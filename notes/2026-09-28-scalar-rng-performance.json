@@ -1,0 +1,744 @@
+{
+  "baseline_commit": "3f5ef4a8",
+  "remote_base": "5b913866768f351f86eed4d5a7246414530f3b2d",
+  "candidate": "scalar RNG changes before native/Wasm probe tooling",
+  "platform": "Darwin arm64",
+  "configuration": "Release, Apple clang 21, fp-contract off",
+  "sampling": "6 alternating fresh-process pairs; warm metrics: 200 ms warmup, 250 ms measurement; first-call metrics: one call/process; inference: 100 warmup + 100 draws + output rows/process",
+  "limitations": [
+    "ctypes overhead included",
+    "source timing uses warmed embedded compiler",
+    "RSS includes Python and embedded compiler; retained memory not measured",
+    "inference is a small illustrative workload, not a representative sampler benchmark"
+  ],
+  "artifacts": {
+    "baseline": {
+      "sha256": "84995384d3e46b43303f0c958b9f0ed4d58ebc124ba007ac34ed5111ab29b621",
+      "bytes": 40045904,
+      "gzip_bytes": 12361146
+    },
+    "candidate": {
+      "sha256": "d16a1ac717ba3aa3d0278b64b2eca520ac1e4945fedc3b97a18f49aab31560a2",
+      "bytes": 40061344,
+      "gzip_bytes": 12361652
+    }
+  },
+  "summary": {
+    "gq_scalar_rng_complete": {
+      "baseline": {
+        "source_us": {
+          "median": 716.9836432664756,
+          "mad": 14.287783576450522
+        },
+        "prep_us": {
+          "median": 216.428494374516,
+          "mad": 2.8664525228223
+        },
+        "first_grad_us": {
+          "median": 5.916,
+          "mad": 0.08300000000000018
+        },
+        "grad_us": {
+          "median": 0.5809428731093451,
+          "mad": 0.006719788406247151
+        },
+        "first_row_us": {
+          "median": 33.75,
+          "mad": 0.9580000000000002
+        },
+        "row_us": {
+          "median": 11.363091663647332,
+          "mad": 0.11103398648387852
+        },
+        "inference_us": {
+          "median": 1373.8125,
+          "mad": 46.06299999999999
+        },
+        "peak_rss": {
+          "median": 26501120.0,
+          "mad": 139264.0
+        }
+      },
+      "candidate": {
+        "source_us": {
+          "median": 718.5969908912718,
+          "mad": 20.69860330235582
+        },
+        "prep_us": {
+          "median": 195.53148035749217,
+          "mad": 2.057380681769658
+        },
+        "first_grad_us": {
+          "median": 11.604,
+          "mad": 0.9994999999999994
+        },
+        "grad_us": {
+          "median": 0.5931180348148866,
+          "mad": 0.013436044308448969
+        },
+        "first_row_us": {
+          "median": 22.6875,
+          "mad": 1.0835000000000008
+        },
+        "row_us": {
+          "median": 1.2764185189961825,
+          "mad": 0.03348248240283236
+        },
+        "inference_us": {
+          "median": 401.937,
+          "mad": 22.625
+        },
+        "peak_rss": {
+          "median": 26599424.0,
+          "mad": 73728.0
+        }
+      }
+    },
+    "gq_scalar_rng": {
+      "baseline": {
+        "source_us": {
+          "median": 582.270652198135,
+          "mad": 10.372241199386167
+        },
+        "prep_us": {
+          "median": 150.48355985381048,
+          "mad": 3.447118938115068
+        },
+        "first_grad_us": {
+          "median": 13.499500000000001,
+          "mad": 1.0415
+        },
+        "grad_us": {
+          "median": 0.6018823516757648,
+          "mad": 0.011238678901608179
+        },
+        "first_row_us": {
+          "median": 17.104,
+          "mad": 0.833499999999999
+        },
+        "row_us": {
+          "median": 0.6482775451453514,
+          "mad": 0.014212665549791892
+        },
+        "inference_us": {
+          "median": 356.354,
+          "mad": 12.021000000000015
+        },
+        "peak_rss": {
+          "median": 25862144.0,
+          "mad": 90112.0
+        }
+      },
+      "candidate": {
+        "source_us": {
+          "median": 606.6244436829174,
+          "mad": 15.263497941176468
+        },
+        "prep_us": {
+          "median": 151.56912657323392,
+          "mad": 4.104379038428576
+        },
+        "first_grad_us": {
+          "median": 11.896,
+          "mad": 0.4375
+        },
+        "grad_us": {
+          "median": 0.5928963084281289,
+          "mad": 0.010878319921472701
+        },
+        "first_row_us": {
+          "median": 18.8335,
+          "mad": 2.208499999999999
+        },
+        "row_us": {
+          "median": 0.6251615949582469,
+          "mad": 0.0088584845406679
+        },
+        "inference_us": {
+          "median": 338.354,
+          "mad": 14.979000000000013
+        },
+        "peak_rss": {
+          "median": 25870336.0,
+          "mad": 24576.0
+        }
+      }
+    },
+    "ar1": {
+      "baseline": {
+        "source_us": {
+          "median": 538.002942594883,
+          "mad": 4.711307367149743
+        },
+        "prep_us": {
+          "median": 151.8363176655561,
+          "mad": 3.247436124244814
+        },
+        "first_grad_us": {
+          "median": 15.8955,
+          "mad": 0.75
+        },
+        "grad_us": {
+          "median": 0.8159891957008922,
+          "mad": 0.015922217410188455
+        },
+        "first_row_us": {
+          "median": 3.771,
+          "mad": 0.12549999999999994
+        },
+        "row_us": {
+          "median": 0.43513626668199445,
+          "mad": 0.007779519863322981
+        },
+        "inference_us": {
+          "median": 8068.7080000000005,
+          "mad": 413.4164999999998
+        },
+        "peak_rss": {
+          "median": 25870336.0,
+          "mad": 81920.0
+        }
+      },
+      "candidate": {
+        "source_us": {
+          "median": 537.7815160964913,
+          "mad": 22.34450334565338
+        },
+        "prep_us": {
+          "median": 150.9284206902254,
+          "mad": 3.1717534390176496
+        },
+        "first_grad_us": {
+          "median": 16.0625,
+          "mad": 0.9165000000000001
+        },
+        "grad_us": {
+          "median": 0.8272773996728724,
+          "mad": 0.012656965081440874
+        },
+        "first_row_us": {
+          "median": 4.167,
+          "mad": 0.25
+        },
+        "row_us": {
+          "median": 0.4473207305906248,
+          "mad": 0.009804130638123298
+        },
+        "inference_us": {
+          "median": 7855.812,
+          "mad": 292.6875
+        },
+        "peak_rss": {
+          "median": 26009600.0,
+          "mad": 131072.0
+        }
+      }
+    }
+  },
+  "raw": [
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 703.0126404494382,
+      "prep_us": 215.30930808950086,
+      "first_grad_us": 6.25,
+      "grad_us": 0.5759676813661004,
+      "first_row_us": 31.959,
+      "row_us": 11.16328792141103,
+      "inference_us": 1374.75,
+      "peak_rss": 26886144,
+      "library_bytes": 40045904,
+      "pair": 0,
+      "build": "baseline"
+    },
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 739.0569085545723,
+      "prep_us": 201.39653784219,
+      "first_grad_us": 10.792,
+      "grad_us": 0.593786740517829,
+      "first_row_us": 22.833,
+      "row_us": 1.1985709888676874,
+      "inference_us": 372.792,
+      "peak_rss": 26427392,
+      "library_bytes": 40061344,
+      "pair": 0,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 697.6597019498606,
+      "prep_us": 195.434603125,
+      "first_grad_us": 13.0,
+      "grad_us": 0.6179542961382832,
+      "first_row_us": 30.708,
+      "row_us": 1.2654359514276603,
+      "inference_us": 430.5,
+      "peak_rss": 26656768,
+      "library_bytes": 40061344,
+      "pair": 1,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 716.4683610315186,
+      "prep_us": 216.87019427580228,
+      "first_grad_us": 5.833,
+      "grad_us": 0.5761057174921478,
+      "first_row_us": 31.292,
+      "row_us": 11.338560342872691,
+      "inference_us": 1327.708,
+      "peak_rss": 26345472,
+      "library_bytes": 40045904,
+      "pair": 1,
+      "build": "baseline"
+    },
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 738.6934631268437,
+      "prep_us": 223.70438282647586,
+      "first_grad_us": 5.916,
+      "grad_us": 0.5616583077030224,
+      "first_row_us": 33.708,
+      "row_us": 11.387622984421972,
+      "inference_us": 1372.875,
+      "peak_rss": 26361856,
+      "library_bytes": 40045904,
+      "pair": 2,
+      "build": "baseline"
+    },
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 728.8979591836735,
+      "prep_us": 195.62835758998435,
+      "first_grad_us": 12.291,
+      "grad_us": 0.6198021395544867,
+      "first_row_us": 21.375,
+      "row_us": 1.3040689903394747,
+      "inference_us": 416.708,
+      "peak_rss": 26689536,
+      "library_bytes": 40061344,
+      "pair": 2,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 708.2960225988701,
+      "prep_us": 190.35854261796044,
+      "first_grad_us": 10.917,
+      "grad_us": 0.5657269014052636,
+      "first_row_us": 22.542,
+      "row_us": 1.2874010865647048,
+      "inference_us": 387.166,
+      "peak_rss": 26476544,
+      "library_bytes": 40061344,
+      "pair": 3,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 731.5882076023393,
+      "prep_us": 215.9867944732297,
+      "first_grad_us": 5.916,
+      "grad_us": 0.5857800287265426,
+      "first_row_us": 33.792,
+      "row_us": 11.420751484696208,
+      "inference_us": 1323.625,
+      "peak_rss": 26624000,
+      "library_bytes": 40045904,
+      "pair": 3,
+      "build": "baseline"
+    },
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 717.4989255014326,
+      "prep_us": 231.73598239110288,
+      "first_grad_us": 5.833,
+      "grad_us": 0.6014310616922796,
+      "first_row_us": 33.875,
+      "row_us": 11.090460784313725,
+      "inference_us": 1473.125,
+      "peak_rss": 26378240,
+      "library_bytes": 40045904,
+      "pair": 4,
+      "build": "baseline"
+    },
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 673.3338924731182,
+      "prep_us": 193.306542503864,
+      "first_grad_us": 10.417,
+      "grad_us": 0.5910822075213853,
+      "first_row_us": 26.375,
+      "row_us": 1.3191755552389546,
+      "inference_us": 379.208,
+      "peak_rss": 26640384,
+      "library_bytes": 40061344,
+      "pair": 4,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 746.3424119402985,
+      "prep_us": 197.4213038674033,
+      "first_grad_us": 13.334,
+      "grad_us": 0.5924493291119443,
+      "first_row_us": 21.833,
+      "row_us": 1.23710402553381,
+      "inference_us": 424.458,
+      "peak_rss": 26558464,
+      "library_bytes": 40061344,
+      "pair": 5,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng_complete",
+      "source_us": 700.5496050420169,
+      "prep_us": 211.81477561388652,
+      "first_grad_us": 6.458,
+      "grad_us": 0.5894072581785947,
+      "first_row_us": 41.917,
+      "row_us": 11.527499815566213,
+      "inference_us": 1419.834,
+      "peak_rss": 26640384,
+      "library_bytes": 40045904,
+      "pair": 5,
+      "build": "baseline"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 626.7709899749373,
+      "prep_us": 155.13505459057072,
+      "first_grad_us": 33.0,
+      "grad_us": 0.6082692827059657,
+      "first_row_us": 26.666,
+      "row_us": 0.6147882870808691,
+      "inference_us": 354.041,
+      "peak_rss": 25870336,
+      "library_bytes": 40045904,
+      "pair": 0,
+      "build": "baseline"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 588.1390845070423,
+      "prep_us": 143.73577586206895,
+      "first_grad_us": 11.75,
+      "grad_us": 0.5972047714145116,
+      "first_row_us": 20.584,
+      "row_us": 0.6605198710666068,
+      "inference_us": 323.625,
+      "peak_rss": 25853952,
+      "library_bytes": 40061344,
+      "pair": 0,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 614.4349926289926,
+      "prep_us": 153.43039386503068,
+      "first_grad_us": 12.042,
+      "grad_us": 0.5809930954826654,
+      "first_row_us": 16.167,
+      "row_us": 0.6177866291382382,
+      "inference_us": 352.916,
+      "peak_rss": 25903104,
+      "library_bytes": 40061344,
+      "pair": 1,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 569.3339022727272,
+      "prep_us": 151.16371946795647,
+      "first_grad_us": 14.041,
+      "grad_us": 0.6207435635132081,
+      "first_row_us": 19.958,
+      "row_us": 0.6622334607468391,
+      "inference_us": 364.458,
+      "peak_rss": 25739264,
+      "library_bytes": 40045904,
+      "pair": 1,
+      "build": "baseline"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 630.7149445843828,
+      "prep_us": 152.72630299328037,
+      "first_grad_us": 14.583,
+      "grad_us": 0.5736697751904009,
+      "first_row_us": 15.916,
+      "row_us": 0.6205931744782681,
+      "inference_us": 325.583,
+      "peak_rss": 25575424,
+      "library_bytes": 40045904,
+      "pair": 2,
+      "build": "baseline"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 627.5995213032581,
+      "prep_us": 154.95580359355637,
+      "first_grad_us": 12.292,
+      "grad_us": 0.5885878454417464,
+      "first_row_us": 24.291,
+      "row_us": 0.5977086894672038,
+      "inference_us": 323.792,
+      "peak_rss": 25821184,
+      "library_bytes": 40061344,
+      "pair": 2,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 588.4022541176471,
+      "prep_us": 149.70785928143712,
+      "first_grad_us": 11.167,
+      "grad_us": 0.6114139974418485,
+      "first_row_us": 15.834,
+      "row_us": 0.6321210331356907,
+      "inference_us": 353.583,
+      "peak_rss": 25886720,
+      "library_bytes": 40061344,
+      "pair": 3,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 574.4629197247706,
+      "prep_us": 149.80340023966448,
+      "first_grad_us": 12.5,
+      "grad_us": 0.5954954206455639,
+      "first_row_us": 16.625,
+      "row_us": 0.6511114439004062,
+      "inference_us": 372.292,
+      "peak_rss": 25919488,
+      "library_bytes": 40045904,
+      "pair": 3,
+      "build": "baseline"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 587.0116384976526,
+      "prep_us": 141.93551362088536,
+      "first_grad_us": 12.958,
+      "grad_us": 0.5891429611684804,
+      "first_row_us": 17.125,
+      "row_us": 0.6454436463902966,
+      "inference_us": 322.916,
+      "peak_rss": 26542080,
+      "library_bytes": 40045904,
+      "pair": 4,
+      "build": "baseline"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 618.92925,
+      "prep_us": 146.56982708089097,
+      "first_grad_us": 15.417,
+      "grad_us": 0.583042881530647,
+      "first_row_us": 18.0,
+      "row_us": 0.618202156780803,
+      "inference_us": 321.958,
+      "peak_rss": 25886720,
+      "library_bytes": 40061344,
+      "pair": 4,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 598.8138947368421,
+      "prep_us": 156.39120762976862,
+      "first_grad_us": 11.417,
+      "grad_us": 0.6066777526748381,
+      "first_row_us": 19.667,
+      "row_us": 0.635503598219574,
+      "inference_us": 357.083,
+      "peak_rss": 25788416,
+      "library_bytes": 40061344,
+      "pair": 5,
+      "build": "candidate"
+    },
+    {
+      "model": "gq_scalar_rng",
+      "source_us": 577.5296658986175,
+      "prep_us": 143.86677675489068,
+      "first_grad_us": 10.75,
+      "grad_us": 0.6116203189716968,
+      "first_row_us": 17.083,
+      "row_us": 0.6627469606434475,
+      "inference_us": 358.667,
+      "peak_rss": 25853952,
+      "library_bytes": 40045904,
+      "pair": 5,
+      "build": "baseline"
+    },
+    {
+      "model": "ar1",
+      "source_us": 536.3814239828694,
+      "prep_us": 146.1457966101695,
+      "first_grad_us": 27.083,
+      "grad_us": 0.8033153840963205,
+      "first_row_us": 3.708,
+      "row_us": 0.44755940177519665,
+      "inference_us": 7551.959,
+      "peak_rss": 25952256,
+      "library_bytes": 40045904,
+      "pair": 0,
+      "build": "baseline"
+    },
+    {
+      "model": "ar1",
+      "source_us": 564.5436433408578,
+      "prep_us": 153.04477784577722,
+      "first_grad_us": 18.75,
+      "grad_us": 0.8017148111803792,
+      "first_row_us": 4.25,
+      "row_us": 0.43701866066262396,
+      "inference_us": 8333.834,
+      "peak_rss": 25952256,
+      "library_bytes": 40061344,
+      "pair": 0,
+      "build": "candidate"
+    },
+    {
+      "model": "ar1",
+      "source_us": 516.360393814433,
+      "prep_us": 152.38398842169408,
+      "first_grad_us": 14.875,
+      "grad_us": 0.8376016008201774,
+      "first_row_us": 3.125,
+      "row_us": 0.45662692193887056,
+      "inference_us": 7570.916,
+      "peak_rss": 25821184,
+      "library_bytes": 40061344,
+      "pair": 1,
+      "build": "candidate"
+    },
+    {
+      "model": "ar1",
+      "source_us": 544.5198369565218,
+      "prep_us": 147.83311170212767,
+      "first_grad_us": 16.0,
+      "grad_us": 0.7639980563951019,
+      "first_row_us": 3.75,
+      "row_us": 0.4299838205903498,
+      "inference_us": 7651.084,
+      "peak_rss": 25788416,
+      "library_bytes": 40045904,
+      "pair": 1,
+      "build": "baseline"
+    },
+    {
+      "model": "ar1",
+      "source_us": 539.6244612068966,
+      "prep_us": 154.3279839506173,
+      "first_grad_us": 14.083,
+      "grad_us": 0.8286630073054639,
+      "first_row_us": 3.959,
+      "row_us": 0.44028871277363907,
+      "inference_us": 8429.583,
+      "peak_rss": 25788416,
+      "library_bytes": 40045904,
+      "pair": 2,
+      "build": "baseline"
+    },
+    {
+      "model": "ar1",
+      "source_us": 526.5814905263157,
+      "prep_us": 144.51644971098264,
+      "first_grad_us": 16.625,
+      "grad_us": 0.8165722437434266,
+      "first_row_us": 4.167,
+      "row_us": 0.45340774709320775,
+      "inference_us": 7555.333,
+      "peak_rss": 26066944,
+      "library_bytes": 40061344,
+      "pair": 2,
+      "build": "candidate"
+    },
+    {
+      "model": "ar1",
+      "source_us": 548.9815416666667,
+      "prep_us": 146.70127096774192,
+      "first_grad_us": 15.417,
+      "grad_us": 0.8169531985255672,
+      "first_row_us": 4.167,
+      "row_us": 0.4412337140880419,
+      "inference_us": 7574.541,
+      "peak_rss": 26148864,
+      "library_bytes": 40061344,
+      "pair": 3,
+      "build": "candidate"
+    },
+    {
+      "model": "ar1",
+      "source_us": 535.0972222222223,
+      "prep_us": 157.9875761212887,
+      "first_grad_us": 15.375,
+      "grad_us": 0.8312365489862281,
+      "first_row_us": 3.5,
+      "row_us": 0.427953252262153,
+      "inference_us": 8477.917,
+      "peak_rss": 25804800,
+      "library_bytes": 40045904,
+      "pair": 3,
+      "build": "baseline"
+    },
+    {
+      "model": "ar1",
+      "source_us": 514.2607802874743,
+      "prep_us": 150.11894717887154,
+      "first_grad_us": 16.875,
+      "grad_us": 0.8551122759611438,
+      "first_row_us": 6.708,
+      "row_us": 0.46866720157172104,
+      "inference_us": 7707.833,
+      "peak_rss": 25935872,
+      "library_bytes": 40045904,
+      "pair": 4,
+      "build": "baseline"
+    },
+    {
+      "model": "ar1",
+      "source_us": 566.0627828054298,
+      "prep_us": 159.7577214057508,
+      "first_grad_us": 18.542,
+      "grad_us": 0.8418861739063084,
+      "first_row_us": 3.75,
+      "row_us": 0.41532020260919983,
+      "inference_us": 8524.958,
+      "peak_rss": 25886720,
+      "library_bytes": 40061344,
+      "pair": 4,
+      "build": "candidate"
+    },
+    {
+      "model": "ar1",
+      "source_us": 514.5136316872428,
+      "prep_us": 149.47285295875673,
+      "first_grad_us": 15.5,
+      "grad_us": 0.8566493681382694,
+      "first_row_us": 9.458,
+      "row_us": 0.4598176220123415,
+      "inference_us": 8137.083,
+      "peak_rss": 26443776,
+      "library_bytes": 40061344,
+      "pair": 5,
+      "build": "candidate"
+    },
+    {
+      "model": "ar1",
+      "source_us": 570.0609339407745,
+      "prep_us": 153.55368815224065,
+      "first_grad_us": 15.791,
+      "grad_us": 0.7993921141658512,
+      "first_row_us": 3.792,
+      "row_us": 0.4267602413751899,
+      "inference_us": 8606.0,
+      "peak_rss": 26099712,
+      "library_bytes": 40045904,
+      "pair": 5,
+      "build": "baseline"
+    }
+  ]
+}

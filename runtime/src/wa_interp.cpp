@@ -27,6 +27,9 @@ const ScalarRng* scalar_rng_family(const std::string& name) {
 
 size_t scalar_rng_arity(ScalarRng family) {
   switch (family) {
+    case ScalarRng::StdNormal:
+      return 0;
+    case ScalarRng::ChiSquare:
     case ScalarRng::PoissonLog:
     case ScalarRng::Bernoulli:
     case ScalarRng::Exponential:
@@ -38,6 +41,15 @@ size_t scalar_rng_arity(ScalarRng family) {
     case ScalarRng::Lognormal:
     case ScalarRng::Binomial:
     case ScalarRng::Gumbel:
+    case ScalarRng::Gamma:
+    case ScalarRng::InvGamma:
+    case ScalarRng::Beta:
+    case ScalarRng::Cauchy:
+    case ScalarRng::DoubleExponential:
+    case ScalarRng::Logistic:
+    case ScalarRng::Weibull:
+    case ScalarRng::NegBinomial2:
+    case ScalarRng::NegBinomial2Log:
       return 2;
     case ScalarRng::BetaBinomial:
     case ScalarRng::StudentT:
@@ -49,7 +61,9 @@ size_t scalar_rng_arity(ScalarRng family) {
 bool scalar_rng_is_int(ScalarRng family) {
   return family == ScalarRng::PoissonLog || family == ScalarRng::Bernoulli ||
          family == ScalarRng::Poisson || family == ScalarRng::BernoulliLogit ||
-         family == ScalarRng::Binomial || family == ScalarRng::BetaBinomial;
+         family == ScalarRng::Binomial || family == ScalarRng::BetaBinomial ||
+         family == ScalarRng::NegBinomial2 ||
+         family == ScalarRng::NegBinomial2Log;
 }
 
 double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
@@ -58,6 +72,28 @@ double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
     throw std::logic_error("malformed scalar RNG arguments");
   stan::rng_t& g = rng.gen();
   switch (family) {
+    case ScalarRng::StdNormal:
+      return stan::math::std_normal_rng(g);
+    case ScalarRng::Gamma:
+      return stan::math::gamma_rng(args[0], args[1], g);
+    case ScalarRng::InvGamma:
+      return stan::math::inv_gamma_rng(args[0], args[1], g);
+    case ScalarRng::Beta:
+      return stan::math::beta_rng(args[0], args[1], g);
+    case ScalarRng::ChiSquare:
+      return stan::math::chi_square_rng(args[0], g);
+    case ScalarRng::Cauchy:
+      return stan::math::cauchy_rng(args[0], args[1], g);
+    case ScalarRng::DoubleExponential:
+      return stan::math::double_exponential_rng(args[0], args[1], g);
+    case ScalarRng::Logistic:
+      return stan::math::logistic_rng(args[0], args[1], g);
+    case ScalarRng::Weibull:
+      return stan::math::weibull_rng(args[0], args[1], g);
+    case ScalarRng::NegBinomial2:
+      return stan::math::neg_binomial_2_rng(args[0], args[1], g);
+    case ScalarRng::NegBinomial2Log:
+      return stan::math::neg_binomial_2_log_rng(args[0], args[1], g);
     case ScalarRng::PoissonLog:
       return static_cast<double>(stan::math::poisson_log_rng(args[0], g));
     case ScalarRng::Uniform:
@@ -88,19 +124,34 @@ double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
   throw std::logic_error("unknown scalar RNG family");
 }
 
-int categorical_rng_draw(const double* probabilities, size_t size, WaRng& rng) {
+int vector_integer_rng_draw(const double* probabilities, size_t size,
+                            WaRng& rng, uint8_t variant) {
   if (size != 0 && probabilities == nullptr)
     throw std::logic_error("malformed categorical RNG arguments");
   Eigen::VectorXd theta(static_cast<Eigen::Index>(size));
   for (size_t i = 0; i < size; ++i)
     theta[static_cast<Eigen::Index>(i)] = probabilities[i];
-  return stan::math::categorical_rng(theta, rng.gen());
+  switch (variant) {
+    case kCategoricalRngVariant:
+      return stan::math::categorical_rng(theta, rng.gen());
+    case kCategoricalLogitRngVariant:
+      // Upstream indexes its cumulative sum even for an empty input. Reject
+      // that invalid distribution before it consumes the stream or reads OOB.
+      stan::math::check_nonzero_size("categorical_logit_rng",
+                                     "Log odds parameter", theta);
+      return stan::math::categorical_logit_rng(theta, rng.gen());
+    case kPoissonBinomialRngVariant:
+      return stan::math::poisson_binomial_rng(theta, rng.gen());
+    default:
+      throw std::logic_error("unknown vector-to-integer RNG family");
+  }
 }
 
 void multi_normal_rng_draw(const double* location, size_t location_size,
                            const double* covariance, size_t covariance_size,
                            size_t covariance_rows, size_t covariance_cols,
-                           double* output, size_t output_size, WaRng& rng) {
+                           double* output, size_t output_size, WaRng& rng,
+                           bool cholesky) {
   if ((location_size != 0 && location == nullptr) ||
       (covariance_size != 0 && covariance == nullptr) ||
       (output_size != 0 && output == nullptr) || output_size != location_size ||
@@ -121,7 +172,8 @@ void multi_normal_rng_draw(const double* location, size_t location_size,
           covariance[j * covariance_rows + i];
 
   const Eigen::VectorXd draw =
-      stan::math::multi_normal_rng(mu, sigma, rng.gen());
+      cholesky ? stan::math::multi_normal_cholesky_rng(mu, sigma, rng.gen())
+               : stan::math::multi_normal_rng(mu, sigma, rng.gen());
   for (size_t i = 0; i < output_size; ++i)
     output[i] = draw[static_cast<Eigen::Index>(i)];
 }
@@ -311,7 +363,7 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
   };
 
   // Vector-valued draw from a mean vector and covariance (or Cholesky
-  // factor) matrix. The covariance form shares its owning-Eigen helper with
+  // factor) matrix. Admitted shapes share their owning-Eigen helper with
   // OP_RNG so validation and engine schedules cannot drift between modes.
   if (base == "multi_normal" || base == "multi_normal_cholesky") {
     const auto& mu = av.at(0);
@@ -319,14 +371,17 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
     const int64_t K = (int64_t)mu.r.size();
     out->dims = {K};
     out->r.resize(static_cast<size_t>(K));
-    if (base == "multi_normal") {
+    if (base == "multi_normal" ||
+        (S.dims.size() == 2 && S.dims[0] == K && S.dims[1] == K)) {
       if (S.dims.size() != 2)
         throw std::logic_error("malformed multi-normal covariance shape");
-      multi_normal_rng_draw(mu.r.data(), mu.r.size(), S.r.data(), S.r.size(),
-                            static_cast<size_t>(S.dims[0]),
-                            static_cast<size_t>(S.dims[1]), out->r.data(),
-                            out->r.size(), rng);
+      multi_normal_rng_draw(
+          mu.r.data(), mu.r.size(), S.r.data(), S.r.size(),
+          static_cast<size_t>(S.dims[0]), static_cast<size_t>(S.dims[1]),
+          out->r.data(), out->r.size(), rng, base == "multi_normal_cholesky");
     } else {
+      // Preserve the legacy adapter outside the square-vector contract.
+      // Rectangular and vectorized shapes need a separate shape migration.
       Eigen::VectorXd m(K);
       for (int64_t i = 0; i < K; ++i) m[i] = mu.r[(size_t)i];
       Eigen::MatrixXd sig(K, K);
@@ -350,33 +405,27 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
     return true;
   }
 
-  // Poisson-binomial RNG consumes one complete probability vector.
-  if (base == "poisson_binomial") {
-    const auto& a = av.at(0);
-    Eigen::VectorXd theta(a.r.size());
-    for (size_t i = 0; i < a.r.size(); ++i) theta[i] = a.r[i];
-    const int draw = stan::math::poisson_binomial_rng(theta, g);
+  // Whole-vector arguments with one integer draw. Use the same owning
+  // Eigen instantiation and validation in every execution path.
+  if (base == "poisson_binomial" || base == "categorical" ||
+      base == "categorical_logit") {
+    const uint8_t variant =
+        base == "poisson_binomial"    ? kPoissonBinomialRngVariant
+        : base == "categorical_logit" ? kCategoricalLogitRngVariant
+                                      : kCategoricalRngVariant;
+    const int k = vector_integer_rng_draw(av.at(0).r.data(), av.at(0).r.size(),
+                                          rng, variant);
     out->is_int = true;
-    out->i = {draw};
-    out->r = {static_cast<double>(draw)};
+    out->i = {k};
+    out->r = {static_cast<double>(k)};
     return true;
   }
 
-  // Whole-vector argument, one categorical draw.
-  if (base == "categorical" || base == "categorical_logit") {
-    int k = 0;
-    if (base == "categorical") {
-      k = categorical_rng_draw(av.at(0).r.data(), av.at(0).r.size(), rng);
-    } else {
-      Eigen::VectorXd th((int64_t)av.at(0).r.size());
-      for (size_t i = 0; i < av[0].r.size(); ++i) th[(int64_t)i] = av[0].r[i];
-      k = stan::math::categorical_logit_rng(th, g);
-    }
-    out->is_int = true;
-    out->i = {k};
-    out->r = {(double)k};
-    return true;
-  }
+  const ScalarRng* family = scalar_rng_family(f);
+  if (!family) return false;
+  const size_t arity = scalar_rng_arity(*family);
+  if (av.size() != arity)
+    throw std::logic_error("malformed scalar RNG arguments");
 
   // Elementwise with scalar broadcasting: one independent draw per element,
   // matching stan-math's vectorized rng semantics.
@@ -387,75 +436,11 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
     double v = 0.0;
     int vi = 0;
     bool iv = false;
-    if (base == "normal") {
-      const double args[] = {sc(0, i), sc(1, i)};
-      v = scalar_rng_draw(ScalarRng::Normal, args, 2, rng);
-    } else if (base == "std_normal") {
-      v = stan::math::std_normal_rng(g);
-    } else if (base == "lognormal") {
-      const double args[] = {sc(0, i), sc(1, i)};
-      v = scalar_rng_draw(ScalarRng::Lognormal, args, 2, rng);
-    } else if (base == "uniform") {
-      const double args[] = {sc(0, i), sc(1, i)};
-      v = scalar_rng_draw(ScalarRng::Uniform, args, 2, rng);
-    } else if (base == "gamma") {
-      v = stan::math::gamma_rng(sc(0, i), sc(1, i), g);
-    } else if (base == "inv_gamma") {
-      v = stan::math::inv_gamma_rng(sc(0, i), sc(1, i), g);
-    } else if (base == "beta") {
-      v = stan::math::beta_rng(sc(0, i), sc(1, i), g);
-    } else if (base == "exponential") {
-      const double args[] = {sc(0, i)};
-      v = scalar_rng_draw(ScalarRng::Exponential, args, 1, rng);
-    } else if (base == "chi_square") {
-      v = stan::math::chi_square_rng(sc(0, i), g);
-    } else if (base == "cauchy") {
-      v = stan::math::cauchy_rng(sc(0, i), sc(1, i), g);
-    } else if (base == "double_exponential") {
-      v = stan::math::double_exponential_rng(sc(0, i), sc(1, i), g);
-    } else if (base == "logistic") {
-      v = stan::math::logistic_rng(sc(0, i), sc(1, i), g);
-    } else if (base == "student_t") {
-      v = stan::math::student_t_rng(sc(0, i), sc(1, i), sc(2, i), g);
-    } else if (base == "weibull") {
-      v = stan::math::weibull_rng(sc(0, i), sc(1, i), g);
-    } else if (base == "gumbel") {
-      const double args[] = {sc(0, i), sc(1, i)};
-      v = scalar_rng_draw(ScalarRng::Gumbel, args, 2, rng);
-    } else if (base == "beta_binomial") {
-      const double args[] = {sc(0, i), sc(1, i), sc(2, i)};
-      vi = static_cast<int>(
-          scalar_rng_draw(ScalarRng::BetaBinomial, args, 3, rng));
-      iv = true;
-    } else if (base == "bernoulli") {
-      const double args[] = {sc(0, i)};
-      vi =
-          static_cast<int>(scalar_rng_draw(ScalarRng::Bernoulli, args, 1, rng));
-      iv = true;
-    } else if (base == "bernoulli_logit") {
-      vi = stan::math::bernoulli_logit_rng(sc(0, i), g);
-      iv = true;
-    } else if (base == "binomial") {
-      const double args[] = {sc(0, i), sc(1, i)};
-      vi = static_cast<int>(scalar_rng_draw(ScalarRng::Binomial, args, 2, rng));
-      iv = true;
-    } else if (base == "poisson") {
-      vi = stan::math::poisson_rng(sc(0, i), g);
-      iv = true;
-    } else if (base == "poisson_log") {
-      const double args[] = {sc(0, i)};
-      vi = static_cast<int>(
-          scalar_rng_draw(ScalarRng::PoissonLog, args, 1, rng));
-      iv = true;
-    } else if (base == "neg_binomial_2") {
-      vi = stan::math::neg_binomial_2_rng(sc(0, i), sc(1, i), g);
-      iv = true;
-    } else if (base == "neg_binomial_2_log") {
-      vi = stan::math::neg_binomial_2_log_rng(sc(0, i), sc(1, i), g);
-      iv = true;
-    } else {
-      return false;
-    }
+    double args[3]{};
+    for (size_t k = 0; k < arity; ++k) args[k] = sc(k, i);
+    v = scalar_rng_draw(*family, args, arity, rng);
+    iv = scalar_rng_is_int(*family);
+    if (iv) vi = static_cast<int>(v);
     if (iv) {
       out->i.push_back(vi);
       out->r.push_back((double)vi);

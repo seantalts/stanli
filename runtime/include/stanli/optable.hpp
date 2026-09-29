@@ -982,6 +982,9 @@ struct Kernel {
   // callback lives on the registered implementation so replacing a kernel
   // cannot accidentally inherit an opcode-only promise.
   BackwardPrimalReadFn primal_reads = nullptr;
+  // Diagnostic description owned by this implementation, not the opcode.
+  // Unclassified is intentional: missing metadata never proves tape freedom.
+  const char* derivative_mechanism = "unclassified";
 };
 
 inline BackwardPrimalReads backward_primal_reads(const Kernel* kernel,

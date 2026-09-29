@@ -1,0 +1,2441 @@
+{
+  "base": "648bc943ba8822b4e677f290f1e5765cb65d6960",
+  "upstream_base": "6ce2018b5382b459666ab32fe0df50d4a6d30ba4",
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+  "build": "Native Release; AppleClang; four build jobs; no timing during builds",
+  "manifest": [
+    {
+      "model": "ode_runtime_for",
+      "source": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_runtime_for.stan",
+      "mir": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_runtime_for.tmir.sexp",
+      "data": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_runtime_for.json",
+      "source_sha256": "82a44d0202c92c90637c2937be204901f68ce5bcde2581cfc2ca329fc9eff37e",
+      "mir_sha256": "623ce87ccb22d35412c0dd1938c1c21b529da544e4c2c7b797d43588f02580f1",
+      "data_sha256": "86dfb31e004753c0e1c1aabd4ddcf322afd32d90f15a459249c1e20a7be9c4f8"
+    },
+    {
+      "model": "ode_branch_returns",
+      "source": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_branch_returns.stan",
+      "mir": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_branch_returns.tmir.sexp",
+      "data": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/tests/fixtures/ode_branch_returns.json",
+      "source_sha256": "19c061eec524c5f4a4724766fa1c931eef25ef3d1d61649043db0849002bf3fe",
+      "mir_sha256": "4d2c0ef899ea57c5b2bf5bfc7a96d936d5428c71764e750f436a790cef6f074a",
+      "data_sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
+    }
+  ],
+  "binaries": {
+    "before": {
+      "bytes": 39647328,
+      "gzip_bytes": 12359470,
+      "sha256": "6ed930b5e53f948e590007d99c44722615714b8783ac866007ad3b54f96083b6"
+    },
+    "after": {
+      "bytes": 39666480,
+      "gzip_bytes": 12367121,
+      "sha256": "2f15800c24dd334bc52103816d228a90d20196caf70b9a2a32ec2075741e6e87"
+    }
+  },
+  "summary": {
+    "ode_runtime_for_before": {
+      "source_us": {
+        "median": 695.7196226915278,
+        "mad": 17.823166172813956
+      },
+      "prep_us": {
+        "median": 270.69632026609906,
+        "mad": 2.9090597966161056
+      },
+      "first_grad_us": {
+        "median": 460.3755,
+        "mad": 8.229500000000002
+      },
+      "grad_us": {
+        "median": 398.60375593396435,
+        "mad": 9.858007261879493
+      },
+      "first_row_us": {
+        "median": 725.7085,
+        "mad": 10.812999999999931
+      },
+      "row_us": {
+        "median": 734.3410717252767,
+        "mad": 13.970928441388082
+      },
+      "inference_us": {
+        "median": 445576.8125,
+        "mad": 6127.271000000008
+      },
+      "peak_rss": {
+        "median": 28622848.0,
+        "mad": 24576.0
+      },
+      "library_bytes": {
+        "median": 39647328.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 397788.97945557523,
+        "mad": 9481.021556442487
+      }
+    },
+    "ode_runtime_for_after": {
+      "source_us": {
+        "median": 699.1659011416164,
+        "mad": 20.28250697316429
+      },
+      "prep_us": {
+        "median": 279.01490066317456,
+        "mad": 5.848107198033716
+      },
+      "first_grad_us": {
+        "median": 45.8745,
+        "mad": 0.8545000000000016
+      },
+      "grad_us": {
+        "median": 5.631825301900598,
+        "mad": 0.08344464169085608
+      },
+      "first_row_us": {
+        "median": 24.9165,
+        "mad": 1.854000000000001
+      },
+      "row_us": {
+        "median": 5.377773765623187,
+        "mad": 0.038271183774959194
+      },
+      "inference_us": {
+        "median": 5449.687,
+        "mad": 250.6880000000001
+      },
+      "peak_rss": {
+        "median": 28483584.0,
+        "mad": 65536.0
+      },
+      "library_bytes": {
+        "median": 39666480.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 4994.9992809253945,
+        "mad": 145.7595227761244
+      }
+    },
+    "ode_branch_returns_before": {
+      "source_us": {
+        "median": 516.2532435477846,
+        "mad": 17.256791403416486
+      },
+      "prep_us": {
+        "median": 305.68284524720445,
+        "mad": 8.782363253658275
+      },
+      "first_grad_us": {
+        "median": 41.6875,
+        "mad": 1.0210000000000008
+      },
+      "grad_us": {
+        "median": 2.607940290230591,
+        "mad": 0.02171877368066033
+      },
+      "first_row_us": {
+        "median": 23.2915,
+        "mad": 4.313000000000001
+      },
+      "row_us": {
+        "median": 1.78649201258678,
+        "mad": 0.057263828187402055
+      },
+      "inference_us": {
+        "median": 3441.8545,
+        "mad": 25.687000000000126
+      },
+      "peak_rss": {
+        "median": 28336128.0,
+        "mad": 24576.0
+      },
+      "library_bytes": {
+        "median": 39647328.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 1824.1958676398822,
+        "mad": 5.637361988920134
+      }
+    },
+    "ode_branch_returns_after": {
+      "source_us": {
+        "median": 527.3431738505747,
+        "mad": 14.603426176417997
+      },
+      "prep_us": {
+        "median": 324.1495493756713,
+        "mad": 8.441717527458394
+      },
+      "first_grad_us": {
+        "median": 40.854,
+        "mad": 1.2085000000000008
+      },
+      "grad_us": {
+        "median": 2.5423969608775496,
+        "mad": 0.054658917938531504
+      },
+      "first_row_us": {
+        "median": 19.1665,
+        "mad": 1.2294999999999998
+      },
+      "row_us": {
+        "median": 1.7216543156260276,
+        "mad": 0.0444953601086826
+      },
+      "inference_us": {
+        "median": 3441.5209999999997,
+        "mad": 34.56250000000023
+      },
+      "peak_rss": {
+        "median": 28303360.0,
+        "mad": 49152.0
+      },
+      "library_bytes": {
+        "median": 39666480.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 1861.6668173090306,
+        "mad": 39.07803074596916
+      }
+    }
+  },
+  "raw": [
+    {
+      "label": "before",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 683.0631830601093,
+        "prep_us": 275.19733223322334,
+        "first_grad_us": 461.084,
+        "grad_us": 407.96784828711253,
+        "first_row_us": 717.041,
+        "row_us": 749.1499491017963,
+        "inference_us": 450986.25,
+        "inference_skipped": false,
+        "peak_rss": 28917760,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 628,
+        "elapsed_ns": 250706083,
+        "batch": 4,
+        "warmup_iterations": 523,
+        "warmup_elapsed_ns": 201164541,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 671.6767211796247,
+        "prep_us": 279.50386368715084,
+        "first_grad_us": 46.041,
+        "grad_us": 5.922407410039561,
+        "first_row_us": 25.125,
+        "row_us": 5.413599034234859,
+        "inference_us": 5678.459,
+        "inference_skipped": false,
+        "peak_rss": 28622848,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 50688,
+        "elapsed_ns": 251012541,
+        "batch": 256,
+        "warmup_iterations": 43007,
+        "warmup_elapsed_ns": 200379583,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 496.374751984127,
+        "prep_us": 298.93633094384705,
+        "first_grad_us": 43.875,
+        "grad_us": 2.6305108955270993,
+        "first_row_us": 18.167,
+        "row_us": 1.892565062037745,
+        "inference_us": 3412.084,
+        "inference_skipped": false,
+        "peak_rss": 28377088,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 137216,
+        "elapsed_ns": 250692625,
+        "batch": 1024,
+        "warmup_iterations": 112127,
+        "warmup_elapsed_ns": 200471500,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 0,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 500.68625,
+        "prep_us": 309.941604708798,
+        "first_grad_us": 39.833,
+        "grad_us": 2.612455066042468,
+        "first_row_us": 17.666,
+        "row_us": 1.812390053646513,
+        "inference_us": 3414.167,
+        "inference_skipped": false,
+        "peak_rss": 28295168,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 126976,
+        "elapsed_ns": 251786375,
+        "batch": 1024,
+        "warmup_iterations": 112639,
+        "warmup_elapsed_ns": 200884667,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 713.0881994301994,
+        "prep_us": 278.5259376391982,
+        "first_grad_us": 48.083,
+        "grad_us": 5.352923025865023,
+        "first_row_us": 26.375,
+        "row_us": 5.0871537522383194,
+        "inference_us": 5230.208,
+        "inference_skipped": false,
+        "peak_rss": 28278784,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 48384,
+        "elapsed_ns": 250384625,
+        "batch": 256,
+        "warmup_iterations": 41471,
+        "warmup_elapsed_ns": 200321833,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 740.2061153846154,
+        "prep_us": 268.52990879828326,
+        "first_grad_us": 498.167,
+        "grad_us": 372.53360714285714,
+        "first_row_us": 712.75,
+        "row_us": 729.3028425655976,
+        "inference_us": 456771.333,
+        "inference_skipped": false,
+        "peak_rss": 28704768,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 612,
+        "elapsed_ns": 250978083,
+        "batch": 4,
+        "warmup_iterations": 511,
+        "warmup_elapsed_ns": 201435541,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 544.0299826086956,
+        "prep_us": 318.9816645408163,
+        "first_grad_us": 42.666,
+        "grad_us": 2.503137230165405,
+        "first_row_us": 19.083,
+        "row_us": 1.6711299532085562,
+        "inference_us": 3468.875,
+        "inference_skipped": false,
+        "peak_rss": 28147712,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 137216,
+        "elapsed_ns": 250425459,
+        "batch": 1024,
+        "warmup_iterations": 99839,
+        "warmup_elapsed_ns": 200524375,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 1,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 528.3430907172996,
+        "prep_us": 320.25389500640205,
+        "first_grad_us": 40.541,
+        "grad_us": 2.5870733481657786,
+        "first_row_us": 28.083,
+        "row_us": 1.7399622082097967,
+        "inference_us": 3463.458,
+        "inference_skipped": false,
+        "peak_rss": 28327936,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 138240,
+        "elapsed_ns": 251273166,
+        "batch": 1024,
+        "warmup_iterations": 101887,
+        "warmup_elapsed_ns": 200119292,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 677.6650891891892,
+        "prep_us": 272.8627317339149,
+        "first_grad_us": 459.667,
+        "grad_us": 404.7181084142395,
+        "first_row_us": 754.25,
+        "row_us": 739.3793008849558,
+        "inference_us": 434167.25,
+        "inference_skipped": false,
+        "peak_rss": 28622848,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 652,
+        "elapsed_ns": 251238083,
+        "batch": 4,
+        "warmup_iterations": 503,
+        "warmup_elapsed_ns": 201255083,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 672.5231854838709,
+        "prep_us": 281.1031831460674,
+        "first_grad_us": 45.708,
+        "grad_us": 5.768831091215358,
+        "first_row_us": 21.458,
+        "row_us": 5.396109432333262,
+        "inference_us": 5669.166,
+        "inference_skipped": false,
+        "peak_rss": 28475392,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 51200,
+        "elapsed_ns": 250031500,
+        "batch": 256,
+        "warmup_iterations": 41727,
+        "warmup_elapsed_ns": 200529584,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 504.16339637826957,
+        "prep_us": 288.74778637413397,
+        "first_grad_us": 41.917,
+        "grad_us": 2.5285931020532013,
+        "first_row_us": 18.791,
+        "row_us": 1.7969971176377568,
+        "inference_us": 3121.625,
+        "inference_skipped": false,
+        "peak_rss": 28344320,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 131072,
+        "elapsed_ns": 251398500,
+        "batch": 1024,
+        "warmup_iterations": 108543,
+        "warmup_elapsed_ns": 200423584,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 2,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 543.999547826087,
+        "prep_us": 317.8898246505718,
+        "first_grad_us": 40.291,
+        "grad_us": 2.4585898411761815,
+        "first_row_us": 19.25,
+        "row_us": 1.744070167360806,
+        "inference_us": 3156.625,
+        "inference_skipped": false,
+        "peak_rss": 28327936,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 130048,
+        "elapsed_ns": 251486125,
+        "batch": 1024,
+        "warmup_iterations": 108543,
+        "warmup_elapsed_ns": 200539708,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 733.712366568915,
+        "prep_us": 294.28132352941174,
+        "first_grad_us": 45.625,
+        "grad_us": 5.626667334353619,
+        "first_row_us": 27.166,
+        "row_us": 5.021813008456702,
+        "inference_us": 5722.291,
+        "inference_skipped": false,
+        "peak_rss": 28508160,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 52480,
+        "elapsed_ns": 250773625,
+        "batch": 256,
+        "warmup_iterations": 38655,
+        "warmup_elapsed_ns": 200721583,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 708.3760623229462,
+        "prep_us": 273.29294098360657,
+        "first_grad_us": 451.375,
+        "grad_us": 408.95567810457516,
+        "first_row_us": 788.459,
+        "row_us": 721.2080922190202,
+        "inference_us": 440167.375,
+        "inference_skipped": false,
+        "peak_rss": 28622848,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 632,
+        "elapsed_ns": 250502333,
+        "batch": 4,
+        "warmup_iterations": 503,
+        "warmup_elapsed_ns": 200719583,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 539.2756810344828,
+        "prep_us": 334.7732597054886,
+        "first_grad_us": 41.417,
+        "grad_us": 2.571046772319179,
+        "first_row_us": 20.959,
+        "row_us": 1.6831879578261337,
+        "inference_us": 3474.542,
+        "inference_skipped": false,
+        "peak_rss": 28377088,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 137216,
+        "elapsed_ns": 251151167,
+        "batch": 1024,
+        "warmup_iterations": 100863,
+        "warmup_elapsed_ns": 200534500,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 3,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 501.61815230460917,
+        "prep_us": 315.95901767676764,
+        "first_grad_us": 41.458,
+        "grad_us": 2.6772757579327258,
+        "first_row_us": 22.25,
+        "row_us": 1.8639870118250548,
+        "inference_us": 3433.125,
+        "inference_skipped": false,
+        "peak_rss": 28246016,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 138240,
+        "elapsed_ns": 251790208,
+        "batch": 1024,
+        "warmup_iterations": 111103,
+        "warmup_elapsed_ns": 200748791,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 678.1278238482384,
+        "prep_us": 267.47482139037436,
+        "first_grad_us": 452.917,
+        "grad_us": 392.4894034536892,
+        "first_row_us": 724.417,
+        "row_us": 717.0568280802293,
+        "inference_us": 452317.875,
+        "inference_skipped": false,
+        "peak_rss": 28606464,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 620,
+        "elapsed_ns": 250755959,
+        "batch": 4,
+        "warmup_iterations": 539,
+        "warmup_elapsed_ns": 200788375,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 708.3873587570621,
+        "prep_us": 266.5578805970149,
+        "first_grad_us": 42.042,
+        "grad_us": 5.636983269447576,
+        "first_row_us": 20.667,
+        "row_us": 5.418490864561434,
+        "inference_us": 5152.667,
+        "inference_skipped": false,
+        "peak_rss": 28377088,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 46080,
+        "elapsed_ns": 250788292,
+        "batch": 256,
+        "warmup_iterations": 38911,
+        "warmup_elapsed_ns": 201190250,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 537.181778969957,
+        "prep_us": 312.4293595505618,
+        "first_grad_us": 40.792,
+        "grad_us": 2.6199561736287227,
+        "first_row_us": 24.333,
+        "row_us": 1.7184941605889592,
+        "inference_us": 3450.584,
+        "inference_skipped": false,
+        "peak_rss": 28327936,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 136704,
+        "elapsed_ns": 250030000,
+        "batch": 512,
+        "warmup_iterations": 99327,
+        "warmup_elapsed_ns": 200212500,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 4,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 514.792695473251,
+        "prep_us": 329.3174342105263,
+        "first_grad_us": 42.25,
+        "grad_us": 2.6743165315247857,
+        "first_row_us": 23.25,
+        "row_us": 1.8069971305076906,
+        "inference_us": 3477.625,
+        "inference_skipped": false,
+        "peak_rss": 28131328,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 138240,
+        "elapsed_ns": 251615042,
+        "batch": 1024,
+        "warmup_iterations": 105983,
+        "warmup_elapsed_ns": 201267833,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 689.9444435261707,
+        "prep_us": 269.40696875,
+        "first_grad_us": 47.334,
+        "grad_us": 5.601941807833646,
+        "first_row_us": 24.708,
+        "row_us": 5.359438098913113,
+        "inference_us": 5131.208,
+        "inference_skipped": false,
+        "peak_rss": 28491776,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 49664,
+        "elapsed_ns": 250201708,
+        "batch": 256,
+        "warmup_iterations": 40703,
+        "warmup_elapsed_ns": 201118000,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_runtime_for",
+        "check_values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ],
+        "source_us": 732.483552631579,
+        "prep_us": 266.5335910543131,
+        "first_grad_us": 503.083,
+        "grad_us": 385.0645507692308,
+        "first_row_us": 727.0,
+        "row_us": 757.8326999999999,
+        "inference_us": 440063.333,
+        "inference_skipped": false,
+        "peak_rss": 28590080,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 672,
+        "elapsed_ns": 250719250,
+        "batch": 4,
+        "warmup_iterations": 491,
+        "warmup_elapsed_ns": 200263500,
+        "values": [
+          -0.470575728286192,
+          0.23211068617644917
+        ]
+      }
+    },
+    {
+      "label": "after",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 515.4106666666667,
+        "prep_us": 336.99449595687327,
+        "first_grad_us": 38.625,
+        "grad_us": 2.51374714943592,
+        "first_row_us": 18.208,
+        "row_us": 1.699238463891249,
+        "inference_us": 3098.959,
+        "inference_skipped": false,
+        "peak_rss": 28311552,
+        "library_bytes": 39666480
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 132096,
+        "elapsed_ns": 250057625,
+        "batch": 1024,
+        "warmup_iterations": 104447,
+        "warmup_elapsed_ns": 200736208,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    },
+    {
+      "label": "before",
+      "repeat": 5,
+      "phase": {
+        "model": "ode_branch_returns",
+        "check_values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ],
+        "source_us": 548.5741951754386,
+        "prep_us": 298.3942911694511,
+        "first_grad_us": 44.209,
+        "grad_us": 2.5959244068324594,
+        "first_row_us": 27.417,
+        "row_us": 1.7759869075358035,
+        "inference_us": 3680.417,
+        "inference_skipped": false,
+        "peak_rss": 28688384,
+        "library_bytes": 39647328
+      },
+      "native": {
+        "protocol": "stanli-gradient-v2",
+        "iterations": 138240,
+        "elapsed_ns": 251280708,
+        "batch": 1024,
+        "warmup_iterations": 102911,
+        "warmup_elapsed_ns": 200484542,
+        "values": [
+          -1.1845939290805645,
+          1.8676516746509961
+        ]
+      }
+    }
+  ],
+  "parity": {
+    "values": 642,
+    "sha256": "a5968f13efefe27ec0735b82c413f66950bd15355a4a9ad077bc05b7aef99952",
+    "changing_calls": 6,
+    "warmup": 100,
+    "draws": 100,
+    "all_draw_rows": true,
+    "bitwise_equal": true
+  },
+  "before_engines": {
+    "schema_version": 1,
+    "kind": "execution_manifest",
+    "stage": "compiled_model",
+    "host_probe": "not_run",
+    "evidence": "selected_structure_not_execution_counts",
+    "interpreter_events": [
+      {
+        "context": "lowering",
+        "event": "folding_probe",
+        "count": 12
+      },
+      {
+        "context": "prepare_data",
+        "event": "construction",
+        "count": 2
+      }
+    ],
+    "strict_violation": false,
+    "log_prob": {
+      "site": "log_prob",
+      "operations": [
+        {
+          "site": "log_prob/op/0",
+          "operation": "OP_ODE",
+          "variant": 6,
+          "value_engine": "bound_graph_kernel",
+          "derivative": "unclassified",
+          "output_elements": 2,
+          "logical_shape": null,
+          "input_elements": [
+            1,
+            1
+          ],
+          "direct_rk_payload": false,
+          "direct_rk_enabled": false,
+          "direct_rk_refusal": "",
+          "solver_derivative_selection": "type_shape_and_mode_dependent",
+          "callback": {
+            "name": "runtime_rhs",
+            "value_engine": "mir_interpreter",
+            "refusal": "integer function Greater__ arg-kind=6 arg-name= arg-type=UReal",
+            "derivative": "solver_dependent",
+            "fresh_interpreter_per_call": true
+          }
+        },
+        {
+          "site": "log_prob/op/1",
+          "operation": "OP_NORMAL_LPDF",
+          "variant": 129,
+          "value_engine": "bound_graph_kernel",
+          "derivative": "unclassified",
+          "output_elements": 1,
+          "logical_shape": null,
+          "input_elements": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "site": "log_prob/op/2",
+          "operation": "OP_INDEX",
+          "variant": 0,
+          "value_engine": "bound_graph_kernel",
+          "derivative": "unclassified",
+          "output_elements": 1,
+          "logical_shape": null,
+          "input_elements": [
+            2
+          ]
+        },
+        {
+          "site": "log_prob/op/3",
+          "operation": "OP_NORMAL_LPDF",
+          "variant": 129,
+          "value_engine": "bound_graph_kernel",
+          "derivative": "unclassified",
+          "output_elements": 1,
+          "logical_shape": null,
+          "input_elements": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "site": "log_prob/op/4",
+          "operation": "OP_ADD_N",
+          "variant": 0,
+          "value_engine": "bound_graph_kernel",
+          "derivative": "unclassified",
+          "output_elements": 1,
+          "logical_shape": null,
+          "input_elements": [
+            1,
+            1
+          ]
+        }
+      ]
+    },
+    "write_array": {
+      "value_engine": "bound_graph",
+      "status": "lowered",
+      "refusal": "",
+      "graph": {
+        "site": "write_array",
+        "operations": [
+          {
+            "site": "write_array/op/0",
+            "operation": "OP_ODE",
+            "variant": 4,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 2,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1
+            ],
+            "direct_rk_payload": false,
+            "direct_rk_enabled": false,
+            "direct_rk_refusal": "",
+            "solver_derivative_selection": "not_used",
+            "callback": {
+              "name": "runtime_rhs",
+              "value_engine": "mir_interpreter",
+              "refusal": "integer function Greater__ arg-kind=6 arg-name= arg-type=UReal",
+              "derivative": "not_used",
+              "fresh_interpreter_per_call": true
+            }
+          },
+          {
+            "site": "write_array/op/1",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              2
+            ]
+          },
+          {
+            "site": "write_array/op/2",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              2
+            ]
+          },
+          {
+            "site": "write_array/op/3",
+            "operation": "OP_ODE",
+            "variant": 4,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 2,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1
+            ],
+            "direct_rk_payload": false,
+            "direct_rk_enabled": false,
+            "direct_rk_refusal": "",
+            "solver_derivative_selection": "not_used",
+            "callback": {
+              "name": "runtime_rhs",
+              "value_engine": "mir_interpreter",
+              "refusal": "integer function Greater__ arg-kind=6 arg-name= arg-type=UReal",
+              "derivative": "not_used",
+              "fresh_interpreter_per_call": true
+            }
+          },
+          {
+            "site": "write_array/op/4",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              2
+            ]
+          },
+          {
+            "site": "write_array/op/5",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              2
+            ]
+          }
+        ]
+      }
+    },
+    "transform_inits": {
+      "value_engine": "mir_interpreter",
+      "refusal": ""
+    },
+    "reported_fallbacks": [
+      "the ODE right-hand side runtime_rhs (integer function Greater__ arg-kind=6 arg-name= arg-type=UReal)"
+    ]
+  },
+  "after_engines": {
+    "schema_version": 1,
+    "kind": "execution_manifest",
+    "stage": "compiled_model",
+    "host_probe": "not_run",
+    "evidence": "selected_structure_not_execution_counts",
+    "interpreter_events": [
+      {
+        "context": "lowering",
+        "event": "folding_probe",
+        "count": 12
+      },
+      {
+        "context": "prepare_data",
+        "event": "construction",
+        "count": 2
+      }
+    ],
+    "strict_violation": false,
+    "log_prob": {
+      "site": "log_prob",
+      "operations": [
+        {
+          "site": "log_prob/op/0",
+          "operation": "OP_ODE",
+          "variant": 6,
+          "value_engine": "bound_graph_kernel",
+          "derivative": "unclassified",
+          "output_elements": 2,
+          "logical_shape": null,
+          "input_elements": [
+            1,
+            1
+          ],
+          "direct_rk_payload": false,
+          "direct_rk_enabled": false,
+          "direct_rk_refusal": "opcode JZ is not in the exact direct-RK whitelist",
+          "solver_derivative_selection": "type_shape_and_mode_dependent",
+          "callback": {
+            "name": "runtime_rhs",
+            "value_engine": "register_program",
+            "refusal": "",
+            "derivative": "solver_dependent",
+            "fresh_interpreter_per_call": false,
+            "registers": 21,
+            "instructions": 30,
+            "kernel_calls": []
+          }
+        },
+        {
+          "site": "log_prob/op/1",
+          "operation": "OP_NORMAL_LPDF",
+          "variant": 129,
+          "value_engine": "bound_graph_kernel",
+          "derivative": "unclassified",
+          "output_elements": 1,
+          "logical_shape": null,
+          "input_elements": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "site": "log_prob/op/2",
+          "operation": "OP_INDEX",
+          "variant": 0,
+          "value_engine": "bound_graph_kernel",
+          "derivative": "unclassified",
+          "output_elements": 1,
+          "logical_shape": null,
+          "input_elements": [
+            2
+          ]
+        },
+        {
+          "site": "log_prob/op/3",
+          "operation": "OP_NORMAL_LPDF",
+          "variant": 129,
+          "value_engine": "bound_graph_kernel",
+          "derivative": "unclassified",
+          "output_elements": 1,
+          "logical_shape": null,
+          "input_elements": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "site": "log_prob/op/4",
+          "operation": "OP_ADD_N",
+          "variant": 0,
+          "value_engine": "bound_graph_kernel",
+          "derivative": "unclassified",
+          "output_elements": 1,
+          "logical_shape": null,
+          "input_elements": [
+            1,
+            1
+          ]
+        }
+      ]
+    },
+    "write_array": {
+      "value_engine": "bound_graph",
+      "status": "lowered",
+      "refusal": "",
+      "graph": {
+        "site": "write_array",
+        "operations": [
+          {
+            "site": "write_array/op/0",
+            "operation": "OP_ODE",
+            "variant": 4,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 2,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1
+            ],
+            "direct_rk_payload": false,
+            "direct_rk_enabled": false,
+            "direct_rk_refusal": "opcode JZ is not in the exact direct-RK whitelist",
+            "solver_derivative_selection": "not_used",
+            "callback": {
+              "name": "runtime_rhs",
+              "value_engine": "register_program",
+              "refusal": "",
+              "derivative": "not_used",
+              "fresh_interpreter_per_call": false,
+              "registers": 21,
+              "instructions": 30,
+              "kernel_calls": []
+            }
+          },
+          {
+            "site": "write_array/op/1",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              2
+            ]
+          },
+          {
+            "site": "write_array/op/2",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              2
+            ]
+          },
+          {
+            "site": "write_array/op/3",
+            "operation": "OP_ODE",
+            "variant": 4,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 2,
+            "logical_shape": null,
+            "input_elements": [
+              1,
+              1
+            ],
+            "direct_rk_payload": false,
+            "direct_rk_enabled": false,
+            "direct_rk_refusal": "opcode JZ is not in the exact direct-RK whitelist",
+            "solver_derivative_selection": "not_used",
+            "callback": {
+              "name": "runtime_rhs",
+              "value_engine": "register_program",
+              "refusal": "",
+              "derivative": "not_used",
+              "fresh_interpreter_per_call": false,
+              "registers": 21,
+              "instructions": 30,
+              "kernel_calls": []
+            }
+          },
+          {
+            "site": "write_array/op/4",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              2
+            ]
+          },
+          {
+            "site": "write_array/op/5",
+            "operation": "OP_INDEX",
+            "variant": 0,
+            "value_engine": "bound_graph_kernel",
+            "derivative": "not_used",
+            "output_elements": 1,
+            "logical_shape": null,
+            "input_elements": [
+              2
+            ]
+          }
+        ]
+      }
+    },
+    "transform_inits": {
+      "value_engine": "mir_interpreter",
+      "refusal": ""
+    },
+    "reported_fallbacks": []
+  },
+  "pre_guard_summary": {
+    "ode_runtime_for_before": {
+      "source_us": {
+        "median": 718.7674341229847,
+        "mad": 20.357176898428236
+      },
+      "prep_us": {
+        "median": 288.1162903776009,
+        "mad": 2.321862932503649
+      },
+      "first_grad_us": {
+        "median": 500.8125,
+        "mad": 9.603999999999985
+      },
+      "grad_us": {
+        "median": 402.73160601741824,
+        "mad": 1.973294288432129
+      },
+      "first_row_us": {
+        "median": 789.396,
+        "mad": 18.375000000000057
+      },
+      "row_us": {
+        "median": 704.323247543085,
+        "mad": 12.07337384606518
+      },
+      "inference_us": {
+        "median": 443773.292,
+        "mad": 1033.5005000000237
+      },
+      "peak_rss": {
+        "median": 28721152.0,
+        "mad": 163840.0
+      },
+      "library_bytes": {
+        "median": 39647328.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 396886.5371835443,
+        "mad": 1966.7452679966518
+      }
+    },
+    "ode_runtime_for_after": {
+      "source_us": {
+        "median": 716.0876435197283,
+        "mad": 27.909432797037255
+      },
+      "prep_us": {
+        "median": 283.3302601272911,
+        "mad": 6.879738501005505
+      },
+      "first_grad_us": {
+        "median": 44.8335,
+        "mad": 1.6875
+      },
+      "grad_us": {
+        "median": 5.637896136733394,
+        "mad": 0.21973292680546352
+      },
+      "first_row_us": {
+        "median": 24.271,
+        "mad": 2.75
+      },
+      "row_us": {
+        "median": 5.078402198851144,
+        "mad": 0.1504254306797721
+      },
+      "inference_us": {
+        "median": 5262.0,
+        "mad": 191.52149999999983
+      },
+      "peak_rss": {
+        "median": 28557312.0,
+        "mad": 180224.0
+      },
+      "library_bytes": {
+        "median": 39647328.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 4976.130051445715,
+        "mad": 177.90066356724628
+      }
+    },
+    "ode_branch_returns_before": {
+      "source_us": {
+        "median": 524.4978963180334,
+        "mad": 8.951628328922084
+      },
+      "prep_us": {
+        "median": 310.02541919707636,
+        "mad": 4.844758940511042
+      },
+      "first_grad_us": {
+        "median": 43.6665,
+        "mad": 2.791499999999999
+      },
+      "grad_us": {
+        "median": 2.5416057145836435,
+        "mad": 0.08504352904133161
+      },
+      "first_row_us": {
+        "median": 23.1045,
+        "mad": 2.8130000000000024
+      },
+      "row_us": {
+        "median": 1.801691898543246,
+        "mad": 0.04871067431595266
+      },
+      "inference_us": {
+        "median": 3146.8959999999997,
+        "mad": 38.70849999999973
+      },
+      "peak_rss": {
+        "median": 28344320.0,
+        "mad": 40960.0
+      },
+      "library_bytes": {
+        "median": 39647328.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 1910.9886818314064,
+        "mad": 50.740689169847315
+      }
+    },
+    "ode_branch_returns_after": {
+      "source_us": {
+        "median": 512.809567329456,
+        "mad": 11.390482002894771
+      },
+      "prep_us": {
+        "median": 320.2653759541985,
+        "mad": 4.128470855144911
+      },
+      "first_grad_us": {
+        "median": 36.9585,
+        "mad": 1.0420000000000016
+      },
+      "grad_us": {
+        "median": 2.5733077749808912,
+        "mad": 0.06542685975315243
+      },
+      "first_row_us": {
+        "median": 21.311999999999998,
+        "mad": 1.9585000000000008
+      },
+      "row_us": {
+        "median": 1.8053306549698918,
+        "mad": 0.030347640633574757
+      },
+      "inference_us": {
+        "median": 3215.417,
+        "mad": 174.70800000000008
+      },
+      "peak_rss": {
+        "median": 28246016.0,
+        "mad": 8192.0
+      },
+      "library_bytes": {
+        "median": 39647328.0,
+        "mad": 0.0
+      },
+      "native_grad_ns": {
+        "median": 1915.3377227783203,
+        "mad": 8.643695243831303
+      }
+    }
+  },
+  "validation": {
+    "ctest": {
+      "passed": 293,
+      "failed": 0
+    },
+    "corpus": {
+      "models": 329,
+      "points_per_model": 3,
+      "values": 1020194,
+      "platform_ulp_gates": 124,
+      "worst_scaled_error": 9.38e-13,
+      "worst_ulp": 7040
+    },
+    "fixture_cmdstan": {
+      "values": 21,
+      "max_ulp": 0
+    },
+    "installed_python": "passed",
+    "installed_r": "passed; current runtime and stock compiler; no missing-runtime skips",
+    "review_followups": "test_ode_prog: all cases pass, including specific refusal reasons, no-loop overflow, loop-carried real value compaction and runtime integer-data indexing"
+  },
+  "pre_bound_guard": {
+    "summary": {
+      "ode_runtime_for_before": {
+        "source_us": {
+          "median": 700.5863771713615,
+          "mad": 11.477774451460107
+        },
+        "prep_us": {
+          "median": 275.540743962689,
+          "mad": 8.441771674329232
+        },
+        "first_grad_us": {
+          "median": 456.0625,
+          "mad": 7.0
+        },
+        "grad_us": {
+          "median": 398.2137973593208,
+          "mad": 5.2588512451906695
+        },
+        "first_row_us": {
+          "median": 738.1045,
+          "mad": 18.959000000000003
+        },
+        "row_us": {
+          "median": 738.5430274906015,
+          "mad": 8.796353025152712
+        },
+        "inference_us": {
+          "median": 446212.083,
+          "mad": 3735.708500000008
+        },
+        "peak_rss": {
+          "median": 28712960.0,
+          "mad": 114688.0
+        },
+        "library_bytes": {
+          "median": 39647328.0,
+          "mad": 0.0
+        },
+        "native_grad_ns": {
+          "median": 389217.9262986261,
+          "mad": 11490.614852566127
+        }
+      },
+      "ode_runtime_for_after": {
+        "source_us": {
+          "median": 716.4864150985221,
+          "mad": 15.871082687338514
+        },
+        "prep_us": {
+          "median": 283.57552297893017,
+          "mad": 6.396854497328945
+        },
+        "first_grad_us": {
+          "median": 44.6045,
+          "mad": 2.2295000000000016
+        },
+        "grad_us": {
+          "median": 5.608862845347305,
+          "mad": 0.10012657135251857
+        },
+        "first_row_us": {
+          "median": 22.375,
+          "mad": 0.7085000000000008
+        },
+        "row_us": {
+          "median": 5.226339742787083,
+          "mad": 0.1424306148812402
+        },
+        "inference_us": {
+          "median": 5390.708,
+          "mad": 258.8125
+        },
+        "peak_rss": {
+          "median": 28606464.0,
+          "mad": 131072.0
+        },
+        "library_bytes": {
+          "median": 39649776.0,
+          "mad": 0.0
+        },
+        "native_grad_ns": {
+          "median": 4958.2415239903,
+          "mad": 34.60481341857576
+        }
+      },
+      "ode_branch_returns_before": {
+        "source_us": {
+          "median": 509.30703576958103,
+          "mad": 10.833450375000012
+        },
+        "prep_us": {
+          "median": 307.64579408471013,
+          "mad": 7.304866857438952
+        },
+        "first_grad_us": {
+          "median": 39.979,
+          "mad": 1.5420000000000016
+        },
+        "grad_us": {
+          "median": 2.5294481263687176,
+          "mad": 0.03981512653160024
+        },
+        "first_row_us": {
+          "median": 25.521,
+          "mad": 1.7294999999999998
+        },
+        "row_us": {
+          "median": 1.7887878655424079,
+          "mad": 0.023619418684574178
+        },
+        "inference_us": {
+          "median": 3286.792,
+          "mad": 167.75
+        },
+        "peak_rss": {
+          "median": 28303360.0,
+          "mad": 106496.0
+        },
+        "library_bytes": {
+          "median": 39647328.0,
+          "mad": 0.0
+        },
+        "native_grad_ns": {
+          "median": 1825.6951339493937,
+          "mad": 22.73913302247263
+        }
+      },
+      "ode_branch_returns_after": {
+        "source_us": {
+          "median": 536.0455410657042,
+          "mad": 8.899869100536137
+        },
+        "prep_us": {
+          "median": 313.959024763839,
+          "mad": 10.06034939972281
+        },
+        "first_grad_us": {
+          "median": 39.375,
+          "mad": 1.8954999999999984
+        },
+        "grad_us": {
+          "median": 2.5177941505519494,
+          "mad": 0.020736597881305663
+        },
+        "first_row_us": {
+          "median": 20.2295,
+          "mad": 3.4590000000000014
+        },
+        "row_us": {
+          "median": 1.7649220428075032,
+          "mad": 0.04328189645827729
+        },
+        "inference_us": {
+          "median": 3270.1875,
+          "mad": 156.16650000000004
+        },
+        "peak_rss": {
+          "median": 28352512.0,
+          "mad": 16384.0
+        },
+        "library_bytes": {
+          "median": 39649776.0,
+          "mad": 0.0
+        },
+        "native_grad_ns": {
+          "median": 1897.1515421520353,
+          "mad": 66.7075086573991
+        }
+      }
+    },
+    "binaries": {
+      "before": {
+        "bytes": 39647328,
+        "gzip_bytes": 12359470,
+        "sha256": "6ed930b5e53f948e590007d99c44722615714b8783ac866007ad3b54f96083b6"
+      },
+      "after": {
+        "bytes": 39649776,
+        "gzip_bytes": 12367035,
+        "sha256": "40fec0a1c039bca2541e7bdff59cf54a55665b594d8768b5ad9fd14128974734"
+      }
+    },
+    "canary_controls": {
+      "rows": [
+        {
+          "kind": "AA",
+          "repeat": 0,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 130048,
+            "elapsed_ns": 251290875,
+            "batch": 1024,
+            "warmup_iterations": 106495,
+            "warmup_elapsed_ns": 201180708,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1932.2932686392717
+        },
+        {
+          "kind": "AA",
+          "repeat": 0,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 130048,
+            "elapsed_ns": 251808417,
+            "batch": 1024,
+            "warmup_iterations": 111615,
+            "warmup_elapsed_ns": 200363000,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1936.2728915477362
+        },
+        {
+          "kind": "AB",
+          "repeat": 0,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 136192,
+            "elapsed_ns": 251205875,
+            "batch": 1024,
+            "warmup_iterations": 103935,
+            "warmup_elapsed_ns": 201016917,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1844.4980248472743
+        },
+        {
+          "kind": "AB",
+          "repeat": 0,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 138240,
+            "elapsed_ns": 251446125,
+            "batch": 1024,
+            "warmup_iterations": 102399,
+            "warmup_elapsed_ns": 200779458,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1818.9100477430557
+        },
+        {
+          "kind": "AB",
+          "repeat": 1,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 138752,
+            "elapsed_ns": 250057167,
+            "batch": 512,
+            "warmup_iterations": 99839,
+            "warmup_elapsed_ns": 200455708,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1802.187838733856
+        },
+        {
+          "kind": "AB",
+          "repeat": 1,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 135168,
+            "elapsed_ns": 250260375,
+            "batch": 1024,
+            "warmup_iterations": 104447,
+            "warmup_elapsed_ns": 200687208,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1851.4764959161932
+        },
+        {
+          "kind": "AA",
+          "repeat": 1,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 131072,
+            "elapsed_ns": 250784334,
+            "batch": 1024,
+            "warmup_iterations": 106495,
+            "warmup_elapsed_ns": 201427292,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1913.3326263427734
+        },
+        {
+          "kind": "AA",
+          "repeat": 1,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 129024,
+            "elapsed_ns": 250989167,
+            "batch": 1024,
+            "warmup_iterations": 111615,
+            "warmup_elapsed_ns": 200763708,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1945.290542844742
+        },
+        {
+          "kind": "AA",
+          "repeat": 2,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 134144,
+            "elapsed_ns": 250873125,
+            "batch": 1024,
+            "warmup_iterations": 114687,
+            "warmup_elapsed_ns": 201353417,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1870.1777567390268
+        },
+        {
+          "kind": "AA",
+          "repeat": 2,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 134144,
+            "elapsed_ns": 250696875,
+            "batch": 1024,
+            "warmup_iterations": 107007,
+            "warmup_elapsed_ns": 200979000,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1868.8638701693703
+        },
+        {
+          "kind": "AB",
+          "repeat": 2,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 141312,
+            "elapsed_ns": 251146625,
+            "batch": 1024,
+            "warmup_iterations": 105471,
+            "warmup_elapsed_ns": 201159958,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1777.2491012794385
+        },
+        {
+          "kind": "AB",
+          "repeat": 2,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 137216,
+            "elapsed_ns": 250559542,
+            "batch": 1024,
+            "warmup_iterations": 101375,
+            "warmup_elapsed_ns": 200350792,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1826.0227815998135
+        },
+        {
+          "kind": "AB",
+          "repeat": 3,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 130048,
+            "elapsed_ns": 250895125,
+            "batch": 1024,
+            "warmup_iterations": 106495,
+            "warmup_elapsed_ns": 200186083,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1929.2501614788387
+        },
+        {
+          "kind": "AB",
+          "repeat": 3,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 128000,
+            "elapsed_ns": 250273917,
+            "batch": 1024,
+            "warmup_iterations": 113663,
+            "warmup_elapsed_ns": 200414625,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1955.2649765625
+        },
+        {
+          "kind": "AA",
+          "repeat": 3,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 137216,
+            "elapsed_ns": 251535417,
+            "batch": 1024,
+            "warmup_iterations": 111615,
+            "warmup_elapsed_ns": 201005041,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1833.1347437616605
+        },
+        {
+          "kind": "AA",
+          "repeat": 3,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 137728,
+            "elapsed_ns": 250753375,
+            "batch": 512,
+            "warmup_iterations": 99327,
+            "warmup_elapsed_ns": 200715000,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1820.641953705855
+        },
+        {
+          "kind": "AA",
+          "repeat": 4,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 138240,
+            "elapsed_ns": 250347500,
+            "batch": 1024,
+            "warmup_iterations": 102911,
+            "warmup_elapsed_ns": 201133000,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1810.962818287037
+        },
+        {
+          "kind": "AA",
+          "repeat": 4,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 131072,
+            "elapsed_ns": 250047458,
+            "batch": 1024,
+            "warmup_iterations": 106495,
+            "warmup_elapsed_ns": 201593625,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1907.710708618164
+        },
+        {
+          "kind": "AB",
+          "repeat": 4,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 128000,
+            "elapsed_ns": 250515500,
+            "batch": 1024,
+            "warmup_iterations": 110591,
+            "warmup_elapsed_ns": 200438583,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1957.15234375
+        },
+        {
+          "kind": "AB",
+          "repeat": 4,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 131072,
+            "elapsed_ns": 250544667,
+            "batch": 1024,
+            "warmup_iterations": 112639,
+            "warmup_elapsed_ns": 201203750,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1911.5041122436523
+        },
+        {
+          "kind": "AB",
+          "repeat": 5,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 136192,
+            "elapsed_ns": 251765125,
+            "batch": 1024,
+            "warmup_iterations": 107007,
+            "warmup_elapsed_ns": 200020667,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1848.6043600211467
+        },
+        {
+          "kind": "AB",
+          "repeat": 5,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 141312,
+            "elapsed_ns": 250853750,
+            "batch": 1024,
+            "warmup_iterations": 103423,
+            "warmup_elapsed_ns": 200470167,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1775.176559669384
+        },
+        {
+          "kind": "AA",
+          "repeat": 5,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 135168,
+            "elapsed_ns": 250494125,
+            "batch": 1024,
+            "warmup_iterations": 102911,
+            "warmup_elapsed_ns": 201884917,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1853.2058253432765
+        },
+        {
+          "kind": "AA",
+          "repeat": 5,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 137216,
+            "elapsed_ns": 250913208,
+            "batch": 1024,
+            "warmup_iterations": 102399,
+            "warmup_elapsed_ns": 200298208,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1828.6002215485075
+        },
+        {
+          "kind": "AA",
+          "repeat": 6,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 136192,
+            "elapsed_ns": 250988250,
+            "batch": 1024,
+            "warmup_iterations": 105471,
+            "warmup_elapsed_ns": 201081875,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1842.9000969219924
+        },
+        {
+          "kind": "AA",
+          "repeat": 6,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 134144,
+            "elapsed_ns": 251206708,
+            "batch": 1024,
+            "warmup_iterations": 107519,
+            "warmup_elapsed_ns": 201654042,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1872.6645097805344
+        },
+        {
+          "kind": "AB",
+          "repeat": 6,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 128000,
+            "elapsed_ns": 250004667,
+            "batch": 1024,
+            "warmup_iterations": 110591,
+            "warmup_elapsed_ns": 200784750,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1953.1614609375
+        },
+        {
+          "kind": "AB",
+          "repeat": 6,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 126976,
+            "elapsed_ns": 251673375,
+            "batch": 1024,
+            "warmup_iterations": 110591,
+            "warmup_elapsed_ns": 201284208,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1982.054679624496
+        },
+        {
+          "kind": "AB",
+          "repeat": 7,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 134144,
+            "elapsed_ns": 250317958,
+            "batch": 1024,
+            "warmup_iterations": 113663,
+            "warmup_elapsed_ns": 200656750,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1866.0391668654581
+        },
+        {
+          "kind": "AB",
+          "repeat": 7,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 140288,
+            "elapsed_ns": 250485417,
+            "batch": 1024,
+            "warmup_iterations": 105471,
+            "warmup_elapsed_ns": 201445083,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1785.5085039347628
+        },
+        {
+          "kind": "AA",
+          "repeat": 7,
+          "label": "B",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 139264,
+            "elapsed_ns": 251802708,
+            "batch": 1024,
+            "warmup_iterations": 101375,
+            "warmup_elapsed_ns": 200199625,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1808.09619140625
+        },
+        {
+          "kind": "AA",
+          "repeat": 7,
+          "label": "A",
+          "result": {
+            "protocol": "stanli-gradient-v2",
+            "iterations": 135168,
+            "elapsed_ns": 251600916,
+            "batch": 1024,
+            "warmup_iterations": 104447,
+            "warmup_elapsed_ns": 200214625,
+            "values": [
+              -1.1845939290805645,
+              1.8676516746509961
+            ]
+          },
+          "ns": 1861.3940873579545
+        }
+      ],
+      "summary": {
+        "AA": {
+          "ratios": [
+            1.0020595335982654,
+            0.9835716486570514,
+            0.9992974536431513,
+            1.006861750071384,
+            1.053423454835279,
+            1.0134559776952954,
+            1.016150855332991,
+            0.9713666781721891
+          ],
+          "median": 1.0044606418348248,
+          "mad": 0.010342774679318434
+        },
+        "AB": {
+          "ratios": [
+            0.9861274033587879,
+            0.9733787291974523,
+            1.0274433563000611,
+            0.9866949925480702,
+            0.9766761991461107,
+            1.041363660392991,
+            1.0147930518110508,
+            1.0451023687387813
+          ],
+          "median": 1.0007440221795605,
+          "mad": 0.025383578576975208
+        }
+      }
+    }
+  },
+  "source_files_sha256": {
+    "runtime/include/stanli/mir_prog.hpp": "06a0b6a870d8ef4eca44364c37417e0a3431b439707628d05a01187b238e7add",
+    "runtime/src/function.cpp": "039d5d23b56ce1623f70e0e4108460631dae3fd33a07332558f79f054247fcd8",
+    "tests/test_ode_prog.cpp": "9b6f28af518eea2fae98f6608c64e763d34680158b014196035b9caeafe6a068",
+    "tests/test_mir_program_conformance.cpp": "bcc41c56a5dcb95a24056bb3d44acc7044147b1217d1fa4b69ed0529da7a5036",
+    "tests/fixtures/odefns.stan": "1a1718aebf307a99aa6ef4db1cd0d688ce4ec27a95d2f6eceeb2c4d527a1fef9"
+  }
+}

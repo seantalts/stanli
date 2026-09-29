@@ -3,6 +3,7 @@
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/execution_report.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -56,11 +57,33 @@ static void summarize(const stanli::Graph& g) {
 int main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr,
-                 "usage: dump_ops mir.sexp data.json [max_ops|-1 summary]\n");
+                 "usage: dump_ops mir.sexp data.json [max_ops|-1 "
+                 "summary|--execution-json [--forbid-mir]]\n");
     return 2;
   }
-  const int max_ops = argc > 3 ? std::atoi(argv[3]) : 200;
+  const bool execution_json =
+      argc > 3 && std::string(argv[3]) == "--execution-json";
+  const int max_ops = argc > 3 && !execution_json ? std::atoi(argv[3]) : 200;
   stanli::DataMap data = stanli::DataMap::from_json(slurp(argv[2]));
+  if (execution_json) {
+    if (argc > 5 || (argc > 4 && std::string(argv[4]) != "--forbid-mir")) {
+      std::fprintf(stderr, "--execution-json accepts only --forbid-mir\n");
+      return 2;
+    }
+    stanli::ExecutionTrace trace;
+    trace.forbid_mir = argc > 4 && std::string(argv[4]) == "--forbid-mir";
+    stanli::ExecutionTraceScope scope(trace);
+    try {
+      const auto cm = stanli::compile_model(slurp(argv[1]), data);
+      trace.check();
+      std::puts(stanli::execution_report(cm, &trace).c_str());
+      return 0;
+    } catch (const std::exception& e) {
+      std::puts(stanli::execution_trace_report(trace).c_str());
+      std::fprintf(stderr, "%s\n", e.what());
+      return 1;
+    }
+  }
   stanli::CompiledModel cm = stanli::compile_model(slurp(argv[1]), data);
   const stanli::Graph& g = cm.graph;
   std::printf("slots=%zu ops=%zu result=%d\n", g.slots.size(), g.ops.size(),

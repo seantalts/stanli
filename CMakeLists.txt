@@ -294,6 +294,7 @@ set_source_files_properties(runtime/src/build_id.cpp PROPERTIES
 # stan-math-heavy translation unit merely to change the final archive kind
 # used to make a clean native build do the expensive half of its work twice.
 set(STANLI_RUNTIME_SOURCES
+  runtime/src/execution_report.cpp
   runtime/src/executor.cpp
   runtime/kernels/elementwise.cpp
   runtime/kernels/densities.cpp
@@ -955,6 +956,56 @@ add_executable(bench_dispatch tools/bench_dispatch.cpp)
 add_executable(dump_ops tools/dump_ops.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(dump_ops PRIVATE stanli)
+add_dependencies(dump_ops stanli_mir_fixtures)
+if(NOT EMSCRIPTEN)
+  add_test(NAME scalar_rng_reference
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+            $<TARGET_FILE:stanli_check>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME vector_rng_reference
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+            $<TARGET_FILE:stanli_check> gq_vector_rng_complete
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME rng_udf_effect_reference
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+            $<TARGET_FILE:stanli_check> gq_rng_udf_effect
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  foreach(exit_fixture gq_function_exits ode_function_exits ode_branch_returns
+                       ode_runtime_for for_bound_semantics ode_integer_arithmetic ode_runtime_index
+                       ode_constant_loop ode_retained_loop ode_structured_callback_branch ode_nested_for
+                       structured_callback_loop structured_callback_branch
+                       ode_nested_callback ode_nested_callback_fallback
+                       nested_callback_contexts nested_callback_contexts_fallback
+                       ode_matrix_callback ode_matrix_callback_flat
+                       ode_matrix_callback_fallback matrix_callback_contexts
+                       matrix_callback_contexts_fallback matrix_callback_geometry_edges
+                       gq_callback_runtime_values matrix_callback_value_fallback
+                       gq_callback_integer_contexts gq_callback_integer_contexts_fallback
+                       gq_callback_shared_function gq_callback_runtime_integer
+                       gq_callback_runtime_control gq_callback_ode_controls gq_callback_solver_controls gq_callback_rng_values)
+    set(_expected_interpreter 0)
+    if(exit_fixture MATCHES "_fallback$" OR
+       exit_fixture STREQUAL "matrix_callback_geometry_edges")
+      set(_expected_interpreter 1)
+    endif()
+    add_test(NAME ${exit_fixture}_reference
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+              $<TARGET_FILE:stanli_check> ${exit_fixture} ${_expected_interpreter}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    if(exit_fixture MATCHES "^structured_callback_")
+      set_tests_properties(${exit_fixture}_reference PROPERTIES
+        ENVIRONMENT "STANLI_STRUCTURED_LOOPS=force")
+    endif()
+  endforeach()
+  add_test(NAME callback_geometry
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_callback_geometry.py
+            $<TARGET_FILE:stanli_check> $<TARGET_FILE:dump_ops>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME execution_report_cli
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_execution_report_cli.py
+            $<TARGET_FILE:dump_ops> $<TARGET_FILE:stanli_shared>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
 add_executable(dump_islands tools/dump_islands.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(dump_islands PRIVATE stanli)
@@ -1099,9 +1150,10 @@ if(STANLI_STANC_EMBED_OBJ OR STANLI_PORTABLE_COMPILER)
 endif()
 
 set(STANLI_TESTS
+  test_execution_report test_rng_families test_vector_rng
   test_smoke test_executor test_recorder test_densities test_matvec test_eigen
   test_mnc test_stan240
-  test_legacy test_eight_schools test_glm test_nuts test_walnuts test_sexp
+  test_legacy test_eight_schools test_glm test_normal_glm test_nuts test_walnuts test_sexp
   test_model_adapter test_sampler_parity
   test_mir test_mir_decode test_transforms test_eltwise test_scalar_binary
   test_lower
@@ -1118,7 +1170,7 @@ set(STANLI_TESTS
   test_solve test_solve_forwards test_solve_reuse test_cross_path
   test_write_array test_pool test_bridgestan test_mixture test_island
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
-  test_odevariadic test_algebra test_estimate test_brmsmono
+  test_odevariadic test_callback_values test_algebra test_estimate test_brmsmono
   test_reduce_sum
   test_structured_arrays test_pathfinder test_unconstrain
   test_init_interp test_constrain_structured)
@@ -1148,6 +1200,11 @@ if(STANLI_FAST_TEST_TUS)
 endif()
 add_test(NAME test_function COMMAND test_function
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+if(Python3_Interpreter_FOUND)
+  add_test(NAME standalone_function_reference
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_function_reference.py
+            $<TARGET_FILE:stanli_shared>)
+endif()
 
 # The conformance gate has its own failure modes (parser drift, a broad policy
 # rule, nonfinite comparison, partition loss) which C++ runtime tests cannot

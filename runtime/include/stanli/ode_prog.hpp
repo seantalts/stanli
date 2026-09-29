@@ -49,19 +49,29 @@ struct RhsProgram : Program {
 // -- theta, x_r, x_i -- and the modern `ode_*` interface takes any number
 // of any type. Both reduce to this list, so there is one calling
 // convention: real arguments are packed in order into the theta region
-// when they carry autodiff and into the x_r region when they are data,
-// and integer arguments bind as compile-time constants. The lowering
+// when supplied at runtime and into the x_r region when preparation constants,
+// independently of the kernel's scalar autodiff activity mask,
+// and integer arguments bind as compile-time constants unless a value-only
+// solve supplies runtime integer lanes in theta. The lowering
 // packs the call site the same way, in the same order, which is what
 // makes the two halves agree.
 struct RhsArg {
   bool is_int = false;
-  bool is_param = false;  // reals: theta region when true, x_r when false
-  int len = 0;            // reals
+  bool is_param = false;  // runtime theta region, including value-only ints
+  int len = 0;            // reals or runtime integers
   std::vector<int> ints;  // ints
+  // Plain matrix geometry, captured before flattening. Negative means absent;
+  // zero extents are valid. Scalar/vector/one-dimensional array bindings keep
+  // their established length-only representation. No per-argument allocation.
+  int64_t rows = -1, cols = -1;
+  // Arrays retain all outer and leaf extents. Real buffers use graph order;
+  // integer constants use Stan's serialized order. Empty means the legacy
+  // one-dimensional scalar-array convention, inferred from the value count.
+  std::vector<int64_t> dims;
 };
 
-// Compile `f` against a variadic argument list. Never throws: failure
-// comes back as ok == false with a reason.
+// Compile `f` against a variadic argument list. Semantic refusal comes back
+// as ok == false with a reason; allocation failure may still propagate.
 RhsProgram compile_rhs_args(
     const mir::FunDef& f, const std::map<std::string, const mir::FunDef*>& funs,
     int n_y, const std::vector<RhsArg>& args);

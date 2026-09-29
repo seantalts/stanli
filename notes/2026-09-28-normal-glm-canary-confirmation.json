@@ -1,0 +1,706 @@
+{
+  "samples": [
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8181201358732112,
+      "inference_us": 8993.385392857144,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 0
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8339026104417671,
+      "inference_us": 9330.702148148148,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 0
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8504812588449815,
+      "inference_us": 9581.648148148148,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 0
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8843719661675281,
+      "inference_us": 9327.964481481482,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 0
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8614738853415391,
+      "inference_us": 8869.152310344829,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 1
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8233872322346059,
+      "inference_us": 8866.883620689654,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 1
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8284187421300285,
+      "inference_us": 8935.096714285715,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 1
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8648628262253342,
+      "inference_us": 9287.469148148148,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 1
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8233172797628849,
+      "inference_us": 8721.956896551725,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 2
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.7993061527246684,
+      "inference_us": 9140.735107142857,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 2
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8967103135603556,
+      "inference_us": 9470.714518518518,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 2
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8681201819570804,
+      "inference_us": 9001.285714285714,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 2
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8176323435624556,
+      "inference_us": 8769.53879310345,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 3
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8084017519636025,
+      "inference_us": 9557.635814814816,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 3
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8376598369581607,
+      "inference_us": 8880.031586206896,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 3
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.7978577583455672,
+      "inference_us": 9259.606481481482,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 3
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.854449131369473,
+      "inference_us": 9602.591037037037,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 4
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8769099030842568,
+      "inference_us": 9339.362629629628,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 4
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8220016440013678,
+      "inference_us": 8873.52727586207,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 4
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8025055147884927,
+      "inference_us": 8842.714068965517,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 4
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8256430600140028,
+      "inference_us": 9532.023148148148,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 5
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8757863083185617,
+      "inference_us": 8953.398785714286,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 5
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8230612849594232,
+      "inference_us": 8844.968413793104,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 5
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8223074757256006,
+      "inference_us": 8844.741379310346,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 5
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8570578033294937,
+      "inference_us": 9495.169740740741,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 6
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8535315686870308,
+      "inference_us": 9209.21575,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 6
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8333238890148131,
+      "inference_us": 8874.340517241379,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 6
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8213137434623775,
+      "inference_us": 8792.794551724137,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 6
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8395931845354039,
+      "inference_us": 8966.95982142857,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 7
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8690188403127074,
+      "inference_us": 9508.054037037038,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 7
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8359288893198559,
+      "inference_us": 9155.809535714285,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 7
+    },
+    {
+      "model": "eight_schools_centered",
+      "grad_us": 0.8246180934192255,
+      "inference_us": 8699.209758620691,
+      "draws_sha256": "4f535bb5cee766922e1f7e63b90c9f450d929be9d766ebe15062ef3dd4ad99cf",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 7
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.7839663052067785,
+      "inference_us": 1345.491935483871,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 0
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8120303081485427,
+      "inference_us": 1367.8526885245901,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 0
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8577970697730275,
+      "inference_us": 1286.7418820512821,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 0
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.7766768411078491,
+      "inference_us": 1359.109375,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 0
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8261408172841791,
+      "inference_us": 1353.8355837837837,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 1
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.7878658836357678,
+      "inference_us": 1289.2850103092783,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 1
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8205462524123988,
+      "inference_us": 1401.4785865921788,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 1
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8331740596817948,
+      "inference_us": 1278.428362244898,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 1
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8143939989184893,
+      "inference_us": 1396.1442166666666,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 2
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8676528698452803,
+      "inference_us": 1395.0152777777778,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 2
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8400075970122675,
+      "inference_us": 1289.83462371134,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 2
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.7842039517434347,
+      "inference_us": 1360.4664891304349,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 2
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.843297008662331,
+      "inference_us": 1323.0662263157894,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 3
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8261711263346784,
+      "inference_us": 1271.8752131979695,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 3
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8047073505175877,
+      "inference_us": 1356.2727459459459,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 3
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8516665360781895,
+      "inference_us": 1395.954627777778,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 3
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8609539872441249,
+      "inference_us": 1364.1333804347828,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 4
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.7927343459166363,
+      "inference_us": 1276.680275510204,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 4
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.856880184537132,
+      "inference_us": 1424.294744318182,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 4
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8653415148284551,
+      "inference_us": 1309.8523141361256,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 4
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.7965656655451046,
+      "inference_us": 1317.4657894736843,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 5
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8309439578811618,
+      "inference_us": 1395.3465277777777,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 5
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8439227237742881,
+      "inference_us": 1364.1929347826087,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 5
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8240925386910157,
+      "inference_us": 1295.9987046632125,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 5
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8102646187553072,
+      "inference_us": 1286.7820512820513,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 6
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8170257755206087,
+      "inference_us": 1364.472597826087,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 6
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8603832755730997,
+      "inference_us": 1355.0583351351352,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 6
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.7870168515626967,
+      "inference_us": 1306.42990625,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 6
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8093421508418772,
+      "inference_us": 1446.3653641618498,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "right",
+      "repeat": 7
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8416539027387345,
+      "inference_us": 1256.03125,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AB",
+      "side": "left",
+      "repeat": 7
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.8109345609772712,
+      "inference_us": 1363.6895380434783,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "right",
+      "repeat": 7
+    },
+    {
+      "model": "eight_schools_noncentered",
+      "grad_us": 0.848627067669173,
+      "inference_us": 1303.0386302083332,
+      "draws_sha256": "87dd901858a9948a44afd7a6842a533db15a745d35eb17b78786f7bf03c32ff2",
+      "mode": "AA",
+      "side": "left",
+      "repeat": 7
+    }
+  ],
+  "summary": {
+    "eight_schools_noncentered": {
+      "AA": {
+        "grad_us": {
+          "median_ratio": 0.9965940577887547,
+          "mad": 0.04010666364840493,
+          "ratios": [
+            1.0357974606247422,
+            0.9848437344842219,
+            1.065396934404623,
+            0.9448620045859233,
+            0.9207627325754578,
+            1.0240630562130444,
+            1.0083443810932875,
+            0.9555841333279324
+          ]
+        },
+        "inference_us": {
+          "median_ratio": 1.0315823824311168,
+          "mad": 0.03059222570028508,
+          "ratios": [
+            1.016619016770753,
+            1.0962511689987906,
+            0.9991913880561822,
+            0.9715736593136973,
+            0.9358910894060042,
+            1.0526190573138865,
+            1.0603758394567524,
+            1.0465457480914806
+          ]
+        }
+      },
+      "AB": {
+        "grad_us": {
+          "median_ratio": 0.960118320591316,
+          "mad": 0.04757318521397902,
+          "ratios": [
+            0.9054319121343667,
+            1.048580519151031,
+            0.9335676897836225,
+            1.0207292191432928,
+            1.0098745780845588,
+            0.9586274236547564,
+            0.9147282076566008,
+            0.9616092175278755
+          ]
+        },
+        "inference_us": {
+          "median_ratio": 1.0451577048938931,
+          "mad": 0.04606373610883285,
+          "ratios": [
+            1.056240877800101,
+            1.0500669541322138,
+            1.0547604042569894,
+            1.0402484556555722,
+            0.919649756036388,
+            0.9441853785036998,
+            0.9641134055824352,
+            1.15153612950462
+          ]
+        }
+      }
+    },
+    "eight_schools_centered": {
+      "AA": {
+        "grad_us": {
+          "median_ratio": 1.0073165525798595,
+          "mad": 0.015472442569861689,
+          "ratios": [
+            1.019291145488933,
+            0.9578614284367329,
+            0.970836119162795,
+            1.0498861835913296,
+            1.0262868448105094,
+            1.0009166999645205,
+            0.9958856513192411,
+            1.0137164051951988
+          ]
+        },
+        "inference_us": {
+          "median_ratio": 0.9863067208231147,
+          "mad": 0.02577331173397579,
+          "ratios": [
+            1.037507205635701,
+            0.9620593696472528,
+            1.0480142490450393,
+            0.9590074485310249,
+            0.972587772780061,
+            1.0000256688661682,
+            0.9698842676278019,
+            1.052487500561889
+          ]
+        }
+      },
+      "AB": {
+        "grad_us": {
+          "median_ratio": 0.9809348953423751,
+          "mad": 0.022639551060933405,
+          "ratios": [
+            1.0398488584787544,
+            1.0462560647237256,
+            0.9681166468468962,
+            1.011418322110797,
+            0.9762821286853258,
+            0.9427448821381669,
+            0.9855876619994244,
+            0.9661392199889303
+          ]
+        },
+        "inference_us": {
+          "median_ratio": 0.9821675222850541,
+          "mad": 0.024911108329733533,
+          "ratios": [
+            0.9735240051873857,
+            1.0002558609938086,
+            0.9504336443343415,
+            0.9175426813721259,
+            0.9965275131367013,
+            1.0646262247759024,
+            0.9908110393827224,
+            0.9430909612523525
+          ]
+        }
+      }
+    }
+  }
+}

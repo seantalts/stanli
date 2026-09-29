@@ -841,6 +841,41 @@ void test_mixed_integer_udf_arguments() {
            {std::move(entry), std::move(score)}, 1.0, {13.0});
 }
 
+void test_runtime_for_bound_effects() {
+  FunDef bound;
+  bound.name = "bound";
+  bound.arg_names = {"n"};
+  bound.arg_types = {"UInt"};
+  bound.arg_views = {{0, UnsizedLeaf::Int}};
+  bound.body = {nr_fun_app("FnPrint", {lit_string("bound "), var("n", "UInt")}),
+                return_value(var("n", "UInt"))};
+  for (int first : {1, 5}) {
+    Stmt loop;
+    loop.kind = Stmt::For;
+    loop.loopvar = "index";
+    loop.lower = fun("bound", {lit_int(first)}, "UInt", Expr::Lib::UserDefined);
+    loop.upper = lit_int(3);
+    loop.body = {nr_fun_app("FnPrint", {var("index", "UInt")})};
+    FunDef entry = rhs_function(
+        "runtime_bounds_rhs",
+        {std::move(loop), return_value(make_array({lit_real(0)}))});
+    const std::string printed = first == 1 ? "bound 1\n1\n2\n3\n" : "bound 5\n";
+    run_observation_case("for bound effects",
+                         "the lower bound runs once, even for an empty range",
+                         {entry, bound}, 1.0, observed_values({0.0}, printed),
+                         nullptr, true);
+    entry.body[0].upper =
+        fun("bound", {lit_int(3)}, "UInt", Expr::Lib::UserDefined);
+    const std::string repeated =
+        first == 1 ? "bound 1\nbound 3\n1\nbound 3\n2\nbound 3\n3\nbound 3\n"
+                   : "bound 5\nbound 3\n";
+    run_observation_case("for upper bound effects",
+                         "the upper bound runs on every condition test",
+                         {entry, bound}, 1.0, observed_values({0.0}, repeated),
+                         nullptr, true);
+  }
+}
+
 void test_nested_print_effect() {
   // print is an ordered language effect even when it lives in an inlined
   // user-defined function. Its arguments are evaluated and rendered once.
@@ -907,6 +942,49 @@ void test_runtime_guarded_effects() {
       "taken runtime effects",
       "a true branch prints once, then reject terminates evaluation", {entry},
       -1.0, "negative t rejected: -1", "negative branch t=-1\n");
+}
+
+void test_early_return_effects() {
+  Stmt arm;
+  arm.kind = Stmt::Block;
+  arm.body = {nr_fun_app("FnPrint", {lit_string("early")}),
+              return_value(make_array({var("t", "UReal")})),
+              nr_fun_app("FnReject", {lit_string("unreachable after return")})};
+  Stmt guarded;
+  guarded.kind = Stmt::IfElse;
+  guarded.cond = fun("Greater__", {var("t", "UReal"), lit_real(0)}, "UInt");
+  guarded.body = {arm};
+  FunDef entry = rhs_function(
+      "early_effects", {nr_fun_app("FnPrint", {lit_string("prefix")}), guarded,
+                        nr_fun_app("FnPrint", {lit_string("late")}),
+                        return_value(make_array({lit_real(7)}))});
+  run_observation_case(
+      "early exit effects", "only the executed return path prints", {entry},
+      1.0, observed_values({1.0}, "prefix\nearly\n"), nullptr, true);
+  run_observation_case(
+      "trailing exit effects", "the skipped arm neither prints nor rejects",
+      {entry}, -1.0, observed_values({7.0}, "prefix\nlate\n"), nullptr, true);
+}
+
+void test_guarded_constructor_error() {
+  Stmt guarded;
+  guarded.kind = Stmt::IfElse;
+  guarded.cond = fun("Greater__", {var("t", "UReal"), lit_real(0)}, "UInt");
+  guarded.body = {return_value(
+      make_array({fun("sum",
+                      {fun("linspaced_vector",
+                           {lit_int(-1), lit_real(0), lit_real(1)}, "UVector")},
+                      "UReal")}))};
+  FunDef entry =
+      rhs_function("guarded_constructor",
+                   {nr_fun_app("FnPrint", {lit_string("checked")}), guarded,
+                    return_value(make_array({var("t", "UReal")}))});
+  run_case("untaken invalid constructor",
+           "compilation cannot reject an untaken return", {entry}, -1, {-1},
+           "checked\n", "linspaced_vector");
+  run_domain_error_case("executed invalid constructor",
+                        "fallback rejects after printing once", {entry}, 1, {},
+                        "checked\n", "linspaced_vector");
 }
 
 void test_unknown_nrfunapp_fails_loud() {
@@ -1245,9 +1323,12 @@ int main() {
   test_program_extrema();
   test_matrix_row_indexing();
   test_mixed_integer_udf_arguments();
+  test_runtime_for_bound_effects();
   test_nested_print_effect();
   test_print_then_reject_effects();
   test_runtime_guarded_effects();
+  test_early_return_effects();
+  test_guarded_constructor_error();
   test_unknown_nrfunapp_fails_loud();
   if (failures == 0)
     std::printf("test_mir_program_conformance: all cases passed\n");

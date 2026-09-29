@@ -3002,7 +3002,7 @@ int main() {
   }
 
   // A shaped zero-width operand also owns the broadcast geometry. An
-  // unsupported gamma RNG keeps this interpreter-specific oracle on WaInterp;
+  // forced interpreter keeps this interpreter-specific oracle on WaInterp;
   // Stan's empty-outcome logit overload returns zero without indexing either
   // the outcomes or the empty vector.
   {
@@ -3040,7 +3040,9 @@ int main() {
       mir.replace(arg, vector_arg.size(), scaled_empty);
     }
     DataMap d = DataMap::from_json(R"({"K":3,"y":2,"ys":[3,1,3]})");
+    test_setenv("STANLI_WA_FORCE_INTERP", "1");
     CompiledModel lm = compile_model(mir, d);
+    test_unsetenv("STANLI_WA_FORCE_INTERP");
     check(lm.write_array && lm.write_array->interp,
           "empty scalar-left interpreted write_array selected");
     if (lm.write_array && lm.write_array->interp) {

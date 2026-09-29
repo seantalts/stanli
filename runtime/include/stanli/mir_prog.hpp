@@ -7,10 +7,11 @@
 // at all: `if (theta > 0)` has no op-graph form, and until this existed
 // it was a compile error (lower.cpp).
 //
-// The shape of the problem is what keeps this small: every size and loop
-// bound is known at compile time. Most indices and integers are too. The
-// one runtime-integer surface is a checked scalar read from a flat array;
-// generated-quantities Viterbi backtracking needs exactly that operation.
+// The shape of the problem is what keeps this small: storage sizes are
+// known at compile time, even when loop bounds are runtime values. Most
+// indices and integers are also known at preparation. Runtime integer values
+// use scalar registers and integer operations; dynamic storage still requires
+// a separate shape proof.
 //
 // Names the compiler does not know are the one thing that differs
 // between callers. The ODE side knows them all up front (t, y, theta,
@@ -29,6 +30,7 @@
 #include <stanli/optable.hpp>
 #include <stanli/program.hpp>
 #include <stanli/rng_family.hpp>
+#include <stanli/structured_loop.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -76,6 +78,60 @@ struct Bail {
   std::string why;
 };
 
+// Every admitted integer operation needs an integer implementation, including
+// integer-valued subexpressions promoted into a real return. Register storage
+// is double, while the I* instructions execute with Stan's integer type.
+inline void check_program_integer_contract(
+    const std::vector<stanli::mir::Stmt>& body,
+    const std::map<std::string, const stanli::mir::FunDef*>& functions,
+    std::set<const stanli::mir::FunDef*>& visited) {
+  std::function<void(const mir::Expr&)> expression;
+  expression = [&](const mir::Expr& value) {
+    if (value.kind == mir::Expr::FunApp) {
+      if (value.fn_lib == mir::Expr::Lib::UserDefined) {
+        const auto found = functions.find(value.name);
+        if (found != functions.end() && visited.insert(found->second).second)
+          check_program_integer_contract(found->second->body, functions,
+                                         visited);
+      } else if (const auto* spec = function_spec(value);
+                 spec && spec->builtin() &&
+                 spec->result() == FunctionArgumentKind::Integer) {
+        const auto policy = spec->builtin()->shape;
+        const auto op = spec->builtin()->opcode;
+        const bool native_integer =
+            op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV ||
+            op == OP_NEG || op == OP_ABS || op == OP_CHOOSE || op == OP_SUM_VEC;
+        // Stanc retains a negative integer literal as unary negation even
+        // when a real comparison consumes it. Its exact value is proven here
+        // without invoking integer arithmetic on unknown runtime operands.
+        const bool literal_negation =
+            spec->builtin()->opcode == OP_NEG && value.args.size() == 1 &&
+            value.args[0].kind == mir::Expr::LitInt &&
+            value.args[0].lit_i >= -(int64_t)std::numeric_limits<int>::max() &&
+            value.args[0].lit_i <= std::numeric_limits<int>::max();
+        if (!native_integer && !literal_negation &&
+            policy != BuiltinShapePolicy::Predicate &&
+            policy != BuiltinShapePolicy::ShapeQuery &&
+            policy != BuiltinShapePolicy::SliceView &&
+            policy != BuiltinShapePolicy::Constructor &&
+            policy != BuiltinShapePolicy::Rng)
+          throw Bail{"integer arithmetic requires the MIR interpreter"};
+      }
+    }
+    for (const auto& child : value.args) expression(child);
+  };
+  std::function<void(const mir::Stmt&)> statement;
+  statement = [&](const mir::Stmt& value) {
+    for (const auto* expr : {&value.init, &value.rhs, &value.target,
+                             &value.lower, &value.upper, &value.cond})
+      expression(*expr);
+    for (const auto* exprs : {&value.read_dims, &value.lhs_idx, &value.fn_args})
+      for (const auto& expr : *exprs) expression(expr);
+    for (const auto& child : value.body) statement(child);
+  };
+  for (const auto& value : body) statement(value);
+}
+
 struct ProgramCompiler {
   Program& p;
   const std::map<std::string, const mir::FunDef*>& funs;
@@ -119,7 +175,13 @@ struct ProgramCompiler {
   // live in ordinary double registers (their producers still preserve Stan's
   // integer-valued operations where they are supported below).
   int structured_while_depth = 0;
+  // Runtime for bodies execute repeatedly too. Keep their scalar integer
+  // locals in registers so declarations initialize on each executed trip.
+  int runtime_for_depth = 0;
   bool structured_while_seen = false;
+  // A callee may return normally while its caller is inside a loop. Only
+  // loops entered within this function make its return a runtime exit.
+  int return_while_base = 0;
   int inline_depth = 0;
   std::vector<std::string> inline_stack;
   struct LoopFrame {
@@ -181,24 +243,63 @@ struct ProgramCompiler {
   // nevertheless be initialized before control reaches that jump so the
   // untaken path preserves it.
   std::vector<Program::Instr> hoisted_int_initializers;
+  // A folded scalar local inside a repeated scope may later need storage.
+  // Preserve its lexical position with a temporary marker, so loop backedges
+  // can distinguish "before declaration" from "after declaration". finish()
+  // removes unused markers; promoted locals replace theirs with a real fill.
+  std::map<std::string, int> int_reset_at;
+  std::set<int> unused_int_resets;
+  void mark_int_reset(const std::string& name) {
+    if (!structured_while_depth) return;
+    const int at = emit(Program::JMP, 0);
+    int_reset_at[name] = at;
+    unused_int_resets.insert(at);
+  }
 
   static void assigned_names(const mir::Stmt& s, std::set<std::string>* names) {
     if (s.kind == mir::Stmt::Assignment) names->insert(s.lhs);
     for (const auto& child : s.body) assigned_names(child, names);
   }
 
-  static bool peel_terminal_return(mir::Stmt* s, mir::Expr* value) {
-    if (s->kind == mir::Stmt::Return) {
-      if (!s->has_init) return false;
-      *value = s->rhs;
-      s->kind = mir::Stmt::Skip;
-      s->body.clear();
-      return true;
+  // Unrolling may capture an upper bound only when reevaluation cannot
+  // change its value or produce effects. Other bounds run at the loop head.
+  bool invariant_for_bound(const mir::Expr& e,
+                           const std::set<std::string>& written) {
+    // Fixed container geometry does not depend on element mutations.
+    // Retain the effect check on the operand even when only its shape matters.
+    if (is_shape_query(e)) {
+      Range view;
+      if (static_view(e.args[0], &view))
+        return invariant_for_bound(e.args[0], {});
     }
-    if ((s->kind == mir::Stmt::Block || s->kind == mir::Stmt::SList) &&
-        !s->body.empty())
-      return peel_terminal_return(&s->body.back(), value);
-    return false;
+    switch (e.kind) {
+      case mir::Expr::Var:
+        return !written.count(e.name);
+      case mir::Expr::LitInt:
+      case mir::Expr::LitReal:
+        return true;
+      case mir::Expr::Promotion:
+      case mir::Expr::TernaryIf:
+      case mir::Expr::EAnd:
+      case mir::Expr::EOr:
+      case mir::Expr::Indexed:
+        break;
+      case mir::Expr::FunApp: {
+        if (e.name == "FnMakeArray" || e.name == "FnMakeRowVec" ||
+            e.name.compare(0, 5, "Index") == 0)
+          break;
+        if (e.fn_lib != mir::Expr::Lib::StanLib) return false;
+        const auto* spec = function_spec(e);
+        if (!spec || !spec->builtin()) return false;
+        if (spec->builtin()->shape == BuiltinShapePolicy::Rng) return false;
+        break;
+      }
+      default:
+        return false;
+    }
+    for (const auto& arg : e.args)
+      if (!invariant_for_bound(arg, written)) return false;
+    return true;
   }
 
   // Move an already-declared scalar integer into a register before compiling
@@ -212,10 +313,49 @@ struct ProgramCompiler {
       bail("structured while writes an integer array: " + name);
     const int r = alloc(1);
     const double value = static_cast<double>(it->second[0]);
-    hoisted_int_initializers.push_back(const_instr(r, &value, 1));
+    const auto reset = int_reset_at.find(name);
+    if (reset == int_reset_at.end()) {
+      hoisted_int_initializers.push_back(const_instr(r, &value, 1));
+    } else {
+      p.code[reset->second] = const_instr(r, &value, 1);
+      unused_int_resets.erase(reset->second);
+      int_reset_at.erase(reset);
+    }
     reals[name] = Range{r, 1};
     ints.erase(it);
     int_decl_at.erase(name);
+  }
+
+  void reify_loop_write(const std::string& name) {
+    if (int_array_names.count(name)) {
+      auto known = known_int_arrays.find(name);
+      if (!reals.count(name) && known != known_int_arrays.end()) {
+        const auto shape = known_int_array_dims.find(name);
+        const std::vector<int64_t> dims =
+            shape == known_int_array_dims.end()
+                ? std::vector<int64_t>{static_cast<int64_t>(
+                      known->second.size())}
+                : shape->second;
+        const auto values = int_array_graph_values(known->second, dims);
+        Range value{alloc(static_cast<int>(values.size())),
+                    static_cast<int>(values.size())};
+        value.kind = ViewKind::Array;
+        value.dims = dims;
+        emit_const(value.reg, values.data(), value.len);
+        reals[name] = value;
+      }
+      known_int_arrays.erase(name);
+      known_int_array_dims.erase(name);
+    } else {
+      reify_written_int(name);
+    }
+    // An imported value written on an earlier iteration is no longer a
+    // preparation constant, even before the first write in this body.
+    if (!reals.count(name) && bind_extern) {
+      Range value;
+      if (bind_extern(name, &value)) reals[name] = value;
+    }
+    extern_bound.erase(name);
   }
 
   // Registers are never recycled, so an unrolled generated-quantities
@@ -392,6 +532,15 @@ struct ProgramCompiler {
     for (mir::Expr& arg : e->args) literalize_external_ints(&arg);
   }
 
+  bool refers_to_local_runtime(const mir::Expr& e) const {
+    if (e.kind == mir::Expr::Var && reals.count(e.name) &&
+        !extern_bound.count(e.name))
+      return true;
+    for (const auto& arg : e.args)
+      if (refers_to_local_runtime(arg)) return true;
+    return false;
+  }
+
   bool external_int_array(const mir::Expr& e, std::vector<long>* values,
                           std::vector<int64_t>* dims) {
     if (!extern_ints) return false;
@@ -411,6 +560,7 @@ struct ProgramCompiler {
     }
     mir::Expr literal = e;
     literalize_external_ints(&literal);
+    if (refers_to_local_runtime(literal)) return false;
     if (!extern_ints(literal, values, dims)) return false;
     *dims = validated_int_array_dims(*values, std::move(*dims),
                                      "external integer array expression");
@@ -1342,7 +1492,9 @@ struct ProgramCompiler {
     const size_t enclosing = it == int_decl_at.end() ? 0 : it->second.second;
     if (branch_depth != depth) return false;
     for (size_t k = enclosing; k < loops.size(); ++k)
-      if (!loops[k].breaks.empty() || !loops[k].continues.empty()) return false;
+      if (loops[k].structured || !loops[k].breaks.empty() ||
+          !loops[k].continues.empty())
+        return false;
     return true;
   }
 
@@ -1510,6 +1662,25 @@ struct ProgramCompiler {
         // remaining base-only node is the identity, as in MirInterp.
         if (e.args.size() == 1) return b;
         if (e.args.size() == 2 && e.args[1].name == "IndexAll") return b;
+        const std::vector<mir::Expr> selectors(e.args.begin() + 1,
+                                               e.args.end());
+        if ((b.kind == ViewKind::Matrix || b.kind == ViewKind::Array ||
+             (e.args.size() == 2 && e.args[1].name == "IndexMulti")) &&
+            has_runtime_selector(selectors)) {
+          // Preserve the existing single-op path for a final scalar array
+          // index; other geometries use the shared checked kernel below.
+          bool final_scalar =
+              b.kind == ViewKind::Array && b.leaf == ViewKind::Flat &&
+              selectors.size() == (b.dims.empty() ? 1 : b.dims.size());
+          for (size_t k = 0; k < selectors.size() && final_scalar; ++k) {
+            long fixed;
+            final_scalar = selectors[k].name == "IndexSingle" &&
+                           selectors[k].args.size() == 1 &&
+                           (k + 1 == selectors.size() ||
+                            try_cint(selectors[k].args[0], &fixed));
+          }
+          if (!final_scalar) return dynamic_index(b, selectors);
+        }
         // General compile-time matrix selection. Registers are column-major,
         // so selected columns are outer and rows inner; this covers All,
         // Single, Between, and Multi in any pair while preserving selector
@@ -2040,6 +2211,156 @@ struct ProgramCompiler {
   // One adapter from register ranges to the graph kernel ABI. Regular
   // builtins, RNGs, and retained higher-order algorithms all use the same
   // binding, scratch sizing, ownership, and reverse-mode contract.
+  bool has_runtime_selector(const std::vector<mir::Expr>& selectors) {
+    for (const auto& index : selectors) {
+      if (index.name == "IndexAll") continue;
+      if (index.name == "IndexMulti") {
+        std::vector<long> values;
+        if (index.args.size() != 1 || !try_cints(index.args[0], &values))
+          return true;
+      } else {
+        for (const auto& arg : index.args) {
+          long value;
+          if (!try_cint(arg, &value)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Fixed shapes with runtime selectors use the same checked gather/scatter
+  // kernels as structured loops. Only selector values vary; result extents
+  // must be proven here before allocating any result registers.
+  Range dynamic_index(const Range& base,
+                      const std::vector<mir::Expr>& selectors,
+                      const Range* rhs = nullptr) {
+    std::vector<int64_t> dims;
+    ViewKind leaf = base.kind;
+    if (base.kind == ViewKind::Array) {
+      dims = base.dims.empty() ? std::vector<int64_t>{base.len} : base.dims;
+      leaf = base.leaf;
+    } else if (base.kind == ViewKind::Matrix) {
+      dims = {base.rows, base.cols};
+    } else if (base.kind == ViewKind::Vector ||
+               base.kind == ViewKind::RowVector) {
+      dims = {base.len};
+    } else {
+      bail("runtime indexed access needs a container view");
+    }
+    if (selectors.size() > dims.size()) bail("too many runtime indices");
+    const size_t leaf_rank =
+        leaf == ViewKind::Matrix                                    ? 2
+        : (leaf == ViewKind::Vector || leaf == ViewKind::RowVector) ? 1
+                                                                    : 0;
+    if (dims.size() < leaf_rank) bail("incomplete runtime index shape");
+    const size_t outer = dims.size() - leaf_rank;
+    std::vector<int64_t> strides(dims.size(), 1);
+    int64_t stride = 1;
+    if (leaf == ViewKind::Matrix) {
+      strides[outer] = 1;
+      strides[outer + 1] = dims[outer];
+      stride = dims[outer] * dims[outer + 1];
+    } else if (leaf_rank) {
+      stride = dims[outer];
+    }
+    for (size_t d = outer; d-- > 0;) {
+      strides[d] = stride;
+      stride *= dims[d];
+    }
+    auto spec = std::make_shared<DynamicIndexSpec>();
+    spec->matrix_leaf = leaf == ViewKind::Matrix;
+    std::vector<Range> parts;
+    std::vector<int64_t> output_dims;
+    std::vector<bool> keep;
+    int packed_size = 0, selected_size = 1;
+    size_t remaining_outer = 0;
+    for (size_t d = 0; d < dims.size(); ++d) {
+      DynamicIndexSpec::Axis axis;
+      axis.extent = dims[d];
+      axis.stride = strides[d];
+      axis.input_offset = packed_size;
+      const auto* index = d < selectors.size() ? &selectors[d] : nullptr;
+      bool drop = false;
+      Range values;
+      if (!index || index->name == "IndexAll") {
+        axis.kind = DynamicIndexSpec::Axis::All;
+        axis.count = dims[d];
+      } else if (index->name == "IndexSingle" && index->args.size() == 1) {
+        axis.kind = DynamicIndexSpec::Axis::Single;
+        axis.count = 1;
+        values = expr(index->args[0]);
+        if (!is_scalar(values)) bail("runtime index must be scalar");
+        drop = true;
+      } else if (index->name == "IndexMulti" && index->args.size() == 1) {
+        axis.kind = DynamicIndexSpec::Axis::Multi;
+        values = expr(index->args[0]);
+        if (values.kind != ViewKind::Array ||
+            (!values.dims.empty() && values.dims.size() != 1))
+          bail("runtime gather indices must be a one-dimensional array");
+        axis.count = values.len;
+      } else {
+        // A range may coexist with runtime selectors on other axes, but its
+        // length must remain static. Variable-length ranges still refuse.
+        const auto positions =
+            matrix_positions(*index, dims[d], "runtime selection");
+        axis.kind = DynamicIndexSpec::Axis::Range;
+        axis.count = positions.size();
+        values =
+            Range{konst(positions.empty() ? 1.0 : positions.front() + 1.0), 1};
+      }
+      if (axis.kind != DynamicIndexSpec::Axis::All) {
+        if (values.len > kMaxRegs - packed_size)
+          bail("runtime selectors are too large");
+        parts.push_back(values);
+        packed_size += values.len;
+      }
+      if (axis.count < 0 || axis.count > kMaxRegs ||
+          (axis.count && selected_size > kMaxRegs / axis.count))
+        bail("runtime selection is too large");
+      selected_size *= static_cast<int>(axis.count);
+      keep.push_back(!drop);
+      if (!drop) {
+        output_dims.push_back(axis.count);
+        if (d < outer) ++remaining_outer;
+      }
+      spec->axes.push_back(axis);
+    }
+    spec->selected_size = selected_size;
+    Range selected{0, selected_size};
+    ViewKind result_leaf = leaf;
+    if (leaf == ViewKind::Matrix)
+      result_leaf =
+          keep[outer]
+              ? (keep[outer + 1] ? ViewKind::Matrix : ViewKind::Vector)
+              : (keep[outer + 1] ? ViewKind::RowVector : ViewKind::Flat);
+    else if (leaf_rank && !keep[outer])
+      result_leaf = ViewKind::Flat;
+    if (remaining_outer) {
+      selected.kind = ViewKind::Array;
+      selected.leaf = result_leaf;
+      selected.dims = output_dims;
+    } else {
+      selected.kind = result_leaf;
+      if (result_leaf == ViewKind::Matrix) {
+        selected.rows = output_dims.at(0);
+        selected.cols = output_dims.at(1);
+      }
+    }
+    if (rhs && !same_view(selected, *rhs))
+      bail("runtime indexed assignment logical view mismatch");
+    Range packed{packed_size ? alloc(packed_size) : konst(0.0),
+                 packed_size ? packed_size : 1};
+    int at = 0;
+    for (const Range& part : parts)
+      for (int k = 0; k < part.len; ++k)
+        emit(Program::MOV, packed.reg + at++, part.reg + k);
+    if (rhs)
+      return kernel_call(OP_SET_INDEX_DYNAMIC, {base, packed, *rhs}, base, 0,
+                         0x5, {}, spec, "runtime indexed assignment");
+    return kernel_call(OP_INDEX_DYNAMIC, {base, packed}, selected, 0, 0x1, {},
+                       spec, "runtime indexed read");
+  }
+
   Range kernel_call(uint16_t opcode, const std::vector<Range>& args, Range out,
                     uint8_t variant = 0, uint8_t input_adjoint_mask = 0x3f,
                     std::vector<int> idata = {},
@@ -2080,7 +2401,9 @@ struct ProgramCompiler {
   // graph's OP_RNG kernel speaks.
   static bool rng_call_name(const std::string& name) {
     return scalar_rng_family(name) != nullptr || name == "categorical_rng" ||
-           name == "multi_normal_rng" || name == "dirichlet_rng";
+           name == "categorical_logit_rng" || name == "poisson_binomial_rng" ||
+           name == "multi_normal_cholesky_rng" || name == "multi_normal_rng" ||
+           name == "dirichlet_rng";
   }
 
   // A draw inside a runtime-control region, spelled as one Program::CALL on
@@ -2106,7 +2429,9 @@ struct ProgramCompiler {
       // and dynamic indexing uses the existing checked register operations.
       const auto leaf = scalar_rng_is_int(*family) ? mir::UnsizedLeaf::Int
                                                    : mir::UnsizedLeaf::Real;
-      if (e.unsized.depth != 0 || e.unsized.leaf != leaf)
+      const bool promoted_int = scalar_rng_is_int(*family) && e.promoted &&
+                                e.unsized.leaf == mir::UnsizedLeaf::Real;
+      if (e.unsized.depth != 0 || (e.unsized.leaf != leaf && !promoted_int))
         bail(e.name + ": result type does not match scalar RNG family");
       if (args.size() != scalar_rng_arity(*family))
         bail(e.name + ": wrong number of arguments");
@@ -2118,8 +2443,18 @@ struct ProgramCompiler {
         if (!is_scalar(a))
           bail(e.name + ": container arguments stay on WaInterp");
       variant = static_cast<uint8_t>(*family);
-    } else if (e.name == "categorical_rng") {
-      bail("categorical_rng: an integer draw stays on WaInterp");
+    } else if (e.name == "categorical_rng" ||
+               e.name == "categorical_logit_rng" ||
+               e.name == "poisson_binomial_rng") {
+      const bool promoted_int =
+          e.promoted && e.unsized.leaf == mir::UnsizedLeaf::Real;
+      if (e.unsized.depth != 0 ||
+          (e.unsized.leaf != mir::UnsizedLeaf::Int && !promoted_int) ||
+          args.size() != 1 || args[0].kind != ViewKind::Vector)
+        bail(e.name + ": expected a vector argument and scalar integer result");
+      variant = e.name == "categorical_logit_rng"  ? kCategoricalLogitRngVariant
+                : e.name == "poisson_binomial_rng" ? kPoissonBinomialRngVariant
+                                                   : kCategoricalRngVariant;
     } else if (e.name == "dirichlet_rng") {
       if (args.size() != 1 || args[0].kind != ViewKind::Vector ||
           args[0].len <= 0)
@@ -2135,7 +2470,9 @@ struct ProgramCompiler {
             "matrix");
       if (args[1].rows != args[0].len || args[1].cols != args[0].len)
         bail("multi_normal_rng: covariance shape must match the location");
-      variant = kMultiNormalRngVariant;
+      variant = e.name == "multi_normal_cholesky_rng"
+                    ? kMultiNormalCholeskyRngVariant
+                    : kMultiNormalRngVariant;
       out_len = args[0].len;
       out_kind = ViewKind::Vector;
       idata.push_back(out_len);
@@ -2176,6 +2513,25 @@ struct ProgramCompiler {
     }
     return kernel_call(spec.opcode, args, out, 0, activity, std::move(idata),
                        {}, e.name);
+  }
+
+  static Program::Code integer_instruction(Program::Code code) {
+    switch (code) {
+      case Program::ADD:
+        return Program::IADD;
+      case Program::SUB:
+        return Program::ISUB;
+      case Program::MUL:
+        return Program::IMUL;
+      case Program::DIV:
+        return Program::IDIV;
+      case Program::NEG:
+        return Program::INEG;
+      case Program::FABS:
+        return Program::IABS;
+      default:
+        return code;
+    }
   }
 
   static std::optional<Program::Code> native_builtin_code(uint16_t opcode) {
@@ -2233,7 +2589,8 @@ struct ProgramCompiler {
     const int n = (int)layout.lanes;
 
     Program::Code code = native_code;
-    if (spec.opcode == OP_DIV && e.type_ == "UInt") code = Program::IDIV;
+    if (spec.result == FunctionArgumentKind::Integer)
+      code = integer_instruction(code);
     // fmax/fmin ties and NaN adjoints depend on which operands are data
     // (adjoint.cpp, program_extremum), the same way pow's zero-base law
     // depends on the exponent's.
@@ -3313,6 +3670,7 @@ struct ProgramCompiler {
         }
       } else
         bail("function " + e.name);
+      if (e.type_ == "UInt") c = integer_instruction(c);
       const int law = c == Program::POW
                           ? mir::pow_zero_base_law(e.args[0], e.args[1],
                                                    !e.args[1].data_only)
@@ -3349,7 +3707,8 @@ struct ProgramCompiler {
         if (a.len == 0) return {konst(0.0), 1};
         const int r = alloc(1);
         emit(Program::MOV, r, a.reg);
-        for (int i = 1; i < a.len; ++i) emit(Program::ADD, r, r, a.reg + i);
+        const auto add = e.type_ == "UInt" ? Program::IADD : Program::ADD;
+        for (int i = 1; i < a.len; ++i) emit(add, r, r, a.reg + i);
         return {r, 1};
       }
       // Registered unary predicates, spelled on the comparison opcodes
@@ -3415,6 +3774,78 @@ struct ProgramCompiler {
   struct Returned {
     Range r;
   };
+  // Ends the current lexical path after emitting a runtime function exit.
+  // Branch/loop handlers still compile their other reachable paths.
+  struct PathExit {};
+  struct ReturnFrame {
+    const std::vector<mir::Stmt>* body = nullptr;
+    ReturnFrame* parent = nullptr;
+    size_t loop_base = 0;
+    bool has_result = false;
+    Range result;
+    std::vector<int> jumps;
+  };
+  ReturnFrame* return_frame = nullptr;
+  const mir::Stmt* checked_region = nullptr;
+
+  void require_runtime_integer_contract() {
+    if (!return_frame && !checked_region)
+      bail("runtime for/integer binding needs a checked function scope");
+    std::set<const mir::FunDef*> visited;
+    if (checked_region)
+      check_program_integer_contract({*checked_region}, funs, visited);
+    for (auto* frame = return_frame; frame; frame = frame->parent)
+      check_program_integer_contract(*frame->body, funs, visited);
+  }
+
+  void emit_function_return(Range value) {
+    if (!return_frame) bail("runtime return has no function scope");
+    auto& frame = *return_frame;
+    if (!frame.has_result) {
+      frame.result = value;
+      frame.result.reg = alloc(value.len);
+      frame.has_result = true;
+    } else if (!same_view(frame.result, value)) {
+      bail("function returns have different logical views");
+    }
+    for (int k = 0; k < value.len; ++k)
+      emit(Program::MOV, frame.result.reg + k, value.reg + k);
+    frame.jumps.push_back(emit(Program::JMP, 0));
+  }
+
+  Range function_body(const std::vector<mir::Stmt>& body) {
+    ReturnFrame frame;
+    frame.body = &body;
+    frame.parent = return_frame;
+    frame.loop_base = loops.size();
+    struct Scope {
+      ReturnFrame*& current;
+      ReturnFrame* saved;
+      ~Scope() { current = saved; }
+    } scope{return_frame, return_frame};
+    return_frame = &frame;
+    try {
+      for (const auto& statement : body) stmt(statement);
+      bail("function can finish without returning a value");
+    } catch (Returned& returned) {
+      // A single unconditional return never needed a join or new storage.
+      return returned.r;
+    } catch (PathExit&) {
+      if (!frame.has_result) bail("function returned no value");
+      // Fall through at the final return instead of dispatching a no-op jump.
+      // PathExit propagates only through all-return paths; handlers with a
+      // fallthrough edge to code.size() consume it before reaching here.
+      if (!frame.jumps.empty() &&
+          frame.jumps.back() == (int)p.code.size() - 1) {
+        p.code.pop_back();
+        frame.jumps.pop_back();
+      }
+      for (int jump : frame.jumps)
+        p.code[(size_t)jump].dst = (int)p.code.size();
+      return frame.result;
+    }
+  }
+
   struct CompileBreak {};
   struct CompileContinue {};
 
@@ -3452,18 +3883,40 @@ struct ProgramCompiler {
   // compiled, and the jumps are the only instructions that name a code
   // position (CONST/CONSTR's `a` is a pool index, CALL's is a call index).
   void finish() {
-    if (late_bound.empty() && hoisted_int_initializers.empty()) return;
-    std::vector<Program::Instr> prologue = std::move(hoisted_int_initializers);
+    if (late_bound.empty() && hoisted_int_initializers.empty() &&
+        unused_int_resets.empty())
+      return;
+    std::vector<Program::Instr> code = std::move(hoisted_int_initializers);
     for (const auto& [reg, len] : late_bound) {
       const std::vector<double> nan((size_t)len,
                                     std::numeric_limits<double>::quiet_NaN());
-      prologue.push_back(const_instr(reg, nan.data(), len));
+      code.push_back(const_instr(reg, nan.data(), len));
     }
-    const int n = (int)prologue.size();
-    for (auto& instr : p.code)
+    // Preserve the existing cheap prepend for programs with no markers to
+    // remove. They need only a constant jump offset, not a relocation map.
+    if (unused_int_resets.empty()) {
+      const int n = static_cast<int>(code.size());
+      for (auto& instr : p.code)
+        if (instr.code == Program::JZ || instr.code == Program::JMP)
+          instr.dst += n;
+      p.code.insert(p.code.begin(), code.begin(), code.end());
+      int_reset_at.clear();
+      late_bound.clear();
+      return;
+    }
+    std::vector<int> pc_map(p.code.size() + 1);
+    for (size_t pc = 0; pc < p.code.size(); ++pc) {
+      pc_map[pc] = static_cast<int>(code.size());
+      if (!unused_int_resets.count(static_cast<int>(pc)))
+        code.push_back(p.code[pc]);
+    }
+    pc_map.back() = static_cast<int>(code.size());
+    for (auto& instr : code)
       if (instr.code == Program::JZ || instr.code == Program::JMP)
-        instr.dst += n;
-    p.code.insert(p.code.begin(), prologue.begin(), prologue.end());
+        instr.dst = pc_map.at(static_cast<size_t>(instr.dst));
+    p.code = std::move(code);
+    unused_int_resets.clear();
+    int_reset_at.clear();
     late_bound.clear();
   }
 
@@ -3482,6 +3935,7 @@ struct ProgramCompiler {
         known_int_array_dims.erase(s.decl_id);
         int_array_names.erase(s.decl_id);
         int_decl_at.erase(s.decl_id);
+        int_reset_at.erase(s.decl_id);
         if (s.decl_type.base.empty() &&
             s.decl_type.unsized.leaf != mir::UnsizedLeaf::Unknown) {
           const mir::UnsizedView view = s.decl_type.unsized;
@@ -3500,6 +3954,8 @@ struct ProgramCompiler {
             int_decl_at[s.decl_id] = {branch_depth, loops.size()};
           }
           if (!s.has_init) {
+            if (runtime_for_depth)
+              bail("runtime for needs a sized container declaration");
             reals[s.decl_id] = Range{};
             deferred_shapes[s.decl_id] = view;
             return;
@@ -3529,10 +3985,22 @@ struct ProgramCompiler {
                s.decl_id);
         if (s.decl_type.base == "SInt") {
           int_decl_at[s.decl_id] = {branch_depth, loops.size()};
+          if (runtime_for_depth) {
+            const Range d =
+                declare(s.decl_id, 1, Range{},
+                        static_cast<double>(std::numeric_limits<int>::min()));
+            if (s.has_init) {
+              const Range v = expr(s.init);
+              if (!is_scalar(v)) bail("integer declaration is not scalar");
+              emit(Program::MOV, d.reg, v.reg);
+            }
+            return;
+          }
           if (s.has_init) {
             long folded;
             if (try_cint(s.init, &folded)) {
               ints[s.decl_id] = {folded};
+              mark_int_reset(s.decl_id);
               return;
             }
             // A declaration after or inside a structured loop may read
@@ -3550,6 +4018,7 @@ struct ProgramCompiler {
             return;
           }
           ints[s.decl_id] = {std::numeric_limits<int>::min()};
+          mark_int_reset(s.decl_id);
           return;
         }
         const bool int_array =
@@ -3635,20 +4104,24 @@ struct ProgramCompiler {
           long ignored;
           // A conditional write must preserve the old value on the untaken
           // path, so it cannot be folded into the single compile-time copy.
-          // Likewise, an unconditional assignment after a structured while
-          // may read loop-carried state, and a generated-quantities integer
-          // may receive an RNG draw before its first while. The
-          // lowering can export scalar-int live-outs, so reify both cases
-          // instead of refusing a representable integer recurrence.
-          if (!fold_is_certain(s.lhs) ||
-              ((structured_while_seen || in_write_array) &&
-               !try_cint(s.rhs, &ignored)))
+          // A runtime integer can also be assigned before its first loop
+          // (for example a bound selected by a comparison of real inputs).
+          // Reify any nonconstant scalar assignment; expr still decides
+          // whether its integer operations have a supported implementation.
+          const bool certain = fold_is_certain(s.lhs);
+          const bool constant = certain && try_cint(s.rhs, &ignored);
+          if (!certain || !constant) {
+            if (certain && !constant && !structured_while_seen &&
+                !in_write_array)
+              require_runtime_integer_contract();
             reify_written_int(s.lhs);
+          }
         }
         if (ints.count(s.lhs) && s.lhs_idx.empty()) {
           // This assignment is certain and its RHS stayed a compile-time
           // integer, so subsequent reads may use the folded value directly.
           ints[s.lhs] = {cint(s.rhs)};
+          mark_int_reset(s.lhs);
           return;
         }
         auto it = reals.find(s.lhs);
@@ -3679,6 +4152,9 @@ struct ProgramCompiler {
         if (it == reals.end()) bail("assignment to undeclared " + s.lhs);
         const Range dst = it->second;
         const Range v = expr(s.rhs);
+        // Once written here, the imported value can no longer be answered
+        // from the enclosing graph's preparation-time observation.
+        extern_bound.erase(s.lhs);
         if (s.lhs_idx.empty()) {
           std::vector<long> folded_ints;
           const bool have_folded_ints = int_array_names.count(s.lhs) &&
@@ -3753,6 +4229,26 @@ struct ProgramCompiler {
               known_int_array_dims.erase(s.lhs);
             }
           }
+          return;
+        }
+        if ((dst.kind == ViewKind::Array || dst.kind == ViewKind::Matrix ||
+             (s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexMulti")) &&
+            has_runtime_selector(s.lhs_idx)) {
+          const bool scalar_array =
+              dst.kind == ViewKind::Array && dst.leaf == ViewKind::Flat &&
+              (dst.dims.empty() || dst.dims.size() == 1) &&
+              s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexSingle";
+          if (scalar_array && is_scalar(v)) {
+            const Range index = expr(s.lhs_idx[0].args.at(0));
+            if (!is_scalar(index))
+              bail("runtime assignment index must be scalar");
+            emit(Program::DYN_SET, dst.reg, dst.reg, v.reg, index.reg, dst.len);
+          } else {
+            const Range updated = dynamic_index(dst, s.lhs_idx, &v);
+            emit(Program::MOVR, dst.reg, updated.reg, 0, 0, dst.len);
+          }
+          known_int_arrays.erase(s.lhs);
+          known_int_array_dims.erase(s.lhs);
           return;
         }
         if (dst.kind == ViewKind::Matrix && s.lhs_idx.size() == 2) {
@@ -3908,14 +4404,24 @@ struct ProgramCompiler {
         }
         return;
       }
-      case mir::Stmt::Return:
-        // A return under a runtime branch is a control-flow join this flat
-        // program has no way to express; the interpreter still handles it.
-        if (branch_depth)
-          bail("return inside a data-dependent branch" +
-               (inline_stack.empty() ? std::string()
-                                     : " in " + inline_stack.back()));
+      case mir::Stmt::Return: {
+        bool runtime_exit =
+            branch_depth || structured_while_depth > return_while_base;
+        // A pending break or continue can bypass an apparently top-level
+        // return in an unrolled loop. Finish and patch that loop before the
+        // function's exit, rather than unwinding compilation immediately.
+        if (return_frame)
+          for (size_t i = return_frame->loop_base; i < loops.size(); ++i)
+            runtime_exit = runtime_exit || !loops[i].breaks.empty() ||
+                           !loops[i].continues.empty();
+        if (return_frame && (runtime_exit || return_frame->has_result)) {
+          emit_function_return(s.has_init ? expr(s.rhs) : Range{0, 0});
+          throw PathExit{};
+        }
+        if (runtime_exit)
+          bail("return inside runtime control without a function scope");
         throw Returned{s.has_init ? expr(s.rhs) : Range{0, 0}};
+      }
       case mir::Stmt::Break:
         if (loops.empty()) bail("break outside a loop");
         if (branch_depth || loops.back().structured) {
@@ -3931,10 +4437,71 @@ struct ProgramCompiler {
         }
         throw CompileContinue{};
       case mir::Stmt::For: {
-        const long lo = cint(s.lower), hi = cint(s.upper);
+        long lo, hi;
+        std::set<std::string> written;
+        for (const auto& child : s.body) assigned_names(child, &written);
+        const bool invariant_upper = invariant_for_bound(s.upper, written);
+        if (!invariant_upper || !try_cint(s.lower, &lo) ||
+            !try_cint(s.upper, &hi)) {
+          // Every integer operation in the repeated body must have a typed
+          // implementation; double storage alone does not prove this.
+          require_runtime_integer_contract();
+          // Evaluate and snapshot the lower bound exactly once.
+          // In particular, the lower bound may be a variable assigned by the
+          // body, so it cannot remain an aliased Range.
+          const Range lower = expr(s.lower);
+          if (!is_scalar(lower)) bail("for lower bound is not scalar");
+          const int index = alloc(1);
+          emit(Program::MOV, index, lower.reg);
+          for (const auto& name : written) reify_loop_write(name);
+          ints.erase(s.loopvar);
+          reals[s.loopvar] = Range{index, 1};
+          const int one = konst(1);
+          const int condition = alloc(1);
+          const int head = (int)p.code.size();
+          const Range upper = expr(s.upper);
+          if (!is_scalar(upper)) bail("for upper bound is not scalar");
+          emit(Program::LE, condition, index, upper.reg);
+          const int empty = emit(Program::JZ, 0, condition);
+          const int body_head = (int)p.code.size();
+          loops.push_back({});
+          loops.back().structured = true;
+          structured_while_seen = true;
+          ++structured_while_depth;
+          ++runtime_for_depth;
+          try {
+            for (const auto& child : s.body) stmt(child);
+          } catch (PathExit&) {
+            // Other paths may still continue or break; patch them below.
+          }
+          --runtime_for_depth;
+          --structured_while_depth;
+          for (int jump : loops.back().continues)
+            p.code[(size_t)jump].dst = (int)p.code.size();
+          // The private double counter represents INT_MAX + 1 exactly; no
+          // out-of-range loop variable reaches a body with an int upper bound.
+          // Proven invariant bounds keep the cheaper counted-loop backedge.
+          int done = -1;
+          if (invariant_upper) {
+            emit(Program::LT, condition, index, upper.reg);
+            done = emit(Program::JZ, 0, condition);
+          }
+          emit(Program::ADD, index, index, one);
+          emit(Program::JMP, invariant_upper ? body_head : head);
+          const int end = (int)p.code.size();
+          p.code[(size_t)empty].dst = end;
+          if (done >= 0) p.code[(size_t)done].dst = end;
+          for (int jump : loops.back().breaks) p.code[(size_t)jump].dst = end;
+          loops.pop_back();
+          reals.erase(s.loopvar);
+          int_decl_at.erase(s.loopvar);
+          return;
+        }
         loops.push_back({});
         bool broken = false;
+        bool returned = false;
         for (long v = lo; v <= hi; ++v) {
+          bool path_returned = false;
           ints[s.loopvar] = {v};
           int_decl_at[s.loopvar] = {branch_depth, loops.size()};
           try {
@@ -3942,6 +4509,15 @@ struct ProgramCompiler {
           } catch (CompileContinue&) {
           } catch (CompileBreak&) {
             broken = true;
+          } catch (PathExit&) {
+            path_returned = true;
+          }
+          // A continue can reach another unrolled trip; a break reaches the
+          // statements after the loop. Only an all-return iteration ends
+          // the enclosing lexical path.
+          if (path_returned && loops.back().continues.empty()) {
+            returned = loops.back().breaks.empty();
+            break;
           }
           for (int jump : loops.back().continues)
             p.code[(size_t)jump].dst = (int)p.code.size();
@@ -3953,6 +4529,7 @@ struct ProgramCompiler {
         for (int jump : loops.back().breaks)
           p.code[(size_t)jump].dst = (int)p.code.size();
         loops.pop_back();
+        if (returned) throw PathExit{};
         return;
       }
       case mir::Stmt::While: {
@@ -3962,7 +4539,7 @@ struct ProgramCompiler {
         // actual trip count, with no arbitrary lowering-time cap.
         std::set<std::string> written;
         for (const auto& child : s.body) assigned_names(child, &written);
-        for (const std::string& name : written) reify_written_int(name);
+        for (const std::string& name : written) reify_loop_write(name);
 
         const int head = (int)p.code.size();
         const Range cv = expr(s.cond);
@@ -3972,10 +4549,15 @@ struct ProgramCompiler {
         loops.back().structured = true;
         structured_while_seen = true;
         ++structured_while_depth;
-        for (const auto& k : s.body) stmt(k);
+        bool body_returned = false;
+        try {
+          for (const auto& k : s.body) stmt(k);
+        } catch (PathExit&) {
+          body_returned = true;
+        }
         --structured_while_depth;
         for (int jump : loops.back().continues) p.code[(size_t)jump].dst = head;
-        emit(Program::JMP, head);
+        if (!body_returned) emit(Program::JMP, head);
         p.code[(size_t)exit].dst = (int)p.code.size();
         for (int jump : loops.back().breaks)
           p.code[(size_t)jump].dst = (int)p.code.size();
@@ -3989,50 +4571,30 @@ struct ProgramCompiler {
           if (c == 0 && s.body.size() > 1) stmt(s.body[1]);
           return;
         }
-        if (s.body.size() == 2) {
-          mir::Stmt then_effects = s.body[0];
-          mir::Stmt else_effects = s.body[1];
-          mir::Expr then_value, else_value;
-          if (peel_terminal_return(&then_effects, &then_value) &&
-              peel_terminal_return(&else_effects, &else_value)) {
-            const Range cv = expr(s.cond);
-            if (!is_scalar(cv)) bail("branch on a container");
-            ++branch_depth;
-            const int jz = emit(Program::JZ, 0, cv.reg);
-            stmt(then_effects);
-            const Range tv = expr(then_value);
-            const int dst = alloc(tv.len);
-            for (int k = 0; k < tv.len; ++k)
-              emit(Program::MOV, dst + k, tv.reg + k);
-            const int jmp = emit(Program::JMP, 0);
-            p.code[(size_t)jz].dst = (int)p.code.size();
-            stmt(else_effects);
-            const Range ev = expr(else_value);
-            if (!same_view(tv, ev))
-              bail("conditional returns have different logical views");
-            for (int k = 0; k < ev.len; ++k)
-              emit(Program::MOV, dst + k, ev.reg + k);
-            p.code[(size_t)jmp].dst = (int)p.code.size();
-            --branch_depth;
-            Range out = tv;
-            out.reg = dst;
-            throw Returned{out};
-          }
-        }
         const Range cv = expr(s.cond);
         if (!is_scalar(cv)) bail("branch on a container");
         ++branch_depth;
         const int jz = emit(Program::JZ, 0, cv.reg);
-        if (!s.body.empty()) stmt(s.body[0]);
+        bool then_exits = false, else_exits = false;
+        try {
+          if (!s.body.empty()) stmt(s.body[0]);
+        } catch (PathExit&) {
+          then_exits = true;
+        }
         if (s.body.size() > 1) {
-          const int jmp = emit(Program::JMP, 0);
+          const int jmp = then_exits ? -1 : emit(Program::JMP, 0);
           p.code[(size_t)jz].dst = (int)p.code.size();
-          stmt(s.body[1]);
-          p.code[(size_t)jmp].dst = (int)p.code.size();
+          try {
+            stmt(s.body[1]);
+          } catch (PathExit&) {
+            else_exits = true;
+          }
+          if (jmp >= 0) p.code[(size_t)jmp].dst = (int)p.code.size();
         } else {
           p.code[(size_t)jz].dst = (int)p.code.size();
         }
         --branch_depth;
+        if (then_exits && else_exits) throw PathExit{};
         return;
       }
       case mir::Stmt::Block:
@@ -4094,8 +4656,12 @@ struct ProgramCompiler {
     auto saved_int_array_names = int_array_names;
     auto saved_deferred_shapes = deferred_shapes;
     auto saved_int_decl_at = int_decl_at;
+    auto saved_int_reset_at = int_reset_at;
     auto saved_extern_bound = extern_bound;
     const int saved_branch_depth = branch_depth;
+    const int saved_return_while_base = return_while_base;
+    const size_t saved_loop_count = loops.size();
+    return_while_base = structured_while_depth;
     reals.clear();
     ints.clear();
     known_reals.clear();
@@ -4104,6 +4670,7 @@ struct ProgramCompiler {
     int_array_names.clear();
     deferred_shapes.clear();
     int_decl_at.clear();
+    int_reset_at.clear();
     extern_bound.clear();
     branch_depth = 0;
     inline_stack.push_back(f.name);
@@ -4112,7 +4679,14 @@ struct ProgramCompiler {
     for (size_t k = 0; k < f.arg_names.size(); ++k) {
       if (args[k].is_const_int) {
         if (args[k].int_dims.empty()) {
-          ints[f.arg_names[k]] = args[k].ints;
+          if (runtime_for_depth && assigned.count(f.arg_names[k]) &&
+              args[k].ints.size() == 1) {
+            const int reg = konst(static_cast<double>(args[k].ints[0]));
+            reals[f.arg_names[k]] = Range{reg, 1};
+          } else {
+            ints[f.arg_names[k]] = args[k].ints;
+            if (args[k].ints.size() == 1) mark_int_reset(f.arg_names[k]);
+          }
         } else {
           known_int_arrays[f.arg_names[k]] = args[k].ints;
           known_int_array_dims[f.arg_names[k]] = args[k].int_dims;
@@ -4128,10 +4702,7 @@ struct ProgramCompiler {
     }
     Range out{0, 0};
     try {
-      for (const auto& s : f.body) stmt(s);
-      bail("function " + f.name + " returned no value");
-    } catch (Returned& r) {
-      out = r.r;
+      out = function_body(f.body);
     } catch (...) {
       inline_stack.pop_back();
       reals = std::move(saved_reals);
@@ -4142,8 +4713,11 @@ struct ProgramCompiler {
       int_array_names = std::move(saved_int_array_names);
       deferred_shapes = std::move(saved_deferred_shapes);
       int_decl_at = std::move(saved_int_decl_at);
+      int_reset_at = std::move(saved_int_reset_at);
       extern_bound = std::move(saved_extern_bound);
       branch_depth = saved_branch_depth;
+      return_while_base = saved_return_while_base;
+      loops.resize(saved_loop_count);
       --inline_depth;
       throw;
     }
@@ -4156,8 +4730,11 @@ struct ProgramCompiler {
     int_array_names = std::move(saved_int_array_names);
     deferred_shapes = std::move(saved_deferred_shapes);
     int_decl_at = std::move(saved_int_decl_at);
+    int_reset_at = std::move(saved_int_reset_at);
     extern_bound = std::move(saved_extern_bound);
     branch_depth = saved_branch_depth;
+    return_while_base = saved_return_while_base;
+    loops.resize(saved_loop_count);
     --inline_depth;
     return out;
   }

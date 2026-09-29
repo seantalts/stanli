@@ -89,6 +89,11 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(DIV, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)     \
   X(IMOD, kProgramReadB | kProgramNoAdjoint)                                  \
   X(IDIV, kProgramReadB | kProgramNoAdjoint)                                  \
+  X(IADD, kProgramReadB)                                                      \
+  X(ISUB, kProgramReadB)                                                      \
+  X(IMUL, kProgramReadB)                                                      \
+  X(INEG, 0)                                                                  \
+  X(IABS, 0)                                                                  \
   /* len holds the PowZeroBaseLaw; a RANGE's law field carries it instead. */ \
   X(POW, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)     \
   X(FMAX, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
@@ -552,6 +557,29 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
       case Program::DIV:
         d() = ra() / rb();
         break;
+      // Registers can store every Stan int exactly, but the operation must
+      // use Stan's C++ integer type and have no derivative. As in stanc's
+      // generated C++, signed overflow has no portable numerical contract.
+      case Program::IADD:
+        d() = T(static_cast<int>(stan::math::value_of(ra())) +
+                static_cast<int>(stan::math::value_of(rb())));
+        break;
+      case Program::ISUB:
+        d() = T(static_cast<int>(stan::math::value_of(ra())) -
+                static_cast<int>(stan::math::value_of(rb())));
+        break;
+      case Program::IMUL:
+        d() = T(static_cast<int>(stan::math::value_of(ra())) *
+                static_cast<int>(stan::math::value_of(rb())));
+        break;
+      case Program::INEG:
+        d() = T(-static_cast<int>(stan::math::value_of(ra())));
+        break;
+      case Program::IABS: {
+        const int value = static_cast<int>(stan::math::value_of(ra()));
+        d() = T(value < 0 ? -value : value);
+        break;
+      }
       case Program::IMOD:
         d() = T(
             stan::math::modulus(static_cast<int>(stan::math::value_of(ra())),

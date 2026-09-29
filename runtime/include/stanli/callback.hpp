@@ -5,23 +5,135 @@
 
 #include <stanli/mir.hpp>
 #include <stanli/ode_prog.hpp>
+#include <stanli/container_shape.hpp>
 
 #include <map>
 #include <limits>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace stanli {
 
+inline std::vector<int64_t> callback_matrix_dimensions(const RhsArg& arg) {
+  if (arg.is_int || arg.rows < 0 || arg.cols < 0)
+    throw std::invalid_argument(
+        "matrix callback argument has no logical dimensions");
+  const std::vector<int64_t> dims{arg.rows, arg.cols};
+  if (arg.rows > std::numeric_limits<int>::max() ||
+      arg.cols > std::numeric_limits<int>::max() ||
+      checked_container_size(dims, "matrix callback argument") != arg.len)
+    throw std::invalid_argument(
+        "matrix callback argument dimensions do not match its values");
+  return dims;
+}
+
+template <typename T>
+class MirInterp;
+
+inline std::vector<int64_t> callback_array_dimensions(
+    const RhsArg& arg, const mir::UnsizedView& view) {
+  const size_t leaf_rank = view.leaf == mir::UnsizedLeaf::Matrix ? 2
+                           : (view.leaf == mir::UnsizedLeaf::Vector ||
+                              view.leaf == mir::UnsizedLeaf::RowVector)
+                               ? 1
+                               : 0;
+  const int64_t count = arg.is_int && !arg.is_param ? arg.ints.size() : arg.len;
+  auto dims = arg.dims;
+  if (dims.empty() && view.depth == 1 && leaf_rank == 0) dims = {count};
+  if (view.depth == 0 || dims.size() != view.depth + leaf_rank ||
+      checked_container_size(dims, "callback array") != count)
+    throw std::invalid_argument(
+        "callback array dimensions do not match its values");
+  return dims;
+}
+
+// Runtime integer lanes share the inactive theta input in value-only solves.
+// Reconstruct serialized integer arrays only when a callback needs fallback.
+template <typename T>
+std::vector<int> callback_integer_values(const RhsArg& arg, const T* theta,
+                                         size_t* at) {
+  if (!arg.is_param) return arg.ints;
+  std::vector<int> values;
+  values.reserve(arg.len);
+  for (int k = 0; k < arg.len; ++k)
+    values.push_back(static_cast<int>(stan::math::value_of(theta[(*at)++])));
+  if (arg.dims.size() > 1)
+    return serialized_container_order(values, arg.dims, arg.dims.size());
+  return values;
+}
+
+// Preserve complete geometry and convert graph buffers to the interpreter's
+// serialized order at the call boundary. Simple positional calls stay cheap.
+template <typename T>
+std::vector<T> interpret_retained_callback(
+    MirInterp<T>& interpreter, const mir::FunDef& function,
+    const std::vector<std::vector<T>>& reals,
+    const std::vector<std::vector<int>>& ints,
+    const std::vector<RhsArg>& bindings) {
+  bool matrix = false;
+  for (const auto& view : function.arg_views)
+    matrix |= view.leaf == mir::UnsizedLeaf::Matrix || view.depth > 1 ||
+              (view.depth && (view.leaf == mir::UnsizedLeaf::Vector ||
+                              view.leaf == mir::UnsizedLeaf::RowVector));
+  if (!matrix) return interpreter.call(function, reals, ints);
+  if (function.arg_views.size() != function.arg_names.size() ||
+      bindings.size() > function.arg_names.size())
+    throw std::invalid_argument("callback argument metadata is incomplete");
+  const size_t prefix = function.arg_names.size() - bindings.size();
+  std::vector<typename MirInterp<T>::Value> values;
+  values.reserve(function.arg_names.size());
+  size_t ri = 0, ii = 0;
+  for (size_t k = 0; k < function.arg_names.size(); ++k) {
+    const auto& view = function.arg_views[k];
+    typename MirInterp<T>::Value value;
+    value.is_int = view.leaf == mir::UnsizedLeaf::Int;
+    if (value.is_int) {
+      if (ii >= ints.size())
+        throw std::invalid_argument("missing callback integer argument");
+      value.i = ints[ii++];
+      value.r.assign(value.i.begin(), value.i.end());
+    } else {
+      if (ri >= reals.size())
+        throw std::invalid_argument("missing callback real argument");
+      value.r = reals[ri++];
+    }
+    if (view.depth && k >= prefix) {
+      value.dims = callback_array_dimensions(bindings[k - prefix], view);
+      if (value.r.size() != static_cast<size_t>(checked_container_size(
+                                value.dims, "callback array")))
+        throw std::invalid_argument("callback array value count mismatch");
+      if (!value.is_int)
+        value.r = serialized_container_order(value.r, value.dims, view.depth);
+    } else if (view.depth == 0 && view.leaf == mir::UnsizedLeaf::Matrix) {
+      if (k < prefix)
+        throw std::invalid_argument(
+            "matrix callback state has no logical dimensions");
+      value.dims = callback_matrix_dimensions(bindings[k - prefix]);
+      if (value.r.size() != static_cast<size_t>(bindings[k - prefix].len))
+        throw std::invalid_argument("matrix callback value count mismatch");
+    } else if (view.depth != 0 || (view.leaf != mir::UnsizedLeaf::Real &&
+                                   view.leaf != mir::UnsizedLeaf::Int)) {
+      value.dims = {static_cast<int64_t>(value.r.size())};
+    }
+    values.push_back(std::move(value));
+  }
+  if (ri != reals.size() || ii != ints.size())
+    throw std::invalid_argument("unexpected callback arguments");
+  return interpreter.call(function, values).r;
+}
+
 struct RetainedCallback {
   std::map<std::string, mir::FunDef> owned;
   std::map<std::string, const mir::FunDef*> funs_map;
   std::string callback_name;
 
-  // Real callback arguments are packed in source order: active values into
-  // the kernel's parameter input and data values into x_r. Integer values
-  // remain in each RhsArg. The register compiler uses the same bindings to
+  // Real callback arguments are packed in source order: runtime values into
+  // the kernel's theta input and preparation constants into x_r. Scalar AD
+  // activity is selected separately by the kernel variant. Constant integers
+  // remain in each RhsArg; value-only solves may pass runtime integers in the
+  // same inactive theta buffer. The register compiler uses these bindings to
   // reconstruct the callback's original positional signature.
   std::vector<RhsArg> args;
   std::vector<double> x_r;
@@ -51,26 +163,35 @@ struct RetainedCallback {
 // RhsArg/x_r ordering and validation.
 template <typename Active, typename GetActive, typename GetReals,
           typename GetInts, typename Fail>
-std::vector<Active> pack_callback_arguments(RetainedCallback& retained,
-                                            const std::vector<mir::Expr>& exprs,
-                                            size_t begin, size_t end,
-                                            GetActive&& get_active,
-                                            GetReals&& get_reals,
-                                            GetInts&& get_ints, Fail&& fail) {
+std::vector<Active> pack_callback_arguments(
+    RetainedCallback& retained, const std::vector<mir::Expr>& exprs,
+    size_t begin, size_t end, GetActive&& get_active, GetReals&& get_reals,
+    GetInts&& get_ints, Fail&& fail, bool runtime_values = false) {
   std::vector<Active> active;
   for (size_t i = begin; i < end; ++i) {
     const mir::Expr& arg = exprs[i];
     RhsArg binding;
     if (arg.unsized.leaf == mir::UnsizedLeaf::Int) {
-      if (!arg.data_only) {
+      if (!arg.data_only && !runtime_values) {
         fail("integer callback argument " + std::to_string(i - begin + 1) +
              " is not data");
         continue;
       }
       binding.is_int = true;
-      binding.ints = get_ints(i);
-    } else if (arg.data_only) {
-      std::vector<double> values = get_reals(i);
+      auto values = get_ints(i, binding);
+      if (values) {
+        binding.ints = std::move(*values);
+      } else if (runtime_values) {
+        auto value = get_active(i, binding);
+        binding.is_param = true;
+        binding.len = value.second;
+        active.push_back(std::move(value.first));
+      } else {
+        fail("integer callback argument must be known at compile time");
+        continue;
+      }
+    } else if (arg.data_only && !runtime_values) {
+      std::vector<double> values = get_reals(i, binding);
       if (values.size() >
           static_cast<size_t>(std::numeric_limits<int>::max())) {
         fail("callback argument " + std::to_string(i - begin + 1) +
@@ -80,7 +201,7 @@ std::vector<Active> pack_callback_arguments(RetainedCallback& retained,
       binding.len = static_cast<int>(values.size());
       retained.x_r.insert(retained.x_r.end(), values.begin(), values.end());
     } else {
-      auto value = get_active(i);
+      auto value = get_active(i, binding);
       binding.is_param = true;
       binding.len = value.second;
       active.push_back(std::move(value.first));

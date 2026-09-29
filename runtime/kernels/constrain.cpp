@@ -490,13 +490,19 @@ int64_t structured_output_width(const KernelCtx& ctx) {
 // with scalar transcendentals so the forward values agree with the tape that
 // structured_bwd replays. Value-only evaluation retains the prim overload.
 Eigen::MatrixXd cholesky_corr_rev_values(
-    const Eigen::Map<const Eigen::VectorXd>& y, int K, double& lp) {
+    const Eigen::Map<const Eigen::VectorXd>& y, int K, double& lp,
+    double* retained, bool& eligible) {
   stan::math::check_size_match("cholesky_corr_constrain", "y.size()", y.size(),
                                "k_choose_2", (K * (K - 1)) / 2);
   Eigen::VectorXd z(y.size());
+  double* prefixes = retained + y.size();
+  double* roots = prefixes + y.size();
+  double* diagonal = roots + y.size();
   double jacobian = 0.0;
   for (Eigen::Index i = 0; i < y.size(); ++i) {
     z(i) = std::tanh(y(i));
+    retained[i] = z(i);
+    eligible = eligible && std::isfinite(z(i)) && z(i) * z(i) < 1.0;
     jacobian += stan::math::log1m(stan::math::square(z(i)));
   }
   lp += jacobian;
@@ -505,14 +511,22 @@ Eigen::MatrixXd cholesky_corr_rev_values(
   x(0, 0) = 1.0;
   int k = 0;
   for (int i = 1; i < K; ++i) {
+    prefixes[k] = 0.0;
+    roots[k] = 1.0;
     x(i, 0) = z(k++);
     double sum_sqs = stan::math::square(x(i, 0));
     for (int j = 1; j < i; ++j) {
       lp += 0.5 * stan::math::log1m(sum_sqs);
-      x(i, j) = z(k++) * std::sqrt(1.0 - sum_sqs);
+      prefixes[k] = sum_sqs;
+      roots[k] = std::sqrt(1.0 - sum_sqs);
+      eligible = eligible && std::isfinite(roots[k]) && roots[k] > 0.0;
+      x(i, j) = z(k) * roots[k];
+      ++k;
       sum_sqs += stan::math::square(x(i, j));
     }
     x(i, i) = std::sqrt(1.0 - sum_sqs);
+    diagonal[i] = x(i, i);
+    eligible = eligible && std::isfinite(diagonal[i]) && diagonal[i] > 0.0;
   }
   return x;
 }
@@ -522,6 +536,8 @@ void structured_fwd(KernelCtx& ctx) {
   const int64_t nb = ctx.idata[0], inner_raw = ctx.idata[1];
   const int64_t inner_con = structured_output_width<K>(ctx);
   double lp = 0.0;
+  if constexpr (K == StructuredKind::CholeskyCorr)
+    ctx.scratch[0] = values_only() ? 0.0 : 1.0;
   for (int64_t b = 0; b < nb; ++b) {
     if constexpr (kMatrixInput<K>) {
       const int64_t raw_rows =
@@ -538,7 +554,12 @@ void structured_fwd(KernelCtx& ctx) {
                                                 inner_raw);
       if constexpr (K == StructuredKind::CholeskyCorr) {
         if (!values_only()) {
-          const auto x = cholesky_corr_rev_values(y, ctx.idata[2], lp);
+          bool eligible = ctx.scratch[0] != 0.0;
+          double* retained =
+              ctx.scratch + 1 + b * (3 * inner_raw + ctx.idata[2]);
+          const auto x =
+              cholesky_corr_rev_values(y, ctx.idata[2], lp, retained, eligible);
+          ctx.scratch[0] = eligible ? 1.0 : 0.0;
           std::copy_n(x.data(), inner_con, ctx.out.data + b * inner_con);
           continue;
         }
@@ -600,6 +621,62 @@ void ordered_bwd_batch(KernelCtx& ctx, int64_t b, int64_t inner_raw,
   }
 }
 
+// Reverse the pinned scalar-var primitive sequence, retaining each prefix
+// instead of reconstructing it from rounded output squares. Exceptional
+// transform histories use the established tape below.
+void cholesky_corr_bwd_batch(KernelCtx& ctx, int64_t b, int64_t raw,
+                             int64_t inner_con) {
+  const int size = ctx.idata[2];
+  const double* z = ctx.scratch + 1 + b * (3 * raw + size);
+  const double* prefix = z + raw;
+  const double* root = prefix + raw;
+  const double* diagonal = root + raw;
+  const double* seed = ctx.out_adj_vec.data + b * inner_con;
+  const double* y = ctx.in[0].data + b * raw;
+  double* adjoint = ctx.in_adj[0].data + b * raw;
+  const double lp_adj = 0.0 + ctx.out2_adj;
+  const auto scatter = [&](int64_t k, double z_adj) {
+    // corr_constrain's log1m(square(z)) contribution runs after the
+    // Cholesky arithmetic, followed by scalar tanh's cosh-based derivative.
+    const double square_adj = 0.0 + lp_adj / (z[k] * z[k] - 1.0);
+    z_adj += square_adj * 2.0 * z[k];
+    const double c = std::cosh(y[k]);
+    adjoint[k] += 0.0 + z_adj / (c * c);
+  };
+  int64_t k = raw;
+  for (int i = size - 1; i > 0; --i) {
+    const double diagonal_adj = 0.0 + seed[i * size + i];
+    const double difference_adj = 0.0 + diagonal_adj / (2.0 * diagonal[i]);
+    double sum_adj = 0.0 - difference_adj;
+    for (int j = i - 1; j > 0; --j) {
+      --k;
+      const double x = z[k] * root[k];
+      // sum_next = sum_previous + square(x): both edges accumulate
+      // into fresh zero adjoints before the multiply/sqrt/log1m reverse.
+      const double square_adj = 0.0 + sum_adj;
+      double previous_adj = 0.0 + sum_adj;
+      double x_adj = 0.0 + seed[j * size + i];
+      x_adj += square_adj * 2.0 * x;
+      const double z_adj = 0.0 + x_adj * root[k];
+      const double root_adj = 0.0 + x_adj * z[k];
+      const double difference_adj = 0.0 + root_adj / (2.0 * root[k]);
+      previous_adj -= difference_adj;
+      const double log_adj = 0.0 + lp_adj * 0.5;
+      previous_adj += log_adj / (prefix[k] - 1.0);
+      sum_adj = previous_adj;
+      scatter(k, z_adj);
+    }
+    --k;
+    double z_adj = 0.0 + seed[i];
+    z_adj += sum_adj * 2.0 * z[k];
+    scatter(k, z_adj);
+  }
+}
+
+int64_t cholesky_corr_scratch(const Op& op, const Slot*) {
+  return 1 + int64_t(op.idata[0]) * (3 * int64_t(op.idata[1]) + op.idata[2]);
+}
+
 template <StructuredKind K>
 void structured_bwd(KernelCtx& ctx) {
   if (ctx.in_adj[0].data == nullptr) return;
@@ -615,6 +692,13 @@ void structured_bwd(KernelCtx& ctx) {
     for (int64_t b = 0; b < nb; ++b)
       ordered_bwd_batch<K>(ctx, b, inner_raw, inner_con);
     return;
+  }
+  if constexpr (K == StructuredKind::CholeskyCorr) {
+    if (ctx.scratch[0] != 0.0) {
+      for (int64_t b = 0; b < nb; ++b)
+        cholesky_corr_bwd_batch(ctx, b, inner_raw, inner_con);
+      return;
+    }
   }
   using stan::math::var;
   for (int64_t b = 0; b < nb; ++b) {
@@ -663,8 +747,11 @@ template <StructuredKind K>
 void register_structured(uint16_t opcode) {
   constexpr bool kNeedsScratch =
       K == StructuredKind::Ordered || K == StructuredKind::PositiveOrdered;
-  register_kernel(opcode, Kernel{structured_fwd<K>, structured_bwd<K>,
-                                 kNeedsScratch ? constrain_scratch : nullptr});
+  register_kernel(
+      opcode, Kernel{structured_fwd<K>, structured_bwd<K>,
+                     K == StructuredKind::CholeskyCorr ? cholesky_corr_scratch
+                     : kNeedsScratch                   ? constrain_scratch
+                                                       : nullptr});
 }
 
 // offset_multiplier_constrain(x, mu, sigma, lp):

@@ -1,0 +1,560 @@
+{
+  "baseline_commit": "304551f0",
+  "method": "six counterbalanced fresh-process pairs per function, 200ms warmup+250ms measurement, public C ABI through ctypes including callback overhead, no result-writer copy, Release Apple Clang 21 arm64",
+  "libraries": {
+    "baseline": {
+      "path": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/.cache/standalone-function-baseline/libstanli.dylib",
+      "sha256": "bbb9c87928f4ba51733b5c8ddf00ed40724b31cd3ff9e3507c43476f29dc0a27"
+    },
+    "candidate": {
+      "path": "/Users/xitrium/.codex/worktrees/487eb96a-ddd3-4992-bdbe-31abef60ead2/stanrt/build-release/libstanli.dylib",
+      "sha256": "ac3728240180e1feb4d9b0c1bd12b3ed7efba5bb8b656c38df9235e128e317b8"
+    }
+  },
+  "samples": [
+    {
+      "function": "affine",
+      "handle_us": 174.99104828551435,
+      "first_call_us": 503.375,
+      "warm_call_us": 9.688455937064022,
+      "churn_call_us": null,
+      "peak_rss": 16760832,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 0
+    },
+    {
+      "function": "affine",
+      "handle_us": 165.1683177014531,
+      "first_call_us": 179.417,
+      "warm_call_us": 1.595168895638192,
+      "churn_call_us": null,
+      "peak_rss": 16596992,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 0
+    },
+    {
+      "function": "affine",
+      "handle_us": 165.95938354346384,
+      "first_call_us": 161.208,
+      "warm_call_us": 1.6537200264594014,
+      "churn_call_us": null,
+      "peak_rss": 16580608,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 1
+    },
+    {
+      "function": "affine",
+      "handle_us": 175.64056601123596,
+      "first_call_us": 148.583,
+      "warm_call_us": 9.94184693999284,
+      "churn_call_us": null,
+      "peak_rss": 16547840,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 1
+    },
+    {
+      "function": "affine",
+      "handle_us": 167.21911229946525,
+      "first_call_us": 154.292,
+      "warm_call_us": 9.014735729996755,
+      "churn_call_us": null,
+      "peak_rss": 16662528,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 2
+    },
+    {
+      "function": "affine",
+      "handle_us": 162.39970259740258,
+      "first_call_us": 156.833,
+      "warm_call_us": 1.6504989965009573,
+      "churn_call_us": null,
+      "peak_rss": 16613376,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 2
+    },
+    {
+      "function": "affine",
+      "handle_us": 175.29619271198317,
+      "first_call_us": 163.166,
+      "warm_call_us": 1.6752068267710203,
+      "churn_call_us": null,
+      "peak_rss": 16646144,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 3
+    },
+    {
+      "function": "affine",
+      "handle_us": 161.21534493874918,
+      "first_call_us": 145.834,
+      "warm_call_us": 9.514558608616227,
+      "churn_call_us": null,
+      "peak_rss": 16580608,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 3
+    },
+    {
+      "function": "affine",
+      "handle_us": 169.02384594594594,
+      "first_call_us": 142.208,
+      "warm_call_us": 9.813848518155053,
+      "churn_call_us": null,
+      "peak_rss": 16728064,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 4
+    },
+    {
+      "function": "affine",
+      "handle_us": 178.8477288984263,
+      "first_call_us": 171.458,
+      "warm_call_us": 1.6911362172766014,
+      "churn_call_us": null,
+      "peak_rss": 16515072,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 4
+    },
+    {
+      "function": "affine",
+      "handle_us": 165.5799668874172,
+      "first_call_us": 181.709,
+      "warm_call_us": 1.5379213388452122,
+      "churn_call_us": null,
+      "peak_rss": 16629760,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 5
+    },
+    {
+      "function": "affine",
+      "handle_us": 163.35717374265184,
+      "first_call_us": 152.542,
+      "warm_call_us": 9.144561505541535,
+      "churn_call_us": null,
+      "peak_rss": 16596992,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 5
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 170.79607855191256,
+      "first_call_us": 203.334,
+      "warm_call_us": 12.680380148103064,
+      "churn_call_us": null,
+      "peak_rss": 16678912,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 0
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 179.81691876347952,
+      "first_call_us": 216.833,
+      "warm_call_us": 1.093999794328724,
+      "churn_call_us": null,
+      "peak_rss": 16564224,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 0
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 167.88889798657718,
+      "first_call_us": 210.708,
+      "warm_call_us": 1.0674474347150347,
+      "churn_call_us": null,
+      "peak_rss": 16564224,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 1
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 169.7688954514596,
+      "first_call_us": 158.709,
+      "warm_call_us": 12.694240631664467,
+      "churn_call_us": null,
+      "peak_rss": 16662528,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 1
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 177.58718039772725,
+      "first_call_us": 147.625,
+      "warm_call_us": 12.991503845354396,
+      "churn_call_us": null,
+      "peak_rss": 16580608,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 2
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 175.67070505617977,
+      "first_call_us": 205.625,
+      "warm_call_us": 1.1022336285838994,
+      "churn_call_us": null,
+      "peak_rss": 16613376,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 2
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 160.35595641025643,
+      "first_call_us": 192.583,
+      "warm_call_us": 1.0900501988244937,
+      "churn_call_us": null,
+      "peak_rss": 16580608,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 3
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 166.94634512683578,
+      "first_call_us": 158.917,
+      "warm_call_us": 12.243759880503452,
+      "churn_call_us": null,
+      "peak_rss": 16646144,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 3
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 179.7949611790079,
+      "first_call_us": 160.75,
+      "warm_call_us": 12.305715544398502,
+      "churn_call_us": null,
+      "peak_rss": 16580608,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 4
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 165.96430524220307,
+      "first_call_us": 220.375,
+      "warm_call_us": 1.0653093951609467,
+      "churn_call_us": null,
+      "peak_rss": 16515072,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 4
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 174.60303142458102,
+      "first_call_us": 200.792,
+      "warm_call_us": 1.14758502448944,
+      "churn_call_us": null,
+      "peak_rss": 16531456,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 5
+    },
+    {
+      "function": "branch_exit",
+      "handle_us": 168.7277887989204,
+      "first_call_us": 167.625,
+      "warm_call_us": 12.130397865114022,
+      "churn_call_us": null,
+      "peak_rss": 16629760,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 5
+    },
+    {
+      "function": "sized",
+      "handle_us": 161.3189787096774,
+      "first_call_us": 225.167,
+      "warm_call_us": 14.009797310170915,
+      "churn_call_us": 12.953665803108809,
+      "peak_rss": 16793600,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 0
+    },
+    {
+      "function": "sized",
+      "handle_us": 177.91385135135135,
+      "first_call_us": 175.125,
+      "warm_call_us": 1.3766009757279414,
+      "churn_call_us": 17.219657552173015,
+      "peak_rss": 16908288,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 0
+    },
+    {
+      "function": "sized",
+      "handle_us": 160.6790301862556,
+      "first_call_us": 182.209,
+      "warm_call_us": 1.3272541038437033,
+      "churn_call_us": 17.119570528622294,
+      "peak_rss": 16908288,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 1
+    },
+    {
+      "function": "sized",
+      "handle_us": 180.58315306859205,
+      "first_call_us": 192.792,
+      "warm_call_us": 14.363162587613466,
+      "churn_call_us": 12.517064737395483,
+      "peak_rss": 16875520,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 1
+    },
+    {
+      "function": "sized",
+      "handle_us": 166.76225,
+      "first_call_us": 169.5,
+      "warm_call_us": 13.472051621942018,
+      "churn_call_us": 12.628855981006263,
+      "peak_rss": 16744448,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 2
+    },
+    {
+      "function": "sized",
+      "handle_us": 172.41666689655173,
+      "first_call_us": 176.541,
+      "warm_call_us": 1.418402314827948,
+      "churn_call_us": 17.287151984511134,
+      "peak_rss": 17022976,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 2
+    },
+    {
+      "function": "sized",
+      "handle_us": 176.91946605374824,
+      "first_call_us": 176.208,
+      "warm_call_us": 1.3744765570021111,
+      "churn_call_us": 16.533400039679915,
+      "peak_rss": 16924672,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 3
+    },
+    {
+      "function": "sized",
+      "handle_us": 160.36746311738293,
+      "first_call_us": 169.875,
+      "warm_call_us": 14.098100998139063,
+      "churn_call_us": 13.187482434855998,
+      "peak_rss": 16908288,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 3
+    },
+    {
+      "function": "sized",
+      "handle_us": 177.53406671398153,
+      "first_call_us": 177.5,
+      "warm_call_us": 14.525047931675575,
+      "churn_call_us": 12.468028974665868,
+      "peak_rss": 16695296,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 4
+    },
+    {
+      "function": "sized",
+      "handle_us": 163.65619568062826,
+      "first_call_us": 177.292,
+      "warm_call_us": 1.3654387794114433,
+      "churn_call_us": 17.266434767594447,
+      "peak_rss": 16941056,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 4
+    },
+    {
+      "function": "sized",
+      "handle_us": 176.00381140042225,
+      "first_call_us": 187.542,
+      "warm_call_us": 1.2849913906093393,
+      "churn_call_us": 16.52495207878908,
+      "peak_rss": 16891904,
+      "library_bytes": 40092720,
+      "label": "candidate",
+      "repeat": 5
+    },
+    {
+      "function": "sized",
+      "handle_us": 164.1420059055118,
+      "first_call_us": 161.75,
+      "warm_call_us": 13.959149916247906,
+      "churn_call_us": 13.068133343787569,
+      "peak_rss": 16809984,
+      "library_bytes": 40051008,
+      "label": "baseline",
+      "repeat": 5
+    }
+  ],
+  "summary": {
+    "branch_exit": {
+      "baseline": {
+        "handle_us": {
+          "median": 170.2824870016861,
+          "mad": 2.4454200388080096
+        },
+        "first_call_us": {
+          "median": 159.83350000000002,
+          "mad": 4.457999999999998
+        },
+        "warm_call_us": {
+          "median": 12.493047846250782,
+          "mad": 0.22524037558050747
+        },
+        "peak_rss": {
+          "median": 16637952.0,
+          "mad": 32768.0
+        },
+        "library_bytes": {
+          "median": 40051008.0,
+          "mad": 0.0
+        }
+      },
+      "candidate": {
+        "handle_us": {
+          "median": 171.2459647055791,
+          "mad": 4.853199906988351
+        },
+        "first_call_us": {
+          "median": 208.16649999999998,
+          "mad": 8.020499999999998
+        },
+        "warm_call_us": {
+          "median": 1.092024996576609,
+          "mad": 0.01739309693443236
+        },
+        "peak_rss": {
+          "median": 16564224.0,
+          "mad": 24576.0
+        },
+        "library_bytes": {
+          "median": 40092720.0,
+          "mad": 0.0
+        }
+      }
+    },
+    "affine": {
+      "baseline": {
+        "handle_us": {
+          "median": 168.12147912270558,
+          "mad": 5.816937271431257
+        },
+        "first_call_us": {
+          "median": 150.5625,
+          "mad": 4.228999999999999
+        },
+        "warm_call_us": {
+          "median": 9.601507272840124,
+          "mad": 0.2763404562338234
+        },
+        "peak_rss": {
+          "median": 16629760.0,
+          "mad": 65536.0
+        },
+        "library_bytes": {
+          "median": 40051008.0,
+          "mad": 0.0
+        }
+      },
+      "candidate": {
+        "handle_us": {
+          "median": 165.76967521544054,
+          "mad": 1.9856650660127002
+        },
+        "first_call_us": {
+          "median": 167.312,
+          "mad": 8.291500000000013
+        },
+        "warm_call_us": {
+          "median": 1.6521095114801794,
+          "mad": 0.031062010543631446
+        },
+        "peak_rss": {
+          "median": 16605184.0,
+          "mad": 24576.0
+        },
+        "library_bytes": {
+          "median": 40092720.0,
+          "mad": 0.0
+        }
+      }
+    },
+    "sized": {
+      "baseline": {
+        "handle_us": {
+          "median": 165.45212795275592,
+          "mad": 4.608907039225755
+        },
+        "first_call_us": {
+          "median": 173.6875,
+          "mad": 8.0625
+        },
+        "warm_call_us": {
+          "median": 14.053949154154989,
+          "mad": 0.20200633568278015
+        },
+        "churn_call_us": {
+          "median": 12.791260892057537,
+          "mad": 0.2755343031960429
+        },
+        "peak_rss": {
+          "median": 16801792.0,
+          "mad": 65536.0
+        },
+        "library_bytes": {
+          "median": 40051008.0,
+          "mad": 0.0
+        }
+      },
+      "candidate": {
+        "handle_us": {
+          "median": 174.210239148487,
+          "mad": 3.2064195540627907
+        },
+        "first_call_us": {
+          "median": 176.91649999999998,
+          "mad": 1.2499999999999858
+        },
+        "warm_call_us": {
+          "median": 1.3699576682067773,
+          "mad": 0.024673435942119015
+        },
+        "churn_call_us": {
+          "median": 17.169614040397654,
+          "mad": 0.10717933565513604
+        },
+        "peak_rss": {
+          "median": 16916480.0,
+          "mad": 16384.0
+        },
+        "library_bytes": {
+          "median": 40092720.0,
+          "mad": 0.0
+        }
+      }
+    }
+  }
+}

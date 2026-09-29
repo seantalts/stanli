@@ -3,8 +3,10 @@
 // OP_RNG is deliberately one effectful opcode. Its variant names the family;
 // the ScalarRng range takes scalar-double arguments (one int-typed, cast in
 // scalar_rng_draw, for the two families whose first argument is a
-// population count), categorical takes one probability-vector slot,
-// multi-normal takes a mean vector plus a square covariance and produces a
+// population count); categorical, categorical-logit and Poisson-binomial
+// take one vector slot and return one integer.
+// Multi-normal takes a mean plus a square covariance or Cholesky factor and
+// produces a
 // vector, and dirichlet takes one concentration vector and produces a
 // same-length simplex draw. The stream is evaluation state, not graph/model
 // state, so callers can interleave independent chains through one compiled
@@ -20,26 +22,21 @@ namespace stanli {
 namespace {
 
 void rng_fwd(KernelCtx& ctx) {
-  if (ctx.variant > static_cast<uint8_t>(ScalarRng::Exponential) &&
-      ctx.variant != static_cast<uint8_t>(ScalarRng::Poisson) &&
-      ctx.variant != static_cast<uint8_t>(ScalarRng::StudentT) &&
-      ctx.variant != static_cast<uint8_t>(ScalarRng::BernoulliLogit) &&
-      ctx.variant != kCategoricalRngVariant &&
-      ctx.variant != kMultiNormalRngVariant &&
-      ctx.variant != kDirichletRngVariant)
-    throw std::logic_error("malformed RNG op");
-  if (ctx.variant == kCategoricalRngVariant) {
+  if (ctx.variant == kCategoricalRngVariant ||
+      ctx.variant == kCategoricalLogitRngVariant ||
+      ctx.variant == kPoissonBinomialRngVariant) {
     if (ctx.out.len != 1 || ctx.n_in != 1 || ctx.in[0].len < 0)
       throw std::logic_error("malformed categorical RNG op");
     if (ctx.eval_state == nullptr || ctx.eval_state->wa_rng == nullptr)
       throw std::logic_error(
           "OP_RNG requires caller-owned evaluation RNG state");
-    ctx.out.data[0] = static_cast<double>(
-        categorical_rng_draw(ctx.in[0].data, static_cast<size_t>(ctx.in[0].len),
-                             *ctx.eval_state->wa_rng));
+    ctx.out.data[0] = static_cast<double>(vector_integer_rng_draw(
+        ctx.in[0].data, static_cast<size_t>(ctx.in[0].len),
+        *ctx.eval_state->wa_rng, ctx.variant));
     return;
   }
-  if (ctx.variant == kMultiNormalRngVariant) {
+  if (ctx.variant == kMultiNormalRngVariant ||
+      ctx.variant == kMultiNormalCholeskyRngVariant) {
     if (ctx.n_in != 2 || ctx.n_idata != 1 || ctx.idata == nullptr ||
         ctx.idata[0] < 0)
       throw std::logic_error("malformed multi-normal RNG op");
@@ -49,11 +46,11 @@ void rng_fwd(KernelCtx& ctx) {
     if (ctx.eval_state == nullptr || ctx.eval_state->wa_rng == nullptr)
       throw std::logic_error(
           "OP_RNG requires caller-owned evaluation RNG state");
-    multi_normal_rng_draw(ctx.in[0].data, static_cast<size_t>(ctx.in[0].len),
-                          ctx.in[1].data, static_cast<size_t>(ctx.in[1].len),
-                          static_cast<size_t>(k), static_cast<size_t>(k),
-                          ctx.out.data, static_cast<size_t>(ctx.out.len),
-                          *ctx.eval_state->wa_rng);
+    multi_normal_rng_draw(
+        ctx.in[0].data, static_cast<size_t>(ctx.in[0].len), ctx.in[1].data,
+        static_cast<size_t>(ctx.in[1].len), static_cast<size_t>(k),
+        static_cast<size_t>(k), ctx.out.data, static_cast<size_t>(ctx.out.len),
+        *ctx.eval_state->wa_rng, ctx.variant == kMultiNormalCholeskyRngVariant);
     return;
   }
   if (ctx.variant == kDirichletRngVariant) {

@@ -548,7 +548,8 @@ changing categorical lowering.
 
 Both execution modes call one helper that copies the already-materialized
 probabilities into the exact Eigen vector accepted by pinned Stan Math. Stan
-Math therefore remains the single definition of empty-vector and simplex
+Math therefore remains the single definition of categorical probability-vector
+empty-input and simplex
 validation, exception class and message, validation priority, one-based result,
 and RNG consumption. Focused tests feed that helper and direct Stan Math the
 identical vector and compare sequential draws, rejected-call continuation, and
@@ -612,8 +613,10 @@ The vector-result `multi_normal_rng(vector, matrix)` write-array surface reuses
 length-`K` mean and a column-major `K` by `K` covariance, and writes a
 length-`K` vector. Lowering admits only an exact non-array `UVector` result,
 one non-array `UVector` mean, and one square `UMatrix` covariance whose known
-dimensions match. Row-vector/array overloads, mismatched or unknown shapes,
-and `multi_normal_cholesky_rng` still select `WaInterp`.
+dimensions match. Row-vector/array overloads and mismatched or unknown shapes
+still select `WaInterp`. Single-vector square `multi_normal_cholesky_rng`
+now uses the same compiled route; see the
+[remaining RNG coverage follow-up](../../notes/2026-09-28-vector-rng-implementation.md).
 
 The graph and interpreter call one helper. It reconstructs the same owning
 Eigen vector and column-major matrix accepted by pinned Stan Math, invokes
@@ -1455,7 +1458,11 @@ headline historical measurements follow:
   Eigen values before calling pinned Stan Math. This preserves its finite,
   symmetry, and positive-definiteness validation order and its exact normal
   draw schedule. Array overloads, non-square or mismatched shapes, and
-  `multi_normal_cholesky_rng` remain on the whole-section interpreter.
+  rectangular Cholesky forms remain on the whole-section interpreter.
+  The [RNG follow-up](../../notes/2026-09-28-vector-rng-implementation.md)
+  adds square single-vector Cholesky, Poisson-binomial, and categorical
+  register-region coverage. It also documents an explicit empty-logit guard
+  around upstream categorical-logit RNG, whose empty case has an unchecked read.
 
   `multi_occupancy` was the only model to change in the exact 24-model census,
   moving graph/interpreter coverage from 18 / 6 to the then-current 19 / 5.

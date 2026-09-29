@@ -799,6 +799,18 @@ static void test_binary_ops() {
   }
 }
 
+static void test_integer_ops() {
+  // Integer results feed a real expression, but carry no derivative back to
+  // their operands. Reusing the destination must clear its old adjoint too.
+  for (Program::Code code : {Program::IADD, Program::ISUB, Program::IMUL,
+                             Program::INEG, Program::IABS}) {
+    Build b({-7, 3, 0.4});
+    b.emit_to(code, 0, 0, 1);
+    const int result = b.emit(Program::MUL, 0, 2);
+    check("integer result in real expression", b.done({result}, {1.5}));
+  }
+}
+
 static void test_fma() {
   {
     Build b({1.7, 0.6, -0.9});
@@ -1972,6 +1984,7 @@ int main() {
   test_call_cached_forward_reverse_aliasing();
   test_call_primal_read_contract();
   test_binary_ops();
+  test_integer_ops();
   test_fma();
   test_unary_ops();
   test_overwrite_needs_checkpoint();

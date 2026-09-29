@@ -4,6 +4,7 @@
 // ranges up front and x_i binds as compile-time integers. Everything the
 // body can contain is the shared compiler's problem.
 #include <stanli/ode_prog.hpp>
+#include <stanli/callback.hpp>
 
 #include <stanli/island.hpp>
 #include <stanli/mir_prog.hpp>
@@ -31,14 +32,11 @@ void compact_rhs(RhsProgram& p) {
 }
 
 bool supported_rhs_view(const mir::UnsizedView& view) {
-  if (view.depth > 1) return false;
-  if (view.depth == 1)
-    return view.leaf == mir::UnsizedLeaf::Real ||
-           view.leaf == mir::UnsizedLeaf::Int;
   return view.leaf == mir::UnsizedLeaf::Real ||
          view.leaf == mir::UnsizedLeaf::Int ||
          view.leaf == mir::UnsizedLeaf::Vector ||
-         view.leaf == mir::UnsizedLeaf::RowVector;
+         view.leaf == mir::UnsizedLeaf::RowVector ||
+         view.leaf == mir::UnsizedLeaf::Matrix;
 }
 
 // The direct RK path compares against a var replay, so admitting a derivative
@@ -54,6 +52,11 @@ bool exact_ode_adjoint_opcode(Program::Code code) {
     case Program::MOV:
     case Program::MOVR:
     case Program::ADD:
+    case Program::IADD:
+    case Program::ISUB:
+    case Program::IMUL:
+    case Program::INEG:
+    case Program::IABS:
     case Program::SUB:
     case Program::MUL:
     case Program::DIV:
@@ -86,13 +89,31 @@ bool exact_ode_adjoint_opcode(Program::Code code) {
   }
 }
 
-void stamp_rhs_view(Range* range, const mir::UnsizedView& view) {
-  if (view.depth == 1)
+void stamp_rhs_view(Range* range, const mir::UnsizedView& view,
+                    const RhsArg* argument = nullptr) {
+  if (view.depth) {
+    RhsArg inferred;
+    inferred.len = range->len;
+    range->dims =
+        callback_array_dimensions(argument ? *argument : inferred, view);
     range->kind = ViewKind::Array;
-  else if (view.leaf == mir::UnsizedLeaf::Vector)
+    range->leaf = view.leaf == mir::UnsizedLeaf::Matrix   ? ViewKind::Matrix
+                  : view.leaf == mir::UnsizedLeaf::Vector ? ViewKind::Vector
+                  : view.leaf == mir::UnsizedLeaf::RowVector
+                      ? ViewKind::RowVector
+                      : ViewKind::Flat;
+  } else if (view.leaf == mir::UnsizedLeaf::Vector)
     range->kind = ViewKind::Vector;
   else if (view.leaf == mir::UnsizedLeaf::RowVector)
     range->kind = ViewKind::RowVector;
+  else if (view.leaf == mir::UnsizedLeaf::Matrix) {
+    if (!argument)
+      throw Bail{"matrix callback state has no logical dimensions"};
+    const auto dims = callback_matrix_dimensions(*argument);
+    range->kind = ViewKind::Matrix;
+    range->rows = dims[0];
+    range->cols = dims[1];
+  }
 }
 
 }  // namespace
@@ -121,8 +142,12 @@ RhsProgram compile_dae_args(
   ProgramCompiler c{p, funs};
   try {
     int n_th = 0, n_xr = 0;
-    for (const auto& a : args) {
-      if (a.is_int) continue;
+    for (size_t k = 0; k < args.size(); ++k) {
+      const auto& a = args[k];
+      if (f.arg_views[k + 3].depth == 0 &&
+          f.arg_views[k + 3].leaf == mir::UnsizedLeaf::Matrix)
+        callback_matrix_dimensions(a);
+      if (a.is_int && !a.is_param) continue;
       (a.is_param ? n_th : n_xr) += a.len;
     }
     p.t_reg = c.alloc(1);
@@ -145,27 +170,31 @@ RhsProgram compile_dae_args(
     for (size_t k = 0; k < args.size(); ++k) {
       const RhsArg& a = args[k];
       const std::string& name = f.arg_names[k + 3];
-      if (a.is_int) {
-        c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+      if (a.is_int && !a.is_param) {
+        const auto& view = f.arg_views[k + 3];
+        if (view.depth) {
+          c.known_int_array_dims[name] = callback_array_dimensions(a, view);
+          c.known_int_arrays[name] =
+              std::vector<long>(a.ints.begin(), a.ints.end());
+          c.int_array_names.insert(name);
+        } else {
+          c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+        }
       } else if (a.is_param) {
         Range r{p.th0 + th_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 3]);
+        stamp_rhs_view(&r, f.arg_views[k + 3], &a);
         c.reals[name] = r;
+        if (a.is_int && f.arg_views[k + 3].depth)
+          c.int_array_names.insert(name);
         th_at += a.len;
       } else {
         Range r{p.xr0 + xr_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 3]);
+        stamp_rhs_view(&r, f.arg_views[k + 3], &a);
         c.reals[name] = r;
         xr_at += a.len;
       }
     }
-    Range out{0, 0};
-    try {
-      for (const auto& s : f.body) c.stmt(s);
-      c.bail("DAE residual returned no value");
-    } catch (ProgramCompiler::Returned& r) {
-      out = r.r;
-    }
+    const Range out = c.function_body(f.body);
     if (out.len != n_y)
       c.bail("DAE residual returns " + std::to_string(out.len) +
              " values for " + std::to_string(n_y) + " states");
@@ -176,6 +205,15 @@ RhsProgram compile_dae_args(
   } catch (Bail& b) {
     p.ok = false;
     p.why = b.why;
+    p.code.clear();
+    p.out_regs.clear();
+  } catch (const std::bad_alloc&) {
+    throw;
+  } catch (const std::exception& failure) {
+    // A folded constructor in an untaken return arm can throw a Stan domain
+    // error during compilation. Defer it to the callback's actual execution.
+    p.ok = false;
+    p.why = failure.what();
     p.code.clear();
     p.out_regs.clear();
   }
@@ -210,8 +248,12 @@ RhsProgram compile_rhs_args(
     // sub-range of whichever region it belongs to, assigned in argument
     // order -- the same order the lowering concatenates the call site in.
     int n_th = 0, n_xr = 0;
-    for (const auto& a : args) {
-      if (a.is_int) continue;
+    for (size_t k = 0; k < args.size(); ++k) {
+      const auto& a = args[k];
+      if (f.arg_views[k + 2].depth == 0 &&
+          f.arg_views[k + 2].leaf == mir::UnsizedLeaf::Matrix)
+        callback_matrix_dimensions(a);
+      if (a.is_int && !a.is_param) continue;
       (a.is_param ? n_th : n_xr) += a.len;
     }
     p.t_reg = c.alloc(1);
@@ -229,28 +271,32 @@ RhsProgram compile_rhs_args(
     for (size_t k = 0; k < args.size(); ++k) {
       const RhsArg& a = args[k];
       const std::string& name = f.arg_names[k + 2];
-      if (a.is_int) {
-        c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+      if (a.is_int && !a.is_param) {
+        const auto& view = f.arg_views[k + 2];
+        if (view.depth) {
+          c.known_int_array_dims[name] = callback_array_dimensions(a, view);
+          c.known_int_arrays[name] =
+              std::vector<long>(a.ints.begin(), a.ints.end());
+          c.int_array_names.insert(name);
+        } else {
+          c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
+        }
       } else if (a.is_param) {
         Range r{p.th0 + th_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 2]);
+        stamp_rhs_view(&r, f.arg_views[k + 2], &a);
         c.reals[name] = r;
+        if (a.is_int && f.arg_views[k + 2].depth)
+          c.int_array_names.insert(name);
         th_at += a.len;
       } else {
         Range r{p.xr0 + xr_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 2]);
+        stamp_rhs_view(&r, f.arg_views[k + 2], &a);
         c.reals[name] = r;
         xr_at += a.len;
       }
     }
 
-    Range out{0, 0};
-    try {
-      for (const auto& s : f.body) c.stmt(s);
-      c.bail("right-hand side returned no value");
-    } catch (ProgramCompiler::Returned& r) {
-      out = r.r;
-    }
+    const Range out = c.function_body(f.body);
     if (out.len != n_y)
       c.bail("right-hand side returns " + std::to_string(out.len) +
              " values for " + std::to_string(n_y) + " states");
@@ -261,6 +307,15 @@ RhsProgram compile_rhs_args(
   } catch (Bail& b) {
     p.ok = false;
     p.why = b.why;
+    p.code.clear();
+    p.out_regs.clear();
+  } catch (const std::bad_alloc&) {
+    throw;
+  } catch (const std::exception& failure) {
+    // A folded constructor in an untaken return arm can throw a Stan domain
+    // error during compilation. Defer it to the callback's actual execution.
+    p.ok = false;
+    p.why = failure.what();
     p.code.clear();
     p.out_regs.clear();
   }

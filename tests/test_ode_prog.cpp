@@ -6,11 +6,12 @@
 // not to a tolerance: the two evaluate the same operations in the same order,
 // and anything else is a bug, not rounding.
 //
-// The other half is the fallback. compile_rhs refuses what it cannot express
-// (a return out of a branch on the solve time), and the test pins both halves
-// of that contract: it must refuse, with a reason, and the interpreter must
-// still produce the right answer.
+// The other half is the fallback: return paths with incompatible logical
+// shapes still refuse, with a reason, while supported early exits select the
+// shared register compiler. Both values and weighted derivatives are checked.
 #include <stanli/mir.hpp>
+#include <stanli/callback.hpp>
+#include <stanli/message_sink.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/island.hpp>
 #include <stanli/ode_prog.hpp>
@@ -187,7 +188,8 @@ void check_exact_opcode_contract() {
 void check(const std::string& name, const stanli::mir::FunDef& f,
            const std::map<std::string, const stanli::mir::FunDef*>& funs,
            int n_y, int n_th, const std::vector<double>& x_r,
-           const std::vector<int>& x_i, bool want_ok, bool want_generated) {
+           const std::vector<int>& x_i, bool want_ok, bool want_generated,
+           const char* expected_refusal = nullptr) {
   using namespace stanli;
   RhsProgram p = compile_rhs(f, funs, n_y, n_th, (int)x_r.size(), x_i);
   if (p.ok != want_ok) {
@@ -213,6 +215,11 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
   expect(name + ": derivative builder preserves canonical bytecode",
          canonical_unchanged);
   if (!want_ok) {
+    if (expected_refusal && p.why.find(expected_refusal) == std::string::npos) {
+      ++failures;
+      std::printf("FAIL %s: expected refusal containing %s, got %s\n",
+                  name.c_str(), expected_refusal, p.why.c_str());
+    }
     if (p.why.empty()) {
       ++failures;
       std::printf("FAIL %s: refused without saying why\n", name.c_str());
@@ -230,11 +237,28 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
            refusal.find("JZ") != std::string::npos ||
                refusal.find("JMP") != std::string::npos);
 
+  // The general region derivative engine supports forward-only branches even
+  // though the stricter direct-RK eligibility contract still excludes them.
+  IslandProg branch_adjoint;
+  const bool check_branch_adjoint =
+      name == "f_early" || name == "f_nested_early" || name == "f_loop_exits";
+  if (check_branch_adjoint) {
+    static_cast<Program&>(branch_adjoint) = static_cast<const Program&>(p);
+    branch_adjoint.ins = {{p.t_reg, 1, -1, 0, false},
+                          {p.y0, p.n_y, -1, 0, true},
+                          {p.th0, p.n_th, -1, 0, true},
+                          {p.xr0, p.n_xr, -1, 0, false}};
+    expect(name + ": acyclic exit supports generated reverse",
+           gen_adjoint(branch_adjoint));
+  }
+
   for (int trial = 0; trial < 12; ++trial) {
-    const double t = probe(trial) * 2.0;  // straddles the t > 0.5 branch
+    const double t =
+        trial == 0 ? 0.25 : probe(trial) * 2.0;  // straddles the t > 0.5 branch
     std::vector<double> y((size_t)n_y), th((size_t)n_th);
     for (int i = 0; i < n_y; ++i) y[(size_t)i] = probe(trial * 7 + i) + 0.4;
     for (int i = 0; i < n_th; ++i) th[(size_t)i] = probe(trial * 11 + i) + 0.2;
+    if (trial % 2 == 0 && !y.empty()) y[0] = -y[0];
 
     std::vector<double> got;
     std::vector<double> registers;
@@ -259,7 +283,7 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
       return;
     }
     for (size_t k = 0; k < got.size(); ++k) {
-      if (got[k] != want[k]) {  // bitwise: same ops, same order
+      if (bits(got[k]) != bits(want[k])) {  // same ops, same order
         ++failures;
         std::printf("FAIL %s trial %d out %zu: %.17g vs %.17g\n", name.c_str(),
                     trial, k, got[k], want[k]);
@@ -267,6 +291,32 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
       }
     }
     if (generated) check_generated_local(name, p, *generated, t, y, th, x_r);
+    if (check_branch_adjoint && branch_adjoint.native_adj)
+      check_generated_local(name + " branch", p, branch_adjoint, t, y, th, x_r);
+    const auto gradient = [&](bool compiled) {
+      stan::math::nested_rev_autodiff nested;
+      using stan::math::var;
+      std::vector<var> yv(y.begin(), y.end()), tv(th.begin(), th.end());
+      std::vector<var> values;
+      if (compiled) {
+        std::vector<var> registers;
+        run_rhs<var>(p, t, yv.data(), tv.data(), x_r.data(), values, registers);
+      } else {
+        MirInterp<var> ev(funs, "callback gradient reference");
+        std::vector<var> xr(x_r.begin(), x_r.end());
+        values = ev.call(f, {{var(t)}, yv, tv, xr}, {x_i});
+      }
+      var target = 0;
+      for (size_t k = 0; k < values.size(); ++k)
+        target += values[k] * (0.7 + 0.2 * k);
+      target.grad();
+      std::vector<uint64_t> result;
+      for (auto v : yv) result.push_back(bits(v.adj()));
+      for (auto v : tv) result.push_back(bits(v.adj()));
+      return result;
+    };
+    expect(name + ": weighted callback gradient bits",
+           gradient(true) == gradient(false));
   }
 }
 
@@ -391,6 +441,261 @@ void check_mixed_seed(const stanli::RhsProgram& p, const char* label) {
          into.nochain_tape == staged.nochain_tape);
 }
 
+void check_matrix_callbacks() {
+  using namespace stanli;
+  const auto mir = mir::read_program(
+      sexp::parse(slurp("tests/fixtures/matrix_callback_functions.tmir.sexp")));
+  std::map<std::string, const mir::FunDef*> funs;
+  for (const auto& f : mir.fun_defs) funs[f.name] = &f;
+  RhsArg active;
+  active.is_param = true;
+  active.len = 6;
+  active.rows = 2;
+  active.cols = 3;
+  RhsArg data = active;
+  data.is_param = false;
+  const std::vector<RhsArg> args{active, data};
+  const std::vector<double> xr{0.1, 0.3, 0.7, -0.2, 0.5, -0.4};
+  for (const char* name :
+       {"matrix_early", "matrix_dynamic", "matrix_gather", "matrix_bounds"}) {
+    const auto& f = *funs.at(name);
+    const auto compiled = compile_rhs_args(f, funs, 2, args);
+    const bool dynamic = std::string(name) == "matrix_dynamic";
+    expect(std::string(name) + ": correct compiler selection",
+           compiled.ok != dynamic);
+    if (!compiled.ok && !dynamic)
+      std::printf("matrix refusal: %s\n", compiled.why.c_str());
+    for (int trial = 0; trial < 8; ++trial) {
+      const double t = trial % 2 ? 0.75 : 0.25;
+      std::vector<double> y{trial % 2 ? -0.4 : 0.4, 0.8};
+      std::vector<double> theta;
+      for (int k = 0; k < 6; ++k) theta.push_back(probe(trial * 6 + k));
+      const auto run = [&](int mode) {
+        stan::math::nested_rev_autodiff nested;
+        using stan::math::var;
+        std::vector<var> yv(y.begin(), y.end()), av(theta.begin(), theta.end());
+        std::vector<var> bv(xr.begin(), xr.end()), out, registers;
+        MirInterp<var> interp(funs, "matrix callback test");
+        std::vector<std::string> messages;
+        set_message_sink([&](const char* text, size_t len) {
+          messages.emplace_back(text, len);
+        });
+        if (mode == 0) {
+          run_rhs<var>(compiled, t, yv.data(), av.data(), xr.data(), out,
+                       registers);
+        } else if (mode == 1) {
+          out = interpret_retained_callback(interp, f, {{var(t)}, yv, av, bv},
+                                            {}, args);
+        } else {
+          std::vector<MirInterp<var>::Value> values(4);
+          values[0].r = {var(t)};
+          values[1].r = yv;
+          values[1].dims = {2};
+          values[2].r = av;
+          values[2].dims = {2, 3};
+          values[3].r = bv;
+          values[3].dims = {2, 3};
+          out = interp.call(f, values).r;
+        }
+        set_message_sink(nullptr);
+        expect("matrix callback effects happen exactly once",
+               messages ==
+                   (dynamic ? std::vector<std::string>{"matrix callback effect"}
+                            : std::vector<std::string>{}));
+        var root = out[0] * 0.37 + out[1] * -0.29;
+        root.grad();
+        std::vector<uint64_t> result;
+        for (const auto& v : out) result.push_back(bits(v.val()));
+        for (const auto& v : yv) result.push_back(bits(v.adj()));
+        for (const auto& v : av) result.push_back(bits(v.adj()));
+        return result;
+      };
+      const auto reference = run(2);
+      expect(
+          std::string(name) + ": fallback values and weighted gradients exact",
+          run(1) == reference);
+      if (compiled.ok)
+        expect(std::string(name) +
+                   ": compiled values and weighted gradients exact",
+               run(0) == reference);
+    }
+  }
+  {
+    const auto& bounds = *funs.at("matrix_bounds");
+    const auto program = compile_rhs_args(bounds, funs, 2, args);
+    for (double t : {-0.5, 1.5}) {
+      for (bool compiled_path : {false, true}) {
+        bool rejected = false;
+        try {
+          std::vector<double> y{0.2, 0.8}, a(6, 0.3), out, registers;
+          if (compiled_path && program.ok)
+            run_rhs<double>(program, t, y.data(), a.data(), xr.data(), out,
+                            registers);
+          else {
+            MirInterp<double> interp(funs, "matrix bounds test");
+            out = interpret_retained_callback(interp, bounds, {{t}, y, a, xr},
+                                              {}, args);
+          }
+        } catch (const std::exception&) {
+          rejected = true;
+        }
+        expect("runtime matrix row rejects each invalid axis", rejected);
+      }
+    }
+  }
+  const auto& f = *funs.at("matrix_shape");
+  for (const auto dims :
+       {std::pair<int, int>{2, 3}, {3, 2}, {0, 3}, {3, 0}, {0, 0}}) {
+    RhsArg arg = active;
+    arg.rows = dims.first;
+    arg.cols = dims.second;
+    arg.len = dims.first * dims.second;
+    const auto compiled = compile_rhs_args(f, funs, 2, {arg});
+    expect("matrix shape callback compiles", compiled.ok);
+    const std::vector<double> y{0.2, 0.8}, theta(arg.len, 0.3);
+    const std::vector<double> want{dims.first + y[0], dims.second + y[1]};
+    std::vector<double> got, registers;
+    if (compiled.ok)
+      run_rhs<double>(compiled, 0.0, y.data(), theta.data(), nullptr, got,
+                      registers);
+    expect("matrix geometry stays distinct at equal flattened length",
+           got == want);
+    MirInterp<double> interp(funs, "matrix shape test");
+    expect("matrix fallback preserves empty axes",
+           interpret_retained_callback(interp, f, {{0.0}, y, theta}, {},
+                                       {arg}) == want);
+  }
+  for (int invalid = 0; invalid < 6; ++invalid) {
+    RhsArg arg = active;
+    if (invalid == 0) arg.rows = -1;
+    if (invalid == 1) arg.cols = -2;
+    if (invalid == 2) arg.rows = 3;
+    if (invalid == 3) arg.rows = int64_t(std::numeric_limits<int>::max()) + 1;
+    if (invalid == 4) arg.len = -1;
+    if (invalid == 5) arg.is_int = true;
+    expect("malformed matrix geometry refuses compilation",
+           !compile_rhs_args(f, funs, 2, {arg}).ok);
+    bool refused = false;
+    try {
+      MirInterp<double> interp(funs, "invalid matrix test");
+      interpret_retained_callback(
+          interp, f, {{0.0}, {0.2, 0.8}, std::vector<double>(6)}, {}, {arg});
+    } catch (const std::invalid_argument&) {
+      refused = true;
+    }
+    expect("malformed matrix geometry refuses interpretation", refused);
+  }
+  auto nested = f;
+  nested.arg_views[2].depth = 1;
+  expect("matrix array without full geometry refuses compilation",
+         !compile_rhs_args(nested, funs, 2, {active}).ok);
+}
+
+void check_nested_callbacks() {
+  using namespace stanli;
+  const auto mir = mir::read_program(
+      sexp::parse(slurp("tests/fixtures/matrix_callback_functions.tmir.sexp")));
+  std::map<std::string, const mir::FunDef*> funs;
+  for (const auto& f : mir.fun_defs) funs[f.name] = &f;
+  RhsArg active, data, integers;
+  active.is_param = true;
+  active.len = 12;
+  active.dims = {2, 2, 3};
+  data.len = 6;
+  data.dims = {2, 3};
+  integers.is_int = true;
+  integers.ints = {1, 3, 2, 4};  // serialized order
+  integers.dims = {2, 2};
+  const auto& f = *funs.at("nested_values");
+  const std::vector<RhsArg> args{active, data, integers};
+  const auto compiled = compile_rhs_args(f, funs, 2, args);
+  expect("nested array callback compiles", compiled.ok);
+  if (!compiled.ok) std::printf("nested refusal: %s\n", compiled.why.c_str());
+  for (int trial = 0; trial < 8; ++trial) {
+    std::vector<double> av, bv;
+    for (int k = 0; k < 12; ++k) av.push_back(probe(trial * 12 + k));
+    for (int k = 0; k < 6; ++k) bv.push_back(probe(trial * 6 + 19 + k));
+    const auto xr = graph_container_order(bv, data.dims, 2);
+    const auto run = [&](int mode) {
+      stan::math::nested_rev_autodiff nested;
+      using stan::math::var;
+      std::vector<var> y{0.4, -0.8}, a(av.begin(), av.end());
+      const auto packed = graph_container_order(a, active.dims, 1);
+      std::vector<var> b(xr.begin(), xr.end()), out, registers;
+      MirInterp<var> interp(funs, "nested callback test");
+      if (mode == 0) {
+        run_rhs<var>(compiled, 0.2, y.data(), packed.data(), xr.data(), out,
+                     registers);
+      } else if (mode == 1) {
+        out = interpret_retained_callback(interp, f, {{var(0.2)}, y, packed, b},
+                                          {integers.ints}, args);
+      } else {
+        std::vector<MirInterp<var>::Value> values(5);
+        values[0].r = {var(0.2)};
+        values[1].r = y;
+        values[1].dims = {2};
+        values[2].r = a;
+        values[2].dims = active.dims;
+        values[3].r.assign(bv.begin(), bv.end());
+        values[3].dims = data.dims;
+        values[4].is_int = true;
+        values[4].i = integers.ints;
+        values[4].r.assign(integers.ints.begin(), integers.ints.end());
+        values[4].dims = integers.dims;
+        out = interp.call(f, values).r;
+      }
+      var root = out[0] * 0.37 + out[1] * -0.29;
+      root.grad();
+      std::vector<uint64_t> result;
+      for (const auto& v : out) result.push_back(bits(v.val()));
+      for (const auto& v : y) result.push_back(bits(v.adj()));
+      for (const auto& v : a) result.push_back(bits(v.adj()));
+      return result;
+    };
+    const auto reference = run(2);
+    expect("nested fallback values and gradients exact", run(1) == reference);
+    if (compiled.ok)
+      expect("nested compiled values and gradients exact", run(0) == reference);
+  }
+  const auto& shape = *funs.at("nested_shape");
+  for (const std::vector<int64_t> dims :
+       {std::vector<int64_t>{2, 3, 4}, {3, 2, 4}, {2, 0, 4}, {2, 3, 0}}) {
+    RhsArg a;
+    a.is_param = true;
+    a.dims = dims;
+    a.len = static_cast<int>(checked_container_size(dims, "test"));
+    const auto p = compile_rhs_args(shape, funs, 2, {a});
+    expect("array-of-vector geometry compiles", p.ok);
+    std::vector<double> y{0.2, 0.8}, theta(a.len, 0.3), out, registers;
+    const std::vector<double> want{dims[0] + y[0], dims[1] + y[1]};
+    if (p.ok)
+      run_rhs<double>(p, 0.0, y.data(), theta.data(), nullptr, out, registers);
+    expect("array geometry keeps empty and equal-size extents", out == want);
+    MirInterp<double> interp(funs, "nested shape test");
+    expect("nested fallback keeps empty axes",
+           interpret_retained_callback(interp, shape, {{0.0}, y, theta}, {},
+                                       {a}) == want);
+  }
+  for (const std::vector<int64_t> dims :
+       {std::vector<int64_t>{2, 6}, {2, 2, 4}, {0, -1, 0}, {}}) {
+    RhsArg bad = active;
+    bad.dims = dims;
+    expect("incomplete or invalid nested geometry refuses compilation",
+           !compile_rhs_args(f, funs, 2, {bad, data, integers}).ok);
+    bool refused = false;
+    try {
+      MirInterp<double> interp(funs, "invalid nested test");
+      interpret_retained_callback(
+          interp, f,
+          {{0.0}, {0.2, 0.8}, std::vector<double>(12), std::vector<double>(6)},
+          {integers.ints}, {bad, data, integers});
+    } catch (const std::exception&) {
+      refused = true;
+    }
+    expect("invalid nested geometry refuses interpretation", refused);
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -409,12 +714,32 @@ int main() {
     int n_y, n_th;
     bool want_ok;
     bool want_generated;
+    const char* refusal = nullptr;
   };
   const Case cases[] = {
       {"f_lin", 2, 4, true, true},
       {"f_branch", 2, 4, true, false},  // JZ/JMP fail closed
       {"f_udf", 2, 4, true, false},     // runtime ternary emits JZ/JMP
-      {"f_early", 2, 4, false, false},  // return from a runtime branch
+      {"f_nested_early", 2, 4, true, false},
+      {"f_while_pair", 2, 4, true, false},
+      {"f_call_in_while", 2, 4, true, false},
+      {"f_while_early", 2, 4, true, false},  // return from a runtime loop
+      {"f_loop_exits", 2, 4, true, false},
+      {"f_return_in_loop", 2, 4, true, false},
+      {"f_runtime_for", 2, 4, true, false},
+      {"f_runtime_for_nested", 2, 4, true, false},
+      {"f_runtime_for_return", 2, 4, true, false},
+      {"f_runtime_for_max", 2, 4, true, false},
+      {"f_runtime_for_shift", 2, 4, true, false},
+      {"f_runtime_for_int_data", 2, 4, true, false},
+      {"f_no_loop_integer_overflow", 2, 4, true, false},
+      {"f_runtime_for_shape", 2, 4, false, false, "integer"},
+      {"f_runtime_for_integer_overflow", 2, 4, true, false},
+      {"f_runtime_for_int_array", 2, 4, true, false},
+      {"f_runtime_for_mutates_bound", 2, 4, true, false},
+      {"f_runtime_for_in_while", 2, 4, true, false},
+      {"f_bad_return_shape", 2, 4, false, false},
+      {"f_early", 2, 4, true, false},  // return from a runtime branch
   };
   for (const Case& c : cases) {
     auto it = funs.find(c.name);
@@ -424,9 +749,40 @@ int main() {
       continue;
     }
     check(c.name, *it->second, funs, c.n_y, c.n_th, x_r, x_i, c.want_ok,
-          c.want_generated);
+          c.want_generated, c.refusal);
+  }
+  // Check both sides of each guard, including the nested return pair,
+  // against an explicit formula as well as the interpreter.
+  for (const char* name :
+       {"f_early", "f_while_early", "f_nested_early", "f_while_pair"}) {
+    for (double t : {0.25, 0.75})
+      for (double first : {-0.7, 0.7}) {
+        std::vector<double> y{first, 1.2}, theta{0.8, 1.4, 0, 0};
+        std::vector<double> expected{-y[0], -y[1]};
+        if (t > 0.5) {
+          const bool pair = std::string(name) == "f_nested_early" ||
+                            std::string(name) == "f_while_pair";
+          expected = pair && y[0] <= 0 ? y
+                                       : std::vector<double>{theta[0] * y[0],
+                                                             theta[1] * y[1]};
+        }
+        const auto compiled = compile_rhs(*funs.at(name), funs, 2, 4, 2, x_i);
+        std::vector<double> values, registers;
+        if (compiled.ok)
+          run_rhs<double>(compiled, t, y.data(), theta.data(), x_r.data(),
+                          values, registers);
+        expect(
+            std::string(name) + ": compiled path selects the executed return",
+            compiled.ok && values == expected);
+        MirInterp<double> interp(funs, "early-return oracle");
+        expect(std::string(name) + ": interpreter selects the executed return",
+               interp.call(*funs.at(name), {{t}, y, theta, x_r}, {x_i}) ==
+                   expected);
+      }
   }
   check_exact_opcode_contract();
+  check_matrix_callbacks();
+  check_nested_callbacks();
 
   // stan-math instantiates a var state whenever either side is active. The
   // data-y/active-theta case is included too: run_rhs is a generic boundary,

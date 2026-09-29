@@ -1,0 +1,60 @@
+{
+  "source_sha256": "3eacd294e2b004ddb864362187c457d0765902b3aeee37f1b7731199161a096d",
+  "data_sha256": "b9605878aa140150942aeadccf712a777e0aedcdde3cfb1d98dde6e90337bf20",
+  "recorded": {
+    "cmdstan": "d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6",
+    "stan": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+    "math": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+    "stanc3": "d58446e631b02cacc5355e373defc6092a684554",
+    "posteriordb": "28f8d3d6e975315f42aa274a8399f21e07a43b30",
+    "cmdstan_version": "2.40.0",
+    "stanc_sha256": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
+    "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "compiler_family": "clang",
+    "reference_flags": "-O1 -ffp-contract=off; stanc default optimization",
+    "platform": "Darwin arm64"
+  },
+  "seed": 1234,
+  "chain": 0,
+  "points": {
+    "0": {
+      "values": [
+        "-1.9767590288952304",
+        "-0.15842357604173951"
+      ],
+      "wa": {
+        "names": "rate,solution.1.1",
+        "values": [
+          "0.52497918747894001",
+          "0.94885629586894193"
+        ]
+      }
+    },
+    "1": {
+      "values": [
+        "-1.9600693186993567",
+        "-0.079796859981017668"
+      ],
+      "wa": {
+        "names": "rate,solution.1.1",
+        "values": [
+          "0.49000133312003458",
+          "0.95218100276531781"
+        ]
+      }
+    },
+    "2": {
+      "values": [
+        "-1.9637130701421457",
+        "-0.10237906456189233"
+      ],
+      "wa": {
+        "names": "rate,solution.1.1",
+        "values": [
+          "0.5",
+          "0.95122942450520842"
+        ]
+      }
+    }
+  }
+}

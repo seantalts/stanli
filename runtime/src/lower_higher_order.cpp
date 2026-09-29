@@ -5,6 +5,19 @@
 namespace stanli {
 namespace lower_detail {
 
+namespace {
+Range scalar_solver_controls(ProgramCompiler& c, const mir::Expr& e,
+                             size_t begin, size_t count = 3) {
+  Range controls{c.alloc(static_cast<int>(count)), static_cast<int>(count)};
+  for (size_t k = 0; k < count; ++k) {
+    const Range value = c.expr(e.args[begin + k]);
+    if (!c.is_scalar(value)) c.bail(e.name + ": solver control must be scalar");
+    c.emit(Program::MOV, controls.reg + static_cast<int>(k), value.reg);
+  }
+  return controls;
+}
+}  // namespace
+
 // Bind callback arguments [begin, end) of a retained call compiled in a
 // Program. Data arguments fold into the spec; active ones are copied into
 // one register run, which the kernel receives as theta.
@@ -14,28 +27,54 @@ Range Lowering::program_callback_theta(ProgramCompiler& c, const mir::Expr& e,
                                        int* parameter_count) {
   std::vector<Range> active = pack_callback_arguments<Range>(
       spec, e.args, begin, end,
-      [&](size_t i) {
+      [&](size_t i, RhsArg& binding) {
         Range value = c.expr(e.args[i]);
+        if (e.args[i].unsized.depth) binding.dims = value.dims;
+        if (value.kind == ViewKind::Matrix) {
+          binding.rows = value.rows;
+          binding.cols = value.cols;
+        }
         return std::make_pair(value, value.len);
       },
-      [&](size_t i) {
+      [&](size_t i, RhsArg& binding) {
         DataMap::Entry value =
             program_constant(c, e.args[i], e.name + " data argument");
         if (value.is_int)
           c.bail(e.name + ": real data argument is integer-valued");
-        const bool matrix = e.args[i].type_ == "UMatrix";
+        if (e.args[i].unsized.depth) binding.dims = value.dims;
+        const bool matrix = e.args[i].unsized.depth == 0 &&
+                            e.args[i].unsized.leaf == mir::UnsizedLeaf::Matrix;
+        if (matrix) {
+          if (value.dims.size() != 2)
+            c.bail(
+                e.name +
+                ": matrix callback argument has incomplete logical dimensions");
+          binding.rows = value.dims[0];
+          binding.cols = value.dims[1];
+        }
         const bool nested_matrix =
             e.args[i].unsized.depth != 0 &&
             e.args[i].unsized.leaf == mir::UnsizedLeaf::Matrix;
         return graph_order(value, matrix, nested_matrix);
       },
-      [&](size_t i) {
-        DataMap::Entry value =
-            program_constant(c, e.args[i], e.name + " integer argument");
-        if (!value.is_int) c.bail(e.name + ": integer argument is real-valued");
-        return value.i;
+      [&](size_t i, RhsArg& binding) -> std::optional<std::vector<int>> {
+        const auto& arg = e.args[i];
+        std::vector<long> values;
+        if (arg.unsized.depth == 0) {
+          long value;
+          if (!c.try_cint(arg, &value)) return std::nullopt;
+          values = {value};
+        } else if (!c.external_int_array(arg, &values, &binding.dims)) {
+          if (!c.try_cints(arg, &values)) return std::nullopt;
+          Range shape;
+          if (!c.static_view(arg, &shape)) return std::nullopt;
+          binding.dims =
+              shape.dims.empty() ? std::vector<int64_t>{shape.len} : shape.dims;
+        }
+        return std::vector<int>(values.begin(), values.end());
       },
-      [&](const std::string& message) { c.bail(e.name + ": " + message); });
+      [&](const std::string& message) { c.bail(e.name + ": " + message); },
+      in_write_array);
   int total = 0;
   for (const Range& value : active) {
     if (value.len > ProgramCompiler::kMaxRegs - total)
@@ -79,7 +118,11 @@ bool Lowering::lower_program_variadic_algebra(ProgramCompiler& c,
   spec->adopt(fun_defs);
   spec->system_name = system->name;
   spec->select(*call);
-  if (call->with_tolerance) {
+  Range controls;
+  const bool runtime_controls = in_write_array && call->with_tolerance;
+  if (runtime_controls) {
+    controls = scalar_solver_controls(c, e, 2);
+  } else if (call->with_tolerance) {
     spec->relative_tolerance =
         program_scalar_real(c, e.args[2], e.name + " relative tolerance");
     spec->function_tolerance =
@@ -102,9 +145,11 @@ bool Lowering::lower_program_variadic_algebra(ProgramCompiler& c,
 
   Range result{0, x.len};
   result.kind = ViewKind::Vector;
-  *out_range =
-      c.kernel_call(OP_ALGEBRA_SOLVER, {x, theta}, result,
-                    parameter_count == 0 ? 0u : 0x1u, 0x2u, {}, spec, e.name);
+  std::vector<Range> inputs{x, theta};
+  if (runtime_controls) inputs.push_back(controls);
+  *out_range = c.kernel_call(OP_ALGEBRA_SOLVER, inputs, result,
+                             in_write_array || parameter_count == 0 ? 0u : 0x1u,
+                             in_write_array ? 0u : 0x2u, {}, spec, e.name);
   return true;
 }
 bool Lowering::lower_program_quadrature(ProgramCompiler& c, const mir::Expr& e,
@@ -140,7 +185,14 @@ bool Lowering::lower_program_quadrature(ProgramCompiler& c, const mir::Expr& e,
   spec->adopt(fun_defs);
   spec->callback_name = integrand->name;
   spec->method = call->method;
-  if (call->legacy && e.args.size() == 7) {
+  Range controls;
+  const bool runtime_controls =
+      in_write_array &&
+      (call->legacy ? e.args.size() == 7 : call->with_tolerance);
+  if (runtime_controls) {
+    controls = scalar_solver_controls(c, e, call->legacy ? 6 : 3,
+                                      call->legacy ? 1 : 3);
+  } else if (call->legacy && e.args.size() == 7) {
     spec->relative_tolerance =
         program_scalar_real(c, e.args[6], "quadrature tolerance");
   } else if (call->with_tolerance) {
@@ -165,12 +217,17 @@ bool Lowering::lower_program_quadrature(ProgramCompiler& c, const mir::Expr& e,
   const Range b = c.expr(e.args[2]);
   if (!c.is_scalar(a) || !c.is_scalar(b))
     c.bail(e.name + ": integration bounds must be scalar");
-  const uint8_t variant = static_cast<uint8_t>(
-      (!e.args[1].data_only ? 0x1u : 0u) | (!e.args[2].data_only ? 0x2u : 0u) |
-      (spec->parameter_count != 0 ? 0x4u : 0u));
+  const uint8_t variant =
+      in_write_array
+          ? 0u
+          : static_cast<uint8_t>((!e.args[1].data_only ? 0x1u : 0u) |
+                                 (!e.args[2].data_only ? 0x2u : 0u) |
+                                 (spec->parameter_count != 0 ? 0x4u : 0u));
   Range result{0, 1};
-  *out_range = c.kernel_call(OP_QUADRATURE, {a, b, theta}, result, variant,
-                             variant, {}, spec, e.name);
+  std::vector<Range> inputs{a, b, theta};
+  if (runtime_controls) inputs.push_back(controls);
+  *out_range = c.kernel_call(OP_QUADRATURE, inputs, result, variant, variant,
+                             {}, spec, e.name);
   return true;
 }
 bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
@@ -210,7 +267,13 @@ bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
   if (S < 0 || N < 0 || (N && S > ProgramCompiler::kMaxRegs / N))
     c.bail(e.name + ": result is too large");
 
-  Range theta;
+  Range theta, controls;
+  const bool runtime_controls =
+      in_write_array &&
+      (call->legacy ? e.args.size() == 10 : call->with_tolerance);
+  const auto bind_controls = [&](size_t first) {
+    controls = scalar_solver_controls(c, e, first);
+  };
   bool theta_active = false;
   if (call->legacy) {
     if (e.args.size() != 7 && e.args.size() != 10)
@@ -223,7 +286,9 @@ bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
     DataMap::Entry xi = program_constant(c, e.args[6], "ODE integer data");
     if (!xi.is_int) c.bail(e.name + ": integer data is real-valued");
     spec->x_i.assign(xi.i.begin(), xi.i.end());
-    if (e.args.size() == 10) {
+    if (runtime_controls) {
+      bind_controls(7);
+    } else if (e.args.size() == 10) {
       spec->rtol = program_scalar_real(c, e.args[7], "ODE relative tolerance");
       spec->atol = program_scalar_real(c, e.args[8], "ODE absolute tolerance");
       spec->max_steps = program_scalar_int(c, e.args[9], "ODE maximum steps");
@@ -236,8 +301,13 @@ bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
     spec->args[2].ints = spec->x_i;
     spec->prog = compile_rhs(*spec->rhs(), *spec->funs(), S, theta.len,
                              (int)spec->x_r.size(), spec->x_i);
+    if (!spec->prog.ok)
+      note_interpreter_fallback("the ODE right-hand side " + spec->rhs_name,
+                                spec->prog.why);
   } else {
-    if (call->with_tolerance) {
+    if (runtime_controls) {
+      bind_controls(4);
+    } else if (call->with_tolerance) {
       spec->rtol = program_scalar_real(c, e.args[4], "ODE relative tolerance");
       spec->atol = program_scalar_real(c, e.args[5], "ODE absolute tolerance");
       spec->max_steps = program_scalar_int(c, e.args[6], "ODE maximum steps");
@@ -256,16 +326,23 @@ bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
   result.kind = ViewKind::Array;
   result.dims = {N, S};
   result.leaf = call->legacy ? ViewKind::Flat : ViewKind::Vector;
-  const uint8_t activity = static_cast<uint8_t>(
-      (e.args[1].data_only ? 0u : 0x1u) | (theta_active ? 0x2u : 0u) |
-      (!call->legacy && !e.args[2].data_only ? 0x4u : 0u) |
-      (!call->legacy && !e.args[3].data_only ? 0x8u : 0u));
+  const uint8_t activity =
+      in_write_array
+          ? 0u
+          : static_cast<uint8_t>(
+                (e.args[1].data_only ? 0u : 0x1u) | (theta_active ? 0x2u : 0u) |
+                (!call->legacy && !e.args[2].data_only ? 0x4u : 0u) |
+                (!call->legacy && !e.args[3].data_only ? 0x8u : 0u));
   if (call->legacy) {
-    *out_range = c.kernel_call(OP_ODE, {z0, theta}, result,
+    std::vector<Range> inputs{z0, theta};
+    if (runtime_controls) inputs.push_back(controls);
+    *out_range = c.kernel_call(OP_ODE, inputs, result,
                                static_cast<uint8_t>(0x4u | activity), activity,
                                {(int)N, S}, spec, e.name);
   } else {
-    *out_range = c.kernel_call(OP_ODE, {z0, theta, t0, ts}, result,
+    std::vector<Range> inputs{z0, theta, t0, ts};
+    if (runtime_controls) inputs.push_back(controls);
+    *out_range = c.kernel_call(OP_ODE, inputs, result,
                                static_cast<uint8_t>(0x10u | activity), activity,
                                {(int)N, S}, spec, e.name);
   }
@@ -296,19 +373,22 @@ bool Lowering::lower_program_ode_adjoint(ProgramCompiler& c, const mir::Expr& e,
   const auto integer = [&](size_t i, const char* role) {
     return program_scalar_int(c, e.args[i], std::string("adjoint ODE ") + role);
   };
-  spec->relative_tolerance_forward = real(4, "forward relative tolerance");
-  spec->absolute_tolerance_forward = reals(5, "forward absolute tolerance");
-  spec->relative_tolerance_backward = real(6, "backward relative tolerance");
-  spec->absolute_tolerance_backward = reals(7, "backward absolute tolerance");
-  spec->relative_tolerance_quadrature =
-      real(8, "quadrature relative tolerance");
-  spec->absolute_tolerance_quadrature =
-      real(9, "quadrature absolute tolerance");
-  spec->max_num_steps = integer(10, "maximum steps");
-  spec->num_steps_between_checkpoints = integer(11, "checkpoint interval");
-  spec->interpolation_polynomial = (int)integer(12, "interpolation polynomial");
-  spec->solver_forward = (int)integer(13, "forward solver");
-  spec->solver_backward = (int)integer(14, "backward solver");
+  if (!in_write_array) {
+    spec->relative_tolerance_forward = real(4, "forward relative tolerance");
+    spec->absolute_tolerance_forward = reals(5, "forward absolute tolerance");
+    spec->relative_tolerance_backward = real(6, "backward relative tolerance");
+    spec->absolute_tolerance_backward = reals(7, "backward absolute tolerance");
+    spec->relative_tolerance_quadrature =
+        real(8, "quadrature relative tolerance");
+    spec->absolute_tolerance_quadrature =
+        real(9, "quadrature absolute tolerance");
+    spec->max_num_steps = integer(10, "maximum steps");
+    spec->num_steps_between_checkpoints = integer(11, "checkpoint interval");
+    spec->interpolation_polynomial =
+        (int)integer(12, "interpolation polynomial");
+    spec->solver_forward = (int)integer(13, "forward solver");
+    spec->solver_backward = (int)integer(14, "backward solver");
+  }
 
   const Range y0 = c.expr(e.args[1]);
   const Range t0 = c.expr(e.args[2]);
@@ -320,11 +400,28 @@ bool Lowering::lower_program_ode_adjoint(ProgramCompiler& c, const mir::Expr& e,
     c.bail(e.name + ": output times must be an array");
   const int S = y0.len;
   const int N = ts.len;
-  if ((int)spec->absolute_tolerance_forward.size() != S ||
-      (int)spec->absolute_tolerance_backward.size() != S)
+  if (!in_write_array && ((int)spec->absolute_tolerance_forward.size() != S ||
+                          (int)spec->absolute_tolerance_backward.size() != S))
     c.bail(e.name + ": absolute tolerance vectors must match state size");
   if (S < 0 || N < 0 || (N && S > ProgramCompiler::kMaxRegs / N))
     c.bail(e.name + ": result is too large");
+
+  Range controls;
+  if (in_write_array) {
+    if (S > (ProgramCompiler::kMaxRegs - 9) / 2)
+      c.bail("adjoint ODE controls are too large");
+    controls = Range{c.alloc(2 * S + 9), 2 * S + 9};
+    int at = 0;
+    for (size_t k = 4; k < 15; ++k) {
+      const Range value = c.expr(e.args[k]);
+      const bool vector = k == 5 || k == 7;
+      if (vector ? value.kind != ViewKind::Vector || value.len != S
+                 : !c.is_scalar(value))
+        c.bail("adjoint ODE control shape mismatch");
+      for (int j = 0; j < value.len; ++j)
+        c.emit(Program::MOV, controls.reg + at++, value.reg + j);
+    }
+  }
 
   int parameter_count = 0;
   const Range theta = program_callback_theta(
@@ -338,10 +435,15 @@ bool Lowering::lower_program_ode_adjoint(ProgramCompiler& c, const mir::Expr& e,
   result.kind = ViewKind::Array;
   result.dims = {N, S};
   result.leaf = ViewKind::Vector;
-  const uint8_t activity = static_cast<uint8_t>(
-      (!e.args[1].data_only ? 0x1u : 0u) | (!e.args[2].data_only ? 0x2u : 0u) |
-      (!e.args[3].data_only ? 0x4u : 0u) | (parameter_count != 0 ? 0x8u : 0u));
-  *out_range = c.kernel_call(OP_ODE_ADJOINT, {y0, t0, ts, theta}, result,
+  const uint8_t activity =
+      in_write_array ? 0u
+                     : static_cast<uint8_t>((!e.args[1].data_only ? 0x1u : 0u) |
+                                            (!e.args[2].data_only ? 0x2u : 0u) |
+                                            (!e.args[3].data_only ? 0x4u : 0u) |
+                                            (parameter_count != 0 ? 0x8u : 0u));
+  std::vector<Range> inputs{y0, t0, ts, theta};
+  if (in_write_array) inputs.push_back(controls);
+  *out_range = c.kernel_call(OP_ODE_ADJOINT, inputs, result,
                              static_cast<uint8_t>(0x10u | activity), activity,
                              {N, S}, spec, e.name);
   return true;
@@ -362,7 +464,11 @@ bool Lowering::lower_program_dae(ProgramCompiler& c, const mir::Expr& e,
     c.bail(e.name + ": unknown residual " + spec->residual_name);
   spec->t0 = program_scalar_real(c, e.args[3], "DAE initial time");
   spec->ts = program_vector_real(c, e.args[4], "DAE output times");
-  if (call->with_tolerance) {
+  Range controls;
+  const bool runtime_controls = in_write_array && call->with_tolerance;
+  if (runtime_controls) {
+    controls = scalar_solver_controls(c, e, 5);
+  } else if (call->with_tolerance) {
     spec->rtol = program_scalar_real(c, e.args[5], "DAE relative tolerance");
     spec->atol = program_scalar_real(c, e.args[6], "DAE absolute tolerance");
     spec->max_steps = program_scalar_int(c, e.args[7], "DAE maximum steps");
@@ -392,10 +498,14 @@ bool Lowering::lower_program_dae(ProgramCompiler& c, const mir::Expr& e,
   result.kind = ViewKind::Array;
   result.dims = {N, S};
   result.leaf = ViewKind::Vector;
-  const uint8_t activity = static_cast<uint8_t>(
-      (!e.args[1].data_only ? 0x1u : 0u) | (!e.args[2].data_only ? 0x2u : 0u) |
-      (parameter_count != 0 ? 0x4u : 0u));
-  *out_range = c.kernel_call(OP_DAE, {y0, yp0, theta}, result,
+  const uint8_t activity =
+      in_write_array ? 0u
+                     : static_cast<uint8_t>((!e.args[1].data_only ? 0x1u : 0u) |
+                                            (!e.args[2].data_only ? 0x2u : 0u) |
+                                            (parameter_count != 0 ? 0x4u : 0u));
+  std::vector<Range> inputs{y0, yp0, theta};
+  if (runtime_controls) inputs.push_back(controls);
+  *out_range = c.kernel_call(OP_DAE, inputs, result,
                              static_cast<uint8_t>(0x8u | activity), activity,
                              {(int)N, S}, spec, e.name);
   return true;
@@ -443,7 +553,11 @@ bool Lowering::lower_program_higher_order(ProgramCompiler& c,
   if (!xi.is_int || xi.i.size() != xi.r.size())
     c.bail("algebra_solver: malformed integer data argument");
   spec->x_i.assign(xi.i.begin(), xi.i.end());
-  if (e.args.size() == 8) {
+  Range controls;
+  const bool runtime_controls = in_write_array && e.args.size() == 8;
+  if (runtime_controls) {
+    controls = scalar_solver_controls(c, e, 5);
+  } else if (e.args.size() == 8) {
     spec->relative_tolerance =
         program_scalar_real(c, e.args[5], "algebra_solver relative tolerance");
     spec->function_tolerance =
@@ -474,9 +588,11 @@ bool Lowering::lower_program_higher_order(ProgramCompiler& c,
 
   Range result{0, x.len};
   result.kind = ViewKind::Vector;
-  const uint8_t active = e.args[2].data_only ? 0u : 0x1u;
-  *out_range = c.kernel_call(OP_ALGEBRA_SOLVER, {x, y}, result, active, 0x2u,
-                             {}, spec, e.name);
+  const uint8_t active = in_write_array || e.args[2].data_only ? 0u : 0x1u;
+  std::vector<Range> inputs{x, y};
+  if (runtime_controls) inputs.push_back(controls);
+  *out_range = c.kernel_call(OP_ALGEBRA_SOLVER, inputs, result, active,
+                             in_write_array ? 0u : 0x2u, {}, spec, e.name);
   return true;
 }
 // map_rect checks that the three job arrays have matching OUTER sizes and
@@ -896,6 +1012,15 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
 // activity and result scalar type from y alone.
 Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
                                             CallArguments& actuals) {
+  if (in_write_array) {
+    const auto meta = mir::quadrature_call(e.name);
+    if (meta && (meta->legacy ? e.args.size() == 7 : meta->with_tolerance)) {
+      const size_t begin = meta->legacy ? 6 : 3;
+      const size_t end = meta->legacy ? 7 : 6;
+      for (size_t k = begin; k < end; ++k)
+        if (needs_runtime_value(e.args[k])) return lower_program_expression(e);
+    }
+  }
   const auto call = mir::quadrature_call(e.name);
   if (!call) fail(e.name + ": missing quadrature metadata", e.raw);
   if (e.unsized.depth != 0 || e.unsized.leaf != mir::UnsizedLeaf::Real)
@@ -946,25 +1071,58 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
 
   std::vector<Val> active = pack_callback_arguments<Val>(
       *spec, e.args, call->callback_args_begin, callback_end,
-      [&](size_t i) {
+      [&](size_t i, RhsArg& binding) {
         Val value = actuals.at(i).value();
+        if (e.args[i].unsized.depth)
+          binding.dims = logical_shape(value, "callback array");
+        if (value.si.kind == ViewKind::Matrix) {
+          binding.rows = value.si.rows;
+          binding.cols = value.si.cols;
+        }
         if (g.slots[value.slot].len > std::numeric_limits<int>::max())
           fail(e.name + ": callback argument is too large", e.raw);
         return std::make_pair(value, static_cast<int>(g.slots[value.slot].len));
       },
-      [&](size_t i) {
+      [&](size_t i, RhsArg& binding) {
         const auto& values =
             actuals.at(i).require_constant_reals("quadrature data argument");
+        if (e.args[i].unsized.depth == 0 &&
+            e.args[i].unsized.leaf == mir::UnsizedLeaf::Matrix) {
+          const auto* entry = actuals.at(i).pure_value();
+          const auto dims = entry && entry->dims.size() == 2
+                                ? entry->dims
+                                : logical_shape(actuals.at(i).value(),
+                                                "matrix callback argument");
+          binding.rows = dims.at(0);
+          binding.cols = dims.at(1);
+        }
+        if (e.args[i].unsized.depth) {
+          const auto* entry = actuals.at(i).pure_value();
+          binding.dims =
+              entry && !entry->dims.empty()
+                  ? entry->dims
+                  : logical_shape(actuals.at(i).value(), "callback array");
+          return graph_container_order(values, binding.dims,
+                                       e.args[i].unsized.depth);
+        }
         return std::vector<double>(values.begin(), values.end());
       },
-      [&](size_t i) {
+      [&](size_t i, RhsArg& binding) -> std::optional<std::vector<int>> {
+        if (in_write_array && needs_runtime_value(e.args[i]))
+          return std::nullopt;
         const auto& values =
             actuals.at(i).require_constant_ints("quadrature integer argument");
+        if (e.args[i].unsized.depth) {
+          const auto* entry = actuals.at(i).pure_value();
+          binding.dims = entry && !entry->dims.empty()
+                             ? entry->dims
+                             : logical_shape(actuals.at(i).value(),
+                                             "callback integer array");
+        }
         return std::vector<int>(values.begin(), values.end());
       },
-      [&](const std::string& message) {
-        fail(e.name + ": " + message, e.raw);
-      });
+      [&](const std::string& message) { fail(e.name + ": " + message, e.raw); },
+      in_write_array);
 
   Val theta = constant(0.0);  // unread placeholder when there are no params
   spec->parameter_count = 0;
@@ -990,9 +1148,9 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
   Val b = actuals.at(2).value();
   if (!is_scalar(a) || !is_scalar(b))
     fail(e.name + ": integration bounds must be scalar", e.raw);
-  const uint8_t variant =
-      static_cast<uint8_t>((a.autodiff ? 0x1u : 0u) | (b.autodiff ? 0x2u : 0u) |
-                           (spec->parameter_count != 0 ? 0x4u : 0u));
+  const uint8_t variant = static_cast<uint8_t>(
+      (a.autodiff ? 0x1u : 0u) | (b.autodiff ? 0x2u : 0u) |
+      (!in_write_array && spec->parameter_count != 0 ? 0x4u : 0u));
   SlotInfo si = view_of(e.type_);
   si.param_free = variant == 0;
   Val result = emit_raw(OP_QUADRATURE, {a.slot, b.slot, theta.slot}, 1, si, {},
@@ -1004,6 +1162,9 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
 }
 Lowering::Val Lowering::lower_algebra_fn(const mir::Expr& e,
                                          CallArguments& actuals) {
+  if (in_write_array && e.args.size() == 8)
+    for (size_t k = 5; k < 8; ++k)
+      if (needs_runtime_value(e.args[k])) return lower_program_expression(e);
   if (actuals.size() != 5 && actuals.size() != 8)
     fail(e.name + ": expected 5 or 8 arguments", e.raw);
   if (e.unsized.leaf != mir::UnsizedLeaf::Vector || e.unsized.depth != 0)
@@ -1096,6 +1257,9 @@ Lowering::Val Lowering::emit_ode(std::shared_ptr<OdeSpec> spec, const Val& z0,
                                  const Val& theta, int64_t N, int64_t S,
                                  SlotInfo result_si, std::optional<Val> t0,
                                  std::optional<Val> ts) {
+  if (!spec->prog.ok)
+    note_interpreter_fallback("the ODE right-hand side " + spec->rhs_name,
+                              spec->prog.why);
   // Falling back to the interpreter is correct but ~30x slower, so make
   // it findable rather than silent.
   if (!spec->prog.ok && std::getenv("STANLI_DEBUG_ODE"))
@@ -1207,10 +1371,16 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
     const mir::Expr& a = actual.expr();
     RhsArg ra;
     const bool is_int = a.unsized.leaf == mir::UnsizedLeaf::Int;
-    if (is_int && a.data_only) {
+    if (is_int && a.data_only && !(in_write_array && needs_runtime_value(a))) {
       ra.is_int = true;
       ra.ints = actual.require_constant_ints("ODE integer argument");
-    } else if (a.data_only) {
+      if (a.unsized.depth) {
+        const auto* entry = actual.pure_value();
+        ra.dims = entry && !entry->dims.empty()
+                      ? entry->dims
+                      : logical_shape(actual.value(), "callback integer array");
+      }
+    } else if (a.data_only && !in_write_array) {
       // One evaluation, held in a local. Calling const_values(a) twice
       // and taking begin() from one temporary and end() from the other
       // is an invalid range, and it does not fail loudly: it appended
@@ -1219,15 +1389,40 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
       const std::vector<double>& vals =
           actual.require_constant_reals("ODE data argument");
       ra.len = (int)vals.size();
-      spec->x_r.insert(spec->x_r.end(), vals.begin(), vals.end());
+      if (a.unsized.depth == 0 && a.unsized.leaf == mir::UnsizedLeaf::Matrix) {
+        const auto* entry = actual.pure_value();
+        const auto dims =
+            entry && entry->dims.size() == 2
+                ? entry->dims
+                : logical_shape(actual.value(), "matrix callback argument");
+        ra.rows = dims.at(0);
+        ra.cols = dims.at(1);
+      }
+      if (a.unsized.depth) {
+        const auto* entry = actual.pure_value();
+        ra.dims = entry && !entry->dims.empty()
+                      ? entry->dims
+                      : logical_shape(actual.value(), "callback array");
+        const auto packed =
+            graph_container_order(vals, ra.dims, a.unsized.depth);
+        spec->x_r.insert(spec->x_r.end(), packed.begin(), packed.end());
+      } else {
+        spec->x_r.insert(spec->x_r.end(), vals.begin(), vals.end());
+      }
     } else {
-      if (is_int)
+      if (is_int && !in_write_array)
         fail(e.name + ": integer argument " + std::to_string(k - fixed + 1) +
                  " is not data",
              e.raw);
       const Val v = actual.value();
+      ra.is_int = is_int;
       ra.is_param = true;
       ra.len = (int)g.slots[v.slot].len;
+      if (a.unsized.depth) ra.dims = logical_shape(v, "callback array");
+      if (v.si.kind == ViewKind::Matrix) {
+        ra.rows = v.si.rows;
+        ra.cols = v.si.cols;
+      }
       param_parts.push_back(v);
     }
     rargs.push_back(std::move(ra));
@@ -1270,6 +1465,15 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
 // The integrate_ode_* family.
 std::optional<Lowering::Val> Lowering::lower_ode_fn(const mir::Expr& e,
                                                     CallArguments& actuals) {
+  if (in_write_array) {
+    const auto call = mir::ode_call(e.name);
+    if (call && call->method != mir::OdeMethod::Adjoint &&
+        (call->legacy ? e.args.size() == 10 : call->with_tolerance)) {
+      const size_t begin = call->legacy ? 7 : 4;
+      for (size_t k = begin; k < begin + 3; ++k)
+        if (needs_runtime_value(e.args[k])) return lower_program_expression(e);
+    }
+  }
   if (auto v = lower_ode_variadic(e, actuals)) return v;
   const auto call = mir::ode_call(e.name);
   if (call && call->legacy) {

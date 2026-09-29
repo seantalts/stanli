@@ -87,7 +87,7 @@ struct MirVariadicSystem {
       size_t theta_at = 0, xr_at = 0;
       for (const RhsArg& arg : spec->args) {
         if (arg.is_int) {
-          ints.push_back(arg.ints);
+          ints.push_back(callback_integer_values(arg, theta.data(), &theta_at));
           continue;
         }
         std::vector<T> values;
@@ -102,7 +102,8 @@ struct MirVariadicSystem {
         reals.push_back(std::move(values));
       }
       MirInterp<T> ev(*spec->funs(), "algebraic system");
-      result = ev.call(*system, reals, ints);
+      result =
+          interpret_retained_callback(ev, *system, reals, ints, spec->args);
     }
     Eigen::Matrix<T, Eigen::Dynamic, 1> out((Eigen::Index)result.size());
     for (size_t i = 0; i < result.size(); ++i) out((Eigen::Index)i) = result[i];
@@ -111,25 +112,27 @@ struct MirVariadicSystem {
 };
 
 Eigen::VectorXd solve_double(const AlgebraSpec& spec, const Desc& x_desc,
-                             const Desc& y_desc) {
+                             const Desc& y_desc,
+                             const double* controls = nullptr) {
+  const double relative = controls ? controls[0] : spec.relative_tolerance;
+  const double function = controls ? controls[1] : spec.function_tolerance;
+  const int64_t steps =
+      controls ? static_cast<int64_t>(controls[2]) : spec.max_num_steps;
   Eigen::Map<const Eigen::VectorXd> x(x_desc.data, x_desc.len);
   Eigen::Map<const Eigen::VectorXd> y(y_desc.data, y_desc.len);
   if (spec.variadic) {
     if (spec.solver == AlgebraSpec::Newton)
-      return stan::math::solve_newton_tol(
-          MirVariadicSystem{&spec}, x, spec.relative_tolerance,
-          spec.function_tolerance, spec.max_num_steps, nullptr, y);
-    return stan::math::solve_powell_tol(
-        MirVariadicSystem{&spec}, x, spec.relative_tolerance,
-        spec.function_tolerance, spec.max_num_steps, nullptr, y);
+      return stan::math::solve_newton_tol(MirVariadicSystem{&spec}, x, relative,
+                                          function, steps, nullptr, y);
+    return stan::math::solve_powell_tol(MirVariadicSystem{&spec}, x, relative,
+                                        function, steps, nullptr, y);
   }
   if (spec.solver == AlgebraSpec::Newton)
-    return stan::math::algebra_solver_newton(
-        MirSystem{&spec}, x, y, spec.x_r, spec.x_i, nullptr,
-        spec.relative_tolerance, spec.function_tolerance, spec.max_num_steps);
-  return stan::math::algebra_solver(
-      MirSystem{&spec}, x, y, spec.x_r, spec.x_i, nullptr,
-      spec.relative_tolerance, spec.function_tolerance, spec.max_num_steps);
+    return stan::math::algebra_solver_newton(MirSystem{&spec}, x, y, spec.x_r,
+                                             spec.x_i, nullptr, relative,
+                                             function, steps);
+  return stan::math::algebra_solver(MirSystem{&spec}, x, y, spec.x_r, spec.x_i,
+                                    nullptr, relative, function, steps);
 }
 
 void algebra_fwd(KernelCtx& ctx) {
@@ -138,14 +141,20 @@ void algebra_fwd(KernelCtx& ctx) {
   const bool y_autodiff = (ctx.variant & 0x1u) != 0;
 
   if (values_only() || !y_autodiff) {
-    const Eigen::VectorXd solved = solve_double(spec, ctx.in[0], ctx.in[1]);
+    const double* controls = ctx.n_in == 3 ? ctx.in[2].data : nullptr;
+    if (controls && ctx.in[2].len != 3)
+      throw std::invalid_argument("algebra solver control count mismatch");
+    const Eigen::VectorXd solved =
+        solve_double(spec, ctx.in[0], ctx.in[1], controls);
     if (solved.size() != ctx.out.len)
       throw std::runtime_error("algebra_solver: result size mismatch");
     std::copy(solved.data(), solved.data() + solved.size(), ctx.out.data);
-    if (!values_only() && ctx.out.len != 0 && P != 0)
-      std::fill(ctx.scratch, ctx.scratch + ctx.out.len * P, 0.0);
     return;
   }
+
+  if (ctx.n_in != 2)
+    throw std::invalid_argument(
+        "runtime algebra controls require a value-only solve");
 
   // Evaluate the exact legacy var overload inside stan-math's Jacobian
   // helper.  Besides keeping the root solve/checks in one implementation,
@@ -201,6 +210,7 @@ void algebra_bwd(KernelCtx& ctx) {
 }
 
 int64_t algebra_scratch(const Op& op, const Slot* slots) {
+  if ((op.variant & 0x1u) == 0) return 0;
   return slots[op.out].len * slots[op.in[1]].len;
 }
 

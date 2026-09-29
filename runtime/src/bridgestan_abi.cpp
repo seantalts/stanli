@@ -38,6 +38,7 @@
 
 #include <stanli/bridgestan_internal.hpp>
 #include <stanli/compile.hpp>
+#include <stanli/execution_report.hpp>
 #include <stanli/executor_pool.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/message_sink.hpp>
@@ -368,6 +369,14 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
         m->n_gq_start = wa.n_gq_start;
       }
     }
+    stanli::report_execution_host("bridgestan",
+                                  m->wa_interp ? "mir_interpreter"
+                                  : m->wa_ex   ? "bound_graph"
+                                               : "parameters_only",
+                                  m->cm.write_array && m->cm.write_array->interp
+                                      ? (m->wa_interp ? "passed" : "failed")
+                                      : "not_required",
+                                  probe_failure);
     {
       const std::string note =
           stanli::interpreter_warning(m->cm, probe_failure);

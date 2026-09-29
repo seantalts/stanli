@@ -44,7 +44,8 @@ std::vector<double> promoted_reals(const Entry& value) {
 
 std::vector<double> storage_order(const mir::Expr& expr, const Entry& value) {
   std::vector<double> values = promoted_reals(value);
-  const bool matrix = expr.type_ == "UMatrix";
+  const bool matrix =
+      expr.unsized.depth == 0 && expr.unsized.leaf == mir::UnsizedLeaf::Matrix;
   const bool nested_matrix =
       expr.unsized.depth != 0 && expr.unsized.leaf == mir::UnsizedLeaf::Matrix;
   if (matrix || value.dims.size() <= 1) return values;
@@ -82,10 +83,20 @@ void pack_data_callback(RetainedCallback& spec,
   for (size_t i = begin; i < end; ++i) {
     Entry value = eval(args[i]);
     RhsArg binding;
+    if (args[i].unsized.depth) binding.dims = value.dims;
     if (args[i].unsized.leaf == mir::UnsizedLeaf::Int) {
       binding.is_int = true;
       binding.ints = int_values(value, "integer callback argument");
     } else {
+      if (args[i].unsized.depth == 0 &&
+          args[i].unsized.leaf == mir::UnsizedLeaf::Matrix) {
+        if (value.dims.size() != 2)
+          throw CompileError("matrix callback argument " +
+                             std::to_string(i - begin + 1) +
+                             " has incomplete logical dimensions");
+        binding.rows = value.dims[0];
+        binding.cols = value.dims[1];
+      }
       std::vector<double> values = storage_order(args[i], value);
       if (values.size() > (size_t)std::numeric_limits<int>::max())
         throw CompileError("higher-order callback argument is too large");

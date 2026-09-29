@@ -220,7 +220,16 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
     if (s.cond.data_only) return true;
   }
   if (s.kind == mir::Stmt::For) {
-    const long lo = eval_int(s.lower), hi = eval_int(s.upper);
+    if (!invariant_for_upper(s)) return true;
+    long lo, hi;
+    try {
+      lo = eval_int(s.lower);
+      hi = eval_int(s.upper);
+    } catch (const CompileError&) {
+      if (needs_runtime_value(s.lower) || needs_runtime_value(s.upper))
+        return true;
+      throw;
+    }
     if (lo > hi) return false;
     const auto old = int_env.find(s.loopvar);
     const bool had_old = old != int_env.end();
@@ -307,6 +316,7 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   auto prog = std::make_shared<IslandProg>();
   ProgramCompiler c{*prog, fun_defs};
   c.in_write_array = in_write_array;
+  c.checked_region = s;
   // Non-returning statement calls may print or reject. A register program
   // would replay them during reverse mode, so ProgramCompiler refuses them
   // until necessity islands have an execute-once effect path.
@@ -1494,15 +1504,25 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       }
       fail("unsupported statement function " + s.fn_name);
     case mir::Stmt::For: {
+      // Unrolled graphs and counted structured loops capture their upper
+      // bound. Mutable or effectful bounds need the register loop's repeated
+      // condition, including its final failed test.
+      if (expr_effectful(s.lower) || !invariant_for_upper(s)) {
+        lower_runtime_ifelse(s);
+        return;
+      }
       long lo = 0, hi = 0;
       try {
         lo = eval_int(s.lower);
         hi = eval_int(s.upper);
       } catch (const CompileError&) {
-        if (in_write_array ||
-            !(needs_runtime_value(s.lower) || needs_runtime_value(s.upper)) ||
-            !try_lower_region(s))
+        if (!(needs_runtime_value(s.lower) || needs_runtime_value(s.upper)))
           throw;
+        if (in_write_array) {
+          lower_runtime_ifelse(s);
+          return;
+        }
+        if (!try_lower_region(s)) lower_runtime_ifelse(s);
         return;
       }
       if (lo > hi) {

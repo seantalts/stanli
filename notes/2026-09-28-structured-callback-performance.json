@@ -1,0 +1,2993 @@
+{
+  "solve-summary": {
+    "loop-8-generated": {
+      "oracle_ns": {
+        "median": 2265.6000000000004,
+        "mad": 124.45000000000005
+      },
+      "candidate_ns": {
+        "median": 1564.05,
+        "mad": 91.65000000000009
+      }
+    },
+    "loop-8-structured": {
+      "oracle_ns": {
+        "median": 2254.15,
+        "mad": 127.10000000000014
+      },
+      "candidate_ns": {
+        "median": 2746.8999999999996,
+        "mad": 106.79999999999995
+      },
+      "prep_ns": {
+        "median": 426333.5,
+        "mad": 9854.5
+      }
+    },
+    "loop-8-segments": {
+      "oracle_ns": {
+        "median": 2367.15,
+        "mad": 11.950000000000273
+      },
+      "candidate_ns": {
+        "median": 2814.6,
+        "mad": 7.7999999999999545
+      },
+      "prep_ns": {
+        "median": 395375.0,
+        "mad": 4770.5
+      }
+    },
+    "loop-128-generated": {
+      "oracle_ns": {
+        "median": 18062.5,
+        "mad": 85.45000000000073
+      },
+      "candidate_ns": {
+        "median": 12891.15,
+        "mad": 15.599999999999454
+      }
+    },
+    "loop-128-structured": {
+      "oracle_ns": {
+        "median": 18023.449999999997,
+        "mad": 114.04999999999745
+      },
+      "candidate_ns": {
+        "median": 27952.1,
+        "mad": 405.7499999999982
+      },
+      "prep_ns": {
+        "median": 410250.0,
+        "mad": 15395.5
+      }
+    },
+    "loop-128-segments": {
+      "oracle_ns": {
+        "median": 20030.75,
+        "mad": 30.200000000000728
+      },
+      "candidate_ns": {
+        "median": 30297.4,
+        "mad": 193.75
+      },
+      "prep_ns": {
+        "median": 393937.5,
+        "mad": 2771.0
+      }
+    },
+    "loop-2048-generated": {
+      "oracle_ns": {
+        "median": 272010.45,
+        "mad": 1055.6000000000058
+      },
+      "candidate_ns": {
+        "median": 196524.3,
+        "mad": 1760.3999999999942
+      }
+    },
+    "loop-2048-structured": {
+      "oracle_ns": {
+        "median": 296152.75,
+        "mad": 8503.600000000006
+      },
+      "candidate_ns": {
+        "median": 469590.25,
+        "mad": 21072.899999999994
+      },
+      "prep_ns": {
+        "median": 385854.0,
+        "mad": 9187.5
+      }
+    },
+    "loop-2048-segments": {
+      "oracle_ns": {
+        "median": 303739.4,
+        "mad": 357.75
+      },
+      "candidate_ns": {
+        "median": 488982.65,
+        "mad": 8006.899999999994
+      },
+      "prep_ns": {
+        "median": 421208.0,
+        "mad": 23145.5
+      }
+    },
+    "branch-8-structured": {
+      "oracle_ns": {
+        "median": 50917.7,
+        "mad": 182.8000000000029
+      },
+      "candidate_ns": {
+        "median": 73384.35,
+        "mad": 5025.5
+      },
+      "prep_ns": {
+        "median": 673312.5,
+        "mad": 49812.5
+      }
+    },
+    "branch-8-segments": {
+      "oracle_ns": {
+        "median": 46280.7,
+        "mad": 571.3499999999949
+      },
+      "candidate_ns": {
+        "median": 70438.05,
+        "mad": 2901.600000000006
+      },
+      "prep_ns": {
+        "median": 743229.5,
+        "mad": 10812.5
+      }
+    },
+    "branch-128-structured": {
+      "oracle_ns": {
+        "median": 318663.0,
+        "mad": 2453.149999999994
+      },
+      "candidate_ns": {
+        "median": 451420.8,
+        "mad": 7613.0500000000175
+      },
+      "prep_ns": {
+        "median": 704104.0,
+        "mad": 13520.5
+      }
+    },
+    "branch-128-segments": {
+      "oracle_ns": {
+        "median": 297273.94999999995,
+        "mad": 5151.549999999988
+      },
+      "candidate_ns": {
+        "median": 422479.69999999995,
+        "mad": 8234.350000000006
+      },
+      "prep_ns": {
+        "median": 701166.5,
+        "mad": 35104.5
+      }
+    },
+    "branch-2048-structured": {
+      "oracle_ns": {
+        "median": 5003524.35,
+        "mad": 154388.90000000037
+      },
+      "candidate_ns": {
+        "median": 7305583.4,
+        "mad": 268058.9499999997
+      },
+      "prep_ns": {
+        "median": 716708.5,
+        "mad": 8541.5
+      }
+    },
+    "branch-2048-segments": {
+      "oracle_ns": {
+        "median": 4880048.55,
+        "mad": 150031.1499999999
+      },
+      "candidate_ns": {
+        "median": 6470670.2,
+        "mad": 235566.05000000028
+      },
+      "prep_ns": {
+        "median": 696542.0,
+        "mad": 38042.0
+      }
+    }
+  },
+  "solve-raw": [
+    {
+      "repeat": 0,
+      "case": "loop",
+      "N": 8,
+      "mode": "generated",
+      "oracle_ns": 2536.4,
+      "candidate_ns": 1656.2,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "loop",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 2115.6,
+      "candidate_ns": 2542.7,
+      "prep_ns": 442709,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "loop",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 2396.9,
+      "candidate_ns": 2826.0,
+      "prep_ns": 397250,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "branch",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 51050.0,
+      "candidate_ns": 75108.3,
+      "prep_ns": 751292,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "branch",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 51954.2,
+      "candidate_ns": 85392.7,
+      "prep_ns": 759375,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "loop",
+      "N": 128,
+      "mode": "generated",
+      "oracle_ns": 17938.5,
+      "candidate_ns": 12909.3,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "loop",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 18057.3,
+      "candidate_ns": 27757.3,
+      "prep_ns": 397000,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "loop",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 19995.8,
+      "candidate_ns": 30226.0,
+      "prep_ns": 396625,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "branch",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 321754.2,
+      "candidate_ns": 451778.1,
+      "prep_ns": 731042,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "branch",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 302564.6,
+      "candidate_ns": 428601.0,
+      "prep_ns": 731625,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "loop",
+      "N": 2048,
+      "mode": "generated",
+      "oracle_ns": 271861.2,
+      "candidate_ns": 194305.5,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "loop",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 271736.0,
+      "candidate_ns": 448569.5,
+      "prep_ns": 383125,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "loop",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 309493.2,
+      "candidate_ns": 482458.3,
+      "prep_ns": 396708,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "branch",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 5115027.7,
+      "candidate_ns": 7465708.3,
+      "prep_ns": 717292,
+      "exact": true
+    },
+    {
+      "repeat": 0,
+      "case": "branch",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 4609861.2,
+      "candidate_ns": 6511368.2,
+      "prep_ns": 730625,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "loop",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 2372.9,
+      "candidate_ns": 2770.8,
+      "prep_ns": 393500,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "loop",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 2372.9,
+      "candidate_ns": 2841.7,
+      "prep_ns": 428708,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "loop",
+      "N": 8,
+      "mode": "generated",
+      "oracle_ns": 2383.3,
+      "candidate_ns": 1650.0,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "branch",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 46453.1,
+      "candidate_ns": 68488.5,
+      "prep_ns": 737750,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "branch",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 47112.5,
+      "candidate_ns": 64634.4,
+      "prep_ns": 637000,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "loop",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 20029.2,
+      "candidate_ns": 30034.4,
+      "prep_ns": 391083,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "loop",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 20240.6,
+      "candidate_ns": 31069.8,
+      "prep_ns": 424000,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "loop",
+      "N": 128,
+      "mode": "generated",
+      "oracle_ns": 18017.7,
+      "candidate_ns": 12888.5,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "branch",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 292261.5,
+      "candidate_ns": 423857.3,
+      "prep_ns": 665583,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "branch",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 284844.8,
+      "candidate_ns": 409541.7,
+      "prep_ns": 686959,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "loop",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 303805.3,
+      "candidate_ns": 476500.2,
+      "prep_ns": 400208,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "loop",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 305993.2,
+      "candidate_ns": 492639.0,
+      "prep_ns": 428125,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "loop",
+      "N": 2048,
+      "mode": "generated",
+      "oracle_ns": 279791.7,
+      "candidate_ns": 203625.0,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "branch",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 4909923.5,
+      "candidate_ns": 6429972.2,
+      "prep_ns": 769583,
+      "exact": true
+    },
+    {
+      "repeat": 1,
+      "case": "branch",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 5182902.8,
+      "candidate_ns": 7661173.7,
+      "prep_ns": 730083,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "loop",
+      "N": 8,
+      "mode": "generated",
+      "oracle_ns": 2131.2,
+      "candidate_ns": 1453.2,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "loop",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 2118.7,
+      "candidate_ns": 2628.1,
+      "prep_ns": 393417,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "loop",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 2356.2,
+      "candidate_ns": 2810.4,
+      "prep_ns": 389417,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "branch",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 51108.3,
+      "candidate_ns": 73929.1,
+      "prep_ns": 742417,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "branch",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 52719.8,
+      "candidate_ns": 78289.6,
+      "prep_ns": 746667,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "loop",
+      "N": 128,
+      "mode": "generated",
+      "oracle_ns": 17894.8,
+      "candidate_ns": 12878.1,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "loop",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 17942.7,
+      "candidate_ns": 27447.9,
+      "prep_ns": 383750,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "loop",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 20032.3,
+      "candidate_ns": 30368.8,
+      "prep_ns": 395959,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "branch",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 320478.1,
+      "candidate_ns": 455317.7,
+      "prep_ns": 714000,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "branch",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 298640.6,
+      "candidate_ns": 421102.1,
+      "prep_ns": 742958,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "loop",
+      "N": 2048,
+      "mode": "generated",
+      "oracle_ns": 272159.7,
+      "candidate_ns": 194305.5,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "loop",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 290027.8,
+      "candidate_ns": 448465.2,
+      "prep_ns": 388583,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "loop",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 304146.0,
+      "candidate_ns": 495507.0,
+      "prep_ns": 488583,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "branch",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 4892021.0,
+      "candidate_ns": 7145458.5,
+      "prep_ns": 747500,
+      "exact": true
+    },
+    {
+      "repeat": 2,
+      "case": "branch",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 4598146.0,
+      "candidate_ns": 6188048.5,
+      "prep_ns": 662459,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "loop",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 2354.2,
+      "candidate_ns": 2817.7,
+      "prep_ns": 400875,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "loop",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 2414.6,
+      "candidate_ns": 2841.7,
+      "prep_ns": 423959,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "loop",
+      "N": 8,
+      "mode": "generated",
+      "oracle_ns": 2372.9,
+      "candidate_ns": 1655.2,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "branch",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 45661.4,
+      "candidate_ns": 69681.3,
+      "prep_ns": 760833,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "branch",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 45753.1,
+      "candidate_ns": 65057.3,
+      "prep_ns": 618042,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "loop",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 20056.2,
+      "candidate_ns": 29581.2,
+      "prep_ns": 389959,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "loop",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 20057.3,
+      "candidate_ns": 30321.9,
+      "prep_ns": 427291,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "loop",
+      "N": 128,
+      "mode": "generated",
+      "oracle_ns": 18109.4,
+      "candidate_ns": 12930.2,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "branch",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 295907.3,
+      "candidate_ns": 410243.8,
+      "prep_ns": 655500,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "branch",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 286270.8,
+      "candidate_ns": 401064.6,
+      "prep_ns": 631209,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "loop",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 303673.5,
+      "candidate_ns": 481125.0,
+      "prep_ns": 399417,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "loop",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 302277.7,
+      "candidate_ns": 489145.8,
+      "prep_ns": 423042,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "loop",
+      "N": 2048,
+      "mode": "generated",
+      "oracle_ns": 270680.5,
+      "candidate_ns": 195263.8,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "branch",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 4880708.3,
+      "candidate_ns": 7051909.7,
+      "prep_ns": 662250,
+      "exact": true
+    },
+    {
+      "repeat": 3,
+      "case": "branch",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 5132923.7,
+      "candidate_ns": 7486111.0,
+      "prep_ns": 716125,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "loop",
+      "N": 8,
+      "mode": "generated",
+      "oracle_ns": 2134.4,
+      "candidate_ns": 1478.1,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "loop",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 2136.4,
+      "candidate_ns": 2652.1,
+      "prep_ns": 392958,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "loop",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 2388.5,
+      "candidate_ns": 2811.5,
+      "prep_ns": 391334,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "branch",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 51092.7,
+      "candidate_ns": 72839.6,
+      "prep_ns": 709625,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "branch",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 46108.3,
+      "candidate_ns": 71194.8,
+      "prep_ns": 739792,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "loop",
+      "N": 128,
+      "mode": "generated",
+      "oracle_ns": 19220.8,
+      "candidate_ns": 12893.8,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "loop",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 17989.6,
+      "candidate_ns": 28146.9,
+      "prep_ns": 377833,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "loop",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 20077.1,
+      "candidate_ns": 30421.9,
+      "prep_ns": 391916,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "branch",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 318167.7,
+      "candidate_ns": 451063.5,
+      "prep_ns": 707667,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "branch",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 281855.2,
+      "candidate_ns": 412132.3,
+      "prep_ns": 735792,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "loop",
+      "N": 2048,
+      "mode": "generated",
+      "oracle_ns": 271229.2,
+      "candidate_ns": 197826.3,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "loop",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 303319.5,
+      "candidate_ns": 495541.7,
+      "prep_ns": 379750,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "loop",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 303430.5,
+      "candidate_ns": 497138.8,
+      "prep_ns": 442208,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "branch",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 4641527.8,
+      "candidate_ns": 6749652.8,
+      "prep_ns": 701833,
+      "exact": true
+    },
+    {
+      "repeat": 4,
+      "case": "branch",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 4879388.8,
+      "candidate_ns": 6282159.8,
+      "prep_ns": 654750,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "loop",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 2361.4,
+      "candidate_ns": 2839.6,
+      "prep_ns": 440000,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "loop",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 2371.9,
+      "candidate_ns": 2955.2,
+      "prep_ns": 429667,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "loop",
+      "N": 8,
+      "mode": "generated",
+      "oracle_ns": 2158.3,
+      "candidate_ns": 1437.5,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "branch",
+      "N": 8,
+      "mode": "segments",
+      "oracle_ns": 45757.3,
+      "candidate_ns": 66584.4,
+      "prep_ns": 668542,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "branch",
+      "N": 8,
+      "mode": "structured",
+      "oracle_ns": 50785.4,
+      "candidate_ns": 81978.1,
+      "prep_ns": 628958,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "loop",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 19931.2,
+      "candidate_ns": 31046.9,
+      "prep_ns": 449417,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "loop",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 17876.1,
+      "candidate_ns": 27644.8,
+      "prep_ns": 423500,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "loop",
+      "N": 128,
+      "mode": "generated",
+      "oracle_ns": 18107.3,
+      "candidate_ns": 12865.7,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "branch",
+      "N": 128,
+      "mode": "segments",
+      "oracle_ns": 304469.8,
+      "candidate_ns": 458283.3,
+      "prep_ns": 670708,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "branch",
+      "N": 128,
+      "mode": "structured",
+      "oracle_ns": 319158.3,
+      "candidate_ns": 462750.0,
+      "prep_ns": 700541,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "loop",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 302416.5,
+      "candidate_ns": 599632.0,
+      "prep_ns": 447250,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "loop",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 271368.2,
+      "candidate_ns": 450034.7,
+      "prep_ns": 373583,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "loop",
+      "N": 2048,
+      "mode": "generated",
+      "oracle_ns": 274006.8,
+      "candidate_ns": 197784.8,
+      "prep_ns": null,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "branch",
+      "N": 2048,
+      "mode": "segments",
+      "oracle_ns": 5207013.8,
+      "candidate_ns": 7305944.3,
+      "prep_ns": 834791,
+      "exact": true
+    },
+    {
+      "repeat": 5,
+      "case": "branch",
+      "N": 2048,
+      "mode": "structured",
+      "oracle_ns": 4607472.2,
+      "candidate_ns": 6906201.3,
+      "prep_ns": 713000,
+      "exact": true
+    }
+  ],
+  "local-results": [
+    {
+      "N": 1,
+      "checks": 96,
+      "structured_prep_ns": 2293710.0,
+      "register_prep_ns": 274958,
+      "first_gradient_ns": 181375,
+      "post_checks_gradient_ns": 208,
+      "register_instructions": 7,
+      "graph_ops": 4,
+      "executor_value_bytes": 56,
+      "executor_adjoint_bytes": 56,
+      "register_var_ns": 95.776,
+      "structured_gradient_ns": 69.5446,
+      "structured_value_ns": 34.6785,
+      "case": "loop",
+      "mode": "structured"
+    },
+    {
+      "N": 1,
+      "checks": 96,
+      "structured_prep_ns": 565250,
+      "register_prep_ns": 53833,
+      "first_gradient_ns": 45625,
+      "post_checks_gradient_ns": 83,
+      "register_instructions": 7,
+      "graph_ops": 4,
+      "executor_value_bytes": 56,
+      "executor_adjoint_bytes": 56,
+      "register_var_ns": 108.807,
+      "structured_gradient_ns": 64.3315,
+      "structured_value_ns": 37.5482,
+      "case": "loop",
+      "mode": "segments"
+    },
+    {
+      "N": 8,
+      "checks": 96,
+      "structured_prep_ns": 546958,
+      "register_prep_ns": 69167,
+      "first_gradient_ns": 45333,
+      "post_checks_gradient_ns": 375,
+      "register_instructions": 42,
+      "graph_ops": 4,
+      "executor_value_bytes": 56,
+      "executor_adjoint_bytes": 56,
+      "register_var_ns": 237.774,
+      "structured_gradient_ns": 313.726,
+      "structured_value_ns": 112.327,
+      "case": "loop",
+      "mode": "structured"
+    },
+    {
+      "N": 8,
+      "checks": 96,
+      "structured_prep_ns": 516208,
+      "register_prep_ns": 57125,
+      "first_gradient_ns": 31916,
+      "post_checks_gradient_ns": 292,
+      "register_instructions": 42,
+      "graph_ops": 4,
+      "executor_value_bytes": 56,
+      "executor_adjoint_bytes": 56,
+      "register_var_ns": 257.736,
+      "structured_gradient_ns": 287.005,
+      "structured_value_ns": 126.29,
+      "case": "loop",
+      "mode": "segments"
+    },
+    {
+      "N": 128,
+      "checks": 96,
+      "structured_prep_ns": 532750,
+      "register_prep_ns": 220750,
+      "first_gradient_ns": 99583,
+      "post_checks_gradient_ns": 4500,
+      "register_instructions": 642,
+      "graph_ops": 4,
+      "executor_value_bytes": 56,
+      "executor_adjoint_bytes": 56,
+      "register_var_ns": 2711.66,
+      "structured_gradient_ns": 3806.79,
+      "structured_value_ns": 1487.27,
+      "case": "loop",
+      "mode": "structured"
+    },
+    {
+      "N": 128,
+      "checks": 96,
+      "structured_prep_ns": 564375,
+      "register_prep_ns": 230625,
+      "first_gradient_ns": 68167,
+      "post_checks_gradient_ns": 4333,
+      "register_instructions": 642,
+      "graph_ops": 4,
+      "executor_value_bytes": 56,
+      "executor_adjoint_bytes": 56,
+      "register_var_ns": 2521.37,
+      "structured_gradient_ns": 4320.99,
+      "structured_value_ns": 1496.53,
+      "case": "loop",
+      "mode": "segments"
+    },
+    {
+      "N": 2048,
+      "checks": 96,
+      "structured_prep_ns": 476959,
+      "register_prep_ns": 2292040.0,
+      "first_gradient_ns": 761458,
+      "post_checks_gradient_ns": 61500,
+      "register_instructions": 10242,
+      "graph_ops": 4,
+      "executor_value_bytes": 56,
+      "executor_adjoint_bytes": 56,
+      "register_var_ns": 44007.9,
+      "structured_gradient_ns": 62306,
+      "structured_value_ns": 22791.7,
+      "case": "loop",
+      "mode": "structured"
+    },
+    {
+      "N": 2048,
+      "checks": 96,
+      "structured_prep_ns": 549375,
+      "register_prep_ns": 2569620.0,
+      "first_gradient_ns": 405417,
+      "post_checks_gradient_ns": 67791,
+      "register_instructions": 10242,
+      "graph_ops": 4,
+      "executor_value_bytes": 56,
+      "executor_adjoint_bytes": 56,
+      "register_var_ns": 40549.8,
+      "structured_gradient_ns": 65422.2,
+      "structured_value_ns": 22904.8,
+      "case": "loop",
+      "mode": "segments"
+    },
+    {
+      "N": 0,
+      "checks": 96,
+      "structured_prep_ns": 768833,
+      "register_prep_ns": 63208,
+      "first_gradient_ns": 21750,
+      "post_checks_gradient_ns": 5083,
+      "register_instructions": 49,
+      "graph_ops": 5,
+      "executor_value_bytes": 64,
+      "executor_adjoint_bytes": 64,
+      "register_var_ns": 111.581,
+      "structured_gradient_ns": 64.603,
+      "structured_value_ns": 44.2721,
+      "case": "branch",
+      "mode": "structured"
+    },
+    {
+      "N": 0,
+      "checks": 96,
+      "structured_prep_ns": 831584,
+      "register_prep_ns": 63625,
+      "first_gradient_ns": 27500,
+      "post_checks_gradient_ns": 4875,
+      "register_instructions": 49,
+      "graph_ops": 5,
+      "executor_value_bytes": 64,
+      "executor_adjoint_bytes": 64,
+      "register_var_ns": 101.075,
+      "structured_gradient_ns": 61.8655,
+      "structured_value_ns": 43.5703,
+      "case": "branch",
+      "mode": "segments"
+    },
+    {
+      "N": 1,
+      "checks": 96,
+      "structured_prep_ns": 775125,
+      "register_prep_ns": 67667,
+      "first_gradient_ns": 36625,
+      "post_checks_gradient_ns": 10583,
+      "register_instructions": 49,
+      "graph_ops": 5,
+      "executor_value_bytes": 64,
+      "executor_adjoint_bytes": 64,
+      "register_var_ns": 171.692,
+      "structured_gradient_ns": 133.177,
+      "structured_value_ns": 73.6332,
+      "case": "branch",
+      "mode": "structured"
+    },
+    {
+      "N": 1,
+      "checks": 96,
+      "structured_prep_ns": 819625,
+      "register_prep_ns": 63541,
+      "first_gradient_ns": 33375,
+      "post_checks_gradient_ns": 10833,
+      "register_instructions": 49,
+      "graph_ops": 5,
+      "executor_value_bytes": 64,
+      "executor_adjoint_bytes": 64,
+      "register_var_ns": 187.464,
+      "structured_gradient_ns": 133.191,
+      "structured_value_ns": 99.267,
+      "case": "branch",
+      "mode": "segments"
+    },
+    {
+      "N": 8,
+      "checks": 96,
+      "structured_prep_ns": 778208,
+      "register_prep_ns": 66083,
+      "first_gradient_ns": 47417,
+      "post_checks_gradient_ns": 14084,
+      "register_instructions": 49,
+      "graph_ops": 5,
+      "executor_value_bytes": 64,
+      "executor_adjoint_bytes": 64,
+      "register_var_ns": 663.889,
+      "structured_gradient_ns": 605.426,
+      "structured_value_ns": 297.245,
+      "case": "branch",
+      "mode": "structured"
+    },
+    {
+      "N": 8,
+      "checks": 96,
+      "structured_prep_ns": 832292,
+      "register_prep_ns": 63583,
+      "first_gradient_ns": 43500,
+      "post_checks_gradient_ns": 11917,
+      "register_instructions": 49,
+      "graph_ops": 5,
+      "executor_value_bytes": 64,
+      "executor_adjoint_bytes": 64,
+      "register_var_ns": 747.429,
+      "structured_gradient_ns": 682.508,
+      "structured_value_ns": 496.253,
+      "case": "branch",
+      "mode": "segments"
+    },
+    {
+      "N": 128,
+      "checks": 96,
+      "structured_prep_ns": 783875,
+      "register_prep_ns": 69541,
+      "first_gradient_ns": 184917,
+      "post_checks_gradient_ns": 126958,
+      "register_instructions": 49,
+      "graph_ops": 5,
+      "executor_value_bytes": 64,
+      "executor_adjoint_bytes": 64,
+      "register_var_ns": 8963.28,
+      "structured_gradient_ns": 8450.21,
+      "structured_value_ns": 4011.23,
+      "case": "branch",
+      "mode": "structured"
+    },
+    {
+      "N": 128,
+      "checks": 96,
+      "structured_prep_ns": 753084,
+      "register_prep_ns": 58459,
+      "first_gradient_ns": 122041,
+      "post_checks_gradient_ns": 60833,
+      "register_instructions": 49,
+      "graph_ops": 5,
+      "executor_value_bytes": 64,
+      "executor_adjoint_bytes": 64,
+      "register_var_ns": 9622.12,
+      "structured_gradient_ns": 9753.07,
+      "structured_value_ns": 5618.3,
+      "case": "branch",
+      "mode": "segments"
+    },
+    {
+      "N": 2048,
+      "checks": 96,
+      "structured_prep_ns": 687916,
+      "register_prep_ns": 60334,
+      "first_gradient_ns": 1793790.0,
+      "post_checks_gradient_ns": 1811380.0,
+      "register_instructions": 49,
+      "graph_ops": 5,
+      "executor_value_bytes": 64,
+      "executor_adjoint_bytes": 64,
+      "register_var_ns": 158942,
+      "structured_gradient_ns": 120049,
+      "structured_value_ns": 71387.7,
+      "case": "branch",
+      "mode": "structured"
+    },
+    {
+      "N": 2048,
+      "checks": 96,
+      "structured_prep_ns": 831833,
+      "register_prep_ns": 66000,
+      "first_gradient_ns": 1139580.0,
+      "post_checks_gradient_ns": 887375,
+      "register_instructions": 49,
+      "graph_ops": 5,
+      "executor_value_bytes": 64,
+      "executor_adjoint_bytes": 64,
+      "register_var_ns": 145068,
+      "structured_gradient_ns": 168285,
+      "structured_value_ns": 96849.1,
+      "case": "branch",
+      "mode": "segments"
+    }
+  ],
+  "solver-proof": [
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "structured",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "structured",
+      "point": 2,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "segments",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 8,
+      "mode": "segments",
+      "point": 2,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "structured",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "structured",
+      "point": 2,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "segments",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 8,
+      "mode": "segments",
+      "point": 2,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "structured",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "structured",
+      "point": 2,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "segments",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 128,
+      "mode": "segments",
+      "point": 2,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "structured",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "structured",
+      "point": 2,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "segments",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 128,
+      "mode": "segments",
+      "point": 2,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "structured",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "structured",
+      "point": 2,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "segments",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "loop",
+      "N": 2048,
+      "mode": "segments",
+      "point": 2,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "structured",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "structured",
+      "point": 2,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "segments",
+      "point": 1,
+      "exact": true
+    },
+    {
+      "case": "branch",
+      "N": 2048,
+      "mode": "segments",
+      "point": 2,
+      "exact": true
+    }
+  ],
+  "oracle-extra": [
+    {
+      "model": "structured_callback_loop",
+      "N": 0,
+      "point": 0,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 0,
+      "point": 1,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 0,
+      "point": 2,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 1,
+      "point": 0,
+      "values": 7,
+      "max_ulp": 0,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 1,
+      "point": 1,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 1,
+      "point": 2,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 8,
+      "point": 0,
+      "values": 7,
+      "max_ulp": 0,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 8,
+      "point": 1,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 8,
+      "point": 2,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 128,
+      "point": 0,
+      "values": 7,
+      "max_ulp": 0,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 128,
+      "point": 1,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 128,
+      "point": 2,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 2048,
+      "point": 0,
+      "values": 7,
+      "max_ulp": 0,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 2048,
+      "point": 1,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_loop",
+      "N": 2048,
+      "point": 2,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 0,
+      "point": 0,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 0,
+      "point": 1,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 0,
+      "point": 2,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 1,
+      "point": 0,
+      "values": 7,
+      "max_ulp": 0,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 1,
+      "point": 1,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 1,
+      "point": 2,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 8,
+      "point": 0,
+      "values": 7,
+      "max_ulp": 0,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 8,
+      "point": 1,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 8,
+      "point": 2,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 128,
+      "point": 0,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 128,
+      "point": 1,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 128,
+      "point": 2,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 2048,
+      "point": 0,
+      "values": 7,
+      "max_ulp": 2,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 2048,
+      "point": 1,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "structured_callback_branch",
+      "N": 2048,
+      "point": 2,
+      "values": 7,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "ode_structured_callback_branch",
+      "N": 8,
+      "point": 0,
+      "values": 4,
+      "max_ulp": 3,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "ode_structured_callback_branch",
+      "N": 8,
+      "point": 1,
+      "values": 4,
+      "max_ulp": 2,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "ode_structured_callback_branch",
+      "N": 8,
+      "point": 2,
+      "values": 4,
+      "max_ulp": 2,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "ode_structured_callback_branch",
+      "N": 128,
+      "point": 0,
+      "values": 4,
+      "max_ulp": 1,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "ode_structured_callback_branch",
+      "N": 128,
+      "point": 1,
+      "values": 4,
+      "max_ulp": 8,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "ode_structured_callback_branch",
+      "N": 128,
+      "point": 2,
+      "values": 4,
+      "max_ulp": 8,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "ode_structured_callback_branch",
+      "N": 2048,
+      "point": 0,
+      "values": 4,
+      "max_ulp": 4,
+      "outside_10_ulp": []
+    },
+    {
+      "model": "ode_structured_callback_branch",
+      "N": 2048,
+      "point": 1,
+      "values": 4,
+      "max_ulp": 24,
+      "outside_10_ulp": [
+        {
+          "index": 1,
+          "cmdstan": "-0.0086632040292135386",
+          "stanli": "-0.0086632040292135802",
+          "ulp": 24,
+          "absolute_error": 4.163336342344337e-17
+        }
+      ]
+    },
+    {
+      "model": "ode_structured_callback_branch",
+      "N": 2048,
+      "point": 2,
+      "values": 4,
+      "max_ulp": 6,
+      "outside_10_ulp": []
+    }
+  ],
+  "memory": [
+    {
+      "N": 8,
+      "mode": "structured",
+      "pools": {
+        "program": {
+          "bytes": 256,
+          "capacity": 256
+        },
+        "backward_order": {
+          "bytes": 256,
+          "capacity": 256
+        },
+        "calls": {
+          "bytes": 496,
+          "capacity": 512
+        },
+        "inplaces": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copies": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "segs": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "guards_if": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "guards_for": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "targets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "sets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "gathers": {
+          "bytes": 40,
+          "capacity": 40
+        },
+        "gather_pos": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "gather_adj": {
+          "bytes": 16,
+          "capacity": 16
+        },
+        "call_ptrs": {
+          "bytes": 992,
+          "capacity": 1024
+        },
+        "call_adj": {
+          "bytes": 744,
+          "capacity": 744
+        },
+        "inplace_pos": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_ptr": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_snapshot": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copy_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "seg_in_src": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "seg_in_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "arena_cells": {
+          "bytes": 240,
+          "capacity": 240
+        },
+        "arena_ranges": {
+          "bytes": 72,
+          "capacity": 72
+        },
+        "adjoints": {
+          "bytes": 256,
+          "capacity": 256
+        },
+        "inplace_old": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "target_work": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "imports": {
+          "bytes": 120,
+          "capacity": 120
+        },
+        "output_value": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_len": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_adjoint": {
+          "bytes": 4,
+          "capacity": 4
+        },
+        "state_bindings": {
+          "bytes": 96,
+          "capacity": 96
+        },
+        "state_workspace": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_ctx": {
+          "bytes": 1344,
+          "capacity": 1344
+        },
+        "state_sites": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_transient_sites": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "state_transient_loops": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_generation": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_node_version": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_node_version2": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_loop_generation": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_loop_version": {
+          "bytes": 8,
+          "capacity": 8
+        }
+      },
+      "reported_bytes": 5116,
+      "reported_capacity": 5164
+    },
+    {
+      "N": 8,
+      "mode": "segments",
+      "pools": {
+        "program": {
+          "bytes": 128,
+          "capacity": 128
+        },
+        "backward_order": {
+          "bytes": 128,
+          "capacity": 128
+        },
+        "calls": {
+          "bytes": 112,
+          "capacity": 112
+        },
+        "inplaces": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copies": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "segs": {
+          "bytes": 256,
+          "capacity": 256
+        },
+        "guards_if": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "guards_for": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "targets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "sets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "gathers": {
+          "bytes": 40,
+          "capacity": 40
+        },
+        "gather_pos": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "gather_adj": {
+          "bytes": 16,
+          "capacity": 16
+        },
+        "call_ptrs": {
+          "bytes": 224,
+          "capacity": 224
+        },
+        "call_adj": {
+          "bytes": 168,
+          "capacity": 168
+        },
+        "inplace_pos": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_ptr": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_snapshot": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copy_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "seg_in_src": {
+          "bytes": 192,
+          "capacity": 192
+        },
+        "seg_in_adj": {
+          "bytes": 192,
+          "capacity": 192
+        },
+        "arena_cells": {
+          "bytes": 488,
+          "capacity": 488
+        },
+        "arena_ranges": {
+          "bytes": 72,
+          "capacity": 72
+        },
+        "adjoints": {
+          "bytes": 512,
+          "capacity": 512
+        },
+        "inplace_old": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "target_work": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "imports": {
+          "bytes": 120,
+          "capacity": 120
+        },
+        "output_value": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_len": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_adjoint": {
+          "bytes": 4,
+          "capacity": 4
+        },
+        "state_bindings": {
+          "bytes": 96,
+          "capacity": 96
+        },
+        "state_workspace": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_ctx": {
+          "bytes": 336,
+          "capacity": 336
+        },
+        "state_sites": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_transient_sites": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "state_transient_loops": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_generation": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_version": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_version2": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_loop_generation": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_loop_version": {
+          "bytes": 8,
+          "capacity": 8
+        }
+      },
+      "reported_bytes": 3172,
+      "reported_capacity": 3172
+    },
+    {
+      "N": 128,
+      "mode": "structured",
+      "pools": {
+        "program": {
+          "bytes": 4096,
+          "capacity": 4096
+        },
+        "backward_order": {
+          "bytes": 4096,
+          "capacity": 4096
+        },
+        "calls": {
+          "bytes": 8176,
+          "capacity": 8176
+        },
+        "inplaces": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copies": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "segs": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "guards_if": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "guards_for": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "targets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "sets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "gathers": {
+          "bytes": 40,
+          "capacity": 40
+        },
+        "gather_pos": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "gather_adj": {
+          "bytes": 16,
+          "capacity": 16
+        },
+        "call_ptrs": {
+          "bytes": 16352,
+          "capacity": 16352
+        },
+        "call_adj": {
+          "bytes": 12264,
+          "capacity": 12264
+        },
+        "inplace_pos": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_ptr": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_snapshot": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copy_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "seg_in_src": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "seg_in_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "arena_cells": {
+          "bytes": 3120,
+          "capacity": 3120
+        },
+        "arena_ranges": {
+          "bytes": 72,
+          "capacity": 72
+        },
+        "adjoints": {
+          "bytes": 4096,
+          "capacity": 4096
+        },
+        "inplace_old": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "target_work": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "imports": {
+          "bytes": 120,
+          "capacity": 120
+        },
+        "output_value": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_len": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_adjoint": {
+          "bytes": 4,
+          "capacity": 4
+        },
+        "state_bindings": {
+          "bytes": 96,
+          "capacity": 96
+        },
+        "state_workspace": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_ctx": {
+          "bytes": 1344,
+          "capacity": 1344
+        },
+        "state_sites": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_transient_sites": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "state_transient_loops": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_generation": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_node_version": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_node_version2": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_loop_generation": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_loop_version": {
+          "bytes": 8,
+          "capacity": 8
+        }
+      },
+      "reported_bytes": 54076,
+      "reported_capacity": 54076
+    },
+    {
+      "N": 128,
+      "mode": "segments",
+      "pools": {
+        "program": {
+          "bytes": 2048,
+          "capacity": 2048
+        },
+        "backward_order": {
+          "bytes": 2048,
+          "capacity": 2048
+        },
+        "calls": {
+          "bytes": 2032,
+          "capacity": 2032
+        },
+        "inplaces": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copies": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "segs": {
+          "bytes": 4096,
+          "capacity": 4096
+        },
+        "guards_if": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "guards_for": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "targets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "sets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "gathers": {
+          "bytes": 40,
+          "capacity": 40
+        },
+        "gather_pos": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "gather_adj": {
+          "bytes": 16,
+          "capacity": 16
+        },
+        "call_ptrs": {
+          "bytes": 4064,
+          "capacity": 4064
+        },
+        "call_adj": {
+          "bytes": 3048,
+          "capacity": 3048
+        },
+        "inplace_pos": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_ptr": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_snapshot": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copy_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "seg_in_src": {
+          "bytes": 3072,
+          "capacity": 3072
+        },
+        "seg_in_adj": {
+          "bytes": 3072,
+          "capacity": 3072
+        },
+        "arena_cells": {
+          "bytes": 7208,
+          "capacity": 7208
+        },
+        "arena_ranges": {
+          "bytes": 72,
+          "capacity": 72
+        },
+        "adjoints": {
+          "bytes": 8192,
+          "capacity": 8192
+        },
+        "inplace_old": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "target_work": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "imports": {
+          "bytes": 120,
+          "capacity": 120
+        },
+        "output_value": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_len": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_adjoint": {
+          "bytes": 4,
+          "capacity": 4
+        },
+        "state_bindings": {
+          "bytes": 96,
+          "capacity": 96
+        },
+        "state_workspace": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_ctx": {
+          "bytes": 336,
+          "capacity": 336
+        },
+        "state_sites": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_transient_sites": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "state_transient_loops": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_generation": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_version": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_version2": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_loop_generation": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_loop_version": {
+          "bytes": 8,
+          "capacity": 8
+        }
+      },
+      "reported_bytes": 39652,
+      "reported_capacity": 39652
+    },
+    {
+      "N": 2048,
+      "mode": "structured",
+      "pools": {
+        "program": {
+          "bytes": 65536,
+          "capacity": 65536
+        },
+        "backward_order": {
+          "bytes": 65536,
+          "capacity": 65536
+        },
+        "calls": {
+          "bytes": 131056,
+          "capacity": 131056
+        },
+        "inplaces": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copies": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "segs": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "guards_if": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "guards_for": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "targets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "sets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "gathers": {
+          "bytes": 40,
+          "capacity": 40
+        },
+        "gather_pos": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "gather_adj": {
+          "bytes": 16,
+          "capacity": 16
+        },
+        "call_ptrs": {
+          "bytes": 262112,
+          "capacity": 262112
+        },
+        "call_adj": {
+          "bytes": 196584,
+          "capacity": 196584
+        },
+        "inplace_pos": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_ptr": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_snapshot": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copy_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "seg_in_src": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "seg_in_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "arena_cells": {
+          "bytes": 49200,
+          "capacity": 49200
+        },
+        "arena_ranges": {
+          "bytes": 72,
+          "capacity": 72
+        },
+        "adjoints": {
+          "bytes": 65536,
+          "capacity": 65536
+        },
+        "inplace_old": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "target_work": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "imports": {
+          "bytes": 120,
+          "capacity": 120
+        },
+        "output_value": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_len": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_adjoint": {
+          "bytes": 4,
+          "capacity": 4
+        },
+        "state_bindings": {
+          "bytes": 96,
+          "capacity": 96
+        },
+        "state_workspace": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_ctx": {
+          "bytes": 1344,
+          "capacity": 1344
+        },
+        "state_sites": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_transient_sites": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "state_transient_loops": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_generation": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_node_version": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_node_version2": {
+          "bytes": 32,
+          "capacity": 32
+        },
+        "state_loop_generation": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_loop_version": {
+          "bytes": 8,
+          "capacity": 8
+        }
+      },
+      "reported_bytes": 837436,
+      "reported_capacity": 837436
+    },
+    {
+      "N": 2048,
+      "mode": "segments",
+      "pools": {
+        "program": {
+          "bytes": 32768,
+          "capacity": 32768
+        },
+        "backward_order": {
+          "bytes": 32768,
+          "capacity": 32768
+        },
+        "calls": {
+          "bytes": 32752,
+          "capacity": 32752
+        },
+        "inplaces": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copies": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "segs": {
+          "bytes": 65536,
+          "capacity": 65536
+        },
+        "guards_if": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "guards_for": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "targets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "sets": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "gathers": {
+          "bytes": 40,
+          "capacity": 40
+        },
+        "gather_pos": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "gather_adj": {
+          "bytes": 16,
+          "capacity": 16
+        },
+        "call_ptrs": {
+          "bytes": 65504,
+          "capacity": 65504
+        },
+        "call_adj": {
+          "bytes": 49128,
+          "capacity": 49128
+        },
+        "inplace_pos": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_ptr": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_sel_snapshot": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "inplace_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "copy_adj": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "seg_in_src": {
+          "bytes": 49152,
+          "capacity": 49152
+        },
+        "seg_in_adj": {
+          "bytes": 49152,
+          "capacity": 49152
+        },
+        "arena_cells": {
+          "bytes": 114728,
+          "capacity": 114728
+        },
+        "arena_ranges": {
+          "bytes": 72,
+          "capacity": 72
+        },
+        "adjoints": {
+          "bytes": 131072,
+          "capacity": 131072
+        },
+        "inplace_old": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "target_work": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "imports": {
+          "bytes": 120,
+          "capacity": 120
+        },
+        "output_value": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_len": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "output_adjoint": {
+          "bytes": 4,
+          "capacity": 4
+        },
+        "state_bindings": {
+          "bytes": 96,
+          "capacity": 96
+        },
+        "state_workspace": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_ctx": {
+          "bytes": 336,
+          "capacity": 336
+        },
+        "state_sites": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_transient_sites": {
+          "bytes": 0,
+          "capacity": 0
+        },
+        "state_transient_loops": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_generation": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_version": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_node_version2": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_loop_generation": {
+          "bytes": 8,
+          "capacity": 8
+        },
+        "state_loop_version": {
+          "bytes": 8,
+          "capacity": 8
+        }
+      },
+      "reported_bytes": 623332,
+      "reported_capacity": 623332
+    }
+  ],
+  "context": {
+    "base_commit": "776b1b0c1618e93c0e068a7accd73ff8b6c4331b",
+    "upstream": "6ce2018b5382b459666ab32fe0df50d4a6d30ba4",
+    "build": "Release AppleClang 21 Darwin arm64",
+    "fresh_process_repeats": 6,
+    "paired_batches_per_process": 2,
+    "warmup_ms_per_arm": 50,
+    "iterations_per_batch": {
+      "8": 20,
+      "128": 20,
+      "2048": 3
+    },
+    "runtime_changes": false,
+    "timing_boundary": "Complete coupled ODE solve; excludes model preparation and complete inference",
+    "memory_boundary": "Reported frozen-history and associated state pools; excludes unreported allocations and is not process RSS",
+    "local_prep_boundary": "Single cold compile+bind of wrapper; register preparation only compiles an already parsed function, not comparable preparation pipelines",
+    "independent_oracle": "246 values; 245 within 10 ULP; 1 unchanged register-path stress gradient differs 24 ULP. No gate widened."
+  },
+  "runtime_library": {
+    "bytes": 39707168,
+    "sha256": "668f339a1895c49e0a4bad568b5f1e16c8d76b508e59841c8fae127a3c3500ff"
+  },
+  "sources": {
+    "tools/structured_rhs_probe.hpp": "339694f5cb133cf48f873f211c2119a7dcd3409a5808fbb6085621406e180266",
+    "tools/bench_structured_callback_local.cpp": "31cd0761bb07922b1e9d0fa5ef10f5b4bbcd70b05281ba5e37fbd59d11428378",
+    "tools/bench_ode_ceiling.cpp": "112ac7d9f7a4be522b47683653dbb6f0ca6bcc1504ce31d9ec3cd18b24ec5a29"
+  },
+  "frame_ablation": {
+    "branch-frames.log": "structured_preparation_ns=732833\nmodel_lp=-1.7005080713954075 rhs=rhs original_solver=rk45 benchmark_solver=rk45 legacy=0 point=0\nshape states=1 theta_source=1 outputs=1 times=1 type_mask=0x2 coupled=2 rhs_instructions=49 rhs_registers=37\nprovider requested=structured selected=structured generated_eligible=0 generated_forward=0 generated_reverse=0 refusal=\"JZ, JMP, IMOD\"\nlocal[0] t=0\nlocal[0].values bitwise=1/1 max_relative=0 worst=0\nlocal[0].jacobian bitwise=2/2 max_relative=0 worst=0\nlocal[1] t=0.050000000000000003\nlocal[1].values bitwise=1/1 max_relative=0 worst=0\nlocal[1].jacobian bitwise=2/2 max_relative=0 worst=0\nlocal[2] t=0.10000000000000001\nlocal[2].values bitwise=1/1 max_relative=0 worst=0\nlocal[2].jacobian bitwise=2/2 max_relative=0 worst=0\ncallbacks oracle=32 candidate=32 equal=1\nsteps candidate_accepted=4 attempted_derived=5 rejected_derived=1 initialization_rhs=2\nsolution.values bitwise=1/1 max_relative=0 worst=0\nsolution.jacobian bitwise=2/2 max_relative=0 worst=0\ntiming_gate=exact pass=1 work_parity=callback_count\nwarmup oracle_ms=50.182 candidate_ms=50.129 oracle_solves=156 candidate_solves=60\nbatch=1 oracle_ns=316179.2 candidate_ns=836200.0 speedup=0.378114x\nbatch=2 oracle_ns=321562.5 candidate_ns=830162.5 speedup=0.387349x\nmedian oracle_ns=318870.8 candidate_ns=833181.2 paired_speedup=0.382732x range=[0.378114x,0.387349x] iterations=10 batches=2 sink=197.997778\n",
+    "constant-frames.log": "structured_preparation_ns=414958\nmodel_lp=-1.9767590288952313 rhs=rhs original_solver=rk45 benchmark_solver=rk45 legacy=0 point=0\nshape states=1 theta_source=1 outputs=1 times=1 type_mask=0x2 coupled=2 rhs_instructions=10242 rhs_registers=8197\nprovider requested=structured selected=structured generated_eligible=1 generated_forward=10242 generated_reverse=8193\nlocal[0] t=0\nlocal[0].values bitwise=1/1 max_relative=0 worst=0\nlocal[0].jacobian bitwise=2/2 max_relative=0 worst=0\nlocal[1] t=0.050000000000000003\nlocal[1].values bitwise=1/1 max_relative=0 worst=0\nlocal[1].jacobian bitwise=2/2 max_relative=0 worst=0\nlocal[2] t=0.10000000000000001\nlocal[2].values bitwise=1/1 max_relative=0 worst=0\nlocal[2].jacobian bitwise=2/2 max_relative=0 worst=0\ncallbacks oracle=7 candidate=7 equal=1\nsteps candidate_accepted=1 attempted_derived=1 rejected_derived=0 initialization_rhs=1\nsolution.values bitwise=1/1 max_relative=0 worst=0\nsolution.jacobian bitwise=2/2 max_relative=0 worst=0\ntiming_gate=exact pass=1 work_parity=callback_count\nwarmup oracle_ms=50.095 candidate_ms=50.759 oracle_solves=184 candidate_solves=58\nbatch=1 oracle_ns=270883.3 candidate_ns=898233.3 speedup=0.301573x\nbatch=2 oracle_ns=271887.5 candidate_ns=877637.5 speedup=0.309795x\nmedian oracle_ns=271385.4 candidate_ns=887935.4 paired_speedup=0.305684x range=[0.301573x,0.309795x] iterations=10 batches=2 sink=396.349135\n"
+  }
+}

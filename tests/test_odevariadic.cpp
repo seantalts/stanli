@@ -165,15 +165,19 @@ OdeActivityRun direct_activity_run(const stanli::OdeSpec& spec) {
 template <bool YAutodiff, bool ThetaAutodiff>
 OdeActivityRun kernel_activity_run(
     const stanli::OdeSpec& spec, const std::vector<double>& y0_values = test_y0,
-    const std::vector<double>& theta_values = test_theta) {
+    const std::vector<double>& theta_values = test_theta,
+    const double* controls = nullptr, bool runtime_times = false) {
   using namespace stanli;
   OdeActivityRun out;
   out.value.assign(spec.ts.size() * y0_values.size(), 0.0);
   out.y_grad.assign(y0_values.size(), 0.0);
   out.theta_grad.assign(theta_values.size(), 0.0);
-  out.jacobian.assign(
-      out.value.size() * (y0_values.size() + theta_values.size()),
-      std::numeric_limits<double>::quiet_NaN());
+  // An all-double solve has no derivative scratch. Mixed/active solves retain
+  // the full Jacobian layout, including explicit zero columns for data inputs.
+  if constexpr (YAutodiff || ThetaAutodiff)
+    out.jacobian.assign(
+        out.value.size() * (y0_values.size() + theta_values.size()),
+        std::numeric_limits<double>::quiet_NaN());
 
   KernelCtx ctx;
   ctx.n_in = 2;
@@ -182,10 +186,21 @@ OdeActivityRun kernel_activity_run(
   ctx.in[1] = Desc{const_cast<double*>(theta_values.data()),
                    (int64_t)theta_values.size()};
   ctx.out = Desc{out.value.data(), (int64_t)out.value.size()};
-  ctx.scratch = out.jacobian.data();
+  ctx.scratch = out.jacobian.empty() ? nullptr : out.jacobian.data();
   ctx.udata = &spec;
   ctx.variant =
       (uint8_t)(0x4u | (YAutodiff ? 0x1u : 0u) | (ThetaAutodiff ? 0x2u : 0u));
+  if (controls) {
+    ctx.n_in = runtime_times ? 5 : 3;
+    const int at = runtime_times ? 4 : 2;
+    ctx.in[at] = Desc{const_cast<double*>(controls), 3};
+    if (runtime_times) {
+      ctx.in[2] = Desc{const_cast<double*>(&spec.t0), 1};
+      ctx.in[3] =
+          Desc{const_cast<double*>(spec.ts.data()), (int64_t)spec.ts.size()};
+      ctx.variant = 0x10u;
+    }
+  }
   // Both buffers deliberately exist for every case. The variant records the
   // C++ type; adjoint storage does not, and ode_bwd must not scatter through a
   // type-inactive side merely because a buffer happens to be present.
@@ -201,7 +216,7 @@ OdeActivityRun kernel_activity_run(
   // column can contain NaN. Poison those columns after checking forward and
   // require the type mask, rather than mere buffer presence, to gate scatter.
   const size_t width = y0_values.size() + theta_values.size();
-  for (size_t o = 0; o < out.value.size(); ++o) {
+  for (size_t o = 0; o < out.value.size() && !out.jacobian.empty(); ++o) {
     if constexpr (!YAutodiff)
       for (size_t i = 0; i < y0_values.size(); ++i)
         out.jacobian[o * width + i] = std::numeric_limits<double>::quiet_NaN();
@@ -247,7 +262,10 @@ void check_activity_case(const stanli::OdeSpec& spec, const char* label) {
                  got.theta_grad[i], want.theta_grad[i]);
 
   const size_t width = test_y0.size() + test_theta.size();
-  for (size_t o = 0; o < got.value.size(); ++o) {
+  if constexpr (!YAutodiff && !ThetaAutodiff)
+    expect(std::string(label) + " has no derivative scratch",
+           got.jacobian.empty());
+  for (size_t o = 0; o < got.value.size() && !got.jacobian.empty(); ++o) {
     if constexpr (!YAutodiff)
       for (size_t i = 0; i < test_y0.size(); ++i)
         expect(std::string(label) + " zero y Jacobian column",
@@ -295,6 +313,50 @@ static void check_error_parity(
   expect(label + ": direct throws", direct.threw);
   expect(label + ": exception type", direct.type == oracle.type);
   expect(label + ": exception message", direct.message == oracle.message);
+}
+
+// Runtime controls must reach the same pinned Stan validation and solver,
+// while leaving the shared prepared spec unchanged between evaluations.
+static void check_runtime_controls(const stanli::OdeSpec& shared) {
+  for (int trial = 0; trial < 7; ++trial) {
+    stanli::OdeSpec reference = shared;
+    reference.rtol = trial == 0 ? 1e-8 : 1e-10;
+    reference.atol = 1e-10;
+    if (trial == 2) reference.rtol = 0;
+    if (trial == 3) reference.atol = -1;
+    if (trial == 4) reference.max_steps = 0;
+    if (trial == 5) reference.rtol = std::numeric_limits<double>::quiet_NaN();
+    if (trial == 6) reference.max_steps = 1;
+    const double controls[]{reference.rtol, reference.atol,
+                            (double)reference.max_steps};
+    OdeActivityRun want;
+    OdeError error;
+    try {
+      want = direct_activity_run<false, false>(reference);
+    } catch (const std::exception& e) {
+      error = {true, typeid(e).name(), e.what()};
+    }
+    for (bool times : {false, true}) {
+      OdeActivityRun got;
+      OdeError failure;
+      try {
+        got = kernel_activity_run<false, false>(shared, test_y0, test_theta,
+                                                controls, times);
+      } catch (const std::exception& e) {
+        failure = {true, typeid(e).name(), e.what()};
+      }
+      expect("runtime controls preserve Stan rejection",
+             failure.threw == error.threw);
+      if (error.threw) {
+        expect("runtime control exception type", failure.type == error.type);
+        expect("runtime control exception message",
+               failure.message == error.message);
+      } else {
+        expect("runtime controls preserve Stan values",
+               bitwise_equal(got.value, want.value));
+      }
+    }
+  }
 }
 
 // OdeSpec and its generated derivative payload are graph-owned and shared by
@@ -476,6 +538,7 @@ int main() {
     check_activity_case<false, true>(*rk45_spec, "data y/active theta");
     check_activity_case<true, true>(*rk45_spec, "active y/active theta");
     check_activity_case<false, false>(*rk45_spec, "data y/data theta");
+    check_runtime_controls(*rk45_spec);
     check_shared_spec_threads(*rk45_spec, true);
     check_shared_spec_threads(*rk45_spec, false);
 

@@ -1021,3 +1021,11 @@ dependencies; it does not install Emscripten or build WebAssembly.
 [`docs/hacking.md`](docs/hacking.md) has the per-change recipes.
 [`docs/how-it-works.md`](docs/how-it-works.md) describes the design the
 numbers above are checking.
+
+The nested callback solver fixtures check recorded CmdStan densities, gradients,
+and output rows within 10 ULP except their combined rate gradient, which permits
+16 ULP and must additionally match its analytic value within 2 ULP. Isolating
+individual solvers attributes this difference to adjoint ODE sensitivity
+integration; the compiled and retained-interpreter callbacks agree bitwise.
+The ordinary nested ODE fixture remains within 10 ULP (observed 0).
+See `notes/2026-09-28-nested-callback-coverage.md` for the measurements.

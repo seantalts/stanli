@@ -65,6 +65,7 @@ std::optional<DataMap::Entry> region_bounded_data_value(const mir::Expr& e) {
     return false;
   };
   try {
+    record_interpreter_event("lowering", "bounded_admission_probe");
     MirInterp<double> probe(fun_defs, "structured data probe", hooks);
     probe.env() = td.env();
     return probe.eval(e);
@@ -1163,7 +1164,7 @@ std::optional<long> static_int(const mir::Expr& e) {
   try {
     return eval_int(e);
   } catch (const CompileError&) {
-    if (write_array_unregioned() || !needs_runtime_value(e)) throw;
+    if (!needs_runtime_value(e)) throw;
     return std::nullopt;
   }
 }
@@ -1395,6 +1396,8 @@ void lower_region_stmt(const mir::Stmt& s) {
       for (const auto& c : s.body) lower_stmt(c);
       return;
     case mir::Stmt::For: {
+      if (!invariant_for_upper(s))
+        fail("mutable/effectful for upper bound needs a register loop", s.raw);
       region_prepare_cells(s);
       auto lo = region_range(s.lower), hi = region_range(s.upper);
       const bool known = lo && hi;

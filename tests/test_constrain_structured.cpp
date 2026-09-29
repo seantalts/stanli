@@ -138,9 +138,111 @@ std::vector<double> reference_positive_ordered(const Batch& b, int64_t nb,
   return adj;
 }
 
+void check_cholesky_reverse(int size, int batches, double magnitude,
+                            double jacobian_seed, double value_seed) {
+  const int raw = size * (size - 1) / 2, width = size * size;
+  std::vector<double> input(batches * raw), seed(batches * width),
+      output(batches * width), adjoint(batches * raw, 0.19);
+  for (int i = 0; i < batches * raw; ++i)
+    input[i] = magnitude * (0.1 + std::sin(0.73 * i));
+  for (int i = 0; i < batches * width; ++i)
+    seed[i] = value_seed * std::cos(0.31 * i);
+  const int dims[] = {batches, raw, size, size};
+  Op op;
+  op.in[0] = 0;
+  op.idata = dims;
+  const Slot slot{0, batches * raw, true};
+  const auto* kernel = find_kernel(OP_CONSTRAIN_CHOL_CORR);
+  std::vector<double> scratch(kernel->scratch_size(op, &slot), 999.0);
+  double jacobian = 0;
+  KernelCtx ctx;
+  ctx.n_in = 1;
+  ctx.in[0] = {input.data(), batches * raw};
+  ctx.in_adj[0] = {adjoint.data(), batches * raw};
+  ctx.out = {output.data(), batches * width};
+  ctx.out2 = {&jacobian, 1};
+  ctx.out_adj_vec = {seed.data(), batches * width};
+  ctx.out2_adj = jacobian_seed;
+  ctx.idata = dims;
+  ctx.n_idata = 4;
+  ctx.scratch = scratch.data();
+  try {
+    kernel->forward(ctx);
+  } catch (const std::exception& error) {
+    stan::math::nested_rev_autodiff nested;
+    Eigen::Matrix<var, -1, 1> y(raw);
+    for (int i = 0; i < raw; ++i) y[i] = input[i];
+    var lp = 0.0;
+    try {
+      stan::math::cholesky_corr_constrain(y, size, lp);
+      check(false, "Cholesky correlation unexpected forward rejection");
+    } catch (const std::exception& reference) {
+      check(std::string(error.what()) == reference.what(),
+            "Cholesky correlation rejection matches upstream");
+    }
+    return;
+  }
+  const bool fast = scratch[0] == 1.0;
+  if (magnitude == 0.0 || magnitude == 0.3)
+    check(fast, "Cholesky correlation ordinary history uses retained reverse");
+  if (batches && raw && std::isinf(magnitude))
+    check(!fast, "Cholesky correlation saturation retains taped fallback");
+  const auto arena_bytes =
+      stan::math::ChainableStack::instance_->memalloc_.bytes_allocated();
+  kernel->backward(ctx);
+  if (fast)
+    check(stan::math::ChainableStack::instance_->memalloc_.bytes_allocated() ==
+              arena_bytes,
+          "Cholesky correlation retained reverse does not grow Stan arena");
+  const auto exact = [&](double got, double want, const std::string& what) {
+    if (std::memcmp(&got, &want, sizeof(double)) &&
+        !(std::isnan(got) && std::isnan(want))) {
+      ++failures;
+      if (failures < 25)
+        std::printf(
+            "FAIL chol size=%d batches=%d magnitude=%g jac=%g seed=%g %s %.17g "
+            "!= %.17g\n",
+            size, batches, magnitude, jacobian_seed, value_seed, what.c_str(),
+            got, want);
+    }
+  };
+  for (int b = 0; b < batches; ++b) {
+    stan::math::nested_rev_autodiff nested;
+    Eigen::Matrix<var, -1, 1> y(raw);
+    for (int i = 0; i < raw; ++i) y[i] = input[b * raw + i];
+    var lp = 0.0;
+    auto x = stan::math::cholesky_corr_constrain(y, size, lp);
+    Eigen::Matrix<var, -1, 1> flat(width);
+    for (int i = 0; i < width; ++i) {
+      flat[i] = x.data()[i];
+      exact(output[b * width + i], flat[i].val(), "value");
+    }
+    Eigen::Map<const Eigen::VectorXd> weights(seed.data() + b * width, width);
+    var objective = stan::math::dot_product(weights, flat) + jacobian_seed * lp;
+    stan::math::grad(objective.vi_);
+    for (int i = 0; i < raw; ++i)
+      exact(adjoint[b * raw + i], 0.19 + y[i].adj(),
+            "adjoint " + std::to_string(i));
+  }
+}
+
 }  // namespace
 
 int main() {
+  check_cholesky_reverse(30, 2, 0.3, 0.37, -0.73);
+  for (double exceptional : {std::numeric_limits<double>::infinity(),
+                             std::numeric_limits<double>::quiet_NaN()}) {
+    check_cholesky_reverse(4, 2, 0.3, exceptional, -0.73);
+    check_cholesky_reverse(4, 2, 0.3, 0.37, exceptional);
+    check_cholesky_reverse(4, 2, exceptional, 0.37, -0.73);
+  }
+  for (int size : {0, 1, 2, 4, 8, 30})
+    for (int batches : {0, 1, 3})
+      for (double magnitude :
+           {0.0, 0.3, 2.0, 18.0, std::numeric_limits<double>::infinity()})
+        for (double jac : {0.0, -0.0, 1.0, -0.37, 1e-308, 1e308})
+          for (double seed : {0.0, -0.73, 1e-308, 1e308})
+            check_cholesky_reverse(size, batches, magnitude, jac, seed);
   const int64_t nb = 2, K = 4;
 
   // Gradient evaluation must use the scalar-var transform's values. The
@@ -186,11 +288,16 @@ int main() {
         prim_values.push_back(d.data()[i]);
       }
     }
+    std::vector<double> expected_gradient(nb * raw), reused_gradient(nb * raw);
+    ex.gradient(expected_gradient.data());
     for (bool value_only : {false, true, false}) {
-      if (value_only)
+      if (value_only) {
         ex.forward_value_only();
-      else
-        ex.forward();
+      } else {
+        ex.gradient(reused_gradient.data());
+        check(reused_gradient == expected_gradient,
+              "Cholesky correlation gradient after value-only reuse");
+      }
       const auto& values = value_only ? prim_values : rev_values;
       for (int i = 0; i < nb * width; ++i)
         check(ex.value_ptr(output)[i] == values[i],

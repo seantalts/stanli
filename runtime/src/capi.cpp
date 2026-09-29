@@ -1,6 +1,7 @@
 #include <stanli/capi.h>
 
 #include <stanli/compile.hpp>
+#include <stanli/execution_report.hpp>
 #include <stanli/diagnose.hpp>
 #include <stanli/estimate.hpp>
 #include <stanli/graph.hpp>
@@ -174,6 +175,14 @@ stanli_model* stanli_model_new_threaded(const char* tmir_sexp,
       }
     }
     m->warnings = stanli::interpreter_warning(m->cm, probe_failure);
+    stanli::report_execution_host("capi",
+                                  m->wa_interp ? "mir_interpreter"
+                                  : m->wa_ex   ? "bound_graph"
+                                               : "unavailable_or_empty",
+                                  m->cm.write_array && m->cm.write_array->interp
+                                      ? (m->wa_interp ? "passed" : "failed")
+                                      : "not_required",
+                                  probe_failure);
     return m.release();
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());

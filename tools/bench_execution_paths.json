@@ -1,0 +1,50 @@
+[
+  {
+    "model": "ode_nested_for",
+    "source": "tests/fixtures/ode_nested_for.stan",
+    "mir": "tests/fixtures/ode_nested_for.tmir.sexp",
+    "data": "tests/fixtures/ode_nested_for.json"
+  },
+  {
+    "model": "ode_runtime_index",
+    "source": "tests/fixtures/ode_runtime_index.stan",
+    "mir": "tests/fixtures/ode_runtime_index.tmir.sexp",
+    "data": "tests/fixtures/ode_runtime_index.json"
+  },
+  {
+    "model": "ode_constant_loop",
+    "source": "tests/fixtures/ode_constant_loop.stan",
+    "mir": "tests/fixtures/ode_constant_loop.tmir.sexp",
+    "data": "tests/fixtures/ode_constant_loop.json"
+  },
+  {
+    "model": "ode_branch_returns",
+    "source": "tests/fixtures/ode_branch_returns.stan",
+    "mir": "tests/fixtures/ode_branch_returns.tmir.sexp",
+    "data": "tests/fixtures/ode_branch_returns.json"
+  },
+  {
+    "model": "ar1",
+    "source": "tests/fixtures/ar1.stan",
+    "mir": "tests/fixtures/ar1.tmir.sexp",
+    "data": "tests/fixtures/ar1.json"
+  },
+  {
+    "model": "gq_scalar_rng_complete",
+    "source": "tests/fixtures/gq_scalar_rng_complete.stan",
+    "mir": "tests/fixtures/gq_scalar_rng_complete.tmir.sexp",
+    "data": "tests/fixtures/gq_scalar_rng_complete.json"
+  },
+  {
+    "model": "gq_vector_rng_complete",
+    "source": "tests/fixtures/gq_vector_rng_complete.stan",
+    "mir": "tests/fixtures/gq_vector_rng_complete.tmir.sexp",
+    "data": "tests/fixtures/gq_vector_rng_complete.json"
+  },
+  {
+    "model": "gq_callback_solver_controls",
+    "source": "tests/fixtures/gq_callback_solver_controls.stan",
+    "mir": "tests/fixtures/gq_callback_solver_controls.tmir.sexp",
+    "data": "tests/fixtures/gq_callback_solver_controls.json"
+  }
+]
