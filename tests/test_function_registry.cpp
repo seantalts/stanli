@@ -161,6 +161,16 @@ int main() {
     std::printf("FAIL nested integer negation lost its integer overload\n");
     return 1;
   }
+  auto integer_array = integer;
+  integer_array.kind = mir::Expr::Var;
+  integer_array.unsized.depth = 1;
+  // Integer sum is lowered separately and has no integer registry entry.
+  // Its real registry overload must not override valid integer metadata.
+  if (function_spec(call("PMinus__", {call("sum", {integer_array})}))
+          ->result() != FunctionArgumentKind::Integer) {
+    std::printf("FAIL unregistered integer reduction became real\n");
+    return 1;
+  }
   auto promoted = integer_negated;
   promoted.promoted = true;
   promoted.type_ = "UReal";
