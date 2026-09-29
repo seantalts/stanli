@@ -27,7 +27,7 @@ from gen_docs import current_benchmark
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 NOTES = REPO / "tools" / "model_notes.json"
-VERIFY_JSON = REPO / "docs" / "verification.json"
+VERIFY_JSON = REPO / "docs" / "internal" / "artifacts" / "verification.json"
 
 # nn_rbm1bJ100 reads all of MNIST: 179 MB of JSON for one model, against
 # 7.8 MB for the other 117 put together. Nothing else comes close, so the

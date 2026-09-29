@@ -196,7 +196,7 @@ static void test_wide_contiguous_read() {
   }
 }
 
-// Gap 2 (docs/superpowers/plans/2026-09-11-lane-layout-unification.md): a
+// Gap 2 (docs/internal/archive/plans/2026-09-11-lane-layout-unification.md): a
 // vector operand shared by every lane, as wide as the row itself, tiles via
 // OP_REP_MAT instead of blocking the bucket.
 static void test_wide_shared_operand_tiles() {

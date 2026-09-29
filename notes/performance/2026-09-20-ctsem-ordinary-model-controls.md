@@ -7,8 +7,8 @@ The observations remain unresolved; deferral is not a finding of zero cost.
 The comparison is the completed frame implementation versus the subsequent
 temporary recording program with data-only instructions. Both derive from
 PR391's merge, `0daf3b15452d758f290afffe70a1cf8e4759310b`.
-See the [implementation draft](../../docs/superpowers/plans/2026-09-20-ctsem-recording-draft.md)
-and [main experiment log](../../docs/superpowers/plans/2026-09-19-ctsem-memory.md).
+See the [implementation draft](../../docs/internal/archive/plans/2026-09-20-ctsem-recording-draft.md)
+and [main experiment log](../../docs/internal/archive/plans/2026-09-19-ctsem-memory.md).
 
 The [machine-readable summary](2026-09-20-ctsem-ordinary-model-controls.json)
 preserves exact statistics, control results and source/binary hashes in the

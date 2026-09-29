@@ -76,7 +76,7 @@ source name or variable spelling.
 The earlier PR fixes remain: compiled scalar integer RNG control, shared
 Poisson/Student-t/Bernoulli-logit RNG kernels, unused-procedure pruning after
 inlining, and buffered exact 17-digit CSV formatting. Their original evidence
-is preserved in [the first investigation](../../docs/superpowers/plans/2026-09-14-educational-performance.md).
+is preserved in [the first investigation](../../docs/internal/archive/plans/2026-09-14-educational-performance.md).
 
 ## Recorded validation and historical reproduction
 
@@ -104,6 +104,6 @@ python3 tools/verify_refs.py deps/posteriordb \
 ```
 
 At that revision, CTest used recorded references and the separate
-`check_educational_performance` target required CmdStan and a quiet machine. See the [Pareto research ledger](../../docs/superpowers/plans/2026-09-14-pareto-parity.md)
+`check_educational_performance` target required CmdStan and a quiet machine. See the [Pareto research ledger](../../docs/internal/archive/plans/2026-09-14-pareto-parity.md)
 for proof obligations, ablations and conservative fallbacks. These fixtures
 and smoke tests do not establish full-size course-data performance or convergence.

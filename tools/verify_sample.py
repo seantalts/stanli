@@ -10,7 +10,7 @@ lp must match exactly in policy terms: both sides use propto=false +
 jacobian, so no propto constant is expected either.
 
 CmdStan's values at EVERY point in verify_refs.POINTS are written to
-docs/corpus-refs.json.gz, including the points CmdStan refuses (recorded
+docs/internal/artifacts/corpus-refs.json.gz, including the points CmdStan refuses (recorded
 as a refusal, which stanli then has to reproduce) and the points where
 stanli disagrees with them. What gets recorded is a property of CmdStan
 alone; whether stanli matches it is a separate field, and never a reason
@@ -97,7 +97,7 @@ def inside_support(fields):
     A point outside a declared support prints a finite gradient next to an
     lp of -inf. Both engines agree on it and the density is never
     exercised, so it is a poor choice for the ONE point the scoreboard in
-    docs/verification.json summarizes -- dogs_log's priors are uniform,
+    docs/internal/artifacts/verification.json summarizes -- dogs_log's priors are uniform,
     and only its third point is in range. Every point is recorded either
     way; this only picks the primary one.
     """
@@ -117,7 +117,7 @@ def write_results(results):
     what that sentence says. The per-point detail lives in the reference
     file, and the replay is what reports it.
     """
-    out = REPO / "docs" / "verification.json"
+    out = REPO / "docs" / "internal" / "artifacts" / "verification.json"
     prev = json.loads(out.read_text()) if out.exists() else {}
     prev.update(results)
     out.write_text(json.dumps(prev, indent=1, sort_keys=True) + "\n")
@@ -316,7 +316,7 @@ def record_model(model, stan, dj, exe, check_bin, strict=False):
             continue
         # The primary point: the first one both engines accept and put
         # inside the support, exactly the point the single-point recorder
-        # would have stopped at. It is what docs/verification.json
+        # would have stopped at. It is what docs/internal/artifacts/verification.json
         # summarizes, so the scoreboard means what it always meant.
         if primary is None and inside_support(ref) and inside_support(got):
             primary = point

@@ -602,9 +602,9 @@ The subsequent index/iterator specializations reduce first gradients from
 1.963 to 1.569 seconds at 400 rows and from 19.367 to 15.273 seconds at 4000
 rows in another matched six-pair experiment. Preparation, warmed gradients
 and peak RSS remain consistent with parity, with identical live bytes and
-allocation counts. The [recording-site experiment](superpowers/plans/2026-09-20-ctsem-index-recording.md)
+allocation counts. The [recording-site experiment](internal/archive/plans/2026-09-20-ctsem-index-recording.md)
 documents the proofs, refusal tests and measurements.
-The [experiment record](superpowers/plans/2026-09-19-ctsem-memory.md)
+The [experiment record](internal/archive/plans/2026-09-19-ctsem-memory.md)
 includes smaller cases, ordinary-model controls, build identities and the
 remaining first-recording limitation. Detailed ordinary-model timing and
 RSS follow-up is archived in [research notes](../notes/performance/2026-09-20-ctsem-ordinary-model-controls.md)

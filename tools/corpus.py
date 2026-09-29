@@ -25,7 +25,7 @@ CHECK = default_check_bin()
 # Verification results written by tools/verify_sample.py. A model counts as
 # passing only if it appears here as VERIFIED; compiling and returning a
 # finite gradient is never sufficient.
-VERIFY_JSON = REPO / "docs" / "verification.json"
+VERIFY_JSON = REPO / "docs" / "internal" / "artifacts" / "verification.json"
 
 
 # Context for models that evaluate but do not match, so the reason is not
