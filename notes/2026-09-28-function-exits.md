@@ -1,5 +1,10 @@
 # Shared compiled function exits
 
+The historical `bench_rng_paths.py` timing script was consolidated into
+`tools/bench_model_phases.py` before merge. Use the maintained
+[focused benchmark instructions](../docs/benchmark-protocol.md#focused-execution-path-benchmarks)
+for new measurements; the samples below retain their original provenance.
+
 Current authorization: keep implementing interpreter-gap work until completion
 or a consequential choice requiring user input. A completed slice or ordinary
 implementation design is not such a stop. Native performance is primary;

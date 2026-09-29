@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure shared-corpus native model phases through the public C API.
+"""Measure native model phases through the public C API.
 
 Usage: bench_model_phases.py /absolute/libstanli.dylib manifest.json model
 Run baseline/candidate in alternating fresh processes. Returns one JSON sample;
@@ -17,8 +17,8 @@ args = parser.parse_args()
 libpath, manifest_path, name = args.library, args.manifest, args.model
 lib=c.CDLL(libpath)
 ptr=c.c_void_p; doubles=c.POINTER(c.c_double)
-for fn in ('stanli_model_new','stanli_model_new_from_stan'):
-    f=getattr(lib,fn);f.argtypes=[c.c_char_p,c.c_char_p,c.c_char_p,c.c_size_t];f.restype=ptr
+lib.stanli_model_new.argtypes=[c.c_char_p,c.c_char_p,c.c_char_p,c.c_size_t]
+lib.stanli_model_new.restype=ptr
 lib.stanli_model_free.argtypes=[ptr]
 lib.stanli_n_unconstrained.argtypes=[ptr];lib.stanli_n_unconstrained.restype=c.c_int64
 lib.stanli_wa_n_columns.argtypes=[ptr];lib.stanli_wa_n_columns.restype=c.c_int64

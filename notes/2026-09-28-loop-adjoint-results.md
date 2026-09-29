@@ -1,5 +1,10 @@
 # Loop-aware register reverse: correct on the probe, slower in complete solves
 
+Historical experiment: its implementation and build targets were removed before
+merge. The commands below describe the recorded experiment at commit
+`5b878354`, not tools in the current tree. Results and limitations remain
+part of the research record. See the [cleanup audit](2026-09-29-execution-code-cleanup.md).
+
 Keep the production callback routing unchanged. Two developer experiments
 reuse the register engine's existing forward and derivative rules across
 loops. Both pass the measured bitwise comparisons, but neither is a performance

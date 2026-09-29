@@ -67,6 +67,43 @@ artifacts keep their recorded 20,000-gradient budget.
 Numerical and sampler correctness remain covered independently by
 [TESTING.md](../TESTING.md).
 
+## Focused execution-path benchmarks
+
+The corpus protocol above remains unchanged. Its gradient measurements do not
+cover generated quantities or standalone function calls. Use the public-API
+phase benchmark for changes to those paths and for interpreter fallback cliffs:
+
+```sh
+# Run from the repository root after building the runtime and MIR fixtures.
+python3 tools/bench_model_phases.py /absolute/path/libstanli.dylib \
+  tools/bench_execution_paths.json ode_nested_for
+python3 tools/bench_function_paths.py /absolute/path/libstanli.dylib affine
+```
+
+The [execution-path manifest](../tools/bench_execution_paths.json) includes
+nested loops, runtime indexing, constant-loop and branch callbacks, an ordinary
+graph canary, scalar/vector RNG output, and runtime solver controls in generated
+quantities. These are focused regression workloads, not additions to the public
+application-model corpus. Every entry runs the shipped runtime; there are no
+experimental providers. The standalone tool accepts `affine`, `branch_exit`,
+and `sized`; the last also measures churn across integer specializations.
+
+`bench_model_phases.py` reports warmed source compilation and preparation,
+first/warm gradients, first/warm output rows, and a seeded 100-warmup/100-draw
+inference including output rows. `--skip-inference` omits only that last phase.
+It includes Python/ctypes overhead; use `bench_grad --timed` for native gradient
+confirmation. Peak RSS is whole-process memory in the platform's `getrusage`
+units (bytes on macOS, KiB on Linux), not retained executor storage. The
+standalone tool similarly separates handle creation, first call, and warm calls.
+
+Collect six alternating baseline/candidate pairs in fresh processes for each
+selected workload, without concurrent builds or benchmarks. Retain raw samples,
+input and binary hashes, compiler/build settings, and median/MAD summaries.
+Check numerical parity independently; a successful timed call is not a parity
+check. Use identical-binary controls when small differences are unresolved.
+These focused samples do not replace the corpus run or rewrite its published
+results. Refresh public tables only from a complete newly recorded corpus run.
+
 ## Running the experiment
 
 ```sh

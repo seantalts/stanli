@@ -1,5 +1,10 @@
 # Decision: the next execution architecture
 
+Historical experiment: its implementation and build targets were removed before
+merge. The commands below describe the recorded experiment at commit
+`84945f1b`, not tools in the current tree. Results and limitations remain
+part of the research record. See the [cleanup audit](2026-09-29-execution-code-cleanup.md).
+
 > **Current decision (2026-09-28):** Native instruction generation, stencil
 > JIT, and dispatch-JIT research are tabled at the user's request, informed
 > by their earlier negative investigations. The codegen proposals below are

@@ -584,7 +584,7 @@ if(EMSCRIPTEN)
     $<TARGET_OBJECTS:stanli_tbb_stub>)
   target_link_libraries(stanli_wasm PRIVATE stanli)
   set_target_properties(stanli_wasm PROPERTIES OUTPUT_NAME stanli)
-  set(STANLI_BROWSER_LINK_OPTIONS
+  target_link_options(stanli_wasm PRIVATE
     -fwasm-exceptions
     "SHELL:-s MODULARIZE=1"
     "SHELL:-s EXPORT_NAME=createStanli"
@@ -592,19 +592,9 @@ if(EMSCRIPTEN)
     "SHELL:-s MAXIMUM_MEMORY=4GB"
     "SHELL:-s STACK_SIZE=8MB"
     "SHELL:-s ENVIRONMENT=web,worker,node"
+    "SHELL:-s EXPORTED_FUNCTIONS=${STANLI_CAPI_EXPORTS},_malloc,_free"
     "SHELL:-s EXPORTED_RUNTIME_METHODS=cwrap,UTF8ToString,stringToNewUTF8,HEAPF64,addFunction,removeFunction"
     "SHELL:-s ALLOW_TABLE_GROWTH=1")
-  target_link_options(stanli_wasm PRIVATE ${STANLI_BROWSER_LINK_OPTIONS}
-    "SHELL:-s EXPORTED_FUNCTIONS=${STANLI_CAPI_EXPORTS},_malloc,_free")
-
-  # Explicit experiment only: compare a narrow kernel bridge with the shipped
-  # browser artifact. These exports never enter stanli_wasm or stanli_webr.
-  add_executable(probe_codegen_wasm EXCLUDE_FROM_ALL runtime/src/capi.cpp
-    tools/probe_kernel_bridge.cpp $<TARGET_OBJECTS:stanli_tbb_stub>)
-  target_link_libraries(probe_codegen_wasm PRIVATE stanli)
-  set_target_properties(probe_codegen_wasm PROPERTIES OUTPUT_NAME stanli_codegen_probe)
-  target_link_options(probe_codegen_wasm PRIVATE ${STANLI_BROWSER_LINK_OPTIONS}
-    "SHELL:-s EXPORTED_FUNCTIONS=${STANLI_CAPI_EXPORTS},_malloc,_free,_probe_create,_probe_forward,_probe_reverse,_probe_free")
 
 # The webR runtime: the same capi surface as a relocatable SIDE_MODULE
 # that webR's main module dlopens, which is how the R package loads
@@ -952,29 +942,6 @@ add_dependencies(bench_rhs_adjoint stanli_mir_fixtures)
 add_executable(bench_ode_ceiling EXCLUDE_FROM_ALL
   tools/bench_ode_ceiling.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_ode_ceiling PRIVATE stanli)
-# Structured callback experiment shares the coupled-solver benchmark, without
-# instantiating its historical fvar Program adapter. Neither target is shipped.
-add_executable(bench_structured_callback EXCLUDE_FROM_ALL
-  tools/bench_ode_ceiling.cpp tests/tbb_stub.cpp)
-target_compile_definitions(bench_structured_callback PRIVATE STANLI_STRUCTURED_CALLBACK_PROBE=1)
-target_link_libraries(bench_structured_callback PRIVATE stanli)
-add_dependencies(bench_structured_callback stanli_mir_fixtures)
-add_executable(bench_structured_callback_local EXCLUDE_FROM_ALL
-  tools/bench_structured_callback_local.cpp tests/tbb_stub.cpp)
-target_link_libraries(bench_structured_callback_local PRIVATE stanli)
-add_dependencies(bench_structured_callback_local stanli_mir_fixtures)
-# Loop reverse lifetime/history prototype; developer-only, never installed.
-add_executable(bench_loop_adjoint_local EXCLUDE_FROM_ALL
-  tools/bench_loop_adjoint_local.cpp tests/tbb_stub.cpp)
-target_link_libraries(bench_loop_adjoint_local PRIVATE stanli)
-add_dependencies(bench_loop_adjoint_local stanli_mir_fixtures)
-
-add_executable(bench_loop_adjoint EXCLUDE_FROM_ALL
-  tools/bench_ode_ceiling.cpp tests/tbb_stub.cpp)
-target_compile_definitions(bench_loop_adjoint PRIVATE STANLI_STRUCTURED_CALLBACK_PROBE=1)
-target_link_libraries(bench_loop_adjoint PRIVATE stanli)
-add_dependencies(bench_loop_adjoint stanli_mir_fixtures)
-
 add_executable(bench_ode_cvodes_ceiling EXCLUDE_FROM_ALL
   tools/bench_ode_cvodes_ceiling.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_ode_cvodes_ceiling PRIVATE stanli)
@@ -986,12 +953,6 @@ add_executable(hp_adjoint_dump EXCLUDE_FROM_ALL
   tools/hp_adjoint_dump.cpp tests/tbb_stub.cpp)
 target_link_libraries(hp_adjoint_dump PRIVATE stanli)
 add_executable(bench_dispatch tools/bench_dispatch.cpp)
-# Developer-only native-code feasibility probe; never a shipped backend.
-if(UNIX AND NOT EMSCRIPTEN)
-  add_executable(probe_native_program EXCLUDE_FROM_ALL tools/probe_native_program.cpp
-    $<TARGET_OBJECTS:stanli_tbb_stub>)
-  target_link_libraries(probe_native_program PRIVATE stanli ${CMAKE_DL_LIBS})
-endif()
 add_executable(dump_ops tools/dump_ops.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(dump_ops PRIVATE stanli)

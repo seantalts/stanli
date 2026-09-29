@@ -87,7 +87,7 @@ the experiment tests whether compact code also delivers faster execution.
 No production unrolling threshold has been changed.
 
 The [structured-callback experiment](2026-09-28-structured-callback-results.md)
-now implements the first proposed adapter. It reuses structured history and
+tested the first proposed adapter. It reuses structured history and
 kernel backwards, and also tests grouping each iteration into an existing
 register segment. Both are correct against the register oracle but slower in
 complete ODE solves. At 2,048 trips, the simple case takes about 197 µs with
@@ -95,7 +95,7 @@ generated register reverse and 470–489 µs with the structured variants. The
 production unrolling and callback policies remain unchanged.
 
 The [loop-aware register reverse experiment](2026-09-28-loop-adjoint-results.md)
-now tests that second option too. It versions overwritten values, preserves
+tested that second option too. It versions overwritten values, preserves
 copy aliases across iterations, and reuses existing derivative instructions.
 Both a complete instruction history and a smaller block-visit history pass
 bitwise checks. Neither beats the current callback: complete solves take about
@@ -103,10 +103,13 @@ bitwise checks. Neither beats the current callback: complete solves take about
 history already costs more than the incumbent's complete callback gradient in
 a representative local comparison.
 
-The [follow-up experiments](2026-09-28-loop-history-followup.md) now test selective
+The [follow-up experiments](2026-09-28-loop-history-followup.md) tested selective
 saving and reuse of guarded prepared paths. Selective per-call recording still
 loses. Guarded reuse gives 1.7–2.3× faster warm solves in the tested cases, but
-adds first-call compilation and retained memory; it remains developer-only.
+adds first-call compilation and retained memory; it was not enabled.
+The prototype implementations and build targets have now been removed. Results
+remain in these notes and their original commits; the
+[cleanup audit](2026-09-29-execution-code-cleanup.md) records the removal.
 No new production engine or callback selector was added.
 
 The production win instead extends shared register lowering: runtime `for`

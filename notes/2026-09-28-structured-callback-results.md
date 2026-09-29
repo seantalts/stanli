@@ -1,5 +1,10 @@
 # Structured callback experiment: correct, but slower on the tested solves
 
+Historical experiment: its implementation and build targets were removed before
+merge. The commands below describe the recorded experiment at commit
+`8c00cc6e`, not tools in the current tree. Results and limitations remain
+part of the research record. See the [cleanup audit](2026-09-29-execution-code-cleanup.md).
+
 Do not route these scalar ODE callbacks into the structured-loop engine by
 default. Reusing its existing derivative history works, including changing
 branches and overwritten values, but loses to the current execution paths in

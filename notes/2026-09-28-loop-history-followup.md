@@ -1,5 +1,10 @@
 # Continued native execution experiments
 
+Historical experiment: its implementation and build targets were removed before
+merge. The commands below describe the recorded experiment at commit
+`ac4be527`, not tools in the current tree. Results and limitations remain
+part of the research record. See the [cleanup audit](2026-09-29-execution-code-cleanup.md).
+
 Authorization: continue experiments, keep improvements, avoid regressions, and
 consolidate existing execution machinery. No new production engine or dispatch
 JIT. Base `5b878354`, synchronized to `origin/HEAD` at `6ce2018b`.
