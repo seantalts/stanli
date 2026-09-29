@@ -76,5 +76,11 @@
     "source": "tests/fixtures/structured_local_shape.stan",
     "mir": "tests/fixtures/structured_local_shape.tmir.sexp",
     "data": "tests/fixtures/structured_local_shape.json"
+  },
+  {
+    "model": "gq_bounded_block",
+    "source": "tests/fixtures/gq_bounded_block.stan",
+    "mir": "tests/fixtures/gq_bounded_block.tmir.sexp",
+    "data": "tests/fixtures/gq_bounded_block.json"
   }
 ]

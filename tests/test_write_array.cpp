@@ -14,6 +14,7 @@
 
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/graph_print.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/mir_interp.hpp>
 #include <stanli/optable.hpp>
@@ -1401,70 +1402,120 @@ void test_write_array_vector_rng() {
   }
 }
 
-// A helper with genuinely runtime-sized local storage still needs MIR. Its
-// transformed-parameter block lowers; generated quantities falls back.
-void test_write_array_partial_fallback() {
+// Require both selection and repeated whole-row parity. The forced interpreter
+// is an oracle alongside the complete graph, never evidence of admission.
+void expect_bounded_output(const std::string& fixture,
+                           const stanli::DataMap& data, bool compiled) {
   using namespace stanli;
-  const int k = 3;
-  DataMap data;
-  data.set_int("K", k);
-  std::vector<int> trials(static_cast<size_t>(k));
-  for (int i = 0; i < k; ++i) trials[static_cast<size_t>(i)] = 5 + i;
-  data.set_int_array("trials", trials);
-  const std::string text =
-      slurp("tests/fixtures/gq_partial_fallback.tmir.sexp");
-
-  CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array) {
+  const std::string text = slurp("tests/fixtures/" + fixture + ".tmir.sexp");
+  const auto normal = compile_model(text, data);
+  if (!normal.write_array || bool(normal.write_array->interp) == compiled ||
+      (compiled && !find_retained_loop(normal.write_array->graph))) {
     ++failures;
-    std::printf("FAIL gq_partial_fallback: no write_array\n");
+    std::printf("FAIL %s bounded selection: expected compiled=%d, %s\n",
+                fixture.c_str(), compiled,
+                normal.write_array ? normal.write_array->truncated.c_str()
+                                   : "missing outputs");
     return;
   }
-  if (cm.write_array->truncated.empty() ||
-      cm.write_array->truncated.find("generated quantities") ==
-          std::string::npos) {
-    ++failures;
-    std::printf("FAIL gq_partial_fallback: truncated message is [%s]\n",
-                cm.write_array->truncated.c_str());
-  }
-  if (!cm.write_array->interp) {
-    ++failures;
-    std::printf("FAIL gq_partial_fallback: no interpreter attached\n");
+  if (!compiled) {
+    test_setenv("STANLI_STRUCTURED_LOOPS", "0");
+    const auto disabled = compile_model(text, data);
+    test_unsetenv("STANLI_STRUCTURED_LOOPS");
+    if (!disabled.write_array) {
+      ++failures;
+      std::printf("FAIL %s missing refusal baseline\n", fixture.c_str());
+      return;
+    }
+    const auto describe = [](const CompiledModel::WriteArray& wa) {
+      GraphPrintInfo info;
+      info.fills = &wa.fills;
+      for (const auto& column : wa.columns)
+        info.views.emplace_back(column.name, column.slot);
+      std::string result;
+      print_graph(result, wa.graph, info);
+      return result;
+    };
+    expect_eq(fixture + " refused trial preserves prefix",
+              describe(*normal.write_array), describe(*disabled.write_array));
     return;
   }
-  expect_eq("gq_partial_fallback graph columns",
-            joined(cm.write_array->columns), "p.1,p.2,p.3,mu,sigma,tp_val");
-  expect_idx("gq_partial_fallback n_gq_start", cm.write_array->n_gq_start,
-             cm.write_array->columns.size());
-
-  Executor pex(cm.graph);
-  cm.bind(pex);
-  Executor wex(std::move(cm.write_array->graph));
-  cm.write_array->bind(wex);
-  for (int64_t j = 0; j < pex.n_params(); ++j)
-    pex.params_data()[j] = 0.1 * (j + 1);
-  pex.run_forward_only();
-  for (int64_t j = 0; j < wex.n_params(); ++j)
-    wex.params_data()[j] = 0.1 * (j + 1);
-  wex.run_forward_only();
-  std::vector<double> graph_row;
-  for (const auto& c : cm.write_array->columns) {
-    const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i)
-      graph_row.push_back(p[c.storage_index(i)]);
-  }
-  WaRng interp_rng(3);
-  const std::vector<double> interp_row =
-      cm.write_array->interp->eval(cm.constrained_env(pex), interp_rng);
-  if (interp_row.size() < graph_row.size() ||
-      !same_double_bytes(graph_row,
-                         std::vector<double>(
-                             interp_row.begin(),
-                             interp_row.begin() + (int64_t)graph_row.size()))) {
+  if (find_retained_loop(normal.write_array->graph)->cache_execution_path) {
     ++failures;
-    std::printf(
-        "FAIL gq_partial_fallback: compiled transformed-parameter prefix "
-        "does not match the interpreter\n");
+    std::printf("FAIL %s output block records a reusable execution path\n",
+                fixture.c_str());
+  }
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  auto model = compile_model(text, data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  Executor pex(model.graph), wex(model.write_array->graph);
+  model.bind(pex);
+  model.write_array->bind(wex);
+  WaRng graph_rng(1234), interp_rng(1234);
+  for (double x : {-0.3, 0.2, 0.0, -0.4, 0.3, -0.3}) {
+    for (int64_t i = 0; i < pex.n_params(); ++i)
+      pex.params_data()[i] = wex.params_data()[i] = x;
+    pex.run_forward_only();
+    bool graph_error = false, interp_error = false;
+    std::vector<double> actual, expected;
+    try {
+      wex.run_forward_only(EvalState{&graph_rng});
+      for (const auto& col : model.write_array->columns)
+        for (int64_t i = 0; i < col.len; ++i)
+          actual.push_back(wex.value_ptr(col.slot)[col.storage_index(i)]);
+    } catch (const std::exception&) {
+      graph_error = true;
+    }
+    try {
+      expected = model.write_array->interp->eval(model.constrained_env(pex),
+                                                 interp_rng);
+    } catch (const std::exception&) {
+      interp_error = true;
+    }
+    if (graph_error != interp_error ||
+        (!graph_error && !same_double_bytes(actual, expected))) {
+      ++failures;
+      std::printf("FAIL %s bounded row/error parity at x=%g\n", fixture.c_str(),
+                  x);
+    }
+    // Compare continuation state even after an error. An exception must not
+    // retry MIR, duplicate the preceding draw, or execute the following draw.
+    if (graph_rng.gen()() != interp_rng.gen()()) {
+      ++failures;
+      std::printf("FAIL %s bounded RNG continuation at x=%g\n", fixture.c_str(),
+                  x);
+    }
+  }
+}
+
+void test_write_array_bounded_blocks() {
+  using namespace stanli;
+  DataMap partial;
+  partial.set_int("K", 3);
+  partial.set_int_array("trials", {5, 6, 7});
+  expect_bounded_output("gq_partial_fallback", partial, true);
+  expect_bounded_output("gq_bounded_many", DataMap{}, true);
+  const auto data = [](int mode, int lo, int hi, int repeats = 1) {
+    DataMap d;
+    d.set_int("mode", mode);
+    d.set_int("lower_size", lo);
+    d.set_int("upper_size", hi);
+    d.set_int("repeats", repeats);
+    return d;
+  };
+  for (int mode = 0; mode <= 4; ++mode)
+    expect_bounded_output("gq_bounded_block", data(mode, 1, 2), true);
+  expect_bounded_output("gq_bounded_block", data(0, 0, 2), true);
+  expect_bounded_output("gq_bounded_block", data(0, 1, 8, 3), true);
+  // Refuse before capacity/fill allocation or excessive recording. Negative
+  // extents keep their runtime validation in MIR.
+  expect_bounded_output("gq_bounded_block", data(0, -1, 2), false);
+  expect_bounded_output("gq_bounded_block", data(0, 1, 100000000), false);
+  expect_bounded_output("gq_bounded_block", data(0, 1, 2, 1000000), false);
+  for (int mode = 0; mode <= 4; ++mode) {
+    DataMap d;
+    d.set_int("mode", mode);
+    expect_bounded_output("gq_bounded_refusals", d, false);
   }
 }
 
@@ -5738,7 +5789,7 @@ int main() {
   test_write_array_retained_loop();
   test_write_array_block_order();
   test_write_array_vector_rng();
-  test_write_array_partial_fallback();
+  test_write_array_bounded_blocks();
   test_write_array_selected_loop_refused();
   test_write_array_selected_loop_overflow();
   if (failures == 0) std::printf("test_write_array OK\n");

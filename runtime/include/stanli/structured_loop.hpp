@@ -93,6 +93,10 @@ struct StructuredLoop {
   std::vector<Import> imports;
   std::vector<int> outputs;
   bool has_target = false;  // one scalar output after `outputs`
+  // Small bounded output blocks use the ordinary tree execution directly:
+  // recording a reusable path costs more when local extents change per draw.
+  // Existing loop plans retain their replay policy.
+  bool cache_execution_path = true;
   Node root;
   // Straight-line runs of the body compiled to register programs; a Segment
   // node's `segment` indexes this.

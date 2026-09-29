@@ -1479,6 +1479,7 @@ struct LoopState : KernelState {
         loop_version(plan.loop_count, -1),
         ctx(plan.site_count),
         sites(plan.site_count, nullptr) {
+    no_replay |= !plan.cache_execution_path;
     const char* frame_option = std::getenv("STANLI_STRUCTURED_FRAMES");
     frame_mode = !no_replay && plan.outer_loop_index >= 0 &&
                  plan.segments.empty() && frame_option &&
