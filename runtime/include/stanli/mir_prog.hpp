@@ -243,6 +243,18 @@ struct ProgramCompiler {
   // nevertheless be initialized before control reaches that jump so the
   // untaken path preserves it.
   std::vector<Program::Instr> hoisted_int_initializers;
+  // A folded scalar local inside a repeated scope may later need storage.
+  // Preserve its lexical position with a temporary marker, so loop backedges
+  // can distinguish "before declaration" from "after declaration". finish()
+  // removes unused markers; promoted locals replace theirs with a real fill.
+  std::map<std::string, int> int_reset_at;
+  std::set<int> unused_int_resets;
+  void mark_int_reset(const std::string& name) {
+    if (!structured_while_depth) return;
+    const int at = emit(Program::JMP, 0);
+    int_reset_at[name] = at;
+    unused_int_resets.insert(at);
+  }
 
   static void assigned_names(const mir::Stmt& s, std::set<std::string>* names) {
     if (s.kind == mir::Stmt::Assignment) names->insert(s.lhs);
@@ -301,7 +313,14 @@ struct ProgramCompiler {
       bail("structured while writes an integer array: " + name);
     const int r = alloc(1);
     const double value = static_cast<double>(it->second[0]);
-    hoisted_int_initializers.push_back(const_instr(r, &value, 1));
+    const auto reset = int_reset_at.find(name);
+    if (reset == int_reset_at.end()) {
+      hoisted_int_initializers.push_back(const_instr(r, &value, 1));
+    } else {
+      p.code[reset->second] = const_instr(r, &value, 1);
+      unused_int_resets.erase(reset->second);
+      int_reset_at.erase(reset);
+    }
     reals[name] = Range{r, 1};
     ints.erase(it);
     int_decl_at.erase(name);
@@ -3835,18 +3854,39 @@ struct ProgramCompiler {
   // compiled, and the jumps are the only instructions that name a code
   // position (CONST/CONSTR's `a` is a pool index, CALL's is a call index).
   void finish() {
-    if (late_bound.empty() && hoisted_int_initializers.empty()) return;
-    std::vector<Program::Instr> prologue = std::move(hoisted_int_initializers);
+    if (late_bound.empty() && hoisted_int_initializers.empty() &&
+        unused_int_resets.empty()) return;
+    std::vector<Program::Instr> code = std::move(hoisted_int_initializers);
     for (const auto& [reg, len] : late_bound) {
       const std::vector<double> nan((size_t)len,
                                     std::numeric_limits<double>::quiet_NaN());
-      prologue.push_back(const_instr(reg, nan.data(), len));
+      code.push_back(const_instr(reg, nan.data(), len));
     }
-    const int n = (int)prologue.size();
-    for (auto& instr : p.code)
+    // Preserve the existing cheap prepend for programs with no markers to
+    // remove. They need only a constant jump offset, not a relocation map.
+    if (unused_int_resets.empty()) {
+      const int n = static_cast<int>(code.size());
+      for (auto& instr : p.code)
+        if (instr.code == Program::JZ || instr.code == Program::JMP)
+          instr.dst += n;
+      p.code.insert(p.code.begin(), code.begin(), code.end());
+      int_reset_at.clear();
+      late_bound.clear();
+      return;
+    }
+    std::vector<int> pc_map(p.code.size() + 1);
+    for (size_t pc = 0; pc < p.code.size(); ++pc) {
+      pc_map[pc] = static_cast<int>(code.size());
+      if (!unused_int_resets.count(static_cast<int>(pc)))
+        code.push_back(p.code[pc]);
+    }
+    pc_map.back() = static_cast<int>(code.size());
+    for (auto& instr : code)
       if (instr.code == Program::JZ || instr.code == Program::JMP)
-        instr.dst += n;
-    p.code.insert(p.code.begin(), prologue.begin(), prologue.end());
+        instr.dst = pc_map.at(static_cast<size_t>(instr.dst));
+    p.code = std::move(code);
+    unused_int_resets.clear();
+    int_reset_at.clear();
     late_bound.clear();
   }
 
@@ -3865,6 +3905,7 @@ struct ProgramCompiler {
         known_int_array_dims.erase(s.decl_id);
         int_array_names.erase(s.decl_id);
         int_decl_at.erase(s.decl_id);
+        int_reset_at.erase(s.decl_id);
         if (s.decl_type.base.empty() &&
             s.decl_type.unsized.leaf != mir::UnsizedLeaf::Unknown) {
           const mir::UnsizedView view = s.decl_type.unsized;
@@ -3929,6 +3970,7 @@ struct ProgramCompiler {
             long folded;
             if (try_cint(s.init, &folded)) {
               ints[s.decl_id] = {folded};
+              mark_int_reset(s.decl_id);
               return;
             }
             // A declaration after or inside a structured loop may read
@@ -3946,6 +3988,7 @@ struct ProgramCompiler {
             return;
           }
           ints[s.decl_id] = {std::numeric_limits<int>::min()};
+          mark_int_reset(s.decl_id);
           return;
         }
         const bool int_array =
@@ -4048,6 +4091,7 @@ struct ProgramCompiler {
           // This assignment is certain and its RHS stayed a compile-time
           // integer, so subsequent reads may use the folded value directly.
           ints[s.lhs] = {cint(s.rhs)};
+          mark_int_reset(s.lhs);
           return;
         }
         auto it = reals.find(s.lhs);
@@ -4370,13 +4414,6 @@ struct ProgramCompiler {
           // Every integer operation in the repeated body must have a typed
           // implementation; double storage alone does not prove this.
           require_runtime_integer_contract();
-          // An enclosing while can have folded integer declarations whose
-          // initialization must repeat at their original lexical location.
-          // Keep that case interpreted until it has the same binding contract
-          // as the runtime for locals below.
-          if (structured_while_depth != runtime_for_depth)
-            bail("runtime for nested in while needs repeated integer bindings");
-
           // Evaluate and snapshot the lower bound exactly once.
           // In particular, the lower bound may be a variable assigned by the
           // body, so it cannot remain an aliased Range.
@@ -4587,6 +4624,7 @@ struct ProgramCompiler {
     auto saved_int_array_names = int_array_names;
     auto saved_deferred_shapes = deferred_shapes;
     auto saved_int_decl_at = int_decl_at;
+    auto saved_int_reset_at = int_reset_at;
     auto saved_extern_bound = extern_bound;
     const int saved_branch_depth = branch_depth;
     const int saved_return_while_base = return_while_base;
@@ -4600,6 +4638,7 @@ struct ProgramCompiler {
     int_array_names.clear();
     deferred_shapes.clear();
     int_decl_at.clear();
+    int_reset_at.clear();
     extern_bound.clear();
     branch_depth = 0;
     inline_stack.push_back(f.name);
@@ -4614,6 +4653,7 @@ struct ProgramCompiler {
             reals[f.arg_names[k]] = Range{reg, 1};
           } else {
             ints[f.arg_names[k]] = args[k].ints;
+            if (args[k].ints.size() == 1) mark_int_reset(f.arg_names[k]);
           }
         } else {
           known_int_arrays[f.arg_names[k]] = args[k].ints;
@@ -4641,6 +4681,7 @@ struct ProgramCompiler {
       int_array_names = std::move(saved_int_array_names);
       deferred_shapes = std::move(saved_deferred_shapes);
       int_decl_at = std::move(saved_int_decl_at);
+      int_reset_at = std::move(saved_int_reset_at);
       extern_bound = std::move(saved_extern_bound);
       branch_depth = saved_branch_depth;
       return_while_base = saved_return_while_base;
@@ -4657,6 +4698,7 @@ struct ProgramCompiler {
     int_array_names = std::move(saved_int_array_names);
     deferred_shapes = std::move(saved_deferred_shapes);
     int_decl_at = std::move(saved_int_decl_at);
+    int_reset_at = std::move(saved_int_reset_at);
     extern_bound = std::move(saved_extern_bound);
     branch_depth = saved_branch_depth;
     return_while_base = saved_return_while_base;

@@ -727,7 +727,7 @@ int main() {
       {"f_runtime_for_integer_overflow", 2, 4, true, false},
       {"f_runtime_for_int_array", 2, 4, true, false},
       {"f_runtime_for_mutates_bound", 2, 4, true, false},
-      {"f_runtime_for_in_while", 2, 4, false, false, "nested in while"},
+      {"f_runtime_for_in_while", 2, 4, true, false},
       {"f_bad_return_shape", 2, 4, false, false},
       {"f_early", 2, 4, true, false},  // return from a runtime branch
   };
