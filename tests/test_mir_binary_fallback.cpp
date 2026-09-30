@@ -226,6 +226,8 @@ int main() {
   check_binary("gamma_p", OP_GAMMA_P, ps, qs);
   check_binary("gamma_q", OP_GAMMA_Q, ps, qs);
   check_binary("hypot", OP_HYPOT, xs, ys);
+  check_binary("hypergeometric_1F0", OP_HYPERGEOMETRIC_1F0, xs,
+               {0.1, -0.5, 0.25, 0.75});
   check_binary("lbeta", OP_LBETA, ps, qs);
   check_binary("lchoose", OP_LCHOOSE, ns, ks);
   check_binary("binomial_coefficient_log", OP_LCHOOSE, ns, ks);

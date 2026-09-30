@@ -162,6 +162,53 @@ int main() {
     check(!rng_report["write_array"].HasMember("graph"),
           "unselected partial GQ graph is not reported as executing");
   }
+  // One registry entry supplies ordinary graph calls, retained-loop calls,
+  // and register CALL instructions without a model-level MIR fallback.
+  for (int mode : {0, 1, 2, 3}) {
+    auto inputs =
+        DataMap::from_json(slurp("tests/fixtures/hypergeometric_1f0.json"));
+    if (mode == 0) {
+      inputs.set_int("N", 0);
+      inputs.set_real_array("offsets", {});
+    }
+    if (mode == 1) test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+    // Small bounded models may profitably specialize the loop into graph
+    // regions. Disable that existing optimization to exercise retained calls.
+    if (mode == 2) test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0", 1);
+    auto cm = compile_model(
+        slurp("tests/fixtures/hypergeometric_1f0.tmir.sexp"), inputs);
+    if (mode == 1) test_unsetenv("STANLI_STRUCTURED_LOOPS");
+    if (mode == 2) test_unsetenv("STANLI_BOUNDED_SPECIALIZATION");
+    const auto selected = execution_report(cm);
+    check(has(selected, "OP_HYPERGEOMETRIC_1F0"),
+          "hypergeometric shared kernel is visible");
+    check(has(selected, "structured_loop") == (mode == 2),
+          "hypergeometric retained-loop selection");
+    if (mode == 1 || mode == 3)
+      check(has(selected, "register_program"),
+            "hypergeometric runtime register CALL selection");
+    check(has(selected, "nested_tape"),
+          "hypergeometric upstream derivative tape is reported");
+    check(cm.interpreter_fallbacks.empty() && cm.write_array &&
+              !cm.write_array->interp,
+          "hypergeometric model and outputs are compiled");
+    Executor executor(std::move(cm.graph));
+    cm.bind(executor);
+    ExecutionTrace evaluation;
+    evaluation.forbid_mir = true;
+    {
+      ExecutionTraceScope scope(evaluation);
+      for (double a : {-0.2, 0.3}) {
+        executor.params_data()[0] = a;
+        executor.params_data()[1] = 0.1;
+        double gradient[2];
+        (void)executor.gradient(gradient);
+      }
+      evaluation.check();
+    }
+    check(evaluation.events.empty(),
+          "hypergeometric changing branches do not enter MIR");
+  }
   test_setenv("STANLI_NO_INTERPRETER", "1", 1);
   bool rejected = false;
   try {

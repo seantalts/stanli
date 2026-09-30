@@ -136,6 +136,26 @@ int main() {
           "cached MIR function call");
     typed_boundary(slurp("tests/fixtures/early_return.tmir.sexp"));
 
+    Function hypergeometric = Function::from_mir(
+        slurp("tests/fixtures/hypergeometric_1f0.tmir.sexp"), "coverage");
+    DataMap hypergeometric_args;
+    hypergeometric_args.set_real("a", 1.0);
+    for (double z : {0.5, 0.0, -0.5}) {
+      hypergeometric_args.set_real("z", z);
+      check(compiled_call(hypergeometric, hypergeometric_args).r ==
+                std::vector<double>{1.0 / (1.0 - z)},
+            "standalone hypergeometric_1F0 reads current arguments");
+    }
+    for (double z : {-1.1, -1.0, 1.0, 1.1}) {
+      hypergeometric_args.set_real("z", z);
+      throws_with([&] { hypergeometric(hypergeometric_args); },
+                  "hypergeometric_1F0", "hypergeometric domain rejection");
+    }
+    hypergeometric_args.set_real("z", 0.5);
+    check(compiled_call(hypergeometric, hypergeometric_args).r ==
+              std::vector<double>{2.0},
+          "compiled hypergeometric recovers after rejection");
+
     if (!stanli_has_embedded_stanc()) {
       throws_with([&] { Function unavailable(source, "affine"); },
                   "does not embed stanc3",

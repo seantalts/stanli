@@ -154,5 +154,11 @@
     "source": "tests/fixtures/gq_bounded_nested3.stan",
     "mir": "tests/fixtures/gq_bounded_nested3.tmir.sexp",
     "data": "tests/fixtures/gq_bounded_nested_budget.json"
+  },
+  {
+    "model": "hypergeometric_1f0",
+    "source": "tests/fixtures/hypergeometric_1f0.stan",
+    "mir": "tests/fixtures/hypergeometric_1f0.tmir.sexp",
+    "data": "tests/fixtures/hypergeometric_1f0.json"
   }
 ]
