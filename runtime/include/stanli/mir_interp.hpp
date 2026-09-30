@@ -546,7 +546,9 @@ class MirInterp {
         const long lo = as_int(st.lower);
         // Match stanc's C++ for condition, including upper-bound effects on
         // the final failed test. Only the lower bound is evaluated once.
-        for (long v = lo; v <= as_int(st.upper); ++v) {
+        // `long` is only 32-bit on Windows. A Stan loop ending at INT_MAX
+        // must advance once more to fail its final condition without wrapping.
+        for (int64_t v = lo; v <= as_int(st.upper); ++v) {
           Value lv;
           lv.is_int = true;
           lv.i = {(int)v};

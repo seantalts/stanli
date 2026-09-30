@@ -238,8 +238,8 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
     // Scan under the same compile-time loop bindings ordinary lowering
     // will use. This keeps static conditions such as `if (t < N)` out of
     // a region without overlooking an arm that exists only at a later t.
-    for (long v = lo; v <= hi && !found; ++v) {
-      int_env[s.loopvar] = v;
+    for (int64_t v = lo; v <= hi && !found; ++v) {
+      int_env[s.loopvar] = static_cast<long>(v);
       for (const auto& k : s.body)
         if (needs_runtime_control(k)) {
           found = true;
@@ -1596,8 +1596,8 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       const long old_value = had_old ? old->second : 0;
       bool has_runtime_loop_control = false;
       try {
-        for (long v = lo; v <= hi && !has_runtime_loop_control; ++v) {
-          int_env[s.loopvar] = v;
+        for (int64_t v = lo; v <= hi && !has_runtime_loop_control; ++v) {
+          int_env[s.loopvar] = static_cast<long>(v);
           for (const auto& child : s.body)
             if (runtime_loop_control(child)) {
               has_runtime_loop_control = true;
@@ -1634,8 +1634,8 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         int_env.erase(s.loopvar);
         return;
       }
-      for (long v = lo; v <= hi; ++v) {
-        int_env[s.loopvar] = v;
+      for (int64_t v = lo; v <= hi; ++v) {
+        int_env[s.loopvar] = static_cast<long>(v);
         try {
           for (const auto& k : s.body) lower_stmt(k);
         } catch (LoopContinue&) {

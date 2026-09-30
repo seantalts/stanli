@@ -1220,6 +1220,7 @@ set(STANLI_TESTS
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()
+set_tests_properties(test_ode_prog PROPERTIES TIMEOUT 180)
 
 # The C ABI lives only in the shared library. Test it through that shipped
 # boundary rather than compiling capi.cpp into the C++ unit-test library.
