@@ -460,6 +460,22 @@ class HistoricalResultsTests(unittest.TestCase):
 
 
 class BenchmarkCatalogTests(unittest.TestCase):
+    def test_complete_rows_rank_by_unrounded_ratio_and_incomplete_rows_stay_separate(self):
+        from tools.corpus_table import _catalog_tables
+        rows = [
+            {"model": "middle", "paired_speedup": 1.2343},
+            {"model": "failed", "note": "gradient build failed"},
+            {"model": "highest", "paired_speedup": 2.0},
+            {"model": "slightly_higher", "paired_speedup": 1.2344},
+        ]
+        details = {row["model"]: {"status": "failed" if row["model"] == "failed" else "ok"}
+                   for row in rows}
+        complete, incomplete = _catalog_tables(rows, details).split("**Incomplete results**")
+        self.assertLess(complete.index("`highest`"), complete.index("`slightly_higher`"))
+        self.assertLess(complete.index("`slightly_higher`"), complete.index("`middle`"))
+        self.assertNotIn("`failed`", complete)
+        self.assertIn("`failed`", incomplete)
+
     def setUp(self):
         from tools.corpus_table import render_catalog
         from benchmark_artifact_fixture import artifact_fixture

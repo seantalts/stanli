@@ -523,7 +523,15 @@ def _catalog_tables(rows, details):
     header = "| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) |"
     output = [header, "| --- | ---: | ---: | ---: |"]
     incomplete = []
-    for row in sorted(rows, key=lambda item: item["model"]):
+    complete = sorted(
+        (row for row in rows if details[row["model"]]["status"] == "ok"),
+        key=lambda row: (-_catalog_number(row, "paired_speedup"), row["model"]),
+    )
+    incomplete_rows = sorted(
+        (row for row in rows if details[row["model"]]["status"] != "ok"),
+        key=lambda row: row["model"],
+    )
+    for row in (*complete, *incomplete_rows):
         speedup = _catalog_number(row, "paired_speedup")
         cells = [_catalog_model(row["model"]), f"{speedup:.3g}x" if speedup is not None else "—"]
         for engine, fields in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
