@@ -73,6 +73,7 @@ paths and hashes in raw records unchanged.
 
 | Document | Contents / use |
 | --- | --- |
+| [2026-09-29 · Complete array-fill proofs](../../notes/execution/2026-09-29-complete-array-fills.md) | Branch-complete fills, range unions for overwrites, remaining construction limits, independent references and native measurements. |
 | [2026-09-29 · Bounded integer output blocks](../../notes/execution/2026-09-29-bounded-integer-blocks.md) | Full logical initialization and int32 partial-sum proofs, adversarial refusals, independent oracle and native comparisons. |
 | [2026-09-29 · Bounded vector output blocks](../../notes/execution/2026-09-29-bounded-vector-blocks.md) | Vector/row-vector admission, shape and sum proofs, MIR indexed-write correction, and native comparisons. |
 | [2026-09-29 · Bounded generated-quantity blocks](../../notes/execution/2026-09-29-bounded-output-blocks.md) | Closed-block admission, resource limits, logical-length tests, existing structured execution policy, and native measurements. |
