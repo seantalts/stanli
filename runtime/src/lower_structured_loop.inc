@@ -27,7 +27,8 @@ bool bounded_output_candidate(const mir::Stmt& root,
   if (!in_write_array || !n_gq_start || root.kind != mir::Stmt::Block ||
       structured_policy == StructuredMode::Off)
     return false;
-  std::set<std::string> locals, containers, dependent;
+  std::set<std::string> locals, dependent;
+  std::map<std::string, size_t> containers;
   size_t nodes = 0;
   const auto collect = [&](const auto& self, const mir::Stmt& s) -> bool {
     if (++nodes > 256) return false;
@@ -36,18 +37,20 @@ bool bounded_output_candidate(const mir::Stmt& root,
       if (scope.count(name) || !locals.insert(name).second) return false;
       if (s.kind == mir::Stmt::Decl &&
           (s.decl_type.base == "SArray" || s.decl_type.base == "SVector" ||
-           s.decl_type.base == "SRowVector"))
-        containers.insert(name);
+           s.decl_type.base == "SRowVector")) {
+        containers.emplace(name, s.decl_type.dims.size());
+      }
     }
     for (const auto& child : s.body)
       if (!self(self, child)) return false;
     return true;
   };
   if (!collect(collect, root) || containers.empty()) return false;
-  const auto expression = [&](const auto& self, const mir::Expr& e) -> bool {
+  const auto expression = [&](const auto& self, const mir::Expr& e,
+                              bool container_argument = false) -> bool {
     if (++nodes > 1024) return false;
     if (e.kind == mir::Expr::Var) {
-      if (containers.count(e.name)) return false;
+      if (containers.count(e.name)) return container_argument;
       if (locals.count(e.name)) return true;
       auto v = scope.find(e.name);
       if (v != scope.end() && !is_scalar(v->second)) return false;
@@ -57,13 +60,21 @@ bool bounded_output_candidate(const mir::Stmt& root,
     if (e.kind == mir::Expr::LitInt || e.kind == mir::Expr::LitReal)
       return true;
     if (e.kind == mir::Expr::Indexed) {
-      return e.args.size() == 2 && e.args[0].kind == mir::Expr::Var &&
-             containers.count(e.args[0].name) && e.args[1].name == "IndexSingle" &&
-             e.args[1].args.size() == 1 && self(self, e.args[1].args[0]);
+      if (e.args.size() < 2 || e.args[0].kind != mir::Expr::Var ||
+          !containers.count(e.args[0].name) ||
+          (!container_argument && e.type_ != "UReal" && e.type_ != "UInt"))
+        return false;
+      for (size_t i = 1; i < e.args.size(); ++i)
+        if (e.args[i].name != "IndexSingle" || e.args[i].args.size() != 1 ||
+            !self(self, e.args[i].args[0]))
+          return false;
+      return true;
     }
     if (e.kind == mir::Expr::FunApp) {
       if (e.fn_lib != mir::Expr::Lib::StanLib) return false;
-      if (e.name == "sum" || e.name == "size" || e.name == "num_elements" ||
+      if (e.name == "sum")
+        return e.args.size() == 1 && self(self, e.args[0], true);
+      if (e.name == "size" || e.name == "num_elements" ||
           e.name == "rows" || e.name == "cols")
         return e.args.size() == 1 && e.args[0].kind == mir::Expr::Var &&
                containers.count(e.args[0].name);
@@ -88,19 +99,23 @@ bool bounded_output_candidate(const mir::Stmt& root,
           if ((s.decl_type.base == "SArray" &&
                s.decl_type.elem_base != "SReal" &&
                s.decl_type.elem_base != "SInt") ||
-              s.decl_type.dims.size() != 1 || s.has_init)
+              s.decl_type.dims.empty() || s.has_init ||
+              (s.decl_type.dims.size() > 1 &&
+               s.decl_type.elem_base != "SReal"))
             return false;
-          if (!expression(expression, s.decl_type.dims[0])) return false;
+          for (const auto& dim : s.decl_type.dims)
+            if (!expression(expression, dim)) return false;
         } else if (s.decl_type.base != "SReal" && s.decl_type.base != "SInt")
           return false;
         if (s.has_init && !expression(expression, s.init)) return false;
         break;
       case mir::Stmt::Assignment:
         if (containers.count(s.lhs)) {
-          if (s.lhs_idx.size() != 1 || s.lhs_idx[0].name != "IndexSingle" ||
-              s.lhs_idx[0].args.size() != 1 ||
-              !expression(expression, s.lhs_idx[0].args[0]))
-            return false;
+          if (s.lhs_idx.size() != containers.at(s.lhs)) return false;
+          for (const auto& index : s.lhs_idx)
+            if (index.name != "IndexSingle" || index.args.size() != 1 ||
+                !expression(expression, index.args[0]))
+              return false;
         } else {
           if (!s.lhs_idx.empty()) return false;
           if (!locals.count(s.lhs)) {
@@ -157,16 +172,20 @@ bool bounded_output_candidate(const mir::Stmt& root,
       if (self(self, arg)) return true;
     return false;
   };
-  bool dynamic = false;
+  bool dynamic = false, dynamic_inner = false;
   const auto propagate = [&](const auto& self, const mir::Stmt& s,
                              bool control) -> void {
     if (s.kind == mir::Stmt::Decl) {
       if (control || (s.has_init && runtime(runtime, s.init)))
         dependent.insert(s.decl_id);
-      for (const auto& dim : s.decl_type.dims)
-        if (runtime(runtime, dim)) {
+      for (size_t d = 0; d < s.decl_type.dims.size(); ++d)
+        if (runtime(runtime, s.decl_type.dims[d])) {
           dependent.insert(s.decl_id);
           dynamic = true;
+          // MIR hoists size expressions into local temporaries. Follow their
+          // dependence before constructing a trial that cannot support a
+          // changing inner dimension. Lowering still checks fixed geometry.
+          dynamic_inner |= d > 0;
         }
     } else if (s.kind == mir::Stmt::Assignment &&
                (control || runtime(runtime, s.rhs)))
@@ -183,7 +202,143 @@ bool bounded_output_candidate(const mir::Stmt& root,
     before = dependent.size();
     propagate(propagate, root, false);
   } while (dependent.size() != before && !dynamic);
-  return dynamic;
+  return dynamic && !dynamic_inner;
+}
+
+// A refusal-only check for a nested container's unavoidable update slot.
+// Follow straight-line integer definitions and declaration-time shapes, then
+// the same maximum trip counts used by bounded lowering. Unknown control or
+// ranges defer to the ordinary isolated trial; this never admits a program.
+bool bounded_nested_update_over_budget(const mir::Stmt& root) {
+  const auto nested = [&](const auto& self, const mir::Stmt& s) -> bool {
+    if (s.kind == mir::Stmt::Decl && s.decl_type.base == "SArray" &&
+        s.decl_type.dims.size() > 1)
+      return true;
+    for (const auto& child : s.body)
+      if (self(self, child)) return true;
+    return false;
+  };
+  if (!nested(nested, root)) return false;
+  std::set<std::string> locals;
+  collect_loop_locals(root, &locals);
+  std::vector<std::string> writes;
+  assigned_names(root, &writes);
+  const std::set<std::string> written(writes.begin(), writes.end());
+  std::map<std::string, IntRange> integers;
+  struct Container {
+    IntRange outer;
+    uint64_t capacity;
+  };
+  std::map<std::string, Container> containers;
+  const auto local = [&](const auto& self, const mir::Expr& e) -> bool {
+    if (e.kind == mir::Expr::Var) return locals.count(e.name);
+    for (const auto& arg : e.args)
+      if (self(self, arg)) return true;
+    return false;
+  };
+  const auto unstable = [&](const auto& self, const mir::Expr& e) -> bool {
+    if (e.kind == mir::Expr::Var)
+      return locals.count(e.name) || written.count(e.name);
+    for (const auto& arg : e.args)
+      if (self(self, arg)) return true;
+    return false;
+  };
+  const auto truth = [&](const auto& self,
+                         const mir::Expr& e) -> std::optional<bool> {
+    if (!unstable(unstable, e)) return region_static_truth(e);
+    if ((e.kind != mir::Expr::EAnd && e.kind != mir::Expr::EOr) ||
+        e.args.size() != 2)
+      return {};
+    const auto a = self(self, e.args[0]), b = self(self, e.args[1]);
+    const bool decisive = e.kind == mir::Expr::EOr;
+    if ((a && *a == decisive) || (b && *b == decisive)) return decisive;
+    if (a && b) return !decisive;
+    return {};
+  };
+  const auto range = [&](const auto& self,
+                         const mir::Expr& e) -> std::optional<IntRange> {
+    if (!local(local, e))
+      return unstable(unstable, e) ? std::optional<IntRange>{} : region_range(e);
+    if (e.kind == mir::Expr::Var) {
+      auto found = integers.find(e.name);
+      if (found != integers.end()) return found->second;
+    } else if (e.kind == mir::Expr::Promotion && e.args.size() == 1) {
+      return self(self, e.args[0]);
+    } else if (e.kind == mir::Expr::TernaryIf && e.args.size() == 3) {
+      // Conditional refinement is deliberately outside this cheap check.
+      if (local(local, e.args[0])) return {};
+      if (auto selected = truth(truth, e.args[0]))
+        return self(self, e.args[*selected ? 1 : 2]);
+      auto a = self(self, e.args[1]), b = self(self, e.args[2]);
+      if (a && b)
+        return IntRange{std::min(a->lo, b->lo), std::max(a->hi, b->hi)};
+    } else if (e.kind == mir::Expr::FunApp && e.name == "size" &&
+               e.args.size() == 1 && e.args[0].kind == mir::Expr::Var) {
+      auto found = containers.find(e.args[0].name);
+      if (found != containers.end()) return found->second.outer;
+    }
+    return {};
+  };
+  const auto forget_writes = [&](const mir::Stmt& s) {
+    std::vector<std::string> writes;
+    assigned_names(s, &writes);
+    for (const auto& name : writes) integers.erase(name);
+  };
+  const auto visit = [&](const auto& self, const mir::Stmt& s,
+                         uint64_t multiplier, bool straight) -> bool {
+    if (s.kind == mir::Stmt::Block || s.kind == mir::Stmt::SList) {
+      for (const auto& child : s.body)
+        if (self(self, child, multiplier, straight)) return true;
+    } else if (s.kind == mir::Stmt::Decl && straight) {
+      if (s.decl_type.base == "SArray" && s.decl_type.dims.size() > 1) {
+        const auto outer = range(range, s.decl_type.dims[0]);
+        if (!outer || outer->lo < 0) return false;
+        uint64_t capacity = outer->hi;
+        for (size_t i = 1; i < s.decl_type.dims.size(); ++i) {
+          const auto dim = range(range, s.decl_type.dims[i]);
+          if (!dim || dim->lo < 0 || dim->lo != dim->hi ||
+              (dim->hi && capacity > 8192 / uint64_t(dim->hi)))
+            return false;
+          capacity *= uint64_t(dim->hi);
+        }
+        containers.emplace(s.decl_id, Container{*outer, capacity});
+      } else if (s.decl_type.base == "SInt" && s.has_init) {
+        if (auto value = range(range, s.init)) integers[s.decl_id] = *value;
+      }
+    } else if (s.kind == mir::Stmt::Assignment) {
+      if (!s.lhs_idx.empty()) {
+        auto found = containers.find(s.lhs);
+        if (found != containers.end() &&
+            found->second.capacity > 65536 / multiplier)
+          return true;
+      } else {
+        auto value = straight ? range(range, s.rhs) : std::optional<IntRange>{};
+        integers.erase(s.lhs);
+        if (value) integers[s.lhs] = *value;
+      }
+    } else if (s.kind == mir::Stmt::For) {
+      const auto lo = range(range, s.lower), hi = range(range, s.upper);
+      // A repeated body's scalar writes cannot supply stable nested bounds.
+      forget_writes(s);
+      if (!lo || !hi) return false;
+      const uint64_t count =
+          std::max<int64_t>(0, int64_t(hi->hi) - lo->lo + 1);
+      if (!count || count > 4096 / multiplier) return false;
+      for (const auto& child : s.body)
+        if (self(self, child, multiplier * count, false)) return true;
+    } else if (s.kind == mir::Stmt::IfElse) {
+      // Only enter data-decided arms; unknown control may refine integer
+      // ranges and needs the full lowering proof. Logical short circuits can
+      // still establish an arm despite an unknown loop iterator.
+      if (auto selected = truth(truth, s.cond)) {
+        const size_t arm = *selected ? 0 : 1;
+        if (arm < s.body.size()) return self(self, s.body[arm], multiplier, false);
+      }
+      forget_writes(s);
+    }
+    return false;
+  };
+  return visit(visit, root, 1, true);
 }
 
 // Matches ostream's default floating-point formatting.
@@ -436,6 +591,9 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
 }
 
 std::optional<RealRange> region_real_range(const mir::Expr& e) {
+  // Real ranges prove while-loop termination. The closed output-block grammar
+  // admits only counted loops, so enumerating real values cannot help it.
+  if (bounded_output) return {};
   if (auto enumerated = region_enumerated_data_range(e)) return enumerated;
   if (e.kind == mir::Expr::LitInt)
     return RealRange{double(e.lit_i), double(e.lit_i)};
@@ -532,6 +690,26 @@ std::optional<RealRange> region_real_range(const mir::Expr& e) {
   return result;
 }
 
+// Number of scalar elements per outer entry for the bounded, rectangular
+// real-array contract. Inner extents are fixed; no padding occurs within an
+// entry. The outer logical extent remains distinct from total element count.
+std::optional<int64_t> bounded_outer_width(const Val& value) {
+  if (!bounded_output || value.runtime_dims.empty() ||
+      value.runtime_dims[0] < 0)
+    return {};
+  if (value.runtime_dims.size() == 1) return 1;
+  if (!is_array(value.si) ||
+      std::any_of(value.runtime_dims.begin() + 1, value.runtime_dims.end(),
+                  [](int slot) { return slot >= 0; }))
+    return {};
+  const auto& shape = array_shape(value.si);
+  if (shape.leaf != ViewKind::Flat ||
+      shape.dims.size() != value.runtime_dims.size())
+    return {};
+  return checked_product({shape.dims.begin() + 1, shape.dims.end()},
+                          "bounded inner array");
+}
+
 std::optional<IntRange> region_range(const mir::Expr& e) {
   const auto bounded = [](int64_t a, int64_t b) -> std::optional<IntRange> {
     if (a < INT32_MIN || b > INT32_MAX || a > b) return {};
@@ -584,12 +762,19 @@ std::optional<IntRange> region_range(const mir::Expr& e) {
       return bounded(shape.value, shape.value);
     if (bounded_output && e.args[0].kind == mir::Expr::Var) {
       auto value = scope.find(e.args[0].name);
-      if (value != scope.end() && value->second.runtime_dims.size() == 1) {
+      if (value != scope.end() && !value->second.runtime_dims.empty()) {
         const int axis = runtime_shape_axis(value->second, e.name);
         if (axis < 0) return bounded(1, 1);
         if (axis != 0) return {};
         auto range = int_ranges.find(value->second.runtime_dims[axis]);
-        if (range != int_ranges.end()) return range->second;
+        if (range != int_ranges.end()) {
+          if (e.name != "num_elements") return range->second;
+          if (auto width = bounded_outer_width(value->second)) {
+            if (*width > INT32_MAX) return {};
+            return bounded(int64_t(range->second.lo) * *width,
+                           int64_t(range->second.hi) * *width);
+          }
+        }
       }
     }
     return {};
@@ -1980,7 +2165,10 @@ void lower_region_stmt(const mir::Stmt& s) {
           (s.decl_type.base == "SVector" || s.decl_type.base == "SRowVector" ||
            s.decl_type.base == "SArray") &&
           s.decl_type.dims.size() == 1;
-      if (one_dimensional_container &&
+      const bool nested_real_array =
+          bounded_output && s.decl_type.base == "SArray" &&
+          s.decl_type.elem_base == "SReal" && s.decl_type.dims.size() > 1;
+      if ((one_dimensional_container || nested_real_array) &&
           needs_runtime_value(s.decl_type.dims[0])) {
         if (s.has_init)
           fail("runtime-sized structured declaration initializer unsupported");
@@ -1990,7 +2178,18 @@ void lower_region_stmt(const mir::Stmt& s) {
                " needs a finite capacity");
         if (bounded_output && range->lo < 0)
           fail("bounded output block needs nonnegative extents");
-        const int64_t capacity = range->hi;
+        std::vector<int64_t> dimensions{range->hi};
+        for (size_t d = 1; d < s.decl_type.dims.size(); ++d) {
+          // Fixed data geometry only: do not erase runtime reads or checks
+          // merely because interval analysis could find a singleton value.
+          if (needs_runtime_value(s.decl_type.dims[d]))
+            fail("bounded nested array needs fixed inner dimensions");
+          const int64_t dimension = eval_int(s.decl_type.dims[d]);
+          if (dimension < 0)
+            fail("bounded nested array needs nonnegative inner dimensions");
+          dimensions.push_back(dimension);
+        }
+        const int64_t capacity = checked_product(dimensions, "bounded array");
         if (bounded_output && range->lo != range->hi)
           bounded_output_dynamic = true;
         const bool fixed_extent = range->lo == range->hi;
@@ -2017,13 +2216,16 @@ void lower_region_stmt(const mir::Stmt& s) {
         else if (s.decl_type.base == "SRowVector")
           si = view_of("URowVector");
         else
-          si = array_view({capacity}, leaf_kind(s.decl_type.elem_base));
+          si = array_view(dimensions, leaf_kind(s.decl_type.elem_base));
         si.param_free = true;
         const bool int_array =
             s.decl_type.base == "SArray" && s.decl_type.elem_base == "SInt";
-        Val value{
-            add_slot(capacity, false), false, si,
-            fixed_extent ? std::vector<int>{} : std::vector<int>{extent.slot}};
+        std::vector<int> runtime_dims;
+        if (!fixed_extent) {
+          runtime_dims.assign(dimensions.size(), -1);
+          runtime_dims[0] = extent.slot;
+        }
+        Val value{add_slot(capacity, false), false, si, runtime_dims};
         const double initial =
             int_array ? static_cast<double>(std::numeric_limits<int>::min())
                       : std::numeric_limits<double>::quiet_NaN();
@@ -2067,6 +2269,13 @@ void lower_region_stmt(const mir::Stmt& s) {
       return;
     }
     case mir::Stmt::Assignment: {
+      // Indexed updates need a result slot as wide as the original container.
+      // Refuse before constructing the RHS and selector graph if that slot
+      // already exceeds the unchanged budget.
+      if (bounded_output && !s.lhs_idx.empty()) {
+        auto base = scope.find(s.lhs);
+        if (base != scope.end()) check_slot_budget(g.slots[base->second.slot].len);
+      }
       if (!scope.count(s.lhs)) {
         const auto declaration = decls.find(s.lhs);
         if (declaration != decls.end() && declaration->second.deferred_shape &&
@@ -2343,6 +2552,15 @@ bool try_lower_region(
   };
   if (target_scale != 1.0)
     return refuse("enclosing target scaling needs a compatible region");
+  if (output_references) {
+    try {
+      if (bounded_nested_update_over_budget(s))
+        return refuse("bounded nested update exceeds work budget before trial");
+    } catch (const CompileError&) {
+      // A failed estimate is not a new compile-time validation boundary.
+    } catch (const std::logic_error&) {
+    }
+  }
   std::shared_ptr<StructuredLoop> plan;
   std::vector<int> parent_inputs;
   std::vector<std::string> names;

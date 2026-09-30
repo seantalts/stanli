@@ -1000,9 +1000,18 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
     if (has_runtime_shape(a) &&
         (e.name == "size" || e.name == "num_elements" || e.name == "rows" ||
          e.name == "cols" || e.name == "FnLength")) {
-      if (e.name == "num_elements" && a.runtime_dims.size() != 1)
-        fail("num_elements: a runtime view of this rank has no single extent",
-             e.raw);
+      if (e.name == "num_elements" && a.runtime_dims.size() != 1) {
+        const auto width = bounded_outer_width(a);
+        const auto range = region_range(e);
+        if (!width || !range)
+          fail("num_elements: runtime array needs bounded fixed inner extents",
+               e.raw);
+        Val extent{a.runtime_dims[0], false, view_of("UInt")};
+        extent.si.param_free = true;
+        Val count = emit_value(OP_MUL, {extent, constant(double(*width))}, 1);
+        set_int_range(count, range->lo, range->hi);
+        return count;
+      }
       const int axis = runtime_shape_axis(a, e.name);
       if (axis < 0) return constant(1);
       if (size_t(axis) < a.runtime_dims.size() && a.runtime_dims[axis] >= 0) {

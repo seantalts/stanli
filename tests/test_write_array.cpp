@@ -13,6 +13,7 @@
 #include "env_helpers.hpp"
 
 #include <stanli/compile.hpp>
+#include <stanli/execution_report.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/graph_print.hpp>
 #include <stanli/mir.hpp>
@@ -1405,10 +1406,16 @@ void test_write_array_vector_rng() {
 // Require both selection and repeated whole-row parity. The forced interpreter
 // is an oracle alongside the complete graph, never evidence of admission.
 void expect_bounded_output(const std::string& fixture,
-                           const stanli::DataMap& data, bool compiled) {
+                           const stanli::DataMap& data, bool compiled,
+                           bool early_refusal = false) {
   using namespace stanli;
   const std::string text = slurp("tests/fixtures/" + fixture + ".tmir.sexp");
-  const auto normal = compile_model(text, data);
+  ExecutionTrace normal_trace, disabled_trace;
+  const auto prepare = [&](ExecutionTrace& trace) {
+    ExecutionTraceScope tracing(trace);
+    return compile_model(text, data);
+  };
+  const auto normal = prepare(normal_trace);
   if (!normal.write_array || bool(normal.write_array->interp) == compiled ||
       (compiled && !find_retained_loop(normal.write_array->graph))) {
     ++failures;
@@ -1420,7 +1427,7 @@ void expect_bounded_output(const std::string& fixture,
   }
   if (!compiled) {
     test_setenv("STANLI_STRUCTURED_LOOPS", "0");
-    const auto disabled = compile_model(text, data);
+    const auto disabled = prepare(disabled_trace);
     test_unsetenv("STANLI_STRUCTURED_LOOPS");
     if (!disabled.write_array) {
       ++failures;
@@ -1438,6 +1445,12 @@ void expect_bounded_output(const std::string& fixture,
     };
     expect_eq(fixture + " refused trial preserves prefix",
               describe(*normal.write_array), describe(*disabled.write_array));
+    if (early_refusal) {
+      const auto event = std::make_pair(std::string("prepare_data"),
+                                        std::string("construction"));
+      expect_idx(fixture + " rejects budget before constructing a trial",
+                 normal_trace.events[event], disabled_trace.events[event]);
+    }
     return;
   }
   if (find_retained_loop(normal.write_array->graph)->cache_execution_path) {
@@ -1482,8 +1495,8 @@ void expect_bounded_output(const std::string& fixture,
                   x);
       std::printf("  graph: %s; interpreter: %s\n", graph_message.c_str(),
                   interp_message.c_str());
-      for (const char* name :
-           {"mode", "lower_size", "upper_size", "repeats", "shift"})
+      for (const char* name : {"mode", "lower_size", "upper_size", "repeats",
+                               "shift", "width", "depth"})
         if (data.has(name)) std::printf("  %s=%d", name, data.at(name).i[0]);
       std::printf("\n");
     }
@@ -1578,6 +1591,65 @@ void test_write_array_bounded_blocks() {
       d.set_int("shift", shift);
       expect_bounded_output("gq_integer_fill_paths", d, false);
     }
+  }
+  for (const std::string fixture :
+       {"gq_bounded_nested", "gq_bounded_nested3", "gq_bounded_nested5"}) {
+    for (int mode = 0; mode <= 7; ++mode) {
+      for (int width : {0, 1, 3}) {
+        auto d = data(mode, 0, 2);
+        d.set_int("width", width);
+        d.set_int("depth", 2);
+        expect_bounded_output(fixture, d, true);
+      }
+    }
+    for (int depth : {0, 1, 2}) {
+      auto d = data(0, 1, 8, 2);
+      d.set_int("width", 3);
+      d.set_int("depth", depth);
+      expect_bounded_output(fixture, d, true);
+    }
+    for (int mode : {0, 6}) {
+      auto d = data(mode, 0, 1);
+      d.set_int("width", 0);
+      d.set_int("depth", 0);
+      expect_bounded_output(fixture, d, true);
+    }
+    for (int width : {-1, 100000000}) {
+      auto d = data(0, 1, 2);
+      d.set_int("width", width);
+      d.set_int("depth", 2);
+      expect_bounded_output(fixture, d, false);
+    }
+    // Resource refusal must preserve the complete parent prefix too.
+    auto over_budget = data(0, 0, 128);
+    over_budget.set_int("width", 3);
+    over_budget.set_int("depth", 2);
+    expect_bounded_output(fixture, over_budget, false, true);
+    // Capacity alone is not a refusal: empty loops and empty inner dimensions
+    // remove the costly writes. Narrow containers also fit at this length.
+    auto large = over_budget;
+    large.set_int("repeats", 0);
+    expect_bounded_output(fixture, large, true);
+    large = over_budget;
+    large.set_int("width", 0);
+    expect_bounded_output(fixture, large, true);
+    large = over_budget;
+    large.set_int("width", 1);
+    large.set_int("depth", 1);
+    expect_bounded_output(fixture, large, true);
+    // An iterator-dependent branch needs the normal trial and its rollback.
+    large = over_budget;
+    large.set_int("mode", 3);
+    expect_bounded_output(fixture, large, false);
+    auto negative = data(0, -1, 2);
+    negative.set_int("width", 3);
+    negative.set_int("depth", 2);
+    expect_bounded_output(fixture, negative, false);
+  }
+  for (int mode = 0; mode <= 7; ++mode) {
+    DataMap d;
+    d.set_int("mode", mode);
+    expect_bounded_output("gq_bounded_nested_refusals", d, false);
   }
   for (int mode = 0; mode < 4; ++mode) {
     DataMap d;
