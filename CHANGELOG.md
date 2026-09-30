@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.18.0
+
+- Execute compiled generated quantities for all 329 recorded numerical-corpus
+  models, including more RNGs, integer operations, nested loops and function
+  calls. Support bounded arrays and vectors whose output sizes vary by draw.
+- Speed up retained nested-loop callbacks and bounded-array output paths. In
+  focused models, a warm gradient is about 111x faster for the callback case;
+  bounded-array output rows are 24–26x faster and first-use inference is
+  6.4–9.8x faster. These are model-specific measurements, not corpus medians.
+- Add `hypergeometric_1F0` support and fix logical array lengths, integer
+  initialization, and a truncated-normal regression. Repair sanitizer build
+  and test failures.
+- Keep the 329-model CmdStan numerical replay and 327 CTests passing against
+  1,020,194 reference values under the existing comparison gates.
+- Put the complete benchmark tables first, sorted by CmdStan / Stanli
+  gradient ratio, with matching columns, three significant digits and
+  separate incomplete results. The vectorized-CmdStan comparison follows
+  in the same document's appendix.
+
 ## 0.17.1
 
 - Support Stan `#include` paths in Python and R, including lookup beside model files.
