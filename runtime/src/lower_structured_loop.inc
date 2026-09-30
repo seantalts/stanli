@@ -1583,6 +1583,71 @@ std::optional<int64_t> region_while_capacity(const mir::Stmt& s,
   *proven_counter = counter;
   return count;
 }
+// A complete iteration must write a[i] on every path. Other writes may
+// overwrite those elements, but cannot escape the union of all written ranges.
+// This proves initialization of the live extent, without executing the body
+// during preparation or changing its runtime control/evaluation order.
+void region_prove_bounded_int_fill(const mir::Stmt& loop, int64_t capacity) {
+  const auto& upper = loop.upper;
+  if (upper.kind != mir::Expr::FunApp ||
+      upper.fn_lib != mir::Expr::Lib::StanLib ||
+      (upper.name != "size" && upper.name != "num_elements") ||
+      upper.args.size() != 1 || upper.args[0].kind != mir::Expr::Var)
+    return;
+  const std::string& name = upper.args[0].name;
+  auto declaration = decls.find(name);
+  auto value = scope.find(name);
+  if (declaration == decls.end() || !declaration->second.int_array ||
+      value == scope.end() || !is_array(value->second.si) ||
+      array_shape(value->second.si).dims.size() != 1 ||
+      g.slots[value->second.slot].len != capacity)
+    return;
+  std::set<std::string> writes;
+  std::vector<const mir::Expr*> elements;
+  const auto summarize = [&](const auto& self, const mir::Stmt& body) -> bool {
+    if (body.kind == mir::Stmt::Decl) writes.insert(body.decl_id);
+    if (body.kind == mir::Stmt::For) writes.insert(body.loopvar);
+    if (body.kind == mir::Stmt::Assignment) {
+      writes.insert(body.lhs);
+      if (body.lhs != name) return false;
+      elements.push_back(&body.rhs);
+      return body.lhs_idx.size() == 1 &&
+             body.lhs_idx[0].name == "IndexSingle" &&
+             body.lhs_idx[0].args.size() == 1 &&
+             body.lhs_idx[0].args[0].kind == mir::Expr::Var &&
+             body.lhs_idx[0].args[0].name == loop.loopvar;
+    }
+    bool any = false, every = body.body.size() == 2;
+    for (const auto& child : body.body) {
+      const bool filled = self(self, child);
+      any |= filled;
+      every &= filled;
+    }
+    if (body.kind == mir::Stmt::IfElse) return every;
+    return (body.kind == mir::Stmt::Block || body.kind == mir::Stmt::SList) &&
+           any;
+  };
+  bool filled = false;
+  for (const auto& child : loop.body) filled |= summarize(summarize, child);
+  if (!filled || writes.count(loop.loopvar)) return;
+  const auto invariant = [&](const auto& self, const mir::Expr& e) -> bool {
+    if (e.kind == mir::Expr::Var && writes.count(e.name)) return false;
+    for (const auto& arg : e.args)
+      if (!self(self, arg)) return false;
+    return true;
+  };
+  std::optional<IntRange> range;
+  for (const auto* e : elements) {
+    if (!invariant(invariant, *e)) return;
+    auto next = region_range(*e);
+    if (!next) return;
+    range = range ? IntRange{std::min(range->lo, next->lo),
+                             std::max(range->hi, next->hi)}
+                  : *next;
+  }
+  if (range) set_int_range(value->second, range->lo, range->hi);
+}
+
 void lower_region_stmt(const mir::Stmt& s) {
   if (bounded_output) {
     bounded_output_visits += bounded_output_multiplier;
@@ -1639,40 +1704,9 @@ void lower_region_stmt(const mir::Stmt& s) {
               return;
             full_int_writes.emplace_back(body.lhs, &body.rhs);
           };
-      if (known && lo->lo == 1 && lo->hi == 1 &&
-          (bounded_output || hi->lo == hi->hi))
+      if (!bounded_output && known && lo->lo == 1 && lo->hi == 1 &&
+          hi->lo == hi->hi)
         for (const auto& child : s.body) find_full_int_writes(child);
-      if (bounded_output && !full_int_writes.empty()) {
-        // The live extent may change between calls. An unconditional a[i]
-        // write proves a complete fill only if it is the sole write to a,
-        // and its range depends solely on the iterator and loop invariants.
-        // In particular, do not infer the range from a carried scalar's
-        // value at the end of the body or from another partially filled array.
-        std::map<std::string, size_t> writes;
-        const auto collect_writes = [&](const auto& self,
-                                        const mir::Stmt& body) -> void {
-          if (body.kind == mir::Stmt::Assignment) ++writes[body.lhs];
-          if (body.kind == mir::Stmt::Decl) ++writes[body.decl_id];
-          if (body.kind == mir::Stmt::For) ++writes[body.loopvar];
-          for (const auto& child : body.body) self(self, child);
-        };
-        for (const auto& child : s.body) collect_writes(collect_writes, child);
-        const auto invariant = [&](const auto& self,
-                                   const mir::Expr& e) -> bool {
-          if (e.kind == mir::Expr::Var && writes.count(e.name)) return false;
-          for (const auto& arg : e.args)
-            if (!self(self, arg)) return false;
-          return true;
-        };
-        full_int_writes.erase(
-            std::remove_if(full_int_writes.begin(), full_int_writes.end(),
-                           [&](const auto& write) {
-                             return writes[write.first] != 1 ||
-                                    writes.count(s.loopvar) ||
-                                    !invariant(invariant, *write.second);
-                           }),
-            full_int_writes.end());
-      }
       if (count == 0) return;
       bool has_loop_control = false;
       std::function<void(const mir::Stmt&)> scan_control =
@@ -1710,6 +1744,8 @@ void lower_region_stmt(const mir::Stmt& s) {
         entry.r = {static_cast<double>(lo->lo)};
         td_assign(s.loopvar, std::move(entry));
         for (const auto& child : s.body) lower_stmt(child);
+        if (bounded_output && lo->lo == 1)
+          region_prove_bounded_int_fill(s, hi->hi);
         if (saved_iterator)
           scope[s.loopvar] = *saved_iterator;
         else
@@ -1759,6 +1795,8 @@ void lower_region_stmt(const mir::Stmt& s) {
       region_append(std::move(loop));
       region_control_active = saved_control;
       region_widen_carried(s, dependencies);
+      if (bounded_output && known && lo->lo == 1 && lo->hi == 1)
+        region_prove_bounded_int_fill(s, hi->hi);
       for (const auto& write : full_int_writes) {
         const auto value = scope.find(write.first);
         if (value == scope.end() || !is_array(value->second.si) ||

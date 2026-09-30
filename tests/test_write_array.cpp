@@ -1482,10 +1482,10 @@ void expect_bounded_output(const std::string& fixture,
                   x);
       std::printf("  graph: %s; interpreter: %s\n", graph_message.c_str(),
                   interp_message.c_str());
-      if (data.has("mode"))
-        std::printf("  mode=%d lower=%d upper=%d repeats=%d\n",
-                    data.at("mode").i[0], data.at("lower_size").i[0],
-                    data.at("upper_size").i[0], data.at("repeats").i[0]);
+      for (const char* name :
+           {"mode", "lower_size", "upper_size", "repeats", "shift"})
+        if (data.has(name)) std::printf("  %s=%d", name, data.at(name).i[0]);
+      std::printf("\n");
     }
     // Compare continuation state even after an error. An exception must not
     // retry MIR, duplicate the preceding draw, or execute the following draw.
@@ -1555,7 +1555,29 @@ void test_write_array_bounded_blocks() {
   for (int mode = 0; mode <= 9; ++mode) {
     DataMap d;
     d.set_int("mode", mode);
-    expect_bounded_output("gq_bounded_integer_refusals", d, false);
+    expect_bounded_output("gq_bounded_integer_refusals", d, mode == 1);
+    expect_bounded_output("gq_integer_fill_paths_refusals", d, false);
+  }
+  for (int mode = 0; mode <= 8; ++mode) {
+    for (int capacity : {1, 2, 8, 32}) {
+      auto d = data(mode, 0, capacity);
+      d.set_int("shift", 3);
+      expect_bounded_output("gq_integer_fill_paths", d, true);
+    }
+  }
+  for (int mode : {0, 1}) {
+    for (int capacity : {128, 512}) {
+      auto d = data(mode, 0, capacity);
+      d.set_int("shift", 3);
+      expect_bounded_output("gq_integer_fill_paths", d, capacity == 128);
+    }
+  }
+  for (int mode : {0, 1, 2, 3, 4}) {
+    auto d = data(mode, 1, 3);
+    for (int shift : {1073741824, -1073741825}) {
+      d.set_int("shift", shift);
+      expect_bounded_output("gq_integer_fill_paths", d, false);
+    }
   }
   for (int mode = 0; mode < 4; ++mode) {
     DataMap d;

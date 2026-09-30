@@ -4,9 +4,9 @@ Initial source base: `df86223160f1387a37ed47c267df1bf31e77f11c`. Integrated
 fetched `origin/HEAD` at `d13f7fa907eb85617aba85a9e570de0389cdae86` without
 conflicts on September 29, 2026; integration commit `d6449fbf`.
 
-Latest sync: `b2fe8596c11fd2ff7c7069195a4b8f156ecf0593`, including merged
-PRs #411–#413. The [integer-array follow-up](2026-09-29-bounded-integer-blocks.md)
-records the next type extension and its proof limits.
+Latest sync: `0a01f56545e995a131af1d32e803a4df5dbfe42a`, including merged
+PRs #411–#414. The [array-fill follow-up](2026-09-29-complete-array-fills.md)
+records branch and overwrite support with its proof limits.
 
 Our goal is to prevent surprising native performance cliffs while expanding
 Stan compatibility. Removing MirInterp is an eventual consequence of covering
@@ -205,6 +205,9 @@ real hot application refusal remains open.
   - [x] Extend one-dimensional integer arrays with an unconditional full-fill
     proof and int32-safe partial sums, including empty/changing lengths and
     promoted sums. See the [results](2026-09-29-bounded-integer-blocks.md).
+  - [x] Prove complete fills through both branches and combine all write ranges
+    for safe overwrites, preserving runtime evaluation. See the
+    [results](2026-09-29-complete-array-fills.md).
   - [ ] Extend nested containers, other construction patterns and consumers
     with their own logical-length proofs. Effects and active callbacks remain
     separate scopes.

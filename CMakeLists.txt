@@ -986,7 +986,8 @@ if(NOT EMSCRIPTEN)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_bounded_block
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  foreach(fixture gq_bounded_vector gq_bounded_row_vector gq_bounded_integer)
+  foreach(fixture gq_bounded_vector gq_bounded_row_vector gq_bounded_integer
+                  gq_integer_fill_paths gq_bounded_integer_refusals)
     add_test(NAME ${fixture}_reference
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
               $<TARGET_FILE:stanli_check> ${fixture}

@@ -112,5 +112,17 @@
     "source": "tests/fixtures/gq_bounded_integer_refusals.stan",
     "mir": "tests/fixtures/gq_bounded_integer_refusals.tmir.sexp",
     "data": "tests/fixtures/gq_bounded_integer_refusals.json"
+  },
+  {
+    "model": "gq_integer_fill_paths",
+    "source": "tests/fixtures/gq_integer_fill_paths.stan",
+    "mir": "tests/fixtures/gq_integer_fill_paths.tmir.sexp",
+    "data": "tests/fixtures/gq_integer_fill_paths.json"
+  },
+  {
+    "model": "gq_integer_fill_paths_refusals",
+    "source": "tests/fixtures/gq_integer_fill_paths_refusals.stan",
+    "mir": "tests/fixtures/gq_integer_fill_paths_refusals.tmir.sexp",
+    "data": "tests/fixtures/gq_integer_fill_paths_refusals.json"
   }
 ]
