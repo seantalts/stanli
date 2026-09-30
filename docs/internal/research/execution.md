@@ -1,9 +1,10 @@
 # Execution coverage and interpreter research
 
-Current result: [complete array-fill proofs](../../../notes/execution/2026-09-29-complete-array-fills.md)
-extends bounded integer arrays to branch fills and safe overwrites in the
-existing engine. [Bounded integers](../../../notes/execution/2026-09-29-bounded-integer-blocks.md)
-shipped in #414; [bounded output blocks](../../../notes/execution/2026-09-29-bounded-output-blocks.md)
+Current result: [bounded nested real arrays](../../../notes/execution/2026-09-29-bounded-nested-arrays.md)
+extends output blocks to changing outer lengths with fixed inner dimensions,
+using existing multidimensional indexing and real-array sums.
+[Complete array-fill proofs](../../../notes/execution/2026-09-29-complete-array-fills.md)
+shipped in #415. [Bounded output blocks](../../../notes/execution/2026-09-29-bounded-output-blocks.md)
 record the shared admission limits and execution policy.
 
 Start with the [inventory and bounded-storage results](../../../notes/execution/2026-09-29-execution-inventory-and-bounded-storage.md):

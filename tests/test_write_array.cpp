@@ -1482,8 +1482,8 @@ void expect_bounded_output(const std::string& fixture,
                   x);
       std::printf("  graph: %s; interpreter: %s\n", graph_message.c_str(),
                   interp_message.c_str());
-      for (const char* name :
-           {"mode", "lower_size", "upper_size", "repeats", "shift"})
+      for (const char* name : {"mode", "lower_size", "upper_size", "repeats",
+                               "shift", "width", "depth"})
         if (data.has(name)) std::printf("  %s=%d", name, data.at(name).i[0]);
       std::printf("\n");
     }
@@ -1578,6 +1578,49 @@ void test_write_array_bounded_blocks() {
       d.set_int("shift", shift);
       expect_bounded_output("gq_integer_fill_paths", d, false);
     }
+  }
+  for (const std::string fixture :
+       {"gq_bounded_nested", "gq_bounded_nested3", "gq_bounded_nested5"}) {
+    for (int mode = 0; mode <= 7; ++mode) {
+      for (int width : {0, 1, 3}) {
+        auto d = data(mode, 0, 2);
+        d.set_int("width", width);
+        d.set_int("depth", 2);
+        expect_bounded_output(fixture, d, true);
+      }
+    }
+    for (int depth : {0, 1, 2}) {
+      auto d = data(0, 1, 8, 2);
+      d.set_int("width", 3);
+      d.set_int("depth", depth);
+      expect_bounded_output(fixture, d, true);
+    }
+    for (int mode : {0, 6}) {
+      auto d = data(mode, 0, 1);
+      d.set_int("width", 0);
+      d.set_int("depth", 0);
+      expect_bounded_output(fixture, d, true);
+    }
+    for (int width : {-1, 100000000}) {
+      auto d = data(0, 1, 2);
+      d.set_int("width", width);
+      d.set_int("depth", 2);
+      expect_bounded_output(fixture, d, false);
+    }
+    // Resource refusal must preserve the complete parent prefix too.
+    auto over_budget = data(0, 0, 128);
+    over_budget.set_int("width", 3);
+    over_budget.set_int("depth", 2);
+    expect_bounded_output(fixture, over_budget, false);
+    auto negative = data(0, -1, 2);
+    negative.set_int("width", 3);
+    negative.set_int("depth", 2);
+    expect_bounded_output(fixture, negative, false);
+  }
+  for (int mode = 0; mode <= 7; ++mode) {
+    DataMap d;
+    d.set_int("mode", mode);
+    expect_bounded_output("gq_bounded_nested_refusals", d, false);
   }
   for (int mode = 0; mode < 4; ++mode) {
     DataMap d;

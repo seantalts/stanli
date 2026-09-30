@@ -89,8 +89,9 @@ length queries on bounded local arrays in automatically selected structured
 loops. It also includes closed generated-quantity blocks with bounded real
 temporaries (arrays, vectors, and row vectors), scalar results, and surrounding
 RNG calls. Bounded integer arrays exercise full-fill and safe partial-sum
-proofs, including fills through both branches and safe overwrites. Matching
-blocks with RNG inside or unproved integer writes remain
+proofs, including fills through both branches and safe overwrites. Nested real
+arrays exercise changing outer lengths, fixed inner shapes and inner-array sums.
+Matching blocks with RNG inside or unproved integer writes remain
 interpreted as canaries.
 These are focused regression workloads, not additions to the public
 application-model corpus. Every entry runs the shipped runtime; there are no
