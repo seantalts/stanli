@@ -3,6 +3,9 @@
 Current result: [bounded nested real arrays](../../../notes/execution/2026-09-29-bounded-nested-arrays.md)
 extends output blocks to changing outer lengths with fixed inner dimensions,
 using existing multidimensional indexing and real-array sums.
+The [refusal-cost follow-up](../../../notes/execution/2026-09-29-bounded-refusal-cost.md)
+avoids trial construction for provably over-budget updates; the measured
+oversized cases no longer show the original setup penalty.
 [Complete array-fill proofs](../../../notes/execution/2026-09-29-complete-array-fills.md)
 shipped in #415. [Bounded output blocks](../../../notes/execution/2026-09-29-bounded-output-blocks.md)
 record the shared admission limits and execution policy.

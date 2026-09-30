@@ -91,6 +91,7 @@ temporaries (arrays, vectors, and row vectors), scalar results, and surrounding
 RNG calls. Bounded integer arrays exercise full-fill and safe partial-sum
 proofs, including fills through both branches and safe overwrites. Nested real
 arrays exercise changing outer lengths, fixed inner shapes and inner-array sums.
+Two larger nested-array inputs remain interpreted and track refusal setup costs.
 Matching blocks with RNG inside or unproved integer writes remain
 interpreted as canaries.
 These are focused regression workloads, not additions to the public

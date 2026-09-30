@@ -142,5 +142,17 @@
     "source": "tests/fixtures/gq_bounded_nested_refusals.stan",
     "mir": "tests/fixtures/gq_bounded_nested_refusals.tmir.sexp",
     "data": "tests/fixtures/gq_bounded_nested_refusals.json"
+  },
+  {
+    "model": "gq_bounded_nested_budget",
+    "source": "tests/fixtures/gq_bounded_nested.stan",
+    "mir": "tests/fixtures/gq_bounded_nested.tmir.sexp",
+    "data": "tests/fixtures/gq_bounded_nested_budget.json"
+  },
+  {
+    "model": "gq_bounded_nested3_budget",
+    "source": "tests/fixtures/gq_bounded_nested3.stan",
+    "mir": "tests/fixtures/gq_bounded_nested3.tmir.sexp",
+    "data": "tests/fixtures/gq_bounded_nested_budget.json"
   }
 ]

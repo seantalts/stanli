@@ -205,6 +205,142 @@ bool bounded_output_candidate(const mir::Stmt& root,
   return dynamic && !dynamic_inner;
 }
 
+// A refusal-only check for a nested container's unavoidable update slot.
+// Follow straight-line integer definitions and declaration-time shapes, then
+// the same maximum trip counts used by bounded lowering. Unknown control or
+// ranges defer to the ordinary isolated trial; this never admits a program.
+bool bounded_nested_update_over_budget(const mir::Stmt& root) {
+  const auto nested = [&](const auto& self, const mir::Stmt& s) -> bool {
+    if (s.kind == mir::Stmt::Decl && s.decl_type.base == "SArray" &&
+        s.decl_type.dims.size() > 1)
+      return true;
+    for (const auto& child : s.body)
+      if (self(self, child)) return true;
+    return false;
+  };
+  if (!nested(nested, root)) return false;
+  std::set<std::string> locals;
+  collect_loop_locals(root, &locals);
+  std::vector<std::string> writes;
+  assigned_names(root, &writes);
+  const std::set<std::string> written(writes.begin(), writes.end());
+  std::map<std::string, IntRange> integers;
+  struct Container {
+    IntRange outer;
+    uint64_t capacity;
+  };
+  std::map<std::string, Container> containers;
+  const auto local = [&](const auto& self, const mir::Expr& e) -> bool {
+    if (e.kind == mir::Expr::Var) return locals.count(e.name);
+    for (const auto& arg : e.args)
+      if (self(self, arg)) return true;
+    return false;
+  };
+  const auto unstable = [&](const auto& self, const mir::Expr& e) -> bool {
+    if (e.kind == mir::Expr::Var)
+      return locals.count(e.name) || written.count(e.name);
+    for (const auto& arg : e.args)
+      if (self(self, arg)) return true;
+    return false;
+  };
+  const auto truth = [&](const auto& self,
+                         const mir::Expr& e) -> std::optional<bool> {
+    if (!unstable(unstable, e)) return region_static_truth(e);
+    if ((e.kind != mir::Expr::EAnd && e.kind != mir::Expr::EOr) ||
+        e.args.size() != 2)
+      return {};
+    const auto a = self(self, e.args[0]), b = self(self, e.args[1]);
+    const bool decisive = e.kind == mir::Expr::EOr;
+    if ((a && *a == decisive) || (b && *b == decisive)) return decisive;
+    if (a && b) return !decisive;
+    return {};
+  };
+  const auto range = [&](const auto& self,
+                         const mir::Expr& e) -> std::optional<IntRange> {
+    if (!local(local, e))
+      return unstable(unstable, e) ? std::optional<IntRange>{} : region_range(e);
+    if (e.kind == mir::Expr::Var) {
+      auto found = integers.find(e.name);
+      if (found != integers.end()) return found->second;
+    } else if (e.kind == mir::Expr::Promotion && e.args.size() == 1) {
+      return self(self, e.args[0]);
+    } else if (e.kind == mir::Expr::TernaryIf && e.args.size() == 3) {
+      // Conditional refinement is deliberately outside this cheap check.
+      if (local(local, e.args[0])) return {};
+      if (auto selected = truth(truth, e.args[0]))
+        return self(self, e.args[*selected ? 1 : 2]);
+      auto a = self(self, e.args[1]), b = self(self, e.args[2]);
+      if (a && b)
+        return IntRange{std::min(a->lo, b->lo), std::max(a->hi, b->hi)};
+    } else if (e.kind == mir::Expr::FunApp && e.name == "size" &&
+               e.args.size() == 1 && e.args[0].kind == mir::Expr::Var) {
+      auto found = containers.find(e.args[0].name);
+      if (found != containers.end()) return found->second.outer;
+    }
+    return {};
+  };
+  const auto forget_writes = [&](const mir::Stmt& s) {
+    std::vector<std::string> writes;
+    assigned_names(s, &writes);
+    for (const auto& name : writes) integers.erase(name);
+  };
+  const auto visit = [&](const auto& self, const mir::Stmt& s,
+                         uint64_t multiplier, bool straight) -> bool {
+    if (s.kind == mir::Stmt::Block || s.kind == mir::Stmt::SList) {
+      for (const auto& child : s.body)
+        if (self(self, child, multiplier, straight)) return true;
+    } else if (s.kind == mir::Stmt::Decl && straight) {
+      if (s.decl_type.base == "SArray" && s.decl_type.dims.size() > 1) {
+        const auto outer = range(range, s.decl_type.dims[0]);
+        if (!outer || outer->lo < 0) return false;
+        uint64_t capacity = outer->hi;
+        for (size_t i = 1; i < s.decl_type.dims.size(); ++i) {
+          const auto dim = range(range, s.decl_type.dims[i]);
+          if (!dim || dim->lo < 0 || dim->lo != dim->hi ||
+              (dim->hi && capacity > 8192 / uint64_t(dim->hi)))
+            return false;
+          capacity *= uint64_t(dim->hi);
+        }
+        containers.emplace(s.decl_id, Container{*outer, capacity});
+      } else if (s.decl_type.base == "SInt" && s.has_init) {
+        if (auto value = range(range, s.init)) integers[s.decl_id] = *value;
+      }
+    } else if (s.kind == mir::Stmt::Assignment) {
+      if (!s.lhs_idx.empty()) {
+        auto found = containers.find(s.lhs);
+        if (found != containers.end() &&
+            found->second.capacity > 65536 / multiplier)
+          return true;
+      } else {
+        auto value = straight ? range(range, s.rhs) : std::optional<IntRange>{};
+        integers.erase(s.lhs);
+        if (value) integers[s.lhs] = *value;
+      }
+    } else if (s.kind == mir::Stmt::For) {
+      const auto lo = range(range, s.lower), hi = range(range, s.upper);
+      // A repeated body's scalar writes cannot supply stable nested bounds.
+      forget_writes(s);
+      if (!lo || !hi) return false;
+      const uint64_t count =
+          std::max<int64_t>(0, int64_t(hi->hi) - lo->lo + 1);
+      if (!count || count > 4096 / multiplier) return false;
+      for (const auto& child : s.body)
+        if (self(self, child, multiplier * count, false)) return true;
+    } else if (s.kind == mir::Stmt::IfElse) {
+      // Only enter data-decided arms; unknown control may refine integer
+      // ranges and needs the full lowering proof. Logical short circuits can
+      // still establish an arm despite an unknown loop iterator.
+      if (auto selected = truth(truth, s.cond)) {
+        const size_t arm = *selected ? 0 : 1;
+        if (arm < s.body.size()) return self(self, s.body[arm], multiplier, false);
+      }
+      forget_writes(s);
+    }
+    return false;
+  };
+  return visit(visit, root, 1, true);
+}
+
 // Matches ostream's default floating-point formatting.
 static std::string fmt_g(double v) {
   char buf[32];
@@ -455,6 +591,9 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
 }
 
 std::optional<RealRange> region_real_range(const mir::Expr& e) {
+  // Real ranges prove while-loop termination. The closed output-block grammar
+  // admits only counted loops, so enumerating real values cannot help it.
+  if (bounded_output) return {};
   if (auto enumerated = region_enumerated_data_range(e)) return enumerated;
   if (e.kind == mir::Expr::LitInt)
     return RealRange{double(e.lit_i), double(e.lit_i)};
@@ -2130,6 +2269,13 @@ void lower_region_stmt(const mir::Stmt& s) {
       return;
     }
     case mir::Stmt::Assignment: {
+      // Indexed updates need a result slot as wide as the original container.
+      // Refuse before constructing the RHS and selector graph if that slot
+      // already exceeds the unchanged budget.
+      if (bounded_output && !s.lhs_idx.empty()) {
+        auto base = scope.find(s.lhs);
+        if (base != scope.end()) check_slot_budget(g.slots[base->second.slot].len);
+      }
       if (!scope.count(s.lhs)) {
         const auto declaration = decls.find(s.lhs);
         if (declaration != decls.end() && declaration->second.deferred_shape &&
@@ -2406,6 +2552,15 @@ bool try_lower_region(
   };
   if (target_scale != 1.0)
     return refuse("enclosing target scaling needs a compatible region");
+  if (output_references) {
+    try {
+      if (bounded_nested_update_over_budget(s))
+        return refuse("bounded nested update exceeds work budget before trial");
+    } catch (const CompileError&) {
+      // A failed estimate is not a new compile-time validation boundary.
+    } catch (const std::logic_error&) {
+    }
+  }
   std::shared_ptr<StructuredLoop> plan;
   std::vector<int> parent_inputs;
   std::vector<std::string> names;

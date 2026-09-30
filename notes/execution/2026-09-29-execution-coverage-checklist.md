@@ -211,6 +211,9 @@ real hot application refusal remains open.
   - [x] Extend nested real arrays with a bounded outer dimension and fixed
     inner shape; reuse multidimensional indexing and inner-array sums. See the
     [results](2026-09-29-bounded-nested-arrays.md).
+  - [x] Avoid failed trial construction for provably oversized nested updates;
+    retain coverage, rollback and ordinary-use performance. The measured
+    setup penalty is resolved; see the [follow-up](2026-09-29-bounded-refusal-cost.md).
   - [ ] Extend other nested types, construction patterns and consumers
     with their own logical-length proofs. Effects and active callbacks remain
     separate scopes.

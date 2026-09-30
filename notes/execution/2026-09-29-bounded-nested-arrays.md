@@ -1,5 +1,9 @@
 # Bounded nested real arrays in output blocks
 
+Follow-up: the [refusal-cost fix](2026-09-29-bounded-refusal-cost.md) removes
+the measured oversized-case setup penalty with an earlier resource proof.
+The results below retain the original #416 head's measurements and limitations.
+
 ## Decision and scope
 
 Extend the existing structured output-block path to rectangular real arrays
