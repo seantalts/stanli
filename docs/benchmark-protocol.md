@@ -93,7 +93,8 @@ proofs, including fills through both branches and safe overwrites. Nested real
 arrays exercise changing outer lengths, fixed inner shapes and inner-array sums.
 Two larger nested-array inputs remain interpreted and track refusal setup costs.
 Matching blocks with RNG inside or unproved integer writes remain
-interpreted as canaries.
+interpreted as canaries. A `hypergeometric_1F0` workload covers shared scalar
+math calls in model control flow, transformed data and generated quantities.
 These are focused regression workloads, not additions to the public
 application-model corpus. Every entry runs the shipped runtime; there are no
 experimental providers. The standalone tool accepts `affine`, `branch_exit`,

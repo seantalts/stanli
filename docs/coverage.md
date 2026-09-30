@@ -37,7 +37,7 @@ That run verified 19,009 cases with no mismatches, crashes, harness errors,
 or regressions from previously verified cases. Its only gate failure was
 the old baseline's compiler and inventory metadata, refreshed here.
 The separate generated signature replay has been refreshed against CmdStan
-2.40.0: 7,386 builtin and 12,131 density signatures, exercised as 66,675
+2.40.0: 7,387 builtin and 12,131 density signatures, exercised as 66,678
 cases across 73 models, including mixed data/parameter arguments.
 
 | family | name metric | verified | unexpected unsupported | generator gaps | inapplicable |
@@ -54,8 +54,12 @@ still checks every inventory signature attached to each qualifying name.
 
 The scalar-math row counts a name if it has a signature with one to five
 `real` arguments and a `real` result. It excludes densities, distribution
-functions, RNGs, and quantiles (`_qf` and `_log_qf`). The six missing names
-are listed under [known unsupported forms](#known-unsupported-forms).
+functions, RNGs, and quantiles (`_qf` and `_log_qf`). The historical baseline
+counts six missing scalar names. `hypergeometric_1F0(real, real)` is now
+supported and covered by fresh CmdStan references, including both mixed
+data/parameter cases; the complete historical classification baseline has not
+been re-recorded. The remaining gaps are listed under
+[known unsupported forms](#known-unsupported-forms).
 The baseline verifies all 256 `student_t_qf` overloads; quantiles are outside
 this metric.
 
@@ -124,8 +128,8 @@ The headline ratios hide several important gaps:
   All inputs are integers, so the probability-kernel layout has no
   differentiable real edge. The harness marks all 24 signatures inapplicable,
   not unsupported.
-- **Missing scalar math:** all-real scalar calls to `hypergeometric_1F0`,
-  `hypergeometric_2F1`, `inc_beta`, `inv_inc_beta`,
+- **Missing scalar math:** all-real scalar calls to `hypergeometric_2F1`,
+  `inc_beta`, `inv_inc_beta`,
   `wiener_lcdf_unnorm`, and `wiener_lccdf_unnorm` are refused because no graph
   operation is registered.
 - **`gp_periodic_cov`:** this covariance is refused. It has no graph

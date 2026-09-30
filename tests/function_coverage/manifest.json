@@ -432,6 +432,7 @@
     "zeros_vector"
   ],
   "focused_coverage": {
+    "hypergeometric_1F0": "tests/fixtures/hypergeometric_1f0.stan and generated builtin signatures: data, graph, runtime-control, output, and standalone calls; fresh CmdStan references",
     "integrate_1d": "tests/fixtures/quadrature_region.stan exercises graph and runtime-control lowering",
     "integrate_1d_double_exponential": "tests/fixtures/quadrature_region.stan exercises graph and runtime-control lowering",
     "integrate_1d_double_exponential_tol": "tests/fixtures/quadrature_region.stan exercises graph and runtime-control lowering",

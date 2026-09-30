@@ -227,8 +227,12 @@ STANLI_SCALAR_BINARY_INT_SECOND_LIST(STANLI_DEFINE_BINARY_INT_SECOND)
 }  // namespace
 
 void register_scalar_binary_kernels() {
-#define STANLI_REGISTER_BINARY(code, name, fn) \
-  register_kernel(code, Kernel{name##_2fwd, name##_2bwd, nullptr});
+#define STANLI_REGISTER_BINARY(code, name, fn)   \
+  {                                              \
+    Kernel k{name##_2fwd, name##_2bwd, nullptr}; \
+    k.derivative_mechanism = "nested_tape";      \
+    register_kernel(code, k);                    \
+  }
   STANLI_SCALAR_BINARY_LIST(STANLI_REGISTER_BINARY)
   STANLI_SCALAR_BINARY_INT_FIRST_LIST(STANLI_REGISTER_BINARY)
   STANLI_SCALAR_BINARY_INT_SECOND_LIST(STANLI_REGISTER_BINARY)

@@ -190,7 +190,8 @@ namespace stanli {
   X(OP_DAE)                           \
   X(OP_ODE_ADJOINT)                   \
   X(OP_STUDENT_T_QF)                  \
-  X(OP_POISSON_BINOMIAL)
+  X(OP_POISSON_BINOMIAL)              \
+  X(OP_HYPERGEOMETRIC_1F0)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry
@@ -688,6 +689,7 @@ inline void div_partials(double u, double b, double out, double* da,
   X(OP_GAMMA_P, gamma_p, gamma_p)                                           \
   X(OP_GAMMA_Q, gamma_q, gamma_q)                                           \
   X(OP_HYPOT, hypot, hypot)                                                 \
+  X(OP_HYPERGEOMETRIC_1F0, hypergeometric_1F0, hypergeometric_1F0)          \
   X(OP_LBETA, lbeta, lbeta)                                                 \
   X(OP_LCHOOSE, lchoose, binomial_coefficient_log)                          \
   X(OP_LMULTIPLY, lmultiply, lmultiply)                                     \

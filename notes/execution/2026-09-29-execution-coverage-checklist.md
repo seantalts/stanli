@@ -4,8 +4,8 @@ Initial source base: `df86223160f1387a37ed47c267df1bf31e77f11c`. Integrated
 fetched `origin/HEAD` at `d13f7fa907eb85617aba85a9e570de0389cdae86` without
 conflicts on September 29, 2026; integration commit `d6449fbf`.
 
-Latest sync: `bd118b2d85ba56df4e0372e07bceef6379168651`, including merged
-PRs #411–#415. The [array-fill follow-up](2026-09-29-complete-array-fills.md)
+Latest sync: `bb3da1db446ee26272077297def091a00cf9e8a3`, including merged
+PRs #411–#416. The [array-fill follow-up](2026-09-29-complete-array-fills.md)
 records branch and overwrite support with its proof limits.
 
 Our goal is to prevent surprising native performance cliffs while expanding
@@ -67,6 +67,9 @@ itself a MIR fallback or another model execution engine.
     transformed-data and generated-quantity contexts where legal.
 - [ ] Refresh each relevant historical refusal against current source/tests.
   Older prose about loops, integer outputs and print/reject is not authoritative.
+  - [x] Refresh ten named numerical gaps in five contexts; all fail before
+    implementation, including in MIR. The [function report](2026-09-29-hypergeometric-1f0.md)
+    separates these probes from the full overload inventory.
   - [x] Replay all 329 recorded corpus models and refresh output-path coverage.
     The only interpreted output case was an uninitialized scalar integer;
     its declaration now compiles with Stan's sentinel value. This does not
@@ -148,7 +151,9 @@ section follow real workloads and measured impact, not headline name counts.
   - [ ] Extended `wiener_lpdf` overloads and `gaussian_dlm_obs_lpdf`: choose an
     argument-packing/call contract beyond today's fixed input limits; avoid
     enlarging every hot operation without evidence that the cost is acceptable.
-  - [ ] `hypergeometric_1F0`, `hypergeometric_2F1`, `inc_beta`, `inv_inc_beta`,
+  - [x] `hypergeometric_1F0`: shared upstream scalar-binary implementation;
+    [coverage and native evidence](2026-09-29-hypergeometric-1f0.md).
+  - [ ] `hypergeometric_2F1`, `inc_beta`, `inv_inc_beta`,
     `wiener_lcdf_unnorm`, `wiener_lccdf_unnorm`, and `gp_periodic_cov`.
   - [ ] `discrete_range_cdf`, `_lcdf`, `_lccdf`: all-integer inputs still need
     runtime validation/value support even without a differentiable edge.
@@ -305,7 +310,7 @@ show they dominate interactive use.
 - [ ] Audit execution diagnostics, forced-fallback hooks and callers, then verify
   there are no remaining production references before removing the implementation.
 
-## Current stopping point
+## Current position
 
 The direct container RNG, bounded integer-expression, standalone layout and
 scalar-initialization slices are implemented and tested. Their linked reports

@@ -1,7 +1,12 @@
 # Execution coverage and interpreter research
 
-Current result: [bounded nested real arrays](../../../notes/execution/2026-09-29-bounded-nested-arrays.md)
-extends output blocks to changing outer lengths with fixed inner dimensions,
+Latest function slice: [hypergeometric_1F0](../../../notes/execution/2026-09-29-hypergeometric-1f0.md)
+uses the existing shared scalar kernel across compiled engines and MIR. Its
+report refreshes ten function gaps across five contexts and separates missing
+capabilities from actual interpreter fallback.
+
+[Bounded nested real arrays](../../../notes/execution/2026-09-29-bounded-nested-arrays.md)
+extend output blocks to changing outer lengths with fixed inner dimensions,
 using existing multidimensional indexing and real-array sums.
 The [refusal-cost follow-up](../../../notes/execution/2026-09-29-bounded-refusal-cost.md)
 avoids trial construction for provably over-budget updates; the measured

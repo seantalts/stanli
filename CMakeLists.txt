@@ -994,6 +994,16 @@ if(NOT EMSCRIPTEN)
               $<TARGET_FILE:stanli_check> ${fixture}
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endforeach()
+  foreach(engine auto register structured)
+    add_test(NAME hypergeometric_1f0_${engine}_reference
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+              $<TARGET_FILE:stanli_check> hypergeometric_1f0
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endforeach()
+  set_tests_properties(hypergeometric_1f0_register_reference PROPERTIES
+    ENVIRONMENT "STANLI_STRUCTURED_LOOPS=0")
+  set_tests_properties(hypergeometric_1f0_structured_reference PROPERTIES
+    ENVIRONMENT "STANLI_BOUNDED_SPECIALIZATION=0")
   add_test(NAME rng_udf_effect_reference
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_rng_udf_effect

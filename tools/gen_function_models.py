@@ -163,6 +163,10 @@ def render():
             "integrate_1d_gauss_kronrod_tol",
         )
     }
+    focused["hypergeometric_1F0"] = (
+        "tests/fixtures/hypergeometric_1f0.stan and generated builtin signatures: "
+        "data, graph, runtime-control, output, and standalone calls; fresh CmdStan references"
+    )
     for name in ("student_t_qf", "poisson_binomial_lpmf", "poisson_binomial_cdf",
                  "poisson_binomial_lcdf", "poisson_binomial_lccdf", "poisson_binomial_rng"):
         focused[name] = "tests/fixtures/stan240_functions.stan; fresh CmdStan 2.40 references in stan240_references.json.gz"

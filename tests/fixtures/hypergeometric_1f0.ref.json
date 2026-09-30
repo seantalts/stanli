@@ -1,0 +1,75 @@
+{
+  "recorded": {
+    "cmdstan": "d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6",
+    "stan": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+    "math": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+    "cmdstan_version": "2.40.0",
+    "stanc_sha256": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
+    "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "reference_flags": "-O1 -ffp-contract=off; stanc default optimization",
+    "platform": "Darwin arm64"
+  },
+  "seed": 1234,
+  "chain": 0,
+  "source_sha256": "7ac5650c80762d02ce6545041a05aff8df48fc2450e71697fb333d83208b05e1",
+  "data_sha256": "b2111961a1193216df47f75eb6e2f751f575f363833bde1d15afc28a9432043d",
+  "points": {
+    "0": {
+      "values": [
+        "42.140096143982319",
+        "1.3555798528261012",
+        "0.90018486657595764"
+      ],
+      "wa": {
+        "names": "a,z_raw,z,both_active,first_active,second_active,from_data",
+        "values": [
+          "0.10000000000000001",
+          "2.7755575615628914e-17",
+          "5.551115123125783e-18",
+          "1",
+          "1.0291860089647606",
+          "1",
+          "1.1547005383792515"
+        ]
+      }
+    },
+    "1": {
+      "values": [
+        "41.933156101124155",
+        "1.634440184336186",
+        "0.43797733296492131"
+      ],
+      "wa": {
+        "names": "a,z_raw,z,both_active,first_active,second_active,from_data",
+        "values": [
+          "-0.040000000000000001",
+          "-0.02",
+          "-0.003999466751986187",
+          "1.0001596723521082",
+          "0.9885586726496457",
+          "0.99800624510207891",
+          "1.1547005383792515"
+        ]
+      }
+    },
+    "2": {
+      "values": [
+        "42",
+        "1.4383819306576475",
+        "0.10000000000000001"
+      ],
+      "wa": {
+        "names": "a,z_raw,z,both_active,first_active,second_active,from_data",
+        "values": [
+          "0",
+          "0",
+          "0",
+          "1",
+          "1",
+          "1",
+          "1.1547005383792515"
+        ]
+      }
+    }
+  }
+}

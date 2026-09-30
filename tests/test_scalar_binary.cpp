@@ -329,6 +329,8 @@ int main() {
   check_fn("gamma_p", OP_GAMMA_P, ps, qs, F(gamma_p));
   check_fn("gamma_q", OP_GAMMA_Q, ps, qs, F(gamma_q));
   check_fn("hypot", OP_HYPOT, xs, ys, F(hypot));
+  check_fn("hypergeometric_1F0", OP_HYPERGEOMETRIC_1F0, xs,
+           {0.1, -0.5, 0.25, 0.75}, F(hypergeometric_1F0));
   check_fn("lbeta", OP_LBETA, ps, qs, F(lbeta));
   check_fn("lchoose", OP_LCHOOSE, ns, ks, F(binomial_coefficient_log));
   check_fn("lmultiply", OP_LMULTIPLY, xs, qs, F(lmultiply));
@@ -379,6 +381,23 @@ int main() {
                                    lmultiply);
   const double inf = std::numeric_limits<double>::infinity();
   const double nan = std::numeric_limits<double>::quiet_NaN();
+  for (const auto& values :
+       std::vector<std::pair<double, double>>{{0.5, std::nextafter(1.0, 0.0)},
+                                              {0.5, std::nextafter(-1.0, 0.0)},
+                                              {0.5, 1.0},
+                                              {0.5, -1.0},
+                                              {0.5, 1.1},
+                                              {0.5, -1.1},
+                                              {0.5, inf},
+                                              {0.5, nan},
+                                              {nan, 0.25},
+                                              {0.0, 0.0},
+                                              {-2.0, 0.25}}) {
+    check_seeds("hypergeometric_1F0 edge", OP_HYPERGEOMETRIC_1F0, values.first,
+                values.second, [](const auto& a, const auto& b) -> var {
+                  return stan::math::hypergeometric_1F0(a, b);
+                });
+  }
   for (const auto& values :
        std::vector<std::pair<double, double>>{{0.0, 0.0},
                                               {-0.0, 0.0},
