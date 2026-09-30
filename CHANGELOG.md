@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.18.1
+
+- Make inclusive Stan `for` loops ending at the maximum integer terminate on
+  Windows, where C++ `long` is 32-bit. Use a wider private counter in MIR
+  interpretation and compile-time loop expansion, and bound the ODE regression
+  test so a future hang fails CI promptly.
+- Complete the cross-platform release after 0.18.0 reached npm but its Windows
+  runtime build stalled before PyPI and GitHub runtime publication. The 0.18.0
+  changes below are included in this release.
+
 ## 0.18.0
 
 - Execute compiled generated quantities for all 329 recorded numerical-corpus

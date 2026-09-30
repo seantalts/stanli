@@ -4559,9 +4559,9 @@ struct ProgramCompiler {
         loops.push_back({});
         bool broken = false;
         bool returned = false;
-        for (long v = lo; v <= hi; ++v) {
+        for (int64_t v = lo; v <= hi; ++v) {
           bool path_returned = false;
-          ints[s.loopvar] = {v};
+          ints[s.loopvar] = {static_cast<long>(v)};
           int_decl_at[s.loopvar] = {branch_depth, loops.size()};
           try {
             for (const auto& k : s.body) stmt(k);
