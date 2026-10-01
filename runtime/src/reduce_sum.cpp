@@ -1,5 +1,5 @@
 #include <stanli/reduce_sum.hpp>
-#include <stanli/nuts.hpp>
+#include <stanli/threading.hpp>
 #include <stanli/optable.hpp>
 #include <stan/math/rev/core/chainablestack.hpp>
 #include <algorithm>

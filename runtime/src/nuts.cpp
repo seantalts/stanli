@@ -185,14 +185,6 @@ std::vector<double> cmdstan_init_point(Executor& ex, uint32_t seed,
   return q;
 }
 
-bool thread_safe_build() {
-#ifdef STAN_THREADS
-  return true;
-#else
-  return false;
-#endif
-}
-
 bool should_report_progress(const NutsConfig& cfg, int64_t i, bool warmup,
                             int refresh) {
   if (refresh <= 0) return false;

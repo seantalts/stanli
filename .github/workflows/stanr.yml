@@ -25,6 +25,10 @@ on:
         description: 'stanr git revision to build against (default: the pin)'
         required: false
         default: ''
+      stanr_repository:
+        description: 'stanr repository to fetch (default: upstream)'
+        required: false
+        default: ''
       test_filter:
         description: testthat filter regex over stanr's test files
         required: false
@@ -52,6 +56,7 @@ jobs:
       # Stanli release fail. Refresh this together with the test if stanr
       # changes its vendoring or backend contract.
       STANR_REF: ${{ inputs.stanr_ref || 'da5de850718ca62ad752365d5467566eea22a0c5' }}
+      STANR_REPOSITORY: ${{ inputs.stanr_repository || 'https://github.com/andrjohns/stanr.git' }}
       STANR_TEST_FILTER: ${{ inputs.test_filter || 'stanli-backend' }}
       TESTTHAT_PARALLEL: ${{ inputs.parallel || 'TRUE' }}
       MAKEFLAGS: -j4
