@@ -161,7 +161,7 @@ def prepare_reference_runtime(cmdstan: pathlib.Path, stanc: pathlib.Path,
                               deps: pathlib.Path,
                               versions: ToolchainVersions,
                               compiler: str = "clang++") -> None:
-    """Build BridgeStan's shared adapter once before parallel model builds."""
+    """Build all shared reference dependencies before parallel model builds."""
     bridgestan = pathlib.Path(deps).resolve() / "bridgestan"
     assignments = _make_assignments(cmdstan, stanc, compiler)
     identity = hashlib.sha256(json.dumps(
@@ -176,8 +176,14 @@ def prepare_reference_runtime(cmdstan: pathlib.Path, stanc: pathlib.Path,
             if metadata.exists() else ""
         if recorded != identity:
             adapter.unlink(missing_ok=True)
-        result = _run(("make", "-C", bridgestan, *assignments, adapter),
-                      timeout=900.0)
+        # The adapter alone does not depend on SUNDIALS, MPI or TBB. Let one
+        # make process prepare the same shared prerequisites as a model link;
+        # independent parallel makes can otherwise write the same archive.
+        runtime_makefile = pathlib.Path(__file__).with_name(
+            "reference_runtime.mk").resolve()
+        result = _run(("make", "-C", bridgestan, "-f", "Makefile",
+                       "-f", runtime_makefile, *assignments,
+                       "stanli-conformance-runtime"), timeout=900.0)
         if result.returncode:
             raise OracleError("BridgeStan runtime build failed: "
                               + (result.stderr or result.stdout)[-4000:])

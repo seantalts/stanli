@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import dataclasses
 import io
@@ -10,10 +11,13 @@ import json
 import math
 import os
 import pathlib
+import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "harnesses"))
@@ -50,7 +54,8 @@ import stan_conformance
 from conformance.model_worker import (TransportUnavailable,
                                       _category as worker_category,
                                       _infrastructure_error, _stan_call)
-from conformance.oracle import ReferenceBuild
+from conformance.oracle import (OracleError, ReferenceBuild, ToolchainVersions,
+                                prepare_reference_runtime)
 from conformance.transport import transport_identity
 
 
@@ -1155,6 +1160,88 @@ class RunnerAndAggregateTests(unittest.TestCase):
                                    created_at="2026-08-12T00:00:00Z")
         self.assertIn("duplicate_case_ids:1", broken.extra_gate_issues)
         self.assertIn("missing_case_ids:2", broken.extra_gate_issues)
+
+
+@unittest.skipUnless(shutil.which("make"), "GNU Make is required")
+class ReferenceRuntimeTests(unittest.TestCase):
+    # Match BridgeStan's dependency graph: the adapter alone does not need
+    # the shared libraries, but every model links all of them. Refuse shared
+    # builds after the parallel phase starts, making the cold-build race
+    # deterministic without needing a C++ toolchain or timing assumptions.
+    MAKEFILE = """
+BRIDGE_O = $(CURDIR)/src/bridgestan.o
+SUNDIALS_TARGETS = $(CURDIR)/math/libcvodes.a $(CURDIR)/math/libidas.a
+MPI_TARGETS = $(CURDIR)/mpi/libmpi.a
+TBB_TARGETS = $(CURDIR)/tbb/libtbb.so
+SHARED_TARGETS = $(BRIDGE_O) $(SUNDIALS_TARGETS) $(MPI_TARGETS) $(TBB_TARGETS)
+
+$(SHARED_TARGETS):
+	@test ! -f parallel-started
+	@if test -f fail-$(@F); then echo 'dependency build failed' >&2; exit 1; fi
+	@mkdir -p $(dir $@)
+	@touch $@
+	@echo $@ >> built.log
+
+.PHONY: model-one model-two
+model-one model-two: $(SHARED_TARGETS)
+"""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        self.deps = self.root / "deps"
+        self.bridge = self.deps / "bridgestan"
+        self.bridge.mkdir(parents=True)
+        (self.bridge / "Makefile").write_text(self.MAKEFILE, encoding="utf-8")
+        self.metadata = self.bridge / ".stanli-conformance-runtime.json"
+        self.versions = ToolchainVersions(
+            "cmdstan", "stan", "math", "stanc", "stanc-sha",
+            "bridgestan", "test", "test-compiler", ())
+        patcher = mock.patch("conformance.oracle._PREPARED", set())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def prepare(self):
+        prepare_reference_runtime(self.deps / "cmdstan", self.deps / "stanc",
+                                  self.deps, self.versions)
+
+    def build_parallel_models(self):
+        (self.bridge / "parallel-started").touch()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            builds = tuple(pool.map(
+                lambda target: subprocess.run(
+                    ["make", "-s", "-C", str(self.bridge), target],
+                    capture_output=True, text=True, timeout=10),
+                ("model-one", "model-two")))
+        for build in builds:
+            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+
+    def test_cold_dependencies_are_ready_before_parallel_models(self):
+        self.prepare()
+        self.build_parallel_models()
+        self.assertTrue(self.metadata.exists())
+        self.prepare()
+        built = (self.bridge / "built.log").read_text().splitlines()
+        self.assertEqual(len(built), 5)
+        self.assertEqual(len(set(built)), 5)
+
+    def test_restored_adapter_metadata_does_not_skip_missing_libraries(self):
+        self.prepare()
+        (self.bridge / "math/libidas.a").unlink(missing_ok=True)
+        with mock.patch("conformance.oracle._PREPARED", set()):
+            self.prepare()
+        self.build_parallel_models()
+
+    def test_dependency_failure_is_not_marked_prepared_and_can_retry(self):
+        failure = self.bridge / "fail-libidas.a"
+        failure.touch()
+        with self.assertRaisesRegex(OracleError, "dependency build failed"):
+            self.prepare()
+        self.assertFalse(self.metadata.exists())
+        failure.unlink()
+        self.prepare()
+        self.build_parallel_models()
 
 
 class ProtocolSmokeTests(unittest.TestCase):
