@@ -16,6 +16,10 @@ matrices remain 2x2. Every real leaf originates in an independent parameter.
 The harness packs cases into content-addressed Stan shards and compares log
 density plus the complete unconstrained gradient at three points through the
 official BridgeStan client on both the pinned reference and stanli sides.
+Before compiling shards in parallel, one Make invocation prepares BridgeStan's
+adapter and all shared SUNDIALS, MPI and TBB dependencies. This also applies
+when source caches are cold: independent shard builds must never write the
+same shared archive concurrently.
 If stanli rejects a generated source before selecting a case, the runner
 bisects that side into content-addressed retry shards while retaining the one
 compiled reference shard. Thus one unsupported call cannot classify its
