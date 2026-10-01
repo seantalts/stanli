@@ -2,6 +2,7 @@
 #define STANLI_NUTS_HPP
 
 #include <stanli/graph.hpp>
+#include <stanli/threading.hpp>
 
 #include <array>
 #include <atomic>
@@ -138,14 +139,6 @@ using StoredDrawWriter =
 // phase's final transition are reported.
 bool should_report_progress(const NutsConfig& cfg, int64_t i, bool warmup,
                             int refresh);
-
-// True when this build can run chains in real threads. stan-math's
-// autodiff stack is a plain static unless STAN_THREADS is defined, in
-// which case it is thread_local; the legacy kernels and tape islands
-// build NESTED var tapes on that stack, so without STAN_THREADS two
-// chains in two threads would quietly corrupt each other's tape. When
-// this is false, run_nuts_chains ignores n_threads and runs sequentially.
-bool thread_safe_build();
 
 // Run one chain per executor. Chain c uses create_rng(seed, chain_id + c),
 // which is CmdStan's convention, so a matched seed means a matched stream

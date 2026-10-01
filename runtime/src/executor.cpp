@@ -608,7 +608,7 @@ KernelCtx Executor::make_ctx_(const Op& op, int64_t scratch_offset,
 }
 
 void Executor::detach_data_() {
-  if (data_.unique()) return;
+  if (data_.use_count() == 1) return;
   auto replacement = std::make_shared<std::vector<double>>(*data_);
   data_ = std::move(replacement);
   // Bound contexts hold input pointers. No output can belong to data_.
