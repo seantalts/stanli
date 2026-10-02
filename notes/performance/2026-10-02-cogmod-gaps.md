@@ -26,6 +26,14 @@ and overstated others.
 
 ## Results
 
+These are fixed-point gradient timings: one parameter point, evaluated
+repeatedly. They overstate the structured loop. Its replay is specialized to
+the branch decisions it recorded, and under sampling several families
+(exgaussian, geg, lognormal, exwald, both LNR programs) change branch on most
+gradients and re-record the whole loop each time, about 10x slower than
+per-observation regions. See the sampling measurements in
+[the replay plan](../execution/2026-10-02-loop-replay-regrouping-plan.md).
+
 Per gradient in microseconds. "main" is `d4a88756`, which includes #423.
 "branch" adds the commits described below.
 
