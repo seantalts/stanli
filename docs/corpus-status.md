@@ -1,11 +1,11 @@
 # Corpus status
 
-Evaluating: 329/330
-CmdStan reference coverage: 329/330 models, 987 evaluation points.
+Evaluating: 350/352
+CmdStan reference coverage: 351/352 models, 1053 evaluation points.
 
-The shared corpus includes posteriordb, generated brms models, imported teaching models, and language fixtures. Collection labels retain their source provenance; all references use the same replay in `tools/verify_refs.py`.
+The shared corpus includes posteriordb, generated brms and cogmod models, imported teaching models, and language fixtures. Collection labels retain their source provenance; all references use the same replay in `tools/verify_refs.py`.
 
-Recording-time primary-point comparison metrics retained for 314 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
+Recording-time primary-point comparison metrics retained for 335 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
 
 A model counts as passing only when tools/verify_sample.py matches CmdStan's log_prob and full gradient at the shared deterministic point. Accuracy below is the worst deviation over lp and every gradient component: relative, and in ULPs (0 = bitwise identical to CmdStan). Bitwise counts are reported for information; the replay uses a 1e-9 scaled-error gate with documented ill-conditioned exceptions. Models that evaluate but are not verified are listed separately and are not counted.
 
@@ -110,6 +110,27 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `ch16_m16_1` | rethinking | 4 | 1.8e-15 | 15 |
 | `ch16_m16_4` | rethinking | 4 | 1.7e-15 | 8 |
 | `cholesky_cov_param_block` | stanc3 | 21 | 0 (bitwise) | 0 |
+| `cm_betadiscrete` | cogmod | 5 | 3.8e-16 | 2 |
+| `cm_betagate` | cogmod | 6 | 6.6e-15 | 59 |
+| `cm_bisa` | cogmod | 6 | 0 (bitwise) | 0 |
+| `cm_choco` | cogmod | 10 | 2.6e-16 | 2 |
+| `cm_exgaussian` | cogmod | 5 | 1.8e-16 | 1 |
+| `cm_exwald` | cogmod | 7 | 0 (bitwise) | 0 |
+| `cm_gamma` | cogmod | 6 | 0 (bitwise) | 0 |
+| `cm_geg` | cogmod | 6 | 1.4e-16 | 1 |
+| `cm_invgamma` | cogmod | 6 | 0 (bitwise) | 0 |
+| `cm_invgaussian` | cogmod | 8 | 1.9e-16 | 28 |
+| `cm_invweibull` | cogmod | 6 | 0 (bitwise) | 0 |
+| `cm_lba1` | cogmod | 8 | 0 (bitwise) | 0 |
+| `cm_lba2` | cogmod | 10 | 0 (bitwise) | 0 |
+| `cm_lnr` | cogmod | 9 | 1.1e-16 | 2 |
+| `cm_lnr_bench` | cogmod | 10 | 0 (bitwise) | 0 |
+| `cm_loggamma` | cogmod | 7 | 0 (bitwise) | 0 |
+| `cm_lognormal` | cogmod | 7 | 0 (bitwise) | 0 |
+| `cm_logstudent` | cogmod | 7 | 0 (bitwise) | 0 |
+| `cm_logweibull` | cogmod | 6 | 0 (bitwise) | 0 |
+| `cm_rdm` | cogmod | 8 | 0 (bitwise) | 0 |
+| `cm_weibull` | cogmod | 6 | 0 (bitwise) | 0 |
 | `covid19imperial_v2` | posteriordb | 52 | 8.2e-16 | 7 |
 | `covid19imperial_v3` | posteriordb | 52 | 8.2e-16 | 7 |
 | `declare-define-multi` | stanc3 | 376 | 0 (bitwise) | 0 |
@@ -449,6 +470,27 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `ch16_m16_1` | 3 |
 | `ch16_m16_4` | 3 |
 | `cholesky_cov_param_block` | 29 |
+| `cm_betadiscrete` | 8 |
+| `cm_betagate` | 10 |
+| `cm_bisa` | 10 |
+| `cm_choco` | 18 |
+| `cm_exgaussian` | 8 |
+| `cm_exwald` | 12 |
+| `cm_gamma` | 10 |
+| `cm_geg` | 10 |
+| `cm_invgamma` | 10 |
+| `cm_invgaussian` | 14 |
+| `cm_invweibull` | 10 |
+| `cm_lba1` | 14 |
+| `cm_lba2` | 18 |
+| `cm_lnr` | 16 |
+| `cm_lnr_bench` | 16 |
+| `cm_loggamma` | 12 |
+| `cm_lognormal` | 12 |
+| `cm_logstudent` | 12 |
+| `cm_logweibull` | 10 |
+| `cm_rdm` | 14 |
+| `cm_weibull` | 10 |
 | `covid19imperial_v2` | 8457 |
 | `covid19imperial_v3` | 8457 |
 | `declare-define-multi` | 452 |
@@ -692,4 +734,5 @@ CmdStan and stanli both reject every shared evaluation point for these models: t
 
 ## Failures
 
+- `cm_ddm`: COMPILE_FAIL mir: malformed wiener_lpdf call: expected 5 or 7 argument(s), got 6
 - `sir`: EVAL_FAIL stanli MIR check: y is -1.82492e-07, but must be greater than or equal to 0.000000

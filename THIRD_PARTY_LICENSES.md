@@ -45,3 +45,10 @@ and data written by brms 2.23.0 (GPL-2), used as test inputs. Parts of a
 generated model are brms's own code, the `scale_r_cor` helper and the
 inlined ordinal densities among them. `tools/gen_brms_models.R` regenerates
 the directory from brms itself.
+
+Also in the repository, not in the binary: `tests/cogmod/` holds Stan
+models and data written by brms 2.23.0 against cogmod's custom families
+(MIT), used as test inputs. A generated model's `functions {}` block
+includes Stan code authored in cogmod for its custom density; see
+`tests/cogmod/licenses/MIT`. `tools/gen_cogmod_models.R` regenerates the
+directory from brms and cogmod.

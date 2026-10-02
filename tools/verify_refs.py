@@ -47,12 +47,13 @@ from corpus_inventory import corpus_cases, local_cases, source_digest
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # Corpora carried in the tree, each a directory of model.stan next to
 # model.json: language and type constructs lifted from stanc3's own test
-# suite (tests/stanc3/README.md), and brms output for the families and
-# effect structures posteriordb does not contain (tests/brms/README.md).
-# They go through the same oracle as posteriordb, and a reference is keyed
-# on the file name either way.
+# suite (tests/stanc3/README.md), brms output for the families and effect
+# structures posteriordb does not contain (tests/brms/README.md), and
+# cogmod's custom brms families for parameter-dependent density branches
+# (tests/cogmod/README.md). They go through the same oracle as posteriordb,
+# and a reference is keyed on the file name either way.
 LOCAL_CORPORA = (REPO / "tests" / "stanc3", REPO / "tests" / "brms",
-                REPO / "tests" / "rethinking")
+                REPO / "tests" / "rethinking", REPO / "tests" / "cogmod")
 N_SAMPLER_COLS = 7
 REFS_PATH = REPO / "docs" / "internal" / "artifacts" / "corpus-refs.json.gz"
 # The reference file's format. Bumping this is a hard break on purpose:
@@ -95,7 +96,10 @@ QUARANTINED = {}
 # closes, the model matches its references, the replay reports GAP_CLOSED,
 # and the run stays red until the entry is deleted. A crash is never
 # excused: a segfault and a refusal are different bugs.
-KNOWN_GAPS = {}
+KNOWN_GAPS = {
+    "cm_ddm": "wiener_lpdf call has 6 arguments; the MIR reader accepts "
+              "only 5 or 7 (issue #422)",
+}
 
 # (model, point) pairs excused from probe_point's finite-gradient rule,
 # for points that carry no reference at all. Empty while every point is

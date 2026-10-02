@@ -10,8 +10,8 @@ CmdStan, the causes found, the fixes, and what remains open.
 The programs are `brms::make_stancode()` output with cogmod's stanvars, from
 cogmod dev at `732be30bdae2a4cc7f38cf78b5ca7cfeb85dc732`, about 2000 simulated
 observations each. `lnr_bench` reproduces the issue's LNR setup (speed_acc
-participants 1-3, N=4620, `sigmabias = 0`). The models are not checked in;
-cogmod is MIT-licensed if they are added later.
+participants 1-3, N=4620, `sigmabias = 0`). These models, at a smaller N,
+are now checked in at `tests/cogmod` (MIT; see its README).
 
 Gradients were timed with `bench_grad --timed` and CmdStan's equivalent from
 `tools/bench_cmdstan_grad.cpp` at `-O3`, on an idle Apple M-series laptop, at
