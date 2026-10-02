@@ -630,11 +630,11 @@
   "status": "VERIFIED"
  },
  "cm_ddm": {
-  "max_rel": null,
+  "max_rel": 0.0,
   "max_ulp": 0,
   "n_values": 10,
   "point": 0,
-  "status": "CMDSTAN_ONLY"
+  "status": "VERIFIED"
  },
  "cm_exgaussian": {
   "max_rel": 1.8060418361715684e-16,

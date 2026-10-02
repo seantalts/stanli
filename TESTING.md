@@ -209,8 +209,8 @@ The reference artifact
   exact `%.17g` strings; migrated records retain round-trippable JSON numbers
   and their original recording provenance. Migration does not rerun the oracle
   or change its numeric answers.
-- 348 models carry at least one complete row from Stan's per-draw output
-  routine, `write_array`, at the same points: 1041 rows and 662,031 values
+- 349 models carry at least one complete row from Stan's per-draw output
+  routine, `write_array`, at the same points: 1044 rows and 662,085 values
   covering constrained parameters, transformed parameters, and generated
   quantities. Column names are also compared exactly. Both direct
   `write_array` drivers start Stan's RNG with
@@ -266,15 +266,12 @@ math library and the libraries used on other platforms. Known implementation
 errors detected by this comparison were much larger; for example, one
 in-place update error produced a scaled difference of 1.7e+05.
 
-Of the 1053 recorded points, 1002 have status `VERIFIED`, 39 imported oracle
-points have status `RECORDED`, six have status `REJECTED_BOTH`, three have
-status `MISMATCH`, and three have status `CMDSTAN_ONLY`. Imported points use
-the same numerical replay gate; their status preserves the distinction
-between recorded oracle answers and historical cross-engine comparisons. The
-three `CMDSTAN_ONLY` points are `cm_ddm`'s: its `wiener_lpdf` call has six
-arguments, which stanli's MIR reader does not accept (`KNOWN_GAPS` in
-[`tools/verify_refs.py`](tools/verify_refs.py)), so CmdStan's values are
-recorded with no stanli answer to compare. The three
+Of the 1053 recorded points, 1005 have status `VERIFIED`, 39 imported oracle
+points have status `RECORDED`, six have status `REJECTED_BOTH`, and three
+have status `MISMATCH`. Imported points use the same numerical replay gate;
+their status preserves the distinction between recorded oracle answers and
+historical cross-engine comparisons. The CmdStan 2.40
+recording has no `CMDSTAN_ONLY` points. The three
 `MISMATCH` points belong to `kronecker_gp`, where two eigenvector
 gradients are sensitive to a nearly degenerate covariance whose smallest
 eigenvalue gap is 6.5e-17. Intel macOS uses an independent same-platform CmdStan recording for this

@@ -1,11 +1,11 @@
 # Corpus status
 
-Evaluating: 350/352
+Evaluating: 351/352
 CmdStan reference coverage: 351/352 models, 1053 evaluation points.
 
 The shared corpus includes posteriordb, generated brms and cogmod models, imported teaching models, and language fixtures. Collection labels retain their source provenance; all references use the same replay in `tools/verify_refs.py`.
 
-Recording-time primary-point comparison metrics retained for 335 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
+Recording-time primary-point comparison metrics retained for 336 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
 
 A model counts as passing only when tools/verify_sample.py matches CmdStan's log_prob and full gradient at the shared deterministic point. Accuracy below is the worst deviation over lp and every gradient component: relative, and in ULPs (0 = bitwise identical to CmdStan). Bitwise counts are reported for information; the replay uses a 1e-9 scaled-error gate with documented ill-conditioned exceptions. Models that evaluate but are not verified are listed separately and are not counted.
 
@@ -114,6 +114,7 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `cm_betagate` | cogmod | 6 | 6.6e-15 | 59 |
 | `cm_bisa` | cogmod | 6 | 0 (bitwise) | 0 |
 | `cm_choco` | cogmod | 10 | 2.6e-16 | 2 |
+| `cm_ddm` | cogmod | 10 | 0 (bitwise) | 0 |
 | `cm_exgaussian` | cogmod | 5 | 1.8e-16 | 1 |
 | `cm_exwald` | cogmod | 7 | 0 (bitwise) | 0 |
 | `cm_gamma` | cogmod | 6 | 0 (bitwise) | 0 |
@@ -474,6 +475,7 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `cm_betagate` | 10 |
 | `cm_bisa` | 10 |
 | `cm_choco` | 18 |
+| `cm_ddm` | 18 |
 | `cm_exgaussian` | 8 |
 | `cm_exwald` | 12 |
 | `cm_gamma` | 10 |
@@ -734,5 +736,4 @@ CmdStan and stanli both reject every shared evaluation point for these models: t
 
 ## Failures
 
-- `cm_ddm`: COMPILE_FAIL mir: malformed wiener_lpdf call: expected 5 or 7 argument(s), got 6
 - `sir`: EVAL_FAIL stanli MIR check: y is -1.82492e-07, but must be greater than or equal to 0.000000

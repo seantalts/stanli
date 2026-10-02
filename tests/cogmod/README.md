@@ -52,14 +52,6 @@ site, which is the opposite of what is wanted.
 [`tools/gen_cogmod_models.R`](../../tools/gen_cogmod_models.R) has the
 exact formulas and simulation parameters.
 
-## Known gaps
-
-`cm_ddm` does not compile: its density calls `wiener_lpdf` with six
-arguments, and stanli's MIR reader accepts only five or seven. CmdStan's
-answers are recorded anyway, and `cm_ddm` is listed in `KNOWN_GAPS` in
-[`tools/verify_refs.py`](../../tools/verify_refs.py) until the reader
-supports that arity.
-
 ## Regenerating and recording
 
 ```
