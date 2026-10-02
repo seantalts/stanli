@@ -989,6 +989,37 @@ static void test_structured_dead_after_break() {
   stan::math::recover_memory();
 }
 
+// The same inlined container return inside a while loop, with one arm a
+// constant vector, so the shared cell must still carry adjoints.
+static void test_structured_while_vector_return() {
+  using namespace stanli;
+  const DataMap data = DataMap::from_json(
+      slurp("tests/fixtures/structured_while_vector_return.json"));
+  CompiledModel cm = compile_model(
+      slurp("tests/fixtures/structured_while_vector_return.tmir.sexp"), data);
+  const std::vector<double>& y = data.at("y").r;
+  const double mu0 = 0.4;
+  stan::math::var mu = mu0, lp = 0;
+  for (const double yn : y) {
+    stan::math::var v1 = 0, v2 = 0;
+    for (int k = 0; k < 2; ++k) {
+      const stan::math::var a = yn - mu - k;
+      v1 += a < 0 ? stan::math::var(1) : a;
+      v2 += a < 0 ? stan::math::var(2) : a * a;
+    }
+    lp += -stan::math::square(v1) - 0.1 * v2;
+  }
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = mu0;
+  double grad = 0;
+  expect_ulp("structured while vector return lp", ex.gradient(&grad), lp.val(),
+             10);
+  expect_ulp("structured while vector return grad", grad, mu.adj(), 10);
+  stan::math::recover_memory();
+}
+
 // log_mix and a comparison used as a value, inside per-observation regions.
 static void test_udf_param_branch() {
   using namespace stanli;
@@ -9344,6 +9375,7 @@ int main() {
   test_udf_guard_returns();
   test_structured_vector_return();
   test_structured_dead_after_break();
+  test_structured_while_vector_return();
   test_udf_param_branch();
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;
