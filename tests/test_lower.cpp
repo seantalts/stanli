@@ -846,6 +846,41 @@ static void test_udf_packed_branch() {
   stan::math::recover_memory();
 }
 
+// A transformed parameter fixed at a constant selects a branch inside a
+// parameter-dependent region. The region folds it, so the unused arm and its
+// kernel call are not compiled.
+static void test_udf_constant_branch() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_constant_branch.json"));
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+  CompiledModel cm = compile_model(
+      slurp("tests/fixtures/udf_constant_branch.tmir.sexp"), data);
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  int islands = 0;
+  for (const Op& op : cm.graph.ops) {
+    if (op.opcode != OP_ISLAND) continue;
+    ++islands;
+    const auto& prog = *static_cast<const IslandProg*>(op.udata);
+    check(prog.calls.empty(), "udf constant branch drops the unused arm");
+  }
+  check(islands > 0, "udf constant branch lowers through regions");
+  const std::vector<double>& y = data.at("y").r;
+  const double mu0 = 0.2;
+  stan::math::var mu = mu0, lp = 0;
+  for (const double yn : y)
+    lp +=
+        yn - mu < 0 ? -stan::math::square(yn - mu) : -stan::math::fabs(yn - mu);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = mu0;
+  double grad = 0;
+  expect_ulp("udf constant branch lp", ex.gradient(&grad), lp.val());
+  expect_ulp("udf constant branch grad", grad, mu.adj(), 10);
+  stan::math::recover_memory();
+}
+
 // log_mix and a comparison used as a value, inside per-observation regions.
 static void test_udf_param_branch() {
   using namespace stanli;
@@ -9197,6 +9232,7 @@ int main() {
   test_bounded_specialization();
   test_udf_tail_branch();
   test_udf_packed_branch();
+  test_udf_constant_branch();
   test_udf_param_branch();
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;

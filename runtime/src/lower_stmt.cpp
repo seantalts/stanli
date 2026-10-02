@@ -371,6 +371,20 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   for (const auto& [name, value] : scope) outer_names.insert(name);
   for (const auto& [name, value] : decls) outer_names.insert(name);
   const std::set<std::string> outer_int_names = int_locals;
+  {
+    std::vector<std::string> region_assigned;
+    if (s) assigned_names(*s, &region_assigned);
+    const std::set<std::string> reassigned(region_assigned.begin(),
+                                           region_assigned.end());
+    for (const auto& [name, value] : scope) {
+      if (reassigned.count(name) || value.slot < 0 ||
+          value.slot >= (int)g.slots.size() || !is_scalar(value))
+        continue;
+      const DataMap::Entry* known = observation(value);
+      if (known && !known->is_int && known->r.size() == 1)
+        c.known_reals[name] = known->r[0];
+    }
+  }
   c.bind_extern = [&](const std::string& name, Range* r) {
     auto sc = scope.find(name);
     int slot = sc != scope.end() ? sc->second.slot : env_slot(name);

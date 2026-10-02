@@ -32,6 +32,7 @@ O0_FIXTURES = {
     "structured_matrix_ops",
     "trunc_param",
     "udf_conditional_return",
+    "udf_constant_branch",
     "udf_local_shape",
     "whileloop",
 }
