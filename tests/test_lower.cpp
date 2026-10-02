@@ -881,6 +881,43 @@ static void test_udf_constant_branch() {
   stan::math::recover_memory();
 }
 
+// Guard clauses that return under a parameter-dependent condition, in a
+// function stanc did not inline.
+static void test_udf_guard_returns() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_guard_returns.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_guard_returns.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf guard returns compile: ") + error.what());
+    return;
+  }
+  const std::vector<double>& y = data.at("y").r;
+  const double u[2] = {0.1, -0.3};
+  stan::math::var mu_free = u[0], sigma_free = u[1];
+  stan::math::var mu = stan::math::exp(mu_free),
+                  sigma = stan::math::exp(sigma_free);
+  stan::math::var lp = mu_free + sigma_free;
+  for (const double yn : y) {
+    const stan::math::var t = yn - mu;
+    lp += t <= 0 ? stan::math::var(std::log(0.1))
+                 : stan::math::normal_lpdf(t, 0, sigma);
+  }
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = u[0];
+  ex.params_data()[1] = u[1];
+  double grad[2] = {};
+  expect_ulp("udf guard returns lp", ex.gradient(grad), lp.val(), 10);
+  expect_ulp("udf guard returns grad mu", grad[0], mu_free.adj(), 10);
+  expect_ulp("udf guard returns grad sigma", grad[1], sigma_free.adj(), 10);
+  stan::math::recover_memory();
+}
+
 // log_mix and a comparison used as a value, inside per-observation regions.
 static void test_udf_param_branch() {
   using namespace stanli;
@@ -9233,6 +9270,7 @@ int main() {
   test_udf_tail_branch();
   test_udf_packed_branch();
   test_udf_constant_branch();
+  test_udf_guard_returns();
   test_udf_param_branch();
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;

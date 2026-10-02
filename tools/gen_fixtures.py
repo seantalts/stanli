@@ -33,6 +33,7 @@ O0_FIXTURES = {
     "trunc_param",
     "udf_conditional_return",
     "udf_constant_branch",
+    "udf_guard_returns",
     "udf_local_shape",
     "whileloop",
 }
