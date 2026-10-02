@@ -39,18 +39,30 @@ if [[ -z "$src_repo" || -z "$src_sha" ]]; then
 fi
 
 out="$repo_root/deps/stanc3/stanc-pinned"
-if [[ -x "$out" && -f "$out.src" && "$(cat "$out.src")" == "$src_sha" ]]; then
+src_dir="$repo_root/deps/stanc3-src"
+# dune subst stamps `git describe`, which changes when a release tag for this
+# commit is published after an earlier build.
+version_matches() {
+  [[ -d "$src_dir/.git" ]] || return 0
+  git -C "$src_dir" fetch -q --force --tags origin "$src_sha" 2>/dev/null || true
+  local described version
+  described=$(git -C "$src_dir" describe --always --abbrev=7 "$src_sha") ||
+    return 0
+  version=$("$out" --version)
+  [[ "$version" == "stanc3 $described" || "$version" == "stanc3 $described "* ]]
+}
+if [[ -x "$out" && -f "$out.src" && "$(cat "$out.src")" == "$src_sha" ]] &&
+   version_matches; then
   echo "conformance stanc already built from $src_sha"
   exit 0
 fi
 
-src_dir="$repo_root/deps/stanc3-src"
 if [[ ! -d "$src_dir/.git" ]]; then
   git clone "$src_repo" "$src_dir"
 else
   git -C "$src_dir" remote set-url origin "$src_repo"
 fi
-git -C "$src_dir" fetch -q origin "$src_sha"
+git -C "$src_dir" fetch -q --force --tags origin "$src_sha"
 # reset first: dune subst (below) edits tracked files, and a leftover
 # subst from a previous build would make this checkout refuse.
 git -C "$src_dir" reset -q --hard

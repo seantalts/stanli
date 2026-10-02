@@ -1306,6 +1306,14 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_function_model_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_function_models.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  find_program(STANLI_BASH bash)
+  if(STANLI_STANC_EMBED_OBJ AND STANLI_BASH AND NOT WIN32)
+    add_test(NAME test_stanc_embed_provenance
+             COMMAND ${STANLI_BASH} -c
+                     "source tools/stanc_embed/provenance.sh && stanc_embed_artifact_matches \"$1\" || { echo \"$1 does not match the pinned stanc3 source and compiler inputs; rebuild it with tools/stanc_embed/build.sh\" >&2; exit 1; }"
+                     provenance ${STANLI_STANC_EMBED_OBJ}
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endif()
   add_test(NAME test_density_signature_model_generation
            COMMAND ${Python3_EXECUTABLE}
                    tools/generate_density_signature_model.py
