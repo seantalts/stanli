@@ -1480,7 +1480,16 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
   if (e.kind == mir::Expr::Promotion && e.args.size() == 1)
     return try_static_view(e.args[0]);
   if (e.kind == mir::Expr::FunApp) {
-    if (e.name == "transpose" && e.args.size() == 1) {
+    if (e.name == "FnMakeRowVec" && !e.args.empty() &&
+        std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& a) {
+          return is_scalar_type(a.type_);
+        })) {
+      SlotInfo si = view_of("URowVector");
+      si.param_free = e.data_only;
+      return {StaticProbeState::Known, {(int64_t)e.args.size(), si}, {}};
+    }
+    if ((e.name == "transpose" || e.name == "Transpose__") &&
+        e.args.size() == 1) {
       auto base = try_static_view(e.args[0]);
       if (base.state != StaticProbeState::Known) return base;
       std::swap(base.value.si.rows, base.value.si.cols);

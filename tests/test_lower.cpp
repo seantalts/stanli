@@ -11,6 +11,7 @@
 #include <stanli/island.hpp>
 #include <stanli/ode_adjoint.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/structured_loop.hpp>
 #include <stanli/packet.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -915,6 +916,76 @@ static void test_udf_guard_returns() {
   expect_ulp("udf guard returns lp", ex.gradient(grad), lp.val(), 10);
   expect_ulp("udf guard returns grad mu", grad[0], mu_free.adj(), 10);
   expect_ulp("udf guard returns grad sigma", grad[1], sigma_free.adj(), 10);
+  stan::math::recover_memory();
+}
+
+// stanc's inliner declares a vector-returning function's result zero-length
+// and assigns it in each arm. The structured loop sizes it from those
+// assignments instead of refusing the loop.
+static void test_structured_vector_return() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/structured_vector_return.json"));
+  CompiledModel cm = compile_model(
+      slurp("tests/fixtures/structured_vector_return.tmir.sexp"), data);
+  int loops = 0, islands = 0;
+  for (const Op& op : cm.graph.ops) {
+    loops += op.opcode == OP_LOOP;
+    islands += op.opcode == OP_ISLAND;
+  }
+  check(loops == 1 && islands == 0,
+        "structured vector return keeps its loop structured");
+  const std::vector<double>& y = data.at("y").r;
+  const double mu0 = 0.4;
+  stan::math::var mu = mu0, lp = 0;
+  for (const double yn : y) {
+    const stan::math::var a = yn - mu;
+    const stan::math::var t1 = a < 0 ? a : stan::math::var(1);
+    const stan::math::var t2 = a < 0 ? stan::math::var(1) : a;
+    lp += -stan::math::square(t1) - 0.5 * stan::math::square(t2);
+  }
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = mu0;
+  double grad = 0;
+  expect_ulp("structured vector return lp", ex.gradient(&grad), lp.val(), 10);
+  expect_ulp("structured vector return grad", grad, mu.adj(), 10);
+  stan::math::recover_memory();
+}
+
+// Statements after an unconditional break are unreachable, so the
+// structured loop does not lower them.
+static void test_structured_dead_after_break() {
+  using namespace stanli;
+  const DataMap data = DataMap::from_json(
+      slurp("tests/fixtures/structured_dead_after_break.json"));
+  CompiledModel cm = compile_model(
+      slurp("tests/fixtures/structured_dead_after_break.tmir.sexp"), data);
+  int loops = 0;
+  for (const Op& op : cm.graph.ops) {
+    if (op.opcode != OP_LOOP) continue;
+    ++loops;
+    const auto& plan = *static_cast<const StructuredLoop*>(op.udata);
+    for (const Op& inner : plan.body.ops)
+      check(inner.opcode != OP_LGAMMA,
+            "structured dead after break skips unreachable statements");
+  }
+  check(loops == 1, "structured dead after break keeps its loop structured");
+  const std::vector<double>& y = data.at("y").r;
+  const double mu0 = 0.4;
+  stan::math::var mu = mu0, lp = 0;
+  for (const double yn : y)
+    lp +=
+        yn - mu < 0 ? -stan::math::square(yn - mu) : -stan::math::abs(yn - mu);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = mu0;
+  double grad = 0;
+  expect_ulp("structured dead after break lp", ex.gradient(&grad), lp.val(),
+             10);
+  expect_ulp("structured dead after break grad", grad, mu.adj(), 10);
   stan::math::recover_memory();
 }
 
@@ -9271,6 +9342,8 @@ int main() {
   test_udf_packed_branch();
   test_udf_constant_branch();
   test_udf_guard_returns();
+  test_structured_vector_return();
+  test_structured_dead_after_break();
   test_udf_param_branch();
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;

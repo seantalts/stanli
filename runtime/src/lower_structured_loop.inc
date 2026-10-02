@@ -8,6 +8,7 @@ std::map<std::string, IntRange> region_analysis_ints;
 int region_control_depth = 0;
 bool region_control_active = false;
 unsigned structured_outer_depth = 0;
+bool region_unreachable = false;
 std::map<std::pair<const mir::Expr*, std::string>, std::optional<RealRange>>
     region_enumerated_cache;
 
@@ -881,9 +882,56 @@ Val region_cell(const std::string& name) {
 void region_prepare_cells(const mir::Stmt& s) {
   std::vector<std::string> assigned;
   assigned_names(s, &assigned);
-  for (const auto& name : assigned)
+  for (const auto& name : assigned) {
+    if (deferred_unsized(name) && !region_size_deferred(name, s))
+      fail("structured branch assigns an unsized local: " + name);
     if (scope.count(name) || int_env.count(name) || decls.count(name))
       (void)region_cell(name);
+  }
+}
+// stanc's inliner declares a callee's result zero-length; branch arms that
+// assign it share one cell, sized from the static shape they agree on.
+bool deferred_unsized(const std::string& name) const {
+  if (int_env.count(name) || int_locals.count(name)) return false;
+  const auto declaration = decls.find(name);
+  if (declaration == decls.end() ||
+      declaration->second.si.kind == ViewKind::Flat ||
+      !declaration->second.runtime_dims.empty() ||
+      (!declaration->second.deferred_shape && declaration->second.len != 0))
+    return false;
+  const auto bound = scope.find(name);
+  return bound == scope.end() || g.slots[bound->second.slot].len == 0;
+}
+bool region_size_deferred(const std::string& name, const mir::Stmt& s) {
+  const auto declaration = decls.find(name);
+  std::optional<StaticView> shape;
+  bool agree = true;
+  std::function<void(const mir::Stmt&)> visit = [&](const mir::Stmt& st) {
+    if (st.kind == mir::Stmt::Assignment && st.lhs == name &&
+        st.lhs_idx.empty()) {
+      const auto view = try_static_view(st.rhs);
+      if (view.state != StaticProbeState::Known)
+        agree = false;
+      else if (!shape)
+        shape = view.value;
+      else if (!same_view(shape->si, shape->len, view.value.si,
+                          view.value.len))
+        agree = false;
+    }
+    for (const auto& child : st.body) visit(child);
+  };
+  visit(s);
+  if (!agree || !shape) return false;
+  if (shape->len == 0) return true;
+  Val value{add_slot(shape->len, false), false, shape->si};
+  out.fills.emplace_back(
+      value.slot, std::vector<double>((size_t)shape->len,
+                                      std::numeric_limits<double>::quiet_NaN()));
+  scope[name] = value;
+  declaration->second.len = shape->len;
+  declaration->second.si = shape->si;
+  declaration->second.deferred_shape = false;
+  return true;
 }
 // A reusable body must account for every iteration, not just the incoming
 // values. Compute a conservative fixed point over source dependencies before
@@ -1842,7 +1890,10 @@ void lower_region_stmt(const mir::Stmt& s) {
   switch (s.kind) {
     case mir::Stmt::Block:
     case mir::Stmt::SList:
-      for (const auto& c : s.body) lower_stmt(c);
+      for (const auto& c : s.body) {
+        if (region_unreachable) break;
+        lower_stmt(c);
+      }
       return;
     case mir::Stmt::For: {
       if (!invariant_for_upper(s))
@@ -2085,6 +2136,7 @@ void lower_region_stmt(const mir::Stmt& s) {
       std::map<int, IntRange> arms[2];
       std::map<int, RealRange> real_arms[2];
       std::map<std::string, Val> arm_scopes[2];
+      bool arm_exits[2] = {false, false};
       for (size_t arm = 0; arm < 2; ++arm) {
         scope = base_scope;
         region_cells = base_cells;
@@ -2098,7 +2150,9 @@ void lower_region_stmt(const mir::Stmt& s) {
         region_control_active = base_control || !condition.si.param_free;
         region_current = &branch.children[arm];
         ++region_control_depth;
+        region_unreachable = false;
         if (arm < s.body.size()) lower_stmt(s.body[arm]);
+        arm_exits[arm] = region_unreachable;
         --region_control_depth;
         region_flush();
         arms[arm] = int_ranges;
@@ -2114,6 +2168,7 @@ void lower_region_stmt(const mir::Stmt& s) {
       int_ranges = base_ranges;
       real_ranges = base_real_ranges;
       region_control_active = base_control;
+      region_unreachable = arm_exits[0] && arm_exits[1];
       std::vector<std::string> writes;
       assigned_names(s, &writes);
       for (const auto& name : writes)
@@ -2276,14 +2331,12 @@ void lower_region_stmt(const mir::Stmt& s) {
         auto base = scope.find(s.lhs);
         if (base != scope.end()) check_slot_budget(g.slots[base->second.slot].len);
       }
-      if (!scope.count(s.lhs)) {
-        const auto declaration = decls.find(s.lhs);
-        if (declaration != decls.end() && declaration->second.deferred_shape &&
-            s.lhs_idx.empty()) {
-          lower_stmt_impl(s);
-          (void)region_cell(s.lhs);
-          return;
-        }
+      if (s.lhs_idx.empty() && deferred_unsized(s.lhs)) {
+        region_cells.erase(s.lhs);
+        scope.erase(s.lhs);
+        lower_stmt_impl(s);
+        (void)region_cell(s.lhs);
+        return;
       }
       (void)region_cell(s.lhs);
       auto range = region_range(s.rhs);
@@ -2320,6 +2373,7 @@ void lower_region_stmt(const mir::Stmt& s) {
       n.kind =
           s.kind == mir::Stmt::Break ? RegionNode::Break : RegionNode::Continue;
       region_append(std::move(n));
+      region_unreachable = true;
       return;
     }
     case mir::Stmt::Return:

@@ -29,6 +29,7 @@ O0_FIXTURES = {
     "paramcond_intarray",
     "reduce_sum_arguments",
     "runtime_int_array_udf",
+    "structured_dead_after_break",
     "structured_matrix_ops",
     "trunc_param",
     "udf_conditional_return",

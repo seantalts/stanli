@@ -2112,6 +2112,8 @@ struct Lowering {
       throw SpecializationRefused{};
     if (region_current) {
       lower_region_stmt(s);
+      if (s.kind == mir::Stmt::For || s.kind == mir::Stmt::While)
+        region_unreachable = false;
       return;
     }
     const bool loop = s.kind == mir::Stmt::For || s.kind == mir::Stmt::While;
