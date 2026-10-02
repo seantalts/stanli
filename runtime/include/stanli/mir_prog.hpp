@@ -3998,6 +3998,7 @@ struct ProgramCompiler {
         // the next, and the later assignment must not see the old binding.
         reals.erase(s.decl_id);
         ints.erase(s.decl_id);
+        known_reals.erase(s.decl_id);
         deferred_shapes.erase(s.decl_id);
         known_int_arrays.erase(s.decl_id);
         known_int_array_dims.erase(s.decl_id);
@@ -4505,6 +4506,7 @@ struct ProgramCompiler {
         }
         throw CompileContinue{};
       case mir::Stmt::For: {
+        known_reals.erase(s.loopvar);
         long lo, hi;
         std::set<std::string> written;
         for (const auto& child : s.body) assigned_names(child, &written);

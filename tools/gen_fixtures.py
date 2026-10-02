@@ -28,6 +28,7 @@ O0_FIXTURES = {
     "gq_function_exits",
     "paramcond_intarray",
     "reduce_sum_arguments",
+    "region_constant_shadow",
     "runtime_int_array_udf",
     "structured_dead_after_break",
     "structured_matrix_ops",

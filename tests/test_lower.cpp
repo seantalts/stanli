@@ -1020,6 +1020,27 @@ static void test_structured_while_vector_return() {
   stan::math::recover_memory();
 }
 
+// A constant from an earlier sibling block must not fold a later loop
+// variable or declaration that reuses its name inside a region.
+static void test_region_constant_shadow() {
+  using namespace stanli;
+  CompiledModel cm = compile_model(
+      slurp("tests/fixtures/region_constant_shadow.tmir.sexp"), DataMap());
+  const double thetas[2] = {0.1, 0.02};
+  const double want_lp[2] = {0.3, 0.04};
+  const double want_grad[2] = {3.0, 2.0};
+  for (int i = 0; i < 2; ++i) {
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = thetas[i];
+    double grad = 0;
+    const std::string at = " at theta=" + std::to_string(thetas[i]);
+    expect_ulp("region constant shadow lp" + at, ex.gradient(&grad),
+               want_lp[i]);
+    expect_eq("region constant shadow grad" + at, grad, want_grad[i]);
+  }
+}
+
 // log_mix and a comparison used as a value, inside per-observation regions.
 static void test_udf_param_branch() {
   using namespace stanli;
@@ -9372,6 +9393,7 @@ int main() {
   test_udf_tail_branch();
   test_udf_packed_branch();
   test_udf_constant_branch();
+  test_region_constant_shadow();
   test_udf_guard_returns();
   test_structured_vector_return();
   test_structured_dead_after_break();
