@@ -3552,6 +3552,15 @@ struct ProgramCompiler {
       out.len = n;
       return typed(out, e.type_);
     }
+    if (e.name == "log_mix" && e.args.size() == 3) {
+      const Range theta = expr(e.args[0]), a = expr(e.args[1]),
+                  b = expr(e.args[2]);
+      if (!is_scalar(theta) || !is_scalar(a) || !is_scalar(b))
+        bail("log_mix on containers");
+      const int r = alloc(1);
+      emit(Program::LOG_MIX, r, theta.reg, a.reg, b.reg);
+      return {r, 1};
+    }
     if ((e.name == "diag_pre_multiply" || e.name == "diag_post_multiply") &&
         e.args.size() == 2) {
       // One instruction preserves stan-math's diagonal-product callback as a

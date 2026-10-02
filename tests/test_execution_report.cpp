@@ -172,8 +172,6 @@ int main() {
       inputs.set_real_array("offsets", {});
     }
     if (mode == 1) test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
-    // Small bounded models may profitably specialize the loop into graph
-    // regions. Disable that existing optimization to exercise retained calls.
     if (mode == 2) test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0", 1);
     auto cm = compile_model(
         slurp("tests/fixtures/hypergeometric_1f0.tmir.sexp"), inputs);
@@ -182,9 +180,9 @@ int main() {
     const auto selected = execution_report(cm);
     check(has(selected, "OP_HYPERGEOMETRIC_1F0"),
           "hypergeometric shared kernel is visible");
-    check(has(selected, "structured_loop") == (mode == 2),
+    check(has(selected, "structured_loop") == (mode == 2 || mode == 3),
           "hypergeometric retained-loop selection");
-    if (mode == 1 || mode == 3)
+    if (mode == 1)
       check(has(selected, "register_program"),
             "hypergeometric runtime register CALL selection");
     check(has(selected, "nested_tape"),

@@ -497,12 +497,10 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   bool has_unmodelled_ranges = false;
   for (size_t pc = 0; pc < prog->code.size(); ++pc) {
     const Program::Instr& instr = prog->code[pc];
-    if (program_code_spec(instr.code).has(kProgramNoAdjoint))
+    const bool jump = instr.code == Program::JZ || instr.code == Program::JMP;
+    if (!jump && program_code_spec(instr.code).has(kProgramNoAdjoint))
       has_unmodelled_ranges = true;
-    if ((instr.code == Program::JZ || instr.code == Program::JMP) &&
-        instr.dst <= static_cast<int>(pc)) {
-      has_back_edge = true;
-    }
+    if (jump && instr.dst <= static_cast<int>(pc)) has_back_edge = true;
   }
   if (!has_back_edge && !has_unmodelled_ranges)
     elide_acyclic_program_constants(*prog);
@@ -555,6 +553,14 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
     // to leave five ordinary descriptors; the program's LiveIn records
     // retain the individual register ranges and point into the packed one.
     const size_t packed_count = inputs.size() - 5;
+    for (size_t k = 0; k < packed_count; ++k) {
+      auto& input = prog->ins[k];
+      if (input.len == 0 || input.len == g.slots[inputs[k]].len) continue;
+      inputs[k] = emit_raw(input.len == 1 ? OP_INDEX : OP_SLICE, {inputs[k]},
+                           input.len, {}, {input.offset})
+                      .slot;
+      input.offset = 0;
+    }
     int packed = inputs[0];
     int64_t packed_len = g.slots[packed].len;
     for (size_t k = 1; k < packed_count; ++k) {
@@ -565,7 +571,7 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
     for (size_t k = 0; k < packed_count; ++k) {
       prog->ins[k].input = 0;
       prog->ins[k].offset += offset;
-      offset += g.slots[reg.in_slots[k]].len;
+      offset += g.slots[inputs[k]].len;
     }
     std::vector<int> compact{packed};
     for (size_t k = packed_count; k < inputs.size(); ++k) {
@@ -604,6 +610,7 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
 }
 // `if (<not known while building the graph>) ... else ...`
 void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
+  if (structured_unroll_depth > 0) throw SpecializationRefused{};
   IslandRegion reg;
   std::shared_ptr<IslandProg> prog;
   Range ignored;
@@ -675,6 +682,7 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
 }
 // `<not known while building the graph> ? a : b`
 Lowering::Val Lowering::lower_runtime_ternary(const mir::Expr& e) {
+  if (structured_unroll_depth > 0) throw SpecializationRefused{};
   IslandRegion reg;
   std::shared_ptr<IslandProg> prog;
   Range value;
@@ -1634,16 +1642,26 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         int_env.erase(s.loopvar);
         return;
       }
-      for (int64_t v = lo; v <= hi; ++v) {
-        int_env[s.loopvar] = static_cast<long>(v);
-        try {
-          for (const auto& k : s.body) lower_stmt(k);
-        } catch (LoopContinue&) {
-          continue;
-        } catch (LoopBreak&) {
-          break;
+      const int unrolled =
+          bounded_specialization &&
+          region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi});
+      structured_unroll_depth += unrolled;
+      try {
+        for (int64_t v = lo; v <= hi; ++v) {
+          int_env[s.loopvar] = static_cast<long>(v);
+          try {
+            for (const auto& k : s.body) lower_stmt(k);
+          } catch (LoopContinue&) {
+            continue;
+          } catch (LoopBreak&) {
+            break;
+          }
         }
+      } catch (...) {
+        structured_unroll_depth -= unrolled;
+        throw;
       }
+      structured_unroll_depth -= unrolled;
       int_env.erase(s.loopvar);
       return;
     }

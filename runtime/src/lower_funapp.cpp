@@ -1022,6 +1022,8 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
     }
   }
   if (auto v = fold_const(e)) return *v;
+  if (shaped_builtin_spec(e.name, e.args.size(), BuiltinShapePolicy::Predicate))
+    return lower_program_expression(e);
   fail("unsupported function " + e.name);
 }
 // Density calls: the registry-planned kernels.
