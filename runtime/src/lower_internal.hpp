@@ -494,6 +494,7 @@ struct Lowering {
   struct SpecializationRefused {};
   bool bounded_specialization = false;
   uint64_t specialization_steps = 0;
+  int structured_unroll_depth = 0;
   uint64_t specialization_elements = 0;
   static constexpr uint64_t specialization_step_limit = 131072;
   static constexpr uint64_t specialization_slot_limit = 65536;

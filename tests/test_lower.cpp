@@ -749,6 +749,147 @@ static void test_symbolic_lane_executor_sharing() {
       "mutated symbolic clone observes its private data");
 }
 
+// A parameter-dependent branch in a UDF called per observation. By default
+// the loop stays structured. Unrolled, it becomes one runtime-control region
+// per call, and each region reads one element, so its register file must not
+// grow with the length of the data vector.
+static void test_udf_tail_branch() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_tail_branch.json"));
+  const std::string mir = slurp("tests/fixtures/udf_tail_branch.tmir.sexp");
+  const int n = (int)data.at("N").r[0];
+  const auto count = [](const CompiledModel& cm, uint16_t opcode) {
+    int k = 0;
+    for (const Op& op : cm.graph.ops) k += op.opcode == opcode;
+    return k;
+  };
+  CompiledModel structured = compile_model(mir, data);
+  check(count(structured, OP_ISLAND) == 0 && count(structured, OP_LOOP) == 1,
+        "udf tail branch keeps its loop structured");
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+  CompiledModel unrolled = compile_model(mir, data);
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  check(count(unrolled, OP_ISLAND) == n,
+        "udf tail branch unrolls to one region per observation");
+  for (const Op& op : unrolled.graph.ops)
+    if (op.opcode == OP_ISLAND)
+      check(static_cast<const IslandProg*>(op.udata)->n_regs < n,
+            "udf tail branch region registers independent of N");
+  const std::vector<double>& y = data.at("y").r;
+  for (const double mu0 : {0.3, -1.5}) {
+    stan::math::var mu = mu0;
+    stan::math::var lp = 0;
+    for (const double yn : y) {
+      const stan::math::var x = yn - mu;
+      if (x < -25)
+        lp += -0.5 * stan::math::square(x) - stan::math::log(-x) -
+              0.9189385332046727;
+      else
+        lp += stan::math::log(0.5 * stan::math::erfc(-x * 0.7071067811865476));
+    }
+    lp.grad();
+    const std::string at = " at mu=" + std::to_string(mu0);
+    for (CompiledModel* cm : {&structured, &unrolled}) {
+      Executor ex(cm->graph);
+      cm->bind(ex);
+      ex.params_data()[0] = mu0;
+      double grad = 0;
+      expect_ulp("udf tail branch lp" + at, ex.gradient(&grad), lp.val());
+      expect_ulp("udf tail branch grad" + at, grad, mu.adj(), 10);
+    }
+    stan::math::recover_memory();
+  }
+}
+
+// A region with more live-ins than an op has descriptors packs the leading
+// ones. Each region reads one element of each transformed vector, so the
+// packed input must not grow with the vector.
+static void test_udf_packed_branch() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_packed_branch.json"));
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/udf_packed_branch.tmir.sexp"), data);
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  const int n = (int)data.at("N").r[0];
+  int islands = 0;
+  for (const Op& op : cm.graph.ops) {
+    islands += op.opcode == OP_ISLAND;
+    if (op.opcode == OP_CONCAT2)
+      check(cm.graph.slots[op.out].len < n,
+            "udf packed branch packs element windows");
+  }
+  check(islands == n, "udf packed branch has one region per observation");
+  const std::vector<double>& y = data.at("y").r;
+  const double a0 = 0.3, b0 = -0.4;
+  stan::math::var a = a0, b = b0, lp = 0;
+  for (const double yn : y) {
+    const stan::math::var m1 = a + yn * 0.5, m2 = b * yn, m3 = a * b + yn,
+                          m4 = a - yn, m5 = stan::math::exp(b) + yn * yn,
+                          m6 = a + b * yn;
+    if (yn - m1 < 0)
+      lp += -stan::math::square(yn - m2) - m3;
+    else
+      lp += -stan::math::square(yn - m4) * m5 + m6;
+  }
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = a0;
+  ex.params_data()[1] = b0;
+  double grad[2] = {};
+  expect_ulp("udf packed branch lp", ex.gradient(grad), lp.val());
+  expect_ulp("udf packed branch grad a", grad[0], a.adj());
+  expect_ulp("udf packed branch grad b", grad[1], b.adj(), 10);
+  stan::math::recover_memory();
+}
+
+// log_mix and a comparison used as a value, inside per-observation regions.
+static void test_udf_param_branch() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_param_branch.json"));
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+  CompiledModel cm;
+  try {
+    cm =
+        compile_model(slurp("tests/fixtures/udf_param_branch.tmir.sexp"), data);
+  } catch (const std::exception& e) {
+    test_unsetenv("STANLI_STRUCTURED_LOOPS");
+    check(false, std::string("udf param branch compiles: ") + e.what());
+    return;
+  }
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  const std::vector<double>& y = data.at("y").r;
+  for (const double mu0 : {0.3, -1.5}) {
+    stan::math::var mu = mu0;
+    stan::math::var lp = 0;
+    for (const double yn : y) {
+      stan::math::var f;
+      if (yn - mu < -25)
+        f = -0.5 * stan::math::square(yn - mu) - stan::math::log(mu - yn) -
+            0.9189385332046727;
+      else if (yn - mu <= 0)
+        f = stan::math::log_mix(0.1, -1.0, stan::math::normal_lpdf(yn, mu, 1));
+      else
+        f = stan::math::log(0.5 *
+                            stan::math::erfc(-(yn - mu) * 0.7071067811865476));
+      lp += f + 0.5 * (yn > mu.val());
+    }
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = mu0;
+    double grad = 0;
+    const std::string at = " at mu=" + std::to_string(mu0);
+    expect_ulp("udf param branch lp" + at, ex.gradient(&grad), lp.val());
+    expect_ulp("udf param branch grad" + at, grad, mu.adj());
+    stan::math::recover_memory();
+  }
+}
+
 int main() {
   // These fixtures pin ULP-level parity with DEFAULT CmdStan, whose AoS
   // Matrix<var> paths run scalar libm per element; the packet path answers
@@ -9054,6 +9195,9 @@ int main() {
   }
 
   test_bounded_specialization();
+  test_udf_tail_branch();
+  test_udf_packed_branch();
+  test_udf_param_branch();
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;
 }
