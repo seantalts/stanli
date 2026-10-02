@@ -27,35 +27,36 @@ and overstated others.
 ## Results
 
 Per gradient in microseconds. "main" is `d4a88756`, which includes #423.
-"branch" adds the two commits described below.
+"branch" adds the commits described below.
 
 | family | main | branch | CmdStan | branch / CmdStan |
 | --- | ---: | ---: | ---: | ---: |
-| lnr | 2507 | 2502 | 308 | 8.12 |
-| lnr_bench | 7908 | 2285 | 657 | 3.48 |
-| betagate | 764 | 766 | 537 | 1.43 |
-| geg | 866 | 863 | 627 | 1.38 |
-| invgaussian | fails | 2055 | 1515 | 1.36 |
-| exgaussian | 479 | 481 | 363 | 1.33 |
-| exwald | 332 | 329 | 250 | 1.32 |
-| choco | 956 | 953 | 726 | 1.31 |
-| lognormal | 366 | 368 | 286 | 1.29 |
-| gamma | 252 | 253 | 198 | 1.28 |
-| invgamma | 257 | 257 | 202 | 1.27 |
-| rdm | 338 | 342 | 271 | 1.26 |
-| weibull | 250 | 252 | 200 | 1.26 |
-| loggamma | 254 | 255 | 204 | 1.25 |
-| logstudent | 255 | 255 | 205 | 1.24 |
-| bisa | 249 | 249 | 205 | 1.21 |
-| logweibull | 208 | 210 | 176 | 1.19 |
-| invweibull | 256 | 253 | 220 | 1.15 |
-| lba1 | 330 | 325 | 301 | 1.08 |
-| lba2 | 361 | 359 | 331 | 1.08 |
-| betadiscrete | 19052 | 18893 | 19064 | 0.99 |
-| ddm | fails | fails | 400246 | |
+| betagate | 777 | 768 | 542 | 1.42 |
+| geg | 859 | 864 | 634 | 1.36 |
+| invgaussian | fails | 2038 | 1503 | 1.36 |
+| bisa | 246 | 252 | 190 | 1.33 |
+| exgaussian | 480 | 477 | 364 | 1.31 |
+| lnr | 2491 | 381 | 292 | 1.30 |
+| weibull | 253 | 247 | 192 | 1.29 |
+| exwald | 329 | 327 | 256 | 1.28 |
+| choco | 969 | 963 | 760 | 1.27 |
+| gamma | 253 | 253 | 199 | 1.27 |
+| lognormal | 368 | 364 | 287 | 1.27 |
+| invweibull | 253 | 255 | 203 | 1.26 |
+| rdm | 339 | 343 | 272 | 1.26 |
+| loggamma | 254 | 252 | 204 | 1.24 |
+| logstudent | 258 | 255 | 207 | 1.23 |
+| invgamma | 256 | 255 | 212 | 1.20 |
+| logweibull | 209 | 209 | 178 | 1.17 |
+| lba2 | 363 | 360 | 328 | 1.10 |
+| lba1 | 326 | 328 | 301 | 1.09 |
+| betadiscrete | 18818 | 18916 | 18969 | 1.00 |
+| lnr_bench | 7681 | 628 | 644 | 0.98 |
+| ddm | fails | fails | 400680 | |
 
-Preparation is about 0.01 s for every family except LNR: `lnr_bench` takes
-5.2 s on main and 2.0 s on the branch, and `lnr` 2.4 s.
+Preparation is 0.01 to 0.04 s for every family except betadiscrete (0.13 s).
+On main, `lnr_bench` took 5.2 s and `lnr` 2.3 s. Both LNR programs now match
+CmdStan's log density and gradient bitwise; invgaussian is within 1 ULP.
 
 ## Causes found and fixed
 
@@ -86,25 +87,26 @@ On this branch:
   such as `if (mu <= 0) return negative_infinity();` followed by more code
   failed with "runtime-control region: return inside runtime control without a
   function scope". Such bodies are now rewritten into stanc's single-exit form.
+- **The structured loop refused stanc's inlined container returns.** The
+  inliner declares a vector-returning function's result zero-length and
+  assigns it in several arms. The structured compiler also lowered
+  statements after an unconditional `break`, which is where a constant-folded
+  LNR branch left that code. It now skips unreachable statements and sizes
+  such a local from the static shape its assignments agree on, so both LNR
+  programs use one structured loop instead of one region per observation.
 
 ## Open
 
-- **Structured-loop overhead on the 1.1 to 1.4x families.** A sampled gamma
+- **Structured-loop dispatch on the 1.1 to 1.4x families.** A sampled gamma
   gradient spends about half its time in `structured_loop_forward` and
   `structured_loop_backward` themselves, and about a sixth in the math
-  functions CmdStan also calls. The ceiling is therefore near 2x if the
-  executor's own work were removed. The next measurement is a line-level
-  profile of those two functions.
-- **LNR does not use the structured loop.** It refuses with "structured
-  assignment changes logical shape" on the inlined return variable of the
-  vector-returning `cogmod_lognormal_acc_ltails`, declared unsized and
-  assigned in several arms. LNR therefore lowers to one region per
-  observation, which is the 2 s preparation. Whether the loop path is also
-  faster per gradient is unmeasured until that refusal is fixed.
-- **`lnr` with a free `sigmabias`** is 8x slower than CmdStan. Its per-observation
-  region interprets every start-point-variability path, about 500 ns per
-  observation against CmdStan's 67. Closing this needs either the structured
-  loop above or a region that executes all observations in one pass.
+  functions CmdStan also calls. Gamma runs in replay mode: each gradient
+  replays about 48,000 recorded scalar kernel calls, 24 per observation, plus
+  12,000 branch guards and 14,000 backward instructions. Every observation
+  repeats the same instruction pattern, so batching each instruction across
+  observations that took the same path would replace per-element dispatch with
+  vector kernel calls. That is a design question, not yet measured beyond this
+  ceiling.
 - **`ddm` does not compile.** Its density calls `wiener_lpdf` with four, five
   and seven parameters plus a precision argument. The reader accepts only five
   or seven arguments ("malformed wiener_lpdf call: expected 5 or 7
