@@ -1652,6 +1652,79 @@ int64_t wiener_scratch(const Op& op, const Slot* slots) {
   return 4;
 }
 
+// wiener(y | a, t0, w, v, sv[, sw, st0], precision): the five- and
+// seven-parameter densities. Input 0 holds the real arguments argument-major,
+// one entry per lane; input 1 is the derivative precision. idata: argument
+// count, lane count, active-argument mask, propto. Scratch keeps the partials.
+template <typename Y, typename P>
+stan::math::var wiener_packed_call(bool propto, int nargs, const Y& y,
+                                   const std::vector<P>& p, double precision) {
+  if (nargs == 6)
+    return propto ? stan::math::wiener_lpdf<true>(y, p[0], p[1], p[2], p[3],
+                                                  p[4], precision)
+                  : stan::math::wiener_lpdf<false>(y, p[0], p[1], p[2], p[3],
+                                                   p[4], precision);
+  return propto ? stan::math::wiener_lpdf<true>(y, p[0], p[1], p[2], p[3], p[4],
+                                                p[5], p[6], precision)
+                : stan::math::wiener_lpdf<false>(y, p[0], p[1], p[2], p[3],
+                                                 p[4], p[5], p[6], precision);
+}
+void wiener_packed_fwd(KernelCtx& ctx) {
+  const int nargs = ctx.idata[0];
+  const int64_t lanes = ctx.idata[1];
+  const unsigned active = (unsigned)ctx.idata[2];
+  const bool propto = ctx.idata[3] != 0;
+  const int64_t width = nargs * lanes;
+  double* partials = values_only() ? nullptr : ctx.scratch;
+  if (partials) std::fill_n(partials, width, 0.0);
+  if (propto && active == 0) {
+    ctx.out.data[0] = 0.0;
+    return;
+  }
+  const double precision = ctx.in[1].data[0];
+  const double* in = ctx.in[0].data;
+  const bool y_active = (active & 1u) != 0;
+  stan::math::nested_rev_autodiff nested;
+  using stan::math::var;
+  var out;
+  if (lanes == 1) {
+    std::vector<var> p;
+    for (int k = 1; k < nargs; ++k) p.emplace_back(in[k]);
+    var y = in[0];
+    out = y_active ? wiener_packed_call(propto, nargs, y, p, precision)
+                   : wiener_packed_call(propto, nargs, in[0], p, precision);
+    ctx.out.data[0] = out.val();
+    if (!partials) return;
+    stan::math::grad(out.vi_);
+    if (y_active) partials[0] = y.adj();
+    for (int k = 1; k < nargs; ++k) partials[k] = p[k - 1].adj();
+    return;
+  }
+  std::vector<VarV> p(nargs - 1, VarV(lanes));
+  for (int k = 1; k < nargs; ++k)
+    for (int64_t i = 0; i < lanes; ++i) p[k - 1](i) = in[k * lanes + i];
+  const Eigen::Map<const Eigen::VectorXd> y_data(in, lanes);
+  VarV y = y_data.cast<var>();
+  out = y_active ? wiener_packed_call(propto, nargs, y, p, precision)
+                 : wiener_packed_call(propto, nargs, Eigen::VectorXd(y_data), p,
+                                      precision);
+  ctx.out.data[0] = out.val();
+  if (!partials) return;
+  stan::math::grad(out.vi_);
+  for (int64_t i = 0; i < lanes; ++i) {
+    if (y_active) partials[i] = y(i).adj();
+    for (int k = 1; k < nargs; ++k) partials[k * lanes + i] = p[k - 1](i).adj();
+  }
+}
+void wiener_packed_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
+  for (int64_t i = 0; i < ctx.in[0].len; ++i)
+    ctx.in_adj[0].data[i] += ctx.out_adj * ctx.scratch[i];
+}
+int64_t wiener_packed_scratch(const Op& op, const Slot* slots) {
+  return slots[op.in[0]].len;
+}
+
 // ---- the last five ------------------------------------------------------
 // lkj_cov(Sigma | mu, sigma, eta): a covariance matrix, two vectors of
 // lognormal hyperparameters for the scales, and the LKJ shape.
@@ -1875,6 +1948,9 @@ void register_matrix_kernels() {
                   Kernel{oprobit_fwd, oprobit_bwd, oprobit_scratch});
   register_kernel(OP_WIENER_LPDF,
                   Kernel{wiener_fwd, wiener_bwd, wiener_scratch});
+  register_kernel(
+      OP_WIENER_PACKED_LPDF,
+      Kernel{wiener_packed_fwd, wiener_packed_bwd, wiener_packed_scratch});
 #define STANLI_REGISTER_TAIL_CDF(code, fn, nreal, tier) \
   register_kernel(code, Kernel{fn##_fwd, fn##_bwd, nullptr});
   STANLI_TAIL_CDF_LIST(STANLI_REGISTER_TAIL_CDF)

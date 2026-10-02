@@ -1638,6 +1638,7 @@ struct Lowering {
   // straight-line graph call and a call under dynamic control on one callback
   // binder and one kernel path instead of growing a second graph-only parser.
   Val lower_program_expression(const mir::Expr& e);
+  Val lower_wiener_packed(const mir::Expr& e, CallArguments& actuals);
 
   Val finish_emit(Op op, int64_t out_len, SlotInfo out_si,
                   std::vector<int> idata, bool autodiff) {

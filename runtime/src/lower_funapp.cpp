@@ -635,6 +635,32 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   ret.layout = owning_layout(ret.si);
   return ret;
 }
+// wiener_lpdf's five- and seven-parameter forms, each with an optional
+// precision. The real arguments are all scalars or all vectors of one length.
+Lowering::Val Lowering::lower_wiener_packed(const mir::Expr& e,
+                                            CallArguments& actuals) {
+  const int total = (int)e.args.size();
+  const int nargs = total == 6 || total == 8 ? total : total - 1;
+  std::vector<Val> args;
+  for (int k = 0; k < nargs; ++k) args.push_back(actuals.at(k).value());
+  int64_t lanes = 1;
+  for (const Val& v : args) lanes = std::max(lanes, g.slots[v.slot].len);
+  int active = 0;
+  for (int k = 0; k < nargs; ++k) {
+    if (g.slots[args[k].slot].len != lanes)
+      fail("wiener_lpdf: arguments differ in length", e.raw);
+    if (!args[k].si.param_free) active |= 1 << k;
+  }
+  Val packed = args[0];
+  for (int k = 1; k < nargs; ++k)
+    packed = emit_value(OP_CONCAT2, {packed, args[k]}, (k + 1) * lanes);
+  const Val precision =
+      nargs < total ? actuals.at(nargs).value() : constant(1e-4);
+  return with_layout(
+      emit_value(OP_WIENER_PACKED_LPDF, {packed, precision}, 1, {},
+                 {nargs, (int)lanes, active, propto(e) ? 1 : 0}),
+      ExpressionLayout::scalar());
+}
 Lowering::Val Lowering::lower_multi_normal_rng(const mir::Expr& e,
                                                CallArguments& actuals) {
   if (!in_write_array)
@@ -1049,6 +1075,8 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
   // state at all.
   CallArguments actuals(*this, e);
   if (e.name == "dims") return lower_dims(e, actuals);
+  if (e.name == "wiener_lpdf" && e.args.size() > 5)
+    return lower_wiener_packed(e, actuals);
   const BuiltinDispatch dispatch = resolve_builtin(e);
 
   // One family decision replaces the former chain of optional handlers.

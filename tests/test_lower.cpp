@@ -1041,6 +1041,55 @@ static void test_region_constant_shadow() {
   }
 }
 
+// wiener_lpdf's five- and seven-parameter forms, with and without precision,
+// scalar and vectorized, and inside a parameter-dependent branch.
+static void test_wiener_forms() {
+  using namespace stanli;
+  using stan::math::var;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/wiener_forms.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/wiener_forms.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("wiener forms compile: ") + error.what());
+    return;
+  }
+  const std::vector<double>& y = data.at("y").r;
+  const double q[7] = {1.2, 0.05, 0.5, 0.3, 0.4, 0.1, 0.02};
+  std::vector<var> p(q, q + 7);
+  const var &a = p[0], &t0 = p[1], &w = p[2], &v = p[3], &sv = p[4], &sw = p[5],
+            &st0 = p[6];
+  var lp = 0;
+  for (const double yn : y) {
+    lp += stan::math::wiener_lpdf<false>(yn, a, t0, w, v, sv);
+    lp += stan::math::wiener_lpdf<false>(yn, a, t0, w, v, sv, 1e-5);
+    lp += stan::math::wiener_lpdf<false>(yn, a, t0, w, v, sv, sw, st0);
+    lp += stan::math::wiener_lpdf<false>(yn, a, t0, w, v, sv, sw, st0, 1e-3);
+  }
+  const int n = (int)y.size();
+  const Eigen::VectorXd yv = Eigen::Map<const Eigen::VectorXd>(y.data(), n);
+  const auto rep = [&](const var& x) {
+    Eigen::Matrix<var, -1, 1> out(n);
+    out.setConstant(x);
+    return out;
+  };
+  lp += stan::math::wiener_lpdf<false>(yv, rep(a), rep(t0), rep(w), rep(v),
+                                       rep(sv));
+  lp += stan::math::wiener_lpdf<true>(y[0], a, t0, w, v, sv);
+  lp += stan::math::wiener_lpdf<false>(y[1], a, t0, w, v, sv, sw, st0, 1e-3);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (int k = 0; k < 7; ++k) ex.params_data()[k] = q[k];
+  double grad[7] = {};
+  expect_ulp("wiener forms lp", ex.gradient(grad), lp.val(), 10);
+  for (int k = 0; k < 7; ++k)
+    expect_ulp("wiener forms grad " + std::to_string(k), grad[k], p[k].adj(),
+               10);
+  stan::math::recover_memory();
+}
+
 // log_mix and a comparison used as a value, inside per-observation regions.
 static void test_udf_param_branch() {
   using namespace stanli;
@@ -9398,6 +9447,7 @@ int main() {
   test_structured_vector_return();
   test_structured_dead_after_break();
   test_structured_while_vector_return();
+  test_wiener_forms();
   test_udf_param_branch();
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;

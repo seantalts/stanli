@@ -1285,11 +1285,15 @@ void check_structural_rejections() {
   check(decoded_wiener.log_prob.size() == 1 &&
             decoded_wiener.log_prob[0].target.args.size() == 7,
         "portable decoder accepts seven-argument wiener_lpdf");
-  expect_compile_error(extended_wiener, "unsupported function wiener_lpdf",
-                       "seven-argument wiener reaches execution boundary");
-  wiener.args.resize(6);
-  expect_error(write_v2(target_program(wiener)), "expected 5 or 7 argument(s)",
-               "six-argument wiener rejected structurally");
+  try {
+    (void)compile_model(extended_wiener, DataMap());
+  } catch (const std::exception& error) {
+    check(false,
+          std::string("seven-argument wiener compiles: ") + error.what());
+  }
+  wiener.args.resize(10);
+  expect_error(write_v2(target_program(wiener)), "expected 5 to 9 argument(s)",
+               "ten-argument wiener rejected structurally");
 
   mir::Expr bad_metadata = literal();
   bad_metadata.unsized.leaf = mir::UnsizedLeaf::Int;
