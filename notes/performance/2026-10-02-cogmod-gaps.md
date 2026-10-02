@@ -52,11 +52,12 @@ Per gradient in microseconds. "main" is `d4a88756`, which includes #423.
 | lba1 | 326 | 328 | 301 | 1.09 |
 | betadiscrete | 18818 | 18916 | 18969 | 1.00 |
 | lnr_bench | 7681 | 628 | 644 | 0.98 |
-| ddm | fails | fails | 400680 | |
+| ddm | fails | 400601 | 399770 | 1.00 |
 
 Preparation is 0.01 to 0.04 s for every family except betadiscrete (0.13 s).
 On main, `lnr_bench` took 5.2 s and `lnr` 2.3 s. Both LNR programs now match
-CmdStan's log density and gradient bitwise; invgaussian is within 1 ULP.
+CmdStan's log density and gradient bitwise, as does ddm; invgaussian is within
+1 ULP.
 
 ## Causes found and fixed
 
@@ -94,6 +95,10 @@ On this branch:
   LNR branch left that code. It now skips unreachable statements and sizes
   such a local from the static shape its assignments agree on, so both LNR
   programs use one structured loop instead of one region per observation.
+- **ddm did not compile.** Its density calls `wiener_lpdf` with five and
+  seven parameters plus a precision argument; stanli had only the
+  four-parameter kernel and its reader rejected six arguments. A packed kernel
+  now covers those forms, adding 0.94 MB to the stripped shared library.
 
 ## Open
 
@@ -107,10 +112,3 @@ On this branch:
   observations that took the same path would replace per-element dispatch with
   vector kernel calls. That is a design question, not yet measured beyond this
   ceiling.
-- **`ddm` does not compile.** Its density calls `wiener_lpdf` with four, five
-  and seven parameters plus a precision argument. The reader accepts only five
-  or seven arguments ("malformed wiener_lpdf call: expected 5 or 7
-  argument(s), got 6"), and only the four-parameter form has a kernel. Stan
-  Math's `wiener5_lpdf.hpp` and `wiener_full_lpdf.hpp` provide the others;
-  adding them means new kernels and a binary-size measurement. CmdStan spends
-  400 ms per gradient on this model.
