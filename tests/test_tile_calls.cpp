@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <random>
 #include <string>
 #include <typeinfo>
@@ -39,6 +40,10 @@ bool same_bits(double a, double b) {
   return std::memcmp(&a, &b, sizeof(double)) == 0;
 }
 
+bool same_value(double a, double b) {
+  return (std::isnan(a) && std::isnan(b)) || same_bits(a, b);
+}
+
 struct Entry {
   uint16_t opcode;
   const char* name;
@@ -47,7 +52,8 @@ struct Entry {
 
 std::vector<Entry> density_entries() {
   std::vector<Entry> v;
-#define STANLI_TEST_ENTRY(code, fn, n, tier) v.push_back({stanli::code, #fn, n});
+#define STANLI_TEST_ENTRY(code, fn, n, tier) \
+  v.push_back({stanli::code, #fn, n});
   STANLI_SCALAR_DENSITY_LIST(STANLI_TEST_ENTRY)
 #undef STANLI_TEST_ENTRY
   return v;
@@ -56,9 +62,7 @@ std::vector<Entry> density_entries() {
 struct Rng {
   std::mt19937_64 gen;
   explicit Rng(uint64_t seed) : gen(seed) {}
-  double u() {
-    return std::uniform_real_distribution<double>(0.0, 1.0)(gen);
-  }
+  double u() { return std::uniform_real_distribution<double>(0.0, 1.0)(gen); }
   size_t pick(size_t n) { return (size_t)(gen() % n); }
   double value() {
     static const double edges[] = {
@@ -110,8 +114,8 @@ constexpr double kSentinel = 7.25;
 void test_kernel(const Entry& e, uint8_t scalar_variant, int lanes, Rng& rng) {
   using namespace stanli;
   const Kernel* k = find_kernel(e.opcode);
-  const std::string tag = std::string(e.name) + " variant=" +
-                          std::to_string((int)scalar_variant) +
+  const std::string tag = std::string(e.name) +
+                          " variant=" + std::to_string((int)scalar_variant) +
                           " lanes=" + std::to_string(lanes);
   if (!k || !k->forward || !k->backward) {
     check(false, tag + ": kernel registered");
@@ -210,8 +214,7 @@ void test_kernel(const Entry& e, uint8_t scalar_variant, int lanes, Rng& rng) {
     ctx.n_in = n;
     for (int a = 0; a < n; ++a) {
       ctx.in[a] = Desc{&args[a], 1};
-      ctx.in_adj[a] =
-          (adj_mask >> a) & 1 ? Desc{&adj[a], 1} : Desc{nullptr, 1};
+      ctx.in_adj[a] = (adj_mask >> a) & 1 ? Desc{&adj[a], 1} : Desc{nullptr, 1};
     }
     ctx.out = Desc{&out[(size_t)l], 1};
     ctx.variant = scalar_variant;
@@ -225,9 +228,8 @@ void test_kernel(const Entry& e, uint8_t scalar_variant, int lanes, Rng& rng) {
   rctx.n_in = n;
   for (int a = 0; a < n; ++a) {
     rctx.in[a] = Desc{in[(size_t)a].data(), (int64_t)in[(size_t)a].size()};
-    rctx.in_adj[a] = (adj_mask >> a) & 1
-                         ? Desc{bcell[(size_t)a].data(), lanes}
-                         : Desc{nullptr, lanes};
+    rctx.in_adj[a] = (adj_mask >> a) & 1 ? Desc{bcell[(size_t)a].data(), lanes}
+                                         : Desc{nullptr, lanes};
   }
   rctx.out = Desc{bout.data(), lanes};
   rctx.variant = eltv;
@@ -272,11 +274,99 @@ void test_unmarked_kernels() {
         "a shape-dispatched arithmetic op is not marked");
 }
 
+std::vector<Entry> unary_candidates() {
+  std::vector<Entry> v;
+#define STANLI_TEST_UNARY(code, fn, value, delta, topology) \
+  v.push_back({stanli::code, #fn, 1});
+  STANLI_SCALAR_UNARY_LIST(STANLI_TEST_UNARY)
+#undef STANLI_TEST_UNARY
+  v.push_back({stanli::OP_LOGIT, "logit", 1});
+  v.push_back({stanli::OP_LOG1M, "log1m", 1});
+  v.push_back({stanli::OP_INV_LOGIT, "inv_logit", 1});
+  v.push_back({stanli::OP_EXPV, "exp", 1});
+  v.push_back({stanli::OP_LOGV, "log", 1});
+  v.push_back({stanli::OP_SQRT, "sqrt", 1});
+  v.push_back({stanli::OP_SQUARE, "square", 1});
+  v.push_back({stanli::OP_TANHV, "tanh", 1});
+  v.push_back({stanli::OP_NEG, "neg", 1});
+  return v;
+}
+
+bool unary_trial(const Entry& e, int lanes, bool want_adj, Rng& rng) {
+  using namespace stanli;
+  const Kernel* k = find_kernel(e.opcode);
+  if (!k || !k->forward || !k->backward) return false;
+  std::vector<double> x((size_t)lanes), seed((size_t)lanes),
+      cell((size_t)lanes);
+  for (int l = 0; l < lanes; ++l) {
+    x[(size_t)l] = rng.u() < 0.5 ? rng.u() : rng.value();
+    seed[(size_t)l] = rng.value();
+    cell[(size_t)l] = rng.u() < 0.3 ? 0.0 : rng.value();
+  }
+  std::vector<double> out((size_t)lanes), want = cell;
+  bool ok = true;
+  std::optional<Outcome> first;
+  for (int l = 0; l < lanes; ++l) {
+    double xi = x[(size_t)l], yi = 0.0, adj = cell[(size_t)l],
+           oa = seed[(size_t)l];
+    KernelCtx ctx;
+    ctx.n_in = 1;
+    ctx.in[0] = Desc{&xi, 1};
+    ctx.in_adj[0] = want_adj ? Desc{&adj, 1} : Desc{nullptr, 1};
+    ctx.out = Desc{&yi, 1};
+    const Outcome o = attempt([&] { k->forward(ctx); });
+    if (o.threw && !first) first = o;
+    if (o.threw) continue;
+    out[(size_t)l] = yi;
+    ctx.out_adj = oa;
+    ctx.out_adj_vec = Desc{&oa, 1};
+    k->backward(ctx);
+    want[(size_t)l] = adj;
+  }
+  std::vector<double> bout((size_t)lanes, kSentinel), badj = cell, bseed = seed;
+  KernelCtx ctx;
+  ctx.n_in = 1;
+  ctx.in[0] = Desc{x.data(), lanes};
+  ctx.out = Desc{bout.data(), lanes};
+  const Outcome batched = attempt([&] { k->forward(ctx); });
+  if (first) return batched.threw && batched.what == first->what;
+  if (batched.threw) return false;
+  for (int l = 0; l < lanes; ++l)
+    ok = ok && same_value(bout[(size_t)l], out[(size_t)l]);
+  ctx.in_adj[0] = want_adj ? Desc{badj.data(), lanes} : Desc{nullptr, lanes};
+  ctx.out_adj = bseed[0];
+  ctx.out_adj_vec = Desc{bseed.data(), lanes};
+  k->backward(ctx);
+  for (int l = 0; l < lanes; ++l)
+    ok = ok && same_value(badj[(size_t)l], want[(size_t)l]);
+  return ok;
+}
+
+void test_unary_kernels() {
+  int marked = 0;
+  for (const Entry& e : unary_candidates()) {
+    Rng rng(0x2545f4914f6cdd1dull ^ e.opcode);
+    bool ok = true;
+    for (int lanes : {1, 5, 64})
+      for (int trial = 0; trial < 100; ++trial)
+        ok = unary_trial(e, lanes, trial % 4 != 0, rng) && ok;
+    const bool is_marked =
+        stanli::tile_call_kind(e.opcode) == stanli::TileCallKind::Unary;
+    marked += is_marked;
+    check(is_marked == ok,
+          std::string(e.name) + (ok ? " is bitwise equal in both forms but not "
+                                      "marked"
+                                    : " differs between forms but is marked"));
+  }
+  check(marked >= 20, "most scalar unary kernels are marked");
+}
+
 }  // namespace
 
 int main() {
   test_density_kernels();
   test_unmarked_kernels();
+  test_unary_kernels();
   check(threw_trials > 100 && clean_trials > 1000,
         "inputs cover both throwing and clean cases (" +
             std::to_string(threw_trials) + " / " +
