@@ -1712,10 +1712,14 @@ const Ref ref_cf_udf = [](const std::vector<var>& p, const Series& s,
 Ref zero_probe_ref(double A) {
   return
       [A](const std::vector<var>& p, const Series& s, std::vector<int>* taken) {
+        // Keep the source's vector product and Stan Math's reduction order
+        // in its pullback, rather than accumulating scalar products per row.
+        const Eigen::Matrix<var, -1, 1> mu = stan::math::multiply(
+            p[0], Eigen::Map<const Eigen::VectorXd>(s.x.data(), s.x.size()));
         const var sc = stan::math::exp(p[1]);
         var lp = 0;
         for (size_t i = 0; i < s.y.size(); ++i) {
-          const var d = shifted_residual(s.y[i], p[0] * s.x[i]);
+          const var d = shifted_residual(s.y[i], mu(i));
           const bool tail = d < -sc;
           if (taken) taken->push_back(tail);
           const var base =
@@ -1727,7 +1731,8 @@ Ref zero_probe_ref(double A) {
           else if (std::isnan(A))
             lp += base + 2;
           else
-            lp += base + stan::math::log(stan::math::erfc(d * A + 3));
+            lp += base +
+                  stan::math::log(stan::math::erfc(stan::math::fma(d, A, 3.0)));
         }
         return lp;
       };
@@ -1749,9 +1754,8 @@ const Ref ref_cf_early = [](const std::vector<var>& p, const Series& s,
 void run_folded(const std::string& stem, const std::string& extra,
                 const Ref& ref, bool dead_arm_present) {
   const std::string what = stem + " [" + extra + "]";
-  setenv("STANLI_NO_CFG_DEAD_CONSTANTS", "1", 1);
-  CompiledModel cm = compile_with(stem, 64, nullptr, "0", extra);
-  unsetenv("STANLI_NO_CFG_DEAD_CONSTANTS");
+  CompiledModel cm =
+      compile_with(stem, 64, "STANLI_NO_CFG_DEAD_CONSTANTS", "1", extra);
   expect_mapped(what, cm);
   check(map_calls(cm, stanli::OP_ERFC) == dead_arm_present,
         what + (dead_arm_present ? ": live arm compiled"

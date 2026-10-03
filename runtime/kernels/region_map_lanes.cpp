@@ -1679,6 +1679,7 @@ void merge_tally(RegionMapProfile& profile, const RegionMapTally& tally) {
   profile.total.add(tally);
 }
 
+#ifndef STANLI_NO_STDIO
 std::string percent(uint64_t part, uint64_t whole) {
   char buf[32];
   std::snprintf(buf, sizeof buf, "%.1f%%",
@@ -1733,12 +1734,17 @@ void print_profile(const RegionMapProfile& pr) {
                  (unsigned long long)t.adj_op[c],
                  occupancy(t.adj_op_lanes[c], t.adj_op[c]).c_str());
 }
+#endif
 
 struct ProfileRegistry {
   std::mutex mu;
   std::vector<std::shared_ptr<RegionMapProfile>> all;
   ~ProfileRegistry() {
+    // Exit-time summaries cannot use a host callback whose lifetime may
+    // already have ended. Omit their stderr output in no-stdio builds.
+#ifndef STANLI_NO_STDIO
     for (const auto& p : all) print_profile(*p);
+#endif
   }
 };
 
