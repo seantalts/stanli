@@ -2256,6 +2256,87 @@ void test_lane_fixtures() {
   }
 }
 
+void expect_tile_call_parity(const std::string& what, const CompiledModel& on,
+                             const CompiledModel& off,
+                             const CompiledModel& scalar,
+                             const std::vector<Params>& points,
+                             bool want_batched, LaneOutcome& tally) {
+  const auto& pon = map_payload(on);
+  check(pon.lanes.active, what + ": lane plan active");
+  check((pon.lanes.tile_calls > 0) == want_batched,
+        what + ": " + std::to_string(pon.lanes.tile_calls) +
+            " density calls marked for tile calls");
+  check(map_payload(off).lanes.tile_calls == 0,
+        what + ": STANLI_REGION_MAP_TILE_CALLS=0 marks nothing");
+  Executor eon(on.graph), eoff(off.graph), es(scalar.graph);
+  on.bind(eon);
+  off.bind(eoff);
+  scalar.bind(es);
+  for (size_t k = 0; k < points.size(); ++k) {
+    const std::string at = what + " point " + std::to_string(k);
+    Params point = points[k];
+    if (point.size() != (size_t)eon.n_params()) {
+      point = spread_point(k, (size_t)eon.n_params());
+      for (size_t j = 0; j < points[k].size() && j < point.size(); ++j)
+        point[j] = points[k][j];
+    }
+    const uint64_t before = stanli::region_map_tile_call_runs();
+    const Run got = try_evaluate(eon, point);
+    const uint64_t after = stanli::region_map_tile_call_runs();
+    const Run per_lane = try_evaluate(eoff, point);
+    const Run want = try_evaluate(es, point);
+    check(stanli::region_map_tile_call_runs() == after,
+          at + ": per-lane calls never count as tile calls");
+    if (want_batched && !got.threw)
+      check(after > before, at + ": a batched kernel call ran");
+    check(got.threw == per_lane.threw && got.threw == want.threw,
+          at + ": the three paths agree on throwing");
+    if (got.threw || per_lane.threw || want.threw) {
+      check(got.what == per_lane.what && got.what == want.what,
+            at + ": same exception: " + got.what + " | " + per_lane.what +
+                " | " + want.what);
+      ++tally.threw;
+      continue;
+    }
+    ++tally.ok;
+    check(same_bits(got.e.lp, per_lane.e.lp) && same_bits(got.e.lp, want.e.lp),
+          at + ": lp bitwise equal");
+    for (size_t i = 0; i < want.e.grad.size(); ++i)
+      check(same_bits(got.e.grad[i], per_lane.e.grad[i]) &&
+                same_bits(got.e.grad[i], want.e.grad[i]),
+            at + ": grad[" + std::to_string(i) + "] bitwise equal (" +
+                std::to_string(got.e.grad[i]) + " | " +
+                std::to_string(per_lane.e.grad[i]) + " | " +
+                std::to_string(want.e.grad[i]) + ")");
+  }
+}
+
+void test_tile_call_parity() {
+  struct Fix {
+    const char* stem;
+    bool batched;
+  };
+  const Fix fixtures[] = {{"region_map_density", true},
+                          {"region_map_call", true},
+                          {"region_map_calldomain", true},
+                          {"region_map_hurdle_param", true}};
+  LaneOutcome tally;
+  for (const Fix& f : fixtures)
+    for (int n : {37, 64, 65, 200}) {
+      const std::string what =
+          std::string(f.stem) + " tile calls N=" + std::to_string(n);
+      CompiledModel on = compile_with(f.stem, n);
+      CompiledModel off =
+          compile_with(f.stem, n, "STANLI_REGION_MAP_TILE_CALLS");
+      CompiledModel scalar =
+          compile_with(f.stem, n, "STANLI_REGION_MAP_LANES", "0");
+      expect_tile_call_parity(what, on, off, scalar, spread_points(2, 6),
+                              f.batched, tally);
+    }
+  check(tally.ok > 0, "tile call parity evaluates some points");
+  check(tally.threw > 0, "tile call parity covers throwing points");
+}
+
 void test_lane_tile_recompute() {
   CompiledModel big = compile_with("region_map_long_body", 200);
   const auto& b = map_payload(big);
@@ -3021,6 +3102,7 @@ static void test_region_map() {
   test_logic_points();
   test_logic_compiles_to_jumps();
   test_lane_fixtures();
+  test_tile_call_parity();
   test_lane_tile_recompute();
   test_lane_seed_and_clean();
   test_map_selection_follows_data_through_udfs();
