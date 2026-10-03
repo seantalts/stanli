@@ -14,8 +14,8 @@ namespace {
 
 int64_t region_map_scratch(const Op& op, const Slot*) {
   const auto& p = *static_cast<const RegionMapProg*>(op.udata);
-  return (int64_t)p.n_regs + p.adj.n_regs + p.count * p.saved_cells +
-         region_map_lane_cells(p);
+  return (int64_t)p.n_regs + p.adj.n_regs +
+         std::max<int64_t>(p.count * p.saved_cells, region_map_lane_cells(p));
 }
 
 void run_prologue(const RegionMapProg& p, double* reg) {
@@ -79,15 +79,13 @@ void run_scalar_forward(const RegionMapProg& p, KernelCtx& ctx) {
 }
 
 double* lane_region(const RegionMapProg& p, KernelCtx& ctx) {
-  return ctx.scratch + p.n_regs + p.adj.n_regs + p.count * p.saved_cells;
+  return ctx.scratch + p.n_regs + p.adj.n_regs;
 }
 
 void run_lane_forward(const RegionMapProg& p, KernelCtx& ctx) {
   std::exception_ptr original;
   try {
     region_map_lanes_forward(p, ctx, lane_region(p, ctx));
-    region_map_lanes_scatter_saved(p, ctx, lane_region(p, ctx),
-                                   ctx.scratch + p.n_regs + p.adj.n_regs);
     return;
   } catch (...) {
     original = std::current_exception();
@@ -143,7 +141,9 @@ void region_map_bwd(KernelCtx& ctx) {
       adj[(size_t)map[(size_t)(li.reg + i)]] =
           ctx.in_adj[li.input].data[li.offset + i];
   }
-  if (p.calls.empty())
+  if (p.lanes.active)
+    region_map_lanes_backward(p, ctx, lane_region(p, ctx), adj);
+  else if (p.calls.empty())
     sweep<false>(p, ctx, adj);
   else
     sweep<true>(p, ctx, adj);

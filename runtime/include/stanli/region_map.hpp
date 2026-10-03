@@ -38,6 +38,8 @@ struct RegionMapLanePlan {
   int tiles = 0;
   int64_t storage = 0;
   int max_window = 0;
+  int max_sites = 0;
+  int max_dynamic = 0;
   std::vector<int32_t> reg_slot;
   std::vector<int32_t> cell_slot;
   std::vector<Block> blocks;
@@ -66,8 +68,8 @@ int64_t region_map_lane_cells(const RegionMapProg& p);
 void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
                               double* region);
 
-void region_map_lanes_scatter_saved(const RegionMapProg& p, KernelCtx& ctx,
-                                    const double* region, double* rows);
+void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
+                               double* region, double* adj);
 
 }  // namespace stanli
 

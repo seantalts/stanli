@@ -2012,7 +2012,10 @@ LaneOutcome expect_lane_parity(const std::string& what, const CompiledModel& lan
       check(grad_close(got.e.grad[i], want.e.grad[i]),
             at + ": grad[" + std::to_string(i) + "] " +
                 std::to_string(got.e.grad[i]) + " vs " +
-                std::to_string(want.e.grad[i]));
+                std::to_string(want.e.grad[i]) + " (" +
+                std::to_string(std::llabs(ulp_key(got.e.grad[i]) -
+                                          ulp_key(want.e.grad[i]))) +
+                " ulp)");
   }
   return out;
 }
