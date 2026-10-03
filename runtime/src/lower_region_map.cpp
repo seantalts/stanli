@@ -308,7 +308,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
 
   const auto build = [&](bool recompute, bool keep_every_clear) -> std::string {
     *prog = pristine;
-    finalize_island_program(*prog, true, keep_every_clear);
+    finalize_island_program(*prog, true, keep_every_clear, true);
     if (!prog->native_adj) {
       std::string why = "no generated adjoint";
       if (diagnostics) {

@@ -1611,7 +1611,11 @@ struct Lowering {
   void configure_island_compiler(ProgramCompiler& c, IslandProg& prog,
                                  IslandRegion& region, const mir::Stmt* s);
   void finalize_island_program(IslandProg& prog, bool native,
-                               bool keep_every_clear = false);
+                               bool keep_every_clear = false,
+                               bool propagate_copies = false);
+  void finalize_island_program_once(IslandProg& prog, bool native,
+                                    bool keep_every_clear,
+                                    bool propagate_copies);
   std::vector<int> pack_island_inputs(IslandProg& prog,
                                       std::vector<int> inputs);
   bool lower_region_map(const mir::Stmt& s, long lo, long hi);
