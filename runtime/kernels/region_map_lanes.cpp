@@ -507,7 +507,10 @@ class Analysis {
         case Program::CONST:
         case Program::DYN_INDEX:
           o.dst = reg_offset(I.dst);
-          o.b = I.code == Program::DYN_INDEX ? reg_offset(I.b) : -1;
+          if (I.code == Program::DYN_INDEX) {
+            o.a = reg_offset(I.a + I.c);
+            o.b = reg_offset(I.b);
+          }
           break;
         case Program::JZ:
           o.a = reg_offset(I.a);
@@ -1034,6 +1037,8 @@ class TileState {
         full_(lanes == kTile ? ~Mask{0} : (Mask{1} << lanes) - 1) {}
 
   Mask full() const { return full_; }
+  const double* base() const { return fwd_; }
+  const double* shared_regs() const { return reg_; }
 
   double* slot(int r) const {
     return fwd_ + (size_t)plan_.reg_slot[(size_t)r] * kTile;
@@ -1266,14 +1271,24 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
     case Program::DYN_INDEX: {
       double* d = t.slot(I.dst);
       const int first = I.a + I.c;
+      const double len = static_cast<double>(I.len);
       t.with(o.b, I.b, [&](auto idx) {
-        t.each(m, [&](int l) {
-          const double raw = idx[l];
-          if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
-              raw > static_cast<double>(I.len))
-            throw std::out_of_range("register-program index out of range");
-          d[l] = t.value(first + static_cast<int32_t>(raw) - 1, l);
-        });
+        const auto pick = [&](auto read) {
+          t.each(m, [&](int l) {
+            const double raw = idx[l];
+            if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
+                raw > len)
+              throw std::out_of_range("register-program index out of range");
+            d[l] = read(static_cast<int32_t>(raw) - 1, l);
+          });
+        };
+        if (o.a >= 0) {
+          const double* base = t.base() + o.a;
+          pick([&](int32_t k, int l) { return base[(size_t)k * kTile + l]; });
+        } else {
+          const double* base = t.shared_regs() + first;
+          pick([&](int32_t k, int) { return base[k]; });
+        }
       });
       break;
     }
@@ -1771,7 +1786,7 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
     case Program::DYN_INDEX: {
       double* const d = cells(o.dst);
       t.with(o.vb, I.vb, [&](auto vb) {
-        if (t.shared_cell(I.a)) {
+        if (o.a < 0) {
           const auto site = t.acc_dynamic();
           t.each(m, [&](int l) {
             const double u = d[l];
@@ -1782,10 +1797,11 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
           });
           return;
         }
+        double* const base = t.cells() + o.a;
         t.each(m, [&](int l) {
           const double u = d[l];
           d[l] = 0.0;
-          t.cell(I.a + static_cast<int32_t>(vb[l]) - 1)[l] += u;
+          base[(size_t)(static_cast<int32_t>(vb[l]) - 1) * kTile + l] += u;
         });
       });
       return;
