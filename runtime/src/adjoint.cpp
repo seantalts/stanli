@@ -253,39 +253,49 @@ bool gen_adjoint(IslandProg& p) {
     // preserves the existing adjoint-cell sharing rule on untaken paths.
     // Bound analysis storage; larger programs keep the established replay.
     const size_t count = orig.size() + 1;
-    if (n0 <= 0 || count > (4u << 20) / static_cast<size_t>(n0)) return false;
-    std::vector<unsigned char> defined(count * static_cast<size_t>(n0), 0);
-    std::vector<unsigned char> reached(count, 0);
-    reached[0] = 1;
+    if (n0 <= 0) return false;
+    std::vector<int> tracked((size_t)n0, 0);
     for (const auto& in : p.ins) {
       if (!in_range(in.reg, in.len)) return false;
-      std::fill_n(defined.data() + in.reg, in.len, 1);
+      std::fill_n(tracked.begin() + in.reg, in.len, -1);
     }
+    int m = 0;
+    for (int& t : tracked) t = t < 0 ? -1 : m++;
+    if (count > (4u << 20) / static_cast<size_t>(std::max(m, 1))) return false;
+    std::vector<unsigned char> defined(count * static_cast<size_t>(m), 0);
+    std::vector<unsigned char> reached(count, 0);
+    reached[0] = 1;
     const auto propagate = [&](size_t target, const unsigned char* values) {
-      auto* dest = defined.data() + target * n0;
+      auto* dest = defined.data() + target * m;
       if (!reached[target])
-        std::copy_n(values, n0, dest);
+        std::copy_n(values, m, dest);
       else
-        for (int r = 0; r < n0; ++r) dest[r] &= values[r];
+        for (int r = 0; r < m; ++r) dest[r] &= values[r];
       reached[target] = 1;
     };
     for (size_t pc = 0; pc < orig.size(); ++pc) {
       if (!reached[pc]) continue;
       const auto& I = orig[pc];
-      auto* values = defined.data() + pc * n0;
+      auto* values = defined.data() + pc * m;
       const auto available = [&](int r, int len) {
         if (!in_range(r, len)) return false;
         for (int k = 0; k < len; ++k)
-          if (!values[r + k]) return false;
+          if (tracked[(size_t)(r + k)] >= 0 &&
+              !values[tracked[(size_t)(r + k)]])
+            return false;
         return true;
+      };
+      const auto define = [&](int r, int len) {
+        for (int k = 0; k < len; ++k)
+          if (tracked[(size_t)(r + k)] >= 0)
+            values[tracked[(size_t)(r + k)]] = 1;
       };
       if (I.code == Program::CALL) {
         const auto& call = fwd.calls[static_cast<size_t>(I.a)];
         for (int k = 0; k < call.n_in; ++k)
           if (!available(call.in[k], call.in_len[k])) return false;
-        if (call.out_len) std::fill_n(values + call.out, call.out_len, 1);
-        if (call.scratch_len)
-          std::fill_n(values + call.scratch, call.scratch_len, 1);
+        if (call.out_len) define(call.out, call.out_len);
+        if (call.scratch_len) define(call.scratch, call.scratch_len);
       } else {
         if (I.code == Program::DENSITY && program_density_arity(I.len) > 3) {
           if (!available(I.a, program_density_arity(I.len))) return false;
@@ -299,7 +309,7 @@ bool gen_adjoint(IslandProg& p) {
               return false;
         }
         const int width = program_output_len(I);
-        if (width) std::fill_n(values + I.dst, width, 1);
+        if (width) define(I.dst, width);
       }
       if (I.code == Program::REJECT) {
         const auto& message = fwd.messages[I.a];
@@ -314,7 +324,9 @@ bool gen_adjoint(IslandProg& p) {
     }
     if (!reached.back()) return false;
     for (int r : p.out_regs)
-      if (!defined[orig.size() * n0 + r]) return false;
+      if (tracked[(size_t)r] >= 0 &&
+          !defined[orig.size() * (size_t)m + (size_t)tracked[(size_t)r]])
+        return false;
     leaders.push_back(static_cast<int>(orig.size()));
     std::sort(leaders.begin(), leaders.end());
     leaders.erase(std::unique(leaders.begin(), leaders.end()), leaders.end());
