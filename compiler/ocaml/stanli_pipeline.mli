@@ -27,6 +27,9 @@ val default_pass_selection : pass_selection
     repeated scalar call arguments. A deterministic pre-dataflow
     structural budget guards the dataflow passes. *)
 
+val selected_default_passes : unit -> pass_selection
+(** The shipping selection with the explicit [STANLI_NO_O1_FALLBACK] override. *)
+
 val compile_mir :
      ?include_source:Frontend.Include_files.t
   -> ?model_only:bool
