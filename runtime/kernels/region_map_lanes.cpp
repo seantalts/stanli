@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <set>
@@ -144,8 +145,11 @@ struct Refusal {
 
 class Analysis {
  public:
-  Analysis(RegionMapProg& p, int64_t storage_limit)
-      : p_(p), plan_(p.lanes), limit_(storage_limit) {}
+  Analysis(RegionMapProg& p, int64_t storage_limit, int64_t recompute_cells)
+      : p_(p),
+        plan_(p.lanes),
+        limit_(storage_limit),
+        recompute_cells_(recompute_cells) {}
 
   void run() {
     check_opcodes();
@@ -162,6 +166,7 @@ class Analysis {
   RegionMapProg& p_;
   RegionMapLanePlan& plan_;
   int64_t limit_;
+  int64_t recompute_cells_;
   int n_cells_ = 0;
 
   bool shared_reg(int r) const {
@@ -484,9 +489,12 @@ class Analysis {
   void size_tiles() {
     plan_.tiles =
         (int)((p_.count + kRegionMapTile - 1) / kRegionMapTile);
-    plan_.storage =
-        (int64_t)plan_.tiles * kRegionMapTile * plan_.fwd_regs +
-        (int64_t)kRegionMapTile * plan_.adj_cells;
+    const int64_t adjoint = (int64_t)kRegionMapTile * plan_.adj_cells;
+    const int64_t one_tile = (int64_t)kRegionMapTile * plan_.fwd_regs + adjoint;
+    const int64_t all_tiles =
+        (int64_t)plan_.tiles * kRegionMapTile * plan_.fwd_regs + adjoint;
+    plan_.tile_recompute = plan_.fwd_regs > recompute_cells_ || all_tiles > limit_;
+    plan_.storage = plan_.tile_recompute ? one_tile : all_tiles;
     if (plan_.storage > limit_) refuse("tile storage exceeds the save limit");
   }
 };
@@ -1185,6 +1193,22 @@ int64_t region_map_lane_cells(const RegionMapProg& p) {
          (int64_t)l.max_dynamic * kRegionMapTile;
 }
 
+static double* tile_base(const RegionMapLanePlan& plan, double* tiles, int tile) {
+  return plan.tile_recompute ? tiles : tiles + (size_t)tile * kTile * plan.fwd_regs;
+}
+
+static TileState seeded_tile(const RegionMapProg& p, double* reg, double* base,
+                      int64_t first, int lanes) {
+  const auto& plan = p.lanes;
+  for (int r = 0; r < p.n_regs; ++r) {
+    const int s = plan.reg_slot[(size_t)r];
+    if (s >= 0) std::fill_n(base + (size_t)s * kTile, kTile, reg[r]);
+  }
+  double* iter = base + (size_t)plan.reg_slot[(size_t)p.iter_reg] * kTile;
+  for (int l = 0; l < lanes; ++l) iter[l] = static_cast<double>(p.lo + first + l);
+  return TileState(p, reg, base, lanes);
+}
+
 void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
                               double* region) {
   lane_runs.fetch_add(1, std::memory_order_relaxed);
@@ -1198,15 +1222,8 @@ void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
   for (int tile = 0; tile < plan.tiles; ++tile) {
     const int64_t first = (int64_t)tile * kTile;
     const int lanes = (int)std::min<int64_t>(kTile, p.count - first);
-    double* base = tiles + (size_t)tile * kTile * plan.fwd_regs;
-    for (int r = 0; r < p.n_regs; ++r) {
-      const int s = plan.reg_slot[(size_t)r];
-      if (s >= 0) std::fill_n(base + (size_t)s * kTile, kTile, reg[r]);
-    }
-    double* iter = base + (size_t)plan.reg_slot[(size_t)p.iter_reg] * kTile;
-    for (int l = 0; l < lanes; ++l)
-      iter[l] = static_cast<double>(p.lo + first + l);
-    TileState t(p, reg, base, lanes);
+    double* base = tile_base(plan, tiles, tile);
+    TileState t = seeded_tile(p, reg, base, first, lanes);
     lane_tile_forward(p, t, window, call_ctx, ctx.eval_state);
     const double* out = t.slot(target);
     for (int l = 0; l < lanes; ++l) total += out[l];
@@ -1221,16 +1238,21 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
   const double seed = ctx.out_adj_vec.data[0];
   const int target = map[(size_t)p.out_regs[0]];
   double* fwd_tiles = region;
-  double* adj_tile = region + (size_t)plan.tiles * kTile * plan.fwd_regs;
+  double* adj_tile =
+      region + (size_t)(plan.tile_recompute ? 1 : plan.tiles) * kTile * plan.fwd_regs;
   double* window = region + plan.storage;
   double* log = window + plan.max_window;
   KernelCtx call_ctx;
   for (int tile = plan.tiles; tile-- > 0;) {
     const int64_t first = (int64_t)tile * kTile;
     const int lanes = (int)std::min<int64_t>(kTile, p.count - first);
-    double* base = fwd_tiles + (size_t)tile * kTile * plan.fwd_regs;
+    double* base = tile_base(plan, fwd_tiles, tile);
     std::fill_n(adj_tile, (size_t)plan.adj_cells * kTile, 0.0);
-    TileState fwd(p, ctx.scratch, base, lanes);
+    TileState fwd = plan.tile_recompute
+                        ? seeded_tile(p, ctx.scratch, base, first, lanes)
+                        : TileState(p, ctx.scratch, base, lanes);
+    if (plan.tile_recompute)
+      lane_tile_forward(p, fwd, window, call_ctx, ctx.eval_state);
     AdjointTile t(p, fwd, adj_tile, adj, log);
     const auto seed_cell = t.cell(target);
     for (int l = 0; l < lanes; ++l) seed_cell[l] += seed;
@@ -1267,7 +1289,10 @@ void plan_region_map_lanes(RegionMapProg& p, bool enabled,
     return;
   }
   try {
-    Analysis(p, storage_limit).run();
+    int64_t recompute_cells = kRegionMapTileRecomputeCells;
+    if (const char* v = std::getenv("STANLI_REGION_MAP_TILE_CELLS"))
+      recompute_cells = std::strtoll(v, nullptr, 10);
+    Analysis(p, storage_limit, recompute_cells).run();
     p.lanes.active = true;
   } catch (const Refusal& r) {
     p.lanes = RegionMapLanePlan{};

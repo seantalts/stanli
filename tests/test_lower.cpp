@@ -2037,9 +2037,9 @@ std::string big_data(int n) {
   return out.str();
 }
 
-void test_lane_fixtures() {
-  const std::vector<LaneFixture> fixtures = {
-      {"region_map_branch", true, ""},
+std::vector<LaneFixture> lane_fixture_list() {
+  return {
+{"region_map_branch", true, ""},
       {"region_map_udf", false, ""},
       {"region_map_many", true, ""},
       {"region_map_alias", true, ""},
@@ -2054,6 +2054,10 @@ void test_lane_fixtures() {
       {"region_map_dup", true, ""},
       {"region_map_intops", false, ""},
   };
+}
+
+void test_lane_fixtures() {
+  const std::vector<LaneFixture> fixtures = lane_fixture_list();
   for (const LaneFixture& f : fixtures) {
     for (int n : {37, 64, 65, 200}) {
       const std::string what = std::string(f.stem) + " N=" + std::to_string(n);
@@ -2073,6 +2077,65 @@ void test_lane_fixtures() {
     expect_mapped(what, lanes);
     expect_lane_parity(what, lanes, scalar, spread_points(2), true);
   }
+}
+
+void test_lane_tile_recompute() {
+  CompiledModel big = compile_with("region_map_long_body", 64);
+  const auto& b = map_payload(big);
+  check(b.lanes.active && b.lanes.tile_recompute,
+        "a body over the per-lane cell threshold recomputes tiles");
+  check(b.lanes.storage ==
+            (int64_t)stanli::kRegionMapTile * (b.lanes.fwd_regs + b.lanes.adj_cells),
+        "tile recompute keeps one forward tile and one adjoint tile");
+  CompiledModel small = compile_with("region_map_branch", 64);
+  const auto& s = map_payload(small);
+  check(s.lanes.active && !s.lanes.tile_recompute,
+        "a small body keeps every tile's forward state");
+  CompiledModel forced =
+      compile_with("region_map_branch", 200, "STANLI_REGION_MAP_TILE_CELLS");
+  check(map_payload(forced).lanes.tile_recompute,
+        "the threshold override forces tile recompute");
+
+  test_setenv("STANLI_REGION_MAP_TILE_CELLS", "0", 1);
+  for (const LaneFixture& f : lane_fixture_list()) {
+    if (!f.lanes) continue;
+    for (int n : {37, 64, 65, 200}) {
+      const std::string what =
+          std::string(f.stem) + " tile recompute N=" + std::to_string(n);
+      CompiledModel lanes = compile_with(f.stem, n, nullptr, "0", f.extra);
+      CompiledModel scalar =
+          compile_with(f.stem, n, "STANLI_REGION_MAP_LANES", "0", f.extra);
+      expect_mapped(what, lanes);
+      check(map_payload(lanes).lanes.tile_recompute,
+            what + ": tile recompute selected");
+      expect_lane_parity(what, lanes, scalar, spread_points(2), true);
+    }
+  }
+  for (int n : {37, 64, 200}) {
+    const std::string extra = big_data(n);
+    const std::string what = "region_map_cancel tile recompute N=" + std::to_string(n);
+    CompiledModel lanes = compile_with("region_map_cancel", n, nullptr, "0", extra);
+    CompiledModel scalar =
+        compile_with("region_map_cancel", n, "STANLI_REGION_MAP_LANES", "0", extra);
+    expect_lane_parity(what, lanes, scalar, spread_points(2), true);
+  }
+  for (int n : {37, 64, 200}) {
+    const std::string what = "region_map_oob tile recompute N=" + std::to_string(n);
+    CompiledModel lanes = compile_with("region_map_oob", n);
+    CompiledModel scalar =
+        compile_with("region_map_oob", n, "STANLI_REGION_MAP_LANES", "0");
+    const LaneOutcome r =
+        expect_lane_parity(what, lanes, scalar, spread_points(2, 3), true);
+    check(r.threw == 4 && r.ok == 0, what + ": out of range index throws every time");
+  }
+  for (int n : {37, 65, 200}) {
+    const std::string what = "region_map_calldomain tile recompute N=" + std::to_string(n);
+    CompiledModel lanes = compile_with("region_map_calldomain", n);
+    CompiledModel scalar =
+        compile_with("region_map_calldomain", n, "STANLI_REGION_MAP_LANES", "0");
+    expect_lane_parity(what, lanes, scalar, spread_points(2, 3), true);
+  }
+  test_unsetenv("STANLI_REGION_MAP_TILE_CELLS");
 }
 
 void test_lane_flag_clear_segments() {
@@ -2352,6 +2415,7 @@ static void test_region_map() {
   test_logic_points();
   test_logic_compiles_to_jumps();
   test_lane_fixtures();
+  test_lane_tile_recompute();
   test_lane_flag_clear_segments();
   test_lane_cancellation_bitwise();
   test_lane_exceptions();

@@ -13,6 +13,7 @@ namespace stanli {
 inline constexpr int kRegionMapSavedGap = 64;
 
 inline constexpr int kRegionMapTile = 64;
+constexpr int kRegionMapTileRecomputeCells = 1024;
 
 struct RegionMapLanePlan {
   struct Block {
@@ -32,6 +33,7 @@ struct RegionMapLanePlan {
     int bwd_size = 0;
   };
   bool active = false;
+  bool tile_recompute = false;
   std::string refusal;
   int fwd_regs = 0;
   int adj_cells = 0;
