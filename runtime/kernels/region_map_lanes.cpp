@@ -42,6 +42,10 @@ bool lane_opcode(Program::Code c) {
     case Program::EXP:
     case Program::LOG:
     case Program::LOG1P_EXP:
+    case Program::ERFC:
+    case Program::LOG1P:
+    case Program::LOG1M_EXP:
+    case Program::INV_SQUARE:
     case Program::SQRT:
     case Program::SQUARE:
     case Program::INV:
@@ -128,6 +132,10 @@ std::string opcode_name(Program::Code c) {
       "REJECT",
       "DENSITY_VEC",
       "RANGE",
+      "ERFC",
+      "LOG1P",
+      "LOG1M_EXP",
+      "INV_SQUARE",
   };
   const size_t i = static_cast<size_t>(c);
   return i < sizeof(names) / sizeof(names[0]) ? names[i]
@@ -262,6 +270,10 @@ class Analysis {
         return;
       case Program::LOG:
       case Program::LOG1P_EXP:
+      case Program::ERFC:
+      case Program::LOG1P:
+      case Program::LOG1M_EXP:
+      case Program::INV_SQUARE:
       case Program::SQUARE:
       case Program::INV:
       case Program::FABS:
@@ -435,6 +447,10 @@ class Analysis {
       case Program::EXP:
       case Program::LOG:
       case Program::LOG1P_EXP:
+      case Program::ERFC:
+      case Program::LOG1P:
+      case Program::LOG1M_EXP:
+      case Program::INV_SQUARE:
       case Program::SQRT:
       case Program::SQUARE:
       case Program::INV:
@@ -469,6 +485,10 @@ class Analysis {
         case Program::EXP:
         case Program::LOG:
         case Program::LOG1P_EXP:
+        case Program::ERFC:
+        case Program::LOG1P:
+        case Program::LOG1M_EXP:
+        case Program::INV_SQUARE:
         case Program::SQRT:
         case Program::SQUARE:
         case Program::INV:
@@ -981,6 +1001,10 @@ class Analysis {
         case Program::EXP:
         case Program::LOG:
         case Program::LOG1P_EXP:
+        case Program::ERFC:
+        case Program::LOG1P:
+        case Program::LOG1M_EXP:
+        case Program::INV_SQUARE:
         case Program::SQRT:
         case Program::SQUARE:
         case Program::INV:
@@ -1234,6 +1258,18 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
       break;
     case Program::LOG1P_EXP:
       t.unary(o, I, m, [](double a) { return stan::math::log1p_exp(a); });
+      break;
+    case Program::ERFC:
+      t.unary(o, I, m, [](double a) { return stan::math::erfc(a); });
+      break;
+    case Program::LOG1P:
+      t.unary(o, I, m, [](double a) { return stan::math::log1p(a); });
+      break;
+    case Program::LOG1M_EXP:
+      t.unary(o, I, m, [](double a) { return stan::math::log1m_exp(a); });
+      break;
+    case Program::INV_SQUARE:
+      t.unary(o, I, m, [](double a) { return stan::math::inv_square(a); });
       break;
     case Program::SQRT:
       t.unary(o, I, m, [](double a) { return stan::math::sqrt(a); });
@@ -1729,6 +1765,24 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
       });
       return;
     }
+#define STANLI_LANE_NATIVE_MATH_ADJOINT(code, op)              \
+  case Program::code: {                                        \
+    double* const d = cells(o.dst);                            \
+    double* const a = t.acc(I.a, o.a);                         \
+    t.with(o.va, I.va, [&](auto va) {                          \
+      t.each(m, [&](int l) {                                   \
+        const double u = d[l];                                 \
+        d[l] = 0.0;                                            \
+        const double x = va[l];                                \
+        if (unary_has_pullback(UnaryRule<op>::topology, x))    \
+          a[l] += UnaryRule<op>::delta(                        \
+              x, std::numeric_limits<double>::quiet_NaN(), u); \
+      });                                                      \
+    });                                                        \
+    return;                                                    \
+  }
+      STANLI_NATIVE_MATH_LIST(STANLI_LANE_NATIVE_MATH_ADJOINT)
+#undef STANLI_LANE_NATIVE_MATH_ADJOINT
     case Program::SQRT: {
       double* const d = cells(o.dst);
       double* const a = t.acc(I.a, o.a);

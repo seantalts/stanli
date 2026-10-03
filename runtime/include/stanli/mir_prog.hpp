@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -2649,8 +2650,27 @@ struct ProgramCompiler {
     }
   }
 
+  static Program::Code native_math_code(uint16_t opcode) {
+    switch (opcode) {
+      case OP_ERFC:
+        return Program::ERFC;
+      case OP_LOG1P:
+        return Program::LOG1P;
+      case OP_LOG1M_EXP:
+        return Program::LOG1M_EXP;
+      default:
+        return Program::INV_SQUARE;
+    }
+  }
+
   static std::optional<Program::Code> native_builtin_code(uint16_t opcode) {
     switch (opcode) {
+      case OP_ERFC:
+      case OP_LOG1P:
+      case OP_LOG1M_EXP:
+      case OP_INV_SQUARE:
+        if (std::getenv("STANLI_NO_NATIVE_MATH")) return std::nullopt;
+        return native_math_code(opcode);
       case OP_ADD:
         return Program::ADD;
       case OP_SUB:

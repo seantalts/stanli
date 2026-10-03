@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
+#include <typeinfo>
 #include <limits>
 #include <cstdio>
 #include <string>
@@ -2148,7 +2149,174 @@ static void test_fuzz_ranges() {
   }
 }
 
+struct NativeMath {
+  Program::Code code;
+  uint16_t opcode;
+  const char* name;
+};
+
+static const NativeMath kNativeMath[] = {
+    {Program::ERFC, OP_ERFC, "erfc"},
+    {Program::LOG1P, OP_LOG1P, "log1p"},
+    {Program::LOG1M_EXP, OP_LOG1M_EXP, "log1m_exp"},
+    {Program::INV_SQUARE, OP_INV_SQUARE, "inv_square"},
+};
+
+static bool same_bits(double a, double b) {
+  if (std::isnan(a) && std::isnan(b)) return true;
+  return std::memcmp(&a, &b, sizeof a) == 0;
+}
+
+static std::vector<double> native_math_grid() {
+  const double inf = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double denorm = std::numeric_limits<double>::denorm_min();
+  const double tiny = std::numeric_limits<double>::min();
+  return {0.0,
+          -0.0,
+          denorm,
+          -denorm,
+          tiny,
+          -tiny,
+          1e-10,
+          -1e-10,
+          1e-300,
+          0.37,
+          -0.37,
+          1.0,
+          -1.0,
+          std::nextafter(-1.0, 0.0),
+          std::nextafter(-1.0, -2.0),
+          -1.5,
+          2.0,
+          -2.0,
+          10.0,
+          -10.0,
+          26.5,
+          -26.5,
+          38.0,
+          -38.0,
+          700.0,
+          -700.0,
+          1e5,
+          -1e5,
+          1e154,
+          1e300,
+          -1e300,
+          nan,
+          inf,
+          -inf};
+}
+
+static Case native_math_case(const NativeMath& m, double x, double seed) {
+  Build b({x});
+  const int d = b.emit(m.code, 0);
+  return b.done({d}, {seed});
+}
+
+static Case call_math_case(const NativeMath& m, double x, double seed) {
+  Case c;
+  c.p.n_regs = 2;
+  c.p.ins = {IslandProg::LiveIn{0, 1}};
+  c.p.out_regs = {1};
+  Program::Call call;
+  call.opcode = m.opcode;
+  call.n_in = 1;
+  call.in[0] = 0;
+  call.in_len[0] = 1;
+  call.out = 1;
+  call.out_len = 1;
+  expect("native math CALL binds", bind_call(call));
+  c.p.calls.push_back(call);
+  c.p.code = {Program::Instr{Program::CALL, 0, 0, 0, 0, 0}};
+  c.in = {x};
+  c.seed = {seed};
+  return c;
+}
+
+static std::string forward_error(const Case& c) {
+  std::vector<double> val((size_t)c.p.n_regs, 0.0);
+  val[0] = c.in[0];
+  try {
+    run_program(static_cast<const Program&>(c.p), val.data());
+  } catch (const std::exception& e) {
+    return std::string(typeid(e).name()) + ": " + e.what();
+  }
+  return "";
+}
+
+static void test_native_math_matches_call() {
+  const double seeds[] = {1.3, 0.0, -0.7,
+                          std::numeric_limits<double>::infinity()};
+  for (const NativeMath& m : kNativeMath) {
+    for (const double x : native_math_grid()) {
+      for (const double seed : seeds) {
+        Case want = call_math_case(m, x, seed);
+        Case got = native_math_case(m, x, seed);
+        const std::string label = std::string(m.name) +
+                                  " x=" + std::to_string(x) +
+                                  " seed=" + std::to_string(seed);
+        const std::string want_error = forward_error(want);
+        const std::string got_error = forward_error(got);
+        if (want_error != got_error) {
+          ++failures;
+          std::printf("FAIL native %s: forward error CALL '%s' native '%s'\n",
+                      label.c_str(), want_error.c_str(), got_error.c_str());
+          continue;
+        }
+        if (!want_error.empty()) continue;
+        if (!gen_adjoint(want.p) || !gen_adjoint(got.p)) {
+          ++failures;
+          std::printf("FAIL native %s: gen_adjoint refused\n", label.c_str());
+          continue;
+        }
+        std::vector<double> want_v, got_v;
+        const auto want_adj =
+            native_adjoints(want.p, want.in, want.seed, &want_v);
+        const auto got_adj = native_adjoints(got.p, got.in, got.seed, &got_v);
+        if (!same_bits(want_v[0], got_v[0])) {
+          ++failures;
+          std::printf("FAIL native %s: value CALL %.17g native %.17g\n",
+                      label.c_str(), want_v[0], got_v[0]);
+        }
+        if (!same_bits(want_adj[0], got_adj[0])) {
+          ++failures;
+          std::printf("FAIL native %s: adjoint CALL %.17g native %.17g\n",
+                      label.c_str(), want_adj[0], got_adj[0]);
+        }
+        stan::math::var vx = x;
+        std::vector<stan::math::var> reg((size_t)got.p.n_regs);
+        reg[0] = vx;
+        try {
+          run_program(static_cast<const Program&>(got.p), reg);
+          if (!same_bits(reg[1].val(), want_v[0])) {
+            ++failures;
+            std::printf("FAIL native %s: var value %.17g CALL %.17g\n",
+                        label.c_str(), reg[1].val(), want_v[0]);
+          }
+        } catch (const std::exception& e) {
+          ++failures;
+          std::printf("FAIL native %s: var forward threw %s\n", label.c_str(),
+                      e.what());
+        }
+      }
+    }
+  }
+}
+
+static void test_native_math_replay() {
+  const double points[] = {0.37, 1.9, 0.02};
+  for (const NativeMath& m : kNativeMath)
+    for (const double x : points) {
+      Build b({x});
+      const int d = b.emit(m.code, 0);
+      check(std::string("native ") + m.name, b.done({d}, {1.3}), 2);
+    }
+}
+
 int main() {
+  test_native_math_matches_call();
+  test_native_math_replay();
   test_inactive_call_replay();
   test_private_adjoint_clears();
   test_acyclic_branches();

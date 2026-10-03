@@ -1689,6 +1689,12 @@ bool map_calls(const CompiledModel& cm, uint16_t opcode) {
   return false;
 }
 
+bool map_has_code(const CompiledModel& cm, stanli::Program::Code code) {
+  for (const auto& I : map_payload(cm).code)
+    if (I.code == code) return true;
+  return false;
+}
+
 var shifted_residual(double y, const var& mu) {
   return y > mu ? y - mu : y - (mu + 0.25);
 }
@@ -1757,7 +1763,9 @@ void run_folded(const std::string& stem, const std::string& extra,
   CompiledModel cm =
       compile_with(stem, 64, "STANLI_NO_CFG_DEAD_CONSTANTS", "1", extra);
   expect_mapped(what, cm);
-  check(map_calls(cm, stanli::OP_ERFC) == dead_arm_present,
+  const bool erfc_compiled =
+      map_calls(cm, stanli::OP_ERFC) || map_has_code(cm, stanli::Program::ERFC);
+  check(erfc_compiled == dead_arm_present,
         what + (dead_arm_present ? ": live arm compiled"
                                  : ": dead arm not compiled"));
   run_points(stem, 64, udf_points, ref, true, nullptr, "0", extra);
@@ -2253,6 +2261,83 @@ void test_lane_fixtures() {
                                         "STANLI_REGION_MAP_LANES", "0", extra);
     expect_mapped(what, lanes);
     expect_lane_parity(what, lanes, scalar, spread_points(2), true);
+  }
+}
+
+struct NativeMathCode {
+  stanli::Program::Code code;
+  uint16_t opcode;
+  const char* name;
+};
+
+const std::vector<NativeMathCode>& native_math_codes() {
+  static const std::vector<NativeMathCode> codes = {
+      {stanli::Program::ERFC, stanli::OP_ERFC, "erfc"},
+      {stanli::Program::LOG1P, stanli::OP_LOG1P, "log1p"},
+      {stanli::Program::LOG1M_EXP, stanli::OP_LOG1M_EXP, "log1m_exp"},
+      {stanli::Program::INV_SQUARE, stanli::OP_INV_SQUARE, "inv_square"},
+  };
+  return codes;
+}
+
+void test_native_math() {
+  struct Fixture {
+    const char* stem;
+    std::vector<size_t> used;
+    double amplitude;
+  };
+  const std::vector<Fixture> fixtures = {
+      {"region_map_native_math", {0, 1, 2, 3}, 1.2},
+      {"region_map_native_domain", {1}, 2.5},
+  };
+  const auto& codes = native_math_codes();
+  for (const Fixture& f : fixtures) {
+    int threw = 0;
+    for (int n : {37, 64, 65, 200}) {
+      const std::string what = std::string(f.stem) + " N=" + std::to_string(n);
+      CompiledModel native = compile_with(f.stem, n);
+      CompiledModel off = compile_with(f.stem, n, "STANLI_NO_NATIVE_MATH", "1");
+      CompiledModel scalar =
+          compile_with(f.stem, n, "STANLI_REGION_MAP_LANES", "0");
+      expect_mapped(what, native);
+      expect_mapped(what + " (native math off)", off);
+      for (size_t k : f.used) {
+        const NativeMathCode& c = codes[k];
+        check(map_has_code(native, c.code),
+              what + ": " + c.name + " compiles to its own opcode");
+        check(!map_calls(native, c.opcode),
+              what + ": " + c.name + " has no CALL");
+        check(!map_has_code(off, c.code),
+              what + ": STANLI_NO_NATIVE_MATH leaves no " + c.name + " opcode");
+        check(map_calls(off, c.opcode),
+              what + ": STANLI_NO_NATIVE_MATH keeps the " + c.name + " CALL");
+      }
+      const auto points = spread_points(2, 8, f.amplitude);
+      Executor en(native.graph), eo(off.graph);
+      native.bind(en);
+      off.bind(eo);
+      for (size_t k = 0; k < points.size(); ++k) {
+        const std::string at = what + " point " + std::to_string(k);
+        const Run got = try_evaluate(en, points[k]);
+        const Run want = try_evaluate(eo, points[k]);
+        check(got.threw == want.threw, at + ": native and CALL agree on throw");
+        if (got.threw || want.threw) {
+          check(got.what == want.what,
+                at + ": same exception: " + got.what + " vs " + want.what);
+          ++threw;
+          continue;
+        }
+        check(same_bits(got.e.lp, want.e.lp),
+              at + ": lp bitwise equal to the CALL build");
+        for (size_t i = 0; i < want.e.grad.size(); ++i)
+          check(same_bits(got.e.grad[i], want.e.grad[i]),
+                at + ": grad[" + std::to_string(i) +
+                    "] bitwise equal to the CALL build");
+      }
+      expect_lane_parity(what, native, scalar, points, true);
+    }
+    if (std::string(f.stem) == "region_map_native_domain")
+      check(threw > 0, "the domain fixture reaches a throwing point");
   }
 }
 
@@ -3021,6 +3106,7 @@ static void test_region_map() {
   test_logic_points();
   test_logic_compiles_to_jumps();
   test_lane_fixtures();
+  test_native_math();
   test_lane_tile_recompute();
   test_lane_seed_and_clean();
   test_map_selection_follows_data_through_udfs();

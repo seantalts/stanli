@@ -119,6 +119,24 @@ inline void log_mix_rule(double t, double va, double vb, double vc,
   adj_a += t * (one_m_exp * one_d);
 }
 
+template <int Opcode>
+struct UnaryRule;
+
+#define STANLI_DEFINE_UNARY_RULE(code, name, VAL, DELTA, TOPOLOGY)           \
+  template <>                                                                \
+  struct UnaryRule<code> {                                                   \
+    static constexpr UnaryTopology topology = TOPOLOGY;                      \
+    static double delta(double x, double y, double seed) { return (DELTA); } \
+  };
+STANLI_SCALAR_UNARY_LIST(STANLI_DEFINE_UNARY_RULE)
+#undef STANLI_DEFINE_UNARY_RULE
+
+#define STANLI_NATIVE_MATH_LIST(X) \
+  X(ERFC, OP_ERFC)                 \
+  X(LOG1P, OP_LOG1P)               \
+  X(LOG1M_EXP, OP_LOG1M_EXP)       \
+  X(INV_SQUARE, OP_INV_SQUARE)
+
 }  // namespace stanli
 
 #endif

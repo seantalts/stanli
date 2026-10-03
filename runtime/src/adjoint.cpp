@@ -901,6 +901,18 @@ __attribute__((noinline)) static void ranged_step(const AdjInstr& I,
         adj[I.a + ka] += u / (ch * ch);
       });
       break;
+#define STANLI_NATIVE_MATH_RANGED(code, op)                  \
+  case Program::code:                                        \
+    unary([&](int32_t k, int32_t ka, int32_t, int32_t) {     \
+      const double u = take(k);                              \
+      const double x = val[I.va + ka];                       \
+      if (unary_has_pullback(UnaryRule<op>::topology, x))    \
+        adj[I.a + ka] += UnaryRule<op>::delta(               \
+            x, std::numeric_limits<double>::quiet_NaN(), u); \
+    });                                                      \
+    break;
+      STANLI_NATIVE_MATH_LIST(STANLI_NATIVE_MATH_RANGED)
+#undef STANLI_NATIVE_MATH_RANGED
     case Program::LSE2:
       binary([&](int32_t k, int32_t ka, int32_t kb, int32_t) {
         lse2_rule(take(k), val[I.va + ka], val[I.vb + kb], adj[I.a + ka],
@@ -1091,6 +1103,17 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
           adj[I.a] += t / (ch * ch);
           break;
         }
+#define STANLI_NATIVE_MATH_SCALAR(code, op)                \
+  case Program::code: {                                    \
+    adj[I.dst] = 0.0;                                      \
+    const double x = val[I.va];                            \
+    if (unary_has_pullback(UnaryRule<op>::topology, x))    \
+      adj[I.a] += UnaryRule<op>::delta(                    \
+          x, std::numeric_limits<double>::quiet_NaN(), t); \
+    break;                                                 \
+  }
+          STANLI_NATIVE_MATH_LIST(STANLI_NATIVE_MATH_SCALAR)
+#undef STANLI_NATIVE_MATH_SCALAR
         // Comparisons produce a plain 0/1 the forward already computed; they
         // have no derivative, but they did write the register.
         case Program::GT:

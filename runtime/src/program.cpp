@@ -422,6 +422,26 @@ void run_range(const Program::Instr& I, T* reg) {
         o = stan::math::tanh(a);
       });
       break;
+    case Program::ERFC:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::erfc(a);
+      });
+      break;
+    case Program::LOG1P:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::log1p(a);
+      });
+      break;
+    case Program::LOG1M_EXP:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::log1m_exp(a);
+      });
+      break;
+    case Program::INV_SQUARE:
+      unary([](T& o, const T& a, const T&, const T&) {
+        o = stan::math::inv_square(a);
+      });
+      break;
     case Program::LSE2:
       binary([](T& o, const T& a, const T& b, const T&) {
         o = stan::math::log_sum_exp(a, b);
