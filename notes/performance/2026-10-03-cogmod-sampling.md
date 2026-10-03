@@ -54,3 +54,31 @@ counting (the earlier convention): structured loop 485 us, first scalar map
 per span ate the gain), merged spans 868, conditions as jumps and flags only
 for segment blocks 633. Warmup-counted from there: lanes 244, seed list and
 one adjoint zero per backward 146.
+
+## Other corpus models
+
+A census of all 351 corpus models (`STANLI_REGION_MAP_DIAGNOSTICS=1`) finds
+the map in 24: the 21 mapped cogmod families and three brms models whose
+likelihood UDF branches on a parameter. All 24 run lanes except invgaussian.
+No corpus model selects the structured loop any more. Four brms models
+(sw_hurdle_lognormal, sw_hurdle_gamma, s2_zi_beta, s2_zoi_beta) branch on
+data inside the UDF; an earlier selection test counted those as parameter
+branches and made them 1.4x to 2.9x slower than v0.18.1. Selection now
+follows data through UDF arguments, and they keep their old lowering.
+
+Sampling, 10000 warmup and 10000 draws, same trajectory (N = 40, so per
+gradient is small):
+
+| model | branch | v0.18.1 |
+| --- | ---: | ---: |
+| s2_gev | 3.7 us | 7.9 us |
+| sw_asymlaplace | 3.2 us | 5.4 us |
+| s2_zi_asymlaplace | 4.9 us | 5.5 us |
+| sw_hurdle_lognormal (not mapped) | 2.2 us | 2.3 us |
+| sw_hurdle_gamma (not mapped) | 3.5 us | 3.6 us |
+| s2_zi_beta (not mapped) | 6.2 us | 6.0 us |
+| s2_zoi_beta (not mapped) | 6.3 us | 6.3 us |
+
+Memory: lanes keep every tile's forward state. lnr_bench peaks at 138 MB
+resident with lanes, 84 MB without the map, 50 MB with the scalar map
+recomputing. gamma peaks at 20 MB.
