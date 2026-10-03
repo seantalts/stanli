@@ -209,7 +209,8 @@ void print_islands(std::string& out, const Graph& g) {
   appendf(out, "graph: %zu ops, %zu slots\n", g.ops.size(), g.slots.size());
   int n = 0;
   for (size_t u = 0; u < g.ops.size(); ++u) {
-    if (g.ops[u].opcode != OP_ISLAND) continue;
+    if (g.ops[u].opcode != OP_ISLAND && g.ops[u].opcode != OP_REGION_MAP)
+      continue;
     print_island_body(out, g, u, n++);
   }
 }
