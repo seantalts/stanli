@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.19.0
+
+- Add batched execution and native gradients for eligible independent loops,
+  including per-observation user functions with parameter-dependent branches.
+  Reuse compiled loop bodies and shared inputs, and reduce repeated gathering
+  and adjoint initialization.
+- Support the five- and seven-parameter forms of `wiener_lpdf`. Fix early
+  returns, container-valued returns in nested loops, constant branches, and
+  shadowed local constants in compiled user functions.
+- Expand the shared CmdStan numerical corpus from 329 to 352 recorded models,
+  adding cognitive and continuous-time state-space models. Keep existing
+  numerical gates and align vectorization diagnostics with the shipped
+  compiler's structural optimization policy.
+- Restore Windows and no-stdio builds, preserve embedded-compiler compatibility
+  with C++20, and fix concurrent reference-library builds in conformance CI.
+  Rebuild stale local compiler artifacts when their provenance no longer matches.
+
 ## 0.18.1
 
 - Make inclusive Stan `for` loops ending at the maximum integer terminate on
