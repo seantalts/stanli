@@ -13,6 +13,7 @@ evolved; verify completion in source rather than executing old task lists.
 | Storage and copies | [Destination forwarding](../archive/plans/2026-08-28-destination-forwarding-results.md), [idata compaction](../archive/plans/2026-08-30-idata-compaction-results.md), [scratch layout](../archive/plans/2026-08-30-op-scratch-layout-results.md), [shared data/pullbacks](../archive/plans/2026-09-11-shared-data-native-pullbacks.md). |
 | Preparation | [Preparation tuning](../archive/plans/2026-09-10-prep-time-tuning.md), [teaching investigation digest](../archive/plans/2026-09-15-teaching-performance.md): cold work, speculation cost and completed-graph profiling. |
 | Identity slices | [Full-range slice regression](../../../notes/performance/2026-09-22-identity-slice.md): why unconditional aliases could regroup adjoints, and the narrower ownership proof. |
+| Diagnostic compiler policy | [Main CI corrections](../../../notes/performance/2026-10-03-ci-diagnostics.md): preserve the shipped O1 budget in vectorization comparisons; forced-O1 ctsem lowering remains unresolved. |
 
 A logical view is not just a flat element count. Shape, storage order, activity,
 control/effect dependence and ownership must survive a rewrite. Speculative
