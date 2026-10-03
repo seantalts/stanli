@@ -1648,7 +1648,6 @@ void test_hoisted_constants_and_saved_state() {
       each_written_span(p, I, [&](int reg, int len) {
         for (int k = 0; k < len; ++k) ++body_writes[(size_t)(reg + k)];
       });
-    std::vector<char> hoisted((size_t)p.n_regs, 0);
     for (const auto& I : p.prologue) {
       check(I.code == stanli::Program::CONST ||
                 I.code == stanli::Program::CONSTR ||
@@ -1658,7 +1657,6 @@ void test_hoisted_constants_and_saved_state() {
       for (int k = 0; k < len; ++k) {
         check(body_writes[(size_t)(I.dst + k)] == 0,
               what + ": the body does not rewrite a hoisted register");
-        hoisted[(size_t)(I.dst + k)] = 1;
       }
     }
     for (const auto& I : p.code) {
@@ -1671,21 +1669,29 @@ void test_hoisted_constants_and_saved_state() {
         rewritten |= body_writes[(size_t)(I.dst + k)] > 1;
       check(rewritten, what + ": a constant left in the body is rewritten");
     }
-    std::vector<char> live((size_t)p.n_regs, 0);
-    for (const auto& li : p.ins)
-      for (int k = 0; k < li.len; ++k) live[(size_t)(li.reg + k)] = 1;
+    std::vector<char> saved((size_t)p.n_regs, 0);
     int cells = 0;
     for (const auto& span : p.saved)
       for (int k = 0; k < span.second; ++k) {
-        const size_t reg = (size_t)(span.first + k);
-        check(!live[reg] && !hoisted[reg],
-              what + ": saved state excludes live-ins and hoisted constants");
-        check(body_writes[reg] > 0, what + ": saved state is body-written");
+        saved[(size_t)(span.first + k)] = 1;
         ++cells;
       }
+    for (int reg = 0; reg < p.n_regs; ++reg)
+      if (body_writes[(size_t)reg] > 0)
+        check(saved[(size_t)reg], what + ": every body-written register is saved");
+    for (size_t k = 1; k < p.saved.size(); ++k)
+      check(p.saved[k].first - (p.saved[k - 1].first + p.saved[k - 1].second) >
+                stanli::kRegionMapSavedGap,
+            what + ": saved spans separated by a small gap are merged");
     check(cells > 0 && cells == p.saved_cells,
           what + ": saved cell count matches its spans");
-    check(p.saved_cells < p.n_regs, what + ": saved state is a strict subset");
+    for (const auto& li : p.ins) {
+      if (li.len <= stanli::kRegionMapSavedGap) continue;
+      for (const auto& span : p.saved)
+        check(span.first + span.second <= li.reg ||
+                  li.reg + li.len <= span.first,
+              what + ": saved state skips live-in vectors");
+    }
   }
 }
 

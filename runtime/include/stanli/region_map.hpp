@@ -9,6 +9,8 @@
 
 namespace stanli {
 
+inline constexpr int kRegionMapSavedGap = 64;
+
 struct RegionMapProg : IslandProg {
   int iter_reg = -1;
   int64_t lo = 1;

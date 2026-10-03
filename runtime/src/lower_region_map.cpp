@@ -94,8 +94,15 @@ void split_prologue(RegionMapProg& p) {
     }
     int end = reg;
     while (end < p.n_regs && written[(size_t)end]) ++end;
-    p.saved.emplace_back(reg, end - reg);
-    p.saved_cells += end - reg;
+    if (!p.saved.empty() &&
+        reg - (p.saved.back().first + p.saved.back().second) <=
+            kRegionMapSavedGap) {
+      p.saved_cells += end - (p.saved.back().first + p.saved.back().second);
+      p.saved.back().second = end - p.saved.back().first;
+    } else {
+      p.saved.emplace_back(reg, end - reg);
+      p.saved_cells += end - reg;
+    }
     reg = end;
   }
 }
@@ -250,6 +257,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
                     " prologue=" + std::to_string(prog->prologue.size()) +
                     " body=" + std::to_string(prog->code.size()) +
                     " saved_cells=" + std::to_string(prog->saved_cells) +
+                    " saved_spans=" + std::to_string(prog->saved.size()) +
                     " registers=" + std::to_string(prog->n_regs) +
                     " live_ins=" + std::to_string(prog->ins.size()));
   return true;
