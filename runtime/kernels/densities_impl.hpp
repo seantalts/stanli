@@ -245,6 +245,17 @@ void density_fwd_v(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
   density_fwd_sum<NArgs, Tier, VecMask>(ctx, fp, ff);
 }
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#define STANLI_NOINLINE __declspec(noinline)
+#else
+#define STANLI_NOINLINE __attribute__((noinline))
+#endif
+
+STANLI_NOINLINE inline void accumulate_partial(double* adj, double out_adj,
+                                               double partial) {
+  *adj += out_adj * partial;
+}
+
 // Partials for argument k live at scratch[sum of lens of args < k]. A scalar
 // argument paired with vector ones holds the already-summed partial.
 // Elementwise variant: column k is scratch[k * N .. k * N + N), each element
@@ -269,7 +280,8 @@ void density_bwd(KernelCtx& ctx) {
       } else {
         for (int64_t n = 0; n < N; ++n)
           if (connected[n] != 0.0)
-            ctx.in_adj[k].data[n] += ctx.out_adj_vec.data[n] * col[n];
+            accumulate_partial(ctx.in_adj[k].data + n, ctx.out_adj_vec.data[n],
+                               col[n]);
       }
     }
     return;
@@ -279,10 +291,14 @@ void density_bwd(KernelCtx& ctx) {
   if (ctx.scratch[n_partials] == 0.0) return;
   int64_t off = 0;
   for (int k = 0; k < NArgs; ++k) {
-    if (((mask >> k) & 1u) != 0 && ctx.in_adj[k].data != nullptr)
-      Eigen::Map<Eigen::ArrayXd>(ctx.in_adj[k].data, ctx.in[k].len) +=
-          ctx.out_adj *
-          Eigen::Map<const Eigen::ArrayXd>(ctx.scratch + off, ctx.in[k].len);
+    if (((mask >> k) & 1u) != 0 && ctx.in_adj[k].data != nullptr) {
+      if (ctx.in[k].len == 1)
+        accumulate_partial(ctx.in_adj[k].data, ctx.out_adj, ctx.scratch[off]);
+      else
+        Eigen::Map<Eigen::ArrayXd>(ctx.in_adj[k].data, ctx.in[k].len) +=
+            ctx.out_adj *
+            Eigen::Map<const Eigen::ArrayXd>(ctx.scratch + off, ctx.in[k].len);
+    }
     off += ctx.in[k].len;
   }
 }

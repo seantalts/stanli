@@ -40,6 +40,12 @@ bool same_bits(double a, double b) {
   return std::memcmp(&a, &b, sizeof(double)) == 0;
 }
 
+double nan_with(uint64_t bits) {
+  double d;
+  std::memcpy(&d, &bits, sizeof d);
+  return d;
+}
+
 bool same_value(double a, double b) {
   return (std::isnan(a) && std::isnan(b)) || same_bits(a, b);
 }
@@ -77,6 +83,8 @@ struct Rng {
         -1e300,
         1e-8,
         std::numeric_limits<double>::quiet_NaN(),
+        nan_with(0xfff8000000000123ull),
+        nan_with(0x7ff8000000000456ull),
         std::numeric_limits<double>::infinity(),
         -std::numeric_limits<double>::infinity(),
         std::numeric_limits<double>::denorm_min(),
@@ -363,7 +371,73 @@ void test_unary_kernels() {
 
 }  // namespace
 
+void test_nan_adjoints() {
+  using namespace stanli;
+  const uint64_t payloads[] = {0x7ff8000000000000ull, 0xfff8000000000000ull,
+                               0x7ff8000000000123ull, 0xfff8000000000456ull};
+  const Kernel* k = find_kernel(OP_NORMAL_LPDF);
+  const int n = 3;
+  const uint8_t eltv = tile_call_variant(TileCallKind::Density, 0, n);
+  for (int lanes : {1, 5}) {
+    for (uint64_t pa : payloads)
+      for (uint64_t pb : payloads)
+        for (uint64_t pc : payloads)
+          for (int mode = 0; mode < 3; ++mode) {
+            const double partial = nan_with(pa);
+            const double seed = mode == 0 ? 1.5 : nan_with(pb);
+            const double cell0 = mode == 1 ? 2.5 : nan_with(pc);
+            const double part = mode == 2 ? 3.5 : partial;
+            std::vector<double> bscratch((size_t)(n + 1) * lanes, 1.0);
+            for (int a = 0; a < n; ++a)
+              for (int l = 0; l < lanes; ++l)
+                bscratch[(size_t)a * lanes + l] = part;
+            std::vector<double> seeds((size_t)lanes, seed);
+            std::vector<std::vector<double>> bcell(
+                (size_t)n, std::vector<double>((size_t)lanes, cell0));
+            KernelCtx rctx;
+            rctx.n_in = n;
+            std::vector<double> in((size_t)lanes, 0.0);
+            for (int a = 0; a < n; ++a) {
+              rctx.in[a] = Desc{in.data(), lanes};
+              rctx.in_adj[a] = Desc{bcell[(size_t)a].data(), lanes};
+            }
+            std::vector<double> bout((size_t)lanes, 0.0);
+            rctx.out = Desc{bout.data(), lanes};
+            rctx.variant = eltv;
+            rctx.scratch = bscratch.data();
+            rctx.out_adj = lanes == 1 ? seeds[0] : 0.0;
+            rctx.out_adj_vec = Desc{seeds.data(), lanes};
+            k->backward(rctx);
+            for (int a = 0; a < n; ++a)
+              for (int l = 0; l < lanes; ++l) {
+                double args = 0.0, adj = cell0;
+                double sc[4] = {part, part, part, 1.0};
+                double oa = seed;
+                KernelCtx ctx;
+                ctx.n_in = n;
+                for (int b = 0; b < n; ++b) {
+                  ctx.in[b] = Desc{&args, 1};
+                  ctx.in_adj[b] = Desc{b == a ? &adj : nullptr, 1};
+                }
+                double o = 0.0;
+                ctx.out = Desc{&o, 1};
+                ctx.variant = 0;
+                ctx.scratch = sc;
+                ctx.out_adj = oa;
+                ctx.out_adj_vec = Desc{&oa, 1};
+                k->backward(ctx);
+                check(same_bits(adj, bcell[(size_t)a][(size_t)l]),
+                      "nan adjoint payloads " + std::to_string(pa) + "/" +
+                          std::to_string(pb) + "/" + std::to_string(pc) +
+                          " mode " + std::to_string(mode) + " lanes " +
+                          std::to_string(lanes));
+              }
+          }
+  }
+}
+
 int main() {
+  test_nan_adjoints();
   test_density_kernels();
   test_unmarked_kernels();
   test_unary_kernels();
