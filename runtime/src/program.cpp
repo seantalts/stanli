@@ -833,6 +833,263 @@ bool elide_program_dead_constants(Program& p) {
   return true;
 }
 
+namespace {
+
+template <typename F>
+void each_read_operand(Program& p, Program::Instr& I, F fn) {
+  if (I.code == Program::DYN_INDEX) {
+    fn(I.b, 1);
+    return;
+  }
+  if (I.code == Program::CALL) {
+    Program::Call& c = p.calls[(size_t)I.a];
+    for (int j = 0; j < c.n_in; ++j) fn(c.in[j], c.in_len[j]);
+    return;
+  }
+  if (I.code == Program::DENSITY) {
+    const int arity = program_density_arity(I.len);
+    if (arity > 3) {
+      fn(I.a, arity);
+      return;
+    }
+    fn(I.a, 1);
+    if (arity > 1) fn(I.b, 1);
+    if (arity > 2) fn(I.c, 1);
+    return;
+  }
+  const ProgramOpSpec& spec = program_spec_of(I);
+  if (spec.has(kProgramNoInputs)) return;
+  fn(I.a, program_input_len(I, 0));
+  if (spec.has(kProgramReadB)) fn(I.b, program_input_len(I, 1));
+  if (spec.has(kProgramReadC)) fn(I.c, program_input_len(I, 2));
+}
+
+bool copy_eligible_op(const Program& p, size_t pc) {
+  const Program::Instr& I = p.code[pc];
+  if (branches(I.code)) return true;
+  if (program_spec_of(I).has(kProgramNoAdjoint)) return false;
+  if (I.code == Program::CALL)
+    return I.a >= 0 && (size_t)I.a < p.calls.size();
+  return true;
+}
+
+}  // namespace
+
+bool propagate_program_copies(Program& p,
+                              const std::vector<std::pair<int, int>>& seeded) {
+  if (std::getenv("STANLI_NO_COPY_PROP")) return false;
+  const size_t n = p.code.size();
+  const int n_regs = p.n_regs;
+  if (n == 0 || n_regs <= 0) return false;
+  std::vector<char> is_target(n + 1, 0);
+  size_t targets = 0;
+  std::vector<int> call_uses(p.calls.size(), 0);
+  bool any_copy = false;
+  for (size_t pc = 0; pc < n; ++pc) {
+    const Program::Instr& I = p.code[pc];
+    if (!copy_eligible_op(p, pc)) return false;
+    if (branches(I.code)) {
+      if (I.dst <= static_cast<int>(pc) || static_cast<size_t>(I.dst) > n)
+        return false;
+      if (!is_target[(size_t)I.dst]) ++targets;
+      is_target[(size_t)I.dst] = 1;
+    }
+    if (I.code == Program::CALL) ++call_uses[(size_t)I.a];
+    any_copy |= I.code == Program::MOV || I.code == Program::MOVR;
+  }
+  if (!any_copy) return false;
+  if (static_cast<size_t>(n_regs) * (targets + 1) > (size_t{1} << 25))
+    return false;
+  const auto in_file = [&](int reg, int len) {
+    return len >= 0 && reg >= 0 && reg + len <= n_regs;
+  };
+  for (const Program::Instr& I : p.code) {
+    bool ok = true;
+    each_write(p, I, [&](Span s) { ok = ok && in_file(s.reg, s.len); });
+    each_read(p, I, [&](Span s) { ok = ok && in_file(s.reg, s.len); });
+    if (!ok) return false;
+  }
+  for (int reg : p.out_regs)
+    if (!in_file(reg, 1)) return false;
+  std::vector<char> pinned((size_t)n_regs, 0);
+  for (const auto& s : seeded) {
+    if (s.second > 0 && !in_file(s.first, s.second)) return false;
+    for (int k = 0; k < s.second; ++k) pinned[(size_t)(s.first + k)] = 1;
+  }
+
+  std::vector<int32_t> copy_of((size_t)n_regs, -1);
+  std::vector<std::vector<int>> dependents((size_t)n_regs);
+  std::vector<std::vector<int32_t>> arrived(n + 1);
+  std::vector<char> no_op(n, 0);
+  bool reachable = true;
+  bool changed = false;
+
+  const auto reload = [&](const std::vector<int32_t>& state) {
+    for (auto& d : dependents) d.clear();
+    copy_of = state;
+    for (int reg = 0; reg < n_regs; ++reg)
+      if (copy_of[(size_t)reg] >= 0)
+        dependents[(size_t)copy_of[(size_t)reg]].push_back(reg);
+  };
+  const auto kill = [&](int reg) {
+    for (int dep : dependents[(size_t)reg])
+      if (copy_of[(size_t)dep] == reg) copy_of[(size_t)dep] = -1;
+    dependents[(size_t)reg].clear();
+    copy_of[(size_t)reg] = -1;
+  };
+
+  for (size_t pc = 0; pc < n; ++pc) {
+    if (is_target[pc]) {
+      auto& incoming = arrived[pc];
+      if (!incoming.empty()) {
+        if (reachable) {
+          for (int reg = 0; reg < n_regs; ++reg)
+            if (copy_of[(size_t)reg] != incoming[(size_t)reg])
+              copy_of[(size_t)reg] = -1;
+        } else {
+          reload(incoming);
+        }
+        reachable = true;
+      } else if (!reachable) {
+        reload(std::vector<int32_t>((size_t)n_regs, -1));
+        reachable = true;
+      }
+      std::vector<int32_t>().swap(incoming);
+    } else if (!reachable) {
+      reload(std::vector<int32_t>((size_t)n_regs, -1));
+      reachable = true;
+    }
+
+    Program::Instr& I = p.code[pc];
+    std::vector<Span> writes;
+    each_write(p, I, [&](Span s) {
+      if (s.len > 0) writes.push_back(s);
+    });
+    const bool shared_call =
+        I.code == Program::CALL && call_uses[(size_t)I.a] != 1;
+    if (!shared_call) {
+      each_read_operand(p, I, [&](int32_t& reg, int len) {
+        if (len <= 0) return;
+        const int32_t base = copy_of[(size_t)reg];
+        if (base < 0 || base == reg) return;
+        for (int k = 1; k < len; ++k)
+          if (copy_of[(size_t)(reg + k)] != base + k) return;
+        for (const Span& w : writes) {
+          const bool overlap = reg < w.reg + w.len && w.reg < reg + len;
+          if (overlap && !(reg == w.reg && len == w.len)) return;
+        }
+        reg = base;
+        changed = true;
+      });
+    }
+
+    if (I.code == Program::MOV || I.code == Program::MOVR) {
+      const int len = I.code == Program::MOV ? 1 : I.len;
+      if (len > 0 && I.a == I.dst) {
+        no_op[pc] = 1;
+        changed = true;
+        continue;
+      }
+      std::vector<int32_t> roots((size_t)std::max(len, 0), -1);
+      const bool disjoint = I.a + len <= I.dst || I.dst + len <= I.a;
+      for (int k = 0; k < len && disjoint; ++k) {
+        const int32_t src = I.a + k;
+        const int32_t root = copy_of[(size_t)src] >= 0 ? copy_of[(size_t)src]
+                                                         : src;
+        if (root < I.dst || root >= I.dst + len) roots[(size_t)k] = root;
+      }
+      for (const Span& w : writes)
+        for (int k = 0; k < w.len; ++k) kill(w.reg + k);
+      for (int k = 0; k < len; ++k) {
+        const int32_t root = roots[(size_t)k];
+        if (root < 0) continue;
+        copy_of[(size_t)(I.dst + k)] = root;
+        dependents[(size_t)root].push_back(I.dst + k);
+      }
+    } else {
+      for (const Span& w : writes)
+        for (int k = 0; k < w.len; ++k) kill(w.reg + k);
+    }
+
+    if (branches(I.code)) {
+      auto& slot = arrived[(size_t)I.dst];
+      if (slot.empty()) {
+        slot = copy_of;
+      } else {
+        for (int reg = 0; reg < n_regs; ++reg)
+          if (slot[(size_t)reg] != copy_of[(size_t)reg])
+            slot[(size_t)reg] = -1;
+      }
+      if (I.code == Program::JMP) reachable = false;
+    }
+  }
+
+  const size_t words = ((size_t)n_regs + 63) / 64;
+  using Bits = std::vector<uint64_t>;
+  const auto test = [](const Bits& b, int reg) {
+    return (b[(size_t)reg >> 6] >> (reg & 63)) & 1u;
+  };
+  const auto set = [](Bits& b, int reg) {
+    b[(size_t)reg >> 6] |= uint64_t{1} << (reg & 63);
+  };
+  const auto clear = [](Bits& b, int reg) {
+    b[(size_t)reg >> 6] &= ~(uint64_t{1} << (reg & 63));
+  };
+  std::vector<Bits> snapshot(n + 1);
+  Bits live(words, 0);
+  for (int reg : p.out_regs) set(live, reg);
+  if (is_target[n]) snapshot[n] = live;
+  std::vector<char> remove(n, 0);
+  for (size_t pc = n; pc-- > 0;) {
+    Program::Instr& I = p.code[pc];
+    if (I.code == Program::JMP) {
+      live = snapshot[(size_t)I.dst];
+    } else if (I.code == Program::JZ) {
+      const Bits& target = snapshot[(size_t)I.dst];
+      for (size_t w = 0; w < words; ++w) live[w] |= target[w];
+    }
+    bool removable = no_op[pc];
+    const bool droppable =
+        I.code == Program::MOV || I.code == Program::MOVR ||
+        I.code == Program::CONST || I.code == Program::CONSTR ||
+        I.code == Program::FILL;
+    if (!removable && droppable) {
+      removable = true;
+      each_write(p, I, [&](Span s) {
+        for (int k = 0; k < s.len; ++k)
+          if (test(live, s.reg + k) || pinned[(size_t)(s.reg + k)])
+            removable = false;
+      });
+    }
+    if (removable) {
+      remove[pc] = 1;
+    } else {
+      each_write(p, I, [&](Span s) {
+        for (int k = 0; k < s.len; ++k) clear(live, s.reg + k);
+      });
+      each_read(p, I, [&](Span s) {
+        for (int k = 0; k < s.len; ++k) set(live, s.reg + k);
+      });
+    }
+    if (is_target[pc]) snapshot[pc] = live;
+  }
+
+  if (std::none_of(remove.begin(), remove.end(), [](char b) { return b; }))
+    return changed;
+  std::vector<int> new_pc(n + 1);
+  std::vector<Program::Instr> code;
+  code.reserve(n);
+  for (size_t pc = 0; pc < n; ++pc) {
+    new_pc[pc] = static_cast<int>(code.size());
+    if (!remove[pc]) code.push_back(p.code[pc]);
+  }
+  new_pc[n] = static_cast<int>(code.size());
+  for (auto& I : code)
+    if (branches(I.code)) I.dst = new_pc[(size_t)I.dst];
+  p.code = std::move(code);
+  return true;
+}
+
 void compact_program(Program& p, std::vector<std::pair<int, int>>& seeded) {
   (void)compact_program_gated(p, seeded, true);
 }

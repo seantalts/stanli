@@ -2642,11 +2642,250 @@ void test_clean_sweep() {
   test_unsetenv("STANLI_REGION_MAP_CHECK_CLEAN");
 }
 
+const Ref ref_nested = [](const std::vector<var>& p, const Series& s,
+                          std::vector<int>* taken) {
+  const var sc = stan::math::exp(p[1]);
+  var lp = 0;
+  for (size_t i = 0; i < s.y.size(); ++i) {
+    const var mu = p[0] * s.x[i];
+    const var z = (s.y[i] - mu) / sc;
+    const bool tail = s.y[i] - mu < -sc;
+    if (taken) taken->push_back(tail);
+    lp += tail ? -0.5 * stan::math::square(z) - stan::math::log(sc)
+               : stan::math::log1p_exp(-stan::math::square(z) * sc) -
+                     stan::math::log(sc);
+  }
+  return lp;
+};
+
+int count_moves(const std::vector<stanli::Program::Instr>& code) {
+  int n = 0;
+  for (const auto& I : code)
+    n += I.code == stanli::Program::MOV || I.code == stanli::Program::MOVR;
+  return n;
+}
+
+void test_copy_propagation_in_map() {
+  const std::string stem = "region_map_nested_udf";
+  CompiledModel off = compile_with(stem, 64, "STANLI_NO_COPY_PROP", "1");
+  CompiledModel cm = compile_with(stem, 64);
+  expect_mapped(stem, cm);
+  const auto& before = map_payload(off);
+  const auto& after = map_payload(cm);
+  check(count_moves(before.code) > 0, stem + ": inlined body has copies");
+  check(count_moves(after.code) == 0, stem + ": no copies left in the body");
+  check(count_moves(after.prologue) == 0, stem + ": no copies in the prologue");
+  check(after.code.size() < before.code.size(),
+        stem + ": body is shorter");
+  check(after.adj.code.size() <= before.adj.code.size(),
+        stem + ": adjoint is no longer");
+  int adjoint_moves = 0;
+  for (const auto& A : after.adj.code)
+    adjoint_moves += A.code == stanli::Program::MOV;
+  check(adjoint_moves == 0, stem + ": no copies in the adjoint");
+  run_points(stem, 64, udf_points, ref_nested);
+
+  CompiledModel scalar = compile_with(stem, 64, "STANLI_REGION_MAP_LANES", "0");
+  check(map_payload(cm).lanes.active && !map_payload(scalar).lanes.active,
+        stem + ": lane and scalar forms");
+  Executor lanes_ex(cm.graph), scalar_ex(scalar.graph);
+  cm.bind(lanes_ex);
+  scalar.bind(scalar_ex);
+  for (const Params& point : udf_points) {
+    const Eval a = evaluate(lanes_ex, point);
+    const Eval b = evaluate(scalar_ex, point);
+    check(a.lp == b.lp && a.grad == b.grad,
+          stem + ": lanes bitwise equal to the scalar map");
+  }
+}
+
 }  // namespace region_map_test
+
+
+namespace copy_prop_test {
+
+using stanli::Program;
+using Instr = Program::Instr;
+using Seeded = std::vector<std::pair<int, int>>;
+
+Program make_program(int n_regs, std::vector<Instr> code,
+                     std::vector<int> out_regs) {
+  Program p;
+  p.n_regs = n_regs;
+  p.code = std::move(code);
+  p.out_regs = std::move(out_regs);
+  p.pool = {2.0};
+  return p;
+}
+
+int count_code(const Program& p, Program::Code code) {
+  int n = 0;
+  for (const Instr& I : p.code) n += I.code == code;
+  return n;
+}
+
+void test_chain_is_forwarded_and_dropped() {
+  Program p = make_program(4,
+                           {Instr(Program::MOV, 1, 0), Instr(Program::MOV, 2, 1),
+                            Instr(Program::ADD, 3, 2, 2)},
+                           {3});
+  check(stanli::propagate_program_copies(p, {{0, 1}}), "chain: program changed");
+  check(p.code.size() == 1 && p.code[0].code == Program::ADD,
+        "chain: both copies dropped");
+  check(p.code[0].a == 0 && p.code[0].b == 0, "chain: reads point at the root");
+}
+
+void test_source_rewritten_on_one_path() {
+  Program p = make_program(
+      4,
+      {Instr(Program::MOV, 2, 0), Instr(Program::JZ, 3, 1),
+       Instr(Program::ADD, 0, 0, 1), Instr(Program::ADD, 3, 2, 2)},
+      {3});
+  stanli::propagate_program_copies(p, {{0, 1}, {1, 1}});
+  check(count_code(p, Program::MOV) == 1, "rewritten source: copy kept");
+  check(p.code.back().a == 2 && p.code.back().b == 2,
+        "rewritten source: join read keeps the destination");
+  check(p.code[1].code == Program::JZ && p.code[1].dst == 3,
+        "rewritten source: jump target intact");
+}
+
+void test_destination_written_on_two_paths() {
+  Program p = make_program(
+      4,
+      {Instr(Program::JZ, 3, 0), Instr(Program::MOV, 2, 0),
+       Instr(Program::JMP, 4), Instr(Program::MOV, 2, 1),
+       Instr(Program::ADD, 3, 2, 2)},
+      {3});
+  stanli::propagate_program_copies(p, {{0, 1}, {1, 1}});
+  check(count_code(p, Program::MOV) == 2, "joined writers: both copies kept");
+  check(p.code.back().a == 2 && p.code.back().b == 2,
+        "joined writers: read keeps the destination");
+}
+
+void test_branch_local_copy_is_forwarded() {
+  Program p = make_program(
+      4,
+      {Instr(Program::JZ, 4, 0), Instr(Program::MOV, 2, 1),
+       Instr(Program::ADD, 3, 2, 2), Instr(Program::JMP, 5),
+       Instr(Program::CONST, 3, 0)},
+      {3});
+  check(stanli::propagate_program_copies(p, {{0, 1}, {1, 1}}),
+        "branch local: program changed");
+  check(count_code(p, Program::MOV) == 0, "branch local: copy dropped");
+  for (const Instr& I : p.code)
+    if (I.code == Program::ADD)
+      check(I.a == 1 && I.b == 1, "branch local: read points at the source");
+}
+
+Program::Call range_call(int in, int len, int out) {
+  Program::Call c;
+  c.n_in = 1;
+  c.in[0] = in;
+  c.in_len[0] = len;
+  c.out = out;
+  c.out_len = 1;
+  return c;
+}
+
+void test_call_input_range() {
+  {
+    Program p = make_program(
+        7,
+        {Instr(Program::MOV, 4, 0), Instr(Program::MOV, 5, 2),
+         Instr(Program::CALL, 0, 0)},
+        {6});
+    p.calls.push_back(range_call(4, 2, 6));
+    stanli::propagate_program_copies(p, {{0, 1}, {2, 1}});
+    check(count_code(p, Program::MOV) == 2, "split range: copies kept");
+    check(p.calls[0].in[0] == 4, "split range: call input unchanged");
+  }
+  {
+    Program p = make_program(
+        7,
+        {Instr(Program::MOV, 4, 0), Instr(Program::MOV, 5, 1),
+         Instr(Program::CALL, 0, 0)},
+        {6});
+    p.calls.push_back(range_call(4, 2, 6));
+    stanli::propagate_program_copies(p, {{0, 2}});
+    check(count_code(p, Program::MOV) == 0, "contiguous range: copies dropped");
+    check(p.calls[0].in[0] == 0, "contiguous range: call reads the source run");
+  }
+}
+
+void test_dyn_index_run_keeps_its_registers() {
+  Program p = make_program(
+      13,
+      {Instr(Program::MOV, 10, 0), Instr(Program::MOV, 11, 1),
+       Instr(Program::MOV, 12, 2), Instr(Program::MOV, 8, 3),
+       Instr(Program::DYN_INDEX, 5, 10, 8, 0, 3)},
+      {5});
+  stanli::propagate_program_copies(p, {{0, 4}});
+  check(count_code(p, Program::MOV) == 3, "dyn index: run copies kept");
+  const Instr& I = p.code.back();
+  check(I.code == Program::DYN_INDEX && I.a == 10 && I.c == 0 && I.len == 3,
+        "dyn index: run operands unchanged");
+  check(I.b == 3, "dyn index: index copy forwarded");
+}
+
+void test_seeded_and_live_out_writes_stay() {
+  {
+    Program p = make_program(
+        3, {Instr(Program::MOV, 0, 1), Instr(Program::ADD, 2, 0, 0)}, {2});
+    stanli::propagate_program_copies(p, {{0, 1}, {1, 1}});
+    check(count_code(p, Program::MOV) == 1, "seeded: write to a live-in kept");
+    check(p.code.back().a == 1 && p.code.back().b == 1,
+          "seeded: later reads follow the source");
+  }
+  {
+    Program p = make_program(
+        4, {Instr(Program::MOV, 2, 0), Instr(Program::ADD, 3, 2, 2)}, {2, 3});
+    stanli::propagate_program_copies(p, {{0, 1}});
+    check(count_code(p, Program::MOV) == 1, "live-out: copy kept");
+    check(p.code.back().a == 0, "live-out: reads still forwarded");
+  }
+}
+
+void test_dead_constant_and_range_copy() {
+  {
+    Program p = make_program(4,
+                             {Instr(Program::CONST, 2, 0),
+                              Instr(Program::MOV, 2, 0),
+                              Instr(Program::ADD, 3, 2, 2)},
+                             {3});
+    stanli::propagate_program_copies(p, {{0, 1}});
+    check(p.code.size() == 1 && p.code[0].code == Program::ADD,
+          "dead constant: fill and copy both dropped");
+  }
+  {
+    Program p = make_program(
+        8, {Instr(Program::MOVR, 4, 0, 0, 0, 2),
+            Instr(Program::LOG_RANGE, 6, 4, 0, 0, 2)},
+        {6, 7});
+    stanli::propagate_program_copies(p, {{0, 2}});
+    check(count_code(p, Program::MOVR) == 0, "range copy: dropped");
+    check(p.code.size() == 1 && p.code[0].a == 0,
+          "range copy: ranged read follows the source run");
+  }
+}
+
+}  // namespace copy_prop_test
+
+static void test_copy_propagation_programs() {
+  using namespace copy_prop_test;
+  test_chain_is_forwarded_and_dropped();
+  test_source_rewritten_on_one_path();
+  test_destination_written_on_two_paths();
+  test_branch_local_copy_is_forwarded();
+  test_call_input_range();
+  test_dyn_index_run_keeps_its_registers();
+  test_seeded_and_live_out_writes_stay();
+  test_dead_constant_and_range_copy();
+}
 
 static void test_region_map() {
   using namespace region_map_test;
   test_same_executor_two_points();
+  test_copy_propagation_in_map();
   test_size_independent();
   test_refusals();
   test_shapes();
@@ -11000,6 +11239,7 @@ int main() {
   test_structured_while_vector_return();
   test_wiener_forms();
   test_udf_param_branch();
+  test_copy_propagation_programs();
   test_region_map();
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;

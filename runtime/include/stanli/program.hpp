@@ -385,6 +385,9 @@ bool elide_program_dead_constants(Program& p);
 // Acyclic CFG version, retaining arithmetic and refusing unmodelled spans.
 bool elide_acyclic_program_constants(Program& p);
 
+bool propagate_program_copies(Program& p,
+                              const std::vector<std::pair<int, int>>& seeded);
+
 // Prove definite initialization at every read and exit across the CFG. CALL
 // scratch is private during var replay and therefore is not a register write.
 bool program_initializes_reads(const Program& p,

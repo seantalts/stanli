@@ -391,7 +391,19 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
   };
 }
 void Lowering::finalize_island_program(IslandProg& prog, bool native,
-                                       bool keep_every_clear) {
+                                       bool keep_every_clear,
+                                       bool propagate_copies) {
+  if (propagate_copies && native) {
+    const IslandProg before = prog;
+    finalize_island_program_once(prog, native, keep_every_clear, true);
+    if (prog.native_adj) return;
+    static_cast<IslandProg&>(prog) = before;
+  }
+  finalize_island_program_once(prog, native, keep_every_clear, false);
+}
+void Lowering::finalize_island_program_once(IslandProg& prog, bool native,
+                                            bool keep_every_clear,
+                                            bool propagate_copies) {
   // Forward-only branches can record the executed path for generated
   // adjoints. Unsupported derivatives and loops retain the replay.
   // The register compactor's liveness analysis is straight-line (with
@@ -406,6 +418,11 @@ void Lowering::finalize_island_program(IslandProg& prog, bool native,
     if (!jump && program_code_spec(instr.code).has(kProgramNoAdjoint))
       has_unmodelled_ranges = true;
     if (jump && instr.dst <= static_cast<int>(pc)) has_back_edge = true;
+  }
+  if (propagate_copies && !has_back_edge && !has_unmodelled_ranges) {
+    std::vector<std::pair<int, int>> seeded;
+    for (const auto& input : prog.ins) seeded.emplace_back(input.reg, input.len);
+    propagate_program_copies(prog, seeded);
   }
   if (!has_back_edge && !has_unmodelled_ranges)
     elide_acyclic_program_constants(prog);
@@ -555,7 +572,7 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   if (prog->out_regs.empty() && !(e && expr_out->len == 0) &&
       (s == nullptr || reg->out_names.empty()) && !reg->has_effect)
     fail("runtime-control region produces nothing", s ? s->raw : e->raw);
-  finalize_island_program(*prog, !in_write_array);
+  finalize_island_program(*prog, !in_write_array, false, true);
   *prog_out = std::move(prog);
 }
 std::vector<int> Lowering::pack_island_inputs(IslandProg& prog,
