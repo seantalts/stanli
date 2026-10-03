@@ -13,7 +13,23 @@ namespace {
 
 int64_t region_map_scratch(const Op& op, const Slot*) {
   const auto& p = *static_cast<const RegionMapProg*>(op.udata);
-  return (int64_t)p.n_regs + p.adj.n_regs;
+  return (int64_t)p.n_regs + p.adj.n_regs + p.count * p.saved_cells;
+}
+
+void run_prologue(const RegionMapProg& p, double* reg) {
+  for (const auto& I : p.prologue) {
+    switch (I.code) {
+      case Program::CONST:
+        reg[I.dst] = p.pool[(size_t)I.a];
+        break;
+      case Program::CONSTR:
+        std::copy_n(p.pool.data() + I.a, I.len, reg + I.dst);
+        break;
+      default:
+        std::fill_n(reg + I.dst, I.len, p.pool[(size_t)I.a]);
+        break;
+    }
+  }
 }
 
 template <bool ReuseCallCtx>
@@ -30,10 +46,15 @@ void run_once(const RegionMapProg& p, KernelCtx& ctx) {
 template <bool ReuseCallCtx>
 void run_iterations(const RegionMapProg& p, KernelCtx& ctx) {
   double total = 0.0;
+  double* row = ctx.scratch + p.n_regs + p.adj.n_regs;
   for (int64_t i = 0; i < p.count; ++i) {
     ctx.scratch[p.iter_reg] = static_cast<double>(p.lo + i);
     run_once<ReuseCallCtx>(p, ctx);
     total += ctx.scratch[p.out_regs[0]];
+    for (const auto& span : p.saved) {
+      std::copy_n(ctx.scratch + span.first, span.second, row);
+      row += span.second;
+    }
   }
   ctx.out.data[0] = total;
 }
@@ -46,19 +67,24 @@ void region_map_fwd(KernelCtx& ctx) {
     std::copy_n(ctx.in[li.input].data + li.offset, li.len,
                 ctx.scratch + li.reg);
   }
+  run_prologue(p, ctx.scratch);
   if (p.calls.empty())
     run_iterations<false>(p, ctx);
   else
     run_iterations<true>(p, ctx);
 }
 
-template <bool ReuseCallCtx>
 void sweep(const RegionMapProg& p, KernelCtx& ctx, double* adj) {
   const double seed = ctx.out_adj_vec.data[0];
   const int64_t target = p.adj.adj_reg[(size_t)p.out_regs[0]];
+  const double* saved = ctx.scratch + p.n_regs + p.adj.n_regs;
   for (int64_t i = p.count; i-- > 0;) {
     ctx.scratch[p.iter_reg] = static_cast<double>(p.lo + i);
-    run_once<ReuseCallCtx>(p, ctx);
+    const double* row = saved + i * p.saved_cells;
+    for (const auto& span : p.saved) {
+      std::copy_n(row, span.second, ctx.scratch + span.first);
+      row += span.second;
+    }
     for (const auto& span : p.transient)
       std::fill_n(adj + span.first, span.second, 0.0);
     adj[target] += seed;
@@ -80,10 +106,7 @@ void region_map_bwd(KernelCtx& ctx) {
       adj[(size_t)map[(size_t)(li.reg + i)]] =
           ctx.in_adj[li.input].data[li.offset + i];
   }
-  if (p.calls.empty())
-    sweep<false>(p, ctx, adj);
-  else
-    sweep<true>(p, ctx, adj);
+  sweep(p, ctx, adj);
   for (const auto& li : p.ins) {
     if (li.input < 0 || !ctx.in_adj[li.input].data) continue;
     for (int i = 0; i < li.len; ++i) {

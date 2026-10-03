@@ -1616,6 +1616,128 @@ void test_copied_executors() {
   }
 }
 
+const stanli::RegionMapProg& map_payload(const CompiledModel& cm) {
+  for (const stanli::Op& op : cm.graph.ops)
+    if (op.opcode == OP_REGION_MAP)
+      return *static_cast<const stanli::RegionMapProg*>(op.udata);
+  throw std::runtime_error("no OP_REGION_MAP");
+}
+
+template <typename F>
+void each_written_span(const stanli::Program& p,
+                       const stanli::Program::Instr& I, F fn) {
+  if (I.code == stanli::Program::CALL) {
+    const auto& c = p.calls[(size_t)I.a];
+    fn(c.out, c.out_len);
+    fn(c.scratch, c.scratch_len);
+    return;
+  }
+  const int len = stanli::program_output_len(I);
+  if (len > 0) fn(I.dst, len);
+}
+
+void test_hoisted_constants_and_saved_state() {
+  for (const char* stem :
+       {"region_map_branch", "region_map_udf", "region_map_call"}) {
+    CompiledModel cm = compile_with(stem, 64);
+    const auto& p = map_payload(cm);
+    const std::string what(stem);
+    check(!p.prologue.empty(), what + ": constants hoisted into a prologue");
+    std::vector<int> body_writes((size_t)p.n_regs, 0);
+    for (const auto& I : p.code)
+      each_written_span(p, I, [&](int reg, int len) {
+        for (int k = 0; k < len; ++k) ++body_writes[(size_t)(reg + k)];
+      });
+    std::vector<char> hoisted((size_t)p.n_regs, 0);
+    for (const auto& I : p.prologue) {
+      check(I.code == stanli::Program::CONST ||
+                I.code == stanli::Program::CONSTR ||
+                I.code == stanli::Program::FILL,
+            what + ": prologue holds only constant stores");
+      const int len = stanli::program_output_len(I);
+      for (int k = 0; k < len; ++k) {
+        check(body_writes[(size_t)(I.dst + k)] == 0,
+              what + ": the body does not rewrite a hoisted register");
+        hoisted[(size_t)(I.dst + k)] = 1;
+      }
+    }
+    for (const auto& I : p.code) {
+      if (I.code != stanli::Program::CONST &&
+          I.code != stanli::Program::CONSTR && I.code != stanli::Program::FILL)
+        continue;
+      bool rewritten = false;
+      const int len = stanli::program_output_len(I);
+      for (int k = 0; k < len; ++k)
+        rewritten |= body_writes[(size_t)(I.dst + k)] > 1;
+      check(rewritten, what + ": a constant left in the body is rewritten");
+    }
+    std::vector<char> live((size_t)p.n_regs, 0);
+    for (const auto& li : p.ins)
+      for (int k = 0; k < li.len; ++k) live[(size_t)(li.reg + k)] = 1;
+    int cells = 0;
+    for (const auto& span : p.saved)
+      for (int k = 0; k < span.second; ++k) {
+        const size_t reg = (size_t)(span.first + k);
+        check(!live[reg] && !hoisted[reg],
+              what + ": saved state excludes live-ins and hoisted constants");
+        check(body_writes[reg] > 0, what + ": saved state is body-written");
+        ++cells;
+      }
+    check(cells > 0 && cells == p.saved_cells,
+          what + ": saved cell count matches its spans");
+    check(p.saved_cells < p.n_regs, what + ": saved state is a strict subset");
+  }
+}
+
+void test_call_partials_differ_per_iteration() {
+  const int n = 64;
+  std::vector<double> offsets;
+  for (int i = 0; i < n; ++i) offsets.push_back(0.3 * std::sin(1.7 * i + 0.4));
+  std::ostringstream json;
+  json.precision(17);
+  json << "{\"N\":" << n << ",\"offsets\":[";
+  for (int i = 0; i < n; ++i) json << (i ? "," : "") << offsets[(size_t)i];
+  json << "],\"z_data\":0.25}";
+  CompiledModel cm = stanli::compile_model(
+      slurp("tests/fixtures/hypergeometric_1f0.tmir.sexp"),
+      DataMap::from_json(json.str()));
+  expect_mapped("hypergeometric loop", cm);
+  const auto& p = map_payload(cm);
+  check(!p.calls.empty(), "hypergeometric map body holds a CALL");
+  check(!p.prologue.empty() && p.saved_cells > 0,
+        "hypergeometric map hoists constants and saves iteration state");
+
+  const auto cov = [](const var& a, const var& z) {
+    return stan::math::hypergeometric_1F0(a, z);
+  };
+  const auto ref = [&](const std::vector<var>& v) {
+    const var a = v[0];
+    const var z = 0.2 * stan::math::tanh(v[1]);
+    var lp = -0.5 * stan::math::square(a) - 0.5 * stan::math::square(v[1]);
+    lp += cov(var(0.5), var(0.25)) * a;
+    lp += cov(a, var(0.25)) + cov(var(0.5), z);
+    for (int i = 0; i < n; ++i)
+      lp += a.val() > 0 ? cov(a, z + offsets[(size_t)i])
+                        : cov(-a, z - offsets[(size_t)i]);
+    return lp;
+  };
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (const Params& point :
+       {Params{0.6, 0.4}, Params{-0.8, -0.3}, Params{0.6, 0.4},
+        Params{0.2, -0.9}, Params{-0.8, -0.3}}) {
+    std::vector<var> v(point.begin(), point.end());
+    var lp = ref(v);
+    lp.grad();
+    Eval want;
+    want.lp = lp.val();
+    for (const var& q : v) want.grad.push_back(q.adj());
+    stan::math::recover_memory();
+    expect_eval("hypergeometric map at " + std::to_string(point[0]),
+                evaluate(ex, point), want);
+  }
+}
+
 }  // namespace region_map_test
 
 static void test_region_map() {
@@ -1626,6 +1748,8 @@ static void test_region_map() {
   test_shapes();
   test_out_of_range();
   test_copied_executors();
+  test_hoisted_constants_and_saved_state();
+  test_call_partials_differ_per_iteration();
 }
 
 int main() {

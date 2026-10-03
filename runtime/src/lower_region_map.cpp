@@ -20,6 +20,85 @@ bool body_escapes(const mir::Stmt& s, bool in_inner_loop) {
 }
 
 constexpr size_t kMaxRegionMapCode = 4096;
+constexpr int64_t kMaxRegionMapSavedCells = int64_t{1} << 24;
+
+template <typename F>
+void each_written_span(const Program& p, const Program::Instr& I, F fn) {
+  if (I.code == Program::CALL) {
+    const Program::Call& call = p.calls[(size_t)I.a];
+    fn(call.out, call.out_len);
+    fn(call.scratch, call.scratch_len);
+    return;
+  }
+  if (I.code == Program::TRANSFORM) {
+    const Program::Transform& tr = p.transforms[(size_t)I.a];
+    fn(tr.out, tr.out_len);
+    fn(tr.jac, 1);
+    return;
+  }
+  const int len = program_output_len(I);
+  if (len > 0) fn(I.dst, len);
+}
+
+bool is_constant_store(Program::Code code) {
+  return code == Program::CONST || code == Program::CONSTR ||
+         code == Program::FILL;
+}
+
+void split_prologue(RegionMapProg& p) {
+  const size_t n = p.code.size();
+  std::vector<int> writes((size_t)p.n_regs, 0);
+  for (const auto& I : p.code)
+    each_written_span(p, I, [&](int reg, int len) {
+      for (int k = 0; k < len; ++k) ++writes[(size_t)(reg + k)];
+    });
+  std::vector<char> live((size_t)p.n_regs, 0);
+  for (const auto& li : p.ins)
+    for (int k = 0; k < li.len; ++k) live[(size_t)(li.reg + k)] = 1;
+
+  std::vector<char> hoist(n, 0);
+  for (size_t i = 0; i < n; ++i) {
+    const Program::Instr& I = p.code[i];
+    if (!is_constant_store(I.code)) continue;
+    const int len = program_output_len(I);
+    bool single = len > 0;
+    for (int k = 0; k < len && single; ++k)
+      single = writes[(size_t)(I.dst + k)] == 1 && !live[(size_t)(I.dst + k)];
+    hoist[i] = single;
+  }
+
+  std::vector<int> new_index(n + 1, 0);
+  std::vector<Program::Instr> body;
+  for (size_t i = 0; i < n; ++i) {
+    new_index[i] = static_cast<int>(body.size());
+    if (hoist[i])
+      p.prologue.push_back(p.code[i]);
+    else
+      body.push_back(p.code[i]);
+  }
+  new_index[n] = static_cast<int>(body.size());
+  for (auto& I : body)
+    if (I.code == Program::JZ || I.code == Program::JMP)
+      I.dst = new_index[(size_t)I.dst];
+  p.code = std::move(body);
+
+  std::vector<char> written((size_t)p.n_regs, 0);
+  for (const auto& I : p.code)
+    each_written_span(p, I, [&](int reg, int len) {
+      for (int k = 0; k < len; ++k) written[(size_t)(reg + k)] = 1;
+    });
+  for (int reg = 0; reg < p.n_regs;) {
+    if (!written[(size_t)reg]) {
+      ++reg;
+      continue;
+    }
+    int end = reg;
+    while (end < p.n_regs && written[(size_t)end]) ++end;
+    p.saved.emplace_back(reg, end - reg);
+    p.saved_cells += end - reg;
+    reg = end;
+  }
+}
 
 }  // namespace
 
@@ -140,6 +219,9 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   prog->iter_reg = prog->ins.back().reg;
   prog->lo = lo;
   prog->count = static_cast<int64_t>(hi) - lo + 1;
+  split_prologue(*prog);
+  if (prog->count * prog->saved_cells > kMaxRegionMapSavedCells)
+    return abandon("per-iteration state too large");
   for (int cell = 0; cell < n_cells;) {
     if (persistent[(size_t)cell]) {
       ++cell;
@@ -165,7 +247,9 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   if (diagnostics)
     emit_diagnostic("stanli_region_map selected (" + s.loopvar +
                     "): iterations=" + std::to_string(prog->count) +
-                    " instructions=" + std::to_string(prog->code.size()) +
+                    " prologue=" + std::to_string(prog->prologue.size()) +
+                    " body=" + std::to_string(prog->code.size()) +
+                    " saved_cells=" + std::to_string(prog->saved_cells) +
                     " registers=" + std::to_string(prog->n_regs) +
                     " live_ins=" + std::to_string(prog->ins.size()));
   return true;
