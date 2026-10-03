@@ -3890,6 +3890,27 @@ struct ProgramCompiler {
       check_program_integer_contract(*frame->body, funs, visited);
   }
 
+  void compile_loop_body(const mir::Stmt& loop, int index) {
+    known_reals.erase(loop.loopvar);
+    require_runtime_integer_contract();
+    ints.erase(loop.loopvar);
+    reals[loop.loopvar] = Range{index, 1};
+    loops.push_back({});
+    loops.back().structured = true;
+    structured_while_seen = true;
+    ++structured_while_depth;
+    ++runtime_for_depth;
+    try {
+      for (const auto& child : loop.body) stmt(child);
+    } catch (PathExit&) {
+    }
+    --runtime_for_depth;
+    --structured_while_depth;
+    loops.pop_back();
+    reals.erase(loop.loopvar);
+    int_decl_at.erase(loop.loopvar);
+  }
+
   void emit_function_return(Range value) {
     if (!return_frame) bail("runtime return has no function scope");
     auto& frame = *return_frame;

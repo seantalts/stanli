@@ -1608,6 +1608,13 @@ struct Lowering {
   void lower_island(const mir::Stmt* s, const mir::Expr* e, IslandRegion* reg,
                     Range* expr_out, std::shared_ptr<IslandProg>* prog_out);
 
+  void configure_island_compiler(ProgramCompiler& c, IslandProg& prog,
+                                 IslandRegion& region, const mir::Stmt* s);
+  void finalize_island_program(IslandProg& prog, bool native);
+  std::vector<int> pack_island_inputs(IslandProg& prog,
+                                      std::vector<int> inputs);
+  bool lower_region_map(const mir::Stmt& s, long lo, long hi);
+
   // The OP_ISLAND for a compiled region, plus one extraction per live-out.
   void emit_island(const std::shared_ptr<IslandProg>& prog,
                    const IslandRegion& reg, const std::vector<int>& out_lens,

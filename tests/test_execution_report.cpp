@@ -173,10 +173,12 @@ int main() {
     }
     if (mode == 1) test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
     if (mode == 2) test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0", 1);
+    if (mode >= 2) test_setenv("STANLI_REGION_MAP", "0", 1);
     auto cm = compile_model(
         slurp("tests/fixtures/hypergeometric_1f0.tmir.sexp"), inputs);
     if (mode == 1) test_unsetenv("STANLI_STRUCTURED_LOOPS");
     if (mode == 2) test_unsetenv("STANLI_BOUNDED_SPECIALIZATION");
+    if (mode >= 2) test_unsetenv("STANLI_REGION_MAP");
     const auto selected = execution_report(cm);
     check(has(selected, "OP_HYPERGEOMETRIC_1F0"),
           "hypergeometric shared kernel is visible");

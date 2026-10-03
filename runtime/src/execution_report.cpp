@@ -136,7 +136,7 @@ struct Report {
       str("children_status", "depth_limit");
       return;
     }
-    if (code == OP_ISLAND) {
+    if (code == OP_ISLAND || code == OP_REGION_MAP) {
       w.Key("region");
       w.StartObject();
       island(*static_cast<const IslandProg*>(data), id, reverse, depth);

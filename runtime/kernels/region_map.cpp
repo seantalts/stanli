@@ -1,0 +1,106 @@
+#include <stanli/adjoint.hpp>
+#include <stanli/graph.hpp>
+#include <stanli/island.hpp>
+#include <stanli/optable.hpp>
+#include <stanli/region_map.hpp>
+
+#include <algorithm>
+#include <stdexcept>
+#include <string_view>
+
+namespace stanli {
+namespace {
+
+int64_t region_map_scratch(const Op& op, const Slot*) {
+  const auto& p = *static_cast<const RegionMapProg*>(op.udata);
+  return (int64_t)p.n_regs + p.adj.n_regs;
+}
+
+template <bool ReuseCallCtx>
+void run_once(const RegionMapProg& p, KernelCtx& ctx) {
+  try {
+    run_program_impl<ReuseCallCtx>(p, ctx.scratch, ctx.eval_state);
+  } catch (const std::out_of_range& e) {
+    if (std::string_view(e.what()) != "register-program index out of range")
+      throw;
+    throw std::out_of_range("structured index out of range");
+  }
+}
+
+template <bool ReuseCallCtx>
+void run_iterations(const RegionMapProg& p, KernelCtx& ctx) {
+  double total = 0.0;
+  for (int64_t i = 0; i < p.count; ++i) {
+    ctx.scratch[p.iter_reg] = static_cast<double>(p.lo + i);
+    run_once<ReuseCallCtx>(p, ctx);
+    total += ctx.scratch[p.out_regs[0]];
+  }
+  ctx.out.data[0] = total;
+}
+
+void region_map_fwd(KernelCtx& ctx) {
+  const auto& p = *static_cast<const RegionMapProg*>(ctx.udata);
+  for (size_t k = 0; k < p.ins.size(); ++k) {
+    const auto& li = p.ins[k];
+    if (li.input < 0) continue;
+    std::copy_n(ctx.in[li.input].data + li.offset, li.len,
+                ctx.scratch + li.reg);
+  }
+  if (p.calls.empty())
+    run_iterations<false>(p, ctx);
+  else
+    run_iterations<true>(p, ctx);
+}
+
+template <bool ReuseCallCtx>
+void sweep(const RegionMapProg& p, KernelCtx& ctx, double* adj) {
+  const double seed = ctx.out_adj_vec.data[0];
+  const int64_t target = p.adj.adj_reg[(size_t)p.out_regs[0]];
+  for (int64_t i = p.count; i-- > 0;) {
+    ctx.scratch[p.iter_reg] = static_cast<double>(p.lo + i);
+    run_once<ReuseCallCtx>(p, ctx);
+    for (const auto& span : p.transient)
+      std::fill_n(adj + span.first, span.second, 0.0);
+    adj[target] += seed;
+    run_adjoint(p, p.adj, ctx.scratch, adj);
+  }
+}
+
+void region_map_bwd(KernelCtx& ctx) {
+  const auto& p = *static_cast<const RegionMapProg*>(ctx.udata);
+  const bool continuing = continue_input_adjoints(p, ctx);
+  double* adj = ctx.scratch + p.n_regs;
+  std::fill_n(adj, p.adj.n_regs, 0.0);
+  const auto& map = p.adj.adj_reg;
+  for (const auto& li : p.ins) {
+    if (li.input < 0 || !continuing || !li.immutable ||
+        !ctx.in_adj[li.input].data)
+      continue;
+    for (int i = 0; i < li.len; ++i)
+      adj[(size_t)map[(size_t)(li.reg + i)]] =
+          ctx.in_adj[li.input].data[li.offset + i];
+  }
+  if (p.calls.empty())
+    sweep<false>(p, ctx, adj);
+  else
+    sweep<true>(p, ctx, adj);
+  for (const auto& li : p.ins) {
+    if (li.input < 0 || !ctx.in_adj[li.input].data) continue;
+    for (int i = 0; i < li.len; ++i) {
+      const double contribution = adj[(size_t)map[(size_t)(li.reg + i)]];
+      if (continuing && li.immutable)
+        ctx.in_adj[li.input].data[li.offset + i] = contribution;
+      else
+        ctx.in_adj[li.input].data[li.offset + i] += contribution;
+    }
+  }
+}
+
+}  // namespace
+
+void register_region_map_kernel() {
+  register_kernel(OP_REGION_MAP, Kernel{region_map_fwd, region_map_bwd,
+                                        region_map_scratch, nullptr});
+}
+
+}  // namespace stanli

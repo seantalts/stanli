@@ -309,17 +309,12 @@ bool Lowering::peel_terminal_return(mir::Stmt* s, mir::Expr* value) {
     return peel_terminal_return(&s->body.back(), value);
   return false;
 }
-// Compile `s` (a statement region) or `e` (a ternary) into a program.
-void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
-                            IslandRegion* reg, Range* expr_out,
-                            std::shared_ptr<IslandProg>* prog_out) {
-  auto prog = std::make_shared<IslandProg>();
-  ProgramCompiler c{*prog, fun_defs};
-  c.in_write_array = in_write_array;
-  c.checked_region = s;
-  // Non-returning statement calls may print or reject. A register program
-  // would replay them during reverse mode, so ProgramCompiler refuses them
-  // until necessity islands have an execute-once effect path.
+void Lowering::configure_island_compiler(ProgramCompiler& c,
+                                         IslandProg& prog_ref,
+                                         IslandRegion& region,
+                                         const mir::Stmt* s) {
+  IslandProg* const prog = &prog_ref;
+  IslandRegion* const reg = &region;
   for (const auto& [name, v] : int_env) c.ints[name] = {v};
   // Data the region reads as a compile-time integer, answered by the
   // same interpreter that answers a size expression. The region has
@@ -357,20 +352,6 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   c.lower_higher_order = [&](const mir::Expr& x, Range* result) {
     return lower_program_higher_order(c, x, result);
   };
-  if (!in_write_array) {
-    c.bind_target = [&](Range* r) {
-      const int slot = current_target_slot();
-      r->reg = c.alloc(1);
-      r->len = 1;
-      prog->ins.push_back(IslandProg::LiveIn{r->reg, 1});
-      reg->in_slots.push_back(slot);
-      return true;
-    };
-  }
-  std::set<std::string> outer_names;
-  for (const auto& [name, value] : scope) outer_names.insert(name);
-  for (const auto& [name, value] : decls) outer_names.insert(name);
-  const std::set<std::string> outer_int_names = int_locals;
   {
     std::vector<std::string> region_assigned;
     if (s) assigned_names(*s, &region_assigned);
@@ -385,7 +366,7 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
         c.known_reals[name] = known->r[0];
     }
   }
-  c.bind_extern = [&](const std::string& name, Range* r) {
+  c.bind_extern = [this, &c, prog, reg](const std::string& name, Range* r) {
     auto sc = scope.find(name);
     int slot = sc != scope.end() ? sc->second.slot : env_slot(name);
     if (slot < 0) slot = uninitialized_decl_slot(name);
@@ -408,6 +389,78 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
     }
     return true;
   };
+}
+void Lowering::finalize_island_program(IslandProg& prog, bool native) {
+  // Forward-only branches can record the executed path for generated
+  // adjoints. Unsupported derivatives and loops retain the replay.
+  // The register compactor's liveness analysis is straight-line (with
+  // forward branches as barriers).  A while adds a back edge, so retaining
+  // the uncompact program is the correctness-first choice: a state register
+  // written in one iteration is necessarily live at the next head.
+  bool has_back_edge = false;
+  bool has_unmodelled_ranges = false;
+  for (size_t pc = 0; pc < prog.code.size(); ++pc) {
+    const Program::Instr& instr = prog.code[pc];
+    const bool jump = instr.code == Program::JZ || instr.code == Program::JMP;
+    if (!jump && program_code_spec(instr.code).has(kProgramNoAdjoint))
+      has_unmodelled_ranges = true;
+    if (jump && instr.dst <= static_cast<int>(pc)) has_back_edge = true;
+  }
+  if (!has_back_edge && !has_unmodelled_ranges)
+    elide_acyclic_program_constants(prog);
+  // Narrow input windows before register compaction. Otherwise an unused
+  // vector prefix/suffix is pinned by the seed range and survives in every
+  // invocation's scratch. Offsets stay relative to the graph descriptor;
+  // emit_island adds any descriptor-packing offset later.
+  std::vector<std::pair<int, int>> input_ranges;
+  for (const auto& input : prog.ins)
+    input_ranges.emplace_back(input.reg, input.len);
+  const auto used_inputs = used_program_inputs(prog, input_ranges);
+  for (size_t k = 0; k < prog.ins.size(); ++k) {
+    auto& input = prog.ins[k];
+    input.offset += used_inputs[k].first - input.reg;
+    input.reg = used_inputs[k].first;
+    input.len = used_inputs[k].second;
+  }
+  // The straight-line compactor derives every range width from Instr::len.
+  // Structured matrix calls use that field for the result width while
+  // their operands can have different widths, so retain the original
+  // register numbering until those instructions carry explicit spans.
+  if (!has_back_edge && !has_unmodelled_ranges) compact_island(prog);
+  if (has_back_edge) {
+    sink_program_fills(prog);
+    elide_program_dead_constants(prog);
+  }
+  // Generated quantities have no backward consumer.
+  prog.native_adj =
+      native && gen_adjoint(prog) && !std::getenv("STANLI_NO_NATIVE_ADJ");
+}
+// Compile `s` (a statement region) or `e` (a ternary) into a program.
+void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
+                            IslandRegion* reg, Range* expr_out,
+                            std::shared_ptr<IslandProg>* prog_out) {
+  auto prog = std::make_shared<IslandProg>();
+  ProgramCompiler c{*prog, fun_defs};
+  c.in_write_array = in_write_array;
+  c.checked_region = s;
+  // Non-returning statement calls may print or reject. A register program
+  // would replay them during reverse mode, so ProgramCompiler refuses them
+  // until necessity islands have an execute-once effect path.
+  configure_island_compiler(c, *prog, *reg, s);
+  if (!in_write_array) {
+    c.bind_target = [&](Range* r) {
+      const int slot = current_target_slot();
+      r->reg = c.alloc(1);
+      r->len = 1;
+      prog->ins.push_back(IslandProg::LiveIn{r->reg, 1});
+      reg->in_slots.push_back(slot);
+      return true;
+    };
+  }
+  std::set<std::string> outer_names;
+  for (const auto& [name, value] : scope) outer_names.insert(name);
+  for (const auto& [name, value] : decls) outer_names.insert(name);
+  const std::set<std::string> outer_int_names = int_locals;
   // `target +=` inside the region accumulates into a register of its
   // own, seeded to zero, and the total leaves as one more live-out that
   // lowering registers as a target term. A `~` statement cannot go here
@@ -501,66 +554,14 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   if (prog->out_regs.empty() && !(e && expr_out->len == 0) &&
       (s == nullptr || reg->out_names.empty()) && !reg->has_effect)
     fail("runtime-control region produces nothing", s ? s->raw : e->raw);
-  // Forward-only branches can record the executed path for generated
-  // adjoints. Unsupported derivatives and loops retain the replay.
-  // The register compactor's liveness analysis is straight-line (with
-  // forward branches as barriers).  A while adds a back edge, so retaining
-  // the uncompact program is the correctness-first choice: a state register
-  // written in one iteration is necessarily live at the next head.
-  bool has_back_edge = false;
-  bool has_unmodelled_ranges = false;
-  for (size_t pc = 0; pc < prog->code.size(); ++pc) {
-    const Program::Instr& instr = prog->code[pc];
-    const bool jump = instr.code == Program::JZ || instr.code == Program::JMP;
-    if (!jump && program_code_spec(instr.code).has(kProgramNoAdjoint))
-      has_unmodelled_ranges = true;
-    if (jump && instr.dst <= static_cast<int>(pc)) has_back_edge = true;
-  }
-  if (!has_back_edge && !has_unmodelled_ranges)
-    elide_acyclic_program_constants(*prog);
-  // Narrow input windows before register compaction. Otherwise an unused
-  // vector prefix/suffix is pinned by the seed range and survives in every
-  // invocation's scratch. Offsets stay relative to the graph descriptor;
-  // emit_island adds any descriptor-packing offset later.
-  std::vector<std::pair<int, int>> input_ranges;
-  for (const auto& input : prog->ins)
-    input_ranges.emplace_back(input.reg, input.len);
-  const auto used_inputs = used_program_inputs(*prog, input_ranges);
-  for (size_t k = 0; k < prog->ins.size(); ++k) {
-    auto& input = prog->ins[k];
-    input.offset += used_inputs[k].first - input.reg;
-    input.reg = used_inputs[k].first;
-    input.len = used_inputs[k].second;
-  }
-  // The straight-line compactor derives every range width from Instr::len.
-  // Structured matrix calls use that field for the result width while
-  // their operands can have different widths, so retain the original
-  // register numbering until those instructions carry explicit spans.
-  if (!has_back_edge && !has_unmodelled_ranges) compact_island(*prog);
-  if (has_back_edge) {
-    sink_program_fills(*prog);
-    elide_program_dead_constants(*prog);
-  }
-  // Generated quantities have no backward consumer.
-  prog->native_adj = !in_write_array && gen_adjoint(*prog) &&
-                     !std::getenv("STANLI_NO_NATIVE_ADJ");
+  finalize_island_program(*prog, !in_write_array);
   *prog_out = std::move(prog);
 }
-// The OP_ISLAND for a compiled region, plus one extraction per live-out.
-void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
-                           const IslandRegion& reg,
-                           const std::vector<int>& out_lens,
-                           std::vector<int>* out_slots) {
-  int64_t packed = 0;
-  for (int len : out_lens) packed += len;
-  Op is;
-  is.opcode = OP_ISLAND;
-  // Variant stays zero: kIslandSoftmax3Variant is a tagged-payload contract
-  // and may only accompany Softmax3IslandProg (the graph carver creates it).
-  std::vector<int> inputs = reg.in_slots;
+std::vector<int> Lowering::pack_island_inputs(IslandProg& prog,
+                                              std::vector<int> inputs) {
   if (inputs.size() <= 6) {
-    for (size_t k = 0; k < prog->ins.size(); ++k) {
-      prog->ins[k].input = (int)k;
+    for (size_t k = 0; k < inputs.size(); ++k) {
+      prog.ins[k].input = (int)k;
     }
   } else {
     // Op::in is deliberately compact. Pack just enough leading live-ins
@@ -568,7 +569,7 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
     // retain the individual register ranges and point into the packed one.
     const size_t packed_count = inputs.size() - 5;
     for (size_t k = 0; k < packed_count; ++k) {
-      auto& input = prog->ins[k];
+      auto& input = prog.ins[k];
       if (input.len == 0 || input.len == g.slots[inputs[k]].len) continue;
       inputs[k] = emit_raw(input.len == 1 ? OP_INDEX : OP_SLICE, {inputs[k]},
                            input.len, {}, {input.offset})
@@ -583,17 +584,31 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
     }
     int offset = 0;
     for (size_t k = 0; k < packed_count; ++k) {
-      prog->ins[k].input = 0;
-      prog->ins[k].offset += offset;
+      prog.ins[k].input = 0;
+      prog.ins[k].offset += offset;
       offset += g.slots[inputs[k]].len;
     }
     std::vector<int> compact{packed};
     for (size_t k = packed_count; k < inputs.size(); ++k) {
-      prog->ins[k].input = (int)compact.size();
+      prog.ins[k].input = (int)compact.size();
       compact.push_back(inputs[k]);
     }
     inputs = std::move(compact);
   }
+  return inputs;
+}
+// The OP_ISLAND for a compiled region, plus one extraction per live-out.
+void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
+                           const IslandRegion& reg,
+                           const std::vector<int>& out_lens,
+                           std::vector<int>* out_slots) {
+  int64_t packed = 0;
+  for (int len : out_lens) packed += len;
+  Op is;
+  is.opcode = OP_ISLAND;
+  // Variant stays zero: kIslandSoftmax3Variant is a tagged-payload contract
+  // and may only accompany Softmax3IslandProg (the graph carver creates it).
+  std::vector<int> inputs = pack_island_inputs(*prog, reg.in_slots);
   if (!prog->native_adj) {
     std::vector<std::pair<int, int>> input_ranges;
     for (const auto& input : prog->ins)
@@ -1601,6 +1616,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         int_env.erase(s.loopvar);
         return;
       }
+      if (lower_region_map(s, lo, hi)) return;
       if (try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi})) return;
       if (in_write_array && structured_policy != StructuredMode::Off &&
           region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi})) {

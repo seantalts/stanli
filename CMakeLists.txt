@@ -327,6 +327,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/message.cpp
   runtime/kernels/rng.cpp
   runtime/kernels/island.cpp
+  runtime/kernels/region_map.cpp
   runtime/src/island.cpp
   runtime/src/adjoint.cpp
   runtime/src/builtin_registry.cpp
@@ -344,6 +345,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/lower.cpp
   runtime/src/lower_expr.cpp
   runtime/src/lower_stmt.cpp
+  runtime/src/lower_region_map.cpp
   runtime/src/lower_funapp.cpp
   runtime/src/lower_higher_order.cpp
   runtime/src/structured_loop.cpp

@@ -104,6 +104,8 @@ constexpr uint8_t kIslandCallVariant = 2;
 
 void island_calls_fwd(KernelCtx& ctx);
 
+bool continue_input_adjoints(const IslandProg& p, const KernelCtx& ctx);
+
 // True when the region's program has an observable effect: a draw from the
 // caller's stream, a print, or a reject. A pass that reasons about purity has
 // to leave such a region alone even when every one of its inputs is data.

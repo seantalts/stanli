@@ -767,11 +767,15 @@ static void test_udf_tail_branch() {
     for (const Op& op : cm.graph.ops) k += op.opcode == opcode;
     return k;
   };
+  test_setenv("STANLI_REGION_MAP", "0", 1);
   CompiledModel structured = compile_model(mir, data);
+  test_unsetenv("STANLI_REGION_MAP");
   check(count(structured, OP_ISLAND) == 0 && count(structured, OP_LOOP) == 1,
         "udf tail branch keeps its loop structured");
   test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+  test_setenv("STANLI_REGION_MAP", "0", 1);
   CompiledModel unrolled = compile_model(mir, data);
+  test_unsetenv("STANLI_REGION_MAP");
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   check(count(unrolled, OP_ISLAND) == n,
         "udf tail branch unrolls to one region per observation");
@@ -813,8 +817,10 @@ static void test_udf_packed_branch() {
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/udf_packed_branch.json"));
   test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+  test_setenv("STANLI_REGION_MAP", "0", 1);
   CompiledModel cm =
       compile_model(slurp("tests/fixtures/udf_packed_branch.tmir.sexp"), data);
+  test_unsetenv("STANLI_REGION_MAP");
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   const int n = (int)data.at("N").r[0];
   int islands = 0;
@@ -866,9 +872,8 @@ static void test_region_dynamic_index() {
     ++islands;
     const auto& prog = *static_cast<const IslandProg*>(op.udata);
     const bool indexed =
-        std::any_of(prog.code.begin(), prog.code.end(), [](const auto& i) {
-          return i.code == Program::DYN_INDEX;
-        });
+        std::any_of(prog.code.begin(), prog.code.end(),
+                    [](const auto& i) { return i.code == Program::DYN_INDEX; });
     dynamic += indexed;
     native += indexed && prog.native_adj;
   }
@@ -917,8 +922,10 @@ static void test_udf_constant_branch() {
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/udf_constant_branch.json"));
   test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+  test_setenv("STANLI_REGION_MAP", "0", 1);
   CompiledModel cm = compile_model(
       slurp("tests/fixtures/udf_constant_branch.tmir.sexp"), data);
+  test_unsetenv("STANLI_REGION_MAP");
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   int islands = 0;
   for (const Op& op : cm.graph.ops) {
@@ -988,8 +995,10 @@ static void test_structured_vector_return() {
   using namespace stanli;
   const DataMap data =
       DataMap::from_json(slurp("tests/fixtures/structured_vector_return.json"));
+  test_setenv("STANLI_REGION_MAP", "0", 1);
   CompiledModel cm = compile_model(
       slurp("tests/fixtures/structured_vector_return.tmir.sexp"), data);
+  test_unsetenv("STANLI_REGION_MAP");
   int loops = 0, islands = 0;
   for (const Op& op : cm.graph.ops) {
     loops += op.opcode == OP_LOOP;
@@ -1022,8 +1031,10 @@ static void test_structured_dead_after_break() {
   using namespace stanli;
   const DataMap data = DataMap::from_json(
       slurp("tests/fixtures/structured_dead_after_break.json"));
+  test_setenv("STANLI_REGION_MAP", "0", 1);
   CompiledModel cm = compile_model(
       slurp("tests/fixtures/structured_dead_after_break.tmir.sexp"), data);
+  test_unsetenv("STANLI_REGION_MAP");
   int loops = 0;
   for (const Op& op : cm.graph.ops) {
     if (op.opcode != OP_LOOP) continue;
@@ -1241,8 +1252,7 @@ std::string fixture_mir(const std::string& stem) {
 }
 
 CompiledModel compile_with(const std::string& stem, int n,
-                           const char* env = nullptr,
-                           const char* value = "0") {
+                           const char* env = nullptr, const char* value = "0") {
   if (env) test_setenv(env, value, 1);
   try {
     CompiledModel cm = stanli::compile_model(fixture_mir(stem), make_data(n));
@@ -1334,8 +1344,8 @@ const Ref ref_branch = [](const std::vector<var>& p, const Series& s,
     const var r = s.y[i] - p[0] * s.x[i];
     const bool low = r < p[1];
     if (taken) taken->push_back(low);
-    lp += low ? -stan::math::square(r) - stan::math::log1p(
-                                             stan::math::square(p[1]))
+    lp += low ? -stan::math::square(r) -
+                    stan::math::log1p(stan::math::square(p[1]))
               : -0.5 * stan::math::square(r) + p[1];
   }
   return lp;
@@ -1369,7 +1379,8 @@ const Ref ref_udf = [](const std::vector<var>& p, const Series& s,
   return lp;
 };
 
-const std::vector<Params> branch_points = {{0.3, -0.5}, {-1.5, 0.7}, {0.3, -0.5}};
+const std::vector<Params> branch_points = {
+    {0.3, -0.5}, {-1.5, 0.7}, {0.3, -0.5}};
 const std::vector<Params> udf_points = {{0.3, -0.4}, {-1.5, 0.9}, {0.3, -0.4}};
 
 void test_same_executor_two_points() {
@@ -1454,8 +1465,8 @@ void test_refusals() {
   expect_refused("region_map_data_control", 64, ref_data, branch_points);
   expect_refused("region_map_branch", 16, ref_branch, branch_points);
   {
-    CompiledModel off = compile_with("region_map_branch", 64,
-                                     "STANLI_REGION_MAP", "0");
+    CompiledModel off =
+        compile_with("region_map_branch", 64, "STANLI_REGION_MAP", "0");
     check(count_opcode(off, OP_REGION_MAP) == 0,
           "STANLI_REGION_MAP=0 disables the map");
     const Series s = make_series(64);
@@ -1483,9 +1494,10 @@ void test_shapes() {
     }
     return lp;
   };
-  run_points("region_map_many", 64,
-             {{0.3, -0.6, 0.5, 0.2}, {-1.5, 0.4, -0.3, 0.1}, {0.3, -0.6, 0.5, 0.2}},
-             ref_many);
+  run_points(
+      "region_map_many", 64,
+      {{0.3, -0.6, 0.5, 0.2}, {-1.5, 0.4, -0.3, 0.1}, {0.3, -0.6, 0.5, 0.2}},
+      ref_many);
 
   const Ref ref_alias = [](const std::vector<var>& p, const Series& s,
                            std::vector<int>* taken) {
@@ -1499,9 +1511,9 @@ void test_shapes() {
       const var d = s.y[i] - mu[i];
       const bool low = d < p[1];
       if (taken) taken->push_back(low);
-      lp += low ? -stan::math::square(d) -
-                      0.5 * stan::math::square(mu[i]) * p[1]
-                : -0.5 * stan::math::square(s.y[i] - mu[i]) + p[1];
+      lp +=
+          low ? -stan::math::square(d) - 0.5 * stan::math::square(mu[i]) * p[1]
+              : -0.5 * stan::math::square(s.y[i] - mu[i]) + p[1];
     }
     for (const var& m : mu)
       lp += -0.5 * stan::math::square(m / 5.0) - std::log(5.0) -
