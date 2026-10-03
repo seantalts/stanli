@@ -863,6 +863,26 @@ add_test(NAME test_check_external_stanc
                  -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/check_external_stanc
                  -DSTANC=${STANLI_STANC_EXECUTABLE}
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_external_stanc.cmake)
+file(GLOB STANLI_COGMOD_SOURCES
+     "${CMAKE_CURRENT_SOURCE_DIR}/tests/cogmod/cm_*.stan")
+foreach(_stanli_cogmod_source IN LISTS STANLI_COGMOD_SOURCES)
+  get_filename_component(_stanli_cogmod "${_stanli_cogmod_source}" NAME_WE)
+  foreach(_stanli_map_mode save recompute)
+    set(_stanli_map_limit "")
+    if(_stanli_map_mode STREQUAL "recompute")
+      set(_stanli_map_limit ";STANLI_REGION_MAP_SAVE_LIMIT=0")
+    endif()
+    add_test(NAME test_region_map_clean_${_stanli_cogmod}_${_stanli_map_mode}
+             COMMAND stanli_check tests/cogmod/${_stanli_cogmod}.stan
+                     tests/cogmod/${_stanli_cogmod}.json --sweep 12
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(
+      test_region_map_clean_${_stanli_cogmod}_${_stanli_map_mode} PROPERTIES
+      ENVIRONMENT "STANLI_REGION_MAP_CHECK_CLEAN=1${_stanli_map_limit}"
+      PASS_REGULAR_EXPRESSION "OK "
+      FAIL_REGULAR_EXPRESSION "EVAL_FAIL")
+  endforeach()
+endforeach()
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 add_executable(test_benchmark_timer tests/test_benchmark_timer.cpp)

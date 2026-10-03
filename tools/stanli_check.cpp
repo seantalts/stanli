@@ -32,6 +32,7 @@
 #include "stanc_embedded.hpp"
 #include "stanc_process.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -84,7 +85,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr,
                  "usage: stanli_check model.stan data.json "
                  "[--stanli-compile PATH | --stanc PATH | --mir PATH]\n"
-                 "       [--point N] [--columns]\n"
+                 "       [--point N] [--sweep K] [--columns]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
                  "[--draw-variant N] [--ledger PATH]]\n"
                  "       [--dump-passes=STAGES] [--dump-dir=DIR]\n"
@@ -95,6 +96,7 @@ int main(int argc, char** argv) {
   std::string compiler;
   std::string mir_path;
   int variant = 0;
+  int sweep = 0;
   bool columns_only = false;
   bool wa_values = false;
   bool paths_only = false;
@@ -131,6 +133,8 @@ int main(int argc, char** argv) {
       mir_path = argv[++i];
     else if (a == "--point" && i + 1 < argc)
       variant = std::atoi(argv[++i]);
+    else if (a == "--sweep" && i + 1 < argc)
+      sweep = std::atoi(argv[++i]);
   }
   if (!stanc.empty() + !compiler.empty() + !mir_path.empty() > 1) {
     std::fprintf(stderr,
@@ -380,6 +384,29 @@ int main(int argc, char** argv) {
     if (wa_values && (!cm.write_array || (!cm.write_array->interp &&
                                           cm.write_array->columns.empty())))
       std::printf("WANAMES FAIL no write_array\nWAVALS FAIL\n");
+    if (sweep > 0) {
+      int evaluated = 0;
+      for (int k = 1; k <= sweep; ++k) {
+        for (int64_t i = 0; i < n; ++i)
+          ex.params_data()[i] = eval_point(i, variant) +
+                                0.6 * std::sin(1.9 * k + 2.3 * i + 0.4) +
+                                0.2 * (k - sweep / 2);
+        try {
+          std::fill(grad.begin(), grad.end(), 0.0);
+          ex.gradient(grad.data());
+          ++evaluated;
+        } catch (const std::exception& e) {
+          if (std::string(e.what()).find("region_map_check_clean") !=
+              std::string::npos)
+            throw;
+        }
+      }
+      std::fprintf(stderr, "SWEEP %d points, %d evaluated\n", sweep, evaluated);
+      for (int64_t i = 0; i < n; ++i)
+        ex.params_data()[i] = eval_point(i, variant);
+      std::fill(grad.begin(), grad.end(), 0.0);
+      ex.gradient(grad.data());
+    }
     std::printf("OK %.17g", lp);
     for (double g : grad) std::printf(" %.17g", g);
     std::printf("\n");
