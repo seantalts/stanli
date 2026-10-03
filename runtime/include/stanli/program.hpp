@@ -87,8 +87,8 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(SUB, kProgramReadB)                                                       \
   X(MUL, kProgramReadB | kProgramSaveA | kProgramSaveB)                       \
   X(DIV, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)     \
-  X(IMOD, kProgramReadB | kProgramNoAdjoint)                                  \
-  X(IDIV, kProgramReadB | kProgramNoAdjoint)                                  \
+  X(IMOD, kProgramReadB)                                                      \
+  X(IDIV, kProgramReadB)                                                      \
   X(IADD, kProgramReadB)                                                      \
   X(ISUB, kProgramReadB)                                                      \
   X(IMUL, kProgramReadB)                                                      \

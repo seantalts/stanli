@@ -213,7 +213,7 @@ bool gen_adjoint(IslandProg& p) {
   const auto comparison = [](Program::Code code) {
     return code == Program::GT || code == Program::GE || code == Program::LT ||
            code == Program::LE || code == Program::EQ || code == Program::NE ||
-           (code >= Program::IADD && code <= Program::IABS);
+           (code >= Program::IMOD && code <= Program::IABS);
   };
   for (size_t pc = orig.size(); pc-- > 0;) {
     const auto& I = orig[pc];
@@ -622,7 +622,7 @@ bool gen_adjoint(IslandProg& p) {
     const bool only_clear =
         spec.has(kProgramNoInputs) ||
         (I.code >= Program::GT && I.code <= Program::NE) ||
-        (I.code >= Program::IADD && I.code <= Program::IABS) ||
+        (I.code >= Program::IMOD && I.code <= Program::IABS) ||
         I.code == Program::EXTREMA_RANGE;
     if (elide_private_clears && only_clear) {
       bool private_first = true;
@@ -1184,6 +1184,8 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
         case Program::LE:
         case Program::EQ:
         case Program::NE:
+        case Program::IMOD:
+        case Program::IDIV:
         case Program::IADD:
         case Program::ISUB:
         case Program::IMUL:
@@ -1301,8 +1303,6 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
           break;
         case Program::DYN_SET:
         case Program::DYN_LSE_RANGE:
-        case Program::IMOD:
-        case Program::IDIV:
         case Program::EXTREMA_RANGE:
         case Program::JZ:
         case Program::JMP:
