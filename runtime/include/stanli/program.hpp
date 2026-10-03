@@ -416,6 +416,9 @@ bool compact_program_gated(Program& p, std::vector<std::pair<int, int>>& seeded,
 // Backward-only fields are left null; run_adjoint fills its own.
 KernelCtx call_fwd_ctx(const Program::Call& call, double* reg);
 
+void bind_call_fwd_ctx(const Program::Call& call, double* reg, KernelCtx& ctx,
+                       EvalState* state);
+
 // Resolve a manually constructed call site once. Production carvers already
 // have the Kernel in hand and bind its pointers directly. False leaves the
 // call unbound, so malformed or unavailable opcodes fail closed.
