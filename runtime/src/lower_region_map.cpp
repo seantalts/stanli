@@ -1,6 +1,9 @@
 #include <stanli/region_map.hpp>
 
 #include <cstdlib>
+#include <map>
+#include <set>
+#include <string>
 
 #include "lower_internal.hpp"
 
@@ -20,6 +23,125 @@ bool body_escapes(const mir::Stmt& s, bool in_inner_loop) {
     if (body_escapes(child, inner)) return true;
   return false;
 }
+
+class ParameterControl {
+ public:
+  using Defs = std::map<std::string, const mir::FunDef*>;
+  using Env = std::set<std::string>;
+
+  explicit ParameterControl(const Defs& defs) : defs_(defs) {}
+
+  bool operator()(const mir::Stmt& root) { return statement(root, nullptr, 0); }
+
+ private:
+  const Defs& defs_;
+  std::set<std::string> visited_;
+
+  static bool dependent(const mir::Expr& e, const Env* env) {
+    switch (e.kind) {
+      case mir::Expr::Var:
+        return env ? env->count(e.name) != 0 : !e.data_only;
+      case mir::Expr::LitInt:
+      case mir::Expr::LitReal:
+      case mir::Expr::LitStr:
+        return false;
+      case mir::Expr::Unsupported:
+        return env || !e.data_only;
+      default:
+        if (e.args.empty()) return env ? false : !e.data_only;
+        for (const auto& a : e.args)
+          if (dependent(a, env)) return true;
+        return false;
+    }
+  }
+
+  static std::string pattern(const std::vector<mir::Expr>& args,
+                             const Env* env) {
+    std::string bits;
+    for (const auto& a : args) bits += dependent(a, env) ? '1' : '0';
+    return bits;
+  }
+
+  bool call(const std::string& name, const std::string& bits, unsigned depth) {
+    if (depth > 32) return false;
+    const auto found = defs_.find(name);
+    if (found == defs_.end()) return false;
+    if (!visited_.insert(name + ":" + bits).second) return false;
+    const mir::FunDef& def = *found->second;
+    Env env;
+    for (size_t k = 0; k < def.arg_names.size(); ++k)
+      if (k >= bits.size() || bits[k] == '1') env.insert(def.arg_names[k]);
+    for (bool changed = true; changed;) {
+      const size_t before = env.size();
+      for (const auto& body : def.body) propagate(body, &env);
+      changed = env.size() != before;
+    }
+    for (const auto& body : def.body)
+      if (statement(body, &env, depth + 1)) return true;
+    return false;
+  }
+
+  void propagate(const mir::Stmt& s, Env* env) const {
+    switch (s.kind) {
+      case mir::Stmt::Decl:
+        if (s.has_init && dependent(s.init, env)) env->insert(s.decl_id);
+        break;
+      case mir::Stmt::Assignment: {
+        bool dep = dependent(s.rhs, env);
+        for (const auto& idx : s.lhs_idx) dep = dep || dependent(idx, env);
+        if (dep) env->insert(s.lhs);
+        break;
+      }
+      case mir::Stmt::For:
+        if (dependent(s.lower, env) || dependent(s.upper, env))
+          env->insert(s.loopvar);
+        break;
+      default:
+        break;
+    }
+    for (const auto& child : s.body) propagate(child, env);
+  }
+
+  bool expression(const mir::Expr& e, const Env* env, unsigned depth) {
+    if (depth > 32) return false;
+    if (e.kind == mir::Expr::TernaryIf && !e.args.empty() &&
+        dependent(e.args[0], env))
+      return true;
+    if ((e.kind == mir::Expr::EAnd || e.kind == mir::Expr::EOr) &&
+        dependent(e, env))
+      return true;
+    if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined &&
+        call(e.name, pattern(e.args, env), depth + 1))
+      return true;
+    for (const auto& a : e.args)
+      if (expression(a, env, depth + 1)) return true;
+    return false;
+  }
+
+  bool statement(const mir::Stmt& s, const Env* env, unsigned depth) {
+    if (depth > 32) return false;
+    if (s.kind == mir::Stmt::While && dependent(s.cond, env)) return true;
+    if (s.kind == mir::Stmt::IfElse && dependent(s.cond, env)) return true;
+    if (s.kind == mir::Stmt::For &&
+        (dependent(s.lower, env) || dependent(s.upper, env)))
+      return true;
+    if (s.kind == mir::Stmt::NRFunApp && defs_.count(s.fn_name) &&
+        call(s.fn_name, pattern(s.fn_args, env), depth + 1))
+      return true;
+    for (const mir::Expr* value :
+         {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+      if (expression(*value, env, depth + 1)) return true;
+    for (const auto& value : s.lhs_idx)
+      if (expression(value, env, depth + 1)) return true;
+    for (const auto& value : s.fn_args)
+      if (expression(value, env, depth + 1)) return true;
+    for (const auto& value : s.decl_type.dims)
+      if (expression(value, env, depth + 1)) return true;
+    for (const auto& child : s.body)
+      if (statement(child, env, depth + 1)) return true;
+    return false;
+  }
+};
 
 constexpr size_t kMaxRegionMapCode = 131072;
 constexpr int64_t kMaxRegionMapSavedCells = int64_t{1} << 24;
@@ -128,7 +250,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   };
   if (structured_outer_depth != 1) return false;
   if (hi - lo + 1 < 32) return refuse("trip count below 32");
-  if (!region_runtime_control(s))
+  if (!ParameterControl(fun_defs)(s))
     return refuse("no parameter-dependent control");
   if (target_scale != 1.0) return refuse("enclosing target scaling");
   if (!has_target_pe(s)) return refuse("body has no target increment");

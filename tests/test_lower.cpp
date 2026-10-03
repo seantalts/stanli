@@ -2042,6 +2042,8 @@ std::vector<LaneFixture> lane_fixture_list() {
 {"region_map_branch", true, ""},
       {"region_map_udf", true, ""},
       {"region_map_density", true, ""},
+      {"region_map_hurdle_param", true, ""},
+      {"region_map_udf_local", true, ""},
       {"region_map_many", true, ""},
       {"region_map_alias", true, ""},
       {"region_map_local_int", true, ""},
@@ -2170,6 +2172,21 @@ void test_lane_seed_and_clean() {
   }
   test_unsetenv("STANLI_REGION_MAP_TILE_CELLS");
   test_unsetenv("STANLI_REGION_MAP_CHECK_CLEAN");
+}
+
+void test_map_selection_follows_data_through_udfs() {
+  CompiledModel data_branch = compile_with("region_map_hurdle_data", 64);
+  CompiledModel unmapped =
+      compile_with("region_map_hurdle_data", 64, "STANLI_REGION_MAP");
+  check(count_opcode(data_branch, OP_REGION_MAP) == 0,
+        "a UDF branching on a data argument does not select the map");
+  check(same_graph_structure(data_branch, unmapped) &&
+            data_branch.fills == unmapped.fills,
+        "a UDF branching on a data argument lowers as with the map off");
+  expect_mapped("udf branch on a parameter-derived argument",
+                compile_with("region_map_hurdle_param", 64));
+  expect_mapped("udf branch on a local derived from a parameter argument",
+                compile_with("region_map_udf_local", 64));
 }
 
 void test_lane_flag_clear_segments() {
@@ -2451,6 +2468,7 @@ static void test_region_map() {
   test_lane_fixtures();
   test_lane_tile_recompute();
   test_lane_seed_and_clean();
+  test_map_selection_follows_data_through_udfs();
   test_lane_flag_clear_segments();
   test_lane_cancellation_bitwise();
   test_lane_exceptions();
