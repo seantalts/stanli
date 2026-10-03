@@ -328,6 +328,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/rng.cpp
   runtime/kernels/island.cpp
   runtime/kernels/region_map.cpp
+  runtime/kernels/region_map_lanes.cpp
   runtime/src/island.cpp
   runtime/src/adjoint.cpp
   runtime/src/builtin_registry.cpp
@@ -1223,6 +1224,10 @@ foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()
 set_tests_properties(test_ode_prog PROPERTIES TIMEOUT 180)
+target_link_libraries(test_lower PRIVATE stanli_stanc_process)
+target_include_directories(test_lower PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(test_lower PRIVATE
+  STANLI_TEST_STANC="${STANLI_STANC_EXECUTABLE}")
 
 # The C ABI lives only in the shared library. Test it through that shipped
 # boundary rather than compiling capi.cpp into the C++ unit-test library.

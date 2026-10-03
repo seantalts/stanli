@@ -237,6 +237,11 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     prog->saved.clear();
     prog->saved_cells = 0;
   }
+  {
+    const char* lanes = std::getenv("STANLI_REGION_MAP_LANES");
+    plan_region_map_lanes(*prog, !(lanes && std::string_view(lanes) == "0"),
+                          save_limit);
+  }
   for (int cell = 0; cell < n_cells;) {
     if (persistent[(size_t)cell]) {
       ++cell;
@@ -267,6 +272,9 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
                     " saved_cells=" + std::to_string(prog->saved_cells) +
                     " saved_spans=" + std::to_string(prog->saved.size()) +
                     (prog->recompute ? " recompute" : "") +
+                    (prog->lanes.active
+                         ? std::string(" lanes=yes")
+                         : " lanes=no(" + prog->lanes.refusal + ")") +
                     " registers=" + std::to_string(prog->n_regs) +
                     " live_ins=" + std::to_string(prog->ins.size()));
   return true;

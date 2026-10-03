@@ -1,0 +1,469 @@
+#include <stanli/adjoint.hpp>
+#include <stanli/program_density.hpp>
+#include <stanli/region_map.hpp>
+
+#include <algorithm>
+#include <atomic>
+#include <set>
+#include <string>
+
+namespace stanli {
+namespace {
+
+bool lane_opcode(Program::Code c) {
+  switch (c) {
+    case Program::CONST:
+    case Program::FILL:
+    case Program::CONSTR:
+    case Program::MOV:
+    case Program::ADD:
+    case Program::SUB:
+    case Program::MUL:
+    case Program::DIV:
+    case Program::FMA:
+    case Program::IADD:
+    case Program::IMOD:
+    case Program::INEG:
+    case Program::POW:
+    case Program::FMAX:
+    case Program::FMIN:
+    case Program::NEG:
+    case Program::EXP:
+    case Program::LOG:
+    case Program::SQRT:
+    case Program::SQUARE:
+    case Program::INV:
+    case Program::FABS:
+    case Program::GT:
+    case Program::GE:
+    case Program::LT:
+    case Program::LE:
+    case Program::EQ:
+    case Program::DYN_INDEX:
+    case Program::JZ:
+    case Program::JMP:
+    case Program::LSE2:
+    case Program::LOG_DIFF_EXP:
+    case Program::LOG_MIX:
+    case Program::DENSITY:
+    case Program::CALL:
+      return true;
+    default:
+      return false;
+  }
+}
+
+std::string opcode_name(Program::Code c) {
+  static const char* const names[] = {
+      "CONST",
+      "FILL",
+      "CONSTR",
+      "MOV",
+      "MOVR",
+      "ADD",
+      "SUB",
+      "MUL",
+      "DIV",
+      "IMOD",
+      "IDIV",
+      "IADD",
+      "ISUB",
+      "IMUL",
+      "INEG",
+      "IABS",
+      "POW",
+      "FMAX",
+      "FMIN",
+      "NEG",
+      "EXP",
+      "LOG",
+      "SQRT",
+      "SQUARE",
+      "INV",
+      "FABS",
+      "INV_LOGIT",
+      "LOG1M",
+      "LOG1P_EXP",
+      "TANH",
+      "GT",
+      "GE",
+      "LT",
+      "LE",
+      "EQ",
+      "NE",
+      "DYN_SET",
+      "DYN_INDEX",
+      "EXTREMA_RANGE",
+      "JZ",
+      "JMP",
+      "LOG_RANGE",
+      "EXP_RANGE",
+      "DOT",
+      "DYN_LSE_RANGE",
+      "LSE_RANGE",
+      "SOFTMAX",
+      "LSE2",
+      "LOG_DIFF_EXP",
+      "LOG_MIX",
+      "FMA",
+      "DIAG_PRE_MULTIPLY",
+      "DIAG_POST_MULTIPLY",
+      "MDIVIDE_LEFT",
+      "MDIVIDE_RIGHT_SPD",
+      "DENSITY",
+      "CALL",
+      "TRANSFORM",
+      "PRINT",
+      "REJECT",
+      "DENSITY_VEC",
+      "RANGE",
+  };
+  const size_t i = static_cast<size_t>(c);
+  return i < sizeof(names) / sizeof(names[0]) ? names[i]
+                                              : std::to_string((int)c);
+}
+
+struct Span {
+  int base = 0, len = 0;
+};
+
+bool overlaps(const Span& a, const Span& b) {
+  return a.len > 0 && b.len > 0 && a.base < b.base + b.len &&
+         b.base < a.base + a.len;
+}
+
+struct Refusal {
+  std::string why;
+};
+
+[[noreturn]] void refuse(const std::string& why) { throw Refusal{why}; }
+
+class Analysis {
+ public:
+  Analysis(RegionMapProg& p, int64_t storage_limit)
+      : p_(p), plan_(p.lanes), limit_(storage_limit) {}
+
+  void run() {
+    check_opcodes();
+    classify_registers();
+    classify_cells();
+    check_ranges();
+    build_blocks();
+    build_windows();
+    size_tiles();
+  }
+
+ private:
+  RegionMapProg& p_;
+  RegionMapLanePlan& plan_;
+  int64_t limit_;
+  int n_cells_ = 0;
+
+  bool shared_reg(int r) const {
+    return r >= 0 && r < (int)plan_.reg_slot.size() && plan_.reg_slot[r] < 0;
+  }
+  bool shared_cell(int c) const { return plan_.cell_slot[(size_t)c] < 0; }
+
+  void check_opcodes() {
+    std::set<std::string> unsupported;
+    for (const auto& I : p_.code)
+      if (!lane_opcode(I.code)) unsupported.insert(opcode_name(I.code));
+    for (const auto& A : p_.adj.code)
+      if (!lane_opcode(A.code) || A.code == Program::JZ ||
+          A.code == Program::JMP)
+        unsupported.insert(opcode_name(A.code));
+    if (unsupported.empty()) return;
+    std::string why = "opcodes not lane-batched:";
+    for (const auto& name : unsupported) why += " " + name;
+    refuse(why);
+  }
+
+  template <typename F>
+  void each_body_write(F f) const {
+    for (const auto& I : p_.code) {
+      switch (I.code) {
+        case Program::JZ:
+        case Program::JMP:
+          break;
+        case Program::CALL: {
+          const Program::Call& call = p_.calls[(size_t)I.a];
+          f(call.out, call.out_len);
+          f(call.scratch, call.scratch_len);
+          break;
+        }
+        case Program::CONSTR:
+        case Program::FILL:
+          f(I.dst, I.len);
+          break;
+        default:
+          f(I.dst, 1);
+      }
+    }
+  }
+
+  void classify_registers() {
+    const int n = p_.n_regs;
+    std::vector<char> per_lane((size_t)n, 0);
+    each_body_write([&](int reg, int len) {
+      for (int k = 0; k < len; ++k) {
+        if (reg + k < 0 || reg + k >= n) refuse("register out of range");
+        per_lane[(size_t)(reg + k)] = 1;
+      }
+    });
+    per_lane[(size_t)p_.iter_reg] = 1;
+    plan_.reg_slot.assign((size_t)n, -1);
+    int next = 0;
+    for (int r = 0; r < n; ++r)
+      if (per_lane[(size_t)r]) plan_.reg_slot[(size_t)r] = next++;
+    plan_.fwd_regs = next;
+  }
+
+  void classify_cells() {
+    n_cells_ = p_.adj.n_regs;
+    const auto& map = p_.adj.adj_reg;
+    std::vector<char> shared((size_t)n_cells_, 0);
+    for (const auto& li : p_.ins) {
+      if (li.input < 0) continue;
+      for (int i = 0; i < li.len; ++i) {
+        const int32_t cell = map[(size_t)(li.reg + i)];
+        if (cell < 0 || cell >= n_cells_) refuse("live-in cell out of range");
+        shared[(size_t)cell] = 1;
+      }
+    }
+    plan_.cell_slot.assign((size_t)n_cells_, -1);
+    int next = 0;
+    for (int c = 0; c < n_cells_; ++c)
+      if (!shared[(size_t)c]) plan_.cell_slot[(size_t)c] = next++;
+    plan_.adj_cells = next;
+    const int32_t target = map[(size_t)p_.out_regs[0]];
+    if (target < 0 || target >= n_cells_ || shared_cell(target))
+      refuse("target cell is shared");
+  }
+
+  void same_class_regs(int base, int len, const char* what) const {
+    if (len <= 0) return;
+    if (base < 0 || base + len > p_.n_regs)
+      refuse(std::string(what) + " range out of bounds");
+    const bool s = shared_reg(base);
+    for (int k = 1; k < len; ++k)
+      if (shared_reg(base + k) != s)
+        refuse(std::string(what) + " range mixes shared and per-lane registers");
+  }
+
+  void same_class_cells(int base, int len, const char* what) const {
+    if (len <= 0) return;
+    if (base < 0 || base + len > n_cells_)
+      refuse(std::string(what) + " cell range out of bounds");
+    const bool s = shared_cell(base);
+    for (int k = 1; k < len; ++k)
+      if (shared_cell(base + k) != s)
+        refuse(std::string(what) + " cell range mixes shared and per-lane cells");
+  }
+
+  void per_lane_cells(int base, int len, const char* what) const {
+    same_class_cells(base, len, what);
+    if (len > 0 && shared_cell(base))
+      refuse(std::string("adjoint consumes a shared cell (") + what + ")");
+  }
+
+  void check_ranges() {
+    for (const auto& I : p_.code) {
+      switch (I.code) {
+        case Program::CONSTR:
+        case Program::FILL:
+          same_class_regs(I.dst, I.len, "constant fill");
+          break;
+        case Program::DYN_INDEX:
+          same_class_regs(I.a + I.c, I.len, "indexed");
+          break;
+        case Program::CALL: {
+          const Program::Call& call = p_.calls[(size_t)I.a];
+          for (int k = 0; k < call.n_in; ++k)
+            same_class_regs(call.in[k], call.in_len[k], "call input");
+          same_class_regs(call.out, call.out_len, "call output");
+          same_class_regs(call.scratch, call.scratch_len, "call scratch");
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    for (const auto& A : p_.adj.code) {
+      switch (A.code) {
+        case Program::CALL: {
+          const Program::Call& call = p_.calls[(size_t)A.a];
+          for (int k = 0; k < call.n_in; ++k)
+            same_class_regs(call.bwd_value_in[k], call.in_len[k],
+                            "call backward value");
+          same_class_regs(call.bwd_value_out, call.out_len,
+                          "call backward output");
+          same_class_regs(call.scratch, call.scratch_len, "call scratch");
+          for (int k = 0; k < call.n_in; ++k)
+            if (call.input_adjoint_mask & (1u << k))
+              same_class_cells(call.bwd_adj_in[k], call.in_len[k],
+                               "call input adjoint");
+          per_lane_cells(call.bwd_adj_out, call.out_len, "call output");
+          break;
+        }
+        case Program::CONSTR:
+        case Program::FILL:
+          per_lane_cells(A.dst, A.len, "constant fill");
+          break;
+        case Program::DYN_INDEX:
+          per_lane_cells(A.dst, 1, "indexed output");
+          same_class_cells(A.a, A.len, "indexed");
+          break;
+        default:
+          per_lane_cells(A.dst, 1, "output");
+          break;
+      }
+    }
+  }
+
+  void build_blocks() {
+    const int n = (int)p_.code.size();
+    std::vector<char> leader((size_t)n + 1, 0);
+    leader[0] = 1;
+    for (int pc = 0; pc < n; ++pc) {
+      const auto& I = p_.code[(size_t)pc];
+      if (I.code != Program::JZ && I.code != Program::JMP) continue;
+      if (I.dst <= pc || I.dst > n) refuse("jump is not forward");
+      leader[(size_t)(pc + 1)] = 1;
+      leader[(size_t)I.dst] = 1;
+    }
+    std::vector<int> block_of((size_t)n + 1, 0);
+    int blocks = 0;
+    for (int pc = 0; pc < n; ++pc) {
+      if (leader[(size_t)pc]) {
+        ++blocks;
+        plan_.blocks.emplace_back();
+        plan_.blocks.back().begin = pc;
+      }
+      block_of[(size_t)pc] = blocks - 1;
+      plan_.blocks.back().end = pc + 1;
+    }
+    block_of[(size_t)n] = blocks;
+    for (auto& b : plan_.blocks) {
+      const auto& last = p_.code[(size_t)(b.end - 1)];
+      const bool jz = last.code == Program::JZ;
+      const bool jmp = last.code == Program::JMP;
+      if (jz || jmp) b.taken = block_of[(size_t)last.dst];
+      b.fall = jmp ? -1 : block_of[(size_t)b.end];
+    }
+  }
+
+  void build_windows() {
+    plan_.calls.assign(p_.calls.size(), {});
+    for (const auto& I : p_.code)
+      if (I.code == Program::CALL) forward_window(I.a);
+    for (const auto& A : p_.adj.code)
+      if (A.code == Program::CALL) backward_window(A.a);
+    for (const auto& w : plan_.calls)
+      plan_.max_window = std::max({plan_.max_window, w.fwd_size, w.bwd_size});
+  }
+
+  void forward_window(int index) {
+    const Program::Call& call = p_.calls[(size_t)index];
+    auto& w = plan_.calls[(size_t)index];
+    w.fwd = call;
+    std::vector<Span> written = {{call.out, call.out_len},
+                                 {call.scratch, call.scratch_len}};
+    std::vector<Span> read;
+    for (int k = 0; k < call.n_in; ++k) read.push_back({call.in[k], call.in_len[k]});
+    for (size_t i = 0; i < written.size(); ++i) {
+      for (size_t j = i + 1; j < written.size(); ++j)
+        if (overlaps(written[i], written[j]))
+          refuse("call output ranges overlap");
+      for (const auto& r : read)
+        if (overlaps(written[i], r)) refuse("call reads what it writes");
+    }
+    int at = 0;
+    for (int k = 0; k < call.n_in; ++k) {
+      w.in_off[k] = at;
+      w.fwd.in[k] = at;
+      at += call.in_len[k];
+    }
+    w.out_off = at;
+    w.fwd.out = at;
+    at += call.out_len;
+    w.scratch_off = at;
+    w.fwd.scratch = at;
+    at += call.scratch_len;
+    w.fwd_size = at;
+  }
+
+  void backward_window(int index) {
+    const Program::Call& call = p_.calls[(size_t)index];
+    auto& w = plan_.calls[(size_t)index];
+    std::vector<Span> adj_spans;
+    for (int k = 0; k < call.n_in; ++k)
+      if (call.input_adjoint_mask & (1u << k))
+        adj_spans.push_back({call.bwd_adj_in[k], call.in_len[k]});
+    adj_spans.push_back({call.bwd_adj_out, call.out_len});
+    for (size_t i = 0; i < adj_spans.size(); ++i)
+      for (size_t j = i + 1; j < adj_spans.size(); ++j)
+        if (overlaps(adj_spans[i], adj_spans[j]))
+          refuse("call adjoint ranges overlap");
+    const Span scratch{call.scratch, call.scratch_len};
+    for (int k = 0; k < call.n_in; ++k)
+      if (overlaps(scratch, {call.bwd_value_in[k], call.in_len[k]}))
+        refuse("call scratch overlaps a value range");
+    if (overlaps(scratch, {call.bwd_value_out, call.out_len}))
+      refuse("call scratch overlaps a value range");
+    int at = 0;
+    for (int k = 0; k < call.n_in; ++k) {
+      w.val_in_off[k] = at;
+      at += call.in_len[k];
+    }
+    w.val_out_off = at;
+    at += call.out_len;
+    w.bwd_scratch_off = at;
+    at += call.scratch_len;
+    for (int k = 0; k < call.n_in; ++k) {
+      w.adj_in_off[k] = at;
+      if (call.input_adjoint_mask & (1u << k)) at += call.in_len[k];
+    }
+    w.adj_out_off = at;
+    at += call.out_len;
+    w.bwd_size = at;
+  }
+
+  void size_tiles() {
+    plan_.tiles =
+        (int)((p_.count + kRegionMapTile - 1) / kRegionMapTile);
+    plan_.storage =
+        (int64_t)plan_.tiles * kRegionMapTile * plan_.fwd_regs +
+        (int64_t)kRegionMapTile * plan_.adj_cells;
+    if (plan_.storage > limit_) refuse("tile storage exceeds the save limit");
+  }
+};
+
+std::atomic<uint64_t> lane_runs{0};
+
+}  // namespace
+
+uint64_t region_map_lane_runs() {
+  return lane_runs.load(std::memory_order_relaxed);
+}
+
+void plan_region_map_lanes(RegionMapProg& p, bool enabled,
+                           int64_t storage_limit) {
+  p.lanes = RegionMapLanePlan{};
+  if (!enabled) {
+    p.lanes.refusal = "off";
+    return;
+  }
+  if (p.recompute) {
+    p.lanes.refusal = "recompute";
+    return;
+  }
+  try {
+    Analysis(p, storage_limit).run();
+    p.lanes.active = true;
+  } catch (const Refusal& r) {
+    p.lanes = RegionMapLanePlan{};
+    p.lanes.refusal = r.why;
+  }
+}
+
+}  // namespace stanli

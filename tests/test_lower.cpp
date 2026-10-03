@@ -4,6 +4,7 @@
 #include "env_helpers.hpp"
 #include "categorical_check_mir.hpp"
 #include "stdout_capture.hpp"
+#include "tools/stanc_process.hpp"
 #include <stanli/compile.hpp>
 #include <stanli/dae.hpp>
 #include <stanli/density_registry.hpp>
@@ -26,6 +27,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -1913,6 +1915,308 @@ void test_logic_compiles_to_jumps() {
   }
 }
 
+struct Run {
+  bool threw = false;
+  std::string what;
+  Eval e;
+};
+
+Run try_evaluate(Executor& ex, const Params& p) {
+  Run r;
+  try {
+    r.e = evaluate(ex, p);
+  } catch (const std::exception& e) {
+    r.threw = true;
+    r.what = std::string(typeid(e).name()) + ": " + e.what();
+  }
+  return r;
+}
+
+bool same_bits(double a, double b) {
+  if (std::isnan(a) && std::isnan(b)) return true;
+  return std::memcmp(&a, &b, sizeof(double)) == 0;
+}
+
+bool grad_close(double got, double want) {
+  if (std::isnan(got) || std::isnan(want)) return std::isnan(got) && std::isnan(want);
+  if (got == want) return true;
+  if (std::isinf(got) || std::isinf(want)) return false;
+  if (std::fabs(got - want) <= 1e-13) return true;
+  return std::llabs(ulp_key(got) - ulp_key(want)) <= 10;
+}
+
+Params spread_point(size_t k, size_t n_params, double amplitude = 1.2) {
+  Params p(n_params);
+  for (size_t j = 0; j < n_params; ++j)
+    p[j] = amplitude * std::sin(1.7 * (double)k + 2.3 * (double)j + 0.4);
+  return p;
+}
+
+std::vector<Params> spread_points(size_t n_params, size_t count = 6,
+                                  double amplitude = 1.2) {
+  std::vector<Params> points;
+  for (size_t k = 0; k < count; ++k)
+    points.push_back(spread_point(k, n_params, amplitude));
+  points.push_back(points.front());
+  return points;
+}
+
+struct LaneOutcome {
+  int threw = 0;
+  int ok = 0;
+};
+
+LaneOutcome expect_lane_parity(const std::string& what, const CompiledModel& lanes,
+                               const CompiledModel& scalar,
+                               const std::vector<Params>& points,
+                               bool want_lanes) {
+  const auto& pl = map_payload(lanes);
+  const auto& ps = map_payload(scalar);
+  check(pl.lanes.active == want_lanes,
+        what + ": lane plan " + (pl.lanes.active ? "active" : "refused (" + pl.lanes.refusal + ")") +
+            ", expected " + (want_lanes ? "active" : "refused"));
+  check(!ps.lanes.active && ps.lanes.refusal == "off",
+        what + ": STANLI_REGION_MAP_LANES=0 leaves no plan");
+  Executor el(lanes.graph), es(scalar.graph);
+  lanes.bind(el);
+  scalar.bind(es);
+  LaneOutcome out;
+  for (size_t k = 0; k < points.size(); ++k) {
+    const std::string at = what + " point " + std::to_string(k);
+    Params point = points[k];
+    if (point.size() != (size_t)el.n_params()) {
+      point = spread_point(k, (size_t)el.n_params());
+      for (size_t j = 0; j < points[k].size() && j < point.size(); ++j)
+        point[j] = points[k][j];
+    }
+    const uint64_t before = stanli::region_map_lane_runs();
+    const Run got = try_evaluate(el, point);
+    const uint64_t after = stanli::region_map_lane_runs();
+    const Run want = try_evaluate(es, point);
+    check(stanli::region_map_lane_runs() == after,
+          at + ": the scalar map never counts as a lane run");
+    check((after > before) == pl.lanes.active,
+          at + ": lane forward ran iff the plan is active");
+    check(got.threw == want.threw, at + ": lanes and scalar agree on throwing");
+    if (got.threw || want.threw) {
+      check(got.what == want.what,
+            at + ": same exception: " + got.what + " vs " + want.what);
+      ++out.threw;
+      continue;
+    }
+    ++out.ok;
+    check(same_bits(got.e.lp, want.e.lp),
+          at + ": lp bitwise equal (" + std::to_string(got.e.lp) + " vs " +
+              std::to_string(want.e.lp) + ")");
+    for (size_t i = 0; i < want.e.grad.size(); ++i)
+      check(grad_close(got.e.grad[i], want.e.grad[i]),
+            at + ": grad[" + std::to_string(i) + "] " +
+                std::to_string(got.e.grad[i]) + " vs " +
+                std::to_string(want.e.grad[i]));
+  }
+  return out;
+}
+
+struct LaneFixture {
+  const char* stem;
+  bool lanes;
+  const char* extra;
+};
+
+std::string big_data(int n) {
+  std::ostringstream out;
+  out.precision(17);
+  out << "\"big\":[";
+  for (int i = 0; i < n; ++i)
+    out << (i ? "," : "")
+        << (i % 8 == 1 ? "1e300" : i % 8 == 2 ? "-1e300" : "0");
+  out << "]";
+  return out.str();
+}
+
+void test_lane_fixtures() {
+  const std::vector<LaneFixture> fixtures = {
+      {"region_map_branch", true, ""},
+      {"region_map_udf", false, ""},
+      {"region_map_many", true, ""},
+      {"region_map_alias", true, ""},
+      {"region_map_local_int", true, ""},
+      {"region_map_multi", true, ""},
+      {"region_map_logic", true, ""},
+      {"region_map_short_circuit", true, ""},
+      {"region_map_nan", true, "\"nv\":NaN"},
+      {"region_map_call", true, ""},
+      {"region_map_long_body", true, ""},
+      {"region_map_nanflag", true, ""},
+      {"region_map_dup", true, ""},
+      {"region_map_intops", false, ""},
+  };
+  for (const LaneFixture& f : fixtures) {
+    for (int n : {37, 64, 65, 200}) {
+      const std::string what = std::string(f.stem) + " N=" + std::to_string(n);
+      CompiledModel lanes = compile_with(f.stem, n, nullptr, "0", f.extra);
+      CompiledModel scalar =
+          compile_with(f.stem, n, "STANLI_REGION_MAP_LANES", "0", f.extra);
+      expect_mapped(what, lanes);
+      expect_lane_parity(what, lanes, scalar, spread_points(2), f.lanes);
+    }
+  }
+  for (int n : {37, 64, 65, 200}) {
+    const std::string extra = big_data(n);
+    const std::string what = "region_map_cancel N=" + std::to_string(n);
+    CompiledModel lanes = compile_with("region_map_cancel", n, nullptr, "0", extra);
+    CompiledModel scalar =
+        compile_with("region_map_cancel", n, "STANLI_REGION_MAP_LANES", "0", extra);
+    expect_mapped(what, lanes);
+    expect_lane_parity(what, lanes, scalar, spread_points(2), true);
+  }
+}
+
+void test_lane_flag_clear_segments() {
+  for (int n : {37, 64, 65}) {
+    const std::string what = "region_map_nanflag N=" + std::to_string(n);
+    CompiledModel lanes = compile_with("region_map_nanflag", n);
+    CompiledModel scalar =
+        compile_with("region_map_nanflag", n, "STANLI_REGION_MAP_LANES", "0");
+    expect_mapped(what, lanes);
+    const std::vector<Params> points = {{0.9, 1.3}, {-0.4, 0.8}, {1.7, -0.6},
+                                        {0.0, 0.0}, {1.1, 0.0}};
+    const LaneOutcome r = expect_lane_parity(what, lanes, scalar, points, true);
+    check(r.ok == (int)points.size(), what + ": every point evaluates");
+    Executor ex(lanes.graph);
+    lanes.bind(ex);
+    const Eval e = evaluate(ex, points[0]);
+    check(std::isfinite(e.lp), what + ": lp finite");
+    for (double g : e.grad)
+      check(std::isfinite(g), what + ": gradient finite (flag-clear lanes stay out)");
+  }
+}
+
+void test_lane_cancellation_bitwise() {
+  const int n = 200;
+  const std::string extra = big_data(n);
+  CompiledModel lanes = compile_with("region_map_cancel", n, nullptr, "0", extra);
+  CompiledModel scalar =
+      compile_with("region_map_cancel", n, "STANLI_REGION_MAP_LANES", "0", extra);
+  check(map_payload(lanes).lanes.active, "cancellation model batches");
+  Executor el(lanes.graph), es(scalar.graph);
+  lanes.bind(el);
+  scalar.bind(es);
+  std::set<double> distinct;
+  for (const Params& p : spread_points(2, 8, 0.9)) {
+    const Eval a = evaluate(el, p), b = evaluate(es, p);
+    check(same_bits(a.lp, b.lp), "cancellation lp bitwise");
+    distinct.insert(a.lp);
+  }
+  check(distinct.size() > 2, "cancellation lp varies across points");
+}
+
+void test_lane_exceptions() {
+  for (int n : {37, 64, 200}) {
+    const std::string what = "region_map_oob N=" + std::to_string(n);
+    CompiledModel lanes = compile_with("region_map_oob", n);
+    CompiledModel scalar =
+        compile_with("region_map_oob", n, "STANLI_REGION_MAP_LANES", "0");
+    const LaneOutcome r =
+        expect_lane_parity(what, lanes, scalar, spread_points(2, 3), true);
+    check(r.threw == 4 && r.ok == 0, what + ": out of range index throws every time");
+    const std::string mapped = outcome("region_map_oob", n, nullptr);
+    check(mapped.find("structured index out of range") != std::string::npos,
+          what + ": lane exception is the structured message: " + mapped);
+  }
+  for (int n : {37, 64, 65, 200}) {
+    const std::string what = "region_map_calldomain N=" + std::to_string(n);
+    CompiledModel lanes = compile_with("region_map_calldomain", n);
+    CompiledModel scalar =
+        compile_with("region_map_calldomain", n, "STANLI_REGION_MAP_LANES", "0");
+    expect_mapped(what, lanes);
+    std::vector<Params> points = spread_points(2, 8, 1.0);
+    points.push_back({0.3, 0.0});
+    points.push_back({-0.2, -0.8});
+    const LaneOutcome r = expect_lane_parity(what, lanes, scalar, points, true);
+    check(r.threw > 0, what + ": some points raise a domain error inside a CALL");
+  }
+}
+
+void test_lane_duplicate_live_in() {
+  CompiledModel cm = compile_with("region_map_dup", 64);
+  const auto& p = map_payload(cm);
+  int duplicates = 0;
+  for (size_t i = 0; i + 1 < p.ins.size(); ++i)
+    for (size_t j = i + 1; j + 1 < p.ins.size(); ++j)
+      if (p.ins[i].input != p.ins[j].input && p.ins[i].len == p.ins[j].len &&
+          p.ins[i].len > 1)
+        ++duplicates;
+  check(duplicates > 0, "equal vectors arrive as two live-ins");
+}
+
+void test_lane_copied_executors_interleaved() {
+  for (const char* stem : {"region_map_branch", "region_map_logic"}) {
+    const std::string what = std::string(stem) + " copies";
+    CompiledModel cm = compile_with(stem, 65);
+    check(map_payload(cm).lanes.active, what + ": plan active");
+    Executor a(cm.graph);
+    cm.bind(a);
+    Executor b(a);
+    Executor fresh_a(cm.graph), fresh_b(cm.graph);
+    cm.bind(fresh_a);
+    cm.bind(fresh_b);
+    const Params pa = spread_point(0, 2), pb = spread_point(3, 2);
+    for (int round = 0; round < 3; ++round) {
+      const Eval ea = evaluate(a, pa);
+      const Eval eb = evaluate(b, pb);
+      const Eval fa = evaluate(fresh_a, pa);
+      const Eval fb = evaluate(fresh_b, pb);
+      check(same_bits(ea.lp, fa.lp) && ea.grad == fa.grad,
+            what + ": copy A matches a fresh executor");
+      check(same_bits(eb.lp, fb.lp) && eb.grad == fb.grad,
+            what + ": copy B matches a fresh executor");
+    }
+  }
+}
+
+#ifdef STANLI_TEST_STANC
+struct CogmodExpectation {
+  const char* stem;
+  bool mapped;
+  bool lanes;
+};
+
+void test_lane_cogmod() {
+  const std::vector<CogmodExpectation> models = {
+      {"cm_betadiscrete", false, false}, {"cm_betagate", true, true},
+      {"cm_bisa", true, true},           {"cm_choco", true, true},
+      {"cm_ddm", true, true},            {"cm_exgaussian", true, true},
+      {"cm_exwald", true, true},         {"cm_gamma", true, true},
+      {"cm_geg", true, true},            {"cm_invgamma", true, true},
+      {"cm_invgaussian", true, false},   {"cm_invweibull", true, true},
+      {"cm_lba1", true, true},           {"cm_lba2", true, true},
+      {"cm_lnr", true, true},            {"cm_lnr_bench", true, true},
+      {"cm_loggamma", true, true},       {"cm_lognormal", true, true},
+      {"cm_logstudent", true, true},     {"cm_logweibull", true, true},
+      {"cm_rdm", true, true},            {"cm_weibull", true, true},
+  };
+  for (const CogmodExpectation& m : models) {
+    const std::string stem = m.stem;
+    const std::string mir = stanli::tooling::run_stanc_process(
+        STANLI_TEST_STANC, "tests/cogmod/" + stem + ".stan");
+    const DataMap data = DataMap::from_json_file("tests/cogmod/" + stem + ".json");
+    CompiledModel lanes = stanli::compile_model(mir, data);
+    test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
+    CompiledModel scalar = stanli::compile_model(mir, data);
+    test_unsetenv("STANLI_REGION_MAP_LANES");
+    const bool mapped = count_opcode(lanes, OP_REGION_MAP) > 0;
+    check(mapped == m.mapped, stem + ": mapped " + (mapped ? "yes" : "no"));
+    if (!mapped) continue;
+    Executor probe(lanes.graph);
+    lanes.bind(probe);
+    const size_t n_params = (size_t)probe.n_params();
+    expect_lane_parity(stem, lanes, scalar, spread_points(n_params, 6, 0.8),
+                       m.lanes);
+  }
+}
+#endif
+
 }  // namespace region_map_test
 
 static void test_region_map() {
@@ -1931,6 +2235,15 @@ static void test_region_map() {
   test_call_partials_differ_per_iteration(true);
   test_logic_points();
   test_logic_compiles_to_jumps();
+  test_lane_fixtures();
+  test_lane_flag_clear_segments();
+  test_lane_cancellation_bitwise();
+  test_lane_exceptions();
+  test_lane_duplicate_live_in();
+  test_lane_copied_executors_interleaved();
+#ifdef STANLI_TEST_STANC
+  test_lane_cogmod();
+#endif
 }
 
 int main() {
