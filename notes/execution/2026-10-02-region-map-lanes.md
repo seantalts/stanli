@@ -1,6 +1,7 @@
 # OP_REGION_MAP Phase 2: run each instruction over many observations
 
-Status: design for review. Builds on [OP_REGION_MAP](2026-10-02-region-map-spec.md).
+Status: revised after Codex review (2026-10-02). Builds on
+[OP_REGION_MAP](2026-10-02-region-map-spec.md).
 
 ## Why
 
@@ -30,79 +31,88 @@ constants once per evaluation. They cut instructions per observation but not
 the dispatch per instruction. This phase removes that: one dispatch per
 instruction per group of observations.
 
-## Shape
+## Step A: smaller programs (portable, also helps every region)
 
-Lanes are iterations. One evaluation runs the program once over all lanes.
+Gamma's body after the scalar fixes is 85 instructions, about 10 of them
+arithmetic. Two sources of the rest:
+
+- `&&` and `||` are compiled as values: each term emits a comparison, a
+  normalization against zero (`NE`), a copy into the result register, and
+  jumps; the `if` then tests the result again. Emit conditions as jumps
+  instead (a comparison followed by a conditional jump straight to the arm),
+  and skip the normalization when the operand is already a comparison or
+  logical result. Stan's short-circuit order and domain errors must not
+  change.
+- `gen_adjoint` writes a path flag at the entry of every block, but only
+  blocks with adjoint work get a reverse segment. Write flags only for those
+  blocks. Gamma has 20 flags; most guard blocks of the validity chain that
+  have no derivative.
+
+## Step B: run each instruction over a tile of lanes
+
+Lanes are iterations. Lanes are processed in tiles of 64. Inside a tile,
+per-lane registers are stored register-major (`tile[k * 64 + l]`), so an
+instruction's loop over the tile is contiguous and vectorizable. Tiles keep
+the working set in cache and keep every lane's forward state for the
+backward.
 
 **Register classes**, fixed at lowering:
 
-- Shared: live-in ranges (immutable, already checked) and registers written
-  only by a hoisted constant. One copy.
-- Per lane: every other register, including the iteration register and the
-  adjoint path flags. Stored lane-major per register: `lane_reg[k * L + l]`
-  for per-lane register index `k` and lane `l`. Per-lane indices are assigned
-  so that every range an instruction reads or writes stays contiguous.
+- Shared: live-in ranges other than the iteration register, and registers
+  written only by a hoisted constant. One copy.
+- Per lane: everything else, including the iteration register (seeded
+  `lo + lane`), checkpoint copies `gen_adjoint` adds, and path flags.
+- Adjoint cells are classified by whole `adj_reg` equivalence class: a class
+  is shared if any register in it is a shared live-in, so a per-lane copy of a
+  live-in still accumulates into the shared cell. Checkpoints and flags have
+  no adjoint cell. Check forward and adjoint range homogeneity separately;
+  refuse batching if a range mixes classes.
+- Refuse batching if any adjoint rule consumes or clears a shared cell (the
+  scalar map already refuses this for live-in cells; extend the proof to the
+  new classes). `FABS` and `FMIN`/`FMAX` NaN cases assign NaN to an operand
+  adjoint; NaN is absorbing, so lane order cannot change the result, but the
+  test suite must cover it.
 
-Refuse batching (keep the scalar map) if any instruction's range mixes the two
-classes.
+**Forward.** Blocks in program order (acyclic). Each block has a 64-bit lane
+mask; the entry block's mask is the tile's active lanes. Each instruction runs
+once over its block's mask, dense loop when the mask is full. `JZ` splits the
+mask; a block's mask is the OR of what its predecessors sent. Path flags are
+ordinary per-lane registers, reset per tile and set on block entry, exactly
+as the scalar program does.
 
-**Forward.** The program is acyclic with forward jumps only. Walk blocks in
-program order. Each block has a lane set; the entry block has all lanes.
+- `DYN_INDEX`: per lane, with the scalar path's finite, integral, one-based
+  range check including `I.c`.
+- Integer ops keep C++ `int` semantics.
+- `CALL`, four-argument `DENSITY` and ranged operands: gather the lane's
+  operand ranges into a contiguous window, run the scalar code, scatter back.
+  Repeated or overlapping CALL operand ranges refuse batching.
+- Opcodes not on the list keep the scalar map.
 
-- Each instruction runs once over its block's lane set. Operand addressing is
-  resolved at lowering: a shared operand is one value, a per-lane operand is a
-  base plus lane. A full lane set uses a dense loop with no index list.
-- `JZ` splits its block's lane set by the condition into the fall-through and
-  the target. A block's lane set is the ascending merge of what its
-  predecessors sent it. `JMP` sends the whole set.
-- `DYN_INDEX` gathers per lane: the index register is per lane (usually the
-  iteration register or derived from it), the indexed run is shared (a live-in
-  vector) or per lane (a body-local vector).
-- `CALL` runs per lane: gather the lane's input ranges into a contiguous
-  window, call the kernel's scalar forward, scatter the output and the
-  kernel's scratch back to per-lane storage.
-- Opcodes are on an explicit list (arithmetic, comparisons, `JZ`/`JMP`,
-  constants, `MOV`/`MOVR`, `DYN_INDEX`, the scalar unary math ops, `LOG_MIX`,
-  `LSE2`, `LOG_DIFF_EXP`, `FMA`, `POW`, `FMIN`/`FMAX`, `IMOD`/`IDIV` and the
-  integer ops, `DENSITY`, `CALL`). Any other opcode keeps the scalar map.
+**Target.** Each lane's target register is summed into the output in
+ascending lane order, tile by tile, so the forward value is bitwise the
+scalar map's.
 
-The per-lane register file holds every lane's forward state when the forward
-ends, so the backward recomputes nothing.
+**Backward.** Tiles in reverse. Within a tile, adjoint segments in their
+stored order; a segment's mask is the lanes whose flag is set. Never run a
+segment for a lane whose flag is clear, even with a zero seed (`FABS` can
+poison). Each adjoint instruction runs over the mask, lanes descending.
+Per-lane cells are zeroed per tile; shared cells are seeded once with the
+island continuation policy and harvested once, with assignment versus
+addition as today.
 
-**Backward.** Adjoint cells split the same way. A cell is shared when any
-forward register mapped to it (`adj_reg`) is shared; that includes a copy that
-shares a live-in's cell. Otherwise per lane.
+**Accumulation order.** Per-lane cells and `DYN_INDEX` scatters into distinct
+elements are unchanged. A shared scalar that several instructions add to on
+every lane is regrouped: instruction-major within a tile instead of
+iteration-major. This is within the ULP policy; it can in principle change
+overflow (a `+1e308`/`-1e308` pair that cancelled in scalar order). Add
+cancellation and overflow cases to the tests.
 
-- Zero the per-lane adjoint storage once per backward. Seed shared live-in
-  cells with the island continuation policy, as the scalar map does. Seed the
-  target cell of every lane with the output adjoint.
-- Walk the adjoint segments in their stored (reverse) order. A segment's lane
-  set is the lanes whose guard register is nonzero. Without segments, all
-  lanes.
-- Each adjoint instruction runs once over the segment's lanes, lanes in
-  descending order. Per-lane cells are independent. Shared cells receive one
-  addition per lane in that order.
-- `CALL` backward per lane with gathered value and adjoint windows.
-- Harvest shared live-in cells as today.
+**Exceptions.** If the batched forward throws, restore inputs and the
+prologue, rerun the scalar map forward, and let it throw with the scalar type
+and message. If the scalar rerun succeeds, rethrow the original exception.
 
-## Accumulation order
-
-The scalar map adds into a shared cell iteration by iteration in reverse, and
-within an iteration in reverse instruction order. The batched backward adds
-instruction by instruction, and within an instruction lane by lane in reverse.
-For a cell that one instruction writes once per lane (the usual case: `mu[n]`
-through `DYN_INDEX`, where each lane hits its own element) nothing changes.
-For a shared scalar that several instructions add into on every lane (a
-broadcast parameter), the sum is regrouped. That is within the ULP policy
-(bitwise is not a gate), and the corpus replay bounds it.
-
-## Exceptions
-
-A domain error at lane `i` in instruction `j` would surface from the batched
-forward at the first instruction where any lane fails, which can be a
-different lane and message than the scalar order. On any exception from the
-batched forward, rerun the scalar map forward from the start and let it throw.
-The cost only applies to rejected evaluations.
+**Oracle.** The scalar map is the differential oracle: forward values and
+per-lane target terms must be bitwise equal; gradients within the ULP policy.
 
 ## Expected cost
 
@@ -115,7 +125,22 @@ observation, which puts gamma near the old loop. This must be measured, not
 assumed: sampling A/B against the scalar map and the old loop, all cogmod
 families.
 
-## Open questions for review
+## Native code instead of, or after, Step B
+
+The map gives a native-code backend exactly the shape it wants: one small
+acyclic program and its adjoint, run once per observation for every
+gradient. The 2026-09-28 probes measured the register VM against the same
+programs emitted as C++: 47 vs 21 ns for 16 arithmetic instructions, 35 vs
+10 ns for a branch, but 632 vs 554 ns for a 256-instruction dependent chain,
+and 256 ms to build with an external compiler. Native code removes dispatch
+and keeps scalar semantics bitwise; it needs per-platform code, executable
+memory, and does not run in WebAssembly. Step B removes most dispatch
+portably and can use SIMD across lanes. A bounded ceiling experiment would
+settle the comparison: emit gamma's actual map program and adjoint with the
+removed probe emitter (`tools/probe_native_program.cpp`, last at 84945f1b),
+build it ahead of time, and measure gamma under sampling.
+
+## Review questions (answered by Codex, folded in above)
 
 1. Is "shared if any register mapped to the cell is shared" the right
    classification for adjoint cells given copy aliasing, and is anything
