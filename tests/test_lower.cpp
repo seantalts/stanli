@@ -2040,7 +2040,8 @@ std::string big_data(int n) {
 std::vector<LaneFixture> lane_fixture_list() {
   return {
 {"region_map_branch", true, ""},
-      {"region_map_udf", false, ""},
+      {"region_map_udf", true, ""},
+      {"region_map_density", true, ""},
       {"region_map_many", true, ""},
       {"region_map_alias", true, ""},
       {"region_map_local_int", true, ""},

@@ -36,6 +36,7 @@ bool lane_opcode(Program::Code c) {
     case Program::NEG:
     case Program::EXP:
     case Program::LOG:
+    case Program::LOG1P_EXP:
     case Program::SQRT:
     case Program::SQUARE:
     case Program::INV:
@@ -445,6 +446,7 @@ class Analysis {
         case Program::NEG:
         case Program::EXP:
         case Program::LOG:
+        case Program::LOG1P_EXP:
         case Program::SQRT:
         case Program::SQUARE:
         case Program::INV:
@@ -652,6 +654,9 @@ void lane_instruction(const RegionMapProg& p, const TileState& t,
       break;
     case Program::LOG:
       t.unary(I, m, [](double a) { return stan::math::log(a); });
+      break;
+    case Program::LOG1P_EXP:
+      t.unary(I, m, [](double a) { return stan::math::log1p_exp(a); });
       break;
     case Program::SQRT:
       t.unary(I, m, [](double a) { return stan::math::sqrt(a); });
@@ -1029,6 +1034,16 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t,
         const double u = d[l];
         d[l] = 0.0;
         a[l] += u / va[l];
+      });
+      return;
+    }
+    case Program::LOG1P_EXP: {
+      const Cell d = t.cell(I.dst), a = t.acc(I.a);
+      const auto va = t.val(I.va);
+      t.each(m, [&](int l) {
+        const double u = d[l];
+        d[l] = 0.0;
+        a[l] += u * stan::math::inv_logit(va[l]);
       });
       return;
     }
