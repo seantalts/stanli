@@ -1683,6 +1683,170 @@ void each_written_span(const stanli::Program& p,
   if (len > 0) fn(I.dst, len);
 }
 
+
+bool map_calls(const CompiledModel& cm, uint16_t opcode) {
+  for (const auto& c : map_payload(cm).calls)
+    if (c.opcode == opcode) return true;
+  return false;
+}
+
+var shifted_residual(double y, const var& mu) {
+  return y > mu ? y - mu : y - (mu + 0.25);
+}
+
+const Ref ref_cf_udf = [](const std::vector<var>& p, const Series& s,
+                          std::vector<int>* taken) {
+  const var sc = stan::math::exp(p[1]);
+  var lp = 0;
+  for (size_t i = 0; i < s.y.size(); ++i) {
+    const var d = shifted_residual(s.y[i], p[0] * s.x[i]);
+    const bool tail = d < -sc;
+    if (taken) taken->push_back(tail);
+    lp += tail ? -0.5 * stan::math::square(d / sc) - stan::math::log(sc) -
+                     0.5 * sc
+               : stan::math::log1p_exp(-stan::math::square(d) * sc) -
+                     stan::math::log(sc);
+  }
+  return lp;
+};
+
+Ref zero_probe_ref(double A) {
+  return [A](const std::vector<var>& p, const Series& s,
+             std::vector<int>* taken) {
+    const var sc = stan::math::exp(p[1]);
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var d = shifted_residual(s.y[i], p[0] * s.x[i]);
+      const bool tail = d < -sc;
+      if (taken) taken->push_back(tail);
+      const var base =
+          tail ? -0.5 * stan::math::square(d / sc) - stan::math::log(sc)
+               : stan::math::log1p_exp(-stan::math::square(d) * sc) -
+                     stan::math::log(sc);
+      if (A == 0)
+        lp += base + (std::signbit(A) ? -1.0 : 1.0);
+      else if (std::isnan(A))
+        lp += base + 2;
+      else
+        lp += base + stan::math::log(stan::math::erfc(d * A + 3));
+    }
+    return lp;
+  };
+}
+
+const Ref ref_cf_early = [](const std::vector<var>& p, const Series& s,
+                            std::vector<int>* taken) {
+  const var sc = stan::math::exp(p[1]);
+  var lp = 0;
+  for (size_t i = 0; i < s.y.size(); ++i) {
+    const var mu = p[0] * s.x[i];
+    if (taken) taken->push_back(s.y[i] > mu);
+    const var d = shifted_residual(s.y[i], mu);
+    lp += -0.5 * stan::math::square(d / sc) - stan::math::log(sc) - 0.5 * sc;
+  }
+  return lp;
+};
+
+void run_folded(const std::string& stem, const std::string& extra,
+                const Ref& ref, bool dead_arm_present) {
+  const std::string what = stem + " [" + extra + "]";
+  setenv("STANLI_NO_CFG_DEAD_CONSTANTS", "1", 1);
+  CompiledModel cm = compile_with(stem, 64, nullptr, "0", extra);
+  unsetenv("STANLI_NO_CFG_DEAD_CONSTANTS");
+  expect_mapped(what, cm);
+  check(map_calls(cm, stanli::OP_ERFC) == dead_arm_present,
+        what + (dead_arm_present ? ": live arm compiled"
+                                 : ": dead arm not compiled"));
+  run_points(stem, 64, udf_points, ref, true, nullptr, "0", extra);
+}
+
+void test_constant_folds_into_loop_body() {
+  run_folded("region_map_cf_literal", "", ref_cf_udf, false);
+  run_folded("region_map_cf_nested", "", ref_cf_udf, false);
+  run_folded("region_map_cf_early", "", ref_cf_early, false);
+  run_folded("region_map_cf_data", "\"A\":0", zero_probe_ref(0.0), false);
+  run_folded("region_map_cf_data", "\"A\":-0.0", zero_probe_ref(-0.0), false);
+  run_folded("region_map_cf_data", "\"A\":NaN",
+             zero_probe_ref(std::numeric_limits<double>::quiet_NaN()), false);
+  run_folded("region_map_cf_data", "\"A\":0.5", zero_probe_ref(0.5), true);
+
+  const Ref ref_nan = [](const std::vector<var>& p, const Series& s,
+                         std::vector<int>* taken) {
+    const var sc = stan::math::exp(p[1]);
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var d = shifted_residual(s.y[i], p[0] * s.x[i]);
+      const bool tail = d < -sc;
+      if (taken) taken->push_back(tail);
+      lp += (tail ? -0.5 * stan::math::square(d / sc) - stan::math::log(sc)
+                  : stan::math::log1p_exp(-stan::math::square(d) * sc) -
+                        stan::math::log(sc)) +
+            3;
+    }
+    return lp;
+  };
+  run_folded("region_map_cf_nan", "", ref_nan, false);
+}
+
+void test_loop_variant_argument_is_not_folded() {
+  std::ostringstream w;
+  w.precision(17);
+  w << "\"w\":[";
+  for (int i = 0; i < 64; ++i)
+    w << (i ? "," : "") << (i % 3 == 0 ? 0.0 : 0.2 + 0.01 * (i % 7));
+  w << "]";
+  const Ref ref = [](const std::vector<var>& p, const Series& s,
+                     std::vector<int>* taken) {
+    const var sc = stan::math::exp(p[1]);
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const double wi = i % 3 == 0 ? 0.0 : 0.2 + 0.01 * (i % 7);
+      const var d = shifted_residual(s.y[i], p[0] * s.x[i]);
+      const bool tail = d < -sc;
+      if (taken) taken->push_back(tail);
+      if (wi == 0)
+        lp += tail ? -0.5 * stan::math::square(d / sc) -
+                         stan::math::log(sc) - 0.5 * sc
+                   : stan::math::log1p_exp(-stan::math::square(d) * sc) -
+                         stan::math::log(sc);
+      else
+        lp += stan::math::log(stan::math::erfc(d * wi + 3)) -
+              std::log(wi);
+    }
+    return lp;
+  };
+  run_folded("region_map_cf_variant", w.str(), ref, true);
+  run_folded("region_map_cf_variant_o0", w.str(), ref, true);
+}
+
+void test_break_inside_unrolled_loop_in_branch() {
+  const Ref ref = [](const std::vector<var>& p, const Series& s,
+                     std::vector<int>* taken) {
+    const var sc = stan::math::exp(p[1]);
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var d = s.y[i] - p[0] * s.x[i];
+      const bool tail = d < -sc;
+      if (taken) taken->push_back(tail);
+      if (tail) {
+        var acc = 0;
+        for (int k = 1; k <= 4; ++k) {
+          if (acc + k * sc > 1.5) break;
+          if (k == 2) continue;
+          acc += k * sc;
+        }
+        lp += -0.5 * stan::math::square(d / sc) - acc;
+      } else {
+        lp += stan::math::log1p_exp(-stan::math::square(d) * sc) -
+              stan::math::log(sc);
+      }
+    }
+    return lp;
+  };
+  run_points("region_map_cf_break", 64, udf_points, ref);
+  run_points("region_map_cf_break", 64, {{0.3, -1.4}, {-1.5, -0.6}}, ref);
+}
+
 void test_hoisted_constants_and_saved_state() {
   for (const char* stem :
        {"region_map_branch", "region_map_udf", "region_map_call"}) {
@@ -2459,6 +2623,9 @@ static void test_region_map() {
   test_long_body_map();
   test_out_of_range();
   test_copied_executors();
+  test_constant_folds_into_loop_body();
+  test_loop_variant_argument_is_not_folded();
+  test_break_inside_unrolled_loop_in_branch();
   test_hoisted_constants_and_saved_state();
   test_recompute_payload();
   test_call_partials_differ_per_iteration(false);

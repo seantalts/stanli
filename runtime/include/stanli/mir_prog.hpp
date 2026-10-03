@@ -188,6 +188,7 @@ struct ProgramCompiler {
     std::vector<int> breaks;
     std::vector<int> continues;
     bool structured = false;
+    int branch_depth = 0;
   };
   std::vector<LoopFrame> loops;
   // A name that is neither a local nor a compile-time integer. The ODE
@@ -4593,14 +4594,16 @@ struct ProgramCompiler {
       }
       case mir::Stmt::Break:
         if (loops.empty()) bail("break outside a loop");
-        if (branch_depth || loops.back().structured) {
+        if (branch_depth > loops.back().branch_depth ||
+            loops.back().structured) {
           loops.back().breaks.push_back(emit(Program::JMP, 0));
           return;
         }
         throw CompileBreak{};
       case mir::Stmt::Continue:
         if (loops.empty()) bail("continue outside a loop");
-        if (branch_depth || loops.back().structured) {
+        if (branch_depth > loops.back().branch_depth ||
+            loops.back().structured) {
           loops.back().continues.push_back(emit(Program::JMP, 0));
           return;
         }
@@ -4668,6 +4671,7 @@ struct ProgramCompiler {
           return;
         }
         loops.push_back({});
+        loops.back().branch_depth = branch_depth;
         bool broken = false;
         bool returned = false;
         for (int64_t v = lo; v <= hi; ++v) {

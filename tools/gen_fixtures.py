@@ -27,6 +27,8 @@ O0_FIXTURES = {
     "gq_rng_udf_effect",
     "gq_function_exits",
     "paramcond_intarray",
+    "region_map_cf_nested",
+    "region_map_cf_variant_o0",
     "reduce_sum_arguments",
     "region_constant_shadow",
     "runtime_int_array_udf",
