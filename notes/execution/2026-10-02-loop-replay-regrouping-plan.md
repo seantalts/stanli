@@ -1,6 +1,8 @@
 # Structured-loop replay that survives branch flips, then batched execution
 
-Status: plan, not implemented. Scope: `OP_LOOP` only (`runtime/src/structured_loop.cpp`,
+Status: Phase 1 superseded by [OP_REGION_MAP](2026-10-02-region-map-spec.md)
+after measuring the region program's own cost. Phase 2 will be redesigned on
+top of it. #423 must not ship in a release before Phase 1 lands. Scope: `OP_LOOP` only (`runtime/src/structured_loop.cpp`,
 `runtime/src/structured_frames.inc`, `runtime/src/structured_recording.inc`). No
 change to graph lowering, regions, or other ops.
 
@@ -24,18 +26,30 @@ number of leapfrog steps). "loop" is the default structured loop; "regions" is
 
 | family | loop | regions |
 | --- | ---: | ---: |
-| gamma | 485 us | 852 us |
-| weibull | 468 us | 848 us |
 | logstudent | 449 us | 812 us |
+| weibull | 468 us | 848 us |
+| gamma | 485 us | 852 us |
 | invgamma | 937 us | 978 us |
 | invweibull | 1492 us | 935 us |
 | logweibull | 1693 us | 996 us |
+| betagate | 1810 us | 2619 us |
+| choco | 2073 us | 5326 us |
 | bisa | 2474 us | 1621 us |
 | loggamma | 3548 us | 1742 us |
-| exgaussian | 16122 us | 1446 us |
-| geg | 26954 us | 2695 us |
+| exgaussian | 13480 us | 1308 us |
+| geg | 25480 us | 2542 us |
+| lnr_bench | 27622 us | 5563 us |
 | lognormal | 31447 us | 4800 us |
 | exwald | 44722 us | 5304 us |
+| betadiscrete | 49525 us | 49490 us |
+| lba1 | over 300 s | 2031 us |
+| lba2 | over 300 s | 4831 us |
+| rdm | over 300 s | 12928 us |
+| lnr | over 300 s | 24941 us |
+| invgaussian | over 300 s | over 300 s (115 s preparation) |
+| ddm | over 300 s | over 300 s |
+
+"over 300 s" means the 100-iteration run did not finish in five minutes.
 
 At a fixed point the same models run at 200 to 900 us per gradient on the loop.
 
