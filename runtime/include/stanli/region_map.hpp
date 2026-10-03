@@ -1,0 +1,21 @@
+#ifndef STANLI_REGION_MAP_HPP
+#define STANLI_REGION_MAP_HPP
+
+#include <stanli/island.hpp>
+
+#include <cstdint>
+#include <utility>
+#include <vector>
+
+namespace stanli {
+
+struct RegionMapProg : IslandProg {
+  int iter_reg = -1;
+  int64_t lo = 1;
+  int64_t count = 0;
+  std::vector<std::pair<int, int>> transient;
+};
+
+}  // namespace stanli
+
+#endif

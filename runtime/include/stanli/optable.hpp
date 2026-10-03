@@ -91,6 +91,7 @@ namespace stanli {
   X(OP_ISLAND)                        \
   X(OP_LOOP)                          \
   X(OP_REDUCE_SUM)                    \
+  X(OP_REGION_MAP)                    \
   X(OP_COMPARE)                       \
   X(OP_INT_ARITH)                     \
   X(OP_REP_VEC_DYNAMIC)               \
@@ -944,6 +945,7 @@ constexpr bool is_effectful_op(uint16_t opcode) {
     case OP_REJECT:
     case OP_LOOP:
     case OP_REDUCE_SUM:
+    case OP_REGION_MAP:
       return true;
     default:
       return false;
