@@ -594,6 +594,16 @@ static void test_private_adjoint_clears() {
              c.p.adj.code.begin(), c.p.adj.code.end(), [](const AdjInstr& i) {
                return i.code == Program::CONST || i.code == Program::LT;
              }));
+  auto kept = b.done({result}, {1.7});
+  expect("kept clear generation", gen_adjoint(kept.p, true));
+  const auto count_clears = [](const IslandProg& p) {
+    return std::count_if(
+        p.adj.code.begin(), p.adj.code.end(), [](const AdjInstr& i) {
+          return i.code == Program::CONST || i.code == Program::LT;
+        });
+  };
+  expect("every constant and comparison keeps its clear",
+         count_clears(kept.p) == 2 && count_clears(c.p) == 0);
 }
 
 // Forward-only branches must preserve executed paths, overwritten values,

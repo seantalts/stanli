@@ -2220,6 +2220,119 @@ void test_lane_cogmod() {
 }
 #endif
 
+void test_mode_policy() {
+  CompiledModel big = compile_with("region_map_long_body", 32);
+  const auto& b = map_payload(big);
+  check(b.lanes.active && !b.recompute && b.saved_cells > 1024,
+        "a body the lane plan accepts saves in lane tiles whatever its size");
+  CompiledModel forced =
+      compile_with("region_map_long_body", 32, "STANLI_REGION_MAP_SAVE_LIMIT");
+  const auto& f = map_payload(forced);
+  check(!f.lanes.active && f.recompute,
+        "a zero save limit refuses the lane plan and recomputes");
+  CompiledModel off =
+      compile_with("region_map_long_body", 32, "STANLI_REGION_MAP_LANES");
+  const auto& o = map_payload(off);
+  check(!o.lanes.active && o.recompute && o.transient.empty(),
+        "lanes off gives the scalar recompute for a large body");
+  CompiledModel small_off =
+      compile_with("region_map_branch", 64, "STANLI_REGION_MAP_LANES");
+  const auto& s = map_payload(small_off);
+  check(!s.lanes.active && !s.recompute && !s.transient.empty(),
+        "lanes off keeps the scalar save for a small body");
+}
+
+void test_large_body_recomputes_by_default() {
+  CompiledModel cm = compile_with("region_map_long_body", 32);
+  expect_mapped("long body", cm);
+  const auto& p = map_payload(cm);
+  check(p.recompute && p.saved.empty() && p.saved_cells == 0,
+        "a body saving more than 1024 cells per iteration recomputes");
+  CompiledModel small = compile_with("region_map_branch", 64);
+  const auto& q = map_payload(small);
+  check(!q.recompute && q.saved_cells > 0 && q.saved_cells <= 1024,
+        "a small body keeps saving");
+}
+
+void test_clear_strategy_follows_mode() {
+  using stanli::Program;
+  const auto clears = [](const stanli::RegionMapProg& p) {
+    return std::count_if(
+        p.adj.code.begin(), p.adj.code.end(), [](const stanli::AdjInstr& i) {
+          return i.code == Program::CONST || i.code == Program::LT ||
+                 i.code == Program::GT;
+        });
+  };
+  CompiledModel small = compile_with("region_map_branch", 64);
+  CompiledModel forced =
+      compile_with("region_map_branch", 64, "STANLI_REGION_MAP_SAVE_LIMIT");
+  CompiledModel big = compile_with("region_map_long_body", 32);
+  const auto& s = map_payload(small);
+  const auto& f = map_payload(forced);
+  const auto& b = map_payload(big);
+  check(!s.recompute && !s.transient.empty(),
+        "save mode clears the transient adjoint spans per observation");
+  check(f.recompute && f.transient.empty(),
+        "recompute mode has no per-observation clear list");
+  check(b.recompute && b.transient.empty(),
+        "a large body has no per-observation clear list");
+  check(clears(f) > clears(s),
+        "recompute mode keeps clears that save mode elides (" +
+            std::to_string(clears(f)) + " vs " + std::to_string(clears(s)) +
+            ")");
+}
+
+struct CleanFixture {
+  const char* stem;
+  int n;
+  const char* extra;
+};
+
+void test_clean_sweep() {
+  const std::vector<CleanFixture> fixtures = {
+      {"region_map_branch", 64, ""},     {"region_map_udf", 64, ""},
+      {"region_map_many", 64, ""},       {"region_map_alias", 64, ""},
+      {"region_map_local_int", 64, ""},  {"region_map_call", 64, ""},
+      {"region_map_multi", 64, ""},      {"region_map_intops", 64, ""},
+      {"region_map_logic", 64, ""},      {"region_map_short_circuit", 64, ""},
+      {"region_map_nan", 64, "\"nv\":NaN"}, {"region_map_long_body", 32, ""}};
+  test_setenv("STANLI_REGION_MAP_CHECK_CLEAN", "1", 1);
+  for (bool recompute : {false, true}) {
+    for (const auto& f : fixtures) {
+      const std::string what =
+          std::string(f.stem) + (recompute ? " recompute" : " save");
+      if (recompute) test_setenv("STANLI_REGION_MAP_SAVE_LIMIT", "0", 1);
+      CompiledModel cm = compile_with(f.stem, f.n, nullptr, "0", f.extra);
+      if (recompute) test_unsetenv("STANLI_REGION_MAP_SAVE_LIMIT");
+      expect_mapped(what, cm);
+      check(map_payload(cm).recompute ==
+                (recompute || std::string(f.stem) == "region_map_long_body"),
+            what + ": mode as requested");
+      Executor ex(cm.graph);
+      cm.bind(ex);
+      int swept = 0;
+      for (int k = 0; k < 8; ++k) {
+        Params point;
+        for (int64_t i = 0; i < ex.n_params(); ++i)
+          point.push_back(1.1 * std::sin(1.9 * k + 2.3 * i + 0.4) +
+                          0.3 * (k - 3));
+        try {
+          evaluate(ex, point);
+          ++swept;
+        } catch (const std::logic_error& e) {
+          const std::string what_failed = e.what();
+          check(what_failed.find("region_map_check_clean") == std::string::npos,
+                what + ": " + what_failed);
+        } catch (const std::exception&) {
+        }
+      }
+      check(swept >= 4, what + ": enough points evaluated (" +
+                            std::to_string(swept) + ")");
+    }
+  }
+  test_unsetenv("STANLI_REGION_MAP_CHECK_CLEAN");
+}
+
 }  // namespace region_map_test
 
 static void test_region_map() {
@@ -2247,6 +2360,12 @@ static void test_region_map() {
 #ifdef STANLI_TEST_STANC
   test_lane_cogmod();
 #endif
+  test_mode_policy();
+  test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
+  test_large_body_recomputes_by_default();
+  test_clear_strategy_follows_mode();
+  test_clean_sweep();
+  test_unsetenv("STANLI_REGION_MAP_LANES");
 }
 
 int main() {

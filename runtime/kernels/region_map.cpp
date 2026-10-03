@@ -5,8 +5,10 @@
 #include <stanli/region_map.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <exception>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace stanli {
@@ -32,6 +34,43 @@ void run_prologue(const RegionMapProg& p, double* reg) {
         break;
     }
   }
+}
+
+std::vector<char> clean_exempt_cells(const RegionMapProg& p) {
+  const auto& map = p.adj.adj_reg;
+  std::vector<char> exempt((size_t)p.adj.n_regs, 1);
+  const auto read = [&](int dst, int width) {
+    for (int k = 0; k < width; ++k)
+      if (dst + k >= 0 && dst + k < p.adj.n_regs) exempt[(size_t)(dst + k)] = 0;
+  };
+  for (const auto& A : p.adj.code) {
+    if (A.code == Program::CALL) {
+      const Program::Call& call = p.calls[(size_t)A.a];
+      read(call.bwd_adj_out, call.out_len);
+      continue;
+    }
+    Program::Instr probe;
+    probe.code = A.code;
+    probe.len = A.len;
+    probe.c = A.c;
+    probe.sub = A.sub;
+    read(A.dst, program_output_len(probe));
+  }
+  for (size_t k = 0; k + 1 < p.ins.size(); ++k)
+    for (int i = 0; i < p.ins[k].len; ++i)
+      exempt[(size_t)map[(size_t)(p.ins[k].reg + i)]] = 1;
+  return exempt;
+}
+
+void expect_clean_sweep(const std::vector<char>& exempt, const double* adj,
+                        int64_t iteration) {
+  for (size_t cell = 0; cell < exempt.size(); ++cell)
+    if (!exempt[cell] && adj[cell] != 0.0)
+      throw std::logic_error("region_map_check_clean: adjoint cell " +
+                             std::to_string(cell) + " holds " +
+                             std::to_string(adj[cell]) +
+                             " after the sweep of iteration " +
+                             std::to_string(iteration));
 }
 
 template <bool ReuseCallCtx>
@@ -109,6 +148,10 @@ void sweep(const RegionMapProg& p, KernelCtx& ctx, double* adj) {
   const double seed = ctx.out_adj_vec.data[0];
   const int64_t target = p.adj.adj_reg[(size_t)p.out_regs[0]];
   const double* saved = ctx.scratch + p.n_regs + p.adj.n_regs;
+  std::vector<char> exempt;
+  const bool verify =
+      p.recompute && std::getenv("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
+  if (verify) exempt = clean_exempt_cells(p);
   for (int64_t i = p.count; i-- > 0;) {
     ctx.scratch[p.iter_reg] = static_cast<double>(p.lo + i);
     if (p.recompute) {
@@ -124,6 +167,7 @@ void sweep(const RegionMapProg& p, KernelCtx& ctx, double* adj) {
       std::fill_n(adj + span.first, span.second, 0.0);
     adj[target] += seed;
     run_adjoint(p, p.adj, ctx.scratch, adj);
+    if (verify) expect_clean_sweep(exempt, adj, p.lo + i);
   }
 }
 

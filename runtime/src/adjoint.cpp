@@ -42,7 +42,7 @@
 
 namespace stanli {
 
-bool gen_adjoint(IslandProg& p) {
+bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
   Program& fwd = p;
   const std::vector<Program::Instr> orig = fwd.code;
   const int n0 = fwd.n_regs;
@@ -455,7 +455,7 @@ bool gen_adjoint(IslandProg& p) {
         (I.code >= Program::GT && I.code <= Program::NE) ||
         (I.code >= Program::IMOD && I.code <= Program::IABS) ||
         I.code == Program::EXTREMA_RANGE;
-    if (elide_private_clears && only_clear) {
+    if (elide_private_clears && !keep_every_clear && only_clear) {
       bool private_first = true;
       for (int k = 0; k < wl; ++k)
         private_first &= first_write[I.dst + k] == i && !no_alias[I.dst + k];
