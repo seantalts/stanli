@@ -56,12 +56,13 @@ All of:
 1. `for` loop in log_prob lowering (`Lowering::lower_stmt_impl`, `For` case,
    `runtime/src/lower_stmt.cpp`) with bounds folded at lowering and trip count
    at least 32. Not write_array, not GQ, not inside another region.
-2. **Parameter-dependent control.** A new detector, not `needs_runtime_control`
-   (which also fires on data-only control that today's paths handle well). The
-   body, following UDF calls transitively, contains an `if`, ternary,
-   short-circuit `&&`/`||`, or `while`/`for` bound whose condition depends on a
-   parameter, transformed parameter, or a local derived from one. Data-only
-   control keeps today's lowering.
+2. **Parameter-dependent control.** Reuse `region_auto_profitable(s, {lo, hi})`
+   (`runtime/src/lower_structured_loop.inc`), the test that selects the
+   structured loop today: trip count at least 32, outermost structured depth,
+   and `region_runtime_control`, which finds an `if`, ternary, `&&`/`||` or
+   `while` whose condition is not data-only, following UDF calls. Not
+   `needs_runtime_control`, which also fires on data-only control. Refuse when
+   `target_scale != 1.0`, as the structured loop does.
 3. **Independent iterations**, decided by binding, not by name. Every name the
    body assigns resolves to a declaration inside the body; the loop variable is
    never assigned; the body reads no local that an earlier iteration wrote. Any
@@ -104,10 +105,13 @@ All of:
   order. Lowering pushes it as one target term. This reassociates the sum
   relative to a per-term prefix fold; the ULP policy accepts that, and the
   tests below bound it.
-- **Transactional lowering.** `lower_island` can mutate `int_env`, scope and
-  other lowering state and then throw. Snapshot what the attempt can touch and
-  restore it on refusal, or run the attempt on a copy, so a refused loop lowers
-  exactly as it does today.
+- **Transactional lowering.** `lower_island` can mutate `int_env` (it writes
+  folded integers back), create slots (`uninitialized_decl_slot`,
+  `current_target_slot`) and then throw. Run every eligibility check and the
+  whole compile, including `gen_adjoint`, before emitting any graph op, and
+  restore what the attempt touched on refusal, so a refused loop lowers
+  exactly as it does today. `fork_region_trial()` is the audited helper the
+  structured loop uses for the same problem; use it or match what it saves.
 
 ## Kernel (`OP_REGION_MAP`, `runtime/kernels/`, registered like `OP_ISLAND`)
 
@@ -137,8 +141,13 @@ All of:
   same iteration.
 - A copied executor (multi-chain) gets its own register file and scratch.
 
-Selection: the map takes priority over the structured loop and bounded
-specialization for qualifying loops. Everything else is unchanged.
+Selection: in the `For` case of `Lowering::lower_stmt_impl`, after the bounds
+fold and before `try_lower_region`, in both the main lowering and the bounded
+specialization trial. On by default; `STANLI_REGION_MAP=0` turns it off for
+ablation. Skipped when `STANLI_STRUCTURED_LOOPS` forces or prefers the
+structured loop, so tests that ask for `OP_LOOP` keep getting it. With
+`STANLI_STRUCTURED_LOOPS=0` the map still applies. Everything else is
+unchanged.
 
 ## Tests (RED first)
 
