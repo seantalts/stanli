@@ -2219,6 +2219,7 @@ std::vector<LaneFixture> lane_fixture_list() {
       {"region_map_long_body", true, ""},
       {"region_map_nanflag", true, ""},
       {"region_map_dup", true, ""},
+      {"region_map_nested", true, ""},
       {"region_map_intops", false, ""},
   };
 }
@@ -2429,6 +2430,38 @@ void test_lane_duplicate_live_in() {
           p.ins[i].len > 1)
         ++duplicates;
   check(duplicates > 0, "equal vectors arrive as two live-ins");
+}
+
+void test_lane_guard_masks() {
+  for (const char* stem :
+       {"region_map_branch", "region_map_udf", "region_map_logic",
+        "region_map_short_circuit", "region_map_nested"}) {
+    const std::string what = std::string(stem) + " guard masks";
+    CompiledModel cm = compile_with(stem, 130, "STANLI_REGION_MAP_PROFILE", "1");
+    const auto& p = map_payload(cm);
+    check(p.lanes.active && p.lanes.profile != nullptr, what + ": plan active");
+    if (!p.lanes.active || !p.lanes.profile) continue;
+    check(!p.adj.segments.empty(), what + ": the adjoint has segments");
+    check(p.lanes.segment_blocks.size() == p.adj.segments.size(),
+          what + ": every segment maps to forward blocks");
+    for (size_t s = 0; s < p.lanes.segment_blocks.size(); ++s) {
+      check(!p.lanes.segment_blocks[s].empty(),
+            what + ": segment " + std::to_string(s) + " has a setting block");
+      for (int b : p.lanes.segment_blocks[s])
+        check(b >= 0 && (size_t)b < p.lanes.blocks.size(),
+              what + ": setting block is a lane block");
+    }
+    for (const auto& seg : p.adj.segments)
+      check(p.lanes.reg_slot[(size_t)seg.guard] < 0,
+            what + ": a guard register takes no tile storage");
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    for (int k = 0; k < 3; ++k) evaluate(ex, spread_point((size_t)k, 2));
+    const auto& t = p.lanes.profile->total;
+    check(t.fwd_exec > 0 && t.adj_exec > 0, what + ": executions counted");
+    check(t.fwd_flag_stores == 0, what + ": no flag store executes in lanes (" +
+                                      std::to_string(t.fwd_flag_stores) + ")");
+  }
 }
 
 void test_lane_profile_counters() {
@@ -2672,6 +2705,7 @@ static void test_region_map() {
   test_lane_exceptions();
   test_lane_duplicate_live_in();
   test_lane_copied_executors_interleaved();
+  test_lane_guard_masks();
   test_lane_profile_counters();
 #ifdef STANLI_TEST_STANC
   test_lane_cogmod();

@@ -21,6 +21,7 @@ inline constexpr int kRegionMapProfileCodes = 128;
 struct RegionMapTally {
   uint64_t evaluations = 0, tiles = 0;
   uint64_t fwd_exec = 0, fwd_lanes = 0, fwd_invariant = 0;
+  uint64_t fwd_flag_stores = 0;
   uint64_t adj_exec = 0, adj_lanes = 0;
   uint64_t block_full = 0, block_partial = 0, block_empty = 0;
   uint64_t seg_full = 0, seg_partial = 0, seg_empty = 0;
@@ -76,6 +77,11 @@ struct RegionMapLanePlan {
   std::vector<CallWindow> calls;
   std::shared_ptr<RegionMapProfile> profile;
   std::vector<char> invariant;
+  std::vector<char> flag_store;
+  std::vector<char> guard_reg;
+  std::vector<std::vector<int>> segment_blocks;
+  int segment_count = 0;
+  int64_t mask_cells = 0;
 };
 
 struct RegionMapProg : IslandProg {
