@@ -87,7 +87,21 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   if (reg.in_slots.empty()) return abandon("no live-in values");
   if (island_has_effect(*prog)) return abandon("program has effects");
   finalize_island_program(*prog, true);
-  if (!prog->native_adj) return abandon("no generated adjoint");
+  if (!prog->native_adj) {
+    std::string why = "no generated adjoint";
+    if (diagnostics) {
+      std::set<int> codes;
+      for (const auto& I : prog->code)
+        if (I.code != Program::JZ && I.code != Program::JMP &&
+            program_code_spec(I.code).has(kProgramNoAdjoint))
+          codes.insert(static_cast<int>(I.code));
+      for (int code : codes) why += " program_code=" + std::to_string(code);
+      for (const auto& call : prog->calls)
+        if (call.backward == nullptr) why += " call_without_backward";
+      why += " instructions=" + std::to_string(prog->code.size());
+    }
+    return abandon(why);
+  }
   if (prog->code.size() > kMaxRegionMapCode)
     return abandon("body program too large");
   for (const auto& li : prog->ins)
@@ -148,6 +162,12 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   g.ops.push_back(op);
   push_target_term(op.out);
   int_env.erase(s.loopvar);
+  if (diagnostics)
+    emit_diagnostic("stanli_region_map selected (" + s.loopvar +
+                    "): iterations=" + std::to_string(prog->count) +
+                    " instructions=" + std::to_string(prog->code.size()) +
+                    " registers=" + std::to_string(prog->n_regs) +
+                    " live_ins=" + std::to_string(prog->ins.size()));
   return true;
 }
 
