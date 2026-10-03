@@ -164,6 +164,7 @@ class Analysis {
     analyze_invariance();
     classify_registers();
     classify_cells();
+    find_adjoint_sinks();
     check_ranges();
     collect_seeds();
     build_windows();
@@ -376,6 +377,110 @@ class Analysis {
     for (int r = 0; r < n; ++r)
       if (per_lane[(size_t)r]) plan_.reg_slot[(size_t)r] = next++;
     plan_.fwd_regs = next;
+  }
+
+  static bool pure_clear(Program::Code c) {
+    switch (c) {
+      case Program::CONST:
+      case Program::GT:
+      case Program::GE:
+      case Program::LT:
+      case Program::LE:
+      case Program::EQ:
+      case Program::IADD:
+      case Program::IMOD:
+      case Program::INEG:
+      case Program::FILL:
+      case Program::CONSTR:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  template <typename F>
+  void each_adjoint_accumulation(const AdjInstr& A, F f) const {
+    switch (A.code) {
+      case Program::CALL: {
+        const Program::Call& call = p_.calls[(size_t)A.a];
+        for (int k = 0; k < call.n_in; ++k)
+          if (call.input_adjoint_mask & (1u << k))
+            f(call.bwd_adj_in[k], call.in_len[k]);
+        return;
+      }
+      case Program::FMA:
+      case Program::LOG_MIX:
+        f(A.a, 1);
+        f(A.b, 1);
+        f(A.c, 1);
+        return;
+      case Program::ADD:
+      case Program::SUB:
+      case Program::MUL:
+      case Program::DIV:
+      case Program::POW:
+      case Program::FMAX:
+      case Program::FMIN:
+      case Program::LSE2:
+      case Program::LOG_DIFF_EXP:
+        f(A.a, 1);
+        f(A.b, 1);
+        return;
+      case Program::MOV:
+      case Program::NEG:
+      case Program::EXP:
+      case Program::LOG:
+      case Program::LOG1P_EXP:
+      case Program::SQRT:
+      case Program::SQUARE:
+      case Program::INV:
+      case Program::FABS:
+        f(A.a, 1);
+        return;
+      default:
+        return;
+    }
+  }
+
+  void find_adjoint_sinks() {
+    const size_t n = (size_t)n_cells_;
+    std::vector<char> read(n, 0), dirty(n, 0);
+    bool dirty_all = false;
+    const auto mark = [&](std::vector<char>& v, int base, int len) {
+      for (int k = 0; k < len; ++k)
+        if (base + k >= 0 && (size_t)(base + k) < n) v[(size_t)(base + k)] = 1;
+    };
+    for (const auto& A : p_.adj.code) {
+      if (A.code == Program::DYN_INDEX) dirty_all = true;
+      each_adjoint_accumulation(A, [&](int base, int len) { mark(dirty, base, len); });
+      if (pure_clear(A.code)) continue;
+      if (A.code == Program::CALL) {
+        const Program::Call& call = p_.calls[(size_t)A.a];
+        mark(read, call.bwd_adj_out, call.out_len);
+      } else {
+        mark(read, A.dst, 1);
+      }
+    }
+    mark(dirty, p_.adj.adj_reg[(size_t)p_.out_regs[0]], 1);
+    const auto sink = [&](int cell) {
+      return cell >= 0 && (size_t)cell < n && !shared_cell(cell) &&
+             !read[(size_t)cell];
+    };
+    plan_.adj_skip.assign(p_.adj.code.size(), 0);
+    plan_.adj_residue.assign(n, 0);
+    for (size_t pc = 0; pc < p_.adj.code.size(); ++pc) {
+      const AdjInstr& A = p_.adj.code[pc];
+      if (!pure_clear(A.code)) continue;
+      const int width =
+          (A.code == Program::FILL || A.code == Program::CONSTR) ? A.len : 1;
+      bool all = width > 0;
+      for (int k = 0; k < width; ++k) all = all && sink(A.dst + k);
+      if (!all) continue;
+      plan_.adj_skip[pc] = 1;
+      for (int k = 0; k < width; ++k)
+        if (dirty_all || dirty[(size_t)(A.dst + k)])
+          plan_.adj_residue[(size_t)(A.dst + k)] = 1;
+    }
   }
 
   void classify_cells() {
@@ -1775,6 +1880,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
       if (counting) {
         const int n = popcount(m);
         for (int pc = begin; pc < end; ++pc) {
+          if (plan.adj_skip[(size_t)pc]) continue;
           const size_t op = (size_t)p.adj.code[(size_t)pc].code;
           ++counting->adj_exec;
           counting->adj_lanes += (uint64_t)n;
@@ -1783,8 +1889,9 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
         }
       }
       for (int pc = begin; pc < end; ++pc)
-        lane_adjoint_instruction(p, t, p.adj.code[(size_t)pc], m, window,
-                                 call_ctx);
+        if (!plan.adj_skip[(size_t)pc])
+          lane_adjoint_instruction(p, t, p.adj.code[(size_t)pc], m, window,
+                                   call_ctx);
     };
     if (p.adj.segments.empty()) {
       run(0, (int)p.adj.code.size(), fwd.full());
@@ -1804,7 +1911,8 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
     if (verify) {
       const auto& cell_slot = plan.cell_slot;
       for (size_t cell = 0; cell < cell_slot.size(); ++cell) {
-        if (cell_slot[cell] < 0 || exempt[cell]) continue;
+        if (cell_slot[cell] < 0 || exempt[cell] || plan.adj_residue[cell])
+          continue;
         const double* row = adj_tile + (size_t)cell_slot[cell] * kTile;
         for (int l = 0; l < lanes; ++l)
           if (row[l] != 0.0)

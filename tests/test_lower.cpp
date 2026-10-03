@@ -2464,6 +2464,51 @@ void test_lane_guard_masks() {
   }
 }
 
+bool pure_clear_code(stanli::Program::Code c) {
+  using P = stanli::Program;
+  return c == P::CONST || c == P::GT || c == P::GE || c == P::LT ||
+         c == P::LE || c == P::EQ || c == P::IADD || c == P::IMOD ||
+         c == P::INEG || c == P::FILL || c == P::CONSTR;
+}
+
+void test_lane_adjoint_clears() {
+  for (const char* stem :
+       {"region_map_branch", "region_map_udf", "region_map_logic",
+        "region_map_short_circuit", "region_map_nested"}) {
+    const std::string what = std::string(stem) + " adjoint clears";
+    CompiledModel cm = compile_with(stem, 130);
+    const auto& p = map_payload(cm);
+    check(p.lanes.active, what + ": plan active");
+    if (!p.lanes.active) continue;
+    check(p.lanes.adj_skip.size() == p.adj.code.size(),
+          what + ": one skip flag per adjoint instruction");
+    if (p.lanes.adj_skip.size() != p.adj.code.size()) continue;
+    std::vector<char> read((size_t)p.adj.n_regs, 0);
+    for (const auto& A : p.adj.code) {
+      if (pure_clear_code(A.code)) continue;
+      if (A.code == stanli::Program::CALL) {
+        const auto& call = p.calls[(size_t)A.a];
+        for (int k = 0; k < call.out_len; ++k)
+          read[(size_t)(call.bwd_adj_out + k)] = 1;
+      } else {
+        read[(size_t)A.dst] = 1;
+      }
+    }
+    int skipped = 0;
+    for (size_t pc = 0; pc < p.adj.code.size(); ++pc) {
+      const auto& A = p.adj.code[pc];
+      if (!p.lanes.adj_skip[pc]) continue;
+      ++skipped;
+      check(pure_clear_code(A.code), what + ": only pure clears are skipped");
+      if (A.code == stanli::Program::FILL || A.code == stanli::Program::CONSTR)
+        continue;
+      check(!read[(size_t)A.dst],
+            what + ": a skipped clear targets a cell no rule reads");
+    }
+    check(skipped > 0, what + ": some clears are skipped");
+  }
+}
+
 void test_lane_profile_counters() {
   CompiledModel off = compile_with("region_map_logic", 130);
   check(!map_payload(off).lanes.profile, "no profile without the variable");
@@ -2706,6 +2751,7 @@ static void test_region_map() {
   test_lane_duplicate_live_in();
   test_lane_copied_executors_interleaved();
   test_lane_guard_masks();
+  test_lane_adjoint_clears();
   test_lane_profile_counters();
 #ifdef STANLI_TEST_STANC
   test_lane_cogmod();

@@ -79,6 +79,8 @@ struct RegionMapLanePlan {
   std::vector<char> invariant;
   std::vector<char> flag_store;
   std::vector<char> guard_reg;
+  std::vector<char> adj_skip;
+  std::vector<char> adj_residue;
   std::vector<std::vector<int>> segment_blocks;
   int segment_count = 0;
   int64_t mask_cells = 0;
