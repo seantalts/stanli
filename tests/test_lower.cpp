@@ -1683,7 +1683,6 @@ void each_written_span(const stanli::Program& p,
   if (len > 0) fn(I.dst, len);
 }
 
-
 bool map_calls(const CompiledModel& cm, uint16_t opcode) {
   for (const auto& c : map_payload(cm).calls)
     if (c.opcode == opcode) return true;
@@ -1711,27 +1710,27 @@ const Ref ref_cf_udf = [](const std::vector<var>& p, const Series& s,
 };
 
 Ref zero_probe_ref(double A) {
-  return [A](const std::vector<var>& p, const Series& s,
-             std::vector<int>* taken) {
-    const var sc = stan::math::exp(p[1]);
-    var lp = 0;
-    for (size_t i = 0; i < s.y.size(); ++i) {
-      const var d = shifted_residual(s.y[i], p[0] * s.x[i]);
-      const bool tail = d < -sc;
-      if (taken) taken->push_back(tail);
-      const var base =
-          tail ? -0.5 * stan::math::square(d / sc) - stan::math::log(sc)
-               : stan::math::log1p_exp(-stan::math::square(d) * sc) -
-                     stan::math::log(sc);
-      if (A == 0)
-        lp += base + (std::signbit(A) ? -1.0 : 1.0);
-      else if (std::isnan(A))
-        lp += base + 2;
-      else
-        lp += base + stan::math::log(stan::math::erfc(d * A + 3));
-    }
-    return lp;
-  };
+  return
+      [A](const std::vector<var>& p, const Series& s, std::vector<int>* taken) {
+        const var sc = stan::math::exp(p[1]);
+        var lp = 0;
+        for (size_t i = 0; i < s.y.size(); ++i) {
+          const var d = shifted_residual(s.y[i], p[0] * s.x[i]);
+          const bool tail = d < -sc;
+          if (taken) taken->push_back(tail);
+          const var base =
+              tail ? -0.5 * stan::math::square(d / sc) - stan::math::log(sc)
+                   : stan::math::log1p_exp(-stan::math::square(d) * sc) -
+                         stan::math::log(sc);
+          if (A == 0)
+            lp += base + (std::signbit(A) ? -1.0 : 1.0);
+          else if (std::isnan(A))
+            lp += base + 2;
+          else
+            lp += base + stan::math::log(stan::math::erfc(d * A + 3));
+        }
+        return lp;
+      };
 }
 
 const Ref ref_cf_early = [](const std::vector<var>& p, const Series& s,
@@ -1805,13 +1804,12 @@ void test_loop_variant_argument_is_not_folded() {
       const bool tail = d < -sc;
       if (taken) taken->push_back(tail);
       if (wi == 0)
-        lp += tail ? -0.5 * stan::math::square(d / sc) -
-                         stan::math::log(sc) - 0.5 * sc
+        lp += tail ? -0.5 * stan::math::square(d / sc) - stan::math::log(sc) -
+                         0.5 * sc
                    : stan::math::log1p_exp(-stan::math::square(d) * sc) -
                          stan::math::log(sc);
       else
-        lp += stan::math::log(stan::math::erfc(d * wi + 3)) -
-              std::log(wi);
+        lp += stan::math::log(stan::math::erfc(d * wi + 3)) - std::log(wi);
     }
     return lp;
   };
@@ -1889,7 +1887,8 @@ void test_hoisted_constants_and_saved_state() {
       }
     for (int reg = 0; reg < p.n_regs; ++reg)
       if (body_writes[(size_t)reg] > 0)
-        check(saved[(size_t)reg], what + ": every body-written register is saved");
+        check(saved[(size_t)reg],
+              what + ": every body-written register is saved");
     for (size_t k = 1; k < p.saved.size(); ++k)
       check(p.saved[k].first - (p.saved[k - 1].first + p.saved[k - 1].second) >
                 stanli::kRegionMapSavedGap,
@@ -1899,9 +1898,9 @@ void test_hoisted_constants_and_saved_state() {
     for (const auto& li : p.ins) {
       if (li.len <= stanli::kRegionMapSavedGap) continue;
       for (const auto& span : p.saved)
-        check(span.first + span.second <= li.reg ||
-                  li.reg + li.len <= span.first,
-              what + ": saved state skips live-in vectors");
+        check(
+            span.first + span.second <= li.reg || li.reg + li.len <= span.first,
+            what + ": saved state skips live-in vectors");
     }
   }
 }
@@ -1966,7 +1965,6 @@ void test_call_partials_differ_per_iteration(bool recompute) {
                 evaluate(ex, point), want);
   }
 }
-
 
 const Ref ref_logic = [](const std::vector<var>& p, const Series& s,
                          std::vector<int>* taken) {
@@ -2035,8 +2033,8 @@ void test_logic_points() {
 
 void test_logic_compiles_to_jumps() {
   using stanli::Program;
-  for (const char* stem : {"region_map_logic", "region_map_nan",
-                           "region_map_short_circuit"}) {
+  for (const char* stem :
+       {"region_map_logic", "region_map_nan", "region_map_short_circuit"}) {
     const std::string what(stem);
     CompiledModel cm = compile_with(
         stem, 64, nullptr, "0", what == "region_map_nan" ? "\"nv\":NaN" : "");
@@ -2052,9 +2050,9 @@ void test_logic_compiles_to_jumps() {
     for (const auto& I : p.code)
       if (I.code == Program::NE && from_comparison[(size_t)I.a])
         ++normalizations;
-    check(normalizations == 0,
-          what + ": no NE normalizes a comparison result (" +
-              std::to_string(normalizations) + ")");
+    check(normalizations == 0, what +
+                                   ": no NE normalizes a comparison result (" +
+                                   std::to_string(normalizations) + ")");
 
     check(!p.adj.segments.empty(), what + ": the body has reverse segments");
     if (p.adj.segments.empty()) continue;
@@ -2102,7 +2100,8 @@ bool same_bits(double a, double b) {
 }
 
 bool grad_close(double got, double want) {
-  if (std::isnan(got) || std::isnan(want)) return std::isnan(got) && std::isnan(want);
+  if (std::isnan(got) || std::isnan(want))
+    return std::isnan(got) && std::isnan(want);
   if (got == want) return true;
   if (std::isinf(got) || std::isinf(want)) return false;
   if (std::fabs(got - want) <= 1e-13) return true;
@@ -2130,15 +2129,18 @@ struct LaneOutcome {
   int ok = 0;
 };
 
-LaneOutcome expect_lane_parity(const std::string& what, const CompiledModel& lanes,
+LaneOutcome expect_lane_parity(const std::string& what,
+                               const CompiledModel& lanes,
                                const CompiledModel& scalar,
                                const std::vector<Params>& points,
                                bool want_lanes) {
   const auto& pl = map_payload(lanes);
   const auto& ps = map_payload(scalar);
-  check(pl.lanes.active == want_lanes,
-        what + ": lane plan " + (pl.lanes.active ? "active" : "refused (" + pl.lanes.refusal + ")") +
-            ", expected " + (want_lanes ? "active" : "refused"));
+  check(
+      pl.lanes.active == want_lanes,
+      what + ": lane plan " +
+          (pl.lanes.active ? "active" : "refused (" + pl.lanes.refusal + ")") +
+          ", expected " + (want_lanes ? "active" : "refused"));
   check(!ps.lanes.active && ps.lanes.refusal == "off",
         what + ": STANLI_REGION_MAP_LANES=0 leaves no plan");
   Executor el(lanes.graph), es(scalar.graph);
@@ -2196,14 +2198,16 @@ std::string big_data(int n) {
   out << "\"big\":[";
   for (int i = 0; i < n; ++i)
     out << (i ? "," : "")
-        << (i % 8 == 1 ? "1e300" : i % 8 == 2 ? "-1e300" : "0");
+        << (i % 8 == 1   ? "1e300"
+            : i % 8 == 2 ? "-1e300"
+                         : "0");
   out << "]";
   return out.str();
 }
 
 std::vector<LaneFixture> lane_fixture_list() {
   return {
-{"region_map_branch", true, ""},
+      {"region_map_branch", true, ""},
       {"region_map_udf", true, ""},
       {"region_map_density", true, ""},
       {"region_map_hurdle_param", true, ""},
@@ -2239,9 +2243,10 @@ void test_lane_fixtures() {
   for (int n : {37, 64, 65, 200}) {
     const std::string extra = big_data(n);
     const std::string what = "region_map_cancel N=" + std::to_string(n);
-    CompiledModel lanes = compile_with("region_map_cancel", n, nullptr, "0", extra);
-    CompiledModel scalar =
-        compile_with("region_map_cancel", n, "STANLI_REGION_MAP_LANES", "0", extra);
+    CompiledModel lanes =
+        compile_with("region_map_cancel", n, nullptr, "0", extra);
+    CompiledModel scalar = compile_with("region_map_cancel", n,
+                                        "STANLI_REGION_MAP_LANES", "0", extra);
     expect_mapped(what, lanes);
     expect_lane_parity(what, lanes, scalar, spread_points(2), true);
   }
@@ -2252,15 +2257,17 @@ void test_lane_tile_recompute() {
   const auto& b = map_payload(big);
   check(b.lanes.active && !b.lanes.tile_recompute,
         "a large body keeps every tile's forward state while it fits");
-  const std::string limit = std::to_string(
-      2 * (int64_t)stanli::kRegionMapTile * (b.lanes.fwd_regs + b.lanes.adj_cells));
-  CompiledModel tight = compile_with("region_map_long_body", 200,
-                                     "STANLI_REGION_MAP_SAVE_LIMIT", limit.c_str());
+  const std::string limit =
+      std::to_string(2 * (int64_t)stanli::kRegionMapTile *
+                     (b.lanes.fwd_regs + b.lanes.adj_cells));
+  CompiledModel tight =
+      compile_with("region_map_long_body", 200, "STANLI_REGION_MAP_SAVE_LIMIT",
+                   limit.c_str());
   const auto& t = map_payload(tight);
   check(t.lanes.active && t.lanes.tile_recompute,
         "a body whose tiles exceed the save limit recomputes tiles");
-  check(t.lanes.storage ==
-            (int64_t)stanli::kRegionMapTile * (t.lanes.fwd_regs + t.lanes.adj_cells),
+  check(t.lanes.storage == (int64_t)stanli::kRegionMapTile *
+                               (t.lanes.fwd_regs + t.lanes.adj_cells),
         "tile recompute keeps one forward tile and one adjoint tile");
   CompiledModel small = compile_with("region_map_branch", 64);
   const auto& s = map_payload(small);
@@ -2288,26 +2295,31 @@ void test_lane_tile_recompute() {
   }
   for (int n : {37, 64, 200}) {
     const std::string extra = big_data(n);
-    const std::string what = "region_map_cancel tile recompute N=" + std::to_string(n);
-    CompiledModel lanes = compile_with("region_map_cancel", n, nullptr, "0", extra);
-    CompiledModel scalar =
-        compile_with("region_map_cancel", n, "STANLI_REGION_MAP_LANES", "0", extra);
+    const std::string what =
+        "region_map_cancel tile recompute N=" + std::to_string(n);
+    CompiledModel lanes =
+        compile_with("region_map_cancel", n, nullptr, "0", extra);
+    CompiledModel scalar = compile_with("region_map_cancel", n,
+                                        "STANLI_REGION_MAP_LANES", "0", extra);
     expect_lane_parity(what, lanes, scalar, spread_points(2), true);
   }
   for (int n : {37, 64, 200}) {
-    const std::string what = "region_map_oob tile recompute N=" + std::to_string(n);
+    const std::string what =
+        "region_map_oob tile recompute N=" + std::to_string(n);
     CompiledModel lanes = compile_with("region_map_oob", n);
     CompiledModel scalar =
         compile_with("region_map_oob", n, "STANLI_REGION_MAP_LANES", "0");
     const LaneOutcome r =
         expect_lane_parity(what, lanes, scalar, spread_points(2, 3), true);
-    check(r.threw == 4 && r.ok == 0, what + ": out of range index throws every time");
+    check(r.threw == 4 && r.ok == 0,
+          what + ": out of range index throws every time");
   }
   for (int n : {37, 65, 200}) {
-    const std::string what = "region_map_calldomain tile recompute N=" + std::to_string(n);
+    const std::string what =
+        "region_map_calldomain tile recompute N=" + std::to_string(n);
     CompiledModel lanes = compile_with("region_map_calldomain", n);
-    CompiledModel scalar =
-        compile_with("region_map_calldomain", n, "STANLI_REGION_MAP_LANES", "0");
+    CompiledModel scalar = compile_with("region_map_calldomain", n,
+                                        "STANLI_REGION_MAP_LANES", "0");
     expect_lane_parity(what, lanes, scalar, spread_points(2, 3), true);
   }
   test_unsetenv("STANLI_REGION_MAP_TILE_CELLS");
@@ -2326,8 +2338,9 @@ void test_lane_seed_and_clean() {
     for (const LaneFixture& f : lane_fixture_list()) {
       if (!f.lanes) continue;
       for (int n : {37, 64, 65, 200}) {
-        const std::string what = std::string(f.stem) + " clean sweep N=" +
-                                 std::to_string(n) + " tile cells " + tile_cells;
+        const std::string what = std::string(f.stem) +
+                                 " clean sweep N=" + std::to_string(n) +
+                                 " tile cells " + tile_cells;
         CompiledModel lanes = compile_with(f.stem, n, nullptr, "0", f.extra);
         CompiledModel scalar =
             compile_with(f.stem, n, "STANLI_REGION_MAP_LANES", "0", f.extra);
@@ -2361,8 +2374,8 @@ void test_lane_flag_clear_segments() {
     CompiledModel scalar =
         compile_with("region_map_nanflag", n, "STANLI_REGION_MAP_LANES", "0");
     expect_mapped(what, lanes);
-    const std::vector<Params> points = {{0.9, 1.3}, {-0.4, 0.8}, {1.7, -0.6},
-                                        {0.0, 0.0}, {1.1, 0.0}};
+    const std::vector<Params> points = {
+        {0.9, 1.3}, {-0.4, 0.8}, {1.7, -0.6}, {0.0, 0.0}, {1.1, 0.0}};
     const LaneOutcome r = expect_lane_parity(what, lanes, scalar, points, true);
     check(r.ok == (int)points.size(), what + ": every point evaluates");
     Executor ex(lanes.graph);
@@ -2370,16 +2383,18 @@ void test_lane_flag_clear_segments() {
     const Eval e = evaluate(ex, points[0]);
     check(std::isfinite(e.lp), what + ": lp finite");
     for (double g : e.grad)
-      check(std::isfinite(g), what + ": gradient finite (flag-clear lanes stay out)");
+      check(std::isfinite(g),
+            what + ": gradient finite (flag-clear lanes stay out)");
   }
 }
 
 void test_lane_cancellation_bitwise() {
   const int n = 200;
   const std::string extra = big_data(n);
-  CompiledModel lanes = compile_with("region_map_cancel", n, nullptr, "0", extra);
-  CompiledModel scalar =
-      compile_with("region_map_cancel", n, "STANLI_REGION_MAP_LANES", "0", extra);
+  CompiledModel lanes =
+      compile_with("region_map_cancel", n, nullptr, "0", extra);
+  CompiledModel scalar = compile_with("region_map_cancel", n,
+                                      "STANLI_REGION_MAP_LANES", "0", extra);
   check(map_payload(lanes).lanes.active, "cancellation model batches");
   Executor el(lanes.graph), es(scalar.graph);
   lanes.bind(el);
@@ -2401,7 +2416,8 @@ void test_lane_exceptions() {
         compile_with("region_map_oob", n, "STANLI_REGION_MAP_LANES", "0");
     const LaneOutcome r =
         expect_lane_parity(what, lanes, scalar, spread_points(2, 3), true);
-    check(r.threw == 4 && r.ok == 0, what + ": out of range index throws every time");
+    check(r.threw == 4 && r.ok == 0,
+          what + ": out of range index throws every time");
     const std::string mapped = outcome("region_map_oob", n, nullptr);
     check(mapped.find("structured index out of range") != std::string::npos,
           what + ": lane exception is the structured message: " + mapped);
@@ -2409,14 +2425,15 @@ void test_lane_exceptions() {
   for (int n : {37, 64, 65, 200}) {
     const std::string what = "region_map_calldomain N=" + std::to_string(n);
     CompiledModel lanes = compile_with("region_map_calldomain", n);
-    CompiledModel scalar =
-        compile_with("region_map_calldomain", n, "STANLI_REGION_MAP_LANES", "0");
+    CompiledModel scalar = compile_with("region_map_calldomain", n,
+                                        "STANLI_REGION_MAP_LANES", "0");
     expect_mapped(what, lanes);
     std::vector<Params> points = spread_points(2, 8, 1.0);
     points.push_back({0.3, 0.0});
     points.push_back({-0.2, -0.8});
     const LaneOutcome r = expect_lane_parity(what, lanes, scalar, points, true);
-    check(r.threw > 0, what + ": some points raise a domain error inside a CALL");
+    check(r.threw > 0,
+          what + ": some points raise a domain error inside a CALL");
   }
 }
 
@@ -2437,7 +2454,8 @@ void test_lane_guard_masks() {
        {"region_map_branch", "region_map_udf", "region_map_logic",
         "region_map_short_circuit", "region_map_nested"}) {
     const std::string what = std::string(stem) + " guard masks";
-    CompiledModel cm = compile_with(stem, 130, "STANLI_REGION_MAP_PROFILE", "1");
+    CompiledModel cm =
+        compile_with(stem, 130, "STANLI_REGION_MAP_PROFILE", "1");
     const auto& p = map_payload(cm);
     check(p.lanes.active && p.lanes.profile != nullptr, what + ": plan active");
     if (!p.lanes.active || !p.lanes.profile) continue;
@@ -2521,7 +2539,8 @@ void test_lane_profile_counters() {
   Executor ex(cm.graph);
   cm.bind(ex);
   const int evaluations = 4;
-  for (int k = 0; k < evaluations; ++k) evaluate(ex, spread_point((size_t)k, 2));
+  for (int k = 0; k < evaluations; ++k)
+    evaluate(ex, spread_point((size_t)k, 2));
   const auto& t = p.lanes.profile->total;
   check(t.evaluations == (uint64_t)evaluations,
         "one forward counted per evaluation");
@@ -2574,23 +2593,35 @@ struct CogmodExpectation {
 
 void test_lane_cogmod() {
   const std::vector<CogmodExpectation> models = {
-      {"cm_betadiscrete", false, false}, {"cm_betagate", true, true},
-      {"cm_bisa", true, true},           {"cm_choco", true, true},
-      {"cm_ddm", true, true},            {"cm_exgaussian", true, true},
-      {"cm_exwald", true, true},         {"cm_gamma", true, true},
-      {"cm_geg", true, true},            {"cm_invgamma", true, true},
-      {"cm_invgaussian", true, false},   {"cm_invweibull", true, true},
-      {"cm_lba1", true, true},           {"cm_lba2", true, true},
-      {"cm_lnr", true, true},            {"cm_lnr_bench", true, true},
-      {"cm_loggamma", true, true},       {"cm_lognormal", true, true},
-      {"cm_logstudent", true, true},     {"cm_logweibull", true, true},
-      {"cm_rdm", true, true},            {"cm_weibull", true, true},
+      {"cm_betadiscrete", false, false},
+      {"cm_betagate", true, true},
+      {"cm_bisa", true, true},
+      {"cm_choco", true, true},
+      {"cm_ddm", true, true},
+      {"cm_exgaussian", true, true},
+      {"cm_exwald", true, true},
+      {"cm_gamma", true, true},
+      {"cm_geg", true, true},
+      {"cm_invgamma", true, true},
+      {"cm_invgaussian", true, false},
+      {"cm_invweibull", true, true},
+      {"cm_lba1", true, true},
+      {"cm_lba2", true, true},
+      {"cm_lnr", true, true},
+      {"cm_lnr_bench", true, true},
+      {"cm_loggamma", true, true},
+      {"cm_lognormal", true, true},
+      {"cm_logstudent", true, true},
+      {"cm_logweibull", true, true},
+      {"cm_rdm", true, true},
+      {"cm_weibull", true, true},
   };
   for (const CogmodExpectation& m : models) {
     const std::string stem = m.stem;
     const std::string mir = stanli::tooling::run_stanc_process(
         STANLI_TEST_STANC, "tests/cogmod/" + stem + ".stan");
-    const DataMap data = DataMap::from_json_file("tests/cogmod/" + stem + ".json");
+    const DataMap data =
+        DataMap::from_json_file("tests/cogmod/" + stem + ".json");
     CompiledModel lanes = stanli::compile_model(mir, data);
     test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
     CompiledModel scalar = stanli::compile_model(mir, data);
@@ -2677,12 +2708,18 @@ struct CleanFixture {
 
 void test_clean_sweep() {
   const std::vector<CleanFixture> fixtures = {
-      {"region_map_branch", 64, ""},     {"region_map_udf", 64, ""},
-      {"region_map_many", 64, ""},       {"region_map_alias", 64, ""},
-      {"region_map_local_int", 64, ""},  {"region_map_call", 64, ""},
-      {"region_map_multi", 64, ""},      {"region_map_intops", 64, ""},
-      {"region_map_logic", 64, ""},      {"region_map_short_circuit", 64, ""},
-      {"region_map_nan", 64, "\"nv\":NaN"}, {"region_map_long_body", 32, ""}};
+      {"region_map_branch", 64, ""},
+      {"region_map_udf", 64, ""},
+      {"region_map_many", 64, ""},
+      {"region_map_alias", 64, ""},
+      {"region_map_local_int", 64, ""},
+      {"region_map_call", 64, ""},
+      {"region_map_multi", 64, ""},
+      {"region_map_intops", 64, ""},
+      {"region_map_logic", 64, ""},
+      {"region_map_short_circuit", 64, ""},
+      {"region_map_nan", 64, "\"nv\":NaN"},
+      {"region_map_long_body", 32, ""}};
   test_setenv("STANLI_REGION_MAP_CHECK_CLEAN", "1", 1);
   for (bool recompute : {false, true}) {
     for (const auto& f : fixtures) {
@@ -2713,8 +2750,8 @@ void test_clean_sweep() {
         } catch (const std::exception&) {
         }
       }
-      check(swept >= 4, what + ": enough points evaluated (" +
-                            std::to_string(swept) + ")");
+      check(swept >= 4,
+            what + ": enough points evaluated (" + std::to_string(swept) + ")");
     }
   }
   test_unsetenv("STANLI_REGION_MAP_CHECK_CLEAN");
@@ -2753,8 +2790,7 @@ void test_copy_propagation_in_map() {
   check(count_moves(before.code) > 0, stem + ": inlined body has copies");
   check(count_moves(after.code) == 0, stem + ": no copies left in the body");
   check(count_moves(after.prologue) == 0, stem + ": no copies in the prologue");
-  check(after.code.size() < before.code.size(),
-        stem + ": body is shorter");
+  check(after.code.size() < before.code.size(), stem + ": body is shorter");
   check(after.adj.code.size() <= before.adj.code.size(),
         stem + ": adjoint is no longer");
   int adjoint_moves = 0;
@@ -2779,7 +2815,6 @@ void test_copy_propagation_in_map() {
 
 }  // namespace region_map_test
 
-
 namespace copy_prop_test {
 
 using stanli::Program;
@@ -2803,22 +2838,24 @@ int count_code(const Program& p, Program::Code code) {
 }
 
 void test_chain_is_forwarded_and_dropped() {
-  Program p = make_program(4,
-                           {Instr(Program::MOV, 1, 0), Instr(Program::MOV, 2, 1),
-                            Instr(Program::ADD, 3, 2, 2)},
-                           {3});
-  check(stanli::propagate_program_copies(p, {{0, 1}}), "chain: program changed");
+  Program p =
+      make_program(4,
+                   {Instr(Program::MOV, 1, 0), Instr(Program::MOV, 2, 1),
+                    Instr(Program::ADD, 3, 2, 2)},
+                   {3});
+  check(stanli::propagate_program_copies(p, {{0, 1}}),
+        "chain: program changed");
   check(p.code.size() == 1 && p.code[0].code == Program::ADD,
         "chain: both copies dropped");
   check(p.code[0].a == 0 && p.code[0].b == 0, "chain: reads point at the root");
 }
 
 void test_source_rewritten_on_one_path() {
-  Program p = make_program(
-      4,
-      {Instr(Program::MOV, 2, 0), Instr(Program::JZ, 3, 1),
-       Instr(Program::ADD, 0, 0, 1), Instr(Program::ADD, 3, 2, 2)},
-      {3});
+  Program p =
+      make_program(4,
+                   {Instr(Program::MOV, 2, 0), Instr(Program::JZ, 3, 1),
+                    Instr(Program::ADD, 0, 0, 1), Instr(Program::ADD, 3, 2, 2)},
+                   {3});
   stanli::propagate_program_copies(p, {{0, 1}, {1, 1}});
   check(count_code(p, Program::MOV) == 1, "rewritten source: copy kept");
   check(p.code.back().a == 2 && p.code.back().b == 2,
@@ -2828,12 +2865,11 @@ void test_source_rewritten_on_one_path() {
 }
 
 void test_destination_written_on_two_paths() {
-  Program p = make_program(
-      4,
-      {Instr(Program::JZ, 3, 0), Instr(Program::MOV, 2, 0),
-       Instr(Program::JMP, 4), Instr(Program::MOV, 2, 1),
-       Instr(Program::ADD, 3, 2, 2)},
-      {3});
+  Program p = make_program(4,
+                           {Instr(Program::JZ, 3, 0), Instr(Program::MOV, 2, 0),
+                            Instr(Program::JMP, 4), Instr(Program::MOV, 2, 1),
+                            Instr(Program::ADD, 3, 2, 2)},
+                           {3});
   stanli::propagate_program_copies(p, {{0, 1}, {1, 1}});
   check(count_code(p, Program::MOV) == 2, "joined writers: both copies kept");
   check(p.code.back().a == 2 && p.code.back().b == 2,
@@ -2841,12 +2877,12 @@ void test_destination_written_on_two_paths() {
 }
 
 void test_branch_local_copy_is_forwarded() {
-  Program p = make_program(
-      4,
-      {Instr(Program::JZ, 4, 0), Instr(Program::MOV, 2, 1),
-       Instr(Program::ADD, 3, 2, 2), Instr(Program::JMP, 5),
-       Instr(Program::CONST, 3, 0)},
-      {3});
+  Program p =
+      make_program(4,
+                   {Instr(Program::JZ, 4, 0), Instr(Program::MOV, 2, 1),
+                    Instr(Program::ADD, 3, 2, 2), Instr(Program::JMP, 5),
+                    Instr(Program::CONST, 3, 0)},
+                   {3});
   check(stanli::propagate_program_copies(p, {{0, 1}, {1, 1}}),
         "branch local: program changed");
   check(count_code(p, Program::MOV) == 0, "branch local: copy dropped");
@@ -2867,22 +2903,22 @@ Program::Call range_call(int in, int len, int out) {
 
 void test_call_input_range() {
   {
-    Program p = make_program(
-        7,
-        {Instr(Program::MOV, 4, 0), Instr(Program::MOV, 5, 2),
-         Instr(Program::CALL, 0, 0)},
-        {6});
+    Program p =
+        make_program(7,
+                     {Instr(Program::MOV, 4, 0), Instr(Program::MOV, 5, 2),
+                      Instr(Program::CALL, 0, 0)},
+                     {6});
     p.calls.push_back(range_call(4, 2, 6));
     stanli::propagate_program_copies(p, {{0, 1}, {2, 1}});
     check(count_code(p, Program::MOV) == 2, "split range: copies kept");
     check(p.calls[0].in[0] == 4, "split range: call input unchanged");
   }
   {
-    Program p = make_program(
-        7,
-        {Instr(Program::MOV, 4, 0), Instr(Program::MOV, 5, 1),
-         Instr(Program::CALL, 0, 0)},
-        {6});
+    Program p =
+        make_program(7,
+                     {Instr(Program::MOV, 4, 0), Instr(Program::MOV, 5, 1),
+                      Instr(Program::CALL, 0, 0)},
+                     {6});
     p.calls.push_back(range_call(4, 2, 6));
     stanli::propagate_program_copies(p, {{0, 2}});
     check(count_code(p, Program::MOV) == 0, "contiguous range: copies dropped");
@@ -2891,12 +2927,12 @@ void test_call_input_range() {
 }
 
 void test_dyn_index_run_keeps_its_registers() {
-  Program p = make_program(
-      13,
-      {Instr(Program::MOV, 10, 0), Instr(Program::MOV, 11, 1),
-       Instr(Program::MOV, 12, 2), Instr(Program::MOV, 8, 3),
-       Instr(Program::DYN_INDEX, 5, 10, 8, 0, 3)},
-      {5});
+  Program p =
+      make_program(13,
+                   {Instr(Program::MOV, 10, 0), Instr(Program::MOV, 11, 1),
+                    Instr(Program::MOV, 12, 2), Instr(Program::MOV, 8, 3),
+                    Instr(Program::DYN_INDEX, 5, 10, 8, 0, 3)},
+                   {5});
   stanli::propagate_program_copies(p, {{0, 4}});
   check(count_code(p, Program::MOV) == 3, "dyn index: run copies kept");
   const Instr& I = p.code.back();
@@ -2925,20 +2961,20 @@ void test_seeded_and_live_out_writes_stay() {
 
 void test_dead_constant_and_range_copy() {
   {
-    Program p = make_program(4,
-                             {Instr(Program::CONST, 2, 0),
-                              Instr(Program::MOV, 2, 0),
-                              Instr(Program::ADD, 3, 2, 2)},
-                             {3});
+    Program p =
+        make_program(4,
+                     {Instr(Program::CONST, 2, 0), Instr(Program::MOV, 2, 0),
+                      Instr(Program::ADD, 3, 2, 2)},
+                     {3});
     stanli::propagate_program_copies(p, {{0, 1}});
     check(p.code.size() == 1 && p.code[0].code == Program::ADD,
           "dead constant: fill and copy both dropped");
   }
   {
-    Program p = make_program(
-        8, {Instr(Program::MOVR, 4, 0, 0, 0, 2),
-            Instr(Program::LOG_RANGE, 6, 4, 0, 0, 2)},
-        {6, 7});
+    Program p = make_program(8,
+                             {Instr(Program::MOVR, 4, 0, 0, 0, 2),
+                              Instr(Program::LOG_RANGE, 6, 4, 0, 0, 2)},
+                             {6, 7});
     stanli::propagate_program_copies(p, {{0, 2}});
     check(count_code(p, Program::MOVR) == 0, "range copy: dropped");
     check(p.code.size() == 1 && p.code[0].a == 0,

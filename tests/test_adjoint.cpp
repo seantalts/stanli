@@ -812,9 +812,9 @@ static void test_binary_ops() {
 static void test_integer_ops() {
   // Integer results feed a real expression, but carry no derivative back to
   // their operands. Reusing the destination must clear its old adjoint too.
-  for (Program::Code code : {Program::IADD, Program::ISUB, Program::IMUL,
-                             Program::IMOD, Program::IDIV, Program::INEG,
-                             Program::IABS}) {
+  for (Program::Code code :
+       {Program::IADD, Program::ISUB, Program::IMUL, Program::IMOD,
+        Program::IDIV, Program::INEG, Program::IABS}) {
     Build b({-7, 3, 0.4});
     b.emit_to(code, 0, 0, 1);
     const int result = b.emit(Program::MUL, 0, 2);
@@ -1961,9 +1961,9 @@ static void test_dyn_index() {
     p.code = {{Program::DYN_INDEX, 5, 0, 4, 0, 4}};
     p.out_regs = {5};
     std::string what;
-    for (double bad : {0.0, 5.0, -1.0, 1.5,
-                       std::numeric_limits<double>::quiet_NaN(),
-                       std::numeric_limits<double>::infinity()}) {
+    for (double bad :
+         {0.0, 5.0, -1.0, 1.5, std::numeric_limits<double>::quiet_NaN(),
+          std::numeric_limits<double>::infinity()}) {
       expect("dyn index out of range throws",
              throws_out_of_range(p, {1, 2, 3, 4, bad, 0}, &what));
       expect("dyn index out of range message",

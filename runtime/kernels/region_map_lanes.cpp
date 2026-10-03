@@ -294,8 +294,8 @@ class Analysis {
     };
     std::vector<int> block_of(p_.code.size(), 0);
     for (int b = 0; b < n_blocks; ++b)
-      for (int pc = plan_.blocks[(size_t)b].begin; pc < plan_.blocks[(size_t)b].end;
-           ++pc)
+      for (int pc = plan_.blocks[(size_t)b].begin;
+           pc < plan_.blocks[(size_t)b].end; ++pc)
         block_of[(size_t)pc] = b;
 
     struct Writes {
@@ -331,10 +331,12 @@ class Analysis {
           int flags = 0;
           for (int k = 0; k < I.len; ++k) flags += guard(I.dst + k);
           if (!flags) break;
-          if (flags != I.len) refuse("a constant fill mixes flag and value registers");
+          if (flags != I.len)
+            refuse("a constant fill mixes flag and value registers");
           for (int k = 0; k < I.len; ++k)
-            record(I.dst + k, (int)pc,
-                   p_.pool[(size_t)(I.code == Program::CONSTR ? I.a + k : I.a)]);
+            record(
+                I.dst + k, (int)pc,
+                p_.pool[(size_t)(I.code == Program::CONSTR ? I.a + k : I.a)]);
           plan_.flag_store[pc] = 1;
           break;
         }
@@ -345,8 +347,7 @@ class Analysis {
           });
       }
     }
-    for (const auto& A : p_.adj.code)
-      each_adjoint_value_read(A, reads_guard);
+    for (const auto& A : p_.adj.code) each_adjoint_value_read(A, reads_guard);
 
     plan_.segment_count = (int)p_.adj.segments.size();
     plan_.segment_blocks.assign(p_.adj.segments.size(), {});
@@ -368,7 +369,8 @@ class Analysis {
     each_body_write([&](int reg, int len) {
       for (int k = 0; k < len; ++k) {
         if (reg + k < 0 || reg + k >= n) refuse("register out of range");
-        if (!plan_.guard_reg[(size_t)(reg + k)]) per_lane[(size_t)(reg + k)] = 1;
+        if (!plan_.guard_reg[(size_t)(reg + k)])
+          per_lane[(size_t)(reg + k)] = 1;
       }
     });
     per_lane[(size_t)p_.iter_reg] = 1;
@@ -452,7 +454,8 @@ class Analysis {
     };
     for (const auto& A : p_.adj.code) {
       if (A.code == Program::DYN_INDEX) dirty_all = true;
-      each_adjoint_accumulation(A, [&](int base, int len) { mark(dirty, base, len); });
+      each_adjoint_accumulation(
+          A, [&](int base, int len) { mark(dirty, base, len); });
       if (pure_clear(A.code)) continue;
       if (A.code == Program::CALL) {
         const Program::Call& call = p_.calls[(size_t)A.a];
@@ -512,7 +515,8 @@ class Analysis {
     const bool s = shared_reg(base);
     for (int k = 1; k < len; ++k)
       if (shared_reg(base + k) != s)
-        refuse(std::string(what) + " range mixes shared and per-lane registers");
+        refuse(std::string(what) +
+               " range mixes shared and per-lane registers");
   }
 
   void same_class_cells(int base, int len, const char* what) const {
@@ -522,7 +526,8 @@ class Analysis {
     const bool s = shared_cell(base);
     for (int k = 1; k < len; ++k)
       if (shared_cell(base + k) != s)
-        refuse(std::string(what) + " cell range mixes shared and per-lane cells");
+        refuse(std::string(what) +
+               " cell range mixes shared and per-lane cells");
   }
 
   void per_lane_cells(int base, int len, const char* what) const {
@@ -617,7 +622,8 @@ class Analysis {
     std::vector<int> writes((size_t)p_.n_regs, 0);
     each_body_write([&](int reg, int len) {
       for (int k = 0; k < len; ++k) {
-        if (reg + k < 0 || reg + k >= p_.n_regs) refuse("register out of range");
+        if (reg + k < 0 || reg + k >= p_.n_regs)
+          refuse("register out of range");
         ++writes[(size_t)(reg + k)];
       }
     });
@@ -645,7 +651,8 @@ class Analysis {
         const Program::Instr& I = p_.code[(size_t)pc];
         each_body_read(I, [&](int reg, int len) {
           for (int k = 0; k < len; ++k)
-            if (!defined[(size_t)(reg + k)]) undefined_read_[(size_t)(reg + k)] = 1;
+            if (!defined[(size_t)(reg + k)])
+              undefined_read_[(size_t)(reg + k)] = 1;
         });
         switch (I.code) {
           case Program::JZ:
@@ -681,7 +688,8 @@ class Analysis {
   }
 
   bool shared_operand(int r) const {
-    return r != p_.iter_reg && (!writes_[(size_t)r] || invariant_reg_[(size_t)r]);
+    return r != p_.iter_reg &&
+           (!writes_[(size_t)r] || invariant_reg_[(size_t)r]);
   }
 
   void analyze_invariance() {
@@ -706,7 +714,8 @@ class Analysis {
           break;
         case Program::CALL: {
           const Program::Call& call = p_.calls[(size_t)I.a];
-          for (int k = 0; k < call.n_in; ++k) exclude(call.in[k], call.in_len[k]);
+          for (int k = 0; k < call.n_in; ++k)
+            exclude(call.in[k], call.in_len[k]);
           exclude(call.out, call.out_len);
           exclude(call.scratch, call.scratch_len);
           break;
@@ -800,7 +809,8 @@ class Analysis {
     std::vector<Span> written = {{call.out, call.out_len},
                                  {call.scratch, call.scratch_len}};
     std::vector<Span> read;
-    for (int k = 0; k < call.n_in; ++k) read.push_back({call.in[k], call.in_len[k]});
+    for (int k = 0; k < call.n_in; ++k)
+      read.push_back({call.in[k], call.in_len[k]});
     for (size_t i = 0; i < written.size(); ++i) {
       for (size_t j = i + 1; j < written.size(); ++j)
         if (overlaps(written[i], written[j]))
@@ -909,20 +919,19 @@ class Analysis {
   }
 
   void size_tiles() {
-    plan_.tiles =
-        (int)((p_.count + kRegionMapTile - 1) / kRegionMapTile);
+    plan_.tiles = (int)((p_.count + kRegionMapTile - 1) / kRegionMapTile);
     const int64_t adjoint = (int64_t)kRegionMapTile * plan_.adj_cells;
     const int64_t one_tile = (int64_t)kRegionMapTile * plan_.fwd_regs + adjoint;
     const int64_t all_tiles =
         (int64_t)plan_.tiles * kRegionMapTile * plan_.fwd_regs + adjoint;
-    plan_.tile_recompute = plan_.fwd_regs > recompute_cells_ || all_tiles > limit_;
+    plan_.tile_recompute =
+        plan_.fwd_regs > recompute_cells_ || all_tiles > limit_;
     plan_.storage = plan_.tile_recompute ? one_tile : all_tiles;
     if (plan_.storage > limit_) refuse("tile storage exceeds the save limit");
-    plan_.mask_cells = (int64_t)plan_.segment_count *
-                       (plan_.tile_recompute ? 1 : plan_.tiles);
+    plan_.mask_cells =
+        (int64_t)plan_.segment_count * (plan_.tile_recompute ? 1 : plan_.tiles);
   }
 };
-
 
 using Mask = uint64_t;
 constexpr int kTile = kRegionMapTile;
@@ -930,7 +939,10 @@ constexpr int kTile = kRegionMapTile;
 class TileState {
  public:
   TileState(const RegionMapProg& p, double* reg, double* fwd, int lanes)
-      : plan_(p.lanes), reg_(reg), fwd_(fwd), n_(lanes),
+      : plan_(p.lanes),
+        reg_(reg),
+        fwd_(fwd),
+        n_(lanes),
         full_(lanes == kTile ? ~Mask{0} : (Mask{1} << lanes) - 1) {}
 
   Mask full() const { return full_; }
@@ -1048,8 +1060,8 @@ void lane_instruction(const RegionMapProg& p, const TileState& t,
       break;
     case Program::IMOD:
       t.binary(I, m, [](double a, double b) {
-        return static_cast<double>(stan::math::modulus(static_cast<int>(a),
-                                                       static_cast<int>(b)));
+        return static_cast<double>(
+            stan::math::modulus(static_cast<int>(a), static_cast<int>(b)));
       });
       break;
     case Program::POW: {
@@ -1247,7 +1259,6 @@ void lane_tile_forward(const RegionMapProg& p, const TileState& t,
   }
 }
 
-
 class AdjointTile {
  public:
   AdjointTile(const RegionMapProg& p, const TileState& fwd, double* cells,
@@ -1266,8 +1277,7 @@ class AdjointTile {
 
   Cell cell(int c) const {
     const int s = plan_.cell_slot[(size_t)c];
-    return s >= 0 ? Cell{cells_ + (size_t)s * kTile, 1}
-                  : Cell{shared_ + c, 0};
+    return s >= 0 ? Cell{cells_ + (size_t)s * kTile, 1} : Cell{shared_ + c, 0};
   }
 
   Cell acc(int c) {
@@ -1311,8 +1321,7 @@ class AdjointTile {
         if (meta_[2 * s] >= 0.0) {
           shared_[(size_t)meta_[2 * s]] += row[l];
         } else {
-          const double idx =
-              idx_rows_[(size_t)meta_[2 * s + 1] * kTile + l];
+          const double idx = idx_rows_[(size_t)meta_[2 * s + 1] * kTile + l];
           if (idx >= 0.0) shared_[(size_t)idx] += row[l];
         }
       }
@@ -1591,7 +1600,8 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t,
           const double u = d[l];
           d[l] = 0.0;
           site.value[l] = u;
-          site.index[l] = static_cast<double>(I.a + static_cast<int32_t>(vb[l]) - 1);
+          site.index[l] =
+              static_cast<double>(I.a + static_cast<int32_t>(vb[l]) - 1);
         });
         return;
       }
@@ -1698,23 +1708,21 @@ void print_profile(const RegionMapProfile& pr) {
   std::fprintf(stderr, "  adjoint: instrs=%llu lanes=%llu occupancy=%s\n",
                (unsigned long long)t.adj_exec, (unsigned long long)t.adj_lanes,
                occupancy(t.adj_lanes, t.adj_exec).c_str());
-  std::fprintf(stderr,
-               "  block entries: full=%llu partial=%llu empty=%llu | "
-               "segment entries: full=%llu partial=%llu empty=%llu\n",
-               (unsigned long long)t.block_full,
-               (unsigned long long)t.block_partial,
-               (unsigned long long)t.block_empty,
-               (unsigned long long)t.seg_full,
-               (unsigned long long)t.seg_partial,
-               (unsigned long long)t.seg_empty);
+  std::fprintf(
+      stderr,
+      "  block entries: full=%llu partial=%llu empty=%llu | "
+      "segment entries: full=%llu partial=%llu empty=%llu\n",
+      (unsigned long long)t.block_full, (unsigned long long)t.block_partial,
+      (unsigned long long)t.block_empty, (unsigned long long)t.seg_full,
+      (unsigned long long)t.seg_partial, (unsigned long long)t.seg_empty);
   std::vector<int> codes;
   for (int c = 0; c < kRegionMapProfileCodes; ++c)
     if (t.fwd_op[c] || t.adj_op[c]) codes.push_back(c);
   std::sort(codes.begin(), codes.end(), [&](int a, int b) {
     return t.fwd_op[a] + t.adj_op[a] > t.fwd_op[b] + t.adj_op[b];
   });
-  std::fprintf(stderr, "  %-14s %12s %7s %12s | %12s %7s\n", "opcode",
-               "fwd", "occ", "shared-only", "adj", "occ");
+  std::fprintf(stderr, "  %-14s %12s %7s %12s | %12s %7s\n", "opcode", "fwd",
+               "occ", "shared-only", "adj", "occ");
   for (int c : codes)
     std::fprintf(stderr, "  %-14s %12llu %7s %12llu | %12llu %7s\n",
                  (size_t)c < program_code_count() ? kProgramOpSpecs[c].name
@@ -1745,7 +1753,8 @@ std::shared_ptr<RegionMapProfile> make_profile(const RegionMapProg& p) {
   std::lock_guard<std::mutex> lock(registry.mu);
   profile->label = "map#" + std::to_string(registry.all.size()) +
                    (p.label.empty() ? "" : " (" + p.label + ")");
-  profile->form = p.lanes.tile_recompute ? "lanes-tile-recompute" : "lanes-save";
+  profile->form =
+      p.lanes.tile_recompute ? "lanes-tile-recompute" : "lanes-save";
   profile->body = (int)p.code.size();
   profile->iterations = p.count;
   registry.all.push_back(profile);
@@ -1785,7 +1794,8 @@ uint64_t region_map_lane_runs() {
 int64_t region_map_lane_cells(const RegionMapProg& p) {
   if (!p.lanes.active) return 0;
   const auto& l = p.lanes;
-  return l.storage + l.max_window + (int64_t)l.max_sites * (2 + kRegionMapTile) +
+  return l.storage + l.max_window +
+         (int64_t)l.max_sites * (2 + kRegionMapTile) +
          (int64_t)l.max_dynamic * kRegionMapTile + l.mask_cells;
 }
 
@@ -1797,8 +1807,10 @@ static double* segment_masks(const RegionMapLanePlan& plan, double* region,
   return plan.tile_recompute ? base : base + (size_t)tile * plan.segment_count;
 }
 
-static double* tile_base(const RegionMapLanePlan& plan, double* tiles, int tile) {
-  return plan.tile_recompute ? tiles : tiles + (size_t)tile * kTile * plan.fwd_regs;
+static double* tile_base(const RegionMapLanePlan& plan, double* tiles,
+                         int tile) {
+  return plan.tile_recompute ? tiles
+                             : tiles + (size_t)tile * kTile * plan.fwd_regs;
 }
 
 static TileState seeded_tile(const RegionMapProg& p, double* reg, double* base,
@@ -1807,7 +1819,8 @@ static TileState seeded_tile(const RegionMapProg& p, double* reg, double* base,
   for (const int32_t r : plan.seed_regs)
     std::fill_n(base + (size_t)plan.reg_slot[(size_t)r] * kTile, kTile, reg[r]);
   double* iter = base + (size_t)plan.reg_slot[(size_t)p.iter_reg] * kTile;
-  for (int l = 0; l < lanes; ++l) iter[l] = static_cast<double>(p.lo + first + l);
+  for (int l = 0; l < lanes; ++l)
+    iter[l] = static_cast<double>(p.lo + first + l);
   return TileState(p, reg, base, lanes);
 }
 
@@ -1850,8 +1863,8 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
   const double seed = ctx.out_adj_vec.data[0];
   const int target = map[(size_t)p.out_regs[0]];
   double* fwd_tiles = region;
-  double* adj_tile =
-      region + (size_t)(plan.tile_recompute ? 1 : plan.tiles) * kTile * plan.fwd_regs;
+  double* adj_tile = region + (size_t)(plan.tile_recompute ? 1 : plan.tiles) *
+                                  kTile * plan.fwd_regs;
   double* window = region + plan.storage;
   double* log = window + plan.max_window;
   KernelCtx call_ctx;

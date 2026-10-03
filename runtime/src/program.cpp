@@ -868,8 +868,7 @@ bool copy_eligible_op(const Program& p, size_t pc) {
   const Program::Instr& I = p.code[pc];
   if (branches(I.code)) return true;
   if (program_spec_of(I).has(kProgramNoAdjoint)) return false;
-  if (I.code == Program::CALL)
-    return I.a >= 0 && (size_t)I.a < p.calls.size();
+  if (I.code == Program::CALL) return I.a >= 0 && (size_t)I.a < p.calls.size();
   return true;
 }
 
@@ -994,8 +993,8 @@ bool propagate_program_copies(Program& p,
       const bool disjoint = I.a + len <= I.dst || I.dst + len <= I.a;
       for (int k = 0; k < len && disjoint; ++k) {
         const int32_t src = I.a + k;
-        const int32_t root = copy_of[(size_t)src] >= 0 ? copy_of[(size_t)src]
-                                                         : src;
+        const int32_t root =
+            copy_of[(size_t)src] >= 0 ? copy_of[(size_t)src] : src;
         if (root < I.dst || root >= I.dst + len) roots[(size_t)k] = root;
       }
       for (const Span& w : writes)
@@ -1017,8 +1016,7 @@ bool propagate_program_copies(Program& p,
         slot = copy_of;
       } else {
         for (int reg = 0; reg < n_regs; ++reg)
-          if (slot[(size_t)reg] != copy_of[(size_t)reg])
-            slot[(size_t)reg] = -1;
+          if (slot[(size_t)reg] != copy_of[(size_t)reg]) slot[(size_t)reg] = -1;
       }
       if (I.code == Program::JMP) reachable = false;
     }
@@ -1049,10 +1047,9 @@ bool propagate_program_copies(Program& p,
       for (size_t w = 0; w < words; ++w) live[w] |= target[w];
     }
     bool removable = no_op[pc];
-    const bool droppable =
-        I.code == Program::MOV || I.code == Program::MOVR ||
-        I.code == Program::CONST || I.code == Program::CONSTR ||
-        I.code == Program::FILL;
+    const bool droppable = I.code == Program::MOV || I.code == Program::MOVR ||
+                           I.code == Program::CONST ||
+                           I.code == Program::CONSTR || I.code == Program::FILL;
     if (!removable && droppable) {
       removable = true;
       each_write(p, I, [&](Span s) {

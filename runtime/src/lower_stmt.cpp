@@ -421,7 +421,8 @@ void Lowering::finalize_island_program_once(IslandProg& prog, bool native,
   }
   if (propagate_copies && !has_back_edge && !has_unmodelled_ranges) {
     std::vector<std::pair<int, int>> seeded;
-    for (const auto& input : prog.ins) seeded.emplace_back(input.reg, input.len);
+    for (const auto& input : prog.ins)
+      seeded.emplace_back(input.reg, input.len);
     propagate_program_copies(prog, seeded);
   }
   if (!has_back_edge && !has_unmodelled_ranges)

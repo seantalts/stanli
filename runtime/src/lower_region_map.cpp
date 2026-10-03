@@ -110,7 +110,8 @@ class ParameterControl {
     if ((e.kind == mir::Expr::EAnd || e.kind == mir::Expr::EOr) &&
         dependent(e, env))
       return true;
-    if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined &&
+    if (e.kind == mir::Expr::FunApp &&
+        e.fn_lib == mir::Expr::Lib::UserDefined &&
         call(e.name, pattern(e.args, env), depth + 1))
       return true;
     for (const auto& a : e.args)
@@ -446,20 +447,21 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   push_target_term(op.out);
   int_env.erase(s.loopvar);
   if (diagnostics)
-    emit_diagnostic("stanli_region_map selected (" + s.loopvar +
-                    "): iterations=" + std::to_string(prog->count) +
-                    " prologue=" + std::to_string(prog->prologue.size()) +
-                    " body=" + std::to_string(prog->code.size()) +
-                    " saved_cells=" + std::to_string(saved_per_iteration) +
-                    " saved_spans=" + std::to_string(prog->saved.size()) +
-                    (prog->recompute ? " recompute" : "") +
-                    (prog->lanes.active
-                         ? std::string(prog->lanes.tile_recompute ? " lanes=tile-recompute"
-                                                                : " lanes=save") +
-                               " seeded=" + std::to_string(prog->lanes.seed_regs.size())
-                         : " lanes=no(" + prog->lanes.refusal + ")") +
-                    " registers=" + std::to_string(prog->n_regs) +
-                    " live_ins=" + std::to_string(prog->ins.size()));
+    emit_diagnostic(
+        "stanli_region_map selected (" + s.loopvar +
+        "): iterations=" + std::to_string(prog->count) +
+        " prologue=" + std::to_string(prog->prologue.size()) +
+        " body=" + std::to_string(prog->code.size()) +
+        " saved_cells=" + std::to_string(saved_per_iteration) +
+        " saved_spans=" + std::to_string(prog->saved.size()) +
+        (prog->recompute ? " recompute" : "") +
+        (prog->lanes.active
+             ? std::string(prog->lanes.tile_recompute ? " lanes=tile-recompute"
+                                                      : " lanes=save") +
+                   " seeded=" + std::to_string(prog->lanes.seed_regs.size())
+             : " lanes=no(" + prog->lanes.refusal + ")") +
+        " registers=" + std::to_string(prog->n_regs) +
+        " live_ins=" + std::to_string(prog->ins.size()));
   return true;
 }
 

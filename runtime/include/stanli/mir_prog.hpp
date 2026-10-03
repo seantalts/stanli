@@ -1990,8 +1990,8 @@ struct ProgramCompiler {
     if (e.kind == mir::Expr::EAnd || e.kind == mir::Expr::EOr) return true;
     if (e.kind != mir::Expr::FunApp || e.args.empty() || e.args.size() > 2)
       return false;
-    const BuiltinSpec* spec =
-        shaped_builtin_spec(e.name, e.args.size(), BuiltinShapePolicy::Predicate);
+    const BuiltinSpec* spec = shaped_builtin_spec(
+        e.name, e.args.size(), BuiltinShapePolicy::Predicate);
     return spec != nullptr && spec->predicate != BuiltinPredicate::None;
   }
 
