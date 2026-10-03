@@ -329,11 +329,12 @@ class CompilerSelectionTests(unittest.TestCase):
 class CorpusInventoryTests(unittest.TestCase):
     def test_educational_cases_are_default_and_selectable_without_posteriordb(self):
         cases = benchmark_cases(pathlib.Path("missing/posterior_database"))
-        self.assertEqual(len(cases), 221)
+        self.assertEqual(len(cases), 222)
         self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "educational")), 13)
         self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "rethinking")), 62)
         self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "brms")), 124)
         self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "cogmod")), 22)
+        self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "ctsem")), 1)
         self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "teaching")), 199)
         for source, data in cases.values():
             self.assertTrue(source.is_file())
@@ -350,7 +351,7 @@ class CorpusInventoryTests(unittest.TestCase):
                 (root / "posteriors" / (name + ".json")).write_text(json.dumps(
                     {"model_name": "example", "data_name": data}))
             cases = benchmark_cases(root)
-            self.assertEqual(len(cases), 222)
+            self.assertEqual(len(cases), 223)
             self.assertEqual(cases["example"][1].name, "first.json.zip")
             self.assertEqual(len(benchmark_cases(root, "posteriordb")), 1)
 

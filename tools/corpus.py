@@ -130,7 +130,8 @@ def main():
           f"CmdStan reference coverage: {sum(m in refs for m in results)}/{len(results)} models, "
           f"{sum(len(refs.get(m, {}).get('points', {})) for m in results)} evaluation points.", "",
           "The shared corpus includes posteriordb, generated brms and "
-          "cogmod models, imported teaching models, and language fixtures. "
+          "cogmod models, ctsem's state-space template, imported teaching "
+          "models, and language fixtures. "
           "Collection labels retain their source provenance; all references "
           "use the same replay in `tools/verify_refs.py`.", "",
           f"Recording-time primary-point comparison metrics retained for {len(verified)} "

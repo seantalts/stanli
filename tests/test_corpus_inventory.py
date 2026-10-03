@@ -21,7 +21,7 @@ class InventoryTest(unittest.TestCase):
         self.imported = self.root / "tests/educational"
         (self.imported / "models").mkdir(parents=True)
         (self.imported / "LICENSE").write_text("fixture license")
-        for collection in ("brms", "rethinking", "cogmod", "stanc3"):
+        for collection in ("brms", "rethinking", "cogmod", "ctsem", "stanc3"):
             directory = self.root / "tests" / collection
             directory.mkdir()
             (directory / f"{collection}.stan").write_text("parameters { real x; }")
@@ -66,10 +66,12 @@ class InventoryTest(unittest.TestCase):
 
     def test_filters_are_provenance_only_and_language_is_explicit(self):
         self.assertEqual(set(inventory.corpus_cases(self.pdb)),
-                         {"pdb_model", "import_a", "import_b", "brms", "rethinking", "cogmod"})
+                         {"pdb_model", "import_a", "import_b", "brms", "rethinking", "cogmod",
+                          "ctsem"})
         self.assertIn("stanc3", inventory.corpus_cases(self.pdb, include_language=True))
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "stanc3")), {"stanc3"})
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "cogmod")), {"cogmod"})
+        self.assertEqual(set(inventory.corpus_cases(self.pdb, "ctsem")), {"ctsem"})
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "teaching")),
                          {"import_a", "import_b", "brms", "rethinking"})
 

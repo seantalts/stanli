@@ -13,7 +13,7 @@ import zipfile
 
 REPO = Path(__file__).resolve().parents[1]
 COLLECTIONS = ("all", "posteriordb", "educational", "rethinking", "brms",
-               "cogmod", "teaching", "stanc3")
+               "cogmod", "ctsem", "teaching", "stanc3")
 
 
 @dataclass(frozen=True)
@@ -66,7 +66,7 @@ def _imported_cases(root):
 def local_cases(include_language=True):
     """Local fixtures keyed by unique model id, with validated provenance."""
     cases = {}
-    collections = ["brms", "rethinking", "cogmod"]
+    collections = ["brms", "rethinking", "cogmod", "ctsem"]
     if include_language:
         collections.append("stanc3")
     for collection in collections:
