@@ -61,6 +61,14 @@ void plan_region_map_lanes(RegionMapProg& p, bool enabled,
 
 uint64_t region_map_lane_runs();
 
+int64_t region_map_lane_cells(const RegionMapProg& p);
+
+void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
+                              double* region);
+
+void region_map_lanes_scatter_saved(const RegionMapProg& p, KernelCtx& ctx,
+                                    const double* region, double* rows);
+
 }  // namespace stanli
 
 #endif

@@ -5,6 +5,7 @@
 #include <stanli/region_map.hpp>
 
 #include <algorithm>
+#include <exception>
 #include <stdexcept>
 #include <string_view>
 
@@ -13,7 +14,8 @@ namespace {
 
 int64_t region_map_scratch(const Op& op, const Slot*) {
   const auto& p = *static_cast<const RegionMapProg*>(op.udata);
-  return (int64_t)p.n_regs + p.adj.n_regs + p.count * p.saved_cells;
+  return (int64_t)p.n_regs + p.adj.n_regs + p.count * p.saved_cells +
+         region_map_lane_cells(p);
 }
 
 void run_prologue(const RegionMapProg& p, double* reg) {
@@ -59,8 +61,7 @@ void run_iterations(const RegionMapProg& p, KernelCtx& ctx) {
   ctx.out.data[0] = total;
 }
 
-void region_map_fwd(KernelCtx& ctx) {
-  const auto& p = *static_cast<const RegionMapProg*>(ctx.udata);
+void seed_registers(const RegionMapProg& p, KernelCtx& ctx) {
   for (size_t k = 0; k < p.ins.size(); ++k) {
     const auto& li = p.ins[k];
     if (li.input < 0) continue;
@@ -68,10 +69,41 @@ void region_map_fwd(KernelCtx& ctx) {
                 ctx.scratch + li.reg);
   }
   run_prologue(p, ctx.scratch);
+}
+
+void run_scalar_forward(const RegionMapProg& p, KernelCtx& ctx) {
   if (p.calls.empty())
     run_iterations<false>(p, ctx);
   else
     run_iterations<true>(p, ctx);
+}
+
+double* lane_region(const RegionMapProg& p, KernelCtx& ctx) {
+  return ctx.scratch + p.n_regs + p.adj.n_regs + p.count * p.saved_cells;
+}
+
+void run_lane_forward(const RegionMapProg& p, KernelCtx& ctx) {
+  std::exception_ptr original;
+  try {
+    region_map_lanes_forward(p, ctx, lane_region(p, ctx));
+    region_map_lanes_scatter_saved(p, ctx, lane_region(p, ctx),
+                                   ctx.scratch + p.n_regs + p.adj.n_regs);
+    return;
+  } catch (...) {
+    original = std::current_exception();
+  }
+  seed_registers(p, ctx);
+  run_scalar_forward(p, ctx);
+  std::rethrow_exception(original);
+}
+
+void region_map_fwd(KernelCtx& ctx) {
+  const auto& p = *static_cast<const RegionMapProg*>(ctx.udata);
+  seed_registers(p, ctx);
+  if (p.lanes.active)
+    run_lane_forward(p, ctx);
+  else
+    run_scalar_forward(p, ctx);
 }
 
 template <bool ReuseCallCtx>

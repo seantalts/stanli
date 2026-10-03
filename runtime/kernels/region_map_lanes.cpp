@@ -4,6 +4,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <stdexcept>
 #include <set>
 #include <string>
 
@@ -45,7 +49,6 @@ bool lane_opcode(Program::Code c) {
     case Program::LSE2:
     case Program::LOG_DIFF_EXP:
     case Program::LOG_MIX:
-    case Program::DENSITY:
     case Program::CALL:
       return true;
     default:
@@ -438,12 +441,324 @@ class Analysis {
   }
 };
 
+
+using Mask = uint64_t;
+constexpr int kTile = kRegionMapTile;
+
+class TileState {
+ public:
+  TileState(const RegionMapProg& p, double* reg, double* fwd, int lanes)
+      : plan_(p.lanes), reg_(reg), fwd_(fwd), n_(lanes),
+        full_(lanes == kTile ? ~Mask{0} : (Mask{1} << lanes) - 1) {}
+
+  Mask full() const { return full_; }
+
+  double* slot(int r) const {
+    return fwd_ + (size_t)plan_.reg_slot[(size_t)r] * kTile;
+  }
+  bool per_lane(int r) const { return plan_.reg_slot[(size_t)r] >= 0; }
+
+  const double* read(int r, double* broadcast) const {
+    if (per_lane(r)) return slot(r);
+    std::fill_n(broadcast, n_, reg_[r]);
+    return broadcast;
+  }
+
+  double value(int r, int l) const {
+    return per_lane(r) ? slot(r)[l] : reg_[r];
+  }
+
+  template <typename F>
+  void each(Mask m, F&& f) const {
+    if (m == full_) {
+      for (int l = 0; l < n_; ++l) f(l);
+    } else {
+      for (; m; m &= m - 1) f(__builtin_ctzll(m));
+    }
+  }
+
+  template <typename F>
+  void binary(const Program::Instr& I, Mask m, F f) const {
+    double b0[kTile], b1[kTile];
+    const double* a = read(I.a, b0);
+    const double* b = read(I.b, b1);
+    double* d = slot(I.dst);
+    each(m, [&](int l) { d[l] = f(a[l], b[l]); });
+  }
+
+  template <typename F>
+  void unary(const Program::Instr& I, Mask m, F f) const {
+    double b0[kTile];
+    const double* a = read(I.a, b0);
+    double* d = slot(I.dst);
+    each(m, [&](int l) { d[l] = f(a[l]); });
+  }
+
+ private:
+  const RegionMapLanePlan& plan_;
+  double* reg_;
+  double* fwd_;
+  int n_;
+  Mask full_;
+};
+
+void lane_instruction(const RegionMapProg& p, const TileState& t,
+                      const Program::Instr& I, Mask m, double* window,
+                      KernelCtx& call_ctx, EvalState* state) {
+  switch (I.code) {
+    case Program::CONST: {
+      const double v = p.pool[(size_t)I.a];
+      double* d = t.slot(I.dst);
+      t.each(m, [&](int l) { d[l] = v; });
+      break;
+    }
+    case Program::FILL: {
+      const double v = p.pool[(size_t)I.a];
+      for (int32_t i = 0; i < I.len; ++i) {
+        double* d = t.slot(I.dst + i);
+        t.each(m, [&](int l) { d[l] = v; });
+      }
+      break;
+    }
+    case Program::CONSTR:
+      for (int32_t i = 0; i < I.len; ++i) {
+        const double v = p.pool[(size_t)(I.a + i)];
+        double* d = t.slot(I.dst + i);
+        t.each(m, [&](int l) { d[l] = v; });
+      }
+      break;
+    case Program::MOV:
+      t.unary(I, m, [](double a) { return a; });
+      break;
+    case Program::ADD:
+      t.binary(I, m, [](double a, double b) { return a + b; });
+      break;
+    case Program::SUB:
+      t.binary(I, m, [](double a, double b) { return a - b; });
+      break;
+    case Program::MUL:
+      t.binary(I, m, [](double a, double b) { return a * b; });
+      break;
+    case Program::DIV:
+      t.binary(I, m, [](double a, double b) { return a / b; });
+      break;
+    case Program::IADD:
+      t.binary(I, m, [](double a, double b) {
+        return static_cast<double>(static_cast<int>(a) + static_cast<int>(b));
+      });
+      break;
+    case Program::INEG:
+      t.unary(I, m, [](double a) {
+        return static_cast<double>(-static_cast<int>(a));
+      });
+      break;
+    case Program::IMOD:
+      t.binary(I, m, [](double a, double b) {
+        return static_cast<double>(stan::math::modulus(static_cast<int>(a),
+                                                       static_cast<int>(b)));
+      });
+      break;
+    case Program::POW: {
+      const uint8_t law = static_cast<uint8_t>(I.len);
+      t.binary(I, m, [law](double a, double b) {
+        return program_pow<double>(law, a, b);
+      });
+      break;
+    }
+    case Program::FMAX:
+    case Program::FMIN: {
+      const uint8_t law = static_cast<uint8_t>(I.len);
+      const bool maximum = I.code == Program::FMAX;
+      t.binary(I, m, [law, maximum](double a, double b) {
+        return program_extremum<double>(maximum, law, a, b);
+      });
+      break;
+    }
+    case Program::NEG:
+      t.unary(I, m, [](double a) { return -a; });
+      break;
+    case Program::EXP:
+      t.unary(I, m, [](double a) { return stan::math::exp(a); });
+      break;
+    case Program::LOG:
+      t.unary(I, m, [](double a) { return stan::math::log(a); });
+      break;
+    case Program::SQRT:
+      t.unary(I, m, [](double a) { return stan::math::sqrt(a); });
+      break;
+    case Program::SQUARE:
+      t.unary(I, m, [](double a) { return stan::math::square(a); });
+      break;
+    case Program::INV:
+      t.unary(I, m, [](double a) { return stan::math::inv(a); });
+      break;
+    case Program::FABS:
+      t.unary(I, m, [](double a) { return stan::math::fabs(a); });
+      break;
+    case Program::GT:
+      t.binary(I, m, [](double a, double b) { return double(a > b); });
+      break;
+    case Program::GE:
+      t.binary(I, m, [](double a, double b) { return double(a >= b); });
+      break;
+    case Program::LT:
+      t.binary(I, m, [](double a, double b) { return double(a < b); });
+      break;
+    case Program::LE:
+      t.binary(I, m, [](double a, double b) { return double(a <= b); });
+      break;
+    case Program::EQ:
+      t.binary(I, m, [](double a, double b) { return double(a == b); });
+      break;
+    case Program::LSE2:
+      t.binary(I, m, [](double a, double b) {
+        return stan::math::log_sum_exp(a, b);
+      });
+      break;
+    case Program::LOG_DIFF_EXP:
+      t.binary(I, m, [](double a, double b) {
+        return stan::math::log_diff_exp(a, b);
+      });
+      break;
+    case Program::FMA:
+    case Program::LOG_MIX: {
+      double b0[kTile], b1[kTile], b2[kTile];
+      const double* a = t.read(I.a, b0);
+      const double* b = t.read(I.b, b1);
+      const double* c = t.read(I.c, b2);
+      double* d = t.slot(I.dst);
+      if (I.code == Program::FMA)
+        t.each(m, [&](int l) { d[l] = stan::math::fma(a[l], b[l], c[l]); });
+      else
+        t.each(m, [&](int l) { d[l] = stan::math::log_mix(a[l], b[l], c[l]); });
+      break;
+    }
+    case Program::DYN_INDEX: {
+      double b1[kTile];
+      const double* idx = t.read(I.b, b1);
+      double* d = t.slot(I.dst);
+      const int first = I.a + I.c;
+      t.each(m, [&](int l) {
+        const double raw = idx[l];
+        if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
+            raw > static_cast<double>(I.len))
+          throw std::out_of_range("register-program index out of range");
+        d[l] = t.value(first + static_cast<int32_t>(raw) - 1, l);
+      });
+      break;
+    }
+    case Program::CALL: {
+      const auto& w = p.lanes.calls[(size_t)I.a];
+      const Program::Call& call = p.calls[(size_t)I.a];
+      t.each(m, [&](int l) {
+        for (int k = 0; k < call.n_in; ++k)
+          for (int j = 0; j < call.in_len[k]; ++j)
+            window[w.in_off[k] + j] = t.value(call.in[k] + j, l);
+        for (int j = 0; j < call.out_len; ++j)
+          window[w.out_off + j] = t.value(call.out + j, l);
+        for (int j = 0; j < call.scratch_len; ++j)
+          window[w.scratch_off + j] = t.value(call.scratch + j, l);
+        run_call(w.fwd, window, call_ctx, state);
+        for (int j = 0; j < call.out_len; ++j)
+          t.slot(call.out + j)[l] = window[w.out_off + j];
+        for (int j = 0; j < call.scratch_len; ++j)
+          t.slot(call.scratch + j)[l] = window[w.scratch_off + j];
+      });
+      break;
+    }
+    default:
+      throw std::logic_error("opcode outside the lane whitelist");
+  }
+}
+
+void lane_tile_forward(const RegionMapProg& p, const TileState& t,
+                       double* window, KernelCtx& call_ctx,
+                       EvalState* state) {
+  const auto& blocks = p.lanes.blocks;
+  std::vector<Mask> entry(blocks.size() + 1, 0);
+  entry[0] = t.full();
+  for (size_t b = 0; b < blocks.size(); ++b) {
+    const Mask m = entry[b];
+    if (!m) continue;
+    const auto& block = blocks[b];
+    const int last = block.end - 1;
+    const auto& tail = p.code[(size_t)last];
+    const bool jump = tail.code == Program::JZ || tail.code == Program::JMP;
+    for (int pc = block.begin; pc < (jump ? last : block.end); ++pc)
+      lane_instruction(p, t, p.code[(size_t)pc], m, window, call_ctx, state);
+    if (tail.code == Program::JMP) {
+      entry[(size_t)block.taken] |= m;
+    } else if (tail.code == Program::JZ) {
+      double b0[kTile];
+      const double* flag = t.read(tail.a, b0);
+      Mask taken = 0;
+      t.each(m, [&](int l) {
+        if (flag[l] == 0.0) taken |= Mask{1} << l;
+      });
+      entry[(size_t)block.taken] |= taken;
+      entry[(size_t)block.fall] |= m & ~taken;
+    } else {
+      entry[(size_t)block.fall] |= m;
+    }
+  }
+}
+
 std::atomic<uint64_t> lane_runs{0};
 
 }  // namespace
 
 uint64_t region_map_lane_runs() {
   return lane_runs.load(std::memory_order_relaxed);
+}
+
+int64_t region_map_lane_cells(const RegionMapProg& p) {
+  return p.lanes.active ? p.lanes.storage + p.lanes.max_window : 0;
+}
+
+void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
+                              double* region) {
+  lane_runs.fetch_add(1, std::memory_order_relaxed);
+  const auto& plan = p.lanes;
+  double* tiles = region;
+  double* window = region + plan.storage;
+  double* reg = ctx.scratch;
+  KernelCtx call_ctx;
+  double total = 0.0;
+  const int target = p.out_regs[0];
+  for (int tile = 0; tile < plan.tiles; ++tile) {
+    const int64_t first = (int64_t)tile * kTile;
+    const int lanes = (int)std::min<int64_t>(kTile, p.count - first);
+    double* base = tiles + (size_t)tile * kTile * plan.fwd_regs;
+    for (int r = 0; r < p.n_regs; ++r) {
+      const int s = plan.reg_slot[(size_t)r];
+      if (s >= 0) std::fill_n(base + (size_t)s * kTile, kTile, reg[r]);
+    }
+    double* iter = base + (size_t)plan.reg_slot[(size_t)p.iter_reg] * kTile;
+    for (int l = 0; l < lanes; ++l)
+      iter[l] = static_cast<double>(p.lo + first + l);
+    TileState t(p, reg, base, lanes);
+    lane_tile_forward(p, t, window, call_ctx, ctx.eval_state);
+    const double* out = t.slot(target);
+    for (int l = 0; l < lanes; ++l) total += out[l];
+  }
+  ctx.out.data[0] = total;
+}
+
+void region_map_lanes_scatter_saved(const RegionMapProg& p, KernelCtx& ctx,
+                                    const double* region, double* rows) {
+  const auto& plan = p.lanes;
+  const double* reg = ctx.scratch;
+  for (int64_t i = 0; i < p.count; ++i) {
+    const double* base = region + (size_t)(i / kTile) * kTile * plan.fwd_regs;
+    const int l = (int)(i % kTile);
+    double* row = rows + i * p.saved_cells;
+    for (const auto& span : p.saved)
+      for (int k = 0; k < span.second; ++k) {
+        const int r = span.first + k;
+        const int s = plan.reg_slot[(size_t)r];
+        *row++ = s >= 0 ? base[(size_t)s * kTile + l] : reg[r];
+      }
+  }
 }
 
 void plan_region_map_lanes(RegionMapProg& p, bool enabled,
