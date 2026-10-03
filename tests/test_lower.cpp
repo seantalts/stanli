@@ -1913,6 +1913,56 @@ void test_logic_compiles_to_jumps() {
   }
 }
 
+struct CleanFixture {
+  const char* stem;
+  int n;
+  const char* extra;
+};
+
+void test_clean_sweep() {
+  const std::vector<CleanFixture> fixtures = {
+      {"region_map_branch", 64, ""},     {"region_map_udf", 64, ""},
+      {"region_map_many", 64, ""},       {"region_map_alias", 64, ""},
+      {"region_map_local_int", 64, ""},  {"region_map_call", 64, ""},
+      {"region_map_multi", 64, ""},      {"region_map_intops", 64, ""},
+      {"region_map_logic", 64, ""},      {"region_map_short_circuit", 64, ""},
+      {"region_map_nan", 64, "\"nv\":NaN"}, {"region_map_long_body", 32, ""}};
+  test_setenv("STANLI_REGION_MAP_CHECK_CLEAN", "1", 1);
+  for (bool recompute : {false, true}) {
+    for (const auto& f : fixtures) {
+      const std::string what =
+          std::string(f.stem) + (recompute ? " recompute" : " save");
+      if (recompute) test_setenv("STANLI_REGION_MAP_SAVE_LIMIT", "0", 1);
+      CompiledModel cm = compile_with(f.stem, f.n, nullptr, "0", f.extra);
+      if (recompute) test_unsetenv("STANLI_REGION_MAP_SAVE_LIMIT");
+      expect_mapped(what, cm);
+      check(map_payload(cm).recompute == recompute,
+            what + ": mode as requested");
+      Executor ex(cm.graph);
+      cm.bind(ex);
+      int swept = 0;
+      for (int k = 0; k < 8; ++k) {
+        Params point;
+        for (int64_t i = 0; i < ex.n_params(); ++i)
+          point.push_back(1.1 * std::sin(1.9 * k + 2.3 * i + 0.4) +
+                          0.3 * (k - 3));
+        try {
+          evaluate(ex, point);
+          ++swept;
+        } catch (const std::logic_error& e) {
+          const std::string what_failed = e.what();
+          check(what_failed.find("region_map_check_clean") == std::string::npos,
+                what + ": " + what_failed);
+        } catch (const std::exception&) {
+        }
+      }
+      check(swept >= 4, what + ": enough points evaluated (" +
+                            std::to_string(swept) + ")");
+    }
+  }
+  test_unsetenv("STANLI_REGION_MAP_CHECK_CLEAN");
+}
+
 }  // namespace region_map_test
 
 static void test_region_map() {
@@ -1931,6 +1981,7 @@ static void test_region_map() {
   test_call_partials_differ_per_iteration(true);
   test_logic_points();
   test_logic_compiles_to_jumps();
+  test_clean_sweep();
 }
 
 int main() {

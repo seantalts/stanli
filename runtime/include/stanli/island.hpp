@@ -127,7 +127,7 @@ bool compact_island_gated(IslandProg& p, bool enable_destination_forwarding);
 
 // Generate p.adj, appending checkpoint saves to p's forward code. False
 // leaves p untouched and keeps the replay.
-bool gen_adjoint(IslandProg& p);
+bool gen_adjoint(IslandProg& p, bool keep_every_clear = false);
 
 // After gen_adjoint has captured the original forward program, return a
 // double-only clone that replaces sufficiently common SOFTMAX(3) instructions

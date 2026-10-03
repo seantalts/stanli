@@ -174,7 +174,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   }
   if (reg.in_slots.empty()) return abandon("no live-in values");
   if (island_has_effect(*prog)) return abandon("program has effects");
-  finalize_island_program(*prog, true);
+  finalize_island_program(*prog, true, true);
   if (!prog->native_adj) {
     std::string why = "no generated adjoint";
     if (diagnostics) {
@@ -236,16 +236,6 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     prog->recompute = true;
     prog->saved.clear();
     prog->saved_cells = 0;
-  }
-  for (int cell = 0; cell < n_cells;) {
-    if (persistent[(size_t)cell]) {
-      ++cell;
-      continue;
-    }
-    int end = cell;
-    while (end < n_cells && !persistent[(size_t)end]) ++end;
-    prog->transient.emplace_back(cell, end - cell);
-    cell = end;
   }
 
   const std::vector<int> inputs = pack_island_inputs(*prog, reg.in_slots);

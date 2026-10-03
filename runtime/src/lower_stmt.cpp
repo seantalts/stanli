@@ -390,7 +390,8 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
     return true;
   };
 }
-void Lowering::finalize_island_program(IslandProg& prog, bool native) {
+void Lowering::finalize_island_program(IslandProg& prog, bool native,
+                                       bool keep_every_clear) {
   // Forward-only branches can record the executed path for generated
   // adjoints. Unsupported derivatives and loops retain the replay.
   // The register compactor's liveness analysis is straight-line (with
@@ -432,8 +433,8 @@ void Lowering::finalize_island_program(IslandProg& prog, bool native) {
     elide_program_dead_constants(prog);
   }
   // Generated quantities have no backward consumer.
-  prog.native_adj =
-      native && gen_adjoint(prog) && !std::getenv("STANLI_NO_NATIVE_ADJ");
+  prog.native_adj = native && gen_adjoint(prog, keep_every_clear) &&
+                    !std::getenv("STANLI_NO_NATIVE_ADJ");
 }
 // Compile `s` (a statement region) or `e` (a ternary) into a program.
 void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
