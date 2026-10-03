@@ -19,7 +19,7 @@ bool body_escapes(const mir::Stmt& s, bool in_inner_loop) {
   return false;
 }
 
-constexpr size_t kMaxRegionMapCode = 4096;
+constexpr size_t kMaxRegionMapCode = 131072;
 constexpr int64_t kMaxRegionMapSavedCells = int64_t{1} << 24;
 
 template <typename F>

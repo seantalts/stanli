@@ -1570,6 +1570,44 @@ void test_shapes() {
   run_points("region_map_multi", 64, branch_points, ref_multi);
 }
 
+void test_integer_ops_map() {
+  const Ref ref_intops = [](const std::vector<var>& p, const Series& s,
+                            std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const int n = static_cast<int>(i) + 1;
+      const int k = n % 3;
+      const int h = n / 2;
+      const var r = s.y[i] - p[0] * s.x[i];
+      const bool low = r < p[1];
+      if (taken) taken->push_back(low);
+      lp += low ? -(k + 1) * stan::math::square(r) - 0.01 * h * p[1]
+                : -0.5 * stan::math::square(r) + p[1] * (h % 2);
+    }
+    return lp;
+  };
+  run_points("region_map_intops", 64, branch_points, ref_intops);
+}
+
+void test_long_body_map() {
+  const Ref ref_long = [](const std::vector<var>& p, const Series& s,
+                          std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var r = s.y[i] - p[0] * s.x[i];
+      var acc = 0;
+      for (int j = 1; j <= 340; ++j)
+        acc += stan::math::exp(-0.002 * j * stan::math::square(r)) * p[1];
+      const bool low = r < p[1];
+      if (taken) taken->push_back(low);
+      lp += low ? -stan::math::square(r) + 0.001 * acc
+                : -0.5 * stan::math::square(r) + p[1] - 0.002 * acc;
+    }
+    return lp;
+  };
+  run_points("region_map_long_body", 32, branch_points, ref_long);
+}
+
 std::string outcome(const std::string& stem, int n, const char* env) {
   try {
     CompiledModel cm = compile_with(stem, n, env);
@@ -1752,6 +1790,8 @@ static void test_region_map() {
   test_size_independent();
   test_refusals();
   test_shapes();
+  test_integer_ops_map();
+  test_long_body_map();
   test_out_of_range();
   test_copied_executors();
   test_hoisted_constants_and_saved_state();

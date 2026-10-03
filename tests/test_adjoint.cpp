@@ -803,11 +803,42 @@ static void test_integer_ops() {
   // Integer results feed a real expression, but carry no derivative back to
   // their operands. Reusing the destination must clear its old adjoint too.
   for (Program::Code code : {Program::IADD, Program::ISUB, Program::IMUL,
-                             Program::INEG, Program::IABS}) {
+                             Program::IMOD, Program::IDIV, Program::INEG,
+                             Program::IABS}) {
     Build b({-7, 3, 0.4});
     b.emit_to(code, 0, 0, 1);
     const int result = b.emit(Program::MUL, 0, 2);
     check("integer result in real expression", b.done({result}, {1.5}));
+  }
+}
+
+static void test_integer_mod_div() {
+  for (Program::Code code : {Program::IMOD, Program::IDIV}) {
+    Build b({-7.9, 3.2, 0.4});
+    const int square = b.emit(Program::MUL, 0, 0);
+    const int whole = b.emit(code, square, 1);
+    const int scaled = b.emit(Program::MUL, whole, 2);
+    const int result = b.emit(Program::ADD, scaled, square);
+    check("integer mod/div of active operands", b.done({result}, {1.5}));
+  }
+  for (Program::Code code : {Program::IMOD, Program::IDIV}) {
+    Build b({-7.9, 3.2, 0.4});
+    const int square = b.emit(Program::MUL, 0, 0);
+    const int guard = b.emit(Program::GT, square, 1);
+    const int result = b.alloc();
+    const int jz = (int)b.p.code.size();
+    b.emit_to(Program::JZ, 0, guard);
+    const int whole = b.emit(code, square, 1);
+    b.emit_to(Program::MUL, result, whole, 2);
+    const int jmp = (int)b.p.code.size();
+    b.emit_to(Program::JMP, 0, 0);
+    b.p.code[(size_t)jz].dst = (int)b.p.code.size();
+    b.emit_to(Program::EXP, result, 1);
+    b.p.code[(size_t)jmp].dst = (int)b.p.code.size();
+    auto c = b.done({result}, {1.5});
+    check("integer mod/div on the taken path", c);
+    c.in = {0.3, 3.2, 0.4};
+    check("integer mod/div on the skipped path", c);
   }
 }
 
@@ -2116,6 +2147,7 @@ int main() {
   test_call_primal_read_contract();
   test_binary_ops();
   test_integer_ops();
+  test_integer_mod_div();
   test_fma();
   test_unary_ops();
   test_overwrite_needs_checkpoint();

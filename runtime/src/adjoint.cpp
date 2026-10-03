@@ -36,6 +36,7 @@
 #include <cstdlib>
 #include <limits>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 namespace stanli {
@@ -212,7 +213,7 @@ bool gen_adjoint(IslandProg& p) {
   const auto comparison = [](Program::Code code) {
     return code == Program::GT || code == Program::GE || code == Program::LT ||
            code == Program::LE || code == Program::EQ || code == Program::NE ||
-           (code >= Program::IADD && code <= Program::IABS);
+           (code >= Program::IMOD && code <= Program::IABS);
   };
   for (size_t pc = orig.size(); pc-- > 0;) {
     const auto& I = orig[pc];
@@ -251,8 +252,6 @@ bool gen_adjoint(IslandProg& p) {
     // Definite initialization over the forward DAG also proves that a
     // conditional single-writer copy dominates every use of its value. This
     // preserves the existing adjoint-cell sharing rule on untaken paths.
-    // Bound analysis storage; larger programs keep the established replay.
-    const size_t count = orig.size() + 1;
     if (n0 <= 0) return false;
     std::vector<int> tracked((size_t)n0, 0);
     for (const auto& in : p.ins) {
@@ -261,34 +260,47 @@ bool gen_adjoint(IslandProg& p) {
     }
     int m = 0;
     for (int& t : tracked) t = t < 0 ? -1 : m++;
-    if (count > (4u << 20) / static_cast<size_t>(std::max(m, 1))) return false;
-    std::vector<unsigned char> defined(count * static_cast<size_t>(m), 0);
-    std::vector<unsigned char> reached(count, 0);
-    reached[0] = 1;
-    const auto propagate = [&](size_t target, const unsigned char* values) {
-      auto* dest = defined.data() + target * m;
-      if (!reached[target])
-        std::copy_n(values, m, dest);
-      else
-        for (int r = 0; r < m; ++r) dest[r] &= values[r];
-      reached[target] = 1;
+    const size_t words = (static_cast<size_t>(m) + 63) / 64;
+    using Bits = std::vector<uint64_t>;
+    Bits values(words, 0);
+    bool live = true;
+    std::unordered_map<size_t, Bits> pending;
+    const auto propagate = [&](size_t target) {
+      auto [it, fresh] = pending.try_emplace(target, values);
+      if (fresh) return;
+      for (size_t w = 0; w < words; ++w) it->second[w] &= values[w];
+    };
+    const auto arrive = [&](size_t pc) {
+      auto it = pending.find(pc);
+      if (it == pending.end()) return;
+      if (live) {
+        for (size_t w = 0; w < words; ++w) values[w] &= it->second[w];
+      } else {
+        values = std::move(it->second);
+        live = true;
+      }
+      pending.erase(it);
+    };
+    const auto is_defined = [&](int t) {
+      return (values[(size_t)t / 64] >> (t % 64)) & 1u;
     };
     for (size_t pc = 0; pc < orig.size(); ++pc) {
-      if (!reached[pc]) continue;
+      arrive(pc);
+      if (!live) continue;
       const auto& I = orig[pc];
-      auto* values = defined.data() + pc * m;
       const auto available = [&](int r, int len) {
         if (!in_range(r, len)) return false;
         for (int k = 0; k < len; ++k)
           if (tracked[(size_t)(r + k)] >= 0 &&
-              !values[tracked[(size_t)(r + k)]])
+              !is_defined(tracked[(size_t)(r + k)]))
             return false;
         return true;
       };
       const auto define = [&](int r, int len) {
-        for (int k = 0; k < len; ++k)
-          if (tracked[(size_t)(r + k)] >= 0)
-            values[tracked[(size_t)(r + k)]] = 1;
+        for (int k = 0; k < len; ++k) {
+          const int t = tracked[(size_t)(r + k)];
+          if (t >= 0) values[(size_t)t / 64] |= uint64_t{1} << (t % 64);
+        }
       };
       if (I.code == Program::CALL) {
         const auto& call = fwd.calls[static_cast<size_t>(I.a)];
@@ -316,16 +328,17 @@ bool gen_adjoint(IslandProg& p) {
         for (size_t k = 0; k < message.value_reg.size(); ++k)
           if (!available(message.value_reg[k], message.value_len[k]))
             return false;
+        live = false;
         continue;
       }
       if (I.code == Program::JZ || I.code == Program::JMP)
-        propagate(I.dst, values);
-      if (I.code != Program::JMP) propagate(pc + 1, values);
+        propagate(static_cast<size_t>(I.dst));
+      if (I.code == Program::JMP) live = false;
     }
-    if (!reached.back()) return false;
+    arrive(orig.size());
+    if (!live) return false;
     for (int r : p.out_regs)
-      if (tracked[(size_t)r] >= 0 &&
-          !defined[orig.size() * (size_t)m + (size_t)tracked[(size_t)r]])
+      if (tracked[(size_t)r] >= 0 && !is_defined(tracked[(size_t)r]))
         return false;
     leaders.push_back(static_cast<int>(orig.size()));
     std::sort(leaders.begin(), leaders.end());
@@ -609,7 +622,7 @@ bool gen_adjoint(IslandProg& p) {
     const bool only_clear =
         spec.has(kProgramNoInputs) ||
         (I.code >= Program::GT && I.code <= Program::NE) ||
-        (I.code >= Program::IADD && I.code <= Program::IABS) ||
+        (I.code >= Program::IMOD && I.code <= Program::IABS) ||
         I.code == Program::EXTREMA_RANGE;
     if (elide_private_clears && only_clear) {
       bool private_first = true;
@@ -1171,6 +1184,8 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
         case Program::LE:
         case Program::EQ:
         case Program::NE:
+        case Program::IMOD:
+        case Program::IDIV:
         case Program::IADD:
         case Program::ISUB:
         case Program::IMUL:
@@ -1288,8 +1303,6 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
           break;
         case Program::DYN_SET:
         case Program::DYN_LSE_RANGE:
-        case Program::IMOD:
-        case Program::IDIV:
         case Program::EXTREMA_RANGE:
         case Program::JZ:
         case Program::JMP:

@@ -498,7 +498,6 @@ bool sink_program_fills(Program& p) {
     has_fill = has_fill || I.code == Program::FILL;
     if (program_code_spec(I.code).has(kProgramNoAdjoint) &&
         I.code != Program::JZ && I.code != Program::JMP &&
-        I.code != Program::IMOD && I.code != Program::IDIV &&
         I.code != Program::DYN_SET && I.code != Program::DYN_LSE_RANGE &&
         I.code != Program::PRINT && I.code != Program::REJECT)
       return false;
@@ -629,8 +628,7 @@ bool program_initializes_reads(const Program& p,
     // The proof is only as strong as the interpreter spans above. Keep
     // unmodelled operations out; new opcodes need a span audit before reuse.
     if (program_spec_of(I).has(kProgramNoAdjoint) && I.code != Program::JZ &&
-        I.code != Program::JMP && I.code != Program::IMOD &&
-        I.code != Program::IDIV && I.code != Program::DYN_SET &&
+        I.code != Program::JMP && I.code != Program::DYN_SET &&
         I.code != Program::DYN_LSE_RANGE && I.code != Program::PRINT &&
         I.code != Program::REJECT)
       return false;
