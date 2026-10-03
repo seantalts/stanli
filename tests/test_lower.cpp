@@ -1925,6 +1925,34 @@ void test_large_body_recomputes_by_default() {
         "a small body keeps saving");
 }
 
+void test_clear_strategy_follows_mode() {
+  using stanli::Program;
+  const auto clears = [](const stanli::RegionMapProg& p) {
+    return std::count_if(
+        p.adj.code.begin(), p.adj.code.end(), [](const stanli::AdjInstr& i) {
+          return i.code == Program::CONST || i.code == Program::LT ||
+                 i.code == Program::GT;
+        });
+  };
+  CompiledModel small = compile_with("region_map_branch", 64);
+  CompiledModel forced =
+      compile_with("region_map_branch", 64, "STANLI_REGION_MAP_SAVE_LIMIT");
+  CompiledModel big = compile_with("region_map_long_body", 32);
+  const auto& s = map_payload(small);
+  const auto& f = map_payload(forced);
+  const auto& b = map_payload(big);
+  check(!s.recompute && !s.transient.empty(),
+        "save mode clears the transient adjoint spans per observation");
+  check(f.recompute && f.transient.empty(),
+        "recompute mode has no per-observation clear list");
+  check(b.recompute && b.transient.empty(),
+        "a large body has no per-observation clear list");
+  check(clears(f) > clears(s),
+        "recompute mode keeps clears that save mode elides (" +
+            std::to_string(clears(f)) + " vs " + std::to_string(clears(s)) +
+            ")");
+}
+
 struct CleanFixture {
   const char* stem;
   int n;
@@ -1995,6 +2023,7 @@ static void test_region_map() {
   test_logic_points();
   test_logic_compiles_to_jumps();
   test_large_body_recomputes_by_default();
+  test_clear_strategy_follows_mode();
   test_clean_sweep();
 }
 

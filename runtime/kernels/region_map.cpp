@@ -119,7 +119,8 @@ void sweep(const RegionMapProg& p, KernelCtx& ctx, double* adj) {
   const int64_t target = p.adj.adj_reg[(size_t)p.out_regs[0]];
   const double* saved = ctx.scratch + p.n_regs + p.adj.n_regs;
   std::vector<char> exempt;
-  const bool verify = std::getenv("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
+  const bool verify =
+      p.recompute && std::getenv("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
   if (verify) exempt = clean_exempt_cells(p);
   for (int64_t i = p.count; i-- > 0;) {
     ctx.scratch[p.iter_reg] = static_cast<double>(p.lo + i);
@@ -132,6 +133,8 @@ void sweep(const RegionMapProg& p, KernelCtx& ctx, double* adj) {
         row += span.second;
       }
     }
+    for (const auto& span : p.transient)
+      std::fill_n(adj + span.first, span.second, 0.0);
     adj[target] += seed;
     run_adjoint(p, p.adj, ctx.scratch, adj);
     if (verify) expect_clean_sweep(exempt, adj, p.lo + i);
