@@ -1,6 +1,10 @@
 # OP_REGION_MAP Phase 2: run each instruction over many observations
 
-Status: revised after Codex review (2026-10-02). Builds on
+Status: implemented on `feat/region-map`; results in
+[cogmod sampling](../performance/2026-10-03-cogmod-sampling.md). Lane
+gradients are bitwise equal to the scalar map: each shared-cell addition is
+logged per lane and replayed in scalar order after the tile. Revised after
+Codex review (2026-10-02). Builds on
 [OP_REGION_MAP](2026-10-02-region-map-spec.md).
 
 ## Why

@@ -1,8 +1,9 @@
 # Structured-loop replay that survives branch flips, then batched execution
 
-Status: Phase 1 superseded by [OP_REGION_MAP](2026-10-02-region-map-spec.md)
-after measuring the region program's own cost. Phase 2 will be redesigned on
-top of it. #423 must not ship in a release before Phase 1 lands. Scope: `OP_LOOP` only (`runtime/src/structured_loop.cpp`,
+Status: superseded by [OP_REGION_MAP](2026-10-02-region-map-spec.md) and its
+[lane batching](2026-10-02-region-map-lanes.md); results in
+[cogmod sampling](../performance/2026-10-03-cogmod-sampling.md). #423 must not
+ship in a release without them. Scope: `OP_LOOP` only (`runtime/src/structured_loop.cpp`,
 `runtime/src/structured_frames.inc`, `runtime/src/structured_recording.inc`). No
 change to graph lowering, regions, or other ops.
 

@@ -1,6 +1,8 @@
 # OP_REGION_MAP: one compiled body, run once per observation
 
-Status: spec for implementation, revised after Codex review (2026-10-02).
+Status: implemented on `feat/region-map`, with lane batching on top
+([design](2026-10-02-region-map-lanes.md), [results](../performance/2026-10-03-cogmod-sampling.md)).
+Revised after Codex review (2026-10-02).
 Replaces Phase 1 of [the replay plan](2026-10-02-loop-replay-regrouping-plan.md).
 
 ## Why this instead of repairing frames
