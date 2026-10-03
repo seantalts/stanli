@@ -77,3 +77,4 @@ tests/rethinking/*.hpp
 
 # Keep exploratory benchmark artifacts local; publish their summaries in docs/.
 /output/teaching-performance/followup-*/
+tests/cogmod/*.hpp
