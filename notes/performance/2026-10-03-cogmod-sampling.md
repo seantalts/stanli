@@ -82,3 +82,29 @@ gradient is small):
 Memory: lanes keep every tile's forward state. lnr_bench peaks at 138 MB
 resident with lanes, 84 MB without the map, 50 MB with the scalar map
 recomputing. gamma peaks at 20 MB.
+
+## After constant folding, copy propagation and lane masks
+
+Folding `break` out of stanc-inlined UDFs under runtime control (lnr_bench's
+body 3227 to 253 instructions), forward copy propagation in region programs,
+and recording lane masks in place of path flags. Same method and trajectory:
+
+| family | before | after | CmdStan |
+| --- | ---: | ---: | ---: |
+| gamma | 146 us | 138 us | 197 us |
+| weibull | 141 us | 124 us | 193 us |
+| exgaussian | 285 us | 270 us | 412 us |
+| geg | 510 us | 485 us | 639 us |
+| loggamma | 352 us | 313 us | 454 us |
+| choco | 743 us | 666 us | 812 us |
+| betagate | 675 us | 655 us | 597 us |
+| lognormal | 637 us | 551 us | 755 us |
+| exwald | 929 us | 693 us | 1586 us |
+| lba1 | 776 us | 707 us | 906 us |
+| lba2 | 1381 us | 1241 us | 1423 us |
+| rdm | 2294 us | 1698 us | 2425 us |
+| lnr_bench | 1937 us | 1216 us | 1265 us |
+| lnr | 2636 us | 1977 us | 2269 us |
+
+The reporter's select rewrite of lnr_bench runs at 640 us on the earlier
+build.
