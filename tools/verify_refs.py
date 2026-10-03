@@ -50,10 +50,12 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # suite (tests/stanc3/README.md), brms output for the families and effect
 # structures posteriordb does not contain (tests/brms/README.md), and
 # cogmod's custom brms families for parameter-dependent density branches
-# (tests/cogmod/README.md). They go through the same oracle as posteriordb,
+# (tests/cogmod/README.md), and ctsem's generic state-space template
+# (tests/ctsem/README.md). They go through the same oracle as posteriordb,
 # and a reference is keyed on the file name either way.
 LOCAL_CORPORA = (REPO / "tests" / "stanc3", REPO / "tests" / "brms",
-                REPO / "tests" / "rethinking", REPO / "tests" / "cogmod")
+                REPO / "tests" / "rethinking", REPO / "tests" / "cogmod",
+                REPO / "tests" / "ctsem")
 N_SAMPLER_COLS = 7
 REFS_PATH = REPO / "docs" / "internal" / "artifacts" / "corpus-refs.json.gz"
 # The reference file's format. Bumping this is a hard break on purpose:
