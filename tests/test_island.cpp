@@ -2809,7 +2809,7 @@ static void test_input_windows() {
           expect_exact("window gradient", gradient[i], want[i]);
       }
       Program unmodelled = *p;
-      unmodelled.code.push_back({Program::DYN_INDEX, 19, 0, 16, 0, 8});
+      unmodelled.code.push_back({Program::DYN_SET, 19, 0, 16, 0, 8});
       expect("window refuses unmodelled spans",
              used_program_inputs(unmodelled, ranges) == ranges);
     }

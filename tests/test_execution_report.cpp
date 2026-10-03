@@ -164,7 +164,7 @@ int main() {
   }
   // One registry entry supplies ordinary graph calls, retained-loop calls,
   // and register CALL instructions without a model-level MIR fallback.
-  for (int mode : {0, 1, 2, 3}) {
+  for (int mode : {0, 1, 2, 3, 4}) {
     auto inputs =
         DataMap::from_json(slurp("tests/fixtures/hypergeometric_1f0.json"));
     if (mode == 0) {
@@ -173,15 +173,19 @@ int main() {
     }
     if (mode == 1) test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
     if (mode == 2) test_setenv("STANLI_BOUNDED_SPECIALIZATION", "0", 1);
+    if (mode == 2 || mode == 4) test_setenv("STANLI_REGION_MAP", "0", 1);
     auto cm = compile_model(
         slurp("tests/fixtures/hypergeometric_1f0.tmir.sexp"), inputs);
     if (mode == 1) test_unsetenv("STANLI_STRUCTURED_LOOPS");
     if (mode == 2) test_unsetenv("STANLI_BOUNDED_SPECIALIZATION");
+    if (mode == 2 || mode == 4) test_unsetenv("STANLI_REGION_MAP");
     const auto selected = execution_report(cm);
     check(has(selected, "OP_HYPERGEOMETRIC_1F0"),
           "hypergeometric shared kernel is visible");
-    check(has(selected, "structured_loop") == (mode == 2 || mode == 3),
+    check(has(selected, "structured_loop") == (mode == 2 || mode == 4),
           "hypergeometric retained-loop selection");
+    check(has(selected, "OP_REGION_MAP") == (mode == 1 || mode == 3),
+          "hypergeometric region map selection");
     if (mode == 1)
       check(has(selected, "register_program"),
             "hypergeometric runtime register CALL selection");

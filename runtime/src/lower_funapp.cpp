@@ -397,6 +397,108 @@ Lowering::Val Lowering::free_transform(uint16_t opcode,
       return elt(OP_DIV, elt(OP_SUB, a[0], a[1]), a[2]);
   }
 }
+namespace {
+
+bool contains_return(const mir::Stmt& s) {
+  if (s.kind == mir::Stmt::Return) return true;
+  for (const auto& child : s.body)
+    if (contains_return(child)) return true;
+  return false;
+}
+
+bool return_in_loop(const mir::Stmt& s, bool in_loop) {
+  if (s.kind == mir::Stmt::Return) return in_loop;
+  const bool loop =
+      in_loop || s.kind == mir::Stmt::For || s.kind == mir::Stmt::While;
+  for (const auto& child : s.body)
+    if (return_in_loop(child, loop)) return true;
+  return false;
+}
+
+bool non_tail_return(const mir::Stmt& s, bool tail);
+
+bool non_tail_return(const std::vector<mir::Stmt>& body, bool tail) {
+  for (size_t i = 0; i < body.size(); ++i)
+    if (non_tail_return(body[i], tail && i + 1 == body.size())) return true;
+  return false;
+}
+
+bool non_tail_return(const mir::Stmt& s, bool tail) {
+  switch (s.kind) {
+    case mir::Stmt::Return:
+      return !tail;
+    case mir::Stmt::Block:
+    case mir::Stmt::SList:
+      return non_tail_return(s.body, tail);
+    case mir::Stmt::IfElse:
+      if (!tail || s.body.size() < 2) return contains_return(s);
+      for (const auto& arm : s.body)
+        if (non_tail_return(arm, true)) return true;
+      return false;
+    default:
+      return contains_return(s);
+  }
+}
+
+mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result) {
+  if (s.kind != mir::Stmt::Return) {
+    mir::Stmt out = s;
+    for (auto& child : out.body) child = returns_to_breaks(child, result);
+    return out;
+  }
+  mir::Stmt block;
+  block.kind = mir::Stmt::Block;
+  if (s.has_init) {
+    mir::Stmt assign;
+    assign.kind = mir::Stmt::Assignment;
+    assign.lhs = result;
+    assign.rhs = s.rhs;
+    block.body.push_back(std::move(assign));
+  }
+  mir::Stmt exit;
+  exit.kind = mir::Stmt::Break;
+  block.body.push_back(std::move(exit));
+  return block;
+}
+
+// stanc's inliner form: one pass of a loop, each return an assignment and a
+// break, then one return of the result.
+std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
+                                        const mir::Expr& call) {
+  const std::string result = "__stanli_" + f.name + "_result";
+  mir::Stmt decl;
+  decl.kind = mir::Stmt::Decl;
+  decl.decl_id = result;
+  decl.decl_type.base = call.type_ == "UInt" ? "SInt" : "SReal";
+  mir::Expr one;
+  one.kind = mir::Expr::LitInt;
+  one.lit_i = 1;
+  one.type_ = "UInt";
+  one.data_only = true;
+  mir::Stmt pass;
+  pass.kind = mir::Stmt::For;
+  pass.loopvar = "__stanli_" + f.name + "_pass";
+  pass.lower = one;
+  pass.upper = one;
+  mir::Stmt body;
+  body.kind = mir::Stmt::Block;
+  for (const auto& st : f.body)
+    body.body.push_back(returns_to_breaks(st, result));
+  pass.body.push_back(std::move(body));
+  mir::Expr value;
+  value.kind = mir::Expr::Var;
+  value.name = result;
+  value.type_ = call.type_;
+  value.unsized = call.unsized;
+  mir::Stmt ret;
+  ret.kind = mir::Stmt::Return;
+  ret.has_init = true;
+  ret.rhs = std::move(value);
+  return {std::move(decl), std::move(pass), std::move(ret)};
+}
+
+}  // namespace
+
 // Inline a user-defined function at its call site: arguments are lowered
 // in the caller's scope, bound under the parameter names in a shadowed
 // scope, and the body lowers like any other statements (loops unroll,
@@ -505,8 +607,21 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
                                binds[i].v.autodiff, binds[i].v.si};
       }
     }
+    const std::vector<mir::Stmt>* body = &f.body;
+    if ((e.type_ == "UReal" || e.type_ == "UInt") && e.unsized.depth == 0 &&
+        non_tail_return(f.body, true)) {
+      bool looped = false;
+      for (const auto& st : f.body)
+        looped = looped || return_in_loop(st, false);
+      if (!looped) {
+        auto rewritten =
+            std::make_shared<std::vector<mir::Stmt>>(single_exit_body(f, e));
+        g.udata_pool.push_back(rewritten);
+        body = rewritten.get();
+      }
+    }
     // CmdStan passes the CALLER's propto__ value into a user density.
-    for (const auto& st : f.body) lower_stmt(st);
+    for (const auto& st : *body) lower_stmt(st);
   } catch (LpReturn& r) {
     ret = r.v;
     returned = true;
@@ -519,6 +634,32 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   if (!returned) fail(e.name + ": no return value on the executed path");
   ret.layout = owning_layout(ret.si);
   return ret;
+}
+// wiener_lpdf's five- and seven-parameter forms, each with an optional
+// precision. The real arguments are all scalars or all vectors of one length.
+Lowering::Val Lowering::lower_wiener_packed(const mir::Expr& e,
+                                            CallArguments& actuals) {
+  const int total = (int)e.args.size();
+  const int nargs = total == 6 || total == 8 ? total : total - 1;
+  std::vector<Val> args;
+  for (int k = 0; k < nargs; ++k) args.push_back(actuals.at(k).value());
+  int64_t lanes = 1;
+  for (const Val& v : args) lanes = std::max(lanes, g.slots[v.slot].len);
+  int active = 0;
+  for (int k = 0; k < nargs; ++k) {
+    if (g.slots[args[k].slot].len != lanes)
+      fail("wiener_lpdf: arguments differ in length", e.raw);
+    if (!args[k].si.param_free) active |= 1 << k;
+  }
+  Val packed = args[0];
+  for (int k = 1; k < nargs; ++k)
+    packed = emit_value(OP_CONCAT2, {packed, args[k]}, (k + 1) * lanes);
+  const Val precision =
+      nargs < total ? actuals.at(nargs).value() : constant(1e-4);
+  return with_layout(
+      emit_value(OP_WIENER_PACKED_LPDF, {packed, precision}, 1, {},
+                 {nargs, (int)lanes, active, propto(e) ? 1 : 0}),
+      ExpressionLayout::scalar());
 }
 Lowering::Val Lowering::lower_multi_normal_rng(const mir::Expr& e,
                                                CallArguments& actuals) {
@@ -934,6 +1075,8 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
   // state at all.
   CallArguments actuals(*this, e);
   if (e.name == "dims") return lower_dims(e, actuals);
+  if (e.name == "wiener_lpdf" && e.args.size() > 5)
+    return lower_wiener_packed(e, actuals);
   const BuiltinDispatch dispatch = resolve_builtin(e);
 
   // One family decision replaces the former chain of optional handlers.

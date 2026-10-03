@@ -188,6 +188,7 @@ struct ProgramCompiler {
     std::vector<int> breaks;
     std::vector<int> continues;
     bool structured = false;
+    int branch_depth = 0;
   };
   std::vector<LoopFrame> loops;
   // A name that is neither a local nor a compile-time integer. The ODE
@@ -1952,27 +1953,20 @@ struct ProgramCompiler {
       case mir::Expr::EAnd: {
         const Range a = expr(e.args[0]);
         if (!is_scalar(a)) bail("logical operator on a container");
-        const int z = konst(0.0), ta = alloc(1), r = alloc(1);
-        emit(Program::NE, ta, a.reg, z);
-        emit(Program::MOV, r, ta);
+        const int r = alloc(1);
+        logical_value(r, a.reg, e.args[0]);
 
-        // The result starts as the normalized left operand. AND is already
-        // final when that value is false; OR is final when it is true. Only
-        // the other case enters the right operand, preserving Stan's
-        // short-circuit evaluation and any domain errors or effects there.
         int done = -1;
         if (e.kind == mir::Expr::EOr) {
-          const int rhs = emit(Program::JZ, 0, ta);
+          const int rhs = emit(Program::JZ, 0, r);
           done = emit(Program::JMP, 0);
           p.code[(size_t)rhs].dst = (int)p.code.size();
         } else {
-          done = emit(Program::JZ, 0, ta);
+          done = emit(Program::JZ, 0, r);
         }
         const Range b = expr(e.args[1]);
         if (!is_scalar(b)) bail("logical operator on a container");
-        const int tb = alloc(1);
-        emit(Program::NE, tb, b.reg, z);
-        emit(Program::MOV, r, tb);
+        logical_value(r, b.reg, e.args[1]);
         p.code[(size_t)done].dst = (int)p.code.size();
         return {r, 1};
       }
@@ -1983,18 +1977,80 @@ struct ProgramCompiler {
     }
   }
 
+  void patch_jumps(const std::vector<int>& jumps) {
+    for (int jump : jumps) p.code[(size_t)jump].dst = (int)p.code.size();
+  }
+
+  static bool is_logical_not(const mir::Expr& e) {
+    return e.kind == mir::Expr::FunApp && e.args.size() == 1 &&
+           (e.name == "PNot__" || e.name == "logical_negation");
+  }
+
+  static bool is_zero_or_one(const mir::Expr& e) {
+    if (e.kind == mir::Expr::EAnd || e.kind == mir::Expr::EOr) return true;
+    if (e.kind != mir::Expr::FunApp || e.args.empty() || e.args.size() > 2)
+      return false;
+    const BuiltinSpec* spec = shaped_builtin_spec(
+        e.name, e.args.size(), BuiltinShapePolicy::Predicate);
+    return spec != nullptr && spec->predicate != BuiltinPredicate::None;
+  }
+
+  void logical_value(int dst, int src, const mir::Expr& operand) {
+    if (is_zero_or_one(operand))
+      emit(Program::MOV, dst, src);
+    else
+      emit(Program::NE, dst, src, konst(0.0));
+  }
+
+  // Emits control flow for a condition. Execution falls through when the
+  // condition's truth differs from `jump_when` and otherwise leaves through
+  // one of the jumps appended to `targets`, which the caller patches.
+  void cond_jump(const mir::Expr& e, bool jump_when,
+                 std::vector<int>* targets) {
+    long folded;
+    if (try_cint(e, &folded)) {
+      if ((folded != 0) == jump_when) targets->push_back(emit(Program::JMP, 0));
+      return;
+    }
+    if ((e.kind == mir::Expr::EAnd || e.kind == mir::Expr::EOr) &&
+        e.args.size() == 2) {
+      if ((e.kind == mir::Expr::EAnd) != jump_when) {
+        cond_jump(e.args[0], jump_when, targets);
+        cond_jump(e.args[1], jump_when, targets);
+      } else {
+        std::vector<int> decided;
+        cond_jump(e.args[0], !jump_when, &decided);
+        cond_jump(e.args[1], jump_when, targets);
+        patch_jumps(decided);
+      }
+      return;
+    }
+    if (is_logical_not(e)) {
+      cond_jump(e.args[0], !jump_when, targets);
+      return;
+    }
+    const Range v = expr(e);
+    if (!is_scalar(v)) bail("branch on a container");
+    const int test = emit(Program::JZ, 0, v.reg);
+    if (!jump_when) {
+      targets->push_back(test);
+      return;
+    }
+    targets->push_back(emit(Program::JMP, 0));
+    p.code[(size_t)test].dst = (int)p.code.size();
+  }
+
   // A ternary on a runtime condition: both arms write the same registers.
   Range branchy_select(const mir::Expr& c, const mir::Expr& a,
                        const mir::Expr& b) {
-    const Range cv = expr(c);
-    if (!is_scalar(cv)) bail("conditional on a container");
+    std::vector<int> to_else;
+    cond_jump(c, false, &to_else);
     // Compile the arms first to learn the width, then re-emit into place.
-    const int jz = emit(Program::JZ, 0, cv.reg);
     const Range av = expr(a);
     const int dst = alloc(av.len);
     for (int k = 0; k < av.len; ++k) emit(Program::MOV, dst + k, av.reg + k);
     const int jmp = emit(Program::JMP, 0);
-    p.code[(size_t)jz].dst = (int)p.code.size();
+    patch_jumps(to_else);
     const Range bv = expr(b);
     if (bv.len != av.len) bail("conditional arms of different widths");
     if (av.kind == ViewKind::Array || bv.kind == ViewKind::Array)
@@ -3231,6 +3287,30 @@ struct ProgramCompiler {
         return native_builtin_call(e, *builtin, *native);
       return builtin_kernel_call(e, *builtin);
     }
+    if (e.name == "wiener_lpdf" && e.args.size() > 5) {
+      const int total = (int)e.args.size();
+      const int nargs = total == 6 || total == 8 ? total : total - 1;
+      std::vector<Range> args;
+      for (int k = 0; k < nargs; ++k) args.push_back(expr(e.args[k]));
+      int lanes = 1;
+      for (const Range& a : args) lanes = std::max(lanes, a.len);
+      int active = 0;
+      for (int k = 0; k < nargs; ++k) {
+        if (args[k].len != lanes)
+          bail("wiener_lpdf: arguments differ in length");
+        if (!e.args[k].data_only) active |= 1 << k;
+      }
+      const int packed = alloc(nargs * lanes);
+      for (int k = 0; k < nargs; ++k)
+        for (int i = 0; i < lanes; ++i)
+          emit(Program::MOV, packed + k * lanes + i, args[k].reg + i);
+      const Range precision =
+          nargs < total ? expr(e.args[nargs]) : Range{konst(1e-4), 1};
+      return kernel_call(
+          OP_WIENER_PACKED_LPDF, {Range{packed, nargs * lanes}, precision},
+          Range{0, 1}, 0, active ? 0x1 : 0,
+          {nargs, lanes, active, e.fn_propto ? 1 : 0}, {}, e.name);
+    }
     if (registered != nullptr && registered->density() != nullptr)
       return density_call(e, *registered->density());
     if (e.name == "tcrossprod" && e.args.size() == 1)
@@ -3866,6 +3946,27 @@ struct ProgramCompiler {
       check_program_integer_contract(*frame->body, funs, visited);
   }
 
+  void compile_loop_body(const mir::Stmt& loop, int index) {
+    known_reals.erase(loop.loopvar);
+    require_runtime_integer_contract();
+    ints.erase(loop.loopvar);
+    reals[loop.loopvar] = Range{index, 1};
+    loops.push_back({});
+    loops.back().structured = true;
+    structured_while_seen = true;
+    ++structured_while_depth;
+    ++runtime_for_depth;
+    try {
+      for (const auto& child : loop.body) stmt(child);
+    } catch (PathExit&) {
+    }
+    --runtime_for_depth;
+    --structured_while_depth;
+    loops.pop_back();
+    reals.erase(loop.loopvar);
+    int_decl_at.erase(loop.loopvar);
+  }
+
   void emit_function_return(Range value) {
     if (!return_frame) bail("runtime return has no function scope");
     auto& frame = *return_frame;
@@ -3998,6 +4099,7 @@ struct ProgramCompiler {
         // the next, and the later assignment must not see the old binding.
         reals.erase(s.decl_id);
         ints.erase(s.decl_id);
+        known_reals.erase(s.decl_id);
         deferred_shapes.erase(s.decl_id);
         known_int_arrays.erase(s.decl_id);
         known_int_array_dims.erase(s.decl_id);
@@ -4492,19 +4594,22 @@ struct ProgramCompiler {
       }
       case mir::Stmt::Break:
         if (loops.empty()) bail("break outside a loop");
-        if (branch_depth || loops.back().structured) {
+        if (branch_depth > loops.back().branch_depth ||
+            loops.back().structured) {
           loops.back().breaks.push_back(emit(Program::JMP, 0));
           return;
         }
         throw CompileBreak{};
       case mir::Stmt::Continue:
         if (loops.empty()) bail("continue outside a loop");
-        if (branch_depth || loops.back().structured) {
+        if (branch_depth > loops.back().branch_depth ||
+            loops.back().structured) {
           loops.back().continues.push_back(emit(Program::JMP, 0));
           return;
         }
         throw CompileContinue{};
       case mir::Stmt::For: {
+        known_reals.erase(s.loopvar);
         long lo, hi;
         std::set<std::string> written;
         for (const auto& child : s.body) assigned_names(child, &written);
@@ -4566,6 +4671,7 @@ struct ProgramCompiler {
           return;
         }
         loops.push_back({});
+        loops.back().branch_depth = branch_depth;
         bool broken = false;
         bool returned = false;
         for (int64_t v = lo; v <= hi; ++v) {
@@ -4610,9 +4716,8 @@ struct ProgramCompiler {
         for (const std::string& name : written) reify_loop_write(name);
 
         const int head = (int)p.code.size();
-        const Range cv = expr(s.cond);
-        if (!is_scalar(cv)) bail("while condition on a container");
-        const int exit = emit(Program::JZ, 0, cv.reg);
+        std::vector<int> exits;
+        cond_jump(s.cond, false, &exits);
         loops.push_back({});
         loops.back().structured = true;
         structured_while_seen = true;
@@ -4626,7 +4731,7 @@ struct ProgramCompiler {
         --structured_while_depth;
         for (int jump : loops.back().continues) p.code[(size_t)jump].dst = head;
         if (!body_returned) emit(Program::JMP, head);
-        p.code[(size_t)exit].dst = (int)p.code.size();
+        patch_jumps(exits);
         for (int jump : loops.back().breaks)
           p.code[(size_t)jump].dst = (int)p.code.size();
         loops.pop_back();
@@ -4639,10 +4744,9 @@ struct ProgramCompiler {
           if (c == 0 && s.body.size() > 1) stmt(s.body[1]);
           return;
         }
-        const Range cv = expr(s.cond);
-        if (!is_scalar(cv)) bail("branch on a container");
+        std::vector<int> to_else;
+        cond_jump(s.cond, false, &to_else);
         ++branch_depth;
-        const int jz = emit(Program::JZ, 0, cv.reg);
         bool then_exits = false, else_exits = false;
         try {
           if (!s.body.empty()) stmt(s.body[0]);
@@ -4651,7 +4755,7 @@ struct ProgramCompiler {
         }
         if (s.body.size() > 1) {
           const int jmp = then_exits ? -1 : emit(Program::JMP, 0);
-          p.code[(size_t)jz].dst = (int)p.code.size();
+          patch_jumps(to_else);
           try {
             stmt(s.body[1]);
           } catch (PathExit&) {
@@ -4659,7 +4763,7 @@ struct ProgramCompiler {
           }
           if (jmp >= 0) p.code[(size_t)jmp].dst = (int)p.code.size();
         } else {
-          p.code[(size_t)jz].dst = (int)p.code.size();
+          patch_jumps(to_else);
         }
         --branch_depth;
         if (then_exits && else_exits) throw PathExit{};

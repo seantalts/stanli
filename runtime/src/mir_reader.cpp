@@ -136,12 +136,12 @@ void validate_funapp_arity(const Expr& e) {
     return;
   }
 
-  // The language has both the original five-parameter Wiener density and
-  // its seven-parameter extension. The current execution kernels implement
-  // only the five-argument form, but decoding must preserve either valid MIR
-  // shape so the normal unsupported-function path can report that boundary.
+  // The original four-parameter Wiener density, and the five- and
+  // seven-parameter forms, each with an optional precision argument.
   if (e.name == "wiener_lpdf") {
-    require_arity(e, 5, 7);
+    if (e.args.size() < 5 || e.args.size() > 9)
+      malformed(e.name + " call: expected 5 to 9 argument(s), got " +
+                std::to_string(e.args.size()));
     return;
   }
 

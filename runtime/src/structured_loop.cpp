@@ -155,7 +155,7 @@ void prepare_node(StructuredLoop& p, Node& n, unsigned depth,
       if (op.opcode == OP_SET_INDEX_INPLACE ||
           op.opcode == OP_SET_SLICE_INPLACE ||
           op.opcode == OP_SET_SLICE_STRIDED_INPLACE || op.opcode == OP_ISLAND ||
-          op.opcode == OP_LOOP)
+          op.opcode == OP_LOOP || op.opcode == OP_REGION_MAP)
         throw std::invalid_argument("unsupported structured body operation");
       if (out_seen[op.out] || (op.out2 >= 0 && out_seen[op.out2]) ||
           op.out2 == op.out)

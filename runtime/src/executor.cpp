@@ -272,6 +272,7 @@ void register_mixture_kernels();
 void register_message_kernels();
 void register_rng_kernel();
 void register_island_kernel();
+void register_region_map_kernel();
 void register_structured_loop_kernel();
 void register_reduce_sum_kernel();
 
@@ -295,6 +296,7 @@ static void ensure_registered() {
     register_scalar_unary_ad_kernels();
     register_mixture_kernels();
     register_island_kernel();
+    register_region_map_kernel();
     register_structured_loop_kernel();
     register_reduce_sum_kernel();
     return true;

@@ -110,5 +110,29 @@
     "bound_ulp": -1,
     "cause": "OPEN BUG, not yet root-caused -- see default/no_ode_direct_rk on this same fixture and quantity.",
     "since": "2026-09-03"
+  },
+  {
+    "model": "region_map_data_control",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "the 64 per-iteration target terms of a data-controlled loop are summed in a different grouping with and without STANLI_NO_REROLL, so the total differs in the last bits. The loop is refused by the region map (control is data-only), so this is the rerolled graph's own regrouping, surfaced by this fixture.",
+    "since": "2026-10-02"
+  },
+  {
+    "model": "region_map_hurdle_data",
+    "quantity": "grad[1]",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "the 64 per-iteration gradient contributions of a loop whose UDF branches on data are accumulated in a different grouping with and without STANLI_NO_REROLL. The region map refuses the loop (the branch is data-only), so this is the rerolled graph's own regrouping, surfaced by this fixture.",
+    "since": "2026-10-03"
+  },
+  {
+    "model": "region_map_multi",
+    "quantity": "lp",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 10,
+    "cause": "the default path runs the loop as one OP_REGION_MAP and sums the per-iteration subtotals in iteration order; STANLI_NO_NATIVE_ADJ refuses the map (it needs the generated adjoint), so the loop keeps its per-iteration regions and its running-target fold, which groups the terms differently.",
+    "since": "2026-10-02"
   }
 ]

@@ -77,6 +77,7 @@ namespace stanli {
   X(OP_ORDERED_PROBIT_LPMF)           \
   X(OP_ORDERED_LOGISTIC_LPMF)         \
   X(OP_WIENER_LPDF)                   \
+  X(OP_WIENER_PACKED_LPDF)            \
   X(OP_LKJ_COV_LPDF)                  \
   X(OP_BINOMIAL_LOGIT_GLM_LPMF)       \
   X(OP_CATEGORICAL_LOGIT_GLM_LPMF)    \
@@ -90,6 +91,7 @@ namespace stanli {
   X(OP_ISLAND)                        \
   X(OP_LOOP)                          \
   X(OP_REDUCE_SUM)                    \
+  X(OP_REGION_MAP)                    \
   X(OP_COMPARE)                       \
   X(OP_INT_ARITH)                     \
   X(OP_REP_VEC_DYNAMIC)               \
@@ -943,6 +945,7 @@ constexpr bool is_effectful_op(uint16_t opcode) {
     case OP_REJECT:
     case OP_LOOP:
     case OP_REDUCE_SUM:
+    case OP_REGION_MAP:
       return true;
     default:
       return false;

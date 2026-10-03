@@ -104,6 +104,8 @@ constexpr uint8_t kIslandCallVariant = 2;
 
 void island_calls_fwd(KernelCtx& ctx);
 
+bool continue_input_adjoints(const IslandProg& p, const KernelCtx& ctx);
+
 // True when the region's program has an observable effect: a draw from the
 // caller's stream, a print, or a reject. A pass that reasons about purity has
 // to leave such a region alone even when every one of its inputs is data.
@@ -125,7 +127,7 @@ bool compact_island_gated(IslandProg& p, bool enable_destination_forwarding);
 
 // Generate p.adj, appending checkpoint saves to p's forward code. False
 // leaves p untouched and keeps the replay.
-bool gen_adjoint(IslandProg& p);
+bool gen_adjoint(IslandProg& p, bool keep_every_clear = false);
 
 // After gen_adjoint has captured the original forward program, return a
 // double-only clone that replaces sufficiently common SOFTMAX(3) instructions

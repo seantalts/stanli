@@ -327,6 +327,8 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/message.cpp
   runtime/kernels/rng.cpp
   runtime/kernels/island.cpp
+  runtime/kernels/region_map.cpp
+  runtime/kernels/region_map_lanes.cpp
   runtime/src/island.cpp
   runtime/src/adjoint.cpp
   runtime/src/builtin_registry.cpp
@@ -344,6 +346,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/lower.cpp
   runtime/src/lower_expr.cpp
   runtime/src/lower_stmt.cpp
+  runtime/src/lower_region_map.cpp
   runtime/src/lower_funapp.cpp
   runtime/src/lower_higher_order.cpp
   runtime/src/structured_loop.cpp
@@ -861,6 +864,34 @@ add_test(NAME test_check_external_stanc
                  -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/check_external_stanc
                  -DSTANC=${STANLI_STANC_EXECUTABLE}
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_external_stanc.cmake)
+file(GLOB STANLI_COGMOD_SOURCES
+     "${CMAKE_CURRENT_SOURCE_DIR}/tests/cogmod/cm_*.stan")
+foreach(_stanli_cogmod_source IN LISTS STANLI_COGMOD_SOURCES)
+  get_filename_component(_stanli_cogmod "${_stanli_cogmod_source}" NAME_WE)
+  add_test(NAME test_region_map_clean_${_stanli_cogmod}
+           COMMAND stanli_check tests/cogmod/${_stanli_cogmod}.stan
+                   tests/cogmod/${_stanli_cogmod}.json --sweep 12
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(
+    test_region_map_clean_${_stanli_cogmod} PROPERTIES
+    ENVIRONMENT
+      "STANLI_REGION_MAP_CHECK_CLEAN=1;STANLI_REGION_MAP_SAVE_LIMIT=0"
+    PASS_REGULAR_EXPRESSION "OK "
+    FAIL_REGULAR_EXPRESSION "EVAL_FAIL")
+  foreach(_stanli_tile_cells IN ITEMS 1000000000 0)
+    add_test(NAME test_region_map_lane_clean_${_stanli_tile_cells}_${_stanli_cogmod}
+             COMMAND stanli_check tests/cogmod/${_stanli_cogmod}.stan
+                     tests/cogmod/${_stanli_cogmod}.json --sweep 12
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(
+      test_region_map_lane_clean_${_stanli_tile_cells}_${_stanli_cogmod}
+      PROPERTIES
+      ENVIRONMENT
+        "STANLI_REGION_MAP_CHECK_CLEAN=1;STANLI_REGION_MAP_TILE_CELLS=${_stanli_tile_cells}"
+      PASS_REGULAR_EXPRESSION "OK "
+      FAIL_REGULAR_EXPRESSION "EVAL_FAIL")
+  endforeach()
+endforeach()
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 add_executable(test_benchmark_timer tests/test_benchmark_timer.cpp)
@@ -1221,6 +1252,10 @@ foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()
 set_tests_properties(test_ode_prog PROPERTIES TIMEOUT 180)
+target_link_libraries(test_lower PRIVATE stanli_stanc_process)
+target_include_directories(test_lower PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(test_lower PRIVATE
+  STANLI_TEST_STANC="${STANLI_STANC_EXECUTABLE}")
 
 # The C ABI lives only in the shared library. Test it through that shipped
 # boundary rather than compiling capi.cpp into the C++ unit-test library.

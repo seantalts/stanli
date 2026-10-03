@@ -594,6 +594,16 @@ static void test_private_adjoint_clears() {
              c.p.adj.code.begin(), c.p.adj.code.end(), [](const AdjInstr& i) {
                return i.code == Program::CONST || i.code == Program::LT;
              }));
+  auto kept = b.done({result}, {1.7});
+  expect("kept clear generation", gen_adjoint(kept.p, true));
+  const auto count_clears = [](const IslandProg& p) {
+    return std::count_if(
+        p.adj.code.begin(), p.adj.code.end(), [](const AdjInstr& i) {
+          return i.code == Program::CONST || i.code == Program::LT;
+        });
+  };
+  expect("every constant and comparison keeps its clear",
+         count_clears(kept.p) == 2 && count_clears(c.p) == 0);
 }
 
 // Forward-only branches must preserve executed paths, overwritten values,
@@ -802,12 +812,43 @@ static void test_binary_ops() {
 static void test_integer_ops() {
   // Integer results feed a real expression, but carry no derivative back to
   // their operands. Reusing the destination must clear its old adjoint too.
-  for (Program::Code code : {Program::IADD, Program::ISUB, Program::IMUL,
-                             Program::INEG, Program::IABS}) {
+  for (Program::Code code :
+       {Program::IADD, Program::ISUB, Program::IMUL, Program::IMOD,
+        Program::IDIV, Program::INEG, Program::IABS}) {
     Build b({-7, 3, 0.4});
     b.emit_to(code, 0, 0, 1);
     const int result = b.emit(Program::MUL, 0, 2);
     check("integer result in real expression", b.done({result}, {1.5}));
+  }
+}
+
+static void test_integer_mod_div() {
+  for (Program::Code code : {Program::IMOD, Program::IDIV}) {
+    Build b({-7.9, 3.2, 0.4});
+    const int square = b.emit(Program::MUL, 0, 0);
+    const int whole = b.emit(code, square, 1);
+    const int scaled = b.emit(Program::MUL, whole, 2);
+    const int result = b.emit(Program::ADD, scaled, square);
+    check("integer mod/div of active operands", b.done({result}, {1.5}));
+  }
+  for (Program::Code code : {Program::IMOD, Program::IDIV}) {
+    Build b({-7.9, 3.2, 0.4});
+    const int square = b.emit(Program::MUL, 0, 0);
+    const int guard = b.emit(Program::GT, square, 1);
+    const int result = b.alloc();
+    const int jz = (int)b.p.code.size();
+    b.emit_to(Program::JZ, 0, guard);
+    const int whole = b.emit(code, square, 1);
+    b.emit_to(Program::MUL, result, whole, 2);
+    const int jmp = (int)b.p.code.size();
+    b.emit_to(Program::JMP, 0, 0);
+    b.p.code[(size_t)jz].dst = (int)b.p.code.size();
+    b.emit_to(Program::EXP, result, 1);
+    b.p.code[(size_t)jmp].dst = (int)b.p.code.size();
+    auto c = b.done({result}, {1.5});
+    check("integer mod/div on the taken path", c);
+    c.in = {0.3, 3.2, 0.4};
+    check("integer mod/div on the skipped path", c);
   }
 }
 
@@ -1815,6 +1856,137 @@ static void test_two_gradients() {
     expect("two gradients agree", a1[k] == a2[k]);
 }
 
+static std::vector<double> native_gradient(Case c, bool* generated) {
+  *generated = gen_adjoint(c.p);
+  if (!*generated) return {};
+  std::vector<double> values;
+  return native_adjoints(c.p, c.in, c.seed, &values);
+}
+
+static bool throws_out_of_range(const Program& p, std::vector<double> reg,
+                                std::string* what) {
+  try {
+    run_program(p, reg.data());
+  } catch (const std::out_of_range& e) {
+    *what = e.what();
+    return true;
+  }
+  return false;
+}
+
+static void test_dyn_index() {
+  const int kNormal = program_density_id_by_name("normal_lpdf");
+  const std::vector<double> theta{0.35, -0.2, 0.9, 1.4, 0.6};
+  for (int idx = 1; idx <= 4; ++idx) {
+    const std::string tag = " idx " + std::to_string(idx);
+    Build b(theta, 5);
+    const int i = b.konst(idx);
+    const int d = b.emit(Program::DYN_INDEX, 0, i, 0, 4);
+    const int sq = b.emit(Program::SQUARE, d);
+    Case c = b.done({sq}, {1.3});
+    check("dyn index" + tag, c);
+    bool generated = false;
+    const std::vector<double> got = native_gradient(c, &generated);
+    expect(("dyn index generated" + tag).c_str(), generated);
+    if (got.size() != theta.size()) continue;
+    stan::math::nested_rev_autodiff nested;
+    std::vector<stan::math::var> x(theta.begin(), theta.end());
+    stan::math::var lp = stan::math::square(x[(size_t)idx - 1]) * 1.3;
+    lp.grad();
+    for (size_t k = 0; k < theta.size(); ++k)
+      expect(("dyn index matches autodiff" + tag).c_str(),
+             ulps(got[k], x[k].adj()) <= 2);
+  }
+
+  for (int idx = 1; idx <= 3; ++idx) {
+    Build b({0.2, 0.7, -0.4, 1.1, 0.5, 0.9, -0.3}, 7);
+    const int i = b.konst(idx);
+    const int d = b.emit(Program::DYN_INDEX, 0, i, 2, 3);
+    const int e = b.emit(Program::MUL, d, d);
+    const int f = b.emit(Program::DYN_INDEX, 0, i, 2, 3);
+    const int r = b.emit(Program::ADD, e, f);
+    check("dyn index offset run idx " + std::to_string(idx),
+          b.done({r}, {0.8}));
+  }
+
+  {
+    Build b({0.35, -0.2, 0.9, 1.4, 0.6}, 5);
+    const int y = b.konst(0.25);
+    const int i = b.konst(3);
+    const int d = b.emit(Program::DYN_INDEX, 0, i, 0, 4);
+    const int lp = b.emit_density(kNormal, {y, d, 4});
+    check("dyn index feeds density", b.done({lp}, {1.0}));
+  }
+
+  {
+    Build b({0.35, -0.2, 0.9, 1.4}, 4);
+    const int i = b.konst(2);
+    b.emit_to(Program::DYN_INDEX, 1, 0, i, 0, 4);
+    const int r = b.emit(Program::MUL, 1, 3);
+    check("dyn index destination inside run", b.done({r, 1}, {0.6, -0.9}));
+  }
+
+  {
+    Build b({0.35, -0.2, 0.9, 1.4}, 4);
+    const int i = b.konst(2);
+    const int first = b.emit(Program::DYN_INDEX, 0, i, 0, 4);
+    b.p.code.push_back(
+        Program::Instr{Program::CONST, i, (int)b.p.pool.size(), 0, 0, 1});
+    b.p.pool.push_back(4.0);
+    const int second = b.emit(Program::DYN_INDEX, 0, i, 0, 4);
+    const int r = b.emit(Program::MUL, first, second);
+    check("dyn index overwritten index register", b.done({r}, {1.0}));
+  }
+
+  for (double gate : {1.0, 0.0}) {
+    Build b({gate, 0.35, -0.2, 0.9}, 4);
+    const int one = b.konst(1.0);
+    const int pick = b.alloc();
+    b.emit_to(Program::JZ, 4, 0);
+    b.p.code.push_back(
+        Program::Instr{Program::CONST, pick, (int)b.p.pool.size(), 0, 0, 1});
+    b.p.pool.push_back(2.0);
+    b.emit_to(Program::JMP, 5, 0);
+    b.emit_to(Program::MOV, pick, one);
+    const int d = b.emit(Program::DYN_INDEX, 1, pick, 0, 3);
+    const int r = b.emit(Program::SQUARE, d);
+    check("dyn index runtime selected gate " + std::to_string(gate),
+          b.done({r}, {1.0}));
+  }
+
+  {
+    Program p;
+    p.n_regs = 6;
+    p.pool = {0.0};
+    p.code = {{Program::DYN_INDEX, 5, 0, 4, 0, 4}};
+    p.out_regs = {5};
+    std::string what;
+    for (double bad :
+         {0.0, 5.0, -1.0, 1.5, std::numeric_limits<double>::quiet_NaN(),
+          std::numeric_limits<double>::infinity()}) {
+      expect("dyn index out of range throws",
+             throws_out_of_range(p, {1, 2, 3, 4, bad, 0}, &what));
+      expect("dyn index out of range message",
+             what == "register-program index out of range");
+    }
+    std::vector<double> ok{1, 2, 3, 4, 4, 0};
+    run_program(p, ok.data());
+    expect("dyn index last element", ok[5] == 4.0);
+  }
+
+  {
+    IslandProg p;
+    p.n_regs = 4;
+    p.ins = {IslandProg::LiveIn{0, 3}};
+    p.pool = {0.0};
+    p.code = {{Program::CONST, 3, 0},
+              {Program::DYN_INDEX, 3, 0, 3, 0, 3},
+              {Program::JMP, 1, 0}};
+    p.out_regs = {3};
+    expect("dyn index in a loop keeps the replay", !gen_adjoint(p));
+  }
+}
+
 // ---- fuzz ---------------------------------------------------------------
 
 // Random programs over the opcodes the carver emits most, checked against
@@ -1985,6 +2157,7 @@ int main() {
   test_call_primal_read_contract();
   test_binary_ops();
   test_integer_ops();
+  test_integer_mod_div();
   test_fma();
   test_unary_ops();
   test_overwrite_needs_checkpoint();
@@ -2014,6 +2187,7 @@ int main() {
   test_density_early_return_partials();
   test_recurrence();
   test_two_gradients();
+  test_dyn_index();
   test_fuzz();
   test_fuzz_ranges();
   if (failures) {

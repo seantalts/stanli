@@ -601,6 +601,160 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "cm_betadiscrete": {
+  "max_rel": 3.846632004976576e-16,
+  "max_ulp": 2,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_betagate": {
+  "max_rel": 6.5503158452884236e-15,
+  "max_ulp": 59,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_bisa": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_choco": {
+  "max_rel": 2.620887718840346e-16,
+  "max_ulp": 2,
+  "n_values": 10,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_ddm": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 10,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_exgaussian": {
+  "max_rel": 1.8060418361715684e-16,
+  "max_ulp": 1,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_exwald": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 7,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_gamma": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_geg": {
+  "max_rel": 1.4090856530117543e-16,
+  "max_ulp": 1,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_invgamma": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_invgaussian": {
+  "max_rel": 1.942890293094024e-16,
+  "max_ulp": 28,
+  "n_values": 8,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_invweibull": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_lba1": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 8,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_lba2": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 10,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_lnr": {
+  "max_rel": 1.1102230246251565e-16,
+  "max_ulp": 2,
+  "n_values": 9,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_lnr_bench": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 10,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_loggamma": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 7,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_lognormal": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 7,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_logstudent": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 7,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_logweibull": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_rdm": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 8,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "cm_weibull": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 6,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "covid19imperial_v2": {
   "max_rel": 8.157260222756722e-16,
   "max_ulp": 7,

@@ -87,8 +87,8 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(SUB, kProgramReadB)                                                       \
   X(MUL, kProgramReadB | kProgramSaveA | kProgramSaveB)                       \
   X(DIV, kProgramReadB | kProgramSaveA | kProgramSaveB | kProgramSaveOut)     \
-  X(IMOD, kProgramReadB | kProgramNoAdjoint)                                  \
-  X(IDIV, kProgramReadB | kProgramNoAdjoint)                                  \
+  X(IMOD, kProgramReadB)                                                      \
+  X(IDIV, kProgramReadB)                                                      \
   X(IADD, kProgramReadB)                                                      \
   X(ISUB, kProgramReadB)                                                      \
   X(IMUL, kProgramReadB)                                                      \
@@ -117,7 +117,7 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(NE, kProgramReadB)                                                        \
   X(DYN_SET, kProgramRangeA | kProgramReadB | kProgramReadC |                 \
                  kProgramRangeOutput | kProgramNoAdjoint)                     \
-  X(DYN_INDEX, kProgramReadB | kProgramNoAdjoint)                             \
+  X(DYN_INDEX, kProgramReadB | kProgramSaveB)                                 \
   /* b selects max (1) or min (0); c stores kProgramExtrema* metadata. */     \
   X(EXTREMA_RANGE, kProgramRangeA | kProgramNoAdjoint)                        \
   X(JZ, kProgramNoAdjoint | kProgramNoOutput)                                 \
@@ -384,6 +384,9 @@ bool elide_program_dead_constants(Program& p);
 
 // Acyclic CFG version, retaining arithmetic and refusing unmodelled spans.
 bool elide_acyclic_program_constants(Program& p);
+
+bool propagate_program_copies(Program& p,
+                              const std::vector<std::pair<int, int>>& seeded);
 
 // Prove definite initialization at every read and exit across the CFG. CALL
 // scratch is private during var replay and therefore is not a register write.

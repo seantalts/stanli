@@ -76,12 +76,15 @@ def compute():
             if (REPO / "tests" / "stanc3" / f"{k}.stan").exists()}
     brms = {k: v for k, v in ver.items()
             if (REPO / "tests" / "brms" / f"{k}.stan").exists()}
+    cogmod = {k: v for k, v in ver.items()
+              if (REPO / "tests" / "cogmod" / f"{k}.stan").exists()}
     rethinking = {p.stem for p in (REPO / "tests" / "rethinking").glob("*.stan")}
     rethinking_verified = sum(ver.get(k, {}).get("status") == "VERIFIED"
                              for k in rethinking)
     imported = {p.name for p in (REPO / "tests/educational/models").iterdir() if p.is_dir()}
     ver = {k: v for k, v in ver.items()
-           if k not in lang and k not in brms and k not in rethinking and k not in imported}
+           if k not in lang and k not in brms and k not in cogmod
+           and k not in rethinking and k not in imported}
     references = json.loads(gzip.decompress((REPO / "docs/internal/artifacts/corpus-refs.json.gz").read_bytes()))["models"]
     verified = {k: v for k, v in ver.items() if v["status"] == "VERIFIED"}
     bitwise = sum(1 for v in verified.values() if v["max_ulp"] == 0)

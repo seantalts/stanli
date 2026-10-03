@@ -1608,6 +1608,18 @@ struct Lowering {
   void lower_island(const mir::Stmt* s, const mir::Expr* e, IslandRegion* reg,
                     Range* expr_out, std::shared_ptr<IslandProg>* prog_out);
 
+  void configure_island_compiler(ProgramCompiler& c, IslandProg& prog,
+                                 IslandRegion& region, const mir::Stmt* s);
+  void finalize_island_program(IslandProg& prog, bool native,
+                               bool keep_every_clear = false,
+                               bool propagate_copies = false);
+  void finalize_island_program_once(IslandProg& prog, bool native,
+                                    bool keep_every_clear,
+                                    bool propagate_copies);
+  std::vector<int> pack_island_inputs(IslandProg& prog,
+                                      std::vector<int> inputs);
+  bool lower_region_map(const mir::Stmt& s, long lo, long hi);
+
   // The OP_ISLAND for a compiled region, plus one extraction per live-out.
   void emit_island(const std::shared_ptr<IslandProg>& prog,
                    const IslandRegion& reg, const std::vector<int>& out_lens,
@@ -1638,6 +1650,7 @@ struct Lowering {
   // straight-line graph call and a call under dynamic control on one callback
   // binder and one kernel path instead of growing a second graph-only parser.
   Val lower_program_expression(const mir::Expr& e);
+  Val lower_wiener_packed(const mir::Expr& e, CallArguments& actuals);
 
   Val finish_emit(Op op, int64_t out_len, SlotInfo out_si,
                   std::vector<int> idata, bool autodiff) {
@@ -2112,6 +2125,8 @@ struct Lowering {
       throw SpecializationRefused{};
     if (region_current) {
       lower_region_stmt(s);
+      if (s.kind == mir::Stmt::For || s.kind == mir::Stmt::While)
+        region_unreachable = false;
       return;
     }
     const bool loop = s.kind == mir::Stmt::For || s.kind == mir::Stmt::While;

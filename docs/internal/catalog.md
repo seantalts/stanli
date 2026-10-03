@@ -59,6 +59,7 @@ paths and hashes in raw records unchanged.
 | --- | --- |
 | [Generated Stan conformance harness](../../harnesses/conformance/README.md) | Fixture scope, provenance or test workflow. |
 | [Models from brms](../../tests/brms/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from cogmod](../../tests/cogmod/README.md) | Fixture scope, provenance or test workflow. |
 | [Compiler producer fixtures](../../tests/compiler/README.md) | Fixture scope, provenance or test workflow. |
 | [Stan teaching-model corpus for Stanli](../../tests/educational/IMPORT_README.md) | Fixture scope, provenance or test workflow. |
 | [Models from Aalto Stan lessons](../../tests/educational/README.md) | Fixture scope, provenance or test workflow. |
