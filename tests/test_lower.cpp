@@ -13,6 +13,7 @@
 #include <stanli/optable.hpp>
 #include <stanli/structured_loop.hpp>
 #include <stanli/packet.hpp>
+#include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <stan/math.hpp>
@@ -23,6 +24,7 @@
 #include <cstring>
 #include <limits>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <sstream>
 #include <string>
@@ -1132,6 +1134,426 @@ static void test_udf_param_branch() {
     expect_ulp("udf param branch grad" + at, grad, mu.adj());
     stan::math::recover_memory();
   }
+}
+
+namespace region_map_test {
+
+using stan::math::var;
+using stanli::CompiledModel;
+using stanli::DataMap;
+using stanli::Executor;
+using stanli::OP_ISLAND;
+using stanli::OP_LOOP;
+using stanli::OP_REGION_MAP;
+
+struct Series {
+  std::vector<double> y, x;
+};
+
+Series make_series(int n) {
+  Series s;
+  for (int i = 0; i < n; ++i) {
+    const double x = -2.0 + 4.0 * i / (n - 1);
+    s.x.push_back(x);
+    s.y.push_back(0.5 * x + 0.9 * std::sin(7.0 * i + 1.0));
+  }
+  return s;
+}
+
+DataMap make_data(int n) {
+  const Series s = make_series(n);
+  std::ostringstream out;
+  out.precision(17);
+  out << "{\"N\":" << n << ",\"y\":[";
+  for (int i = 0; i < n; ++i) out << (i ? "," : "") << s.y[i];
+  out << "],\"x\":[";
+  for (int i = 0; i < n; ++i) out << (i ? "," : "") << s.x[i];
+  out << "]}";
+  return DataMap::from_json(out.str());
+}
+
+using Params = std::vector<double>;
+using Ref = std::function<var(const std::vector<var>&, const Series&,
+                              std::vector<int>*)>;
+
+std::string fixture_mir(const std::string& stem) {
+  return slurp("tests/fixtures/" + stem + ".tmir.sexp");
+}
+
+CompiledModel compile_with(const std::string& stem, int n,
+                           const char* env = nullptr,
+                           const char* value = "0") {
+  if (env) test_setenv(env, value, 1);
+  try {
+    CompiledModel cm = stanli::compile_model(fixture_mir(stem), make_data(n));
+    if (env) test_unsetenv(env);
+    return cm;
+  } catch (...) {
+    if (env) test_unsetenv(env);
+    throw;
+  }
+}
+
+std::map<uint16_t, int> histogram(const CompiledModel& cm) {
+  std::map<uint16_t, int> h;
+  for (const stanli::Op& op : cm.graph.ops) ++h[op.opcode];
+  return h;
+}
+
+struct Eval {
+  double lp = 0;
+  std::vector<double> grad;
+};
+
+Eval evaluate(Executor& ex, const Params& p) {
+  for (size_t i = 0; i < p.size(); ++i) ex.params_data()[i] = p[i];
+  Eval e;
+  e.grad.assign(p.size(), 0.0);
+  e.lp = ex.gradient(e.grad.data());
+  return e;
+}
+
+Eval reference(const Ref& ref, const Series& s, const Params& p,
+               std::vector<int>* branches) {
+  std::vector<var> v(p.begin(), p.end());
+  var lp = ref(v, s, branches);
+  lp.grad();
+  Eval e;
+  e.lp = lp.val();
+  for (const var& q : v) e.grad.push_back(q.adj());
+  stan::math::recover_memory();
+  return e;
+}
+
+void expect_eval(const std::string& what, const Eval& got, const Eval& want,
+                 int64_t ulp = 10) {
+  expect_ulp(what + " lp", got.lp, want.lp, ulp);
+  for (size_t i = 0; i < want.grad.size(); ++i)
+    expect_ulp(what + " grad[" + std::to_string(i) + "]", got.grad[i],
+               want.grad[i], ulp);
+}
+
+int flips(const std::vector<int>& a, const std::vector<int>& b) {
+  int k = 0;
+  for (size_t i = 0; i < a.size() && i < b.size(); ++i) k += a[i] != b[i];
+  return k;
+}
+
+void expect_mapped(const std::string& what, const CompiledModel& cm) {
+  check(count_opcode(cm, OP_REGION_MAP) == 1, what + ": one OP_REGION_MAP");
+  check(count_opcode(cm, OP_LOOP) == 0, what + ": no OP_LOOP");
+  check(count_opcode(cm, OP_ISLAND) == 0, what + ": no OP_ISLAND");
+}
+
+void run_points(const std::string& stem, int n,
+                const std::vector<Params>& points, const Ref& ref,
+                bool expect_map = true) {
+  const Series s = make_series(n);
+  CompiledModel cm = compile_with(stem, n);
+  if (expect_map)
+    expect_mapped(stem, cm);
+  else
+    check(count_opcode(cm, OP_REGION_MAP) == 0, stem + ": no OP_REGION_MAP");
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  std::vector<std::vector<int>> taken(points.size());
+  for (size_t k = 0; k < points.size(); ++k) {
+    const Eval want = reference(ref, s, points[k], &taken[k]);
+    expect_eval(stem + " point " + std::to_string(k), evaluate(ex, points[k]),
+                want);
+  }
+  if (points.size() > 1)
+    check(flips(taken[0], taken[1]) > 0,
+          stem + ": parameter points flip branches");
+}
+
+const Ref ref_branch = [](const std::vector<var>& p, const Series& s,
+                          std::vector<int>* taken) {
+  var lp = 0;
+  for (size_t i = 0; i < s.y.size(); ++i) {
+    const var r = s.y[i] - p[0] * s.x[i];
+    const bool low = r < p[1];
+    if (taken) taken->push_back(low);
+    lp += low ? -stan::math::square(r) - stan::math::log1p(
+                                             stan::math::square(p[1]))
+              : -0.5 * stan::math::square(r) + p[1];
+  }
+  return lp;
+};
+
+const Ref ref_simple = [](const std::vector<var>& p, const Series& s,
+                          std::vector<int>* taken) {
+  var lp = 0;
+  for (size_t i = 0; i < s.y.size(); ++i) {
+    const var r = s.y[i] - p[0] * s.x[i];
+    const bool low = r < p[1];
+    if (taken) taken->push_back(low);
+    lp += low ? -stan::math::square(r) : -0.5 * stan::math::square(r) + p[1];
+  }
+  return lp;
+};
+
+const Ref ref_udf = [](const std::vector<var>& p, const Series& s,
+                       std::vector<int>* taken) {
+  const var sc = stan::math::exp(p[1]);
+  var lp = 0;
+  for (size_t i = 0; i < s.y.size(); ++i) {
+    const var d = s.y[i] - p[0] * s.x[i];
+    const bool tail = d < -sc;
+    if (taken) taken->push_back(tail);
+    lp += tail ? -0.5 * stan::math::square(d / sc) - stan::math::log(sc) -
+                     0.5 * sc
+               : stan::math::log1p_exp(-stan::math::square(d) * sc) -
+                     stan::math::log(sc);
+  }
+  return lp;
+};
+
+const std::vector<Params> branch_points = {{0.3, -0.5}, {-1.5, 0.7}, {0.3, -0.5}};
+const std::vector<Params> udf_points = {{0.3, -0.4}, {-1.5, 0.9}, {0.3, -0.4}};
+
+void test_same_executor_two_points() {
+  run_points("region_map_branch", 64, branch_points, ref_branch);
+  run_points("region_map_udf", 64, udf_points, ref_udf);
+  run_points("region_map_branch", 512, branch_points, ref_branch);
+}
+
+void test_size_independent() {
+  for (const char* stem :
+       {"region_map_branch", "region_map_udf", "region_map_many"}) {
+    size_t instrs[2] = {0, 0}, regs[2] = {0, 0};
+    int slot = 0;
+    for (int n : {64, 512}) {
+      CompiledModel cm = compile_with(stem, n);
+      for (const stanli::Op& op : cm.graph.ops) {
+        if (op.opcode != OP_REGION_MAP) continue;
+        const auto& p = *static_cast<const stanli::RegionMapProg*>(op.udata);
+        int live = 0;
+        for (const auto& li : p.ins) live += li.len;
+        instrs[slot] = p.code.size();
+        regs[slot] = (size_t)(p.n_regs - live);
+      }
+      ++slot;
+    }
+    check(instrs[0] > 0 && instrs[0] == instrs[1],
+          std::string(stem) + ": instruction count independent of N");
+    check(regs[0] == regs[1],
+          std::string(stem) + ": non-live-in registers independent of N");
+  }
+}
+
+void expect_refused(const std::string& stem, int n, const Ref& ref,
+                    const std::vector<Params>& points) {
+  CompiledModel cm = compile_with(stem, n);
+  CompiledModel off = compile_with(stem, n, "STANLI_REGION_MAP", "0");
+  check(count_opcode(cm, OP_REGION_MAP) == 0, stem + ": refused");
+  check(histogram(cm) == histogram(off),
+        stem + ": refusal keeps today's graph op kinds");
+  const Series s = make_series(n);
+  Executor ex(cm.graph), ex_off(off.graph);
+  cm.bind(ex);
+  off.bind(ex_off);
+  for (const Params& p : points) {
+    std::vector<int> taken;
+    const Eval want = reference(ref, s, p, &taken);
+    const Eval got = evaluate(ex, p);
+    const Eval before = evaluate(ex_off, p);
+    expect_eval(stem + " refused", got, want);
+    check(got.lp == before.lp && got.grad == before.grad,
+          stem + ": refused loop matches the ablation bitwise");
+  }
+}
+
+void test_refusals() {
+  const Ref ref_carry = [](const std::vector<var>& p, const Series& s,
+                           std::vector<int>* taken) {
+    var acc = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const bool low = s.y[i] - p[0] * s.x[i] < p[1];
+      if (taken) taken->push_back(low);
+      acc = low ? acc + p[0] : acc + s.y[i] * p[1];
+    }
+    return -0.01 * stan::math::square(acc);
+  };
+  expect_refused("region_map_carry", 64, ref_carry, branch_points);
+  expect_refused("region_map_outer_local", 64, ref_simple, branch_points);
+  expect_refused("region_map_break", 64, ref_simple, branch_points);
+  expect_refused("region_map_target_read", 64, ref_simple, branch_points);
+  const Ref ref_data = [](const std::vector<var>& p, const Series& s,
+                          std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var r = s.y[i] - p[0] * s.x[i];
+      const bool low = s.y[i] < 0.1;
+      if (taken) taken->push_back(low);
+      lp += low ? -stan::math::square(r) + p[1]
+                : -0.5 * stan::math::square(r) - p[1];
+    }
+    return lp;
+  };
+  expect_refused("region_map_data_control", 64, ref_data, branch_points);
+  expect_refused("region_map_branch", 16, ref_branch, branch_points);
+  {
+    CompiledModel off = compile_with("region_map_branch", 64,
+                                     "STANLI_REGION_MAP", "0");
+    check(count_opcode(off, OP_REGION_MAP) == 0,
+          "STANLI_REGION_MAP=0 disables the map");
+    const Series s = make_series(64);
+    Executor ex(off.graph);
+    off.bind(ex);
+    std::vector<int> taken;
+    expect_eval("ablated branch", evaluate(ex, branch_points[0]),
+                reference(ref_branch, s, branch_points[0], &taken));
+  }
+}
+
+void test_shapes() {
+  const Ref ref_many = [](const std::vector<var>& p, const Series& s,
+                          std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const double x = s.x[i];
+      const var v1 = p[0] * x, v2 = p[1] * x + 0.3, v3 = p[2] * x - 0.2,
+                v4 = p[3] * stan::math::square(x);
+      const var r = s.y[i] - v1;
+      const bool low = r < v2;
+      if (taken) taken->push_back(low);
+      lp += low ? -stan::math::square(v3 - s.y[i]) - v4 * x
+                : -0.5 * stan::math::square(r) + v4 - 0.1 * v2 * v3;
+    }
+    return lp;
+  };
+  run_points("region_map_many", 64,
+             {{0.3, -0.6, 0.5, 0.2}, {-1.5, 0.4, -0.3, 0.1}, {0.3, -0.6, 0.5, 0.2}},
+             ref_many);
+
+  const Ref ref_alias = [](const std::vector<var>& p, const Series& s,
+                           std::vector<int>* taken) {
+    var lp = 0;
+    var ss = 0;
+    std::vector<var> mu;
+    for (size_t i = 0; i < s.y.size(); ++i) mu.push_back(p[0] * s.x[i]);
+    for (const var& m : mu) ss += stan::math::square(m);
+    lp += -0.01 * ss;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var d = s.y[i] - mu[i];
+      const bool low = d < p[1];
+      if (taken) taken->push_back(low);
+      lp += low ? -stan::math::square(d) -
+                      0.5 * stan::math::square(mu[i]) * p[1]
+                : -0.5 * stan::math::square(s.y[i] - mu[i]) + p[1];
+    }
+    for (const var& m : mu)
+      lp += -0.5 * stan::math::square(m / 5.0) - std::log(5.0) -
+            0.9189385332046727;
+    return lp;
+  };
+  run_points("region_map_alias", 64, {{0.3, -0.5}, {-1.5, 0.7}, {0.3, -0.5}},
+             ref_alias);
+
+  const Ref ref_int = [](const std::vector<var>& p, const Series& s,
+                         std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var r = s.y[i] - p[0] * s.x[i];
+      const bool low = r < p[1];
+      if (taken) taken->push_back(low);
+      lp += low ? -2 * stan::math::square(r)
+                : -0.5 * stan::math::square(r) + p[1];
+    }
+    return lp;
+  };
+  run_points("region_map_local_int", 64, branch_points, ref_int);
+
+  const Ref ref_call = [](const std::vector<var>& p, const Series& s,
+                          std::vector<int>* taken) {
+    const var sc = stan::math::exp(p[1]);
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var mu = p[0] * s.x[i];
+      const bool low = s.y[i] - mu < -0.3;
+      if (taken) taken->push_back(low);
+      lp += low ? stan::math::normal_lpdf<false>(s.y[i], mu, sc)
+                : stan::math::student_t_lpdf<false>(s.y[i], 4, mu, sc);
+    }
+    return lp;
+  };
+  run_points("region_map_call", 64, {{0.3, -0.4}, {-1.5, 0.3}, {0.3, -0.4}},
+             ref_call);
+
+  const Ref ref_multi = [](const std::vector<var>& p, const Series& s,
+                           std::vector<int>* taken) {
+    var lp = stan::math::normal_lpdf<false>(p[0], 0, 2);
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var r = s.y[i] - p[0] * s.x[i];
+      const bool low = r < p[1];
+      if (taken) taken->push_back(low);
+      lp += -0.1 * stan::math::square(p[1]);
+      lp += low ? -stan::math::square(r) : -0.5 * stan::math::square(r) + p[1];
+      lp += -0.01 * r;
+    }
+    lp += stan::math::normal_lpdf<false>(p[1], 0, 3);
+    return lp;
+  };
+  run_points("region_map_multi", 64, branch_points, ref_multi);
+}
+
+std::string outcome(const std::string& stem, int n, const char* env) {
+  try {
+    CompiledModel cm = compile_with(stem, n, env);
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    evaluate(ex, {0.3, -0.5});
+    return "ok";
+  } catch (const std::exception& e) {
+    return std::string(typeid(e).name()) + ": " + e.what();
+  }
+}
+
+void test_out_of_range() {
+  const std::string mapped = outcome("region_map_oob", 64, nullptr);
+  const std::string before = outcome("region_map_oob", 64, "STANLI_REGION_MAP");
+  check(before != "ok", "out of range index throws today");
+  check(mapped == before, "out of range index throws the same exception: " +
+                              mapped + " vs " + before);
+}
+
+void test_copied_executors() {
+  const Series s = make_series(64);
+  CompiledModel cm = compile_with("region_map_udf", 64);
+  expect_mapped("copied executors", cm);
+  Executor a(cm.graph);
+  cm.bind(a);
+  Executor b(a);
+  Executor fresh_a(cm.graph), fresh_b(cm.graph);
+  cm.bind(fresh_a);
+  cm.bind(fresh_b);
+  const Params pa = udf_points[0], pb = udf_points[1];
+  for (int round = 0; round < 3; ++round) {
+    const Eval ea = evaluate(a, pa);
+    const Eval eb = evaluate(b, pb);
+    const Eval fa = evaluate(fresh_a, pa);
+    const Eval fb = evaluate(fresh_b, pb);
+    check(ea.lp == fa.lp && ea.grad == fa.grad,
+          "copied executor A matches a fresh executor");
+    check(eb.lp == fb.lp && eb.grad == fb.grad,
+          "copied executor B matches a fresh executor");
+    std::vector<int> t;
+    expect_eval("copied executor A reference", ea,
+                reference(ref_udf, s, pa, &t));
+  }
+}
+
+}  // namespace region_map_test
+
+static void test_region_map() {
+  using namespace region_map_test;
+  test_same_executor_two_points();
+  test_size_independent();
+  test_refusals();
+  test_shapes();
+  test_out_of_range();
+  test_copied_executors();
 }
 
 int main() {
@@ -9449,6 +9871,7 @@ int main() {
   test_structured_while_vector_return();
   test_wiener_forms();
   test_udf_param_branch();
+  test_region_map();
   if (failures == 0) std::printf("test_lower OK\n");
   return failures == 0 ? 0 : 1;
 }
