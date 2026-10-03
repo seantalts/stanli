@@ -60,6 +60,13 @@ struct RegionMapLanePlan {
     int adj_out_off = 0;
     int bwd_size = 0;
   };
+  struct Operands {
+    int32_t dst = -1, a = -1, b = -1, c = -1;
+  };
+  struct AdjOperands {
+    int32_t dst = -1, a = -1, b = -1, c = -1;
+    int32_t va = -1, vb = -1, vc = -1, vd = -1;
+  };
   bool active = false;
   bool tile_recompute = false;
   std::string refusal;
@@ -74,6 +81,8 @@ struct RegionMapLanePlan {
   std::vector<int32_t> seed_regs;
   std::vector<int32_t> cell_slot;
   std::vector<Block> blocks;
+  std::vector<Operands> ops;
+  std::vector<AdjOperands> adj_ops;
   std::vector<CallWindow> calls;
   std::shared_ptr<RegionMapProfile> profile;
   std::vector<char> invariant;

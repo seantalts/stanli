@@ -15,6 +15,7 @@
 #include <memory>
 #include <stdexcept>
 #include <set>
+#include <type_traits>
 #include <string>
 
 namespace stanli {
@@ -164,6 +165,7 @@ class Analysis {
     analyze_invariance();
     classify_registers();
     classify_cells();
+    decode_operands();
     find_adjoint_sinks();
     check_ranges();
     collect_seeds();
@@ -441,6 +443,92 @@ class Analysis {
         return;
       default:
         return;
+    }
+  }
+
+  int32_t reg_offset(int r) const {
+    if (r < 0 || r >= (int)plan_.reg_slot.size()) return -1;
+    const int s = plan_.reg_slot[(size_t)r];
+    return s >= 0 ? s * kRegionMapTile : -1;
+  }
+
+  int32_t cell_offset(int c) const {
+    if (c < 0 || c >= (int)plan_.cell_slot.size()) return -1;
+    const int s = plan_.cell_slot[(size_t)c];
+    return s >= 0 ? s * kRegionMapTile : -1;
+  }
+
+  void decode_operands() {
+    plan_.ops.assign(p_.code.size(), {});
+    for (size_t pc = 0; pc < p_.code.size(); ++pc) {
+      const Program::Instr& I = p_.code[pc];
+      auto& o = plan_.ops[pc];
+      switch (I.code) {
+        case Program::MOV:
+        case Program::NEG:
+        case Program::EXP:
+        case Program::LOG:
+        case Program::LOG1P_EXP:
+        case Program::SQRT:
+        case Program::SQUARE:
+        case Program::INV:
+        case Program::FABS:
+        case Program::INEG:
+          o.dst = reg_offset(I.dst);
+          o.a = reg_offset(I.a);
+          break;
+        case Program::ADD:
+        case Program::SUB:
+        case Program::MUL:
+        case Program::DIV:
+        case Program::IADD:
+        case Program::IMOD:
+        case Program::POW:
+        case Program::FMAX:
+        case Program::FMIN:
+        case Program::GT:
+        case Program::GE:
+        case Program::LT:
+        case Program::LE:
+        case Program::EQ:
+        case Program::LSE2:
+        case Program::LOG_DIFF_EXP:
+          o.dst = reg_offset(I.dst);
+          o.a = reg_offset(I.a);
+          o.b = reg_offset(I.b);
+          break;
+        case Program::FMA:
+        case Program::LOG_MIX:
+          o.dst = reg_offset(I.dst);
+          o.a = reg_offset(I.a);
+          o.b = reg_offset(I.b);
+          o.c = reg_offset(I.c);
+          break;
+        case Program::CONST:
+        case Program::DYN_INDEX:
+          o.dst = reg_offset(I.dst);
+          o.b = I.code == Program::DYN_INDEX ? reg_offset(I.b) : -1;
+          break;
+        case Program::JZ:
+          o.a = reg_offset(I.a);
+          break;
+        default:
+          break;
+      }
+    }
+    plan_.adj_ops.assign(p_.adj.code.size(), {});
+    for (size_t pc = 0; pc < p_.adj.code.size(); ++pc) {
+      const AdjInstr& A = p_.adj.code[pc];
+      auto& o = plan_.adj_ops[pc];
+      if (A.code == Program::CALL) continue;
+      o.dst = cell_offset(A.dst);
+      o.a = cell_offset(A.a);
+      o.b = cell_offset(A.b);
+      o.c = cell_offset(A.c);
+      o.va = reg_offset(A.va);
+      o.vb = reg_offset(A.vb);
+      o.vc = reg_offset(A.vc);
+      o.vd = reg_offset(A.vd);
     }
   }
 
@@ -952,24 +1040,37 @@ class TileState {
   }
   bool per_lane(int r) const { return plan_.reg_slot[(size_t)r] >= 0; }
 
-  const double* read(int r, double* broadcast) const {
-    if (per_lane(r)) return slot(r);
-    std::fill_n(broadcast, n_, reg_[r]);
-    return broadcast;
-  }
-
   double value(int r, int l) const {
     return per_lane(r) ? slot(r)[l] : reg_[r];
   }
 
-  struct View {
-    double* p;
-    size_t stride;
-    double& operator[](int l) const { return p[(size_t)l * stride]; }
+  struct Lane {
+    const double* p;
+    double operator[](int l) const { return p[l]; }
+  };
+  struct Shared {
+    double v;
+    double operator[](int) const { return v; }
   };
 
-  View view(int r) const {
-    return per_lane(r) ? View{slot(r), 1} : View{reg_ + r, 0};
+  template <typename F>
+  void with(int32_t off, int r, F&& f) const {
+    if (off >= 0)
+      f(Lane{fwd_ + off});
+    else
+      f(Shared{reg_[r]});
+  }
+
+  template <typename F>
+  void with(int32_t off_a, int a, int32_t off_b, int b, F&& f) const {
+    with(off_a, a, [&](auto A) { with(off_b, b, [&](auto B) { f(A, B); }); });
+  }
+
+  template <typename F>
+  void with(int32_t off_a, int a, int32_t off_b, int b, int32_t off_c, int c,
+            F&& f) const {
+    with(off_a, a, off_b, b,
+         [&](auto A, auto B) { with(off_c, c, [&](auto C) { f(A, B, C); }); });
   }
 
   int lanes() const { return n_; }
@@ -984,20 +1085,41 @@ class TileState {
   }
 
   template <typename F>
-  void binary(const Program::Instr& I, Mask m, F f) const {
-    double b0[kTile], b1[kTile];
-    const double* a = read(I.a, b0);
-    const double* b = read(I.b, b1);
-    double* d = slot(I.dst);
-    each(m, [&](int l) { d[l] = f(a[l], b[l]); });
+  void binary(const RegionMapLanePlan::Operands& o, const Program::Instr& I,
+              Mask m, F f) const {
+    double* d = fwd_ + o.dst;
+    with(o.a, I.a, o.b, I.b, [&](auto A, auto B) {
+      if constexpr (std::is_same_v<decltype(A), Shared> &&
+                    std::is_same_v<decltype(B), Shared>) {
+        const double v = f(A.v, B.v);
+        each(m, [&](int l) { d[l] = v; });
+      } else {
+        each(m, [&](int l) { d[l] = f(A[l], B[l]); });
+      }
+    });
   }
 
   template <typename F>
-  void unary(const Program::Instr& I, Mask m, F f) const {
-    double b0[kTile];
-    const double* a = read(I.a, b0);
-    double* d = slot(I.dst);
-    each(m, [&](int l) { d[l] = f(a[l]); });
+  void unary(const RegionMapLanePlan::Operands& o, const Program::Instr& I,
+             Mask m, F f) const {
+    double* d = fwd_ + o.dst;
+    with(o.a, I.a, [&](auto A) {
+      if constexpr (std::is_same_v<decltype(A), Shared>) {
+        const double v = f(A.v);
+        each(m, [&](int l) { d[l] = v; });
+      } else {
+        each(m, [&](int l) { d[l] = f(A[l]); });
+      }
+    });
+  }
+
+  template <typename F>
+  void ternary(const RegionMapLanePlan::Operands& o, const Program::Instr& I,
+               Mask m, F f) const {
+    double* d = fwd_ + o.dst;
+    with(o.a, I.a, o.b, I.b, o.c, I.c, [&](auto A, auto B, auto C) {
+      each(m, [&](int l) { d[l] = f(A[l], B[l], C[l]); });
+    });
   }
 
  private:
@@ -1008,9 +1130,11 @@ class TileState {
   Mask full_;
 };
 
-void lane_instruction(const RegionMapProg& p, const TileState& t,
-                      const Program::Instr& I, Mask m, double* window,
-                      KernelCtx& call_ctx, EvalState* state) {
+void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
+                      Mask m, double* window, KernelCtx& call_ctx,
+                      EvalState* state) {
+  const Program::Instr& I = p.code[(size_t)pc];
+  const auto& o = p.lanes.ops[(size_t)pc];
   switch (I.code) {
     case Program::CONST: {
       const double v = p.pool[(size_t)I.a];
@@ -1034,39 +1158,39 @@ void lane_instruction(const RegionMapProg& p, const TileState& t,
       }
       break;
     case Program::MOV:
-      t.unary(I, m, [](double a) { return a; });
+      t.unary(o, I, m, [](double a) { return a; });
       break;
     case Program::ADD:
-      t.binary(I, m, [](double a, double b) { return a + b; });
+      t.binary(o, I, m, [](double a, double b) { return a + b; });
       break;
     case Program::SUB:
-      t.binary(I, m, [](double a, double b) { return a - b; });
+      t.binary(o, I, m, [](double a, double b) { return a - b; });
       break;
     case Program::MUL:
-      t.binary(I, m, [](double a, double b) { return a * b; });
+      t.binary(o, I, m, [](double a, double b) { return a * b; });
       break;
     case Program::DIV:
-      t.binary(I, m, [](double a, double b) { return a / b; });
+      t.binary(o, I, m, [](double a, double b) { return a / b; });
       break;
     case Program::IADD:
-      t.binary(I, m, [](double a, double b) {
+      t.binary(o, I, m, [](double a, double b) {
         return static_cast<double>(static_cast<int>(a) + static_cast<int>(b));
       });
       break;
     case Program::INEG:
-      t.unary(I, m, [](double a) {
+      t.unary(o, I, m, [](double a) {
         return static_cast<double>(-static_cast<int>(a));
       });
       break;
     case Program::IMOD:
-      t.binary(I, m, [](double a, double b) {
+      t.binary(o, I, m, [](double a, double b) {
         return static_cast<double>(
             stan::math::modulus(static_cast<int>(a), static_cast<int>(b)));
       });
       break;
     case Program::POW: {
       const uint8_t law = static_cast<uint8_t>(I.len);
-      t.binary(I, m, [law](double a, double b) {
+      t.binary(o, I, m, [law](double a, double b) {
         return program_pow<double>(law, a, b);
       });
       break;
@@ -1075,84 +1199,81 @@ void lane_instruction(const RegionMapProg& p, const TileState& t,
     case Program::FMIN: {
       const uint8_t law = static_cast<uint8_t>(I.len);
       const bool maximum = I.code == Program::FMAX;
-      t.binary(I, m, [law, maximum](double a, double b) {
+      t.binary(o, I, m, [law, maximum](double a, double b) {
         return program_extremum<double>(maximum, law, a, b);
       });
       break;
     }
     case Program::NEG:
-      t.unary(I, m, [](double a) { return -a; });
+      t.unary(o, I, m, [](double a) { return -a; });
       break;
     case Program::EXP:
-      t.unary(I, m, [](double a) { return stan::math::exp(a); });
+      t.unary(o, I, m, [](double a) { return stan::math::exp(a); });
       break;
     case Program::LOG:
-      t.unary(I, m, [](double a) { return stan::math::log(a); });
+      t.unary(o, I, m, [](double a) { return stan::math::log(a); });
       break;
     case Program::LOG1P_EXP:
-      t.unary(I, m, [](double a) { return stan::math::log1p_exp(a); });
+      t.unary(o, I, m, [](double a) { return stan::math::log1p_exp(a); });
       break;
     case Program::SQRT:
-      t.unary(I, m, [](double a) { return stan::math::sqrt(a); });
+      t.unary(o, I, m, [](double a) { return stan::math::sqrt(a); });
       break;
     case Program::SQUARE:
-      t.unary(I, m, [](double a) { return stan::math::square(a); });
+      t.unary(o, I, m, [](double a) { return stan::math::square(a); });
       break;
     case Program::INV:
-      t.unary(I, m, [](double a) { return stan::math::inv(a); });
+      t.unary(o, I, m, [](double a) { return stan::math::inv(a); });
       break;
     case Program::FABS:
-      t.unary(I, m, [](double a) { return stan::math::fabs(a); });
+      t.unary(o, I, m, [](double a) { return stan::math::fabs(a); });
       break;
     case Program::GT:
-      t.binary(I, m, [](double a, double b) { return double(a > b); });
+      t.binary(o, I, m, [](double a, double b) { return double(a > b); });
       break;
     case Program::GE:
-      t.binary(I, m, [](double a, double b) { return double(a >= b); });
+      t.binary(o, I, m, [](double a, double b) { return double(a >= b); });
       break;
     case Program::LT:
-      t.binary(I, m, [](double a, double b) { return double(a < b); });
+      t.binary(o, I, m, [](double a, double b) { return double(a < b); });
       break;
     case Program::LE:
-      t.binary(I, m, [](double a, double b) { return double(a <= b); });
+      t.binary(o, I, m, [](double a, double b) { return double(a <= b); });
       break;
     case Program::EQ:
-      t.binary(I, m, [](double a, double b) { return double(a == b); });
+      t.binary(o, I, m, [](double a, double b) { return double(a == b); });
       break;
     case Program::LSE2:
-      t.binary(I, m, [](double a, double b) {
+      t.binary(o, I, m, [](double a, double b) {
         return stan::math::log_sum_exp(a, b);
       });
       break;
     case Program::LOG_DIFF_EXP:
-      t.binary(I, m, [](double a, double b) {
+      t.binary(o, I, m, [](double a, double b) {
         return stan::math::log_diff_exp(a, b);
       });
       break;
     case Program::FMA:
-    case Program::LOG_MIX: {
-      double b0[kTile], b1[kTile], b2[kTile];
-      const double* a = t.read(I.a, b0);
-      const double* b = t.read(I.b, b1);
-      const double* c = t.read(I.c, b2);
-      double* d = t.slot(I.dst);
-      if (I.code == Program::FMA)
-        t.each(m, [&](int l) { d[l] = stan::math::fma(a[l], b[l], c[l]); });
-      else
-        t.each(m, [&](int l) { d[l] = stan::math::log_mix(a[l], b[l], c[l]); });
+      t.ternary(o, I, m, [](double a, double b, double c) {
+        return stan::math::fma(a, b, c);
+      });
       break;
-    }
+    case Program::LOG_MIX:
+      t.ternary(o, I, m, [](double a, double b, double c) {
+        return stan::math::log_mix(a, b, c);
+      });
+      break;
     case Program::DYN_INDEX: {
-      double b1[kTile];
-      const double* idx = t.read(I.b, b1);
       double* d = t.slot(I.dst);
       const int first = I.a + I.c;
-      t.each(m, [&](int l) {
-        const double raw = idx[l];
-        if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
-            raw > static_cast<double>(I.len))
-          throw std::out_of_range("register-program index out of range");
-        d[l] = t.value(first + static_cast<int32_t>(raw) - 1, l);
+      t.with(o.b, I.b, [&](auto idx) {
+        t.each(m, [&](int l) {
+          const double raw = idx[l];
+          if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
+              raw > static_cast<double>(I.len))
+            throw std::out_of_range("register-program index out of range");
+          d[l] = t.value(first + static_cast<int32_t>(raw) - 1, l);
+        });
       });
       break;
     }
@@ -1235,15 +1356,15 @@ void lane_tile_forward(const RegionMapProg& p, const TileState& t,
     const bool jump = tail.code == Program::JZ || tail.code == Program::JMP;
     for (int pc = block.begin; pc < (jump ? last : block.end); ++pc)
       if (!p.lanes.flag_store[(size_t)pc])
-        lane_instruction(p, t, p.code[(size_t)pc], m, window, call_ctx, state);
+        lane_instruction(p, t, pc, m, window, call_ctx, state);
     if (tail.code == Program::JMP) {
       entry[(size_t)block.taken] |= m;
     } else if (tail.code == Program::JZ) {
-      double b0[kTile];
-      const double* flag = t.read(tail.a, b0);
       Mask taken = 0;
-      t.each(m, [&](int l) {
-        if (flag[l] == 0.0) taken |= Mask{1} << l;
+      t.with(p.lanes.ops[(size_t)last].a, tail.a, [&](auto flag) {
+        t.each(m, [&](int l) {
+          if (flag[l] == 0.0) taken |= Mask{1} << l;
+        });
       });
       entry[(size_t)block.taken] |= taken;
       entry[(size_t)block.fall] |= m & ~taken;
@@ -1271,19 +1392,17 @@ class AdjointTile {
         rows_(log + (size_t)2 * p.lanes.max_sites),
         idx_rows_(rows_ + (size_t)p.lanes.max_sites * kTile) {}
 
-  using Cell = TileState::View;
-
   bool shared_cell(int c) const { return plan_.cell_slot[(size_t)c] < 0; }
 
-  Cell cell(int c) const {
-    const int s = plan_.cell_slot[(size_t)c];
-    return s >= 0 ? Cell{cells_ + (size_t)s * kTile, 1} : Cell{shared_ + c, 0};
+  double* cells() const { return cells_; }
+
+  double* cell(int c) const {
+    return cells_ + (size_t)plan_.cell_slot[(size_t)c] * kTile;
   }
 
-  Cell acc(int c) {
-    const int s = plan_.cell_slot[(size_t)c];
-    if (s >= 0) return Cell{cells_ + (size_t)s * kTile, 1};
-    return Cell{open_row(c), 1};
+  double* acc(int c, int32_t off) {
+    if (off >= 0) return cells_ + off;
+    return open_row(c);
   }
 
   double* acc_rows(int base, int len) {
@@ -1328,8 +1447,21 @@ class AdjointTile {
     }
   }
 
-  TileState::View val(int r) const { return fwd_.view(r); }
   const TileState& forward() const { return fwd_; }
+
+  template <typename F>
+  void with(int32_t off, int r, F&& f) const {
+    fwd_.with(off, r, f);
+  }
+  template <typename F>
+  void with(int32_t oa, int a, int32_t ob, int b, F&& f) const {
+    fwd_.with(oa, a, ob, b, f);
+  }
+  template <typename F>
+  void with(int32_t oa, int a, int32_t ob, int b, int32_t oc, int c,
+            F&& f) const {
+    fwd_.with(oa, a, ob, b, oc, c, f);
+  }
 
   template <typename F>
   void each(Mask m, F&& f) const {
@@ -1367,10 +1499,11 @@ class AdjointTile {
   int n_dynamic_ = 0;
 };
 
-void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t,
-                              const AdjInstr& I, Mask m, double* window,
-                              KernelCtx& ctx) {
-  using Cell = AdjointTile::Cell;
+void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
+                              Mask m, double* window, KernelCtx& ctx) {
+  const AdjInstr& I = p.adj.code[(size_t)pc];
+  const auto& o = p.lanes.adj_ops[(size_t)pc];
+  const auto cells = [&](int32_t off) { return t.cells() + off; };
   switch (I.code) {
     case Program::CONST:
     case Program::GT:
@@ -1381,19 +1514,20 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t,
     case Program::IADD:
     case Program::IMOD:
     case Program::INEG: {
-      const Cell d = t.cell(I.dst);
+      double* const d = cells(o.dst);
       t.each(m, [&](int l) { d[l] = 0.0; });
       return;
     }
     case Program::FILL:
     case Program::CONSTR:
       for (int32_t k = 0; k < I.len; ++k) {
-        const Cell d = t.cell(I.dst + k);
+        double* const d = t.cell(I.dst + k);
         t.each(m, [&](int l) { d[l] = 0.0; });
       }
       return;
     case Program::MOV: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
       t.each(m, [&](int l) {
         const double u = d[l];
         d[l] = 0.0;
@@ -1402,7 +1536,9 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t,
       return;
     }
     case Program::ADD: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a), b = t.acc(I.b);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      double* const b = t.acc(I.b, o.b);
       t.each(m, [&](int l) {
         const double u = d[l];
         d[l] = 0.0;
@@ -1412,7 +1548,9 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t,
       return;
     }
     case Program::SUB: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a), b = t.acc(I.b);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      double* const b = t.acc(I.b, o.b);
       t.each(m, [&](int l) {
         const double u = d[l];
         d[l] = 0.0;
@@ -1422,72 +1560,90 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t,
       return;
     }
     case Program::MUL: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a), b = t.acc(I.b);
-      const auto va = t.val(I.va), vb = t.val(I.vb);
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        a[l] += vb[l] * u;
-        b[l] += va[l] * u;
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      double* const b = t.acc(I.b, o.b);
+      t.with(o.va, I.va, o.vb, I.vb, [&](auto va, auto vb) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          a[l] += vb[l] * u;
+          b[l] += va[l] * u;
+        });
       });
       return;
     }
     case Program::FMA: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a), b = t.acc(I.b),
-                 c = t.acc(I.c);
-      const auto va = t.val(I.va), vb = t.val(I.vb);
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        a[l] += vb[l] * u;
-        b[l] += va[l] * u;
-        c[l] += u;
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      double* const b = t.acc(I.b, o.b);
+      double* const c = t.acc(I.c, o.c);
+      t.with(o.va, I.va, o.vb, I.vb, [&](auto va, auto vb) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          a[l] += vb[l] * u;
+          b[l] += va[l] * u;
+          c[l] += u;
+        });
       });
       return;
     }
     case Program::DIV: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a), b = t.acc(I.b);
-      const auto va = t.val(I.va), vb = t.val(I.vb), vd = t.val(I.vd);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      double* const b = t.acc(I.b, o.b);
       const bool safe = static_cast<uint8_t>(I.len) == kDivSafeGrouping;
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        double da, db;
-        if (safe)
-          div_partials(u, vb[l], vd[l], &da, &db);
-        else
-          div_partials_replay(u, va[l], vb[l], &da, &db);
-        a[l] += da;
-        b[l] += db;
-      });
+      t.with(o.va, I.va, o.vb, I.vb, o.vd, I.vd,
+             [&](auto va, auto vb, auto vd) {
+               t.each(m, [&](int l) {
+                 const double u = d[l];
+                 d[l] = 0.0;
+                 double da, db;
+                 if (safe)
+                   div_partials(u, vb[l], vd[l], &da, &db);
+                 else
+                   div_partials_replay(u, va[l], vb[l], &da, &db);
+                 a[l] += da;
+                 b[l] += db;
+               });
+             });
       return;
     }
     case Program::POW: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a), b = t.acc(I.b);
-      const auto va = t.val(I.va), vb = t.val(I.vb), vd = t.val(I.vd);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      double* const b = t.acc(I.b, o.b);
       const uint8_t law = static_cast<uint8_t>(I.len);
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        pow_rule(law, u, va[l], vb[l], vd[l], a[l], b[l]);
-      });
+      t.with(o.va, I.va, o.vb, I.vb, o.vd, I.vd,
+             [&](auto va, auto vb, auto vd) {
+               t.each(m, [&](int l) {
+                 const double u = d[l];
+                 d[l] = 0.0;
+                 pow_rule(law, u, va[l], vb[l], vd[l], a[l], b[l]);
+               });
+             });
       return;
     }
     case Program::FMAX:
     case Program::FMIN: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a), b = t.acc(I.b);
-      const auto va = t.val(I.va), vb = t.val(I.vb);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      double* const b = t.acc(I.b, o.b);
       const uint8_t law = static_cast<uint8_t>(I.len);
       const bool maximum = I.code == Program::FMAX;
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        extremum_rule(maximum, law, u, va[l], vb[l], a[l], b[l]);
+      t.with(o.va, I.va, o.vb, I.vb, [&](auto va, auto vb) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          extremum_rule(maximum, law, u, va[l], vb[l], a[l], b[l]);
+        });
       });
       return;
     }
     case Program::NEG: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
       t.each(m, [&](int l) {
         const double u = d[l];
         d[l] = 0.0;
@@ -1496,119 +1652,141 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t,
       return;
     }
     case Program::EXP: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a);
-      const auto vd = t.val(I.vd);
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        a[l] += u * vd[l];
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      t.with(o.vd, I.vd, [&](auto vd) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          a[l] += u * vd[l];
+        });
       });
       return;
     }
     case Program::LOG: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a);
-      const auto va = t.val(I.va);
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        a[l] += u / va[l];
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      t.with(o.va, I.va, [&](auto va) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          a[l] += u / va[l];
+        });
       });
       return;
     }
     case Program::LOG1P_EXP: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a);
-      const auto va = t.val(I.va);
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        a[l] += u * stan::math::inv_logit(va[l]);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      t.with(o.va, I.va, [&](auto va) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          a[l] += u * stan::math::inv_logit(va[l]);
+        });
       });
       return;
     }
     case Program::SQRT: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a);
-      const auto vd = t.val(I.vd);
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        if (vd[l] != 0.0) a[l] += u / (2.0 * vd[l]);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      t.with(o.vd, I.vd, [&](auto vd) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          if (vd[l] != 0.0) a[l] += u / (2.0 * vd[l]);
+        });
       });
       return;
     }
     case Program::SQUARE: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a);
-      const auto va = t.val(I.va);
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        a[l] += u * 2.0 * va[l];
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      t.with(o.va, I.va, [&](auto va) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          a[l] += u * 2.0 * va[l];
+        });
       });
       return;
     }
     case Program::INV: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a);
-      const auto va = t.val(I.va);
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        a[l] -= u / (va[l] * va[l]);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      t.with(o.va, I.va, [&](auto va) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          a[l] -= u / (va[l] * va[l]);
+        });
       });
       return;
     }
     case Program::FABS: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a);
-      const auto va = t.val(I.va);
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        fabs_rule(u, va[l], a[l]);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      t.with(o.va, I.va, [&](auto va) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          fabs_rule(u, va[l], a[l]);
+        });
       });
       return;
     }
     case Program::LSE2:
     case Program::LOG_DIFF_EXP: {
-      const Cell d = t.cell(I.dst), a = t.acc(I.a), b = t.acc(I.b);
-      const auto va = t.val(I.va), vb = t.val(I.vb);
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      double* const b = t.acc(I.b, o.b);
       const bool lse = I.code == Program::LSE2;
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        if (lse)
-          lse2_rule(u, va[l], vb[l], a[l], b[l]);
-        else
-          log_diff_exp_rule(u, va[l], vb[l], a[l], b[l]);
+      t.with(o.va, I.va, o.vb, I.vb, [&](auto va, auto vb) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          if (lse)
+            lse2_rule(u, va[l], vb[l], a[l], b[l]);
+          else
+            log_diff_exp_rule(u, va[l], vb[l], a[l], b[l]);
+        });
       });
       return;
     }
     case Program::LOG_MIX: {
-      const Cell d = t.cell(I.dst), c = t.acc(I.c), b = t.acc(I.b),
-                 a = t.acc(I.a);
-      const auto va = t.val(I.va), vb = t.val(I.vb), vc = t.val(I.vc);
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        log_mix_rule(u, va[l], vb[l], vc[l], a[l], b[l], c[l]);
-      });
+      double* const d = cells(o.dst);
+      double* const c = t.acc(I.c, o.c);
+      double* const b = t.acc(I.b, o.b);
+      double* const a = t.acc(I.a, o.a);
+      t.with(o.va, I.va, o.vb, I.vb, o.vc, I.vc,
+             [&](auto va, auto vb, auto vc) {
+               t.each(m, [&](int l) {
+                 const double u = d[l];
+                 d[l] = 0.0;
+                 log_mix_rule(u, va[l], vb[l], vc[l], a[l], b[l], c[l]);
+               });
+             });
       return;
     }
     case Program::DYN_INDEX: {
-      const Cell d = t.cell(I.dst);
-      const auto vb = t.val(I.vb);
-      if (t.shared_cell(I.a)) {
-        const auto site = t.acc_dynamic();
+      double* const d = cells(o.dst);
+      t.with(o.vb, I.vb, [&](auto vb) {
+        if (t.shared_cell(I.a)) {
+          const auto site = t.acc_dynamic();
+          t.each(m, [&](int l) {
+            const double u = d[l];
+            d[l] = 0.0;
+            site.value[l] = u;
+            site.index[l] =
+                static_cast<double>(I.a + static_cast<int32_t>(vb[l]) - 1);
+          });
+          return;
+        }
         t.each(m, [&](int l) {
           const double u = d[l];
           d[l] = 0.0;
-          site.value[l] = u;
-          site.index[l] =
-              static_cast<double>(I.a + static_cast<int32_t>(vb[l]) - 1);
+          t.cell(I.a + static_cast<int32_t>(vb[l]) - 1)[l] += u;
         });
-        return;
-      }
-      t.each(m, [&](int l) {
-        const double u = d[l];
-        d[l] = 0.0;
-        t.cell(I.a + static_cast<int32_t>(vb[l]) - 1)[l] += u;
       });
       return;
     }
@@ -1903,8 +2081,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
       }
       for (int pc = begin; pc < end; ++pc)
         if (!plan.adj_skip[(size_t)pc])
-          lane_adjoint_instruction(p, t, p.adj.code[(size_t)pc], m, window,
-                                   call_ctx);
+          lane_adjoint_instruction(p, t, pc, m, window, call_ctx);
     };
     if (p.adj.segments.empty()) {
       run(0, (int)p.adj.code.size(), fwd.full());
