@@ -38,7 +38,7 @@ Release builds. v0.18.1 is the last release (82c605cd); the branch is
 | invgaussian | over 5 min | does not compile | over 5 min |
 
 v0.18.1 does not compile lnr and lnr_bench (`log_mix` inside a parameter
-branch) nor ddm (seven-argument `wiener_lpdf`); invgaussian fails on a guard
+branch) nor ddm (six-argument `wiener_lpdf`); invgaussian fails on a guard
 return. lnr's trajectory diverges from CmdStan's (5812 vs 7124 leapfrogs).
 betadiscrete has no parameter-dependent control and keeps its old lowering.
 ddm and invgaussian run numerical integration per observation and exceed the
