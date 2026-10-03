@@ -38,7 +38,7 @@ keeping installation small and avoiding a local stan-math build.
   <!--gen:corpus_at_par-->302<!--/gen--> at or above parity.
   Failed or capped runs remain in the full table.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
-  <!--gen:corpus_reference_models-->351<!--/gen--> models share one three-point
+  <!--gen:corpus_reference_models-->352<!--/gen--> models share one three-point
   CmdStan reference replay. Within the posteriordb subset,
   <!--gen:corpus_verified-->118/120<!--/gen--> models are
   verified against CmdStan's log density and full gradient,

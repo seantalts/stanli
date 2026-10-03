@@ -1,11 +1,11 @@
 # Corpus status
 
-Evaluating: 351/352
-CmdStan reference coverage: 351/352 models, 1053 evaluation points.
+Evaluating: 352/353
+CmdStan reference coverage: 352/353 models, 1056 evaluation points.
 
-The shared corpus includes posteriordb, generated brms and cogmod models, imported teaching models, and language fixtures. Collection labels retain their source provenance; all references use the same replay in `tools/verify_refs.py`.
+The shared corpus includes posteriordb, generated brms and cogmod models, ctsem's state-space template, imported teaching models, and language fixtures. Collection labels retain their source provenance; all references use the same replay in `tools/verify_refs.py`.
 
-Recording-time primary-point comparison metrics retained for 336 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
+Recording-time primary-point comparison metrics retained for 337 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
 
 A model counts as passing only when tools/verify_sample.py matches CmdStan's log_prob and full gradient at the shared deterministic point. Accuracy below is the worst deviation over lp and every gradient component: relative, and in ULPs (0 = bitwise identical to CmdStan). Bitwise counts are reported for information; the replay uses a 1e-9 scaled-error gate with documented ill-conditioned exceptions. Models that evaluate but are not verified are listed separately and are not counted.
 
@@ -134,6 +134,7 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `cm_weibull` | cogmod | 6 | 0 (bitwise) | 0 |
 | `covid19imperial_v2` | posteriordb | 52 | 8.2e-16 | 7 |
 | `covid19imperial_v3` | posteriordb | 52 | 8.2e-16 | 7 |
+| `ctsem_ctsm` | ctsem | 182 | 2.0e-15 | 224 |
 | `declare-define-multi` | stanc3 | 376 | 0 (bitwise) | 0 |
 | `diamonds` | posteriordb | 27 | 0 (bitwise) | 0 |
 | `dogs` | posteriordb | 4 | 5.5e-15 | 31 |
@@ -495,6 +496,7 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `cm_weibull` | 10 |
 | `covid19imperial_v2` | 8457 |
 | `covid19imperial_v3` | 8457 |
+| `ctsem_ctsm` | 648 |
 | `declare-define-multi` | 452 |
 | `diamonds` | 27 |
 | `dogs` | 2253 |
