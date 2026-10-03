@@ -11,11 +11,13 @@ parameters {
 model {
   for (n in 1:N) {
     real r = y[n] - a * x[n];
+    real t;
     if (r < nv || b > nv)
-      target += -square(r);
+      t = -square(r);
     else
-      target += -0.5 * square(r) + b;
-    if (!(r >= nv) && r < b) target += 0.1 * a;
-    target += (r > nv || r < -b) ? 0.2 * b : -0.1 * r;
+      t = -0.5 * square(r) + b;
+    if (!(r >= nv) && r < b) t += 0.1 * a;
+    t += (r > nv || r < -b) ? 0.2 * b : -0.1 * r;
+    target += t;
   }
 }

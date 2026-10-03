@@ -441,6 +441,34 @@ bool gen_adjoint(IslandProg& p) {
     return true;
   };
 
+  const bool elide_private_clears =
+      std::getenv("STANLI_NO_PRIVATE_ADJOINT_CLEARS") == nullptr;
+  auto produces_adjoint = [&](const Program::Instr& I, int i) {
+    if (I.code == Program::CALL) return true;
+    if (aliasable(I, i)) return false;
+    const int wl = program_output_len(I);
+    if (wl == 0) return false;
+    const ProgramOpSpec& spec = program_spec_of(I);
+    const bool only_clear =
+        spec.has(kProgramNoInputs) ||
+        (I.code >= Program::GT && I.code <= Program::NE) ||
+        (I.code >= Program::IMOD && I.code <= Program::IABS) ||
+        I.code == Program::EXTREMA_RANGE;
+    if (elide_private_clears && only_clear) {
+      bool private_first = true;
+      for (int k = 0; k < wl; ++k)
+        private_first &= first_write[I.dst + k] == i && !no_alias[I.dst + k];
+      if (private_first) return false;
+    }
+    return true;
+  };
+  std::vector<int> flag_of((size_t)nblocks, -1);
+  int nflags = 0;
+  if (control)
+    for (int i = 0; i < (int)orig.size(); ++i)
+      if (produces_adjoint(orig[(size_t)i], i) && flag_of[block[i]] < 0)
+        flag_of[block[i]] = nflags++;
+
   // Discover every shared cell before emitting the adjoint instructions.
   // Besides making their indices final for map1/mapn below, this lets the
   // file store one double per equivalence class rather than retaining holes
@@ -475,24 +503,24 @@ bool gen_adjoint(IslandProg& p) {
     return base;
   };
 
-  int n_regs = n0 + nblocks;
-  const bool elide_private_clears =
-      std::getenv("STANLI_NO_PRIVATE_ADJOINT_CLEARS") == nullptr;
+  int n_regs = n0 + nflags;
   std::vector<double> pool;
   std::vector<int> pc_map(orig.size() + 1), adj_starts(nblocks + 1);
   int flag_one = 0;
   if (control) {
     pool = fwd.pool;
     const int zeros = static_cast<int>(pool.size());
-    pool.resize(pool.size() + nblocks, 0.0);
+    pool.resize(pool.size() + nflags, 0.0);
     flag_one = static_cast<int>(pool.size());
     pool.push_back(1.0);
-    Program::Instr clear;
-    clear.code = Program::CONSTR;
-    clear.dst = n0;
-    clear.a = zeros;
-    clear.len = nblocks;
-    ncode.push_back(clear);
+    if (nflags > 0) {
+      Program::Instr clear;
+      clear.code = Program::CONSTR;
+      clear.dst = n0;
+      clear.a = zeros;
+      clear.len = nflags;
+      ncode.push_back(clear);
+    }
   }
   auto checkpoint = [&](int r, int len, bool needed) {
     if (!needed) return r;
@@ -521,11 +549,13 @@ bool gen_adjoint(IslandProg& p) {
     pc_map[i] = static_cast<int>(ncode.size());
     if (control && leaders[block[i]] == i) {
       adj_starts[block[i]] = static_cast<int>(ap.code.size());
-      Program::Instr flag;
-      flag.code = Program::CONST;
-      flag.dst = n0 + block[i];
-      flag.a = flag_one;
-      ncode.push_back(flag);
+      if (flag_of[block[i]] >= 0) {
+        Program::Instr flag;
+        flag.code = Program::CONST;
+        flag.dst = n0 + flag_of[block[i]];
+        flag.a = flag_one;
+        ncode.push_back(flag);
+      }
     }
     if (I.code == Program::CALL) {
       Program::Call call = fwd.calls[(size_t)I.a];
@@ -619,17 +649,7 @@ bool gen_adjoint(IslandProg& p) {
     // definition there is no earlier value to differentiate, so that final
     // clear has no reader. Live-ins and shared cells retain their clears;
     // each invocation starts with a zeroed adjoint file.
-    const bool only_clear =
-        spec.has(kProgramNoInputs) ||
-        (I.code >= Program::GT && I.code <= Program::NE) ||
-        (I.code >= Program::IMOD && I.code <= Program::IABS) ||
-        I.code == Program::EXTREMA_RANGE;
-    if (elide_private_clears && only_clear) {
-      bool private_first = true;
-      for (int k = 0; k < wl; ++k)
-        private_first &= first_write[I.dst + k] == i && !no_alias[I.dst + k];
-      if (private_first) continue;
-    }
+    if (!produces_adjoint(I, i)) continue;
 
     // An output value is needed as this instruction LEFT it, so only a
     // later overwrite can lose it.
@@ -671,9 +691,11 @@ bool gen_adjoint(IslandProg& p) {
     const int total = static_cast<int>(ap.code.size());
     adj_starts.back() = total;
     for (int b = nblocks; b-- > 0;)
-      if (adj_starts[b] != adj_starts[b + 1])
-        ap.segments.push_back(
-            {n0 + b, total - adj_starts[b + 1], total - adj_starts[b]});
+      if (adj_starts[b] != adj_starts[b + 1]) {
+        if (flag_of[b] < 0) return false;
+        ap.segments.push_back({n0 + flag_of[b], total - adj_starts[b + 1],
+                               total - adj_starts[b]});
+      }
     fwd.pool = std::move(pool);
   }
   std::reverse(ap.code.begin(), ap.code.end());

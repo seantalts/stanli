@@ -1846,14 +1846,16 @@ const Ref ref_nan = [](const std::vector<var>& p, const Series& s,
   const var a = p[0], b = p[1];
   for (size_t i = 0; i < s.y.size(); ++i) {
     const var r = s.y[i] - a * s.x[i];
+    var t;
     if (r < nv || b > nv)
-      lp += -stan::math::square(r);
+      t = -stan::math::square(r);
     else
-      lp += -0.5 * stan::math::square(r) + b;
+      t = -0.5 * stan::math::square(r) + b;
     const bool gate = !(r >= nv) && r < b;
     if (taken) taken->push_back(gate);
-    if (gate) lp += 0.1 * a;
-    lp += (r > nv || r < -b) ? 0.2 * b : -0.1 * r;
+    if (gate) t += 0.1 * a;
+    t += (r > nv || r < -b) ? 0.2 * b : -0.1 * r;
+    lp += t;
   }
   return lp;
 };
