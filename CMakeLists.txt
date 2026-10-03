@@ -1225,7 +1225,8 @@ endif()
 
 set(STANLI_TESTS
   test_execution_report test_rng_families test_vector_rng test_container_rng
-  test_smoke test_executor test_recorder test_densities test_matvec test_eigen
+  test_smoke test_executor test_recorder test_densities test_tile_calls
+  test_matvec test_eigen
   test_mnc test_stan240
   test_legacy test_eight_schools test_glm test_normal_glm test_nuts test_walnuts test_sexp
   test_model_adapter test_sampler_parity

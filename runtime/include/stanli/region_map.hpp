@@ -2,6 +2,7 @@
 #define STANLI_REGION_MAP_HPP
 
 #include <stanli/island.hpp>
+#include <stanli/tile_call.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -65,6 +66,7 @@ struct RegionMapLanePlan {
     int32_t val_out_reg = -1;
     int32_t adj_in_cell[6] = {-1, -1, -1, -1, -1, -1};
     int32_t adj_out_cell = -1;
+    TileCallKind tile = TileCallKind::None;
   };
   struct Operands {
     int32_t dst = -1, a = -1, b = -1, c = -1;
@@ -83,6 +85,7 @@ struct RegionMapLanePlan {
   int max_window = 0;
   int max_sites = 0;
   int max_dynamic = 0;
+  int tile_calls = 0;
   std::vector<int32_t> reg_slot;
   std::vector<int32_t> seed_regs;
   std::vector<int32_t> cell_slot;
@@ -118,6 +121,10 @@ void plan_region_map_lanes(RegionMapProg& p, bool enabled,
                            int64_t storage_limit);
 
 uint64_t region_map_lane_runs();
+
+uint64_t region_map_tile_call_runs();
+
+std::string region_map_call_summary(const RegionMapProg& p);
 
 int64_t region_map_lane_cells(const RegionMapProg& p);
 std::vector<char> region_map_clean_exempt_cells(const RegionMapProg& p);

@@ -11,12 +11,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <memory>
 #include <stdexcept>
 #include <set>
 #include <type_traits>
 #include <string>
+#include <string_view>
 
 namespace stanli {
 namespace {
@@ -159,11 +161,13 @@ struct Refusal {
 
 class Analysis {
  public:
-  Analysis(RegionMapProg& p, int64_t storage_limit, int64_t recompute_cells)
+  Analysis(RegionMapProg& p, int64_t storage_limit, int64_t recompute_cells,
+           bool tile_calls)
       : p_(p),
         plan_(p.lanes),
         limit_(storage_limit),
-        recompute_cells_(recompute_cells) {}
+        recompute_cells_(recompute_cells),
+        tile_calls_(tile_calls) {}
 
   void run() {
     check_opcodes();
@@ -187,6 +191,7 @@ class Analysis {
   RegionMapLanePlan& plan_;
   int64_t limit_;
   int64_t recompute_cells_;
+  bool tile_calls_;
   int n_cells_ = 0;
   std::vector<int> writes_;
   std::vector<char> undefined_read_;
@@ -923,7 +928,38 @@ class Analysis {
       w.scratch_reg = reg_offset(call.scratch);
       w.val_out_reg = reg_offset(call.bwd_value_out);
       w.adj_out_cell = cell_offset(call.bwd_adj_out);
+      if (tile_calls_ && tile_callable(call, w)) {
+        w.tile = tile_call_kind(call.opcode);
+        ++plan_.tile_calls;
+      }
     }
+  }
+
+  bool tile_callable(const Program::Call& call,
+                     const RegionMapLanePlan::CallWindow& w) const {
+    const TileCallKind kind = tile_call_kind(call.opcode);
+    if (kind == TileCallKind::None) return false;
+    if (call.forward == nullptr || call.backward == nullptr) return false;
+    if (call.n_in < 1 || call.n_in > 6 || call.out_len != 1) return false;
+    const int scratch = kind == TileCallKind::Density ? call.n_in + 1 : 0;
+    if (call.scratch_len != scratch) return false;
+    if (kind == TileCallKind::Unary && call.n_in != 1) return false;
+    if (call.variant & 0x40u) return false;
+    if (!call.idata.empty() || call.udata_owner) return false;
+    for (int k = 0; k < call.n_in; ++k)
+      if (call.in_len[k] != 1) return false;
+    if (w.out_reg < 0 || w.adj_out_cell < 0) return false;
+    if (scratch && w.scratch_reg < 0) return false;
+    for (int k = 0; k < call.n_in; ++k)
+      if ((call.input_adjoint_mask & (1u << k)) && w.adj_in_cell[k] < 0 &&
+          !shared_adjoint_cell(call.bwd_adj_in[k]))
+        return false;
+    return true;
+  }
+
+  bool shared_adjoint_cell(int c) const {
+    return c >= 0 && (size_t)c < plan_.cell_slot.size() &&
+           plan_.cell_slot[(size_t)c] < 0;
   }
 
   void forward_window(int index) {
@@ -1173,6 +1209,93 @@ class TileState {
   Mask full_;
 };
 
+std::atomic<uint64_t> tile_call_runs{0};
+
+constexpr int kTileCallColumns = 20;
+
+struct TileLanes {
+  int idx[kTile];
+  int n = 0;
+  bool direct = false;
+  TileLanes(const TileState& t, Mask m) {
+    direct = t.lanes() == kTile && m == t.full();
+    if (direct) {
+      for (int l = 0; l < kTile; ++l) idx[l] = l;
+      n = kTile;
+    } else {
+      for (; m; m &= m - 1) idx[n++] = __builtin_ctzll(m);
+    }
+  }
+};
+
+Desc tile_operand(const TileLanes& lanes, int32_t off, const double* shared,
+                  bool broadcast, const double* rows, double*& at) {
+  if (off >= 0) {
+    if (lanes.direct) return Desc{const_cast<double*>(rows + off), kTile};
+    const double* src = rows + off;
+    for (int i = 0; i < lanes.n; ++i) at[i] = src[lanes.idx[i]];
+    const Desc d{at, (int64_t)lanes.n};
+    at += lanes.n;
+    return d;
+  }
+  if (!broadcast) return Desc{const_cast<double*>(shared), 1};
+  std::fill_n(at, lanes.n, *shared);
+  const Desc d{at, (int64_t)lanes.n};
+  at += lanes.n;
+  return d;
+}
+
+bool tile_call_forward(const RegionMapLanePlan::CallWindow& w,
+                       const Program::Call& call, const TileState& t, Mask m,
+                       KernelCtx& ctx) {
+  const int n_in = call.n_in;
+  const int n_scratch = call.scratch_len;
+  const bool broadcast = w.tile == TileCallKind::Unary;
+  const double* const base = t.base();
+  double* const rows = t.mutable_base();
+  const TileLanes lanes(t, m);
+  const int n = lanes.n;
+  ctx.variant = tile_call_variant(w.tile, call.variant, n_in);
+  ctx.n_in = n_in;
+  double buf[kTileCallColumns * kTile];
+  double* at = buf;
+  for (int k = 0; k < n_in; ++k)
+    ctx.in[k] = tile_operand(lanes, w.in_reg[k], t.shared_regs() + call.in[k],
+                             broadcast, base, at);
+  double* out = rows + w.out_reg;
+  double* scratch = n_scratch ? rows + w.scratch_reg : nullptr;
+  if (!lanes.direct) {
+    out = at;
+    at += n;
+    if (n_scratch) {
+      scratch = at;
+      for (int c = 0; c < n_scratch; ++c) {
+        const double* src = base + w.scratch_reg + (size_t)c * kTile;
+        for (int i = 0; i < n; ++i)
+          scratch[(size_t)c * n + i] = src[lanes.idx[i]];
+      }
+    }
+  }
+  ctx.out = Desc{out, (int64_t)n};
+  ctx.scratch = scratch;
+  try {
+    call.forward(ctx);
+  } catch (...) {
+    return false;
+  }
+  if (!lanes.direct) {
+    double* const out_row = rows + w.out_reg;
+    for (int i = 0; i < n; ++i) out_row[lanes.idx[i]] = out[i];
+    for (int c = 0; c < n_scratch; ++c) {
+      double* dst = rows + w.scratch_reg + (size_t)c * kTile;
+      for (int i = 0; i < n; ++i)
+        dst[lanes.idx[i]] = scratch[(size_t)c * n + i];
+    }
+  }
+  tile_call_runs.fetch_add(1, std::memory_order_relaxed);
+  return true;
+}
+
 void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
                       Mask m, double* window, KernelCtx& call_ctx,
                       EvalState* state) {
@@ -1348,6 +1471,10 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
       if (call.forward == nullptr)
         throw std::logic_error("unbound Program::CALL forward");
       bind_call_fwd_ctx(w.fwd, window, call_ctx, state);
+      if (w.tile != TileCallKind::None) {
+        if (tile_call_forward(w, call, t, m, call_ctx)) break;
+        bind_call_fwd_ctx(w.fwd, window, call_ctx, state);
+      }
       const double* const base = t.base();
       for (int k = 0; k < call.n_in; ++k)
         if (w.in_reg[k] < 0)
@@ -1576,6 +1703,87 @@ class AdjointTile {
   int n_sites_ = 0;
   int n_dynamic_ = 0;
 };
+
+void tile_call_backward(const RegionMapLanePlan::CallWindow& w,
+                        const Program::Call& call, const AdjointTile& t, Mask m,
+                        double* const rows[6], KernelCtx& ctx) {
+  const TileState& f = t.forward();
+  const int n_in = call.n_in;
+  const int n_scratch = call.scratch_len;
+  const bool unary = w.tile == TileCallKind::Unary;
+  const double* const fbase = f.base();
+  double* const cbase = t.cells();
+  const TileLanes lanes(f, m);
+  const int n = lanes.n;
+  ctx.n_in = n_in;
+  ctx.variant = tile_call_variant(w.tile, call.variant, n_in);
+  ctx.idata = call.idata.data();
+  ctx.n_idata = (int64_t)call.idata.size();
+  ctx.udata = call.udata_owner.get();
+  double buf[kTileCallColumns * kTile];
+  double* at = buf;
+  for (int k = 0; k < n_in; ++k)
+    ctx.in[k] =
+        tile_operand(lanes, w.val_in_reg[k],
+                     f.shared_regs() + call.bwd_value_in[k], unary, fbase, at);
+  double* adj[6] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+  for (int k = 0; k < n_in; ++k) {
+    if (!(call.input_adjoint_mask & (1u << k))) {
+      ctx.in_adj[k] = Desc{nullptr, (int64_t)n};
+      continue;
+    }
+    if (lanes.direct) {
+      adj[k] = rows[k] ? rows[k] : cbase + w.adj_in_cell[k];
+    } else {
+      adj[k] = at;
+      at += n;
+      if (rows[k]) {
+        std::fill_n(adj[k], n, 0.0);
+      } else {
+        const double* src = cbase + w.adj_in_cell[k];
+        for (int i = 0; i < n; ++i) adj[k][i] = src[lanes.idx[i]];
+      }
+    }
+    ctx.in_adj[k] = Desc{adj[k], (int64_t)n};
+  }
+  double* const out_adj_cell = cbase + w.adj_out_cell;
+  double* out_adj = out_adj_cell;
+  if (!lanes.direct) {
+    out_adj = at;
+    at += n;
+    for (int i = 0; i < n; ++i) out_adj[i] = out_adj_cell[lanes.idx[i]];
+  }
+  ctx.out_adj = out_adj[0];
+  ctx.out_adj_vec = Desc{out_adj, (int64_t)n};
+  if (unary) {
+    ctx.out =
+        tile_operand(lanes, w.val_out_reg, f.shared_regs() + call.bwd_value_out,
+                     true, fbase, at);
+  } else {
+    ctx.out = Desc{out_adj, (int64_t)n};
+  }
+  double* scratch = n_scratch ? f.mutable_base() + w.scratch_reg : nullptr;
+  if (n_scratch && !lanes.direct) {
+    scratch = at;
+    for (int c = 0; c < n_scratch; ++c) {
+      const double* src = fbase + w.scratch_reg + (size_t)c * kTile;
+      for (int i = 0; i < n; ++i)
+        scratch[(size_t)c * n + i] = src[lanes.idx[i]];
+    }
+  }
+  ctx.scratch = scratch;
+  call.backward(ctx);
+  if (lanes.direct) {
+    std::fill_n(out_adj_cell, kTile, 0.0);
+    return;
+  }
+  for (int k = 0; k < n_in; ++k) {
+    if (!adj[k]) continue;
+    double* const dst = rows[k] ? rows[k] : cbase + w.adj_in_cell[k];
+    for (int i = 0; i < n; ++i) dst[lanes.idx[i]] = adj[k][i];
+  }
+  for (int i = 0; i < n; ++i) out_adj_cell[lanes.idx[i]] = 0.0;
+}
 
 void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
                               Mask m, double* window, KernelCtx& ctx) {
@@ -1896,6 +2104,10 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
         if ((call.input_adjoint_mask & (1u << k)) &&
             t.shared_cell(call.bwd_adj_in[k]))
           rows[k] = t.acc_rows(call.bwd_adj_in[k], call.in_len[k]);
+      if (w.tile != TileCallKind::None) {
+        tile_call_backward(w, call, t, m, rows, ctx);
+        return;
+      }
       const double* const fbase = f.base();
       double* const cbase = t.cells();
       for (int k = 0; k < call.n_in; ++k) {
@@ -2088,6 +2300,19 @@ void RegionMapTally::add(const RegionMapTally& o) {
   }
 }
 
+std::string region_map_call_summary(const RegionMapProg& p) {
+  std::map<std::string, int> counts;
+  for (const auto& call : p.calls) ++counts[stanli::opcode_name(call.opcode)];
+  std::string out = " calls=";
+  for (const auto& [name, n] : counts)
+    out += name + ":" + std::to_string(n) + ",";
+  return out;
+}
+
+uint64_t region_map_tile_call_runs() {
+  return tile_call_runs.load(std::memory_order_relaxed);
+}
+
 uint64_t region_map_lane_runs() {
   return lane_runs.load(std::memory_order_relaxed);
 }
@@ -2255,7 +2480,9 @@ void plan_region_map_lanes(RegionMapProg& p, bool enabled,
     int64_t recompute_cells = std::numeric_limits<int64_t>::max();
     if (const char* v = std::getenv("STANLI_REGION_MAP_TILE_CELLS"))
       recompute_cells = std::strtoll(v, nullptr, 10);
-    Analysis(p, storage_limit, recompute_cells).run();
+    const char* tile_env = std::getenv("STANLI_REGION_MAP_TILE_CALLS");
+    const bool tile_calls = !(tile_env && std::string_view(tile_env) == "0");
+    Analysis(p, storage_limit, recompute_cells, tile_calls).run();
     p.lanes.active = true;
     if (std::getenv("STANLI_REGION_MAP_PROFILE"))
       p.lanes.profile = make_profile(p);

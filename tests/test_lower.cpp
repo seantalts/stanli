@@ -2341,6 +2341,97 @@ void test_native_math() {
   }
 }
 
+void expect_tile_call_parity(const std::string& what, const CompiledModel& on,
+                             const CompiledModel& off,
+                             const CompiledModel& scalar,
+                             const std::vector<Params>& points,
+                             LaneOutcome& tally, int& batched_models) {
+  const auto& pon = map_payload(on);
+  check(pon.lanes.active, what + ": lane plan active");
+  int callable = 0;
+  for (const auto& c : pon.calls)
+    if (stanli::tile_call_kind(c.opcode) != stanli::TileCallKind::None)
+      ++callable;
+  check(pon.lanes.tile_calls == callable,
+        what + ": every density and unary call is marked (" +
+            std::to_string(pon.lanes.tile_calls) + " of " +
+            std::to_string(callable) + ")");
+  const bool want_batched = callable > 0;
+  batched_models += want_batched;
+  check(map_payload(off).lanes.tile_calls == 0,
+        what + ": STANLI_REGION_MAP_TILE_CALLS=0 marks nothing");
+  Executor eon(on.graph), eoff(off.graph), es(scalar.graph);
+  on.bind(eon);
+  off.bind(eoff);
+  scalar.bind(es);
+  bool ran_any = false;
+  size_t threw_here = 0;
+  for (size_t k = 0; k < points.size(); ++k) {
+    const std::string at = what + " point " + std::to_string(k);
+    Params point = points[k];
+    if (point.size() != (size_t)eon.n_params()) {
+      point = spread_point(k, (size_t)eon.n_params());
+      for (size_t j = 0; j < points[k].size() && j < point.size(); ++j)
+        point[j] = points[k][j];
+    }
+    const uint64_t before = stanli::region_map_tile_call_runs();
+    const Run got = try_evaluate(eon, point);
+    const uint64_t after = stanli::region_map_tile_call_runs();
+    const Run per_lane = try_evaluate(eoff, point);
+    const Run want = try_evaluate(es, point);
+    check(stanli::region_map_tile_call_runs() == after,
+          at + ": per-lane calls never count as tile calls");
+    ran_any = ran_any || after > before;
+    check(got.threw == per_lane.threw && got.threw == want.threw,
+          at + ": the three paths agree on throwing");
+    if (got.threw || per_lane.threw || want.threw) {
+      check(got.what == per_lane.what && got.what == want.what,
+            at + ": same exception: " + got.what + " | " + per_lane.what +
+                " | " + want.what);
+      ++tally.threw;
+      ++threw_here;
+      continue;
+    }
+    ++tally.ok;
+    check(same_bits(got.e.lp, per_lane.e.lp) && same_bits(got.e.lp, want.e.lp),
+          at + ": lp bitwise equal");
+    for (size_t i = 0; i < want.e.grad.size(); ++i)
+      check(same_bits(got.e.grad[i], per_lane.e.grad[i]) &&
+                same_bits(got.e.grad[i], want.e.grad[i]),
+            at + ": grad[" + std::to_string(i) + "] bitwise equal (" +
+                std::to_string(got.e.grad[i]) + " | " +
+                std::to_string(per_lane.e.grad[i]) + " | " +
+                std::to_string(want.e.grad[i]) + ")");
+  }
+  check(threw_here == points.size() || ran_any == want_batched,
+        what + ": a batched kernel call ran iff a call is marked");
+}
+
+void test_tile_call_parity() {
+  std::vector<LaneFixture> fixtures;
+  for (const LaneFixture& f : lane_fixture_list())
+    if (f.lanes) fixtures.push_back(f);
+  fixtures.push_back({"region_map_calldomain", true, ""});
+  LaneOutcome tally;
+  int batched_models = 0;
+  for (const LaneFixture& f : fixtures)
+    for (int n : {37, 64, 65, 200}) {
+      const std::string what =
+          std::string(f.stem) + " tile calls N=" + std::to_string(n);
+      CompiledModel on = compile_with(f.stem, n, nullptr, "0", f.extra);
+      CompiledModel off =
+          compile_with(f.stem, n, "STANLI_REGION_MAP_TILE_CALLS", "0", f.extra);
+      CompiledModel scalar =
+          compile_with(f.stem, n, "STANLI_REGION_MAP_LANES", "0", f.extra);
+      expect_tile_call_parity(what, on, off, scalar, spread_points(2, 6), tally,
+                              batched_models);
+    }
+  check(tally.ok > 0, "tile call parity evaluates some points");
+  check(tally.threw > 0, "tile call parity covers throwing points");
+  check(batched_models >= 16, "tile calls run in several fixtures (" +
+                                  std::to_string(batched_models) + ")");
+}
+
 void test_lane_tile_recompute() {
   CompiledModel big = compile_with("region_map_long_body", 200);
   const auto& b = map_payload(big);
@@ -3107,6 +3198,7 @@ static void test_region_map() {
   test_logic_compiles_to_jumps();
   test_lane_fixtures();
   test_native_math();
+  test_tile_call_parity();
   test_lane_tile_recompute();
   test_lane_seed_and_clean();
   test_map_selection_follows_data_through_udfs();
