@@ -8,8 +8,11 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <memory>
 #include <stdexcept>
 #include <set>
 #include <string>
@@ -155,11 +158,13 @@ class Analysis {
 
   void run() {
     check_opcodes();
+    build_blocks();
+    find_undefined_reads();
+    analyze_invariance();
     classify_registers();
     classify_cells();
     check_ranges();
-    build_blocks();
-    find_seeds();
+    collect_seeds();
     build_windows();
     count_sites();
     size_tiles();
@@ -171,6 +176,9 @@ class Analysis {
   int64_t limit_;
   int64_t recompute_cells_;
   int n_cells_ = 0;
+  std::vector<int> writes_;
+  std::vector<char> undefined_read_;
+  std::vector<char> invariant_reg_;
 
   bool shared_reg(int r) const {
     return r >= 0 && r < (int)plan_.reg_slot.size() && plan_.reg_slot[r] < 0;
@@ -358,16 +366,25 @@ class Analysis {
       if (program_reads(I, k)) f(operand[k], program_input_len(I, k));
   }
 
-  void find_seeds() {
+  void find_undefined_reads() {
     const auto& blocks = plan_.blocks;
     const size_t n_blocks = blocks.size();
-    const size_t n_slots = (size_t)plan_.fwd_regs;
-    std::vector<std::vector<char>> out(n_blocks);
+    const size_t n_regs = (size_t)p_.n_regs;
+    std::vector<int> writes((size_t)p_.n_regs, 0);
+    each_body_write([&](int reg, int len) {
+      for (int k = 0; k < len; ++k) {
+        if (reg + k < 0 || reg + k >= p_.n_regs) refuse("register out of range");
+        ++writes[(size_t)(reg + k)];
+      }
+    });
+    writes_ = writes;
+    undefined_read_.assign(n_regs, 0);
     std::vector<std::vector<char>> in(n_blocks);
     std::vector<char> reached(n_blocks, 0);
-    std::vector<char> seeded(n_slots, 0);
     reached[0] = 1;
-    in[0].assign(n_slots, 0);
+    in[0].assign(n_regs, 0);
+    for (size_t r = 0; r < n_regs; ++r) in[0][r] = writes[r] == 0;
+    in[0][(size_t)p_.iter_reg] = 1;
     const auto meet = [&](size_t to, const std::vector<char>& from) {
       if (to >= n_blocks) return;
       if (!reached[to]) {
@@ -375,20 +392,16 @@ class Analysis {
         in[to] = from;
         return;
       }
-      for (size_t k = 0; k < n_slots; ++k) in[to][k] &= from[k];
+      for (size_t k = 0; k < n_regs; ++k) in[to][k] &= from[k];
     };
-    const int iter_slot = plan_.reg_slot[(size_t)p_.iter_reg];
     for (size_t b = 0; b < n_blocks; ++b) {
       if (!reached[b]) continue;
       std::vector<char> defined = in[b];
-      if (b == 0) defined[(size_t)iter_slot] = 1;
       for (int pc = blocks[b].begin; pc < blocks[b].end; ++pc) {
         const Program::Instr& I = p_.code[(size_t)pc];
         each_body_read(I, [&](int reg, int len) {
-          for (int k = 0; k < len; ++k) {
-            const int s = plan_.reg_slot[(size_t)(reg + k)];
-            if (s >= 0 && !defined[(size_t)s]) seeded[(size_t)s] = 1;
-          }
+          for (int k = 0; k < len; ++k)
+            if (!defined[(size_t)(reg + k)]) undefined_read_[(size_t)(reg + k)] = 1;
         });
         switch (I.code) {
           case Program::JZ:
@@ -397,27 +410,100 @@ class Analysis {
           case Program::CALL: {
             const Program::Call& call = p_.calls[(size_t)I.a];
             for (int k = 0; k < call.out_len; ++k)
-              defined[(size_t)plan_.reg_slot[(size_t)(call.out + k)]] = 1;
+              defined[(size_t)(call.out + k)] = 1;
             for (int k = 0; k < call.scratch_len; ++k)
-              defined[(size_t)plan_.reg_slot[(size_t)(call.scratch + k)]] = 1;
+              defined[(size_t)(call.scratch + k)] = 1;
             break;
           }
           case Program::CONSTR:
           case Program::FILL:
-            for (int k = 0; k < I.len; ++k)
-              defined[(size_t)plan_.reg_slot[(size_t)(I.dst + k)]] = 1;
+            for (int k = 0; k < I.len; ++k) defined[(size_t)(I.dst + k)] = 1;
             break;
           default:
-            defined[(size_t)plan_.reg_slot[(size_t)I.dst]] = 1;
+            defined[(size_t)I.dst] = 1;
         }
       }
       if (blocks[b].taken >= 0) meet((size_t)blocks[b].taken, defined);
       if (blocks[b].fall >= 0) meet((size_t)blocks[b].fall, defined);
     }
+  }
+
+  void collect_seeds() {
     for (int r = 0; r < p_.n_regs; ++r) {
       const int s = plan_.reg_slot[(size_t)r];
-      if (s >= 0 && seeded[(size_t)s] && r != p_.iter_reg)
+      if (s >= 0 && undefined_read_[(size_t)r] && r != p_.iter_reg)
         plan_.seed_regs.push_back(r);
+    }
+  }
+
+  bool shared_operand(int r) const {
+    return r != p_.iter_reg && (!writes_[(size_t)r] || invariant_reg_[(size_t)r]);
+  }
+
+  void analyze_invariance() {
+    const int n = p_.n_regs;
+    invariant_reg_.assign((size_t)n, 0);
+    std::vector<char> excluded((size_t)n, 0);
+    const auto exclude = [&](int base, int len) {
+      if (len <= 1) return;
+      for (int k = 0; k < len; ++k)
+        if (base + k >= 0 && base + k < n) excluded[(size_t)(base + k)] = 1;
+    };
+    for (const auto& seg : p_.adj.segments)
+      if (seg.guard >= 0 && seg.guard < n) excluded[(size_t)seg.guard] = 1;
+    for (const auto& I : p_.code) {
+      switch (I.code) {
+        case Program::CONSTR:
+        case Program::FILL:
+          exclude(I.dst, I.len);
+          break;
+        case Program::DYN_INDEX:
+          exclude(I.a + I.c, I.len);
+          break;
+        case Program::CALL: {
+          const Program::Call& call = p_.calls[(size_t)I.a];
+          for (int k = 0; k < call.n_in; ++k) exclude(call.in[k], call.in_len[k]);
+          exclude(call.out, call.out_len);
+          exclude(call.scratch, call.scratch_len);
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    for (const auto& A : p_.adj.code) {
+      if (A.code != Program::CALL) continue;
+      const Program::Call& call = p_.calls[(size_t)A.a];
+      for (int k = 0; k < call.n_in; ++k)
+        exclude(call.bwd_value_in[k], call.in_len[k]);
+      exclude(call.bwd_value_out, call.out_len);
+    }
+    plan_.invariant.assign(p_.code.size(), 0);
+    for (size_t pc = 0; pc < p_.code.size(); ++pc) {
+      const Program::Instr& I = p_.code[pc];
+      if (I.code == Program::JMP) continue;
+      bool reads = false, shared = true;
+      each_body_read(I, [&](int reg, int len) {
+        for (int k = 0; k < len; ++k) {
+          reads = true;
+          if (!shared_operand(reg + k)) shared = false;
+        }
+      });
+      if (!reads || !shared) continue;
+      plan_.invariant[pc] = 1;
+      switch (I.code) {
+        case Program::JZ:
+        case Program::CALL:
+        case Program::CONSTR:
+        case Program::FILL:
+        case Program::DYN_INDEX:
+          continue;
+        default:
+          break;
+      }
+      const size_t d = (size_t)I.dst;
+      if (writes_[d] != 1 || excluded[d] || undefined_read_[d]) continue;
+      invariant_reg_[d] = 1;
     }
   }
 
@@ -836,14 +922,49 @@ void lane_instruction(const RegionMapProg& p, const TileState& t,
   }
 }
 
+int popcount(Mask m) { return __builtin_popcountll(m); }
+
+void tally_mask(Mask m, Mask full, uint64_t& n_full, uint64_t& n_partial,
+                uint64_t& n_empty) {
+  if (!m)
+    ++n_empty;
+  else if (m == full)
+    ++n_full;
+  else
+    ++n_partial;
+}
+
+void tally_block(const RegionMapProg& p, const RegionMapLanePlan::Block& block,
+                 Mask m, RegionMapTally& tally) {
+  const int lanes = popcount(m);
+  for (int pc = block.begin; pc < block.end; ++pc) {
+    const auto& I = p.code[(size_t)pc];
+    if (I.code == Program::JMP) continue;
+    const size_t op = (size_t)I.code;
+    ++tally.fwd_exec;
+    tally.fwd_lanes += (uint64_t)lanes;
+    ++tally.fwd_op[op];
+    tally.fwd_op_lanes[op] += (uint64_t)lanes;
+    if (p.lanes.invariant[(size_t)pc]) {
+      ++tally.fwd_invariant;
+      ++tally.fwd_op_invariant[op];
+    }
+  }
+}
+
 void lane_tile_forward(const RegionMapProg& p, const TileState& t,
                        double* window, KernelCtx& call_ctx, EvalState* state,
-                       std::vector<Mask>& entry) {
+                       std::vector<Mask>& entry, RegionMapTally* tally) {
   const auto& blocks = p.lanes.blocks;
   entry.assign(blocks.size() + 1, 0);
   entry[0] = t.full();
   for (size_t b = 0; b < blocks.size(); ++b) {
     const Mask m = entry[b];
+    if (tally) {
+      tally_mask(m, t.full(), tally->block_full, tally->block_partial,
+                 tally->block_empty);
+      if (m) tally_block(p, blocks[b], m, *tally);
+    }
     if (!m) continue;
     const auto& block = blocks[b];
     const int last = block.end - 1;
@@ -1285,7 +1406,118 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t,
 
 std::atomic<uint64_t> lane_runs{0};
 
+void merge_tally(RegionMapProfile& profile, const RegionMapTally& tally) {
+  std::lock_guard<std::mutex> lock(profile.mu);
+  profile.total.add(tally);
+}
+
+std::string percent(uint64_t part, uint64_t whole) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%.1f%%",
+                whole ? 100.0 * (double)part / (double)whole : 0.0);
+  return buf;
+}
+
+std::string occupancy(uint64_t lanes, uint64_t exec) {
+  return percent(lanes, exec * (uint64_t)kTile);
+}
+
+void print_profile(const RegionMapProfile& pr) {
+  const RegionMapTally& t = pr.total;
+  std::fprintf(stderr,
+               "region_map_profile %s: iterations=%lld body=%d form=%s "
+               "hoisted=%d evaluations=%llu tiles=%llu\n",
+               pr.label.c_str(), (long long)pr.iterations, pr.body,
+               pr.form.c_str(), pr.hoisted, (unsigned long long)t.evaluations,
+               (unsigned long long)t.tiles);
+  std::fprintf(stderr,
+               "  forward: instrs=%llu lanes=%llu occupancy=%s "
+               "shared-operand-only=%llu (%s)\n",
+               (unsigned long long)t.fwd_exec, (unsigned long long)t.fwd_lanes,
+               occupancy(t.fwd_lanes, t.fwd_exec).c_str(),
+               (unsigned long long)t.fwd_invariant,
+               percent(t.fwd_invariant, t.fwd_exec).c_str());
+  std::fprintf(stderr, "  adjoint: instrs=%llu lanes=%llu occupancy=%s\n",
+               (unsigned long long)t.adj_exec, (unsigned long long)t.adj_lanes,
+               occupancy(t.adj_lanes, t.adj_exec).c_str());
+  std::fprintf(stderr,
+               "  block entries: full=%llu partial=%llu empty=%llu | "
+               "segment entries: full=%llu partial=%llu empty=%llu\n",
+               (unsigned long long)t.block_full,
+               (unsigned long long)t.block_partial,
+               (unsigned long long)t.block_empty,
+               (unsigned long long)t.seg_full,
+               (unsigned long long)t.seg_partial,
+               (unsigned long long)t.seg_empty);
+  std::vector<int> codes;
+  for (int c = 0; c < kRegionMapProfileCodes; ++c)
+    if (t.fwd_op[c] || t.adj_op[c]) codes.push_back(c);
+  std::sort(codes.begin(), codes.end(), [&](int a, int b) {
+    return t.fwd_op[a] + t.adj_op[a] > t.fwd_op[b] + t.adj_op[b];
+  });
+  std::fprintf(stderr, "  %-14s %12s %7s %12s | %12s %7s\n", "opcode",
+               "fwd", "occ", "shared-only", "adj", "occ");
+  for (int c : codes)
+    std::fprintf(stderr, "  %-14s %12llu %7s %12llu | %12llu %7s\n",
+                 (size_t)c < program_code_count() ? kProgramOpSpecs[c].name
+                                                  : std::to_string(c).c_str(),
+                 (unsigned long long)t.fwd_op[c],
+                 occupancy(t.fwd_op_lanes[c], t.fwd_op[c]).c_str(),
+                 (unsigned long long)t.fwd_op_invariant[c],
+                 (unsigned long long)t.adj_op[c],
+                 occupancy(t.adj_op_lanes[c], t.adj_op[c]).c_str());
+}
+
+struct ProfileRegistry {
+  std::mutex mu;
+  std::vector<std::shared_ptr<RegionMapProfile>> all;
+  ~ProfileRegistry() {
+    for (const auto& p : all) print_profile(*p);
+  }
+};
+
+ProfileRegistry& profile_registry() {
+  static ProfileRegistry registry;
+  return registry;
+}
+
+std::shared_ptr<RegionMapProfile> make_profile(const RegionMapProg& p) {
+  auto profile = std::make_shared<RegionMapProfile>();
+  ProfileRegistry& registry = profile_registry();
+  std::lock_guard<std::mutex> lock(registry.mu);
+  profile->label = "map#" + std::to_string(registry.all.size()) +
+                   (p.label.empty() ? "" : " (" + p.label + ")");
+  profile->form = p.lanes.tile_recompute ? "lanes-tile-recompute" : "lanes-save";
+  profile->body = (int)p.code.size();
+  profile->iterations = p.count;
+  registry.all.push_back(profile);
+  return profile;
+}
+
 }  // namespace
+
+void RegionMapTally::add(const RegionMapTally& o) {
+  evaluations += o.evaluations;
+  tiles += o.tiles;
+  fwd_exec += o.fwd_exec;
+  fwd_lanes += o.fwd_lanes;
+  fwd_invariant += o.fwd_invariant;
+  adj_exec += o.adj_exec;
+  adj_lanes += o.adj_lanes;
+  block_full += o.block_full;
+  block_partial += o.block_partial;
+  block_empty += o.block_empty;
+  seg_full += o.seg_full;
+  seg_partial += o.seg_partial;
+  seg_empty += o.seg_empty;
+  for (int c = 0; c < kRegionMapProfileCodes; ++c) {
+    fwd_op[c] += o.fwd_op[c];
+    fwd_op_lanes[c] += o.fwd_op_lanes[c];
+    fwd_op_invariant[c] += o.fwd_op_invariant[c];
+    adj_op[c] += o.adj_op[c];
+    adj_op_lanes[c] += o.adj_op_lanes[c];
+  }
+}
 
 uint64_t region_map_lane_runs() {
   return lane_runs.load(std::memory_order_relaxed);
@@ -1324,14 +1556,21 @@ void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
   entry.reserve(plan.blocks.size() + 1);
   double total = 0.0;
   const int target = p.out_regs[0];
+  RegionMapTally tally;
+  RegionMapTally* counting = plan.profile ? &tally : nullptr;
   for (int tile = 0; tile < plan.tiles; ++tile) {
     const int64_t first = (int64_t)tile * kTile;
     const int lanes = (int)std::min<int64_t>(kTile, p.count - first);
     double* base = tile_base(plan, tiles, tile);
     TileState t = seeded_tile(p, reg, base, first, lanes);
-    lane_tile_forward(p, t, window, call_ctx, ctx.eval_state, entry);
+    lane_tile_forward(p, t, window, call_ctx, ctx.eval_state, entry, counting);
     const double* out = t.slot(target);
     for (int l = 0; l < lanes; ++l) total += out[l];
+  }
+  if (counting) {
+    tally.evaluations = 1;
+    tally.tiles = (uint64_t)plan.tiles;
+    merge_tally(*plan.profile, tally);
   }
   ctx.out.data[0] = total;
 }
@@ -1354,6 +1593,8 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
   std::vector<char> exempt;
   if (verify) exempt = region_map_clean_exempt_cells(p);
   std::fill_n(adj_tile, (size_t)plan.adj_cells * kTile, 0.0);
+  RegionMapTally tally;
+  RegionMapTally* counting = plan.profile ? &tally : nullptr;
   for (int tile = plan.tiles; tile-- > 0;) {
     const int64_t first = (int64_t)tile * kTile;
     const int lanes = (int)std::min<int64_t>(kTile, p.count - first);
@@ -1362,11 +1603,22 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
                         ? seeded_tile(p, ctx.scratch, base, first, lanes)
                         : TileState(p, ctx.scratch, base, lanes);
     if (plan.tile_recompute)
-      lane_tile_forward(p, fwd, window, call_ctx, ctx.eval_state, entry);
+      lane_tile_forward(p, fwd, window, call_ctx, ctx.eval_state, entry,
+                        counting);
     AdjointTile t(p, fwd, adj_tile, adj, log);
     const auto seed_cell = t.cell(target);
     for (int l = 0; l < lanes; ++l) seed_cell[l] += seed;
     const auto run = [&](int begin, int end, Mask m) {
+      if (counting) {
+        const int n = popcount(m);
+        for (int pc = begin; pc < end; ++pc) {
+          const size_t op = (size_t)p.adj.code[(size_t)pc].code;
+          ++counting->adj_exec;
+          counting->adj_lanes += (uint64_t)n;
+          ++counting->adj_op[op];
+          counting->adj_op_lanes[op] += (uint64_t)n;
+        }
+      }
       for (int pc = begin; pc < end; ++pc)
         lane_adjoint_instruction(p, t, p.adj.code[(size_t)pc], m, window,
                                  call_ctx);
@@ -1380,6 +1632,9 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
         Mask m = 0;
         for (int l = 0; l < lanes; ++l)
           if (flag[l] != 0.0) m |= Mask{1} << l;
+        if (counting)
+          tally_mask(m, fwd.full(), counting->seg_full, counting->seg_partial,
+                     counting->seg_empty);
         if (m) run(seg.begin, seg.end, m);
       }
     }
@@ -1399,6 +1654,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
       }
     }
   }
+  if (counting) merge_tally(*plan.profile, tally);
 }
 
 void plan_region_map_lanes(RegionMapProg& p, bool enabled,
@@ -1418,6 +1674,8 @@ void plan_region_map_lanes(RegionMapProg& p, bool enabled,
       recompute_cells = std::strtoll(v, nullptr, 10);
     Analysis(p, storage_limit, recompute_cells).run();
     p.lanes.active = true;
+    if (std::getenv("STANLI_REGION_MAP_PROFILE"))
+      p.lanes.profile = make_profile(p);
   } catch (const Refusal& r) {
     p.lanes = RegionMapLanePlan{};
     p.lanes.refusal = r.why;

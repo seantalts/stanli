@@ -2431,6 +2431,37 @@ void test_lane_duplicate_live_in() {
   check(duplicates > 0, "equal vectors arrive as two live-ins");
 }
 
+void test_lane_profile_counters() {
+  CompiledModel off = compile_with("region_map_logic", 130);
+  check(!map_payload(off).lanes.profile, "no profile without the variable");
+  CompiledModel cm =
+      compile_with("region_map_logic", 130, "STANLI_REGION_MAP_PROFILE", "1");
+  const auto& p = map_payload(cm);
+  check(p.lanes.active && p.lanes.profile != nullptr,
+        "STANLI_REGION_MAP_PROFILE attaches a profile to an active plan");
+  if (!p.lanes.profile) return;
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  const int evaluations = 4;
+  for (int k = 0; k < evaluations; ++k) evaluate(ex, spread_point((size_t)k, 2));
+  const auto& t = p.lanes.profile->total;
+  check(t.evaluations == (uint64_t)evaluations,
+        "one forward counted per evaluation");
+  check(t.tiles == (uint64_t)evaluations * (uint64_t)p.lanes.tiles,
+        "tiles counted per evaluation");
+  check(t.block_full + t.block_partial + t.block_empty ==
+            t.tiles * p.lanes.blocks.size(),
+        "every block is entered, partially or not at all, once per tile");
+  check(t.fwd_exec > 0 && t.adj_exec > 0, "instructions counted both ways");
+  check(t.fwd_lanes <= t.fwd_exec * (uint64_t)stanli::kRegionMapTile &&
+            t.adj_lanes <= t.adj_exec * (uint64_t)stanli::kRegionMapTile,
+        "active lanes never exceed a full tile per execution");
+  check(t.fwd_invariant <= t.fwd_exec, "invariant executions are a subset");
+  uint64_t by_op = 0;
+  for (int c = 0; c < stanli::kRegionMapProfileCodes; ++c) by_op += t.fwd_op[c];
+  check(by_op == t.fwd_exec, "the per-opcode split sums to the total");
+}
+
 void test_lane_copied_executors_interleaved() {
   for (const char* stem : {"region_map_branch", "region_map_logic"}) {
     const std::string what = std::string(stem) + " copies";
@@ -2641,6 +2672,7 @@ static void test_region_map() {
   test_lane_exceptions();
   test_lane_duplicate_live_in();
   test_lane_copied_executors_interleaved();
+  test_lane_profile_counters();
 #ifdef STANLI_TEST_STANC
   test_lane_cogmod();
 #endif

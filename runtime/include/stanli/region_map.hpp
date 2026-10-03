@@ -4,6 +4,8 @@
 #include <stanli/island.hpp>
 
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -13,6 +15,32 @@ namespace stanli {
 inline constexpr int kRegionMapSavedGap = 64;
 
 inline constexpr int kRegionMapTile = 64;
+
+inline constexpr int kRegionMapProfileCodes = 128;
+
+struct RegionMapTally {
+  uint64_t evaluations = 0, tiles = 0;
+  uint64_t fwd_exec = 0, fwd_lanes = 0, fwd_invariant = 0;
+  uint64_t adj_exec = 0, adj_lanes = 0;
+  uint64_t block_full = 0, block_partial = 0, block_empty = 0;
+  uint64_t seg_full = 0, seg_partial = 0, seg_empty = 0;
+  uint64_t fwd_op[kRegionMapProfileCodes] = {};
+  uint64_t fwd_op_lanes[kRegionMapProfileCodes] = {};
+  uint64_t fwd_op_invariant[kRegionMapProfileCodes] = {};
+  uint64_t adj_op[kRegionMapProfileCodes] = {};
+  uint64_t adj_op_lanes[kRegionMapProfileCodes] = {};
+  void add(const RegionMapTally& o);
+};
+
+struct RegionMapProfile {
+  std::string label;
+  std::string form;
+  int body = 0;
+  int64_t iterations = 0;
+  int hoisted = 0;
+  std::mutex mu;
+  RegionMapTally total;
+};
 
 struct RegionMapLanePlan {
   struct Block {
@@ -46,6 +74,8 @@ struct RegionMapLanePlan {
   std::vector<int32_t> cell_slot;
   std::vector<Block> blocks;
   std::vector<CallWindow> calls;
+  std::shared_ptr<RegionMapProfile> profile;
+  std::vector<char> invariant;
 };
 
 struct RegionMapProg : IslandProg {
@@ -58,6 +88,7 @@ struct RegionMapProg : IslandProg {
   int saved_cells = 0;
   bool recompute = false;
   RegionMapLanePlan lanes;
+  std::string label;
 };
 
 void plan_region_map_lanes(RegionMapProg& p, bool enabled,

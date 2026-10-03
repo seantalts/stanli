@@ -297,6 +297,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   }
   if (reg.in_slots.empty()) return abandon("no live-in values");
   if (island_has_effect(*prog)) return abandon("program has effects");
+  prog->label = s.loopvar;
   const RegionMapProg pristine = *prog;
   int64_t save_limit = kMaxRegionMapSavedCells;
   if (const char* limit = std::getenv("STANLI_REGION_MAP_SAVE_LIMIT"))
