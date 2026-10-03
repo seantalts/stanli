@@ -10,7 +10,7 @@ use it for lookup, not as a required reading list. Human readers start at
 | --- | --- | --- |
 | Interpreter fallbacks, callbacks, RNGs, register coverage, local tapes | [Execution coverage](research/execution.md) | Enabled improvements, remaining boundaries, removed experiments and deletion criteria. |
 | Retained loops, frames, recording, ctsem, memory | [Loops and memory](research/loops.md) | Which frame/data-provenance ideas worked, which failed, and why validation order matters. |
-| Compiler lowering, shapes, lanes, vectorization, preparation | [Compiler and layout](research/compiler.md) | Design trail, shared representations, transactional refusal and preparation regressions. |
+| Compiler lowering, shapes, lanes, vectorization, preparation | [Compiler and layout](research/compiler.md) | Design trail, shared representations, transactional refusal, preparation regressions and diagnostic compiler policy. |
 | Numerical disagreement, sampler work, corpus oracles, performance claims | [Numerics and measurement](research/numerics.md) | Authoritative gates, source/platform provenance, unresolved exceptions and benchmark boundaries. |
 | Native reduce_sum, shared inputs, worker ownership | [Parallel reductions](research/parallelism.md) | Shipped interface versus historical prototypes, deterministic partitions and memory costs. |
 | Binaries, browser packaging, interfaces, installation | [Packaging and interfaces](research/packaging.md) | Current contracts and earlier designs or rejected packaging experiments. |

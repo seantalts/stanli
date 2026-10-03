@@ -124,6 +124,10 @@ The test-only OCaml probe compiles each source once with the candidate off and
 once with it on; every later check consumes those exact portable MIR files
 through `stanli_check --mir`. All other source-pass choices are explicit and
 identical between the two cells.
+Both cells retain the shipped compiler's structural O1 budget and report
+when a model uses the transformed-O0 fallback. `STANLI_NO_O1_FALLBACK=1`
+explicitly disables that budget for separate compiler experiments; a model
+supported through the shipped fallback may not lower under forced O1.
 
 The complete run covers all 352 recorded models plus any posteriordb census
 model without a recorded CmdStan row:

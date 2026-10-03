@@ -200,6 +200,7 @@ paths and hashes in raw records unchanged.
 | [2026-09-11 · Carver boundaries: one cost function for island, split, and leave](archive/plans/2026-09-11-carver-boundaries.md) | Historical plan or digest; read final disposition first. |
 | [2026-09-11 · Lane layout unification for reroll and partition](archive/plans/2026-09-11-lane-layout-unification.md) | Historical plan or digest; read final disposition first. |
 | [2026-09-11 · Shared executor data, native matrix pullbacks, and streaming JSON](archive/plans/2026-09-11-shared-data-native-pullbacks.md) | Historical plan or digest; read final disposition first. |
+| [2026-10-03 · Compiler policy and reference corrections in main CI](../../notes/performance/2026-10-03-ci-diagnostics.md) | Vectorization probe budget, forced-O1 limitation and ARM64 gradient reference evidence. |
 | [runtime/include/stanli](../../runtime/include/stanli/README.md) | Public C++ header map. |
 | [Graph optimizations and performance work](../../runtime/src/OPTIMIZATIONS.md) | Production optimization proofs, refusal boundaries and historical evidence. |
 | [runtime/src](../../runtime/src/README.md) | Runtime source ownership and execution components. |
