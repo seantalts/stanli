@@ -36,7 +36,9 @@ void run_prologue(const RegionMapProg& p, double* reg) {
   }
 }
 
-std::vector<char> clean_exempt_cells(const RegionMapProg& p) {
+}  // namespace
+
+std::vector<char> region_map_clean_exempt_cells(const RegionMapProg& p) {
   const auto& map = p.adj.adj_reg;
   std::vector<char> exempt((size_t)p.adj.n_regs, 1);
   const auto read = [&](int dst, int width) {
@@ -61,6 +63,8 @@ std::vector<char> clean_exempt_cells(const RegionMapProg& p) {
       exempt[(size_t)map[(size_t)(p.ins[k].reg + i)]] = 1;
   return exempt;
 }
+
+namespace {
 
 void expect_clean_sweep(const std::vector<char>& exempt, const double* adj,
                         int64_t iteration) {
@@ -151,7 +155,7 @@ void sweep(const RegionMapProg& p, KernelCtx& ctx, double* adj) {
   std::vector<char> exempt;
   const bool verify =
       p.recompute && std::getenv("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
-  if (verify) exempt = clean_exempt_cells(p);
+  if (verify) exempt = region_map_clean_exempt_cells(p);
   for (int64_t i = p.count; i-- > 0;) {
     ctx.scratch[p.iter_reg] = static_cast<double>(p.lo + i);
     if (p.recompute) {

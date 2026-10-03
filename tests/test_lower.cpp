@@ -1686,7 +1686,7 @@ void each_written_span(const stanli::Program& p,
 void test_hoisted_constants_and_saved_state() {
   for (const char* stem :
        {"region_map_branch", "region_map_udf", "region_map_call"}) {
-    CompiledModel cm = compile_with(stem, 64);
+    CompiledModel cm = compile_with(stem, 64, "STANLI_REGION_MAP_LANES");
     const auto& p = map_payload(cm);
     const std::string what(stem);
     check(!p.prologue.empty(), what + ": constants hoisted into a prologue");
@@ -1768,8 +1768,8 @@ void test_call_partials_differ_per_iteration(bool recompute) {
   expect_mapped("hypergeometric loop", cm);
   const auto& p = map_payload(cm);
   check(!p.calls.empty(), "hypergeometric map body holds a CALL");
-  check(!p.prologue.empty() && (p.saved_cells > 0) != recompute &&
-            p.recompute == recompute,
+  check(!p.prologue.empty() && p.recompute == recompute &&
+            (p.lanes.active || (p.saved_cells > 0) != recompute),
         "hypergeometric map hoists constants and saves or recomputes state");
 
   const auto cov = [](const var& a, const var& z) {
@@ -2081,12 +2081,19 @@ void test_lane_fixtures() {
 }
 
 void test_lane_tile_recompute() {
-  CompiledModel big = compile_with("region_map_long_body", 64);
+  CompiledModel big = compile_with("region_map_long_body", 200);
   const auto& b = map_payload(big);
-  check(b.lanes.active && b.lanes.tile_recompute,
-        "a body over the per-lane cell threshold recomputes tiles");
-  check(b.lanes.storage ==
-            (int64_t)stanli::kRegionMapTile * (b.lanes.fwd_regs + b.lanes.adj_cells),
+  check(b.lanes.active && !b.lanes.tile_recompute,
+        "a large body keeps every tile's forward state while it fits");
+  const std::string limit = std::to_string(
+      2 * (int64_t)stanli::kRegionMapTile * (b.lanes.fwd_regs + b.lanes.adj_cells));
+  CompiledModel tight = compile_with("region_map_long_body", 200,
+                                     "STANLI_REGION_MAP_SAVE_LIMIT", limit.c_str());
+  const auto& t = map_payload(tight);
+  check(t.lanes.active && t.lanes.tile_recompute,
+        "a body whose tiles exceed the save limit recomputes tiles");
+  check(t.lanes.storage ==
+            (int64_t)stanli::kRegionMapTile * (t.lanes.fwd_regs + t.lanes.adj_cells),
         "tile recompute keeps one forward tile and one adjoint tile");
   CompiledModel small = compile_with("region_map_branch", 64);
   const auto& s = map_payload(small);
@@ -2137,6 +2144,32 @@ void test_lane_tile_recompute() {
     expect_lane_parity(what, lanes, scalar, spread_points(2, 3), true);
   }
   test_unsetenv("STANLI_REGION_MAP_TILE_CELLS");
+}
+
+void test_lane_seed_and_clean() {
+  for (const LaneFixture& f : lane_fixture_list()) {
+    if (!f.lanes) continue;
+    CompiledModel lanes = compile_with(f.stem, 64, nullptr, "0", f.extra);
+    check(map_payload(lanes).lanes.seed_regs.empty(),
+          std::string(f.stem) + ": only the iteration register is seeded");
+  }
+  test_setenv("STANLI_REGION_MAP_CHECK_CLEAN", "1", 1);
+  for (const char* tile_cells : {"1000000000", "0"}) {
+    test_setenv("STANLI_REGION_MAP_TILE_CELLS", tile_cells, 1);
+    for (const LaneFixture& f : lane_fixture_list()) {
+      if (!f.lanes) continue;
+      for (int n : {37, 64, 65, 200}) {
+        const std::string what = std::string(f.stem) + " clean sweep N=" +
+                                 std::to_string(n) + " tile cells " + tile_cells;
+        CompiledModel lanes = compile_with(f.stem, n, nullptr, "0", f.extra);
+        CompiledModel scalar =
+            compile_with(f.stem, n, "STANLI_REGION_MAP_LANES", "0", f.extra);
+        expect_lane_parity(what, lanes, scalar, spread_points(2), true);
+      }
+    }
+  }
+  test_unsetenv("STANLI_REGION_MAP_TILE_CELLS");
+  test_unsetenv("STANLI_REGION_MAP_CHECK_CLEAN");
 }
 
 void test_lane_flag_clear_segments() {
@@ -2287,7 +2320,7 @@ void test_lane_cogmod() {
 void test_mode_policy() {
   CompiledModel big = compile_with("region_map_long_body", 32);
   const auto& b = map_payload(big);
-  check(b.lanes.active && !b.recompute && b.saved_cells > 1024,
+  check(b.lanes.active && !b.recompute && b.lanes.fwd_regs > 1024,
         "a body the lane plan accepts saves in lane tiles whatever its size");
   CompiledModel forced =
       compile_with("region_map_long_body", 32, "STANLI_REGION_MAP_SAVE_LIMIT");
@@ -2417,6 +2450,7 @@ static void test_region_map() {
   test_logic_compiles_to_jumps();
   test_lane_fixtures();
   test_lane_tile_recompute();
+  test_lane_seed_and_clean();
   test_lane_flag_clear_segments();
   test_lane_cancellation_bitwise();
   test_lane_exceptions();

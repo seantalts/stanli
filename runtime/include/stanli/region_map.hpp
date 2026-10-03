@@ -13,7 +13,6 @@ namespace stanli {
 inline constexpr int kRegionMapSavedGap = 64;
 
 inline constexpr int kRegionMapTile = 64;
-constexpr int kRegionMapTileRecomputeCells = 1024;
 
 struct RegionMapLanePlan {
   struct Block {
@@ -43,6 +42,7 @@ struct RegionMapLanePlan {
   int max_sites = 0;
   int max_dynamic = 0;
   std::vector<int32_t> reg_slot;
+  std::vector<int32_t> seed_regs;
   std::vector<int32_t> cell_slot;
   std::vector<Block> blocks;
   std::vector<CallWindow> calls;
@@ -66,6 +66,7 @@ void plan_region_map_lanes(RegionMapProg& p, bool enabled,
 uint64_t region_map_lane_runs();
 
 int64_t region_map_lane_cells(const RegionMapProg& p);
+std::vector<char> region_map_clean_exempt_cells(const RegionMapProg& p);
 
 void region_map_lanes_forward(const RegionMapProg& p, KernelCtx& ctx,
                               double* region);

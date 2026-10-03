@@ -878,6 +878,19 @@ foreach(_stanli_cogmod_source IN LISTS STANLI_COGMOD_SOURCES)
       "STANLI_REGION_MAP_CHECK_CLEAN=1;STANLI_REGION_MAP_SAVE_LIMIT=0"
     PASS_REGULAR_EXPRESSION "OK "
     FAIL_REGULAR_EXPRESSION "EVAL_FAIL")
+  foreach(_stanli_tile_cells IN ITEMS 1000000000 0)
+    add_test(NAME test_region_map_lane_clean_${_stanli_tile_cells}_${_stanli_cogmod}
+             COMMAND stanli_check tests/cogmod/${_stanli_cogmod}.stan
+                     tests/cogmod/${_stanli_cogmod}.json --sweep 12
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(
+      test_region_map_lane_clean_${_stanli_tile_cells}_${_stanli_cogmod}
+      PROPERTIES
+      ENVIRONMENT
+        "STANLI_REGION_MAP_CHECK_CLEAN=1;STANLI_REGION_MAP_TILE_CELLS=${_stanli_tile_cells}"
+      PASS_REGULAR_EXPRESSION "OK "
+      FAIL_REGULAR_EXPRESSION "EVAL_FAIL")
+  endforeach()
 endforeach()
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)

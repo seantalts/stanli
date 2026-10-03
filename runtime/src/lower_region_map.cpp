@@ -183,9 +183,9 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   std::vector<char> persistent;
   int saved_per_iteration = 0;
 
-  const auto build = [&](bool recompute) -> std::string {
+  const auto build = [&](bool recompute, bool keep_every_clear) -> std::string {
     *prog = pristine;
-    finalize_island_program(*prog, true, recompute);
+    finalize_island_program(*prog, true, keep_every_clear);
     if (!prog->native_adj) {
       std::string why = "no generated adjoint";
       if (diagnostics) {
@@ -253,11 +253,14 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   bool use_lanes = false;
   std::string lane_refusal = "off";
   if (lanes_enabled) {
-    const std::string why = build(false);
-    if (!why.empty()) return abandon(why);
-    plan_region_map_lanes(*prog, true, save_limit);
-    use_lanes = prog->lanes.active;
-    lane_refusal = prog->lanes.refusal;
+    const std::string why = build(false, true);
+    if (why.empty()) {
+      plan_region_map_lanes(*prog, true, save_limit);
+      use_lanes = prog->lanes.active;
+      lane_refusal = prog->lanes.refusal;
+    } else {
+      lane_refusal = why;
+    }
   }
 
   bool recompute = false;
@@ -279,7 +282,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   }
   bool downgraded = false;
   while (!use_lanes) {
-    const std::string why = build(recompute);
+    const std::string why = build(recompute, recompute);
     if (!why.empty()) return abandon(why);
     if (too_large() && !recompute) {
       recompute = true;
@@ -291,7 +294,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     }
   }
   if (!use_lanes) prog->lanes.refusal = lane_refusal;
-  if (prog->recompute) {
+  if (use_lanes || prog->recompute) {
     prog->saved.clear();
     prog->saved_cells = 0;
   } else {
@@ -329,7 +332,8 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
                     (prog->recompute ? " recompute" : "") +
                     (prog->lanes.active
                          ? std::string(prog->lanes.tile_recompute ? " lanes=tile-recompute"
-                                                                : " lanes=save")
+                                                                : " lanes=save") +
+                               " seeded=" + std::to_string(prog->lanes.seed_regs.size())
                          : " lanes=no(" + prog->lanes.refusal + ")") +
                     " registers=" + std::to_string(prog->n_regs) +
                     " live_ins=" + std::to_string(prog->ins.size()));
