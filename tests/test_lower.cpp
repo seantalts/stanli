@@ -1231,7 +1231,7 @@ Series make_series(int n) {
   return s;
 }
 
-DataMap make_data(int n) {
+DataMap make_data(int n, const std::string& extra = "") {
   const Series s = make_series(n);
   std::ostringstream out;
   out.precision(17);
@@ -1239,7 +1239,7 @@ DataMap make_data(int n) {
   for (int i = 0; i < n; ++i) out << (i ? "," : "") << s.y[i];
   out << "],\"x\":[";
   for (int i = 0; i < n; ++i) out << (i ? "," : "") << s.x[i];
-  out << "]}";
+  out << "]" << (extra.empty() ? "" : "," + extra) << "}";
   return DataMap::from_json(out.str());
 }
 
@@ -1252,10 +1252,12 @@ std::string fixture_mir(const std::string& stem) {
 }
 
 CompiledModel compile_with(const std::string& stem, int n,
-                           const char* env = nullptr, const char* value = "0") {
+                           const char* env = nullptr, const char* value = "0",
+                           const std::string& extra = "") {
   if (env) test_setenv(env, value, 1);
   try {
-    CompiledModel cm = stanli::compile_model(fixture_mir(stem), make_data(n));
+    CompiledModel cm =
+        stanli::compile_model(fixture_mir(stem), make_data(n, extra));
     if (env) test_unsetenv(env);
     return cm;
   } catch (...) {
@@ -1318,9 +1320,9 @@ void expect_mapped(const std::string& what, const CompiledModel& cm) {
 void run_points(const std::string& stem, int n,
                 const std::vector<Params>& points, const Ref& ref,
                 bool expect_map = true, const char* env = nullptr,
-                const char* value = "0") {
+                const char* value = "0", const std::string& extra = "") {
   const Series s = make_series(n);
-  CompiledModel cm = compile_with(stem, n, env, value);
+  CompiledModel cm = compile_with(stem, n, env, value, extra);
   if (expect_map)
     expect_mapped(stem, cm);
   else
@@ -1799,6 +1801,116 @@ void test_call_partials_differ_per_iteration(bool recompute) {
   }
 }
 
+
+const Ref ref_logic = [](const std::vector<var>& p, const Series& s,
+                         std::vector<int>* taken) {
+  var lp = 0;
+  const var a = p[0], b = p[1];
+  for (size_t i = 0; i < s.y.size(); ++i) {
+    const double y = s.y[i], x = s.x[i];
+    if (b <= -5 || a > 6 || a < -6 || y > 40 || x > 40) {
+      lp += -std::numeric_limits<double>::infinity();
+      continue;
+    }
+    const var r = y - a * x;
+    const var sc = stan::math::exp(b);
+    const bool tail = r < -sc || r > sc;
+    if (taken) taken->push_back(tail);
+    var w = tail ? -0.5 * stan::math::square(r / sc) - b
+                 : -stan::math::square(r) * sc;
+    if (r > 0 && b > 0) w += 0.1 * a;
+    lp += w;
+  }
+  return lp;
+};
+
+const Ref ref_short_circuit = [](const std::vector<var>& p, const Series& s,
+                                 std::vector<int>* taken) {
+  var lp = 0;
+  const var a = p[0], b = p[1];
+  for (size_t i = 0; i < s.y.size(); ++i) {
+    const var r = s.y[i] - a * s.x[i];
+    const bool low =
+        b <= 0 || stan::math::normal_lpdf(s.y[i], a * s.x[i], b) < -5;
+    if (taken) taken->push_back(low);
+    lp += low ? -0.1 * stan::math::square(r) + b
+              : -0.5 * stan::math::square(r) + a;
+  }
+  return lp;
+};
+
+const Ref ref_nan = [](const std::vector<var>& p, const Series& s,
+                       std::vector<int>* taken) {
+  const double nv = std::numeric_limits<double>::quiet_NaN();
+  var lp = 0;
+  const var a = p[0], b = p[1];
+  for (size_t i = 0; i < s.y.size(); ++i) {
+    const var r = s.y[i] - a * s.x[i];
+    if (r < nv || b > nv)
+      lp += -stan::math::square(r);
+    else
+      lp += -0.5 * stan::math::square(r) + b;
+    const bool gate = !(r >= nv) && r < b;
+    if (taken) taken->push_back(gate);
+    if (gate) lp += 0.1 * a;
+    lp += (r > nv || r < -b) ? 0.2 * b : -0.1 * r;
+  }
+  return lp;
+};
+
+void test_logic_points() {
+  run_points("region_map_logic", 64, branch_points, ref_logic);
+  run_points("region_map_short_circuit", 64, branch_points, ref_short_circuit);
+  run_points("region_map_nan", 64, branch_points, ref_nan, true, nullptr, "0",
+             "\"nv\":NaN");
+}
+
+void test_logic_compiles_to_jumps() {
+  using stanli::Program;
+  for (const char* stem : {"region_map_logic", "region_map_nan",
+                           "region_map_short_circuit"}) {
+    const std::string what(stem);
+    CompiledModel cm = compile_with(
+        stem, 64, nullptr, "0", what == "region_map_nan" ? "\"nv\":NaN" : "");
+    const auto& p = map_payload(cm);
+    const auto comparison = [](Program::Code c) {
+      return c == Program::GT || c == Program::GE || c == Program::LT ||
+             c == Program::LE || c == Program::EQ || c == Program::NE;
+    };
+    std::vector<char> from_comparison((size_t)p.n_regs, 0);
+    for (const auto& I : p.code)
+      if (comparison(I.code)) from_comparison[(size_t)I.dst] = 1;
+    int normalizations = 0;
+    for (const auto& I : p.code)
+      if (I.code == Program::NE && from_comparison[(size_t)I.a])
+        ++normalizations;
+    check(normalizations == 0,
+          what + ": no NE normalizes a comparison result (" +
+              std::to_string(normalizations) + ")");
+
+    check(!p.adj.segments.empty(), what + ": the body has reverse segments");
+    if (p.adj.segments.empty()) continue;
+    const int guard = p.adj.segments.front().guard;
+    int lo = -1, len = 0;
+    for (const auto& I : p.code)
+      if (I.code == Program::CONSTR && I.dst <= guard &&
+          guard < I.dst + I.len) {
+        lo = I.dst;
+        len = I.len;
+      }
+    check(lo >= 0, what + ": one CONSTR resets the path flags");
+    int flags = 0;
+    for (const auto& I : p.code)
+      if (I.code == Program::CONST && I.dst >= lo && I.dst < lo + len) ++flags;
+    check(flags == (int)p.adj.segments.size(),
+          what + ": one flag per reverse segment (" + std::to_string(flags) +
+              " flags, " + std::to_string(p.adj.segments.size()) +
+              " segments)");
+    check(len == (int)p.adj.segments.size(),
+          what + ": the reset covers only the flags in use");
+  }
+}
+
 }  // namespace region_map_test
 
 static void test_region_map() {
@@ -1815,6 +1927,8 @@ static void test_region_map() {
   test_recompute_payload();
   test_call_partials_differ_per_iteration(false);
   test_call_partials_differ_per_iteration(true);
+  test_logic_points();
+  test_logic_compiles_to_jumps();
 }
 
 int main() {
