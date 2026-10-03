@@ -891,6 +891,19 @@ class Analysis {
       if (A.code == Program::CALL) backward_window(A.a);
     for (const auto& w : plan_.calls)
       plan_.max_window = std::max({plan_.max_window, w.fwd_size, w.bwd_size});
+    for (size_t i = 0; i < p_.calls.size(); ++i) {
+      const Program::Call& call = p_.calls[i];
+      auto& w = plan_.calls[i];
+      for (int k = 0; k < call.n_in; ++k) {
+        w.in_reg[k] = reg_offset(call.in[k]);
+        w.val_in_reg[k] = reg_offset(call.bwd_value_in[k]);
+        w.adj_in_cell[k] = cell_offset(call.bwd_adj_in[k]);
+      }
+      w.out_reg = reg_offset(call.out);
+      w.scratch_reg = reg_offset(call.scratch);
+      w.val_out_reg = reg_offset(call.bwd_value_out);
+      w.adj_out_cell = cell_offset(call.bwd_adj_out);
+    }
   }
 
   void forward_window(int index) {
@@ -1038,6 +1051,7 @@ class TileState {
 
   Mask full() const { return full_; }
   const double* base() const { return fwd_; }
+  double* mutable_base() const { return fwd_; }
   const double* shared_regs() const { return reg_; }
 
   double* slot(int r) const {
@@ -1295,19 +1309,32 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
     case Program::CALL: {
       const auto& w = p.lanes.calls[(size_t)I.a];
       const Program::Call& call = p.calls[(size_t)I.a];
-      t.each(m, [&](int l) {
+      if (call.forward == nullptr)
+        throw std::logic_error("unbound Program::CALL forward");
+      bind_call_fwd_ctx(w.fwd, window, call_ctx, state);
+      const double* const base = t.base();
+      for (int k = 0; k < call.n_in; ++k)
+        if (w.in_reg[k] < 0)
+          std::copy_n(t.shared_regs() + call.in[k], call.in_len[k],
+                      window + w.in_off[k]);
+      const auto in_regs = [&](int l) {
         for (int k = 0; k < call.n_in; ++k)
-          for (int j = 0; j < call.in_len[k]; ++j)
-            window[w.in_off[k] + j] = t.value(call.in[k] + j, l);
+          if (w.in_reg[k] >= 0)
+            for (int j = 0; j < call.in_len[k]; ++j)
+              window[w.in_off[k] + j] = base[w.in_reg[k] + j * kTile + l];
+      };
+      t.each(m, [&](int l) {
+        in_regs(l);
         for (int j = 0; j < call.out_len; ++j)
-          window[w.out_off + j] = t.value(call.out + j, l);
+          window[w.out_off + j] = base[w.out_reg + j * kTile + l];
         for (int j = 0; j < call.scratch_len; ++j)
-          window[w.scratch_off + j] = t.value(call.scratch + j, l);
-        run_call(w.fwd, window, call_ctx, state);
+          window[w.scratch_off + j] = base[w.scratch_reg + j * kTile + l];
+        call.forward(call_ctx);
+        double* const out = t.mutable_base();
         for (int j = 0; j < call.out_len; ++j)
-          t.slot(call.out + j)[l] = window[w.out_off + j];
+          out[w.out_reg + j * kTile + l] = window[w.out_off + j];
         for (int j = 0; j < call.scratch_len; ++j)
-          t.slot(call.scratch + j)[l] = window[w.scratch_off + j];
+          out[w.scratch_reg + j * kTile + l] = window[w.scratch_off + j];
       });
       break;
     }
@@ -1815,49 +1842,69 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
         if ((call.input_adjoint_mask & (1u << k)) &&
             t.shared_cell(call.bwd_adj_in[k]))
           rows[k] = t.acc_rows(call.bwd_adj_in[k], call.in_len[k]);
+      const double* const fbase = f.base();
+      double* const cbase = t.cells();
+      for (int k = 0; k < call.n_in; ++k) {
+        if (w.val_in_reg[k] < 0)
+          std::copy_n(f.shared_regs() + call.bwd_value_in[k], call.in_len[k],
+                      window + w.val_in_off[k]);
+      }
+      if (w.val_out_reg < 0)
+        std::copy_n(f.shared_regs() + call.bwd_value_out, call.out_len,
+                    window + w.val_out_off);
+      ctx.n_in = call.n_in;
+      for (int k = 0; k < call.n_in; ++k) {
+        ctx.in[k] = Desc{window + w.val_in_off[k], call.in_len[k]};
+        ctx.in_adj[k] = (call.input_adjoint_mask & (uint8_t)(1u << k))
+                            ? Desc{window + w.adj_in_off[k], call.in_len[k]}
+                            : Desc{nullptr, call.in_len[k]};
+      }
+      ctx.out = Desc{window + w.val_out_off, call.out_len};
+      ctx.out_adj_vec = Desc{window + w.adj_out_off, call.out_len};
+      ctx.variant = call.variant;
+      ctx.scratch = window + w.bwd_scratch_off;
+      ctx.idata = call.idata.data();
+      ctx.n_idata = (int64_t)call.idata.size();
+      ctx.udata = call.udata_owner.get();
       t.each(m, [&](int l) {
-        for (int k = 0; k < call.n_in; ++k)
-          for (int j = 0; j < call.in_len[k]; ++j)
-            window[w.val_in_off[k] + j] = f.value(call.bwd_value_in[k] + j, l);
-        for (int j = 0; j < call.out_len; ++j)
-          window[w.val_out_off + j] = f.value(call.bwd_value_out + j, l);
-        for (int j = 0; j < call.scratch_len; ++j)
-          window[w.bwd_scratch_off + j] = f.value(call.scratch + j, l);
-        for (int k = 0; k < call.n_in; ++k)
-          if (call.input_adjoint_mask & (1u << k))
-            for (int j = 0; j < call.in_len[k]; ++j)
-              window[w.adj_in_off[k] + j] =
-                  rows[k] ? 0.0 : t.cell(call.bwd_adj_in[k] + j)[l];
-        for (int j = 0; j < call.out_len; ++j)
-          window[w.adj_out_off + j] = t.cell(call.bwd_adj_out + j)[l];
-        ctx.n_in = call.n_in;
         for (int k = 0; k < call.n_in; ++k) {
-          ctx.in[k] = Desc{window + w.val_in_off[k], call.in_len[k]};
-          ctx.in_adj[k] = (call.input_adjoint_mask & (uint8_t)(1u << k))
-                              ? Desc{window + w.adj_in_off[k], call.in_len[k]}
-                              : Desc{nullptr, call.in_len[k]};
+          if (w.val_in_reg[k] >= 0)
+            for (int j = 0; j < call.in_len[k]; ++j)
+              window[w.val_in_off[k] + j] =
+                  fbase[w.val_in_reg[k] + j * kTile + l];
+          if (call.input_adjoint_mask & (1u << k)) {
+            if (rows[k])
+              std::fill_n(window + w.adj_in_off[k], call.in_len[k], 0.0);
+            else
+              for (int j = 0; j < call.in_len[k]; ++j)
+                window[w.adj_in_off[k] + j] =
+                    cbase[w.adj_in_cell[k] + j * kTile + l];
+          }
         }
-        ctx.out = Desc{window + w.val_out_off, call.out_len};
-        ctx.out_adj_vec = Desc{window + w.adj_out_off, call.out_len};
+        if (w.val_out_reg >= 0)
+          for (int j = 0; j < call.out_len; ++j)
+            window[w.val_out_off + j] = fbase[w.val_out_reg + j * kTile + l];
+        for (int j = 0; j < call.scratch_len; ++j)
+          window[w.bwd_scratch_off + j] = fbase[w.scratch_reg + j * kTile + l];
+        for (int j = 0; j < call.out_len; ++j)
+          window[w.adj_out_off + j] = cbase[w.adj_out_cell + j * kTile + l];
         ctx.out_adj = call.out_len == 1 ? window[w.adj_out_off] : 0.0;
-        ctx.variant = call.variant;
-        ctx.scratch = window + w.bwd_scratch_off;
-        ctx.idata = call.idata.data();
-        ctx.n_idata = (int64_t)call.idata.size();
-        ctx.udata = call.udata_owner.get();
         call.backward(ctx);
         for (int k = 0; k < call.n_in; ++k)
-          if (call.input_adjoint_mask & (1u << k))
-            for (int j = 0; j < call.in_len[k]; ++j) {
-              if (rows[k])
+          if (call.input_adjoint_mask & (1u << k)) {
+            if (rows[k])
+              for (int j = 0; j < call.in_len[k]; ++j)
                 rows[k][(size_t)j * kTile + l] = window[w.adj_in_off[k] + j];
-              else
-                t.cell(call.bwd_adj_in[k] + j)[l] = window[w.adj_in_off[k] + j];
-            }
+            else
+              for (int j = 0; j < call.in_len[k]; ++j)
+                cbase[w.adj_in_cell[k] + j * kTile + l] =
+                    window[w.adj_in_off[k] + j];
+          }
+        double* const fout = f.mutable_base();
         for (int j = 0; j < call.scratch_len; ++j)
-          f.slot(call.scratch + j)[l] = window[w.bwd_scratch_off + j];
+          fout[w.scratch_reg + j * kTile + l] = window[w.bwd_scratch_off + j];
         for (int j = 0; j < call.out_len; ++j)
-          t.cell(call.bwd_adj_out + j)[l] = 0.0;
+          cbase[w.adj_out_cell + j * kTile + l] = 0.0;
       });
       return;
     }

@@ -77,8 +77,8 @@ const Kernel* find_kernel(uint16_t opcode) {
 // integer/shape metadata are immutable call-site facts, so builders resolve
 // the former once and a program invocation reuses one context packet across
 // all of its CALL instructions.
-static void bind_call_fwd_ctx(const Program::Call& call, double* reg,
-                              KernelCtx& ctx, EvalState* state) {
+void bind_call_fwd_ctx(const Program::Call& call, double* reg, KernelCtx& ctx,
+                       EvalState* state) {
   ctx.n_in = call.n_in;
   for (int k = 0; k < call.n_in; ++k)
     ctx.in[k] = Desc{reg + call.in[k], call.in_len[k]};

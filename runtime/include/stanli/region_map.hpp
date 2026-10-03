@@ -59,6 +59,12 @@ struct RegionMapLanePlan {
     int adj_in_off[6] = {0, 0, 0, 0, 0, 0};
     int adj_out_off = 0;
     int bwd_size = 0;
+    int32_t in_reg[6] = {-1, -1, -1, -1, -1, -1};
+    int32_t out_reg = -1, scratch_reg = -1;
+    int32_t val_in_reg[6] = {-1, -1, -1, -1, -1, -1};
+    int32_t val_out_reg = -1;
+    int32_t adj_in_cell[6] = {-1, -1, -1, -1, -1, -1};
+    int32_t adj_out_cell = -1;
   };
   struct Operands {
     int32_t dst = -1, a = -1, b = -1, c = -1;
