@@ -1913,6 +1913,18 @@ void test_logic_compiles_to_jumps() {
   }
 }
 
+void test_large_body_recomputes_by_default() {
+  CompiledModel cm = compile_with("region_map_long_body", 32);
+  expect_mapped("long body", cm);
+  const auto& p = map_payload(cm);
+  check(p.recompute && p.saved.empty() && p.saved_cells == 0,
+        "a body saving more than 1024 cells per iteration recomputes");
+  CompiledModel small = compile_with("region_map_branch", 64);
+  const auto& q = map_payload(small);
+  check(!q.recompute && q.saved_cells > 0 && q.saved_cells <= 1024,
+        "a small body keeps saving");
+}
+
 struct CleanFixture {
   const char* stem;
   int n;
@@ -1936,7 +1948,8 @@ void test_clean_sweep() {
       CompiledModel cm = compile_with(f.stem, f.n, nullptr, "0", f.extra);
       if (recompute) test_unsetenv("STANLI_REGION_MAP_SAVE_LIMIT");
       expect_mapped(what, cm);
-      check(map_payload(cm).recompute == recompute,
+      check(map_payload(cm).recompute ==
+                (recompute || std::string(f.stem) == "region_map_long_body"),
             what + ": mode as requested");
       Executor ex(cm.graph);
       cm.bind(ex);
@@ -1981,6 +1994,7 @@ static void test_region_map() {
   test_call_partials_differ_per_iteration(true);
   test_logic_points();
   test_logic_compiles_to_jumps();
+  test_large_body_recomputes_by_default();
   test_clean_sweep();
 }
 

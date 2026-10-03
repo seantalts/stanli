@@ -23,6 +23,7 @@ bool body_escapes(const mir::Stmt& s, bool in_inner_loop) {
 
 constexpr size_t kMaxRegionMapCode = 131072;
 constexpr int64_t kMaxRegionMapSavedCells = int64_t{1} << 24;
+constexpr int kRegionMapMaxSavedPerIteration = 1024;
 
 template <typename F>
 void each_written_span(const Program& p, const Program::Instr& I, F fn) {
@@ -232,7 +233,9 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   int64_t save_limit = kMaxRegionMapSavedCells;
   if (const char* limit = std::getenv("STANLI_REGION_MAP_SAVE_LIMIT"))
     save_limit = std::strtoll(limit, nullptr, 10);
-  if (prog->count * prog->saved_cells > save_limit) {
+  const int saved_per_iteration = prog->saved_cells;
+  if (saved_per_iteration > kRegionMapMaxSavedPerIteration ||
+      prog->count * saved_per_iteration > save_limit) {
     prog->recompute = true;
     prog->saved.clear();
     prog->saved_cells = 0;
@@ -254,7 +257,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
                     "): iterations=" + std::to_string(prog->count) +
                     " prologue=" + std::to_string(prog->prologue.size()) +
                     " body=" + std::to_string(prog->code.size()) +
-                    " saved_cells=" + std::to_string(prog->saved_cells) +
+                    " saved_cells=" + std::to_string(saved_per_iteration) +
                     " saved_spans=" + std::to_string(prog->saved.size()) +
                     (prog->recompute ? " recompute" : "") +
                     " registers=" + std::to_string(prog->n_regs) +
