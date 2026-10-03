@@ -847,6 +847,66 @@ static void test_udf_packed_branch() {
   stan::math::recover_memory();
 }
 
+// A runtime integer chosen by a parameter comparison indexes a parameter
+// vector inside a parameter-dependent region. The region compiles the index
+// as DYN_INDEX and must still get a generated adjoint.
+static void test_region_dynamic_index() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/dynindex_region.json"));
+  test_setenv("STANLI_STRUCTURED_LOOPS", "0", 1);
+  CompiledModel cm =
+      compile_model(slurp("tests/fixtures/dynindex_region.tmir.sexp"), data);
+  test_unsetenv("STANLI_STRUCTURED_LOOPS");
+  int islands = 0, dynamic = 0, native = 0;
+  for (const Op& op : cm.graph.ops) {
+    if (op.opcode != OP_ISLAND) continue;
+    ++islands;
+    const auto& prog = *static_cast<const IslandProg*>(op.udata);
+    const bool indexed =
+        std::any_of(prog.code.begin(), prog.code.end(), [](const auto& i) {
+          return i.code == Program::DYN_INDEX;
+        });
+    dynamic += indexed;
+    native += indexed && prog.native_adj;
+  }
+  check(islands > 0 && dynamic == islands,
+        "dynamic index regions lower every iteration through DYN_INDEX");
+  check(native == dynamic, "dynamic index regions get a native adjoint");
+  const std::vector<double>& y = data.at("y").r;
+  const double points[][4] = {{0.4, -0.2, 0.7, 0.6},
+                              {-0.3, 0.8, 0.1, -0.5},
+                              {0.2, 0.9, -0.6, 0.3},
+                              {-0.7, -0.4, 0.5, -0.2}};
+  for (const auto& point : points) {
+    stan::math::var th[3] = {point[0], point[1], point[2]};
+    stan::math::var g = point[3], lp = 0;
+    for (const double yn : y) {
+      if (g * yn > 0) {
+        const int k = (th[0] > th[1]) + 1;
+        lp += stan::math::normal_lpdf(yn, th[k - 1], 1.0);
+      } else {
+        const int k = (th[1] > th[2]) + 2;
+        lp += stan::math::normal_lpdf(yn, th[k - 1], 2.0);
+      }
+    }
+    lp += -0.5 * (stan::math::square(th[0]) + stan::math::square(th[1]) +
+                  stan::math::square(th[2])) -
+          0.5 * stan::math::square(g);
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    for (int k = 0; k < 4; ++k) ex.params_data()[k] = point[k];
+    double grad[4] = {};
+    const std::string at = " at th1=" + std::to_string(point[0]);
+    expect_ulp("dynamic index region lp" + at, ex.gradient(grad), lp.val());
+    for (int k = 0; k < 3; ++k)
+      expect_ulp("dynamic index region grad" + at, grad[k], th[k].adj(), 10);
+    expect_ulp("dynamic index region grad g" + at, grad[3], g.adj(), 10);
+    stan::math::recover_memory();
+  }
+}
+
 // A transformed parameter fixed at a constant selects a branch inside a
 // parameter-dependent region. The region folds it, so the unused arm and its
 // kernel call are not compiled.
@@ -9442,6 +9502,7 @@ int main() {
   test_udf_tail_branch();
   test_udf_packed_branch();
   test_udf_constant_branch();
+  test_region_dynamic_index();
   test_region_constant_shadow();
   test_udf_guard_returns();
   test_structured_vector_return();

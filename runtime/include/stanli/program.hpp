@@ -117,7 +117,7 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(NE, kProgramReadB)                                                        \
   X(DYN_SET, kProgramRangeA | kProgramReadB | kProgramReadC |                 \
                  kProgramRangeOutput | kProgramNoAdjoint)                     \
-  X(DYN_INDEX, kProgramReadB | kProgramNoAdjoint)                             \
+  X(DYN_INDEX, kProgramReadB | kProgramSaveB)                                 \
   /* b selects max (1) or min (0); c stores kProgramExtrema* metadata. */     \
   X(EXTREMA_RANGE, kProgramRangeA | kProgramNoAdjoint)                        \
   X(JZ, kProgramNoAdjoint | kProgramNoOutput)                                 \
