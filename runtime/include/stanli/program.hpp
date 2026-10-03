@@ -148,7 +148,11 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(REJECT, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)          \
   X(DENSITY_VEC, kProgramNoAdjoint)                                           \
   /* An elementwise rule (sub) over len elements; see Instr. */               \
-  X(RANGE, 0)
+  X(RANGE, 0)                                                                 \
+  X(ERFC, kProgramSaveA)                                                      \
+  X(LOG1P, kProgramSaveA)                                                     \
+  X(LOG1M_EXP, kProgramSaveA)                                                 \
+  X(INV_SQUARE, kProgramSaveA)
 
 struct Program {
   enum Code : uint8_t {
@@ -371,7 +375,8 @@ inline constexpr int program_input_len(const Program::Instr& instr, int k) {
   return 1;
 }
 
-static_assert(program_code_count() == static_cast<size_t>(Program::RANGE) + 1,
+static_assert(program_code_count() ==
+                  static_cast<size_t>(Program::INV_SQUARE) + 1,
               "every Program::Code needs exactly one ProgramOpSpec");
 
 // Sink constant range fills past paths that never access their registers.
@@ -637,6 +642,18 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
         break;
       case Program::TANH:
         d() = stan::math::tanh(ra());
+        break;
+      case Program::ERFC:
+        d() = stan::math::erfc(ra());
+        break;
+      case Program::LOG1P:
+        d() = stan::math::log1p(ra());
+        break;
+      case Program::LOG1M_EXP:
+        d() = stan::math::log1m_exp(ra());
+        break;
+      case Program::INV_SQUARE:
+        d() = stan::math::inv_square(ra());
         break;
       case Program::GT:
         d() = T(stan::math::value_of(ra()) > stan::math::value_of(rb()));
