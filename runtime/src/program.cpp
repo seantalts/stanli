@@ -500,8 +500,7 @@ bool sink_program_fills(Program& p) {
         I.code != Program::JZ && I.code != Program::JMP &&
         I.code != Program::IMOD && I.code != Program::IDIV &&
         I.code != Program::DYN_SET && I.code != Program::DYN_LSE_RANGE &&
-        I.code != Program::DYN_INDEX && I.code != Program::PRINT &&
-        I.code != Program::REJECT)
+        I.code != Program::PRINT && I.code != Program::REJECT)
       return false;
     if (branches(I.code)) {
       if (I.dst < 0 || I.dst > n) return false;
@@ -632,8 +631,8 @@ bool program_initializes_reads(const Program& p,
     if (program_spec_of(I).has(kProgramNoAdjoint) && I.code != Program::JZ &&
         I.code != Program::JMP && I.code != Program::IMOD &&
         I.code != Program::IDIV && I.code != Program::DYN_SET &&
-        I.code != Program::DYN_INDEX && I.code != Program::DYN_LSE_RANGE &&
-        I.code != Program::PRINT && I.code != Program::REJECT)
+        I.code != Program::DYN_LSE_RANGE && I.code != Program::PRINT &&
+        I.code != Program::REJECT)
       return false;
     if (I.code == Program::CALL && (I.a < 0 || (size_t)I.a >= p.calls.size()))
       return false;

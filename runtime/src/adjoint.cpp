@@ -75,6 +75,10 @@ bool gen_adjoint(IslandProg& p) {
     if (program_spec_of(I).has(kProgramNoAdjoint) && !jump &&
         I.code != Program::REJECT && I.code != Program::EXTREMA_RANGE)
       return false;
+    if (I.code == Program::DYN_INDEX &&
+        !(I.len > 0 && I.a >= 0 && I.a <= n0 && I.c >= 0 && I.c <= n0 &&
+          in_range(I.a + I.c, I.len) && in_range(I.b, 1)))
+      return false;
     if (I.code != Program::CALL) continue;
     if (I.a < 0 || (size_t)I.a >= fwd.calls.size()) return false;
     const Program::Call& call = fwd.calls[(size_t)I.a];
@@ -134,6 +138,8 @@ bool gen_adjoint(IslandProg& p) {
     if (I.code == Program::DENSITY && program_density_arity(I.len) > 3)
       for (int k = 0; k < program_density_arity(I.len); ++k)
         if (I.a + k >= 0 && I.a + k < n0) no_alias[(size_t)(I.a + k)] = 1;
+    if (I.code == Program::DYN_INDEX)
+      for (int k = 0; k < I.len; ++k) no_alias[(size_t)(I.a + I.c + k)] = 1;
     if (I.code == Program::CALL) {
       // The kernel's backward accumulates adjoints over whole ranges, so
       // every CALL range keeps identity adjoint cells.
@@ -157,6 +163,7 @@ bool gen_adjoint(IslandProg& p) {
   for (const auto& I : orig) {
     const ProgramOpSpec& spec = program_spec_of(I);
     const int reads = spec.has(kProgramNoInputs) ? 0 : 3;
+    if (I.code == Program::DYN_INDEX) continue;
     if (I.code == Program::DENSITY && program_density_arity(I.len) > 3 &&
         !in_range(I.a, program_density_arity(I.len)))
       return false;
@@ -227,6 +234,10 @@ bool gen_adjoint(IslandProg& p) {
         needed[I.a + k] = 1;
       continue;
     }
+    if (I.code == Program::DYN_INDEX) {
+      for (int k = 0; k < I.len; ++k) needed[I.a + I.c + k] = 1;
+      continue;
+    }
     for (int k = 0; k < 3; ++k)
       if (program_reads(I, k)) {
         const int r = k == 0 ? I.a : (k == 1 ? I.b : I.c);
@@ -278,6 +289,8 @@ bool gen_adjoint(IslandProg& p) {
       } else {
         if (I.code == Program::DENSITY && program_density_arity(I.len) > 3) {
           if (!available(I.a, program_density_arity(I.len))) return false;
+        } else if (I.code == Program::DYN_INDEX) {
+          if (!available(I.a + I.c, I.len) || !available(I.b, 1)) return false;
         } else {
           for (int k = 0; k < 3; ++k)
             if (program_reads(I, k) &&
@@ -352,6 +365,8 @@ bool gen_adjoint(IslandProg& p) {
         }
         dmask[i] = (uint8_t)m;
         any = m != 0;
+      } else if (I.code == Program::DYN_INDEX) {
+        read(I.a + I.c, I.len);
       } else {
         read(I.a, program_input_len(I, 0));
         if (spec.has(kProgramReadB)) read(I.b, program_input_len(I, 1));
@@ -609,6 +624,10 @@ bool gen_adjoint(IslandProg& p) {
         A.b = map1(I.b);
         A.c = map1(I.c);
       }
+    } else if (I.code == Program::DYN_INDEX) {
+      A.a = mapn(I.a + I.c, I.len);
+      A.b = 0;
+      A.c = 0;
     } else if (!spec.has(kProgramNoInputs) &&
                I.code != Program::EXTREMA_RANGE) {
       A.a = mapn(I.a, program_input_len(I, 0));
@@ -1251,10 +1270,13 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
         case Program::RANGE:
           ranged_step(I, val, adj);
           break;
+        case Program::DYN_INDEX:
+          adj[I.dst] = 0.0;
+          adj[I.a + static_cast<int32_t>(val[I.vb]) - 1] += t;
+          break;
         case Program::DYN_SET:
         case Program::DYN_LSE_RANGE:
         case Program::IMOD:
-        case Program::DYN_INDEX:
         case Program::IDIV:
         case Program::EXTREMA_RANGE:
         case Program::JZ:
