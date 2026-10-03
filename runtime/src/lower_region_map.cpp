@@ -1,5 +1,7 @@
 #include <stanli/region_map.hpp>
 
+#include <cstdlib>
+
 #include "lower_internal.hpp"
 
 namespace stanli {
@@ -227,8 +229,14 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   prog->lo = lo;
   prog->count = static_cast<int64_t>(hi) - lo + 1;
   split_prologue(*prog);
-  if (prog->count * prog->saved_cells > kMaxRegionMapSavedCells)
-    return abandon("per-iteration state too large");
+  int64_t save_limit = kMaxRegionMapSavedCells;
+  if (const char* limit = std::getenv("STANLI_REGION_MAP_SAVE_LIMIT"))
+    save_limit = std::strtoll(limit, nullptr, 10);
+  if (prog->count * prog->saved_cells > save_limit) {
+    prog->recompute = true;
+    prog->saved.clear();
+    prog->saved_cells = 0;
+  }
   for (int cell = 0; cell < n_cells;) {
     if (persistent[(size_t)cell]) {
       ++cell;
@@ -258,6 +266,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
                     " body=" + std::to_string(prog->code.size()) +
                     " saved_cells=" + std::to_string(prog->saved_cells) +
                     " saved_spans=" + std::to_string(prog->saved.size()) +
+                    (prog->recompute ? " recompute" : "") +
                     " registers=" + std::to_string(prog->n_regs) +
                     " live_ins=" + std::to_string(prog->ins.size()));
   return true;

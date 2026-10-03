@@ -74,16 +74,21 @@ void region_map_fwd(KernelCtx& ctx) {
     run_iterations<true>(p, ctx);
 }
 
+template <bool ReuseCallCtx>
 void sweep(const RegionMapProg& p, KernelCtx& ctx, double* adj) {
   const double seed = ctx.out_adj_vec.data[0];
   const int64_t target = p.adj.adj_reg[(size_t)p.out_regs[0]];
   const double* saved = ctx.scratch + p.n_regs + p.adj.n_regs;
   for (int64_t i = p.count; i-- > 0;) {
     ctx.scratch[p.iter_reg] = static_cast<double>(p.lo + i);
-    const double* row = saved + i * p.saved_cells;
-    for (const auto& span : p.saved) {
-      std::copy_n(row, span.second, ctx.scratch + span.first);
-      row += span.second;
+    if (p.recompute) {
+      run_once<ReuseCallCtx>(p, ctx);
+    } else {
+      const double* row = saved + i * p.saved_cells;
+      for (const auto& span : p.saved) {
+        std::copy_n(row, span.second, ctx.scratch + span.first);
+        row += span.second;
+      }
     }
     for (const auto& span : p.transient)
       std::fill_n(adj + span.first, span.second, 0.0);
@@ -106,7 +111,10 @@ void region_map_bwd(KernelCtx& ctx) {
       adj[(size_t)map[(size_t)(li.reg + i)]] =
           ctx.in_adj[li.input].data[li.offset + i];
   }
-  sweep(p, ctx, adj);
+  if (p.calls.empty())
+    sweep<false>(p, ctx, adj);
+  else
+    sweep<true>(p, ctx, adj);
   for (const auto& li : p.ins) {
     if (li.input < 0 || !ctx.in_adj[li.input].data) continue;
     for (int i = 0; i < li.len; ++i) {

@@ -1317,9 +1317,10 @@ void expect_mapped(const std::string& what, const CompiledModel& cm) {
 
 void run_points(const std::string& stem, int n,
                 const std::vector<Params>& points, const Ref& ref,
-                bool expect_map = true) {
+                bool expect_map = true, const char* env = nullptr,
+                const char* value = "0") {
   const Series s = make_series(n);
-  CompiledModel cm = compile_with(stem, n);
+  CompiledModel cm = compile_with(stem, n, env, value);
   if (expect_map)
     expect_mapped(stem, cm);
   else
@@ -1552,6 +1553,8 @@ void test_shapes() {
   };
   run_points("region_map_call", 64, {{0.3, -0.4}, {-1.5, 0.3}, {0.3, -0.4}},
              ref_call);
+  run_points("region_map_call", 64, {{0.3, -0.4}, {-1.5, 0.3}, {0.3, -0.4}},
+             ref_call, true, "STANLI_REGION_MAP_SAVE_LIMIT");
 
   const Ref ref_multi = [](const std::vector<var>& p, const Series& s,
                            std::vector<int>* taken) {
@@ -1606,6 +1609,8 @@ void test_long_body_map() {
     return lp;
   };
   run_points("region_map_long_body", 32, branch_points, ref_long);
+  run_points("region_map_long_body", 32, branch_points, ref_long, true,
+             "STANLI_REGION_MAP_SAVE_LIMIT");
 }
 
 std::string outcome(const std::string& stem, int n, const char* env) {
@@ -1733,7 +1738,16 @@ void test_hoisted_constants_and_saved_state() {
   }
 }
 
-void test_call_partials_differ_per_iteration() {
+void test_recompute_payload() {
+  for (const char* stem : {"region_map_long_body", "region_map_call"}) {
+    CompiledModel cm = compile_with(stem, 32, "STANLI_REGION_MAP_SAVE_LIMIT");
+    const auto& p = map_payload(cm);
+    check(p.recompute && p.saved.empty() && p.saved_cells == 0,
+          std::string(stem) + ": over the save limit the map recomputes");
+  }
+}
+
+void test_call_partials_differ_per_iteration(bool recompute) {
   const int n = 64;
   std::vector<double> offsets;
   for (int i = 0; i < n; ++i) offsets.push_back(0.3 * std::sin(1.7 * i + 0.4));
@@ -1742,14 +1756,17 @@ void test_call_partials_differ_per_iteration() {
   json << "{\"N\":" << n << ",\"offsets\":[";
   for (int i = 0; i < n; ++i) json << (i ? "," : "") << offsets[(size_t)i];
   json << "],\"z_data\":0.25}";
+  if (recompute) test_setenv("STANLI_REGION_MAP_SAVE_LIMIT", "0", 1);
   CompiledModel cm = stanli::compile_model(
       slurp("tests/fixtures/hypergeometric_1f0.tmir.sexp"),
       DataMap::from_json(json.str()));
+  if (recompute) test_unsetenv("STANLI_REGION_MAP_SAVE_LIMIT");
   expect_mapped("hypergeometric loop", cm);
   const auto& p = map_payload(cm);
   check(!p.calls.empty(), "hypergeometric map body holds a CALL");
-  check(!p.prologue.empty() && p.saved_cells > 0,
-        "hypergeometric map hoists constants and saves iteration state");
+  check(!p.prologue.empty() && (p.saved_cells > 0) != recompute &&
+            p.recompute == recompute,
+        "hypergeometric map hoists constants and saves or recomputes state");
 
   const auto cov = [](const var& a, const var& z) {
     return stan::math::hypergeometric_1F0(a, z);
@@ -1795,7 +1812,9 @@ static void test_region_map() {
   test_out_of_range();
   test_copied_executors();
   test_hoisted_constants_and_saved_state();
-  test_call_partials_differ_per_iteration();
+  test_recompute_payload();
+  test_call_partials_differ_per_iteration(false);
+  test_call_partials_differ_per_iteration(true);
 }
 
 int main() {

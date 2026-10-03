@@ -19,6 +19,7 @@ struct RegionMapProg : IslandProg {
   std::vector<Program::Instr> prologue;
   std::vector<std::pair<int, int>> saved;
   int saved_cells = 0;
+  bool recompute = false;
 };
 
 }  // namespace stanli
