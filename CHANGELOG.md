@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.19.1
+
+- Reduce math overhead in eligible independent loops with native operations
+  for `erfc`, `log1p`, `log1m_exp`, and `inv_square`.
+- Batch eligible scalar density and unary function calls across loop lanes,
+  preserving their scalar values, gradients, and exception messages. Keep
+  per-lane calls for functions whose vector implementations round differently.
+
 ## 0.19.0
 
 - Add batched execution and native gradients for eligible independent loops,
