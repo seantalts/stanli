@@ -2795,6 +2795,35 @@ void test_hoisted_shared_scalar_mixture() {
   }
 }
 
+void test_data_early_return_unrolls() {
+  const int n = 64;
+  check(count_opcode(compile_with("data_early_return", 20000),
+                     stanli::OP_LOOP) == 0,
+        "data-only early return does not become a structured loop");
+  CompiledModel cm = compile_with("data_early_return", n);
+  const Series s = make_series(n);
+  const Ref ref = [&](const std::vector<var>& v, const Series& d,
+                      std::vector<int>*) {
+    using namespace stan::math;
+    const var sigma = exp(v[1]);
+    var lp = v[1];
+    for (size_t i = 0; i < d.y.size(); ++i)
+      lp += normal_lpdf(d.y[i], v[0] * d.x[i], sigma);
+    return lp;
+  };
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (const Params& p : spread_points(2, 5, 0.6)) {
+    const Eval got = evaluate(ex, p);
+    const Eval want = reference(ref, s, p, nullptr);
+    check(grad_close(got.lp, want.lp), "early-return lp matches Stan Math");
+    for (size_t i = 0; i < 2; ++i)
+      check(
+          grad_close(got.grad[i], want.grad[i]),
+          "early-return gradient " + std::to_string(i) + " matches Stan Math");
+  }
+}
+
 #ifdef STANLI_TEST_STANC
 struct CogmodExpectation {
   const char* stem;
@@ -3242,6 +3271,7 @@ static void test_region_map() {
   test_lane_adjoint_clears();
   test_lane_profile_counters();
   test_hoisted_shared_scalar_mixture();
+  test_data_early_return_unrolls();
 #ifdef STANLI_TEST_STANC
   test_lane_cogmod();
 #endif

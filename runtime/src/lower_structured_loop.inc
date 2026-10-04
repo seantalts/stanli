@@ -2406,6 +2406,18 @@ static int64_t region_setting(const char* name, int64_t fallback) {
   return end && *end == 0 && value >= 0 ? static_cast<int64_t>(value)
                                         : fallback;
 }
+static bool region_condition_data(const mir::Expr& e) {
+  if (e.data_only) return true;
+  if (e.kind != mir::Expr::FunApp && e.kind != mir::Expr::EAnd &&
+      e.kind != mir::Expr::EOr)
+    return false;
+  if (e.kind == mir::Expr::FunApp && e.fn_lib != mir::Expr::Lib::StanLib)
+    return false;
+  if (e.args.empty()) return false;
+  for (const auto& a : e.args)
+    if (!region_condition_data(a)) return false;
+  return true;
+}
 bool region_runtime_control(const mir::Stmt& root) const {
   std::set<std::string> visited;
   std::function<bool(const mir::Stmt&, unsigned)> statement;
@@ -2413,10 +2425,10 @@ bool region_runtime_control(const mir::Stmt& root) const {
       [&](const mir::Expr& e, unsigned depth) {
         if (depth > 32) return false;
         if (e.kind == mir::Expr::TernaryIf && !e.args.empty() &&
-            !e.args[0].data_only)
+            !region_condition_data(e.args[0]))
           return true;
         if ((e.kind == mir::Expr::EAnd || e.kind == mir::Expr::EOr) &&
-            !e.data_only)
+            !region_condition_data(e))
           return true;
         if (e.kind == mir::Expr::FunApp &&
             e.fn_lib == mir::Expr::Lib::UserDefined) {
@@ -2432,7 +2444,8 @@ bool region_runtime_control(const mir::Stmt& root) const {
   statement = [&](const mir::Stmt& s, unsigned depth) {
     if (depth > 32) return false;
     if (s.kind == mir::Stmt::While) return true;
-    if (s.kind == mir::Stmt::IfElse && !s.cond.data_only) return true;
+    if (s.kind == mir::Stmt::IfElse && !region_condition_data(s.cond))
+      return true;
     for (const mir::Expr* value :
          {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
       if (expression(*value, depth + 1)) return true;
