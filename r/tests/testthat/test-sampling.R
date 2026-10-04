@@ -222,6 +222,20 @@ test_that("threading does not change the answer", {
   expect_identical(a$draws, b$draws)
 })
 
+test_that("threading does not change the answer when init is given", {
+  skip_without_runtime()
+  m <- es_model()
+  k <- m$n_unconstrained
+  starts <- list(rep(0.1, k), matrix(0.1 * seq_len(4 * k), nrow = 4))
+  for (init in starts) {
+    a <- sample_model(m, chains = 4, seed = 7, warmup = 100, samples = 100,
+                      init = init, parallel_chains = 1, refresh = 0)
+    b <- sample_model(m, chains = 4, seed = 7, warmup = 100, samples = 100,
+                      init = init, parallel_chains = 4, refresh = 0)
+    expect_identical(a$draws, b$draws)
+  }
+})
+
 test_that("chains are different streams of the same seed", {
   skip_without_runtime()
   m <- es_model()

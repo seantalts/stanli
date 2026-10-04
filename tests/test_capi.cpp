@@ -976,6 +976,71 @@ void expect_sampling_progress() {
   stanli_model_free(observed);
 }
 
+// Explicit inits are per-chain starting points, not a reason to sample the
+// chains one after another: a threaded run with inits must interleave its
+// chains and return the bytes of the sequential run.
+void expect_inits_run_in_parallel() {
+  if (!stanli_thread_safe()) return;
+  const std::string mir = slurp("tests/fixtures/gqconst.tmir.sexp");
+  const char* data = R"({"rectangular":[[1,4],[2,5],[3,6]]})";
+  char err[8192]{};
+  stanli_model* model = stanli_model_new(mir.c_str(), data, err, sizeof err);
+  expect_true("per-chain inits model builds", model != nullptr);
+  if (model == nullptr) return;
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.seed = 31;
+  opts.chains = 4;
+  opts.warmup = 1000;
+  opts.samples = 1000;
+  const int64_t n = stanli_n_unconstrained(model);
+  const int64_t rows = stanli_n_stored_draws(&opts);
+  std::vector<double> rows_init((size_t)(opts.chains * n));
+  for (size_t i = 0; i < rows_init.size(); ++i) rows_init[i] = 0.25 * (double)i;
+  std::vector<double> shared_init((size_t)(opts.chains * n), 0.5);
+  const std::vector<double>* cases[] = {&rows_init, &shared_init};
+  const char* labels[] = {"one row per chain", "one vector for every chain"};
+  for (int k = 0; k < 2; ++k) {
+    opts.inits = cases[k]->data();
+    std::vector<double> serial_draws((size_t)(opts.chains * rows * n));
+    std::vector<double> serial_stats(
+        (size_t)(opts.chains * rows * STANLI_N_SAMPLER_COLS));
+    opts.num_threads = 1;
+    int rc = stanli_sample_multi(model, &opts, serial_draws.data(),
+                                 serial_stats.data(), err, sizeof err);
+    expect_true(std::string("sequential run with inits succeeds: ") + labels[k],
+                rc == 0);
+
+    std::vector<double> draws(serial_draws.size());
+    std::vector<double> stats(serial_stats.size());
+    ProgressCapture capture{std::this_thread::get_id()};
+    opts.num_threads = opts.chains;
+    rc = stanli_sample_multi_progress(model, &opts, 1, draws.data(),
+                                      stats.data(), capture_progress, &capture,
+                                      nullptr, err, sizeof err);
+    expect_true(std::string("threaded run with inits succeeds: ") + labels[k],
+                rc == 0);
+    expect_true(
+        std::string("threaded inits draws match sequential: ") + labels[k],
+        draws == serial_draws && stats == serial_stats);
+    expect_true(
+        std::string("threaded inits progress uses the caller thread: ") +
+            labels[k],
+        capture.caller_thread);
+
+    size_t first_of_last = capture.events.size();
+    size_t last_of_first = 0;
+    for (size_t e = 0; e < capture.events.size(); ++e) {
+      if (capture.events[e][0] == opts.chains && first_of_last > e)
+        first_of_last = e;
+      if (capture.events[e][0] == 1) last_of_first = e;
+    }
+    expect_true(std::string("chains with inits overlap in time: ") + labels[k],
+                first_of_last < last_of_first);
+  }
+  stanli_model_free(model);
+}
+
 // Browser streaming must expose the same diagnostics as the existing
 // multi-chain API without changing any draw or callback-visible row.
 void expect_streaming_stats() {
@@ -1301,6 +1366,7 @@ int main() {
   expect_necessity_effects();
   expect_pathfinder();
   expect_sampling_progress();
+  expect_inits_run_in_parallel();
   expect_interruptible_sampling();
   expect_in_worker_write_array();
   expect_streaming_stats();
