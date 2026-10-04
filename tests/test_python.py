@@ -749,6 +749,18 @@ def test_parallel_chains_match_sequential_bitwise():
     assert (seq.sampler_stats == par.sampler_stats).all()
 
 
+def test_parallel_chains_with_inits_match_sequential_bitwise():
+    m = _es()
+    n = m.n_unconstrained
+    for inits in (np.full(n, 0.1), 0.1 * np.arange(4 * n).reshape(4, n)):
+        seq = m.sample(chains=4, seed=11, warmup=100, samples=100, inits=inits,
+                       parallel_chains=1, refresh=0)
+        par = m.sample(chains=4, seed=11, warmup=100, samples=100, inits=inits,
+                       parallel_chains=4, refresh=0)
+        assert (seq.draws() == par.draws()).all()
+        assert (seq.sampler_stats == par.sampler_stats).all()
+
+
 def test_thin_and_save_warmup_change_the_row_count():
     m = _es()
     assert m.sample(chains=1, seed=6, warmup=100, samples=100,

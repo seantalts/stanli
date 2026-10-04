@@ -151,11 +151,16 @@ bool should_report_progress(const NutsConfig& cfg, int64_t i, bool warmup,
 //
 // `poll` is asked on the calling thread about every 100 ms; a true answer
 // stops every chain after its current transition.
+//
+// `inits`, when non-null, holds one unconstrained starting point per chain,
+// chain-major with n_params values each; it replaces cfg.init for every
+// chain and runs under the same threading as the draw-from-radius case.
 std::vector<ChainResult> run_nuts_chains(
     const std::vector<Executor*>& execs, const NutsConfig& cfg,
     int n_threads = 1, const DrawObserver& observe = {},
     const ChainProgressObserver& progress = {}, int progress_refresh = 1,
-    const std::function<bool()>& poll = {}, const StoredDrawWriter& write = {});
+    const std::function<bool()>& poll = {}, const StoredDrawWriter& write = {},
+    const double* inits = nullptr);
 
 // Build `n` executors over the same compiled graph, copying it out of an
 // already-bound one. The caller keeps ownership; `src` is not modified.
