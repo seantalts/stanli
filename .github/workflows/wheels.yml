@@ -125,6 +125,8 @@ jobs:
           bash tests/test_cached_ocaml_switch.sh
       - name: Check the Windows C ABI exports
         run: python3 tests/test_windows_exports.py
+      - name: Check the x86-64 baseline ISA guard
+        run: python3 tests/test_isa_baseline.py
       - name: Check portable build parallelism
         shell: bash
         run: |
@@ -669,6 +671,10 @@ jobs:
           ! objdump -T "$so" | grep -q GLIBCXX_ ||
             { echo "dynamic libstdc++ leaked into the library"; exit 1; }
           ldd "$so"
+
+      - name: The Linux x86-64 runtime stays on the baseline ISA
+        if: matrix.runtime == 'linux-x86_64'
+        run: python3 tools/check_isa_baseline.py python/stanli/_bin/libstanli.so
 
       # Same question on macOS: the deployment target has to match the tag,
       # or the wheel installs on machines that cannot dlopen it.
