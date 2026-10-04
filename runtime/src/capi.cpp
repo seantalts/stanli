@@ -756,45 +756,9 @@ int stanli_sample_multi_write_array(
         }
       };
 
-    std::vector<stanli::ChainResult> res;
-    if (opts->inits == nullptr) {
-      res =
-          stanli::run_nuts_chains(execs, cfg, opts->num_threads, {},
-                                  progress_observer, refresh, poll_fn, writer);
-    } else {
-      std::atomic<bool> stop{false};
-      // Per-chain inits mean per-chain configs, which run_nuts_chains
-      // does not take (it varies only the chain id). Run them one at a
-      // time; explicit inits are a debugging and Pathfinder-handoff path,
-      // not the hot one.
-      res.resize((size_t)n_chains);
-      for (int c = 0; c < n_chains; ++c) {
-        stanli::NutsConfig cc = cfg;
-        cc.chain_id = cfg.chain_id + c;
-        cc.init = opts->inits + (int64_t)c * n;
-        cc.stop = &stop;
-        cc.poll = poll_fn;
-        if (writer)
-          cc.on_stored = [&writer, c](int64_t row, const double* q,
-                                      stanli::WaRng& rng,
-                                      const stanli::SamplerRow& stats) {
-            writer(c, row, q, rng, stats);
-          };
-        try {
-          stanli::ProgressObserver one_progress;
-          if (progress_observer)
-            one_progress = [&, c, cc](int64_t i, bool warmup) {
-              if (stanli::should_report_progress(cc, i, warmup, refresh))
-                progress_observer(c, i, warmup);
-            };
-          res[(size_t)c].draws =
-              stanli::run_nuts(*execs[(size_t)c], cc, &res[(size_t)c].stats, {},
-                               one_progress, &res[(size_t)c].report);
-        } catch (const std::exception& e) {
-          res[(size_t)c].error = e.what();
-        }
-      }
-    }
+    std::vector<stanli::ChainResult> res = stanli::run_nuts_chains(
+        execs, cfg, opts->num_threads, {}, progress_observer, refresh, poll_fn,
+        writer, opts->inits);
 
     int failed = 0;
     std::string first_error;

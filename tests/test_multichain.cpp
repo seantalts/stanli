@@ -233,6 +233,39 @@ int main() {
     expect("threaded chains are bitwise the sequential chains", same);
   }
 
+  // ---- per-chain inits are threaded like any other chain ----------------
+  {
+    const int C = 4;
+    const int D = 3;
+    std::vector<double> inits((size_t)(C * D));
+    for (size_t i = 0; i < inits.size(); ++i) inits[i] = 0.2 * (double)i - 1.0;
+
+    Executor a(normal_graph(D));
+    a.value_ptr(2)[0] = 1.0;
+    auto ca = clone_executors(a, C - 1);
+    std::vector<Executor*> ea{&a};
+    for (auto& c : ca) ea.push_back(c.get());
+
+    NutsConfig cfg;
+    cfg.seed = 77;
+    cfg.warmup = 100;
+    cfg.samples = 100;
+    cfg.chain_id = 1;
+    auto par = run_nuts_chains(ea, cfg, C, {}, {}, 1, {}, {}, inits.data());
+
+    bool same = par.size() == (size_t)C;
+    for (int c = 0; same && c < C; ++c) {
+      Executor solo(normal_graph(D));
+      solo.value_ptr(2)[0] = 1.0;
+      NutsConfig one = cfg;
+      one.chain_id = cfg.chain_id + c;
+      one.init = inits.data() + (size_t)(c * D);
+      same = par[(size_t)c].error.empty() &&
+             par[(size_t)c].draws == run_nuts(solo, one);
+    }
+    expect("threaded chains with inits equal each chain run alone", same);
+  }
+
   // ---- progress is rate-limited, caller-threaded, and observational ----
   {
     NutsConfig schedule;

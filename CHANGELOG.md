@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Run chains in parallel when `init` is given, as `parallel_chains` asks. They
+  ran one at a time before; the draws are unchanged.
+
 ## 0.19.1
 
 - Reduce math overhead in eligible independent loops with native operations

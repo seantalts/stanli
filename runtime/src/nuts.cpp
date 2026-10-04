@@ -201,13 +201,11 @@ std::vector<std::unique_ptr<Executor>> clone_executors(const Executor& src,
   return out;
 }
 
-std::vector<ChainResult> run_nuts_chains(const std::vector<Executor*>& execs,
-                                         const NutsConfig& cfg, int n_threads,
-                                         const DrawObserver& observe,
-                                         const ChainProgressObserver& progress,
-                                         int progress_refresh,
-                                         const std::function<bool()>& poll,
-                                         const StoredDrawWriter& write) {
+std::vector<ChainResult> run_nuts_chains(
+    const std::vector<Executor*>& execs, const NutsConfig& cfg, int n_threads,
+    const DrawObserver& observe, const ChainProgressObserver& progress,
+    int progress_refresh, const std::function<bool()>& poll,
+    const StoredDrawWriter& write, const double* inits) {
   const size_t n_chains = execs.size();
   std::vector<ChainResult> out(n_chains);
   std::atomic<bool> local_stop{false};
@@ -221,6 +219,7 @@ std::vector<ChainResult> run_nuts_chains(const std::vector<Executor*>& execs,
                            const std::function<bool()>& chain_poll) {
     NutsConfig cc = cfg;
     cc.chain_id = cfg.chain_id + (int)c;
+    if (inits) cc.init = inits + (int64_t)c * execs[c]->n_params();
     cc.stop = stop;
     cc.poll = chain_poll;
     if (write)
