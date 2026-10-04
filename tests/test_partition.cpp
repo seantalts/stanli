@@ -645,6 +645,58 @@ static void test_two_templates_interleaved() {
   expect_same_grad("two templates", std::move(g), f2, tt, want);
 }
 
+// The mixture shape of log_sum_exp(log(p) + a, log1m(p) + b) under a shared
+// probability p: log(p) and log1m(p) have no lane-varying input, so each
+// hoists to one scalar and the lanes keep only their own work. Reading p at
+// two hoisted positions must not decline the bucket; the same bucket with a
+// lane-varying op reading p as well (log_mix) stays one group too.
+static void test_hoisted_shared_scalar_reads() {
+  const int L = 12;
+  for (int blend = 0; blend < 2; ++blend) {
+    Graph g;
+    Fills fills;
+    const int base = g.add_slot(L, true);
+    const int sigma = g.add_slot(1, true);
+    const int p = g.add_slot(1, true);
+    std::vector<int> terms;
+    for (int l = 0; l < L; ++l) {
+      const int x = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {base}, x, {l});
+      const int y = g.add_slot(1, false);
+      fills.emplace_back(y, std::vector<double>{0.2 * l - 0.5});
+      const int lp = g.add_slot(1, false);
+      const int id = g.add_op(OP_NORMAL_LPDF, {y, x, sigma}, lp);
+      g.ops[(size_t)id].variant = 0x06;
+      const int la = g.add_slot(1, false);
+      g.add_op(OP_LOGV, {p}, la);
+      const int term = g.add_slot(1, false);
+      if (blend) {
+        const int mix = g.add_slot(1, false);
+        g.add_op(OP_LOG_MIX, {p, lp, x}, mix);
+        g.add_op(OP_ADD, {mix, la}, term);
+      } else {
+        const int lb = g.add_slot(1, false);
+        g.add_op(OP_LOG1M, {p}, lb);
+        const int ca = g.add_slot(1, false);
+        g.add_op(OP_ADD, {la, lp}, ca);
+        const int cb = g.add_slot(1, false);
+        g.add_op(OP_ADD, {lb, x}, cb);
+        g.add_op(OP_LSE2, {ca, cb}, term);
+      }
+      terms.push_back(term);
+    }
+    const std::vector<double> want = reference(g, fills, terms);
+
+    std::vector<int> tt = terms;
+    Fills f2 = fills;
+    const PartitionStats st = partition_lanes(g, f2, tt, {});
+    const std::string tag = blend ? "hoisted blend" : "hoisted lse";
+    expect((tag + " one group").c_str(), st.groups == 1 && st.lanes == L);
+    expect((tag + " not declined").c_str(), st.declined == 0);
+    expect_same_grad(tag, std::move(g), f2, tt, want);
+  }
+}
+
 // A write to the gathered base between lanes 7 and 8. The lanes on either
 // side read different contents, so the bucket splits at the writer instead of
 // declining -- and the split is what the gradient check is really testing.
@@ -1072,6 +1124,7 @@ int main() {
   test_binomial_elt_fusion();
   test_store_delimited_lanes();
   test_two_templates_interleaved();
+  test_hoisted_shared_scalar_reads();
   test_mid_bucket_writer_split();
   test_cross_bucket_read_after_write();
   test_kill_switch();
