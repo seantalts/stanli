@@ -2764,6 +2764,37 @@ void test_lane_copied_executors_interleaved() {
   }
 }
 
+void test_hoisted_shared_scalar_mixture() {
+  const int n = 64;
+  CompiledModel cm = compile_with("partition_hoisted_mix", n);
+  check(count_opcode(cm, stanli::OP_LSE2) == 1,
+        "mixture over a shared probability fuses to one log_sum_exp");
+  check(cm.graph.ops.size() < 40, "mixture graph does not grow with N");
+  const Series s = make_series(n);
+  const Ref ref = [&](const std::vector<var>& v, const Series& d,
+                      std::vector<int>*) {
+    using namespace stan::math;
+    const var mu = v[0];
+    const var sigma = exp(v[1]);
+    const var p = inv_logit(v[2]);
+    var lp = v[1] + log(p) + log1m(p);
+    for (size_t i = 0; i < d.y.size(); ++i)
+      lp += log_sum_exp(log(p) + normal_lpdf(d.y[i], 0.0, 3.0),
+                        log1m(p) + normal_lpdf(d.y[i], mu * d.x[i], sigma));
+    return lp;
+  };
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (const Params& p : spread_points(3, 5, 0.6)) {
+    const Eval got = evaluate(ex, p);
+    const Eval want = reference(ref, s, p, nullptr);
+    check(grad_close(got.lp, want.lp), "mixture lp matches Stan Math");
+    for (size_t i = 0; i < 3; ++i)
+      check(grad_close(got.grad[i], want.grad[i]),
+            "mixture gradient " + std::to_string(i) + " matches Stan Math");
+  }
+}
+
 #ifdef STANLI_TEST_STANC
 struct CogmodExpectation {
   const char* stem;
@@ -3210,6 +3241,7 @@ static void test_region_map() {
   test_lane_guard_masks();
   test_lane_adjoint_clears();
   test_lane_profile_counters();
+  test_hoisted_shared_scalar_mixture();
 #ifdef STANLI_TEST_STANC
   test_lane_cogmod();
 #endif
