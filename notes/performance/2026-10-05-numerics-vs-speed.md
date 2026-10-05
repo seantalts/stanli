@@ -107,8 +107,26 @@ differently from CmdStan's default build.
 - Decision (2026-10-05): keep it off. CmdStan's default is `-O0`, which never
   runs partial evaluation, so this matches what most Stan users run; it is
   not a regression against CmdStan.
+- Accuracy against a 70-digit reference (scripts in
+  `data/2026-10-05-numerics-vs-speed/partial-evaluation/`, run from a checkout
+  with two `stanli_check` builds, partial evaluation off and on): roughly
+  neutral, not strictly better.
+  - s2_me2_nomecor: better. Its gate failure is generated quantities only;
+    worst error 0.5 ULP with partial evaluation against about 53 for CmdStan
+    and the current build. Over 200 random points it is never clearly worse.
+  - sw_me: mixed, leaning better. Generated quantities improve; one
+    near-zero gradient component is 13.4 ULP off instead of 2.2 (about 2e-17
+    absolute).
+  - s2_gev: worse at the three recorded points (worst 326 ULP against
+    CmdStan's 154); over 200 random points a statistical tie on gradients
+    (better at 93 points, worse at 91), with a larger worst log-density error
+    (250 ULP against 95).
+  - Corpus-wide, 23 models change, all by at most 5e-14 scaled error. The
+    151x151 GP models ch14_m14_10 and ch14_m14_11 get slightly more accurate;
+    one gradient component of ch15_m15_8 gets slightly worse (6.6e-15
+    absolute).
 - Fast mode: turning partial evaluation back on is the simplest fast-mode
-  switch (about 10-20% on linear predictors).
+  switch (about 10-20% on linear predictors), and accuracy-neutral overall.
 
 ## Other speed-for-numerics trades already measured
 
@@ -175,7 +193,7 @@ build's:
 | --- | --- | --- | --- |
 | Merge active duplicates in CSE | up to 5x (aalto_poisson_hurdle, M0_model, rethinking ch11-13); only if the exact shared-primal backward leaves a gap | seeds summed before the pullback; 5 brms fixtures 16-418 ULP from CmdStan | `X_NO_CSE_ACTIVE` in `diagnostic-toggles.patch` |
 | Fuse over shared parameters | about 2x on 6 models | different summation order; less accurate on discrete Weibull and hurdle negbin unless the reduction is pairwise or pre-summed per observation | `fusion-toggles.patch` |
-| stanc3 partial evaluation | 10-20% on about 25 models | `fma` contraction of linear predictors; 3 brms fixtures 16-53 ULP | `partial_evaluation` in `compiler/ocaml/stanli_pipeline.ml` |
+| stanc3 partial evaluation | 10-20% on about 25 models | `fma` contraction of linear predictors; 3 brms fixtures 16-53 ULP from CmdStan; accuracy-neutral against a 70-digit reference (better on s2_me2_nomecor, worse on s2_gev at its recorded points) | `partial_evaluation` in `compiler/ocaml/stanli_pipeline.ml` |
 | Data-class specialization | 1.03x on lnr_bench | gradient order across groups (up to 19 ULP); first-error observation changes | branch `feat/map-dataclass` |
 | x86-64-v3 runtime | median 1.04x, up to 2.2x; 36 models slower | 44 of 352 replay failures; CPU-dependent results | scratch branch `bench/avx2` |
 

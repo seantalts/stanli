@@ -1,0 +1,21 @@
+diff --git a/tools/stanli_check.cpp b/tools/stanli_check.cpp
+index 1865b897..cf5a4592 100644
+--- a/tools/stanli_check.cpp
++++ b/tools/stanli_check.cpp
+@@ -48,6 +48,16 @@
+ // lower bound, say) and both engines reject it; the harness then retries the
+ // next variant so those models still get a real comparison.
+ static double eval_point(int64_t i, int variant) {
++  static const std::vector<double> override_pt = [] {
++    std::vector<double> v;
++    if (const char* f = std::getenv("STANLI_CHECK_PARAMS_FILE")) {
++      std::ifstream in(f);
++      double x;
++      while (in >> x) v.push_back(x);
++    }
++    return v;
++  }();
++  if (!override_pt.empty()) return override_pt.at(static_cast<size_t>(i));
+   switch (variant) {
+     case 1:
+       return 0.02 * static_cast<double>((i % 5) - 2);
