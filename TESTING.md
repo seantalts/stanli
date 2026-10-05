@@ -96,7 +96,7 @@ and are separate from CI correctness gates.
 | check | question | acceptance rule | schedule |
 | --- | --- | --- | --- |
 | unit tests for numerical operations | Does one numerical operation or graph transformation agree with stan-math? | Bitwise by default; a recorded limit of at most 2 ULP (10 for reassociation) where a kernel reorders arithmetic | source-changing PRs |
-| compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | native/JS on source-changing PRs; Windows after merge and on demand |
+| compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | source-changing PRs |
 | MIR wire cost | Is the compact-v2 decoder materially faster and the wire materially smaller than legacy MIR? | On Eight Schools, median decode time and raw bytes must each be at most half the legacy value | after merge, nightly, and on demand |
 | corpus comparison | Are the 352 models in the shared corpus consistent with recorded CmdStan behavior at three fixed inputs? | 10 ULP for 124 fixtures with same-platform references; scaled error of 1e-9 for most points, with documented limits for `kronecker_gp` and three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | source-changing PRs |
 | corpus sampling smoke | Do inventory-selected source models produce complete saved draws? | Exactly 100 saved draws after 100 warmup iterations, exact reference output names/order, finite outputs and no missing columns | source-changing PRs, within CTest |
@@ -490,8 +490,8 @@ median time across 51 repetitions and no more than half its raw bytes. Gzip and
 complete preparation timings remain descriptive measurements in the uploaded
 artifact.
 
-The same parity check covers the Windows producer after merge, nightly,
-on release tags, and on demand. The
+The same parity check covers the Windows producer on source PRs, after merge,
+nightly, on release tags, and on demand. The
 `stanc-windows` job cross-builds pristine `stanc.exe` before applying the
 stanli overlay, then cross-builds `stanli-compile.exe` and records its source
 and core-toolchain stamp. The `windows-compiler` job executes both PE
@@ -500,7 +500,7 @@ runs the seven-model byte comparison above between `stanli-compile.exe` and
 the JavaScript producer. The surrounding JavaScript suite separately checks
 errors, warnings, and its stock API. A real R subprocess check then runs both
 executables from paths containing spaces and Unicode, stages CRLF source as
-UTF-8 bytes, and checks portable versus legacy envelopes. This bounded gate
+UTF-8 bytes, and checks portable versus legacy envelopes. This compiler check
 builds no stan-math runtime or Windows wheel.
 
 ## Comparing stanli execution paths
