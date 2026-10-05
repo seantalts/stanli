@@ -15,10 +15,12 @@ std::size_t fused_density_calls();
 
 void normal_lpdf_fused(KernelCtx& ctx);
 void cauchy_lpdf_fused(KernelCtx& ctx);
+void student_t_lpdf_fused(KernelCtx& ctx);
 void ordered_logistic_lpmf_fused(KernelCtx& ctx);
 
 void normal_lpdf_fwd_gen(KernelCtx& ctx);
 void cauchy_lpdf_fwd_gen(KernelCtx& ctx);
+void student_t_lpdf_fwd_gen(KernelCtx& ctx);
 
 #ifdef STANLI_FUSED_ONLY
 inline constexpr bool kFusedOnly = true;
@@ -32,6 +34,7 @@ template <typename Code>
 constexpr FusedKernel fused_kernel_for(Code code) {
   if (code == OP_NORMAL_LPDF) return &normal_lpdf_fused;
   if (code == OP_CAUCHY_LPDF) return &cauchy_lpdf_fused;
+  if (code == OP_STUDENT_T_LPDF) return &student_t_lpdf_fused;
   return nullptr;
 }
 

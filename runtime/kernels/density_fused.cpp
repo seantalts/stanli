@@ -5,7 +5,11 @@
 #include <stan/math/prim/fun/constants.hpp>
 #include <stan/math/prim/fun/exp.hpp>
 #include <stan/math/prim/fun/log1m_exp.hpp>
+#include <stan/math/prim/fun/digamma.hpp>
+#include <stan/math/prim/fun/lgamma.hpp>
+#include <stan/math/prim/fun/log.hpp>
 #include <stan/math/prim/fun/log1p.hpp>
+#include <stan/math/prim/fun/square.hpp>
 #include <stan/math/prim/fun/sum.hpp>
 
 #include <algorithm>
@@ -336,6 +340,206 @@ void ordered_logistic_summed(const Lambda& lambda_val, const int* y,
   *o.connected = 1.0;
 }
 
+struct Out4 {
+  double* buf[4];
+  int64_t len[4];
+  double* connected;
+  double* value;
+};
+
+void zero_result4(const Out4& o) {
+  *o.value = 0.0;
+  for (int k = 0; k < 4; ++k)
+    std::fill_n(o.buf[k], static_cast<std::size_t>(o.len[k]), 0.0);
+  *o.connected = 0.0;
+}
+
+template <typename E>
+auto materialize(const E& e, double* buf, Eigen::Index n) {
+  if constexpr (is_scalar_v<E>) {
+    return e;
+  } else {
+    Eigen::Map<Eigen::ArrayXd, Eigen::Aligned64> a(buf, n);
+    a = e;
+    return a;
+  }
+}
+
+template <typename Y, typename N, typename M, typename S>
+void check_sizes4(const char* function, const Y& y, const N& nu, const M& mu,
+                  const S& sigma) {
+  bool have = false, match = true;
+  std::size_t first = 0;
+  note_size(y, have, first, match);
+  note_size(nu, have, first, match);
+  note_size(mu, have, first, match);
+  note_size(sigma, have, first, match);
+  if (!match)
+    stan::math::check_consistent_sizes(
+        function, "Random variable", y, "Degrees of freedom parameter", nu,
+        "Location parameter", mu, "Scale parameter", sigma);
+}
+
+template <typename Y, typename Nu, typename M, typename S>
+void student_t_summed(const Y& y, const Nu& nu, const M& mu, const S& sigma,
+                      unsigned mask, bool propto, const Out4& o, double* work,
+                      Eigen::Index stride) {
+  static constexpr const char* function = "student_t_lpdf";
+  check_sizes4(function, y, nu, mu, sigma);
+  if (any_nan(y) || !all_positive_finite(nu) || !all_finite(mu) ||
+      !all_positive_finite(sigma)) {
+    stan::math::check_not_nan(function, "Random variable", y);
+    stan::math::check_positive_finite(function, "Degrees of freedom parameter",
+                                      nu);
+    stan::math::check_finite(function, "Location parameter", mu);
+    stan::math::check_positive_finite(function, "Scale parameter", sigma);
+  }
+  if (size_of(y) == 0 || size_of(nu) == 0 || size_of(mu) == 0 ||
+      size_of(sigma) == 0 || (propto && mask == 0)) {
+    zero_result4(o);
+    return;
+  }
+  const bool ya = (mask & 1u) != 0, na = (mask & 2u) != 0,
+             ma = (mask & 4u) != 0, sa = (mask & 8u) != 0;
+  const std::size_t N =
+      std::max({size_of(y), size_of(nu), size_of(mu), size_of(sigma)});
+  const Eigen::Index n = static_cast<Eigen::Index>(N);
+  const auto half_nu = 0.5 * nu;
+  const auto square_y_scaled = stan::math::square((y - mu) / sigma);
+  const auto sqn = materialize(square_y_scaled / nu, work, n);
+  // Stan keeps log1p(sqn) lazy unless nu is active, and a lazy expression
+  // sums in a different order than an array.
+  double logp;
+  decltype(materialize(stan::math::log1p(sqn), work, n)) log1p_val = [&] {
+    if constexpr (is_scalar_v<decltype(sqn)>)
+      return na ? stan::math::log1p(sqn) : 0.0;
+    else
+      return Eigen::Map<Eigen::ArrayXd, Eigen::Aligned64>(work + stride, n);
+  }();
+  if (na) {
+    if constexpr (!is_scalar_v<decltype(sqn)>)
+      log1p_val = stan::math::log1p(sqn);
+    logp = -stan::math::sum((half_nu + 0.5) * log1p_val);
+  } else {
+    logp = -stan::math::sum((half_nu + 0.5) * stan::math::log1p(sqn));
+  }
+  if (!propto) logp -= stan::math::LOG_SQRT_PI * N;
+  if (!propto || na) {
+    logp += (stan::math::sum(stan::math::lgamma(half_nu + 0.5)) -
+             stan::math::sum(stan::math::lgamma(half_nu)) -
+             0.5 * stan::math::sum(stan::math::log(nu))) *
+            N / size_of(nu);
+  }
+  if (!propto || sa)
+    logp -= stan::math::sum(stan::math::log(sigma)) * N / size_of(sigma);
+  if (mask != 0) {
+    if (ya || ma) {
+      const auto square_sigma = stan::math::square(sigma);
+      const auto emit = [&](const auto& deriv_y_mu) {
+        if (ya) put<Y>(o.buf[0], o.len[0], -deriv_y_mu);
+        if (ma) put<M>(o.buf[2], o.len[2], deriv_y_mu);
+      };
+      const auto expr = (nu + 1) * (y - mu) / ((1 + sqn) * square_sigma * nu);
+      if (ya && ma)
+        emit(materialize(expr, work + 2 * stride, n));
+      else
+        emit(expr);
+    }
+    if (na || sa) {
+      const auto emit = [&](const auto& rep_deriv) {
+        if (na) {
+          put<Nu>(o.buf[1], o.len[1],
+                  0.5 * (stan::math::digamma(half_nu + 0.5) -
+                         stan::math::digamma(half_nu) - log1p_val +
+                         rep_deriv / nu));
+        }
+        if (sa) put<S>(o.buf[3], o.len[3], rep_deriv / sigma);
+      };
+      const auto expr = (nu + 1) * sqn / (1 + sqn) - 1;
+      if (na && sa)
+        emit(materialize(expr, work + 3 * stride, n));
+      else
+        emit(expr);
+    }
+    *o.value = logp;
+    *o.connected = 1.0;
+    return;
+  }
+  zero_result4(o);
+  *o.value = logp;
+}
+
+template <typename Y, typename Nu, typename M, typename S>
+void student_t_dispatch(const Y& y, const Nu& nu, const M& mu, const S& sigma,
+                        unsigned mask, bool propto, const Out4& o,
+                        std::size_t n) {
+  constexpr Eigen::Index kStack = 128;
+  const Eigen::Index stride =
+      (static_cast<Eigen::Index>(n) + 7) & ~Eigen::Index{7};
+  const auto run = [&](double* work) {
+    student_t_summed(y, nu, mu, sigma, mask, propto, o, work, stride);
+  };
+  if (n <= static_cast<std::size_t>(kStack)) {
+    alignas(64) double work[4 * kStack];
+    run(work);
+  } else {
+    std::vector<double> heap(static_cast<std::size_t>(4 * stride + 8));
+    double* work = heap.data();
+    while (reinterpret_cast<std::uintptr_t>(work) % 64 != 0) ++work;
+    run(work);
+  }
+}
+
+void student_t_lpdf_run(KernelCtx& ctx) {
+  ++g_calls;
+  const unsigned variant = ctx.variant;
+#ifdef STANLI_LITE_LP
+  const bool propto = false;
+#else
+  const bool propto = (variant & 0x80u) != 0;
+#endif
+  if (variant & 0x40u) {
+    const unsigned mask = variant & 0x3fu;
+    const int64_t N = ctx.out.len;
+    for (int64_t n = 0; n < N; ++n) {
+      Out4 o;
+      for (int k = 0; k < 4; ++k) {
+        o.buf[k] = ctx.scratch + static_cast<int64_t>(k) * N + n;
+        o.len[k] = 1;
+      }
+      o.connected = ctx.scratch + 4 * N + n;
+      o.value = ctx.out.data + n;
+      student_t_dispatch(ctx.in[0].data[ctx.in[0].len == 1 ? 0 : n],
+                         ctx.in[1].data[ctx.in[1].len == 1 ? 0 : n],
+                         ctx.in[2].data[ctx.in[2].len == 1 ? 0 : n],
+                         ctx.in[3].data[ctx.in[3].len == 1 ? 0 : n], mask,
+                         propto, o, 1);
+    }
+    return;
+  }
+  const unsigned mask = variant == 0 ? 15u : (variant & 0x3fu);
+  Out4 o;
+  int64_t off = 0;
+  std::size_t n = 1;
+  for (int k = 0; k < 4; ++k) {
+    o.buf[k] = ctx.scratch + off;
+    o.len[k] = ctx.in[k].len;
+    off += ctx.in[k].len;
+    n = std::max<std::size_t>(n, static_cast<std::size_t>(ctx.in[k].len));
+  }
+  o.connected = ctx.scratch + off;
+  o.value = ctx.out.data;
+  with_view(ctx.in[0], [&](const auto& y) {
+    with_view(ctx.in[1], [&](const auto& nu) {
+      with_view(ctx.in[2], [&](const auto& mu) {
+        with_view(ctx.in[3], [&](const auto& sigma) {
+          student_t_dispatch(y, nu, mu, sigma, mask, propto, o, n);
+        });
+      });
+    });
+  });
+}
+
 struct NormalOp {
   template <typename Y, typename M, typename S>
   static void run(const Y& y, const M& mu, const S& sigma, unsigned mask,
@@ -488,6 +692,7 @@ void ordered_logistic_lpmf_fused(KernelCtx& ctx) {
 
 void normal_lpdf_fused(KernelCtx& ctx) { fused_lpdf<NormalOp>(ctx); }
 void cauchy_lpdf_fused(KernelCtx& ctx) { fused_lpdf<CauchyOp>(ctx); }
+void student_t_lpdf_fused(KernelCtx& ctx) { student_t_lpdf_run(ctx); }
 
 }  // namespace dens
 }  // namespace stanli
