@@ -4,6 +4,7 @@
 // scalars are bare, containers are indexed even at length one, and matrices
 // carry row/column indices in column-major order. This test is intentionally
 // at the ABI boundary so a second flattening policy in capi.cpp cannot drift.
+#include "../runtime/third_party/bridgestan.h"
 #include "categorical_check_mir.hpp"
 #include "env_helpers.hpp"
 #include "structured_array_oracles.hpp"
@@ -976,13 +977,33 @@ void expect_sampling_progress() {
   stanli_model_free(observed);
 }
 
-// Explicit inits are per-chain starting points, not a reason to sample the
-// chains one after another: a threaded run with inits must interleave its
-// chains and return the bytes of the sequential run.
+struct PrintThreadCapture {
+  std::thread::id caller;
+  size_t caller_prints = 0;
+  size_t worker_prints = 0;
+};
+
+// BridgeStan's process-wide print callback has no user-data argument. The
+// runtime serializes calls, and sampling joins all workers before we inspect
+// or reset this capture.
+PrintThreadCapture print_thread_capture;
+
+void capture_print_thread(const char*, size_t) {
+  if (std::this_thread::get_id() == print_thread_capture.caller)
+    ++print_thread_capture.caller_prints;
+  else
+    ++print_thread_capture.worker_prints;
+}
+
+// Explicit inits must still dispatch sampling to the worker pool and return
+// the bytes of the sequential run. Observe model evaluation through the
+// public print callback: progress is marshalled to the caller, and its event
+// order cannot prove concurrency (a fast chain may finish before another
+// worker starts).
 void expect_inits_run_in_parallel() {
   if (!stanli_thread_safe()) return;
-  const std::string mir = slurp("tests/fixtures/gqconst.tmir.sexp");
-  const char* data = R"({"rectangular":[[1,4],[2,5],[3,6]]})";
+  const std::string mir = slurp("tests/fixtures/rejectprint.tmir.sexp");
+  const char* data = R"({"N":3,"lim":1.0})";
   char err[8192]{};
   stanli_model* model = stanli_model_new(mir.c_str(), data, err, sizeof err);
   expect_true("per-chain inits model builds", model != nullptr);
@@ -991,8 +1012,8 @@ void expect_inits_run_in_parallel() {
   stanli_sample_opts_init(&opts);
   opts.seed = 31;
   opts.chains = 4;
-  opts.warmup = 1000;
-  opts.samples = 1000;
+  opts.warmup = 100;
+  opts.samples = 100;
   const int64_t n = stanli_n_unconstrained(model);
   const int64_t rows = stanli_n_stored_draws(&opts);
   std::vector<double> rows_init((size_t)(opts.chains * n));
@@ -1000,21 +1021,36 @@ void expect_inits_run_in_parallel() {
   std::vector<double> shared_init((size_t)(opts.chains * n), 0.5);
   const std::vector<double>* cases[] = {&rows_init, &shared_init};
   const char* labels[] = {"one row per chain", "one vector for every chain"};
+  char* print_error = nullptr;
+  const int print_rc =
+      bs_set_print_callback(capture_print_thread, &print_error);
+  expect_true("install sampling print callback", print_rc == 0);
+  bs_free_error_msg(print_error);
+  if (print_rc != 0) {
+    stanli_model_free(model);
+    return;
+  }
   for (int k = 0; k < 2; ++k) {
     opts.inits = cases[k]->data();
     std::vector<double> serial_draws((size_t)(opts.chains * rows * n));
     std::vector<double> serial_stats(
         (size_t)(opts.chains * rows * STANLI_N_SAMPLER_COLS));
     opts.num_threads = 1;
+    print_thread_capture = {std::this_thread::get_id()};
     int rc = stanli_sample_multi(model, &opts, serial_draws.data(),
                                  serial_stats.data(), err, sizeof err);
     expect_true(std::string("sequential run with inits succeeds: ") + labels[k],
                 rc == 0);
+    expect_true(
+        std::string("sequential inits evaluate on the caller: ") + labels[k],
+        print_thread_capture.caller_prints > 0 &&
+            print_thread_capture.worker_prints == 0);
 
     std::vector<double> draws(serial_draws.size());
     std::vector<double> stats(serial_stats.size());
     ProgressCapture capture{std::this_thread::get_id()};
     opts.num_threads = opts.chains;
+    print_thread_capture = {std::this_thread::get_id()};
     rc = stanli_sample_multi_progress(model, &opts, 1, draws.data(),
                                       stats.data(), capture_progress, &capture,
                                       nullptr, err, sizeof err);
@@ -1024,20 +1060,21 @@ void expect_inits_run_in_parallel() {
         std::string("threaded inits draws match sequential: ") + labels[k],
         draws == serial_draws && stats == serial_stats);
     expect_true(
-        std::string("threaded inits progress uses the caller thread: ") +
+        std::string(
+            "threaded inits progress covers every transition on caller: ") +
             labels[k],
-        capture.caller_thread);
+        capture.caller_thread &&
+            capture.events.size() ==
+                (size_t)(opts.chains * (opts.warmup + opts.samples)));
 
-    size_t first_of_last = capture.events.size();
-    size_t last_of_first = 0;
-    for (size_t e = 0; e < capture.events.size(); ++e) {
-      if (capture.events[e][0] == opts.chains && first_of_last > e)
-        first_of_last = e;
-      if (capture.events[e][0] == 1) last_of_first = e;
-    }
-    expect_true(std::string("chains with inits overlap in time: ") + labels[k],
-                first_of_last < last_of_first);
+    expect_true(std::string("threaded inits evaluate on workers: ") + labels[k],
+                print_thread_capture.caller_prints == 0 &&
+                    print_thread_capture.worker_prints > 0);
   }
+  print_error = nullptr;
+  expect_true("restore sampling print callback",
+              bs_set_print_callback(nullptr, &print_error) == 0);
+  bs_free_error_msg(print_error);
   stanli_model_free(model);
 }
 
