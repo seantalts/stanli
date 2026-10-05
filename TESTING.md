@@ -96,7 +96,7 @@ and are separate from CI correctness gates.
 | check | question | acceptance rule | schedule |
 | --- | --- | --- | --- |
 | unit tests for numerical operations | Does one numerical operation or graph transformation agree with stan-math? | Bitwise by default; a recorded limit of at most 2 ULP (10 for reassociation) where a kernel reorders arithmetic | source-changing PRs |
-| compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | native/JS on source-changing PRs; Windows after merge and on demand |
+| compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | source-changing PRs |
 | MIR wire cost | Is the compact-v2 decoder materially faster and the wire materially smaller than legacy MIR? | On Eight Schools, median decode time and raw bytes must each be at most half the legacy value | after merge, nightly, and on demand |
 | corpus comparison | Are the 352 models in the shared corpus consistent with recorded CmdStan behavior at three fixed inputs? | 10 ULP for 124 fixtures with same-platform references; scaled error of 1e-9 for most points, with documented limits for `kronecker_gp` and three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | source-changing PRs |
 | corpus sampling smoke | Do inventory-selected source models produce complete saved draws? | Exactly 100 saved draws after 100 warmup iterations, exact reference output names/order, finite outputs and no missing columns | source-changing PRs, within CTest |
@@ -490,8 +490,8 @@ median time across 51 repetitions and no more than half its raw bytes. Gzip and
 complete preparation timings remain descriptive measurements in the uploaded
 artifact.
 
-The same parity check covers the Windows producer after merge, nightly,
-on release tags, and on demand. The
+The same parity check covers the Windows producer on source PRs, after merge,
+nightly, on release tags, and on demand. The
 `stanc-windows` job cross-builds pristine `stanc.exe` before applying the
 stanli overlay, then cross-builds `stanli-compile.exe` and records its source
 and core-toolchain stamp. The `windows-compiler` job executes both PE
@@ -500,7 +500,7 @@ runs the seven-model byte comparison above between `stanli-compile.exe` and
 the JavaScript producer. The surrounding JavaScript suite separately checks
 errors, warnings, and its stock API. A real R subprocess check then runs both
 executables from paths containing spaces and Unicode, stages CRLF source as
-UTF-8 bytes, and checks portable versus legacy envelopes. This bounded gate
+UTF-8 bytes, and checks portable versus legacy envelopes. This compiler check
 builds no stan-math runtime or Windows wheel.
 
 ## Comparing stanli execution paths
@@ -845,7 +845,7 @@ repeat-evaluation tests are needed for that case.
 
 ## Checks run before and after merge
 
-PRs use one representative native build and one complete external model
+PRs use Linux and Windows x86_64 native builds and one complete external model
 oracle. Focused tests cover individual kernels, compiler contracts, execution
 paths, and clients; broad alternative-configuration sweeps and platform
 matrices run post-submit. The source-change path is defined in
@@ -857,6 +857,8 @@ matrices run post-submit. The source-change path is defined in
 - One Linux x86_64 Clang build: the full CTest suite, including focused
   cross-path and pass-safety tests, and every recorded CmdStan model at all
   three points. Numerical thresholds and the reference corpus are unchanged.
+- One Windows x64 wheel build: the full CTest suite, source-built compiler
+  provenance and native/JavaScript parity, and installed-wheel Python tests.
 - Installed wheel checks: Python and BridgeStan transport tests in a clean
   environment, truthful manylinux tags, and the binary-size artifact.
 - Shared compiler checks: native/JavaScript producer parity, typed/legacy
@@ -871,25 +873,27 @@ including `AGENTS.md`, research material under `notes/`, or `web/index.html`
 instead run static checks and formatting. Executable code and test fixtures
 must not live under the documentation-only `notes/` directory. The required
 `manylinux_2_28_x86_64` status remains present for every PR. It checks static
-validation and, for source changes, the native build, shared compiler, and R
-integration. A failed, cancelled, or unexpectedly skipped prerequisite cannot
-produce a green gate; unknown file paths select the full source-change path.
+validation and, for source changes, the Linux and Windows builds, shared
+compiler, and R integration. A failed, cancelled, or unexpectedly skipped
+prerequisite cannot produce a green gate; unknown file paths select the full
+source-change path.
 
 Main pushes, nightly runs, release tags, and manual dispatches additionally
 run the full vectorization A/B corpus, portable-MIR cost measurements, live
 reference BridgeStan comparisons, cross-release R compatibility, first-posterior
-timings, no-stdio configuration, Windows compiler parity, the other native
-platforms, WebAssembly, and webR. ASan and TSan run on the same non-PR events
+timings, no-stdio configuration, the other native platforms, WebAssembly, and
+webR. ASan and TSan run on the same non-PR events
 except release tags. The standalone R platform/version matrix runs on relevant
 main pushes, release tags, and manual dispatches. Rethinking regeneration runs
-after relevant main pushes, nightly, and on demand.
+after relevant main pushes, nightly, and on demand. The full Windows
+development setup matrix remains post-submit and on demand.
 
 The full Windows job builds the runtime and CTest suite, packages `stanli.dll`,
 `stanli-compile.exe`, and pristine `stanc.exe`, then runs the installed-wheel
 Python tests through source compilation, errors, lowering, gradients, sampling,
-and generated quantities. These checks report failures for prompt follow-up
-after merge and preserve the existing release dependencies. If a change needs
-specific platform or optimization evidence before landing, run the relevant
+and generated quantities. These checks are required for source PRs and
+preserve the existing release dependencies. If a change needs specific
+platform or optimization evidence before landing, run the relevant
 focused check or dispatch the full workflow on its branch:
 
 ```sh

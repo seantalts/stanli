@@ -68,7 +68,7 @@ in documentation directories.
 ## Validation and CI
 
 Use focused regression tests for the behavior being changed. PR CI retains
-one representative native build, CTest, the complete recorded CmdStan
+Linux and Windows x86_64 native builds, CTest, one complete recorded CmdStan
 corpus replay for the shipped configuration, installed Python/R interface
 checks, native/JavaScript compiler parity, and inexpensive static checks.
 Keep the required status present for documentation-only changes and fail it
