@@ -990,7 +990,13 @@ struct Kernel {
   // Diagnostic description owned by this implementation, not the opcode.
   // Unclassified is intentional: missing metadata never proves tape freedom.
   const char* derivative_mechanism = "unclassified";
+  CachedMicroFn cached_micro = nullptr;
 };
+
+inline Kernel with_cached_micro(Kernel k, CachedMicroFn micro) {
+  k.cached_micro = micro;
+  return k;
+}
 
 inline BackwardPrimalReads backward_primal_reads(const Kernel* kernel,
                                                  uint8_t variant) {
