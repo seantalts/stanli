@@ -17,6 +17,10 @@
 
 namespace stanli {
 
+namespace {
+constexpr size_t kMinMicroRun = 2;
+}  // namespace
+
 using ForwardFn = void (*)(KernelCtx&);
 ForwardFn resolve_forward_fn(const Op& op);
 
@@ -560,7 +564,29 @@ void Executor::bind_() {
   micro_.clear();
   micro_runs_.clear();
   fused_.clear();
-  bool in_run = false;
+  struct Pending {
+    size_t ci;
+    const Kernel* k;
+    uint16_t opcode;
+  };
+  std::vector<Pending> pending;
+  size_t run_start = 0;
+  const auto close_run = [&] {
+    if (pending.empty()) return;
+    if (micro_.size() - run_start >= kMinMicroRun) {
+      micro_runs_.push_back(MicroRun{static_cast<uint32_t>(run_start),
+                                     static_cast<uint32_t>(micro_.size()),
+                                     static_cast<uint32_t>(bwd_.size())});
+      bwd_.push_back(BwdStep{nullptr, nullptr, nullptr});
+      for (const Pending& p : pending)
+        fused_.push_back(FusedOp{&ctx_[p.ci], p.k->cached_micro, p.opcode});
+    } else {
+      micro_.resize(run_start);
+      for (const Pending& p : pending)
+        bwd_.push_back(BwdStep{p.k->backward, &ctx_[p.ci], nullptr});
+    }
+    pending.clear();
+  };
   for (size_t i = graph_.ops.size(); i-- > 0;) {
     const Op& op = graph_.ops[i];
     const Kernel& k = kernel(op.opcode);
@@ -570,28 +596,23 @@ void Executor::bind_() {
     if (has_shared_primals && op.primal_source >= 0 &&
         op.primal_source != op.out && op.out2 < 0 && k.cached_micro) {
       const size_t before = micro_.size();
+      if (pending.empty()) run_start = before;
       if (k.cached_micro(ctx_[ci], micro_)) {
         for (size_t m = before; m < micro_.size(); ++m)
           micro_[m].opcode = op.opcode;
-        fused_.push_back(FusedOp{&ctx_[ci], k.cached_micro, op.opcode});
-        if (micro_.size() == before) continue;
-        if (in_run) {
-          micro_runs_.back().end = static_cast<uint32_t>(micro_.size());
-        } else {
-          micro_runs_.push_back(MicroRun{static_cast<uint32_t>(before),
-                                         static_cast<uint32_t>(micro_.size())});
-          bwd_.push_back(BwdStep{nullptr, nullptr, nullptr});
-          in_run = true;
-        }
+        if (micro_.size() != before)
+          pending.push_back(Pending{ci, &k, op.opcode});
         continue;
       }
+      micro_.resize(before);
     }
-    in_run = false;
+    close_run();
     const int o2 = op.out2;
     const double* out2 =
         o2 >= 0 ? adjoints_.data() + adjoint_offsets[o2] : nullptr;
     bwd_.push_back(BwdStep{b, &ctx_[ci], out2});
   }
+  close_run();
 }
 
 void Executor::refresh_micros_() {
@@ -802,6 +823,57 @@ double Executor::gradient(double* grad_out) {
   return v;
 }
 
+namespace {
+
+template <class Step>
+inline void run_bwd_step(const Step& s) {
+  KernelCtx& ctx = *s.ctx;
+  if (ctx.out_adj_vec.len == 1) ctx.out_adj = ctx.out_adj_vec.data[0];
+  if (s.out2_adj) ctx.out2_adj = *s.out2_adj;
+  s.fn(ctx);
+}
+
+inline void run_micro_range(const BwdMicro* m, const BwdMicro* end) {
+  for (; m != end; ++m) run_bwd_micro(*m);
+}
+
+template <class Steps, class Runs>
+[[gnu::noinline]] void reverse_dense_micro(const Steps& bwd, const Runs& runs,
+                                           const std::vector<BwdMicro>& micro) {
+  size_t run = 0;
+  for (const auto& s : bwd) {
+    if (s.fn) {
+      run_bwd_step(s);
+      continue;
+    }
+    const auto r = runs[run++];
+    run_micro_range(micro.data() + r.begin, micro.data() + r.end);
+  }
+}
+
+template <class Steps, class Runs>
+[[gnu::noinline]] void reverse_sparse_micro(
+    const Steps& bwd, const Runs& runs, const std::vector<BwdMicro>& micro) {
+  const auto plain = [&](size_t i, const size_t end) {
+    for (; i + 4 <= end; i += 4) {
+      run_bwd_step(bwd[i]);
+      run_bwd_step(bwd[i + 1]);
+      run_bwd_step(bwd[i + 2]);
+      run_bwd_step(bwd[i + 3]);
+    }
+    for (; i < end; ++i) run_bwd_step(bwd[i]);
+  };
+  size_t pos = 0;
+  for (const auto& r : runs) {
+    plain(pos, r.at);
+    run_micro_range(micro.data() + r.begin, micro.data() + r.end);
+    pos = r.at + 1;
+  }
+  plain(pos, bwd.size());
+}
+
+}  // namespace
+
 void Executor::reverse(double* grad_out, double seed) {
   if (!reverse_ready_)
     throw std::logic_error("reverse requires a fresh forward");
@@ -860,18 +932,10 @@ void Executor::reverse(double* grad_out, double seed) {
   };
   const size_t nb = bwd_.size();
   if (!micro_runs_.empty()) {
-    size_t run = 0;
-    for (const BwdStep& s : bwd_) {
-      if (s.fn) {
-        step(s);
-        continue;
-      }
-      const MicroRun r = micro_runs_[run++];
-      for (const BwdMicro *m = micro_.data() + r.begin,
-                          *end = micro_.data() + r.end;
-           m != end; ++m)
-        run_bwd_micro(*m);
-    }
+    if (micro_.size() * 2 < nb)
+      reverse_sparse_micro(bwd_, micro_runs_, micro_);
+    else
+      reverse_dense_micro(bwd_, micro_runs_, micro_);
     if (n_params_)
       std::memcpy(grad_out, adjoints_.data(), sizeof(double) * n_params_);
     return;

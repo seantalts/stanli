@@ -269,9 +269,10 @@ class Executor {
   };
   std::vector<BwdStep> bwd_;
   // A step with a null fn stands for the next run of micro-ops, taken in
-  // order from micro_runs_ ([begin, end) into micro_).
+  // order from micro_runs_ ([begin, end) into micro_), and `at` is that
+  // step's index in bwd_.
   struct MicroRun {
-    uint32_t begin, end;
+    uint32_t begin, end, at;
   };
   struct FusedOp {
     const KernelCtx* ctx;

@@ -318,10 +318,14 @@ static SharedBackwardGraph build_shared_backward_graph() {
   }
   std::vector<int> terms;
   const auto dup = [&](auto&& emit) {
+    std::vector<int> outs;
     for (int d = 0; d < sb.n_dups; ++d) {
-      const int out = g.add_slot(1, false), term = g.add_slot(1, false);
-      emit(out);
-      g.add_op(OP_MUL, {out, w[d]}, term);
+      outs.push_back(g.add_slot(1, false));
+      emit(outs.back());
+    }
+    for (int d = 0; d < sb.n_dups; ++d) {
+      const int term = g.add_slot(1, false);
+      g.add_op(OP_MUL, {outs[d], w[d]}, term);
       terms.push_back(term);
     }
   };
