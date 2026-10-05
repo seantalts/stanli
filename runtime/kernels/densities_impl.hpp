@@ -303,6 +303,29 @@ void density_bwd(KernelCtx& ctx) {
   }
 }
 
+template <int NArgs>
+bool density_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
+  if ((ctx.variant & 0x40u) != 0 || ctx.out.len != 1) return false;
+  const unsigned mask =
+      ctx.variant == 0 ? (1u << NArgs) - 1 : (ctx.variant & 0x3fu);
+  int64_t n_partials = 0;
+  for (int k = 0; k < NArgs; ++k) n_partials += ctx.in[k].len;
+  for (int k = 0; k < NArgs; ++k)
+    if (((mask >> k) & 1u) != 0 && ctx.in_adj[k].data != nullptr &&
+        ctx.in[k].len != 1)
+      return false;
+  const double* connected = ctx.scratch + n_partials;
+  int64_t off = 0;
+  for (int k = 0; k < NArgs; ++k) {
+    if (((mask >> k) & 1u) != 0 && ctx.in_adj[k].data != nullptr)
+      out.push_back(bwd_micro(kMicroScaled, ctx.in_adj[k].data,
+                              ctx.out_adj_vec.data, ctx.scratch + off,
+                              connected));
+    off += ctx.in[k].len;
+  }
+  return true;
+}
+
 // Elementwise ops need one partial per argument per element, even for
 // broadcast scalars (each element scales by its own adjoint).
 template <int NArgs>

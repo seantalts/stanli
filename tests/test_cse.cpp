@@ -8,6 +8,8 @@
 #include <stan/math.hpp>
 
 #include <cmath>
+#include <cstring>
+#include <limits>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -292,6 +294,138 @@ static void test_gradient_accumulation_order() {
   }
 }
 
+struct SharedBackwardGraph {
+  Graph g;
+  Fills fills;
+  int n_dups = 3;
+};
+
+static SharedBackwardGraph build_shared_backward_graph() {
+  SharedBackwardGraph sb;
+  Graph& g = sb.g;
+  const int p0 = g.add_slot(1, true), p1 = g.add_slot(1, true);
+  const int p2 = g.add_slot(1, true), pv = g.add_slot(3, true);
+  const int k3 = g.add_slot(1, false);
+  sb.fills.emplace_back(k3, std::vector<double>{3.0});
+  const int hi = g.add_slot(1, false), theta = g.add_slot(1, false);
+  g.add_op(OP_ADD, {p0, k3}, hi);
+  g.add_op(OP_INV_LOGIT, {p2}, theta);
+  const double weights[] = {1.0, -3.7e5, 0.31, 7.9e-3};
+  std::vector<int> w;
+  for (double x : weights) {
+    w.push_back(g.add_slot(1, false));
+    sb.fills.emplace_back(w.back(), std::vector<double>{x});
+  }
+  std::vector<int> terms;
+  const auto dup = [&](auto&& emit) {
+    std::vector<int> outs;
+    for (int d = 0; d < sb.n_dups; ++d) {
+      outs.push_back(g.add_slot(1, false));
+      emit(outs.back());
+    }
+    for (int d = 0; d < sb.n_dups; ++d) {
+      const int term = g.add_slot(1, false);
+      g.add_op(OP_MUL, {outs[d], w[d]}, term);
+      terms.push_back(term);
+    }
+  };
+  dup([&](int o) { g.add_op(OP_INDEX, {pv}, o, {1}); });
+  dup([&](int o) { g.add_op(OP_ADD, {p0, p1}, o); });
+  dup([&](int o) { g.add_op(OP_SUB, {p0, p1}, o); });
+  dup([&](int o) { g.add_op(OP_NEG, {p1}, o); });
+  dup([&](int o) { g.add_op(OP_MUL, {p0, p1}, o); });
+  dup([&](int o) { g.add_op(OP_EXP, {p1}, o); });
+  dup([&](int o) { g.add_op(OP_INV_LOGIT, {p1}, o); });
+  dup([&](int o) { g.add_op(OP_LOG1M, {theta}, o); });
+  dup([&](int o) { g.add_op(OP_LOGV, {theta}, o); });
+  dup([&](int o) { g.add_op(OP_SQUARE, {p1}, o); });
+  dup([&](int o) { g.add_op(OP_ABS, {p1}, o); });
+  dup([&](int o) { g.add_op(OP_LOG_INV_LOGIT, {p1}, o); });
+  dup([&](int o) { g.add_op(OP_LSE2, {p0, p1}, o); });
+  dup([&](int o) { g.add_op(OP_LOG_DIFF_EXP, {hi, p0}, o); });
+  dup([&](int o) { g.add_op(OP_LOG_MIX, {theta, p0, p1}, o); });
+  for (uint8_t variant : {uint8_t{0}, uint8_t{0x81}}) {
+    dup([&](int o) {
+      g.ops[g.add_op(OP_BERNOULLI_LPMF, {theta}, o, {1})].variant = variant;
+    });
+    dup([&](int o) {
+      g.ops[g.add_op(OP_BINOMIAL_LPMF, {theta}, o, {1, 3, 1, 10})].variant =
+          variant;
+    });
+    dup([&](int o) {
+      g.ops[g.add_op(OP_POISSON_LPMF, {hi}, o, {4})].variant = variant;
+    });
+  }
+  testutil::reduce_into_result(g, terms);
+  return sb;
+}
+
+struct Evaluation {
+  bool threw = false;
+  std::vector<double> out;
+};
+
+static Evaluation evaluate_at(const Graph& g, const Fills& fills,
+                              const std::vector<double>& point) {
+  Evaluation e;
+  try {
+    Executor ex(g);
+    for (const auto& f : fills)
+      ex.set_values(f.first, f.second.data(), f.second.size());
+    for (size_t i = 0; i < point.size(); ++i) ex.params_data()[i] = point[i];
+    e.out.assign(1 + (size_t)ex.n_params(), 0.0);
+    e.out[0] = ex.gradient(e.out.data() + 1);
+  } catch (const std::exception&) {
+    e.threw = true;
+  }
+  return e;
+}
+
+static bool same_bits(const Evaluation& a, const Evaluation& b) {
+  if (a.threw != b.threw || a.out.size() != b.out.size()) return false;
+  for (size_t i = 0; i < a.out.size(); ++i)
+    if (std::memcmp(&a.out[i], &b.out[i], sizeof(double)) != 0) return false;
+  return true;
+}
+
+// Every duplicate keeps its own seed and accumulation order, so the shared
+// backward must reproduce the unmerged graph bit for bit, including at
+// points where a kernel throws or a gradient is non-finite.
+static void test_shared_backward_bitwise() {
+  SharedBackwardGraph sb = build_shared_backward_graph();
+  Graph merged = sb.g;
+  std::vector<int> terms;
+  const CseStats st = cse(merged, sb.fills, terms, {});
+  expect("shared primals found",
+         st.primals_shared >= 40 && st.ops_removed == 0);
+  expect("graph keeps every pullback", merged.ops.size() == sb.g.ops.size());
+  {
+    Executor ex(merged);
+    expect("duplicate backwards are fused", ex.fused_backward_ops() >= 40);
+  }
+  const double inf = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const std::vector<std::vector<double>> points = {
+      {0.3, 0.5, 0.7, 0.1, -0.4, 0.9}, {-1.3, 2.1, -0.2, 3.0, 0.5, -2.0},
+      {0.0, 0.0, 0.0, 0.0, 0.0, 0.0},  {40.0, -40.0, 30.0, 1e-300, 1e300, 0.5},
+      {1e3, 1e3, -1e3, 0.0, 0.0, 0.0}, {nan, 0.5, 0.2, 0.1, 0.2, 0.3},
+      {0.3, nan, 0.2, 0.1, 0.2, 0.3},  {0.3, 0.5, nan, 0.1, 0.2, 0.3},
+      {inf, 0.5, 0.2, 0.1, 0.2, 0.3},  {0.3, -inf, 0.2, 0.1, 0.2, 0.3},
+      {0.3, 0.5, inf, 0.1, 0.2, 0.3},
+  };
+  int n_threw = 0, n_finite = 0;
+  for (size_t k = 0; k < points.size(); ++k) {
+    const Evaluation want = evaluate_at(sb.g, sb.fills, points[k]);
+    const Evaluation got = evaluate_at(merged, sb.fills, points[k]);
+    n_threw += got.threw;
+    n_finite += !got.threw && std::isfinite(got.out[0]);
+    const std::string what =
+        "shared backward bitwise, point " + std::to_string(k);
+    expect(what.c_str(), same_bits(got, want));
+  }
+  expect("some points evaluate", n_finite >= 3);
+}
+
 int main() {
   {  // kernels register through the first Executor
     Graph g;
@@ -311,6 +445,7 @@ int main() {
   test_keeps_roots();
   test_env_disable();
   test_gradient_accumulation_order();
+  test_shared_backward_bitwise();
   if (failures == 0) std::printf("test_cse OK\n");
   return failures == 0 ? 0 : 1;
 }

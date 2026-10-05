@@ -629,6 +629,78 @@ void repv_dynamic_bwd(KernelCtx& ctx) {
     ctx.in_adj[0].data[0] += ctx.out_adj_vec.data[i];
 }
 
+bool add_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
+  if (ctx.variant != 0 || ctx.out.len != 1) return false;
+  for (int k = 0; k < 2; ++k)
+    if (ctx.in_adj[k].data && ctx.in[k].len != 1) return false;
+  for (int k = 0; k < 2; ++k)
+    if (ctx.in_adj[k].data)
+      out.push_back(
+          bwd_micro(kMicroAdd, ctx.in_adj[k].data, ctx.out_adj_vec.data));
+  return true;
+}
+
+bool sub_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
+  if (ctx.out.len != 1) return false;
+  for (int k = 0; k < 2; ++k)
+    if (ctx.in_adj[k].data && ctx.in[k].len != 1) return false;
+  if (ctx.in_adj[0].data)
+    out.push_back(
+        bwd_micro(kMicroAdd, ctx.in_adj[0].data, ctx.out_adj_vec.data));
+  if (ctx.in_adj[1].data)
+    out.push_back(
+        bwd_micro(kMicroSub, ctx.in_adj[1].data, ctx.out_adj_vec.data));
+  return true;
+}
+
+bool neg_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
+  if (ctx.out.len != 1) return false;
+  if (ctx.in_adj[0].data)
+    out.push_back(
+        bwd_micro(kMicroSub, ctx.in_adj[0].data, ctx.out_adj_vec.data));
+  return true;
+}
+
+bool mul_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
+  if (ctx.out.len != 1 || ctx.in[0].len != 1 || ctx.in[1].len != 1)
+    return false;
+  if (ctx.in_adj[0].data)
+    out.push_back(bwd_micro(kMicroScaled, ctx.in_adj[0].data,
+                            ctx.out_adj_vec.data, ctx.in[1].data));
+  if (ctx.in_adj[1].data)
+    out.push_back(bwd_micro(kMicroScaled, ctx.in_adj[1].data,
+                            ctx.out_adj_vec.data, ctx.in[0].data));
+  return true;
+}
+
+double logv_delta(double seed, double x, double) { return seed / x; }
+double invlogit_delta(double seed, double, double y) {
+  return seed * y * (1.0 - y);
+}
+double square_delta(double seed, double x, double) { return seed * 2.0 * x; }
+double log1m_delta(double seed, double x, double) { return seed / (x - 1.0); }
+
+template <double (*Delta)(double, double, double)>
+bool unary_fn_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
+  if (ctx.out.len != 1) return false;
+  if (ctx.in_adj[0].data)
+    out.push_back(bwd_micro(kMicroFn, ctx.in_adj[0].data, ctx.out_adj_vec.data,
+                            ctx.in[0].data, ctx.out.data, Delta));
+  return true;
+}
+
+template <double (*Delta)(double, double, double), UnaryTopology Topology>
+bool unary_list_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
+  if (ctx.out.len != 1) return false;
+  if (Topology == UnaryTopology::Disconnected || !ctx.in_adj[0].data)
+    return true;
+  out.push_back(
+      bwd_micro(Topology == UnaryTopology::Nonzero ? kMicroFnNonzero : kMicroFn,
+                ctx.in_adj[0].data, ctx.out_adj_vec.data, ctx.in[0].data,
+                ctx.out.data, Delta));
+  return true;
+}
+
 // Generated from STANLI_SCALAR_UNARY_LIST (optable.hpp): the value in the
 // forward, the ordered delta and its pullback topology in the backward.
 // Shape-preserving and elementwise, so a re-rolled vector arrives here as one
@@ -640,6 +712,11 @@ void repv_dynamic_bwd(KernelCtx& ctx) {
       const double x = ctx.in[0].data[i];                                    \
       ctx.out.data[i] = (VAL);                                               \
     }                                                                        \
+  }                                                                          \
+  double name##_udelta(double seed, double x, double y) {                    \
+    (void)x;                                                                 \
+    (void)y;                                                                 \
+    return (DELTA);                                                          \
   }                                                                          \
   void name##_ubwd(KernelCtx& ctx) {                                         \
     if (!ctx.in_adj[0].data) return;                                         \
@@ -658,28 +735,43 @@ STANLI_SCALAR_UNARY_LIST(STANLI_DEFINE_UNARY)
 }  // namespace
 
 void register_eltwise_kernels() {
-#define STANLI_REGISTER_UNARY(code, name, value, delta, topology) \
-  register_kernel(code, Kernel{name##_ufwd, name##_ubwd, nullptr});
+#define STANLI_REGISTER_UNARY(code, name, value, delta, topology)        \
+  register_kernel(                                                       \
+      code, with_cached_micro(Kernel{name##_ufwd, name##_ubwd, nullptr}, \
+                              unary_list_micro<name##_udelta, topology>));
   STANLI_SCALAR_UNARY_LIST(STANLI_REGISTER_UNARY)
 #undef STANLI_REGISTER_UNARY
+  register_kernel(OP_ADD,
+                  with_cached_micro(Kernel{add_fwd, add_bwd, nullptr, nullptr,
+                                           backward_reads_none},
+                                    add_micro));
   register_kernel(
-      OP_ADD, Kernel{add_fwd, add_bwd, nullptr, nullptr, backward_reads_none});
-  register_kernel(OP_SUB, Kernel{sub_fwd, sub_bwd, nullptr});
-  register_kernel(OP_MUL, Kernel{mul_fwd, mul_bwd, nullptr});
+      OP_SUB, with_cached_micro(Kernel{sub_fwd, sub_bwd, nullptr}, sub_micro));
+  register_kernel(
+      OP_MUL, with_cached_micro(Kernel{mul_fwd, mul_bwd, nullptr}, mul_micro));
   register_kernel(OP_FMA, Kernel{fma_fwd, fma_bwd, nullptr});
   register_kernel(OP_DIV, Kernel{div_fwd, div_bwd, nullptr});
   register_kernel(OP_POW, Kernel{pow_fwd, pow_bwd, nullptr});
   register_kernel(OP_DOT, Kernel{dot_fwd, dot_bwd, nullptr});
   register_kernel(OP_GROUP_DOT, Kernel{group_dot_fwd, group_dot_bwd, nullptr});
-  register_kernel(OP_NEG, Kernel{negu_fwd, negu_bwd, nullptr});
+  register_kernel(OP_NEG, with_cached_micro(Kernel{negu_fwd, negu_bwd, nullptr},
+                                            neg_micro));
   register_kernel(OP_EXPV, Kernel{expv_fwd, expv_bwd, nullptr});
   register_kernel(OP_TANHV, Kernel{tanhv_fwd, tanhv_bwd, nullptr});
   register_kernel(OP_CUMSUM, Kernel{cumsum_fwd, cumsum_bwd, nullptr});
-  register_kernel(OP_LOGV, Kernel{logv_fwd, logv_bwd, nullptr});
-  register_kernel(OP_INV_LOGIT, Kernel{invlogit_fwd, invlogit_bwd, nullptr});
+  register_kernel(OP_LOGV,
+                  with_cached_micro(Kernel{logv_fwd, logv_bwd, nullptr},
+                                    unary_fn_micro<logv_delta>));
+  register_kernel(OP_INV_LOGIT,
+                  with_cached_micro(Kernel{invlogit_fwd, invlogit_bwd, nullptr},
+                                    unary_fn_micro<invlogit_delta>));
   register_kernel(OP_SQRT, Kernel{sqrtv_fwd, sqrtv_bwd, nullptr});
-  register_kernel(OP_SQUARE, Kernel{squarev_fwd, squarev_bwd, nullptr});
-  register_kernel(OP_LOG1M, Kernel{log1mv_fwd, log1mv_bwd, nullptr});
+  register_kernel(OP_SQUARE,
+                  with_cached_micro(Kernel{squarev_fwd, squarev_bwd, nullptr},
+                                    unary_fn_micro<square_delta>));
+  register_kernel(OP_LOG1M,
+                  with_cached_micro(Kernel{log1mv_fwd, log1mv_bwd, nullptr},
+                                    unary_fn_micro<log1m_delta>));
   register_kernel(OP_LOGIT, Kernel{logitv_fwd, logitv_bwd, nullptr});
   register_kernel(OP_MEAN, Kernel{mean_fwd, mean_bwd, nullptr});
   register_kernel(
