@@ -178,3 +178,43 @@ build's:
 | stanc3 partial evaluation | 10-20% on about 25 models | `fma` contraction of linear predictors; 3 brms fixtures 16-53 ULP | `partial_evaluation` in `compiler/ocaml/stanli_pipeline.ml` |
 | Data-class specialization | 1.03x on lnr_bench | gradient order across groups (up to 19 ULP); first-error observation changes | branch `feat/map-dataclass` |
 | x86-64-v3 runtime | median 1.04x, up to 2.2x; 36 models slower | 44 of 352 replay failures; CPU-dependent results | scratch branch `bench/avx2` |
+
+## Starting points for fast-mode work
+
+Branch `fastmath/base` (from main) carries this note, its data folder, and the
+x86-64 instruction-set benchmark used for the measurements above.
+
+- Benchmark workflow: `.github/workflows/bench-isa.yml` with helpers in
+  `.github/bench-isa/`. It builds `bench_grad` and `stanli_check` for several
+  `-march` variants in one job, times every corpus model with each (plus an
+  identical-binary control to measure noise), and runs the CmdStan corpus
+  replay per variant. It runs on pushes to `bench/**` branches only (GitHub
+  needs a workflow on the default branch for manual dispatch), so push a
+  `bench/<name>` branch to run it. A run costs about 30-60 runner-minutes.
+- What the first run showed (AMD EPYC 7763, no AVX-512): see the x86-64
+  bullet and the candidates table above. The 36 models that got slower with
+  `-march=x86-64-v3` (ch12_m12_4 0.70x, i319_gauss_re 0.74x, several ch14
+  models about 0.85x) are not understood yet. AVX-512 has not been measured;
+  it needs a runner or machine that has it.
+- Constraints from the default build that fast mode must not break:
+  - Release runtimes are built for baseline x86-64 with `-ffp-contract=off`,
+    and `tools/check_isa_baseline.py` (run in the manylinux wheel job) fails
+    the build if the baseline runtime contains newer instructions. AVX2
+    kernels therefore need runtime dispatch or separate artifacts, never a
+    baseline build that silently requires AVX2.
+  - Default-mode results must stay exactly as they are (CmdStan corpus
+    replay, 10-ULP brms gates, bitwise lane-versus-scalar parity in
+    `OP_REGION_MAP`).
+  - Eigen packet math and libm can differ by vector width; per-tile kernel
+    batching already excludes `inv_logit` and `log` for that reason.
+- A paused design for shipping instruction-set variants of the R runtime: a
+  release publishes baseline, `x86-64-v3` and `x86-64-v4` runtimes per x86
+  platform; `stanli_install()` downloads all of them; the package picks the
+  best one the running CPU supports each time it loads (not at install time,
+  because R libraries and caches are often shared across cluster nodes with
+  different CPUs); `STANLI_RUNTIME_ISA=baseline` or
+  `options(stanli.runtime_isa = "baseline")` forces the baseline.
+- Work in progress elsewhere, not on this branch: an exact, faster backward
+  for duplicate operations (branch `perf/cse-shared-primal`), and a
+  high-precision accuracy check of stanc3 partial evaluation on the three
+  brms models whose gates it breaks.
