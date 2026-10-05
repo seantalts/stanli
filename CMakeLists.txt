@@ -206,6 +206,7 @@ if(EMSCRIPTEN)
   # times summed/elementwise: 21 MB of object at -O3. The browser build
   # trades their straight-line speed for size.
   set_source_files_properties(
+    runtime/kernels/density_fused.cpp
     runtime/kernels/densities_common.cpp
     runtime/kernels/densities_common_b.cpp
     runtime/kernels/densities_lpmf.cpp
@@ -298,6 +299,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/executor.cpp
   runtime/kernels/elementwise.cpp
   runtime/kernels/densities.cpp
+  runtime/kernels/density_fused.cpp
   runtime/kernels/densities_common.cpp
   runtime/kernels/densities_lpmf.cpp
   runtime/kernels/densities_glm.cpp
@@ -1227,6 +1229,7 @@ set(STANLI_TESTS
   test_execution_report test_rng_families test_vector_rng test_container_rng
   test_smoke test_executor test_recorder test_densities test_tile_calls
   test_matvec test_eigen
+  test_density_fused
   test_mnc test_stan240
   test_legacy test_eight_schools test_glm test_normal_glm test_nuts test_walnuts test_sexp
   test_model_adapter test_sampler_parity

@@ -15,6 +15,8 @@
 
 // Deliberately depend on the kernel-facing layouts rather than graph.hpp:
 // otherwise any Graph or Executor edit reinstantiates every density shard.
+#include "density_fused.hpp"
+
 #include <stanli/kernel_types.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/recorder.hpp>
@@ -365,11 +367,20 @@ int64_t density_scratch(const Op& op, const Slot* slots) {
 // share -- propto and per-argument activity from the variant byte,
 // elementwise output, the partials stashed for density_bwd to contract --
 // lives in density_fwd_v.
-#define STANLI_DEFINE_DENSITY_FWD(code, fn, n, tier)                      \
-  void fn##_fwd_gen(KernelCtx& ctx) {                                     \
-    density_fwd_v<n, tier>(                                               \
-        ctx, [](const auto&... a) { return stan::math::fn<true>(a...); }, \
-        [](const auto&... a) { return stan::math::fn<false>(a...); });    \
+#define STANLI_DEFINE_DENSITY_FWD(code, fn, n, tier)                        \
+  void fn##_fwd_gen(KernelCtx& ctx) {                                       \
+    constexpr FusedKernel fused = fused_kernel_for(code);                   \
+    if constexpr (fused != nullptr) {                                       \
+      if (fused_density_active()) {                                         \
+        fused(ctx);                                                         \
+        return;                                                             \
+      }                                                                     \
+    }                                                                       \
+    if constexpr (!(fused != nullptr && kFusedOnly)) {                      \
+      density_fwd_v<n, tier>(                                               \
+          ctx, [](const auto&... a) { return stan::math::fn<true>(a...); }, \
+          [](const auto&... a) { return stan::math::fn<false>(a...); });    \
+    }                                                                       \
   }
 
 // Distribution functions: one form, no propto, and no elementwise
