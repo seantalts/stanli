@@ -24,7 +24,7 @@ static void expect_eq(const std::string& what, double got, double want) {
 static int64_t ulp_key(double d) {
   int64_t i;
   std::memcpy(&i, &d, sizeof(i));
-  return i < 0 ? (-(int64_t(1) << 63)) - i : i;
+  return i < 0 ? std::numeric_limits<int64_t>::min() - i : i;
 }
 static void expect_ulp(const std::string& what, double got, double want,
                        int64_t budget) {

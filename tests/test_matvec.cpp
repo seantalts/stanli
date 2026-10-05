@@ -6,6 +6,7 @@
 #include <stan/math.hpp>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -14,7 +15,7 @@ static int failures = 0;
 static int64_t ulp_key(double d) {
   int64_t i;
   std::memcpy(&i, &d, sizeof(i));
-  return i < 0 ? (-(int64_t(1) << 63)) - i : i;
+  return i < 0 ? std::numeric_limits<int64_t>::min() - i : i;
 }
 static int64_t ulp_distance(double a, double b) {
   const int64_t k = ulp_key(a) - ulp_key(b);

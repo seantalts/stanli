@@ -13,6 +13,7 @@
 // iterations to lose a race if there is one.
 #include <stanli/compile.hpp>
 #include <stanli/executor_pool.hpp>
+#include <stan/math/rev/core/chainable_alloc.hpp>
 #include <stan/math/rev/core/chainablestack.hpp>
 
 #include <cstdio>
@@ -25,6 +26,12 @@
 namespace {
 
 int failures = 0;
+
+struct CountingAlloc : stan::math::chainable_alloc {
+  explicit CountingAlloc(int* count) : count_(count) {}
+  ~CountingAlloc() override { ++*count_; }
+  int* count_;
+};
 
 std::string slurp(const std::string& path) {
   std::ifstream f(path);
@@ -72,19 +79,23 @@ int main() {
     got_g[(size_t)t].resize((size_t)kIters);
     ts.emplace_back([&, t] {
       auto* initial_tape = stan::math::ChainableStack::instance_;
+      int destructor_calls = 0;
       {
         ExecutorPool scope_pool(proto);
         auto first =
             std::make_unique<ExecutorPool::Lease>(scope_pool.acquire());
         auto second = scope_pool.acquire();
         auto moved = std::move(second);
+        new CountingAlloc(&destructor_calls);
         auto* tape = stan::math::ChainableStack::instance_;
         first.reset();
-        tape_lifetime_ok[t] =
-            tape && stan::math::ChainableStack::instance_ == tape;
+        tape_lifetime_ok[t] = tape &&
+                              stan::math::ChainableStack::instance_ == tape &&
+                              destructor_calls == 0;
       }
       tape_lifetime_ok[t] &=
-          stan::math::ChainableStack::instance_ == initial_tape;
+          stan::math::ChainableStack::instance_ == initial_tape &&
+          destructor_calls == 1;
       for (int k = 0; k < kIters; ++k) {
         auto lease = pool.acquire();
         for (int64_t i = 0; i < n; ++i) lease->params_data()[i] = point(i, k);

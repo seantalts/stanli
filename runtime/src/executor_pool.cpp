@@ -1,6 +1,6 @@
 #include <stanli/executor_pool.hpp>
 
-#include <stan/math/rev/core/chainablestack.hpp>
+#include <stan/math/rev/core/chainable_alloc.hpp>
 
 namespace stanli {
 
