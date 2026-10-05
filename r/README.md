@@ -41,6 +41,7 @@ package upgrade the old runtime is simply not found and this step runs
 once more. Nothing is fetched without it. No Windows ARM64 runtime tarball is
 published, so `stanli_install()` cannot supply one there. Set
 `STANLI_RUNTIME` to the matching native library you built yourself.
+The standalone R package is not currently tested on Windows ARM64 in CI.
 
 ## Use
 

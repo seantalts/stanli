@@ -405,6 +405,8 @@ Windows x86_64 wheel and runtime tarball, but no Windows ARM64 wheel or runtime
 tarball; `stanli_install()` therefore cannot install the runtime on Windows
 ARM64. Use a source-built runtime from the R package's pinned release and
 point `STANLI_RUNTIME` at it for R.
+The ARM64 setup job builds the native tools and runs CTest; it does not test
+the standalone R package or a Windows ARM64 Python wheel.
 With `--no-embed`, setup builds `stanli-compile` from the same Stanli pipeline
 and CMake copies it beside both `stanli_check` and `stanli_run`, including in
 `cmake --install` deployments. Keep those executables together when moving an
