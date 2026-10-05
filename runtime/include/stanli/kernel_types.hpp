@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <vector>
 
 namespace stanli {
 
@@ -120,6 +121,56 @@ inline void apply_dynamic_length(KernelCtx& c) {
   }
   c.n_in = c.dyn_extent_in;
 }
+
+enum BwdMicroKind : uint8_t {
+  kMicroAdd,
+  kMicroSub,
+  kMicroScaled,
+  kMicroFn,
+  kMicroFnNonzero,
+};
+
+struct BwdMicro {
+  double* dst;
+  const double* seed;
+  const double* a;
+  const double* b;
+  double (*fn)(double seed, double a, double b);
+  uint8_t kind;
+  uint16_t opcode;
+};
+
+inline void run_bwd_micro(const BwdMicro& m) {
+  switch (m.kind) {
+    case kMicroAdd:
+      *m.dst += *m.seed;
+      break;
+    case kMicroSub:
+      *m.dst -= *m.seed;
+      break;
+    case kMicroScaled:
+      if (m.b != nullptr && *m.b == 0.0) break;
+      *m.dst += *m.seed * *m.a;
+      break;
+    case kMicroFn:
+      *m.dst += m.fn(*m.seed, *m.a, *m.b);
+      break;
+    case kMicroFnNonzero:
+      if (*m.a != 0.0) *m.dst += m.fn(*m.seed, *m.a, *m.b);
+      break;
+  }
+}
+
+inline BwdMicro bwd_micro(uint8_t kind, double* dst, const double* seed,
+                          const double* a = nullptr, const double* b = nullptr,
+                          double (*fn)(double, double, double) = nullptr) {
+  return BwdMicro{dst, seed, a, b, fn, kind, 0};
+}
+
+// Appends the micro-ops that reproduce this context's backward exactly, in
+// its order, and returns true; returns false and appends nothing when the
+// backward is not of that form.
+using CachedMicroFn = bool (*)(const KernelCtx&, std::vector<BwdMicro>&);
 
 }  // namespace stanli
 

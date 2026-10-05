@@ -23,6 +23,13 @@ void exp_bwd(KernelCtx& ctx) {
     ctx.in_adj[0].data[0] += ctx.out_adj * ctx.out.data[0];
 }
 
+bool exp_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
+  if (ctx.in_adj[0].data)
+    out.push_back(bwd_micro(kMicroScaled, ctx.in_adj[0].data,
+                            ctx.out_adj_vec.data, ctx.out.data));
+  return true;
+}
+
 // OP_ADD_N: scalar out = sum of scalar inputs.
 void add_n_fwd(KernelCtx& ctx) {
   double acc = 0;
@@ -234,6 +241,13 @@ void index_fwd(KernelCtx& ctx) {
 }
 void index_bwd(KernelCtx& ctx) {
   if (ctx.in_adj[0].data) ctx.in_adj[0].data[ctx.idata[0]] += ctx.out_adj;
+}
+bool index_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
+  if (ctx.out.len != 1) return false;
+  if (ctx.in_adj[0].data)
+    out.push_back(bwd_micro(kMicroAdd, ctx.in_adj[0].data + ctx.idata[0],
+                            ctx.out_adj_vec.data));
+  return true;
 }
 
 // OP_SET_INDEX: out = copy(in[0]) with out[flat] = in[1] (scalar).
@@ -470,7 +484,8 @@ void set_slice_strided_inplace_bwd(KernelCtx& ctx) {
 // Called from Executor's constructor path; a static registrar object in a
 // static library dropped by the linker.
 void register_elementwise_kernels() {
-  register_kernel(OP_EXP, Kernel{exp_fwd, exp_bwd, nullptr});
+  register_kernel(
+      OP_EXP, with_cached_micro(Kernel{exp_fwd, exp_bwd, nullptr}, exp_micro));
   register_kernel(OP_ADD_N, Kernel{add_n_fwd, add_n_bwd, nullptr});
   register_kernel(OP_BCAST_FMA, Kernel{fma_fwd, fma_bwd, nullptr});
   register_kernel(OP_MATVEC, Kernel{matvec_fwd, matvec_bwd, nullptr});
@@ -478,7 +493,9 @@ void register_elementwise_kernels() {
   register_kernel(OP_PROD_VEC, Kernel{prod_vec_fwd, prod_vec_bwd, nullptr});
   register_kernel(OP_EXTREMA_VEC,
                   Kernel{extrema_vec_fwd, extrema_vec_bwd, extrema_scratch});
-  register_kernel(OP_INDEX, Kernel{index_fwd, index_bwd, nullptr});
+  register_kernel(
+      OP_INDEX,
+      with_cached_micro(Kernel{index_fwd, index_bwd, nullptr}, index_micro));
   register_kernel(OP_SET_INDEX, Kernel{set_index_fwd, set_index_bwd, nullptr});
   register_kernel(OP_SET_INDEX_INPLACE, Kernel{set_index_inplace_fwd,
                                                set_index_inplace_bwd, nullptr});

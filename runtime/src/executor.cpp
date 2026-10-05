@@ -557,15 +557,49 @@ void Executor::bind_() {
     if (op.primal_source < 0 || op.primal_source == op.out)
       fwd_fn_.push_back(resolve_forward_fn(op));
   }
+  micro_.clear();
+  micro_runs_.clear();
+  fused_.clear();
+  bool in_run = false;
   for (size_t i = graph_.ops.size(); i-- > 0;) {
-    void (*b)(KernelCtx&) = kernel(graph_.ops[i].opcode).backward;
-    if (b) {
-      const int o2 = graph_.ops[i].out2;
-      const double* out2 =
-          o2 >= 0 ? adjoints_.data() + adjoint_offsets[o2] : nullptr;
-      const size_t ci = has_shared_primals ? (size_t)primal_sources[i] : i;
-      bwd_.push_back(BwdStep{b, &ctx_[ci], out2});
+    const Op& op = graph_.ops[i];
+    const Kernel& k = kernel(op.opcode);
+    void (*b)(KernelCtx&) = k.backward;
+    if (!b) continue;
+    const size_t ci = has_shared_primals ? (size_t)primal_sources[i] : i;
+    if (has_shared_primals && op.primal_source >= 0 &&
+        op.primal_source != op.out && op.out2 < 0 && k.cached_micro) {
+      const size_t before = micro_.size();
+      if (k.cached_micro(ctx_[ci], micro_)) {
+        for (size_t m = before; m < micro_.size(); ++m)
+          micro_[m].opcode = op.opcode;
+        fused_.push_back(FusedOp{&ctx_[ci], k.cached_micro, op.opcode});
+        if (micro_.size() == before) continue;
+        if (in_run) {
+          micro_runs_.back().end = static_cast<uint32_t>(micro_.size());
+        } else {
+          micro_runs_.push_back(MicroRun{static_cast<uint32_t>(before),
+                                         static_cast<uint32_t>(micro_.size())});
+          bwd_.push_back(BwdStep{nullptr, nullptr, nullptr});
+          in_run = true;
+        }
+        continue;
+      }
     }
+    in_run = false;
+    const int o2 = op.out2;
+    const double* out2 =
+        o2 >= 0 ? adjoints_.data() + adjoint_offsets[o2] : nullptr;
+    bwd_.push_back(BwdStep{b, &ctx_[ci], out2});
+  }
+}
+
+void Executor::refresh_micros_() {
+  micro_.clear();
+  for (const FusedOp& f : fused_) {
+    const size_t before = micro_.size();
+    f.fn(*f.ctx, micro_);
+    for (size_t m = before; m < micro_.size(); ++m) micro_[m].opcode = f.opcode;
   }
 }
 
@@ -624,6 +658,7 @@ void Executor::detach_data_() {
       if (data_offsets_[slot] >= 0) ctx_[ci].in[i].data = slot_data_(slot);
     }
   }
+  refresh_micros_();
 }
 
 double* Executor::value_ptr(int slot) {
@@ -784,7 +819,20 @@ void Executor::reverse(double* grad_out, double seed) {
     // Profile the exact bound backward plan. Each context belongs to ctx_,
     // so its index supplies opcode attribution without a second graph walk
     // or extra fields in the fast-path BwdStep layout.
+    size_t run = 0;
     for (const BwdStep& step : bwd_) {
+      if (!step.fn) {
+        const MicroRun r = micro_runs_[run++];
+        for (uint32_t m = r.begin; m < r.end; ++m) {
+          const auto t0 = std::chrono::steady_clock::now();
+          run_bwd_micro(micro_[m]);
+          prof_[micro_[m].opcode].bwd_ns +=
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::steady_clock::now() - t0)
+                  .count();
+        }
+        continue;
+      }
       KernelCtx& ctx = *step.ctx;
       const size_t pi = static_cast<size_t>(step.ctx - ctx_.data());
       assert(pi < graph_.ops.size());
@@ -811,6 +859,23 @@ void Executor::reverse(double* grad_out, double seed) {
     s.fn(ctx);
   };
   const size_t nb = bwd_.size();
+  if (!micro_runs_.empty()) {
+    size_t run = 0;
+    for (const BwdStep& s : bwd_) {
+      if (s.fn) {
+        step(s);
+        continue;
+      }
+      const MicroRun r = micro_runs_[run++];
+      for (const BwdMicro *m = micro_.data() + r.begin,
+                          *end = micro_.data() + r.end;
+           m != end; ++m)
+        run_bwd_micro(*m);
+    }
+    if (n_params_)
+      std::memcpy(grad_out, adjoints_.data(), sizeof(double) * n_params_);
+    return;
+  }
   size_t i = 0;
   for (; i + 4 <= nb; i += 4) {
     step(bwd_[i]);

@@ -213,10 +213,13 @@ class Executor {
   // Human-readable table sorted by total time; empty when nothing was
   // collected.
   std::string profile_report() const;
+  // Cached copies whose pullback runs as compact accumulations.
+  size_t fused_backward_ops() const { return fused_.size(); }
 
  private:
   void bind_();
   void detach_data_();
+  void refresh_micros_();
   double* slot_data_(int slot) const {
     const auto offset = data_offsets_[slot];
     return offset >= 0 ? data_->data() + offset
@@ -265,6 +268,19 @@ class Executor {
     const double* out2_adj;  // null when the op has no second output
   };
   std::vector<BwdStep> bwd_;
+  // A step with a null fn stands for the next run of micro-ops, taken in
+  // order from micro_runs_ ([begin, end) into micro_).
+  struct MicroRun {
+    uint32_t begin, end;
+  };
+  struct FusedOp {
+    const KernelCtx* ctx;
+    CachedMicroFn fn;
+    uint16_t opcode;
+  };
+  std::vector<BwdMicro> micro_;
+  std::vector<MicroRun> micro_runs_;
+  std::vector<FusedOp> fused_;
   std::vector<uint16_t> ctx_opcodes_;  // parallel to ctx_; profiling only
   bool profile_ = false;
   std::vector<ProfEntry> prof_;  // indexed by opcode; empty until enabled
