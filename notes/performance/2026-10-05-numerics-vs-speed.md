@@ -43,9 +43,15 @@ adding the seeds before a nonlinear pullback reassociates the sum.
 - What it protects: five brms fixtures exceed 10 ULP when merged:
   s2_car 16, s2_mo_simo_prior 128, s2_zi_asymlaplace 18, sw_mono 418,
   sw_skewnormal 60.
-- Plan: recover the speed exactly. The duplicates' partials are identical,
-  so one backward can compute them once and apply each duplicate's seed in
-  the original order (branch `perf/cse-shared-primal`, in progress).
+- Exact recovery (branch `perf/cse-shared-primal`): each duplicate's backward
+  runs as one multiply-add at its original reverse position, reusing the
+  shared partials, for scalar kernels whose backward is `adj += seed *
+  partial`. Bitwise unchanged; aalto_poisson_hurdle 1.74x, M0_model 1.71x,
+  ch12_m12_3 1.50x, ch11_m11_5 1.33x, ch13_m13_4/6 1.24x faster than main.
+  M0_model stays about 2.3x slower than before #403: what remains is the
+  duplicates' own multiply-adds (about 1400 per gradient), which only the
+  merge removes. Admitting the surviving duplicates into islands is not exact
+  (see the candidates table).
 - Fast mode: merging is the natural fast-mode behaviour if the exact
   recovery falls short anywhere.
 
@@ -200,6 +206,7 @@ build's:
 | --- | --- | --- | --- |
 | Merge active duplicates in CSE | up to 5x (aalto_poisson_hurdle, M0_model, rethinking ch11-13); only if the exact shared-primal backward leaves a gap | seeds summed before the pullback; 5 brms fixtures 16-418 ULP from CmdStan | `X_NO_CSE_ACTIVE` in `diagnostic-toggles.patch` |
 | Fuse over shared parameters | about 2x on 6 models | different summation order; less accurate on discrete Weibull and hurdle negbin unless the reduction is pairwise or pre-summed per observation | `fusion-toggles.patch` |
+| Admit CSE survivors into islands | 1.12-1.23x on rethinking ch11/ch13/ch14 (ceiling probe); none on M0_model, ch12_m12_3 | an island adds each live-in adjoint as one local subtotal, regrouping sums (hmm_gaussian 1 ULP on 14 of 15 gradient entries); copies left outside need un-sharing (ctsem_ctsm, gpcm_latent_reg_irt, iohmm_reg, s2_car otherwise fail) | drop the survivor refusal at `runtime/src/island.cpp:192` (probe, 2026-10-05) |
 | stanc3 partial evaluation | 10-20% on about 25 models | `fma` contraction of linear predictors; 3 brms fixtures 16-53 ULP from CmdStan; accuracy-neutral against a 70-digit reference (better on s2_me2_nomecor, worse on s2_gev at its recorded points) | `partial_evaluation` in `compiler/ocaml/stanli_pipeline.ml` |
 | Data-class specialization | 1.03x on lnr_bench | gradient order across groups (up to 19 ULP); first-error observation changes | branch `feat/map-dataclass` |
 | x86-64-v3 runtime | median 1.04x, up to 2.2x; 36 models slower | 44 of 352 replay failures; CPU-dependent results | scratch branch `bench/avx2` |
