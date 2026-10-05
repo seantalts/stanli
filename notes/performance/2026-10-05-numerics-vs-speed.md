@@ -146,3 +146,35 @@ bitwise agreement between CPU classes, and, for some shapes (mechanism 2),
 accuracy against the true value. Its tests would compare against a
 high-precision reference with a scaled-error bound, not against CmdStan's
 ULPs.
+
+## Plan
+
+We intend to build the fast mode one day, as a collection of speedups like
+the ones above. Until then this note is where candidates go: whenever a
+change is rejected or held back because it moves results away from CmdStan
+or the high-precision reference, add it under "Candidates" with its measured
+speedup, what it changes numerically, and where its code or toggle lives.
+
+Before the mode ships it needs its own evidence, separate from the default
+build's:
+
+- Benchmarks: the corpus benchmark in fast mode, paired against the default
+  mode and against CmdStan, plus the sampling benchmark once it exists, so
+  each candidate's contribution is visible per model.
+- Numerics: every corpus model at the recorded evaluation points against a
+  high-precision reference (as `hp_reference.py` does for two models), with a
+  scaled-error bound in place of the 10-ULP CmdStan gates, and a report of
+  where fast mode is less accurate than the default and by how much.
+- Sampling checks: posterior agreement with the default mode (means,
+  intervals, R-hat, ESS per gradient) on the corpus models that have
+  reference posteriors.
+
+### Candidates
+
+| candidate | measured speedup | numerics change | where |
+| --- | --- | --- | --- |
+| Merge active duplicates in CSE | up to 5x (aalto_poisson_hurdle, M0_model, rethinking ch11-13); only if the exact shared-primal backward leaves a gap | seeds summed before the pullback; 5 brms fixtures 16-418 ULP from CmdStan | `X_NO_CSE_ACTIVE` in `diagnostic-toggles.patch` |
+| Fuse over shared parameters | about 2x on 6 models | different summation order; less accurate on discrete Weibull and hurdle negbin unless the reduction is pairwise or pre-summed per observation | `fusion-toggles.patch` |
+| stanc3 partial evaluation | 10-20% on about 25 models | `fma` contraction of linear predictors; 3 brms fixtures 16-53 ULP | `partial_evaluation` in `compiler/ocaml/stanli_pipeline.ml` |
+| Data-class specialization | 1.03x on lnr_bench | gradient order across groups (up to 19 ULP); first-error observation changes | branch `feat/map-dataclass` |
+| x86-64-v3 runtime | median 1.04x, up to 2.2x; 36 models slower | 44 of 352 replay failures; CPU-dependent results | scratch branch `bench/avx2` |
