@@ -1,0 +1,202 @@
+name: bench-isa
+
+on:
+  push:
+    branches: ['bench/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  STANC3_SRC_SHA: d58446e631b02cacc5355e373defc6092a684554
+  OCAML_VERSION: 5.5.0
+  PDB_SHA: 28f8d3d6e975315f42aa274a8399f21e07a43b30
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    container:
+      image: ghcr.io/seantalts/stanli-manylinux:2_28-x86_64
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: CPU and compiler
+        id: cpu
+        shell: bash
+        run: |
+          mkdir -p out
+          {
+            lscpu
+            echo
+            grep -m1 '^model name' /proc/cpuinfo
+            echo "nproc: $(nproc)"
+            free -g
+            echo
+            echo "flags:"
+            grep -m1 '^flags' /proc/cpuinfo | tr ' ' '\n' | tail -n +3 | sort | tr '\n' ' '
+            echo
+            echo
+            c++ --version | head -1
+            cmake --version | head -1
+          } | tee out/cpuinfo.txt
+          cp /proc/cpuinfo out/proc-cpuinfo.txt
+          for f in avx2 fma bmi2 movbe; do
+            grep -m1 '^flags' /proc/cpuinfo | grep -qw "$f" ||
+              { echo "runner lacks $f; x86-64-v3 cannot run"; exit 1; }
+          done
+          if grep -m1 '^flags' /proc/cpuinfo | grep -qw avx512f; then
+            echo "avx512=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "avx512=false" >> "$GITHUB_OUTPUT"
+            echo "runner CPU has no avx512f: x86-64-v4 variant skipped" | tee -a out/cpuinfo.txt
+          fi
+
+      - name: Fingerprint the C++ compiler
+        id: toolchain
+        shell: bash
+        run: echo "id=$(c++ --version | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the compiler cache
+        id: ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: bench-isa-ccache-v1-${{ steps.toolchain.outputs.id }}-${{ steps.cpu.outputs.avx512 }}
+          restore-keys: ccache-manylinux_2_28_x86_64-release-v4-${{ steps.toolchain.outputs.id }}-
+
+      - name: Restore the vendored dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps/math
+            deps/stan
+          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/fetch.sh') }}
+
+      - name: Vendored dependencies
+        run: ./deps/fetch.sh
+
+      - name: Restore the embedded stanc3 object
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps/stanc3/stanc_embed.o
+            deps/stanc3/stanc_embed.o.stamp
+            deps/stanc3/stanc
+            deps/stanc3/stanc.src
+            deps/stanc3/stanli-vectorize-probe
+            deps/stanc3/stanli-vectorize-probe.stamp
+            deps/ocaml-include
+          key: >-
+            stanc-embed-v2-manylinux_2_28_x86_64-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+          fail-on-cache-miss: true
+
+      - name: Restore posteriordb (models and data only)
+        id: pdb-cache
+        uses: actions/cache@v4
+        with:
+          path: deps/posteriordb
+          key: pdb-lite-${{ env.PDB_SHA }}-2
+      - name: Fetch posteriordb
+        if: steps.pdb-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --filter=blob:none --sparse \
+            https://github.com/stan-dev/posteriordb.git deps/posteriordb
+          git -C deps/posteriordb sparse-checkout set \
+            posterior_database/models/stan posterior_database/data/data \
+            posterior_database/posteriors
+          git -C deps/posteriordb fetch -q origin "$PDB_SHA"
+          git -C deps/posteriordb checkout -q "$PDB_SHA"
+
+      - name: Configure and build the variants
+        shell: bash
+        run: |
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=2G
+          export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+          ccache -z
+          variants="baseline|build-rel|"
+          variants+=$'\n'"v3|build-v3|-march=x86-64-v3"
+          variants+=$'\n'"v3nofma|build-v3nofma|-march=x86-64-v3 -mno-fma"
+          if [ "${{ steps.cpu.outputs.avx512 }}" = true ]; then
+            variants+=$'\n'"v4|build-v4|-march=x86-64-v4"
+          fi
+          echo "$variants" | cut -d'|' -f1,2 > out/variants.txt
+          while IFS='|' read -r name dir flags; do
+            start=$(date +%s)
+            echo "::group::configure $name [$flags]"
+            cmake -B "$dir" -DCMAKE_BUILD_TYPE=Release \
+              ${flags:+-DCMAKE_C_FLAGS="$flags" -DCMAKE_CXX_FLAGS="$flags"} \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+              -DSTANLI_STANC_EMBED_OBJ="$PWD/deps/stanc3/stanc_embed.o" \
+              -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
+            python3 .github/bench-isa/check_flags.py "$dir" "$name" "$flags" |
+              tee "out/flags-$name.txt"
+            echo "::endgroup::"
+            echo "::group::build $name"
+            cmake --build "$dir" -j3 --target bench_grad stanli_check 2>&1 |
+              tee "out/build-$name.log" | tail -n 40
+            test -x "$dir/bench_grad" -a -x "$dir/stanli_check"
+            echo "built $name in $(( $(date +%s) - start )) s" | tee -a out/build-times.txt
+            ccache -s | tee -a "out/ccache-$name.txt"
+            echo "::endgroup::"
+          done <<< "$variants"
+
+      - name: Save the compiler cache
+        if: always() && steps.ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: bench-isa-ccache-v1-${{ steps.toolchain.outputs.id }}-${{ steps.cpu.outputs.avx512 }}
+
+      - name: Time warm gradients
+        shell: bash
+        run: |
+          args=()
+          while IFS='|' read -r name dir; do
+            args+=(--variant "$name=$PWD/$dir")
+          done < out/variants.txt
+          python3 .github/bench-isa/bench_timing.py "${args[@]}" \
+            --pdb deps/posteriordb --out out/timing.tsv \
+            --rounds 3 --warmup-ms 100 --measure-ms 200 \
+            --budget-min 200 2>&1 | tee out/timing.log
+          python3 .github/bench-isa/summarize.py out/timing.tsv | tee out/timing-summary.txt
+
+      - name: Compare values across variants
+        if: always()
+        shell: bash
+        run: |
+          args=()
+          while IFS='|' read -r name dir; do
+            args+=(--variant "$name=$PWD/$dir")
+          done < out/variants.txt
+          python3 .github/bench-isa/diff_variants.py "${args[@]}" \
+            --pdb deps/posteriordb --out out/variant-diff.tsv --jobs 4
+
+      - name: Corpus verification per variant
+        if: always()
+        shell: bash
+        run: |
+          while IFS='|' read -r name dir; do
+            echo "::group::verify_refs $name"
+            rc=0
+            python3 tools/verify_refs.py deps/posteriordb \
+              --check "$dir/stanli_check" --jobs 4 --per-model \
+              > "out/verify-$name.txt" 2>&1 || rc=$?
+            echo "exit $rc" >> "out/verify-$name.txt"
+            tail -n 8 "out/verify-$name.txt"
+            echo "::endgroup::"
+          done < out/variants.txt
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-isa
+          path: out/
