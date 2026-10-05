@@ -904,6 +904,9 @@ add_executable(bench_mir_decode tools/bench_mir_decode.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(bench_mir_decode PRIVATE stanli)
 add_dependencies(bench_mir_decode stanli_mir_fixtures)
+add_executable(op_census tools/op_census.cpp
+  $<TARGET_OBJECTS:stanli_tbb_stub>)
+target_link_libraries(op_census PRIVATE stanli)
 add_test(NAME test_prep_only
          COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
                  tests/fixtures/ar1.json --prep
