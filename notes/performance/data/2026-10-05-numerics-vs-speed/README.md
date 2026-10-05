@@ -14,3 +14,4 @@ Data and scripts for [the numerics-versus-speed note](../../2026-10-05-numerics-
 - `isa-timing-summary.txt`, `isa-variant-diff.tsv`: x86-64 baseline vs
   x86-64-v3 (with and without FMA) timing and numerics on a GitHub runner
   (AMD EPYC 7763), scratch branch `bench/avx2`.
+- `partial-evaluation/`: the stanc3 partial-evaluation accuracy check. `hp_models.py` and `hp_nb.py` are mpmath references for s2_gev, s2_me2_nomecor, sw_me and three rethinking models; `compare3.py`, `compare_wa.py` and `multipoint.py` compare CmdStan, partial evaluation off and on; `corpus_onoff.py` diffs the corpus replay between the two builds (`corpus_changed.json` is its output); `stanli_check_params.patch` adds the `STANLI_CHECK_PARAMS_FILE` override the multi-point runs use. They expect two builds, `build-off/` and `build-on/`, in the checkout root.
