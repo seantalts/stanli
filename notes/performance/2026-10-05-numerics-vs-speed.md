@@ -187,6 +187,13 @@ build's:
   intervals, R-hat, ESS per gradient) on the corpus models that have
   reference posteriors.
 
+### Decided
+
+- The first fast-mode item is AVX2 kernels (in progress on `fastmath/base`).
+- The second is stanc3 partial evaluation (decided 2026-10-05): it stays off
+  in the default build, which matches CmdStan's `-O0`, and turns on in fast
+  mode. Add it once the fast mode exists with the AVX2 work.
+
 ### Candidates
 
 | candidate | measured speedup | numerics change | where |
