@@ -4,6 +4,8 @@
 #include <stanli/recorder.hpp>
 
 #include <stan/math.hpp>
+#include <cmath>
+#include <limits>
 #include <cstdio>
 #include <vector>
 
@@ -69,6 +71,26 @@ int main() {
   for (int i = 0; i < N; ++i) {
     expect_eq("copied d/dy", gy_copy[i], vy(i).adj());
     expect_eq("mapped d/dy", gy_map[i], vy(i).adj());
+  }
+
+  {
+    auto ry = stanli::as_rvar(stanli::Desc{ys.data(), N});
+    const auto& cry = ry;
+    decltype(auto) values =
+        stan::math::to_ref(stan::math::as_value_column_array_or_scalar(ry));
+    decltype(auto) const_values =
+        stan::math::to_ref(stan::math::as_value_column_array_or_scalar(cry));
+    for (const void* p : {static_cast<const void*>(values.data()),
+                          static_cast<const void*>(const_values.data())}) {
+      if (p != static_cast<const void*>(ys.data())) {
+        ++failures;
+        std::printf("FAIL value_of of an rvar view copies its values\n");
+      }
+    }
+    for (int i = 0; i < N; ++i) {
+      expect_eq("view value", values(i), ys[i]);
+      expect_eq("const view value", const_values(i), ys[i]);
+    }
   }
 
   // Recorder path 3: null buf[0] on a vector rvar edge.
@@ -138,6 +160,44 @@ int main() {
   expect_eq("gamma d/dalpha", ga, va.adj());
   expect_eq("gamma d/dbeta", gb, vb.adj());
   stan::math::recover_memory();
+
+  for (int n : {17, 33, 64, 100})
+    for (int offset = 0; offset < 2; ++offset) {
+      std::vector<double> storage(n + 2);
+      double* y = storage.data() + offset;
+      Eigen::Matrix<stan::math::var, -1, 1> vchi(n);
+      for (int i = 0; i < n; ++i) {
+        y[i] = 2.0 + std::sin(1.7 * i);
+        vchi(i) = y[i];
+      }
+      stan::math::var vlp_chi = stan::math::chi_square_lpdf<false>(vchi, 3.5);
+      vlp_chi.grad();
+      std::vector<double> g(n);
+      double gnu = 0;
+      stanli::sink s;
+      s.buf[0] = g.data();
+      s.len[0] = n;
+      s.len[1] = 1;
+      s.buf[1] = &gnu;
+      stanli::active_sink() = &s;
+      stan::math::chi_square_lpdf<false>(stanli::as_rvar(stanli::Desc{y, n}),
+                                         rvar(3.5));
+      stanli::active_sink() = nullptr;
+      if (offset == 0) {
+        expect_eq("aligned view chi_square value", s.value, vlp_chi.val());
+      } else {
+        const double ulp =
+            std::abs(s.value - vlp_chi.val()) /
+            (std::nextafter(std::abs(vlp_chi.val()),
+                            std::numeric_limits<double>::infinity()) -
+             std::abs(vlp_chi.val()));
+        if (ulp > 2) {
+          ++failures;
+          std::printf("FAIL offset view chi_square value: %g ULP\n", ulp);
+        }
+      }
+      stan::math::recover_memory();
+    }
 
   if (failures == 0) std::printf("test_recorder OK\n");
   return failures == 0 ? 0 : 1;
