@@ -19,7 +19,7 @@ suppressPackageStartupMessages({
 # named here, runs each file in its own worker process, which is where a
 # teardown crash surfaces as "R session crashed" rather than as a failure.
 Sys.setenv(STANR_BACKEND = "stanli")
-testthat::test_dir(
+results <- testthat::test_dir(
   file.path(args[[1L]], "tests", "testthat"),
   filter = Sys.getenv("STANR_TEST_FILTER", "stanli-backend"),
   package = "stanr",
@@ -27,5 +27,8 @@ testthat::test_dir(
   reporter = "summary",
   stop_on_failure = TRUE
 )
+counts <- as.data.frame(results)
+if (nrow(counts) == 0L || any(counts$skipped))
+  stop("stanr's requested Stanli tests were absent or skipped", call. = FALSE)
 
 message("stanr's Stanli backend suite passed")

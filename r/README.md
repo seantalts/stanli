@@ -19,24 +19,29 @@ install.packages("stanli", repos = "https://seantalts.r-universe.dev")
 # R CMD INSTALL r
 ```
 
-On macOS and Windows the R-universe route installs a prebuilt binary. A
+On macOS and Windows the R-universe route may install a prebuilt R bridge. A
 source install builds the 40 KB C bridge, so it wants the toolchain R
 already expects for source packages: Xcode command line tools on macOS,
 `r-base-dev` on Debian and Ubuntu, Rtools on Windows. The sampler
-itself is not compiled here -- it arrives prebuilt below.
+itself is not compiled here. Release runtimes are available for macOS and
+Linux arm64/x86_64 and Windows x86_64; Windows ARM64 requires a native runtime
+built from the matching release source with `./tools/dev_setup.sh --no-embed`
+(for the 0.19.1 R package, use the `v0.19.1` source tag).
 
-Then, once per machine:
+Then, once per machine on a platform with a release runtime:
 
 ```r
 stanli_install()
 ```
 
-That downloads the ~9-12 MB runtime for your platform into
+On a platform with a release asset, that downloads the ~9-12 MB runtime into
 `tools::R_user_dir("stanli", "cache")`, under the release the package
 was built against, so the binding and the library always agree: after a
 package upgrade the old runtime is simply not found and this step runs
-once more. Nothing is fetched without it. Set `STANLI_RUNTIME` to use a
-library you built yourself.
+once more. Nothing is fetched without it. No Windows ARM64 runtime tarball is
+published, so `stanli_install()` cannot supply one there. Set
+`STANLI_RUNTIME` to the matching native library you built yourself.
+The standalone R package is not currently tested on Windows ARM64 in CI.
 
 ## Use
 

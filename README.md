@@ -26,8 +26,11 @@ different binding, so a model samples to the same draws from any of them.
 
 [R-universe](https://seantalts.r-universe.dev) serves prebuilt R binaries,
 and `remotes::install_github()` or a checkout installs from source (see
-[R](#r) below). The package downloads its matching runtime on first use,
-keeping installation small and avoiding a local stan-math build.
+[R](#r) below). On platforms with a release runtime, the R package downloads
+the version it pins when `stanli_install()` is called, keeping installation
+small and avoiding a local stan-math build. Windows ARM64 has a tested native
+source-build path but no prebuilt wheel or runtime tarball; see
+[build instructions](#build).
 
 - Performance vs CmdStan: [full benchmark and method](docs/benchmarks.md).
   In the <!--gen:benchmark_date-->2026-09-21<!--/gen--> native run,
@@ -323,13 +326,15 @@ remotes::install_github("seantalts/stanli", subdir = "r")
 That builds a 40 KB C bridge, so it wants the compiler R already
 expects for source packages (Xcode command line tools on macOS,
 `r-base-dev` on Debian and Ubuntu, Rtools on Windows). Nothing else is
-compiled: the sampler arrives prebuilt through `stanli_install()`
-below, which downloads the runtime for your platform from this
-repository's releases into `tools::R_user_dir("stanli", "cache")`.
+compiled: on platforms with a release asset, the sampler arrives through
+`stanli_install()` below, which downloads the runtime from this repository's
+releases into `tools::R_user_dir("stanli", "cache")`. Windows ARM64 users must
+build the native runtime from the matching source tag (for example `v0.19.1`
+for the 0.19.1 R package) and set `STANLI_RUNTIME` to its path.
 
 ```r
 library(stanli)
-stanli_install()   # one time: fetches the runtime for this platform
+stanli_install()   # one time: fetches the runtime where a release asset exists
 
 m <- stanli_model(file = "eight_schools.stan", data = list(J = 8L, y = y, sigma = s))
 fit <- sample_model(m, chains = 4, seed = 1)
@@ -394,6 +399,14 @@ Embedding is the default, keeping the tools self-contained and compilation
 in-process. `--embed` explicitly selects that default. Windows ARM64 requires
 `--no-embed`: its OCaml compiler runs under x64 emulation, while Stanli's
 numerical runtime is native ARM64. `--all` respects `--no-embed` in either order.
+This ARM64 source-build path is exercised by the `windows-11-arm` development
+setup job after main pushes and on demand. Releases currently provide a
+Windows x86_64 wheel and runtime tarball, but no Windows ARM64 wheel or runtime
+tarball; `stanli_install()` therefore cannot install the runtime on Windows
+ARM64. Use a source-built runtime from the R package's pinned release and
+point `STANLI_RUNTIME` at it for R.
+The ARM64 setup job builds the native tools and runs CTest; it does not test
+the standalone R package or a Windows ARM64 Python wheel.
 With `--no-embed`, setup builds `stanli-compile` from the same Stanli pipeline
 and CMake copies it beside both `stanli_check` and `stanli_run`, including in
 `cmake --install` deployments. Keep those executables together when moving an
@@ -502,10 +515,11 @@ authorize with 404 rather than 401.
 ### R
 
 The same `v*` tag publishes the R side (`runtime-release` job). It
-attaches to the GitHub Release five runtime tarballs
-(`stanli-runtime-{darwin,linux,windows}-{arm64,x86_64}.tar.gz`, what
-`stanli_install()` downloads) plus `stanli_X.Y.Z.tar.gz`, the R source
-package. The job asserts `stanli_runtime_release` in `r/R/install.R`
+attaches to the GitHub Release six runtime tarballs: macOS and Linux arm64
+and x86_64, Windows x86_64, and Emscripten wasm32. It also attaches
+`stanli_X.Y.Z.tar.gz`, the R source package. `stanli_install()` uses the
+matching native asset where one exists; no Windows ARM64 asset is published.
+The job asserts `stanli_runtime_release` in `r/R/install.R`
 equals the tag: the package pins its runtime release on purpose, so bump
 the pin in the same commit as the version.
 

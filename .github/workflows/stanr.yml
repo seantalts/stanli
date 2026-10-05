@@ -21,6 +21,10 @@ on:
   workflow_call:
   workflow_dispatch:
     inputs:
+      runtime_ref:
+        description: 'Stanli ref to test (default: the workflow ref)'
+        required: false
+        default: ''
       stanr_ref:
         description: 'stanr git revision to build against (default: the pin)'
         required: false
@@ -63,6 +67,8 @@ jobs:
       TESTTHAT_CPUS: 4
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.runtime_ref || github.ref }}
 
       - uses: r-lib/actions/setup-r@v2
         with:
@@ -75,7 +81,7 @@ jobs:
           working-directory: r
           dependencies: '"hard"'
           extra-packages: >-
-            any::R6, any::QuickJSR, any::posterior, any::withr, any::testthat
+            any::R6, any::QuickJSR, any::posterior, any::loo, any::withr, any::testthat
 
       - name: Build and test stanr's Stanli backend
         shell: bash
