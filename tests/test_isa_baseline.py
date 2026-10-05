@@ -115,6 +115,41 @@ class ScanLinesTest(unittest.TestCase):
         self.assertIn("popcntq", hits[0][1])
 
 
+MAP_LINES = [
+    " .text         0x0000000000001000      0x200 /build/CMakeFiles/rt.dir/executor.cpp.o",
+    " .text         0x0000000000000000       0x40 /build/avx2/matrix_fns_avx2_init.o",
+    " .text.hot",
+    "                0x0000000000002000      0x100 /build/avx2/matrix_fns_avx2_init.o",
+    " .text         0x0000000000003000       0x80 /build/avx2/matrix_solve_avx2_init.o",
+]
+
+
+class AllowedObjectsTest(unittest.TestCase):
+    def test_ranges_cover_matching_objects_in_both_map_layouts(self):
+        ranges = check.allowed_ranges(MAP_LINES, "avx2")
+        # The section whose name sits on its own line, and the one that does
+        # not; the discarded section at address 0 and the baseline object
+        # are left out.
+        self.assertEqual(ranges, [(0x2000, 0x2100), (0x3000, 0x3080)])
+
+    def test_instruction_inside_an_avx2_object_is_allowed_outside_is_a_leak(self):
+        ranges = check.allowed_ranges(MAP_LINES, "avx2")
+        hits = check.scan_lines([
+            "  002010: \tvaddpd\t%ymm1, %ymm2, %ymm3",
+            "  001010: \tvaddpd\t%ymm1, %ymm2, %ymm3",
+            "  003080: \tvaddpd\t%ymm1, %ymm2, %ymm3",
+        ])
+        allowed, leaks = check.split_hits(hits, ranges)
+        self.assertEqual([r[0] for r in allowed["avx"]], [0x2010])
+        self.assertEqual([r[0] for r in leaks["avx"]], [0x1010, 0x3080])
+
+    def test_address_just_before_a_range_is_outside(self):
+        ranges = [(0x2000, 0x2100)]
+        self.assertFalse(check.in_ranges(ranges, 0x1FFF))
+        self.assertTrue(check.in_ranges(ranges, 0x2000))
+        self.assertFalse(check.in_ranges(ranges, 0x2100))
+
+
 class ControlBinaryTest(unittest.TestCase):
     def build(self, flags):
         compiler = find_tool("clang")
