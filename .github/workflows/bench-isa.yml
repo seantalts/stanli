@@ -125,9 +125,15 @@ jobs:
           if [ "${{ steps.cpu.outputs.avx512 }}" = true ]; then
             variants+=$'\n'"v4|build-v4|-march=x86-64-v4"
           fi
+          variants+=$'\n'"control|build-ctl|"
           echo "$variants" | cut -d'|' -f1,2 > out/variants.txt
           while IFS='|' read -r name dir flags; do
             start=$(date +%s)
+            if [ "$name" = control ]; then
+              mkdir -p "$dir"
+              ln -sf "$PWD/build-rel/bench_grad" "$PWD/build-rel/stanli_check" "$dir/"
+              continue
+            fi
             echo "::group::configure $name [$flags]"
             cmake -B "$dir" -DCMAKE_BUILD_TYPE=Release \
               ${flags:+-DCMAKE_C_FLAGS="$flags" -DCMAKE_CXX_FLAGS="$flags"} \
