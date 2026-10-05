@@ -13,8 +13,7 @@ namespace stanli {
 // aligned packet. One means every offset is already lane zero.
 inline constexpr int64_t extrema_phase_modulus() {
   using Packet = typename Eigen::internal::packet_traits<double>::type;
-  constexpr int64_t alignment =
-      Eigen::internal::unpacket_traits<Packet>::alignment;
+  constexpr int64_t alignment = alignof(Packet);
   return alignment > static_cast<int64_t>(sizeof(double))
              ? alignment / static_cast<int64_t>(sizeof(double))
              : 1;
@@ -29,7 +28,7 @@ inline double reduce_phased(const double* data, int64_t len, int64_t offset,
                             const Func& func) {
   using Packet = typename Eigen::internal::packet_traits<double>::type;
   constexpr int64_t packet_size =
-      Eigen::internal::unpacket_traits<Packet>::size;
+      Eigen::internal::packet_traits<double>::size;
   constexpr int64_t phase_modulus = extrema_phase_modulus();
 
   int64_t aligned_start =

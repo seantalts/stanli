@@ -52,12 +52,12 @@ struct Key {
 
 struct KeyHash {
   size_t operator()(const Key& k) const {
-    size_t h = 1469598103934665603ull;
+    uint64_t h = 1469598103934665603ull;
     for (int64_t v : k.w) {
-      h ^= static_cast<size_t>(v);
+      h ^= static_cast<uint64_t>(v);
       h *= 1099511628211ull;
     }
-    return h;
+    return static_cast<size_t>(h);
   }
 };
 
