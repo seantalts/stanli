@@ -89,9 +89,9 @@ int main() {
         new CountingAlloc(&destructor_calls);
         auto* tape = stan::math::ChainableStack::instance_;
         first.reset();
-        tape_lifetime_ok[t] =
-            tape && stan::math::ChainableStack::instance_ == tape &&
-            destructor_calls == 0;
+        tape_lifetime_ok[t] = tape &&
+                              stan::math::ChainableStack::instance_ == tape &&
+                              destructor_calls == 0;
       }
       tape_lifetime_ok[t] &=
           stan::math::ChainableStack::instance_ == initial_tape &&

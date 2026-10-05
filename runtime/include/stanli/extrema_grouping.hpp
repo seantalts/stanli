@@ -27,8 +27,7 @@ template <typename Func>
 inline double reduce_phased(const double* data, int64_t len, int64_t offset,
                             const Func& func) {
   using Packet = typename Eigen::internal::packet_traits<double>::type;
-  constexpr int64_t packet_size =
-      Eigen::internal::packet_traits<double>::size;
+  constexpr int64_t packet_size = Eigen::internal::packet_traits<double>::size;
   constexpr int64_t phase_modulus = extrema_phase_modulus();
 
   int64_t aligned_start =
