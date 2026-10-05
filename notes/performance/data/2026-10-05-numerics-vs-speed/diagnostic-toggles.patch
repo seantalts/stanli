@@ -1,0 +1,48 @@
+diff --git a/runtime/src/cse.cpp b/runtime/src/cse.cpp
+index 22aa6f7a..6a3ab8ff 100644
+--- a/runtime/src/cse.cpp
++++ b/runtime/src/cse.cpp
+@@ -120,7 +120,7 @@ CseStats cse(Graph& g,
+       auto ins = table.emplace(key, i);
+       if (!ins.second) {
+         Op& survivor = g.ops[ins.first->second];
+-        if (any_active) {
++        if (any_active && !getenv("X_NO_CSE_ACTIVE")) {
+           // Combining output adjoints before the pullback reassociates
+           // arithmetic. Share only the primal, keeping source reverse order.
+           op.primal_source = survivor.primal_source = survivor.out;
+diff --git a/runtime/src/partition.cpp b/runtime/src/partition.cpp
+index 1538ea1d..05fcace7 100644
+--- a/runtime/src/partition.cpp
++++ b/runtime/src/partition.cpp
+@@ -871,7 +871,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
+     // the same active scalar. Grouping all contributions by opcode can lose
+     // many ULP even though every individual kernel is exact.
+     std::unordered_set<int> shared_adjoints;
+-    for (int p = 0; p < k && ok; ++p) {
++    for (int p = 0; p < k && ok && !getenv("X_NO_PART_SHARED"); ++p) {
+       const Op& op = op_at(p, 0);
+       for (int j = 0; j < op.n_in && ok; ++j) {
+         const int s = op.in[j];
+@@ -882,7 +882,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
+         if (!shared_adjoints.insert(s).second) ok = false;
+       }
+     }
+-    if (!ok) {
++    if (!ok && !getenv("X_NO_PART_SHARED")) {
+       ++st.declined;
+       continue;
+     }
+diff --git a/runtime/src/reroll.cpp b/runtime/src/reroll.cpp
+index e788cb19..3b11136a 100644
+--- a/runtime/src/reroll.cpp
++++ b/runtime/src/reroll.cpp
+@@ -1353,7 +1353,7 @@ static RerollStats reroll_impl(
+           }
+           lane0_producer[t.out] = p;
+         }
+-        if (ok) {
++        if (ok && !getenv("X_NO_RR_SHARED")) {
+           // Widening evaluates one reverse operation across all lanes before
+           // moving to the preceding operation. A shared active scalar read
+           // at multiple positions would therefore receive regrouped, rather

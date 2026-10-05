@@ -1,0 +1,26 @@
+diff --git a/runtime/src/partition.cpp b/runtime/src/partition.cpp
+index 7717b257..ee9dcd17 100644
+--- a/runtime/src/partition.cpp
++++ b/runtime/src/partition.cpp
+@@ -871,7 +871,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
+     // the same active scalar. Grouping all contributions by opcode can lose
+     // many ULP even though every individual kernel is exact.
+     std::unordered_set<int> shared_adjoints;
+-    for (int p = 0; p < k && ok; ++p) {
++    for (int p = 0; p < k && ok && !getenv("X_NO_PART_SHARED"); ++p) {
+       const Op& op = op_at(p, 0);
+       const bool hoisted = pos[(size_t)p].emit == Emit::kShared;
+       std::unordered_set<int> in_op;
+diff --git a/runtime/src/reroll.cpp b/runtime/src/reroll.cpp
+index e788cb19..3b11136a 100644
+--- a/runtime/src/reroll.cpp
++++ b/runtime/src/reroll.cpp
+@@ -1353,7 +1353,7 @@ static RerollStats reroll_impl(
+           }
+           lane0_producer[t.out] = p;
+         }
+-        if (ok) {
++        if (ok && !getenv("X_NO_RR_SHARED")) {
+           // Widening evaluates one reverse operation across all lanes before
+           // moving to the preceding operation. A shared active scalar read
+           // at multiple positions would therefore receive regrouped, rather
