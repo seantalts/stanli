@@ -845,7 +845,7 @@ repeat-evaluation tests are needed for that case.
 
 ## Checks run before and after merge
 
-PRs use one representative native build and one complete external model
+PRs use Linux and Windows x86_64 native builds and one complete external model
 oracle. Focused tests cover individual kernels, compiler contracts, execution
 paths, and clients; broad alternative-configuration sweeps and platform
 matrices run post-submit. The source-change path is defined in
@@ -857,6 +857,8 @@ matrices run post-submit. The source-change path is defined in
 - One Linux x86_64 Clang build: the full CTest suite, including focused
   cross-path and pass-safety tests, and every recorded CmdStan model at all
   three points. Numerical thresholds and the reference corpus are unchanged.
+- One Windows x64 wheel build: the full CTest suite, source-built compiler
+  provenance and native/JavaScript parity, and installed-wheel Python tests.
 - Installed wheel checks: Python and BridgeStan transport tests in a clean
   environment, truthful manylinux tags, and the binary-size artifact.
 - Shared compiler checks: native/JavaScript producer parity, typed/legacy
@@ -871,25 +873,27 @@ including `AGENTS.md`, research material under `notes/`, or `web/index.html`
 instead run static checks and formatting. Executable code and test fixtures
 must not live under the documentation-only `notes/` directory. The required
 `manylinux_2_28_x86_64` status remains present for every PR. It checks static
-validation and, for source changes, the native build, shared compiler, and R
-integration. A failed, cancelled, or unexpectedly skipped prerequisite cannot
-produce a green gate; unknown file paths select the full source-change path.
+validation and, for source changes, the Linux and Windows builds, shared
+compiler, and R integration. A failed, cancelled, or unexpectedly skipped
+prerequisite cannot produce a green gate; unknown file paths select the full
+source-change path.
 
 Main pushes, nightly runs, release tags, and manual dispatches additionally
 run the full vectorization A/B corpus, portable-MIR cost measurements, live
 reference BridgeStan comparisons, cross-release R compatibility, first-posterior
-timings, no-stdio configuration, Windows compiler parity, the other native
-platforms, WebAssembly, and webR. ASan and TSan run on the same non-PR events
+timings, no-stdio configuration, the other native platforms, WebAssembly, and
+webR. ASan and TSan run on the same non-PR events
 except release tags. The standalone R platform/version matrix runs on relevant
 main pushes, release tags, and manual dispatches. Rethinking regeneration runs
-after relevant main pushes, nightly, and on demand.
+after relevant main pushes, nightly, and on demand. The full Windows
+development setup matrix remains post-submit and on demand.
 
 The full Windows job builds the runtime and CTest suite, packages `stanli.dll`,
 `stanli-compile.exe`, and pristine `stanc.exe`, then runs the installed-wheel
 Python tests through source compilation, errors, lowering, gradients, sampling,
-and generated quantities. These checks report failures for prompt follow-up
-after merge and preserve the existing release dependencies. If a change needs
-specific platform or optimization evidence before landing, run the relevant
+and generated quantities. These checks are required for source PRs and
+preserve the existing release dependencies. If a change needs specific
+platform or optimization evidence before landing, run the relevant
 focused check or dispatch the full workflow on its branch:
 
 ```sh

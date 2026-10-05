@@ -1,9 +1,10 @@
 # Build the platform wheels, and publish them to PyPI on a version tag.
 #
-# Pull requests build the representative manylinux target with Clang, run
-# CTest and the recorded CmdStan oracle, and check installed Python/R packages
-# and the shared native/JavaScript compiler. Performance comparisons and the
-# extra platform builds run after merge, nightly, on demand, and on tags.
+# Pull requests build the representative manylinux target with Clang and the
+# Windows x64 wheel, run CTest and the recorded CmdStan oracle, and check
+# installed Python/R packages and the shared native/JavaScript compiler.
+# Performance comparisons and the extra platform builds run after merge,
+# nightly, on demand, and on tags.
 # Shipped Linux and Windows builds retain their established GCC toolchains.
 # Publishing is gated on the tag and its platform builds.
 #
@@ -15,14 +16,10 @@
 # which is why RStan ships through RTools), exports the C ABI through a
 # .def file, and bundles exact-source stock and stanli compiler executables as
 # subprocesses. Keeping the compilers in separate processes avoids introducing
-# a Windows OCaml DLL ABI and isolates compiler state from the sampler. That job
-# does not run on pull requests: mingw compiles the density kernels an
-# order of magnitude slower than every other platform (110 minutes for
-# that one translation unit against ~7 for the other 140 targets), so
-# gating merges on it means waiting hours for a signal that has never
-# caught a bug the other five platforms missed. It runs after the merge
-# instead, nightly, and on release tags, where a failure is a bug report
-# rather than a roadblock. Publishing still waits for it.
+# a Windows OCaml DLL ABI and isolates compiler state from the sampler. Source
+# PRs require this build and its compiler prerequisites to catch Windows-only
+# compilation, runtime, and packaging failures before merge. The full Windows
+# development setup matrix remains post-submit. Publishing waits for the wheel.
 name: wheels
 
 on:
@@ -199,15 +196,9 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_target }}
     strategy:
       fail-fast: false
-      # A pull request builds one platform, and it is Linux x86_64. It
-      # runs the test suite and the corpus oracle, which is what has ever
-      # caught anything. It is not the mac: on identical work the arm64
-      # runner took 49.8 min against this container's 30.1 while the
-      # container was pinned to -j1, so it is the slowest machine here,
-      # not the fastest. It only looked quick on docs-only runs, where
-      # the build is a cache hit and the two minutes are fixed overhead.
-      # The other three platforms build after the merge, nightly and on
-      # tags, where a break is fixed forward the way Windows already is.
+      # This matrix uses Linux x86_64 for PR tests and the corpus oracle;
+      # the separate windows job covers the Windows x64 wheel. The other
+      # three platforms build after merge, nightly, on demand, and on tags.
       matrix:
         include: >-
           ${{ fromJSON(github.event_name == 'pull_request'
@@ -1206,7 +1197,10 @@ jobs:
   # Linux-to-Windows recipe. Their provenance is checked before packaging.
   stanc-windows:
     name: cross-build Windows compilers
-    if: github.event_name != 'pull_request'
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-24.04
     env:
       WINDOWS_DUNE_VERSION: 3.24.2
@@ -1325,12 +1319,14 @@ jobs:
           if-no-files-found: error
           path: windows-compilers/
 
-  # After merge, run the PE executable on Windows and compare it byte for byte
-  # with the same JS producer that the Linux-native PR check uses.
+  # Run the PE executable on Windows and compare it byte for byte with the
+  # same JS producer that the Linux-native PR check uses.
   windows-compiler:
     name: Windows compiler parity
-    if: github.event_name != 'pull_request'
-    needs: [stanc-windows, browser-compiler]
+    needs: [changes, stanc-windows, browser-compiler]
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.heavy == 'true'
     runs-on: windows-2022
     defaults:
       run:
@@ -1399,13 +1395,14 @@ jobs:
             windows-compilers/stanli-compile.exe \
             windows-compilers/stanc.exe
 
-  # Everything except pull requests: main pushes, the nightly cron, and
-  # release tags (the publish job needs this wheel, so a tag still waits
-  # for it).
+  # Source PRs require the same Windows wheel build, CTest suite, and installed
+  # Python checks that main, nightly, manual, and release runs exercise.
   windows:
     name: win_amd64
-    if: github.event_name != 'pull_request'
-    needs: [stanc-windows, windows-compiler]
+    needs: [changes, stanc-windows, windows-compiler]
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.heavy == 'true'
     runs-on: windows-2022
     defaults:
       run:
@@ -2116,13 +2113,14 @@ jobs:
           path: /tmp/portable-mir-browser-measurements.txt
 
   # Branch protection requires this exact check name. It follows the heavy
-  # native build, shared compiler, and installed R checks for source PRs.
+  # Linux and Windows builds, shared compiler, and installed R checks for
+  # source PRs.
   # Docs-only PRs require static checks and the expected skips; unexpected
   # failures, cancellations, missing scope, or skips must not pass this gate.
   pr-gate:
     name: manylinux_2_28_x86_64
     if: always() && github.event_name == 'pull_request'
-    needs: [changes, static_checks, build, browser-compiler, r-tests]
+    needs: [changes, static_checks, build, windows, browser-compiler, r-tests]
     runs-on: ubuntu-latest
     steps:
       - name: Verify the required validation path
@@ -2131,6 +2129,7 @@ jobs:
           STATIC_RESULT: ${{ needs.static_checks.result }}
           HEAVY: ${{ needs.changes.outputs.heavy }}
           BUILD_RESULT: ${{ needs.build.result }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
           COMPILER_RESULT: ${{ needs.browser-compiler.result }}
           R_RESULT: ${{ needs.r-tests.result }}
         run: |
@@ -2138,11 +2137,13 @@ jobs:
           test "$STATIC_RESULT" = success
           if [ "$HEAVY" = true ]; then
             test "$BUILD_RESULT" = success
+            test "$WINDOWS_RESULT" = success
             test "$COMPILER_RESULT" = success
             test "$R_RESULT" = success
           else
             test "$HEAVY" = false
             test "$BUILD_RESULT" = skipped
+            test "$WINDOWS_RESULT" = skipped
             test "$COMPILER_RESULT" = skipped
             test "$R_RESULT" = skipped
           fi

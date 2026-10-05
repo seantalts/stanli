@@ -78,8 +78,7 @@ class CiPolicyTest(unittest.TestCase):
 
     def test_extra_configurations_are_post_submit(self):
         items = [self.jobs[name] for name in (
-            "no-stdio", "stanc-windows", "windows-compiler", "windows",
-            "wasm", "wasm-webr", "r-platform-tests")]
+            "no-stdio", "wasm", "wasm-webr", "r-platform-tests")]
         items.append(workflow("r.yml")["jobs"]["check"])
         items += [self.step("build", name) for name in (
             "Fetch the main-branch vectorization baseline",
@@ -104,6 +103,29 @@ class CiPolicyTest(unittest.TestCase):
                     self.assertEqual(enabled(item, event), event != "pull_request")
             self.assertTrue(enabled(item, "push", ref="refs/tags/v1.0.0"))
 
+    def test_windows_wheel_and_prerequisites_follow_source_scope(self):
+        for name in ("stanc-windows", "windows-compiler", "windows"):
+            job = self.jobs[name]
+            self.assertIn("changes", job["needs"])
+            for heavy in ("true", "false"):
+                with self.subTest(job=name, heavy=heavy):
+                    self.assertEqual(enabled(job, "pull_request", heavy),
+                                     heavy == "true")
+                    for event in ("push", "schedule", "workflow_dispatch"):
+                        self.assertTrue(enabled(job, event, heavy))
+                    self.assertTrue(enabled(job, "push", heavy,
+                                            ref="refs/tags/v1.0.0"))
+
+    def test_windows_wheel_keeps_compiler_and_release_dependencies(self):
+        # The required wheel consumes fresh compiler artifacts and waits for
+        # native/JavaScript parity. Release publishers must keep that chain.
+        for dependency in ("stanc-windows", "windows-compiler"):
+            self.assertIn(dependency, self.jobs["windows"]["needs"])
+        for dependency in ("stanc-windows", "browser-compiler"):
+            self.assertIn(dependency, self.jobs["windows-compiler"]["needs"])
+        for publisher in ("publish", "runtime-release"):
+            self.assertIn("windows", self.jobs[publisher]["needs"])
+
     def test_core_correctness_and_install_checks_still_run_on_prs(self):
         for job in ("build", "browser-compiler"):
             self.assertTrue(enabled(self.jobs[job], "pull_request"))
@@ -117,12 +139,15 @@ class CiPolicyTest(unittest.TestCase):
                         "R ecosystem acceptance (no skips)"),
             "browser-compiler": ("Native and JavaScript compilers emit identical bytes",
                                  "R compiler helper in webR"),
+            "windows": ("Configure, build, test", "Build the wheel",
+                        "Install the wheel and run the Python tests"),
         }.items():
             for name in names:
                 with self.subTest(job=job, step=name):
                     self.assertTrue(enabled(self.step(job, name), "pull_request"))
         self.assertNotIn("pull_request", workflow("rethinking.yml")["on"])
         self.assertEqual(workflow("rethinking.yml")["on"]["push"]["branches"], ["main"])
+        self.assertNotIn("pull_request", workflow("dev-setup-windows.yml")["on"])
 
     def test_changed_files_select_the_correct_validation_path(self):
         cases = [
@@ -159,8 +184,8 @@ class CiPolicyTest(unittest.TestCase):
 
     def gate(self, heavy, results):
         job = self.jobs["pr-gate"]
-        # Every dependency belongs to this required status, including R and
-        # producer parity; a failed prerequisite must still schedule the gate.
+        # Every dependency belongs to this required status, including Windows,
+        # R, and producer parity; a failed prerequisite still schedules it.
         self.assertEqual(set(job["needs"]), set(results))
         self.assertIn("always()", job["if"])
         step = job["steps"][0]
@@ -176,6 +201,7 @@ class CiPolicyTest(unittest.TestCase):
         for heavy in ("true", "false"):
             expected = {"changes": "success", "static_checks": "success",
                         "build": "success" if heavy == "true" else "skipped",
+                        "windows": "success" if heavy == "true" else "skipped",
                         "browser-compiler": "success" if heavy == "true" else "skipped",
                         "r-tests": "success" if heavy == "true" else "skipped"}
             self.assertEqual(self.gate(heavy, expected), 0)
