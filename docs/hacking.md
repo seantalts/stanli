@@ -157,7 +157,8 @@ Step by step:
    arenas, resolves each opcode to its kernel's function pointers, and
    builds each op a `KernelCtx`: the small struct of raw pointers the
    kernel will read. All of this happens once. Afterwards a gradient
-   evaluation looks nothing up and allocates nothing.
+   evaluation looks nothing up, and the executor allocates nothing; some
+   kernels still allocate Eigen temporaries inside Stan Math code.
 
 6. **Forward, then reverse.** The forward sweep walks the list; each
    kernel computes its output and may stash partial derivatives in its
