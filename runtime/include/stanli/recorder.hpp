@@ -104,6 +104,32 @@ inline Eigen::Map<const Eigen::Matrix<rvar, -1, -1>> as_rvar_matrix(
       reinterpret_cast<const rvar*>(d.data), rows, cols);
 }
 
+inline Eigen::Map<const Eigen::Matrix<double, -1, 1>> value_of(
+    Eigen::Map<const Eigen::Matrix<rvar, -1, 1>> values) {
+  return Eigen::Map<const Eigen::Matrix<double, -1, 1>>(
+      reinterpret_cast<const double*>(values.data()), values.size());
+}
+
+inline Eigen::Map<const Eigen::Matrix<double, -1, 1>> value_of_rec(
+    Eigen::Map<const Eigen::Matrix<rvar, -1, 1>> values) {
+  return Eigen::Map<const Eigen::Matrix<double, -1, 1>>(
+      reinterpret_cast<const double*>(values.data()), values.size());
+}
+
+inline Eigen::Map<const Eigen::Matrix<double, -1, -1>> value_of(
+    Eigen::Map<const Eigen::Matrix<rvar, -1, -1>> values) {
+  return Eigen::Map<const Eigen::Matrix<double, -1, -1>>(
+      reinterpret_cast<const double*>(values.data()), values.rows(),
+      values.cols());
+}
+
+inline Eigen::Map<const Eigen::Matrix<double, -1, -1>> value_of_rec(
+    Eigen::Map<const Eigen::Matrix<rvar, -1, -1>> values) {
+  return Eigen::Map<const Eigen::Matrix<double, -1, -1>>(
+      reinterpret_cast<const double*>(values.data()), values.rows(),
+      values.cols());
+}
+
 // Where build() deposits partials: one buffer per propagator edge, in
 // operand order. A null buf skips that edge's copy-out. len is the configured
 // buffer width; it lets a probability function that returns before build()

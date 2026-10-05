@@ -18,9 +18,58 @@ static void expect_eq(const char* what, double got, double want) {
 }
 
 int main() {
+  using stan::math::value_of;
+  using stan::math::value_of_rec;
   using stanli::rvar;
   std::vector<double> ys{1.3, -0.4, 2.2, 0.1, -1.7};
   const int N = static_cast<int>(ys.size());
+
+  for (int n : {17, 33, 64, 100})
+    for (int offset = 0; offset < 2; ++offset) {
+      const int cols = 3;
+      std::vector<double> storage(n * cols + 2);
+      double* y = storage.data() + offset;
+      for (int i = 0; i < n * cols; ++i) y[i] = 2.0 + std::sin(1.7 * i);
+      const Eigen::VectorXd vec_copy = Eigen::Map<const Eigen::VectorXd>(y, n);
+      const Eigen::MatrixXd mat_copy =
+          Eigen::Map<const Eigen::MatrixXd>(y, n, cols);
+      const auto vec_view = stanli::as_rvar(stanli::Desc{y, n});
+      const auto mat_view =
+          stanli::as_rvar_matrix(stanli::Desc{y, n * cols}, n, cols);
+      decltype(auto) vec_val = stan::math::to_ref(value_of(vec_view));
+      decltype(auto) vec_rec = stan::math::to_ref(value_of_rec(vec_view));
+      decltype(auto) mat_val = stan::math::to_ref(value_of(mat_view));
+      decltype(auto) mat_rec = stan::math::to_ref(value_of_rec(mat_view));
+      const double* views[] = {vec_val.data(), vec_rec.data(), mat_val.data(),
+                               mat_rec.data()};
+      for (const double* p : views) {
+        if (p != y) {
+          ++failures;
+          std::printf(
+              "FAIL value_of of an rvar vector or matrix view copies\n");
+        }
+      }
+      const double vec_sums[] = {vec_val.sum(), vec_rec.sum()};
+      const double mat_sums[] = {mat_val.sum(), mat_rec.sum()};
+      for (double got : vec_sums) {
+        if (offset == 0) {
+          expect_eq("aligned vector view sum", got, vec_copy.sum());
+        } else if (std::abs(got - vec_copy.sum()) > 4e-16 * std::abs(got)) {
+          ++failures;
+          std::printf("FAIL offset vector view sum %.17g vs %.17g\n", got,
+                      vec_copy.sum());
+        }
+      }
+      for (double got : mat_sums) {
+        if (offset == 0) {
+          expect_eq("aligned matrix view sum", got, mat_copy.sum());
+        } else if (std::abs(got - mat_copy.sum()) > 4e-16 * std::abs(got)) {
+          ++failures;
+          std::printf("FAIL offset matrix view sum %.17g vs %.17g\n", got,
+                      mat_copy.sum());
+        }
+      }
+    }
 
   // Reference: var path.
   Eigen::Matrix<stan::math::var, -1, 1> vy(N);
