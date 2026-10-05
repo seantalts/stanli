@@ -916,8 +916,9 @@ description renders. Before any full-release publisher runs, the release
 workflow also calls [`.github/workflows/stanr.yml`](.github/workflows/stanr.yml)
 to rebuild the pinned downstream `stanr` package with the tagged runtime and
 run its Stanli-backend construction, derivative, sampling, data, output,
-initialization, and cache tests. The check remains available on demand through
-manual workflow dispatch.
+initialization, and cache tests. On-demand checks can include stanr's LOO
+tests; the requested tests must run without skips. The check remains available
+through manual workflow dispatch.
 
 Documentation consistency is also checked. Every
 headline number in `README.md`, `python/README.md` and the demo page is

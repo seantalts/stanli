@@ -75,7 +75,7 @@ jobs:
           working-directory: r
           dependencies: '"hard"'
           extra-packages: >-
-            any::R6, any::QuickJSR, any::posterior, any::withr, any::testthat
+            any::R6, any::QuickJSR, any::posterior, any::loo, any::withr, any::testthat
 
       - name: Build and test stanr's Stanli backend
         shell: bash
