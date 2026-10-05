@@ -233,6 +233,5 @@ x86-64 instruction-set benchmark used for the measurements above.
   different CPUs); `STANLI_RUNTIME_ISA=baseline` or
   `options(stanli.runtime_isa = "baseline")` forces the baseline.
 - Work in progress elsewhere, not on this branch: an exact, faster backward
-  for duplicate operations (branch `perf/cse-shared-primal`), and a
-  high-precision accuracy check of stanc3 partial evaluation on the three
-  brms models whose gates it breaks.
+  for duplicate operations (branch `perf/cse-shared-primal`). The stanc3
+  partial-evaluation accuracy check is done; see mechanism 3.
