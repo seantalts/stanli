@@ -67,6 +67,40 @@ in documentation directories.
 
 ## Validation and CI
 
+### Compiler diagnostics
+
+Fix compiler errors and warnings encountered in the affected builds, including
+pre-existing diagnostics. Before proposing or merging a code change, rebuild
+the affected targets and inspect the complete compiler output. Force those
+targets to recompile when cached objects would hide diagnostics, and repeat
+the build after fixes to verify that the errors and warnings are gone. Do not
+silence warnings, lower warning levels, or ignore a failing compiler to obtain
+a green result. Report any diagnostic that cannot be resolved as unfinished
+validation; do not describe that build as clean.
+
+### Compiler-pipeline performance
+
+Any change to the compiler pipeline requires a complete corpus benchmark
+before merge against the current remote-default-branch baseline. This includes
+source-to-MIR compilation, MIR decoding/lowering, graph passes, preparation,
+producer/backend selection, compiler pins, and pass flags or budgets. Follow
+[`docs/benchmark-protocol.md`](docs/benchmark-protocol.md#compiler-pipeline-regression-checks):
+run the full shared application-model corpus for both revisions with the
+shipped configuration, matched hardware/toolchains, and retained raw results.
+A focused benchmark or a passing numerical corpus replay does not substitute
+for the full performance run.
+
+A **2% or greater slowdown** is a major regression. Compare each model's
+source compilation, preparation, warm gradients, and fixed-work estimate;
+aggregate gains must not hide an individual regression. Investigate apparent
+regressions with fresh, controlled measurements and fix confirmed regressions
+before merge. Preserve failures, timeouts, and noisy or incomplete evidence as
+unresolved; do not drop models, change the threshold, or silently rebaseline
+to make the result pass. Include baseline/candidate revisions, commands,
+coverage, raw-result links, and the comparison in the PR.
+
+### Required checks and follow-up
+
 Use focused regression tests for the behavior being changed. PR CI retains
 Linux and Windows x86_64 native builds, CTest, one complete recorded CmdStan
 corpus replay for the shipped configuration, installed Python/R interface
@@ -74,7 +108,8 @@ checks, native/JavaScript compiler parity, and inexpensive static checks.
 Keep the required status present for documentation-only changes and fail it
 if a required source-change check fails or is unexpectedly skipped.
 
-Broad optimization-on/off sweeps, timing comparisons, extra platform and
+Except for the compiler-pipeline benchmark requirement above, broad
+optimization-on/off sweeps, timing comparisons, extra platform and
 R-version matrices, sanitizer builds, live upstream compatibility comparisons,
 and corpus regeneration belong after merge or on demand. They provide useful
 diagnosis and portability coverage without duplicating the PR numerical
@@ -86,6 +121,17 @@ every PR. Preserve release validation dependencies.
 and CI coverage; [`docs/benchmark-protocol.md`](docs/benchmark-protocol.md)
 defines performance measurements. Distinguish these measured contracts from
 project goals, and report the limits of the evidence.
+
+After merging a PR, arrange a follow-up **about one hour after the merge** to
+check CI on main. Record the merge SHA and inspect all workflows for that
+commit, plus the latest main commit if it has advanced. Use an available
+scheduled follow-up rather than keeping an interactive session waiting. If
+scheduling is unavailable, state that limitation and the time a manual check
+is due; never imply that a check has been scheduled when it has not. If jobs
+are still running, check again until they settle. Investigate failures and fix
+them through the normal validated PR process, or report a concrete blocker.
+Report the final result with links to the affected runs, then retire the
+completed follow-up.
 
 ## Start from current upstream
 

@@ -67,6 +67,43 @@ artifacts keep their recorded 20,000-gradient budget.
 Numerical and sampler correctness remain covered independently by
 [TESTING.md](../TESTING.md).
 
+## Compiler-pipeline regression checks
+
+Compiler-pipeline changes must benchmark both the current remote default
+branch and the candidate before merge. Use the full shared application-model
+inventory (`--corpus all`, without `--filter`) and the shipped compiler/runtime
+configuration for both revisions. Keep hardware, native compiler, build mode,
+thread limits, inputs, and benchmark settings matched; record any intentional
+compiler-pin or pipeline difference. Retain separate output paths and raw run
+directories for the two revisions. Reuse historical measurements only as
+context, not as the baseline for a 2% gate.
+
+Compare each model's source-to-MIR time, preparation time, median warm-gradient
+latency, and setup-plus-20,000-gradient estimate. Report the percentage change
+as `100 * (candidate / baseline - 1)`; **2% or greater is a major slowdown**.
+Show per-model and per-phase results, because an aggregate improvement can
+hide a regression. Missing, failed, timed-out, or incomparable observations
+remain visible and cannot count as a pass. Keep the existing independent
+numerical acceptance checks; a faster incorrect result is not admissible.
+
+The protocol's six pairs alternate Stanli and CmdStan, not the baseline and
+candidate revisions. Source compilation is measured once per run, and shared
+CI hosts can produce noise larger than 2%. Investigate threshold crossings
+with a separate experiment: alternate at least six fresh baseline/candidate
+process pairs for the affected phases on the same otherwise idle host, retain
+all samples and median/MAD, and use identical-binary controls when necessary.
+Do not rerun until a favorable sample appears. Fix confirmed regressions before
+merge; inconclusive evidence remains unresolved rather than establishing a
+no-regression claim. A focused confirmation supplements the full corpus run.
+
+Include both revision SHAs, build/compiler identities, exact commands, complete
+coverage, the phase comparison, and raw-result links in the PR. CI run summaries
+and downloadable artifacts are suitable places to publish these comparisons.
+The existing `mir-vectorization-measurements` CI artifact compares pass-on/off
+behavior and times a limited gradient set; it does not enforce this full-corpus
+baseline/candidate requirement. Public Stanli/CmdStan tables still require a
+complete newly recorded run under the publication rules below.
+
 ## Focused execution-path benchmarks
 
 The corpus protocol above remains unchanged. Its gradient measurements do not

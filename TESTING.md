@@ -848,7 +848,11 @@ repeat-evaluation tests are needed for that case.
 PRs use Linux and Windows x86_64 native builds and one complete external model
 oracle. Focused tests cover individual kernels, compiler contracts, execution
 paths, and clients; broad alternative-configuration sweeps and platform
-matrices run post-submit. The source-change path is defined in
+matrices run post-submit. In addition, compiler-pipeline changes require the
+[full corpus performance comparison](docs/benchmark-protocol.md#compiler-pipeline-regression-checks)
+before merge, with confirmed slowdowns of 2% or more fixed. This is an agent
+validation requirement; the ordinary PR numerical replay is not a performance
+benchmark. The source-change path is defined in
 [`.github/workflows/wheels.yml`](.github/workflows/wheels.yml) and
 [`.github/workflows/lint.yml`](.github/workflows/lint.yml):
 
