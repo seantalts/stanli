@@ -15,6 +15,7 @@ std::size_t fused_density_calls();
 
 void normal_lpdf_fused(KernelCtx& ctx);
 void cauchy_lpdf_fused(KernelCtx& ctx);
+void ordered_logistic_lpmf_fused(KernelCtx& ctx);
 
 void normal_lpdf_fwd_gen(KernelCtx& ctx);
 void cauchy_lpdf_fwd_gen(KernelCtx& ctx);

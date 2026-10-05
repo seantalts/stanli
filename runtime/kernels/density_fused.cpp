@@ -3,12 +3,16 @@
 #include <stan/math/prim/err.hpp>
 #include <stan/math/prim/fun/Eigen.hpp>
 #include <stan/math/prim/fun/constants.hpp>
+#include <stan/math/prim/fun/exp.hpp>
+#include <stan/math/prim/fun/log1m_exp.hpp>
 #include <stan/math/prim/fun/log1p.hpp>
 #include <stan/math/prim/fun/sum.hpp>
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
+#include <vector>
 #include <cstdlib>
 #include <type_traits>
 
@@ -261,6 +265,77 @@ void cauchy_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
   finish(o, logp, mask);
 }
 
+struct OrderedOut {
+  double* lambda_buf;
+  int64_t lambda_len;
+  double* cut_buf;
+  int64_t cut_len;
+  double* connected;
+  double* value;
+};
+
+void zero_ordered(const OrderedOut& o) {
+  *o.value = 0.0;
+  std::fill_n(o.lambda_buf, static_cast<std::size_t>(o.lambda_len), 0.0);
+  std::fill_n(o.cut_buf, static_cast<std::size_t>(o.cut_len), 0.0);
+  *o.connected = 0.0;
+}
+
+template <typename Lambda>
+void ordered_logistic_summed(const Lambda& lambda_val, const int* y,
+                             Eigen::Index N, int K, const double* cut,
+                             double* work, const OrderedOut& o) {
+  using Arr = Eigen::Map<Eigen::ArrayXd, Eigen::Aligned64>;
+  const Eigen::Index S = (N + 7) & ~Eigen::Index{7};
+  Arr cuts_y1(work, N), cuts_y2(work + S, N), cut1(work + 2 * S, N),
+      cut2(work + 3 * S, N), exp_m_abs_cut1(work + 4 * S, N),
+      exp_m_abs_cut2(work + 5 * S, N), exp_cuts_diff(work + 6 * S, N),
+      inv_logit_neg_cut2(work + 7 * S, N), inv_logit_neg_cut1(work + 8 * S, N),
+      d1(work + 9 * S, N), d2(work + 10 * S, N);
+  for (Eigen::Index i = 0; i < N; ++i) {
+    const int c = y[i];
+    cuts_y1(i) = c != K ? cut[c - 1] : INFINITY;
+    cuts_y2(i) = c != 1 ? cut[c - 2] : -INFINITY;
+  }
+  cut2 = lambda_val - cuts_y2;
+  cut1 = lambda_val - cuts_y1;
+  auto m_log_1p_exp_cut1 =
+      (cut1 > 0.0).select(-cut1, 0) - (-cut1.abs()).exp().log1p();
+  auto m_log_1p_exp_m_cut2 =
+      (cut2 <= 0.0).select(cut2, 0) - (-cut2.abs()).exp().log1p();
+  Eigen::Map<const Eigen::Matrix<int, Eigen::Dynamic, 1>> y_vec(y, N);
+  auto log1m_exp_cuts_diff = stan::math::log1m_exp(cut1 - cut2);
+  const double logp =
+      y_vec.cwiseEqual(1)
+          .select(m_log_1p_exp_cut1,
+                  y_vec.cwiseEqual(K).select(m_log_1p_exp_m_cut2,
+                                             m_log_1p_exp_m_cut2 +
+                                                 log1m_exp_cuts_diff +
+                                                 m_log_1p_exp_cut1))
+          .sum();
+  exp_m_abs_cut1 = (-cut1.abs()).exp();
+  exp_m_abs_cut2 = (-cut2.abs()).exp();
+  exp_cuts_diff = stan::math::exp(cuts_y2 - cuts_y1);
+  inv_logit_neg_cut2 = (cut2 > 0).select(exp_m_abs_cut2 / (1 + exp_m_abs_cut2),
+                                         1 / (1 + exp_m_abs_cut2));
+  inv_logit_neg_cut1 = (cut1 > 0).select(exp_m_abs_cut1 / (1 + exp_m_abs_cut1),
+                                         1 / (1 + exp_m_abs_cut1));
+  d1 = inv_logit_neg_cut2 - exp_cuts_diff / (exp_cuts_diff - 1);
+  d2 = 1 / (1 - exp_cuts_diff) - inv_logit_neg_cut1;
+  if (o.lambda_len == 1)
+    o.lambda_buf[0] = d1.coeff(0) - d2.coeff(0);
+  else
+    OutView(o.lambda_buf, o.lambda_len) = d1 - d2;
+  std::fill_n(o.cut_buf, static_cast<std::size_t>(o.cut_len), 0.0);
+  for (Eigen::Index i = 0; i < N; ++i) {
+    const int c = y[i];
+    if (c != K) o.cut_buf[c - 1] += d2.coeff(i);
+    if (c != 1) o.cut_buf[c - 2] -= d1.coeff(i);
+  }
+  *o.value = logp;
+  *o.connected = 1.0;
+}
+
 struct NormalOp {
   template <typename Y, typename M, typename S>
   static void run(const Y& y, const M& mu, const S& sigma, unsigned mask,
@@ -339,6 +414,77 @@ void set_fused_density(bool on) {
 }
 
 std::size_t fused_density_calls() { return g_calls; }
+
+void ordered_logistic_lpmf_fused(KernelCtx& ctx) {
+  ++g_calls;
+  static constexpr const char* function = "ordered_logistic";
+  const int64_t n = ctx.n_idata - 3;
+  const int* y = ctx.idata;
+  const int64_t L = ctx.in[0].len, C = ctx.in[1].len;
+  const double* lambda = ctx.in[0].data;
+  const double* cut = ctx.in[1].data;
+  OrderedOut o{ctx.scratch,         L,           ctx.scratch + L, C,
+               ctx.scratch + L + C, ctx.out.data};
+  const bool scalar_lambda = L == 1;
+  const Eigen::Map<const Eigen::ArrayXd> lambda_vec(lambda, L);
+  const auto yvec = [&] { return std::vector<int>(y, y + n); };
+  const auto cut_vec = [&] {
+    return Eigen::Map<const Eigen::VectorXd>(cut, C);
+  };
+  const auto check_lambda = [&] {
+    if (scalar_lambda)
+      stan::math::check_finite(function, "Location parameter", lambda[0]);
+    else
+      stan::math::check_finite(function, "Location parameter", lambda_vec);
+  };
+  if (!scalar_lambda && n != L)
+    stan::math::check_consistent_sizes(function, "Integers", yvec(),
+                                       "Locations", lambda_vec);
+  const bool lambda_ok =
+      scalar_lambda ? std::isfinite(lambda[0]) : lambda_vec.isFinite().all();
+  if (!lambda_ok) check_lambda();
+  if (L == 0) {
+    zero_ordered(o);
+    return;
+  }
+  const int K = static_cast<int>(C) + 1;
+  bool y_ok = true;
+  for (int64_t i = 0; i < n; ++i) y_ok = y_ok && y[i] >= 1 && y[i] <= K;
+  if (!y_ok)
+    stan::math::check_bounded(function, "Random variable", yvec(), 1, K);
+  bool cuts_ok = true;
+  for (int64_t i = 1; i < C; ++i) cuts_ok = cuts_ok && cut[i] > cut[i - 1];
+  if (C >= 1) cuts_ok = cuts_ok && std::isfinite(cut[0]);
+  if (C >= 2) cuts_ok = cuts_ok && std::isfinite(cut[C - 1]);
+  if (!cuts_ok) {
+    stan::math::check_ordered(function, "Cut-points", cut_vec());
+    if (K > 1) {
+      if (K > 2)
+        stan::math::check_finite(function, "Final cut-point", cut[K - 2]);
+      stan::math::check_finite(function, "First cut-point", cut[0]);
+    }
+  }
+  if (n != (scalar_lambda ? 1 : L))
+    stan::math::check_size_match(function, "Integers", n, "Locations", L);
+  const Eigen::Index N = scalar_lambda ? 1 : static_cast<Eigen::Index>(L);
+  constexpr Eigen::Index kStack = 128;
+  const Eigen::Index stride = (N + 7) & ~Eigen::Index{7};
+  const auto run = [&](const auto& lambda_val) {
+    if (N <= kStack) {
+      alignas(64) double work[11 * kStack];
+      ordered_logistic_summed(lambda_val, y, N, K, cut, work, o);
+    } else {
+      std::vector<double> heap(static_cast<std::size_t>(11 * stride + 8));
+      double* work = heap.data();
+      while (reinterpret_cast<std::uintptr_t>(work) % 64 != 0) ++work;
+      ordered_logistic_summed(lambda_val, y, N, K, cut, work, o);
+    }
+  };
+  if (scalar_lambda)
+    run(lambda[0]);
+  else
+    run(lambda_vec);
+}
 
 void normal_lpdf_fused(KernelCtx& ctx) { fused_lpdf<NormalOp>(ctx); }
 void cauchy_lpdf_fused(KernelCtx& ctx) { fused_lpdf<CauchyOp>(ctx); }
