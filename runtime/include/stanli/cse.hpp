@@ -25,10 +25,13 @@ struct CseStats {
 // never renamed away. `fills` is read to keep bind-time-filled slots alive,
 // since their buffers are sized from the slot length.
 // STANLI_NO_CSE=1 disables the pass.
+//
+// `merge_active` (fast mode) also merges duplicates whose inputs depend on
+// parameters, summing their seeds before one pullback.
 CseStats cse(Graph& g,
              const std::vector<std::pair<int, std::vector<double>>>& fills,
              std::vector<int>& target_terms,
-             const std::vector<int>& extra_roots);
+             const std::vector<int>& extra_roots, bool merge_active = false);
 
 }  // namespace stanli
 

@@ -2700,7 +2700,47 @@ static void test_shared_gradient_source_order() {
   }
 }
 
+static void test_fast_fuses_shared_parameter() {
+  const int L = 12;
+  Graph g;
+  Fills fills;
+  const int parameter = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int lane = 0; lane < L; ++lane) {
+    const int coefficient = g.add_slot(1, false);
+    fills.emplace_back(coefficient, std::vector<double>{0.5 + 0.25 * lane});
+    const int product = g.add_slot(1, false), term = g.add_slot(1, false);
+    g.add_op(OP_MUL, {parameter, coefficient}, product);
+    g.add_op(OP_ADD, {product, parameter}, term);
+    terms.push_back(term);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  {
+    Graph off = g;
+    Fills f = fills;
+    std::vector<int> tt = terms;
+    const RerollStats st = reroll(off, f, tt, {}, false);
+    expect("shared parameter stays scalar by default",
+           st.regions == 0 && off.ops.size() == 2 * (size_t)L);
+  }
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {}, true);
+  expect("fast mode fuses the shared parameter", st.regions == 1);
+  expect("fast mode shrinks the graph", g.ops.size() < 2 * (size_t)L);
+  reduce_into_result(g, tt);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  expect("fast gradient size", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("fast shared v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
+}
+
 int main() {
+  test_fast_fuses_shared_parameter();
   test_shared_gradient_source_order();
   test_opaque_payload_not_hoisted();
   test_proven_lane_pricing();
