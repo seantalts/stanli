@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <vector>
+#include <cstdio>
 #include <cstdlib>
 #include <type_traits>
 
@@ -602,6 +603,22 @@ void fused_lpdf(KernelCtx& ctx) {
 }
 
 }  // namespace
+
+#ifdef STANLI_FUSED_ONLY
+namespace {
+struct OracleSwitchNotice {
+  OracleSwitchNotice() {
+    const char* e = std::getenv("STANLI_NO_FUSED_DENSITY");
+    if (e != nullptr && e[0] != '\0' && e[0] != '0')
+      std::fputs(
+          "stanli: STANLI_NO_FUSED_DENSITY is ignored: this build does not "
+          "contain Stan Math's normal, cauchy, student_t and ordered_logistic "
+          "kernels (CMake option STANLI_STAN_DENSITY_ORACLE=OFF)\n",
+          stderr);
+  }
+} g_oracle_switch_notice;
+}  // namespace
+#endif
 
 bool fused_density_enabled() {
   int v = g_enabled.load(std::memory_order_relaxed);

@@ -697,6 +697,17 @@ python3 tools/verify_lite.py deps/posteriordb
 python3 tools/verify_refs.py deps/posteriordb --check build-lite/stanli_check --no-lp
 ```
 
+If the change touches `runtime/kernels/density_fused.cpp`, build with the
+Stan Math kernels kept, which is the default of a plain `cmake -B build`
+(`-DSTANLI_STAN_DENSITY_ORACLE=ON`), and run the three differential tests
+(`test_density_fused`, `test_student_t_fused`, `test_ordered_logistic_fused`).
+They compare each fused kernel with Stan Math's own over every activity mask and
+shape and require bitwise equal results. `tools/dev_setup.sh` configures
+`build-rel` with the option OFF, as the release scripts and CI do, so the
+corpus replay there runs the fused kernels alone; its `build` keeps them.
+`STANLI_NO_FUSED_DENSITY=1` selects Stan Math's kernels in an ON build and
+prints a notice, then is ignored, in an OFF build.
+
 For sampler changes, use
 [`tools/sampler_trace.py`](../tools/sampler_trace.py). For
 generated-quantities coverage, run the verifier with `--wa-report`.

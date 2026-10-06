@@ -39,7 +39,10 @@ constexpr FusedKernel fused_kernel_for(Code code) {
 }
 
 inline bool fused_density_active() {
-  return kFusedOnly || fused_density_enabled();
+  if constexpr (kFusedOnly)
+    return true;
+  else
+    return fused_density_enabled();
 }
 
 }  // namespace dens

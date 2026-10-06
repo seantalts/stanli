@@ -28,6 +28,10 @@ if [ -f "$EMBED_OBJECT" ] &&
   exit 1
 fi
 
+if ! grep -q '^STANLI_STAN_DENSITY_ORACLE:BOOL=OFF' build-rel/CMakeCache.txt 2>/dev/null; then
+  echo "warning: build-rel keeps Stan Math's kernels for the fused densities;" \
+       "configure it with -DSTANLI_STAN_DENSITY_ORACLE=OFF for a release wheel" >&2
+fi
 cmake --build build-rel --parallel "$BUILD_JOBS" --target stanli_shared
 
 mkdir -p python/stanli/_bin

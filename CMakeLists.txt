@@ -163,6 +163,19 @@ if(STANLI_LITE_LP)
   target_compile_definitions(stanmath INTERFACE STANLI_LITE_LP=1)
 endif()
 
+# normal, cauchy, student_t and ordered_logistic (shared cutpoints) have fused
+# kernels (runtime/kernels/density_fused.cpp). With this option ON the Stan
+# Math instantiations they replace stay compiled, which is what
+# STANLI_NO_FUSED_DENSITY=1 and the differential tests compare against. OFF
+# drops them: 3.4 MB smaller. Release and packaging builds pass OFF. It
+# defaults ON so that a plain developer build runs the whole ctest suite.
+option(STANLI_STAN_DENSITY_ORACLE
+  "Keep Stan Math's own kernels for the fused densities (oracle and differential tests)"
+  ON)
+if(NOT STANLI_STAN_DENSITY_ORACLE)
+  target_compile_definitions(stanmath INTERFACE STANLI_FUSED_ONLY=1)
+endif()
+
 # Chains in threads. stan-math's autodiff stack is a plain static unless
 # STAN_THREADS is defined, in which case it is thread_local (__thread on
 # gcc/clang). The legacy kernels and tape islands build NESTED var tapes
@@ -1232,7 +1245,6 @@ set(STANLI_TESTS
   test_execution_report test_rng_families test_vector_rng test_container_rng
   test_smoke test_executor test_recorder test_densities test_tile_calls
   test_matvec test_eigen
-  test_density_fused test_ordered_logistic_fused test_student_t_fused
   test_mnc test_stan240
   test_legacy test_eight_schools test_glm test_normal_glm test_nuts test_walnuts test_sexp
   test_model_adapter test_sampler_parity
@@ -1255,6 +1267,10 @@ set(STANLI_TESTS
   test_reduce_sum
   test_structured_arrays test_pathfinder test_unconstrain
   test_init_interp test_constrain_structured)
+if(STANLI_STAN_DENSITY_ORACLE)
+  list(APPEND STANLI_TESTS
+    test_density_fused test_ordered_logistic_fused test_student_t_fused)
+endif()
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()
