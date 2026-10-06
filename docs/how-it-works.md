@@ -229,8 +229,9 @@ scalar so the existing Stan Math template computes its usual partial
 derivatives. The partials of a vector input are written straight into
 scratch and vector arguments are read in place, but the Stan Math code still
 allocates its own Eigen temporaries. `normal_lpdf`, `cauchy_lpdf`,
-`student_t_lpdf` and `ordered_logistic_lpmf` (shared cutpoints) have fused
-kernels that allocate none
+`student_t_lpdf`, `lognormal_lpdf`, `beta_lpdf`, `gamma_lpdf` and
+`ordered_logistic_lpmf` (shared cutpoints) have fused kernels that allocate
+nothing for arguments of up to 128 elements and one work array above that
 ([`runtime/kernels/density_fused.cpp`](../runtime/kernels/density_fused.cpp)).
 See
 [`runtime/include/stanli/recorder.hpp`](../runtime/include/stanli/recorder.hpp).

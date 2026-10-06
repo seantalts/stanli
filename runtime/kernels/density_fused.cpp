@@ -866,8 +866,8 @@ struct OracleSwitchNotice {
     if (e != nullptr && e[0] != '\0' && e[0] != '0')
       std::fputs(
           "stanli: STANLI_NO_FUSED_DENSITY is ignored: this build does not "
-          "contain Stan Math's normal, cauchy, student_t and ordered_logistic "
-          "kernels (CMake option STANLI_STAN_DENSITY_ORACLE=OFF)\n",
+          "contain Stan Math's kernels for the fused densities (CMake option "
+          "STANLI_STAN_DENSITY_ORACLE=OFF)\n",
           stderr);
   }
 } g_oracle_switch_notice;
