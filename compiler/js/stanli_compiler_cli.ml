@@ -1,11 +1,13 @@
 let () =
   let model_only = ref false in
+  let fast_math = ref false in
   let include_paths = ref [] in
   let model = ref None in
   let usage =
-    "usage: stanli_compiler_cli [--model-only] [--include-path DIR]... MODEL.stan" in
+    "usage: stanli_compiler_cli [--model-only] [--fast-math] [--include-path DIR]... MODEL.stan" in
   Arg.parse
     [ ("--model-only", Arg.Set model_only, "compile only model entry points")
+    ; ("--fast-math", Arg.Set fast_math, "enable partial evaluation")
     ; ( "--include-path"
       , Arg.String (fun path -> include_paths := path :: !include_paths)
       , "directory to search for Stan includes (repeatable)" ) ]
@@ -20,7 +22,7 @@ let () =
   let path = Option.get !model in
   let code = In_channel.with_open_bin path In_channel.input_all in
   let compilation =
-    Stanli_pipeline.compile_portable ~model_only:!model_only ~model_name:"embedded_model" code
+    Stanli_pipeline.compile_portable ~model_only:!model_only ~fast_math:!fast_math ~model_name:"embedded_model" code
       ~include_source:
         (Frontend.Include_files.FileSystemPaths
            (List.rev !include_paths @ [Filename.dirname path]))

@@ -118,6 +118,34 @@ let arithmetic_preservation_test () =
   require (has_call "fma" explicit)
     "an explicit fused operation lost its source semantics"
 
+let fast_math_test () =
+  let code = {|
+    parameters { real a; real b; real z; }
+    model { target += a * b + z; }
+  |} in
+  let compile_fast ~fast_math code =
+    match Stanli_pipeline.compile_mir ~fast_math ~model_name:"fast_math_test" code with
+    | {result= Ok mir; _} -> mir
+    | {result= Error _; _} -> failwith "Stan source did not compile" in
+  let default = compile_fast ~fast_math:false code in
+  let fast = compile_fast ~fast_math:true code in
+  require (not (has_call "fma" default))
+    "fast_math=false fused a multiply-add";
+  require (has_call "fma" fast)
+    "fast_math=true did not run partial evaluation";
+  require (String.equal (encode default) (encode (compile code)))
+    "fast_math=false changed the default output";
+  let portable ?fast_math () =
+    match
+      Stanli_pipeline.compile_portable ?fast_math ~model_name:"fast_math_test" code
+    with
+    | {result= Ok encoded; _} -> encoded
+    | {result= Error _; _} -> failwith "Stan source did not compile" in
+  require (String.equal (portable ()) (portable ~fast_math:false ()))
+    "an explicit fast_math=false differs from the default";
+  require (not (String.equal (portable ()) (portable ~fast_math:true ())))
+    "fast_math=true left the portable encoding unchanged"
+
 let repeated_scalar_argument_test () =
   let mir = compile {|
     functions {
@@ -270,6 +298,7 @@ let () =
   require (materialized () > 0 && materialized () < List.length builtin_sets / 2)
     "simple compilation forced unrelated built-in overloads";
   arithmetic_preservation_test ();
+  fast_math_test ();
   repeated_scalar_argument_test ();
   inlining_effect_order_test ();
   List.iter (fun code ->
