@@ -440,6 +440,52 @@ void beta_summed(const Y& y, const A& alpha, const B& beta, unsigned mask,
   finish(o, logp, mask);
 }
 
+template <typename Y, typename A, typename B>
+void gamma_summed(const Y& y, const A& alpha, const B& beta, unsigned mask,
+                  bool propto, const Out& o, double* work,
+                  Eigen::Index stride) {
+  static constexpr const char* function = "gamma_lpdf";
+  check_sizes(function, y, alpha, beta, "Shape parameter",
+              "Inverse scale parameter");
+  if (!all_positive_finite(y) || !all_positive_finite(alpha) ||
+      !all_positive_finite(beta)) {
+    stan::math::check_positive_finite(function, "Random variable", y);
+    stan::math::check_positive_finite(function, "Shape parameter", alpha);
+    stan::math::check_positive_finite(function, "Inverse scale parameter",
+                                      beta);
+  }
+  if (size_zero_any(y, alpha, beta) || (propto && mask == 0)) {
+    zero_result(o);
+    return;
+  }
+  const bool ya = (mask & 1u) != 0, aa = (mask & 2u) != 0,
+             ba = (mask & 4u) != 0;
+  const std::size_t N = max_size_of(y, alpha, beta);
+  const Eigen::Index n = static_cast<Eigen::Index>(N);
+  double logp = 0.0;
+  if (!propto || aa)
+    logp = -stan::math::sum(stan::math::lgamma(alpha)) * N / size_of(alpha);
+  with_ref(!aa, log_of(y), work, n, [&](const auto& log_y) {
+    if (!propto || aa || ba) {
+      with_ref(aa, log_of(beta), work + stride, n, [&](const auto& log_beta) {
+        logp += stan::math::sum(alpha * log_beta) * N /
+                std::max(size_of(alpha), size_of(beta));
+        if (aa)
+          put<A>(o.buf[1], o.len[1],
+                 log_beta + log_y - stan::math::digamma(alpha));
+      });
+    }
+    if (!propto || ya || aa)
+      logp += stan::math::sum((alpha - 1.0) * log_y) * N /
+              std::max(size_of(alpha), size_of(y));
+  });
+  if (!propto || ya || ba)
+    logp -= stan::math::sum(beta * y) * N / std::max(size_of(beta), size_of(y));
+  if (ya) put<Y>(o.buf[0], o.len[0], (alpha - 1) / y - beta);
+  if (ba) put<B>(o.buf[2], o.len[2], alpha / beta - y);
+  finish(o, logp, mask);
+}
+
 struct OrderedOut {
   double* lambda_buf;
   int64_t lambda_len;
@@ -754,6 +800,17 @@ struct BetaOp {
   }
 };
 
+struct GammaOp {
+  template <typename Y, typename A, typename B>
+  static void run(const Y& y, const A& alpha, const B& beta, unsigned mask,
+                  bool propto, const Out& o) {
+    with_work<2>(max_size_of(y, alpha, beta),
+                 [&](double* work, Eigen::Index stride) {
+                   gamma_summed(y, alpha, beta, mask, propto, o, work, stride);
+                 });
+  }
+};
+
 template <typename Op>
 void fused_lpdf(KernelCtx& ctx) {
   ++g_calls;
@@ -909,6 +966,7 @@ void cauchy_lpdf_fused(KernelCtx& ctx) { fused_lpdf<CauchyOp>(ctx); }
 void student_t_lpdf_fused(KernelCtx& ctx) { student_t_lpdf_run(ctx); }
 void lognormal_lpdf_fused(KernelCtx& ctx) { fused_lpdf<LognormalOp>(ctx); }
 void beta_lpdf_fused(KernelCtx& ctx) { fused_lpdf<BetaOp>(ctx); }
+void gamma_lpdf_fused(KernelCtx& ctx) { fused_lpdf<GammaOp>(ctx); }
 
 }  // namespace dens
 }  // namespace stanli

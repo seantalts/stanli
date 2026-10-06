@@ -1,8 +1,8 @@
-// The fused normal, cauchy, lognormal and beta kernels against the
+// The fused normal, cauchy, lognormal, beta and gamma kernels against the
 // Stan Math path they can replace. Every activity mask, both propto
 // settings, every scalar/vector shape, the elementwise variant, and edge
 // values; the two paths must agree on rejections (same message) and be
-// within the ULP limit of the density (0 for lognormal and beta).
+// within the ULP limit of the density (0 for lognormal, beta and gamma).
 #include "../runtime/kernels/density_fused.hpp"
 
 #include <algorithm>
@@ -24,8 +24,8 @@ struct Outcome {
   std::vector<double> scratch;
 };
 
-enum class Dist { normal, cauchy, lognormal, beta };
-constexpr int kDists = 4;
+enum class Dist { normal, cauchy, lognormal, beta, gamma };
+constexpr int kDists = 5;
 
 constexpr double kSentinel = 12345.0;
 
@@ -76,6 +76,9 @@ Outcome run(Dist d, const std::vector<double>& y, const std::vector<double>& mu,
       case Dist::beta:
         stanli::dens::beta_lpdf_fwd_gen(ctx);
         break;
+      case Dist::gamma:
+        stanli::dens::gamma_lpdf_fwd_gen(ctx);
+        break;
     }
   } catch (const std::exception& e) {
     o.threw = true;
@@ -102,7 +105,7 @@ double ulp_distance(double a, double b) {
 int failures = 0;
 double worst_by_mask[kDists][8];
 double worst_overall = 0;
-const double kMaxUlp[kDists] = {2, 2, 0, 0};
+const double kMaxUlp[kDists] = {2, 2, 0, 0, 0};
 
 void compare(const char* name, Dist d, unsigned mask, unsigned variant,
              const Outcome& stan, const Outcome& fused,
@@ -220,6 +223,14 @@ const Spec kSpecs[] = {
       {0.0, -1.5, kNaN, kInf},
       {0.0, -1.5, kNaN, kInf}},
      {{0.0, 1.0, 1e-300}, {1.0, 1e-300}, {1.0, 1e-300}},
+     false},
+    {"gamma_lpdf",
+     Dist::gamma,
+     {Kind::positive, Kind::positive, Kind::positive},
+     {{kNaN, 0.0, -1.5, kInf},
+      {0.0, -1.5, kNaN, kInf},
+      {0.0, -1.5, kNaN, kInf}},
+     {{1e-300}, {1.0, 1e-300}, {1.0, 1e-300}},
      false},
 };
 
