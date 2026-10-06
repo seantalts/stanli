@@ -276,8 +276,9 @@ def build_model(name, stan, data, work, runner, args, setup=None):
     work.mkdir(exist_ok=True)
     source, hpp, mir = work / f"{name}.stan", work / f"{name}.hpp", work / "model.sexp"
     source.write_bytes(stan.read_bytes())
+    fast = ["--fast-math"] if getattr(args, "fast_math", False) else []
     setup_phase(runner, setup, "stanli_compile", f"{name}/stanli-mir",
-        [args.vectorize_probe, "--vectorize-loops", "on", "--output", mir, source],
+        [args.vectorize_probe, "--vectorize-loops", "on", *fast, "--output", mir, source],
         args.build_timeout)
     setup_phase(runner, setup, "cmdstan_stanc", f"{name}/stanc-cpp",
         [args.stanc, source, f"--o={hpp}", *shlex.split(args.stancflags)], args.build_timeout)
@@ -306,11 +307,20 @@ def setup_estimates(row, setup):
                                             + GRADIENT_BUDGET * grad / 1e9)
 
 
+def run_config(args):
+    config = {k: str(v) if isinstance(v, pathlib.Path) else v for k, v in vars(args).items()
+              if k not in ("resume", "output")}
+    if not config.get("fast_math"):
+        config.pop("fast_math", None)
+    return config
+
+
 def measure_model(name, stan, data, directory, manifest, runner, args):
     row = dict(model=name, run_id=manifest["run_id"], gradient_budget=GRADIENT_BUDGET)
     record = dict(model=name, inputs={"stan": sha(stan), "data": sha(data)}, row=row,
                   gradients=[], setup={}, preparation_s=[], status="failed")
     notes = []
+    fast = ["--fast-math"] if getattr(args, "fast_math", False) else []
     source = directory / name / f"{name}.stan"
     try:
         commands, source = build_model(name, stan, data, directory / name, runner, args,
@@ -322,7 +332,8 @@ def measure_model(name, stan, data, directory, manifest, runner, args):
             for engine in order:
                 event = runner.require(f"{name}/gradient/{round_index}/{engine}",
                     commands[engine] + ["--timed", "--warmup-ms", str(args.warmup_ms),
-                                        "--measure-ms", str(args.measure_ms)], args.gradient_timeout)
+                                        "--measure-ms", str(args.measure_ms)]
+                    + (fast if engine == "stanli" else []), args.gradient_timeout)
                 pair[engine] = parse_timing(runner.text(event), args.warmup_ms, args.measure_ms)
                 pair[engine]["event"] = event["id"]
             deviation = check_pair(pair)
@@ -331,7 +342,8 @@ def measure_model(name, stan, data, directory, manifest, runner, args):
         row["params"] = len(record["gradients"][0]["stanli"]["values"]) - 1
         # Binding existing MIR excludes the separately measured source compiler.
         for i in range(args.rounds):
-            event = runner.require(f"{name}/prepare/{i}", commands["stanli"] + ["--prep"],
+            event = runner.require(f"{name}/prepare/{i}",
+                                   commands["stanli"] + ["--prep"] + fast,
                                    args.gradient_timeout)
             try:
                 duration = float(runner.text(event).splitlines()[-1].split()[0])
@@ -391,6 +403,8 @@ def main(argv=None):
                         help="compiler for the CmdStan model header")
     parser.add_argument("--stancflags", default="", help="flags for CmdStan header generation")
     parser.add_argument("--vectorize-probe", type=pathlib.Path, default=VECTORIZE_PROBE)
+    parser.add_argument("--fast-math", action="store_true",
+                        help="build stanli MIR in fast mode and run bench_grad --fast-math")
     args = parser.parse_args(argv)
     if args.rounds < 2 or args.rounds % 2:
         parser.error("--rounds must be even and at least two for balanced engine order")
@@ -430,8 +444,7 @@ def main(argv=None):
             inputs[name] = (stan, data)
         if not inputs:
             parser.error("no models selected")
-        config = {k: str(v) if isinstance(v, pathlib.Path) else v for k, v in vars(args).items()
-                  if k not in ("resume", "output")}
+        config = run_config(args)
         config["gradient_budget"] = GRADIENT_BUDGET
         identities = {str(p.relative_to(REPO)): sha(p) for p in (
             REPO / "harnesses/corpus_bench.py", REPO / "tools/benchmark_timer.hpp",
