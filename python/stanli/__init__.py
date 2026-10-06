@@ -100,6 +100,12 @@ _SampleProgressCallback = ctypes.CFUNCTYPE(
 _SamplePollCallback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
 
 
+class _ModelOpts(ctypes.Structure):
+    _fields_ = [("seed", ctypes.c_uint32),
+                ("threads_per_chain", ctypes.c_int),
+                ("fast_math", ctypes.c_int)]
+
+
 def _load_lib():
     names = {"darwin": "libstanli.dylib", "linux": "libstanli.so"}
     lib = ctypes.CDLL(str(_BIN / names.get(sys.platform, "stanli.dll")))
@@ -159,6 +165,18 @@ def _load_lib():
         lib.stanli_stan_to_mir_with_includes.argtypes = [
             ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_size_t,
             ctypes.c_char_p, ctypes.c_size_t]
+    for name in ("stanli_model_new_with_opts", "stanli_model_new_from_stan_with_opts"):
+        fn = getattr(lib, name, None)
+        if fn is not None:
+            fn.restype = ctypes.c_void_p
+            fn.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
+                           ctypes.POINTER(_ModelOpts), ctypes.c_char_p,
+                           ctypes.c_size_t]
+    if hasattr(lib, "stanli_stan_to_mir_with_opts"):
+        lib.stanli_stan_to_mir_with_opts.restype = ctypes.c_void_p
+        lib.stanli_stan_to_mir_with_opts.argtypes = [
+            ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_size_t,
+            ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_string_free.argtypes = [ctypes.c_void_p]
     lib.stanli_build_id.restype = ctypes.c_char_p
     lib.stanli_build_id.argtypes = []
@@ -402,12 +420,15 @@ def _pathfinder_init_options(value):
     return out
 
 
-def _compiler_command(model_path: pathlib.Path, include_paths=()):
+def _compiler_command(model_path: pathlib.Path, include_paths=(),
+                      fast_math=False):
     """The packaged compiler argv, preferring stanli's portable producer."""
     suffix = ".exe" if sys.platform == "win32" else ""
     portable = _BIN / ("stanli-compile" + suffix)
     if portable.is_file():
         flags = [arg for path in include_paths for arg in ("--include-path", path)]
+        if fast_math:
+            flags.insert(0, "--fast-math")
         return [str(portable), *flags, str(model_path)]
 
     # One-cycle rollback path: pristine stanc3 emits the legacy s-expression
@@ -415,6 +436,9 @@ def _compiler_command(model_path: pathlib.Path, include_paths=()):
     # portable compiler must fail loudly rather than being hidden by a retry.
     stanc = _BIN / ("stanc" + suffix)
     if stanc.is_file():
+        if fast_math:
+            raise RuntimeError("fast_math requires the portable stanli-compile "
+                               f"compiler, which is missing from {_BIN}")
         if any("," in path for path in include_paths):
             raise ValueError("the legacy stanc compiler cannot use include_paths "
                              "containing commas")
@@ -425,8 +449,8 @@ def _compiler_command(model_path: pathlib.Path, include_paths=()):
         f"(expected {portable.name} or {stanc.name} in {_BIN})")
 
 
-def _stanc_mir(model_path: pathlib.Path, include_paths=()) -> str:
-    argv = _compiler_command(model_path, include_paths)
+def _stanc_mir(model_path: pathlib.Path, include_paths=(), fast_math=False) -> str:
+    argv = _compiler_command(model_path, include_paths, fast_math)
     try:
         r = subprocess.run(argv, capture_output=True, text=True,
                            encoding="utf-8")
@@ -438,7 +462,7 @@ def _stanc_mir(model_path: pathlib.Path, include_paths=()) -> str:
     return r.stdout
 
 
-def _subprocess_mir(stan_code: str, include_paths=()) -> str:
+def _subprocess_mir(stan_code: str, include_paths=(), fast_math=False) -> str:
     """Compile source in an isolated directory and remove every side effect."""
     import tempfile
     with tempfile.TemporaryDirectory(prefix="stanli-compile-") as tmpdir:
@@ -447,6 +471,8 @@ def _subprocess_mir(stan_code: str, include_paths=()) -> str:
         # of text-mode files on Windows. Stock stanc also writes model.hpp next
         # to this file; TemporaryDirectory removes that rollback-path artifact.
         source.write_bytes(stan_code.encode("utf-8"))
+        if fast_math:
+            return _stanc_mir(source, include_paths, True)
         return _stanc_mir(source, include_paths) if include_paths else _stanc_mir(source)
 
 
@@ -489,7 +515,7 @@ def _read_stan_source(stan_file, stan_code, include_paths):
     return stan_code, paths
 
 
-def stan_to_mir(stan_code: str, include_paths=None) -> str:
+def stan_to_mir(stan_code: str, include_paths=None, fast_math=False) -> str:
     """Stan source to optimized-MIR text, without building a model.
 
     The first half of compiling a model, on its own. Useful when the MIR
@@ -502,20 +528,40 @@ def stan_to_mir(stan_code: str, include_paths=None) -> str:
     ``include_paths`` is a directory or an iterable of directories searched
     in order for ``#include`` files, followed by the current directory.
     Nested includes use the same search path.
+
+    ``fast_math=True`` compiles with the opt-in fast mode: the compiler
+    rewrites expressions into fused multiply-adds, and the results can
+    differ from the default in the last bits.
     """
+    fast_math = _check_fast_math(fast_math)
     stan_code, paths = _read_stan_source(None, stan_code, include_paths)
-    return _compile_stan(stan_code, paths)
+    return _compile_stan(stan_code, paths, fast_math)
 
 
-def _compile_stan(stan_code, include_paths):
+def _check_fast_math(value):
+    if not isinstance(value, bool):
+        raise TypeError("fast_math must be True or False")
+    return value
+
+
+def _compile_stan(stan_code, include_paths, fast_math=False):
     # Source without an include keeps the original compiler entry point, also
     # allowing these bindings to work with older embedded runtimes.
     include_paths = include_paths if "#include" in stan_code else []
     if not _lib.stanli_has_embedded_stanc():
+        if fast_math:
+            return _subprocess_mir(stan_code, include_paths, True)
         return (_subprocess_mir(stan_code, include_paths) if include_paths
                 else _subprocess_mir(stan_code))
     err = ctypes.create_string_buffer(8192)
-    if include_paths:
+    if fast_math:
+        compile_opts = getattr(_lib, "stanli_stan_to_mir_with_opts", None)
+        if compile_opts is None:
+            raise RuntimeError("fast_math requires a newer Stanli runtime")
+        paths = (ctypes.c_char_p * len(include_paths))(
+            *(path.encode("utf-8") for path in include_paths))
+        p = compile_opts(stan_code.encode(), paths, len(paths), 1, err, len(err))
+    elif include_paths:
         compile_includes = getattr(_lib, "stanli_stan_to_mir_with_includes", None)
         if compile_includes is None:
             raise RuntimeError("Stan includes require a newer Stanli runtime")
@@ -1000,15 +1046,23 @@ class Model:
     containing ``stan_file`` (or the current directory for ``stan_code``).
     Nested includes use the same search path. Included source is compiled
     once and retained for later sampling, even if its files change or move.
+
+    ``fast_math=True`` opts this model into fast mode: source is compiled
+    with fused multiply-add rewriting and the runtime may use faster,
+    less exactly rounded evaluation. Results can differ from the default in
+    the last bits. Pass the same ``fast_math`` with ``mir=`` that was used
+    to produce it with ``stan_to_mir``.
     """
 
     def __init__(self, stan_file=None, data=None, stan_code=None, mir=None,
-                 seed=1, threads_per_chain=1, include_paths=None):
+                 seed=1, threads_per_chain=1, include_paths=None,
+                 fast_math=False):
         threads_per_chain = _threads_per_chain(threads_per_chain)
+        self._fast_math = _check_fast_math(fast_math)
         if mir is None:
             stan_code, paths = _read_stan_source(stan_file, stan_code, include_paths)
             if "#include" in stan_code:
-                mir = _compile_stan(stan_code, paths)
+                mir = _compile_stan(stan_code, paths, self._fast_math)
         self._source = (mir, stan_code, _data_to_json(data))
         self._m = None
         self._adopt(self._construct(seed, threads_per_chain), seed, threads_per_chain)
@@ -1041,9 +1095,15 @@ class Model:
         elif _lib.stanli_has_embedded_stanc():
             text, name = stan_code, "stanli_model_new_from_stan"
         else:
-            text, name = _subprocess_mir(stan_code), "stanli_model_new"
+            text, name = (_subprocess_mir(stan_code, (), self._fast_math),
+                          "stanli_model_new")
         args = [text.encode(), data_json.encode(), seed]
-        if threads_per_chain > 1:
+        if self._fast_math:
+            fn = getattr(_lib, name + "_with_opts", None)
+            if fn is None:
+                raise RuntimeError("fast_math requires a newer Stanli runtime")
+            args[2] = ctypes.byref(_ModelOpts(seed, threads_per_chain, 1))
+        elif threads_per_chain > 1:
             fn = getattr(_lib, name + "_threaded", None)
             if fn is None:
                 raise RuntimeError("threads_per_chain requires a newer Stanli runtime")
@@ -1054,6 +1114,11 @@ class Model:
         if not m:
             raise RuntimeError(err.value.decode())
         return m
+
+    @property
+    def fast_math(self):
+        """Whether this model was built in fast mode."""
+        return self._fast_math
 
     @property
     def threads_per_chain(self):
