@@ -26,7 +26,6 @@
 // Active outputs instead retain their slot identity and reverse callback.
 // Only their primal and read-only forward scratch are shared: summing seeds
 // before a nonlinear pullback would change floating-point accumulation.
-// Fast mode merges them too.
 #include <stanli/cse.hpp>
 #include <stanli/optable.hpp>
 

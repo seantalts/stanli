@@ -1,7 +1,3 @@
-// CompileOptions::fast_math reaches the lowering passes: duplicates with
-// parameter inputs merge in CSE, and loops reading one parameter at several
-// positions are fused by reroll and partition. The default keeps both
-// unfused, and the fast graph agrees with it to rounding error.
 #include <stanli/compile.hpp>
 #include <stanli/data.hpp>
 #include <stanli/optable.hpp>
