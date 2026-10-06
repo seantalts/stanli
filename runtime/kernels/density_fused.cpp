@@ -8,6 +8,7 @@
 #include <stan/math/prim/fun/digamma.hpp>
 #include <stan/math/prim/fun/lgamma.hpp>
 #include <stan/math/prim/fun/log.hpp>
+#include <stan/math/prim/fun/log1m.hpp>
 #include <stan/math/prim/fun/log1p.hpp>
 #include <stan/math/prim/fun/square.hpp>
 #include <stan/math/prim/fun/sum.hpp>
@@ -92,6 +93,14 @@ bool all_nonnegative(const T& x) {
     return x >= 0;
   else
     return (x >= 0.0).all();
+}
+
+template <typename T>
+bool all_unit_interval(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return x >= 0 && x <= 1;
+  else
+    return ((x >= 0.0) && (x <= 1.0)).all();
 }
 
 template <typename T>
@@ -189,17 +198,17 @@ void note_size(const T& x, bool& have, std::size_t& first, bool& match) {
 }
 
 template <typename Y, typename M, typename S>
-void check_sizes(const char* function, const Y& y, const M& mu,
-                 const S& sigma) {
+void check_sizes(const char* function, const Y& y, const M& mu, const S& sigma,
+                 const char* mu_name = "Location parameter",
+                 const char* sigma_name = "Scale parameter") {
   bool have = false, match = true;
   std::size_t first = 0;
   note_size(y, have, first, match);
   note_size(mu, have, first, match);
   note_size(sigma, have, first, match);
   if (!match)
-    stan::math::check_consistent_sizes(function, "Random variable", y,
-                                       "Location parameter", mu,
-                                       "Scale parameter", sigma);
+    stan::math::check_consistent_sizes(function, "Random variable", y, mu_name,
+                                       mu, sigma_name, sigma);
 }
 
 template <typename Y, typename M, typename S>
@@ -366,6 +375,69 @@ void lognormal_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
     }
     finish(o, logp, mask);
   });
+}
+
+template <typename T>
+auto log1m_of(const T& x) {
+  return stan::math::log1m(x);
+}
+
+template <typename Y, typename A, typename B>
+void beta_summed(const Y& y, const A& alpha, const B& beta, unsigned mask,
+                 bool propto, const Out& o, double* work, Eigen::Index stride) {
+  static constexpr const char* function = "beta_lpdf";
+  check_sizes(function, y, alpha, beta, "First shape parameter",
+              "Second shape parameter");
+  if (size_zero_any(y, alpha, beta)) {
+    zero_result(o);
+    return;
+  }
+  if (!all_positive_finite(alpha) || !all_positive_finite(beta) ||
+      !all_unit_interval(y)) {
+    stan::math::check_positive_finite(function, "First shape parameter", alpha);
+    stan::math::check_positive_finite(function, "Second shape parameter", beta);
+    stan::math::check_bounded(function, "Random variable", y, 0, 1);
+  }
+  if (propto && mask == 0) {
+    zero_result(o);
+    return;
+  }
+  const bool ya = (mask & 1u) != 0, aa = (mask & 2u) != 0,
+             ba = (mask & 4u) != 0;
+  const std::size_t N = max_size_of(y, alpha, beta);
+  const Eigen::Index n = static_cast<Eigen::Index>(N);
+  const auto log_y = materialize(log_of(y), work, n);
+  const auto log1m_y = materialize(log1m_of(y), work + stride, n);
+  double logp = 0;
+  if (!propto || aa)
+    logp -= stan::math::sum(stan::math::lgamma(alpha)) * N / size_of(alpha);
+  if (!propto || ba)
+    logp -= stan::math::sum(stan::math::lgamma(beta)) * N / size_of(beta);
+  if (!propto || ya || aa)
+    logp += stan::math::sum((alpha - 1.0) * log_y) * N /
+            std::max(size_of(y), size_of(alpha));
+  if (!propto || ya || ba)
+    logp += stan::math::sum((beta - 1.0) * log1m_y) * N /
+            std::max(size_of(y), size_of(beta));
+  if (ya) put<Y>(o.buf[0], o.len[0], (alpha - 1) / y + (beta - 1) / (y - 1));
+  if (!propto || aa || ba) {
+    const auto alpha_beta = alpha + beta;
+    logp += stan::math::sum(stan::math::lgamma(alpha_beta)) * N /
+            std::max(size_of(alpha), size_of(beta));
+    if (aa || ba) {
+      with_ref(
+          aa && ba, stan::math::digamma(alpha_beta), work + 2 * stride, n,
+          [&](const auto& digamma_alpha_beta) {
+            if (aa)
+              put<A>(o.buf[1], o.len[1],
+                     log_y + digamma_alpha_beta - stan::math::digamma(alpha));
+            if (ba)
+              put<B>(o.buf[2], o.len[2],
+                     log1m_y + digamma_alpha_beta - stan::math::digamma(beta));
+          });
+    }
+  }
+  finish(o, logp, mask);
 }
 
 struct OrderedOut {
@@ -671,6 +743,17 @@ struct LognormalOp {
   }
 };
 
+struct BetaOp {
+  template <typename Y, typename A, typename B>
+  static void run(const Y& y, const A& alpha, const B& beta, unsigned mask,
+                  bool propto, const Out& o) {
+    with_work<3>(max_size_of(y, alpha, beta),
+                 [&](double* work, Eigen::Index stride) {
+                   beta_summed(y, alpha, beta, mask, propto, o, work, stride);
+                 });
+  }
+};
+
 template <typename Op>
 void fused_lpdf(KernelCtx& ctx) {
   ++g_calls;
@@ -825,6 +908,7 @@ void normal_lpdf_fused(KernelCtx& ctx) { fused_lpdf<NormalOp>(ctx); }
 void cauchy_lpdf_fused(KernelCtx& ctx) { fused_lpdf<CauchyOp>(ctx); }
 void student_t_lpdf_fused(KernelCtx& ctx) { student_t_lpdf_run(ctx); }
 void lognormal_lpdf_fused(KernelCtx& ctx) { fused_lpdf<LognormalOp>(ctx); }
+void beta_lpdf_fused(KernelCtx& ctx) { fused_lpdf<BetaOp>(ctx); }
 
 }  // namespace dens
 }  // namespace stanli
