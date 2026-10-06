@@ -1,7 +1,8 @@
-// The fused normal and cauchy kernels against the Stan Math path they can
-// replace. Every activity mask, both propto settings, every scalar/vector
-// shape, the elementwise variant, and edge values; the two paths must agree
-// on rejections (same message) and be within 2 ULP everywhere else.
+// The fused normal, cauchy and lognormal kernels against the
+// Stan Math path they can replace. Every activity mask, both propto
+// settings, every scalar/vector shape, the elementwise variant, and edge
+// values; the two paths must agree on rejections (same message) and be
+// within the ULP limit of the density (0 for lognormal).
 #include "../runtime/kernels/density_fused.hpp"
 
 #include <algorithm>
@@ -23,7 +24,8 @@ struct Outcome {
   std::vector<double> scratch;
 };
 
-enum class Dist { normal, cauchy };
+enum class Dist { normal, cauchy, lognormal };
+constexpr int kDists = 3;
 
 constexpr double kSentinel = 12345.0;
 
@@ -61,10 +63,17 @@ Outcome run(Dist d, const std::vector<double>& y, const std::vector<double>& mu,
   ctx.variant = static_cast<uint8_t>(variant);
   ctx.scratch = o.scratch.data();
   try {
-    if (d == Dist::normal)
-      stanli::dens::normal_lpdf_fwd_gen(ctx);
-    else
-      stanli::dens::cauchy_lpdf_fwd_gen(ctx);
+    switch (d) {
+      case Dist::normal:
+        stanli::dens::normal_lpdf_fwd_gen(ctx);
+        break;
+      case Dist::cauchy:
+        stanli::dens::cauchy_lpdf_fwd_gen(ctx);
+        break;
+      case Dist::lognormal:
+        stanli::dens::lognormal_lpdf_fwd_gen(ctx);
+        break;
+    }
   } catch (const std::exception& e) {
     o.threw = true;
     o.message = e.what();
@@ -88,8 +97,9 @@ double ulp_distance(double a, double b) {
 }
 
 int failures = 0;
-double worst_by_mask[2][8];
+double worst_by_mask[kDists][8];
 double worst_overall = 0;
+const double kMaxUlp[kDists] = {2, 2, 0};
 
 void compare(const char* name, Dist d, unsigned mask, unsigned variant,
              const Outcome& stan, const Outcome& fused,
@@ -119,26 +129,37 @@ void compare(const char* name, Dist d, unsigned mask, unsigned variant,
     worst = std::max(worst, ulp_distance(stan.out[i], fused.out[i]));
   for (size_t i = 0; i < stan.scratch.size(); ++i)
     worst = std::max(worst, ulp_distance(stan.scratch[i], fused.scratch[i]));
-  double& slot = worst_by_mask[d == Dist::normal ? 0 : 1][mask];
+  double& slot = worst_by_mask[static_cast<int>(d)][mask];
   slot = std::max(slot, worst);
   worst_overall = std::max(worst_overall, worst);
-  if (worst > 2) {
-    report("more than 2 ULP");
+  const double limit = kMaxUlp[static_cast<int>(d)];
+  if (worst > limit) {
+    report("more ULP than allowed");
     if (failures <= 3) {
       for (size_t i = 0; i < stan.out.size(); ++i)
         std::printf("  out[%zu] stan %.17g fused %.17g\n", i, stan.out[i],
                     fused.out[i]);
       for (size_t i = 0; i < stan.scratch.size(); ++i)
-        if (ulp_distance(stan.scratch[i], fused.scratch[i]) > 2)
+        if (ulp_distance(stan.scratch[i], fused.scratch[i]) > limit)
           std::printf("  scratch[%zu] stan %.17g fused %.17g\n", i,
                       stan.scratch[i], fused.scratch[i]);
     }
   }
 }
 
-double draw(std::mt19937_64& rng, bool positive) {
+enum class Kind { real, positive, unit, nonneg };
+
+double draw(std::mt19937_64& rng, Kind kind) {
   std::normal_distribution<double> nd(0, 2);
   std::uniform_real_distribution<double> u(0, 1);
+  if (kind == Kind::unit) {
+    const double r = u(rng);
+    if (r < 0.05) return 1e-300;
+    if (r < 0.10) return 1.0 - 1e-16;
+    if (r < 0.15) return 1e-8;
+    if (r < 0.20) return 0.5;
+    return u(rng) * 0.998 + 0.001;
+  }
   const double r = u(rng);
   double v;
   if (r < 0.04)
@@ -151,21 +172,56 @@ double draw(std::mt19937_64& rng, bool positive) {
     v = 3e7;
   else
     v = nd(rng);
-  if (positive) return std::abs(v) + (v == 0 ? 1.0 : 0.0);
+  if (kind == Kind::positive || kind == Kind::nonneg)
+    return std::abs(v) + (v == 0 ? 1.0 : 0.0);
   return (u(rng) < 0.5) ? v : -v;
 }
+
+constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+constexpr double kInf = std::numeric_limits<double>::infinity();
+
+struct Spec {
+  const char* name;
+  Dist dist;
+  Kind kind[3];
+  std::vector<double> bad[3];
+  std::vector<double> edge[3];
+  bool equal_y_mu;
+};
+
+const Spec kSpecs[] = {
+    {"normal_lpdf",
+     Dist::normal,
+     {Kind::real, Kind::real, Kind::positive},
+     {{kNaN}, {kInf, kNaN}, {0.0, -1.5, kNaN, kInf}},
+     {{}, {}, {}},
+     true},
+    {"cauchy_lpdf",
+     Dist::cauchy,
+     {Kind::real, Kind::real, Kind::positive},
+     {{kNaN}, {kInf, kNaN}, {0.0, -1.5, kNaN, kInf}},
+     {{}, {}, {}},
+     true},
+    {"lognormal_lpdf",
+     Dist::lognormal,
+     {Kind::nonneg, Kind::real, Kind::positive},
+     {{kNaN, -1.5, -1e-300, -kInf},
+      {kInf, kNaN, -kInf},
+      {0.0, -1.5, kNaN, kInf}},
+     {{0.0, -0.0, 1.0, kInf, 1e-300}, {}, {}},
+     false},
+};
 
 }  // namespace
 
 int main() {
   std::mt19937_64 rng(20251004);
   std::uniform_real_distribution<double> u(0, 1);
-  const int sizes[] = {1, 2, 3, 5, 8, 17, 64, 600, 1000};
-  const char* names[] = {"normal_lpdf", "cauchy_lpdf"};
+  const int sizes[] = {1, 2, 3, 5, 8, 17, 64, 128, 129, 600, 1000};
   long cases = 0, rejected = 0;
 
-  for (int di = 0; di < 2; ++di) {
-    const Dist d = di == 0 ? Dist::normal : Dist::cauchy;
+  for (const Spec& spec : kSpecs) {
+    const Dist d = spec.dist;
     for (unsigned mask = 0; mask < 8; ++mask) {
       for (int propto = 0; propto < 2; ++propto) {
         for (int shape = 0; shape < 8; ++shape) {
@@ -173,31 +229,26 @@ int main() {
             for (int rep = 0; rep < 12; ++rep) {
               g_offset = rep & 1;
               for (int elt = 0; elt < 2; ++elt) {
-                const bool yv = shape & 1, mv = shape & 2, sv = shape & 4;
+                const bool vec[3] = {(shape & 1) != 0, (shape & 2) != 0,
+                                     (shape & 4) != 0};
                 const size_t N = static_cast<size_t>(n);
-                if ((yv || mv || sv) == false && N != 1) continue;
-                if (n == 1 && (yv || mv || sv)) continue;
-                std::vector<double> y(yv ? N : 1), mu(mv ? N : 1),
-                    sigma(sv ? N : 1);
-                for (auto& x : y) x = draw(rng, false);
-                for (auto& x : mu) x = draw(rng, false);
-                for (auto& x : sigma) x = draw(rng, true);
-                if (u(rng) < 0.15) y[0] = mu[0];
-                const double bad = u(rng);
-                if (bad < 0.04)
-                  y[0] = std::numeric_limits<double>::quiet_NaN();
-                else if (bad < 0.07)
-                  mu[0] = std::numeric_limits<double>::infinity();
-                else if (bad < 0.10)
-                  mu[0] = std::numeric_limits<double>::quiet_NaN();
-                else if (bad < 0.13)
-                  sigma[0] = 0.0;
-                else if (bad < 0.16)
-                  sigma[0] = -1.5;
-                else if (bad < 0.19)
-                  sigma[0] = std::numeric_limits<double>::quiet_NaN();
-                else if (bad < 0.21)
-                  sigma[0] = std::numeric_limits<double>::infinity();
+                if (!(vec[0] || vec[1] || vec[2]) && N != 1) continue;
+                if (n == 1 && (vec[0] || vec[1] || vec[2])) continue;
+                std::vector<double> args[3];
+                for (int k = 0; k < 3; ++k) {
+                  args[k].resize(vec[k] ? N : 1);
+                  for (auto& x : args[k]) x = draw(rng, spec.kind[k]);
+                  for (const auto& e : spec.edge[k])
+                    if (u(rng) < 0.04)
+                      args[k][static_cast<size_t>(u(rng) * args[k].size())] = e;
+                }
+                if (spec.equal_y_mu && u(rng) < 0.15) args[0][0] = args[1][0];
+                if (u(rng) < 0.21) {
+                  const int k = static_cast<int>(u(rng) * 3) % 3;
+                  const auto& b = spec.bad[k];
+                  args[k][static_cast<size_t>(u(rng) * args[k].size())] =
+                      b[static_cast<size_t>(u(rng) * b.size()) % b.size()];
+                }
                 unsigned variant = mask | (propto ? 0x80u : 0u);
                 int64_t n_out = 1;
                 if (elt) {
@@ -205,11 +256,14 @@ int main() {
                   variant |= 0x40u;
                   n_out = static_cast<int64_t>(N);
                 }
-                const Outcome s = run(d, y, mu, sigma, variant, n_out, false);
-                const Outcome f = run(d, y, mu, sigma, variant, n_out, true);
+                const Outcome s =
+                    run(d, args[0], args[1], args[2], variant, n_out, false);
+                const Outcome f =
+                    run(d, args[0], args[1], args[2], variant, n_out, true);
                 ++cases;
                 if (s.threw) ++rejected;
-                compare(names[di], d, mask, variant, s, f, y, mu, sigma);
+                compare(spec.name, d, mask, variant, s, f, args[0], args[1],
+                        args[2]);
               }
             }
           }
@@ -225,14 +279,15 @@ int main() {
         const Outcome f = run(d, y, mu, sigma, variant, 1, true);
         ++cases;
         if (s.threw) ++rejected;
-        compare(names[di], d, variant & 7u, variant, s, f, y, mu, sigma);
+        compare(spec.name, d, variant & 7u, variant, s, f, y, mu, sigma);
       }
     }
   }
 
-  for (int di = 0; di < 2; ++di) {
-    std::printf("%s max ULP by mask:", names[di]);
-    for (unsigned m = 0; m < 8; ++m) std::printf(" %g", worst_by_mask[di][m]);
+  for (const Spec& spec : kSpecs) {
+    std::printf("%s max ULP by mask:", spec.name);
+    for (unsigned m = 0; m < 8; ++m)
+      std::printf(" %g", worst_by_mask[static_cast<int>(spec.dist)][m]);
     std::printf("\n");
   }
   std::printf("%ld cases, %ld rejected, max ULP %g\n", cases, rejected,
@@ -240,20 +295,24 @@ int main() {
 
   stanli::dens::set_fused_density(true);
   {
-    std::vector<double> y{0.5, -1.0, 2.0}, mu{0.25}, sigma{1.5};
-    const size_t before = stanli::dens::fused_density_calls();
-    run(Dist::normal, y, mu, sigma, 0x87, 1, true);
-    run(Dist::cauchy, y, mu, sigma, 0x87, 1, true);
-    if (stanli::dens::fused_density_calls() != before + 2) {
-      ++failures;
-      std::printf("FAIL fused path not taken\n");
-    }
-    stanli::dens::set_fused_density(false);
-    const size_t mid = stanli::dens::fused_density_calls();
-    run(Dist::normal, y, mu, sigma, 0x87, 1, false);
-    if (stanli::dens::fused_density_calls() != mid) {
-      ++failures;
-      std::printf("FAIL oracle switch does not select the Stan Math path\n");
+    std::vector<double> y{0.5, 0.25, 0.75}, mu{0.25}, sigma{1.5};
+    for (const Spec& spec : kSpecs) {
+      const size_t before = stanli::dens::fused_density_calls();
+      run(spec.dist, y, mu, sigma, 0x87, 1, true);
+      if (stanli::dens::fused_density_calls() != before + 1) {
+        ++failures;
+        std::printf("FAIL %s: fused path not taken\n", spec.name);
+      }
+      stanli::dens::set_fused_density(false);
+      const size_t mid = stanli::dens::fused_density_calls();
+      run(spec.dist, y, mu, sigma, 0x87, 1, false);
+      if (stanli::dens::fused_density_calls() != mid) {
+        ++failures;
+        std::printf(
+            "FAIL %s: oracle switch does not select the Stan Math path\n",
+            spec.name);
+      }
+      stanli::dens::set_fused_density(true);
     }
   }
 

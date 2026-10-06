@@ -87,6 +87,22 @@ bool all_positive_finite(const T& x) {
 }
 
 template <typename T>
+bool all_nonnegative(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return x >= 0;
+  else
+    return (x >= 0.0).all();
+}
+
+template <typename T>
+bool any_zero(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return x == 0;
+  else
+    return (x == 0.0).any();
+}
+
+template <typename T>
 auto inv_of(const T& x) {
   if constexpr (is_scalar_v<T>)
     return 1.0 / x;
@@ -133,6 +149,19 @@ void finish(const Out& o, double logp, unsigned mask) {
     return;
   }
   *o.value = logp;
+  *o.connected = 1.0;
+}
+
+void log_zero_result(const Out& o, unsigned mask) {
+  if (mask == 0) {
+    zero_result(o);
+    *o.value = stan::math::LOG_ZERO;
+    return;
+  }
+  for (int k = 0; k < 3; ++k)
+    if (((mask >> k) & 1u) != 0)
+      std::fill_n(o.buf[k], static_cast<std::size_t>(o.len[k]), 0.0);
+  *o.value = stan::math::LOG_ZERO;
   *o.connected = 1.0;
 }
 
@@ -270,6 +299,75 @@ void cauchy_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
   finish(o, logp, mask);
 }
 
+template <typename E>
+auto materialize(const E& e, double* buf, Eigen::Index n) {
+  if constexpr (is_scalar_v<E>) {
+    return e;
+  } else {
+    Eigen::Map<Eigen::ArrayXd, Eigen::Aligned64> a(buf, n);
+    a = e;
+    return a;
+  }
+}
+
+template <typename E, typename F>
+void with_ref(bool materialized, const E& e, double* buf, Eigen::Index n,
+              F&& f) {
+  if (materialized)
+    f(materialize(e, buf, n));
+  else
+    f(e);
+}
+
+template <typename Y, typename M, typename S>
+void lognormal_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
+                      bool propto, const Out& o, double* work,
+                      Eigen::Index stride) {
+  static constexpr const char* function = "lognormal_lpdf";
+  check_sizes(function, y, mu, sigma);
+  if (!all_nonnegative(y) || !all_finite(mu) || !all_positive_finite(sigma)) {
+    stan::math::check_nonnegative(function, "Random variable", y);
+    stan::math::check_finite(function, "Location parameter", mu);
+    stan::math::check_positive_finite(function, "Scale parameter", sigma);
+  }
+  if (size_zero_any(y, mu, sigma) || (propto && mask == 0)) {
+    zero_result(o);
+    return;
+  }
+  const bool ya = (mask & 1u) != 0, ma = (mask & 2u) != 0,
+             sa = (mask & 4u) != 0;
+  if (any_zero(y)) {
+    log_zero_result(o, mask);
+    return;
+  }
+  const std::size_t N = max_size_of(y, mu, sigma);
+  const Eigen::Index n = static_cast<Eigen::Index>(N);
+  const auto inv_sigma = inv_of(sigma);
+  const auto inv_sigma_sq = square_of(inv_sigma);
+  with_ref(!propto || ya, log_of(y), work, n, [&](const auto& log_y) {
+    const auto logy_m_mu = materialize(log_y - mu, work + stride, n);
+    double logp = N * stan::math::NEG_LOG_SQRT_TWO_PI -
+                  0.5 * stan::math::sum(square_of(logy_m_mu) * inv_sigma_sq);
+    if (!propto || sa)
+      logp -= stan::math::sum(log_of(sigma)) * N / size_of(sigma);
+    if (!propto || ya) logp -= stan::math::sum(log_y) * N / size_of(y);
+    if (mask != 0) {
+      const int active =
+          static_cast<int>(ya) + static_cast<int>(ma) + static_cast<int>(sa);
+      with_ref(active >= 2, logy_m_mu * inv_sigma_sq, work + 2 * stride, n,
+               [&](const auto& logy_m_mu_div_sigma) {
+                 if (ya)
+                   put<Y>(o.buf[0], o.len[0], -(1 + logy_m_mu_div_sigma) / y);
+                 if (ma) put<M>(o.buf[1], o.len[1], logy_m_mu_div_sigma);
+                 if (sa)
+                   put<S>(o.buf[2], o.len[2],
+                          (logy_m_mu_div_sigma * logy_m_mu - 1) * inv_sigma);
+               });
+    }
+    finish(o, logp, mask);
+  });
+}
+
 struct OrderedOut {
   double* lambda_buf;
   int64_t lambda_len;
@@ -353,17 +451,6 @@ void zero_result4(const Out4& o) {
   for (int k = 0; k < 4; ++k)
     std::fill_n(o.buf[k], static_cast<std::size_t>(o.len[k]), 0.0);
   *o.connected = 0.0;
-}
-
-template <typename E>
-auto materialize(const E& e, double* buf, Eigen::Index n) {
-  if constexpr (is_scalar_v<E>) {
-    return e;
-  } else {
-    Eigen::Map<Eigen::ArrayXd, Eigen::Aligned64> a(buf, n);
-    a = e;
-    return a;
-  }
 }
 
 template <typename Y, typename N, typename M, typename S>
@@ -557,6 +644,33 @@ struct CauchyOp {
   }
 };
 
+template <int Arrays, typename F>
+void with_work(std::size_t n, F&& f) {
+  constexpr Eigen::Index kStack = 128;
+  const Eigen::Index stride =
+      (static_cast<Eigen::Index>(n) + 7) & ~Eigen::Index{7};
+  if (n <= static_cast<std::size_t>(kStack)) {
+    alignas(64) double work[Arrays * kStack];
+    f(work, stride);
+  } else {
+    std::vector<double> heap(static_cast<std::size_t>(Arrays * stride + 8));
+    double* work = heap.data();
+    while (reinterpret_cast<std::uintptr_t>(work) % 64 != 0) ++work;
+    f(work, stride);
+  }
+}
+
+struct LognormalOp {
+  template <typename Y, typename M, typename S>
+  static void run(const Y& y, const M& mu, const S& sigma, unsigned mask,
+                  bool propto, const Out& o) {
+    with_work<3>(
+        max_size_of(y, mu, sigma), [&](double* work, Eigen::Index stride) {
+          lognormal_summed(y, mu, sigma, mask, propto, o, work, stride);
+        });
+  }
+};
+
 template <typename Op>
 void fused_lpdf(KernelCtx& ctx) {
   ++g_calls;
@@ -710,6 +824,7 @@ void ordered_logistic_lpmf_fused(KernelCtx& ctx) {
 void normal_lpdf_fused(KernelCtx& ctx) { fused_lpdf<NormalOp>(ctx); }
 void cauchy_lpdf_fused(KernelCtx& ctx) { fused_lpdf<CauchyOp>(ctx); }
 void student_t_lpdf_fused(KernelCtx& ctx) { student_t_lpdf_run(ctx); }
+void lognormal_lpdf_fused(KernelCtx& ctx) { fused_lpdf<LognormalOp>(ctx); }
 
 }  // namespace dens
 }  // namespace stanli
