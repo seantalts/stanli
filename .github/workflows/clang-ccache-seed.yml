@@ -240,6 +240,7 @@ jobs:
           export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
           ccache -z
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
+            -DSTANLI_STAN_DENSITY_ORACLE=OFF \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \

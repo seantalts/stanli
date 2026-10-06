@@ -163,6 +163,19 @@ if(STANLI_LITE_LP)
   target_compile_definitions(stanmath INTERFACE STANLI_LITE_LP=1)
 endif()
 
+# normal, cauchy, student_t and ordered_logistic (shared cutpoints) have fused
+# kernels (runtime/kernels/density_fused.cpp). With this option ON the Stan
+# Math instantiations they replace stay compiled, which is what
+# STANLI_NO_FUSED_DENSITY=1 and the differential tests compare against. OFF
+# drops them: 3.4 MB smaller. Release and packaging builds pass OFF. It
+# defaults ON so that a plain developer build runs the whole ctest suite.
+option(STANLI_STAN_DENSITY_ORACLE
+  "Keep Stan Math's own kernels for the fused densities (oracle and differential tests)"
+  ON)
+if(NOT STANLI_STAN_DENSITY_ORACLE)
+  target_compile_definitions(stanmath INTERFACE STANLI_FUSED_ONLY=1)
+endif()
+
 # Chains in threads. stan-math's autodiff stack is a plain static unless
 # STAN_THREADS is defined, in which case it is thread_local (__thread on
 # gcc/clang). The legacy kernels and tape islands build NESTED var tapes
@@ -206,6 +219,7 @@ if(EMSCRIPTEN)
   # times summed/elementwise: 21 MB of object at -O3. The browser build
   # trades their straight-line speed for size.
   set_source_files_properties(
+    runtime/kernels/density_fused.cpp
     runtime/kernels/densities_common.cpp
     runtime/kernels/densities_common_b.cpp
     runtime/kernels/densities_lpmf.cpp
@@ -298,6 +312,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/executor.cpp
   runtime/kernels/elementwise.cpp
   runtime/kernels/densities.cpp
+  runtime/kernels/density_fused.cpp
   runtime/kernels/densities_common.cpp
   runtime/kernels/densities_lpmf.cpp
   runtime/kernels/densities_glm.cpp
@@ -984,6 +999,9 @@ add_executable(bench_mir_decode tools/bench_mir_decode.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(bench_mir_decode PRIVATE stanli)
 add_dependencies(bench_mir_decode stanli_mir_fixtures)
+add_executable(op_census tools/op_census.cpp
+  $<TARGET_OBJECTS:stanli_tbb_stub>)
+target_link_libraries(op_census PRIVATE stanli)
 add_test(NAME test_prep_only
          COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
                  tests/fixtures/ar1.json --prep
@@ -1331,6 +1349,10 @@ set(STANLI_TESTS
   test_reduce_sum
   test_structured_arrays test_pathfinder test_unconstrain
   test_init_interp test_constrain_structured)
+if(STANLI_STAN_DENSITY_ORACLE)
+  list(APPEND STANLI_TESTS
+    test_density_fused test_ordered_logistic_fused test_student_t_fused)
+endif()
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()

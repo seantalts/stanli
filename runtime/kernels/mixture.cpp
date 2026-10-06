@@ -148,6 +148,18 @@ void mix_bwd(KernelCtx& ctx) {
   }
 }
 
+template <int NArgs>
+bool mix_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
+  if (ctx.out.len != 1) return false;
+  for (int k = 0; k < NArgs; ++k)
+    if (ctx.in_adj[k].data && ctx.in_adj[k].len != 1) return false;
+  for (int k = 0; k < NArgs; ++k)
+    if (ctx.in_adj[k].data)
+      out.push_back(bwd_micro(kMicroScaled, ctx.in_adj[k].data,
+                              ctx.out_adj_vec.data, ctx.scratch + k));
+  return true;
+}
+
 void lse2_fwd(KernelCtx& ctx) {
   mix_fwd<2>(ctx, [](const double* a, double* p) {
     p[0] = stan::math::inv_logit(a[0] - a[1]);
@@ -200,10 +212,16 @@ void register_mixture_kernels() {
   register_kernel(OP_LOG_SUM_EXP_ROWS,
                   Kernel{lse_rows_fwd, lse_rows_bwd, lse_scratch});
   register_kernel(OP_SUM_ROWS, Kernel{sum_rows_fwd, sum_rows_bwd, nullptr});
-  register_kernel(OP_LSE2, Kernel{lse2_fwd, mix_bwd<2>, mix_scratch<2>});
-  register_kernel(OP_LOG_DIFF_EXP,
-                  Kernel{log_diff_exp_fwd, mix_bwd<2>, mix_scratch<2>});
-  register_kernel(OP_LOG_MIX, Kernel{log_mix_fwd, mix_bwd<3>, mix_scratch<3>});
+  register_kernel(
+      OP_LSE2, with_cached_micro(Kernel{lse2_fwd, mix_bwd<2>, mix_scratch<2>},
+                                 mix_micro<2>));
+  register_kernel(
+      OP_LOG_DIFF_EXP,
+      with_cached_micro(Kernel{log_diff_exp_fwd, mix_bwd<2>, mix_scratch<2>},
+                        mix_micro<2>));
+  register_kernel(OP_LOG_MIX, with_cached_micro(Kernel{log_mix_fwd, mix_bwd<3>,
+                                                       mix_scratch<3>},
+                                                mix_micro<3>));
 }
 
 }  // namespace stanli

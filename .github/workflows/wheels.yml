@@ -452,6 +452,7 @@ jobs:
             compiler_args+=("-DCMAKE_C_COMPILER=$CC" "-DCMAKE_CXX_COMPILER=$CXX")
           fi
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
+            -DSTANLI_STAN_DENSITY_ORACLE=OFF \
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -513,6 +514,32 @@ jobs:
           cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
           echo "runner: $cores cores, testing -j$cores"
           ctest --test-dir build-rel --parallel "$cores" --output-on-failure
+
+      # build-rel is the shipped configuration and has no Stan Math kernels for
+      # the fused densities. This builds the same sources with them kept, to
+      # run the differential tests and the STANLI_NO_FUSED_DENSITY oracle
+      # switch. One platform is enough: the comparison is of two kernels.
+      - name: Differential tests against Stan Math
+        if: matrix.plat == 'manylinux_2_28_x86_64'
+        run: |
+          export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
+          export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+          compiler_args=()
+          if [ -n "${CC:-}" ] && [ -n "${CXX:-}" ]; then
+            compiler_args+=("-DCMAKE_C_COMPILER=$CC" "-DCMAKE_CXX_COMPILER=$CXX")
+          fi
+          cmake -B build-oracle -DCMAKE_BUILD_TYPE=Release \
+            -DSTANLI_STAN_DENSITY_ORACLE=ON \
+            "${compiler_args[@]}" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DSTANLI_STANC_EMBED_OBJ="$PWD/deps/stanc3/stanc_embed.o" \
+            -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
+          cmake --build build-oracle -j ${{ matrix.build_jobs }} \
+            --target test_density_fused test_ordered_logistic_fused \
+                     test_student_t_fused
+          ctest --test-dir build-oracle --output-on-failure \
+            -R '^test_(density|ordered_logistic|student_t)_fused$'
 
       # The models and data the corpus check reads: ~24 MB out of
       # posteriordb's 2 GB, via sparse checkout, cached on the pinned SHA.
@@ -1473,6 +1500,7 @@ jobs:
           export CCACHE_DIR="$PWD/.ccache" CCACHE_COMPRESS=1 CCACHE_MAXSIZE=600M
           ccache -z
           cmake -B build-rel -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DSTANLI_STAN_DENSITY_ORACLE=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-rel -j4
@@ -1850,6 +1878,7 @@ jobs:
           export CCACHE_BASEDIR="$(dirname "$RUNNER_TEMP")"
           ccache -z
           emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release \
+            -DSTANLI_STAN_DENSITY_ORACLE=OFF \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-wasm -j4
@@ -1930,6 +1959,7 @@ jobs:
           export CCACHE_BASEDIR="$(dirname "$RUNNER_TEMP")"
           ccache -z
           emcmake cmake -B build-wasm-side -DCMAKE_BUILD_TYPE=Release \
+            -DSTANLI_STAN_DENSITY_ORACLE=OFF \
             -DSTANLI_WASM_SIDE=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache

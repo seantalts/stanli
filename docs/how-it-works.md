@@ -226,9 +226,13 @@ Several kernel paths sit behind this interface. Analytic kernels operate
 directly on double buffers, and many save the values needed by the reverse
 pass in fixed scratch. Generic probability kernels use a small recording
 scalar so the existing Stan Math template computes its usual partial
-derivatives; for a vector input that depends on parameters, this path
-currently creates a temporary Eigen array of partials before copying it to
-scratch, while specialized hot kernels avoid that temporary. See
+derivatives. The partials of a vector input are written straight into
+scratch and vector arguments are read in place, but the Stan Math code still
+allocates its own Eigen temporaries. `normal_lpdf`, `cauchy_lpdf`,
+`student_t_lpdf` and `ordered_logistic_lpmf` (shared cutpoints) have fused
+kernels that allocate none
+([`runtime/kernels/density_fused.cpp`](../runtime/kernels/density_fused.cpp)).
+See
 [`runtime/include/stanli/recorder.hpp`](../runtime/include/stanli/recorder.hpp).
 
 Functions without an analytic or recorder path build a nested Stan Math tape
