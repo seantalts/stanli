@@ -1,0 +1,34 @@
+350 models timed
+
+v3_speedup: median 1.037x  q1 0.993  q3 1.115  geomean 1.070  min 0.701  max 2.225
+  worst 10: ch12_m12_4 0.70, i319_gauss_re 0.74, s2_index_mi 0.77, sw_me 0.79, i319_pois_re 0.82, ch14_m14_6 0.84, ch14_m14_8nc 0.84, ch14_m14_8 0.85, ch14_m14_6x 0.85, ch15_m15_7 0.85
+  best 10:  nn_rbm1bJ100 2.22, wells_dist100_model 2.07, wells_interaction_c_model 2.07, wells_interaction_model 2.07, wells_dae_model 2.06, wells_dist100ars_model 2.05, nes_logit_model 2.05, wells_dae_c_model 2.03, wells_daae_c_model 2.01, wells_dae_inter_model 1.99
+  brms         n=123 median 1.018
+  cogmod       n= 22 median 1.046
+  ctsem        n=  1 median 0.921
+  educational  n= 13 median 1.013
+  posteriordb  n=118 median 1.100
+  rethinking   n= 62 median 1.011
+  stanc3       n= 11 median 1.003
+
+v3nofma_speedup: median 1.031x  q1 0.987  q3 1.112  geomean 1.060  min 0.722  max 2.118
+  worst 10: ch12_m12_4 0.72, i319_gauss_re 0.74, s2_index_mi 0.77, ch14_m14_8nc 0.81, sw_me 0.81, i319_pois_re 0.82, ch14_m14_8 0.83, ch14_m14_6 0.84, ch15_m15_7 0.85, i319_pois_re2 0.85
+  best 10:  nn_rbm1bJ100 2.12, wells_interaction_model 1.89, wells_interaction_c_model 1.88, wells_dae_model 1.88, wells_dist100ars_model 1.85, wells_dist100_model 1.85, wells_dae_c_model 1.83, nes_logit_model 1.83, wells_daae_c_model 1.82, wells_dae_inter_model 1.82
+  brms         n=123 median 1.015
+  cogmod       n= 22 median 1.048
+  ctsem        n=  1 median 0.929
+  educational  n= 13 median 1.000
+  posteriordb  n=118 median 1.095
+  rethinking   n= 62 median 1.014
+  stanc3       n= 11 median 0.973
+
+control_speedup: median 1.000x  q1 0.997  q3 1.004  geomean 1.000  min 0.951  max 1.077
+  worst 10: s2_car_esicar 0.95, sw_ar 0.96, ch12_m12_6 0.97, cm_rdm 0.98, ch13_m13_5 0.98, ch15_m15_2 0.98, gp_pois_regr 0.98, sw_mv_rescor 0.99, ch13_m13_4nc 0.99, ch14_m14_6 0.99
+  best 10:  ch16_m16_1 1.08, eight_schools_noncentered 1.04, s2_cumulative_cloglog 1.03, s2_categorical_re 1.03, sw_re_bern 1.03, sw_acat 1.02, aalto_grp_aov 1.02, sw_gaussian 1.02, nes 1.02, 2pl_latent_reg_irt 1.02
+  brms         n=123 median 1.000
+  cogmod       n= 22 median 1.000
+  ctsem        n=  1 median 0.993
+  educational  n= 13 median 1.002
+  posteriordb  n=118 median 1.000
+  rethinking   n= 62 median 0.999
+  stanc3       n= 11 median 0.999
