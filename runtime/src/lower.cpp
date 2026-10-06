@@ -998,6 +998,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
              static_cast<int64_t>(mir_text.size()));
   Lowering lo(data, prep, dumper, "log_prob", WaRng(seed));
   lo.compile_options = options;
+  if (std::getenv("STANLI_TMP_FAST_LOWERING"))
+    lo.compile_options.fast_math = true;
   auto specialized = try_bounded_specialization(lo, *prog);
   CompiledModel cm = specialized ? std::move(*specialized) : lo.run(*prog);
   if (!prog->generate_quantities.empty()) {
