@@ -185,6 +185,7 @@ if [ "$WANT_BUILD" = 1 ]; then
     ${EMBED_FLAGS[@]+"${EMBED_FLAGS[@]}"}
   cmake --build build --parallel "$BUILD_JOBS"
   cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
+    -DSTANLI_STAN_DENSITY_ORACLE=OFF \
     "${CMAKE_FLAGS[@]}" \
     ${EMBED_FLAGS[@]+"${EMBED_FLAGS[@]}"}
   cmake --build build-rel --parallel "$BUILD_JOBS" \

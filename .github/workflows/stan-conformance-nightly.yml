@@ -82,6 +82,7 @@ jobs:
       - name: Build the public stanli Python runtime
         run: |
           cmake -B build-rel -DCMAKE_BUILD_TYPE=Release \
+            -DSTANLI_STAN_DENSITY_ORACLE=OFF \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
             -DSTANLI_STANC_EXECUTABLE="$PWD/deps/stanc3/stanc-pinned"
           cmake --build build-rel --target stanli_shared -j2

@@ -545,6 +545,26 @@ as skipped. Minimum counts are enforced for each execution path and output
 mode, preventing a broad regression from appearing only as additional skips.
 The exact current thresholds are kept beside the test.
 
+`normal_lpdf`, `cauchy_lpdf`, `student_t_lpdf` and `ordered_logistic_lpmf`
+(shared cutpoints) run through fused kernels in
+[`runtime/kernels/density_fused.cpp`](runtime/kernels/density_fused.cpp).
+The shipped configuration compiles out the Stan Math path they replace
+(`-DSTANLI_STAN_DENSITY_ORACLE=OFF`; wheels, the browser build, the CLI and
+the runtime tarballs), so the corpus replay and the installed-artifact checks
+run on the fused kernels. A build with the option ON, which is the default
+for a plain developer build, keeps Stan Math's kernels:
+`STANLI_NO_FUSED_DENSITY=1` selects them, and
+[`tests/test_density_fused.cpp`](tests/test_density_fused.cpp),
+[`tests/test_student_t_fused.cpp`](tests/test_student_t_fused.cpp) and
+[`tests/test_ordered_logistic_fused.cpp`](tests/test_ordered_logistic_fused.cpp)
+compare the two paths over every activity mask, propto setting, scalar or
+vector shape, edge values and rejection messages, and require bitwise equal
+results. These tests exist only in the ON configuration. CI builds that
+configuration once, in the Linux x86-64 wheel job ("Differential tests
+against Stan Math"), and sanitizer builds use the default. In a build with the
+option OFF, `STANLI_NO_FUSED_DENSITY=1` prints a notice at load and is
+otherwise ignored.
+
 Generated adjoints have a separate comparison. `gen_adjoint`
 ([`runtime/src/adjoint.cpp`](runtime/src/adjoint.cpp)) generates an
 island's backward as a second instruction list at load time;

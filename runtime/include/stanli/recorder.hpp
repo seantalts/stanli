@@ -81,12 +81,53 @@ inline auto value_of(const T& values) {
   return values.unaryExpr([](const rvar& value) { return value.val(); });
 }
 
+inline Eigen::Map<const Eigen::Array<double, -1, 1>> value_of(
+    Eigen::ArrayWrapper<Eigen::Map<const Eigen::Matrix<rvar, -1, 1>>> values) {
+  return Eigen::Map<const Eigen::Array<double, -1, 1>>(
+      reinterpret_cast<const double*>(values.nestedExpression().data()),
+      values.size());
+}
+
+inline Eigen::Map<const Eigen::Array<double, -1, 1>> value_of(
+    Eigen::ArrayWrapper<const Eigen::Map<const Eigen::Matrix<rvar, -1, 1>>>
+        values) {
+  return Eigen::Map<const Eigen::Array<double, -1, 1>>(
+      reinterpret_cast<const double*>(values.nestedExpression().data()),
+      values.size());
+}
+
 // The same promotion for a matrix operand (a GLM's parameter-dependent
 // design matrix). Column-major, like every kernel matrix map.
 inline Eigen::Map<const Eigen::Matrix<rvar, -1, -1>> as_rvar_matrix(
     const Desc& d, int64_t rows, int64_t cols) {
   return Eigen::Map<const Eigen::Matrix<rvar, -1, -1>>(
       reinterpret_cast<const rvar*>(d.data), rows, cols);
+}
+
+inline Eigen::Map<const Eigen::Matrix<double, -1, 1>> value_of(
+    Eigen::Map<const Eigen::Matrix<rvar, -1, 1>> values) {
+  return Eigen::Map<const Eigen::Matrix<double, -1, 1>>(
+      reinterpret_cast<const double*>(values.data()), values.size());
+}
+
+inline Eigen::Map<const Eigen::Matrix<double, -1, 1>> value_of_rec(
+    Eigen::Map<const Eigen::Matrix<rvar, -1, 1>> values) {
+  return Eigen::Map<const Eigen::Matrix<double, -1, 1>>(
+      reinterpret_cast<const double*>(values.data()), values.size());
+}
+
+inline Eigen::Map<const Eigen::Matrix<double, -1, -1>> value_of(
+    Eigen::Map<const Eigen::Matrix<rvar, -1, -1>> values) {
+  return Eigen::Map<const Eigen::Matrix<double, -1, -1>>(
+      reinterpret_cast<const double*>(values.data()), values.rows(),
+      values.cols());
+}
+
+inline Eigen::Map<const Eigen::Matrix<double, -1, -1>> value_of_rec(
+    Eigen::Map<const Eigen::Matrix<rvar, -1, -1>> values) {
+  return Eigen::Map<const Eigen::Matrix<double, -1, -1>>(
+      reinterpret_cast<const double*>(values.data()), values.rows(),
+      values.cols());
 }
 
 // Where build() deposits partials: one buffer per propagator edge, in

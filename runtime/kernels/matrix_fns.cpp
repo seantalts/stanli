@@ -7,6 +7,8 @@
 //
 // Matrices live in slots column-major, matching Eigen and the rest of the
 // pipeline, so a flat slot maps straight onto Map<MatrixXd>.
+#include "density_fused.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/density_registry.hpp>
 #include <stanli/recorder.hpp>
@@ -1468,22 +1470,29 @@ void ologistic_fwd(KernelCtx& ctx) {
     ctx.out.data[0] = ordered_eval<false, kOrderedLogistic>(ctx);
     return;
   }
-  sink s = recorded_tail_sink<2>(ctx);
-  sink_scope active(s);
-  const std::vector<int> y(ctx.idata, ctx.idata + ctx.n_idata - 3);
-  const auto cuts = as_rvar(ctx.in[1]);
-  const auto call = [&](const auto& location) {
-    record_probability_call([&] {
-      return (ctx.variant & 0x80u)
-                 ? stan::math::ordered_logistic_lpmf<true>(y, location, cuts)
-                 : stan::math::ordered_logistic_lpmf<false>(y, location, cuts);
-    });
-  };
-  if (ctx.in[0].len == 1)
-    call(rvar(ctx.in[0].data[0]));
-  else
-    call(as_rvar(ctx.in[0]));
-  ctx.out.data[0] = s.value;
+  if (dens::fused_density_active()) {
+    dens::ordered_logistic_lpmf_fused(ctx);
+    return;
+  }
+  if constexpr (!dens::kFusedOnly) {
+    sink s = recorded_tail_sink<2>(ctx);
+    sink_scope active(s);
+    const std::vector<int> y(ctx.idata, ctx.idata + ctx.n_idata - 3);
+    const auto cuts = as_rvar(ctx.in[1]);
+    const auto call = [&](const auto& location) {
+      record_probability_call([&] {
+        return (ctx.variant & 0x80u)
+                   ? stan::math::ordered_logistic_lpmf<true>(y, location, cuts)
+                   : stan::math::ordered_logistic_lpmf<false>(y, location,
+                                                              cuts);
+      });
+    };
+    if (ctx.in[0].len == 1)
+      call(rvar(ctx.in[0].data[0]));
+    else
+      call(as_rvar(ctx.in[0]));
+    ctx.out.data[0] = s.value;
+  }
 }
 void ologistic_bwd(KernelCtx& ctx) {
   if (ctx.idata[ctx.n_idata - 1] >= 0) {
