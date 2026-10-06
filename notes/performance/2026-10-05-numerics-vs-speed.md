@@ -193,21 +193,27 @@ build's:
   intervals, R-hat, ESS per gradient) on the corpus models that have
   reference posteriors.
 
-### Decided
+### In fast mode
 
-- The first fast-mode item is AVX2 kernels (in progress on `fastmath/base`).
-- The second is stanc3 partial evaluation (decided 2026-10-05): it stays off
-  in the default build, which matches CmdStan's `-O0`, and turns on in fast
-  mode. Add it once the fast mode exists with the AVX2 work.
+- `fast_math` (C API `stanli_model_opts`, Python `Model(..., fast_math=True)`,
+  R `stanli_model(..., fast_math = TRUE)`, `--fast-math` on the CLI tools and
+  `harnesses/corpus_bench.py`) turns on, per model: stanc3 partial evaluation,
+  merging of active duplicates in CSE, and fusion over shared parameters in
+  reroll and partition. Default mode is unchanged.
+- The AVX2 dense-matrix kernels are still chosen per process by
+  `STANLI_FAST_MATH=1`, in builds with `-DSTANLI_AVX2_KERNELS=ON` only.
+- On the replay corpus, fast mode changes 107 of 352 models against default,
+  by at most 3.7e-13 scaled error (normal_mixture_k); 7 of the 124 gated brms
+  models exceed 10 ULP from CmdStan (s2_gev 480, sw_mono 418, sw_skewnormal
+  60, s2_hurdle_negbin 34, s2_car 16, sw_me 15, s2_discrete_weibull 14).
+  Fast mode is not held to those gates. It still needs the high-precision
+  reference check and its own corpus benchmark described above.
 
 ### Candidates
 
 | candidate | measured speedup | numerics change | where |
 | --- | --- | --- | --- |
-| Merge active duplicates in CSE | up to 5x (aalto_poisson_hurdle, M0_model, rethinking ch11-13); only if the exact shared-primal backward leaves a gap | seeds summed before the pullback; 5 brms fixtures 16-418 ULP from CmdStan | `X_NO_CSE_ACTIVE` in `diagnostic-toggles.patch` |
-| Fuse over shared parameters | about 2x on 6 models | different summation order; less accurate on discrete Weibull and hurdle negbin unless the reduction is pairwise or pre-summed per observation | `fusion-toggles.patch` |
 | Admit CSE survivors into islands | 1.12-1.23x on rethinking ch11/ch13/ch14 (ceiling probe); none on M0_model, ch12_m12_3 | an island adds each live-in adjoint as one local subtotal, regrouping sums (hmm_gaussian 1 ULP on 14 of 15 gradient entries); copies left outside need un-sharing (ctsem_ctsm, gpcm_latent_reg_irt, iohmm_reg, s2_car otherwise fail) | drop the survivor refusal at `runtime/src/island.cpp:192` (probe, 2026-10-05) |
-| stanc3 partial evaluation | 10-20% on about 25 models | `fma` contraction of linear predictors; 3 brms fixtures 16-53 ULP from CmdStan; accuracy-neutral against a 70-digit reference (better on s2_me2_nomecor, worse on s2_gev at its recorded points) | `partial_evaluation` in `compiler/ocaml/stanli_pipeline.ml` |
 | Data-class specialization | 1.03x on lnr_bench | gradient order across groups (up to 19 ULP); first-error observation changes | branch `feat/map-dataclass` |
 | x86-64-v3 runtime | median 1.04x, up to 2.2x; 36 models slower | 44 of 352 replay failures; CPU-dependent results | scratch branch `bench/avx2` |
 | AVX2 copies of the dense-matrix kernels only, chosen at run time | 1.77x on a cholesky GP (N=200); nothing on the others measured; +8.5 MB | 13 of 352 replay failures (10 new, gradients within 3.5 ULP of the largest entry except one ill-conditioned GP); CPU-dependent results | [2026-10-05-avx2-kernel-dispatch.md](2026-10-05-avx2-kernel-dispatch.md), `-DSTANLI_AVX2_KERNELS=ON`, `STANLI_FAST_MATH=1` |
