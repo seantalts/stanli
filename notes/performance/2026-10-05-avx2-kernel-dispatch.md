@@ -29,7 +29,7 @@ the CI run in the numerics-vs-speed note (EPYC 7763) agrees on the replay:
 | --- | ---: |
 | baseline | 3 (this toolchain; GP models) |
 | whole library `-march=x86-64-v3` | 44 (CI run: 44) |
-| AVX2 matrix kernels only | 14 |
+| AVX2 matrix kernels only | 13 (14 on an earlier main) |
 
 CI also found 36 of 350 models more than 5% slower with the whole-library v3
 build. Only the matrix kernels gain, so only they are built twice.
@@ -49,14 +49,16 @@ the session). With GCC 13 (spike build, not the in-tree one) gp was 1.77x too.
 `elementwise.cpp`; adding that file got 1.10x and cost 20 more replay
 failures, so it is not included.
 
-## The 11 new replay failures are not large errors
+## The 10 new replay failures are not large errors
 
-Fast mode fails 11 models that the baseline passes. For 10 of them the
-AVX2-versus-baseline gradient differs by at most 3.5 ULP of the largest
-gradient entry (mostly under 1 ULP); the 10-ULP gate trips because the gate is
+Fast mode fails 10 models that the baseline passes. The sensitivity analysis
+below was done on the 11 of an earlier main; `s2_hurdle_cumulative`, one of
+them, no longer fails on the current main (not investigated), and nothing new
+appeared. For 10 of those 11 the AVX2-versus-baseline gradient differs by at
+most 3.5 ULP of the largest gradient entry (mostly under 1 ULP); the 10-ULP gate trips because the gate is
 per coordinate and those models have near-zero coordinates (`sw_cumulative`
 coordinate 1 is 0.0070 beside entries near 125, a 2e-13 difference that counts
-as 244,480 ULP). The eleventh, `s2_gp_by_gr`, is ill-conditioned: the baseline
+as 244,480 ULP). The last, `s2_gp_by_gr`, is ill-conditioned: the baseline
 moves 8e-9 relative under a 4-ULP input perturbation and AVX2 differs by
 2.7e-9. No model with a well-conditioned gradient deviates by more than a few
 ULP of its largest entry. This is for the fast mode's own evidence; the
@@ -97,7 +99,8 @@ default gates are untouched.
   both binaries): identical, except `ch14_m14_10`, which is nondeterministic on
   main too (see below).
 - Replay with the AVX2 objects linked last: default 3 failures (same set as the
-  plain baseline), `STANLI_FAST_MATH=1` 14 failures (same set as the spike), no
+  plain baseline), `STANLI_FAST_MATH=1` 13 failures (the spike's 14 without
+  `s2_hurdle_cumulative`; nothing new), no
   crashes.
 - Shared library, default mode versus plain baseline on `cm_ddm`: bitwise equal.
 - `tests/test_isa_baseline.py`: 3 new tests for the map parsing and the split
@@ -115,7 +118,7 @@ default gates are untouched.
   it directly.
 - **GCC for the in-tree build.** The GCC result is from the spike build only.
 - **Fidelity policy.** Fast mode gives different results on AVX2 and non-AVX2
-  machines for the same seed, and 11 models would need documented exceptions
+  machines for the same seed, and 10 models would need documented exceptions
   to their 10-ULP gates, or fast mode a different gate (the plan in
   numerics-vs-speed already says high-precision reference with a scaled bound).
 - **Binary size.** Carrying both copies makes the shared library 63.1 MB

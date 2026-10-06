@@ -210,7 +210,7 @@ build's:
 | stanc3 partial evaluation | 10-20% on about 25 models | `fma` contraction of linear predictors; 3 brms fixtures 16-53 ULP from CmdStan; accuracy-neutral against a 70-digit reference (better on s2_me2_nomecor, worse on s2_gev at its recorded points) | `partial_evaluation` in `compiler/ocaml/stanli_pipeline.ml` |
 | Data-class specialization | 1.03x on lnr_bench | gradient order across groups (up to 19 ULP); first-error observation changes | branch `feat/map-dataclass` |
 | x86-64-v3 runtime | median 1.04x, up to 2.2x; 36 models slower | 44 of 352 replay failures; CPU-dependent results | scratch branch `bench/avx2` |
-| AVX2 copies of the dense-matrix kernels only, chosen at run time | 1.77x on a cholesky GP (N=200); nothing on the others measured; +8.5 MB | 14 of 352 replay failures (11 new, gradients within 3.5 ULP of the largest entry except one ill-conditioned GP); CPU-dependent results | [2026-10-05-avx2-kernel-dispatch.md](2026-10-05-avx2-kernel-dispatch.md), `-DSTANLI_AVX2_KERNELS=ON`, `STANLI_FAST_MATH=1` |
+| AVX2 copies of the dense-matrix kernels only, chosen at run time | 1.77x on a cholesky GP (N=200); nothing on the others measured; +8.5 MB | 13 of 352 replay failures (10 new, gradients within 3.5 ULP of the largest entry except one ill-conditioned GP); CPU-dependent results | [2026-10-05-avx2-kernel-dispatch.md](2026-10-05-avx2-kernel-dispatch.md), `-DSTANLI_AVX2_KERNELS=ON`, `STANLI_FAST_MATH=1` |
 
 ## Starting points for fast-mode work
 
