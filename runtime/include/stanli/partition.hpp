@@ -37,9 +37,13 @@ struct PartitionStats {
 // they have no consuming op, so a lane writing one cannot be proven dead.
 // Passing an incomplete list is a miscompile, so this is not defaulted.
 // STANLI_NO_PARTITION=1 disables the pass.
+//
+// `fuse_shared_params` (fast mode) fuses lanes that read one active scalar at
+// several positions, regrouping its adjoint contributions.
 PartitionStats partition_lanes(
     Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
-    std::vector<int>& target_terms, const std::vector<int>& extra_roots);
+    std::vector<int>& target_terms, const std::vector<int>& extra_roots,
+    bool fuse_shared_params = false);
 
 }  // namespace stanli
 

@@ -167,7 +167,8 @@ struct Glm {
 
 PartitionStats partition_lanes(Graph& g, Fills& fills,
                                std::vector<int>& target_terms,
-                               const std::vector<int>& extra_roots) {
+                               const std::vector<int>& extra_roots,
+                               bool fuse_shared_params) {
   PartitionStats st;
   if (std::getenv("STANLI_NO_PARTITION")) return st;
   const size_t n_ops = g.ops.size();
@@ -871,7 +872,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     // the same active scalar. Grouping all contributions by opcode can lose
     // many ULP even though every individual kernel is exact.
     std::unordered_set<int> shared_adjoints;
-    for (int p = 0; p < k && ok; ++p) {
+    for (int p = 0; p < k && ok && !fuse_shared_params; ++p) {
       const Op& op = op_at(p, 0);
       const bool hoisted = pos[(size_t)p].emit == Emit::kShared;
       std::unordered_set<int> in_op;

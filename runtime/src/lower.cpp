@@ -671,12 +671,13 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
   RerollStats rerolled;
   detail::RerollDispositionStats reroll_dispositions;
   if (prep.enabled()) {
-    detail::ProfiledRerollStats profiled =
-        detail::reroll_profiled(g, out.fills, target_terms, roots);
+    detail::ProfiledRerollStats profiled = detail::reroll_profiled(
+        g, out.fills, target_terms, roots, compile_options.fast_math);
     rerolled = profiled.work;
     reroll_dispositions = profiled.dispositions;
   } else {
-    rerolled = reroll(g, out.fills, target_terms, roots);  // STANLI_NO_REROLL
+    rerolled = reroll(g, out.fills, target_terms, roots,
+                      compile_options.fast_math);  // STANLI_NO_REROLL
   }
   trace("reroll", reroll_time, roots, PrepTrace::Extra::Reroll,
         rerolled.regions, rerolled.list_steps, false, 0,
@@ -699,8 +700,8 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     // already handles, and before CSE, which would merge ops shared
     // between lanes and leave the lanes no longer whole.
     const auto partition_time = prep.start();
-    const PartitionStats parted =
-        partition_lanes(g, out.fills, target_terms, roots);
+    const PartitionStats parted = partition_lanes(
+        g, out.fills, target_terms, roots, compile_options.fast_math);
     trace("partition", partition_time, roots, PrepTrace::Extra::Partition,
           parted.groups, parted.lanes, false, 0, parted.declined,
           parted.list_steps);
@@ -731,7 +732,8 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     // to still be there, and before islands, so they compile the smaller
     // residue.
     const auto cse_time = prep.start();
-    const CseStats cse_st = cse(g, out.fills, target_terms, roots);
+    const CseStats cse_st =
+        cse(g, out.fills, target_terms, roots, compile_options.fast_math);
     trace("cse", cse_time, roots, PrepTrace::Extra::Removed,
           cse_st.ops_removed);
   }
