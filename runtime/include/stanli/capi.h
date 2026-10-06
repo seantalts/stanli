@@ -59,6 +59,32 @@ stanli_model* stanli_model_new_from_stan_seeded(const char* stan_code,
 /* 1 if this build embeds stanc3, else 0. */
 int stanli_has_embedded_stanc(void);
 
+/* Model construction options. Call stanli_model_opts_init before setting
+ * fields: seed 1, one thread per chain, fast_math 0.
+ *
+ * fast_math opts this model into numerics that may differ from CmdStan in the
+ * last bits in exchange for speed. For a model built from Stan source it also
+ * selects the compile-time rewrites that stanc3 applies, such as fused
+ * multiply-add; for a model built from MIR text the rewrites are whatever the
+ * MIR was compiled with, so compile it with stanli_stan_to_mir_with_opts
+ * using the same setting. Default models are unchanged. */
+typedef struct {
+  uint32_t seed;
+  int threads_per_chain;
+  int fast_math;
+} stanli_model_opts;
+void stanli_model_opts_init(stanli_model_opts* o);
+
+/* The two constructors above and the threaded forms below, taking their
+ * settings from opts. A null opts means the defaults. */
+stanli_model* stanli_model_new_with_opts(const char* mir_text,
+                                         const char* data_json,
+                                         const stanli_model_opts* opts,
+                                         char* err, size_t err_len);
+stanli_model* stanli_model_new_from_stan_with_opts(
+    const char* stan_code, const char* data_json, const stanli_model_opts* opts,
+    char* err, size_t err_len);
+
 /* Compile Stan source to transformed-MIR text WITHOUT building a model,
  * for a caller that wants to keep the MIR: cache it, ship it, or hand it
  * to stanli_model_new later or elsewhere. Returns null on failure with a
@@ -75,6 +101,13 @@ char* stanli_stan_to_mir_with_includes(const char* stan_code,
                                        const char* const* include_paths,
                                        size_t include_path_count, char* err,
                                        size_t err_len);
+
+/* stanli_stan_to_mir_with_includes with the fast_math setting of
+ * stanli_model_opts. include_paths may be null with a zero count. */
+char* stanli_stan_to_mir_with_opts(const char* stan_code,
+                                   const char* const* include_paths,
+                                   size_t include_path_count, int fast_math,
+                                   char* err, size_t err_len);
 
 /* Frees a string this library returned ownership of. */
 void stanli_string_free(char* p);

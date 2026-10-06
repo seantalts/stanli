@@ -152,6 +152,23 @@ char* stanli_stanc_tmir_with_includes(const char* stan_code,
                           include_path_count);
 }
 
+char* stanli_stanc_tmir_fast(const char* stan_code) {
+  return compile_callback(stan_code, "stanc_compile_tmir_fast");
+}
+
+char* stanli_stanc_model_tmir_fast(const char* stan_code) {
+  return compile_callback(stan_code, "stanc_compile_model_tmir_fast");
+}
+
+char* stanli_stanc_tmir_with_includes_fast(const char* stan_code,
+                                           const char* const* include_paths,
+                                           size_t include_path_count) {
+  const char* empty = nullptr;
+  return compile_callback(stan_code, "stanc_compile_tmir_with_includes_fast",
+                          include_paths ? include_paths : &empty,
+                          include_path_count);
+}
+
 void stanli_stanc_free(char* p) { std::free(p); }
 
 }  // extern "C"

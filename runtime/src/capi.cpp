@@ -99,10 +99,9 @@ stanli_model* stanli_model_new_seeded(const char* tmir_sexp,
   return stanli_model_new_threaded(tmir_sexp, data_json, seed, 1, err, err_len);
 }
 
-stanli_model* stanli_model_new_threaded(const char* tmir_sexp,
-                                        const char* data_json, uint32_t seed,
-                                        int threads_per_chain, char* err,
-                                        size_t err_len) {
+static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
+                               uint32_t seed, int threads_per_chain,
+                               bool fast_math, char* err, size_t err_len) {
   try {
     if (threads_per_chain < 1)
       throw std::invalid_argument("threads_per_chain must be positive");
@@ -114,6 +113,7 @@ stanli_model* stanli_model_new_threaded(const char* tmir_sexp,
     stanli::DataMap data = stanli::DataMap::from_json(data_json);
     stanli::CompileOptions options;
     options.reduce_sum_threads = threads_per_chain;
+    options.fast_math = fast_math;
     m->cm = stanli::compile_model(tmir_sexp, data, seed, options);
     m->reduce_sum_count =
         (int)std::count_if(m->cm.graph.ops.begin(), m->cm.graph.ops.end(),
@@ -190,12 +190,44 @@ stanli_model* stanli_model_new_threaded(const char* tmir_sexp,
   }
 }
 
+stanli_model* stanli_model_new_threaded(const char* tmir_sexp,
+                                        const char* data_json, uint32_t seed,
+                                        int threads_per_chain, char* err,
+                                        size_t err_len) {
+  return model_new(tmir_sexp, data_json, seed, threads_per_chain, false, err,
+                   err_len);
+}
+
+void stanli_model_opts_init(stanli_model_opts* o) {
+  if (o == nullptr) return;
+  *o = stanli_model_opts{};
+  o->seed = 1;
+  o->threads_per_chain = 1;
+  o->fast_math = 0;
+}
+
+stanli_model* stanli_model_new_with_opts(const char* mir_text,
+                                         const char* data_json,
+                                         const stanli_model_opts* opts,
+                                         char* err, size_t err_len) {
+  stanli_model_opts o;
+  stanli_model_opts_init(&o);
+  if (opts != nullptr) o = *opts;
+  return model_new(mir_text, data_json, o.seed, o.threads_per_chain,
+                   o.fast_math != 0, err, err_len);
+}
+
 #ifdef STANLI_EMBED_STANC
 extern "C" char* stanli_stanc_tmir(const char* stan_code);
 extern "C" char* stanli_stanc_tmir_with_includes(
     const char* stan_code, const char* const* include_paths,
     size_t include_path_count);
 extern "C" char* stanli_stanc_model_tmir(const char* stan_code);
+extern "C" char* stanli_stanc_tmir_fast(const char* stan_code);
+extern "C" char* stanli_stanc_tmir_with_includes_fast(
+    const char* stan_code, const char* const* include_paths,
+    size_t include_path_count);
+extern "C" char* stanli_stanc_model_tmir_fast(const char* stan_code);
 extern "C" void stanli_stanc_free(char* p);
 #endif
 
@@ -214,20 +246,20 @@ stanli_model* stanli_model_new_from_stan_seeded(const char* stan_code,
                                              err_len);
 }
 
-stanli_model* stanli_model_new_from_stan_threaded(const char* stan_code,
-                                                  const char* data_json,
-                                                  uint32_t seed,
-                                                  int threads_per_chain,
-                                                  char* err, size_t err_len) {
+static stanli_model* model_new_from_stan(const char* stan_code,
+                                         const char* data_json, uint32_t seed,
+                                         int threads_per_chain, bool fast_math,
+                                         char* err, size_t err_len) {
 #ifdef STANLI_EMBED_STANC
-  char* res = stanli_stanc_model_tmir(stan_code);
+  char* res = fast_math ? stanli_stanc_model_tmir_fast(stan_code)
+                        : stanli_stanc_model_tmir(stan_code);
   if (std::strncmp(res, "OK", 2) != 0) {
     put_err(err, err_len, res + (std::strncmp(res, "ERR", 3) == 0 ? 3 : 0));
     stanli_stanc_free(res);
     return nullptr;
   }
-  stanli_model* m = stanli_model_new_threaded(res + 2, data_json, seed,
-                                              threads_per_chain, err, err_len);
+  stanli_model* m = model_new(res + 2, data_json, seed, threads_per_chain,
+                              fast_math, err, err_len);
   stanli_stanc_free(res);
   return m;
 #else
@@ -235,9 +267,29 @@ stanli_model* stanli_model_new_from_stan_threaded(const char* stan_code,
   (void)data_json;
   (void)seed;
   (void)threads_per_chain;
+  (void)fast_math;
   put_err(err, err_len, "this build does not embed stanc3");
   return nullptr;
 #endif
+}
+
+stanli_model* stanli_model_new_from_stan_threaded(const char* stan_code,
+                                                  const char* data_json,
+                                                  uint32_t seed,
+                                                  int threads_per_chain,
+                                                  char* err, size_t err_len) {
+  return model_new_from_stan(stan_code, data_json, seed, threads_per_chain,
+                             false, err, err_len);
+}
+
+stanli_model* stanli_model_new_from_stan_with_opts(
+    const char* stan_code, const char* data_json, const stanli_model_opts* opts,
+    char* err, size_t err_len) {
+  stanli_model_opts o;
+  stanli_model_opts_init(&o);
+  if (opts != nullptr) o = *opts;
+  return model_new_from_stan(stan_code, data_json, o.seed, o.threads_per_chain,
+                             o.fast_math != 0, err, err_len);
 }
 
 char* stanli_stan_to_mir(const char* stan_code, char* err, size_t err_len) {
@@ -248,6 +300,14 @@ char* stanli_stan_to_mir_with_includes(const char* stan_code,
                                        const char* const* include_paths,
                                        size_t include_path_count, char* err,
                                        size_t err_len) {
+  return stanli_stan_to_mir_with_opts(stan_code, include_paths,
+                                      include_path_count, 0, err, err_len);
+}
+
+char* stanli_stan_to_mir_with_opts(const char* stan_code,
+                                   const char* const* include_paths,
+                                   size_t include_path_count, int fast_math,
+                                   char* err, size_t err_len) {
   if (stan_code == nullptr ||
       (include_path_count && include_paths == nullptr)) {
     put_err(err, err_len, "Stan source or include_paths is null");
@@ -260,10 +320,15 @@ char* stanli_stan_to_mir_with_includes(const char* stan_code,
     }
   }
 #ifdef STANLI_EMBED_STANC
-  char* res = include_path_count
-                  ? stanli_stanc_tmir_with_includes(stan_code, include_paths,
-                                                    include_path_count)
-                  : stanli_stanc_tmir(stan_code);
+  char* res = fast_math
+                  ? (include_path_count
+                         ? stanli_stanc_tmir_with_includes_fast(
+                               stan_code, include_paths, include_path_count)
+                         : stanli_stanc_tmir_fast(stan_code))
+                  : (include_path_count
+                         ? stanli_stanc_tmir_with_includes(
+                               stan_code, include_paths, include_path_count)
+                         : stanli_stanc_tmir(stan_code));
   if (res == nullptr) {
     put_err(err, err_len, "out of memory");
     return nullptr;
@@ -284,6 +349,7 @@ char* stanli_stan_to_mir_with_includes(const char* stan_code,
   return out;
 #else
   (void)stan_code;
+  (void)fast_math;
   put_err(err, err_len, "this build does not embed stanc3");
   return nullptr;
 #endif
