@@ -1,9 +1,15 @@
 # Density-path allocations: what changed and what was tried
 
-Base `db9c575f`, macOS 26 arm64, Apple clang, Release (`-O3`,
-`-ffp-contract=off`). Timing is `bench_grad --timed` (200 ms warmup, 250 ms
-or longer window, fresh process per sample, one thread requested, arms
-interleaved, first arm rotating). Speedups are old time over new time.
+macOS 26 arm64, Apple clang, Release (`-O3`, `-ffp-contract=off`). Timing is
+`bench_grad --timed` (200 ms warmup, 250 ms or longer window, fresh process
+per sample, one thread requested, arms interleaved, first arm rotating).
+Speedups are old time over new time.
+
+Two bases appear. `db9c575f` is the old base, the commit the first
+measurements compared against. `3cecda71` is origin/main before PR #439 and
+`80c3ea47` is that PR's merge; the section "Corpus sweep, starters and memory
+against 3cecda71" at the end is the measurement of the merged work against
+its real base. Figures in the sections before it are against the old base.
 
 ## On this branch
 
@@ -19,7 +25,7 @@ interleaved, first arm rotating). Speedups are old time over new time.
 Production code: fused kernels +425 lines (including the CMake edits), vector
 views +15, column and matrix maps +26.
 
-## Results at the head against `db9c575f`
+## Results against the old base `db9c575f`
 
 ### Corpus sweep
 
@@ -465,11 +471,81 @@ scratch contents, pass.
   any of them; Eight Schools is faster, as it was for the earlier fused-only
   build (no out-of-line oracle-switch check).
 
+### Corpus sweep, starters and memory against 3cecda71
+
+`80c3ea47` against `3cecda71`, both Release builds with
+`STANLI_STAN_DENSITY_ORACLE=OFF`. `harnesses/ab_bench_corpus.py` over every
+corpus model that lowers (342 attempted), 8 interleaved pairs per model,
+binaries frozen as copies, one process at a time, one thread, the first arm
+rotating each round. Three models (`dogs_log`, `s2_invgaussian`, `sir`) fail
+at the benchmark point in the base binary and are not timed, leaving 339.
+One-minute load average around the models: 2.5 to 4.3, median 3.2, with
+another session running.
+
+| | models | geomean speedup | 95% bootstrap interval |
+| --- | ---: | ---: | ---: |
+| all | 339 | 1.098 | 1.081 to 1.115 |
+| can act (a normal or cauchy op, or a density op with an argument longer than one) | 310 | 1.108 | 1.090 to 1.128 |
+| rest | 29 | 0.997 | 0.988 to 1.008 |
+| A/A, base against a copy of itself, 60 random models | 60 | 0.998 | |
+
+Faster than 1.02: 201 models. Within 2%: 117. Slower than 0.98: 21. Slower
+than 0.90: none. One model's values differ between the arms, `ch14_m14_8` (the
+2 ULP log density below).
+
+Ten largest wins: `s2_hurdle_cumulative` 2.23x (5,445 ns to 2,447 ns),
+`ch12_m12_5` 2.15x, `ch12_m12_7` 2.11x, `aalto_grp_aov` 2.10x,
+`eight_schools_centered` 1.93x, `eight_schools_noncentered` 1.82x,
+`aalto_grp_prior_mean` 1.78x, `pilots` 1.74x, `aalto_lin_std` 1.66x,
+`ch09_m9_5` 1.65x.
+
+Ten largest regressions: `bones_model` 0.920 (47,861 ns to 52,041 ns),
+`sw_acat` 0.922, `aalto_poisson_hurdle` 0.943, `Rate_5_model` 0.951,
+`ch14_m14_6` 0.952, `i320_pois_trunc_ub` 0.956, `gp_regr` 0.962, `irt_2pl`
+0.966, `sw_gp` 0.969, `i319_gauss_re` 0.972.
+
+At 24 pairs with an A/A arm: `bones_model` 0.932 (MAD 0.033, A/A 1.006), so it
+reproduces and its cause is still unknown. It is the model with one fused
+`normal_lpdf` call among about 6,000 scalar ops that the old-base sweep also
+flagged. `sw_acat` is 0.989 (A/A 0.994) and
+`aalto_poisson_hurdle` 1.007 (A/A 1.014), so those two were noise.
+
+Nine starter models, 24 interleaved pairs, base ns and speedup (MAD), A/A:
+
+| model | base ns | speedup | A/A |
+| --- | ---: | ---: | ---: |
+| eight_schools_centered | 213.0 | 1.931 (0.021) | 0.995 (0.009) |
+| eight_schools_noncentered | 195.6 | 1.844 (0.029) | 1.003 (0.009) |
+| radon_pooled | 48,916 | 1.303 (0.008) | 1.003 (0.007) |
+| radon_variable_intercept_noncentered | 55,388 | 1.250 (0.011) | 0.999 (0.014) |
+| kidscore_momiq | 1,603.7 | 1.242 (0.009) | 1.001 (0.005) |
+| logearn_height | 4,314.5 | 1.238 (0.009) | 0.995 (0.008) |
+| arK | 1,755.8 | 1.146 (0.008) | 0.999 (0.007) |
+| arma11 | 5,079.5 | 1.045 (0.008) | 1.003 (0.018) |
+| garch11 | 7,344.8 | 1.026 (0.008) | 1.006 (0.008) |
+
+Peak RSS of the same nine, median of 9 fresh processes, KiB:
+
+| model | base | new |
+| --- | ---: | ---: |
+| eight_schools_centered | 5,360 | 5,264 |
+| eight_schools_noncentered | 5,520 | 5,472 |
+| arK | 8,528 | 8,512 |
+| arma11 | 7,936 | 7,936 |
+| garch11 | 8,256 | 8,224 |
+| kidscore_momiq | 5,600 | 5,616 |
+| logearn_height | 5,712 | 5,760 |
+| radon_pooled | 22,400 | 22,304 |
+| radon_variable_intercept_noncentered | 37,760 | 37,680 |
+
+The largest increase is 48 KiB (`logearn_height`) and the largest decrease 96
+KiB (`eight_schools_centered` and `radon_pooled`).
+
+The raw files of this sweep are not in the repository.
+
 ### Not done on the new base
 
-The corpus geomean sweep (the 1.096x was measured against db9c575f), the
-24-pair starter timings, the peak RSS comparison, and the wheel, R package,
-browser build and installed-artifact checks were not run here: the 22:30 limit
-for the machine came first, and the wheel, R and wasm toolchains were not
-exercised. `actionlint` is not installed; the workflow YAML parses and
+The wheel, R package, browser build and installed-artifact checks were not run
+by this note's author; the PR ran the wheels workflow on the branch by hand
+and it passed. `actionlint` is not installed; the workflow YAML parses and
 `tests/test_ci_policy.py` passes.
