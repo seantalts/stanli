@@ -52,7 +52,8 @@ int count_opcode(const Graph& g, uint16_t opcode) {
 Run run(const std::string& name, const CompileOptions& options) {
   const std::string stem = "tests/fixtures/" + name;
   const DataMap data = DataMap::from_json(slurp(stem + ".json"));
-  CompiledModel cm = compile_model(slurp(stem + ".tmir.sexp"), data, 1, options);
+  CompiledModel cm =
+      compile_model(slurp(stem + ".tmir.sexp"), data, 1, options);
   Run r;
   r.ops = cm.graph.ops.size();
   r.bernoulli = count_opcode(cm.graph, OP_BERNOULLI_LPMF);
