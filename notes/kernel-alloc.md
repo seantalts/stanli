@@ -5,11 +5,13 @@ macOS 26 arm64, Apple clang, Release (`-O3`, `-ffp-contract=off`). Timing is
 per sample, one thread requested, arms interleaved, first arm rotating).
 Speedups are old time over new time.
 
-Two bases appear. `db9c575f` is the old base, the commit the first
+Several bases appear. `db9c575f` is the old base, the commit the first
 measurements compared against. `3cecda71` is origin/main before PR #439 and
 `80c3ea47` is that PR's merge; the section "Corpus sweep, starters and memory
-against 3cecda71" at the end is the measurement of the merged work against
-its real base. Figures in the sections before it are against the old base.
+against 3cecda71" is the measurement of the merged work against its real
+base. Figures in the sections before it are against the old base. `29856a71`
+is origin/main after `80c3ea47`; the head sizes and the sweep in the section
+"Fusing lognormal, beta and gamma" are against it.
 
 ## On this branch
 
@@ -243,7 +245,8 @@ not adopted:
   `write_array` at three points by 1 ULP, moving toward CmdStan; one
   `one_comp_mm_elim_abs` gradient component by 32 ULP, 1344 to 1312 ULP from
   CmdStan), none in a log density;
-- it speeds up nothing on arm64 (within 2% on 20 models);
+- it speeds up nothing on arm64 (within 2%, not consistently, on the nine
+  starters and seven vector-heavy corpus models at 12 pairs);
 - the arenas grow: 0 to 88 bytes on the starters, 1.5% across the corpus,
   16% (23 KB) at worst in `brms-sw_acat_cs`;
 - parameters cannot be padded, so 1,846 inputs (1.6%) stay misaligned;
@@ -294,6 +297,11 @@ project.
 Estimated fused lines (no code written): lognormal 45; gamma and beta 55
 each; student_t 110 (a four-argument path); exponential 70; ordered_logistic
 90 (integer outcomes, shared cutpoints); the discrete densities 60 each.
+
+Update: `student_t` and `ordered_logistic` with a shared cutpoint vector were
+fused next (section "Fusing ordered_logistic and student_t"), and `lognormal`,
+`beta` and `gamma` after that (section "Fusing lognormal, beta and gamma",
+which also records the array form of `ordered_logistic`, tried and dropped).
 
 1. `ordered_logistic`: the only remaining density with a large per-call cost
    (12 mallocs, 2.7 microseconds at N=64) and 99,301 of the mallocs per
@@ -391,9 +399,10 @@ A/A 0.995 to 1.005.
 
 ### What it does not cover
 
-An array of cutpoint vectors still goes through the nested-tape path. A
-scalar location with more than one outcome is undefined in Stan Math; the
-fused kernel raises a size mismatch there. Not tested: x86-64, wasm, Windows,
+An array of cutpoint vectors goes through the nested-tape path; fusing it was
+tried and dropped (section "Fusing lognormal, beta and gamma"). A scalar
+location with more than one outcome is undefined in Stan Math; the fused kernel raises a size
+mismatch there. Not tested: x86-64, wasm, Windows,
 R and Python builds.
 
 ## Shipping it: release configuration and rebase onto 3cecda71
@@ -549,3 +558,220 @@ The wheel, R package, browser build and installed-artifact checks were not run
 by this note's author; the PR ran the wheels workflow on the branch by hand
 and it passed. `actionlint` is not installed; the workflow YAML parses and
 `tests/test_ci_policy.py` passes.
+
+## Fusing lognormal, beta and gamma
+
+Three more kernels in `density_fused.cpp`, one commit each, after PR #439. Same
+pattern: run-time mask and propto, Stan Math's own checks on rejection,
+intermediates materialized where Stan's `to_ref_if` does, the
+`STANLI_NO_FUSED_DENSITY=1` oracle, and the Stan Math instantiations compiled
+out under `STANLI_STAN_DENSITY_ORACLE=OFF`. The per-density measurements
+below were made against `80c3ea47`, one stage at a time. The head sizes and
+the final sweep are against origin/main `29856a71`, which adds an AVX2 option
+that is off by default, notes and CI tooling to `80c3ea47` and has an OFF
+library of the same size.
+
+Before fusing each density, the allocations per gradient attributed to it were
+counted on every corpus model whose source mentions it (`tools/alloc_attr`
+with a script that labels each allocation site by the Stan Math density in its
+backtrace, 1,000 against 11,000 gradients).
+
+| | lognormal | beta | gamma |
+| --- | ---: | ---: | ---: |
+| corpus models whose source mentions it | 24 | 34 | 42 |
+| of those, models with 0.5 or more allocations per gradient from it | 12 | 1 | 3 |
+| allocations per gradient at sites inside Stan Math's density, before, over those models | 46.4 | 4.2 | 3.6 |
+| production lines added (net) | 118 | 87 | 61 |
+| library with the option OFF, bytes (gzip -6) | -366,528 (-107,229) | -352,592 (-89,754) | -317,712 (-105,019) |
+| `rvar` instantiations of Stan Math removed, text bytes | 150, 348,452 | 236, 304,728 | 130, 282,288 |
+| speedup on the models that use it, 16 pairs (95% interval) | 1.036 (1.012 to 1.063) | 1.029 (1.016 to 1.042) | 1.006 (0.998 to 1.016) |
+| A/A on the same models | 1.001 | 0.997 | 0.998 |
+
+At 64 observations the #439 census measured 2 allocations per call for
+lognormal, 2 for beta and 0 for gamma; nothing was measured per call after. The
+new kernels keep their work arrays on the stack up to 128 elements and use one
+`std::vector` above that, so a call allocates nothing up to 128 elements and
+once beyond. The whole-model totals from the corpus fell with them:
+`aalto_grp_prior_mean_var` 7.8 to 0, `s2_shifted_lognormal` 11.9 to 0,
+`losscurve_sislob` 6.3 to 0, `sw_beta` 9.3 to 1.0 and `sw_gamma` 4.2 to 1.0
+per gradient, the remainder coming from other ops.
+
+The first density's 118 lines include the helpers the other two reuse. The
+speedups compare a build with the density fused against the build one commit
+earlier, arms in the same rounds (`base`, the three stages, and a copy of
+`base`), over 90 models in all. The models with allocations: lognormal 12
+models 1.054 (1.016 to 1.102), the best `aalto_grp_prior_mean_var` 1.21x,
+`sw_lognormal` 1.17x, `s2_shifted_lognormal` 1.14x; beta's one model,
+`sw_beta`, 1.07x; gamma's three models 1.037 (0.973 to 1.085), `sw_gamma` 1.09x
+and `covid19imperial_v2` 0.970. The other beta models gain too, with
+`s2_zoi_beta` 1.11x, `aalto_binom2` 1.10x and `Rate_4_model` 1.09x: their
+calls are scalar, and the fused scalar path is cheaper than the Stan Math one.
+Gamma has no measurable speed effect and 0 to 1.6 allocations per gradient in
+three of 42 models; its case is the size, 318 KB.
+
+Library sizes for the OFF configuration, bytes (gzip -6):
+
+| build | library | `stanli_run` |
+| --- | ---: | ---: |
+| origin/main `29856a71` | 39,118,368 (11,701,356) | 39,137,176 (11,773,711) |
+| lognormal | 38,751,840 (11,594,053) | 38,770,728 (11,670,821) |
+| beta | 38,399,248 (11,504,299) | 38,418,024 (11,579,826) |
+| gamma, head | 38,081,536 (11,399,394) | 38,116,824 (11,476,961) |
+
+The head is 1,036,832 bytes smaller (301,962 gzipped) than origin/main with the
+option OFF, and 3,703,728 smaller than the head built with it ON (41,785,264;
+gzipped 12,503,201 against 11,399,394). `stanli_run` is 1,020,352 smaller
+(296,750 gzipped). The lognormal and beta rows were measured at their own
+commits on the earlier base. After the head, no `rvar` instantiation of
+`ordered_logistic_lpmf` and none of `lognormal_lpdf`, `beta_lpdf` or
+`gamma_lpdf` on a vector argument remains in the OFF build. What is left of
+the three densities is 42, 34 and 34 symbols: seven scalar `rvar` combinations
+of each, and the `var` and `double` code for Program regions in
+`program_density.cpp` and two instantiations in `matrix_fns.cpp`. The 17
+`ordered_logistic_lpmf` symbols that remain are `var` code for the array of
+cutpoint vectors, the same 17 as in origin/main.
+
+### Tried and dropped: the array form of ordered_logistic
+
+A commit fused `ordered_logistic_lpmf` for an array of cutpoint vectors by
+giving the shared-cutpoint kernel a per-observation cutpoint offset. It made
+the library 57,632 bytes smaller (12,660 gzipped) with the option OFF, and a
+synthetic model with 64 outcomes and `rep_array(c, N)` as the cutpoints went
+from 12.6 to 2.7 microseconds per gradient. No corpus model passes an array of
+cutpoint vectors. It was dropped by decision and is not part of this change; the array form still runs through Stan Math,
+in release builds too, and `test_glm` checks it against the Stan Math
+`var` path bitwise.
+
+### Micro models
+
+`tools/alloc_attr/density_models.py` models (64 observations, a vector location
+that depends on parameters, parameter scalars), 16 pairs against the base:
+lognormal 522 ns to 452 ns (1.14x), beta 591 ns to 535 ns (1.08x), gamma 492 ns
+to 476 ns (1.05x), the same model with no density under test 144 ns to 137 ns
+(1.05x; it has a scalar gamma prior). A/A on each is 0.99 to 1.00. The
+per-call allocation counts of the attribution tool were too noisy to use on
+these models (the model without a density read 1.0 to 12.1 allocations per
+gradient across repeats), so no per-call figure after the change was measured.
+The corpus totals above are the evidence that the Stan Math sites are gone and
+that whole-model allocations fell.
+
+### Correctness
+
+- Differential tests (both paths in one process, ON build): `test_density_fused`
+  135,535 cases over normal, cauchy, lognormal, beta and gamma with 27,783
+  rejections, `test_ordered_logistic_fused` 7,566 cases (shared cutpoints) with
+  1,878 rejections, `test_student_t_fused` 61,741 cases with 14,145; every
+  rejection has the same message; 0 ULP in all of them.
+- Each test was seen to fail when a kernel was wrong: an extra factor on the
+  lognormal sum (2.1 million ULP), a sequential instead of Eigen's reduction
+  order for `sum(log_y)` (up to 24 ULP), and the wrong size divisor in beta
+  (1.5e19 ULP) and gamma (1.5e19 ULP).
+- Corpus replay (352 models, 1,056 points), outputs byte-compared: head with
+  the option OFF against origin/main with it OFF, 1,053 identical and 3
+  different, all three `ctsem_ctsm` points with `--wa-values`, where only the
+  build id in a stderr warning differs (`abi1-` followed by the checked-out
+  commit) and stdout is identical; head OFF against the head built with the
+  option ON and `STANLI_NO_FUSED_DENSITY=1`, 1,056 identical. 352 of 352
+  inside the corpus gate, worst `gpcm_latent_reg_irt` at 9.38e-13.
+- An array of cutpoint vectors, which is not fused, in a model
+  (`vector[N] lambda; array[N] ordered[K - 1] c; y ~ ordered_logistic(lambda,
+  c)`): the output at three points is byte-identical for the OFF head, the ON
+  head, the ON head with `STANLI_NO_FUSED_DENSITY=1` and origin/main OFF.
+  `test_glm` runs the array form through the executor in both configurations
+  and compares value and gradients bitwise with Stan Math's `var` path.
+- Builds from empty trees, option ON and OFF: no compiler warning. Three linker
+  notices about the embedded stanc object, as on origin/main, and 44 stanc
+  notes about test fixtures, as on origin/main.
+- CTest: ON 398 of 398, OFF 395 of 395.
+
+### Corpus sweep against 29856a71
+
+The head against origin/main `29856a71`, both Release builds with
+`STANLI_STAN_DENSITY_ORACLE=OFF` from empty trees, binaries frozen as copies.
+`harnesses/ab_bench_corpus.py` over every corpus model that lowers (342
+attempted), 8 interleaved pairs per model, one thread, one process at a time,
+the first arm rotating, `--load-limit 5` (run from a copy that polls the load
+every 3 seconds instead of every 30). Three models (`dogs_log`,
+`s2_invgaussian`, `sir`) fail at the benchmark point in the base binary and are
+not timed, leaving 339. The one-minute load average around the models was 2.6
+to 5.1, median 3.3, with a one-core Python job from another project running.
+
+| | models | geomean speedup | 95% interval |
+| --- | ---: | ---: | ---: |
+| all | 339 | 1.005 | 1.001 to 1.009 |
+| source calls lognormal, beta or gamma | 71 | 1.031 | 1.019 to 1.043 |
+| the rest | 268 | 0.998 | 0.995 to 1.002 |
+| A/A, base against a copy, 70 random models | 70 | 1.005 | 0.999 to 1.011 |
+
+Faster than 1.02: 75 models. Within 2%: 214. Slower than 0.98: 50. Slower than
+0.90: one, `sw_skewnormal`. In the A/A run 16 of 70 models read above 1.02 and 6
+below 0.98. The geometric mean over all models is inside the A/A interval, so
+the sweep supports the 71 models that call these densities and nothing more.
+No density or gradient value differs between the arms.
+Largest wins: `aalto_grp_prior_mean_var` 1.22x, `sw_lognormal` 1.20x,
+`losscurve_sislob` 1.13x, `sw_hurdle_lognormal` 1.13x, `s2_shifted_lognormal`
+1.13x, `s2_zoi_beta` 1.11x, `s2_mi_lognormal` 1.09x, `aalto_binom2` 1.09x,
+`Rate_4_model` 1.09x, `sw_beta` 1.09x.
+Largest regressions: `sw_skewnormal` 0.802, `surgical_model` 0.941,
+`rats_model` 0.944, `s2_s_cc` 0.945, `sw_mono` 0.949.
+
+Re-timing these and the other popular models below 0.97, 24 pairs with an A/A
+arm (speedup, A/A): `surgical_model` 1.003 (1.000), `rats_model` 0.988 (1.007),
+`s2_s_cc` 0.992 (1.008), `sw_mono` 1.009 (1.017), `ch15_m15_9` 0.990 (0.993),
+`low_dim_gauss_mix_collapse` 0.990 (1.004), `kidscore_momhs` 0.977 (0.989),
+`s2_gp_by_approx` 0.998 (0.993), `dogs_hierarchical` 1.007 (1.013),
+`seeds_model` 1.006 (0.999) and `logearn_interaction` 1.029 (1.018). Only
+`sw_skewnormal` stays slow: 0.803 at 24 pairs against an A/A of 0.986. No
+popular model is more than 10% slower and one model is.
+
+`sw_skewnormal` calls `student_t`, `normal`, `skew_normal` and `student_t_lccdf`
+and none of the three fused densities. The same head built with the option ON,
+and with `STANLI_STAN_DENSITY_ORACLE=ON` and `STANLI_NO_FUSED_DENSITY=1`, reads
+0.806 and 0.802. An earlier build of this series that also fused the array form
+of `ordered_logistic` reads 0.954 against `29856a71` and 0.968 for `80c3ea47`'s
+build. Appending 12 or 36 `nop` instructions (48 or 144 bytes) to
+`density_fused.cpp` gives the head 1.019 and 1.031, and appending 1 or 4 does
+not (0.810 and 0.826). So the slowdown is a code-placement effect of the same
+kind as `bones_model` below and not a cost of the change; I did not find the
+function whose placement matters.
+
+The nine starters at 24 pairs, speedup over `29856a71` (MAD), A/A (MAD):
+
+| model | speedup | A/A |
+| --- | ---: | ---: |
+| arK | 0.957 (0.029) | 0.973 (0.022) |
+| arma11 | 1.012 (0.050) | 0.980 (0.062) |
+| eight_schools_centered | 1.006 (0.037) | 1.014 (0.041) |
+| eight_schools_noncentered | 0.997 (0.034) | 1.016 (0.041) |
+| garch11 | 0.973 (0.023) | 1.013 (0.044) |
+| kidscore_momiq | 0.989 (0.038) | 0.989 (0.032) |
+| logearn_height | 0.995 (0.020) | 0.995 (0.029) |
+| radon_pooled | 0.999 (0.036) | 0.998 (0.038) |
+| radon_variable_intercept_noncentered | 1.019 (0.020) | 1.004 (0.020) |
+
+`arK` and `garch11` read 2% to 4% slower; their A/A arms read 0.973 and 1.013,
+and neither uses the three densities.
+
+Peak RSS of the nine starters, median of 9 fresh processes, KiB:
+
+| model | `29856a71` | head |
+| --- | ---: | ---: |
+| eight_schools_centered | 4,864 | 4,832 |
+| eight_schools_noncentered | 5,104 | 5,088 |
+| arK | 8,448 | 8,464 |
+| arma11 | 7,760 | 7,648 |
+| garch11 | 7,968 | 7,872 |
+| kidscore_momiq | 5,296 | 5,232 |
+| logearn_height | 5,552 | 5,504 |
+| radon_pooled | 9,504 | 9,472 |
+| radon_variable_intercept_noncentered | 42,608 | 42,832 |
+
+The largest increase is 224 KiB (`radon_variable_intercept_noncentered`, 0.5%);
+the run-to-run spread is up to 400 KiB on that model and about 100 KiB on the
+others.
+
+### Not tested
+
+x86-64, wasm, Windows, R and Python builds, the ASan and TSan builds, the lite
+build, and the wheels workflow. The Mac was shared; the load average during
+the sweeps was 2.6 to 5.1.
