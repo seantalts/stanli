@@ -638,9 +638,9 @@ giving the shared-cutpoint kernel a per-observation cutpoint offset. It made
 the library 57,632 bytes smaller (12,660 gzipped) with the option OFF, and a
 synthetic model with 64 outcomes and `rep_array(c, N)` as the cutpoints went
 from 12.6 to 2.7 microseconds per gradient. No corpus model passes an array of
-cutpoint vectors. It was dropped by decision and is not part of this change; the array form still runs through Stan Math,
-in release builds too, and `test_glm` checks it against the Stan Math
-`var` path bitwise.
+cutpoint vectors. It was dropped by decision and is not part of this change.
+The array form still runs through Stan Math, in release builds too, and
+`test_glm` checks it against the Stan Math `var` path bitwise.
 
 ### Micro models
 
@@ -725,15 +725,14 @@ arm (speedup, A/A): `surgical_model` 1.003 (1.000), `rats_model` 0.988 (1.007),
 popular model is more than 10% slower and one model is.
 
 `sw_skewnormal` calls `student_t`, `normal`, `skew_normal` and `student_t_lccdf`
-and none of the three fused densities. The same head built with the option ON,
-and with `STANLI_STAN_DENSITY_ORACLE=ON` and `STANLI_NO_FUSED_DENSITY=1`, reads
-0.806 and 0.802. An earlier build of this series that also fused the array form
-of `ordered_logistic` reads 0.954 against `29856a71` and 0.968 for `80c3ea47`'s
-build. Appending 12 or 36 `nop` instructions (48 or 144 bytes) to
-`density_fused.cpp` gives the head 1.019 and 1.031, and appending 1 or 4 does
-not (0.810 and 0.826). So the slowdown is a code-placement effect of the same
-kind as `bones_model` below and not a cost of the change; I did not find the
-function whose placement matters.
+and none of the three fused densities. The same head built with the option ON
+reads 0.806, and 0.802 with `STANLI_NO_FUSED_DENSITY=1`. An earlier build of
+this series that also fused the array form of `ordered_logistic` reads 0.954
+against `29856a71`, and the build of `80c3ea47` reads 0.968. Appending 12 or 36
+`nop` instructions (48 or 144 bytes) to `density_fused.cpp` gives the head 1.019
+and 1.031, and appending 1 or 4 does not (0.810 and 0.826). So the slowdown is
+a code-placement effect of the same kind as `bones_model` below and not a cost
+of the change. The function whose placement matters was not identified.
 
 The nine starters at 24 pairs, speedup over `29856a71` (MAD), A/A (MAD):
 
@@ -767,7 +766,7 @@ Peak RSS of the nine starters, median of 9 fresh processes, KiB:
 | radon_variable_intercept_noncentered | 42,608 | 42,832 |
 
 The largest increase is 224 KiB (`radon_variable_intercept_noncentered`, 0.5%);
-the run-to-run spread is up to 400 KiB on that model and about 100 KiB on the
+the run-to-run spread is up to 500 KiB on that model and about 100 KiB on the
 others.
 
 ### Not tested
@@ -775,3 +774,49 @@ others.
 x86-64, wasm, Windows, R and Python builds, the ASan and TSan builds, the lite
 build, and the wheels workflow. The Mac was shared; the load average during
 the sweeps was 2.6 to 5.1.
+
+## bones_model: a CPU-state effect in back-to-back gradients
+
+Update to the earlier "cause unknown" entries. `bones_model` reads 0.91 to 0.93
+(old over new) in `bench_grad --timed` against base, at 24 pairs: 0.913 for the
+option-ON build, 0.923 for the release build, 1.002 for the ON build with
+`STANLI_NO_FUSED_DENSITY=1`, and 0.994 for A/A. The model has 7,527 ops, 9
+distinct opcodes and 6,841 opcode changes per gradient.
+
+What was measured, on the same frozen binaries:
+
+- The P core alternates between about 4.05 and 3.62 GHz every 0.1 to 0.5 s in
+  both arms. That is the timing noise and not the arm gap. At equal clock the
+  IPC is 2.22 to 2.26 with the fused kernels and 2.42 without; instructions
+  retired are equal.
+- Thread QoS classes (user-interactive, user-initiated, default, utility), busy
+  threads on other cores and the DIT bit change nothing. Background QoS moves
+  the thread to an E core.
+- Random placement of allocations of 2 KiB or more moves the arm ratio between
+  0.92 and 1.02. Uniform shifts do nothing, some staggered shifts remove the
+  effect, and malloc salting does nothing.
+- A no-op call every 500 ops, 8,192 extra branches, 96 KB of straight-line code,
+  a 1 MiB sweep, barriers and atomics do not restore the speed. Any kernel entry
+  or any malloc and free of 16 B to 64 KiB between gradients does, and the
+  effect of a `getpid` call fades within about 17 microseconds.
+- Page faults are 0 and reclaims about 1,210 in both arms.
+
+In seeded NUTS sampling the cycles per gradient, old over new, are 1.001 for the
+release build and 1.007 for the ON build (12 pairs), with IPC 2.44 to 2.46 in
+every arm. The slow state needs gradients back to back with no allocation or
+system call between them, so sampling does not reach it. The hardware structure
+involved is not identified, because there are no performance counters here.
+
+Consequences for measurement, not adopted anywhere yet:
+
+- Report cycles per gradient from `proc_pid_rusage` next to nanoseconds. The
+  median absolute deviation falls from 0.031 to 0.007.
+- Confirm any `bench_grad` ratio below 0.97 with seeded sampling cycles per
+  gradient before calling it a regression.
+- An A/A run cannot detect this effect. It reads 1.00 while allocation layout
+  moves the arm gap between 0.92 and 1.02.
+- A system call per gradient is not a fix: about 0.3 microseconds would swamp
+  small models.
+
+The scripts are on the local scratch branch `density-fused-bones2`
+(`scratch-bones2/`), not on main.
