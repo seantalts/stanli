@@ -1,0 +1,8 @@
+352 models, 1056 points, exact arm A
+arm	pts_bytes_diff	pts_val_diff	models_val_diff	pts_wa_diff	max_scaled_err_vs_exact	status_diff	brms_pts_diff	brms_max_ulp_vs_exact	brms_max_ulp_vs_cmdstan	max_scaled_err_vs_cmdstan	gate_violations
+A	0	0	0	0	0.00e+00	0	0	0	8	9.38e-13	0
+B2	0	0	0	0	0.00e+00	0	0	0	8	9.38e-13	0
+H	0	0	0	0	0.00e+00	0	0	0	8	9.38e-13	0
+D2	2	0	0	0	0.00e+00	2	0	0	8	9.38e-13	0
+HC	269	269	121	0	1.18e-13	0	69	12	12	9.38e-13	1
+HC gate violations: [('s2_s_by', 0, 6.661338147750939e-16, 12)]

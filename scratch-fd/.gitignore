@@ -1,0 +1,8 @@
+bin/
+models/
+results/*/work/
+results/*/logs/
+results/*/events.jsonl
+results/*/results.jsonl
+results/*.jsonl
+results/*.jsonl.summary.json

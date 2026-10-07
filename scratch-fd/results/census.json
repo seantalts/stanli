@@ -1,0 +1,2550 @@
+{
+ "models": {
+  "2pl_latent_reg_irt": {
+   "lognormal": [
+    1,
+    14
+   ],
+   "normal": [
+    2,
+    500
+   ],
+   "student_t": [
+    1,
+    4
+   ]
+  },
+  "GLMM1_model": {
+   "normal": [
+    2,
+    235
+   ]
+  },
+  "GLMM_Poisson_model": {
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "GLM_Binomial_model": {
+   "normal": [
+    3,
+    1
+   ]
+  },
+  "GLM_Poisson_model": {},
+  "M0_model": {},
+  "Mb_model": {},
+  "Mh_model": {
+   "normal": [
+    1,
+    385
+   ]
+  },
+  "Mt_model": {},
+  "Mtbh_model": {
+   "normal": [
+    2,
+    146
+   ]
+  },
+  "Mth_model": {
+   "normal": [
+    1,
+    387
+   ]
+  },
+  "Rate_1_model": {
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "Rate_2_model": {
+   "beta": [
+    2,
+    1
+   ]
+  },
+  "Rate_3_model": {
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "Rate_4_model": {
+   "beta": [
+    2,
+    1
+   ]
+  },
+  "Rate_5_model": {
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "Survey_model": {},
+  "aalto_bern": {
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "aalto_binom": {
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "aalto_binom2": {
+   "beta": [
+    2,
+    1
+   ]
+  },
+  "aalto_binomb": {
+   "normal": [
+    1,
+    1
+   ]
+  },
+  "aalto_gpareto": {},
+  "aalto_grp_aov": {
+   "normal": [
+    3,
+    12
+   ]
+  },
+  "aalto_grp_prior_mean": {
+   "normal": [
+    4,
+    12
+   ],
+   "lognormal": [
+    1,
+    1
+   ]
+  },
+  "aalto_grp_prior_mean_var": {
+   "normal": [
+    5,
+    12
+   ],
+   "lognormal": [
+    2,
+    3
+   ]
+  },
+  "aalto_lin": {
+   "normal": [
+    4,
+    8
+   ]
+  },
+  "aalto_lin_std": {
+   "normal": [
+    4,
+    8
+   ]
+  },
+  "aalto_lin_std_t": {
+   "normal": [
+    3,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ],
+   "student_t": [
+    1,
+    8
+   ]
+  },
+  "aalto_poisson_hurdle": {},
+  "aalto_poisson_simple": {},
+  "accel_gp": {
+   "student_t": [
+    4,
+    1
+   ],
+   "normal": [
+    3,
+    133
+   ]
+  },
+  "accel_splines": {
+   "student_t": [
+    4,
+    1
+   ],
+   "normal": [
+    3,
+    133
+   ]
+  },
+  "arK": {
+   "normal": [
+    3,
+    195
+   ],
+   "cauchy": [
+    1,
+    1
+   ]
+  },
+  "arma11": {
+   "normal": [
+    4,
+    200
+   ],
+   "cauchy": [
+    1,
+    1
+   ]
+  },
+  "blr": {
+   "normal": [
+    3,
+    100
+   ]
+  },
+  "bones_model": {
+   "normal": [
+    1,
+    13
+   ]
+  },
+  "bym2_offset_only": {
+   "normal": [
+    4,
+    1921
+   ],
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "ch09_m5_8s": {
+   "normal": [
+    4,
+    100
+   ]
+  },
+  "ch09_m5_8s2": {
+   "normal": [
+    4,
+    100
+   ]
+  },
+  "ch09_m9_1": {
+   "normal": [
+    3,
+    170
+   ]
+  },
+  "ch09_m9_1_chains4": {
+   "normal": [
+    3,
+    170
+   ]
+  },
+  "ch09_m9_2": {
+   "normal": [
+    2,
+    2
+   ]
+  },
+  "ch09_m9_3": {
+   "normal": [
+    2,
+    2
+   ]
+  },
+  "ch09_m9_4": {
+   "normal": [
+    3,
+    100
+   ]
+  },
+  "ch09_m9_5": {
+   "normal": [
+    3,
+    100
+   ]
+  },
+  "ch09_mp": {
+   "cauchy": [
+    1,
+    1
+   ],
+   "normal": [
+    1,
+    1
+   ]
+  },
+  "ch11_m11_10": {
+   "normal": [
+    2,
+    2
+   ]
+  },
+  "ch11_m11_11": {
+   "normal": [
+    1,
+    2
+   ]
+  },
+  "ch11_m11_4": {
+   "normal": [
+    2,
+    7
+   ]
+  },
+  "ch11_m11_5": {
+   "normal": [
+    3,
+    7
+   ]
+  },
+  "ch11_m11_6": {
+   "normal": [
+    2,
+    7
+   ]
+  },
+  "ch11_m11_7": {
+   "normal": [
+    1,
+    2
+   ]
+  },
+  "ch11_m11_8": {
+   "normal": [
+    2,
+    6
+   ]
+  },
+  "ch11_m11_9": {
+   "normal": [
+    1,
+    1
+   ]
+  },
+  "ch11_m_pois": {
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "ch12_m12_1": {
+   "normal": [
+    1,
+    2
+   ]
+  },
+  "ch12_m12_2": {
+   "normal": [
+    1,
+    2
+   ]
+  },
+  "ch12_m12_3": {
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "ch12_m12_3_alt": {
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "ch12_m12_4": {
+   "normal": [
+    1,
+    6
+   ],
+   "ordered_logistic": [
+    9930,
+    6
+   ]
+  },
+  "ch12_m12_5": {
+   "normal": [
+    6,
+    6
+   ],
+   "ordered_logistic": [
+    9930,
+    6
+   ]
+  },
+  "ch12_m12_6": {
+   "normal": [
+    5,
+    6
+   ],
+   "ordered_logistic": [
+    9930,
+    6
+   ]
+  },
+  "ch12_m12_7": {
+   "normal": [
+    5,
+    6
+   ],
+   "ordered_logistic": [
+    9930,
+    6
+   ]
+  },
+  "ch13_m13_1": {
+   "normal": [
+    1,
+    48
+   ]
+  },
+  "ch13_m13_2": {
+   "normal": [
+    2,
+    48
+   ]
+  },
+  "ch13_m13_3": {
+   "normal": [
+    2,
+    60
+   ]
+  },
+  "ch13_m13_4": {
+   "normal": [
+    4,
+    7
+   ]
+  },
+  "ch13_m13_4b": {
+   "normal": [
+    4,
+    7
+   ]
+  },
+  "ch13_m13_4nc": {
+   "normal": [
+    4,
+    7
+   ]
+  },
+  "ch13_m13_5": {
+   "normal": [
+    3,
+    7
+   ]
+  },
+  "ch13_m13_6": {
+   "normal": [
+    4,
+    7
+   ]
+  },
+  "ch13_m13_7": {
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "ch13_m13_7nc": {
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "ch14_m14_1": {
+   "normal": [
+    3,
+    200
+   ]
+  },
+  "ch14_m14_10": {
+   "normal": [
+    3,
+    1
+   ]
+  },
+  "ch14_m14_11": {
+   "normal": [
+    5,
+    1
+   ]
+  },
+  "ch14_m14_2": {
+   "normal": [
+    1,
+    4
+   ]
+  },
+  "ch14_m14_3": {
+   "normal": [
+    3,
+    28
+   ]
+  },
+  "ch14_m14_4": {
+   "normal": [
+    3,
+    500
+   ]
+  },
+  "ch14_m14_4x": {
+   "normal": [
+    3,
+    500
+   ]
+  },
+  "ch14_m14_5": {
+   "normal": [
+    4,
+    500
+   ]
+  },
+  "ch14_m14_6": {
+   "normal": [
+    4,
+    1
+   ]
+  },
+  "ch14_m14_6x": {
+   "normal": [
+    4,
+    1
+   ]
+  },
+  "ch14_m14_7": {
+   "normal": [
+    2,
+    600
+   ]
+  },
+  "ch14_m14_8": {},
+  "ch14_m14_8nc": {
+   "normal": [
+    1,
+    10
+   ]
+  },
+  "ch14_m14_9": {
+   "normal": [
+    3,
+    1
+   ]
+  },
+  "ch15_m15_1": {
+   "normal": [
+    5,
+    50
+   ]
+  },
+  "ch15_m15_2": {
+   "normal": [
+    7,
+    50
+   ]
+  },
+  "ch15_m15_3": {
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "ch15_m15_4": {
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "ch15_m15_5": {
+   "normal": [
+    6,
+    29
+   ]
+  },
+  "ch15_m15_6": {
+   "normal": [
+    6,
+    17
+   ]
+  },
+  "ch15_m15_7": {
+   "normal": [
+    6,
+    29
+   ]
+  },
+  "ch15_m15_8": {
+   "beta": [
+    1,
+    1
+   ],
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "ch15_m15_9": {
+   "beta": [
+    1,
+    1
+   ],
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "ch16_m16_1": {
+   "beta": [
+    1,
+    1
+   ],
+   "lognormal": [
+    1,
+    544
+   ]
+  },
+  "ch16_m16_4": {
+   "lognormal": [
+    3,
+    1
+   ]
+  },
+  "cm_betadiscrete": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "cm_betagate": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    3,
+    1
+   ]
+  },
+  "cm_bisa": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "cm_choco": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    7,
+    1
+   ]
+  },
+  "cm_ddm": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    5,
+    1
+   ]
+  },
+  "cm_exgaussian": {
+   "normal": [
+    3,
+    1
+   ]
+  },
+  "cm_exwald": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    3,
+    1
+   ]
+  },
+  "cm_gamma": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "cm_geg": {
+   "normal": [
+    4,
+    1
+   ]
+  },
+  "cm_invgamma": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "cm_invgaussian": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    4,
+    1
+   ]
+  },
+  "cm_invweibull": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "cm_lba1": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    4,
+    1
+   ]
+  },
+  "cm_lba2": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    7,
+    1
+   ]
+  },
+  "cm_lnr": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    6,
+    1
+   ]
+  },
+  "cm_lnr_bench": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    6,
+    1
+   ]
+  },
+  "cm_loggamma": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    3,
+    1
+   ]
+  },
+  "cm_lognormal": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    3,
+    1
+   ]
+  },
+  "cm_logstudent": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    3,
+    1
+   ]
+  },
+  "cm_logweibull": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "cm_rdm": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    5,
+    1
+   ]
+  },
+  "cm_weibull": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "covid19imperial_v2": {
+   "normal": [
+    4,
+    14
+   ],
+   "gamma": [
+    1,
+    6
+   ]
+  },
+  "covid19imperial_v3": {
+   "normal": [
+    4,
+    14
+   ],
+   "gamma": [
+    1,
+    6
+   ]
+  },
+  "ctsem_ctsm": {
+   "normal": [
+    3,
+    11
+   ]
+  },
+  "diamonds": {
+   "normal": [
+    1,
+    24
+   ],
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "dogs": {
+   "normal": [
+    1,
+    3
+   ]
+  },
+  "dogs_hierarchical": {},
+  "dogs_log": {},
+  "dogs_nonhierarchical": {
+   "normal": [
+    2,
+    60
+   ]
+  },
+  "dugongs_model": {
+   "normal": [
+    3,
+    27
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "earn_height": {
+   "normal": [
+    1,
+    1192
+   ]
+  },
+  "eight_schools_centered": {
+   "cauchy": [
+    1,
+    1
+   ],
+   "normal": [
+    3,
+    8
+   ]
+  },
+  "eight_schools_noncentered": {
+   "normal": [
+    3,
+    8
+   ],
+   "cauchy": [
+    1,
+    1
+   ]
+  },
+  "election88_full": {
+   "normal": [
+    6,
+    51
+   ]
+  },
+  "extra_hurdle_poisson": {
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "garch11": {
+   "normal": [
+    1,
+    200
+   ]
+  },
+  "gp_pois_regr": {
+   "gamma": [
+    1,
+    1
+   ],
+   "normal": [
+    2,
+    11
+   ]
+  },
+  "gp_regr": {
+   "gamma": [
+    1,
+    1
+   ],
+   "normal": [
+    2,
+    1
+   ]
+  },
+  "gpcm_latent_reg_irt": {
+   "lognormal": [
+    1,
+    11
+   ],
+   "normal": [
+    2,
+    500
+   ],
+   "student_t": [
+    1,
+    5
+   ]
+  },
+  "grsm_latent_reg_irt": {
+   "lognormal": [
+    1,
+    7
+   ],
+   "normal": [
+    3,
+    392
+   ],
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "hier_2pl": {
+   "normal": [
+    3,
+    600
+   ]
+  },
+  "hierarchical_gp": {
+   "normal": [
+    7,
+    700
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "hmm_drive_0": {
+   "normal": [
+    4,
+    1
+   ]
+  },
+  "hmm_drive_1": {
+   "normal": [
+    3328,
+    1
+   ]
+  },
+  "hmm_example": {
+   "normal": [
+    7,
+    1
+   ]
+  },
+  "hmm_gaussian": {
+   "normal": [
+    4492,
+    3
+   ]
+  },
+  "i319_gauss_re": {
+   "student_t": [
+    3,
+    1
+   ]
+  },
+  "i319_negbin_fixed": {
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "i319_negbin_re": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "i319_pois_fixed": {
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "i319_pois_re": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "i319_pois_re2": {
+   "student_t": [
+    3,
+    1
+   ]
+  },
+  "i320_gp_expquad": {
+   "student_t": [
+    3,
+    1
+   ],
+   "normal": [
+    1,
+    30
+   ]
+  },
+  "i320_gp_matern32": {
+   "student_t": [
+    3,
+    1
+   ],
+   "normal": [
+    1,
+    30
+   ]
+  },
+  "i320_mi_nhanes": {
+   "student_t": [
+    4,
+    1
+   ]
+  },
+  "i320_pois_trunc_both": {
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "i320_pois_trunc_ub": {
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "i320_sratio_cs": {
+   "normal": [
+    2,
+    3
+   ],
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "i320_sratio_plain": {
+   "normal": [
+    1,
+    3
+   ],
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "iohmm_reg": {
+   "normal": [
+    9,
+    4
+   ]
+  },
+  "irt_2pl": {
+   "cauchy": [
+    3,
+    1
+   ],
+   "normal": [
+    3,
+    100
+   ],
+   "lognormal": [
+    1,
+    20
+   ]
+  },
+  "kidscore_interaction": {
+   "cauchy": [
+    1,
+    1
+   ],
+   "normal": [
+    1,
+    434
+   ]
+  },
+  "kidscore_interaction_c": {
+   "normal": [
+    1,
+    434
+   ]
+  },
+  "kidscore_interaction_c2": {
+   "normal": [
+    1,
+    434
+   ]
+  },
+  "kidscore_interaction_z": {
+   "normal": [
+    1,
+    434
+   ]
+  },
+  "kidscore_mom_work": {
+   "normal": [
+    1,
+    434
+   ]
+  },
+  "kidscore_momhs": {
+   "cauchy": [
+    1,
+    1
+   ],
+   "normal": [
+    1,
+    434
+   ]
+  },
+  "kidscore_momhsiq": {
+   "cauchy": [
+    1,
+    1
+   ],
+   "normal": [
+    1,
+    434
+   ]
+  },
+  "kidscore_momiq": {
+   "cauchy": [
+    1,
+    1
+   ],
+   "normal": [
+    1,
+    434
+   ]
+  },
+  "kilpisjarvi": {
+   "normal": [
+    3,
+    62
+   ]
+  },
+  "kronecker_gp": {
+   "lognormal": [
+    2,
+    1
+   ],
+   "cauchy": [
+    1,
+    1
+   ]
+  },
+  "ldaK2": {},
+  "ldaK5": {},
+  "log10earn_height": {
+   "normal": [
+    1,
+    1192
+   ]
+  },
+  "logearn_height": {
+   "normal": [
+    1,
+    1192
+   ]
+  },
+  "logearn_height_male": {
+   "normal": [
+    1,
+    1192
+   ]
+  },
+  "logearn_interaction": {
+   "normal": [
+    1,
+    1192
+   ]
+  },
+  "logearn_interaction_z": {
+   "normal": [
+    1,
+    1192
+   ]
+  },
+  "logearn_logheight_male": {
+   "normal": [
+    1,
+    1192
+   ]
+  },
+  "logistic_regression_rhs": {
+   "student_t": [
+    2,
+    1536
+   ],
+   "normal": [
+    1,
+    1
+   ]
+  },
+  "logmesquite": {
+   "normal": [
+    1,
+    46
+   ]
+  },
+  "logmesquite_logva": {
+   "normal": [
+    1,
+    46
+   ]
+  },
+  "logmesquite_logvas": {
+   "normal": [
+    1,
+    46
+   ]
+  },
+  "logmesquite_logvash": {
+   "normal": [
+    1,
+    46
+   ]
+  },
+  "logmesquite_logvolume": {
+   "normal": [
+    1,
+    46
+   ]
+  },
+  "losscurve_sislob": {
+   "normal": [
+    2,
+    55
+   ],
+   "lognormal": [
+    5,
+    10
+   ]
+  },
+  "lotka_volterra": {
+   "normal": [
+    2,
+    2
+   ],
+   "lognormal": [
+    5,
+    20
+   ]
+  },
+  "low_dim_gauss_mix": {
+   "normal": [
+    4,
+    1000
+   ],
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "low_dim_gauss_mix_collapse": {
+   "normal": [
+    4,
+    1000
+   ],
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "lsat_model": {
+   "normal": [
+    3,
+    1000
+   ]
+  },
+  "mesquite": {
+   "normal": [
+    1,
+    46
+   ]
+  },
+  "multi_occupancy": {
+   "cauchy": [
+    3,
+    2
+   ],
+   "beta": [
+    2,
+    1
+   ]
+  },
+  "nes": {
+   "normal": [
+    1,
+    1330
+   ]
+  },
+  "nes_logit_model": {},
+  "nn_rbm1bJ10": {
+   "normal": [
+    4,
+    7840
+   ]
+  },
+  "nn_rbm1bJ100": {
+   "normal": [
+    4,
+    78400
+   ]
+  },
+  "normal_mixture": {
+   "normal": [
+    3,
+    1000
+   ]
+  },
+  "normal_mixture_k": {
+   "normal": [
+    1703,
+    5
+   ]
+  },
+  "one_comp_mm_elim_abs": {
+   "cauchy": [
+    4,
+    1
+   ],
+   "lognormal": [
+    1,
+    20
+   ]
+  },
+  "pilots": {
+   "normal": [
+    5,
+    40
+   ]
+  },
+  "prophet": {
+   "normal": [
+    5,
+    1169
+   ]
+  },
+  "radon_county": {
+   "normal": [
+    3,
+    12573
+   ]
+  },
+  "radon_county_intercept": {
+   "normal": [
+    4,
+    12573
+   ]
+  },
+  "radon_hierarchical_intercept_centered": {
+   "normal": [
+    6,
+    12573
+   ]
+  },
+  "radon_hierarchical_intercept_noncentered": {
+   "normal": [
+    6,
+    12573
+   ]
+  },
+  "radon_partially_pooled_centered": {
+   "normal": [
+    5,
+    12573
+   ]
+  },
+  "radon_partially_pooled_noncentered": {
+   "normal": [
+    5,
+    12573
+   ]
+  },
+  "radon_pooled": {
+   "normal": [
+    4,
+    12573
+   ]
+  },
+  "radon_variable_intercept_centered": {
+   "normal": [
+    6,
+    12573
+   ]
+  },
+  "radon_variable_intercept_noncentered": {
+   "normal": [
+    6,
+    12573
+   ]
+  },
+  "radon_variable_intercept_slope_centered": {
+   "normal": [
+    8,
+    12573
+   ]
+  },
+  "radon_variable_intercept_slope_noncentered": {
+   "normal": [
+    8,
+    12573
+   ]
+  },
+  "radon_variable_slope_centered": {
+   "normal": [
+    6,
+    12573
+   ]
+  },
+  "radon_variable_slope_noncentered": {
+   "normal": [
+    6,
+    12573
+   ]
+  },
+  "rats_model": {
+   "normal": [
+    5,
+    150
+   ]
+  },
+  "s2_ar_cov": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "s2_beta_binomial": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "s2_car": {
+   "student_t": [
+    3,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_car_esicar": {
+   "student_t": [
+    3,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_car_icar": {
+   "student_t": [
+    3,
+    1
+   ],
+   "normal": [
+    2,
+    40
+   ]
+  },
+  "s2_categorical_re": {
+   "student_t": [
+    4,
+    1
+   ]
+  },
+  "s2_cens_interval": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    30
+   ]
+  },
+  "s2_com_poisson": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "s2_cosy": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "s2_cox": {
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "s2_cox_cens": {
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "s2_cumulative_cauchit": {
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "s2_cumulative_cloglog": {
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "s2_cumulative_probit": {
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "s2_custom_vint": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "s2_custom_vreal": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_dirichlet": {
+   "student_t": [
+    2,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "s2_discrete_weibull": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "s2_dist_sigma_re": {
+   "student_t": [
+    3,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_fcor": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "s2_frechet": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "s2_gev": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    1
+   ]
+  },
+  "s2_gp_approx": {
+   "student_t": [
+    3,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_gp_by_approx": {
+   "student_t": [
+    3,
+    2
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_gp_by_gr": {
+   "student_t": [
+    3,
+    5
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_gr_by": {
+   "student_t": [
+    3,
+    2
+   ]
+  },
+  "s2_gr_student": {
+   "student_t": [
+    3,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "s2_hurdle_cumulative": {
+   "student_t": [
+    1,
+    2
+   ],
+   "beta": [
+    1,
+    1
+   ],
+   "ordered_logistic": [
+    27,
+    2
+   ]
+  },
+  "s2_hurdle_negbin": {
+   "student_t": [
+    1,
+    1
+   ],
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "s2_index_mi": {
+   "student_t": [
+    4,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_invgaussian": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "s2_logistic_normal": {
+   "student_t": [
+    4,
+    1
+   ]
+  },
+  "s2_me2": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    3,
+    40
+   ]
+  },
+  "s2_me2_nomecor": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    3,
+    40
+   ]
+  },
+  "s2_mi_lognormal": {
+   "student_t": [
+    4,
+    1
+   ],
+   "lognormal": [
+    1,
+    40
+   ]
+  },
+  "s2_mi_trunc_lb": {
+   "student_t": [
+    4,
+    1
+   ],
+   "normal": [
+    40,
+    1
+   ]
+  },
+  "s2_mixture_theta": {
+   "student_t": [
+    4,
+    1
+   ],
+   "normal": [
+    80,
+    1
+   ]
+  },
+  "s2_mm": {
+   "student_t": [
+    3,
+    1
+   ]
+  },
+  "s2_mm_weights": {
+   "student_t": [
+    3,
+    1
+   ]
+  },
+  "s2_mmc": {
+   "student_t": [
+    3,
+    2
+   ]
+  },
+  "s2_mo_simo_prior": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_multinomial": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "s2_mv_shared_re": {
+   "student_t": [
+    5,
+    2
+   ]
+  },
+  "s2_mv_subset": {
+   "student_t": [
+    4,
+    1
+   ]
+  },
+  "s2_nl_noloop": {
+   "normal": [
+    3,
+    40
+   ],
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "s2_nlf": {
+   "normal": [
+    3,
+    40
+   ],
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "s2_rate": {
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "s2_s_by": {
+   "student_t": [
+    7,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_s_cc": {
+   "student_t": [
+    3,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_sar": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "s2_sar_error": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "s2_shifted_lognormal": {
+   "student_t": [
+    2,
+    1
+   ],
+   "lognormal": [
+    1,
+    40
+   ]
+  },
+  "s2_t2_by": {
+   "student_t": [
+    4,
+    3
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "s2_threading": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "s2_unstr": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "s2_weights_trunc": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    40,
+    1
+   ]
+  },
+  "s2_wiener": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ],
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "s2_zi_asymlaplace": {
+   "student_t": [
+    2,
+    1
+   ],
+   "beta": [
+    2,
+    1
+   ]
+  },
+  "s2_zi_beta": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ],
+   "beta": [
+    38,
+    1
+   ]
+  },
+  "s2_zoi_beta": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ],
+   "beta": [
+    38,
+    1
+   ]
+  },
+  "seeds_centered_model": {
+   "normal": [
+    5,
+    21
+   ],
+   "cauchy": [
+    1,
+    1
+   ]
+  },
+  "seeds_model": {
+   "normal": [
+    5,
+    21
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "seeds_stanified_model": {
+   "normal": [
+    5,
+    21
+   ],
+   "cauchy": [
+    1,
+    1
+   ]
+  },
+  "sesame_one_pred_a": {
+   "normal": [
+    1,
+    240
+   ]
+  },
+  "sir": {
+   "cauchy": [
+    4,
+    1
+   ],
+   "lognormal": [
+    1,
+    20
+   ]
+  },
+  "soil_incubation": {
+   "beta": [
+    1,
+    1
+   ],
+   "normal": [
+    5,
+    25
+   ],
+   "cauchy": [
+    1,
+    1
+   ]
+  },
+  "state_space_stochastic_level_stochastic_seasonal": {
+   "normal": [
+    3,
+    192
+   ],
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "surgical_model": {
+   "normal": [
+    2,
+    12
+   ]
+  },
+  "sw_acat": {
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "sw_acat_cs": {
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "sw_ar": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "sw_arma": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "sw_asymlaplace": {
+   "student_t": [
+    2,
+    1
+   ],
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "sw_bernoulli": {
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "sw_beta": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ],
+   "beta": [
+    1,
+    40
+   ]
+  },
+  "sw_binomial": {
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "sw_categorical": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "sw_cens": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    15
+   ]
+  },
+  "sw_cratio": {
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "sw_cratio_cs": {
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "sw_cumulative": {
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "sw_cumulative_cs": {
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "sw_dist_sigma": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "sw_exgaussian": {
+   "student_t": [
+    2,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "sw_gamma": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    2,
+    40
+   ]
+  },
+  "sw_gaussian": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "sw_gp": {
+   "student_t": [
+    3,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "sw_hurdle_gamma": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    41,
+    1
+   ],
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "sw_hurdle_lognormal": {
+   "student_t": [
+    2,
+    1
+   ],
+   "beta": [
+    1,
+    1
+   ],
+   "lognormal": [
+    1,
+    40
+   ]
+  },
+  "sw_hurdle_pois": {
+   "student_t": [
+    1,
+    1
+   ],
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "sw_lognormal": {
+   "student_t": [
+    2,
+    1
+   ],
+   "lognormal": [
+    1,
+    40
+   ]
+  },
+  "sw_ma": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "sw_me": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    2,
+    40
+   ]
+  },
+  "sw_mi": {
+   "student_t": [
+    4,
+    1
+   ]
+  },
+  "sw_mixture": {
+   "student_t": [
+    4,
+    1
+   ],
+   "normal": [
+    80,
+    1
+   ]
+  },
+  "sw_mono": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "sw_mv_norescor": {
+   "student_t": [
+    4,
+    1
+   ]
+  },
+  "sw_mv_rescor": {
+   "student_t": [
+    4,
+    1
+   ]
+  },
+  "sw_negbinomial": {
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "sw_nonlinear": {
+   "normal": [
+    3,
+    40
+   ],
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "sw_poisson": {
+   "student_t": [
+    1,
+    1
+   ]
+  },
+  "sw_re_bern": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "sw_re_gauss": {
+   "student_t": [
+    3,
+    1
+   ]
+  },
+  "sw_re_negbin": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "sw_re_pois": {
+   "student_t": [
+    2,
+    1
+   ]
+  },
+  "sw_re_slope": {
+   "student_t": [
+    3,
+    2
+   ]
+  },
+  "sw_se": {
+   "student_t": [
+    1,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "sw_skewnormal": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    1
+   ]
+  },
+  "sw_spline_s": {
+   "student_t": [
+    3,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "sw_spline_t2": {
+   "student_t": [
+    3,
+    3
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "sw_sratio": {
+   "student_t": [
+    1,
+    3
+   ]
+  },
+  "sw_student": {
+   "student_t": [
+    3,
+    40
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "sw_trunc": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    40,
+    1
+   ]
+  },
+  "sw_vonmises": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "sw_weibull": {
+   "student_t": [
+    1,
+    1
+   ],
+   "gamma": [
+    1,
+    1
+   ]
+  },
+  "sw_weights": {
+   "student_t": [
+    2,
+    1
+   ],
+   "normal": [
+    1,
+    40
+   ]
+  },
+  "sw_zi_binomial": {
+   "student_t": [
+    1,
+    1
+   ],
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "sw_zi_negbin": {
+   "student_t": [
+    1,
+    1
+   ],
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "sw_zi_poisson": {
+   "student_t": [
+    1,
+    1
+   ],
+   "beta": [
+    1,
+    1
+   ]
+  },
+  "wells_daae_c_model": {},
+  "wells_dae_c_model": {},
+  "wells_dae_inter_model": {},
+  "wells_dae_model": {},
+  "wells_dist": {},
+  "wells_dist100_model": {},
+  "wells_dist100ars_model": {},
+  "wells_interaction_c_model": {},
+  "wells_interaction_model": {}
+ },
+ "failed": []
+}

@@ -1,0 +1,45 @@
+{
+ "arms": {
+  "B": {
+   "path": "/Users/xitrium/claud/stanrt/.worktrees/fast-density/scratch-fd/bin/B_bench_grad",
+   "sha256": "c0ec3ae336633f1019e5eaa6eba6d7a075eb1225c29266752f98541571a761eb",
+   "env": [
+    "STANLI_FAST_REDUCE=0",
+    "STANLI_FAST_NOCHECK=0",
+    "STANLI_FAST_CHECK=0"
+   ]
+  },
+  "C4": {
+   "path": "/Users/xitrium/claud/stanrt/.worktrees/fast-density/scratch-fd/bin/B_bench_grad",
+   "sha256": "c0ec3ae336633f1019e5eaa6eba6d7a075eb1225c29266752f98541571a761eb",
+   "env": [
+    "STANLI_FAST_REDUCE=1",
+    "STANLI_FAST_NOCHECK=0",
+    "STANLI_FAST_CHECK=0"
+   ]
+  },
+  "C8": {
+   "path": "/Users/xitrium/claud/stanrt/.worktrees/fast-density/scratch-fd/bin/B_bench_grad",
+   "sha256": "c0ec3ae336633f1019e5eaa6eba6d7a075eb1225c29266752f98541571a761eb",
+   "env": [
+    "STANLI_FAST_REDUCE=2",
+    "STANLI_FAST_NOCHECK=0",
+    "STANLI_FAST_CHECK=0"
+   ]
+  },
+  "Z": {
+   "path": "/Users/xitrium/claud/stanrt/.worktrees/fast-density/scratch-fd/bin/Z_bench_grad",
+   "sha256": "c0ec3ae336633f1019e5eaa6eba6d7a075eb1225c29266752f98541571a761eb",
+   "env": [
+    "STANLI_FAST_REDUCE=0",
+    "STANLI_FAST_NOCHECK=0",
+    "STANLI_FAST_CHECK=0"
+   ]
+  }
+ },
+ "rounds": 8,
+ "warmup_ms": 200,
+ "measure_ms": 250,
+ "thread_env": "STAN_NUM_THREADS=1",
+ "started": "Wed Oct  7 06:18:30 2026"
+}

@@ -1,0 +1,16 @@
+137 models timed, 0 failed or excluded: []
+
+H over B2: all n=137 1.0346 (1.0273 to 1.0428) cycles 1.0358; vector n=137 1.0346 (1.0273 to 1.0428) cycles 1.0358; scalar n=0 nan (nan to nan) cycles nan
+  faster than 1.02: 77, within 2%: 56, slower than 0.98: 4, below 0.90: 0
+  best : ch15_m15_2 1.196 (cy 1.156), ch09_m9_5 1.163 (cy 1.169), ch09_m9_4 1.153 (cy 1.167), kilpisjarvi 1.143 (cy 1.129), ch09_m9_1 1.125 (cy 1.113), ch15_m15_1 1.123 (cy 1.117)
+  worst: arma11 0.940 (cy 0.976), s2_s_by 0.959 (cy 1.013), irt_2pl 0.971 (cy 0.999), sw_hurdle_lognormal 0.977 (cy 0.988), ch16_m16_1 0.983 (cy 1.008), s2_gp_by_gr 0.983 (cy 1.001)
+
+D2 over B2: all n=137 1.0706 (1.0566 to 1.0845) cycles 1.0704; vector n=137 1.0706 (1.0566 to 1.0845) cycles 1.0704; scalar n=0 nan (nan to nan) cycles nan
+  faster than 1.02: 93, within 2%: 41, slower than 0.98: 3, below 0.90: 0
+  best : radon_partially_pooled_noncentered 1.309 (cy 1.282), radon_partially_pooled_centered 1.304 (cy 1.294), radon_county 1.267 (cy 1.286), ch15_m15_2 1.262 (cy 1.247), ch14_m14_4 1.240 (cy 1.204), ch09_m9_5 1.235 (cy 1.233)
+  worst: arma11 0.923 (cy 0.984), soil_incubation 0.961 (cy 0.991), irt_2pl 0.974 (cy 1.002), hier_2pl 0.980 (cy 1.000), ch14_m14_3 0.983 (cy 1.002), s2_s_by 0.983 (cy 1.020)
+
+Y over B2: all n=137 1.0018 (0.9970 to 1.0059) cycles 1.0001; vector n=137 1.0018 (0.9970 to 1.0059) cycles 1.0001; scalar n=0 nan (nan to nan) cycles nan
+  faster than 1.02: 20, within 2%: 102, slower than 0.98: 15, below 0.90: 0
+  best : sw_se 1.053 (cy 0.996), ch09_m9_4 1.045 (cy 0.997), ch15_m15_5 1.040 (cy 1.006), kidscore_interaction 1.040 (cy 1.000), ch14_m14_4 1.038 (cy 1.000), nn_rbm1bJ10 1.034 (cy 1.002)
+  worst: arma11 0.922 (cy 0.995), sw_me 0.958 (cy 1.000), ch09_m5_8s 0.962 (cy 1.004), radon_variable_intercept_slope_noncentered 0.963 (cy 0.998), ch14_m14_4x 0.968 (cy 1.000), accel_splines 0.968 (cy 0.997)

@@ -1,0 +1,19 @@
+352 models, 1056 points, exact arm A
+arm	pts_bytes_diff	pts_val_diff	models_val_diff	pts_wa_diff	max_scaled_err_vs_exact	status_diff	brms_pts_diff	brms_max_ulp_vs_exact	brms_max_ulp_vs_cmdstan	max_scaled_err_vs_cmdstan	gate_violations
+A	0	0	0	0	0.00e+00	0	0	0	8	9.38e-13	0
+B	0	0	0	0	0.00e+00	0	0	0	8	9.38e-13	0
+C4	269	269	121	0	1.18e-13	0	69	12	12	9.38e-13	1
+C8	279	279	129	0	1.26e-13	0	74	12	12	9.38e-13	1
+D	2	0	0	0	0.00e+00	2	0	0	8	9.38e-13	0
+E4	271	269	121	0	1.18e-13	2	69	12	12	9.38e-13	1
+E8	281	279	129	0	1.26e-13	2	74	12	12	9.38e-13	1
+F	149	140	97	9	1.40e-15	0	40	12	12	9.38e-13	1
+G4	315	304	134	10	1.18e-13	2	85	12	12	9.38e-13	1
+G8	318	307	139	10	1.26e-13	2	84	24	24	9.38e-13	1
+C4 gate violations: [('s2_s_by', 0, 6.661338147750939e-16, 12)]
+C8 gate violations: [('s2_s_by', 0, 6.661338147750939e-16, 12)]
+E4 gate violations: [('s2_s_by', 0, 6.661338147750939e-16, 12)]
+E8 gate violations: [('s2_s_by', 0, 6.661338147750939e-16, 12)]
+F gate violations: [('s2_s_by', 0, 6.661338147750939e-16, 12)]
+G4 gate violations: [('s2_s_by', 0, 6.661338147750939e-16, 12)]
+G8 gate violations: [('s2_s_by', 0, 1.3322676295501878e-15, 24)]
