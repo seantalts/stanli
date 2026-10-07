@@ -53,7 +53,7 @@ bool never_merge(uint16_t oc) {
 CseStats cse(Graph& g,
              const std::vector<std::pair<int, std::vector<double>>>& fills,
              std::vector<int>& target_terms,
-             const std::vector<int>& extra_roots) {
+             const std::vector<int>& extra_roots, bool merge_active) {
   CseStats st;
   if (std::getenv("STANLI_NO_CSE")) return st;
 
@@ -120,7 +120,7 @@ CseStats cse(Graph& g,
       auto ins = table.emplace(key, i);
       if (!ins.second) {
         Op& survivor = g.ops[ins.first->second];
-        if (any_active) {
+        if (any_active && !merge_active) {
           // Combining output adjoints before the pullback reassociates
           // arithmetic. Share only the primal, keeping source reverse order.
           op.primal_source = survivor.primal_source = survivor.out;

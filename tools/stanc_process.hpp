@@ -13,7 +13,8 @@ std::string run_stanc_process(const std::string& stanc,
 // Run stanli-compile, the shipped pipeline as an executable, on one model and
 // return the portable MIR it prints.
 std::string run_portable_compiler(const std::string& compiler,
-                                  const std::string& model);
+                                  const std::string& model,
+                                  bool fast_math = false);
 
 // The directory holding the running executable.
 std::string executable_directory();

@@ -16,6 +16,9 @@
 //   --stanc P           shell out to the stock stanc executable at P
 //   --mir P             read already-compiled MIR from P, keeping model.stan
 //                       as the report/ledger identity
+// --fast-math compiles the model with per-model fast math: the stanli
+// compiler (embedded or stanli-compile) runs its fast-math rewrites and the
+// runtime is told fast math is on.
 //
 // Two other modes, both stanli-against-itself rather than stanli against
 // CmdStan (tests/cross_path.hpp has the full account):
@@ -85,7 +88,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr,
                  "usage: stanli_check model.stan data.json "
                  "[--stanli-compile PATH | --stanc PATH | --mir PATH]\n"
-                 "       [--point N] [--sweep K] [--columns]\n"
+                 "       [--point N] [--sweep K] [--columns] [--fast-math]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
                  "[--draw-variant N] [--ledger PATH]]\n"
                  "       [--dump-passes=STAGES] [--dump-dir=DIR]\n"
@@ -101,6 +104,7 @@ int main(int argc, char** argv) {
   bool wa_values = false;
   bool paths_only = false;
   bool cross = false;
+  bool fast_math = false;
   std::string cross_one;
   std::string ledger_path = "tests/cross_path_ledger.json";
   int draw_variant = -1;
@@ -119,6 +123,8 @@ int main(int argc, char** argv) {
       paths_only = true;
     else if (a == "--cross")
       cross = true;
+    else if (a == "--fast-math")
+      fast_math = true;
     else if (a == "--cross-one" && i + 1 < argc)
       cross_one = argv[++i];
     else if (a == "--draw-variant" && i + 1 < argc)
@@ -157,9 +163,9 @@ int main(int argc, char** argv) {
 
   std::string mir;
   try {
-    mir = mir_path.empty()
-              ? stanli::tooling::compile_source(stanc, compiler, argv[1])
-              : read_mir(mir_path);
+    mir = mir_path.empty() ? stanli::tooling::compile_source(stanc, compiler,
+                                                             argv[1], fast_math)
+                           : read_mir(mir_path);
     if (mir.empty()) {
       std::printf("COMPILE_FAIL %s produced no MIR\n",
                   mir_path.empty() ? "the compiler" : "the MIR file");
@@ -235,7 +241,9 @@ int main(int argc, char** argv) {
   stanli::CompiledModel cm;
   try {
     stanli::DataMap data = stanli::DataMap::from_json_file(argv[2]);
-    cm = stanli::compile_model(mir, data);
+    stanli::CompileOptions compile_options;
+    compile_options.fast_math = fast_math;
+    cm = stanli::compile_model(mir, data, 1, compile_options);
     {
       const std::string note = stanli::interpreter_warning(cm);
       if (!note.empty()) std::fprintf(stderr, "INTERP %s\n", note.c_str());

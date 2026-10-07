@@ -19,6 +19,7 @@ type 'a compilation =
 (** Source-level MIR passes added to upstream's stability-preserving O1 policy. *)
 type pass_selection =
   { vectorize_loops: bool
+  ; partial_evaluation: bool
   ; max_o1_statement_depth_cost: int option }
 
 val default_pass_selection : pass_selection
@@ -27,12 +28,14 @@ val default_pass_selection : pass_selection
     repeated scalar call arguments. A deterministic pre-dataflow
     structural budget guards the dataflow passes. *)
 
-val selected_default_passes : unit -> pass_selection
-(** The shipping selection with the explicit [STANLI_NO_O1_FALLBACK] override. *)
+val selected_default_passes : ?fast_math:bool -> unit -> pass_selection
+(** The shipping selection with the explicit [STANLI_NO_O1_FALLBACK] override.
+    [fast_math] (default false) turns partial evaluation on. *)
 
 val compile_mir :
      ?include_source:Frontend.Include_files.t
   -> ?model_only:bool
+  -> ?fast_math:bool
   -> model_name:string
   -> string
   -> Middle.Program.Typed.t compilation
@@ -54,6 +57,7 @@ val compile_mir_with_passes :
 val compile_portable :
      ?include_source:Frontend.Include_files.t
   -> ?model_only:bool
+  -> ?fast_math:bool
   -> model_name:string
   -> string
   -> string compilation

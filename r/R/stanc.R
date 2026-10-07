@@ -105,8 +105,10 @@ stanc_js <- function() {
   ctx
 }
 
-mir_from_js <- function(code, name = "stanli_model", include_paths = character()) {
+mir_from_js <- function(code, name = "stanli_model", include_paths = character(),
+                        fast_math = FALSE) {
   ctx <- stanc_js()
+  ctx$assign("stanli_fast", isTRUE(fast_math))
   ctx$assign("stanli_src", enc2utf8(code))
   ctx$assign("stanli_name", name)
   ctx$assign("stanli_includes", stan_include_sources(code, include_paths))
@@ -123,9 +125,14 @@ mir_from_js <- function(code, name = "stanli_model", include_paths = character()
            return {present: true, value: common[name]};
          return {present: false, value: null};
        }
-       var portable_export = exported('stanli_compile');
+       var portable_name = stanli_fast ? 'stanli_compile_fast' : 'stanli_compile';
+       var portable_export = exported(portable_name);
+       if (stanli_fast && !portable_export.present)
+         return JSON.stringify({e: 'fast_math needs a stanc.js with the ' +
+                                   'stanli_compile_fast export',
+                                c: 'JavaScript compiler'});
        var classic_export = exported('stanc');
-       var compiler = portable_export.present ? 'stanli_compile' : 'stanc';
+       var compiler = portable_export.present ? portable_name : 'stanc';
        var selected = portable_export.present ? portable_export
                                               : classic_export;
        if (!selected.present)
@@ -211,7 +218,11 @@ js_string_literal <- function(value) {
 }
 
 mir_from_binary <- function(compiler, code, portable = FALSE,
-                            run_stanc = system2, include_paths = character()) {
+                            run_stanc = system2, include_paths = character(),
+                            fast_math = FALSE) {
+  if (fast_math && !portable)
+    stop("fast_math needs the portable stanli-compile compiler; the legacy ",
+         "stanc cannot produce fast-mode MIR", call. = FALSE)
   work <- tempfile("stanli-compile-")
   if (!dir.create(work))
     stop("could not create a temporary compiler directory", call. = FALSE)
@@ -228,8 +239,8 @@ mir_from_binary <- function(compiler, code, portable = FALSE,
   include_args <- if (!length(include_paths)) character() else if (portable)
     as.vector(rbind("--include-path", shQuote(include_paths))) else
     shQuote(paste0("--include-paths=", paste(include_paths, collapse = ",")))
-  args <- c(if (!portable) c("--O1", "--debug-optimized-mir"), include_args,
-            shQuote(source))
+  args <- c(if (!portable) c("--O1", "--debug-optimized-mir"),
+            if (fast_math) "--fast-math", include_args, shQuote(source))
   status <- tryCatch(
     suppressWarnings(run_stanc(compiler, args, stdout = stdout_file,
                                stderr = stderr_file)),
@@ -266,7 +277,7 @@ webr_eval_js <- function() {
 }
 
 mir_from_webr <- function(eval_js, code, name = "stanli_model",
-                          include_paths = character()) {
+                          include_paths = character(), fast_math = FALSE) {
   if (is.null(stanc_js_ctx$webr_loaded)) {
     js <- stanc_js_path()
     if (!nzchar(js) || !file.exists(js))
@@ -305,9 +316,12 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
         return {present: true, value: common[name]};
       return {present: false, value: null};
     }
-    const portableExport = exported('stanli_compile');
+    const portableName = %s ? 'stanli_compile_fast' : 'stanli_compile';
+    const portableExport = exported(portableName);
+    if (%s && !portableExport.present)
+      return 'ERR:JavaScript compiler: fast_math needs a stanc.js with the stanli_compile_fast export';
     const classicExport = exported('stanc');
-    const compiler = portableExport.present ? 'stanli_compile' : 'stanc';
+    const compiler = portableExport.present ? portableName : 'stanc';
     const selected = portableExport.present ? portableExport : classicExport;
     if (!selected.present)
       return 'ERR:JavaScript compiler: no stanli_compile() or stanc() export';
@@ -327,19 +341,25 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
     } catch (e) {
       return 'ERR:' + compiler + ': ' + String(e);
     }
-  })()", src_js, paste(include_js, collapse = "\n"), name_js, name_js, mirf_js))
+  })()", src_js, paste(include_js, collapse = "\n"),
+    if (isTRUE(fast_math)) "true" else "false",
+    if (isTRUE(fast_math)) "true" else "false",
+    name_js, name_js, mirf_js))
   if (!identical(status, "ok"))
     stop(sub("^ERR:", "", status), call. = FALSE)
   read_compiler_output(mirf)
 }
 
-stanc_mir <- function(code, include_paths = character()) {
+stanc_mir <- function(code, include_paths = character(), fast_math = FALSE) {
   compiler <- find_native_compiler()
   if (!is.null(compiler))
     return(mir_from_binary(compiler$path, code,
                            portable = compiler$portable,
-                           include_paths = include_paths))
+                           include_paths = include_paths,
+                           fast_math = fast_math))
   ejs <- webr_eval_js()
-  if (!is.null(ejs)) return(mir_from_webr(ejs, code, include_paths = include_paths))
-  mir_from_js(code, include_paths = include_paths)
+  if (!is.null(ejs))
+    return(mir_from_webr(ejs, code, include_paths = include_paths,
+                         fast_math = fast_math))
+  mir_from_js(code, include_paths = include_paths, fast_math = fast_math)
 }

@@ -452,6 +452,11 @@ void run_range(const Program::Instr& I, T* reg) {
         o = stan::math::log_diff_exp(a, b);
       });
       break;
+    case Program::LMULTIPLY:
+      binary([](T& o, const T& a, const T& b, const T&) {
+        o = stan::math::multiply_log(a, b);
+      });
+      break;
     case Program::LOG_MIX:
       ternary([](T& o, const T& a, const T& b, const T& c) {
         o = stan::math::log_mix(a, b, c);

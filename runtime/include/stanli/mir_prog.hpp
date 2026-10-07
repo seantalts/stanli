@@ -2689,6 +2689,8 @@ struct ProgramCompiler {
         return Program::LSE2;
       case OP_LOG_DIFF_EXP:
         return Program::LOG_DIFF_EXP;
+      case OP_LMULTIPLY:
+        return Program::LMULTIPLY;
       case OP_NEG:
         return Program::NEG;
       case OP_EXPV:

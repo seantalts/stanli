@@ -1365,6 +1365,85 @@ def test_reduce_sum_threads_preserve_transformed_data_seed():
                                   fresh.log_prob_grad([0.2])[1])
 
 
+FAST_MATH_SOURCE = """
+data { int<lower=0> N; vector[N] x; vector[N] y; }
+parameters { real a; real b; real<lower=0> sigma; }
+model { y ~ normal(a + b * x, sigma); }
+"""
+FAST_MATH_DATA = {"N": 4, "x": [1, 2, 3, 4], "y": [1.1, 1.9, 3.2, 3.9]}
+
+
+def test_fast_math_is_off_by_default_and_opt_in():
+    q = np.array([0.3, 0.7, -0.2])
+    default_mir = stanli.stan_to_mir(FAST_MATH_SOURCE)
+    assert stanli.stan_to_mir(FAST_MATH_SOURCE, fast_math=False) == default_mir
+    fast_mir = stanli.stan_to_mir(FAST_MATH_SOURCE, fast_math=True)
+    assert fast_mir != default_mir
+
+    default = stanli.Model(stan_code=FAST_MATH_SOURCE, data=FAST_MATH_DATA)
+    assert default.fast_math is False
+    fast = stanli.Model(stan_code=FAST_MATH_SOURCE, data=FAST_MATH_DATA,
+                        fast_math=True)
+    assert fast.fast_math is True
+    from_mir = stanli.Model(mir=fast_mir, data=FAST_MATH_DATA, fast_math=True)
+    lp, grad = default.log_prob_grad(q)
+    for model in (fast, from_mir):
+        fast_lp, fast_grad = model.log_prob_grad(q)
+        np.testing.assert_allclose(fast_lp, lp, rtol=1e-12)
+        np.testing.assert_allclose(fast_grad, grad, rtol=1e-12)
+
+    fast._forward_seed(7)
+    assert fast.fast_math is True
+    np.testing.assert_allclose(fast.log_prob_grad(q)[0], lp, rtol=1e-12)
+    for bad in (1, "yes", None):
+        try:
+            stanli.Model(stan_code=FAST_MATH_SOURCE, data=FAST_MATH_DATA,
+                         fast_math=bad)
+        except TypeError as exc:
+            assert "fast_math" in str(exc)
+        else:
+            raise AssertionError(f"fast_math={bad!r} was accepted")
+
+
+def test_fast_math_reaches_the_subprocess_compiler():
+    suffix = ".exe" if sys.platform == "win32" else ""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        compiler_dir = pathlib.Path(tmpdir)
+        portable = compiler_dir / ("stanli-compile" + suffix)
+        stock = compiler_dir / ("stanc" + suffix)
+        source = compiler_dir / "model.stan"
+        source.write_text("model {}", encoding="utf-8")
+        stock.touch()
+        with mock.patch.object(stanli, "_BIN", compiler_dir):
+            try:
+                stanli._compiler_command(source, fast_math=True)
+            except RuntimeError as exc:
+                assert "fast_math" in str(exc) and "stanli-compile" in str(exc)
+            else:
+                raise AssertionError("stock stanc accepted fast_math")
+            assert stanli._compiler_command(source)[0] == str(stock)
+            portable.touch()
+            assert stanli._compiler_command(source, fast_math=True) == [
+                str(portable), "--fast-math", str(source)]
+            assert stanli._compiler_command(source) == [str(portable), str(source)]
+            assert stanli._compiler_command(
+                source, ["inc"], fast_math=True) == [
+                    str(portable), "--fast-math", "--include-path", "inc",
+                    str(source)]
+
+
+def test_fast_math_needs_a_runtime_with_options():
+    with mock.patch.object(stanli._lib, "stanli_model_new_from_stan_with_opts", None), \
+            mock.patch.object(stanli._lib, "stanli_model_new_with_opts", None):
+        try:
+            stanli.Model(stan_code=FAST_MATH_SOURCE, data=FAST_MATH_DATA,
+                         fast_math=True)
+        except RuntimeError as exc:
+            assert "newer Stanli runtime" in str(exc)
+        else:
+            raise AssertionError("missing native entrypoint was ignored")
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

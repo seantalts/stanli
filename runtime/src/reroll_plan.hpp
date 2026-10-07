@@ -72,6 +72,7 @@ struct Pos {
 struct CandidatePlan {
   int64_t lanes = 0;
   bool column_major = false;
+  bool price_distinct_ops = false;
   std::vector<Pos> positions;
 };
 
@@ -110,6 +111,34 @@ struct GraphSource {
   }
 };
 
+template <class Source>
+std::vector<int64_t> distinct_per_position(const CandidatePlan& plan,
+                                           const Source& source) {
+  const auto& pos = plan.positions;
+  const int P = static_cast<int>(pos.size());
+  std::vector<std::unordered_set<uint64_t>> seen((size_t)P);
+  std::vector<uint64_t> value((size_t)P);
+  for (int64_t l = 0; l < plan.lanes; ++l)
+    for (int p = 0; p < P; ++p) {
+      const Op& o = source.at(p, l);
+      const Pos& ap = pos[(size_t)p];
+      uint64_t h = 1469598103934665603ull;
+      const auto mix = [&h](uint64_t v) { h = (h ^ v) * 1099511628211ull; };
+      for (int j = 0; j < o.n_in; ++j) {
+        const PosIn& in = ap.ins[(size_t)j];
+        mix(in.kind == InKind::kLaneLocal ? value[(size_t)in.producer_pos]
+                                          : (uint64_t)(int64_t)o.in[j]);
+      }
+      for (int64_t m = 0; m < o.n_idata; ++m) mix((uint64_t)o.idata[m]);
+      value[(size_t)p] = h;
+      seen[(size_t)p].insert(h);
+    }
+  std::vector<int64_t> counts((size_t)P);
+  for (int p = 0; p < P; ++p)
+    counts[(size_t)p] = (int64_t)seen[(size_t)p].size();
+  return counts;
+}
+
 // Existing cost model, including CSE's distinct-input-lane discount. Geometry
 // alone must not select a vector plan: choosing this form changes reductions
 // and broadcast-adjoint accumulation order. Source::at must describe every
@@ -122,7 +151,9 @@ bool profitable(const Graph& g, const CandidatePlan& plan,
   const int64_t Luse = plan.lanes;
   const bool layout_cols = plan.column_major;
   int64_t ops_out = 0, added = 0, lane_elems = 0;
+  std::vector<int64_t> position_elems((size_t)P, 0);
   for (int p = 0; p < P; ++p) {
+    const int64_t elems_before = lane_elems;
     const Pos& ap = pos[(size_t)p];
     const int64_t tile_width = ap.rows > 1 ? ap.rows : ap.width;
     for (const PosIn& in : ap.ins)
@@ -173,6 +204,7 @@ bool profitable(const Graph& g, const CandidatePlan& plan,
       ++ops_out;
       lane_elems += 2 * ap.width;
     }
+    position_elems[(size_t)p] = lane_elems - elems_before;
   }
   // A source may prove these exact hashes distinct without constructing
   // them. This is stronger than distinct data values or distinct input tuples:
@@ -198,8 +230,21 @@ bool profitable(const Graph& g, const CandidatePlan& plan,
     }
     distinct = (int64_t)lane_hash.size();
   }
-  added += ops_out * kLaneOpCost + (Luse - distinct) * lane_elems;
-  return distinct * (int64_t)P * kLaneOpCost > added + kLanePartitionMargin;
+  int64_t scalar_ops = distinct * (int64_t)P;
+  int64_t wasted_elems = (Luse - distinct) * lane_elems;
+  if constexpr (!Source::kDistinctLaneHashes) {
+    if (plan.price_distinct_ops) {
+      scalar_ops = 0;
+      wasted_elems = 0;
+      const std::vector<int64_t> counts = distinct_per_position(plan, source);
+      for (int p = 0; p < P; ++p) {
+        scalar_ops += counts[(size_t)p];
+        wasted_elems += (Luse - counts[(size_t)p]) * position_elems[(size_t)p];
+      }
+    }
+  }
+  added += ops_out * kLaneOpCost + wasted_elems;
+  return scalar_ops * kLaneOpCost > added + kLanePartitionMargin;
 }
 
 // The classifier supplies the structural proof. This move-only boundary

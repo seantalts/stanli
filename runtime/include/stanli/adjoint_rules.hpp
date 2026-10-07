@@ -87,6 +87,12 @@ inline void log_diff_exp_rule(double t, double va, double vb, double& adj_a,
   adj_b -= t / stan::math::expm1(va - vb);
 }
 
+inline void lmultiply_rule(double t, double va, double vb, double& adj_a,
+                           double& adj_b) {
+  adj_a += t * std::log(vb);
+  adj_b += t * va / vb;
+}
+
 // rev/fun/log_mix.hpp: partials through the helper, with the arms swapped
 // when lambda1 <= lambda2 so the exponential cannot overflow. Transcribed
 // rather than reused because log_mix's partials live in the rev overload,

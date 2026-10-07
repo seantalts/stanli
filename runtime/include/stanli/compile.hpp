@@ -232,6 +232,7 @@ struct CompileOptions {
   int reduce_sum_threads = 1;
   int64_t reduce_sum_min_elements = 8192;
   int reduce_sum_max_chunks = 1024;
+  bool fast_math = false;
 };
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                             unsigned seed = 1);

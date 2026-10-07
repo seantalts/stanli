@@ -1100,7 +1100,47 @@ static void test_scaling() {
   if (rss > 0.0) expect("partition space stays linear", rss < 1024.0);
 }
 
+static void test_fast_fuses_shared_parameter() {
+  const int L = 12;
+  Graph g;
+  Fills fills;
+  const int base = g.add_slot(L, true);
+  const int sigma = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int idx = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {base}, idx, {l});
+    const int y = g.add_slot(1, false);
+    fills.emplace_back(y, std::vector<double>{0.2 * l - 0.5});
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_NORMAL_LPDF, {y, idx, sigma}, lp);
+    g.ops[(size_t)id].variant = 0x06;
+    const int mixed = g.add_slot(1, false);
+    g.add_op(OP_LSE2, {lp, sigma}, mixed);
+    terms.push_back(mixed);
+  }
+  const std::vector<double> want = reference(g, fills, terms);
+
+  {
+    Graph off = g;
+    std::vector<int> tt = terms;
+    Fills f2 = fills;
+    const PartitionStats st = partition_lanes(off, f2, tt, {}, false);
+    expect(
+        "shared parameter declines by default",
+        st.groups == 0 && st.declined == 1 && off.ops.size() == 3 * (size_t)L);
+  }
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {}, true);
+  expect("fast mode fuses the shared parameter",
+         st.groups == 1 && st.lanes == L && st.declined == 0);
+  expect("fast mode shrinks the graph", g.ops.size() < 3 * (size_t)L);
+  expect_same_grad("fast shared parameter", std::move(g), f2, tt, want);
+}
+
 int main() {
+  test_fast_fuses_shared_parameter();
   {  // kernels register through the first Executor
     Graph g;
     const int a = g.add_slot(1, true), o = g.add_slot(1, false);

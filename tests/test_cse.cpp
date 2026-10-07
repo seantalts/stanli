@@ -426,6 +426,143 @@ static void test_shared_backward_bitwise() {
   expect("some points evaluate", n_finite >= 3);
 }
 
+static bool close_values(const std::vector<double>& got,
+                         const std::vector<double>& want, double tol) {
+  if (got.size() != want.size()) return false;
+  for (size_t i = 0; i < got.size(); ++i) {
+    if (std::isfinite(want[i]) != std::isfinite(got[i])) return false;
+    if (std::isfinite(want[i]) &&
+        std::abs(got[i] - want[i]) > tol * std::max(1.0, std::abs(want[i])))
+      return false;
+  }
+  return true;
+}
+
+static void test_fast_merges_active_duplicates() {
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  const int e1 = g.add_slot(1, false), e2 = g.add_slot(1, false);
+  g.add_op(OP_EXP, {p}, e1);
+  g.add_op(OP_EXP, {p}, e2);
+  const int s = g.add_slot(1, false);
+  g.add_op(OP_ADD, {e1, e2}, s);
+  g.result_slot = s;
+
+  Graph ref = g;
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  std::vector<int> terms;
+  Graph off = g;
+  const CseStats st_off = cse(off, fills, terms, {}, false);
+  expect("explicit off shares primal only", st_off.primals_shared == 1 &&
+                                                st_off.ops_removed == 0 &&
+                                                count_opcode(off, OP_EXP) == 2);
+
+  const CseStats st = cse(g, fills, terms, {}, true);
+  expect("fast removes the duplicate", st.ops_removed == 1);
+  expect("fast shares no primal", st.primals_shared == 0);
+  expect("one EXP remains", count_opcode(g, OP_EXP) == 1);
+  expect("both ADD inputs are the survivor",
+         g.ops.back().in[0] == e1 && g.ops.back().in[1] == e1);
+  expect_same_values("fast value and gradient", run_grad(std::move(g), fills),
+                     want);
+}
+
+static void test_fast_merge_target_terms() {
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  const int t1 = g.add_slot(1, false), t2 = g.add_slot(1, false);
+  g.add_op(OP_EXP, {p}, t1);
+  g.add_op(OP_EXP, {p}, t2);
+  std::vector<int> terms{t1, t2};
+  Graph ref = g;
+  testutil::reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+
+  const CseStats st = cse(g, fills, terms, {}, true);
+  expect("duplicate term removed", st.ops_removed == 1 && g.ops.size() == 1);
+  expect("both terms name the survivor",
+         terms.size() == 2 && terms[0] == t1 && terms[1] == t1);
+  testutil::reduce_into_result(g, terms);
+  expect_same_values("fast term gradient", run_grad(std::move(g), fills), want);
+}
+
+static void test_fast_merge_chain() {
+  Graph g;
+  Fills fills;
+  const int a = g.add_slot(1, true), b = g.add_slot(1, true);
+  const int c = g.add_slot(1, true);
+  const int s1 = g.add_slot(1, false), s2 = g.add_slot(1, false);
+  g.add_op(OP_ADD, {a, b}, s1);
+  g.add_op(OP_ADD, {a, b}, s2);
+  const int m1 = g.add_slot(1, false), m2 = g.add_slot(1, false);
+  g.add_op(OP_MUL, {s1, c}, m1);
+  g.add_op(OP_MUL, {s2, c}, m2);
+  const int r = g.add_slot(1, false);
+  g.add_op(OP_ADD, {m1, m2}, r);
+  g.result_slot = r;
+
+  Graph ref = g;
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+  std::vector<int> terms;
+  const CseStats st = cse(g, fills, terms, {}, true);
+  expect("both levels merge", st.ops_removed == 2 && g.ops.size() == 3);
+  expect_same_values("fast chain gradient", run_grad(std::move(g), fills),
+                     want);
+}
+
+static void test_fast_keeps_active_roots_and_effects() {
+  Graph g;
+  Fills fills;
+  const int p = g.add_slot(1, true);
+  const int e1 = g.add_slot(1, false), e2 = g.add_slot(1, false);
+  g.add_op(OP_EXP, {p}, e1);
+  g.add_op(OP_EXP, {p}, e2);
+  g.result_slot = e1;
+  std::vector<int> terms;
+  const CseStats st = cse(g, fills, terms, {e2}, true);
+  expect("fast keeps a root", st.ops_removed == 0);
+
+  for (uint16_t oc : {OP_PRINT, OP_REJECT, OP_CHECK_LOWER}) {
+    Graph h;
+    const int q = h.add_slot(1, true);
+    const int a = h.add_slot(1, false), b = h.add_slot(1, false);
+    h.add_op(oc, {q}, a);
+    h.add_op(oc, {q}, b);
+    std::vector<int> none;
+    const CseStats hs = cse(h, fills, none, {}, true);
+    std::string what = std::string(opcode_name(oc)) + " never merges in fast";
+    expect(what.c_str(), hs.ops_removed == 0 && h.ops.size() == 2);
+  }
+}
+
+static void test_fast_merge_many_kernels() {
+  SharedBackwardGraph sb = build_shared_backward_graph();
+  Graph merged = sb.g;
+  std::vector<int> terms;
+  const CseStats st = cse(merged, sb.fills, terms, {}, true);
+  expect("fast removes the duplicates",
+         st.ops_removed >= 40 && st.primals_shared == 0);
+  expect("graph shrinks by the removed count",
+         merged.ops.size() == sb.g.ops.size() - (size_t)st.ops_removed);
+  const std::vector<std::vector<double>> points = {
+      {0.3, 0.5, 0.7, 0.1, -0.4, 0.9},
+      {-1.3, 2.1, -0.2, 3.0, 0.5, -2.0},
+      {0.0, 0.0, 0.0, 0.0, 0.0, 0.0},
+      {1e3, 1e3, -1e3, 0.0, 0.0, 0.0},
+  };
+  for (size_t k = 0; k < points.size(); ++k) {
+    const Evaluation want = evaluate_at(sb.g, sb.fills, points[k]);
+    const Evaluation got = evaluate_at(merged, sb.fills, points[k]);
+    const std::string what =
+        "fast merge matches default, point " + std::to_string(k);
+    expect(what.c_str(),
+           got.threw == want.threw && close_values(got.out, want.out, 1e-12));
+  }
+}
+
 int main() {
   {  // kernels register through the first Executor
     Graph g;
@@ -446,6 +583,11 @@ int main() {
   test_env_disable();
   test_gradient_accumulation_order();
   test_shared_backward_bitwise();
+  test_fast_merges_active_duplicates();
+  test_fast_merge_target_terms();
+  test_fast_merge_chain();
+  test_fast_keeps_active_roots_and_effects();
+  test_fast_merge_many_kernels();
   if (failures == 0) std::printf("test_cse OK\n");
   return failures == 0 ? 0 : 1;
 }

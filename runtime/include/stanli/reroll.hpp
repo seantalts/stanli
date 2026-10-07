@@ -43,10 +43,15 @@ struct RerollStats {
 // directly and which therefore have no consuming op to find. The pass
 // refuses to fold a region that would stop writing one. Passing an
 // incomplete list is a miscompile, so this is not defaulted.
+//
+// `fuse_shared_params` (fast mode) widens regions that read one active scalar
+// at several positions, so its adjoint contributions are summed position by
+// position instead of lane by lane.
 RerollStats reroll(Graph& g,
                    std::vector<std::pair<int, std::vector<double>>>& fills,
                    std::vector<int>& target_terms,
-                   const std::vector<int>& extra_roots);
+                   const std::vector<int>& extra_roots,
+                   bool fuse_shared_params = false);
 
 }  // namespace stanli
 

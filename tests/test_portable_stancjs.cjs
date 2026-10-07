@@ -38,6 +38,13 @@ const compileModel =
     (exported && exported.stanli_compile_model) || globalThis.stanli_compile_model;
 if (typeof compile !== "function") fail("no stanli_compile() export");
 if (typeof compileModel !== "function") fail("no stanli_compile_model() export");
+const compileFast =
+    (exported && exported.stanli_compile_fast) || globalThis.stanli_compile_fast;
+const compileModelFast = (exported && exported.stanli_compile_model_fast) ||
+    globalThis.stanli_compile_model_fast;
+if (typeof compileFast !== "function") fail("no stanli_compile_fast() export");
+if (typeof compileModelFast !== "function")
+  fail("no stanli_compile_model_fast() export");
 const compatibleStanc = (exported && exported.stanc) || globalThis.stanc;
 if (typeof compatibleStanc !== "function") fail("no compatible stanc() export");
 const customVersion = compatibleStanc("version-test", "", ["version"]);
@@ -163,6 +170,33 @@ for (const [name, relative, includes] of models) {
     legacy_bytes: legacyBytes,
     legacy_gzip_bytes: legacyGzipBytes,
   });
+}
+
+for (const relative of ["tests/compiler/portable_fast_math.stan",
+                        "tests/fixtures/es.stan",
+                        "tests/compiler/portable_folded_float.stan"]) {
+  const model = path.join(repo, relative);
+  const code = fs.readFileSync(model, "utf8");
+  const native = execFileSync(nativePath, ["--fast-math", model], {
+    maxBuffer: 1 << 28,
+  });
+  const nativeModel = execFileSync(
+      nativePath, ["--model-only", "--fast-math", model], {maxBuffer: 1 << 28});
+  const js = compileFast("embedded_model", code);
+  const jsModel = compileModelFast("embedded_model", code);
+  if (js.errors || jsModel.errors)
+    fail(relative + ": fast-math compilation failed");
+  if (!Buffer.from(String(js.result)).equals(native))
+    fail(relative + ": fast-math native/JS bytes differ");
+  if (!Buffer.from(String(jsModel.result)).equals(nativeModel))
+    fail(relative + ": fast-math model-only native/JS bytes differ");
+  const plain = String(compile("embedded_model", code).result);
+  const fast = String(js.result);
+  if (relative.endsWith("portable_fast_math.stan")) {
+    if (fast === plain) fail("fast mode left the linear predictor unchanged");
+    if (!portablePayload(fast, relative).includes(Buffer.from("fma", "utf8")))
+      fail("fast mode did not fuse the linear predictor");
+  }
 }
 
 const warningCode =

@@ -30,7 +30,8 @@ struct ProfiledRerollStats {
 // dispositions.
 ProfiledRerollStats reroll_profiled(
     Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
-    std::vector<int>& target_terms, const std::vector<int>& extra_roots);
+    std::vector<int>& target_terms, const std::vector<int>& extra_roots,
+    bool fuse_shared_params = false);
 
 struct SignatureCheckResult {
   int64_t pairs_checked = 0;

@@ -66,6 +66,11 @@ read_utf8_file <- function(path) {
 #'   current directory for `code`). Nested includes use the same search path.
 #'   Included source is compiled once and retained when sampling rebuilds the
 #'   model, even if the files later change or move. Ignored when `mir` is supplied.
+#' @param fast_math `TRUE` opts this model into fast mode: the Stan source is
+#'   compiled with fused multiply-add rewriting and the runtime may use faster,
+#'   less exactly rounded evaluation, so results can differ from the default
+#'   in the last bits. Defaults to `FALSE`. With `mir`, use MIR compiled in
+#'   fast mode.
 #' @return An object of class `stanli_model` whose `columns` name every
 #'   output the way the posterior package reads them, `theta[1,2]` for an
 #'   indexed value. Warns, naming the part and the
@@ -75,8 +80,11 @@ read_utf8_file <- function(path) {
 #'   what to include in a bug report.
 #' @export
 stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
-                         seed = 1, threads_per_chain = 1, include_paths = NULL) {
+                         seed = 1, threads_per_chain = 1, include_paths = NULL,
+                         fast_math = FALSE) {
   cstan_integer(threads_per_chain, "threads_per_chain")
+  if (!is.logical(fast_math) || length(fast_math) != 1L || is.na(fast_math))
+    stop("fast_math must be TRUE or FALSE", call. = FALSE)
   load_runtime()
   if (is.null(mir)) {
     source_file <- NULL
@@ -86,12 +94,13 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
       source_file <- file
     }
     has_includes <- grepl("#include", code, fixed = TRUE)
+    paths <- character()
     if (has_includes || !is.null(include_paths))
       paths <- stan_include_paths(include_paths, source_file)
-    if (has_includes) {
+    if (has_includes || fast_math) {
       mir <- if (.Call("stanli_r_has_embedded_stanc"))
-        .Call("stanli_r_stan_to_mir", code, paths) else
-        stanc_mir(code, include_paths = paths)
+        .Call("stanli_r_stan_to_mir", code, paths, fast_math) else
+        stanc_mir(code, include_paths = paths, fast_math = fast_math)
     }
   }
   data_json <- if (is.null(data)) {
@@ -115,7 +124,7 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
     model_name = if (is.null(file)) "stanli_model" else
       tools::file_path_sans_ext(basename(file)),
     model_code = if (is.null(code)) character(0) else code,
-    threads_per_chain = threads_per_chain)
+    threads_per_chain = threads_per_chain, fast_math = fast_math)
   note <- .Call("stanli_r_warnings", model$ptr)
   if (nzchar(note)) warning(note, call. = FALSE)
   model
@@ -128,9 +137,9 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
 # vector length and the columns along with the draws.
 build_model <- function(code, data_json, is_mir, seed,
                         model_name = "stanli_model", model_code = character(0),
-                        threads_per_chain = 1) {
+                        threads_per_chain = 1, fast_math = FALSE) {
   ptr <- .Call("stanli_r_model_new", code, data_json, is_mir,
-               as.numeric(seed), as.integer(threads_per_chain))
+               as.numeric(seed), as.integer(threads_per_chain), fast_math)
   structure(list(ptr = ptr,
                  n_unconstrained = .Call("stanli_r_n_unconstrained", ptr),
                  columns = stan_variable_names(
@@ -140,6 +149,7 @@ build_model <- function(code, data_json, is_mir, seed,
                  source = list(code = code, data_json = data_json,
                                is_mir = is_mir),
                  seed = seed, threads_per_chain = threads_per_chain,
+                 fast_math = fast_math,
                  reduce_sum_count = .Call("stanli_r_reduce_sum_count", ptr),
                  reduce_sum_fallbacks = strsplit(
                    .Call("stanli_r_reduce_sum_fallbacks", ptr), "\n", fixed = TRUE)[[1L]]),
@@ -157,7 +167,7 @@ with_run_seed <- function(model, seed, threads_per_chain = model$threads_per_cha
     return(model)
   build_model(model$source$code, model$source$data_json,
               model$source$is_mir, seed, model$model_name, model$model_code,
-              threads_per_chain)
+              threads_per_chain, model$fast_math)
 }
 
 stan_variable_names <- function(x) {

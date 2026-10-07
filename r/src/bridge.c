@@ -130,6 +130,18 @@ static void* (*p_model_new_from_stan_seeded)(const char*, const char*, uint32_t,
                                              char*, size_t);
 static void* (*p_model_new_seeded)(const char*, const char*, uint32_t, char*,
                                    size_t);
+typedef struct {
+  uint32_t seed;
+  int threads_per_chain;
+  int fast_math;
+} model_opts;
+static void* (*p_model_new_with_opts)(const char*, const char*,
+                                      const model_opts*, char*, size_t);
+static void* (*p_model_new_from_stan_with_opts)(const char*, const char*,
+                                                const model_opts*, char*,
+                                                size_t);
+static char* (*p_stan_to_mir_with_opts)(const char*, const char* const*, size_t,
+                                        int, char*, size_t);
 static void (*p_model_free)(void*);
 static int (*p_has_embedded_stanc)(void);
 static char* (*p_stan_to_mir_with_includes)(const char*, const char* const*,
@@ -234,6 +246,12 @@ SEXP stanli_bridge_load(SEXP path) {
   *(void**)(&p_model_new_from_stan_seeded) =
       dl_sym(g_lib, "stanli_model_new_from_stan_seeded");
   *(void**)(&p_model_new_seeded) = dl_sym(g_lib, "stanli_model_new_seeded");
+  *(void**)(&p_model_new_with_opts) =
+      dl_sym(g_lib, "stanli_model_new_with_opts");
+  *(void**)(&p_model_new_from_stan_with_opts) =
+      dl_sym(g_lib, "stanli_model_new_from_stan_with_opts");
+  *(void**)(&p_stan_to_mir_with_opts) =
+      dl_sym(g_lib, "stanli_stan_to_mir_with_opts");
   BIND("stanli_model_free", p_model_free);
   BIND("stanli_has_embedded_stanc", p_has_embedded_stanc);
   *(void**)(&p_stan_to_mir_with_includes) =
@@ -306,7 +324,7 @@ static void* model_ptr(SEXP ext) {
 }
 
 SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
-                        SEXP threads_per_chain) {
+                        SEXP threads_per_chain, SEXP fast_math) {
   require_loaded();
   char err[8192];
   err[0] = '\0';
@@ -316,7 +334,16 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
   const uint32_t construction_seed = (uint32_t)asReal(seed);
   const int threads = asInteger(threads_per_chain);
   if (threads < 1) error("threads_per_chain must be positive");
-  if (threads > 1) {
+  if (asLogical(fast_math) == TRUE) {
+    if (p_model_new_with_opts == NULL ||
+        p_model_new_from_stan_with_opts == NULL)
+      error("fast_math requires a newer Stanli runtime; run stanli_install()");
+    model_opts opts = {construction_seed, threads, 1};
+    m = asLogical(is_mir)
+            ? p_model_new_with_opts(text, data, &opts, err, sizeof err)
+            : p_model_new_from_stan_with_opts(text, data, &opts, err,
+                                              sizeof err);
+  } else if (threads > 1) {
     if (p_model_new_threaded == NULL || p_model_new_from_stan_threaded == NULL)
       error("threads_per_chain requires a newer Stanli runtime");
     m = asLogical(is_mir)
@@ -356,17 +383,24 @@ SEXP stanli_r_has_embedded_stanc(void) {
   return ScalarLogical(p_has_embedded_stanc());
 }
 
-SEXP stanli_r_stan_to_mir(SEXP code, SEXP include_paths) {
+SEXP stanli_r_stan_to_mir(SEXP code, SEXP include_paths, SEXP fast_math) {
   require_loaded();
-  if (p_stan_to_mir_with_includes == NULL || p_string_free == NULL)
+  const int fast = asLogical(fast_math) == TRUE;
+  if (fast && (p_stan_to_mir_with_opts == NULL || p_string_free == NULL))
+    error("fast_math requires a newer Stanli runtime; run stanli_install()");
+  if (!fast && (p_stan_to_mir_with_includes == NULL || p_string_free == NULL))
     error("Stan includes require a newer Stanli runtime; run stanli_install()");
   const size_t count = (size_t)XLENGTH(include_paths);
   const char** paths = (const char**)R_alloc(count, sizeof(char*));
   for (size_t i = 0; i < count; ++i)
     paths[i] = Rf_translateCharUTF8(STRING_ELT(include_paths, i));
   char err[8192] = {0};
-  char* mir = p_stan_to_mir_with_includes(
-      Rf_translateCharUTF8(STRING_ELT(code, 0)), paths, count, err, sizeof err);
+  char* mir =
+      fast ? p_stan_to_mir_with_opts(Rf_translateCharUTF8(STRING_ELT(code, 0)),
+                                     paths, count, 1, err, sizeof err)
+           : p_stan_to_mir_with_includes(
+                 Rf_translateCharUTF8(STRING_ELT(code, 0)), paths, count, err,
+                 sizeof err);
   if (mir == NULL) error("%s", err[0] ? err : "Stan source compilation failed");
   SEXP result = PROTECT(ScalarString(mkCharCE(mir, CE_UTF8)));
   p_string_free(mir);

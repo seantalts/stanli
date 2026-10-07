@@ -1,6 +1,6 @@
 let usage =
-  "usage: stanli-vectorize-probe --vectorize-loops off|on --output OUT \
-   [--legacy-output OUT] MODEL.stan"
+  "usage: stanli-vectorize-probe --vectorize-loops off|on [--fast-math] \
+   --output OUT [--legacy-output OUT] MODEL.stan"
 
 let fail_usage message =
   prerr_endline message;
@@ -12,6 +12,8 @@ let enabled_value option = function
   | "on" -> true
   | value -> fail_usage ("unknown " ^ option ^ " value: " ^ value)
 
+let fast_math = ref false
+
 let rec parse_args index vectorize output legacy_output model =
   if index = Array.length Sys.argv then (vectorize, output, legacy_output, model)
   else
@@ -19,6 +21,9 @@ let rec parse_args index vectorize output legacy_output model =
     | "--vectorize-loops" when index + 1 < Array.length Sys.argv ->
         let enabled = enabled_value "vectorize-loops" Sys.argv.(index + 1) in
         parse_args (index + 2) (Some enabled) output legacy_output model
+    | "--fast-math" ->
+        fast_math := true;
+        parse_args (index + 1) vectorize output legacy_output model
     | "--output" when index + 1 < Array.length Sys.argv ->
         parse_args (index + 2) vectorize (Some Sys.argv.(index + 1)) legacy_output
           model
@@ -56,7 +61,7 @@ let () =
   let compilation =
     Stanli_pipeline.compile_mir_with_passes
       ~passes:
-        { (Stanli_pipeline.selected_default_passes ()) with
+        { (Stanli_pipeline.selected_default_passes ~fast_math:!fast_math ()) with
           vectorize_loops= vectorize }
       ~model_name:"embedded_model" code
       ~include_source:

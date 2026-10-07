@@ -8,6 +8,7 @@
 //        [--sampler-stats] [--chains N] [--num-threads N] [--threads-per-chain
 //        N] [--thin N]
 //        [--save-warmup] [--init-radius X] [--summary] [--timings]
+//        [--fast-math]
 //
 // --chains runs N chains and concatenates their draws in chain order, so
 // a reader that expects one chain still parses the CSV. --summary is
@@ -54,7 +55,8 @@ int main(int argc, char** argv) {
         "[--max-depth N] [--stanli-compile PATH | --stanc PATH] "
         "[--sampler-stats] "
         "[--chains N] [--num-threads N] [--threads-per-chain N] [--thin N] "
-        "[--save-warmup] [--init-radius X] [--summary] [--timings]\n");
+        "[--save-warmup] [--init-radius X] [--summary] [--timings] "
+        "[--fast-math]\n");
     return 2;
   }
   std::string model = argv[1], datafile = argv[2];
@@ -67,6 +69,7 @@ int main(int argc, char** argv) {
   bool want_stats = false;
   bool want_summary = false;
   bool want_timings = false;
+  bool fast_math = false;
   int n_chains = 1;
   // 0 means "one thread per chain", resolved once n_chains is known.
   // Threading does not change the draws -- they are byte-identical to a
@@ -82,6 +85,10 @@ int main(int argc, char** argv) {
     }
     if (k == "--sampler-stats") {
       want_stats = true;
+      continue;
+    }
+    if (k == "--fast-math") {
+      fast_math = true;
       continue;
     }
     if (k == "--summary") {
@@ -157,11 +164,12 @@ int main(int argc, char** argv) {
     const auto timing_start = want_timings ? Clock::now() : Clock::time_point{};
     stanli::DataMap data = stanli::DataMap::from_json_file(datafile);
     const std::string mir =
-        stanli::tooling::compile_source(stanc, compiler, model);
+        stanli::tooling::compile_source(stanc, compiler, model, fast_math);
     if (mir.empty())
       throw std::runtime_error("the compiler produced no MIR (compile error?)");
     stanli::CompileOptions compile_options;
     compile_options.reduce_sum_threads = threads_per_chain;
+    compile_options.fast_math = fast_math;
     stanli::CompiledModel cm =
         stanli::compile_model(mir, data, cfg.seed, compile_options);
     const auto reductions = std::count_if(
