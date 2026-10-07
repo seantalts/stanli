@@ -3,6 +3,7 @@
 
 python3 harnesses/ab_bench_corpus.py PDB OUT_DIR --arm base=BIN --arm new=BIN \
     [--arm aa=BIN_COPY] [--rounds 7] [--filter SUBSTR] [--limit N]
+    [--fast-math] [--arm-env new:STANLI_NO_COLLAPSE=1]
 
 Uses the protocol of harnesses/corpus_bench.py (docs/benchmarks.md#how-we-measure):
 MIR from the vectorizing stanc, bench_grad --timed with a 200 ms warmup and a
@@ -12,6 +13,9 @@ against CmdStan. OUT_DIR/results.jsonl holds one record per model (every
 sample, the order, the load average, the density and gradient values);
 rerunning with the same OUT_DIR skips models already recorded.
 Binaries should be copies, so that no rebuild can change them mid-sweep.
+--fast-math builds the MIR in fast mode and passes --fast-math to every arm;
+--arm-env sets one environment variable for one arm, so a single binary can
+be compared with a pass switched off.
 """
 import argparse
 import hashlib
@@ -53,10 +57,18 @@ def main():
                     help="file with one model name per line")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--load-limit", type=float, default=3.0)
+    ap.add_argument("--fast-math", action="store_true")
+    ap.add_argument("--arm-env", action="append", default=[],
+                    metavar="ARM:VAR=VALUE")
     args = ap.parse_args()
     arms = [a.split("=", 1) for a in args.arm]
     names = [n for n, _ in arms]
     binaries = {n: pathlib.Path(b).resolve() for n, b in arms}
+    arm_env = {n: [] for n in names}
+    for setting in args.arm_env:
+        arm, assignment = setting.split(":", 1)
+        arm_env[arm].append(assignment)
+    fast = ["--fast-math"] if args.fast_math else []
     args.output.mkdir(parents=True, exist_ok=True)
     results = args.output / "results.jsonl"
     done = set()
@@ -74,6 +86,7 @@ def main():
     (args.output / "manifest.json").write_text(json.dumps(dict(
         arms={n: dict(path=str(b), sha256=hashlib.sha256(b.read_bytes()).hexdigest())
               for n, b in binaries.items()},
+        fast_math=args.fast_math, arm_env=arm_env,
         rounds=args.rounds, warmup_ms=args.warmup_ms, measure_ms=args.measure_ms,
         thread_env="STAN_NUM_THREADS=1", started=time.ctime()), indent=1))
     pauses = []
@@ -93,14 +106,15 @@ def main():
             source.write_bytes(stan.read_bytes())
             materialize_data(data, data_json)
             runner.require(f"{name}/mir", [VECTORIZE_PROBE, "--vectorize-loops", "on",
-                                           "--output", mir, source], args.timeout)
+                                           *fast, "--output", mir, source], args.timeout)
             for round_index in range(args.rounds):
                 order = rotation(names, round_index)
                 record["orders"].append(order)
                 for arm in order:
                     event = runner.require(
                         f"{name}/gradient/{round_index}/{arm}",
-                        [binaries[arm], mir, data_json, "--timed", "--warmup-ms",
+                        [*(["env", *arm_env[arm]] if arm_env[arm] else []),
+                         binaries[arm], mir, data_json, "--timed", *fast, "--warmup-ms",
                          str(args.warmup_ms), "--measure-ms", str(args.measure_ms)],
                         args.timeout)
                     timing = parse_timing(runner.text(event), args.warmup_ms, args.measure_ms)

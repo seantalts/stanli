@@ -1,3 +1,4 @@
+#include "env_helpers.hpp"
 #include <stanli/compile.hpp>
 #include <stanli/data.hpp>
 #include <stanli/optable.hpp>
@@ -35,6 +36,7 @@ struct Run {
   size_t ops = 0;
   int bernoulli = 0;
   int normal = 0;
+  int quadratic = 0;
   double lp = 0;
   std::vector<double> grad;
 };
@@ -54,6 +56,7 @@ Run run(const std::string& name, const CompileOptions& options) {
   r.ops = cm.graph.ops.size();
   r.bernoulli = count_opcode(cm.graph, OP_BERNOULLI_LPMF);
   r.normal = count_opcode(cm.graph, OP_NORMAL_LPDF);
+  r.quadratic = count_opcode(cm.graph, OP_LINEAR_GAUSSIAN_LPDF);
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
   const int64_t n = ex.n_params();
@@ -94,12 +97,16 @@ void test_active_duplicates_merge() {
   expect("fast cse gradient matches default", close(fast, slow));
 }
 
+// The fusion on its own: the observation collapse would go on to replace
+// the fused density, so it is switched off here.
 void test_shared_parameter_fuses() {
   CompileOptions off, on;
   on.fast_math = true;
   const Run base = run("fast_math_shared", CompileOptions{});
   const Run slow = run("fast_math_shared", off);
+  test_setenv("STANLI_NO_COLLAPSE", "1");
   const Run fast = run("fast_math_shared", on);
+  test_unsetenv("STANLI_NO_COLLAPSE");
   expect("default options match explicit false", same_bits(base, slow));
   expect("default keeps every scalar density", slow.normal == 16);
   expect("fast fuses the loop", fast.normal == 1);
@@ -107,11 +114,25 @@ void test_shared_parameter_fuses() {
   expect("fast fused gradient matches default", close(fast, slow));
 }
 
+// Sixteen observations whose locations are mu * x[n] + mu: once fused, one
+// quadratic form in mu.
+void test_observations_collapse() {
+  CompileOptions off, on;
+  on.fast_math = true;
+  const Run slow = run("fast_math_shared", off);
+  const Run fast = run("fast_math_shared", on);
+  expect("default has no quadratic form", slow.quadratic == 0);
+  expect("fast collapses the fused density",
+         fast.normal == 0 && fast.quadratic == 1);
+  expect("fast collapsed gradient matches default", close(fast, slow));
+}
+
 }  // namespace
 
 int main() {
   test_active_duplicates_merge();
   test_shared_parameter_fuses();
+  test_observations_collapse();
   if (failures == 0) std::printf("test_fast_math OK\n");
   return failures == 0 ? 0 : 1;
 }

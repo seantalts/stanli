@@ -279,6 +279,7 @@ void register_island_kernel();
 void register_region_map_kernel();
 void register_structured_loop_kernel();
 void register_reduce_sum_kernel();
+void register_collapse_kernels();
 
 static void ensure_registered() {
   static const bool once = [] {
@@ -296,6 +297,7 @@ static void ensure_registered() {
     register_message_kernels();
     register_rng_kernel();
     register_eltwise_kernels();
+    register_collapse_kernels();
     register_scalar_binary_kernels();
     register_scalar_unary_ad_kernels();
     register_mixture_kernels();

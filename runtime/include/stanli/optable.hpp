@@ -193,7 +193,9 @@ namespace stanli {
   X(OP_ODE_ADJOINT)                   \
   X(OP_STUDENT_T_QF)                  \
   X(OP_POISSON_BINOMIAL)              \
-  X(OP_HYPERGEOMETRIC_1F0)
+  X(OP_HYPERGEOMETRIC_1F0)            \
+  X(OP_NORMAL_GROUPED_LPDF)           \
+  X(OP_LINEAR_GAUSSIAN_LPDF)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry

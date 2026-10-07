@@ -339,6 +339,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/constrain.cpp
   runtime/kernels/eltwise_expr.cpp
   runtime/kernels/mixture.cpp
+  runtime/kernels/collapse_kernels.cpp
   runtime/kernels/message.cpp
   runtime/kernels/rng.cpp
   runtime/kernels/island.cpp
@@ -375,6 +376,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
   runtime/src/collapse.cpp
+  runtime/src/collapse_linear.cpp
   runtime/src/cse.cpp
   runtime/src/gp_cov_fusion.cpp
   runtime/src/graph_print.cpp
