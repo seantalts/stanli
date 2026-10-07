@@ -99,7 +99,7 @@ and are separate from CI correctness gates.
 | compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | source-changing PRs |
 | MIR wire cost | Is the compact-v2 decoder materially faster and the wire materially smaller than legacy MIR? | On Eight Schools, median decode time and raw bytes must each be at most half the legacy value | after merge, nightly, and on demand |
 | corpus comparison | Are the 352 models in the shared corpus consistent with recorded CmdStan behavior at three fixed inputs? | 10 ULP for 124 fixtures with same-platform references; scaled error of 1e-9 for most points, with documented limits for `kronecker_gp` and three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | source-changing PRs |
-| fast-mode corpus comparison | Is fast mode's error small at the same 352 models and points? | Log density within 1e-12 scaled error; gradient within 1e-12 of its largest entry; rejection parity; see [Fast mode](#fast-mode) | defined, not yet enforced |
+| fast-mode corpus comparison | Is fast mode's error small at the same 352 models and points? | Log density within 1e-12 scaled error; gradient within 1e-12 of its largest entry; rejection parity; see [Fast mode](#fast-mode) | on demand (`verify_refs.py --fast-math`); not yet in CI |
 | corpus sampling smoke | Do inventory-selected source models produce complete saved draws? | Exactly 100 saved draws after 100 warmup iterations, exact reference output names/order, finite outputs and no missing columns | source-changing PRs, within CTest |
 | cross-path matrix | Do stanli's execution paths agree with one another? | Bitwise, except entries named in the ledger | source-changing PRs, within CTest |
 | transformation A/B | Do selected graph optimizations preserve model results? | Optimizations enabled and disabled agree at the default point within 1e-11 | manually after optimization changes |
@@ -385,8 +385,8 @@ Fast mode (`fast_math`) is opt-in and is not held to the ULP limits above. It
 may reorder sums and use different arithmetic, so it is judged on the size of
 its error, not on matching CmdStan's last bits.
 
-Status: this gate is defined but not yet enforced. `tools/verify_refs.py` has
-no fast-mode option and no CI job runs it.
+Status: `tools/verify_refs.py --fast-math` runs this gate; no CI job runs it
+yet.
 
 The gate replays the same 352 models at the same three points against the
 same recorded CmdStan values, with the model compiled in fast mode. At each
@@ -415,13 +415,16 @@ A fast-mode kernel that replaces per-observation arithmetic with a closed form
 own against a high-precision reference, including inputs chosen to make it
 cancel.
 
-Measured on 2026-10-06 (Linux x86-64, `fastmath/mode` at `73a344cd`, baseline
-kernels): over the 1034 referenced points outside the exceptions, the worst
-fast-mode log-density error is 5.8e-14 and the worst gradient error is
-3.6e-14. Default mode on the same machine measures 5.8e-14 and 3.4e-14 against
-these references, most of which were recorded on another platform, so much of
-the distance is the reference's. Fast and default mode never differ from each
-other by more than 3.6e-14, and they agree on every rejection.
+Measured on 2026-10-06 (Linux x86-64, clang 18.1.3, `fastmath/mode` at
+`73a344cd`, baseline kernels): 351 of 352 models pass, and the worst error
+outside the exceptions is 5.8e-14 on the log density and 3.6e-14 on the
+gradient. Default mode on the same machine measures 5.8e-14 and 3.4e-14 in
+this metric against these references, most of which were recorded on another
+platform, so much of the distance is the reference's. Fast and default mode
+never differ from each other by more than 3.6e-14, and they agree on every
+rejection. The failing model is `sw_gp` (4.4e-8 at point 0 against its 1e-9
+limit); it fails the default replay on this toolchain too, with
+`i320_gp_expquad` and `i320_gp_matern32`.
 
 ## Unit tests for numerical operations
 

@@ -493,7 +493,8 @@ def fail_detail(proc, got):
     return detail
 
 
-def probe_point(model, stan, dj, check_bin, point, timeout):
+def probe_point(model, stan, dj, check_bin, point, timeout,
+                fast_math=False):
     """Evaluate a point with no recorded reference. (status, detail).
 
     No CmdStan values means no parity check, so the bar here is only what
@@ -534,7 +535,8 @@ def probe_point(model, stan, dj, check_bin, point, timeout):
     """
     try:
         proc = subprocess.run(
-            [str(check_bin), str(stan), str(dj), "--point", str(point)],
+            [str(check_bin), str(stan), str(dj), "--point", str(point)]
+            + (["--fast-math"] if fast_math else []),
             capture_output=True, text=True, cwd=REPO, timeout=timeout)
     except subprocess.TimeoutExpired:
         return ("POINT_TIMEOUT", "")
@@ -569,8 +571,39 @@ def worst_pair(rv, gv):
     return worst, worst_ulp
 
 
+# Fast mode (TESTING.md, "Fast mode"): lp and the gradient are held to
+# FAST_MAX_REL, the gradient as a whole against its largest entry; every
+# other output keeps the default gate.
+FAST_MAX_REL = 1e-12
+WA_MAX_REL = 1e-9
+
+
+def fast_dev(rv, gv):
+    """(worst deviation, worst ULP distance) under the fast-mode metric.
+
+    Element 0 is lp, scored as pair_dev scores it. The rest is the
+    gradient, scored as one vector: the largest absolute difference over
+    the largest absolute entry on either side (at least 1). A coordinate
+    that cancels to nearly zero is then judged against the gradient it
+    belongs to and not against itself. A coordinate that is nonfinite on
+    one side only, or in a different way, is an infinite deviation, as in
+    pair_dev.
+    """
+    worst, worst_ulp = pair_dev(rv[0], gv[0]) if rv else (0.0, 0)
+    diff, scale = 0.0, 1.0
+    for a, b in zip(rv[1:], gv[1:]):
+        rel, ulp = pair_dev(a, b)
+        worst_ulp = max(worst_ulp, ulp)
+        if rel == math.inf:
+            return (math.inf, worst_ulp)
+        if a - a == 0.0 and b - b == 0.0:
+            diff = max(diff, abs(a - b))
+            scale = max(scale, abs(a), abs(b))
+    return (max(worst, diff / scale), worst_ulp)
+
+
 def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
-                no_lp, strict=False):
+                no_lp, strict=False, fast_math=False):
     """Replay one recorded point. (status, worst, worst_ulp, n, detail).
 
     A point whose entry has no `values` is one CmdStan itself refuses (it
@@ -583,6 +616,8 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
     the same asymmetry as one engine throwing, read from the other side.
     """
     cmd = [str(check_bin), str(stan), str(dj), "--point", str(point)]
+    if fast_math:
+        cmd.append("--fast-math")
     want_wa = "values" in pt and not no_wa
     if want_wa:
         cmd.append("--wa-values")
@@ -632,7 +667,13 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         # the one that can actually catch a bug; tools/verify_lite.py
         # answers it by evaluating both builds at several points.
         rv, gv = rv[1:], gv[1:]
-    worst, worst_ulp = worst_pair(rv, gv)
+    if fast_math:
+        # Without lp, a zero in its place leaves the gradient as the
+        # vector fast_dev scores.
+        worst, worst_ulp = fast_dev(*(([0.0] + v) if no_lp else v
+                                      for v in (rv, gv)))
+    else:
+        worst, worst_ulp = worst_pair(rv, gv)
     n = len(rv)
     if want_wa:
         # The write_array reference: column names must match exactly, and
@@ -665,16 +706,25 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
             return ("WA_NONFINITE", worst, worst_ulp, n,
                     f"point {point}: write_array is nonfinite")
         wworst, wulp = worst_pair(wref, wgot)
-        worst, worst_ulp = max(worst, wworst), max(worst_ulp, wulp)
         n += len(wref)
+        if fast_math:
+            # These outputs keep the default gate, so they are judged here
+            # and kept out of the deviation the fast gate reads.
+            if wworst >= WA_MAX_REL:
+                return ("WA_GATE", worst, worst_ulp, n,
+                        f"point {point}: write_array {wworst:.2e}, "
+                        f"allowed {WA_MAX_REL:.1e}")
+        else:
+            worst, worst_ulp = max(worst, wworst), max(worst_ulp, wulp)
     return ("OK", worst, worst_ulp, n, "")
 
 
 def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                no_wa=False, no_lp=False, target_platform=None):
+                no_wa=False, no_lp=False, target_platform=None,
+                fast_math=False):
     """Replay one model, under whatever KNOWN_GAPS says about it."""
     result = replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                          no_wa, no_lp, target_platform)
+                          no_wa, no_lp, target_platform, fast_math)
     if model not in KNOWN_GAPS:
         return result
     _, status, rel, ulp, total, _, notes = result
@@ -689,7 +739,8 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
 
 
 def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                 no_wa=False, no_lp=False, target_platform=None):
+                 no_wa=False, no_lp=False, target_platform=None,
+                 fast_math=False):
     """Replay every point of one model.
 
     Returns (model, status, max_rel, max_ulp, n_values, detail, notes).
@@ -711,7 +762,9 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     if model in ULP_LIMITS and not ref.get("recorded", {}).get("platform"):
         return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
                 "ULP-gated fixtures require recording platform provenance", [])
-    ulp_limit = ulp_limit_for(model, ref, target_platform or native_platform())
+    # Fast mode is not held to the same-platform ULP limits.
+    ulp_limit = None if fast_math else ulp_limit_for(
+        model, ref, target_platform or native_platform())
     strict = ref.get("strict", False)
     if strict:
         if set(ref.get("points", {})) != {str(p) for p in POINTS}:
@@ -733,14 +786,14 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             notes.append(f"QUARANTINE {model} point {point}: "
                          f"{QUARANTINED[(model, point)]}")
             status, detail = probe_point(model, stan, dj, check_bin, point,
-                                         timeout)
+                                         timeout, fast_math)
             if status != "OK":
                 return (model, status, worst, worst_ulp, total,
                         f"point {point}: {detail}", notes)
             continue
         if pt is None:
             status, detail = probe_point(model, stan, dj, check_bin, point,
-                                         timeout)
+                                         timeout, fast_math)
             if status != "OK":
                 return (model, status, worst, worst_ulp, total,
                         f"point {point}: {detail}", notes)
@@ -748,11 +801,16 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                          f"but nothing compared it against CmdStan")
             continue
         status, rel, ulp, n, detail = check_point(
-            model, stan, dj, check_bin, point, pt, timeout, no_wa, no_lp, strict)
+            model, stan, dj, check_bin, point, pt, timeout, no_wa, no_lp, strict,
+            fast_math)
         total += n
         if status != "OK":
             return (model, status, worst, worst_ulp, total, detail, notes)
-        gate = gate_for(model, pt, max_rel)
+        # The documented ill-conditioned limits are floors measured in
+        # default mode; the tighter fast-mode bound must not undercut them.
+        documented = model in ILL_CONDITIONED or pt.get("status") == "MISMATCH"
+        gate = gate_for(model, pt, max(max_rel, WA_MAX_REL)
+                        if fast_math and documented else max_rel)
         if rel >= gate:
             return (model, "GATE", rel, ulp, total,
                     f"point {point}: {rel:.2e} ({ulp} ulp) over {n} "
@@ -895,7 +953,14 @@ def main():
     ap.add_argument("models", nargs="*")
     ap.add_argument("--check", type=pathlib.Path,
                     default=default_check_bin())
-    ap.add_argument("--max-rel", type=float, default=1e-9)
+    ap.add_argument("--max-rel", type=float, default=None,
+                    help="gate on lp and gradients (default 1e-9, or "
+                         f"{FAST_MAX_REL:g} with --fast-math)")
+    ap.add_argument("--fast-math", action="store_true",
+                    help="replay with stanli_check --fast-math under the "
+                         "fast-mode gate (TESTING.md): the gradient is "
+                         "scored against its largest entry and the "
+                         "same-platform ULP limits do not apply")
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--target-platform", default=native_platform(),
                     help="runtime platform for reference selection (default: "
@@ -921,6 +986,8 @@ def main():
     ap.add_argument("--filter", default="", metavar="SUBSTR",
                     help="with --wa-report, select model names containing this")
     args = ap.parse_intermixed_args()
+    if args.max_rel is None:
+        args.max_rel = FAST_MAX_REL if args.fast_math else 1e-9
 
     pdb = args.pdb / "posterior_database"
     if args.wa_headers and args.wa_report:
@@ -961,10 +1028,16 @@ def main():
     overrides = sum(refs[m]["recorded"] != recorded for m in models)
     if overrides:
         print(f"{overrides} models retain per-model recording provenance overrides")
-    tight = sum(ulp_limit_for(m, refs[m], args.target_platform) is not None
-                for m in models)
-    print(f"same-platform ULP limits: {tight} models on {args.target_platform}; "
-          "all models retain their scaled-error and structural checks")
+    if args.fast_math:
+        print(f"fast mode: lp and gradient (against its largest entry) "
+              f"within {args.max_rel:.0e}; other outputs within "
+              f"{WA_MAX_REL:.0e}; no same-platform ULP limits")
+    else:
+        tight = sum(ulp_limit_for(m, refs[m], args.target_platform) is not None
+                    for m in models)
+        print(f"same-platform ULP limits: {tight} models on "
+              f"{args.target_platform}; all models retain their "
+              "scaled-error and structural checks")
     if compiler:
         print(f"runtime compiler: {compiler}; references selected before evaluation")
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_refs_"))
@@ -973,7 +1046,7 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         futs = [pool.submit(check_model, m, refs[m], pdb, check_bin, tmp,
                             args.timeout, args.max_rel, args.no_wa,
-                            args.no_lp, args.target_platform)
+                            args.no_lp, args.target_platform, args.fast_math)
                 for m in models]
         for fut in concurrent.futures.as_completed(futs):
             model, status, rel, ulp, n, detail, notes = fut.result()
