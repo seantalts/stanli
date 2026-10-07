@@ -1,333 +1,363 @@
 # Corpus benchmark evidence
 
-Run `7bc507e14400797e`, started 2026-09-21T10:21:25Z, records 319 application models.
+Run `5fc1376df80b5a23`, started 2026-10-07T15:05:16Z, records 342 application models.
 
-The manifest identifies the exact sources, inputs, binaries and settings. The summary, raw paired observations and command events are retained here. Estimated time is measured setup plus 20,000 times median warm gradient latency; full sampling is not run. Failures remain in the inventory.
+The manifest identifies the exact sources, inputs, binaries and settings. The summary, raw paired observations and command events are retained here. The summary retains the protocol's setup-plus-20,000-gradient estimate; the table below recalculates totals for 2,000 gradients from the same measurements. Full sampling is not run. Failures remain in the inventory.
 
-Full inputs, generated code and command logs remain locally at `/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/vectorized-v4.tsv.run`; these larger artifacts are not hosted with this report.
+Full inputs, generated code and command logs remain locally at `/Users/xitrium/claud/corpus-bench/corpus-vec-2026-10-07.tsv.run`; these larger artifacts are not hosted with this report.
 
-Run `7bc507e14400797e` (2026-09-21): 319 models, 6 alternating gradient pairs.
+Run `5fc1376df80b5a23` (2026-10-07): 342 models, 6 alternating gradient pairs.
 
-Gradient ratio is the median paired CmdStan/Stanli ratio ± MAD. Estimated seconds are measured setup plus 20,000 × median gradient latency; this fixed-work proxy is not measured HMC sampling time. Missing components leave estimates blank; failures remain visible.
+| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) |
+| --- | ---: | ---: | ---: |
+| `ch12_m12_4` | 31.5x | 0.153 | 7.44 |
+| `gpcm_latent_reg_irt` | 12.8x | 0.339 | 8.45 |
+| `grsm_latent_reg_irt` | 11.9x | 0.172 | 6.94 |
+| <code>radon_partially_pooled_</code><br><code>centered</code> | 10.5x | 0.092 | 3.61 |
+| <code>radon_partially_pooled_</code><br><code>noncentered</code> | 10.3x | 0.097 | 3.78 |
+| `aalto_poisson_hurdle` | 8.07x | 0.038 | 3.05 |
+| `radon_county_intercept` | 7.78x | 0.149 | 3.7 |
+| <code>radon_variable_slope_</code><br><code>noncentered</code> | 7.7x | 0.152 | 4.02 |
+| <code>radon_variable_</code><br><code>intercept_centered</code> | 7.7x | 0.146 | 3.8 |
+| <code>radon_variable_slope_</code><br><code>centered</code> | 7.64x | 0.149 | 3.81 |
+| <code>radon_variable_</code><br><code>intercept_noncentered</code> | 7.64x | 0.147 | 4.03 |
+| <code>radon_hierarchical_</code><br><code>intercept_centered</code> | 7.28x | 0.217 | 4.22 |
+| <code>radon_variable_</code><br><code>intercept_slope_</code><br><code>noncentered</code> | 7.18x | 0.165 | 4.25 |
+| <code>radon_variable_</code><br><code>intercept_slope_centered</code> | 7.18x | 0.164 | 3.97 |
+| <code>radon_hierarchical_</code><br><code>intercept_noncentered</code> | 7.03x | 0.218 | 4.4 |
+| `s2_custom_vreal` | 7.02x | 0.0104 | 3.43 |
+| `ch12_m12_3_alt` | 6.67x | 0.0146 | 2.55 |
+| `M0_model` | 6.4x | 0.0149 | 2.72 |
+| `ch12_m12_3` | 6.32x | 0.0144 | 2.54 |
+| `rats_model` | 6.06x | 0.0104 | 3.08 |
+| `Mt_model` | 5.16x | 0.0177 | 3.51 |
+| `arK` | 4.73x | 0.0124 | 2.85 |
+| `Mth_model` | 4.17x | 0.0673 | 4.46 |
+| `s2_cumulative_cauchit` | 4.07x | 0.015 | 3.79 |
+| `sw_weights` | 3.57x | 0.0108 | 3.47 |
+| `dogs` | 3.41x | 0.0431 | 4.2 |
+| `s2_cox_cens` | 3.33x | 0.0144 | 4.97 |
+| `s2_gp_by_approx` | 3.29x | 0.0213 | 6.53 |
+| `GLMM1_model` | 3.25x | 0.031 | 3.31 |
+| `cm_exgaussian` | 3.23x | 0.0424 | 4.41 |
+| <code>state_space_stochastic_</code><br><code>level_stochastic_</code><br><code>seasonal</code> | 3.2x | 0.0236 | 4.88 |
+| `s2_hurdle_cumulative` | 2.98x | 0.018 | 4.14 |
+| `logmesquite_logvash` | 2.95x | 0.00946 | 3.56 |
+| `mesquite` | 2.94x | 0.00899 | 3.34 |
+| `cm_geg` | 2.91x | 0.0643 | 4.67 |
+| `logmesquite_logvas` | 2.89x | 0.00925 | 3.66 |
+| `aalto_grp_aov` | 2.86x | 0.00712 | 3.04 |
+| `s2_cox` | 2.83x | 0.0131 | 4.1 |
+| `logmesquite` | 2.82x | 0.00986 | 3.41 |
+| `dogs_nonhierarchical` | 2.81x | 0.0594 | 7.17 |
+| `sw_hurdle_lognormal` | 2.79x | 0.0144 | 3.54 |
+| `logmesquite_logva` | 2.79x | 0.00855 | 3.34 |
+| `ch09_m9_1_chains4` | 2.77x | 0.00919 | 3.3 |
+| `radon_county` | 2.73x | 0.0702 | 3.28 |
+| `sw_acat` | 2.7x | 0.111 | 4.18 |
+| `sw_acat_cs` | 2.69x | 0.154 | 5.44 |
+| `Mtbh_model` | 2.69x | 0.0579 | 4.96 |
+| `ch09_m9_1` | 2.69x | 0.00864 | 3.3 |
+| `eight_schools_centered` | 2.69x | 0.00727 | 3.01 |
+| `logmesquite_logvolume` | 2.68x | 0.00821 | 3.06 |
+| `ch15_m15_5` | 2.64x | 0.00913 | 3.66 |
+| `aalto_grp_prior_mean` | 2.59x | 0.00709 | 3.12 |
+| `ch15_m15_1` | 2.59x | 0.00834 | 3.43 |
+| `hierarchical_gp` | 2.54x | 0.0664 | 9.18 |
+| `ch12_m12_5` | 2.54x | 2.08 | 8.52 |
+| `ch12_m12_7` | 2.52x | 1.99 | 8.34 |
+| <code>eight_schools_</code><br><code>noncentered</code> | 2.5x | 0.00682 | 3.2 |
+| `ldaK5` | 2.5x | 5.3 | 15.4 |
+| `sw_hurdle_pois` | 2.49x | 0.0165 | 3.42 |
+| `aalto_lin` | 2.45x | 0.00765 | 3.03 |
+| `s2_shifted_lognormal` | 2.45x | 0.0102 | 3.91 |
+| `aalto_lin_std` | 2.41x | 0.00836 | 3.25 |
+| `ch09_m5_8s` | 2.41x | 0.00823 | 3.03 |
+| `kilpisjarvi` | 2.41x | 0.00789 | 2.78 |
+| `extra_hurdle_poisson` | 2.39x | 0.00675 | 2.61 |
+| `s2_s_cc` | 2.39x | 0.0107 | 4.23 |
+| `pilots` | 2.39x | 0.00991 | 3.51 |
+| `s2_sar` | 2.38x | 0.0182 | 4.2 |
+| `aalto_grp_prior_mean_var` | 2.36x | 0.00865 | 3.82 |
+| `s2_nlf` | 2.36x | 0.0114 | 4.35 |
+| `s2_gp_approx` | 2.34x | 0.0147 | 5.47 |
+| `ch09_m5_8s2` | 2.32x | 0.00819 | 3.04 |
+| `nes` | 2.32x | 0.0493 | 3.71 |
+| `losscurve_sislob` | 2.32x | 0.0164 | 4.69 |
+| `sw_spline_s` | 2.31x | 0.0111 | 4.36 |
+| `s2_cumulative_cloglog` | 2.3x | 0.0126 | 3.76 |
+| `Mh_model` | 2.29x | 0.047 | 3.37 |
+| <code>low_dim_gauss_mix_</code><br><code>collapse</code> | 2.28x | 0.0993 | 3.33 |
+| `normal_mixture` | 2.28x | 0.0902 | 3.01 |
+| `kidscore_interaction_z` | 2.23x | 0.0132 | 3.3 |
+| `dugongs_model` | 2.22x | 0.0084 | 3.02 |
+| `ch15_m15_2` | 2.22x | 0.00942 | 3.65 |
+| `dogs_hierarchical` | 2.2x | 0.056 | 2.84 |
+| `ch15_m15_6` | 2.19x | 0.00858 | 3.17 |
+| `s2_sar_error` | 2.18x | 0.0187 | 4.18 |
+| `kidscore_interaction_c2` | 2.17x | 0.0128 | 3.17 |
+| `low_dim_gauss_mix` | 2.17x | 0.108 | 3.41 |
+| `sw_vonmises` | 2.17x | 0.0106 | 3.67 |
+| `ch09_m9_2` | 2.16x | 0.00688 | 2.51 |
+| `kidscore_interaction` | 2.15x | 0.0134 | 3.21 |
+| `GLMM_Poisson_model` | 2.13x | 0.00962 | 3.86 |
+| `kidscore_mom_work` | 2.13x | 0.0142 | 3.11 |
+| `s2_mi_lognormal` | 2.12x | 0.0128 | 4.55 |
+| `logearn_logheight_male` | 2.12x | 0.0192 | 3.08 |
+| `logearn_interaction` | 2.11x | 0.0237 | 3.19 |
+| `ch14_m14_5` | 2.1x | 0.0124 | 3.05 |
+| `ldaK2` | 2.09x | 0.117 | 3.87 |
+| `logearn_interaction_z` | 2.09x | 0.0237 | 3.32 |
+| `sw_nonlinear` | 2.09x | 0.0101 | 3.9 |
+| `ch09_m9_3` | 2.08x | 0.00664 | 2.52 |
+| `kidscore_interaction_c` | 2.07x | 0.0135 | 3.17 |
+| `s2_s_by` | 2.06x | 0.0218 | 5.74 |
+| `kidscore_momhsiq` | 2.05x | 0.0115 | 3.1 |
+| `sw_zi_poisson` | 2.05x | 0.0156 | 3.42 |
+| `election88_full` | 2.02x | 0.484 | 6.06 |
+| `sw_lognormal` | 2.02x | 0.0101 | 3.63 |
+| `logearn_height_male` | 2.02x | 0.019 | 3.08 |
+| `GLM_Poisson_model` | 2.01x | 0.0088 | 3.3 |
+| `sw_dist_sigma` | 2x | 0.0118 | 3.77 |
+| `ch09_m9_4` | 1.99x | 0.007 | 2.57 |
+| `s2_car_icar` | 1.99x | 0.0125 | 4.38 |
+| `seeds_centered_model` | 1.98x | 0.00942 | 3.92 |
+| `ch09_m9_5` | 1.96x | 0.00661 | 2.56 |
+| `s2_nl_noloop` | 1.95x | 0.0103 | 3.83 |
+| `sw_student` | 1.95x | 0.011 | 3.8 |
+| `aalto_lin_std_t` | 1.95x | 0.00901 | 3.45 |
+| `sw_se` | 1.91x | 0.0102 | 3.46 |
+| `ch16_m16_4` | 1.91x | 0.0103 | 3.36 |
+| `s2_cens_interval` | 1.9x | 0.0131 | 3.72 |
+| `normal_mixture_k` | 1.9x | 0.434 | 4.17 |
+| `radon_pooled` | 1.89x | 0.0989 | 3.03 |
+| `sesame_one_pred_a` | 1.87x | 0.00939 | 2.83 |
+| `kidscore_momhs` | 1.87x | 0.011 | 2.92 |
+| `s2_gev` | 1.87x | 0.0173 | 3.83 |
+| `soil_incubation` | 1.87x | 0.0745 | 4.04 |
+| `sw_spline_t2` | 1.87x | 0.0148 | 4.82 |
+| `ch13_m13_7` | 1.86x | 0.00607 | 2.31 |
+| `log10earn_height` | 1.85x | 0.016 | 2.89 |
+| `logearn_height` | 1.85x | 0.0157 | 2.91 |
+| `earn_height` | 1.85x | 0.0149 | 2.87 |
+| `ch14_m14_4` | 1.84x | 0.0105 | 2.88 |
+| `multi_occupancy` | 1.84x | 0.0851 | 6.57 |
+| `ch13_m13_7nc` | 1.84x | 0.00616 | 2.36 |
+| `s2_t2_by` | 1.83x | 0.0207 | 5.66 |
+| `lotka_volterra` | 1.83x | 0.0556 | 4.56 |
+| `sw_me` | 1.81x | 0.0122 | 4.26 |
+| `kidscore_momiq` | 1.8x | 0.0101 | 2.92 |
+| `ch09_mp` | 1.8x | 0.00612 | 2.29 |
+| `ch14_m14_4x` | 1.8x | 0.0107 | 2.89 |
+| `s2_car_esicar` | 1.78x | 0.0152 | 4.8 |
+| `sw_mi` | 1.73x | 0.0125 | 3.84 |
+| `accel_gp` | 1.73x | 0.031 | 6.6 |
+| `s2_car` | 1.72x | 0.0149 | 4.72 |
+| `ch11_m11_11` | 1.71x | 0.00847 | 3.54 |
+| `sw_asymlaplace` | 1.7x | 0.0145 | 3.62 |
+| `bym2_offset_only` | 1.7x | 0.0885 | 4.49 |
+| `sw_hurdle_gamma` | 1.69x | 0.0177 | 3.58 |
+| `s2_threading` | 1.67x | 0.0103 | 3.38 |
+| `hier_2pl` | 1.66x | 0.421 | 7.41 |
+| `seeds_model` | 1.66x | 0.0101 | 3.74 |
+| `ch15_m15_9` | 1.66x | 0.0175 | 3.13 |
+| `sw_zi_binomial` | 1.66x | 0.0169 | 3.43 |
+| `2pl_latent_reg_irt` | 1.64x | 0.147 | 5.8 |
+| `cm_gamma` | 1.63x | 0.0376 | 4.11 |
+| `cm_weibull` | 1.62x | 0.0383 | 4.09 |
+| `ch15_m15_8` | 1.62x | 0.0162 | 2.87 |
+| `cm_invgamma` | 1.61x | 0.0404 | 4.09 |
+| `cm_lba1` | 1.61x | 0.0623 | 4.93 |
+| `surgical_model` | 1.6x | 0.00903 | 3.42 |
+| `seeds_stanified_model` | 1.6x | 0.0101 | 3.63 |
+| `s2_mv_subset` | 1.59x | 0.012 | 3.48 |
+| `cm_betagate` | 1.58x | 0.0857 | 4.3 |
+| `cm_choco` | 1.58x | 0.115 | 5.16 |
+| `sw_ma` | 1.58x | 0.015 | 4.21 |
+| `cm_logweibull` | 1.57x | 0.0377 | 4.07 |
+| `s2_index_mi` | 1.56x | 0.0138 | 4.2 |
+| `cm_logstudent` | 1.55x | 0.0409 | 4.19 |
+| `sw_ar` | 1.55x | 0.0144 | 4.24 |
+| `sw_gaussian` | 1.55x | 0.00943 | 3.3 |
+| `ctsem_ctsm` | 1.55x | 3.72 | 444 |
+| `s2_unstr` | 1.55x | 0.0365 | 8.72 |
+| `cm_lognormal` | 1.54x | 0.0753 | 5.49 |
+| `cm_bisa` | 1.53x | 0.0381 | 4.17 |
+| `sw_zi_negbin` | 1.53x | 0.019 | 3.49 |
+| `cm_invweibull` | 1.53x | 0.0398 | 4.1 |
+| `accel_splines` | 1.53x | 0.0253 | 4.62 |
+| `cm_loggamma` | 1.52x | 0.0466 | 4.62 |
+| `s2_dist_sigma_re` | 1.52x | 0.014 | 4.96 |
+| `covid19imperial_v2` | 1.51x | 1.38 | 7.58 |
+| `Mb_model` | 1.5x | 0.108 | 3.41 |
+| `cm_lnr_bench` | 1.49x | 0.562 | 8.9 |
+| `sw_mv_norescor` | 1.49x | 0.0119 | 3.48 |
+| `s2_rate` | 1.49x | 0.00988 | 3.57 |
+| `covid19imperial_v3` | 1.48x | 1.39 | 7.53 |
+| `lsat_model` | 1.48x | 0.0955 | 3.86 |
+| `gp_regr` | 1.47x | 0.0117 | 5.44 |
+| `prophet` | 1.45x | 0.0953 | 5.69 |
+| `sw_arma` | 1.44x | 0.0167 | 4.34 |
+| `Rate_4_model` | 1.44x | 0.00628 | 2.51 |
+| `sw_gamma` | 1.43x | 0.0105 | 3.76 |
+| `ch16_m16_1` | 1.43x | 0.0509 | 3.05 |
+| `i320_sratio_cs` | 1.42x | 0.206 | 5.59 |
+| `ch13_m13_1` | 1.42x | 0.0088 | 2.97 |
+| `sw_cratio_cs` | 1.42x | 0.215 | 5.28 |
+| `gp_pois_regr` | 1.41x | 0.0114 | 5.66 |
+| `aalto_binom2` | 1.4x | 0.00656 | 2.57 |
+| `ch13_m13_3` | 1.4x | 0.0096 | 3.04 |
+| `ch13_m13_2` | 1.4x | 0.00985 | 3.12 |
+| `sw_cumulative_cs` | 1.39x | 0.184 | 5.2 |
+| `s2_gr_student` | 1.38x | 0.0147 | 5.3 |
+| `aalto_bern` | 1.38x | 0.0064 | 2.58 |
+| `cm_lba2` | 1.38x | 0.0919 | 7.46 |
+| `aalto_binom` | 1.37x | 0.00619 | 2.4 |
+| `hmm_example` | 1.37x | 0.0592 | 4.15 |
+| `sw_exgaussian` | 1.37x | 0.0119 | 3.86 |
+| `s2_zoi_beta` | 1.37x | 0.0223 | 3.77 |
+| `Rate_1_model` | 1.36x | 0.00581 | 2.4 |
+| `Rate_2_model` | 1.36x | 0.00679 | 2.58 |
+| `s2_cumulative_probit` | 1.35x | 0.0185 | 3.71 |
+| `GLM_Binomial_model` | 1.33x | 0.00879 | 3.26 |
+| `irt_2pl` | 1.33x | 0.0427 | 4.25 |
+| `s2_zi_beta` | 1.32x | 0.0219 | 3.72 |
+| `ch12_m12_6` | 1.32x | 4.12 | 9.52 |
+| `s2_zi_asymlaplace` | 1.32x | 0.0191 | 3.67 |
+| `i320_gp_expquad` | 1.32x | 0.0346 | 7.28 |
+| `wells_dist` | 1.31x | 0.0563 | 3.08 |
+| `ch11_m11_9` | 1.31x | 0.00701 | 2.62 |
+| `sw_mixture` | 1.3x | 0.0239 | 4.74 |
+| `s2_gr_by` | 1.3x | 0.0147 | 4.92 |
+| `ch12_m12_2` | 1.3x | 0.00949 | 3.98 |
+| `ch11_m_pois` | 1.3x | 0.00665 | 2.52 |
+| `Rate_5_model` | 1.3x | 0.0068 | 2.51 |
+| `ch14_m14_9` | 1.29x | 0.681 | 5.14 |
+| `s2_mm_weights` | 1.28x | 0.0156 | 4.68 |
+| `s2_mm` | 1.27x | 0.016 | 4.72 |
+| `aalto_binomb` | 1.26x | 0.00591 | 2.4 |
+| `sw_re_gauss` | 1.26x | 0.0134 | 4.58 |
+| `sw_beta` | 1.26x | 0.0131 | 3.9 |
+| `Rate_3_model` | 1.26x | 0.00613 | 2.38 |
+| `cm_exwald` | 1.25x | 0.121 | 5.96 |
+| `nn_rbm1bJ10` | 1.25x | 0.335 | 5.82 |
+| `ch14_m14_6x` | 1.25x | 0.185 | 6.93 |
+| `logistic_regression_rhs` | 1.24x | 0.107 | 5.11 |
+| `sw_gp` | 1.23x | 0.0503 | 7.33 |
+| `ch14_m14_6` | 1.22x | 0.188 | 6.93 |
+| `s2_categorical_re` | 1.22x | 0.0292 | 5.41 |
+| `i320_mi_nhanes` | 1.22x | 0.0183 | 4.44 |
+| `sw_mv_rescor` | 1.22x | 0.0262 | 6.1 |
+| `ch14_m14_8nc` | 1.22x | 0.0165 | 5.96 |
+| `s2_custom_vint` | 1.21x | 0.0195 | 3.54 |
+| `ch11_m11_8` | 1.21x | 0.00815 | 2.95 |
+| `sw_skewnormal` | 1.2x | 0.0147 | 3.91 |
+| `ch12_m12_1` | 1.2x | 0.00915 | 3.21 |
+| `ch14_m14_1` | 1.18x | 0.0202 | 6.91 |
+| `sw_bernoulli` | 1.18x | 0.0088 | 3.28 |
+| `s2_me2_nomecor` | 1.17x | 0.017 | 4.55 |
+| `ch14_m14_10` | 1.17x | 0.783 | 5.16 |
+| `sw_re_pois` | 1.16x | 0.0139 | 4.5 |
+| `ch14_m14_3` | 1.16x | 0.0542 | 5.94 |
+| `s2_frechet` | 1.16x | 0.0136 | 3.92 |
+| `blr` | 1.15x | 0.00766 | 3.04 |
+| `ch11_m11_10` | 1.15x | 0.00839 | 3.24 |
+| `sw_weibull` | 1.15x | 0.0124 | 3.88 |
+| `sw_binomial` | 1.14x | 0.0122 | 3.49 |
+| `sw_categorical` | 1.14x | 0.012 | 4.35 |
+| `Survey_model` | 1.13x | 0.129 | 3.09 |
+| `sw_poisson` | 1.13x | 0.00891 | 3.14 |
+| `s2_multinomial` | 1.13x | 0.0302 | 3.97 |
+| `sw_re_slope` | 1.13x | 0.018 | 6.8 |
+| `sw_re_bern` | 1.12x | 0.0137 | 4.67 |
+| `s2_me2` | 1.11x | 0.0207 | 6.67 |
+| `sw_re_negbin` | 1.11x | 0.0157 | 4.77 |
+| `ch14_m14_8` | 1.1x | 0.016 | 4.77 |
+| `s2_beta_binomial` | 1.08x | 0.0183 | 3.7 |
+| `ch11_m11_7` | 1.08x | 0.00746 | 2.84 |
+| `i320_sratio_plain` | 1.08x | 0.149 | 4.19 |
+| `s2_weights_trunc` | 1.07x | 0.0234 | 3.59 |
+| `sw_negbinomial` | 1.07x | 0.0119 | 3.39 |
+| `sw_sratio` | 1.07x | 0.142 | 4.02 |
+| `s2_hurdle_negbin` | 1.07x | 0.0275 | 3.51 |
+| `nn_rbm1bJ100` | 1.07x | 858 | 924 |
+| `aalto_poisson_simple` | 1.06x | 0.0105 | 2.66 |
+| `sw_trunc` | 1.05x | 0.0214 | 3.56 |
+| <code>wells_interaction_c_</code><br><code>model</code> | 1.04x | 0.0486 | 3.37 |
+| `sw_cratio` | 1.04x | 0.146 | 4.02 |
+| `wells_dist100_model` | 1.04x | 0.0419 | 3.23 |
+| `s2_mv_shared_re` | 1.04x | 0.0228 | 7.15 |
+| `nes_logit_model` | 1.04x | 0.0206 | 3.19 |
+| `s2_discrete_weibull` | 1.03x | 0.0177 | 3.51 |
+| `ch15_m15_7` | 1.03x | 0.0341 | 7.6 |
+| `i319_pois_fixed` | 1.03x | 0.0137 | 3.13 |
+| `diamonds` | 1.03x | 0.0906 | 3.48 |
+| `s2_mmc` | 1.03x | 0.0228 | 7 |
+| `wells_dae_model` | 1.03x | 0.048 | 3.27 |
+| `i319_pois_re2` | 1.03x | 0.0366 | 4.84 |
+| `iohmm_reg` | 1.03x | 0.895 | 6.89 |
+| `hmm_gaussian` | 1.03x | 0.718 | 5.41 |
+| `one_comp_mm_elim_abs` | 1.02x | 0.994 | 4.75 |
+| `ch14_m14_7` | 1.02x | 0.0792 | 8.82 |
+| `sw_mono` | 1.02x | 0.0165 | 4.1 |
+| `i320_pois_trunc_ub` | 1.02x | 0.0595 | 3.49 |
+| `s2_dirichlet` | 1.02x | 0.0369 | 4.36 |
+| `wells_dist100ars_model` | 1.02x | 0.0459 | 3.28 |
+| `cm_betadiscrete` | 1.01x | 3.96 | 8.3 |
+| `wells_interaction_model` | 1.01x | 0.0501 | 3.39 |
+| `bones_model` | 1.01x | 0.127 | 3.61 |
+| `s2_wiener` | 1.01x | 0.0724 | 3.73 |
+| `ch11_m11_5` | 1x | 0.0443 | 3.14 |
+| `cm_ddm` | 1x | 37.5 | 46.9 |
+| `s2_ar_cov` | 1x | 0.032 | 7.59 |
+| `wells_dae_c_model` | 1x | 0.0475 | 3.43 |
+| `wells_daae_c_model` | 0.997x | 0.0517 | 3.43 |
+| `i319_negbin_fixed` | 0.996x | 0.0246 | 3.48 |
+| `wells_dae_inter_model` | 0.993x | 0.0508 | 3.4 |
+| `i319_pois_re` | 0.991x | 0.0258 | 4.54 |
+| `s2_cosy` | 0.984x | 0.0313 | 6.73 |
+| `s2_logistic_normal` | 0.976x | 0.053 | 6.69 |
+| `i319_negbin_re` | 0.974x | 0.0397 | 4.8 |
+| `s2_mo_simo_prior` | 0.963x | 0.0164 | 4.11 |
+| `sw_cumulative` | 0.96x | 0.0536 | 3.8 |
+| `cm_rdm` | 0.957x | 0.239 | 10.8 |
+| `hmm_drive_1` | 0.956x | 0.371 | 5.09 |
+| `s2_mixture_theta` | 0.951x | 0.0328 | 4.46 |
+| `s2_fcor` | 0.951x | 0.0379 | 4.91 |
+| `i320_pois_trunc_both` | 0.95x | 0.0775 | 3.57 |
+| `ch14_m14_11` | 0.945x | 1.54 | 5.86 |
+| `ch11_m11_6` | 0.938x | 0.00957 | 3.03 |
+| `hmm_drive_0` | 0.937x | 0.35 | 5.07 |
+| `cm_lnr` | 0.922x | 0.307 | 13.9 |
+| `i319_gauss_re` | 0.911x | 0.0234 | 4.61 |
+| `ch13_m13_6` | 0.911x | 0.0494 | 3.41 |
+| `i320_gp_matern32` | 0.909x | 0.075 | 7.23 |
+| `ch13_m13_4b` | 0.907x | 0.0425 | 3.33 |
+| `ch13_m13_5` | 0.902x | 0.0395 | 3.29 |
+| `ch11_m11_4` | 0.898x | 0.0385 | 3.04 |
+| `ch13_m13_4nc` | 0.896x | 0.0535 | 3.35 |
+| `ch13_m13_4` | 0.874x | 0.0487 | 3.44 |
+| `ch15_m15_3` | 0.874x | 0.0596 | 2.69 |
+| `ch15_m15_4` | 0.867x | 0.0507 | 2.7 |
+| `ch14_m14_2` | 0.864x | 0.0669 | 7.11 |
+| `garch11` | 0.864x | 0.0247 | 2.95 |
+| `aalto_gpareto` | 0.832x | 0.0141 | 3.07 |
+| `arma11` | 0.719x | 0.0197 | 2.97 |
+| `s2_com_poisson` | 0.2x | 0.514 | 4.73 |
+| `cm_invgaussian` | 0.0488x | 2.12 | 33.4 |
 
-| Model | Paired gradient ratio ± MAD | Stanli setup + 20,000 gradients (s) | CmdStan equivalent (s) | Notes |
+Total sampling is an estimate: each engine's measured setup time + 2,000 × its median warm gradient time. Full sampling is not run.
+
+**Incomplete results**
+
+Missing measurements are —; available timings are retained.
+
+| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) | Reason |
 | --- | ---: | ---: | ---: | --- |
-| `2pl_latent_reg_irt` | 1.59x ± 0.03 | 1.363 | 6.363 | complete |
-| `GLMM1_model` | 3.23x ± 0.07 | 0.2161 | 2.645 | complete |
-| `GLMM_Poisson_model` | 1.88x ± 0.04 | 0.02106 | 2.614 | complete |
-| `GLM_Binomial_model` | 1.33x ± 0.03 | 0.02449 | 2.03 | complete |
-| `GLM_Poisson_model` | 2.05x ± 0.04 | 0.01515 | 2.048 | complete |
-| `M0_model` | 14.78x ± 0.09 | 0.03153 | 1.723 | complete |
-| `Mb_model` | 1.24x ± 0.02 | 0.9068 | 3.071 | complete |
-| `Mh_model` | 2.27x ± 0.05 | 0.33 | 2.744 | complete |
-| `Mt_model` | 16.49x ± 0.50 | 0.03342 | 2.609 | complete |
-| `Mtbh_model` | 3.17x ± 0.04 | 0.3072 | 4.558 | complete |
-| `Mth_model` | 4.67x ± 0.08 | 0.527 | 5.381 | complete |
-| `Rate_1_model` | 1.34x ± 0.02 | 0.007285 | 1.127 | complete |
-| `Rate_2_model` | 1.35x ± 0.04 | 0.009096 | 1.265 | complete |
-| `Rate_3_model` | 1.20x ± 0.03 | 0.007969 | 1.149 | complete |
-| `Rate_4_model` | 1.45x ± 0.06 | 0.008646 | 1.246 | complete |
-| `Rate_5_model` | 1.32x ± 0.02 | 0.007899 | 1.245 | complete |
-| `Survey_model` | 1.13x ± 0.02 | 1.163 | 3.018 | complete |
-| `aalto_bern` | 1.44x ± 0.03 | 0.008114 | 1.281 | complete |
-| `aalto_binom` | 1.39x ± 0.04 | 0.007418 | 1.12 | complete |
-| `aalto_binom2` | 1.33x ± 0.05 | 0.009181 | 1.249 | complete |
-| `aalto_binomb` | 1.36x ± 0.05 | 0.007526 | 1.149 | complete |
-| `aalto_gpareto` | 0.72x ± 0.02 | 0.02023 | 1.817 | complete |
-| `aalto_grp_aov` | 1.36x ± 0.06 | 0.01162 | 1.787 | complete |
-| `aalto_grp_prior_mean` | 1.31x ± 0.03 | 0.01331 | 1.877 | complete |
-| `aalto_grp_prior_mean_var` | 1.33x ± 0.04 | 0.01912 | 2.617 | complete |
-| `aalto_lin` | 1.62x ± 0.03 | 0.01155 | 1.761 | complete |
-| `aalto_lin_std` | 1.56x ± 0.05 | 0.0119 | 1.973 | complete |
-| `aalto_lin_std_t` | 1.49x ± 0.03 | 0.01412 | 2.217 | complete |
-| `aalto_poisson_hurdle` | 25.73x ± 0.88 | 0.06837 | 2.852 | complete |
-| `aalto_poisson_simple` | 1.03x ± 0.03 | 0.02529 | 1.4 | complete |
-| `accel_gp` | 1.76x ± 0.07 | 0.1167 | 5.492 | complete |
-| `accel_splines` | 1.57x ± 0.02 | 0.1133 | 3.505 | complete |
-| `arK` | 4.84x ± 0.13 | 0.04381 | 1.775 | complete |
-| `arma11` | 0.83x ± 0.02 | 0.1013 | 1.778 | complete |
-| `blr` | 0.83x ± 0.03 | 0.01876 | 1.816 | complete |
-| `bones_model` | 1.31x ± 0.04 | 0.8981 | 3.411 | complete |
-| `bym2_offset_only` | 1.69x ± 0.05 | 0.7651 | 4.408 | complete |
-| `ch09_m5_8s` | 2.00x ± 0.06 | 0.01929 | 1.801 | complete |
-| `ch09_m5_8s2` | 1.95x ± 0.02 | 0.01956 | 1.785 | complete |
-| `ch09_m9_1` | 2.05x ± 0.08 | 0.02748 | 2.072 | complete |
-| `ch09_m9_1_chains4` | 2.10x ± 0.02 | 0.02731 | 2.089 | complete |
-| `ch09_m9_2` | 1.46x ± 0.03 | 0.008395 | 1.257 | complete |
-| `ch09_m9_3` | 1.43x ± 0.01 | 0.008249 | 1.256 | complete |
-| `ch09_m9_4` | 1.33x ± 0.04 | 0.01139 | 1.295 | complete |
-| `ch09_m9_5` | 1.28x ± 0.02 | 0.01134 | 1.296 | complete |
-| `ch09_mp` | 2.00x ± 0.04 | 0.00681 | 1.03 | complete |
-| `ch11_m11_10` | 1.32x ± 0.02 | 0.01506 | 2.068 | complete |
-| `ch11_m11_11` | 1.64x ± 0.04 | 0.01633 | 2.333 | complete |
-| `ch11_m11_4` | 1.72x ± 0.02 | 0.1443 | 1.981 | complete |
-| `ch11_m11_5` | 2.19x ± 0.05 | 0.1465 | 2.119 | complete |
-| `ch11_m11_6` | 1.26x ± 0.01 | 0.02231 | 1.786 | complete |
-| `ch11_m11_7` | 1.39x ± 0.03 | 0.01201 | 1.594 | complete |
-| `ch11_m11_8` | 1.32x ± 0.03 | 0.0157 | 1.677 | complete |
-| `ch11_m11_9` | 1.54x ± 0.04 | 0.007797 | 1.332 | complete |
-| `ch11_m_pois` | 1.44x ± 0.01 | 0.008466 | 1.248 | complete |
-| `ch12_m12_1` | 1.25x ± 0.02 | 0.03046 | 1.971 | complete |
-| `ch12_m12_2` | 1.27x ± 0.01 | 0.02653 | 2.777 | complete |
-| `ch12_m12_3` | 17.19x ± 0.41 | 0.03042 | 1.606 | complete |
-| `ch12_m12_3_alt` | 5.60x ± 0.26 | 0.07085 | 1.598 | complete |
-| `ch12_m12_4` | 104.92x ± 2.43 | 0.5455 | 57.07 | complete |
-| `ch12_m12_5` | 1.13x ± 0.01 | 54.63 | 64.21 | complete |
-| `ch12_m12_6` | 1.02x ± 0.02 | 60.85 | 64.93 | complete |
-| `ch12_m12_7` | 1.12x ± 0.02 | 52.72 | 61.69 | complete |
-| `ch13_m13_1` | 1.25x ± 0.02 | 0.0266 | 1.722 | complete |
-| `ch13_m13_2` | 1.30x ± 0.02 | 0.02902 | 1.899 | complete |
-| `ch13_m13_3` | 1.30x ± 0.05 | 0.0316 | 1.799 | complete |
-| `ch13_m13_4` | 1.69x ± 0.06 | 0.1869 | 2.451 | complete |
-| `ch13_m13_4b` | 1.72x ± 0.06 | 0.1846 | 2.35 | complete |
-| `ch13_m13_4nc` | 2.10x ± 0.04 | 0.1814 | 2.412 | complete |
-| `ch13_m13_5` | 1.77x ± 0.04 | 0.1434 | 2.216 | complete |
-| `ch13_m13_6` | 1.69x ± 0.06 | 0.1925 | 2.45 | complete |
-| `ch13_m13_7` | 1.89x ± 0.03 | 0.00676 | 1.062 | complete |
-| `ch13_m13_7nc` | 1.99x ± 0.08 | 0.006942 | 1.097 | complete |
-| `ch14_m14_1` | 1.13x ± 0.02 | 0.137 | 5.855 | complete |
-| `ch14_m14_10` | 1.28x ± 0.03 | 7.297 | 12.26 | complete |
-| `ch14_m14_11` | 1.15x ± 0.03 | 11.08 | 15.9 | complete |
-| `ch14_m14_2` | 1.20x ± 0.02 | 0.4015 | 6.39 | complete |
-| `ch14_m14_3` | 1.83x ± 0.03 | 0.2517 | 5.128 | complete |
-| `ch14_m14_4` | 1.76x ± 0.05 | 0.04416 | 1.681 | complete |
-| `ch14_m14_4x` | 1.82x ± 0.02 | 0.04309 | 1.67 | complete |
-| `ch14_m14_5` | 2.07x ± 0.07 | 0.05629 | 1.857 | complete |
-| `ch14_m14_6` | 1.21x ± 0.02 | 2.105 | 8.19 | complete |
-| `ch14_m14_6x` | 1.26x ± 0.04 | 2.046 | 8.126 | complete |
-| `ch14_m14_7` | 1.39x ± 0.03 | 0.5047 | 8.34 | complete |
-| `ch14_m14_8` | 1.30x ± 0.01 | 0.06216 | 3.617 | complete |
-| `ch14_m14_8nc` | 1.37x ± 0.05 | 0.06524 | 4.854 | complete |
-| `ch14_m14_9` | 1.25x ± 0.03 | 6.917 | 11.55 | complete |
-| `ch15_m15_1` | 1.87x ± 0.04 | 0.01965 | 2.181 | complete |
-| `ch15_m15_2` | 1.54x ± 0.03 | 0.02735 | 2.439 | complete |
-| `ch15_m15_3` | 0.97x ± 0.03 | 0.4599 | 1.796 | complete |
-| `ch15_m15_4` | 0.94x ± 0.04 | 0.3833 | 1.722 | complete |
-| `ch15_m15_5` | 2.17x ± 0.03 | 0.02036 | 2.467 | complete |
-| `ch15_m15_6` | 1.62x ± 0.03 | 0.01483 | 1.906 | complete |
-| `ch15_m15_7` | 1.36x ± 0.01 | 0.2234 | 6.701 | complete |
-| `ch15_m15_8` | 1.89x ± 0.01 | 0.06771 | 1.699 | complete |
-| `ch15_m15_9` | 1.84x ± 0.04 | 0.07202 | 1.987 | complete |
-| `ch16_m16_1` | 2.34x ± 0.02 | 0.2364 | 2.274 | complete |
-| `ch16_m16_4` | 1.94x ± 0.05 | 0.03951 | 2.162 | complete |
-| `covid19imperial_v2` | 1.48x ± 0.08 | 5.75 | 12.67 | complete |
-| `covid19imperial_v3` | 1.43x ± 0.06 | 5.873 | 12.67 | complete |
-| `diamonds` | 0.95x ± 0.02 | 0.6956 | 2.845 | complete |
-| `dogs` | 4.68x ± 0.09 | 0.1569 | 3.55 | complete |
-| `dogs_hierarchical` | 3.22x ± 0.10 | 0.2429 | 2.221 | complete |
-| `dogs_log` | — | — | — | failed; dogs_log/gradient/0/stanli: failed (event 2269) |
-| `dogs_nonhierarchical` | 2.62x ± 0.04 | 0.3474 | 6.508 | complete |
-| `dugongs_model` | 1.83x ± 0.08 | 0.01827 | 1.778 | complete |
-| `earn_height` | 1.73x ± 0.02 | 0.09413 | 1.732 | complete |
-| `eight_schools_centered` | 1.39x ± 0.05 | 0.01232 | 1.724 | complete |
-| `eight_schools_noncentered` | 1.38x ± 0.01 | 0.01132 | 1.972 | complete |
-| `election88_full` | 2.09x ± 0.01 | 4.442 | 12.99 | complete |
-| `extra_hurdle_poisson` | 2.16x ± 0.07 | 0.01112 | 1.339 | complete |
-| `garch11` | 0.94x ± 0.02 | 0.1538 | 1.814 | complete |
-| `gp_pois_regr` | 1.33x ± 0.03 | 0.04956 | 4.49 | complete |
-| `gp_regr` | 1.33x ± 0.03 | 0.05689 | 4.307 | complete |
-| `gpcm_latent_reg_irt` | 15.58x ± 0.34 | 2.368 | 39.69 | complete |
-| `grsm_latent_reg_irt` | 13.73x ± 0.09 | 1.363 | 22.79 | complete |
-| `hier_2pl` | 1.58x ± 0.04 | 4.09 | 12.12 | complete |
-| `hierarchical_gp` | 2.36x ± 0.05 | 0.409 | 8.778 | complete |
-| `hmm_drive_0` | 1.14x ± 0.03 | 2.504 | 6.409 | complete |
-| `hmm_drive_1` | 1.23x ± 0.03 | 2.551 | 6.587 | complete |
-| `hmm_example` | 1.60x ± 0.06 | 0.3735 | 3.424 | complete |
-| `hmm_gaussian` | 1.39x ± 0.03 | 4.132 | 9.129 | complete |
-| `i319_gauss_re` | 1.19x ± 0.04 | 0.09406 | 3.484 | complete |
-| `i319_negbin_fixed` | 0.96x ± 0.01 | 0.1834 | 2.353 | complete |
-| `i319_negbin_re` | 1.18x ± 0.03 | 0.2346 | 3.826 | complete |
-| `i319_pois_fixed` | 1.00x ± 0.01 | 0.06368 | 1.952 | complete |
-| `i319_pois_re` | 1.33x ± 0.02 | 0.1174 | 3.452 | complete |
-| `i319_pois_re2` | 1.44x ± 0.03 | 0.1609 | 3.839 | complete |
-| `i320_gp_expquad` | 1.25x ± 0.04 | 0.2443 | 6.411 | complete |
-| `i320_gp_matern32` | 0.87x ± 0.01 | 0.6662 | 6.609 | complete |
-| `i320_mi_nhanes` | 1.22x ± 0.02 | 0.05043 | 3.265 | complete |
-| `i320_pois_trunc_both` | 0.99x ± 0.02 | 0.642 | 2.927 | complete |
-| `i320_pois_trunc_ub` | 1.06x ± 0.01 | 0.4982 | 2.725 | complete |
-| `i320_sratio_cs` | 1.81x ± 0.04 | 1.65 | 7.049 | complete |
-| `i320_sratio_plain` | 1.20x ± 0.05 | 1.219 | 4.265 | complete |
-| `iohmm_reg` | 1.85x ± 0.03 | 3.948 | 11.91 | complete |
-| `irt_2pl` | 1.26x ± 0.04 | 0.3664 | 3.423 | complete |
-| `kidscore_interaction` | 2.24x ± 0.07 | 0.06073 | 2.044 | complete |
-| `kidscore_interaction_c` | 2.29x ± 0.07 | 0.06024 | 2.062 | complete |
-| `kidscore_interaction_c2` | 2.26x ± 0.07 | 0.06017 | 2.023 | complete |
-| `kidscore_interaction_z` | 2.26x ± 0.06 | 0.05979 | 2.102 | complete |
-| `kidscore_mom_work` | 2.20x ± 0.04 | 0.06095 | 1.949 | complete |
-| `kidscore_momhs` | 1.71x ± 0.03 | 0.03868 | 1.69 | complete |
-| `kidscore_momhsiq` | 2.15x ± 0.05 | 0.0485 | 1.893 | complete |
-| `kidscore_momiq` | 1.68x ± 0.04 | 0.03882 | 1.707 | complete |
-| `kilpisjarvi` | 1.63x ± 0.02 | 0.01389 | 1.545 | complete |
-| `kronecker_gp` | — | — | — | failed; density/gradient mismatch: scaled error 0.0063 |
-| `ldaK2` | 2.36x ± 0.07 | 1.023 | 4.832 | complete |
-| `ldaK5` | 2.51x ± 0.03 | 49.31 | 124.5 | complete |
-| `log10earn_height` | 1.76x ± 0.06 | 0.09374 | 1.778 | complete |
-| `logearn_height` | 1.66x ± 0.02 | 0.09437 | 1.772 | complete |
-| `logearn_height_male` | 2.09x ± 0.04 | 0.1281 | 2.045 | complete |
-| `logearn_interaction` | 2.18x ± 0.06 | 0.1654 | 2.25 | complete |
-| `logearn_interaction_z` | 2.19x ± 0.03 | 0.1613 | 2.371 | complete |
-| `logearn_logheight_male` | 2.12x ± 0.03 | 0.1264 | 2.048 | complete |
-| `logistic_regression_rhs` | 1.19x ± 0.04 | 0.8715 | 4.862 | complete |
-| `logmesquite` | 2.89x ± 0.04 | 0.01845 | 2.171 | complete |
-| `logmesquite_logva` | 2.29x ± 0.03 | 0.01557 | 2.079 | complete |
-| `logmesquite_logvas` | 2.79x ± 0.05 | 0.0185 | 2.41 | complete |
-| `logmesquite_logvash` | 2.68x ± 0.04 | 0.01763 | 2.322 | complete |
-| `logmesquite_logvolume` | 1.76x ± 0.03 | 0.01272 | 1.781 | complete |
-| `losscurve_sislob` | 1.92x ± 0.04 | 0.03581 | 3.531 | complete |
-| `lotka_volterra` | 2.02x ± 0.03 | 0.4904 | 4.181 | complete |
-| `low_dim_gauss_mix` | 2.02x ± 0.02 | 1.039 | 4.064 | complete |
-| `low_dim_gauss_mix_collapse` | 2.09x ± 0.07 | 0.9863 | 3.93 | complete |
-| `lsat_model` | 1.62x ± 0.05 | 0.8101 | 3.789 | complete |
-| `mesquite` | 2.89x ± 0.07 | 0.01794 | 2.111 | complete |
-| `multi_occupancy` | 2.27x ± 0.04 | 0.5397 | 6.48 | complete |
-| `nes` | 2.66x ± 0.05 | 0.354 | 3.229 | complete |
-| `nes_logit_model` | 1.03x ± 0.03 | 0.1382 | 2.058 | complete |
-| `nn_rbm1bJ10` | 1.20x ± 0.02 | 3.265 | 8.068 | complete |
-| `nn_rbm1bJ100` | 1.07x ± 0.02 | 8576 | 9231 | complete |
-| `normal_mixture` | 2.08x ± 0.05 | 0.9193 | 3.472 | complete |
-| `normal_mixture_k` | 1.93x ± 0.04 | 4.095 | 10.11 | complete |
-| `one_comp_mm_elim_abs` | 1.03x ± 0.02 | 10.38 | 13.16 | complete |
-| `pilots` | 1.39x ± 0.04 | 0.02181 | 2.256 | complete |
-| `prophet` | 1.49x ± 0.06 | 0.7711 | 5.47 | complete |
-| `radon_county` | 2.10x ± 0.06 | 0.7522 | 3.422 | complete |
-| `radon_county_intercept` | 6.80x ± 0.06 | 1.133 | 8.991 | complete |
-| `radon_hierarchical_intercept_centered` | 6.83x ± 0.04 | 1.456 | 11.43 | complete |
-| `radon_hierarchical_intercept_noncentered` | 6.98x ± 0.20 | 1.455 | 11.8 | complete |
-| `radon_partially_pooled_centered` | 7.93x ± 0.17 | 0.7831 | 7.695 | complete |
-| `radon_partially_pooled_noncentered` | 7.66x ± 0.13 | 0.8034 | 7.683 | complete |
-| `radon_pooled` | 1.82x ± 0.05 | 0.9349 | 3.276 | complete |
-| `radon_variable_intercept_centered` | 6.96x ± 0.13 | 1.111 | 9.001 | complete |
-| `radon_variable_intercept_noncentered` | 6.99x ± 0.22 | 1.136 | 9.414 | complete |
-| `radon_variable_intercept_slope_centered` | 6.20x ± 0.07 | 1.3 | 9.779 | complete |
-| `radon_variable_intercept_slope_noncentered` | 6.21x ± 0.06 | 1.261 | 9.872 | complete |
-| `radon_variable_slope_centered` | 6.86x ± 0.19 | 1.125 | 9.244 | complete |
-| `radon_variable_slope_noncentered` | 6.63x ± 0.16 | 1.171 | 9.405 | complete |
-| `rats_model` | 4.07x ± 0.07 | 0.0317 | 1.909 | complete |
-| `s2_ar_cov` | 1.02x ± 0.01 | 0.1408 | 6.525 | complete |
-| `s2_beta_binomial` | 1.12x ± 0.01 | 0.09839 | 2.561 | complete |
-| `s2_car` | 2.00x ± 0.07 | 0.03181 | 3.538 | complete |
-| `s2_car_esicar` | 1.98x ± 0.02 | 0.03085 | 3.605 | complete |
-| `s2_car_icar` | 2.37x ± 0.05 | 0.02647 | 3.2 | complete |
-| `s2_categorical_re` | 1.47x ± 0.05 | 0.1235 | 4.359 | complete |
-| `s2_cens_interval` | 1.78x ± 0.06 | 0.0422 | 2.568 | complete |
-| `s2_com_poisson` | 0.17x ± 0.00 | 5.84 | 4.398 | complete |
-| `s2_cosy` | 0.97x ± 0.01 | 0.1322 | 5.799 | complete |
-| `s2_cox` | 3.24x ± 0.09 | 0.02638 | 2.899 | complete |
-| `s2_cox_cens` | 3.98x ± 0.11 | 0.03017 | 3.849 | complete |
-| `s2_cumulative_cauchit` | 3.90x ± 0.08 | 0.02985 | 2.61 | complete |
-| `s2_cumulative_cloglog` | 2.31x ± 0.06 | 0.0336 | 2.605 | complete |
-| `s2_cumulative_probit` | 1.35x ± 0.03 | 0.09968 | 2.566 | complete |
-| `s2_custom_vint` | 1.37x ± 0.02 | 0.1027 | 2.422 | complete |
-| `s2_custom_vreal` | 5.37x ± 0.08 | 0.01751 | 2.258 | complete |
-| `s2_dirichlet` | 1.05x ± 0.03 | 0.2804 | 3.404 | complete |
-| `s2_discrete_weibull` | 2.06x ± 0.07 | 0.04466 | 2.348 | complete |
-| `s2_dist_sigma_re` | 1.87x ± 0.02 | 0.03434 | 3.813 | complete |
-| `s2_fcor` | 0.95x ± 0.02 | 0.2864 | 3.955 | complete |
-| `s2_frechet` | 1.15x ± 0.04 | 0.0487 | 2.769 | complete |
-| `s2_gev` | 0.60x ± 0.01 | 0.1574 | 2.724 | complete |
-| `s2_gp_approx` | 2.33x ± 0.08 | 0.02583 | 4.332 | complete |
-| `s2_gp_by_approx` | 3.35x ± 0.04 | 0.04075 | 5.397 | complete |
+| `dogs_log` | — | — | — | failed; dogs_log/gradient/0/stanli: failed (event 2775) |
+| `kronecker_gp` | — | — | — | failed; density/gradient mismatch: scaled error 0.000113 |
 | `s2_gp_by_gr` | — | — | — | failed; density/gradient mismatch: scaled error 5.33e-08 |
-| `s2_gr_by` | 1.49x ± 0.06 | 0.03391 | 3.788 | complete |
-| `s2_gr_student` | 1.48x ± 0.01 | 0.03836 | 4.181 | complete |
-| `s2_hurdle_cumulative` | 1.25x ± 0.01 | 0.1523 | 3.096 | complete |
-| `s2_hurdle_negbin` | 2.12x ± 0.06 | 0.0794 | 2.414 | complete |
-| `s2_index_mi` | 1.27x ± 0.02 | 0.03653 | 3.013 | complete |
-| `s2_invgaussian` | — | — | — | failed; s2_invgaussian/gradient/0/stanli: failed (event 4816) |
-| `s2_logistic_normal` | 1.06x ± 0.01 | 0.411 | 5.981 | complete |
-| `s2_me2` | 1.39x ± 0.04 | 0.07284 | 5.611 | complete |
-| `s2_me2_nomecor` | 1.63x ± 0.04 | 0.04811 | 3.384 | complete |
-| `s2_mi_lognormal` | 1.68x ± 0.05 | 0.02903 | 3.395 | complete |
-| `s2_mi_trunc_lb` | 0.92x ± 0.03 | 0.1265 | 3.309 | complete |
-| `s2_mixture_theta` | 1.23x ± 0.03 | 0.156 | 3.387 | complete |
-| `s2_mm` | 1.20x ± 0.04 | 0.04601 | 3.543 | complete |
-| `s2_mm_weights` | 1.22x ± 0.01 | 0.04564 | 3.536 | complete |
-| `s2_mmc` | 0.88x ± 0.02 | 0.09571 | 5.958 | complete |
-| `s2_mo_simo_prior` | 1.85x ± 0.07 | 0.03129 | 2.939 | complete |
-| `s2_multinomial` | 1.13x ± 0.04 | 0.2139 | 2.966 | complete |
-| `s2_mv_shared_re` | 1.12x ± 0.03 | 0.0746 | 6.039 | complete |
-| `s2_mv_subset` | 1.08x ± 0.01 | 0.02504 | 2.28 | complete |
-| `s2_nl_noloop` | 1.62x ± 0.05 | 0.02026 | 2.627 | complete |
-| `s2_nlf` | 2.23x ± 0.03 | 0.02692 | 3.174 | complete |
-| `s2_rate` | 1.46x ± 0.01 | 0.01971 | 2.37 | complete |
-| `s2_s_by` | 2.09x ± 0.05 | 0.04903 | 4.553 | complete |
-| `s2_s_cc` | 2.03x ± 0.05 | 0.01963 | 3.019 | complete |
-| `s2_sar` | 2.25x ± 0.08 | 0.07955 | 3.136 | complete |
-| `s2_sar_error` | 2.22x ± 0.07 | 0.08152 | 3.128 | complete |
-| `s2_shifted_lognormal` | 2.02x ± 0.03 | 0.01992 | 2.717 | complete |
-| `s2_t2_by` | 1.77x ± 0.03 | 0.05183 | 4.512 | complete |
-| `s2_threading` | 1.19x ± 0.04 | 0.01652 | 2.182 | complete |
-| `s2_unstr` | 1.10x ± 0.02 | 0.1501 | 7.738 | complete |
-| `s2_weights_trunc` | 1.15x ± 0.01 | 0.128 | 2.495 | complete |
-| `s2_wiener` | 1.03x ± 0.02 | 0.5761 | 3.018 | complete |
-| `s2_zi_asymlaplace` | 0.89x ± 0.03 | 0.1136 | 2.547 | complete |
-| `s2_zi_beta` | 1.43x ± 0.03 | 0.09272 | 2.614 | complete |
-| `s2_zoi_beta` | 1.41x ± 0.02 | 0.09918 | 2.675 | complete |
-| `seeds_centered_model` | 1.87x ± 0.07 | 0.02407 | 2.683 | complete |
-| `seeds_model` | 1.56x ± 0.05 | 0.02289 | 2.5 | complete |
-| `seeds_stanified_model` | 1.44x ± 0.03 | 0.02396 | 2.403 | complete |
-| `sesame_one_pred_a` | 1.80x ± 0.04 | 0.02506 | 1.612 | complete |
-| `sir` | — | — | — | failed; sir/gradient/0/stanli: failed (event 5547) |
-| `soil_incubation` | 2.13x ± 0.06 | 0.6214 | 4.007 | complete |
-| `state_space_stochastic_level_stochastic_seasonal` | 3.00x ± 0.06 | 0.1436 | 4.029 | complete |
-| `surgical_model` | 1.30x ± 0.03 | 0.01726 | 2.193 | complete |
-| `sw_acat` | 3.06x ± 0.10 | 0.9919 | 5.631 | complete |
-| `sw_acat_cs` | 3.45x ± 0.07 | 1.241 | 7.978 | complete |
-| `sw_ar` | 1.54x ± 0.04 | 0.04418 | 3.088 | complete |
-| `sw_arma` | 1.39x ± 0.04 | 0.06486 | 3.208 | complete |
-| `sw_asymlaplace` | 0.76x ± 0.02 | 0.1041 | 2.472 | complete |
-| `sw_bernoulli` | 1.16x ± 0.02 | 0.01671 | 2.036 | complete |
-| `sw_beta` | 1.19x ± 0.04 | 0.04968 | 2.738 | complete |
-| `sw_binomial` | 1.13x ± 0.02 | 0.04408 | 2.297 | complete |
-| `sw_categorical` | 1.12x ± 0.01 | 0.03442 | 3.18 | complete |
-| `sw_cens` | 1.58x ± 0.05 | 0.03517 | 3.054 | complete |
-| `sw_cratio` | 1.18x ± 0.02 | 1.207 | 4.087 | complete |
-| `sw_cratio_cs` | 1.78x ± 0.07 | 1.624 | 6.708 | complete |
-| `sw_cumulative` | 0.98x ± 0.01 | 0.4494 | 2.951 | complete |
-| `sw_cumulative_cs` | 1.79x ± 0.03 | 1.086 | 5.661 | complete |
-| `sw_dist_sigma` | 1.82x ± 0.07 | 0.02317 | 2.569 | complete |
-| `sw_exgaussian` | 1.34x ± 0.06 | 0.0289 | 2.668 | complete |
-| `sw_gamma` | 1.33x ± 0.03 | 0.02269 | 2.548 | complete |
-| `sw_gaussian` | 1.10x ± 0.01 | 0.01669 | 2.079 | complete |
-| `sw_gp` | 1.19x ± 0.03 | 0.4106 | 6.606 | complete |
-| `sw_hurdle_gamma` | 2.18x ± 0.07 | 0.04453 | 2.379 | complete |
-| `sw_hurdle_lognormal` | 2.44x ± 0.06 | 0.03491 | 2.391 | complete |
-| `sw_hurdle_pois` | 2.48x ± 0.05 | 0.04455 | 2.257 | complete |
-| `sw_lognormal` | 1.66x ± 0.02 | 0.0178 | 2.457 | complete |
-| `sw_ma` | 1.53x ± 0.03 | 0.04518 | 3.06 | complete |
-| `sw_me` | 1.67x ± 0.06 | 0.03201 | 3.095 | complete |
-| `sw_mi` | 1.09x ± 0.01 | 0.02916 | 2.654 | complete |
-| `sw_mixture` | 1.41x ± 0.04 | 0.1172 | 3.676 | complete |
-| `sw_mono` | 1.86x ± 0.04 | 0.03102 | 2.897 | complete |
-| `sw_mv_norescor` | 1.08x ± 0.04 | 0.02561 | 2.288 | complete |
-| `sw_mv_rescor` | 1.13x ± 0.02 | 0.1495 | 5.129 | complete |
-| `sw_negbinomial` | 1.03x ± 0.02 | 0.04068 | 2.213 | complete |
-| `sw_nonlinear` | 1.74x ± 0.01 | 0.0203 | 2.69 | complete |
-| `sw_poisson` | 1.10x ± 0.03 | 0.02028 | 1.89 | complete |
-| `sw_re_bern` | 1.61x ± 0.04 | 0.02992 | 3.482 | complete |
-| `sw_re_gauss` | 1.41x ± 0.02 | 0.03141 | 3.413 | complete |
-| `sw_re_negbin` | 1.32x ± 0.02 | 0.05409 | 3.616 | complete |
-| `sw_re_pois` | 1.58x ± 0.05 | 0.03318 | 3.34 | complete |
-| `sw_re_slope` | 1.06x ± 0.02 | 0.06221 | 5.757 | complete |
-| `sw_se` | 1.66x ± 0.04 | 0.01558 | 2.213 | complete |
-| `sw_skewnormal` | 1.39x ± 0.02 | 0.04081 | 2.737 | complete |
-| `sw_spline_s` | 2.08x ± 0.08 | 0.02217 | 3.163 | complete |
-| `sw_spline_t2` | 1.77x ± 0.07 | 0.03217 | 3.639 | complete |
-| `sw_sratio` | 1.17x ± 0.02 | 1.206 | 4.068 | complete |
-| `sw_student` | 1.75x ± 0.03 | 0.02042 | 2.579 | complete |
-| `sw_trunc` | 1.12x ± 0.03 | 0.1275 | 2.452 | complete |
-| `sw_vonmises` | 2.26x ± 0.05 | 0.02349 | 2.455 | complete |
-| `sw_weibull` | 1.13x ± 0.02 | 0.04758 | 2.71 | complete |
-| `sw_weights` | 3.25x ± 0.05 | 0.02135 | 2.267 | complete |
-| `sw_zi_binomial` | 1.77x ± 0.04 | 0.05352 | 2.286 | complete |
-| `sw_zi_negbin` | 1.57x ± 0.02 | 0.07147 | 2.331 | complete |
-| `sw_zi_poisson` | 2.03x ± 0.04 | 0.03487 | 2.22 | complete |
-| `wells_daae_c_model` | 1.06x ± 0.02 | 0.4225 | 2.607 | complete |
-| `wells_dae_c_model` | 1.03x ± 0.03 | 0.3976 | 2.548 | complete |
-| `wells_dae_inter_model` | 1.00x ± 0.01 | 0.4463 | 2.554 | complete |
-| `wells_dae_model` | 1.05x ± 0.03 | 0.4105 | 2.426 | complete |
-| `wells_dist` | 1.53x ± 0.02 | 0.4467 | 2.401 | complete |
-| `wells_dist100_model` | 1.01x ± 0.01 | 0.3601 | 2.306 | complete |
-| `wells_dist100ars_model` | 1.02x ± 0.03 | 0.3846 | 2.369 | complete |
-| `wells_interaction_c_model` | 1.04x ± 0.03 | 0.4175 | 2.522 | complete |
-| `wells_interaction_model` | 0.98x ± 0.02 | 0.4253 | 2.45 | complete |
+| `s2_invgaussian` | — | — | — | failed; s2_invgaussian/gradient/0/stanli: failed (event 5322) |
+| `s2_mi_trunc_lb` | — | — | — | failed; density/gradient mismatch: scaled error 2.99e-07 |
+| `sir` | — | — | — | failed; sir/gradient/0/stanli: failed (event 6037) |
+| `sw_cens` | — | — | — | failed; density/gradient mismatch: scaled error 2.44e-06 |
