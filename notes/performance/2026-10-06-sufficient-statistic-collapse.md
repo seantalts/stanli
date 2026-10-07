@@ -1,6 +1,6 @@
 # Sufficient-statistic collapse for fast mode: design
 
-Status: design for review, 2026-10-06. Nothing here is implemented. Base:
+Status: design approved 2026-10-06. Nothing here is implemented. Base:
 `origin/fastmath/mode` at `73a344cd`. The sizing behind it is a census of the
 shared corpus on that revision; outputs and scripts are in
 [data/2026-10-06-suffstat-census/](data/2026-10-06-suffstat-census/). Every
@@ -289,10 +289,14 @@ runs in CI.
 
 Add any of these when a model that needs it appears, with its measurement.
 
-## Open questions for review
+## Decided in review (2026-10-06)
 
-1. Order: weighted evaluation first (machinery with no new math) as proposed,
-   or grouped normal first (more models)?
-2. Is the first-reported-observation concession acceptable in fast mode?
-3. Threshold: N >= 16 and G <= N/2 are starting values, to be set from the
-   step-1 benchmark.
+1. Build weighted evaluation first, then grouped normal, then
+   linear-Gaussian.
+2. A collapsed term may report a different observation first when several are
+   invalid.
+3. The fast-mode gate is 1e-12 on the log density and on the gradient scaled
+   by its largest entry ([TESTING.md](../../TESTING.md#fast-mode)).
+
+Still to be set from the step-1 benchmark: the N >= 16 and G <= N/2
+thresholds.
