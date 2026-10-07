@@ -130,6 +130,12 @@ endif()
 # eight-schools d/dmu). Cost is well inside the performance budget.
 target_compile_options(stanmath INTERFACE -ffp-contract=off)
 
+option(STANLI_FD_FMA "Scratch: compile density_fused.cpp with -ffp-contract=fast" OFF)
+if(STANLI_FD_FMA)
+  set_source_files_properties(runtime/kernels/density_fused.cpp
+    PROPERTIES COMPILE_OPTIONS -ffp-contract=fast)
+endif()
+
 # Clang can speculate every pow() in the recorder's piecewise CDF formulas,
 # evaluating unused tail approximations on ordinary inputs. Preserve libm's
 # errno contract in these shards so expensive calls stay in their branches.
