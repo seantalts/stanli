@@ -11,8 +11,10 @@ table rows are in "Candidates table rows" below, for pasting there later.
 - V1, free reduction order in the fused density sums: no on its own. The gain is
   1.010x over the 196 vector-argument models (1.012x by cycles) and nothing on the
   122 scalar-only ones. It is accurate (no worse than the packet order against a
-  70-digit reference, usually better for the log density) but leaves the 10-ULP
-  `s2_s_by` fixture gate. Take it only if a fast-kernel template exists anyway.
+  70-digit reference, usually better for the log density) but moves `s2_s_by` to
+  12 ULP from CmdStan against the fixture limit of 10; on that component V1 is 35
+  ULP from the truth and CmdStan 47. Take it only if a fast-kernel template exists
+  anyway.
 - V2, `-ffp-contract=fast` for `density_fused.cpp`: no. 1.000x over 317 models, 149
   corpus points change, accuracy against the truth does not move.
 - V3, skipping the argument predicates: no as a fast-mode switch, because it removes
@@ -20,8 +22,9 @@ table rows are in "Candidates table rows" below, for pasting there later.
   large (1.047x over vector-argument models, 1.10x above 256 elements, 1.30x on
   `radon_county`), and half of it comes back with no numerics change from one
   vectorized pass in front of the same checks (V3b, 1.035x over the 137 models with
-  an argument of 16 or more, byte-identical output). V3b belongs in the default
-  path, not in fast mode.
+  an argument of 16 or more, byte-identical output, 0 ULP in the differential
+  suites). V3b is an extra beyond the three requested candidates and belongs in the
+  default path, not in fast mode.
 
 ## Baseline and method
 
@@ -41,6 +44,7 @@ old time over new time, so above 1 is faster.
 | G | F with V1 and V3 on | F | F |
 | Z | copy of B (A/A) | `c0ec3ae3` | |
 | B2, H, D2, Y | `6e49f5af` (adds V3b): B2 all off, H `STANLI_FAST_CHECK=1`, D2 `STANLI_FAST_NOCHECK=1`, Y copy of B2 | `7967ff2c` | `54bfb5e5` |
+| B3, H3 | `af8a7218` (V3b with the empty-argument guard), replayed for numerics only, not timed | `71e05f20` | `999cf4e1` |
 
 Every timed arm runs through `/usr/bin/env` with the same set of switch variables
 (`0` or `1`) and a binary path of the same length, so environment size and argv do
@@ -110,9 +114,9 @@ tighter than nanoseconds: models more than 3% below B in nanoseconds are 14 (C),
 ### Layout noise and the models that matter
 
 B against A is 1.004 over all models, but single models move: 0.88 to 1.14 in
-nanoseconds, 0.91 to 1.09 in cycles (28 models below 0.97 in cycles). The extra code
-in `density_fused.cpp` changes the link layout and nothing else. Confirmation at 24
-pairs, arms A, B, C, F and Z (`scratch-fd/results/confirm`):
+nanoseconds, 0.91 to 1.09 in cycles (28 models below 0.97 in cycles). With the
+switches off B computes the same values as A; what differs is the link layout and a
+few predictable branches on the two switch globals. Confirmation at 24 pairs, arms A, B, C, F and Z (`scratch-fd/results/confirm`):
 
 | model | A over B | C over B | F over B | Z over B |
 | --- | --- | --- | --- | --- |
@@ -180,11 +184,25 @@ ceiling of 1.260 / 1.251, `logearn_height` 1.089 / 1.086 against 1.242 / 1.231,
 `radon_pooled` 1.045 / 1.051 against 1.184 / 1.203, `radon_variable_intercept_noncentered`
 1.040 / 1.044 against 1.170 / 1.173, `arK` 1.049 / 1.058 against 1.078 / 1.087; the
 geometric mean over the nine is 1.048 (cycles) against 1.115. H gets about half of
-the ceiling because its own pass is bound by floating-point add latency (two packet
-accumulators, about one element per cycle per array). Eight accumulators, or testing
-data arguments once at bind time, would shorten it; neither was tried. Output is
-byte-identical to A at all 1,056 corpus points and 352 of 352 models pass
-`tools/verify_refs.py`, including the points CmdStan rejects.
+the ceiling. A likely cause is that its own pass is bound by floating-point add
+latency (a sum over two packet accumulators is about one element per cycle per
+array); this was not measured. Eight accumulators, or testing data arguments once
+at bind time, would shorten it; neither was tried.
+
+Exactness checks. Timing used B2 (`6e49f5af`). Review found that the `minCoeff` and
+`maxCoeff` calls read element 0 of an empty argument, so `af8a7218` returns before
+the reduction when the argument has no elements (one length compare per call); the
+timing was not repeated. At `af8a7218`: the corpus replay of arm H3 (`B3_stanli_check`,
+sha256 `999cf4e1`, switch on) is byte-identical to A
+at all 1,056 points and `tools/verify_refs.py` passes 352 of 352 including the
+points CmdStan rejects; the differential suites, built in an
+`STANLI_STAN_DENSITY_ORACLE=ON` tree (`build-fd-on`) and run with
+`STANLI_FAST_CHECK=1`, give `test_density_fused` 135,535 cases (27,783 rejections),
+`test_student_t_fused` 61,741 (14,145) and `test_ordered_logistic_fused` 7,566
+(1,878), all at 0 ULP with equal rejection messages, as with the switch off. The
+suites include empty arguments. With `STANLI_FAST_NOCHECK=1` they fail on
+rejections (as intended); with `STANLI_FAST_REDUCE=1` `test_density_fused` and
+`test_student_t_fused` fail their 0 ULP limit.
 
 ## Numerics
 
@@ -194,8 +212,10 @@ Replay of the corpus at all recorded points (352 models, 1,056 points) through
 from `tools/verify_refs.py` itself through a wrapper per arm
 (`scratch-fd/results/verify/`). Scaled error is `|a-b| / max(|a|, |b|, 1)` over the
 log density and gradient. Raw ULP distance over all values is dominated by
-components that are zero to rounding (up to 1e18 for A against CmdStan), so ULP is
-reported over the 124 ULP-gated brms fixtures only.
+components that are zero to rounding, so ULP is reported over the 124 ULP-gated brms
+fixtures. For the record, the raw maximum over every value against the exact arm is
+7.0e13 (C), 2.8e14 (C8), 4.3e18 (F) and 8.7e18 for A against CmdStan; these come
+from components that are zero to rounding and say nothing about accuracy.
 
 | arm | points with a different byte | points with a different density or gradient (models) | max scaled error vs A | brms fixtures: points differing, max ULP vs A and vs CmdStan | `verify_refs.py` |
 | --- | ---: | --- | --- | --- | --- |
@@ -277,11 +297,14 @@ the packet order keeps two accumulators and V1 keeps four or eight. The gradient
 barely moves: the per-element partials are written by the fused kernels but summed
 into parameter adjoints elsewhere (`density_bwd`), so only the partials of scalar
 arguments (`put`) change. The one gradient that gets worse is `syn_gamma_800`
-(3.64 to 4.81 with 4 accumulators, 3.73 with 8). The `s2_s_by` point that leaves the
-10-ULP gate is a component where CmdStan and A are both 47 ULP from the truth and V1
-is 35: V1 is closer to the truth than the reference it fails against, which is the
-case TESTING.md accepts when the high-precision reference is recorded with the
-model. V2 is a tie (one point better, two worse).
+(3.64 to 4.81 with 4 accumulators, 3.73 with 8). The `s2_s_by` failure is
+gradient component 52 at point 0 (value -0.319; the largest component is 6.95).
+CmdStan is 47.3 ULP from the truth there; stanli A is within 8 ULP of CmdStan, V1
+with 4 accumulators is 35.3 ULP from the truth and with 8 accumulators 23.3. On that
+component V1 is closer to the truth than the reference it fails against, which is
+the case TESTING.md accepts when the high-precision reference is recorded with the
+model. V2 is not: 59.3 ULP from the truth, farther than CmdStan. Over all 60
+model-points V2 is a tie (one better, two worse).
 
 ## Candidates table rows
 
@@ -344,9 +367,9 @@ Per variant:
 | candidate | worth shipping in fast mode | geomean over affected models | vector-argument models | worst model | accuracy |
 | --- | --- | --- | --- | --- | --- |
 | V1 free reduction order | no on its own (free once a `Fast` template exists) | 1.006 over 317 (1.003 to 1.010) | 1.0095 (1.006 to 1.014), cycles 1.012 | 0.968 by cycles (`low_dim_gauss_mix_collapse`, 1.002 at 24 pairs) | log density more accurate, gradients level; leaves the 10-ULP gate on `s2_s_by` while closer to the truth than CmdStan |
-| V2 FMA contraction | no | 1.000 over 317 (0.9965 to 1.005) | 0.9998 | 0.938 by cycles (`ch12_m12_4`, 0.999 at 24 pairs) | unchanged; leaves the gate on `s2_s_by` |
+| V2 FMA contraction | no | 1.000 over 317 (0.9965 to 1.005) | 0.9998 | 0.938 by cycles (`ch12_m12_4`, 0.999 at 24 pairs) | unchanged overall; leaves the gate on `s2_s_by` and is farther from the truth than CmdStan there (59 against 47 ULP) |
 | V3 skip checks | no, unsafe | 1.030 over 317 (1.023 to 1.037) | 1.047 (1.037 to 1.057) | 0.993 by cycles | identical at valid points; loses rejections |
-| V3b exact checks | yes, in the default path | 1.035 over the 137 with an argument of 16 or more (1.027 to 1.043) | same set | 0.976 (`arma11`, whose A/A reads 0.922 in nanoseconds and 0.995 in cycles) | identical output |
+| V3b exact checks (extra) | yes, in the default path | 1.035 over the 137 with an argument of 16 or more (1.027 to 1.043) | same set | 0.976 (`arma11`, whose A/A reads 0.922 in nanoseconds and 0.995 in cycles) | identical output on the corpus; 0 ULP in the differential suites |
 
 If one item from this note goes into fast mode it is none of the three; the gains
 are in the checks, and they can be had exactly.
@@ -385,11 +408,11 @@ reach most of 1.07x over the 137 models without a flag.
 Branch `scratch/fast-density-variants` in `/Users/xitrium/claud/stanrt/.worktrees/fast-density`:
 `f5fdc139` cycles in `bench_grad` and the harness switches, `a7aee7ef` V1,
 `020f259d` V3, `a12c313d` V2, `25010224` replay and summary scripts, `0f0c4bad`
-70-digit script, `6e49f5af` V3b. Raw results are under `scratch-fd/` (untracked
+70-digit script, `6e49f5af` V3b, `af8a7218` the empty-argument guard for V3b. Raw results are under `scratch-fd/` (untracked
 where large): `results/corpus/results.jsonl` (317 models, every sample, cycles,
 instructions, values, load), `results/starters/`, `results/confirm/`,
-`results/v1acc/`, `results/v3b/`, `results/v3b_starters/`, `results/replay.jsonl`
-and `replay2.jsonl` (per point, per arm), `results/verify/*.txt` (the gate verdicts),
+`results/v1acc/`, `results/v3b/`, `results/v3b_starters/`, `results/replay.jsonl`,
+`replay2.jsonl` and `replay3.jsonl` (per point, per arm), `results/verify/*.txt` (the gate verdicts),
 `results/hp_truth.json` and `hp_compare.txt`, `results/census.json`, the summaries
 `results/bench_summary.txt`, `v1acc_summary.txt`, `v3b_summary.txt`,
 `replay_summary.txt`, the model lists `results/models_vector.txt` and

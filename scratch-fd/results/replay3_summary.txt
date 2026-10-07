@@ -1,0 +1,5 @@
+352 models, 1056 points, exact arm A
+arm	pts_bytes_diff	pts_val_diff	models_val_diff	pts_wa_diff	max_scaled_err_vs_exact	status_diff	brms_pts_diff	brms_max_ulp_vs_exact	brms_max_ulp_vs_cmdstan	max_scaled_err_vs_cmdstan	gate_violations
+A	0	0	0	0	0.00e+00	0	0	0	8	9.38e-13	0
+B3	0	0	0	0	0.00e+00	0	0	0	8	9.38e-13	0
+H3	0	0	0	0	0.00e+00	0	0	0	8	9.38e-13	0
