@@ -322,6 +322,10 @@ times a vector (row by row), and any pure op with a scalar result. An op it
 does not model gives every output element a number of its own, so it can
 only keep rows apart. `-0.0` and `0.0` are different data.
 
+A term is one vector density, or a family of scalar `normal` or `lognormal`
+terms, one op per observation, which is what a loop looks like when no
+earlier pass fused it; both get the same treatment.
+
 **Three ways to evaluate a collapsed term**, chosen per term:
 
 - *Rows.* For any density with an elementwise form: keep one observation
@@ -388,22 +392,23 @@ are affine in.
 
 **Measured** (i9-13900K, one P-core, fast mode with the pass on against fast
 mode with `STANLI_NO_COLLAPSE=1`, paired `ab_bench_corpus.py`, 9 rounds,
-identical-binary control within 1.9%): 92 of 352 corpus models have a term
-that collapses, and 91 of them could be timed. Their gradients are 8.2x
-faster in geometric mean; 67 are at least 2x faster, 40 at least 10x, and
-none is slower: `radon_pooled` 517x (47.5 us to 92 ns), `nes` 221x, the
-earnings regressions 86x to 139x, `diamonds` 73x, the hierarchical radon
-models 7x to 16x, `election88_full` 6.7x. A model the pass leaves alone has
-the same op graph with it on or off.
+identical-binary control within 2.9%): 91 of 352 corpus models have a term
+that collapses, and 90 of them could be timed. Their gradients are 7.4x
+faster in geometric mean; 68 are at least 2x faster, 35 at least 10x, and
+none is slower: `radon_pooled` 519x (46.9 us to 90 ns), `nes` 206x, the
+earnings regressions 82x to 131x, `diamonds` 74x, the hierarchical radon
+models 2.5x to 16x, `election88_full` 6.7x. A model the pass leaves alone
+has the same op graph with it on or off.
 
 Preparation pays for the analysis: over all 342 timeable models it is 5%
-longer at the median (0.07 ms) and 2.5% longer in total (12.05 s to
-12.35 s). Among the 92 models it changes the median is 15% (0.34 ms); the
-most added to any model is 40 ms, on `ch12_m12_6` (161 ms before), whose
-terms it examines and leaves alone. Sampling twelve of the collapsed models
-with four chains gave posterior means within 0.15 posterior standard
-deviations of default mode on every parameter (`election88_full` the
-largest), and whole runs from 1.1x to 41x shorter. The fast-mode gate in
+longer at the median (0.07 ms) and 2.6% longer in total (12.99 s to
+13.33 s). Among the 91 models it changes the median is 15% (0.37 ms); the
+most added to any model is 43 ms, on `nn_rbm1bJ100` (4.6 s before), and
+41 ms on `ch12_m12_6` (161 ms before), whose terms it examines and leaves
+alone. Sampling thirteen of the collapsed models with four chains gave
+posterior means within 0.15 posterior standard deviations of default mode
+on every parameter (`election88_full` the largest), and whole runs from
+1.2x to 41x shorter. The fast-mode gate in
 [`TESTING.md`](../../TESTING.md#fast-mode) passes with the pass on; the
 largest deviation in the corpus is `election88_full` at 1.7e-13.
 

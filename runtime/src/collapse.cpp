@@ -864,6 +864,11 @@ struct StatisticPlan {
   // in the order the kernel reads them, and its data.
   std::vector<std::pair<int, int>> leaves;  // slot, element
   std::vector<double> linear;
+  // Set when the term is a family of scalar densities, one op per
+  // observation, and not one vector op: the ops, and each group's location
+  // and scale slots. `op` is then the last of them.
+  std::vector<size_t> family;
+  std::vector<int> locations, scales;
 };
 
 // Locations affine in more values than this are left to the group form.
@@ -994,6 +999,18 @@ Analysis analyze(const Graph& g, const Fills& fills,
   const auto refuse = [](CollapseTerm& t, const char* why) {
     if (t.refusal == nullptr) t.refusal = why;
   };
+  std::unordered_set<int> targets(target_terms.begin(), target_terms.end());
+  std::vector<int> readers(n_slots, 0);
+  for (const Op& op : g.ops)
+    for (int j = 0; j < op.n_in; ++j)
+      if (op.in[j] >= 0) ++readers[(size_t)op.in[j]];
+  // Scalar normal and lognormal target terms, by opcode and variant.
+  struct Member {
+    size_t op;
+    double y;
+    Vn location, scale;
+  };
+  std::map<std::pair<uint16_t, uint8_t>, std::vector<Member>> members;
   std::vector<long> last_writer(n_slots, -1);
   Key row;
 
@@ -1214,9 +1231,106 @@ Analysis analyze(const Graph& g, const Fills& fills,
       report.terms.push_back(t);
     }
 
+    // One observation of a possible family of scalar normal terms.
+    if (has_statistic(op.opcode) && op_active[i] && op.n_in == 3 &&
+        op.out >= 0 && op.udata == nullptr && !op.dyn_lengths &&
+        !candidate[i] && op.in[0] >= 0 && op.in[1] >= 0 && op.in[2] >= 0 &&
+        g.slots[(size_t)op.out].len == 1 && readers[(size_t)op.out] == 0 &&
+        targets.count(op.out) == 1 && num.n_writes[(size_t)op.out] == 1) {
+      const auto* y =
+          g.slots[(size_t)op.in[0]].len == 1 ? num.data_of(op.in[0]) : nullptr;
+      // The location and scale are read where the family ends, so they
+      // must be scalars that are written once or not at all.
+      const auto fixed = [&](int s) {
+        return g.slots[(size_t)s].len == 1 && num.n_writes[(size_t)s] <= 1;
+      };
+      if (y != nullptr && fixed(op.in[1]) && fixed(op.in[2]) &&
+          std::isfinite((*y)[0]) &&
+          (op.opcode != OP_LOGNORMAL_LPDF || (*y)[0] > 0))
+        members[std::make_pair(op.opcode, op.variant)].push_back(
+            Member{i, (*y)[0], num.elem(op.in[1], 0), num.elem(op.in[2], 0)});
+    }
+
     num.number(op, shape[i], active);
     if (op.out >= 0) last_writer[(size_t)op.out] = (long)i;
     if (op.out2 >= 0) last_writer[(size_t)op.out2] = (long)i;
+  }
+
+  // A family of scalar normal terms is the vector term an unrolled loop
+  // would have been, had an earlier pass fused it: the same statistics.
+  std::unordered_set<int> in_family;
+  for (auto& entry : members) {
+    std::vector<Member>& family = entry.second;
+    const int64_t n = (int64_t)family.size();
+    if (n < kCollapseMinObservations) continue;
+    const Op& first = g.ops[family[0].op];
+    const bool lognormal = first.opcode == OP_LOGNORMAL_LPDF;
+    CollapseTerm t;
+    t.op = (int)family[0].op;
+    t.opcode = first.opcode;
+    t.ops = t.n = t.rows = n;
+    t.variate_is_data = true;
+    StatisticPlan stat;
+    stat.op = family.back().op;
+    std::vector<int> member;
+    std::vector<double> values;
+    std::map<std::pair<Vn, Vn>, int> group_of;
+    Compensated log_y;
+    for (const Member& m : family) {
+      const auto ins = group_of.emplace(std::make_pair(m.location, m.scale),
+                                        (int)stat.rep.size());
+      if (ins.second) {
+        stat.rep.push_back((int)stat.family.size());
+        stat.locations.push_back(g.ops[m.op].in[1]);
+        stat.scales.push_back(g.ops[m.op].in[2]);
+      }
+      member.push_back(ins.first->second);
+      stat.family.push_back(m.op);
+      values.push_back(lognormal ? std::log(m.y) : m.y);
+      if (lognormal) log_y.add(values.back());
+    }
+    t.groups = (int64_t)stat.rep.size();
+    const bool by_statistic = kCollapseNativeRatio * t.groups <= n;
+    bool one_scale = true;
+    for (int s : stat.scales) one_scale &= s == stat.scales[0];
+    history.p = stat.op;
+    Affine affine(history, kLinearMaxTerms);
+    Affine::Rows lines;
+    bool try_line = one_scale;
+    if (try_line) {
+      for (size_t k = 0; k < stat.rep.size(); ++k)
+        lines.push_back(affine.rows(stat.locations[k], {0},
+                                    stat.family[(size_t)stat.rep[k]])[0]);
+      try_line = worth_a_line(affine, lines);
+    }
+    if (!by_statistic && !try_line) {
+      refuse(t, "too few repeated rows");
+      report.terms.push_back(t);
+      continue;
+    }
+    stat.variate_constant = -log_y.value();
+    stat.statistics = grouped_statistics(values, member, stat.rep.size());
+    stat.scale = stat.scales[0];
+    stat.propto = (first.variant & 0x80u) != 0;
+    stat.variant = (uint8_t)((first.variant == 0 || (first.variant & 0x02u)
+                                  ? kGroupedLocationActive
+                                  : 0) |
+                             (first.variant == 0 || (first.variant & 0x04u)
+                                  ? kGroupedScaleActive
+                                  : 0) |
+                             (lognormal ? kGroupedLognormal : 0) |
+                             (stat.propto ? kGroupedPropto : 0));
+    const bool by_line = try_line && line_data(stat, affine, lines);
+    if (!by_line && !by_statistic) {
+      refuse(t, "too few repeated rows");
+      report.terms.push_back(t);
+      continue;
+    }
+    t.evaluator = by_line ? "linear" : "groups";
+    stat.term = report.terms.size();
+    for (const Member& m : family) in_family.insert(g.ops[m.op].out);
+    a.statistics.push_back(std::move(stat));
+    report.terms.push_back(t);
   }
 
   // Scalar target terms: equal values are one term and a count.
@@ -1230,7 +1344,9 @@ Analysis analyze(const Graph& g, const Fills& fills,
   std::map<uint16_t, ByOpcode> by_opcode;
   for (int t : target_terms) {
     if (t < 0 || g.slots[(size_t)t].len != 1) continue;
-    const Vn v = num.elem(t, 0);
+    // A term a family took stands alone here.
+    const bool taken = in_family.count(t) != 0;
+    const Vn v = taken ? num.fresh() : num.elem(t, 0);
     const auto ins = scalar_of.emplace(v, a.scalars.size());
     if (ins.second) {
       a.scalars.emplace_back(t, 1);
@@ -1241,7 +1357,7 @@ Analysis analyze(const Graph& g, const Fills& fills,
     a.scalar_group.push_back((int)ins.first->second);
     // A vector density's own sum is reported with that density.
     const long producer = last_writer[(size_t)t];
-    if (producer < 0 || candidate[(size_t)producer]) continue;
+    if (producer < 0 || candidate[(size_t)producer] || taken) continue;
     const uint16_t opcode = g.ops[(size_t)producer].opcode;
     const auto entry = by_opcode.emplace(opcode, ByOpcode{(int)producer});
     ++entry.first->second.n;
@@ -1368,7 +1484,10 @@ struct Rewriter : History {
       const int s = elements[(size_t)at].first;
       std::vector<int> which;
       int64_t next = at;
-      for (; next < total && elements[(size_t)next].first == s; ++next)
+      // A scalar is stored once per place it is wanted in.
+      for (; next < total && elements[(size_t)next].first == s &&
+             (next == at || len(s) != 1);
+           ++next)
         which.push_back(elements[(size_t)next].second);
       bool in_order = (int64_t)which.size() == len(s);
       for (size_t k = 0; in_order && k < which.size(); ++k)
@@ -1605,6 +1724,8 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
     st.rows += rows;
   }
 
+  std::unordered_set<int> family_terms;
+  std::vector<int> new_terms;
   for (const StatisticPlan& plan : a.statistics) {
     rw.p = plan.op;
     rw.memo.clear();
@@ -1614,7 +1735,23 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
     Op e;
     e.variant = plan.variant;
     e.n_in = 4;
-    if (plan.linear.empty()) {
+    if (!plan.family.empty() && plan.linear.empty()) {
+      // One scalar op per observation: the groups' locations and scales are
+      // scalars already, packed where the family ends.
+      std::vector<std::pair<int, int>> mu, sigma;
+      bool one_scale = true;
+      for (size_t k = 0; k < plan.rep.size(); ++k) {
+        mu.emplace_back(plan.locations[k], 0);
+        sigma.emplace_back(plan.scales[k], 0);
+        one_scale &= plan.scales[k] == plan.scales[0];
+      }
+      e.opcode = OP_NORMAL_GROUPED_LPDF;
+      e.in[1] = rw.packed(mu);
+      e.in[2] = one_scale ? plan.scales[0] : rw.packed(sigma);
+      e.in[0] = rw.data_slot(plan.statistics);
+      ++st.statistic_terms;
+      st.rows += (int64_t)plan.rep.size();
+    } else if (plan.linear.empty()) {
       e.opcode = OP_NORMAL_GROUPED_LPDF;
       e.in[1] = rw.restricted(d.in[1], plan.rep, plan.op);
       e.in[2] = rw.restricted(plan.scale, plan.rep, plan.op);
@@ -1637,10 +1774,21 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
     // Stan drops the variate's own term under propto; otherwise it is a
     // constant of the data.
     e.in[3] = rw.data_slot({plan.propto ? 0.0 : plan.variate_constant});
-    e.out = d.out;
+    if (plan.family.empty()) {
+      e.out = d.out;
+      replaced[plan.op] = 1;
+      st.observations += g.slots[(size_t)d.in[0]].len;
+    } else {
+      // The family's terms give way to the one new term.
+      e.out = g.add_slot(1, false);
+      for (size_t member : plan.family) {
+        replaced[member] = 1;
+        family_terms.insert(g.ops[member].out);
+      }
+      new_terms.push_back(e.out);
+      st.observations += (int64_t)plan.family.size();
+    }
     rw.before[plan.op].push_back(e);
-    replaced[plan.op] = 1;
-    st.observations += g.slots[(size_t)d.in[0]].len;
   }
 
   std::vector<Op> ops;
@@ -1685,6 +1833,13 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
     }
     target_terms = std::move(terms);
     st.scalar_terms_merged = a.scalars_merged;
+  }
+  if (!new_terms.empty()) {
+    std::vector<int> terms;
+    for (int t : target_terms)
+      if (!family_terms.count(t)) terms.push_back(t);
+    terms.insert(terms.end(), new_terms.begin(), new_terms.end());
+    target_terms = std::move(terms);
   }
 
   // Remove what nothing reads any more: only ops of the shapes this pass

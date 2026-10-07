@@ -202,8 +202,8 @@ build's:
   reroll and partition. Default mode is unchanged.
 - It also runs the observation collapse (2026-10-07): likelihood terms that
   repeat over the data are evaluated once per distinct row, group or, for a
-  normal term with a linear predictor, as one quadratic form. 92 corpus
-  models have such a term; 8.2x in geometric mean on them. See
+  normal term with a linear predictor, as one quadratic form. 91 corpus
+  models have such a term; 7.4x in geometric mean on them. See
   [the design and results](2026-10-06-sufficient-statistic-collapse.md) and
   `runtime/src/OPTIMIZATIONS.md`.
 - The AVX2 dense-matrix kernels are still chosen per process by

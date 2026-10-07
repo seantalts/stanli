@@ -6,8 +6,8 @@
   data. A density whose rows repeat is evaluated once per distinct row; a
   `normal` or `lognormal` term with a data variate becomes per-group
   statistics, or one quadratic form when its locations are a linear
-  predictor (`normal_id_glm` included). 92 of the 352 corpus models have such
-  a term; their gradients are 8x faster in geometric mean, 40 of them at
+  predictor (`normal_id_glm` included). 91 of the 352 corpus models have such
+  a term; their gradients are 7x faster in geometric mean, 35 of them at
   least 10x. Results differ from default mode by rounding only (at most
   1.7e-13 of the largest gradient entry in the corpus). Default mode is
   unchanged. `STANLI_NO_COLLAPSE=1` switches it off.

@@ -410,7 +410,7 @@ static void test_scalar_terms() {
     const int y = data_slot(m, {i % 4 < 2 ? 1.5 : -0.5});
     const int mu = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_INDEX, {a}, mu, {i % 2});
-    m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    m.g.add_op(OP_CAUCHY_LPDF, {y, mu, sigma}, lp);
     m.terms.push_back(lp);
   }
   const int extra = m.g.add_slot(1, false);
@@ -420,7 +420,7 @@ static void test_scalar_terms() {
   expect("scalars: thirty-six terms merged",
          c.stats.scalar_terms_merged == 36 && c.model.terms.size() == 5);
   expect("scalars: four densities and four weights left",
-         count_opcode(c.model.g, OP_NORMAL_LPDF) == 4 &&
+         count_opcode(c.model.g, OP_CAUCHY_LPDF) == 4 &&
              count_opcode(c.model.g, OP_MUL) == 4 &&
              count_opcode(c.model.g, OP_INDEX) == 4);
   expect("scalars: same values", c.same_values);
@@ -434,7 +434,7 @@ static void test_scalar_terms_equal_by_slot() {
   for (int i = 0; i < 40; ++i) {
     const int mu = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_INDEX, {a}, mu, {i % 20});
-    m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    m.g.add_op(OP_CAUCHY_LPDF, {y, mu, sigma}, lp);
     m.terms.push_back(lp);
   }
   const Collapsed c = collapse(m);
@@ -456,7 +456,7 @@ static void test_scalar_terms_mixed_counts() {
     const int y = data_slot(m, {0.75});
     const int mu = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_INDEX, {a}, mu, {which});
-    m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    m.g.add_op(OP_CAUCHY_LPDF, {y, mu, sigma}, lp);
     m.terms.push_back(lp);
   }
   const Collapsed c = collapse(m);
@@ -468,7 +468,7 @@ static void test_scalar_terms_mixed_counts() {
          std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
   expect("mixed counts: four weights, four densities",
          count_opcode(c.model.g, OP_MUL) == 4 &&
-             count_opcode(c.model.g, OP_NORMAL_LPDF) == 4);
+             count_opcode(c.model.g, OP_CAUCHY_LPDF) == 4);
   expect("mixed counts: same values", c.same_values);
 }
 
@@ -716,6 +716,70 @@ static void test_grouped_normal_refusals() {
            r.stats.statistic_terms == 0 &&
                refused(r.report.terms[0], "too few repeated rows"));
   }
+}
+
+// One scalar normal term per observation, as a loop no earlier pass fused
+// leaves them: the same statistics as the vector term.
+static void test_grouped_normal_from_scalar_terms() {
+  for (const bool per_group_scale : {false, true}) {
+    Model m;
+    const int a = m.g.add_slot(3, true);
+    const int s = m.g.add_slot(per_group_scale ? 3 : 1, true);
+    for (int i = 0; i < 40; ++i) {
+      const int y = data_slot(m, {0.25 * i - 4.0 + 0.01 * (i % 7)});
+      const int mu = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
+      m.g.add_op(OP_INDEX, {a}, mu, {i % 3});
+      int sigma = s;
+      if (per_group_scale) {
+        sigma = m.g.add_slot(1, false);
+        m.g.add_op(OP_INDEX, {s}, sigma, {i % 3});
+      }
+      m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+      m.g.ops.back().variant = 0x86;
+      m.terms.push_back(lp);
+    }
+    // One more term, so the scale has a use of its own.
+    const int squared = m.g.add_slot(per_group_scale ? 3 : 1, false);
+    const int extra = m.g.add_slot(1, false);
+    m.g.add_op(OP_SQUARE, {s}, squared);
+    m.g.add_op(OP_SUM_VEC, {squared}, extra);
+    m.terms.push_back(extra);
+    const Collapsed c = collapse(m);
+    expect("scalar family: one grouped term over three groups",
+           c.stats.statistic_terms == 1 && c.stats.rows == 3 &&
+               c.stats.observations == 40 &&
+               count_opcode(c.model.g, OP_NORMAL_GROUPED_LPDF) == 1 &&
+               count_opcode(c.model.g, OP_NORMAL_LPDF) == 0 &&
+               c.model.terms.size() == 2);
+    expect("scalar family: three locations left",
+           count_opcode(c.model.g, OP_INDEX) == (per_group_scale ? 6 : 3));
+    expect("scalar family: same values", c.same_values);
+  }
+}
+
+// The same family with locations b * x[n] + a: one quadratic form.
+static void test_linear_gaussian_from_scalar_terms() {
+  Model m;
+  const int a = m.g.add_slot(1, true), b = m.g.add_slot(1, true);
+  const int sigma = m.g.add_slot(1, true);
+  for (int i = 0; i < 40; ++i) {
+    const double x = std::sin(0.7 * (i + 1));
+    const int xs = data_slot(m, {x});
+    const int y = data_slot(m, {0.4 + 1.3 * x + 0.05 * std::cos(2.1 * i)});
+    const int mu = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
+    m.g.add_op(OP_FMA, {b, xs, a}, mu);
+    m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    m.g.ops.back().variant = 0x86;
+    m.terms.push_back(lp);
+  }
+  const Collapsed c = collapse(m);
+  const Op* op = find_op(c.model.g, OP_LINEAR_GAUSSIAN_LPDF);
+  expect("scalar family: one quadratic form in two values",
+         c.stats.linear_terms == 1 && op != nullptr &&
+             c.model.g.slots[(size_t)op->in[1]].len == 2 &&
+             count_opcode(c.model.g, OP_NORMAL_LPDF) == 0 &&
+             count_opcode(c.model.g, OP_FMA) == 0 && c.model.terms.size() == 1);
+  expect("scalar family, linear: same values", c.same_values);
 }
 
 // ---- locations affine in a few values --------------------------------------
@@ -1132,6 +1196,8 @@ int main() {
   test_grouped_normal_shifted_data();
   test_grouped_normal_rejects();
   test_grouped_normal_refusals();
+  test_grouped_normal_from_scalar_terms();
+  test_linear_gaussian_from_scalar_terms();
   test_linear_gaussian();
   test_linear_gaussian_near_the_mode();
   test_linear_gaussian_from_a_glm();

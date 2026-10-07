@@ -3,16 +3,16 @@ Worst difference of posterior means over all parameters and generated
 quantities, in units of the larger posterior standard deviation; wall time of
 the whole run.
 
-model                                        worst |mean diff|/sd   default   fast
-radon_county                                 0.051 (a.148)            2.08s   0.34s
-kidscore_momiq                               0.034 (beta.1)           0.16s   0.05s
-dogs                                         0.038 (p.3.25)           0.61s   0.38s
-earn_height                                  0.022 (beta.1)           0.81s   0.09s
-ch12_m12_4                                   0.023 (cutpoints.1)      2.48s   0.06s
-diamonds                                     0.071 (b.4)             55.44s   1.75s
-logmesquite                                  0.045 (beta.4)           0.08s   0.05s
-aalto_poisson_simple                         0.051 (y_rep.124)        0.17s   0.16s
-radon_variable_intercept_slope_noncentered   0.089 (beta_raw.202)     9.29s   2.26s
-election88_full                              0.144 (e.2)            230.78s  39.82s
-sw_lognormal                                 0.040 (b.1)              0.03s   0.02s
-ch11_m11_4                                   0.056 (a.6)              0.49s   0.22s
+radon_county                 draws 4000/4000  columns 389  worst |mean diff|/sd 0.051 (a.148)  wall default 2.05s fast 0.33s
+kidscore_momiq               draws 4000/4000  columns 3  worst |mean diff|/sd 0.034 (beta.1)  wall default 0.16s fast 0.05s
+dogs                         draws 4000/4000  columns 2253  worst |mean diff|/sd 0.038 (p.3.25)  wall default 0.60s fast 0.41s
+earn_height                  draws 4000/4000  columns 3  worst |mean diff|/sd 0.022 (beta.1)  wall default 0.79s fast 0.09s
+ch12_m12_4                   draws 4000/4000  columns 6  worst |mean diff|/sd 0.023 (cutpoints.1)  wall default 2.46s fast 0.06s
+diamonds                     draws 4000/4000  columns 27  worst |mean diff|/sd 0.071 (b.4)  wall default 55.39s fast 1.85s
+logmesquite                  draws 4000/4000  columns 8  worst |mean diff|/sd 0.045 (beta.4)  wall default 0.09s fast 0.05s
+aalto_poisson_simple         draws 4000/4000  columns 1001  worst |mean diff|/sd 0.051 (y_rep.124)  wall default 0.18s fast 0.15s
+radon_variable_intercept_slope_noncentered draws 4000/4000  columns 1549  worst |mean diff|/sd 0.066 (beta_raw.260)  wall default 9.30s fast 3.49s
+radon_hierarchical_intercept_centered draws 4000/4000  columns 391  worst |mean diff|/sd 0.087 (beta.1)  wall default 6.16s fast 2.43s
+election88_full              draws 4000/4000  columns 11656  worst |mean diff|/sd 0.144 (e.2)  wall default 231.18s fast 39.39s
+sw_lognormal                 draws 4000/4000  columns 5  worst |mean diff|/sd 0.040 (b.1)  wall default 0.03s fast 0.02s
+ch11_m11_4                   draws 4000/4000  columns 1019  worst |mean diff|/sd 0.056 (a.6)  wall default 0.51s fast 0.22s

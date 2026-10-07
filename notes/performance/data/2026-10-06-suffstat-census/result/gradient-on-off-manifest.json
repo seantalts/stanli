@@ -1,16 +1,16 @@
 {
  "arms": {
   "off": {
-   "path": "/tmp/claude-1000/-home-xitrium-claude/3c1c17d6-18a7-4278-a76b-1885cc7d7ddb/scratchpad/bench/bin/bench_grad.merged",
-   "sha256": "74b14ebae1d2503512eb5cb2cc9d14ac6d85f5f213c402190ba6f8b596a3ace8"
+   "path": "/tmp/claude-1000/-home-xitrium-claude/3c1c17d6-18a7-4278-a76b-1885cc7d7ddb/scratchpad/bench/bin/bench_grad.last2",
+   "sha256": "abf3781ab2834afbd4062a10473de096373f98f262b2de034b4cf8bc459a3a4d"
   },
   "on": {
-   "path": "/tmp/claude-1000/-home-xitrium-claude/3c1c17d6-18a7-4278-a76b-1885cc7d7ddb/scratchpad/bench/bin/bench_grad.merged",
-   "sha256": "74b14ebae1d2503512eb5cb2cc9d14ac6d85f5f213c402190ba6f8b596a3ace8"
+   "path": "/tmp/claude-1000/-home-xitrium-claude/3c1c17d6-18a7-4278-a76b-1885cc7d7ddb/scratchpad/bench/bin/bench_grad.last2",
+   "sha256": "abf3781ab2834afbd4062a10473de096373f98f262b2de034b4cf8bc459a3a4d"
   },
   "aa": {
-   "path": "/tmp/claude-1000/-home-xitrium-claude/3c1c17d6-18a7-4278-a76b-1885cc7d7ddb/scratchpad/bench/bin/bench_grad.merged.aa",
-   "sha256": "74b14ebae1d2503512eb5cb2cc9d14ac6d85f5f213c402190ba6f8b596a3ace8"
+   "path": "/tmp/claude-1000/-home-xitrium-claude/3c1c17d6-18a7-4278-a76b-1885cc7d7ddb/scratchpad/bench/bin/bench_grad.last2.aa",
+   "sha256": "abf3781ab2834afbd4062a10473de096373f98f262b2de034b4cf8bc459a3a4d"
   }
  },
  "fast_math": true,
@@ -25,5 +25,5 @@
  "warmup_ms": 200,
  "measure_ms": 250,
  "thread_env": "STAN_NUM_THREADS=1",
- "started": "Wed Oct  7 02:22:07 2026"
+ "started": "Wed Oct  7 04:49:00 2026"
 }
