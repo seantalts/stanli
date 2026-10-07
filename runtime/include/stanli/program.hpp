@@ -132,6 +132,7 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(SOFTMAX, kProgramRangeA | kProgramSaveOut | kProgramRangeOutput)          \
   X(LSE2, kProgramReadB | kProgramSaveA | kProgramSaveB)                      \
   X(LOG_DIFF_EXP, kProgramReadB | kProgramSaveA | kProgramSaveB)              \
+  X(LMULTIPLY, kProgramReadB | kProgramSaveA | kProgramSaveB)                 \
   X(LOG_MIX, kProgramReadB | kProgramReadC | kProgramSaveA | kProgramSaveB |  \
                  kProgramSaveC)                                               \
   X(FMA, kProgramReadB | kProgramReadC | kProgramSaveA | kProgramSaveB)       \
@@ -823,6 +824,9 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
         break;
       case Program::LOG_DIFF_EXP:
         d() = stan::math::log_diff_exp(ra(), rb());
+        break;
+      case Program::LMULTIPLY:
+        d() = stan::math::multiply_log(ra(), rb());
         break;
       case Program::LOG_MIX:
         d() = stan::math::log_mix(ra(), rb(), reg[(size_t)I.c]);

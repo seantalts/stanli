@@ -1156,13 +1156,14 @@ static void test_elementwise_width() {
                         {Program::MUL, 2},          {Program::DIV, 2},
                         {Program::POW, 2},          {Program::FMAX, 2},
                         {Program::FMIN, 2},         {Program::LSE2, 2},
-                        {Program::LOG_DIFF_EXP, 2}, {Program::FMA, 3},
-                        {Program::LOG_MIX, 3},      {Program::NEG, 1},
-                        {Program::EXP, 1},          {Program::LOG, 1},
-                        {Program::SQRT, 1},         {Program::SQUARE, 1},
-                        {Program::INV, 1},          {Program::FABS, 1},
-                        {Program::INV_LOGIT, 1},    {Program::LOG1M, 1},
-                        {Program::LOG1P_EXP, 1},    {Program::TANH, 1}};
+                        {Program::LOG_DIFF_EXP, 2}, {Program::LMULTIPLY, 2},
+                        {Program::FMA, 3},          {Program::LOG_MIX, 3},
+                        {Program::NEG, 1},          {Program::EXP, 1},
+                        {Program::LOG, 1},          {Program::SQRT, 1},
+                        {Program::SQUARE, 1},       {Program::INV, 1},
+                        {Program::FABS, 1},         {Program::INV_LOGIT, 1},
+                        {Program::LOG1M, 1},        {Program::LOG1P_EXP, 1},
+                        {Program::TANH, 1}};
   // Three length-4 operand ranges at 0, 4 and 8. Every a exceeds every b,
   // so log_diff_exp stays finite whichever operand broadcasts.
   const std::vector<double> in = {0.72, 0.85, 0.9, 0.93, 0.31, 0.4,
@@ -1475,6 +1476,11 @@ static void test_reductions() {
     Build b({1.1, 0.3});
     const int d = b.emit(Program::LOG_DIFF_EXP, 0, 1);
     check("log_diff_exp", b.done({d}, {1.9}));
+  }
+  {
+    Build b({1.3, 0.4});
+    const int d = b.emit(Program::LMULTIPLY, 0, 1);
+    check("lmultiply", b.done({d}, {1.9}));
   }
   // Long enough that Eigen vectorizes the reductions. A short vector hides
   // any disagreement between the double pass's redux over the register file

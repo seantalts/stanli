@@ -803,6 +803,7 @@ static RerollStats reroll_impl(
 
       // ---- classify, shrinking to the reported prefix on failure ----
       detail::reroll_plan::CandidatePlan plan;
+      plan.price_distinct_ops = fuse_shared_params;
       std::vector<Pos>& pos = plan.positions;
       bool layout_set = false;  // has the region committed to a convention
       bool& layout_cols = plan.column_major;  // column-major, once committed

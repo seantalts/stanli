@@ -925,6 +925,12 @@ __attribute__((noinline)) static void ranged_step(const AdjInstr& I,
                           adj[I.a + ka], adj[I.b + kb]);
       });
       break;
+    case Program::LMULTIPLY:
+      binary([&](int32_t k, int32_t ka, int32_t kb, int32_t) {
+        lmultiply_rule(take(k), val[I.va + ka], val[I.vb + kb], adj[I.a + ka],
+                       adj[I.b + kb]);
+      });
+      break;
     case Program::LOG_MIX:
       ternary([&](int32_t k, int32_t ka, int32_t kb, int32_t kc) {
         log_mix_rule(take(k), val[I.va + ka], val[I.vb + kb], val[I.vc + kc],
@@ -1201,6 +1207,10 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
         case Program::LOG_DIFF_EXP:
           adj[I.dst] = 0.0;
           log_diff_exp_rule(t, val[I.va], val[I.vb], adj[I.a], adj[I.b]);
+          break;
+        case Program::LMULTIPLY:
+          adj[I.dst] = 0.0;
+          lmultiply_rule(t, val[I.va], val[I.vb], adj[I.a], adj[I.b]);
           break;
         case Program::LOG_MIX:
           adj[I.dst] = 0.0;

@@ -2739,7 +2739,37 @@ static void test_fast_fuses_shared_parameter() {
                  want[i]);
 }
 
+static RerollStats fast_poisson_lanes(int L, int period, bool varied_per_lane,
+                                      std::vector<size_t>* ops_after) {
+  Graph g;
+  Fills fills;
+  const int parameter = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int lane = 0; lane < L; ++lane)
+    for (int p = 0; p < period; ++p) {
+      const int out = g.add_slot(1, false);
+      const int y =
+          varied_per_lane ? lane * period + p : (lane / (p + 1) + p) % 3 + 1;
+      g.add_op(OP_POISSON_LPMF, {parameter}, out, {y});
+      terms.push_back(out);
+    }
+  const RerollStats st = reroll(g, fills, terms, {}, true);
+  if (ops_after) ops_after->push_back(g.ops.size());
+  return st;
+}
+
+static void test_fast_prices_shared_density_duplicates() {
+  std::vector<size_t> ops;
+  const RerollStats dup = fast_poisson_lanes(44, 3, false, &ops);
+  expect("fast mode leaves duplicated shared densities for cse",
+         dup.regions == 0);
+  const RerollStats distinct = fast_poisson_lanes(44, 3, true, &ops);
+  expect("fast mode still fuses distinct shared densities",
+         distinct.regions == 1 && ops.back() < 44 * 3);
+}
+
 int main() {
+  test_fast_prices_shared_density_duplicates();
   test_fast_fuses_shared_parameter();
   test_shared_gradient_source_order();
   test_opaque_payload_not_hoisted();
