@@ -37,6 +37,8 @@ int env_level(const char* name) {
 const int g_fast_reduce = env_level("STANLI_FAST_REDUCE");
 const bool g_fast_nocheck = env_level("STANLI_FAST_NOCHECK") != 0;
 
+const bool g_cheap_check = env_level("STANLI_FAST_CHECK") != 0;
+
 inline bool checks_on() { return !g_fast_nocheck; }
 
 using VecView = Eigen::Map<const Eigen::Array<double, -1, 1>>;
@@ -117,6 +119,48 @@ template <typename T>
 bool any_zero(const T& x) {
   if constexpr (is_scalar_v<T>)
     return x == 0;
+  else
+    return (x == 0.0).any();
+}
+
+template <typename T>
+bool cheap_finite(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return std::isfinite(x);
+  else
+    return (x - x).sum() == 0.0;
+}
+
+template <typename T>
+bool cheap_positive_finite(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return std::isfinite(x) && x > 0;
+  else
+    return cheap_finite(x) && x.minCoeff() > 0.0;
+}
+
+template <typename T>
+bool cheap_nonneg_finite(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return std::isfinite(x) && x >= 0;
+  else
+    return cheap_finite(x) && x.minCoeff() >= 0.0;
+}
+
+template <typename T>
+bool cheap_unit_finite(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return x >= 0 && x <= 1;
+  else
+    return cheap_finite(x) && x.minCoeff() >= 0.0 && x.maxCoeff() <= 1.0;
+}
+
+template <typename T>
+bool any_zero_cheap(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return x == 0;
+  else if (g_cheap_check)
+    return x.minCoeff() == 0.0;
   else
     return (x == 0.0).any();
 }
@@ -269,6 +313,8 @@ void normal_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
   static constexpr const char* function = "normal_lpdf";
   check_sizes(function, y, mu, sigma);
   if (checks_on() &&
+      !(g_cheap_check && cheap_finite(y) && cheap_finite(mu) &&
+        cheap_positive_finite(sigma)) &&
       (any_nan(y) || !all_finite(mu) || !all_positive(sigma))) {
     stan::math::check_not_nan(function, "Random variable", y);
     stan::math::check_finite(function, "Location parameter", mu);
@@ -307,6 +353,8 @@ void cauchy_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
     return;
   }
   if (checks_on() &&
+      !(g_cheap_check && cheap_finite(y) && cheap_finite(mu) &&
+        cheap_positive_finite(sigma)) &&
       (any_nan(y) || !all_finite(mu) || !all_positive_finite(sigma))) {
     stan::math::check_not_nan(function, "Random variable", y);
     stan::math::check_finite(function, "Location parameter", mu);
@@ -389,8 +437,10 @@ void lognormal_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
                       Eigen::Index stride) {
   static constexpr const char* function = "lognormal_lpdf";
   check_sizes(function, y, mu, sigma);
-  if (checks_on() && (!all_nonnegative(y) || !all_finite(mu) ||
-                      !all_positive_finite(sigma))) {
+  if (checks_on() &&
+      !(g_cheap_check && cheap_nonneg_finite(y) && cheap_finite(mu) &&
+        cheap_positive_finite(sigma)) &&
+      (!all_nonnegative(y) || !all_finite(mu) || !all_positive_finite(sigma))) {
     stan::math::check_nonnegative(function, "Random variable", y);
     stan::math::check_finite(function, "Location parameter", mu);
     stan::math::check_positive_finite(function, "Scale parameter", sigma);
@@ -401,7 +451,7 @@ void lognormal_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
   }
   const bool ya = (mask & 1u) != 0, ma = (mask & 2u) != 0,
              sa = (mask & 4u) != 0;
-  if (any_zero(y)) {
+  if (any_zero_cheap(y)) {
     log_zero_result(o, mask);
     return;
   }
@@ -448,8 +498,11 @@ void beta_summed(const Y& y, const A& alpha, const B& beta, unsigned mask,
     zero_result(o);
     return;
   }
-  if (checks_on() && (!all_positive_finite(alpha) ||
-                      !all_positive_finite(beta) || !all_unit_interval(y))) {
+  if (checks_on() &&
+      !(g_cheap_check && cheap_positive_finite(alpha) &&
+        cheap_positive_finite(beta) && cheap_unit_finite(y)) &&
+      (!all_positive_finite(alpha) || !all_positive_finite(beta) ||
+       !all_unit_interval(y))) {
     stan::math::check_positive_finite(function, "First shape parameter", alpha);
     stan::math::check_positive_finite(function, "Second shape parameter", beta);
     stan::math::check_bounded(function, "Random variable", y, 0, 1);
@@ -503,8 +556,11 @@ void gamma_summed(const Y& y, const A& alpha, const B& beta, unsigned mask,
   static constexpr const char* function = "gamma_lpdf";
   check_sizes(function, y, alpha, beta, "Shape parameter",
               "Inverse scale parameter");
-  if (checks_on() && (!all_positive_finite(y) || !all_positive_finite(alpha) ||
-                      !all_positive_finite(beta))) {
+  if (checks_on() &&
+      !(g_cheap_check && cheap_positive_finite(y) &&
+        cheap_positive_finite(alpha) && cheap_positive_finite(beta)) &&
+      (!all_positive_finite(y) || !all_positive_finite(alpha) ||
+       !all_positive_finite(beta))) {
     stan::math::check_positive_finite(function, "Random variable", y);
     stan::math::check_positive_finite(function, "Shape parameter", alpha);
     stan::math::check_positive_finite(function, "Inverse scale parameter",
@@ -648,8 +704,11 @@ void student_t_summed(const Y& y, const Nu& nu, const M& mu, const S& sigma,
                       Eigen::Index stride) {
   static constexpr const char* function = "student_t_lpdf";
   check_sizes4(function, y, nu, mu, sigma);
-  if (checks_on() && (any_nan(y) || !all_positive_finite(nu) ||
-                      !all_finite(mu) || !all_positive_finite(sigma))) {
+  if (checks_on() &&
+      !(g_cheap_check && cheap_finite(y) && cheap_positive_finite(nu) &&
+        cheap_finite(mu) && cheap_positive_finite(sigma)) &&
+      (any_nan(y) || !all_positive_finite(nu) || !all_finite(mu) ||
+       !all_positive_finite(sigma))) {
     stan::math::check_not_nan(function, "Random variable", y);
     stan::math::check_positive_finite(function, "Degrees of freedom parameter",
                                       nu);
