@@ -325,6 +325,82 @@ static void test_a_later_store() {
   expect("store: same values", c.same_values);
 }
 
+// Where an argument can only be gathered from its full-length vector, the
+// rewrite is taken back whole unless the rows are few.
+static void test_unrestricted_argument() {
+  for (const int n : {16, kWide}) {
+    Model m;
+    const int b = m.g.add_slot(2, true), c0 = m.g.add_slot(1, true);
+    const int eta = m.g.add_slot(n, false), eta2 = m.g.add_slot(n, false);
+    const int theta = m.g.add_slot(n, false), lp = m.g.add_slot(1, false);
+    std::vector<int> group, outcome;
+    for (int i = 0; i < n; ++i) {
+      group.push_back(i % 2);
+      outcome.push_back(i % 4 < 2);
+    }
+    m.g.add_op(OP_GATHER, {b}, eta, group);
+    // One element replaced: the vector is a mix of sources, so only a
+    // gather can restrict it.
+    m.g.add_op(OP_SET_INDEX, {eta, c0}, eta2, {7});
+    m.g.add_op(OP_INV_LOGIT, {eta2}, theta);
+    m.g.add_op(OP_BERNOULLI_LPMF, {theta}, lp, outcome);
+    m.terms = {lp};
+    const Collapsed c = collapse(m);
+    if (n == 16) {
+      // Five rows of sixteen.
+      expect("unrestricted, few observations: taken back whole",
+             c.stats.vector_terms == 0 &&
+                 c.model.g.ops.size() == m.g.ops.size() &&
+                 c.model.g.slots.size() == m.g.slots.size() &&
+                 c.model.fills.size() == m.fills.size());
+      expect("unrestricted, few observations: says why",
+             c.report.terms.size() == 1 &&
+                 refused(c.report.terms[0],
+                         "its arguments could not be restricted") &&
+                 c.report.terms[0].evaluator == nullptr);
+    } else {
+      // Five rows of sixty-four pay even so.
+      expect("unrestricted, many observations: collapses",
+             c.stats.vector_terms == 1 && c.stats.rows == 5 &&
+                 count_opcode(c.model.g, OP_INV_LOGIT) == 1 &&
+                 out_len(c.model.g, OP_INV_LOGIT) == 5);
+    }
+    expect("unrestricted: same values", c.same_values);
+  }
+}
+
+// A vector updated element by element, each update reading the element
+// back, as `mu[n] += ...` lowers: only the updates behind the kept rows
+// remain.
+static void test_element_updates_die_with_their_rows() {
+  Model m;
+  const int a = m.g.add_slot(2, true), b = m.g.add_slot(1, true);
+  const int sigma = m.g.add_slot(1, true);
+  const int y = data_slot(m, distinct_y(kN));
+  const int start = m.g.add_slot(kN, false), mu = m.g.add_slot(kN, false);
+  std::vector<int> group;
+  for (int i = 0; i < kN; ++i) group.push_back(i % 2);
+  m.g.add_op(OP_GATHER, {a}, start, group);
+  for (int i = 0; i < kN; ++i) {
+    const int was = m.g.add_slot(1, false), now = m.g.add_slot(1, false);
+    m.g.add_op(OP_INDEX, {i == 0 ? start : mu}, was, {i});
+    m.g.add_op(OP_ADD, {was, b}, now);
+    if (i == 0)
+      m.g.add_op(OP_SET_INDEX, {start, now}, mu, {i});
+    else
+      m.g.add_op(OP_SET_INDEX_INPLACE, {mu, now}, mu, {i});
+  }
+  const int lp = m.g.add_slot(1, false);
+  m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  m.terms = {lp};
+  const Collapsed c = collapse(m);
+  expect("updates: two groups", c.stats.rows == 2);
+  expect("updates: two updates left of twenty",
+         count_opcode(c.model.g, OP_ADD) == 2 &&
+             count_opcode(c.model.g, OP_INDEX) == 2);
+  expect("updates: same values", c.same_values);
+}
+
 // Scalar target terms with equal values become one term and a count,
 // whatever slots their equal data sit in.
 static void test_scalar_terms() {
@@ -1046,6 +1122,8 @@ int main() {
   test_real_variate_rows();
   test_matvec_rows();
   test_a_later_store();
+  test_unrestricted_argument();
+  test_element_updates_die_with_their_rows();
   test_scalar_terms();
   test_scalar_terms_equal_by_slot();
   test_scalar_terms_mixed_counts();

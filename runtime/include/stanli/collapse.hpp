@@ -62,6 +62,10 @@ inline constexpr int64_t kCollapseMinObservations = 16;
 // fewer than the observations; elsewhere, half.
 inline constexpr int64_t kCollapseRecorderRatio = 8;
 inline constexpr int64_t kCollapseNativeRatio = 2;
+// Where an argument has to be gathered from a vector still built in full,
+// only the density itself gets shorter, and the rows must be this many
+// times fewer.
+inline constexpr int64_t kCollapseUnrestrictedRatio = 4;
 
 // OP_NORMAL_GROUPED_LPDF: sum over groups of the normal log density of that
 // group's observations, from per-group statistics.

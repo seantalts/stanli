@@ -415,6 +415,18 @@ A fast-mode kernel that replaces per-observation arithmetic with a closed form
 own against a high-precision reference, including inputs chosen to make it
 cancel.
 
+The observation collapse ([`runtime/src/collapse.cpp`](runtime/src/collapse.cpp))
+is checked by [`tests/test_collapse.cpp`](tests/test_collapse.cpp). Every
+graph it rewrites is run against the graph it came from, under this gate's
+metric: each way of building an argument, each of the three evaluation forms,
+every propto and activity variant, shared and rooted arguments, and every
+refusal. The grouped normal form is compared with the observations summed in
+extended precision for data shifted by up to 1e9 (bound 2e-14 of the largest
+gradient entry), and the linear form near the mode for data shifted by up to
+1e6, with and without a rank-deficient design (bound 1e-13). Both run only
+where `long double` is wider than `double`. Rejection is tested by message:
+a negative scale produces Stan's own text.
+
 Measured on 2026-10-06 (Linux x86-64, clang 18.1.3, `fastmath/mode` at
 `73a344cd`, baseline kernels): 351 of 352 models pass, and the worst error
 outside the exceptions is 5.8e-14 on the log density and 3.6e-14 on the

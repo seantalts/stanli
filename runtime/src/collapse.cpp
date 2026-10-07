@@ -44,6 +44,7 @@ constexpr int64_t kSlotTag = -2;
 constexpr int64_t kMatvecTag = -3;
 constexpr int64_t kIdataTag = -4;
 constexpr int64_t kPlaceTag = -5;
+constexpr int64_t kRowTag = -6;
 
 // A pure scalar op is keyed on its immediates too; past this many it is
 // simply left unnumbered.
@@ -207,15 +208,106 @@ Outcomes outcomes_of(const Op& op) {
   return o;
 }
 
+// The value table for keys of up to four words, which is nearly all of them:
+// open addressing over the words themselves, so a lookup allocates nothing.
+// Equality is of the words and their count, exactly; the hash only picks
+// where to look.
+class SmallTable {
+ public:
+  static constexpr size_t kWords = 4;
+
+  void reserve(size_t entries) {
+    size_t cells = 256;
+    while (3 * cells < 4 * entries) cells *= 2;
+    if (cells > cells_.size()) rehash(cells);
+  }
+
+  // The value stored under `w[0..n)`, or `fresh` after storing it.
+  Vn find_or_insert(const int64_t* w, size_t n, Vn fresh) {
+    if (4 * (used_ + 1) > 3 * cells_.size())
+      rehash(cells_.empty() ? 256 : 2 * cells_.size());
+    Cell probe;
+    for (size_t k = 0; k < kWords; ++k) probe.w[k] = k < n ? w[k] : 0;
+    probe.tag = hash(probe, n);
+    const size_t mask = cells_.size() - 1;
+    for (size_t at = (size_t)probe.tag & mask;; at = (at + 1) & mask) {
+      Cell& cell = cells_[at];
+      if (cell.value == 0) {
+        cell = probe;
+        cell.value = fresh;
+        ++used_;
+        return fresh;
+      }
+      if (cell.tag == probe.tag && cell.w[0] == probe.w[0] &&
+          cell.w[1] == probe.w[1] && cell.w[2] == probe.w[2] &&
+          cell.w[3] == probe.w[3])
+        return cell.value;
+    }
+  }
+
+ private:
+  // `tag` is the hash with the word count in its low three bits, so two
+  // keys of different lengths never compare equal.
+  struct Cell {
+    int64_t w[kWords];
+    uint64_t tag = 0;
+    Vn value = 0;  // value numbers start at one
+  };
+
+  static uint64_t hash(const Cell& c, size_t n) {
+    uint64_t h = 0x9e3779b97f4a7c15ull;
+    for (size_t k = 0; k < kWords; ++k) {
+      h ^= (uint64_t)c.w[k];
+      h *= 0xff51afd7ed558ccdull;
+      h ^= h >> 29;
+    }
+    return (h << 3) | (uint64_t)n;
+  }
+
+  void rehash(size_t cells) {
+    std::vector<Cell> old = std::move(cells_);
+    cells_.assign(cells, Cell{});
+    const size_t mask = cells - 1;
+    for (const Cell& cell : old) {
+      if (cell.value == 0) continue;
+      size_t at = (size_t)cell.tag & mask;
+      while (cells_[at].value != 0) at = (at + 1) & mask;
+      cells_[at] = cell;
+    }
+  }
+
+  std::vector<Cell> cells_;
+  size_t used_ = 0;
+};
+
 struct Numbering {
+  // The numbers of one slot's elements, inside `flat`.
+  struct Span {
+    Vn* p = nullptr;
+    size_t n = 0;
+    bool empty() const { return n == 0; }
+    size_t size() const { return n; }
+    Vn& operator[](size_t i) const { return p[i]; }
+    Vn* begin() const { return p; }
+    Vn* end() const { return p + n; }
+    Span& operator=(const std::vector<Vn>& values) {
+      std::copy(values.begin(), values.end(), p);
+      return *this;
+    }
+  };
+
   const Graph& g;
-  std::vector<std::vector<Vn>> vn;  // per op-written cone slot, per element
+  // Per element of every op-written cone slot, in one block: a vector per
+  // slot is an allocation per scalar of an unrolled model.
+  std::vector<Vn> flat;
+  std::vector<int64_t> base;  // a slot's place in `flat`, or -1
   std::vector<char> in_cone;
   std::vector<int> n_writes;
   std::vector<int64_t> version;
   std::vector<Vn> param_base;
   std::unordered_map<int, const std::vector<double>*> fill_of;
-  std::unordered_map<Key, Vn, KeyHash> table;
+  std::unordered_map<Key, Vn, KeyHash> table;  // the few longer keys
+  SmallTable small;
   Key key;
   Vn next = 1;
   // Compare data by the slot element it sits in, not by its value: two
@@ -224,18 +316,42 @@ struct Numbering {
 
   explicit Numbering(const Graph& graph)
       : g(graph),
-        vn(graph.slots.size()),
+        base(graph.slots.size(), -1),
         in_cone(graph.slots.size(), 0),
         n_writes(graph.slots.size(), 0),
         version(graph.slots.size(), 0),
         param_base(graph.slots.size(), 0) {}
 
+  Span span(int s) {
+    const int64_t at = base[(size_t)s];
+    return at < 0 ? Span{}
+                  : Span{flat.data() + at, (size_t)g.slots[(size_t)s].len};
+  }
+
   Vn fresh() { return next++; }
 
   Vn intern() {
+    if (key.w.size() <= SmallTable::kWords) {
+      const Vn v = small.find_or_insert(key.w.data(), key.w.size(), next);
+      if (v == next) ++next;
+      return v;
+    }
     const auto ins = table.emplace(key, next);
     if (ins.second) ++next;
     return ins.first->second;
+  }
+
+  // One number for a row of numbers, built a word at a time so that no key
+  // is ever longer than the small table takes.
+  Vn row(const std::vector<int64_t>& words) {
+    Vn v = 0;
+    for (const int64_t word : words) {
+      const int64_t w[3] = {kRowTag, v, word};
+      const Vn got = small.find_or_insert(w, 3, next);
+      if (got == next) ++next;
+      v = got;
+    }
+    return v;
   }
 
   Vn data(double x) {
@@ -270,7 +386,7 @@ struct Numbering {
   // Element i of slot s as it stands now; a length-one slot broadcasts.
   Vn elem(int s, int64_t i) {
     const size_t at = g.slots[(size_t)s].len == 1 ? 0 : (size_t)i;
-    const auto& v = vn[(size_t)s];
+    const Span v = span(s);
     if (!v.empty()) return v[at];
     if (n_writes[(size_t)s] == 0) {
       if (g.slots[(size_t)s].is_param) return param_base[(size_t)s] + (Vn)at;
@@ -280,15 +396,27 @@ struct Numbering {
   }
 
   void fresh_slot(int s) {
-    for (Vn& v : vn[(size_t)s]) v = fresh();
+    for (Vn& v : span(s)) v = fresh();
   }
 
   // The values of every cone slot written by ops, before any op has run.
   void materialize() {
+    size_t elements = 0;
+    for (size_t s = 0; s < g.slots.size(); ++s)
+      if (in_cone[s] && n_writes[s] != 0) elements += (size_t)g.slots[s].len;
+    // Gathers and stores copy numbers, so about half of the elements ever
+    // reach the table; it grows if that is short.
+    small.reserve(elements / 2);
+    flat.assign(elements, 0);
+    size_t placed = 0;
     for (size_t s = 0; s < g.slots.size(); ++s) {
-      if (!in_cone[s] || n_writes[s] == 0) continue;
-      auto& v = vn[s];
-      v.resize((size_t)g.slots[s].len);
+      if (!in_cone[s] || n_writes[s] == 0 || g.slots[s].len == 0) continue;
+      base[s] = (int64_t)placed;
+      placed += (size_t)g.slots[s].len;
+    }
+    for (size_t s = 0; s < g.slots.size(); ++s) {
+      if (base[s] < 0) continue;
+      const Span v = span((int)s);
       const auto f = fill_of.find((int)s);
       if (!g.slots[s].is_param && f != fill_of.end() &&
           f->second->size() == v.size()) {
@@ -304,7 +432,7 @@ struct Numbering {
   void number(const Op& op, Shape shape, const std::vector<char>& active) {
     if (op.out >= 0 && in_cone[(size_t)op.out]) {
       const int out = op.out;
-      auto& vout = vn[(size_t)out];
+      Span vout = span(out);
       const int64_t len = (int64_t)vout.size();
       switch (shape) {
         case Shape::kElementwise: {
@@ -314,18 +442,18 @@ struct Numbering {
             // Operands first: a lookup of data would clobber the key.
             for (int j = 0; j < op.n_in; ++j)
               operands[(size_t)j] = elem(op.in[j], k);
-            key.w.assign({op.opcode, op.variant});
+            key.w.assign({(int64_t)op.opcode | ((int64_t)op.variant << 16)});
             key.w.insert(key.w.end(), operands.begin(), operands.end());
             result[(size_t)k] = intern();
           }
-          vout = std::move(result);
+          vout = result;
           break;
         }
         case Shape::kGather: {
           std::vector<Vn> result((size_t)len);
           for (int64_t k = 0; k < len; ++k)
             result[(size_t)k] = elem(op.in[0], op.idata[k]);
-          vout = std::move(result);
+          vout = result;
           break;
         }
         case Shape::kIndex:
@@ -344,7 +472,7 @@ struct Numbering {
           std::vector<Vn> result((size_t)len);
           for (int64_t k = 0; k < len; ++k)
             result[(size_t)k] = elem(op.in[0], start + k * stride);
-          vout = std::move(result);
+          vout = result;
           break;
         }
         case Shape::kSliceWrite: {
@@ -355,7 +483,7 @@ struct Numbering {
             result[(size_t)k] = elem(op.in[0], k);
           for (int64_t k = 0; k < count; ++k)
             result[(size_t)(start + k * stride)] = elem(op.in[1], k);
-          vout = std::move(result);
+          vout = result;
           break;
         }
         case Shape::kMatvec: {
@@ -392,7 +520,7 @@ struct Numbering {
             operands.push_back(g.slots[(size_t)op.in[j]].len == 1
                                    ? elem(op.in[j], 0)
                                    : whole_slot(op.in[j]));
-          key.w.assign({op.opcode, op.variant});
+          key.w.assign({(int64_t)op.opcode | ((int64_t)op.variant << 16)});
           key.w.insert(key.w.end(), operands.begin(), operands.end());
           if (op.n_idata > 0) {
             key.w.push_back(kIdataTag);
@@ -713,6 +841,7 @@ struct Affine {
 // A vector density that collapses: one representative observation per row.
 struct VectorPlan {
   size_t op;
+  size_t term = 0;  // its entry in the report
   std::vector<int> rep;
   std::vector<int> count;
 };
@@ -720,6 +849,7 @@ struct VectorPlan {
 // A normal or lognormal term that collapses to per-group statistics.
 struct StatisticPlan {
   size_t op;
+  size_t term = 0;                 // its entry in the report
   std::vector<int> rep;            // first observation of each group
   std::vector<double> statistics;  // grouped_statistics' layout
   double variate_constant = 0;     // lognormal's -sum(log y)
@@ -856,7 +986,6 @@ Analysis analyze(const Graph& g, const Fills& fills,
   Numbering same = num;
   same.by_slot = true;
   num.materialize();
-  same.materialize();
 
   const auto refuse = [](CollapseTerm& t, const char* why) {
     if (t.refusal == nullptr) t.refusal = why;
@@ -907,10 +1036,11 @@ Analysis analyze(const Graph& g, const Fills& fills,
         };
         VectorPlan plan;
         plan.op = i;
-        std::unordered_map<Key, int, KeyHash> group_of;
+        std::unordered_map<Vn, int> group_of;
         for (int64_t obs = 0; obs < n; ++obs) {
           row_key(obs, true);
-          const auto ins = group_of.emplace(row, (int)plan.rep.size());
+          const auto ins =
+              group_of.emplace(num.row(row.w), (int)plan.rep.size());
           if (ins.second) {
             plan.rep.push_back((int)obs);
             plan.count.push_back(1);
@@ -930,7 +1060,8 @@ Analysis analyze(const Graph& g, const Fills& fills,
           member.reserve((size_t)n);
           for (int64_t obs = 0; obs < n; ++obs) {
             row_key(obs, false);
-            const auto ins = group_of.emplace(row, (int)stat.rep.size());
+            const auto ins =
+                group_of.emplace(num.row(row.w), (int)stat.rep.size());
             if (ins.second) stat.rep.push_back((int)obs);
             member.push_back(ins.first->second);
           }
@@ -991,6 +1122,7 @@ Analysis analyze(const Graph& g, const Fills& fills,
           refuse(t, "too few repeated rows");
         if (t.refusal == nullptr) {
           t.evaluator = by_line ? "linear" : by_statistic ? "groups" : "rows";
+          stat.term = plan.term = report.terms.size();
           if (by_line || by_statistic)
             a.statistics.push_back(std::move(stat));
           else
@@ -1028,7 +1160,7 @@ Analysis analyze(const Graph& g, const Fills& fills,
       bool by_line = false;
       if (usable) {
         std::vector<int> member;
-        std::unordered_map<Key, int, KeyHash> group_of;
+        std::unordered_map<Vn, int> group_of;
         member.reserve((size_t)rows);
         for (int64_t obs = 0; obs < rows; ++obs) {
           row.w.assign({num.elem(op.in[2], obs)});
@@ -1037,7 +1169,8 @@ Analysis analyze(const Graph& g, const Fills& fills,
             std::memcpy(&bits, &(*x)[(size_t)(c * rows + obs)], sizeof bits);
             row.w.push_back(bits);
           }
-          const auto ins = group_of.emplace(row, (int)stat.rep.size());
+          const auto ins =
+              group_of.emplace(num.row(row.w), (int)stat.rep.size());
           if (ins.second) stat.rep.push_back((int)obs);
           member.push_back(ins.first->second);
         }
@@ -1068,6 +1201,7 @@ Analysis analyze(const Graph& g, const Fills& fills,
       }
       if (by_line) {
         t.evaluator = "linear";
+        stat.term = report.terms.size();
         a.statistics.push_back(std::move(stat));
       } else {
         refuse(t, usable ? "too few repeated rows"
@@ -1077,7 +1211,6 @@ Analysis analyze(const Graph& g, const Fills& fills,
     }
 
     num.number(op, shape[i], active);
-    same.number(op, shape[i], active);
     if (op.out >= 0) last_writer[(size_t)op.out] = (long)i;
     if (op.out2 >= 0) last_writer[(size_t)op.out2] = (long)i;
   }
@@ -1101,7 +1234,6 @@ Analysis analyze(const Graph& g, const Fills& fills,
     } else {
       ++a.scalars[ins.first->second].second;
     }
-    places[ins.first->second].insert(same.elem(t, 0));
     a.scalar_group.push_back((int)ins.first->second);
     // A vector density's own sum is reported with that density.
     const long producer = last_writer[(size_t)t];
@@ -1119,6 +1251,17 @@ Analysis analyze(const Graph& g, const Fills& fills,
   // fewer to the target sum (a fifth of an op). Terms that read the very
   // same slots are merged by CSE next for nothing, so they count for the
   // sum alone. What it costs is one multiply per merged value.
+  // That second numbering is run only when some value does repeat.
+  bool any_repeat = false;
+  for (const auto& term : a.scalars) any_repeat |= term.second >= 2;
+  if (any_repeat) {
+    same.materialize();
+    for (size_t i = 0; i < n_ops; ++i) same.number(g.ops[i], shape[i], active);
+    size_t next = 0;
+    for (int t : target_terms)
+      if (t >= 0 && g.slots[(size_t)t].len == 1)
+        places[(size_t)a.scalar_group[next++]].insert(same.elem(t, 0));
+  }
   double saved = 0;
   int repeats = 0;
   for (size_t k = 0; k < a.scalars.size(); ++k) {
@@ -1152,6 +1295,7 @@ struct Rewriter : History {
   Fills& data;
   std::vector<std::vector<Op>> before;  // new ops, by the op they precede
   std::map<std::pair<std::pair<int, size_t>, std::vector<int>>, int> memo;
+  int fallbacks = 0;
 
   Rewriter(Graph& mutable_graph, Fills& mutable_fills)
       : History(mutable_graph, mutable_fills),
@@ -1169,6 +1313,29 @@ struct Rewriter : History {
     const int s = graph.add_slot((int64_t)values.size(), false);
     data.emplace_back(s, std::move(values));
     return s;
+  }
+
+  // A gather of a vector some op built in full: correct, but the ops that
+  // built it still run at full length.
+  int fallback(int s, const std::vector<int>& which) {
+    ++fallbacks;
+    return gather(s, which);
+  }
+
+  // Everything emitted since a mark can be taken back.
+  struct Mark {
+    size_t slots, fills, idata, ops;
+  };
+  Mark mark() const {
+    return Mark{graph.slots.size(), data.size(), graph.idata_pool.size(),
+                before[p].size()};
+  }
+  void rollback(const Mark& m) {
+    graph.slots.resize(m.slots);
+    data.resize(m.fills);
+    graph.idata_pool.resize(m.idata);
+    before[p].resize(m.ops);
+    memo.clear();
   }
 
   int gather(int s, const std::vector<int>& which) {
@@ -1241,7 +1408,7 @@ struct Rewriter : History {
       return gather(s, which);
     }
     const Op w = g.ops[(size_t)q];  // a copy: emitting grows the graph
-    if (w.out != s) return gather(s, which);
+    if (w.out != s) return fallback(s, which);
     // An input the writer read must still hold that value at p.
     const auto holds = [&](int in) {
       return in != s && !written_in(in, (size_t)q + 1, p);
@@ -1249,7 +1416,7 @@ struct Rewriter : History {
     switch (classify(g, w)) {
       case Shape::kElementwise: {
         for (int j = 0; j < w.n_in; ++j)
-          if (!holds(w.in[j])) return gather(s, which);
+          if (!holds(w.in[j])) return fallback(s, which);
         Op op = w;
         op.primal_source = -1;
         for (int j = 0; j < w.n_in; ++j)
@@ -1259,14 +1426,14 @@ struct Rewriter : History {
         return op.out;
       }
       case Shape::kGather: {
-        if (!holds(w.in[0])) return gather(s, which);
+        if (!holds(w.in[0])) return fallback(s, which);
         std::vector<int> through;
         through.reserve(which.size());
         for (int k : which) through.push_back(w.idata[k]);
         return restricted(w.in[0], through, p);
       }
       case Shape::kSliceRead: {
-        if (!holds(w.in[0])) return gather(s, which);
+        if (!holds(w.in[0])) return fallback(s, which);
         const int64_t start = w.idata[0], stride = slice_stride(w);
         std::vector<int> through;
         through.reserve(which.size());
@@ -1278,7 +1445,7 @@ struct Rewriter : History {
         const auto* x = data_before(w.in[0], p);
         if (x == nullptr || !writers[(size_t)w.in[0]].empty() ||
             !holds(w.in[1]))
-          return gather(s, which);
+          return fallback(s, which);
         const int64_t kept = (int64_t)which.size();
         std::vector<double> picked((size_t)(kept * cols));
         for (int64_t c = 0; c < cols; ++c)
@@ -1300,7 +1467,7 @@ struct Rewriter : History {
         bool scalars = true, one_slot = true;
         for (int e : which) {
           const Source src = source_of(s, e, at);
-          if (src.kind == Source::kNone) return gather(s, which);
+          if (src.kind == Source::kNone) return fallback(s, which);
           scalars &= src.kind == Source::kScalar;
           one_slot &= src.kind == Source::kElement &&
                       (from.empty() ||
@@ -1332,10 +1499,10 @@ struct Rewriter : History {
           }
           return packed;
         }
-        return gather(s, which);
+        return fallback(s, which);
       }
       default:
-        return gather(s, which);
+        return fallback(s, which);
     }
   }
 };
@@ -1354,16 +1521,29 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
   CollapseStats st;
   if (std::getenv("STANLI_NO_COLLAPSE")) return st;
   Analysis a = analyze(g, fills, target_terms);
-  if (report != nullptr) *report = a.report;
-  if (a.vectors.empty() && a.statistics.empty() && a.scalars_merged == 0)
+  if (a.vectors.empty() && a.statistics.empty() && a.scalars_merged == 0) {
+    if (report != nullptr) *report = std::move(a.report);
     return st;
+  }
 
   const size_t n_old = g.ops.size();
   Rewriter rw(g, fills);
   std::vector<char> replaced(n_old, 0);
+  // Where an argument could only be gathered from its full-length vector,
+  // the ops behind it still run in full and only the density shrinks: that
+  // is taken back unless the rows are few enough to pay on their own.
+  const auto unpaid = [&](size_t term, int64_t rows, int64_t n) {
+    if (rw.fallbacks == 0 || kCollapseUnrestrictedRatio * rows <= n)
+      return false;
+    a.report.terms[term].refusal = "its arguments could not be restricted";
+    a.report.terms[term].evaluator = nullptr;
+    return true;
+  };
   for (const VectorPlan& plan : a.vectors) {
     rw.p = plan.op;
     rw.memo.clear();
+    rw.fallbacks = 0;
+    const Rewriter::Mark mark = rw.mark();
     const Op d = g.ops[plan.op];
     const Outcomes outcomes = outcomes_of(d);
     const int64_t rows = (int64_t)plan.rep.size();
@@ -1391,6 +1571,10 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
       }
       rw.attach(e, std::move(idata));
     }
+    if (unpaid(plan.term, rows, n)) {
+      rw.rollback(mark);
+      continue;
+    }
     e.out = g.add_slot(rows, false);
     rw.before[plan.op].push_back(e);
 
@@ -1411,6 +1595,8 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
   for (const StatisticPlan& plan : a.statistics) {
     rw.p = plan.op;
     rw.memo.clear();
+    rw.fallbacks = 0;
+    const Rewriter::Mark mark = rw.mark();
     const Op d = g.ops[plan.op];
     Op e;
     e.variant = plan.variant;
@@ -1419,6 +1605,11 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
       e.opcode = OP_NORMAL_GROUPED_LPDF;
       e.in[1] = rw.restricted(d.in[1], plan.rep, plan.op);
       e.in[2] = rw.restricted(plan.scale, plan.rep, plan.op);
+      if (unpaid(plan.term, (int64_t)plan.rep.size(),
+                 g.slots[(size_t)d.in[0]].len)) {
+        rw.rollback(mark);
+        continue;
+      }
       e.in[0] = rw.data_slot(plan.statistics);
       ++st.statistic_terms;
       st.rows += (int64_t)plan.rep.size();
@@ -1484,25 +1675,64 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
   }
 
   // Remove what nothing reads any more: only ops of the shapes this pass
-  // models, which are pure and write all of their output.
+  // models, which are pure and write all of their output. A slot is live
+  // whole, or in the elements an index read asked for: a loop that updates
+  // a vector element by element reads each one back, and only the stores
+  // behind the elements still wanted have to stay.
   std::vector<char> live(g.slots.size(), 0);
+  std::unordered_map<int, std::unordered_set<int>> wanted;
   for (int s : extra_roots)
     if (s >= 0) live[(size_t)s] = 1;
   for (int s : target_terms)
     if (s >= 0) live[(size_t)s] = 1;
   if (g.result_slot >= 0) live[(size_t)g.result_slot] = 1;
+  const auto want_all = [&](int s) {
+    live[(size_t)s] = 1;
+    wanted.erase(s);
+  };
   std::vector<char> drop(ops.size(), 0);
   for (size_t i = ops.size(); i-- > 0;) {
     const Op& op = ops[i];
-    const bool modelled = classify(g, op) != Shape::kFresh;
-    if (modelled && !live[(size_t)op.out]) {
+    const Shape shape = classify(g, op);
+    const bool modelled = shape != Shape::kFresh;
+    const auto some = modelled ? wanted.find(op.out) : wanted.end();
+    const bool partly = some != wanted.end() && !some->second.empty();
+    if (modelled && !live[(size_t)op.out] && !partly) {
       drop[i] = 1;
       ++st.ops_removed;
       continue;
     }
-    if (modelled) live[(size_t)op.out] = 0;
+    if (shape == Shape::kStore && !live[(size_t)op.out]) {
+      // Only some elements are wanted, and this store writes one.
+      const int at = op.idata[0];
+      if (op.in[0] == op.out) {
+        if (some->second.erase(at) == 0) {
+          drop[i] = 1;
+          ++st.ops_removed;
+          continue;
+        }
+      } else {
+        // A copying store has to run for the elements it passes on, which
+        // are then wanted of its base.
+        std::unordered_set<int> rest = std::move(some->second);
+        wanted.erase(some);
+        rest.erase(at);
+        if (!live[(size_t)op.in[0]])
+          wanted[op.in[0]].insert(rest.begin(), rest.end());
+      }
+      want_all(op.in[1]);
+      continue;
+    }
+    if (modelled) {
+      live[(size_t)op.out] = 0;
+      wanted.erase(op.out);
+    }
+    if (shape == Shape::kIndex) {
+      if (!live[(size_t)op.in[0]]) wanted[op.in[0]].insert(op.idata[0]);
+      continue;
+    }
     for (int j = 0; j < op.n_in; ++j)
-      if (op.in[j] >= 0) live[(size_t)op.in[j]] = 1;
+      if (op.in[j] >= 0) want_all(op.in[j]);
   }
   std::vector<Op> kept;
   kept.reserve(ops.size() - (size_t)st.ops_removed);
@@ -1526,6 +1756,7 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
   for (const auto& f : fills) named[(size_t)f.first] = 1;
   for (size_t s = 0; s < g.slots.size(); ++s)
     if (!named[s] && !g.slots[s].is_param) g.slots[s].len = 0;
+  if (report != nullptr) *report = std::move(a.report);
   return st;
 }
 

@@ -1,7 +1,8 @@
 # Sufficient-statistic collapse for fast mode: design
 
-Status: design approved 2026-10-06. Only the analysis half (step 0) is
-implemented; nothing is rewritten yet. Base:
+Status: implemented 2026-10-07 except the arrow-structured form (step 4);
+see "Result" at the end for what was built, what changed from this design,
+and the measurements. Design approved 2026-10-06. Base:
 `origin/fastmath/mode` at `73a344cd`. The sizing behind it is a census of the
 shared corpus on that revision; outputs and scripts are in
 [data/2026-10-06-suffstat-census/](data/2026-10-06-suffstat-census/). Every
@@ -332,3 +333,81 @@ Add any of these when a model that needs it appears, with its measurement.
 
 Still to be set from the step-1 benchmark: the N >= 16 and G <= N/2
 thresholds.
+
+## Result (2026-10-07)
+
+Built: the pass (`runtime/src/collapse.cpp`, `collapse_linear.cpp`), the two
+closed-form kernels (`runtime/kernels/collapse_kernels.cpp`), tests
+(`tests/test_collapse.cpp`), and the description in
+`runtime/src/OPTIMIZATIONS.md`. It runs in fast mode only.
+
+### Measurements
+
+i9-13900K, one P-core, clang 18.1.3, Release, `fastmath/mode` plus this
+work. Fast mode with the pass on against fast mode with
+`STANLI_NO_COLLAPSE=1`, the same binary, `harnesses/ab_bench_corpus.py
+--fast-math --arm-env off:STANLI_NO_COLLAPSE=1`, 9 rounds, with a third arm
+of an identical binary as control (at most 1.4% apart).
+
+- 92 of 352 corpus models have a term that collapses: by rows in 30, by
+  groups in 18, by the linear form in 44.
+- Of the 91 that could be timed (`dogs_log` has a non-finite benchmark
+  point in every configuration), gradients are 8.1x faster in geometric
+  mean; 84 are at least 1.1x faster, 67 at least 2x, 41 at least 10x.
+- The census estimated 85 models at 2x or more and 36 at 10x or more for
+  these families together. The estimates were conservative per model, as the
+  hand-collapsed timings suggested, and the pass reaches fewer of the
+  scalar-term models than the census assumed.
+- The models the pass does not change have the same op graph with it on or
+  off, so they were not re-timed in the final run. An earlier full-corpus
+  run was too noisy to use (identical binaries differed by up to 41% on a
+  loaded machine).
+- Fast-mode gate (`tools/verify_refs.py --fast-math`): 351 of 352, the same
+  single failure (`sw_gp`) as without the pass and as default mode on this
+  toolchain. Largest deviation in the corpus: 1.7e-13 (`election88_full`).
+- Object code: about 205 KB of text (110 KB the pass, 85 KB the
+  least-squares preparation, 10 KB the kernels).
+
+### What changed from the design
+
+- **Scalar target terms** were added (decided in review after step 0): terms
+  with equal values are computed once and multiplied by their count. This is
+  what reaches the unrolled `ordered_logistic`, capture-recapture and
+  hurdle models. Two things were learned the hard way:
+  - Listing one slot twice among the target terms instead of multiplying
+    gives wrong results; the later passes take target slots to be distinct.
+  - Merging only some repeats is worse than merging none: partitioning then
+    fuses the remaining lanes where it had left them to CSE
+    (`dogs_hierarchical` 0.68x, `multi_occupancy` 0.79x). Merging is
+    all-or-nothing per model on an estimate of dispatches saved, which also
+    declines when the repeats read the very same slots and CSE would merge
+    them for nothing.
+- **Arguments are restricted by pushing a gather upward**, not by re-emitting
+  a cone from value numbers. Value numbering only decides which rows are
+  equal; each restriction rule is a local identity with a plain gather as the
+  fallback. A rewrite that could only use the fallback is taken back unless
+  the rows are at least 4x fewer.
+- **The linear form applies to grouped rows and to `normal_id_glm`.** Its
+  centre is the minimum-norm least-squares solution, and the expansion is
+  exact for any centre, so rank-deficient designs (44 of the 112 qualifying
+  in the census) needed nothing special. Checked against extended precision
+  near the mode with a repeated column: within 1e-13 of the largest gradient
+  entry.
+- **Thresholds.** Rows 2x fewer than observations for densities with a native
+  elementwise form, 8x for those that pay a recorder call per row; groups 2x
+  fewer; at least 16 observations. These came from the measurements above,
+  not a separate sweep.
+- **Dead-op removal follows index reads element by element.** A loop of
+  `mu[n] += ...` reads each element back, which kept every store alive under
+  slot-level liveness (`sw_mono` was 3% slower until this).
+
+### Not built
+
+| what | why |
+| --- | --- |
+| Arrow-structured linear form (an indicator block plus dense columns) | The hierarchical radon models it targets already get 7x to 16x from the group form. Not sized beyond the census. |
+| GLM densities other than `normal_id_glm` by rows (`bernoulli_logit_glm`, `poisson_log_glm`) | Needs the GLM rewritten as a matrix product and an elementwise density, whose argument checks differ from the GLM's for infinite parameters. `nes_logit_model` (1179 observations, 10 rows) is the main case. |
+| A predictor built by ops the analysis does not follow (`ch12_m12_6`, `s2_mo_simo_prior`, `sw_mono`'s monotonic effect) | Each needs its op modelled. |
+| Dropping data that no op reads any more | The full-length data stay in the bound buffers; only op-written slots are released. |
+| Preparation-time cap for large designs | The linear form is limited to 256 parameters and the analysis to 4 million affine terms; no corpus model comes near either. |
+
