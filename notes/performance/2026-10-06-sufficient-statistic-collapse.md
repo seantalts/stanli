@@ -1,6 +1,7 @@
 # Sufficient-statistic collapse for fast mode: design
 
-Status: design approved 2026-10-06. Nothing here is implemented. Base:
+Status: design approved 2026-10-06. Only the analysis half (step 0) is
+implemented; nothing is rewritten yet. Base:
 `origin/fastmath/mode` at `73a344cd`. The sizing behind it is a census of the
 shared corpus on that revision; outputs and scripts are in
 [data/2026-10-06-suffstat-census/](data/2026-10-06-suffstat-census/). Every
@@ -266,12 +267,43 @@ pipeline rule requires, run in fast mode against fast mode without the step.
 - Sampling: posterior agreement with default mode on the corpus models that
   have reference posteriors.
 
-Dependency: the fast-mode gate is defined in
-[TESTING.md](../../TESTING.md#fast-mode) (1e-12 on the log density and on the
-gradient scaled by its largest entry, against the recorded CmdStan values) but
-is not yet enforced. This work can start on kernel-level references and the
-fast-against-fast comparison, and should not ship to users before the gate
-runs in CI.
+Dependency: the fast-mode gate in [TESTING.md](../../TESTING.md#fast-mode)
+(1e-12 on the log density and on the gradient scaled by its largest entry,
+against the recorded CmdStan values) runs with `tools/verify_refs.py
+--fast-math` but is not in CI. The collapse should not ship to users before
+it is.
+
+## Step 0 result: what the pass sees (2026-10-06)
+
+`analyze_collapse` (`runtime/src/collapse.cpp`) is the analysis half of the
+pass. It runs where the rewrite will, changes nothing, and reports under
+`STANLI_COLLAPSE_REPORT=1` in fast mode. `harnesses/collapse_census.py` runs
+it over the corpus; its output is `dry-run.txt` in the data folder.
+
+- 46 of 352 models have a term that would collapse, 28 of them by 10x or more
+  in that term.
+- Of the 56 models the census put at an estimated 2x or more, the pass finds
+  39. Seven others it finds were below 2x in the census.
+- Visibility is not what the other 17 lack: none is hidden by a region map,
+  retained loop or island at this point in the pipeline. They need coverage
+  the first version of the analysis does not have:
+
+  | models | what is missing |
+  | ---: | --- |
+  | 5 | the density feeds a mixture or marginalisation (`LSE2`), so the repeat is in the whole target term, not the density: Mb_model, Mt_model, M0_model, ch12_m12_3, ch12_m12_3_alt |
+  | 4 | GLM densities, whose rows are a design-matrix row and an outcome: nes_logit_model, i319_pois_fixed, i319_pois_re, i319_gauss_re |
+  | 4 | scalar `ordered_logistic` terms sharing one cutpoint vector: ch12_m12_4 to ch12_m12_7 |
+  | 2 | no density op at all, hand-written target terms: sw_acat, ch11_m11_7 |
+  | 2 | a predictor built by an op the analysis does not follow: s2_mo_simo_prior, sw_mono |
+
+  The first and fourth rows are one extension: number the target terms
+  themselves and weight the ones that repeat. Fast-mode CSE already merges
+  the repeats that are the same slots; this would add the ones equal only by
+  data value.
+- The pass follows elementwise ops, gathers, element and slice stores and
+  reads, and data-matrix times vector by row. Slice stores mattered: without
+  them it found 43 models, because `vector[N] mu = ...` lowers to a slice
+  store that a later pass removes.
 
 ## Left out
 

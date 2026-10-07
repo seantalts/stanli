@@ -20,6 +20,9 @@ Results:
   agreement.
 - `datarows.txt`: repeated raw data rows in models whose likelihood the graph
   census could not see.
+- `dry-run.txt`: output of `harnesses/collapse_census.py`, the analysis half
+  of the pass run over the corpus in the shipped pipeline (the design note's
+  step 0).
 
 Scripts (throwaway; they expect a `scratch/suffstat/` directory in a checkout
 with a Release build in `build-spike/`, the pinned

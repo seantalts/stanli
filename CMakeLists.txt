@@ -374,6 +374,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/reroll.cpp
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
+  runtime/src/collapse.cpp
   runtime/src/cse.cpp
   runtime/src/gp_cov_fusion.cpp
   runtime/src/graph_print.cpp
@@ -1339,7 +1340,7 @@ set(STANLI_TESTS
   test_ode_prog test_mir_program_conformance test_mir_checks
   test_structured_checks test_structured_loop
   test_mir_unary_fallback test_mir_binary_fallback test_mir_reduction_fallback
-  test_constfold test_cse test_fast_math test_graph_print test_pass_dump
+  test_constfold test_collapse test_cse test_fast_math test_graph_print test_pass_dump
   test_function_registry test_function_shape
   test_partition
   test_solve test_solve_forwards test_solve_reuse test_cross_path

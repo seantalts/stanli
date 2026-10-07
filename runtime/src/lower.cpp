@@ -695,6 +695,14 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
   trace("post_reroll_inplace", post_reroll_inplace_time, post_reroll_roots,
         PrepTrace::Extra::Rewrites, post_reroll_inplace);
   std::vector<int> current_roots = post_reroll_roots;
+  if (compile_options.fast_math && !in_write_array &&
+      std::getenv("STANLI_COLLAPSE_REPORT")) {
+    // Analysis only, for now: which likelihood terms repeat over the data,
+    // seen where the rewrite will run. After re-roll, which builds the
+    // vector terms; before partition, CSE and islands, which hide them.
+    print_collapse_report(analyze_collapse(g, out.fills, target_terms),
+                          prep_graph);
+  }
   if (plan.partition) {
     // After re-roll, which keeps first crack at the contiguous shapes it
     // already handles, and before CSE, which would merge ops shared
