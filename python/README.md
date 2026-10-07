@@ -43,6 +43,11 @@ looks beneath each search directory. `Function`, `stan_to_mir`, and
 `bridgestan_model` also accept `include_paths`. Constructed models retain the
 compiled includes, so later sampling does not reread files that may have changed.
 
+`Model(..., fast_math=True)` and `stan_to_mir(..., fast_math=True)` opt in to
+fast mode, which compiles with fused multiply-adds and lets the runtime regroup
+sums. Results can differ from the default in the last bits. It is off by default and needs the
+bundled portable compiler (`stanli-compile`) or an embedded build.
+
 Sampling reports CmdStan-shaped progress every 100 transitions by default,
 followed by per-chain warm-up, sampling, and total times:
 

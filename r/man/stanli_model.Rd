@@ -11,7 +11,8 @@ stanli_model(
   mir = NULL,
   seed = 1,
   threads_per_chain = 1,
-  include_paths = NULL
+  include_paths = NULL,
+  fast_math = FALSE
 )
 }
 \arguments{
@@ -42,6 +43,12 @@ Stan `#include` files, followed by the directory containing `file` (or the
 current directory for `code`). Nested includes use the same search path.
 Included source is compiled once and retained when sampling rebuilds the
 model, even if the files later change or move. Ignored when `mir` is supplied.}
+
+\item{fast_math}{`TRUE` opts this model into fast mode: the Stan source is
+compiled with fused multiply-add rewriting and the runtime may use faster,
+less exactly rounded evaluation, so results can differ from the default
+in the last bits. Defaults to `FALSE`. With `mir`, use MIR compiled in
+fast mode.}
 }
 \value{
 An object of class `stanli_model` whose `columns` name every

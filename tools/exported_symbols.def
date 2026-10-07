@@ -15,11 +15,15 @@ EXPORTS
   stanli_model_new_from_stan_seeded
   stanli_model_new_threaded
   stanli_model_new_from_stan_threaded
+  stanli_model_opts_init
+  stanli_model_new_with_opts
+  stanli_model_new_from_stan_with_opts
   stanli_reduce_sum_count
   stanli_reduce_sum_fallbacks
   stanli_has_embedded_stanc
   stanli_stan_to_mir
   stanli_stan_to_mir_with_includes
+  stanli_stan_to_mir_with_opts
   stanli_string_free
   stanli_function_new_from_stan
   stanli_function_new_from_mir

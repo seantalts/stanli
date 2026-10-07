@@ -273,8 +273,11 @@ std::string run_stanc_process(const std::string& stanc,
 }
 
 std::string run_portable_compiler(const std::string& compiler,
-                                  const std::string& model) {
-  return run_process(compiler, {"--model-only", model}, true);
+                                  const std::string& model, bool fast_math) {
+  std::vector<std::string> args = {"--model-only"};
+  if (fast_math) args.push_back("--fast-math");
+  args.push_back(model);
+  return run_process(compiler, args, true);
 }
 
 std::string executable_directory() {

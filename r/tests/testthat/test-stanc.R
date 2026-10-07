@@ -398,3 +398,73 @@ test_that("runtime asset names match the five published targets", {
 
   expect_equal(actual, published)
 })
+
+test_that("fast_math selects the fast producer in every compile path", {
+  skip_if_not_installed("V8")
+  skip_if_not_installed("jsonlite")
+
+  seen <- NULL
+  run_stanc <- function(compiler, args, stdout, stderr) {
+    seen <<- args
+    con <- file(stdout, open = "wb")
+    writeChar("STANLI2:ZmFrZQ==", con, eos = NULL, useBytes = TRUE)
+    close(con)
+    0L
+  }
+  stanli:::mir_from_binary("fake", "model {}", portable = TRUE,
+                           run_stanc = run_stanc)
+  expect_length(seen, 1)
+  stanli:::mir_from_binary("fake", "model {}", portable = TRUE,
+                           run_stanc = run_stanc, fast_math = TRUE)
+  expect_identical(seen[[1]], "--fast-math")
+  expect_length(seen, 2)
+  expect_error(
+    stanli:::mir_from_binary("fake", "model {}", portable = FALSE,
+                             run_stanc = run_stanc, fast_math = TRUE),
+    "fast_math")
+
+  state <- stanli:::stanc_js_ctx
+  had_ctx <- exists("ctx", envir = state, inherits = FALSE)
+  old_ctx <- state$ctx
+  on.exit(if (had_ctx) state$ctx <- old_ctx else
+            rm("ctx", envir = state), add = TRUE)
+  ctx <- V8::v8()
+  ctx$eval("globalThis.__calls = [];
+  globalThis.stanli_compile = function() {
+    globalThis.__calls.push('plain'); return {result: 'STANLI2:cGxhaW4='};
+  };
+  globalThis.stanli_compile_fast = function() {
+    globalThis.__calls.push('fast'); return {result: 'STANLI2:ZmFzdA=='};
+  };")
+  state$ctx <- ctx
+  expect_identical(stanli:::mir_from_js("model {}"), "STANLI2:cGxhaW4=")
+  expect_identical(stanli:::mir_from_js("model {}", fast_math = TRUE),
+                   "STANLI2:ZmFzdA==")
+  expect_identical(jsonlite::fromJSON(ctx$eval("JSON.stringify(__calls)")),
+                   c("plain", "fast"))
+
+  ctx$eval("delete globalThis.stanli_compile_fast;")
+  expect_error(stanli:::mir_from_js("model {}", fast_math = TRUE), "fast_math")
+  ctx$eval("delete globalThis.stanli_compile;
+  globalThis.stanc = function() { return {result: '(legacy MIR)'}; };")
+  expect_error(stanli:::mir_from_js("model {}", fast_math = TRUE), "fast_math")
+})
+
+test_that("the bundled JavaScript compiler fuses multiply-adds only in fast mode", {
+  skip_if_not_installed("V8")
+  skip_if_not_installed("jsonlite")
+  skip_if(!nzchar(stanli:::stanc_js_path()) ||
+            !file.exists(stanli:::stanc_js_path()),
+          "stanc.js is not in this installation")
+
+  code <- "
+    data { int<lower=0> N; vector[N] x; vector[N] y; }
+    parameters { real a; real b; real<lower=0> sigma; }
+    model { y ~ normal(a + b * x, sigma); }"
+  plain <- stanli:::mir_from_js(code)
+  fast <- stanli:::mir_from_js(code, fast_math = TRUE)
+  expect_false(identical(plain, fast))
+  expect_true(raw_contains(portable_payload(fast), "fma"))
+  expect_false(raw_contains(portable_payload(plain), "fma"))
+  expect_identical(stanli:::stanc_mir(code, fast_math = FALSE), plain)
+})

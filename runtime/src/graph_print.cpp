@@ -109,7 +109,7 @@ void print_instr(std::string& out, const Program& p, size_t i,
       const bool ternary = I.code == Program::LOG_MIX || I.code == Program::FMA;
       if ((I.code >= Program::ADD && I.code <= Program::FMIN) ||
           (I.code >= Program::GT && I.code <= Program::NE) ||
-          I.code == Program::LSE2 || ternary)
+          I.code == Program::LSE2 || I.code == Program::LMULTIPLY || ternary)
         appendf(out, ", r%d", I.b);
       if (ternary) appendf(out, ", r%d", I.c);
       if (I.len) appendf(out, " (len %d)", I.len);

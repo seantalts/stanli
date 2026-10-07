@@ -1350,7 +1350,77 @@ void test_source_include_paths() {
   stanli_string_free(mir);
 }
 
+void test_fast_math_options() {
+  stanli_model_opts defaults;
+  stanli_model_opts_init(&defaults);
+  expect_true("opts default seed", defaults.seed == 1);
+  expect_true("opts default threads", defaults.threads_per_chain == 1);
+  expect_true("opts default fast_math off", defaults.fast_math == 0);
+  if (!stanli_has_embedded_stanc()) return;
+
+  char err[8192]{};
+  const std::string code = slurp("tests/compiler/portable_fast_math.stan");
+  const char* data = "{\"N\":4,\"x\":[1,2,3,4],\"y\":[1.1,1.9,3.2,3.9]}";
+  char* plain = stanli_stan_to_mir_with_opts(code.c_str(), nullptr, 0, 0, err,
+                                             sizeof err);
+  expect_true(std::string("mir without fast math: ") + err, plain != nullptr);
+  char* legacy = stanli_stan_to_mir(code.c_str(), err, sizeof err);
+  char* fast = stanli_stan_to_mir_with_opts(code.c_str(), nullptr, 0, 1, err,
+                                            sizeof err);
+  expect_true(std::string("mir with fast math: ") + err, fast != nullptr);
+  if (plain && legacy && fast) {
+    expect_true("fast_math 0 matches the unflagged entry point",
+                std::strcmp(plain, legacy) == 0);
+    expect_true("fast_math 1 changes the MIR", std::strcmp(plain, fast) != 0);
+  }
+  const char* include_paths[] = {"tests/compiler"};
+  char* fast_inc = stanli_stan_to_mir_with_opts(
+      "#include portable_include.stan\n", include_paths, 1, 1, err, sizeof err);
+  expect_true(std::string("fast math with includes: ") + err,
+              fast_inc != nullptr);
+  stanli_string_free(fast_inc);
+
+  const double q[3] = {0.3, 0.7, -0.2};
+  double lp_plain = 0, lp_fast = 0, g_plain[3]{}, g_fast[3]{};
+  stanli_model* a =
+      stanli_model_new_from_stan(code.c_str(), data, err, sizeof err);
+  expect_true(std::string("model without opts: ") + err, a != nullptr);
+  stanli_model_opts fast_opts = defaults;
+  fast_opts.fast_math = 1;
+  stanli_model* b = stanli_model_new_from_stan_with_opts(
+      code.c_str(), data, &fast_opts, err, sizeof err);
+  expect_true(std::string("model with fast math from source: ") + err,
+              b != nullptr);
+  stanli_model* c = nullptr;
+  if (fast)
+    c = stanli_model_new_with_opts(fast, data, &fast_opts, err, sizeof err);
+  expect_true(std::string("model with fast math from MIR: ") + err,
+              c != nullptr);
+  stanli_model* d = stanli_model_new_from_stan_with_opts(
+      code.c_str(), data, nullptr, err, sizeof err);
+  expect_true(std::string("null opts mean defaults: ") + err, d != nullptr);
+  if (a && b && c && d) {
+    expect_true("grad plain", stanli_grad(a, q, &lp_plain, g_plain) == 0);
+    expect_true("grad fast", stanli_grad(b, q, &lp_fast, g_fast) == 0);
+    expect_near("fast lp", lp_fast, lp_plain);
+    for (int i = 0; i < 3; ++i) expect_near("fast grad", g_fast[i], g_plain[i]);
+    double lp_c = 0, lp_d = 0, g_c[3]{}, g_d[3]{};
+    expect_true("grad from fast MIR", stanli_grad(c, q, &lp_c, g_c) == 0);
+    expect_true("grad null opts", stanli_grad(d, q, &lp_d, g_d) == 0);
+    expect_near("fast MIR agrees with fast source", lp_c, lp_fast);
+    expect_true("null opts agree with defaults", lp_d == lp_plain);
+  }
+  stanli_model_free(a);
+  stanli_model_free(b);
+  stanli_model_free(c);
+  stanli_model_free(d);
+  stanli_string_free(plain);
+  stanli_string_free(legacy);
+  stanli_string_free(fast);
+}
+
 int main() {
+  test_fast_math_options();
   test_source_include_paths();
   test_reduce_sum_threads();
   test_transformed_data_seed();

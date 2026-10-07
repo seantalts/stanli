@@ -14,6 +14,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 static std::string slurp(const char* p) {
   std::ifstream f(p);
@@ -23,10 +24,20 @@ static std::string slurp(const char* p) {
 }
 
 int benchmark_main(int argc, char** argv) {
+  bool fast_math = false;
+  std::vector<char*> kept;
+  for (int i = 0; i < argc; ++i) {
+    if (i >= 4 && std::string(argv[i]) == "--fast-math")
+      fast_math = true;
+    else
+      kept.push_back(argv[i]);
+  }
+  argc = static_cast<int>(kept.size());
+  argv = kept.data();
   if (argc < 4) {
     std::fprintf(stderr,
                  "usage: bench_grad mir.sexp data.json N|--prep|--timed "
-                 "[--warmup-ms N --measure-ms N]\n");
+                 "[--fast-math] [--warmup-ms N --measure-ms N]\n");
     return 2;
   }
   const bool prep_only = std::string(argv[3]) == "--prep";
@@ -72,7 +83,9 @@ int benchmark_main(int argc, char** argv) {
     read_mir_ns = prep_ns(pt);
     mir_bytes = static_cast<int64_t>(mir_text.size());
     pt = prep_now();
-    cm = stanli::compile_model(mir_text, data);
+    stanli::CompileOptions compile_options;
+    compile_options.fast_math = fast_math;
+    cm = stanli::compile_model(mir_text, data, 1, compile_options);
     compile_ns = prep_ns(pt);
   }
   pt = prep_now();

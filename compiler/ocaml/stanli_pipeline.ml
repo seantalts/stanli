@@ -25,6 +25,7 @@ type 'a compilation =
 
 type pass_selection =
   { vectorize_loops: bool
+  ; partial_evaluation: bool
   ; max_o1_statement_depth_cost: int option }
 
 (* A flat procedure has cost equal to its statement count.  Nesting weights
@@ -35,6 +36,7 @@ let default_o1_statement_depth_budget = 20_000
 
 let default_pass_selection =
   { vectorize_loops= true
+  ; partial_evaluation= false
   ; max_o1_statement_depth_cost= Some default_o1_statement_depth_budget }
 
 type structural_stats =
@@ -90,10 +92,11 @@ let max_procedure_stats (mir : Middle.Program.Typed.t) =
       | Some body -> max_stats current (statement_stats 0 body))
     block_max mir.functions_block
 
-let selected_default_passes () =
+let selected_default_passes ?(fast_math = false) () =
+  let selection = {default_pass_selection with partial_evaluation= fast_math} in
   match Sys.getenv_opt "STANLI_NO_O1_FALLBACK" with
-  | None -> default_pass_selection
-  | Some _ -> {default_pass_selection with max_o1_statement_depth_cost= None}
+  | None -> selection
+  | Some _ -> {selection with max_o1_statement_depth_cost= None}
 
 module Function_names = Set.Make (String)
 
@@ -181,11 +184,7 @@ let compile_mir_with_passes_uncached ?include_source ?(prune_unused_sections = t
         { (Analysis_and_optimization.Optimize.level_optimizations O1) with
           vectorize_loops= passes.vectorize_loops
         ; preserve_stability= true
-        ; partial_evaluation= false } in
-      (* Keep upstream's dataflow optimizations without rewriting the source
-         arithmetic into fused operations. The standalone partial evaluator
-         does not accept preserve_stability, so it must stay disabled too.
-         A one-ULP intermediate change can become hundreds in a gradient. *)
+        ; partial_evaluation= passes.partial_evaluation } in
       let optimize candidate settings =
         Common.ICE.with_exn_message (fun () ->
             Analysis_and_optimization.Optimize.optimization_suite ~settings
@@ -233,12 +232,13 @@ let compile_mir_with_passes ?include_source ?(cache_signatures = true)
     Frontend.SignatureMismatch.with_stanlib_cache compile
   else compile ()
 
-let compile_mir ?include_source ?model_only ~model_name code =
-  compile_mir_with_passes ?include_source ?model_only ~passes:(selected_default_passes ())
-    ~model_name code
+let compile_mir ?include_source ?model_only ?fast_math ~model_name code =
+  compile_mir_with_passes ?include_source ?model_only
+    ~passes:(selected_default_passes ?fast_math ()) ~model_name code
 
-let compile_portable ?include_source ?model_only ~model_name code =
-  let compiled = compile_mir ?include_source ?model_only ~model_name code in
+let compile_portable ?include_source ?model_only ?fast_math ~model_name code =
+  let compiled =
+    compile_mir ?include_source ?model_only ?fast_math ~model_name code in
   let result =
     match compiled.result with
     | Error error -> Error error

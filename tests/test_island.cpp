@@ -800,6 +800,7 @@ static const VectorOpSpec kVectorOps[] = {
     {OP_FMIN, "fmin", 2, "bb"},
     {OP_LSE2, "lse2", 2, "bb"},
     {OP_LOG_DIFF_EXP, "log_diff_exp", 2, "bs"},
+    {OP_LMULTIPLY, "lmultiply", 2, "bb"},
     {OP_FMA, "fma", 3, "bbb"},
     {OP_LOG_MIX, "log_mix", 3, "sbb"},
     {OP_NEG, "neg", 1, "b"},
@@ -2100,8 +2101,10 @@ static Graph build_native_extras(Fills& fills, std::vector<int>& terms) {
     g.add_op(OP_ABS, {fn}, ab);
     const int ld = g.add_slot(1, false);
     g.add_op(OP_LOG_DIFF_EXP, {ab, cslot(-1.0)}, ld);
+    const int lm = g.add_slot(1, false);
+    g.add_op(OP_LMULTIPLY, {ld, ab}, lm);
     const int l1 = g.add_slot(1, false);
-    g.add_op(OP_LOG1P_EXP, {ld}, l1);
+    g.add_op(OP_LOG1P_EXP, {lm}, l1);
     acc = l1;
   }
   const int lp = g.add_slot(1, false);
@@ -2126,8 +2129,8 @@ static void test_native_extras_carved() {
   expect("native extras carved==1", carved == 1);
 
   bool has_pow = false, has_fmax = false, has_fmin = false, has_inv = false,
-       has_fabs = false, has_log_diff_exp = false, has_log1p_exp = false,
-       has_call = false;
+       has_fabs = false, has_log_diff_exp = false, has_lmultiply = false,
+       has_log1p_exp = false, has_call = false;
   for (const Op& op : g.ops) {
     if (op.opcode != OP_ISLAND) continue;
     const auto& p = *static_cast<const IslandProg*>(op.udata);
@@ -2151,6 +2154,9 @@ static void test_native_extras_carved() {
         case Program::LOG_DIFF_EXP:
           has_log_diff_exp = true;
           break;
+        case Program::LMULTIPLY:
+          has_lmultiply = true;
+          break;
         case Program::LOG1P_EXP:
           has_log1p_exp = true;
           break;
@@ -2168,6 +2174,7 @@ static void test_native_extras_carved() {
   expect("native extras has INV", has_inv);
   expect("native extras has FABS", has_fabs);
   expect("native extras has LOG_DIFF_EXP", has_log_diff_exp);
+  expect("native extras has LMULTIPLY", has_lmultiply);
   expect("native extras has LOG1P_EXP", has_log1p_exp);
   expect("native extras no CALL", !has_call);
 

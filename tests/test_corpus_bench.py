@@ -21,7 +21,7 @@ sys.path.insert(0, str(REPO))
 from harnesses.corpus_bench import (COLS, GRADIENT_BUDGET, PROTOCOL, row_line,
     upgrade_header, Runner, PhaseFailure, parse_timing, check_pair,
     summarize_pairs, paired_order, open_run, measure_model,
-    benchmark_cases, materialize_data, build_model)
+    benchmark_cases, materialize_data, build_model, run_config)
 
 
 class EnvironmentTests(unittest.TestCase):
@@ -324,6 +324,38 @@ class CompilerSelectionTests(unittest.TestCase):
             self.assertEqual(calls[1].args[1][0], args.stanc)
             self.assertEqual(calls[1].args[1][-2:], ["--O1", "--vectorize-loops"])
             self.assertEqual(commands["stanli"][0], args.bench)
+
+
+class FastMathModeTests(SetupEstimateTests):
+    def run_with(self, fast_math):
+        self.args.fast_math = fast_math
+        with mock.patch("harnesses.corpus_bench.compile_cmd", return_value=["c++"]):
+            self.measure()
+        return [[str(part) for part in event["argv"]] for event in self.events]
+
+    def test_default_mode_never_passes_the_flag(self):
+        for argv in self.run_with(False):
+            self.assertNotIn("--fast-math", argv)
+
+    def test_fast_mode_reaches_only_the_stanli_commands(self):
+        commands = self.run_with(True)
+        probe = [a for a in commands if a[0] == str(self.args.vectorize_probe)]
+        self.assertEqual(len(probe), 1)
+        self.assertIn("--fast-math", probe[0])
+        for argv in commands:
+            if argv[0] == str(self.args.bench):
+                self.assertEqual(argv[-1], "--fast-math")
+                self.assertIn(argv[3], ("--timed", "--prep"))
+            elif argv[0] != str(self.args.vectorize_probe):
+                self.assertNotIn("--fast-math", argv)
+        self.assertTrue(any(a[0] == str(self.args.bench) for a in commands))
+
+    def test_mode_is_part_of_the_run_identity_only_when_on(self):
+        base = dict(rounds=2, warmup_ms=1, resume=False, output="x")
+        self.assertEqual(run_config(SimpleNamespace(**base, fast_math=False)),
+                         run_config(SimpleNamespace(**base)))
+        self.assertNotIn("fast_math", run_config(SimpleNamespace(**base, fast_math=False)))
+        self.assertIs(run_config(SimpleNamespace(**base, fast_math=True))["fast_math"], True)
 
 
 class CorpusInventoryTests(unittest.TestCase):

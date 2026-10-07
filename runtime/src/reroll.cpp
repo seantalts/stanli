@@ -594,7 +594,7 @@ int fuse_log_sum_exp_rows(Graph& g, std::vector<int>& target_terms,
 static RerollStats reroll_impl(
     Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
     std::vector<int>& target_terms, const std::vector<int>& extra_roots,
-    detail::RerollDispositionStats* dispositions) {
+    detail::RerollDispositionStats* dispositions, bool fuse_shared_params) {
   RerollStats st;
   if (std::getenv("STANLI_NO_REROLL")) return st;
 
@@ -803,6 +803,7 @@ static RerollStats reroll_impl(
 
       // ---- classify, shrinking to the reported prefix on failure ----
       detail::reroll_plan::CandidatePlan plan;
+      plan.price_distinct_ops = fuse_shared_params;
       std::vector<Pos>& pos = plan.positions;
       bool layout_set = false;  // has the region committed to a convention
       bool& layout_cols = plan.column_major;  // column-major, once committed
@@ -1353,7 +1354,7 @@ static RerollStats reroll_impl(
           }
           lane0_producer[t.out] = p;
         }
-        if (ok) {
+        if (ok && !fuse_shared_params) {
           // Widening evaluates one reverse operation across all lanes before
           // moving to the preceding operation. A shared active scalar read
           // at multiple positions would therefore receive regrouped, rather
@@ -1455,18 +1456,21 @@ static RerollStats reroll_impl(
 RerollStats reroll(Graph& g,
                    std::vector<std::pair<int, std::vector<double>>>& fills,
                    std::vector<int>& target_terms,
-                   const std::vector<int>& extra_roots) {
-  return reroll_impl(g, fills, target_terms, extra_roots, nullptr);
+                   const std::vector<int>& extra_roots,
+                   bool fuse_shared_params) {
+  return reroll_impl(g, fills, target_terms, extra_roots, nullptr,
+                     fuse_shared_params);
 }
 
 namespace detail {
 
 ProfiledRerollStats reroll_profiled(
     Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
-    std::vector<int>& target_terms, const std::vector<int>& extra_roots) {
+    std::vector<int>& target_terms, const std::vector<int>& extra_roots,
+    bool fuse_shared_params) {
   ProfiledRerollStats result;
-  result.work =
-      reroll_impl(g, fills, target_terms, extra_roots, &result.dispositions);
+  result.work = reroll_impl(g, fills, target_terms, extra_roots,
+                            &result.dispositions, fuse_shared_params);
   return result;
 }
 

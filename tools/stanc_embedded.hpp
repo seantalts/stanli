@@ -10,11 +10,13 @@
 
 #ifdef STANLI_EMBED_STANC
 extern "C" char* stanli_stanc_model_tmir(const char* stan_code);
+extern "C" char* stanli_stanc_model_tmir_fast(const char* stan_code);
 extern "C" void stanli_stanc_free(char* p);
 
 namespace stanli::tooling {
 
-inline std::string embedded_stanc(const std::string& model) {
+inline std::string embedded_stanc(const std::string& model,
+                                  bool fast_math = false) {
   std::string src;
   {
     std::unique_ptr<FILE, int (*)(FILE*)> f(std::fopen(model.c_str(), "rb"),
@@ -25,7 +27,8 @@ inline std::string embedded_stanc(const std::string& model) {
     while ((n = fread(buf.data(), 1, buf.size(), f.get())) > 0)
       src.append(buf.data(), n);
   }
-  char* res = stanli_stanc_model_tmir(src.c_str());
+  char* res = fast_math ? stanli_stanc_model_tmir_fast(src.c_str())
+                        : stanli_stanc_model_tmir(src.c_str());
   const std::string out(res ? res : "ERRstanc returned nothing");
   if (res) stanli_stanc_free(res);
   if (out.compare(0, 3, "ERR") == 0)
@@ -42,11 +45,19 @@ namespace stanli::tooling {
 // explicit override only; a missing or broken portable compiler must fail.
 inline std::string compile_source(const std::string& stanc,
                                   const std::string& compiler,
-                                  const std::string& model) {
-  if (!stanc.empty()) return run_stanc_process(stanc, model);
-  if (!compiler.empty()) return run_portable_compiler(compiler, model);
+                                  const std::string& model,
+                                  bool fast_math = false) {
+  if (!stanc.empty()) {
+    if (fast_math)
+      throw std::runtime_error(
+          "--fast-math needs the stanli compiler; stock stanc is not "
+          "supported");
+    return run_stanc_process(stanc, model);
+  }
+  if (!compiler.empty())
+    return run_portable_compiler(compiler, model, fast_math);
 #ifdef STANLI_EMBED_STANC
-  return embedded_stanc(model);
+  return embedded_stanc(model, fast_math);
 #else
   const std::string found = find_portable_compiler(executable_directory());
   if (found.empty())
@@ -54,7 +65,7 @@ inline std::string compile_source(const std::string& stanc,
         "this build does not embed stanc3 and no stanli-compile is beside "
         "the executable or on PATH; pass --stanli-compile PATH or --stanc "
         "PATH");
-  return run_portable_compiler(found, model);
+  return run_portable_compiler(found, model, fast_math);
 #endif
 }
 

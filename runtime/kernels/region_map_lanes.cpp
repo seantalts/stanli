@@ -62,6 +62,7 @@ bool lane_opcode(Program::Code c) {
     case Program::JMP:
     case Program::LSE2:
     case Program::LOG_DIFF_EXP:
+    case Program::LMULTIPLY:
     case Program::LOG_MIX:
     case Program::CALL:
       return true;
@@ -121,6 +122,7 @@ std::string opcode_name(Program::Code c) {
       "SOFTMAX",
       "LSE2",
       "LOG_DIFF_EXP",
+      "LMULTIPLY",
       "LOG_MIX",
       "FMA",
       "DIAG_PRE_MULTIPLY",
@@ -259,6 +261,7 @@ class Analysis {
       case Program::FMIN:
       case Program::LSE2:
       case Program::LOG_DIFF_EXP:
+      case Program::LMULTIPLY:
         f(A.va, 1);
         f(A.vb, 1);
         return;
@@ -444,6 +447,7 @@ class Analysis {
       case Program::FMIN:
       case Program::LSE2:
       case Program::LOG_DIFF_EXP:
+      case Program::LMULTIPLY:
         f(A.a, 1);
         f(A.b, 1);
         return;
@@ -518,6 +522,7 @@ class Analysis {
         case Program::EQ:
         case Program::LSE2:
         case Program::LOG_DIFF_EXP:
+        case Program::LMULTIPLY:
           o.dst = reg_offset(I.dst);
           o.a = reg_offset(I.a);
           o.b = reg_offset(I.b);
@@ -1055,6 +1060,7 @@ class Analysis {
         case Program::FMIN:
         case Program::LSE2:
         case Program::LOG_DIFF_EXP:
+        case Program::LMULTIPLY:
           return {A.a, A.b};
         case Program::FMA:
         case Program::LOG_MIX:
@@ -1429,6 +1435,11 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
     case Program::LOG_DIFF_EXP:
       t.binary(o, I, m, [](double a, double b) {
         return stan::math::log_diff_exp(a, b);
+      });
+      break;
+    case Program::LMULTIPLY:
+      t.binary(o, I, m, [](double a, double b) {
+        return stan::math::multiply_log(a, b);
       });
       break;
     case Program::FMA:
@@ -2053,6 +2064,19 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
             lse2_rule(u, va[l], vb[l], a[l], b[l]);
           else
             log_diff_exp_rule(u, va[l], vb[l], a[l], b[l]);
+        });
+      });
+      return;
+    }
+    case Program::LMULTIPLY: {
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      double* const b = t.acc(I.b, o.b);
+      t.with(o.va, I.va, o.vb, I.vb, [&](auto va, auto vb) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          lmultiply_rule(u, va[l], vb[l], a[l], b[l]);
         });
       });
       return;

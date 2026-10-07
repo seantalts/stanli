@@ -203,6 +203,7 @@ bool in_vocab(const Graph& g, const Op& op, bool strict = false) {
     case OP_FMAX:
     case OP_FMIN:
     case OP_LOG_DIFF_EXP:
+    case OP_LMULTIPLY:
       return strict ? scalar_ins(g, op) : elementwise_ins(g, op);
     case OP_ADD_N:
       return scalar_ins(g, op);
@@ -531,6 +532,8 @@ struct Compiler {
         return compile_elementwise(op, Program::LSE2, 0);
       case OP_LOG_DIFF_EXP:
         return compile_elementwise(op, Program::LOG_DIFF_EXP, 0);
+      case OP_LMULTIPLY:
+        return compile_elementwise(op, Program::LMULTIPLY, 0);
       case OP_POW:
         return compile_elementwise(op, Program::POW, op.variant);
       // The variant is the operands' activity, set at lowering; ties and
