@@ -1,0 +1,21 @@
+model          pt      max|g| | error in ULP of the largest entry (max over entries) | worst per-entry ULP
+                              |   stanli  st.fast  centred  centr+d        raw |   stanli  centred  centr+d
+radon_pooled    0   1.468e+04 |   102.05   102.05     4.97     4.97       2.97 |   102.05     4.97     4.97
+radon_pooled    1   1.285e+04 |    25.15    25.15     0.96     0.96       1.04 |    38.07     0.96     0.96
+radon_pooled    2   1.183e+04 |    28.58    28.58     0.58     0.58      0.929 |    28.58     0.58     0.58
+earn_height     0   1.332e+12 |     0.68     0.68     0.32     0.32      0.677 |     3.04     0.58     0.58
+earn_height     1   1.091e+12 |     7.50     7.50     1.50     0.50      0.499 |    22.12     1.50     0.64
+earn_height     2   1.091e+12 |     0.00     0.00     0.00     0.00          0 |     0.00     0.00     0.00
+ch09_m9_4       0       28.93 |     8.34     8.34     4.34     4.34       4.34 |     8.34     4.34     4.34
+ch09_m9_4       1       25.03 |     0.99     0.99     2.49     2.49       2.49 |     1.99     4.99     4.99
+ch09_m9_4       2       19.03 |     1.25     1.25     1.26     1.26       1.26 |     1.48     2.52     2.52
+radon_county    0        5969 |     5.54     5.54     0.46     0.46      0.456 |   430.23    81.77    18.44
+radon_county    1        6219 |    22.27    22.27     2.73     2.73       2.73 |    35.05    36.50    36.50
+radon_county    2        6282 |    33.52    33.52     2.09     2.09       2.09 |   692.63    67.00    67.00
+
+synthetic near-mode stress (gradient w.r.t. mu and sigma; ULP of the largest entry)
+   shift     max|g|    per-obs    centred    centr+d          raw
+   0e+00      9.774        3.3       8.11       8.11         8.11
+   1e+03      9.774       1.69        367       2.87     8.07e+06
+   1e+06      9.774       4.27   4.38e+05       3.73     1.02e+13
+   1e+09      9.774       3.18   9.62e+08       5.18     5.56e+16

@@ -1,0 +1,62 @@
+models whose likelihood the graph census cannot see (no data-variate elementwise term with N>=8), with data rows L -> distinct:
+  aalto_gpareto                L=    12 fields= 1 distinct=    12 target_terms=    3 
+  arma11                       L=   200 fields= 1 distinct=   200 target_terms=  206 
+  bones_model                  L=    34 fields= 3 distinct=    34 target_terms=  520 
+  ch14_m14_10                  L=   151 fields= 6 distinct=   151 target_terms=    6 
+  ch14_m14_11                  L=   151 fields= 7 distinct=   151 target_terms=    9 
+  ch14_m14_6                   L=   500 fields= 3 distinct=   500 target_terms=   12 
+  ch14_m14_6x                  L=   500 fields= 3 distinct=   500 target_terms=   12 
+  ch14_m14_9                   L=   151 fields= 4 distinct=   151 target_terms=    6 
+  cm_betagate                  L=   200 fields= 5 distinct=   200 target_terms=  240 
+  cm_bisa                      L=   200 fields= 5 distinct=   200 target_terms=  240 
+  cm_choco                     L=   200 fields= 9 distinct=   200 target_terms=  240 
+  cm_ddm                       L=   200 fields=10 distinct=   200 target_terms=  240 
+  cm_exgaussian                L=   200 fields= 4 distinct=   200 target_terms=  240 
+  cm_exwald                    L=   200 fields= 6 distinct=   200 target_terms=  240 
+  cm_gamma                     L=   200 fields= 5 distinct=   200 target_terms=  240 
+  cm_geg                       L=   200 fields= 5 distinct=   200 target_terms=  240 
+  cm_invgamma                  L=   200 fields= 5 distinct=   200 target_terms=  240 
+  cm_invgaussian               L=   200 fields= 7 distinct=   200 target_terms=  240 
+  cm_invweibull                L=   200 fields= 5 distinct=   200 target_terms=  240 
+  cm_lba1                      L=   200 fields= 7 distinct=   200 target_terms=  240 
+  cm_lba2                      L=   200 fields=10 distinct=   200 target_terms=  240 
+  cm_lnr                       L=   200 fields= 9 distinct=   200 target_terms=  240 
+  cm_lnr_bench                 L=  1540 fields= 7 distinct=   744 target_terms= 1850 REPEATS
+  cm_loggamma                  L=   200 fields= 6 distinct=   200 target_terms=  240 
+  cm_lognormal                 L=   200 fields= 6 distinct=   200 target_terms=  240 
+  cm_logstudent                L=   200 fields= 6 distinct=   200 target_terms=  240 
+  cm_logweibull                L=   200 fields= 5 distinct=   200 target_terms=  240 
+  cm_rdm                       L=   200 fields= 8 distinct=   200 target_terms=  240 
+  cm_weibull                   L=   200 fields= 5 distinct=   200 target_terms=  240 
+  gp_regr                      L=    11 fields= 3 distinct=    11 target_terms=    8 
+  i320_mi_nhanes               L=    25 fields= 5 distinct=    21 target_terms=   55 
+  i320_sratio_cs               L=   572 fields= 3 distinct=    14 target_terms=  695 REPEATS
+  i320_sratio_plain            L=   572 fields= 2 distinct=    14 target_terms=  693 REPEATS
+  kronecker_gp                 L=    30 fields= 3 distinct=    30 target_terms= 1810 
+  ldaK2                        L=  1200 fields= 2 distinct=     4 target_terms= 1209 REPEATS
+  s2_ar_cov                    L=    40 fields= 2 distinct=    40 target_terms=    9 
+  s2_com_poisson               L=    20 fields= 2 distinct=    20 target_terms=   26 
+  s2_cosy                      L=    40 fields= 2 distinct=    40 target_terms=    9 
+  s2_cox                       L=    40 fields= 4 distinct=    40 target_terms=   43 
+  s2_cox_cens                  L=    40 fields= 5 distinct=    40 target_terms=   24 
+  s2_cumulative_cauchit        L=    40 fields= 2 distinct=    40 target_terms=   53 
+  s2_cumulative_cloglog        L=    40 fields= 2 distinct=    40 target_terms=   53 
+  s2_discrete_weibull          L=    40 fields= 2 distinct=    40 target_terms=   50 
+  s2_fcor                      L=    40 fields= 3 distinct=    40 target_terms=    3 
+  s2_gev                       L=    40 fields= 2 distinct=    40 target_terms=   50 
+  s2_invgaussian               L=    40 fields= 2 distinct=    40 target_terms=    3 
+  s2_sar                       L=    40 fields= 4 distinct=    40 target_terms=   44 
+  s2_sar_error                 L=    40 fields= 4 distinct=    40 target_terms=   44 
+  s2_shifted_lognormal         L=    40 fields= 2 distinct=    40 target_terms=   44 
+  s2_unstr                     L=    40 fields= 2 distinct=    40 target_terms=    4 
+  sw_acat                      L=   572 fields= 2 distinct=     8 target_terms=  690 REPEATS
+  sw_acat_cs                   L=   572 fields= 3 distinct=    11 target_terms=  690 REPEATS
+  sw_asymlaplace               L=    40 fields= 2 distinct=    40 target_terms=   51 
+  sw_categorical               L=    40 fields= 3 distinct=    40 target_terms=    2 
+  sw_cratio                    L=   572 fields= 2 distinct=     8 target_terms=  690 REPEATS
+  sw_cratio_cs                 L=   572 fields= 3 distinct=    11 target_terms=  690 REPEATS
+  sw_cumulative                L=   572 fields= 2 distinct=    11 target_terms=    6 REPEATS
+  sw_cumulative_cs             L=   572 fields= 3 distinct=    11 target_terms=  691 REPEATS
+  sw_mv_rescor                 L=    40 fields= 4 distinct=    40 target_terms=    5 
+  sw_sratio                    L=   572 fields= 2 distinct=     8 target_terms=  690 REPEATS
+with >=2x repeated data rows: 11

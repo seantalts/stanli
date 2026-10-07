@@ -1,0 +1,249 @@
+== 1. linear-Gaussian (Gram / QR) form ==
+models flagged in the first report: 36
+models with a linear-Gaussian term (data variate, one broadcast sigma, affine mean, N>=8): 112
+of the 36 flagged: qualify 36; not qualifying: 
+  estimated ceiling >=2x: 12; >=10x: 1; <1.1x: 21
+  dense P^2 >= nnz(Z) [no win without structure]: 6; structured nnz(Z'Z) >= nnz(Z): 6
+columns: Kden/Gsp = columns of Z with >= / < N/2 nonzeros; rows = distinct rows of [Z|c]; ceil = est. ceiling vs default; net(a) = net of grouped normal; net(a,b) = net of grouped normal and duplicate rows
+model                                   N     P Kden   Gsp     nnzZ   nnzZtZ      P^2   rows    ceil net(a) net(a,b)   ns/grad  note
+diamonds                             5000    25   25     0   125000      625      625   4996   18.91  18.91    18.91     32971  
+s2_mmc                                 40    12    2    10      224      144      144     40    5.86   5.86     5.86      4004  
+s2_mm_weights                          40     7    2     5      152       49       49     40    5.49   5.49     5.49      1922  
+s2_mm                                  40     7    2     5      152       49       49     40    5.21   5.21     5.21      1905  
+sw_re_slope                            40    12    2    10      160       64      144     40    4.92   4.92     4.92      2732  
+s2_mv_shared_re                        40     7    2     5      120       29       49     40    4.54   4.54     4.54      3266  
+sw_re_gauss                            40     7    2     5      120       29       49     40    4.42   4.42     4.42      1384  
+s2_gr_by                               40     7    2     5      120       29       49     40    4.21   4.21     4.21      1408  
+s2_car_icar                            40     7    2     5      120       29       49     40    4.00   4.00     4.00      1206  
+s2_gr_student                          40     7    2     5      120       29       49     40    3.43   3.43     3.43      1630  
+s2_car                                 40     7    2     5      120       29       49     40    2.66   2.66     2.66      1459  
+blr                                   100     5    5     0      500       25       25    100    2.14   2.11     2.11       468  
+s2_custom_vreal                        40     2    2     0       80        4        4     40    1.44   1.44     1.44       361  
+s2_gp_by_approx                        40    11    6     5      240       71      121     40    1.29   1.29     1.29      1283  
+s2_cens_interval                       30     2    2     0       60        4        4     30    1.11   1.11     1.11      1683  
+s2_gp_approx                           40     6    6     0      240       36       36     40    1.08   1.06     1.06       765  
+sw_spline_s                            40    10   10     0      400      100      100     40    1.06   1.06     1.06       644  
+sw_cens                                15     2    2     0       30        4        4     15    1.05   1.05     1.05      1294  
+s2_weights_trunc                       40     2    2     0       80        4        4     40    1.00   1.00     1.00      7582  
+sw_spline_t2                           40    25   25     0     1000      625      625     40    1.00   0.99     0.99      1148  
+s2_mv_subset                           30     2    2     0       60        4        4     30    1.00   1.00     1.00       493  
+s2_s_cc                                40     9    9     0      360       81       81     40    1.00   1.00     1.00       542  
+s2_nl_noloop                           40    42    2    40      120      204     1764     40    1.00   1.00     1.00       630  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+sw_trunc                               40     2    2     0       80        4        4     40    1.00   1.00     1.00      7367  
+prophet                              1169  1203   26  1177    31697    63325  1447209   1169    1.00   1.00     1.00     39650  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+sw_gaussian                            40     3    3     0      120        9        9     40    1.00   1.00     1.00       287  
+sw_mi                                  40     2    2     0       80        4        4     40    1.00   1.00     1.00       598  
+sw_weights                             40     2    2     0       80        4        4     40    1.00   1.00     1.00       712  
+s2_threading                           40     3    3     0      120        9        9     40    1.00   1.00     1.00       296  
+sw_nonlinear                           40    40    0    40       40       40     1600     40    1.00   0.99     0.99       626  pure indicator = grouped normal; P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+s2_mi_lognormal                        40     2    2     0       80        4        4     40    1.00   0.99     0.99       932  
+s2_nlf                                 40    41    1    40       80      121     1681     40    1.00   1.00     1.00      1076  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+sw_mv_norescor                         40     2    2     0       80        4        4     40    1.00   1.00     1.00       512  
+s2_s_by                                40    46    1    45      400      496     2116     40    1.00   1.00     1.00      1841  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+s2_mi_trunc_lb                         40     2    2     0       80        4        4     40    1.00   1.00     1.00      5548  
+s2_t2_by                               40    49   25    24     1000     1249     2401     40    1.00   1.00     1.00      1846  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+
+beyond the flagged set: 76 more models qualify; 5 are pure indicator designs (identical to grouped normal); the rest:
+model                                   N     P Kden   Gsp     nnzZ   nnzZtZ      P^2   rows    ceil net(a) net(a,b)   ns/grad  note
+radon_pooled                        12573     2    1     1    16847        4        4      5  156.90   0.70     0.70     47331  
+nes                                  1330     9    6     3     8926       75       81    553   49.51  21.57    21.57     17878  
+logearn_interaction_z                1192     4    2     2     3394       16       16     36   24.00   1.78     1.78      7459  
+logearn_interaction                  1192     4    2     2     3394       16       16     36   23.65   1.75     1.75      7378  
+logearn_logheight_male               1192     3    2     1     2889        9        9     36   22.34   1.62     1.62      5774  
+logearn_height_male                  1192     3    2     1     2889        9        9     36   22.13   1.62     1.62      5749  
+logearn_height                       1192     2    2     0     2384        4        4     20   17.60   1.12     1.12      4164  
+earn_height                          1192     2    2     0     2384        4        4     20   17.55   1.12     1.12      4173  
+log10earn_height                     1192     2    2     0     2384        4        4     20   17.43   1.12     1.12      4182  
+radon_variable_slope_centered       12573   387    1   386    16847     1030   149769    442   17.07   1.46     1.46     56616  P^2>=nnz(Z)
+radon_county_intercept              12573   387    0   387    16847     1073   149769    809   16.67   1.38     1.38     54843  P^2>=nnz(Z)
+radon_variable_intercept_centered   12573   387    0   387    16847     1073   149769    809   16.03   1.38     1.38     54549  P^2>=nnz(Z)
+radon_hierarchical_intercept_cente  12573   388    1   387    29420     1848   150544   1008   14.97   1.44     1.44     73640  P^2>=nnz(Z)
+kidscore_interaction_c2               434     4    4     0     1736       16       16    362   13.29  11.19    11.19      2752  
+kidscore_interaction_z                434     4    4     0     1736       16       16    362   12.85  10.81    10.81      2760  
+radon_variable_intercept_slope_cen  12573   772    0   772    16847     1415   595984    809   12.66   1.27     1.27     65015  P^2>=nnz(Z)
+radon_variable_slope_noncentered    12573   388    1   387    21121     1719   150544    442   11.56   1.10     1.10     57202  P^2>=nnz(Z)
+kidscore_mom_work                     434     4    1     3      791       10       16      4   11.31   1.13     1.13      2734  
+kidscore_interaction_c                434     4    4     0     1736       16       16    362   10.93   9.26     9.26      2751  
+radon_variable_intercept_noncenter  12573   388    1   387    29420     1848   150544    809   10.84   0.98     0.98     56490  P^2>=nnz(Z)
+radon_hierarchical_intercept_nonce  12573   389    2   387    41993     2625   151321   1008   10.83   1.14     1.14     74292  P^2>=nnz(Z)
+ch14_m14_5                            500     3    3     0     1500        9        9    500   10.21  10.21    10.21      2463  
+radon_partially_pooled_noncentered  12573   387    1   386    25146     1159   149769    386    9.54   0.75     0.75     36637  P^2>=nnz(Z)
+kidscore_interaction                  434     4    4     0     1550       16       16    362    8.63   7.43     7.43      2748  
+kidscore_momhsiq                      434     3    3     0     1209        9        9    362    8.39   7.22     7.22      2102  
+ch14_m14_4                            500     2    2     0     1000        4        4    500    8.24   8.24     8.24      1784  
+ch14_m14_4x                           500     2    2     0     1000        4        4    500    8.23   8.23     8.23      1785  
+kidscore_momiq                        434     2    2     0      868        4        4    332    6.81   5.43     5.43      1569  
+kidscore_momhs                        434     2    2     0      775        4        4      2    6.78   0.80     0.80      1565  
+arK                                   195     6    6     0     1170       36       36    195    6.34   6.34     6.34      1926  
+radon_variable_intercept_slope_non  12573   774    1   773    33694     4249   599076    809    5.92   0.65     0.65     66262  P^2>=nnz(Z)
+sesame_one_pred_a                     240     2    2     0      392        4        4      2    5.43   0.71     0.71       926  
+ch09_m9_1_chains4                     170     4    2     2      340        8       16    164    4.18   4.05     4.05       914  
+ch09_m9_1                             170     4    2     2      340        8       16    164    4.10   4.09     4.09       900  
+s2_index_mi                            40     5    2     3       80       13       25     40    3.03   3.03     3.03      1186  
+ch09_m5_8s                            100     3    3     0      300        9        9    100    2.93   2.90     2.90       585  
+i319_gauss_re                         236    64    5    59     1416      674     4096     59    2.82   1.18     1.18      5270  P^2>=nnz(Z)
+s2_car_esicar                          40     7    2     5      120       29       49     40    2.64   2.64     2.64      1341  
+logmesquite                            46     7    5     2      253       49       49     46    2.48   2.47     2.47       583  
+mesquite                               46     7    6     1      296       49       49     46    2.47   2.47     2.47       580  
+ch09_m5_8s2                           100     3    3     0      300        9        9    100    2.47   2.46     2.46       602  
+logmesquite_logvas                     46     7    5     2      257       49       49     46    2.44   2.44     2.44       573  
+logmesquite_logvash                    46     6    5     1      244       36       36     46    2.41   2.41     2.41       504  
+logmesquite_logva                      46     4    3     1      158       16       16     46    2.15   2.15     2.15       367  
+kilpisjarvi                            62     2    2     0      124        4        4     62    1.76   1.76     1.76       274  
+sw_mono                                40     5    1     4       69       10       25      4    1.70   0.27     0.27      2000  
+rats_model                            150    60    0    60      270      120     3600    150    1.62   1.62     1.62      1039  P^2>=nnz(Z)
+s2_mo_simo_prior                       40     5    1     4       71       10       25      4    1.61   0.24     0.24      2048  
+logmesquite_logvolume                  46     2    2     0       92        4        4     46    1.47   1.42     1.42       214  
+ch09_m9_4                             100     2    2     0      200        4        4      1    1.28   0.47     0.47       220  
+ch09_m9_5                             100     2    2     0      200        4        4      1    1.23   0.47     0.47       210  
+s2_gp_by_gr                            40    41    1    40       80      121     1681     40    1.13   1.11     1.11      8481  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+sw_ar                                  40    38    2    36      115      179     1444     40    1.12   1.12     1.12      1949  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+ch14_m14_1                            200    40    0    40      300       80     1600     40    1.11   1.02     1.02      6480  P^2>=nnz(Z)
+s2_me2                                 40    81    1    80      120      321     6561     40    1.10   1.10     1.10      4424  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+s2_me2_nomecor                         40    81    1    80      120      321     6561     40    1.03   1.03     1.03      3198  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+sw_gp                                  40    41    1    40       80      121     1681     40    1.03   1.03     1.03     27467  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+soil_incubation                        25    25    0    25       25       25      625     25    1.03   1.03     1.03     52197  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+i320_gp_expquad                        30    31    1    30       60       91      961     30    1.03   1.03     1.03     16994  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+aalto_lin                               8     2    2     0       15        4        4      8    1.00   0.99     0.99       135  
+aalto_lin_std                           8     2    2     0       16        4        4      8    1.00   1.00     1.00       134  
+ch15_m15_5                             29    30    2    28       87      144      900     29    1.00   1.00     0.99       514  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+ch15_m15_7                             29    30    2    28       87      144      900     29    1.00   1.00     1.00     13988  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+dugongs_model                          27    21    1    20       54       61      441     20    1.00   0.87     0.87       629  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+hierarchical_gp                       550   732    1   731     3300     9554   535824    550    1.00   1.00     1.00     24486  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+i320_gp_matern32                       30    31    1    30       60       91      961     30    1.00   1.00     1.00     37154  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+pilots                                 40    13    0    13       80       93      169     40    1.00   1.00     1.00       437  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+state_space_stochastic_level_stoch    192   386    1   385      599     1632   148996    192    1.00   1.00     1.00      8736  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+sw_arma                                40    74    2    72      150      424     5476     40    1.00   1.00     1.00      2803  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+sw_ma                                  40    38    2    36      115      179     1444     40    1.00   1.00     1.00      1894  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+sw_me                                  40    41    1    40       80      121     1681     40    1.00   1.00     1.00      1336  P^2>=nnz(Z); nnz(Z'Z)>=nnz(Z)
+all 112 qualifying models: ceiling >=2x 58, >=10x 25; net of grouped normal >=2x 34, >=10x 5
+  of those with N>=200 (38 models): >=2x 35, >=10x 25; N<200: >=2x 23 (fixed-overhead wins: the term becomes one op)
+  dense P^2 >= nnz(Z): 38 of 112; structured nnz(Z'Z) >= nnz(Z): 23; of the models at >=2x, dense P^2 >= nnz(Z) (need the sparse/arrow structure): 13
+lognormal with affine log-mean (same form on log y): 5 models: ch16_m16_1 lotka_volterra one_comp_mm_elim_abs sw_hurdle_lognormal sw_lognormal
+
+== 2. families: data-variate density terms by family ==
+present = models with a data-variate term (N>=2) of the family; eligible = its non-variate arguments admit a finite statistic; collapses = eligible, summed linearly into target, groups < N; then models at estimated standalone ceiling
+family                   present eligible collapses >=2x grp ceil>=2x ceil>=10x
+normal                       136      136        48       35       29        18
+bern/binom                    72       72        44       39       10         4
+poisson                       31       31        14       13        3         1
+poisson+offset                 0        0         0        0        0         0
+lognormal                      6        6         1        1        1         0
+gamma                          2        2         0        0        0         0
+beta                           3        3         0        0        0         0
+exponential                    1        1         0        0        0         0
+inv_gamma                      0        0         0        0        0         0
+weibull                        1        0         0        0        0         0
+von_mises                      1        1         0        0        0         0
+dirichlet                      1        1         0        0        0         0
+multinomial                    1        1         0        0        0         0
+categorical                    5        5         0        0        0         0
+multi_normal                   8        8         0        0        0         0
+neg_binomial_2                 9        0         0        0        0         0
+neg_binomial                   0        0         0        0        0         0
+beta_binomial                  3        0         0        0        0         0
+student_t                      2        0         0        0        0         0
+cauchy                         0        0         0        0        0         0
+ordered_logistic               5        0         0        0        0         0
+chi_square                     0        0         0        0        0         0
+inv_chi_square                 0        0         0        0        0         0
+scaled_inv_chi_square          0        0         0        0        0         0
+rayleigh                       0        0         0        0        0         0
+beta_proportion                0        0         0        0        0         0
+pareto                         0        0         0        0        0         0
+beta_lcdf                      1        0         0        0        0         0
+exp_mod_normal                 1        0         0        0        0         0
+frechet                        1        0         0        0        0         0
+ordered_probit                 1        0         0        0        0         0
+poisson_lcdf                   3        0         0        0        0         0
+skew_normal                    1        0         0        0        0         0
+wiener                         1        0         0        0        0         0
+
+collapsing terms outside normal / bern-binom / poisson (model, op, N, groups, args):
+  lognormal        ch16_m16_1                   LOGNORMAL_LPDF               N=   544 groups=   182 ceil=  2.11 y:data,covar,bcast
+
+every data-variate term of the remaining families (model, op, terms N, groups, eligible, linear-to-target, args):
+  student_t          aalto_lin_std_t              STUDENT_T_LPDF             N=     8 groups=     8 tuples=     8 elig=0 lin=1 y:data,bcast,covar,bcast
+  poisson_lcdf       aalto_poisson_hurdle         POISSON_LCDF               N=   798 groups=     1 tuples=     2 elig=0 lin=0 y:data,bcast
+  beta_binomial      ch12_m12_1                   BETA_BINOMIAL_LPMF         N=    12 groups=    12 tuples=    12 elig=0 lin=1 y:data,data,fn(gather),fn(gather)
+  neg_binomial_2     ch12_m12_2                   NEG_BINOMIAL_2_LPMF        N=    10 groups=    10 tuples=    10 elig=0 lin=1 y:data,covar,bcast
+  ordered_logistic   ch12_m12_4                   ORDERED_LOGISTIC_LPMF      N=  9930 groups=     1 tuples=     7 elig=0 lin=1 y:data,data,bcast
+  ordered_logistic   ch12_m12_5                   ORDERED_LOGISTIC_LPMF      N=  9930 groups=     6 tuples=    42 elig=0 lin=1 y:data,covar,bcast
+  ordered_logistic   ch12_m12_6                   ORDERED_LOGISTIC_LPMF      N=  9930 groups=    48 tuples=   305 elig=0 lin=1 y:data,other,bcast
+  ordered_logistic   ch12_m12_7                   ORDERED_LOGISTIC_LPMF      N=  9930 groups=    48 tuples=   305 elig=0 lin=1 y:data,covar,bcast
+  multi_normal       ch14_m14_6                   MULTI_NORMAL_LPDF          N=   500 groups=   500 tuples=   500 elig=1 lin=1 K=2 mvn
+  multi_normal       ch14_m14_6x                  MULTI_NORMAL_LPDF          N=   500 groups=   500 tuples=   500 elig=1 lin=1 K=2 mvn
+  lognormal          ch16_m16_1                   LOGNORMAL_LPDF             N=   544 groups=   182 tuples=   540 elig=1 lin=1 y:data,covar,bcast
+  beta_lcdf          cm_betadiscrete              BETA_LCDF                  N=   353 groups=   181 tuples=   353 elig=0 lin=0 y:data,linpred,linpred
+  neg_binomial_2     covid19imperial_v2           NEG_BINOMIAL_2_LPMF        N=   235 groups=   235 tuples=   235 elig=0 lin=1 y:data,other,bcast
+  neg_binomial_2     covid19imperial_v3           NEG_BINOMIAL_2_LPMF        N=   235 groups=   235 tuples=   235 elig=0 lin=1 y:data,other,bcast
+  multi_normal       ctsem_ctsm                   MULTI_NORMAL_CHOL_LPDF     N=   320 groups=   320 tuples=   320 elig=1 lin=0 K=2 mvn
+  categorical        gpcm_latent_reg_irt          CATEGORICAL                N=  5500 groups=  5500 tuples=  5500 elig=1 lin=1 generic
+  categorical        grsm_latent_reg_irt          CATEGORICAL                N=  2744 groups=  2744 tuples=  2744 elig=1 lin=1 generic
+  exponential        hmm_drive_0                  EXPONENTIAL_LPDF           N=  3324 groups=     4 tuples=  1662 elig=1 lin=0 y:data,gather
+  neg_binomial_2     i319_negbin_fixed            NEG_BINOMIAL_2_LOG_GLM_LPMF N=   236 groups=    59 tuples=   194 elig=0 lin=1 glm
+  neg_binomial_2     i319_negbin_re               NEG_BINOMIAL_2_LOG_GLM_LPMF N=   236 groups=    59 tuples=   194 elig=0 lin=1 glm
+  poisson_lcdf       i320_pois_trunc_both         POISSON_LCDF               N=   472 groups=    42 tuples=    84 elig=0 lin=0 y:data,linpred
+  poisson_lcdf       i320_pois_trunc_ub           POISSON_LCDF               N=   236 groups=    42 tuples=    42 elig=0 lin=1 y:data,linpred
+  lognormal          lotka_volterra               LOGNORMAL_LPDF             N=    42 groups=    42 tuples=    42 elig=1 lin=1 y:data,other,gather
+  categorical        nn_rbm1bJ10                  CATEGORICAL                N=   100 groups=   100 tuples=   100 elig=1 lin=1 generic
+  categorical        nn_rbm1bJ100                 CATEGORICAL                N= 60000 groups= 60000 tuples= 60000 elig=1 lin=1 generic
+  lognormal          one_comp_mm_elim_abs         LOGNORMAL_LPDF             N=    20 groups=    20 tuples=    20 elig=1 lin=1 y:data,other,bcast
+  multi_normal       s2_ar_cov                    MULTI_NORMAL_CHOL_LPDF     N=     5 groups=     5 tuples=     5 elig=1 lin=0 K=8 mvn
+  beta_binomial      s2_beta_binomial             BETA_BINOMIAL_LPMF         N=    40 groups=    40 tuples=    40 elig=0 lin=1 y:data,data,linpred,linpred
+  categorical        s2_categorical_re            CATEGORICAL                N=    40 groups=    40 tuples=    40 elig=1 lin=1 generic
+  multi_normal       s2_cosy                      MULTI_NORMAL_CHOL_LPDF     N=     5 groups=     5 tuples=     5 elig=1 lin=0 K=8 mvn
+  ordered_probit     s2_cumulative_probit         ORDERED_PROBIT_LPMF        N=    40 groups=    40 tuples=    40 elig=0 lin=1 y:data,linpred,bcast
+  beta_binomial      s2_custom_vint               BETA_BINOMIAL_LPMF         N=    40 groups=    40 tuples=    40 elig=0 lin=1 y:data,data,linpred,linpred
+  dirichlet          s2_dirichlet                 DIRICHLET_LPDF             N=    40 groups=    40 tuples=    40 elig=1 lin=1 generic
+  frechet            s2_frechet                   FRECHET_LPDF               N=    40 groups=    40 tuples=    40 elig=0 lin=1 y:data,bcast,linpred
+  ordered_logistic   s2_hurdle_cumulative         ORDERED_LOGISTIC_LPMF      N=    27 groups=    27 tuples=    27 elig=0 lin=1 y:data,linpred,bcast
+  neg_binomial_2     s2_hurdle_negbin             NEG_BINOMIAL_2_LOG_LPMF    N=    40 groups=    40 tuples=    40 elig=0 lin=1 y:data,linpred,bcast
+  multi_normal       s2_logistic_normal           MULTI_NORMAL_CHOL_LPDF     N=    40 groups=    40 tuples=    40 elig=1 lin=1 K=2 mvn
+  multinomial        s2_multinomial               MULTINOMIAL_LPMF           N=    40 groups=    40 tuples=    40 elig=1 lin=1 generic
+  multi_normal       s2_unstr                     MULTI_NORMAL_CHOL_LPDF     N=     5 groups=     5 tuples=     5 elig=1 lin=1 K=8 mvn
+  wiener             s2_wiener                    WIENER_LPDF                N=    40 groups=    40 tuples=    40 elig=0 lin=1 generic
+  beta               s2_zi_beta                   BETA_LPDF                  N=    37 groups=    37 tuples=    37 elig=1 lin=1 y:data,linpred,linpred
+  beta               s2_zoi_beta                  BETA_LPDF                  N=    36 groups=    36 tuples=    36 elig=1 lin=1 y:data,linpred,linpred
+  lognormal          sir                          LOGNORMAL_LPDF             N=    20 groups=    20 tuples=    20 elig=1 lin=1 y:data,other,data
+  beta               sw_beta                      BETA_LPDF                  N=    40 groups=    40 tuples=    40 elig=1 lin=1 y:data,linpred,linpred
+  exp_mod_normal     sw_exgaussian                EXP_MOD_NORMAL_LPDF        N=    40 groups=    40 tuples=    40 elig=0 lin=1 y:data,linpred,bcast,bcast
+  gamma              sw_gamma                     GAMMA_LPDF                 N=    40 groups=    40 tuples=    40 elig=1 lin=1 y:data,bcast,linpred
+  gamma              sw_hurdle_gamma              GAMMA_LPDF                 N=    40 groups=    40 tuples=    40 elig=1 lin=1 y:data,bcast,linpred
+  lognormal          sw_hurdle_lognormal          LOGNORMAL_LPDF             N=    40 groups=    40 tuples=    40 elig=1 lin=1 y:data,linpred,bcast
+  lognormal          sw_lognormal                 LOGNORMAL_LPDF             N=    40 groups=    40 tuples=    40 elig=1 lin=1 y:data,linpred,bcast
+  multi_normal       sw_mv_rescor                 MULTI_NORMAL_CHOL_LPDF     N=    40 groups=    40 tuples=    40 elig=1 lin=1 K=2 mvn
+  neg_binomial_2     sw_negbinomial               NEG_BINOMIAL_2_LOG_GLM_LPMF N=    40 groups=    40 tuples=    40 elig=0 lin=1 glm
+  neg_binomial_2     sw_re_negbin                 NEG_BINOMIAL_2_LOG_GLM_LPMF N=    40 groups=    40 tuples=    40 elig=0 lin=1 glm
+  skew_normal        sw_skewnormal                SKEW_NORMAL_LPDF           N=    40 groups=    40 tuples=    40 elig=0 lin=1 y:data,linpred,bcast,bcast
+  student_t          sw_student                   STUDENT_T_LPDF             N=    40 groups=    40 tuples=    40 elig=0 lin=1 y:data,bcast,linpred,bcast
+  von_mises          sw_vonmises                  VON_MISES_LPDF             N=    40 groups=    40 tuples=    40 elig=1 lin=1 y:data,linpred,bcast
+  weibull            sw_weibull                   WEIBULL_LPDF               N=    40 groups=    40 tuples=    40 elig=0 lin=1 y:data,bcast,linpred
+  neg_binomial_2     sw_zi_negbin                 NEG_BINOMIAL_2_LOG_LPMF    N=    39 groups=    39 tuples=    39 elig=0 lin=1 y:data,linpred,bcast
+
+== 3. ranked list (greedy; each row net of the rows above) ==
+rank family                 alone>=2x alone>=10x net>=1.1x  net>=2x  net>=10x  cum>=2x  cum>=10x
+   1 lg                            58         25        71       58        25       58        25
+   2 b                             22          9        33       19         8       77        33
+   3 bern/binom                    10          4        18        2         0       80        36
+   4 poisson                        3          1         8        2         0       84        36
+   5 lognormal                      1          0         1        1         0       85        36
+   6 normal                        29         18         3        0         0       85        36
+   7 poisson+offset                 0          0         0        0         0       85        36
+   8 gamma                          0          0         0        0         0       85        36
+   9 beta                           0          0         0        0         0       85        36
+  10 exponential                    0          0         0        0         0       85        36
+  11 von_mises                      0          0         0        0         0       85        36
+  12 dirichlet                      0          0         0        0         0       85        36
+  13 multinomial                    0          0         0        0         0       85        36
+  14 categorical                    0          0         0        0         0       85        36
+  15 multi_normal                   0          0         0        0         0       85        36
+
+fixed build order (simplest first), same columns:
+   1 normal                        29         18        44       29        18       29        18
+   2 bern/binom                    10          4        19       10         4       39        22
+   3 poisson                        3          1         7        3         1       42        23
+   4 b                             22          9        16       13         6       55        29
+   5 lg                            58         25        59       34         5       84        36
+   6 lognormal                      1          0         1        1         0       85        36
+(of 341 timed models; 'lg' = linear-Gaussian form, 'b' = duplicate-row weighting)
