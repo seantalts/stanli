@@ -225,6 +225,7 @@ build's:
 | Data-class specialization | 1.03x on lnr_bench | gradient order across groups (up to 19 ULP); first-error observation changes | branch `feat/map-dataclass` |
 | x86-64-v3 runtime | median 1.04x, up to 2.2x; 36 models slower | 44 of 352 replay failures; CPU-dependent results | scratch branch `bench/avx2` |
 | AVX2 copies of the dense-matrix kernels only, chosen at run time | 1.77x on a cholesky GP (N=200); nothing on the others measured; +8.5 MB | 13 of 352 replay failures (10 new, gradients within 3.5 ULP of the largest entry except one ill-conditioned GP); CPU-dependent results | [2026-10-05-avx2-kernel-dispatch.md](2026-10-05-avx2-kernel-dispatch.md), `-DSTANLI_AVX2_KERNELS=ON`, `STANLI_FAST_MATH=1` |
+| Start vector slots on a 16 byte boundary | none on arm64: NEON loads do not penalize an 8 byte offset, and 12 pairs on the nine starters and seven vector-heavy corpus models are within 2%; x86-64 with AVX2 not measured | makes the zero-copy `rvar` views bitwise equal to the copying path (two log densities, `ch14_m14_8` and `ch15_m15_8`, otherwise 1 to 2 ULP); changes four other corpus points: `iohmm_reg` `write_array` at three points by 1 ULP (now 0 ULP from CmdStan) and one `one_comp_mm_elim_abs` gradient component by 32 ULP (1312 ULP from CmdStan instead of 1344); value and data arenas grow 1.5% in total, 16% worst case (`brms-sw_acat_cs`, 23 KB) | commit `38bcc277` on local branch `spike/density-fused` (8 production lines in `runtime/src/executor.cpp`) |
 
 ## Starting points for fast-mode work
 

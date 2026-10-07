@@ -163,12 +163,13 @@ if(STANLI_LITE_LP)
   target_compile_definitions(stanmath INTERFACE STANLI_LITE_LP=1)
 endif()
 
-# normal, cauchy, student_t and ordered_logistic (shared cutpoints) have fused
-# kernels (runtime/kernels/density_fused.cpp). With this option ON the Stan
-# Math instantiations they replace stay compiled, which is what
-# STANLI_NO_FUSED_DENSITY=1 and the differential tests compare against. OFF
-# drops them: 3.4 MB smaller. Release and packaging builds pass OFF. It
-# defaults ON so that a plain developer build runs the whole ctest suite.
+# normal, cauchy, student_t, lognormal, beta, gamma and ordered_logistic
+# (shared cutpoints) have fused kernels (runtime/kernels/density_fused.cpp).
+# With this option ON the Stan Math instantiations they replace stay compiled,
+# which is what STANLI_NO_FUSED_DENSITY=1 and the differential tests compare
+# against. OFF drops them: 3.7 MB smaller. Release and packaging builds pass
+# OFF. It defaults ON so that a plain developer build runs the whole ctest
+# suite.
 option(STANLI_STAN_DENSITY_ORACLE
   "Keep Stan Math's own kernels for the fused densities (oracle and differential tests)"
   ON)
