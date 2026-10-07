@@ -340,7 +340,6 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/constrain.cpp
   runtime/kernels/eltwise_expr.cpp
   runtime/kernels/mixture.cpp
-  runtime/kernels/collapse_kernels.cpp
   runtime/kernels/message.cpp
   runtime/kernels/rng.cpp
   runtime/kernels/island.cpp
@@ -376,15 +375,18 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/reroll.cpp
   runtime/src/inplace.cpp
   runtime/src/constfold.cpp
-  runtime/src/collapse.cpp
-  runtime/src/collapse_linear.cpp
   runtime/src/cse.cpp
   runtime/src/gp_cov_fusion.cpp
   runtime/src/graph_print.cpp
   runtime/src/partition.cpp
   runtime/src/data.cpp
   runtime/src/data_var_context.cpp
-  runtime/src/program_softmax.cpp)
+  runtime/src/program_softmax.cpp
+  # Fast-mode observation collapse. Last, so that adding to it does not move
+  # the code the default path runs.
+  runtime/src/collapse.cpp
+  runtime/src/collapse_linear.cpp
+  runtime/kernels/collapse_kernels.cpp)
 
 if(NOT EMSCRIPTEN)
   list(APPEND STANLI_RUNTIME_SOURCES runtime/src/bridgestan_abi.cpp)

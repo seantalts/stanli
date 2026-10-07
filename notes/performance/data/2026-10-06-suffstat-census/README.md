@@ -30,6 +30,11 @@ Results:
   control, summarised by `summarize_gradient.py`; `preparation-on-off.json`
   is `preparation.py`; `sampling.txt` is `sampling.py`. The manifest's paths
   are those of the machine it ran on.
+  `default-mode-all.jsonl` is the whole corpus in default mode, the base
+  against this branch with an identical-binary control;
+  `default-mode-recheck.jsonl` repeats its outliers after the link-order and
+  registration changes; `default-mode-control.jsonl` adds a no-op control
+  (the base with one unused function).
 
 Scripts (throwaway; they expect a `scratch/suffstat/` directory in a checkout
 with a Release build in `build-spike/`, the pinned

@@ -30,10 +30,14 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace stanli {
+
+void register_collapse_kernels();  // collapse_kernels.cpp
+
 namespace {
 
 using Vn = int64_t;
@@ -1520,6 +1524,15 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
                                     CollapseReport* report) {
   CollapseStats st;
   if (std::getenv("STANLI_NO_COLLAPSE")) return st;
+  // The two kernels this pass emits are registered here, on first use, and
+  // not with the built-in ones: executor.cpp then compiles to the code it
+  // had before this pass existed, which keeps the default path's timing
+  // where it was (placement alone moved small models by up to 6%).
+  static std::once_flag kernels;
+  std::call_once(kernels, [] {
+    find_kernel(OP_ADD);  // the built-in kernels first
+    register_collapse_kernels();
+  });
   Analysis a = analyze(g, fills, target_terms);
   if (a.vectors.empty() && a.statistics.empty() && a.scalars_merged == 0) {
     if (report != nullptr) *report = std::move(a.report);

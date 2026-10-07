@@ -67,6 +67,10 @@ inline constexpr int64_t kCollapseNativeRatio = 2;
 // times fewer.
 inline constexpr int64_t kCollapseUnrestrictedRatio = 4;
 
+// The pass's two kernels are registered the first time it runs, not with the
+// built-in ones, so a graph that names these opcodes without having been
+// through collapse_observations has no kernel for them.
+//
 // OP_NORMAL_GROUPED_LPDF: sum over groups of the normal log density of that
 // group's observations, from per-group statistics.
 //   in[0]  statistics, four columns of one value per group: count n, a

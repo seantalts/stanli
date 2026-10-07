@@ -386,6 +386,33 @@ them are in [data/2026-10-06-suffstat-census/result/](data/2026-10-06-suffstat-c
 - Object code: about 220 KB of text (125 KB the pass, 85 KB the
   least-squares preparation, 10 KB the kernels).
 
+### Default mode
+
+Default mode never runs the pass, and its op graphs are the same with and
+without this work. The rule for pipeline changes still asks for a corpus
+benchmark, so: the whole corpus in default mode, this branch against the
+same base without it (`fastmath/mode` merged with main `1ebe01c5`), 7 rounds,
+with an identical-binary control (`result/default-mode-all.jsonl`).
+
+- 339 models timed. Geometric mean 0.996, median 0.999 (base time over new
+  time). 28 models were more than 2% slower, the worst 6.1%, almost all with
+  gradients under 1 us; 7 were more than 2% faster; the identical control
+  had 5 of 339 beyond 2%.
+- That is code placement, not work added. The new sources then sat in the
+  middle of the link order, and `executor.cpp` had two more lines in its
+  registration function. Moving the sources to the end of the list and
+  registering the two kernels on the pass's first use (so `executor.cpp`
+  compiles to the same instructions, differing only in the opcode-count
+  constant) left 11 of the 52 worst and best models beyond 2% slower instead
+  of 24, and a different 11 (`result/default-mode-recheck.jsonl`).
+- A no-op control settles it (`result/default-mode-control.jsonl`, 9 rounds,
+  the same 52 models): the base with one unused cold function appended to
+  `lower.cpp` is more than 2% slower than the base on 7 models (worst 4.2%,
+  geometric mean 0.995); this branch on 6 (worst 3.7%, geometric mean
+  0.996); an identical copy of the base on none. The small models move by a
+  few percent whenever the binary's layout changes at all, which is the
+  effect the allocation notes already record.
+
 ### What changed from the design
 
 - **Scalar target terms** were added (decided in review after step 0): terms
