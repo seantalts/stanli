@@ -29,7 +29,8 @@ int main(int argc, char** argv) {
     cm.bind(ex);
     const int64_t n = ex.n_params();
     double* q = ex.params_data();
-    for (int64_t i = 0; i < n; ++i) q[i] = 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3);
+    for (int64_t i = 0; i < n; ++i)
+      q[i] = 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3);
     bool fwd_ok = true;
     try {
       ex.forward();

@@ -388,14 +388,24 @@ are affine in.
 
 **Measured** (i9-13900K, one P-core, fast mode with the pass on against fast
 mode with `STANLI_NO_COLLAPSE=1`, paired `ab_bench_corpus.py`, 9 rounds,
-identical-binary control within 1.4%): 92 of 352 corpus models have a term
-that collapses, and 91 of them could be timed. Their gradients are 8.1x
-faster in geometric mean; 67 are at least 2x faster and 41 at least 10x:
-`radon_pooled` 468x (47.7 us to 102 ns), `nes` 218x, the earnings regressions
-86x to 140x, `diamonds` 75x, the hierarchical radon models 7x to 16x,
-`election88_full` 6.6x. The fast-mode gate in
-[`TESTING.md`](../../TESTING.md#fast-mode) passes with it on; the largest
-deviation in the corpus is `election88_full` at 1.7e-13.
+identical-binary control within 1.9%): 92 of 352 corpus models have a term
+that collapses, and 91 of them could be timed. Their gradients are 8.2x
+faster in geometric mean; 67 are at least 2x faster, 40 at least 10x, and
+none is slower: `radon_pooled` 517x (47.5 us to 92 ns), `nes` 221x, the
+earnings regressions 86x to 139x, `diamonds` 73x, the hierarchical radon
+models 7x to 16x, `election88_full` 6.7x. A model the pass leaves alone has
+the same op graph with it on or off.
+
+Preparation pays for the analysis: over all 342 timeable models it is 5%
+longer at the median (0.07 ms) and 2.5% longer in total (12.05 s to
+12.35 s). Among the 92 models it changes the median is 15% (0.34 ms); the
+most added to any model is 40 ms, on `ch12_m12_6` (161 ms before), whose
+terms it examines and leaves alone. Sampling twelve of the collapsed models
+with four chains gave posterior means within 0.15 posterior standard
+deviations of default mode on every parameter (`election88_full` the
+largest), and whole runs from 1.1x to 41x shorter. The fast-mode gate in
+[`TESTING.md`](../../TESTING.md#fast-mode) passes with the pass on; the
+largest deviation in the corpus is `election88_full` at 1.7e-13.
 
 ## Lane partitioning (`partition.cpp`, disable: `STANLI_NO_PARTITION=1`)
 

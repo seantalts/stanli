@@ -23,6 +23,13 @@ Results:
 - `dry-run.txt`: output of `harnesses/collapse_census.py`, the analysis half
   of the pass run over the corpus in the shipped pipeline (the design note's
   step 0).
+- `result/`: measurements of the pass as built (2026-10-07, the design
+  note's "Result"). `terms.txt` is `harnesses/collapse_census.py` over the
+  corpus; `gradient-on-off.jsonl` and its manifest are
+  `harnesses/ab_bench_corpus.py` with the pass on, off and an identical
+  control, summarised by `summarize_gradient.py`; `preparation-on-off.json`
+  is `preparation.py`; `sampling.txt` is `sampling.py`. The manifest's paths
+  are those of the machine it ran on.
 
 Scripts (throwaway; they expect a `scratch/suffstat/` directory in a checkout
 with a Release build in `build-spike/`, the pinned

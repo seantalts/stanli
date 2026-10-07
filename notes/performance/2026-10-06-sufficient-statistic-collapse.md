@@ -344,16 +344,34 @@ closed-form kernels (`runtime/kernels/collapse_kernels.cpp`), tests
 ### Measurements
 
 i9-13900K, one P-core, clang 18.1.3, Release, `fastmath/mode` plus this
-work. Fast mode with the pass on against fast mode with
-`STANLI_NO_COLLAPSE=1`, the same binary, `harnesses/ab_bench_corpus.py
---fast-math --arm-env off:STANLI_NO_COLLAPSE=1`, 9 rounds, with a third arm
-of an identical binary as control (at most 1.4% apart).
+work, merged with main `1ebe01c5`. Fast mode with the pass on against fast
+mode with `STANLI_NO_COLLAPSE=1`, the same binary,
+`harnesses/ab_bench_corpus.py --fast-math --arm-env
+off:STANLI_NO_COLLAPSE=1`, 9 rounds, with a third arm of an identical binary
+as control (at most 1.9% apart). Raw results and the scripts that summarise
+them are in [data/2026-10-06-suffstat-census/result/](data/2026-10-06-suffstat-census/result/).
 
 - 92 of 352 corpus models have a term that collapses: by rows in 30, by
   groups in 18, by the linear form in 44.
 - Of the 91 that could be timed (`dogs_log` has a non-finite benchmark
-  point in every configuration), gradients are 8.1x faster in geometric
-  mean; 84 are at least 1.1x faster, 67 at least 2x, 41 at least 10x.
+  point in every configuration), gradients are 8.2x faster in geometric
+  mean; 85 are at least 1.1x faster, 67 at least 2x, 40 at least 10x. None
+  is slower; the smallest ratio is 1.000 (`cm_betadiscrete`).
+- Preparation (`bench_grad --prep`, best of 7, all 342 timeable models): 5%
+  longer at the median (0.07 ms), 12% in geometric mean, 2.5% in total
+  (12.05 s to 12.35 s). The 250 models the pass leaves alone: 3.5% at the
+  median, at most 38 ms (`nn_rbm1bJ100`, 4.6 s before). The 92 it changes:
+  15% at the median (0.34 ms), at most 40 ms (`ch12_m12_6`, 161 ms before,
+  whose 9930 scalar terms it numbers and then leaves). The analysis started
+  at about twice this cost; an allocation-free value table, one flat array of
+  value numbers and running the slot-identity numbering only when a value
+  repeats brought it down.
+- Sampling (`result/sampling.txt`): twelve collapsed models, four chains of
+  1000 draws, default mode against fast mode. Posterior means agree within
+  0.15 posterior standard deviations on every parameter and generated
+  quantity (worst: `election88_full`, 11,656 columns). Whole runs are 1.1x
+  to 41x shorter (`diamonds` 55.4 s to 1.75 s, `election88_full` 231 s to
+  40 s); that comparison includes the rest of fast mode.
 - The census estimated 85 models at 2x or more and 36 at 10x or more for
   these families together. The estimates were conservative per model, as the
   hand-collapsed timings suggested, and the pass reaches fewer of the
@@ -365,7 +383,7 @@ of an identical binary as control (at most 1.4% apart).
 - Fast-mode gate (`tools/verify_refs.py --fast-math`): 351 of 352, the same
   single failure (`sw_gp`) as without the pass and as default mode on this
   toolchain. Largest deviation in the corpus: 1.7e-13 (`election88_full`).
-- Object code: about 205 KB of text (110 KB the pass, 85 KB the
+- Object code: about 220 KB of text (125 KB the pass, 85 KB the
   least-squares preparation, 10 KB the kernels).
 
 ### What changed from the design

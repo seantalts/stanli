@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Which likelihood terms would the fast-mode observation collapse reach?
+"""Which likelihood terms does the fast-mode observation collapse reach?
 
 Compiles every corpus model in fast mode with STANLI_COLLAPSE_REPORT=1, so
-the analysis in runtime/src/collapse.cpp reports each likelihood term where
-the rewrite will run in the pass pipeline: observations, rows that differ
-by value, groups for the densities with a sufficient statistic, or the
-reason the term is left alone. Nothing is rewritten.
+the pass in runtime/src/collapse.cpp reports each likelihood term it looked
+at: observations, rows that differ by value, groups for the densities with a
+sufficient statistic, the form it chose (rows, groups or linear), or the
+reason the term was left alone.
 
 Usage: python3 harnesses/collapse_census.py deps/posteriordb
            [--check BIN] [--jobs N] [--out FILE.json] [model ...]
@@ -91,12 +91,13 @@ def main():
                                len(kept)))
     print(f"{len(results)} models: "
           + ", ".join(f"{n} {s}" for s, n in sorted(statuses.items())))
-    print(f"{len(collapsing)} models have a term that would collapse; "
+    print(f"{len(collapsing)} models have a term that collapses; "
           f"{sum(c[0] >= 10 for c in collapsing)} by 10x or more in that term")
-    print("\nmodel\tterms\topcode\tops\tn\trows\tgroups\tfactor")
+    print("\nmodel\tterms\topcode\tform\tops\tn\trows\tgroups\tfactor")
     for factor, model, t, kept in sorted(collapsing, reverse=True):
-        print(f"{model}\t{kept}\t{t['opcode']}\t{t['ops']}\t{t['n']}\t"
-              f"{t['rows']}\t{t['groups']}\t{factor:.1f}")
+        print(f"{model}\t{kept}\t{t['opcode']}\t{t.get('evaluator', '')}\t"
+              f"{t['ops']}\t{t['n']}\t{t['rows']}\t{t['groups']}\t"
+              f"{factor:.1f}")
     print("\nterms left alone, by reason:")
     for why, n in refusals.most_common():
         print(f"  {n}\t{why}")

@@ -1,0 +1,18 @@
+4 chains, 1000 warmup, 1000 draws, seed 7, stanli_run default mode against --fast-math.
+Worst difference of posterior means over all parameters and generated
+quantities, in units of the larger posterior standard deviation; wall time of
+the whole run.
+
+model                                        worst |mean diff|/sd   default   fast
+radon_county                                 0.051 (a.148)            2.08s   0.34s
+kidscore_momiq                               0.034 (beta.1)           0.16s   0.05s
+dogs                                         0.038 (p.3.25)           0.61s   0.38s
+earn_height                                  0.022 (beta.1)           0.81s   0.09s
+ch12_m12_4                                   0.023 (cutpoints.1)      2.48s   0.06s
+diamonds                                     0.071 (b.4)             55.44s   1.75s
+logmesquite                                  0.045 (beta.4)           0.08s   0.05s
+aalto_poisson_simple                         0.051 (y_rep.124)        0.17s   0.16s
+radon_variable_intercept_slope_noncentered   0.089 (beta_raw.202)     9.29s   2.26s
+election88_full                              0.144 (e.2)            230.78s  39.82s
+sw_lognormal                                 0.040 (b.1)              0.03s   0.02s
+ch11_m11_4                                   0.056 (a.6)              0.49s   0.22s
