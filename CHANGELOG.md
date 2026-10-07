@@ -8,8 +8,13 @@
   that use these densities are faster (Eight Schools 1.8x, ordered-logit
   models up to 2.1x). Two log densities in the recorded corpus change in the
   last bit; every gradient and generated quantity is unchanged.
+- Fuse `lognormal_lpdf`, `beta_lpdf` and `gamma_lpdf` the same way. Release
+  builds drop the Stan Math instantiations they replace: the CLI and shared
+  library are about 1.0 MB smaller. Values and gradients are bitwise equal to
+  Stan Math's. Models that call `lognormal` or `beta` on vectors, or in many
+  scalar priors, run their gradients up to 1.2x faster.
 - Release builds no longer contain Stan Math's own kernels for the fused
-  densities: the CLI and shared library are about 3.4 MB smaller. Configure
+  densities: the CLI and shared library are about 3.5 MB smaller. Configure
   with `-DSTANLI_STAN_DENSITY_ORACLE=ON` (the default outside the release
   scripts and CI) to keep them for `STANLI_NO_FUSED_DENSITY=1` and the
   differential tests.

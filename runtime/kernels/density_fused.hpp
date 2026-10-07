@@ -16,11 +16,17 @@ std::size_t fused_density_calls();
 void normal_lpdf_fused(KernelCtx& ctx);
 void cauchy_lpdf_fused(KernelCtx& ctx);
 void student_t_lpdf_fused(KernelCtx& ctx);
+void lognormal_lpdf_fused(KernelCtx& ctx);
+void beta_lpdf_fused(KernelCtx& ctx);
+void gamma_lpdf_fused(KernelCtx& ctx);
 void ordered_logistic_lpmf_fused(KernelCtx& ctx);
 
 void normal_lpdf_fwd_gen(KernelCtx& ctx);
 void cauchy_lpdf_fwd_gen(KernelCtx& ctx);
 void student_t_lpdf_fwd_gen(KernelCtx& ctx);
+void lognormal_lpdf_fwd_gen(KernelCtx& ctx);
+void beta_lpdf_fwd_gen(KernelCtx& ctx);
+void gamma_lpdf_fwd_gen(KernelCtx& ctx);
 
 #ifdef STANLI_FUSED_ONLY
 inline constexpr bool kFusedOnly = true;
@@ -35,6 +41,9 @@ constexpr FusedKernel fused_kernel_for(Code code) {
   if (code == OP_NORMAL_LPDF) return &normal_lpdf_fused;
   if (code == OP_CAUCHY_LPDF) return &cauchy_lpdf_fused;
   if (code == OP_STUDENT_T_LPDF) return &student_t_lpdf_fused;
+  if (code == OP_LOGNORMAL_LPDF) return &lognormal_lpdf_fused;
+  if (code == OP_BETA_LPDF) return &beta_lpdf_fused;
+  if (code == OP_GAMMA_LPDF) return &gamma_lpdf_fused;
   return nullptr;
 }
 
