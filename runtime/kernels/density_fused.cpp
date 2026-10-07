@@ -29,6 +29,13 @@ namespace {
 std::atomic<int> g_enabled{-1};
 thread_local std::size_t g_calls = 0;
 
+int env_level(const char* name) {
+  const char* e = std::getenv(name);
+  return e != nullptr && e[0] != '\0' ? std::atoi(e) : 0;
+}
+
+const int g_fast_reduce = env_level("STANLI_FAST_REDUCE");
+
 using VecView = Eigen::Map<const Eigen::Array<double, -1, 1>>;
 using OutView = Eigen::Map<Eigen::Array<double, -1, 1>>;
 
@@ -135,10 +142,52 @@ auto square_of(const T& x) {
     return x.square();
 }
 
+template <int Acc, typename E>
+double multi_sum(const E& e) {
+  using Eval = Eigen::internal::evaluator<E>;
+  const Eval ev(e);
+  const Eigen::Index n = e.size();
+  Eigen::Index i = 0;
+  double s = 0.0;
+  if constexpr ((Eval::Flags & Eigen::PacketAccessBit) != 0) {
+    using Packet = typename Eigen::internal::packet_traits<double>::type;
+    constexpr int P = Eigen::internal::unpacket_traits<Packet>::size;
+    Packet a[Acc];
+    for (int k = 0; k < Acc; ++k) a[k] = Eigen::internal::pset1<Packet>(0.0);
+    for (; i + Acc * P <= n; i += Acc * P)
+      for (int k = 0; k < Acc; ++k)
+        a[k] = Eigen::internal::padd(
+            a[k], ev.template packet<Eigen::Unaligned, Packet>(i + k * P));
+    for (int w = Acc / 2; w >= 1; w /= 2)
+      for (int k = 0; k < w; ++k) a[k] = Eigen::internal::padd(a[k], a[k + w]);
+    s = Eigen::internal::predux(a[0]);
+  } else {
+    double a[Acc] = {};
+    for (; i + Acc <= n; i += Acc)
+      for (int k = 0; k < Acc; ++k) a[k] += ev.coeff(i + k);
+    for (int w = Acc / 2; w >= 1; w /= 2)
+      for (int k = 0; k < w; ++k) a[k] += a[k + w];
+    s = a[0];
+  }
+  for (; i < n; ++i) s += ev.coeff(i);
+  return s;
+}
+
+template <typename E>
+double fsum(const E& e) {
+  if constexpr (is_scalar_v<E>) {
+    return e;
+  } else {
+    if (g_fast_reduce == 0) return stan::math::sum(e);
+    if (g_fast_reduce == 1) return multi_sum<4>(e);
+    return multi_sum<8>(e);
+  }
+}
+
 template <typename Arg, typename E>
 void put(double* buf, int64_t len, const E& e) {
   if constexpr (is_scalar_v<Arg>)
-    buf[0] = stan::math::sum(e);
+    buf[0] = fsum(e);
   else
     OutView(buf, len) = e;
 }
@@ -231,10 +280,10 @@ void normal_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
   const auto inv_sigma = inv_of(sigma);
   const auto y_scaled = (y - mu) * inv_sigma;
   const auto y_scaled_sq = y_scaled * y_scaled;
-  double logp = -0.5 * stan::math::sum(y_scaled_sq);
+  double logp = -0.5 * fsum(y_scaled_sq);
   if (!propto) logp += stan::math::NEG_LOG_SQRT_TWO_PI * N;
   if (!propto || sa)
-    logp -= stan::math::sum(log_of(sigma)) * N / size_of(sigma);
+    logp -= fsum(log_of(sigma)) * N / size_of(sigma);
   if (mask != 0) {
     const auto scaled_diff = inv_sigma * y_scaled;
     if (ya) put<Y>(o.buf[0], o.len[0], -scaled_diff);
@@ -264,10 +313,10 @@ void cauchy_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
   double logp = 0.0;
   const auto inv_sigma = inv_of(sigma);
   const auto y_minus_mu = y - mu;
-  logp -= stan::math::sum(stan::math::log1p(square_of(y_minus_mu * inv_sigma)));
+  logp -= fsum(stan::math::log1p(square_of(y_minus_mu * inv_sigma)));
   if (!propto) logp -= N * stan::math::LOG_PI;
   if (!propto || sa)
-    logp -= stan::math::sum(log_of(sigma)) * N / size_of(sigma);
+    logp -= fsum(log_of(sigma)) * N / size_of(sigma);
   if (mask != 0) {
     const auto sigma_squared = square_of(sigma);
     const auto y_minus_mu_squared = square_of(y_minus_mu);
@@ -275,7 +324,7 @@ void cauchy_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
       const auto emit = [&](const auto& mu_deriv) {
         if (ya) {
           if constexpr (is_scalar_v<Y>)
-            o.buf[0][0] = -stan::math::sum(mu_deriv);
+            o.buf[0][0] = -fsum(mu_deriv);
           else
             OutView(o.buf[0], o.len[0]) = -mu_deriv;
         }
@@ -284,7 +333,8 @@ void cauchy_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
       const auto expr = 2 * y_minus_mu / (sigma_squared + y_minus_mu_squared);
       if constexpr (is_scalar_v<Y> && is_scalar_v<M> && is_scalar_v<S>) {
         emit(expr);
-      } else if (ya && ma) {
+      } else if (ya && ma && !(g_fast_reduce != 0 &&
+                               (is_scalar_v<Y> || is_scalar_v<M>))) {
         constexpr Eigen::Index kStack = 512;
         if (static_cast<Eigen::Index>(N) <= kStack) {
           alignas(64) double buf[kStack];
@@ -356,10 +406,10 @@ void lognormal_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
   with_ref(!propto || ya, log_of(y), work, n, [&](const auto& log_y) {
     const auto logy_m_mu = materialize(log_y - mu, work + stride, n);
     double logp = N * stan::math::NEG_LOG_SQRT_TWO_PI -
-                  0.5 * stan::math::sum(square_of(logy_m_mu) * inv_sigma_sq);
+                  0.5 * fsum(square_of(logy_m_mu) * inv_sigma_sq);
     if (!propto || sa)
-      logp -= stan::math::sum(log_of(sigma)) * N / size_of(sigma);
-    if (!propto || ya) logp -= stan::math::sum(log_y) * N / size_of(y);
+      logp -= fsum(log_of(sigma)) * N / size_of(sigma);
+    if (!propto || ya) logp -= fsum(log_y) * N / size_of(y);
     if (mask != 0) {
       const int active =
           static_cast<int>(ya) + static_cast<int>(ma) + static_cast<int>(sa);
@@ -410,19 +460,19 @@ void beta_summed(const Y& y, const A& alpha, const B& beta, unsigned mask,
   const auto log1m_y = materialize(log1m_of(y), work + stride, n);
   double logp = 0;
   if (!propto || aa)
-    logp -= stan::math::sum(stan::math::lgamma(alpha)) * N / size_of(alpha);
+    logp -= fsum(stan::math::lgamma(alpha)) * N / size_of(alpha);
   if (!propto || ba)
-    logp -= stan::math::sum(stan::math::lgamma(beta)) * N / size_of(beta);
+    logp -= fsum(stan::math::lgamma(beta)) * N / size_of(beta);
   if (!propto || ya || aa)
-    logp += stan::math::sum((alpha - 1.0) * log_y) * N /
+    logp += fsum((alpha - 1.0) * log_y) * N /
             std::max(size_of(y), size_of(alpha));
   if (!propto || ya || ba)
-    logp += stan::math::sum((beta - 1.0) * log1m_y) * N /
+    logp += fsum((beta - 1.0) * log1m_y) * N /
             std::max(size_of(y), size_of(beta));
   if (ya) put<Y>(o.buf[0], o.len[0], (alpha - 1) / y + (beta - 1) / (y - 1));
   if (!propto || aa || ba) {
     const auto alpha_beta = alpha + beta;
-    logp += stan::math::sum(stan::math::lgamma(alpha_beta)) * N /
+    logp += fsum(stan::math::lgamma(alpha_beta)) * N /
             std::max(size_of(alpha), size_of(beta));
     if (aa || ba) {
       with_ref(
@@ -464,11 +514,11 @@ void gamma_summed(const Y& y, const A& alpha, const B& beta, unsigned mask,
   const Eigen::Index n = static_cast<Eigen::Index>(N);
   double logp = 0.0;
   if (!propto || aa)
-    logp = -stan::math::sum(stan::math::lgamma(alpha)) * N / size_of(alpha);
+    logp = -fsum(stan::math::lgamma(alpha)) * N / size_of(alpha);
   with_ref(!aa, log_of(y), work, n, [&](const auto& log_y) {
     if (!propto || aa || ba) {
       with_ref(aa, log_of(beta), work + stride, n, [&](const auto& log_beta) {
-        logp += stan::math::sum(alpha * log_beta) * N /
+        logp += fsum(alpha * log_beta) * N /
                 std::max(size_of(alpha), size_of(beta));
         if (aa)
           put<A>(o.buf[1], o.len[1],
@@ -476,11 +526,11 @@ void gamma_summed(const Y& y, const A& alpha, const B& beta, unsigned mask,
       });
     }
     if (!propto || ya || aa)
-      logp += stan::math::sum((alpha - 1.0) * log_y) * N /
+      logp += fsum((alpha - 1.0) * log_y) * N /
               std::max(size_of(alpha), size_of(y));
   });
   if (!propto || ya || ba)
-    logp -= stan::math::sum(beta * y) * N / std::max(size_of(beta), size_of(y));
+    logp -= fsum(beta * y) * N / std::max(size_of(beta), size_of(y));
   if (ya) put<Y>(o.buf[0], o.len[0], (alpha - 1) / y - beta);
   if (ba) put<B>(o.buf[2], o.len[2], alpha / beta - y);
   finish(o, logp, mask);
@@ -625,19 +675,19 @@ void student_t_summed(const Y& y, const Nu& nu, const M& mu, const S& sigma,
   if (na) {
     if constexpr (!is_scalar_v<decltype(sqn)>)
       log1p_val = stan::math::log1p(sqn);
-    logp = -stan::math::sum((half_nu + 0.5) * log1p_val);
+    logp = -fsum((half_nu + 0.5) * log1p_val);
   } else {
-    logp = -stan::math::sum((half_nu + 0.5) * stan::math::log1p(sqn));
+    logp = -fsum((half_nu + 0.5) * stan::math::log1p(sqn));
   }
   if (!propto) logp -= stan::math::LOG_SQRT_PI * N;
   if (!propto || na) {
-    logp += (stan::math::sum(stan::math::lgamma(half_nu + 0.5)) -
-             stan::math::sum(stan::math::lgamma(half_nu)) -
-             0.5 * stan::math::sum(stan::math::log(nu))) *
+    logp += (fsum(stan::math::lgamma(half_nu + 0.5)) -
+             fsum(stan::math::lgamma(half_nu)) -
+             0.5 * fsum(stan::math::log(nu))) *
             N / size_of(nu);
   }
   if (!propto || sa)
-    logp -= stan::math::sum(stan::math::log(sigma)) * N / size_of(sigma);
+    logp -= fsum(stan::math::log(sigma)) * N / size_of(sigma);
   if (mask != 0) {
     if (ya || ma) {
       const auto square_sigma = stan::math::square(sigma);
