@@ -545,8 +545,9 @@ as skipped. Minimum counts are enforced for each execution path and output
 mode, preventing a broad regression from appearing only as additional skips.
 The exact current thresholds are kept beside the test.
 
-`normal_lpdf`, `cauchy_lpdf`, `student_t_lpdf` and `ordered_logistic_lpmf`
-(shared cutpoints) run through fused kernels in
+`normal_lpdf`, `cauchy_lpdf`, `student_t_lpdf`, `lognormal_lpdf`,
+`beta_lpdf`, `gamma_lpdf` and `ordered_logistic_lpmf` (shared cutpoints) run
+through fused kernels in
 [`runtime/kernels/density_fused.cpp`](runtime/kernels/density_fused.cpp).
 The shipped configuration compiles out the Stan Math path they replace
 (`-DSTANLI_STAN_DENSITY_ORACLE=OFF`; wheels, the browser build, the CLI and
