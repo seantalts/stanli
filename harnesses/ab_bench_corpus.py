@@ -4,6 +4,12 @@
 python3 harnesses/ab_bench_corpus.py PDB OUT_DIR --arm base=BIN --arm new=BIN \
     [--arm aa=BIN_COPY] [--rounds 7] [--filter SUBSTR] [--limit N]
 
+An arm is NAME=BIN, optionally followed by ,VAR=VALUE entries that are set in
+the environment of that arm's processes (one binary can then be several arms).
+--mir-dir DIR times the DIR/NAME/model.tmir.sexp and data.json pairs instead
+of the corpus. When bench_grad reports cycles and instructions for the timed
+window they are recorded per sample next to the nanoseconds.
+
 Uses the protocol of harnesses/corpus_bench.py (docs/benchmarks.md#how-we-measure):
 MIR from the vectorizing stanc, bench_grad --timed with a 200 ms warmup and a
 250 ms window, one fresh process per sample, one thread requested, one
@@ -53,16 +59,22 @@ def main():
                     help="file with one model name per line")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--load-limit", type=float, default=3.0)
+    ap.add_argument("--mir-dir", type=pathlib.Path)
     args = ap.parse_args()
     arms = [a.split("=", 1) for a in args.arm]
     names = [n for n, _ in arms]
-    binaries = {n: pathlib.Path(b).resolve() for n, b in arms}
+    binaries = {n: pathlib.Path(b.split(",")[0]).resolve() for n, b in arms}
+    arm_env = {n: b.split(",")[1:] for n, b in arms}
     args.output.mkdir(parents=True, exist_ok=True)
     results = args.output / "results.jsonl"
     done = set()
     if results.exists():
         done = {json.loads(line)["model"] for line in results.open()}
-    cases = benchmark_cases(args.pdb, "all")
+    if args.mir_dir:
+        cases = {d.name: (d / "model.tmir.sexp", d / "data.json")
+                 for d in sorted(args.mir_dir.iterdir()) if (d / "model.tmir.sexp").exists()}
+    else:
+        cases = benchmark_cases(args.pdb, "all")
     wanted = set(pathlib.Path(args.models).read_text().split()) if args.models else None
     selected = [n for n in sorted(cases)
                 if args.filter in n and (wanted is None or n in wanted)]
@@ -72,7 +84,8 @@ def main():
     work = args.output / "work"
     work.mkdir(exist_ok=True)
     (args.output / "manifest.json").write_text(json.dumps(dict(
-        arms={n: dict(path=str(b), sha256=hashlib.sha256(b.read_bytes()).hexdigest())
+        arms={n: dict(path=str(b), sha256=hashlib.sha256(b.read_bytes()).hexdigest(),
+                      env=arm_env[n])
               for n, b in binaries.items()},
         rounds=args.rounds, warmup_ms=args.warmup_ms, measure_ms=args.measure_ms,
         thread_env="STAN_NUM_THREADS=1", started=time.ctime()), indent=1))
@@ -82,6 +95,7 @@ def main():
             continue
         stan, data = cases[name]
         record = dict(model=name, status="failed", note="", samples={n: [] for n in names},
+                      cycles={n: [] for n in names}, instructions={n: [] for n in names},
                       orders=[], values={}, load_before=os.getloadavg())
         directory = work / name
         directory.mkdir(exist_ok=True)
@@ -90,21 +104,30 @@ def main():
             record["load_before"] = os.getloadavg()
             source, mir, data_json = (directory / "model.stan", directory / "model.sexp",
                                       directory / "data.json")
-            source.write_bytes(stan.read_bytes())
-            materialize_data(data, data_json)
-            runner.require(f"{name}/mir", [VECTORIZE_PROBE, "--vectorize-loops", "on",
-                                           "--output", mir, source], args.timeout)
+            if args.mir_dir:
+                mir.write_bytes(stan.read_bytes())
+                materialize_data(data, data_json)
+            else:
+                source.write_bytes(stan.read_bytes())
+                materialize_data(data, data_json)
+                runner.require(f"{name}/mir", [VECTORIZE_PROBE, "--vectorize-loops", "on",
+                                               "--output", mir, source], args.timeout)
             for round_index in range(args.rounds):
                 order = rotation(names, round_index)
                 record["orders"].append(order)
                 for arm in order:
+                    prefix = ["/usr/bin/env"] + arm_env[arm] if arm_env[arm] else []
                     event = runner.require(
                         f"{name}/gradient/{round_index}/{arm}",
-                        [binaries[arm], mir, data_json, "--timed", "--warmup-ms",
-                         str(args.warmup_ms), "--measure-ms", str(args.measure_ms)],
+                        prefix + [binaries[arm], mir, data_json, "--timed", "--warmup-ms",
+                                  str(args.warmup_ms), "--measure-ms", str(args.measure_ms)],
                         args.timeout)
                     timing = parse_timing(runner.text(event), args.warmup_ms, args.measure_ms)
                     record["samples"][arm].append(timing["elapsed_ns"] / timing["iterations"])
+                    if "cycles" in timing:
+                        record["cycles"][arm].append(timing["cycles"] / timing["iterations"])
+                        record["instructions"][arm].append(
+                            timing["instructions"] / timing["iterations"])
                     record["values"].setdefault(arm, timing["values"])
             record["status"] = "ok"
         except (PhaseFailure, ValueError) as exc:

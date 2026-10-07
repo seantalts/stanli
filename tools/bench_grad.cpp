@@ -132,9 +132,11 @@ int benchmark_main(int argc, char** argv) {
       throw std::runtime_error(
           "benchmark point has non-finite density or gradient");
     const auto warm = stanli_benchmark::window(one, opts.warmup_ns, 1, true);
+    const auto c0 = stanli_benchmark::counters();
     const auto measured =
         stanli_benchmark::window(one, opts.measure_ns, warm.batch);
-    stanli_benchmark::output(warm, measured, lp, grad);
+    const auto c1 = stanli_benchmark::counters();
+    stanli_benchmark::output(warm, measured, lp, grad, c0, c1);
     return 0;
   }
   // Warm up by time, not by count: 1000 evaluations is nothing on a scalar

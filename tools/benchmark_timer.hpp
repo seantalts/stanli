@@ -12,7 +12,32 @@
 #include <stdexcept>
 #include <string>
 
+#ifdef __APPLE__
+#include <libproc.h>
+#include <unistd.h>
+#endif
+
 namespace stanli_benchmark {
+struct Counters {
+  uint64_t cycles = 0;
+  uint64_t instructions = 0;
+  bool valid = false;
+};
+
+inline Counters counters() {
+  Counters c;
+#ifdef __APPLE__
+  rusage_info_v4 ri;
+  if (proc_pid_rusage(getpid(), RUSAGE_INFO_V4,
+                      reinterpret_cast<rusage_info_t*>(&ri)) == 0) {
+    c.cycles = ri.ri_cycles;
+    c.instructions = ri.ri_instructions;
+    c.valid = true;
+  }
+#endif
+  return c;
+}
+
 struct Window {
   uint64_t iterations = 0;
   int64_t elapsed_ns = 0;
@@ -73,7 +98,7 @@ inline Options options(int argc, char** argv, int first) {
 
 template <class G>
 void output(const Window& warm, const Window& measured, double lp,
-            const G& grad) {
+            const G& grad, const Counters& begin = {}, const Counters& end = {}) {
   if (!std::isfinite(lp)) throw std::runtime_error("non-finite log density");
   for (int64_t i = 0; i < static_cast<int64_t>(grad.size()); ++i)
     if (!std::isfinite(grad[i]))
@@ -83,8 +108,11 @@ void output(const Window& warm, const Window& measured, double lp,
             << measured.iterations << ",\"elapsed_ns\":" << measured.elapsed_ns
             << ",\"batch\":" << measured.batch
             << ",\"warmup_iterations\":" << warm.iterations
-            << ",\"warmup_elapsed_ns\":" << warm.elapsed_ns << ",\"values\":["
-            << lp;
+            << ",\"warmup_elapsed_ns\":" << warm.elapsed_ns;
+  if (begin.valid && end.valid)
+    std::cout << ",\"cycles\":" << end.cycles - begin.cycles
+              << ",\"instructions\":" << end.instructions - begin.instructions;
+  std::cout << ",\"values\":[" << lp;
   for (int64_t i = 0; i < static_cast<int64_t>(grad.size()); ++i)
     std::cout << ',' << grad[i];
   std::cout << "]}" << std::endl;
