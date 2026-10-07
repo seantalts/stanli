@@ -869,6 +869,9 @@ struct StatisticPlan {
   // and scale slots. `op` is then the last of them.
   std::vector<size_t> family;
   std::vector<int> locations, scales;
+  // A family's group locations as affine forms over `leaves`, when the
+  // analysis could write them so.
+  std::vector<LinearRow> lines;
 };
 
 // Locations affine in more values than this are left to the group form.
@@ -887,9 +890,10 @@ bool worth_a_line(const Affine& affine, const Affine::Rows& lines) {
          p <= groups && 2 * p * p <= terms + 3 * groups;
 }
 
-// Fills in the plan's quadratic form from its groups' statistics. The
-// kernel reads the leaves slot by slot, so they are put in that order.
-bool line_data(StatisticPlan& stat, const Affine& affine, Affine::Rows& lines) {
+// Puts the plan's leaves in slot order, which is how they are read back,
+// and renames the lines' terms to match.
+void order_leaves(StatisticPlan& stat, const Affine& affine,
+                  Affine::Rows& lines) {
   const size_t p = affine.leaves.size();
   std::vector<int> order(p), place(p);
   for (size_t k = 0; k < p; ++k) order[k] = (int)k;
@@ -897,13 +901,20 @@ bool line_data(StatisticPlan& stat, const Affine& affine, Affine::Rows& lines) {
     return affine.leaves[(size_t)a] < affine.leaves[(size_t)b];
   });
   for (size_t k = 0; k < p; ++k) place[(size_t)order[k]] = (int)k;
-  for (LinearRow& line : lines)
+  for (LinearRow& line : lines) {
     for (auto& term : line.terms) term.first = place[(size_t)term.first];
-  stat.linear = linear_gaussian_data((int64_t)p, lines, stat.statistics);
-  if (stat.linear.empty()) return false;
+    std::sort(line.terms.begin(), line.terms.end());
+  }
   for (size_t k = 0; k < p; ++k)
     stat.leaves.push_back(affine.leaves[(size_t)order[k]]);
-  return true;
+}
+
+// Fills in the plan's quadratic form from its groups' statistics.
+bool line_data(StatisticPlan& stat, const Affine& affine, Affine::Rows& lines) {
+  order_leaves(stat, affine, lines);
+  stat.linear = linear_gaussian_data((int64_t)affine.leaves.size(), lines,
+                                     stat.statistics);
+  return !stat.linear.empty();
 }
 
 struct Analysis {
@@ -1296,13 +1307,10 @@ Analysis analyze(const Graph& g, const Fills& fills,
     history.p = stat.op;
     Affine affine(history, kLinearMaxTerms);
     Affine::Rows lines;
-    bool try_line = one_scale;
-    if (try_line) {
-      for (size_t k = 0; k < stat.rep.size(); ++k)
-        lines.push_back(affine.rows(stat.locations[k], {0},
-                                    stat.family[(size_t)stat.rep[k]])[0]);
-      try_line = worth_a_line(affine, lines);
-    }
+    for (size_t k = 0; k < stat.rep.size(); ++k)
+      lines.push_back(affine.rows(stat.locations[k], {0},
+                                  stat.family[(size_t)stat.rep[k]])[0]);
+    const bool try_line = one_scale && worth_a_line(affine, lines);
     if (!by_statistic && !try_line) {
       refuse(t, "too few repeated rows");
       report.terms.push_back(t);
@@ -1325,6 +1333,12 @@ Analysis analyze(const Graph& g, const Fills& fills,
       refuse(t, "too few repeated rows");
       report.terms.push_back(t);
       continue;
+    }
+    // For the group form the affine lines say how to build every group's
+    // location at once, in place of one scalar chain per group.
+    if (!by_line && !affine.failed()) {
+      if (!try_line) order_leaves(stat, affine, lines);
+      stat.lines = std::move(lines);
     }
     t.evaluator = by_line ? "linear" : "groups";
     stat.term = report.terms.size();
@@ -1416,6 +1430,7 @@ struct Rewriter : History {
   std::vector<std::vector<Op>> before;  // new ops, by the op they precede
   std::map<std::pair<std::pair<int, size_t>, std::vector<int>>, int> memo;
   int fallbacks = 0;
+  int packs = 0;
 
   Rewriter(Graph& mutable_graph, Fills& mutable_fills)
       : History(mutable_graph, mutable_fills),
@@ -1505,6 +1520,134 @@ struct Rewriter : History {
       at = next;
     }
     return out;
+  }
+
+  int binary(uint16_t opcode, int a, int b) {
+    Op op;
+    op.opcode = opcode;
+    op.n_in = 2;
+    op.in[0] = a;
+    op.in[1] = b;
+    op.out = graph.add_slot(std::max(len(a), len(b)), false);
+    before[p].push_back(op);
+    return op.out;
+  }
+
+  // One vector of the rows' values, each constant + sum(coefficient *
+  // leaf), built with a gather, a multiply and an add per column. Columns
+  // are per leaf slot, as many as the most terms any row takes from it, so
+  // each gathers from one slot; a row with fewer terms is padded with a zero
+  // coefficient. Returns -1 when that would take more than a few columns,
+  // or a scalar that only some rows use, as when every row has a value of
+  // its own; nothing is emitted then, and the caller packs.
+  int affine_vector(const std::vector<std::pair<int, int>>& leaves,
+                    const std::vector<LinearRow>& rows) {
+    constexpr size_t kMaxColumns = 8;
+    const size_t n = rows.size();
+    std::vector<int> slots;  // in order of first use
+    std::map<int, size_t> width;
+    for (const LinearRow& row : rows) {
+      std::map<int, size_t> here;
+      for (const auto& term : row.terms)
+        ++here[leaves[(size_t)term.first].first];
+      for (const auto& h : here) {
+        const auto ins = width.emplace(h.first, h.second);
+        if (ins.second) slots.push_back(h.first);
+        ins.first->second = std::max(ins.first->second, h.second);
+      }
+    }
+    size_t columns = 0;
+    for (const auto& w : width) columns += w.second;
+    if (columns > kMaxColumns) return -1;
+
+    const Mark start = mark();
+    int acc = -1;
+    const auto add = [&](int term) {
+      acc = acc < 0 ? term : binary(OP_ADD, acc, term);
+    };
+    for (int s : slots)
+      for (size_t c = 0; c < width[s]; ++c) {
+        std::vector<int> which(n, 0);
+        std::vector<double> coefficient(n, 0.0);
+        for (size_t r = 0; r < n; ++r) {
+          size_t seen = 0;
+          for (const auto& term : rows[r].terms) {
+            if (leaves[(size_t)term.first].first != s || seen++ != c) continue;
+            which[r] = leaves[(size_t)term.first].second;
+            coefficient[r] = term.second;
+          }
+        }
+        std::vector<char> present(n, 0);
+        for (size_t r = 0; r < n; ++r) {
+          size_t seen = 0;
+          for (const auto& term : rows[r].terms)
+            if (leaves[(size_t)term.first].first == s && seen++ == c)
+              present[r] = 1;
+        }
+        bool one_element = true, in_order = (int64_t)n == len(s), ones = true;
+        bool one_coefficient = true, everywhere = true;
+        for (size_t r = 0; r < n; ++r) {
+          one_element &= which[r] == which[0];
+          in_order &= which[r] == (int)r;
+          ones &= coefficient[r] == 1.0;
+          one_coefficient &= coefficient[r] == coefficient[0];
+          everywhere &= present[r] != 0;
+        }
+        // A scalar only some rows use is a value of those rows' own, and a
+        // column per such scalar is no better than packing them.
+        if (len(s) == 1 && !everywhere) {
+          rollback(start);
+          return -1;
+        }
+        int value;
+        if (len(s) == 1 || in_order) {
+          value = s;
+        } else if (one_element) {
+          Op op;
+          op.opcode = OP_INDEX;
+          op.n_in = 1;
+          op.in[0] = s;
+          op.out = graph.add_slot(1, false);
+          attach(op, {which[0]});
+          before[p].push_back(op);
+          value = op.out;
+        } else {
+          value = gather(s, which);
+        }
+        if (!ones)
+          value = binary(
+              OP_MUL, value,
+              data_slot(one_coefficient ? std::vector<double>{coefficient[0]}
+                                        : coefficient));
+        add(value);
+      }
+    std::vector<double> constant(n);
+    bool any_constant = false;
+    for (size_t r = 0; r < n; ++r) {
+      constant[r] = rows[r].constant;
+      any_constant |= constant[r] != 0;
+    }
+    if (any_constant || acc < 0) add(data_slot(std::move(constant)));
+    return acc;
+  }
+
+  // An argument of the op being rewritten, at the kept rows. Where pushing
+  // the gather up ends in a pack of scalars, one chain per row is still
+  // running; if the rows are affine in elements of a few slots, they are
+  // built from those slots with vector ops instead.
+  int restricted_argument(int s, const std::vector<int>& which) {
+    const Mark start = mark();
+    const int packs_before = packs, fallbacks_before = fallbacks;
+    const int pushed = restricted(s, which, p);
+    if (packs == packs_before) return pushed;
+    Affine affine(*this, kLinearMaxTerms);
+    const Affine::Rows rows = affine.rows(s, which, p);
+    if (affine.failed()) return pushed;
+    rollback(start);
+    packs = packs_before;
+    fallbacks = fallbacks_before;
+    const int built = affine_vector(affine.leaves, rows);
+    return built >= 0 ? built : restricted(s, which, p);
   }
 
   // A slot holding s[which], for s as it stands just before op `at`. The
@@ -1607,6 +1750,7 @@ struct Rewriter : History {
         if (scalars && !from.empty()) {
           // Pack the scalars as the lowering does: one copying store from
           // a filled base, then in-place stores into its result.
+          ++packs;
           const int64_t kept = (int64_t)from.size();
           const int base = data_slot(std::vector<double>((size_t)kept, 0.0));
           const int packed = graph.add_slot(kept, false);
@@ -1689,7 +1833,7 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
     int64_t n = outcomes.width;
     for (int j = 0; j < d.n_in; ++j) {
       n = std::max(n, g.slots[(size_t)d.in[j]].len);
-      e.in[j] = rw.restricted(d.in[j], plan.rep, plan.op);
+      e.in[j] = rw.restricted_argument(d.in[j], plan.rep);
     }
     if (!outcomes.groups.empty()) {
       std::vector<int> idata;
@@ -1746,15 +1890,17 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
         one_scale &= plan.scales[k] == plan.scales[0];
       }
       e.opcode = OP_NORMAL_GROUPED_LPDF;
-      e.in[1] = rw.packed(mu);
+      const int built =
+          plan.lines.empty() ? -1 : rw.affine_vector(plan.leaves, plan.lines);
+      e.in[1] = built >= 0 ? built : rw.packed(mu);
       e.in[2] = one_scale ? plan.scales[0] : rw.packed(sigma);
       e.in[0] = rw.data_slot(plan.statistics);
       ++st.statistic_terms;
       st.rows += (int64_t)plan.rep.size();
     } else if (plan.linear.empty()) {
       e.opcode = OP_NORMAL_GROUPED_LPDF;
-      e.in[1] = rw.restricted(d.in[1], plan.rep, plan.op);
-      e.in[2] = rw.restricted(plan.scale, plan.rep, plan.op);
+      e.in[1] = rw.restricted_argument(d.in[1], plan.rep);
+      e.in[2] = rw.restricted_argument(plan.scale, plan.rep);
       if (unpaid(plan.term, (int64_t)plan.rep.size(),
                  g.slots[(size_t)d.in[0]].len)) {
         rw.rollback(mark);

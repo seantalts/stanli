@@ -221,6 +221,46 @@ static void test_scalar_chains() {
   expect("chains: same values", c.same_values);
 }
 
+// The predictor filled one scalar at a time, each a[group] + b * x: the
+// kept rows are rebuilt from the parameters with vector ops, not kept as
+// one chain per row and packed.
+static void test_scalar_chains_become_vector_ops() {
+  Model m;
+  const int a = m.g.add_slot(5, true), b = m.g.add_slot(1, true);
+  const int sigma = m.g.add_slot(1, true);
+  const int n = 60;
+  const int y = data_slot(m, distinct_y(n));
+  const int decl = data_slot(
+      m, std::vector<double>(n, std::numeric_limits<double>::quiet_NaN()));
+  const int mu = m.g.add_slot(n, false);
+  for (int i = 0; i < n; ++i) {
+    const int xs = data_slot(m, {i % 2 ? 1.0 : 0.25});
+    const int ai = m.g.add_slot(1, false), mi = m.g.add_slot(1, false);
+    m.g.add_op(OP_INDEX, {a}, ai, {i % 5});
+    m.g.add_op(OP_FMA, {xs, b, ai}, mi);
+    if (i == 0)
+      m.g.add_op(OP_SET_INDEX, {decl, mi}, mu, {i});
+    else
+      m.g.add_op(OP_SET_INDEX_INPLACE, {mu, mi}, mu, {i});
+  }
+  const int lp = m.g.add_slot(1, false);
+  m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  m.g.ops.back().variant = 0x86;
+  m.terms = {lp};
+  const Collapsed c = collapse(m);
+  const Graph& g = c.model.g;
+  expect("chains to vectors: ten groups",
+         c.stats.statistic_terms == 1 && c.stats.rows == 10);
+  expect("chains to vectors: no scalar chains or packing left",
+         count_opcode(g, OP_FMA) == 0 && count_opcode(g, OP_INDEX) == 0 &&
+             count_opcode(g, OP_SET_INDEX) == 0 &&
+             count_opcode(g, OP_SET_INDEX_INPLACE) == 0);
+  expect("chains to vectors: one gather, one multiply, one add",
+         count_opcode(g, OP_GATHER) == 1 && out_len(g, OP_GATHER) == 10 &&
+             count_opcode(g, OP_MUL) == 1 && count_opcode(g, OP_ADD) == 1);
+  expect("chains to vectors: same values", c.same_values);
+}
+
 // mu = a + b * x copied into a declared vector, as `vector[N] mu = ...`
 // lowers, under a density that pays a recorder call per row.
 static void test_copied_predictor() {
@@ -374,7 +414,7 @@ static void test_unrestricted_argument() {
 // remain.
 static void test_element_updates_die_with_their_rows() {
   Model m;
-  const int a = m.g.add_slot(2, true), b = m.g.add_slot(1, true);
+  const int a = m.g.add_slot(2, true);
   const int sigma = m.g.add_slot(1, true);
   const int y = data_slot(m, distinct_y(kN));
   const int start = m.g.add_slot(kN, false), mu = m.g.add_slot(kN, false);
@@ -384,7 +424,7 @@ static void test_element_updates_die_with_their_rows() {
   for (int i = 0; i < kN; ++i) {
     const int was = m.g.add_slot(1, false), now = m.g.add_slot(1, false);
     m.g.add_op(OP_INDEX, {i == 0 ? start : mu}, was, {i});
-    m.g.add_op(OP_ADD, {was, b}, now);
+    m.g.add_op(OP_MUL, {was, was}, now);
     if (i == 0)
       m.g.add_op(OP_SET_INDEX, {start, now}, mu, {i});
     else
@@ -396,7 +436,7 @@ static void test_element_updates_die_with_their_rows() {
   const Collapsed c = collapse(m);
   expect("updates: two groups", c.stats.rows == 2);
   expect("updates: two updates left of twenty",
-         count_opcode(c.model.g, OP_ADD) == 2 &&
+         count_opcode(c.model.g, OP_MUL) == 2 &&
              count_opcode(c.model.g, OP_INDEX) == 2);
   expect("updates: same values", c.same_values);
 }
@@ -751,10 +791,46 @@ static void test_grouped_normal_from_scalar_terms() {
                count_opcode(c.model.g, OP_NORMAL_GROUPED_LPDF) == 1 &&
                count_opcode(c.model.g, OP_NORMAL_LPDF) == 0 &&
                c.model.terms.size() == 2);
-    expect("scalar family: three locations left",
-           count_opcode(c.model.g, OP_INDEX) == (per_group_scale ? 6 : 3));
+    // The locations are a[0..2] in order: the parameter vector itself.
+    expect("scalar family: no location chains left",
+           count_opcode(c.model.g, OP_INDEX) == (per_group_scale ? 3 : 0));
     expect("scalar family: same values", c.same_values);
   }
+}
+
+// A family whose locations are a[group] + b * x, as a hierarchical
+// regression unrolls: the groups' locations are rebuilt as a few vector ops
+// over the parameters, not one scalar chain per group.
+static void test_scalar_family_locations_are_vectorized() {
+  Model m;
+  const int a = m.g.add_slot(5, true), b = m.g.add_slot(1, true);
+  const int sigma = m.g.add_slot(1, true);
+  for (int i = 0; i < 60; ++i) {
+    const int xs = data_slot(m, {i % 2 ? 1.0 : 0.25});
+    const int y = data_slot(m, {0.1 * i - 3.0 + 0.01 * (i % 7)});
+    const int ai = m.g.add_slot(1, false), mu = m.g.add_slot(1, false);
+    const int lp = m.g.add_slot(1, false);
+    m.g.add_op(OP_INDEX, {a}, ai, {i % 5});
+    m.g.add_op(OP_FMA, {xs, b, ai}, mu);
+    m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    m.g.ops.back().variant = 0x86;
+    m.terms.push_back(lp);
+  }
+  const Collapsed c = collapse(m);
+  const Graph& g = c.model.g;
+  // Ten groups (five of a, two of x) in six values: the group form.
+  expect("vectorized family: one grouped term over ten groups",
+         c.stats.statistic_terms == 1 && c.stats.rows == 10 &&
+             count_opcode(g, OP_NORMAL_GROUPED_LPDF) == 1 &&
+             count_opcode(g, OP_NORMAL_LPDF) == 0);
+  expect("vectorized family: no scalar chains or packing left",
+         count_opcode(g, OP_FMA) == 0 && count_opcode(g, OP_INDEX) == 0 &&
+             count_opcode(g, OP_SET_INDEX) == 0 &&
+             count_opcode(g, OP_SET_INDEX_INPLACE) == 0);
+  expect("vectorized family: one gather, one multiply, one add",
+         count_opcode(g, OP_GATHER) == 1 && out_len(g, OP_GATHER) == 10 &&
+             count_opcode(g, OP_MUL) == 1 && count_opcode(g, OP_ADD) == 1);
+  expect("vectorized family: same values", c.same_values);
 }
 
 // The same family with locations b * x[n] + a: one quadratic form.
@@ -1182,6 +1258,7 @@ int main() {
   test_shared_predictor();
   test_one_row();
   test_scalar_chains();
+  test_scalar_chains_become_vector_ops();
   test_copied_predictor();
   test_real_variate_rows();
   test_matvec_rows();
@@ -1197,6 +1274,7 @@ int main() {
   test_grouped_normal_rejects();
   test_grouped_normal_refusals();
   test_grouped_normal_from_scalar_terms();
+  test_scalar_family_locations_are_vectorized();
   test_linear_gaussian_from_scalar_terms();
   test_linear_gaussian();
   test_linear_gaussian_near_the_mode();
