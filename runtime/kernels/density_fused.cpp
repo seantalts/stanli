@@ -136,7 +136,7 @@ bool cheap_positive_finite(const T& x) {
   if constexpr (is_scalar_v<T>)
     return std::isfinite(x) && x > 0;
   else
-    return cheap_finite(x) && x.minCoeff() > 0.0;
+    return cheap_finite(x) && (x.size() == 0 || x.minCoeff() > 0.0);
 }
 
 template <typename T>
@@ -144,7 +144,7 @@ bool cheap_nonneg_finite(const T& x) {
   if constexpr (is_scalar_v<T>)
     return std::isfinite(x) && x >= 0;
   else
-    return cheap_finite(x) && x.minCoeff() >= 0.0;
+    return cheap_finite(x) && (x.size() == 0 || x.minCoeff() >= 0.0);
 }
 
 template <typename T>
@@ -152,7 +152,8 @@ bool cheap_unit_finite(const T& x) {
   if constexpr (is_scalar_v<T>)
     return x >= 0 && x <= 1;
   else
-    return cheap_finite(x) && x.minCoeff() >= 0.0 && x.maxCoeff() <= 1.0;
+    return cheap_finite(x) &&
+           (x.size() == 0 || (x.minCoeff() >= 0.0 && x.maxCoeff() <= 1.0));
 }
 
 template <typename T>
@@ -160,7 +161,7 @@ bool any_zero_cheap(const T& x) {
   if constexpr (is_scalar_v<T>)
     return x == 0;
   else if (g_cheap_check)
-    return x.minCoeff() == 0.0;
+    return x.size() != 0 && x.minCoeff() == 0.0;
   else
     return (x == 0.0).any();
 }
