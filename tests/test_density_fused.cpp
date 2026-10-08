@@ -55,9 +55,10 @@ Outcome run(Dist d, const std::vector<double>& y, const std::vector<double>& mu,
   o.scratch.assign(static_cast<size_t>(std::max<int64_t>(total, 4 * n_out) + 1),
                    kSentinel);
   stanli::KernelCtx ctx;
-  ctx.in[0] = {ys.data, static_cast<int64_t>(ys.size())};
-  ctx.in[1] = {mus.data, static_cast<int64_t>(mus.size())};
-  ctx.in[2] = {ss.data, static_cast<int64_t>(ss.size())};
+  ctx.in[0] = {ys.n == 0 ? nullptr : ys.data, static_cast<int64_t>(ys.size())};
+  ctx.in[1] = {mus.n == 0 ? nullptr : mus.data,
+               static_cast<int64_t>(mus.size())};
+  ctx.in[2] = {ss.n == 0 ? nullptr : ss.data, static_cast<int64_t>(ss.size())};
   ctx.n_in = 3;
   ctx.out = {o.out.data(), n_out};
   ctx.variant = static_cast<uint8_t>(variant);
@@ -234,6 +235,136 @@ const Spec kSpecs[] = {
      false},
 };
 
+const double kSpecial[] = {kNaN, kInf,   -kInf, 0.0, -0.0,
+                           -1.5, 1e-300, 1.0,   1.5, 1e300};
+
+void one_case(const Spec& spec, const std::vector<double> (&args)[3],
+              unsigned variant, int64_t n_out, long& cases, long& rejected) {
+  const Outcome s =
+      run(spec.dist, args[0], args[1], args[2], variant, n_out, false);
+  const Outcome f =
+      run(spec.dist, args[0], args[1], args[2], variant, n_out, true);
+  ++cases;
+  if (s.threw) ++rejected;
+  compare(spec.name, spec.dist, variant & 7u, variant, s, f, args[0], args[1],
+          args[2]);
+}
+
+// A special value (NaN, infinities, zeros, negatives, extremes) at the first,
+// middle and last index of each argument in turn, in every shape, size,
+// activity mask, propto setting and both output forms. Whatever the Stan Math
+// path accepts or rejects, and with which message, the fused path must too.
+void systematic_single(const Spec& spec, std::mt19937_64& rng, long& cases,
+                       long& rejected) {
+  const int sizes[] = {2, 3, 7, 8, 9, 16, 17, 33, 129};
+  const unsigned masks[] = {7u, 5u, 0u};
+  for (int k = 0; k < 3; ++k) {
+    for (double special : kSpecial) {
+      for (int shape = 1; shape < 8; ++shape) {
+        const bool vec[3] = {(shape & 1) != 0, (shape & 2) != 0,
+                             (shape & 4) != 0};
+        for (int n : sizes) {
+          const size_t N = static_cast<size_t>(n);
+          const size_t positions[] = {0, N / 2, N - 1};
+          for (size_t pos : positions) {
+            if (!vec[k] && pos != 0) continue;
+            for (int off = 0; off < 2; ++off) {
+              g_offset = off;
+              std::vector<double> args[3];
+              for (int j = 0; j < 3; ++j) {
+                args[j].resize(vec[j] ? N : 1);
+                for (auto& x : args[j]) x = draw(rng, spec.kind[j]);
+              }
+              args[k][pos] = special;
+              for (unsigned mask : masks)
+                for (int propto = 0; propto < 2; ++propto)
+                  for (int elt = 0; elt < 2; ++elt) {
+                    unsigned variant = mask | (propto ? 0x80u : 0u);
+                    int64_t n_out = 1;
+                    if (elt) {
+                      variant |= 0x40u;
+                      n_out = static_cast<int64_t>(N);
+                    }
+                    one_case(spec, args, variant, n_out, cases, rejected);
+                  }
+            }
+          }
+        }
+      }
+    }
+  }
+  std::vector<double> args[3];
+  for (int k = 0; k < 3; ++k) {
+    for (double special : kSpecial) {
+      for (int j = 0; j < 3; ++j) args[j].assign(1, draw(rng, spec.kind[j]));
+      args[k][0] = special;
+      for (unsigned mask : masks)
+        for (int propto = 0; propto < 2; ++propto)
+          one_case(spec, args, mask | (propto ? 0x80u : 0u), 1, cases,
+                   rejected);
+    }
+  }
+}
+
+// Several bad values at once, in different arguments, so that the order of
+// the checks decides which message comes out.
+void systematic_multiple(const Spec& spec, std::mt19937_64& rng, long& cases,
+                         long& rejected) {
+  std::uniform_real_distribution<double> u(0, 1);
+  const int sizes[] = {2, 5, 8, 9, 17, 33, 129};
+  for (int rep = 0; rep < 20000; ++rep) {
+    g_offset = rep & 1;
+    const int shape = 1 + static_cast<int>(u(rng) * 7) % 7;
+    const bool vec[3] = {(shape & 1) != 0, (shape & 2) != 0, (shape & 4) != 0};
+    const size_t N =
+        static_cast<size_t>(sizes[static_cast<size_t>(u(rng) * 7) % 7]);
+    std::vector<double> args[3];
+    for (int j = 0; j < 3; ++j) {
+      args[j].resize(vec[j] ? N : 1);
+      for (auto& x : args[j]) x = draw(rng, spec.kind[j]);
+      if (u(rng) < 0.6)
+        args[j][static_cast<size_t>(u(rng) * args[j].size())] =
+            kSpecial[static_cast<size_t>(u(rng) * 10) % 10];
+      if (u(rng) < 0.2)
+        args[j][static_cast<size_t>(u(rng) * args[j].size())] =
+            kSpecial[static_cast<size_t>(u(rng) * 10) % 10];
+    }
+    unsigned variant =
+        static_cast<unsigned>(u(rng) * 8) % 8 | (u(rng) < 0.5 ? 0x80u : 0u);
+    int64_t n_out = 1;
+    if (u(rng) < 0.3) {
+      variant |= 0x40u;
+      n_out = static_cast<int64_t>(N);
+    }
+    one_case(spec, args, variant, n_out, cases, rejected);
+  }
+}
+
+// Sizes of zero, one and several in every combination, clean and with a
+// special value in one argument.
+void systematic_sizes(const Spec& spec, std::mt19937_64& rng, long& cases,
+                      long& rejected) {
+  std::uniform_real_distribution<double> u(0, 1);
+  const size_t sizes[] = {0, 1, 2, 5};
+  for (size_t a : sizes)
+    for (size_t b : sizes)
+      for (size_t c : sizes) {
+        const size_t lens[3] = {a, b, c};
+        for (int bad = -1; bad < 3; ++bad)
+          for (unsigned variant : {0u, 7u, 0x87u, 0x80u, 0x85u, 0x02u}) {
+            std::vector<double> args[3];
+            for (int j = 0; j < 3; ++j) {
+              args[j].resize(lens[j]);
+              for (auto& x : args[j]) x = draw(rng, spec.kind[j]);
+            }
+            if (bad >= 0 && !args[bad].empty())
+              args[bad][static_cast<size_t>(u(rng) * args[bad].size())] =
+                  kSpecial[static_cast<size_t>(u(rng) * 10) % 10];
+            one_case(spec, args, variant, 1, cases, rejected);
+          }
+      }
+}
+
 }  // namespace
 
 int main() {
@@ -304,6 +435,9 @@ int main() {
         compare(spec.name, d, variant & 7u, variant, s, f, y, mu, sigma);
       }
     }
+    systematic_single(spec, rng, cases, rejected);
+    systematic_multiple(spec, rng, cases, rejected);
+    systematic_sizes(spec, rng, cases, rejected);
   }
 
   for (const Spec& spec : kSpecs) {

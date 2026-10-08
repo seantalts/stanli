@@ -41,7 +41,8 @@ Outcome run(const std::vector<double>& y, const std::vector<double>& nu,
   size_t off = 0;
   for (int k = 0; k < 4; ++k) {
     std::copy(args[k]->begin(), args[k]->end(), base + off);
-    ctx.in[k] = {base + off, static_cast<int64_t>(args[k]->size())};
+    ctx.in[k] = {args[k]->empty() ? nullptr : base + off,
+                 static_cast<int64_t>(args[k]->size())};
     off += args[k]->size();
   }
   o.out.assign(static_cast<size_t>(n_out), kSentinel);
@@ -142,6 +143,135 @@ double draw(std::mt19937_64& rng, bool positive) {
   return (u(rng) < 0.5) ? v : -v;
 }
 
+const double kSpecial[] = {std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity(),
+                           -std::numeric_limits<double>::infinity(),
+                           0.0,
+                           -0.0,
+                           -1.5,
+                           1e-300,
+                           1.0,
+                           1.5,
+                           1e300};
+const bool kPositive[4] = {false, true, false, true};
+
+void one_case(const std::vector<double> (&a)[4], unsigned variant,
+              int64_t n_out, long& cases, long& rejected, size_t shape,
+              size_t n) {
+  const Outcome s = run(a[0], a[1], a[2], a[3], variant, n_out, false);
+  const Outcome f = run(a[0], a[1], a[2], a[3], variant, n_out, true);
+  ++cases;
+  if (s.threw) ++rejected;
+  compare(variant & 15u, variant, s, f, shape, n);
+}
+
+// A special value at the first, middle and last index of each argument in
+// turn, in every shape, size, mask, propto setting and output form.
+void systematic_single(std::mt19937_64& rng, long& cases, long& rejected) {
+  const int sizes[] = {2, 3, 7, 8, 9, 16, 17, 33, 129};
+  const unsigned masks[] = {15u, 9u, 0u};
+  for (int k = 0; k < 4; ++k)
+    for (double special : kSpecial)
+      for (int shape = 1; shape < 16; ++shape) {
+        const bool vec[4] = {(shape & 1) != 0, (shape & 2) != 0,
+                             (shape & 4) != 0, (shape & 8) != 0};
+        for (int n : sizes) {
+          const size_t N = static_cast<size_t>(n);
+          const size_t positions[] = {0, N / 2, N - 1};
+          for (size_t pos : positions) {
+            if (!vec[k] && pos != 0) continue;
+            for (int off = 0; off < 2; ++off) {
+              g_offset = off;
+              std::vector<double> a[4];
+              for (int j = 0; j < 4; ++j) {
+                a[j].resize(vec[j] ? N : 1);
+                for (auto& x : a[j]) x = draw(rng, kPositive[j]);
+              }
+              a[k][pos] = special;
+              for (unsigned mask : masks)
+                for (int propto = 0; propto < 2; ++propto)
+                  for (int elt = 0; elt < 2; ++elt) {
+                    unsigned variant = mask | (propto ? 0x80u : 0u);
+                    int64_t n_out = 1;
+                    if (elt) {
+                      variant |= 0x40u;
+                      n_out = static_cast<int64_t>(N);
+                    }
+                    one_case(a, variant, n_out, cases, rejected,
+                             static_cast<size_t>(shape), N);
+                  }
+            }
+          }
+        }
+      }
+  std::vector<double> a[4];
+  for (int k = 0; k < 4; ++k)
+    for (double special : kSpecial) {
+      for (int j = 0; j < 4; ++j) a[j].assign(1, draw(rng, kPositive[j]));
+      a[k][0] = special;
+      for (unsigned mask : masks)
+        for (int propto = 0; propto < 2; ++propto)
+          one_case(a, mask | (propto ? 0x80u : 0u), 1, cases, rejected, 0, 1);
+    }
+}
+
+// Several bad values at once, in different arguments, so that the order of
+// the checks decides which message comes out.
+void systematic_multiple(std::mt19937_64& rng, long& cases, long& rejected) {
+  std::uniform_real_distribution<double> u(0, 1);
+  const int sizes[] = {2, 5, 8, 9, 17, 33, 129};
+  for (int rep = 0; rep < 40000; ++rep) {
+    g_offset = rep & 1;
+    const int shape = 1 + static_cast<int>(u(rng) * 15) % 15;
+    const bool vec[4] = {(shape & 1) != 0, (shape & 2) != 0, (shape & 4) != 0,
+                         (shape & 8) != 0};
+    const size_t N =
+        static_cast<size_t>(sizes[static_cast<size_t>(u(rng) * 7) % 7]);
+    std::vector<double> a[4];
+    for (int j = 0; j < 4; ++j) {
+      a[j].resize(vec[j] ? N : 1);
+      for (auto& x : a[j]) x = draw(rng, kPositive[j]);
+      for (int t = 0; t < 2; ++t)
+        if (u(rng) < (t == 0 ? 0.5 : 0.2))
+          a[j][static_cast<size_t>(u(rng) * a[j].size())] =
+              kSpecial[static_cast<size_t>(u(rng) * 10) % 10];
+    }
+    unsigned variant =
+        static_cast<unsigned>(u(rng) * 16) % 16 | (u(rng) < 0.5 ? 0x80u : 0u);
+    int64_t n_out = 1;
+    if (u(rng) < 0.3) {
+      variant |= 0x40u;
+      n_out = static_cast<int64_t>(N);
+    }
+    one_case(a, variant, n_out, cases, rejected, static_cast<size_t>(shape), N);
+  }
+}
+
+// Sizes of zero, one and several in every combination, clean and with a
+// special value in one argument.
+void systematic_sizes(std::mt19937_64& rng, long& cases, long& rejected) {
+  std::uniform_real_distribution<double> u(0, 1);
+  const size_t sizes[] = {0, 1, 2, 5};
+  for (size_t l0 : sizes)
+    for (size_t l1 : sizes)
+      for (size_t l2 : sizes)
+        for (size_t l3 : sizes) {
+          const size_t lens[4] = {l0, l1, l2, l3};
+          for (int bad = -1; bad < 4; ++bad)
+            for (unsigned variant : {0u, 15u, 0x8fu, 0x80u, 0x85u, 0x04u}) {
+              std::vector<double> a[4];
+              for (int j = 0; j < 4; ++j) {
+                a[j].resize(lens[j]);
+                for (auto& x : a[j]) x = draw(rng, kPositive[j]);
+              }
+              if (bad >= 0 && !a[bad].empty())
+                a[bad][static_cast<size_t>(u(rng) * a[bad].size())] =
+                    kSpecial[static_cast<size_t>(u(rng) * 10) % 10];
+              one_case(a, variant, 1, cases, rejected, 98, 0);
+            }
+        }
+}
+
 }  // namespace
 
 int main() {
@@ -231,6 +361,10 @@ int main() {
       compare(variant & 15u, variant, s, f, 99, 0);
     }
   }
+
+  systematic_single(rng, cases, rejected);
+  systematic_multiple(rng, cases, rejected);
+  systematic_sizes(rng, cases, rejected);
 
   std::printf("max ULP by mask:");
   for (unsigned m = 0; m < 16; ++m) std::printf(" %g", worst_by_mask[m]);

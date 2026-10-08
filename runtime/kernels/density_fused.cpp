@@ -108,7 +108,40 @@ bool any_zero(const T& x) {
   if constexpr (is_scalar_v<T>)
     return x == 0;
   else
-    return (x == 0.0).any();
+    return x.size() != 0 && x.minCoeff() == 0.0;
+}
+
+template <typename T>
+bool clear_finite(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return std::isfinite(x);
+  else
+    return (x - x).sum() == 0.0;
+}
+
+template <typename T>
+bool clear_positive_finite(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return std::isfinite(x) && x > 0;
+  else
+    return clear_finite(x) && (x.size() == 0 || x.minCoeff() > 0.0);
+}
+
+template <typename T>
+bool clear_nonnegative_finite(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return std::isfinite(x) && x >= 0;
+  else
+    return clear_finite(x) && (x.size() == 0 || x.minCoeff() >= 0.0);
+}
+
+template <typename T>
+bool clear_unit_interval(const T& x) {
+  if constexpr (is_scalar_v<T>)
+    return x >= 0 && x <= 1;
+  else
+    return clear_finite(x) &&
+           (x.size() == 0 || (x.minCoeff() >= 0.0 && x.maxCoeff() <= 1.0));
 }
 
 template <typename T>
@@ -216,7 +249,8 @@ void normal_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
                    bool propto, const Out& o) {
   static constexpr const char* function = "normal_lpdf";
   check_sizes(function, y, mu, sigma);
-  if (any_nan(y) || !all_finite(mu) || !all_positive(sigma)) {
+  if (!(clear_finite(y) && clear_finite(mu) && clear_positive_finite(sigma)) &&
+      (any_nan(y) || !all_finite(mu) || !all_positive(sigma))) {
     stan::math::check_not_nan(function, "Random variable", y);
     stan::math::check_finite(function, "Location parameter", mu);
     stan::math::check_positive(function, "Scale parameter", sigma);
@@ -253,7 +287,8 @@ void cauchy_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
     zero_result(o);
     return;
   }
-  if (any_nan(y) || !all_finite(mu) || !all_positive_finite(sigma)) {
+  if (!(clear_finite(y) && clear_finite(mu) && clear_positive_finite(sigma)) &&
+      (any_nan(y) || !all_finite(mu) || !all_positive_finite(sigma))) {
     stan::math::check_not_nan(function, "Random variable", y);
     stan::math::check_finite(function, "Location parameter", mu);
     stan::math::check_positive_finite(function, "Scale parameter", sigma);
@@ -334,7 +369,9 @@ void lognormal_summed(const Y& y, const M& mu, const S& sigma, unsigned mask,
                       Eigen::Index stride) {
   static constexpr const char* function = "lognormal_lpdf";
   check_sizes(function, y, mu, sigma);
-  if (!all_nonnegative(y) || !all_finite(mu) || !all_positive_finite(sigma)) {
+  if (!(clear_nonnegative_finite(y) && clear_finite(mu) &&
+        clear_positive_finite(sigma)) &&
+      (!all_nonnegative(y) || !all_finite(mu) || !all_positive_finite(sigma))) {
     stan::math::check_nonnegative(function, "Random variable", y);
     stan::math::check_finite(function, "Location parameter", mu);
     stan::math::check_positive_finite(function, "Scale parameter", sigma);
@@ -392,8 +429,10 @@ void beta_summed(const Y& y, const A& alpha, const B& beta, unsigned mask,
     zero_result(o);
     return;
   }
-  if (!all_positive_finite(alpha) || !all_positive_finite(beta) ||
-      !all_unit_interval(y)) {
+  if (!(clear_positive_finite(alpha) && clear_positive_finite(beta) &&
+        clear_unit_interval(y)) &&
+      (!all_positive_finite(alpha) || !all_positive_finite(beta) ||
+       !all_unit_interval(y))) {
     stan::math::check_positive_finite(function, "First shape parameter", alpha);
     stan::math::check_positive_finite(function, "Second shape parameter", beta);
     stan::math::check_bounded(function, "Random variable", y, 0, 1);
@@ -447,8 +486,10 @@ void gamma_summed(const Y& y, const A& alpha, const B& beta, unsigned mask,
   static constexpr const char* function = "gamma_lpdf";
   check_sizes(function, y, alpha, beta, "Shape parameter",
               "Inverse scale parameter");
-  if (!all_positive_finite(y) || !all_positive_finite(alpha) ||
-      !all_positive_finite(beta)) {
+  if (!(clear_positive_finite(y) && clear_positive_finite(alpha) &&
+        clear_positive_finite(beta)) &&
+      (!all_positive_finite(y) || !all_positive_finite(alpha) ||
+       !all_positive_finite(beta))) {
     stan::math::check_positive_finite(function, "Random variable", y);
     stan::math::check_positive_finite(function, "Shape parameter", alpha);
     stan::math::check_positive_finite(function, "Inverse scale parameter",
@@ -592,8 +633,10 @@ void student_t_summed(const Y& y, const Nu& nu, const M& mu, const S& sigma,
                       Eigen::Index stride) {
   static constexpr const char* function = "student_t_lpdf";
   check_sizes4(function, y, nu, mu, sigma);
-  if (any_nan(y) || !all_positive_finite(nu) || !all_finite(mu) ||
-      !all_positive_finite(sigma)) {
+  if (!(clear_finite(y) && clear_positive_finite(nu) && clear_finite(mu) &&
+        clear_positive_finite(sigma)) &&
+      (any_nan(y) || !all_positive_finite(nu) || !all_finite(mu) ||
+       !all_positive_finite(sigma))) {
     stan::math::check_not_nan(function, "Random variable", y);
     stan::math::check_positive_finite(function, "Degrees of freedom parameter",
                                       nu);
