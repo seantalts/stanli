@@ -3,16 +3,17 @@ Worst difference of posterior means over all parameters and generated
 quantities, in units of the larger posterior standard deviation; wall time of
 the whole run.
 
-radon_county                 draws 4000/4000  columns 389  worst |mean diff|/sd 0.051 (a.148)  wall default 2.05s fast 0.33s
-kidscore_momiq               draws 4000/4000  columns 3  worst |mean diff|/sd 0.034 (beta.1)  wall default 0.16s fast 0.05s
-dogs                         draws 4000/4000  columns 2253  worst |mean diff|/sd 0.038 (p.3.25)  wall default 0.60s fast 0.41s
-earn_height                  draws 4000/4000  columns 3  worst |mean diff|/sd 0.022 (beta.1)  wall default 0.79s fast 0.09s
-ch12_m12_4                   draws 4000/4000  columns 6  worst |mean diff|/sd 0.023 (cutpoints.1)  wall default 2.46s fast 0.06s
-diamonds                     draws 4000/4000  columns 27  worst |mean diff|/sd 0.071 (b.4)  wall default 55.39s fast 1.85s
-logmesquite                  draws 4000/4000  columns 8  worst |mean diff|/sd 0.045 (beta.4)  wall default 0.09s fast 0.05s
-aalto_poisson_simple         draws 4000/4000  columns 1001  worst |mean diff|/sd 0.051 (y_rep.124)  wall default 0.18s fast 0.15s
-radon_variable_intercept_slope_noncentered draws 4000/4000  columns 1549  worst |mean diff|/sd 0.066 (beta_raw.260)  wall default 9.30s fast 3.49s
-radon_hierarchical_intercept_centered draws 4000/4000  columns 391  worst |mean diff|/sd 0.087 (beta.1)  wall default 6.16s fast 2.43s
-election88_full              draws 4000/4000  columns 11656  worst |mean diff|/sd 0.144 (e.2)  wall default 231.18s fast 39.39s
-sw_lognormal                 draws 4000/4000  columns 5  worst |mean diff|/sd 0.040 (b.1)  wall default 0.03s fast 0.02s
-ch11_m11_4                   draws 4000/4000  columns 1019  worst |mean diff|/sd 0.056 (a.6)  wall default 0.51s fast 0.22s
+radon_county                 draws 4000/4000  columns 389  worst |mean diff|/sd 0.051 (a.148)  wall default 2.21s fast 0.34s
+kidscore_momiq               draws 4000/4000  columns 3  worst |mean diff|/sd 0.034 (beta.1)  wall default 0.18s fast 0.06s
+dogs                         draws 4000/4000  columns 2253  worst |mean diff|/sd 0.038 (p.3.25)  wall default 0.60s fast 0.42s
+earn_height                  draws 4000/4000  columns 3  worst |mean diff|/sd 0.022 (beta.1)  wall default 0.78s fast 0.09s
+ch12_m12_4                   draws 4000/4000  columns 6  worst |mean diff|/sd 0.023 (cutpoints.1)  wall default 2.47s fast 0.06s
+diamonds                     draws 4000/4000  columns 27  worst |mean diff|/sd 0.071 (b.4)  wall default 55.59s fast 1.77s
+logmesquite                  draws 4000/4000  columns 8  worst |mean diff|/sd 0.045 (beta.4)  wall default 0.09s fast 0.04s
+aalto_poisson_simple         draws 4000/4000  columns 1001  worst |mean diff|/sd 0.051 (y_rep.124)  wall default 0.20s fast 0.21s
+radon_variable_intercept_slope_noncentered draws 4000/4000  columns 1549  worst |mean diff|/sd 0.063 (alpha_raw.20)  wall default 9.42s fast 2.07s
+radon_hierarchical_intercept_centered draws 4000/4000  columns 391  worst |mean diff|/sd 0.069 (beta.1)  wall default 6.18s fast 1.08s
+radon_county_intercept       draws 4000/4000  columns 388  worst |mean diff|/sd 0.042 (alpha.303)  wall default 3.94s fast 0.65s
+election88_full              draws 4000/4000  columns 11656  worst |mean diff|/sd 0.144 (e.2)  wall default 231.80s fast 39.87s
+sw_lognormal                 draws 4000/4000  columns 5  worst |mean diff|/sd 0.040 (b.1)  wall default 0.06s fast 0.02s
+ch11_m11_4                   draws 4000/4000  columns 1019  worst |mean diff|/sd 0.056 (a.6)  wall default 0.51s fast 0.24s

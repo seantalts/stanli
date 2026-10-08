@@ -348,46 +348,44 @@ work, merged with main `1ebe01c5` and `fastmath/mode` `d00d5643`. Fast mode
 with the pass on against fast mode with `STANLI_NO_COLLAPSE=1`, the same
 binary, `harnesses/ab_bench_corpus.py --fast-math --arm-env
 off:STANLI_NO_COLLAPSE=1`, 9 rounds, with a third arm of an identical binary
-as control (at most 2.9% apart). Raw results and the scripts that summarise
+as control. Raw results and the scripts that summarise
 them are in [data/2026-10-06-suffstat-census/result/](data/2026-10-06-suffstat-census/result/).
 
 - 91 of 352 corpus models have a term that collapses: by rows in 28, by
   groups in 18, by the linear form in 45.
 - Of the 90 that could be timed (`dogs_log` has a non-finite benchmark
-  point in every configuration), gradients are 7.4x faster in geometric
-  mean; 85 are at least 1.1x faster, 68 at least 2x, 35 at least 10x. None
-  is slower; the smallest ratio is 0.999 (`cm_betadiscrete`).
-- Before `fastmath/mode` gained `d00d5643` ("Price shared-param reroll
-  fusion by distinct ops per position"), the same measurement gave 8.2x on
-  91 models with 40 at 10x or more. That commit leaves four hierarchical
-  radon likelihoods as about 12,500 scalar `normal` terms where re-roll used
-  to fuse them into one vector term. The pass first lost them altogether;
-  taking a family of scalar normal terms as one term (below) brought them
-  back at 2.5x to 4.1x, where the vector term had given 7x to 10x: the
-  groups' locations are now built by a scalar chain each and packed.
+  point in every configuration), gradients are 8.6x faster in geometric
+  mean; 85 are at least 1.1x faster, 68 at least 2x, 45 at least 10x. None
+  is slower; the smallest ratio is 1.002 (`cm_betadiscrete`). The machine
+  was not idle for this run: the identical control is within 5% on 95% of
+  the models and 13% at worst.
+- `fastmath/mode` gained `d00d5643` ("Price shared-param reroll fusion by
+  distinct ops per position") during this work. Before it the same
+  measurement gave 8.2x on 91 models with 40 at 10x or more. After it,
+  re-roll leaves the radon likelihoods as about 12,500 scalar `normal` terms,
+  or as five vector chunks and a scalar remainder, where it used to fuse one
+  vector term; the pass then gave 7.4x overall, with eleven radon models at
+  2.4x to 5.2x that had been at 7x to 16x. Three changes brought them back,
+  to 9x to 16x: normal terms of one kind are pooled into one family whether
+  they are scalar or vector; a family's group locations are built from their
+  affine form with vector ops; and the same is done for any argument that
+  would otherwise be packed from one scalar chain per kept row.
 - Preparation (`bench_grad --prep`, best of 7, all 342 timeable models): 5%
-  longer at the median (0.07 ms), 12% in geometric mean, 2.6% in total
-  (12.99 s to 13.33 s). The 251 models the pass leaves alone: 4% at the
-  median, at most 43 ms (`nn_rbm1bJ100`, 4.6 s before). The 91 it changes:
-  15% at the median (0.37 ms), at most 41 ms (`ch12_m12_6`, 161 ms before,
+  longer at the median (0.08 ms), 14% in geometric mean, 3% in total
+  (12.92 s to 13.31 s). The 251 models the pass leaves alone: 4% at the
+  median, at most 38 ms (`nn_rbm1bJ100`, 4.6 s before). The 91 it changes:
+  20% at the median (0.39 ms), at most 42 ms (`ch12_m12_6`, 161 ms before,
   whose 9930 scalar terms it numbers and then leaves). The analysis started
   at about twice this cost; an allocation-free value table, one flat array of
   value numbers and running the slot-identity numbering only when a value
   repeats brought it down.
-- Sampling (`result/sampling.txt`): thirteen collapsed models, four chains
+- Sampling (`result/sampling.txt`): fourteen collapsed models, four chains
   of 1000 draws, default mode against fast mode. Posterior means agree
   within 0.15 posterior standard deviations on every parameter and generated
-  quantity (worst: `election88_full`, 11,656 columns). Whole runs are 1.2x
-  to 41x shorter (`diamonds` 55.4 s to 1.85 s, `election88_full` 231 s to
-  39 s); that comparison includes the rest of fast mode.
-- The census estimated 85 models at 2x or more and 36 at 10x or more for
-  these families together. The estimates were conservative per model, as the
-  hand-collapsed timings suggested, and the pass reaches fewer of the
-  scalar-term models than the census assumed.
-- The models the pass does not change have the same op graph with it on or
-  off, so they were not re-timed in the final run. An earlier full-corpus
-  run was too noisy to use (identical binaries differed by up to 41% on a
-  loaded machine).
+  quantity (worst: `election88_full`, 11,656 columns). Whole runs are up to
+  41x shorter (`diamonds` 55.6 s to 1.77 s, `election88_full` 232 s to
+  40 s; `aalto_poisson_simple` is unchanged); that comparison includes the
+  rest of fast mode.
 - Fast-mode gate (`tools/verify_refs.py --fast-math`): 351 of 352, the same
   single failure (`sw_gp`) as without the pass and as default mode on this
   toolchain. Largest deviation in the corpus: 1.7e-13 (`election88_full`).
@@ -435,10 +433,16 @@ with an identical-binary control (`result/default-mode-all.jsonl`).
     all-or-nothing per model on an estimate of dispatches saved, which also
     declines when the repeats read the very same slots and CSE would merge
     them for nothing.
-- **A family of scalar normal terms is one term.** Whether a loop reaches
-  this pass as one vector density or as one scalar density per observation
-  is an earlier pass's decision, and it changed under this work. The group
-  and linear forms take either.
+- **The pieces of one loop are one term.** Whether a loop reaches this pass
+  as one vector density, as one scalar density per observation, or as several
+  vector chunks and a scalar remainder is an earlier pass's decision, and it
+  changed under this work. Normal and lognormal terms of one kind are pooled
+  into one family, and the group and linear forms take the family.
+- **Scalar chains are rebuilt as vector ops.** The affine analysis written
+  for the linear form also says how to compute many locations at once: a
+  gather, a multiply and an add per column of leaves. That replaces one
+  scalar chain per kept row wherever restriction would otherwise pack
+  scalars, and it is the only way a pooled family's locations are built.
 - **Arguments are restricted by pushing a gather upward**, not by re-emitting
   a cone from value numbers. Value numbering only decides which rows are
   equal; each restriction rule is a local identity with a plain gather as the
@@ -462,8 +466,8 @@ with an identical-binary control (`result/default-mode-all.jsonl`).
 
 | what | why |
 | --- | --- |
-| Arrow-structured linear form (an indicator block plus dense columns) | The hierarchical radon models it targets get 2.5x to 16x from the group form. Not sized beyond the census. |
-| Vector ops for the groups of a scalar family | The four radon models that reach the pass as scalar terms keep one scalar chain per group; fusing those would recover the 7x to 10x the vector term gave. |
+| Arrow-structured linear form (an indicator block plus dense columns) | The hierarchical radon models it targets get 9x to 16x from the group form. Not sized beyond the census. |
+| Pooling for densities other than normal and lognormal | A Bernoulli or Poisson loop that re-roll leaves in chunks is still collapsed chunk by chunk. No corpus model was seen to need it. |
 | GLM densities other than `normal_id_glm` by rows (`bernoulli_logit_glm`, `poisson_log_glm`) | Needs the GLM rewritten as a matrix product and an elementwise density, whose argument checks differ from the GLM's for infinite parameters. `nes_logit_model` (1179 observations, 10 rows) is the main case. |
 | A predictor built by ops the analysis does not follow (`ch12_m12_6`, `s2_mo_simo_prior`, `sw_mono`'s monotonic effect) | Each needs its op modelled. |
 | Dropping data that no op reads any more | The full-length data stay in the bound buffers; only op-written slots are released. |

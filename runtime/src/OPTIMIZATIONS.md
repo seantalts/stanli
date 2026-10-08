@@ -322,9 +322,11 @@ times a vector (row by row), and any pure op with a scalar result. An op it
 does not model gives every output element a number of its own, so it can
 only keep rows apart. `-0.0` and `0.0` are different data.
 
-A term is one vector density, or a family of scalar `normal` or `lognormal`
-terms, one op per observation, which is what a loop looks like when no
-earlier pass fused it; both get the same treatment.
+A term is one vector density, or, for `normal` and `lognormal`, every such
+term of one kind together: re-roll may leave one loop as several vector
+chunks and a remainder of scalar terms, one op per observation, and whether
+it does is its own cost decision. Those are pooled, so the groups are found
+once over the whole loop and not once per piece.
 
 **Three ways to evaluate a collapsed term**, chosen per term:
 
@@ -369,7 +371,11 @@ a pack of the kept scalars. Each rule has a local proof, including that the
 writer's inputs are not written between it and the density. Where no rule
 applies, a plain gather of the full vector is always correct; then only the
 density gets shorter, and the rewrite is taken back unless the rows are at
-least four times fewer than the observations. The ops that built the
+least four times fewer than the observations. Where pushing the gather up
+would end in one scalar chain per kept row, and the rows are affine in
+elements of a few slots (`alpha[county] + beta * floor`), they are built
+from those slots with a gather, a multiply and an add per column; a pooled
+term's group locations are always built that way. The ops that built the
 full-length arguments are removed if nothing else reads them, following
 index reads through store chains element by element, so a loop of
 `mu[n] += ...` keeps only the updates behind the kept rows.
@@ -391,24 +397,24 @@ and the linear form never forms the locations, so it checks the values they
 are affine in.
 
 **Measured** (i9-13900K, one P-core, fast mode with the pass on against fast
-mode with `STANLI_NO_COLLAPSE=1`, paired `ab_bench_corpus.py`, 9 rounds,
-identical-binary control within 2.9%): 91 of 352 corpus models have a term
-that collapses, and 90 of them could be timed. Their gradients are 7.4x
-faster in geometric mean; 68 are at least 2x faster, 35 at least 10x, and
-none is slower: `radon_pooled` 519x (46.9 us to 90 ns), `nes` 206x, the
-earnings regressions 82x to 131x, `diamonds` 74x, the hierarchical radon
-models 2.5x to 16x, `election88_full` 6.7x. A model the pass leaves alone
-has the same op graph with it on or off.
+mode with `STANLI_NO_COLLAPSE=1`, paired `ab_bench_corpus.py`, 9 rounds; the
+identical-binary control is within 5% on 95% of models, 13% at worst, on a
+machine that was not idle): 91 of 352 corpus models have a term that
+collapses, and 90 of them could be timed. Their gradients are 8.6x faster in
+geometric mean; 68 are at least 2x faster, 45 at least 10x, and none is
+slower: `radon_pooled` 487x (46.8 us to 96 ns), `nes` 209x, the earnings
+regressions 83x to 133x, `diamonds` 75x, the hierarchical radon models 9x to
+16x, `election88_full` 6.8x. A model the pass leaves alone has the same op
+graph with it on or off.
 
 Preparation pays for the analysis: over all 342 timeable models it is 5%
-longer at the median (0.07 ms) and 2.6% longer in total (12.99 s to
-13.33 s). Among the 91 models it changes the median is 15% (0.37 ms); the
-most added to any model is 43 ms, on `nn_rbm1bJ100` (4.6 s before), and
-41 ms on `ch12_m12_6` (161 ms before), whose terms it examines and leaves
-alone. Sampling thirteen of the collapsed models with four chains gave
-posterior means within 0.15 posterior standard deviations of default mode
-on every parameter (`election88_full` the largest), and whole runs from
-1.2x to 41x shorter. The fast-mode gate in
+longer at the median (0.08 ms) and 3% longer in total (12.92 s to 13.31 s).
+Among the 91 models it changes the median is 20% (0.39 ms); the most added
+to any model is 42 ms, on `ch12_m12_6` (161 ms before), whose terms it
+examines and leaves alone. Sampling fourteen of the collapsed models with
+four chains gave posterior means within 0.15 posterior standard deviations
+of default mode on every parameter (`election88_full` the largest), and
+whole runs up to 41x shorter. The fast-mode gate in
 [`TESTING.md`](../../TESTING.md#fast-mode) passes with the pass on; the
 largest deviation in the corpus is `election88_full` at 1.7e-13.
 
