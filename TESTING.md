@@ -423,8 +423,12 @@ every propto and activity variant, shared and rooted arguments, and every
 refusal. The grouped normal form is compared with the observations summed in
 extended precision for data shifted by up to 1e9 (bound 2e-14 of the largest
 gradient entry), and the linear form near the mode for data shifted by up to
-1e6, with and without a rank-deficient design (bound 1e-13). Both run only
-where `long double` is wider than `double`. Rejection is tested by message:
+1e6, with and without a rank-deficient design (bound 1e-13). The group form
+of each other density (exponential, gamma, inverse gamma, beta, Poisson,
+Bernoulli, binomial and their log and logit forms) is compared the same way
+over 4,000 observations at parameters where its terms are large (bound
+1e-13, and no more than four times the error of the per-observation sum it
+replaces). These run only where `long double` is wider than `double`. Rejection is tested by message:
 a negative scale produces Stan's own text.
 
 Measured on 2026-10-06 (Linux x86-64, clang 18.1.3, `fastmath/mode` at

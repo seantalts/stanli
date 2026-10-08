@@ -4,6 +4,7 @@
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/collapse.hpp>
+#include <stanli/density_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -112,10 +113,12 @@ static std::vector<double> distinct_y(int n) {
   return y;
 }
 
-// y[n] ~ bernoulli(inv_logit(b[group[n]])): two groups, two outcomes.
-static Model bernoulli_by_group(int n, int groups = 2) {
+// y[n] ~ neg_binomial_2(inv_logit(b[group[n]]), phi): two groups, two
+// outcomes. This density has no statistic form, so it is evaluated by rows,
+// and it pays a recorder call per row.
+static Model counts_by_group(int n, int groups = 2) {
   Model m;
-  const int b = m.g.add_slot(groups, true);
+  const int b = m.g.add_slot(groups, true), phi = m.g.add_slot(1, true);
   const int eta = m.g.add_slot(n, false), theta = m.g.add_slot(n, false);
   const int lp = m.g.add_slot(1, false);
   std::vector<int> group, outcome;
@@ -125,18 +128,18 @@ static Model bernoulli_by_group(int n, int groups = 2) {
   }
   m.g.add_op(OP_GATHER, {b}, eta, group);
   m.g.add_op(OP_INV_LOGIT, {eta}, theta);
-  m.g.add_op(OP_BERNOULLI_LPMF, {theta}, lp, outcome);
+  m.g.add_op(OP_NEG_BINOMIAL_2_LPMF, {theta, phi}, lp, outcome);
   m.terms = {lp};
   return m;
 }
 
 static void test_gathered_predictor() {
-  const Collapsed c = collapse(bernoulli_by_group(kN));
+  const Collapsed c = collapse(counts_by_group(kWide));
   const Graph& g = c.model.g;
   expect("gather: one term over four rows", c.stats.vector_terms == 1 &&
-                                                c.stats.observations == kN &&
+                                                c.stats.observations == kWide &&
                                                 c.stats.rows == 4);
-  const Op* dens = find_op(g, OP_BERNOULLI_LPMF);
+  const Op* dens = find_op(g, OP_NEG_BINOMIAL_2_LPMF);
   expect("gather: density is elementwise over the rows",
          dens && (dens->variant & 0x40u) && dens->n_idata == 4 &&
              g.slots[(size_t)dens->out].len == 4);
@@ -149,7 +152,7 @@ static void test_gathered_predictor() {
 
 // A slot something outside the graph reads keeps its full-length producer.
 static void test_roots_stay() {
-  Model m = bernoulli_by_group(kN);
+  Model m = counts_by_group(kWide);
   m.roots = {find_op(m.g, OP_INV_LOGIT)->out};
   const Collapsed c = collapse(m);
   expect("root: collapses", c.stats.vector_terms == 1);
@@ -160,7 +163,7 @@ static void test_roots_stay() {
 
 // The predictor is also summed into the target: both readers are served.
 static void test_shared_predictor() {
-  Model m = bernoulli_by_group(kN);
+  Model m = counts_by_group(kWide);
   const int total = m.g.add_slot(1, false);
   m.g.add_op(OP_SUM_VEC, {find_op(m.g, OP_INV_LOGIT)->out}, total);
   m.terms.push_back(total);
@@ -172,9 +175,9 @@ static void test_shared_predictor() {
 }
 
 static void test_one_row() {
-  Model m = bernoulli_by_group(kN, 1);
+  Model m = counts_by_group(kWide, 1);
   Op& dens = m.g.ops.back();
-  std::vector<int> ones((size_t)kN, 1);
+  std::vector<int> ones((size_t)kWide, 1);
   m.g.idata_pool.push_back(ones);
   dens.idata = m.g.idata_pool.back().data();
   const Collapsed c = collapse(m);
@@ -184,14 +187,15 @@ static void test_one_row() {
 }
 
 // The predictor built one scalar at a time and stored into a vector, as an
-// unrolled loop lowers; binomial outcomes arrive as two [len, vals] groups.
+// unrolled loop lowers; beta-binomial outcomes arrive as two [len, vals]
+// groups.
 static void test_scalar_chains() {
   Model m;
-  const int a = m.g.add_slot(4, true);
+  const int a = m.g.add_slot(4, true), beta = m.g.add_slot(1, true);
   const int decl = data_slot(
-      m, std::vector<double>(kN, std::numeric_limits<double>::quiet_NaN()));
-  const int p = m.g.add_slot(kN, false);
-  for (int i = 0; i < kN; ++i) {
+      m, std::vector<double>(kWide, std::numeric_limits<double>::quiet_NaN()));
+  const int p = m.g.add_slot(kWide, false);
+  for (int i = 0; i < kWide; ++i) {
     const int ai = m.g.add_slot(1, false), pi = m.g.add_slot(1, false);
     m.g.add_op(OP_INDEX, {a}, ai, {i % 4});
     m.g.add_op(OP_INV_LOGIT, {ai}, pi);
@@ -200,12 +204,12 @@ static void test_scalar_chains() {
     else
       m.g.add_op(OP_SET_INDEX_INPLACE, {p, pi}, p, {i});
   }
-  std::vector<int> idata{kN};
-  for (int i = 0; i < kN; ++i) idata.push_back(i % 2);  // successes
+  std::vector<int> idata{kWide};
+  for (int i = 0; i < kWide; ++i) idata.push_back(i % 2);  // successes
   idata.push_back(-1);  // trials: one language-level scalar
   idata.push_back(5);
   const int lp = m.g.add_slot(1, false);
-  m.g.add_op(OP_BINOMIAL_LPMF, {p}, lp, idata);
+  m.g.add_op(OP_BETA_BINOMIAL_LPMF, {p, beta}, lp, idata);
   m.terms = {lp};
   const Collapsed c = collapse(m);
   const Graph& g = c.model.g;
@@ -213,7 +217,7 @@ static void test_scalar_chains() {
   expect("chains: four rows", c.stats.vector_terms == 1 && c.stats.rows == 4);
   expect("chains: four scalar chains left",
          count_opcode(g, OP_INV_LOGIT) == 4 && count_opcode(g, OP_INDEX) == 4);
-  const Op* dens = find_op(g, OP_BINOMIAL_LPMF);
+  const Op* dens = find_op(g, OP_BETA_BINOMIAL_LPMF);
   const std::vector<int> want{4, 0, 1, 0, 1, -1, 5};
   expect("chains: outcome groups restricted",
          dens && dens->n_idata == (int64_t)want.size() &&
@@ -266,6 +270,7 @@ static void test_scalar_chains_become_vector_ops() {
 static void test_copied_predictor() {
   Model m;
   const int a = m.g.add_slot(1, true), b = m.g.add_slot(1, true);
+  const int phi = m.g.add_slot(1, true);
   std::vector<double> x;
   std::vector<int> y;
   for (int i = 0; i < kWide; ++i) {
@@ -280,7 +285,7 @@ static void test_copied_predictor() {
   m.g.add_op(OP_MUL, {b, xs}, bx);
   m.g.add_op(OP_ADD, {a, bx}, mu);
   m.g.add_op(OP_SET_SLICE, {decl, mu}, stored, {0});
-  m.g.add_op(OP_POISSON_LOG_LPMF, {stored}, lp, y);
+  m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {stored, phi}, lp, y);
   m.terms = {lp};
   const Collapsed c = collapse(m);
   const Graph& g = c.model.g;
@@ -318,18 +323,18 @@ static void test_real_variate_rows() {
 // X * beta with four distinct rows of X.
 static void test_matvec_rows() {
   Model m;
-  const int beta = m.g.add_slot(2, true);
-  std::vector<double> x((size_t)(2 * kN));
+  const int beta = m.g.add_slot(2, true), phi = m.g.add_slot(1, true);
+  std::vector<double> x((size_t)(2 * kWide));
   std::vector<int> y;
-  for (int i = 0; i < kN; ++i) {
-    x[(size_t)i] = 1.0;                   // column 0
-    x[(size_t)(kN + i)] = 0.5 * (i % 2);  // column 1
+  for (int i = 0; i < kWide; ++i) {
+    x[(size_t)i] = 1.0;                      // column 0
+    x[(size_t)(kWide + i)] = 0.5 * (i % 2);  // column 1
     y.push_back((i / 2) % 2);
   }
   const int xs = data_slot(m, x);
-  const int eta = m.g.add_slot(kN, false), lp = m.g.add_slot(1, false);
-  m.g.add_op(OP_MATVEC, {xs, beta}, eta, {kN, 2});
-  m.g.add_op(OP_BERNOULLI_LOGIT_LPMF, {eta}, lp, y);
+  const int eta = m.g.add_slot(kWide, false), lp = m.g.add_slot(1, false);
+  m.g.add_op(OP_MATVEC, {xs, beta}, eta, {kWide, 2});
+  m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {eta, phi}, lp, y);
   m.terms = {lp};
   const Collapsed c = collapse(m);
   expect("matvec: four rows", c.stats.vector_terms == 1 && c.stats.rows == 4);
@@ -345,6 +350,7 @@ static void test_matvec_rows() {
 static void test_a_later_store() {
   Model m;
   const int b = m.g.add_slot(1, true), c0 = m.g.add_slot(1, true);
+  const int phi = m.g.add_slot(1, true);
   std::vector<double> x;
   std::vector<int> y;
   for (int i = 0; i < kWide; ++i) {
@@ -355,9 +361,9 @@ static void test_a_later_store() {
   const int mu = m.g.add_slot(kWide, false), mu2 = m.g.add_slot(kWide, false);
   const int lp1 = m.g.add_slot(1, false), lp2 = m.g.add_slot(1, false);
   m.g.add_op(OP_MUL, {b, xs}, mu);
-  m.g.add_op(OP_POISSON_LOG_LPMF, {mu}, lp1, y);
+  m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {mu, phi}, lp1, y);
   m.g.add_op(OP_SET_INDEX, {mu, c0}, mu2, {7});
-  m.g.add_op(OP_POISSON_LOG_LPMF, {mu2}, lp2, y);
+  m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {mu2, phi}, lp2, y);
   m.terms = {lp1, lp2};
   const Collapsed c = collapse(m);
   // The second term shares four of its five rows with the first, so the
@@ -368,16 +374,16 @@ static void test_a_later_store() {
 }
 
 // Where an argument can only be gathered from its full-length vector, the
-// rewrite is taken back whole unless the rows are few.
+// rewrite is taken back whole unless the groups are few.
 static void test_unrestricted_argument() {
   for (const int n : {16, kWide}) {
     Model m;
-    const int b = m.g.add_slot(2, true), c0 = m.g.add_slot(1, true);
+    const int b = m.g.add_slot(6, true), c0 = m.g.add_slot(1, true);
     const int eta = m.g.add_slot(n, false), eta2 = m.g.add_slot(n, false);
     const int theta = m.g.add_slot(n, false), lp = m.g.add_slot(1, false);
     std::vector<int> group, outcome;
     for (int i = 0; i < n; ++i) {
-      group.push_back(i % 2);
+      group.push_back(i % 6);
       outcome.push_back(i % 4 < 2);
     }
     m.g.add_op(OP_GATHER, {b}, eta, group);
@@ -389,9 +395,10 @@ static void test_unrestricted_argument() {
     m.terms = {lp};
     const Collapsed c = collapse(m);
     if (n == 16) {
-      // Five rows of sixteen.
+      // Seven groups of sixteen: enough to group, not enough to pay for a
+      // predictor still built in full.
       expect("unrestricted, few observations: taken back whole",
-             c.stats.vector_terms == 0 &&
+             c.stats.statistic_terms == 0 &&
                  c.model.g.ops.size() == m.g.ops.size() &&
                  c.model.g.slots.size() == m.g.slots.size() &&
                  c.model.fills.size() == m.fills.size());
@@ -401,11 +408,11 @@ static void test_unrestricted_argument() {
                          "its arguments could not be restricted") &&
                  c.report.terms[0].evaluator == nullptr);
     } else {
-      // Five rows of sixty-four pay even so.
+      // Seven of sixty-four pay even so.
       expect("unrestricted, many observations: collapses",
-             c.stats.vector_terms == 1 && c.stats.rows == 5 &&
+             c.stats.statistic_terms == 1 && c.stats.rows == 7 &&
                  count_opcode(c.model.g, OP_INV_LOGIT) == 1 &&
-                 out_len(c.model.g, OP_INV_LOGIT) == 5);
+                 out_len(c.model.g, OP_INV_LOGIT) == 7);
     }
     expect("unrestricted: same values", c.same_values);
   }
@@ -794,8 +801,8 @@ static void test_grouped_normal_from_scalar_terms() {
                count_opcode(c.model.g, OP_NORMAL_LPDF) == 0 &&
                c.model.terms.size() == 2);
     // The locations are a[0..2] in order: the parameter vector itself.
-    expect("scalar family: no location chains left",
-           count_opcode(c.model.g, OP_INDEX) == (per_group_scale ? 3 : 0));
+    expect("scalar family: no location or scale chains left",
+           count_opcode(c.model.g, OP_INDEX) == 0);
     expect("scalar family: same values", c.same_values);
   }
 }
@@ -876,17 +883,23 @@ static void test_chunks_of_one_loop_are_pooled() {
   expect("pooled: same values", c.same_values);
 }
 
-// The same for a density with no statistic: a Bernoulli loop left as two
-// vector chunks and a scalar remainder is evaluated once per distinct row
-// of the whole loop.
-static Model bernoulli_in_pieces(bool same_rows, uint16_t opcode) {
+// The same for a density with no statistic: a negative-binomial loop left
+// as two vector chunks and a scalar remainder is evaluated once per distinct
+// row of the whole loop.
+static Model counts_in_pieces(bool same_rows, uint16_t opcode) {
   Model m;
-  const int b = m.g.add_slot(4, true);
+  const int b = m.g.add_slot(4, true), phi = m.g.add_slot(1, true);
+  const bool log_form = opcode == OP_NEG_BINOMIAL_2_LOG_LPMF;
+  const int n = 32;
   int obs = 0;
+  const auto mean = [&](int eta, int len) {
+    if (log_form) return eta;
+    const int mu = m.g.add_slot(len, false);
+    m.g.add_op(OP_EXPV, {eta}, mu);
+    return mu;
+  };
   for (int chunk = 0; chunk < 2; ++chunk) {
-    const int n = opcode == OP_BERNOULLI_LPMF ? kN : 32;
-    const int eta = m.g.add_slot(n, false), theta = m.g.add_slot(n, false);
-    const int lp = m.g.add_slot(1, false);
+    const int eta = m.g.add_slot(n, false), lp = m.g.add_slot(1, false);
     std::vector<int> group, outcome;
     for (int i = 0; i < n; ++i, ++obs) {
       // The second chunk repeats the first one's rows, or has its own.
@@ -894,34 +907,22 @@ static Model bernoulli_in_pieces(bool same_rows, uint16_t opcode) {
       outcome.push_back(obs % 4 < 2);
     }
     m.g.add_op(OP_GATHER, {b}, eta, group);
-    if (opcode == OP_BERNOULLI_LPMF) {
-      m.g.add_op(OP_INV_LOGIT, {eta}, theta);
-      m.g.add_op(opcode, {theta}, lp, outcome);
-    } else {
-      m.g.add_op(opcode, {eta}, lp, outcome);
-    }
+    m.g.add_op(opcode, {mean(eta, n), phi}, lp, outcome);
     m.terms.push_back(lp);
   }
   for (int i = 0; same_rows && i < 3; ++i, ++obs) {
-    const int eta = m.g.add_slot(1, false), theta = m.g.add_slot(1, false);
-    const int lp = m.g.add_slot(1, false);
+    const int eta = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_INDEX, {b}, eta, {obs % 2});
-    if (opcode == OP_BERNOULLI_LPMF) {
-      m.g.add_op(OP_INV_LOGIT, {eta}, theta);
-      m.g.add_op(opcode, {theta}, lp, {obs % 4 < 2});
-    } else {
-      m.g.add_op(opcode, {eta}, lp, {obs % 4 < 2});
-    }
+    m.g.add_op(opcode, {mean(eta, 1), phi}, lp, {obs % 4 < 2});
     m.terms.push_back(lp);
   }
   return m;
 }
 
 static void test_any_density_in_pieces_is_pooled() {
-  for (const uint16_t opcode :
-       {(uint16_t)OP_BERNOULLI_LPMF, (uint16_t)OP_POISSON_LOG_LPMF}) {
-    const Model m = bernoulli_in_pieces(true, opcode);
-    const Collapsed c = collapse(m);
+  for (const uint16_t opcode : {(uint16_t)OP_NEG_BINOMIAL_2_LPMF,
+                                (uint16_t)OP_NEG_BINOMIAL_2_LOG_LPMF}) {
+    const Collapsed c = collapse(counts_in_pieces(true, opcode));
     const Graph& g = c.model.g;
     const Op* dens = find_op(g, opcode);
     expect("pieces: one density over the loop's four rows",
@@ -931,17 +932,17 @@ static void test_any_density_in_pieces_is_pooled() {
                g.slots[(size_t)dens->out].len == 4 &&
                c.model.terms.size() == 1);
     expect("pieces: every observation accounted for",
-           c.stats.observations ==
-               (opcode == OP_BERNOULLI_LPMF ? 2 * kN + 3 : 67));
+           c.stats.observations == 67);
     expect("pieces: same values", c.same_values);
   }
   {
     // Chunks with no rows in common gain nothing from being one term, and
     // keep their own collapses.
-    const Collapsed c = collapse(bernoulli_in_pieces(false, OP_BERNOULLI_LPMF));
+    const Collapsed c =
+        collapse(counts_in_pieces(false, OP_NEG_BINOMIAL_2_LOG_LPMF));
     expect("disjoint pieces: collapsed piece by piece",
            c.stats.vector_terms == 2 &&
-               count_opcode(c.model.g, OP_BERNOULLI_LPMF) == 2);
+               count_opcode(c.model.g, OP_NEG_BINOMIAL_2_LOG_LPMF) == 2);
     expect("disjoint pieces: same values", c.same_values);
   }
 }
@@ -969,6 +970,318 @@ static void test_linear_gaussian_from_scalar_terms() {
              count_opcode(c.model.g, OP_NORMAL_LPDF) == 0 &&
              count_opcode(c.model.g, OP_FMA) == 0 && c.model.terms.size() == 1);
   expect("scalar family, linear: same values", c.same_values);
+}
+
+// ---- the other families with sufficient statistics --------------------------
+
+struct FamilyCase {
+  const char* name;
+  uint16_t opcode;
+  int parameters;  // one or two
+  bool integer;    // outcomes are immediates
+  char first;      // how the first parameter is made valid: 'e' exp,
+                   // 'p' inv_logit, 'r' raw
+};
+
+static const FamilyCase kFamilies[] = {
+    {"exponential", OP_EXPONENTIAL_LPDF, 1, false, 'e'},
+    {"gamma", OP_GAMMA_LPDF, 2, false, 'e'},
+    {"inv_gamma", OP_INV_GAMMA_LPDF, 2, false, 'e'},
+    {"beta", OP_BETA_LPDF, 2, false, 'e'},
+    {"poisson", OP_POISSON_LPMF, 1, true, 'e'},
+    {"poisson_log", OP_POISSON_LOG_LPMF, 1, true, 'r'},
+    {"bernoulli", OP_BERNOULLI_LPMF, 1, true, 'p'},
+    {"bernoulli_logit", OP_BERNOULLI_LOGIT_LPMF, 1, true, 'r'},
+    {"binomial", OP_BINOMIAL_LPMF, 1, true, 'p'},
+    {"binomial_logit", OP_BINOMIAL_LOGIT_LPMF, 1, true, 'r'},
+};
+
+// The outcome or variate of observation i, every one different where the
+// family allows, so that only the parameters repeat.
+static double family_y(const FamilyCase& c, int i, int n) {
+  if (c.opcode == OP_BETA_LPDF) return (i + 1.0) / (n + 2.0);
+  if (!c.integer) return 0.4 + 0.11 * i;
+  if (c.opcode == OP_POISSON_LPMF || c.opcode == OP_POISSON_LOG_LPMF)
+    return i % 7;
+  if (c.opcode == OP_BERNOULLI_LPMF || c.opcode == OP_BERNOULLI_LOGIT_LPMF)
+    return i % 3 == 0;
+  return i % 5;  // binomial successes
+}
+
+// One vector term: the first parameter is a transform of a[group[n]], the
+// second a parameter or data scalar. `piece` and `pieces` cut the loop the
+// way re-roll can leave it: `pieces` vector chunks, and with `scalars` a
+// remainder of one scalar term per observation.
+struct FamilyModel {
+  bool second_is_data = false;
+  bool propto = false;
+  bool vector_trials = false;
+  int n = 40;
+  int groups = 4;
+  int pieces = 1;
+  int scalars = 0;
+};
+
+static Model family_model(const FamilyCase& c, const FamilyModel& o) {
+  Model m;
+  const int a = m.g.add_slot(o.groups, true);
+  int second = -1;
+  if (c.parameters == 2)
+    second = o.second_is_data ? data_slot(m, {1.3}) : m.g.add_slot(1, true);
+  const auto variant = [&](void) {
+    if (!o.propto) return uint8_t{0};
+    const int base = c.integer ? 0 : 1;
+    uint8_t v = (uint8_t)(0x80u | (1u << base));
+    if (c.parameters == 2 && !o.second_is_data)
+      v |= (uint8_t)(1u << (base + 1));
+    return v;
+  };
+  const auto first_op = [&](int raw, int len) {
+    if (c.first == 'r') return raw;
+    const int out = m.g.add_slot(len, false);
+    m.g.add_op(c.first == 'e' ? OP_EXPV : OP_INV_LOGIT, {raw}, out);
+    return out;
+  };
+  const auto outcomes = [&](int from, int count) {
+    std::vector<int> idata;
+    const bool binomial =
+        c.opcode == OP_BINOMIAL_LPMF || c.opcode == OP_BINOMIAL_LOGIT_LPMF;
+    if (binomial) idata.push_back(count == 1 ? -1 : count);
+    for (int i = from; i < from + count; ++i)
+      idata.push_back((int)family_y(c, i, o.n));
+    if (binomial) {
+      if (o.vector_trials && count > 1) {
+        idata.push_back(count);
+        for (int i = from; i < from + count; ++i) idata.push_back(5 + i % 3);
+      } else {
+        idata.push_back(-1);
+        idata.push_back(o.vector_trials ? 5 + from % 3 : 6);
+      }
+    }
+    return idata;
+  };
+  const auto density = [&](int y, int first, int lp, std::vector<int> idata) {
+    if (c.integer)
+      m.g.add_op(c.opcode, {first}, lp, std::move(idata));
+    else if (c.parameters == 2)
+      m.g.add_op(c.opcode, {y, first, second}, lp);
+    else
+      m.g.add_op(c.opcode, {y, first}, lp);
+    m.g.ops.back().variant = variant();
+    m.terms.push_back(lp);
+  };
+  const int in_vectors = o.n - o.scalars;
+  const int chunk = o.pieces > 0 ? in_vectors / o.pieces : 0;
+  int at = 0;
+  for (int k = 0; k < o.pieces; ++k) {
+    std::vector<int> group;
+    std::vector<double> yv;
+    for (int i = at; i < at + chunk; ++i) {
+      group.push_back(i % o.groups);
+      yv.push_back(family_y(c, i, o.n));
+    }
+    const int raw = m.g.add_slot(chunk, false), lp = m.g.add_slot(1, false);
+    m.g.add_op(OP_GATHER, {a}, raw, group);
+    const int y = c.integer ? -1 : data_slot(m, yv);
+    density(y, first_op(raw, chunk), lp, outcomes(at, chunk));
+    at += chunk;
+  }
+  for (; at < o.n; ++at) {
+    const int raw = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
+    m.g.add_op(OP_INDEX, {a}, raw, {at % o.groups});
+    const int y = c.integer ? -1 : data_slot(m, {family_y(c, at, o.n)});
+    density(y, first_op(raw, 1), lp, outcomes(at, 1));
+  }
+  return m;
+}
+
+static void expect_family(const char* what, const FamilyCase& c,
+                          const FamilyModel& o) {
+  const Collapsed r = collapse(family_model(c, o));
+  const Graph& g = r.model.g;
+  const Op* op = find_op(g, OP_FAMILY_GROUPED_LPDF);
+  const bool grouped = r.stats.statistic_terms == 1 &&
+                       r.stats.rows == o.groups &&
+                       r.stats.observations == o.n && op != nullptr &&
+                       count_opcode(g, OP_FAMILY_GROUPED_LPDF) == 1 &&
+                       count_opcode(g, c.opcode) == 0 &&
+                       g.slots[(size_t)op->in[2]].len == o.groups;
+  if (!grouped || !r.same_values) {
+    ++failures;
+    std::printf("FAIL %s, %s: %s\n", c.name, what,
+                grouped ? "values differ" : "not rewritten as expected");
+  }
+}
+
+#if LDBL_MANT_DIG >= 64
+static long double digamma_l(long double x) {
+  long double shift = 0;
+  for (; x < 30; x += 1) shift -= 1 / x;
+  const long double f = 1 / (x * x);
+  return shift + std::log(x) - 0.5L / x -
+         f * (1.0L / 12 -
+              f * (1.0L / 120 -
+                   f * (1.0L / 252 - f * (1.0L / 240 - f * (1.0L / 132)))));
+}
+
+// One observation's log density and its partials in the two parameters.
+static void family_reference(const FamilyCase& c, long double y,
+                             long double trials, long double a, long double b,
+                             long double out[3]) {
+  out[2] = 0;
+  switch (c.opcode) {
+    case OP_EXPONENTIAL_LPDF:
+      out[0] = std::log(a) - a * y;
+      out[1] = 1 / a - y;
+      break;
+    case OP_GAMMA_LPDF:
+    case OP_INV_GAMMA_LPDF: {
+      const bool inverse = c.opcode == OP_INV_GAMMA_LPDF;
+      const long double ly = std::log(y);
+      out[0] = a * std::log(b) - std::lgamma(a) +
+               (inverse ? -(a + 1) * ly - b / y : (a - 1) * ly - b * y);
+      out[1] = std::log(b) - digamma_l(a) + (inverse ? -ly : ly);
+      out[2] = a / b - (inverse ? 1 / y : y);
+      break;
+    }
+    case OP_BETA_LPDF:
+      out[0] = std::lgamma(a + b) - std::lgamma(a) - std::lgamma(b) +
+               (a - 1) * std::log(y) + (b - 1) * std::log1p(-y);
+      out[1] = digamma_l(a + b) - digamma_l(a) + std::log(y);
+      out[2] = digamma_l(a + b) - digamma_l(b) + std::log1p(-y);
+      break;
+    case OP_POISSON_LPMF:
+      out[0] = y * std::log(a) - a - std::lgamma(y + 1);
+      out[1] = y / a - 1;
+      break;
+    case OP_POISSON_LOG_LPMF:
+      out[0] = y * a - std::exp(a) - std::lgamma(y + 1);
+      out[1] = y - std::exp(a);
+      break;
+    case OP_BERNOULLI_LPMF:
+    case OP_BINOMIAL_LPMF:
+    case OP_BERNOULLI_LOGIT_LPMF:
+    case OP_BINOMIAL_LOGIT_LPMF: {
+      const bool logit = c.opcode == OP_BERNOULLI_LOGIT_LPMF ||
+                         c.opcode == OP_BINOMIAL_LOGIT_LPMF;
+      const bool binomial =
+          c.opcode == OP_BINOMIAL_LPMF || c.opcode == OP_BINOMIAL_LOGIT_LPMF;
+      const long double total = binomial ? trials : 1;
+      const long double choose = std::lgamma(total + 1) - std::lgamma(y + 1) -
+                                 std::lgamma(total - y + 1);
+      if (logit) {
+        out[0] = choose - y * std::log1p(std::exp(-a)) -
+                 (total - y) * std::log1p(std::exp(a));
+        out[1] = y - total / (1 + std::exp(-a));
+      } else {
+        out[0] = choose + y * std::log(a) + (total - y) * std::log1p(-a);
+        out[1] = y / a - (total - y) / (1 - a);
+      }
+      break;
+    }
+    default:
+      out[0] = out[1] = 0;
+  }
+}
+#endif
+
+// The sums stand in for the observations without losing accuracy: many
+// observations, parameters where the terms are large and cancel, against
+// the per-observation density summed in extended precision.
+static void test_families_against_a_reference() {
+#if LDBL_MANT_DIG >= 64
+  for (const FamilyCase& c : kFamilies) {
+    FamilyModel o;
+    o.n = 4000;
+    const Model m = family_model(c, o);
+    Model collapsed = m;
+    collapse_observations(collapsed.g, collapsed.fills, collapsed.terms,
+                          collapsed.roots);
+    // Parameters in slot order: a[0..3], then the second parameter.
+    const auto at = [&](int64_t i) {
+      if (i >= o.groups) return 37.5;
+      return c.first == 'e' ? 3.0 + 0.5 * (double)i : -4.0 + 2.5 * (double)i;
+    };
+    const double b = at(o.groups);
+    long double want[6] = {0, 0, 0, 0, 0, 0};
+    for (int i = 0; i < o.n; ++i) {
+      const int group = i % o.groups;
+      // The first parameter as the graph's own op rounds it.
+      const double raw = at(group);
+      const double first = c.first == 'e'   ? std::exp(raw)
+                           : c.first == 'p' ? 1 / (1 + std::exp(-raw))
+                                            : raw;
+      long double r[3];
+      family_reference(c, family_y(c, i, o.n), 6, first, b, r);
+      const long double chain =
+          c.first == 'e'   ? (long double)first
+          : c.first == 'p' ? (long double)first * (1 - (long double)first)
+                           : 1.0L;
+      want[0] += r[0];
+      want[1 + group] += r[1] * chain;
+      want[1 + o.groups] += r[2];
+    }
+    const size_t values = 1 + (size_t)o.groups + (c.parameters == 2 ? 1 : 0);
+    const auto error = [&](const std::vector<double>& got) {
+      if (got.size() != values) return 1.0;
+      double scale = 1, diff = 0;
+      for (size_t k = 1; k < values; ++k) {
+        scale = std::max(scale, std::abs((double)want[k]));
+        diff = std::max(diff, std::abs(got[k] - (double)want[k]));
+      }
+      return std::max(diff / scale,
+                      std::abs(got[0] - (double)want[0]) /
+                          std::max(1.0, std::abs((double)want[0])));
+    };
+    const double before = error(evaluate_at(m, at));
+    const double after = error(evaluate_at(collapsed, at));
+    // Not worse than the gate allows, and not much worse than the
+    // per-observation sum it replaces.
+    if (count_opcode(collapsed.g, OP_FAMILY_GROUPED_LPDF) != 1 ||
+        !(after <= 1e-13) || !(after <= std::max(4 * before, 2e-15))) {
+      ++failures;
+      std::printf(
+          "FAIL %s against a reference: off by %.3g, the original "
+          "by %.3g\n",
+          c.name, after, before);
+    }
+  }
+#endif
+}
+
+static void test_families() {
+  for (const FamilyCase& c : kFamilies) {
+    expect_family("full density", c, {});
+    {
+      FamilyModel o;
+      o.propto = true;
+      expect_family("propto", c, o);
+    }
+    if (c.parameters == 2) {
+      FamilyModel o;
+      o.second_is_data = true;
+      expect_family("full density, second parameter data", c, o);
+      o.propto = true;
+      expect_family("propto, second parameter data", c, o);
+    }
+    if (c.opcode == OP_BINOMIAL_LPMF || c.opcode == OP_BINOMIAL_LOGIT_LPMF) {
+      FamilyModel o;
+      o.vector_trials = true;
+      expect_family("a trial count per observation", c, o);
+    }
+    {
+      // The loop as re-roll may leave it: the groups are found once over
+      // all of it.
+      FamilyModel o;
+      o.propto = true;
+      o.pieces = 2;
+      o.scalars = 4;
+      expect_family("two chunks and a scalar remainder", c, o);
+      o.pieces = 0;
+      o.scalars = o.n;
+      expect_family("one scalar term per observation", c, o);
+    }
+  }
 }
 
 // ---- locations affine in a few values --------------------------------------
@@ -1213,6 +1526,110 @@ static void test_linear_gaussian_from_a_glm() {
   }
 }
 
+// The GLMs over integer outcomes, with a design of `distinct` different
+// rows: y ~ glm(X, alpha, beta), the intercept one value or one per row.
+static Model count_glm(uint16_t opcode, bool propto, bool intercept_per_row,
+                       int n = 64, int distinct = 4) {
+  Model m;
+  const int beta = m.g.add_slot(2, true);
+  const int a = m.g.add_slot(intercept_per_row ? 2 : 1, true);
+  const int phi = m.g.add_slot(1, true);
+  std::vector<double> x((size_t)(2 * n));
+  std::vector<int> idata, trials, group;
+  for (int i = 0; i < n; ++i) {
+    const int r = i % distinct;
+    x[(size_t)i] = 0.25 * (r % 2) - 0.1;
+    x[(size_t)(n + i)] = 0.5 * (r / 2);
+    group.push_back(r % 2);
+    // Outcomes that differ within a row, except for the density that has
+    // no statistic and needs whole rows to repeat.
+    const bool by_rows = opcode == OP_NEG_BINOMIAL_2_LOG_GLM_LPMF;
+    const int y = by_rows ? r % 3 : (i / distinct) % 3;
+    idata.push_back(opcode == OP_BERNOULLI_LOGIT_GLM_LPMF ? y % 2 : y);
+    trials.push_back(2 + i % 3);
+  }
+  if (opcode == OP_BINOMIAL_LOGIT_GLM_LPMF)
+    idata.insert(idata.end(), trials.begin(), trials.end());
+  idata.push_back(n);
+  idata.push_back(2);
+  if (intercept_per_row) {
+    // The tail lowering may add: no integer argument is a scalar.
+    idata.push_back(kGlmScalarLayoutMarker);
+    idata.push_back(0);
+  }
+  const int xs = data_slot(m, x);
+  int alpha = a;
+  if (intercept_per_row) {
+    alpha = m.g.add_slot(n, false);
+    m.g.add_op(OP_GATHER, {a}, alpha, group);
+  }
+  const int lp = m.g.add_slot(1, false);
+  if (opcode == OP_NEG_BINOMIAL_2_LOG_GLM_LPMF)
+    m.g.add_op(opcode, {xs, alpha, beta, phi}, lp, idata);
+  else
+    m.g.add_op(opcode, {xs, alpha, beta}, lp, idata);
+  // Activity bits: alpha, beta and the precision.
+  m.g.ops.back().variant = propto ? 0x8e : 0;
+  m.terms = {lp};
+  return m;
+}
+
+static void test_count_glms() {
+  for (const uint16_t opcode :
+       {(uint16_t)OP_BERNOULLI_LOGIT_GLM_LPMF,
+        (uint16_t)OP_POISSON_LOG_GLM_LPMF, (uint16_t)OP_BINOMIAL_LOGIT_GLM_LPMF,
+        (uint16_t)OP_NEG_BINOMIAL_2_LOG_GLM_LPMF}) {
+    const bool by_rows = opcode == OP_NEG_BINOMIAL_2_LOG_GLM_LPMF;
+    for (const bool propto : {false, true})
+      for (const bool per_row : {false, true}) {
+        const Model m = count_glm(opcode, propto, per_row);
+        const Collapsed c = collapse(m);
+        const Graph& g = c.model.g;
+        const Op* product = find_op(g, OP_MATVEC);
+        expect("count glm: the predictor of four rows",
+               count_opcode(g, opcode) == 0 && product != nullptr &&
+                   g.slots[(size_t)product->out].len == 4 &&
+                   c.stats.rows == 4 && c.stats.observations == 64);
+        expect("count glm: by groups, or by rows without a statistic",
+               by_rows ? c.stats.vector_terms == 1 &&
+                             out_len(g, OP_NEG_BINOMIAL_2_LOG_LPMF) == 4
+                       : c.stats.statistic_terms == 1 &&
+                             count_opcode(g, OP_FAMILY_GROUPED_LPDF) == 1);
+        expect("count glm: no full-length intercept left",
+               !per_row || out_len(g, OP_GATHER) == 4);
+        expect("count glm: same values", c.same_values);
+        // A weight that is not finite is an error either way.
+        const auto fails = [](Model model) {
+          testutil::reduce_into_result(model.g, model.terms);
+          try {
+            testutil::run_grad(std::move(model.g), model.fills, [](int64_t i) {
+              return i == 0 ? std::numeric_limits<double>::infinity() : 0.5;
+            });
+          } catch (const std::domain_error&) {
+            return true;
+          }
+          return false;
+        };
+        expect("count glm: an infinite weight is rejected before", fails(m));
+        expect("count glm: and after", fails(c.model));
+      }
+    {
+      // Every row its own: nothing to gain.
+      const Collapsed c = collapse(count_glm(opcode, false, false, 64, 64));
+      expect("count glm, no repeated rows: untouched",
+             count_opcode(c.model.g, opcode) == 1 &&
+                 c.report.terms.size() == 1 &&
+                 refused(c.report.terms[0], "too few repeated rows"));
+    }
+    {
+      const Collapsed c = collapse(count_glm(opcode, false, false, 12));
+      expect("short count glm: untouched",
+             count_opcode(c.model.g, opcode) == 1 &&
+                 refused(c.report.terms[0], "too few observations"));
+    }
+  }
+}
+
 // A location that is not affine in few values stays with the group form.
 static void test_linear_gaussian_left_to_groups() {
   const Collapsed r = collapse(normal_by_group({}));
@@ -1222,7 +1639,7 @@ static void test_linear_gaussian_left_to_groups() {
 
 static void test_left_alone() {
   {
-    const Model m = bernoulli_by_group(kCollapseMinObservations - 1);
+    const Model m = counts_by_group(kCollapseMinObservations - 1);
     const Collapsed c = collapse(m);
     expect("short term: untouched",
            c.stats.vector_terms == 0 && c.model.g.ops.size() == m.g.ops.size());
@@ -1234,7 +1651,7 @@ static void test_left_alone() {
     // Four rows of sixty-four would do; four of twenty does not pay for a
     // recorder call per row.
     Model m;
-    const int b = m.g.add_slot(1, true);
+    const int b = m.g.add_slot(1, true), phi = m.g.add_slot(1, true);
     std::vector<double> x;
     std::vector<int> y;
     for (int i = 0; i < kN; ++i) {
@@ -1244,7 +1661,7 @@ static void test_left_alone() {
     const int xs = data_slot(m, x);
     const int mu = m.g.add_slot(kN, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_MUL, {b, xs}, mu);
-    m.g.add_op(OP_POISSON_LOG_LPMF, {mu}, lp, y);
+    m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {mu, phi}, lp, y);
     m.terms = {lp};
     const Collapsed c = collapse(m);
     expect("recorder density: untouched", c.stats.vector_terms == 0);
@@ -1254,7 +1671,7 @@ static void test_left_alone() {
   }
   {
     test_setenv("STANLI_NO_COLLAPSE", "1");
-    const Model m = bernoulli_by_group(kN);
+    const Model m = counts_by_group(kWide);
     const Collapsed c = collapse(m);
     test_unsetenv("STANLI_NO_COLLAPSE");
     expect("disabled: untouched",
@@ -1394,9 +1811,12 @@ int main() {
   test_chunks_of_one_loop_are_pooled();
   test_any_density_in_pieces_is_pooled();
   test_linear_gaussian_from_scalar_terms();
+  test_families();
+  test_families_against_a_reference();
   test_linear_gaussian();
   test_linear_gaussian_near_the_mode();
   test_linear_gaussian_from_a_glm();
+  test_count_glms();
   test_linear_gaussian_left_to_groups();
   test_left_alone();
   test_reports_rows_and_groups();

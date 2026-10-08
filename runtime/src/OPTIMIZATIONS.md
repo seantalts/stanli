@@ -327,8 +327,8 @@ together: re-roll may leave one loop as several vector chunks and a
 remainder of scalar terms, one op per observation, and whether it does is
 its own cost decision. Those pieces are pooled, so the rows or groups are
 found once over the whole loop and not once per piece. This holds for every
-density the pass handles: normal and lognormal pieces pool into the group or
-linear form, any other density into the row form, with each piece
+density the pass handles: pieces of a density with a statistic pool into the
+group or linear form, any other density into the row form, with each piece
 contributing the rows it is first to show and the pieces laid end to end.
 Pooling happens only when it keeps fewer rows than the pieces would between
 them.
@@ -337,10 +337,12 @@ them.
 
 - *Rows.* For any density with an elementwise form: keep one observation
   per distinct row (outcome and every argument), evaluate the density on
-  those, and take a dot product with the row counts. Bernoulli, binomial and
-  Poisson terms over a few groups collapse this way.
-- *Groups.* For `normal` and `lognormal` with a data variate: the variate
-  does not need to repeat. Each group of observations that share a location
+  those, and take a dot product with the row counts. This is the form for
+  densities with no sufficient statistic (`neg_binomial_2`, `student_t`,
+  `ordered_logistic`, mixtures, a parameter variate).
+- *Groups.* For a density whose observations enter only through sums, with a
+  data variate: the variate does not need to repeat, only the parameters.
+  For `normal` and `lognormal`: Each group of observations that share a location
   and scale is replaced by its count, a centre `c` (the rounded group mean),
   `d = sum(y - c)` and `S = sum((y - c)^2)`, computed once with compensated
   sums, and `OP_NORMAL_GROUPED_LPDF` uses
@@ -348,6 +350,15 @@ them.
   `c`. Keeping `d` is what makes this as accurate as the per-observation sum
   when the data sit far from zero; raw moments (`sum(y)`, `sum(y^2)`) lose up
   to all of the digits and are not used.
+  For `exponential`, `gamma`, `inv_gamma`, `beta`, `poisson`, `poisson_log`,
+  `bernoulli`, `bernoulli_logit`, `binomial` and `binomial_logit`, each group
+  is its count and two sums of the data (`sum(y)`, `sum(log y)`, successes
+  and failures, as the density needs), and `OP_FAMILY_GROUPED_LPDF` evaluates
+  Stan's formula for the group from those. These densities are linear in
+  their statistics, so nothing cancels that did not cancel per observation.
+  Terms of the data alone (`lgamma(y + 1)`, binomial coefficients) are summed
+  once into a constant, and each term is kept or dropped under `propto`
+  exactly as Stan does for the arguments that are parameters.
 - *Linear.* When there is one scale and the locations are affine in a few
   values (`alpha + X * beta`, written with a matrix product, with one `fma`
   per column, or as `normal_id_glm`), the whole term is a quadratic form.
@@ -360,6 +371,16 @@ them.
   the least-squares centre is what keeps it accurate near the mode; the raw
   Gram form (`y'y`, `X'y`, `X'X`) and a QR of `[X y]` both cancel there and
   were rejected (measurements in the design note).
+
+**GLM densities.** `normal_id_glm` takes the linear form.
+`bernoulli_logit_glm`, `poisson_log_glm` and `binomial_logit_glm` over a data
+design take the group form: two observations are one group when their design
+rows and intercepts are equal, the linear predictor is formed for the
+distinct rows only (those rows of the design times `beta`, plus the
+intercept), and the family kernel takes it. `neg_binomial_2_log_glm` has no
+statistic and takes the row form, as `neg_binomial_2_log` on the distinct
+rows' predictor. `categorical_logit_glm` and `ordered_logistic_glm` are left
+alone.
 
 Scalar target terms are handled the same way: terms with equal values are
 computed once and multiplied by their count. That is all-or-nothing per
@@ -379,8 +400,10 @@ density gets shorter, and the rewrite is taken back unless the rows are at
 least four times fewer than the observations. Where pushing the gather up
 would end in one scalar chain per kept row, and the rows are affine in
 elements of a few slots (`alpha[county] + beta * floor`), they are built
-from those slots with a gather, a multiply and an add per column; a pooled
-term's group locations are always built that way. The ops that built the
+from those slots with a gather, a multiply and an add per column. A pooled
+term's group parameters are built that way where they are affine, and
+otherwise taken piece by piece from where each group's first observation
+read them. The ops that built the
 full-length arguments are removed if nothing else reads them, following
 index reads through store chains element by element, so a loop of
 `mu[n] += ...` keeps only the updates behind the kept rows.
@@ -399,7 +422,11 @@ that over the corpus.
 original function's name. A point Stan rejects is still rejected. When
 several observations are invalid, the one named in the message can differ,
 and the linear form never forms the locations, so it checks the values they
-are affine in.
+are affine in. A collapsed GLM sees only its linear predictor: where Stan
+would name a non-finite weight or intercept, it names the predictor, and it
+rejects a non-finite predictor in the few cases where Stan's Poisson GLM
+returns a non-finite value instead. `neg_binomial_2_log_glm` errors are
+reported under `neg_binomial_2_log_lpmf`.
 
 **Measured** (i9-13900K, one P-core, fast mode with the pass on against fast
 mode with `STANLI_NO_COLLAPSE=1`, paired `ab_bench_corpus.py`, 9 rounds; the
@@ -411,6 +438,17 @@ slower: `radon_pooled` 487x (46.8 us to 96 ns), `nes` 209x, the earnings
 regressions 83x to 133x, `diamonds` 75x, the hierarchical radon models 9x to
 16x, `election88_full` 6.8x. A model the pass leaves alone has the same op
 graph with it on or off.
+
+The group form for the other densities and the GLMs came after those
+timings and was measured on the 21 models whose terms it changed, against
+the build before it (same harness, 9 rounds, identical-binary control within
+1.2%; `families-and-glms*.jsonl` beside the note's other results). 20 could be timed; all are faster,
+2.1x in geometric mean: `nes_logit_model` 103x (13.7 us to 133 ns; its
+`bernoulli_logit_glm` was not collapsed before), `i319_pois_fixed` 6.7x,
+`i319_pois_re` 3.4x, `aalto_poisson_simple` 2.1x, `election88_full` 1.44x
+(now 10x over the pass off), the binomial chimpanzee models 1.4x to 1.5x,
+`dogs` 1.24x, the least `ch14_m14_2` at 1.15x. That makes 98 corpus models
+with a collapsing term. The headline figures above were not re-measured.
 
 Preparation pays for the analysis: over all 342 timeable models it is 5%
 longer at the median (0.08 ms) and 3% longer in total (12.92 s to 13.31 s).

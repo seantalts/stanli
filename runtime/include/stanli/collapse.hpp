@@ -26,8 +26,7 @@ struct CollapseTerm {
   // by value: what weighted evaluation keeps.
   int64_t rows = 0;
   // Rows that differ in the arguments other than the variate, for the
-  // densities with a sufficient statistic (normal, lognormal) and a data
-  // variate; -1 otherwise.
+  // densities with a sufficient statistic and a data variate; -1 otherwise.
   int64_t groups = -1;
   bool variate_is_data = false;
   // Why the term is left alone, or nullptr if it collapses.
@@ -67,7 +66,7 @@ inline constexpr int64_t kCollapseNativeRatio = 2;
 // times fewer.
 inline constexpr int64_t kCollapseUnrestrictedRatio = 4;
 
-// The pass's two kernels are registered the first time it runs, not with the
+// The pass's kernels are registered the first time it runs, not with the
 // built-in ones, so a graph that names these opcodes without having been
 // through collapse_observations has no kernel for them.
 //
@@ -106,6 +105,38 @@ inline constexpr int kLinearGaussianHeader = 2;
 inline int64_t linear_gaussian_data_len(int64_t p) {
   return kLinearGaussianHeader + 2 * p + p * (p + 1) / 2;
 }
+
+// OP_FAMILY_GROUPED_LPDF: the same for the other densities whose
+// observations enter only through sums. Per group, with the group's
+// parameter values, the log density is a function of the count n and two
+// sums over the group's observations, t1 and t2 (CollapseFamily says which).
+//   in[0]  statistics, three columns of one value per group: n, t1, t2
+//   in[1]  a constant added to the result (the terms of the data alone,
+//          already zero where Stan drops them)
+//   in[2]  first parameter, one per group or one for all
+//   in[3]  second parameter, for the families that have one
+//   idata  the CollapseFamily
+// Variant bits: 0 and 1 mark the parameters active, 7 is propto. Under
+// propto each term is kept or dropped as Stan does for that activity.
+enum CollapseFamily : int {
+  kFamilyExponential,     // t1 = sum(y)
+  kFamilyGamma,           // t1 = sum(log y), t2 = sum(y)
+  kFamilyInvGamma,        // t1 = sum(log y), t2 = sum(1 / y)
+  kFamilyBeta,            // t1 = sum(log y), t2 = sum(log1m y)
+  kFamilyPoisson,         // t1 = sum(y)
+  kFamilyPoissonLog,      // t1 = sum(y)
+  kFamilyBernoulli,       // t1 = successes, t2 = failures
+  kFamilyBernoulliLogit,  // likewise
+  kFamilyBinomial,        // t1 = sum(successes), t2 = sum(trials - successes)
+  kFamilyBinomialLogit,   // likewise
+  kFamilyCount_,
+};
+inline constexpr int kFamilyStatColumns = 3;
+inline constexpr uint8_t kFamilyFirstActive = 1 << 0;
+inline constexpr uint8_t kFamilySecondActive = 1 << 1;
+// The term came from a GLM density: its checks and their names.
+inline constexpr uint8_t kFamilyGlm = 1 << 2;
+inline constexpr uint8_t kFamilyPropto = 1 << 7;
 
 // Read-only. `target_terms` are the slots summed into the log density;
 // `fills` are the bind-time data values. Two elements count as equal only

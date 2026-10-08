@@ -32,6 +32,18 @@ std::vector<double> grouped_statistics(const std::vector<double>& y,
                                        const std::vector<int>& group_of,
                                        size_t groups);
 
+// What one observation adds to its group's statistics under a
+// CollapseFamily: t[0] and t[1] are its terms of the two sums, t[2] its term
+// of the constant Stan keeps only without propto. `second` is the trial
+// count for the binomials and ignored otherwise. False when the observation
+// is one the closed form cannot stand in for (outside the support, or on
+// its edge where the density is not finite).
+bool family_observation(int family, double y, double second, double t[3]);
+// The CollapseFamily of a density opcode, or -1; and how many parameters it
+// takes.
+int family_of_opcode(uint16_t opcode);
+int family_parameters(int family);
+
 // One group's location as constant + sum(coefficient * theta[index]).
 struct LinearRow {
   double constant = 0;

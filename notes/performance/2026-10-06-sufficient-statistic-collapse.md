@@ -310,17 +310,23 @@ it over the corpus; its output is `dry-run.txt` in the data folder.
 
 | family | corpus evidence |
 | --- | --- |
-| Bernoulli/binomial counts, Poisson sums | 2 models each at >=2x beyond weighted evaluation |
-| gamma, beta, von Mises, Dirichlet, multinomial | present in 1 to 3 models, none collapses (per-observation predictors or distinct parameters) |
+| Bernoulli/binomial counts, Poisson sums | 2 models each at >=2x beyond weighted evaluation. Built on 2026-10-08 all the same; see "What changed from the design". |
+| gamma, beta | present in 1 to 3 models, none collapses (per-observation predictors or distinct parameters). Built on 2026-10-08 with the above. |
+| von Mises, Dirichlet, multinomial | present in 1 to 3 models, none collapses |
 | categorical | 5 models, groups = N in all |
 | multi_normal scatter | 8 models, none has a shared mean over more than one row |
-| exponential, Weibull | 1 model each; under an HMM, or active shape |
+| exponential, Weibull | 1 model each; under an HMM, or active shape. Exponential built on 2026-10-08. |
 | neg_binomial_2 | phi never data; covered by weighted evaluation only |
-| inverse-gamma, Cauchy, chi-square, Rayleigh, Pareto | absent as data-variate terms |
+| inverse-gamma, Cauchy, chi-square, Rayleigh, Pareto | absent as data-variate terms. Inverse gamma built on 2026-10-08. |
 | likelihoods inside user-defined functions | 38 models invisible to the census; 11 have >=2x repeated raw data rows |
 | normal with per-group sigma and an affine mean | not sized |
 
-Add any of these when a model that needs it appears, with its measurement.
+The counts say how often each appears in this corpus, which is a sample of
+what people write and not a reason to leave a family out. Of the rest,
+Weibull with a data shape, Pareto, Rayleigh and chi-square have a count and
+one or two sums per group and would be further cases of the family kernel;
+Dirichlet, multinomial, categorical and the multi_normal scatter need a
+vector statistic per group and a kernel of their own.
 
 ## Decided in review (2026-10-06)
 
@@ -468,6 +474,41 @@ with an identical-binary control (`result/default-mode-all.jsonl`).
   elementwise form, 8x for those that pay a recorder call per row; groups 2x
   fewer; at least 16 observations. These came from the measurements above,
   not a separate sweep.
+- **The other densities with a statistic take the group form** (added
+  2026-10-08). The census had put these under "Left out" as two corpus
+  models each beyond the row form. That was the same mistake as with
+  pooling: the corpus decided what was built. A Bernoulli, binomial or
+  Poisson term needs its *rows* to repeat for the row form, outcome
+  included, and 8 groups with 500 different counts do not; with a statistic
+  only the parameters have to repeat. One kernel, `OP_FAMILY_GROUPED_LPDF`,
+  covers exponential, gamma, inverse gamma, beta, Poisson, Bernoulli and
+  binomial with their log and logit forms: a count and two sums per group.
+  They pool across the pieces of a loop like the normal family.
+- **The GLM densities over integer outcomes are taken** (added 2026-10-08):
+  `bernoulli_logit_glm`, `poisson_log_glm` and `binomial_logit_glm` by
+  groups of equal design rows, `neg_binomial_2_log_glm` by rows. The
+  predictor is the distinct design rows times `beta`. What it costs is in
+  the error text: the kernel sees the predictor and not the weights, so a
+  non-finite weight is reported as a non-finite predictor.
+  The group form for the other densities and the GLMs came after those
+  timings and was measured on the 21 models whose terms it changed, against
+  the build before it (same harness, 9 rounds, identical-binary control within
+  1.2%; `result/families-and-glms*.jsonl`). 20 could be timed; all are faster,
+  2.1x in geometric mean: `nes_logit_model` 103x (13.7 us to 133 ns; its
+  `bernoulli_logit_glm` was not collapsed before), `i319_pois_fixed` 6.7x,
+  `i319_pois_re` 3.4x, `aalto_poisson_simple` 2.1x, `election88_full` 1.44x
+  (now 10x over the pass off), the binomial chimpanzee models 1.4x to 1.5x,
+  `dogs` 1.24x, the least `ch14_m14_2` at 1.15x. That makes 98 corpus models
+  with a collapsing term. The headline figures above were not re-measured.
+  The first version of the kernel evaluated a logit group with up to four
+  `exp` calls where the row form it replaced used one per row, and `dogs`
+  was 14% slower than before (4.16 us to 4.84 us). One `exp` and one
+  `log1p` per group serve both outcomes and both partials.
+- **`beta_binomial` had no elementwise form** although the trait table that
+  partitioning and this pass both read says every listed density has one.
+  Asked for one value per element it wrote the sum into the first element,
+  which gave the right log density and a wrong gradient. A test of the row
+  form on it found this; the kernel now has the form.
 - **Dead-op removal follows index reads element by element.** A loop of
   `mu[n] += ...` reads each element back, which kept every store alive under
   slot-level liveness (`sw_mono` was 3% slower until this).
@@ -477,7 +518,8 @@ with an identical-binary control (`result/default-mode-all.jsonl`).
 | what | why |
 | --- | --- |
 | Arrow-structured linear form (an indicator block plus dense columns) | The hierarchical radon models it targets get 9x to 16x from the group form. Not sized beyond the census. |
-| GLM densities other than `normal_id_glm` by rows (`bernoulli_logit_glm`, `poisson_log_glm`) | Needs the GLM rewritten as a matrix product and an elementwise density, whose argument checks differ from the GLM's for infinite parameters. `nes_logit_model` (1179 observations, 10 rows) is the main case. |
+| `categorical_logit_glm`, `ordered_logistic_glm` | Their linear predictor is a matrix or is shared with cutpoints; the row form would need an elementwise categorical over a restricted design. |
+| Statistic forms for densities with a parameter the data enter nonlinearly with (`weibull` with an active shape, `neg_binomial_2`, `student_t`, `von_mises`) | No finite statistic; they take the row form. `weibull` with a data shape, `pareto`, `rayleigh`, `chi_square` and `dirichlet`/`multinomial` counts do have one and are not built. |
 | A predictor built by ops the analysis does not follow (`ch12_m12_6`, `s2_mo_simo_prior`, `sw_mono`'s monotonic effect) | Each needs its op modelled. |
 | Dropping data that no op reads any more | The full-length data stay in the bound buffers; only op-written slots are released. |
 | Preparation-time cap for large designs | The linear form is limited to 256 parameters and the analysis to 4 million affine terms; no corpus model comes near either. |
