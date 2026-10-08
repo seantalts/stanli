@@ -833,6 +833,47 @@ static void test_scalar_family_locations_are_vectorized() {
   expect("vectorized family: same values", c.same_values);
 }
 
+// One loop left in pieces, as re-roll leaves it: two vector terms over
+// chunks and a few scalar terms for the remainder, all over the same groups.
+// They collapse as one term, not piece by piece.
+static void test_chunks_of_one_loop_are_pooled() {
+  Model m;
+  const int a = m.g.add_slot(3, true), sigma = m.g.add_slot(1, true);
+  int obs = 0;
+  for (int chunk = 0; chunk < 2; ++chunk) {
+    std::vector<double> yv;
+    std::vector<int> group;
+    for (int i = 0; i < kN; ++i, ++obs) {
+      yv.push_back(0.1 * obs - 2.0 + 0.01 * (obs % 7));
+      group.push_back(obs % 3);
+    }
+    const int y = data_slot(m, yv);
+    const int mu = m.g.add_slot(kN, false), lp = m.g.add_slot(1, false);
+    m.g.add_op(OP_GATHER, {a}, mu, group);
+    m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    m.g.ops.back().variant = 0x86;
+    m.terms.push_back(lp);
+  }
+  for (int i = 0; i < 4; ++i, ++obs) {
+    const int y = data_slot(m, {0.1 * obs - 2.0});
+    const int mu = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
+    m.g.add_op(OP_INDEX, {a}, mu, {obs % 3});
+    m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    m.g.ops.back().variant = 0x86;
+    m.terms.push_back(lp);
+  }
+  const Collapsed c = collapse(m);
+  const Graph& g = c.model.g;
+  expect("pooled: one grouped term over three groups for 44 observations",
+         c.stats.statistic_terms == 1 && c.stats.rows == 3 &&
+             c.stats.observations == 2 * kN + 4 &&
+             count_opcode(g, OP_NORMAL_GROUPED_LPDF) == 1 &&
+             count_opcode(g, OP_NORMAL_LPDF) == 0 && c.model.terms.size() == 1);
+  expect("pooled: the locations are the parameter vector itself",
+         count_opcode(g, OP_GATHER) == 0 && count_opcode(g, OP_INDEX) == 0);
+  expect("pooled: same values", c.same_values);
+}
+
 // The same family with locations b * x[n] + a: one quadratic form.
 static void test_linear_gaussian_from_scalar_terms() {
   Model m;
@@ -1219,8 +1260,11 @@ static void test_slices_carry_values() {
   m.g.add_op(OP_NORMAL_LPDF, {y, tail, sigma}, lp2);
   m.terms = {lp1, lp2};
   const CollapseReport r = analyze(m);
-  expect("slices: two terms", r.terms.size() == 2);
-  if (r.terms.size() != 2) return;
+  // Each term, and then the two pooled as one family.
+  expect("slices: two terms and their family", r.terms.size() == 3);
+  if (r.terms.size() != 3) return;
+  expect("slices: the family has both terms' observations in two groups",
+         r.terms[2].n == 2 * kN && r.terms[2].groups == 2);
   expect("slices: strided read sees two groups", r.terms[0].groups == 2);
   expect("slices: contiguous read sees two groups", r.terms[1].groups == 2);
 }
@@ -1275,6 +1319,7 @@ int main() {
   test_grouped_normal_refusals();
   test_grouped_normal_from_scalar_terms();
   test_scalar_family_locations_are_vectorized();
+  test_chunks_of_one_loop_are_pooled();
   test_linear_gaussian_from_scalar_terms();
   test_linear_gaussian();
   test_linear_gaussian_near_the_mode();

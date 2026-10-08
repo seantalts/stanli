@@ -842,6 +842,45 @@ struct Affine {
   }
 };
 
+// How affine rows are laid out as vector ops: columns per leaf slot, as many
+// as the most terms any row takes from it. `ok` is false when that takes
+// more than a few columns, or a scalar slot is used by only some rows: a
+// scalar of a row's own is no better gathered than packed.
+struct AffineColumns {
+  bool ok = false;
+  std::vector<int> slots;  // in order of first use
+  std::map<int, size_t> width;
+};
+
+AffineColumns affine_columns(const History& h,
+                             const std::vector<std::pair<int, int>>& leaves,
+                             const std::vector<LinearRow>& rows) {
+  constexpr size_t kMaxColumns = 8;
+  AffineColumns c;
+  std::vector<std::map<int, size_t>> per_row(rows.size());
+  for (size_t r = 0; r < rows.size(); ++r) {
+    for (const auto& term : rows[r].terms)
+      ++per_row[r][leaves[(size_t)term.first].first];
+    for (const auto& here : per_row[r]) {
+      const auto ins = c.width.emplace(here.first, here.second);
+      if (ins.second) c.slots.push_back(here.first);
+      ins.first->second = std::max(ins.first->second, here.second);
+    }
+  }
+  size_t columns = 0;
+  for (const auto& w : c.width) columns += w.second;
+  if (columns > kMaxColumns) return c;
+  for (const auto& w : c.width) {
+    if (h.len(w.first) != 1) continue;
+    for (const auto& here : per_row) {
+      const auto found = here.find(w.first);
+      if (found == here.end() || found->second != w.second) return c;
+    }
+  }
+  c.ok = true;
+  return c;
+}
+
 // A vector density that collapses: one representative observation per row.
 struct VectorPlan {
   size_t op;
@@ -869,6 +908,9 @@ struct StatisticPlan {
   // and scale slots. `op` is then the last of them.
   std::vector<size_t> family;
   std::vector<int> locations, scales;
+  // The family includes vector terms, so its group locations are not
+  // scalars to pack and can only be built from `lines`.
+  bool needs_lines = false;
   // A family's group locations as affine forms over `leaves`, when the
   // analysis could write them so.
   std::vector<LinearRow> lines;
@@ -1018,9 +1060,14 @@ Analysis analyze(const Graph& g, const Fills& fills,
   // Scalar normal and lognormal target terms, by opcode and variant.
   struct Member {
     size_t op;
+    int obs;  // which element of the op's arguments; 0 for a scalar op
+    bool vector;
     double y;
     Vn location, scale;
   };
+  // The plan a vector normal term got on its own, to withdraw if a family
+  // takes the term: 's' or 'v' and an index into that list.
+  std::map<size_t, std::pair<char, size_t>> own_plan;
   std::map<std::pair<uint16_t, uint8_t>, std::vector<Member>> members;
   std::vector<long> last_writer(n_slots, -1);
   Key row;
@@ -1104,10 +1151,24 @@ Analysis analyze(const Graph& g, const Fills& fills,
           const auto* y = g.slots[(size_t)op.in[0]].len == n
                               ? num.data_of(op.in[0])
                               : nullptr;
-          bool usable = y != nullptr && summed && n >= kCollapseMinObservations;
-          for (int64_t obs = 0; usable && obs < n; ++obs) {
+          bool poolable = y != nullptr && summed;
+          for (int64_t obs = 0; poolable && obs < n; ++obs) {
             const double v = (*y)[(size_t)obs];
-            usable = std::isfinite(v) && (!lognormal || v > 0);
+            poolable = std::isfinite(v) && (!lognormal || v > 0);
+          }
+          const bool usable = poolable && n >= kCollapseMinObservations;
+          // Several terms of one loop, as re-roll leaves it in chunks, are
+          // one term: its observations join the family of its kind.
+          if (poolable && targets.count(op.out) == 1 &&
+              readers[(size_t)op.out] == 0 &&
+              num.n_writes[(size_t)op.out] == 1 &&
+              g.slots[(size_t)op.in[2]].len == 1 &&
+              num.n_writes[(size_t)op.in[2]] <= 1) {
+            auto& family = members[std::make_pair(op.opcode, op.variant)];
+            for (int64_t obs = 0; obs < n; ++obs)
+              family.push_back(Member{i, (int)obs, true, (*y)[(size_t)obs],
+                                      num.elem(op.in[1], obs),
+                                      num.elem(op.in[2], 0)});
           }
           by_statistic = usable && kCollapseNativeRatio * t.groups <= n;
           // One scale for every observation: the locations may be affine in
@@ -1155,10 +1216,13 @@ Analysis analyze(const Graph& g, const Fills& fills,
         if (t.refusal == nullptr) {
           t.evaluator = by_line ? "linear" : by_statistic ? "groups" : "rows";
           stat.term = plan.term = report.terms.size();
-          if (by_line || by_statistic)
+          if (by_line || by_statistic) {
+            own_plan[i] = std::make_pair('s', a.statistics.size());
             a.statistics.push_back(std::move(stat));
-          else
+          } else {
+            own_plan[i] = std::make_pair('v', a.vectors.size());
             a.vectors.push_back(std::move(plan));
+          }
         }
       }
       report.terms.push_back(t);
@@ -1259,7 +1323,8 @@ Analysis analyze(const Graph& g, const Fills& fills,
           std::isfinite((*y)[0]) &&
           (op.opcode != OP_LOGNORMAL_LPDF || (*y)[0] > 0))
         members[std::make_pair(op.opcode, op.variant)].push_back(
-            Member{i, (*y)[0], num.elem(op.in[1], 0), num.elem(op.in[2], 0)});
+            Member{i, 0, false, (*y)[0], num.elem(op.in[1], 0),
+                   num.elem(op.in[2], 0)});
     }
 
     num.number(op, shape[i], active);
@@ -1267,13 +1332,17 @@ Analysis analyze(const Graph& g, const Fills& fills,
     if (op.out2 >= 0) last_writer[(size_t)op.out2] = (long)i;
   }
 
-  // A family of scalar normal terms is the vector term an unrolled loop
-  // would have been, had an earlier pass fused it: the same statistics.
+  // A family of normal terms is the one vector term the loop would have
+  // been, had an earlier pass fused all of it: scalar terms, one per
+  // observation, and vector terms that each cover a chunk. `pooled` families
+  // include vector terms; their group locations can only be built from the
+  // affine lines, so they need those.
   std::unordered_set<int> in_family;
-  for (auto& entry : members) {
-    std::vector<Member>& family = entry.second;
+  std::vector<char> dead_statistic(a.statistics.size(), 0);
+  std::vector<char> dead_vector(a.vectors.size(), 0);
+  const auto plan_family = [&](const std::vector<Member>& family, bool pooled) {
     const int64_t n = (int64_t)family.size();
-    if (n < kCollapseMinObservations) continue;
+    if (n < kCollapseMinObservations) return false;
     const Op& first = g.ops[family[0].op];
     const bool lognormal = first.opcode == OP_LOGNORMAL_LPDF;
     CollapseTerm t;
@@ -1283,8 +1352,10 @@ Analysis analyze(const Graph& g, const Fills& fills,
     t.variate_is_data = true;
     StatisticPlan stat;
     stat.op = family.back().op;
+    stat.needs_lines = pooled;
     std::vector<int> member;
     std::vector<double> values;
+    std::vector<std::pair<int, int>> where;  // each group's location element
     std::map<std::pair<Vn, Vn>, int> group_of;
     Compensated log_y;
     for (const Member& m : family) {
@@ -1294,6 +1365,7 @@ Analysis analyze(const Graph& g, const Fills& fills,
         stat.rep.push_back((int)stat.family.size());
         stat.locations.push_back(g.ops[m.op].in[1]);
         stat.scales.push_back(g.ops[m.op].in[2]);
+        where.emplace_back(g.ops[m.op].in[1], m.obs);
       }
       member.push_back(ins.first->second);
       stat.family.push_back(m.op);
@@ -1308,13 +1380,14 @@ Analysis analyze(const Graph& g, const Fills& fills,
     Affine affine(history, kLinearMaxTerms);
     Affine::Rows lines;
     for (size_t k = 0; k < stat.rep.size(); ++k)
-      lines.push_back(affine.rows(stat.locations[k], {0},
+      lines.push_back(affine.rows(where[k].first, {where[k].second},
                                   stat.family[(size_t)stat.rep[k]])[0]);
     const bool try_line = one_scale && worth_a_line(affine, lines);
     if (!by_statistic && !try_line) {
+      if (pooled) return false;
       refuse(t, "too few repeated rows");
       report.terms.push_back(t);
-      continue;
+      return false;
     }
     stat.variate_constant = -log_y.value();
     stat.statistics = grouped_statistics(values, member, stat.rep.size());
@@ -1329,22 +1402,62 @@ Analysis analyze(const Graph& g, const Fills& fills,
                              (lognormal ? kGroupedLognormal : 0) |
                              (stat.propto ? kGroupedPropto : 0));
     const bool by_line = try_line && line_data(stat, affine, lines);
-    if (!by_line && !by_statistic) {
-      refuse(t, "too few repeated rows");
-      report.terms.push_back(t);
-      continue;
-    }
     // For the group form the affine lines say how to build every group's
     // location at once, in place of one scalar chain per group.
-    if (!by_line && !affine.failed()) {
+    bool built = false;
+    if (!by_line && by_statistic && !affine.failed()) {
       if (!try_line) order_leaves(stat, affine, lines);
-      stat.lines = std::move(lines);
+      built = affine_columns(history, stat.leaves, lines).ok;
+      if (built) stat.lines = std::move(lines);
+    }
+    if (!by_line && !(by_statistic && (built || !pooled))) {
+      if (pooled) return false;
+      refuse(t, "too few repeated rows");
+      report.terms.push_back(t);
+      return false;
     }
     t.evaluator = by_line ? "linear" : "groups";
     stat.term = report.terms.size();
     for (const Member& m : family) in_family.insert(g.ops[m.op].out);
     a.statistics.push_back(std::move(stat));
     report.terms.push_back(t);
+    return true;
+  };
+  for (auto& entry : members) {
+    const std::vector<Member>& all = entry.second;
+    std::vector<Member> scalars;
+    std::unordered_set<size_t> ops;
+    for (const Member& m : all) {
+      ops.insert(m.op);
+      if (!m.vector) scalars.push_back(m);
+    }
+    if (scalars.size() < all.size() && ops.size() >= 2 &&
+        plan_family(all, true)) {
+      // The terms' own plans, and what the report said of them, give way.
+      for (size_t op : ops) {
+        const auto own = own_plan.find(op);
+        if (own == own_plan.end()) continue;
+        const size_t term = own->second.first == 's'
+                                ? a.statistics[own->second.second].term
+                                : a.vectors[own->second.second].term;
+        (own->second.first == 's' ? dead_statistic
+                                  : dead_vector)[own->second.second] = 1;
+        report.terms[term].evaluator = report.terms.back().evaluator;
+      }
+      continue;
+    }
+    plan_family(scalars, false);
+  }
+  {
+    std::vector<StatisticPlan> kept;
+    for (size_t k = 0; k < a.statistics.size(); ++k)
+      if (k >= dead_statistic.size() || !dead_statistic[k])
+        kept.push_back(std::move(a.statistics[k]));
+    a.statistics = std::move(kept);
+    std::vector<VectorPlan> kept_vectors;
+    for (size_t k = 0; k < a.vectors.size(); ++k)
+      if (!dead_vector[k]) kept_vectors.push_back(std::move(a.vectors[k]));
+    a.vectors = std::move(kept_vectors);
   }
 
   // Scalar target terms: equal values are one term and a count.
@@ -1537,30 +1650,16 @@ struct Rewriter : History {
   // leaf), built with a gather, a multiply and an add per column. Columns
   // are per leaf slot, as many as the most terms any row takes from it, so
   // each gathers from one slot; a row with fewer terms is padded with a zero
-  // coefficient. Returns -1 when that would take more than a few columns,
-  // or a scalar that only some rows use, as when every row has a value of
-  // its own; nothing is emitted then, and the caller packs.
+  // coefficient. Returns -1, emitting nothing, when affine_columns says the
+  // layout is not worth it; the caller then packs.
   int affine_vector(const std::vector<std::pair<int, int>>& leaves,
                     const std::vector<LinearRow>& rows) {
-    constexpr size_t kMaxColumns = 8;
+    const AffineColumns columns = affine_columns(*this, leaves, rows);
+    if (!columns.ok) return -1;
     const size_t n = rows.size();
-    std::vector<int> slots;  // in order of first use
-    std::map<int, size_t> width;
-    for (const LinearRow& row : rows) {
-      std::map<int, size_t> here;
-      for (const auto& term : row.terms)
-        ++here[leaves[(size_t)term.first].first];
-      for (const auto& h : here) {
-        const auto ins = width.emplace(h.first, h.second);
-        if (ins.second) slots.push_back(h.first);
-        ins.first->second = std::max(ins.first->second, h.second);
-      }
-    }
-    size_t columns = 0;
-    for (const auto& w : width) columns += w.second;
-    if (columns > kMaxColumns) return -1;
+    const std::vector<int>& slots = columns.slots;
+    std::map<int, size_t> width = columns.width;
 
-    const Mark start = mark();
     int acc = -1;
     const auto add = [&](int term) {
       acc = acc < 0 ? term : binary(OP_ADD, acc, term);
@@ -1577,27 +1676,13 @@ struct Rewriter : History {
             coefficient[r] = term.second;
           }
         }
-        std::vector<char> present(n, 0);
-        for (size_t r = 0; r < n; ++r) {
-          size_t seen = 0;
-          for (const auto& term : rows[r].terms)
-            if (leaves[(size_t)term.first].first == s && seen++ == c)
-              present[r] = 1;
-        }
         bool one_element = true, in_order = (int64_t)n == len(s), ones = true;
-        bool one_coefficient = true, everywhere = true;
+        bool one_coefficient = true;
         for (size_t r = 0; r < n; ++r) {
           one_element &= which[r] == which[0];
           in_order &= which[r] == (int)r;
           ones &= coefficient[r] == 1.0;
           one_coefficient &= coefficient[r] == coefficient[0];
-          everywhere &= present[r] != 0;
-        }
-        // A scalar only some rows use is a value of those rows' own, and a
-        // column per such scalar is no better than packing them.
-        if (len(s) == 1 && !everywhere) {
-          rollback(start);
-          return -1;
         }
         int value;
         if (len(s) == 1 || in_order) {
@@ -1892,6 +1977,10 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
       e.opcode = OP_NORMAL_GROUPED_LPDF;
       const int built =
           plan.lines.empty() ? -1 : rw.affine_vector(plan.leaves, plan.lines);
+      if (built < 0 && plan.needs_lines) {
+        rw.rollback(mark);
+        continue;
+      }
       e.in[1] = built >= 0 ? built : rw.packed(mu);
       e.in[2] = one_scale ? plan.scales[0] : rw.packed(sigma);
       e.in[0] = rw.data_slot(plan.statistics);
