@@ -959,9 +959,21 @@ bool line_data(StatisticPlan& stat, const Affine& affine, Affine::Rows& lines) {
   return !stat.linear.empty();
 }
 
+// Several terms of one density, the pieces an earlier pass left one loop
+// in, evaluated by rows as one term: each distinct row is kept in the piece
+// it first shows up in.
+struct PooledPlan {
+  size_t term = 0;                    // its entry in the report
+  std::vector<size_t> ops;            // the pieces, in graph order
+  std::vector<std::vector<int>> rep;  // per piece, the observations kept
+  std::vector<int> count;             // per kept row, piece by piece
+  int64_t observations = 0;
+};
+
 struct Analysis {
   CollapseReport report;
   std::vector<VectorPlan> vectors;
+  std::vector<PooledPlan> pooled;
   std::vector<StatisticPlan> statistics;
   // Scalar target terms by value, in order of first appearance.
   std::vector<std::pair<int, int>> scalars;  // first slot, count
@@ -1065,8 +1077,24 @@ Analysis analyze(const Graph& g, const Fills& fills,
     double y;
     Vn location, scale;
   };
-  // The plan a vector normal term got on its own, to withdraw if a family
-  // takes the term: 's' or 'v' and an index into that list.
+  // Target terms of any one density, vector or scalar, with a number per
+  // observation's row: the pieces of what may be one loop.
+  struct Piece {
+    size_t op;
+    std::vector<Vn> rows;
+  };
+  std::map<std::vector<int64_t>, std::vector<Piece>> pieces;
+  const auto piece_key = [](const Op& op, const Outcomes& outcomes) {
+    return std::vector<int64_t>{op.opcode, op.variant, op.n_in,
+                                (int64_t)outcomes.groups.size()};
+  };
+  const auto sole_target = [&](const Op& op) {
+    return op.out >= 0 && g.slots[(size_t)op.out].len == 1 &&
+           targets.count(op.out) == 1 && readers[(size_t)op.out] == 0 &&
+           num.n_writes[(size_t)op.out] == 1;
+  };
+  // The plan a vector term got on its own, to withdraw if a family takes
+  // the term: 's' or 'v' and an index into that list.
   std::map<size_t, std::pair<char, size_t>> own_plan;
   std::map<std::pair<uint16_t, uint8_t>, std::vector<Member>> members;
   std::vector<long> last_writer(n_slots, -1);
@@ -1116,10 +1144,13 @@ Analysis analyze(const Graph& g, const Fills& fills,
         VectorPlan plan;
         plan.op = i;
         std::unordered_map<Vn, int> group_of;
+        Piece piece{i, {}};
+        piece.rows.reserve((size_t)n);
         for (int64_t obs = 0; obs < n; ++obs) {
           row_key(obs, true);
+          piece.rows.push_back(num.row(row.w));
           const auto ins =
-              group_of.emplace(num.row(row.w), (int)plan.rep.size());
+              group_of.emplace(piece.rows.back(), (int)plan.rep.size());
           if (ins.second) {
             plan.rep.push_back((int)obs);
             plan.count.push_back(1);
@@ -1127,6 +1158,8 @@ Analysis analyze(const Graph& g, const Fills& fills,
             ++plan.count[(size_t)ins.first->second];
           }
         }
+        if (sole_target(op))
+          pieces[piece_key(op, outcomes)].push_back(std::move(piece));
         t.rows = (int64_t)plan.rep.size();
         StatisticPlan stat;
         stat.op = i;
@@ -1306,6 +1339,23 @@ Analysis analyze(const Graph& g, const Fills& fills,
       report.terms.push_back(t);
     }
 
+    // A scalar density that is a target term: a one-observation piece.
+    if (is_density(op.opcode) && op_active[i] && !candidate[i] &&
+        op.udata == nullptr && !op.dyn_lengths && sole_target(op)) {
+      const Outcomes outcomes = outcomes_of(op);
+      bool scalar = outcomes.ok && outcomes.width == 1;
+      for (int j = 0; j < op.n_in && scalar; ++j)
+        scalar = op.in[j] >= 0 && g.slots[(size_t)op.in[j]].len == 1;
+      if (scalar) {
+        row.w.clear();
+        for (size_t q = 0; q < outcomes.groups.size(); ++q)
+          row.w.push_back(outcomes.at(q, 0));
+        for (int j = 0; j < op.n_in; ++j)
+          row.w.push_back(num.elem(op.in[j], 0));
+        pieces[piece_key(op, outcomes)].push_back(Piece{i, {num.row(row.w)}});
+      }
+    }
+
     // One observation of a possible family of scalar normal terms.
     if (has_statistic(op.opcode) && op_active[i] && op.n_in == 3 &&
         op.out >= 0 && op.udata == nullptr && !op.dyn_lengths &&
@@ -1447,6 +1497,75 @@ Analysis analyze(const Graph& g, const Fills& fills,
       continue;
     }
     plan_family(scalars, false);
+  }
+  // Any other density left in pieces is pooled by rows: a row that repeats
+  // across pieces is kept once. This needs a vector piece and a second
+  // piece; scalar terms alone are the scalar-term merge's, below.
+  for (const auto& entry : pieces) {
+    std::vector<const Piece*> use;
+    bool any_vector = false, has_statistic_plan = false;
+    int64_t n = 0, own_rows = 0;
+    for (const Piece& piece : entry.second) {
+      if (in_family.count(g.ops[piece.op].out)) continue;
+      use.push_back(&piece);
+      any_vector |= piece.rows.size() > 1;
+      n += (int64_t)piece.rows.size();
+      const auto own = own_plan.find(piece.op);
+      if (own == own_plan.end()) {
+        own_rows += (int64_t)piece.rows.size();
+      } else if (own->second.first == 's') {
+        has_statistic_plan = true;
+      } else {
+        own_rows += (int64_t)a.vectors[own->second.second].rep.size();
+      }
+    }
+    if (use.size() < 2 || !any_vector || has_statistic_plan ||
+        n < kCollapseMinObservations)
+      continue;
+    PooledPlan plan;
+    plan.observations = n;
+    std::unordered_map<Vn, size_t> row_of;
+    for (const Piece* piece : use) {
+      plan.ops.push_back(piece->op);
+      plan.rep.emplace_back();
+      for (size_t obs = 0; obs < piece->rows.size(); ++obs) {
+        const auto ins = row_of.emplace(piece->rows[obs], plan.count.size());
+        if (ins.second) {
+          plan.count.push_back(1);
+          plan.rep.back().push_back((int)obs);
+        } else {
+          ++plan.count[ins.first->second];
+        }
+      }
+    }
+    const Op& first = g.ops[use[0]->op];
+    const int64_t rows = (int64_t)plan.count.size();
+    const int64_t ratio = lane_elt_costs_per_element(first.opcode)
+                              ? kCollapseRecorderRatio
+                              : kCollapseNativeRatio;
+    // Worth it when the rows are few enough, and fewer than the pieces
+    // would keep between them on their own.
+    if (ratio * rows > n || rows >= own_rows) continue;
+    CollapseTerm t;
+    t.op = (int)use[0]->op;
+    t.opcode = first.opcode;
+    t.ops = (int64_t)use.size();
+    t.n = n;
+    t.rows = rows;
+    t.variate_is_data = true;
+    t.evaluator = "rows";
+    plan.term = report.terms.size();
+    for (const Piece* piece : use) {
+      in_family.insert(g.ops[piece->op].out);
+      const auto own = own_plan.find(piece->op);
+      if (own == own_plan.end()) continue;
+      dead_vector[own->second.second] = 1;
+      CollapseTerm& mine = report.terms[a.vectors[own->second.second].term];
+      mine.refusal = nullptr;
+      mine.evaluator = "rows";
+    }
+    a.pooled.push_back(std::move(plan));
+    report.terms.push_back(t);
   }
   {
     std::vector<StatisticPlan> kept;
@@ -1882,7 +2001,8 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
     register_collapse_kernels();
   });
   Analysis a = analyze(g, fills, target_terms);
-  if (a.vectors.empty() && a.statistics.empty() && a.scalars_merged == 0) {
+  if (a.vectors.empty() && a.statistics.empty() && a.pooled.empty() &&
+      a.scalars_merged == 0) {
     if (report != nullptr) *report = std::move(a.report);
     return st;
   }
@@ -2024,6 +2144,112 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
       st.observations += (int64_t)plan.family.size();
     }
     rw.before[plan.op].push_back(e);
+  }
+
+  for (const PooledPlan& plan : a.pooled) {
+    rw.p = plan.ops.back();
+    rw.memo.clear();
+    const Rewriter::Mark mark = rw.mark();
+    const Op d = g.ops[plan.ops[0]];
+    const int64_t rows = (int64_t)plan.count.size();
+    std::vector<Outcomes> outcomes;
+    for (size_t op : plan.ops) outcomes.push_back(outcomes_of(g.ops[op]));
+
+    Op e = d;
+    e.primal_source = -1;
+    if (e.variant == 0) e.variant = (uint8_t)((1u << d.n_in) - 1u);
+    e.variant = (uint8_t)(e.variant | 0x40u);
+    bool ok = true;
+    for (int j = 0; j < d.n_in && ok; ++j) {
+      // One scalar for every piece is passed as it is.
+      bool shared = g.slots[(size_t)d.in[j]].len == 1;
+      for (size_t op : plan.ops) shared &= g.ops[op].in[j] == d.in[j];
+      if (shared) {
+        ok = !rw.written_in(d.in[j], plan.ops[0], rw.p);
+        continue;
+      }
+      // Otherwise each piece gives its kept rows, read as the piece read
+      // them, and the pieces are laid end to end.
+      std::vector<std::pair<int, int64_t>> segments;  // slot, rows
+      for (size_t k = 0; k < plan.ops.size() && ok; ++k) {
+        const int64_t kept = (int64_t)plan.rep[k].size();
+        if (kept == 0) continue;
+        const int slot = g.ops[plan.ops[k]].in[j];
+        ok = !rw.written_in(slot, plan.ops[k], rw.p);
+        if (!ok) break;
+        int segment;
+        if (g.slots[(size_t)slot].len != 1)
+          segment = rw.restricted(slot, plan.rep[k], plan.ops[k]);
+        else if (kept == 1)
+          segment = slot;
+        else
+          segment = rw.gather(slot, std::vector<int>((size_t)kept, 0));
+        segments.emplace_back(segment, kept);
+      }
+      if (!ok) break;
+      if (segments.size() == 1) {
+        e.in[j] = segments[0].first;
+        continue;
+      }
+      const int base = rw.data_slot(std::vector<double>((size_t)rows, 0.0));
+      const int whole = g.add_slot(rows, false);
+      int64_t at = 0;
+      for (const auto& segment : segments) {
+        Op store;
+        const bool one =
+            segment.second == 1 && g.slots[(size_t)segment.first].len == 1;
+        store.opcode = one ? (at == 0 ? OP_SET_INDEX : OP_SET_INDEX_INPLACE)
+                           : (at == 0 ? OP_SET_SLICE : OP_SET_SLICE_INPLACE);
+        store.n_in = 2;
+        store.in[0] = at == 0 ? base : whole;
+        store.in[1] = segment.first;
+        store.out = whole;
+        rw.attach(store, {(int)at});
+        rw.before[rw.p].push_back(store);
+        at += segment.second;
+      }
+      e.in[j] = whole;
+    }
+    if (!ok) {
+      rw.rollback(mark);
+      continue;
+    }
+    if (!outcomes[0].groups.empty()) {
+      std::vector<int> idata;
+      for (size_t q = 0; q < outcomes[0].groups.size(); ++q) {
+        // A group that is one scalar, the same in every piece, stays one.
+        bool scalar = true;
+        for (const Outcomes& o : outcomes)
+          scalar &= o.groups[q].second == 1 &&
+                    o.groups[q].first[0] == outcomes[0].groups[q].first[0];
+        if (outcomes[0].grouped) idata.push_back(scalar ? -1 : (int)rows);
+        if (scalar && outcomes[0].grouped) {
+          idata.push_back(outcomes[0].groups[q].first[0]);
+          continue;
+        }
+        for (size_t k = 0; k < plan.ops.size(); ++k)
+          for (int obs : plan.rep[k]) idata.push_back(outcomes[k].at(q, obs));
+      }
+      rw.attach(e, std::move(idata));
+    }
+    e.out = g.add_slot(rows, false);
+    rw.before[rw.p].push_back(e);
+    Op dot;
+    dot.opcode = OP_DOT;
+    dot.n_in = 2;
+    dot.in[0] = e.out;
+    dot.in[1] =
+        rw.data_slot(std::vector<double>(plan.count.begin(), plan.count.end()));
+    dot.out = g.add_slot(1, false);
+    rw.before[rw.p].push_back(dot);
+    for (size_t op : plan.ops) {
+      replaced[op] = 1;
+      family_terms.insert(g.ops[op].out);
+    }
+    new_terms.push_back(dot.out);
+    ++st.vector_terms;
+    st.observations += plan.observations;
+    st.rows += rows;
   }
 
   std::vector<Op> ops;

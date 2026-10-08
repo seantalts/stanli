@@ -35,6 +35,8 @@ Results:
   `default-mode-recheck.jsonl` repeats its outliers after the link-order and
   registration changes; `default-mode-control.jsonl` adds a no-op control
   (the base with one unused function).
+  `pooling-any-density.jsonl` times twelve models before and after pooling
+  was extended from normal and lognormal to every density.
 
 Scripts (throwaway; they expect a `scratch/suffstat/` directory in a checkout
 with a Release build in `build-spike/`, the pinned

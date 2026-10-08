@@ -360,8 +360,10 @@ static void test_a_later_store() {
   m.g.add_op(OP_POISSON_LOG_LPMF, {mu2}, lp2, y);
   m.terms = {lp1, lp2};
   const Collapsed c = collapse(m);
-  expect("store: both terms collapse, four and five rows",
-         c.stats.vector_terms == 2 && c.stats.rows == 9);
+  // The second term shares four of its five rows with the first, so the
+  // two are one term over five rows.
+  expect("store: one term over five rows",
+         c.stats.vector_terms == 1 && c.stats.rows == 5);
   expect("store: same values", c.same_values);
 }
 
@@ -874,6 +876,76 @@ static void test_chunks_of_one_loop_are_pooled() {
   expect("pooled: same values", c.same_values);
 }
 
+// The same for a density with no statistic: a Bernoulli loop left as two
+// vector chunks and a scalar remainder is evaluated once per distinct row
+// of the whole loop.
+static Model bernoulli_in_pieces(bool same_rows, uint16_t opcode) {
+  Model m;
+  const int b = m.g.add_slot(4, true);
+  int obs = 0;
+  for (int chunk = 0; chunk < 2; ++chunk) {
+    const int n = opcode == OP_BERNOULLI_LPMF ? kN : 32;
+    const int eta = m.g.add_slot(n, false), theta = m.g.add_slot(n, false);
+    const int lp = m.g.add_slot(1, false);
+    std::vector<int> group, outcome;
+    for (int i = 0; i < n; ++i, ++obs) {
+      // The second chunk repeats the first one's rows, or has its own.
+      group.push_back(same_rows ? obs % 2 : obs % 2 + 2 * chunk);
+      outcome.push_back(obs % 4 < 2);
+    }
+    m.g.add_op(OP_GATHER, {b}, eta, group);
+    if (opcode == OP_BERNOULLI_LPMF) {
+      m.g.add_op(OP_INV_LOGIT, {eta}, theta);
+      m.g.add_op(opcode, {theta}, lp, outcome);
+    } else {
+      m.g.add_op(opcode, {eta}, lp, outcome);
+    }
+    m.terms.push_back(lp);
+  }
+  for (int i = 0; same_rows && i < 3; ++i, ++obs) {
+    const int eta = m.g.add_slot(1, false), theta = m.g.add_slot(1, false);
+    const int lp = m.g.add_slot(1, false);
+    m.g.add_op(OP_INDEX, {b}, eta, {obs % 2});
+    if (opcode == OP_BERNOULLI_LPMF) {
+      m.g.add_op(OP_INV_LOGIT, {eta}, theta);
+      m.g.add_op(opcode, {theta}, lp, {obs % 4 < 2});
+    } else {
+      m.g.add_op(opcode, {eta}, lp, {obs % 4 < 2});
+    }
+    m.terms.push_back(lp);
+  }
+  return m;
+}
+
+static void test_any_density_in_pieces_is_pooled() {
+  for (const uint16_t opcode :
+       {(uint16_t)OP_BERNOULLI_LPMF, (uint16_t)OP_POISSON_LOG_LPMF}) {
+    const Model m = bernoulli_in_pieces(true, opcode);
+    const Collapsed c = collapse(m);
+    const Graph& g = c.model.g;
+    const Op* dens = find_op(g, opcode);
+    expect("pieces: one density over the loop's four rows",
+           c.stats.vector_terms == 1 && c.stats.rows == 4 &&
+               count_opcode(g, opcode) == 1 && dens != nullptr &&
+               (dens->variant & 0x40u) != 0 &&
+               g.slots[(size_t)dens->out].len == 4 &&
+               c.model.terms.size() == 1);
+    expect("pieces: every observation accounted for",
+           c.stats.observations ==
+               (opcode == OP_BERNOULLI_LPMF ? 2 * kN + 3 : 67));
+    expect("pieces: same values", c.same_values);
+  }
+  {
+    // Chunks with no rows in common gain nothing from being one term, and
+    // keep their own collapses.
+    const Collapsed c = collapse(bernoulli_in_pieces(false, OP_BERNOULLI_LPMF));
+    expect("disjoint pieces: collapsed piece by piece",
+           c.stats.vector_terms == 2 &&
+               count_opcode(c.model.g, OP_BERNOULLI_LPMF) == 2);
+    expect("disjoint pieces: same values", c.same_values);
+  }
+}
+
 // The same family with locations b * x[n] + a: one quadratic form.
 static void test_linear_gaussian_from_scalar_terms() {
   Model m;
@@ -1320,6 +1392,7 @@ int main() {
   test_grouped_normal_from_scalar_terms();
   test_scalar_family_locations_are_vectorized();
   test_chunks_of_one_loop_are_pooled();
+  test_any_density_in_pieces_is_pooled();
   test_linear_gaussian_from_scalar_terms();
   test_linear_gaussian();
   test_linear_gaussian_near_the_mode();

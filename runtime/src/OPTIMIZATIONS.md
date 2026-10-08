@@ -322,11 +322,16 @@ times a vector (row by row), and any pure op with a scalar result. An op it
 does not model gives every output element a number of its own, so it can
 only keep rows apart. `-0.0` and `0.0` are different data.
 
-A term is one vector density, or, for `normal` and `lognormal`, every such
-term of one kind together: re-roll may leave one loop as several vector
-chunks and a remainder of scalar terms, one op per observation, and whether
-it does is its own cost decision. Those are pooled, so the groups are found
-once over the whole loop and not once per piece.
+A term is one vector density, or every target term of one density
+together: re-roll may leave one loop as several vector chunks and a
+remainder of scalar terms, one op per observation, and whether it does is
+its own cost decision. Those pieces are pooled, so the rows or groups are
+found once over the whole loop and not once per piece. This holds for every
+density the pass handles: normal and lognormal pieces pool into the group or
+linear form, any other density into the row form, with each piece
+contributing the rows it is first to show and the pieces laid end to end.
+Pooling happens only when it keeps fewer rows than the pieces would between
+them.
 
 **Three ways to evaluate a collapsed term**, chosen per term:
 

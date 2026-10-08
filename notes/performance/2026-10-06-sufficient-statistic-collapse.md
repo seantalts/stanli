@@ -352,7 +352,8 @@ as control. Raw results and the scripts that summarise
 them are in [data/2026-10-06-suffstat-census/result/](data/2026-10-06-suffstat-census/result/).
 
 - 91 of 352 corpus models have a term that collapses: by rows in 28, by
-  groups in 18, by the linear form in 45.
+  groups in 18, by the linear form in 45 (92 after pooling was extended to
+  every density, below).
 - Of the 90 that could be timed (`dogs_log` has a non-finite benchmark
   point in every configuration), gradients are 8.6x faster in geometric
   mean; 85 are at least 1.1x faster, 68 at least 2x, 45 at least 10x. None
@@ -438,6 +439,15 @@ with an identical-binary control (`result/default-mode-all.jsonl`).
   vector chunks and a scalar remainder is an earlier pass's decision, and it
   changed under this work. Normal and lognormal terms of one kind are pooled
   into one family, and the group and linear forms take the family.
+- **Pooling is for every density.** It was first written for normal and
+  lognormal only, on the grounds that no corpus model needed more. That was
+  the wrong test: the corpus is a sample, and which loops re-roll leaves in
+  pieces is not a property of the density. Pieces of any density the pass
+  handles are now pooled into the row form. In the corpus this reaches one
+  more model, `dogs_hierarchical` (738 pieces, 750 observations, 226 rows;
+  1.00x to 1.57x), and changes no other timing
+  (`result/pooling-any-density.jsonl`); the headline measurements above were
+  taken just before it.
 - **Scalar chains are rebuilt as vector ops.** The affine analysis written
   for the linear form also says how to compute many locations at once: a
   gather, a multiply and an add per column of leaves. That replaces one
@@ -467,7 +477,6 @@ with an identical-binary control (`result/default-mode-all.jsonl`).
 | what | why |
 | --- | --- |
 | Arrow-structured linear form (an indicator block plus dense columns) | The hierarchical radon models it targets get 9x to 16x from the group form. Not sized beyond the census. |
-| Pooling for densities other than normal and lognormal | A Bernoulli or Poisson loop that re-roll leaves in chunks is still collapsed chunk by chunk. No corpus model was seen to need it. |
 | GLM densities other than `normal_id_glm` by rows (`bernoulli_logit_glm`, `poisson_log_glm`) | Needs the GLM rewritten as a matrix product and an elementwise density, whose argument checks differ from the GLM's for infinite parameters. `nes_logit_model` (1179 observations, 10 rows) is the main case. |
 | A predictor built by ops the analysis does not follow (`ch12_m12_6`, `s2_mo_simo_prior`, `sw_mono`'s monotonic effect) | Each needs its op modelled. |
 | Dropping data that no op reads any more | The full-length data stay in the bound buffers; only op-written slots are released. |
