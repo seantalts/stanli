@@ -1,25 +1,25 @@
 {
   "identity": {
     "config": {
-      "bench": "/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/bench_grad",
+      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/build-rel/bench_grad",
       "build_timeout": 900.0,
-      "cmdstan": "/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/deps/cmdstan",
+      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/cmdstan",
       "corpus": "all",
       "filter": "",
       "gradient_budget": 20000,
       "gradient_timeout": 60.0,
       "measure_ms": 250,
-      "pdb": "/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/deps/posteriordb",
+      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/posteriordb",
       "rounds": 6,
       "stanc": "/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src/_build/default/src/stanc/stanc.exe",
       "stancflags": "--O1",
-      "vectorize_probe": "/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/deps/stanc3/stanli-vectorize-probe",
+      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/stanc3/stanli-vectorize-probe",
       "warmup_ms": 200
     },
     "executables": {
-      "bench": "843734f5af4b44f7d432c73a1c513730ef847cbc1faf410c7a080a9a0889a1cd",
+      "bench": "378be400cb9ab5758777cd48daf2936a0ebe22fbc9f0885e5efa4ab436d3c21a",
       "stanc": "359c905c882a4263811b17636817ce349f0b8c743a07769e5348e389dc81173c",
-      "vectorize_probe": "cf1a7bf76c647668047a886610281d5a0d4a83a8ec560eb37480ecd1a9596acb"
+      "vectorize_probe": "8098079e522eb6f5f85e1aa68b57c19b24ee34fcda520aa11980ce842554c6a8"
     },
     "inputs": {
       "2pl_latent_reg_irt": {
@@ -512,6 +512,116 @@
         "data": "5d49039f59bcbe2fcb2d0fdf16a01a42949a8d71db067bf05bc6badc0fde10c4",
         "stan": "7395023cd359225dc19042997aeade1fc83f0e3638b59174c4ea01654a5c646e"
       },
+      "cm_betadiscrete": {
+        "collection": "cogmod",
+        "data": "6d4a4a773d0c3a0c42177352d399b13957619981dc94422dca288df758cafd3b",
+        "stan": "36b31f7f8ad719e6e00044945da7a5793080ed4f89464cbb6a30c982d1c01808"
+      },
+      "cm_betagate": {
+        "collection": "cogmod",
+        "data": "0bf477094b3d592a37b0ed5d471794a198d5ec68458a5d498e288dfffdf3a83d",
+        "stan": "03ed189e5d70c2fcb3b0814a1899048a99e976533fed5d31ba7e4f8a0e4104f6"
+      },
+      "cm_bisa": {
+        "collection": "cogmod",
+        "data": "163c2120f71e8edb45b10214f539e49530eb385958f9d55cc5380c98a4c32076",
+        "stan": "71d553290cfaef2d4476ab1a305806fe3aaf29dae8002ec8c265939474df93aa"
+      },
+      "cm_choco": {
+        "collection": "cogmod",
+        "data": "88a3ff41f17fd332271355dfb667ea5e4d08ed079773426c8b4ef6fede2976f7",
+        "stan": "acbb5d077b2d05fbdd0401e39a292617d0ac2cfe91e4f969102b849851ee65e2"
+      },
+      "cm_ddm": {
+        "collection": "cogmod",
+        "data": "abb14e318cfe81a387eaf84a1ac5655c3c774e092366a879392efdc1c8c23dab",
+        "stan": "c324b12628028db89430340d88b931f821bbe5f8720810ec4adb34fcea9454e6"
+      },
+      "cm_exgaussian": {
+        "collection": "cogmod",
+        "data": "026d4c35a07a661c8d04c2da104d41f2aa2fd73e0ad0e7e5f967bdb631f427b8",
+        "stan": "0ad47afb34d5666151dddca482bce28bb14ff29332ce5a429bb5dd3a4b9fff54"
+      },
+      "cm_exwald": {
+        "collection": "cogmod",
+        "data": "f5d03725acd6d998a6a160796c2eb2d1d4881cb37629b77c7ff08ed204cf0dca",
+        "stan": "811f6e6374a364c3c844d3fbfb29c1ca9440b02ef2d834c017ce4f6e28abf4b6"
+      },
+      "cm_gamma": {
+        "collection": "cogmod",
+        "data": "14074b8be1c7c7c1d97a6d271a9ef1406331ba60fd5a83e86d20f1b6d117fa00",
+        "stan": "d55228d9707f9beb7a7cf1bf65c74e637c46f49c23c116d89f54e2a83de0830a"
+      },
+      "cm_geg": {
+        "collection": "cogmod",
+        "data": "c70d3c98dbeaedf13f916b710fb8ff86f29bb6355834070647cbb91253ed432c",
+        "stan": "a1452af9ba0ff670257de4b4cd33f5ff61d904c76f39f6f319913b52f6270549"
+      },
+      "cm_invgamma": {
+        "collection": "cogmod",
+        "data": "51c623153c44b646773001ee405853e3e7f0dff3e678668c7b34b562ebe489c7",
+        "stan": "1f1c0b3c7574293d568673dff8c13fc8a54bf5d348c375fea1540040b089daf7"
+      },
+      "cm_invgaussian": {
+        "collection": "cogmod",
+        "data": "713e8bbfb78b783e73a4f1d28004e452989694d2c85e12b8f87efdc5dbe8c294",
+        "stan": "ae9c1c7d99d776579b299ab27ffaec68d999405d7cee37beb7e072808461a46c"
+      },
+      "cm_invweibull": {
+        "collection": "cogmod",
+        "data": "626fdc816af8de2ab5e1b2dca4866292682a145d3aab83743c9093e4ecd0a500",
+        "stan": "82d5bef98e455ca1b2c2147530bf063095fa5bc1ebcd4c3258b9b7faa3903d16"
+      },
+      "cm_lba1": {
+        "collection": "cogmod",
+        "data": "77d4aaf918f40888b1dc638443d4ead21d4a622f8d3776e4dc845b024059aad7",
+        "stan": "0393fa1d1d126b5711faa5293fb3b466bad9df3353f217f2e9bbf764db753906"
+      },
+      "cm_lba2": {
+        "collection": "cogmod",
+        "data": "d0fa2479b3766124b8b2b63b40c414a70715434df8a58116f5e85b492070a750",
+        "stan": "e9b53940d09889fdd4471f11f3e3377ce0507681a953341cf06af22fa384d490"
+      },
+      "cm_lnr": {
+        "collection": "cogmod",
+        "data": "800ff79b9fa8840d07f2d3731872555073bfec40e1b0d876ce5a0a522887e572",
+        "stan": "b8a85561e9bf6f49490f9c22a64b34a00a3cb616015a9b9c293af6e52db403db"
+      },
+      "cm_lnr_bench": {
+        "collection": "cogmod",
+        "data": "6fd3a89f4b95d2766effd0baad7f9dbf3568594ed0236fb8e8246630eadd1f6a",
+        "stan": "710b09fe8bd30b74867e45fe38b390cca2dfccc015e5c913b5b6954044dfe3b6"
+      },
+      "cm_loggamma": {
+        "collection": "cogmod",
+        "data": "cf79c21b961a3d5af449368785174029ce1f3c35b72362742cfd3a5050a5f285",
+        "stan": "9950cbfc1bc8ca5d49b638132cdd1be9cd5f93c7b8e5596b057092c1153b2179"
+      },
+      "cm_lognormal": {
+        "collection": "cogmod",
+        "data": "50edffa510d19b6e67208f2257a91fd918d6eab0d2869edac4cc6a5779dfbe1c",
+        "stan": "cd4fb3f6648be1f68697178da6373200a1d2bf44c686345a522ec22e16ab1368"
+      },
+      "cm_logstudent": {
+        "collection": "cogmod",
+        "data": "61bf7529e1d628bcb353e87be80bcbc9ae1f569f6b0f2f8efd9a7a1fd06b34e5",
+        "stan": "b1d8d6be6c74129518124b8cf9416144c556e24e21fcd499b454f8f444fb46da"
+      },
+      "cm_logweibull": {
+        "collection": "cogmod",
+        "data": "91ed010363f896ca098bf5b1d1c8b6fa739dacd8d7d4515c9f4b032e07368dbe",
+        "stan": "869cf01191d404662a3e5b7ac8986a18073fe6d7fb2b1128fd4df3b2b99574d9"
+      },
+      "cm_rdm": {
+        "collection": "cogmod",
+        "data": "4e0b109e2605fd537e18f119bff3b04fae17099fb61efd32b0b1b43c09a7acf7",
+        "stan": "50416cee734f7ddeae9d20a7d34a9d8b24bbba8c9d0719e29efb9be0ab66e49f"
+      },
+      "cm_weibull": {
+        "collection": "cogmod",
+        "data": "7c380f5bc0733f392c2c6194cd09aa710f7652817183dc909e83229c10302356",
+        "stan": "67ce66557d739f6c079a9a47f80562b307284ababa79578a71da7fad59080522"
+      },
       "covid19imperial_v2": {
         "collection": "posteriordb",
         "data": "97389c0f2a24ffe59371abe416d72607471f5d319bae9b4f3495357d0a73544c",
@@ -521,6 +631,11 @@
         "collection": "posteriordb",
         "data": "97389c0f2a24ffe59371abe416d72607471f5d319bae9b4f3495357d0a73544c",
         "stan": "ea0d293199edfe1f06a9bdece810686d9cc98a64bc50fd23da4760a9c0733216"
+      },
+      "ctsem_ctsm": {
+        "collection": "ctsem",
+        "data": "24daa78a42c818eff28a686f013e785eda5e42030e026d35142c831bb6092735",
+        "stan": "b148f5b3f129f981e7a3bfbd966e825c28fbc7314d14e2896d18c7c6bc1b01d2"
       },
       "diamonds": {
         "collection": "posteriordb",
@@ -1626,16 +1741,16 @@
     },
     "protocol": "stanli-corpus-v4",
     "sources": {
-      "harnesses/corpus_bench.py": "4a0f8a2a84e045569b1dcf0f725845ec370a62068c76b40b8c6afe296670c490",
+      "harnesses/corpus_bench.py": "7fa3a7ac28b66fc373e4f515ee1db9464bd864504840b6e686f17a860dd73de9",
       "tools/bench_cmdstan_grad.cpp": "e377628e54d3783d0a3a4c1ed73fe1f0c5c015d19a65e8e58cb4ab2b2f361fdf",
       "tools/bench_grad.cpp": "2d5cf4ad201e4af4f01afc9144cb782cd599683d8fbc479884bba2e8f02bf5ec",
       "tools/benchmark_timer.hpp": "96846e97f74cec6b7334c543d53355ddba1254e4b891aa5507cb4458f5b1c57b",
       "tools/cmdstan_ref.py": "7d61e5a95f5b3ee3fe38f8360c29dcc216363711b55a30f7b52b4deb86c163c4",
-      "tools/corpus_inventory.py": "25f2be78a9e247615ecc954762a652674e1e1ba18c9bd69198cfa8c42ef44ac6",
-      "tools/verify_refs.py": "42b46d8cd5505d7e2668d2cada3a45c635d30d05565ecf5c4a351b94c861febb"
+      "tools/corpus_inventory.py": "61653eb2071d0b792e3f2e7e99b22038cef724ad254b3adc1f9fcbfcd68a46bf",
+      "tools/verify_refs.py": "20201012faa8e97388f0cac60ebb252671166843e9a200208618c0873fb0cba9"
     },
     "stanli_source": {
-      "head": "53f972f0a5324ae0e0fe558dada8e06efa31ca90",
+      "head": "1ebe01c5846c3252cc54ea7f4e495e0c49e533f3",
       "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "threads": {
@@ -1657,24 +1772,24 @@
       },
       "clang_sha256": "b8763cf250e607a778bb4603cecb5b90338814d0a3dfcba0d57b1de242f610e9",
       "cmdstan": {
-        "head": "d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6",
+        "head": "11cb052d3e1fc8c799e0fec559e2ee5452b38d27",
         "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "libraries": {
-        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_cvodes.a": "ebccfa3610e12fcf618ea9063a19d17b1efdbe2914cb7d4fde977840854ed898",
-        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_idas.a": "2cd70ec92aecb97b94bb0fe5cab718b84978cab925d8ea23448dec4ef850621f",
-        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_kinsol.a": "f71044c5aa70f722c680402a62a95f0e8b13f8fdb0e9e9b898d1478770a12d22",
-        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_nvecserial.a": "12a4c273b6aab99a4e8c6c99a8abe076c4c13e96e2ee4100625323d9e895af2a",
-        "stan/lib/stan_math/lib/tbb/libtbb.dylib": "40c552a9cc9bc64b168b82fca609711a040e39d91165d4d0537637b7be25fce3",
-        "stan/lib/stan_math/lib/tbb/libtbbmalloc.dylib": "30a36f334ea2d4fdea261509909581a6db211094242dfea9fcf544be9635c01e",
-        "stan/lib/stan_math/lib/tbb/libtbbmalloc_proxy.dylib": "2891ed2fee56ce237e23fccc12280e27ea80f3e68e560c8fd68ca4c3f947d974"
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_cvodes.a": "ff02832646b7027836fec6f0cbe3a8878ebc995e2bfc6720d0af30d109657473",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_idas.a": "0435dedceb3b3bc85b0734ab5530a64a7cfb5c85297f1a166b64aacbf7ba0942",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_kinsol.a": "8b584280a4198d33acfcffd3b46419fa1b10063c6cf3d9ad4caafe9730ea06a9",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_nvecserial.a": "d1fb253c1830e30f51b3ad0e9f190143a71d7429b46bbec46f2c13782c4c3ce9",
+        "stan/lib/stan_math/lib/tbb/libtbb.dylib": "bb8cc7df94931fccb41d6af1372b168958a7791aba95438bcdd3994b8ce0c0e5",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc.dylib": "c9816fff8e1bba5787e936e02caae5fbc0966b98ef7ac3de27cdaa7539d02e45",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc_proxy.dylib": "fc5788a0e339562b33a4d3e6961eddbb53da7eceed09a8f791fd14e71ee90105"
       },
       "math": {
-        "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+        "head": "8f326d14599d3030c626c46532d8e8534c1cdbec",
         "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "stan": {
-        "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+        "head": "c96d04115d35cb04f42e45c5a69a82f9704798f1",
         "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "stanli_fmt": {
@@ -1691,6 +1806,6 @@
       }
     }
   },
-  "run_id": "7bc507e14400797e",
-  "started_utc": "2026-09-21T10:21:25Z"
+  "run_id": "5fc1376df80b5a23",
+  "started_utc": "2026-10-07T15:05:16Z"
 }

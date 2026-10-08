@@ -820,3 +820,25 @@ Consequences for measurement, not adopted anywhere yet:
 
 The scripts are on the local scratch branch `density-fused-bones2`
 (`scratch-bones2/`), not on main.
+
+## sw_skewnormal: a page-boundary effect in the benchmark binary
+
+After #442 `sw_skewnormal` reads 0.80x against 29856a71 in `bench_grad`
+(0.802 at 8 pairs and 0.803 at 24 pairs in this sweep, 0.827 in the 2026-10-07
+corpus run). It calls only `normal_lpdf` and `student_t_lpdf`, which both builds
+already fuse. A fresh `origin/main` build reads 0.80; the same source with a
+driver-only change to `bench_grad.cpp` reads 0.95. `sample` puts the difference
+in `run_program_impl<false,double>`: 1,126 samples in the slow build and 728 in
+the fast one.
+
+The function's hot dispatch head and vector-multiply loop span its first 0x204
+bytes, so a 4 KB page boundary falls inside that region when the function starts
+at page offset 0xe00 or 0xf00. Starting offsets 0, 0x400, 0x500, 0x800, 0xc00,
+0xc40 and 0xf40 are fast; this was tested with `aligned(N)` variants in both
+layouts. The shipped library, `stanli_run` and the #444 head sit in fast
+placements, so users do not see the slowdown; the `bench_grad` driver, which
+links the runtime statically, does in some builds. `aligned(4096)` on the
+function removes the sensitivity and is neutral on 27 other models plus the
+starters (cycles 1.005), but grows the library by 1.54 MB (4%), so nothing was
+shipped. Evidence: `scratch-fd/results/sk` in the local worktree used for the
+fast-density measurements (branch `scratch/fast-density-variants`).

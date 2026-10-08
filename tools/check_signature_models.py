@@ -40,6 +40,7 @@ import platform
 import re
 import subprocess
 import sys
+import time
 
 from check_function_models import digest, parse, source_digest
 from cmdstan_ref import compile_cmd
@@ -270,6 +271,38 @@ def compare(name, source, manifest_sha, functions, reference, ledger,
     return used
 
 
+def land_seed(path, text, attempts=20, delay=0.02):
+    """Publish the shared context seed with one rename, never half written.
+
+    Concurrent ctest replays share the file, and Windows refuses to replace
+    one that another process has open, so retry, and stop as soon as the
+    file holds the text.
+    """
+    def current():
+        try:
+            return path.read_text() == text
+        except OSError:
+            return False
+
+    if current():
+        return
+    staged = path.with_name(f"{path.stem}.{os.getpid()}{path.suffix}")
+    try:
+        staged.write_text(text)
+        for attempt in range(attempts):
+            try:
+                os.replace(staged, path)
+                return
+            except PermissionError:
+                if current():
+                    return
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(delay * (attempt + 1))
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", type=pathlib.Path, default=REPO / "build-rel")
@@ -290,13 +323,7 @@ def main():
         p.resolve() for p in (args.build, args.stanc, args.cmdstan,
                               args.reference))
     args.data = args.build / "context_seed.json"
-    text = json.dumps(CONTEXT_DATA) + "\n"
-    if not args.data.exists() or args.data.read_text() != text:
-        # Concurrent ctest replays share this file: land it with one rename
-        # so a reader never sees it half written.
-        staged = args.data.with_name(f"context_seed.{os.getpid()}.json")
-        staged.write_text(text)
-        os.replace(staged, args.data)
+    land_seed(args.data, json.dumps(CONTEXT_DATA) + "\n")
     models = manifest_models(args.manifest or MANIFESTS)
     ledger = load_ledger(models)
     if args.model:
