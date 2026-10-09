@@ -399,6 +399,55 @@ them are in [data/2026-10-06-suffstat-census/result/](data/2026-10-06-suffstat-c
 - Object code: about 220 KB of text (125 KB the pass, 85 KB the
   least-squares preparation, 10 KB the kernels).
 
+### Re-measured on `main` (2026-10-09)
+
+Everything above was taken before the family and GLM forms. After the merge
+(`f99f3ec7`), on an idle machine, same protocol; raw results under
+`result/2026-10-09-main/`.
+
+- **Gradients, pass on against off:** 98 models have a collapsing term, 97
+  timed (`dogs_log` has a non-finite benchmark point). 7.8x geometric mean,
+  median 8.3x; 79 at least 2x, 40 at least 10x, none slower (lowest 1.000),
+  five within 10% of unchanged. Identical-binary control: 1.4% at worst. The
+  figure is not comparable with the 8.6x above: the set is different (97
+  models for 90) and the pass-off baseline is faster than it was, since the
+  fused-density work merged in between (`radon_pooled` with the pass off
+  went from 46.8 us to 37.3 us; with it on it is 97 ns in both). `radon_pooled`
+  385x, `nes` 179x, `nes_logit_model` 103x, `diamonds` 69x,
+  `election88_full` 10x.
+- **Preparation:** the first run found a regression from the new forms.
+  They made the pass slower on models it examines and leaves alone:
+  `lsat_model` +11.2 ms on a 1.7 ms preparation, `logistic_regression_rhs`
+  and `ch14_m14_7` +6 ms, the `wells_*` GLMs +1.6 ms. Three causes, each
+  fixed without changing a decision (the census is identical):
+  a pooled family ran its affine analysis before finding out that it had too
+  many groups; a GLM numbered every design row before finding out that none
+  repeated (a hash of each row now settles that first); and a
+  one-parameter group key went through the row table when the parameter's
+  own number would do. After: `lsat_model` +2.5 ms, the others +0.1 ms to
+  +0.8 ms. Over 342 models preparation is 7% longer at the median (0.09 ms)
+  and 3% in total (12.93 s to 13.34 s); on the 98 changed models 15% at the
+  median (0.39 ms). Against the build before the families a residue remains
+  on Bernoulli-logit models with a parameter per observation, the most
+  `hier_2pl` at +1.2 ms: the per-observation group pass and the member list
+  that pooling needs.
+- **Sampling:** 18 models, 4 chains of 1000 draws; posterior means within
+  0.12 posterior standard deviations of default mode on every column
+  (`election88_full`), whole runs up to 50x shorter (`ch12_m12_4`).
+- **Default mode against `614db5e1`:** geometric mean 0.9999 over 339
+  models; 24 more than 2% slower and 19 more than 2% faster. Rechecked with
+  15 rounds, 13 of the 24 remain, by 2% to 6%. The default-mode op graphs
+  are identical at every pass stage, and the no-op control build from
+  "Default mode" below moves the same models (`ch14_m14_1`: base 6.34 us,
+  this branch 6.65 us, no-op control 6.66 us), so it is placement again.
+  `ch12_m12_4` at 0.91 is bimodal in every build, the base included (82 us
+  or 108 us).
+- **Not caught before merge:** the report printed by
+  `STANLI_COLLAPSE_REPORT=1` wrote to `stderr`, which the runtime built
+  without the standard streams forbids. That check runs only after merge,
+  and `main` failed it at `f99f3ec7`. The report now goes through the
+  diagnostic sink.
+
 ### Default mode
 
 Default mode never runs the pass, and its op graphs are the same with and

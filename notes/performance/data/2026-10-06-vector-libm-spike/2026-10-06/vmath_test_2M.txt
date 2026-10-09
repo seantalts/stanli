@@ -1,0 +1,85 @@
+== exp
+  glibc-scalar    6.38 ns/elem  (1.00x)
+     [-40,40] uniform                       max    0.506 ULP at -31.335495755926448      mean 0.250  >1ULP 0.0000%  >2ULP 0.0000%
+     [-2,2] uniform                         max    0.505 ULP at 0.63014083390413766      mean 0.250  >1ULP 0.0000%  >2ULP 0.0000%
+     [-745,709] uniform                     max    0.506 ULP at 460.16034866017321       mean 0.250  >1ULP 0.0000%  >2ULP 0.0000%
+     +-10^[-300,-1]                         max    0.503 ULP at -0.0025506158613989196   mean 0.013  >1ULP 0.0000%  >2ULP 0.0000%
+  libmvec         2.67 ns/elem  (2.39x)
+     [-40,40] uniform                       max    2.934 ULP at 20.788660201177187       mean 0.508  >1ULP 11.5844%  >2ULP 0.1240%
+     [-2,2] uniform                         max    3.082 ULP at -0.0043999038171080862   mean 0.508  >1ULP 11.5814%  >2ULP 0.1197%
+     [-745,709] uniform                     max    2.927 ULP at -670.97899561730264      mean 0.501  >1ULP 11.2808%  >2ULP 0.1197%
+     +-10^[-300,-1]                         max    2.674 ULP at -0.00034153596088778163  mean 0.016  >1ULP 0.0992%  >2ULP 0.0024%
+  self            3.35 ns/elem  (1.90x)
+     [-40,40] uniform                       max    0.881 ULP at 37.090356596308297       mean 0.264  >1ULP 0.0000%  >2ULP 0.0000%
+     [-2,2] uniform                         max    0.836 ULP at 1.7605791587617414       mean 0.264  >1ULP 0.0000%  >2ULP 0.0000%
+     [-745,709] uniform                     max    0.882 ULP at -450.85921965050443      mean 0.263  >1ULP 0.0000%  >2ULP 0.0000%
+     +-10^[-300,-1]                         max    0.567 ULP at -0.086786238794988771    mean 0.013  >1ULP 0.0000%  >2ULP 0.0000%
+  eigen-avx2      3.16 ns/elem  (2.02x)
+     [-40,40] uniform                       max    1.639 ULP at -19.048128928497299      mean 0.289  >1ULP 0.3739%  >2ULP 0.0000%
+     [-2,2] uniform                         max    1.635 ULP at 1.7693618410625973       mean 0.290  >1ULP 0.3750%  >2ULP 0.0000%
+     [-745,709] uniform                     max    1.605 ULP at -409.26315554936684      mean 0.288  >1ULP 0.3514%  >2ULP 0.0000%
+     +-10^[-300,-1]                         max    0.708 ULP at -0.065077776576163343    mean 0.013  >1ULP 0.0000%  >2ULP 0.0000%
+== log
+  glibc-scalar    6.82 ns/elem  (1.00x)
+     10^[-10,10]                            max    0.511 ULP at 1.1247177201104923       mean 0.250  >1ULP 0.0000%  >2ULP 0.0000%
+     [0.5,2] uniform                        max    0.517 ULP at 1.0861323531080864       mean 0.250  >1ULP 0.0000%  >2ULP 0.0000%
+     10^[-307,308]                          max    0.504 ULP at 0.84428891892201796      mean 0.250  >1ULP 0.0000%  >2ULP 0.0000%
+     subnormal 10^[-323,-308]               max    0.500 ULP at 9.0336854523775609e-310  mean 0.249  >1ULP 0.0000%  >2ULP 0.0000%
+  libmvec         2.68 ns/elem  (2.54x)
+     10^[-10,10]                            max    1.514 ULP at 1.0035851995431848       mean 0.300  >1ULP 0.0604%  >2ULP 0.0000%
+     [0.5,2] uniform                        max    1.507 ULP at 1.0037921680473532       mean 0.357  >1ULP 1.8239%  >2ULP 0.0000%
+     10^[-307,308]                          max    1.474 ULP at 1.0036729412762724       mean 0.298  >1ULP 0.0021%  >2ULP 0.0000%
+     subnormal 10^[-323,-308]               max    0.500 ULP at 9.0336854523775609e-310  mean 0.249  >1ULP 0.0000%  >2ULP 0.0000%
+  self            8.27 ns/elem  (0.83x)
+     10^[-10,10]                            max    0.822 ULP at 1.4087400683309579       mean 0.251  >1ULP 0.0000%  >2ULP 0.0000%
+     [0.5,2] uniform                        max    0.837 ULP at 1.4112419143328079       mean 0.260  >1ULP 0.0000%  >2ULP 0.0000%
+     10^[-307,308]                          max    0.749 ULP at 0.63061941335862404      mean 0.250  >1ULP 0.0000%  >2ULP 0.0000%
+     subnormal 10^[-323,-308]               max    0.500 ULP at 2.9170594217820128e-317  mean 0.249  >1ULP 0.0000%  >2ULP 0.0000%
+  eigen-avx2      6.61 ns/elem  (1.03x)
+     10^[-10,10]                            max    1.223 ULP at 0.70647150529721559      mean 0.298  >1ULP 0.0215%  >2ULP 0.0000%
+     [0.5,2] uniform                        max    1.274 ULP at 0.70584454610561764      mean 0.313  >1ULP 0.7212%  >2ULP 0.0000%
+     10^[-307,308]                          max    1.175 ULP at 1.5756251101760286       mean 0.297  >1ULP 0.0006%  >2ULP 0.0000%
+     subnormal 10^[-323,-308]               max    0.717 ULP at 1.2529504778534012e-320  mean 0.292  >1ULP 0.0000%  >2ULP 0.0000%
+== log1p
+  glibc-scalar   12.70 ns/elem  (1.00x)
+     10^[-20,6] (z^2 of student_t/cauchy)   max    0.776 ULP at 0.40173088469945589      mean 0.219  >1ULP 0.0000%  >2ULP 0.0000%
+     [0,1] uniform (exp(-|x|))              max    0.832 ULP at 0.40799191693765091      mean 0.260  >1ULP 0.0000%  >2ULP 0.0000%
+     (-1,0) uniform                         max    0.851 ULP at -0.29666776714250542     mean 0.259  >1ULP 0.0000%  >2ULP 0.0000%
+     -10^[-300,-1]                          max    0.567 ULP at -0.098672487057024708    mean 0.013  >1ULP 0.0000%  >2ULP 0.0000%
+     10^[6,308]                             max    0.517 ULP at 1561665.681377033        mean 0.250  >1ULP 0.0000%  >2ULP 0.0000%
+  libmvec         3.33 ns/elem  (3.81x)
+     10^[-20,6] (z^2 of student_t/cauchy)   max    1.690 ULP at 0.00048827929351653128   mean 0.251  >1ULP 0.4999%  >2ULP 0.0000%
+     [0,1] uniform (exp(-|x|))              max    1.558 ULP at 0.0035912991908281051    mean 0.360  >1ULP 1.9870%  >2ULP 0.0000%
+     (-1,0) uniform                         max    1.559 ULP at -0.82587250179614036     mean 0.356  >1ULP 2.1917%  >2ULP 0.0000%
+     -10^[-300,-1]                          max    1.472 ULP at -0.0013544580713529522   mean 0.014  >1ULP 0.0081%  >2ULP 0.0000%
+     10^[6,308]                             max    1.298 ULP at 2.0024704493016122e+222  mean 0.375  >1ULP 2.3374%  >2ULP 0.0000%
+  self           11.58 ns/elem  (1.10x)
+     10^[-20,6] (z^2 of student_t/cauchy)   max    0.792 ULP at 0.4099413091064103       mean 0.219  >1ULP 0.0000%  >2ULP 0.0000%
+     [0,1] uniform (exp(-|x|))              max    0.832 ULP at 0.40799191693765091      mean 0.260  >1ULP 0.0000%  >2ULP 0.0000%
+     (-1,0) uniform                         max    0.805 ULP at -0.29389530128275354     mean 0.259  >1ULP 0.0000%  >2ULP 0.0000%
+     -10^[-300,-1]                          max    0.555 ULP at -0.093685604167970699    mean 0.013  >1ULP 0.0000%  >2ULP 0.0000%
+     10^[6,308]                             max    0.517 ULP at 1561665.681377033        mean 0.250  >1ULP 0.0000%  >2ULP 0.0000%
+  eigen-avx2      9.93 ns/elem  (1.28x)
+     10^[-20,6] (z^2 of student_t/cauchy)   max    2.198 ULP at 1.6176497124510261       mean 0.336  >1ULP 3.0404%  >2ULP 0.0016%
+     [0,1] uniform (exp(-|x|))              max    2.213 ULP at 0.56506149680623863      mean 0.437  >1ULP 6.3808%  >2ULP 0.0259%
+     (-1,0) uniform                         max    2.278 ULP at -0.29314056873178362     mean 0.394  >1ULP 6.8053%  >2ULP 0.0524%
+     -10^[-300,-1]                          max    1.969 ULP at -0.0018848478740962067   mean 0.024  >1ULP 0.5900%  >2ULP 0.0000%
+     10^[6,308]                             max    2.634 ULP at 9146484594911322         mean 0.359  >1ULP 4.5368%  >2ULP 0.0016%
+== log1p_exp
+  glibc-scalar   22.34 ns/elem  (1.00x)
+     [-30,30] uniform (logit scale)         max    1.420 ULP at -3.4641609458421598      mean 0.292  >1ULP 0.0495%  >2ULP 0.0000%
+     [-5,5] uniform                         max    1.499 ULP at -1.2873822475450831      mean 0.295  >1ULP 0.2957%  >2ULP 0.0000%
+     [-745,745] uniform                     max    1.351 ULP at -2.0189412449567499      mean 0.133  >1ULP 0.0024%  >2ULP 0.0000%
+  libmvec         6.81 ns/elem  (3.28x)
+     [-30,30] uniform (logit scale)         max    3.666 ULP at -2.7593910651928937      mean 0.411  >1ULP 8.0936%  >2ULP 0.2288%
+     [-5,5] uniform                         max    3.711 ULP at -4.1531625324292447      mean 0.428  >1ULP 8.8156%  >2ULP 0.3641%
+     [-745,745] uniform                     max    3.416 ULP at -2.8047440554475997      mean 0.256  >1ULP 5.6254%  >2ULP 0.0676%
+  self           19.02 ns/elem  (1.17x)
+     [-30,30] uniform (logit scale)         max    1.488 ULP at -0.45157063779628714     mean 0.298  >1ULP 0.3715%  >2ULP 0.0000%
+     [-5,5] uniform                         max    1.574 ULP at -1.2653248835165289      mean 0.300  >1ULP 0.4824%  >2ULP 0.0000%
+     [-745,745] uniform                     max    1.351 ULP at -2.0189412449567499      mean 0.140  >1ULP 0.0186%  >2ULP 0.0000%
+  eigen-avx2     15.76 ns/elem  (1.42x)
+     [-30,30] uniform (logit scale)         max    2.932 ULP at -0.43502032069850571     mean 0.368  >1ULP 4.7993%  >2ULP 0.0152%
+     [-5,5] uniform                         max    3.000 ULP at -0.44110701908878269     mean 0.380  >1ULP 5.1708%  >2ULP 0.0416%
+     [-745,745] uniform                     max    2.386 ULP at -0.63245999899368144     mean 0.154  >1ULP 0.3992%  >2ULP 0.0009%
+special-value mismatches: 0

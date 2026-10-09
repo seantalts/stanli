@@ -428,38 +428,41 @@ rejects a non-finite predictor in the few cases where Stan's Poisson GLM
 returns a non-finite value instead. `neg_binomial_2_log_glm` errors are
 reported under `neg_binomial_2_log_lpmf`.
 
-**Measured** (i9-13900K, one P-core, fast mode with the pass on against fast
-mode with `STANLI_NO_COLLAPSE=1`, paired `ab_bench_corpus.py`, 9 rounds; the
-identical-binary control is within 5% on 95% of models, 13% at worst, on a
-machine that was not idle): 91 of 352 corpus models have a term that
-collapses, and 90 of them could be timed. Their gradients are 8.6x faster in
-geometric mean; 68 are at least 2x faster, 45 at least 10x, and none is
-slower: `radon_pooled` 487x (46.8 us to 96 ns), `nes` 209x, the earnings
-regressions 83x to 133x, `diamonds` 75x, the hierarchical radon models 9x to
-16x, `election88_full` 6.8x. A model the pass leaves alone has the same op
-graph with it on or off.
+**Measured** (i9-13900K, one P-core, `main` at `f99f3ec7`, fast mode with
+the pass on against fast mode with `STANLI_NO_COLLAPSE=1`, paired
+`ab_bench_corpus.py`, 9 rounds on an idle machine; the identical-binary
+control is within 0.8% on 95% of models and 1.4% at worst): 98 of 352 corpus
+models have a term that collapses, and 97 of them could be timed. Their
+gradients are 7.8x faster in geometric mean (median 8.3x); 79 are at least
+2x faster, 40 at least 10x, and none is slower: `radon_pooled` 385x (37.3 us
+to 97 ns), `nes` 179x, the earnings regressions 63x to 109x,
+`nes_logit_model` 103x, `diamonds` 69x, `ch12_m12_4` 30x, the hierarchical
+radon models 10x to 13x, `election88_full` 10x. Five are within 10% of
+unchanged. A model the pass leaves alone has the same op graph with it on
+or off.
 
-The group form for the other densities and the GLMs came after those
-timings and was measured on the 21 models whose terms it changed, against
-the build before it (same harness, 9 rounds, identical-binary control within
-1.2%; `families-and-glms*.jsonl` beside the note's other results). 20 could be timed; all are faster,
-2.1x in geometric mean: `nes_logit_model` 103x (13.7 us to 133 ns; its
-`bernoulli_logit_glm` was not collapsed before), `i319_pois_fixed` 6.7x,
-`i319_pois_re` 3.4x, `aalto_poisson_simple` 2.1x, `election88_full` 1.44x
-(now 10x over the pass off), the binomial chimpanzee models 1.4x to 1.5x,
-`dogs` 1.24x, the least `ch14_m14_2` at 1.15x. That makes 98 corpus models
-with a collapsing term. The headline figures above were not re-measured.
-
-Preparation pays for the analysis: over all 342 timeable models it is 5%
-longer at the median (0.08 ms) and 3% longer in total (12.92 s to 13.31 s).
-Among the 91 models it changes the median is 20% (0.39 ms); the most added
-to any model is 42 ms, on `ch12_m12_6` (161 ms before), whose terms it
-examines and leaves alone. Sampling fourteen of the collapsed models with
-four chains gave posterior means within 0.15 posterior standard deviations
-of default mode on every parameter (`election88_full` the largest), and
-whole runs up to 41x shorter. The fast-mode gate in
+Preparation pays for the analysis: over all 342 timeable models it is 7%
+longer at the median (0.09 ms) and 3% longer in total (12.93 s to 13.34 s).
+Among the 98 models it changes the median is 15% (0.39 ms); the most added
+to a model of ordinary size is 42 ms, on `ch12_m12_6` (162 ms before), whose
+terms it examines and leaves alone. Six models it leaves alone prepare more
+than 1.5x slower, by 1 ms to 7 ms (`hier_2pl`, `prophet`, `lsat_model`,
+`bym2_offset_only`, `wells_dist`, `irt_2pl`): grouping their observations
+is most of a short preparation. Sampling eighteen of the collapsed models
+with four chains gave posterior means within 0.12 posterior standard
+deviations of default mode on every parameter (`election88_full` the
+largest), and whole runs up to 50x shorter. The fast-mode gate in
 [`TESTING.md`](../../TESTING.md#fast-mode) passes with the pass on; the
-largest deviation in the corpus is `election88_full` at 1.7e-13.
+largest deviation in the corpus is `election88_full` at 1.6e-13.
+
+Default mode against `main` before the pass (`614db5e1`), 339 models, 7
+rounds: geometric mean 0.9999. 24 models read more than 2% slower and 19
+more than 2% faster; with 15 rounds 13 of the 24 still do, by 2% to 6%
+(`aalto_lin` 0.94, `ch14_m14_1` 0.94). Their default-mode op graphs are
+identical at every pass stage, and an earlier build that added one unused
+function to the base moves the same models by as much, so this is code
+placement. `ch12_m12_4` reads 0.91 and is bimodal (82 us or 108 us from run
+to run) in every build, the base included.
 
 ## Lane partitioning (`partition.cpp`, disable: `STANLI_NO_PARTITION=1`)
 

@@ -1,0 +1,30 @@
+rank share_on share_off delta moved>0.10 model | dominant elem site (its elem share of all samples)
+ 1 0.799 0.793 +0.006 no sw_cumulative | stanli::{anon}::olglm_fwd 0.80
+ 2 0.779 0.770 +0.009 no wells_dist100_model | stan::math::bernoulli_logit_glm_lpmf 0.78
+ 3 0.772 0.762 +0.010 no ldaK2 | stanli::{anon}::lse_fwd_partials 0.53
+ 4 0.763 0.758 +0.005 no wells_dist100ars_model | stan::math::bernoulli_logit_glm_lpmf 0.76
+ 5 0.747 0.733 +0.014 no wells_dae_c_model | stan::math::bernoulli_logit_glm_lpmf 0.75
+ 6 0.740 0.738 +0.002 no wells_dae_model | stan::math::bernoulli_logit_glm_lpmf 0.74
+ 7 0.736 0.738 -0.002 no wells_interaction_model | stan::math::bernoulli_logit_glm_lpmf 0.74
+ 8 0.734 0.736 -0.002 no ldaK5 | stanli::{anon}::lse_fwd_partials 0.43
+ 9 0.732 0.741 -0.010 no wells_interaction_c_model | stan::math::bernoulli_logit_glm_lpmf 0.73
+10 0.714 0.714 +0.000 no wells_daae_c_model | stan::math::bernoulli_logit_glm_lpmf 0.71
+11 0.706 0.705 +0.001 no wells_dist | stanli::dens::bernoulli_logit_fwd 0.71
+12 0.697 0.674 +0.023 no lsat_model | stanli::dens::bernoulli_logit_fwd 0.70
+13 0.686 0.678 +0.008 no low_dim_gauss_mix_collapse | stanli::{anon}::log_mix_fwd 0.59
+14 0.682 0.686 -0.004 no low_dim_gauss_mix | stanli::{anon}::log_mix_fwd 0.58
+15 0.673 0.692 -0.020 no irt_2pl | stanli::dens::bernoulli_logit_fwd 0.67
+16 0.669 0.666 +0.003 no s2_discrete_weibull | stanli::{anon}::pow_fwd 0.48
+17 0.661 0.662 -0.001 no 2pl_latent_reg_irt | stanli::dens::bernoulli_logit_fwd 0.66
+18 0.652 0.733 -0.081 no wells_dae_inter_model | stan::math::bernoulli_logit_glm_lpmf 0.65
+19 0.638 0.638 +0.000 no hier_2pl | stanli::dens::bernoulli_logit_fwd 0.64
+20 0.619 0.606 +0.013 no sw_vonmises | stan::math::von_mises_lpdf 0.45
+21 0.616 0.612 +0.004 no GLM_Binomial_model | stan::math::binomial_logit_lpmf 0.62
+22 0.604 0.604 +0.001 no normal_mixture | stanli::{anon}::log_mix_fwd 0.60
+23 0.596 0.582 +0.014 no Mh_model | stanli::dens::binomial_elt_vector_fwd 0.41
+24 0.574 0.558 +0.017 no sw_bernoulli | stan::math::bernoulli_logit_glm_lpmf 0.57
+25 0.573 0.576 -0.003 no s2_cumulative_cloglog | stanli::{anon}::inv_cloglog_ufwd 0.25
+
+models in both runs: 336 ; |delta|>0.10: 11 ; down>0.10: 9 ; up>0.10: 2
+largest drops: ch12_m12_5 -0.44 (0.46->0.02), sw_lognormal -0.38 (0.39->0.02), nes_logit_model -0.34 (0.77->0.43), aalto_poisson_simple -0.30 (0.30->0.00), ch12_m12_7 -0.29 (0.47->0.18), ch16_m16_1 -0.23 (0.45->0.23), i319_pois_re -0.18 (0.25->0.08), dogs -0.13 (0.59->0.47), i319_pois_fixed -0.12 (0.44->0.31), wells_dae_inter_model -0.08 (0.73->0.65), cm_exgaussian -0.08 (0.37->0.29), ch11_m_pois -0.07 (0.14->0.07), ch13_m13_4b -0.06 (0.37->0.31), ch14_m14_2 -0.05 (0.21->0.16), election88_full -0.05 (0.35->0.31)
+largest rises: ch12_m12_4 +0.53 (0.02->0.55), dogs_hierarchical +0.33 (0.02->0.35), log10earn_height +0.06 (0.00->0.06), logearn_logheight_male +0.06 (0.00->0.06), earn_height +0.06 (0.00->0.06), sesame_one_pred_a +0.06 (0.00->0.06), cm_logweibull +0.06 (0.25->0.31), logmesquite_logvas +0.06 (0.01->0.06), mesquite +0.05 (0.01->0.06), cm_weibull +0.05 (0.28->0.34), logmesquite +0.05 (0.01->0.06), kidscore_interaction_c +0.05 (0.00->0.05), kidscore_interaction_c2 +0.05 (0.00->0.05), kidscore_interaction_z +0.05 (0.00->0.05), logmesquite_logvolume +0.05 (0.01->0.06)

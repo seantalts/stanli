@@ -1,0 +1,132 @@
+skipped dogs_log 59
+skipped s2_invgaussian 1
+skipped sir 3
+models 337
+all transcendental (elem+gamma+boost+longdouble) mean 0.295  p25 0.105  median 0.261  p75 0.439  p90 0.656  p95 0.736  max 0.859 | >=10%: 259  >=30%: 150  >=50%: 57
+elem                                             mean 0.258  p25 0.095  median 0.230  p75 0.384  p90 0.515  p95 0.662  max 0.800 | >=10%: 249  >=30%: 128  >=50%: 34
+gamma                                            mean 0.029  p25 0.000  median 0.000  p75 0.010  p90 0.078  p95 0.192  max 0.662 | >=10%: 30  >=30%: 7  >=50%: 2
+boost_special                                    mean 0.003  p25 0.000  median 0.000  p75 0.000  p90 0.000  p95 0.007  max 0.274 | >=10%: 4  >=30%: 0  >=50%: 0
+longdouble                                       mean 0.005  p25 0.000  median 0.000  p75 0.000  p90 0.000  p95 0.000  max 0.589 | >=10%: 3  >=30%: 3  >=50%: 2
+fma                                              mean 0.005  p25 0.000  median 0.000  p75 0.000  p90 0.017  p95 0.027  max 0.102 | >=10%: 1  >=30%: 0  >=50%: 0
+libm_misc                                        mean 0.011  p25 0.003  median 0.008  p75 0.018  p90 0.025  p95 0.030  max 0.100 | >=10%: 1  >=30%: 0  >=50%: 0
+
+function: mean share over models, #models >=5%, top model
+  elem/log1p                               0.0779  138  0.42 GLM_Binomial_model
+  elem/exp                                 0.0622  184  0.47 s2_cumulative_cloglog
+  elem/log                                 0.0345   90  0.23 hmm_drive_0
+  elem/eigen:scalar_exp_op                 0.0296   42  0.50 ldaK2
+  gamma/lgamma                             0.0206   36  0.41 s2_beta_binomial
+  elem/eigen:scalar_log_op                 0.0142   29  0.45 sw_gamma
+  elem/eigen:scalar_log1p_op               0.0137   12  0.60 wells_dae_inter_model
+  libm_misc/plt_or_unknown                 0.0106    0  0.04 s2_cumulative_cloglog
+  elem/pow                                 0.0105   17  0.48 s2_discrete_weibull
+  gamma/boost:digamma_imp                  0.0050   13  0.22 ch12_m12_1
+  fma/fma_fma3                             0.0046    7  0.10 ch15_m15_1
+  longdouble/powl_helper                   0.0031    3  0.42 i320_pois_trunc_ub
+  elem/wrap:log1p                          0.0026    5  0.22 lsat_model
+  gamma/wrap:lbeta                         0.0023    6  0.32 Survey_model
+  elem/expm1                               0.0022    3  0.14 i320_sratio_cs
+  elem/erfc                                0.0022    6  0.15 sw_exgaussian
+  elem/eigen:generic_pow_impl              0.0020    2  0.34 sw_weibull
+  elem/atan                                0.0012    2  0.22 s2_cumulative_cauchit
+  gamma/wrap:binomial_coefficient_log      0.0010    2  0.05 Survey_model
+  elem/wrap:log_sum_exp                    0.0009    1  0.05 low_dim_gauss_mix
+  boost_special/boost:hypergeometric_pFq_checked_series_impl 0.0008    1  0.25 cm_betadiscrete
+  elem/wrap:log1p_exp                      0.0007    4  0.07 sw_negbinomial
+  longdouble/expl                          0.0007    3  0.10 aalto_poisson_hurdle
+  boost_special/boost:overflow_error       0.0006    0  0.03 ch12_m12_1
+  elem/eigen:scalar_cos_op                 0.0006    1  0.19 sw_vonmises
+  elem/eigen:scalar_sin_op                 0.0005    1  0.17 sw_vonmises
+  elem/wrap:log_inv_logit                  0.0005    0  0.02 Mh_model
+  boost_special/boost:regularised_gamma_prefix 0.0004    2  0.06 i320_pois_trunc_ub
+
+site (kernel or Stan Math density holding the call): mean transcendental share, #models >=5%, top models
+  stan::math::bernoulli_logit_glm_lpmf                 0.0200   10  wells_dist100_model 0.78, wells_dist100ars_model 0.76, wells_dae_c_model 0.75, wells_dae_model 0.74
+  stanli::{anon}::clower_fwd                           0.0153   46  aalto_poisson_simple 0.14, logmesquite_logvolume 0.14, earn_height 0.13, log10earn_height 0.12
+  stanli::dens::{anon}::student_t_dispatch             0.0141   25  sw_student 0.27, s2_mv_subset 0.23, sw_lognormal 0.22, sw_mv_norescor 0.22
+  stanli::run_program_impl                             0.0123   32  hmm_example 0.35, hmm_gaussian 0.28, iohmm_reg 0.27, ch16_m16_1 0.23
+  stanli::dens::bernoulli_logit_fwd                    0.0117    7  wells_dist 0.71, lsat_model 0.70, irt_2pl 0.67, 2pl_latent_reg_irt 0.66
+  stanli::{anon}::family_grouped_fwd                   0.0113   17  dogs 0.47, nes_logit_model 0.43, i319_pois_fixed 0.31, election88_full 0.31
+  stan::math::binomial_coefficient_log                 0.0096   11  Survey_model 0.70, sw_binomial 0.52, sw_zi_binomial 0.39, s2_beta_binomial 0.30
+  stanli::{anon}::lse_fwd_partials                     0.0095    8  ldaK2 0.53, sw_acat 0.51, normal_mixture_k 0.47, sw_acat_cs 0.44
+  stan::math::binomial_logit_lpmf                      0.0094    8  GLM_Binomial_model 0.62, surgical_model 0.45, seeds_stanified_model 0.44, seeds_model 0.44
+  stanli::{anon}::clu_fwd                              0.0090   15  Rate_1_model 0.29, aalto_binom 0.29, Rate_5_model 0.25, aalto_bern 0.24
+  stan::math::neg_binomial_2_log_glm_lpmf              0.0084    4  i319_negbin_fixed 0.81, sw_negbinomial 0.76, i319_negbin_re 0.66, sw_re_negbin 0.60
+  stanli::{anon}::log1p_exp_ufwd                       0.0082   18  cm_lba1 0.25, cm_weibull 0.22, cm_gamma 0.20, cm_invweibull 0.19
+  stanli::dens::{anon}::BetaOp::run                    0.0074   14  sw_beta 0.65, s2_zi_beta 0.37, s2_zoi_beta 0.34, cm_betagate 0.15
+  stanli::{anon}::pow_fwd                              0.0074    9  s2_discrete_weibull 0.48, dogs_nonhierarchical 0.47, dugongs_model 0.36, s2_nlf 0.35
+  stan::math::poisson_log_lpmf                         0.0073    9  s2_rate 0.59, GLMM1_model 0.42, ch15_m15_9 0.28, ch15_m15_8 0.27
+  stan::math::binomial_lpmf                            0.0065   14  ch13_m13_1 0.23, ch13_m13_3 0.23, ch11_m11_7 0.22, ch13_m13_2 0.22
+  stan::math::poisson_lcdf                             0.0065    3  i320_pois_trunc_ub 0.82, i320_pois_trunc_both 0.77, aalto_poisson_hurdle 0.59
+  stanli::{anon}::log_mix_fwd                          0.0061    5  normal_mixture 0.60, low_dim_gauss_mix_collapse 0.59, low_dim_gauss_mix 0.58, ch12_m12_3_alt 0.16
+  stanli::{anon}::expv_fwd                             0.0059   13  s2_nl_noloop 0.18, sw_dist_sigma 0.16, sw_nonlinear 0.16, sw_gamma 0.12
+  stanli::dens::{anon}::with_view                      0.0055   11  sw_se 0.35, sw_dist_sigma 0.19, s2_me2_nomecor 0.15, losscurve_sislob 0.15
+  stan::math::beta_binomial_lpmf                       0.0050    3  ch12_m12_1 0.64, s2_custom_vint 0.52, s2_beta_binomial 0.51
+  stanli::dens::bind_args_m                            0.0048    5  s2_weights_trunc 0.35, s2_cens_interval 0.35, sw_trunc 0.34, sw_cens 0.30
+  stanli::{anon}::linear_gaussian_fwd                  0.0045   12  log10earn_height 0.06, earn_height 0.06, mesquite 0.06, logmesquite_logvas 0.06
+  stan::math::bernoulli_lpmf                           0.0043   11  Mt_model 0.27, Mb_model 0.18, sw_hurdle_lognormal 0.16, sw_zi_poisson 0.13
+  stan::math::poisson_log_glm_lpmf                     0.0039    3  sw_poisson 0.61, sw_re_pois 0.36, i319_pois_re2 0.33
+  stanli::{anon}::clglm_fwd                            0.0038    3  grsm_latent_reg_irt 0.50, gpcm_latent_reg_irt 0.42, sw_categorical 0.37
+  stanli::{anon}::logv_fwd                             0.0034    8  ldaK5 0.28, ldaK2 0.24, s2_cumulative_cauchit 0.15, s2_cox 0.14
+  stanli::{anon}::lane_instruction                     0.0033    7  cm_geg 0.17, s2_gev 0.15, cm_exgaussian 0.08, cm_lognormal 0.08
+  stanli::{anon}::lse2_fwd                             0.0031    6  ch15_m15_9 0.25, ch15_m15_8 0.25, Mh_model 0.18, Mth_model 0.12
+  stanli::dens::{anon}::ordered_logistic_summed        0.0029    3  ch12_m12_4 0.51, ch12_m12_6 0.28, ch12_m12_7 0.18, ch12_m12_5 0.02
+  stan::math::poisson_lpmf                             0.0026    6  ch11_m11_9 0.20, ch12_m12_3_alt 0.13, extra_hurdle_poisson 0.12, ch12_m12_3 0.10
+  stanli::dens::{anon}::LognormalOp::run               0.0026    4  s2_shifted_lognormal 0.36, s2_mi_lognormal 0.27, aalto_grp_prior_mean_var 0.09, losscurve_sislob 0.06
+  stanli::dens::{anon}::CauchyOp::run                  0.0025    6  kidscore_momhsiq 0.15, kidscore_momhs 0.15, kidscore_momiq 0.14, kidscore_interaction 0.14
+  stanli::{anon}::olglm_fwd                            0.0024    1  sw_cumulative 0.80
+  stan::math::beta_lcdf                                0.0023    1  cm_betadiscrete 0.78
+  stanli::dens::binomial_elt_vector_fwd                0.0022    2  Mh_model 0.41, sw_zi_binomial 0.32, multi_occupancy 0.02, Survey_model 0.00
+  stanli::{anon}::log1m_exp_ufwd                       0.0022    6  sw_hurdle_pois 0.17, sw_cratio_cs 0.17, i320_sratio_cs 0.16, i320_sratio_plain 0.07
+  stanli::dens::{anon}::GammaOp::run                   0.0022    2  sw_gamma 0.48, sw_hurdle_gamma 0.11, aalto_lin_std_t 0.03, dugongs_model 0.01
+  stanli::dens::{anon}::NormalOp::run                  0.0020    5  sw_weights 0.18, low_dim_gauss_mix 0.10, low_dim_gauss_mix_collapse 0.10, ch13_m13_7 0.08
+  stan::math::neg_binomial_2_log_lpmf                  0.0019    2  sw_zi_negbin 0.37, s2_hurdle_negbin 0.29
+  stanli::{anon}::invlogit_fwd                         0.0019    2  aalto_binomb 0.09, bones_model 0.08, surgical_model 0.04, cm_choco 0.03
+  stan::math::wiener_lpdf                              0.0019    2  cm_ddm 0.46, s2_wiener 0.17
+  stanli::{anon}::log1m_inv_logit_ufwd                 0.0019    3  sw_sratio 0.23, i320_sratio_plain 0.22, i320_sratio_cs 0.14, multi_occupancy 0.03
+  stanli::{anon}::structured_fwd                       0.0016    3  s2_unstr 0.09, s2_cox 0.06, s2_cox_cens 0.06, sw_mono 0.04
+  stanli::{anon}::oprobit_fwd                          0.0016    1  s2_cumulative_probit 0.52
+
+top models by transcendental share
+  0.859 (elem 0.06 gamma 0.03) i320_pois_trunc_ub           powl_helper 0.42, boost:regularised_gamma_prefix 0.06, expl 0.06, boost:gamma_incomplete_imp_final 0.05
+  0.834 (elem 0.44 gamma 0.40) sw_binomial                  lgamma 0.31, log1p 0.28, exp 0.08, wrap:binomial_coefficient_log 0.05
+  0.829 (elem 0.07 gamma 0.04) i320_pois_trunc_both         powl_helper 0.39, expl 0.06, boost:regularised_gamma_prefix 0.06, logl 0.05
+  0.822 (elem 0.14 gamma 0.66) s2_custom_vint               lgamma 0.39, boost:digamma_imp 0.17, log 0.08, wrap:lbeta 0.06
+  0.820 (elem 0.14 gamma 0.66) s2_beta_binomial             lgamma 0.41, boost:digamma_imp 0.17, log 0.09, wrap:lbeta 0.05
+  0.808 (elem 0.52 gamma 0.27) i319_negbin_fixed            log1p 0.29, lgamma 0.19, boost:digamma_imp 0.09, wrap:log1p_exp 0.07
+  0.800 (elem 0.80 gamma 0.00) sw_cumulative                log1p 0.41, eigen:scalar_exp_op 0.16, exp 0.13, eigen:scalar_log1p_op 0.10
+  0.785 (elem 0.48 gamma 0.29) sw_negbinomial               log1p 0.25, lgamma 0.20, boost:digamma_imp 0.09, wrap:log1p_exp 0.07
+  0.779 (elem 0.78 gamma 0.00) wells_dist100_model          eigen:scalar_log1p_op 0.49, eigen:scalar_exp_op 0.28
+  0.777 (elem 0.49 gamma 0.00) cm_betadiscrete              exp 0.37, boost:hypergeometric_pFq_checked_series_impl 0.25, log 0.11, plt_or_unknown 0.04
+  0.777 (elem 0.40 gamma 0.37) Survey_model                 wrap:lbeta 0.32, log1p 0.27, eigen:scalar_exp_op 0.07, log 0.06
+  0.774 (elem 0.77 gamma 0.00) ldaK2                        eigen:scalar_exp_op 0.50, eigen:scalar_log_op 0.24, log 0.03, plt_or_unknown 0.00
+  0.763 (elem 0.76 gamma 0.00) wells_dist100ars_model       eigen:scalar_log1p_op 0.50, eigen:scalar_exp_op 0.27
+  0.747 (elem 0.75 gamma 0.00) wells_dae_c_model            eigen:scalar_log1p_op 0.47, eigen:scalar_exp_op 0.27
+  0.745 (elem 0.49 gamma 0.25) sw_zi_binomial               log1p 0.33, lgamma 0.19, exp 0.08, log 0.07
+  0.740 (elem 0.74 gamma 0.00) wells_dae_model              eigen:scalar_log1p_op 0.47, eigen:scalar_exp_op 0.27
+  0.736 (elem 0.74 gamma 0.00) wells_interaction_model      eigen:scalar_log1p_op 0.46, eigen:scalar_exp_op 0.27
+  0.734 (elem 0.73 gamma 0.00) ldaK5                        eigen:scalar_exp_op 0.32, eigen:scalar_log_op 0.28, exp 0.07, log 0.06
+  0.732 (elem 0.73 gamma 0.00) wells_interaction_c_model    eigen:scalar_log1p_op 0.47, eigen:scalar_exp_op 0.26
+  0.714 (elem 0.71 gamma 0.00) wells_daae_c_model           eigen:scalar_log1p_op 0.45, eigen:scalar_exp_op 0.26
+  0.706 (elem 0.71 gamma 0.00) wells_dist                   log1p 0.33, eigen:scalar_exp_op 0.19, wrap:log1p 0.19, plt_or_unknown 0.02
+  0.698 (elem 0.23 gamma 0.45) sw_beta                      lgamma 0.27, boost:digamma_imp 0.18, log1p 0.08, eigen:scalar_log_op 0.07
+  0.698 (elem 0.70 gamma 0.00) lsat_model                   log1p 0.25, eigen:scalar_exp_op 0.22, wrap:log1p 0.22, plt_or_unknown 0.02
+  0.687 (elem 0.14 gamma 0.01) aalto_poisson_hurdle         powl_helper 0.25, expl 0.10, floor 0.08, log 0.05
+  0.686 (elem 0.69 gamma 0.00) low_dim_gauss_mix_collapse   log1p 0.34, exp 0.16, log 0.12, wrap:log_sum_exp 0.04
+  0.684 (elem 0.68 gamma 0.01) s2_discrete_weibull          pow 0.48, log 0.11, eigen:scalar_log_op 0.05, plt_or_unknown 0.03
+  0.684 (elem 0.68 gamma 0.00) low_dim_gauss_mix            log1p 0.31, exp 0.17, log 0.12, wrap:log_sum_exp 0.05
+  0.674 (elem 0.67 gamma 0.00) irt_2pl                      log1p 0.27, eigen:scalar_exp_op 0.21, wrap:log1p 0.18, plt_or_unknown 0.02
+  0.672 (elem 0.60 gamma 0.07) Mh_model                     log1p 0.37, exp 0.17, lgamma 0.05, plt_or_unknown 0.04
+  0.663 (elem 0.65 gamma 0.01) sw_vonmises                  eigen:scalar_cos_op 0.19, eigen:scalar_sin_op 0.17, atan 0.17, log 0.05
+
+transcendental share by width of the op being run (widest input/output length of the kernel call)
+  w1     all transcendental: mean 0.070 median 0.020 | elementary only: mean 0.057 median 0.016
+  w2-3   all transcendental: mean 0.010 median 0.000 | elementary only: mean 0.009 median 0.000
+  w4-15  all transcendental: mean 0.037 median 0.000 | elementary only: mean 0.034 median 0.000
+  w16+   all transcendental: mean 0.178 median 0.042 | elementary only: mean 0.158 median 0.042
+  w0     all transcendental: mean 0.000 median 0.000 | elementary only: mean 0.000 median 0.000
+  w?     all transcendental: mean 0.000 median 0.000 | elementary only: mean 0.000 median 0.000
+elementary in ops of width >= 4                  mean 0.192  p25 0.018  median 0.102  p75 0.318  p90 0.504  p95 0.662  max 0.799 | >=10%: 169  >=30%: 98  >=50%: 34
+elementary in ops of width >= 16                 mean 0.158  p25 0.000  median 0.042  p75 0.295  p90 0.464  p95 0.660  max 0.799 | >=10%: 143  >=30%: 80  >=50%: 29
+elementary in ops of width 1                     mean 0.057  p25 0.001  median 0.016  p75 0.075  p90 0.181  p95 0.296  max 0.494 | >=10%: 56  >=30%: 16  >=50%: 0
+all transcendental in ops of width >= 4          mean 0.215  p25 0.018  median 0.104  p75 0.350  p90 0.613  p95 0.714  max 0.827 | >=10%: 171  >=30%: 109  >=50%: 51

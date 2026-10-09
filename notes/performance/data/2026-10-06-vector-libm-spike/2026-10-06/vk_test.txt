@@ -1,0 +1,15 @@
+bernoulli_logit source=self: 110400 elements, max lp diff 2.00 ULP, max partial diff 2.00 ULP, max |sum - sequential sum| / sum|lp| 1.22e-15
+bernoulli_logit source=mvec: 110400 elements, max lp diff 3.00 ULP, max partial diff 2.00 ULP, max |sum - sequential sum| / sum|lp| 8.11e-16
+log1p 10^[-20,6]   self vs glibc scalar: 936 of 4000000 differ (0.0234%), max 1.00 ULP
+log1p 10^[-20,6]   mvec vs glibc scalar: 377868 of 4000000 differ (9.4467%), max 2.00 ULP
+log1p [0,1]        self vs glibc scalar: 8328 of 4000000 differ (0.2082%), max 1.00 ULP
+log1p [0,1]        mvec vs glibc scalar: 1133841 of 4000000 differ (28.3460%), max 2.00 ULP
+log1p (-1,0)       self vs glibc scalar: 7576 of 4000000 differ (0.1894%), max 1.00 ULP
+log1p (-1,0)       mvec vs glibc scalar: 1084340 of 4000000 differ (27.1085%), max 2.00 ULP
+log1p 10^[6,300]   self vs glibc scalar: 129 of 4000000 differ (0.0032%), max 1.00 ULP
+log1p 10^[6,300]   mvec vs glibc scalar: 1184489 of 4000000 differ (29.6122%), max 1.00 ULP
+exp [-40,40]     self vs glibc scalar: 391906 of 4000000 differ (9.7977%), max 1.00 ULP
+exp [-40,40]     mvec vs glibc scalar: 1738287 of 4000000 differ (43.4572%), max 3.00 ULP
+exp [-745,709]   self vs glibc scalar: 382511 of 4000000 differ (9.5628%), max inf ULP
+exp [-745,709]   mvec vs glibc scalar: 1692348 of 4000000 differ (42.3087%), max 3.00 ULP
+failures: 0

@@ -569,6 +569,180 @@ static void test_binomial_elt_fusion() {
   expect_same_grad("binomial elt", std::move(g), f2, tt, want);
 }
 
+// A weighted beta-binomial likelihood, `target += w[n] * beta_binomial_lpmf(
+// y[n] | T[n], alpha[n], beta)`: each lane consumes its density, so the fused
+// op must give one value per lane. This kernel once had no such form and
+// wrote the sum into the first element, which made the weighted total and
+// its gradient wrong.
+static void test_beta_binomial_elt_fusion() {
+  const int L = 24;
+  Graph g;
+  Fills fills;
+  const int base = g.add_slot(L, true);
+  const int beta = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int l = 0; l < L; ++l) {
+    const int alpha = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {base}, alpha, {l});
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_BETA_BINOMIAL_LPMF, {alpha, beta}, lp,
+                            {-1, l % 4, -1, 5 + l % 3});
+    g.ops[(size_t)id].variant = 0x03;
+    const int w = g.add_slot(1, false);
+    fills.emplace_back(w, std::vector<double>{0.5 + 0.1 * (l % 5)});
+    const int t = g.add_slot(1, false);
+    g.add_op(OP_MUL, {w, lp}, t);
+    terms.push_back(t);
+  }
+  const std::vector<double> want = reference(g, fills, terms);
+
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const PartitionStats st = partition_lanes(g, f2, tt, {});
+  expect("beta-binomial elt one group", st.groups == 1 && st.lanes == L);
+  bool elementwise = false;
+  for (const Op& op : g.ops)
+    if (op.opcode == OP_BETA_BINOMIAL_LPMF)
+      elementwise =
+          (op.variant & 0x40u) != 0 && g.slots[(size_t)op.out].len == L;
+  expect("beta-binomial elt one value per lane",
+         elementwise && count_opcode(g, OP_BETA_BINOMIAL_LPMF) == 1);
+  expect_same_grad("beta-binomial elt", std::move(g), f2, tt, want);
+}
+
+// Every density the trait table lets a pass fuse must have both forms: the
+// summed one, and one value per element (variant bit 0x40) that sums to it
+// with the same gradient. The table is the passes' only source for this, so
+// a listed density without the second form is fused into a wrong answer.
+struct ListedDensity {
+  const char* name;
+  uint16_t opcode;
+  int reals;       // real arguments, the variate included
+  int int_groups;  // 0, one flat outcome array, or two [len, vals...] groups
+};
+
+static bool both_forms_agree(const ListedDensity& d, int fill, int outcome,
+                             bool* evaluated) {
+  const int L = 3;
+  // Several ways to place the arguments, since each density wants its own:
+  // all in (0, 1) rising or falling by argument, the same above 1, and the
+  // variate between its bounds.
+  const auto at = [&](int64_t i) {
+    const double j = (double)(i / L), e = (double)(i % L);
+    switch (fill) {
+      case 0:
+        return 0.2 + 0.15 * j + 0.04 * e;
+      case 1:
+        return 0.8 - 0.15 * j + 0.04 * e;
+      case 2:
+        return 1.3 + 0.6 * j + 0.1 * e;
+      case 3:
+        return 3.1 - 0.6 * j + 0.1 * e;
+      default:
+        return i / L == 0 ? 0.5 + 0.04 * e : i / L == 1 ? 0.1 : 0.9 + 0.3 * j;
+    }
+  };
+  const int low = outcome, high = outcome + 1;
+  const auto build = [&](bool elementwise) {
+    Graph g;
+    std::vector<int> in;
+    for (int j = 0; j < d.reals; ++j) in.push_back(g.add_slot(L, true));
+    std::vector<int> idata;
+    if (d.int_groups == 1) idata = {low, high, high};
+    if (d.int_groups == 2) idata = {L, low, high, high, -1, 4};
+    const int lp = g.add_slot(elementwise ? L : 1, false);
+    const int id = g.add_op(d.opcode, {}, lp, idata);
+    g.ops[(size_t)id].n_in = (uint8_t)d.reals;
+    for (int j = 0; j < d.reals; ++j) g.ops[(size_t)id].in[j] = in[(size_t)j];
+    const uint8_t all = (uint8_t)((1u << d.reals) - 1u);
+    g.ops[(size_t)id].variant = elementwise ? (uint8_t)(all | 0x40u) : all;
+    int term = lp;
+    if (elementwise) {
+      term = g.add_slot(1, false);
+      g.add_op(OP_SUM_VEC, {lp}, term);
+    }
+    reduce_into_result(g, {term});
+    return testutil::run_grad(std::move(g), Fills{}, at);
+  };
+  std::vector<double> summed;
+  try {
+    summed = build(false);
+  } catch (const std::exception&) {
+    return true;  // not a valid point for this density
+  }
+  for (double x : summed)
+    if (!std::isfinite(x)) return true;
+  if (summed.empty() || summed[0] == 0) return true;
+  *evaluated = true;
+  std::vector<double> each;
+  try {
+    each = build(true);
+  } catch (const std::exception&) {
+    return false;
+  }
+  if (each.size() != summed.size()) return false;
+  double scale = 1;
+  for (size_t k = 1; k < summed.size(); ++k)
+    scale = std::max(scale, std::abs(summed[k]));
+  bool ok = std::abs(each[0] - summed[0]) <= 1e-12 * std::abs(summed[0]);
+  for (size_t k = 1; k < summed.size(); ++k)
+    ok = ok && std::abs(each[k] - summed[k]) <= 1e-12 * scale;
+  return ok;
+}
+
+static void test_listed_densities_have_both_forms() {
+  std::vector<ListedDensity> listed;
+#define STANLI_TEST_REAL(code, fn, arity, tier) \
+  listed.push_back({#fn, code, arity, 0});
+  STANLI_SCALAR_DENSITY_LIST(STANLI_TEST_REAL)
+#undef STANLI_TEST_REAL
+#define STANLI_TEST_INT(code, fn, nreal, tier) \
+  listed.push_back({#fn, code, nreal, 1});
+  STANLI_INT_DENSITY_LIST(STANLI_TEST_INT)
+#undef STANLI_TEST_INT
+  listed.push_back({"bernoulli_lpmf", OP_BERNOULLI_LPMF, 1, 1});
+  listed.push_back({"bernoulli_logit_lpmf", OP_BERNOULLI_LOGIT_LPMF, 1, 1});
+  listed.push_back({"poisson_lpmf", OP_POISSON_LPMF, 1, 1});
+  listed.push_back({"poisson_log_lpmf", OP_POISSON_LOG_LPMF, 1, 1});
+  listed.push_back({"neg_binomial_2_lpmf", OP_NEG_BINOMIAL_2_LPMF, 2, 1});
+  listed.push_back({"binomial_lpmf", OP_BINOMIAL_LPMF, 1, 2});
+  listed.push_back({"binomial_logit_lpmf", OP_BINOMIAL_LOGIT_LPMF, 1, 2});
+  listed.push_back({"beta_binomial_lpmf", OP_BETA_BINOMIAL_LPMF, 2, 2});
+
+  // The list above is the trait table's: a density added to one and not
+  // the other is a failure here, not a gap.
+  for (int oc = 0; oc < OP_NONE_; ++oc) {
+    if (!has_op_trait((uint16_t)oc, op_trait::kRerollAnyDensity)) continue;
+    bool covered = false;
+    for (const ListedDensity& d : listed) covered |= d.opcode == oc;
+    if (!covered) {
+      ++failures;
+      std::printf("FAIL opcode %d has the density trait and no entry here\n",
+                  oc);
+    }
+  }
+
+  for (const ListedDensity& d : listed) {
+    expect((std::string(d.name) + " carries the density trait").c_str(),
+           has_op_trait(d.opcode, op_trait::kRerollAnyDensity));
+    bool evaluated = false, agree = true;
+    for (int fill = 0; fill < 5; ++fill)
+      for (int outcome = 0; outcome < (d.int_groups ? 2 : 1); ++outcome)
+        agree = both_forms_agree(d, fill, outcome, &evaluated) && agree;
+    if (!evaluated) {
+      ++failures;
+      std::printf("FAIL %s: no valid point found to compare its forms at\n",
+                  d.name);
+    } else if (!agree) {
+      ++failures;
+      std::printf(
+          "FAIL %s: the elementwise form does not sum to the summed "
+          "form, or its gradient differs\n",
+          d.name);
+    }
+  }
+}
+
 // Survey_model's accumulator: lanes delimited by an element store rather
 // than a term, at indices that march by one. The run becomes a single slice
 // store, and the reduction that reads the whole vector afterwards is what
@@ -1162,6 +1336,8 @@ int main() {
   test_binomial_idata_groups();
   test_width_w_outcome_group();
   test_binomial_elt_fusion();
+  test_beta_binomial_elt_fusion();
+  test_listed_densities_have_both_forms();
   test_store_delimited_lanes();
   test_two_templates_interleaved();
   test_hoisted_shared_scalar_reads();

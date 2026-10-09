@@ -1,0 +1,6 @@
+wells_dist                   base 1.07 ms  new 1.07 ms  ratio 1.007
+irt_2pl                      base 0.83 ms  new 0.83 ms  ratio 0.995
+sw_student                   base 0.68 ms  new 0.68 ms  ratio 1.005
+eight_schools_centered       base 0.32 ms  new 0.32 ms  ratio 1.010
+radon_pooled                 base 3.69 ms  new 3.68 ms  ratio 1.001
+hier_2pl                     base 5.31 ms  new 5.29 ms  ratio 1.003
