@@ -130,6 +130,30 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
   model
 }
 
+#' Check Stan code for syntax and type errors
+#'
+#' Runs the Stan compiler front end on the code and nothing else: no data is
+#' needed and no model is built.
+#'
+#' @param code Stan model source.
+#' @param include_paths Directories searched for `#include` files, as in
+#'   [stanli_model()].
+#' @return `TRUE`, invisibly. An invalid program is an error carrying the
+#'   compiler's message.
+#' @export
+stanli_check_syntax <- function(code, include_paths = NULL) {
+  if (!is.character(code) || length(code) != 1L || is.na(code))
+    stop("code must be a single string of Stan source", call. = FALSE)
+  load_runtime()
+  paths <- character()
+  if (grepl("#include", code, fixed = TRUE) || !is.null(include_paths))
+    paths <- stan_include_paths(include_paths, NULL)
+  if (.Call("stanli_r_has_embedded_stanc"))
+    .Call("stanli_r_stan_to_mir", code, paths, FALSE) else
+    stanc_mir(code, include_paths = paths)
+  invisible(TRUE)
+}
+
 # The whole object, from its source: everything a `stanli_model` carries
 # besides the source is derived from the handle, so a rebuild under another
 # seed must recompute all of it. Transformed data can size a parameter

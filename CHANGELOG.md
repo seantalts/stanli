@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- R: what a brms backend needs. `as_stanfit()` takes `exclude` to leave
+  variables out of the stored draws, records each chain's `adapt_delta` and
+  `max_treedepth` where brms reads them, and lets a model be reattached to a
+  fit whose variables brms has renamed or dropped; `stanli_check_syntax()`
+  checks Stan code without data. A stanli fit now completes a real `brmsfit`
+  through brms's `"mock"` backend (see `docs/teaching-support.md`).
+- R: attaching stanli after brms no longer breaks `log_lik()` on a `brmsfit`.
+  stanli's generic masked brms's and had no method for it; it now hands
+  objects of other packages to `rstantools::log_lik()`.
 - Fast mode (`fast_math`) now collapses likelihood terms that repeat over the
   data. A density whose rows repeat is evaluated once per distinct row; a
   `normal` or `lognormal` term with a data variate becomes per-group

@@ -8,7 +8,7 @@
 \usage{
 as_stanfit(x, ...)
 
-\method{as_stanfit}{stanli_fit}(x, model = x$model, ...)
+\method{as_stanfit}{stanli_fit}(x, model = x$model, exclude = NULL, ...)
 
 \method{as_stanfit}{stanli_stanfit}(x, model, ...)
 }
@@ -22,6 +22,10 @@ unchanged unless a replacement `model` is supplied.}
 \item{model}{A `stanli_model` made with the original code and data. Defaults
 to the model retained by a `stanli_fit`. Use `NULL` for a draws-only result.
 A replacement must match the fit's output columns and parameter count.}
+
+\item{exclude}{Names of variables to leave out of the stored draws, as
+`pars` with `include = FALSE` does in `rstan::sampling()`. Every element
+of a named container is dropped. The live model is unaffected.}
 }
 \value{
 An S4 object inheriting from `stanfit`, with samples, sampler
