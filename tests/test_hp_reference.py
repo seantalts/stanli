@@ -141,7 +141,8 @@ class Builtins(unittest.TestCase):
     def setUp(self):
         mp.dps = 50
 
-    def close(self, a, b, tol=mpf(10) ** -45):
+    def close(self, a, b, tol=None):
+        tol = mpf(10) ** -45 if tol is None else tol
         self.assertLess(abs(a - b), tol * max(1, abs(b)))
 
     def test_student_t_lccdf_at_center_is_log_half(self):
@@ -186,7 +187,8 @@ class Densities(unittest.TestCase):
     def setUp(self):
         mp.dps = 50
 
-    def close(self, a, b, tol=mpf(10) ** -45):
+    def close(self, a, b, tol=None):
+        tol = mpf(10) ** -45 if tol is None else tol
         self.assertLess(abs(a - b), tol * max(1, abs(b)))
 
     def test_skew_normal_with_zero_shape_is_normal(self):
