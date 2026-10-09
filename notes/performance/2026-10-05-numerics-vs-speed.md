@@ -189,9 +189,11 @@ build's:
   high-precision reference (as `hp_reference.py` does for two models), with a
   scaled-error bound in place of the 10-ULP CmdStan gates, and a report of
   where fast mode is less accurate than the default and by how much.
-- Sampling checks: posterior agreement with the default mode (means,
-  intervals, R-hat, ESS per gradient) on the corpus models that have
-  reference posteriors.
+- Sampling checks (done 2026-10-09, [record](2026-10-09-fast-mode-sampling-check.md)):
+  posterior agreement with the default mode (means, intervals, R-hat, ESS per
+  gradient) on the 39 corpus models that have reference posteriors and 81 more
+  that fast mode changes most. 17 of 120 were flagged; none held up against
+  default mode sampled with other seeds, and ESS per gradient is 1.01x.
 
 ### In fast mode
 
@@ -214,8 +216,13 @@ build's:
   60, s2_hurdle_negbin 34, s2_car 16, sw_me 15, s2_discrete_weibull 14).
   Fast mode is not held to those gates. Its own gate is in
   [TESTING.md](../../TESTING.md#fast-mode) (`tools/verify_refs.py
-  --fast-math`); it still needs its own corpus benchmark against CmdStan and
-  the sampling checks described above.
+  --fast-math`); it still needs its own corpus benchmark against CmdStan.
+- Sampling (2026-10-09, [record](2026-10-09-fast-mode-sampling-check.md)):
+  120 models (39 with reference posteriors) sampled in both modes, 4 chains
+  of 1,000 warmup and 1,000 draws. Posteriors agree with default mode and with
+  the references to within what default mode shows against itself with other
+  seeds; ESS per gradient evaluation is 1.01x (0.95 to 1.09). Nothing outside
+  those 120 models and Apple Silicon was sampled.
 
 ### Candidates
 
