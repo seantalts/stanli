@@ -1,7 +1,7 @@
 // The sampling worker: stanc3 (js_of_ocaml) compiles the model to MIR,
 // stanli.wasm lowers it and runs NUTS or WALNUTS. Everything heavy lives
 // here so the page never blocks. Protocol: {cmd: "run", code, dataJson,
-// seed, warmup, samples, delta, sampler, maxError, pathfinderInit} in;
+// seed, warmup, samples, delta, sampler, maxError, pathfinderInit, fastMath} in;
 // {status} progress
 // messages and one {done} or {error} out. `sampler` is "nuts",
 // "walnuts" or "pathfinder".
@@ -28,8 +28,14 @@ function ensureStanc() {
     importScripts("stancjs.bc.js");
 }
 
-function compileMir(code) {
+function compileMir(code, fastMath) {
   ensureStanc();
+  if (fastMath) {
+    if (typeof globalThis.stanli_compile_fast !== "function")
+      throw new Error("fastMath needs the portable stanli compiler with the " +
+                      "stanli_compile_fast export");
+    return globalThis.stanli_compile_fast("embedded_model", code);
+  }
   if (typeof globalThis.stanli_compile === "function")
     return globalThis.stanli_compile("embedded_model", code);
   return globalThis.stanc(
@@ -155,9 +161,9 @@ onmessage = async (e) => {
       // and never load the compiler.
       say("compiling Stan -> MIR (stanc3)");
       ensureStanc();
-      const sc = compileMir(req.code);
+      const sc = compileMir(req.code, !!req.fastMath);
       if (sc.errors) throw new Error(Array.from(sc.errors).join("\n"));
-      postMessage({ done: { mir: String(sc.result),
+      postMessage({ done: { mir: String(sc.result), fastMath: !!req.fastMath,
                             ms: { stanc: performance.now() - t0 } } });
       return;
     }
@@ -170,7 +176,7 @@ onmessage = async (e) => {
     if (!mir) {
       say("compiling Stan -> MIR (stanc3)");
       ensureStanc();
-      const sc = compileMir(req.code);
+      const sc = compileMir(req.code, !!req.fastMath);
       if (sc.errors) throw new Error(Array.from(sc.errors).join("\n"));
       mir = String(sc.result);
     }
@@ -183,9 +189,21 @@ onmessage = async (e) => {
     const errPtr = M._malloc(errLen);
     // The construction seed CmdStan would use: transformed data draws
     // from it once, at build time, so every chain of this run shares them.
-    const model = M._stanli_model_new_seeded(mirPtr, dataPtr,
-                                            (req.seed ?? 1) >>> 0, errPtr,
+    let model;
+    if (req.fastMath) {
+      const optsPtr = M._malloc(12);
+      M._stanli_model_opts_init(optsPtr);
+      const fields = new Uint32Array(M.HEAPF64.buffer, optsPtr, 3);
+      fields[0] = (req.seed ?? 1) >>> 0;
+      fields[2] = 1;
+      model = M._stanli_model_new_with_opts(mirPtr, dataPtr, optsPtr, errPtr,
                                             errLen);
+      M._free(optsPtr);
+    } else {
+      model = M._stanli_model_new_seeded(mirPtr, dataPtr,
+                                         (req.seed ?? 1) >>> 0, errPtr,
+                                         errLen);
+    }
     M._free(mirPtr);
     M._free(dataPtr);
     if (!model) throw new Error(M.UTF8ToString(errPtr));
@@ -315,6 +333,7 @@ onmessage = async (e) => {
     postMessage({
       done: {
         names, samples, generatedStart, pathfinder: pf,
+        fastMath: !!req.fastMath,
         sampler: pathfinder ? "pathfinder" : walnuts ? "walnuts" : "nuts",
         maxDepth: pathfinder ? null : 10,
         samplerStats: samplerStats ? samplerStats.buffer : null,

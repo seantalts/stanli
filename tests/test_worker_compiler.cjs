@@ -49,6 +49,11 @@ require(workerPath);
 const code = fs.readFileSync(
     path.join(__dirname, "fixtures", "es.stan"), "utf8");
 
+const fastCode = `
+data { int<lower=0> N; vector[N] x; vector[N] y; }
+parameters { real a; real b; real<lower=0> sigma; }
+model { y ~ normal(a + b * x, sigma); }`;
+
 Promise.resolve(globalThis.onmessage({data: {cmd: "compile", code}}))
     .then(() => {
       const completed = messages.filter((message) => message.done);
@@ -66,6 +71,29 @@ Promise.resolve(globalThis.onmessage({data: {cmd: "compile", code}}))
       if (JSON.stringify(imports) !== JSON.stringify(expected))
         throw new Error("unexpected import order: " + JSON.stringify(imports));
 
+      return globalThis.onmessage({data: {cmd: "compile", code: fastCode}})
+          .then(() => globalThis.onmessage(
+              {data: {cmd: "compile", code: fastCode, fastMath: true}}));
+    })
+    .then(() => {
+      const results = messages.filter((message) => message.done || message.error)
+                          .slice(1);
+      if (results.length !== 2) throw new Error("expected two more replies");
+      if (mode === "fallback") {
+        if (results[0].error || !results[1].error ||
+            !/fastMath/.test(results[1].error))
+          throw new Error("fastMath without the portable compiler must fail " +
+                          "naming fastMath: " + JSON.stringify(results[1]).slice(0, 200));
+        console.log("test_worker_compiler " + mode + " OK");
+        return;
+      }
+      const [plain, fast] = results.map((message) => message.done);
+      if (!plain || !fast) throw new Error("fast compile failed: " +
+                                           JSON.stringify(results).slice(0, 200));
+      if (plain.fastMath !== false || fast.fastMath !== true)
+        throw new Error("compile did not report fastMath");
+      if (!fast.mir.startsWith("STANLI2:") || fast.mir === plain.mir)
+        throw new Error("fastMath did not change the compiled MIR");
       console.log("test_worker_compiler " + mode + " OK");
     })
     .catch((error) => {

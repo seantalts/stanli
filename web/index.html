@@ -31,6 +31,7 @@
     border: 1px solid #8884; border-radius: 4px; padding: .2rem .35rem;
   }
   .bar input { width: 4.6rem; }
+  .bar input[type=checkbox] { width: auto; }
   button {
     font: 600 .95rem system-ui; padding: .45rem 1.1rem; border-radius: 6px;
     border: 1px solid #4a7; background: #4a7; color: #fff; cursor: pointer;
@@ -176,6 +177,8 @@ graph and runs Stan Dynamic HMC,
   <label>warmup <input id="warmup" value="1000"></label>
   <label>samples <input id="samples" value="1000"></label>
   <label>seed <input id="seed" value="1"></label>
+  <label title="Fused multiply-add rewriting and faster kernels; results can differ from CmdStan in the last bits">
+    <input id="fastmath" type="checkbox"> fast math</label>
   <label id="deltalab">delta <input id="delta" value="0.8"></label>
   <label id="maxerrlab" hidden>max err <input id="maxerr" value="0.5"></label>
   <label id="initlab">init <select id="initmethod">
@@ -727,6 +730,7 @@ $("run").onclick = async () => {
     samples: parseInt($("samples").value, 10) || 1000,
     delta: parseFloat($("delta").value) || 0.8,
     maxError: parseFloat($("maxerr").value) || 0,
+    fastMath: $("fastmath").checked,
     pathfinderInit: $("initmethod").value === "pathfinder" && mode === "nuts"
         ? {
             numIterations: parseInt($("pfiterations").value, 10),
@@ -741,7 +745,7 @@ $("run").onclick = async () => {
     // MIR, in its own worker, all simultaneously.
     $("status").textContent = "compiling (stanc3)";
     const tWall = performance.now();
-    const compiled = await compile({ code: opts.code });
+    const compiled = await compile({ code: opts.code, fastMath: opts.fastMath });
     const runOpts = { ...opts, mir: compiled.mir };
     if (mode === "both") {
       await runCompare(runOpts, nChains, seed, compiled, tWall);

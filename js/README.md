@@ -43,6 +43,20 @@ const fit = await sample({
 `historySize` and Pathfinder's own `initRadius` are also supported. This mode
 does not perform PSIS resampling.
 
+`fastMath: true` opts a model into fast mode, as `fast_math` does in Python and
+R: Stan source is compiled with fused multiply-add rewriting, the runtime
+regroups sums, and likelihood terms that repeat over the data are evaluated
+once per distinct case. Results can differ from the default in the last bits.
+It is off by default, `fit.fastMath` reports the mode a fit ran in, and it
+needs the portable compiler (`stanli-compiler.js`). With a precompiled `mir`,
+give `compile()` and `sample()` the same value:
+
+```js
+const { mir } = await compile({ code, fastMath: true });
+const fit = await sample({ mir, data, fastMath: true });
+fit.fastMath;  // true
+```
+
 For NUTS, `await diagnose(fit)` returns the same text report as the R and
 Python bindings: divergences, maximum-treedepth saturation, E-BFMI,
 rank-normalized R-hat, and bulk/tail ESS. Pass an array of fits from the
