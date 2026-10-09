@@ -48,6 +48,41 @@ test_that("a model can be reattached after variables were dropped or renamed", {
   expect_error(as_stanfit(restored, model = other), "model must match")
 })
 
+test_that("starting values may leave parameters out", {
+  skip_without_runtime()
+  model <- brms_support_fit()$model
+  # mu, sigma (positive), z[1:2]
+  full <- unconstrain(model, list(mu = 0.5, sigma = 2, z = c(1, -1)))
+  expect_equal(full, c(0.5, log(2), 1, -1))
+  expect_error(unconstrain(model, list(sigma = 2)), "no starting value")
+
+  some <- unconstrain(model, list(sigma = 2), partial = TRUE, seed = 11)
+  expect_length(some, 4L)
+  expect_equal(some[2L], log(2))
+  expect_true(all(abs(some[-2L]) <= 2))
+  expect_false(any(some[-2L] == 0))
+  # a seed makes the draw repeatable and leaves R's own stream alone
+  set.seed(3); before <- stats::runif(1)
+  set.seed(3)
+  expect_identical(unconstrain(model, list(sigma = 2), partial = TRUE, seed = 11), some)
+  expect_identical(stats::runif(1), before)
+  expect_false(identical(
+    unconstrain(model, list(sigma = 2), partial = TRUE, seed = 12), some))
+  # a radius of zero starts the rest at the origin
+  expect_equal(unconstrain(model, list(z = c(3, 4)), partial = TRUE, init_radius = 0),
+               c(0, 0, 3, 4))
+  # nothing given is a fully random start; a complete list is used as it is
+  expect_length(unconstrain(model, list(), partial = TRUE, seed = 1), 4L)
+  expect_identical(
+    unconstrain(model, list(mu = 0.5, sigma = 2, z = c(1, -1)), partial = TRUE), full)
+  # out-of-support values are still refused
+  expect_error(unconstrain(model, list(sigma = -1), partial = TRUE))
+
+  fit <- sample_model(model, chains = 2, warmup = 50, samples = 50, refresh = 0,
+                      init = rbind(some, some))
+  expect_identical(dim(fit$draws)[1:2], c(50L, 2L))
+})
+
 test_that("each chain records its sampler settings as rstan does", {
   skip_without_runtime()
   skip_if_not_installed("rstan")

@@ -1934,6 +1934,7 @@ struct Lowering {
   // data-only loop result lives in a slot without a compile-time observation.
   // This probe does not lower or execute anything (in particular, no UDF loop).
   bool needs_runtime_value(const mir::Expr& e);
+  bool static_int_bookkeeping(const std::vector<mir::Stmt>& body);
 
   bool runtime_int_value(const mir::Expr& e) const;
 

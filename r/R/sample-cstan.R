@@ -11,11 +11,13 @@
 #'   calls; see [sample_model()]. Defaults to 1.
 #' @param iter_warmup,iter_sampling Iterations per chain before thinning.
 #' @param seed Integer seed. If NULL, draw one from R's RNG.
-#' @param init Complete constrained parameter list, one list per chain, a
+#' @param init Constrained parameter list, one list per chain, a
 #'   function returning a list (optionally accepting `chain_id`), or NULL for
-#'   random initialization. Partial lists, numeric radii, and files are unsupported;
-#'   use `init_radius` for random initialization. Extra non-parameter names
-#'   (such as transformed parameters) are ignored, as in CmdStanR.
+#'   random initialization. A list may leave parameters out; those start at
+#'   random within `init_radius`, as in CmdStan. Numeric radii and files are
+#'   unsupported; use `init_radius` for random initialization. Extra
+#'   non-parameter names (such as transformed parameters) are ignored, as in
+#'   CmdStanR.
 #' @param adapt_delta Target acceptance probability.
 #' @param max_treedepth Maximum NUTS tree depth.
 #' @param thin Retain every thin-th iteration, separately in warmup and sampling.
@@ -53,7 +55,7 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
   if (!is.null(init) && !is.null(pathfinder_init))
     stop("init and pathfinder_init cannot be combined", call. = FALSE)
   if (!is.null(init) && !is.list(init) && !is.function(init))
-    stop("init must be a complete constrained list or function", call. = FALSE)
+    stop("init must be a constrained list or function", call. = FALSE)
   if (is.null(seed)) seed <- sample.int(.Machine$integer.max, 1)
   cstan_integer(seed, "seed", 0)
   model <- stanli_model(code = model_code, data = data, seed = seed,
@@ -64,17 +66,19 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
     declared <- unique(sub("\\..*$", "", .Call("stanli_r_parameter_columns", model$ptr)))
     per_chain <- is.list(init) && is.null(names(init))
     if (per_chain && (length(init) != chains || !all(vapply(init, is.list, logical(1)))))
-      stop("init must supply one complete named list per chain", call. = FALSE)
+      stop("init must supply one named list per chain", call. = FALSE)
     unconstrained <- do.call(rbind, lapply(seq_len(chains), function(chain) {
       values <- if (is.function(init)) {
         if ("chain_id" %in% names(formals(init))) init(chain_id = chain) else init()
       } else if (per_chain) init[[chain]] else init
       if (!is.list(values) || is.null(names(values)) || anyNA(names(values)) || any(!nzchar(names(values))) ||
           anyDuplicated(names(values)))
-        stop("init must supply a complete named list of parameters", call. = FALSE)
+        stop("init must supply a named list of parameters", call. = FALSE)
       values <- values[intersect(names(values), declared)]
       values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
-      unconstrain(model, values)
+      # parameters left out start at random, as in CmdStan
+      unconstrain(model, values, partial = TRUE, init_radius = init_radius,
+                  seed = seed + chain)
     }))
   }
   as_cstanfit(sample_model(model, chains = chains, parallel_chains = min(chains, parallel_chains),

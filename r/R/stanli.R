@@ -222,7 +222,8 @@ log_prob_grad <- function(model, q) {
 
 #' Starting values on the constrained scale, as the free vector
 #'
-#' Every declared parameter must appear, at its declared size. A missing,
+#' Unless `partial = TRUE`, every declared parameter must appear, at its
+#' declared size. A missing,
 #' unknown, wrong-length, or out-of-support value is an error naming the
 #' parameter. Containers are listed in Stan's own serialization order (the
 #' first index fastest, the order a CSV column carries) and may be nested or
@@ -235,15 +236,66 @@ log_prob_grad <- function(model, q) {
 #' @param model A `stanli_model`.
 #' @param values A named list of constrained starting values, or a JSON
 #'   string in CmdStan's data format.
+#' @param partial `TRUE` allows `values` to leave parameters out. Each one
+#'   left out starts where Stan would start it: at the constrained image of a
+#'   point drawn uniformly in `(-init_radius, init_radius)` on the
+#'   unconstrained scale. Only for a list, not a JSON string.
+#' @param init_radius Radius of that draw.
+#' @param seed Seed for that draw. `NULL` uses, and advances, R's random
+#'   stream; a number leaves the stream untouched.
 #' @return A numeric vector of length `model$n_unconstrained`.
 #' @export
-unconstrain <- function(model, values) {
+unconstrain <- function(model, values, partial = FALSE, init_radius = 2,
+                        seed = NULL) {
+  if (!is.logical(partial) || length(partial) != 1L || is.na(partial))
+    stop("partial must be TRUE or FALSE", call. = FALSE)
+  if (partial && is.list(values))
+    values <- complete_partial_inits(model, values, init_radius, seed)
   json <- if (is.character(values) && length(values) == 1) {
     values
   } else {
     to_json(values)
   }
   .Call("stanli_r_unconstrain_inits", model$ptr, json)
+}
+
+# Fill the parameters a starting list leaves out the way Stan does: draw every
+# unconstrained coordinate uniformly in (-init_radius, init_radius), map that
+# point to the constrained scale, and keep its values for the parameters that
+# were not given. The result names every parameter with elements.
+complete_partial_inits <- function(model, values, init_radius, seed) {
+  if (length(values) && (is.null(names(values)) || anyNA(names(values)) ||
+      any(!nzchar(names(values))) || anyDuplicated(names(values))))
+    stop("starting values must be a list with unique parameter names",
+         call. = FALSE)
+  if (length(init_radius) != 1L || !is.numeric(init_radius) ||
+      !is.finite(init_radius) || init_radius < 0)
+    stop("init_radius must be finite and nonnegative", call. = FALSE)
+  columns <- .Call("stanli_r_parameter_columns", model$ptr)
+  declared <- sub("\\..*$", "", columns)
+  values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
+  if (all(unique(declared) %in% names(values))) return(values)
+  if (!identical(stan_variable_names(columns),
+                 utils::head(model$columns, length(columns))))
+    stop("this model's outputs do not begin with its parameters; partial ",
+         "starting values are unavailable", call. = FALSE)
+  if (!is.null(seed)) {
+    # Leave the caller's random stream as it was.
+    old <- if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+      get(".Random.seed", envir = globalenv()) else NULL
+    on.exit(if (is.null(old)) rm(".Random.seed", envir = globalenv()) else
+      assign(".Random.seed", old, envir = globalenv()), add = TRUE)
+    set.seed(seed)
+  }
+  point <- stats::runif(model$n_unconstrained, -init_radius, init_radius)
+  drawn <- utils::head(.Call("stanli_r_write_array", model$ptr, point),
+                       length(columns))
+  filled <- split(drawn, factor(declared, levels = unique(declared)))
+  filled[intersect(names(values), names(filled))] <-
+    values[intersect(names(values), names(filled))]
+  # names that are not parameters are passed on for the usual error or, for
+  # transformed parameters and generated quantities, the usual silence
+  c(filled, values[setdiff(names(values), names(filled))])
 }
 
 #' Sample a model with NUTS

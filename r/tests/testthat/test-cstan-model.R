@@ -31,7 +31,7 @@ test_that("invalid model and sampler options fail before preparation", {
   expect_error(model$sample(cpp_options=list()),"unsupported.*cpp_options")
   expect_error(model$sample(iter_sampling=0),"iter_sampling must")
   expect_error(model$sample(save_warmup=NULL),"save_warmup")
-  expect_error(model$sample(init=0),"complete constrained")
+  expect_error(model$sample(init=0),"constrained list or function")
 })
 
 test_that("model sampling exactly preserves draws, diagnostics, RNG and starts", {

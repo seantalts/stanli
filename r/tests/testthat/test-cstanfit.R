@@ -153,7 +153,9 @@ test_that("sample_cstan translates initialization and sampling options", {
   by_chain <- do.call(sample_cstan,c(args,list(init=list(init,init))))
   expect_identical(by_function$draws(),fit$draws())
   expect_identical(by_chain$draws(),fit$draws())
-  expect_error(do.call(sample_cstan,c(args,list(init=list(a=.2)))),"sigma|missing|parameter")
+  # a list may leave parameters out; they start at random, as in CmdStan
+  partial <- do.call(sample_cstan,c(args,list(init=list(a=.2))))
+  expect_identical(dim(partial$draws("a")),dim(fit$draws("a")))
   expect_error(do.call(sample_cstan,c(args,list(init=list(init)))),"per chain")
 })
 

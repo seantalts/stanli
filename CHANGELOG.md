@@ -8,6 +8,16 @@
   fit whose variables brms has renamed or dropped; `stanli_check_syntax()`
   checks Stan code without data. A stanli fit now completes a real `brmsfit`
   through brms's `"mock"` backend (see `docs/teaching-support.md`).
+- R: starting values may leave parameters out. `unconstrain(partial = TRUE)`
+  starts each missing parameter where Stan would, at the constrained image
+  of a uniform draw within `init_radius` on the unconstrained scale, and
+  `sample_cstan()` accepts partial `init` lists as CmdStan does.
+- Fix a compile error, "size expression needs unknown int", for a function
+  that counts observations in a loop of 32 or more iterations whose body has
+  `&&` or `||`, and then declares arrays of those sizes. The loop was kept
+  for run time, so the counts had no value when the arrays were laid out.
+  A loop that only assigns integer locals from values known at compile time
+  is now evaluated then. brms's `xbeta` family is written this way.
 - R: attaching stanli after brms no longer breaks `log_lik()` on a `brmsfit`.
   stanli's generic masked brms's and had no method for it; it now hands
   objects of other packages to `rstantools::log_lik()`.
