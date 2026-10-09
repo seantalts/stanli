@@ -20,6 +20,7 @@
 // reads them.
 #include <stanli/collapse.hpp>
 #include <stanli/density_registry.hpp>
+#include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
 
 #include "collapse_linear.hpp"
@@ -1306,8 +1307,10 @@ Analysis analyze(const Graph& g, const Fills& fills,
           member.reserve((size_t)n);
           for (int64_t obs = 0; obs < n; ++obs) {
             row_key(obs, false);
-            const auto ins =
-                group_of.emplace(num.row(row.w), (int)stat.rep.size());
+            // One parameter is its own key; only two need a row of their
+            // own in the table.
+            const Vn key = row.w.size() == 1 ? row.w[0] : num.row(row.w);
+            const auto ins = group_of.emplace(key, (int)stat.rep.size());
             if (ins.second) stat.rep.push_back((int)obs);
             member.push_back(ins.first->second);
           }
@@ -1320,6 +1323,7 @@ Analysis analyze(const Graph& g, const Fills& fills,
           std::vector<Compensated> sum(2 * groups);
           Compensated constant;
           std::vector<Member> mine;
+          mine.reserve((size_t)n);
           for (int64_t obs = 0; valid && obs < n; ++obs) {
             Member m{i, (int)obs, true, 0, {0, 0, 0}, 0, 0};
             const double value =
@@ -1504,7 +1508,36 @@ Analysis analyze(const Graph& g, const Fills& fills,
       plan.observations = rows;
       plan.propto = (op.variant & 0x80u) != 0;
       bool valid = enough;
+      const int64_t ratio =
+          by_rows ? kCollapseRecorderRatio : kCollapseNativeRatio;
+      // A design with no repeated rows is the common case, and is settled
+      // by a hash of each row before any row is numbered. Equal rows hash
+      // equally, so this can only overcount the repeats, never refuse a
+      // design that would have collapsed.
+      bool repeats = enough;
       if (enough) {
+        std::unordered_set<uint64_t> seen;
+        seen.reserve((size_t)rows);
+        for (int64_t obs = 0; obs < rows; ++obs) {
+          uint64_t h = (uint64_t)num.elem(op.in[1], obs);
+          const auto mix = [&h](uint64_t w) {
+            h ^= w + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+          };
+          if (by_rows) {
+            mix((uint64_t)num.elem(op.in[3], obs));
+            mix((uint64_t)op.idata[obs]);
+          }
+          for (int64_t c = 0; c < cols; ++c) {
+            uint64_t bits;
+            std::memcpy(&bits, &(*x)[(size_t)(c * rows + obs)], sizeof bits);
+            mix(bits);
+          }
+          seen.insert(h);
+        }
+        repeats = ratio * (int64_t)seen.size() <= rows;
+        (by_rows ? t.rows : t.groups) = (int64_t)seen.size();
+      }
+      if (repeats) {
         std::vector<int> member;
         std::unordered_map<Vn, int> group_of;
         member.reserve((size_t)rows);
@@ -1563,15 +1596,13 @@ Analysis analyze(const Graph& g, const Fills& fills,
           for (int obs : plan.rep)
             plan.design.push_back((*x)[(size_t)(c * rows + obs)]);
       }
-      const int64_t ratio =
-          by_rows ? kCollapseRecorderRatio : kCollapseNativeRatio;
       if (!usable)
         refuse(t, "argument shapes are not per observation");
       else if (!enough)
         refuse(t, "too few observations");
       else if (!valid)
         refuse(t, "an outcome outside the density's support");
-      else if (ratio * (int64_t)plan.rep.size() > rows)
+      else if (!repeats || ratio * (int64_t)plan.rep.size() > rows)
         refuse(t, "too few repeated rows");
       if (t.refusal == nullptr) {
         t.evaluator = by_rows ? "rows" : "groups";
@@ -1661,6 +1692,17 @@ Analysis analyze(const Graph& g, const Fills& fills,
     const bool lognormal = first.opcode == OP_LOGNORMAL_LPDF;
     const int n_args = kind < 0 ? 2 : family_parameters(kind);
     const int base = first.n_in - n_args;
+    if (kind >= 0 && pooled) {
+      // Pieces that share no parameters are the common case, and a hash of
+      // each observation's parameters settles it: equal parameters hash
+      // equally, so this can only overcount the repeats.
+      std::unordered_set<uint64_t> seen;
+      seen.reserve((size_t)n);
+      for (const Member& m : family)
+        seen.insert((uint64_t)m.first * 0x9e3779b97f4a7c15ull ^
+                    (uint64_t)m.second);
+      if (kCollapseNativeRatio * (int64_t)seen.size() > n) return false;
+    }
     CollapseTerm t;
     t.op = (int)family[0].op;
     t.opcode = first.opcode;
@@ -1706,6 +1748,14 @@ Analysis analyze(const Graph& g, const Fills& fills,
       for (const auto& w : where[k])
         shared[k] &=
             w.first == where[k][0].first && g.slots[(size_t)w.first].len == 1;
+    // Only the normal family has a linear form to fall back on; for the
+    // rest, too many groups ends it here, before any affine analysis.
+    if (kind >= 0 && !by_statistic) {
+      if (pooled) return false;
+      refuse(t, "too few repeated rows");
+      report.terms.push_back(t);
+      return false;
+    }
     history.p = stat.op;
     Affine affine[2] = {Affine(history, kLinearMaxTerms),
                         Affine(history, kLinearMaxTerms)};
@@ -2853,23 +2903,29 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
 }
 
 void print_collapse_report(const CollapseReport& report, const char* graph) {
+  // Through the diagnostic sink, not stderr itself: the runtime is also
+  // built without the standard streams.
+  char line[512];
   for (const CollapseTerm& t : report.terms) {
     const char* name = opcode_name(t.opcode);
-    std::fprintf(stderr,
-                 "COLLAPSE {\"graph\":\"%s\",\"op\":%d,\"opcode\":\"%s\","
-                 "\"ops\":%lld,\"n\":%lld,\"rows\":%lld,\"groups\":%lld,"
-                 "\"variate_is_data\":%s,\"refusal\":\"%s\","
-                 "\"evaluator\":\"%s\"}\n",
-                 graph, t.op, name, (long long)t.ops, (long long)t.n,
-                 (long long)t.rows, (long long)t.groups,
-                 t.variate_is_data ? "true" : "false",
-                 t.refusal ? t.refusal : "", t.evaluator ? t.evaluator : "");
+    std::snprintf(line, sizeof line,
+                  "COLLAPSE {\"graph\":\"%s\",\"op\":%d,\"opcode\":\"%s\","
+                  "\"ops\":%lld,\"n\":%lld,\"rows\":%lld,\"groups\":%lld,"
+                  "\"variate_is_data\":%s,\"refusal\":\"%s\","
+                  "\"evaluator\":\"%s\"}",
+                  graph, t.op, name, (long long)t.ops, (long long)t.n,
+                  (long long)t.rows, (long long)t.groups,
+                  t.variate_is_data ? "true" : "false",
+                  t.refusal ? t.refusal : "", t.evaluator ? t.evaluator : "");
+    emit_diagnostic(line);
   }
-  for (const auto& o : report.opaque_ops)
-    std::fprintf(stderr,
-                 "COLLAPSE {\"graph\":\"%s\",\"opaque\":\"%s\","
-                 "\"count\":%lld}\n",
-                 graph, opcode_name(o.first), (long long)o.second);
+  for (const auto& o : report.opaque_ops) {
+    std::snprintf(line, sizeof line,
+                  "COLLAPSE {\"graph\":\"%s\",\"opaque\":\"%s\","
+                  "\"count\":%lld}",
+                  graph, opcode_name(o.first), (long long)o.second);
+    emit_diagnostic(line);
+  }
 }
 
 }  // namespace stanli

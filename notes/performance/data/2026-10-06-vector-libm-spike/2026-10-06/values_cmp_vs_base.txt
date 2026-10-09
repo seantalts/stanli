@@ -1,0 +1,50 @@
+== base2 vs base: 339 models identical, 0 differ, 0 status mismatches, 0 finite/non-finite mismatches
+== off vs base: 339 models identical, 0 differ, 0 status mismatches, 0 finite/non-finite mismatches
+== self vs base: 319 models identical, 20 differ, 0 status mismatches, 0 finite/non-finite mismatches
+   worst lp ULP 163.0; worst lp rel 2.21e-14; worst grad per-coordinate ULP 128.0; worst grad scaled error 7.29e-16 (3.3 eps)
+   model                                  lp ULP     lp rel   grad max ULP  grad scaled   (in eps)
+   ch14_m14_10                               2.0   3.13e-16           27.0     7.29e-16       3.28
+   wells_dae_c_model                         0.0   0.00e+00           12.0     2.88e-16       1.30
+   sw_bernoulli                              0.0   0.00e+00            2.0     2.26e-16       1.02
+   wells_dist100ars_model                    0.0   0.00e+00            1.0     1.33e-16       0.60
+   hier_2pl                                163.0   2.21e-14          128.0     1.30e-16       0.59
+   sw_re_bern                                0.0   0.00e+00            4.0     1.29e-16       0.58
+   wells_interaction_model                   0.0   0.00e+00            2.0     1.26e-16       0.57
+   wells_dae_model                           0.0   0.00e+00           24.0     1.16e-16       0.52
+   wells_dae_inter_model                     0.0   0.00e+00           64.0     6.94e-17       0.31
+   election88_full                          10.0   2.09e-15           13.0     6.32e-17       0.28
+   2pl_latent_reg_irt                        2.0   3.77e-16           20.0     5.70e-17       0.26
+   wells_daae_c_model                        0.0   0.00e+00            2.0     3.60e-17       0.16
+   logistic_regression_rhs                  78.0   1.12e-14           64.0     2.59e-17       0.12
+   Mtbh_model                                0.0   0.00e+00            4.0     2.06e-17       0.09
+   irt_2pl                                   3.0   4.63e-16           16.0     1.84e-17       0.08
+   Mth_model                                 0.0   0.00e+00           48.0     8.11e-18       0.04
+   lsat_model                                3.0   3.89e-16           11.0     1.07e-18       0.00
+   wells_dist                               87.0   1.91e-14            0.0     0.00e+00       0.00
+   nes_logit_model                           1.0   1.37e-16            0.0     0.00e+00       0.00
+   dogs                                     10.0   1.31e-15            0.0     0.00e+00       0.00
+== mvec vs base: 317 models identical, 22 differ, 0 status mismatches, 0 finite/non-finite mismatches
+   worst lp ULP 169.0; worst lp rel 2.29e-14; worst grad per-coordinate ULP 352.0; worst grad scaled error 3.38e-15 (15.2 eps)
+   model                                  lp ULP     lp rel   grad max ULP  grad scaled   (in eps)
+   wells_dist100_model                       0.0   0.00e+00           35.0     3.38e-15      15.20
+   wells_dist                               87.0   1.91e-14           16.0     3.30e-15      14.85
+   ch14_m14_10                               2.0   3.13e-16           27.0     7.29e-16       3.28
+   logistic_regression_rhs                  78.0   1.12e-14          256.0     4.14e-16       1.87
+   election88_full                          10.0   2.09e-15           23.0     3.79e-16       1.71
+   sw_re_bern                                0.0   0.00e+00            2.0     2.59e-16       1.16
+   wells_interaction_model                   0.0   0.00e+00            6.0     2.52e-16       1.14
+   sw_bernoulli                              0.0   0.00e+00            2.0     2.26e-16       1.02
+   hier_2pl                                169.0   2.29e-14          320.0     2.17e-16       0.98
+   lsat_model                                3.0   3.89e-16          352.0     2.05e-16       0.92
+   wells_daae_c_model                        0.0   0.00e+00            6.0     1.44e-16       0.65
+   wells_dist100ars_model                    1.0   2.12e-16            2.0     1.33e-16       0.60
+   wells_dae_model                           0.0   0.00e+00            8.0     1.16e-16       0.52
+   irt_2pl                                   3.0   4.63e-16           24.0     1.10e-16       0.50
+   wells_dae_inter_model                     0.0   0.00e+00           64.0     6.94e-17       0.31
+   Mth_model                                 0.0   0.00e+00           96.0     6.49e-17       0.29
+   2pl_latent_reg_irt                        3.0   5.65e-16          128.0     5.70e-17       0.26
+   wells_dae_c_model                         0.0   0.00e+00           18.0     5.40e-17       0.24
+   Mtbh_model                                0.0   0.00e+00           23.0     4.12e-17       0.19
+   wells_interaction_c_model                 0.0   0.00e+00            1.0     3.62e-17       0.16
+   dogs                                     10.0   1.31e-15            1.0     5.41e-18       0.02
+   nes_logit_model                           1.0   1.37e-16            0.0     0.00e+00       0.00
