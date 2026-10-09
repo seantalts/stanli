@@ -331,6 +331,13 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   many threads. `fit$model$reduce_sum_count` and `reduce_sum_fallbacks`
 #'   report retained reductions and graph-lowering refusals (not opaque regions).
 #' @param parallel_chains Chains to run at once. Defaults to all of them.
+#' @param fixed_param `TRUE` runs Stan's fixed-parameter sampler instead of
+#'   NUTS: every chain keeps its parameters at its starting point and only
+#'   generated quantities are drawn, which is how a model with no parameters,
+#'   or one that simulates data at given values, is run. There is no warmup:
+#'   `warmup`, `delta`, `max_depth`, `save_warmup` and `parallel_chains` are
+#'   not used, and the chains run one after another. The fit's `sampler`
+#'   element then holds only `lp__` and `accept_stat__`, both zero.
 #' @param refresh Print a progress update every `refresh` transitions within
 #'   each phase, plus the first and last transition of the phase. Set to 0 to
 #'   suppress all automatic sampling output.
@@ -350,8 +357,12 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          max_depth = 10, save_warmup = FALSE, init = NULL,
                          init_radius = 2, pathfinder_init = NULL,
                          parallel_chains = NULL, refresh = 100,
-                         threads_per_chain = 1) {
+                         threads_per_chain = 1, fixed_param = FALSE) {
   cstan_integer(threads_per_chain, "threads_per_chain")
+  stanfit_flag(fixed_param, "fixed_param")
+  if (fixed_param && !is.null(pathfinder_init))
+    stop("pathfinder_init does not apply with fixed_param = TRUE",
+         call. = FALSE)
   if (length(refresh) != 1L || !is.numeric(refresh) || is.na(refresh) ||
       !is.finite(refresh) || refresh < 0 || refresh != floor(refresh) ||
       refresh > .Machine$integer.max)
@@ -369,6 +380,9 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
          call. = FALSE)
   load_runtime()
   model <- with_run_seed(model, seed, threads_per_chain)
+  if (fixed_param)
+    return(fixed_param_fit(model, chains, seed, samples, thin, init,
+                           init_radius, refresh))
   if (is.null(parallel_chains)) parallel_chains <- chains
   if (!is.null(pathfinder_init)) {
     init <- .Call("stanli_r_pathfinder_inits", model$ptr, as.integer(seed),
@@ -502,10 +516,12 @@ summary.stanli_fit <- function(object, ...) {
 #' bulk/tail effective sample size -- each either confirmed or reported
 #' with the number that failed and what to do about it.
 #'
-#' @param fit A `stanli_fit`.
+#' @param fit A `stanli_fit` from NUTS. The other algorithms have no chains
+#'   to diagnose.
 #' @return The report, invisibly, after printing it.
 #' @export
 stanli_diagnose <- function(fit) {
+  require_nuts_fit(fit, "stanli_diagnose()")
   d <- dim(fit$draws)
   flat <- as.double(aperm(fit$draws, c(3, 1, 2)))
   stats <- as.double(aperm(fit$sampler, c(3, 1, 2)))

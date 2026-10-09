@@ -111,6 +111,70 @@ typedef struct {
   const double* init;
 } stanli_optimize_opts;
 
+/* Mirrors of the option structs of the other inference algorithms in
+ * runtime/include/stanli/capi.h. As with the two above, field order and
+ * types must match exactly. Each is filled by the runtime's own _init
+ * function before any field is set. */
+typedef struct {
+  uint32_t seed;
+  int chains;
+  int chain_id;
+  int samples;
+  int thin;
+  double init_radius;
+  const double* inits;
+  int refresh;
+} stanli_fixed_param_opts;
+
+typedef struct {
+  uint32_t seed;
+  int draws;
+  int jacobian;
+  int calculate_lp;
+  int refresh;
+} stanli_laplace_opts;
+
+typedef struct {
+  uint32_t seed;
+  int chain_id;
+  int num_paths;
+  int num_draws;
+  int num_psis_draws;
+  int num_elbo_draws;
+  int max_lbfgs_iters;
+  int history_size;
+  double init_alpha;
+  double tol_obj;
+  double tol_rel_obj;
+  double tol_grad;
+  double tol_rel_grad;
+  double tol_param;
+  double init_radius;
+  const double* inits;
+  int psis_resample;
+  int calculate_lp;
+  int refresh;
+} stanli_pathfinder_opts;
+
+typedef struct {
+  uint32_t seed;
+  int chain_id;
+  int algorithm;
+  int iter;
+  int grad_samples;
+  int elbo_samples;
+  double eta;
+  int adapt_engaged;
+  int adapt_iter;
+  double tol_rel_obj;
+  int eval_elbo;
+  int output_samples;
+  double init_radius;
+  const double* init;
+} stanli_variational_opts;
+
+typedef void (*stanli_log_cb)(int32_t, const char*, void*);
+
 static void* g_lib = NULL;
 
 /* Every entry point the R side uses. */
@@ -192,6 +256,27 @@ static int (*p_transformed_data_rng)(const void*);
 static void (*p_optimize_opts_init)(stanli_optimize_opts*);
 static int (*p_optimize)(void*, const stanli_optimize_opts*, double*, double*,
                          double*, char*, size_t);
+
+static void (*p_fixed_param_opts_init)(stanli_fixed_param_opts*);
+static int64_t (*p_fixed_param_n_draws)(const stanli_fixed_param_opts*);
+static int (*p_fixed_param)(void*, const stanli_fixed_param_opts*, double*,
+                            stanli_log_cb, void*, stanli_sample_poll_cb, void*,
+                            int*, char*, size_t);
+static void (*p_laplace_opts_init)(stanli_laplace_opts*);
+static int (*p_laplace_sample)(void*, const stanli_laplace_opts*, const double*,
+                               double*, double*, double*, stanli_log_cb, void*,
+                               stanli_sample_poll_cb, void*, int*, char*,
+                               size_t);
+static void (*p_pathfinder_opts_init)(stanli_pathfinder_opts*);
+static int64_t (*p_pathfinder_max_draws)(const stanli_pathfinder_opts*);
+static int (*p_pathfinder)(void*, const stanli_pathfinder_opts*, double*,
+                           double*, double*, double*, int64_t*, stanli_log_cb,
+                           void*, stanli_sample_poll_cb, void*, int*, char*,
+                           size_t);
+static void (*p_variational_opts_init)(stanli_variational_opts*);
+static int (*p_variational)(void*, const stanli_variational_opts*, double*,
+                            double*, double*, double*, stanli_log_cb, void*,
+                            stanli_sample_poll_cb, void*, int*, char*, size_t);
 
 #define BIND(fn, var)                                           \
   do {                                                          \
@@ -294,6 +379,23 @@ SEXP stanli_bridge_load(SEXP path) {
       dl_sym(g_lib, "stanli_transformed_data_rng");
   BIND("stanli_optimize_opts_init", p_optimize_opts_init);
   BIND("stanli_optimize", p_optimize);
+  /* The other inference algorithms are additive too: an older version-1
+   * runtime loads, and only a caller that asks for one of them is told. */
+  *(void**)(&p_fixed_param_opts_init) =
+      dl_sym(g_lib, "stanli_fixed_param_opts_init");
+  *(void**)(&p_fixed_param_n_draws) =
+      dl_sym(g_lib, "stanli_fixed_param_n_draws");
+  *(void**)(&p_fixed_param) = dl_sym(g_lib, "stanli_fixed_param");
+  *(void**)(&p_laplace_opts_init) = dl_sym(g_lib, "stanli_laplace_opts_init");
+  *(void**)(&p_laplace_sample) = dl_sym(g_lib, "stanli_laplace_sample");
+  *(void**)(&p_pathfinder_opts_init) =
+      dl_sym(g_lib, "stanli_pathfinder_opts_init");
+  *(void**)(&p_pathfinder_max_draws) =
+      dl_sym(g_lib, "stanli_pathfinder_max_draws");
+  *(void**)(&p_pathfinder) = dl_sym(g_lib, "stanli_pathfinder");
+  *(void**)(&p_variational_opts_init) =
+      dl_sym(g_lib, "stanli_variational_opts_init");
+  *(void**)(&p_variational) = dl_sym(g_lib, "stanli_variational");
   return mkString("");
 }
 
@@ -873,5 +975,289 @@ SEXP stanli_r_optimize(SEXP m, SEXP optlist, SEXP init) {
   SET_STRING_ELT(nm, 2, mkChar("lp"));
   setAttrib(out, R_NamesSymbol, nm);
   UNPROTECT(4);
+  return out;
+}
+
+/* ---- fixed_param, Laplace, Pathfinder, ADVI ------------------------------ */
+
+static void require_algorithm(int available, const char* what) {
+  require_loaded();
+  if (!available)
+    error(
+        "%s is unavailable with this older stanli runtime. Run "
+        "stanli_install(overwrite = TRUE) to update.",
+        what);
+}
+
+/* What a run said. The runtime calls back on the thread that entered it, so
+ * printing is safe. Information is printed when the caller asked for
+ * progress; warnings, errors and Stan's "Informational Message" lines (how
+ * ADVI says it ran out of iterations) are kept for an R warning. */
+typedef struct {
+  int verbose;
+  size_t used;
+  char notes[8192];
+} run_log;
+
+static void log_keep(run_log* log, const char* text) {
+  const size_t len = strlen(text);
+  if (log->used + len + 2 >= sizeof log->notes) return;
+  if (log->used > 0) log->notes[log->used++] = '\n';
+  memcpy(log->notes + log->used, text, len);
+  log->used += len;
+  log->notes[log->used] = '\0';
+}
+
+static void run_logger(int32_t level, const char* text, void* user) {
+  run_log* log = (run_log*)user;
+  if (level >= 1 || strstr(text, "Informational Message") != NULL)
+    log_keep(log, text);
+  if (log->verbose && level == 0) {
+    Rprintf("%s\n", text);
+    R_FlushConsole();
+  }
+}
+
+static void run_log_init(run_log* log, int verbose) {
+  log->verbose = verbose;
+  log->used = 0;
+  log->notes[0] = '\0';
+}
+
+static int64_t row_width(void* mm) {
+  const int64_t n = p_wa_n_columns(mm);
+  return n > 0 ? n : p_n_constrained(mm);
+}
+
+/* A named list from parallel arrays; `values` are already protected by the
+ * caller, and stay so until it returns. */
+static SEXP named_list(int n, const char** names, SEXP* values) {
+  SEXP out = PROTECT(allocVector(VECSXP, n));
+  SEXP nm = PROTECT(allocVector(STRSXP, n));
+  for (int i = 0; i < n; ++i) {
+    SET_VECTOR_ELT(out, i, values[i]);
+    SET_STRING_ELT(nm, i, mkChar(names[i]));
+  }
+  setAttrib(out, R_NamesSymbol, nm);
+  UNPROTECT(2);
+  return out;
+}
+
+static SEXP interrupted_result(void) {
+  const char* names[] = {"interrupted", ""};
+  SEXP out = PROTECT(mkNamed(VECSXP, names));
+  SET_VECTOR_ELT(out, 0, ScalarLogical(1));
+  UNPROTECT(1);
+  return out;
+}
+
+/* optlist: seed, chains, samples, thin, init_radius, refresh. */
+SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
+  require_algorithm(p_fixed_param != NULL, "Fixed-parameter sampling");
+  void* mm = model_ptr(m);
+  stanli_fixed_param_opts o;
+  p_fixed_param_opts_init(&o);
+  o.seed = (uint32_t)asInteger(VECTOR_ELT(optlist, 0));
+  o.chains = asInteger(VECTOR_ELT(optlist, 1));
+  o.samples = asInteger(VECTOR_ELT(optlist, 2));
+  o.thin = asInteger(VECTOR_ELT(optlist, 3));
+  o.init_radius = asReal(VECTOR_ELT(optlist, 4));
+  o.refresh = asInteger(VECTOR_ELT(optlist, 5));
+  if (XLENGTH(inits) > 0) o.inits = REAL(inits);
+  if (o.chains < 1) error("chains must be positive");
+
+  const int64_t rows = p_fixed_param_n_draws(&o);
+  const int64_t width = row_width(mm);
+  SEXP vals =
+      PROTECT(allocVector(REALSXP, (R_xlen_t)(o.chains * rows * width)));
+  run_log log;
+  run_log_init(&log, o.refresh > 0);
+  char err[4096];
+  err[0] = '\0';
+  int interrupted = 0;
+  const int rc =
+      p_fixed_param(mm, &o, REAL(vals), run_logger, &log, sample_poll, NULL,
+                    &interrupted, err, sizeof err);
+  if (rc != 0) {
+    UNPROTECT(1);
+    error("fixed_param failed: %s", err[0] ? err : "(no message)");
+  }
+  if (interrupted) {
+    UNPROTECT(1);
+    return interrupted_result();
+  }
+  SEXP values[4];
+  values[0] = vals;
+  values[1] = PROTECT(ScalarInteger(o.chains));
+  values[2] = PROTECT(ScalarInteger((int)rows));
+  values[3] = PROTECT(mkString(log.notes));
+  const char* names[] = {"values", "chains", "draws", "notes"};
+  SEXP out = named_list(4, names, values);
+  UNPROTECT(4);
+  return out;
+}
+
+/* optlist: seed, draws, jacobian, calculate_lp, refresh. */
+SEXP stanli_r_laplace(SEXP m, SEXP optlist, SEXP mode) {
+  require_algorithm(p_laplace_sample != NULL, "Laplace sampling");
+  void* mm = model_ptr(m);
+  stanli_laplace_opts o;
+  p_laplace_opts_init(&o);
+  o.seed = (uint32_t)asInteger(VECTOR_ELT(optlist, 0));
+  o.draws = asInteger(VECTOR_ELT(optlist, 1));
+  o.jacobian = asLogical(VECTOR_ELT(optlist, 2));
+  o.calculate_lp = asLogical(VECTOR_ELT(optlist, 3));
+  o.refresh = asInteger(VECTOR_ELT(optlist, 4));
+  if (o.draws < 1) error("draws must be positive");
+  if (XLENGTH(mode) != (R_xlen_t)p_n_unconstrained(mm))
+    error("mode must hold %lld unconstrained values",
+          (long long)p_n_unconstrained(mm));
+
+  const int64_t width = row_width(mm);
+  SEXP values[4];
+  values[0] = PROTECT(allocVector(REALSXP, (R_xlen_t)(o.draws * width)));
+  values[1] = PROTECT(allocVector(REALSXP, (R_xlen_t)o.draws));
+  values[2] = PROTECT(allocVector(REALSXP, (R_xlen_t)o.draws));
+  run_log log;
+  run_log_init(&log, o.refresh > 0);
+  char err[4096];
+  err[0] = '\0';
+  int interrupted = 0;
+  const int rc = p_laplace_sample(
+      mm, &o, REAL(mode), REAL(values[0]), REAL(values[1]), REAL(values[2]),
+      run_logger, &log, sample_poll, NULL, &interrupted, err, sizeof err);
+  if (rc != 0) {
+    UNPROTECT(3);
+    error("laplace failed: %s", err[0] ? err : "(no message)");
+  }
+  if (interrupted) {
+    UNPROTECT(3);
+    return interrupted_result();
+  }
+  values[3] = PROTECT(mkString(log.notes));
+  const char* names[] = {"values", "lp", "lp_approx", "notes"};
+  SEXP out = named_list(4, names, values);
+  UNPROTECT(4);
+  return out;
+}
+
+/* optlist: seed, num_paths, num_draws, num_psis_draws, num_elbo_draws,
+ * max_lbfgs_iters, history_size, init_alpha, tol_obj, tol_rel_obj, tol_grad,
+ * tol_rel_grad, tol_param, init_radius, psis_resample, calculate_lp,
+ * refresh. */
+SEXP stanli_r_pathfinder(SEXP m, SEXP optlist, SEXP inits) {
+  require_algorithm(p_pathfinder != NULL, "Pathfinder");
+  void* mm = model_ptr(m);
+  stanli_pathfinder_opts o;
+  p_pathfinder_opts_init(&o);
+  o.seed = (uint32_t)asInteger(VECTOR_ELT(optlist, 0));
+  o.num_paths = asInteger(VECTOR_ELT(optlist, 1));
+  o.num_draws = asInteger(VECTOR_ELT(optlist, 2));
+  o.num_psis_draws = asInteger(VECTOR_ELT(optlist, 3));
+  o.num_elbo_draws = asInteger(VECTOR_ELT(optlist, 4));
+  o.max_lbfgs_iters = asInteger(VECTOR_ELT(optlist, 5));
+  o.history_size = asInteger(VECTOR_ELT(optlist, 6));
+  o.init_alpha = asReal(VECTOR_ELT(optlist, 7));
+  o.tol_obj = asReal(VECTOR_ELT(optlist, 8));
+  o.tol_rel_obj = asReal(VECTOR_ELT(optlist, 9));
+  o.tol_grad = asReal(VECTOR_ELT(optlist, 10));
+  o.tol_rel_grad = asReal(VECTOR_ELT(optlist, 11));
+  o.tol_param = asReal(VECTOR_ELT(optlist, 12));
+  o.init_radius = asReal(VECTOR_ELT(optlist, 13));
+  o.psis_resample = asLogical(VECTOR_ELT(optlist, 14));
+  o.calculate_lp = asLogical(VECTOR_ELT(optlist, 15));
+  o.refresh = asInteger(VECTOR_ELT(optlist, 16));
+  if (XLENGTH(inits) > 0) o.inits = REAL(inits);
+
+  const int64_t cap = p_pathfinder_max_draws(&o);
+  if (cap < 1) error("num_paths and the draw counts must be positive");
+  const int64_t width = row_width(mm);
+  double* raw = (double*)R_alloc((size_t)(cap * width), sizeof(double));
+  double* lp = (double*)R_alloc((size_t)cap, sizeof(double));
+  double* lp_approx = (double*)R_alloc((size_t)cap, sizeof(double));
+  double* path = (double*)R_alloc((size_t)cap, sizeof(double));
+  run_log log;
+  run_log_init(&log, o.refresh > 0);
+  char err[4096];
+  err[0] = '\0';
+  int interrupted = 0;
+  int64_t rows = 0;
+  const int rc =
+      p_pathfinder(mm, &o, raw, lp, lp_approx, path, &rows, run_logger, &log,
+                   sample_poll, NULL, &interrupted, err, sizeof err);
+  if (rc != 0) error("pathfinder failed: %s", err[0] ? err : "(no message)");
+  if (interrupted) return interrupted_result();
+
+  /* The row count is only known now; copy what was written. */
+  SEXP values[5];
+  values[0] = PROTECT(allocVector(REALSXP, (R_xlen_t)(rows * width)));
+  values[1] = PROTECT(allocVector(REALSXP, (R_xlen_t)rows));
+  values[2] = PROTECT(allocVector(REALSXP, (R_xlen_t)rows));
+  values[3] = PROTECT(allocVector(REALSXP, (R_xlen_t)rows));
+  if (rows > 0) {
+    memcpy(REAL(values[0]), raw, sizeof(double) * (size_t)(rows * width));
+    memcpy(REAL(values[1]), lp, sizeof(double) * (size_t)rows);
+    memcpy(REAL(values[2]), lp_approx, sizeof(double) * (size_t)rows);
+    memcpy(REAL(values[3]), path, sizeof(double) * (size_t)rows);
+  }
+  values[4] = PROTECT(mkString(log.notes));
+  const char* names[] = {"values", "lp", "lp_approx", "path", "notes"};
+  SEXP out = named_list(5, names, values);
+  UNPROTECT(5);
+  return out;
+}
+
+/* optlist: seed, fullrank, iter, grad_samples, elbo_samples, eta,
+ * adapt_engaged, adapt_iter, tol_rel_obj, eval_elbo, output_samples,
+ * init_radius, refresh. */
+SEXP stanli_r_variational(SEXP m, SEXP optlist, SEXP init) {
+  require_algorithm(p_variational != NULL, "Variational inference");
+  void* mm = model_ptr(m);
+  stanli_variational_opts o;
+  p_variational_opts_init(&o);
+  o.seed = (uint32_t)asInteger(VECTOR_ELT(optlist, 0));
+  o.algorithm = asLogical(VECTOR_ELT(optlist, 1)) ? 1 : 0;
+  o.iter = asInteger(VECTOR_ELT(optlist, 2));
+  o.grad_samples = asInteger(VECTOR_ELT(optlist, 3));
+  o.elbo_samples = asInteger(VECTOR_ELT(optlist, 4));
+  o.eta = asReal(VECTOR_ELT(optlist, 5));
+  o.adapt_engaged = asLogical(VECTOR_ELT(optlist, 6));
+  o.adapt_iter = asInteger(VECTOR_ELT(optlist, 7));
+  o.tol_rel_obj = asReal(VECTOR_ELT(optlist, 8));
+  o.eval_elbo = asInteger(VECTOR_ELT(optlist, 9));
+  o.output_samples = asInteger(VECTOR_ELT(optlist, 10));
+  o.init_radius = asReal(VECTOR_ELT(optlist, 11));
+  const int refresh = asInteger(VECTOR_ELT(optlist, 12));
+  if (XLENGTH(init) > 0) o.init = REAL(init);
+  if (o.output_samples < 1) error("draws must be positive");
+
+  const int64_t width = row_width(mm);
+  SEXP values[5];
+  values[0] = PROTECT(allocVector(REALSXP, (R_xlen_t)width));
+  values[1] =
+      PROTECT(allocVector(REALSXP, (R_xlen_t)(o.output_samples * width)));
+  values[2] = PROTECT(allocVector(REALSXP, (R_xlen_t)o.output_samples));
+  values[3] = PROTECT(allocVector(REALSXP, (R_xlen_t)o.output_samples));
+  run_log log;
+  run_log_init(&log, refresh > 0);
+  char err[4096];
+  err[0] = '\0';
+  int interrupted = 0;
+  const int rc =
+      p_variational(mm, &o, REAL(values[0]), REAL(values[1]), REAL(values[2]),
+                    REAL(values[3]), run_logger, &log, sample_poll, NULL,
+                    &interrupted, err, sizeof err);
+  if (rc != 0) {
+    UNPROTECT(4);
+    error("variational inference failed: %s", err[0] ? err : "(no message)");
+  }
+  if (interrupted) {
+    UNPROTECT(4);
+    return interrupted_result();
+  }
+  values[4] = PROTECT(mkString(log.notes));
+  const char* names[] = {"mean", "values", "lp", "lp_approx", "notes"};
+  SEXP out = named_list(5, names, values);
+  UNPROTECT(5);
   return out;
 }

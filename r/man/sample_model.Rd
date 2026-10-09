@@ -19,7 +19,8 @@ sample_model(
   pathfinder_init = NULL,
   parallel_chains = NULL,
   refresh = 100,
-  threads_per_chain = 1
+  threads_per_chain = 1,
+  fixed_param = FALSE
 )
 }
 \arguments{
@@ -63,6 +64,14 @@ Changing this setting prepares a new graph; reduction rounding and NUTS
 draws can differ across thread counts. Active chains may each use this
 many threads. `fit$model$reduce_sum_count` and `reduce_sum_fallbacks`
 report retained reductions and graph-lowering refusals (not opaque regions).}
+
+\item{fixed_param}{`TRUE` runs Stan's fixed-parameter sampler instead of
+NUTS: every chain keeps its parameters at its starting point and only
+generated quantities are drawn, which is how a model with no parameters,
+or one that simulates data at given values, is run. There is no warmup:
+`warmup`, `delta`, `max_depth`, `save_warmup` and `parallel_chains` are
+not used, and the chains run one after another. The fit's `sampler`
+element then holds only `lp__` and `accept_stat__`, both zero.}
 }
 \value{
 An object of class `stanli_fit`. Its `report` element contains
