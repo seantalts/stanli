@@ -10,6 +10,7 @@
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -3294,7 +3295,29 @@ static void test_replay_workspace_lifetimes() {
   }
 }
 
+static void test_register_fill_alignment() {
+  alignas(64) double buf[160];
+  for (int offset = 0; offset < 9; ++offset)
+    for (int len : {0, 1, 7, 8, 15, 16, 17, 31, 63, 64, 100}) {
+      std::fill(buf, buf + 160, 7.0);
+      double* dst = buf + 8 + offset;
+      stanli::fill_registers(dst, len, 1.5);
+      bool exact = true;
+      for (int i = 0; i < 160; ++i) {
+        const bool inside = i >= 8 + offset && i < 8 + offset + len;
+        exact = exact && buf[i] == (inside ? 1.5 : 7.0);
+      }
+      expect("fill_registers writes exactly the range", exact);
+      const int head = stanli::fill_head_elements(dst, len);
+      expect("fill head stays inside the range", head >= 0 && head <= len);
+      expect(
+          "fill body starts on a cache line or the head is the range",
+          head == len || (reinterpret_cast<uintptr_t>(dst + head) & 63u) == 0u);
+    }
+}
+
 int main() {
+  test_register_fill_alignment();
   test_fill_sink();
   test_worker_lifetimes();
   test_replay_workspace_lifetimes();
