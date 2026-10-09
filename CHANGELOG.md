@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The browser package takes `fastMath: true` in `compile()` and `sample()` to
+  opt a model into fast mode, and the demo page has a "fast math" checkbox.
+  `sample()` results report `fastMath`. It is off by default and default
+  results are unchanged.
 - Fast mode (`fast_math`) now collapses likelihood terms that repeat over the
   data. A density whose rows repeat is evaluated once per distinct row; a
   `normal` or `lognormal` term with a data variate becomes per-group
