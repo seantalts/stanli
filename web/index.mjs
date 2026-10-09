@@ -89,10 +89,25 @@ export function preload(opts) {
   return Promise.all(jobs);
 }
 
+function fastMathOption(value) {
+  if (value == null) return false;
+  if (typeof value !== "boolean")
+    throw new TypeError("fastMath must be true or false");
+  return value;
+}
+
 /** Compile Stan source to portable MIR (one worker loads stanc3).
- * @returns {Promise<{mir: string, ms: {stanc: number}}>} */
+ * @param {Object} opts
+ * @param {string} opts.code
+ * @param {boolean} [opts.fastMath=false]  Compile in fast mode (fused
+ *   multiply-add rewriting; numerics may differ from CmdStan in the last
+ *   bits). Pass the same value to sample() together with the returned MIR.
+ *   Needs the portable stanli compiler.
+ * @returns {Promise<{mir: string, fastMath: boolean,
+ *                    ms: {stanc: number}}>} */
 export function compile(opts) {
-  return request({ cmd: "compile", code: opts.code }, opts);
+  return request({ cmd: "compile", code: opts.code,
+                   fastMath: fastMathOption(opts.fastMath) }, opts);
 }
 
 function pathfinderInitOptions(value) {
@@ -143,6 +158,11 @@ function pathfinderInitOptions(value) {
  * @param {number} [opts.maxError]     WALNUTS only: largest drift in the
  *   joint log density allowed across one macro step before the step is
  *   halved within the trajectory. Omit for the runtime default (0.5).
+ * @param {boolean} [opts.fastMath=false]  Opt this model into fast mode:
+ *   Stan source is compiled with fused multiply-add rewriting and the
+ *   runtime may use faster kernels whose results can differ from CmdStan
+ *   in the last bits. With a precompiled `mir`, pass the same value that
+ *   `compile()` was given. The default leaves every result unchanged.
  * @param {function(string)} [opts.onProgress]  Stage announcements.
  * @param {function(Object)} [opts.onLive]  Streaming draws while NUTS
  *   runs: {liveMeta: {names, warmup, samples}} once per call, then
@@ -152,7 +172,7 @@ function pathfinderInitOptions(value) {
  *   message per L-BFGS iterate.
  * @returns {Promise<{names: string[], samples: number, generatedStart: number,
  *                    columns: Object<string, Float64Array>,
- *                    exactLp: boolean,
+ *                    exactLp: boolean, fastMath: boolean,
  *                    sampler: string, maxDepth: number|null,
  *                    samplerStats: Float64Array|null,
  *                    pathfinder?: {path: {iter, lp}[], khat: number,
@@ -179,6 +199,7 @@ export function sample(opts) {
   const sampler = opts.sampler === "walnuts" || opts.sampler === "pathfinder"
       ? opts.sampler : "nuts";
   const pathfinderInit = pathfinderInitOptions(opts.pathfinderInit);
+  const fastMath = fastMathOption(opts.fastMath);
   if (pathfinderInit && sampler !== "nuts")
     throw new RangeError("pathfinderInit is available only with NUTS");
   return request({
@@ -196,9 +217,10 @@ export function sample(opts) {
     sampler,
     maxError: opts.maxError == null ? 0 : opts.maxError,
     pathfinderInit,
+    fastMath,
   }, opts).then((done) => {
     const { names, samples, generatedStart, ms, exactLp, pathfinder,
-            sampler, maxDepth } = done;
+            sampler, maxDepth, fastMath } = done;
     const flat = new Float64Array(done.columns);
     const columns = {};
     names.forEach((name, i) => {
@@ -206,8 +228,8 @@ export function sample(opts) {
     });
     const samplerStats = done.samplerStats
         ? new Float64Array(done.samplerStats) : null;
-    return { names, samples, generatedStart, columns, ms, exactLp, pathfinder,
-             sampler, maxDepth, samplerStats };
+    return { names, samples, generatedStart, columns, ms, exactLp, fastMath,
+             pathfinder, sampler, maxDepth, samplerStats };
   });
 }
 

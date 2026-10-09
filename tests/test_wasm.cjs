@@ -261,6 +261,72 @@ createStanli().then((M) => {
     M._stanli_model_free(gqModel);
   }
 
+  if (portableCompile) {
+    const exported = require(compilerPath);
+    const fastCompile =
+        (exported && exported.stanli_compile_fast) ||
+        globalThis.stanli_compile_fast;
+    if (typeof fastCompile !== "function")
+      fail("browser compiler did not export stanli_compile_fast()");
+    for (const name of ["_stanli_model_opts_init", "_stanli_model_new_with_opts",
+                        "_stanli_model_new_from_stan_with_opts",
+                        "_stanli_stan_to_mir_with_opts"])
+      if (typeof M[name] !== "function") fail("wasm does not export " + name);
+
+    const code = [
+      "data { int<lower=0> N; vector[N] x; vector[N] y; }",
+      "parameters { real a; real b; real<lower=0> sigma; }",
+      "model { y ~ normal(a + b * x, sigma); }"].join("\n");
+    const regData = '{"N": 4, "x": [1, 2, 3, 4], "y": [1.1, 1.9, 3.2, 3.9]}';
+    const plainMir = String(portableCompile("reg", code).result);
+    const fastMir = String(fastCompile("reg", code).result);
+    if (fastMir === plainMir) fail("fast compile left the MIR unchanged");
+
+    const buildWithOpts = (mirText, fastMath) => {
+      const mirP = M.stringToNewUTF8(mirText);
+      const dataP = M.stringToNewUTF8(regData);
+      const optsP = M._malloc(12);
+      M._stanli_model_opts_init(optsP);
+      const fields = new Int32Array(M.HEAPF64.buffer, optsP, 3);
+      if (fields[0] !== 1 || fields[1] !== 1 || fields[2] !== 0)
+        fail("model_opts_init wrote " + Array.from(fields));
+      fields[2] = fastMath ? 1 : 0;
+      const m = M._stanli_model_new_with_opts(mirP, dataP, optsP, errPtr,
+                                              errLen);
+      M._free(mirP);
+      M._free(dataP);
+      M._free(optsP);
+      if (!m) fail("model_new_with_opts: " + M.UTF8ToString(errPtr));
+      return m;
+    };
+    const evaluate = (m) => {
+      const q = M._malloc(8 * 3);
+      const l = M._malloc(8);
+      const g = M._malloc(8 * 3);
+      M.HEAPF64.set([0.3, 0.7, -0.2], q / 8);
+      if (M._stanli_grad(m, q, l, g) !== 0) fail("regression grad rc");
+      const out = {lp: M.HEAPF64[l / 8],
+                   grad: Array.from(M.HEAPF64.subarray(g / 8, g / 8 + 3))};
+      M._free(q);
+      M._free(l);
+      M._free(g);
+      return out;
+    };
+    const defaultModel = buildWithOpts(plainMir, false);
+    const fastModel = buildWithOpts(fastMir, true);
+    const reference = evaluate(defaultModel);
+    const quick = evaluate(fastModel);
+    const close = (a, b) => Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(b));
+    if (!Number.isFinite(reference.lp) || !close(quick.lp, reference.lp))
+      fail("fast lp " + quick.lp + " vs " + reference.lp);
+    quick.grad.forEach((v, i) => {
+      if (!close(v, reference.grad[i]))
+        fail("fast grad[" + i + "] " + v + " vs " + reference.grad[i]);
+    });
+    M._stanli_model_free(defaultModel);
+    M._stanli_model_free(fastModel);
+  }
+
   console.log("test_wasm OK  lp(0) = " + lp.toFixed(6) + "  mean(mu) = " +
               mu.toFixed(3) + "  walnuts mean(mu) = " + muW.toFixed(3) +
               "  pathfinder mean(mu) = " + muP.toFixed(3) +

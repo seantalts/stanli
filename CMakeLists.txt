@@ -1408,6 +1408,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_corpus_sampling_harness
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_sampling.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_fast_sampling_check
+           COMMAND ${Python3_EXECUTABLE} tests/test_fast_sampling_check.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_historical_benchmarks
            COMMAND ${Python3_EXECUTABLE} tests/test_historical_benchmarks.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1611,6 +1614,9 @@ if(Python3_Interpreter_FOUND)
   if(NOT WIN32)
     add_test(NAME test_verify_refs
              COMMAND ${Python3_EXECUTABLE} tests/test_verify_refs.py
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME test_hp_reference
+             COMMAND ${Python3_EXECUTABLE} tests/test_hp_reference.py
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endif()
 endif()

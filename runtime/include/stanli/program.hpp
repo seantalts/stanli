@@ -520,6 +520,27 @@ inline T program_pow(uint8_t law, const T& a, const T& b) {
   }
 }
 
+// Elements to store one at a time before `dst` reaches a 64-byte boundary.
+inline int fill_head_elements(const void* dst, int len) {
+  const auto misaligned = reinterpret_cast<uintptr_t>(dst) & 63u;
+  const int head = static_cast<int>(((64u - misaligned) & 63u) >> 3);
+  return head < len ? head : len;
+}
+
+template <typename T>
+inline void fill_registers(T* dst, int len, const T& value) {
+  constexpr int kPeelMin = 16;
+  if constexpr (sizeof(T) == 8) {
+    if (len >= kPeelMin) {
+      const int head = fill_head_elements(dst, len);
+      std::fill_n(dst, head, value);
+      dst += head;
+      len -= head;
+    }
+  }
+  std::fill_n(dst, len, value);
+}
+
 template <bool ReuseCallCtx, typename T>
 __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
                                                    EvalState* state = nullptr) {
@@ -543,7 +564,7 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
         break;
       case Program::FILL: {
         const T value(p.pool[(size_t)I.a]);
-        std::fill_n(reg + I.dst, I.len, value);
+        fill_registers(reg + I.dst, I.len, value);
         break;
       }
       case Program::CONSTR:

@@ -122,7 +122,45 @@ globalThis.Worker = class {
   assert.equal(gq.names.length, 2);
   assert.deepEqual(gq.columns.doubled, gq.columns.x.map((x) => 2 * x));
   assert.match(await diagnose(gq), /treedepth of 10/);
-  console.log("test_worker_diagnostics OK: clean, failing, short, and unsupported fits");
+
+  const regression = `
+    data { int<lower=0> N; vector[N] x; vector[N] y; }
+    parameters { real a; real b; real<lower=0> sigma; }
+    model { y ~ normal(a + b * x, sigma); }`;
+  const regressionData = { N: 4, x: [1, 2, 3, 4], y: [1.1, 1.9, 3.2, 3.9] };
+  const base = { data: regressionData, warmup: 200, samples: 200, seed: 5 };
+  const plain = await compile({ code: regression });
+  const quick = await compile({ code: regression, fastMath: true });
+  assert.equal(plain.fastMath, false);
+  assert.equal(quick.fastMath, true);
+  assert.notEqual(quick.mir, plain.mir);
+  assert.equal((await compile({ code: regression, fastMath: false })).mir,
+               plain.mir);
+
+  const unset = await sample({ ...base, mir: plain.mir });
+  const off = await sample({ ...base, mir: plain.mir, fastMath: false });
+  assert.equal(unset.fastMath, false);
+  assert.equal(off.fastMath, false);
+  for (const name of unset.names)
+    assert.deepEqual(off.columns[name], unset.columns[name]);
+
+  const fromMir = await sample({ ...base, mir: quick.mir, fastMath: true });
+  const fromCode = await sample({ ...base, code: regression, fastMath: true });
+  for (const fit of [fromMir, fromCode]) {
+    assert.equal(fit.fastMath, true);
+    assert.deepEqual(fit.names, unset.names);
+    assert(fit.samplerStats.every(Number.isFinite));
+    for (const name of fit.names) assert(fit.columns[name].every(Number.isFinite));
+  }
+  for (const name of fromMir.names)
+    assert.deepEqual(fromCode.columns[name], fromMir.columns[name]);
+  for (const bad of [1, "yes"])
+    assert.throws(() => sample({ ...base, mir: plain.mir, fastMath: bad }),
+                  /fastMath must be true or false/);
+  assert.throws(() => compile({ code: regression, fastMath: 1 }),
+                /fastMath must be true or false/);
+
+  console.log("test_worker_diagnostics OK: clean, failing, short, and unsupported fits; fast mode");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

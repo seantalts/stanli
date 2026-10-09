@@ -185,13 +185,16 @@ build's:
 - Benchmarks: the corpus benchmark in fast mode, paired against the default
   mode and against CmdStan, plus the sampling benchmark once it exists, so
   each candidate's contribution is visible per model.
-- Numerics: every corpus model at the recorded evaluation points against a
-  high-precision reference (as `hp_reference.py` does for two models), with a
-  scaled-error bound in place of the 10-ULP CmdStan gates, and a report of
-  where fast mode is less accurate than the default and by how much.
-- Sampling checks: posterior agreement with the default mode (means,
-  intervals, R-hat, ESS per gradient) on the corpus models that have
-  reference posteriors.
+- Numerics (done 2026-10-09, [report](2026-10-09-fast-mode-hp-accuracy.md)):
+  every corpus model at the recorded evaluation points against a
+  high-precision reference (`tools/hp/`), with a scaled-error bound in place
+  of the 10-ULP CmdStan gates, and a report of where fast mode is less
+  accurate than the default and by how much.
+- Sampling checks (done 2026-10-09, [record](2026-10-09-fast-mode-sampling-check.md)):
+  posterior agreement with the default mode (means, intervals, R-hat, ESS per
+  gradient) on the 39 corpus models that have reference posteriors and 81 more
+  that fast mode changes most. 17 of 120 were flagged; none held up against
+  default mode sampled with other seeds, and ESS per gradient is 1.01x.
 
 ### In fast mode
 
@@ -208,14 +211,23 @@ build's:
   `runtime/src/OPTIMIZATIONS.md`.
 - The AVX2 dense-matrix kernels are still chosen per process by
   `STANLI_FAST_MATH=1`, in builds with `-DSTANLI_AVX2_KERNELS=ON` only.
-- On the replay corpus, fast mode changes 107 of 352 models against default,
-  by at most 3.7e-13 scaled error (normal_mixture_k); 7 of the 124 gated brms
-  models exceed 10 ULP from CmdStan (s2_gev 480, sw_mono 418, sw_skewnormal
-  60, s2_hurdle_negbin 34, s2_car 16, sw_me 15, s2_discrete_weibull 14).
-  Fast mode is not held to those gates. Its own gate is in
+- Accuracy against an 80-digit reference ([2026-10-09](2026-10-09-fast-mode-hp-accuracy.md)):
+  fast mode differs from default on 156 of 344 scored corpus models, by at most
+  1.6e-13 in the gate metric. Against the reference it is no less accurate than
+  default in median, p90 or maximum, for log density and gradient. One model
+  is materially worse (`ch14_m14_11` gradient, 3.5e-15 to 3.7e-14, CSE merge)
+  and 12 model-quantities are better, through the collapse. Fast mode is not
+  held to the 10-ULP CmdStan gates. Its own gate is in
   [TESTING.md](../../TESTING.md#fast-mode) (`tools/verify_refs.py
-  --fast-math`); it still needs its own corpus benchmark against CmdStan and
-  the sampling checks described above.
+  --fast-math`). The corpus benchmark of 2026-10-07 (#446, before the
+  collapse) has fast mode 1.12x faster than default and 2.15x faster than
+  CmdStan in geometric mean.
+- Sampling (2026-10-09, [record](2026-10-09-fast-mode-sampling-check.md)):
+  120 models (39 with reference posteriors) sampled in both modes, 4 chains
+  of 1,000 warmup and 1,000 draws. Posteriors agree with default mode and with
+  the references to within what default mode shows against itself with other
+  seeds; ESS per gradient evaluation is 1.01x (0.95 to 1.09). Nothing outside
+  those 120 models and Apple Silicon was sampled.
 
 ### Candidates
 
