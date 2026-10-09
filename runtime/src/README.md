@@ -18,6 +18,9 @@ of each subsystem, with recipes for common changes, is
 
 Everything else runs the result: [`executor.cpp`](executor.cpp) walks
 the op list, [`nuts.cpp`](nuts.cpp) samples with Stan's own NUTS,
+[`algorithms.cpp`](algorithms.cpp) and
+[`pathfinder_multi.cpp`](pathfinder_multi.cpp) run Stan's services for
+fixed_param, Laplace, ADVI and Pathfinder,
 [`wa_interp.cpp`](wa_interp.cpp) interprets generated quantities the
 graph cannot express, and [`capi.cpp`](capi.cpp) wraps the whole
 thing in the C ABI the language wrappers call.

@@ -41,16 +41,38 @@
 
 namespace tbb {
 
-// The whole range as one chunk, on the calling thread.
+// Every grain of the range in order, on the calling thread: the range is
+// split until it will not divide, as TBB splits it when it has workers to
+// feed. One chunk for the whole range would also be a legal schedule, and is
+// what TBB does with a single thread, but Stan's multi-path loop leaves its
+// chunk on the first path that fails, so the chunking decides whether the
+// paths after a failed one run at all. One path per chunk is the reading its
+// own "Only m of the n pathfinders succeeded" message describes.
+namespace stanli_serial {
+template <typename Range, typename Body>
+void each_grain(Range& range, const Body& body) {
+  if (range.empty()) return;
+  if (!range.is_divisible()) {
+    body(range);
+    return;
+  }
+  Range upper(range, split());
+  each_grain(range, body);
+  each_grain(upper, body);
+}
+}  // namespace stanli_serial
+
 template <typename Range, typename Body>
 void parallel_for(const Range& range, const Body& body) {
-  if (!range.empty()) body(range);
+  Range all(range);
+  stanli_serial::each_grain(all, body);
 }
 
 template <typename Range, typename Body, typename Partitioner>
 void parallel_for(const Range& range, const Body& body,
                   const Partitioner& /*partitioner*/) {
-  if (!range.empty()) body(range);
+  Range all(range);
+  stanli_serial::each_grain(all, body);
 }
 
 // Grown from one thread only, so a std::vector is the same container.

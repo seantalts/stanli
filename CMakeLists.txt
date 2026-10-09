@@ -1355,7 +1355,7 @@ set(STANLI_TESTS
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
   test_odevariadic test_callback_values test_algebra test_estimate test_brmsmono
   test_reduce_sum
-  test_structured_arrays test_pathfinder test_unconstrain
+  test_structured_arrays test_pathfinder test_algorithms test_unconstrain
   test_init_interp test_constrain_structured)
 if(STANLI_STAN_DENSITY_ORACLE)
   list(APPEND STANLI_TESTS

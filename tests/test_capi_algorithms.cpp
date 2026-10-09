@@ -455,6 +455,23 @@ void test_pathfinder(stanli_model* m) {
                          sizeof err);
   expect("pathfinder depends on its inits",
          rc == 0 && n == 200 && from_a != from_b);
+  // One path that cannot move does not take the others with it: Stan says
+  // how many succeeded and resamples from those.
+  const std::vector<double> one_stuck = {1, -2, 0, 2, -1, -1};
+  o.inits = one_stuck.data();
+  Log partial;
+  std::vector<double> from_path((size_t)200);
+  rc = stanli_pathfinder(m, &o, from_b.data(), nullptr, nullptr,
+                         from_path.data(), &n, on_log, &partial, nullptr,
+                         nullptr, nullptr, err, sizeof err);
+  expect(std::string("pathfinder with one failed path: ") + err,
+         rc == 0 && n == 200);
+  expect("pathfinder reports the failed path",
+         partial.text.find("Only 1 of the 2 pathfinders succeeded") !=
+             std::string::npos);
+  bool survivor = n == 200;
+  for (int64_t i = 0; i < n; ++i) survivor &= from_path[(size_t)i] == 2.0;
+  expect("pathfinder draws come from the surviving path", survivor);
   const std::vector<double> at_mode = {1, -2, 0, 1, -2, 0};
   o.inits = at_mode.data();
   Log stuck;

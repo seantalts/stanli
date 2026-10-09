@@ -317,8 +317,9 @@ void run_service(Result& out, const SinkLogger& logger, const char* what,
                                             : logger.errors();
   } catch (const Interrupted&) {
     // The run was abandoned mid-evaluation; drop whatever it left on the
-    // autodiff stack.
-    stan::math::recover_memory();
+    // autodiff stack. Unwinding has closed every nested tape by now, and
+    // recover_memory throws rather than run with one open.
+    if (stan::math::empty_nested()) stan::math::recover_memory();
     out.interrupted = true;
     out.return_code = 0;
   } catch (const std::exception& e) {
