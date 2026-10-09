@@ -1,0 +1,16 @@
+{
+ "recorded": "2026-10-09",
+ "stanli_commit": "62375382",
+ "brms": "2.23.2 plus the stanli backend (local branch backend-stanli on c89c4c05)",
+ "rstan": "2.39.0.9000",
+ "StanHeaders": "2.39.1",
+ "posterior": "1.7.1",
+ "R": "4.3.3",
+ "platform": "x86_64-pc-linux-gnu",
+ "cpu": "i9-13900K",
+ "chains": 4,
+ "iter": 2000,
+ "seed": 20261009,
+ "formulas": "tools/gen_brms_models.R",
+ "note": "rstan seconds include compiling each model; rstan ran in up to eight processes at once and stanli in one, so the seconds are not a benchmark"
+}

@@ -100,6 +100,9 @@ stanfit_no_cppmodule <- function(...) {
 #'
 #'   Install rstan from a CRAN binary on supported macOS/Windows R versions to
 #'   avoid a toolchain. On Linux, provision a compatible binary installation.
+#' @param exclude Names of variables to leave out of the stored draws, as
+#'   `pars` with `include = FALSE` does in `rstan::sampling()`. Every element
+#'   of a named container is dropped. The live model is unaffected.
 #' @examples
 #' \dontrun{
 #' m <- stanli_model(code = "parameters { real mu; } model { mu ~ normal(0, 1); }")
@@ -114,7 +117,7 @@ as_stanfit <- function(x, ...) UseMethod("as_stanfit")
 
 #' @rdname as_stanfit
 #' @export
-as_stanfit.stanli_fit <- function(x, model = x$model, ...) {
+as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
   if (!requireNamespace("rstan", quietly = TRUE))
     stop("as_stanfit() needs rstan. Install a compatible binary with ",
          "install.packages('rstan', type = 'binary') on macOS/Windows; ",
@@ -136,8 +139,14 @@ as_stanfit.stanli_fit <- function(x, model = x$model, ...) {
       shape[2L] != x$chains || shape[3L] != length(x$columns) ||
       !identical(dim(x$sampler)[1:2], shape[1:2]) || kept < 1L)
     stop("sampling metadata does not match the stored draws", call. = FALSE)
-  layout <- stanfit_column_layout(c(x$columns, "lp__"))
-  flat_names <- c(x$columns, "lp__")
+  if (!is.null(exclude) && (!is.character(exclude) || anyNA(exclude)))
+    stop("exclude must be a character vector of variable names", call. = FALSE)
+  # Dropped variables leave the stored draws only: the live model, and so
+  # log_prob and the transforms, still know every parameter.
+  kept_columns <- !(sub("\\[.*$", "", x$columns) %in% exclude)
+  columns <- x$columns[kept_columns]
+  layout <- stanfit_column_layout(c(columns, "lp__"))
+  flat_names <- c(columns, "lp__")
   posterior_rows <- seq.int(saved_warmup + 1L, shape[1L])
 
   # Slot semantics checked against installed CRAN rstan 2.32.7 and
@@ -151,7 +160,7 @@ as_stanfit.stanli_fit <- function(x, model = x$model, ...) {
   chains <- vector("list", x$chains)
   arguments <- vector("list", x$chains)
   for (chain in seq_len(x$chains)) {
-    values <- cbind(matrix(x$draws[, chain, ], nrow = shape[1L]),
+    values <- cbind(matrix(x$draws[, chain, kept_columns], nrow = shape[1L]),
                     x$sampler[, chain, "lp__"])
     colnames(values) <- flat_names
     draws <- as.data.frame(values, optional = TRUE)
@@ -159,7 +168,11 @@ as_stanfit.stanli_fit <- function(x, model = x$model, ...) {
     diagnostics <- matrix(x$sampler[, chain, sampler_names], nrow = shape[1L])
     colnames(diagnostics) <- sampler_names
     attr(draws, "sampler_params") <- as.data.frame(diagnostics)
-    attr(draws, "args") <- list(chain_id = chain, sampler_t = "NUTS(diag_e)")
+    # rstan keeps each chain's sampler settings here too, and brms reads
+    # them from here (control_params()).
+    attr(draws, "args") <- list(
+      chain_id = chain, sampler_t = "NUTS(diag_e)",
+      control = list(adapt_delta = x$delta, max_treedepth = x$max_depth))
     attr(draws, "adaptation_info") <- ""
     elapsed <- c(warmup = NA_real_, sample = NA_real_)
     if (isTRUE(x$report$available))
@@ -201,6 +214,10 @@ as_stanfit.stanli_fit <- function(x, model = x$model, ...) {
   misc <- new.env(parent = asNamespace("rstan"))
   misc$stanli_model <- live_model
   misc$stanli_n_unconstrained <- dim(x$unconstrained)[3L]
+  # The model's own output columns, for checking a model attached later:
+  # the stored draws may by then have lost variables (`exclude`) or been
+  # renamed by the package that holds the fit.
+  misc$stanli_columns <- x$columns
   methods::new("stanli_stanfit", model_name = name, model_pars = layout$parameters,
                par_dims = layout$dimensions, sim = simulation, stan_args = arguments,
                stanmodel = model, mode = 0L, date = date(), inits = list(),
@@ -211,7 +228,9 @@ as_stanfit.stanli_fit <- function(x, model = x$model, ...) {
 #' @export
 as_stanfit.stanli_stanfit <- function(x, model, ...) {
   if (missing(model)) return(x)
-  columns <- x@sim$fnames_oi[x@sim$fnames_oi != "lp__"]
+  columns <- x@.MISC$stanli_columns
+  # a fit converted before the columns were recorded
+  if (is.null(columns)) columns <- x@sim$fnames_oi[x@sim$fnames_oi != "lp__"]
   stanfit_check_model(model, columns, x@.MISC$stanli_n_unconstrained)
   # Clone the environment: attaching a model must not change other copies of
   # the saved fit that still share its original .MISC environment.

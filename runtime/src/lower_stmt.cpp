@@ -855,6 +855,30 @@ bool Lowering::repeatable_target_stmt(const mir::Stmt& s,
       return false;
   }
 }
+// True when every statement assigns a scalar integer local a value that
+// needs nothing from run time, possibly under conditions that need nothing
+// either. Such statements lower to compile-time integers and no graph ops.
+bool Lowering::static_int_bookkeeping(const std::vector<mir::Stmt>& body) {
+  if (body.empty()) return false;
+  for (const mir::Stmt& s : body) {
+    switch (s.kind) {
+      case mir::Stmt::Skip:
+        break;
+      case mir::Stmt::Block:
+      case mir::Stmt::SList:
+        if (!static_int_bookkeeping(s.body)) return false;
+        break;
+      case mir::Stmt::Assignment:
+        if (!s.lhs_idx.empty() || !int_locals.count(s.lhs) ||
+            expr_effectful(s.rhs) || needs_runtime_value(s.rhs))
+          return false;
+        break;
+      default:
+        return false;
+    }
+  }
+  return true;
+}
 // Availability is independent of both MIR's AD type and param_free. A
 // data-only loop result lives in a slot without a compile-time observation.
 // This probe does not lower or execute anything (in particular, no UDF loop).
@@ -1635,12 +1659,25 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         int_env.erase(s.loopvar);
         return;
       }
-      if (lower_region_map(s, lo, hi)) return;
-      if (try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi})) return;
-      if (in_write_array && structured_policy != StructuredMode::Off &&
-          region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi})) {
-        lower_runtime_ifelse(s);
-        return;
+      // A loop that only counts into integer locals from values known now
+      // (how many observations are zero, say) is evaluated here, emitting
+      // nothing. Kept as a region its counters would exist only at run
+      // time, and a later declaration sized by one could not be laid out.
+      const bool bookkeeping = static_int_bookkeeping(s.body);
+      if (bookkeeping && std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") &&
+          region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi}))
+        emit_diagnostic(
+            "stanli_structured counting loop evaluated at compile "
+            "time: " +
+            std::to_string(hi - lo + 1) + " iterations");
+      if (!bookkeeping) {
+        if (lower_region_map(s, lo, hi)) return;
+        if (try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi})) return;
+        if (in_write_array && structured_policy != StructuredMode::Off &&
+            region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi})) {
+          lower_runtime_ifelse(s);
+          return;
+        }
       }
       // runtime_loop_control evaluates data-only conditions while looking
       // for a parameter-selected break/continue. Scan under the same loop
