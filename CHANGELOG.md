@@ -14,9 +14,16 @@
   10x. Results differ from default mode by rounding only (at most
   1.7e-13 of the largest gradient entry in the corpus). Default mode is
   unchanged. `STANLI_NO_COLLAPSE=1` switches it off.
-- `beta_binomial_lpmf` now has the elementwise form the rewrite passes' trait
-  table says it has. Asked for one value per element, the kernel wrote the
-  sum into the first element, which gave a wrong gradient.
+- Fix wrong results for a loop whose iterations use `beta_binomial_lpmf`
+  without adding it straight to the target: a weighted or scaled term
+  (`target += w[n] * beta_binomial_lpmf(...)`), or one stored per
+  observation and summed afterwards. Lane partitioning fused such a loop
+  into one density with a value per iteration, and this kernel had no such
+  form: it wrote the sum into the first element. The gradient was wrong, and
+  with unequal weights the log density too. A plain
+  `y[n] ~ beta_binomial(...)` loop or a vectorized statement was not
+  affected. Releases 0.9.1 through 0.19.1 are affected (the two ends were
+  run); `STANLI_NO_PARTITION=1` avoids it there.
 - Fuse `normal_lpdf`, `cauchy_lpdf`, `student_t_lpdf` and `ordered_logistic_lpmf`
   (shared cutpoints) into allocation-free kernels, and read mapped `rvar`
   vectors and matrices as values without copying them. Gradients of models

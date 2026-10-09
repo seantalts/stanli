@@ -592,6 +592,17 @@ jobs:
           python3 tools/verify_refs.py deps/posteriordb \
             --check build-rel/stanli_check --jobs 4
 
+      # The same replay with every model compiled in fast mode, held to the
+      # fast-mode gate in TESTING.md: fast mode may reorder sums and use
+      # closed forms, so it is judged on the size of its error against the
+      # same CmdStan references, not on their last bits. Linux x86-64 only
+      # until fast mode has been replayed on the other platforms.
+      - name: Fast-mode corpus verification against CmdStan references
+        if: matrix.runtime == 'linux-x86_64'
+        run: |
+          python3 tools/verify_refs.py deps/posteriordb \
+            --check build-rel/stanli_check --fast-math --jobs 4
+
       # Report-only: never fails the job. A missing or unreachable baseline
       # (first run, expired retention, rate limit) leaves the directory
       # absent and the harness skips the comparison.
