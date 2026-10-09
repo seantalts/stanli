@@ -11,8 +11,27 @@
 
 #include <cmath>
 #include <memory>
+#include <string>
+#include <type_traits>
 
 namespace stanli {
+
+namespace {
+
+// A diagnostic writer that records nothing, as the base class does, and can
+// be called with any integer. The service writes std::size_t values, and
+// structured_writer's integer overloads are fixed-width: where std::size_t
+// is `unsigned long` and uint64_t is `unsigned long long` (macOS, wasm) no
+// overload matches exactly and the call is ambiguous. pathfinder.cpp's
+// PathCollector answers the same way.
+class QuietDiagnostics : public stan::callbacks::structured_writer {
+ public:
+  using stan::callbacks::structured_writer::write;
+  template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
+  void write(const std::string&, T) {}
+};
+
+}  // namespace
 
 int64_t pathfinder_max_draws(const PathfinderRunConfig& cfg) {
   if (cfg.num_paths < 1 || cfg.num_draws < 1) return 0;
@@ -58,8 +77,8 @@ AlgorithmResult run_pathfinder_paths(Executor& ex, const AlgorithmHost& host,
   // Base writers are invalid, which is how the service knows not to write
   // each path's own draws as well.
   std::vector<stan::callbacks::writer> path_writers(paths);
-  std::vector<stan::callbacks::structured_writer> path_diagnostics(paths);
-  stan::callbacks::structured_writer diagnostics;
+  std::vector<QuietDiagnostics> path_diagnostics(paths);
+  QuietDiagnostics diagnostics;
 
   detail::run_service(out, logger, "pathfinder", [&] {
     namespace pf = stan::services::pathfinder;
