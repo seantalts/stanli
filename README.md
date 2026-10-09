@@ -37,6 +37,8 @@ keeping installation small and avoiding a local stan-math build.
   <!--gen:corpus_median-->1.70x<!--/gen-->, with
   <!--gen:corpus_at_par-->305<!--/gen--> at or above parity.
   Failed or capped runs remain in the full table.
+- Fast mode: [docs/fast-mode.md](docs/fast-mode.md). An opt-in setting per
+  model that gives up CmdStan's last bits for speed.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
   <!--gen:corpus_reference_models-->352<!--/gen--> models share one three-point
   CmdStan reference replay. Within the posteriordb subset,

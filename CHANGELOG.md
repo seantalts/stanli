@@ -1,7 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.20.0
 
+- Add fast mode, an opt-in setting per model: `fast_math=True` in Python,
+  `fast_math = TRUE` in R, `fastMath: true` in JavaScript, `--fast-math` on
+  the command line. It gives up agreement with CmdStan in the last bits for
+  speed: stanc3 partial evaluation, one backward pass for repeated
+  operations on parameters, fused loops over shared parameters, and the
+  collapse of repeated observations below. Default mode is unchanged. See
+  [docs/fast-mode.md](docs/fast-mode.md).
 - The browser package takes `fastMath: true` in `compile()` and `sample()` to
   opt a model into fast mode, and the demo page has a "fast math" checkbox.
   `sample()` results report `fastMath`. It is off by default and default
@@ -50,6 +57,11 @@
   Gradients of models that call these densities on vectors of 16 or more
   elements are about 1.04x faster on average and up to 1.14x (linear
   regressions); values, gradients, rejections and messages are unchanged.
+- Align large register fills to a cache line. Models that fill large local
+  vectors, such as s2_com_poisson, are about 1.02x faster.
+- Builds configured with `-DSTANLI_AVX2_KERNELS=ON` (x86-64 Linux; off in
+  release builds) carry AVX2 copies of the dense-matrix kernels, used when
+  `STANLI_FAST_MATH=1` is set.
 
 ## 0.19.1
 
