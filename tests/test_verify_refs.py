@@ -330,6 +330,97 @@ class CheckModelPointsTest(unittest.TestCase):
         self.assertIn("signal 11", detail)
 
 
+class FastModeGateTest(unittest.TestCase):
+    """--fast-math: lp and the gradient as a vector, not per coordinate."""
+
+    WIDE = {"values": ["-3.5", "1000", "1e-13"], "status": "VERIFIED",
+            "max_rel": 0.0, "max_ulp": 0}
+
+    def run_check(self, body, values=None, fast=True, wa=True):
+        pt = values or VALUES
+        ref = {"primary": 0, "points": {str(p): pt for p in POINTS},
+               "recorded": {"platform": verify_refs.native_platform()}}
+        with tempfile.TemporaryDirectory() as tmp:
+            return check_model(MODEL, ref, REPO / "nonexistent-pdb",
+                               stub(tmp, body, wa), pathlib.Path(tmp), 60,
+                               verify_refs.FAST_MAX_REL if fast else 1e-9,
+                               fast_math=fast)
+
+    def test_the_flag_reaches_stanli_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "stanli_check_stub.sh"
+            path.write_text('#!/bin/sh\ncase " $* " in\n'
+                            '  *" --fast-math "*) echo "OK -3.5 1 -2";;\n'
+                            '  *) echo "COMPILE_FAIL default mode";;\nesac\n')
+            path.chmod(path.stat().st_mode | stat.S_IXUSR)
+            ref = {"primary": 0, "points": {str(p): VALUES for p in POINTS}}
+            args = (MODEL, ref, REPO / "nonexistent-pdb", path,
+                    pathlib.Path(tmp), 60, 1e-12)
+            self.assertEqual(check_model(*args, no_wa=True,
+                                         fast_math=True)[1], "OK")
+            self.assertNotEqual(check_model(*args, no_wa=True)[1], "OK")
+
+    def test_a_cancelled_coordinate_is_scored_against_the_gradient(self):
+        # 2e-13 away in a coordinate of 1e-13: thousands of ULP there, and
+        # 2e-16 of the largest entry.
+        body = 'echo "OK -3.5 1000 3e-13"'
+        result = self.run_check(body, self.WIDE)
+        self.assertEqual(result[1], "OK")
+        self.assertLess(result[2], 1e-15)
+        self.assertGreater(result[3], 1000)
+        with unittest.mock.patch.dict(verify_refs.ULP_LIMITS, {MODEL: 10}):
+            self.assertEqual(self.run_check(body, self.WIDE)[1], "OK")
+            self.assertEqual(self.run_check(body, self.WIDE, fast=False)[1],
+                             "ULP_GATE")
+
+    def test_the_gradient_gate_is_tighter_than_the_default(self):
+        body = 'echo "OK -3.5 1000.00000001 1e-13"'  # 1e-11 of the largest
+        self.assertEqual(self.run_check(body, self.WIDE)[1], "GATE")
+        self.assertEqual(self.run_check(body, self.WIDE, fast=False)[1], "OK")
+
+    def test_lp_is_gated_on_its_own(self):
+        self.assertEqual(
+            self.run_check('echo "OK -3.50000000004 1 -2"')[1], "GATE")
+        self.assertEqual(
+            self.run_check('echo "OK -3.5000000000000004 1 -2"')[1], "OK")
+
+    def test_a_nonfinite_coordinate_fails(self):
+        for got in ("nan", "inf"):
+            with self.subTest(got=got):
+                self.assertEqual(
+                    self.run_check(f'echo "OK -3.5 1 {got}"')[1], "GATE")
+
+    def test_a_point_cmdstan_rejects_must_still_be_rejected(self):
+        rejected = {"status": "REJECTED_BOTH"}
+        self.assertEqual(
+            self.run_check('echo "EVAL_FAIL out of range"', rejected)[1], "OK")
+        self.assertEqual(
+            self.run_check('echo "OK -3.5 1 -2"', rejected)[1],
+            "POINT_NOT_REJECTED")
+
+    def test_ill_conditioned_models_keep_their_documented_limit(self):
+        # A point with no recorded deviation, as the brms GP points are.
+        pt = {"values": VALUES["values"], "status": "VERIFIED"}
+        body = 'echo "OK -3.5 1.0000000001 -2"'  # 1e-10 of the largest
+        self.assertEqual(self.run_check(body, pt)[1], "GATE")
+        with unittest.mock.patch.dict(verify_refs.ILL_CONDITIONED,
+                                      {MODEL: "a test"}):
+            self.assertEqual(self.run_check(body, pt)[1], "OK")
+            self.assertEqual(
+                self.run_check('echo "OK -3.5 1.00000001 -2"', pt)[1], "GATE")
+
+    def test_other_outputs_keep_the_default_gate(self):
+        pt = {**VALUES, "wa": {"names": "a", "values": ["1"]}}
+        row = ('if [ -n "$wa" ]; then echo "WANAMES a"; '
+               'echo "WAVALS %s"; fi\necho "OK -3.5 1 -2"')
+        # 1e-10 is above the fast gate and below the one these outputs keep.
+        near = self.run_check(row % "1.0000000001", pt, wa=False)
+        self.assertEqual(near[1], "OK")
+        self.assertEqual(near[2], 0.0)
+        self.assertEqual(
+            self.run_check(row % "1.00000001", pt, wa=False)[1], "WA_GATE")
+
+
 class LocalCorpusTest(unittest.TestCase):
     """Models carried in the tree, resolved by name before posteriordb."""
 

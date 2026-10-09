@@ -1,0 +1,137 @@
+models analysed: 342 of 342; with profile: 341; with default/fast timing: 341
+
+== corpus counts: models with >=1 data-variate density term (N>=2) that collapses ==
+a_strict               any  51; >=2x  51; >=10x  36; >=100x   6
+a_repeated_covariate   any  55; >=2x  36; >=10x  24; >=100x   6
+a_any                  any 104; >=2x  85; >=10x  58; >=100x  12
+b                      any  93; >=2x  56; >=10x  31; >=100x  12
+b_frontier_only        any   4; >=2x   1; >=10x   0; >=100x   0
+a or b: 118; a only: 21; b only: 14; both: 83
+(a) by opcode (models): NORMAL_LPDF:46, BERNOULLI_LPMF:23, BINOMIAL_LPMF:13, POISSON_LPMF:12, BERNOULLI_LOGIT_GLM_LPMF:5, BERNOULLI_LOGIT_LPMF:3, NORMAL_ID_GLM_LPDF:2, POISSON_LOG_GLM_LPMF:2, LOGNORMAL_LPDF:1, BINOMIAL_LOGIT_LPMF:1
+(b) by opcode (models): NORMAL_LPDF:37, BERNOULLI_LPMF:24, BINOMIAL_LPMF:10, POISSON_LPMF:9, ORDERED_LOGISTIC_LPMF:4, POISSON_LCDF:3, BERNOULLI_LOGIT_LPMF:3, NORMAL_ID_GLM_LPDF:2, NEG_BINOMIAL_2_LOG_GLM_LPMF:2, POISSON_LOG_GLM_LPMF:2, BERNOULLI_LOGIT_GLM_LPMF:2, LOGNORMAL_LPDF:1, EXPONENTIAL_LPDF:1, BINOMIAL_LOGIT_LPMF:1
+adjacent shape, not sized: normal likelihood with matvec/GLM linear predictor and broadcast sigma that does not collapse 2x (Gram-matrix form): 36 models
+
+== estimated whole-gradient ceilings (models at or above each factor) ==
+vs_default_a     >=1.1x  71; >=1.5x  51; >=2x  43; >=5x  31; >=10x  23; of 341
+vs_default_b     >=1.1x  57; >=1.5x  36; >=2x  22; >=5x  18; >=10x   9; of 341
+vs_default_best  >=1.1x  84; >=1.5x  64; >=2x  56; >=5x  41; >=10x  29; of 341
+vs_default_cse   >=1.1x  14; >=1.5x  11; >=2x  11; >=5x  10; >=10x   5; of 341
+vs_fast_a        >=1.1x  70; >=1.5x  44; >=2x  39; >=5x  29; >=10x  20; of 341
+vs_fast_b        >=1.1x  52; >=1.5x  36; >=2x  18; >=5x  11; >=10x   7; of 341
+vs_fast_best     >=1.1x  83; >=1.5x  57; >=2x  49; >=5x  35; >=10x  24; of 341
+runtime fast-math / default ns per gradient: median 0.998; <=0.9: 61; <=0.5: 10; >=1.1: 2
+
+== near-miss buckets (data-variate terms with N>=8, >=10% of the model's density elements, <2x collapse); a model can be in several ==
+ 121  per-observation covariate / linear predictor [groups<=N/2 if the covariate were absent]
+      GLM_Binomial_model GLM_Poisson_model aalto_lin aalto_lin_std aalto_lin_std_t accel_gp accel_splines arK blr ch09_m5_8s ch09_m5_8s2 ch09_m9_1 ch09_m9_1_chains4 ch11_m11_10 ...
+  51  one latent parameter (or opaque active value) per observation
+      2pl_latent_reg_irt GLMM1_model GLMM_Poisson_model Mh_model Mtbh_model Mth_model bym2_offset_only ch11_m11_6 ch11_m11_8 ch12_m12_1 ch13_m13_1 ch13_m13_2 ch13_m13_3 ch14_m14_7 ...
+  38  no visible term: UDF / hand-written target terms (opaque island or generic ops)
+      aalto_gpareto cm_betagate cm_bisa cm_choco cm_ddm cm_exgaussian cm_exwald cm_gamma cm_geg cm_invgamma cm_invgaussian cm_invweibull cm_lba1 cm_lba2 ...
+  17  no visible term: one multivariate / categorical-GLM op
+      ch14_m14_10 ch14_m14_11 ch14_m14_6 ch14_m14_6x ch14_m14_9 gp_regr kronecker_gp ldaK2 s2_ar_cov s2_cosy s2_cox s2_cox_cens s2_fcor s2_unstr ...
+  15  no visible term: tiny data (N<8)
+      Rate_1_model Rate_2_model Rate_3_model Rate_4_model Rate_5_model aalto_binom aalto_binom2 aalto_binomb ch09_m9_2 ch09_m9_3 ch09_mp ch13_m13_7 ch13_m13_7nc extra_hurdle_poisson ...
+  11  opaque multivariate/categorical op (only whole-op repeats visible)
+      ch15_m15_7 ctsem_ctsm gpcm_latent_reg_irt grsm_latent_reg_irt ldaK5 nn_rbm1bJ100 s2_categorical_re s2_dirichlet s2_logistic_normal s2_multinomial s2_wiener
+   6  density under nonlinear consumer (mixture/marginalisation/censoring)
+      Survey_model hmm_example low_dim_gauss_mix low_dim_gauss_mix_collapse normal_mixture normal_mixture_k
+   4  no visible term: variate is active (transformed y, residual recursion, missing data)
+      arma11 bones_model i320_mi_nhanes s2_shifted_lognormal
+   4  per-observation covariate / linear predictor [plus per-observation parameters]
+      i319_pois_re2 s2_mm s2_mm_weights s2_mmc
+source has truncation T[..]: 1 (aalto_poisson_hurdle); graph has cdf-family ops: 9 (aalto_poisson_hurdle cm_betadiscrete i320_pois_trunc_both i320_pois_trunc_ub s2_cens_interval s2_mi_trunc_lb s2_weights_trunc sw_cens sw_trunc)
+generated quantities mention log_lik: 21 models; among models with a collapse: 10 of 118
+opaque opcodes (models): ISLAND:32, GEMM:32, DIAG_MATRIX:17, CHOLESKY:11, CHECK_LOWER:8, GP_COV:7, CUMSUM:6, SOFTMAX:5, CHECK_UPPER:4, CHECK_STRUCTURED:4, ODE:4, REP_MAT:2, MULT_LOWER_TRI_SELF_TRANSPOSE:2, LOG_SUM_EXP_ROWS:2, ADD_DIAG:2, MDIVIDE_LEFT:1, QUAD_FORM_SYM:1, MDIVIDE_RIGHT_SPD:1, EIGENVECTORS_SYM:1, EIGENVALUES_SYM:1, NEG:1, EXPV:1, MUL:1, LOG1M_EXP:1, EXTREMA_VEC:1
+
+== models by estimated ceiling against shipped default ==
+columns: est. ceiling vs default for (a) only, (b) only, best of both; best vs runtime fast-math; cse = ceiling an ideal merge of identical scalar ops would reach (vs default); default ns/grad; fast/default; census/default
+model                                     a      b   best vsFast    cse   ns/grad   f/d   c/d LL  main collapsing terms
+nes_logit_model                      235.21 117.61 235.21 235.00   1.00     13636  1.00  1.00 -   BERNOULLI_LOGIT_GLM_LPMF(linpred) N=1179 Ga=5 Gb=10 el=1.00 t=1.00
+radon_pooled                         222.79  16.97 222.79 222.38   1.00     47331  1.00  1.00 -   NORMAL_LPDF(covar,bcast) N=12573 Ga=5 Gb=691 el=1.00 t=0.57
+ch12_m12_5                             1.03  79.56  79.56  71.29  79.56   1329142  0.90  0.97 -   ORDERED_LOGISTIC_LPMF(covar,bcast)[scalar ops] N=9930 Ga=- Gb=42 el=1.00 t=0.67
+sw_acat                                1.00  54.10  54.10  55.55  54.10     81045  1.03  1.01 -   (no density op; target terms 690->126)
+Mb_model                               1.12  37.43  41.25  41.23   6.34     51009  1.00  1.66 -   BERNOULLI_LPMF(fn(gather)) N=1050 Ga=- Gb=4 el=0.51 t=0.10; BERNOULLI_LPMF(covar) N=1008 Ga=4 Gb=7 el=0.49 t=0.10
+ch12_m12_7                             1.01  26.63  26.63  25.51  26.63   1208172  0.96  0.99 -   ORDERED_LOGISTIC_LPMF(covar,bcast)[scalar ops] N=9930 Ga=- Gb=305 el=1.00 t=0.71
+ch12_m12_6                             1.00  26.43  26.43   9.96  26.43   3941871  0.38  1.11 -   ORDERED_LOGISTIC_LPMF(other,bcast)[scalar ops] N=9930 Ga=- Gb=305 el=1.00 t=0.23
+aalto_poisson_simple                  21.08  16.45  21.08  21.08   1.00      2320  1.00  1.00 L   POISSON_LPMF(bcast) N=500 Ga=1 Gb=8 el=1.00 t=0.95
+radon_partially_pooled_centered       16.63   1.65  16.63  16.98   1.00     35971  1.02  1.00 -   NORMAL_LPDF(gather,bcast) N=12573 Ga=386 Gb=7437 el=0.97 t=0.73
+earn_height                           15.69   1.92  15.69  15.73   1.00      4173  1.00  1.00 -   NORMAL_LPDF(covar,bcast) N=1192 Ga=20 Gb=593 el=1.00 t=0.54
+logearn_height                        15.68   1.91  15.68  15.76   1.00      4164  1.01  1.01 -   NORMAL_LPDF(covar,bcast) N=1192 Ga=20 Gb=593 el=1.00 t=0.55
+radon_county                          15.64   1.57  15.64  15.62   1.00     35948  1.00  1.06 -   NORMAL_LPDF(gather,bcast) N=12573 Ga=386 Gb=7437 el=0.97 t=0.73
+log10earn_height                      15.57   1.92  15.57  15.57   1.00      4182  1.00  1.00 -   NORMAL_LPDF(covar,bcast) N=1192 Ga=20 Gb=593 el=1.00 t=0.55
+logearn_logheight_male                13.77   1.68  13.77  13.77   1.00      5774  1.00  1.01 -   NORMAL_LPDF(covar,bcast) N=1192 Ga=36 Gb=683 el=1.00 t=0.41
+logearn_height_male                   13.67   1.67  13.67  13.68   1.00      5749  1.00  1.01 -   NORMAL_LPDF(covar,bcast) N=1192 Ga=36 Gb=683 el=1.00 t=0.41
+logearn_interaction                   13.55   1.68  13.55  13.59   1.00      7378  1.00  1.01 -   NORMAL_LPDF(covar,bcast) N=1192 Ga=36 Gb=683 el=1.00 t=0.32
+logearn_interaction_z                 13.50   1.70  13.50  13.45   1.00      7459  1.00  1.00 -   NORMAL_LPDF(covar,bcast) N=1192 Ga=36 Gb=683 el=1.00 t=0.32
+radon_partially_pooled_noncentered    12.66   1.56  12.66  12.74   1.00     36637  1.01  1.05 -   NORMAL_LPDF(fn(gather),bcast) N=12573 Ga=386 Gb=7437 el=0.97 t=0.72
+radon_county_intercept                12.09   1.48  12.09  11.96   1.00     54843  0.99  1.01 -   NORMAL_LPDF(covar,bcast) N=12573 Ga=809 Gb=8311 el=0.97 t=0.49
+ch11_m11_4                            11.84   6.63  11.84   7.75   1.00     15369  0.65  1.46 L   BINOMIAL_LPMF(fn(gather)) N=504 Ga=28 Gb=51 el=0.98 t=0.05
+radon_variable_slope_centered         11.68   1.45  11.68  11.69   1.00     56616  1.00  1.03 -   NORMAL_LPDF(covar,bcast) N=12573 Ga=809 Gb=8311 el=0.97 t=0.48
+radon_variable_intercept_centered     11.63   1.46  11.63  11.62   1.00     54549  1.00  1.03 -   NORMAL_LPDF(covar,bcast) N=12573 Ga=809 Gb=8311 el=0.97 t=0.50
+ch13_m13_5                            11.08   6.27  11.08   7.28   1.00     15470  0.66  1.52 L   BINOMIAL_LPMF(fn(gather)) N=504 Ga=28 Gb=51 el=0.97 t=0.05
+radon_variable_intercept_noncentered  11.07   1.53  11.07  11.06   1.03     56490  1.00  0.97 -   NORMAL_LPDF(covar,bcast) N=12573 Ga=809 Gb=8311 el=0.97 t=0.49
+ch12_m12_4                             1.00  10.68  10.68   2.17  10.68    111892  0.20  8.91 -   ORDERED_LOGISTIC_LPMF(data,bcast)[scalar ops] N=9930 Ga=- Gb=7 el=1.00 t=0.94
+ch11_m11_5                            10.66   5.95  10.66   6.30   1.00     16838  0.59  1.63 L   BINOMIAL_LPMF(fn(gather)) N=504 Ga=28 Gb=51 el=0.98 t=0.04
+radon_variable_slope_noncentered      10.52   1.45  10.52  10.82   1.00     57202  1.03  1.03 -   NORMAL_LPDF(covar,bcast) N=12573 Ga=809 Gb=8311 el=0.97 t=0.47
+radon_hierarchical_intercept_centere  10.38   1.44  10.38  10.43   1.00     73640  1.00  1.01 -   NORMAL_LPDF(covar,bcast) N=12573 Ga=1008 Gb=8579 el=0.97 t=0.38
+kidscore_mom_work                     10.05   1.87  10.05  10.12   1.00      2734  1.01  1.01 -   NORMAL_LPDF(covar,bcast) N=434 Ga=4 Gb=210 el=1.00 t=0.30
+radon_variable_intercept_slope_cente   9.97   1.40   9.97   9.93   1.00     65015  1.00  1.06 -   NORMAL_LPDF(covar,bcast) N=12573 Ga=809 Gb=8311 el=0.94 t=0.43
+radon_hierarchical_intercept_noncent   9.54   1.42   9.54   9.55   1.00     74292  1.00  1.02 -   NORMAL_LPDF(covar,bcast) N=12573 Ga=1008 Gb=8579 el=0.97 t=0.37
+radon_variable_intercept_slope_nonce   9.07   1.45   9.07   9.24   1.00     66262  1.02  1.02 -   NORMAL_LPDF(covar,bcast) N=12573 Ga=809 Gb=8311 el=0.94 t=0.42
+kidscore_momhs                         8.49   2.63   8.49   8.49   1.00      1565  1.00  1.01 -   NORMAL_LPDF(covar,bcast) N=434 Ga=2 Gb=129 el=1.00 t=0.51
+Mt_model                               1.00   7.49   8.07   2.00   5.52      4465  0.25  5.19 -   BERNOULLI_LPMF(gather) N=750 Ga=- Gb=5 el=0.68 t=0.46; BERNOULLI_LPMF(gather) N=348 Ga=4 Gb=7 el=0.32 t=0.21
+election88_full                        7.68   5.19   7.68   7.65   1.00    471449  1.00  1.00 -   BERNOULLI_LOGIT_LPMF(covar) N=11566 Ga=1458 Gb=2185 el=0.99 t=0.47
+sesame_one_pred_a                      7.65   7.25   7.65   7.65   1.01       926  1.00  0.99 -   NORMAL_LPDF(covar,bcast) N=240 Ga=2 Gb=4 el=1.00 t=0.50
+ch12_m12_3                             1.00   6.74   6.74   1.81   6.74      3630  0.27  5.87 -   POISSON_LPMF(bcast)[scalar ops] N=187 Ga=- Gb=1 el=0.51 t=0.19; POISSON_LPMF(bcast)[scalar ops] N=178 Ga=1 Gb=4 el=0.49 t=0.18
+s2_mo_simo_prior                       6.58   1.00   6.58   3.25   1.00      2048  0.49  1.02 -   NORMAL_LPDF(other,bcast) N=40 Ga=4 Gb=40 el=0.93 t=0.02
+sw_mono                                6.34   1.00   6.34   3.24   1.00      2000  0.51  1.00 -   NORMAL_LPDF(other,bcast) N=40 Ga=4 Gb=40 el=0.93 t=0.02
+M0_model                               1.00   5.80   5.80   1.90   5.80      2648  0.33  8.01 -   BERNOULLI_LPMF(bcast)[scalar ops] N=300 Ga=- Gb=2 el=0.48 t=0.30; BINOMIAL_LPMF(bcast)[scalar ops] N=150 Ga=- Gb=1 el=0.24 t=0.18
+ch12_m12_3_alt                         1.00   5.56   5.56   6.17   5.56      2985  1.11  6.79 -   POISSON_LPMF(bcast)[scalar ops] N=187 Ga=- Gb=1 el=0.51 t=0.19; POISSON_LPMF(bcast)[scalar ops] N=178 Ga=1 Gb=4 el=0.49 t=0.18
+aalto_poisson_hurdle                   1.00   4.49   5.00   1.71   4.49     10335  0.34 25.67 L   POISSON_LCDF(bcast)[scalar ops] N=798 Ga=- Gb=2 el=0.67 t=0.72; POISSON_LPMF(bcast)[scalar ops] N=399 Ga=1 Gb=7 el=0.33 t=0.05
+ch11_m11_7                             4.86   1.02   4.86   3.77   1.02       473  0.77  0.98 -   BINOMIAL_LPMF(fn(gather)) N=12 Ga=2 Gb=12 el=0.86 t=0.13
+dogs                                   3.97   3.10   3.98   3.99   1.03     13502  1.00  1.00 -   BERNOULLI_LOGIT_LPMF(covar) N=750 Ga=171 Gb=226 el=1.00 t=0.73
+dogs_log                               3.84   3.02   3.85   3.87   1.02     12107  1.01  1.01 -   BERNOULLI_LPMF(covar) N=750 Ga=171 Gb=226 el=1.00 t=0.54
+i319_pois_fixed                        3.64   1.20   3.64   3.64   1.00      4394  1.00  1.01 -   POISSON_LOG_GLM_LPMF(linpred) N=236 Ga=59 Gb=194 el=1.00 t=0.97
+ch15_m15_9                             1.31   1.88   2.84   2.73   1.00      4724  0.96  1.95 -   BERNOULLI_LPMF(bcast)[scalar ops] N=76 Ga=1 Gb=2 el=0.37 t=0.12; POISSON_LPMF(covar) N=76 Ga=2 Gb=17 el=0.37 t=0.07
+ch15_m15_8                             1.31   1.89   2.83   2.75   1.00      4722  0.97  1.94 -   BERNOULLI_LPMF(bcast)[scalar ops] N=76 Ga=1 Gb=2 el=0.37 t=0.12; POISSON_LPMF(covar) N=76 Ga=2 Gb=17 el=0.37 t=0.07
+i319_pois_re                           2.80   1.00   2.80   2.26   1.00      8885  0.81  1.24 -   POISSON_LOG_GLM_LPMF(linpred) N=236 Ga=59 Gb=194 el=0.79 t=0.10
+ch09_m9_4                              2.70   1.00   2.70   2.57   1.00       220  0.95  1.01 -   NORMAL_LPDF(bcast,bcast) N=100 Ga=1 Gb=100 el=0.97 t=0.64
+ch09_m9_5                              2.62   1.00   2.62   2.67   1.00       210  1.02  1.04 -   NORMAL_LPDF(bcast,bcast) N=100 Ga=1 Gb=100 el=0.97 t=0.64
+i319_gauss_re                          2.39   1.00   2.39   1.54   1.00      5270  0.64  1.42 -   NORMAL_ID_GLM_LPDF(linpred) N=236 Ga=59 Gb=194 el=0.79 t=0.02
+nes                                    2.30   1.34   2.30   2.31   1.00     17878  1.01  1.01 -   NORMAL_LPDF(covar,bcast) N=1330 Ga=553 Gb=977 el=1.00 t=0.16
+ch16_m16_1                             2.11   1.00   2.11   1.26   1.00     21101  0.60  1.41 -   LOGNORMAL_LPDF(covar,bcast) N=544 Ga=182 Gb=540 el=0.99 t=0.02
+ch13_m13_4b                            2.08   1.40   2.08   1.42   1.00     20310  0.68  1.44 -   BINOMIAL_LPMF(fn(gather)) N=504 Ga=167 Gb=249 el=0.96 t=0.04
+ch14_m14_3                             2.03   1.39   2.03   1.47   1.00     22250  0.72  1.42 L   BINOMIAL_LPMF(other) N=504 Ga=167 Gb=249 el=0.88 t=0.04
+ch13_m13_4                             1.92   1.29   1.92   1.37   1.00     19344  0.71  1.56 L   BINOMIAL_LPMF(fn(gather)) N=504 Ga=167 Gb=249 el=0.96 t=0.04
+ch11_m_pois                            1.89   1.00   1.89   1.90   1.00       198  1.00  1.00 -   POISSON_LPMF(fn(gather)) N=24 Ga=2 Gb=24 el=0.92 t=0.51
+ch14_m14_2                             1.89   1.37   1.89   1.56   1.00     31815  0.83  1.35 -   BINOMIAL_LPMF(fn(gather)) N=504 Ga=167 Gb=249 el=0.97 t=0.04
+ch13_m13_6                             1.88   1.27   1.88   1.34   1.00     19356  0.71  1.59 L   BINOMIAL_LPMF(fn(gather)) N=504 Ga=167 Gb=249 el=0.96 t=0.04
+aalto_grp_aov                          1.81   1.00   1.81   1.82   1.00       122  1.01  1.00 -   NORMAL_LPDF(gather,bcast) N=12 Ga=3 Gb=12 el=0.75 t=0.46
+ch13_m13_4nc                           1.67   1.13   1.67   1.00   1.00     24783  0.57  1.79 -   BINOMIAL_LPMF(fn(gather)) N=504 Ga=167 Gb=249 el=0.96 t=0.03
+ch11_m11_9                             1.67   1.00   1.67   1.68   1.00       102  1.00  1.00 L   POISSON_LPMF(bcast) N=10 Ga=1 Gb=10 el=0.91 t=0.45
+dogs_hierarchical                      1.63   1.26   1.63   1.00   1.24     17076  0.46  2.59 -   BERNOULLI_LPMF(covar) N=750 Ga=171 Gb=226 el=1.00 t=0.27
+aalto_grp_prior_mean                   1.47   1.00   1.47   1.49   1.00       197  1.01  1.01 -   NORMAL_LPDF(gather,bcast) N=12 Ga=3 Gb=12 el=0.67 t=0.35
+aalto_grp_prior_mean_var               1.42   1.00   1.42   1.41   1.00       421  1.00  1.00 -   NORMAL_LPDF(gather,gather) N=12 Ga=3 Gb=12 el=0.55 t=0.30
+i320_pois_trunc_ub                     1.00   1.34   1.34   1.33   1.34    108464  1.00  1.01 -   POISSON_LPMF(linpred)[scalar ops] N=236 Ga=42 Gb=174 el=0.50 t=0.12; POISSON_LCDF(linpred)[scalar ops] N=236 Ga=- Gb=42 el=0.50 t=0.70
+i320_pois_trunc_both                   1.00   1.33   1.33   1.32   1.33    116039  0.99  1.02 -   POISSON_LCDF(linpred)[scalar ops] N=472 Ga=- Gb=84 el=0.67 t=0.63; POISSON_LPMF(linpred)[scalar ops] N=236 Ga=42 Gb=174 el=0.33 t=0.10
+aalto_bern                             1.33   1.28   1.33   1.32   1.00       111  0.99  1.02 L   BERNOULLI_LPMF(bcast) N=10 Ga=1 Gb=2 el=0.91 t=0.29
+Rate_3_model                           1.30   1.00   1.30   1.30   1.00       125  1.00  1.01 -   BINOMIAL_LPMF(bcast)[scalar ops] N=2 Ga=1 Gb=2 el=0.67 t=0.42
+Rate_5_model                           1.29   1.00   1.29   1.30   1.00       121  1.01  1.02 -   BINOMIAL_LPMF(bcast)[scalar ops] N=2 Ga=1 Gb=2 el=0.67 t=0.42
+ch15_m15_6                             1.26   1.02   1.26   1.26   1.01       308  1.01  0.99 -   NORMAL_LPDF(covar,gather) N=34 Ga=18 Gb=33 el=0.85 t=0.42
+kidscore_momiq                         1.26   1.00   1.26   1.25   1.00      1569  1.00  1.01 -   NORMAL_LPDF(covar,bcast) N=434 Ga=332 Gb=430 el=1.00 t=0.51
+ch09_m9_2                              1.21   1.01   1.21   1.23   1.01        78  1.01  0.99 -   NORMAL_LPDF(bcast,bcast) N=2 Ga=1 Gb=2 el=0.50 t=0.34
+accel_splines                          1.21   1.00   1.21   1.20   1.00      6686  0.99  1.14 -   NORMAL_LPDF(linpred,linpred) N=133 Ga=94 Gb=132 el=0.62 t=0.04
+i319_negbin_fixed                      1.00   1.21   1.21   1.21   1.00     13525  1.00  1.00 -   NEG_BINOMIAL_2_LOG_GLM_LPMF(linpred) N=236 Ga=- Gb=194 el=0.99 t=0.98
+ch09_m9_3                              1.21   1.00   1.21   1.21   1.00        77  1.01  1.00 -   NORMAL_LPDF(bcast,bcast) N=2 Ga=1 Gb=2 el=0.50 t=0.34
+kidscore_interaction_z                 1.19   1.01   1.19   1.18   1.01      2760  0.99  0.99 -   NORMAL_LPDF(covar,bcast) N=434 Ga=362 Gb=433 el=1.00 t=0.31
+kidscore_interaction_c2                1.19   1.01   1.19   1.19   1.01      2752  1.00  0.99 -   NORMAL_LPDF(covar,bcast) N=434 Ga=362 Gb=433 el=1.00 t=0.31
+kidscore_interaction_c                 1.18   1.00   1.18   1.19   1.00      2751  1.01  1.00 -   NORMAL_LPDF(covar,bcast) N=434 Ga=362 Gb=433 el=1.00 t=0.30
+kidscore_interaction                   1.16   1.00   1.16   1.16   1.00      2748  1.00  1.01 -   NORMAL_LPDF(covar,bcast) N=434 Ga=362 Gb=433 el=1.00 t=0.30
+kidscore_momhsiq                       1.16   1.00   1.16   1.16   1.00      2102  1.00  1.01 -   NORMAL_LPDF(covar,bcast) N=434 Ga=362 Gb=433 el=1.00 t=0.38
+dugongs_model                          1.15   1.00   1.15   1.15   1.00       629  1.00  1.05 -   NORMAL_LPDF(covar,bcast) N=27 Ga=20 Gb=26 el=0.87 t=0.16
+accel_gp                               1.13   1.00   1.13   1.12   1.00      6752  1.00  1.14 -   NORMAL_LPDF(linpred,linpred) N=133 Ga=94 Gb=132 el=0.67 t=0.05
+ch14_m14_1                             1.09   1.00   1.09   1.10   1.00      6480  1.00  1.09 -   NORMAL_LPDF(covar,bcast) N=200 Ga=40 Gb=200 el=0.97 t=0.07
+i319_negbin_re                         1.00   1.07   1.07   1.00   1.00     18314  0.90  1.12 -   NEG_BINOMIAL_2_LOG_GLM_LPMF(linpred) N=236 Ga=- Gb=194 el=0.79 t=0.26
+multi_occupancy                        1.00   1.03   1.03   1.00   1.03     40552  0.78  2.31 -   BINOMIAL_LOGIT_LPMF(fn(gather))[scalar ops] N=355 Ga=28 Gb=162 el=0.56 t=0.17; BINOMIAL_LOGIT_LPMF(fn(gather))[scalar ops] N=227 Ga=- Gb=49 el=0.36 t=0.11
+extra_hurdle_poisson                   1.00   1.00   1.00   1.00   1.00       290  0.99  1.69 -   POISSON_LPMF(bcast)[scalar ops] N=5 Ga=1 Gb=4 el=0.56 t=0.18; BERNOULLI_LPMF(bcast)[scalar ops] N=2 Ga=1 Gb=1 el=0.22 t=0.05

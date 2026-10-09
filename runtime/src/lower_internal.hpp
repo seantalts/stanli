@@ -6,6 +6,7 @@
 #include <stanli/compile.hpp>
 #include <stanli/unconstrain.hpp>
 #include <stanli/constfold.hpp>
+#include <stanli/collapse.hpp>
 #include <stanli/cse.hpp>
 #include <stanli/dae.hpp>
 #include <stanli/density_registry.hpp>

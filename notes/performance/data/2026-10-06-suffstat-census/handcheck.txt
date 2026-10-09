@@ -1,0 +1,6 @@
+radon_county pt0: n=389 max|g|=5969 max abs diff 5.46e-12 = 6.0 ULP of the largest entry
+radon_county pt1: n=389 max|g|=6219 max abs diff 2e-11 = 22.0 ULP of the largest entry
+radon_county pt2: n=389 max|g|=6282 max abs diff 3e-11 = 33.0 ULP of the largest entry
+ch12_m12_5 pt0: n=11 max|g|=9809 max abs diff 7.09e-11 = 39.0 ULP of the largest entry
+ch12_m12_5 pt1: n=11 max|g|=6278 max abs diff 1.11e-10 = 122.0 ULP of the largest entry
+ch12_m12_5 pt2: n=11 max|g|=6383 max abs diff 1.4e-10 = 154.0 ULP of the largest entry

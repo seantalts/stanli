@@ -1,0 +1,22 @@
+model                      point     max|g| | error, ULP of the largest gradient entry
+                                            |    stanli   per-obs       gram        qr  qr-exact       lsc lsc-exact
+# kilpisjarvi: N=62 P=2 cond(Z)=8.86e+05 |y|^2/RSS=74.1
+kilpisjarvi                  pt0  2.779e+06 |      1.94      0.94      0.942      2.06      1.06     12.06      2.06
+kilpisjarvi                  pt1  2.198e+07 |      0.52      0.52      0.524      1.52      0.52      2.52      0.52
+kilpisjarvi                  pt2    2.3e+06 |      0.15      0.15      0.151      1.15      0.15      8.15      0.15
+kilpisjarvi            near-mode       1954 |       nan    125.95    1.7e+03   1993.95   1997.95      4.95      4.95
+# kidscore_interaction: N=434 P=4 cond(Z)=3.1e+03 |y|^2/RSS=24.8
+kidscore_interaction         pt0  2.487e+06 |      6.58      4.42       1.58      2.58      0.65      0.65      2.30
+kidscore_interaction         pt1  3.467e+06 |      3.87      1.01       1.01      1.86      2.13      1.01      3.01
+kidscore_interaction         pt2  3.826e+06 |      6.83      6.83      0.207      3.13      1.21      0.87      2.21
+kidscore_interaction   near-mode      11.96 |       nan     43.80   1.03e+03    943.25     97.25     27.70     27.70
+# mesquite: N=46 P=7 cond(Z)=26.9 |y|^2/RSS=11.7
+mesquite                     pt0  3.643e+07 |      1.43      0.57      0.431      0.43      1.43      0.57      0.57
+mesquite                     pt1  3.301e+07 |      1.02      1.02      0.975      1.02      0.98      0.02      3.02
+mesquite                     pt2    3.3e+07 |      0.29      1.71      0.289      3.71      0.29      0.29      0.29
+mesquite               near-mode          1 |       nan     35.63       35.6     26.37     26.37     26.37     26.37
+# diamonds: N=5000 P=25 cond(Z)=715 |y|^2/RSS=4.16e+03
+diamonds                     pt0   2.09e+05 |      4.62     11.38      0.618      1.38      0.62      4.62      0.62
+diamonds                     pt1   3.26e+05 |      0.21     13.21      0.209      1.79      0.21      3.21      0.21
+diamonds                     pt2  3.034e+05 |      0.33      2.33      0.668      3.67      1.67      1.33      0.67
+diamonds               near-mode       2625 |       nan     97.58   1.59e+04   3684.79     81.49      3.67      1.42

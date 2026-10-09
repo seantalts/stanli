@@ -1,0 +1,4 @@
+diamonds (N=5000, P=25): original 32953 ns/grad, hand-collapsed 500 ns/grad, measured 65.8x
+  pt0: max|g|=2.09e+05, max abs diff 0.5 ULP of the largest entry
+  pt1: max|g|=3.26e+05, max abs diff 4.0 ULP of the largest entry
+  pt2: max|g|=3.034e+05, max abs diff 2.0 ULP of the largest entry

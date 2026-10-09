@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Fast mode (`fast_math`) now collapses likelihood terms that repeat over the
+  data. A density whose rows repeat is evaluated once per distinct row; a
+  `normal` or `lognormal` term with a data variate becomes per-group
+  statistics, or one quadratic form when its locations are a linear
+  predictor (`normal_id_glm` included). `exponential`, `gamma`, `inv_gamma`,
+  `beta`, `poisson`, `bernoulli` and `binomial` terms (with their log and
+  logit forms and GLMs) become a count and two sums per group. 98 of the 352
+  corpus models have such a term; before the last of these forms, the
+  gradients of 90 of them were 8.6x faster in geometric mean, 45 at least
+  10x. Results differ from default mode by rounding only (at most
+  1.7e-13 of the largest gradient entry in the corpus). Default mode is
+  unchanged. `STANLI_NO_COLLAPSE=1` switches it off.
+- `beta_binomial_lpmf` now has the elementwise form the rewrite passes' trait
+  table says it has. Asked for one value per element, the kernel wrote the
+  sum into the first element, which gave a wrong gradient.
 - Fuse `normal_lpdf`, `cauchy_lpdf`, `student_t_lpdf` and `ordered_logistic_lpmf`
   (shared cutpoints) into allocation-free kernels, and read mapped `rvar`
   vectors and matrices as values without copying them. Gradients of models

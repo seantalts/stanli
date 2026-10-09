@@ -1,0 +1,2 @@
+radon_county: original 37779 ns/grad, hand-collapsed 1274 ns/grad, measured 29.7x; estimated ceiling 15.6x
+ch12_m12_5: original 1121609 ns/grad, hand-collapsed 4786 ns/grad, measured 234.4x; estimated ceiling 79.6x

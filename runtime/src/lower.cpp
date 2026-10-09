@@ -695,6 +695,21 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
   trace("post_reroll_inplace", post_reroll_inplace_time, post_reroll_roots,
         PrepTrace::Extra::Rewrites, post_reroll_inplace);
   std::vector<int> current_roots = post_reroll_roots;
+  if (compile_options.fast_math && !in_write_array) {
+    // After re-roll, which builds the vector terms this reads; before
+    // partition, CSE and islands, which then work on what is left.
+    const auto collapse_time = prep.start();
+    const bool report_terms = std::getenv("STANLI_COLLAPSE_REPORT") != nullptr;
+    CollapseReport report;
+    const CollapseStats collapsed = collapse_observations(
+        g, out.fills, target_terms, roots, report_terms ? &report : nullptr);
+    if (report_terms) print_collapse_report(report, prep_graph);
+    current_roots = roots;
+    current_roots.insert(current_roots.end(), target_terms.begin(),
+                         target_terms.end());
+    trace("collapse", collapse_time, current_roots, PrepTrace::Extra::Removed,
+          collapsed.ops_removed);
+  }
   if (plan.partition) {
     // After re-roll, which keeps first crack at the contiguous shapes it
     // already handles, and before CSE, which would merge ops shared

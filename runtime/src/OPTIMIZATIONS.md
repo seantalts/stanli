@@ -92,6 +92,9 @@ order, from `lower.cpp`:
 5. in-place updates again, for slice stores created by re-rolling
 6. tape islands (`island.cpp`)
 
+Fast mode adds one pass between steps 5 and 6 that does change the numbers,
+within the fast-mode gate: observation collapse (`collapse.cpp`).
+
 ## In-place updates (`inplace.cpp`, disable: `STANLI_NO_INPLACE=1`)
 
 Writing one element of a vector, like `mu[n] = x;` in a loop, lowers as
@@ -289,6 +292,174 @@ is cost-neutral, 11.1-11.8 us either way at 8 interleaved rounds of N=30,000.
 Prep time (compiling and binding the larger declined graph) grows by roughly
 a millisecond on both models, negligible against thousands of gradient
 evaluations per chain.
+
+## Observation collapse (`collapse.cpp`, fast mode only, disable: `STANLI_NO_COLLAPSE=1`)
+
+A likelihood usually evaluates the same expression many times. In
+
+```stan
+y ~ normal(a[county] + b * floor, sigma);
+```
+
+with 12,573 houses in 386 counties and a 0/1 `floor`, there are at most 772
+different locations, and the model is compiled with the data in hand. This
+pass finds terms like that and evaluates each distinct case once. It changes
+the order sums are taken in, and for the normal forms the arithmetic, so it
+runs only in fast mode (`CompileOptions::fast_math`), after re-rolling has
+built the vector terms and before partitioning, CSE and the island carver,
+which then work on what is left. The design, the corpus census behind it and
+the numerical checks are in
+[`notes/performance/2026-10-06-sufficient-statistic-collapse.md`](../../notes/performance/2026-10-06-sufficient-statistic-collapse.md).
+
+**Finding equal rows.** Every element that can reach a density argument or a
+target term gets a value number: two elements get the same number only if
+they are the same expression over the same parameter elements and
+bitwise-equal data. Numbers come from an exact table lookup keyed on the
+opcode and the operands' numbers, as in CSE, never from a hash alone. The
+pass follows elementwise ops, gathers, index and slice reads, element and
+slice stores (per element, through each slot's write history), a data matrix
+times a vector (row by row), and any pure op with a scalar result. An op it
+does not model gives every output element a number of its own, so it can
+only keep rows apart. `-0.0` and `0.0` are different data.
+
+A term is one vector density, or every target term of one density
+together: re-roll may leave one loop as several vector chunks and a
+remainder of scalar terms, one op per observation, and whether it does is
+its own cost decision. Those pieces are pooled, so the rows or groups are
+found once over the whole loop and not once per piece. This holds for every
+density the pass handles: pieces of a density with a statistic pool into the
+group or linear form, any other density into the row form, with each piece
+contributing the rows it is first to show and the pieces laid end to end.
+Pooling happens only when it keeps fewer rows than the pieces would between
+them.
+
+**Three ways to evaluate a collapsed term**, chosen per term:
+
+- *Rows.* For any density with an elementwise form: keep one observation
+  per distinct row (outcome and every argument), evaluate the density on
+  those, and take a dot product with the row counts. This is the form for
+  densities with no sufficient statistic (`neg_binomial_2`, `student_t`,
+  `ordered_logistic`, mixtures, a parameter variate).
+- *Groups.* For a density whose observations enter only through sums, with a
+  data variate: the variate does not need to repeat, only the parameters.
+  For `normal` and `lognormal`: Each group of observations that share a location
+  and scale is replaced by its count, a centre `c` (the rounded group mean),
+  `d = sum(y - c)` and `S = sum((y - c)^2)`, computed once with compensated
+  sums, and `OP_NORMAL_GROUPED_LPDF` uses
+  `sum((y - mu)^2) = S + 2 (c - mu) d + n (c - mu)^2`, which is exact for any
+  `c`. Keeping `d` is what makes this as accurate as the per-observation sum
+  when the data sit far from zero; raw moments (`sum(y)`, `sum(y^2)`) lose up
+  to all of the digits and are not used.
+  For `exponential`, `gamma`, `inv_gamma`, `beta`, `poisson`, `poisson_log`,
+  `bernoulli`, `bernoulli_logit`, `binomial` and `binomial_logit`, each group
+  is its count and two sums of the data (`sum(y)`, `sum(log y)`, successes
+  and failures, as the density needs), and `OP_FAMILY_GROUPED_LPDF` evaluates
+  Stan's formula for the group from those. These densities are linear in
+  their statistics, so nothing cancels that did not cancel per observation.
+  Terms of the data alone (`lgamma(y + 1)`, binomial coefficients) are summed
+  once into a constant, and each term is kept or dropped under `propto`
+  exactly as Stan does for the arguments that are parameters.
+- *Linear.* When there is one scale and the locations are affine in a few
+  values (`alpha + X * beta`, written with a matrix product, with one `fma`
+  per column, or as `normal_id_glm`), the whole term is a quadratic form.
+  With a centre `t` near the least-squares solution and `u = theta - t`,
+  `sum((y - mu)^2) = K - 2 u.b + |R u|^2` exactly for any `t`, where `R` is
+  the triangular factor of the weighted design. `OP_LINEAR_GAUSSIAN_LPDF`
+  evaluates that in `P^2 / 2` multiply-adds whatever the number of
+  observations. Because the identity does not depend on `t` being the exact
+  minimiser, a rank-deficient design needs no special case. Expanding around
+  the least-squares centre is what keeps it accurate near the mode; the raw
+  Gram form (`y'y`, `X'y`, `X'X`) and a QR of `[X y]` both cancel there and
+  were rejected (measurements in the design note).
+
+**GLM densities.** `normal_id_glm` takes the linear form.
+`bernoulli_logit_glm`, `poisson_log_glm` and `binomial_logit_glm` over a data
+design take the group form: two observations are one group when their design
+rows and intercepts are equal, the linear predictor is formed for the
+distinct rows only (those rows of the design times `beta`, plus the
+intercept), and the family kernel takes it. `neg_binomial_2_log_glm` has no
+statistic and takes the row form, as `neg_binomial_2_log` on the distinct
+rows' predictor. `categorical_logit_glm` and `ordered_logistic_glm` are left
+alone.
+
+Scalar target terms are handled the same way: terms with equal values are
+computed once and multiplied by their count. That is all-or-nothing per
+model, on an estimate of op dispatches saved: merging only some of the
+repeats left lane partitioning a mix of lanes its cost model priced badly
+(`dogs_hierarchical` 0.68x, `multi_occupancy` 0.79x in that state).
+
+**Restricting the arguments.** The kept rows need their arguments at the
+kept rows only. The pass pushes a gather up through the ops that built each
+argument: `f(a, b)[rows]` is `f(a[rows], b[rows])`, a gather of a gather is
+one gather, a gather of data is smaller data, a gather of `X * beta` is the
+kept rows of `X` times `beta`, and a vector filled by element stores becomes
+a pack of the kept scalars. Each rule has a local proof, including that the
+writer's inputs are not written between it and the density. Where no rule
+applies, a plain gather of the full vector is always correct; then only the
+density gets shorter, and the rewrite is taken back unless the rows are at
+least four times fewer than the observations. Where pushing the gather up
+would end in one scalar chain per kept row, and the rows are affine in
+elements of a few slots (`alpha[county] + beta * floor`), they are built
+from those slots with a gather, a multiply and an add per column. A pooled
+term's group parameters are built that way where they are affine, and
+otherwise taken piece by piece from where each group's first observation
+read them. The ops that built the
+full-length arguments are removed if nothing else reads them, following
+index reads through store chains element by element, so a loop of
+`mu[n] += ...` keeps only the updates behind the kept rows.
+
+**When it applies.** A term needs at least 16 observations. Rows must be at
+least 2 times fewer than observations where the density's elementwise form
+is native (Bernoulli and binomial), 8 times where it costs a recorder call
+per element; groups 2 times fewer; the linear form is used when its
+triangular products are at most half the work of forming the locations.
+`STANLI_COLLAPSE_REPORT=1` prints each term with its observations, rows,
+groups, the form chosen or the reason it was left alone;
+[`harnesses/collapse_census.py`](../../harnesses/collapse_census.py) runs
+that over the corpus.
+
+**Rejection.** The closed forms run Stan's own argument checks under the
+original function's name. A point Stan rejects is still rejected. When
+several observations are invalid, the one named in the message can differ,
+and the linear form never forms the locations, so it checks the values they
+are affine in. A collapsed GLM sees only its linear predictor: where Stan
+would name a non-finite weight or intercept, it names the predictor, and it
+rejects a non-finite predictor in the few cases where Stan's Poisson GLM
+returns a non-finite value instead. `neg_binomial_2_log_glm` errors are
+reported under `neg_binomial_2_log_lpmf`.
+
+**Measured** (i9-13900K, one P-core, fast mode with the pass on against fast
+mode with `STANLI_NO_COLLAPSE=1`, paired `ab_bench_corpus.py`, 9 rounds; the
+identical-binary control is within 5% on 95% of models, 13% at worst, on a
+machine that was not idle): 91 of 352 corpus models have a term that
+collapses, and 90 of them could be timed. Their gradients are 8.6x faster in
+geometric mean; 68 are at least 2x faster, 45 at least 10x, and none is
+slower: `radon_pooled` 487x (46.8 us to 96 ns), `nes` 209x, the earnings
+regressions 83x to 133x, `diamonds` 75x, the hierarchical radon models 9x to
+16x, `election88_full` 6.8x. A model the pass leaves alone has the same op
+graph with it on or off.
+
+The group form for the other densities and the GLMs came after those
+timings and was measured on the 21 models whose terms it changed, against
+the build before it (same harness, 9 rounds, identical-binary control within
+1.2%; `families-and-glms*.jsonl` beside the note's other results). 20 could be timed; all are faster,
+2.1x in geometric mean: `nes_logit_model` 103x (13.7 us to 133 ns; its
+`bernoulli_logit_glm` was not collapsed before), `i319_pois_fixed` 6.7x,
+`i319_pois_re` 3.4x, `aalto_poisson_simple` 2.1x, `election88_full` 1.44x
+(now 10x over the pass off), the binomial chimpanzee models 1.4x to 1.5x,
+`dogs` 1.24x, the least `ch14_m14_2` at 1.15x. That makes 98 corpus models
+with a collapsing term. The headline figures above were not re-measured.
+
+Preparation pays for the analysis: over all 342 timeable models it is 5%
+longer at the median (0.08 ms) and 3% longer in total (12.92 s to 13.31 s).
+Among the 91 models it changes the median is 20% (0.39 ms); the most added
+to any model is 42 ms, on `ch12_m12_6` (161 ms before), whose terms it
+examines and leaves alone. Sampling fourteen of the collapsed models with
+four chains gave posterior means within 0.15 posterior standard deviations
+of default mode on every parameter (`election88_full` the largest), and
+whole runs up to 41x shorter. The fast-mode gate in
+[`TESTING.md`](../../TESTING.md#fast-mode) passes with the pass on; the
+largest deviation in the corpus is `election88_full` at 1.7e-13.
 
 ## Lane partitioning (`partition.cpp`, disable: `STANLI_NO_PARTITION=1`)
 

@@ -200,14 +200,22 @@ build's:
   `harnesses/corpus_bench.py`) turns on, per model: stanc3 partial evaluation,
   merging of active duplicates in CSE, and fusion over shared parameters in
   reroll and partition. Default mode is unchanged.
+- It also runs the observation collapse (2026-10-07): likelihood terms that
+  repeat over the data are evaluated once per distinct row, group or, for a
+  normal term with a linear predictor, as one quadratic form. 91 corpus
+  models have such a term; 8.6x in geometric mean on them. See
+  [the design and results](2026-10-06-sufficient-statistic-collapse.md) and
+  `runtime/src/OPTIMIZATIONS.md`.
 - The AVX2 dense-matrix kernels are still chosen per process by
   `STANLI_FAST_MATH=1`, in builds with `-DSTANLI_AVX2_KERNELS=ON` only.
 - On the replay corpus, fast mode changes 107 of 352 models against default,
   by at most 3.7e-13 scaled error (normal_mixture_k); 7 of the 124 gated brms
   models exceed 10 ULP from CmdStan (s2_gev 480, sw_mono 418, sw_skewnormal
   60, s2_hurdle_negbin 34, s2_car 16, sw_me 15, s2_discrete_weibull 14).
-  Fast mode is not held to those gates. It still needs the high-precision
-  reference check and its own corpus benchmark described above.
+  Fast mode is not held to those gates. Its own gate is in
+  [TESTING.md](../../TESTING.md#fast-mode) (`tools/verify_refs.py
+  --fast-math`); it still needs its own corpus benchmark against CmdStan and
+  the sampling checks described above.
 
 ### Candidates
 

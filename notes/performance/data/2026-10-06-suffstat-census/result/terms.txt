@@ -1,0 +1,118 @@
+352 models: 352 OK
+98 models have a term that collapses; 46 by 10x or more in that term
+
+model	terms	opcode	form	ops	n	rows	groups	factor
+radon_pooled	1	OP_NORMAL_LPDF	linear	1	12573	691	5	2514.6
+ch12_m12_4	1	OP_ORDERED_LOGISTIC_LPMF	rows	9930	9930	7	-1	1418.6
+aalto_poisson_simple	1	OP_POISSON_LPMF	groups	1	500	8	1	500.0
+aalto_poisson_hurdle	4	OP_POISSON_LPMF	groups	399	399	399	1	399.0
+ch12_m12_5	1	OP_ORDERED_LOGISTIC_LPMF	rows	9930	9930	42	-1	236.4
+nes_logit_model	1	OP_BERNOULLI_LOGIT_GLM_LPMF	groups	1	1179	1179	5	235.8
+kidscore_momhs	1	OP_NORMAL_LPDF	linear	1	434	129	2	217.0
+ch12_m12_3_alt	2	OP_LOG_MIX	rows	187	187	1	-1	187.0
+ch12_m12_3	2	OP_LOG_MIX	rows	187	187	1	-1	187.0
+Mt_model	2	OP_LSE2	rows	150	150	1	-1	150.0
+M0_model	2	OP_LSE2	rows	150	150	1	-1	150.0
+sesame_one_pred_a	1	OP_NORMAL_LPDF	linear	1	240	4	2	120.0
+kidscore_mom_work	1	OP_NORMAL_LPDF	groups	1	434	210	4	108.5
+ch09_m9_5	1	OP_NORMAL_LPDF	groups	1	100	100	1	100.0
+ch09_m9_4	1	OP_NORMAL_LPDF	groups	1	100	100	1	100.0
+ch15_m15_9	2	OP_BERNOULLI_LPMF	groups	76	76	76	1	76.0
+ch15_m15_8	2	OP_BERNOULLI_LPMF	groups	76	76	76	1	76.0
+logearn_height	1	OP_NORMAL_LPDF	linear	1	1192	593	20	59.6
+log10earn_height	1	OP_NORMAL_LPDF	linear	1	1192	593	20	59.6
+earn_height	1	OP_NORMAL_LPDF	linear	1	1192	593	20	59.6
+sw_sratio	1	OP_INDEX	rows	572	572	14	-1	40.9
+sw_cratio	1	OP_INDEX	rows	572	572	14	-1	40.9
+logearn_logheight_male	1	OP_NORMAL_LPDF	linear	1	1192	683	36	33.1
+logearn_interaction_z	1	OP_NORMAL_LPDF	linear	1	1192	683	36	33.1
+logearn_interaction	1	OP_NORMAL_LPDF	linear	1	1192	683	36	33.1
+logearn_height_male	1	OP_NORMAL_LPDF	linear	1	1192	683	36	33.1
+radon_partially_pooled_noncentered	6	OP_NORMAL_LPDF	groups	12573	12573	12573	386	32.6
+radon_partially_pooled_centered	6	OP_NORMAL_LPDF	groups	12573	12573	12573	386	32.6
+radon_county	1	OP_NORMAL_LPDF	groups	1	12573	7437	386	32.6
+ch12_m12_7	1	OP_ORDERED_LOGISTIC_LPMF	rows	9930	9930	305	-1	32.6
+i320_sratio_plain	1	OP_INDEX	rows	572	572	19	-1	30.1
+cm_betadiscrete	1	OP_LOGV	rows	19	19	1	-1	19.0
+ch13_m13_5	1	OP_BINOMIAL_LPMF	groups	1	504	51	28	18.0
+ch11_m11_5	1	OP_BINOMIAL_LPMF	groups	1	504	51	28	18.0
+ch11_m11_4	1	OP_BINOMIAL_LPMF	groups	1	504	51	28	18.0
+ch15_m15_6	2	OP_NORMAL_LPDF	linear	1	17	16	1	17.0
+radon_variable_slope_noncentered	6	OP_NORMAL_LPDF	groups	12573	12573	12573	809	15.5
+radon_variable_slope_centered	6	OP_NORMAL_LPDF	groups	12573	12573	12573	809	15.5
+radon_variable_intercept_slope_noncentered	1	OP_NORMAL_LPDF	groups	12573	12573	12573	809	15.5
+radon_variable_intercept_slope_centered	1	OP_NORMAL_LPDF	groups	12573	12573	12573	809	15.5
+radon_variable_intercept_noncentered	6	OP_NORMAL_LPDF	groups	12573	12573	12573	809	15.5
+radon_variable_intercept_centered	6	OP_NORMAL_LPDF	groups	12573	12573	12573	809	15.5
+radon_county_intercept	6	OP_NORMAL_LPDF	groups	12573	12573	12573	809	15.5
+radon_hierarchical_intercept_noncentered	1	OP_NORMAL_LPDF	groups	12573	12573	12573	1008	12.5
+radon_hierarchical_intercept_centered	1	OP_NORMAL_LPDF	groups	12573	12573	12573	1008	12.5
+ch11_m_pois	1	OP_POISSON_LPMF	groups	24	24	24	2	12.0
+election88_full	1	OP_BERNOULLI_LOGIT_LPMF	groups	1	11566	2185	1458	7.9
+ch14_m14_1	1	OP_NORMAL_LPDF	groups	1	200	200	40	5.0
+dogs_log	1	OP_BERNOULLI_LPMF	groups	1	750	226	171	4.4
+dogs_hierarchical	1	OP_BERNOULLI_LPMF	groups	750	750	750	171	4.4
+dogs	1	OP_BERNOULLI_LOGIT_LPMF	groups	1	750	226	171	4.4
+i319_pois_re	1	OP_POISSON_LOG_GLM_LPMF	groups	1	236	236	59	4.0
+i319_pois_fixed	1	OP_POISSON_LOG_GLM_LPMF	groups	1	236	236	59	4.0
+ch14_m14_3	1	OP_BINOMIAL_LPMF	groups	1	504	249	167	3.0
+ch14_m14_2	1	OP_BINOMIAL_LPMF	groups	1	504	249	167	3.0
+ch13_m13_6	1	OP_BINOMIAL_LPMF	groups	1	504	249	167	3.0
+ch13_m13_4nc	1	OP_BINOMIAL_LPMF	groups	1	504	249	167	3.0
+ch13_m13_4b	1	OP_BINOMIAL_LPMF	groups	1	504	249	167	3.0
+ch13_m13_4	1	OP_BINOMIAL_LPMF	groups	1	504	249	167	3.0
+ch16_m16_1	1	OP_LOGNORMAL_LPDF	groups	1	544	540	182	3.0
+nes	1	OP_NORMAL_LPDF	linear	1	1330	977	553	2.4
+sw_mono	1	OP_NORMAL_LPDF	groups	1	40	40	18	2.2
+i320_pois_trunc_ub	1	OP_SUB	rows	236	236	174	-1	1.4
+i320_pois_trunc_both	1	OP_SUB	rows	236	236	174	-1	1.4
+kidscore_momiq	1	OP_NORMAL_LPDF	linear	1	434	430	332	1.3
+kidscore_momhsiq	1	OP_NORMAL_LPDF	linear	1	434	433	362	1.2
+kidscore_interaction_z	1	OP_NORMAL_LPDF	linear	1	434	433	362	1.2
+kidscore_interaction_c2	1	OP_NORMAL_LPDF	linear	1	434	433	362	1.2
+kidscore_interaction_c	1	OP_NORMAL_LPDF	linear	1	434	433	362	1.2
+kidscore_interaction	1	OP_NORMAL_LPDF	linear	1	434	433	362	1.2
+ch09_m9_1_chains4	1	OP_NORMAL_LPDF	linear	1	170	170	164	1.0
+ch09_m9_1	1	OP_NORMAL_LPDF	linear	1	170	170	164	1.0
+ch12_m12_6	1	OP_ORDERED_LOGISTIC_LPMF	rows	9930	9930	9892	-1	1.0
+diamonds	1	OP_NORMAL_ID_GLM_LPDF	linear	1	5000	5000	4996	1.0
+sw_mv_norescor	2	OP_NORMAL_ID_GLM_LPDF	linear	1	40	40	40	1.0
+sw_mi	1	OP_NORMAL_ID_GLM_LPDF	linear	1	40	40	40	1.0
+sw_lognormal	1	OP_LOGNORMAL_LPDF	linear	1	40	40	40	1.0
+sw_gaussian	1	OP_NORMAL_ID_GLM_LPDF	linear	1	40	40	40	1.0
+s2_threading	1	OP_NORMAL_ID_GLM_LPDF	linear	1	40	40	40	1.0
+s2_mv_subset	2	OP_NORMAL_ID_GLM_LPDF	linear	1	30	30	30	1.0
+s2_mi_trunc_lb	1	OP_NORMAL_ID_GLM_LPDF	linear	1	40	40	40	1.0
+s2_mi_lognormal	1	OP_NORMAL_ID_GLM_LPDF	linear	1	40	40	40	1.0
+s2_custom_vreal	1	OP_NORMAL_LPDF	linear	1	40	40	40	1.0
+s2_cens_interval	1	OP_NORMAL_LPDF	linear	30	30	30	30	1.0
+mesquite	1	OP_NORMAL_LPDF	linear	1	46	46	46	1.0
+logmesquite_logvolume	1	OP_NORMAL_LPDF	linear	1	46	46	46	1.0
+logmesquite_logvash	1	OP_NORMAL_LPDF	linear	1	46	46	46	1.0
+logmesquite_logvas	1	OP_NORMAL_LPDF	linear	1	46	46	46	1.0
+logmesquite_logva	1	OP_NORMAL_LPDF	linear	1	46	46	46	1.0
+logmesquite	1	OP_NORMAL_LPDF	linear	1	46	46	46	1.0
+kilpisjarvi	1	OP_NORMAL_LPDF	linear	1	62	62	62	1.0
+ch14_m14_5	1	OP_NORMAL_LPDF	linear	1	500	500	500	1.0
+ch14_m14_4x	1	OP_NORMAL_LPDF	linear	1	500	500	500	1.0
+ch14_m14_4	1	OP_NORMAL_LPDF	linear	1	500	500	500	1.0
+ch09_m5_8s2	1	OP_NORMAL_LPDF	linear	1	100	100	100	1.0
+ch09_m5_8s	1	OP_NORMAL_LPDF	linear	1	100	100	100	1.0
+blr	1	OP_NORMAL_ID_GLM_LPDF	linear	1	100	100	100	1.0
+arK	1	OP_NORMAL_LPDF	linear	1	195	195	195	1.0
+
+terms left alone, by reason:
+  1822	too few observations
+  1729	elementwise output
+  234	too few repeated rows
+  171	merging would not pay
+  7	argument shapes are not per observation
+
+models holding an op the analysis cannot see into, by opcode:
+  24	OP_REGION_MAP
+  9	OP_CHECK_LOWER
+  6	OP_CHECK_STRUCTURED
+  5	OP_CHECK_UPPER
+  4	OP_ISLAND
+  3	OP_ODE
+  1	OP_ALGEBRA_SOLVER

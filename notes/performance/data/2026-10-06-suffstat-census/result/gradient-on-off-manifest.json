@@ -1,0 +1,29 @@
+{
+ "arms": {
+  "off": {
+   "path": "/tmp/claude-1000/-home-xitrium-claude/3c1c17d6-18a7-4278-a76b-1885cc7d7ddb/scratchpad/bench/bin/bench_grad.pool",
+   "sha256": "2de410297ed0fc4964d90a30d323f256952d7cb492a4d086569608455d202e55"
+  },
+  "on": {
+   "path": "/tmp/claude-1000/-home-xitrium-claude/3c1c17d6-18a7-4278-a76b-1885cc7d7ddb/scratchpad/bench/bin/bench_grad.pool",
+   "sha256": "2de410297ed0fc4964d90a30d323f256952d7cb492a4d086569608455d202e55"
+  },
+  "aa": {
+   "path": "/tmp/claude-1000/-home-xitrium-claude/3c1c17d6-18a7-4278-a76b-1885cc7d7ddb/scratchpad/bench/bin/bench_grad.pool.aa",
+   "sha256": "2de410297ed0fc4964d90a30d323f256952d7cb492a4d086569608455d202e55"
+  }
+ },
+ "fast_math": true,
+ "arm_env": {
+  "off": [
+   "STANLI_NO_COLLAPSE=1"
+  ],
+  "on": [],
+  "aa": []
+ },
+ "rounds": 9,
+ "warmup_ms": 200,
+ "measure_ms": 250,
+ "thread_env": "STAN_NUM_THREADS=1",
+ "started": "Thu Oct  8 00:26:46 2026"
+}
