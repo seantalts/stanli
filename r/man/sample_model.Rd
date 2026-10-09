@@ -71,7 +71,8 @@ generated quantities are drawn, which is how a model with no parameters,
 or one that simulates data at given values, is run. There is no warmup:
 `warmup`, `delta`, `max_depth`, `save_warmup` and `parallel_chains` are
 not used, and the chains run one after another. The fit's `sampler`
-element then holds only `lp__` and `accept_stat__`, both zero.}
+element then holds only `lp__` and `accept_stat__`, both zero, and its
+`report` only the time each chain took.}
 }
 \value{
 An object of class `stanli_fit`. Its `report` element contains

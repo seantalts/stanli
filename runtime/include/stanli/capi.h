@@ -541,11 +541,13 @@ void stanli_fixed_param_opts_init(stanli_fixed_param_opts* o);
 int64_t stanli_fixed_param_n_draws(const stanli_fixed_param_opts* o);
 /* `values` holds chains * stanli_fixed_param_n_draws(opts) rows, chain-major.
  * There are no per-draw diagnostics: lp__ is zero by definition. A row whose
- * generated quantities are rejected is NaN, as in CmdStan. */
+ * generated quantities are rejected is NaN, as in CmdStan. `seconds`, when
+ * non-null, receives each chain's wall time, opts->chains doubles. */
 int stanli_fixed_param(stanli_model* m, const stanli_fixed_param_opts* opts,
-                       double* values, stanli_log_cb log, void* log_user,
-                       stanli_sample_poll_cb poll, void* poll_user,
-                       int* interrupted, char* err, size_t err_len);
+                       double* values, double* seconds, stanli_log_cb log,
+                       void* log_user, stanli_sample_poll_cb poll,
+                       void* poll_user, int* interrupted, char* err,
+                       size_t err_len);
 
 /* Draws from the normal approximation at a mode, whose covariance is the
  * inverse of the negative Hessian there: stan::services::laplace_sample. */

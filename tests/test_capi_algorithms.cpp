@@ -170,9 +170,11 @@ void test_fixed_param(stanli_model* m) {
   expect("fixed_param row count", rows == 2000);
   std::vector<double> values((size_t)(2 * rows * kWidth));
   int interrupted = -1;
-  int rc = stanli_fixed_param(m, &o, values.data(), nullptr, nullptr, nullptr,
-                              nullptr, &interrupted, err, sizeof err);
+  double seconds[2] = {-1, -1};
+  int rc = stanli_fixed_param(m, &o, values.data(), seconds, nullptr, nullptr,
+                              nullptr, nullptr, &interrupted, err, sizeof err);
   expect(std::string("fixed_param runs: ") + err, rc == 0 && interrupted == 0);
+  expect("fixed_param times each chain", seconds[0] >= 0 && seconds[1] >= 0);
   bool fixed = true;
   for (int64_t i = 0; i < 2 * rows; ++i) {
     const double* row = values.data() + i * kWidth;
@@ -190,11 +192,11 @@ void test_fixed_param(stanli_model* m) {
   // The same seed is the same run; another seed is another.
   std::vector<double> again(values.size());
   rc = stanli_fixed_param(m, &o, again.data(), nullptr, nullptr, nullptr,
-                          nullptr, nullptr, err, sizeof err);
+                          nullptr, nullptr, nullptr, err, sizeof err);
   expect("fixed_param is reproducible", rc == 0 && again == values);
   o.seed = 4712;
   rc = stanli_fixed_param(m, &o, again.data(), nullptr, nullptr, nullptr,
-                          nullptr, nullptr, err, sizeof err);
+                          nullptr, nullptr, nullptr, err, sizeof err);
   expect("fixed_param follows the seed", rc == 0 && again != values);
 
   // Random starting points: fixed within a chain, different across chains,
@@ -205,7 +207,7 @@ void test_fixed_param(stanli_model* m) {
   expect("fixed_param thinned row count", stanli_fixed_param_n_draws(&o) == 4);
   std::vector<double> thin((size_t)(2 * 4 * kWidth));
   rc = stanli_fixed_param(m, &o, thin.data(), nullptr, nullptr, nullptr,
-                          nullptr, nullptr, err, sizeof err);
+                          nullptr, nullptr, nullptr, err, sizeof err);
   expect(std::string("fixed_param random init: ") + err, rc == 0);
   bool constant = true;
   for (int c = 0; c < 2; ++c)
@@ -222,11 +224,11 @@ void test_fixed_param(stanli_model* m) {
 
   // Errors.
   rc = stanli_fixed_param(m, nullptr, thin.data(), nullptr, nullptr, nullptr,
-                          nullptr, nullptr, err, sizeof err);
+                          nullptr, nullptr, nullptr, err, sizeof err);
   expect("fixed_param refuses null options", rc != 0 && err[0] != '\0');
   o.thin = 0;
   rc = stanli_fixed_param(m, &o, thin.data(), nullptr, nullptr, nullptr,
-                          nullptr, nullptr, err, sizeof err);
+                          nullptr, nullptr, nullptr, err, sizeof err);
   expect("fixed_param refuses thin 0",
          rc != 0 && std::strstr(err, "thin") != nullptr);
 }
@@ -244,8 +246,9 @@ void test_noparam() {
   o.samples = 4000;
   o.seed = 99;
   std::vector<double> values((size_t)(4000 * width));
-  const int rc = stanli_fixed_param(m, &o, values.data(), nullptr, nullptr,
-                                    nullptr, nullptr, nullptr, err, sizeof err);
+  const int rc =
+      stanli_fixed_param(m, &o, values.data(), nullptr, nullptr, nullptr,
+                         nullptr, nullptr, nullptr, err, sizeof err);
   expect(std::string("noparam runs: ") + err, rc == 0);
   if (rc == 0 && width == 2) {
     // y = normal_rng(5, 2), k = poisson_rng(3); five standard errors.

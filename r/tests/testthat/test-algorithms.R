@@ -212,6 +212,8 @@ test_that("sample_model(fixed_param = TRUE) moves only generated quantities", {
   expect_identical(dim(fit$draws), c(2000L, 2L, 5L))
   expect_identical(dimnames(fit$sampler)[[3L]], c("lp__", "accept_stat__"))
   expect_true(all(fit$sampler == 0))
+  expect_length(fit$report$sampling_seconds, 2L)
+  expect_true(all(fit$report$sampling_seconds >= 0))
   expect_true(all(fit$draws[, , "theta[1]"] == 0.3))
   expect_true(all(fit$draws[, , "theta[2]"] == -0.7))
   expect_equal(unique(as.vector(fit$draws[, , "tau2"])), 4)

@@ -337,7 +337,8 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   or one that simulates data at given values, is run. There is no warmup:
 #'   `warmup`, `delta`, `max_depth`, `save_warmup` and `parallel_chains` are
 #'   not used, and the chains run one after another. The fit's `sampler`
-#'   element then holds only `lp__` and `accept_stat__`, both zero.
+#'   element then holds only `lp__` and `accept_stat__`, both zero, and its
+#'   `report` only the time each chain took.
 #' @param refresh Print a progress update every `refresh` transitions within
 #'   each phase, plus the first and last transition of the phase. Set to 0 to
 #'   suppress all automatic sampling output.

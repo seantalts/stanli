@@ -260,8 +260,8 @@ static int (*p_optimize)(void*, const stanli_optimize_opts*, double*, double*,
 static void (*p_fixed_param_opts_init)(stanli_fixed_param_opts*);
 static int64_t (*p_fixed_param_n_draws)(const stanli_fixed_param_opts*);
 static int (*p_fixed_param)(void*, const stanli_fixed_param_opts*, double*,
-                            stanli_log_cb, void*, stanli_sample_poll_cb, void*,
-                            int*, char*, size_t);
+                            double*, stanli_log_cb, void*,
+                            stanli_sample_poll_cb, void*, int*, char*, size_t);
 static void (*p_laplace_opts_init)(stanli_laplace_opts*);
 static int (*p_laplace_sample)(void*, const stanli_laplace_opts*, const double*,
                                double*, double*, double*, stanli_log_cb, void*,
@@ -1075,25 +1075,27 @@ SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
   char err[4096];
   err[0] = '\0';
   int interrupted = 0;
+  SEXP seconds = PROTECT(allocVector(REALSXP, (R_xlen_t)o.chains));
   const int rc =
-      p_fixed_param(mm, &o, REAL(vals), run_logger, &log, sample_poll, NULL,
-                    &interrupted, err, sizeof err);
+      p_fixed_param(mm, &o, REAL(vals), REAL(seconds), run_logger, &log,
+                    sample_poll, NULL, &interrupted, err, sizeof err);
   if (rc != 0) {
-    UNPROTECT(1);
+    UNPROTECT(2);
     error("fixed_param failed: %s", err[0] ? err : "(no message)");
   }
   if (interrupted) {
-    UNPROTECT(1);
+    UNPROTECT(2);
     return interrupted_result();
   }
-  SEXP values[4];
+  SEXP values[5];
   values[0] = vals;
   values[1] = PROTECT(ScalarInteger(o.chains));
   values[2] = PROTECT(ScalarInteger((int)rows));
   values[3] = PROTECT(mkString(log.notes));
-  const char* names[] = {"values", "chains", "draws", "notes"};
-  SEXP out = named_list(4, names, values);
-  UNPROTECT(4);
+  values[4] = seconds;
+  const char* names[] = {"values", "chains", "draws", "notes", "seconds"};
+  SEXP out = named_list(5, names, values);
+  UNPROTECT(5);
   return out;
 }
 

@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -1106,9 +1107,10 @@ int64_t stanli_fixed_param_n_draws(const stanli_fixed_param_opts* o) {
 }
 
 int stanli_fixed_param(stanli_model* m, const stanli_fixed_param_opts* opts,
-                       double* values, stanli_log_cb log, void* log_user,
-                       stanli_sample_poll_cb poll, void* poll_user,
-                       int* interrupted, char* err, size_t err_len) {
+                       double* values, double* seconds, stanli_log_cb log,
+                       void* log_user, stanli_sample_poll_cb poll,
+                       void* poll_user, int* interrupted, char* err,
+                       size_t err_len) {
   try {
     if (interrupted != nullptr) *interrupted = 0;
     if (opts == nullptr) throw std::invalid_argument("null options");
@@ -1129,8 +1131,13 @@ int stanli_fixed_param(stanli_model* m, const stanli_fixed_param_opts* opts,
     for (int c = 0; c < opts->chains; ++c) {
       cfg.chain_id = first + c;
       cfg.init = opts->inits ? opts->inits + (int64_t)c * n : nullptr;
+      const auto started = std::chrono::steady_clock::now();
       const stanli::AlgorithmResult r =
           stanli::run_fixed_param(*m->ex, host, cfg);
+      if (seconds != nullptr)
+        seconds[c] = std::chrono::duration<double>(
+                         std::chrono::steady_clock::now() - started)
+                         .count();
       if (r.interrupted || r.return_code != 0) {
         const std::string what =
             "chain " + std::to_string(cfg.chain_id) + ": " +
