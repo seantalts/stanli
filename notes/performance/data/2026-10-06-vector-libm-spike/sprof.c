@@ -39,7 +39,8 @@ static void handler(int sig, siginfo_t* si, void* uc) {
   clock_gettime(CLOCK_MONOTONIC, &ts);
   struct rec* r = &g_buf[i];
   r->t = (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
-  r->pad = g_width ? (int32_t)(*g_width > 0x7fffffff ? 0x7fffffff : *g_width) : -1;
+  r->pad =
+      g_width ? (int32_t)(*g_width > 0x7fffffff ? 0x7fffffff : *g_width) : -1;
   r->n = backtrace(r->pc, DEPTH);
   g_n = i + 1;
 }
