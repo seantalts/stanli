@@ -260,6 +260,8 @@ class Interp:
         return c
 
     def idx(self, i):
+        if isinstance(i, str):
+            i = [i]
         k = i[0]
         if k == "Single":
             e = self.expr(i[1])
@@ -376,7 +378,7 @@ class Interp:
         return lambda env: f(*[e(env) for e in ev])
 
     def cdf(self, name, ev):
-        from mpcdf import CDFS
+        from mpextra import CDFS
         f = CDFS.get(name)
         if f is None:
             raise Unsupported("fn " + name)
@@ -456,6 +458,10 @@ class Interp:
                     raise RuntimeError("missing data " + name)
                 return jflat(self.data[name], want_int)
             return rd
+        if what == "FnNegInf":
+            return lambda env: mpf("-inf")
+        if what == "FnLength":
+            return lambda env: len(ev[0](env))
         if what == "FnMakeArray":
             return lambda env: [e(env) for e in ev]
         if what == "FnMakeRowVec":
@@ -520,6 +526,10 @@ class Interp:
                     x, j = mptrans.sum_to_zero(take(n - 1))
                 elif kind == "CholeskyCorr":
                     m, j = mptrans.cholesky_corr(take(n * (n - 1) // 2), n)
+                    self.target += j
+                    return m
+                elif kind == "Correlation":
+                    m, j = mptrans.corr_matrix(take(n * (n - 1) // 2), n)
                     self.target += j
                     return m
                 elif kind == "CholeskyCov":
@@ -736,7 +746,7 @@ class Interp:
         return self.user_call(fn[1], fn, args, ev)
 
 
-EXTRA_DENS = {}
+from mpextra import EXTRA_DENS  # noqa: E402
 
 
 class _Zeros:

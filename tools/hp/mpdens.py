@@ -47,9 +47,9 @@ def _terms():
     d("normal", ((), lambda y, m, s: nlsp()), ((2,), lambda y, m, s: -mp.log(s)),
       ((0, 1, 2), lambda y, m, s: -((y - m) / s) ** 2 / 2))
     d("std_normal", ((), lambda y: nlsp()), ((0,), lambda y: -y * y / 2))
-    d("lognormal", ((), lambda y, m, s: nlsp()), ((2,), lambda y, m, s: -mp.log(s)),
+    d("lognormal", ((2,), lambda y, m, s: -mp.log(s)),
       ((0,), lambda y, m, s: -mp.log(y)),
-      ((0, 1, 2), lambda y, m, s: -((mp.log(y) - m) / s) ** 2 / 2))
+      ((0, 1, 2), lambda y, m, s: nlsp() - ((mp.log(y) - m) / s) ** 2 / 2))
     d("student_t", ((1,), lambda y, n, m, s: lg((n + 1) / 2) - lg(n / 2) - mp.log(n) / 2),
       ((), lambda y, n, m, s: -mp.log(mp.pi) / 2), ((3,), lambda y, n, m, s: -mp.log(s)),
       ((0, 1, 2, 3), lambda y, n, m, s: -(n / 2 + mpf(1) / 2) * mp.log1p(((y - m) / s) ** 2 / n)))
@@ -72,7 +72,8 @@ def _terms():
     d("bernoulli_logit", ((1,), lambda n, a: log_inv_logit(a) if n else log1m_inv_logit(a)))
     d("poisson", ((), lambda n, l: -lg(n + 1)), ((1,), lambda n, l: xlogy(n, l) - l))
     d("poisson_log", ((), lambda n, a: -lg(n + 1)), ((1,), lambda n, a: n * a - mp.exp(a)))
-    d("uniform", ((1, 2), lambda y, a, b: -mp.log(b - a)))
+    d("uniform", ((0, 1, 2), lambda y, a, b: mpf(0) if a <= y <= b else mpf("-inf")),
+      ((1, 2), lambda y, a, b: -mp.log(b - a)))
     d("double_exponential", ((), lambda y, m, s: -mp.log(2)), ((2,), lambda y, m, s: -mp.log(s)),
       ((0, 1, 2), lambda y, m, s: -abs(y - m) / s))
     d("logistic", ((2,), lambda y, m, s: -mp.log(s)),

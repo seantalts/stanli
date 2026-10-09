@@ -115,3 +115,37 @@ def cholesky_cov(u, M, N):
             pos += 1
     lp = mp.fsum(u[(m * (m + 1)) // 2 + m] for m in range(N))
     return Mat(L), lp
+
+
+def corr_matrix(u, K):
+    z = [corr_constrain(e) for e in u]
+    lp = mp.fsum(j for _, j in z)
+    c = [a for a, _ in z]
+    if K == 1:
+        return Mat([[mpf(1)]]), lp
+    acc_lp = mpf(0)
+    pos = 0
+    for k in range(1, K - 1):
+        for i in range(k + 1, K + 1):
+            acc_lp += (K - k - 1) * mp.log1p(-c[pos] ** 2)
+            pos += 1
+    lp += acc_lp / 2
+    L = [[mpf(0)] * K for _ in range(K)]
+    L[0][0] = mpf(1)
+    acc = [mpf(1)] * (K - 1)
+    pos = 0
+    pull = K - 1
+    for r in range(pull):
+        L[r + 1][0] = c[r]
+        acc[r] = 1 - c[r] ** 2
+    for i in range(1, K - 1):
+        pos += pull
+        pull -= 1
+        L[i][i] = mp.sqrt(acc[i - 1])
+        for r in range(pull):
+            t = c[pos + r]
+            L[i + 1 + r][i] = t * mp.sqrt(acc[i + r])
+            acc[i + r] *= 1 - t ** 2
+    L[K - 1][K - 1] = mp.sqrt(acc[K - 2])
+    C = [[mp.fsum(L[i][k] * L[j][k] for k in range(K)) for j in range(K)] for i in range(K)]
+    return Mat(C), lp
