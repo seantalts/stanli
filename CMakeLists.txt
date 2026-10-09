@@ -356,6 +356,8 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/diagnose.cpp
   runtime/src/estimate.cpp
   runtime/src/pathfinder.cpp
+  runtime/src/algorithms.cpp
+  runtime/src/pathfinder_multi.cpp
   runtime/src/mir_reader.cpp
   runtime/src/mir_decode.cpp
   runtime/src/portable_mir_v2_reader.cpp
@@ -1380,6 +1382,16 @@ if(STANLI_FAST_TEST_TUS)
   target_compile_options(test_capi PRIVATE -O0)
 endif()
 add_test(NAME test_capi COMMAND test_capi
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+# fixed_param, Laplace, Pathfinder and ADVI, through the same boundary.
+add_executable(test_capi_algorithms tests/test_capi_algorithms.cpp)
+target_link_libraries(test_capi_algorithms PRIVATE stanli_shared)
+add_dependencies(test_capi_algorithms stanli_mir_fixtures)
+if(STANLI_FAST_TEST_TUS)
+  target_compile_options(test_capi_algorithms PRIVATE -O0)
+endif()
+add_test(NAME test_capi_algorithms COMMAND test_capi_algorithms
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(test_function tests/test_function.cpp)
