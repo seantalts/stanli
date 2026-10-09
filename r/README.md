@@ -100,6 +100,34 @@ overrides are `num_iterations`, `num_elbo_draws`, `history_size`, and
 `init_radius`. It is mutually exclusive with explicit `init`, and does not
 perform PSIS resampling.
 
+### Other inference algorithms
+
+Stan's other inference algorithms are its own implementations, run on the
+same model:
+
+```r
+vi <- variational_model(m, algorithm = "meanfield")  # or "fullrank": ADVI
+pf <- pathfinder_model(m, num_paths = 4)             # multi-path, PSIS resampled
+la <- laplace_model(m)                               # normal at the posterior mode
+gq <- sample_model(m, fixed_param = TRUE)            # only generated quantities move
+```
+
+Each returns a `stanli_fit`, so `as_draws_array()`, `summary()` and
+`as_stanfit()` work as for a NUTS fit. The three approximations return one
+chain of independent draws, and `fit$sampler` holds `lp__` and `lp_approx__`
+(the log density and the approximation's, per draw) where a NUTS fit has its
+sampler columns; `stanli_diagnose()` and `nuts_params()` say that they need a
+NUTS fit. Argument names follow cmdstanr. A warning repeats what Stan reports
+about a run: ADVI stopping at its iteration limit, or a Pathfinder Pareto k
+above 0.7, which means the draws should not be trusted.
+
+None of the three checks itself against the posterior. They are fast, and on
+a posterior that is far from normal on the unconstrained scale they can be
+badly wrong, in the spread more often than in the centre. Compare with
+`sample_model()` before relying on one. Pathfinder's paths run one after
+another, and `laplace_model()` always includes the Jacobian, as
+`optimize_model()` does.
+
 Chains run in parallel by default. Threading does not change the
 answer: each chain owns its executor and its RNG stream, so a parallel
 run is byte-identical to a sequential one, which the test suite
@@ -244,7 +272,9 @@ invalid models through the file on Linux, macOS, and Windows.
 `optimize_model()` returns the posterior **mode**. CmdStan's `optimize`
 defaults to `jacobian=0`, the penalized maximum likelihood, which
 stanli cannot offer: the change-of-variables Jacobian is folded into
-the graph when the model is lowered.
+the graph when the model is lowered. `laplace_model()` has the same limit.
+Standalone generated quantities, run over the draws of an earlier fit, are
+not offered either.
 
 ## Generated models and migration
 

@@ -14,6 +14,7 @@ first useful results, compressed size and installed size are separate concerns.
 | [OCaml MIR rollout](../archive/plans/2026-08-26-ocaml-mir-backend-rollout.md) | Compiler producer pins and portable/native discovery. |
 | [Python function overhead](../archive/plans/2026-08-30-python-function-overhead.md) | Paired call-boundary measurements and the four-way A/B recipe. |
 | [Browser density-pack experiment](../archive/density-pack.md) | A working prototype that was removed; measured payload and the remaining deployment blocker. |
+| [Stan's other inference algorithms](../../../notes/execution/2026-10-09-other-inference-algorithms.md) | fixed_param, Laplace, multi-path Pathfinder and ADVI through Stan's services: the model adapter, the serial stand-in for TBB, the C API and R surface, agreement with `rstan::vb()`, and limits (no `propto = false` density; R only). |
 
 The density-pack experiment is historical, while the optional
 [lite build](../../lite-lp.md) has a current public numerical contract; do not

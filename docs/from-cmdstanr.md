@@ -15,7 +15,11 @@ model, then pass that model to sampling or optimization. These examples assume
 | `fit$diagnostic_summary()` or `fit$cmdstan_diagnose()` | `stanli_diagnose(fit)` prints a report; `fit$report` contains per-chain timings, divergence counts, and treedepth counts, rather than the cmdstanr summary table. |
 | `fit$sampler_diagnostics()` | `fit$sampler` is the raw array, including `lp__`; `bayesplot::nuts_params(fit)` gives the plotting table, excluding `lp__` by default. |
 | `m$optimize(data = data, jacobian = TRUE)` | `optimize_model(m)` includes the transform Jacobian. CmdStan's default `jacobian = FALSE` gives penalized maximum likelihood and has no stanli equivalent. |
-| `m$pathfinder(data = data)` | `sample_model(m, pathfinder_init = list())` uses single-path Pathfinder to initialize NUTS. Standalone Pathfinder draws are not exposed in R. |
+| `m$pathfinder(data = data, num_paths = 4, draws = 1000)` | `pathfinder_model(m, num_paths = 4, draws = 1000)`: multi-path Pathfinder with PSIS resampling, with cmdstanr's argument names. The paths run one after another. `sample_model(m, pathfinder_init = list())` uses single-path Pathfinder to initialize NUTS. |
+| `m$variational(data = data, algorithm = "meanfield", iter = 10000, draws = 1000)` | `variational_model(m, algorithm = "meanfield", iter = 10000, draws = 1000)`; `"fullrank"` likewise. |
+| `m$laplace(data = data, mode = opt, draws = 1000)` | `laplace_model(m, mode = optimize_model(m), draws = 1000)`, or leave `mode` out to find it first. Always with the Jacobian, which is also cmdstanr's default. |
+| `m$sample(data = data, fixed_param = TRUE)` | `sample_model(m, fixed_param = TRUE)` |
+| `fit$draws()` of those fits, with `lp__` and `lp_approx__` | `as_draws_array(fit, include_sampler = TRUE)`; the two columns are also in `fit$sampler`. |
 | `fit$loo()` | `loo::loo(fit)` with pointwise `log_lik` in generated quantities. |
 | `fit$save_object("fit.rds")` | Strip the live model, then `saveRDS(saved, "fit.rds")`; see persistence below. |
 
@@ -132,10 +136,14 @@ also saves the arrays, but its restored `fit$model$ptr` is unusable.
 
 ## Features without a stanli equivalent
 
-- Standalone `generate_quantities()` and `laplace()`.
-- Multi-path Pathfinder and `variational()`.
+- Standalone `generate_quantities()`.
 - Cmdstanr's `$output()` and per-chain CSV files: R draws live in memory.
-- Optimization with `jacobian = FALSE`.
+  The same goes for Pathfinder's single-path output files and ADVI's
+  diagnostic file; ADVI's lower-bound trace is printed with `refresh = 1`.
+- Optimization and `laplace()` with `jacobian = FALSE`.
+- A `mode` for `laplace()` given as constrained values in a file: pass
+  `unconstrain()`'s result.
+- Pathfinder paths in parallel threads.
 
 See the [course quickstart](teaching.md) for installation and an eight-schools
 example that requires no model files.

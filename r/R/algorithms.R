@@ -163,9 +163,11 @@ fixed_param_fit <- function(model, chains, seed, samples, thin, init,
 #'   Stan measures the lower bound with every constant of the log density
 #'   included. stanli evaluates the density `lp__` reports, which leaves out
 #'   the constants of `~` statements, so for a model written with them the
-#'   lower bound printed here sits a constant below CmdStan's and the
-#'   relative stopping rule can end on a different iteration. A model that
-#'   uses `target +=` throughout is unaffected.
+#'   lower bound printed here differs from CmdStan's by a constant. The
+#'   gradients and the random stream are the same, but the stopping rule is
+#'   a relative change of the bound, so the fit can stop on a different
+#'   iteration than CmdStan's with the same seed. A model that uses
+#'   `target +=` throughout, as brms models do, is unaffected.
 #' @return A `stanli_fit` with one chain of `draws` draws. Its `sampler`
 #'   element holds `lp__`, the log density at each draw, and `lp_approx__`,
 #'   the approximation's unnormalized log density there. `mean` holds every
