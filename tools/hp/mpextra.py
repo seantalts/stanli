@@ -2,7 +2,8 @@ from mpmath import mp, mpf, matrix
 import mpdens
 from mpdens import lg, lchoose, log1m, log_inv_logit, log1m_inv_logit
 from mpfun import F, Phi, inv_logit, lse
-from mpvals import Mat, RVec, Unsupported, Vec, flat, map1, mat_cols, matmul, transpose
+from mpmath import matrix
+from mpvals import map2, Mat, RVec, Unsupported, Vec, flat, map1, mat_cols, matmul, transpose
 
 EXTRA_DENS = {}
 CDFS = {}
@@ -65,6 +66,8 @@ def dirichlet(args, flags, propto):
 
 
 def to_mp(m):
+    if m and not isinstance(m[0], list):
+        return matrix(list(m)) if not isinstance(m, RVec) else matrix([list(m)])
     return matrix([list(r) for r in m])
 
 
@@ -381,7 +384,8 @@ def choose(n, k):
 F.update({
     "negative_infinity": lambda: mpf("-inf"), "positive_infinity": lambda: mpf("inf"),
     "not_a_number": lambda: mpf("nan"), "pi": lambda: +mp.pi, "e": lambda: mp.e,
-    "log10": lambda x: map1(mp.log10, x), "log2": lambda x: map1(lambda v: mp.log(v) / mp.log(2), x),
+    "log10": lambda *x: mp.log(10) if not x else map1(mp.log10, x[0]),
+    "log2": lambda *x: mp.log(2) if not x else map1(lambda v: mp.log(v) / mp.log(2), x[0]),
     "log1m_exp": lambda x: map1(lambda v: mp.log(-mp.expm1(v)), x),
     "log_mix": log_mix, "cholesky_decompose": cholesky_decompose, "dims": dims,
     "choose": choose,
@@ -502,7 +506,7 @@ def add_diag(m, d):
 
 
 F.update({
-    "fma": lambda a, b, c: a * b + c, "add_diag": add_diag,
+    "fma": lambda a, b, c: map2(lambda p, q: p + q, map2(lambda p, q: p * q, a, b), c), "add_diag": add_diag,
     "gp_exp_quad_cov": gp_cov_cross(lambda s, l, d: s ** 2 * mp.exp(-d * d / (2 * l * l))),
     "gp_matern32_cov": gp_cov_cross(lambda s, l, d: s ** 2 * (1 + mp.sqrt(3) * d / l) * mp.exp(-mp.sqrt(3) * d / l)),
     "gp_matern52_cov": gp_cov_cross(lambda s, l, d: s ** 2 * (1 + mp.sqrt(5) * d / l + 5 * d * d / (3 * l * l)) * mp.exp(-mp.sqrt(5) * d / l)),
@@ -510,3 +514,128 @@ F.update({
     "append_array": lambda a, b: list(a) + list(b),
     "sqrt2": lambda: mp.sqrt(2),
 })
+
+
+EXTRA_DENS["skew_normal"] = vec_density([
+    ((0, 1, 2, 3), lambda y, m, s, a: mp.log(mp.erfc(-a * ((y - m) / s) / mp.sqrt(2)))),
+    ((), lambda y, m, s, a: -mp.log(2 * mp.pi) / 2),
+    ((2,), lambda y, m, s, a: -mp.log(s)),
+    ((0, 1, 2), lambda y, m, s, a: -((y - m) / s) ** 2 / 2)])
+EXTRA_DENS["exp_mod_normal"] = vec_density([
+    ((), lambda y, m, s, l: -mp.log(2)),
+    ((3,), lambda y, m, s, l: mp.log(l)),
+    ((0, 1, 2, 3), lambda y, m, s, l: l * (m - y + l * s * s / 2)
+     + mp.log(mp.erfc((m - y + l * s * s) / (mp.sqrt(2) * s))))])
+EXTRA_DENS["von_mises"] = vec_density([
+    ((0, 1, 2), lambda y, m, k: k * mp.cos(m - y)),
+    ((), lambda y, m, k: -mp.log(2 * mp.pi)),
+    ((2,), lambda y, m, k: -mp.log(mp.besseli(0, k)))])
+
+
+def categorical_logit_glm(args, flags, propto):
+    y, x, a, b = args
+    if not inc(propto, flags, (1, 2, 3)):
+        return mpf(0)
+    ys = flat(y) if isinstance(y, list) else [y]
+    xr = [list(x)] if isinstance(x, RVec) else [list(r) for r in x]
+    nc = len(b[0])
+    tot = []
+    n = len(ys) if len(xr) == 1 else len(xr)
+    for i in range(n):
+        row = xr[i if len(xr) > 1 else 0]
+        lin = [mp.fsum(row[k] * b[k][c] for k in range(len(row))) + a[c] for c in range(nc)]
+        tot.append(lin[ys[i if len(ys) > 1 else 0] - 1] - lse(lin))
+    return mp.fsum(tot)
+
+
+def ordered_logistic_glm(args, flags, propto):
+    y, x, b, c = args
+    if not inc(propto, flags, (1, 2, 3)):
+        return mpf(0)
+    eta = lin_pred(x, [mpf(0)], b)
+    return ordered_logistic([y, Vec(eta), c], [False, False, False], False)
+
+
+EXTRA_DENS["categorical_logit_glm"] = categorical_logit_glm
+EXTRA_DENS["ordered_logistic_glm"] = ordered_logistic_glm
+
+
+def eigen_sym(m):
+    E, Q = mp.eigsy(to_mp(m))
+    return E, Q
+
+
+def eigenvectors_sym(m):
+    E, Q = eigen_sym(m)
+    return Mat([[Q[i, j] for j in range(Q.cols)] for i in range(Q.rows)])
+
+
+def eigenvalues_sym(m):
+    E, Q = eigen_sym(m)
+    return Vec([E[i] for i in range(len(E))])
+
+
+def matrix_exp(m):
+    X = mp.expm(to_mp(m))
+    return Mat([[X[i, j] for j in range(X.cols)] for i in range(X.rows)])
+
+
+F.update({"eigenvectors_sym": eigenvectors_sym, "eigenvalues_sym": eigenvalues_sym,
+          "matrix_exp": matrix_exp})
+
+
+def mat_of(m):
+    return Mat([[m[i, j] for j in range(m.cols)] for i in range(m.rows)])
+
+
+def quad_form(A, B):
+    r = matmul(transpose(B if isinstance(B, Mat) else Mat([[e] for e in B])), matmul(A, B))
+    return r[0][0] if not isinstance(B, Mat) else r
+
+
+def quad_form_sym(A, B):
+    r = quad_form(A, B)
+    if isinstance(r, Mat):
+        n = len(r)
+        return Mat([[(r[i][j] + r[j][i]) / 2 for j in range(n)] for i in range(n)])
+    return r
+
+
+F.update({
+    "quad_form": quad_form, "quad_form_sym": quad_form_sym,
+    "determinant": lambda m: mp.det(to_mp(m)),
+    "log_determinant": lambda m: mp.log(abs(mp.det(to_mp(m)))),
+    "inverse": lambda m: mat_of(mp.inverse(to_mp(m))),
+    "inverse_spd": lambda m: mat_of(mp.inverse(to_mp(m))),
+    "trace": lambda m: mp.fsum(m[i][i] for i in range(len(m))),
+    "mdivide_left_tri_low": lambda A, b: mat_of(mp.lu_solve(to_mp(A), to_mp(b))) if isinstance(b, Mat) else Vec([x for x in mp.lu_solve(to_mp(A), matrix(list(b)))]),
+    "mdivide_left_spd": lambda A, b: mat_of(mp.lu_solve(to_mp(A), to_mp(b))) if isinstance(b, Mat) else Vec([x for x in mp.lu_solve(to_mp(A), matrix(list(b)))]),
+    "symmetrize_from_lower_tri": lambda m: Mat([[m[max(i, j)][min(i, j)] for j in range(len(m))] for i in range(len(m))]),
+    "log_softmax": F["log_softmax"],
+    "bessel_first_kind": lambda v, x: map1(lambda t: mp.besselj(v, t), x),
+    "modified_bessel_first_kind": lambda v, x: map1(lambda t: mp.besseli(v, t), x),
+    "log_modified_bessel_first_kind": lambda v, x: map1(lambda t: mp.log(mp.besseli(v, t)), x),
+    "rank": lambda x, s: sum(1 for e in flat(x) if e < flat(x)[s - 1]),
+    "sort_asc": lambda x: type(x)(sorted(flat(x))),
+    "sort_desc": lambda x: type(x)(sorted(flat(x), reverse=True)),
+    "cov_exp_quad": lambda *a: F["gp_exp_quad_cov"](*a),
+})
+
+
+def solve_left(A, b):
+    Am = to_mp(A)
+    if isinstance(b, Mat):
+        cols = [mp.lu_solve(Am, matrix([row[j] for row in b])) for j in range(len(b[0]))]
+        return Mat([[cols[j][i] for j in range(len(cols))] for i in range(len(b))])
+    return Vec([x for x in mp.lu_solve(Am, matrix(list(b)))])
+
+
+def solve_right(b, A):
+    At = transpose(A)
+    if isinstance(b, Mat):
+        return transpose(solve_left(At, transpose(b)))
+    return RVec(list(solve_left(At, Vec(list(b)))))
+
+
+F.update({"mdivide_left": solve_left, "mdivide_left_tri_low": solve_left, "mdivide_left_spd": solve_left,
+          "mdivide_right": solve_right, "mdivide_right_tri_low": solve_right, "mdivide_right_spd": solve_right})

@@ -2,8 +2,9 @@
 #include <stan/math/prim.hpp>
 #include <iostream>
 
-using mp = boost::multiprecision::number<
-    boost::multiprecision::cpp_bin_float<50>, boost::multiprecision::et_off>;
+using mp =
+    boost::multiprecision::number<boost::multiprecision::cpp_bin_float<50>,
+                                  boost::multiprecision::et_off>;
 
 #ifdef SPECIALIZE_TRAITS
 namespace stan {

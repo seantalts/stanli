@@ -2,7 +2,7 @@ import json
 import math
 import sys
 
-from mpmath import mp, mpf
+from mpmath import matrix, mp, mpf
 
 import mpdens
 import mptrans
@@ -224,8 +224,11 @@ class Interp:
         self.pos = 0
         self.target = mpf(0)
         self.theta = _Zeros()
-        for s in field(self.mir, "log_prob"):
-            self.stmt(s)(env)
+        try:
+            for s in field(self.mir, "log_prob"):
+                self.stmt(s)(env)
+        except (ArithmeticError, ValueError, StanReject):
+            pass
         n = self.pos
         self.theta = saved
         return n
@@ -233,6 +236,7 @@ class Interp:
     def grad_fd(self, theta, h=None):
         mp_dps = mp.dps
         h = h if h is not None else mpf(10) ** (-(mp_dps // 3))
+        f0 = None
         g = []
         for i in range(len(theta)):
             t = list(theta)
@@ -240,6 +244,15 @@ class Interp:
             fp = self.logp(t)
             t[i] = theta[i] - h
             fm = self.logp(t)
+            if not (mp.isfinite(fp) and mp.isfinite(fm)):
+                if f0 is None:
+                    f0 = self.logp(theta)
+                if mp.isfinite(fp):
+                    g.append((fp - f0) / h)
+                    continue
+                if mp.isfinite(fm):
+                    g.append((f0 - fm) / h)
+                    continue
             g.append((fp - fm) / (2 * h))
         return g
 
@@ -356,6 +369,11 @@ class Interp:
         name = fn[1]
         if kind == "UserDefined":
             return self.user_call(name, fn, args, ev)
+        if name in ("reduce_sum", "reduce_sum_static") and pat(args[0])[0] == "Var":
+            sl = ev[1]
+            ev2 = [sl, lambda env: 1, lambda env: len(sl(env))] + ev[3:]
+            flags2 = [ad_of(args[1]), False, False] + [ad_of(a) for a in args[3:]]
+            return self.user_call(pat(args[0])[1], fn, None, ev2, flags2)
         suffix = fn[2]
         flags = [ad_of(a) for a in args]
         if isinstance(suffix, list) and suffix[0] in ("FnLpdf", "FnLpmf"):
@@ -428,6 +446,17 @@ class Interp:
                     raise Unsupported("matrix right-divide")
                 return divide(x, y)
             return dv
+        if name == "IntDivide__":
+            return lambda env: divide(a(env), b(env))
+        if name == "LDivide__":
+            def ld(env):
+                from mpextra import to_mp
+                A, B = a(env), b(env)
+                sol = mp.lu_solve(to_mp(A), matrix(list(B)) if not isinstance(B, Mat) else to_mp(B))
+                if isinstance(B, Mat):
+                    return Mat([[sol[i, j] for j in range(sol.cols)] for i in range(sol.rows)])
+                return Vec([sol[i] for i in range(sol.rows)])
+            return ld
         if name == "EltTimes__":
             return lambda env: map2(lambda p, q: p * q, a(env), b(env))
         if name == "EltDivide__":
@@ -561,13 +590,14 @@ class Interp:
             return build(0)
         return run
 
-    def user_call(self, name, fn, args, ev):
+    def user_call(self, name, fn, args, ev, flags=None):
         fd = self.funcs.get(name)
         if fd is None:
             raise Unsupported("udf " + name)
         fargs = field(fd, "fdargs")
         body = field(fd, "fdbody")
-        flags = [ad_of(a) for a in args]
+        if flags is None:
+            flags = [ad_of(a) for a in args]
         stmts = [self.stmt(s) for s in body]
         names = [a[1] for a in fargs]
         fad = [a[0] == "AutoDiffable" for a in fargs]

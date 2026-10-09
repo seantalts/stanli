@@ -137,6 +137,8 @@ def cumsum(x):
 
 
 def append_row(a, b):
+    if isinstance(a, RVec) and isinstance(b, RVec):
+        return Mat([list(a), list(b)])
     if isinstance(a, Mat) or isinstance(b, Mat):
         a = a if isinstance(a, Mat) else Mat([list(a)])
         b = b if isinstance(b, Mat) else Mat([list(b)])
@@ -147,6 +149,8 @@ def append_row(a, b):
 
 
 def append_col(a, b):
+    if isinstance(a, Vec) and isinstance(b, Vec):
+        return Mat([[x, y] for x, y in zip(a, b)])
     if isinstance(a, Mat) or isinstance(b, Mat):
         a = a if isinstance(a, Mat) else Mat([[e] for e in a])
         b = b if isinstance(b, Mat) else Mat([[e] for e in b])
