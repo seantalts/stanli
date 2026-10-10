@@ -46,8 +46,9 @@ compiled includes, so later sampling does not reread files that may have changed
 `Model(..., fast_math=True)` and `stan_to_mir(..., fast_math=True)` opt in to
 fast mode, which compiles with fused multiply-adds, lets the runtime regroup
 sums, and evaluates likelihood terms that repeat over the data once per
-distinct case. Results can differ from the default in the last bits. It is off by default and needs the
-bundled portable compiler (`stanli-compile`) or an embedded build.
+distinct case. Results can differ from the default in the last bits. It is off
+by default and needs the bundled portable compiler (`stanli-compile`) or an
+embedded build. See [fast mode](../docs/fast-mode.md).
 
 Sampling reports CmdStan-shaped progress every 100 transitions by default,
 followed by per-chain warm-up, sampling, and total times:
@@ -232,12 +233,12 @@ Full per-model accuracy table:
 
 ## Performance
 
-In the <!--gen:benchmark_date-->2026-10-07<!--/gen--> native run,
+In the <!--gen:benchmark_date-->2026-10-10<!--/gen--> native run,
 <!--gen:corpus_n_grad-->336<!--/gen--> of
 <!--gen:benchmark_models-->342<!--/gen--> models produced paired gradient
 measurements. The median CmdStan/Stanli ratio was
-<!--gen:corpus_median-->1.70x<!--/gen-->, with
-<!--gen:corpus_at_par-->305<!--/gen--> at or above parity.
+<!--gen:corpus_median-->1.72x<!--/gen-->, with
+<!--gen:corpus_at_par-->308<!--/gen--> at or above parity.
 
 Stanli avoids a per-model C++ build and can combine repeated work into fewer
 runtime operations. Dense kernels and serial dependencies offer fewer such

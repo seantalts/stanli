@@ -57,6 +57,8 @@ const fit = await sample({ mir, data, fastMath: true });
 fit.fastMath;  // true
 ```
 
+See [fast mode](../docs/fast-mode.md) for what it changes and how accurate it is.
+
 For NUTS, `await diagnose(fit)` returns the same text report as the R and
 Python bindings: divergences, maximum-treedepth saturation, E-BFMI,
 rank-normalized R-hat, and bulk/tail ESS. Pass an array of fits from the

@@ -5,20 +5,21 @@
       "build_timeout": 900.0,
       "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/cmdstan",
       "corpus": "all",
+      "fast_math": true,
       "filter": "",
       "gradient_budget": 20000,
       "gradient_timeout": 60.0,
       "measure_ms": 250,
       "pdb": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/posteriordb",
       "rounds": 6,
-      "stanc": "/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src/_build/default/src/stanc/stanc.exe",
-      "stancflags": "--O1",
+      "stanc": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/stanc3/stanc",
+      "stancflags": "",
       "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/stanc3/stanli-vectorize-probe",
       "warmup_ms": 200
     },
     "executables": {
       "bench": "dbf56546c47a47d527e6c07845d3ba43f46c7aa7ee26a7295edb9b2ea79c4ee0",
-      "stanc": "359c905c882a4263811b17636817ce349f0b8c743a07769e5348e389dc81173c",
+      "stanc": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
       "vectorize_probe": "8e6d3f59ee9965ad281392ffee716557090330622849dd93eed47444333a3068"
     },
     "inputs": {
@@ -1806,6 +1807,6 @@
       }
     }
   },
-  "run_id": "8ab8978d93458c88",
-  "started_utc": "2026-10-10T11:33:04Z"
+  "run_id": "61f40f0d8b5ef7af",
+  "started_utc": "2026-10-10T04:44:59Z"
 }

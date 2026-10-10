@@ -42,5 +42,5 @@
     "Apple M3 Ultra",
     "103079215104"
   ],
-  "numerical_replay": "references recorded against CmdStan 2.40.0 (d3d5df6a2256), math 5252d51d47c1, on Darwin arm64\n36 models retain per-model recording provenance overrides\nsame-platform ULP limits: 124 models on Darwin arm64; all models retain their scaled-error and structural checks\n352/352 models within 1e-09 of the CmdStan references at all 3 evaluation points (1023977 values compared); worst gpcm_latent_reg_irt at 9.38e-13 (7040 ulp)\n"
+  "numerical_replay": "references recorded against CmdStan 2.40.0 (d3d5df6a2256), math 5252d51d47c1, on Darwin arm64\n36 models retain per-model recording provenance overrides\n352/352 models within 1e-12 of the CmdStan references at all 3 evaluation points (1023977 values compared); worst election88_full at 1.59e-13 (726 ulp)\n"
 }

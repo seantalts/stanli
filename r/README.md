@@ -58,6 +58,10 @@ stanli_diagnose(fit)  # divergences, treedepth, E-BFMI, R-hat, ESS
 as_draws_array(fit)   # a posterior::draws_array
 ```
 
+`stanli_model(..., fast_math = TRUE)` opts a model into
+[fast mode](../docs/fast-mode.md): faster gradients, with results that can
+differ from the default in the last bits.
+
 Stan `#include` directives automatically search the directory containing
 `file`. Add shared directories with `include_paths`:
 
