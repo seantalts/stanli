@@ -4,19 +4,30 @@
 \alias{unconstrain}
 \title{Starting values on the constrained scale, as the free vector}
 \usage{
-unconstrain(model, values)
+unconstrain(model, values, partial = FALSE, init_radius = 2, seed = NULL)
 }
 \arguments{
 \item{model}{A `stanli_model`.}
 
 \item{values}{A named list of constrained starting values, or a JSON
 string in CmdStan's data format.}
+
+\item{partial}{`TRUE` allows `values` to leave parameters out. Each one
+left out starts where Stan would start it: at the constrained image of a
+point drawn uniformly in `(-init_radius, init_radius)` on the
+unconstrained scale. Only for a list, not a JSON string.}
+
+\item{init_radius}{Radius of that draw.}
+
+\item{seed}{Seed for that draw. `NULL` uses, and advances, R's random
+stream; a number leaves the stream untouched.}
 }
 \value{
 A numeric vector of length `model$n_unconstrained`.
 }
 \description{
-Every declared parameter must appear, at its declared size. A missing,
+Unless `partial = TRUE`, every declared parameter must appear, at its
+declared size. A missing,
 unknown, wrong-length, or out-of-support value is an error naming the
 parameter. Containers are listed in Stan's own serialization order (the
 first index fastest, the order a CSV column carries) and may be nested or

@@ -44,6 +44,30 @@ permutations; it does not alter the stored draws. Initial values and adaptation
 text are empty because the fit does not retain the actual initial state or
 mass-matrix adaptation text.
 
+### Fits from the other algorithms
+
+A fit from `variational_model()`, `pathfinder_model()` or `laplace_model()`
+converts to a one-chain `stanfit` with no warmup and no sampler statistics.
+Its draws end with `lp__` and `lp_approx__`, which is where brms's
+`read_csv_as_stanfit()` puts them for the same algorithms run by CmdStan, and
+`stan_args[[1]]$method` is `"variational"`, `"pathfinder"` or `"laplace"`.
+`sim$iter` is the number of draws and `sim$warmup` is 0, as in an
+`rstan::vb()` fit, so RStan's own `extract()`, `summary()` and `print()` work;
+brms's reader leaves both empty for these algorithms. There is no leading row
+of means: `rstan::vb()` drops it too, and `variational_model()` returns it
+separately as `fit$mean`. For a variational fit the conversion also stores
+the per-column Pareto k that `rstan::summary()` prints for that method
+(computed with loo, `NaN` without it), and no effective sample size, as
+`rstan::vb()` does when it does not resample.
+
+A fixed-parameter fit converts as a sampling fit with algorithm
+`"Fixed_param"` and `accept_stat__` as its only sampler statistic.
+
+These layouts are tested with RStan's methods and through the brms `stanli`
+backend (a branch, not part of a brms release). They were not compared with a
+`stanfit` that brms read from CmdStan output, because no CmdStan was
+available where this was written.
+
 ### Live model adapter
 
 A `stanli_stanfit` inherits RStan's extraction, summaries, and plotting and

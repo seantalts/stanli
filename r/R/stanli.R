@@ -130,6 +130,30 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
   model
 }
 
+#' Check Stan code for syntax and type errors
+#'
+#' Runs the Stan compiler front end on the code and nothing else: no data is
+#' needed and no model is built.
+#'
+#' @param code Stan model source.
+#' @param include_paths Directories searched for `#include` files, as in
+#'   [stanli_model()].
+#' @return `TRUE`, invisibly. An invalid program is an error carrying the
+#'   compiler's message.
+#' @export
+stanli_check_syntax <- function(code, include_paths = NULL) {
+  if (!is.character(code) || length(code) != 1L || is.na(code))
+    stop("code must be a single string of Stan source", call. = FALSE)
+  load_runtime()
+  paths <- character()
+  if (grepl("#include", code, fixed = TRUE) || !is.null(include_paths))
+    paths <- stan_include_paths(include_paths, NULL)
+  if (.Call("stanli_r_has_embedded_stanc"))
+    .Call("stanli_r_stan_to_mir", code, paths, FALSE) else
+    stanc_mir(code, include_paths = paths)
+  invisible(TRUE)
+}
+
 # The whole object, from its source: everything a `stanli_model` carries
 # besides the source is derived from the handle, so a rebuild under another
 # seed must recompute all of it. Transformed data can size a parameter
@@ -198,7 +222,8 @@ log_prob_grad <- function(model, q) {
 
 #' Starting values on the constrained scale, as the free vector
 #'
-#' Every declared parameter must appear, at its declared size. A missing,
+#' Unless `partial = TRUE`, every declared parameter must appear, at its
+#' declared size. A missing,
 #' unknown, wrong-length, or out-of-support value is an error naming the
 #' parameter. Containers are listed in Stan's own serialization order (the
 #' first index fastest, the order a CSV column carries) and may be nested or
@@ -211,15 +236,66 @@ log_prob_grad <- function(model, q) {
 #' @param model A `stanli_model`.
 #' @param values A named list of constrained starting values, or a JSON
 #'   string in CmdStan's data format.
+#' @param partial `TRUE` allows `values` to leave parameters out. Each one
+#'   left out starts where Stan would start it: at the constrained image of a
+#'   point drawn uniformly in `(-init_radius, init_radius)` on the
+#'   unconstrained scale. Only for a list, not a JSON string.
+#' @param init_radius Radius of that draw.
+#' @param seed Seed for that draw. `NULL` uses, and advances, R's random
+#'   stream; a number leaves the stream untouched.
 #' @return A numeric vector of length `model$n_unconstrained`.
 #' @export
-unconstrain <- function(model, values) {
+unconstrain <- function(model, values, partial = FALSE, init_radius = 2,
+                        seed = NULL) {
+  if (!is.logical(partial) || length(partial) != 1L || is.na(partial))
+    stop("partial must be TRUE or FALSE", call. = FALSE)
+  if (partial && is.list(values))
+    values <- complete_partial_inits(model, values, init_radius, seed)
   json <- if (is.character(values) && length(values) == 1) {
     values
   } else {
     to_json(values)
   }
   .Call("stanli_r_unconstrain_inits", model$ptr, json)
+}
+
+# Fill the parameters a starting list leaves out the way Stan does: draw every
+# unconstrained coordinate uniformly in (-init_radius, init_radius), map that
+# point to the constrained scale, and keep its values for the parameters that
+# were not given. The result names every parameter with elements.
+complete_partial_inits <- function(model, values, init_radius, seed) {
+  if (length(values) && (is.null(names(values)) || anyNA(names(values)) ||
+      any(!nzchar(names(values))) || anyDuplicated(names(values))))
+    stop("starting values must be a list with unique parameter names",
+         call. = FALSE)
+  if (length(init_radius) != 1L || !is.numeric(init_radius) ||
+      !is.finite(init_radius) || init_radius < 0)
+    stop("init_radius must be finite and nonnegative", call. = FALSE)
+  columns <- .Call("stanli_r_parameter_columns", model$ptr)
+  declared <- sub("\\..*$", "", columns)
+  values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
+  if (all(unique(declared) %in% names(values))) return(values)
+  if (!identical(stan_variable_names(columns),
+                 utils::head(model$columns, length(columns))))
+    stop("this model's outputs do not begin with its parameters; partial ",
+         "starting values are unavailable", call. = FALSE)
+  if (!is.null(seed)) {
+    # Leave the caller's random stream as it was.
+    old <- if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+      get(".Random.seed", envir = globalenv()) else NULL
+    on.exit(if (is.null(old)) rm(".Random.seed", envir = globalenv()) else
+      assign(".Random.seed", old, envir = globalenv()), add = TRUE)
+    set.seed(seed)
+  }
+  point <- stats::runif(model$n_unconstrained, -init_radius, init_radius)
+  drawn <- utils::head(.Call("stanli_r_write_array", model$ptr, point),
+                       length(columns))
+  filled <- split(drawn, factor(declared, levels = unique(declared)))
+  filled[intersect(names(values), names(filled))] <-
+    values[intersect(names(values), names(filled))]
+  # names that are not parameters are passed on for the usual error or, for
+  # transformed parameters and generated quantities, the usual silence
+  c(filled, values[setdiff(names(values), names(filled))])
 }
 
 #' Sample a model with NUTS
@@ -255,6 +331,14 @@ unconstrain <- function(model, values) {
 #'   many threads. `fit$model$reduce_sum_count` and `reduce_sum_fallbacks`
 #'   report retained reductions and graph-lowering refusals (not opaque regions).
 #' @param parallel_chains Chains to run at once. Defaults to all of them.
+#' @param fixed_param `TRUE` runs Stan's fixed-parameter sampler instead of
+#'   NUTS: every chain keeps its parameters at its starting point and only
+#'   generated quantities are drawn, which is how a model with no parameters,
+#'   or one that simulates data at given values, is run. There is no warmup:
+#'   `warmup`, `delta`, `max_depth`, `save_warmup` and `parallel_chains` are
+#'   not used, and the chains run one after another. The fit's `sampler`
+#'   element then holds only `lp__` and `accept_stat__`, both zero, and its
+#'   `report` only the time each chain took.
 #' @param refresh Print a progress update every `refresh` transitions within
 #'   each phase, plus the first and last transition of the phase. Set to 0 to
 #'   suppress all automatic sampling output.
@@ -274,8 +358,12 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          max_depth = 10, save_warmup = FALSE, init = NULL,
                          init_radius = 2, pathfinder_init = NULL,
                          parallel_chains = NULL, refresh = 100,
-                         threads_per_chain = 1) {
+                         threads_per_chain = 1, fixed_param = FALSE) {
   cstan_integer(threads_per_chain, "threads_per_chain")
+  stanfit_flag(fixed_param, "fixed_param")
+  if (fixed_param && !is.null(pathfinder_init))
+    stop("pathfinder_init does not apply with fixed_param = TRUE",
+         call. = FALSE)
   if (length(refresh) != 1L || !is.numeric(refresh) || is.na(refresh) ||
       !is.finite(refresh) || refresh < 0 || refresh != floor(refresh) ||
       refresh > .Machine$integer.max)
@@ -293,6 +381,9 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
          call. = FALSE)
   load_runtime()
   model <- with_run_seed(model, seed, threads_per_chain)
+  if (fixed_param)
+    return(fixed_param_fit(model, chains, seed, samples, thin, init,
+                           init_radius, refresh))
   if (is.null(parallel_chains)) parallel_chains <- chains
   if (!is.null(pathfinder_init)) {
     init <- .Call("stanli_r_pathfinder_inits", model$ptr, as.integer(seed),
@@ -426,10 +517,12 @@ summary.stanli_fit <- function(object, ...) {
 #' bulk/tail effective sample size -- each either confirmed or reported
 #' with the number that failed and what to do about it.
 #'
-#' @param fit A `stanli_fit`.
+#' @param fit A `stanli_fit` from NUTS. The other algorithms have no chains
+#'   to diagnose.
 #' @return The report, invisibly, after printing it.
 #' @export
 stanli_diagnose <- function(fit) {
+  require_nuts_fit(fit, "stanli_diagnose()")
   d <- dim(fit$draws)
   flat <- as.double(aperm(fit$draws, c(3, 1, 2)))
   stats <- as.double(aperm(fit$sampler, c(3, 1, 2)))

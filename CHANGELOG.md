@@ -7,8 +7,41 @@
   the command line. It gives up agreement with CmdStan in the last bits for
   speed: stanc3 partial evaluation, one backward pass for repeated
   operations on parameters, fused loops over shared parameters, and the
-  collapse of repeated observations below. Default mode is unchanged. See
+  collapse of repeated observations below. On the test corpus, gradients
+  are 2.03x faster than default mode in geometric mean and 3.95x faster
+  than CmdStan. Default mode is unchanged. See
   [docs/fast-mode.md](docs/fast-mode.md).
+- Stan's other inference algorithms. R has `variational_model()` (ADVI,
+  `"meanfield"` or `"fullrank"`), `pathfinder_model()` (single-path),
+  `laplace_model()`, and `sample_model(fixed_param = TRUE)`; the C API has
+  `stanli_variational`, `stanli_pathfinder`, `stanli_laplace_sample` and
+  `stanli_fixed_param`. Each runs Stan's own service on the model, draws
+  generated quantities from the algorithm's generator as CmdStan does, and
+  returns a `stanli_fit` that `as_draws_array()` and `as_stanfit()` handle.
+  Laplace always includes the Jacobian. Multi-path Pathfinder is not
+  included: the multi-path service of Stan 2.40 reads past the end of an
+  array while it resamples, so more than one path is refused with a message
+  until Stan has a fix. Python and the browser do not have these yet. See
+  `notes/execution/2026-10-09-other-inference-algorithms.md`.
+- R: what a brms backend needs. `as_stanfit()` takes `exclude` to leave
+  variables out of the stored draws, records each chain's `adapt_delta` and
+  `max_treedepth` where brms reads them, and lets a model be reattached to a
+  fit whose variables brms has renamed or dropped; `stanli_check_syntax()`
+  checks Stan code without data. A stanli fit now completes a real `brmsfit`
+  through brms's `"mock"` backend (see `docs/teaching-support.md`).
+- R: starting values may leave parameters out. `unconstrain(partial = TRUE)`
+  starts each missing parameter where Stan would, at the constrained image
+  of a uniform draw within `init_radius` on the unconstrained scale, and
+  `sample_cstan()` accepts partial `init` lists as CmdStan does.
+- Fix a compile error, "size expression needs unknown int", for a function
+  that counts observations in a loop of 32 or more iterations whose body has
+  `&&` or `||`, and then declares arrays of those sizes. The loop was kept
+  for run time, so the counts had no value when the arrays were laid out.
+  A loop that only assigns integer locals from values known at compile time
+  is now evaluated then. brms's `xbeta` family is written this way.
+- R: attaching stanli after brms no longer breaks `log_lik()` on a `brmsfit`.
+  stanli's generic masked brms's and had no method for it; it now hands
+  objects of other packages to `rstantools::log_lik()`.
 - The browser package takes `fastMath: true` in `compile()` and `sample()` to
   opt a model into fast mode, and the demo page has a "fast math" checkbox.
   `sample()` results report `fastMath`. It is off by default and default

@@ -53,13 +53,21 @@ steps. Fast mode changes the compiled MIR as well as the runtime.
 
 ## How much faster
 
-On the shared test corpus of 352 models:
+On the shared test corpus (336 models with timings, Apple M3 Ultra,
+2026-10-10, default and fast mode from the same build):
 
-- The 98 models with a repeated-observation term have gradients 7.8x
-  faster in geometric mean, 40 of them at least 10x.
-- The other changes, measured before the repeated-observation work, made
-  gradients 1.12x faster across the corpus in geometric mean, with 26 models
-  at least 1.5x faster (capture-recapture and hurdle models about 2-3x).
+- Fast mode is 2.03x faster than default mode in geometric mean. The median
+  model is 1.06x faster: most models gain little, and models with repeated
+  observations or repeated work gain a lot. 87 models are at least 2x
+  faster, 43 at least 10x, and 7 at least 100x (radon_pooled 493x, nes
+  251x).
+- Against CmdStan, stanli's geometric-mean speedup goes from 1.95x in
+  default mode to 3.95x in fast mode, and fast mode is faster than CmdStan
+  on 321 of the 336 models.
+- No model is measurably slower in fast mode. The few that timed up to 6%
+  slower were within noise when rechecked in CPU cycles.
+
+Details and the per-model table are in [Benchmarks](benchmarks.md#fast-mode).
 
 ## How accurate
 

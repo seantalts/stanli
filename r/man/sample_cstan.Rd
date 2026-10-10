@@ -38,11 +38,13 @@ sample_cstan(
 
 \item{seed}{Integer seed. If NULL, draw one from R's RNG.}
 
-\item{init}{Complete constrained parameter list, one list per chain, a
+\item{init}{Constrained parameter list, one list per chain, a
 function returning a list (optionally accepting `chain_id`), or NULL for
-random initialization. Partial lists, numeric radii, and files are unsupported;
-use `init_radius` for random initialization. Extra non-parameter names
-(such as transformed parameters) are ignored, as in CmdStanR.}
+random initialization. A list may leave parameters out; those start at
+random within `init_radius`, as in CmdStan. Numeric radii and files are
+unsupported; use `init_radius` for random initialization. Extra
+non-parameter names (such as transformed parameters) are ignored, as in
+CmdStanR.}
 
 \item{adapt_delta}{Target acceptance probability.}
 

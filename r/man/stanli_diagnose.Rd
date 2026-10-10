@@ -7,7 +7,8 @@
 stanli_diagnose(fit)
 }
 \arguments{
-\item{fit}{A `stanli_fit`.}
+\item{fit}{A `stanli_fit` from NUTS. The other algorithms have no chains
+to diagnose.}
 }
 \value{
 The report, invisibly, after printing it.

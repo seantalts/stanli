@@ -70,6 +70,7 @@ NULL
 
 #' @rdname stanli-ecosystem
 nuts_params.stanli_fit <- function(object, pars = NULL, inc_warmup = FALSE, ...) {
+  require_nuts_fit(object, "nuts_params()")
   if (is.null(pars))
     pars <- setdiff(dimnames(object$sampler)[[3L]], "lp__")
   sampler_long(object, pars, inc_warmup)
@@ -123,6 +124,18 @@ neff_ratio.stanli_fit <- function(object, pars = NULL, ...) {
 #'   excluding saved warmup. A scalar variable retains a singleton third axis.
 #' @export
 log_lik <- function(object, ...) UseMethod("log_lik")
+
+# Other packages export a generic of this name too (rstantools, and brms and
+# rstanarm through it). Whichever is attached last masks the rest, so an
+# object this package has no method for is handed to that generic and not
+# refused here.
+#' @export
+log_lik.default <- function(object, ...) {
+  if (requireNamespace("rstantools", quietly = TRUE))
+    return(rstantools::log_lik(object, ...))
+  stop("no applicable method for 'log_lik' applied to an object of class \"",
+       class(object)[1L], "\"", call. = FALSE)
+}
 
 #' @rdname log_lik
 #' @export

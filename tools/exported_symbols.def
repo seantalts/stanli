@@ -66,6 +66,16 @@ EXPORTS
   stanli_diagnose_text
   stanli_optimize_opts_init
   stanli_optimize
+  stanli_fixed_param_opts_init
+  stanli_fixed_param_n_draws
+  stanli_fixed_param
+  stanli_laplace_opts_init
+  stanli_laplace_sample
+  stanli_pathfinder_opts_init
+  stanli_pathfinder_max_draws
+  stanli_pathfinder
+  stanli_variational_opts_init
+  stanli_variational
   bs_major_version DATA
   bs_minor_version DATA
   bs_patch_version DATA
