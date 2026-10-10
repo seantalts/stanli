@@ -3,15 +3,16 @@
 ## Unreleased
 
 - Stan's other inference algorithms. R has `variational_model()` (ADVI,
-  `"meanfield"` or `"fullrank"`), `pathfinder_model()` (multi-path, with
-  PSIS resampling), `laplace_model()`, and `sample_model(fixed_param = TRUE)`;
-  the C API has `stanli_variational`, `stanli_pathfinder`,
-  `stanli_laplace_sample` and `stanli_fixed_param`. Each runs Stan's own
-  service on the model, draws generated quantities from the algorithm's
-  generator as CmdStan does, and returns a `stanli_fit` that
-  `as_draws_array()` and `as_stanfit()` handle. Pathfinder's paths run one
-  after another, and Laplace always includes the Jacobian. Python and the
-  browser do not have them yet. See
+  `"meanfield"` or `"fullrank"`), `pathfinder_model()` (single-path),
+  `laplace_model()`, and `sample_model(fixed_param = TRUE)`; the C API has
+  `stanli_variational`, `stanli_pathfinder`, `stanli_laplace_sample` and
+  `stanli_fixed_param`. Each runs Stan's own service on the model, draws
+  generated quantities from the algorithm's generator as CmdStan does, and
+  returns a `stanli_fit` that `as_draws_array()` and `as_stanfit()` handle.
+  Laplace always includes the Jacobian. Multi-path Pathfinder is not
+  included: the multi-path service of Stan 2.40 reads past the end of an
+  array while it resamples, so more than one path is refused with a message
+  until Stan has a fix. Python and the browser do not have these yet. See
   `notes/execution/2026-10-09-other-inference-algorithms.md`.
 - R: what a brms backend needs. `as_stanfit()` takes `exclude` to leave
   variables out of the stored draws, records each chain's `adapt_delta` and

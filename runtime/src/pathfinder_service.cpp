@@ -1,12 +1,21 @@
-// Must stay first: see the header.
-#include "tbb_serial.hpp"
-
+// Single-path Pathfinder as an algorithm service: constrained rows written
+// through the service's own generator, like the other entry points of
+// algorithms.hpp. (pathfinder.cpp is the older single-path entry point with
+// unconstrained draws and the L-BFGS path.)
+//
+// MULTI-PATH IS HELD. stan::services::pathfinder::pathfinder_lbfgs_multi in
+// Stan 2.40.0 reads one element past the end of its array of resampled draw
+// indices (stan/services/pathfinder/multi.hpp, line 348: the bound on j is
+// checked once before a loop that increments j and reads coeff(j + 1)),
+// whenever the last resampled draws are duplicates. AddressSanitizer reports
+// it as a heap-buffer-overflow. Until Stan has a fix this file must not
+// include multi.hpp or call that service; run_pathfinder_paths refuses more
+// than one path instead.
 #include <stanli/algorithms.hpp>
 
 #include "service_model.hpp"
 
 #include <stan/callbacks/structured_writer.hpp>
-#include <stan/services/pathfinder/multi.hpp>
 #include <stan/services/pathfinder/single.hpp>
 
 #include <cmath>
@@ -34,12 +43,7 @@ class QuietDiagnostics : public stan::callbacks::structured_writer {
 }  // namespace
 
 int64_t pathfinder_max_draws(const PathfinderRunConfig& cfg) {
-  if (cfg.num_paths < 1 || cfg.num_draws < 1) return 0;
-  const int64_t all = (int64_t)cfg.num_paths * cfg.num_draws;
-  const bool resampled =
-      cfg.num_paths > 1 && cfg.psis_resample && cfg.calculate_lp;
-  return resampled ? (int64_t)(cfg.num_psis_draws > 0 ? cfg.num_psis_draws : 0)
-                   : all;
+  return cfg.num_paths == 1 && cfg.num_draws >= 1 ? (int64_t)cfg.num_draws : 0;
 }
 
 AlgorithmResult run_pathfinder_paths(Executor& ex, const AlgorithmHost& host,
@@ -52,8 +56,11 @@ AlgorithmResult run_pathfinder_paths(Executor& ex, const AlgorithmHost& host,
     return true;
   };
   if (refuse(cfg.num_paths < 1, "num_paths must be positive") ||
+      refuse(cfg.num_paths > 1,
+             "multi-path Pathfinder is not available in this version: Stan "
+             "2.40's multi-path service reads past the end of an array while "
+             "resampling. Use num_paths = 1 for single-path Pathfinder.") ||
       refuse(cfg.num_draws < 1, "num_draws must be positive") ||
-      refuse(cfg.num_psis_draws < 1, "num_psis_draws must be positive") ||
       refuse(cfg.num_elbo_draws < 1, "num_elbo_draws must be positive") ||
       refuse(cfg.max_lbfgs_iters < 1, "max_lbfgs_iters must be positive") ||
       refuse(cfg.history_size < 1, "history_size must be positive") ||
@@ -67,39 +74,18 @@ AlgorithmResult run_pathfinder_paths(Executor& ex, const AlgorithmHost& host,
   detail::PollInterrupt interrupt(model);
   detail::RowCollector rows(3);  // lp_approx__, lp__, path__
 
-  const size_t paths = (size_t)cfg.num_paths;
-  const int64_t n = ex.n_params();
-  std::vector<std::unique_ptr<stan::io::var_context>> inits;
-  for (size_t p = 0; p < paths; ++p)
-    inits.push_back(detail::init_context(
-        model, cfg.inits ? cfg.inits + (int64_t)p * n : nullptr));
-  std::vector<stan::callbacks::writer> init_writers(paths);
-  // Base writers are invalid, which is how the service knows not to write
-  // each path's own draws as well.
-  std::vector<stan::callbacks::writer> path_writers(paths);
-  std::vector<QuietDiagnostics> path_diagnostics(paths);
+  const auto init = detail::init_context(model, cfg.inits);
+  stan::callbacks::writer init_writer;
   QuietDiagnostics diagnostics;
 
   detail::run_service(out, logger, "pathfinder", [&] {
-    namespace pf = stan::services::pathfinder;
-    // CmdStan's own choice: one path is the single-path service, with no
-    // resampling step.
-    if (cfg.num_paths == 1)
-      return pf::pathfinder_lbfgs_single(
-          model, *inits[0], cfg.seed, (unsigned int)cfg.chain_id,
-          cfg.init_radius, cfg.history_size, cfg.init_alpha, cfg.tol_obj,
-          cfg.tol_rel_obj, cfg.tol_grad, cfg.tol_rel_grad, cfg.tol_param,
-          cfg.max_lbfgs_iters, cfg.num_elbo_draws, cfg.num_draws,
-          /*save_iterations=*/false, cfg.refresh, interrupt, logger,
-          init_writers[0], rows, diagnostics, cfg.calculate_lp);
-    return pf::pathfinder_lbfgs_multi(
-        model, inits, cfg.seed, (unsigned int)cfg.chain_id, cfg.init_radius,
+    return stan::services::pathfinder::pathfinder_lbfgs_single(
+        model, *init, cfg.seed, (unsigned int)cfg.chain_id, cfg.init_radius,
         cfg.history_size, cfg.init_alpha, cfg.tol_obj, cfg.tol_rel_obj,
         cfg.tol_grad, cfg.tol_rel_grad, cfg.tol_param, cfg.max_lbfgs_iters,
-        cfg.num_elbo_draws, cfg.num_draws, cfg.num_psis_draws, cfg.num_paths,
-        /*save_iterations=*/false, cfg.refresh, interrupt, logger, init_writers,
-        path_writers, path_diagnostics, rows, diagnostics, cfg.calculate_lp,
-        cfg.psis_resample);
+        cfg.num_elbo_draws, cfg.num_draws, /*save_iterations=*/false,
+        cfg.refresh, interrupt, logger, init_writer, rows, diagnostics,
+        cfg.calculate_lp);
   });
   if (out.return_code != 0 || out.interrupted) return out;
   out.n_columns = (int64_t)model.n_columns();

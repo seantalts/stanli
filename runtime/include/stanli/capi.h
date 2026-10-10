@@ -572,18 +572,22 @@ int stanli_laplace_sample(stanli_model* m, const stanli_laplace_opts* opts,
                           stanli_sample_poll_cb poll, void* poll_user,
                           int* interrupted, char* err, size_t err_len);
 
-/* Pathfinder as CmdStan runs it: num_paths single-path runs, then Pareto
- * smoothed importance resampling across them
- * (stan::services::pathfinder::pathfinder_lbfgs_multi), or the single-path
- * service alone when num_paths is 1. The paths run one after another. For
- * unconstrained single-path draws, the L-BFGS path and k-hat, see
- * stanli_run_pathfinder above. */
+/* Single-path Pathfinder with constrained rows:
+ * stan::services::pathfinder::pathfinder_lbfgs_single. For unconstrained
+ * draws, the L-BFGS path and k-hat, see stanli_run_pathfinder above.
+ *
+ * MULTI-PATH PATHFINDER IS NOT AVAILABLE in this version. Stan 2.40's
+ * multi-path service reads past the end of an array while resampling, so
+ * num_paths must be 1 and any other value is refused with a message saying
+ * so. num_psis_draws and psis_resample belong to multi-path only; they are
+ * not read, and stay in the struct so its layout does not change when
+ * multi-path returns. */
 typedef struct {
   uint32_t seed;
-  int chain_id; /* path p uses the stream of (seed, chain_id + p) */
-  int num_paths;
-  int num_draws;      /* draws taken from each path's approximation */
-  int num_psis_draws; /* draws returned after resampling */
+  int chain_id;
+  int num_paths;      /* must be 1 */
+  int num_draws;      /* draws taken from the approximation */
+  int num_psis_draws; /* unused: multi-path only */
   int num_elbo_draws;
   int max_lbfgs_iters;
   int history_size;
@@ -594,24 +598,23 @@ typedef struct {
   double tol_rel_grad;
   double tol_param;
   double init_radius;
-  const double* inits; /* num_paths * n_unconstrained, or null */
-  int psis_resample;   /* 0 returns every path's draws unweighted */
-  int calculate_lp;    /* 0 also turns resampling off */
+  const double* inits; /* n_unconstrained, or null */
+  int psis_resample;   /* unused: multi-path only */
+  int calculate_lp;    /* 0 leaves lp as NaN beyond the first
+                        * num_elbo_draws draws, which Stan has scored */
   int refresh;
 } stanli_pathfinder_opts;
 
-/* CmdStan's defaults: seed 1, 4 paths from id 1, 1000 draws per path, 1000
- * returned, 25 ELBO draws, 1000 L-BFGS iterations, history 5, L-BFGS
- * tolerances as in stanli_optimize_opts, radius 2, resampling and lp on. */
+/* seed 1, chain id 1, one path, 1000 draws, 25 ELBO draws, 1000 L-BFGS
+ * iterations, history 5, L-BFGS tolerances as in stanli_optimize_opts,
+ * radius 2, lp on. */
 void stanli_pathfinder_opts_init(stanli_pathfinder_opts* o);
-/* The most rows a run under these options can return: num_psis_draws when
- * it resamples, num_paths * num_draws otherwise. */
+/* The rows a run under these options returns: num_draws, or 0 for options
+ * the run would refuse. */
 int64_t stanli_pathfinder_max_draws(const stanli_pathfinder_opts* o);
 /* `values` holds stanli_pathfinder_max_draws(opts) rows; `lp`, `lp_approx`
  * and `path` that many doubles each, or null. *n_draws receives the rows
- * actually written, which is fewer than the maximum when resampling is off
- * and a path failed. `path` is CmdStan's path__, the id of the path a draw
- * came from. */
+ * written. `path` is CmdStan's path__, which is chain_id on every row. */
 int stanli_pathfinder(stanli_model* m, const stanli_pathfinder_opts* opts,
                       double* values, double* lp, double* lp_approx,
                       double* path, int64_t* n_draws, stanli_log_cb log,

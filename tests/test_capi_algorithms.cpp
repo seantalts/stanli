@@ -352,18 +352,17 @@ void test_pathfinder(stanli_model* m) {
   stanli_pathfinder_opts o;
   stanli_pathfinder_opts_init(&o);
   expect("pathfinder defaults",
-         o.seed == 1 && o.num_paths == 4 && o.num_draws == 1000 &&
-             o.num_psis_draws == 1000 && o.num_elbo_draws == 25 &&
+         o.seed == 1 && o.chain_id == 1 && o.num_paths == 1 &&
+             o.num_draws == 1000 && o.num_elbo_draws == 25 &&
              o.max_lbfgs_iters == 1000 && o.history_size == 5 &&
-             o.psis_resample == 1 && o.calculate_lp == 1);
+             o.calculate_lp == 1 && o.inits == nullptr);
   expect("pathfinder default capacity",
          stanli_pathfinder_max_draws(&o) == 1000);
 
-  // Multi-path with resampling, the CmdStan default shape.
   o.seed = 8128;
-  o.num_psis_draws = 4000;
+  o.num_draws = 4000;
   const int64_t cap = stanli_pathfinder_max_draws(&o);
-  expect("pathfinder resampled capacity", cap == 4000);
+  expect("pathfinder capacity is num_draws", cap == 4000);
   std::vector<double> values((size_t)(cap * kWidth));
   std::vector<double> lp((size_t)cap), lq((size_t)cap), path((size_t)cap);
   int64_t n = -1;
@@ -372,24 +371,15 @@ void test_pathfinder(stanli_model* m) {
                              path.data(), &n, on_log, &log, nullptr, nullptr,
                              nullptr, err, sizeof err);
   expect(std::string("pathfinder runs: ") + err, rc == 0);
-  expect("pathfinder returns num_psis_draws rows", n == 4000);
+  expect("pathfinder returns num_draws rows", n == 4000);
   expect("pathfinder logs no errors", log.errors == 0);
   if (rc == 0 && n == 4000) {
     expect("pathfinder output is finite",
            all_finite(values) && all_finite(lp) && all_finite(lq));
-    // Resampled draws repeat, so the effective sample is smaller than 4000;
-    // ten standard errors at the nominal count allows for that.
-    expect_gaussian("pathfinder", values, n, 10);
+    expect_gaussian("pathfinder", values, n, 5);
     bool ids = true;
-    bool seen[4] = {false, false, false, false};
-    for (int64_t i = 0; i < n; ++i) {
-      const int id = (int)path[(size_t)i];
-      ids &= id >= 1 && id <= 4 && path[(size_t)i] == id;
-      if (id >= 1 && id <= 4) seen[id - 1] = true;
-    }
-    expect("pathfinder path ids are 1..4", ids);
-    expect("pathfinder draws come from every path",
-           seen[0] && seen[1] && seen[2] && seen[3]);
+    for (int64_t i = 0; i < n; ++i) ids &= path[(size_t)i] == 1.0;
+    expect("pathfinder path id is the chain id", ids);
   }
 
   std::vector<double> again(values.size());
@@ -404,75 +394,44 @@ void test_pathfinder(stanli_model* m) {
                          sizeof err);
   expect("pathfinder follows the seed", rc == 0 && again != values);
   o.seed -= 1;
+  // The chain id names the stream and the path.
+  o.chain_id = 3;
+  rc = stanli_pathfinder(m, &o, again.data(), nullptr, nullptr, path.data(),
+                         &n2, nullptr, nullptr, nullptr, nullptr, nullptr, err,
+                         sizeof err);
+  expect("pathfinder follows the chain id",
+         rc == 0 && again != values && path[0] == 3.0);
+  o.chain_id = 1;
 
-  // Without resampling: every path's draws, in path order.
-  o.psis_resample = 0;
-  o.num_draws = 500;
-  expect("pathfinder unresampled capacity",
-         stanli_pathfinder_max_draws(&o) == 2000);
-  rc = stanli_pathfinder(m, &o, values.data(), lp.data(), lq.data(),
-                         path.data(), &n, nullptr, nullptr, nullptr, nullptr,
-                         nullptr, err, sizeof err);
-  expect(std::string("pathfinder without resampling: ") + err,
-         rc == 0 && n == 2000);
-  if (rc == 0 && n == 2000) {
-    const std::vector<double> head(values.begin(),
-                                   values.begin() + (size_t)(n * kWidth));
-    expect_gaussian("pathfinder unresampled", head, n, 5);
-  }
+  // Stan reuses the draws it scored the chosen approximation with, which
+  // carry their log density; only the draws beyond those go without.
+  o.calculate_lp = 0;
+  o.num_draws = 50;
+  rc = stanli_pathfinder(m, &o, again.data(), lp.data(), nullptr, nullptr, &n2,
+                         nullptr, nullptr, nullptr, nullptr, nullptr, err,
+                         sizeof err);
+  expect(std::string("pathfinder without lp: ") + err,
+         rc == 0 && n2 == 50 && std::isfinite(lp[0]) && std::isnan(lp[49]));
+  o.calculate_lp = 1;
 
-  // One path is the single-path service.
-  o.num_paths = 1;
-  o.num_draws = 3000;
-  expect("pathfinder single capacity", stanli_pathfinder_max_draws(&o) == 3000);
-  rc = stanli_pathfinder(m, &o, values.data(), lp.data(), lq.data(),
-                         path.data(), &n, nullptr, nullptr, nullptr, nullptr,
-                         nullptr, err, sizeof err);
-  expect(std::string("single-path pathfinder: ") + err, rc == 0 && n == 3000);
-  if (rc == 0 && n == 3000) {
-    const std::vector<double> head(values.begin(),
-                                   values.begin() + (size_t)(n * kWidth));
-    expect_gaussian("pathfinder single", head, n, 5);
-  }
-
-  // Explicit starting points are used: the run depends on them, and at the
+  // An explicit starting point is used: the run depends on it, and at the
   // mode itself L-BFGS has nowhere to go, which Stan reports as a failure.
-  o.num_paths = 2;
   o.num_draws = 200;
-  o.psis_resample = 1;
-  o.num_psis_draws = 200;
-  const std::vector<double> start_a = {0, 0, 1, 2, -1, -1};
-  const std::vector<double> start_b = {-1, 1, 0.5, 0, -3, 1};
+  const std::vector<double> start_a = {0, 0, 1};
+  const std::vector<double> start_b = {2, -1, -1};
   std::vector<double> from_a((size_t)(200 * kWidth)), from_b(from_a.size());
   o.inits = start_a.data();
   rc = stanli_pathfinder(m, &o, from_a.data(), nullptr, nullptr, nullptr, &n,
                          nullptr, nullptr, nullptr, nullptr, nullptr, err,
                          sizeof err);
-  expect(std::string("pathfinder with inits: ") + err, rc == 0 && n == 200);
+  expect(std::string("pathfinder with an init: ") + err, rc == 0 && n == 200);
   o.inits = start_b.data();
   rc = stanli_pathfinder(m, &o, from_b.data(), nullptr, nullptr, nullptr, &n,
                          nullptr, nullptr, nullptr, nullptr, nullptr, err,
                          sizeof err);
-  expect("pathfinder depends on its inits",
+  expect("pathfinder depends on its init",
          rc == 0 && n == 200 && from_a != from_b);
-  // One path that cannot move does not take the others with it: Stan says
-  // how many succeeded and resamples from those.
-  const std::vector<double> one_stuck = {1, -2, 0, 2, -1, -1};
-  o.inits = one_stuck.data();
-  Log partial;
-  std::vector<double> from_path((size_t)200);
-  rc = stanli_pathfinder(m, &o, from_b.data(), nullptr, nullptr,
-                         from_path.data(), &n, on_log, &partial, nullptr,
-                         nullptr, nullptr, err, sizeof err);
-  expect(std::string("pathfinder with one failed path: ") + err,
-         rc == 0 && n == 200);
-  expect("pathfinder reports the failed path",
-         partial.text.find("Only 1 of the 2 pathfinders succeeded") !=
-             std::string::npos);
-  bool survivor = n == 200;
-  for (int64_t i = 0; i < n; ++i) survivor &= from_path[(size_t)i] == 2.0;
-  expect("pathfinder draws come from the surviving path", survivor);
-  const std::vector<double> at_mode = {1, -2, 0, 1, -2, 0};
+  const std::vector<double> at_mode = {1, -2, 0};
   o.inits = at_mode.data();
   Log stuck;
   rc = stanli_pathfinder(m, &o, from_b.data(), nullptr, nullptr, nullptr, &n,
@@ -482,6 +441,23 @@ void test_pathfinder(stanli_model* m) {
          rc != 0 && stuck.errors > 0 && std::strstr(err, "LBFGS") != nullptr);
   o.inits = nullptr;
 
+  // Multi-path is held: Stan 2.40's multi-path service reads past the end
+  // of an array, so more than one path is refused before anything runs.
+  for (int paths : {2, 4}) {
+    o.num_paths = paths;
+    expect("multi-path has no capacity", stanli_pathfinder_max_draws(&o) == 0);
+    Log refused;
+    n = -1;
+    rc = stanli_pathfinder(m, &o, from_b.data(), nullptr, nullptr, nullptr, &n,
+                           on_log, &refused, nullptr, nullptr, nullptr, err,
+                           sizeof err);
+    expect("multi-path pathfinder is refused",
+           rc != 0 && n == 0 && refused.info == 0 &&
+               std::strstr(err, "multi-path Pathfinder is not available") !=
+                   nullptr &&
+               std::strstr(err, "num_paths = 1") != nullptr);
+  }
+
   // Errors and interrupts.
   o.num_paths = 0;
   rc = stanli_pathfinder(m, &o, values.data(), nullptr, nullptr, nullptr, &n,
@@ -489,7 +465,14 @@ void test_pathfinder(stanli_model* m) {
                          sizeof err);
   expect("pathfinder refuses zero paths",
          rc != 0 && std::strstr(err, "num_paths") != nullptr && n == 0);
-  o.num_paths = 4;
+  o.num_paths = 1;
+  o.num_draws = 0;
+  rc = stanli_pathfinder(m, &o, values.data(), nullptr, nullptr, nullptr, &n,
+                         nullptr, nullptr, nullptr, nullptr, nullptr, err,
+                         sizeof err);
+  expect("pathfinder refuses zero draws",
+         rc != 0 && std::strstr(err, "num_draws") != nullptr);
+  o.num_draws = 200;
   int asked = 0, interrupted = 0;
   rc = stanli_pathfinder(m, &o, values.data(), nullptr, nullptr, nullptr, &n,
                          nullptr, nullptr, stop_now, &asked, &interrupted, err,

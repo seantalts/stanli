@@ -65,9 +65,10 @@ OptimizeResult run_optimize(Executor& ex, const WriteArray* wa,
 
 // ---- Pathfinder ------------------------------------------------------------
 // Single path, with unconstrained draws, the L-BFGS path and k-hat: what
-// NUTS initialization and a live view of the climb need. Multi-path
-// Pathfinder with PSIS resampling, returning constrained rows the way
-// CmdStan writes them, is run_pathfinder_paths in algorithms.hpp.
+// NUTS initialization and a live view of the climb need. The same single
+// path returning constrained rows the way CmdStan writes them is
+// run_pathfinder_paths in algorithms.hpp. Multi-path Pathfinder is held
+// there, for the reason given in pathfinder_service.cpp.
 
 struct PathfinderConfig {
   uint32_t seed = 1;

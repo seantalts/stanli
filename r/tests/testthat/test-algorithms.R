@@ -99,55 +99,51 @@ test_that("laplace_model draws from the normal approximation at the mode", {
   expect_error(laplace_model(model, draws = 0), "draws must be")
 })
 
-test_that("pathfinder_model resamples across paths", {
+test_that("pathfinder_model draws from a single path", {
   skip_without_runtime()
   model <- gaussian_model()
-  # Stan fits a Pareto tail to importance ratios that are nearly constant
-  # here, and warns about a shape that is mostly noise. The warning is
-  # checked once and then set aside.
-  pathfinder_model <- function(...)
-    withCallingHandlers(stanli::pathfinder_model(...), warning = function(w) {
-      if (grepl("Pareto k", conditionMessage(w))) invokeRestart("muffleWarning")
-    })
-  expect_warning(stanli::pathfinder_model(model, seed = 21, draws = 4000),
-                 "Pareto k value")
   fit <- pathfinder_model(model, seed = 21, draws = 4000)
   expect_approximation_fit(fit, "pathfinder", 4000,
                            c("lp__", "lp_approx__", "path__"))
-  # Resampled draws repeat, so fewer than 4000 are distinct; ten standard
-  # errors at the nominal count allows for that.
-  expect_gaussian(fit, k = 10)
-  expect_setequal(unique(fit$sampler[, 1L, "path__"]), 1:4)
+  expect_gaussian(fit)
+  expect_true(all(fit$sampler[, 1L, "path__"] == 1))
   expect_identical(pathfinder_model(model, seed = 21, draws = 4000)$draws,
                    fit$draws)
+  expect_identical(pathfinder_model(model, seed = 21, draws = 4000,
+                                    num_paths = 1)$draws, fit$draws)
   expect_false(identical(pathfinder_model(model, seed = 22, draws = 4000)$draws,
                          fit$draws))
 
-  # without resampling every path's draws come back, and `draws` is not used
-  all_paths <- pathfinder_model(model, seed = 21, num_paths = 3,
-                                single_path_draws = 500, psis_resample = FALSE)
-  expect_approximation_fit(all_paths, "pathfinder", 1500,
-                           c("lp__", "lp_approx__", "path__"))
-  expect_identical(as.numeric(table(all_paths$sampler[, 1L, "path__"])),
-                   c(500, 500, 500))
-  expect_gaussian(all_paths)
-  # one path is the single-path algorithm
-  single <- pathfinder_model(model, seed = 21, num_paths = 1,
-                             single_path_draws = 3000)
-  expect_approximation_fit(single, "pathfinder", 3000,
-                           c("lp__", "lp_approx__", "path__"))
-  expect_gaussian(single)
+  # a starting point is used, and the run depends on it
+  from_a <- pathfinder_model(model, seed = 21, draws = 100, init = c(0, 0, 1))
+  from_b <- pathfinder_model(model, seed = 21, draws = 100, init = c(2, -1, -1))
+  expect_identical(dim(from_a$draws)[1L], 100L)
+  expect_false(identical(from_a$draws, from_b$draws))
+  # Stan scores its first num_elbo_draws draws whatever is asked
+  bare <- pathfinder_model(model, seed = 21, draws = 60, calculate_lp = FALSE)
+  expect_identical(is.nan(bare$sampler[, 1L, "lp__"]), rep(c(FALSE, TRUE), c(25, 35)))
 
-  starts <- rbind(c(0, 0, 1), c(2, -1, -1))
-  started <- pathfinder_model(model, seed = 21, num_paths = 2, draws = 100,
-                              init = starts)
-  expect_identical(dim(started$draws)[1L], 100L)
-  expect_error(pathfinder_model(model, num_paths = 2, init = c(0, 0)),
-               "init must be")
+  expect_error(pathfinder_model(model, init = c(0, 0)), "init must be")
   expect_error(pathfinder_model(model, num_paths = 0), "num_paths must be")
+  expect_error(pathfinder_model(model, draws = 0), "draws must be")
   # Stan's own failure, reported with its message: L-BFGS cannot leave the mode
-  expect_error(pathfinder_model(model, num_paths = 2, init = c(1, -2, 0)),
-               "pathfinder failed")
+  expect_error(pathfinder_model(model, init = c(1, -2, 0)), "pathfinder failed")
+})
+
+test_that("multi-path Pathfinder is refused", {
+  skip_without_runtime()
+  model <- gaussian_model()
+  # Stan 2.40's multi-path service reads past the end of an array, so it is
+  # never called: more than one path is an error that says so.
+  for (paths in c(2, 4))
+    expect_error(pathfinder_model(model, num_paths = paths),
+                 "multi-path Pathfinder is not available.*num_paths = 1")
+  # the runtime refuses it too, for callers that do not come through here
+  opts <- list(1L, 2L, 100L, 100L, 25L, 1000L, 5L, 0.001, 1e-12, 1e4, 1e-8,
+               1e7, 1e-8, 2, TRUE, TRUE, 0L)
+  expect_error(.Call("stanli_r_pathfinder", model$ptr, opts, numeric(0)),
+               "num_paths must be 1")
+  expect_false("single_path_draws" %in% names(formals(pathfinder_model)))
 })
 
 test_that("variational_model fits both ADVI families", {

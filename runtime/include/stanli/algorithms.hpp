@@ -1,5 +1,5 @@
 // Stan's inference algorithms other than NUTS: fixed_param, Laplace
-// sampling, multi-path Pathfinder, and ADVI.
+// sampling, single-path Pathfinder, and ADVI.
 //
 // Each is Stan's own service (stan/services/) run on the executor through a
 // model adapter that behaves like a generated Stan model: rejections throw,
@@ -89,13 +89,17 @@ struct LaplaceConfig {
 AlgorithmResult run_laplace(Executor& ex, const AlgorithmHost& host,
                             const double* mode, const LaplaceConfig& cfg);
 
-// ---- Pathfinder, single- or multi-path -------------------------------------
+// ---- Pathfinder -----------------------------------------------------------
+// Single path only. Multi-path Pathfinder is held: Stan 2.40's multi-path
+// service reads past the end of an array while resampling (see
+// pathfinder_service.cpp). The fields that only it uses stay in place, so
+// that the layout does not change when it returns.
 struct PathfinderRunConfig {
   uint32_t seed = 1;
-  int chain_id = 1;  // Stan's stride_id; path p uses chain_id + p
-  int num_paths = 4;
-  int num_draws = 1000;       // per path
-  int num_psis_draws = 1000;  // returned after resampling
+  int chain_id = 1;   // Stan's stride_id
+  int num_paths = 1;  // must be 1
+  int num_draws = 1000;
+  int num_psis_draws = 1000;  // unused: multi-path only
   int num_elbo_draws = 25;
   int max_lbfgs_iters = 1000;
   int history_size = 5;
@@ -106,19 +110,19 @@ struct PathfinderRunConfig {
   double tol_rel_grad = 1e7;
   double tol_param = 1e-8;
   double init_radius = 2.0;
-  // num_paths * n_params unconstrained values, path-major, or null.
+  // n_params unconstrained values, or null.
   const double* inits = nullptr;
-  bool psis_resample = true;
+  bool psis_resample = true;  // unused: multi-path only
   bool calculate_lp = true;
   int refresh = 0;
 };
 
-// The most rows a run under `cfg` can return.
+// The rows a run under `cfg` returns: num_draws, or 0 for options the run
+// would refuse.
 int64_t pathfinder_max_draws(const PathfinderRunConfig& cfg);
 
-// stan::services::pathfinder::pathfinder_lbfgs_multi, or _single when
-// num_paths is 1, which is the choice CmdStan makes. Paths run one after
-// another: they share one executor.
+// stan::services::pathfinder::pathfinder_lbfgs_single. More than one path
+// is refused.
 AlgorithmResult run_pathfinder_paths(Executor& ex, const AlgorithmHost& host,
                                      const PathfinderRunConfig& cfg);
 

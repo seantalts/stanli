@@ -357,7 +357,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/estimate.cpp
   runtime/src/pathfinder.cpp
   runtime/src/algorithms.cpp
-  runtime/src/pathfinder_multi.cpp
+  runtime/src/pathfinder_service.cpp
   runtime/src/mir_reader.cpp
   runtime/src/mir_decode.cpp
   runtime/src/portable_mir_v2_reader.cpp

@@ -1171,8 +1171,9 @@ SEXP stanli_r_pathfinder(SEXP m, SEXP optlist, SEXP inits) {
   o.refresh = asInteger(VECTOR_ELT(optlist, 16));
   if (XLENGTH(inits) > 0) o.inits = REAL(inits);
 
+  /* Zero for options the runtime refuses, more than one path among them. */
   const int64_t cap = p_pathfinder_max_draws(&o);
-  if (cap < 1) error("num_paths and the draw counts must be positive");
+  if (cap < 1) error("num_paths must be 1 and draws positive");
   const int64_t width = row_width(mm);
   double* raw = (double*)R_alloc((size_t)(cap * width), sizeof(double));
   double* lp = (double*)R_alloc((size_t)cap, sizeof(double));

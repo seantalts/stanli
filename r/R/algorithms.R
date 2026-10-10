@@ -210,54 +210,64 @@ variational_model <- function(model, algorithm = c("meanfield", "fullrank"),
 
 #' Pathfinder variational inference
 #'
-#' Runs `num_paths` single-path Pathfinders, each a normal approximation
-#' chosen along an L-BFGS path, and resamples their draws by Pareto smoothed
-#' importance sampling. This is Stan's own multi-path Pathfinder, the
-#' algorithm behind CmdStan's `pathfinder` method, with its defaults.
+#' Follows an L-BFGS path towards the posterior mode, builds a normal
+#' approximation at each point along it, keeps the one with the highest
+#' evidence lower bound, and draws from that. This is Stan's own single-path
+#' Pathfinder, what CmdStan's `pathfinder` method runs with `num_paths = 1`.
 #'
 #' @param model A `stanli_model`.
-#' @param seed Seed; path `p` uses the stream of chain id `p`.
-#' @param num_paths Number of single-path runs. With 1, the single-path
-#'   algorithm runs alone and nothing is resampled.
-#' @param draws Number of draws returned after resampling.
-#' @param single_path_draws Number of draws taken from each path's
-#'   approximation. Without resampling, all `num_paths * single_path_draws`
-#'   are returned and `draws` is not used.
-#' @param max_lbfgs_iters Maximum L-BFGS iterations per path.
-#' @param num_elbo_draws Draws used to compare the approximations along a
+#' @param seed Seed.
+#' @param num_paths Must be 1. Multi-path Pathfinder, which runs several
+#'   paths and resamples their draws by importance, is not available in this
+#'   version; see Details.
+#' @param draws Number of draws to take from the approximation.
+#' @param max_lbfgs_iters Maximum L-BFGS iterations.
+#' @param num_elbo_draws Draws used to compare the approximations along the
 #'   path.
 #' @param history_size,init_alpha,tol_obj,tol_rel_obj,tol_grad,tol_rel_grad,tol_param
 #'   L-BFGS settings, as in CmdStan.
-#' @param psis_resample Resample across paths. `FALSE` returns every path's
-#'   draws unweighted.
-#' @param calculate_lp Evaluate the log density at each draw. `FALSE` saves
-#'   those evaluations, leaves `lp__` as `NaN`, and turns resampling off.
-#' @param init Optional starting points on the unconstrained scale: one
-#'   vector shared by every path or a matrix with one row per path.
-#' @param init_radius Random starts are drawn uniform(-r, r).
+#' @param calculate_lp Evaluate the log density at each draw. With `FALSE`,
+#'   `lp__` is `NaN` except for the first `num_elbo_draws` draws, which Stan
+#'   has already evaluated.
+#' @param init Optional starting point on the unconstrained scale; see
+#'   [unconstrain()].
+#' @param init_radius A random start is drawn uniform(-r, r).
 #' @param refresh Any positive value prints Stan's progress every that many
 #'   L-BFGS iterations. 0 prints nothing.
-#' @details The paths run one after another. A warning repeats what Stan
-#'   reports about the run, such as a Pareto k above 0.7, which means the
-#'   importance weights are unreliable and the draws should not be trusted,
-#'   or a path that failed. Resampling is with replacement, so the draws
-#'   repeat; the number of distinct draws is what carries information.
-#' @return A `stanli_fit` with one chain. Its `sampler` element holds `lp__`,
-#'   `lp_approx__`, and `path__`, the path each draw came from.
+#' @details Multi-path Pathfinder is held back because the multi-path
+#'   service of Stan 2.40, the version stanli is built on, reads past the end
+#'   of an array while it resamples. `num_paths` is kept as an argument so
+#'   that code written for it says what it means; any value but 1 is an
+#'   error. cmdstanr's default is four paths, so its default results are not
+#'   what this function returns.
+#'
+#'   A single path is one normal approximation, with no importance
+#'   resampling and no Pareto k diagnostic. It can be far from the posterior
+#'   and nothing in the fit says so: compare with [sample_model()] before
+#'   relying on it. `sample_model(pathfinder_init = )` uses the same
+#'   algorithm to start NUTS.
+#' @return A `stanli_fit` with one chain of `draws` draws. Its `sampler`
+#'   element holds `lp__`, `lp_approx__`, and `path__`, which is 1 on every
+#'   draw.
 #' @export
-pathfinder_model <- function(model, seed = 1, num_paths = 4, draws = 1000,
-                             single_path_draws = 1000, max_lbfgs_iters = 1000,
-                             num_elbo_draws = 25, history_size = 5,
-                             init_alpha = 0.001, tol_obj = 1e-12,
-                             tol_rel_obj = 1e4, tol_grad = 1e-8,
-                             tol_rel_grad = 1e7, tol_param = 1e-8,
-                             psis_resample = TRUE, calculate_lp = TRUE,
+pathfinder_model <- function(model, seed = 1, num_paths = 1, draws = 1000,
+                             max_lbfgs_iters = 1000, num_elbo_draws = 25,
+                             history_size = 5, init_alpha = 0.001,
+                             tol_obj = 1e-12, tol_rel_obj = 1e4,
+                             tol_grad = 1e-8, tol_rel_grad = 1e7,
+                             tol_param = 1e-8, calculate_lp = TRUE,
                              init = NULL, init_radius = 2, refresh = 0) {
   num_paths <- algorithm_count(num_paths, "num_paths")
+  if (num_paths != 1L)
+    stop("multi-path Pathfinder is not available in this version: Stan ",
+         "2.40's multi-path service reads past the end of an array while ",
+         "resampling. Use num_paths = 1 for single-path Pathfinder.",
+         call. = FALSE)
+  draws <- algorithm_count(draws, "draws")
+  # The runtime's options keep the two multi-path fields (the resampled draw
+  # count and the resampling switch); they are filled and not read.
   opts <- list(
-    as.integer(seed), num_paths,
-    algorithm_count(single_path_draws, "single_path_draws"),
-    algorithm_count(draws, "draws"),
+    as.integer(seed), num_paths, draws, draws,
     algorithm_count(num_elbo_draws, "num_elbo_draws"),
     algorithm_count(max_lbfgs_iters, "max_lbfgs_iters"),
     algorithm_count(history_size, "history_size"),
@@ -268,14 +278,13 @@ pathfinder_model <- function(model, seed = 1, num_paths = 4, draws = 1000,
     algorithm_number(tol_rel_grad, "tol_rel_grad", positive = FALSE),
     algorithm_number(tol_param, "tol_param", positive = FALSE),
     algorithm_number(init_radius, "init_radius", positive = FALSE),
-    stanfit_flag(psis_resample, "psis_resample"),
-    stanfit_flag(calculate_lp, "calculate_lp"),
+    TRUE, stanfit_flag(calculate_lp, "calculate_lp"),
     algorithm_count(refresh, "refresh", 0L))
   load_runtime()
   model <- with_run_seed(model, seed)
   started <- proc.time()[["elapsed"]]
   res <- .Call("stanli_r_pathfinder", model$ptr, opts,
-               algorithm_inits(model, init, num_paths))
+               algorithm_inits(model, init, 1L))
   elapsed <- proc.time()[["elapsed"]] - started
   algorithm_interrupt(res, "Pathfinder")
   algorithm_notes(res)

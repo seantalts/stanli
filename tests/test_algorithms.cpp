@@ -199,7 +199,45 @@ static void test_rejected_row() {
              clean.values[3] != clean.values[5]);
 }
 
+// Multi-path Pathfinder is held (Stan 2.40's multi-path service reads past
+// the end of an array), so the C++ entry point runs one path and refuses
+// more before touching the model.
+static void test_pathfinder_single_only() {
+  using namespace stanli;
+  const int D = 3;
+  Graph g;
+  const int x = g.add_slot(D, true);
+  const int zero = g.add_slot(1, false);
+  const int one = g.add_slot(1, false);
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+  g.result_slot = lp;
+  Executor ex(std::move(g));
+  ex.value_ptr(zero)[0] = 0.0;
+  ex.value_ptr(one)[0] = 1.0;
+
+  const AlgorithmHost host;
+  PathfinderRunConfig cfg;
+  expect("pathfinder defaults to one path", cfg.num_paths == 1);
+  cfg.seed = 99;
+  cfg.num_draws = 300;
+  expect("pathfinder capacity", pathfinder_max_draws(cfg) == 300);
+  const AlgorithmResult r = run_pathfinder_paths(ex, host, cfg);
+  expect("single path runs: " + r.message, r.return_code == 0);
+  expect("single path rows", r.rows() == 300 && r.n_columns == D &&
+                                 r.lp.size() == 300 && r.path.size() == 300);
+
+  cfg.num_paths = 4;
+  expect("multi-path capacity is zero", pathfinder_max_draws(cfg) == 0);
+  const AlgorithmResult refused = run_pathfinder_paths(ex, host, cfg);
+  expect("multi-path is refused",
+         refused.return_code != 0 && refused.rows() == 0 &&
+             refused.message.find("multi-path Pathfinder is not available") !=
+                 std::string::npos);
+}
+
 int main() {
+  test_pathfinder_single_only();
   test_fixed_param_stream();
   test_laplace_stream();
   test_rejected_row();

@@ -15,7 +15,7 @@ model, then pass that model to sampling or optimization. These examples assume
 | `fit$diagnostic_summary()` or `fit$cmdstan_diagnose()` | `stanli_diagnose(fit)` prints a report; `fit$report` contains per-chain timings, divergence counts, and treedepth counts, rather than the cmdstanr summary table. |
 | `fit$sampler_diagnostics()` | `fit$sampler` is the raw array, including `lp__`; `bayesplot::nuts_params(fit)` gives the plotting table, excluding `lp__` by default. |
 | `m$optimize(data = data, jacobian = TRUE)` | `optimize_model(m)` includes the transform Jacobian. CmdStan's default `jacobian = FALSE` gives penalized maximum likelihood and has no stanli equivalent. |
-| `m$pathfinder(data = data, num_paths = 4, draws = 1000)` | `pathfinder_model(m, num_paths = 4, draws = 1000)`: multi-path Pathfinder with PSIS resampling, with cmdstanr's argument names. The paths run one after another. `sample_model(m, pathfinder_init = list())` uses single-path Pathfinder to initialize NUTS. |
+| `m$pathfinder(data = data, num_paths = 1, draws = 1000)` | `pathfinder_model(m, draws = 1000)`: single-path Pathfinder. cmdstanr's default of four paths with PSIS resampling has no equivalent; see below. `sample_model(m, pathfinder_init = list())` uses the same single path to initialize NUTS. |
 | `m$variational(data = data, algorithm = "meanfield", iter = 10000, draws = 1000)` | `variational_model(m, algorithm = "meanfield", iter = 10000, draws = 1000)`; `"fullrank"` likewise. |
 | `m$laplace(data = data, mode = opt, draws = 1000)` | `laplace_model(m, mode = optimize_model(m), draws = 1000)`, or leave `mode` out to find it first. Always with the Jacobian, which is also cmdstanr's default. |
 | `m$sample(data = data, fixed_param = TRUE)` | `sample_model(m, fixed_param = TRUE)` |
@@ -143,7 +143,10 @@ also saves the arrays, but its restored `fit$model$ptr` is unusable.
 - Optimization and `laplace()` with `jacobian = FALSE`.
 - A `mode` for `laplace()` given as constrained values in a file: pass
   `unconstrain()`'s result.
-- Pathfinder paths in parallel threads.
+- Multi-path Pathfinder (`num_paths` above 1, with PSIS resampling). The
+  multi-path service of Stan 2.40 reads past the end of an array while it
+  resamples, so stanli does not call it; `pathfinder_model(num_paths = 4)`
+  is an error that says so. Single-path Pathfinder is available.
 
 See the [course quickstart](teaching.md) for installation and an eight-schools
 example that requires no model files.

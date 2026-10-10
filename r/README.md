@@ -107,7 +107,7 @@ same model:
 
 ```r
 vi <- variational_model(m, algorithm = "meanfield")  # or "fullrank": ADVI
-pf <- pathfinder_model(m, num_paths = 4)             # multi-path, PSIS resampled
+pf <- pathfinder_model(m)                            # single-path Pathfinder
 la <- laplace_model(m)                               # normal at the posterior mode
 gq <- sample_model(m, fixed_param = TRUE)            # only generated quantities move
 ```
@@ -118,14 +118,19 @@ chain of independent draws, and `fit$sampler` holds `lp__` and `lp_approx__`
 (the log density and the approximation's, per draw) where a NUTS fit has its
 sampler columns; `stanli_diagnose()` and `nuts_params()` say that they need a
 NUTS fit. Argument names follow cmdstanr. A warning repeats what Stan reports
-about a run: ADVI stopping at its iteration limit, or a Pathfinder Pareto k
-above 0.7, which means the draws should not be trusted.
+about a run, such as ADVI stopping at its iteration limit.
+
+`pathfinder_model()` runs a single path. Multi-path Pathfinder, cmdstanr's
+default, is not available in this version: the multi-path service of Stan
+2.40 reads past the end of an array while it resamples, so stanli does not
+call it, and `num_paths` above 1 is an error that says so. A single path has
+no importance resampling and no Pareto k diagnostic.
 
 None of the three checks itself against the posterior. They are fast, and on
 a posterior that is far from normal on the unconstrained scale they can be
 badly wrong, in the spread more often than in the centre. Compare with
-`sample_model()` before relying on one. Pathfinder's paths run one after
-another, and `laplace_model()` always includes the Jacobian, as
+`sample_model()` before relying on one. `laplace_model()` always includes
+the Jacobian, as
 `optimize_model()` does.
 
 Chains run in parallel by default. Threading does not change the
