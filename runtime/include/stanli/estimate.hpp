@@ -64,9 +64,11 @@ OptimizeResult run_optimize(Executor& ex, const WriteArray* wa,
                             const OptimizeConfig& cfg);
 
 // ---- Pathfinder ------------------------------------------------------------
-// Single path only. Multi-path needs real TBB (tbb::parallel_for in
-// stan/services/pathfinder/multi.hpp, tbb::parallel_invoke in psis.hpp)
-// and this build stubs TBB out, so it does not link.
+// Single path, with unconstrained draws, the L-BFGS path and k-hat: what
+// NUTS initialization and a live view of the climb need. The same single
+// path returning constrained rows the way CmdStan writes them is
+// run_pathfinder_paths in algorithms.hpp. Multi-path Pathfinder is held
+// there, for the reason given in pathfinder_service.cpp.
 
 struct PathfinderConfig {
   uint32_t seed = 1;

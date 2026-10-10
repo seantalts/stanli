@@ -37,6 +37,7 @@
 as_cstanfit <- function(x) {
   if (inherits(x, "stanli_cstanfit")) return(x)
   if (!inherits(x, "stanli_fit")) stop("x must be a stanli_fit", call. = FALSE)
+  require_nuts_fit(x, "as_cstanfit()")
   required <- c("warmup", "samples", "thin", "chains", "warmup_draws", "save_warmup")
   if (!all(required %in% names(x)))
     stop("fit lacks sampling metadata; sample with the current Stanli version", call. = FALSE)

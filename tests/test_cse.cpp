@@ -286,6 +286,11 @@ static void test_gradient_accumulation_order() {
     ex.set_profile(true);
     expect("profiled cached value exact", ex.gradient(&gradient) == sum.val());
     expect("profiled cached gradient exact", gradient == x.adj());
+    // The report is empty until some op has measured a nonzero time, and
+    // one pass over a graph this small can fall inside a single tick of a
+    // coarse clock (seen on Windows). Accumulate until the clock has moved.
+    for (int pass = 0; pass < 100000 && ex.profile_report().empty(); ++pass)
+      ex.gradient(&gradient);
     expect("cached profile is populated", !ex.profile_report().empty());
     ex.set_profile(false);
     Executor clone(ex);

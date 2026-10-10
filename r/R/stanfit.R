@@ -54,6 +54,25 @@ stanfit_no_cppmodule <- function(...) {
   stop("as_stanfit() has no compiled RStan model", call. = FALSE)
 }
 
+# rstan::summary() and print() read these for a fit whose method is
+# "variational", as rstan::vb() stores them when it does not resample: no
+# effective sample size or standard error, and for each column the Pareto k
+# of its importance-weighted second moment, which needs loo.
+stanfit_vb_diagnostics <- function(samples, log_ratio) {
+  n <- length(samples)
+  khat <- rep(NaN, n)
+  finite <- all(is.finite(log_ratio))
+  if (finite && requireNamespace("loo", quietly = TRUE)) {
+    special <- names(samples) %in% c("lp__", "lp_approx__")
+    khat[!special] <- vapply(samples[!special], function(column) {
+      if (any(!is.finite(column)) || all(column == column[1L])) return(NaN)
+      suppressWarnings(
+        loo::psis(log1p(column^2) / 2 + log_ratio, r_eff = 1)$diagnostics$pareto_k)
+    }, numeric(1))
+  }
+  list(theta_pareto_k = khat, mcse = rep(NaN, n), n_eff = rep(NaN, n))
+}
+
 #' Convert draws to an RStan fit without compilation
 #'
 #' Build a `stanli_stanfit`, an S4 subclass of `rstan::stanfit`, directly from
@@ -69,6 +88,15 @@ stanfit_no_cppmodule <- function(...) {
 #' @return An S4 object inheriting from `stanfit`, with samples, sampler
 #'   statistics, timings, and parameter dimensions. Initial values and
 #'   adaptation text are empty: the first saved draw is not the initial state.
+#'
+#'   A fit from [variational_model()], [pathfinder_model()] or
+#'   [laplace_model()] becomes a one-chain fit without warmup or sampler
+#'   statistics, whose draws end with `lp__` and `lp_approx__`, and whose
+#'   `stan_args[[1]]$method` is `"variational"`, `"pathfinder"` or
+#'   `"laplace"`. This is the layout brms builds from CmdStan's output for
+#'   the same algorithms; unlike [rstan::vb()], no row of means precedes the
+#'   draws. A fixed-parameter fit keeps its chains and has `accept_stat__`
+#'   as its only sampler statistic.
 #' @details Extraction, summaries, plots, and ordinary LOO inherit RStan's
 #'   methods. With a live model, `rstan::log_prob`, `grad_log_prob`,
 #'   `constrain_pars`, and `unconstrain_pars` call stanli directly.
@@ -128,7 +156,12 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
   register_stanfit_class()
   live_model <- model
   stanfit_check_model(live_model, x$columns, dim(x$unconstrained)[3L])
-  required <- c("warmup", "thin", "samples", "save_warmup", "chains", "delta")
+  algorithm <- fit_algorithm(x)
+  nuts <- algorithm == "sampling"
+  # an approximation: independent draws, no chain to diagnose
+  approximate <- !algorithm %in% c("sampling", "fixed_param")
+  required <- c("warmup", "thin", "samples", "save_warmup", "chains",
+                if (nuts) "delta")
   if (!all(required %in% names(x)))
     stop("this fit lacks sampling metadata; create it with the current ",
          "sample_model() before using as_stanfit()", call. = FALSE)
@@ -145,8 +178,11 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
   # log_prob and the transforms, still know every parameter.
   kept_columns <- !(sub("\\[.*$", "", x$columns) %in% exclude)
   columns <- x$columns[kept_columns]
-  layout <- stanfit_column_layout(c(columns, "lp__"))
-  flat_names <- c(columns, "lp__")
+  # lp__ closes every fit; an approximation also has the density of the
+  # approximation at each draw, as cmdstanr names it.
+  special <- if (approximate) c("lp__", "lp_approx__") else "lp__"
+  layout <- stanfit_column_layout(c(columns, special))
+  flat_names <- c(columns, special)
   posterior_rows <- seq.int(saved_warmup + 1L, shape[1L])
 
   # Slot semantics checked against installed CRAN rstan 2.32.7 and
@@ -155,13 +191,26 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
   # stanfit-class.R reads each chain's sampler_params, elapsed_time, args,
   # mean_pars and mean_lp__ attributes. Samples use CSV dot names internally;
   # sim$fnames_oi uses bracket names. Diagnostics follow the CSV reader's order.
-  sampler_names <- c("accept_stat__", "treedepth__", "stepsize__",
-                     "divergent__", "n_leapfrog__", "energy__")
+  # Fixed-parameter sampling has CmdStan's one diagnostic for it, and an
+  # approximation has none, which is what brms builds from a CmdStan CSV of
+  # a variational, Pathfinder or Laplace run.
+  sampler_names <- if (nuts) c("accept_stat__", "treedepth__", "stepsize__",
+                               "divergent__", "n_leapfrog__", "energy__")
+                   else if (approximate) character(0) else "accept_stat__"
+  control <- if (nuts) list(adapt_delta = x$delta, max_treedepth = x$max_depth)
+  sampler_t <- if (nuts) "NUTS(diag_e)" else if (!approximate) "Fixed_param"
+  method_args <- switch(algorithm,
+    sampling = list(method = "sampling", algorithm = "NUTS"),
+    fixed_param = list(method = "sampling", algorithm = "Fixed_param"),
+    meanfield = , fullrank = list(method = "variational", algorithm = algorithm),
+    pathfinder = list(method = "pathfinder", algorithm = "lbfgs"),
+    laplace = list(method = "laplace", algorithm = "lbfgs"),
+    stop("unknown algorithm '", algorithm, "'", call. = FALSE))
   chains <- vector("list", x$chains)
   arguments <- vector("list", x$chains)
   for (chain in seq_len(x$chains)) {
     values <- cbind(matrix(x$draws[, chain, kept_columns], nrow = shape[1L]),
-                    x$sampler[, chain, "lp__"])
+                    matrix(x$sampler[, chain, special], nrow = shape[1L]))
     colnames(values) <- flat_names
     draws <- as.data.frame(values, optional = TRUE)
     names(draws) <- gsub("\\[|,", ".", sub("\\]$", "", flat_names))
@@ -170,9 +219,9 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     attr(draws, "sampler_params") <- as.data.frame(diagnostics)
     # rstan keeps each chain's sampler settings here too, and brms reads
     # them from here (control_params()).
-    attr(draws, "args") <- list(
-      chain_id = chain, sampler_t = "NUTS(diag_e)",
-      control = list(adapt_delta = x$delta, max_treedepth = x$max_depth))
+    attr(draws, "args") <- c(list(chain_id = chain),
+                             if (!is.null(sampler_t)) list(sampler_t = sampler_t),
+                             if (nuts) list(control = control))
     attr(draws, "adaptation_info") <- ""
     elapsed <- c(warmup = NA_real_, sample = NA_real_)
     if (isTRUE(x$report$available))
@@ -180,15 +229,14 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     attr(draws, "elapsed_time") <- elapsed
     averages <- colMeans(values[posterior_rows, , drop = FALSE])
     names(averages) <- names(draws)
-    attr(draws, "mean_pars") <- utils::head(averages, -1L)
+    attr(draws, "mean_pars") <- utils::head(averages, -length(special))
     attr(draws, "mean_lp__") <- averages["lp__"]
     chains[[chain]] <- draws
-    arguments[[chain]] <- list(
-      chain_id = chain, seed = x$seed, iter = x$warmup + x$samples,
-      warmup = x$warmup, thin = x$thin, save_warmup = x$save_warmup,
-      control = list(adapt_delta = x$delta, max_treedepth = x$max_depth),
-      method = "sampling", algorithm = "NUTS", sampler_t = "NUTS(diag_e)"
-    )
+    arguments[[chain]] <- c(
+      list(chain_id = chain, seed = x$seed, iter = x$warmup + x$samples,
+           warmup = x$warmup, thin = x$thin, save_warmup = x$save_warmup),
+      if (nuts) list(control = control), method_args,
+      if (!is.null(sampler_t)) list(sampler_t = sampler_t))
   }
   simulation <- list(
     samples = chains, chains = x$chains, iter = x$warmup + x$samples,
@@ -198,6 +246,9 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     pars_oi = layout$parameters, dims_oi = layout$dimensions,
     fnames_oi = flat_names, n_flatnames = length(flat_names)
   )
+  if (algorithm %in% c("meanfield", "fullrank"))
+    simulation$diagnostics <- stanfit_vb_diagnostics(
+      chains[[1L]], x$sampler[, 1L, "lp__"] - x$sampler[, 1L, "lp_approx__"])
   description <- if (is.null(live_model)) x$model else live_model
   name <- if (is.null(description$model_name)) "stanli_model" else description$model_name
   code <- if (is.null(description$model_code)) character(0) else description$model_code

@@ -1,0 +1,33 @@
+== 1. a diverging run: y ~ x + (1 | g), meanfield, seed 3 ==
+Chain 1: stan::variational::normal_meanfield::calc_grad: The number of dropped evaluations has reached its maximum amount (10). Your model may be either severely ill-conditioned or misspecified.
+stanli:
+  Success! Found best value [eta = 100] earlier than expected.
+  100       -70697.910             1.000            1.000
+  200       -69214.918             0.511            1.000
+  variational inference failed: stan::variational::normal_meanfield::calc_grad: The number of dropped evaluations has reached its maximum amount (10). Your model may be either severely ill-conditioned or misspecified.
+rstan:
+  Success! Found best value [eta = 100] earlier than expected.
+  100       -70697.910             1.000            1.000
+  200       -69214.918             0.511            1.000
+
+== 2. a model written with ~ statements, meanfield, seeds 1 to 5 ==
+seed 1
+  stanli last line: 700          -31.600             0.149            0.008   MEDIAN ELBO CONVERGED
+  rstan  last line: 300          -61.850             0.338            0.008   MEDIAN ELBO CONVERGED
+  mu mean (sd): stanli 0.50260 (0.28395), rstan 0.51941 (0.36805)
+seed 2
+  stanli last line: 300          -31.935             0.337            0.005   MEDIAN ELBO CONVERGED
+  rstan  last line: 300          -62.032             0.335            0.003   MEDIAN ELBO CONVERGED
+  mu mean (sd): stanli 0.55793 (0.32841), rstan 0.55793 (0.32841)
+seed 3
+  stanli last line: 300          -31.851             0.337            0.007   MEDIAN ELBO CONVERGED
+  rstan  last line: 300          -61.948             0.335            0.003   MEDIAN ELBO CONVERGED
+  mu mean (sd): stanli 0.54161 (0.31841), rstan 0.54161 (0.31841)
+seed 4
+  stanli last line: 500          -31.594             0.204            0.009   MEDIAN ELBO CONVERGED
+  rstan  last line: 300          -61.662             0.337            0.005   MEDIAN ELBO CONVERGED
+  mu mean (sd): stanli 0.47697 (0.37955), rstan 0.61095 (0.26553)
+seed 5
+  stanli last line: 1100          -31.640             0.008            0.010   MEAN ELBO CONVERGED   MEDIAN ELBO CONVERGED
+  rstan  last line: 300          -61.687             0.337            0.006   MEDIAN ELBO CONVERGED
+  mu mean (sd): stanli 0.54945 (0.27449), rstan 0.61020 (0.31162)

@@ -1,0 +1,60 @@
+left out (no usable NUTS mean): sw_negbinomial shape 
+
+| model | parameters | algorithm | runs that finished | mean error, median run (worst) | sd ratio, median run | runs with a warning |
+|---|---|---|---|---|---|---|
+| sw_gaussian | 4 | meanfield | 5 of 5 | 0.60 (0.80) | 0.91 to 1.22 | 0 |
+| sw_gaussian | 4 | fullrank | 5 of 5 | 0.15 (0.45) | 0.90 to 1.09 | 0 |
+| sw_gaussian | 4 | pathfinder | 5 of 5 | 0.41 (0.75) | 0.92 to 1.03 | 0 |
+| sw_gaussian | 4 | laplace | 5 of 5 | 0.44 (0.44) | 0.86 to 0.94 | 0 |
+| sw_bernoulli | 3 | meanfield | 5 of 5 | 0.35 (0.42) | 0.94 to 1.02 | 0 |
+| sw_bernoulli | 3 | fullrank | 5 of 5 | 0.35 (0.44) | 0.85 to 1.23 | 0 |
+| sw_bernoulli | 3 | pathfinder | 5 of 5 | 0.05 (0.16) | 0.93 to 1.01 | 0 |
+| sw_bernoulli | 3 | laplace | 5 of 5 | 0.03 (0.04) | 0.92 to 0.96 | 0 |
+| sw_poisson | 3 | meanfield | 5 of 5 | 0.66 (0.97) | 0.93 to 1.13 | 0 |
+| sw_poisson | 3 | fullrank | 5 of 5 | 0.25 (0.30) | 0.88 to 1.17 | 0 |
+| sw_poisson | 3 | pathfinder | 5 of 5 | 0.07 (0.12) | 0.99 to 1.05 | 0 |
+| sw_poisson | 3 | laplace | 5 of 5 | 0.08 (0.10) | 0.97 to 1.01 | 0 |
+| sw_negbinomial | 3 | meanfield | 5 of 5 | 1.11 (1.23) | 0.61 to 0.70 | 0 |
+| sw_negbinomial | 3 | fullrank | 4 of 5 | 0.76 (3.43) | 0.67 to 1.28 | 1 |
+| sw_negbinomial | 3 | pathfinder | 5 of 5 | 0.84 (0.89) | 0.66 to 0.80 | 0 |
+| sw_negbinomial | 3 | laplace | 5 of 5 | 0.84 (0.88) | 0.64 to 0.68 | 0 |
+| sw_re_gauss | 4 | meanfield | 4 of 5 | 0.52 (1.02) | 0.48 to 1.12 | 0 |
+| sw_re_gauss | 4 | fullrank | 5 of 5 | 0.43 (1.2e+09) | 0.61 to 1.39 | 1 |
+| sw_re_gauss | 4 | pathfinder | 5 of 5 | 1.07 (11.57) | 0.40 to 1.16 | 0 |
+| sw_re_gauss | 4 | laplace | 5 of 5 | 12.47 (13.13) | 0.89 to 12.15 | 0 |
+| sw_re_pois | 3 | meanfield | 5 of 5 | 0.53 (0.61) | 0.59 to 0.96 | 0 |
+| sw_re_pois | 3 | fullrank | 5 of 5 | 0.74 (36.75) | 0.59 to 1.10 | 1 |
+| sw_re_pois | 3 | pathfinder | 5 of 5 | 0.35 (0.55) | 0.57 to 1.03 | 0 |
+| sw_re_pois | 3 | laplace | 5 of 5 | 16.87 (17.35) | 1.08 to 15.69 | 0 |
+| i319_pois_re | 6 | meanfield | 5 of 5 | 17.42 (24.25) | 1.03 to 5.87 | 4 |
+| i319_pois_re | 6 | fullrank | 4 of 5 | 10.11 (28.52) | 3.09 to 9.03 | 3 |
+| i319_pois_re | 6 | pathfinder | 4 of 5 | 25.74 (62.88) | 0.12 to 1.38 | 0 |
+| i319_pois_re | 6 | laplace | 4 of 5 | 72.59 (75.41) | 7.96 to 42.16 | 0 |
+
+Pathfinder, distinct draws among the 1000 returned, per run:
+  i319_pois_re: 1000, 1000, 1000, 1000
+  sw_bernoulli: 1000, 1000, 1000, 1000, 1000
+  sw_gaussian: 1000, 1000, 1000, 1000, 1000
+  sw_negbinomial: 1000, 1000, 1000, 1000, 1000
+  sw_poisson: 1000, 1000, 1000, 1000, 1000
+  sw_re_gauss: 1000, 1000, 1000, 1000, 1000
+  sw_re_pois: 1000, 1000, 1000, 1000, 1000
+
+stanli against rstan::vb(), same seed: largest absolute difference of a posterior mean and of a posterior sd
+| model | algorithm | runs | values | mean | sd |
+|---|---|---|---|---|---|
+| sw_bernoulli | fullrank | 5 | 15 | 5.7e-08 | 8.7e-08 |
+| sw_bernoulli | meanfield | 5 | 15 | 2.4e-08 | 4.5e-08 |
+| sw_gaussian | fullrank | 5 | 20 | 6.9e-08 | 1.1e-07 |
+| sw_gaussian | meanfield | 5 | 20 | 5.8e-08 | 8.2e-08 |
+| sw_re_pois | fullrank | 5 | 15 | 1.0e-07 | 2.3e-07 |
+| sw_re_pois | meanfield | 5 | 15 | 8.9e-08 | 1.0e-07 |
+
+Failures:
+  sw_negbinomial stanli fullrank seed 4: variational inference failed: stan::variational::normal_fullrank::calc_grad: The number of dropped evaluations has reached its maximum amount (10). Your model may be either severely ill-conditi
+  sw_re_gauss stanli meanfield seed 3: variational inference failed: stan::variational::normal_meanfield::calc_grad: The number of dropped evaluations has reached its maximum amount (10). Your model may be either severely ill-condit
+  i319_pois_re stanli fullrank seed 4: variational inference failed: stan::variational::advi::adapt_eta: All proposed step-sizes failed. Your model may be either severely ill-conditioned or misspecified.
+  i319_pois_re stanli pathfinder seed 3: pathfinder failed: Optimization terminated with error: Line search failed to achieve a sufficient decrease, no more progress can be made Optimization failed to start, pathfinder cannot be run.
+  i319_pois_re stanli laplace seed 3: optimize failed: Error evaluating model log probability: Non-finite gradient.
+Error evaluating model log probability: Non-finite gradient.
+Error evaluating model log probability: Non-finite gra

@@ -1,5 +1,6 @@
 #include <stanli/capi.h>
 
+#include <stanli/algorithms.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/execution_report.hpp>
 #include <stanli/diagnose.hpp>
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -82,6 +84,104 @@ std::vector<double> interp_wa_row(stanli_model& m, const double* q,
   std::memcpy(ex.params_data(), q, sizeof(double) * ex.n_params());
   ex.run_forward_only();
   return m.wa_interp->eval(m.cm.constrained_env(ex), rng);
+}
+
+int64_t row_width(const stanli_model& m) {
+  return m.wa_n > 0 ? m.wa_n : m.n_con;
+}
+
+// One output row at unconstrained q on the model's own executors, drawing
+// generated quantities from the caller's stream rather than the model's.
+// Throws what the evaluation throws; the caller decides what a rejection is.
+void write_row(stanli_model& m, const double* q, double* out,
+               stanli::WaRng& rng) {
+  const int64_t width = row_width(m);
+  if (m.wa_interp) {
+    const auto row = interp_wa_row(m, q, rng);
+    if ((int64_t)row.size() != width)
+      throw std::runtime_error("write_array produced " +
+                               std::to_string(row.size()) +
+                               " columns, expected " + std::to_string(width));
+    std::memcpy(out, row.data(), sizeof(double) * (size_t)width);
+  } else if (m.wa_ex) {
+    std::memcpy(m.wa_ex->params_data(), q,
+                sizeof(double) * (size_t)m.wa_ex->n_params());
+    m.wa_ex->run_forward_only(stanli::EvalState{&rng});
+    int64_t at = 0;
+    for (const auto& col : m.wa_cols) {
+      const double* p = std::as_const(*m.wa_ex).value_ptr(col.slot);
+      for (int64_t i = 0; i < col.len; ++i) out[at++] = p[i];
+    }
+  } else {
+    stanli::Executor& ex = *m.ex;
+    std::memcpy(ex.params_data(), q, sizeof(double) * (size_t)ex.n_params());
+    ex.run_forward_only();
+    int64_t at = 0;
+    for (const auto& v : m.cm.views) {
+      const double* p = std::as_const(ex).value_ptr(v.slot);
+      for (int64_t i = 0; i < v.len; ++i) out[at++] = p[v.storage_index(i)];
+    }
+  }
+}
+
+// The model, its log sink and its interrupt poll, as the algorithms see them.
+stanli::AlgorithmHost algorithm_host(stanli_model* m, stanli_log_cb log,
+                                     void* log_user, stanli_sample_poll_cb poll,
+                                     void* poll_user) {
+  stanli::AlgorithmHost host;
+  host.names = m->wa_n > 0 ? m->wa_names : m->flat_names;
+  host.row = [m](const double* q, double* out, stanli::WaRng& rng) {
+    write_row(*m, q, out, rng);
+  };
+  if (log != nullptr)
+    host.log = [log, log_user](int level, const std::string& text) {
+      log((int32_t)level, text.c_str(), log_user);
+    };
+  if (poll != nullptr)
+    host.poll = [poll, poll_user] { return poll(poll_user) != 0; };
+  return host;
+}
+
+// Shared tail of the algorithm entry points: 0 with the interrupt flag, or
+// the failure and its message.
+int algorithm_status(const stanli::AlgorithmResult& r, int* interrupted,
+                     char* err, size_t err_len, const char* what) {
+  if (r.interrupted) {
+    if (interrupted != nullptr) *interrupted = 1;
+    return 0;
+  }
+  if (r.return_code != 0)
+    put_err(err, err_len, r.message.empty() ? what : r.message.c_str());
+  return r.return_code;
+}
+
+stanli::PathfinderRunConfig pathfinder_config(const stanli_pathfinder_opts& o) {
+  stanli::PathfinderRunConfig cfg;
+  cfg.seed = o.seed;
+  cfg.chain_id = o.chain_id > 0 ? o.chain_id : 1;
+  cfg.num_paths = o.num_paths;
+  cfg.num_draws = o.num_draws;
+  cfg.num_psis_draws = o.num_psis_draws;
+  cfg.num_elbo_draws = o.num_elbo_draws;
+  cfg.max_lbfgs_iters = o.max_lbfgs_iters;
+  cfg.history_size = o.history_size;
+  cfg.init_alpha = o.init_alpha;
+  cfg.tol_obj = o.tol_obj;
+  cfg.tol_rel_obj = o.tol_rel_obj;
+  cfg.tol_grad = o.tol_grad;
+  cfg.tol_rel_grad = o.tol_rel_grad;
+  cfg.tol_param = o.tol_param;
+  cfg.init_radius = o.init_radius;
+  cfg.inits = o.inits;
+  cfg.psis_resample = o.psis_resample != 0;
+  cfg.calculate_lp = o.calculate_lp != 0;
+  cfg.refresh = o.refresh;
+  return cfg;
+}
+
+void copy_out(double* to, const std::vector<double>& from) {
+  if (to != nullptr && !from.empty())
+    std::memcpy(to, from.data(), sizeof(double) * from.size());
 }
 
 }  // namespace
@@ -980,6 +1080,256 @@ int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
           err, err_len,
           r.message.empty() ? "L-BFGS did not converge" : r.message.c_str());
     return r.return_code;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
+  }
+}
+
+void stanli_fixed_param_opts_init(stanli_fixed_param_opts* o) {
+  if (o == nullptr) return;
+  *o = stanli_fixed_param_opts{};
+  const stanli::FixedParamConfig d;
+  o->seed = d.seed;
+  o->chains = 4;
+  o->chain_id = d.chain_id;
+  o->samples = d.samples;
+  o->thin = d.thin;
+  o->init_radius = d.init_radius;
+  o->inits = nullptr;
+  o->refresh = d.refresh;
+}
+
+int64_t stanli_fixed_param_n_draws(const stanli_fixed_param_opts* o) {
+  if (o == nullptr || o->samples <= 0) return 0;
+  const int thin = o->thin > 0 ? o->thin : 1;
+  return ((int64_t)o->samples + thin - 1) / thin;
+}
+
+int stanli_fixed_param(stanli_model* m, const stanli_fixed_param_opts* opts,
+                       double* values, double* seconds, stanli_log_cb log,
+                       void* log_user, stanli_sample_poll_cb poll,
+                       void* poll_user, int* interrupted, char* err,
+                       size_t err_len) {
+  try {
+    if (interrupted != nullptr) *interrupted = 0;
+    if (opts == nullptr) throw std::invalid_argument("null options");
+    if (opts->chains < 1)
+      throw std::invalid_argument("chains must be positive");
+    const stanli::AlgorithmHost host =
+        algorithm_host(m, log, log_user, poll, poll_user);
+    const int64_t n = m->ex->n_params();
+    const int64_t rows = stanli_fixed_param_n_draws(opts);
+    const int64_t width = row_width(*m);
+    stanli::FixedParamConfig cfg;
+    cfg.seed = opts->seed;
+    cfg.samples = opts->samples;
+    cfg.thin = opts->thin;
+    cfg.init_radius = opts->init_radius;
+    cfg.refresh = opts->refresh;
+    const int first = opts->chain_id > 0 ? opts->chain_id : 1;
+    for (int c = 0; c < opts->chains; ++c) {
+      cfg.chain_id = first + c;
+      cfg.init = opts->inits ? opts->inits + (int64_t)c * n : nullptr;
+      const auto started = std::chrono::steady_clock::now();
+      const stanli::AlgorithmResult r =
+          stanli::run_fixed_param(*m->ex, host, cfg);
+      if (seconds != nullptr)
+        seconds[c] = std::chrono::duration<double>(
+                         std::chrono::steady_clock::now() - started)
+                         .count();
+      if (r.interrupted || r.return_code != 0) {
+        const std::string what =
+            "chain " + std::to_string(cfg.chain_id) + ": " +
+            (r.message.empty() ? "fixed_param failed" : r.message);
+        stanli::AlgorithmResult failed = r;
+        failed.message = what;
+        return algorithm_status(failed, interrupted, err, err_len,
+                                what.c_str());
+      }
+      if (r.rows() != rows || r.n_columns != width)
+        throw std::runtime_error("fixed_param wrote " +
+                                 std::to_string(r.rows()) + " rows, expected " +
+                                 std::to_string(rows));
+      if (values != nullptr && rows * width > 0)
+        std::memcpy(values + (int64_t)c * rows * width, r.values.data(),
+                    sizeof(double) * (size_t)(rows * width));
+    }
+    return 0;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
+  }
+}
+
+void stanli_laplace_opts_init(stanli_laplace_opts* o) {
+  if (o == nullptr) return;
+  *o = stanli_laplace_opts{};
+  const stanli::LaplaceConfig d;
+  o->seed = d.seed;
+  o->draws = d.draws;
+  o->jacobian = d.jacobian ? 1 : 0;
+  o->calculate_lp = d.calculate_lp ? 1 : 0;
+  o->refresh = d.refresh;
+}
+
+int stanli_laplace_sample(stanli_model* m, const stanli_laplace_opts* opts,
+                          const double* mode, double* values, double* lp,
+                          double* lp_approx, stanli_log_cb log, void* log_user,
+                          stanli_sample_poll_cb poll, void* poll_user,
+                          int* interrupted, char* err, size_t err_len) {
+  try {
+    if (interrupted != nullptr) *interrupted = 0;
+    if (opts == nullptr) throw std::invalid_argument("null options");
+    const stanli::AlgorithmHost host =
+        algorithm_host(m, log, log_user, poll, poll_user);
+    stanli::LaplaceConfig cfg;
+    cfg.seed = opts->seed;
+    cfg.draws = opts->draws;
+    cfg.jacobian = opts->jacobian != 0;
+    cfg.calculate_lp = opts->calculate_lp != 0;
+    cfg.refresh = opts->refresh;
+    const stanli::AlgorithmResult r =
+        stanli::run_laplace(*m->ex, host, mode, cfg);
+    const int rc =
+        algorithm_status(r, interrupted, err, err_len, "laplace failed");
+    if (rc != 0 || r.interrupted) return rc;
+    if (r.rows() != cfg.draws)
+      throw std::runtime_error("laplace wrote " + std::to_string(r.rows()) +
+                               " rows, expected " + std::to_string(cfg.draws));
+    copy_out(values, r.values);
+    copy_out(lp, r.lp);
+    copy_out(lp_approx, r.lp_approx);
+    return 0;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
+  }
+}
+
+void stanli_pathfinder_opts_init(stanli_pathfinder_opts* o) {
+  if (o == nullptr) return;
+  *o = stanli_pathfinder_opts{};
+  const stanli::PathfinderRunConfig d;
+  o->seed = d.seed;
+  o->chain_id = d.chain_id;
+  o->num_paths = d.num_paths;
+  o->num_draws = d.num_draws;
+  o->num_psis_draws = d.num_psis_draws;
+  o->num_elbo_draws = d.num_elbo_draws;
+  o->max_lbfgs_iters = d.max_lbfgs_iters;
+  o->history_size = d.history_size;
+  o->init_alpha = d.init_alpha;
+  o->tol_obj = d.tol_obj;
+  o->tol_rel_obj = d.tol_rel_obj;
+  o->tol_grad = d.tol_grad;
+  o->tol_rel_grad = d.tol_rel_grad;
+  o->tol_param = d.tol_param;
+  o->init_radius = d.init_radius;
+  o->inits = nullptr;
+  o->psis_resample = d.psis_resample ? 1 : 0;
+  o->calculate_lp = d.calculate_lp ? 1 : 0;
+  o->refresh = d.refresh;
+}
+
+int64_t stanli_pathfinder_max_draws(const stanli_pathfinder_opts* o) {
+  return o == nullptr ? 0 : stanli::pathfinder_max_draws(pathfinder_config(*o));
+}
+
+int stanli_pathfinder(stanli_model* m, const stanli_pathfinder_opts* opts,
+                      double* values, double* lp, double* lp_approx,
+                      double* path, int64_t* n_draws, stanli_log_cb log,
+                      void* log_user, stanli_sample_poll_cb poll,
+                      void* poll_user, int* interrupted, char* err,
+                      size_t err_len) {
+  try {
+    if (interrupted != nullptr) *interrupted = 0;
+    if (n_draws != nullptr) *n_draws = 0;
+    if (opts == nullptr) throw std::invalid_argument("null options");
+    const stanli::AlgorithmHost host =
+        algorithm_host(m, log, log_user, poll, poll_user);
+    const stanli::PathfinderRunConfig cfg = pathfinder_config(*opts);
+    const stanli::AlgorithmResult r =
+        stanli::run_pathfinder_paths(*m->ex, host, cfg);
+    const int rc =
+        algorithm_status(r, interrupted, err, err_len, "pathfinder failed");
+    if (rc != 0 || r.interrupted) return rc;
+    if (r.rows() > stanli::pathfinder_max_draws(cfg))
+      throw std::runtime_error("pathfinder wrote more rows than it may");
+    copy_out(values, r.values);
+    copy_out(lp, r.lp);
+    copy_out(lp_approx, r.lp_approx);
+    copy_out(path, r.path);
+    if (n_draws != nullptr) *n_draws = r.rows();
+    return 0;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
+  }
+}
+
+void stanli_variational_opts_init(stanli_variational_opts* o) {
+  if (o == nullptr) return;
+  *o = stanli_variational_opts{};
+  const stanli::VariationalConfig d;
+  o->seed = d.seed;
+  o->chain_id = d.chain_id;
+  o->algorithm = d.fullrank ? STANLI_ADVI_FULLRANK : STANLI_ADVI_MEANFIELD;
+  o->iter = d.iter;
+  o->grad_samples = d.grad_samples;
+  o->elbo_samples = d.elbo_samples;
+  o->eta = d.eta;
+  o->adapt_engaged = d.adapt_engaged ? 1 : 0;
+  o->adapt_iter = d.adapt_iter;
+  o->tol_rel_obj = d.tol_rel_obj;
+  o->eval_elbo = d.eval_elbo;
+  o->output_samples = d.output_samples;
+  o->init_radius = d.init_radius;
+  o->init = nullptr;
+}
+
+int stanli_variational(stanli_model* m, const stanli_variational_opts* opts,
+                       double* mean, double* values, double* lp,
+                       double* lp_approx, stanli_log_cb log, void* log_user,
+                       stanli_sample_poll_cb poll, void* poll_user,
+                       int* interrupted, char* err, size_t err_len) {
+  try {
+    if (interrupted != nullptr) *interrupted = 0;
+    if (opts == nullptr) throw std::invalid_argument("null options");
+    if (opts->algorithm != STANLI_ADVI_MEANFIELD &&
+        opts->algorithm != STANLI_ADVI_FULLRANK)
+      throw std::invalid_argument("unknown variational algorithm");
+    const stanli::AlgorithmHost host =
+        algorithm_host(m, log, log_user, poll, poll_user);
+    stanli::VariationalConfig cfg;
+    cfg.seed = opts->seed;
+    cfg.chain_id = opts->chain_id > 0 ? opts->chain_id : 1;
+    cfg.fullrank = opts->algorithm == STANLI_ADVI_FULLRANK;
+    cfg.iter = opts->iter;
+    cfg.grad_samples = opts->grad_samples;
+    cfg.elbo_samples = opts->elbo_samples;
+    cfg.eta = opts->eta;
+    cfg.adapt_engaged = opts->adapt_engaged != 0;
+    cfg.adapt_iter = opts->adapt_iter;
+    cfg.tol_rel_obj = opts->tol_rel_obj;
+    cfg.eval_elbo = opts->eval_elbo;
+    cfg.output_samples = opts->output_samples;
+    cfg.init_radius = opts->init_radius;
+    cfg.init = opts->init;
+    const stanli::AlgorithmResult r =
+        stanli::run_variational(*m->ex, host, cfg);
+    const int rc =
+        algorithm_status(r, interrupted, err, err_len, "variational failed");
+    if (rc != 0 || r.interrupted) return rc;
+    if (r.rows() != cfg.output_samples)
+      throw std::runtime_error("variational wrote " + std::to_string(r.rows()) +
+                               " rows, expected " +
+                               std::to_string(cfg.output_samples));
+    copy_out(mean, r.mean);
+    copy_out(values, r.values);
+    copy_out(lp, r.lp);
+    copy_out(lp_approx, r.lp_approx);
+    return 0;
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());
     return 1;

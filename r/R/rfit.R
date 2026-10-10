@@ -167,6 +167,7 @@ summary.stanli_rfit <- function(object, pars = NULL,
 #' @export
 get_sampler_params <- function(object, inc_warmup = TRUE) {
   stanfit_flag(inc_warmup, "inc_warmup")
+  require_nuts_fit(object, "get_sampler_params()")
   rows <- post_warmup_rows(object, inc_warmup)
   pars <- c("accept_stat__", "treedepth__", "stepsize__", "divergent__",
             "n_leapfrog__", "energy__")

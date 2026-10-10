@@ -493,6 +493,172 @@ int stanli_pathfinder_inits(stanli_model* m, uint32_t seed, int chain_id,
                             stanli_path_cb cb, void* user, char* err,
                             size_t err_len);
 
+/* ---- fixed_param, Laplace, Pathfinder, ADVI -------------------------------
+ *
+ * Stan's own services for its other inference algorithms. They share a
+ * contract that differs from the entry points above in one way that matters:
+ *
+ * DRAWS COME BACK CONSTRAINED. Each row is every CSV column of the model, in
+ * CmdStan's order: stanli_wa_n_columns(m) doubles when that is positive,
+ * stanli_n_constrained(m) otherwise, named by stanli_wa_column_name or
+ * stanli_constrained_name. The services draw generated quantities from their
+ * own generator between their other draws, so the rows are written as the
+ * run goes; that is what makes a seed name the run it names in CmdStan. The
+ * model's stanli_wa_seed stream is not touched.
+ *
+ * Starting points are UNCONSTRAINED, as everywhere else, and a null pointer
+ * means a uniform draw within init_radius.
+ *
+ * `log`, when non-null, receives each line the service logs, on the calling
+ * thread: level 0 is information (ADVI's convergence table, progress), 1 a
+ * warning (Pathfinder's Pareto k), 2 an error. `poll`, when non-null, is
+ * asked on the calling thread about every 100 ms; a nonzero answer abandons
+ * the run, which then returns 0 with *interrupted set to 1 and nothing
+ * usable in the output buffers. `interrupted` may be null.
+ *
+ * Each returns 0 on success and nonzero with a message in err otherwise.
+ * Call the _init function before setting fields: a zeroed struct is not the
+ * defaults. */
+typedef void (*stanli_log_cb)(int32_t level, const char* text, void* user);
+
+/* The parameters stay at each chain's starting point and only generated
+ * quantities are drawn: stan::services::sample::fixed_param, once per chain,
+ * chain c on the stream of (seed, chain_id + c). */
+typedef struct {
+  uint32_t seed;
+  int chains;
+  int chain_id;
+  int samples; /* iterations; ceil(samples / thin) rows are stored */
+  int thin;
+  double init_radius;
+  const double* inits; /* chains * n_unconstrained, or null */
+  int refresh;         /* log progress every `refresh` iterations; 0 = never */
+} stanli_fixed_param_opts;
+
+/* seed 1, 4 chains from id 1, 1000 samples, thin 1, radius 2, no progress. */
+void stanli_fixed_param_opts_init(stanli_fixed_param_opts* o);
+/* Stored rows per chain under these options. */
+int64_t stanli_fixed_param_n_draws(const stanli_fixed_param_opts* o);
+/* `values` holds chains * stanli_fixed_param_n_draws(opts) rows, chain-major.
+ * There are no per-draw diagnostics: lp__ is zero by definition. A row whose
+ * generated quantities are rejected is NaN, as in CmdStan. `seconds`, when
+ * non-null, receives each chain's wall time, opts->chains doubles. */
+int stanli_fixed_param(stanli_model* m, const stanli_fixed_param_opts* opts,
+                       double* values, double* seconds, stanli_log_cb log,
+                       void* log_user, stanli_sample_poll_cb poll,
+                       void* poll_user, int* interrupted, char* err,
+                       size_t err_len);
+
+/* Draws from the normal approximation at a mode, whose covariance is the
+ * inverse of the negative Hessian there: stan::services::laplace_sample. */
+typedef struct {
+  uint32_t seed;
+  int draws;
+  int jacobian;     /* must be 1, for the reason stanli_optimize's must */
+  int calculate_lp; /* 0 leaves lp as NaN and saves an evaluation per draw */
+  int refresh;
+} stanli_laplace_opts;
+
+/* seed 1, 1000 draws, jacobian 1, calculate_lp 1, no progress. */
+void stanli_laplace_opts_init(stanli_laplace_opts* o);
+/* `mode` is n_unconstrained doubles, normally stanli_optimize's
+ * `unconstrained` from a run with jacobian = 1. `values` holds opts->draws
+ * rows. `lp` and `lp_approx`, each opts->draws doubles or null, receive the
+ * model's log density at each draw and the approximation's unnormalized log
+ * density (CmdStan's log_p__ and log_q__). */
+int stanli_laplace_sample(stanli_model* m, const stanli_laplace_opts* opts,
+                          const double* mode, double* values, double* lp,
+                          double* lp_approx, stanli_log_cb log, void* log_user,
+                          stanli_sample_poll_cb poll, void* poll_user,
+                          int* interrupted, char* err, size_t err_len);
+
+/* Single-path Pathfinder with constrained rows:
+ * stan::services::pathfinder::pathfinder_lbfgs_single. For unconstrained
+ * draws, the L-BFGS path and k-hat, see stanli_run_pathfinder above.
+ *
+ * MULTI-PATH PATHFINDER IS NOT AVAILABLE in this version. Stan 2.40's
+ * multi-path service reads past the end of an array while resampling, so
+ * num_paths must be 1 and any other value is refused with a message saying
+ * so. num_psis_draws and psis_resample belong to multi-path only; they are
+ * not read, and stay in the struct so its layout does not change when
+ * multi-path returns. */
+typedef struct {
+  uint32_t seed;
+  int chain_id;
+  int num_paths;      /* must be 1 */
+  int num_draws;      /* draws taken from the approximation */
+  int num_psis_draws; /* unused: multi-path only */
+  int num_elbo_draws;
+  int max_lbfgs_iters;
+  int history_size;
+  double init_alpha;
+  double tol_obj;
+  double tol_rel_obj;
+  double tol_grad;
+  double tol_rel_grad;
+  double tol_param;
+  double init_radius;
+  const double* inits; /* n_unconstrained, or null */
+  int psis_resample;   /* unused: multi-path only */
+  int calculate_lp;    /* 0 leaves lp as NaN beyond the first
+                        * num_elbo_draws draws, which Stan has scored */
+  int refresh;
+} stanli_pathfinder_opts;
+
+/* seed 1, chain id 1, one path, 1000 draws, 25 ELBO draws, 1000 L-BFGS
+ * iterations, history 5, L-BFGS tolerances as in stanli_optimize_opts,
+ * radius 2, lp on. */
+void stanli_pathfinder_opts_init(stanli_pathfinder_opts* o);
+/* The rows a run under these options returns: num_draws, or 0 for options
+ * the run would refuse. */
+int64_t stanli_pathfinder_max_draws(const stanli_pathfinder_opts* o);
+/* `values` holds stanli_pathfinder_max_draws(opts) rows; `lp`, `lp_approx`
+ * and `path` that many doubles each, or null. *n_draws receives the rows
+ * written. `path` is CmdStan's path__, which is chain_id on every row. */
+int stanli_pathfinder(stanli_model* m, const stanli_pathfinder_opts* opts,
+                      double* values, double* lp, double* lp_approx,
+                      double* path, int64_t* n_draws, stanli_log_cb log,
+                      void* log_user, stanli_sample_poll_cb poll,
+                      void* poll_user, int* interrupted, char* err,
+                      size_t err_len);
+
+/* ADVI: stan::services::experimental::advi::meanfield or fullrank. */
+#define STANLI_ADVI_MEANFIELD 0
+#define STANLI_ADVI_FULLRANK 1
+typedef struct {
+  uint32_t seed;
+  int chain_id;
+  int algorithm; /* STANLI_ADVI_MEANFIELD or STANLI_ADVI_FULLRANK */
+  int iter;      /* maximum iterations */
+  int grad_samples;
+  int elbo_samples;
+  double eta;
+  int adapt_engaged;
+  int adapt_iter;
+  double tol_rel_obj;
+  int eval_elbo;
+  int output_samples;
+  double init_radius;
+  const double* init; /* n_unconstrained, or null */
+} stanli_variational_opts;
+
+/* CmdStan's defaults: seed 1, chain id 1, meanfield, 10000 iterations, 1
+ * gradient sample, 100 ELBO samples, eta 1 with adaptation on for 50
+ * iterations, tol_rel_obj 0.01, ELBO every 100 iterations, 1000 output
+ * samples, radius 2. */
+void stanli_variational_opts_init(stanli_variational_opts* o);
+/* `mean`, one row or null, receives the columns at the mean of the
+ * approximation, which is the row Stan writes ahead of the draws. `values`
+ * holds opts->output_samples rows. `lp` and `lp_approx`, each
+ * opts->output_samples doubles or null, receive Stan's log_p__ and log_g__.
+ * Running out of iterations is not a failure: Stan says so through `log` and
+ * returns the approximation it reached. */
+int stanli_variational(stanli_model* m, const stanli_variational_opts* opts,
+                       double* mean, double* values, double* lp,
+                       double* lp_approx, stanli_log_cb log, void* log_user,
+                       stanli_sample_poll_cb poll, void* poll_user,
+                       int* interrupted, char* err, size_t err_len);
+
 /* write_array: every CSV column CmdStan would emit for one draw --
  * constrained parameters, transformed parameters, generated quantities,
  * in CmdStan's column order. n_columns is 0 when the model has no

@@ -31,6 +31,15 @@ of a named container is dropped. The live model is unaffected.}
 An S4 object inheriting from `stanfit`, with samples, sampler
   statistics, timings, and parameter dimensions. Initial values and
   adaptation text are empty: the first saved draw is not the initial state.
+
+  A fit from [variational_model()], [pathfinder_model()] or
+  [laplace_model()] becomes a one-chain fit without warmup or sampler
+  statistics, whose draws end with `lp__` and `lp_approx__`, and whose
+  `stan_args[[1]]$method` is `"variational"`, `"pathfinder"` or
+  `"laplace"`. This is the layout brms builds from CmdStan's output for
+  the same algorithms; unlike [rstan::vb()], no row of means precedes the
+  draws. A fixed-parameter fit keeps its chains and has `accept_stat__`
+  as its only sampler statistic.
 }
 \description{
 Build a `stanli_stanfit`, an S4 subclass of `rstan::stanfit`, directly from

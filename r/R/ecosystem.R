@@ -70,6 +70,7 @@ NULL
 
 #' @rdname stanli-ecosystem
 nuts_params.stanli_fit <- function(object, pars = NULL, inc_warmup = FALSE, ...) {
+  require_nuts_fit(object, "nuts_params()")
   if (is.null(pars))
     pars <- setdiff(dimnames(object$sampler)[[3L]], "lp__")
   sampler_long(object, pars, inc_warmup)
