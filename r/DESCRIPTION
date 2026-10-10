@@ -18,7 +18,7 @@ BugReports: https://github.com/seantalts/stanli/issues
 Encoding: UTF-8
 Depends: R (>= 4.0)
 Imports: utils, tools, methods
-Suggests: V8, jsonlite, posterior, bayesplot, loo, tidybayes,
+Suggests: V8, jsonlite, posterior, bayesplot, loo, rstantools, tidybayes,
     callr, rstan, cmdstanr, shinystan, testthat (>= 3.0.0)
 Additional_repositories: https://stan-dev.r-universe.dev
 NeedsCompilation: yes
