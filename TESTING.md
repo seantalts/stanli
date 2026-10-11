@@ -157,9 +157,10 @@ the lowered log_prob graph growing, or the final log_prob graph growing by
 more than 10% (with the runtime reroll pass on), are listed in `summary.md`
 but never fail the run by themselves. The execution gate is gradient time on
 the fixed `GRADIENT_MODELS` set: a model whose pass-on/pass-off ratio
-exceeds 1.04 is re-measured with a fresh, independently interleaved run, and
-the job fails only if that re-run also exceeds the ratio, so isolated
-measurement noise does not fail the post-submit run.
+exceeds 1.04 is re-measured with a fresh, independently interleaved run of
+six rounds (the first measurement uses two), and the job fails only if that
+re-run also exceeds the ratio, so isolated measurement noise does not fail
+the post-submit run.
 
 The op-count diagnostic and the gradient gate only ever compare a run's own
 pass-off cell against its pass-on cell, so a change that slows (or speeds
