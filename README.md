@@ -30,13 +30,15 @@ and `remotes::install_github()` or a checkout installs from source (see
 keeping installation small and avoiding a local stan-math build.
 
 - Performance vs CmdStan: [full benchmark and method](docs/benchmarks.md).
-  In the <!--gen:benchmark_date-->2026-10-07<!--/gen--> native run,
+  In the <!--gen:benchmark_date-->2026-10-10<!--/gen--> native run,
   <!--gen:corpus_n_grad-->336<!--/gen--> of
   <!--gen:benchmark_models-->342<!--/gen--> models produced paired gradient
   measurements: median CmdStan/Stanli ratio
-  <!--gen:corpus_median-->1.70x<!--/gen-->, with
-  <!--gen:corpus_at_par-->305<!--/gen--> at or above parity.
+  <!--gen:corpus_median-->1.72x<!--/gen-->, with
+  <!--gen:corpus_at_par-->308<!--/gen--> at or above parity.
   Failed or capped runs remain in the full table.
+- Fast mode: [docs/fast-mode.md](docs/fast-mode.md). An opt-in setting per
+  model that gives up CmdStan's last bits for speed.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
   <!--gen:corpus_reference_models-->352<!--/gen--> models share one three-point
   CmdStan reference replay. Within the posteriordb subset,

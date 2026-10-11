@@ -11,6 +11,7 @@ Start with the [project overview](../README.md) or your interface guide:
 | Numerical correctness, tests and exceptions | [Testing and numerical contracts](../TESTING.md), [compact densities](compact-densities.md), [optional lite build](lite-lp.md) |
 | Moving an R workflow to Stanli | [From cmdstanr](from-cmdstanr.md), [native stanfit compatibility](stanfit-compatibility.md) |
 | Generated models and teaching | [brms/Rethinking workflows](teaching-support.md), [teaching guide](teaching.md) |
+| Faster results that may differ from CmdStan in the last bits | [Fast mode](fast-mode.md) |
 | Parallel execution within a chain | [Native reductions](native-reduce-sum.md) |
 | How execution works | [Architecture explained](how-it-works.md), [three-model walkthrough](lowering-walkthrough.md) |
 | Contributing or building | [Contributor guide](hacking.md), [build/CI measurements](build-performance.md), [runtime source map](../runtime/src/README.md) |

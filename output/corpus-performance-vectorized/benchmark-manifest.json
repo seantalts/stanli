@@ -17,9 +17,9 @@
       "warmup_ms": 200
     },
     "executables": {
-      "bench": "378be400cb9ab5758777cd48daf2936a0ebe22fbc9f0885e5efa4ab436d3c21a",
+      "bench": "dbf56546c47a47d527e6c07845d3ba43f46c7aa7ee26a7295edb9b2ea79c4ee0",
       "stanc": "359c905c882a4263811b17636817ce349f0b8c743a07769e5348e389dc81173c",
-      "vectorize_probe": "8098079e522eb6f5f85e1aa68b57c19b24ee34fcda520aa11980ce842554c6a8"
+      "vectorize_probe": "8e6d3f59ee9965ad281392ffee716557090330622849dd93eed47444333a3068"
     },
     "inputs": {
       "2pl_latent_reg_irt": {
@@ -1741,16 +1741,16 @@
     },
     "protocol": "stanli-corpus-v4",
     "sources": {
-      "harnesses/corpus_bench.py": "7fa3a7ac28b66fc373e4f515ee1db9464bd864504840b6e686f17a860dd73de9",
+      "harnesses/corpus_bench.py": "aa0dca35696d4d66ec66586490874b7d29725e9a23481e26a26193d058153e9f",
       "tools/bench_cmdstan_grad.cpp": "e377628e54d3783d0a3a4c1ed73fe1f0c5c015d19a65e8e58cb4ab2b2f361fdf",
-      "tools/bench_grad.cpp": "2d5cf4ad201e4af4f01afc9144cb782cd599683d8fbc479884bba2e8f02bf5ec",
+      "tools/bench_grad.cpp": "e2b915b6a7c690f06c96786aed1a82e05d79f956697fc21d46bcf8bace4201b2",
       "tools/benchmark_timer.hpp": "96846e97f74cec6b7334c543d53355ddba1254e4b891aa5507cb4458f5b1c57b",
       "tools/cmdstan_ref.py": "7d61e5a95f5b3ee3fe38f8360c29dcc216363711b55a30f7b52b4deb86c163c4",
       "tools/corpus_inventory.py": "61653eb2071d0b792e3f2e7e99b22038cef724ad254b3adc1f9fcbfcd68a46bf",
-      "tools/verify_refs.py": "20201012faa8e97388f0cac60ebb252671166843e9a200208618c0873fb0cba9"
+      "tools/verify_refs.py": "249aac6abd414fa76e6a600cffd421394e6b07c97dbfc4358dee483bebf12d8b"
     },
     "stanli_source": {
-      "head": "1ebe01c5846c3252cc54ea7f4e495e0c49e533f3",
+      "head": "84e607961fdaff7efe9910eea5247a35ac9edfe4",
       "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "threads": {
@@ -1806,6 +1806,6 @@
       }
     }
   },
-  "run_id": "5fc1376df80b5a23",
-  "started_utc": "2026-10-07T15:05:16Z"
+  "run_id": "8ab8978d93458c88",
+  "started_utc": "2026-10-10T11:33:04Z"
 }
