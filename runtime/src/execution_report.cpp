@@ -9,8 +9,7 @@
 #include <stanli/structured_loop.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/message_sink.hpp>
-#include <rapidjson/stringbuffer.h>
-#include <rapidjson/writer.h>
+#include <stanli/json_writer.hpp>
 
 #include <cstdlib>
 #include <stdexcept>
@@ -20,11 +19,10 @@ namespace {
 thread_local ExecutionTraceScope* current_scope = nullptr;
 
 struct Report {
-  rapidjson::StringBuffer buffer;
-  rapidjson::Writer<rapidjson::StringBuffer> w{buffer};
+  JsonWriter w;
   void str(const char* key, const std::string& value) {
     w.Key(key);
-    w.String(value.data(), static_cast<rapidjson::SizeType>(value.size()));
+    w.String(value.data(), value.size());
   }
   void number(const char* key, int64_t value) {
     w.Key(key);
@@ -41,7 +39,7 @@ struct Report {
   }
   std::string finish() {
     w.EndObject();
-    return buffer.GetString();
+    return w.str();
   }
   void trace(const ExecutionTrace* t) {
     w.Key("interpreter_events");

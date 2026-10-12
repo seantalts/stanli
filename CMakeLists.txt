@@ -1332,7 +1332,7 @@ if(STANLI_STANC_EMBED_OBJ OR STANLI_PORTABLE_COMPILER)
 endif()
 
 set(STANLI_TESTS
-  test_execution_report test_rng_families test_vector_rng test_container_rng
+  test_execution_report test_json_writer test_rng_families test_vector_rng test_container_rng
   test_smoke test_executor test_recorder test_densities test_tile_calls
   test_matvec test_eigen
   test_mnc test_stan240
