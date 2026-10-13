@@ -46,6 +46,18 @@ the scaled-error checks and report that no same-platform ULP limit applies.
 No additional model evaluation is required. Three probe points do not prove
 a bound for every parameter value.
 
+Eight of those fixtures (`GRADIENT_AGAINST_LARGEST` in
+`tools/verify_refs.py`: `s2_car`, `s2_car_esicar`, `s2_gr_by`, `s2_mm`,
+`s2_mm_weights`, `s2_mmc`, `sw_re_bern`, `sw_skewnormal`) measure the
+gradient's ULP distance against its largest entry, with the same limit of 10;
+log density and `write_array` outputs stay per element. Vectorized
+read-modify-write loops regroup the adjoint sums into the random-effect
+vectors, which moves small gradient entries (0.003 to 0.2, beside entries of
+13 to 25) by up to 6142 ULP of themselves while the absolute error stays under
+1e-15. The measured distance is at most 2 ULP of the largest entry. Against a
+60-digit reference six of the eight are closer than before; `s2_mm` and
+`s2_gr_by` are farther on one small entry, by 2e-16 and 6e-16.
+
 The numerical criterion depends on the comparison. Agreement with CmdStan is
 measured in ULPs; the default policy is within 2 ULP. Bitwise agreement is not
 a gate; a change that moves a model from bitwise to a small ULP band is
