@@ -16,6 +16,12 @@
 namespace stanli {
 namespace {
 
+#if defined(__GNUC__) || defined(__clang__)
+#define STANLI_ALIGN_FUNCTION_64 __attribute__((aligned(64)))
+#else
+#define STANLI_ALIGN_FUNCTION_64
+#endif
+
 // OP_EXP: scalar out = exp(in). Partial is the output itself; no scratch.
 void exp_fwd(KernelCtx& ctx) { ctx.out.data[0] = std::exp(ctx.in[0].data[0]); }
 void exp_bwd(KernelCtx& ctx) {
@@ -340,7 +346,7 @@ void gather_fwd(KernelCtx& ctx) {
   for (int64_t k = 0; k < ctx.out.len; ++k)
     ctx.out.data[k] = ctx.in[0].data[ctx.idata[k]];
 }
-void gather_bwd(KernelCtx& ctx) {
+STANLI_ALIGN_FUNCTION_64 void gather_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   double* in_adj = ctx.in_adj[0].data;
   const double* out_adj = ctx.out_adj_vec.data;
