@@ -23,6 +23,10 @@
 - `wiener_lpdf` over a whole vector evaluates the density once per gradient
   instead of twice, and data arguments are no longer differentiated. About
   1.5x faster on a model that is one `y ~ wiener(...)` statement.
+- `wiener_lpdf` also evaluates the density once per gradient when its
+  log density is weighted, as in a mixture. Before, any output adjoint other
+  than 1 re-evaluated it. Gradients move by at most 7 ULP on the DDM models
+  tried.
 - The reverse pass of per-observation loops with branches no longer zeroes
   its scratch buffer. `cm_lnr` and `cm_rdm` gradients are about 1.5x faster.
 - Fix ctsem models being lowered as one operation per data row since 0.19.0,
