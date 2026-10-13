@@ -90,6 +90,16 @@ typedef struct {
   int64_t n_max_treedepth;
 } stanli_sample_report;
 
+/* Mirrors stanli_metric_opts, the options of stanli_sample_multi_metric. */
+typedef struct {
+  int metric;
+  const double* inv_metric;
+  double step_size;
+  int adapt_engaged;
+  double* adapted_step_size;
+  double* adapted_inv_metric;
+} stanli_metric_opts;
+
 typedef void (*stanli_sample_progress_cb)(int32_t, int64_t, int64_t, int32_t,
                                           void*);
 typedef void (*stanli_path_cb)(int32_t, double, void*);
@@ -238,6 +248,12 @@ static int (*p_sample_multi_write_array)(void*, const stanli_sample_opts*, int,
                                          stanli_sample_progress_cb, void*,
                                          stanli_sample_poll_cb, void*, int*,
                                          stanli_sample_report*, char*, size_t);
+static int (*p_sample_multi_metric)(void*, const stanli_sample_opts*,
+                                    const stanli_metric_opts*, int, double*,
+                                    double*, double*,
+                                    stanli_sample_progress_cb, void*,
+                                    stanli_sample_poll_cb, void*, int*,
+                                    stanli_sample_report*, char*, size_t);
 static int (*p_pathfinder_inits)(void*, uint32_t, int, int, int, int, int,
                                  double, double*, stanli_path_cb, void*, char*,
                                  size_t);
@@ -364,6 +380,8 @@ SEXP stanli_bridge_load(SEXP path) {
       dl_sym(g_lib, "stanli_sample_multi_interruptible");
   *(void**)(&p_sample_multi_write_array) =
       dl_sym(g_lib, "stanli_sample_multi_write_array");
+  *(void**)(&p_sample_multi_metric) =
+      dl_sym(g_lib, "stanli_sample_multi_metric");
   /* Pathfinder initialization is also additive. Only callers that request it
    * require a runtime new enough to provide the symbol. */
   *(void**)(&p_pathfinder_inits) = dl_sym(g_lib, "stanli_pathfinder_inits");
@@ -768,7 +786,8 @@ SEXP stanli_r_pathfinder_inits(SEXP m, SEXP seed, SEXP chains, SEXP options) {
   return out;
 }
 
-SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh) {
+SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
+                     SEXP metric_list) {
   require_loaded();
   void* mm = model_ptr(m);
   stanli_sample_opts o;
@@ -792,6 +811,37 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh) {
   err[0] = '\0';
   const int have_reports = p_sample_multi_progress != NULL;
   const int in_worker = p_sample_multi_write_array != NULL;
+
+  stanli_metric_opts mo;
+  mo.metric = asInteger(VECTOR_ELT(metric_list, 0));
+  SEXP inv_metric_in = VECTOR_ELT(metric_list, 1);
+  mo.inv_metric = XLENGTH(inv_metric_in) > 0 ? REAL(inv_metric_in) : NULL;
+  mo.step_size = asReal(VECTOR_ELT(metric_list, 2));
+  mo.adapt_engaged = asLogical(VECTOR_ELT(metric_list, 3));
+  const int64_t metric_len = mo.metric == 0 ? 0 : mo.metric == 2 ? n * n : n;
+  if (XLENGTH(inv_metric_in) > 0 &&
+      (int64_t)XLENGTH(inv_metric_in) != nchain * metric_len) {
+    UNPROTECT(3);
+    error("inv_metric must hold %lld values", (long long)(nchain * metric_len));
+  }
+  const int have_metric = p_sample_multi_metric != NULL;
+  if (!have_metric &&
+      (mo.metric != 1 || mo.inv_metric != NULL || mo.step_size != 1.0 ||
+       !mo.adapt_engaged)) {
+    UNPROTECT(3);
+    error(
+        "Metric, inverse metric and step size options are unavailable with "
+        "this older stanli runtime. Run stanli_install(overwrite = TRUE) to "
+        "update.");
+  }
+  SEXP adapted_step = PROTECT(allocVector(REALSXP, (R_xlen_t)nchain));
+  SEXP adapted_inv =
+      PROTECT(allocVector(REALSXP, (R_xlen_t)(nchain * metric_len)));
+  for (int64_t c = 0; c < nchain; ++c) REAL(adapted_step)[c] = NA_REAL;
+  for (int64_t i = 0; i < nchain * metric_len; ++i)
+    REAL(adapted_inv)[i] = NA_REAL;
+  mo.adapted_step_size = REAL(adapted_step);
+  mo.adapted_inv_metric = metric_len > 0 ? REAL(adapted_inv) : NULL;
   if (!have_reports && refresh_rate > 0) {
     Rprintf(
         "Sampling progress is unavailable with this older stanli runtime; "
@@ -801,7 +851,12 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh) {
   }
   int interrupted = 0;
   const int failed =
-      in_worker ? p_sample_multi_write_array(
+      have_metric ? p_sample_multi_metric(
+                        mm, &o, &mo, refresh_rate, REAL(raw), REAL(stats),
+                        REAL(vals), refresh_rate > 0 ? sample_progress : NULL,
+                        NULL, sample_poll, NULL, &interrupted, reports, err,
+                        sizeof err)
+      : in_worker ? p_sample_multi_write_array(
                       mm, &o, refresh_rate, REAL(raw), REAL(stats), REAL(vals),
                       refresh_rate > 0 ? sample_progress : NULL, NULL,
                       sample_poll, NULL, &interrupted, reports, err, sizeof err)
@@ -817,7 +872,8 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh) {
                                     NULL, reports, err, sizeof err)
           : p_sample_multi(mm, &o, REAL(raw), REAL(stats), err, sizeof err);
   if (failed) {
-    UNPROTECT(3);
+    UNPROTECT(5);
+    if (err[0] && strncmp(err, "chain ", 6) != 0) error("%s", err);
     error("%d of %d chains failed; first: %s", failed, (int)nchain,
           err[0] ? err : "(no message)");
   }
@@ -825,7 +881,7 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh) {
     const char* names[] = {"interrupted", ""};
     SEXP out = PROTECT(mkNamed(VECSXP, names));
     SET_VECTOR_ELT(out, 0, ScalarLogical(1));
-    UNPROTECT(4);
+    UNPROTECT(6);
     return out;
   }
   if (have_reports && refresh_rate > 0)
@@ -850,7 +906,7 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh) {
         const double* q = rp + (c * rows + i) * n;
         const int rc = wa ? p_wa_row(mm, q, row) : p_constrain(mm, q, row);
         if (rc != 0) {
-          UNPROTECT(3);
+          UNPROTECT(5);
           error("failed to write draw %lld of chain %lld", (long long)i,
                 (long long)c);
         }
@@ -875,7 +931,7 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh) {
         have_reports ? (double)reports[c].n_max_treedepth : NA_REAL;
   }
 
-  SEXP out = PROTECT(allocVector(VECSXP, 10));
+  SEXP out = PROTECT(allocVector(VECSXP, 12));
   SET_VECTOR_ELT(out, 0, vals);
   SET_VECTOR_ELT(out, 1, stats);
   SET_VECTOR_ELT(out, 2, ScalarInteger((int)nchain));
@@ -886,7 +942,9 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh) {
   SET_VECTOR_ELT(out, 7, n_divergent);
   SET_VECTOR_ELT(out, 8, n_max_treedepth);
   SET_VECTOR_ELT(out, 9, ScalarLogical(have_reports));
-  SEXP nm = PROTECT(allocVector(STRSXP, 10));
+  SET_VECTOR_ELT(out, 10, adapted_step);
+  SET_VECTOR_ELT(out, 11, have_metric ? adapted_inv : allocVector(REALSXP, 0));
+  SEXP nm = PROTECT(allocVector(STRSXP, 12));
   SET_STRING_ELT(nm, 0, mkChar("values"));
   SET_STRING_ELT(nm, 1, mkChar("stats"));
   SET_STRING_ELT(nm, 2, mkChar("chains"));
@@ -897,8 +955,10 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh) {
   SET_STRING_ELT(nm, 7, mkChar("n_divergent"));
   SET_STRING_ELT(nm, 8, mkChar("n_max_treedepth"));
   SET_STRING_ELT(nm, 9, mkChar("report_available"));
+  SET_STRING_ELT(nm, 10, mkChar("step_size"));
+  SET_STRING_ELT(nm, 11, mkChar("inv_metric"));
   setAttrib(out, R_NamesSymbol, nm);
-  UNPROTECT(9);
+  UNPROTECT(11);
   return out;
 }
 

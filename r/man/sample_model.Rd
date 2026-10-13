@@ -20,7 +20,11 @@ sample_model(
   parallel_chains = NULL,
   refresh = 100,
   threads_per_chain = 1,
-  fixed_param = FALSE
+  fixed_param = FALSE,
+  metric = c("diag_e", "dense_e", "unit_e"),
+  inv_metric = NULL,
+  step_size = NULL,
+  adapt_engaged = TRUE
 )
 }
 \arguments{
@@ -73,6 +77,31 @@ or one that simulates data at given values, is run. There is no warmup:
 not used, and the chains run one after another. The fit's `sampler`
 element then holds only `lp__` and `accept_stat__`, both zero, and its
 `report` only the time each chain took.}
+
+\item{metric}{The metric: `"diag_e"` (the default), `"dense_e"` or
+`"unit_e"`, as in CmdStan.}
+
+\item{inv_metric}{Optional starting inverse metric. For `"diag_e"`, a
+numeric vector with one value per unconstrained parameter. For
+`"dense_e"`, a symmetric positive definite matrix with one row and column
+per unconstrained parameter. A list with one such element per chain gives
+each chain its own; a single vector or matrix is used for every chain.
+`NULL` starts from the identity. A `"unit_e"` metric takes none. Stan
+checks the values and its message is reported when they are not valid.
+With adaptation on, the metric is adapted during warmup from this start.}
+
+\item{step_size}{Optional initial step size, a single positive number used
+by every chain. `NULL` uses 1, as CmdStan does. With adaptation on it is
+the starting point of the step size search and of dual averaging.}
+
+\item{adapt_engaged}{`TRUE` (the default) adapts the step size and, unless
+`metric = "unit_e"`, the metric during warmup. `FALSE` runs no adaptation:
+`warmup` iterations are ordinary transitions and `inv_metric` and
+`step_size` are used as given. With `warmup = 0` and `adapt_engaged =
+TRUE`, stanli still runs Stan's initial step size search, as Stan's
+adaptive sampler does, so the step size in use differs from `step_size`.
+To use a supplied step size exactly, set `adapt_engaged = FALSE`, as with
+CmdStanR.}
 }
 \value{
 An object of class `stanli_fit`. Its `report` element contains
@@ -82,6 +111,16 @@ An object of class `stanli_fit`. Its `report` element contains
   `NA`. Sampling metadata (`warmup`, `samples`, `thin`, `save_warmup`,
   `chains`, and `delta`) records the configuration for downstream conversion;
   iteration counts are before thinning.
+
+  `metric` is the metric used. `step_size` is a numeric vector with the
+  step size each chain holds after warmup (the value CmdStan writes as
+  "Step size"). `inv_metric` is a list with one element per chain holding
+  the inverse metric after warmup: a numeric vector for `"diag_e"`, an
+  n x n matrix for `"dense_e"` and `NULL` for `"unit_e"`. With a runtime
+  that predates these options, `step_size` is `NA` and `inv_metric` holds
+  `NULL`s. Passing `inv_metric = fit$inv_metric`, `step_size =
+  mean(fit$step_size)` and `adapt_engaged = FALSE` to a later call reuses
+  an adapted metric and step size.
 }
 \description{
 Four chains by default, run in parallel: R-hat needs more than one
