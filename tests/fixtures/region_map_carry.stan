@@ -12,9 +12,9 @@ model {
   vector[N] mu = a * x;
   for (n in 1:N) {
     if (y[n] - mu[n] < b)
-      s = s + a;
+      s = 0.9 * s + a;
     else
-      s = s + y[n] * b;
+      s = 0.9 * s + y[n] * b;
   }
   target += -0.01 * square(s);
 }

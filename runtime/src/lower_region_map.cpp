@@ -233,6 +233,42 @@ void split_prologue(RegionMapProg& p) {
   }
 }
 
+bool reads_name(const mir::Stmt& s, const std::string& name) {
+  const auto refs = [&](const mir::Expr& e) {
+    return Lowering::expr_references(e, name);
+  };
+  if ((s.has_init && refs(s.init)) || refs(s.rhs) || refs(s.target) ||
+      refs(s.lower) || refs(s.upper) || refs(s.cond))
+    return true;
+  for (const auto* list : {&s.lhs_idx, &s.fn_args, &s.decl_type.dims})
+    for (const auto& e : *list)
+      if (refs(e)) return true;
+  return false;
+}
+
+bool accumulate_as_target(mir::Stmt& s, const std::string& name,
+                          mir::Expr* update) {
+  if (s.kind == mir::Stmt::Assignment && s.lhs == name) {
+    const mir::Expr& rhs = s.rhs;
+    if (!s.lhs_idx.empty() || rhs.kind != mir::Expr::FunApp ||
+        rhs.name != "Plus__" || rhs.args.size() != 2 || rhs.type_ != "UReal" ||
+        rhs.args[0].kind != mir::Expr::Var || rhs.args[0].name != name ||
+        Lowering::expr_references(rhs.args[1], name))
+      return false;
+    if (update->args.empty()) *update = rhs;
+    mir::Expr term = std::move(s.rhs.args[1]);
+    s.kind = mir::Stmt::TargetPE;
+    s.lhs.clear();
+    s.rhs = mir::Expr{};
+    s.target = std::move(term);
+    return true;
+  }
+  if (reads_name(s, name)) return false;
+  for (auto& child : s.body)
+    if (!accumulate_as_target(child, name, update)) return false;
+  return true;
+}
+
 }  // namespace
 
 bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
@@ -254,17 +290,36 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   if (!ParameterControl(fun_defs)(s))
     return refuse("no parameter-dependent control");
   if (target_scale != 1.0) return refuse("enclosing target scaling");
-  if (!has_target_pe(s)) return refuse("body has no target increment");
-  if (stmt_effectful(s)) return refuse("body has effects");
-  for (const auto& child : s.body)
-    if (body_escapes(child, false)) return refuse("break, continue or return");
-  {
-    std::set<std::string> locals;
-    for (const auto& child : s.body) collect_loop_locals(child, &locals);
+  std::set<std::string> locals;
+  for (const auto& child : s.body) collect_loop_locals(child, &locals);
+  std::optional<mir::Stmt> accumulated;
+  std::string accumulator;
+  mir::Expr accumulator_update;
+  if (!has_target_pe(s)) {
     std::vector<std::string> writes;
     assigned_names(s, &writes);
+    for (const auto& name : writes)
+      if (!locals.count(name) && name != s.loopvar) {
+        if (!accumulator.empty()) {
+          accumulator.clear();
+          break;
+        }
+        accumulator = name;
+      }
+    if (accumulator.empty()) return refuse("body has no target increment");
+    accumulated = s;
+    if (!accumulate_as_target(*accumulated, accumulator, &accumulator_update))
+      return refuse("body does more than add to " + accumulator);
+  }
+  const mir::Stmt& loop = accumulated ? *accumulated : s;
+  if (stmt_effectful(loop)) return refuse("body has effects");
+  for (const auto& child : loop.body)
+    if (body_escapes(child, false)) return refuse("break, continue or return");
+  {
+    std::vector<std::string> writes;
+    assigned_names(loop, &writes);
     for (const auto& name : writes) {
-      if (name == s.loopvar) return refuse("loop variable assigned");
+      if (name == loop.loopvar) return refuse("loop variable assigned");
       if (!locals.count(name))
         return refuse("assigns " + name + " declared outside the body");
     }
@@ -279,15 +334,15 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   auto prog = std::make_shared<RegionMapProg>();
   IslandRegion reg;
   ProgramCompiler c{*prog, fun_defs};
-  c.checked_region = &s;
-  configure_island_compiler(c, *prog, reg, &s);
+  c.checked_region = &loop;
+  configure_island_compiler(c, *prog, reg, &loop);
   try {
     const int target_reg = c.alloc(1);
     const double zero = 0.0;
     c.emit_const(target_reg, &zero, 1);
     c.target_reg = target_reg;
     const int iter = c.alloc(1);
-    c.compile_loop_body(s, iter);
+    c.compile_loop_body(loop, iter);
     prog->out_regs.push_back(target_reg);
     c.finish();
     prog->ins.push_back(IslandProg::LiveIn{iter, 1, -1, 0, false});
@@ -298,7 +353,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   }
   if (reg.in_slots.empty()) return abandon("no live-in values");
   if (island_has_effect(*prog)) return abandon("program has effects");
-  prog->label = s.loopvar;
+  prog->label = loop.loopvar;
   const RegionMapProg pristine = *prog;
   int64_t save_limit = kMaxRegionMapSavedCells;
   if (const char* limit = std::getenv("STANLI_REGION_MAP_SAVE_LIMIT"))
@@ -444,11 +499,29 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   op.udata = prog.get();
   g.udata_pool.push_back(prog);
   g.ops.push_back(op);
-  push_target_term(op.out);
-  int_env.erase(s.loopvar);
+  if (accumulator.empty()) {
+    push_target_term(op.out);
+  } else {
+    const std::string sum = "(region map sum " + std::to_string(op.out) + ")";
+    SlotInfo si = view_of("UReal");
+    si.param_free = false;
+    scope[sum] = Val{op.out, scalar_autodiff(), si};
+    decls[sum] = DeclView{1, scalar_autodiff(), si, false, false};
+    mir::Stmt update;
+    update.kind = mir::Stmt::Assignment;
+    update.lhs = accumulator;
+    update.rhs = accumulator_update;
+    update.rhs.args[1] = update.rhs.args[0];
+    update.rhs.args[1].name = sum;
+    update.raw = loop.raw;
+    assign_plain(update);
+    scope.erase(sum);
+    decls.erase(sum);
+  }
+  int_env.erase(loop.loopvar);
   if (diagnostics)
     emit_diagnostic(
-        "stanli_region_map selected (" + s.loopvar +
+        "stanli_region_map selected (" + loop.loopvar +
         "): iterations=" + std::to_string(prog->count) +
         " prologue=" + std::to_string(prog->prologue.size()) +
         " body=" + std::to_string(prog->code.size()) +
