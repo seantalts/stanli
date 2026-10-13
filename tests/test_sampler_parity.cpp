@@ -561,6 +561,7 @@ bool compare_rng(bool interpreted, int mode, int scenario) {
 }  // namespace
 
 int main() {
+  std::setvbuf(stdout, nullptr, _IONBF, 0);
   int failures = 0;
   for (bool schools : {false, true})
     for (int scenario = 0; scenario < 4; ++scenario)
