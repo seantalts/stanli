@@ -300,7 +300,10 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     assigned_names(s, &writes);
     for (const auto& name : writes)
       if (!locals.count(name) && name != s.loopvar) {
-        if (!accumulator.empty()) return refuse("assigns several outer names");
+        if (!accumulator.empty()) {
+          accumulator.clear();
+          break;
+        }
         accumulator = name;
       }
     if (accumulator.empty()) return refuse("body has no target increment");
