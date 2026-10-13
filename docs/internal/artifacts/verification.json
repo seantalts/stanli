@@ -776,6 +776,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "ctsem_ctsm_400": {
+  "max_rel": 2.3793949164159014e-14,
+  "max_ulp": 192,
+  "n_values": 1622,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "declare-define-multi": {
   "max_rel": 0.0,
   "max_ulp": 0,

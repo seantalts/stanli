@@ -40,7 +40,7 @@ keeping installation small and avoiding a local stan-math build.
 - Fast mode: [docs/fast-mode.md](docs/fast-mode.md). An opt-in setting per
   model that gives up CmdStan's last bits for speed.
 - Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
-  <!--gen:corpus_reference_models-->352<!--/gen--> models share one three-point
+  <!--gen:corpus_reference_models-->353<!--/gen--> models share one three-point
   CmdStan reference replay. Within the posteriordb subset,
   <!--gen:corpus_verified-->118/120<!--/gen--> models are
   verified against CmdStan's log density and full gradient,
