@@ -901,7 +901,6 @@ static RerollStats reroll_impl(
             int64_t br_const = Luse;
             const int64_t cw = g.slots[t.in[j]].len;
             std::vector<double> vals;
-            vals.reserve((size_t)(Luse * cw));
             for (int64_t l = 0; l < Luse; ++l) {
               const int s = op_at(p, l).in[j];
               if (cw == 1) {

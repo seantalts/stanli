@@ -19,15 +19,30 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <new>
 #include <sstream>
 #include <string>
 #include <vector>
+
+static std::atomic<size_t> largest_request{0};
+
+void* operator new(size_t n) {
+  size_t seen = largest_request.load(std::memory_order_relaxed);
+  while (n > seen && !largest_request.compare_exchange_weak(
+                         seen, n, std::memory_order_relaxed)) {
+  }
+  if (void* p = std::malloc(n ? n : 1)) return p;
+  throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, size_t) noexcept { std::free(p); }
 
 static int failures = 0;
 static void expect(const char* what, bool ok) {
@@ -1611,10 +1626,9 @@ static void test_read_modify_write_lanes() {
   }
 }
 
-static void test_read_modify_write_adjacent_loops() {
-  const int L = 16, J = 5;
-  Graph g;
-  Fills fills;
+static void adjacent_loops(int L, Graph& g, Fills& fills,
+                           std::vector<int>& terms) {
+  const int J = 5;
   const int t0 = g.add_slot(1, true), a = g.add_slot(J, true);
   const int sigma = g.add_slot(1, true);
   int mus[2], ys[2];
@@ -1642,13 +1656,19 @@ static void test_read_modify_write_adjacent_loops() {
       g.add_op(OP_SET_INDEX_INPLACE, {mus[v], s}, mus[v], {l});
     }
   }
-  std::vector<int> terms;
   for (int v = 0; v < 2; ++v) {
     const int lp = g.add_slot(1, false);
     const int id = g.add_op(OP_NORMAL_LPDF, {ys[v], mus[v], sigma}, lp);
     g.ops[(size_t)id].variant = 0x06;
     terms.push_back(lp);
   }
+}
+
+static void test_read_modify_write_adjacent_loops() {
+  Graph g;
+  Fills fills;
+  std::vector<int> terms;
+  adjacent_loops(16, g, fills, terms);
   Graph ref = g;
   reduce_into_result(ref, terms);
   const std::vector<double> want = run_grad(std::move(ref), fills);
@@ -1663,6 +1683,19 @@ static void test_read_modify_write_adjacent_loops() {
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
     expect_close(("adjacent loops v" + std::to_string(i)).c_str(), got[i],
                  want[i]);
+}
+
+static void test_read_modify_write_working_set_is_linear() {
+  const int L = 20000;
+  Graph g;
+  Fills fills;
+  std::vector<int> terms;
+  adjacent_loops(L, g, fills, terms);
+  largest_request = 0;
+  const RerollStats st = reroll(g, fills, terms, {});
+  expect("adjacent loops at scale: both fused", st.regions == 2);
+  expect("adjacent loops at scale: largest allocation is linear in lanes",
+         largest_request.load() < (size_t)L * 1024);
 }
 
 static void test_read_modify_write_recurrence_stays_scalar() {
@@ -3141,6 +3174,7 @@ int main() {
   test_write_fusion_bails();
   test_read_modify_write_lanes();
   test_read_modify_write_recurrence_stays_scalar();
+  test_read_modify_write_working_set_is_linear();
   test_read_modify_write_adjacent_loops();
   test_post_reroll_slice_inplace();
   test_write_fusion_scalar_chain();
