@@ -1506,10 +1506,7 @@ static void test_write_fusion_bails() {
   }
 }
 
-// `mu[e] += a[l % J] * c_l` under an unrolled loop: each lane reads the
-// element it is about to overwrite. `read_shift` moves the read to another
-// element, which turns the loop into a recurrence (-stride) or a read of a
-// later lane's target (+stride).
+// `mu[e] += a[l % J] * c_l`; `read_shift` reads another element instead.
 namespace rmwlanes {
 
 struct Built {
@@ -2050,8 +2047,7 @@ static void test_row_store_lanes() {
   }
 }
 
-// `M[l, :] += x_l` over every row of a produced matrix: each lane reads its
-// own row and writes it back. `shift` reads the row before instead.
+// `M[l, :] += x_l` over every row; `shift` reads another row instead.
 static void test_read_modify_write_rows() {
   using rowlanes::Rows;
   for (Rows rows : {Rows::kMatrix, Rows::kArray}) {

@@ -528,9 +528,7 @@ static void test_store_to_load_forwarding() {
     expect_close(("fwd v" + std::to_string(i)).c_str(), got[i], want[i]);
 }
 
-// rethinking's `p[i] = a + b; p[i] = inv_logit(p[i]);`: the second write
-// replaces the first, and the only reader in between is the read-back that
-// forwarding already removes.
+// `p[i] = a + b; p[i] = inv_logit(p[i]);`
 enum class Between { kNothing, kOtherElement, kWholeVector };
 
 static Graph build_double_store(int L, Between between, Fills& fills,
@@ -596,8 +594,7 @@ static void test_superseded_store_dropped() {
     int stores;
   };
   const Case cases[] = {
-      // Lane 0 copies the fill-backed declaration, so its first write is not
-      // destructive and stays; every later lane keeps only its last write.
+      // Lane 0 copies the fill-backed declaration and keeps its first write.
       {"superseded", Between::kNothing, L + 1},
       {"other element read keeps both", Between::kOtherElement, 2 * L},
       {"whole vector read keeps both", Between::kWholeVector, 2 * L},

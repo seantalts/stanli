@@ -144,9 +144,11 @@ A common pattern: write `mu[n]`, then read `mu[n]` back in the same
 iteration. After lowering that is a write op immediately followed by a
 read op on the same element. The pass deletes the read and hands the
 value straight to its consumer. If nobody reads the vector at all after
-this, the writes are deleted too. This turns "loop that fills a vector"
-into "loop that does arithmetic", which re-rolling knows how to
-vectorize.
+this, the writes are deleted too. When a write is followed by another
+write to the same element with no other read of the vector in between
+(`p[i] = a + b; p[i] = inv_logit(p[i]);`), the first write is deleted as
+well. This turns "loop that fills a vector" into "loop that does
+arithmetic", which re-rolling knows how to vectorize.
 
 ## Constant folding (`constfold.cpp`, disable: `STANLI_NO_CONSTFOLD=1`)
 
@@ -198,6 +200,12 @@ Element reads and writes get special handling:
   its own.
 - A run of writes that all write the same value: keep the computation
   scalar and broadcast it across the range.
+- Read-modify-write (`mu[n] += ...`): a lane may read the element it is
+  about to overwrite, and only that element. Lane targets are distinct, so
+  each read sees the vector as it was before the run, and the read becomes
+  the whole vector, a slice or a gather of it. A lane that reads another
+  element (`mu[n] = mu[n - 1] + ...`) is a recurrence and stays scalar.
+  Rows of a matrix follow the same rule.
 
 Densities get two more rewrites, depending on where their results go.
 If every lane's density result goes straight into the target, N scalar

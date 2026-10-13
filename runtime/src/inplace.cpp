@@ -233,10 +233,8 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
   std::unordered_set<int> root_set(roots.begin(), roots.end());
   if (g.result_slot >= 0) root_set.insert(g.result_slot);
 
-  // Most recent write to each vector, as (op index, element, value slot).
-  // `observed` is set once any op other than a forwarded read-back reads the
-  // vector, which is what keeps a later write to the same element from
-  // superseding this one.
+  // Most recent write to each vector; `observed` once anything but a
+  // forwarded read-back has read the vector since.
   struct Store {
     size_t op = 0;
     int elem = 0;
