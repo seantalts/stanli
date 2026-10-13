@@ -502,7 +502,6 @@ check_step_size <- function(step_size) {
 
 metric_kinds <- c(unit_e = 0L, diag_e = 1L, dense_e = 2L)
 
-# The runtime's per-chain inverse metric length for n parameters.
 metric_length <- function(metric, n) {
   switch(metric, unit_e = 0, diag_e = n, dense_e = n * n)
 }
@@ -525,9 +524,6 @@ check_inv_metric <- function(x, metric, n) {
   as.double(x)
 }
 
-# The list passed to the runtime: metric kind, the starting inverse metric
-# flattened chain-major (empty for the identity), step size and whether
-# adaptation is engaged.
 metric_options <- function(metric, inv_metric, step_size, adapt_engaged,
                            chains, n) {
   flat <- numeric(0)
@@ -550,7 +546,6 @@ metric_options <- function(metric, inv_metric, step_size, adapt_engaged,
        isTRUE(adapt_engaged))
 }
 
-# Per-chain inverse metrics out of the runtime's flat chain-major vector.
 split_inv_metric <- function(flat, metric, chains, n) {
   len <- metric_length(metric, n)
   if (len == 0 || length(flat) != chains * len || anyNA(flat))
