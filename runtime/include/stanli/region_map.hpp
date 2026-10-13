@@ -23,7 +23,7 @@ struct RegionMapTally {
   uint64_t evaluations = 0, tiles = 0;
   uint64_t fwd_exec = 0, fwd_lanes = 0, fwd_invariant = 0;
   uint64_t fwd_flag_stores = 0;
-  uint64_t adj_exec = 0, adj_lanes = 0;
+  uint64_t adj_exec = 0, adj_lanes = 0, adj_cleared = 0;
   uint64_t block_full = 0, block_partial = 0, block_empty = 0;
   uint64_t seg_full = 0, seg_partial = 0, seg_empty = 0;
   uint64_t fwd_op[kRegionMapProfileCodes] = {};
