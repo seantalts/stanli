@@ -182,6 +182,25 @@ class CheckModelPointsTest(unittest.TestCase):
             self.assertEqual(self.run_check('echo "OK -3.5 nan -2"', ref)[1],
                              "GATE")
 
+    def test_gradient_against_largest_entry_replaces_per_element_ulp(self):
+        wide = {"values": ["-3.5", "1000", "0"], "status": "VERIFIED",
+                "max_rel": 0.0, "max_ulp": 0}
+        ref = {"primary": 0, "points": {str(p): wide for p in POINTS},
+               "recorded": {"platform": verify_refs.native_platform()}}
+        step = math.ulp(1000.0)
+        small = f'echo "OK -3.5 1000 {5 * step!r}"'
+        large = f'echo "OK -3.5 1000 {11 * step!r}"'
+        lp = f'echo "OK {-3.5 + 11 * math.ulp(3.5)!r} 1000 0"'
+        with unittest.mock.patch.dict(verify_refs.ULP_LIMITS, {MODEL: 10}):
+            self.assertEqual(self.run_check(small, ref)[1], "ULP_GATE")
+            with unittest.mock.patch.dict(verify_refs.GRADIENT_AGAINST_LARGEST,
+                                          {MODEL: "a test"}):
+                result = self.run_check(small, ref)
+                self.assertEqual(result[1], "OK")
+                self.assertEqual(result[3], 5)
+                self.assertEqual(self.run_check(large, ref)[1], "ULP_GATE")
+                self.assertEqual(self.run_check(lp, ref)[1], "ULP_GATE")
+
     def test_missing_ulp_reference_provenance_fails(self):
         with unittest.mock.patch.dict(verify_refs.ULP_LIMITS, {MODEL: 10}):
             self.assertEqual(self.run_check('echo "OK -3.5 1 -2"')[1],

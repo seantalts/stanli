@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Per-observation loops that update an element in place (`mu[n] += ...`) are
+  now vectorized in default mode, as are loops that store to the same element
+  twice. These loops used to stay one operation per iteration. In the corpus,
+  `ch13_m13_5` goes from 3031 operations to 18, `ch14_m14_2` from 4053 to 36
+  and `i319_gauss_re` from 313 to 21. Gradients of 45 corpus models move at
+  rounding level relative to CmdStan, because the adjoint sums into the
+  random-effect vectors are regrouped. Eight brms test fixtures (`s2_car`,
+  `s2_car_esicar`, `s2_gr_by`, `s2_mm`, `s2_mm_weights`, `s2_mmc`,
+  `sw_re_bern`, `sw_skewnormal`) are now gated on gradient error in ULP of
+  the largest gradient entry (limit 10, measured at most 2) instead of per
+  element. Against a 60-digit reference, `s2_mm` and `s2_gr_by` are slightly
+  farther on one small entry (by 2e-16 and 6e-16); the other six are closer.
+
 ## 0.20.0
 
 - Add fast mode, an opt-in setting per model: `fast_math=True` in Python,
