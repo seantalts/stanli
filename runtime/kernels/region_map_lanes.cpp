@@ -35,6 +35,7 @@ bool lane_opcode(Program::Code c) {
     case Program::DIV:
     case Program::FMA:
     case Program::IADD:
+    case Program::ISUB:
     case Program::IMOD:
     case Program::INEG:
     case Program::POW:
@@ -412,6 +413,7 @@ class Analysis {
       case Program::LE:
       case Program::EQ:
       case Program::IADD:
+      case Program::ISUB:
       case Program::IMOD:
       case Program::INEG:
       case Program::FILL:
@@ -511,6 +513,7 @@ class Analysis {
         case Program::MUL:
         case Program::DIV:
         case Program::IADD:
+        case Program::ISUB:
         case Program::IMOD:
         case Program::POW:
         case Program::FMAX:
@@ -1349,6 +1352,11 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
         return static_cast<double>(static_cast<int>(a) + static_cast<int>(b));
       });
       break;
+    case Program::ISUB:
+      t.binary(o, I, m, [](double a, double b) {
+        return static_cast<double>(static_cast<int>(a) - static_cast<int>(b));
+      });
+      break;
     case Program::INEG:
       t.unary(o, I, m, [](double a) {
         return static_cast<double>(-static_cast<int>(a));
@@ -1809,6 +1817,7 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
     case Program::LE:
     case Program::EQ:
     case Program::IADD:
+    case Program::ISUB:
     case Program::IMOD:
     case Program::INEG: {
       double* const d = cells(o.dst);

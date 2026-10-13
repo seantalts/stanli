@@ -1447,7 +1447,7 @@ void test_refusals() {
     for (size_t i = 0; i < s.y.size(); ++i) {
       const bool low = s.y[i] - p[0] * s.x[i] < p[1];
       if (taken) taken->push_back(low);
-      acc = low ? acc + p[0] : acc + s.y[i] * p[1];
+      acc = low ? 0.9 * acc + p[0] : 0.9 * acc + s.y[i] * p[1];
     }
     return -0.01 * stan::math::square(acc);
   };
@@ -1455,6 +1455,7 @@ void test_refusals() {
   expect_refused("region_map_outer_local", 64, ref_simple, branch_points);
   expect_refused("region_map_break", 64, ref_simple, branch_points);
   expect_refused("region_map_target_read", 64, ref_simple, branch_points);
+  expect_refused("region_map_acc_read", 64, ref_simple, branch_points);
   const Ref ref_data = [](const std::vector<var>& p, const Series& s,
                           std::vector<int>* taken) {
     var lp = 0;
@@ -1575,6 +1576,47 @@ void test_shapes() {
     return lp;
   };
   run_points("region_map_multi", 64, branch_points, ref_multi);
+}
+
+const stanli::RegionMapProg& map_payload(const CompiledModel& cm);
+
+void test_local_accumulator() {
+  const auto branch_from = [](size_t first, double init, double scale) {
+    return Ref([=](const std::vector<var>& p, const Series& s,
+                   std::vector<int>* taken) {
+      var acc = init;
+      for (size_t i = first; i < s.y.size(); ++i) {
+        const var r = s.y[i] - p[0] * s.x[i];
+        const bool low = r < p[1];
+        if (taken) taken->push_back(low);
+        acc += low ? -stan::math::square(r) -
+                         stan::math::log1p(stan::math::square(p[1]))
+                   : -0.5 * stan::math::square(r) + p[1];
+      }
+      return scale == 0 ? acc : -scale * stan::math::square(acc);
+    });
+  };
+  run_points("region_map_acc_udf", 64, branch_points, branch_from(2, 0, 0));
+  run_points("region_map_acc_reduce_sum", 64, branch_points,
+             branch_from(0, 0, 0));
+  run_points("region_map_acc_init", 64, branch_points,
+             branch_from(0, 2.5, 0.01));
+  run_points("region_map_acc_udf", 512, branch_points, branch_from(2, 0, 0));
+
+  const std::string stem = "region_map_acc_udf";
+  CompiledModel lanes = compile_with(stem, 64);
+  CompiledModel scalar = compile_with(stem, 64, "STANLI_REGION_MAP_LANES", "0");
+  check(map_payload(lanes).lanes.active && !map_payload(scalar).lanes.active,
+        stem + ": offset index arithmetic runs in lanes");
+  Executor lanes_ex(lanes.graph), scalar_ex(scalar.graph);
+  lanes.bind(lanes_ex);
+  scalar.bind(scalar_ex);
+  for (const Params& point : branch_points) {
+    const Eval a = evaluate(lanes_ex, point);
+    const Eval b = evaluate(scalar_ex, point);
+    check(a.lp == b.lp && a.grad == b.grad,
+          stem + ": lanes bitwise equal to the scalar map");
+  }
 }
 
 void test_integer_ops_map() {
@@ -3243,6 +3285,7 @@ static void test_region_map() {
   test_size_independent();
   test_refusals();
   test_shapes();
+  test_local_accumulator();
   test_integer_ops_map();
   test_long_body_map();
   test_out_of_range();
