@@ -1506,6 +1506,133 @@ static void test_write_fusion_bails() {
   }
 }
 
+// `mu[e] += a[l % J] * c_l` under an unrolled loop: each lane reads the
+// element it is about to overwrite. `read_shift` moves the read to another
+// element, which turns the loop into a recurrence (-stride) or a read of a
+// later lane's target (+stride).
+namespace rmwlanes {
+
+struct Built {
+  Graph g;
+  Fills fills;
+  std::vector<int> terms;
+  int mu = -1, a = -1, sigma = -1;
+};
+
+Built build(int L, int start = 0, int stride = 1, int read_shift = 0,
+            int64_t tail = 0) {
+  Built b;
+  Graph& g = b.g;
+  const int J = 5;
+  const int t0 = g.add_slot(1, true);
+  b.a = g.add_slot(J, true);
+  b.sigma = g.add_slot(1, true);
+  const int64_t last = start + (int64_t)(L - 1) * stride;
+  const int64_t vlen = last + 1 + tail + (read_shift > 0 ? read_shift : 0);
+  b.mu = g.add_slot(vlen, false);
+  g.add_op(OP_REP_VEC, {t0}, b.mu);
+  const int ydata = g.add_slot(vlen, false);
+  std::vector<double> yv((size_t)vlen);
+  for (int64_t k = 0; k < vlen; ++k) yv[(size_t)k] = 0.4 * (double)k - 1.0;
+  b.fills.emplace_back(ydata, yv);
+  for (int l = 0; l < L; ++l) {
+    const int e = start + l * stride;
+    const int m = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {b.mu}, m, {e + read_shift});
+    const int r = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {b.a}, r, {l % J});
+    const int c = g.add_slot(1, false);
+    b.fills.emplace_back(c, std::vector<double>{0.3 + 0.07 * (l % 11)});
+    const int h = g.add_slot(1, false);
+    g.add_op(OP_MUL, {r, c}, h);
+    const int v = g.add_slot(1, false);
+    g.add_op(OP_ADD, {m, h}, v);
+    g.add_op(OP_SET_INDEX_INPLACE, {b.mu, v}, b.mu, {e});
+  }
+  const int lp = g.add_slot(1, false);
+  const int id = g.add_op(OP_NORMAL_LPDF, {ydata, b.mu, b.sigma}, lp);
+  g.ops[(size_t)id].variant = 0x06;
+  b.terms.push_back(lp);
+  return b;
+}
+
+int reads_of(const Graph& g, int vec) {
+  int n = 0;
+  for (const Op& op : g.ops) n += op.opcode == OP_INDEX && op.in[0] == vec;
+  return n;
+}
+
+std::vector<double> reference(const Built& b) {
+  Graph ref = b.g;
+  reduce_into_result(ref, b.terms);
+  return run_grad(std::move(ref), b.fills);
+}
+
+}  // namespace rmwlanes
+
+static void test_read_modify_write_lanes() {
+  using namespace rmwlanes;
+  struct Case {
+    const char* name;
+    int start, stride;
+    int64_t tail;
+    int stores_left, slice_stores;
+  };
+  const Case cases[] = {
+      {"whole", 0, 1, 0, 0, 0},
+      {"window", 2, 1, 3, 0, 1},
+      {"comb", 1, 2, 0, 0, 1},
+  };
+  for (const Case& c : cases) {
+    const std::string tag = c.name;
+    Built b = build(16, c.start, c.stride, 0, c.tail);
+    const std::vector<double> want = reference(b);
+    std::vector<int> tt = b.terms;
+    Fills f2 = b.fills;
+    const detail::ProfiledRerollStats profiled =
+        detail::reroll_profiled(b.g, f2, tt, {});
+    expect((tag + " rmw regions").c_str(), profiled.work.regions == 1);
+    expect((tag + " rmw element store recorded").c_str(),
+           profiled.dispositions.element_store == 1);
+    expect((tag + " rmw no element writes left").c_str(),
+           writefuse::count(b.g, OP_SET_INDEX_INPLACE) == c.stores_left);
+    expect((tag + " rmw no scalar reads of the vector").c_str(),
+           reads_of(b.g, b.mu) == 0);
+    const size_t ops16 = b.g.ops.size();
+    reduce_into_result(b.g, tt);
+    const std::vector<double> got = run_grad(std::move(b.g), f2);
+    for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+      expect_close((tag + " rmw v" + std::to_string(i)).c_str(), got[i],
+                   want[i]);
+
+    Built big = build(64, c.start, c.stride, 0, c.tail);
+    std::vector<int> tt64 = big.terms;
+    Fills f64 = big.fills;
+    reroll(big.g, f64, tt64, {});
+    expect((tag + " rmw op count independent of lanes").c_str(),
+           big.g.ops.size() == ops16);
+  }
+}
+
+static void test_read_modify_write_recurrence_stays_scalar() {
+  using namespace rmwlanes;
+  for (int shift : {-1, 1}) {
+    const std::string tag = shift < 0 ? "recurrence" : "read ahead";
+    Built b = build(16, 1, 1, shift);
+    const std::vector<double> want = reference(b);
+    std::vector<int> tt = b.terms;
+    Fills f2 = b.fills;
+    const size_t before = b.g.ops.size();
+    reroll(b.g, f2, tt, {});
+    expect((tag + " not fused").c_str(),
+           writefuse::count(b.g, OP_SET_INDEX_INPLACE) == 16 &&
+               b.g.ops.size() == before);
+    reduce_into_result(b.g, tt);
+    const std::vector<double> got = run_grad(std::move(b.g), f2);
+    expect((tag + " exact value and gradient").c_str(), got == want);
+  }
+}
+
 // Reroll creates slice stores after the compiler's first in-place pass has
 // already run. Two disjoint comb runs model Mtbh's column fills: the first
 // store must copy its fill-backed base, while the second can reuse that fresh
@@ -1923,6 +2050,78 @@ static void test_row_store_lanes() {
   }
 }
 
+// `M[l, :] += x_l` over every row of a produced matrix: each lane reads its
+// own row and writes it back. `shift` reads the row before instead.
+static void test_read_modify_write_rows() {
+  using rowlanes::Rows;
+  for (Rows rows : {Rows::kMatrix, Rows::kArray}) {
+    for (int shift : {0, 1}) {
+      const int L = 6, C = 4;
+      const std::string tag =
+          std::string(rows == Rows::kMatrix ? "rmw-mat" : "rmw-arr") +
+          (shift ? " shifted" : "");
+      Graph g;
+      Fills fills;
+      const int t0 = g.add_slot(1, true);
+      const int sigma = g.add_slot(1, true);
+      const int base = g.add_slot((int64_t)L * C, false);
+      g.add_op(OP_REP_VEC, {t0}, base);
+      const int ydata = g.add_slot((int64_t)L * C, false);
+      std::vector<double> yv((size_t)(L * C));
+      for (size_t i = 0; i < yv.size(); ++i) yv[i] = 0.3 * (double)i - 1.0;
+      fills.emplace_back(ydata, yv);
+      const auto row_idata = [&](int l) {
+        return rows == Rows::kMatrix ? std::vector<int>{l, L}
+                                     : std::vector<int>{l * C};
+      };
+      for (int l = 0; l < L; ++l) {
+        const int row = g.add_slot(C, false);
+        std::vector<int> read_at = row_idata(shift ? (l + 1) % L : l);
+        g.add_op(rows == Rows::kMatrix ? OP_SLICE_STRIDED : OP_SLICE, {base},
+                 row, read_at);
+        const int x = g.add_slot(C, false);
+        std::vector<double> xv((size_t)C);
+        for (int k = 0; k < C; ++k) xv[(size_t)k] = 0.5 * l + 0.25 * k - 1.0;
+        fills.emplace_back(x, xv);
+        const int v = g.add_slot(C, false);
+        g.add_op(OP_ADD, {row, x}, v);
+        g.add_op(rows == Rows::kMatrix ? OP_SET_SLICE_STRIDED_INPLACE
+                                       : OP_SET_SLICE_INPLACE,
+                 {base, v}, base, row_idata(l));
+      }
+      const int lp = g.add_slot(1, false);
+      const int id = g.add_op(OP_NORMAL_LPDF, {ydata, base, sigma}, lp);
+      g.ops[(size_t)id].variant = 0x06;
+      std::vector<int> terms{lp};
+
+      Graph ref = g;
+      reduce_into_result(ref, terms);
+      const std::vector<double> want = run_grad(std::move(ref), fills);
+      std::vector<int> tt = terms;
+      Fills f2 = fills;
+      const size_t before = g.ops.size();
+      const RerollStats st = reroll(g, f2, tt, {});
+      if (shift) {
+        expect((tag + " not fused").c_str(),
+               st.regions == 0 && g.ops.size() == before);
+      } else {
+        expect((tag + " fused").c_str(), st.regions == 1);
+        expect((tag + " no row stores left").c_str(),
+               rowlanes::row_stores(g) == 0);
+        expect((tag + " no row reads left").c_str(),
+               writefuse::count(g, OP_SLICE) +
+                       writefuse::count(g, OP_SLICE_STRIDED) ==
+                   0);
+      }
+      reduce_into_result(g, tt);
+      const std::vector<double> got = run_grad(std::move(g), f2);
+      expect((tag + " sizes").c_str(), got.size() == want.size());
+      for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+        expect_close((tag + " v" + std::to_string(i)).c_str(), got[i], want[i]);
+    }
+  }
+}
+
 // (d) What vector lanes must leave alone: lanes that do not cover every
 // row, a reduction inside the lane, and an invariant operand as wide as
 // the lane.
@@ -2237,6 +2436,92 @@ static void test_e2e_fixtures() {
     std::printf("%s: %zu ops -> %zu ops\n", c.name, ops_unrolled, ops_rerolled);
     expect((std::string(c.name) + " preserves compact loop").c_str(),
            ops_rerolled <= c.max_ops && ops_rerolled < ops_unrolled);
+  }
+}
+
+static std::string json_array(int n, double (*f)(int)) {
+  std::string s = "[";
+  for (int i = 0; i < n; ++i) {
+    if (i) s += ",";
+    s += std::to_string(f(i));
+  }
+  return s + "]";
+}
+
+static std::string json_int_array(int n, int (*f)(int)) {
+  std::string s = "[";
+  for (int i = 0; i < n; ++i) {
+    if (i) s += ",";
+    s += std::to_string(f(i));
+  }
+  return s + "]";
+}
+
+static std::string rmw_re_json(int N) {
+  return "{\"N\":" + std::to_string(N) + ",\"N_1\":5,\"Y\":" +
+         json_array(N, [](int i) { return 0.3 * std::sin(1.7 * i) + 0.2; }) +
+         ",\"J_1\":" +
+         json_int_array(N, [](int i) { return (i * 7) % 5 + 1; }) +
+         ",\"Z_1_1\":" + json_array(N, [](int) { return 1.0; }) +
+         ",\"Z_1_2\":" +
+         json_array(N, [](int i) { return i % 2 ? 0.5 : -0.5; }) + "}";
+}
+
+static std::string rmw_double_json(int N) {
+  return "{\"N\":" + std::to_string(N) + ",\"actor\":" +
+         json_int_array(N, [](int i) { return (i * 3) % 7 + 1; }) +
+         ",\"treatment\":" +
+         json_int_array(N, [](int i) { return i % 4 + 1; }) + ",\"y\":" +
+         json_int_array(N, [](int i) { return (i * i + i / 3) % 2; }) + "}";
+}
+
+static std::string rmw_recurrence_json(int N) {
+  return "{\"N\":" + std::to_string(N) +
+         ",\"J\":" + json_int_array(N, [](int i) { return (i * 2) % 5 + 1; }) +
+         ",\"Y\":" +
+         json_array(N, [](int i) { return 0.4 * std::cos(0.9 * i); }) + "}";
+}
+
+static void test_read_modify_write_models() {
+  struct Case {
+    const char* sexp;
+    std::string (*json)(int);
+    const char* name;
+    bool vectorizes;
+  };
+  const Case cases[] = {
+      {"tests/fixtures/rmw_re.tmir.sexp", rmw_re_json, "rmw_re", true},
+      {"tests/fixtures/rmw_double_store.tmir.sexp", rmw_double_json,
+       "rmw_double_store", true},
+      {"tests/fixtures/rmw_recurrence.tmir.sexp", rmw_recurrence_json,
+       "rmw_recurrence", false},
+  };
+  for (const Case& c : cases) {
+    const std::string tag = c.name;
+    size_t small = 0, large = 0, unrolled = 0, scratch = 0;
+    const std::string json24 = c.json(24), json96 = c.json(96);
+    test_setenv("STANLI_NO_REROLL", "1", 1);
+    test_setenv("STANLI_NO_PARTITION", "1", 1);
+    test_setenv("STANLI_NO_ISLAND", "1", 1);
+    const std::vector<double> want =
+        e2e_grad(c.sexp, json96.c_str(), &unrolled);
+    test_unsetenv("STANLI_NO_REROLL");
+    test_unsetenv("STANLI_NO_PARTITION");
+    const std::vector<double> got = e2e_grad(c.sexp, json96.c_str(), &large);
+    e2e_grad(c.sexp, json24.c_str(), &small);
+    test_unsetenv("STANLI_NO_ISLAND");
+    (void)scratch;
+    std::printf("%s: unrolled %zu ops, N=24 %zu ops, N=96 %zu ops\n", c.name,
+                unrolled, small, large);
+    expect((tag + " sizes").c_str(), got.size() == want.size());
+    for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+      expect_close((tag + " v" + std::to_string(i)).c_str(), got[i], want[i]);
+    if (c.vectorizes) {
+      expect((tag + " op count independent of N").c_str(), small == large);
+      expect((tag + " collapsed").c_str(), large * 4 < unrolled);
+    } else {
+      expect((tag + " stays sequential").c_str(), large > small);
+    }
   }
 }
 
@@ -2804,16 +3089,20 @@ int main() {
   test_sparse_candidate_cost();
   test_write_fusion();
   test_write_fusion_bails();
+  test_read_modify_write_lanes();
+  test_read_modify_write_recurrence_stays_scalar();
   test_post_reroll_slice_inplace();
   test_write_fusion_scalar_chain();
   test_pow_widens();
   test_row_density_lanes();
   test_row_store_lanes();
   test_row_lanes_bail();
+  test_read_modify_write_rows();
   test_row_lane_shared_read();
   test_gather_lane_partial_row();
   test_shared_vector_mean_row_major();
   test_e2e_fixtures();
+  test_read_modify_write_models();
   test_signature_soundness();
   test_prefilter_output_matches();
   if (failures) {

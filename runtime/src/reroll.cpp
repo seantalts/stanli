@@ -1074,9 +1074,21 @@ static RerollStats reroll_impl(
                 return u >= i && u < region_end &&
                        (u - i) % (size_t)P == (size_t)p;
               };
+              auto own_element_read = [&](size_t u) {
+                const size_t q = (u - i) % (size_t)P;
+                const Op& rd = g.ops[u];
+                return q < (size_t)p && rd.opcode == OP_INDEX && rd.n_in == 1 &&
+                       rd.in[0] == vec && rd.n_idata == 1 &&
+                       rd.idata[0] ==
+                           op_at(p, (int64_t)((u - i) / (size_t)P)).idata[0];
+              };
               const std::vector<size_t>& vec_uses = uses[(size_t)vec];
               const std::vector<size_t>& vec_writers = writers[(size_t)vec];
-              if (any_in_range_but(vec_uses, i, region_end, in_region_write) ||
+              if (any_in_range_but(vec_uses, i, region_end,
+                                   [&](size_t u) {
+                                     return in_region_write(u) ||
+                                            own_element_read(u);
+                                   }) ||
                   any_in_range_but(vec_writers, i, region_end, in_region_write))
                 clean = false;
               if (any_at_or_after(vec_writers, region_end, st.list_steps))
@@ -1144,9 +1156,25 @@ static RerollStats reroll_impl(
                 return u >= i && u < region_end &&
                        (u - i) % (size_t)P == (size_t)p;
               };
+              auto own_row_read = [&](size_t u) {
+                const size_t q = (u - i) % (size_t)P;
+                const Op& rd = g.ops[u];
+                const Op& st_op = op_at(p, (int64_t)((u - i) / (size_t)P));
+                if (q >= (size_t)p || !is_row_read(rd) || rd.in[0] != vec ||
+                    rd.n_idata != st_op.n_idata ||
+                    is_strided(rd.opcode) != strided)
+                  return false;
+                for (int64_t k = 0; k < rd.n_idata; ++k)
+                  if (rd.idata[k] != st_op.idata[k]) return false;
+                return true;
+              };
               const std::vector<size_t>& vec_uses = uses[(size_t)vec];
               const std::vector<size_t>& vec_writers = writers[(size_t)vec];
-              if (any_in_range_but(vec_uses, i, region_end, in_region_write) ||
+              if (any_in_range_but(vec_uses, i, region_end,
+                                   [&](size_t u) {
+                                     return in_region_write(u) ||
+                                            own_row_read(u);
+                                   }) ||
                   any_in_range_but(vec_writers, i, region_end, in_region_write))
                 clean = false;
               if (any_at_or_after(vec_writers, region_end, st.list_steps))
