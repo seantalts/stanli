@@ -458,7 +458,10 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
         (prog->lanes.active
              ? std::string(prog->lanes.tile_recompute ? " lanes=tile-recompute"
                                                       : " lanes=save") +
-                   " seeded=" + std::to_string(prog->lanes.seed_regs.size())
+                   " seeded=" + std::to_string(prog->lanes.seed_regs.size()) +
+                   " adj_cells=" + std::to_string(prog->lanes.adj_cells) +
+                   " fwd_regs=" + std::to_string(prog->lanes.fwd_regs) +
+                   " tiles=" + std::to_string(prog->lanes.tiles)
              : " lanes=no(" + prog->lanes.refusal + ")") +
         " registers=" + std::to_string(prog->n_regs) + " live_ins=" +
         std::to_string(prog->ins.size()) + region_map_call_summary(*prog));

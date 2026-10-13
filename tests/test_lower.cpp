@@ -2532,6 +2532,60 @@ void test_lane_seed_and_clean() {
   test_unsetenv("STANLI_REGION_MAP_CHECK_CLEAN");
 }
 
+void test_lane_adjoint_clear() {
+  for (const LaneFixture& f : lane_fixture_list()) {
+    if (!f.lanes) continue;
+    for (const char* tile_cells : {"1000000000", "0"}) {
+      test_setenv("STANLI_REGION_MAP_TILE_CELLS", tile_cells, 1);
+      const std::string what =
+          std::string(f.stem) + " adjoint zeroing, tile cells " + tile_cells;
+      CompiledModel cm =
+          compile_with(f.stem, 130, "STANLI_REGION_MAP_PROFILE", "1", f.extra);
+      const auto& p = map_payload(cm);
+      check(p.lanes.active && p.lanes.profile != nullptr, what + ": lanes");
+      if (!p.lanes.active || !p.lanes.profile) continue;
+      Executor ex(cm.graph);
+      cm.bind(ex);
+      int swept = 0;
+      for (int k = 0; k < 4; ++k) {
+        try {
+          evaluate(ex, spread_point((size_t)k, (size_t)ex.n_params()));
+          ++swept;
+        } catch (const std::exception&) {
+        }
+      }
+      const auto& t = p.lanes.profile->total;
+      check(swept > 0 && t.adj_exec > 0, what + ": backward ran");
+      check(t.adj_cleared == 0, what +
+                                    ": no adjoint cell zeroed per backward (" +
+                                    std::to_string(t.adj_cleared) + " over " +
+                                    std::to_string(swept) + " gradients)");
+    }
+  }
+  test_unsetenv("STANLI_REGION_MAP_TILE_CELLS");
+}
+
+void test_lane_adjoint_sequence() {
+  for (const LaneFixture& f : lane_fixture_list()) {
+    if (!f.lanes) continue;
+    for (int n : {37, 65, 200}) {
+      for (const char* tile_cells : {"1000000000", "0"}) {
+        test_setenv("STANLI_REGION_MAP_TILE_CELLS", tile_cells, 1);
+        const std::string what = std::string(f.stem) +
+                                 " 24 points N=" + std::to_string(n) +
+                                 " tile cells " + tile_cells;
+        CompiledModel lanes = compile_with(f.stem, n, nullptr, "0", f.extra);
+        CompiledModel scalar =
+            compile_with(f.stem, n, "STANLI_REGION_MAP_LANES", "0", f.extra);
+        std::vector<Params> points = spread_points(2, 12, 2.0);
+        for (const Params& q : spread_points(2, 12, 0.6)) points.push_back(q);
+        expect_lane_parity(what, lanes, scalar, points, true);
+      }
+    }
+  }
+  test_unsetenv("STANLI_REGION_MAP_TILE_CELLS");
+}
+
 void test_map_selection_follows_data_through_udfs() {
   CompiledModel data_branch = compile_with("region_map_hurdle_data", 64);
   CompiledModel unmapped =
@@ -3261,6 +3315,8 @@ static void test_region_map() {
   test_tile_call_parity();
   test_lane_tile_recompute();
   test_lane_seed_and_clean();
+  test_lane_adjoint_clear();
+  test_lane_adjoint_sequence();
   test_map_selection_follows_data_through_udfs();
   test_lane_flag_clear_segments();
   test_lane_cancellation_bitwise();

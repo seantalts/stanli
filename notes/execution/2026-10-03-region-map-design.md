@@ -110,6 +110,11 @@ live-in accumulators and cells nothing reads. `STANLI_REGION_MAP_CHECK_CLEAN=1`
 checks that after each observation or tile; the cogmod ctest entries run with
 it.
 
+The lane adjoint tile is zero when the scratch is bound and every backward
+leaves it zero, so a backward does not clear it. A backward that throws
+zeroes the tile before it propagates. Cells nothing reads can end a sweep
+nonzero and are ignored.
+
 ## Code
 
 - `runtime/src/lower_region_map.cpp`: selection, compilation, form choice.
