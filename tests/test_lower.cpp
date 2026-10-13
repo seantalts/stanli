@@ -1165,6 +1165,48 @@ static void test_wiener_forms() {
   stan::math::recover_memory();
 }
 
+// The op carries the activity of its arguments: the observations and the
+// nondecision time are data, and the gradient matches stan-math evaluated
+// with those arguments as doubles.
+static void test_wiener_activity() {
+  using namespace stanli;
+  using stan::math::var;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/wiener_activity.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/wiener_activity.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("wiener activity compile: ") + error.what());
+    return;
+  }
+  int wiener_ops = 0;
+  for (const Op& op : cm.graph.ops)
+    if (op.opcode == OP_WIENER_LPDF) {
+      ++wiener_ops;
+      check((op.variant & 0x3fu) == 0x1au,
+            "wiener op activity is alpha, beta and delta only");
+    }
+  check(wiener_ops == 1, "wiener lowers to one op");
+  const std::vector<double>& y = data.at("y").r;
+  const Eigen::VectorXd yv =
+      Eigen::Map<const Eigen::VectorXd>(y.data(), (Eigen::Index)y.size());
+  const double q[3] = {1.2, 0.5, 0.3};
+  var alpha = q[0], beta = q[1], delta = q[2];
+  var lp = stan::math::wiener_lpdf<true>(yv, alpha, 0.1, beta, delta);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (int k = 0; k < 3; ++k) ex.params_data()[k] = q[k];
+  double grad[3] = {};
+  expect_ulp("wiener activity lp", ex.gradient(grad), lp.val(), 2);
+  const var* ref[3] = {&alpha, &beta, &delta};
+  for (int k = 0; k < 3; ++k)
+    expect_ulp("wiener activity grad " + std::to_string(k), grad[k],
+               ref[k]->adj(), 2);
+  stan::math::recover_memory();
+}
+
 // log_mix and a comparison used as a value, inside per-observation regions.
 static void test_udf_param_branch() {
   using namespace stanli;
@@ -11598,6 +11640,7 @@ int main() {
   test_structured_dead_after_break();
   test_structured_while_vector_return();
   test_wiener_forms();
+  test_wiener_activity();
   test_udf_param_branch();
   test_copy_propagation_programs();
   test_region_map();

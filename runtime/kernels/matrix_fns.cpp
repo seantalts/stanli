@@ -1412,37 +1412,72 @@ double ordered_eval(KernelCtx& ctx) {
     return finish_tail_density<Grad>(ctx, out, lambda, cuts);
 }
 
-// wiener(y | alpha, tau, beta, delta): five real arguments, and every one
-// of them vectorizes in the language. A length-1 slot must enter stan-math
-// as a scalar: its sequence views broadcast scalars but require vectors to
-// match sizes, and the conformance sweep caught the old scalar-only tail
-// silently evaluating every observation with element 0's parameters.
-template <bool Grad>
-double wiener_eval(KernelCtx& ctx) {
-  const bool propto = (ctx.variant & 0x80u) != 0;
+// A length-1 argument is spread to the common length as one shared variable:
+// stan-math broadcasts scalars, not one-element vectors.
+using WienerData = Eigen::Map<const Eigen::VectorXd>;
+using WienerArg = std::variant<WienerData, stan::arena_t<VarV>>;
+unsigned wiener_activity(const KernelCtx& ctx) {
+  const unsigned mask = ctx.variant & 0x1fu;
+  return mask ? mask : 0x1fu;
+}
+int64_t wiener_extent(const KernelCtx& ctx) {
+  int64_t n = 1;
+  for (int k = 0; k < 5; ++k)
+    if (ctx.in[k].len != 1) n = ctx.in[k].len;
+  return n;
+}
+WienerArg wiener_load(const KernelCtx& ctx, int k, bool active, int64_t n) {
+  const bool spread = ctx.in[k].len == 1;
+  const int64_t len = spread ? n : ctx.in[k].len;
+  const double* d = ctx.in[k].data;
+  if (!active) {
+    if (!spread) return WienerData(d, len);
+    double* wide =
+        stan::math::ChainableStack::instance_->memalloc_.alloc_array<double>(
+            len);
+    std::fill_n(wide, len, d[0]);
+    return WienerData(wide, len);
+  }
+  stan::arena_t<VarV> v(len);
+  if (spread)
+    v.setConstant(stan::math::var(d[0]));
+  else
+    for (int64_t i = 0; i < len; ++i) v(i) = d[i];
+  return v;
+}
+enum class WienerPass { Value, Partials, Seeded };
+double wiener_eval(KernelCtx& ctx, unsigned active, WienerPass pass) {
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
-  using Arg = std::variant<var, VarV>;
-  auto load = [&](int k) -> Arg {
-    if (ctx.in[k].len == 1) return var(ctx.in[k].data[0]);
-    return tail_v(ctx, k, ctx.in[k].len);
-  };
-  Arg y = load(0), alpha = load(1), tau = load(2), beta = load(3),
-      delta = load(4);
+  const int64_t n = wiener_extent(ctx);
+  WienerArg args[5] = {
+      wiener_load(ctx, 0, active & 1u, n), wiener_load(ctx, 1, active & 2u, n),
+      wiener_load(ctx, 2, active & 4u, n), wiener_load(ctx, 3, active & 8u, n),
+      wiener_load(ctx, 4, active & 16u, n)};
   var out = std::visit(
-      [&](const auto&... a) -> var {
-        return propto ? stan::math::wiener_lpdf<true>(a...)
-                      : stan::math::wiener_lpdf<false>(a...);
+      [](const auto&... a) -> var {
+        return stan::math::wiener_lpdf<false>(a...);
       },
-      y, alpha, tau, beta, delta);
+      args[0], args[1], args[2], args[3], args[4]);
   const double value = out.val();
-  if constexpr (Grad) {
+  if (pass == WienerPass::Value) return value;
+  if (pass == WienerPass::Seeded) {
     var seeded = out * ctx.out_adj;
     stan::math::grad(seeded.vi_);
-    int slot = 0;
-    for (const Arg* p : {&y, &alpha, &tau, &beta, &delta}) {
-      std::visit([&](const auto& a) { tail_scatter(ctx, slot, a); }, *p);
-      ++slot;
+  } else {
+    stan::math::grad(out.vi_);
+  }
+  double* stash = ctx.scratch;
+  for (int k = 0; k < 5; ++k) {
+    const int64_t len = ctx.in[k].len;
+    const auto* v = std::get_if<stan::arena_t<VarV>>(&args[k]);
+    if (pass == WienerPass::Partials) {
+      for (int64_t i = 0; i < len; ++i)
+        stash[i] = v && v->size() ? (*v)(len == 1 ? 0 : i).adj() : 0.0;
+      stash += len;
+    } else if (v && ctx.in_adj[k].data) {
+      for (int64_t i = 0; i < len && v->size(); ++i)
+        ctx.in_adj[k].data[i] += (*v)(len == 1 ? 0 : i).adj();
     }
   }
   return value;
@@ -1605,60 +1640,36 @@ void oprobit_bwd(KernelCtx& ctx) {
 int64_t oprobit_scratch(const Op& op, const Slot* slots) {
   return 5 * slots[op.in[0]].len + slots[op.in[1]].len;
 }
-// Scalar observations with a fixed outcome need derivatives only
-// for boundary, nondecision time, bias and drift. Keep those types active
-// (including under propto), and retain their unit partials from a single Stan
-// Math tape.
-bool wiener_fixed_observation(const KernelCtx& ctx) {
-  if (ctx.in_adj[0].data) return false;
-  for (int k = 0; k < 5; ++k)
-    if (ctx.in[k].len != 1) return false;
-  return true;
-}
 void wiener_fwd(KernelCtx& ctx) {
-  if (!wiener_fixed_observation(ctx)) {
-    ctx.out.data[0] = wiener_eval<false>(ctx);
-    return;
-  }
-  stan::math::nested_rev_autodiff nested;
-  using stan::math::var;
-  var alpha = ctx.in[1].data[0], tau = ctx.in[2].data[0],
-      beta = ctx.in[3].data[0], delta = ctx.in[4].data[0];
-  const double y = ctx.in[0].data[0];
-  var out = (ctx.variant & 0x80u)
-                ? stan::math::wiener_lpdf<true>(y, alpha, tau, beta, delta)
-                : stan::math::wiener_lpdf<false>(y, alpha, tau, beta, delta);
-  ctx.out.data[0] = out.val();
-  if (!values_only()) {
-    stan::math::grad(out.vi_);
-    ctx.scratch[0] = alpha.adj();
-    ctx.scratch[1] = tau.adj();
-    ctx.scratch[2] = beta.adj();
-    ctx.scratch[3] = delta.adj();
-  }
+  ctx.out.data[0] = values_only() ? wiener_eval(ctx, 0, WienerPass::Value)
+                                  : wiener_eval(ctx, wiener_activity(ctx),
+                                                WienerPass::Partials);
 }
 void wiener_bwd(KernelCtx& ctx) {
-  // A unit seed reuses the same reverse arithmetic. Weighted replay must
-  // propagate its seed through that arithmetic: post-scaling unit partials
-  // can hide intermediate overflow or change underflow/cancellation.
-  if (!wiener_fixed_observation(ctx) || ctx.out_adj != 1.0) {
-    wiener_eval<true>(ctx);
+  unsigned active = wiener_activity(ctx);
+  for (int k = 0; k < 5; ++k)
+    if (ctx.in_adj[k].data) active |= 1u << k;
+  bool reusable = ctx.out_adj == 1.0 && active == wiener_activity(ctx);
+  int64_t total = 0;
+  for (int k = 0; k < 5; ++k) total += ctx.in[k].len;
+  for (int64_t i = 0; reusable && i < total; ++i)
+    reusable = std::isfinite(ctx.scratch[i]);
+  if (!reusable) {
+    wiener_eval(ctx, active, WienerPass::Seeded);
     return;
   }
-  for (int j = 0; j < 4; ++j)
-    if (!std::isfinite(ctx.scratch[j])) {
-      wiener_eval<true>(ctx);
-      return;
-    }
-  const int inputs[] = {1, 2, 3, 4};
-  for (int j = 0; j < 4; ++j)
-    if (ctx.in_adj[inputs[j]].data)
-      ctx.in_adj[inputs[j]].data[0] += ctx.out_adj * ctx.scratch[j];
+  const double* stash = ctx.scratch;
+  for (int k = 0; k < 5; ++k) {
+    if (ctx.in_adj[k].data)
+      for (int64_t i = 0; i < ctx.in[k].len; ++i)
+        ctx.in_adj[k].data[i] += ctx.out_adj * stash[i];
+    stash += ctx.in[k].len;
+  }
 }
 int64_t wiener_scratch(const Op& op, const Slot* slots) {
-  for (int k = 0; k < 5; ++k)
-    if (slots[op.in[k]].len != 1) return 0;
-  return 4;
+  int64_t total = 0;
+  for (int k = 0; k < 5; ++k) total += slots[op.in[k]].len;
+  return total;
 }
 
 // wiener(y | a, t0, w, v, sv[, sw, st0], precision): the five- and

@@ -786,8 +786,7 @@ const std::vector<FunctionSpec>& function_specs() {
                                     DensityShape::VectorizedVectors, 0x3, false,
                                     0, 0, DensityEvaluationPolicy::GraphKernel,
                                     AllIntegerDensity::None, 0x2});
-    density("wiener_lpdf",
-            {OP_WIENER_LPDF, 5, 0, false, DensityShape::Plain, 0x1f});
+    density("wiener_lpdf", {OP_WIENER_LPDF, 5, 0, false, DensityShape::Plain});
     density("wishart_lpdf",
             {OP_WISHART_LPDF, 3, 0, false, DensityShape::FirstMatrixRows, 0x7});
     density("inv_wishart_lpdf", {OP_INV_WISHART_LPDF, 3, 0, false,
