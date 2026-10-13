@@ -9,6 +9,7 @@ int region_control_depth = 0;
 bool region_control_active = false;
 unsigned structured_outer_depth = 0;
 bool region_unreachable = false;
+std::set<std::string> region_unsized_unagreed;
 std::map<std::pair<const mir::Expr*, std::string>, std::optional<RealRange>>
     region_enumerated_cache;
 
@@ -883,8 +884,11 @@ void region_prepare_cells(const mir::Stmt& s) {
   std::vector<std::string> assigned;
   assigned_names(s, &assigned);
   for (const auto& name : assigned) {
-    if (deferred_unsized(name) && !region_size_deferred(name, s))
-      fail("structured branch assigns an unsized local: " + name);
+    if (deferred_unsized(name) && !region_size_deferred(name, s)) {
+      if (decls.at(name).deferred_shape)
+        fail("structured branch assigns an unsized local: " + name);
+      region_unsized_unagreed.insert(name);
+    }
     if (scope.count(name) || int_env.count(name) || decls.count(name))
       (void)region_cell(name);
   }
@@ -895,9 +899,10 @@ bool deferred_unsized(const std::string& name) const {
   if (int_env.count(name) || int_locals.count(name)) return false;
   const auto declaration = decls.find(name);
   if (declaration == decls.end() ||
-      declaration->second.si.kind == ViewKind::Flat ||
       !declaration->second.runtime_dims.empty() ||
-      (!declaration->second.deferred_shape && declaration->second.len != 0))
+      (!declaration->second.deferred_shape &&
+       (declaration->second.si.kind == ViewKind::Flat ||
+        declaration->second.len != 0)))
     return false;
   const auto bound = scope.find(name);
   return bound == scope.end() || g.slots[bound->second.slot].len == 0;
@@ -905,10 +910,11 @@ bool deferred_unsized(const std::string& name) const {
 bool region_size_deferred(const std::string& name, const mir::Stmt& s) {
   const auto declaration = decls.find(name);
   std::optional<StaticView> shape;
-  bool agree = true;
+  bool agree = true, assigned = false;
   std::function<void(const mir::Stmt&)> visit = [&](const mir::Stmt& st) {
     if (st.kind == mir::Stmt::Assignment && st.lhs == name &&
         st.lhs_idx.empty()) {
+      assigned = true;
       const auto view = try_static_view(st.rhs);
       if (view.state != StaticProbeState::Known)
         agree = false;
@@ -921,6 +927,7 @@ bool region_size_deferred(const std::string& name, const mir::Stmt& s) {
     for (const auto& child : st.body) visit(child);
   };
   visit(s);
+  if (!assigned) return true;
   if (!agree || !shape) return false;
   if (shape->len == 0) return true;
   Val value{add_slot(shape->len, false), false, shape->si};
@@ -2212,6 +2219,7 @@ void lower_region_stmt(const mir::Stmt& s) {
       if (s.read_transform)
         fail("parameter declaration inside structured loop");
       region_cells.erase(s.decl_id);
+      region_unsized_unagreed.erase(s.decl_id);
       // Container sizes are data-only in Stan, but a retained loop can
       // compute them at execution time. Allocate a proved maximum and
       // carry the current logical extent in a scalar graph slot. This is
@@ -2331,7 +2339,8 @@ void lower_region_stmt(const mir::Stmt& s) {
         auto base = scope.find(s.lhs);
         if (base != scope.end()) check_slot_budget(g.slots[base->second.slot].len);
       }
-      if (s.lhs_idx.empty() && deferred_unsized(s.lhs)) {
+      if (s.lhs_idx.empty() && deferred_unsized(s.lhs) &&
+          !region_unsized_unagreed.count(s.lhs)) {
         region_cells.erase(s.lhs);
         scope.erase(s.lhs);
         lower_stmt_impl(s);

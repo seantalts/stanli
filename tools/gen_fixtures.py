@@ -34,6 +34,8 @@ O0_FIXTURES = {
     "runtime_int_array_udf",
     "structured_dead_after_break",
     "structured_matrix_ops",
+    "structured_sequence_local",
+    "structured_zero_matrix_udf",
     "trunc_param",
     "udf_conditional_return",
     "udf_constant_branch",
