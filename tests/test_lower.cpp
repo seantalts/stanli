@@ -1207,6 +1207,56 @@ static void test_wiener_activity() {
   stan::math::recover_memory();
 }
 
+static void test_wiener_scalar_calls() {
+  using namespace stanli;
+  using stan::math::var;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/wiener_scalar_calls.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/wiener_scalar_calls.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("wiener scalar calls compile: ") + error.what());
+    return;
+  }
+  int wiener_ops = 0;
+  for (const Op& op : cm.graph.ops)
+    if (op.opcode == OP_WIENER_LPDF) {
+      ++wiener_ops;
+      check((op.variant & 0x1fu) == 0x1au,
+            "wiener scalar call leaves y and tau as data");
+      for (int k = 0; k < 5; ++k)
+        check(cm.graph.slots[(size_t)op.in[(size_t)k]].len == 1,
+              "wiener scalar call arguments have length 1");
+    }
+  check(wiener_ops == 4, "wiener scalar calls lower to one op per observation");
+  const std::vector<double>& y = data.at("y").r;
+  const std::vector<double>& x = data.at("x").r;
+  const double q[3] = {1.2, 0.5, 0.3};
+  var alpha = q[0], beta = q[1], delta = q[2];
+  var lp = 0;
+  for (size_t n = 0; n < y.size(); ++n) {
+    if (n % 2 == 0)
+      lp +=
+          stan::math::wiener_lpdf<false>(y[n], alpha, 0.1, beta, delta * x[n]);
+    else
+      lp += stan::math::wiener_lpdf<false>(y[n], alpha, 0.1, 1 - beta,
+                                           -delta * x[n]);
+  }
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (int k = 0; k < 3; ++k) ex.params_data()[k] = q[k];
+  double grad[3] = {};
+  expect_ulp("wiener scalar calls lp", ex.gradient(grad), lp.val(), 2);
+  const var* ref[3] = {&alpha, &beta, &delta};
+  for (int k = 0; k < 3; ++k)
+    expect_ulp("wiener scalar calls grad " + std::to_string(k), grad[k],
+               ref[k]->adj(), 2);
+  stan::math::recover_memory();
+}
+
 // log_mix and a comparison used as a value, inside per-observation regions.
 static void test_udf_param_branch() {
   using namespace stanli;
@@ -11641,6 +11691,7 @@ int main() {
   test_structured_while_vector_return();
   test_wiener_forms();
   test_wiener_activity();
+  test_wiener_scalar_calls();
   test_udf_param_branch();
   test_copy_propagation_programs();
   test_region_map();

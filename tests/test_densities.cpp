@@ -717,24 +717,36 @@ static void check_wiener_single_evaluation() {
                                                       0x1eu, propto);
     check_wiener_activity<var, var, var, var, var>("wiener scalar y active" + p,
                                                    one, 0x1fu, propto);
+    check_wiener_activity<double, double, var, var, var>(
+        "wiener scalar alpha data" + p, one, 0x1cu, propto);
+    check_wiener_activity<double, var, double, double, var>(
+        "wiener scalar tau beta data" + p, one, 0x12u, propto);
+    check_wiener_activity<double, double, double, double, var>(
+        "wiener scalar delta only" + p, one, 0x10u, propto);
+    check_wiener_activity<double, var, var, var, double>(
+        "wiener scalar delta data" + p, one, 0x0eu, propto);
   }
 
   // The backward sweep consumes the partials the forward pass kept. Moving an
   // input between the two passes changes the answer only if the density is
   // evaluated again.
-  {
+  for (const bool scalar : {false, true}) {
+    const WienerValues& values = scalar ? one : obs;
     int slots[5];
-    stanli::Executor ex = wiener_executor(obs, 0x1eu, false, slots);
+    stanli::Executor ex = wiener_executor(values, 0x1eu, false, slots);
     double* params = ex.params_data();
-    for (int k = 1, at = 0; k < 5; ++k) params[at++] = obs[(size_t)k][0];
+    for (int k = 1, at = 0; k < 5; ++k) params[at++] = values[(size_t)k][0];
     ex.forward();
     ex.value_ptr(slots[1])[0] += 0.05;
     double grad[4];
     ex.reverse(grad, 1.0);
     const auto want =
-        wiener_reference<Vec, var, var, var, var>(obs, false, 1.0);
+        scalar
+            ? wiener_reference<double, var, var, var, var>(values, false, 1.0)
+            : wiener_reference<Vec, var, var, var, var>(values, false, 1.0);
     for (int i = 0; i < 4; ++i)
-      expect_eq("wiener partials kept from forward " + std::to_string(i),
+      expect_eq(std::string("wiener partials kept from forward") +
+                    (scalar ? " scalar " : " ") + std::to_string(i),
                 grad[i], want.grad[(size_t)i]);
   }
 }
