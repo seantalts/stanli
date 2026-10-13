@@ -1308,6 +1308,157 @@ void test_reduce_sum_threads() {
   stanli_model_free(parallel);
 }
 
+void expect_metric_options() {
+  char err[8192]{};
+  stanli_model* model = stanli_model_new(
+      slurp("tests/fixtures/gq_scalar_rng_container_guard.tmir.sexp").c_str(),
+      "{}", err, sizeof err);
+  expect_true("metric model builds", model != nullptr);
+  if (model == nullptr) return;
+  const int64_t n = stanli_n_unconstrained(model);
+  expect_true("metric model has two parameters", n == 2);
+
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.seed = 3;
+  opts.chains = 2;
+  opts.warmup = 300;
+  opts.samples = 20;
+  const int64_t rows = stanli_n_stored_draws(&opts);
+  const size_t n_draws = (size_t)(opts.chains * rows * n);
+  const size_t n_stats = (size_t)(opts.chains * rows * STANLI_N_SAMPLER_COLS);
+
+  stanli_metric_opts dm;
+  stanli_metric_opts_init(&dm);
+  expect_true("metric defaults",
+              dm.metric == STANLI_METRIC_DIAG && dm.inv_metric == nullptr &&
+                  dm.step_size == 1.0 && dm.adapt_engaged == 1 &&
+                  dm.adapted_step_size == nullptr &&
+                  dm.adapted_inv_metric == nullptr);
+
+  std::vector<double> want_draws(n_draws), want_stats(n_stats);
+  err[0] = '\0';
+  int rc = stanli_sample_multi_write_array(
+      model, &opts, 0, want_draws.data(), want_stats.data(), nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true("metric reference run succeeds", rc == 0);
+
+  std::vector<double> draws(n_draws, -1.0), stats(n_stats, -1.0);
+  err[0] = '\0';
+  rc = stanli_sample_multi_metric(
+      model, &opts, &dm, 0, draws.data(), stats.data(), nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true("default metric options succeed", rc == 0);
+  expect_true("default metric options reproduce write_array bitwise",
+              draws == want_draws && stats == want_stats);
+
+  std::vector<double> inv(opts.chains * n * n);
+  for (int64_t c = 0; c < opts.chains; ++c) {
+    inv[(size_t)(c * 4 + 0)] = 2.0;
+    inv[(size_t)(c * 4 + 1)] = 0.5;
+    inv[(size_t)(c * 4 + 2)] = 0.5;
+    inv[(size_t)(c * 4 + 3)] = 1.5;
+  }
+  std::vector<double> step(opts.chains, -1.0), adapted(inv.size(), -1.0);
+  stanli_metric_opts dense = dm;
+  dense.metric = STANLI_METRIC_DENSE;
+  dense.inv_metric = inv.data();
+  dense.adapted_step_size = step.data();
+  dense.adapted_inv_metric = adapted.data();
+  err[0] = '\0';
+  rc = stanli_sample_multi_metric(
+      model, &opts, &dense, 0, draws.data(), stats.data(), nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(
+      std::string("dense metric with a starting inverse metric: ") + err,
+      rc == 0);
+  bool sized = true;
+  for (int64_t c = 0; c < opts.chains; ++c) {
+    sized = sized && step[(size_t)c] > 0 && std::isfinite(step[(size_t)c]);
+    const double* m = adapted.data() + c * 4;
+    sized = sized && m[0] > 0 && m[3] > 0 && std::fabs(m[1] - m[2]) < 1e-12 &&
+            m[0] * m[3] - m[1] * m[2] > 0;
+  }
+  expect_true("dense metric reports positive step sizes and SPD matrices",
+              sized);
+  expect_true("dense metric adapts away from the starting matrix",
+              adapted[0] != inv[0] || adapted[1] != inv[1]);
+
+  std::vector<double> diag_adapted((size_t)(opts.chains * n), -1.0);
+  stanli_metric_opts diag = dm;
+  diag.adapted_inv_metric = diag_adapted.data();
+  rc = stanli_sample_multi_metric(
+      model, &opts, &diag, 0, draws.data(), stats.data(), nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true("diag metric reports n values per chain",
+              rc == 0 && std::all_of(diag_adapted.begin(), diag_adapted.end(),
+                                     [](double x) { return x > 0; }));
+
+  std::vector<double> unit_adapted(4, -1.0);
+  stanli_metric_opts unit = dm;
+  unit.metric = STANLI_METRIC_UNIT;
+  unit.adapted_inv_metric = unit_adapted.data();
+  rc = stanli_sample_multi_metric(
+      model, &opts, &unit, 0, draws.data(), stats.data(), nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true("unit metric writes no inverse metric",
+              rc == 0 && std::all_of(unit_adapted.begin(), unit_adapted.end(),
+                                     [](double x) { return x == -1.0; }));
+
+  std::vector<double> fixed_step(opts.chains, -1.0);
+  stanli_metric_opts fixed = dm;
+  fixed.step_size = 0.25;
+  fixed.adapt_engaged = 0;
+  fixed.adapted_step_size = fixed_step.data();
+  rc = stanli_sample_multi_metric(
+      model, &opts, &fixed, 0, draws.data(), stats.data(), nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  bool constant = rc == 0;
+  for (int64_t c = 0; c < opts.chains; ++c) {
+    constant = constant && fixed_step[(size_t)c] == 0.25;
+    for (int64_t i = 0; i < rows; ++i)
+      constant =
+          constant &&
+          stats[(size_t)((c * rows + i) * STANLI_N_SAMPLER_COLS + 2)] == 0.25;
+  }
+  expect_true("adapt off keeps the supplied step size throughout", constant);
+
+  std::vector<double> bad = inv;
+  bad[0] = -1.0;
+  bad[3] = -1.0;
+  stanli_metric_opts nonspd = dm;
+  nonspd.metric = STANLI_METRIC_DENSE;
+  nonspd.inv_metric = bad.data();
+  err[0] = '\0';
+  rc = stanli_sample_multi_metric(
+      model, &opts, &nonspd, 0, draws.data(), stats.data(), nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true(
+      "a non positive definite inverse metric fails with Stan's message",
+      rc != 0 && std::strstr(err, "positive definite") != nullptr);
+  expect_true("an invalid metric fails once, before any chain runs",
+              std::strstr(err, "chain ") == nullptr);
+
+  stanli_metric_opts bad_step = dm;
+  bad_step.step_size = 0.0;
+  err[0] = '\0';
+  rc = stanli_sample_multi_metric(
+      model, &opts, &bad_step, 0, draws.data(), stats.data(), nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true("a zero step size is rejected",
+              rc != 0 && std::strstr(err, "step_size") != nullptr);
+
+  stanli_metric_opts bad_kind = dm;
+  bad_kind.metric = 7;
+  err[0] = '\0';
+  rc = stanli_sample_multi_metric(
+      model, &opts, &bad_kind, 0, draws.data(), stats.data(), nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  expect_true("an unknown metric kind is rejected",
+              rc != 0 && std::strstr(err, "metric") != nullptr);
+  stanli_model_free(model);
+}
+
 void test_source_include_paths() {
   char err[8192]{};
   expect_true("null include array is rejected",
@@ -1476,6 +1627,7 @@ int main() {
   expect_inits_run_in_parallel();
   expect_interruptible_sampling();
   expect_in_worker_write_array();
+  expect_metric_options();
   expect_streaming_stats();
 
   if (failures == 0) std::printf("test_capi OK\n");

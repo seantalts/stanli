@@ -187,3 +187,63 @@ test_that("stored method delegates use the installed package implementation", {
   testthat::local_mocked_bindings(cstan_draws=function(...) "updated implementation", .package="stanli")
   expect_identical(fit$draws(),"updated implementation")
 })
+
+test_that("inv_metric() and metadata() report the adapted sampler state", {
+  skip_without_runtime()
+  fit <- sample_cstan("parameters { vector[2] x; } model { x ~ normal(0, [1, 3]'); }",
+                      chains = 2, iter_warmup = 200, iter_sampling = 20,
+                      seed = 4, refresh = 0)
+  as_matrices <- fit$inv_metric()
+  expect_named(as_matrices, c("1", "2"))
+  for (m in as_matrices) {
+    expect_true(is.matrix(m))
+    expect_identical(dim(m), c(2L, 2L))
+    expect_equal(m[upper.tri(m)], 0)
+  }
+  as_vectors <- fit$inv_metric(matrix = FALSE)
+  expect_named(as_vectors, c("1", "2"))
+  expect_equal(as_matrices[["1"]], diag(as_vectors[["1"]]))
+  expect_length(as_vectors[["2"]], 2L)
+
+  meta <- fit$metadata()
+  expect_identical(meta$metric, "diag_e")
+  expect_equal(meta$step_size_adaptation, fit$stanli_fit()$step_size)
+  expect_length(meta$step_size_adaptation, 2L)
+  expect_true(all(meta$step_size_adaptation > 0))
+  expect_equal(meta$adapt_engaged, 1)
+})
+
+test_that("cstanfit reports dense metrics as matrices and forwards the options", {
+  skip_without_runtime()
+  code <- "parameters { vector[2] x; } model { x ~ normal(0, [1, 3]'); }"
+  fit <- sample_cstan(code, chains = 2, iter_warmup = 200, iter_sampling = 20,
+                      seed = 4, refresh = 0, metric = "dense_e")
+  for (matrix in c(TRUE, FALSE)) {
+    m <- fit$inv_metric(matrix = matrix)
+    expect_named(m, c("1", "2"))
+    expect_identical(dim(m[[1]]), c(2L, 2L))
+  }
+  expect_identical(fit$metadata()$metric, "dense_e")
+  again <- sample_cstan(code, chains = 2, iter_warmup = 0, iter_sampling = 10,
+                        seed = 5, refresh = 0, metric = "dense_e",
+                        inv_metric = fit$inv_metric(),
+                        step_size = mean(fit$metadata()$step_size_adaptation),
+                        adapt_engaged = FALSE)
+  expect_identical(again$inv_metric(), fit$inv_metric())
+  expect_equal(again$metadata()$adapt_engaged, 0)
+  expect_true(all(again$sampler_diagnostics()[, , "stepsize__"] ==
+                    mean(fit$metadata()$step_size_adaptation)))
+})
+
+test_that("fits without adapted metric fields say so", {
+  fit <- as_cstanfit(cstan_fixture())
+  expect_error(fit$inv_metric(), "inverse metric")
+  raw <- cstan_fixture()
+  raw$metric <- "diag_e"
+  raw$step_size <- rep(NA_real_, 4)
+  raw$inv_metric <- rep(list(NULL), 4)
+  expect_error(as_cstanfit(raw)$inv_metric(), "inverse metric")
+  meta <- fit$metadata()
+  expect_identical(meta$metric, "diag_e")
+  expect_identical(meta$step_size_adaptation, rep(NA_real_, 4))
+})

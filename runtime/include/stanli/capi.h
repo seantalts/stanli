@@ -314,6 +314,51 @@ int stanli_sample_multi_write_array(
     void* progress_user, stanli_sample_poll_cb poll, void* poll_user,
     int* interrupted, stanli_sample_report* reports, char* err, size_t err_len);
 
+/* Metric kinds for stanli_metric_opts::metric, as CmdStan's unit_e, diag_e and
+ * dense_e. */
+enum {
+  STANLI_METRIC_UNIT = 0,
+  STANLI_METRIC_DIAG = 1,
+  STANLI_METRIC_DENSE = 2
+};
+
+/* Metric and step size controls for stanli_sample_multi_metric.
+ *
+ * `inv_metric` is the starting inverse metric: null for the identity, else
+ * chain-major with n_unconstrained values per chain for DIAG or
+ * n_unconstrained^2 for DENSE; UNIT takes none. `step_size` is CmdStan's
+ * `stepsize`. With `adapt_engaged` zero no adaptation runs and the metric and
+ * step size stay as given.
+ *
+ * `adapted_step_size`, when non-null, receives one step size per chain and
+ * `adapted_inv_metric`, when non-null, the metric each chain holds after
+ * warmup in the layout of `inv_metric` (nothing for UNIT). Both are filled
+ * only for chains that ran. */
+typedef struct {
+  int metric;
+  const double* inv_metric;
+  double step_size;
+  int adapt_engaged;
+  double* adapted_step_size;
+  double* adapted_inv_metric;
+} stanli_metric_opts;
+
+/* Fill with diag, identity, step size 1, adaptation engaged, no outputs. */
+void stanli_metric_opts_init(stanli_metric_opts* o);
+
+/* stanli_sample_multi_write_array with the metric controls in `metric`
+ * (null means the defaults of stanli_metric_opts_init). An invalid metric,
+ * inverse metric or step size fails before any chain starts, returns nonzero,
+ * and puts Stan's message in err. Additive, like the entry points above. */
+int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
+                               const stanli_metric_opts* metric, int refresh,
+                               double* draws, double* stats, double* values,
+                               stanli_sample_progress_cb progress,
+                               void* progress_user, stanli_sample_poll_cb poll,
+                               void* poll_user, int* interrupted,
+                               stanli_sample_report* reports, char* err,
+                               size_t err_len);
+
 /* The seven sampler columns, in order: lp__, accept_stat__, stepsize__,
  * treedepth__, n_leapfrog__, divergent__, energy__. */
 #define STANLI_N_SAMPLER_COLS 7

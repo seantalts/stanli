@@ -795,18 +795,42 @@ int stanli_sample_multi_interruptible(
       poll_user, interrupted, reports, err, err_len);
 }
 
+void stanli_metric_opts_init(stanli_metric_opts* o) {
+  if (o == nullptr) return;
+  *o = stanli_metric_opts{};
+  o->metric = STANLI_METRIC_DIAG;
+  o->step_size = 1.0;
+  o->adapt_engaged = 1;
+}
+
 int stanli_sample_multi_write_array(
     stanli_model* m, const stanli_sample_opts* opts, int refresh, double* draws,
     double* stats, double* values, stanli_sample_progress_cb progress,
     void* progress_user, stanli_sample_poll_cb poll, void* poll_user,
     int* interrupted, stanli_sample_report* reports, char* err,
     size_t err_len) {
+  return stanli_sample_multi_metric(
+      m, opts, nullptr, refresh, draws, stats, values, progress, progress_user,
+      poll, poll_user, interrupted, reports, err, err_len);
+}
+
+int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
+                               const stanli_metric_opts* metric, int refresh,
+                               double* draws, double* stats, double* values,
+                               stanli_sample_progress_cb progress,
+                               void* progress_user, stanli_sample_poll_cb poll,
+                               void* poll_user, int* interrupted,
+                               stanli_sample_report* reports, char* err,
+                               size_t err_len) {
   try {
     if (interrupted != nullptr) *interrupted = 0;
     if (opts == nullptr) {
       put_err(err, err_len, "null options");
       return 1;
     }
+    stanli_metric_opts defaults;
+    stanli_metric_opts_init(&defaults);
+    const stanli_metric_opts& mo = metric != nullptr ? *metric : defaults;
     if (refresh < 0) {
       put_err(err, err_len, "refresh must be nonnegative");
       return 1;
@@ -827,6 +851,31 @@ int stanli_sample_multi_write_array(
     cfg.max_depth = opts->max_depth > 0 ? opts->max_depth : 10;
     cfg.save_warmup = opts->save_warmup != 0;
     cfg.init_radius = opts->init_radius;
+    switch (mo.metric) {
+      case STANLI_METRIC_UNIT:
+        cfg.metric = stanli::Metric::Unit;
+        break;
+      case STANLI_METRIC_DIAG:
+        cfg.metric = stanli::Metric::Diag;
+        break;
+      case STANLI_METRIC_DENSE:
+        cfg.metric = stanli::Metric::Dense;
+        break;
+      default:
+        put_err(err, err_len, "unknown metric kind");
+        return 1;
+    }
+    cfg.step_size = mo.step_size;
+    cfg.adapt = mo.adapt_engaged != 0;
+    const int64_t metric_len = cfg.metric == stanli::Metric::Unit    ? 0
+                               : cfg.metric == stanli::Metric::Dense ? n * n
+                                                                     : n;
+    for (int c = 0; c < n_chains; ++c) {
+      stanli::NutsConfig probe = cfg;
+      probe.inv_metric =
+          mo.inv_metric != nullptr ? mo.inv_metric + c * metric_len : nullptr;
+      stanli::validate_metric_config(probe, n);
+    }
 
     // Chain 0 samples on the model's own executor; the rest get clones,
     // so a single-chain run allocates no second arena and behaves exactly
@@ -924,7 +973,7 @@ int stanli_sample_multi_write_array(
 
     std::vector<stanli::ChainResult> res = stanli::run_nuts_chains(
         execs, cfg, opts->num_threads, {}, progress_observer, refresh, poll_fn,
-        writer, opts->inits);
+        writer, opts->inits, mo.inv_metric);
 
     int failed = 0;
     std::string first_error;
@@ -937,6 +986,15 @@ int stanli_sample_multi_write_array(
         reports[c].n_max_treedepth = r.report.n_max_treedepth;
       }
       if (interrupted != nullptr && r.report.interrupted) *interrupted = 1;
+      if (r.error.empty()) {
+        if (mo.adapted_step_size != nullptr)
+          mo.adapted_step_size[c] = r.report.step_size;
+        if (mo.adapted_inv_metric != nullptr && metric_len > 0 &&
+            (int64_t)r.report.inv_metric.size() == metric_len)
+          std::memcpy(mo.adapted_inv_metric + c * metric_len,
+                      r.report.inv_metric.data(),
+                      sizeof(double) * (size_t)metric_len);
+      }
       if (!r.error.empty()) {
         if (failed++ == 0)
           first_error =

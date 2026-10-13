@@ -1444,6 +1444,158 @@ def test_fast_math_needs_a_runtime_with_options():
             raise AssertionError("missing native entrypoint was ignored")
 
 
+METRIC_SOURCE = """
+parameters { vector[3] x; }
+model { x ~ normal(0, [1, 2, 3]'); }
+"""
+
+
+def _metric_model():
+    return stanli.Model(stan_code=METRIC_SOURCE)
+
+
+def _metric_fit(model=None, **kw):
+    kw.setdefault("chains", 3)
+    kw.setdefault("seed", 5)
+    kw.setdefault("warmup", 200)
+    kw.setdefault("samples", 50)
+    return (model or _metric_model()).sample(refresh=0, **kw)
+
+
+def test_metric_opts_defaults_match_the_header():
+    import ctypes
+    o = stanli._MetricOpts()
+    stanli._lib.stanli_metric_opts_init(ctypes.byref(o))
+    assert o.metric == 1 and not o.inv_metric
+    assert o.step_size == 1.0 and o.adapt_engaged == 1
+    assert not o.adapted_step_size and not o.adapted_inv_metric
+
+
+def test_default_metric_arguments_leave_the_draws_unchanged():
+    m = _metric_model()
+    a = _metric_fit(m)
+    b = _metric_fit(m, metric="diag_e", step_size=1.0, adapt_engaged=True)
+    np.testing.assert_array_equal(a.draws(), b.draws())
+    np.testing.assert_array_equal(a.sampler_stats, b.sampler_stats)
+
+
+def test_diag_fit_reports_metric_and_step_size_per_chain():
+    fit = _metric_fit()
+    assert fit.metric == "diag_e"
+    assert fit.step_size.shape == (3,) and np.all(fit.step_size > 0)
+    assert len(fit.inv_metric) == 3
+    for v in fit.inv_metric:
+        assert v.shape == (3,) and np.all(v > 0)
+
+
+def test_dense_metric_gives_a_positive_definite_matrix_per_chain():
+    fit = _metric_fit(metric="dense_e", warmup=300)
+    assert fit.metric == "dense_e" and len(fit.inv_metric) == 3
+    for mat in fit.inv_metric:
+        assert mat.shape == (3, 3)
+        np.testing.assert_allclose(mat, mat.T)
+        assert np.all(np.linalg.eigvalsh(mat) > 0)
+
+
+def test_unit_metric_has_no_inverse_metric():
+    fit = _metric_fit(metric="unit_e")
+    assert fit.metric == "unit_e"
+    assert fit.inv_metric == [None, None, None]
+    assert fit.step_size.shape == (3,)
+
+
+def test_adapted_metric_and_step_size_start_the_next_fit():
+    m = _metric_model()
+    pilot = _metric_fit(m, warmup=300)
+    step = float(pilot.step_size.mean())
+    fit = _metric_fit(m, warmup=0, inv_metric=pilot.inv_metric,
+                      step_size=step, adapt_engaged=False)
+    assert np.all(fit.sampler_stats[:, :, 2] == step)
+    np.testing.assert_array_equal(fit.step_size, [step] * 3)
+    for got, want in zip(fit.inv_metric, pilot.inv_metric):
+        np.testing.assert_array_equal(got, want)
+
+
+def test_inv_metric_forms_for_diag_and_dense():
+    m = _metric_model()
+    one = np.array([1.0, 4.0, 9.0])
+    per_chain = np.array([one, 2 * one, 3 * one])
+    kw = dict(warmup=0, adapt_engaged=False)
+    fit = _metric_fit(m, inv_metric=one, **kw)
+    assert all(np.array_equal(v, one) for v in fit.inv_metric)
+    fit = _metric_fit(m, inv_metric=per_chain, **kw)
+    for v, want in zip(fit.inv_metric, per_chain):
+        np.testing.assert_array_equal(v, want)
+    fit = _metric_fit(m, inv_metric=list(per_chain), **kw)
+    for v, want in zip(fit.inv_metric, per_chain):
+        np.testing.assert_array_equal(v, want)
+    dense = np.diag(one) + 0.1
+    fit = _metric_fit(m, metric="dense_e", inv_metric=dense, **kw)
+    assert all(np.array_equal(v, dense) for v in fit.inv_metric)
+    stacked = np.stack([dense, 2 * dense, 3 * dense])
+    fit = _metric_fit(m, metric="dense_e", inv_metric=stacked, **kw)
+    for v, want in zip(fit.inv_metric, stacked):
+        np.testing.assert_array_equal(v, want)
+
+
+def _expect(exc, text, **kw):
+    try:
+        _metric_fit(**kw)
+    except exc as e:
+        assert text in str(e), str(e)
+    else:
+        raise AssertionError(f"no {exc.__name__} for {kw}")
+
+
+def test_metric_argument_errors():
+    _expect(ValueError, "metric", metric="euclidean")
+    _expect(ValueError, "(3,)", inv_metric=np.ones(4))
+    _expect(ValueError, "(3, 3)", inv_metric=np.ones((2, 3)))
+    _expect(ValueError, "(3, 3)", inv_metric=np.ones((3, 3, 3)))
+    _expect(ValueError, "(3, 3)", metric="dense_e", inv_metric=np.ones(3))
+    _expect(ValueError, "(3, 3, 3)", metric="dense_e",
+            inv_metric=np.ones((2, 3, 3)))
+    _expect(ValueError, "unit_e", metric="unit_e", inv_metric=np.ones(3))
+    _expect(ValueError, "inv_metric", inv_metric=[[1.0, 2.0, 3.0], [1.0]])
+    _expect(ValueError, "inv_metric", inv_metric=[None, None, None])
+    for bad in (0, -1.0, float("nan"), float("inf"), [1.0, 2.0], "1", True):
+        _expect(ValueError, "step_size", step_size=bad)
+
+
+def test_invalid_metric_values_raise_stans_message_before_sampling():
+    bad = np.array([[1.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    try:
+        _metric_fit(metric="dense_e", inv_metric=bad)
+    except RuntimeError as e:
+        assert "positive definite" in str(e), str(e)
+        assert "chains failed" not in str(e), str(e)
+    else:
+        raise AssertionError("indefinite inv_metric accepted")
+    try:
+        _metric_fit(inv_metric=np.array([1.0, -1.0, 1.0]))
+    except RuntimeError as e:
+        assert "chains failed" not in str(e), str(e)
+    else:
+        raise AssertionError("negative diag inv_metric accepted")
+
+
+def test_metric_options_need_a_runtime_that_has_them():
+    m = _metric_model()
+    with mock.patch.object(stanli._lib, "stanli_sample_multi_metric", None):
+        fit = m.sample(chains=2, seed=3, warmup=20, samples=10, refresh=0)
+        assert fit.metric == "diag_e"
+        assert fit.step_size.shape == (2,) and np.all(np.isnan(fit.step_size))
+        assert fit.inv_metric == [None, None]
+        for kw in ({"metric": "dense_e"}, {"inv_metric": np.ones(3)},
+                   {"step_size": 0.5}, {"adapt_engaged": False}):
+            try:
+                m.sample(chains=2, warmup=5, samples=5, refresh=0, **kw)
+            except RuntimeError as e:
+                assert "newer Stanli runtime" in str(e)
+            else:
+                raise AssertionError(f"{kw} ignored")
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

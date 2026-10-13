@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `sample_model()` and `sample_cstan()` in R, and `Model.sample()` in Python,
+  take `metric` (`"diag_e"`, `"dense_e"` or `"unit_e"`), a starting
+  `inv_metric`, `step_size` and `adapt_engaged`, as CmdStanR and CmdStanPy
+  do. The fit reports the step size and inverse metric each chain holds after
+  warmup (`fit$step_size`, `fit$inv_metric`, and `$inv_metric()` on
+  `as_cstanfit()` objects in R; `fit.step_size`, `fit.inv_metric` and
+  `fit.metric` in Python), so a pilot fit's metric can start the next one. The C API gains
+  `stanli_sample_multi_metric` with the same controls; `stanli_sample_opts`
+  and the ABI version are unchanged.
 - Per-observation loops that update an element in place (`mu[n] += ...`) are
   now vectorized in default mode, as are loops that store to the same element
   twice. These loops used to stay one operation per iteration. In the corpus,

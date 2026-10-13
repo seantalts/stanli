@@ -9,6 +9,7 @@ import ctypes
 from collections.abc import Mapping
 import json
 import math
+import numbers
 import operator
 import os
 import pathlib
@@ -98,6 +99,21 @@ _SampleProgressCallback = ctypes.CFUNCTYPE(
     None, ctypes.c_int32, ctypes.c_int64, ctypes.c_int64, ctypes.c_int32,
     ctypes.c_void_p)
 _SamplePollCallback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
+
+
+class _MetricOpts(ctypes.Structure):
+    """Mirrors stanli_metric_opts in runtime/include/stanli/capi.h."""
+    _fields_ = [
+        ("metric", ctypes.c_int),
+        ("inv_metric", ctypes.POINTER(ctypes.c_double)),
+        ("step_size", ctypes.c_double),
+        ("adapt_engaged", ctypes.c_int),
+        ("adapted_step_size", ctypes.POINTER(ctypes.c_double)),
+        ("adapted_inv_metric", ctypes.POINTER(ctypes.c_double)),
+    ]
+
+
+_METRICS = ("unit_e", "diag_e", "dense_e")
 
 
 class _ModelOpts(ctypes.Structure):
@@ -227,6 +243,17 @@ def _load_lib():
         _SampleProgressCallback, ctypes.c_void_p, _SamplePollCallback,
         ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
         ctypes.POINTER(_SampleReport), ctypes.c_char_p, ctypes.c_size_t]
+    if hasattr(lib, "stanli_sample_multi_metric"):
+        lib.stanli_metric_opts_init.argtypes = [ctypes.POINTER(_MetricOpts)]
+        lib.stanli_sample_multi_metric.restype = ctypes.c_int
+        lib.stanli_sample_multi_metric.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(_SampleOpts),
+            ctypes.POINTER(_MetricOpts), ctypes.c_int,
+            ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_double),
+            _SampleProgressCallback, ctypes.c_void_p, _SamplePollCallback,
+            ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(_SampleReport), ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_pathfinder_inits.restype = ctypes.c_int
     lib.stanli_pathfinder_inits.argtypes = [
         ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_int,
@@ -794,7 +821,8 @@ class Fit:
     """
 
     def __init__(self, names, draws, sampler_stats, max_depth, seed,
-                 reports=None):
+                 reports=None, metric="diag_e", step_size=None,
+                 inv_metric=None):
         self.names = list(names)
         self._columns = {n: i for i, n in enumerate(self.names)}
         self._variables = _group_variables(self.names)
@@ -802,6 +830,11 @@ class Fit:
         self.sampler_stats = sampler_stats  # (chains, draws, 7)
         self.max_depth = max_depth
         self.seed = seed
+        self.metric = metric
+        self.step_size = (np.full(draws.shape[0], np.nan) if step_size is None
+                          else step_size)
+        self.inv_metric = ([None] * draws.shape[0] if inv_metric is None
+                           else inv_metric)
         self._divergence_counts = None
         self._max_treedepth_counts = None
         if reports is not None:
@@ -1010,6 +1043,40 @@ class OptimizeResult(dict):
         except ValueError:
             return False
         return True
+
+
+def _check_step_size(step_size):
+    if step_size is None:
+        return 1.0
+    ok = (isinstance(step_size, numbers.Real)
+          and not isinstance(step_size, (bool, np.bool_)))
+    if not ok or not math.isfinite(step_size) or step_size <= 0:
+        raise ValueError(
+            f"step_size must be a single positive finite number, "
+            f"got {step_size!r}")
+    return float(step_size)
+
+
+def _inv_metric_buffer(inv_metric, metric, chains, n):
+    if metric == "unit_e":
+        raise ValueError("inv_metric cannot be used with metric='unit_e'")
+    one = (n,) if metric == "diag_e" else (n, n)
+    try:
+        arr = np.asarray(inv_metric)
+        if arr.dtype == object:
+            raise TypeError
+        arr = arr.astype(np.float64)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"inv_metric for {metric} must be numeric with shape {one} or "
+            f"{(chains,) + one}") from None
+    if arr.shape == one:
+        arr = np.broadcast_to(arr, (chains,) + one)
+    elif arr.shape != (chains,) + one:
+        raise ValueError(
+            f"inv_metric for {metric} must have shape {one} or "
+            f"{(chains,) + one}, got {arr.shape}")
+    return np.ascontiguousarray(arr)
 
 
 def _threads_per_chain(value):
@@ -1263,7 +1330,9 @@ class Model:
     def sample(self, *, chains=4, seed=1, warmup=1000, samples=1000,
                delta=0.8, max_depth=10, thin=1, save_warmup=False,
                inits=None, init_radius=2.0, pathfinder_init=None,
-               parallel_chains=None, refresh=100, threads_per_chain=1):
+               parallel_chains=None, refresh=100, threads_per_chain=1,
+               metric="diag_e", inv_metric=None, step_size=None,
+               adapt_engaged=True):
         """NUTS draws as a Fit.
 
         Four chains by default, because R-hat needs more than one and a
@@ -1306,6 +1375,24 @@ class Model:
         `model.reduce_sum_count` and `model.reduce_sum_fallbacks` describe
         retained reductions and graph-lowering refusals.
 
+        `metric` is "diag_e" (the default), "dense_e" or "unit_e", as in
+        CmdStan. `inv_metric` is the starting inverse metric: shape (n,) for
+        "diag_e" or (n, n) for "dense_e" with n the number of unconstrained
+        parameters, shared by every chain, or with a leading chain axis, or a
+        list of one array per chain such as `fit.inv_metric`. None starts from
+        the identity. "unit_e" takes none. `step_size` is the initial step
+        size (default 1). `adapt_engaged=False` runs no adaptation, so the
+        metric and step size stay as given. With warmup under 150 Stan does
+        not adapt the metric and a supplied one is kept, as in CmdStan. With
+        `adapt_engaged=True` and `warmup=0` Stan still runs its initial step
+        size search, so use `adapt_engaged=False` to run at exactly `step_size`.
+
+        The Fit reports `metric`, `step_size` (one per chain) and
+        `inv_metric` (a list with one array per chain, None for "unit_e"):
+        what each chain holds after warmup. A pilot fit's `inv_metric` and
+        mean `step_size` can start a later fit with `warmup=0` and
+        `adapt_engaged=False`.
+
         `refresh` is the number of transitions between CmdStan-shaped
         progress updates. The default is 100; zero disables all automatic
         progress, timing, and sampler-problem output. Reporting only observes
@@ -1317,6 +1404,12 @@ class Model:
         section, and the constrained parameters otherwise.
         """
         threads_per_chain = _threads_per_chain(threads_per_chain)
+        if metric not in _METRICS:
+            raise ValueError(
+                f"metric must be one of {', '.join(_METRICS)}, got {metric!r}")
+        step_size_value = _check_step_size(step_size)
+        if not isinstance(adapt_engaged, (bool, np.bool_)):
+            raise TypeError("adapt_engaged must be a bool")
         self._prepare_run(seed, threads_per_chain)
         if isinstance(refresh, (bool, np.bool_)):
             raise TypeError("refresh must be a nonnegative integer")
@@ -1380,6 +1473,34 @@ class Model:
                     f"scale, got {init_arr.shape}")
             opts.inits = _dptr(init_arr)
 
+        metric_fn = getattr(_lib, "stanli_sample_multi_metric", None)
+        default_metric = (metric == "diag_e" and inv_metric is None
+                          and step_size is None and adapt_engaged)
+        if metric_fn is None and not default_metric:
+            raise RuntimeError(
+                "metric, inv_metric, step_size and adapt_engaged require a "
+                "newer Stanli runtime")
+        metric_opts = _MetricOpts()
+        inv_metric_arr = None
+        adapted_step = None
+        adapted_inv = None
+        if metric_fn is not None:
+            _lib.stanli_metric_opts_init(ctypes.byref(metric_opts))
+            metric_opts.metric = _METRICS.index(metric)
+            metric_opts.step_size = step_size_value
+            metric_opts.adapt_engaged = 1 if adapt_engaged else 0
+            if inv_metric is not None:
+                inv_metric_arr = _inv_metric_buffer(
+                    inv_metric, metric, opts.chains, self.n_unconstrained)
+                metric_opts.inv_metric = _dptr(inv_metric_arr)
+            adapted_step = np.full(opts.chains, np.nan)
+            metric_opts.adapted_step_size = _dptr(adapted_step)
+            if metric != "unit_e":
+                width = self.n_unconstrained * (
+                    self.n_unconstrained if metric == "dense_e" else 1)
+                adapted_inv = np.full((opts.chains, width), np.nan)
+                metric_opts.adapted_inv_metric = _dptr(adapted_inv)
+
         n_stored = _lib.stanli_n_stored_draws(ctypes.byref(opts))
         raw = np.empty((opts.chains, n_stored, self.n_unconstrained))
         stats = np.empty((opts.chains, n_stored, _N_SAMPLER_COLS))
@@ -1409,13 +1530,22 @@ class Model:
         interrupted = ctypes.c_int(0)
         watch = _InterruptWatch()
         with watch:
-            failed = _lib.stanli_sample_multi_write_array(
-                self._m, ctypes.byref(opts), refresh, _dptr(raw),
-                _dptr(stats), _dptr(out), progress_cb, None, watch.poll, None,
-                ctypes.byref(interrupted), reports, err, len(err))
-        del init_arr
+            if metric_fn is None:
+                failed = _lib.stanli_sample_multi_write_array(
+                    self._m, ctypes.byref(opts), refresh, _dptr(raw),
+                    _dptr(stats), _dptr(out), progress_cb, None, watch.poll,
+                    None, ctypes.byref(interrupted), reports, err, len(err))
+            else:
+                failed = metric_fn(
+                    self._m, ctypes.byref(opts), ctypes.byref(metric_opts),
+                    refresh, _dptr(raw), _dptr(stats), _dptr(out), progress_cb,
+                    None, watch.poll, None, ctypes.byref(interrupted), reports,
+                    err, len(err))
+        del init_arr, inv_metric_arr
         if interrupted.value:
             watch.raise_interrupt()
+        if failed and err.value and not err.value.startswith(b"chain "):
+            raise RuntimeError(err.value.decode())
         if failed:
             raise RuntimeError(
                 f"{failed} of {opts.chains} chains failed; first: "
@@ -1424,7 +1554,14 @@ class Model:
             raise callback_errors[0]
 
         first_chain = opts.chain_id if opts.chain_id > 0 else 1
-        fit = Fit(names, out, stats, opts.max_depth, seed, reports)
+        n = self.n_unconstrained
+        fit_inv_metric = None
+        if adapted_inv is not None:
+            shape = (n, n) if metric == "dense_e" else (n,)
+            fit_inv_metric = [row.reshape(shape).copy() for row in adapted_inv]
+        fit = Fit(names, out, stats, opts.max_depth, seed, reports,
+                  metric=metric, step_size=adapted_step,
+                  inv_metric=fit_inv_metric)
         if refresh:
             _print_sample_reports(reports, first_chain, opts.samples,
                                   opts.max_depth)

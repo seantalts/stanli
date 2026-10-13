@@ -7,8 +7,12 @@
 
 #include <stan/callbacks/logger.hpp>
 #include <stan/math/rev/core/chainablestack.hpp>
+#include <stan/mcmc/hmc/nuts/adapt_dense_e_nuts.hpp>
 #include <stan/mcmc/hmc/nuts/adapt_diag_e_nuts.hpp>
+#include <stan/mcmc/hmc/nuts/adapt_unit_e_nuts.hpp>
 #include <stan/services/util/create_rng.hpp>
+#include <stan/services/util/validate_dense_inv_metric.hpp>
+#include <stan/services/util/validate_diag_inv_metric.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -19,17 +23,92 @@
 #include <deque>
 #include <exception>
 #include <mutex>
+#include <stdexcept>
+#include <string>
 #include <thread>
 
 namespace stanli {
+
+namespace {
+
+struct RecordingLogger : stan::callbacks::logger {
+  std::string message;
+  void error(const std::string& m) override {
+    if (!message.empty()) message += " ";
+    message += m;
+  }
+};
+
+template <Metric M, class Sampler>
+std::vector<std::vector<double>> run_nuts_with(Executor& ex,
+                                               const NutsConfig& cfg,
+                                               SamplerStats* stats,
+                                               const DrawObserver& observe,
+                                               const ProgressObserver& progress,
+                                               SamplingReport* report);
+
+}  // namespace
+
+void validate_metric_config(const NutsConfig& cfg, int64_t n_params) {
+  if (!(cfg.step_size > 0) || !std::isfinite(cfg.step_size))
+    throw std::invalid_argument("step_size must be positive and finite");
+  if (cfg.metric == Metric::Unit) {
+    if (cfg.inv_metric)
+      throw std::invalid_argument("unit_e metric takes no inv_metric");
+    return;
+  }
+  if (!cfg.inv_metric) return;
+  RecordingLogger logger;
+  try {
+    if (cfg.metric == Metric::Diag) {
+      stan::services::util::validate_diag_inv_metric(
+          Eigen::Map<const Eigen::VectorXd>(cfg.inv_metric, n_params), logger);
+    } else {
+      stan::services::util::validate_dense_inv_metric(
+          Eigen::Map<const Eigen::MatrixXd>(cfg.inv_metric, n_params, n_params),
+          logger);
+    }
+  } catch (const std::domain_error& e) {
+    throw std::invalid_argument(logger.message.empty() ? e.what()
+                                                       : logger.message);
+  }
+}
 
 std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
                                           SamplerStats* stats,
                                           const DrawObserver& observe,
                                           const ProgressObserver& progress,
                                           SamplingReport* report) {
-  using Clock = std::chrono::steady_clock;
   if (report) *report = SamplingReport{};
+  validate_metric_config(cfg, ex.n_params());
+  using rng_t = stan::rng_t;
+  switch (cfg.metric) {
+    case Metric::Unit:
+      return run_nuts_with<Metric::Unit,
+                           stan::mcmc::adapt_unit_e_nuts<ExecutorModel, rng_t>>(
+          ex, cfg, stats, observe, progress, report);
+    case Metric::Dense:
+      return run_nuts_with<
+          Metric::Dense, stan::mcmc::adapt_dense_e_nuts<ExecutorModel, rng_t>>(
+          ex, cfg, stats, observe, progress, report);
+    case Metric::Diag:
+      break;
+  }
+  return run_nuts_with<Metric::Diag,
+                       stan::mcmc::adapt_diag_e_nuts<ExecutorModel, rng_t>>(
+      ex, cfg, stats, observe, progress, report);
+}
+
+namespace {
+
+template <Metric M, class Sampler>
+std::vector<std::vector<double>> run_nuts_with(Executor& ex,
+                                               const NutsConfig& cfg,
+                                               SamplerStats* stats,
+                                               const DrawObserver& observe,
+                                               const ProgressObserver& progress,
+                                               SamplingReport* report) {
+  using Clock = std::chrono::steady_clock;
   // CmdStan's generator, seeded CmdStan's way: same engine (mixmax in this
   // Stan version, ecuyer1988 in older ones -- create_rng is what tracks
   // that), same (0, 1, seed, chain) construction, chain 1 as the default
@@ -42,7 +121,7 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
   ExecutorModel model(ex);
   WaRng chain_rng(cfg.seed, cfg.chain_id);
   rng_t& rng = chain_rng.gen();
-  stan::mcmc::adapt_diag_e_nuts<ExecutorModel, rng_t> sampler(model, rng);
+  Sampler sampler(model, rng);
   stan::callbacks::logger logger;
 
   const int64_t n = ex.n_params();
@@ -64,18 +143,31 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
   }
   sampler.seed(q);
 
+  if constexpr (M == Metric::Diag) {
+    if (cfg.inv_metric)
+      sampler.set_metric(Eigen::VectorXd(
+          Eigen::Map<const Eigen::VectorXd>(cfg.inv_metric, n)));
+  } else if constexpr (M == Metric::Dense) {
+    if (cfg.inv_metric)
+      sampler.set_metric(Eigen::MatrixXd(
+          Eigen::Map<const Eigen::MatrixXd>(cfg.inv_metric, n, n)));
+  }
+
   // Match CmdStan's service defaults, not base_hmc's 0.1 step size.
   // Initial dual averaging is centered on the requested step size BEFORE
   // init_stepsize searches; recentering on the result changes adaptation.
-  constexpr double initial_stepsize = 1.0;
+  const double initial_stepsize = cfg.step_size;
   sampler.set_nominal_stepsize(initial_stepsize);
   sampler.set_stepsize_jitter(0.0);
   sampler.get_stepsize_adaptation().set_mu(std::log(10.0 * initial_stepsize));
   sampler.get_stepsize_adaptation().set_delta(cfg.delta);
   sampler.set_max_depth(cfg.max_depth);
-  sampler.set_window_params(cfg.warmup, 75, 50, 25, logger);
-  sampler.engage_adaptation();
-  sampler.init_stepsize(logger);
+  if (cfg.adapt) {
+    if constexpr (M != Metric::Unit)
+      sampler.set_window_params(cfg.warmup, 75, 50, 25, logger);
+    sampler.engage_adaptation();
+    sampler.init_stepsize(logger);
+  }
 
   stan::mcmc::sample s(q, 0, 0);
 
@@ -159,7 +251,14 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
   if (report)
     report->warmup_seconds =
         std::chrono::duration<double>(warmup_finished - warmup_started).count();
-  sampler.disengage_adaptation();
+  if (cfg.adapt) sampler.disengage_adaptation();
+  if (report) {
+    report->step_size = sampler.get_nominal_stepsize();
+    if constexpr (M != Metric::Unit) {
+      const auto& inv = sampler.z().inv_e_metric_;
+      report->inv_metric.assign(inv.data(), inv.data() + inv.size());
+    }
+  }
   const auto sampling_started = Clock::now();
   for (int i = 0; i < cfg.samples && !interrupted; ++i) {
     if (stopping())
@@ -174,6 +273,8 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
   }
   return draws;
 }
+
+}  // namespace
 
 std::vector<double> cmdstan_init_point(Executor& ex, uint32_t seed,
                                        int chain_id, double init_radius,
@@ -205,7 +306,8 @@ std::vector<ChainResult> run_nuts_chains(
     const std::vector<Executor*>& execs, const NutsConfig& cfg, int n_threads,
     const DrawObserver& observe, const ChainProgressObserver& progress,
     int progress_refresh, const std::function<bool()>& poll,
-    const StoredDrawWriter& write, const double* inits) {
+    const StoredDrawWriter& write, const double* inits,
+    const double* inv_metrics) {
   const size_t n_chains = execs.size();
   std::vector<ChainResult> out(n_chains);
   std::atomic<bool> local_stop{false};
@@ -220,6 +322,11 @@ std::vector<ChainResult> run_nuts_chains(
     NutsConfig cc = cfg;
     cc.chain_id = cfg.chain_id + (int)c;
     if (inits) cc.init = inits + (int64_t)c * execs[c]->n_params();
+    if (inv_metrics) {
+      const int64_t n = execs[c]->n_params();
+      cc.inv_metric =
+          inv_metrics + (int64_t)c * (cfg.metric == Metric::Dense ? n * n : n);
+    }
     cc.stop = stop;
     cc.poll = chain_poll;
     if (write)

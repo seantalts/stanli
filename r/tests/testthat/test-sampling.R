@@ -368,3 +368,166 @@ test_that("rejected generated quantities preserve the chain", {
   expect_true(all(is.finite(fit$sampler)))
   expect_true(any(is.nan(fit$draws)))
 })
+
+metric_model <- function() {
+  stanli_model(code = "
+    parameters { vector[2] x; }
+    model { x ~ normal(0, [1, 3]'); }")
+}
+
+test_that("dense_e returns an SPD inverse metric and a step size per chain", {
+  skip_without_runtime()
+  fit <- sample_model(metric_model(), chains = 2, seed = 5, warmup = 300,
+                      samples = 50, metric = "dense_e", refresh = 0)
+  expect_identical(fit$metric, "dense_e")
+  expect_length(fit$step_size, 2L)
+  expect_true(all(is.finite(fit$step_size) & fit$step_size > 0))
+  expect_length(fit$inv_metric, 2L)
+  for (m in fit$inv_metric) {
+    expect_true(is.matrix(m))
+    expect_identical(dim(m), c(2L, 2L))
+    expect_true(isSymmetric(m, tol = 1e-12))
+    expect_true(all(eigen(m, symmetric = TRUE, only.values = TRUE)$values > 0))
+  }
+})
+
+test_that("diag_e and unit_e report what the sampler adapted", {
+  skip_without_runtime()
+  m <- metric_model()
+  diag_fit <- sample_model(m, chains = 2, seed = 5, warmup = 300, samples = 50,
+                           refresh = 0)
+  expect_identical(diag_fit$metric, "diag_e")
+  expect_length(diag_fit$inv_metric, 2L)
+  for (v in diag_fit$inv_metric) {
+    expect_true(is.numeric(v) && is.null(dim(v)))
+    expect_length(v, 2L)
+    expect_true(all(v > 0))
+  }
+  expect_false(isTRUE(all.equal(diag_fit$inv_metric[[1]], c(1, 1))))
+  unit_fit <- sample_model(m, chains = 2, seed = 5, warmup = 100, samples = 20,
+                           metric = "unit_e", refresh = 0)
+  expect_identical(unit_fit$metric, "unit_e")
+  expect_identical(unit_fit$inv_metric, list(NULL, NULL))
+  expect_true(all(unit_fit$step_size > 0))
+})
+
+test_that("explicit default metric options reproduce the default run", {
+  skip_without_runtime()
+  m <- metric_model()
+  a <- sample_model(m, chains = 2, seed = 8, warmup = 100, samples = 30,
+                    refresh = 0)
+  b <- sample_model(m, chains = 2, seed = 8, warmup = 100, samples = 30,
+                    metric = "diag_e", inv_metric = c(1, 1), step_size = 1,
+                    adapt_engaged = TRUE, refresh = 0)
+  expect_identical(a$draws, b$draws)
+  expect_identical(a$sampler, b$sampler)
+})
+
+test_that("an adapted metric and step size feed a second fit", {
+  skip_without_runtime()
+  m <- metric_model()
+  pilot <- sample_model(m, chains = 2, seed = 11, warmup = 300, samples = 30,
+                        refresh = 0)
+  eps <- mean(pilot$step_size)
+  fit <- sample_model(m, chains = 2, seed = 12, warmup = 0, samples = 40,
+                      inv_metric = pilot$inv_metric, step_size = eps,
+                      adapt_engaged = FALSE, refresh = 0)
+  expect_true(all(fit$sampler[, , "stepsize__"] == eps))
+  expect_equal(fit$step_size, rep(eps, 2))
+  expect_identical(fit$inv_metric, pilot$inv_metric)
+
+  shared <- sample_model(m, chains = 2, seed = 12, warmup = 0, samples = 40,
+                         inv_metric = pilot$inv_metric[[1]], step_size = eps,
+                         adapt_engaged = FALSE, refresh = 0)
+  expect_identical(shared$inv_metric,
+                   list(pilot$inv_metric[[1]], pilot$inv_metric[[1]]))
+  expect_true(all(shared$sampler[, , "stepsize__"] == eps))
+})
+
+test_that("a supplied dense metric round-trips with adaptation off", {
+  skip_without_runtime()
+  m <- metric_model()
+  S <- matrix(c(2, 0.5, 0.5, 1.5), 2)
+  fit <- sample_model(m, chains = 2, seed = 3, warmup = 0, samples = 20,
+                      metric = "dense_e", inv_metric = S, step_size = 0.25,
+                      adapt_engaged = FALSE, refresh = 0)
+  expect_identical(fit$inv_metric, list(S, S))
+  expect_true(all(fit$sampler[, , "stepsize__"] == 0.25))
+})
+
+test_that("warmup = 0 searches for a step size only while adaptation is engaged", {
+  skip_without_runtime()
+  m <- metric_model()
+  searched <- sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
+                           step_size = 0.25, refresh = 0)
+  expect_false(all(searched$sampler[, , "stepsize__"] == 0.25))
+  fixed <- sample_model(m, chains = 1, seed = 3, warmup = 0, samples = 10,
+                        step_size = 0.25, adapt_engaged = FALSE, refresh = 0)
+  expect_true(all(fixed$sampler[, , "stepsize__"] == 0.25))
+})
+
+test_that("a length-one inverse metric fits a one-parameter model", {
+  skip_without_runtime()
+  fit <- sample_model(progress_model(), chains = 2, seed = 3, warmup = 0,
+                      samples = 10, inv_metric = 4, step_size = 0.5,
+                      adapt_engaged = FALSE, refresh = 0)
+  expect_identical(fit$inv_metric, list(4, 4))
+  dense <- sample_model(progress_model(), chains = 1, seed = 3, warmup = 0,
+                        samples = 10, metric = "dense_e", inv_metric = 4,
+                        step_size = 0.5, adapt_engaged = FALSE, refresh = 0)
+  expect_identical(dense$inv_metric, list(matrix(4, 1, 1)))
+})
+
+test_that("inverse metric shapes are checked before sampling", {
+  skip_without_runtime()
+  m <- metric_model()
+  run <- function(...) sample_model(m, chains = 2, warmup = 10, samples = 10,
+                                    refresh = 0, ...)
+  expect_error(run(inv_metric = c(1, 1, 1)), "length 2")
+  expect_error(run(inv_metric = matrix(1, 2, 2)), "length 2")
+  expect_error(run(metric = "dense_e", inv_metric = c(1, 1)), "2 x 2")
+  expect_error(run(metric = "dense_e", inv_metric = matrix(1, 2, 3)), "2 x 2")
+  expect_error(run(inv_metric = list(c(1, 1), c(1, 1), c(1, 1))),
+               "one element per chain")
+  expect_error(run(inv_metric = list(c(1, 1), c(1, 1, 1))), "length 2")
+  expect_error(run(metric = "unit_e", inv_metric = c(1, 1)), "unit_e")
+  expect_error(run(inv_metric = c(1, NA)), "finite")
+  expect_error(run(inv_metric = "a"), "numeric")
+  expect_error(run(metric = "full_e"), "should be one of")
+})
+
+test_that("a non positive definite inverse metric surfaces Stan's message", {
+  skip_without_runtime()
+  m <- metric_model()
+  expect_error(
+    sample_model(m, chains = 2, warmup = 10, samples = 10, refresh = 0,
+                 metric = "dense_e", inv_metric = matrix(c(1, 2, 2, 1), 2)),
+    "^Inverse Euclidean metric not positive definite")
+  expect_error(
+    sample_model(m, chains = 2, warmup = 10, samples = 10, refresh = 0,
+                 inv_metric = c(1, -1)),
+    "positive")
+})
+
+test_that("step_size and adapt_engaged are validated", {
+  skip_without_runtime()
+  m <- metric_model()
+  run <- function(...) sample_model(m, chains = 2, warmup = 10, samples = 10,
+                                    refresh = 0, ...)
+  for (bad in list(0, -1, NA_real_, Inf, "a", NULL))
+    if (!is.null(bad)) expect_error(run(step_size = bad), "step_size")
+  expect_error(run(step_size = c(0.1, 0.2)), "step_size")
+  expect_error(run(adapt_engaged = NA), "adapt_engaged")
+  expect_error(run(adapt_engaged = c(TRUE, FALSE)), "adapt_engaged")
+})
+
+test_that("fixed_param refuses metric options", {
+  skip_without_runtime()
+  m <- progress_model()
+  for (args in list(list(metric = "dense_e"), list(inv_metric = 1),
+                    list(step_size = 0.5), list(adapt_engaged = FALSE)))
+    expect_error(do.call(sample_model, c(list(m, chains = 1, samples = 5,
+                                              fixed_param = TRUE, refresh = 0),
+                                         args)),
+                 "fixed_param")
+})

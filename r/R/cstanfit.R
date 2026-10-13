@@ -18,7 +18,14 @@
 #'   returns the six sampler diagnostics in stable alphabetical order;
 #'   CmdStanR's CSV order may differ.
 #' * `$metadata()` includes iteration counts **before** thinning, `thin`,
-#'   `save_warmup`, variable names, chain IDs, and sampler settings.
+#'   `save_warmup`, variable names, chain IDs, and sampler settings, including
+#'   `metric`, `step_size_adaptation` (the step size each chain holds after
+#'   warmup, `NA` when unavailable) and `adapt_engaged` (1 or 0).
+#' * `$inv_metric(matrix = TRUE)` returns the inverse metric each chain holds
+#'   after warmup, as a list named by chain id. A `diag_e` metric is a diagonal
+#'   matrix when `matrix = TRUE` and a vector otherwise; a `dense_e` metric is
+#'   always a matrix; a `unit_e` metric is the identity. Fits made by an older
+#'   Stanli version or runtime do not carry it and the method errors.
 #' * `$num_chains()` returns the number of chains.
 #' * `$time()` returns `total` and a `chains` data frame with `chain_id`,
 #'   `warmup`, `sampling`, and `total` seconds. Unavailable timings are `NA`;
@@ -69,6 +76,7 @@ cstan_methods <- function(x) {
     sampler_diagnostics = function(inc_warmup = FALSE, format = "draws_array")
       cstan_diagnostics(x, inc_warmup, format),
     metadata = function() cstan_metadata(x),
+    inv_metric = function(matrix = TRUE) cstan_inv_metric(x, matrix),
     num_chains = function() x$chains,
     time = function() cstan_time(x),
     loo = function(variables = "log_lik", r_eff = TRUE, moment_match = FALSE, ...)
@@ -116,7 +124,30 @@ cstan_metadata <- function(x) {
     stan_variables = layout$parameters,
     stan_variable_sizes = lapply(layout$dimensions, function(d) if (length(d)) d else 1L),
     sampler_diagnostics = cstan_diagnostic_names(), adapt_delta = x$delta,
-    max_treedepth = x$max_depth, seed = x$seed)
+    max_treedepth = x$max_depth, seed = x$seed,
+    metric = if (is.null(x$metric)) "diag_e" else x$metric,
+    step_size_adaptation = if (is.null(x$step_size)) rep(NA_real_, x$chains) else x$step_size,
+    adapt_engaged = if (is.null(x$adapt_engaged)) 1L else as.integer(x$adapt_engaged))
+}
+
+cstan_inv_metric <- function(x, matrix = TRUE) {
+  stanfit_flag(matrix, "matrix")
+  if (is.null(x$metric) || length(x$inv_metric) != x$chains ||
+      (x$metric != "unit_e" && any(vapply(x$inv_metric, is.null, logical(1)))))
+    stop("this fit does not carry the adapted inverse metric; sample with ",
+         "the current Stanli version and runtime", call. = FALSE)
+  n <- dim(x$unconstrained)[3L]
+  out <- lapply(x$inv_metric, function(m) {
+    if (x$metric == "unit_e") m <- rep(1, n)
+    if (matrix && !is.matrix(m)) {
+      m <- if (x$metric == "unit_e") diag(n) else diag(m, nrow = length(m))
+    } else if (!matrix && length(m) == 1L) {
+      m <- array(m, dim = 1L)
+    }
+    m
+  })
+  names(out) <- as.character(seq_len(x$chains))
+  out
 }
 
 cstan_time <- function(x) {

@@ -342,6 +342,27 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #' @param refresh Print a progress update every `refresh` transitions within
 #'   each phase, plus the first and last transition of the phase. Set to 0 to
 #'   suppress all automatic sampling output.
+#' @param metric The metric: `"diag_e"` (the default), `"dense_e"` or
+#'   `"unit_e"`, as in CmdStan.
+#' @param inv_metric Optional starting inverse metric. For `"diag_e"`, a
+#'   numeric vector with one value per unconstrained parameter. For
+#'   `"dense_e"`, a symmetric positive definite matrix with one row and column
+#'   per unconstrained parameter. A list with one such element per chain gives
+#'   each chain its own; a single vector or matrix is used for every chain.
+#'   `NULL` starts from the identity. A `"unit_e"` metric takes none. Stan
+#'   checks the values and its message is reported when they are not valid.
+#'   With adaptation on, the metric is adapted during warmup from this start.
+#' @param step_size Optional initial step size, a single positive number used
+#'   by every chain. `NULL` uses 1, as CmdStan does. With adaptation on it is
+#'   the starting point of the step size search and of dual averaging.
+#' @param adapt_engaged `TRUE` (the default) adapts the step size and, unless
+#'   `metric = "unit_e"`, the metric during warmup. `FALSE` runs no adaptation:
+#'   `warmup` iterations are ordinary transitions and `inv_metric` and
+#'   `step_size` are used as given. With `warmup = 0` and `adapt_engaged =
+#'   TRUE`, stanli still runs Stan's initial step size search, as Stan's
+#'   adaptive sampler does, so the step size in use differs from `step_size`.
+#'   To use a supplied step size exactly, set `adapt_engaged = FALSE`, as with
+#'   CmdStanR.
 #' @details Interrupting R (Ctrl-C, or the stop button in RStudio) stops
 #'   every chain after its current transition and raises the usual
 #'   interrupt; no fit is returned.
@@ -352,15 +373,35 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   `NA`. Sampling metadata (`warmup`, `samples`, `thin`, `save_warmup`,
 #'   `chains`, and `delta`) records the configuration for downstream conversion;
 #'   iteration counts are before thinning.
+#'
+#'   `metric` is the metric used. `step_size` is a numeric vector with the
+#'   step size each chain holds after warmup (the value CmdStan writes as
+#'   "Step size"). `inv_metric` is a list with one element per chain holding
+#'   the inverse metric after warmup: a numeric vector for `"diag_e"`, an
+#'   n x n matrix for `"dense_e"` and `NULL` for `"unit_e"`. With a runtime
+#'   that predates these options, `step_size` is `NA` and `inv_metric` holds
+#'   `NULL`s. Passing `inv_metric = fit$inv_metric`, `step_size =
+#'   mean(fit$step_size)` and `adapt_engaged = FALSE` to a later call reuses
+#'   an adapted metric and step size.
 #' @export
 sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          samples = 1000, thin = 1, delta = 0.8,
                          max_depth = 10, save_warmup = FALSE, init = NULL,
                          init_radius = 2, pathfinder_init = NULL,
                          parallel_chains = NULL, refresh = 100,
-                         threads_per_chain = 1, fixed_param = FALSE) {
+                         threads_per_chain = 1, fixed_param = FALSE,
+                         metric = c("diag_e", "dense_e", "unit_e"),
+                         inv_metric = NULL, step_size = NULL,
+                         adapt_engaged = TRUE) {
   cstan_integer(threads_per_chain, "threads_per_chain")
   stanfit_flag(fixed_param, "fixed_param")
+  metric <- match.arg(metric)
+  stanfit_flag(adapt_engaged, "adapt_engaged")
+  check_step_size(step_size)
+  if (fixed_param && (metric != "diag_e" || !is.null(inv_metric) ||
+                      !is.null(step_size) || !adapt_engaged))
+    stop("metric, inv_metric, step_size and adapt_engaged do not apply with ",
+         "fixed_param = TRUE", call. = FALSE)
   if (fixed_param && !is.null(pathfinder_init))
     stop("pathfinder_init does not apply with fixed_param = TRUE",
          call. = FALSE)
@@ -404,7 +445,10 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                as.integer(samples), as.integer(thin), as.double(delta),
                as.integer(max_depth), isTRUE(save_warmup),
                as.double(init_radius), as.integer(parallel_chains))
-  res <- .Call("stanli_r_sample", model$ptr, opts, init_vec, refresh)
+  metric_opts <- metric_options(metric, inv_metric, step_size, adapt_engaged,
+                                as.integer(chains), model$n_unconstrained)
+  res <- .Call("stanli_r_sample", model$ptr, opts, init_vec, refresh,
+               metric_opts)
   if (isTRUE(res$interrupted)) {
     signalCondition(structure(class = c("interrupt", "condition"),
                               list(message = "sampling interrupted",
@@ -439,8 +483,77 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                    as.integer(ceiling(warmup / max(1, thin))) else 0L,
                  warmup = as.integer(warmup), thin = as.integer(max(1, thin)),
                  samples = as.integer(samples), save_warmup = isTRUE(save_warmup),
-                 chains = as.integer(nchain), delta = as.double(delta)),
+                 chains = as.integer(nchain), delta = as.double(delta),
+                 metric = metric, step_size = res$step_size,
+                 inv_metric = split_inv_metric(res$inv_metric, metric, nchain,
+                                               model$n_unconstrained),
+                 adapt_engaged = adapt_engaged),
             class = "stanli_fit")
+}
+
+check_step_size <- function(step_size) {
+  if (is.null(step_size)) return(invisible(NULL))
+  if (!is.numeric(step_size) || length(step_size) != 1L ||
+      !is.finite(step_size) || step_size <= 0)
+    stop("step_size must be a single positive finite number",
+         call. = FALSE)
+  invisible(NULL)
+}
+
+metric_kinds <- c(unit_e = 0L, diag_e = 1L, dense_e = 2L)
+
+metric_length <- function(metric, n) {
+  switch(metric, unit_e = 0, diag_e = n, dense_e = n * n)
+}
+
+check_inv_metric <- function(x, metric, n) {
+  if (!is.numeric(x))
+    stop("inv_metric must be numeric", call. = FALSE)
+  if (metric == "diag_e") {
+    if (length(x) != n || length(dim(x)) > 1L)
+      stop("inv_metric for diag_e must be a numeric vector of length ", n,
+           call. = FALSE)
+  } else if (is.matrix(x) || (n == 1L && length(x) == 1L)) {
+    if (length(x) != n * n || (is.matrix(x) && !identical(dim(x), c(n, n))))
+      stop("inv_metric for dense_e must be a ", n, " x ", n, " matrix",
+           call. = FALSE)
+  } else {
+    stop("inv_metric for dense_e must be a ", n, " x ", n, " matrix",
+         call. = FALSE)
+  }
+  as.double(x)
+}
+
+metric_options <- function(metric, inv_metric, step_size, adapt_engaged,
+                           chains, n) {
+  flat <- numeric(0)
+  if (!is.null(inv_metric)) {
+    if (metric == "unit_e")
+      stop("inv_metric cannot be used with metric = \"unit_e\"", call. = FALSE)
+    per_chain <- if (is.list(inv_metric)) {
+      if (length(inv_metric) != chains)
+        stop("an inv_metric list must have one element per chain (", chains,
+             ")", call. = FALSE)
+      inv_metric
+    } else {
+      rep(list(inv_metric), chains)
+    }
+    flat <- unlist(lapply(per_chain, check_inv_metric, metric = metric, n = n),
+                   use.names = FALSE)
+  }
+  list(unname(metric_kinds[metric]), flat,
+       if (is.null(step_size)) 1 else as.double(step_size),
+       isTRUE(adapt_engaged))
+}
+
+split_inv_metric <- function(flat, metric, chains, n) {
+  len <- metric_length(metric, n)
+  if (len == 0 || length(flat) != chains * len || anyNA(flat))
+    return(rep(list(NULL), chains))
+  lapply(seq_len(chains), function(chain) {
+    x <- flat[(chain - 1) * len + seq_len(len)]
+    if (metric == "dense_e") matrix(x, n, n) else x
+  })
 }
 
 .pathfinder_init_options <- function(x) {

@@ -43,7 +43,14 @@ Neither cmdstanr nor rstan is needed. The original fit is unchanged.
   returns the six sampler diagnostics in stable alphabetical order;
   CmdStanR's CSV order may differ.
 * `$metadata()` includes iteration counts **before** thinning, `thin`,
-  `save_warmup`, variable names, chain IDs, and sampler settings.
+  `save_warmup`, variable names, chain IDs, and sampler settings, including
+  `metric`, `step_size_adaptation` (the step size each chain holds after
+  warmup, `NA` when unavailable) and `adapt_engaged` (1 or 0).
+* `$inv_metric(matrix = TRUE)` returns the inverse metric each chain holds
+  after warmup, as a list named by chain id. A `diag_e` metric is a diagonal
+  matrix when `matrix = TRUE` and a vector otherwise; a `dense_e` metric is
+  always a matrix; a `unit_e` metric is the identity. Fits made by an older
+  Stanli version or runtime do not carry it and the method errors.
 * `$num_chains()` returns the number of chains.
 * `$time()` returns `total` and a `chains` data frame with `chain_id`,
   `warmup`, `sampling`, and `total` seconds. Unavailable timings are `NA`;

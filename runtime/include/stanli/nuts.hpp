@@ -17,6 +17,8 @@ namespace stanli {
 class WaRng;
 using SamplerRow = std::array<double, 7>;
 
+enum class Metric { Unit, Diag, Dense };
+
 struct NutsConfig {
   uint32_t seed = 0;
   // CmdStan's chain id, which is what makes chain c of a run a different
@@ -30,6 +32,18 @@ struct NutsConfig {
   // thin=2 keeps samples/2 rows.
   int thin = 1;
   double delta = 0.8;  // target acceptance statistic
+  // CmdStan's `metric`. Unit takes no inv_metric.
+  Metric metric = Metric::Diag;
+  // Starting inverse metric: n values for Diag, n*n for Dense (symmetric, so
+  // row- and column-major agree), null for the identity. Checked with
+  // stan::services::util::validate_{diag,dense}_inv_metric.
+  const double* inv_metric = nullptr;
+  // CmdStan's `stepsize`: the starting step size, which also centres dual
+  // averaging at log(10 * step_size).
+  double step_size = 1.0;
+  // CmdStan's `adapt engaged`. When false no step size search or adaptation
+  // runs, and warmup iterations are plain transitions.
+  bool adapt = true;
   // stan::mcmc::base_nuts defaults this to 5; CmdStan sets 10 and so must
   // we, or trajectories cap at 31 leapfrogs instead of 1023 and any model
   // needing deep trees is silently under-explored.
@@ -89,6 +103,11 @@ struct SamplingReport {
   int64_t n_divergent = 0;
   int64_t n_max_treedepth = 0;
   bool interrupted = false;
+  // The sampler's nominal step size and inverse metric after warmup (the
+  // values CmdStan writes as "Step size" and the adapted metric). inv_metric
+  // is n values for Diag, n*n for Dense (column-major), empty for Unit.
+  double step_size = 0;
+  std::vector<double> inv_metric;
 };
 
 // Optional per-transition observer for streaming consumers (the browser
@@ -103,9 +122,14 @@ using DrawObserver =
 // current phase and the callback runs after that transition completes.
 using ProgressObserver = std::function<void(int64_t i, bool warmup)>;
 
-// Adaptive diagonal-metric NUTS (stan::mcmc::adapt_diag_e_nuts) over the
-// executor's log_prob_grad. Returns one unconstrained parameter vector per
-// stored draw. `stats`, when non-null, receives one row per stored draw.
+// Throws std::invalid_argument when cfg's metric, inv_metric and step_size
+// are unusable for an n-parameter model. run_nuts calls this first.
+void validate_metric_config(const NutsConfig& cfg, int64_t n_params);
+
+// NUTS over the executor's log_prob_grad with the metric cfg.metric
+// (stan::mcmc::adapt_{unit,diag,dense}_e_nuts). Returns one unconstrained
+// parameter vector per stored draw. `stats`, when non-null, receives one row
+// per stored draw.
 std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
                                           SamplerStats* stats = nullptr,
                                           const DrawObserver& observe = {},
@@ -155,12 +179,15 @@ bool should_report_progress(const NutsConfig& cfg, int64_t i, bool warmup,
 // `inits`, when non-null, holds one unconstrained starting point per chain,
 // chain-major with n_params values each; it replaces cfg.init for every
 // chain and runs under the same threading as the draw-from-radius case.
+// `inv_metrics`, when non-null, is the same for the starting inverse metric:
+// chain-major, n_params values per chain for Diag or n_params^2 for Dense,
+// replacing cfg.inv_metric.
 std::vector<ChainResult> run_nuts_chains(
     const std::vector<Executor*>& execs, const NutsConfig& cfg,
     int n_threads = 1, const DrawObserver& observe = {},
     const ChainProgressObserver& progress = {}, int progress_refresh = 1,
     const std::function<bool()>& poll = {}, const StoredDrawWriter& write = {},
-    const double* inits = nullptr);
+    const double* inits = nullptr, const double* inv_metrics = nullptr);
 
 // Build `n` executors over the same compiled graph, copying it out of an
 // already-bound one. The caller keeps ownership; `src` is not modified.
