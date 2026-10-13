@@ -266,6 +266,60 @@ int main() {
     expect("threaded chains with inits equal each chain run alone", same);
   }
 
+  // ---- per-chain inverse metrics are threaded like inits ------------------
+  for (const Metric metric : {Metric::Diag, Metric::Dense}) {
+    const int C = 3;
+    const int D = 3;
+    const size_t stride = (size_t)(metric == Metric::Dense ? D * D : D);
+    std::vector<double> metrics(C * stride, 0.0);
+    for (int c = 0; c < C; ++c)
+      for (int i = 0; i < D; ++i) {
+        const size_t at =
+            metric == Metric::Dense ? (size_t)(i * D + i) : (size_t)i;
+        metrics[(size_t)c * stride + at] = 0.5 + 0.25 * c + 0.1 * i;
+      }
+
+    Executor a(normal_graph(D));
+    a.value_ptr(2)[0] = 1.0;
+    auto ca = clone_executors(a, C - 1);
+    std::vector<Executor*> ea{&a};
+    for (auto& c : ca) ea.push_back(c.get());
+
+    NutsConfig cfg;
+    cfg.seed = 78;
+    cfg.warmup = 60;
+    cfg.samples = 40;
+    cfg.metric = metric;
+    cfg.step_size = 0.4;
+    auto par =
+        run_nuts_chains(ea, cfg, C, {}, {}, 1, {}, {}, nullptr, metrics.data());
+
+    bool same = par.size() == (size_t)C;
+    bool distinct = true;
+    for (int c = 0; same && c < C; ++c) {
+      Executor solo(normal_graph(D));
+      solo.value_ptr(2)[0] = 1.0;
+      NutsConfig one = cfg;
+      one.chain_id = cfg.chain_id + c;
+      one.inv_metric = metrics.data() + (size_t)c * stride;
+      SamplingReport report;
+      same = par[(size_t)c].error.empty() &&
+             par[(size_t)c].draws ==
+                 run_nuts(solo, one, nullptr, {}, {}, &report) &&
+             par[(size_t)c].report.step_size == report.step_size &&
+             par[(size_t)c].report.inv_metric == report.inv_metric &&
+             report.inv_metric.size() == stride;
+      if (c > 0)
+        distinct = distinct &&
+                   par[(size_t)c].report.inv_metric != par[0].report.inv_metric;
+    }
+    expect(metric == Metric::Dense ? "dense chains with per-chain inv_metrics "
+                                     "equal each chain run alone"
+                                   : "diag chains with per-chain inv_metrics "
+                                     "equal each chain run alone",
+           same && distinct);
+  }
+
   // ---- progress is rate-limited, caller-threaded, and observational ----
   {
     NutsConfig schedule;

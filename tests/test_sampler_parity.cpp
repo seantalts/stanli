@@ -9,10 +9,18 @@
 #include <stanli/nuts.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include <stan/callbacks/structured_writer.hpp>
+#include <stan/io/array_var_context.hpp>
 #include <stan/io/empty_var_context.hpp>
+#include <stan/services/sample/hmc_nuts_dense_e.hpp>
+#include <stan/services/sample/hmc_nuts_dense_e_adapt.hpp>
+#include <stan/services/sample/hmc_nuts_diag_e.hpp>
 #include <stan/services/sample/hmc_nuts_diag_e_adapt.hpp>
+#include <stan/services/sample/hmc_nuts_unit_e_adapt.hpp>
 
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -111,6 +119,266 @@ bool compare(bool schools, int scenario) {
   std::printf("PASS %s case %d: %zu rows bitwise equal to Stan service\n", name,
               scenario, expected);
   return true;
+}
+
+struct MetricCapture : stan::callbacks::structured_writer {
+  using stan::callbacks::structured_writer::write;
+  bool has_step = false;
+  double step = 0;
+  std::vector<double> inv;
+  void write(const std::string& key, double value) override {
+    if (key == "stepsize") {
+      step = value;
+      has_step = true;
+    }
+  }
+  void write(const std::string& key, const Eigen::MatrixXd& m) override {
+    if (key == "inv_metric") inv.assign(m.data(), m.data() + m.size());
+  }
+  void write(const std::string& key, const Eigen::VectorXd& v) override {
+    if (key == "inv_metric") inv.assign(v.data(), v.data() + v.size());
+  }
+};
+
+struct MetricCase {
+  const char* label;
+  stanli::Metric metric;
+  bool adapt;
+  bool supply_inv;
+  double step_size;
+  int warmup;
+  bool save_warmup;
+  int thin;
+};
+
+std::vector<double> sample_inv_metric(stanli::Metric metric, int n) {
+  if (metric == stanli::Metric::Diag) {
+    std::vector<double> d(n);
+    for (int i = 0; i < n; ++i) d[i] = 0.4 + 0.35 * i;
+    return d;
+  }
+  std::vector<double> m((size_t)n * n);
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j < n; ++j)
+      m[(size_t)i * n + j] =
+          i == j ? 0.5 + 0.2 * i : 0.15 / (1.0 + std::abs(i - j));
+  return m;
+}
+
+bool same_bits(const std::vector<double>& a, const std::vector<double>& b) {
+  return a.size() == b.size() &&
+         (a.empty() || !std::memcmp(a.data(), b.data(), a.size() * 8));
+}
+
+bool compare_metric(bool schools, const MetricCase& k, int index) {
+  stanli::NutsConfig cfg;
+  cfg.seed = 31 + index;
+  cfg.chain_id = 2 + index;
+  cfg.samples = 30;
+  cfg.warmup = k.warmup;
+  cfg.save_warmup = k.save_warmup;
+  cfg.thin = k.thin;
+  cfg.max_depth = 8;
+  cfg.metric = k.metric;
+  cfg.adapt = k.adapt;
+  cfg.step_size = k.step_size;
+
+  auto ours = make_executor(schools);
+  auto reference = make_executor(schools);
+  const int n = (int)ours->n_params();
+  std::vector<double> inv;
+  if (k.supply_inv) {
+    inv = sample_inv_metric(k.metric, n);
+    cfg.inv_metric = inv.data();
+  }
+  stanli::SamplerStats stats;
+  stanli::SamplingReport report;
+  const auto draws = stanli::run_nuts(*ours, cfg, &stats, {}, {}, &report);
+
+  stanli::ExecutorModel model(*reference);
+  stan::io::empty_var_context init;
+  stan::callbacks::interrupt interrupt;
+  stan::callbacks::logger logger;
+  stan::callbacks::writer init_writer, diagnostic_writer;
+  Rows writer;
+  MetricCapture captured;
+  const std::vector<std::string> names =
+      k.supply_inv ? std::vector<std::string>{"inv_metric"}
+                   : std::vector<std::string>{};
+  std::vector<std::vector<size_t>> dims;
+  if (k.supply_inv)
+    dims.push_back(k.metric == stanli::Metric::Dense
+                       ? std::vector<size_t>{(size_t)n, (size_t)n}
+                       : std::vector<size_t>{(size_t)n});
+  stan::io::array_var_context inv_context(names, inv, dims);
+  int status = -1;
+  using stanli::Metric;
+  if (k.adapt) {
+    if (k.metric == Metric::Unit) {
+      status = stan::services::sample::hmc_nuts_unit_e_adapt(
+          model, init, cfg.seed, cfg.chain_id, cfg.init_radius, cfg.warmup,
+          cfg.samples, cfg.thin, cfg.save_warmup, 0, cfg.step_size, 0.0,
+          cfg.max_depth, cfg.delta, 0.05, 0.75, 10.0, interrupt, logger,
+          init_writer, writer, diagnostic_writer, captured);
+    } else if (k.metric == Metric::Diag) {
+      if (k.supply_inv)
+        status = stan::services::sample::hmc_nuts_diag_e_adapt(
+            model, init, inv_context, cfg.seed, cfg.chain_id, cfg.init_radius,
+            cfg.warmup, cfg.samples, cfg.thin, cfg.save_warmup, 0,
+            cfg.step_size, 0.0, cfg.max_depth, cfg.delta, 0.05, 0.75, 10.0, 75,
+            50, 25, interrupt, logger, init_writer, writer, diagnostic_writer,
+            captured);
+      else
+        status = stan::services::sample::hmc_nuts_diag_e_adapt(
+            model, init, cfg.seed, cfg.chain_id, cfg.init_radius, cfg.warmup,
+            cfg.samples, cfg.thin, cfg.save_warmup, 0, cfg.step_size, 0.0,
+            cfg.max_depth, cfg.delta, 0.05, 0.75, 10.0, 75, 50, 25, interrupt,
+            logger, init_writer, writer, diagnostic_writer, captured);
+    } else {
+      if (k.supply_inv)
+        status = stan::services::sample::hmc_nuts_dense_e_adapt(
+            model, init, inv_context, cfg.seed, cfg.chain_id, cfg.init_radius,
+            cfg.warmup, cfg.samples, cfg.thin, cfg.save_warmup, 0,
+            cfg.step_size, 0.0, cfg.max_depth, cfg.delta, 0.05, 0.75, 10.0, 75,
+            50, 25, interrupt, logger, init_writer, writer, diagnostic_writer,
+            captured);
+      else
+        status = stan::services::sample::hmc_nuts_dense_e_adapt(
+            model, init, cfg.seed, cfg.chain_id, cfg.init_radius, cfg.warmup,
+            cfg.samples, cfg.thin, cfg.save_warmup, 0, cfg.step_size, 0.0,
+            cfg.max_depth, cfg.delta, 0.05, 0.75, 10.0, 75, 50, 25, interrupt,
+            logger, init_writer, writer, diagnostic_writer, captured);
+    }
+  } else {
+    if (k.metric == Metric::Diag)
+      status = stan::services::sample::hmc_nuts_diag_e(
+          model, init, inv_context, cfg.seed, cfg.chain_id, cfg.init_radius,
+          cfg.warmup, cfg.samples, cfg.thin, cfg.save_warmup, 0, cfg.step_size,
+          0.0, cfg.max_depth, interrupt, logger, init_writer, writer,
+          diagnostic_writer);
+    else
+      status = stan::services::sample::hmc_nuts_dense_e(
+          model, init, inv_context, cfg.seed, cfg.chain_id, cfg.init_radius,
+          cfg.warmup, cfg.samples, cfg.thin, cfg.save_warmup, 0, cfg.step_size,
+          0.0, cfg.max_depth, interrupt, logger, init_writer, writer,
+          diagnostic_writer);
+  }
+
+  const char* name = schools ? "eight-schools" : "normal";
+  const size_t expected =
+      (cfg.samples + cfg.thin - 1) / cfg.thin +
+      (cfg.save_warmup ? (cfg.warmup + cfg.thin - 1) / cfg.thin : 0);
+  if (status != 0 || draws.size() != expected ||
+      stats.rows.size() != expected || writer.rows.size() != expected) {
+    std::printf(
+        "FAIL %s metric case '%s': status %d, rows %zu/%zu, expected %zu\n",
+        name, k.label, status, draws.size(), writer.rows.size(), expected);
+    return false;
+  }
+  for (size_t r = 0; r < expected; ++r) {
+    std::vector<double> row(stats.rows[r].begin(), stats.rows[r].end());
+    row.insert(row.end(), draws[r].begin(), draws[r].end());
+    if (row.size() != writer.rows[r].size() ||
+        std::memcmp(row.data(), writer.rows[r].data(), row.size() * 8)) {
+      std::printf(
+          "FAIL %s metric case '%s' row %zu differs from Stan service\n", name,
+          k.label, r);
+      return false;
+    }
+    if (!k.adapt && stats.rows[r][2] != k.step_size) {
+      std::printf(
+          "FAIL %s metric case '%s' row %zu: stepsize__ %.17g != %.17g\n", name,
+          k.label, r, stats.rows[r][2], k.step_size);
+      return false;
+    }
+  }
+
+  std::vector<double> want_inv;
+  double want_step = k.step_size;
+  if (k.adapt) {
+    if (!captured.has_step) {
+      std::printf("FAIL %s metric case '%s': no metric writer record\n", name,
+                  k.label);
+      return false;
+    }
+    want_step = captured.step;
+    if (k.metric != Metric::Unit) want_inv = captured.inv;
+  } else if (k.metric != Metric::Unit) {
+    want_inv = inv;
+  }
+  if (std::memcmp(&report.step_size, &want_step, 8) ||
+      !same_bits(report.inv_metric, want_inv)) {
+    std::printf(
+        "FAIL %s metric case '%s': report step %.17g (want %.17g), "
+        "inv_metric size %zu (want %zu) or contents differ\n",
+        name, k.label, report.step_size, want_step, report.inv_metric.size(),
+        want_inv.size());
+    return false;
+  }
+  if (k.adapt && k.warmup >= 100 && k.metric != Metric::Unit && !k.supply_inv &&
+      same_bits(report.inv_metric, sample_inv_metric(k.metric, n))) {
+    std::printf("FAIL %s metric case '%s': metric never adapted\n", name,
+                k.label);
+    return false;
+  }
+  std::printf(
+      "PASS %s metric case '%s': %zu rows bitwise equal to Stan "
+      "service, step size %.17g\n",
+      name, k.label, expected, report.step_size);
+  return true;
+}
+
+bool throws_invalid(const stanli::NutsConfig& cfg, const char* what) {
+  auto ex = make_executor(false);
+  try {
+    stanli::run_nuts(*ex, cfg);
+  } catch (const std::invalid_argument& e) {
+    std::printf("PASS invalid %s rejected: %s\n", what, e.what());
+    return true;
+  } catch (const std::exception& e) {
+    std::printf("FAIL invalid %s threw a different type: %s\n", what, e.what());
+    return false;
+  }
+  std::printf("FAIL invalid %s was accepted\n", what);
+  return false;
+}
+
+bool check_invalid_inputs() {
+  using stanli::Metric;
+  bool ok = true;
+  const int n = 4;
+  stanli::NutsConfig base;
+  base.warmup = 5;
+  base.samples = 5;
+
+  std::vector<double> bad_dense((size_t)n * n, 0.0);
+  for (int i = 0; i < n; ++i) bad_dense[(size_t)i * n + i] = 1.0;
+  bad_dense[1 * n + 1] = -2.0;
+  auto cfg = base;
+  cfg.metric = Metric::Dense;
+  cfg.inv_metric = bad_dense.data();
+  ok &= throws_invalid(cfg, "non-SPD dense inv_metric");
+
+  std::vector<double> bad_diag{1.0, 2.0, 0.0, 1.0};
+  cfg = base;
+  cfg.inv_metric = bad_diag.data();
+  ok &= throws_invalid(cfg, "zero diag inv_metric entry");
+  bad_diag[2] = std::numeric_limits<double>::quiet_NaN();
+  ok &= throws_invalid(cfg, "NaN diag inv_metric entry");
+
+  std::vector<double> some(n, 1.0);
+  cfg = base;
+  cfg.metric = Metric::Unit;
+  cfg.inv_metric = some.data();
+  ok &= throws_invalid(cfg, "unit_e with inv_metric");
+
+  for (double bad : {0.0, -1.0, std::numeric_limits<double>::infinity(),
+                     std::numeric_limits<double>::quiet_NaN()}) {
+    cfg = base;
+    cfg.step_size = bad;
+    ok &= throws_invalid(cfg, "step_size");
+  }
+  return ok;
 }
 
 // An independent write_array implementation for the Stan fixtures below.
@@ -297,6 +565,24 @@ int main() {
   for (bool schools : {false, true})
     for (int scenario = 0; scenario < 4; ++scenario)
       if (!compare(schools, scenario)) ++failures;
+  using stanli::Metric;
+  const MetricCase metric_cases[] = {
+      {"dense_e adapt, default metric", Metric::Dense, true, false, 1.0, 200,
+       false, 1},
+      {"dense_e adapt, supplied metric", Metric::Dense, true, true, 0.3, 100,
+       true, 1},
+      {"diag_e adapt, supplied metric", Metric::Diag, true, true, 0.3, 100,
+       true, 2},
+      {"unit_e adapt", Metric::Unit, true, false, 1.0, 60, true, 1},
+      {"dense_e fixed", Metric::Dense, false, true, 0.25, 0, false, 1},
+      {"diag_e fixed with warmup", Metric::Diag, false, true, 0.25, 20, true,
+       1},
+  };
+  int index = 0;
+  for (bool schools : {false, true})
+    for (const auto& k : metric_cases)
+      if (!compare_metric(schools, k, index++)) ++failures;
+  if (!check_invalid_inputs()) ++failures;
   for (bool interpreted : {false, true})
     for (int mode = 0; mode < 3; ++mode)
       for (int scenario = 0; scenario < 4; ++scenario)
