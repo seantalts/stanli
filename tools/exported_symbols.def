@@ -61,6 +61,8 @@ EXPORTS
   stanli_sample_multi_progress
   stanli_sample_multi_interruptible
   stanli_sample_multi_write_array
+  stanli_metric_opts_init
+  stanli_sample_multi_metric
   stanli_sampler_column_name
   stanli_summary_stats
   stanli_diagnose_text
