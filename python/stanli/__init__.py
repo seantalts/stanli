@@ -1058,7 +1058,6 @@ def _check_step_size(step_size):
 
 
 def _inv_metric_buffer(inv_metric, metric, chains, n):
-    """Chain-major float64 buffer of the starting inverse metric."""
     if metric == "unit_e":
         raise ValueError("inv_metric cannot be used with metric='unit_e'")
     one = (n,) if metric == "diag_e" else (n, n)
