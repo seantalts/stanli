@@ -3450,6 +3450,123 @@ static DataMap runtime_slice_data(int op) {
   return data;
 }
 
+using Var = stan::math::var;
+
+static std::optional<CompiledModel> try_compile_fixture(const char* name,
+                                                        const DataMap& data,
+                                                        Mode mode) {
+  try {
+    return compile_fixture(name, data, mode);
+  } catch (const std::exception& e) {
+    std::printf("  %s: %s\n", name, e.what());
+    return std::nullopt;
+  }
+}
+
+static void check_reference_point(
+    const CompiledModel& model, const std::vector<double>& point,
+    const std::function<Var(const std::vector<Var>&)>& lp, const char* name) {
+  std::vector<Var> inputs(point.begin(), point.end());
+  Var value = lp(inputs);
+  std::vector<double> expected;
+  value.grad(inputs, expected);
+  Executor ex(model.graph);
+  model.bind(ex);
+  std::copy(point.begin(), point.end(), ex.params_data());
+  std::vector<double> gradient(point.size());
+  close(ex.gradient(gradient.data()), value.val(), name);
+  for (size_t i = 0; i < point.size(); ++i)
+    close(gradient[i], expected[i], name);
+  stan::math::recover_memory();
+}
+
+static void zero_length_matrix_udf_tests() {
+  const DataMap data =
+      DataMap::from_json_file("tests/fixtures/structured_zero_matrix_udf.json");
+  const auto& y = data.at("y").r;
+  const auto lp = [&](const std::vector<Var>& u) {
+    using namespace stan::math;
+    const Var mu = u[0], sigma = exp(u[1]);
+    Var s = 0, total = u[1];
+    for (const double yn : y) {
+      s = tanh(0.8 * s + u[2] * yn + u[3] * 0.5);
+      total += normal_lpdf(yn, mu + s, sigma);
+    }
+    return total + normal_lpdf(mu, 0, 2) + lognormal_lpdf(sigma, 0, 1) +
+           normal_lpdf(u[2], 0, 1) + normal_lpdf(u[3], 0, 1);
+  };
+  const std::vector<std::vector<double>> points = {
+      {.2, -.3, .5, -.4}, {-.1, .4, 1.1, .3}, {.7, 0., -.6, .9}};
+  const auto structured =
+      try_compile_fixture("structured_zero_matrix_udf", data, Mode::Prefer);
+  size_t loops = 0;
+  if (structured)
+    for (const auto& op : structured->graph.ops) loops += op.opcode == OP_LOOP;
+  check(loops == 1 && structured->graph.ops.size() < 64,
+        "zero-length matrix assigned from a UDF keeps its loop structured");
+  if (loops != 1) return;
+  for (const auto& point : points)
+    check_reference_point(*structured, point, lp,
+                          "zero-length matrix UDF reference");
+  const auto legacy =
+      try_compile_fixture("structured_zero_matrix_udf", data, Mode::Off);
+  check(legacy.has_value() && retained(*legacy) == nullptr,
+        "zero-length matrix UDF unrolled lowering");
+  if (legacy)
+    compare_gradients(*structured, *legacy, points,
+                      "zero-length matrix UDF value parity",
+                      "zero-length matrix UDF gradient parity");
+}
+
+static void sequence_local_tests() {
+  const DataMap data =
+      DataMap::from_json_file("tests/fixtures/structured_sequence_local.json");
+  const auto& y = data.at("y").r;
+  const auto lp = [&](const std::vector<Var>& u) {
+    using namespace stan::math;
+    const Var mu = u[0], sigma = exp(u[1]);
+    Var s = 0, total = u[1];
+    for (const double yn : y) {
+      for (const int k : {0, 2, 1, 3}) s = 0.9 * s + 0.1 * k * yn - 0.05 * mu;
+      total += normal_lpdf(yn, mu + s, sigma);
+    }
+    return total + normal_lpdf(mu, 0, 2) + lognormal_lpdf(sigma, 0, 1);
+  };
+  const auto model =
+      try_compile_fixture("structured_sequence_local", data, Mode::Prefer);
+  size_t loops = 0;
+  if (model)
+    for (const auto& op : model->graph.ops) loops += op.opcode == OP_LOOP;
+  check(loops == 1 && model->graph.ops.size() < 64,
+        "a for-loop sequence local keeps its loop structured");
+  if (loops != 1) return;
+  for (const auto& point :
+       std::vector<std::vector<double>>{{.2, -.3}, {-.1, .4}, {.7, 0.}})
+    check_reference_point(*model, point, lp, "for-loop sequence reference");
+}
+
+static void ambiguous_return_shape_tests() {
+  const DataMap data = DataMap::from_json_file(
+      "tests/fixtures/structured_ambiguous_return.json");
+  const auto& y = data.at("y").r;
+  const auto lp = [&](const std::vector<Var>& u) {
+    using namespace stan::math;
+    Var total = 0;
+    for (size_t n = 1; n <= y.size(); ++n)
+      total += -0.5 * (n % 2 == 0 ? 2 : 3) * square(y[n - 1] - u[0]);
+    return total;
+  };
+  const auto model =
+      try_compile_fixture("structured_ambiguous_return", data, Mode::Prefer);
+  check(model.has_value(), "ambiguous return shape compiles");
+  if (!model) return;
+  check(retained(*model) == nullptr,
+        "return shapes that differ between iterations refuse the structured "
+        "loop");
+  for (const double mu : {-.4, .3, 1.2})
+    check_reference_point(*model, {mu}, lp, "ambiguous return shape reference");
+}
+
 static void runtime_local_shape_tests() {
   for (Mode mode : {Mode::Auto, Mode::Force}) {
     const auto model =
@@ -6316,6 +6433,9 @@ int main() {
   prefer_parent_tests();
   direct_index_lowering_tests();
   runtime_local_shape_tests();
+  zero_length_matrix_udf_tests();
+  sequence_local_tests();
+  ambiguous_return_shape_tests();
   runtime_slice_tests();
   runtime_index_tests();
   memo_tests();
