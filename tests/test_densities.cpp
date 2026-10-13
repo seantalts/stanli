@@ -7,6 +7,7 @@
 #include <stanli/optable.hpp>
 
 #include <stan/math.hpp>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -22,6 +23,16 @@ static void expect_eq(const std::string& what, double got, double want) {
   if (got != want) {
     ++failures;
     std::printf("FAIL %-32s got %.17g want %.17g\n", what.c_str(), got, want);
+  }
+}
+static void expect_ulp_of_largest(const std::string& what, double got,
+                                  double want, double largest, int64_t bound) {
+  const double spacing = std::nextafter(largest, INFINITY) - largest;
+  if (!(std::abs(got - want) <= (double)bound * spacing)) {
+    ++failures;
+    std::printf("FAIL %-32s got %.17g want %.17g (%.1f ulp of %g)\n",
+                what.c_str(), got, want, std::abs(got - want) / spacing,
+                largest);
   }
 }
 static void expect_nan(const std::string& what, double got, double want) {
@@ -674,8 +685,18 @@ static void check_wiener_activity(const std::string& tag,
     const std::string what = tag + (seed == 1.0 ? "" : " weighted");
     expect_eq(what + " value", ex.forward(), want.value);
     ex.reverse(grad.data(), seed);
-    for (size_t i = 0; i < grad.size(); ++i)
-      expect_eq(what + " grad " + std::to_string(i), grad[i], want.grad[i]);
+    const auto unit = wiener_reference<Y, A, T, B, D>(vals, propto, 1.0);
+    double largest = 0;
+    for (const double g : want.grad) largest = std::max(largest, std::abs(g));
+    for (size_t i = 0; i < grad.size(); ++i) {
+      const std::string gi = what + " grad " + std::to_string(i);
+      if (seed == 1.0) {
+        expect_eq(gi, grad[i], want.grad[i]);
+      } else {
+        expect_eq(gi + " scaled", grad[i], seed * unit.grad[i]);
+        expect_ulp_of_largest(gi, grad[i], want.grad[i], largest, 10);
+      }
+    }
   }
   stanli::Executor ex = wiener_executor(vals, active, propto, slots);
   for (int k = 0, at = 0; k < 5; ++k)
@@ -727,28 +748,33 @@ static void check_wiener_single_evaluation() {
         "wiener scalar delta data" + p, one, 0x0eu, propto);
   }
 
-  // The backward sweep consumes the partials the forward pass kept. Moving an
-  // input between the two passes changes the answer only if the density is
-  // evaluated again.
-  for (const bool scalar : {false, true}) {
-    const WienerValues& values = scalar ? one : obs;
-    int slots[5];
-    stanli::Executor ex = wiener_executor(values, 0x1eu, false, slots);
-    double* params = ex.params_data();
-    for (int k = 1, at = 0; k < 5; ++k) params[at++] = values[(size_t)k][0];
-    ex.forward();
-    ex.value_ptr(slots[1])[0] += 0.05;
-    double grad[4];
-    ex.reverse(grad, 1.0);
-    const auto want =
-        scalar
-            ? wiener_reference<double, var, var, var, var>(values, false, 1.0)
-            : wiener_reference<Vec, var, var, var, var>(values, false, 1.0);
-    for (int i = 0; i < 4; ++i)
-      expect_eq(std::string("wiener partials kept from forward") +
-                    (scalar ? " scalar " : " ") + std::to_string(i),
-                grad[i], want.grad[(size_t)i]);
-  }
+  // The backward sweep consumes the partials the forward pass kept, scaled by
+  // the output adjoint. Moving an input between the two passes changes the
+  // answer only if the density is evaluated again.
+  for (const bool scalar : {false, true})
+    for (const double seed : {1.0, 2.5}) {
+      const WienerValues& values = scalar ? one : obs;
+      int slots[5];
+      stanli::Executor ex = wiener_executor(values, 0x1eu, false, slots);
+      double* params = ex.params_data();
+      for (int k = 1, at = 0; k < 5; ++k) params[at++] = values[(size_t)k][0];
+      ex.forward();
+      ex.value_ptr(slots[1])[0] += 0.05;
+      double grad[4];
+      ex.reverse(grad, seed);
+      const auto want = scalar ? wiener_reference<double, var, var, var, var>(
+                                     values, false, seed)
+                               : wiener_reference<Vec, var, var, var, var>(
+                                     values, false, seed);
+      double largest = 0;
+      for (const double g : want.grad) largest = std::max(largest, std::abs(g));
+      for (int i = 0; i < 4; ++i)
+        expect_ulp_of_largest(
+            std::string("wiener partials kept from forward") +
+                (scalar ? " scalar " : " ") + (seed == 1.0 ? "" : "weighted ") +
+                std::to_string(i),
+            grad[i], want.grad[(size_t)i], largest, seed == 1.0 ? 0 : 10);
+    }
 }
 
 int main() {

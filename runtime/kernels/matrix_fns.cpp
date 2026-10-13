@@ -1698,7 +1698,7 @@ void wiener_bwd(KernelCtx& ctx) {
   unsigned active = wiener_activity(ctx);
   for (int k = 0; k < 5; ++k)
     if (ctx.in_adj[k].data) active |= 1u << k;
-  bool reusable = ctx.out_adj == 1.0 && active == wiener_activity(ctx);
+  bool reusable = std::isfinite(ctx.out_adj) && active == wiener_activity(ctx);
   int64_t total = 0;
   for (int k = 0; k < 5; ++k) total += ctx.in[k].len;
   for (int64_t i = 0; reusable && i < total; ++i)

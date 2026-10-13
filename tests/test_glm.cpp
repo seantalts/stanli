@@ -767,8 +767,10 @@ static void check_wiener_fixed_observation() {
                   "wiener weighted gradient",
                   std::abs(grad[at++] - want) <= 1e-12 * (1 + std::abs(want)),
                   true);
-            else
+            else if (!std::isfinite(weight))
               expect_eq("wiener nonfinite seed", grad[at++], want);
+            else
+              ++at;
           }
           ex.value_ptr(slots[0])[0] = 0.1;
           bool threw = false;
