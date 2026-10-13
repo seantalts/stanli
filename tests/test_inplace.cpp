@@ -579,6 +579,49 @@ static Graph build_double_store(int L, Between between, Fills& fills,
   return g;
 }
 
+static void test_first_store_after_add_is_destructive() {
+  const int L = 8;
+  Graph g;
+  Fills fills;
+  const int t = g.add_slot(1, true);
+  const int sigma = g.add_slot(1, true);
+  const int base = g.add_slot(L, false);
+  g.add_op(OP_REP_VEC, {t}, base);
+  const int shifted = g.add_slot(L, false);
+  g.add_op(OP_ADD, {base, sigma}, shifted);
+  int prev = shifted;
+  for (int n = 0; n < L; ++n) {
+    const int cur = g.add_slot(1, false);
+    g.add_op(OP_INDEX, {prev}, cur, {n});
+    const int c = g.add_slot(1, false);
+    fills.emplace_back(c, std::vector<double>{0.1 * n - 0.3});
+    const int v = g.add_slot(1, false);
+    g.add_op(OP_ADD, {cur, c}, v);
+    const int next = g.add_slot(L, false);
+    g.add_op(OP_SET_INDEX, {prev, v}, next, {n});
+    prev = next;
+  }
+  const int lp = g.add_slot(1, false);
+  const int ydata = g.add_slot(L, false);
+  std::vector<double> yv((size_t)L);
+  for (int i = 0; i < L; ++i) yv[(size_t)i] = 0.3 * i - 0.5;
+  fills.emplace_back(ydata, yv);
+  const int id = g.add_op(OP_NORMAL_LPDF, {ydata, prev, sigma}, lp);
+  g.ops[id].variant = 0x06;
+  std::vector<int> terms{lp};
+
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+  expect("every write after an add is destructive",
+         make_inplace_updates(g, {}) == L);
+  reduce_into_result(g, terms);
+  const std::vector<double> got = run_grad_twice(std::move(g), fills);
+  expect("add chain sizes", got.size() == want.size());
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("add chain v" + std::to_string(i)).c_str(), got[i], want[i]);
+}
+
 static int count_stores(const Graph& g) {
   int n = 0;
   for (const Op& op : g.ops)
@@ -938,6 +981,7 @@ int main() {
   test_native_lse_allows_destructive();
   test_store_to_load_forwarding();
   test_superseded_store_dropped();
+  test_first_store_after_add_is_destructive();
   test_keeps_live_writes();
   test_bail_value_reading_consumer();
   test_bail_later_reader();

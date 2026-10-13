@@ -116,6 +116,12 @@ static std::vector<double> route_adjoints(uint16_t oc, bool poison) {
       idata = {3};  // two packed rows of width three
       out_len = 2;
       break;
+    case OP_ADD:
+      // Vector plus a broadcast scalar.
+      ctx.n_in = 2;
+      ctx.in[1] = Desc{b_in.data(), 1};
+      ctx.in_adj[1] = Desc{b_adj.data(), 1};
+      break;
     case OP_LSE2:
       // Two scalar inputs; reuse the vector buffer's first element.
       ctx.n_in = 2;

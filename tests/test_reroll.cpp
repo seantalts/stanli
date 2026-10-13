@@ -1611,6 +1611,60 @@ static void test_read_modify_write_lanes() {
   }
 }
 
+static void test_read_modify_write_adjacent_loops() {
+  const int L = 16, J = 5;
+  Graph g;
+  Fills fills;
+  const int t0 = g.add_slot(1, true), a = g.add_slot(J, true);
+  const int sigma = g.add_slot(1, true);
+  int mus[2], ys[2];
+  for (int v = 0; v < 2; ++v) {
+    mus[v] = g.add_slot(L, false);
+    g.add_op(OP_REP_VEC, {t0}, mus[v]);
+    ys[v] = g.add_slot(L, false);
+    std::vector<double> yv((size_t)L);
+    for (int k = 0; k < L; ++k) yv[(size_t)k] = 0.4 * k - 1.0 + v;
+    fills.emplace_back(ys[v], yv);
+  }
+  int stage = 0;
+  for (int v = 0; v < 2; ++v) {
+    for (int l = 0; l < L; ++l, ++stage) {
+      const int m = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {mus[v]}, m, {l});
+      const int r = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {a}, r, {(l + v) % J});
+      const int c = g.add_slot(1, false);
+      fills.emplace_back(c, std::vector<double>{0.3 + 0.07 * (stage % 11)});
+      const int h = g.add_slot(1, false);
+      g.add_op(OP_MUL, {r, c}, h);
+      const int s = g.add_slot(1, false);
+      g.add_op(OP_ADD, {m, h}, s);
+      g.add_op(OP_SET_INDEX_INPLACE, {mus[v], s}, mus[v], {l});
+    }
+  }
+  std::vector<int> terms;
+  for (int v = 0; v < 2; ++v) {
+    const int lp = g.add_slot(1, false);
+    const int id = g.add_op(OP_NORMAL_LPDF, {ys[v], mus[v], sigma}, lp);
+    g.ops[(size_t)id].variant = 0x06;
+    terms.push_back(lp);
+  }
+  Graph ref = g;
+  reduce_into_result(ref, terms);
+  const std::vector<double> want = run_grad(std::move(ref), fills);
+  std::vector<int> tt = terms;
+  Fills f2 = fills;
+  const RerollStats st = reroll(g, f2, tt, {});
+  expect("adjacent loops: both fused", st.regions == 2);
+  expect("adjacent loops: no element writes left",
+         writefuse::count(g, OP_SET_INDEX_INPLACE) == 0);
+  reduce_into_result(g, tt);
+  const std::vector<double> got = run_grad(std::move(g), f2);
+  for (size_t i = 0; i < want.size() && i < got.size(); ++i)
+    expect_close(("adjacent loops v" + std::to_string(i)).c_str(), got[i],
+                 want[i]);
+}
+
 static void test_read_modify_write_recurrence_stays_scalar() {
   using namespace rmwlanes;
   for (int shift : {-1, 1}) {
@@ -3087,6 +3141,7 @@ int main() {
   test_write_fusion_bails();
   test_read_modify_write_lanes();
   test_read_modify_write_recurrence_stays_scalar();
+  test_read_modify_write_adjacent_loops();
   test_post_reroll_slice_inplace();
   test_write_fusion_scalar_chain();
   test_pow_widens();

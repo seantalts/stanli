@@ -1096,7 +1096,8 @@ static RerollStats reroll_impl(
             }
             if (!clean || br_run < Luse) {
               ok = false;
-              prefix = std::min(prefix, clean ? br_run : (int64_t)0);
+              if (ap.ins[0].kind == InKind::kInvariant)
+                prefix = std::min(prefix, clean ? br_run : (int64_t)0);
             } else {
               ap.store_vec = vec;
               ap.store_src = vec;
