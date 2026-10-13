@@ -250,9 +250,8 @@ static int (*p_sample_multi_write_array)(void*, const stanli_sample_opts*, int,
                                          stanli_sample_report*, char*, size_t);
 static int (*p_sample_multi_metric)(void*, const stanli_sample_opts*,
                                     const stanli_metric_opts*, int, double*,
-                                    double*, double*,
-                                    stanli_sample_progress_cb, void*,
-                                    stanli_sample_poll_cb, void*, int*,
+                                    double*, double*, stanli_sample_progress_cb,
+                                    void*, stanli_sample_poll_cb, void*, int*,
                                     stanli_sample_report*, char*, size_t);
 static int (*p_pathfinder_inits)(void*, uint32_t, int, int, int, int, int,
                                  double, double*, stanli_path_cb, void*, char*,
@@ -825,9 +824,8 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
     error("inv_metric must hold %lld values", (long long)(nchain * metric_len));
   }
   const int have_metric = p_sample_multi_metric != NULL;
-  if (!have_metric &&
-      (mo.metric != 1 || mo.inv_metric != NULL || mo.step_size != 1.0 ||
-       !mo.adapt_engaged)) {
+  if (!have_metric && (mo.metric != 1 || mo.inv_metric != NULL ||
+                       mo.step_size != 1.0 || !mo.adapt_engaged)) {
     UNPROTECT(3);
     error(
         "Metric, inverse metric and step size options are unavailable with "
@@ -851,15 +849,16 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   }
   int interrupted = 0;
   const int failed =
-      have_metric ? p_sample_multi_metric(
-                        mm, &o, &mo, refresh_rate, REAL(raw), REAL(stats),
-                        REAL(vals), refresh_rate > 0 ? sample_progress : NULL,
-                        NULL, sample_poll, NULL, &interrupted, reports, err,
-                        sizeof err)
-      : in_worker ? p_sample_multi_write_array(
-                      mm, &o, refresh_rate, REAL(raw), REAL(stats), REAL(vals),
-                      refresh_rate > 0 ? sample_progress : NULL, NULL,
-                      sample_poll, NULL, &interrupted, reports, err, sizeof err)
+      have_metric
+          ? p_sample_multi_metric(
+                mm, &o, &mo, refresh_rate, REAL(raw), REAL(stats), REAL(vals),
+                refresh_rate > 0 ? sample_progress : NULL, NULL, sample_poll,
+                NULL, &interrupted, reports, err, sizeof err)
+      : in_worker
+          ? p_sample_multi_write_array(
+                mm, &o, refresh_rate, REAL(raw), REAL(stats), REAL(vals),
+                refresh_rate > 0 ? sample_progress : NULL, NULL, sample_poll,
+                NULL, &interrupted, reports, err, sizeof err)
       : p_sample_multi_interruptible != NULL
           ? p_sample_multi_interruptible(
                 mm, &o, refresh_rate, REAL(raw), REAL(stats),

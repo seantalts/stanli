@@ -350,12 +350,14 @@ void stanli_metric_opts_init(stanli_metric_opts* o);
  * (null means the defaults of stanli_metric_opts_init). An invalid metric,
  * inverse metric or step size fails before any chain starts, returns nonzero,
  * and puts Stan's message in err. Additive, like the entry points above. */
-int stanli_sample_multi_metric(
-    stanli_model* m, const stanli_sample_opts* opts,
-    const stanli_metric_opts* metric, int refresh, double* draws, double* stats,
-    double* values, stanli_sample_progress_cb progress, void* progress_user,
-    stanli_sample_poll_cb poll, void* poll_user, int* interrupted,
-    stanli_sample_report* reports, char* err, size_t err_len);
+int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
+                               const stanli_metric_opts* metric, int refresh,
+                               double* draws, double* stats, double* values,
+                               stanli_sample_progress_cb progress,
+                               void* progress_user, stanli_sample_poll_cb poll,
+                               void* poll_user, int* interrupted,
+                               stanli_sample_report* reports, char* err,
+                               size_t err_len);
 
 /* The seven sampler columns, in order: lp__, accept_stat__, stepsize__,
  * treedepth__, n_leapfrog__, divergent__, energy__. */

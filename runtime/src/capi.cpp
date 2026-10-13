@@ -809,18 +809,19 @@ int stanli_sample_multi_write_array(
     void* progress_user, stanli_sample_poll_cb poll, void* poll_user,
     int* interrupted, stanli_sample_report* reports, char* err,
     size_t err_len) {
-  return stanli_sample_multi_metric(m, opts, nullptr, refresh, draws, stats,
-                                    values, progress, progress_user, poll,
-                                    poll_user, interrupted, reports, err,
-                                    err_len);
+  return stanli_sample_multi_metric(
+      m, opts, nullptr, refresh, draws, stats, values, progress, progress_user,
+      poll, poll_user, interrupted, reports, err, err_len);
 }
 
-int stanli_sample_multi_metric(
-    stanli_model* m, const stanli_sample_opts* opts,
-    const stanli_metric_opts* metric, int refresh, double* draws, double* stats,
-    double* values, stanli_sample_progress_cb progress, void* progress_user,
-    stanli_sample_poll_cb poll, void* poll_user, int* interrupted,
-    stanli_sample_report* reports, char* err, size_t err_len) {
+int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
+                               const stanli_metric_opts* metric, int refresh,
+                               double* draws, double* stats, double* values,
+                               stanli_sample_progress_cb progress,
+                               void* progress_user, stanli_sample_poll_cb poll,
+                               void* poll_user, int* interrupted,
+                               stanli_sample_report* reports, char* err,
+                               size_t err_len) {
   try {
     if (interrupted != nullptr) *interrupted = 0;
     if (opts == nullptr) {
@@ -866,10 +867,9 @@ int stanli_sample_multi_metric(
     }
     cfg.step_size = mo.step_size;
     cfg.adapt = mo.adapt_engaged != 0;
-    const int64_t metric_len =
-        cfg.metric == stanli::Metric::Unit    ? 0
-        : cfg.metric == stanli::Metric::Dense ? n * n
-                                              : n;
+    const int64_t metric_len = cfg.metric == stanli::Metric::Unit    ? 0
+                               : cfg.metric == stanli::Metric::Dense ? n * n
+                                                                     : n;
     for (int c = 0; c < n_chains; ++c) {
       stanli::NutsConfig probe = cfg;
       probe.inv_metric =

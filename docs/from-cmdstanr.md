@@ -9,6 +9,7 @@ model, then pass that model to sampling or optimization. These examples assume
 | `m <- cmdstan_model("model.stan")` | `m <- stanli_model("model.stan", data = data)` |
 | `m$compile()` | Compilation happens inside `stanli_model()`, typically in milliseconds for small models. No separate call. |
 | `m$sample(data = data, chains = 4, parallel_chains = 4, iter_warmup = 1000, iter_sampling = 1000, seed = 1, adapt_delta = 0.8, max_treedepth = 10, init = init, refresh = 100)` | `sample_model(m, chains = 4, parallel_chains = 4, warmup = 1000, samples = 1000, seed = 1, delta = 0.8, max_depth = 10, init = q, refresh = 100)`; see initialization below. |
+| `m$sample(data = data, metric = "dense_e", inv_metric = M, step_size = 0.5, adapt_engaged = FALSE)` | `sample_model(m, metric = "dense_e", inv_metric = M, step_size = 0.5, adapt_engaged = FALSE)`, with the same argument names. `fit$inv_metric` and `fit$step_size` hold what each chain adapted, so they can start a later fit; `fit$inv_metric()` and `fit$metadata()$step_size_adaptation` are the cmdstanr equivalents. |
 | `fit$summary()` | `posterior::summarise_draws(as_draws_array(fit))` for the cmdstanr default table; `summary(fit)` for the stansummary table. |
 | `fit$draws()` | `as_draws_array(fit)` |
 | `fit$draws("mu")` | `posterior::subset_draws(as_draws_array(fit), variable = "mu")` |
