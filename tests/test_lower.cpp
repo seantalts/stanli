@@ -1165,6 +1165,98 @@ static void test_wiener_forms() {
   stan::math::recover_memory();
 }
 
+// The op carries the activity of its arguments: the observations and the
+// nondecision time are data, and the gradient matches stan-math evaluated
+// with those arguments as doubles.
+static void test_wiener_activity() {
+  using namespace stanli;
+  using stan::math::var;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/wiener_activity.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/wiener_activity.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("wiener activity compile: ") + error.what());
+    return;
+  }
+  int wiener_ops = 0;
+  for (const Op& op : cm.graph.ops)
+    if (op.opcode == OP_WIENER_LPDF) {
+      ++wiener_ops;
+      check((op.variant & 0x3fu) == 0x1au,
+            "wiener op activity is alpha, beta and delta only");
+    }
+  check(wiener_ops == 1, "wiener lowers to one op");
+  const std::vector<double>& y = data.at("y").r;
+  const Eigen::VectorXd yv =
+      Eigen::Map<const Eigen::VectorXd>(y.data(), (Eigen::Index)y.size());
+  const double q[3] = {1.2, 0.5, 0.3};
+  var alpha = q[0], beta = q[1], delta = q[2];
+  var lp = stan::math::wiener_lpdf<true>(yv, alpha, 0.1, beta, delta);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (int k = 0; k < 3; ++k) ex.params_data()[k] = q[k];
+  double grad[3] = {};
+  expect_ulp("wiener activity lp", ex.gradient(grad), lp.val(), 2);
+  const var* ref[3] = {&alpha, &beta, &delta};
+  for (int k = 0; k < 3; ++k)
+    expect_ulp("wiener activity grad " + std::to_string(k), grad[k],
+               ref[k]->adj(), 2);
+  stan::math::recover_memory();
+}
+
+static void test_wiener_scalar_calls() {
+  using namespace stanli;
+  using stan::math::var;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/wiener_scalar_calls.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/wiener_scalar_calls.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("wiener scalar calls compile: ") + error.what());
+    return;
+  }
+  int wiener_ops = 0;
+  for (const Op& op : cm.graph.ops)
+    if (op.opcode == OP_WIENER_LPDF) {
+      ++wiener_ops;
+      check((op.variant & 0x1fu) == 0x1au,
+            "wiener scalar call leaves y and tau as data");
+      for (int k = 0; k < 5; ++k)
+        check(cm.graph.slots[(size_t)op.in[(size_t)k]].len == 1,
+              "wiener scalar call arguments have length 1");
+    }
+  check(wiener_ops == 4, "wiener scalar calls lower to one op per observation");
+  const std::vector<double>& y = data.at("y").r;
+  const std::vector<double>& x = data.at("x").r;
+  const double q[3] = {1.2, 0.5, 0.3};
+  var alpha = q[0], beta = q[1], delta = q[2];
+  var lp = 0;
+  for (size_t n = 0; n < y.size(); ++n) {
+    if (n % 2 == 0)
+      lp +=
+          stan::math::wiener_lpdf<false>(y[n], alpha, 0.1, beta, delta * x[n]);
+    else
+      lp += stan::math::wiener_lpdf<false>(y[n], alpha, 0.1, 1 - beta,
+                                           -delta * x[n]);
+  }
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (int k = 0; k < 3; ++k) ex.params_data()[k] = q[k];
+  double grad[3] = {};
+  expect_ulp("wiener scalar calls lp", ex.gradient(grad), lp.val(), 2);
+  const var* ref[3] = {&alpha, &beta, &delta};
+  for (int k = 0; k < 3; ++k)
+    expect_ulp("wiener scalar calls grad " + std::to_string(k), grad[k],
+               ref[k]->adj(), 2);
+  stan::math::recover_memory();
+}
+
 // log_mix and a comparison used as a value, inside per-observation regions.
 static void test_udf_param_branch() {
   using namespace stanli;
@@ -1447,7 +1539,7 @@ void test_refusals() {
     for (size_t i = 0; i < s.y.size(); ++i) {
       const bool low = s.y[i] - p[0] * s.x[i] < p[1];
       if (taken) taken->push_back(low);
-      acc = low ? acc + p[0] : acc + s.y[i] * p[1];
+      acc = low ? 0.9 * acc + p[0] : 0.9 * acc + s.y[i] * p[1];
     }
     return -0.01 * stan::math::square(acc);
   };
@@ -1455,6 +1547,7 @@ void test_refusals() {
   expect_refused("region_map_outer_local", 64, ref_simple, branch_points);
   expect_refused("region_map_break", 64, ref_simple, branch_points);
   expect_refused("region_map_target_read", 64, ref_simple, branch_points);
+  expect_refused("region_map_acc_read", 64, ref_simple, branch_points);
   const Ref ref_data = [](const std::vector<var>& p, const Series& s,
                           std::vector<int>* taken) {
     var lp = 0;
@@ -1575,6 +1668,47 @@ void test_shapes() {
     return lp;
   };
   run_points("region_map_multi", 64, branch_points, ref_multi);
+}
+
+const stanli::RegionMapProg& map_payload(const CompiledModel& cm);
+
+void test_local_accumulator() {
+  const auto branch_from = [](size_t first, double init, double scale) {
+    return Ref([=](const std::vector<var>& p, const Series& s,
+                   std::vector<int>* taken) {
+      var acc = init;
+      for (size_t i = first; i < s.y.size(); ++i) {
+        const var r = s.y[i] - p[0] * s.x[i];
+        const bool low = r < p[1];
+        if (taken) taken->push_back(low);
+        acc += low ? -stan::math::square(r) -
+                         stan::math::log1p(stan::math::square(p[1]))
+                   : -0.5 * stan::math::square(r) + p[1];
+      }
+      return scale == 0 ? acc : -scale * stan::math::square(acc);
+    });
+  };
+  run_points("region_map_acc_udf", 64, branch_points, branch_from(2, 0, 0));
+  run_points("region_map_acc_reduce_sum", 64, branch_points,
+             branch_from(0, 0, 0));
+  run_points("region_map_acc_init", 64, branch_points,
+             branch_from(0, 2.5, 0.01));
+  run_points("region_map_acc_udf", 512, branch_points, branch_from(2, 0, 0));
+
+  const std::string stem = "region_map_acc_udf";
+  CompiledModel lanes = compile_with(stem, 64);
+  CompiledModel scalar = compile_with(stem, 64, "STANLI_REGION_MAP_LANES", "0");
+  check(map_payload(lanes).lanes.active && !map_payload(scalar).lanes.active,
+        stem + ": offset index arithmetic runs in lanes");
+  Executor lanes_ex(lanes.graph), scalar_ex(scalar.graph);
+  lanes.bind(lanes_ex);
+  scalar.bind(scalar_ex);
+  for (const Params& point : branch_points) {
+    const Eval a = evaluate(lanes_ex, point);
+    const Eval b = evaluate(scalar_ex, point);
+    check(a.lp == b.lp && a.grad == b.grad,
+          stem + ": lanes bitwise equal to the scalar map");
+  }
 }
 
 void test_integer_ops_map() {
@@ -2532,6 +2666,60 @@ void test_lane_seed_and_clean() {
   test_unsetenv("STANLI_REGION_MAP_CHECK_CLEAN");
 }
 
+void test_lane_adjoint_clear() {
+  for (const LaneFixture& f : lane_fixture_list()) {
+    if (!f.lanes) continue;
+    for (const char* tile_cells : {"1000000000", "0"}) {
+      test_setenv("STANLI_REGION_MAP_TILE_CELLS", tile_cells, 1);
+      const std::string what =
+          std::string(f.stem) + " adjoint zeroing, tile cells " + tile_cells;
+      CompiledModel cm =
+          compile_with(f.stem, 130, "STANLI_REGION_MAP_PROFILE", "1", f.extra);
+      const auto& p = map_payload(cm);
+      check(p.lanes.active && p.lanes.profile != nullptr, what + ": lanes");
+      if (!p.lanes.active || !p.lanes.profile) continue;
+      Executor ex(cm.graph);
+      cm.bind(ex);
+      int swept = 0;
+      for (int k = 0; k < 4; ++k) {
+        try {
+          evaluate(ex, spread_point((size_t)k, (size_t)ex.n_params()));
+          ++swept;
+        } catch (const std::exception&) {
+        }
+      }
+      const auto& t = p.lanes.profile->total;
+      check(swept > 0 && t.adj_exec > 0, what + ": backward ran");
+      check(t.adj_cleared == 0, what +
+                                    ": no adjoint cell zeroed per backward (" +
+                                    std::to_string(t.adj_cleared) + " over " +
+                                    std::to_string(swept) + " gradients)");
+    }
+  }
+  test_unsetenv("STANLI_REGION_MAP_TILE_CELLS");
+}
+
+void test_lane_adjoint_sequence() {
+  for (const LaneFixture& f : lane_fixture_list()) {
+    if (!f.lanes) continue;
+    for (int n : {37, 65, 200}) {
+      for (const char* tile_cells : {"1000000000", "0"}) {
+        test_setenv("STANLI_REGION_MAP_TILE_CELLS", tile_cells, 1);
+        const std::string what = std::string(f.stem) +
+                                 " 24 points N=" + std::to_string(n) +
+                                 " tile cells " + tile_cells;
+        CompiledModel lanes = compile_with(f.stem, n, nullptr, "0", f.extra);
+        CompiledModel scalar =
+            compile_with(f.stem, n, "STANLI_REGION_MAP_LANES", "0", f.extra);
+        std::vector<Params> points = spread_points(2, 12, 2.0);
+        for (const Params& q : spread_points(2, 12, 0.6)) points.push_back(q);
+        expect_lane_parity(what, lanes, scalar, points, true);
+      }
+    }
+  }
+  test_unsetenv("STANLI_REGION_MAP_TILE_CELLS");
+}
+
 void test_map_selection_follows_data_through_udfs() {
   CompiledModel data_branch = compile_with("region_map_hurdle_data", 64);
   CompiledModel unmapped =
@@ -3243,6 +3431,7 @@ static void test_region_map() {
   test_size_independent();
   test_refusals();
   test_shapes();
+  test_local_accumulator();
   test_integer_ops_map();
   test_long_body_map();
   test_out_of_range();
@@ -3261,6 +3450,8 @@ static void test_region_map() {
   test_tile_call_parity();
   test_lane_tile_recompute();
   test_lane_seed_and_clean();
+  test_lane_adjoint_clear();
+  test_lane_adjoint_sequence();
   test_map_selection_follows_data_through_udfs();
   test_lane_flag_clear_segments();
   test_lane_cancellation_bitwise();
@@ -11598,6 +11789,8 @@ int main() {
   test_structured_dead_after_break();
   test_structured_while_vector_return();
   test_wiener_forms();
+  test_wiener_activity();
+  test_wiener_scalar_calls();
   test_udf_param_branch();
   test_copy_propagation_programs();
   test_region_map();

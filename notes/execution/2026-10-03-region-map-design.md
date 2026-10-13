@@ -46,7 +46,10 @@ loop maps when all of these hold (`runtime/src/lower_region_map.cpp`):
 - Iterations are independent: everything the body assigns is declared inside
   it, nothing escapes with `break`/`return`, and the body does not read
   `target()`. A recurrence (`state = a * state + c`, the shape of ctsem's
-  filter) is refused and stays on the structured loop.
+  filter) is refused and stays on the structured loop. One real declared
+  outside the loop may collect the terms (`acc += e`, as in a brms
+  partial-sum function): it must be assigned only that way and never read in
+  the body, and the map's sum is added to its value before the loop.
 - No effects (print, reject, RNG).
 - The region compiler accepts the body and a native adjoint can be generated.
 
@@ -109,6 +112,11 @@ observation's (or one tile's) backward every cell is zero again apart from
 live-in accumulators and cells nothing reads. `STANLI_REGION_MAP_CHECK_CLEAN=1`
 checks that after each observation or tile; the cogmod ctest entries run with
 it.
+
+The lane adjoint tile is zero when the scratch is bound and every backward
+leaves it zero, so a backward does not clear it. A backward that throws
+zeroes the tile before it propagates. Cells nothing reads can end a sweep
+nonzero and are ignored.
 
 ## Code
 

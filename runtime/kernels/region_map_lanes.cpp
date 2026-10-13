@@ -35,6 +35,7 @@ bool lane_opcode(Program::Code c) {
     case Program::DIV:
     case Program::FMA:
     case Program::IADD:
+    case Program::ISUB:
     case Program::IMOD:
     case Program::INEG:
     case Program::POW:
@@ -412,6 +413,7 @@ class Analysis {
       case Program::LE:
       case Program::EQ:
       case Program::IADD:
+      case Program::ISUB:
       case Program::IMOD:
       case Program::INEG:
       case Program::FILL:
@@ -511,6 +513,7 @@ class Analysis {
         case Program::MUL:
         case Program::DIV:
         case Program::IADD:
+        case Program::ISUB:
         case Program::IMOD:
         case Program::POW:
         case Program::FMAX:
@@ -1349,6 +1352,11 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
         return static_cast<double>(static_cast<int>(a) + static_cast<int>(b));
       });
       break;
+    case Program::ISUB:
+      t.binary(o, I, m, [](double a, double b) {
+        return static_cast<double>(static_cast<int>(a) - static_cast<int>(b));
+      });
+      break;
     case Program::INEG:
       t.unary(o, I, m, [](double a) {
         return static_cast<double>(-static_cast<int>(a));
@@ -1809,6 +1817,7 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
     case Program::LE:
     case Program::EQ:
     case Program::IADD:
+    case Program::ISUB:
     case Program::IMOD:
     case Program::INEG: {
       double* const d = cells(o.dst);
@@ -2237,9 +2246,11 @@ void print_profile(const RegionMapProfile& pr) {
                occupancy(t.fwd_lanes, t.fwd_exec).c_str(),
                (unsigned long long)t.fwd_invariant,
                percent(t.fwd_invariant, t.fwd_exec).c_str());
-  std::fprintf(stderr, "  adjoint: instrs=%llu lanes=%llu occupancy=%s\n",
+  std::fprintf(stderr,
+               "  adjoint: instrs=%llu lanes=%llu occupancy=%s cleared=%llu\n",
                (unsigned long long)t.adj_exec, (unsigned long long)t.adj_lanes,
-               occupancy(t.adj_lanes, t.adj_exec).c_str());
+               occupancy(t.adj_lanes, t.adj_exec).c_str(),
+               (unsigned long long)t.adj_cleared);
   std::fprintf(
       stderr,
       "  block entries: full=%llu partial=%llu empty=%llu | "
@@ -2309,6 +2320,7 @@ void RegionMapTally::add(const RegionMapTally& o) {
   fwd_flag_stores += o.fwd_flag_stores;
   adj_exec += o.adj_exec;
   adj_lanes += o.adj_lanes;
+  adj_cleared += o.adj_cleared;
   block_full += o.block_full;
   block_partial += o.block_partial;
   block_empty += o.block_empty;
@@ -2423,9 +2435,22 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
   const bool verify = std::getenv("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
   std::vector<char> exempt;
   if (verify) exempt = region_map_clean_exempt_cells(p);
-  std::fill_n(adj_tile, (size_t)plan.adj_cells * kTile, 0.0);
   RegionMapTally tally;
   RegionMapTally* counting = plan.profile ? &tally : nullptr;
+  struct DirtyOnThrow {
+    double* tile;
+    int cells;
+    RegionMapProfile* profile;
+    bool swept = false;
+    ~DirtyOnThrow() {
+      if (swept) return;
+      std::fill_n(tile, (size_t)cells * kTile, 0.0);
+      if (!profile) return;
+      RegionMapTally cleared;
+      cleared.adj_cleared = (uint64_t)cells;
+      merge_tally(*profile, cleared);
+    }
+  } dirty{adj_tile, plan.adj_cells, plan.profile.get()};
   for (int tile = plan.tiles; tile-- > 0;) {
     const int64_t first = (int64_t)tile * kTile;
     const int lanes = (int)std::min<int64_t>(kTile, p.count - first);
@@ -2476,7 +2501,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
         if (cell_slot[cell] < 0 || exempt[cell] || plan.adj_residue[cell])
           continue;
         const double* row = adj_tile + (size_t)cell_slot[cell] * kTile;
-        for (int l = 0; l < lanes; ++l)
+        for (int l = 0; l < kTile; ++l)
           if (row[l] != 0.0)
             throw std::logic_error("region_map_check_clean: adjoint cell " +
                                    std::to_string(cell) + " holds " +
@@ -2486,6 +2511,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
       }
     }
   }
+  dirty.swept = true;
   if (counting) merge_tally(*plan.profile, tally);
 }
 

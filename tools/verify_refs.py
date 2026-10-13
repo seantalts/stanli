@@ -138,6 +138,15 @@ ILL_CONDITIONED = {
 # recording, without another model/CI sweep. Cross-platform libm differences
 # are still held to the scaled-error gate above.
 ULP_LIMITS = {source.stem: 10 for source in (REPO / "tests" / "brms").glob("*.stan")}
+# Gradient ULP is measured against the largest gradient entry for these
+# fixtures; lp and write_array outputs keep per-element ULP.
+_REGROUPED_ADJOINT = ("adjoint sums regrouped by vectorized random-effect "
+                      "loops; checked against a 60-digit reference")
+GRADIENT_AGAINST_LARGEST = {
+    name: _REGROUPED_ADJOINT for name in (
+        "s2_car", "s2_car_esicar", "s2_gr_by", "s2_mm", "s2_mm_weights",
+        "s2_mmc", "sw_re_bern", "sw_skewnormal")
+}
 PLATFORM_REFS = {
     "Linux x86_64": REPO / "docs" / "internal" / "artifacts" / "corpus-refs-linux-x86_64.json.gz",
 }
@@ -332,6 +341,15 @@ def pair_dev(a, b):
         return (float("inf"), ulp_distance(a, b) if a == a and b == b else 0)
     scale = max(abs(a), abs(b), 1.0)
     return (abs(a - b) / scale, ulp_distance(a, b))
+
+
+def gradient_ulp(rv, gv):
+    """Largest |a-b| over the gradient, in ULPs of its largest entry."""
+    if not all(math.isfinite(x) for x in rv + gv):
+        return worst_pair(rv, gv)[1]
+    scale = max([abs(x) for x in rv + gv] or [0.0])
+    diff = max([abs(a - b) for a, b in zip(rv, gv)] or [0.0])
+    return math.ceil(diff / math.ulp(scale)) if diff else 0
 
 
 def parse_wa(out):
@@ -674,6 +692,10 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                                       for v in (rv, gv)))
     else:
         worst, worst_ulp = worst_pair(rv, gv)
+        if model in GRADIENT_AGAINST_LARGEST:
+            first = 0 if no_lp else 1
+            worst_ulp = max(worst_pair(rv[:first], gv[:first])[1],
+                            gradient_ulp(rv[first:], gv[first:]))
     n = len(rv)
     if want_wa:
         # The write_array reference: column names must match exactly, and

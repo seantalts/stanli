@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <type_traits>
 #include <functional>
 #include <string>
 #include <vector>
@@ -585,8 +586,174 @@ static void check_scalar_poisson_lcdf() {
       }
 }
 
+using WienerValues = std::vector<std::vector<double>>;
+using WienerVecV = Eigen::Matrix<stan::math::var, -1, 1>;
+
+template <typename T>
+static T wiener_argument(const std::vector<double>& v) {
+  if constexpr (std::is_same_v<T, double> ||
+                std::is_same_v<T, stan::math::var>) {
+    return T(v[0]);
+  } else {
+    T x((Eigen::Index)v.size());
+    for (size_t i = 0; i < v.size(); ++i) x((Eigen::Index)i) = v[i];
+    return x;
+  }
+}
+
+template <typename T>
+static void wiener_adjoints(const T& x, std::vector<double>& out) {
+  if constexpr (std::is_same_v<T, stan::math::var>) {
+    out.push_back(x.adj());
+  } else if constexpr (std::is_same_v<T, WienerVecV>) {
+    for (Eigen::Index i = 0; i < x.size(); ++i) out.push_back(x(i).adj());
+  }
+}
+
+template <typename Y, typename A, typename T, typename B, typename D>
+static stanli::testutil::RunResult wiener_reference(const WienerValues& vals,
+                                                    bool propto, double seed) {
+  using stan::math::var;
+  stan::math::nested_rev_autodiff nested;
+  Y y = wiener_argument<Y>(vals[0]);
+  A a = wiener_argument<A>(vals[1]);
+  T t = wiener_argument<T>(vals[2]);
+  B b = wiener_argument<B>(vals[3]);
+  D d = wiener_argument<D>(vals[4]);
+  var lp = propto ? stan::math::wiener_lpdf<true>(y, a, t, b, d)
+                  : stan::math::wiener_lpdf<false>(y, a, t, b, d);
+  stanli::testutil::RunResult r;
+  r.value = lp.val();
+  var seeded = seed == 1.0 ? lp : lp * seed;
+  stan::math::grad(seeded.vi_);
+  wiener_adjoints(y, r.grad);
+  wiener_adjoints(a, r.grad);
+  wiener_adjoints(t, r.grad);
+  wiener_adjoints(b, r.grad);
+  wiener_adjoints(d, r.grad);
+  return r;
+}
+
+static stanli::Executor wiener_executor(const WienerValues& vals,
+                                        unsigned active, bool propto,
+                                        int* slots) {
+  using namespace stanli;
+  Graph g;
+  for (int k = 0; k < 5; ++k)
+    slots[k] = g.add_slot((int64_t)vals[(size_t)k].size(), (active >> k) & 1u);
+  const int out = g.add_slot(1, false);
+  const int lp = g.add_slot(1, false);
+  Op op;
+  op.opcode = OP_WIENER_LPDF;
+  op.variant = (uint8_t)(active | (propto ? 0x80u : 0u));
+  op.out = out;
+  for (int k = 0; k < 5; ++k) op.in[op.n_in++] = slots[k];
+  g.ops.push_back(op);
+  g.add_op(OP_ADD_N, {out}, lp);
+  g.result_slot = lp;
+  Executor ex(std::move(g));
+  for (int k = 0; k < 5; ++k)
+    for (size_t j = 0; j < vals[(size_t)k].size(); ++j)
+      ex.value_ptr(slots[k])[j] = vals[(size_t)k][j];
+  return ex;
+}
+
+template <typename Y, typename A, typename T, typename B, typename D>
+static void check_wiener_activity(const std::string& tag,
+                                  const WienerValues& vals, unsigned active,
+                                  bool propto) {
+  int slots[5];
+  for (const double seed : {1.0, 2.5}) {
+    const auto want = wiener_reference<Y, A, T, B, D>(vals, propto, seed);
+    stanli::Executor ex = wiener_executor(vals, active, propto, slots);
+    std::vector<double> grad(want.grad.size());
+    for (int k = 0, at = 0; k < 5; ++k)
+      if ((active >> k) & 1u)
+        for (size_t j = 0; j < vals[(size_t)k].size(); ++j)
+          ex.params_data()[at++] = vals[(size_t)k][j];
+    const std::string what = tag + (seed == 1.0 ? "" : " weighted");
+    expect_eq(what + " value", ex.forward(), want.value);
+    ex.reverse(grad.data(), seed);
+    for (size_t i = 0; i < grad.size(); ++i)
+      expect_eq(what + " grad " + std::to_string(i), grad[i], want.grad[i]);
+  }
+  stanli::Executor ex = wiener_executor(vals, active, propto, slots);
+  for (int k = 0, at = 0; k < 5; ++k)
+    if ((active >> k) & 1u)
+      for (size_t j = 0; j < vals[(size_t)k].size(); ++j)
+        ex.params_data()[at++] = vals[(size_t)k][j];
+  const auto want = wiener_reference<Y, A, T, B, D>(vals, propto, 1.0);
+  expect_eq(tag + " value only", ex.forward_value_only(), want.value);
+}
+
+static void check_wiener_single_evaluation() {
+  using stan::math::var;
+  using Vec = Eigen::VectorXd;
+  const WienerValues vec{{1.45, 1.54, 1.2},
+                         {1.15, 1.24, 1.31},
+                         {0.15, 0.24, 0.2},
+                         {0.40, 0.49, 0.45},
+                         {0.05, 0.14, -0.3}};
+  const WienerValues obs{{1.45, 1.54, 1.2}, {1.15}, {0.15}, {0.40}, {0.05}};
+  const WienerValues one{{1.45}, {1.15}, {0.15}, {0.40}, {0.05}};
+  for (const bool propto : {false, true}) {
+    const std::string p = propto ? " propto" : "";
+    check_wiener_activity<Vec, var, var, var, var>("wiener y data" + p, obs,
+                                                   0x1eu, propto);
+    check_wiener_activity<Vec, double, var, var, var>("wiener alpha data" + p,
+                                                      obs, 0x1cu, propto);
+    check_wiener_activity<Vec, var, double, double, var>(
+        "wiener tau beta data" + p, obs, 0x12u, propto);
+    check_wiener_activity<Vec, double, double, double, var>(
+        "wiener delta only" + p, obs, 0x10u, propto);
+    check_wiener_activity<WienerVecV, var, var, var, var>("wiener y active" + p,
+                                                          obs, 0x1fu, propto);
+    check_wiener_activity<Vec, WienerVecV, WienerVecV, WienerVecV, WienerVecV>(
+        "wiener all vector" + p, vec, 0x1eu, propto);
+    check_wiener_activity<Vec, WienerVecV, double, double, WienerVecV>(
+        "wiener mixed vector" + p, {vec[0], vec[1], {0.15}, {0.4}, vec[4]},
+        0x12u, propto);
+    check_wiener_activity<double, var, var, var, var>("wiener scalar" + p, one,
+                                                      0x1eu, propto);
+    check_wiener_activity<var, var, var, var, var>("wiener scalar y active" + p,
+                                                   one, 0x1fu, propto);
+    check_wiener_activity<double, double, var, var, var>(
+        "wiener scalar alpha data" + p, one, 0x1cu, propto);
+    check_wiener_activity<double, var, double, double, var>(
+        "wiener scalar tau beta data" + p, one, 0x12u, propto);
+    check_wiener_activity<double, double, double, double, var>(
+        "wiener scalar delta only" + p, one, 0x10u, propto);
+    check_wiener_activity<double, var, var, var, double>(
+        "wiener scalar delta data" + p, one, 0x0eu, propto);
+  }
+
+  // The backward sweep consumes the partials the forward pass kept. Moving an
+  // input between the two passes changes the answer only if the density is
+  // evaluated again.
+  for (const bool scalar : {false, true}) {
+    const WienerValues& values = scalar ? one : obs;
+    int slots[5];
+    stanli::Executor ex = wiener_executor(values, 0x1eu, false, slots);
+    double* params = ex.params_data();
+    for (int k = 1, at = 0; k < 5; ++k) params[at++] = values[(size_t)k][0];
+    ex.forward();
+    ex.value_ptr(slots[1])[0] += 0.05;
+    double grad[4];
+    ex.reverse(grad, 1.0);
+    const auto want =
+        scalar
+            ? wiener_reference<double, var, var, var, var>(values, false, 1.0)
+            : wiener_reference<Vec, var, var, var, var>(values, false, 1.0);
+    for (int i = 0; i < 4; ++i)
+      expect_eq(std::string("wiener partials kept from forward") +
+                    (scalar ? " scalar " : " ") + std::to_string(i),
+                grad[i], want.grad[(size_t)i]);
+  }
+}
+
 int main() {
   check_scalar_poisson_lcdf();
+  check_wiener_single_evaluation();
   using namespace stanli;
   using stan::math::var;
 

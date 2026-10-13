@@ -46,6 +46,18 @@ the scaled-error checks and report that no same-platform ULP limit applies.
 No additional model evaluation is required. Three probe points do not prove
 a bound for every parameter value.
 
+Eight of those fixtures (`GRADIENT_AGAINST_LARGEST` in
+`tools/verify_refs.py`: `s2_car`, `s2_car_esicar`, `s2_gr_by`, `s2_mm`,
+`s2_mm_weights`, `s2_mmc`, `sw_re_bern`, `sw_skewnormal`) measure the
+gradient's ULP distance against its largest entry, with the same limit of 10;
+log density and `write_array` outputs stay per element. Vectorized
+read-modify-write loops regroup the adjoint sums into the random-effect
+vectors, which moves small gradient entries (0.003 to 0.2, beside entries of
+13 to 25) by up to 6142 ULP of themselves while the absolute error stays under
+1e-15. The measured distance is at most 2 ULP of the largest entry. Against a
+60-digit reference six of the eight are closer than before; `s2_mm` and
+`s2_gr_by` are farther on one small entry, by 2e-16 and 6e-16.
+
 The numerical criterion depends on the comparison. Agreement with CmdStan is
 measured in ULPs; the default policy is within 2 ULP. Bitwise agreement is not
 a gate; a change that moves a model from bitwise to a small ULP band is
@@ -87,7 +99,7 @@ signature suite adds all supported overloads and mixed argument activity.
 
 The shared [corpus inventory](tools/corpus_inventory.py) supplies numerical
 replay, sampling smoke tests and benchmark discovery. Source collections remain
-provenance metadata and optional filters. Numerical replay covers all 352
+provenance metadata and optional filters. Numerical replay covers all 353
 referenced models; sampling smoke tests select fixtures through inventory
 metadata, retaining complete output-name, draw-count and finiteness checks.
 Live performance measurements use the [common benchmark protocol](docs/benchmark-protocol.md)
@@ -98,8 +110,8 @@ and are separate from CI correctness gates.
 | unit tests for numerical operations | Does one numerical operation or graph transformation agree with stan-math? | Bitwise by default; a recorded limit of at most 2 ULP (10 for reassociation) where a kernel reorders arithmetic | source-changing PRs |
 | compiler producer parity | Do native OCaml, js_of_ocaml, and the Windows executable emit identical compact-v2 bytes while the stock rollback paths remain usable? | Byte-for-byte identity on fixture models, including the Stan 2.40 additions; JS API/error/warning/rollback checks; Windows provenance, executable-format, and final-newline checks | source-changing PRs |
 | MIR wire cost | Is the compact-v2 decoder materially faster and the wire materially smaller than legacy MIR? | On Eight Schools, median decode time and raw bytes must each be at most half the legacy value | after merge, nightly, and on demand |
-| corpus comparison | Are the 352 models in the shared corpus consistent with recorded CmdStan behavior at three fixed inputs? | 10 ULP for 124 fixtures with same-platform references; scaled error of 1e-9 for most points, with documented limits for `kronecker_gp` and three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | source-changing PRs |
-| fast-mode corpus comparison | Is fast mode's error small at the same 352 models and points? | Log density within 1e-12 scaled error; gradient within 1e-12 of its largest entry; rejection parity; see [Fast mode](#fast-mode) | source-changing PRs (Linux x86-64) |
+| corpus comparison | Are the 353 models in the shared corpus consistent with recorded CmdStan behavior at three fixed inputs? | 10 ULP for 124 fixtures with same-platform references; scaled error of 1e-9 for most points, with documented limits for `kronecker_gp` and three brms Gaussian-process models; rejection parity; a model named in `KNOWN_GAPS` must keep failing until its gap closes | source-changing PRs |
+| fast-mode corpus comparison | Is fast mode's error small at the same 353 models and points? | Log density within 1e-12 scaled error; gradient within 1e-12 of its largest entry; rejection parity; see [Fast mode](#fast-mode) | source-changing PRs (Linux x86-64) |
 | corpus sampling smoke | Do inventory-selected source models produce complete saved draws? | Exactly 100 saved draws after 100 warmup iterations, exact reference output names/order, finite outputs and no missing columns | source-changing PRs, within CTest |
 | cross-path matrix | Do stanli's execution paths agree with one another? | Bitwise, except entries named in the ledger | source-changing PRs, within CTest |
 | transformation A/B | Do selected graph optimizations preserve model results? | Optimizations enabled and disabled agree at the default point within 1e-11 | manually after optimization changes |
@@ -130,7 +142,7 @@ when a model uses the transformed-O0 fallback. `STANLI_NO_O1_FALLBACK=1`
 explicitly disables that budget for separate compiler experiments; a model
 supported through the shipped fallback may not lower under forced O1.
 
-The complete run covers all 352 recorded models plus any posteriordb census
+The complete run covers all 353 recorded models plus any posteriordb census
 model without a recorded CmdStan row:
 
 ```sh
@@ -201,22 +213,22 @@ did not reach, which is why it runs in addition to the unit-test suite.
 The reference artifact
 [`docs/internal/artifacts/corpus-refs.json.gz`](docs/internal/artifacts/corpus-refs.json.gz) contains:
 
-- 352 models at 3 deterministic unconstrained points each, 1056 points in
-  total, holding 359,948 log-density and gradient values. The models are
+- 353 models at 3 deterministic unconstrained points each, 1059 points in
+  total, holding 364,814 log-density and gradient values. The models are
   119 posteriordb models that evaluate, 11 language fixtures adapted
   from stanc3's compiler tests, 124 models generated by brms 2.23.0,
   62 Rethinking fixtures (all 61 second-edition book calls plus a hurdle model),
   13 Aalto lesson fixtures, and 22 models generated from the cogmod R
   package's custom brms families, whose densities branch on parameter
   values ([issue #422](https://github.com/seantalts/stanli/issues/422)),
-  and ctsem's generic state-space template with synthetic data.
+  and ctsem's generic state-space template with synthetic data at two sizes.
 - Values preserve the doubles emitted by CmdStan's driver
   ([`tools/ref_driver.cpp`](tools/ref_driver.cpp)). Original records use its
   exact `%.17g` strings; migrated records retain round-trippable JSON numbers
   and their original recording provenance. Migration does not rerun the oracle
   or change its numeric answers.
-- 350 models carry at least one complete row from Stan's per-draw output
-  routine, `write_array`, at the same points: 1047 rows and 664,029 values
+- 351 models carry at least one complete row from Stan's per-draw output
+  routine, `write_array`, at the same points: 1050 rows and 678,933 values
   covering constrained parameters, transformed parameters, and generated
   quantities. Column names are also compared exactly. Both direct
   `write_array` drivers start Stan's RNG with
@@ -272,7 +284,7 @@ math library and the libraries used on other platforms. Known implementation
 errors detected by this comparison were much larger; for example, one
 in-place update error produced a scaled difference of 1.7e+05.
 
-Of the 1056 recorded points, 1008 have status `VERIFIED`, 39 imported oracle
+Of the 1059 recorded points, 1011 have status `VERIFIED`, 39 imported oracle
 points have status `RECORDED`, six have status `REJECTED_BOTH`, and three
 have status `MISMATCH`. Imported points use the same numerical replay gate;
 their status preserves the distinction between recorded oracle answers and
@@ -389,7 +401,7 @@ Status: `tools/verify_refs.py --fast-math` runs this gate, and the wheels
 workflow runs it after the default replay on Linux x86-64. It has not been
 run on macOS, Windows or ARM.
 
-The gate replays the same 352 models at the same three points against the
+The gate replays the same 353 models at the same three points against the
 same recorded CmdStan values, with the model compiled in fast mode. At each
 point:
 

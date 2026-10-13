@@ -233,13 +233,16 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
   std::unordered_set<int> root_set(roots.begin(), roots.end());
   if (g.result_slot >= 0) root_set.insert(g.result_slot);
 
-  // Most recent write to each vector, as (op index, element, value slot).
+  // Most recent write to each vector; `observed` once anything but a
+  // forwarded read-back has read the vector since.
   struct Store {
-    size_t op;
-    int elem;
-    int value;
+    size_t op = 0;
+    int elem = 0;
+    int value = -1;
+    bool live = false;
+    bool observed = false;
   };
-  std::unordered_map<int, Store> last_store;
+  std::vector<Store> last_store(g.slots.size());
   std::unordered_map<int, int> rename;  // load output -> stored value slot
   const auto resolve = [&](int s) {
     auto it = rename.find(s);
@@ -255,7 +258,14 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
     if (op.opcode == OP_SET_INDEX || op.opcode == OP_SET_INDEX_INPLACE) {
       // The written vector is op.out (both forms), and the element written
       // is idata[0]. A later write to the same vector supersedes this one.
-      last_store[op.out] = Store{i, op.idata[0], op.in[1]};
+      Store& prev = last_store[(size_t)op.out];
+      if (prev.live && !prev.observed && prev.elem == op.idata[0] &&
+          op.opcode == OP_SET_INDEX_INPLACE &&
+          g.ops[prev.op].opcode == OP_SET_INDEX_INPLACE) {
+        drop[prev.op] = 1;
+        ++removed;
+      }
+      prev = Store{i, op.idata[0], op.in[1], true, false};
       continue;
     }
     if (op.opcode == OP_SET_SLICE || op.opcode == OP_SET_SLICE_INPLACE ||
@@ -265,23 +275,21 @@ int forward_stores_to_loads(Graph& g, const std::vector<int>& roots) {
       // have a distinct output and therefore erase nothing in ordinary SSA
       // graphs, but spelling all four contracts keeps this correct for a
       // hand-built graph too.
-      last_store.erase(op.out);
+      last_store[(size_t)op.out] = Store{};
       continue;
     }
     if (op.opcode == OP_INDEX && op.n_idata == 1) {
-      auto it = last_store.find(op.in[0]);
-      if (it != last_store.end() && it->second.elem == op.idata[0] &&
-          !root_set.count(op.out)) {
+      const Store& hit = last_store[(size_t)op.in[0]];
+      if (hit.live && hit.elem == op.idata[0] && !root_set.count(op.out)) {
         // Reading back exactly what the last write put there.
-        rename[op.out] = it->second.value;
+        rename[op.out] = hit.value;
         drop[i] = 1;
         ++removed;
         continue;
       }
     }
-    // Any other read of a vector leaves its stores observable; a write to
-    // some *other* vector cannot invalidate this one, so nothing else
-    // needs clearing here -- last_store is keyed by vector.
+    for (int j = 0; j < op.n_in; ++j)
+      if (op.in[j] >= 0) last_store[(size_t)op.in[j]].observed = true;
   }
 
   // Sweep dead writes: a store whose vector nothing reads afterwards (and

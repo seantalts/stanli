@@ -876,8 +876,10 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     case OP_LSE2:
       return op_trait::kRerollWidenable | op_trait::kBackwardValueFree;
 
-    // Shape-dispatched elementwise ops that can widen scalar lanes in place.
     case OP_ADD:
+      return op_trait::kRerollWidenable | op_trait::kBackwardValueFree;
+
+    // Shape-dispatched elementwise ops that can widen scalar lanes in place.
     case OP_SUB:
     case OP_MUL:
     case OP_DIV:

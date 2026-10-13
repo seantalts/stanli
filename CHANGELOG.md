@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+- Per-observation loops that update an element in place (`mu[n] += ...`) are
+  now vectorized in default mode, as are loops that store to the same element
+  twice. These loops used to stay one operation per iteration. In the corpus,
+  `ch13_m13_5` goes from 3031 operations to 18, `ch14_m14_2` from 4053 to 36
+  and `i319_gauss_re` from 313 to 21. Gradients of 45 corpus models move at
+  rounding level relative to CmdStan, because the adjoint sums into the
+  random-effect vectors are regrouped. Eight brms test fixtures (`s2_car`,
+  `s2_car_esicar`, `s2_gr_by`, `s2_mm`, `s2_mm_weights`, `s2_mmc`,
+  `sw_re_bern`, `sw_skewnormal`) are now gated on gradient error in ULP of
+  the largest gradient entry (limit 10, measured at most 2) instead of per
+  element. Against a 60-digit reference, `s2_mm` and `s2_gr_by` are slightly
+  farther on one small entry (by 2e-16 and 6e-16); the other six are closer.
+  On the multilevel models of issue #455 this also removes the slowdown
+  from running several chains at once and the growth of cost per
+  observation with N.
+- brms `threading()` programs no longer run many times slower than the
+  plain program. Their per-observation loop adds to a local `ptarget`, which
+  the fast path for such loops now accepts. They still run on one core.
+- `wiener_lpdf` over a whole vector evaluates the density once per gradient
+  instead of twice, and data arguments are no longer differentiated. About
+  1.5x faster on a model that is one `y ~ wiener(...)` statement.
+- The reverse pass of per-observation loops with branches no longer zeroes
+  its scratch buffer. `cm_lnr` and `cm_rdm` gradients are about 1.5x faster.
+- Fix ctsem models being lowered as one operation per data row since 0.19.0,
+  which made preparation time and memory grow with the data. The Kalman
+  loop is one loop again: at 2000 subjects, preparation goes from 18 s to
+  under 1 s and peak memory from 1.5 GB to 156 MB. A 400 subject ctsem model
+  is now in the test corpus.
+
 ## 0.20.0
 
 - Add fast mode, an opt-in setting per model: `fast_math=True` in Python,
