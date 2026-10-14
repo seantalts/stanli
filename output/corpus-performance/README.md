@@ -2,7 +2,7 @@
 
 Run `694ea75f15c86c92`, started 2026-10-13T22:48:45Z, records 343 application models.
 
-The measured runtime is an isolated snapshot of `bd6f15290b23851b744e244960a6e14a29ed87fb` plus the retained [local patch](local.patch) and [untracked sources](snapshot-untracked/). [Source provenance](source-provenance.json) and [source hashes](source-hashes.json) identify the frozen code. Later upstream and worktree changes are not measured by this run.
+The measured runtime is an isolated snapshot of `bd6f15290b23851b744e244960a6e14a29ed87fb` plus the retained [local patch](local.patch.gz) and [untracked sources](snapshot-untracked/). [Source provenance](source-provenance.json) and [source hashes](source-hashes.json) identify the frozen code. Later upstream and worktree changes are not measured by this run.
 
 The fresh Release build targets macOS 26.0 to match the embedded compiler object. Complete native build and corpus command logs contain no C/C++ or linker warnings or errors; initial fixture generation retains legacy-API and deliberate edge-case Stan warnings. [Build identity](build-identity.json) records this host validation boundary.
 
