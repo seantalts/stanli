@@ -64,6 +64,15 @@ The [public tables](benchmarks.md#full-corpus) recalculate totals for a
 2,000-gradient workload from these same measurements; the retained v4
 artifacts keep their recorded 20,000-gradient budget.
 
+The public headline sums setup plus 2,000 gradients per model across the
+application inventory and reports both engines' seconds and
+`sum(CmdStan seconds) / sum(Stanli seconds)`. This is a ratio of total times,
+not a median or mean of per-model ratios. Both sums use the same models with
+accepted gradients and complete setup measurements. If any model is incomplete,
+report the matched subtotal and its coverage, and mark the full-corpus total
+unavailable. Never count failures or timeouts as zero seconds or substitute
+historical timings. The per-model table keeps its separate warm-gradient ratio.
+
 Numerical and sampler correctness remain covered independently by
 [TESTING.md](../TESTING.md).
 

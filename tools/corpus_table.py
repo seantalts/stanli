@@ -518,10 +518,51 @@ def _catalog_model(model):
     return "<br>".join(f"<code>{html.escape(line)}</code>" for line in lines)
 
 
+def catalog_estimate(row, engine, gradient_budget=CATALOG_GRADIENT_BUDGET):
+    """Seconds for one model's setup plus the requested gradient workload."""
+    fields = (("stanli_compile_s", "stanli_prep_s") if engine == "stanli"
+              else ("cmdstan_stanc_s", "cmdstan_build_s"))
+    components = [_catalog_number(row, field) for field in (*fields, engine + "_ns_grad")]
+    return (components[0] + components[1] + gradient_budget * components[2] / 1e9
+            if all(value is not None for value in components) else None)
+
+
+def corpus_time_totals(rows, details, gradient_budget=CATALOG_GRADIENT_BUDGET):
+    """Sum validated, completed models over the same inventory for both engines."""
+    matched = []
+    for row in rows:
+        estimates = [catalog_estimate(row, engine, gradient_budget)
+                     for engine in ("stanli", "cmdstan")]
+        if details[row["model"]]["status"] == "ok" and all(v is not None for v in estimates):
+            matched.append(estimates)
+    stanli = math.fsum(pair[0] for pair in matched) if matched else None
+    cmdstan = math.fsum(pair[1] for pair in matched) if matched else None
+    return dict(models=len(matched), inventory=len(rows), stanli_s=stanli, cmdstan_s=cmdstan,
+                ratio=cmdstan / stanli if stanli else None)
+
+
+def corpus_time_summary(rows, details, gradient_budget=CATALOG_GRADIENT_BUDGET):
+    totals = corpus_time_totals(rows, details, gradient_budget)
+    coverage = f"{totals['models']}/{totals['inventory']} models"
+    if totals["models"]:
+        ratio = f"{totals['ratio']:.2f}x" if totals["ratio"] is not None else "unavailable"
+        summary = (f"Estimated corpus time: Stanli {totals['stanli_s']:,.1f} s vs "
+                   f"CmdStan {totals['cmdstan_s']:,.1f} s "
+                   f"({ratio} CmdStan / Stanli; {coverage}).")
+    else:
+        summary = f"Estimated corpus time unavailable: {coverage} have complete measurements."
+    summary += f" Setup + {gradient_budget:,} gradients per model."
+    missing = totals["inventory"] - totals["models"]
+    if missing:
+        reason = "model has" if missing == 1 else "models have"
+        summary += f" Full-corpus total unavailable: {missing} {reason} incomplete measurements."
+    return summary
+
+
 def _catalog_tables(rows, details):
     """Present both compiler configurations with the same public workload."""
-    header = "| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) |"
-    output = [header, "| --- | ---: | ---: | ---: |"]
+    header = "| Model | CmdStan / Stanli gradient | Stanli estimate (s) | CmdStan estimate (s) |"
+    output = [corpus_time_summary(rows, details), "", header, "| --- | ---: | ---: | ---: |"]
     incomplete = []
     complete = sorted(
         (row for row in rows if details[row["model"]]["status"] == "ok"),
@@ -534,11 +575,8 @@ def _catalog_tables(rows, details):
     for row in (*complete, *incomplete_rows):
         speedup = _catalog_number(row, "paired_speedup")
         cells = [_catalog_model(row["model"]), f"{speedup:.3g}x" if speedup is not None else "—"]
-        for engine, fields in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
-                               ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
-            components = [_catalog_number(row, field) for field in (*fields, engine + "_ns_grad")]
-            estimate = (components[0] + components[1] + CATALOG_GRADIENT_BUDGET * components[2] / 1e9
-                        if all(value is not None for value in components) else None)
+        for engine in ("stanli", "cmdstan"):
+            estimate = catalog_estimate(row, engine)
             cells.append(f"{estimate:.3g}" if estimate is not None else "—")
         record = details[row["model"]]
         if record["status"] == "ok":
@@ -547,7 +585,7 @@ def _catalog_tables(rows, details):
             cells.append(_catalog_notes(row, record))
             incomplete.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
     output.extend([
-        "", f"Total sampling is an estimate: each engine's measured setup time + {CATALOG_GRADIENT_BUDGET:,} × "
+        "", f"Each estimate is the engine's measured setup time + {CATALOG_GRADIENT_BUDGET:,} × "
         "its median warm gradient time. Full sampling is not run.",
     ])
     if incomplete:

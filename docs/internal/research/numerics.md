@@ -16,7 +16,7 @@ retain their recorded inputs and revisions.
 | Do fast-mode posteriors agree with default mode and the reference posteriors? | [Fast mode sampling check](../../../notes/performance/2026-10-09-fast-mode-sampling-check.md): 120 models, 17 flagged, none persistent against a seed-to-seed control; ESS per gradient 1.01x. |
 | Platform-specific oracle disagreement | [Intel macOS recording](../../../notes/performance/2026-09-22-intel-oracle.md): same-platform CmdStan distinguished oracle drift from a runtime error; eigenvector outputs were not added to the gate. |
 | Lightweight densities and additive constants | [Compact densities](../../compact-densities.md), [lite build](../../lite-lp.md): public numerical contracts. |
-| Benchmark/corpus artifact provenance | [Artifact inventory](../artifacts/README.md), [published run manifests](../../../output/corpus-performance/README.md). |
+| Benchmark/corpus artifact provenance | [Artifact inventory](../artifacts/README.md), [13–14 October rerun](../../../output/corpus-performance/README.md): 343 attempted, 337 accepted, 985.3 s Stanli / 2,595.0 s CmdStan at setup + 2,000 gradients; frozen `bd6f1529` plus retained local changes. [Preceding runs](../../benchmark-history.md#full-corpus-10-october-2026) remain unchanged. |
 
 Use CmdStan independently; matching an old interpreter alone cannot establish
 Stan semantics. Preserve effects, shapes, names, rejection, nonfinite classes

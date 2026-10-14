@@ -1,35 +1,37 @@
 {
-  "runtime_base": "84e607961fdaff7efe9910eea5247a35ac9edfe4",
+  "runtime_base": "bd6f15290b23851b744e244960a6e14a29ed87fb",
+  "source_provenance": "/Users/xitrium/.codex/benchmark-runs/corpus-20261013T2240Z/source-provenance.json",
   "files": {
-    "build/bench_grad": "dbf56546c47a47d527e6c07845d3ba43f46c7aa7ee26a7295edb9b2ea79c4ee0",
-    "build/stanli_run": "811fd915b1f503520b552292048d29233ddbec961bda54ffc80c8b169f53ad89",
-    "build/stanli_check": "949b8683e2821171f91ee47f3430c4bd25cd0455642ddb777ddf8839038fb7a9",
-    "build/CMakeCache.txt": "36ccc8ec6509fd8762b0d8e8c234c4e5c86dde126f8e54a3c3c1e80fd349e1cf",
-    "deps/stanc3/stanc": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
-    "deps/stanc3/stanc_embed.o": "d98c403a4af46b32b8362831e89e11d41ff07ab6d51f07844820bfaab544a8ed",
-    "deps/stanc3/stanc_embed.o.stamp": "5e16815a2a878fa44d03c1e87734f63520a07c14bfed58cfba050495faa0556f",
-    "deps/stanc3/stanli-vectorize-probe": "8e6d3f59ee9965ad281392ffee716557090330622849dd93eed47444333a3068",
-    "deps/stanc3/stanli-vectorize-probe.stamp": "5e16815a2a878fa44d03c1e87734f63520a07c14bfed58cfba050495faa0556f"
+    "/Users/xitrium/.codex/benchmark-runs/corpus-20261013T2240Z/build-rel/bench_grad": "380acce7ec752213d2403db0b6f0bc7f820cbd374524367bf82a7553653a4d82",
+    "/Users/xitrium/.codex/benchmark-runs/corpus-20261013T2240Z/build-rel/libstanli.dylib": "f896fba694907fc3b5e9114776a904b8484e8d89db9d53bdf6ecc4df383dc603",
+    "/Users/xitrium/.codex/benchmark-runs/corpus-20261013T2240Z/build-rel/CMakeCache.txt": "315e83554269b4837aeeb5acc10e247322090a5f34a394178a1de4d9cfc55a2a",
+    "/Users/xitrium/.codex/worktrees/corpus-latest-rerun/stanrt/deps/stanc3/stanc": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
+    "/Users/xitrium/.codex/worktrees/corpus-latest-rerun/stanrt/deps/stanc3/stanli-vectorize-probe": "8e6d3f59ee9965ad281392ffee716557090330622849dd93eed47444333a3068",
+    "/Users/xitrium/.codex/worktrees/corpus-latest-rerun/stanrt/deps/stanc3/stanc_embed.o": "d98c403a4af46b32b8362831e89e11d41ff07ab6d51f07844820bfaab544a8ed",
+    "/Users/xitrium/.codex/worktrees/corpus-latest-rerun/stanrt/deps/stanc3/stanc-o1vec": "359c905c882a4263811b17636817ce349f0b8c743a07769e5348e389dc81173c",
+    "/Users/xitrium/.codex/benchmark-runs/corpus-20261013T2240Z/local.patch": "e6fa50c8c3951a062e07f3b31dbf0705d36816074a85c42dd412762492ca8da5",
+    "/Users/xitrium/.codex/benchmark-runs/corpus-20261013T2240Z/source-hashes.json": "fdd86e22b9dac0db96cca20be3e2f55eab72d453daec893b49899388b31f6de7"
   },
   "configuration": [
     "CMAKE_BUILD_TYPE:STRING=Release",
-    "CMAKE_CXX_COMPILER:STRING=/usr/bin/clang++",
+    "CMAKE_CXX_COMPILER:UNINITIALIZED=/usr/bin/clang++",
     "CMAKE_CXX_FLAGS:STRING=",
     "CMAKE_CXX_FLAGS_DEBUG:STRING=-g",
     "CMAKE_CXX_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG",
     "CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG",
     "CMAKE_CXX_FLAGS_RELWITHDEBINFO:STRING=-O2 -g -DNDEBUG",
-    "CMAKE_OSX_ARCHITECTURES:STRING=",
-    "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=11.0",
-    "CMAKE_OSX_SYSROOT:STRING=",
+    "CMAKE_OSX_DEPLOYMENT_TARGET:UNINITIALIZED=26.0",
+    "STANLI_AVX2_KERNELS:BOOL=OFF",
+    "STANLI_BASH:FILEPATH=/bin/bash",
     "STANLI_LITE_LP:BOOL=OFF",
     "STANLI_LIT_JOBS:STRING=24",
     "STANLI_OCAML_STDLIB:PATH=/Users/xitrium/.opam/stanc3-55/lib/ocaml",
     "STANLI_PORTABLE_COMPILER:FILEPATH=",
     "STANLI_SANITIZE:STRING=",
     "STANLI_SHARED_TEST_RUNTIME:BOOL=ON",
-    "STANLI_STANC_EMBED_OBJ:FILEPATH=/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/stanc3/stanc_embed.o",
-    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/stanc3/stanc",
+    "STANLI_STANC_EMBED_OBJ:FILEPATH=/Users/xitrium/.codex/worktrees/corpus-latest-rerun/stanrt/deps/stanc3/stanc_embed.o",
+    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/.codex/worktrees/corpus-latest-rerun/stanrt/deps/stanc3/stanc",
+    "STANLI_STAN_DENSITY_ORACLE:BOOL=ON",
     "STANLI_THREADS:BOOL=ON",
     "STANLI_WASM_SIDE:BOOL=OFF",
     "CMAKE_CXX_FLAGS-ADVANCED:INTERNAL=1",
@@ -38,9 +40,8 @@
     "CMAKE_CXX_FLAGS_RELEASE-ADVANCED:INTERNAL=1",
     "CMAKE_CXX_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1"
   ],
-  "host": [
-    "Apple M3 Ultra",
-    "103079215104"
-  ],
-  "numerical_replay": "references recorded against CmdStan 2.40.0 (d3d5df6a2256), math 5252d51d47c1, on Darwin arm64\n36 models retain per-model recording provenance overrides\nsame-platform ULP limits: 124 models on Darwin arm64; all models retain their scaled-error and structural checks\n352/352 models within 1e-09 of the CmdStan references at all 3 evaluation points (1023977 values compared); worst gpcm_latent_reg_irt at 9.38e-13 (7040 ulp)\n"
+  "native_diagnostics": "No C/C++ or linker warnings/errors in complete fresh macOS26 rebuild output",
+  "fixture_diagnostics": "Initial generation retains intended legacy API deprecations, integer-division and unreachable-statement warnings in regression fixtures; no fixture semantics were changed or warnings suppressed.",
+  "reporting_tests": "98 focused tests passed",
+  "cmdstan_revision": "11cb052d3e1fc8c799e0fec559e2ee5452b38d27"
 }

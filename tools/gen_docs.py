@@ -29,7 +29,7 @@ import subprocess
 import sys
 import warnings
 
-from corpus_table import render_catalog, render_gradient_catalog
+from corpus_table import render_catalog, render_gradient_catalog, corpus_time_summary, corpus_time_totals
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # The demo page carries headline numbers too, and its markers are HTML
@@ -40,7 +40,7 @@ TARGETS = [REPO / "README.md", REPO / "python" / "README.md",
 MARK = re.compile(r"(<!--gen:([a-z_]+)-->)(.*?)(<!--/gen-->)", re.S)
 
 
-def current_benchmark():
+def current_benchmark(*, include_details=False):
     """Validated current table, rows, and manifest shared by public summaries.
 
     Validate the complete inventory, provenance, and measurement evidence
@@ -55,6 +55,10 @@ def current_benchmark():
     with summary.open(newline="") as stream:
         rows = list(csv.DictReader(stream, delimiter="\t"))
     manifest = json.loads(manifest_path.read_text())
+    if include_details:
+        with gzip.open(records, "rt") as stream:
+            details = {record["model"]: record for record in json.load(stream)}
+        return catalog, rows, manifest, details
     return catalog, rows, manifest
 
 
@@ -94,11 +98,16 @@ def compute():
     n_total = len(ver)
     lang_verified = sum(1 for v in lang.values() if v["status"] == "VERIFIED")
 
-    catalog, benchmark_rows, manifest = current_benchmark()
+    catalog, benchmark_rows, manifest, benchmark_details = current_benchmark(include_details=True)
     c_n, c_med, c_par = corpus_stats(benchmark_rows)
+    totals = corpus_time_totals(benchmark_rows, benchmark_details)
 
     return {
         "benchmark_catalog": catalog,
+        "benchmark_corpus_time": corpus_time_summary(benchmark_rows, benchmark_details),
+        "benchmark_corpus_headline": (
+            f"{totals['ratio']:.2f}× estimated corpus speedup"
+            if totals["ratio"] is not None else "Estimated corpus speedup unavailable"),
         "benchmark_models": str(len(manifest["identity"]["inputs"])),
         "benchmark_date": manifest["started_utc"][:10],
         "benchmark_vectorized_catalog": render_gradient_catalog().rstrip(),

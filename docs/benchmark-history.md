@@ -10,6 +10,10 @@ and the [September 16, 199-fixture appendix](../output/teaching-performance/READ
 The latter retains its original collection-oriented report and all failures.
 Do not pool these runs into a single median or substitute later results into them.
 
+## Full corpus: 10 October 2026
+
+The preceding 342-model v4 runs remain unchanged in the dated archive: [default](../output/corpus-performance-history/2026-10-10/corpus-performance/README.md), [optimized reference](../output/corpus-performance-history/2026-10-10/corpus-performance-vectorized/README.md), and [fast mode](../output/corpus-performance-history/2026-10-10/corpus-performance-fast/README.md). Their manifests, raw results and checksums retain the original measured revisions and inputs.
+
 ## ctsem retained-loop replay: 19 September 2026
 
 The ctsem model from [issue #248](https://github.com/seantalts/stanli/issues/248),

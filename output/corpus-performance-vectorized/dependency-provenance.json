@@ -1,0 +1,22 @@
+{
+  "math": {
+    "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+    "diff_sha256": "c275d2e64906811660bf407bfc02e8f77dfb31c38234f699b0e382aca66125e0"
+  },
+  "stan": {
+    "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+    "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "fmt": {
+    "head": "40626af88bd7df9a5fb80be7b25ac85b122d6c21",
+    "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "cmdstan": {
+    "head": "11cb052d3e1fc8c799e0fec559e2ee5452b38d27",
+    "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "posteriordb": {
+    "head": "28f8d3d6e975315f42aa274a8399f21e07a43b30",
+    "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}

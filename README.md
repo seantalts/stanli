@@ -30,12 +30,13 @@ and `remotes::install_github()` or a checkout installs from source (see
 keeping installation small and avoiding a local stan-math build.
 
 - Performance vs CmdStan: [full benchmark and method](docs/benchmarks.md).
-  In the <!--gen:benchmark_date-->2026-10-10<!--/gen--> native run,
-  <!--gen:corpus_n_grad-->336<!--/gen--> of
-  <!--gen:benchmark_models-->342<!--/gen--> models produced paired gradient
+  <!--gen:benchmark_corpus_time-->Estimated corpus time: Stanli 985.3 s vs CmdStan 2,595.0 s (2.63x CmdStan / Stanli; 337/343 models). Setup + 2,000 gradients per model. Full-corpus total unavailable: 6 models have incomplete measurements.<!--/gen-->
+  In the <!--gen:benchmark_date-->2026-10-13<!--/gen--> native run,
+  <!--gen:corpus_n_grad-->337<!--/gen--> of
+  <!--gen:benchmark_models-->343<!--/gen--> models produced paired gradient
   measurements: median CmdStan/Stanli ratio
-  <!--gen:corpus_median-->1.72x<!--/gen-->, with
-  <!--gen:corpus_at_par-->308<!--/gen--> at or above parity.
+  <!--gen:corpus_median-->2.17x<!--/gen-->, with
+  <!--gen:corpus_at_par-->318<!--/gen--> at or above parity.
   Failed or capped runs remain in the full table.
 - Fast mode: [docs/fast-mode.md](docs/fast-mode.md). An opt-in setting per
   model that gives up CmdStan's last bits for speed.

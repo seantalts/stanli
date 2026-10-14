@@ -1,0 +1,37 @@
+{
+  "source": "/Users/xitrium/.codex-workspaces/worktrees/ios-20ca027f-9cd1-42a2-9235-31e199f93fe5/stanrt",
+  "snapshot": "/Users/xitrium/.codex/worktrees/corpus-latest-rerun/stanrt",
+  "head": "bd6f15290b23851b744e244960a6e14a29ed87fb",
+  "remote_default": "bd6f15290b23851b744e244960a6e14a29ed87fb",
+  "copied_untracked": [
+    "runtime/kernels/density_partials.hpp",
+    "tests/fixtures/glm_normalization.stan"
+  ],
+  "excluded_untracked": [
+    "notes/performance/2026-10-13-x86-v3-regressions.md",
+    "notes/performance/data/2026-10-13-x86-v3/README.md",
+    "notes/performance/data/2026-10-13-x86-v3/acat-high-precision.json",
+    "notes/performance/data/2026-10-13-x86-v3/evidence.sha256",
+    "notes/performance/data/2026-10-13-x86-v3/evidence.tar.gz",
+    "notes/performance/data/2026-10-13-x86-v3/historical-evidence.tar.gz",
+    "notes/performance/data/2026-10-13-x86-v3/historical-provenance.json",
+    "notes/performance/data/2026-10-13-x86-v3/map-probe.json.gz",
+    "notes/performance/data/2026-10-13-x86-v3/matched-oracle.json.gz",
+    "notes/performance/data/2026-10-13-x86-v3/timing-summary.json.gz",
+    "output/isa-continuation/density_partials-all-packet.hpp",
+    "output/isa-continuation/matrix-packed.cpp",
+    "output/isa-continuation/matrix-varmat.cpp",
+    "output/isa-continuation/matrix-views.cpp",
+    "output/isa-continuation/unary-hp.json",
+    "tools/isa_acat_hp_probe.py",
+    "tools/isa_density_bwd_probe.cpp",
+    "tools/isa_lgamma_probe.cpp",
+    "tools/isa_libm_count_probe.c",
+    "tools/isa_malloc_align_probe.c",
+    "tools/isa_mean_phase.patch",
+    "tools/isa_probe.py",
+    "tools/isa_sumzero_probe.cpp",
+    "tools/isa_tail_loop.patch"
+  ],
+  "stability_seconds": 15
+}

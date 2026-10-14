@@ -77,6 +77,9 @@ class CurrentBenchmarkTests(unittest.TestCase):
         self.assertEqual(stats["benchmark_models"], "2")
         self.assertNotIn("benchmark_n_sampling", stats)
         self.assertEqual(stats["corpus_median"], "1.42x")
+        self.assertIn("18.24x CmdStan / Stanli; 1/2 models", stats["benchmark_corpus_time"])
+        self.assertEqual(stats["benchmark_corpus_headline"], "18.24× estimated corpus speedup")
+        self.assertIn("Full-corpus total unavailable", stats["benchmark_corpus_time"])
         self.assertEqual(stats["corpus_reference_models"], "1")
         self.assertEqual(stats["corpus_reference_points"], "3")
         self.assertEqual(stats["corpus_verified"], "1/1")
@@ -93,6 +96,8 @@ class CurrentBenchmarkTests(unittest.TestCase):
         self.assertEqual(stats["benchmark_models"], "2")
         self.assertNotIn("benchmark_n_sampling", stats)
         self.assertEqual(stats["corpus_n_grad"], "1")
+        self.assertIn("time unavailable: 0/2 models", stats["benchmark_corpus_time"])
+        self.assertEqual(stats["benchmark_corpus_headline"], "Estimated corpus speedup unavailable")
 
 
 class HeadlineStatsTests(unittest.TestCase):

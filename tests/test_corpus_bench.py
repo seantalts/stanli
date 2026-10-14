@@ -494,6 +494,43 @@ class HistoricalResultsTests(unittest.TestCase):
 
 
 class BenchmarkCatalogTests(unittest.TestCase):
+    def test_corpus_ratio_divides_summed_times_for_the_same_models(self):
+        from tools.corpus_table import corpus_time_totals
+        rows = [dict(model="a", stanli_compile_s=1, stanli_prep_s=2,
+                     cmdstan_stanc_s=3, cmdstan_build_s=4,
+                     stanli_ns_grad=500000, cmdstan_ns_grad=1000000),
+                dict(model="b", stanli_compile_s=10, stanli_prep_s=20,
+                     cmdstan_stanc_s=30, cmdstan_build_s=40,
+                     stanli_ns_grad=1000000, cmdstan_ns_grad=500000),
+                dict(model="partial", stanli_compile_s=999, stanli_prep_s=999,
+                     stanli_ns_grad=999),
+                dict(model="rejected", stanli_compile_s=999, stanli_prep_s=999,
+                     cmdstan_stanc_s=999, cmdstan_build_s=999,
+                     stanli_ns_grad=999, cmdstan_ns_grad=999)]
+        details = {row["model"]: dict(status="ok" if row["model"] in ("a", "b") else "failed")
+                   for row in rows}
+        totals = corpus_time_totals(rows, details)
+        self.assertEqual(totals, dict(models=2, inventory=4, stanli_s=36,
+                                     cmdstan_s=80, ratio=80/36))
+        custom = corpus_time_totals(rows, details, gradient_budget=1000)
+        self.assertEqual(custom["stanli_s"], 34.5)
+        self.assertEqual(custom["cmdstan_s"], 78.5)
+
+    def test_corpus_headline_marks_incomplete_and_empty_totals(self):
+        from tools.corpus_table import corpus_time_summary
+        summary = corpus_time_summary(self.rows, {r["model"]: r for r in self.records})
+        self.assertIn("18.24x CmdStan / Stanli; 1/2 models", summary)
+        self.assertIn("Full-corpus total unavailable: 1 model has", summary)
+        empty = corpus_time_summary([self.rows[1]], {"failed": self.records[1]})
+        self.assertIn("time unavailable: 0/1 models", empty)
+        self.assertNotIn("0.0 s", empty)
+
+    def test_full_inventory_has_a_corpus_total_without_incomplete_label(self):
+        from tools.corpus_table import corpus_time_summary
+        summary = corpus_time_summary([self.rows[0]], {"good": self.records[0]})
+        self.assertIn("1/1 models", summary)
+        self.assertNotIn("unavailable", summary)
+
     def test_complete_rows_rank_by_unrounded_ratio_and_incomplete_rows_stay_separate(self):
         from tools.corpus_table import _catalog_tables
         rows = [

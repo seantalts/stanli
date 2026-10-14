@@ -18,6 +18,8 @@ eight megabytes. Models run without a per-model C++ build; see the
 [current benchmark](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
 for measured gradients and setup-plus-2,000-gradient time estimates.
 
+<!--gen:benchmark_corpus_time-->Estimated corpus time: Stanli 985.3 s vs CmdStan 2,595.0 s (2.63x CmdStan / Stanli; 337/343 models). Setup + 2,000 gradients per model. Full-corpus total unavailable: 6 models have incomplete measurements.<!--/gen-->
+
 ```python
 import stanli
 
@@ -233,12 +235,12 @@ Full per-model accuracy table:
 
 ## Performance
 
-In the <!--gen:benchmark_date-->2026-10-10<!--/gen--> native run,
-<!--gen:corpus_n_grad-->336<!--/gen--> of
-<!--gen:benchmark_models-->342<!--/gen--> models produced paired gradient
+In the <!--gen:benchmark_date-->2026-10-13<!--/gen--> native run,
+<!--gen:corpus_n_grad-->337<!--/gen--> of
+<!--gen:benchmark_models-->343<!--/gen--> models produced paired gradient
 measurements. The median CmdStan/Stanli ratio was
-<!--gen:corpus_median-->1.72x<!--/gen-->, with
-<!--gen:corpus_at_par-->308<!--/gen--> at or above parity.
+<!--gen:corpus_median-->2.17x<!--/gen-->, with
+<!--gen:corpus_at_par-->318<!--/gen--> at or above parity.
 
 Stanli avoids a per-model C++ build and can combine repeated work into fewer
 runtime operations. Dense kernels and serial dependencies offer fewer such

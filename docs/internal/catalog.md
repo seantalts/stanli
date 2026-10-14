@@ -260,6 +260,10 @@ paths and hashes in raw records unchanged.
 | --- | --- |
 | [Corpus benchmark evidence](../../output/corpus-performance-vectorized/README.md) | Published run/report provenance; retains recorded revision. |
 | [Corpus benchmark evidence](../../output/corpus-performance/README.md) | Published run/report provenance; retains recorded revision. |
+| [Fast-mode corpus evidence](../../output/corpus-performance-fast/README.md) | Current full-inventory fast-mode run, raw pairs and frozen source/build provenance. |
+| [10 October default corpus evidence](../../output/corpus-performance-history/2026-10-10/corpus-performance/README.md) | Immutable preceding default run. |
+| [10 October optimized-reference evidence](../../output/corpus-performance-history/2026-10-10/corpus-performance-vectorized/README.md) | Immutable preceding O1 plus loop-vectorization run. |
+| [10 October fast-mode evidence](../../output/corpus-performance-history/2026-10-10/corpus-performance-fast/README.md) | Immutable preceding fast-mode run. |
 | [Rethinking report evidence](../../output/rethinking-report/README.md) | Published run/report provenance; retains recorded revision. |
 | [Rethinking models: speedup and numerical differences](../../output/rethinking-report/rethinking-report.md) | Published run/report provenance; retains recorded revision. |
 | [Teaching sweep: evidence and reproduction](../../output/teaching-performance/EVIDENCE.md) | Published run/report provenance; retains recorded revision. |

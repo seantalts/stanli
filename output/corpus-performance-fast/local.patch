@@ -1,0 +1,1122 @@
+diff --git a/README.md b/README.md
+index 768d5499..38723dd0 100644
+--- a/README.md
++++ b/README.md
+@@ -30,6 +30,7 @@ and `remotes::install_github()` or a checkout installs from source (see
+ keeping installation small and avoiding a local stan-math build.
+ 
+ - Performance vs CmdStan: [full benchmark and method](docs/benchmarks.md).
++  <!--gen:benchmark_corpus_time-->Estimated corpus time: Stanli 960.4 s vs CmdStan 2,446.6 s (2.55x CmdStan / Stanli; 336/342 models). Setup + 2,000 gradients per model. Full-corpus total unavailable: 6 models have incomplete measurements.<!--/gen-->
+   In the <!--gen:benchmark_date-->2026-10-10<!--/gen--> native run,
+   <!--gen:corpus_n_grad-->336<!--/gen--> of
+   <!--gen:benchmark_models-->342<!--/gen--> models produced paired gradient
+diff --git a/docs/benchmark-protocol.md b/docs/benchmark-protocol.md
+index 5772f26e..a5b514ce 100644
+--- a/docs/benchmark-protocol.md
++++ b/docs/benchmark-protocol.md
+@@ -64,6 +64,15 @@ The [public tables](benchmarks.md#full-corpus) recalculate totals for a
+ 2,000-gradient workload from these same measurements; the retained v4
+ artifacts keep their recorded 20,000-gradient budget.
+ 
++The public headline sums setup plus 2,000 gradients per model across the
++application inventory and reports both engines' seconds and
++`sum(CmdStan seconds) / sum(Stanli seconds)`. This is a ratio of total times,
++not a median or mean of per-model ratios. Both sums use the same models with
++accepted gradients and complete setup measurements. If any model is incomplete,
++report the matched subtotal and its coverage, and mark the full-corpus total
++unavailable. Never count failures or timeouts as zero seconds or substitute
++historical timings. The per-model table keeps its separate warm-gradient ratio.
++
+ Numerical and sampler correctness remain covered independently by
+ [TESTING.md](../TESTING.md).
+ 
+diff --git a/docs/benchmarks.md b/docs/benchmarks.md
+index acb817ec..fa03dea5 100644
+--- a/docs/benchmarks.md
++++ b/docs/benchmarks.md
+@@ -5,6 +5,8 @@ build. During sampling, it reuses a prepared autodiff graph and batches
+ independent work. This can shorten the first fit and repeated gradient
+ evaluations; the gain depends on the model.
+ 
++<!--gen:benchmark_corpus_time-->Estimated corpus time: Stanli 960.4 s vs CmdStan 2,446.6 s (2.55x CmdStan / Stanli; 336/342 models). Setup + 2,000 gradients per model. Full-corpus total unavailable: 6 models have incomplete measurements.<!--/gen-->
++
+ The current comparison covers **<!--gen:benchmark_models-->342<!--/gen--> application
+ models**. Across <!--gen:corpus_n_grad-->336<!--/gen--> accepted gradient
+ comparisons, the median paired speedup is **<!--gen:corpus_median-->1.72x<!--/gen-->**.
+@@ -19,7 +21,11 @@ Both engines evaluate the same log density and full gradient at a shared
+ unconstrained point. After warmup, six alternating pairs give a median
+ speedup. Every accepted pair must pass its numerical comparison.
+ 
+-**Total sampling is estimated as setup + 2,000 × median warm gradient time.**
++**Corpus time is the sum of setup + 2,000 × median warm gradient time for every model.**
++The headline ratio divides summed CmdStan seconds by summed Stanli seconds.
++When any model lacks an accepted gradient comparison or complete setup timings,
++the headline shows the subtotal for the same completed models in both engines
++and marks the full-corpus total unavailable.
+ Stanli setup includes source-to-MIR compilation and lowering/binding; CmdStan
+ setup includes stanc translation and the ordinary C++ model build. This
+ fixed-work estimate excludes sampler/output overhead. Full sampling is not run
+@@ -60,7 +66,9 @@ Complete results are sorted by CmdStan / Stanli gradient ratio, highest first.
+ <!--gen:benchmark_catalog-->
+ Run `6c7cf86a5b24c3d8` (2026-10-10): 342 models, 6 alternating gradient pairs.
+ 
+-| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) |
++Estimated corpus time: Stanli 960.4 s vs CmdStan 2,446.6 s (2.55x CmdStan / Stanli; 336/342 models). Setup + 2,000 gradients per model. Full-corpus total unavailable: 6 models have incomplete measurements.
++
++| Model | CmdStan / Stanli gradient | Stanli estimate (s) | CmdStan estimate (s) |
+ | --- | ---: | ---: | ---: |
+ | `ch12_m12_4` | 32.5x | 0.152 | 7.46 |
+ | `gpcm_latent_reg_irt` | 12.2x | 0.346 | 8.16 |
+@@ -399,13 +407,13 @@ Run `6c7cf86a5b24c3d8` (2026-10-10): 342 models, 6 alternating gradient pairs.
+ | `s2_com_poisson` | 0.257x | 0.501 | 3.76 |
+ | `cm_invgaussian` | 0.0473x | 2.18 | 4.78 |
+ 
+-Total sampling is an estimate: each engine's measured setup time + 2,000 × its median warm gradient time. Full sampling is not run.
++Each estimate is the engine's measured setup time + 2,000 × its median warm gradient time. Full sampling is not run.
+ 
+ **Incomplete results**
+ 
+ Missing measurements are —; available timings are retained.
+ 
+-| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) | Reason |
++| Model | CmdStan / Stanli gradient | Stanli estimate (s) | CmdStan estimate (s) | Reason |
+ | --- | ---: | ---: | ---: | --- |
+ | `dogs_log` | — | — | — | failed; dogs_log/gradient/0/stanli: failed (event 2775) |
+ | `kronecker_gp` | — | — | — | failed; density/gradient mismatch: scaled error 0.000113 |
+@@ -575,7 +583,9 @@ with the [evidence](../output/corpus-performance-vectorized/README.md).
+ <!--gen:benchmark_vectorized_catalog-->
+ Run `8ab8978d93458c88`: 342 models, 6 alternating gradient pairs.
+ 
+-| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) |
++Estimated corpus time: Stanli 950.2 s vs CmdStan 2,864.5 s (3.01x CmdStan / Stanli; 335/342 models). Setup + 2,000 gradients per model. Full-corpus total unavailable: 7 models have incomplete measurements.
++
++| Model | CmdStan / Stanli gradient | Stanli estimate (s) | CmdStan estimate (s) |
+ | --- | ---: | ---: | ---: |
+ | `ch12_m12_4` | 31.5x | 0.159 | 7.54 |
+ | `gpcm_latent_reg_irt` | 12.5x | 0.332 | 8.43 |
+@@ -913,13 +923,13 @@ Run `8ab8978d93458c88`: 342 models, 6 alternating gradient pairs.
+ | `s2_com_poisson` | 0.206x | 0.506 | 4.76 |
+ | `cm_invgaussian` | 0.0513x | 2.15 | 33.8 |
+ 
+-Total sampling is an estimate: each engine's measured setup time + 2,000 × its median warm gradient time. Full sampling is not run.
++Each estimate is the engine's measured setup time + 2,000 × its median warm gradient time. Full sampling is not run.
+ 
+ **Incomplete results**
+ 
+ Missing measurements are —; available timings are retained.
+ 
+-| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) | Reason |
++| Model | CmdStan / Stanli gradient | Stanli estimate (s) | CmdStan estimate (s) | Reason |
+ | --- | ---: | ---: | ---: | --- |
+ | `dogs_log` | — | — | — | failed; dogs_log/gradient/0/stanli: failed (event 2775) |
+ | `kronecker_gp` | — | — | — | failed; density/gradient mismatch: scaled error 0.000113 |
+diff --git a/docs/internal/catalog.md b/docs/internal/catalog.md
+index 09c56d7d..ff5dfa80 100644
+--- a/docs/internal/catalog.md
++++ b/docs/internal/catalog.md
+@@ -216,6 +216,7 @@ paths and hashes in raw records unchanged.
+ 
+ | Document | Contents / use |
+ | --- | --- |
++| [2026-10-13 · x86-64-v3 matched-oracle regressions](../../notes/performance/2026-10-13-x86-v3-regressions.md) | Investigation of historical ISA regressions with independently compiled baseline/v3 CmdStan oracles, fixed-MIR timing, and kernel attribution. |
+ | [2026-08-08 · Competing with CmdStan: the seven-item roadmap](archive/plans/2026-08-08-cmdstan-parity-roadmap.md) | Historical plan or digest; read final disposition first. |
+ | [2026-09-11 · Harness execution gates](archive/plans/2026-09-11-harness-execution-gates.md) | Historical plan or digest; read final disposition first. |
+ | [2026-09-14 · Educational performance investigation](archive/plans/2026-09-14-educational-performance.md) | Historical plan or digest; read final disposition first. |
+diff --git a/docs/internal/research/numerics.md b/docs/internal/research/numerics.md
+index af7af073..1855b2ff 100644
+--- a/docs/internal/research/numerics.md
++++ b/docs/internal/research/numerics.md
+@@ -8,6 +8,7 @@ retain their recorded inputs and revisions.
+ 
+ | Question | Read |
+ | --- | --- |
++| Does raising the x86 baseline preserve parity when CmdStan uses the same ISA? | [x86-64-v3 investigation](../../../notes/performance/2026-10-13-x86-v3-regressions.md): matched baseline/v3 CmdStan builds, historical regression provenance, and focused timing/profile evidence. |
+ | What is in the shared corpus? | [Corpus inventory/status](../../corpus-status.md), collection provenance in the [catalog](../catalog.md#corpus-and-test-guides). |
+ | Why can inference time differ despite similar gradients? | [Teaching investigation digest](../archive/plans/2026-09-15-teaching-performance.md), [sampler RNG parity](../../../notes/performance/2026-09-20-sampler-rng-parity.md), [startup parity](../../../notes/performance/2026-09-20-sampler-startup-parity.md). |
+ | Remaining issue-374 cases | [Triage](../../../notes/performance/2026-09-21-issue-374-triage.md), [refreshed measurements](../../../notes/performance/2026-09-21-issue-374-refresh.md), [numerics](../../../notes/performance/2026-09-21-issue-374-numerics.md), [scalar experiment](../../../notes/performance/2026-09-21-issue-374-scalar-experiment.md). These records have different revisions; do not mix their timings. |
+diff --git a/python/README.md b/python/README.md
+index 999f0ab0..88d0aa7e 100644
+--- a/python/README.md
++++ b/python/README.md
+@@ -18,6 +18,8 @@ eight megabytes. Models run without a per-model C++ build; see the
+ [current benchmark](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
+ for measured gradients and setup-plus-2,000-gradient time estimates.
+ 
++<!--gen:benchmark_corpus_time-->Estimated corpus time: Stanli 960.4 s vs CmdStan 2,446.6 s (2.55x CmdStan / Stanli; 336/342 models). Setup + 2,000 gradients per model. Full-corpus total unavailable: 6 models have incomplete measurements.<!--/gen-->
++
+ ```python
+ import stanli
+ 
+diff --git a/runtime/include/stanli/density_registry.hpp b/runtime/include/stanli/density_registry.hpp
+index 516e8781..e4f5f3d8 100644
+--- a/runtime/include/stanli/density_registry.hpp
++++ b/runtime/include/stanli/density_registry.hpp
+@@ -8,6 +8,7 @@
+ 
+ #include <cstddef>
+ #include <cstdint>
++#include <optional>
+ #include <string>
+ #include <utility>
+ #include <vector>
+@@ -147,6 +148,13 @@ DensityCallPlan density_call_plan(
+     const DensitySpec& spec, const std::vector<DensityCallArgument>& arguments,
+     bool propto);
+ 
++// A parameter-independent normalization that can be factored from the
++// propto kernel without changing validation or the remaining arithmetic.
++// nullopt retains the complete density call. For graph preparation only:
++// runtime-control backends need not recompute this while executing a call.
++std::optional<double> density_data_constant(const DensitySpec& spec,
++                                           const DensityCallPlan& plan);
++
+ }  // namespace stanli
+ 
+ #endif
+diff --git a/runtime/kernels/constrain.cpp b/runtime/kernels/constrain.cpp
+index 064ca044..acc8c255 100644
+--- a/runtime/kernels/constrain.cpp
++++ b/runtime/kernels/constrain.cpp
+@@ -826,10 +826,8 @@ void sum_to_zero_mat_fwd(KernelCtx& ctx) {
+   const int64_t nb = ctx.idata[0], raw = ctx.idata[1];
+   const int64_t R = ctx.idata[2], C = ctx.idata[3], con = R * C;
+   for (int64_t b = 0; b < nb; ++b) {
+-    Eigen::MatrixXd y(R - 1, C - 1);
+-    for (int64_t j = 0; j < C - 1; ++j)
+-      for (int64_t i = 0; i < R - 1; ++i)
+-        y(i, j) = ctx.in[0].data[b * raw + j * (R - 1) + i];
++    const Eigen::Map<const Eigen::MatrixXd> y(ctx.in[0].data + b * raw,
++                                            R - 1, C - 1);
+     const Eigen::MatrixXd x = stan::math::sum_to_zero_constrain(y);
+     for (int64_t j = 0; j < C; ++j)
+       for (int64_t i = 0; i < R; ++i)
+@@ -844,19 +842,17 @@ void sum_to_zero_mat_bwd(KernelCtx& ctx) {
+   using stan::math::var;
+   for (int64_t b = 0; b < nb; ++b) {
+     stan::math::nested_rev_autodiff nested;
+-    Eigen::Matrix<var, -1, -1> y(R - 1, C - 1);
+-    for (int64_t j = 0; j < C - 1; ++j)
+-      for (int64_t i = 0; i < R - 1; ++i)
+-        y(i, j) = ctx.in[0].data[b * raw + j * (R - 1) + i];
++    stan::math::var_value<Eigen::MatrixXd> y(
++        Eigen::Map<const Eigen::MatrixXd>(ctx.in[0].data + b * raw,
++                                          R - 1, C - 1));
+     auto x = stan::math::sum_to_zero_constrain(y);
+-    var seeded = 0.0;
+-    for (int64_t j = 0; j < C; ++j)
+-      for (int64_t i = 0; i < R; ++i)
+-        seeded += ctx.out_adj_vec.data[b * con + j * R + i] * x(i, j);
++    const Eigen::Map<const Eigen::MatrixXd> seed(
++        ctx.out_adj_vec.data + b * con, R, C);
++    var seeded = stan::math::sum(stan::math::elt_multiply(x, seed));
+     stan::math::grad(seeded.vi_);
+     for (int64_t j = 0; j < C - 1; ++j)
+       for (int64_t i = 0; i < R - 1; ++i)
+-        ctx.in_adj[0].data[b * raw + j * (R - 1) + i] += y(i, j).adj();
++        ctx.in_adj[0].data[b * raw + j * (R - 1) + i] += y.adj()(i, j);
+   }
+ }
+ 
+diff --git a/runtime/kernels/densities_impl.hpp b/runtime/kernels/densities_impl.hpp
+index f19e9f09..161dc948 100644
+--- a/runtime/kernels/densities_impl.hpp
++++ b/runtime/kernels/densities_impl.hpp
+@@ -16,6 +16,7 @@
+ // Deliberately depend on the kernel-facing layouts rather than graph.hpp:
+ // otherwise any Graph or Executor edit reinstantiates every density shard.
+ #include "density_fused.hpp"
++#include "density_partials.hpp"
+ 
+ #include <stanli/kernel_types.hpp>
+ #include <stanli/optable.hpp>
+@@ -297,9 +298,8 @@ void density_bwd(KernelCtx& ctx) {
+       if (ctx.in[k].len == 1)
+         accumulate_partial(ctx.in_adj[k].data, ctx.out_adj, ctx.scratch[off]);
+       else
+-        Eigen::Map<Eigen::ArrayXd>(ctx.in_adj[k].data, ctx.in[k].len) +=
+-            ctx.out_adj *
+-            Eigen::Map<const Eigen::ArrayXd>(ctx.scratch + off, ctx.in[k].len);
++        add_scaled_partials(ctx.in_adj[k].data, ctx.scratch + off, ctx.out_adj,
++                            ctx.in[k].len);
+     }
+     off += ctx.in[k].len;
+   }
+@@ -312,17 +312,25 @@ bool density_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
+       ctx.variant == 0 ? (1u << NArgs) - 1 : (ctx.variant & 0x3fu);
+   int64_t n_partials = 0;
+   for (int k = 0; k < NArgs; ++k) n_partials += ctx.in[k].len;
+-  for (int k = 0; k < NArgs; ++k)
+-    if (((mask >> k) & 1u) != 0 && ctx.in_adj[k].data != nullptr &&
+-        ctx.in[k].len != 1)
++  // A few independent vector coordinates fit the same cached scalar
++  // accumulations as scalar arguments. Bound expansion per call so larger
++  // vectors retain the kernel path and its compact storage.
++  constexpr int64_t kMaxMicroCells = NArgs > 4 ? NArgs : 4;
++  int64_t cells = 0;
++  for (int k = 0; k < NArgs; ++k) {
++    if (((mask >> k) & 1u) == 0 || ctx.in_adj[k].data == nullptr) continue;
++    if (ctx.in[k].len < 0 || ctx.in[k].len > kMaxMicroCells - cells)
+       return false;
++    cells += ctx.in[k].len;
++  }
+   const double* connected = ctx.scratch + n_partials;
+   int64_t off = 0;
+   for (int k = 0; k < NArgs; ++k) {
+     if (((mask >> k) & 1u) != 0 && ctx.in_adj[k].data != nullptr)
+-      out.push_back(bwd_micro(kMicroScaled, ctx.in_adj[k].data,
+-                              ctx.out_adj_vec.data, ctx.scratch + off,
+-                              connected));
++      for (int64_t i = 0; i < ctx.in[k].len; ++i)
++        out.push_back(bwd_micro(kMicroScaled, ctx.in_adj[k].data + i,
++                                ctx.out_adj_vec.data, ctx.scratch + off + i,
++                                connected));
+     off += ctx.in[k].len;
+   }
+   return true;
+diff --git a/runtime/kernels/matrix_fns.cpp b/runtime/kernels/matrix_fns.cpp
+index 209b8022..5e5a0f1d 100644
+--- a/runtime/kernels/matrix_fns.cpp
++++ b/runtime/kernels/matrix_fns.cpp
+@@ -8,6 +8,7 @@
+ // Matrices live in slots column-major, matching Eigen and the rest of the
+ // pipeline, so a flat slot maps straight onto Map<MatrixXd>.
+ #include "density_fused.hpp"
++#include "density_partials.hpp"
+ 
+ #include <stanli/graph.hpp>
+ #include <stanli/density_registry.hpp>
+@@ -35,6 +36,7 @@ using CMapM = Eigen::Map<const MatD>;
+ using CMapV = Eigen::Map<const VecD>;
+ using VarV = Eigen::Matrix<stan::math::var, -1, 1>;
+ using VarM = Eigen::Matrix<stan::math::var, -1, -1>;
++using VarValueV = stan::math::var_value<VecD>;
+ 
+ // Promote every input to var on a nested tape, call f, seed the output
+ // adjoints, and copy back the adjoints of inputs that carry one. Inputs
+@@ -371,6 +373,18 @@ void qf_bwd_impl(KernelCtx& ctx, int64_t n, int64_t m, bool vec) {
+   } else {
+     g = CMapM(ctx.out_adj_vec.data, m, m);
+   }
++  if (vec) {
++    // Preserve the source vector's compile-time column shape, as Stan's
++    // quad_form_vari does. A dynamic matrix with one column selects different
++    // Eigen products and can regroup short-vector arithmetic under AVX2.
++    const CMapV bv(ctx.in[1].data, n);
++    if (ctx.in_adj[0].data)
++      MapM(ctx.in_adj[0].data, n, n) += bv * g * bv.transpose();
++    if (ctx.in_adj[1].data)
++      Eigen::Map<VecD>(ctx.in_adj[1].data, n) +=
++          a * bv * g.transpose() + a.transpose() * bv * g;
++    return;
++  }
+   if (ctx.in_adj[0].data)
+     MapM(ctx.in_adj[0].data, n, n) += b * g * b.transpose();
+   if (ctx.in_adj[1].data)
+@@ -491,12 +505,15 @@ void tail_scatter(KernelCtx& ctx, int k, const VarV& v) {
+ void tail_scatter(KernelCtx& ctx, int k, const stan::math::var& x) {
+   if (ctx.in_adj[k].data) ctx.in_adj[k].data[0] += x.adj();
+ }
+-void tail_scatter(KernelCtx& ctx, int k, const std::vector<VarV>& xs) {
++template <typename Vector>
++void tail_scatter(KernelCtx& ctx, int k, const std::vector<Vector>& xs) {
+   if (!ctx.in_adj[k].data) return;
+   int64_t at = 0;
+-  for (const auto& x : xs)
++  for (const auto& x : xs) {
++    const auto& adj = x.adj();
+     for (int64_t i = 0; i < x.size(); ++i)
+-      ctx.in_adj[k].data[at++] += x(i).adj();
++      ctx.in_adj[k].data[at++] += adj.coeff(i);
++  }
+ }
+ 
+ // Complete a compact density and return all argument adjoints in slot order.
+@@ -525,8 +542,12 @@ double* tail_stash(double* s, const stan::math::var& x) {
+   *s++ = x.adj();
+   return s;
+ }
+-double* tail_stash(double* s, const std::vector<VarV>& xs) {
+-  for (const auto& x : xs) s = tail_stash(s, x);
++template <typename Vector>
++double* tail_stash(double* s, const std::vector<Vector>& xs) {
++  for (const auto& x : xs) {
++    const auto& adj = x.adj();
++    for (int64_t i = 0; i < x.size(); ++i) *s++ = adj.coeff(i);
++  }
+   return s;
+ }
+ 
+@@ -556,8 +577,7 @@ void tail_density_bwd(KernelCtx& ctx) {
+   const double w = ctx.out_adj;
+   for (int k = 0; k < NArgs; ++k) {
+     if (ctx.in_adj[k].data)
+-      Eigen::Map<Eigen::ArrayXd>(ctx.in_adj[k].data, ctx.in[k].len) +=
+-          w * Eigen::Map<const Eigen::ArrayXd>(s, ctx.in[k].len);
++      add_scaled_partials(ctx.in_adj[k].data, s, w, ctx.in[k].len);
+     s += ctx.in[k].len;
+   }
+ }
+@@ -608,15 +628,25 @@ enum MnKind { kMnCov, kMnPrec, kMnChol };
+ inline int64_t mvt_count(int encoded) { return encoded < 0 ? 1 : encoded; }
+ 
+ template <typename Scalar, typename Input>
+-std::vector<Eigen::Matrix<Scalar, Eigen::Dynamic, 1>> mvt_vectors(
+-    const Input& input, int64_t width, int encoded) {
+-  using Vector = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
++auto mvt_vectors(const Input& input, int64_t width, int encoded) {
+   const int64_t count = mvt_count(encoded);
+-  std::vector<Vector> result((size_t)count, Vector(width));
+-  for (int64_t k = 0; k < count; ++k)
+-    for (int64_t i = 0; i < width; ++i)
+-      result[(size_t)k](i) = input.data[k * width + i];
+-  return result;
++  if constexpr (std::is_same_v<Scalar, double>) {
++    // Data operands are contiguous, read-only views for the duration of the
++    // Stan Math call and its nested reverse. Avoid one owning allocation per
++    // vector; subtraction/products still use Stan Math's own temporaries.
++    std::vector<CMapV> result;
++    result.reserve((size_t)count);
++    for (int64_t k = 0; k < count; ++k)
++      result.emplace_back(input.data ? input.data + k * width : nullptr, width);
++    return result;
++  } else {
++    using Vector = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
++    std::vector<Vector> result((size_t)count, Vector(width));
++    for (int64_t k = 0; k < count; ++k)
++      for (int64_t i = 0; i < width; ++i)
++        result[(size_t)k](i) = input.data[k * width + i];
++    return result;
++  }
+ }
+ 
+ template <typename Vectors, typename F>
+@@ -625,6 +655,19 @@ decltype(auto) with_mvt_argument(Vectors& values, int encoded, F&& f) {
+                      : std::forward<F>(f)(values);
+ }
+ 
++// Stan Math's supported varmat vector operands keep values and adjoints in
++// its arena. No per-vector Eigen owning allocation or custom partials edge.
++std::vector<VarValueV> mvt_varmat_vectors(const Desc& input, int64_t width,
++                                         int encoded) {
++  const int64_t count = mvt_count(encoded);
++  std::vector<VarValueV> result;
++  result.reserve((size_t)count);
++  for (int64_t k = 0; k < count; ++k)
++    result.emplace_back(CMapV(input.data ? input.data + k * width : nullptr,
++                              width));
++  return result;
++}
++
+ template <bool Grad, MnKind Kind = kMnCov>
+ double mn_eval(KernelCtx& ctx) {
+   const int64_t n = ctx.idata[0];
+@@ -643,11 +686,13 @@ double mn_eval(KernelCtx& ctx) {
+   // Bind only the representation selected by activity. Inactive var copies
+   // and active double copies were never passed to Stan Math. Precision's
+   // replay retains its original inactive-var scatter contract.
+-  std::vector<VarV> ys, mus;
+-  std::vector<VecD> ysd, musd;
+-  if (ay || Kind == kMnPrec) ys = mvt_vectors<var>(ctx.in[0], n, y_encoded);
++  std::vector<VarValueV> ys, mus;
++  std::vector<CMapV> ysd, musd;
++  if (ay || Kind == kMnPrec)
++    ys = mvt_varmat_vectors(ctx.in[0], n, y_encoded);
+   if (!ay) ysd = mvt_vectors<double>(ctx.in[0], n, y_encoded);
+-  if (am || Kind == kMnPrec) mus = mvt_vectors<var>(ctx.in[1], n, mu_encoded);
++  if (am || Kind == kMnPrec)
++    mus = mvt_varmat_vectors(ctx.in[1], n, mu_encoded);
+   if (!am) musd = mvt_vectors<double>(ctx.in[1], n, mu_encoded);
+   VarM S;
+   if (aS || Kind == kMnPrec) {
+diff --git a/runtime/src/density_registry.cpp b/runtime/src/density_registry.cpp
+index 754a4780..ed9af235 100644
+--- a/runtime/src/density_registry.cpp
++++ b/runtime/src/density_registry.cpp
+@@ -1,6 +1,9 @@
+ #include <stanli/density_registry.hpp>
+ #include <stanli/function_registry.hpp>
++#include <stanli/optable.hpp>
+ 
++#include <stan/math/prim/fun/lgamma.hpp>
++#include <stan/math/prim/fun/sum.hpp>
+ #include <stan/math/prim/prob/discrete_range_lpmf.hpp>
+ #include <stan/math/prim/prob/hypergeometric_lpmf.hpp>
+ 
+@@ -10,6 +13,37 @@
+ #include <utility>
+ 
+ namespace stanli {
++
++std::optional<double> density_data_constant(const DensitySpec& spec,
++                                           const DensityCallPlan& plan) {
++  // poisson_log_glm's propto form drops only this outcome normalization:
++  // its real operands remain recorder scalars/vectors in both forms.
++  if (spec.opcode != OP_POISSON_LOG_GLM_LPMF || (plan.variant & 0x80u) ||
++      plan.empty_result || plan.idata.size() < 2)
++    return std::nullopt;
++  const size_t size = plan.idata.size();
++  const bool scalar_layout = size >= 4 &&
++      plan.idata[size - 2] == kGlmScalarLayoutMarker;
++  const size_t tail = scalar_layout ? 4 : 2;
++  const int rows = plan.idata[size - tail];
++  const bool scalar_y = scalar_layout && (plan.idata.back() & 1);
++  const int ny = scalar_y ? 1 : rows;
++  // Amortize the extra scalar graph addition; leave small calls unchanged.
++  if (ny < 16 || size != static_cast<size_t>(ny) + tail)
++    return std::nullopt;
++  for (int i = 0; i < ny; ++i)
++    if (plan.idata[i] < 0 || plan.idata[i] == std::numeric_limits<int>::max())
++      return std::nullopt;  // keep support checks and integer +1 on fallback
++  double constant = 0;
++  if (scalar_y) {
++    constant -= stan::math::lgamma(plan.idata[0] + 1);
++  } else {
++    const Eigen::Map<const Eigen::VectorXi> y(plan.idata.data(), ny);
++    constant -= stan::math::sum(stan::math::lgamma(y.array() + 1));
++  }
++  return constant;
++}
++
+ namespace {
+ 
+ template <typename F>
+diff --git a/runtime/src/lower_funapp.cpp b/runtime/src/lower_funapp.cpp
+index b5265510..6e773569 100644
+--- a/runtime/src/lower_funapp.cpp
++++ b/runtime/src/lower_funapp.cpp
+@@ -1268,6 +1268,14 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
+       g.ops.back().dyn_lengths = dyn_lengths;
+     }
+     g.ops.back().variant = plan.variant;
++    if (const auto normalization = stanli::density_data_constant(spec, plan)) {
++      // The full Stan Math call starts at the negative normalization and
++      // then adds its parameter-dependent sum. Keep that operand order and
++      // its ordinary validation, propagator and backward implementation.
++      g.ops.back().variant |= 0x80u;
++      return with_layout(emit_value(OP_ADD, {constant(*normalization), dv}, 1),
++                         ExpressionLayout::scalar());
++    }
+     return dv;
+   }
+ 
+diff --git a/tests/test_corpus_bench.py b/tests/test_corpus_bench.py
+index 06708464..27de26b5 100644
+--- a/tests/test_corpus_bench.py
++++ b/tests/test_corpus_bench.py
+@@ -494,6 +494,43 @@ class HistoricalResultsTests(unittest.TestCase):
+ 
+ 
+ class BenchmarkCatalogTests(unittest.TestCase):
++    def test_corpus_ratio_divides_summed_times_for_the_same_models(self):
++        from tools.corpus_table import corpus_time_totals
++        rows = [dict(model="a", stanli_compile_s=1, stanli_prep_s=2,
++                     cmdstan_stanc_s=3, cmdstan_build_s=4,
++                     stanli_ns_grad=500000, cmdstan_ns_grad=1000000),
++                dict(model="b", stanli_compile_s=10, stanli_prep_s=20,
++                     cmdstan_stanc_s=30, cmdstan_build_s=40,
++                     stanli_ns_grad=1000000, cmdstan_ns_grad=500000),
++                dict(model="partial", stanli_compile_s=999, stanli_prep_s=999,
++                     stanli_ns_grad=999),
++                dict(model="rejected", stanli_compile_s=999, stanli_prep_s=999,
++                     cmdstan_stanc_s=999, cmdstan_build_s=999,
++                     stanli_ns_grad=999, cmdstan_ns_grad=999)]
++        details = {row["model"]: dict(status="ok" if row["model"] in ("a", "b") else "failed")
++                   for row in rows}
++        totals = corpus_time_totals(rows, details)
++        self.assertEqual(totals, dict(models=2, inventory=4, stanli_s=36,
++                                     cmdstan_s=80, ratio=80/36))
++        custom = corpus_time_totals(rows, details, gradient_budget=1000)
++        self.assertEqual(custom["stanli_s"], 34.5)
++        self.assertEqual(custom["cmdstan_s"], 78.5)
++
++    def test_corpus_headline_marks_incomplete_and_empty_totals(self):
++        from tools.corpus_table import corpus_time_summary
++        summary = corpus_time_summary(self.rows, {r["model"]: r for r in self.records})
++        self.assertIn("18.24x CmdStan / Stanli; 1/2 models", summary)
++        self.assertIn("Full-corpus total unavailable: 1 model has", summary)
++        empty = corpus_time_summary([self.rows[1]], {"failed": self.records[1]})
++        self.assertIn("time unavailable: 0/1 models", empty)
++        self.assertNotIn("0.0 s", empty)
++
++    def test_full_inventory_has_a_corpus_total_without_incomplete_label(self):
++        from tools.corpus_table import corpus_time_summary
++        summary = corpus_time_summary([self.rows[0]], {"good": self.records[0]})
++        self.assertIn("1/1 models", summary)
++        self.assertNotIn("unavailable", summary)
++
+     def test_complete_rows_rank_by_unrounded_ratio_and_incomplete_rows_stay_separate(self):
+         from tools.corpus_table import _catalog_tables
+         rows = [
+diff --git a/tests/test_densities.cpp b/tests/test_densities.cpp
+index 2cd06bf8..0bcae833 100644
+--- a/tests/test_densities.cpp
++++ b/tests/test_densities.cpp
+@@ -777,7 +777,92 @@ static void check_wiener_single_evaluation() {
+     }
+ }
+ 
++// Both recorder-backed density families consume retained partials. Exercise
++// independent scratch/adjoint alignment, packet boundaries, repeated seeds,
++// and disconnected edges without rerunning a forward density (which could
++// hide a bad pullback by replacing its scratch).
++static void check_retained_density_pullbacks() {
++  using namespace stanli;
++  const double inf = std::numeric_limits<double>::infinity();
++  for (uint16_t opcode : {OP_BERNOULLI_LPMF, OP_ORDERED_LOGISTIC_LPMF}) {
++    const Kernel* kernel = find_kernel(opcode);
++    const bool tail = opcode == OP_ORDERED_LOGISTIC_LPMF;
++    for (int n : {0, 1, 2, 3, 4, 6, 7, 8, 9, 16, 17, 59, 128})
++      for (int aoff = 0; aoff < 8; ++aoff)
++        for (int soff = 0; soff < 8; ++soff)
++          for (double seed : {0.0, -0.0, 1.3, -2.7, inf}) {
++            alignas(64) double adj[144], scratch[144];
++            std::fill(std::begin(adj), std::end(adj), 12345.0);
++            std::fill(std::begin(scratch), std::end(scratch), -77.0);
++            double* const partials = scratch + soff + (tail ? 1 : 0);
++            for (int i = 0; i < n; ++i) {
++              adj[aoff + i] = 0.2 * (i % 5 - 2);
++              partials[i] = 0.1 * (i % 7 - 3);
++            }
++            partials[n] = 1.0;
++            const std::vector<double> initial(adj, adj + 144);
++            KernelCtx ctx{};
++            ctx.n_in = tail ? 2 : 1;
++            ctx.out = Desc{nullptr, 1};
++            ctx.in[0] = Desc{nullptr, tail ? 1 : n};
++            ctx.in[1] = Desc{nullptr, n};
++            const int active_arg = tail ? 1 : 0;
++            ctx.in_adj[active_arg] = Desc{adj + aoff, n};
++            ctx.scratch = scratch + soff;
++            ctx.out_adj = seed;
++            ctx.out_adj_vec = Desc{&ctx.out_adj, 1};
++            int marker = -1;
++            ctx.idata = &marker;
++            ctx.n_idata = 1;
++            for (int repeat = 0; repeat < 2; ++repeat) kernel->backward(ctx);
++            for (int i = 0; i < 144; ++i) {
++              double want = initial[i];
++              if (i >= aoff && i < aoff + n)
++                for (int repeat = 0; repeat < 2; ++repeat)
++                  want += seed * partials[i - aoff];
++              if (std::isnan(want))
++                expect_nan("retained density nonfinite", adj[i], want);
++              else
++                expect_bits("retained density pullback/guard", adj[i], want);
++            }
++            if (kernel->cached_micro) {
++              const std::vector<double> expected(adj, adj + 144);
++              std::vector<BwdMicro> micro;
++              const bool eligible = kernel->cached_micro(ctx, micro);
++              expect_true("density micro cell bound", eligible == (n <= 4));
++              if (eligible) {
++                expect_true("density micro cell count", micro.size() == size_t(n));
++                std::copy(initial.begin(), initial.end(), adj);
++                for (int repeat = 0; repeat < 2; ++repeat)
++                  for (const auto& step : micro) run_bwd_micro(step);
++                for (int i = 0; i < 144; ++i) {
++                  if (std::isnan(expected[i]))
++                    expect_nan("cached density nonfinite", adj[i], expected[i]);
++                  else
++                    expect_bits("cached density accumulation", adj[i], expected[i]);
++                }
++                partials[n] = 0.0;
++                std::copy(initial.begin(), initial.end(), adj);
++                ctx.out_adj = inf;
++                for (const auto& step : micro) run_bwd_micro(step);
++                for (int i = 0; i < 144; ++i)
++                  expect_bits("cached density disconnect", adj[i], initial[i]);
++              } else {
++                expect_true("density micro transactional refusal", micro.empty());
++              }
++            }
++            partials[n] = 0.0;
++            std::copy(initial.begin(), initial.end(), adj);
++            ctx.out_adj = inf;
++            kernel->backward(ctx);
++            for (int i = 0; i < 144; ++i)
++              expect_bits("disconnected retained density", adj[i], initial[i]);
++          }
++  }
++}
++
+ int main() {
++  check_retained_density_pullbacks();
+   check_scalar_poisson_lcdf();
+   check_wiener_single_evaluation();
+   using namespace stanli;
+diff --git a/tests/test_gen_web_models.py b/tests/test_gen_web_models.py
+index b606f003..6705efcd 100644
+--- a/tests/test_gen_web_models.py
++++ b/tests/test_gen_web_models.py
+@@ -77,6 +77,8 @@ class CurrentBenchmarkTests(unittest.TestCase):
+         self.assertEqual(stats["benchmark_models"], "2")
+         self.assertNotIn("benchmark_n_sampling", stats)
+         self.assertEqual(stats["corpus_median"], "1.42x")
++        self.assertIn("18.24x CmdStan / Stanli; 1/2 models", stats["benchmark_corpus_time"])
++        self.assertIn("Full-corpus total unavailable", stats["benchmark_corpus_time"])
+         self.assertEqual(stats["corpus_reference_models"], "1")
+         self.assertEqual(stats["corpus_reference_points"], "3")
+         self.assertEqual(stats["corpus_verified"], "1/1")
+@@ -93,6 +95,7 @@ class CurrentBenchmarkTests(unittest.TestCase):
+         self.assertEqual(stats["benchmark_models"], "2")
+         self.assertNotIn("benchmark_n_sampling", stats)
+         self.assertEqual(stats["corpus_n_grad"], "1")
++        self.assertIn("time unavailable: 0/2 models", stats["benchmark_corpus_time"])
+ 
+ 
+ class HeadlineStatsTests(unittest.TestCase):
+diff --git a/tests/test_hp_reference.py b/tests/test_hp_reference.py
+index 910c5b69..f06769ca 100644
+--- a/tests/test_hp_reference.py
++++ b/tests/test_hp_reference.py
+@@ -145,6 +145,37 @@ class Builtins(unittest.TestCase):
+         tol = mpf(10) ** -45 if tol is None else tol
+         self.assertLess(abs(a - b), tol * max(1, abs(b)))
+ 
++    def test_normal_log_quantile_in_both_extreme_tails(self):
++        f = mpfun.F["std_normal_log_qf"]
++        for logp in (mpf("-0.5"), mpf("-1000"), -mpf("1e-300")):
++            z = f(logp)
++            observed = mp.log(mpfun.Phi(z)) if z < 0 else mp.log1p(-mpfun.Phi(-z))
++            self.assertLess(abs(observed - logp), mpf("1e-45") * abs(logp))
++        self.assertEqual(f(mpf(0)), mp.inf)
++        self.assertEqual(f(-mp.inf), -mp.inf)
++
++    def test_inverse_erfc_and_lambert_branches(self):
++        for p in (mpf("0.75"), mpf("1.25"), mpf("1e-300")):
++            z = mpfun.F["inv_erfc"](p)
++            self.assertLess(abs(mp.erfc(z) / p - 1), mpf("1e-45"))
++        x = mpf("-0.1")
++        w0, wm1 = mpfun.F["lambert_w0"](x), mpfun.F["lambert_wm1"](x)
++        self.assertGreater(w0, -1)
++        self.assertLess(wm1, -1)
++        self.close(w0 * mp.exp(w0), x)
++        self.close(wm1 * mp.exp(wm1), x)
++
++    def test_trigamma_recurrence(self):
++        f = mpfun.F["trigamma"]
++        x = mpf("0.4")
++        self.close(f(x) - f(x + 1), 1 / x**2)
++
++    def test_named_unary_and_binary_signs_preserve_containers(self):
++        x = Vec([mpf("0.2"), mpf("-0.7")])
++        self.assertEqual(mpfun.F["plus"](x), x)
++        self.assertEqual(mpfun.F["minus"](x), Vec([-x[0], -x[1]]))
++        self.assertEqual(mpfun.F["minus"](x, x), Vec([mpf(0), mpf(0)]))
++
+     def test_student_t_lccdf_at_center_is_log_half(self):
+         f = mpextra.CDFS["student_t_lccdf"]
+         self.close(f(mpf(0), mpf(3), mpf(0), mpf(1)), -mp.log(2))
+diff --git a/tests/test_lower.cpp b/tests/test_lower.cpp
+index 35a428a4..f329c12d 100644
+--- a/tests/test_lower.cpp
++++ b/tests/test_lower.cpp
+@@ -9925,6 +9925,71 @@ int main() {
+           "glm: lp matches the var path (propto reached the kernel)");
+   }
+ 
++  // Constant normalization factoring keeps both source pullbacks even when
++  // CSE shares the GLM forward. Check both sides of the short-call fallback,
++  // irregular packet tails, and support errors at evaluation rather than
++  // preparation.
++  for (int n : {15, 16, 17, 32}) {
++    const int k = 3;
++    std::ostringstream json;
++    json << "{\"N\":" << n << ",\"K\":" << k << ",\"x\":[";
++    Eigen::MatrixXd X(n, k);
++    std::vector<int> y(n);
++    for (int i = 0; i < n; ++i) {
++      json << (i ? "," : "") << '[';
++      for (int j = 0; j < k; ++j) {
++        X(i, j) = 0.125 * (1 + (i + 3 * j) % 7);
++        json << (j ? "," : "") << X(i, j);
++      }
++      json << ']';
++      y[i] = i % 6;
++    }
++    json << "],\"y\":[";
++    for (int i = 0; i < n; ++i) json << (i ? "," : "") << y[i];
++    json << "]}";
++    DataMap d = DataMap::from_json(json.str());
++    auto gm = compile_model(slurp("tests/fixtures/glm_normalization.tmir.sexp"), d);
++    bool factored = false;
++    for (const Op& op : gm.graph.ops)
++      if (op.opcode == OP_POISSON_LOG_GLM_LPMF) factored |= op.variant & 0x80u;
++    check(factored == (n >= 16), "glm normalization eligibility");
++    Executor ex(std::move(gm.graph));
++    gm.bind(ex);
++    using stan::math::var;
++    stan::math::nested_rev_autodiff nested;
++    Eigen::Matrix<var, -1, 1> a(n), b(k);
++    for (int i = 0; i < n + k; ++i) {
++      const double q = 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3);
++      ex.params_data()[i] = q;
++      if (i < n) a(i) = q;
++      else b(i - n) = q;
++    }
++    std::vector<double> gradient(n + k);
++    const double got = ex.gradient(gradient.data());
++    var ref = 0;
++    ref += stan::math::poisson_log_glm_lpmf<false>(y, X, a, b);
++    ref += 0.75 * stan::math::poisson_log_glm_lpmf<false>(y, X, a, b);
++    ref.grad();
++    expect_ulp("glm normalized value", got, ref.val());
++    for (int i = 0; i < n; ++i)
++      expect_ulp("glm normalized alpha", gradient[i], a(i).adj());
++    for (int j = 0; j < k; ++j)
++      expect_ulp("glm normalized beta", gradient[n + j], b(j).adj());
++
++    y[0] = -1;
++    d.set_int_array("y", y);
++    auto invalid = compile_model(slurp("tests/fixtures/glm_normalization.tmir.sexp"), d);
++    for (const Op& op : invalid.graph.ops)
++      if (op.opcode == OP_POISSON_LOG_GLM_LPMF)
++        check(!(op.variant & 0x80u), "invalid outcome retains full glm");
++    Executor iex(std::move(invalid.graph));
++    invalid.bind(iex);
++    std::copy(ex.params_data(), ex.params_data() + n + k, iex.params_data());
++    bool rejected = false;
++    try { iex.forward(); } catch (const std::domain_error&) { rejected = true; }
++    check(rejected, "invalid glm rejected during evaluation");
++  }
++
+   // A GLM whose outcome is a language-level scalar rather than an array of
+   // one value per row. Scalar-vs-array is retained in the shared GLM payload:
+   // merely replicating the value changes poisson_log_glm's <false> constant.
+diff --git a/tools/bench_opcost.cpp b/tools/bench_opcost.cpp
+index 220743f9..5a62d83d 100644
+--- a/tools/bench_opcost.cpp
++++ b/tools/bench_opcost.cpp
+@@ -9,11 +9,15 @@
+ #include <stanli/compile.hpp>
+ #include <stanli/graph.hpp>
+ #include <stanli/optable.hpp>
++#include "benchmark_timer.hpp"
+ 
+ #include <chrono>
+ #include <cmath>
+ #include <cstdio>
+ #include <cstring>
++#include <fstream>
++#include <sstream>
++#include <stdexcept>
+ #include <vector>
+ 
+ using namespace stanli;
+@@ -90,7 +94,68 @@ static double time_ns(int reps, F&& f) {
+   return std::chrono::duration<double, std::nano>(t1 - t0).count() / reps;
+ }
+ 
++// Isolate an existing stateless kernel with the inputs produced by a real
++// graph. Reuses the normal compiler, binder, kernel registry and timer.
++static int kernel_forward(int argc, char** argv) {
++  if (argc < 5) throw std::invalid_argument(
++      "usage: bench_opcost --kernel-forward mir.sexp data.json OP_INDEX "
++      "[--warmup-ms N --measure-ms N]");
++  const auto slurp = [](const char* path) {
++    std::ifstream f(path);
++    if (!f) throw std::runtime_error(std::string("cannot read ") + path);
++    std::ostringstream s;
++    s << f.rdbuf();
++    return s.str();
++  };
++  auto cm = compile_model(slurp(argv[2]), DataMap::from_json(slurp(argv[3])));
++  Executor ex(std::move(cm.graph));
++  cm.bind(ex);
++  for (int64_t i = 0; i < ex.n_params(); ++i)
++    ex.params_data()[i] = 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3);
++  ex.forward();
++  const Graph& g = ex.graph();
++  const Op& op = g.ops.at(static_cast<size_t>(std::stoul(argv[4])));
++  const Kernel& k = kernel(op.opcode);
++  if (!k.forward || k.make_state || op.dyn_capacity)
++    throw std::invalid_argument("kernel needs state or dynamic extents");
++  KernelCtx ctx{};
++  ctx.n_in = op.n_in;
++  ctx.variant = op.variant;
++  ctx.idata = op.idata;
++  ctx.n_idata = op.n_idata;
++  ctx.udata = op.udata;
++  for (int i = 0; i < op.n_in; ++i)
++    ctx.in[i] = {ex.value_ptr(op.in[i]), g.slots[op.in[i]].len};
++  const int64_t n = g.slots[op.out].len;
++  std::vector<double> out(static_cast<size_t>(n));
++  std::vector<double> out2(op.out2 < 0 ? 0 : g.slots[op.out2].len);
++  std::vector<double> scratch(k.scratch_size ? k.scratch_size(op, g.slots.data()) : 0);
++  ctx.out = {out.data(), n};
++  ctx.out2 = {out2.data(), static_cast<int64_t>(out2.size())};
++  ctx.scratch = scratch.data();
++  k.forward(ctx);
++  for (int64_t i = 0; i < n; ++i)
++    if (out[i] != ex.value_ptr(op.out)[i])
++      throw std::runtime_error("isolated value differs from graph execution");
++  const auto opts = stanli_benchmark::options(argc, argv, 5);
++  const auto one = [&]() { k.forward(ctx); };
++  const auto warm = stanli_benchmark::window(one, opts.warmup_ns, 1, true);
++  const auto measured = stanli_benchmark::window(one, opts.measure_ns, warm.batch);
++  std::cout << "{\"opcode\":\"" << opcode_name(op.opcode)
++            << "\",\"variant\":" << unsigned(op.variant) << ",\"lens\":[";
++  for (int i = 0; i < op.n_in; ++i)
++    std::cout << (i ? "," : "") << ctx.in[i].len;
++  std::cout << "],\"iterations\":" << measured.iterations
++            << ",\"elapsed_ns\":" << measured.elapsed_ns
++            << ",\"values\":[" << std::setprecision(17);
++  for (int64_t i = 0; i < n; ++i) std::cout << (i ? "," : "") << out[i];
++  std::cout << "]}" << std::endl;
++  return 0;
++}
++
+ int main(int argc, char** argv) {
++  if (argc > 1 && std::strcmp(argv[1], "--kernel-forward") == 0)
++    return kernel_forward(argc, argv);
+   int reps = REPS;
+   if (argc == 2 && std::strcmp(argv[1], "--smoke") == 0) {
+     reps = 1;
+diff --git a/tools/corpus_table.py b/tools/corpus_table.py
+index dcb1f172..33480122 100644
+--- a/tools/corpus_table.py
++++ b/tools/corpus_table.py
+@@ -518,10 +518,51 @@ def _catalog_model(model):
+     return "<br>".join(f"<code>{html.escape(line)}</code>" for line in lines)
+ 
+ 
++def catalog_estimate(row, engine, gradient_budget=CATALOG_GRADIENT_BUDGET):
++    """Seconds for one model's setup plus the requested gradient workload."""
++    fields = (("stanli_compile_s", "stanli_prep_s") if engine == "stanli"
++              else ("cmdstan_stanc_s", "cmdstan_build_s"))
++    components = [_catalog_number(row, field) for field in (*fields, engine + "_ns_grad")]
++    return (components[0] + components[1] + gradient_budget * components[2] / 1e9
++            if all(value is not None for value in components) else None)
++
++
++def corpus_time_totals(rows, details, gradient_budget=CATALOG_GRADIENT_BUDGET):
++    """Sum validated, completed models over the same inventory for both engines."""
++    matched = []
++    for row in rows:
++        estimates = [catalog_estimate(row, engine, gradient_budget)
++                     for engine in ("stanli", "cmdstan")]
++        if details[row["model"]]["status"] == "ok" and all(v is not None for v in estimates):
++            matched.append(estimates)
++    stanli = math.fsum(pair[0] for pair in matched) if matched else None
++    cmdstan = math.fsum(pair[1] for pair in matched) if matched else None
++    return dict(models=len(matched), inventory=len(rows), stanli_s=stanli, cmdstan_s=cmdstan,
++                ratio=cmdstan / stanli if stanli else None)
++
++
++def corpus_time_summary(rows, details, gradient_budget=CATALOG_GRADIENT_BUDGET):
++    totals = corpus_time_totals(rows, details, gradient_budget)
++    coverage = f"{totals['models']}/{totals['inventory']} models"
++    if totals["models"]:
++        ratio = f"{totals['ratio']:.2f}x" if totals["ratio"] is not None else "unavailable"
++        summary = (f"Estimated corpus time: Stanli {totals['stanli_s']:,.1f} s vs "
++                   f"CmdStan {totals['cmdstan_s']:,.1f} s "
++                   f"({ratio} CmdStan / Stanli; {coverage}).")
++    else:
++        summary = f"Estimated corpus time unavailable: {coverage} have complete measurements."
++    summary += f" Setup + {gradient_budget:,} gradients per model."
++    missing = totals["inventory"] - totals["models"]
++    if missing:
++        reason = "model has" if missing == 1 else "models have"
++        summary += f" Full-corpus total unavailable: {missing} {reason} incomplete measurements."
++    return summary
++
++
+ def _catalog_tables(rows, details):
+     """Present both compiler configurations with the same public workload."""
+-    header = "| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) |"
+-    output = [header, "| --- | ---: | ---: | ---: |"]
++    header = "| Model | CmdStan / Stanli gradient | Stanli estimate (s) | CmdStan estimate (s) |"
++    output = [corpus_time_summary(rows, details), "", header, "| --- | ---: | ---: | ---: |"]
+     incomplete = []
+     complete = sorted(
+         (row for row in rows if details[row["model"]]["status"] == "ok"),
+@@ -534,11 +575,8 @@ def _catalog_tables(rows, details):
+     for row in (*complete, *incomplete_rows):
+         speedup = _catalog_number(row, "paired_speedup")
+         cells = [_catalog_model(row["model"]), f"{speedup:.3g}x" if speedup is not None else "—"]
+-        for engine, fields in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
+-                               ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
+-            components = [_catalog_number(row, field) for field in (*fields, engine + "_ns_grad")]
+-            estimate = (components[0] + components[1] + CATALOG_GRADIENT_BUDGET * components[2] / 1e9
+-                        if all(value is not None for value in components) else None)
++        for engine in ("stanli", "cmdstan"):
++            estimate = catalog_estimate(row, engine)
+             cells.append(f"{estimate:.3g}" if estimate is not None else "—")
+         record = details[row["model"]]
+         if record["status"] == "ok":
+@@ -547,7 +585,7 @@ def _catalog_tables(rows, details):
+             cells.append(_catalog_notes(row, record))
+             incomplete.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
+     output.extend([
+-        "", f"Total sampling is an estimate: each engine's measured setup time + {CATALOG_GRADIENT_BUDGET:,} × "
++        "", f"Each estimate is the engine's measured setup time + {CATALOG_GRADIENT_BUDGET:,} × "
+         "its median warm gradient time. Full sampling is not run.",
+     ])
+     if incomplete:
+diff --git a/tools/gen_docs.py b/tools/gen_docs.py
+index be59616d..9cf0bda8 100644
+--- a/tools/gen_docs.py
++++ b/tools/gen_docs.py
+@@ -29,7 +29,7 @@ import subprocess
+ import sys
+ import warnings
+ 
+-from corpus_table import render_catalog, render_gradient_catalog
++from corpus_table import render_catalog, render_gradient_catalog, corpus_time_summary
+ 
+ REPO = pathlib.Path(__file__).resolve().parent.parent
+ # The demo page carries headline numbers too, and its markers are HTML
+@@ -40,7 +40,7 @@ TARGETS = [REPO / "README.md", REPO / "python" / "README.md",
+ MARK = re.compile(r"(<!--gen:([a-z_]+)-->)(.*?)(<!--/gen-->)", re.S)
+ 
+ 
+-def current_benchmark():
++def current_benchmark(*, include_details=False):
+     """Validated current table, rows, and manifest shared by public summaries.
+ 
+     Validate the complete inventory, provenance, and measurement evidence
+@@ -55,6 +55,10 @@ def current_benchmark():
+     with summary.open(newline="") as stream:
+         rows = list(csv.DictReader(stream, delimiter="\t"))
+     manifest = json.loads(manifest_path.read_text())
++    if include_details:
++        with gzip.open(records, "rt") as stream:
++            details = {record["model"]: record for record in json.load(stream)}
++        return catalog, rows, manifest, details
+     return catalog, rows, manifest
+ 
+ 
+@@ -94,11 +98,12 @@ def compute():
+     n_total = len(ver)
+     lang_verified = sum(1 for v in lang.values() if v["status"] == "VERIFIED")
+ 
+-    catalog, benchmark_rows, manifest = current_benchmark()
++    catalog, benchmark_rows, manifest, benchmark_details = current_benchmark(include_details=True)
+     c_n, c_med, c_par = corpus_stats(benchmark_rows)
+ 
+     return {
+         "benchmark_catalog": catalog,
++        "benchmark_corpus_time": corpus_time_summary(benchmark_rows, benchmark_details),
+         "benchmark_models": str(len(manifest["identity"]["inputs"])),
+         "benchmark_date": manifest["started_utc"][:10],
+         "benchmark_vectorized_catalog": render_gradient_catalog().rstrip(),
+diff --git a/tools/hp/common.py b/tools/hp/common.py
+index c1a223f3..2418b66d 100644
+--- a/tools/hp/common.py
++++ b/tools/hp/common.py
+@@ -1,4 +1,5 @@
+ import json
++import os
+ import pathlib
+ import subprocess
+ import sys
+@@ -12,8 +13,8 @@ sys.path.insert(0, str(HERE))
+ import verify_refs as v  # noqa: E402
+ from sexp import parse  # noqa: E402
+ 
+-PDB = pathlib.Path("/Users/xitrium/claud/stanrt/deps/posteriordb/posterior_database")
+-STANC = pathlib.Path("/Users/xitrium/claud/stanrt/deps/stanc3/stanc")
++PDB = pathlib.Path(os.environ.get("STANLI_HP_PDB", REPO / "deps/posteriordb/posterior_database"))
++STANC = pathlib.Path(os.environ.get("STANLI_HP_STANC", REPO / "deps/stanc3/stanc"))
+ 
+ 
+ def load_case(model, tmp, refs=None):
+diff --git a/tools/hp/hp_eval.py b/tools/hp/hp_eval.py
+index f1e4df56..cb581386 100644
+--- a/tools/hp/hp_eval.py
++++ b/tools/hp/hp_eval.py
+@@ -113,7 +113,7 @@ def run_model(model, args, refs, tmp, res):
+         lp = it.logp(theta)
+         lp_s = time.time() - t1
+         entry["lp_s"] = round(lp_s, 3)
+-        entry["lp"] = mp.nstr(lp, 55)
++        entry["lp"] = mp.nstr(lp, max(55, args.dps))
+         if args.dps_check and pt == args.points[0]:
+             mp.dps = 2 * args.dps
+             lp2 = Interp(mir, data).logp([mpf(point_value(i, pt)) for i in range(n)])
+@@ -129,7 +129,7 @@ def run_model(model, args, refs, tmp, res):
+             entry["method"] = method
+             if g is not None:
+                 hp_grad = [float(x) for x in g]
+-                entry["grad"] = [mp.nstr(x, 55) for x in g]
++                entry["grad"] = [mp.nstr(x, max(55, args.dps)) for x in g]
+             else:
+                 entry["dirs"] = [{k: d[k] for k in ("seed", "D_hp")} for d in dirs]
+         hp_lp = float(lp)
+diff --git a/tools/hp/mpfun.py b/tools/hp/mpfun.py
+index 70d817c6..ce15fad6 100644
+--- a/tools/hp/mpfun.py
++++ b/tools/hp/mpfun.py
+@@ -181,6 +181,30 @@ def _inv_Phi(p):
+     return mp.sqrt(2) * mp.erfinv(2 * p - 1)
+ 
+ 
++def _log_inv_Phi(logp):
++    if mp.isnan(logp):
++        return mp.nan
++    if logp > 0:
++        raise StanReject("normal log quantile probability exceeds zero")
++    if logp == 0:
++        return mp.inf
++    if logp == -mp.inf:
++        return -mp.inf
++    if logp > -mp.log(2):
++        return -_log_inv_Phi(mp.log(-mp.expm1(logp)))
++    if logp > -(mp.dps // 2) * mp.log(10):
++        return _inv_Phi(mp.exp(logp))
++    # In the far tail, forming 2*p-1 loses p even at arbitrary precision.
++    start = -mp.sqrt(-2 * logp)
++    return mp.findroot(lambda z: mp.log(Phi(z)) - logp, (start, start + 1))
++
++
++def _inv_erfc(p):
++    if p < 0 or p > 2:
++        raise StanReject("inverse erfc argument outside [0,2]")
++    return -_log_inv_Phi(mp.log(p / 2)) / mp.sqrt(2)
++
++
+ def fmin_(a, b):
+     return min(a, b)
+ 
+@@ -234,12 +258,16 @@ def mkF():
+         "sinh": ew(mp.sinh), "cosh": ew(mp.cosh), "asin": ew(mp.asin), "acos": ew(mp.acos),
+         "atan": ew(mp.atan), "asinh": ew(mp.asinh), "acosh": ew(mp.acosh),
+         "atanh": ew(mp.atanh), "lgamma": ew(lg), "tgamma": ew(mp.gamma),
+-        "digamma": ew(mp.digamma), "erf": ew(mp.erf), "erfc": ew(mp.erfc),
++        "digamma": ew(mp.digamma), "trigamma": ew(lambda x: mp.polygamma(1, x)),
++        "erf": ew(mp.erf), "erfc": ew(mp.erfc), "inv_erfc": ew(_inv_erfc),
++        "lambert_w0": ew(lambda x: mp.lambertw(x, 0)),
++        "lambert_wm1": ew(lambda x: mp.lambertw(x, -1)),
+         "inv_logit": ew(inv_logit), "logit": ew(lambda x: mp.log(x / (1 - x))),
+         "log_inv_logit": ew(log_inv_logit), "log1m_inv_logit": ew(log1m_inv_logit),
+         "inv_cloglog": ew(lambda x: 1 - mp.exp(-mp.exp(x))),
+         "Phi": ew(Phi), "Phi_approx": ew(lambda x: inv_logit(mpf("0.07056") * x ** 3 + mpf("1.5976") * x)),
+-        "inv_Phi": ew(_inv_Phi),
++        "inv_Phi": ew(_inv_Phi), "std_normal_qf": ew(_inv_Phi),
++        "std_normal_log_qf": ew(_log_inv_Phi),
+         "log1p_exp": ew(lambda x: mp.log1p(mp.exp(x)) if x < 0 else x + mp.log1p(mp.exp(-x))),
+         "log_sum_exp": lambda *a: lse(a[0]) if len(a) == 1 else lse([a[0], a[1]]),
+         "fabs": ew(abs), "abs": ew(abs), "floor": ew(mp.floor), "ceil": ew(mp.ceil),
+@@ -266,6 +294,8 @@ def mkF():
+         "int_step": lambda x: int(x > 0), "step": lambda x: mpf(int(x >= 0)),
+         "sign": ew(lambda x: (x > 0) - (x < 0)),
+         "multiply_log": lambda a, b: mpf(0) if a == 0 and b == 0 else a * mp.log(b),
++        "minus": lambda *a: map1(lambda x: -x, a[0]) if len(a) == 1 else minus(*a),
++        "plus": lambda *a: copy(a[0]) if len(a) == 1 else plus(*a),
+         "lmultiply": lambda a, b: mpf(0) if a == 0 and b == 0 else a * mp.log(b),
+         "logical_negation": None,
+         "tcrossprod": lambda m: matmul(m, transpose(m)),
+diff --git a/web/index.html b/web/index.html
+index 518a9093..a4f57c44 100644
+--- a/web/index.html
++++ b/web/index.html
+@@ -1763,7 +1763,8 @@ which takes several seconds even for small models after the precompiled headers
+ Stanli has its own lowering and optimization passes that run in tens of milliseconds and then just interprets that high level result rather than using a compiler.
+ <a href="https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md">How
+ it works</a></p>
+-<p><b>How does it perform?</b> In the
++<p><b>How does it perform?</b>
++<!--gen:benchmark_corpus_time-->Estimated corpus time: Stanli 960.4 s vs CmdStan 2,446.6 s (2.55x CmdStan / Stanli; 336/342 models). Setup + 2,000 gradients per model. Full-corpus total unavailable: 6 models have incomplete measurements.<!--/gen--> In the
+ <!--gen:benchmark_date-->2026-10-10<!--/gen--> native run,
+ <!--gen:corpus_n_grad-->336<!--/gen--> of
+ <!--gen:benchmark_models-->342<!--/gen--> models produced paired gradient
