@@ -765,29 +765,38 @@ class Analysis {
     });
     writes_ = writes;
     undefined_read_.assign(n_regs, 0);
-    std::vector<std::vector<char>> in(n_blocks);
+    using Bits = std::vector<uint64_t>;
+    const size_t words = (n_regs + 63) / 64;
+    const auto test = [](const Bits& v, size_t r) {
+      return (v[r >> 6] >> (r & 63)) & 1;
+    };
+    const auto set = [](Bits& v, size_t r) {
+      v[r >> 6] |= uint64_t{1} << (r & 63);
+    };
+    std::vector<Bits> in(n_blocks);
     std::vector<char> reached(n_blocks, 0);
     reached[0] = 1;
-    in[0].assign(n_regs, 0);
-    for (size_t r = 0; r < n_regs; ++r) in[0][r] = writes[r] == 0;
-    in[0][(size_t)p_.iter_reg] = 1;
-    const auto meet = [&](size_t to, const std::vector<char>& from) {
+    in[0].assign(words, 0);
+    for (size_t r = 0; r < n_regs; ++r)
+      if (writes[r] == 0) set(in[0], r);
+    set(in[0], (size_t)p_.iter_reg);
+    const auto meet = [&](size_t to, const Bits& from) {
       if (to >= n_blocks) return;
       if (!reached[to]) {
         reached[to] = 1;
         in[to] = from;
         return;
       }
-      for (size_t k = 0; k < n_regs; ++k) in[to][k] &= from[k];
+      for (size_t k = 0; k < words; ++k) in[to][k] &= from[k];
     };
     for (size_t b = 0; b < n_blocks; ++b) {
       if (!reached[b]) continue;
-      std::vector<char> defined = in[b];
+      Bits defined = std::move(in[b]);
       for (int pc = blocks[b].begin; pc < blocks[b].end; ++pc) {
         const Program::Instr& I = p_.code[(size_t)pc];
         each_body_read(I, [&](int reg, int len) {
           for (int k = 0; k < len; ++k)
-            if (!defined[(size_t)(reg + k)])
+            if (!test(defined, (size_t)(reg + k)))
               undefined_read_[(size_t)(reg + k)] = 1;
         });
         switch (I.code) {
