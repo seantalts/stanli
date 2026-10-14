@@ -373,6 +373,29 @@ class VectorizeAbTest(unittest.TestCase):
         self.assertEqual(measured["iterations"], 5000)
         self.assertEqual(measured["on_over_off"], 2.0)
 
+    def test_flagged_model_is_confirmed_with_more_rounds(self):
+        calls = []
+
+        def fake_benchmark(bench, mirs, data, rounds, *rest):
+            calls.append(rounds)
+            ratio = 1.1 if len(calls) == 1 else 1.0
+            return {"ok": True, "on_over_off": ratio}
+
+        with mock.patch.object(vectorize_ab, "gradient_benchmark",
+                               side_effect=fake_benchmark):
+            gradient, confirmation = vectorize_ab.measure_gradient(
+                "bench", {}, "data", 2, 6, 8, 0.75, 1_000_000, 20)
+        self.assertEqual(calls, [2, 6])
+        self.assertEqual(gradient["on_over_off"], 1.1)
+        self.assertEqual(confirmation["on_over_off"], 1.0)
+
+        calls.clear()
+        with mock.patch.object(vectorize_ab, "gradient_benchmark",
+                               return_value={"ok": True, "on_over_off": 1.0}):
+            gradient, confirmation = vectorize_ab.measure_gradient(
+                "bench", {}, "data", 2, 6, 8, 0.75, 1_000_000, 20)
+        self.assertIsNone(confirmation)
+
     def test_gradient_ratio_exceeds_threshold(self):
         threshold = vectorize_ab.GRADIENT_RATIO_THRESHOLD
         self.assertFalse(vectorize_ab.gradient_ratio_exceeds(

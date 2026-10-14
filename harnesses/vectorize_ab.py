@@ -17,8 +17,8 @@ graph growing by more than 10%, both in the runtime-reroll-on cells) are
 diagnostics: they never fail the run on their own. The execution gate is
 gradient time on the candidate-pass measurement set (GRADIENT_MODELS)
 against the pass-off cell: a model whose on/off ratio exceeds
-GRADIENT_RATIO_THRESHOLD is re-measured fresh, and only fails the run if
-the re-run also exceeds it.
+GRADIENT_RATIO_THRESHOLD is re-measured fresh with three times the rounds,
+and only fails the run if the re-run also exceeds it.
 
 That gate, like the op-count diagnostic, compares a run's own pass-off
 cell against its pass-on cell, so a change that moves both identically is
@@ -1146,6 +1146,18 @@ def gradient_benchmark(bench, mirs, data, rounds, calibration_n,
     }
 
 
+def measure_gradient(bench, mirs, data, rounds, confirmation_rounds,
+                     calibration_n, target_seconds, max_n, timeout):
+    gradient = gradient_benchmark(bench, mirs, data, rounds, calibration_n,
+                                  target_seconds, max_n, timeout)
+    if not gradient["ok"] or not gradient_ratio_exceeds(gradient):
+        return gradient, None
+    confirmation = gradient_benchmark(bench, mirs, data, confirmation_rounds,
+                                      calibration_n, target_seconds, max_n,
+                                      timeout)
+    return gradient, confirmation
+
+
 def gradient_ratio_exceeds(gradient):
     ratio = gradient.get("on_over_off") if gradient else None
     return isinstance(ratio, (int, float)) and ratio > GRADIENT_RATIO_THRESHOLD
@@ -1339,8 +1351,9 @@ def write_reports(output_dir, manifest, corpus_records, graph_records,
         "cells), are listed below as `## Op count diagnostics` but do not "
         "decide pass/fail. Gradient time on `GRADIENT_MODELS` is the "
         f"execution gate: a model whose on/off ratio exceeds "
-        f"{GRADIENT_RATIO_THRESHOLD} is re-measured fresh, and the run "
-        "fails only if that re-run also exceeds the ratio.", "",
+        f"{GRADIENT_RATIO_THRESHOLD} is re-measured fresh with "
+        "`--gradient-confirmation-rounds` rounds, and the run fails only if "
+        "that re-run also exceeds the ratio.", "",
         "| model | comparison | MIR changed | changed values | semantic points | "
         "gradient on/off | confirmation on/off |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
@@ -1400,6 +1413,7 @@ def main():
     parser.add_argument("--timeout", type=float, default=300)
     parser.add_argument("--prep-samples", type=int, default=1)
     parser.add_argument("--gradient-rounds", type=int, default=2)
+    parser.add_argument("--gradient-confirmation-rounds", type=int, default=6)
     parser.add_argument("--gradient-calibration-n", type=int, default=8)
     parser.add_argument("--gradient-target-seconds", type=float, default=0.75)
     parser.add_argument("--gradient-max-n", type=int, default=1_000_000)
@@ -1412,6 +1426,8 @@ def main():
         parser.error("--timeout must be positive")
     if args.gradient_rounds < 2:
         parser.error("--gradient-rounds must be at least 2")
+    if args.gradient_confirmation_rounds < 2:
+        parser.error("--gradient-confirmation-rounds must be at least 2")
     if args.gradient_calibration_n < 1:
         parser.error("--gradient-calibration-n must be positive")
     if not 0 < args.gradient_target_seconds <= 5:
@@ -1523,6 +1539,7 @@ def main():
         if args.baseline is not None else None,
         "gradient": {
             "rounds": args.gradient_rounds,
+            "confirmation_rounds": args.gradient_confirmation_rounds,
             "process_order": ["off", "on", "on", "off"],
             "calibration_iterations": args.gradient_calibration_n,
             "target_seconds": args.gradient_target_seconds,
@@ -1693,20 +1710,16 @@ def main():
             gradient = None
             gradient_confirmation = None
             if model in gradient_models:
-                gradient = gradient_benchmark(
+                gradient, gradient_confirmation = measure_gradient(
                     tools["bench"], mirs, data, args.gradient_rounds,
+                    args.gradient_confirmation_rounds,
                     args.gradient_calibration_n,
                     args.gradient_target_seconds, args.gradient_max_n,
                     args.gradient_timeout)
                 if not gradient["ok"]:
                     infrastructure_failures.append(
                         f"{model}: gradient benchmark")
-                elif gradient_ratio_exceeds(gradient):
-                    gradient_confirmation = gradient_benchmark(
-                        tools["bench"], mirs, data, args.gradient_rounds,
-                        args.gradient_calibration_n,
-                        args.gradient_target_seconds, args.gradient_max_n,
-                        args.gradient_timeout)
+                elif gradient_confirmation is not None:
                     if not gradient_confirmation["ok"]:
                         infrastructure_failures.append(
                             f"{model}: gradient confirmation benchmark")
