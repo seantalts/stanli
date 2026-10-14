@@ -2371,6 +2371,8 @@ std::vector<LaneFixture> lane_fixture_list() {
       {"region_map_dup", true, ""},
       {"region_map_nested", true, ""},
       {"region_map_intops", false, ""},
+      {"region_map_lse", true, ""},
+      {"region_map_lse_const", true, ""},
   };
 }
 
@@ -2395,6 +2397,70 @@ void test_lane_fixtures() {
                                         "STANLI_REGION_MAP_LANES", "0", extra);
     expect_mapped(what, lanes);
     expect_lane_parity(what, lanes, scalar, spread_points(2), true);
+  }
+}
+
+void test_lse_range_lanes() {
+  const stanli::Program::Code lse = stanli::Program::LSE_RANGE;
+  const Ref ref_lse = [](const std::vector<var>& p, const Series& s,
+                         std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const bool race = p[0] * s.x[i] > 0.2;
+      if (taken) taken->push_back(race);
+      if (!race) {
+        lp += -stan::math::square(s.y[i] - p[1] * s.x[i]);
+        continue;
+      }
+      std::vector<var> t;
+      for (int j = 1; j <= 5; ++j)
+        t.push_back(-0.5 *
+                        stan::math::square(s.y[i] - p[0] * s.x[i] * j / 5.0) *
+                        stan::math::exp(p[1]) -
+                    0.1 * j * p[1]);
+      lp += stan::math::log_sum_exp(t);
+    }
+    return lp;
+  };
+  const Ref ref_const = [](const std::vector<var>& p, const Series& s,
+                           std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const bool race = p[0] * s.x[i] > 0.2;
+      if (taken) taken->push_back(race);
+      if (!race) {
+        lp += -stan::math::square(s.y[i] - p[1] * s.x[i]);
+        continue;
+      }
+      std::vector<var> t = {
+          var(-1.5), -0.5 * stan::math::square(s.y[i] - p[0] * s.x[i]) - p[1],
+          -0.5 * stan::math::square(s.y[i] + p[1] * s.x[i]) - 0.2, var(-2.0)};
+      lp += stan::math::log_sum_exp(t);
+    }
+    return lp;
+  };
+  const std::vector<Params> points = {{0.3, -0.5}, {-1.5, 0.7}, {0.9, 0.2}};
+  for (const char* stem : {"region_map_lse", "region_map_lse_const"}) {
+    const Ref& ref =
+        std::string(stem) == "region_map_lse" ? ref_lse : ref_const;
+    for (int n : {37, 64, 200}) {
+      const std::string what = std::string(stem) + " N=" + std::to_string(n);
+      CompiledModel lanes = compile_with(stem, n);
+      expect_mapped(what, lanes);
+      check(map_has_code(lanes, lse), what + ": body holds LSE_RANGE");
+      CompiledModel scalar =
+          compile_with(stem, n, "STANLI_REGION_MAP_LANES", "0");
+      expect_lane_parity(what, lanes, scalar, spread_points(2), true);
+      const Series series = make_series(n);
+      Executor ex(lanes.graph);
+      lanes.bind(ex);
+      for (size_t k = 0; k < points.size(); ++k) {
+        std::vector<int> taken;
+        expect_eval(what + " point " + std::to_string(k),
+                    evaluate(ex, points[k]),
+                    reference(ref, series, points[k], &taken));
+      }
+    }
   }
 }
 
@@ -3031,7 +3097,7 @@ void test_lane_cogmod() {
       {"cm_gamma", true, true},
       {"cm_geg", true, true},
       {"cm_invgamma", true, true},
-      {"cm_invgaussian", true, false},
+      {"cm_invgaussian", true, true},
       {"cm_invweibull", true, true},
       {"cm_lba1", true, true},
       {"cm_lba2", true, true},
@@ -3446,6 +3512,7 @@ static void test_region_map() {
   test_logic_points();
   test_logic_compiles_to_jumps();
   test_lane_fixtures();
+  test_lse_range_lanes();
   test_native_math();
   test_tile_call_parity();
   test_lane_tile_recompute();

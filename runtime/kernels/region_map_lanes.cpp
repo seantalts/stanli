@@ -62,6 +62,7 @@ bool lane_opcode(Program::Code c) {
     case Program::JZ:
     case Program::JMP:
     case Program::LSE2:
+    case Program::LSE_RANGE:
     case Program::LOG_DIFF_EXP:
     case Program::LMULTIPLY:
     case Program::LOG_MIX:
@@ -277,6 +278,10 @@ class Analysis {
         f(A.vb, 1);
         f(A.vc, 1);
         return;
+      case Program::LSE_RANGE:
+        f(A.va, A.len);
+        f(A.vd, 1);
+        return;
       case Program::LOG:
       case Program::LOG1P_EXP:
       case Program::ERFC:
@@ -452,6 +457,9 @@ class Analysis {
       case Program::LMULTIPLY:
         f(A.a, 1);
         f(A.b, 1);
+        return;
+      case Program::LSE_RANGE:
+        f(A.a, A.len);
         return;
       case Program::MOV:
       case Program::NEG:
@@ -707,6 +715,10 @@ class Analysis {
           per_lane_cells(A.dst, 1, "indexed output");
           same_class_cells(A.a, A.len, "indexed");
           break;
+        case Program::LSE_RANGE:
+          per_lane_cells(A.dst, 1, "output");
+          per_lane_cells(A.a, A.len, "log_sum_exp terms");
+          break;
         default:
           per_lane_cells(A.dst, 1, "output");
           break;
@@ -785,17 +797,17 @@ class Analysis {
           case Program::CALL: {
             const Program::Call& call = p_.calls[(size_t)I.a];
             for (int k = 0; k < call.out_len; ++k)
-              defined[(size_t)(call.out + k)] = 1;
+              set(defined, (size_t)(call.out + k));
             for (int k = 0; k < call.scratch_len; ++k)
-              defined[(size_t)(call.scratch + k)] = 1;
+              set(defined, (size_t)(call.scratch + k));
             break;
           }
           case Program::CONSTR:
           case Program::FILL:
-            for (int k = 0; k < I.len; ++k) defined[(size_t)(I.dst + k)] = 1;
+            for (int k = 0; k < I.len; ++k) set(defined, (size_t)(I.dst + k));
             break;
           default:
-            defined[(size_t)I.dst] = 1;
+            set(defined, (size_t)I.dst);
         }
       }
       if (blocks[b].taken >= 0) meet((size_t)blocks[b].taken, defined);
@@ -1440,6 +1452,17 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
         return stan::math::log_sum_exp(a, b);
       });
       break;
+    case Program::LSE_RANGE: {
+      double* const d = t.slot(I.dst);
+      std::vector<double> terms((size_t)I.len);
+      t.each(m, [&](int l) {
+        for (int32_t k = 0; k < I.len; ++k)
+          terms[(size_t)k] = t.value(I.a + k, l);
+        d[l] = stan::math::log_sum_exp(
+            Eigen::Map<const Eigen::VectorXd>(terms.data(), I.len));
+      });
+      break;
+    }
     case Program::LOG_DIFF_EXP:
       t.binary(o, I, m, [](double a, double b) {
         return stan::math::log_diff_exp(a, b);
@@ -2074,6 +2097,20 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
           else
             log_diff_exp_rule(u, va[l], vb[l], a[l], b[l]);
         });
+      });
+      return;
+    }
+    case Program::LSE_RANGE: {
+      double* const d = cells(o.dst);
+      double* const terms = cells(o.a);
+      const TileState& f = t.forward();
+      t.each(m, [&](int l) {
+        const double u = d[l];
+        d[l] = 0.0;
+        const double out = f.value(I.vd, l);
+        for (int32_t k = 0; k < I.len; ++k)
+          terms[(size_t)k * kTile + l] +=
+              u * std::exp(f.value(I.va + k, l) - out);
       });
       return;
     }
