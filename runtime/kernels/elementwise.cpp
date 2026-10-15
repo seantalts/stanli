@@ -1,4 +1,5 @@
 // Native elementwise / structural ops with hand-written vjps.
+#include "add_n_fold.hpp"
 #include <stanli/extrema_grouping.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
@@ -37,14 +38,8 @@ bool exp_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
 }
 
 // OP_ADD_N: scalar out = sum of scalar inputs.
-void add_n_fwd(KernelCtx& ctx) {
-  double acc = 0;
-  for (int i = 0; i < ctx.n_in; ++i) {
-    assert(ctx.in[i].len == 1);
-    acc += ctx.in[i].data[0];
-  }
-  ctx.out.data[0] = acc;
-}
+void add_n_fwd(KernelCtx& ctx) { add_n_fold<>(ctx); }
+
 void add_n_bwd(KernelCtx& ctx) {
   for (int i = 0; i < ctx.n_in; ++i)
     if (ctx.in_adj[i].data) ctx.in_adj[i].data[0] += ctx.out_adj;
@@ -486,6 +481,10 @@ void set_slice_strided_inplace_bwd(KernelCtx& ctx) {
 }
 
 }  // namespace
+
+// Stable identity for late binding; custom kernel registrations retain
+// their own callback.
+extern void (*const canonical_add_n_forward)(KernelCtx&) = add_n_fwd;
 
 // Called from Executor's constructor path; a static registrar object in a
 // static library dropped by the linker.

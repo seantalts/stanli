@@ -1,18 +1,25 @@
 #include <stanli/function_registry.hpp>
 #include <stanli/mir.hpp>
 
+#include <boost/container/small_vector.hpp>
+#include <boost/container/new_allocator.hpp>
+
 #include <stdexcept>
-#include <unordered_map>
+#include <boost/unordered/unordered_flat_map.hpp>
 
 namespace stanli {
 namespace {
 
+using Overloads = boost::container::small_vector<
+    const FunctionSpec*, 1,
+    boost::container::new_allocator<const FunctionSpec*>>;
+
 struct FunctionRegistryIndex {
-  std::unordered_map<std::string_view, std::vector<const FunctionSpec*>>
-      by_name;
+  boost::unordered_flat_map<std::string_view, Overloads> by_name;
   std::array<std::vector<const FunctionSpec*>, 2> by_family;
 
   FunctionRegistryIndex() {
+    by_name.reserve(function_specs().size());
     for (const FunctionSpec& spec : function_specs()) {
       by_name[spec.name].push_back(&spec);
       by_family[spec.family() == FunctionFamily::Builtin ? 0 : 1].push_back(
@@ -26,8 +33,8 @@ const FunctionRegistryIndex& function_registry_index() {
   return index;
 }
 
-const std::vector<const FunctionSpec*>& overloads(std::string_view name) {
-  static const std::vector<const FunctionSpec*> none;
+const Overloads& overloads(std::string_view name) {
+  static const Overloads none;
   const auto& by_name = function_registry_index().by_name;
   const auto found = by_name.find(name);
   return found == by_name.end() ? none : found->second;
@@ -348,7 +355,7 @@ bool FunctionSpec::accepts(size_t call_arity,
 const std::vector<FunctionSpec>& function_specs() {
   static const std::vector<FunctionSpec> entries = [] {
     std::vector<FunctionSpec> result;
-    result.reserve(384);
+    result.reserve(512);
     const auto builtin = [&](std::string_view name, BuiltinSpec spec) {
       result.emplace_back(name, std::move(spec));
     };

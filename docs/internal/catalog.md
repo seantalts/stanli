@@ -254,6 +254,8 @@ paths and hashes in raw records unchanged.
 | [2026-08-10 · BridgeStan ABI facade and sampler strategy](archive/specs/2026-08-10-bridgestan-facade-design.md) | Historical specification; verify current implementation. |
 | [2026-08-11 · Embedding the model in the data argument](archive/specs/2026-08-11-embedded-mir-data.md) | Historical specification; verify current implementation. |
 
+| [2026-10-15 · General runtime fixes](../../notes/performance/2026-10-15-general-runtime-fixes.md) | Baseline-ISA constant reuse, registry storage, and ADD_N binding; proof and benchmark evidence. |
+
 ## Published artifacts
 
 | Document | Contents / use |

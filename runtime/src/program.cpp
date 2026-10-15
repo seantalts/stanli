@@ -21,6 +21,8 @@
 #include <stanli/program.hpp>
 
 #include <cmath>
+#include <cstring>
+#include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <stdexcept>
@@ -1166,7 +1168,23 @@ bool compact_program_gated(Program& p, std::vector<std::pair<int, int>>& seeded,
     mark_pinned(Span{s.first, s.second});
     mark_range(Span{s.first, s.second});
   }
+  bool scalar_constant_reuse = true;
+  size_t literal_stores = 0;
   for (const auto& I : p.code) {
+    if (scalar_constant_reuse) {
+      const auto& spec = program_spec_of(I);
+      const bool copy_range = I.code == Program::MOVR ||
+                              I.code == Program::CONSTR ||
+                              I.code == Program::FILL;
+      scalar_constant_reuse =
+          !branches(I.code) && I.code != Program::CALL &&
+          I.code != Program::TRANSFORM && I.code != Program::DENSITY_VEC &&
+          !spec.has(kProgramNoAdjoint) && (!copy_range || I.len >= 0) &&
+          (copy_range ||
+           (!spec.has(kProgramRangeA) && !spec.has(kProgramRangeB) &&
+            !spec.has(kProgramRangeOutput)));
+      literal_stores += I.code == Program::CONST;
+    }
     each_write(p, I, mark_range);
     each_read(p, I, mark_range);
     // The adjoint rules that walk a run of adjoint cells need those cells to
@@ -1218,6 +1236,15 @@ bool compact_program_gated(Program& p, std::vector<std::pair<int, int>>& seeded,
     if (branches(I.code)) next_branch = (int)i;
   }
 
+  // Reuse the completed next-event scratch tables. next_read now holds
+  // first reads; negative entries protect direct outputs. Pool entries from
+  // different compiler paths need not be interned. Compare literal bits,
+  // including signed zero and NaN payloads.
+  scalar_constant_reuse = scalar_constant_reuse && literal_stores > 1;
+  if (scalar_constant_reuse)
+    for (int reg : p.out_regs) next_read[(size_t)reg] = -1;
+  auto& literal_root = next_write;
+
   std::vector<int> declared((size_t)n_regs, -1);
   for (size_t i = 0; i < n; ++i)
     each_write(p, p.code[i], [&](Span s) {
@@ -1249,8 +1276,46 @@ bool compact_program_gated(Program& p, std::vector<std::pair<int, int>>& seeded,
     }
     for (int reg = 0; reg < n_regs; ++reg) alias[(size_t)reg] = reg;
     remove = dead_fill;
+    if (scalar_constant_reuse)
+      std::fill(literal_root.begin(), literal_root.end(), -1);
     for (size_t i = 0; i < n; ++i) {
       const Program::Instr& I = p.code[i];
+      // Share only private, immutable, definitely initialized scalar leaves.
+      // No arithmetic or evaluation order changes. Ranged computations and
+      // control flow keep the original path; copies retain their own proof.
+      if (scalar_constant_reuse && !remove[i] && I.code == Program::CONST &&
+          I.a >= 0 && (size_t)I.a < p.pool.size()) {
+        const size_t dst = (size_t)I.dst;
+        if (!pinned[dst] && !interior[dst] && !interior[dst + 1] &&
+            first_write[dst] == (int)i && last_write[dst] == (int)i &&
+            next_read[dst] > (int)i) {
+          uint64_t bits;
+          std::memcpy(&bits, &p.pool[(size_t)I.a], sizeof bits);
+          // Open addressing in the existing n_regs scratch table. Each root
+          // owns a distinct register, so there is always room for this one.
+          uint64_t hash = bits ^ (bits >> 33);
+          hash *= UINT64_C(0xff51afd7ed558ccd);
+          hash ^= hash >> 33;
+          size_t slot = (size_t)(hash % literal_root.size());
+          for (;;) {
+            int& root = literal_root[slot];
+            if (root < 0) {
+              root = I.dst;
+              break;
+            }
+            const auto& stored = p.code[(size_t)first_write[(size_t)root]];
+            uint64_t root_bits;
+            std::memcpy(&root_bits, &p.pool[(size_t)stored.a],
+                        sizeof root_bits);
+            if (root_bits == bits) {
+              alias[dst] = alias[(size_t)root];
+              remove[i] = 1;
+              break;
+            }
+            if (++slot == literal_root.size()) slot = 0;
+          }
+        }
+      }
       if (I.code != Program::MOV && I.code != Program::MOVR) continue;
       const int len = I.code == Program::MOV ? 1 : I.len;
       if (len <= 0) continue;
