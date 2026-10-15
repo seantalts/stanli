@@ -3309,6 +3309,49 @@ void test_recompute_visits_taken_blocks() {
   }
 }
 
+void test_lane_reverse_order() {
+  const std::string stem = "region_map_chain";
+  const int n = 64;
+  const Series s = make_series(n);
+  const Ref ref = [](const std::vector<var>& p, const Series& d,
+                     std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < d.y.size(); ++i) {
+      const var u = d.y[i] - p[0] * d.x[i];
+      const bool first = u.val() < p[1].val();
+      var v = first ? p[2] * stan::math::square(u) : stan::math::exp(-u) - p[1];
+      const bool second = v.val() < p[2].val();
+      var w = second ? stan::math::log1p(stan::math::square(v)) : p[0] * v;
+      if (taken) taken->push_back(first * 2 + second);
+      lp += -w - 0.5 * stan::math::square(u);
+    }
+    return lp;
+  };
+  const std::vector<Params> points = {
+      {0.3, -0.2, 0.4}, {-1.2, 0.6, -0.3}, {0.8, 0.1, 1.5}, {0.0, 0.5, 0.5}};
+  CompiledModel lanes = compile_with(stem, n);
+  CompiledModel scalar = compile_with(stem, n, "STANLI_REGION_MAP_LANES", "0");
+  expect_mapped(stem, lanes);
+  const auto& plan = map_payload(lanes);
+  check(plan.lanes.active, stem + ": lanes run the body");
+  check(plan.adj.segments.size() >= 4,
+        stem + ": a segment per block (" +
+            std::to_string(plan.adj.segments.size()) + ")");
+  Executor lane_ex(lanes.graph), scalar_ex(scalar.graph);
+  lanes.bind(lane_ex);
+  scalar.bind(scalar_ex);
+  for (size_t k = 0; k < points.size(); ++k) {
+    const std::string what = stem + " point " + std::to_string(k);
+    const Eval want = reference(ref, s, points[k], nullptr);
+    const Eval lane = evaluate(lane_ex, points[k]);
+    const Eval flat = evaluate(scalar_ex, points[k]);
+    expect_eval(what + " lanes", lane, want);
+    expect_eval(what + " scalar", flat, want);
+    check(same_bits(lane.lp, flat.lp) && lane.grad == flat.grad,
+          what + ": lanes bitwise equal to scalar");
+  }
+}
+
 struct CleanFixture {
   const char* stem;
   int n;
@@ -3653,6 +3696,7 @@ static void test_region_map() {
 #endif
   test_mode_policy();
   test_recompute_visits_taken_blocks();
+  test_lane_reverse_order();
   test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
   test_large_body_recomputes_by_default();
   test_clear_strategy_follows_mode();
