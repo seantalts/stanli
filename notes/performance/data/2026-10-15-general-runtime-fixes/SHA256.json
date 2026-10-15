@@ -1,0 +1,74 @@
+{
+  "baseline-identity-14e.json": {
+    "bytes": 486,
+    "sha256": "f05023379d2791c6fec767c2a8857805f742cae50fedfae08650a0093bc881ca"
+  },
+  "build-identity-14e.json": {
+    "bytes": 1414,
+    "sha256": "1bcf1503b11c7cebda775aaabf004a0bdbc9839cebc0d15742446fc36fbf1705"
+  },
+  "confirm-commands.json.gz": {
+    "bytes": 448,
+    "sha256": "ce976c1ab12683239f92388a8bdececb346e3f93d77b60bac66ef31c761eb396"
+  },
+  "confirm-plan.json.gz": {
+    "bytes": 358,
+    "sha256": "8afe8285d457fde46bc12677a9dfcecc49a2164d5f513668d71b4b11f777a8b8"
+  },
+  "confirm-setup-manifest.json.gz": {
+    "bytes": 40258,
+    "sha256": "7ee1a5df737da61e0a87088291dc830df73917b7c814281338dffb4470cbc9ae"
+  },
+  "confirm-setup-results.json.gz": {
+    "bytes": 7780,
+    "sha256": "092a1f90aef8e9632caa0dbd31b4df0c100afbdd6ab7d494b251afb5acebefb7"
+  },
+  "confirm-warm-identity.json.gz": {
+    "bytes": 1148,
+    "sha256": "edd0dbea377a94a604197f0327ac933ccea5cd8ad107031304a7fb2eb672390d"
+  },
+  "confirm-warm-results.json.gz": {
+    "bytes": 276500,
+    "sha256": "c82c35633739f626c26e576a3a904fef0830df4e736ab8bdd1a44a542c61a21b"
+  },
+  "full-commands.json.gz": {
+    "bytes": 449,
+    "sha256": "969f528951392cf16fca33e74b38b57a4e16f31f60275cf3672a58c5aea71c68"
+  },
+  "full-comparison.json.gz": {
+    "bytes": 48634,
+    "sha256": "b2b01c3a74cd1629d8c5ab9f714a2d204bfc64ad711b272206cf1b2e38cd7b44"
+  },
+  "full-setup-manifest.json.gz": {
+    "bytes": 41935,
+    "sha256": "c9cd4b7916d9c708945f78b5d5b68d03e562a952a3f3f2f32e965c5d7bf59b58"
+  },
+  "full-setup-results.json.gz": {
+    "bytes": 90952,
+    "sha256": "26dd5d280fa9a30ff966fbc7170316532b1a21eb795b1994a01614aed221beb2"
+  },
+  "full-warm-manifest.json.gz": {
+    "bytes": 26707,
+    "sha256": "8c92d63aa3aa8da5594db1e322b713632aec165f62b684b6a041adb62f855672"
+  },
+  "full-warm-results.json.gz": {
+    "bytes": 2528116,
+    "sha256": "dbb72e85559d9c8b3134a3f1818c16876df1b076a7e8bd4263523d73f90189d2"
+  },
+  "initial-three-fix-ablation.json.gz": {
+    "bytes": 3974,
+    "sha256": "aec280271f9fce4a166ec59131b02a00fef531b99e54f1b9400c002304ff6ec3"
+  },
+  "initial-two-fix-confirmation.json.gz": {
+    "bytes": 2242,
+    "sha256": "39e220edf66377e009b8047357d1304f2aff8b232fd2d10b81501b6329d0e231"
+  },
+  "recorded-cmdstan.log.gz": {
+    "bytes": 465,
+    "sha256": "02d624bdc6f9967f6035c324e4fa336534ca7e2934fb9c937b5edfac3a5e8b34"
+  },
+  "strict-14e-baseline-candidate.json.gz": {
+    "bytes": 180,
+    "sha256": "910af73fdafc3222bb9f15470200625946b00dc1f454c9c29cb02862c56b29c8"
+  }
+}
