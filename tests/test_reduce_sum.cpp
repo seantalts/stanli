@@ -515,6 +515,108 @@ void native_parallel() {
       }
 }
 
+std::string region_map_data(int chunk, int lo, int hi) {
+  const int n = 256;
+  std::ostringstream json;
+  json << "{\"N\":" << n << ",\"chunk\":" << chunk << ",\"lo\":" << lo
+       << ",\"hi\":" << hi << ",\"y\":[";
+  for (int i = 0; i < n; ++i)
+    json << (i ? "," : "") << std::sin(0.31 * i) - 0.4 + 0.01 * i;
+  json << "],\"x\":[";
+  for (int i = 0; i < n; ++i) json << (i ? "," : "") << -2.0 + 4.0 * i / 255.0;
+  json << "]}";
+  return json.str();
+}
+
+Run evaluate_region_map(stanli::Executor& ex, int point) {
+  Run run;
+  run.grad.assign((size_t)ex.n_params(), 0.0);
+  ex.params_data()[0] = 0.8 - 0.1 * point;
+  ex.params_data()[1] = -0.3 + 0.2 * point;
+  run.lp = ex.gradient(run.grad.data());
+  return run;
+}
+
+void native_region_map() {
+  using namespace stanli;
+  if (!thread_safe_build()) return;
+  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.tmir.sexp");
+  const auto whole = DataMap::from_json(region_map_data(0, 1, 256));
+  CompileOptions options;
+  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_threads = 4;
+  auto cm = compile_model(mir, whole, 1, options);
+  expect("region-map body retains one reduction",
+         count_opcode(cm.graph, OP_REDUCE_SUM) == 1);
+  std::string reasons;
+  for (const auto& reason : cm.reduce_sum_fallbacks) reasons += " " + reason;
+  expect("region-map body has no fallback:" + reasons,
+         cm.reduce_sum_fallbacks.empty());
+  for (const auto& op : cm.graph.ops)
+    if (op.opcode == OP_REDUCE_SUM) {
+      const auto& spec = *static_cast<const ReduceSumSpec*>(op.udata);
+      expect("four children", spec.children.size() == 4);
+      for (const auto& child : spec.children)
+        expect("child runs a region map",
+               count_opcode(child.graph, OP_REGION_MAP) == 1);
+    }
+
+  auto serial = compile_model(mir, whole);
+  Executor reference(std::move(serial.graph));
+  serial.bind(reference);
+  Executor plain(std::move(cm.graph));
+  cm.bind(plain);
+  Executor attached(plain), clone(plain);
+  ReduceExecutionContext team(4), small(2), clone_team(3);
+  attached.set_reduce_context(&team);
+  clone.set_reduce_context(&clone_team);
+  for (int point = 0; point < 3; ++point) {
+    const Run want = evaluate_region_map(reference, point);
+    const Run base = evaluate_region_map(plain, point);
+    expect("region-map lp matches the whole slice",
+           std::abs(base.lp - want.lp) < 1e-10 * (1 + std::abs(want.lp)));
+    for (size_t i = 0; i < base.grad.size(); ++i)
+      expect("region-map gradient matches the whole slice",
+             std::abs(base.grad[i] - want.grad[i]) <
+                 1e-10 * (1 + std::abs(want.grad[i])));
+    for (auto* candidate : {&attached, &clone}) {
+      const Run got = evaluate_region_map(*candidate, point);
+      expect("team attached is bitwise equal to no team",
+             got.lp == base.lp && got.grad == base.grad);
+    }
+    attached.set_reduce_context(&small);
+    const Run fewer = evaluate_region_map(attached, point);
+    attached.set_reduce_context(&team);
+    expect("team size does not change the result",
+           fewer.lp == base.lp && fewer.grad == base.grad);
+  }
+
+  options.reduce_sum_threads = 2;
+  auto halves = compile_model(mir, whole, 1, options);
+  expect("two-chunk region-map reduction",
+         count_opcode(halves.graph, OP_REDUCE_SUM) == 1);
+  Executor split(std::move(halves.graph));
+  halves.bind(split);
+  ReduceExecutionContext pair(2);
+  split.set_reduce_context(&pair);
+  auto lower =
+      compile_model(mir, DataMap::from_json(region_map_data(1, 1, 128)));
+  auto upper =
+      compile_model(mir, DataMap::from_json(region_map_data(1, 129, 256)));
+  Executor lower_ex(std::move(lower.graph)), upper_ex(std::move(upper.graph));
+  lower.bind(lower_ex);
+  upper.bind(upper_ex);
+  for (int point = 0; point < 3; ++point) {
+    const Run got = evaluate_region_map(split, point);
+    const Run a = evaluate_region_map(lower_ex, point);
+    const Run b = evaluate_region_map(upper_ex, point);
+    expect("child values are the serial chunk calls", got.lp == a.lp + b.lp);
+    for (size_t i = 0; i < got.grad.size(); ++i)
+      expect("child gradients are the serial chunk calls",
+             got.grad[i] == a.grad[i] + b.grad[i]);
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -524,6 +626,7 @@ int main() {
   native_lifecycle();
   native_corners();
   native_parallel();
+  native_region_map();
   argument_evaluation();
   shapes_and_overloads();
   argument_evaluation(true);
