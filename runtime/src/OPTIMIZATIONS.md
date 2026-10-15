@@ -1886,9 +1886,12 @@ Beyond the estimate, islands still refuse propto densities (their
 term-dropping depends on argument types, which the island's uniform
 binding cannot reproduce), runs under 32 ops, and regions producing
 target terms. Parameter-dependent forward branches can use generated
-adjoints; recorded block flags preserve the executed path. A scalar region
-map records the taken blocks in a trail instead, so the per-iteration cost
-follows the blocks the path executed. Back edges and unsupported derivatives
+adjoints. Each block that produces an adjoint appends its segment index to a
+trail as it starts (opcode PATH), and the reverse pass visits the recorded
+segments from last to first, so the per-iteration cost follows the blocks
+the path executed and not the number of blocks in the body. The lane plan
+reads the same PATH instructions to build per-tile segment masks, and walks
+segments in descending index order. Back edges and unsupported derivatives
 retain the replay. The branch tests in
 `tests/test_adjoint.cpp` cover reused frames, conditional overwrites, nested
 branches, kernel calls, and refusal of uninitialized joins.

@@ -72,7 +72,6 @@ struct IslandProg : Program {
   // so the two backwards are compared over the SAME islands running the
   // SAME forward program, which is the only comparison worth having.
   bool native_adj = false;
-  bool path_trail = false;
   // Set after necessity lowering has finalized code and live-in windows.
   // Immutable once published; hand-built programs leave this unset and the
   // workspace factory proves initialization when binding them.

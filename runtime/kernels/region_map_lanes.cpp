@@ -68,6 +68,7 @@ bool lane_opcode(Program::Code c) {
     case Program::LMULTIPLY:
     case Program::LOG_MIX:
     case Program::CALL:
+    case Program::PATH:
       return true;
     default:
       return false;
@@ -177,7 +178,7 @@ class Analysis {
   void run() {
     check_opcodes();
     build_blocks();
-    find_flags();
+    find_path();
     find_undefined_reads();
     analyze_invariance();
     classify_registers();
@@ -307,90 +308,64 @@ class Analysis {
     }
   }
 
-  void find_flags() {
+  void find_path() {
     const int n = p_.n_regs;
-    const int n_blocks = (int)plan_.blocks.size();
+    const int segments = (int)p_.adj.segments.size();
     plan_.guard_reg.assign((size_t)n, 0);
-    for (const auto& seg : p_.adj.segments) {
-      if (seg.guard < 0 || seg.guard >= n) refuse("segment guard out of range");
-      plan_.guard_reg[(size_t)seg.guard] = 1;
-    }
+    plan_.flag_store.assign(p_.code.size(), 0);
+    plan_.segment_count = segments;
+    plan_.segment_block.assign((size_t)segments, -1);
+    if (segments == 0) return;
+    const int trail = p_.adj.trail;
+    if (trail < 0 || trail + segments + 1 > n)
+      refuse("path trail out of range");
+    for (int k = 0; k <= segments; ++k)
+      plan_.guard_reg[(size_t)(trail + k)] = 1;
     const auto guard = [&](int reg) {
       return reg >= 0 && reg < n && plan_.guard_reg[(size_t)reg] != 0;
     };
     const auto reads_guard = [&](int reg, int len) {
       for (int k = 0; k < len; ++k)
-        if (guard(reg + k)) refuse("a flag register is read as a value");
+        if (guard(reg + k)) refuse("a trail register is read as a value");
     };
     std::vector<int> block_of(p_.code.size(), 0);
-    for (int b = 0; b < n_blocks; ++b)
+    for (int b = 0; b < (int)plan_.blocks.size(); ++b)
       for (int pc = plan_.blocks[(size_t)b].begin;
            pc < plan_.blocks[(size_t)b].end; ++pc)
         block_of[(size_t)pc] = b;
 
-    struct Writes {
-      std::vector<int> set_blocks;
-      int first_set = std::numeric_limits<int>::max();
-      int last_clear = -1;
-    };
-    std::vector<Writes> writes((size_t)n);
-    const auto record = [&](int reg, int pc, double value) {
-      Writes& w = writes[(size_t)reg];
-      if (value != 0.0) {
-        w.set_blocks.push_back(block_of[(size_t)pc]);
-        w.first_set = std::min(w.first_set, pc);
-      } else {
-        if (block_of[(size_t)pc] != 0)
-          refuse("a flag is cleared outside the entry block");
-        w.last_clear = std::max(w.last_clear, pc);
-      }
-    };
-    plan_.flag_store.assign(p_.code.size(), 0);
+    int reset = -1;
+    int first_path = std::numeric_limits<int>::max();
     for (size_t pc = 0; pc < p_.code.size(); ++pc) {
       const Program::Instr& I = p_.code[pc];
-      each_body_read(I, reads_guard);
-      switch (I.code) {
-        case Program::CONST:
-          if (guard(I.dst)) {
-            record(I.dst, (int)pc, p_.pool[(size_t)I.a]);
-            plan_.flag_store[pc] = 1;
-          }
-          break;
-        case Program::CONSTR:
-        case Program::FILL: {
-          int flags = 0;
-          for (int k = 0; k < I.len; ++k) flags += guard(I.dst + k);
-          if (!flags) break;
-          if (flags != I.len)
-            refuse("a constant fill mixes flag and value registers");
-          for (int k = 0; k < I.len; ++k)
-            record(
-                I.dst + k, (int)pc,
-                p_.pool[(size_t)(I.code == Program::CONSTR ? I.a + k : I.a)]);
-          plan_.flag_store[pc] = 1;
-          break;
-        }
-        default:
-          each_instr_write(I, [&](int reg, int len) {
-            for (int k = 0; k < len; ++k)
-              if (guard(reg + k)) refuse("a flag register has another writer");
-          });
+      if (I.code == Program::PATH) {
+        if (I.dst != trail || I.a < 0 || I.a >= segments)
+          refuse("a path record does not match the trail");
+        if (plan_.segment_block[(size_t)I.a] >= 0)
+          refuse("a segment is recorded in two places");
+        plan_.segment_block[(size_t)I.a] = block_of[pc];
+        plan_.flag_store[pc] = 1;
+        first_path = std::min(first_path, (int)pc);
+        continue;
       }
+      each_body_read(I, reads_guard);
+      if (I.code == Program::CONST && I.dst == trail) {
+        if (reset >= 0 || block_of[pc] != 0 || p_.pool[(size_t)I.a] != 0.0)
+          refuse("the trail is not reset once in the entry block");
+        reset = (int)pc;
+        plan_.flag_store[pc] = 1;
+        continue;
+      }
+      each_instr_write(I, [&](int reg, int len) {
+        for (int k = 0; k < len; ++k)
+          if (guard(reg + k)) refuse("a trail register has another writer");
+      });
     }
+    if (reset < 0 || reset > first_path)
+      refuse("the trail is not reset before it is written");
     for (const auto& A : p_.adj.code) each_adjoint_value_read(A, reads_guard);
-
-    plan_.segment_count = (int)p_.adj.segments.size();
-    plan_.segment_blocks.assign(p_.adj.segments.size(), {});
-    for (size_t s = 0; s < p_.adj.segments.size(); ++s) {
-      const Writes& w = writes[(size_t)p_.adj.segments[s].guard];
-      if (w.set_blocks.empty()) refuse("a segment guard is never set");
-      if (w.last_clear < 0 || w.last_clear > w.first_set)
-        refuse("a segment guard is not reset before it is set");
-      auto& blocks = plan_.segment_blocks[s];
-      blocks = w.set_blocks;
-      std::sort(blocks.begin(), blocks.end());
-      blocks.erase(std::unique(blocks.begin(), blocks.end()), blocks.end());
-    }
+    for (int block : plan_.segment_block)
+      if (block < 0) refuse("a segment is never recorded");
   }
 
   void classify_registers() {
@@ -738,6 +713,9 @@ class Analysis {
       case Program::JZ:
         f(I.a, 1);
         return;
+      case Program::PATH:
+        f(I.dst, 1);
+        return;
       case Program::DYN_INDEX:
         f(I.a + I.c, I.len);
         f(I.b, 1);
@@ -850,8 +828,8 @@ class Analysis {
       for (int k = 0; k < len; ++k)
         if (base + k >= 0 && base + k < n) excluded[(size_t)(base + k)] = 1;
     };
-    for (const auto& seg : p_.adj.segments)
-      if (seg.guard >= 0 && seg.guard < n) excluded[(size_t)seg.guard] = 1;
+    for (int r = 0; r < n; ++r)
+      if (plan_.guard_reg[(size_t)r]) excluded[(size_t)r] = 1;
     for (const auto& I : p_.code) {
       switch (I.code) {
         case Program::CONSTR:
@@ -1588,8 +1566,7 @@ void tally_block(const RegionMapProg& p, const RegionMapLanePlan::Block& block,
     tally.fwd_lanes += (uint64_t)lanes;
     ++tally.fwd_op[op];
     tally.fwd_op_lanes[op] += (uint64_t)lanes;
-    if ((I.code == Program::CONST || I.code == Program::CONSTR ||
-         I.code == Program::FILL) &&
+    if ((I.code == Program::CONST || I.code == Program::PATH) &&
         p.lanes.guard_reg[(size_t)I.dst])
       ++tally.fwd_flag_stores;
     if (p.lanes.invariant[(size_t)pc]) {
@@ -1636,10 +1613,9 @@ void lane_tile_forward(const RegionMapProg& p, const TileState& t,
       entry[(size_t)block.fall] |= m;
     }
   }
-  const auto& segment_blocks = p.lanes.segment_blocks;
-  for (size_t s = 0; s < segment_blocks.size(); ++s) {
-    Mask m = 0;
-    for (int b : segment_blocks[s]) m |= entry[(size_t)b];
+  const auto& segment_block = p.lanes.segment_block;
+  for (size_t s = 0; s < segment_block.size(); ++s) {
+    const Mask m = entry[(size_t)segment_block[s]];
     std::memcpy(seg_masks + s, &m, sizeof m);
   }
 }
@@ -2550,7 +2526,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
       run(0, (int)p.adj.code.size(), fwd.full());
     } else {
       const double* masks = segment_masks(plan, region, tile);
-      for (size_t s = 0; s < p.adj.segments.size(); ++s) {
+      for (size_t s = p.adj.segments.size(); s-- > 0;) {
         const auto& seg = p.adj.segments[s];
         Mask m;
         std::memcpy(&m, masks + s, sizeof m);

@@ -609,14 +609,14 @@ static void test_private_adjoint_clears() {
 
 // Forward-only branches must preserve executed paths, overwritten values,
 // conditional copies and joins. Reuse the register file while toggling paths
-// so stale flags/checkpoints cannot pass by starting from zero every time.
-static void check_reused_branches(Case c, bool trail) {
+// so stale trail entries/checkpoints cannot pass by starting from zero every
+// time.
+static void check_reused_branches(Case c) {
   const auto orig = c.p;
-  c.p.path_trail = trail;
   expect("branch generation", gen_adjoint(c.p));
   if (c.p.adj.empty()) return;
   expect("branch segments recorded", !c.p.adj.segments.empty());
-  expect("path trail follows the request", (c.p.adj.trail >= 0) == trail);
+  expect("taken blocks are recorded in a trail", c.p.adj.trail >= 0);
   std::vector<double> val(c.p.n_regs, 0.0), adj(c.p.adj.n_regs);
   for (double condition : {1.0, 0.0, 1.0, 0.0}) {
     c.in[0] = condition;
@@ -639,11 +639,6 @@ static void check_reused_branches(Case c, bool trail) {
         expect("reused branch gradient exact",
                ulps(adj[c.p.adj.adj_reg[in.reg + k]], want[offset++]) == 0);
   }
-}
-
-static void check_reused_branches(const Case& c) {
-  check_reused_branches(c, false);
-  check_reused_branches(c, true);
 }
 
 static void test_acyclic_branches() {

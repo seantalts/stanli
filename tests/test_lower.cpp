@@ -2202,24 +2202,18 @@ void test_logic_compiles_to_jumps() {
 
     check(!p.adj.segments.empty(), what + ": the body has reverse segments");
     if (p.adj.segments.empty()) continue;
-    const int guard = p.adj.segments.front().guard;
-    int lo = -1, len = 0;
-    for (const auto& I : p.code)
-      if (I.code == Program::CONSTR && I.dst <= guard &&
-          guard < I.dst + I.len) {
-        lo = I.dst;
-        len = I.len;
-      }
-    check(lo >= 0, what + ": one CONSTR resets the path flags");
-    int flags = 0;
-    for (const auto& I : p.code)
-      if (I.code == Program::CONST && I.dst >= lo && I.dst < lo + len) ++flags;
-    check(flags == (int)p.adj.segments.size(),
-          what + ": one flag per reverse segment (" + std::to_string(flags) +
-              " flags, " + std::to_string(p.adj.segments.size()) +
-              " segments)");
-    check(len == (int)p.adj.segments.size(),
-          what + ": the reset covers only the flags in use");
+    int paths = 0, resets = 0, wide = 0;
+    for (const auto& I : p.code) {
+      paths += I.code == Program::PATH;
+      resets += I.code == Program::CONST && I.dst == p.adj.trail;
+      wide += I.code == Program::CONSTR && I.len > 1;
+    }
+    check(paths == (int)p.adj.segments.size(),
+          what + ": one path record per reverse segment (" +
+              std::to_string(paths) + " records, " +
+              std::to_string(p.adj.segments.size()) + " segments)");
+    check(resets == 1, what + ": one store resets the trail");
+    check(wide == 0, what + ": no wide clear in the body");
   }
 }
 
@@ -2941,18 +2935,17 @@ void test_lane_guard_masks() {
     check(p.lanes.active && p.lanes.profile != nullptr, what + ": plan active");
     if (!p.lanes.active || !p.lanes.profile) continue;
     check(!p.adj.segments.empty(), what + ": the adjoint has segments");
-    check(p.lanes.segment_blocks.size() == p.adj.segments.size(),
-          what + ": every segment maps to forward blocks");
-    for (size_t s = 0; s < p.lanes.segment_blocks.size(); ++s) {
-      check(!p.lanes.segment_blocks[s].empty(),
-            what + ": segment " + std::to_string(s) + " has a setting block");
-      for (int b : p.lanes.segment_blocks[s])
-        check(b >= 0 && (size_t)b < p.lanes.blocks.size(),
-              what + ": setting block is a lane block");
+    check(p.lanes.segment_block.size() == p.adj.segments.size(),
+          what + ": every segment maps to a forward block");
+    for (size_t s = 0; s < p.lanes.segment_block.size(); ++s) {
+      const int b = p.lanes.segment_block[s];
+      check(b >= 0 && (size_t)b < p.lanes.blocks.size(),
+            what + ": segment " + std::to_string(s) +
+                " is recorded by a lane block");
     }
-    for (const auto& seg : p.adj.segments)
-      check(p.lanes.reg_slot[(size_t)seg.guard] < 0,
-            what + ": a guard register takes no tile storage");
+    for (size_t k = 0; k <= p.adj.segments.size(); ++k)
+      check(p.lanes.reg_slot[(size_t)p.adj.trail + k] < 0,
+            what + ": a trail register takes no tile storage");
     Executor ex(cm.graph);
     cm.bind(ex);
     for (int k = 0; k < 3; ++k) evaluate(ex, spread_point((size_t)k, 2));
