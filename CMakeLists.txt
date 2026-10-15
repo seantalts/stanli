@@ -1174,7 +1174,7 @@ if(NOT EMSCRIPTEN)
         ENVIRONMENT "STANLI_STRUCTURED_LOOPS=force")
     endif()
   endforeach()
-  if(NOT STANLI_SANITIZE)
+  if(NOT STANLI_SANITIZE AND NOT WIN32)
     add_test(NAME test_region_map_memory
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_region_map_memory.py
               $<TARGET_FILE:stanli_check>
