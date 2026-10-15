@@ -27,32 +27,19 @@
   from running several chains at once and the growth of cost per
   observation with N.
 - brms `threading()` programs no longer run many times slower than the
-  plain program. Their per-observation loop adds to a local `ptarget`, which
-  the fast path for such loops now accepts. They still run on one core.
-- brms `threading()` programs can now use several cores. With
-  `threads_per_chain` above 1 (`--threads-per-chain` in `stanli_run`), a
-  `reduce_sum` whose partial sum is a per-observation loop is split across the
-  chain's threads. Before, such calls were refused with "opaque/stateful
-  kernel or dynamic import geometry: OP_REGION_MAP". Data arguments are held in
-  one shared copy that every chunk and chain views, instead of each chunk
-  keeping its own and receiving a fresh copy on every gradient. A chunk whose
-  partial sum is a per-observation loop still copies the data ranges it reads
-  into its own working registers on each gradient. On a 10,000-observation
-  log-normal race model a gradient is 2.8x faster at 4 threads and 3.5x faster
-  at 8, and at 100,000 observations each additional chain uses about 75 MB
-  less than with a private copy per chunk. A call is split only when each
-  chunk has about 30 microseconds of estimated work, replacing the old fixed
-  minimum of 8192 elements: small slices stay serial, moderate ones use fewer
-  chunks than threads, and on the models measured no thread count was slower
-  than serial. Results do not depend on thread scheduling, but they depend on
-  `threads_per_chain`, because the number of chunks sets the summation order.
-  The chunk count also comes from an estimate of the work, so threaded results
-  can change between stanli versions.
+  plain program, and with `threads_per_chain` above 1 they now use several
+  cores. On a 10,000-observation log-normal race model a gradient is 2.8x
+  faster at 4 threads and 3.5x faster at 8; four chains with 4 threads each
+  sample in 10 s instead of 30 s. Data is shared between threads and chains
+  instead of copied, which saves about 75 MB per extra chain at 100,000
+  observations. A `reduce_sum` is split only when each chunk has enough work
+  (about 30 microseconds), so small models stay on one thread and are never
+  slower. Threaded results depend on `threads_per_chain`, which sets the
+  summation order, and can change between stanli versions; they do not depend
+  on thread scheduling. `stanli_run` prints a note when a model with a large
+  `reduce_sum` runs on one thread.
   C++ callers that set `CompileOptions::reduce_sum_min_elements` should set
-  `reduce_sum_min_chunk_ns` (default 30000, 0 to force splitting) instead; the
-  old field is removed.
-  `stanli_run` now prints a one-line note when a model with a large
-  `reduce_sum` runs at one thread per chain.
+  `reduce_sum_min_chunk_ns` instead (default 30000, 0 to always split).
 - `wiener_lpdf` over a whole vector evaluates the density once per gradient
   instead of twice, and data arguments are no longer differentiated. About
   1.5x faster on a model that is one `y ~ wiener(...)` statement.
