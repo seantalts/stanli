@@ -155,7 +155,20 @@ struct ReductionState : KernelState {
       throw std::logic_error("empty retained reduction");
     for (const auto& program : spec.children) {
       Child child;
-      child.executor = std::make_unique<Executor>(program.graph);
+      std::vector<Executor::Borrow> borrows;
+      for (const auto& view : program.shared) {
+        if (view.slot < 0 || size_t(view.slot) >= program.graph.slots.size() ||
+            view.block < 0 || size_t(view.block) >= spec.blocks.size())
+          throw std::logic_error("invalid reduction data binding");
+        const auto& block = spec.blocks[size_t(view.block)];
+        const int64_t len = program.graph.slots[size_t(view.slot)].len;
+        if (view.offset < 0 || size_t(view.offset) > block.size() ||
+            size_t(len) > block.size() - size_t(view.offset))
+          throw std::logic_error("reduction data binding exceeds block");
+        borrows.push_back({view.slot, block.data() + view.offset});
+      }
+      child.executor =
+          std::make_unique<Executor>(program.graph, std::move(borrows));
       for (const auto& fill : program.fills)
         child.executor->set_values(fill.first, fill.second.data(),
                                    fill.second.size());

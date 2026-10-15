@@ -711,14 +711,33 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
   if (chunks <= 1) return refuse("grainsize selects one chunk");
   if (chunks > compile_options.reduce_sum_max_chunks)
     return refuse("partition exceeds reduce_sum_max_chunks");
+  auto spec = std::make_shared<ReduceSumSpec>();
+  const auto data_fill =
+      [&](const UdfBinding& bind) -> const std::vector<double>* {
+    if (!bind.data || bind.v.autodiff) return nullptr;
+    const int slot = bind.v.slot;
+    for (const auto& op : g.ops)
+      if (op.out == slot || op.out2 == slot) return nullptr;
+    for (auto it = out.fills.rbegin(); it != out.fills.rend(); ++it)
+      if (it->first == slot)
+        return it->second.size() == size_t(g.slots[slot].len) ? &it->second
+                                                              : nullptr;
+    return nullptr;
+  };
   std::vector<Val> inputs;
-  std::map<int, int> parent_index;
+  std::map<int, int> parent_index, shared_index;
   for (const auto& bind : binds) {
     if (bind.is_int) continue;
     if (!bind.v.runtime_dims.empty() || bind.v.slot < 0)
       return refuse("argument has runtime geometry");
+    if (shared_index.count(bind.v.slot)) continue;
     auto found = parent_index.find(bind.v.slot);
     if (found == parent_index.end()) {
+      if (const auto* fill = data_fill(bind)) {
+        shared_index[bind.v.slot] = static_cast<int>(spec->blocks.size());
+        spec->blocks.push_back(*fill);
+        continue;
+      }
       parent_index[bind.v.slot] = static_cast<int>(inputs.size());
       inputs.push_back(bind.v);
     } else {
@@ -727,7 +746,6 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
       value.si.param_free &= bind.v.si.param_free;
     }
   }
-  auto spec = std::make_shared<ReduceSumSpec>();
   bool active = false, param_free = true;
   try {
     for (int64_t chunk = 0; chunk < chunks; ++chunk) {
@@ -742,6 +760,12 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
       for (const auto& input : inputs)
         imported.push_back(
             trial.add_slot(g.slots[input.slot].len, input.autodiff));
+      std::map<int, int> shared_local;
+      for (const auto& [parent_slot, block] : shared_index) {
+        const int local = trial.add_slot(g.slots[parent_slot].len, false);
+        trial.out.fills.emplace_back(local, spec->blocks[size_t(block)]);
+        shared_local[parent_slot] = local;
+      }
       mir::Expr invocation = call;
       for (size_t i = 0; i < binds.size(); ++i) {
         if (i == 1 || i == 2 || binds[i].is_int) {
@@ -752,7 +776,10 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
           continue;
         }
         Val value = binds[i].v;
-        value.slot = imported.at(parent_index.at(value.slot));
+        const auto view = shared_local.find(value.slot);
+        value.slot = view != shared_local.end()
+                         ? view->second
+                         : imported.at(parent_index.at(value.slot));
         const std::string name =
             "(reduce_sum argument " + std::to_string(i) + ")";
         trial.scope[name] = value;
@@ -803,13 +830,34 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
         if (trial.g.slots[imported[i]].len)
           child.imports.push_back(
               {imported[i], static_cast<int>(i), offsets[imported[i]]});
+      std::set<int> view_slots;
+      for (const auto& [parent_slot, block] : shared_index) {
+        const int local = shared_local.at(parent_slot);
+        view_slots.insert(local);
+        if (trial.g.slots[local].len)
+          child.shared.push_back({local, block, offsets[local]});
+      }
       child.graph = std::move(trial.g);
-      child.fills = std::move(trial.out.fills);
+      for (auto& fill : trial.out.fills)
+        if (!view_slots.count(fill.first))
+          child.fills.push_back(std::move(fill));
       spec->children.push_back(std::move(child));
     }
   } catch (const CompileError& error) {
     return refuse(std::string("child lowering: ") + error.what());
   }
+  std::vector<int> block_map(spec->blocks.size(), -1);
+  for (const auto& child : spec->children)
+    for (const auto& view : child.shared) block_map[size_t(view.block)] = 0;
+  std::vector<std::vector<double>> kept_blocks;
+  for (size_t i = 0; i < block_map.size(); ++i)
+    if (block_map[i] == 0) {
+      block_map[i] = static_cast<int>(kept_blocks.size());
+      kept_blocks.push_back(std::move(spec->blocks[i]));
+    }
+  spec->blocks = std::move(kept_blocks);
+  for (auto& child : spec->children)
+    for (auto& view : child.shared) view.block = block_map[size_t(view.block)];
   // Drop unneeded operand bindings; argument evaluation has already happened.
   std::vector<bool> used(inputs.size(), false);
   for (const auto& child : spec->children)

@@ -556,9 +556,16 @@ void native_region_map() {
     if (op.opcode == OP_REDUCE_SUM) {
       const auto& spec = *static_cast<const ReduceSumSpec*>(op.udata);
       expect("four children", spec.children.size() == 4);
-      for (const auto& child : spec.children)
+      for (const auto& child : spec.children) {
         expect("child runs a region map",
                count_opcode(child.graph, OP_REGION_MAP) == 1);
+        expect("child views the slice and both data vectors",
+               child.shared.size() == 3);
+        for (const auto& fill : child.fills)
+          expect("child keeps no copy of the data", fill.second.size() < 64);
+      }
+      expect("one block per data argument", spec.blocks.size() == 3);
+      expect("data arguments are not op inputs", op.n_in == 2);
     }
 
   auto serial = compile_model(mir, whole);
@@ -590,6 +597,27 @@ void native_region_map() {
     expect("team size does not change the result",
            fewer.lp == base.lp && fewer.grad == base.grad);
   }
+
+  Executor first(plain), second(plain);
+  ReduceExecutionContext first_team(4), second_team(2);
+  first.set_reduce_context(&first_team);
+  second.set_reduce_context(&second_team);
+  std::vector<Run> expected;
+  for (int point = 0; point < 3; ++point)
+    expected.push_back(evaluate_region_map(plain, point));
+  std::atomic<bool> chains_agree{true};
+  const auto chain = [&](Executor& executor) {
+    for (int repeat = 0; repeat < 100; ++repeat)
+      for (int point = 0; point < 3; ++point) {
+        const Run got = evaluate_region_map(executor, point);
+        if (got.lp != expected[point].lp || got.grad != expected[point].grad)
+          chains_agree = false;
+      }
+  };
+  std::thread chain_a(chain, std::ref(first)), chain_b(chain, std::ref(second));
+  chain_a.join();
+  chain_b.join();
+  expect("concurrent clones share data and agree bitwise", chains_agree);
 
   options.reduce_sum_threads = 2;
   auto halves = compile_model(mir, whole, 1, options);
@@ -640,6 +668,65 @@ void serial_notice() {
   expect("no notice without a reduce_sum", direct.reduce_sum_notice.empty());
 }
 
+void region_map_domain_error() {
+  using namespace stanli;
+  if (!thread_safe_build()) return;
+  const auto mir =
+      slurp("tests/fixtures/reduce_sum_region_map_domain.tmir.sexp");
+  const auto data = DataMap::from_json(region_map_data(0, 1, 256));
+  CompileOptions options;
+  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_threads = 4;
+  auto cm = compile_model(mir, data, 1, options);
+  auto serial = compile_model(mir, data);
+  expect("domain fixture retains the reduction",
+         count_opcode(cm.graph, OP_REDUCE_SUM) == 1 &&
+             cm.reduce_sum_fallbacks.empty());
+  Executor reference(std::move(serial.graph));
+  serial.bind(reference);
+  Executor ex(std::move(cm.graph));
+  cm.bind(ex);
+  ReduceExecutionContext team(4);
+  ex.set_reduce_context(&team);
+  Executor plain(ex);
+  const auto set_point = [](Executor& e, double scale) {
+    e.params_data()[0] = 0.8;
+    e.params_data()[1] = -0.3;
+    e.params_data()[2] = scale;
+  };
+  const auto message = [](Executor& e) {
+    std::vector<double> grad(3);
+    try {
+      e.gradient(grad.data());
+    } catch (const std::domain_error& error) {
+      return std::string(error.what());
+    }
+    return std::string();
+  };
+  set_point(reference, 100.0);
+  set_point(ex, 100.0);
+  set_point(plain, 100.0);
+  std::vector<double> want(3), got(3);
+  const double good = reference.gradient(want.data());
+  expect(
+      "retained lp before the error",
+      std::abs(ex.gradient(got.data()) - good) < 1e-10 * (1 + std::abs(good)));
+  for (double scale : {1.7, 2.3}) {
+    set_point(reference, scale);
+    set_point(ex, scale);
+    set_point(plain, scale);
+    const std::string expected = message(reference);
+    expect("whole-slice call rejects", !expected.empty());
+    expect("worker error is the first in chunk order", message(ex) == expected);
+    expect("no team gives the same error", message(plain) == expected);
+  }
+  set_point(ex, 100.0);
+  set_point(plain, 100.0);
+  expect("gradient recovers after a worker error",
+         ex.gradient(got.data()) == plain.gradient(want.data()));
+  expect("recovered gradient is finite", std::isfinite(got[0]));
+}
+
 }  // namespace
 
 int main() {
@@ -651,6 +738,7 @@ int main() {
   native_parallel();
   native_region_map();
   serial_notice();
+  region_map_domain_error();
   argument_evaluation();
   shapes_and_overloads();
   argument_evaluation(true);
