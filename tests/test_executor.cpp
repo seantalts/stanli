@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 static int failures = 0;
@@ -310,6 +312,54 @@ static void test_shared_data_with_cached_primals() {
   expect_eq("cached second clone gradient", grad, 18);
 }
 
+static void test_borrowed_data() {
+  using namespace stanli;
+  Graph g;
+  const int x = g.add_slot(1, true), data = g.add_slot(3, false);
+  const int selected = g.add_slot(1, false), result = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {data}, selected, {1});
+  g.add_op(OP_MUL, {x, selected}, result);
+  g.result_slot = result;
+  std::vector<double> block{2, 3, 4};
+  Executor ex(g, {{data, block.data()}});
+  Executor clone(ex);
+  expect_i64("borrowed storage is not allocated", ex.shared_data_size(), 0);
+  expect_i64("borrowed slot reads the owner",
+             std::as_const(ex).value_ptr(data) == block.data(), 1);
+  expect_i64("clone borrows the same block",
+             std::as_const(clone).value_ptr(data) == block.data(), 1);
+  double grad = 0;
+  ex.params_data()[0] = 2;
+  clone.params_data()[0] = 2;
+  expect_eq("borrowed value", ex.gradient(&grad), 6);
+  expect_eq("borrowed derivative", grad, 3);
+  block[1] = 5;
+  expect_eq("owner update is visible", clone.gradient(&grad), 10);
+  bool refused = false;
+  try {
+    ex.value_ptr(data);
+  } catch (const std::logic_error&) {
+    refused = true;
+  }
+  expect_i64("writable pointer to a borrowed slot is refused", refused, 1);
+  refused = false;
+  try {
+    ex.set_values(data, block.data(), 3);
+  } catch (const std::logic_error&) {
+    refused = true;
+  }
+  expect_i64("fill of a borrowed slot is refused", refused, 1);
+  for (int slot : {x, selected}) {
+    refused = false;
+    try {
+      Executor bad(g, {{slot, block.data()}});
+    } catch (const std::invalid_argument&) {
+      refused = true;
+    }
+    expect_i64("only unwritten data can be borrowed", refused, 1);
+  }
+}
+
 int main() {
   using namespace stanli;
 
@@ -521,6 +571,7 @@ int main() {
 
   test_shared_data();
   test_shared_data_with_cached_primals();
+  test_borrowed_data();
   test_compact_idata_lifecycle();
   test_compact_append_after_copy();
   test_mixed_owned_borrowed_idata();
