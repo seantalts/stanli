@@ -1324,7 +1324,8 @@ def test_reduce_sum_threads_per_chain():
     cached = stanli.Model(mir=mir, data=data, threads_per_chain=2)
     assert cached.reduce_sum_count == 1
     np.testing.assert_allclose(cached.log_prob_grad([0.2])[1], baseline[1], rtol=2e-12)
-    static = stanli.Model(stan_code=REDUCE_SUM_SOURCE.replace("reduce_sum(", "reduce_sum_static("),
+    static_source = REDUCE_SUM_SOURCE.replace("reduce_sum(", "reduce_sum_static(")
+    static = stanli.Model(stan_code=static_source.replace(", 1000,", ", 25000,"),
                           data=data, threads_per_chain=4)
     assert static.reduce_sum_count == 1
     np.testing.assert_allclose(static.log_prob_grad([0.2])[1], baseline[1], rtol=2e-12)
