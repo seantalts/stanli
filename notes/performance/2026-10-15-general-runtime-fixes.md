@@ -53,8 +53,11 @@ full-corpus pass. The complete fresh comparison and its limitations follow below
 
 Both revisions were clean-built on the same Ubuntu 24.04 i9-13900K host with
 Clang 18.1.3, Release `-O3 -DNDEBUG`, `-ffp-contract=off`, density oracle OFF,
-and shared test runtime ON. Neither build enables AVX2 or x86-64-v3. Final
-build output contained no compiler warnings or errors. All 406 CTest cases
+and shared test runtime ON. Neither build enables AVX2 or x86-64-v3. Native C/C++
+compilation emitted no diagnostics. Fixture generation emitted 44 Stan
+warnings on both revisions, including deliberate deprecated-API, integer-division,
+and unreachable-statement cases. Those fixture diagnostics are retained and
+unresolved; this is not an entirely warning-free build. All 406 CTest cases
 passed. Strict differential replay covered 353 models at three points
 (1,059,605 non-NaN values, 531 NaNs, six rejected points) with zero changes,
 including signed zero and non-finite classifications. Recorded CmdStan replay

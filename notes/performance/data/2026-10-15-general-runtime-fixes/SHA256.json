@@ -1,4 +1,8 @@
 {
+  "baseline-build.log.gz": {
+    "bytes": 2525,
+    "sha256": "afa653cefc457729623096fc3fcff2c5ddd59961f648e31e5e858b8e68491bfb"
+  },
   "baseline-identity-14e.json": {
     "bytes": 486,
     "sha256": "f05023379d2791c6fec767c2a8857805f742cae50fedfae08650a0093bc881ca"
@@ -6,6 +10,10 @@
   "build-identity-14e.json": {
     "bytes": 1414,
     "sha256": "1bcf1503b11c7cebda775aaabf004a0bdbc9839cebc0d15742446fc36fbf1705"
+  },
+  "candidate-build.log.gz": {
+    "bytes": 2847,
+    "sha256": "7867d88a72c0b083bbf800c52ce1ee49db99598ed9f2d70fc201063d88205998"
   },
   "confirm-commands.json.gz": {
     "bytes": 448,
