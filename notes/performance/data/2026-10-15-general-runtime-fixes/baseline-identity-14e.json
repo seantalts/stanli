@@ -1,0 +1,17 @@
+{
+  "base": "14e14253a3a4d8908deaf222c32da59d2ec40b51",
+  "libraries": {
+    "libstanli.so": {
+      "sha256": "ece0f5ba07142aed9ceccdbfa117ccc594b2328cdd6ccf788ba16a3c9eccc32d",
+      "bytes": 49965032
+    },
+    "bench_grad": {
+      "sha256": "74df55f0bc5a250e21c4ca38b04fe597315edcfde6511fa006e72bd8f0da34e2",
+      "bytes": 36819040
+    },
+    "stanli_check": {
+      "sha256": "19afad1075f12efbecf68bdb987a902d6f42ee883118f86afba25a07aa983917",
+      "bytes": 47613840
+    }
+  }
+}

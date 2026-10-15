@@ -1,0 +1,28 @@
+{
+  "base": "14e14253a3a4d8908deaf222c32da59d2ec40b51",
+  "source_commit": "7c6d70ecea908f672cd422591b2edb628f73a91b",
+  "sources": {
+    "CMakeLists.txt": "ac786efdecf2d928e92342eff93b7d24b72ff0daab46e1977dbeffc8f13e0480",
+    "runtime/src/program_softmax.cpp": "40a8cb10003418068ef34502c9985d325da7ef1e93dc39418c74060d9321c420",
+    "runtime/src/function_registry.cpp": "4a5b5010783d1f2917789c142c03ce16be5c536dd5f3924821fe13a51916fd83",
+    "runtime/kernels/elementwise.cpp": "5a64fa1c112f81f432f0d34a414ff81ca79c810812880dca829fbbf5ec55c698",
+    "runtime/kernels/add_n_fold.hpp": "9602d99ae7929448a028b68aadbb149594dc88236c9a6427e875fe2b819e6d5b",
+    "tests/test_add_n_binding.cpp": "1904c406c3057cb80358e791f199352b6bebbf6695e40b6f95596b04f75ddd36"
+  },
+  "binaries": {
+    "libstanli.so": {
+      "sha256": "0c66c905fef2246350f52bc8dbe0cc99fbeb0fb210f79c4f50f803b6dba4f260",
+      "bytes": 49975816
+    },
+    "bench_grad": {
+      "sha256": "d2c6b77d168ae4060a7f41f3da3c566a589bf406bc4f0b7558153f59bd276f0f",
+      "bytes": 36829824
+    },
+    "stanli_check": {
+      "sha256": "98c456c355b6625d0ee7655351c52941138dc5d58f6afea7056f1aa7bb4f3092",
+      "bytes": 47624624
+    }
+  },
+  "compiler": "Ubuntu clang version 18.1.3 (1ubuntu1)\nTarget: x86_64-pc-linux-gnu\nThread model: posix\nInstalledDir: /usr/bin\n",
+  "cmake_cache_sha256": "7306e098c7c5326e9ed95207413af87ebbfec9fb8d8d5807e636bdd68cd394f8"
+}

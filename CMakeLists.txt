@@ -1354,6 +1354,7 @@ set(STANLI_TESTS
   test_structured_checks test_structured_loop
   test_mir_unary_fallback test_mir_binary_fallback test_mir_reduction_fallback
   test_constfold test_collapse test_cse test_fast_math test_graph_print test_pass_dump
+  test_add_n_binding
   test_function_registry test_function_shape
   test_partition
   test_solve test_solve_forwards test_solve_reuse test_cross_path
