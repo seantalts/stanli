@@ -1,16 +1,9 @@
 # General runtime fixes extracted from the ISA investigation
 
 The candidate starts at `cc99a937c201f732d9fd6cb35b32ebd5db5fc935` and
-retains the existing minimum ISA and floating-point flags. Three independent
-changes reuse existing runtime infrastructure:
+retains the existing minimum ISA and floating-point flags. Two changes reuse
+existing runtime infrastructure:
 
-- The program compactor shares bit-identical scalar constants using its
-  existing alias/remap machinery and scratch vectors. Eligible constants
-  are private, single-writer, initialized before their first read, outside
-  contiguous ranges, and not direct outputs or seeded inputs. Control flow,
-  effects, calls, and ranged computations retain the existing path. Literal
-  equality includes signed zero and NaN payload bits. No arithmetic is moved
-  or reassociated.
 - The private function registry uses the Boost flat map already used in
   lowering, with one inline overload pointer per name. Canonical specification
   storage, overload insertion order, family views, and the public API remain
@@ -25,13 +18,31 @@ changes reuse existing runtime infrastructure:
   callback. This extraction handles upstream's scalar inputs only; the
   research branch's separate indexed-input extension is excluded.
 
-Focused tests compare constant-compacted execution with the original program
-through native and Stan Math autodiff, including cancellation, signed zero,
-non-finite values, range boundaries, output/input ownership, repeated writes,
-and reads before initialization. The ADD_N test covers all supported arities,
-eight buffer alignments, output/input aliasing, and fallback selection. The
-existing registry test checks every overload and canonical pointer identity.
+The ADD_N regression test covers all supported arities, eight buffer
+alignments, output/input aliasing, and fallback selection. The existing
+registry test checks every overload and canonical pointer identity.
 
-Validation results and the full corpus comparison will be recorded here
-before merge. Earlier v3 candidate measurements do not establish performance
-for this baseline-ISA extraction.
+## Rejected inclusion: constant sharing
+
+The initial three-fix candidate passed all 406 CTest cases and a strict
+353-model, three-point comparison with unchanged upstream, with zero output
+changes. Recorded CmdStan replay passed 350/353; three GP failures reproduced
+on unchanged upstream with identical errors on this host.
+
+The full performance run was stopped with its partial evidence retained after
+five warm-gradient crossings. A six-round independent-process comparison of
+baseline, each individual fix, the combination, and an identical-binary
+control confirmed slowdowns from constant sharing: Rate_2_model +4.994%,
+aalto_grp_aov +2.574%, aalto_grp_prior_mean +4.501%, and arK +6.443%. The
+combination also slowed GLM_Poisson_model +6.396%. These models contain no
+register islands in their printed graphs; the constant-sharing transform does
+not execute in their warm paths. The actual placement/layout cause remains
+unresolved. Mb_model improved 8.91% with constant sharing alone, but that gain
+does not excuse the other regressions. Constant sharing is therefore excluded
+from this PR and retained in the ISA research artifacts for investigation.
+
+The registry-plus-ADD_N combination passed the same six-case confirmation:
+GLM_Poisson_model -0.095%, Rate_2_model +0.187%, aalto_grp_aov -1.031%,
+aalto_grp_prior_mean -2.043%, arK +0.048%, and Mb_model +0.313%. Identical-binary
+controls ranged from -0.298% to +1.229%; this is focused evidence, not a
+full-corpus pass. The complete corpus comparison remains required before merge.
