@@ -463,12 +463,12 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
     }
     return true;
   };
-  std::vector<int> flag_of((size_t)nblocks, -1);
-  int nflags = 0;
+  std::vector<int> segment_of((size_t)nblocks, -1);
+  int nsegments = 0;
   if (control)
     for (int i = 0; i < (int)orig.size(); ++i)
-      if (produces_adjoint(orig[(size_t)i], i) && flag_of[block[i]] < 0)
-        flag_of[block[i]] = nflags++;
+      if (produces_adjoint(orig[(size_t)i], i) && segment_of[block[i]] < 0)
+        segment_of[block[i]] = nsegments++;
 
   // Discover every shared cell before emitting the adjoint instructions.
   // Besides making their indices final for map1/mapn below, this lets the
@@ -504,22 +504,19 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
     return base;
   };
 
-  int n_regs = n0 + nflags;
+  const bool trail = control && nsegments > 0;
+  int n_regs = n0 + nsegments + trail;
   std::vector<double> pool;
   std::vector<int> pc_map(orig.size() + 1), adj_starts(nblocks + 1);
-  int flag_one = 0;
   if (control) {
     pool = fwd.pool;
-    const int zeros = static_cast<int>(pool.size());
-    pool.resize(pool.size() + nflags, 0.0);
-    flag_one = static_cast<int>(pool.size());
-    pool.push_back(1.0);
-    if (nflags > 0) {
+    if (trail) {
+      const int zero = static_cast<int>(pool.size());
+      pool.push_back(0.0);
       Program::Instr clear;
-      clear.code = Program::CONSTR;
+      clear.code = Program::CONST;
       clear.dst = n0;
-      clear.a = zeros;
-      clear.len = nflags;
+      clear.a = zero;
       ncode.push_back(clear);
     }
   }
@@ -550,12 +547,13 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
     pc_map[i] = static_cast<int>(ncode.size());
     if (control && leaders[block[i]] == i) {
       adj_starts[block[i]] = static_cast<int>(ap.code.size());
-      if (flag_of[block[i]] >= 0) {
-        Program::Instr flag;
-        flag.code = Program::CONST;
-        flag.dst = n0 + flag_of[block[i]];
-        flag.a = flag_one;
-        ncode.push_back(flag);
+      if (segment_of[block[i]] >= 0) {
+        Program::Instr path;
+        path.code = Program::PATH;
+        path.dst = n0;
+        path.a = segment_of[block[i]];
+        path.len = nsegments + 1;
+        ncode.push_back(path);
       }
     }
     if (I.code == Program::CALL) {
@@ -691,11 +689,15 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
         I.dst = pc_map[I.dst];
     const int total = static_cast<int>(ap.code.size());
     adj_starts.back() = total;
+    if (trail) {
+      ap.trail = n0;
+      ap.segments.assign((size_t)nsegments, {0, 0});
+    }
     for (int b = nblocks; b-- > 0;)
       if (adj_starts[b] != adj_starts[b + 1]) {
-        if (flag_of[b] < 0) return false;
-        ap.segments.push_back({n0 + flag_of[b], total - adj_starts[b + 1],
-                               total - adj_starts[b]});
+        if (segment_of[b] < 0) return false;
+        ap.segments[(size_t)segment_of[b]] = {total - adj_starts[b + 1],
+                                              total - adj_starts[b]};
       }
     fwd.pool = std::move(pool);
   }
@@ -1262,17 +1264,22 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
         case Program::PRINT:
         case Program::REJECT:
         case Program::DENSITY_VEC:
+        case Program::PATH:
           break;  // gen_adjoint refuses these; unreachable
         case Program::CALL:
           break;  // handled before this switch
       }
     }
   };
-  if (ap.segments.empty())
+  if (ap.segments.empty()) {
     run_segment(0, static_cast<int>(ap.code.size()));
-  else
-    for (const auto& segment : ap.segments)
-      if (val[segment.guard] != 0.0) run_segment(segment.begin, segment.end);
+  } else {
+    for (int k = static_cast<int>(val[ap.trail]); k-- > 0;) {
+      const auto& segment =
+          ap.segments[static_cast<size_t>(val[ap.trail + 1 + k])];
+      run_segment(segment.begin, segment.end);
+    }
+  }
 }
 
 }  // namespace stanli

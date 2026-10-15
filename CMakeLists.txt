@@ -1174,6 +1174,12 @@ if(NOT EMSCRIPTEN)
         ENVIRONMENT "STANLI_STRUCTURED_LOOPS=force")
     endif()
   endforeach()
+  if(NOT STANLI_SANITIZE AND NOT WIN32)
+    add_test(NAME test_region_map_memory
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_region_map_memory.py
+              $<TARGET_FILE:stanli_check>
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endif()
   add_test(NAME callback_geometry
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_callback_geometry.py
             $<TARGET_FILE:stanli_check> $<TARGET_FILE:dump_ops>

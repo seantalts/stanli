@@ -153,7 +153,9 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(ERFC, kProgramSaveA)                                                      \
   X(LOG1P, kProgramSaveA)                                                     \
   X(LOG1M_EXP, kProgramSaveA)                                                 \
-  X(INV_SQUARE, kProgramSaveA)
+  X(INV_SQUARE, kProgramSaveA)                                                \
+  /* Appends segment a to the trail counted at dst; len is its capacity+1. */ \
+  X(PATH, kProgramNoInputs | kProgramRangeOutput | kProgramNoAdjoint)
 
 struct Program {
   enum Code : uint8_t {
@@ -376,8 +378,7 @@ inline constexpr int program_input_len(const Program::Instr& instr, int k) {
   return 1;
 }
 
-static_assert(program_code_count() ==
-                  static_cast<size_t>(Program::INV_SQUARE) + 1,
+static_assert(program_code_count() == static_cast<size_t>(Program::PATH) + 1,
               "every Program::Code needs exactly one ProgramOpSpec");
 
 // Sink constant range fills past paths that never access their registers.
@@ -571,6 +572,13 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
         for (int32_t i = 0; i < I.len; ++i)
           reg[(size_t)(I.dst + i)] = T(p.pool[(size_t)(I.a + i)]);
         break;
+      case Program::PATH: {
+        const int32_t taken =
+            static_cast<int32_t>(stan::math::value_of(reg[(size_t)I.dst]));
+        reg[(size_t)(I.dst + 1 + taken)] = T(I.a);
+        reg[(size_t)I.dst] = T(taken + 1);
+        break;
+      }
       case Program::MOV:
         d() = ra();
         break;
