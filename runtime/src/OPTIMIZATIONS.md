@@ -1886,8 +1886,10 @@ Beyond the estimate, islands still refuse propto densities (their
 term-dropping depends on argument types, which the island's uniform
 binding cannot reproduce), runs under 32 ops, and regions producing
 target terms. Parameter-dependent forward branches can use generated
-adjoints; recorded block flags preserve the executed path. Back edges and
-unsupported derivatives retain the replay. The branch tests in
+adjoints; recorded block flags preserve the executed path. A scalar region
+map records the taken blocks in a trail instead, so the per-iteration cost
+follows the blocks the path executed. Back edges and unsupported derivatives
+retain the replay. The branch tests in
 `tests/test_adjoint.cpp` cover reused frames, conditional overwrites, nested
 branches, kernel calls, and refusal of uninitialized joins.
 

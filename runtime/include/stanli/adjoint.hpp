@@ -65,6 +65,8 @@ struct AdjProgram {
   // Acyclic control records which basic blocks ran. Empty for the ordinary
   // straight-line path; each taken segment executes its existing rules.
   std::vector<Segment> segments;
+  // Register of the taken-segment count, then their indices; -1 if flagged.
+  int trail = -1;
   // Which adjoint cell each forward register accumulates into, normally
   // itself. A copy the forward never rewrites is the exception: it shares
   // its source's cell rather than moving a total across at the end, because

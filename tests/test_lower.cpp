@@ -3128,6 +3128,74 @@ void test_clear_strategy_follows_mode() {
             ")");
 }
 
+void test_recompute_visits_taken_blocks() {
+  using stanli::Program;
+  const std::string stem = "region_map_wide_branch";
+  const int n = 64;
+  const Series s = make_series(n);
+  const Ref ref = [](const std::vector<var>& p, const Series& d,
+                     std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < d.y.size(); ++i) {
+      const var r = d.y[i] - p[0] * d.x[i];
+      const bool low = r.val() < p[1].val();
+      if (taken) taken->push_back(low);
+      if (low) {
+        lp += -stan::math::square(r);
+        continue;
+      }
+      var acc = 0;
+      for (int j = 1; j <= 48; ++j) {
+        if (p[0].val() * j < r.val())
+          acc += -0.01 * j * stan::math::square(r - p[0]);
+        else
+          acc -= 0.01 * p[1] * j;
+      }
+      lp += -0.5 * stan::math::square(r) + acc;
+    }
+    return lp;
+  };
+  const std::vector<Params> points = {
+      {0.3, -0.5}, {-1.5, 0.7}, {0.3, 5.0}, {0.3, -5.0}};
+
+  CompiledModel lanes = compile_with(stem, n);
+  expect_mapped(stem + " lanes", lanes);
+  check(map_payload(lanes).lanes.active, stem + ": lanes run the body");
+  Executor lane_ex(lanes.graph);
+  lanes.bind(lane_ex);
+
+  for (bool recompute : {true, false}) {
+    const std::string what = stem + (recompute ? " recompute" : " save");
+    if (recompute) test_setenv("STANLI_REGION_MAP_SAVE_LIMIT", "0", 1);
+    CompiledModel cm = compile_with(stem, n, "STANLI_REGION_MAP_LANES");
+    if (recompute) test_unsetenv("STANLI_REGION_MAP_SAVE_LIMIT");
+    expect_mapped(what, cm);
+    const auto& p = map_payload(cm);
+    check(!p.lanes.active && p.recompute == recompute, what + ": scalar mode");
+    check(p.adj.segments.size() > 40,
+          what + ": many reverse segments (" +
+              std::to_string(p.adj.segments.size()) + ")");
+    check(p.adj.trail >= 0, what + ": the taken blocks are recorded");
+    size_t widest_clear = 0;
+    for (const auto& I : p.code)
+      if (I.code == Program::CONSTR)
+        widest_clear = std::max(widest_clear, (size_t)I.len);
+    check(widest_clear < p.adj.segments.size(),
+          what + ": nothing clears a flag per segment (" +
+              std::to_string(widest_clear) + ")");
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    for (size_t k = 0; k < points.size(); ++k) {
+      const Eval got = evaluate(ex, points[k]);
+      expect_eval(what + " point " + std::to_string(k), got,
+                  reference(ref, s, points[k], nullptr));
+      const Eval lane = evaluate(lane_ex, points[k]);
+      check(same_bits(got.lp, lane.lp) && got.grad == lane.grad,
+            what + " point " + std::to_string(k) + ": bitwise equal to lanes");
+    }
+  }
+}
+
 struct CleanFixture {
   const char* stem;
   int n;
@@ -3147,7 +3215,8 @@ void test_clean_sweep() {
       {"region_map_logic", 64, ""},
       {"region_map_short_circuit", 64, ""},
       {"region_map_nan", 64, "\"nv\":NaN"},
-      {"region_map_long_body", 32, ""}};
+      {"region_map_long_body", 32, ""},
+      {"region_map_wide_branch", 64, ""}};
   test_setenv("STANLI_REGION_MAP_CHECK_CLEAN", "1", 1);
   for (bool recompute : {false, true}) {
     for (const auto& f : fixtures) {
@@ -3467,6 +3536,7 @@ static void test_region_map() {
   test_lane_cogmod();
 #endif
   test_mode_policy();
+  test_recompute_visits_taken_blocks();
   test_setenv("STANLI_REGION_MAP_LANES", "0", 1);
   test_large_body_recomputes_by_default();
   test_clear_strategy_follows_mode();
