@@ -45,7 +45,9 @@
   minimum of 8192 elements: small slices stay serial, moderate ones use fewer
   chunks than threads, and on the models measured no thread count was slower
   than serial. Results do not depend on thread scheduling, but they depend on
-  the thread count, because the number of chunks sets the summation order.
+  `threads_per_chain`, because the number of chunks sets the summation order.
+  The chunk count also comes from an estimate of the work, so threaded results
+  can change between stanli versions.
   C++ callers that set `CompileOptions::reduce_sum_min_elements` should set
   `reduce_sum_min_chunk_ns` (default 30000, 0 to force splitting) instead; the
   old field is removed.
