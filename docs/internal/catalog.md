@@ -180,6 +180,7 @@ paths and hashes in raw records unchanged.
 
 | Document | Contents / use |
 | --- | --- |
+| [2026-10-15 · General runtime fixes](../../notes/performance/2026-10-15-general-runtime-fixes.md) | Baseline-ISA constant reuse, registry storage, and ADD_N binding; proof and benchmark evidence. |
 | [Stanli portable MIR v2](../../compiler/portable_ir/SCHEMA.md) | Portable MIR producer/consumer format and compatibility contract. |
 | [2026-08-06 · Elementwise-lp densities and batched mixture kernels](archive/plans/2026-08-06-elementwise-lp.md) | Historical plan or digest; read final disposition first. |
 | [2026-08-06 · Perf Phase 2 Plan](archive/plans/2026-08-06-perf-phase2.md) | Historical plan or digest; read final disposition first. |
@@ -253,8 +254,6 @@ paths and hashes in raw records unchanged.
 | [2026-08-04 · stanli: a portable Stan runtime](archive/specs/2026-08-04-stan-portable-runtime-design.md) | Historical specification; verify current implementation. |
 | [2026-08-10 · BridgeStan ABI facade and sampler strategy](archive/specs/2026-08-10-bridgestan-facade-design.md) | Historical specification; verify current implementation. |
 | [2026-08-11 · Embedding the model in the data argument](archive/specs/2026-08-11-embedded-mir-data.md) | Historical specification; verify current implementation. |
-
-| [2026-10-15 · General runtime fixes](../../notes/performance/2026-10-15-general-runtime-fixes.md) | Baseline-ISA constant reuse, registry storage, and ADD_N binding; proof and benchmark evidence. |
 
 ## Published artifacts
 
