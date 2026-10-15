@@ -165,6 +165,117 @@ struct Refusal {
 
 [[noreturn]] void refuse(const std::string& why) { throw Refusal{why}; }
 
+struct Lifetimes {
+  std::vector<int> first, last;
+  std::vector<char> link, pinned;
+
+  explicit Lifetimes(size_t n)
+      : first(n, std::numeric_limits<int>::max()),
+        last(n, -1),
+        link(n, 0),
+        pinned(n, 0) {}
+
+  void join(int base, int len) {
+    for (int k = 1; k < len; ++k)
+      if (base + k >= 0 && (size_t)(base + k) < link.size())
+        link[(size_t)(base + k)] = 1;
+  }
+
+  void touch(int base, int len, int step) {
+    join(base, len);
+    for (int k = 0; k < len; ++k) {
+      if (base + k < 0 || (size_t)(base + k) >= link.size()) continue;
+      const size_t id = (size_t)(base + k);
+      first[id] = std::min(first[id], step);
+      last[id] = std::max(last[id], step);
+    }
+  }
+
+  void hold(int base, int len, int horizon) {
+    join(base, len);
+    for (int k = 0; k < len; ++k)
+      if (base + k >= 0 && (size_t)(base + k) < link.size())
+        last[(size_t)(base + k)] = horizon;
+  }
+
+  void pin(int id) {
+    if (id >= 0 && (size_t)id < pinned.size()) pinned[(size_t)id] = 1;
+  }
+};
+
+int pack_slots(const Lifetimes& life, const std::vector<char>& sink,
+               int horizon, std::vector<int32_t>& slot) {
+  struct Unit {
+    int base, len, first, last, at;
+    bool sink;
+  };
+  std::vector<Unit> units;
+  int widest = 1;
+  for (int id = 0; id < (int)slot.size(); ++id) {
+    if (slot[(size_t)id] < 0) continue;
+    const bool is_sink = !sink.empty() && sink[(size_t)id];
+    int first = life.first[(size_t)id], last = life.last[(size_t)id];
+    if (life.pinned[(size_t)id] || first > last) first = -1, last = horizon;
+    last = std::max(last, 0);
+    if (life.link[(size_t)id] && !units.empty() &&
+        units.back().base + units.back().len == id) {
+      Unit& u = units.back();
+      ++u.len;
+      u.first = std::min(u.first, first);
+      u.last = std::max(u.last, last);
+      if (u.sink != is_sink) u.sink = false, u.first = -1, u.last = horizon;
+      widest = std::max(widest, u.len);
+    } else {
+      units.push_back({id, 1, first, last, 0, is_sink});
+    }
+  }
+  const auto order_by = [&](auto key) {
+    std::vector<int> start((size_t)horizon + 3, 0), order;
+    for (const Unit& u : units)
+      if (!u.sink) ++start[(size_t)key(u) + 1];
+    for (size_t k = 1; k < start.size(); ++k) start[k] += start[k - 1];
+    order.resize((size_t)start.back());
+    for (size_t i = 0; i < units.size(); ++i)
+      if (!units[i].sink)
+        order[(size_t)start[(size_t)key(units[i])]++] = (int)i;
+    return order;
+  };
+  const std::vector<int> by_first =
+      order_by([](const Unit& u) { return u.first + 1; });
+  const std::vector<int> by_last =
+      order_by([](const Unit& u) { return u.last; });
+  std::vector<std::vector<int>> free_at((size_t)widest + 1);
+  int next = 0;
+  size_t ended = 0;
+  for (const int ui : by_first) {
+    Unit& u = units[(size_t)ui];
+    for (;
+         ended < by_last.size() && units[(size_t)by_last[ended]].last < u.first;
+         ++ended) {
+      const Unit& done = units[(size_t)by_last[ended]];
+      free_at[(size_t)done.len].push_back(done.at);
+    }
+    auto& pool = free_at[(size_t)u.len];
+    if (pool.empty()) {
+      u.at = next;
+      next += u.len;
+    } else {
+      u.at = pool.back();
+      pool.pop_back();
+    }
+  }
+  std::vector<int> scratch_row((size_t)widest + 1, -1);
+  for (Unit& u : units) {
+    if (!u.sink) continue;
+    int& row = scratch_row[(size_t)u.len];
+    if (row < 0) row = next, next += u.len;
+    u.at = row;
+  }
+  for (const Unit& u : units)
+    for (int k = 0; k < u.len; ++k) slot[(size_t)(u.base + k)] = u.at + k;
+  return next;
+}
+
 class Analysis {
  public:
   Analysis(RegionMapProg& p, int64_t storage_limit, int64_t recompute_cells,
@@ -183,9 +294,11 @@ class Analysis {
     analyze_invariance();
     classify_registers();
     classify_cells();
-    decode_operands();
     find_adjoint_sinks();
     check_ranges();
+    assign_register_slots();
+    assign_cell_slots();
+    decode_operands();
     collect_seeds();
     build_windows();
     count_sites();
@@ -202,6 +315,7 @@ class Analysis {
   std::vector<int> writes_;
   std::vector<char> undefined_read_;
   std::vector<char> invariant_reg_;
+  std::vector<int> block_of_;
 
   bool shared_reg(int r) const {
     return r >= 0 && r < (int)plan_.reg_slot.size() && plan_.reg_slot[r] < 0;
@@ -328,12 +442,6 @@ class Analysis {
       for (int k = 0; k < len; ++k)
         if (guard(reg + k)) refuse("a trail register is read as a value");
     };
-    std::vector<int> block_of(p_.code.size(), 0);
-    for (int b = 0; b < (int)plan_.blocks.size(); ++b)
-      for (int pc = plan_.blocks[(size_t)b].begin;
-           pc < plan_.blocks[(size_t)b].end; ++pc)
-        block_of[(size_t)pc] = b;
-
     int reset = -1;
     int first_path = std::numeric_limits<int>::max();
     for (size_t pc = 0; pc < p_.code.size(); ++pc) {
@@ -343,14 +451,14 @@ class Analysis {
           refuse("a path record does not match the trail");
         if (plan_.segment_block[(size_t)I.a] >= 0)
           refuse("a segment is recorded in two places");
-        plan_.segment_block[(size_t)I.a] = block_of[pc];
+        plan_.segment_block[(size_t)I.a] = block_of_[pc];
         plan_.skip[pc] = 1;
         first_path = std::min(first_path, (int)pc);
         continue;
       }
       each_body_read(I, reads_guard);
       if (I.code == Program::CONST && I.dst == trail) {
-        if (reset >= 0 || block_of[pc] != 0 || p_.pool[(size_t)I.a] != 0.0)
+        if (reset >= 0 || block_of_[pc] != 0 || p_.pool[(size_t)I.a] != 0.0)
           refuse("the trail is not reset once in the entry block");
         reset = (int)pc;
         plan_.skip[pc] = 1;
@@ -380,10 +488,8 @@ class Analysis {
     });
     per_lane[(size_t)p_.iter_reg] = 1;
     plan_.reg_slot.assign((size_t)n, -1);
-    int next = 0;
     for (int r = 0; r < n; ++r)
-      if (per_lane[(size_t)r]) plan_.reg_slot[(size_t)r] = next++;
-    plan_.fwd_regs = next;
+      if (per_lane[(size_t)r]) plan_.reg_slot[(size_t)r] = 0;
   }
 
   static bool pure_clear(Program::Code c) {
@@ -555,45 +661,41 @@ class Analysis {
     }
   }
 
+  Span adjoint_dst(const AdjInstr& A) const {
+    switch (A.code) {
+      case Program::CALL: {
+        const Program::Call& call = p_.calls[(size_t)A.a];
+        return {call.bwd_adj_out, call.out_len};
+      }
+      case Program::FILL:
+      case Program::CONSTR:
+        return {A.dst, A.len};
+      default:
+        return {A.dst, 1};
+    }
+  }
+
   void find_adjoint_sinks() {
     const size_t n = (size_t)n_cells_;
-    std::vector<char> read(n, 0), dirty(n, 0);
-    bool dirty_all = false;
-    const auto mark = [&](std::vector<char>& v, int base, int len) {
-      for (int k = 0; k < len; ++k)
-        if (base + k >= 0 && (size_t)(base + k) < n) v[(size_t)(base + k)] = 1;
-    };
+    plan_.adj_sink.assign(n, 0);
+    for (size_t c = 0; c < n; ++c) plan_.adj_sink[c] = !shared_cell((int)c);
     for (const auto& A : p_.adj.code) {
-      if (A.code == Program::DYN_INDEX) dirty_all = true;
-      each_adjoint_accumulation(
-          A, [&](int base, int len) { mark(dirty, base, len); });
       if (pure_clear(A.code)) continue;
-      if (A.code == Program::CALL) {
-        const Program::Call& call = p_.calls[(size_t)A.a];
-        mark(read, call.bwd_adj_out, call.out_len);
-      } else {
-        mark(read, A.dst, 1);
-      }
+      const Span d = adjoint_dst(A);
+      for (int k = 0; k < d.len; ++k)
+        if (d.base + k >= 0 && (size_t)(d.base + k) < n)
+          plan_.adj_sink[(size_t)(d.base + k)] = 0;
     }
-    mark(dirty, p_.adj.adj_reg[(size_t)p_.out_regs[0]], 1);
-    const auto sink = [&](int cell) {
-      return cell >= 0 && (size_t)cell < n && !shared_cell(cell) &&
-             !read[(size_t)cell];
-    };
     plan_.adj_skip.assign(p_.adj.code.size(), 0);
-    plan_.adj_residue.assign(n, 0);
     for (size_t pc = 0; pc < p_.adj.code.size(); ++pc) {
       const AdjInstr& A = p_.adj.code[pc];
       if (!pure_clear(A.code)) continue;
-      const int width =
-          (A.code == Program::FILL || A.code == Program::CONSTR) ? A.len : 1;
-      bool all = width > 0;
-      for (int k = 0; k < width; ++k) all = all && sink(A.dst + k);
-      if (!all) continue;
-      plan_.adj_skip[pc] = 1;
-      for (int k = 0; k < width; ++k)
-        if (dirty_all || dirty[(size_t)(A.dst + k)])
-          plan_.adj_residue[(size_t)(A.dst + k)] = 1;
+      const Span d = adjoint_dst(A);
+      bool all = d.len > 0;
+      for (int k = 0; k < d.len; ++k)
+        all = all && d.base + k >= 0 && (size_t)(d.base + k) < n &&
+              plan_.adj_sink[(size_t)(d.base + k)];
+      plan_.adj_skip[pc] = all;
     }
   }
 
@@ -610,13 +712,100 @@ class Analysis {
       }
     }
     plan_.cell_slot.assign((size_t)n_cells_, -1);
-    int next = 0;
     for (int c = 0; c < n_cells_; ++c)
-      if (!shared[(size_t)c]) plan_.cell_slot[(size_t)c] = next++;
-    plan_.adj_cells = next;
+      if (!shared[(size_t)c]) plan_.cell_slot[(size_t)c] = 0;
     const int32_t target = map[(size_t)p_.out_regs[0]];
     if (target < 0 || target >= n_cells_ || shared_cell(target))
       refuse("target cell is shared");
+  }
+
+  int place_in_blocks(const Lifetimes& life, std::vector<int32_t>& rest) {
+    const int n = p_.n_regs;
+    const int end = (int)p_.code.size();
+    const int n_blocks = (int)plan_.blocks.size();
+    constexpr int kUnwritten = -2;
+    std::vector<int> home((size_t)n, kUnwritten);
+    for (int pc = 0; pc < end; ++pc)
+      each_instr_write(p_.code[(size_t)pc], [&](int base, int len) {
+        for (int k = 0; k < len; ++k) {
+          int& h = home[(size_t)(base + k)];
+          const int b = block_of_[(size_t)pc];
+          h = h == kUnwritten || h == b ? b : -1;
+        }
+      });
+    for (int r = 0; r < n; ++r)
+      if (rest[(size_t)r] < 0 || life.pinned[(size_t)r] ||
+          life.last[(size_t)r] != end)
+        home[(size_t)r] = -1;
+    for (int r = 0; r < n;) {
+      int e = r + 1;
+      while (e < n && life.link[(size_t)e]) ++e;
+      bool same = true;
+      for (int k = r + 1; k < e; ++k)
+        same = same && home[(size_t)k] == home[(size_t)r];
+      if (!same) std::fill(home.begin() + r, home.begin() + e, -1);
+      r = e;
+    }
+    std::vector<int> weight((size_t)n_blocks, 0), offset((size_t)n_blocks, 0);
+    for (int r = 0; r < n; ++r)
+      if (home[(size_t)r] >= 0) ++weight[(size_t)home[(size_t)r]];
+    int height = 0;
+    for (int b = 0; b < n_blocks; ++b) {
+      const int top = offset[(size_t)b] + weight[(size_t)b];
+      height = std::max(height, top);
+      for (const int s :
+           {plan_.blocks[(size_t)b].taken, plan_.blocks[(size_t)b].fall})
+        if (s >= 0 && s < n_blocks)
+          offset[(size_t)s] = std::max(offset[(size_t)s], top);
+    }
+    for (int r = 0; r < n; ++r) {
+      if (home[(size_t)r] < 0) continue;
+      plan_.reg_slot[(size_t)r] = offset[(size_t)home[(size_t)r]]++;
+      rest[(size_t)r] = -1;
+    }
+    return height;
+  }
+
+  void assign_register_slots() {
+    const int n = p_.n_regs;
+    const int end = (int)p_.code.size();
+    Lifetimes life((size_t)n);
+    for (int pc = 0; pc < end; ++pc) {
+      const Program::Instr& I = p_.code[(size_t)pc];
+      each_instr_write(I, [&](int b, int l) { life.touch(b, l, pc); });
+      each_body_read(I, [&](int b, int l) { life.touch(b, l, pc); });
+    }
+    for (const auto& A : p_.adj.code)
+      each_adjoint_value_read(A, [&](int b, int l) { life.hold(b, l, end); });
+    life.pin(p_.iter_reg);
+    life.pin(p_.out_regs[0]);
+    for (int r = 0; r < n; ++r)
+      if (undefined_read_[(size_t)r]) life.pin(r);
+    std::vector<int32_t> rest = plan_.reg_slot;
+    const int height = place_in_blocks(life, rest);
+    const int packed = pack_slots(life, {}, end, rest);
+    for (int r = 0; r < n; ++r)
+      if (rest[(size_t)r] >= 0)
+        plan_.reg_slot[(size_t)r] = height + rest[(size_t)r];
+    plan_.fwd_regs = height + packed;
+  }
+
+  void assign_cell_slots() {
+    const int end = (int)p_.adj.code.size();
+    Lifetimes life((size_t)n_cells_);
+    for (int pc = 0; pc < end; ++pc) {
+      if (plan_.adj_skip[(size_t)pc]) continue;
+      const AdjInstr& A = p_.adj.code[(size_t)pc];
+      const Span d = adjoint_dst(A);
+      life.touch(d.base, d.len, pc);
+      each_adjoint_accumulation(A, [&](int b, int l) { life.touch(b, l, pc); });
+      if (A.code == Program::DYN_INDEX) life.touch(A.a, A.len, pc);
+    }
+    life.first[(size_t)p_.adj.adj_reg[(size_t)p_.out_regs[0]]] = -1;
+    for (int r = 0; r < p_.n_regs; ++r)
+      if (undefined_read_[(size_t)r] || r == p_.iter_reg)
+        life.pin(p_.adj.adj_reg[(size_t)r]);
+    plan_.adj_cells = pack_slots(life, plan_.adj_sink, end, plan_.cell_slot);
   }
 
   void same_class_regs(int base, int len, const char* what) const {
@@ -898,7 +1087,7 @@ class Analysis {
       leader[(size_t)(pc + 1)] = 1;
       leader[(size_t)I.dst] = 1;
     }
-    std::vector<int> block_of((size_t)n + 1, 0);
+    block_of_.assign((size_t)n + 1, 0);
     int blocks = 0;
     for (int pc = 0; pc < n; ++pc) {
       if (leader[(size_t)pc]) {
@@ -906,16 +1095,16 @@ class Analysis {
         plan_.blocks.emplace_back();
         plan_.blocks.back().begin = pc;
       }
-      block_of[(size_t)pc] = blocks - 1;
+      block_of_[(size_t)pc] = blocks - 1;
       plan_.blocks.back().end = pc + 1;
     }
-    block_of[(size_t)n] = blocks;
+    block_of_[(size_t)n] = blocks;
     for (auto& b : plan_.blocks) {
       const auto& last = p_.code[(size_t)(b.end - 1)];
       const bool jz = last.code == Program::JZ;
       const bool jmp = last.code == Program::JMP;
-      if (jz || jmp) b.taken = block_of[(size_t)last.dst];
-      b.fall = jmp ? -1 : block_of[(size_t)b.end];
+      if (jz || jmp) b.taken = block_of_[(size_t)last.dst];
+      b.fall = jmp ? -1 : block_of_[(size_t)b.end];
     }
   }
 
@@ -2471,8 +2660,6 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
   std::vector<Mask> entry;
   entry.reserve(plan.blocks.size() + 1);
   const bool verify = std::getenv("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
-  std::vector<char> exempt;
-  if (verify) exempt = region_map_clean_exempt_cells(p);
   RegionMapTally tally;
   RegionMapTally* counting = plan.profile ? &tally : nullptr;
   struct DirtyOnThrow {
@@ -2536,8 +2723,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
     if (verify) {
       const auto& cell_slot = plan.cell_slot;
       for (size_t cell = 0; cell < cell_slot.size(); ++cell) {
-        if (cell_slot[cell] < 0 || exempt[cell] || plan.adj_residue[cell])
-          continue;
+        if (cell_slot[cell] < 0 || plan.adj_sink[cell]) continue;
         const double* row = adj_tile + (size_t)cell_slot[cell] * kTile;
         for (int l = 0; l < kTile; ++l)
           if (row[l] != 0.0)
