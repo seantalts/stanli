@@ -43,6 +43,16 @@
   loop is one loop again: at 2000 subjects, preparation goes from 18 s to
   under 1 s and peak memory from 1.5 GB to 156 MB. A 400 subject ctsem model
   is now in the test corpus.
+- Per-observation loops that use `log_sum_exp` over a range or `inv_logit`
+  now run 64 observations at a time. `cm_invgaussian` samples 4.0x faster
+  with one chain and 3.3x faster with four. Its peak memory with four chains
+  goes from 59 MB to 502 MB, because each chain keeps the forward values of
+  its 200 observations for the reverse pass.
+- The reverse pass of a program with branches now visits only the blocks
+  that ran, instead of checking a flag for every block. When a
+  per-observation loop with many branches runs one observation at a time,
+  its gradient at points where most observations return early is up to
+  9x faster.
 
 ## 0.20.0
 

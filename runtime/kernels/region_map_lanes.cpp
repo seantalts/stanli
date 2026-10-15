@@ -43,6 +43,7 @@ bool lane_opcode(Program::Code c) {
     case Program::FMIN:
     case Program::NEG:
     case Program::EXP:
+    case Program::INV_LOGIT:
     case Program::LOG:
     case Program::LOG1P_EXP:
     case Program::ERFC:
@@ -62,10 +63,12 @@ bool lane_opcode(Program::Code c) {
     case Program::JZ:
     case Program::JMP:
     case Program::LSE2:
+    case Program::LSE_RANGE:
     case Program::LOG_DIFF_EXP:
     case Program::LMULTIPLY:
     case Program::LOG_MIX:
     case Program::CALL:
+    case Program::PATH:
       return true;
     default:
       return false;
@@ -175,7 +178,7 @@ class Analysis {
   void run() {
     check_opcodes();
     build_blocks();
-    find_flags();
+    find_path();
     find_undefined_reads();
     analyze_invariance();
     classify_registers();
@@ -277,6 +280,10 @@ class Analysis {
         f(A.vb, 1);
         f(A.vc, 1);
         return;
+      case Program::LSE_RANGE:
+        f(A.va, A.len);
+        f(A.vd, 1);
+        return;
       case Program::LOG:
       case Program::LOG1P_EXP:
       case Program::ERFC:
@@ -289,6 +296,7 @@ class Analysis {
         f(A.va, 1);
         return;
       case Program::EXP:
+      case Program::INV_LOGIT:
       case Program::SQRT:
         f(A.vd, 1);
         return;
@@ -300,90 +308,64 @@ class Analysis {
     }
   }
 
-  void find_flags() {
+  void find_path() {
     const int n = p_.n_regs;
-    const int n_blocks = (int)plan_.blocks.size();
-    plan_.guard_reg.assign((size_t)n, 0);
-    for (const auto& seg : p_.adj.segments) {
-      if (seg.guard < 0 || seg.guard >= n) refuse("segment guard out of range");
-      plan_.guard_reg[(size_t)seg.guard] = 1;
-    }
+    const int segments = (int)p_.adj.segments.size();
+    plan_.trail_reg.assign((size_t)n, 0);
+    plan_.skip.assign(p_.code.size(), 0);
+    plan_.segment_count = segments;
+    plan_.segment_block.assign((size_t)segments, -1);
+    if (segments == 0) return;
+    const int trail = p_.adj.trail;
+    if (trail < 0 || trail + segments + 1 > n)
+      refuse("path trail out of range");
+    for (int k = 0; k <= segments; ++k)
+      plan_.trail_reg[(size_t)(trail + k)] = 1;
     const auto guard = [&](int reg) {
-      return reg >= 0 && reg < n && plan_.guard_reg[(size_t)reg] != 0;
+      return reg >= 0 && reg < n && plan_.trail_reg[(size_t)reg] != 0;
     };
     const auto reads_guard = [&](int reg, int len) {
       for (int k = 0; k < len; ++k)
-        if (guard(reg + k)) refuse("a flag register is read as a value");
+        if (guard(reg + k)) refuse("a trail register is read as a value");
     };
     std::vector<int> block_of(p_.code.size(), 0);
-    for (int b = 0; b < n_blocks; ++b)
+    for (int b = 0; b < (int)plan_.blocks.size(); ++b)
       for (int pc = plan_.blocks[(size_t)b].begin;
            pc < plan_.blocks[(size_t)b].end; ++pc)
         block_of[(size_t)pc] = b;
 
-    struct Writes {
-      std::vector<int> set_blocks;
-      int first_set = std::numeric_limits<int>::max();
-      int last_clear = -1;
-    };
-    std::vector<Writes> writes((size_t)n);
-    const auto record = [&](int reg, int pc, double value) {
-      Writes& w = writes[(size_t)reg];
-      if (value != 0.0) {
-        w.set_blocks.push_back(block_of[(size_t)pc]);
-        w.first_set = std::min(w.first_set, pc);
-      } else {
-        if (block_of[(size_t)pc] != 0)
-          refuse("a flag is cleared outside the entry block");
-        w.last_clear = std::max(w.last_clear, pc);
-      }
-    };
-    plan_.flag_store.assign(p_.code.size(), 0);
+    int reset = -1;
+    int first_path = std::numeric_limits<int>::max();
     for (size_t pc = 0; pc < p_.code.size(); ++pc) {
       const Program::Instr& I = p_.code[pc];
-      each_body_read(I, reads_guard);
-      switch (I.code) {
-        case Program::CONST:
-          if (guard(I.dst)) {
-            record(I.dst, (int)pc, p_.pool[(size_t)I.a]);
-            plan_.flag_store[pc] = 1;
-          }
-          break;
-        case Program::CONSTR:
-        case Program::FILL: {
-          int flags = 0;
-          for (int k = 0; k < I.len; ++k) flags += guard(I.dst + k);
-          if (!flags) break;
-          if (flags != I.len)
-            refuse("a constant fill mixes flag and value registers");
-          for (int k = 0; k < I.len; ++k)
-            record(
-                I.dst + k, (int)pc,
-                p_.pool[(size_t)(I.code == Program::CONSTR ? I.a + k : I.a)]);
-          plan_.flag_store[pc] = 1;
-          break;
-        }
-        default:
-          each_instr_write(I, [&](int reg, int len) {
-            for (int k = 0; k < len; ++k)
-              if (guard(reg + k)) refuse("a flag register has another writer");
-          });
+      if (I.code == Program::PATH) {
+        if (I.dst != trail || I.a < 0 || I.a >= segments)
+          refuse("a path record does not match the trail");
+        if (plan_.segment_block[(size_t)I.a] >= 0)
+          refuse("a segment is recorded in two places");
+        plan_.segment_block[(size_t)I.a] = block_of[pc];
+        plan_.skip[pc] = 1;
+        first_path = std::min(first_path, (int)pc);
+        continue;
       }
+      each_body_read(I, reads_guard);
+      if (I.code == Program::CONST && I.dst == trail) {
+        if (reset >= 0 || block_of[pc] != 0 || p_.pool[(size_t)I.a] != 0.0)
+          refuse("the trail is not reset once in the entry block");
+        reset = (int)pc;
+        plan_.skip[pc] = 1;
+        continue;
+      }
+      each_instr_write(I, [&](int reg, int len) {
+        for (int k = 0; k < len; ++k)
+          if (guard(reg + k)) refuse("a trail register has another writer");
+      });
     }
+    if (reset < 0 || reset > first_path)
+      refuse("the trail is not reset before it is written");
     for (const auto& A : p_.adj.code) each_adjoint_value_read(A, reads_guard);
-
-    plan_.segment_count = (int)p_.adj.segments.size();
-    plan_.segment_blocks.assign(p_.adj.segments.size(), {});
-    for (size_t s = 0; s < p_.adj.segments.size(); ++s) {
-      const Writes& w = writes[(size_t)p_.adj.segments[s].guard];
-      if (w.set_blocks.empty()) refuse("a segment guard is never set");
-      if (w.last_clear < 0 || w.last_clear > w.first_set)
-        refuse("a segment guard is not reset before it is set");
-      auto& blocks = plan_.segment_blocks[s];
-      blocks = w.set_blocks;
-      std::sort(blocks.begin(), blocks.end());
-      blocks.erase(std::unique(blocks.begin(), blocks.end()), blocks.end());
-    }
+    for (int block : plan_.segment_block)
+      if (block < 0) refuse("a segment is never recorded");
   }
 
   void classify_registers() {
@@ -392,7 +374,7 @@ class Analysis {
     each_body_write([&](int reg, int len) {
       for (int k = 0; k < len; ++k) {
         if (reg + k < 0 || reg + k >= n) refuse("register out of range");
-        if (!plan_.guard_reg[(size_t)(reg + k)])
+        if (!plan_.trail_reg[(size_t)(reg + k)])
           per_lane[(size_t)(reg + k)] = 1;
       }
     });
@@ -453,9 +435,13 @@ class Analysis {
         f(A.a, 1);
         f(A.b, 1);
         return;
+      case Program::LSE_RANGE:
+        f(A.a, A.len);
+        return;
       case Program::MOV:
       case Program::NEG:
       case Program::EXP:
+      case Program::INV_LOGIT:
       case Program::LOG:
       case Program::LOG1P_EXP:
       case Program::ERFC:
@@ -494,6 +480,7 @@ class Analysis {
         case Program::MOV:
         case Program::NEG:
         case Program::EXP:
+        case Program::INV_LOGIT:
         case Program::LOG:
         case Program::LOG1P_EXP:
         case Program::ERFC:
@@ -707,6 +694,10 @@ class Analysis {
           per_lane_cells(A.dst, 1, "indexed output");
           same_class_cells(A.a, A.len, "indexed");
           break;
+        case Program::LSE_RANGE:
+          per_lane_cells(A.dst, 1, "output");
+          per_lane_cells(A.a, A.len, "log_sum_exp terms");
+          break;
         default:
           per_lane_cells(A.dst, 1, "output");
           break;
@@ -721,6 +712,9 @@ class Analysis {
         return;
       case Program::JZ:
         f(I.a, 1);
+        return;
+      case Program::PATH:
+        f(I.dst, 1);
         return;
       case Program::DYN_INDEX:
         f(I.a + I.c, I.len);
@@ -753,29 +747,38 @@ class Analysis {
     });
     writes_ = writes;
     undefined_read_.assign(n_regs, 0);
-    std::vector<std::vector<char>> in(n_blocks);
+    using Bits = std::vector<uint64_t>;
+    const size_t words = (n_regs + 63) / 64;
+    const auto test = [](const Bits& v, size_t r) {
+      return (v[r >> 6] >> (r & 63)) & 1;
+    };
+    const auto set = [](Bits& v, size_t r) {
+      v[r >> 6] |= uint64_t{1} << (r & 63);
+    };
+    std::vector<Bits> in(n_blocks);
     std::vector<char> reached(n_blocks, 0);
     reached[0] = 1;
-    in[0].assign(n_regs, 0);
-    for (size_t r = 0; r < n_regs; ++r) in[0][r] = writes[r] == 0;
-    in[0][(size_t)p_.iter_reg] = 1;
-    const auto meet = [&](size_t to, const std::vector<char>& from) {
+    in[0].assign(words, 0);
+    for (size_t r = 0; r < n_regs; ++r)
+      if (writes[r] == 0) set(in[0], r);
+    set(in[0], (size_t)p_.iter_reg);
+    const auto meet = [&](size_t to, const Bits& from) {
       if (to >= n_blocks) return;
       if (!reached[to]) {
         reached[to] = 1;
         in[to] = from;
         return;
       }
-      for (size_t k = 0; k < n_regs; ++k) in[to][k] &= from[k];
+      for (size_t k = 0; k < words; ++k) in[to][k] &= from[k];
     };
     for (size_t b = 0; b < n_blocks; ++b) {
       if (!reached[b]) continue;
-      std::vector<char> defined = in[b];
+      Bits defined = std::move(in[b]);
       for (int pc = blocks[b].begin; pc < blocks[b].end; ++pc) {
         const Program::Instr& I = p_.code[(size_t)pc];
         each_body_read(I, [&](int reg, int len) {
           for (int k = 0; k < len; ++k)
-            if (!defined[(size_t)(reg + k)])
+            if (!test(defined, (size_t)(reg + k)))
               undefined_read_[(size_t)(reg + k)] = 1;
         });
         switch (I.code) {
@@ -785,17 +788,17 @@ class Analysis {
           case Program::CALL: {
             const Program::Call& call = p_.calls[(size_t)I.a];
             for (int k = 0; k < call.out_len; ++k)
-              defined[(size_t)(call.out + k)] = 1;
+              set(defined, (size_t)(call.out + k));
             for (int k = 0; k < call.scratch_len; ++k)
-              defined[(size_t)(call.scratch + k)] = 1;
+              set(defined, (size_t)(call.scratch + k));
             break;
           }
           case Program::CONSTR:
           case Program::FILL:
-            for (int k = 0; k < I.len; ++k) defined[(size_t)(I.dst + k)] = 1;
+            for (int k = 0; k < I.len; ++k) set(defined, (size_t)(I.dst + k));
             break;
           default:
-            defined[(size_t)I.dst] = 1;
+            set(defined, (size_t)I.dst);
         }
       }
       if (blocks[b].taken >= 0) meet((size_t)blocks[b].taken, defined);
@@ -825,8 +828,8 @@ class Analysis {
       for (int k = 0; k < len; ++k)
         if (base + k >= 0 && base + k < n) excluded[(size_t)(base + k)] = 1;
     };
-    for (const auto& seg : p_.adj.segments)
-      if (seg.guard >= 0 && seg.guard < n) excluded[(size_t)seg.guard] = 1;
+    for (int r = 0; r < n; ++r)
+      if (plan_.trail_reg[(size_t)r]) excluded[(size_t)r] = 1;
     for (const auto& I : p_.code) {
       switch (I.code) {
         case Program::CONSTR:
@@ -1043,6 +1046,7 @@ class Analysis {
         case Program::MOV:
         case Program::NEG:
         case Program::EXP:
+        case Program::INV_LOGIT:
         case Program::LOG:
         case Program::LOG1P_EXP:
         case Program::ERFC:
@@ -1390,6 +1394,9 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
     case Program::EXP:
       t.unary(o, I, m, [](double a) { return stan::math::exp(a); });
       break;
+    case Program::INV_LOGIT:
+      t.unary(o, I, m, [](double a) { return stan::math::inv_logit(a); });
+      break;
     case Program::LOG:
       t.unary(o, I, m, [](double a) { return stan::math::log(a); });
       break;
@@ -1440,6 +1447,17 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
         return stan::math::log_sum_exp(a, b);
       });
       break;
+    case Program::LSE_RANGE: {
+      double* const d = t.slot(I.dst);
+      std::vector<double> terms((size_t)I.len);
+      t.each(m, [&](int l) {
+        for (int32_t k = 0; k < I.len; ++k)
+          terms[(size_t)k] = t.value(I.a + k, l);
+        d[l] = stan::math::log_sum_exp(
+            Eigen::Map<const Eigen::VectorXd>(terms.data(), I.len));
+      });
+      break;
+    }
     case Program::LOG_DIFF_EXP:
       t.binary(o, I, m, [](double a, double b) {
         return stan::math::log_diff_exp(a, b);
@@ -1542,16 +1560,12 @@ void tally_block(const RegionMapProg& p, const RegionMapLanePlan::Block& block,
   const int lanes = popcount(m);
   for (int pc = block.begin; pc < block.end; ++pc) {
     const auto& I = p.code[(size_t)pc];
-    if (I.code == Program::JMP || p.lanes.flag_store[(size_t)pc]) continue;
+    if (I.code == Program::JMP || p.lanes.skip[(size_t)pc]) continue;
     const size_t op = (size_t)I.code;
     ++tally.fwd_exec;
     tally.fwd_lanes += (uint64_t)lanes;
     ++tally.fwd_op[op];
     tally.fwd_op_lanes[op] += (uint64_t)lanes;
-    if ((I.code == Program::CONST || I.code == Program::CONSTR ||
-         I.code == Program::FILL) &&
-        p.lanes.guard_reg[(size_t)I.dst])
-      ++tally.fwd_flag_stores;
     if (p.lanes.invariant[(size_t)pc]) {
       ++tally.fwd_invariant;
       ++tally.fwd_op_invariant[op];
@@ -1579,7 +1593,7 @@ void lane_tile_forward(const RegionMapProg& p, const TileState& t,
     const auto& tail = p.code[(size_t)last];
     const bool jump = tail.code == Program::JZ || tail.code == Program::JMP;
     for (int pc = block.begin; pc < (jump ? last : block.end); ++pc)
-      if (!p.lanes.flag_store[(size_t)pc])
+      if (!p.lanes.skip[(size_t)pc])
         lane_instruction(p, t, pc, m, window, call_ctx, state);
     if (tail.code == Program::JMP) {
       entry[(size_t)block.taken] |= m;
@@ -1596,10 +1610,9 @@ void lane_tile_forward(const RegionMapProg& p, const TileState& t,
       entry[(size_t)block.fall] |= m;
     }
   }
-  const auto& segment_blocks = p.lanes.segment_blocks;
-  for (size_t s = 0; s < segment_blocks.size(); ++s) {
-    Mask m = 0;
-    for (int b : segment_blocks[s]) m |= entry[(size_t)b];
+  const auto& segment_block = p.lanes.segment_block;
+  for (size_t s = 0; s < segment_block.size(); ++s) {
+    const Mask m = entry[(size_t)segment_block[s]];
     std::memcpy(seg_masks + s, &m, sizeof m);
   }
 }
@@ -1969,6 +1982,18 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
       });
       return;
     }
+    case Program::INV_LOGIT: {
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      t.with(o.vd, I.vd, [&](auto vd) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          a[l] += u * vd[l] * (1.0 - vd[l]);
+        });
+      });
+      return;
+    }
     case Program::LOG: {
       double* const d = cells(o.dst);
       double* const a = t.acc(I.a, o.a);
@@ -2074,6 +2099,20 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
           else
             log_diff_exp_rule(u, va[l], vb[l], a[l], b[l]);
         });
+      });
+      return;
+    }
+    case Program::LSE_RANGE: {
+      double* const d = cells(o.dst);
+      double* const terms = cells(o.a);
+      const TileState& f = t.forward();
+      t.each(m, [&](int l) {
+        const double u = d[l];
+        d[l] = 0.0;
+        const double out = f.value(I.vd, l);
+        for (int32_t k = 0; k < I.len; ++k)
+          terms[(size_t)k * kTile + l] +=
+              u * std::exp(f.value(I.va + k, l) - out);
       });
       return;
     }
@@ -2317,7 +2356,6 @@ void RegionMapTally::add(const RegionMapTally& o) {
   fwd_exec += o.fwd_exec;
   fwd_lanes += o.fwd_lanes;
   fwd_invariant += o.fwd_invariant;
-  fwd_flag_stores += o.fwd_flag_stores;
   adj_exec += o.adj_exec;
   adj_lanes += o.adj_lanes;
   adj_cleared += o.adj_cleared;
@@ -2484,7 +2522,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
       run(0, (int)p.adj.code.size(), fwd.full());
     } else {
       const double* masks = segment_masks(plan, region, tile);
-      for (size_t s = 0; s < p.adj.segments.size(); ++s) {
+      for (size_t s = p.adj.segments.size(); s-- > 0;) {
         const auto& seg = p.adj.segments[s];
         Mask m;
         std::memcpy(&m, masks + s, sizeof m);

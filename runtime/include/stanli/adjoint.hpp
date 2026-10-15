@@ -60,11 +60,16 @@ struct AdjInstr {
 struct AdjProgram {
   std::vector<AdjInstr> code;  // in reverse execution order
   struct Segment {
-    int guard, begin, end;
+    int begin, end;
   };
   // Acyclic control records which basic blocks ran. Empty for the ordinary
   // straight-line path; each taken segment executes its existing rules.
+  // Segment s belongs to the s-th block that produces an adjoint, in forward
+  // order.
   std::vector<Segment> segments;
+  // Register of the taken-segment count, then their indices; set whenever
+  // segments is non-empty.
+  int trail = -1;
   // Which adjoint cell each forward register accumulates into, normally
   // itself. A copy the forward never rewrites is the exception: it shares
   // its source's cell rather than moving a total across at the end, because
