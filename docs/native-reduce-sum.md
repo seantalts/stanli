@@ -89,7 +89,10 @@ partitions are deterministic across worker schedules; changing the compile-time
 partition may change floating-point rounding and resulting sampling trajectories.
 
 Each child retains its compact values, adjoints, scratch and gradient buffer.
-Only the input ranges that child reads are copied per evaluation. Forward and
+Data arguments whose values are known at preparation are stored once in the
+reduction and read in place by every child and every chain clone. Only the
+parameter-dependent inputs are copied per evaluation, and only the ranges a
+child reads. Forward and
 reverse dispatch separately, so reverse uses the actual incoming adjoint even
 inside nonlinear expressions. Shared input gradients merge in fixed child order.
 Buffers and threads are reused; kernels and exceptional paths may still allocate.

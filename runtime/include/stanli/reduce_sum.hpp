@@ -26,7 +26,6 @@ class ReduceExecutionContext {
 
 // Immutable child programs. Bindings name operands, never parent graph slots
 // or mutable arena pointers. The kernel state owns all saved forward state.
-// Data arguments live once in blocks; every child and every clone views them.
 struct ReduceSumSpec {
   struct Import {
     int slot = -1;

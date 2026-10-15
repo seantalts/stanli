@@ -146,9 +146,7 @@ struct BoundCheckSpec {
 class Executor {
  public:
   explicit Executor(Graph g);
-  // A borrowed slot is unwritten data whose values the caller owns and keeps
-  // alive for the executor and its clones. It takes no storage here and
-  // cannot be filled or written through.
+  // Borrowed data must outlive this executor and its clones.
   struct Borrow {
     int slot;
     const double* data;

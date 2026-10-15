@@ -33,13 +33,16 @@
   `threads_per_chain` above 1 (`--threads-per-chain` in `stanli_run`), a
   `reduce_sum` whose partial sum is a per-observation loop is split across the
   chain's threads. Before, such calls were refused with "opaque/stateful
-  kernel or dynamic import geometry: OP_REGION_MAP". Splitting still applies
-  only to slices of at least 8192 elements. On a 10,000-observation
-  log-normal race model a gradient is about 1.6x faster at 4 threads and 1.9x
-  faster at 8. Results do not depend on thread
-  scheduling, but they depend on the thread count, because the number of
-  chunks sets the summation order. `stanli_run` now prints a one-line note
-  when a model with a large `reduce_sum` runs at one thread per chain.
+  kernel or dynamic import geometry: OP_REGION_MAP". Data arguments are stored
+  once and read in place by every chunk and every chain, not copied into each
+  chunk on every gradient. On a 10,000-observation log-normal race model a
+  gradient is 2.8x faster at 4 threads and 3.5x faster at 8, and at 100,000
+  observations each additional chain uses about 75 MB less than copying the
+  data into every chunk would. Splitting applies only to slices of at least
+  8192 elements. Results do not depend on thread scheduling, but they depend on
+  the thread count, because the number of chunks sets the summation order.
+  `stanli_run` now prints a one-line note when a model with a large
+  `reduce_sum` runs at one thread per chain.
 - `wiener_lpdf` over a whole vector evaluates the density once per gradient
   instead of twice, and data arguments are no longer differentiated. About
   1.5x faster on a model that is one `y ~ wiener(...)` statement.
