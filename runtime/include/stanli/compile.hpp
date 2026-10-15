@@ -213,6 +213,9 @@ struct CompiledModel {
   std::vector<std::string> interpreter_fallbacks;
   // Reasons opt-in within-chain reduction sites kept ordinary lowering.
   std::vector<std::string> reduce_sum_fallbacks;
+  // Set when a serial compile has a reduce_sum that threads_per_chain > 1
+  // could split; hosts show it once.
+  std::string reduce_sum_notice;
   // Transformed data drew from the construction seed, so this model is a
   // function of that seed as well as of its data. A host that runs with one
   // seed the way CmdStan does rebuilds under the run seed when this is set,

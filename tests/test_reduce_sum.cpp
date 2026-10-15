@@ -617,6 +617,29 @@ void native_region_map() {
   }
 }
 
+void serial_notice() {
+  using namespace stanli;
+  if (!thread_safe_build()) return;
+  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.tmir.sexp");
+  const auto data = DataMap::from_json(region_map_data(0, 1, 256));
+  CompileOptions options;
+  auto quiet = compile_model(mir, data, 1, options);
+  expect("a slice below the cutoff gets no notice",
+         quiet.reduce_sum_notice.empty());
+  options.reduce_sum_min_elements = 0;
+  auto noted = compile_model(mir, data, 1, options);
+  expect("a serial reduce_sum that could thread says so",
+         noted.reduce_sum_notice.find("256 elements") != std::string::npos);
+  options.reduce_sum_threads = 4;
+  auto threaded = compile_model(mir, data, 1, options);
+  expect("a threaded compile has no serial notice",
+         threaded.reduce_sum_notice.empty());
+  options.reduce_sum_threads = 1;
+  auto direct = compile_model(
+      mir, DataMap::from_json(region_map_data(1, 1, 256)), 1, options);
+  expect("no notice without a reduce_sum", direct.reduce_sum_notice.empty());
+}
+
 }  // namespace
 
 int main() {
@@ -627,6 +650,7 @@ int main() {
   native_corners();
   native_parallel();
   native_region_map();
+  serial_notice();
   argument_evaluation();
   shapes_and_overloads();
   argument_evaluation(true);

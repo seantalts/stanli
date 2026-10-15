@@ -27,4 +27,14 @@ with tempfile.TemporaryDirectory() as directory:
     invalid = subprocess.run(command + ['--threads-per-chain', '0'],
                              capture_output=True, text=True, timeout=60)
     assert invalid.returncode == 2 and 'must be positive' in invalid.stderr
+    def single(n):
+        path.write_text(json.dumps(dict(N=n, P=3, active_slice=0, kind=1,
+                                       chunk=0, start=1, end=n,
+                                       x=[.1]*n, y=[.3]*n)))
+        return subprocess.run(
+            [binary, str(repo/'tests/fixtures/reduce_sum_parallel_probe.stan'),
+             str(path), '--warmup', '2', '--samples', '2', '--max-depth', '3'],
+            capture_output=True, text=True, check=True, timeout=60).stderr
+    assert 'reduce_sum over 16384 elements runs on one thread' in single(n)
+    assert 'runs on one thread' not in single(64)
 print('PASS: within-chain CLI teams, sampling, CSV, and validation')

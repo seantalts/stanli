@@ -1,6 +1,7 @@
 #include "lower_internal.hpp"
 #include <stanli/reduce_sum.hpp>
 #include <stanli/detail/input_ranges.hpp>
+#include <stanli/threading.hpp>
 
 namespace stanli {
 namespace lower_detail {
@@ -976,6 +977,14 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   call.args.push_back(slice_bound_literal(n, e.raw));
   for (size_t i = 3; i < actuals.size(); ++i)
     call.args.push_back(actuals.at(i).expr());
+
+  if (compile_options.reduce_sum_threads <= 1 && thread_safe_build() &&
+      out.reduce_sum_notice.empty() && !region_current && !in_write_array &&
+      n >= compile_options.reduce_sum_min_elements && n > 1 &&
+      !fun_effectful(f->name))
+    out.reduce_sum_notice = "reduce_sum over " + std::to_string(n) +
+                            " elements runs on one thread; threads_per_chain "
+                            "above 1 may split it across cores";
 
   Val result{-1, false, {}};
   try {
