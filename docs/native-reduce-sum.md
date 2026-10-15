@@ -81,12 +81,20 @@ control-flow regions and generated quantities currently keep their serial path.
 
 Ordinary reductions use at most the requested compile-time number of chunks;
 static reductions use deterministic grainsize-sized chunks. Child counts above
-`reduce_sum_max_chunks` (default 1024), one-chunk calls, and slices below
-`reduce_sum_min_elements` (currently 8192 outer elements) stay serial. These
-controls bound compilation/storage and avoid dispatch overhead on small calls;
-actual benefit still depends on callback cost and memory bandwidth. Fixed
-partitions are deterministic across worker schedules; changing the compile-time
-partition may change floating-point rounding and resulting sampling trajectories.
+`reduce_sum_max_chunks` (default 1024) and one-chunk calls stay serial. So do
+calls with too little work: the first child is lowered and its work is
+estimated as 0.3 ns per region-map instruction per iteration plus 0.8 ns per
+element touched by any other operation. Each chunk must cover at least
+`reduce_sum_min_chunk_ns` (default 30 us) of that estimate, so a small slice
+stays serial and a moderate one uses fewer chunks than threads. The estimate
+was calibrated on four callbacks; against their measured serial time it ranges
+from 0.45x to 1.1x, and the refusal reason prints it. Actual benefit still
+depends on callback cost and memory bandwidth. Because the chunk count sets the summation order,
+it is a function of the data, the model and the thread count, and never of
+thread scheduling. Dispatch costs about 8 us per thread per gradient.
+Fixed partitions are deterministic across worker schedules; changing the
+compile-time partition may change floating-point rounding and resulting
+sampling trajectories.
 
 Each child retains its compact values, adjoints, scratch and gradient buffer.
 Data arguments whose values are known at preparation are stored once in the

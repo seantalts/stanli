@@ -1251,8 +1251,8 @@ void test_reduce_sum_threads() {
           std::string(err).find("threads_per_chain") != std::string::npos);
   stanli_model_free(invalid);
   const std::string mir = slurp("tests/fixtures/reduce_sum_bindings.tmir.sexp");
-  std::string data = "{\"N\":10000,\"y\":[0.5";
-  for (int i = 1; i < 10000; ++i) data += ",0.5";
+  std::string data = "{\"N\":100000,\"y\":[0.5";
+  for (int i = 1; i < 100000; ++i) data += ",0.5";
   data += "]}";
   auto* serial =
       stanli_model_new_seeded(mir.c_str(), data.c_str(), 1, err, sizeof err);
@@ -1282,7 +1282,7 @@ void test_reduce_sum_threads() {
                 stanli_grad(parallel, &q, &plp, &pg) == 0);
     expect_near("ABI reduction density", plp, slp);
     expect_near("ABI reduction gradient", pg, sg);
-    expect_near("ABI reduction analytic gradient", pg, 5000 - 10001 * q);
+    expect_near("ABI reduction analytic gradient", pg, 50000 - 100001 * q);
     stanli_sample_opts opts;
     stanli_sample_opts_init(&opts);
     opts.chains = 2;

@@ -40,10 +40,15 @@
   into its own working registers on each gradient. On a 10,000-observation
   log-normal race model a gradient is 2.8x faster at 4 threads and 3.5x faster
   at 8, and at 100,000 observations each additional chain uses about 75 MB
-  less than with a private copy per chunk. Splitting applies only to slices
-  of at least 8192 elements. Results do not depend on thread scheduling, but
-  they depend on the thread count, because the number of chunks sets the
-  summation order.
+  less than with a private copy per chunk. A call is split only when each
+  chunk has about 30 microseconds of estimated work, replacing the old fixed
+  minimum of 8192 elements: small slices stay serial, moderate ones use fewer
+  chunks than threads, and on the models measured no thread count was slower
+  than serial. Results do not depend on thread scheduling, but they depend on
+  the thread count, because the number of chunks sets the summation order.
+  C++ callers that set `CompileOptions::reduce_sum_min_elements` should set
+  `reduce_sum_min_chunk_ns` (default 30000, 0 to force splitting) instead; the
+  old field is removed.
   `stanli_run` now prints a one-line note when a model with a large
   `reduce_sum` runs at one thread per chain.
 - `wiener_lpdf` over a whole vector evaluates the density once per gradient

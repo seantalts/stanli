@@ -1,5 +1,6 @@
 #include "lower_internal.hpp"
 #include <stanli/reduce_sum.hpp>
+#include <stanli/region_map.hpp>
 #include <stanli/detail/input_ranges.hpp>
 #include <stanli/threading.hpp>
 
@@ -677,6 +678,33 @@ mir::Expr Lowering::slice_bound_literal(int64_t value, const std::string& raw) {
   literal.raw = raw;
   return literal;
 }
+namespace {
+constexpr double kNsPerRegionInstruction = 0.3;
+constexpr double kNsPerElement = 0.8;
+
+double reduce_sum_work_ns(const Graph& graph, size_t begin, size_t end) {
+  double ns = 0;
+  for (size_t i = begin; i < end; ++i) {
+    const Op& op = graph.ops[i];
+    if (op.opcode == OP_REGION_MAP && op.udata) {
+      const auto& prog = *static_cast<const RegionMapProg*>(op.udata);
+      ns += kNsPerRegionInstruction * double(prog.count) *
+            double(prog.code.size());
+      continue;
+    }
+    int64_t elements = std::max<int64_t>(1, graph.slots[size_t(op.out)].len);
+    const bool routing = op.opcode == OP_INDEX || op.opcode == OP_SLICE ||
+                         op.opcode == OP_SLICE_STRIDED ||
+                         op.opcode == OP_GATHER;
+    if (!routing)
+      for (int k = 0; k < op.n_in; ++k)
+        elements = std::max(elements, graph.slots[size_t(op.in[k])].len);
+    ns += kNsPerElement * double(elements);
+  }
+  return ns;
+}
+}  // namespace
+
 // Only publish after every child has lowered and passed the fixed-range proof.
 // The ordinary UDF binder has already evaluated arguments and validation once;
 // refusal therefore proceeds with that exact same binding and parent graph.
@@ -697,14 +725,12 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
 #endif
   if (region_current || in_write_array)
     return refuse("retained control-flow or write-array context");
-  if (count < compile_options.reduce_sum_min_elements)
-    return refuse("slice below reduce_sum_min_elements");
   if (count <= 1) return refuse("slice has at most one element");
   if (grain <= 0) return refuse("grainsize is not a known positive integer");
   if (fun_effectful(call.name))
     return refuse("callback has observable effects");
   const int64_t needed = 1 + (count - 1) / grain;
-  const int64_t chunks =
+  int64_t chunks =
       fixed_partition
           ? needed
           : std::min<int64_t>(needed, compile_options.reduce_sum_threads);
@@ -747,12 +773,14 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
     }
   }
   bool active = false, param_free = true;
-  try {
-    for (int64_t chunk = 0; chunk < chunks; ++chunk) {
+  std::string chunk_refusal;
+  const auto lower_chunk =
+      [&](int64_t chunk, int64_t total) -> std::optional<ReduceSumSpec::Child> {
+    try {
       const int64_t first =
-          fixed_partition ? chunk * grain : count * chunk / chunks;
+          fixed_partition ? chunk * grain : count * chunk / total;
       const int64_t last = fixed_partition ? std::min(count, first + grain)
-                                           : count * (chunk + 1) / chunks;
+                                           : count * (chunk + 1) / total;
       Lowering trial = fork_region_trial();
       trial.compile_options.reduce_sum_threads = 1;
       trial.structured_policy = StructuredMode::Off;
@@ -808,9 +836,11 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
       }
       const Val result = trial.lower_call_udf(invocation);
       if (!trial.target_terms.empty() || !trial.jac_slots.empty() ||
-          trial.g.slots[result.slot].len != 1)
-        return refuse(
-            "callback changes target/Jacobian state or returns a nonscalar");
+          trial.g.slots[result.slot].len != 1) {
+        chunk_refusal =
+            "callback changes target/Jacobian state or returns a nonscalar";
+        return std::nullopt;
+      }
       active |= result.autodiff;
       param_free &= result.si.param_free;
       // Roots stay addressable through these ordinary graph passes. Opaque
@@ -823,8 +853,10 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
       std::vector<int64_t> offsets;
       std::string reason;
       if (!detail::compact_imports(trial.g, trial.out.fills, parameter_map,
-                                   &offsets, &reason))
-        return refuse(reason);
+                                   &offsets, &reason)) {
+        chunk_refusal = reason;
+        return std::nullopt;
+      }
       ReduceSumSpec::Child child;
       for (size_t i = 0; i < imported.size(); ++i)
         if (trial.g.slots[imported[i]].len)
@@ -841,10 +873,37 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
       for (auto& fill : trial.out.fills)
         if (!view_slots.count(fill.first))
           child.fills.push_back(std::move(fill));
-      spec->children.push_back(std::move(child));
+      return child;
+    } catch (const CompileError& error) {
+      chunk_refusal = std::string("child lowering: ") + error.what();
+      return std::nullopt;
     }
-  } catch (const CompileError& error) {
-    return refuse(std::string("child lowering: ") + error.what());
+  };
+  auto first_child = lower_chunk(0, chunks);
+  if (!first_child) return refuse(chunk_refusal);
+  if (compile_options.reduce_sum_min_chunk_ns > 0) {
+    const double min_ns = double(compile_options.reduce_sum_min_chunk_ns);
+    const double chunk_ns = reduce_sum_work_ns(first_child->graph, 0,
+                                               first_child->graph.ops.size());
+    const int64_t affordable =
+        fixed_partition
+            ? (chunk_ns >= min_ns ? chunks : 0)
+            : std::min<int64_t>(chunks, int64_t(chunk_ns * chunks / min_ns));
+    if (affordable < 2)
+      return refuse("estimated work is below the dispatch cost (" +
+                    std::to_string(int64_t(chunk_ns * chunks / 1000)) +
+                    " us for the slice)");
+    if (affordable < chunks) {
+      chunks = affordable;
+      first_child = lower_chunk(0, chunks);
+      if (!first_child) return refuse(chunk_refusal);
+    }
+  }
+  spec->children.push_back(std::move(*first_child));
+  for (int64_t chunk = 1; chunk < chunks; ++chunk) {
+    auto child = lower_chunk(chunk, chunks);
+    if (!child) return refuse(chunk_refusal);
+    spec->children.push_back(std::move(*child));
   }
   std::vector<int> block_map(spec->blocks.size(), -1);
   for (const auto& child : spec->children)
@@ -1026,13 +1085,11 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   for (size_t i = 3; i < actuals.size(); ++i)
     call.args.push_back(actuals.at(i).expr());
 
-  if (compile_options.reduce_sum_threads <= 1 && thread_safe_build() &&
-      out.reduce_sum_notice.empty() && !region_current && !in_write_array &&
-      n >= compile_options.reduce_sum_min_elements && n > 1 &&
-      !fun_effectful(f->name))
-    out.reduce_sum_notice = "reduce_sum over " + std::to_string(n) +
-                            " elements runs on one thread; threads_per_chain "
-                            "above 1 may split it across cores";
+  const bool could_thread = compile_options.reduce_sum_threads <= 1 &&
+                            thread_safe_build() &&
+                            out.reduce_sum_notice.empty() && !region_current &&
+                            !in_write_array && n > 1 && !fun_effectful(f->name);
+  const size_t first_op = g.ops.size();
 
   Val result{-1, false, {}};
   try {
@@ -1057,6 +1114,12 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   }
   scope.erase(bound);
   decls.erase(bound);
+  if (could_thread && first_op <= g.ops.size() &&
+      reduce_sum_work_ns(g, first_op, g.ops.size()) >=
+          2.0 * double(compile_options.reduce_sum_min_chunk_ns))
+    out.reduce_sum_notice = "reduce_sum over " + std::to_string(n) +
+                            " elements runs on one thread; threads_per_chain "
+                            "above 1 may split it across cores";
   return result;
 }
 // The deprecated algebra_solver interfaces (Powell and Newton):

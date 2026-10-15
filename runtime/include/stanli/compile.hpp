@@ -233,7 +233,7 @@ struct CompiledModel {
 // unsupported/small calls keep whole-slice lowering. See reduce_sum.hpp.
 struct CompileOptions {
   int reduce_sum_threads = 1;
-  int64_t reduce_sum_min_elements = 8192;
+  int64_t reduce_sum_min_chunk_ns = 30000;
   int reduce_sum_max_chunks = 1024;
   bool fast_math = false;
 };

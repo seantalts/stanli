@@ -1284,7 +1284,7 @@ REDUCE_SUM_SOURCE = (FIXTURES / "reduce_sum_bindings.stan").read_text()
 
 
 def test_reduce_sum_threads_per_chain():
-    data = {"N": 10000, "y": np.linspace(-1, 2, 10000).tolist()}
+    data = {"N": 100000, "y": np.linspace(-1, 2, 100000).tolist()}
     m = stanli.Model(stan_code=REDUCE_SUM_SOURCE, data=data)
     assert m.threads_per_chain == 1 and m.reduce_sum_count == 0
     baseline = m.log_prob_grad([0.2])
@@ -1312,7 +1312,7 @@ def test_reduce_sum_threads_per_chain():
     lp, grad = m.log_prob_grad([0.2])
     np.testing.assert_allclose(lp, baseline[0], rtol=2e-12)
     np.testing.assert_allclose(grad, baseline[1], rtol=2e-12)
-    np.testing.assert_allclose(grad, [sum(data["y"]) - 10001 * 0.2], rtol=2e-12)
+    np.testing.assert_allclose(grad, [sum(data["y"]) - 100001 * 0.2], rtol=2e-12)
     again = m.sample(**args, threads_per_chain=4, parallel_chains=1)
     np.testing.assert_array_equal(first.draws(), again.draws())
     # Returning to the default must restore the original serial graph.
@@ -1352,7 +1352,7 @@ def test_reduce_sum_threads_preserve_transformed_data_seed():
     code = REDUCE_SUM_SOURCE.replace(
         "parameters {", "transformed data { real shift = normal_rng(0, 1); } parameters {")
     code = code.replace("mu ~ normal(0, 1)", "mu ~ normal(shift, 1)")
-    data = {"N": 10000, "y": [0.5] * 10000}
+    data = {"N": 100000, "y": [0.5] * 100000}
     m = stanli.Model(stan_code=code, data=data, seed=2)
     args = dict(chains=1, warmup=10, samples=5, seed=17, refresh=0,
                 max_depth=5, threads_per_chain=2)

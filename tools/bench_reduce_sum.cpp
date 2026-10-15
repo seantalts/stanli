@@ -834,6 +834,7 @@ void run_native(const Config& cfg, const std::string& mir) {
   data.set_int("end", cfg.n);
   CompileOptions options;
   options.reduce_sum_threads = cfg.chunks;
+  options.reduce_sum_min_chunk_ns = 0;
   const auto start = Clock::now();
   auto cm = compile_model(mir, data, 1, options);
   const double compile_ns = ns(start);
@@ -855,8 +856,7 @@ void run_native(const Config& cfg, const std::string& mir) {
         }
       }
     }
-  require(retained == size_t(cfg.n >= options.reduce_sum_min_elements &&
-                             cfg.chunks > 1),
+  require(retained == size_t(cfg.n > 1 && cfg.chunks > 1),
           "native eligibility unexpectedly changed");
   const auto bind = Clock::now();
   Executor native(std::move(cm.graph));

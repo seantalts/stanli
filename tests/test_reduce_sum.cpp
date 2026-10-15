@@ -112,7 +112,7 @@ void argument_evaluation(bool parallel = false) {
           try {
             CompileOptions options;
             options.reduce_sum_threads = parallel ? 4 : 1;
-            options.reduce_sum_min_elements = 0;
+            options.reduce_sum_min_chunk_ns = 0;
             CompiledModel cm = compile_model(mir, data, 1, options);
             if (!in_td)
               expect(tag + " no effects while lowering", lines.empty());
@@ -163,7 +163,7 @@ void shapes_and_overloads(bool parallel = false) {
   using namespace stanli;
   CompileOptions options;
   options.reduce_sum_threads = parallel ? 4 : 1;
-  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_min_chunk_ns = 0;
   CompiledModel cm =
       compile_model(slurp("tests/fixtures/reduce_sum_shapes.tmir.sexp"),
                     DataMap{}, 1, options);
@@ -197,7 +197,7 @@ void native_review_regressions() {
   if (!thread_safe_build()) return;
   CompileOptions options;
   options.reduce_sum_threads = 4;
-  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_min_chunk_ns = 0;
   ReduceExecutionContext team(4);
   const auto discrete =
       slurp("tests/fixtures/reduce_sum_native_discrete.tmir.sexp");
@@ -288,7 +288,7 @@ void native_lifecycle() {
   data.set_real_array("y", std::vector<double>(257, .3));
   CompileOptions options;
   options.reduce_sum_threads = 4;
-  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_min_chunk_ns = 0;
   auto cm =
       compile_model(slurp("tests/fixtures/reduce_sum_parallel_probe.tmir.sexp"),
                     data, 1, options);
@@ -349,7 +349,7 @@ void native_corners() {
   const auto mir = slurp("tests/fixtures/reduce_sum_native.tmir.sexp");
   CompileOptions options;
   options.reduce_sum_threads = 4;
-  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_min_chunk_ns = 0;
   ReduceExecutionContext team(4);
   for (int fixed : {0, 1})
     for (int dynamic : {0, 1})
@@ -455,7 +455,7 @@ void native_parallel() {
         auto data = DataMap::from_json(json.str());
         CompileOptions options;
         options.reduce_sum_threads = 4;
-        options.reduce_sum_min_elements = 0;
+        options.reduce_sum_min_chunk_ns = 0;
         auto cm = compile_model(mir, data, 1, options);
         expect("native retained opcode n=" + std::to_string(n),
                count_opcode(cm.graph, OP_REDUCE_SUM) == (n > 1 ? 1 : 0));
@@ -515,15 +515,15 @@ void native_parallel() {
       }
 }
 
-std::string region_map_data(int chunk, int lo, int hi) {
-  const int n = 256;
+std::string region_map_data(int chunk, int lo, int hi, int n = 256) {
   std::ostringstream json;
   json << "{\"N\":" << n << ",\"chunk\":" << chunk << ",\"lo\":" << lo
        << ",\"hi\":" << hi << ",\"y\":[";
   for (int i = 0; i < n; ++i)
     json << (i ? "," : "") << std::sin(0.31 * i) - 0.4 + 0.01 * i;
   json << "],\"x\":[";
-  for (int i = 0; i < n; ++i) json << (i ? "," : "") << -2.0 + 4.0 * i / 255.0;
+  for (int i = 0; i < n; ++i)
+    json << (i ? "," : "") << -2.0 + 4.0 * i / (n - 1.0);
   json << "]}";
   return json.str();
 }
@@ -543,7 +543,7 @@ void native_region_map() {
   const auto mir = slurp("tests/fixtures/reduce_sum_region_map.tmir.sexp");
   const auto whole = DataMap::from_json(region_map_data(0, 1, 256));
   CompileOptions options;
-  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_min_chunk_ns = 0;
   options.reduce_sum_threads = 4;
   auto cm = compile_model(mir, whole, 1, options);
   expect("region-map body retains one reduction",
@@ -649,23 +649,60 @@ void serial_notice() {
   using namespace stanli;
   if (!thread_safe_build()) return;
   const auto mir = slurp("tests/fixtures/reduce_sum_region_map.tmir.sexp");
-  const auto data = DataMap::from_json(region_map_data(0, 1, 256));
   CompileOptions options;
-  auto quiet = compile_model(mir, data, 1, options);
-  expect("a slice below the cutoff gets no notice",
+  auto quiet = compile_model(
+      mir, DataMap::from_json(region_map_data(0, 1, 256)), 1, options);
+  expect("a slice with little work gets no notice",
          quiet.reduce_sum_notice.empty());
-  options.reduce_sum_min_elements = 0;
-  auto noted = compile_model(mir, data, 1, options);
+  auto noted = compile_model(
+      mir, DataMap::from_json(region_map_data(0, 1, 100000, 100000)), 1,
+      options);
   expect("a serial reduce_sum that could thread says so",
-         noted.reduce_sum_notice.find("256 elements") != std::string::npos);
+         noted.reduce_sum_notice.find("100000 elements") != std::string::npos);
   options.reduce_sum_threads = 4;
-  auto threaded = compile_model(mir, data, 1, options);
+  auto threaded = compile_model(
+      mir, DataMap::from_json(region_map_data(0, 1, 100000, 100000)), 1,
+      options);
   expect("a threaded compile has no serial notice",
          threaded.reduce_sum_notice.empty());
   options.reduce_sum_threads = 1;
   auto direct = compile_model(
       mir, DataMap::from_json(region_map_data(1, 1, 256)), 1, options);
   expect("no notice without a reduce_sum", direct.reduce_sum_notice.empty());
+}
+
+int retained_children(const stanli::CompiledModel& cm) {
+  for (const auto& op : cm.graph.ops)
+    if (op.opcode == stanli::OP_REDUCE_SUM)
+      return int(
+          static_cast<const stanli::ReduceSumSpec*>(op.udata)->children.size());
+  return 0;
+}
+
+void work_cutoff() {
+  using namespace stanli;
+  if (!thread_safe_build()) return;
+  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.tmir.sexp");
+  CompileOptions options;
+  options.reduce_sum_threads = 4;
+  const auto compile = [&](int n) {
+    return compile_model(mir, DataMap::from_json(region_map_data(0, 1, n, n)),
+                         1, options);
+  };
+  auto tiny = compile(256);
+  expect("little work stays serial", retained_children(tiny) == 0);
+  expect("the refusal names the work estimate",
+         !tiny.reduce_sum_fallbacks.empty() &&
+             tiny.reduce_sum_fallbacks[0].find("estimated work") !=
+                 std::string::npos);
+  auto some = compile(8000);
+  expect("moderate work uses fewer chunks than threads",
+         retained_children(some) == 2);
+  auto plenty = compile(100000);
+  expect("plenty of work uses every thread", retained_children(plenty) == 4);
+  options.reduce_sum_min_chunk_ns = 0;
+  expect("no minimum forces every thread",
+         retained_children(compile(256)) == 4);
 }
 
 void region_map_domain_error() {
@@ -675,7 +712,7 @@ void region_map_domain_error() {
       slurp("tests/fixtures/reduce_sum_region_map_domain.tmir.sexp");
   const auto data = DataMap::from_json(region_map_data(0, 1, 256));
   CompileOptions options;
-  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_min_chunk_ns = 0;
   options.reduce_sum_threads = 4;
   auto cm = compile_model(mir, data, 1, options);
   auto serial = compile_model(mir, data);
@@ -738,6 +775,7 @@ int main() {
   native_parallel();
   native_region_map();
   serial_notice();
+  work_cutoff();
   region_map_domain_error();
   argument_evaluation();
   shapes_and_overloads();
