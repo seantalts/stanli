@@ -90,9 +90,11 @@ partition may change floating-point rounding and resulting sampling trajectories
 
 Each child retains its compact values, adjoints, scratch and gradient buffer.
 Data arguments whose values are known at preparation are stored once in the
-reduction and read in place by every child and every chain clone. Only the
-parameter-dependent inputs are copied per evaluation, and only the ranges a
-child reads. Forward and
+reduction, and every child and chain clone views that copy instead of keeping
+its own and importing it on each gradient. A child whose body lowers to a
+region map still copies the ranges it reads into its own registers when it
+runs. Parameter-dependent inputs are copied per evaluation, and only the
+ranges a child reads. Forward and
 reverse dispatch separately, so reverse uses the actual incoming adjoint even
 inside nonlinear expressions. Shared input gradients merge in fixed child order.
 Buffers and threads are reused; kernels and exceptional paths may still allocate.
