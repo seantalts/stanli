@@ -29,6 +29,17 @@
 - brms `threading()` programs no longer run many times slower than the
   plain program. Their per-observation loop adds to a local `ptarget`, which
   the fast path for such loops now accepts. They still run on one core.
+- brms `threading()` programs can now use several cores. With
+  `threads_per_chain` above 1 (`--threads-per-chain` in `stanli_run`), a
+  `reduce_sum` whose partial sum is a per-observation loop is split across the
+  chain's threads. Before, such calls were refused with "opaque/stateful
+  kernel or dynamic import geometry: OP_REGION_MAP". Splitting still applies
+  only to slices of at least 8192 elements. On a 10,000-observation
+  log-normal race model a gradient is about 1.6x faster at 4 threads and 1.9x
+  faster at 8. Results do not depend on thread
+  scheduling, but they depend on the thread count, because the number of
+  chunks sets the summation order. `stanli_run` now prints a one-line note
+  when a model with a large `reduce_sum` runs at one thread per chain.
 - `wiener_lpdf` over a whole vector evaluates the density once per gradient
   instead of twice, and data arguments are no longer differentiated. About
   1.5x faster on a model that is one `y ~ wiener(...)` statement.

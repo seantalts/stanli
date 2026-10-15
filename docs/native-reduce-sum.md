@@ -14,6 +14,9 @@ chain is idle. The CLI reports how many reduction sites were retained. Zero
 means all sites use the ordinary serial path. The CLI prints graph-lowering
 refusal reasons; C++ callers can inspect `CompiledModel::reduce_sum_fallbacks`.
 The default remains one thread. The Web interface remains serial within each chain.
+When a model with a large `reduce_sum` runs at one thread, the CLI prints a
+one-line note saying so. The note is a cheap size check, so a call it names may
+still be refused when threads are requested; the refusal reasons then say why.
 
 ```python
 fit = model.sample(chains=4, parallel_chains=2, threads_per_chain=4)
@@ -69,7 +72,9 @@ Eligible calls have fixed shapes, a known positive grainsize, pure callbacks,
 and transparent child graphs whose input reads can be bounded statically.
 Runtime control or dynamic indexing, opaque/stateful kernels, callback effects,
 and unsupported child layouts conservatively keep the ordinary lowering.
-Immutable bound/dimension-check payloads are supported and stay in the child.
+Immutable bound/dimension-check payloads are supported and stay in the child,
+as are per-observation loops that lower to a region map, which is the form
+brms `threading()` partial sums take.
 Argument evaluation and grainsize validation still occur once per call.
 Nested reductions run serially within a retained outer child. Calls in retained
 control-flow regions and generated quantities currently keep their serial path.

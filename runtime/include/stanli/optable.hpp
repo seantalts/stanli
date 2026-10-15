@@ -837,8 +837,8 @@ constexpr uint8_t kRerollWidenable = 1 << 2;
 // Backward reads adjoints/scratch only, never input or output value buffers.
 constexpr uint8_t kBackwardValueFree = 1 << 3;
 constexpr uint8_t kVariantGrouped = 1 << 4;
-// The payload is immutable and names no graph slot, and the op reads every
-// element of each input. Such an op can move into a child graph unchanged.
+// Immutable payload with no slot ids; the op may be treated as reading all of
+// each input.
 constexpr uint8_t kWholeInputPayload = 1 << 5;
 }  // namespace op_trait
 
