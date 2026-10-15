@@ -504,22 +504,25 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
     return base;
   };
 
-  int n_regs = n0 + nflags;
+  const bool trail = control && nflags > 0 && p.path_trail;
+  int n_regs = n0 + nflags + (trail ? 1 : 0);
   std::vector<double> pool;
   std::vector<int> pc_map(orig.size() + 1), adj_starts(nblocks + 1);
   int flag_one = 0;
   if (control) {
     pool = fwd.pool;
     const int zeros = static_cast<int>(pool.size());
-    pool.resize(pool.size() + nflags, 0.0);
-    flag_one = static_cast<int>(pool.size());
-    pool.push_back(1.0);
+    pool.resize(pool.size() + (trail ? 1 : nflags), 0.0);
+    if (!trail) {
+      flag_one = static_cast<int>(pool.size());
+      pool.push_back(1.0);
+    }
     if (nflags > 0) {
       Program::Instr clear;
-      clear.code = Program::CONSTR;
+      clear.code = trail ? Program::CONST : Program::CONSTR;
       clear.dst = n0;
       clear.a = zeros;
-      clear.len = nflags;
+      clear.len = trail ? 1 : nflags;
       ncode.push_back(clear);
     }
   }
@@ -552,9 +555,16 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
       adj_starts[block[i]] = static_cast<int>(ap.code.size());
       if (flag_of[block[i]] >= 0) {
         Program::Instr flag;
-        flag.code = Program::CONST;
-        flag.dst = n0 + flag_of[block[i]];
-        flag.a = flag_one;
+        if (trail) {
+          flag.code = Program::PATH;
+          flag.dst = n0;
+          flag.a = flag_of[block[i]];
+          flag.len = nflags + 1;
+        } else {
+          flag.code = Program::CONST;
+          flag.dst = n0 + flag_of[block[i]];
+          flag.a = flag_one;
+        }
         ncode.push_back(flag);
       }
     }
@@ -691,11 +701,20 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
         I.dst = pc_map[I.dst];
     const int total = static_cast<int>(ap.code.size());
     adj_starts.back() = total;
+    if (trail) {
+      ap.trail = n0;
+      ap.segments.assign((size_t)nflags, {-1, 0, 0});
+    }
     for (int b = nblocks; b-- > 0;)
       if (adj_starts[b] != adj_starts[b + 1]) {
         if (flag_of[b] < 0) return false;
-        ap.segments.push_back({n0 + flag_of[b], total - adj_starts[b + 1],
-                               total - adj_starts[b]});
+        const AdjProgram::Segment segment{trail ? -1 : n0 + flag_of[b],
+                                          total - adj_starts[b + 1],
+                                          total - adj_starts[b]};
+        if (trail)
+          ap.segments[(size_t)flag_of[b]] = segment;
+        else
+          ap.segments.push_back(segment);
       }
     fwd.pool = std::move(pool);
   }
@@ -1262,17 +1281,25 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
         case Program::PRINT:
         case Program::REJECT:
         case Program::DENSITY_VEC:
+        case Program::PATH:
           break;  // gen_adjoint refuses these; unreachable
         case Program::CALL:
           break;  // handled before this switch
       }
     }
   };
-  if (ap.segments.empty())
+  if (ap.segments.empty()) {
     run_segment(0, static_cast<int>(ap.code.size()));
-  else
+  } else if (ap.trail >= 0) {
+    for (int k = static_cast<int>(val[ap.trail]); k-- > 0;) {
+      const auto& segment =
+          ap.segments[static_cast<size_t>(val[ap.trail + 1 + k])];
+      run_segment(segment.begin, segment.end);
+    }
+  } else {
     for (const auto& segment : ap.segments)
       if (val[segment.guard] != 0.0) run_segment(segment.begin, segment.end);
+  }
 }
 
 }  // namespace stanli

@@ -362,8 +362,10 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   std::vector<char> persistent;
   int saved_per_iteration = 0;
 
-  const auto build = [&](bool recompute, bool keep_every_clear) -> std::string {
+  const auto build = [&](bool recompute, bool keep_every_clear,
+                         bool path_trail) -> std::string {
     *prog = pristine;
+    prog->path_trail = path_trail;
     finalize_island_program(*prog, true, keep_every_clear, true);
     if (!prog->native_adj) {
       std::string why = "no generated adjoint";
@@ -432,7 +434,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   bool use_lanes = false;
   std::string lane_refusal = "off";
   if (lanes_enabled) {
-    const std::string why = build(false, true);
+    const std::string why = build(false, true, false);
     if (why.empty()) {
       plan_region_map_lanes(*prog, true, save_limit);
       use_lanes = prog->lanes.active;
@@ -461,7 +463,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   }
   bool downgraded = false;
   while (!use_lanes) {
-    const std::string why = build(recompute, recompute);
+    const std::string why = build(recompute, recompute, true);
     if (!why.empty()) return abandon(why);
     if (too_large() && !recompute) {
       recompute = true;
