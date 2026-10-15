@@ -2951,8 +2951,6 @@ void test_lane_guard_masks() {
     for (int k = 0; k < 3; ++k) evaluate(ex, spread_point((size_t)k, 2));
     const auto& t = p.lanes.profile->total;
     check(t.fwd_exec > 0 && t.adj_exec > 0, what + ": executions counted");
-    check(t.fwd_flag_stores == 0, what + ": no flag store executes in lanes (" +
-                                      std::to_string(t.fwd_flag_stores) + ")");
   }
 }
 

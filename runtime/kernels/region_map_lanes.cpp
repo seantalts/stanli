@@ -311,8 +311,8 @@ class Analysis {
   void find_path() {
     const int n = p_.n_regs;
     const int segments = (int)p_.adj.segments.size();
-    plan_.guard_reg.assign((size_t)n, 0);
-    plan_.flag_store.assign(p_.code.size(), 0);
+    plan_.trail_reg.assign((size_t)n, 0);
+    plan_.skip.assign(p_.code.size(), 0);
     plan_.segment_count = segments;
     plan_.segment_block.assign((size_t)segments, -1);
     if (segments == 0) return;
@@ -320,9 +320,9 @@ class Analysis {
     if (trail < 0 || trail + segments + 1 > n)
       refuse("path trail out of range");
     for (int k = 0; k <= segments; ++k)
-      plan_.guard_reg[(size_t)(trail + k)] = 1;
+      plan_.trail_reg[(size_t)(trail + k)] = 1;
     const auto guard = [&](int reg) {
-      return reg >= 0 && reg < n && plan_.guard_reg[(size_t)reg] != 0;
+      return reg >= 0 && reg < n && plan_.trail_reg[(size_t)reg] != 0;
     };
     const auto reads_guard = [&](int reg, int len) {
       for (int k = 0; k < len; ++k)
@@ -344,7 +344,7 @@ class Analysis {
         if (plan_.segment_block[(size_t)I.a] >= 0)
           refuse("a segment is recorded in two places");
         plan_.segment_block[(size_t)I.a] = block_of[pc];
-        plan_.flag_store[pc] = 1;
+        plan_.skip[pc] = 1;
         first_path = std::min(first_path, (int)pc);
         continue;
       }
@@ -353,7 +353,7 @@ class Analysis {
         if (reset >= 0 || block_of[pc] != 0 || p_.pool[(size_t)I.a] != 0.0)
           refuse("the trail is not reset once in the entry block");
         reset = (int)pc;
-        plan_.flag_store[pc] = 1;
+        plan_.skip[pc] = 1;
         continue;
       }
       each_instr_write(I, [&](int reg, int len) {
@@ -374,7 +374,7 @@ class Analysis {
     each_body_write([&](int reg, int len) {
       for (int k = 0; k < len; ++k) {
         if (reg + k < 0 || reg + k >= n) refuse("register out of range");
-        if (!plan_.guard_reg[(size_t)(reg + k)])
+        if (!plan_.trail_reg[(size_t)(reg + k)])
           per_lane[(size_t)(reg + k)] = 1;
       }
     });
@@ -829,7 +829,7 @@ class Analysis {
         if (base + k >= 0 && base + k < n) excluded[(size_t)(base + k)] = 1;
     };
     for (int r = 0; r < n; ++r)
-      if (plan_.guard_reg[(size_t)r]) excluded[(size_t)r] = 1;
+      if (plan_.trail_reg[(size_t)r]) excluded[(size_t)r] = 1;
     for (const auto& I : p_.code) {
       switch (I.code) {
         case Program::CONSTR:
@@ -1560,15 +1560,12 @@ void tally_block(const RegionMapProg& p, const RegionMapLanePlan::Block& block,
   const int lanes = popcount(m);
   for (int pc = block.begin; pc < block.end; ++pc) {
     const auto& I = p.code[(size_t)pc];
-    if (I.code == Program::JMP || p.lanes.flag_store[(size_t)pc]) continue;
+    if (I.code == Program::JMP || p.lanes.skip[(size_t)pc]) continue;
     const size_t op = (size_t)I.code;
     ++tally.fwd_exec;
     tally.fwd_lanes += (uint64_t)lanes;
     ++tally.fwd_op[op];
     tally.fwd_op_lanes[op] += (uint64_t)lanes;
-    if ((I.code == Program::CONST || I.code == Program::PATH) &&
-        p.lanes.guard_reg[(size_t)I.dst])
-      ++tally.fwd_flag_stores;
     if (p.lanes.invariant[(size_t)pc]) {
       ++tally.fwd_invariant;
       ++tally.fwd_op_invariant[op];
@@ -1596,7 +1593,7 @@ void lane_tile_forward(const RegionMapProg& p, const TileState& t,
     const auto& tail = p.code[(size_t)last];
     const bool jump = tail.code == Program::JZ || tail.code == Program::JMP;
     for (int pc = block.begin; pc < (jump ? last : block.end); ++pc)
-      if (!p.lanes.flag_store[(size_t)pc])
+      if (!p.lanes.skip[(size_t)pc])
         lane_instruction(p, t, pc, m, window, call_ctx, state);
     if (tail.code == Program::JMP) {
       entry[(size_t)block.taken] |= m;
@@ -2359,7 +2356,6 @@ void RegionMapTally::add(const RegionMapTally& o) {
   fwd_exec += o.fwd_exec;
   fwd_lanes += o.fwd_lanes;
   fwd_invariant += o.fwd_invariant;
-  fwd_flag_stores += o.fwd_flag_stores;
   adj_exec += o.adj_exec;
   adj_lanes += o.adj_lanes;
   adj_cleared += o.adj_cleared;

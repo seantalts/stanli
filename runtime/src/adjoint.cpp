@@ -463,12 +463,12 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
     }
     return true;
   };
-  std::vector<int> flag_of((size_t)nblocks, -1);
-  int nflags = 0;
+  std::vector<int> segment_of((size_t)nblocks, -1);
+  int nsegments = 0;
   if (control)
     for (int i = 0; i < (int)orig.size(); ++i)
-      if (produces_adjoint(orig[(size_t)i], i) && flag_of[block[i]] < 0)
-        flag_of[block[i]] = nflags++;
+      if (produces_adjoint(orig[(size_t)i], i) && segment_of[block[i]] < 0)
+        segment_of[block[i]] = nsegments++;
 
   // Discover every shared cell before emitting the adjoint instructions.
   // Besides making their indices final for map1/mapn below, this lets the
@@ -504,8 +504,8 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
     return base;
   };
 
-  const bool trail = control && nflags > 0;
-  int n_regs = n0 + nflags + (trail ? 1 : 0);
+  const bool trail = control && nsegments > 0;
+  int n_regs = n0 + nsegments + trail;
   std::vector<double> pool;
   std::vector<int> pc_map(orig.size() + 1), adj_starts(nblocks + 1);
   if (control) {
@@ -547,12 +547,12 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
     pc_map[i] = static_cast<int>(ncode.size());
     if (control && leaders[block[i]] == i) {
       adj_starts[block[i]] = static_cast<int>(ap.code.size());
-      if (flag_of[block[i]] >= 0) {
+      if (segment_of[block[i]] >= 0) {
         Program::Instr path;
         path.code = Program::PATH;
         path.dst = n0;
-        path.a = flag_of[block[i]];
-        path.len = nflags + 1;
+        path.a = segment_of[block[i]];
+        path.len = nsegments + 1;
         ncode.push_back(path);
       }
     }
@@ -691,13 +691,13 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
     adj_starts.back() = total;
     if (trail) {
       ap.trail = n0;
-      ap.segments.assign((size_t)nflags, {0, 0});
+      ap.segments.assign((size_t)nsegments, {0, 0});
     }
     for (int b = nblocks; b-- > 0;)
       if (adj_starts[b] != adj_starts[b + 1]) {
-        if (flag_of[b] < 0) return false;
-        ap.segments[(size_t)flag_of[b]] = {total - adj_starts[b + 1],
-                                           total - adj_starts[b]};
+        if (segment_of[b] < 0) return false;
+        ap.segments[(size_t)segment_of[b]] = {total - adj_starts[b + 1],
+                                              total - adj_starts[b]};
       }
     fwd.pool = std::move(pool);
   }
