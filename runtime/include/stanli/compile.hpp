@@ -213,6 +213,9 @@ struct CompiledModel {
   std::vector<std::string> interpreter_fallbacks;
   // Reasons opt-in within-chain reduction sites kept ordinary lowering.
   std::vector<std::string> reduce_sum_fallbacks;
+  // Set when a serial compile has a reduce_sum that threads_per_chain > 1
+  // might split.
+  std::string reduce_sum_notice;
   // Transformed data drew from the construction seed, so this model is a
   // function of that seed as well as of its data. A host that runs with one
   // seed the way CmdStan does rebuilds under the run seed when this is set,
@@ -230,7 +233,7 @@ struct CompiledModel {
 // unsupported/small calls keep whole-slice lowering. See reduce_sum.hpp.
 struct CompileOptions {
   int reduce_sum_threads = 1;
-  int64_t reduce_sum_min_elements = 8192;
+  int64_t reduce_sum_min_chunk_ns = 30000;
   int reduce_sum_max_chunks = 1024;
   bool fast_math = false;
 };

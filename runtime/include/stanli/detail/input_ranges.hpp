@@ -48,12 +48,8 @@ inline bool compact_imports(stanli::Graph& graph, Fills& fills,
   }
   for (const auto& op : graph.ops) {
     const auto* k = find_kernel(op.opcode);
-    // BoundCheckSpec contains only immutable text/booleans, never slot IDs.
-    // Keep these checks in each child, including nested-reduction grainsize
-    // validation. Their full input reads prevent unsafe range trimming.
-    const bool transparent_payload = op.opcode == OP_CHECK_LOWER ||
-                                     op.opcode == OP_CHECK_UPPER ||
-                                     op.opcode == OP_CHECK_MATCHING_DIMS;
+    const bool transparent_payload =
+        has_op_trait(op.opcode, op_trait::kWholeInputPayload);
     if (!k || !k->forward || k->make_state ||
         (op.udata && !transparent_payload) || op.dyn_extent_in != -1 ||
         op.dyn_lengths || op.dyn_capacity || op.opcode == OP_DYNAMIC_SLICE ||

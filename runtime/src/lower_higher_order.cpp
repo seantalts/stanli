@@ -1,6 +1,8 @@
 #include "lower_internal.hpp"
 #include <stanli/reduce_sum.hpp>
+#include <stanli/region_map.hpp>
 #include <stanli/detail/input_ranges.hpp>
+#include <stanli/threading.hpp>
 
 namespace stanli {
 namespace lower_detail {
@@ -676,6 +678,33 @@ mir::Expr Lowering::slice_bound_literal(int64_t value, const std::string& raw) {
   literal.raw = raw;
   return literal;
 }
+namespace {
+constexpr double kNsPerRegionInstruction = 0.3;
+constexpr double kNsPerElement = 0.8;
+
+double reduce_sum_work_ns(const Graph& graph, size_t begin, size_t end) {
+  double ns = 0;
+  for (size_t i = begin; i < end; ++i) {
+    const Op& op = graph.ops[i];
+    if (op.opcode == OP_REGION_MAP && op.udata) {
+      const auto& prog = *static_cast<const RegionMapProg*>(op.udata);
+      ns += kNsPerRegionInstruction * double(prog.count) *
+            double(prog.code.size());
+      continue;
+    }
+    int64_t elements = std::max<int64_t>(1, graph.slots[size_t(op.out)].len);
+    const bool routing = op.opcode == OP_INDEX || op.opcode == OP_SLICE ||
+                         op.opcode == OP_SLICE_STRIDED ||
+                         op.opcode == OP_GATHER;
+    if (!routing)
+      for (int k = 0; k < op.n_in; ++k)
+        elements = std::max(elements, graph.slots[size_t(op.in[k])].len);
+    ns += kNsPerElement * double(elements);
+  }
+  return ns;
+}
+}  // namespace
+
 // Only publish after every child has lowered and passed the fixed-range proof.
 // The ordinary UDF binder has already evaluated arguments and validation once;
 // refusal therefore proceeds with that exact same binding and parent graph.
@@ -696,28 +725,45 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
 #endif
   if (region_current || in_write_array)
     return refuse("retained control-flow or write-array context");
-  if (count < compile_options.reduce_sum_min_elements)
-    return refuse("slice below reduce_sum_min_elements");
   if (count <= 1) return refuse("slice has at most one element");
   if (grain <= 0) return refuse("grainsize is not a known positive integer");
   if (fun_effectful(call.name))
     return refuse("callback has observable effects");
   const int64_t needed = 1 + (count - 1) / grain;
-  const int64_t chunks =
+  int64_t chunks =
       fixed_partition
           ? needed
           : std::min<int64_t>(needed, compile_options.reduce_sum_threads);
   if (chunks <= 1) return refuse("grainsize selects one chunk");
   if (chunks > compile_options.reduce_sum_max_chunks)
     return refuse("partition exceeds reduce_sum_max_chunks");
+  auto spec = std::make_shared<ReduceSumSpec>();
+  const auto data_fill =
+      [&](const UdfBinding& bind) -> const std::vector<double>* {
+    if (!bind.data || bind.v.autodiff) return nullptr;
+    const int slot = bind.v.slot;
+    for (const auto& op : g.ops)
+      if (op.out == slot || op.out2 == slot) return nullptr;
+    for (auto it = out.fills.rbegin(); it != out.fills.rend(); ++it)
+      if (it->first == slot)
+        return it->second.size() == size_t(g.slots[slot].len) ? &it->second
+                                                              : nullptr;
+    return nullptr;
+  };
   std::vector<Val> inputs;
-  std::map<int, int> parent_index;
+  std::map<int, int> parent_index, shared_index;
   for (const auto& bind : binds) {
     if (bind.is_int) continue;
     if (!bind.v.runtime_dims.empty() || bind.v.slot < 0)
       return refuse("argument has runtime geometry");
+    if (shared_index.count(bind.v.slot)) continue;
     auto found = parent_index.find(bind.v.slot);
     if (found == parent_index.end()) {
+      if (const auto* fill = data_fill(bind)) {
+        shared_index[bind.v.slot] = static_cast<int>(spec->blocks.size());
+        spec->blocks.push_back(*fill);
+        continue;
+      }
       parent_index[bind.v.slot] = static_cast<int>(inputs.size());
       inputs.push_back(bind.v);
     } else {
@@ -726,14 +772,15 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
       value.si.param_free &= bind.v.si.param_free;
     }
   }
-  auto spec = std::make_shared<ReduceSumSpec>();
   bool active = false, param_free = true;
-  try {
-    for (int64_t chunk = 0; chunk < chunks; ++chunk) {
+  std::string chunk_refusal;
+  const auto lower_chunk =
+      [&](int64_t chunk, int64_t total) -> std::optional<ReduceSumSpec::Child> {
+    try {
       const int64_t first =
-          fixed_partition ? chunk * grain : count * chunk / chunks;
+          fixed_partition ? chunk * grain : count * chunk / total;
       const int64_t last = fixed_partition ? std::min(count, first + grain)
-                                           : count * (chunk + 1) / chunks;
+                                           : count * (chunk + 1) / total;
       Lowering trial = fork_region_trial();
       trial.compile_options.reduce_sum_threads = 1;
       trial.structured_policy = StructuredMode::Off;
@@ -741,6 +788,12 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
       for (const auto& input : inputs)
         imported.push_back(
             trial.add_slot(g.slots[input.slot].len, input.autodiff));
+      std::map<int, int> shared_local;
+      for (const auto& [parent_slot, block] : shared_index) {
+        const int local = trial.add_slot(g.slots[parent_slot].len, false);
+        trial.out.fills.emplace_back(local, spec->blocks[size_t(block)]);
+        shared_local[parent_slot] = local;
+      }
       mir::Expr invocation = call;
       for (size_t i = 0; i < binds.size(); ++i) {
         if (i == 1 || i == 2 || binds[i].is_int) {
@@ -751,7 +804,10 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
           continue;
         }
         Val value = binds[i].v;
-        value.slot = imported.at(parent_index.at(value.slot));
+        const auto view = shared_local.find(value.slot);
+        value.slot = view != shared_local.end()
+                         ? view->second
+                         : imported.at(parent_index.at(value.slot));
         const std::string name =
             "(reduce_sum argument " + std::to_string(i) + ")";
         trial.scope[name] = value;
@@ -780,9 +836,11 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
       }
       const Val result = trial.lower_call_udf(invocation);
       if (!trial.target_terms.empty() || !trial.jac_slots.empty() ||
-          trial.g.slots[result.slot].len != 1)
-        return refuse(
-            "callback changes target/Jacobian state or returns a nonscalar");
+          trial.g.slots[result.slot].len != 1) {
+        chunk_refusal =
+            "callback changes target/Jacobian state or returns a nonscalar";
+        return std::nullopt;
+      }
       active |= result.autodiff;
       param_free &= result.si.param_free;
       // Roots stay addressable through these ordinary graph passes. Opaque
@@ -795,20 +853,70 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
       std::vector<int64_t> offsets;
       std::string reason;
       if (!detail::compact_imports(trial.g, trial.out.fills, parameter_map,
-                                   &offsets, &reason))
-        return refuse(reason);
+                                   &offsets, &reason)) {
+        chunk_refusal = reason;
+        return std::nullopt;
+      }
       ReduceSumSpec::Child child;
       for (size_t i = 0; i < imported.size(); ++i)
         if (trial.g.slots[imported[i]].len)
           child.imports.push_back(
               {imported[i], static_cast<int>(i), offsets[imported[i]]});
+      std::set<int> view_slots;
+      for (const auto& [parent_slot, block] : shared_index) {
+        const int local = shared_local.at(parent_slot);
+        view_slots.insert(local);
+        if (trial.g.slots[local].len)
+          child.shared.push_back({local, block, offsets[local]});
+      }
       child.graph = std::move(trial.g);
-      child.fills = std::move(trial.out.fills);
-      spec->children.push_back(std::move(child));
+      for (auto& fill : trial.out.fills)
+        if (!view_slots.count(fill.first))
+          child.fills.push_back(std::move(fill));
+      return child;
+    } catch (const CompileError& error) {
+      chunk_refusal = std::string("child lowering: ") + error.what();
+      return std::nullopt;
     }
-  } catch (const CompileError& error) {
-    return refuse(std::string("child lowering: ") + error.what());
+  };
+  auto first_child = lower_chunk(0, chunks);
+  if (!first_child) return refuse(chunk_refusal);
+  if (compile_options.reduce_sum_min_chunk_ns > 0) {
+    const double min_ns = double(compile_options.reduce_sum_min_chunk_ns);
+    const double chunk_ns = reduce_sum_work_ns(first_child->graph, 0,
+                                               first_child->graph.ops.size());
+    const int64_t affordable =
+        fixed_partition
+            ? (chunk_ns >= min_ns ? chunks : 0)
+            : std::min<int64_t>(chunks, int64_t(chunk_ns * chunks / min_ns));
+    if (affordable < 2)
+      return refuse("estimated work is below the dispatch cost (" +
+                    std::to_string(int64_t(chunk_ns * chunks / 1000)) +
+                    " us for the slice)");
+    if (affordable < chunks) {
+      chunks = affordable;
+      first_child = lower_chunk(0, chunks);
+      if (!first_child) return refuse(chunk_refusal);
+    }
   }
+  spec->children.push_back(std::move(*first_child));
+  for (int64_t chunk = 1; chunk < chunks; ++chunk) {
+    auto child = lower_chunk(chunk, chunks);
+    if (!child) return refuse(chunk_refusal);
+    spec->children.push_back(std::move(*child));
+  }
+  std::vector<int> block_map(spec->blocks.size(), -1);
+  for (const auto& child : spec->children)
+    for (const auto& view : child.shared) block_map[size_t(view.block)] = 0;
+  std::vector<std::vector<double>> kept_blocks;
+  for (size_t i = 0; i < block_map.size(); ++i)
+    if (block_map[i] == 0) {
+      block_map[i] = static_cast<int>(kept_blocks.size());
+      kept_blocks.push_back(std::move(spec->blocks[i]));
+    }
+  spec->blocks = std::move(kept_blocks);
+  for (auto& child : spec->children)
+    for (auto& view : child.shared) view.block = block_map[size_t(view.block)];
   // Drop unneeded operand bindings; argument evaluation has already happened.
   std::vector<bool> used(inputs.size(), false);
   for (const auto& child : spec->children)
@@ -977,6 +1085,12 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   for (size_t i = 3; i < actuals.size(); ++i)
     call.args.push_back(actuals.at(i).expr());
 
+  const bool could_thread = compile_options.reduce_sum_threads <= 1 &&
+                            thread_safe_build() &&
+                            out.reduce_sum_notice.empty() && !region_current &&
+                            !in_write_array && n > 1 && !fun_effectful(f->name);
+  const size_t first_op = g.ops.size();
+
   Val result{-1, false, {}};
   try {
     int64_t grain = 0;
@@ -1000,6 +1114,12 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   }
   scope.erase(bound);
   decls.erase(bound);
+  if (could_thread && first_op <= g.ops.size() &&
+      reduce_sum_work_ns(g, first_op, g.ops.size()) >=
+          2.0 * double(compile_options.reduce_sum_min_chunk_ns))
+    out.reduce_sum_notice = "reduce_sum over " + std::to_string(n) +
+                            " elements runs on one thread; threads_per_chain "
+                            "above 1 may split it across cores";
   return result;
 }
 // The deprecated algebra_solver interfaces (Powell and Newton):

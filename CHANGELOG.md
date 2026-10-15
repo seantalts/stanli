@@ -27,8 +27,19 @@
   from running several chains at once and the growth of cost per
   observation with N.
 - brms `threading()` programs no longer run many times slower than the
-  plain program. Their per-observation loop adds to a local `ptarget`, which
-  the fast path for such loops now accepts. They still run on one core.
+  plain program, and with `threads_per_chain` above 1 they now use several
+  cores. On a 10,000-observation log-normal race model a gradient is 2.8x
+  faster at 4 threads and 3.5x faster at 8; four chains with 4 threads each
+  sample in 10 s instead of 30 s. Data is shared between threads and chains
+  instead of copied, which saves about 75 MB per extra chain at 100,000
+  observations. A `reduce_sum` is split only when each chunk has enough work
+  (about 30 microseconds), so small models stay on one thread and are never
+  slower. Threaded results depend on `threads_per_chain`, which sets the
+  summation order, and can change between stanli versions; they do not depend
+  on thread scheduling. `stanli_run` prints a note when a model with a large
+  `reduce_sum` runs on one thread.
+  C++ callers that set `CompileOptions::reduce_sum_min_elements` should set
+  `reduce_sum_min_chunk_ns` instead (default 30000, 0 to always split).
 - `wiener_lpdf` over a whole vector evaluates the density once per gradient
   instead of twice, and data arguments are no longer differentiated. About
   1.5x faster on a model that is one `y ~ wiener(...)` statement.

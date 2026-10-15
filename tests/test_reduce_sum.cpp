@@ -112,7 +112,7 @@ void argument_evaluation(bool parallel = false) {
           try {
             CompileOptions options;
             options.reduce_sum_threads = parallel ? 4 : 1;
-            options.reduce_sum_min_elements = 0;
+            options.reduce_sum_min_chunk_ns = 0;
             CompiledModel cm = compile_model(mir, data, 1, options);
             if (!in_td)
               expect(tag + " no effects while lowering", lines.empty());
@@ -163,7 +163,7 @@ void shapes_and_overloads(bool parallel = false) {
   using namespace stanli;
   CompileOptions options;
   options.reduce_sum_threads = parallel ? 4 : 1;
-  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_min_chunk_ns = 0;
   CompiledModel cm =
       compile_model(slurp("tests/fixtures/reduce_sum_shapes.tmir.sexp"),
                     DataMap{}, 1, options);
@@ -197,7 +197,7 @@ void native_review_regressions() {
   if (!thread_safe_build()) return;
   CompileOptions options;
   options.reduce_sum_threads = 4;
-  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_min_chunk_ns = 0;
   ReduceExecutionContext team(4);
   const auto discrete =
       slurp("tests/fixtures/reduce_sum_native_discrete.tmir.sexp");
@@ -288,7 +288,7 @@ void native_lifecycle() {
   data.set_real_array("y", std::vector<double>(257, .3));
   CompileOptions options;
   options.reduce_sum_threads = 4;
-  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_min_chunk_ns = 0;
   auto cm =
       compile_model(slurp("tests/fixtures/reduce_sum_parallel_probe.tmir.sexp"),
                     data, 1, options);
@@ -349,7 +349,7 @@ void native_corners() {
   const auto mir = slurp("tests/fixtures/reduce_sum_native.tmir.sexp");
   CompileOptions options;
   options.reduce_sum_threads = 4;
-  options.reduce_sum_min_elements = 0;
+  options.reduce_sum_min_chunk_ns = 0;
   ReduceExecutionContext team(4);
   for (int fixed : {0, 1})
     for (int dynamic : {0, 1})
@@ -455,7 +455,7 @@ void native_parallel() {
         auto data = DataMap::from_json(json.str());
         CompileOptions options;
         options.reduce_sum_threads = 4;
-        options.reduce_sum_min_elements = 0;
+        options.reduce_sum_min_chunk_ns = 0;
         auto cm = compile_model(mir, data, 1, options);
         expect("native retained opcode n=" + std::to_string(n),
                count_opcode(cm.graph, OP_REDUCE_SUM) == (n > 1 ? 1 : 0));
@@ -515,6 +515,255 @@ void native_parallel() {
       }
 }
 
+std::string region_map_data(int chunk, int lo, int hi, int n = 256) {
+  std::ostringstream json;
+  json << "{\"N\":" << n << ",\"chunk\":" << chunk << ",\"lo\":" << lo
+       << ",\"hi\":" << hi << ",\"y\":[";
+  for (int i = 0; i < n; ++i)
+    json << (i ? "," : "") << std::sin(0.31 * i) - 0.4 + 0.01 * i;
+  json << "],\"x\":[";
+  for (int i = 0; i < n; ++i)
+    json << (i ? "," : "") << -2.0 + 4.0 * i / (n - 1.0);
+  json << "]}";
+  return json.str();
+}
+
+Run evaluate_region_map(stanli::Executor& ex, int point) {
+  Run run;
+  run.grad.assign((size_t)ex.n_params(), 0.0);
+  ex.params_data()[0] = 0.8 - 0.1 * point;
+  ex.params_data()[1] = -0.3 + 0.2 * point;
+  run.lp = ex.gradient(run.grad.data());
+  return run;
+}
+
+void native_region_map() {
+  using namespace stanli;
+  if (!thread_safe_build()) return;
+  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.tmir.sexp");
+  const auto whole = DataMap::from_json(region_map_data(0, 1, 256));
+  CompileOptions options;
+  options.reduce_sum_min_chunk_ns = 0;
+  options.reduce_sum_threads = 4;
+  auto cm = compile_model(mir, whole, 1, options);
+  expect("region-map body retains one reduction",
+         count_opcode(cm.graph, OP_REDUCE_SUM) == 1);
+  std::string reasons;
+  for (const auto& reason : cm.reduce_sum_fallbacks) reasons += " " + reason;
+  expect("region-map body has no fallback:" + reasons,
+         cm.reduce_sum_fallbacks.empty());
+  for (const auto& op : cm.graph.ops)
+    if (op.opcode == OP_REDUCE_SUM) {
+      const auto& spec = *static_cast<const ReduceSumSpec*>(op.udata);
+      expect("four children", spec.children.size() == 4);
+      for (const auto& child : spec.children) {
+        expect("child runs a region map",
+               count_opcode(child.graph, OP_REGION_MAP) == 1);
+        expect("child views the slice and both data vectors",
+               child.shared.size() == 3);
+        for (const auto& fill : child.fills)
+          expect("child keeps no copy of the data", fill.second.size() < 64);
+      }
+      expect("one block per data argument", spec.blocks.size() == 3);
+      expect("data arguments are not op inputs", op.n_in == 2);
+    }
+
+  auto serial = compile_model(mir, whole);
+  Executor reference(std::move(serial.graph));
+  serial.bind(reference);
+  Executor plain(std::move(cm.graph));
+  cm.bind(plain);
+  Executor attached(plain), clone(plain);
+  ReduceExecutionContext team(4), small(2), clone_team(3);
+  attached.set_reduce_context(&team);
+  clone.set_reduce_context(&clone_team);
+  for (int point = 0; point < 3; ++point) {
+    const Run want = evaluate_region_map(reference, point);
+    const Run base = evaluate_region_map(plain, point);
+    expect("region-map lp matches the whole slice",
+           std::abs(base.lp - want.lp) < 1e-10 * (1 + std::abs(want.lp)));
+    for (size_t i = 0; i < base.grad.size(); ++i)
+      expect("region-map gradient matches the whole slice",
+             std::abs(base.grad[i] - want.grad[i]) <
+                 1e-10 * (1 + std::abs(want.grad[i])));
+    for (auto* candidate : {&attached, &clone}) {
+      const Run got = evaluate_region_map(*candidate, point);
+      expect("team attached is bitwise equal to no team",
+             got.lp == base.lp && got.grad == base.grad);
+    }
+    attached.set_reduce_context(&small);
+    const Run fewer = evaluate_region_map(attached, point);
+    attached.set_reduce_context(&team);
+    expect("team size does not change the result",
+           fewer.lp == base.lp && fewer.grad == base.grad);
+  }
+
+  Executor first(plain), second(plain);
+  ReduceExecutionContext first_team(4), second_team(2);
+  first.set_reduce_context(&first_team);
+  second.set_reduce_context(&second_team);
+  std::vector<Run> expected;
+  for (int point = 0; point < 3; ++point)
+    expected.push_back(evaluate_region_map(plain, point));
+  std::atomic<bool> chains_agree{true};
+  const auto chain = [&](Executor& executor) {
+    for (int repeat = 0; repeat < 100; ++repeat)
+      for (int point = 0; point < 3; ++point) {
+        const Run got = evaluate_region_map(executor, point);
+        if (got.lp != expected[point].lp || got.grad != expected[point].grad)
+          chains_agree = false;
+      }
+  };
+  std::thread chain_a(chain, std::ref(first)), chain_b(chain, std::ref(second));
+  chain_a.join();
+  chain_b.join();
+  expect("concurrent clones share data and agree bitwise", chains_agree);
+
+  options.reduce_sum_threads = 2;
+  auto halves = compile_model(mir, whole, 1, options);
+  expect("two-chunk region-map reduction",
+         count_opcode(halves.graph, OP_REDUCE_SUM) == 1);
+  Executor split(std::move(halves.graph));
+  halves.bind(split);
+  ReduceExecutionContext pair(2);
+  split.set_reduce_context(&pair);
+  auto lower =
+      compile_model(mir, DataMap::from_json(region_map_data(1, 1, 128)));
+  auto upper =
+      compile_model(mir, DataMap::from_json(region_map_data(1, 129, 256)));
+  Executor lower_ex(std::move(lower.graph)), upper_ex(std::move(upper.graph));
+  lower.bind(lower_ex);
+  upper.bind(upper_ex);
+  for (int point = 0; point < 3; ++point) {
+    const Run got = evaluate_region_map(split, point);
+    const Run a = evaluate_region_map(lower_ex, point);
+    const Run b = evaluate_region_map(upper_ex, point);
+    expect("child values are the serial chunk calls", got.lp == a.lp + b.lp);
+    for (size_t i = 0; i < got.grad.size(); ++i)
+      expect("child gradients are the serial chunk calls",
+             got.grad[i] == a.grad[i] + b.grad[i]);
+  }
+}
+
+void serial_notice() {
+  using namespace stanli;
+  if (!thread_safe_build()) return;
+  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.tmir.sexp");
+  CompileOptions options;
+  auto quiet = compile_model(
+      mir, DataMap::from_json(region_map_data(0, 1, 256)), 1, options);
+  expect("a slice with little work gets no notice",
+         quiet.reduce_sum_notice.empty());
+  auto noted = compile_model(
+      mir, DataMap::from_json(region_map_data(0, 1, 100000, 100000)), 1,
+      options);
+  expect("a serial reduce_sum that could thread says so",
+         noted.reduce_sum_notice.find("100000 elements") != std::string::npos);
+  options.reduce_sum_threads = 4;
+  auto threaded = compile_model(
+      mir, DataMap::from_json(region_map_data(0, 1, 100000, 100000)), 1,
+      options);
+  expect("a threaded compile has no serial notice",
+         threaded.reduce_sum_notice.empty());
+  options.reduce_sum_threads = 1;
+  auto direct = compile_model(
+      mir, DataMap::from_json(region_map_data(1, 1, 256)), 1, options);
+  expect("no notice without a reduce_sum", direct.reduce_sum_notice.empty());
+}
+
+int retained_children(const stanli::CompiledModel& cm) {
+  for (const auto& op : cm.graph.ops)
+    if (op.opcode == stanli::OP_REDUCE_SUM)
+      return int(
+          static_cast<const stanli::ReduceSumSpec*>(op.udata)->children.size());
+  return 0;
+}
+
+void work_cutoff() {
+  using namespace stanli;
+  if (!thread_safe_build()) return;
+  const auto mir = slurp("tests/fixtures/reduce_sum_region_map.tmir.sexp");
+  CompileOptions options;
+  options.reduce_sum_threads = 4;
+  const auto compile = [&](int n) {
+    return compile_model(mir, DataMap::from_json(region_map_data(0, 1, n, n)),
+                         1, options);
+  };
+  auto tiny = compile(256);
+  expect("little work stays serial", retained_children(tiny) == 0);
+  expect("the refusal names the work estimate",
+         !tiny.reduce_sum_fallbacks.empty() &&
+             tiny.reduce_sum_fallbacks[0].find("estimated work") !=
+                 std::string::npos);
+  auto some = compile(8000);
+  expect("moderate work uses fewer chunks than threads",
+         retained_children(some) == 2);
+  auto plenty = compile(100000);
+  expect("plenty of work uses every thread", retained_children(plenty) == 4);
+  options.reduce_sum_min_chunk_ns = 0;
+  expect("no minimum forces every thread",
+         retained_children(compile(256)) == 4);
+}
+
+void region_map_domain_error() {
+  using namespace stanli;
+  if (!thread_safe_build()) return;
+  const auto mir =
+      slurp("tests/fixtures/reduce_sum_region_map_domain.tmir.sexp");
+  const auto data = DataMap::from_json(region_map_data(0, 1, 256));
+  CompileOptions options;
+  options.reduce_sum_min_chunk_ns = 0;
+  options.reduce_sum_threads = 4;
+  auto cm = compile_model(mir, data, 1, options);
+  auto serial = compile_model(mir, data);
+  expect("domain fixture retains the reduction",
+         count_opcode(cm.graph, OP_REDUCE_SUM) == 1 &&
+             cm.reduce_sum_fallbacks.empty());
+  Executor reference(std::move(serial.graph));
+  serial.bind(reference);
+  Executor ex(std::move(cm.graph));
+  cm.bind(ex);
+  ReduceExecutionContext team(4);
+  ex.set_reduce_context(&team);
+  Executor plain(ex);
+  const auto set_point = [](Executor& e, double scale) {
+    e.params_data()[0] = 0.8;
+    e.params_data()[1] = -0.3;
+    e.params_data()[2] = scale;
+  };
+  const auto message = [](Executor& e) {
+    std::vector<double> grad(3);
+    try {
+      e.gradient(grad.data());
+    } catch (const std::domain_error& error) {
+      return std::string(error.what());
+    }
+    return std::string();
+  };
+  set_point(reference, 100.0);
+  set_point(ex, 100.0);
+  set_point(plain, 100.0);
+  std::vector<double> want(3), got(3);
+  const double good = reference.gradient(want.data());
+  expect(
+      "retained lp before the error",
+      std::abs(ex.gradient(got.data()) - good) < 1e-10 * (1 + std::abs(good)));
+  for (double scale : {1.7, 2.3}) {
+    set_point(reference, scale);
+    set_point(ex, scale);
+    set_point(plain, scale);
+    const std::string expected = message(reference);
+    expect("whole-slice call rejects", !expected.empty());
+    expect("worker error is the first in chunk order", message(ex) == expected);
+    expect("no team gives the same error", message(plain) == expected);
+  }
+  set_point(ex, 100.0);
+  set_point(plain, 100.0);
+  expect("gradient recovers after a worker error",
+         ex.gradient(got.data()) == plain.gradient(want.data()));
+  expect("recovered gradient is finite", std::isfinite(got[0]));
+}
+
 }  // namespace
 
 int main() {
@@ -524,6 +773,10 @@ int main() {
   native_lifecycle();
   native_corners();
   native_parallel();
+  native_region_map();
+  serial_notice();
+  work_cutoff();
+  region_map_domain_error();
   argument_evaluation();
   shapes_and_overloads();
   argument_evaluation(true);

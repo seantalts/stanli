@@ -12,7 +12,7 @@ generated quantities { real draw = normal_rng(mu, 1); }
 
 test_that("native within-chain reductions reach sampling and gradients", {
   skip_without_runtime()
-  data <- list(N=10000L, y=seq(-1, 2, length.out=10000))
+  data <- list(N=100000L, y=seq(-1, 2, length.out=100000))
   m <- stanli_model(code=reduce_source, data=data)
   expect_equal(m$reduce_sum_count, 0L)
   args <- list(chains=2, warmup=25, samples=10, refresh=0, seed=123, max_depth=6)
@@ -27,7 +27,7 @@ test_that("native within-chain reductions reach sampling and gradients", {
   expect_length(a$model$reduce_sum_fallbacks, 0L)
   expect_equal(a$model$threads_per_chain, 4)
   expect_equal(log_prob_grad(a$model, .2), log_prob_grad(m, .2), tolerance=2e-12)
-  expect_equal(log_prob_grad(a$model, .2)$grad, sum(data$y) - 10001 * .2,
+  expect_equal(log_prob_grad(a$model, .2)$grad, sum(data$y) - 100001 * .2,
                tolerance=2e-12)
   b <- do.call(sample_model, c(list(a$model), args, list(threads_per_chain=4, parallel_chains=1)))
   expect_identical(a$draws, b$draws)
@@ -52,7 +52,7 @@ test_that("thread changes preserve the transformed data construction seed", {
   code <- sub("parameters ", "transformed data { real shift = normal_rng(0,1); } parameters ",
               reduce_source, fixed=TRUE)
   code <- sub("mu ~ normal(0, 1)", "mu ~ normal(shift, 1)", code, fixed=TRUE)
-  data <- list(N=10000L, y=rep(.5, 10000))
+  data <- list(N=100000L, y=rep(.5, 100000))
   m <- stanli_model(code=code, data=data, seed=2)
   fresh <- stanli_model(code=code, data=data, seed=17, threads_per_chain=2)
   args <- list(chains=1, warmup=10, samples=5, seed=17, refresh=0,

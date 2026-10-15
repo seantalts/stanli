@@ -391,11 +391,26 @@ Executor::Executor(Graph g) : graph_(std::move(g)) {
   bind_();
 }
 
+Executor::Executor(Graph g, std::vector<Borrow> borrows)
+    : graph_(std::move(g)) {
+  ensure_registered();
+  graph_.compact_idata();
+  borrowed_.assign(graph_.slots.size(), nullptr);
+  for (const auto& borrow : borrows) {
+    if (borrow.slot < 0 || size_t(borrow.slot) >= graph_.slots.size() ||
+        !borrow.data)
+      throw std::invalid_argument("borrowed slot is not in the graph");
+    borrowed_[size_t(borrow.slot)] = borrow.data;
+  }
+  bind_();
+}
+
 Executor::Executor(const Executor& src)
     : graph_(src.graph_),
       data_(src.data_pointer_exposed_
                 ? std::make_shared<std::vector<double>>(*src.data_)
-                : src.data_) {
+                : src.data_),
+      borrowed_(src.borrowed_) {
   ensure_registered();
   bind_();
   std::copy(src.values_.begin(), src.values_.end(), values_.begin());
@@ -441,8 +456,13 @@ void Executor::bind_() {
   n_params_ = off;
   for (size_t i = 0; i < graph_.slots.size(); ++i) {
     auto& s = graph_.slots[i];
+    const bool borrowed = !borrowed_.empty() && borrowed_[i];
+    if (borrowed && (s.is_param || written[i]))
+      throw std::invalid_argument("only unwritten data can be borrowed");
     if (s.is_param) continue;
-    if (written[i]) {
+    if (borrowed) {
+      s.offset = 0;
+    } else if (written[i]) {
       if (has_shared_primals && primal_sources[i] >= 0) continue;
       s.offset = off;
       off = checked_size(off, s.len);
@@ -683,6 +703,8 @@ void Executor::detach_data_() {
 }
 
 double* Executor::value_ptr(int slot) {
+  if (!borrowed_.empty() && borrowed_[slot])
+    throw std::logic_error("borrowed slot is read-only");
   if (data_offsets_[slot] >= 0) {
     detach_data_();
     data_pointer_exposed_ = true;
@@ -694,6 +716,8 @@ void Executor::set_values(int slot, const double* data, size_t size) {
   if (slot < 0 || static_cast<size_t>(slot) >= graph_.slots.size() ||
       size > static_cast<uint64_t>(graph_.slots[slot].len))
     throw std::out_of_range("executor fill exceeds slot");
+  if (!borrowed_.empty() && borrowed_[slot])
+    throw std::logic_error("borrowed slot is read-only");
   if (data_offsets_[slot] >= 0) detach_data_();
   if (size) std::copy_n(data, size, slot_data_(slot));
 }

@@ -146,6 +146,12 @@ struct BoundCheckSpec {
 class Executor {
  public:
   explicit Executor(Graph g);
+  // Borrowed data must outlive this executor and its clones.
+  struct Borrow {
+    int slot;
+    const double* data;
+  };
+  Executor(Graph g, std::vector<Borrow> borrows);
   // Copies share unwritten data slots unless a writable pointer escaped.
   // Parameters, outputs, adjoints, scratch and kernel state remain private.
   // Writable data access detaches before exposing a pointer; later clones of
@@ -222,9 +228,10 @@ class Executor {
   void refresh_micros_();
   double* slot_data_(int slot) const {
     const auto offset = data_offsets_[slot];
-    return offset >= 0 ? data_->data() + offset
-                       : const_cast<double*>(values_.data()) +
-                             graph_.slots[slot].offset;
+    if (offset >= 0) return data_->data() + offset;
+    if (!borrowed_.empty() && borrowed_[slot])
+      return const_cast<double*>(borrowed_[slot]);
+    return const_cast<double*>(values_.data()) + graph_.slots[slot].offset;
   }
   KernelCtx make_ctx_(const Op& op, int64_t scratch_offset,
                       const std::vector<char>& written,
@@ -243,6 +250,7 @@ class Executor {
   std::vector<double> values_;
   std::shared_ptr<std::vector<double>> data_;
   std::vector<int64_t> data_offsets_;
+  std::vector<const double*> borrowed_;
   bool data_pointer_exposed_ = false;
   std::vector<double> adjoints_;
   int64_t result_adjoint_offset_ = -1;

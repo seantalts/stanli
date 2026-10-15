@@ -14,6 +14,9 @@ chain is idle. The CLI reports how many reduction sites were retained. Zero
 means all sites use the ordinary serial path. The CLI prints graph-lowering
 refusal reasons; C++ callers can inspect `CompiledModel::reduce_sum_fallbacks`.
 The default remains one thread. The Web interface remains serial within each chain.
+When a model with a large `reduce_sum` runs at one thread, the CLI prints a
+one-line note saying so. The note is a cheap size check, so a call it names may
+still be refused when threads are requested; the refusal reasons then say why.
 
 ```python
 fit = model.sample(chains=4, parallel_chains=2, threads_per_chain=4)
@@ -69,22 +72,37 @@ Eligible calls have fixed shapes, a known positive grainsize, pure callbacks,
 and transparent child graphs whose input reads can be bounded statically.
 Runtime control or dynamic indexing, opaque/stateful kernels, callback effects,
 and unsupported child layouts conservatively keep the ordinary lowering.
-Immutable bound/dimension-check payloads are supported and stay in the child.
+Immutable bound/dimension-check payloads are supported and stay in the child,
+as are per-observation loops that lower to a region map, which is the form
+brms `threading()` partial sums take.
 Argument evaluation and grainsize validation still occur once per call.
 Nested reductions run serially within a retained outer child. Calls in retained
 control-flow regions and generated quantities currently keep their serial path.
 
 Ordinary reductions use at most the requested compile-time number of chunks;
 static reductions use deterministic grainsize-sized chunks. Child counts above
-`reduce_sum_max_chunks` (default 1024), one-chunk calls, and slices below
-`reduce_sum_min_elements` (currently 8192 outer elements) stay serial. These
-controls bound compilation/storage and avoid dispatch overhead on small calls;
-actual benefit still depends on callback cost and memory bandwidth. Fixed
-partitions are deterministic across worker schedules; changing the compile-time
-partition may change floating-point rounding and resulting sampling trajectories.
+`reduce_sum_max_chunks` (default 1024) and one-chunk calls stay serial. So do
+calls with too little work: the first child is lowered and its work is
+estimated as 0.3 ns per region-map instruction per iteration plus 0.8 ns per
+element touched by any other operation. Each chunk must cover at least
+`reduce_sum_min_chunk_ns` (default 30 us) of that estimate, so a small slice
+stays serial and a moderate one uses fewer chunks than threads. The estimate
+was calibrated on four callbacks; against their measured serial time it ranges
+from 0.45x to 1.1x, and the refusal reason prints it. Actual benefit still
+depends on callback cost and memory bandwidth. Because the chunk count sets the summation order,
+it is a function of the data, the model and the thread count, and never of
+thread scheduling. Dispatch costs about 8 us per thread per gradient.
+Fixed partitions are deterministic across worker schedules; changing the
+compile-time partition may change floating-point rounding and resulting
+sampling trajectories.
 
 Each child retains its compact values, adjoints, scratch and gradient buffer.
-Only the input ranges that child reads are copied per evaluation. Forward and
+Data arguments whose values are known at preparation are stored once in the
+reduction, and every child and chain clone views that copy instead of keeping
+its own and importing it on each gradient. A child whose body lowers to a
+region map still copies the ranges it reads into its own registers when it
+runs. Parameter-dependent inputs are copied per evaluation, and only the
+ranges a child reads. Forward and
 reverse dispatch separately, so reverse uses the actual incoming adjoint even
 inside nonlinear expressions. Shared input gradients merge in fixed child order.
 Buffers and threads are reused; kernels and exceptional paths may still allocate.

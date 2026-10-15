@@ -192,6 +192,8 @@ int main(int argc, char** argv) {
     // Only retained reductions need worker teams. Each executor owns its
     // mutable child state and borrows one persistent per-chain team.
     std::vector<std::unique_ptr<stanli::ReduceExecutionContext>> reduce_teams;
+    if (threads_per_chain == 1 && !cm.reduce_sum_notice.empty())
+      std::fprintf(stderr, "stanli_run: %s\n", cm.reduce_sum_notice.c_str());
     if (threads_per_chain > 1) {
       std::fprintf(stderr,
                    "stanli_run: %td retained reductions; up to %lld active "

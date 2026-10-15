@@ -995,7 +995,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   ExecutionTrace execution_trace;
   std::optional<ExecutionTraceScope> execution_scope;
   if (report_enabled) execution_scope.emplace(execution_trace);
-  if (options.reduce_sum_threads < 1 || options.reduce_sum_min_elements < 0 ||
+  if (options.reduce_sum_threads < 1 || options.reduce_sum_min_chunk_ns < 0 ||
       options.reduce_sum_max_chunks < 1)
     throw std::invalid_argument("invalid reduce_sum compilation options");
   const char* prep_env = std::getenv("STANLI_PROFILE_PREP");
