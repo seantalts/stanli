@@ -45,9 +45,9 @@
   is now in the test corpus.
 - Per-observation loops that use `log_sum_exp` over a range or `inv_logit`
   now run 64 observations at a time. `cm_invgaussian` samples 4.0x faster
-  with one chain and 3.3x faster with four. Its peak memory with four chains
-  goes from 59 MB to 502 MB, because each chain keeps the forward values of
-  its 200 observations for the reverse pass.
+  with one chain and 4.6x faster with four. Its peak memory with four chains
+  goes from 59 MB to 114 MB: values that are not live at the same time share
+  storage, so each chain keeps only what the reverse pass reads.
 - The reverse pass of a program with branches now visits only the blocks
   that ran, instead of checking a flag for every block. When a
   per-observation loop with many branches runs one observation at a time,

@@ -2368,6 +2368,7 @@ std::vector<LaneFixture> lane_fixture_list() {
       {"region_map_lse", true, ""},
       {"region_map_lse_const", true, ""},
       {"region_map_inv_logit", true, ""},
+      {"region_map_sinks", true, ""},
   };
 }
 
