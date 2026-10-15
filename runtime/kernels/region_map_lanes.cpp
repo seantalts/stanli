@@ -43,6 +43,7 @@ bool lane_opcode(Program::Code c) {
     case Program::FMIN:
     case Program::NEG:
     case Program::EXP:
+    case Program::INV_LOGIT:
     case Program::LOG:
     case Program::LOG1P_EXP:
     case Program::ERFC:
@@ -294,6 +295,7 @@ class Analysis {
         f(A.va, 1);
         return;
       case Program::EXP:
+      case Program::INV_LOGIT:
       case Program::SQRT:
         f(A.vd, 1);
         return;
@@ -464,6 +466,7 @@ class Analysis {
       case Program::MOV:
       case Program::NEG:
       case Program::EXP:
+      case Program::INV_LOGIT:
       case Program::LOG:
       case Program::LOG1P_EXP:
       case Program::ERFC:
@@ -502,6 +505,7 @@ class Analysis {
         case Program::MOV:
         case Program::NEG:
         case Program::EXP:
+        case Program::INV_LOGIT:
         case Program::LOG:
         case Program::LOG1P_EXP:
         case Program::ERFC:
@@ -1064,6 +1068,7 @@ class Analysis {
         case Program::MOV:
         case Program::NEG:
         case Program::EXP:
+        case Program::INV_LOGIT:
         case Program::LOG:
         case Program::LOG1P_EXP:
         case Program::ERFC:
@@ -1410,6 +1415,9 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
       break;
     case Program::EXP:
       t.unary(o, I, m, [](double a) { return stan::math::exp(a); });
+      break;
+    case Program::INV_LOGIT:
+      t.unary(o, I, m, [](double a) { return stan::math::inv_logit(a); });
       break;
     case Program::LOG:
       t.unary(o, I, m, [](double a) { return stan::math::log(a); });
@@ -1997,6 +2005,18 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
           const double u = d[l];
           d[l] = 0.0;
           a[l] += u * vd[l];
+        });
+      });
+      return;
+    }
+    case Program::INV_LOGIT: {
+      double* const d = cells(o.dst);
+      double* const a = t.acc(I.a, o.a);
+      t.with(o.vd, I.vd, [&](auto vd) {
+        t.each(m, [&](int l) {
+          const double u = d[l];
+          d[l] = 0.0;
+          a[l] += u * vd[l] * (1.0 - vd[l]);
         });
       });
       return;

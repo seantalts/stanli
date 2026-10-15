@@ -2373,6 +2373,7 @@ std::vector<LaneFixture> lane_fixture_list() {
       {"region_map_intops", false, ""},
       {"region_map_lse", true, ""},
       {"region_map_lse_const", true, ""},
+      {"region_map_inv_logit", true, ""},
   };
 }
 
@@ -2460,6 +2461,52 @@ void test_lse_range_lanes() {
                     evaluate(ex, points[k]),
                     reference(ref, series, points[k], &taken));
       }
+    }
+  }
+}
+
+void test_inv_logit_lanes() {
+  const Ref ref = [](const std::vector<var>& p, const Series& s,
+                     std::vector<int>* taken) {
+    var lp = 0;
+    for (size_t i = 0; i < s.y.size(); ++i) {
+      const var r = s.y[i] - p[0] * s.x[i];
+      const bool low = r.val() < p[1].val();
+      if (taken) taken->push_back(low);
+      if (low)
+        lp +=
+            -stan::math::square(r) *
+                stan::math::inv_logit(p[0] * s.x[i] + 3 * p[1]) -
+            0.1 * stan::math::inv_logit(40 * (r + stan::math::inv_logit(p[1])));
+      else
+        lp += -0.5 * stan::math::square(r) * stan::math::inv_logit(p[1]);
+    }
+    return lp;
+  };
+  const std::vector<Params> points = {{0.3, -0.5}, {-1.5, 0.7}, {0.9, 0.2}};
+  for (int n : {37, 64, 200}) {
+    const std::string what = "region_map_inv_logit N=" + std::to_string(n);
+    CompiledModel lanes = compile_with("region_map_inv_logit", n);
+    expect_mapped(what, lanes);
+    check(map_has_code(lanes, stanli::Program::INV_LOGIT),
+          what + ": body holds INV_LOGIT");
+    int shared = 0, per_lane = 0;
+    for (const auto& I : map_payload(lanes).code)
+      if (I.code == stanli::Program::INV_LOGIT)
+        (map_payload(lanes).lanes.reg_slot[(size_t)I.a] < 0 ? shared
+                                                            : per_lane)++;
+    check(shared > 0 && per_lane > 0,
+          what + ": INV_LOGIT reads both shared and per-lane registers");
+    CompiledModel scalar =
+        compile_with("region_map_inv_logit", n, "STANLI_REGION_MAP_LANES", "0");
+    expect_lane_parity(what, lanes, scalar, spread_points(2, 8, 12.0), true);
+    const Series series = make_series(n);
+    Executor ex(lanes.graph);
+    lanes.bind(ex);
+    for (size_t k = 0; k < points.size(); ++k) {
+      std::vector<int> taken;
+      expect_eval(what + " point " + std::to_string(k), evaluate(ex, points[k]),
+                  reference(ref, series, points[k], &taken));
     }
   }
 }
@@ -3213,6 +3260,7 @@ void test_clean_sweep() {
       {"region_map_logic", 64, ""},
       {"region_map_short_circuit", 64, ""},
       {"region_map_nan", 64, "\"nv\":NaN"},
+      {"region_map_inv_logit", 64, ""},
       {"region_map_long_body", 32, ""}};
   test_setenv("STANLI_REGION_MAP_CHECK_CLEAN", "1", 1);
   for (bool recompute : {false, true}) {
@@ -3513,6 +3561,7 @@ static void test_region_map() {
   test_logic_compiles_to_jumps();
   test_lane_fixtures();
   test_lse_range_lanes();
+  test_inv_logit_lanes();
   test_native_math();
   test_tile_call_parity();
   test_lane_tile_recompute();
