@@ -199,6 +199,13 @@ specified in the [appendix](benchmarks.md#appendix). The current table validates
 inventory, raw pairs and recomputed estimates before publishing.
 It never fills missing cells from historical measurements.
 
+The one exception is the optimized-reference appendix. When CmdStan, its
+toolchain and the optimized stanc3 are unchanged, it may reuse CmdStan
+timings from an earlier published run and pair them with the current default
+run's Stanli timings. `publish_corpus_bench.py --vectorized` records which run
+supplied each model in `combined.json`, and the renderer checks the inputs,
+settings, toolchain and compiler hash and reapplies the numerical gate.
+
 ## Earlier protocols and validation
 
 Version 3 optionally measured full sampling across four seeds. Its retained
