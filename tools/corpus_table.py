@@ -2,7 +2,7 @@
 """Render the benchmark catalog and detailed historical appendix tables.
 
 --catalog renders one complete, current benchmark run for benchmarks.md.
-The original TSV mode emits two tables for docs/benchmark-2026-09-11.md.
+The original TSV mode emits two tables for notes/performance/2026-09-11-posteriordb-benchmark.md.
 The first is every model both engines measured end to end,
 sorted by per-gradient speedup. It shows both engines' absolute gradient
 times and the wall time from Stan source to a completed 1,000-warmup,

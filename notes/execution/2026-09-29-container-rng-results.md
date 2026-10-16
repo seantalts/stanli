@@ -127,7 +127,7 @@ python3 tools/bench_model_phases.py /path/to/libstanli.dylib tools/bench_executi
 ```
 
 Use alternating baseline/candidate processes for six pairs, as specified in the
-[benchmark protocol](../../docs/benchmark-protocol.md#focused-execution-path-benchmarks).
+[benchmark protocol](../../docs/benchmarks.md#focused-execution-path-benchmarks).
 For boundary sizes, vary `K` and set `trials[i] = 5 + i % 8`; use
 `--skip-inference` for the 0/1/1,024-element checks. The maintained manifest now
 includes the two new output workloads. Public corpus benchmark tables are unchanged.

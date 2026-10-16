@@ -2,7 +2,7 @@
 
 The historical `bench_rng_paths.py` timing script was consolidated into
 `tools/bench_model_phases.py` before merge. Use the maintained
-[focused benchmark instructions](../../docs/benchmark-protocol.md#focused-execution-path-benchmarks)
+[focused benchmark instructions](../../docs/benchmarks.md#focused-execution-path-benchmarks)
 for new measurements; the samples below retain their original provenance.
 
 Current authorization: continue interpreter-gap work, prioritizing native

@@ -59,7 +59,7 @@ Do not recreate a removed backend merely to reduce interpreter counters.
 Dynamic storage, general call frames/recursion, some active-density solver
 inputs, and preparation/initialization remain distinct contracts. Verify exact
 current admission in source/tests before treating a historical refusal as open.
-Use the [maintained benchmark coverage](../../benchmark-protocol.md#focused-execution-path-benchmarks)
+Use the [maintained benchmark coverage](../../benchmarks.md#how-we-measure)
 and [execution diagnostics](../../hacking.md) for new measurements. A known
 24-ULP large-branch stress discrepancy remains documented; tolerances were not
 widened to accept the experiments.

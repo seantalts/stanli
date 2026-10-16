@@ -36,7 +36,7 @@ turn measurement noise into an acceptable regression budget.
   28.99 µs: near parity, not a stable claim of beating CmdStan.
 - A native-conditional COM-Poisson attempt did not solve its dynamic integer
   requirement and was removed. Later COM-Poisson support and measurements
-  are in the [brms report](../../../brms-performance.md).
+  are in the [brms report](../../../../notes/performance/2026-09-16-brms-performance.md).
 - Sequence flattening preserved tested values but missed its predeclared 5%
   benefit criterion on GEV/ALD cases and a canary; the prototype was removed.
 
@@ -52,7 +52,7 @@ Rethinking fixtures exceeded 1.0 in that sweep. Subsequent GP checks were
 kept separate; they did not rewrite the frozen aggregate.
 
 The published [historical teaching report](../../../../output/teaching-performance/README.md)
-and [brms results](../../../brms-performance.md) retain the measured outcomes.
+and [brms results](../../../../notes/performance/2026-09-16-brms-performance.md) retain the measured outcomes.
 The 550,455,487-byte local raw archive had SHA256
 `30840d8b8ed7ae4734ec3d69f41fff54bad51c91d9f4cf2227e00667182125ad`;
 its original local paths and all intermediate identities are in the full record.

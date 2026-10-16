@@ -2,8 +2,8 @@
 
 For current contracts, use the [Python](../../../python/README.md),
 [R](../../../r/README.md), [JavaScript](../../../js/README.md),
-[stanfit compatibility](../../stanfit-compatibility.md), and
-[build measurements](../../build-performance.md) guides. Installation simplicity,
+[stanfit compatibility](../../../notes/validation/2026-09-16-stanfit-compatibility.md), and
+[build measurements](../../../notes/performance/build-performance.md) guides. Installation simplicity,
 first useful results, compressed size and installed size are separate concerns.
 
 | Prior work | What to recover from it |
@@ -17,7 +17,7 @@ first useful results, compressed size and installed size are separate concerns.
 | [Stan's other inference algorithms](../../../notes/execution/2026-10-09-other-inference-algorithms.md) | fixed_param, Laplace, single-path Pathfinder and ADVI through Stan's services: the model adapter, the C API and R surface, agreement with `rstan::vb()`, and limits (no `propto = false` density; R only). Multi-path Pathfinder is held: an out-of-bounds read in Stan 2.40's `multi.hpp`. |
 
 The density-pack experiment is historical, while the optional
-[lite build](../../lite-lp.md) has a current public numerical contract; do not
+[lite build](../../lp-constant.md) has a current public numerical contract; do not
 confuse them. Native instruction generation and stencil JIT are tabled, and
 the recent [code-generation probes](../../../notes/execution/2026-09-28-codegen-decision.md)
 were removed with their [cleanup](../../../notes/execution/2026-09-29-execution-code-cleanup.md).

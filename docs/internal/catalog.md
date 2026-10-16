@@ -21,13 +21,13 @@ paths and hashes in raw records unchanged.
 | [Why should I trust this?](../../TESTING.md) | Numerical gates, exceptions, validation and CI. |
 | [Third-party components in the stanli binary](../../THIRD_PARTY_LICENSES.md) | Bundled dependency licenses and attribution. |
 | [Documentation](../README.md) | Human reading map by task: use, understand, validate or contribute. |
-| [2026-09-11 · Performance measurements](../benchmark-2026-09-11.md) | Human-facing guide or maintained technical contract. |
-| [Historical benchmark experiments](../benchmark-history.md) | Human-facing guide or maintained technical contract. |
-| [Corpus benchmark protocol, version 4](../benchmark-protocol.md) | Timed boundaries, numerical gate, repetition and publication rules. |
+| [2026-09-11 · Performance measurements](../../notes/performance/2026-09-11-posteriordb-benchmark.md) | Human-facing guide or maintained technical contract. |
+| [Historical benchmark experiments](../../notes/performance/benchmark-history.md) | Human-facing guide or maintained technical contract. |
+| [Corpus benchmark protocol, version 4](../benchmarks.md#how-we-measure) | Timed boundaries, numerical gate, repetition and publication rules. |
 | [Benchmarks](../benchmarks.md) | Published model comparisons; accepted pairs, incomplete cases and limits. |
-| [brms performance and numerics](../brms-performance.md) | Human-facing guide or maintained technical contract. |
-| [Build and pull-request latency](../build-performance.md) | Human-facing guide or maintained technical contract. |
-| [Compact densities: exact gradients, lp\_\_ off by a constant](../compact-densities.md) | Human-facing guide or maintained technical contract. |
+| [brms performance and numerics](../../notes/performance/2026-09-16-brms-performance.md) | Human-facing guide or maintained technical contract. |
+| [Build and pull-request latency](../../notes/performance/build-performance.md) | Human-facing guide or maintained technical contract. |
+| [Compact densities: exact gradients, lp\_\_ off by a constant](../lp-constant.md) | Human-facing guide or maintained technical contract. |
 | [Corpus status](../corpus-status.md) | Recorded model support and reference coverage, distinct from fresh replay. |
 | [Probability-function coverage](../coverage.md) | Builtin signature coverage and unsupported overloads. |
 | [Coming from cmdstanr](../from-cmdstanr.md) | Human-facing guide or maintained technical contract. |
@@ -42,11 +42,11 @@ paths and hashes in raw records unchanged.
 | [Numerical fidelity and measurement evidence](research/numerics.md) | Short topic map; follow links only as needed. |
 | [Packaging, interfaces and installation](research/packaging.md) | Short topic map; follow links only as needed. |
 | [Native parallel reductions](research/parallelism.md) | Short topic map; follow links only as needed. |
-| [The lite build: half the library, lp__ off by a constant](../lite-lp.md) | Human-facing guide or maintained technical contract. |
+| [The lite build: half the library, lp__ off by a constant](../lp-constant.md) | Human-facing guide or maintained technical contract. |
 | [Tutorial: three small models through every layer](../lowering-walkthrough.md) | Three small models traced through compiler and execution layers. |
 | [Native within-chain reductions](../native-reduce-sum.md) | Supported opt-in within-chain parallelism and API settings. |
-| [Native stanfit compatibility](../stanfit-compatibility.md) | Human-facing guide or maintained technical contract. |
-| [Generated models and R workflows](../teaching-support.md) | Human-facing guide or maintained technical contract. |
+| [Native stanfit compatibility](../../notes/validation/2026-09-16-stanfit-compatibility.md) | Human-facing guide or maintained technical contract. |
+| [Generated models and R workflows](../teaching.md) | Human-facing guide or maintained technical contract. |
 | [Teaching Bayesian workflow with stanli](../teaching.md) | Human-facing guide or maintained technical contract. |
 | [JavaScript and browser guide](../../js/README.md) | Browser/Node package, compilation, sampling and deployment. |
 | [Research evidence](../../notes/README.md) | Where to write and find topical research evidence. |
