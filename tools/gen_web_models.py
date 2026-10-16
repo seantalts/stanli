@@ -34,11 +34,6 @@ VERIFY_JSON = REPO / "docs" / "internal" / "artifacts" / "verification.json"
 # cap is a backstop rather than a knob.
 MAX_DATA_BYTES = 2.5 * 1024 * 1024
 
-# Browser-chain defaults are independent of native benchmark timing. A fixed
-# gradient budget does not predict NUTS's gradient count or sampling duration.
-DRAWS_MIN = 100
-
-
 def num(row, key):
     try:
         return float(row[key])
@@ -48,7 +43,7 @@ def num(row, key):
 
 def benchmark_fields(row):
     """Native benchmark metadata; a missing paired ratio stays missing."""
-    fields = {"warmup": DRAWS_MIN, "samples": DRAWS_MIN}
+    fields = {}
     if row.get("params"):
         fields["params"] = int(row["params"])
     ns = num(row, "stanli_ns_grad")
