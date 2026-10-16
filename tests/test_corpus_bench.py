@@ -651,54 +651,133 @@ class BenchmarkCatalogTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.render_catalog(*self.paths)
         self.assertTrue(all("corpus-performance" in str(path)
-                            for path in self.render_catalog.__defaults__))
+                            for path in self.render_catalog.__defaults__[:3]))
 
 
-class VectorizedCatalogTests(unittest.TestCase):
+def _scale_engine(record, engine, factor):
+    import statistics
+    for pair in record["gradients"]:
+        pair[engine]["elapsed_ns"] = int(pair[engine]["elapsed_ns"] * factor)
+    times = {name: [p[name]["elapsed_ns"] / p[name]["iterations"] for p in record["gradients"]]
+             for name in ("stanli", "cmdstan")}
+    series = {"stanli_ns_grad": times["stanli"], "cmdstan_ns_grad": times["cmdstan"],
+              "paired_speedup": [c / s for s, c in zip(times["stanli"], times["cmdstan"])]}
+    row = record["row"]
+    for field, values in series.items():
+        row[field] = statistics.median(values)
+        row[field + "_mad"] = statistics.median(abs(v - row[field]) for v in values)
+    row["cmdstan_estimated_s"] = (row["cmdstan_stanc_s"] + row["cmdstan_build_s"]
+                                  + 20000 * row["cmdstan_ns_grad"] / 1e9)
+    row["stanli_estimated_s"] = (row["stanli_compile_s"] + row["stanli_prep_s"]
+                                 + 20000 * row["stanli_ns_grad"] / 1e9)
+
+
+class VectorizedFixture(unittest.TestCase):
     def setUp(self):
-        from tools.corpus_table import render_gradient_catalog
         from benchmark_artifact_fixture import artifact_fixture
-        self.render_catalog = render_gradient_catalog
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        root = pathlib.Path(self.temp.name)
-        self.paths = [root / name for name in ("summary.tsv", "manifest.json",
-                      "models.json.gz", "compiler.json", "default.json")]
-        self.manifest, self.records, self.rows = artifact_fixture()
-        self.baseline = copy.deepcopy(self.manifest)
-        self.manifest["identity"]["config"]["stancflags"] = "--O1"
+        self.root = pathlib.Path(self.temp.name)
+        self.default = artifact_fixture()
+        self.default[0]["identity"]["toolchains"] = {"cmdstan": {"head": "cmdstan-head"}}
+        self.vector = self.root / "vectorized"
+        self.sources = {}
+        self.add_source("old", ("good", "failed"), cmdstan_factor=2)
         self.provenance = dict(source_sha="a" * 40, binary_sha256="b" * 64,
             patch_sha256="c" * 64, optimization="O1 plus vectorize_loops",
             build_commands=["opam exec -- dune build"])
+        self.combined = {"stanli_run_id": "current",
+                         "cmdstan_runs": {"good": "old", "failed": "old"}}
+
+    def add_source(self, run_id, models, cmdstan_factor=1, stanli_factor=3):
+        from benchmark_artifact_fixture import artifact_fixture
+        manifest, records, _ = artifact_fixture()
+        manifest["run_id"] = run_id
+        identity = manifest["identity"]
+        identity["toolchains"] = {"cmdstan": {"head": "cmdstan-head"}}
+        identity["config"]["stancflags"] = "--O1"
+        identity["executables"]["bench"] = "older-bench-hash"
+        records = [r for r in records if r["model"] in models]
+        identity["inputs"] = {m: identity["inputs"][m] for m in models}
+        if len(models) == 1:
+            identity["config"]["filter"] = models[0]
+        for record in records:
+            record["row"]["run_id"] = run_id
+            if record["status"] == "ok":
+                _scale_engine(record, "cmdstan", cmdstan_factor)
+                _scale_engine(record, "stanli", stanli_factor)
+        self.sources[run_id] = (manifest, records)
+
+    def write(self):
+        from benchmark_artifact_fixture import write_artifacts
+        default_dir = self.root / "default"
+        default_dir.mkdir(exist_ok=True)
+        manifest, records, rows = self.default
+        write_artifacts(default_dir / "benchmark-summary.tsv", default_dir / "model-results.json.gz",
+                        default_dir / "benchmark-manifest.json", rows, records, manifest)
+        for run_id, (manifest, records) in self.sources.items():
+            run = self.vector / "cmdstan-runs" / run_id
+            run.mkdir(parents=True, exist_ok=True)
+            write_artifacts(run / "benchmark-summary.tsv", run / "model-results.json.gz",
+                            run / "benchmark-manifest.json",
+                            [copy.deepcopy(r["row"]) for r in records], records, manifest)
+        self.vector.mkdir(exist_ok=True)
+        (self.vector / "compiler-provenance.json").write_text(json.dumps(self.provenance))
+        (self.vector / "combined.json").write_text(json.dumps(self.combined))
+        return default_dir
 
     def render(self):
-        from benchmark_artifact_fixture import write_artifacts
-        write_artifacts(self.paths[0], self.paths[2], self.paths[1],
-                        self.rows, self.records, self.manifest)
-        self.paths[3].write_text(json.dumps(self.provenance))
-        self.paths[4].write_text(json.dumps(self.baseline))
-        return self.render_catalog(*self.paths)
+        from tools.corpus_table import render_gradient_catalog
+        default_dir = self.write()
+        return render_gradient_catalog(self.vector, default_dir)
 
-    def test_vectorized_comparison_uses_same_workload_and_tables(self):
-        from tools.corpus_table import render_catalog
+
+class VectorizedCatalogTests(VectorizedFixture):
+    def test_stanli_side_comes_from_default_run_and_cmdstan_side_from_reused_run(self):
         rendered = self.render()
-        default = render_catalog(self.paths[0], self.paths[2], self.paths[1])
-        self.assertEqual(rendered.split("\n\n", 1)[1], default.split("\n\n", 1)[1])
-        self.assertIn("1.42x", rendered)
-        self.assertNotIn("| 2x |", rendered)
+        self.assertIn("| `good` | 4x |", rendered)
         self.assertIn("| 0.121 | 2.2 |", rendered)
         self.assertIn("`failed` | — | — | — | failed; gradient build failed", rendered)
+        self.assertIn("reused from run `old`", rendered)
+        self.assertIn("2026-09-21", rendered)
+        self.assertNotIn("paired", rendered.split("\n\n", 1)[0])
 
-    def test_default_inputs_and_executables_must_match(self):
-        for field in ("inputs", "bench", "vectorize_probe"):
-            baseline = copy.deepcopy(self.baseline)
-            if field == "inputs":
-                self.baseline["identity"]["inputs"]["good"]["data"] = "changed"
-            else:
-                self.baseline["identity"]["executables"][field] = "changed"
-            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "differ"):
-                self.render()
-            self.baseline = baseline
+    def test_models_missing_from_the_reused_run_take_a_supplement_run(self):
+        self.add_source("supp", ("good",), cmdstan_factor=3)
+        self.combined["cmdstan_runs"]["good"] = "supp"
+        rendered = self.render()
+        self.assertIn("| `good` | 6x |", rendered)
+        self.assertIn("run `supp`", rendered)
+
+    def test_stanli_run_must_be_the_default_run(self):
+        self.combined["stanli_run_id"] = "other"
+        with self.assertRaisesRegex(ValueError, "Stanli run"):
+            self.render()
+
+    def test_every_default_model_needs_a_cmdstan_source(self):
+        del self.combined["cmdstan_runs"]["failed"]
+        with self.assertRaisesRegex(ValueError, "inventory"):
+            self.render()
+
+    def test_cmdstan_inputs_must_match_default_inputs(self):
+        self.sources["old"][0]["identity"]["inputs"]["good"]["data"] = "changed"
+        self.sources["old"][1][0]["inputs"]["data"] = "changed"
+        with self.assertRaisesRegex(ValueError, "input"):
+            self.render()
+
+    def test_cmdstan_toolchain_must_match_default_run(self):
+        self.sources["old"][0]["identity"]["toolchains"]["cmdstan"]["head"] = "newer"
+        with self.assertRaisesRegex(ValueError, "toolchain"):
+            self.render()
+
+    def test_gradient_protocol_must_match_default_run(self):
+        self.sources["old"][0]["identity"]["config"]["measure_ms"] = 300
+        with self.assertRaisesRegex(ValueError, "configuration differs"):
+            self.render()
+        self.sources["old"][0]["identity"]["config"]["measure_ms"] = 250
+        self.sources["old"][0]["identity"]["threads"] = {"STAN_NUM_THREADS": "2"}
+        with self.assertRaisesRegex(ValueError, "thread"):
+            self.render()
 
     def test_compiler_provenance_must_match(self):
         for field, value in (("binary_sha256", "d" * 64), ("patch_sha256", ""),
@@ -710,15 +789,57 @@ class VectorizedCatalogTests(unittest.TestCase):
                 self.render()
             self.provenance = provenance
 
-    def test_default_and_optimized_protocols_must_match(self):
-        self.baseline["identity"]["config"]["rounds"] = 5
-        with self.assertRaisesRegex(ValueError, "configuration differs"):
-            self.render()
-
     def test_current_optimized_flags_are_required(self):
-        self.manifest["identity"]["config"]["stancflags"] = ""
+        self.sources["old"][0]["identity"]["config"]["stancflags"] = ""
         with self.assertRaisesRegex(ValueError, "requires O1"):
             self.render()
+
+    def test_new_stanli_values_must_agree_with_reused_cmdstan_values(self):
+        for pair in self.sources["old"][1][0]["gradients"]:
+            pair["cmdstan"]["values"] = [-1.0, 2.001]
+            pair["stanli"]["values"] = [-1.0, 2.001]
+        rendered = self.render()
+        complete, incomplete = rendered.split("**Incomplete results**")
+        self.assertNotIn("`good`", complete)
+        self.assertRegex(incomplete, r"`good` \| — \|.*mismatch")
+
+
+class PublishVectorizedTests(VectorizedFixture):
+    def test_filtered_supplement_run_publishes_with_its_filter_recorded(self):
+        from tools.publish_corpus_bench import publish
+        from benchmark_artifact_fixture import write_artifacts
+        manifest, records = self.sources["old"]
+        manifest["identity"]["config"]["filter"] = "good"
+        manifest["identity"]["inputs"] = {"good": manifest["identity"]["inputs"]["good"]}
+        records = records[:1]
+        summary = self.root / "supp.tsv"
+        run = pathlib.Path(str(summary) + ".run")
+        run.mkdir()
+        write_artifacts(summary, self.root / "unused.json.gz", run / "manifest.json",
+                        [copy.deepcopy(records[0]["row"])], records, manifest)
+        (run / "good.result.json").write_text(json.dumps(records[0]))
+        (run / "events.jsonl").write_text("")
+        with contextlib.redirect_stdout(io.StringIO()):
+            publish(summary, self.root / "published")
+        published = json.loads((self.root / "published/benchmark-manifest.json").read_text())
+        self.assertEqual(published["identity"]["config"]["filter"], "good")
+        self.assertIn("`good`", (self.root / "published/README.md").read_text())
+
+    def test_publish_maps_each_model_to_the_last_run_that_has_it(self):
+        from tools.publish_corpus_bench import publish_vectorized
+        self.add_source("supp", ("good",), cmdstan_factor=3)
+        default_dir = self.write()
+        (self.vector / "combined.json").unlink()
+        runs = [self.vector / "cmdstan-runs" / name for name in ("old", "supp")]
+        publish_vectorized(self.vector, default_dir, runs)
+        combined = json.loads((self.vector / "combined.json").read_text())
+        self.assertEqual(combined, {"stanli_run_id": "current",
+                                    "cmdstan_runs": {"failed": "old", "good": "supp"}})
+        readme = (self.vector / "README.md").read_text()
+        self.assertIn("| `good` | 6x |", readme)
+        sums = (self.vector / "SHA256SUMS").read_text()
+        self.assertIn("combined.json", sums)
+        self.assertIn("README.md", sums)
 
 
 if __name__ == "__main__":

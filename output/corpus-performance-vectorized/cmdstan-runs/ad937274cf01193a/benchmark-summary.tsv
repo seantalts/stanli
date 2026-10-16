@@ -1,0 +1,2 @@
+model	params	stanli_compile_s	stanli_prep_s	cmdstan_stanc_s	cmdstan_build_s	stanli_ns_grad	cmdstan_ns_grad	stanli_ns_grad_mad	cmdstan_ns_grad_mad	paired_speedup	paired_speedup_mad	paired_rounds	gradient_budget	stanli_estimated_s	cmdstan_estimated_s	run_id	note
+ctsem_ctsm_400	1621	0.041457625	0.6546762085	17.684833667	439.658583708	10599078.895833332	21693159.75	295388.2034782609	153371.5833333321	2.0523395408536302	0.07484885072083336	6	20000	212.67771175016665	891.2066123750001	ad937274cf01193a	""

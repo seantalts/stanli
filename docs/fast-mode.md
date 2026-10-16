@@ -54,7 +54,7 @@ steps. Fast mode changes the compiled MIR as well as the runtime.
 ## How much faster
 
 On the shared test corpus (336 models with timings, Apple M3 Ultra,
-2026-10-10, default and fast mode from the same build):
+2026-10-10, Stanli 0.20.0, default and fast mode from the same build):
 
 - Fast mode is 2.03x faster than default mode in geometric mean. The median
   model is 1.06x faster: most models gain little, and models with repeated
