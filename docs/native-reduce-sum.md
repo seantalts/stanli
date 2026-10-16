@@ -1,22 +1,15 @@
 # Native within-chain reductions
 
-Native C++, C, Python, R and `stanli_run` can opt into within-chain `reduce_sum` and
-`reduce_sum_static` parallelism. Build with `-DSTANLI_THREADS=ON`.
+Native C++, C, Python, R and `stanli_run` can run `reduce_sum` and
+`reduce_sum_static` in parallel within a chain. Build with
+`-DSTANLI_THREADS=ON`. The default is one thread per chain, and the web build
+stays serial within each chain.
+
+## Using it
 
 ```sh
 stanli_run model.stan data.json --chains 4 --num-threads 2 --threads-per-chain 4
 ```
-
-`--num-threads` limits simultaneously sampled chains; `--threads-per-chain`
-includes each chain's sampling thread. This example uses up to eight active
-sampling threads. Worker teams persist for each chain, including while that
-chain is idle. The CLI reports how many reduction sites were retained. Zero
-means all sites use the ordinary serial path. The CLI prints graph-lowering
-refusal reasons; C++ callers can inspect `CompiledModel::reduce_sum_fallbacks`.
-The default remains one thread. The Web interface remains serial within each chain.
-When a model with a large `reduce_sum` runs at one thread, the CLI prints a
-one-line note saying so. The note is a cheap size check, so a call it names may
-still be refused when threads are requested; the refusal reasons then say why.
 
 ```python
 fit = model.sample(chains=4, parallel_chains=2, threads_per_chain=4)
@@ -30,23 +23,31 @@ fit$model$reduce_sum_fallbacks
 # Also accepted by sample_cstan() and cstan_model(code)$sample().
 ```
 
-These examples use up to eight active sampling threads. Changing the thread
-setting prepares a new graph before sampling; worker teams and child storage
-persist across gradients. Python updates the model in place; R returns the
-prepared model in `fit$model`. Construction also accepts `threads_per_chain`
-for direct gradient calls. Sampling has its own setting, defaulting to one.
-Counts and refusal reasons describe graph lowering, not opaque runtime regions.
-A count of zero means the model has no retained native parallel reductions.
-Thread counts must be positive integers. Values above one require a thread-safe
-runtime and the new constructor entry points; older runtimes still support
-serial calls but reject requests for within-chain parallelism.
+Each example runs at most two chains at once with four threads each, so up to
+eight sampling threads are active. The thread count per chain includes the
+chain's own sampling thread. Thread counts must be positive integers.
+
+Changing the thread setting prepares a new graph before sampling. Python
+updates the model in place; R returns the prepared model in `fit$model`.
+Constructors also accept `threads_per_chain` for direct gradient calls;
+sampling has its own setting, which defaults to one. A thread count above one
+needs a thread-safe runtime and the new constructor entry points. Older
+runtimes still run serially and reject requests for within-chain parallelism.
+
+The reduction count says how many `reduce_sum` calls were kept parallel; zero
+means every call uses the ordinary serial path. The fallback reasons say why a
+call was refused. Both describe graph lowering and do not cover opaque runtime
+regions. The CLI prints the count and the reasons. When a model with a large
+`reduce_sum` runs at one thread, the CLI prints a note saying so. The note is a
+cheap size check, so a call it names may still be refused when threads are
+requested.
 
 C callers use `stanli_model_new_threaded` or
-`stanli_model_new_from_stan_threaded`, supplying the construction seed and thread
-count. The model owns its worker team, and multi-chain sampling supplies teams
-for its executor clones. Existing C constructors and sampling structs keep their
-ABI and serial defaults. `stanli_reduce_sum_count` and
-`stanli_reduce_sum_fallbacks` expose the same diagnostics.
+`stanli_model_new_from_stan_threaded`, which take the construction seed and the
+thread count. The model owns its worker team, and multi-chain sampling gives
+each executor clone its own team. The existing C constructors and sampling
+structs keep their ABI and serial defaults. `stanli_reduce_sum_count` and
+`stanli_reduce_sum_fallbacks` return the same diagnostics.
 
 ```cpp
 #include <stanli/compile.hpp>
@@ -62,51 +63,58 @@ executor.set_reduce_context(&workers);
 // Use executor.gradient(...) or pass executor to the native sampler.
 ```
 
-The context is caller-owned and must outlive evaluations using it. Give each
-concurrently evaluated executor its own context. Clones rebuild private child
-state and start without an attached context. A retained graph also works
-sequentially without a context, with the same partition and summation order.
-Compiling with one thread selects the established whole-slice lowering instead.
+In C++ the context belongs to the caller and must outlive the evaluations that
+use it. Give each executor that runs concurrently its own context. Clones
+rebuild their private child state and start with no context attached. A
+parallel graph also runs sequentially without a context, with the same
+partition and summation order. Compiling with one thread selects the ordinary
+whole-slice lowering. C++ callers can read refusal reasons from
+`CompiledModel::reduce_sum_fallbacks`.
 
-Eligible calls have fixed shapes, a known positive grainsize, pure callbacks,
-and transparent child graphs whose input reads can be bounded statically.
-Runtime control or dynamic indexing, opaque/stateful kernels, callback effects,
-and unsupported child layouts conservatively keep the ordinary lowering.
-Immutable bound/dimension-check payloads are supported and stay in the child,
-as are per-observation loops that lower to a region map, which is the form
-brms `threading()` partial sums take.
-Argument evaluation and grainsize validation still occur once per call.
-Nested reductions run serially within a retained outer child. Calls in retained
-control-flow regions and generated quantities currently keep their serial path.
+## Which calls run in parallel
 
-Ordinary reductions use at most the requested compile-time number of chunks;
-static reductions use deterministic grainsize-sized chunks. Child counts above
-`reduce_sum_max_chunks` (default 1024) and one-chunk calls stay serial. So do
-calls with too little work: the first child is lowered and its work is
-estimated as 0.3 ns per region-map instruction per iteration plus 0.8 ns per
-element touched by any other operation. Each chunk must cover at least
-`reduce_sum_min_chunk_ns` (default 30 us) of that estimate, so a small slice
-stays serial and a moderate one uses fewer chunks than threads. The estimate
-was calibrated on four callbacks; against their measured serial time it ranges
-from 0.45x to 1.1x, and the refusal reason prints it. Actual benefit still
-depends on callback cost and memory bandwidth. Because the chunk count sets the summation order,
-it is a function of the data, the model and the thread count, and never of
-thread scheduling. Dispatch costs about 8 us per thread per gradient.
-Fixed partitions are deterministic across worker schedules; changing the
-compile-time partition may change floating-point rounding and resulting
-sampling trajectories.
+An eligible call has fixed shapes, a known positive grainsize, a pure
+callback, and child graphs whose input reads can be bounded statically.
+Immutable bound and dimension checks are allowed, as are per-observation loops
+that lower to a region map, which is the form brms `threading()` partial sums
+take. Runtime control flow, dynamic indexing, opaque or stateful kernels,
+callback side effects and unsupported child layouts keep the serial lowering.
+So do calls inside retained control-flow regions and generated quantities.
+Nested reductions run serially inside a parallel outer child. Arguments are
+evaluated and the grainsize validated once per call.
 
-Each child retains its compact values, adjoints, scratch and gradient buffer.
-Data arguments whose values are known at preparation are stored once in the
-reduction, and every child and chain clone views that copy instead of keeping
-its own and importing it on each gradient. A child whose body lowers to a
-region map still copies the ranges it reads into its own registers when it
-runs. Parameter-dependent inputs are copied per evaluation, and only the
-ranges a child reads. Forward and
-reverse dispatch separately, so reverse uses the actual incoming adjoint even
-inside nonlinear expressions. Shared input gradients merge in fixed child order.
-Buffers and threads are reused; kernels and exceptional paths may still allocate.
-A failed job drains the team before propagating the first error in chunk order,
-and a later fresh gradient can reuse the executor.
+`reduce_sum` uses at most the requested number of chunks, and
+`reduce_sum_static` uses chunks of exactly the grainsize. Calls with more than
+`reduce_sum_max_chunks` children (default 1024), with one chunk, or with too
+little work stay serial. Work is estimated from the first child as 0.3 ns per
+region-map instruction per iteration plus 0.8 ns per element touched by any
+other operation. Each chunk must cover at least `reduce_sum_min_chunk_ns` of
+that estimate (default 30 us), so a small slice stays serial and a moderate one
+uses fewer chunks than threads. On the four callbacks used for calibration, the
+estimate ranged from 0.45x to 1.1x of the measured serial time; the refusal
+reason prints it. The actual benefit depends on callback cost and memory
+bandwidth. Dispatch costs about 8 us per thread per gradient.
 
-Validation and benchmark evidence: [integration record](internal/archive/plans/2026-09-18-native-reduce-sum-integration.md).
+## Determinism
+
+The chunk count sets the summation order, so it depends on the data, the model
+and the thread count, and never on thread scheduling. Results are the same
+across runs with the same settings. Changing the thread count can change
+floating-point rounding and therefore the sampling trajectory.
+
+Forward and reverse passes dispatch separately, so the reverse pass uses the
+actual incoming adjoint even inside nonlinear expressions. Gradients of shared
+inputs merge in fixed child order. A failed job lets the team finish, then
+reports the first error in chunk order; a later gradient can reuse the
+executor.
+
+## Memory
+
+Each child keeps its own values, adjoints, scratch and gradient buffer. Data
+arguments known at preparation are stored once in the reduction, and every
+child and chain clone reads that copy. A child whose body lowers to a region
+map still copies the ranges it reads into its own registers when it runs.
+Parameter-dependent inputs are copied on each evaluation, limited to the
+ranges a child reads. Worker teams persist for each chain, including while it
+is idle, and buffers and threads are reused across gradients; kernels and
+error paths may still allocate.

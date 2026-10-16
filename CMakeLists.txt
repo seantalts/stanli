@@ -155,7 +155,7 @@ endif()
 # Off everywhere, browser included. The browser build used to default it
 # on to save 7 MB of wasm, which meant the demo reported an lp__ nobody
 # could compare against CmdStan. Every build now reports the same lp__.
-# See density_tier in optable.hpp and docs/lite-lp.md.
+# See density_tier in optable.hpp and docs/lp-constant.md.
 option(STANLI_LITE_LP
   "Drop the propto instantiation family: half the size, lp__ off by a constant"
   OFF)
