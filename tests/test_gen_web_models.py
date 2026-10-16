@@ -14,7 +14,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 
 import gen_docs
-from gen_web_models import DRAWS_MIN, benchmark_fields
+from gen_web_models import benchmark_fields
 
 
 class CurrentBenchmarkTests(unittest.TestCase):
@@ -111,20 +111,12 @@ class BrowserBenchmarkTests(unittest.TestCase):
     def test_ratio_uses_paired_measurement_instead_of_ratio_of_medians(self):
         fields = benchmark_fields({"stanli_ns_grad": "100", "cmdstan_ns_grad": "200",
                                    "paired_speedup": "1.8", "params": "7", "stanli_sample_s": "4"})
-        self.assertEqual(fields, {"speedup": 1.8, "us": .1, "params": 7,
-                                  "warmup": 100, "samples": 100})
-
-    def test_draw_defaults_do_not_infer_sampling_duration_from_proxy(self):
-        for estimate in (0.001, 10000):
-            fields = benchmark_fields({"stanli_estimated_s": str(estimate)})
-            self.assertEqual(fields["warmup"], DRAWS_MIN)
-            self.assertEqual(fields["samples"], DRAWS_MIN)
+        self.assertEqual(fields, {"speedup": 1.8, "us": .1, "params": 7})
 
     def test_missing_paired_ratio_does_not_fall_back_to_median_ratio(self):
         fields = benchmark_fields({"stanli_ns_grad": "100", "cmdstan_ns_grad": "200",
                                    "paired_speedup": "", "stanli_sample_s": ""})
         self.assertNotIn("speedup", fields)
-        self.assertEqual(fields["samples"], DRAWS_MIN)
 
 
 if __name__ == "__main__":

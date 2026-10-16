@@ -477,17 +477,12 @@ async function choose(m) {
   ].filter(Boolean).join(" · ");
   $("note").innerHTML = `<b>${esc(m.name)}</b>. ${esc(m.note)}` +
       (stats ? ` <span class="stats">(${esc(stats)})</span>` : "");
+  $("warmup").value = $("samples").value = 1000;
   if (m.builtin) {
-    $("warmup").value = $("samples").value = 1000;
     $("code").value = PRESETS[m.builtin].code;
     $("data").value = PRESETS[m.builtin].data();
     return;
   }
-  // Heavier models ask for fewer draws than the toy presets rather than
-  // looking hung; gen_web_models.py picks the count from the reference
-  // sampling time.
-  $("warmup").value = m.warmup;
-  $("samples").value = m.samples;
   $("code").value = $("data").value = "loading...";
   const get = (p) => fetch(p).then((r) => {
     if (!r.ok) throw new Error(`${p}: ${r.status}`);
