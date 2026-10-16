@@ -8,15 +8,17 @@ C++ toolchain on the machine.
 [![License](https://img.shields.io/pypi/l/stanli.svg)](https://github.com/seantalts/stanli/blob/main/LICENSE)
 [![wheels](https://github.com/seantalts/stanli/actions/workflows/wheels.yml/badge.svg)](https://github.com/seantalts/stanli/actions/workflows/wheels.yml)
 
+## Install
+
 ```console
 pip install stanli
 ```
 
-That is the whole install. No compiler, no `make`, no CmdStan checkout,
-no multi-minute first-run build. One wheel, one shared library, under
-eight megabytes. Models run without a per-model C++ build; see the
-[current benchmark](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
-for measured gradients and setup-plus-2,000-gradient time estimates.
+That is the whole install. There is no compiler, no `make`, no CmdStan
+checkout, and no first-run build. The wheel is about 11 MB and holds one
+shared library with the Stan compiler, stan-math and the sampler.
+
+## Quick start
 
 ```python
 import stanli
@@ -28,30 +30,34 @@ fit["mu"].mean()        # every draw of a column, chains concatenated
 fit.draws("mu")         # (chains, draws), for a trace plot
 ```
 
-Stan `#include` directives automatically search the directory containing
-`stan_file`. Add shared directories with `include_paths`:
+`stan_code=` takes the model source as a string. `data` is a path to a JSON
+file or a dict of Python scalars, lists and NumPy arrays.
+
+Stan `#include` directives search the directory containing `stan_file`. Add
+shared directories with `include_paths`; they are searched in order, then the
+file's directory (the current directory for `stan_code`):
 
 ```python
 model = stanli.Model(stan_file="models/model.stan", data="data.json",
                      include_paths=["shared", "vendor/stan"])
 ```
 
-Explicit directories are searched in order, then the input file's directory.
-For `stan_code`, the final search directory is the current directory. Nested
-includes use the same search path; for example, `#include nested/helper.stan`
-looks beneath each search directory. `Function`, `stan_to_mir`, and
-`bridgestan_model` also accept `include_paths`. Constructed models retain the
-compiled includes, so later sampling does not reread files that may have changed.
+A constructed model keeps its compiled includes, so later sampling does not
+reread the files.
 
-`Model(..., fast_math=True)` and `stan_to_mir(..., fast_math=True)` opt in to
-fast mode, which compiles with fused multiply-adds, lets the runtime regroup
-sums, and evaluates likelihood terms that repeat over the data once per
-distinct case. Results can differ from the default in the last bits. It is off
-by default and needs the bundled portable compiler (`stanli-compile`) or an
-embedded build. See [fast mode](../docs/fast-mode.md).
+`Model(..., fast_math=True)` opts in to
+[fast mode](https://github.com/seantalts/stanli/blob/main/docs/fast-mode.md):
+faster gradients, with results that can differ from the default in the last
+bits.
 
-Sampling reports CmdStan-shaped progress every 100 transitions by default,
-followed by per-chain warm-up, sampling, and total times:
+## Sampling and diagnostics
+
+Four chains run in parallel by default. R-hat needs more than one chain. Each
+chain owns its executor and RNG stream, so the draws are byte-identical to a
+sequential run. Eight schools runs all four chains in about 70 ms.
+
+Sampling prints CmdStan-style progress every 100 transitions, then per-chain
+times:
 
 ```text
 Chain [1] Iteration:    1 / 2000 [  0%]  (Warmup)
@@ -64,33 +70,12 @@ Chain [1] Elapsed Time: 0.821 seconds (Warm-up)
                         0.990 seconds (Total)
 ```
 
-Set `refresh=0` for a completely quiet run, or another positive integer to
-change the update interval. Progress is written through Python's `sys.stdout`,
-so notebook output and `contextlib.redirect_stdout()` work normally. Reporting
-only observes completed transitions: changing `refresh` does not change draws,
-sampler statistics, generated-quantity RNG streams, or reproducibility. If any
-post-warmup transition diverges or saturates the maximum treedepth, the final
-output also reports the aggregate count. Those counts cover all transitions,
-including transitions omitted by thinning.
-
-For models using `reduce_sum` or `reduce_sum_static`, opt into native
-within-chain parallelism with `model.sample(threads_per_chain=4,
-parallel_chains=2)`. This uses up to eight active sampling threads. The default
-is one thread per chain; small or unsupported reductions stay serial. Inspect
-`model.reduce_sum_count` and `model.reduce_sum_fallbacks` after sampling for
-retained reductions and graph-lowering refusals. Changing the thread setting
-rebuilds the prepared model and can change reduction rounding and NUTS draws.
-The runtime must have thread support. See the
-[native reduction guide](https://github.com/seantalts/stanli/blob/main/docs/native-reduce-sum.md)
-for eligibility and memory behavior.
-
-## Chains and convergence
-
-Four chains by default, run in parallel, because R-hat needs more than
-one and a single-chain run cannot be checked for convergence at all.
-Eight schools does all four in about 70 ms. Scheduling chains changes nothing
-about the answer: each chain owns its executor and its RNG stream, so
-the draws come out byte-identical to a sequential run.
+`refresh=0` silences it; another positive integer changes the interval.
+Output goes through `sys.stdout`, so notebooks and
+`contextlib.redirect_stdout()` work. Progress never changes draws or RNG
+streams. If any post-warmup transition diverges or hits the maximum treedepth,
+the final output reports the count. Ctrl-C stops every chain after its current
+transition and raises `KeyboardInterrupt`.
 
 ```python
 print(fit.summary())
@@ -102,9 +87,9 @@ mu                4.4600     0.0532     3.1705    -0.7414     4.5519     9.5384 
 tau               3.4752     0.0635     3.1612     0.2192     2.6680     9.6313       2160       1874      1.001
 ```
 
-R-hat is rank-normalized split-R-hat and ESS is the bulk/tail pair
-(Vehtari et al. 2021), computed by stan's own estimators, so the
-numbers agree with `stansummary` rather than approximating it.
+R-hat is rank-normalized split R-hat and ESS is the bulk/tail pair
+(Vehtari et al. 2021), computed by Stan's own estimators, so the numbers match
+`stansummary`.
 
 ```python
 print(fit.diagnose())
@@ -120,14 +105,45 @@ Tail ESS is at least 100 per chain for every parameter (worst 1874, tau).
 No problems detected.
 ```
 
-Those are the checks a Bayesian workflow actually turns on, including
-E-BFMI, the one that catches a badly explored heavy tail, which R-hat
-and ESS are both blind to. The pieces are reachable individually too:
-`fit.divergences`, `fit.max_treedepth_hits`, `fit.stepsize` and
-`fit.ebfmi()` are per-chain arrays, and `fit.to_arviz()` hands off an
-InferenceData with the sampler stats attached.
+E-BFMI catches a badly explored heavy tail that R-hat and ESS both miss.
+`fit.divergences`, `fit.max_treedepth_hits`, `fit.stepsize` and `fit.ebfmi()`
+are per-chain arrays, and `fit.to_arviz()` returns an ArviZ InferenceData with
+the sampler statistics attached.
 
-## The mode, and where to start
+### Metric and step size
+
+`metric` is `"diag_e"` (the default), `"dense_e"` or `"unit_e"`, as in CmdStan.
+`inv_metric` sets the starting inverse metric: shape `(n,)` for `"diag_e"` or
+`(n, n)` for `"dense_e"`, shared by every chain, or one per chain. `step_size`
+sets the initial step size (default 1). `adapt_engaged=False` turns adaptation
+off, so the metric and step size stay as given.
+
+After sampling, `fit.metric`, `fit.step_size` and `fit.inv_metric` hold what
+each chain adapted. A pilot fit can start a later one:
+
+```python
+pilot = model.sample(seed=1, metric="dense_e")
+fit = model.sample(seed=2, metric="dense_e", warmup=0, adapt_engaged=False,
+                   inv_metric=pilot.inv_metric,
+                   step_size=float(pilot.step_size.mean()))
+```
+
+With fewer than 150 warmup iterations Stan does not adapt the metric, and a
+supplied one is kept.
+
+### Within-chain parallelism
+
+For models using `reduce_sum` or `reduce_sum_static`,
+`model.sample(threads_per_chain=4, parallel_chains=2)` runs eligible
+reductions on up to eight threads. Small or unsupported reductions stay
+serial; `model.reduce_sum_count` and `model.reduce_sum_fallbacks` report what
+was kept. Changing the thread count rebuilds the model and can change rounding
+and therefore the draws. See
+[native reductions](https://github.com/seantalts/stanli/blob/main/docs/native-reduce-sum.md).
+
+## Other algorithms
+
+`optimize()` runs Stan's L-BFGS and returns the posterior mode:
 
 ```python
 r = model.optimize(seed=1)
@@ -137,17 +153,26 @@ r.unconstrained        # the point on the sampler's scale
 fit = model.sample(inits=r.unconstrained)   # start the chains there
 ```
 
-L-BFGS, stan's own, the one behind CmdStan's `optimize`. It returns the
-posterior **mode**. CmdStan's `optimize` defaults to `jacobian=0`, the
-penalized maximum likelihood, and stanli cannot offer that: the
-change-of-variables Jacobian is folded into the graph when the model is
-lowered. `jacobian=False` raises rather than quietly handing back the
-other quantity.
+`pathfinder_init` fits single-path Pathfinder and draws one NUTS start per
+chain from it. The sampling seed controls both stages, and `{}` uses CmdStan's
+defaults:
+
+```python
+fit = model.sample(chains=4, seed=303,
+                   pathfinder_init={"num_iterations": 500, "num_elbo_draws": 25})
+```
+
+The other options are `history_size` and Pathfinder's own `init_radius`. It
+cannot be combined with `inits`, and a single path does no PSIS resampling.
+
+Standalone Pathfinder, ADVI and Laplace draws are available from the
+[R package](https://github.com/seantalts/stanli/blob/main/r/README.md#other-algorithms)
+only.
 
 ## Call a Stan function from Python
 
-`Function` exposes a pure, value-returning Stan user-defined function without
-building a model or compiling C++. Source compilation happens once:
+`Function` calls a pure, value-returning Stan user-defined function without
+building a model. The source compiles once:
 
 ```python
 source = """
@@ -162,181 +187,88 @@ affine = stanli.Function("affine", stan_code=source)
 affine(x=[1, 2, 4], a=2.5, b=-1)  # array([1.5, 4.0, 9.0])
 ```
 
-Use `stan_file="functions.stan"` instead of `stan_code`, or pass
-`mir=stanli.stan_to_mir(source)` to reuse cached compilation. Calls take
-keyword arguments or one mapping, such as `affine({"x": x, "a": 2.5, "b": -1})`.
-Scalars return Python `float`/`int`; vectors, matrices, and arrays return owned
-NumPy arrays with the same logical shape. Inputs can be rectangular lists or
-NumPy arrays, including strided views. The adapter uses typed numeric buffers,
-not JSON.
+Use `stan_file=` instead of `stan_code`, or pass
+`mir=stanli.stan_to_mir(source)` to reuse a compilation. Calls take keyword
+arguments or one mapping. Scalars come back as `float` or `int`; vectors,
+matrices and arrays come back as NumPy arrays with the declared shape.
+Integers must fit Stan's 32-bit range. Select an ambiguous overload by its
+resolved name, such as `f(real,vector)`, and pass an integer-dtype array for an
+empty integer argument. Complex, void, RNG and `_lp` functions are not
+callable this way. Reuse a `Function` handle across calls; its lookup tables
+are built once.
 
-Integer inputs must fit Stan's 32-bit integers and promote to real formals.
-Overloads are selected using argument names, rank, and numeric type; select an
-ambiguous overload explicitly with a resolved name such as `f(real,vector)`.
-For empty integer arguments, supply an integer-dtype NumPy array (`[]` defaults
-to real). This is the native value-only interpreter, not autodiff: complex,
-void, RNG, and `_lp` entry points are outside this interface.
-
-From a repository checkout, compare an installed wheel's steady-state calls
-with plain Python and NumPy:
-
-```sh
-python tools/bench_python_function.py
-```
-
-For a development build, stage the Release library in `python/stanli/_bin/`
-and prefix the command with `PYTHONPATH=python`.
-The benchmark excludes one-time compilation from call latency, checks the
-answers first, alternates implementations, and reports medians and IQRs.
-
-Reuse a `Function` handle across calls: its native function lookup tables are
-cached at construction. Exact Python `float` and `int` arguments use a direct
-scalar path; NumPy scalars and other array-like values retain NumPy conversion.
-Overload selection, integer bounds, and shape validation still apply on every
-call. See the [optimization measurements and four-way A/B command](../docs/internal/archive/plans/2026-08-30-python-function-overhead.md)
-for separate measurements of scalar packing and native lookup caching.
-
-## How it works
-
-Every Stan model is a composition of a fixed vocabulary of operations:
-densities, constraint transforms, linear algebra, elementwise math.
-stanli ships those precompiled and turns each model into *data*, a
-static graph of ops over flat preallocated buffers, instead of
-generating and compiling C++ per model. The graph doubles as the
-autodiff tape, so a reverse sweep is a backwards loop over an array,
-and steady-state gradient evaluation allocates nothing.
-
-Two things are not reimplemented, which is what makes the results
-trustworthy: the compiler is the real stanc3 plus the stanli OCaml pipeline,
-embedded in the runtime on macOS and Linux and packaged as an executable on
-Windows, and the math is unmodified stan-math, the same code CmdStan runs.
-
-## Correctness
-
-Nothing here ships on "looks close".
-
-**<!--gen:corpus_verified_of-->118 of 120<!--/gen--> posteriordb models**
-are differentially verified against CmdStan: same model, same data, same
-evaluation point, comparing the log density and every single gradient
-component. **<!--gen:corpus_bitwise-->55<!--/gen--> agree bitwise.** The
-worst deviation among these verified posteriordb models is
-**<!--gen:corpus_worst-->7.1e-13<!--/gen--> relative**.
-
-The two exceptions are documented rather than hidden. `sir`'s ODE
-solution dips about 1e-9 below a declared lower bound at the shared
-evaluation point, where CmdStan rejects it too; `kronecker_gp` matches
-on the log density and 436 of 438 gradients, differing on the two that
-flow through eigenvectors of a nearly degenerate covariance matrix.
-
-Full per-model accuracy table:
-[docs/corpus-status.md](https://github.com/seantalts/stanli/blob/main/docs/corpus-status.md)
-
-## Performance
-
-In the <!--gen:benchmark_date-->2026-10-15<!--/gen--> native run,
-<!--gen:corpus_n_grad-->337<!--/gen--> of
-<!--gen:benchmark_models-->343<!--/gen--> models produced paired gradient
-measurements. The median CmdStan/Stanli ratio was
-<!--gen:corpus_median-->2.11x<!--/gen-->, with
-<!--gen:corpus_at_par-->320<!--/gen--> at or above parity.
-
-Stanli avoids a per-model C++ build and can combine repeated work into fewer
-runtime operations. Dense kernels and serial dependencies offer fewer such
-opportunities; the model and data determine the result.
-
-The [current full table and method](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md)
-include every model, failed or capped measurement, and the explicit cost-estimate formula.
-The [optimized-reference appendix](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md#cmdstan-with-stanc3-loop-vectorization)
-compares against CmdStan with stanc3 O1 and loop vectorization enabled.
-
-## API
-
-The surface is small on purpose.
+## API reference
 
 ```python
 import stanli
 
-# A path to a .stan file, or the model source directly.
 model = stanli.Model(stan_file="model.stan", data="data.json")
-model = stanli.Model(stan_code=src, data={"J": 8, "y": y, "sigma": sigma})
+model = stanli.Model(stan_code=src, data={"J": 8, "y": y, "sigma": sigma},
+                     include_paths=None, fast_math=False)
 
 model.n_unconstrained               # length of the unconstrained vector
 model.constrained_names             # ['mu', 'tau', 'theta[1]', ...]
+model.unconstrain({"mu": 0.5})      # constrained values -> unconstrained vector
+lp, grad = model.log_prob_grad(q)   # log density and gradient at q
 
-lp, grad = model.log_prob_grad(q)   # sampling log density and its gradient
-
-fit = model.sample(seed=1, warmup=1000, samples=1000, delta=0.8,
-                   refresh=100)
-fit["theta"]                        # (chains*draws, 8) ndarray
+fit = model.sample(chains=4, seed=1, warmup=1000, samples=1000, delta=0.8,
+                   max_depth=10, thin=1, save_warmup=False, inits=None,
+                   init_radius=2.0, pathfinder_init=None,
+                   parallel_chains=None, refresh=100, threads_per_chain=1,
+                   metric="diag_e", inv_metric=None, step_size=None,
+                   adapt_engaged=True)
+fit["theta"]                        # (chains*draws, 8), declared shape
 fit["theta[1]"]                     # one column, chains concatenated
+fit["lp__"]                         # sampler columns by name too
+fit.summary(); fit.diagnose(); fit.to_arviz()
+
+r = model.optimize(seed=1, iter=2000, init=None, init_radius=2.0)
+
+f = stanli.Function("name", stan_file="functions.stan")
+mir = stanli.stan_to_mir(src, include_paths=None, fast_math=False)
+bs = stanli.bridgestan_model(stan_file="model.stan", data="data.json")
 ```
 
-Ctrl-C while `sample()` runs stops every chain after its current
-transition and raises `KeyboardInterrupt`.
+`sample` returns every column CmdStan's CSV would carry: parameters,
+transformed parameters and generated quantities, named the way CmdStanPy
+names them (`theta[1]` through `theta[8]` for a `vector[8] theta`). Chain `c`
+uses CmdStan's RNG stream for `(seed, c + 1)`.
 
-Pathfinder can generate one initialization per chain before NUTS. The
-sampling seed controls both stages; an empty options object uses CmdStan's
-single-path defaults:
-
-```python
-fit = model.sample(
-    chains=4,
-    seed=303,
-    pathfinder_init={"num_iterations": 500, "num_elbo_draws": 25},
-)
-```
-
-The other supported options are `history_size` and Pathfinder's own
-`init_radius`. `pathfinder_init` and explicit `inits` are mutually exclusive;
-single-path Pathfinder does not perform PSIS resampling.
-
-`data` accepts a path to a JSON file or a dict of Python scalars,
-lists, and numpy arrays. `sample` returns every column CmdStan's CSV
-would carry (constrained parameters, transformed parameters, generated
-quantities, with RNG draws streamed per chain); a `theta` declared as
-`vector[8]` gets columns `theta[1]` through `theta[8]`, the way CmdStanPy
-names them. Indexing by the variable name, `fit["theta"]`, returns an
-array with the declared shape; dot names like `theta.1` are still
-accepted when indexing. Sampler columns (`lp__`, `divergent__`, ...) are
-reachable by name too.
+`inits` are on the unconstrained scale: one vector for every chain, or one row
+per chain. Pass constrained values through `model.unconstrain()` first.
+`init_radius=0` starts every chain at the origin, CmdStan's `init=0`.
 
 ## Platforms
 
-Wheels for macOS (arm64 and x86_64), Linux (x86_64 and aarch64,
-manylinux_2_28) and Windows (x86_64). The Windows wheel is built under
-mingw-w64, because stan-math does not build under MSVC (the same reason
-RStan ships through RTools). Windows wheels built from this revision run
-`stanli-compile.exe` as a short-lived subprocess and keep pristine `stanc.exe`
-beside it for one rollback cycle; there is no OCaml compiler DLL. Python
-prefers `stanli-compile.exe` whenever
-it is present and selects `stanc.exe` only when it is absent. Launch errors,
-compiler errors, and empty output are reported; an invalid portable result is
-rejected when decoded. None causes an automatic retry through stock stanc. The
-public API works the same way as the embedded compiler path.
-
-The installed library is 29.7 MB: over half of it is the density
-kernels, about a quarter the embedded stanc3, and the interpreter and
-NUTS together are about 410 KB. That is the trade this design makes:
-ship the compiler and every kernel once, so nothing is ever built on
-the user's machine.
+Wheels for macOS (arm64, x86_64), Linux (x86_64, aarch64, manylinux_2_28) and
+Windows (x86_64). The Windows wheel is built with mingw-w64, because stan-math
+does not build under MSVC (RStan ships through RTools for the same reason).
+On Windows the compiler runs as a short-lived `stanli-compile.exe` subprocess.
 
 ## Limits
 
-Stated plainly:
+- `optimize(jacobian=False)`, CmdStan's default penalized maximum likelihood,
+  raises. The change-of-variables Jacobian is part of the compiled graph, so
+  `optimize()` always returns the posterior mode.
+- Standalone Pathfinder, ADVI, Laplace and fixed-parameter sampling are in the
+  R package only.
+- Standalone generated quantities over an earlier fit's draws are not
+  available.
 
-- The sampler is Stan's own NUTS with diagonal-metric adaptation, and
-  `optimize()` is Stan's L-BFGS. Single-path Pathfinder is available for
-  sampler initialization; a standalone Python Pathfinder result is not yet
-  exposed.
-- `inits` are on the unconstrained scale. `model.unconstrain({...})`
-  turns constrained starting values into that vector, so unconstraining is
-  a step per starting point rather than a second kind of argument.
-- `optimize(jacobian=False)` (CmdStan's default penalized maximum
-  likelihood) raises; see above.
+## More
 
-What is here is verified against CmdStan model by model, and every
-number on this page is reproducible from the repository.
-
-- Source, issues, and roadmap:
-  [github.com/seantalts/stanli](https://github.com/seantalts/stanli)
-- License: BSD-3-Clause, matching Stan's own.
+- How it works: [docs/how-it-works.md](https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md).
+- Correctness: <!--gen:corpus_verified_of-->118 of 120<!--/gen--> posteriordb
+  models match CmdStan's log density and every gradient component,
+  <!--gen:corpus_bitwise-->55<!--/gen--> of them bitwise, with a worst
+  relative error of <!--gen:corpus_worst-->7.1e-13<!--/gen-->. See
+  [TESTING.md](https://github.com/seantalts/stanli/blob/main/TESTING.md).
+- Speed: in the <!--gen:benchmark_date-->2026-10-15<!--/gen--> run,
+  <!--gen:corpus_n_grad-->337<!--/gen--> of
+  <!--gen:benchmark_models-->343<!--/gen--> models produced paired gradient
+  timings. The median gradient is <!--gen:corpus_median-->2.11x<!--/gen-->
+  faster than CmdStan's, and <!--gen:corpus_at_par-->320<!--/gen--> are at
+  least as fast. See
+  [docs/benchmarks.md](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md).
+- Source and issues: [github.com/seantalts/stanli](https://github.com/seantalts/stanli).
+  License: BSD-3-Clause, matching Stan's.

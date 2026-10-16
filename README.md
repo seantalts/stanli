@@ -1,8 +1,10 @@
 # stanli
 
-The Stan Language Interpreter: an op-graph executor over precompiled
-stan-math kernels. No C++ toolchain, no LLVM, no compilation on the
-user's machine.
+The Stan Language Interpreter runs Stan models without generating machine
+code for them. It turns each model into a graph of operations over precompiled stan-math
+kernels and runs Stan's own NUTS sampler on it. There is no C++ toolchain,
+no LLVM and no per-model compile on your machine. Log densities and
+gradients are checked against CmdStan's on a corpus of hundreds of models.
 
 [![PyPI](https://img.shields.io/pypi/v/stanli.svg)](https://pypi.org/project/stanli/)
 [![npm](https://img.shields.io/npm/v/@seantalts/stanli.svg)](https://www.npmjs.com/package/@seantalts/stanli)
@@ -11,9 +13,11 @@ user's machine.
 [![License](https://img.shields.io/pypi/l/stanli.svg)](LICENSE)
 
 **Try it in your browser, no install:**
-[seantalts.github.io/stanli](https://seantalts.github.io/stanli/) --
-Stan source to posterior draws in a few hundred milliseconds, entirely
-client side.
+[seantalts.github.io/stanli](https://seantalts.github.io/stanli/). Eight
+schools goes from Stan source to 1,000 posterior draws in about 120 ms,
+entirely client side.
+
+## Install
 
 One runtime, three packages. Each is the same shared library behind a
 different binding, so a model samples to the same draws from any of them.
@@ -24,241 +28,10 @@ different binding, so a model samples to the same draws from any of them.
 | **R** | `install.packages("stanli", repos = "https://seantalts.r-universe.dev")` then `stanli_install()` | [r/README.md](r/README.md) |
 | **Browser / Node** | `npm install @seantalts/stanli` | [js/README.md](js/README.md), [npm](https://www.npmjs.com/package/@seantalts/stanli) |
 
-[R-universe](https://seantalts.r-universe.dev) serves prebuilt R binaries,
-and `remotes::install_github()` or a checkout installs from source (see
-[R](#r) below). The package downloads its matching runtime on first use,
-keeping installation small and avoiding a local stan-math build.
+The R package downloads its matching prebuilt runtime on first use, so
+installing it never builds stan-math.
 
-- Performance vs CmdStan: [full benchmark and method](docs/benchmarks.md).
-  In the <!--gen:benchmark_date-->2026-10-15<!--/gen--> native run,
-  <!--gen:corpus_n_grad-->337<!--/gen--> of
-  <!--gen:benchmark_models-->343<!--/gen--> models produced paired gradient
-  measurements: median CmdStan/Stanli ratio
-  <!--gen:corpus_median-->2.11x<!--/gen-->, with
-  <!--gen:corpus_at_par-->320<!--/gen--> at or above parity.
-  Failed or capped runs remain in the full table.
-- Fast mode: [docs/fast-mode.md](docs/fast-mode.md). An opt-in setting per
-  model that gives up CmdStan's last bits for speed.
-- Model coverage: [docs/corpus-status.md](docs/corpus-status.md).
-  <!--gen:corpus_reference_models-->353<!--/gen--> models share one three-point
-  CmdStan reference replay. Within the posteriordb subset,
-  <!--gen:corpus_verified-->118/120<!--/gen--> models are
-  verified against CmdStan's log density and full gradient,
-  <!--gen:corpus_bitwise-->55<!--/gen--> of them bitwise identical,
-  worst relative deviation <!--gen:corpus_worst-->7.1e-13<!--/gen-->.
-- R workflows: [generated models and R package integrations](docs/teaching-support.md),
-  plus a [cmdstanr migration guide](docs/from-cmdstanr.md).
-- Language coverage: [tests/stanc3/README.md](tests/stanc3/README.md).
-  <!--gen:lang_verified-->11/11<!--/gen--> models lifted from stanc3's own
-  test suite, for the type and language constructs no real posterior
-  happens to use, verified the same way.
-- Distribution coverage: [docs/coverage.md](docs/coverage.md). 71 of 72
-  densities, all 105 cdf/lcdf/lccdf, truncation, censoring, ordinal
-  regression and the count GLMs, each verified against CmdStan; the table
-  there regenerates from the nightly sweep.
-- Why you can trust this: [TESTING.md](TESTING.md). Every oracle, what it
-  gates, what it cannot see, and the known limits.
-- Install size: one 29.7 MB shared library, a 10.8 MB wheel. Breakdown in
-  [Binary size](#binary-size).
-- How this is possible, for statisticians:
-  [docs/how-it-works.md](docs/how-it-works.md)
-- Tutorial, three small models traced through every layer:
-  [docs/lowering-walkthrough.md](docs/lowering-walkthrough.md)
-- Contributor map: [docs/hacking.md](docs/hacking.md)
-- All human-facing guides: [documentation index](docs/README.md).
-- Prior research and design decisions: [internal research index](docs/internal/README.md).
-
-## Architecture
-
-The premise: a Stan model does not need machine code generated for it.
-Every model is a composition of a fixed vocabulary of operations
-(densities, constraint transforms, linear algebra, elementwise math).
-stanli ships those operations precompiled and turns each model into
-data: a static graph of ops over flat buffers, built at load time and
-run by a small interpreter. There is no JIT and no C++ codegen;
-"compiling" a model takes milliseconds.
-
-```
-model.stan + data.json
-  |  stanc3 + the stanli pipeline (embedded, or an executable on Windows)
-  v
-optimized typed MIR (--O1)
-  |  stanli OCaml encoder
-  v
-compact portable MIR v2 (legacy s-expressions are also accepted)
-  |  decoder + lowering: runtime/src/lower.cpp
-  v
-op graph + preallocated value/adjoint arenas
-  |  executor: forward = log density, reverse = gradient
-  v
-NUTS (stan::mcmc::adapt_diag_e_nuts) -> draws
-```
-
-1. **stanc3 plus the stanli compiler pipeline (OCaml).** The official
-   compiler parses, typechecks, and optimizes the model. The shared
-   [`compiler/ocaml/`](compiler/ocaml/) package selects O1 and encodes the
-   resulting typed MIR into the versioned portable format. Thin entry points
-   in [`compiler/native/`](compiler/native/) embed that pipeline in the shared
-   library, while [`compiler/js/`](compiler/js/) builds the browser/npm
-   compiler and the CLI cross-built for Windows as `stanli-compile.exe`. The
-   runtime retains the legacy s-expression reader for cached MIR and rollback
-   compiler paths. Full language fidelity without a reimplemented parser.
-
-2. **Lowering** (`runtime/src/lower.cpp`). Transformed data is evaluated
-   eagerly, loops with data-known bounds are unrolled, and the model
-   block flattens into a linear op sequence over preallocated arenas.
-   `~` statements lower to the same propto and per-argument-activity
-   instantiations CmdStan's generated C++ uses, so dropped constants
-   match exactly. The one user function that cannot be inlined is an ODE
-   right-hand side (the integrator picks the times), and it compiles
-   into a flat register machine (`runtime/src/ode_prog.cpp`) instead.
-
-3. **Graph passes** (`runtime/src/reroll.cpp` and friends; plain-language
-   guide in [runtime/src/OPTIMIZATIONS.md](runtime/src/OPTIMIZATIONS.md)).
-   A model written as a per-observation loop arrives as N copies of one
-   small op template, and the interpreter's cost is per op. The passes
-   rewrite those regions into the vectorized ops the kernels already
-   support: constants become vectors, invariant ops hoist, indexed reads
-   become gathers, and N scalar density terms fuse into one summed
-   vector density. `radon_pooled` goes from 27,670 ops to 8. Anything a
-   pass cannot prove safe it leaves alone. `STANLI_NO_REROLL=1` disables
-   the main pass. A proven subset of terminal scalar loops (one indexed
-   real-data read, parameter addition/multiplication or FMA, then an
-   optional `exp`/`square` chain) is priced before expanding its iterations.
-   When profitable, lowering emits the same vector kernels directly.
-   `STANLI_SYMBOLIC_LANES=0` disables this shortcut; unset or `1` enables
-   automatic selection. Other values conservatively disable it.
-
-4. **Execution** (`runtime/src/executor.cpp`). The op graph is the AD
-   tape. The forward sweep computes the log density and stashes each
-   op's partials; the reverse sweep runs the ops backward, contracting
-   adjoints. Steady-state gradient evaluation allocates no memory.
-
-5. **Kernels** (`runtime/kernels/`). Two tiers behind one interface.
-   Native kernels mirror the exact Eigen expressions of stan-math's rev
-   overloads, so gradients match CmdStan bitwise (FP contraction pinned
-   off project-wide). Everything else runs as a "legacy" op: a recorder
-   scalar or a nested var tape drives unmodified stan-math templates.
-   Legacy ops make the whole library expressible; native kernels make
-   the hot path fast. Both compile once, when stanli is built.
-
-6. **Sampling** (`runtime/src/nuts.cpp`). Stan's own NUTS with
-   diagonal-metric adaptation, driven through a thin model adapter.
-
-7. **Writing draws.** A second, forward-only graph lowers the MIR's
-   `generate_quantities` section and produces every CSV column CmdStan
-   would write, in CmdStan's order and under CmdStan's naming. A section the
-   graph cannot lower runs through the per-draw interpreter
-   (`runtime/src/wa_interp.cpp`) with a warning naming the reason;
-   `STANLI_NO_INTERPRETER=1` makes that a compile error. Fixed-shape
-   draw-dependent branches, checked one-level runtime indexing, and Viterbi
-   backtracking now compile, so all 119 compiling corpus models have complete,
-   graph-backed write arrays.
-
-8. **Distribution.** Everything sits behind a C ABI
-   (`runtime/include/stanli/capi.h`) in one shared library. Each binding
-   is a thin wrapper over it. The macOS and Linux wheels embed the compiler in
-   that library. The Windows wheel carries `stanli.dll`, the preferred
-   `stanli-compile.exe`, and pristine `stanc.exe` for one rollback cycle.
-
-## Binary size
-
-One self-contained shared library, 29.7 MB installed, 10.8 MB compressed
-in the wheel, measured on the manylinux_2_28_x86_64 artifact.
-
-The per-symbol breakdown rides with every build as the `binary-size`
-artifact, written by `tools/binary_size.py` during `tools/build_wheel.sh`.
-It has to be measured there and nowhere else: the shipped library exports
-a few hundred C ABI names and carries no static symbol table, so the
-attribution cannot be reconstructed from the wheel or the runtime tarball
-after the fact -- only from the object as it exists a moment before the
-strip. It is not checked in for the same reason it went stale as a typed
-table: a number nothing recomputes is a number that drifts. Run
-`tools/binary_size.py` on an unstripped build for it locally.
-
-The densities dominate. A distribution is instantiated once per activity
-mask (which arguments are autodiff), twice for propto, and again for the
-elementwise form: `4 * 2^N` templates per distribution, about 630 KB of
-object each. That is the standing cost of shipping precompiled math;
-CmdStan instantiates only the combination your model uses and pays for
-it with a per-model compile. Each density chooses how much of that
-ladder to instantiate (`STANLI_SCALAR_DENSITY_LIST` in optable.hpp): the
-thirteen distributions models lean on take all of it, the long tail
-takes less, and the 72 distribution functions take one instantiation
-each.
-
-`-DSTANLI_LITE_LP=ON` drops the propto family: the library is 48%
-smaller and every gradient stays bitwise, but `lp__` differs from
-CmdStan's by a per-model constant. It is **off by default in every
-build, browser included**, so any run can be compared against CmdStan
-directly; `stanli_exact_lp()` reports which build is loaded. See
-[docs/lite-lp.md](docs/lite-lp.md).
-
-The interpreter and NUTS together are about 410 KB. Shrinking further
-was measured and declined: dead-code stripping cannot reach inside the
-OCaml object, and compiling stanc3 to bytecode saves 3.7 MB at the cost
-of about 8x slower model compilation.
-
-### The browser build
-
-A different binary: no embedded stanc3, because the compiler ships
-separately as JavaScript. `stanli-compiler.js` contains stanc3 plus the shared
-stanli OCaml pipeline and emits portable MIR; it is 2,990,736 bytes raw and
-425,026 bytes gzipped in the current measured build. For one rollback cycle
-the package also carries stock `stancjs.bc.js` (2,971,677 bytes raw, 418,847
-bytes gzipped), which emits O1 legacy MIR and is loaded only if the portable
-compiler is unavailable. A page that ships precompiled MIR fetches neither
-compiler.
-
-`stanli.wasm` is 5.79 MB raw and 1.52 MB gzipped, and densities are 55% of the
-compressed runtime payload (measured by stubbing every density kernel and
-relinking). Loading the uncommon densities on demand was built and removed;
-the measurements and the emscripten limitation that blocks it are in
-[docs/internal/archive/density-pack.md](docs/internal/archive/density-pack.md).
-
-## C++
-
-Native builds with embedded stanc expose a value-only function entry point.
-The source is compiled once by `Function`; subsequent calls bind named
-`DataMap` arguments directly to the Stan formals and return a
-`DataMap::Entry`, including integer identity and logical dimensions.
-
-```cpp
-#include <stanli/function.hpp>
-
-const std::string source = R"stan(
-functions {
-  vector affine(vector x, real a, real b) {
-    return a * x + b;
-  }
-}
-model {}
-)stan";
-
-stanli::Function affine(source, "affine");
-stanli::DataMap args;
-args.set_real_array("x", {1, 2, 4});
-args.set_real("a", 2.5);
-args.set_real("b", -1);
-stanli::DataMap::Entry result = affine(args);  // {1.5, 4, 9}
-```
-
-`Function::from_mir(mir, name)` skips source compilation for cached portable
-or legacy MIR and works in builds without embedded stanc. Arguments are
-matched by formal name. The first version evaluates pure, value-returning
-functions on doubles; `_lp`, void, RNG, and autodiff entry points are not part
-of this surface.
-
-Native C++, C, Python, R and `stanli_run` support opt-in [within-chain `reduce_sum`
-parallelism](docs/native-reduce-sum.md), using reusable per-chain workers.
-Pass `threads_per_chain=N` to Python/R sampling, or `--threads-per-chain N`
-to the CLI; the default remains one.
-
-## Python
-
-A ctypes wrapper over the shared library, published to PyPI as one
-platform wheel per platform. Full documentation in
-[python/README.md](python/README.md).
+## Example
 
 ```python
 import stanli
@@ -269,308 +42,102 @@ print(fit.summary())      # stansummary's table
 print(fit.diagnose())     # the convergence checks, in words
 ```
 
-Sampling prints per-chain progress, elapsed warmup/sampling time, and any
-divergence or maximum-treedepth warnings. `refresh=100` is the default update
-interval; pass `refresh=0` for a quiet run. Reporting is observational and
-does not change draws or RNG streams.
+Four chains run in parallel by default. Each chain owns its executor and
+its random number stream, so the draws are byte-identical to a sequential
+run. The [R](r/README.md) and [JavaScript](js/README.md) guides have the
+same example in their language.
 
-Four chains by default, run in parallel. Threading does not change the
-answer: each chain owns its executor and its RNG stream, so the draws
-are byte-identical to a sequential run. macOS and Linux release wheels compile
-Stan in process. Windows runs the packaged `stanli-compile.exe`; pristine
-`stanc.exe` is selected only when that preferred executable is absent, and a
-compiler failure is reported without retrying the rollback path.
+## What it runs
 
-Pure Stan functions are also callable directly, with a separate Python/NumPy
-adapter over typed buffers:
+- NUTS with diagonal, dense or unit metrics, CmdStan's adaptation, and a
+  starting step size and inverse metric, in Python, R and the C API.
+- Optimization in Python and R. R also runs ADVI (mean-field or
+  full-rank), single-path Pathfinder, Laplace sampling and fixed-parameter
+  sampling.
+- Generated quantities, with every CSV column CmdStan would write.
+- Pure Stan functions called directly from Python or C++.
+- Opt-in [fast mode](docs/fast-mode.md) and
+  [within-chain `reduce_sum`](docs/native-reduce-sum.md) threads.
+- Wheels for macOS (arm64, x86_64), Linux (manylinux_2_28 x86_64 and
+  aarch64) and Windows x86_64, plus WebAssembly for browsers and Node.
 
-```python
-affine = stanli.Function("affine", stan_file="functions.stan")
-affine(x=[1, 2, 4], a=2.5, b=-1)  # array([1.5, 4.0, 9.0])
-```
+## What is verified, and how fast
 
-`stan_code=` and cached `mir=` work too. See the
-[function API and benchmark command](python/README.md#call-a-stan-function-from-python).
+- Speed. In the <!--gen:benchmark_date-->2026-10-15<!--/gen--> native run,
+  <!--gen:corpus_n_grad-->337<!--/gen--> of
+  <!--gen:benchmark_models-->343<!--/gen--> models produced paired gradient
+  measurements. The median gradient is
+  <!--gen:corpus_median-->2.11x<!--/gen--> faster than CmdStan's, and
+  <!--gen:corpus_at_par-->320<!--/gen--> models are at least as fast.
+  Failed or capped runs stay in the [full benchmark](docs/benchmarks.md).
+- Model coverage. <!--gen:corpus_reference_models-->353<!--/gen--> models
+  share one three-point CmdStan reference replay. Within the posteriordb
+  subset, <!--gen:corpus_verified-->118/120<!--/gen--> models match
+  CmdStan's log density and full gradient. Of those
+  <!--gen:corpus_verified_n-->118<!--/gen-->,
+  <!--gen:corpus_bitwise-->55<!--/gen--> are bitwise identical, and the worst
+  relative deviation is <!--gen:corpus_worst-->7.1e-13<!--/gen-->. Every model
+  is listed in [docs/corpus-status.md](docs/corpus-status.md).
+- Language coverage. <!--gen:lang_verified-->11/11<!--/gen--> models lifted
+  from stanc3's own test suite, for the type and language constructs no
+  real posterior uses, are verified the same way
+  ([tests/stanc3/README.md](tests/stanc3/README.md)).
+- Distribution coverage. 71 of 72 densities, all 105 cdf/lcdf/lccdf
+  functions, truncation, censoring, ordinal regression and the count GLMs
+  are each verified against CmdStan ([docs/coverage.md](docs/coverage.md)).
+- How we test. [TESTING.md](TESTING.md) lists every oracle, what it gates,
+  what it cannot see, and the known limits.
+- Install size. One 29.7 MB shared library in a 10.8 MB wheel
+  ([docs/install-size.md](docs/install-size.md)).
 
-Call overhead matters: an affine-function benchmark (`a*x+b`) measured
-13.2 µs per scalar call and 125 µs for a 100,000-element vector, versus
-2,270 µs for a Python list loop and 24.2 µs for NumPy on that vector.
-These are 11-sample medians on an M3 Ultra, Release build, Python 3.11.15,
-and NumPy 2.4.6, excluding one-time compilation; the large-vector Stanli
-IQR was 125–127 µs. Scalar packing and cached native lookups reduced scalar
-latency by about 27% in a [paired A/B](docs/internal/archive/plans/2026-08-30-python-function-overhead.md).
-This is one workload, not a general Python speedup claim.
-[Run the comparison on your machine](tools/bench_python_function.py).
+## How it works
 
-## R
+A Stan model is a composition of a fixed set of operations: densities,
+constraint transforms, linear algebra and elementwise math. stanli ships
+those operations precompiled. stanc3, the official Stan compiler, parses
+and optimizes the model, and stanli lowers the result into a static graph
+of operations over flat buffers. Graph passes rewrite per-observation
+loops into vectorized operations. The graph is also the autodiff tape: a
+forward sweep computes the log density and a reverse sweep computes the
+gradient. Stan's NUTS sampler drives it, and a second, forward-only graph
+writes every column CmdStan would write, in CmdStan's order. Loading a
+model takes milliseconds. [docs/how-it-works.md](docs/how-it-works.md)
+explains why this can outrun a compiled model, and
+[docs/hacking.md](docs/hacking.md) maps the code.
 
-The same runtime behind an R binding, with `posterior`-shaped draws.
-Full documentation in [r/README.md](r/README.md).
+## Documentation
 
-Install a prebuilt package from R-universe, or install the `r/` subdirectory
-from this repository:
+The full index is [docs/README.md](docs/README.md).
 
-```r
-# prebuilt binary
-install.packages("stanli", repos = "https://seantalts.r-universe.dev")
+### Use
 
-# source from GitHub
-# install.packages("remotes")
-remotes::install_github("seantalts/stanli", subdir = "r")
+- [Python](python/README.md), [R](r/README.md) and
+  [JavaScript](js/README.md) package guides
+- [Coming from cmdstanr](docs/from-cmdstanr.md)
+- [Teaching with stanli](docs/teaching.md), including brms and
+  Rethinking
+- [Fast mode](docs/fast-mode.md)
+- [Within-chain `reduce_sum` parallelism](docs/native-reduce-sum.md)
 
-# or, from a checkout of this repository
-# R CMD INSTALL r
-```
+### Trust
 
-That builds a 40 KB C bridge, so it wants the compiler R already
-expects for source packages (Xcode command line tools on macOS,
-`r-base-dev` on Debian and Ubuntu, Rtools on Windows). Nothing else is
-compiled: the sampler arrives prebuilt through `stanli_install()`
-below, which downloads the runtime for your platform from this
-repository's releases into `tools::R_user_dir("stanli", "cache")`.
+- [TESTING.md](TESTING.md), every oracle and the known limits
+- [Corpus status](docs/corpus-status.md) and
+  [distribution coverage](docs/coverage.md)
+- [Benchmarks and how we measure](docs/benchmarks.md)
+- [The lp constant](docs/lp-constant.md), when `lp__` differs from
+  CmdStan's
 
-```r
-library(stanli)
-stanli_install()   # one time: fetches the runtime for this platform
+### Understand
 
-m <- stanli_model(file = "eight_schools.stan", data = list(J = 8L, y = y, sigma = s))
-fit <- sample_model(m, chains = 4, seed = 1)
-summary(fit)          # mean, MCSE, sd, quantiles, bulk/tail ESS, R-hat
-```
+- [How it works](docs/how-it-works.md), for statisticians
+- [Lowering walkthrough](docs/lowering-walkthrough.md), three small models
+  traced through every layer
+- [Graph optimizations](runtime/src/OPTIMIZATIONS.md)
+- [Install size](docs/install-size.md)
 
-`sample_model()` reports the same progress, timing, and sampler problems as
-the Python binding. Set `refresh = 0` to suppress automatic output; doing so
-does not change the sampled result.
+### Contribute
 
-The runtime is a separate release artifact so installing the R bridge never
-rebuilds stan-math. `stanli_install()` is explicit and pins the release the
-package was built against. An embedded compiler wins when the runtime has one.
-On native hosts without one, `STANLI_STANC` is the explicit stock-compiler
-override; otherwise R prefers `stanli-compile` beside the runtime, then stock
-`stanc` beside the runtime or on `PATH`, and finally the bundled JavaScript
-compiler through V8. The v0.9.2 compatibility runtime has stock `stanc.exe`;
-Windows runtime builds from this revision add `stanli-compile.exe` beside it
-for the rollback cycle. Because binding and runtime are separately versioned,
-the C ABI carries a layout version (`stanli_abi_version()`) and the bridge
-refuses a runtime that disagrees; reading the options struct at wrong
-offsets would not crash, it would sample from the wrong seed.
-
-## Browser (WASM)
-
-The same runtime compiles to WebAssembly and runs full Stan in a browser
-tab with no server:
-**[seantalts.github.io/stanli](https://seantalts.github.io/stanli/)**.
-The js_of_ocaml build in `compiler/js/` uses the same O1 policy and portable
-encoder as native compilation; `stanli.wasm` lowers its output and samples.
-Stock stancjs remains beside it for one rollback cycle, emitting O1 legacy MIR
-that the same runtime can decode. Eight schools goes from source to 1,000
-draws in about 120 ms in-tab. 118 of the 119 compiling corpus models replay
-against the CmdStan references from inside WASM (`tools/wasm_check.sh`; the
-exception is `nn_rbm1bJ100`, whose compile does not fit in wasm32's 4 GB).
-
-```
-./tools/build_web.sh              # emsdk + opam builds, assembled in web/
-python3 -m http.server -d web     # then open http://localhost:8000
-```
-
-## Build
-
-Linux/macOS developer C/C++ builds use a C++17 Clang toolchain (`clang` and
-`clang++`) to match pull-request validation. The shipped Linux and Windows
-release wheels retain their established GCC toolchains, while macOS uses
-AppleClang. Other GNU libraries and tools may remain installed for auxiliary
-workflows.
-
-One-shot setup (fetches pinned deps, builds, runs tests):
-
-```
-./tools/dev_setup.sh               # core build + tests + source-pinned stanc3, embedded in the tools/library
-./tools/dev_setup.sh --no-embed    # use standalone stanli-compile (required on Windows ARM64)
-./tools/dev_setup.sh --corpus      # + posteriordb and CmdStan
-./tools/dev_setup.sh --conformance # + the Stan conformance reference stack
-./tools/dev_setup.sh --all
-```
-
-On Windows, run `bash tools/dev_setup.sh` from Git Bash or MSYS2 Bash.
-Embedding is the default, keeping the tools self-contained and compilation
-in-process. `--embed` explicitly selects that default. Windows ARM64 requires
-`--no-embed`: its OCaml compiler runs under x64 emulation, while Stanli's
-numerical runtime is native ARM64. `--all` respects `--no-embed` in either order.
-With `--no-embed`, setup builds `stanli-compile` from the same Stanli pipeline
-and CMake copies it beside both `stanli_check` and `stanli_run`, including in
-`cmake --install` deployments. Keep those executables together when moving an
-installation. The tools also accept `--stanli-compile PATH`; stock stanc is
-used only when explicitly requested with `--stanc PATH` (or `STANC` for
-`stanli_run`). `--conformance` stages the standalone compiler with the Python
-library when embedding is disabled.
-Setup reuses the installation providing `pacman` on `PATH`, or checks
-`C:/msys64` and installs `MSYS2.MSYS2` with winget if absent. It prepends
-the UCRT64 directories on x86_64 or CLANGARM64 directories on ARM64 to `PATH`.
-Pacman provides Git, Python, make, Clang and CMake; missing opam uses winget.
-MinGW `RelWithDebInfo` builds use `-g1` to reduce object and `.exe.debug` sizes,
-retaining source lines and backtraces. Use `-DCMAKE_BUILD_TYPE=Debug` for full
-variable and type information.
-
-Full native Windows setup runs after pushes to `main` and on manual dispatch,
-covering x64 embedding and ARM64 standalone deployment. Pull requests run the
-fast setup contract tests in the existing static checks and retain Windows
-compiler parity coverage, without waiting for these full native builds.
-
-Windows CI saves the OCaml toolchain and validated compiler artifacts before
-building C++, then saves the C++ cache before running the full test suite.
-Its toolchain cache is keyed on the compiler versions and source pin, so
-unrelated workflow edits do not force an OCaml rebuild. ARM runners install the
-x64 MinGW dependencies used by OCaml before validating its restored cache. A
-failed compiler launch preserves the cache and reports the error; only a
-successfully reported incompatible version triggers switch replacement.
-CI uses `--no-build`
-for compiler preparation and `--no-test` to save the completed build before
-the separate test step; ordinary setup still builds and tests in one command.
-
-`--conformance` is what makes the differential Stan language sweep runnable
-here rather than only in the nightly; see
-[harnesses/conformance/README.md](harnesses/conformance/README.md).
-
-Or manually:
-
-```
-./tools/dev_setup.sh --no-build
-build_jobs=$(tools/build_jobs.sh)
-cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build --parallel "$build_jobs"
-ctest --test-dir build --parallel "$build_jobs"
-```
-
-The helper caps parallelism by both CPU count and usable RAM. Its current
-starting-point budget is 4 GiB per concurrent Stan Math compile on macOS/Windows
-and 6 GiB elsewhere, with container limits honored; these figures should be
-remeasured for Clang as build workloads evolve.
-Override the result with `STANLI_JOBS=12 ./tools/dev_setup.sh`, or raise the
-per-job budget for a heavier toolchain with `STANLI_JOB_MEMORY_GIB` (the local
-AddressSanitizer recipe uses 12 GiB).
-The measured scaling curve and CI baseline are in
-[docs/build-performance.md](docs/build-performance.md).
-
-## Releasing
-
-`.github/workflows/wheels.yml` builds all five wheels (macOS arm64 and
-x86_64, manylinux_2_28 x86_64 and aarch64, Windows x86_64). Pull requests
-with source-affecting changes run the manylinux x86_64 build plus a
-compiler-only Windows gate that
-cross-builds and executes both compiler artifacts and byte-compares the
-portable producer with the JavaScript producer. Prose-only changes and the
-generated browser page take a static generated-document/JavaScript syntax
-path; the allowlist fails closed, so every unfamiliar path gets the full
-build. All five full C++ platform
-builds run after merge, nightly, and on release tags. The four Unix wheels
-link the cached embedded compiler; Windows packages `stanli-compile.exe` and
-the pristine `stanc.exe` rollback beside `stanli.dll`. Every wheel runs the
-test suite, checks its platform contract, and samples eight schools from a
-clean installed environment.
-
-To cut a release: bump the version in `python/stanli/__init__.py`,
-`js/package.json`, `r/DESCRIPTION`, and `r/R/install.R` (they move in
-lockstep), add a `CHANGELOG.md` entry, then tag. One `v*` tag publishes
-every channel: PyPI, npm, and the GitHub runtime release the R package
-installs from. The publish jobs assert the tag matches each manifest,
-so a forgotten bump fails the release rather than shipping channels
-that disagree. Uploads go through PyPI and npm trusted publishing; no
-API token exists anywhere in the repo. The `pypi` and `npm` deployment
-environments are restricted to release tags as a second lock.
-
-```
-git tag -a v0.1.0 -m "stanli 0.1.0" && git push origin v0.1.0
-```
-
-No sdist is published: building from source needs a 30-minute OCaml
-toolchain step, so an sdist would only turn "no wheel for your platform"
-into a confusing build failure.
-
-The npm package `@seantalts/stanli` rides the same `v*` tag. An
-`npm-vX.Y.Z` tag still works as an npm-only republish hatch for when
-npm alone fails on a release that already went out everywhere else.
-Three npm quirks worth knowing. A trusted publisher attaches only to a package
-that already exists, so a package's first version goes out by hand with
-`npm publish`, and the publisher itself is configured on npmjs.com
-(Settings -> Trusted publisher: GitHub Actions, `seantalts` / `stanli` /
-`wheels.yml` / environment `npm`). The package is scoped because npm's
-name-similarity filter rejects unscoped `stanli`, which is why
-`publishConfig.access` is set to public. And the job passes
-`actions/setup-node` no `registry-url`: given one it writes an `.npmrc`
-carrying a placeholder auth token, npm sees credentials and never
-attempts the OIDC exchange, and the registry answers a write it cannot
-authorize with 404 rather than 401.
-
-### R
-
-The same `v*` tag publishes the R side (`runtime-release` job). It
-attaches to the GitHub Release five runtime tarballs
-(`stanli-runtime-{darwin,linux,windows}-{arm64,x86_64}.tar.gz`, what
-`stanli_install()` downloads) plus `stanli_X.Y.Z.tar.gz`, the R source
-package. The job asserts `stanli_runtime_release` in `r/R/install.R`
-equals the tag: the package pins its runtime release on purpose, so bump
-the pin in the same commit as the version.
-
-Bumping `STANLI_ABI_VERSION` in `runtime/include/stanli/capi.h` means
-bumping `STANLI_R_ABI_VERSION` in `r/src/bridge.c` too; `r.yml` fails if
-they disagree. Bump it when a C ABI struct changes layout or a function
-changes signature; adding a function does not need one.
-
-Two R installation routes:
-
-- **R-universe** serves prebuilt binaries. Its registry uses `*release`, so a
-  new GitHub Release advances the package source automatically; the remaining
-  delay is R-universe's platform builds.
-- **GitHub** builds the bridge from any selected commit with
-  `remotes::install_github("seantalts/stanli", subdir = "r")`.
-
-Both routes call `stanli_install()` to fetch the runtime release pinned by the
-installed package.
-
-The R sampling tests run in `wheels.yml` against the Linux library that
-build produced (and fail if skipped); `r.yml` separately checks the package
-without a runtime, so both the package-only and integrated paths stay covered.
-
-## Verification policy
-
-Nothing ships on "looks close". Kernel gradients are bitwise-tested
-against stan-math's var path at fixed points; whole models are
-differentially verified against CmdStan at the same deterministic
-evaluation point (`tools/verify_sample.py`). The corpus scoreboard
-(`tools/corpus.py`) tracks source collections, recorded reference coverage
-and numerical comparison results across the shared inventory. Details in [docs/corpus-status.md](docs/corpus-status.md).
-
-## Status
-
-Built and tested in CI on macOS (arm64, x86_64) and manylinux (x86_64,
-aarch64). 119/120 posteriordb models compile and evaluate,
-<!--gen:corpus_verified_n-->118<!--/gen--> of them CmdStan-verified. Of
-the two that are not: `sir`'s ODE solution dips about 1e-9 below a
-declared lower bound at every shared evaluation point and CmdStan
-rejects it there too, and `kronecker_gp` matches on lp and 436 of 438
-gradients, differing on the two that flow through eigenvectors of a
-nearly degenerate covariance (see the note in the corpus status).
-
-## Roadmap
-
-The path to displacing CmdStan rather than out-running it on a corpus is
-written up in
-[docs/internal/archive/plans/2026-08-08-cmdstan-parity-roadmap.md](docs/internal/archive/plans/2026-08-08-cmdstan-parity-roadmap.md):
-multi-chain and diagnostics (done), the missing parameter transforms
-(done), the modern `ode_*` and solver interfaces, Pathfinder and
-optimize, a native adjoint program for the sequential tail (done;
-[design](docs/internal/archive/plans/2026-08-08-native-adjoint-program.md)),
-`reduce_sum`, and the R/brms and browser packaging.
-
-Engine-level items that predate it:
-
-1. Fusing adjacent elementwise chains into one pass over the arena, now
-   that the re-roll pass covers the mixture shape and tape islands
-   compile the leftover scalar residue.
-2. Vectorized kernels via stan-math's varmat (SoA) overloads. Today the
-   kernels mirror CmdStan's default AoS arithmetic, which is scalar for
-   transcendentals and reductions. The plan: switch kernels to mirror
-   the varmat expressions function-by-function where the overload
-   exists, verify differentially against `stanc --O1` CmdStan builds,
-   and keep AoS parity for the rest. Profile a large-N model first to
-   size the win.
+- [Hacking on stanli](docs/hacking.md), covering building, layout, the C++ API, and
+  verifying a change
+- [Releasing](RELEASING.md)

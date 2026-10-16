@@ -1,61 +1,104 @@
 # Benchmarks
 
 Stanli gets you from Stan source to posterior draws without a per-model C++
-build. During sampling, it reuses a prepared autodiff graph and batches
-independent work. This can shorten the first fit and repeated gradient
-evaluations; the gain depends on the model.
+build. During sampling it reuses a prepared autodiff graph and batches
+independent work. Both shorten the first fit and every later gradient, by an
+amount that depends on the model.
 
 The current comparison covers **<!--gen:benchmark_models-->343<!--/gen--> application
 models**. Across <!--gen:corpus_n_grad-->337<!--/gen--> accepted gradient
-comparisons, the median paired speedup is **<!--gen:corpus_median-->2.11x<!--/gen-->**.
-The tables cover every model, with incomplete results listed separately.
-
-<a id="benchmark-method"></a>
+comparisons, the median model's gradient is **<!--gen:corpus_median-->2.11x<!--/gen--> faster**
+in Stanli than in CmdStan. The tables cover every model, with incomplete
+results listed separately.
 
 ## How we measure
 
-**Gradient speedup is CmdStan time / Stanli time:** above 1x favors Stanli.
-Both engines evaluate the same log density and full gradient at a shared
-unconstrained point. After warmup, six alternating pairs give a median
-speedup. Every accepted pair must pass its numerical comparison.
+Both engines evaluate the same model, data and unconstrained parameter vector
+with the sampling log density (`propto=true`) and the Jacobian adjustment.
+Coordinate `i` of the parameter vector is `0.1 + 0.05 * (i % 7) - 0.15 * (i % 3)`.
 
-**Total sampling is estimated as setup + 2,000 × median warm gradient time.**
-Stanli setup includes source-to-MIR compilation and lowering/binding; CmdStan
-setup includes stanc translation and the ordinary C++ model build. This
-fixed-work estimate excludes sampler/output overhead. Full sampling is not run
-in this benchmark.
+### Gradient time
 
-See the [appendix](#appendix) and independent
-[numerical checks](../TESTING.md#comparison-with-cmdstan-on-complete-models).
+Each engine builds its model and checks the point outside
+the timed window, warms up for at least 200 ms, then measures batches of
+gradients for at least 250 ms. Each measurement is a fresh process, and only
+one engine runs at a time. Six pairs alternate the order (Stanli first, then
+CmdStan first). The reported speedup is the median of the six within-pair
+CmdStan/Stanli time ratios, so above 1x means Stanli is faster. The artifacts
+keep the median absolute deviation (MAD) of the ratios and of each engine's
+latency; read a small difference with that dispersion. The drivers share
+[`benchmark_timer.hpp`](../tools/benchmark_timer.hpp).
+
+### Numerical gate
+
+Every accepted pair must agree on the log density and
+every gradient component within scaled error
+`abs(a-b) / max(abs(a), abs(b), 1) <= 1e-9`. Non-finite values, unequal widths
+and failed commands produce no accepted pair. The independent
+[three-point corpus replay](../TESTING.md#comparison-with-cmdstan-on-complete-models)
+checks correctness separately.
+
+### Setup
+
+Stanli setup is the source-to-MIR compiler process plus the median
+of six fresh-process preparations from MIR and JSON data to a bound executor.
+CmdStan setup is stanc translation plus a fresh C++ build of the ordinary
+model. Common CmdStan dependencies and precompiled headers are built in
+advance. CmdStan data loading and model initialization are not counted, and
+neither is the gradient driver's own build. Each compilation phase is timed
+once per model with normal filesystem caches, so this is not a cold-cache or
+in-process Python/R first-fit time.
+
+### Total sampling estimate
+
+Each engine's setup time plus 2,000 times its
+median warm gradient time. No sampler runs. Adaptation, tree building,
+generated quantities and CSV output are left out, and a fixed gradient budget
+says nothing about how long each engine needs to reach the same inference
+quality. The run manifests record a 20,000-gradient budget; the tables
+recompute totals for 2,000 gradients from the same measurements. A missing
+setup component leaves the estimate blank and keeps the gradient result.
+
+Six default-run models fail the gate and appear in the incomplete-results
+table: `dogs_log`, `s2_invgaussian` and `sir` return non-finite values;
+`kronecker_gp`, `sw_cens` and `s2_mi_trunc_lb` have scaled errors of
+`1.13e-4`, `2.44e-6` and `2.99e-7`. The loop-vectorization table also rejects
+`s2_gp_by_gr` at `5.33e-8`. [TESTING.md](../TESTING.md#comparison-with-cmdstan-on-complete-models)
+lists the numerical exceptions.
 
 ## Why some models are faster, and some slower
 
-**Less setup and repeated bookkeeping.** Stanli avoids compiling each model
-to C++, binds data-dependent structure once, and reuses its reverse plan and
-working buffers. [How the graph works](how-it-works.md#from-stan-source-to-a-bound-operation-graph)
+### Less setup and repeated bookkeeping
+
+Stanli does not compile each model
+to C++. It binds data-dependent structure once and reuses its reverse plan and
+working buffers. [How it works](how-it-works.md#from-stan-source-to-a-bound-operation-graph)
 explains what is prepared once and what each evaluation repeats.
 
-**Independent observations offer more work to batch.** Regressions, GLMs and
-IRT models can turn repeated scalar work into vector operations, amortizing
-instruction dispatch. See [loop recovery](how-it-works.md#recovering-vector-operations-from-scalar-loops)
+### Independent observations give more work to batch
+
+Regressions, GLMs and
+IRT models can turn repeated scalar work into vector operations, which pays
+dispatch once per vector. See [loop recovery](how-it-works.md#recovering-vector-operations-from-scalar-loops)
 and the [optimization details](../runtime/src/OPTIMIZATIONS.md).
 
-**Shared kernels and sequential work leave less overhead to remove.** Dense
-linear algebra and ODEs spend substantial time in Stan Math in both engines.
-Recurrences limit independent batching, and fallback derivatives can retain
-local autodiff costs. These costs can bring results close to parity or make
-Stanli slower; the per-model measurements show where that happens.
+### Shared kernels and sequential work leave less to remove
+
+Dense linear
+algebra and ODEs spend most of their time in Stan Math in both engines.
+Recurrences limit batching, and fallback derivatives keep local autodiff
+costs. These models land near parity or run slower in Stanli; the table shows
+which.
 
 <a id="full-corpus"></a>
 
 ## Full corpus results
 
-Every application fixture uses the same run settings. Language-conformance
-fixtures belong to the [numerical corpus](corpus-status.md) and are not timed
-here. This table uses default CmdStan compiler settings; the
-[appendix comparison](#cmdstan-with-stanc3-loop-vectorization) enables O1
-optimizations and loop vectorization. Incomplete results follow each table.
-Complete results are sorted by CmdStan / Stanli gradient ratio, highest first.
+Every application model uses the same settings. Language-conformance fixtures
+belong to the [numerical corpus](corpus-status.md) and are not timed here.
+CmdStan uses its default compiler settings. The `CmdStan / Stanli` column is
+how many times faster Stanli's gradient is; complete results are sorted by it,
+fastest first. Incomplete results follow each table.
 
 <!--gen:benchmark_catalog-->
 Run `bec65da115c4bf4e` (2026-10-15): 343 models, 6 alternating gradient pairs.
@@ -416,181 +459,23 @@ Missing measurements are —; available timings are retained.
 | `sw_cens` | — | — | — | failed; density/gradient mismatch: scaled error 2.44e-06 |
 <!--/gen-->
 
-## Fast mode
-
-These fast-mode figures are from 2026-10-10 (Stanli 0.20.0, main
-`84e60796`) and have not been remeasured since. [Fast mode](fast-mode.md)
-was measured with the same protocol and inputs as that day's default run,
-from the same binaries, with the models compiled and run in fast mode
-(`corpus_bench.py --fast-math`). The default-mode figures in this section
-also come from that 2026-10-10 run. Gradient times, 336 models with paired
-timings, Apple M3 Ultra:
-
-- Fast mode is 2.03x faster than default mode in geometric mean; the median
-  model is 1.06x faster. 87 models are at least 2x faster, 43 at least 10x
-  and 7 at least 100x. Most of the large gains are models whose likelihood
-  repeats over the data, which fast mode evaluates once per distinct row or
-  group.
-- Against CmdStan, the geometric-mean speedup is 1.95x in default mode and
-  3.95x in fast mode; fast mode is faster than CmdStan on 321 of the 336
-  models, default mode on 307.
-- No model is measurably slower in fast mode: the few that timed up to 6%
-  slower were within noise when rechecked in CPU cycles.
-
-The largest gains, gradient time in microseconds:
-
-| model | default | fast | fast vs default |
-| --- | ---: | ---: | ---: |
-| `radon_pooled` | 40.1 | 0.081 | 493x faster |
-| `nes` | 18.2 | 0.072 | 251x faster |
-| `logearn_interaction_z` | 8.15 | 0.051 | 159x faster |
-| `diamonds` | 33.6 | 0.311 | 108x faster |
-| `ch12_m12_4` | 65.8 | 0.666 | 99x faster |
-| `aalto_poisson_hurdle` | 7.34 | 0.208 | 35x faster |
-| `kidscore_momiq` | 1.39 | 0.053 | 26x faster |
-| `M0_model` | 2.45 | 0.241 | 10x faster |
-
-The per-model fast-mode table, raw observations and build identity are in
-[`output/corpus-performance-fast/`](../output/corpus-performance-fast/README.md).
-
-## Appendix
-
-The [main table](#full-corpus) uses default CmdStan compiler flags.
-The appendix table below uses stanc3 `--O1` with loop vectorization enabled.
-Both experiments cover the same application inputs with the same Stanli build.
-
-### Configuration and evidence
-
-| Item | Configuration |
-| --- | --- |
-| Scope | All 343 application models, `--corpus all` |
-| Gradient trials | Six alternating pairs, 200 ms warmup and 250 ms measurement per process |
-| Displayed workload | Setup + 2,000 × median warm gradient time |
-| Stanli build | Release clang++, `-O3 -DNDEBUG`; full runtime, threads enabled, lite mode disabled |
-| Upstream source base | `2c9d67b98b196e800dc051460aaaf653ac811ace`; exact measured checkpoint and hashes in manifests |
-| Default reference compiler | Stock pinned stanc3, no additional flags |
-| CmdStan | 2.40.0, `d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6` |
-| Stan Math | `5252d51d47c1d5e78005fc043ad996fad6dd8da8` |
-| Timeouts | Gradient command 60 s; build 900 s |
-| Host | Apple M3 Ultra, macOS arm64, 32 logical CPUs, 96 GiB RAM |
-
-The sweeps run serially on a shared development host with normal background
-services. Commands request one thread for Stan, OpenMP and common BLAS
-implementations. The manifests retain machine details, requested threads,
-source/data hashes, executable hashes, upstream identities and compiler flags;
-event logs retain load averages and exact commands.
-
-[Default evidence](../output/corpus-performance/README.md) and
-[optimized-reference evidence](../output/corpus-performance-vectorized/README.md)
-contain the complete inventories, immutable manifests, summary TSVs, raw paired
-observations, command events and checksums. Every model remains in the tables,
-including numerical failures and timeouts in the incomplete-results tables.
-Default results are never filled from older experiments. The appendix
-table reuses CmdStan timings from earlier runs of the same CmdStan build, as
-described there.
-
-### What the numbers include
-
-**Warm gradients:** both engines evaluate the sampling log density with
-proportional terms and Jacobian adjustment at coordinate `i` equal to
-`0.1 + 0.05 * (i % 7) - 0.15 * (i % 3)`. Construction and the initial validation
-evaluation are outside the timed window. Each accepted pair must agree on the
-log density and every gradient component within scaled error
-`abs(a-b) / max(abs(a), abs(b), 1) <= 1e-9`. Non-finite values, unequal widths
-and failed commands are rejected. This gate is distinct from the independent
-[three-point numerical replay](../TESTING.md#comparison-with-cmdstan-on-complete-models).
-
-The gradient ratio is the median of six within-pair CmdStan/Stanli ratios.
-The artifacts retain median absolute deviations (MAD) for these ratios and
-for each engine's gradient latency. The paired ratio can differ from a ratio
-of the median latencies or total-time estimates. Small differences should be
-read with the dispersion recorded in the artifacts.
-
-**Setup:** Stanli includes a source-to-MIR compiler-probe process and the
-median of six preparation measurements from existing MIR/JSON to a bound
-executor. CmdStan includes stanc translation and a fresh ordinary C++ model
-build. CmdStan data/model initialization is not added to the estimate.
-Common dependencies and precompiled headers are prepared in advance.
-Gradient-driver compilation is retained in the event log but excluded from
-the estimate. Compilation phases are measured once, with normal filesystem
-caches; this is not an in-process Python/R or cold-cache first-fit measurement.
-
-**Total sampling estimate:** each engine's setup time plus 2,000 times its
-median warm gradient time. No sampler is run, and adaptation, tree building,
-generated quantities and CSV output are excluded. The retained v4 summaries
-and manifests use a 20,000-gradient budget; the tables on this page recalculate
-totals for 2,000 gradients from the same validated setup and latency measurements.
-A missing setup component leaves that estimate blank without hiding a valid
-gradient measurement in the incomplete-results table. Sampler correctness tests
-remain part of [the validation suite](../TESTING.md).
-
-The fixed-point gate leaves six default-run rows without estimates:
-`dogs_log`, `s2_invgaussian` and `sir` report non-finite density or gradients;
-`kronecker_gp`, `sw_cens` and `s2_mi_trunc_lb` have scaled errors `1.13e-4`,
-`2.44e-6` and `2.99e-7`. The optimized-reference table also rejects
-`s2_gp_by_gr` at `5.33e-8`. The incomplete-results tables retain these
-recorded failures; see the [numerical policies and exceptions](../TESTING.md#comparison-with-cmdstan-on-complete-models).
-
-### Reproduction
-
-Prepare the compiler/dependencies and build `bench_grad` as described in the
-[protocol](benchmark-protocol.md). Use distinct output paths for the two runs:
-
-```sh
-python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  build/corpus-current/default-v4.tsv --bench build/bench_grad \
-  --corpus all --rounds 6 --warmup-ms 200 --measure-ms 250 \
-  --gradient-timeout 60 --build-timeout 900
-python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  build/corpus-current/vectorized-v4.tsv --bench build/bench_grad \
-  --corpus all --rounds 6 --warmup-ms 200 --measure-ms 250 \
-  --gradient-timeout 60 --build-timeout 900 \
-  --stanc build/corpus-current/stanc-o1vec-src/_build/default/src/stanc/stanc.exe \
-  --stancflags=--O1
-```
-
-Run the commands serially. `--resume` requires identical sources, inputs,
-binaries and settings. Publish the complete runs with
-`tools/publish_corpus_bench.py`, then regenerate the docs and browser catalog:
-
-```sh
-python3 tools/publish_corpus_bench.py build/corpus-current/default-v4.tsv \
-  output/corpus-performance
-V=output/corpus-performance-vectorized
-python3 tools/publish_corpus_bench.py build/corpus-current/vectorized-v4.tsv \
-  $V/cmdstan-runs/RUN_ID --compiler-evidence build/corpus-current
-python3 tools/publish_corpus_bench.py --vectorized $V \
-  --stanli-run output/corpus-performance \
-  --cmdstan-run $V/cmdstan-runs/RUN_ID [--cmdstan-run ...]
-python3 tools/gen_docs.py
-python3 tools/gen_web_models.py deps/posteriordb
-```
-
-When CmdStan is unchanged, the vectorized run can be skipped: list the
-existing runs under `cmdstan-runs/`, and time only models they lack with
-`--filter MODEL`. A later `--cmdstan-run` takes precedence for the models it
-contains.
-
 ### CmdStan with stanc3 loop vectorization
 
-Stock pinned stanc3 leaves loop vectorization off at `--O1`. This experiment
-changes that one setting and invokes the resulting compiler with `--O1`.
-Compared with the default table, it enables **O1 optimizations plus loop
-vectorization**; it is not a vectorization-only ablation or `--Oexperimental`.
-The Stanli timings are the default run's. The CmdStan timings are reused
-from earlier runs of the same CmdStan build and toolchain, with the same
-inputs, timing windows and settings; models those runs lack are timed again.
-Every Stanli gradient is checked against the reused CmdStan gradients with
-the same numerical gate. The ratio is CmdStan's median gradient time divided
-by Stanli's, because the two come from separate runs. The table uses the same columns and
-2,000-gradient estimate as the default comparison. Complete results are sorted
-by CmdStan / Stanli gradient ratio, highest first.
+Stock pinned stanc3 leaves loop vectorization off at `--O1`. This table turns
+that one setting on and runs the resulting compiler with `--O1`, so CmdStan
+gets both the O1 optimizations and loop vectorization (this is neither a
+vectorization-only ablation nor `--Oexperimental`). The Stanli timings are the
+default run's. The CmdStan timings are reused from earlier runs of the same
+CmdStan build and toolchain with the same inputs and settings; models those
+runs lack are timed again. Every Stanli gradient passes the same numerical gate
+against the reused CmdStan gradients. Because the two sides come from separate
+runs, the ratio is CmdStan's median gradient time divided by Stanli's.
 
 The [compiler provenance](../output/corpus-performance-vectorized/compiler-provenance.json)
-records pinned source, build commands, tool versions and binary hash. The
+records the pinned source, build commands, tool versions and binary hash. The
 [enabling patch](../output/corpus-performance-vectorized/stanc-o1vec.patch)
-and stock/patched optimized MIR for a scalar normal-likelihood loop are retained
-with the [evidence](../output/corpus-performance-vectorized/README.md).
+and stock and patched MIR for a scalar normal-likelihood loop are kept with the
+[evidence](../output/corpus-performance-vectorized/README.md).
 
 <!--gen:benchmark_vectorized_catalog-->
 Stanli timings are from the default run `bec65da115c4bf4e`. The CmdStan timings with loop vectorization are reused from run `8ab8978d93458c88` (2026-10-10). `s2_gp_by_gr` is from run `532c791f4c877dc4` (2026-10-16). `ctsem_ctsm_400` is from run `ad937274cf01193a` (2026-10-16). Each ratio is CmdStan's median gradient time divided by Stanli's.
@@ -950,3 +835,176 @@ Missing measurements are —; available timings are retained.
 | `sir` | — | — | — | failed; sir/gradient/0/stanli: failed (event 6075) |
 | `sw_cens` | — | — | — | failed; density/gradient mismatch: scaled error 2.44e-06 |
 <!--/gen-->
+
+## Fast mode
+
+These figures are from 2026-10-10 (Stanli 0.20.0, main `84e60796`) and have
+not been remeasured. [Fast mode](fast-mode.md) used the same protocol, inputs
+and binaries as that day's default run, with models compiled and run in fast
+mode (`corpus_bench.py --fast-math`). The default-mode figures here come from
+the same 2026-10-10 run. Gradient times, 336 models with paired timings, Apple
+M3 Ultra:
+
+- Fast mode is 2.03x faster than default mode in geometric mean; the median
+  model is 1.06x faster. 87 models are at least 2x faster, 43 at least 10x
+  and 7 at least 100x. Most of the large gains are models whose likelihood
+  repeats over the data, which fast mode evaluates once per distinct row or
+  group.
+- Against CmdStan, the geometric-mean speedup is 1.95x in default mode and
+  3.95x in fast mode. Fast mode beats CmdStan on 321 of the 336 models,
+  default mode on 307.
+- No model is measurably slower in fast mode. The few that timed up to 6%
+  slower were within noise when rechecked in CPU cycles.
+
+The largest gains, gradient time in microseconds:
+
+| model | default | fast | fast vs default |
+| --- | ---: | ---: | ---: |
+| `radon_pooled` | 40.1 | 0.081 | 493x faster |
+| `nes` | 18.2 | 0.072 | 251x faster |
+| `logearn_interaction_z` | 8.15 | 0.051 | 159x faster |
+| `diamonds` | 33.6 | 0.311 | 108x faster |
+| `ch12_m12_4` | 65.8 | 0.666 | 99x faster |
+| `aalto_poisson_hurdle` | 7.34 | 0.208 | 35x faster |
+| `kidscore_momiq` | 1.39 | 0.053 | 26x faster |
+| `M0_model` | 2.45 | 0.241 | 10x faster |
+
+The per-model fast-mode table, raw observations and build identity are in
+[`output/corpus-performance-fast/`](../output/corpus-performance-fast/README.md).
+
+## Reproduction
+
+| Item | Configuration |
+| --- | --- |
+| Scope | All 343 application models, `--corpus all` |
+| Gradient trials | Six alternating pairs, 200 ms warmup and 250 ms measurement per process |
+| Displayed workload | Setup + 2,000 × median warm gradient time |
+| Stanli build | Release clang++, `-O3 -DNDEBUG`; full runtime, threads enabled, lite mode disabled |
+| Upstream source base | `2c9d67b98b196e800dc051460aaaf653ac811ace`; exact measured checkpoint and hashes in manifests |
+| Default reference compiler | Stock pinned stanc3, no additional flags |
+| CmdStan | 2.40.0, `d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6` |
+| Stan Math | `5252d51d47c1d5e78005fc043ad996fad6dd8da8` |
+| Timeouts | Gradient command 60 s; build 900 s |
+| Host | Apple M3 Ultra, macOS arm64, 32 logical CPUs, 96 GiB RAM |
+
+The sweeps run one at a time on a shared development host with normal
+background services. Each command asks for one thread from Stan, OpenMP and
+common BLAS libraries.
+
+Build the dependencies and `bench_grad`, then run the default sweep and the
+loop-vectorization sweep with separate output paths:
+
+```sh
+./tools/dev_setup.sh
+cmake --build build-rel --target bench_grad -j 4
+python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
+  build/corpus-current/default-v4.tsv --bench build-rel/bench_grad \
+  --corpus all --rounds 6 --warmup-ms 200 --measure-ms 250 \
+  --gradient-timeout 60 --build-timeout 900
+python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
+  build/corpus-current/vectorized-v4.tsv --bench build-rel/bench_grad \
+  --corpus all --rounds 6 --warmup-ms 200 --measure-ms 250 \
+  --gradient-timeout 60 --build-timeout 900 \
+  --stanc build/corpus-current/stanc-o1vec-src/_build/default/src/stanc/stanc.exe \
+  --stancflags=--O1
+```
+
+`--corpus` selects a source collection and `--filter` selects model IDs.
+`--stanc` (alias `--cmdstan-stanc`) and `--stancflags` choose CmdStan's
+compiler; Stanli uses `deps/stanc3/stanli-vectorize-probe`. `--resume`
+requires identical sources, inputs, binaries and settings. Timeouts kill the
+command's process group and never count as a completed measurement.
+
+Each `OUT.tsv` has a sibling `OUT.tsv.run/` directory that keeps an immutable
+manifest (source, input and executable hashes, machine, threads, compilers,
+upstream checkouts and build flags), the frozen inputs, exact commands, load
+averages, logs, raw paired observations and numerical deviations. `OUT.tsv` is
+derived from these records.
+
+Publish the complete runs, then regenerate the docs and browser catalog:
+
+```sh
+python3 tools/publish_corpus_bench.py build/corpus-current/default-v4.tsv \
+  output/corpus-performance
+V=output/corpus-performance-vectorized
+python3 tools/publish_corpus_bench.py build/corpus-current/vectorized-v4.tsv \
+  $V/cmdstan-runs/RUN_ID --compiler-evidence build/corpus-current
+python3 tools/publish_corpus_bench.py --vectorized $V \
+  --stanli-run output/corpus-performance \
+  --cmdstan-run $V/cmdstan-runs/RUN_ID [--cmdstan-run ...]
+python3 tools/gen_docs.py
+python3 tools/gen_web_models.py deps/posteriordb
+```
+
+The publisher checks the whole inventory, the raw pairs and the recomputed
+estimates, and never fills a missing cell from an older run. The one exception
+is the loop-vectorization table: when CmdStan, its toolchain and the patched
+stanc3 are unchanged, you can skip the vectorized sweep, list the existing runs
+under `cmdstan-runs/`, and time only the models they lack with
+`--filter MODEL`. A later `--cmdstan-run` takes precedence for the models it
+contains. `publish_corpus_bench.py --vectorized` records which run supplied
+each model in `combined.json`, and the renderer rechecks inputs, settings,
+toolchain, compiler hash and the numerical gate.
+
+The [default evidence](../output/corpus-performance/README.md) and
+[loop-vectorization evidence](../output/corpus-performance-vectorized/README.md)
+directories hold the full inventories, manifests, summary TSVs, raw
+observations, command events and checksums. Older runs and protocols are in
+[benchmark history](../notes/performance/benchmark-history.md).
+
+### Compiler-pipeline regression checks
+
+A change to the compiler pipeline must benchmark both the current default
+branch and the candidate before merge. Run the full inventory
+(`--corpus all`, no `--filter`) with the shipped configuration for both
+revisions, on matched hardware, compiler, build mode, threads, inputs and
+settings, with separate output paths.
+
+Compare each model's source-to-MIR time, preparation time, warm gradient and
+setup-plus-gradient estimate as `100 * (candidate / baseline - 1)`. A change of
+2% or more is a major slowdown. Show per-model and per-phase results, since
+an aggregate win can hide a regression. Missing, failed or timed-out
+observations stay visible and cannot count as a pass, and every existing
+numerical check still applies.
+
+Shared CI hosts can be noisier than 2%. Investigate a threshold crossing with a
+separate experiment on an idle host: at least six alternating fresh-process
+baseline/candidate pairs for the affected phases, all samples kept, with
+identical-binary controls when needed. Do not rerun until a favorable sample
+appears. Fix a confirmed regression before merge. The PR lists both revision
+SHAs, build identities, exact commands, coverage, the phase comparison and
+links to the raw results. The `mir-vectorization-measurements` CI artifact
+compares pass-on and pass-off behavior on a small gradient set and does not
+replace this check.
+
+### Focused execution-path benchmarks
+
+The corpus run times gradients only. For generated quantities, standalone
+function calls and interpreter fallback cliffs, use the public-API phase
+benchmarks:
+
+```sh
+# From the repository root, after building the runtime and MIR fixtures.
+python3 tools/bench_model_phases.py /absolute/path/libstanli.dylib \
+  tools/bench_execution_paths.json ode_nested_for
+python3 tools/bench_function_paths.py /absolute/path/libstanli.dylib affine
+```
+
+The [execution-path manifest](../tools/bench_execution_paths.json) lists the
+workloads: nested loops, runtime indexing, loop and branch callbacks, RNG
+output and arguments, runtime integer expressions, solver controls in
+generated quantities, bounded generated-quantity temporaries, and canaries
+that must stay on the interpreter. `bench_function_paths.py` accepts `affine`,
+`branch_exit`, `sized`, `nested_identity`, `nested_scalars` and
+`nested_matrices`; the nested cases take an optional outer extent (default 4).
+
+`bench_model_phases.py` reports source compilation, preparation, first and
+warm gradients, first and warm output rows, and a seeded 100-warmup/100-draw
+fit (`--skip-inference` omits the fit). It includes Python/ctypes overhead;
+confirm native gradients with `bench_grad --timed`. Peak RSS is whole-process
+`getrusage` memory (bytes on macOS, KiB on Linux).
+
+Collect six alternating baseline/candidate pairs in fresh processes with
+nothing else running, keep raw samples, hashes and build settings, and check
+numerical parity separately. These focused runs do not replace the corpus run
+or change its published tables.

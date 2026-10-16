@@ -1283,6 +1283,29 @@ parity and the focused ODE suite on Linux x86-64 are a merge gate. A Linux
 failure must narrow the whitelist or retain the oracle, not weaken the bitwise
 gate.
 
+## Retained loops
+
+`OP_LOOP` keeps a loop whose body has a `while` or a parameter branch as one
+graph op (`lower.cpp`, `structured_loop.cpp`, `structured_recording.inc`).
+[How it works](../../docs/how-it-works.md#retained-loops) explains selection,
+recording and guarded replay. Large recordings are sealed into per-iteration
+numerical frames, and frame admission enables a temporary recording program
+with data-only specializations. The
+[recording-site experiment](../../docs/internal/archive/plans/2026-09-20-ctsem-index-recording.md)
+and the [ctsem memory record](../../docs/internal/archive/plans/2026-09-19-ctsem-memory.md)
+have the proofs and ctsem measurements.
+
+| switch | effect | source |
+| --- | --- | --- |
+| `STANLI_STRUCTURED_LOOPS=0` / `=1` | retain no loops / retain every loop | `lower.cpp` |
+| `STANLI_NO_STRUCTURED_REPLAY=1` | walk the control tree on every evaluation | `structured_loop.cpp` |
+| `STANLI_NO_STRUCTURED_CELL_CONSTANTS=1` | disable the per-cell data proof for updated containers | `structured_loop.cpp` |
+| `STANLI_STRUCTURED_FRAMES=0` / `=1` | disable frames / force them on eligible plans | `structured_loop.cpp` |
+| `STANLI_STRUCTURED_COMPILED_RECORDING=0` | record with the tree walk instead of the temporary program | `structured_loop.cpp` |
+| `STANLI_STRUCTURED_DATA_RECORDING=0` | disable data-only call specialization in that program | `structured_recording.inc` |
+| `STANLI_STRUCTURED_PREPARED_INDEX=0` | disable prepared data-only point reads | `structured_recording.inc` |
+| `STANLI_STRUCTURED_PREPARED_ITERATOR=0` | disable transient iterator rebinding reuse | `structured_recording.inc` |
+
 ## Executor details (`executor.cpp`)
 
 - Each op's context (the pointers telling the kernel where its inputs,

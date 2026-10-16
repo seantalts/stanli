@@ -2,7 +2,7 @@
 
 [TESTING.md](../../../TESTING.md) is authoritative for actual numerical gates,
 known exceptions, oracle selection and CI. The ten-ULP objective is not a
-universal measured bound. [The benchmark protocol](../../benchmark-protocol.md)
+universal measured bound. [The benchmark protocol](../../benchmarks.md#how-we-measure)
 defines timed phases and publication; public [benchmarks](../../benchmarks.md)
 retain their recorded inputs and revisions.
 
@@ -15,7 +15,7 @@ retain their recorded inputs and revisions.
 | Would a free summation order, FMA contraction or skipped argument checks speed up fused densities in fast mode? | [Fast-mode density candidates](../../../notes/performance/2026-10-07-fast-density-candidates.md): none is worth a flag (1.006x, 1.000x and an unsafe 1.030x ceiling over 317 models); the exact vectorized check pass shipped by default in #444. |
 | Do fast-mode posteriors agree with default mode and the reference posteriors? | [Fast mode sampling check](../../../notes/performance/2026-10-09-fast-mode-sampling-check.md): 120 models, 17 flagged, none persistent against a seed-to-seed control; ESS per gradient 1.01x. |
 | Platform-specific oracle disagreement | [Intel macOS recording](../../../notes/performance/2026-09-22-intel-oracle.md): same-platform CmdStan distinguished oracle drift from a runtime error; eigenvector outputs were not added to the gate. |
-| Lightweight densities and additive constants | [Compact densities](../../compact-densities.md), [lite build](../../lite-lp.md): public numerical contracts. |
+| Lightweight densities and additive constants | [Compact densities](../../lp-constant.md), [lite build](../../lp-constant.md): public numerical contracts. |
 | Benchmark/corpus artifact provenance | [Artifact inventory](../artifacts/README.md), [published run manifests](../../../output/corpus-performance/README.md). |
 
 Use CmdStan independently; matching an old interpreter alone cannot establish

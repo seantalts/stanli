@@ -1,12 +1,20 @@
 # stanli
 
-Full [Stan](https://mc-stan.org) in the browser. stanc3 (the real Stan
-compiler, compiled to JavaScript) parses, typechecks, and optimizes the
-model; the shared stanli OCaml pipeline encodes its typed MIR into portable
-MIR. A WebAssembly build of the stanli runtime lowers that to an op graph over
-precompiled stan-math kernels and samples with NUTS. No server, no C++
-toolchain, everything in the tab. Live demo:
-<https://seantalts.github.io/stanli/>.
+Full [Stan](https://mc-stan.org) in the browser. stanc3, the real Stan
+compiler built to JavaScript, compiles the model. A WebAssembly build of the
+stanli runtime samples it with Stan's NUTS over precompiled stan-math kernels.
+There is no server and no C++ toolchain; everything runs in the tab. Live
+demo: <https://seantalts.github.io/stanli/>.
+
+## Install
+
+```console
+npm install @seantalts/stanli
+```
+
+The package runs in browsers that support module Web Workers.
+
+## Quick start
 
 ```js
 import { sample } from "@seantalts/stanli";
@@ -27,42 +35,25 @@ fit.generatedStart;    // index where generated-quantity columns begin
 fit.ms;                // {stanc, lower, sample, total} in milliseconds
 ```
 
-NUTS can take its starting point from single-path Pathfinder. The same seed
-controls initialization and sampling, and an empty options object uses the
-defaults:
+Columns cover the full CmdStan CSV: parameters, transformed parameters and
+generated quantities, with RNG draws seeded from `seed`. With no generated
+quantities, `generatedStart === fit.names.length`.
 
-```js
-const fit = await sample({
-  code,
-  data,
-  seed: 303,
-  pathfinderInit: { numIterations: 500, numElboDraws: 25 },
-});
-```
-
-`historySize` and Pathfinder's own `initRadius` are also supported. This mode
-does not perform PSIS resampling.
-
-`fastMath: true` opts a model into fast mode, as `fast_math` does in Python and
-R: Stan source is compiled with fused multiply-add rewriting, the runtime
-regroups sums, and likelihood terms that repeat over the data are evaluated
-once per distinct case. Results can differ from the default in the last bits.
-It is off by default, `fit.fastMath` reports the mode a fit ran in, and it
-needs the portable compiler (`stanli-compiler.js`). With a precompiled `mir`,
-give `compile()` and `sample()` the same value:
+`fastMath: true` opts in to [fast mode](https://github.com/seantalts/stanli/blob/main/docs/fast-mode.md): faster
+gradients, with results that can differ from the default in the last bits.
+`fit.fastMath` reports the mode a fit ran in. With a precompiled `mir`, give
+`compile()` and `sample()` the same value:
 
 ```js
 const { mir } = await compile({ code, fastMath: true });
 const fit = await sample({ mir, data, fastMath: true });
-fit.fastMath;  // true
 ```
 
-See [fast mode](../docs/fast-mode.md) for what it changes and how accurate it is.
+## Sampling and diagnostics
 
-For NUTS, `await diagnose(fit)` returns the same text report as the R and
-Python bindings: divergences, maximum-treedepth saturation, E-BFMI,
-rank-normalized R-hat, and bulk/tail ESS. Pass an array of fits from the
-same model and configuration to diagnose all chains together:
+Each `sample()` call runs one chain. Workers pool up to the machine's core
+count (at most eight), so independent calls run at the same time. Compile once
+and pass `mir` to run several chains:
 
 ```js
 import { compile, diagnose, sample } from "@seantalts/stanli";
@@ -72,48 +63,75 @@ const fits = await Promise.all([1, 2, 3, 4].map((seed) =>
 console.log(await diagnose(fits));
 ```
 
-`fit.samplerStats` contains seven doubles per post-warmup draw, in order:
+`diagnose()` returns the same text report as the R and Python packages:
+divergences, maximum-treedepth saturation, E-BFMI, rank-normalized R-hat, and
+bulk/tail ESS. It takes one NUTS fit or an array of chains from the same model
+and settings.
+
+`fit.samplerStats` holds seven doubles per post-warmup draw, in order:
 `lp__`, `accept_stat__`, `stepsize__`, `treedepth__`, `n_leapfrog__`,
-`divergent__`, `energy__`. `fit.maxDepth` records the sampling limit (10).
-WALNUTS and Pathfinder return `null` for `samplerStats`; `diagnose()` rejects
-these methods rather than treating missing statistics as successful checks.
-The demo displays the report after NUTS runs, including comparisons, and
-explicitly marks WALNUTS sampler diagnostics as unavailable. Pathfinder keeps
-its existing importance-weight k-hat diagnostic.
+`divergent__`, `energy__`. `fit.maxDepth` is the treedepth limit (10).
 
-Columns cover the full CmdStan CSV: constrained parameters, transformed
-parameters, and generated quantities (RNG draws stream from `seed`).
-When there are no generated quantities, `generatedStart === fit.names.length`.
-The heavy work runs in a worker the package owns, so the page never
-blocks; calls queue and run one at a time.
+## Other algorithms
 
-The preferred compiler, `stanli-compiler.js`, is 2,988,001 bytes raw and
-424,607 bytes gzipped in the current measured build. For one rollback cycle
-the package also contains stock `stancjs.bc.js` (2,966,778 bytes raw, 417,857
-bytes gzipped). The worker loads the stock compiler only if the portable
-compiler is unavailable; its O1 legacy MIR remains accepted by the runtime.
-Carrying both temporarily doubles the compiler portion of the installed and
-downloaded package.
+`sampler: "walnuts"` runs WALNUTS, NUTS with a step length that adapts within
+each trajectory ([arXiv:2506.18746](https://arxiv.org/abs/2506.18746)).
+`maxError` sets its largest allowed log-density drift per macro step (default
+0.5).
 
-The compiler loads lazily, only when a call passes Stan source. `preload()`
-starts the compiler and WASM loads in the background; call it at page idle so
-the first `sample()` skips the fetch and parse. An app that ships a fixed model
-can precompile it at build time (`stanc --O1 --debug-optimized-mir model.stan`)
-and pass `mir` instead of `code`; neither browser compiler loads, and the WASM
-runtime alone is ~1.5 MB gzipped.
+`sampler: "pathfinder"` fits a normal approximation along an L-BFGS path. It
+ignores `warmup` and `delta`, treats `samples` as its draw count, and returns
+a `fit.pathfinder` block with the path, the selected iteration, its ELBO, and
+an importance-weight k-hat.
 
-On Eight Schools, compact portable MIR is 6,932 bytes (1,793 gzipped), compared
-with 33,320 bytes (2,000 gzipped) for legacy MIR. Across 51 fresh processes on
-the same Apple arm64 release build, median decoder parsing was 0.074 ms versus
-0.293 ms, and complete preparation was 0.278 ms versus 0.682 ms. These are
-one-time preparation measurements; source compilation still dominates that
-path.
+WALNUTS and Pathfinder return `null` for `samplerStats`, and `diagnose()`
+refuses them.
 
-118 of 119 posteriordb corpus models verify against CmdStan's log
-density, gradients, and write_array values from inside this WASM build;
-see the [repository](https://github.com/seantalts/stanli) for the
-verification policy and numbers.
+NUTS can also start from single-path Pathfinder. The seed controls both
+stages, and `{}` uses the defaults:
 
-Not yet here: variational inference, optimization, multi-chain
-threading. `wasm32` caps memory at 4 GB, which one 79,000-parameter
-corpus model exceeds; everything typical fits.
+```js
+const fit = await sample({
+  code, data, seed: 303,
+  pathfinderInit: { numIterations: 500, numElboDraws: 25 },
+});
+```
+
+`historySize` and Pathfinder's own `initRadius` are the other options. This
+mode does no PSIS resampling.
+
+## API reference
+
+| Function | Does |
+| --- | --- |
+| `sample({code \| mir, data, seed, warmup, samples, delta, sampler, maxError, pathfinderInit, fastMath, onProgress, onLive})` | Compile (unless `mir` is given) and draw. Defaults: `seed` 1, `warmup` 1000, `samples` 1000, `delta` 0.8, `sampler` `"nuts"`. |
+| `compile({code, fastMath})` | Compile Stan source to portable MIR once, for reuse across `sample()` calls. |
+| `diagnose(fit \| fits)` | Text diagnostic report for NUTS fits. |
+| `preload({chains})` | Start loading the compiler and WASM runtime in the background. |
+
+`data` is an object or JSON text; `NaN` and infinities are passed through as
+Stan expects. `onLive` streams draws while NUTS runs (or path iterates for
+Pathfinder), for live plots.
+
+## Platforms
+
+The compiler loads only when a call passes Stan source. It is about 3 MB raw
+and 425 KB gzipped. The package also carries the stock `stancjs.bc.js` of
+about the same size for one release cycle, loaded only if the preferred
+compiler is unavailable. `preload()` at page idle lets the first `sample()`
+skip the fetch and parse. An app with a fixed model can compile it at build
+time (`stanc --O1 --debug-optimized-mir model.stan`) and pass `mir`; then no
+compiler loads and the WASM runtime alone is about 1.5 MB gzipped.
+
+## Limits
+
+- No optimization, ADVI or Laplace; the
+  [R package](https://github.com/seantalts/stanli/blob/main/r/README.md#other-algorithms) has them.
+- No metric or step-size options; NUTS uses the adapted diagonal metric.
+- No within-chain threading; run chains as separate `sample()` calls.
+- `wasm32` caps memory at 4 GB. One 79,000-parameter corpus model exceeds it;
+  typical models fit.
+
+How stanli works is in [docs/how-it-works.md](https://github.com/seantalts/stanli/blob/main/docs/how-it-works.md), how it
+is tested (including inside this WASM build) in [TESTING.md](https://github.com/seantalts/stanli/blob/main/TESTING.md),
+and how fast it is in [docs/benchmarks.md](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md).

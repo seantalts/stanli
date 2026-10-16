@@ -253,7 +253,7 @@ and each saved draw takes 36 ms instead of 6 s. A run of 30 warmup and 30
 saved draws at 33 rows takes 248 s against 354 s for CmdStan. Across the
 316 other corpus models that evaluate, warm-gradient latency is unchanged
 against 0.16.0 (median ratio 0.999) and preparation is within 3%. The
-measurements are in [docs/benchmark-history.md](docs/benchmark-history.md).
+measurements are in [notes/performance/benchmark-history.md](notes/performance/benchmark-history.md).
 
 - Retained loops replay a recorded instruction stream instead of walking the
   loop body on every gradient. The first evaluation records the kernel calls
@@ -889,7 +889,7 @@ Includes the shape fixes drafted for 0.4.1, which was never released.
   Reject operations exceeding input capacity instead of corrupting memory.
 - Use compact instantiations for the multivariate/multinomial tail: gradients
   and output values match CmdStan, but `lp__` can differ by a model-specific
-  constant. See [compact densities](docs/compact-densities.md).
+  constant. See [compact densities](docs/lp-constant.md).
 - Disable `STANLI_LITE_LP` by default everywhere, including the browser, so builds
   use the same `lp__` convention; compact-density limitations still apply.
 
@@ -924,7 +924,7 @@ Includes changes drafted for 0.2.1, which was never released.
   comparisons, Bayes factors, marginal likelihoods, or bridge sampling.
   PyPI wheels retain exact builds. C's `stanli_exact_lp()`, Python's
   `stanli.exact_lp()`, and JS's `fit.exactLp` report the mode. See
-  [lite log densities](docs/lite-lp.md). The browser default changes in 0.4.0.
+  [lite log densities](docs/lp-constant.md). The browser default changes in 0.4.0.
 
 ### Browser and platform support
 

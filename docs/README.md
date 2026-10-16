@@ -1,25 +1,47 @@
 # Documentation
 
-Start with the [project overview](../README.md) or your interface guide:
-[Python](../python/README.md), [R](../r/README.md), or
-[JavaScript/browser](../js/README.md).
+Start with the [project overview](../README.md), then the guide for your
+language: [Python](../python/README.md), [R](../r/README.md) or
+[JavaScript](../js/README.md).
 
-| What you want to understand | Read |
+## Use
+
+| Page | Read it when |
 | --- | --- |
-| Performance and its measurement limits | [Benchmarks](benchmarks.md), [benchmark protocol](benchmark-protocol.md) |
-| Model and function support | [Corpus status](corpus-status.md), [probability-function coverage](coverage.md) |
-| Numerical correctness, tests and exceptions | [Testing and numerical contracts](../TESTING.md), [compact densities](compact-densities.md), [optional lite build](lite-lp.md) |
-| Moving an R workflow to Stanli | [From cmdstanr](from-cmdstanr.md), [native stanfit compatibility](stanfit-compatibility.md) |
-| Generated models and teaching | [brms/Rethinking workflows](teaching-support.md), [teaching guide](teaching.md) |
-| Faster results that may differ from CmdStan in the last bits | [Fast mode](fast-mode.md) |
-| Parallel execution within a chain | [Native reductions](native-reduce-sum.md) |
-| How execution works | [Architecture explained](how-it-works.md), [three-model walkthrough](lowering-walkthrough.md) |
-| Contributing or building | [Contributor guide](hacking.md), [build/CI measurements](build-performance.md), [runtime source map](../runtime/src/README.md) |
-| Older measurements | [Benchmark history](benchmark-history.md), [September 11 tables](benchmark-2026-09-11.md), [brms performance](brms-performance.md) |
-| Releases and licensing | [Changelog](../CHANGELOG.md), [third-party licenses](../THIRD_PARTY_LICENSES.md) |
+| [Coming from cmdstanr](from-cmdstanr.md) | You have cmdstanr code and want the stanli equivalent of each call. |
+| [Teaching with stanli](teaching.md) | You are setting up a class, including brms and Rethinking models. |
+| [Fast mode](fast-mode.md) | You want more speed and can accept results that differ from CmdStan in the last bits. |
+| [Within-chain parallelism](native-reduce-sum.md) | Your model uses `reduce_sum` and you want more than one thread per chain. |
 
-These guides are intended for people using or contributing to Stanli. Internal
-research has a separate [short index](internal/README.md) and
-[full document catalog](internal/catalog.md). Historical plans, review transcripts,
-and machine-readable evidence live below `internal/` or in topical `notes/`
-directories; they are not prerequisites for using the packages.
+## Trust
+
+| Page | Read it when |
+| --- | --- |
+| [Testing](../TESTING.md) | You want to know what is checked, against what, and the known limits. |
+| [Corpus status](corpus-status.md) | You want to know whether a particular model runs and matches CmdStan. Generated. |
+| [Distribution coverage](coverage.md) | You want to know which densities, CDFs and transforms are supported. |
+| [The lp constant](lp-constant.md) | Your `lp__` differs from CmdStan's by a constant. |
+| [Benchmarks](benchmarks.md) | You want speed numbers and how they were measured. |
+
+## Understand
+
+| Page | Read it when |
+| --- | --- |
+| [How it works](how-it-works.md) | You want to know why an interpreter can be faster than compiled C++. |
+| [Lowering walkthrough](lowering-walkthrough.md) | You want to follow three small models through every layer. |
+| [Graph optimizations](../runtime/src/OPTIMIZATIONS.md) | You want the list of graph passes, their switches and their measured effect. |
+| [Install size](install-size.md) | You want to know what makes up the shared library. |
+
+## Contribute
+
+| Page | Read it when |
+| --- | --- |
+| [Hacking on stanli](hacking.md) | You want to build, change, or verify a change. |
+| [Runtime source map](../runtime/src/README.md) | You are looking for a file in the runtime. |
+| [Releasing](../RELEASING.md) | You are cutting a release. |
+| [Changelog](../CHANGELOG.md) | You want to know what changed between versions. |
+| [Third-party licenses](../THIRD_PARTY_LICENSES.md) | You are redistributing stanli. |
+
+Dated experiment reports and earlier benchmark tables live in
+[notes/](../notes/README.md). Design history lives under
+[internal/](internal/README.md). Neither is needed to use stanli.

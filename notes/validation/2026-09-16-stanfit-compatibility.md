@@ -1,15 +1,13 @@
-# Native stanfit compatibility
+# stanfit adapter validation record (16 September 2026)
 
-For RStan-style extraction, summaries, and diagnostics **without RStan**, use
-`as_rfit()`. That native S3 interface ships inside Stanli; see the
-[R interface guide](../r/README.md#native-r-style-fit-methods-without-rstan).
-The `as_stanfit()` conversion documented below remains optional and produces
-an actual RStan S4 subclass.
+This is a dated record of how `as_stanfit()` was designed and validated. The
+user-facing behavior and limits of the fit adapters are in the
+[R package README](../../r/README.md#fit-adapters).
 
 `as_stanfit()` constructs an S4 subclass of RStan's `stanfit` in memory from a
 `stanli_fit`. It neither writes nor reads CSV and never compiles a C++ model.
-RStan is an optional suggested package. This supplies the stored-fit object
-for future backends; it does not itself create a complete `brmsfit` or `ulam`.
+It supplies the stored-fit object for backends; it does not itself create a
+complete `brmsfit` or `ulam`.
 
 ## Consumer premise, checked September 2026
 
@@ -103,12 +101,6 @@ parameter count, and does not mutate other copies of the fit. These checks do
 not prove that the original data was supplied. There is no automatic model
 compilation, fake Rcpp pointer, or RStan fork.
 
-[CRAN's RStan page](https://CRAN.R-project.org/package=rstan)
-provides 2.32.7 binaries for supported macOS and Windows R versions, verified
-against the R 4.6 binary indexes. Install the binary to avoid a toolchain;
-Linux deployments need a compatible preinstalled binary. No model compiler is
-needed for conversion or the supported consumers.
-
 ## Independent oracle and validation
 
 `test-stanfit.R` invokes `stanli_run` with the same model, configuration, and
@@ -171,6 +163,6 @@ the 29-parameter reference model gave a median 3.75 microseconds per direct
 `log_prob_grad()` call (range 3.75–4.20), versus 13.25 through
 `rstan::log_prob(..., gradient = TRUE)` (12.50–13.65). Each arm warmed for at
 least 200 ms. This measures R dispatch and validation overhead on a small
-model, not inference speed. [Raw measurements](../output/teaching-performance/native-call-benchmark.csv)
+model, not inference speed. [Raw measurements](../../output/teaching-performance/native-call-benchmark.csv)
 were taken after the full sampling sweep. Ordinary stanli startup still leaves
 the RStan namespace unloaded.

@@ -60,7 +60,7 @@ Ordinary replay needs no CmdStan build or source download for these local fixtur
 
 The [common benchmark runner](../../harnesses/corpus_bench.py) includes these
 models by default. `--corpus educational` is an optional provenance filter.
-New runs use the same [measurement protocol](../../docs/benchmark-protocol.md)
+New runs use the same [measurement protocol](../../docs/benchmarks.md#how-we-measure)
 and reporting path as the rest of the application corpus:
 
 ```sh
@@ -70,7 +70,7 @@ python3 tools/publish_corpus_bench.py /tmp/corpus-v4.tsv /tmp/corpus-v4-report
 ```
 
 The [main results page](../../docs/benchmarks.md) is organized by measurement.
-The [September 14 archive](../../docs/benchmark-history.md) and
+The [September 14 archive](../../notes/performance/benchmark-history.md) and
 [detailed investigation](RESULTS.md) preserve the original collection-specific
 experiments, raw timings, posterior-mean comparisons and per-model performance
 floors. Those historical thresholds do not define a separate active test tier.

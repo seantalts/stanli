@@ -159,7 +159,7 @@ The headline ratio is **median CmdStan process time / median Stanli process
 time** across the four seeds. It includes Stanli source compilation,
 preparation, sampling and output. CmdStan's C++ compilation is excluded.
 This is a complete sampling measurement, distinct from the setup-plus-gradient
-estimate in `docs/benchmark-protocol.md`.
+estimate in `docs/benchmarks.md`.
 
 **121/124 brms models meet the requested 0.8 ratio. The median ratio is 1.29.**
 The three remaining misses are:

@@ -193,7 +193,7 @@ rather than silently skipping ones without a record. Output columns and
 values are compared as well as log density and the full gradient.
 
 The default benchmark suite includes this directory. The [version-4
-protocol](../../docs/benchmark-protocol.md) measures setup and warm gradients
+protocol](../../docs/benchmarks.md#how-we-measure) measures setup and warm gradients
 and estimates setup plus 20,000 gradient evaluations. To measure this corpus alone:
 
 ```sh
