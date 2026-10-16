@@ -1,6 +1,52 @@
 # Changelog
 
-## Unreleased
+## 0.21.0
+
+Faster multilevel brms and cognitive models, multi-core brms `threading()`,
+and CmdStan-style metric controls for sampling.
+
+### Performance
+
+- Across the 343-model test corpus, gradients are 2.17x faster than
+  CmdStan in geometric mean, up from 1.95x in 0.20.0, and 1.10x faster than
+  0.20.0 on the models both releases measure.
+- brms random-effect loops are vectorized. Loops that update an element in
+  place (`mu[n] += r[J[n]] * Z[n]`) and loops that store to the same element
+  twice used to run one operation per observation. In the corpus,
+  `ch13_m13_5` goes from 3031 operations to 18 and `ch14_m14_2` from 4053 to
+  36. On the multilevel models of issue #455 this also removes the slowdown
+  from running several chains at once and the growth of cost per observation
+  with N. Gradients of 45 corpus models move at rounding level.
+- brms `threading()` programs use several cores when `threads_per_chain` is
+  above 1. Before, they ran on one core, and in 0.20.0 they were many times
+  slower than the plain program. On a 10,000-observation log-normal race model
+  a gradient is 2.8x faster at 4 threads and 3.5x faster at 8, and four chains
+  with 4 threads each sample in 10 s instead of 30 s. Data is shared between
+  threads and chains instead of copied. A `reduce_sum` is split only when each
+  chunk has about 30 microseconds of work, so small models stay on one thread
+  and are never slower. Threaded results depend on `threads_per_chain`, which
+  sets the summation order, and can change between stanli versions; they do
+  not depend on thread scheduling. `stanli_run` prints a note when a model
+  with a large `reduce_sum` runs on one thread.
+- Cognitive race and diffusion models (the cogmod family):
+  - `cm_invgaussian` samples 4.0x faster with one chain and 4.6x faster with
+    four. Loops that use `log_sum_exp` over a range or `inv_logit` now run 64
+    observations at a time. This uses more memory: peak memory with four
+    chains rises from 59 MB to 114 MB.
+  - `cm_lnr` and `cm_rdm` gradients are about 1.5x faster: the reverse pass
+    of loops with branches no longer zeroes its scratch buffer.
+  - `wiener_lpdf` evaluates the density once per gradient instead of twice,
+    also when its log density is weighted as in a mixture, and data
+    arguments are no longer differentiated. About 1.5x faster on a model
+    that is one `y ~ wiener(...)` statement. Gradients move by at most 7 ULP
+    on the DDM models tried.
+  - In loops with many branches that run one observation at a time, the
+    reverse pass visits only the blocks that ran. The gradient is up to 9x
+    faster at points where most observations return early.
+- Preparing a model allocates less in the function registry; median
+  preparation time is about 1.6% shorter.
+
+### Features
 
 - `sample_model()` and `sample_cstan()` in R, and `Model.sample()` in Python,
   take `metric` (`"diag_e"`, `"dense_e"` or `"unit_e"`), a starting
@@ -8,62 +54,33 @@
   do. The fit reports the step size and inverse metric each chain holds after
   warmup (`fit$step_size`, `fit$inv_metric`, and `$inv_metric()` on
   `as_cstanfit()` objects in R; `fit.step_size`, `fit.inv_metric` and
-  `fit.metric` in Python), so a pilot fit's metric can start the next one. The C API gains
-  `stanli_sample_multi_metric` with the same controls; `stanli_sample_opts`
-  and the ABI version are unchanged.
-- Per-observation loops that update an element in place (`mu[n] += ...`) are
-  now vectorized in default mode, as are loops that store to the same element
-  twice. These loops used to stay one operation per iteration. In the corpus,
-  `ch13_m13_5` goes from 3031 operations to 18, `ch14_m14_2` from 4053 to 36
-  and `i319_gauss_re` from 313 to 21. Gradients of 45 corpus models move at
-  rounding level relative to CmdStan, because the adjoint sums into the
-  random-effect vectors are regrouped. Eight brms test fixtures (`s2_car`,
-  `s2_car_esicar`, `s2_gr_by`, `s2_mm`, `s2_mm_weights`, `s2_mmc`,
-  `sw_re_bern`, `sw_skewnormal`) are now gated on gradient error in ULP of
-  the largest gradient entry (limit 10, measured at most 2) instead of per
-  element. Against a 60-digit reference, `s2_mm` and `s2_gr_by` are slightly
-  farther on one small entry (by 2e-16 and 6e-16); the other six are closer.
-  On the multilevel models of issue #455 this also removes the slowdown
-  from running several chains at once and the growth of cost per
-  observation with N.
-- brms `threading()` programs no longer run many times slower than the
-  plain program, and with `threads_per_chain` above 1 they now use several
-  cores. On a 10,000-observation log-normal race model a gradient is 2.8x
-  faster at 4 threads and 3.5x faster at 8; four chains with 4 threads each
-  sample in 10 s instead of 30 s. Data is shared between threads and chains
-  instead of copied, which saves about 75 MB per extra chain at 100,000
-  observations. A `reduce_sum` is split only when each chunk has enough work
-  (about 30 microseconds), so small models stay on one thread and are never
-  slower. Threaded results depend on `threads_per_chain`, which sets the
-  summation order, and can change between stanli versions; they do not depend
-  on thread scheduling. `stanli_run` prints a note when a model with a large
-  `reduce_sum` runs on one thread.
-  C++ callers that set `CompileOptions::reduce_sum_min_elements` should set
+  `fit.metric` in Python), so a pilot fit's metric can start the next one.
+  The C API gains `stanli_sample_multi_metric` with the same controls;
+  `stanli_sample_opts` and the ABI version are unchanged.
+
+### Fixes
+
+- ctsem models were lowered as one operation per data row since 0.19.0, so
+  preparation time and memory grew with the data. The Kalman loop is one loop
+  again: at 2000 subjects, preparation goes from 18 s to under 1 s and peak
+  memory from 1.5 GB to 156 MB. A 400-subject ctsem model is now in the test
+  corpus.
+- The runtime builds inside stanr again. The execution report no longer
+  needs rapidjson's writer headers, which stanr's vendored Stan does not ship.
+
+### API changes
+
+- C++ callers that set `CompileOptions::reduce_sum_min_elements` should set
   `reduce_sum_min_chunk_ns` instead (default 30000, 0 to always split).
-- `wiener_lpdf` over a whole vector evaluates the density once per gradient
-  instead of twice, and data arguments are no longer differentiated. About
-  1.5x faster on a model that is one `y ~ wiener(...)` statement.
-- `wiener_lpdf` also evaluates the density once per gradient when its
-  log density is weighted, as in a mixture. Before, any output adjoint other
-  than 1 re-evaluated it. Gradients move by at most 7 ULP on the DDM models
-  tried.
-- The reverse pass of per-observation loops with branches no longer zeroes
-  its scratch buffer. `cm_lnr` and `cm_rdm` gradients are about 1.5x faster.
-- Fix ctsem models being lowered as one operation per data row since 0.19.0,
-  which made preparation time and memory grow with the data. The Kalman
-  loop is one loop again: at 2000 subjects, preparation goes from 18 s to
-  under 1 s and peak memory from 1.5 GB to 156 MB. A 400 subject ctsem model
-  is now in the test corpus.
-- Per-observation loops that use `log_sum_exp` over a range or `inv_logit`
-  now run 64 observations at a time. `cm_invgaussian` samples 4.0x faster
-  with one chain and 4.6x faster with four. Its peak memory with four chains
-  goes from 59 MB to 114 MB: values that are not live at the same time share
-  storage, so each chain keeps only what the reverse pass reads.
-- The reverse pass of a program with branches now visits only the blocks
-  that ran, instead of checking a flag for every block. When a
-  per-observation loop with many branches runs one observation at a time,
-  its gradient at points where most observations return early is up to
-  9x faster.
+
+### Testing
+
+- Eight brms test fixtures (`s2_car`, `s2_car_esicar`, `s2_gr_by`, `s2_mm`,
+  `s2_mm_weights`, `s2_mmc`, `sw_re_bern`, `sw_skewnormal`) are gated on
+  gradient error in ULP of the largest gradient entry (limit 10, measured at
+  most 2) instead of per element. Against a 60-digit reference, `s2_mm` and
+  `s2_gr_by` are slightly farther on one small entry (by 2e-16 and 6e-16);
+  the other six are closer.
 
 ## 0.20.0
 
