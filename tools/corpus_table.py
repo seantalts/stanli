@@ -359,11 +359,11 @@ def _catalog_cell(value):
     return str(value).replace("|", "\\|").replace("\n", " ")
 
 
-def _catalog_config(manifest):
+def _catalog_config(manifest, allow_filter=False):
     identity = manifest["identity"]
     config = identity["config"]
     if (not manifest.get("run_id") or identity.get("protocol") != "stanli-corpus-v4"
-            or config.get("corpus") != "all" or config.get("filter")
+            or config.get("corpus") != "all" or (config.get("filter") and not allow_filter)
             or type(config.get("rounds")) is not int or config["rounds"] <= 0
             or type(config.get("gradient_budget")) is not int or config["gradient_budget"] != 20000
             or any(key in config for key in ("sampling", "seeds", "iter_sampling", "iter_warmup", "run"))):
@@ -466,11 +466,11 @@ def _catalog_setup(model, record, row, config, gradients):
     return values
 
 
-def validated_catalog(summary_path, records_path, manifest_path):
+def validated_catalog(summary_path, records_path, manifest_path, allow_filter=False):
     """Return a complete current v4 inventory with validated raw evidence."""
     rows = _catalog_rows(summary_path)
     manifest = json.loads(Path(manifest_path).read_text())
-    config = _catalog_config(manifest)
+    config = _catalog_config(manifest, allow_filter)
     with gzip.open(records_path, "rt") as stream:
         records = json.load(stream)
     if not isinstance(records, list):
@@ -518,21 +518,21 @@ def _catalog_model(model):
     return "<br>".join(f"<code>{html.escape(line)}</code>" for line in lines)
 
 
-def _catalog_tables(rows, details):
+def _catalog_tables(rows, details, speedup_field="paired_speedup"):
     """Present both compiler configurations with the same public workload."""
     header = "| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) |"
     output = [header, "| --- | ---: | ---: | ---: |"]
     incomplete = []
     complete = sorted(
         (row for row in rows if details[row["model"]]["status"] == "ok"),
-        key=lambda row: (-_catalog_number(row, "paired_speedup"), row["model"]),
+        key=lambda row: (-_catalog_number(row, speedup_field), row["model"]),
     )
     incomplete_rows = sorted(
         (row for row in rows if details[row["model"]]["status"] != "ok"),
         key=lambda row: row["model"],
     )
     for row in (*complete, *incomplete_rows):
-        speedup = _catalog_number(row, "paired_speedup")
+        speedup = _catalog_number(row, speedup_field)
         cells = [_catalog_model(row["model"]), f"{speedup:.3g}x" if speedup is not None else "—"]
         for engine, fields in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
                                ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
@@ -558,9 +558,10 @@ def _catalog_tables(rows, details):
 
 
 def render_catalog(summary_path=CATALOG_SUMMARY, records_path=CATALOG_RECORDS,
-                   manifest_path=CATALOG_MANIFEST):
+                   manifest_path=CATALOG_MANIFEST, allow_filter=False):
     """One current setup-plus-fixed-gradient proxy table, never sampling time."""
-    rows, manifest, details = validated_catalog(summary_path, records_path, manifest_path)
+    rows, manifest, details = validated_catalog(summary_path, records_path, manifest_path,
+                                                allow_filter)
     config = manifest["identity"]["config"]
     intro = (
         f"Run `{_catalog_cell(manifest['run_id'])}` ({_catalog_cell(manifest['started_utc'][:10])}): "
@@ -569,31 +570,27 @@ def render_catalog(summary_path=CATALOG_SUMMARY, records_path=CATALOG_RECORDS,
     return intro + _catalog_tables(rows, details)
 
 
-def render_gradient_catalog(summary_path=VECTORIZED_ROOT / "benchmark-summary.tsv",
-                            manifest_path=VECTORIZED_ROOT / "benchmark-manifest.json",
-                            records_path=VECTORIZED_ROOT / "model-results.json.gz",
-                            provenance_path=VECTORIZED_ROOT / "compiler-provenance.json",
-                            default_manifest_path=CATALOG_MANIFEST):
-    """Current O1+vectorization comparison with the same runtime and inputs."""
-    rows, manifest, details = validated_catalog(summary_path, records_path, manifest_path)
-    baseline = json.loads(Path(default_manifest_path).read_text())
-    default_config = _catalog_config(baseline)
-    provenance = json.loads(Path(provenance_path).read_text())
-    identity, default = manifest["identity"], baseline["identity"]
-    config = identity["config"]
+DEFAULT_ROOT = CATALOG_ROOT / "output/corpus-performance"
+
+
+def _run_artifacts(directory, allow_filter=False):
+    directory = Path(directory)
+    return validated_catalog(directory / "benchmark-summary.tsv", directory / "model-results.json.gz",
+                             directory / "benchmark-manifest.json", allow_filter)
+
+
+def _check_optimized_run(manifest, default, provenance):
+    identity, baseline = manifest["identity"], default["identity"]
+    config, default_config = identity["config"], _catalog_config(default)
     if "--O1" not in shlex.split(config.get("stancflags", "")):
         raise ValueError("Vectorized catalog requires O1 compiler flags")
-    if identity["inputs"] != default["inputs"]:
-        raise ValueError("Vectorized/default input inventories differ")
-    for name in ("bench", "vectorize_probe"):
-        digest = identity["executables"].get(name)
-        if not digest or digest != default["executables"].get(name):
-            raise ValueError(f"Vectorized/default executable hashes differ: {name}")
     for key in ("rounds", "warmup_ms", "measure_ms", "gradient_timeout", "gradient_budget"):
         if config.get(key) != default_config.get(key):
             raise ValueError(f"Vectorized/default gradient configuration differs: {key}")
-    if identity.get("threads") != default.get("threads"):
+    if identity.get("threads") != baseline.get("threads"):
         raise ValueError("Vectorized/default thread settings differ")
+    if identity.get("toolchains") != baseline.get("toolchains"):
+        raise ValueError("Vectorized/default CmdStan toolchain differs")
     if (provenance.get("optimization") != "O1 plus vectorize_loops"
             or provenance.get("binary_sha256") != identity["executables"].get("stanc")
             or not re.fullmatch(r"[0-9a-f]{40}", provenance.get("source_sha", ""))
@@ -602,9 +599,85 @@ def render_gradient_catalog(summary_path=VECTORIZED_ROOT / "benchmark-summary.ts
             or not isinstance(provenance.get("build_commands"), list) or not provenance["build_commands"]
             or not all(isinstance(command, str) and command.strip() for command in provenance["build_commands"])):
         raise ValueError("Invalid optimized compiler provenance")
-    intro = (f"Run `{_catalog_cell(manifest['run_id'])}`: {len(rows)} models, "
-             f"{config['rounds']} alternating gradient pairs.\n\n")
-    return intro + _catalog_tables(rows, details)
+
+
+def _cross_gate(stanli, cmdstan):
+    worst = 0.0
+    for left in stanli["gradients"]:
+        for right in cmdstan["gradients"]:
+            a, b = left["stanli"]["values"], right["cmdstan"]["values"]
+            if len(a) != len(b):
+                return math.inf
+            worst = max(worst, max(abs(x-y) / max(abs(x), abs(y), 1) for x, y in zip(a, b)))
+    return worst
+
+
+def combined_vectorized_rows(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
+    """Default-run Stanli timings against vectorized CmdStan timings from earlier runs."""
+    root = Path(root)
+    default_rows, default, default_details = _run_artifacts(default_root)
+    combined = json.loads((root / "combined.json").read_text())
+    provenance = json.loads((root / "compiler-provenance.json").read_text())
+    if combined.get("stanli_run_id") != default["run_id"]:
+        raise ValueError("Stanli run differs from the default run")
+    sources = combined.get("cmdstan_runs", {})
+    inputs = default["identity"]["inputs"]
+    if set(sources) != set(inputs):
+        raise ValueError("Vectorized CmdStan inventory must cover every default input")
+    runs = {}
+    for run_id in sorted(set(sources.values())):
+        rows, manifest, details = _run_artifacts(root / "cmdstan-runs" / run_id, allow_filter=True)
+        if manifest["run_id"] != run_id:
+            raise ValueError(f"CmdStan run identity differs: {run_id}")
+        _check_optimized_run(manifest, default, provenance)
+        runs[run_id] = ({row["model"]: row for row in rows}, manifest, details)
+    output, statuses = [], {}
+    for row in default_rows:
+        model = row["model"]
+        cmdstan_rows, manifest, details = runs[sources[model]]
+        if model not in details or manifest["identity"]["inputs"].get(model) != inputs[model]:
+            raise ValueError(f"Vectorized/default input hashes differ: {model}")
+        source, stanli = cmdstan_rows[model], default_details[model]
+        status, note = "ok", ""
+        if stanli["status"] != "ok":
+            status, note = stanli["status"], row.get("note", "")
+        elif details[model]["status"] != "ok":
+            status, note = details[model]["status"], source.get("note", "")
+        else:
+            worst = _cross_gate(stanli, details[model])
+            if worst > 1e-9:
+                status, note = "failed", f"density/gradient mismatch: scaled error {worst:.3g}"
+        merged = dict(model=model, run_id=sources[model], note=note,
+                      **{key: row.get(key, "") for key in ("stanli_compile_s", "stanli_prep_s",
+                                                           "stanli_ns_grad")},
+                      **{key: source.get(key, "") for key in ("cmdstan_stanc_s", "cmdstan_build_s",
+                                                              "cmdstan_ns_grad")})
+        if status == "ok":
+            merged["median_ratio"] = (_catalog_number(merged, "cmdstan_ns_grad")
+                                      / _catalog_number(merged, "stanli_ns_grad"))
+        else:
+            merged["stanli_ns_grad"] = merged["cmdstan_ns_grad"] = ""
+        output.append(merged)
+        statuses[model] = {"status": status}
+    return output, statuses, default, {run_id: manifest for run_id, (_, manifest, _) in runs.items()}
+
+
+def render_gradient_catalog(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
+    """O1+vectorization CmdStan timings reused from earlier runs against the default Stanli run."""
+    rows, statuses, default, manifests = combined_vectorized_rows(root, default_root)
+    counts = {}
+    for row in rows:
+        counts[row["run_id"]] = counts.get(row["run_id"], 0) + 1
+    main, *extra = sorted(manifests, key=lambda run_id: -counts.get(run_id, 0))
+    describe = lambda run_id: (f"run `{_catalog_cell(run_id)}` "
+                               f"({_catalog_cell(manifests[run_id]['started_utc'][:10])})")
+    supplements = "".join(
+        " " + ", ".join(f"`{row['model']}`" for row in rows if row["run_id"] == run_id)
+        + f" is from {describe(run_id)}." for run_id in extra)
+    intro = (f"Stanli timings are from the default run `{_catalog_cell(default['run_id'])}`. "
+             f"The CmdStan timings with loop vectorization are reused from {describe(main)}."
+             f"{supplements} Each ratio is CmdStan's median gradient time divided by Stanli's.\n\n")
+    return intro + _catalog_tables(rows, statuses, "median_ratio")
 
 
 def require_historical_tsv(col):
