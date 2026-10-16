@@ -73,9 +73,9 @@ instantiations, and it is why `multi_normal` is exact while
 
 `-DSTANLI_LITE_LP=ON` makes every density compact by clearing the propto bit
 of each tier (`density_tier()` in
-[`optable.hpp`](../runtime/include/stanli/optable.hpp)). The library is 48%
-smaller (15.75 MB to 8.43 MB stripped on macOS arm64), which roughly halves
-the wasm payload. Over the 119-model posteriordb corpus, every gradient and
+[`optable.hpp`](../runtime/include/stanli/optable.hpp)). In September
+2026 this made the stripped library about half the size, and the wasm
+payload shrank by about the same. Over the 119-model posteriordb corpus, every gradient and
 every `write_array` value is bitwise identical to the exact build, and `lp__`
 differs by a constant at every evaluation point. Speed is unchanged, because
 the propto choice is internal to a kernel and never changes the graph.

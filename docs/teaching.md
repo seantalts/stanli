@@ -54,7 +54,6 @@ If the report flags divergences, rerun with `delta = 0.99` and check again.
 including initial values, posterior predictive checks, LOO, tidybayes, and
 saving a fit.
 
-<a id="time-from-a-fresh-r-session-to-the-first-posterior"></a>
 A fresh R session reaches this posterior in well under a second on current
 hardware. `tools/bench_r_first_posterior.R` in the repository times it; run it
 on the classroom machines before promising a number to students.
@@ -138,7 +137,7 @@ For example, download the Apple Silicon runtime on a connected machine with
 the lab's stanli version installed:
 
 ```r
-tag <- stanli:::stanli_runtime_release  # the release this package pairs with
+tag <- paste0("v", packageVersion("stanli"))  # runtime releases match the package version
 asset <- "stanli-runtime-darwin-arm64.tar.gz"
 download.file(paste0("https://github.com/seantalts/stanli/releases/download/", tag, "/", asset), asset, mode = "wb")
 ```
