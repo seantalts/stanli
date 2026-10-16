@@ -144,6 +144,12 @@ Step by step:
    CmdStan's dropped-constant rules (see "the variant byte" below);
    and any statement whose control flow depends on a parameter is
    compiled for the register machine (its own section below).
+   A proven subset of terminal scalar loops (one indexed real-data read,
+   parameter addition, multiplication or FMA, then an optional
+   `exp`/`square` chain) is priced before its iterations are expanded,
+   and when profitable lowering emits the vector kernels directly.
+   `STANLI_SYMBOLIC_LANES=0` disables this shortcut; unset or `1` keeps
+   automatic selection, and any other value disables it.
 
 4. **The passes rewrite the list.** In pipeline order: in-place
    updates, store-to-load forwarding, constant folding, loop
@@ -407,7 +413,8 @@ The rules:
   [`test_matvec`](../tests/test_matvec.cpp) at 1 ULP (one "unit in the
   last place": the gap between a double and the next representable
   double). Bitwise parity is a feature. Do not trade it for a tidier
-  loop.
+  loop. For the same reason the build compiles stan-math with
+  `-ffp-contract=off`, so the compiler never fuses a multiply and an add.
 - **Scratch is private.** Sized at bind by `scratch_size`, never
   touched by any other op. The usual use: `forward` stashes partial
   derivatives there so `backward` does not have to recompute them.
@@ -642,6 +649,110 @@ Everything else takes four steps:
    actually lowered. The passes rewrite aggressively, and the op list
    is the only ground truth.
 
+## C++ entry points
+
+Native builds with embedded stanc expose a value-only function entry
+point. `Function` compiles the source once; later calls bind named
+`DataMap` arguments to the Stan formals and return a `DataMap::Entry`
+with integer identity and logical dimensions.
+
+```cpp
+#include <stanli/function.hpp>
+
+const std::string source = R"stan(
+functions {
+  vector affine(vector x, real a, real b) {
+    return a * x + b;
+  }
+}
+model {}
+)stan";
+
+stanli::Function affine(source, "affine");
+stanli::DataMap args;
+args.set_real_array("x", {1, 2, 4});
+args.set_real("a", 2.5);
+args.set_real("b", -1);
+stanli::DataMap::Entry result = affine(args);  // {1.5, 4, 9}
+```
+
+`Function::from_mir(mir, name)` skips source compilation for cached
+portable or legacy MIR and works in builds without embedded stanc.
+Arguments are matched by formal name. This surface evaluates pure,
+value-returning functions on doubles; `_lp`, void, RNG, and autodiff
+entry points are not part of it.
+
+Native C++, C, Python, R and `stanli_run` support opt-in within-chain
+`reduce_sum` parallelism with reusable per-chain workers
+([`native-reduce-sum.md`](native-reduce-sum.md)). Pass
+`threads_per_chain=N` to Python or R sampling, or `--threads-per-chain N`
+to the CLI; the default is one.
+
+## Building
+
+Developer builds on Linux and macOS use `clang` and `clang++` with
+C++17, matching pull-request validation. The Linux and Windows release
+wheels keep their GCC toolchains, and macOS uses AppleClang. One command
+fetches the pinned dependencies, builds, and runs the tests:
+
+```
+./tools/dev_setup.sh               # build + tests + source-pinned stanc3, embedded in the library
+./tools/dev_setup.sh --no-embed    # standalone stanli-compile instead (required on Windows ARM64)
+./tools/dev_setup.sh --corpus      # + posteriordb and CmdStan
+./tools/dev_setup.sh --conformance # + the Stan conformance reference stack
+./tools/dev_setup.sh --all
+```
+
+Embedding the compiler is the default, and `--embed` selects it
+explicitly. With `--no-embed`, setup builds `stanli-compile` from the
+same pipeline and CMake copies it beside `stanli_check` and `stanli_run`,
+including in `cmake --install` deployments; keep those executables
+together when moving an installation. `--all` respects `--no-embed` in
+either order. The tools also accept `--stanli-compile PATH`, and use
+stock stanc only when asked with `--stanc PATH` (or `STANC` for
+`stanli_run`). `--conformance` stages the standalone compiler with the
+Python library when embedding is disabled, and makes the differential
+Stan language sweep runnable locally; see
+[`harnesses/conformance/README.md`](../harnesses/conformance/README.md).
+
+On Windows, run `bash tools/dev_setup.sh` from Git Bash or MSYS2 Bash.
+Setup reuses the installation providing `pacman` on `PATH`, or checks
+`C:/msys64` and installs `MSYS2.MSYS2` with winget if absent. It prepends
+the UCRT64 directories on x86_64, or the CLANGARM64 directories on ARM64,
+to `PATH`. Pacman provides Git, Python, make, Clang and CMake, and a
+missing opam comes from winget. Windows ARM64 needs `--no-embed` because
+its OCaml compiler runs under x64 emulation while the runtime is native
+ARM64. MinGW `RelWithDebInfo` builds use `-g1` to keep objects and
+`.exe.debug` files small while retaining source lines and backtraces; use
+`-DCMAKE_BUILD_TYPE=Debug` for full variable and type information.
+
+Full native Windows setup runs in CI after pushes to `main` and on manual
+dispatch, covering x64 embedding and ARM64 standalone deployment. Pull
+requests run the fast setup contract tests and Windows compiler parity
+instead. Windows CI caches the OCaml toolchain and validated compiler
+artifacts, keyed on compiler versions and the source pin, before building
+C++. A failed compiler launch keeps the cache and reports the error; only
+a successfully reported incompatible version replaces the switch. CI uses
+`--no-build` for compiler preparation and `--no-test` to save the build
+before a separate test step.
+
+Or manually:
+
+```
+./tools/dev_setup.sh --no-build
+build_jobs=$(tools/build_jobs.sh)
+cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake --build build --parallel "$build_jobs"
+ctest --test-dir build --parallel "$build_jobs"
+```
+
+`tools/build_jobs.sh` caps parallelism by CPU count and usable RAM: 4 GiB
+per concurrent Stan Math compile on macOS and Windows, 6 GiB elsewhere,
+with container limits honored. Override the result with `STANLI_JOBS=12`,
+or raise the per-job budget with `STANLI_JOB_MEMORY_GIB` (the
+AddressSanitizer recipe below uses 12 GiB). The measured scaling curve is
+in [`notes/performance/build-performance.md`](../notes/performance/build-performance.md).
+
 ## Verifying a change
 
 ```
@@ -651,7 +762,7 @@ cmake --build build-rel --parallel "$build_jobs" && \
 python3 tools/verify_refs.py deps/posteriordb --check build-rel/stanli_check --jobs 8
 ```
 
-The second command is the corpus replay: 254 models, log density and
+The second command is the corpus replay: every model with a recorded reference (353 at 0.21.0), log density and
 every gradient component, compared against recorded CmdStan values.
 That is the 119 runnable posteriordb posteriors, the language
 models in [`tests/stanc3/`](../tests/stanc3/README.md), which exercise
@@ -686,7 +797,7 @@ lands inside a live allocation and reports nothing.
 
 If the change touches a density tier or anything about propto, also
 check the lite build, the smaller build variant that reports lp only
-up to a constant ([`docs/lite-lp.md`](lite-lp.md)). CI does not cover
+up to a constant ([`docs/lp-constant.md`](lp-constant.md)). CI does not cover
 it, because that would mean a second full stan-math compile:
 
 ```
@@ -748,5 +859,4 @@ landing, run its focused check or dispatch the full workflow on the branch:
 gh workflow run wheels.yml --ref my-change
 ```
 
-Release process and CI layout: [`README.md`](../README.md) under
-"Releasing".
+Release process and CI layout: [`RELEASING.md`](../RELEASING.md).

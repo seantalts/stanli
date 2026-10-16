@@ -84,7 +84,7 @@ Any change to the compiler pipeline requires a complete corpus benchmark
 before merge against the current remote-default-branch baseline. This includes
 source-to-MIR compilation, MIR decoding/lowering, graph passes, preparation,
 producer/backend selection, compiler pins, and pass flags or budgets. Follow
-[`docs/benchmark-protocol.md`](docs/benchmark-protocol.md#compiler-pipeline-regression-checks):
+[`docs/benchmarks.md`](docs/benchmarks.md#how-we-measure):
 run the full shared application-model corpus for both revisions with the
 shipped configuration, matched hardware/toolchains, and retained raw results.
 A focused benchmark or a passing numerical corpus replay does not substitute
@@ -118,7 +118,7 @@ change specifically needs that evidence; do not add every broad sweep to
 every PR. Preserve release validation dependencies.
 
 [`TESTING.md`](TESTING.md) documents the actual numerical gates, exceptions,
-and CI coverage; [`docs/benchmark-protocol.md`](docs/benchmark-protocol.md)
+and CI coverage; [`docs/benchmarks.md`](docs/benchmarks.md#how-we-measure)
 defines performance measurements. Distinguish these measured contracts from
 project goals, and report the limits of the evidence.
 
