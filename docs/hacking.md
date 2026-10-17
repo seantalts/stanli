@@ -442,7 +442,7 @@ whichever branch actually executed. That is the same arithmetic
 CmdStan's generated C++ performs for the same statement, so the
 derivatives agree by construction.
 
-Three front ends produce these programs:
+Six front ends produce these programs:
 
 - `compile_rhs` ([`ode_prog.cpp`](../runtime/src/ode_prog.cpp)) for
   ODE right-hand sides.
@@ -452,10 +452,20 @@ Three front ends produce these programs:
   `STANLI_NO_ISLAND=1` turns it off, and `STANLI_ISLAND_ALWAYS=1`
   makes it skip the cost estimate.
 - `lower_runtime_ifelse` / `lower_runtime_ternary`
-  ([`lower.cpp`](../runtime/src/lower.cpp)) for control flow whose condition
-  is unavailable while the graph is built. This includes genuine parameter
-  branches and data-only predicates computed in graph-local storage. It is
-  not an optimization: without it those models do not compile.
+  ([`lower_stmt.cpp`](../runtime/src/lower_stmt.cpp)) for control flow
+  whose condition is unavailable while the graph is built (`if`, `while`
+  and the ternary operator). This includes genuine parameter branches and
+  data-only predicates computed in graph-local storage. It is not an
+  optimization: without it those models do not compile.
+- `lower_region_map` ([`lower_region_map.cpp`](../runtime/src/lower_region_map.cpp))
+  for long loops with parameter-dependent control whose body only adds to
+  the target.
+- The segments of a structured loop (`OP_LOOP`,
+  [`structured_loop.cpp`](../runtime/src/structured_loop.cpp)), which run
+  a register program per trip.
+- Standalone Stan functions
+  ([`function.cpp`](../runtime/src/function.cpp)), called from the C API
+  and R and Python bindings.
 
 The machine's instruction set covers ordinary arithmetic, every scalar
 continuous density (the `DENSITY` instruction, backed by one table

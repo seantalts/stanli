@@ -661,17 +661,16 @@ for all 28,926 compared values across six seeds and three sequential rows.
 
 Four remaining capture-recapture models stopped at `prod` over a vector or
 row-vector and/or `sum` over an integer array assembled from scalar RNG draws.
-`OP_PROD_VEC` is a forward-only write-array opcode: it uses Stan Math's Eigen
-product grouping while hiding the graph arena's input alignment for
+`OP_PROD_VEC` has forward and backward kernels. In generated quantities it
+uses Stan Math's Eigen product grouping while hiding the graph arena's input alignment for
 materialized vectors, so an odd slot offset cannot change their packet
 boundary. A strided matrix-row operand instead records and preserves Stan
 Math's ascending scalar grouping before the expression is materialized.
 Lowering admits only a bare materialized vector/row-vector and the exact
 outer-subtraction surfaces used by these models. Shifted views, arbitrary
-nested expressions, UDF formals, empty containers, and any product that needs
-reverse mode remain on the existing fallback. The opcode is explicitly
-excluded from reroll matching and island CALLs because it deliberately has no
-backward kernel.
+nested expressions, UDF formals, and empty containers remain on the existing
+fallback. The opcode carries the `kVariantGrouped` trait, which excludes it
+from reroll matching and island CALLs.
 
 Runtime integer `sum` reuses `OP_SUM_VEC` only after lowering proves that the
 one-dimensional array is completely initialized in ascending contiguous
@@ -756,18 +755,18 @@ table in `docs/benchmarks.md`.
 
 ## Compiled generated-quantities extrema (`elementwise.cpp`, `lower.cpp`)
 
-`OP_EXTREMA_VEC` has forward-only variants for `min` and `max`. Its lowering
-gate is write-array only: a top-level call must consume a direct `UVector` or
-`URowVector` `Var`. The kernel uses the same address-independent grouping that
-the pinned Stan Math implementation applies to an owning Eigen value, while
-retaining its empty-real results: positive infinity for `min` and negative
-infinity for `max`. Arrays, matrices, indexed views, expressions, and UDF calls
-remain in `WaInterp`; reverse-mode uses remain refused.
+`OP_EXTREMA_VEC` has `min` and `max` variants with forward and backward
+kernels. The backward kernel adds the output adjoint to the selected element.
+A top-level call must consume a direct `UVector` or `URowVector` `Var`. The
+kernel uses the same address-independent grouping that the pinned Stan Math
+implementation applies to an owning Eigen value, while retaining its
+empty-real results: positive infinity for `min` and negative infinity for
+`max`. Arrays, matrices, indexed views, expressions, and UDF calls
+remain in `WaInterp`.
 
-Because the opcode deliberately has no backward kernel, it is explicitly
-excluded from reroll matching and interpreter-island CALLs. This keeps the
-lowering gate forward-only rather than allowing a graph transformation to
-place it in a reverse sweep.
+The opcode carries the `kVariantGrouped` trait, because its variant bits pick
+the reduction grouping. That excludes it from reroll matching, CSE, collapse,
+partitioning, and interpreter-island CALLs.
 
 `losscurve_sislob` was the only model to change in the exact 24-model census,
 moving coverage from 17 graph / 7 interpreter to the then-current 18 / 6. The
@@ -1627,16 +1626,15 @@ headline historical measurements follow:
   direct pinned Stan Math call, then comparing the next engine state. These
   targeted results do not refresh `docs/internal/artifacts/corpus-bench.tsv` or the current
   [full-corpus table](../../docs/benchmarks.md#full-corpus).
-- **Compiled generated-quantities extrema** add the forward-only
+- **Compiled generated-quantities extrema** add the
   `OP_EXTREMA_VEC` min/max variants. Lowering admits only a top-level
   write-array call on a direct `UVector` or `URowVector` `Var` and evaluates
   it with the same address-independent grouping that pinned Stan Math uses for
   an owning Eigen value. Empty-real results are preserved: `min` is positive
   infinity and `max` is negative infinity. Arrays, matrices, indexed views,
-  expressions, and UDF calls still select `WaInterp`; reverse-mode uses remain
-  refused.
-  The opcode is explicitly excluded from reroll matching and interpreter
-  islands because it has no reverse kernel.
+  expressions, and UDF calls still select `WaInterp`.
+  The opcode is excluded from reroll matching and interpreter islands by its
+  `kVariantGrouped` trait.
 
   `losscurve_sislob` was the only model to change in the exact 24-model
   census, moving graph/interpreter coverage from 17 / 7 to the then-current
