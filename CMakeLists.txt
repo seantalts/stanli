@@ -1037,26 +1037,11 @@ set_tests_properties(test_prep_profile_reroll_dispositions PROPERTIES
 add_executable(bench_opcost tools/bench_opcost.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(bench_opcost PRIVATE stanli)
-add_executable(bench_call_arguments EXCLUDE_FROM_ALL
-  tools/bench_call_arguments.cpp tests/tbb_stub.cpp)
-target_link_libraries(bench_call_arguments PRIVATE stanli)
-add_dependencies(bench_call_arguments stanli_mir_fixtures)
-# Developer-only Program::CALL dispatch/context benchmark.  It builds a
-# synthetic, model-independent register program so CALL overhead can be
-# measured without attributing a kernel's own arithmetic to the mechanism.
-add_executable(bench_program_call EXCLUDE_FROM_ALL
-  tools/bench_program_call.cpp tests/tbb_stub.cpp)
-target_link_libraries(bench_program_call PRIVATE stanli)
 # Developer-only Executor metadata/clone evaluator. Fresh baseline/candidate
 # processes make its peak-RSS output comparable across layout changes.
 add_executable(bench_executor_clone EXCLUDE_FROM_ALL
   tools/bench_executor_clone.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_executor_clone PRIVATE stanli)
-if(NOT WIN32)
-  add_executable(bench_executor_data EXCLUDE_FROM_ALL
-    tools/bench_executor_data.cpp tests/tbb_stub.cpp)
-  target_link_libraries(bench_executor_data PRIVATE stanli)
-endif()
 # Within-chain feasibility probes and matched native integration benchmarks.
 add_executable(bench_reduce_sum EXCLUDE_FROM_ALL
   tools/bench_reduce_sum.cpp tests/tbb_stub.cpp)
@@ -1065,25 +1050,6 @@ add_dependencies(bench_reduce_sum stanli_mir_fixtures)
 add_test(NAME test_bench_opcost_smoke COMMAND bench_opcost --smoke)
 set_tests_properties(test_bench_opcost_smoke PROPERTIES
   PASS_REGULAR_EXPRESSION "sink=")
-# Developer-only: one pool lease + gradient from the three thread states a
-# caller can be in, for judging what the pool's autodiff-tape policy costs.
-add_executable(bench_pool EXCLUDE_FROM_ALL
-  tools/bench_pool.cpp tests/tbb_stub.cpp)
-target_link_libraries(bench_pool PRIVATE stanli)
-add_dependencies(bench_pool stanli_mir_fixtures)
-# Developer-only ODE RHS generated-adjoint spike.  Not a test and not installed.
-add_executable(bench_rhs_adjoint EXCLUDE_FROM_ALL
-  tools/bench_rhs_adjoint.cpp tests/tbb_stub.cpp)
-target_link_libraries(bench_rhs_adjoint PRIVATE stanli)
-add_dependencies(bench_rhs_adjoint stanli_mir_fixtures)
-# Developer-only complete-solve sensitivity ceilings.  They retain the merged
-# runtime as the oracle and install no experimental path in libstanli.
-add_executable(bench_ode_ceiling EXCLUDE_FROM_ALL
-  tools/bench_ode_ceiling.cpp tests/tbb_stub.cpp)
-target_link_libraries(bench_ode_ceiling PRIVATE stanli)
-add_executable(bench_ode_cvodes_ceiling EXCLUDE_FROM_ALL
-  tools/bench_ode_cvodes_ceiling.cpp tests/tbb_stub.cpp)
-target_link_libraries(bench_ode_cvodes_ceiling PRIVATE stanli)
 # Developer-only bridge for tools/matrix_pullback_hp_check.py: dumps the
 # pre-native nested-tape adjoint and the native kernel's adjoint for
 # matrix_exp and the solve kernels so they can both be checked against an
