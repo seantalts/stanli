@@ -259,6 +259,8 @@ Retain the original run directory, including model headers, inputs, logs and per
 python3 tools/corpus_diagnostic_jobs.py RUN_DIRECTORY /tmp/teaching-jobs.json
 Rscript tools/summarize_rethinking_bench.R /tmp/teaching-jobs.json /tmp/teaching-diagnostics.json
 python3 tools/report_corpus.py RUN_DIRECTORY /tmp/teaching-diagnostics.json output/teaching-performance
+mv output/teaching-performance/corpus-results.json output/teaching-performance/teaching-results.json
+mv output/teaching-performance/corpus-timings.csv output/teaching-performance/teaching-timings.csv
 ```
 
-The exporter writes `corpus-results.json` and `corpus-timings.csv`; `teaching-results.json` and `teaching-timings.csv` here are copies of them. The jobs file contains absolute CSV paths; regenerate it after relocating the evidence directory. The exporter refuses an unfinished sweep. See the [benchmark protocol](../../docs/benchmarks.md#how-we-measure).
+The jobs file contains absolute CSV paths; regenerate it after relocating the evidence directory. The exporter refuses an unfinished sweep. See the [benchmark protocol](../../docs/benchmarks.md#how-we-measure).

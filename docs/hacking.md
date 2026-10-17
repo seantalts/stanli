@@ -198,7 +198,7 @@ ones through every stage, op list and register programs included.
 | [`runtime/src/stanc_embed_c.cpp`](../runtime/src/stanc_embed_c.cpp), [`tools/stanc_embed/`](../tools/stanc_embed/) | The native OCaml-runtime bridge plus exact-source overlay, provenance, and Windows cross-build tooling. |
 | [`js/`](../js/), [`web/`](../web/) | The npm package (a one-call `sample()` over a worker) and the demo page. The worker prefers the portable compiler and keeps stock stancjs as a one-cycle legacy fallback. [`tools/build_web.sh`](../tools/build_web.sh) builds the page from the package, so the two cannot drift. |
 | [`tools/`](../tools/) | Small programs and scripts; the important ones are listed below. |
-| [`harnesses/`](../harnesses/) | Corpus sweeps that need a local posteriordb: [`verify_refs.py --wa-report`](../tools/verify_refs.py), [`ab_corpus.py`](../harnesses/ab_corpus.py), [`fn_sweep.py`](../harnesses/fn_sweep.py), benchmarks. |
+| [`harnesses/`](../harnesses/) | Corpus sweeps that need a local posteriordb: [`ab_corpus.py`](../harnesses/ab_corpus.py), [`fn_sweep.py`](../harnesses/fn_sweep.py), benchmarks. |
 | [`tests/`](../tests/) | One `test_*.cpp` per subsystem, plus [`fixtures/`](../tests/fixtures/) with checked-in `.stan` sources. CMake generates ignored MIR before its consumers; run [`tools/gen_fixtures.sh`](../tools/gen_fixtures.sh) to do so explicitly. |
 
 The tools you will reach for most:
