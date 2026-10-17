@@ -223,10 +223,8 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
                              if (!is.null(sampler_t)) list(sampler_t = sampler_t),
                              if (nuts) list(control = control))
     attr(draws, "adaptation_info") <- ""
-    elapsed <- c(warmup = NA_real_, sample = NA_real_)
-    if (isTRUE(x$report$available))
-      elapsed[] <- c(x$report$warmup_seconds[chain], x$report$sampling_seconds[chain])
-    attr(draws, "elapsed_time") <- elapsed
+    attr(draws, "elapsed_time") <- c(warmup = x$report$warmup_seconds[chain],
+                                     sample = x$report$sampling_seconds[chain])
     averages <- colMeans(values[posterior_rows, , drop = FALSE])
     names(averages) <- names(draws)
     attr(draws, "mean_pars") <- utils::head(averages, -length(special))

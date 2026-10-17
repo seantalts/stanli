@@ -136,7 +136,6 @@ test_that("sampling progress is informative and observational", {
   expect_true(all(grepl("\\(Warmup\\)$", progress[1:3])))
   expect_true(all(grepl("\\(Sampling\\)$", progress[4:6])))
   expect_equal(sum(grepl("^Chain \\[1\\] Elapsed Time:", text)), 1)
-  expect_true(loud$report$available)
   expect_length(loud$report$warmup_seconds, 1)
   expect_gte(loud$report$warmup_seconds, 0)
   expect_gte(loud$report$sampling_seconds, 0)
