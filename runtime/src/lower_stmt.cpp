@@ -1640,11 +1640,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         if (!repeatable_target) repeatable_target = repeatable_target_body(s);
         return *repeatable_target;
       };
-      // Both cheap invariant folding and retained selection precede the
-      // per-iteration control scan. Neither needs an expanded graph.
-      if ((structured_policy == StructuredMode::Prefer ||
-           structured_policy == StructuredMode::Force) &&
-          lo != hi && has_repeatable_target()) {
+      const auto fold_repeatable_target = [&]() {
         const double old_scale = target_scale;
         target_scale *= static_cast<double>(hi) - static_cast<double>(lo) + 1;
         int_env[s.loopvar] = lo;
@@ -1657,6 +1653,13 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         }
         target_scale = old_scale;
         int_env.erase(s.loopvar);
+      };
+      // Both cheap invariant folding and retained selection precede the
+      // per-iteration control scan. Neither needs an expanded graph.
+      if ((structured_policy == StructuredMode::Prefer ||
+           structured_policy == StructuredMode::Force) &&
+          lo != hi && has_repeatable_target()) {
+        fold_repeatable_target();
         return;
       }
       // A loop that only counts into integer locals from values known now
@@ -1714,18 +1717,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         return;
       }
       if (lo != hi && has_repeatable_target()) {
-        const double old_scale = target_scale;
-        target_scale *= static_cast<double>(hi) - static_cast<double>(lo) + 1.0;
-        int_env[s.loopvar] = lo;
-        try {
-          for (const auto& child : s.body) lower_stmt(child);
-        } catch (...) {
-          target_scale = old_scale;
-          int_env.erase(s.loopvar);
-          throw;
-        }
-        target_scale = old_scale;
-        int_env.erase(s.loopvar);
+        fold_repeatable_target();
         return;
       }
       const int unrolled =
