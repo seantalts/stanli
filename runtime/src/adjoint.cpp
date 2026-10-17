@@ -442,8 +442,6 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
     return true;
   };
 
-  const bool elide_private_clears =
-      std::getenv("STANLI_NO_PRIVATE_ADJOINT_CLEARS") == nullptr;
   auto produces_adjoint = [&](const Program::Instr& I, int i) {
     if (I.code == Program::CALL) return true;
     if (aliasable(I, i)) return false;
@@ -455,7 +453,7 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
         (I.code >= Program::GT && I.code <= Program::NE) ||
         (I.code >= Program::IMOD && I.code <= Program::IABS) ||
         I.code == Program::EXTREMA_RANGE;
-    if (elide_private_clears && !keep_every_clear && only_clear) {
+    if (!keep_every_clear && only_clear) {
       bool private_first = true;
       for (int k = 0; k < wl; ++k)
         private_first &= first_write[I.dst + k] == i && !no_alias[I.dst + k];

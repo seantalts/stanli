@@ -810,7 +810,6 @@ bool elide_acyclic_program_constants(Program& p) {
 }
 
 bool elide_program_dead_constants(Program& p) {
-  if (std::getenv("STANLI_NO_DEAD_CONSTANTS")) return false;
   const size_t n = p.code.size();
   for (const auto& I : p.code)
     if (branches(I.code) && (I.dst < 0 || (size_t)I.dst > n)) return false;

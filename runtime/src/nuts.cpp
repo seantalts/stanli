@@ -136,11 +136,6 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
   // badly, with the failure surfacing later as a stepsize-search error.
   initialize_point(ex, rng, cfg.init_radius, cfg.init, q.data(),
                    FixedInitPolicy::Validate);
-  if (std::getenv("STANLI_DEBUG_INIT")) {
-    std::fprintf(stderr, "init");
-    for (int64_t i = 0; i < n; ++i) std::fprintf(stderr, " %.17g", q(i));
-    std::fprintf(stderr, "\n");
-  }
   sampler.seed(q);
 
   if constexpr (M == Metric::Diag) {
