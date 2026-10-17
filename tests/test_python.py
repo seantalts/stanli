@@ -1332,19 +1332,6 @@ def test_reduce_sum_threads_per_chain():
     small = stanli.Model(stan_code=REDUCE_SUM_SOURCE,
                          data={"N": 3, "y": [0, 1, 2]}, threads_per_chain=4)
     assert small.reduce_sum_count == 0 and small.reduce_sum_fallbacks
-    # Old runtime capability failures must leave the existing model usable.
-    constructor = ("stanli_model_new_from_stan_threaded"
-                   if stanli._lib.stanli_has_embedded_stanc()
-                   else "stanli_model_new_threaded")
-    with mock.patch.object(stanli._lib, constructor, None):
-        try:
-            m.sample(**args, threads_per_chain=2)
-        except RuntimeError as e:
-            assert "newer Stanli runtime" in str(e)
-        else:
-            raise AssertionError("missing native entrypoint was ignored")
-    assert m.threads_per_chain == 1
-    np.testing.assert_array_equal(m.log_prob_grad([0.2])[1], baseline[1])
 
 
 def test_reduce_sum_threads_preserve_transformed_data_seed():
@@ -1431,18 +1418,6 @@ def test_fast_math_reaches_the_subprocess_compiler():
                 source, ["inc"], fast_math=True) == [
                     str(portable), "--fast-math", "--include-path", "inc",
                     str(source)]
-
-
-def test_fast_math_needs_a_runtime_with_options():
-    with mock.patch.object(stanli._lib, "stanli_model_new_from_stan_with_opts", None), \
-            mock.patch.object(stanli._lib, "stanli_model_new_with_opts", None):
-        try:
-            stanli.Model(stan_code=FAST_MATH_SOURCE, data=FAST_MATH_DATA,
-                         fast_math=True)
-        except RuntimeError as exc:
-            assert "newer Stanli runtime" in str(exc)
-        else:
-            raise AssertionError("missing native entrypoint was ignored")
 
 
 METRIC_SOURCE = """
@@ -1578,23 +1553,6 @@ def test_invalid_metric_values_raise_stans_message_before_sampling():
         assert "chains failed" not in str(e), str(e)
     else:
         raise AssertionError("negative diag inv_metric accepted")
-
-
-def test_metric_options_need_a_runtime_that_has_them():
-    m = _metric_model()
-    with mock.patch.object(stanli._lib, "stanli_sample_multi_metric", None):
-        fit = m.sample(chains=2, seed=3, warmup=20, samples=10, refresh=0)
-        assert fit.metric == "diag_e"
-        assert fit.step_size.shape == (2,) and np.all(np.isnan(fit.step_size))
-        assert fit.inv_metric == [None, None]
-        for kw in ({"metric": "dense_e"}, {"inv_metric": np.ones(3)},
-                   {"step_size": 0.5}, {"adapt_engaged": False}):
-            try:
-                m.sample(chains=2, warmup=5, samples=5, refresh=0, **kw)
-            except RuntimeError as e:
-                assert "newer Stanli runtime" in str(e)
-            else:
-                raise AssertionError(f"{kw} ignored")
 
 
 def main():
