@@ -579,6 +579,11 @@ def _run_artifacts(directory, allow_filter=False):
                              directory / "benchmark-manifest.json", allow_filter)
 
 
+def _cmdstan_toolchain(identity):
+    return {key: value for key, value in (identity.get("toolchains") or {}).items()
+            if not key.startswith("stanli_")}
+
+
 def _check_optimized_run(manifest, default, provenance):
     identity, baseline = manifest["identity"], default["identity"]
     config, default_config = identity["config"], _catalog_config(default)
@@ -589,7 +594,7 @@ def _check_optimized_run(manifest, default, provenance):
             raise ValueError(f"Vectorized/default gradient configuration differs: {key}")
     if identity.get("threads") != baseline.get("threads"):
         raise ValueError("Vectorized/default thread settings differ")
-    if identity.get("toolchains") != baseline.get("toolchains"):
+    if _cmdstan_toolchain(identity) != _cmdstan_toolchain(baseline):
         raise ValueError("Vectorized/default CmdStan toolchain differs")
     if (provenance.get("optimization") != "O1 plus vectorize_loops"
             or provenance.get("binary_sha256") != identity["executables"].get("stanc")
