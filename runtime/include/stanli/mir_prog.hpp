@@ -4610,8 +4610,7 @@ struct ProgramCompiler {
           emit_function_return(s.has_init ? expr(s.rhs) : Range{0, 0});
           throw PathExit{};
         }
-        if (runtime_exit)
-          bail("return inside runtime control without a function scope");
+        if (!return_frame) bail("return without a function scope");
         throw Returned{s.has_init ? expr(s.rhs) : Range{0, 0}};
       }
       case mir::Stmt::Break:

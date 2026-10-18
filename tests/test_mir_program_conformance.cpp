@@ -1056,6 +1056,21 @@ void test_constant_probes() {
           "shape without runtime values");
 }
 
+void test_return_without_function_scope() {
+  stanli::Program p;
+  std::map<std::string, const FunDef*> functions;
+  stanli::ProgramCompiler pc{p, functions};
+  try {
+    pc.stmt(return_value(lit_real(1)));
+    ++failures;
+    std::printf("FAIL return without function scope: compiled\n");
+  } catch (const stanli::Bail&) {
+  } catch (...) {
+    ++failures;
+    std::printf("FAIL return without function scope: wrong exception\n");
+  }
+}
+
 void test_builtin_activity() {
   for (int mode = 0; mode < 4; ++mode) {
     stanli::Program p;
@@ -1311,6 +1326,7 @@ int main() {
   test_dynamic_vector_program();
   test_runtime_remainder_and_identity_index();
   test_constant_probes();
+  test_return_without_function_scope();
   test_short_circuit_or();
   test_short_circuit_and();
   test_short_circuit_or_requires_rhs();
