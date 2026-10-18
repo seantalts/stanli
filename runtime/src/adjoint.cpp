@@ -848,12 +848,12 @@ __attribute__((noinline)) static void ranged_step(const AdjInstr& I,
         adj[I.a + ka] -= take(k);
       });
       break;
-#define STANLI_UNARY_RANGED(code, fn, from_out, pullback)                  \
-  case Program::code:                                                       \
-    unary([&](int32_t k, int32_t ka, int32_t, int32_t) {                    \
-      STANLI_UNARY_PULLBACK(from_out, pullback, take(k), val[I.va + ka],    \
-                            val[I.vd + k], adj[I.a + ka])                   \
-    });                                                                     \
+#define STANLI_UNARY_RANGED(code, fn, from_out, pullback)                \
+  case Program::code:                                                    \
+    unary([&](int32_t k, int32_t ka, int32_t, int32_t) {                 \
+      STANLI_UNARY_PULLBACK(from_out, pullback, take(k), val[I.va + ka], \
+                            val[I.vd + k], adj[I.a + ka])                \
+    });                                                                  \
     break;
       STANLI_PROGRAM_UNARY_LIST(STANLI_UNARY_RANGED)
 #undef STANLI_UNARY_RANGED
@@ -1008,11 +1008,11 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
           adj[I.dst] = 0.0;
           adj[I.a] -= t;
           break;
-#define STANLI_UNARY_SCALAR(code, fn, from_out, pullback)                \
-  case Program::code:                                                    \
-    adj[I.dst] = 0.0;                                                    \
-    STANLI_UNARY_PULLBACK(from_out, pullback, t, val[I.va], val[I.vd],   \
-                          adj[I.a])                                      \
+#define STANLI_UNARY_SCALAR(code, fn, from_out, pullback)              \
+  case Program::code:                                                  \
+    adj[I.dst] = 0.0;                                                  \
+    STANLI_UNARY_PULLBACK(from_out, pullback, t, val[I.va], val[I.vd], \
+                          adj[I.a])                                    \
     break;
           STANLI_PROGRAM_UNARY_LIST(STANLI_UNARY_SCALAR)
 #undef STANLI_UNARY_SCALAR

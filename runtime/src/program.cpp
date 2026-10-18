@@ -376,16 +376,16 @@ void run_range(const Program::Instr& I, T* reg) {
     case Program::NEG:
       unary([](T& o, const T& a, const T&, const T&) { o = -a; });
       break;
-#define STANLI_PROGRAM_UNARY_RANGED(code, fn, from_out, pullback)         \
-  case Program::code:                                                     \
-    unary([](T& o, const T& a, const T&, const T&) {                      \
-      if constexpr (Program::code == Program::INV_LOGIT)                  \
-        o = inv_logit_range(a);                                           \
-      else                                                                \
-        o = stan::math::fn(a);                                            \
-    });                                                                   \
+#define STANLI_PROGRAM_UNARY_RANGED(code, fn, from_out, pullback) \
+  case Program::code:                                             \
+    unary([](T& o, const T& a, const T&, const T&) {              \
+      if constexpr (Program::code == Program::INV_LOGIT)          \
+        o = inv_logit_range(a);                                   \
+      else                                                        \
+        o = stan::math::fn(a);                                    \
+    });                                                           \
     break;
-    STANLI_PROGRAM_UNARY_LIST(STANLI_PROGRAM_UNARY_RANGED)
+      STANLI_PROGRAM_UNARY_LIST(STANLI_PROGRAM_UNARY_RANGED)
 #undef STANLI_PROGRAM_UNARY_RANGED
     case Program::LSE2:
       binary([](T& o, const T& a, const T& b, const T&) {

@@ -2943,8 +2943,7 @@ static void test_lane_plan_boundary() {
                  g.udata_pool.size() == before.udata_pool.size());
       expect("lane pricing leaves fills/targets unchanged",
              fills == old_fills && terms == old_terms);
-      auto accepted =
-          rp::SelectedPlan::select(g, plan, source);
+      auto accepted = rp::SelectedPlan::select(g, plan, source);
       expect("selection follows unchanged price",
              accepted.has_value() == selected);
       if (!selected) {

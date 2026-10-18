@@ -460,9 +460,9 @@ static void test_fast_merges_active_duplicates() {
   std::vector<int> terms;
   Graph off = g;
   const CseStats st_off = cse(off, fills, terms, {}, false);
-  expect("explicit off shares primal only", st_off.primals_shared == 1 &&
-                                                st_off.ops_removed == 0 &&
-                                                count_opcode(off, OP_EXPV) == 2);
+  expect("explicit off shares primal only",
+         st_off.primals_shared == 1 && st_off.ops_removed == 0 &&
+             count_opcode(off, OP_EXPV) == 2);
 
   const CseStats st = cse(g, fills, terms, {}, true);
   expect("fast removes the duplicate", st.ops_removed == 1);

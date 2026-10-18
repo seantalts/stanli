@@ -1580,11 +1580,11 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
     case Program::NEG:
       t.unary(o, I, m, [](double a) { return -a; });
       break;
-#define STANLI_LANE_UNARY_FORWARD(code, fn, from_out, pullback)  \
-  case Program::code:                                            \
+#define STANLI_LANE_UNARY_FORWARD(code, fn, from_out, pullback)   \
+  case Program::code:                                             \
     t.unary(o, I, m, [](double a) { return stan::math::fn(a); }); \
     break;
-    STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_FORWARD)
+      STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_FORWARD)
 #undef STANLI_LANE_UNARY_FORWARD
     case Program::GT:
       t.binary(o, I, m, [](double a, double b) { return double(a > b); });
@@ -2129,20 +2129,20 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
       });
       return;
     }
-#define STANLI_LANE_UNARY_ADJOINT(code, fn, from_out, pullback)             \
-  case Program::code: {                                                     \
-    double* const d = cells(o.dst);                                         \
-    double* const a = t.acc(I.a, o.a);                                      \
-    t.with(from_out ? o.vd : o.va, from_out ? I.vd : I.va, [&](auto v) {    \
-      t.each(m, [&](int l) {                                                \
-        const double u = d[l];                                              \
-        d[l] = 0.0;                                                         \
-        STANLI_UNARY_PULLBACK(from_out, pullback, u, v[l], v[l], a[l])      \
-      });                                                                   \
-    });                                                                     \
-    return;                                                                 \
+#define STANLI_LANE_UNARY_ADJOINT(code, fn, from_out, pullback)          \
+  case Program::code: {                                                  \
+    double* const d = cells(o.dst);                                      \
+    double* const a = t.acc(I.a, o.a);                                   \
+    t.with(from_out ? o.vd : o.va, from_out ? I.vd : I.va, [&](auto v) { \
+      t.each(m, [&](int l) {                                             \
+        const double u = d[l];                                           \
+        d[l] = 0.0;                                                      \
+        STANLI_UNARY_PULLBACK(from_out, pullback, u, v[l], v[l], a[l])   \
+      });                                                                \
+    });                                                                  \
+    return;                                                              \
   }
-    STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_ADJOINT)
+      STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_ADJOINT)
 #undef STANLI_LANE_UNARY_ADJOINT
     case Program::LSE2:
     case Program::LOG_DIFF_EXP: {

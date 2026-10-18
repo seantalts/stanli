@@ -648,7 +648,7 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
   case Program::code:                                              \
     d() = stan::math::fn(ra());                                    \
     break;
-      STANLI_PROGRAM_UNARY_LIST(STANLI_PROGRAM_UNARY_FORWARD)
+        STANLI_PROGRAM_UNARY_LIST(STANLI_PROGRAM_UNARY_FORWARD)
 #undef STANLI_PROGRAM_UNARY_FORWARD
       case Program::GT:
         d() = T(stan::math::value_of(ra()) > stan::math::value_of(rb()));
