@@ -123,8 +123,8 @@ auto solve_active_left_values(const MatD& a, const B& b,
     if (a.size() == 0) return Result(0, b.cols());
     const Eigen::HouseholderQR<MatD> factor(a);
     if (qr_scratch) {
-      // Per-execution scratch is retained and rebound by the executor and
-      // numerical frames. It must not be shared by repeated calls at a site.
+      // Per-execution scratch is retained and rebound by the executor. It
+      // must not be shared by repeated calls at a site.
       MapM(qr_scratch, a.rows(), a.cols()) = factor.matrixQR();
       Eigen::Map<VecD>(qr_scratch + a.size(), a.rows()) = factor.hCoeffs();
     }

@@ -369,16 +369,7 @@ void classify(StructuredLoop& p) {
     if (n.kind != Node::KernelCall || n.storage == Node::InPlace) return;
     const Op& op = p.body.ops[n.op];
     if (is_effectful_op(op.opcode)) return;
-    if (n.active) {
-      // Cache only a stateless primal. Each source execution still gets its
-      // own adjoint and reverse call, preserving the order of contributions
-      // to shared inputs. Stateful/scratch-bearing kernels keep full calls.
-      const Kernel* k = find_kernel(op.opcode);
-      if (std::getenv("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS") ||
-          op.out2 >= 0 || op.dyn_lengths || n.kernel_scratch || !k ||
-          k->make_state || n.forward != k->forward || n.backward != k->backward)
-        return;
-    }
+    if (n.active) return;
     for (int loop : enclosing) {
       bool varies = false;
       for (int k = 0; k < op.n_in; ++k) varies |= written[loop][op.in[k]] != 0;
@@ -1236,8 +1227,7 @@ struct StreamInstr {
     GuardFor,
     Tgt,
     Set,
-    Gather,
-    AdjointCall
+    Gather
   } kind;
   uint32_t index = 0;
 };
@@ -1286,103 +1276,6 @@ struct Stream {
   std::vector<int64_t> output_len;
   std::vector<int32_t> output_adjoint;
   int64_t adjoint_size = 0;
-
-  // A sealed frame owns all saved values and code. These vectors only stage
-  // the next frame, so clear their contents while retaining recording capacity.
-  // finish_frames destroys this Stream; replay retains none of this storage.
-  void clear_frame_recording() {
-    program.clear();
-    backward_order.clear();
-    calls.clear();
-    inplaces.clear();
-    copies.clear();
-    segs.clear();
-    guards_if.clear();
-    guards_for.clear();
-    targets.clear();
-    target_adj_version.clear();
-    sets.clear();
-    gathers.clear();
-    call_ptrs.clear();
-    call_adj.clear();
-    call_adj_version.clear();
-    inplace_pos.clear();
-    inplace_sel_ptr.clear();
-    inplace_sel_snapshot.clear();
-    inplace_adj.clear();
-    inplace_adj_version.clear();
-    copy_adj.clear();
-    copy_adj_version.clear();
-    seg_in_src.clear();
-    seg_in_adj.clear();
-    seg_in_adj_version.clear();
-    gather_pos.clear();
-    gather_adj.clear();
-    gather_adj_version.clear();
-    inplace_base_len.clear();
-    gather_src_len.clear();
-    adjoints.clear();
-    inplace_old.clear();
-    target_work.clear();
-    imports.clear();
-    output_value.clear();
-    output_len.clear();
-    output_adjoint.clear();
-    arena.ranges.clear();
-    arena.cells.clear();
-    adjoint_size = 0;
-  }
-};
-
-// The experimental frame path seals a bounded recording at each outer trip.
-// Code contains relative operands; frame bindings carry the execution's
-// external addresses and derivative identities.
-struct FrameCode {
-  std::vector<uint64_t> words;
-  std::vector<uint32_t> backward;
-  std::vector<int64_t> positions;
-};
-struct FrameAdjoint {
-  int64_t id = -1, shift = 0, promotion = -1;
-  bool operator==(const FrameAdjoint& b) const {
-    return id == b.id && shift == b.shift && promotion == b.promotion;
-  }
-};
-struct LoopFrame {
-  std::shared_ptr<const FrameCode> code;
-  std::vector<double> values, old, literals;
-  std::vector<double*> bindings;
-  std::vector<FrameAdjoint> adj_bindings;
-  int64_t adjoint_base = 0;
-};
-// Reused only while building the frame tape. Every field is overwritten or
-// cleared before the next seal, and this scratch is released before replay.
-struct FrameSealScratch {
-  struct Layout {
-    std::shared_ptr<const FrameCode> code;
-    size_t instructions;
-  };
-  std::vector<int64_t> live_ids, remap, lengths;
-  std::vector<std::pair<const double*, int64_t>> ranges;
-  ArenaSnapshot snapshot;
-  std::vector<Version> versions;
-  std::vector<Layout> layouts;
-};
-struct FrameTape {
-  std::unique_ptr<FrameSealScratch> sealing;
-  std::vector<std::unique_ptr<LoopFrame>> frames;
-  std::unordered_map<size_t, std::vector<std::shared_ptr<const FrameCode>>>
-      codes;
-  std::vector<FrozenImport> imports;
-  std::vector<const double*> outputs, targets;
-  std::vector<FrameAdjoint> output_adjoints, target_adjoints;
-  std::vector<double> adjoints, target_work;
-  std::vector<int64_t> promotions;
-  std::unordered_map<int64_t, int64_t> promotion_links;
-  int64_t adjoint_base = 0;
-  size_t version_peak = 0, recording_cells = 0;
-  size_t layout_attempts = 0, layout_matches = 0;
-  bool ready = false;
 };
 
 double* resolve_adjoint(int64_t id, double* adjoints, const StructuredLoop& p,
@@ -1421,10 +1314,6 @@ struct LoopState : KernelState {
   BlockArena arena;
   std::vector<double> workspace;
   MappedVector<Version> versions;
-  // Recording-only provenance, conditional on the stream's guards, for
-  // containers with constant and varying cells. Keys are versions, so
-  // copy-on-write aliases keep their own facts.
-  std::unordered_map<int64_t, std::vector<uint8_t>> constant_cells;
   std::vector<int64_t> bindings;
   std::vector<int64_t> handles;
   std::vector<double> undo;
@@ -1444,7 +1333,6 @@ struct LoopState : KernelState {
   size_t visits = 0, reused_primal_cells = 0;
   int64_t adjoint_size = 0;
   bool reverse_ready = false;
-  bool frame_clone_ready = false;
   bool memo_ready = false;
   bool has_reusable_primals = false;
   bool reuse_primals = false;
@@ -1452,22 +1340,10 @@ struct LoopState : KernelState {
       std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
   bool report_tape = diagnostics;
   bool no_replay = std::getenv("STANLI_NO_STRUCTURED_REPLAY") != nullptr;
-  bool cell_constants =
-      std::getenv("STANLI_NO_STRUCTURED_CELL_CONSTANTS") == nullptr;
   std::unique_ptr<Stream> stream;
   std::unique_ptr<Stream> building;
-  std::unique_ptr<FrameTape> frames;
-  bool frame_mode = false;
-  bool frame_auto = false;
-  bool frame_layout =
-      std::getenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT") == nullptr;
-  bool check_frame_layout =
-      std::getenv("STANLI_STRUCTURED_CHECK_FRAME_LAYOUT") != nullptr;
-  bool frame_clone = std::getenv("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
   bool last_replayed = false;
   size_t respecialized = 0;
-
-  bool clone_from(const KernelState& source) override;
 
   explicit LoopState(const StructuredLoop& plan)
       : p(plan),
@@ -1480,12 +1356,6 @@ struct LoopState : KernelState {
         ctx(plan.site_count),
         sites(plan.site_count, nullptr) {
     no_replay |= !plan.cache_execution_path;
-    const char* frame_option = std::getenv("STANLI_STRUCTURED_FRAMES");
-    frame_mode = !no_replay && plan.outer_loop_index >= 0 &&
-                 plan.segments.empty() && frame_option &&
-                 frame_option[0] == '1';
-    frame_auto = !no_replay && plan.outer_loop_index >= 0 &&
-                 plan.segments.empty() && !frame_option;
     collect(plan.root);
     for (size_t site = 0; site < sites.size(); ++site) {
       const Node* n = sites[site];
@@ -1526,7 +1396,6 @@ struct LoopState : KernelState {
   }
 
   void release() {
-    constant_cells.clear();
     arena.clear();
     version_peak = std::max(version_peak, versions.size());
     versions.right_size(version_peak);
@@ -1540,25 +1409,7 @@ struct LoopState : KernelState {
   }
 };
 
-void seal_frame(LoopState& s);
-
 constexpr int64_t kReservePrefixTrips = 8;
-
-// Only a recording that would grow a large working version table selects the
-// frame path automatically. Use the already executed prefix, not a new prep
-// pass or a body/model fingerprint. The threshold bounds the metadata we are
-// willing to grow; numerical history is accounted separately.
-bool prefer_frames(const LoopState& s, int64_t trips, int64_t sampled) {
-  constexpr double max_version_bytes = 128.0 * 1024 * 1024;
-  constexpr size_t min_instructions_per_trip = 128;
-  constexpr size_t version_bytes = sizeof(Version);
-  return s.frame_auto &&
-         static_cast<double>(s.versions.size()) * version_bytes *
-                 (static_cast<double>(trips) / sampled) >
-             max_version_bytes &&
-         s.building->program.size() / static_cast<size_t>(sampled) >=
-             min_instructions_per_trip;
-}
 
 struct RecordingPoolSizes {
   size_t program = 0, gather_pos = 0, gather_adj_version = 0, gathers = 0,
@@ -1667,16 +1518,11 @@ void reserve_remaining_trips(Stream& st, const RecordingPoolSizes& before,
                         remaining_trips);
 }
 
-#include "structured_recording.inc"
-
 struct Execution {
   const StructuredLoop& p;
   LoopState& s;
   KernelCtx& outer;
   enum Flow { Normal, Break, Continue };
-  std::unique_ptr<RecordingProgram> recording[2];
-  int recording_enabled = -1;
-  Flow recording_forward(const Node& root, size_t which);
 
   double* value(int slot) const {
     return s.versions[static_cast<size_t>(s.bindings[slot])].value;
@@ -1711,27 +1557,6 @@ struct Execution {
     for (int k = 0; k < op.n_in; ++k)
       if (!is_const(s.bindings[op.in[k]])) return false;
     return true;
-  }
-  bool selected_cells_const(const Node& n, const Op& op,
-                            const KernelCtx& c) const {
-    if (!s.building || !s.cell_constants || !gather_eligible(n, op))
-      return false;
-    // The normal index kernel has already validated/evaluated this read.
-    // Only constant selectors can fold it; varying selectors still replay.
-    const auto it = s.constant_cells.find(s.bindings[op.in[0]]);
-    if (it == s.constant_cells.end()) return false;
-    const auto& cells = it->second;
-    const auto& spec = *static_cast<const DynamicIndexSpec*>(op.udata);
-    const int64_t fixed = fixed_scalar_index(spec, c, false);
-    if (fixed >= 0) return cells[static_cast<size_t>(fixed)] != 0;
-    const IndexRuntime runtime = validate_index(spec, c, false);
-    // Capacity padding is not covered by the selection proof.
-    if (runtime.selected != c.out.len) return false;
-    bool constant = true;
-    selected_positions(spec, runtime, [&](int64_t, int64_t at) {
-      constant = constant && cells[static_cast<size_t>(at)];
-    });
-    return constant;
   }
   double* materialize(int64_t version, int64_t len) {
     double* v = s.versions[static_cast<size_t>(version)].value;
@@ -1794,10 +1619,9 @@ struct Execution {
                                       adj_offset, flags, n.site});
   }
 
-  void log_call(const Node& n, const Op& op, const KernelCtx& c,
-                bool cached_primal = false) {
+  void log_call(const Node& n, const Op& op, const KernelCtx& c) {
     if (!s.building) return;
-    if (!cached_primal && gather_eligible(n, op)) {
+    if (gather_eligible(n, op)) {
       log_gather(n, op, c);
       return;
     }
@@ -1823,8 +1647,7 @@ struct Execution {
     if (n.reuse_primal_output && s.reuse_primals)
       flags |= kFrozenCallReusePrimal;
     const uint32_t idx = static_cast<uint32_t>(st.calls.size());
-    st.program.push_back(StreamInstr{
-        cached_primal ? StreamInstr::AdjointCall : StreamInstr::Call, idx});
+    st.program.push_back(StreamInstr{StreamInstr::Call, idx});
     st.calls.push_back(FrozenCall{n.site, ptr_offset, adj_offset,
                                   static_cast<uint16_t>(op.n_in), flags});
   }
@@ -1840,7 +1663,7 @@ struct Execution {
     c.scratch = w;
     bind_inputs(op, c);
     n.forward(c);
-    const bool folded = inputs_const(op) || selected_cells_const(n, op, c);
+    const bool folded = inputs_const(op);
     s.bindings[op.out] = s.node_version[n.site];
     s.versions[static_cast<size_t>(s.node_version[n.site])].constant = folded;
     if (op.out2 >= 0) {
@@ -1872,7 +1695,7 @@ struct Execution {
     c.scratch = n.kernel_scratch ? block + out_len + out2_len : nullptr;
     bind_inputs(op, c);
     n.forward(c);
-    const bool folded = inputs_const(op) || selected_cells_const(n, op, c);
+    const bool folded = inputs_const(op);
     const int64_t out =
         make_version(block, n.active ? reserve_adjoint(out_len) : -1, folded);
     s.bindings[op.out] = out;
@@ -1885,25 +1708,6 @@ struct Execution {
     if (n.active && !s.building)
       s.records.push_back(Record{Record::Kernel, n.site, handles, out, -1});
     if (!folded) log_call(n, op, c);
-  }
-
-  void reuse_invariant_primal(const Node& n, const Op& op, KernelCtx& c) {
-    const int64_t cached = s.node_version[n.site];
-    c.out.data = s.versions[static_cast<size_t>(cached)].value;
-    c.scratch = nullptr;
-    int64_t handles = -1;
-    if (!s.building) {
-      handles = static_cast<int64_t>(s.handles.size());
-      for (int k = 0; k < op.n_in; ++k)
-        s.handles.push_back(s.bindings[op.in[k]]);
-    }
-    const bool folded = is_const(cached);
-    const int64_t out = make_version(
-        c.out.data, reserve_adjoint(p.body.slots[op.out].len), folded);
-    s.bindings[op.out] = out;
-    if (!s.building)
-      s.records.push_back(Record{Record::Kernel, n.site, handles, out, -1});
-    if (!folded) log_call(n, op, c, true);
   }
 
   void run_in_place(const Node& n, const Op& op, KernelCtx& c) {
@@ -1927,14 +1731,6 @@ struct Execution {
       const bool needs_adjoint = !write_const && (rhs_active || active(base));
       const int64_t fresh = make_version(
           copy, needs_adjoint ? reserve_adjoint(len) : -1, write_const);
-      if (s.building && s.cell_constants && !write_const) {
-        if (is_const(base)) {
-          s.constant_cells.emplace(fresh, std::vector<uint8_t>(len, 1));
-        } else if (auto it = s.constant_cells.find(base);
-                   it != s.constant_cells.end()) {
-          s.constant_cells.emplace(fresh, it->second);
-        }
-      }
       s.versions[static_cast<size_t>(fresh)].owner = base_slot;
       if (!write_const) {
         s.records.push_back(Record{Record::Copy, n.site, 0, base, fresh});
@@ -1952,28 +1748,11 @@ struct Execution {
     } else if (!write_const && rhs_active &&
                s.versions[static_cast<size_t>(base)].adjoint == -1) {
       s.versions[static_cast<size_t>(base)].adjoint = reserve_adjoint(len);
-      if (s.frames) {
-        auto it = s.frames->promotion_links.find(base);
-        if (it != s.frames->promotion_links.end())
-          s.frames->promotions[it->second] =
-              s.versions[static_cast<size_t>(base)].adjoint;
-      }
     }
     bind_inputs(op, c);
     double* values = s.versions[static_cast<size_t>(base)].value;
     c.out.data = values;
     const double* source = c.in[layout.rhs].data;
-    std::vector<uint8_t>* cells = nullptr;
-    const std::vector<uint8_t>* rhs_cells = nullptr;
-    const bool rhs_constant = is_const(rhs);
-    if (s.building && s.cell_constants && !write_const) {
-      if (auto it = s.constant_cells.find(rhs); it != s.constant_cells.end())
-        rhs_cells = &it->second;
-      auto it = s.constant_cells.find(base);
-      if (it == s.constant_cells.end() && (rhs_constant || rhs_cells))
-        it = s.constant_cells.emplace(base, std::vector<uint8_t>(len, 0)).first;
-      if (it != s.constant_cells.end()) cells = &it->second;
-    }
     const int64_t undo = static_cast<int64_t>(s.undo.size());
     const uint32_t pos_offset =
         s.building ? static_cast<uint32_t>(s.building->inplace_pos.size()) : 0;
@@ -1990,11 +1769,6 @@ struct Execution {
         s.undo.push_back(values[at]);
       }
       values[at] = source[i];
-      // A varying write selector is guarded by FrozenInPlace. If it changes,
-      // recording restarts before any dependent folded read can be reused.
-      if (cells)
-        (*cells)[static_cast<size_t>(at)] =
-            rhs_constant || (rhs_cells && (*rhs_cells)[static_cast<size_t>(i)]);
     };
     const int64_t fixed = fixed_scalar_index(spec, c, true);
     if (fixed >= 0) {
@@ -2071,18 +1845,11 @@ struct Execution {
 
   Flow forward(const Node& n) { return run(n); }
 
-  // Keep the original tree path inlined when sharing leaf execution with
-  // the compiled recorder; outlining this helper slows non-frame recording.
-  __attribute__((always_inline)) void execute_kernel(const Node& n) {
+  void execute_kernel(const Node& n) {
     const Op& op = p.body.ops[n.op];
     KernelCtx& c = s.ctx[n.site];
     if (n.invariant_loop >= 0 &&
         s.node_generation[n.site] == s.loop_generation[n.invariant_loop]) {
-      if (n.active) {
-        reuse_invariant_primal(n, op, c);
-        ++s.effects;
-        return;
-      }
       s.bindings[op.out] = s.node_version[n.site];
       if (op.out2 >= 0) s.bindings[op.out2] = s.node_version2[n.site];
       return;
@@ -2161,54 +1928,31 @@ struct Execution {
         if (s.building && !bounds_const)
           log_guard_for(value(n.lower), value(n.upper), lo, hi);
         const bool marked = s.building && n.loop_index == p.outer_loop_index;
-        bool framed = marked && s.frames;
-        if (framed) seal_frame(s);
-        const int64_t prefix = marked && !framed && count > kReservePrefixTrips
-                                   ? kReservePrefixTrips
-                                   : 0;
+        const int64_t prefix =
+            marked && count > kReservePrefixTrips ? kReservePrefixTrips : 0;
         RecordingPoolSizes pools_before;
         if (prefix > 0) pools_before = recording_pool_sizes(*s.building);
         for (int64_t i = 0; i < count; ++i) {
           bind_iterator(n, lo + static_cast<double>(i), bounds_const);
-          const Flow flow = framed ? recording_forward(n.children[0], 0)
-                                   : forward(n.children[0]);
-          if (framed) seal_frame(s);
+          const Flow flow = forward(n.children[0]);
           if (flow == Break) break;
-          if (i + 1 == prefix) {
-            if (prefer_frames(s, count, prefix)) {
-              if (s.diagnostics)
-                emit_diagnostic("stanli_structured frame_selection: sampled=" +
-                                std::to_string(prefix));
-              s.frames = std::make_unique<FrameTape>();
-              seal_frame(s);
-              framed = true;
-            } else {
-              reserve_remaining_trips(*s.building, pools_before,
-                                      recording_pool_sizes(*s.building), prefix,
-                                      count - prefix);
-            }
-          }
+          if (i + 1 == prefix)
+            reserve_remaining_trips(*s.building, pools_before,
+                                    recording_pool_sizes(*s.building), prefix,
+                                    count - prefix);
         }
         return Normal;
       }
       case Node::While: {
         ++s.loop_generation[n.loop_index];
-        const bool framed =
-            s.frames && s.building && n.loop_index == p.outer_loop_index;
-        if (framed) seal_frame(s);
         for (;;) {
-          if ((framed ? recording_forward(n.children[0], 1)
-                      : forward(n.children[0])) == Break)
-            break;
+          if (forward(n.children[0]) == Break) break;
           const double* cond = value(n.condition);
           const bool taken = cond[0] != 0.0;
           if (s.building && !is_const(s.bindings[n.condition]))
             log_guard_if(cond, taken);
           if (!taken) break;
-          const Flow flow = framed ? recording_forward(n.children[1], 0)
-                                   : forward(n.children[1]);
-          if (framed) seal_frame(s);
-          if (flow == Break) break;
+          if (forward(n.children[1]) == Break) break;
         }
         return Normal;
       }
@@ -2358,185 +2102,6 @@ struct Execution {
     }
   }
 };
-
-Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
-  if (recording_enabled < 0) {
-    const char* option = std::getenv("STANLI_STRUCTURED_COMPILED_RECORDING");
-    recording_enabled = !option || option[0] != '0';
-  }
-  if (!recording_enabled) return forward(root);
-  auto& owned = recording[which];
-  if (!owned) {
-    owned = std::make_unique<RecordingProgram>(root, s);
-    if (s.diagnostics)
-      emit_diagnostic("stanli_structured compiled_recording: instructions=" +
-                      std::to_string(owned->code.size()));
-  }
-  auto& program = *owned;
-  size_t pc = 0;
-  while (pc < program.code.size()) {
-    auto& instruction = program.code[pc];
-    switch (instruction.kind) {
-      case RecordingProgram::DataKernel: {
-        const Node& n = *instruction.node;
-        const auto& op = p.body.ops[n.op];
-        auto& context = s.ctx[n.site];
-        for (int k = 0; k < op.n_in; ++k) context.in[k].data = value(op.in[k]);
-        n.forward(context);
-        ++s.effects;
-        if (!instruction.jump) {
-          const auto version = s.node_version[n.site];
-          s.bindings[op.out] = version;
-          s.versions[static_cast<size_t>(version)].constant = 1;
-          instruction.jump = 1;
-        }
-        ++pc;
-        break;
-      }
-      case RecordingProgram::DataBranchFresh:
-      case RecordingProgram::DataBranch: {
-        const Node& n = *instruction.node;
-        const auto& op = p.body.ops[n.op];
-        auto& context = s.ctx[n.site];
-        for (int k = 0; k < op.n_in; ++k) context.in[k].data = value(op.in[k]);
-        n.forward(context);
-        ++s.effects;
-        if (instruction.kind == RecordingProgram::DataBranchFresh) {
-          const auto version = s.node_version[n.site];
-          s.bindings[op.out] = version;
-          s.versions[static_cast<size_t>(version)].constant = 1;
-          instruction.kind = RecordingProgram::DataBranch;
-        }
-        pc = context.out.data[0] != 0.0 ? pc + 2 : instruction.jump;
-        break;
-      }
-      case RecordingProgram::DataIndex: {
-        const Node& n = *instruction.node;
-        const auto& op = p.body.ops[n.op];
-        auto& context = s.ctx[n.site];
-        for (int k = 0; k < op.n_in; ++k) context.in[k].data = value(op.in[k]);
-        if (!instruction.jump) {
-          n.forward(context);
-          const auto version = s.node_version[n.site];
-          s.bindings[op.out] = version;
-          s.versions[static_cast<size_t>(version)].constant = 1;
-          instruction.jump = 1;
-        } else {
-          // Successful first use proved immutable descriptor/slot geometry.
-          // Fixed Single axes have logical strides equal to physical strides.
-          // Check live selectors in the validator's original axis order; its
-          // capacity proof bounds this exact integer sum. Refreshing bindings
-          // above also handles aliases and frame compaction.
-          const auto& spec = *static_cast<const DynamicIndexSpec*>(op.udata);
-          int64_t position = 0;
-          for (const auto& a : spec.axes) {
-            const double raw =
-                context.in[a.selector_input].data[a.input_offset];
-            if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
-                raw > static_cast<double>(a.extent))
-              index_out_of_range();
-            position += (static_cast<int64_t>(raw) - 1) * a.stride;
-          }
-          context.out.data[0] = context.in[0].data[position];
-        }
-        ++s.effects;
-        ++pc;
-        break;
-      }
-      case RecordingProgram::Kernel:
-        execute_kernel(*instruction.node);
-        ++pc;
-        break;
-      case RecordingProgram::Alias:
-        execute_alias(*instruction.node);
-        ++pc;
-        break;
-      case RecordingProgram::Target:
-        execute_target(*instruction.node);
-        ++pc;
-        break;
-      case RecordingProgram::Leaf:
-        (void)run(*instruction.node);
-        ++pc;
-        break;
-      case RecordingProgram::Branch:
-      case RecordingProgram::WhileTest: {
-        const Node& n = *instruction.node;
-        const double* condition = value(n.condition);
-        const bool taken = condition[0] != 0.0;
-        if (s.building && !is_const(s.bindings[n.condition]))
-          log_guard_if(condition, taken);
-        pc = taken ? pc + 1 : instruction.jump;
-        break;
-      }
-      case RecordingProgram::ForEnter: {
-        const Node& n = *instruction.node;
-        ++s.loop_generation[n.loop_index];
-        const double lo = value(n.lower)[0], hi = value(n.upper)[0];
-        if (!std::isfinite(lo) || !std::isfinite(hi) || std::trunc(lo) != lo ||
-            std::trunc(hi) != hi || lo < std::numeric_limits<int32_t>::min() ||
-            hi < std::numeric_limits<int32_t>::min() ||
-            lo > std::numeric_limits<int32_t>::max() ||
-            hi > std::numeric_limits<int32_t>::max())
-          throw std::logic_error("structured loop invalid integer bounds");
-        auto& cursor = program.cursors[n.loop_index];
-        cursor.lower = lo;
-        cursor.count = hi >= lo ? static_cast<int64_t>(hi - lo) + 1 : 0;
-        cursor.iteration = 0;
-        cursor.constant =
-            is_const(s.bindings[n.lower]) && is_const(s.bindings[n.upper]);
-        if (s.building && !cursor.constant)
-          log_guard_for(value(n.lower), value(n.upper), lo, hi);
-        if (cursor.count) {
-          bind_iterator(n, lo, cursor.constant);
-          ++pc;
-        } else {
-          pc = instruction.jump;
-        }
-        break;
-      }
-      case RecordingProgram::ForNext: {
-        const Node& n = *instruction.node;
-        auto& cursor = program.cursors[n.loop_index];
-        if (++cursor.iteration < cursor.count) {
-          bind_iterator(n, cursor.lower + static_cast<double>(cursor.iteration),
-                        cursor.constant);
-          pc = instruction.jump;
-        } else {
-          ++pc;
-        }
-        break;
-      }
-      case RecordingProgram::DataForNext: {
-        // ForEnter already bound this unique, constant transient iterator.
-        // Frame compaction preserves workspace and remaps both its handles.
-        const Node& n = *instruction.node;
-        auto& cursor = program.cursors[n.loop_index];
-        if (++cursor.iteration < cursor.count) {
-          s.workspace[n.workspace] =
-              cursor.lower + static_cast<double>(cursor.iteration);
-          pc = instruction.jump;
-        } else {
-          ++pc;
-        }
-        break;
-      }
-      case RecordingProgram::WhileEnter:
-        ++s.loop_generation[instruction.node->loop_index];
-        ++pc;
-        break;
-      case RecordingProgram::ExitJump:
-        ++s.effects;
-        [[fallthrough]];
-      case RecordingProgram::Jump:
-        pc = instruction.jump;
-        break;
-    }
-  }
-  return pc == RecordingProgram::exit_break      ? Break
-         : pc == RecordingProgram::exit_continue ? Continue
-                                                 : Normal;
-}
 
 void collect_live_ranges(LoopState& s, Stream& st,
                          std::vector<std::pair<const double*, int64_t>>& live) {
@@ -2812,7 +2377,6 @@ void freeze(LoopState& s) {
     st.output_adjoint.push_back(adj_of(v));
   }
   s.versions.reset();
-  decltype(s.constant_cells){}.swap(s.constant_cells);
 
   compact_snapshot(s, st.arena);
   std::vector<int64_t>().swap(st.inplace_base_len);
@@ -2865,7 +2429,6 @@ void freeze(LoopState& s) {
     bool live = false;
     switch (instr.kind) {
       case StreamInstr::Call:
-      case StreamInstr::AdjointCall:
         live = (st.calls[instr.index].flags & kFrozenCallActive) != 0;
         break;
       case StreamInstr::InPlace:
@@ -2936,8 +2499,6 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
   }
   for (const auto& instr : st.program) {
     switch (instr.kind) {
-      case StreamInstr::AdjointCall:
-        break;
       case StreamInstr::Call: {
         const FrozenCall& f = st.calls[instr.index];
         KernelCtx& c = s.ctx[f.site];
@@ -3052,7 +2613,6 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
       case StreamInstr::Set:
       case StreamInstr::Tgt:
         break;
-      case StreamInstr::AdjointCall:
       case StreamInstr::Call: {
         const FrozenCall& f = st.calls[instr.index];
         KernelCtx& c = s.ctx[f.site];
@@ -3152,8 +2712,6 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
     }
   }
 }
-
-#include "structured_frames.inc"
 
 KernelState* make_loop_state(const Op& op, const Slot*) {
   return new LoopState(*static_cast<const StructuredLoop*>(op.udata));
@@ -3308,17 +2866,6 @@ void structured_loop_forward(KernelCtx& ctx) {
   LoopState& s = require_state(ctx);
   const StructuredLoop& p = s.p;
   s.reverse_ready = false;
-  s.frame_clone_ready = false;
-  if (s.frames && !s.frames->ready) s.frames.reset();
-  if (s.frames && s.frames->ready) {
-    if (frames_forward(s, ctx)) {
-      s.reverse_ready = true;
-      s.frame_clone_ready = true;
-      return;
-    }
-    s.frames.reset();
-    ++s.respecialized;
-  }
   if (s.stream && !s.no_replay) {
     if (replay_forward(s, ctx)) {
       s.last_replayed = true;
@@ -3340,7 +2887,6 @@ void structured_loop_forward(KernelCtx& ctx) {
   if (expected != ctx.out.len)
     throw std::logic_error("structured output size mismatch");
   if (!s.no_replay) s.building = std::make_unique<Stream>();
-  if (s.frame_mode) s.frames = std::make_unique<FrameTape>();
   Execution e{p, s, ctx};
   double* initial = s.arena.allocate(p.initial_size);
   std::fill_n(initial, p.initial_size, 0.0);
@@ -3404,44 +2950,6 @@ void structured_loop_forward(KernelCtx& ctx) {
   for (auto& c : s.ctx) c.eval_state = ctx.eval_state;
 
   e.forward(p.root);
-  if (s.frames) {
-    if (s.diagnostics) {
-      size_t spans = 0, published = 0, indices = 0, index_prepared = 0,
-             iterators = 0, branches = 0;
-      for (const auto& program : e.recording) {
-        if (!program) continue;
-        for (const auto& instruction : program->code) {
-          const bool data =
-              instruction.kind == RecordingProgram::DataKernel ||
-              instruction.kind == RecordingProgram::DataIndex ||
-              instruction.kind == RecordingProgram::DataBranchFresh ||
-              instruction.kind == RecordingProgram::DataBranch;
-          spans += data;
-          const bool branch =
-              instruction.kind == RecordingProgram::DataBranch ||
-              instruction.kind == RecordingProgram::DataBranchFresh;
-          branches += branch;
-          published += branch ? instruction.kind == RecordingProgram::DataBranch
-                              : data && instruction.jump != 0;
-          iterators += instruction.kind == RecordingProgram::DataForNext;
-          indices += instruction.kind == RecordingProgram::DataIndex;
-          index_prepared += instruction.kind == RecordingProgram::DataIndex &&
-                            instruction.jump != 0;
-        }
-      }
-      emit_diagnostic("stanli_structured recording_proofs: data_kernels=" +
-                      std::to_string(spans) +
-                      " data_published=" + std::to_string(published) +
-                      " index_sites=" + std::to_string(indices) +
-                      " index_prepared=" + std::to_string(index_prepared) +
-                      " data_iterators=" + std::to_string(iterators) +
-                      " data_branches=" + std::to_string(branches));
-    }
-    finish_frames(s, ctx);
-    s.reverse_ready = true;
-    s.frame_clone_ready = true;
-    return;
-  }
   int64_t pos = 0;
   for (int slot : p.outputs) {
     std::copy_n(e.value(slot), p.body.slots[slot].len, ctx.out.data + pos);
@@ -3517,12 +3025,6 @@ void structured_loop_backward(KernelCtx& ctx) {
     throw std::logic_error(
         "structured reverse has no successful forward state");
   s.reverse_ready = false;
-  s.frame_clone_ready = false;
-  if (s.frames && s.frames->ready) {
-    frames_backward(s, ctx);
-    s.frame_clone_ready = true;
-    return;
-  }
   if (s.last_replayed) {
     replay_backward(s, ctx);
     return;
