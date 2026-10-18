@@ -19,6 +19,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 import test_corpus_bench as existing
+from benchmark_artifact_fixture import artifact_fixture, write_artifacts
 from harnesses import corpus_bench
 from harnesses.corpus_bench import CmdstanCache, Runner, cache_context, cmdstan_build, prebuild
 
@@ -515,6 +516,89 @@ class MainWiringTests(unittest.TestCase):
         self.assertEqual([m[0] for m in self.measured], ["b"])
         phases = {call["phase"].split("/")[0] for call in self.runners[1].calls}
         self.assertEqual(phases, {"b"})
+
+
+def mark_cached(record, run_id="older-run"):
+    for key in ("cmdstan_stanc", "cmdstan_build"):
+        record["setup"][key].update(cached=True, cache_key="k" * 64, cache_run_id=run_id)
+
+
+class CachedSetupCatalogTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = pathlib.Path(self.temp.name)
+        self.paths = (root / "summary.tsv", root / "records.json.gz", root / "manifest.json")
+        self.manifest, self.records, self.rows = artifact_fixture()
+
+    def render(self):
+        from tools.corpus_table import render_catalog
+        write_artifacts(*self.paths, self.rows, self.records, self.manifest)
+        return render_catalog(*self.paths)
+
+    def test_cached_setup_events_are_accepted_and_the_intro_says_so(self):
+        mark_cached(self.records[0])
+        rendered = self.render()
+        intro = rendered.split("| Model")[0]
+        self.assertIn("CmdStan stanc and build times for 1 of 2 models were reused from the build cache", intro)
+        self.assertIn("1.42x", rendered)
+        self.assertIn("| 0.121 | 2.2 |", rendered)
+
+    def test_intro_is_unchanged_when_nothing_was_reused(self):
+        self.assertNotIn("build cache", self.render())
+
+    def test_malformed_cached_events_are_rejected(self):
+        changes = {"not true": dict(cached="yes"), "no key": dict(cache_key=""),
+                   "no builder": dict(cache_run_id=None)}
+        for label, change in changes.items():
+            self.records[0]["setup"] = artifact_fixture()[1][0]["setup"]
+            mark_cached(self.records[0])
+            self.records[0]["setup"]["cmdstan_build"].update(change)
+            with self.subTest(label=label), self.assertRaisesRegex(ValueError, "Invalid setup event"):
+                self.render()
+
+    def test_stanli_compile_is_never_reused(self):
+        mark_cached(self.records[0])
+        self.records[0]["setup"]["stanli_compile"].update(cached=True, cache_key="k", cache_run_id="r")
+        with self.assertRaisesRegex(ValueError, "Invalid setup event"):
+            self.render()
+
+    def test_failed_event_cannot_be_cached(self):
+        mark_cached(self.records[0])
+        self.records[0]["setup"]["cmdstan_build"]["status"] = "failed"
+        self.records[0]["row"]["cmdstan_build_s"] = ""
+        self.rows[0]["cmdstan_build_s"] = ""
+        with self.assertRaisesRegex(ValueError, "Invalid setup event"):
+            self.render()
+
+    def test_published_warm_run_keeps_the_cached_evidence_and_the_sentence(self):
+        from tools.publish_corpus_bench import publish
+        mark_cached(self.records[0])
+        summary = pathlib.Path(self.temp.name) / "warm.tsv"
+        run = pathlib.Path(str(summary) + ".run")
+        run.mkdir()
+        write_artifacts(summary, pathlib.Path(self.temp.name) / "unused.gz", run / "manifest.json",
+                        self.rows, self.records, self.manifest)
+        for record in self.records:
+            (run / f"{record['model']}.result.json").write_text(json.dumps(record))
+        (run / "events.jsonl").write_text("")
+        with contextlib.redirect_stdout(io.StringIO()):
+            publish(summary, pathlib.Path(self.temp.name) / "published")
+        readme = (pathlib.Path(self.temp.name) / "published/README.md").read_text()
+        self.assertIn("1 of 2 models were reused from the build cache", readme)
+        import gzip
+        published = json.loads(gzip.open(pathlib.Path(self.temp.name) / "published/model-results.json.gz", "rt").read())
+        good = next(record for record in published if record["model"] == "good")
+        self.assertTrue(good["setup"]["cmdstan_build"]["cached"])
+
+
+class CachedSetupVectorizedTests(existing.VectorizedFixture):
+    def test_intro_counts_models_whose_reused_cmdstan_build_came_from_the_cache(self):
+        self.assertNotIn("build cache", self.render())
+        mark_cached(self.sources["old"][1][0])
+        intro = self.render().split("| Model")[0]
+        self.assertIn("CmdStan stanc and build times for 1 of 2 models were reused from the build cache "
+                      "and not remeasured in the runs that report them.", intro)
 
 
 class CacheKeyTests(unittest.TestCase):
