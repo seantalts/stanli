@@ -41,6 +41,10 @@ static bool g_packet_math = [] {
 bool packet_math() { return g_packet_math; }
 void set_packet_math(bool on) { g_packet_math = on; }
 
+static bool g_fixed_small_matrices = true;
+bool fixed_small_matrices() { return g_fixed_small_matrices; }
+void set_fixed_small_matrices(bool on) { g_fixed_small_matrices = on; }
+
 // Set only for the duration of Executor::forward_value_only(). Kernels
 // that read it must still write ctx.out; all they may skip is work whose
 // only consumer is their own backward.
