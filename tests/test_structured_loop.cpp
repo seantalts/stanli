@@ -3357,8 +3357,7 @@ static void direct_index_lowering_tests() {
     }
   }
   check(in_place > 0, "lowered indexed assignment is fused in place");
-  check(direct_reads > 0,
-        "structured model exposes direct-index read sites");
+  check(direct_reads > 0, "structured model exposes direct-index read sites");
   check(direct_multi_selector,
         "fixed-capacity multi-index binds a direct data operand");
   check(direct_updates > 0,
@@ -3646,8 +3645,7 @@ static void runtime_index_tests() {
     }
     for (size_t i = 0; i < ga.size(); ++i)
       if (!near(ga[i], gb[i])) {
-        std::printf("  %s g%zu: %.17g != %.17g\n", names[op], i, ga[i],
-                    gb[i]);
+        std::printf("  %s g%zu: %.17g != %.17g\n", names[op], i, ga[i], gb[i]);
         check(false, "runtime index gradient");
       }
     close(written_s(loop, point), written_s(flat, point),
