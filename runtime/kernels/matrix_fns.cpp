@@ -849,22 +849,30 @@ void mnprec_bwd(KernelCtx& ctx) { mn_eval<true, kMnPrec>(ctx); }
 // rebuilding an AoS var matrix and nested tape in both sweeps. The equality
 // checks here are deliberately strict: every other activity, propto, and
 // vectorized shape stays on mn_eval's generic replay.
-inline bool mnc_native_variant(uint8_t variant, const int* idata,
-                               int64_t n_idata) {
-  return variant == 0x84u && idata != nullptr && idata[0] >= 0 &&
-         ((n_idata == 2 && idata[1] == 1) ||
-          (n_idata == 3 && idata[1] == -1 && idata[2] == -1));
+enum MncPath { kMncGeneric, kMncLegacy, kMncSmall };
+
+inline MncPath mnc_path(uint8_t variant, const int* idata, int64_t n_idata,
+                        int64_t n_in, int64_t len_y, int64_t len_mu,
+                        int64_t len_l, int64_t len_out) {
+  if (idata == nullptr || idata[0] < 0 || n_in != 3 || len_out != 1 ||
+      !((n_idata == 2 && idata[1] == 1) ||
+        (n_idata == 3 && idata[1] == -1 && idata[2] == -1)))
+    return kMncGeneric;
+  const int64_t n = idata[0];
+  if (len_y != n || len_mu != n || len_l != n * n) return kMncGeneric;
+  const unsigned mask = variant == 0 ? 7u : (variant & 7u);
+  if (n >= 1 && n <= 2 && mask != 0) return kMncSmall;
+  return variant == 0x84u ? kMncLegacy : kMncGeneric;
 }
 
-bool mnc_native_shape(const KernelCtx& ctx) {
-  if (!mnc_native_variant(ctx.variant, ctx.idata, ctx.n_idata) ||
-      ctx.n_in != 3 || ctx.out.len != 1)
-    return false;
-  const int64_t n = ctx.idata[0];
-  return ctx.in[0].len == n && ctx.in[1].len == n && ctx.in[2].len == n * n;
+MncPath mnc_path(const KernelCtx& ctx) {
+  return mnc_path(ctx.variant, ctx.idata, ctx.n_idata, ctx.n_in,
+                  ctx.n_in == 3 ? ctx.in[0].len : -1,
+                  ctx.n_in == 3 ? ctx.in[1].len : -1,
+                  ctx.n_in == 3 ? ctx.in[2].len : -1, ctx.out.len);
 }
 
-double mnc_native_fwd(KernelCtx& ctx) {
+double mnc_legacy_fwd(KernelCtx& ctx) {
   static constexpr const char* function = "multi_normal_cholesky_lpdf";
   const int64_t n = ctx.idata[0];
   CMapV y(ctx.in[0].data, n), mu(ctx.in[1].data, n);
@@ -905,12 +913,81 @@ double mnc_native_fwd(KernelCtx& ctx) {
   return logp;
 }
 
+template <int N>
+double mnc_small_fwd(KernelCtx& ctx) {
+  static constexpr const char* function = "multi_normal_cholesky_lpdf";
+  const int64_t n = ctx.idata[0];
+  const unsigned mask = ctx.variant == 0 ? 7u : (ctx.variant & 7u);
+  const bool propto = (ctx.variant & 0x80u) != 0;
+  const bool record = !values_only();
+  const FixM<N, 1> y = FixCMap<N, 1>(ctx.in[0].data, n, 1);
+  const FixM<N, 1> mu = FixCMap<N, 1>(ctx.in[1].data, n, 1);
+  const FixM<N, N> L = FixCMap<N, N>(ctx.in[2].data, n, n);
+  stan::math::check_size_match(function, "Size of random variable", y.size(),
+                               "size of location parameter", mu.size());
+  stan::math::check_size_match(function, "Size of random variable", y.size(),
+                               "rows of covariance parameter", L.rows());
+  stan::math::check_size_match(function, "Size of random variable", y.size(),
+                               "columns of covariance parameter", L.cols());
+  stan::math::check_finite(function, "Location parameter", mu);
+  stan::math::check_not_nan(function, "Random variable", y);
+
+  double logp = 0.0;
+  if (!propto) logp += stan::math::NEG_LOG_SQRT_TWO_PI * n;
+  const FixM<N, 1> y_minus_mu = y - mu;
+  Eigen::Matrix<double, 1, N> half;
+  FixM<N, 1> scaled_diff;
+  FixM<N, N> l_partial;
+  if (!(mask & 4u)) {
+    const MatD l_dyn = L;
+    const VecD diff_dyn = y_minus_mu;
+    const Eigen::RowVectorXd half_dyn =
+        stan::math::mdivide_left_tri<Eigen::Lower>(l_dyn, diff_dyn).transpose();
+    if (record)
+      scaled_diff = stan::math::mdivide_right_tri<Eigen::Lower>(half_dyn, l_dyn)
+                        .transpose();
+    if (!propto) logp -= stan::math::sum(stan::math::log(l_dyn.diagonal()));
+    half = half_dyn;
+  } else {
+    const FixM<N, N> inv_L = stan::math::mdivide_left_tri<Eigen::Lower>(L);
+    half = (inv_L.template triangularView<Eigen::Lower>() * y_minus_mu)
+               .transpose();
+    if (record) {
+      scaled_diff =
+          (half * inv_L.template triangularView<Eigen::Lower>()).transpose();
+      l_partial = scaled_diff * half - inv_L.transpose();
+    }
+    logp += stan::math::sum(stan::math::log(inv_L.diagonal()));
+  }
+  logp -= 0.5 * stan::math::sum(stan::math::dot_self(half));
+  if (record) {
+    FixMap<N, 1> py(ctx.scratch, n, 1), pmu(ctx.scratch + n, n, 1);
+    FixMap<N, N> pl(ctx.scratch + 2 * n, n, n);
+    py.setZero();
+    pmu.setZero();
+    pl.setZero();
+    if (mask & 1u) py -= scaled_diff;
+    if (mask & 2u) pmu += scaled_diff;
+    if (mask & 4u) pl += l_partial;
+  }
+  return logp;
+}
+
 void mnc_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = mnc_native_shape(ctx) ? mnc_native_fwd(ctx)
-                                          : mn_eval<false, kMnChol>(ctx);
+  switch (mnc_path(ctx)) {
+    case kMncSmall:
+      ctx.out.data[0] =
+          ctx.idata[0] == 1 ? mnc_small_fwd<1>(ctx) : mnc_small_fwd<2>(ctx);
+      return;
+    case kMncLegacy:
+      ctx.out.data[0] = mnc_legacy_fwd(ctx);
+      return;
+    default:
+      ctx.out.data[0] = mn_eval<false, kMnChol>(ctx);
+  }
 }
 void mnc_bwd(KernelCtx& ctx) {
-  if (!mnc_native_shape(ctx)) {
+  if (mnc_path(ctx) != kMncLegacy) {
     tail_density_bwd<3>(ctx);
     return;
   }
@@ -920,19 +997,15 @@ void mnc_bwd(KernelCtx& ctx) {
     ctx.in_adj[2].data[i] += ctx.out_adj * ctx.scratch[i];
 }
 
-// Everything that misses the native gate replays through mn_eval, which
-// stashes one partial per input element instead of the pullback's n*n.
 int64_t mnc_scratch(const Op& op, const Slot* slots) {
   if (op.n_in != 3 || op.out < 0 || slots == nullptr || op.in[0] < 0 ||
       op.in[1] < 0 || op.in[2] < 0)
     return 0;
-  if (!mnc_native_variant(op.variant, op.idata, op.n_idata))
-    return tail_density_scratch<3>(op, slots);
-  const int64_t n = op.idata[0];
-  if (slots[op.in[0]].len != n || slots[op.in[1]].len != n ||
-      slots[op.in[2]].len != n * n || slots[op.out].len != 1)
-    return tail_density_scratch<3>(op, slots);
-  return n * n;
+  if (mnc_path(op.variant, op.idata, op.n_idata, op.n_in, slots[op.in[0]].len,
+               slots[op.in[1]].len, slots[op.in[2]].len,
+               slots[op.out].len) == kMncLegacy)
+    return op.idata[0] * op.idata[0];
+  return tail_density_scratch<3>(op, slots);
 }
 
 // ---- general matrix product: out = A * B ----------------------------------
