@@ -996,40 +996,6 @@ and reversing only those blocks. Back edges, malformed jump targets,
 unsupported derivatives, and paths that can read an uninitialized register
 retain the autodiff replay.
 
-### Shared three-lane softmax (`program_softmax.cpp`, disable: `STANLI_NO_ISLAND_SOFTMAX3=1`)
-
-Some admitted native-adjoint islands contain thousands of identical
-three-element softmax instructions. The ordinary register-program interpreter
-handles each one with its general dynamic-length instruction. After compaction,
-adjoint generation, and the island cost decision have all succeeded, a second
-double-only program can replace those instructions with one allocation-free
-fixed-size helper. The generated backward and the canonical program do not
-change.
-
-The specialization is deliberately narrow. It requires at least 32 matching
-instructions and refuses when the estimated cloned-program payload exceeds the
-lesser of 2 MiB or 4 KiB per match. The canonical `IslandProg` remains the
-replay and correctness oracle; a derived payload owns an immutable optimized
-clone, and only the bound double forward selects it. Ordinary islands retain
-their original object layout and kernel-table path.
-
-The helper is encoded as a private `Program::CALL` using the otherwise-invalid
-`OP_NONE_` table slot and a reserved variant. The slot is registered only after
-an island passes every admission check, and specialization is refused if it
-ever acquires another kernel. Both graph carving and executor binding reject
-`OP_NONE_` explicitly, so registering the private program helper cannot make a
-malformed graph opcode callable. The helper fully materializes its aligned
-three-element result before writing the output, preserving the general
-softmax's aliasing and exceptional-value behavior.
-
-On the exact-main Release A/B used for admission, `iohmm_reg` measured 0.9597x
-baseline time (4.03% faster). Across 119 measurable corpus models the geometric
-mean ratio was 1.00006 and p95 was 1.0093. A longer 64-round control measurement
-found `hmm_drive_0` at 1.0224x, with a 95% upper bound of 1.0274; that island
-does not activate the specialization, so this is a whole-binary layout effect
-rather than a bad activation decision. It is retained as the explicit worst
-admitted regression against the 3% gate.
-
 ### Register-program compaction (`program.cpp`, disable: `STANLI_NO_ISLAND_COMPACT=1`)
 
 A region's instruction list arrives full of the MIR's declaration
@@ -1408,6 +1374,16 @@ islands stay off: write_array has no target reduction to feed them.
 `DataMap` is under 5%). A SAX walk would save at most half of that on the one
 corpus model with data this size and costs a second numeric parser, so the
 DOM parse stays.
+
+## Removed after measuring flat
+
+Two earlier optimizations were deleted in October 2026 because a paired
+timing of the 340-model corpus found no gain. A fixed-size three-lane softmax
+inside islands gave a geometric-mean speedup of 1.002x, and `iohmm_reg` was
+4% slower without it (327 us against 340 us). Emitting reroll's vector
+kernels directly for a terminal scalar loop, without expanding its iterations,
+gave 1.0003x on gradients, and total corpus preparation time was 9.31 s with
+it and 9.36 s without. Accuracy replay was unchanged by either.
 
 ## How we check all of this
 
