@@ -40,6 +40,24 @@ git -C math apply <<'EOF'
            accumulate_adjoints(NV_DATA_S(qBdot), args...);
 EOF
 
+# grad() reloads the thread-local stack pointer after every virtual chain()
+# call. In a Linux shared library each reload is a TLS lookup. Load it once.
+git -C math apply <<'EOF'
+--- a/stan/math/rev/core/grad.hpp
++++ b/stan/math/rev/core/grad.hpp
+@@ -26,8 +26,9 @@ namespace math {
+ static inline void grad() {
+   size_t end = ChainableStack::instance_->var_stack_.size();
+   size_t beginning = empty_nested() ? 0 : end - nested_size();
++  auto* const stack = ChainableStack::instance_;
+   for (size_t i = end; i-- > beginning;) {
+-    ChainableStack::instance_->var_stack_[i]->chain();
++    stack->var_stack_[i]->chain();
+   }
+ }
+
+EOF
+
 # Do not fetch stanc3's moving `nightly` release here. It is replaced in
 # place, so its URL cannot identify the compiler bytes a release used.
 # tools/dev_setup.sh builds the native compiler from STANC3_SRC_SHA when a

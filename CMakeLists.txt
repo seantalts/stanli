@@ -192,6 +192,15 @@ endif()
 # 223.0 -- noise in both directions. Against that, 8 chains on 8 threads
 # is 5.9x, and the output is byte-identical to the sequential run.
 #
+# Those numbers are for executables. A Linux x86-64 shared library, which
+# R and Python load, defaults to global-dynamic TLS: every access calls
+# __tls_get_addr. That made the brms DDM-4 gradient 1.3x slower than a
+# build without threads. TLS descriptors (-mtls-dialect=gnu2) resolve to a
+# constant offset when the library gets static TLS and fall back to the
+# general path when it does not, so loading never fails. With them the
+# library matches the build without threads. aarch64 uses descriptors
+# already.
+#
 # Off under Emscripten: wasm threads need -pthread and a
 # cross-origin-isolated page, and the browser build runs one chain per
 # worker instead.
@@ -200,6 +209,13 @@ option(STANLI_THREADS
   ON)
 if(STANLI_THREADS AND NOT EMSCRIPTEN)
   target_compile_definitions(stanmath INTERFACE STAN_THREADS=1)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag(-mtls-dialect=gnu2 STANLI_HAVE_TLSDESC)
+    if(STANLI_HAVE_TLSDESC)
+      target_compile_options(stanmath INTERFACE -mtls-dialect=gnu2)
+    endif()
+  endif()
 endif()
 
 if(EMSCRIPTEN)
@@ -951,6 +967,11 @@ target_compile_definitions(test_csv_writer PRIVATE FMT_HEADER_ONLY)
 add_test(NAME test_csv_writer COMMAND test_csv_writer)
 add_test(NAME test_dev_setup
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dev_setup.py)
+if(STANLI_HAVE_TLSDESC)
+  add_test(NAME test_shared_tlsdesc
+           COMMAND sh -c "readelf -rW \"$1\" | grep -q R_X86_64_TLSDESC"
+                   sh $<TARGET_FILE:stanli_shared>)
+endif()
 add_test(NAME test_check_precompiled_mir
          COMMAND stanli_check tests/fixtures/ar1.stan tests/fixtures/ar1.json
                  --mir tests/fixtures/ar1.tmir.sexp
