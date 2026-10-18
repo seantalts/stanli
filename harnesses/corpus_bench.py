@@ -7,8 +7,9 @@ is a fixed-work proxy, not measured HMC or sampling time.
 A sibling fresh.tsv.run directory holds the frozen manifest and raw evidence.
 --resume requires identical inputs, binaries and settings. Historical TSVs are
 never appended to, and candidate-only refreshes cannot create paired results.
-CmdStan builds run in parallel (--build-jobs) before any timing and are reused
-across runs from --build-cache; --no-build-cache builds inside the run directory.
+CmdStan builds finish before any timing: stanc and make run one at a time, gradient
+drivers in parallel (--build-jobs). Builds are reused across runs from --build-cache;
+--no-build-cache builds inside the run directory.
 """
 import argparse
 import csv
@@ -321,36 +322,6 @@ class CmdstanCache:
         return cache_key(self.context, sha(stan))
 
 
-def run_cmdstan_build(name, directory, stem, runner, args):
-    """stanc, the gradient driver, then the ordinary make target, one after another."""
-    cmdstan = args.cmdstan.resolve()
-    build = dict(setup={}, gradient=None, executable=None, gradient_failure=None, build_failure=None)
-    phase = f"{name}/stanc-cpp"
-    event = build["setup"]["cmdstan_stanc"] = runner.run(
-        phase, [args.stanc, f"{stem}.stan", f"--o={stem}.hpp", *shlex.split(args.stancflags)],
-        args.build_timeout, directory)
-    if event["status"] != "ok":
-        build["gradient_failure"] = failure_note(phase, event)
-        return build
-    phase = f"{name}/gradient-driver-build"
-    event = runner.run(phase, driver_command(cmdstan, f"{stem}.hpp",
-                                             REPO / "tools/bench_cmdstan_grad.cpp", "gradbench"),
-                       args.build_timeout, directory)
-    build["driver_build_s"] = event["elapsed_s"]
-    if event["status"] == "ok":
-        build["gradient"] = directory / "gradbench"
-    else:
-        build["gradient_failure"] = failure_note(phase, event)
-    phase = f"{name}/cmdstan-build"
-    event = build["setup"]["cmdstan_build"] = runner.run(
-        phase, make_command(directory / stem, args.stanc, args.stancflags), args.build_timeout, cmdstan)
-    if event["status"] == "ok":
-        build["executable"] = directory / stem
-    else:
-        build["build_failure"] = failure_note(phase, event)
-    return build
-
-
 def cached_build(name, key, meta, cache):
     reused = dict(status="ok", returncode=0, cached=True, cache_key=key, cache_run_id=meta["run_id"])
     entry = cache.store.entry(key)
@@ -362,48 +333,123 @@ def cached_build(name, key, meta, cache):
         cache=dict(directory=str(cache.store.root), key=key, hit=True, run_id=meta["run_id"]))
 
 
+class CmdstanJob:
+    """One model's CmdStan build in stages, so a caller can serialize the timed ones."""
+    def __init__(self, name, stan, work, cache=None):
+        self.name, self.stan, self.work, self.cache = name, stan, work, cache
+        self.scratch = None
+        work.mkdir(parents=True, exist_ok=True)
+        if cache is None:
+            self.directory, self.stem = work, name
+            self.build = dict(setup={}, gradient=None, executable=None, gradient_failure=None,
+                              build_failure=None, cache=dict(directory=None, hit=False))
+            (work / f"{name}.stan").write_bytes(stan.read_bytes())
+            return
+        self.key = cache.key(stan)
+        meta = cache.store.lookup(self.key)
+        if meta is not None:
+            self.build = cached_build(name, self.key, meta, cache)
+            return
+        self.scratch = self.directory = cache.store.scratch(self.key)
+        self.stem = CACHE_STEM
+        self.build = dict(setup={}, gradient=None, executable=None, gradient_failure=None,
+                          build_failure=None, cache=dict(directory=str(cache.store.root),
+                                                         key=self.key, hit=False))
+        (self.directory / f"{CACHE_STEM}.stan").write_bytes(stan.read_bytes())
+
+    @property
+    def hit(self):
+        return self.build["cache"]["hit"]
+
+    def stanc(self, runner, args):
+        phase = f"{self.name}/stanc-cpp"
+        event = self.build["setup"]["cmdstan_stanc"] = runner.run(
+            phase, [args.stanc, f"{self.stem}.stan", f"--o={self.stem}.hpp", *shlex.split(args.stancflags)],
+            args.build_timeout, self.directory)
+        if event["status"] != "ok":
+            self.build["gradient_failure"] = failure_note(phase, event)
+
+    def header_ready(self):
+        return self.build["setup"].get("cmdstan_stanc", {}).get("status") == "ok"
+
+    def driver(self, runner, args):
+        phase = f"{self.name}/gradient-driver-build"
+        event = runner.run(phase, driver_command(args.cmdstan.resolve(), f"{self.stem}.hpp",
+                                                 REPO / "tools/bench_cmdstan_grad.cpp", "gradbench"),
+                           args.build_timeout, self.directory)
+        self.build["driver_build_s"] = event["elapsed_s"]
+        if event["status"] == "ok":
+            self.build["gradient"] = self.directory / "gradbench"
+        else:
+            self.build["gradient_failure"] = failure_note(phase, event)
+
+    def make(self, runner, args):
+        phase = f"{self.name}/cmdstan-build"
+        executable = self.directory / self.stem
+        event = self.build["setup"]["cmdstan_build"] = runner.run(
+            phase, make_command(executable, args.stanc, args.stancflags), args.build_timeout,
+            args.cmdstan.resolve())
+        if event["status"] == "ok":
+            self.build["executable"] = executable
+        else:
+            self.build["build_failure"] = failure_note(phase, event)
+
+    def finish(self):
+        """Publish a complete build into the cache; keep an incomplete one in the run."""
+        build = self.build
+        if self.scratch is None:
+            return build
+        store, scratch = self.cache.store, self.scratch
+        try:
+            if build["gradient_failure"] or build["build_failure"]:
+                kept = self.work / "cmdstan-build"
+                shutil.rmtree(kept, ignore_errors=True)
+                shutil.move(str(scratch), kept)
+                for field in ("gradient", "executable"):
+                    if build[field]:
+                        build[field] = kept / build[field].name
+                return build
+            setup = build["setup"]
+            files = [f"{CACHE_STEM}.stan", f"{CACHE_STEM}.hpp", "gradbench", CACHE_STEM]
+            meta = dict(files=files, run_id=self.cache.run_id, key=self.key,
+                        created_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        stanc_s=setup["cmdstan_stanc"]["elapsed_s"], build_s=setup["cmdstan_build"]["elapsed_s"],
+                        driver_build_s=build["driver_build_s"],
+                        driver_sha256=sha(scratch / "gradbench"), executable_sha256=sha(scratch / CACHE_STEM))
+            if not store.commit(scratch, self.key, meta):
+                build["cache"]["raced"] = True
+            entry = store.entry(self.key)
+            build["gradient"], build["executable"] = entry / "gradbench", entry / CACHE_STEM
+            return build
+        finally:
+            store.discard(scratch)
+
+    def abort(self):
+        if self.scratch is not None:
+            self.cache.store.discard(self.scratch)
+
+
 def cmdstan_build(name, stan, work, runner, args, cache=None):
     """Build the CmdStan binaries for one model, or reuse the cached ones."""
-    work.mkdir(parents=True, exist_ok=True)
-    if cache is None:
-        (work / f"{name}.stan").write_bytes(stan.read_bytes())
-        build = run_cmdstan_build(name, work, name, runner, args)
-        return dict(build, cache=dict(directory=None, hit=False))
-    key = cache.key(stan)
-    meta = cache.store.lookup(key)
-    if meta is not None:
-        return cached_build(name, key, meta, cache)
-    scratch = cache.store.scratch(key)
+    job = CmdstanJob(name, stan, work, cache)
     try:
-        (scratch / f"{CACHE_STEM}.stan").write_bytes(stan.read_bytes())
-        build = run_cmdstan_build(name, scratch, CACHE_STEM, runner, args)
-        build["cache"] = dict(directory=str(cache.store.root), key=key, hit=False)
-        if build["gradient_failure"] or build["build_failure"]:
-            kept = work / "cmdstan-build"
-            shutil.rmtree(kept, ignore_errors=True)
-            shutil.move(str(scratch), kept)
-            for field in ("gradient", "executable"):
-                if build[field]:
-                    build[field] = kept / build[field].name
-            return build
-        setup = build["setup"]
-        files = [f"{CACHE_STEM}.stan", f"{CACHE_STEM}.hpp", "gradbench", CACHE_STEM]
-        meta = dict(files=files, run_id=cache.run_id, key=key,
-                    created_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    stanc_s=setup["cmdstan_stanc"]["elapsed_s"], build_s=setup["cmdstan_build"]["elapsed_s"],
-                    driver_build_s=build["driver_build_s"],
-                    driver_sha256=sha(scratch / "gradbench"), executable_sha256=sha(scratch / CACHE_STEM))
-        if not cache.store.commit(scratch, key, meta):
-            build["cache"]["raced"] = True
-        entry = cache.store.entry(key)
-        build["gradient"], build["executable"] = entry / "gradbench", entry / CACHE_STEM
-        return build
-    finally:
-        cache.store.discard(scratch)
+        if not job.hit:
+            job.stanc(runner, args)
+            if job.header_ready():
+                job.driver(runner, args)
+                job.make(runner, args)
+        return job.finish()
+    except BaseException:
+        job.abort()
+        raise
 
 
 def prebuild(inputs, directory, runner, args, cache=None):
-    """Build every CmdStan binary before any timing starts; a failure stays with its model."""
+    """Build every CmdStan binary before any timing starts; a failure stays with its model.
+
+    The stanc and make durations are published, so those commands run one at a
+    time with nothing else building. Only the unpublished gradient drivers run in parallel.
+    """
     leaders, twins, seen = [], [], set()
     for name, (stan, _) in inputs.items():
         try:
@@ -413,29 +459,56 @@ def prebuild(inputs, directory, runner, args, cache=None):
         (twins if key in seen else leaders).append(name)
         seen.add(key)
 
-    def build(name):
-        try:
-            return cmdstan_build(name, inputs[name][0], directory / name, runner, args, cache)
-        except Exception as exc:
-            return dict(setup={}, gradient=None, executable=None, build_failure=None,
-                        gradient_failure=f"{name}/cmdstan-build: error ({exc})",
-                        cache=dict(directory=str(cache.store.root) if cache else None, hit=False))
+    builds, jobs = {}, {}
 
-    builds = {}
-    with ThreadPoolExecutor(max_workers=args.build_jobs) as pool:
+    def broken(name, exc):
+        builds[name] = dict(setup={}, gradient=None, executable=None, build_failure=None,
+                            gradient_failure=f"{name}/cmdstan-build: error ({exc})",
+                            cache=dict(directory=str(cache.store.root) if cache else None, hit=False))
+
+    def guarded(name, step):
         try:
-            for wave in (leaders, twins):
-                futures = {pool.submit(build, name): name for name in wave}
-                for future in as_completed(futures):
-                    name = futures[future]
-                    builds[name] = future.result()
-                    failed = builds[name]["gradient_failure"] or builds[name]["build_failure"]
-                    print(f"{name}: cmdstan build {'failed' if failed else 'cached' if builds[name]['cache']['hit'] else 'built'}",
-                          flush=True)
-        except BaseException:
-            runner.kill_active()
-            pool.shutdown(wait=True, cancel_futures=True)
-            raise
+            step(jobs[name])
+        except Exception as exc:
+            jobs.pop(name).abort()
+            broken(name, exc)
+
+    def report(name):
+        build = builds[name]
+        failed = build["gradient_failure"] or build["build_failure"]
+        print(f"{name}: cmdstan build {'failed' if failed else 'cached' if build['cache']['hit'] else 'built'}",
+              flush=True)
+
+    pool = ThreadPoolExecutor(max_workers=args.build_jobs)
+    try:
+        for wave in (leaders, twins):
+            for name in wave:
+                try:
+                    jobs[name] = CmdstanJob(name, inputs[name][0], directory / name, cache)
+                except Exception as exc:
+                    broken(name, exc)
+            misses = [n for n in wave if n in jobs and not jobs[n].hit]
+            for name in misses:
+                guarded(name, lambda job: job.stanc(runner, args))
+            ready = [n for n in misses if n in jobs and jobs[n].header_ready()]
+            for future in as_completed([pool.submit(guarded, n, lambda job: job.driver(runner, args))
+                                        for n in ready]):
+                future.result()
+            for name in ready:
+                if name in jobs:
+                    guarded(name, lambda job: job.make(runner, args))
+            for name in wave:
+                if name in jobs:
+                    guarded(name, lambda job: builds.__setitem__(name, job.finish()))
+                report(name)
+    except BaseException:
+        pool.shutdown(wait=False, cancel_futures=True)
+        runner.kill_active()
+        for job in jobs.values():
+            job.abort()
+        raise
+    finally:
+        pool.shutdown(wait=True)
     return {name: builds[name] for name in inputs}
 
 
@@ -597,7 +670,7 @@ def main(argv=None):
     parser.add_argument("--no-build-cache", action="store_true",
                         help="build every CmdStan binary inside the run directory")
     parser.add_argument("--build-jobs", type=int, default=8,
-                        help="CmdStan builds to run at once before timing starts")
+                        help="gradient driver builds to run at once before timing starts")
     args = parser.parse_args(argv)
     if args.build_cache and args.no_build_cache:
         parser.error("--build-cache and --no-build-cache are exclusive")

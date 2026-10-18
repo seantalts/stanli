@@ -10,6 +10,7 @@ import pathlib
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -56,6 +57,7 @@ class FakeRunner:
         self.calls, self.fail, self.hooks = [], {}, {}
         self.delay, self.lock = delay, threading.Lock()
         self.running = self.peak = 0
+        self.intervals = []
 
     def kill_active(self):
         self.killed = True
@@ -69,6 +71,7 @@ class FakeRunner:
             self.calls.append(dict(phase=phase, argv=[str(a) for a in argv], cwd=cwd))
             self.running += 1
             self.peak = max(self.peak, self.running)
+        began = time.monotonic()
         if self.delay:
             threading.Event().wait(self.delay)
         status = self.fail.get(phase, "ok")
@@ -84,6 +87,7 @@ class FakeRunner:
             self.hooks[phase]()
         with self.lock:
             self.running -= 1
+            self.intervals.append((phase, began, time.monotonic()))
         return dict(id=event_id, phase=phase, argv=[str(a) for a in argv], status=status,
                     returncode=0 if status == "ok" else 1, elapsed_s=self.ELAPSED.get(step, 1.))
 
@@ -322,6 +326,27 @@ class PrebuildTests(BuildFixture):
             self.assertTrue(build["gradient"].is_file())
             self.assertEqual(build["cache"]["hit"], False)
         self.assertEqual(len(self.entries()), 5)
+
+    def test_published_setup_events_never_overlap_another_command(self):
+        self.runner = FakeRunner(delay=.03)
+        self.prebuild()
+        published = [i for i in self.runner.intervals
+                     if i[0].split("/")[-1] in ("stanc-cpp", "cmdstan-build")]
+        self.assertEqual(len(published), 10)
+        for mine in published:
+            for other in self.runner.intervals:
+                if other is not mine:
+                    self.assertTrue(other[2] <= mine[1] or other[1] >= mine[2], (mine, other))
+
+    def test_only_driver_builds_run_in_parallel_between_serial_stanc_and_make(self):
+        self.runner = FakeRunner(delay=.03)
+        self.prebuild()
+        end = lambda step: max(i[2] for i in self.runner.intervals if i[0].endswith(step))
+        start = lambda step: min(i[1] for i in self.runner.intervals if i[0].endswith(step))
+        self.assertLessEqual(end("stanc-cpp"), start("gradient-driver-build"))
+        self.assertLessEqual(end("gradient-driver-build"), start("cmdstan-build"))
+        drivers = sorted(i for i in self.runner.intervals if i[0].endswith("gradient-driver-build"))
+        self.assertTrue(any(a[2] > b[1] for a, b in zip(drivers, drivers[1:])))
 
     def test_runs_only_cmdstan_build_phases(self):
         self.prebuild()

@@ -47,9 +47,10 @@ model. Common CmdStan dependencies and precompiled headers are built in
 advance. CmdStan data loading and model initialization are not counted, and
 neither is the gradient driver's own build. Each compilation phase is timed
 once per model with normal filesystem caches, so this is not a cold-cache or
-in-process Python/R first-fit time. CmdStan builds run before any timing
-starts, up to `--build-jobs` at a time, so a build duration includes that
-contention. A model whose CmdStan inputs match an earlier build reuses that
+in-process Python/R first-fit time. CmdStan builds finish before any gradient
+timing starts. The timed stanc and make steps run one at a time with nothing
+else building; only the gradient driver builds, whose time is not published, run
+`--build-jobs` at a time. A model whose CmdStan inputs match an earlier build reuses that
 build's stanc and make durations from the [build cache](#reproduction); the
 event is marked `cached` with the run that measured it.
 
@@ -917,7 +918,7 @@ python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
 CmdStan binaries are built once and reused from a content-addressed cache,
 `$STANLI_BENCH_CACHE` or `~/.cache/stanli/corpus-bench`; `--build-cache DIR`
 overrides it and `--no-build-cache` builds inside the run directory.
-`--build-jobs N` (default 8) sets how many fresh CmdStan builds run at once.
+`--build-jobs N` (default 8) sets how many gradient driver builds run at once.
 An entry is keyed by the `.stan` bytes, the stanc binary and flags, the gradient
 driver and timer sources, the CmdStan checkout, library, compiler and
 environment identity, and the CmdStan path, so worktrees share entries. It holds
