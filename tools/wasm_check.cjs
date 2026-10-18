@@ -55,7 +55,7 @@ createStanli().then((M) => {
   const dataPtr = M.stringToNewUTF8(data);
   const errLen = 8192;
   const errPtr = M._malloc(errLen);
-  const m = M._stanli_model_new(mirPtr, dataPtr, errPtr, errLen);
+  const m = M._stanli_model_new_with_opts(mirPtr, dataPtr, 0, errPtr, errLen);
   if (!m) {
     console.log("COMPILE_FAIL " +
                 M.UTF8ToString(errPtr).split("\n")[0]);
