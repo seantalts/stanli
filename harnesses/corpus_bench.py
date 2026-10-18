@@ -537,9 +537,9 @@ def measure_model(name, stan, data, directory, manifest, runner, args, build=Non
         row["stanli_prep_s"] = statistics.median(record["preparation_s"])
     except (PhaseFailure, ValueError) as exc:
         notes.append(str(exc))
-    # An ordinary CmdStan executable is setup for the fixed-work proxy. It is
-    # built independently of gradient/preparation success and never executed,
-    # and its failure must not discard already accepted gradient measurements.
+    # An ordinary CmdStan executable is setup for the fixed-work proxy. Build
+    # it independently of gradient/preparation success, without executing it.
+    # Its failure must not discard already accepted gradient measurements.
     if record["setup"].get("cmdstan_stanc", {}).get("status") == "ok" and "cmdstan_build" in build["setup"]:
         record["setup"]["cmdstan_build"] = build["setup"]["cmdstan_build"]
         if build["build_failure"]:

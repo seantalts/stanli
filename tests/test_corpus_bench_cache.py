@@ -2,7 +2,6 @@
 """Focused tests for the corpus benchmark's CmdStan build cache and build pre-pass."""
 
 import contextlib
-import copy
 import io
 import shutil
 import json
