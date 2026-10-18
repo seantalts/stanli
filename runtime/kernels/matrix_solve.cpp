@@ -13,6 +13,18 @@ using VecD = Eigen::VectorXd;
 using MapM = Eigen::Map<MatD>;
 using CMapM = Eigen::Map<const MatD>;
 using CMapV = Eigen::Map<const VecD>;
+constexpr int kDyn = Eigen::Dynamic;
+template <int R, int C>
+using FMat = Eigen::Matrix<
+    double, R, C,
+    (R == 1 && C != 1) ? Eigen::RowMajor : (C == 1 && R != 1 ? Eigen::ColMajor : 0),
+    (R == kDyn && C != kDyn) ? 2 : R, (C == kDyn && R != kDyn) ? 2 : C>;
+template <int R, int C>
+using FMap = Eigen::Map<FMat<R, C>>;
+template <int R, int C>
+using FCMap = Eigen::Map<const FMat<R, C>>;
+template <int V>
+using IntC = std::integral_constant<int, V>;
 
 // ---- matrix solves: `A \ B` and `B / A` -----------------------------------
 // Argument order is the operator's, so in = {A, B} for the left solve and
@@ -70,17 +82,17 @@ auto solve_at(const A& a, const B& b) {
 }
 
 // The Eigen type of a dividend: a matrix, or the vector its side implies.
-template <bool Left, bool Vec, typename T>
+template <bool Left, bool Vec, typename T, int BR = kDyn, int BC = kDyn>
 using Dividend = std::conditional_t<
-    !Vec, Eigen::Matrix<T, -1, -1>,
-    std::conditional_t<Left, Eigen::Matrix<T, -1, 1>, Eigen::Matrix<T, 1, -1>>>;
+    !Vec, Eigen::Matrix<T, BR, BC>,
+    std::conditional_t<Left, Eigen::Matrix<T, BR, 1>, Eigen::Matrix<T, 1, BC>>>;
 
 // Numerical part of the pinned Matrix<var> left overloads. In particular,
 // calling the prim plain solve here would change QR to LU. Keep both the
 // dividend's Eigen shape and the vv/dv versus vd evaluation style: these
 // select different Eigen paths even when the mathematical result is equal.
-template <SolveKind Kind, bool DividendVar, typename B>
-auto solve_active_left_values(const MatD& a, const B& b,
+template <SolveKind Kind, bool DividendVar, int N = kDyn, typename B>
+auto solve_active_left_values(const FMat<N, N>& a, const B& b,
                               double* qr_scratch = nullptr) {
   using Result = typename B::PlainObject;
   if constexpr (Kind == SolveKind::Spd) {
@@ -88,8 +100,10 @@ auto solve_active_left_values(const MatD& a, const B& b,
     stan::math::check_multiplicable(function, "A", a, "b", b);
     stan::math::check_symmetric(function, "A", a);
     stan::math::check_not_nan(function, "A", a);
-    if (a.size() == 0) return Result(0, b.cols());
-    const Eigen::LLT<MatD> factor(a);
+    if constexpr (N == kDyn) {
+      if (a.size() == 0) return Result(0, b.cols());
+    }
+    const Eigen::LLT<FMat<N, N>> factor(a);
     stan::math::check_pos_definite(function, "A", factor);
     Result result;
     if constexpr (DividendVar) {
@@ -120,29 +134,32 @@ auto solve_active_left_values(const MatD& a, const B& b,
     constexpr const char* function = "mdivide_left";
     stan::math::check_square(function, "A", a);
     stan::math::check_multiplicable(function, "A", a, "B", b);
-    if (a.size() == 0) return Result(0, b.cols());
-    const Eigen::HouseholderQR<MatD> factor(a);
+    if constexpr (N == kDyn) {
+      if (a.size() == 0) return Result(0, b.cols());
+    }
+    const Eigen::HouseholderQR<FMat<N, N>> factor(a);
     if (qr_scratch) {
       // Per-execution scratch is retained and rebound by the executor. It
       // must not be shared by repeated calls at a site.
-      MapM(qr_scratch, a.rows(), a.cols()) = factor.matrixQR();
-      Eigen::Map<VecD>(qr_scratch + a.size(), a.rows()) = factor.hCoeffs();
+      FMap<N, N>(qr_scratch, a.rows(), a.cols()) = factor.matrixQR();
+      FMap<N, 1>(qr_scratch + a.size(), a.rows()) = factor.hCoeffs();
     }
     return Result(factor.solve(b));
   }
 }
 
-template <bool Left, SolveKind Kind, bool DividendVar, bool Vec>
+template <bool Left, SolveKind Kind, bool DividendVar, bool Vec, int N = kDyn,
+          int BR = kDyn, int BC = kDyn>
 void solve_active_values(KernelCtx& ctx) {
   static_assert(Left || Kind == SolveKind::Spd);
   const int64_t n = ctx.idata[0], k = ctx.idata[1];
   const int ai = Left ? 0 : 1, bi = Left ? 1 : 0;
-  const MatD a = CMapM(ctx.in[ai].data, n, n);
-  const Dividend<Left, Vec, double> b =
-      CMapM(ctx.in[bi].data, Left ? n : k, Left ? k : n);
+  const FMat<N, N> a = FCMap<N, N>(ctx.in[ai].data, n, n);
+  const Dividend<Left, Vec, double, BR, BC> b =
+      FCMap<BR, BC>(ctx.in[bi].data, Left ? n : k, Left ? k : n);
   if constexpr (Left) {
     const auto result =
-        solve_active_left_values<Kind, DividendVar>(a, b, ctx.scratch);
+        solve_active_left_values<Kind, DividendVar, N>(a, b, ctx.scratch);
     std::copy_n(result.data(), result.size(), ctx.out.data);
   } else {
     // The right-SPD wrapper checks under its own name, then invokes the
@@ -152,9 +169,9 @@ void solve_active_values(KernelCtx& ctx) {
     stan::math::check_symmetric(function, "A", a);
     stan::math::check_not_nan(function, "A", a);
     if (a.size() == 0) return;
-    const Dividend<true, Vec, double> bt = b.transpose();
-    const auto result = solve_active_left_values<Kind, DividendVar>(a, bt);
-    MapM(ctx.out.data, k, n) = result.transpose();
+    const Dividend<true, Vec, double, BC, BR> bt = b.transpose();
+    const auto result = solve_active_left_values<Kind, DividendVar, N>(a, bt);
+    FMap<BR, BC>(ctx.out.data, k, n) = result.transpose();
   }
 }
 
@@ -163,10 +180,10 @@ void solve_active_values(KernelCtx& ctx) {
 // scalar-var arithmetic. Eligible left/SPD overloads already factor doubles;
 // execute that numerical work without constructing an unused reverse tape.
 template <bool Left, SolveKind Kind, bool DivisorVar, bool DividendVar,
-          bool Vec>
+          bool Vec, int N = kDyn, int BR = kDyn, int BC = kDyn>
 void solve_var(KernelCtx& ctx) {
   if constexpr (Left || Kind == SolveKind::Spd) {
-    solve_active_values<Left, Kind, DividendVar, Vec>(ctx);
+    solve_active_values<Left, Kind, DividendVar, Vec, N, BR, BC>(ctx);
     return;
   }
   using stan::math::var;
@@ -186,50 +203,54 @@ void solve_var(KernelCtx& ctx) {
     ctx.out.data[i] = out.data()[i].val();
 }
 
-template <SolveKind Kind, Eigen::UpLoType Tri = Eigen::Lower>
-void left_adjoint(const MatD& a, const MatD& x, const MatD& g, bool divisor_var,
-                  bool dividend_var, MatD* adj_a, MatD* adj_b,
+template <SolveKind Kind, Eigen::UpLoType Tri = Eigen::Lower, int N = kDyn,
+          int K = kDyn>
+void left_adjoint(const FMat<N, N>& a, const FMat<N, K>& x,
+                  const FMat<N, K>& g, bool divisor_var, bool dividend_var,
+                  FMat<N, N>* adj_a, FMat<N, K>* adj_b,
                   const double* qr_scratch = nullptr) {
+  using Sq = FMat<N, N>;
+  using Rect = FMat<N, K>;
   if constexpr (Kind == SolveKind::Spd) {
-    const Eigen::LLT<MatD> fac(a);
+    const Eigen::LLT<Sq> fac(a);
     if (dividend_var) {
-      const MatD y = fac.solve(g);
+      const Rect y = fac.solve(g);
       if (adj_b) *adj_b += y;
       if (divisor_var) *adj_a -= y * x.transpose();
     } else if (divisor_var) {
-      *adj_a -= fac.solve(MatD(g * x.transpose()));
+      *adj_a -= fac.solve(Sq(g * x.transpose()));
     }
   } else if constexpr (Kind == SolveKind::TriLow) {
     const auto tri = a.template triangularView<Tri>();
     if (dividend_var) {
-      const MatD y = tri.transpose().solve(g);
+      const Rect y = tri.transpose().solve(g);
       if (adj_b) *adj_b += y;
       if (divisor_var) {
-        MatD full = MatD::Zero(a.rows(), a.cols());
+        Sq full = Sq::Zero(a.rows(), a.cols());
         full.template triangularView<Tri>() = -(y * x.transpose());
         *adj_a += full;
       }
     } else if (divisor_var) {
-      MatD full = MatD::Zero(a.rows(), a.cols());
+      Sq full = Sq::Zero(a.rows(), a.cols());
       full.template triangularView<Tri>() =
-          -MatD(tri.transpose().solve(MatD(g * x.transpose())));
+          -Sq(tri.transpose().solve(Sq(g * x.transpose())));
       *adj_a += full;
     }
   } else {
-    const auto solve_transpose = [&](const auto& q, const auto& qr) -> MatD {
+    const auto solve_transpose = [&](const auto& q, const auto& qr) -> Rect {
       return q *
-             MatD(qr.template triangularView<Eigen::Upper>().transpose().solve(
+             Rect(qr.template triangularView<Eigen::Upper>().transpose().solve(
                  g));
     };
-    MatD y;
+    Rect y;
     if (qr_scratch) {
-      const MatD qr = CMapM(qr_scratch, a.rows(), a.cols());
-      const VecD coefficients = CMapV(qr_scratch + a.size(), a.rows());
+      const Sq qr = FCMap<N, N>(qr_scratch, a.rows(), a.cols());
+      const FMat<N, 1> coefficients = FCMap<N, 1>(qr_scratch + a.size(), a.rows());
       y = solve_transpose(Eigen::householderSequence(qr, coefficients), qr);
     } else {
       // Right plain solves and direct kernel callers without scratch keep
       // the established recomputation path.
-      const Eigen::HouseholderQR<MatD> qr(a);
+      const Eigen::HouseholderQR<Sq> qr(a);
       y = solve_transpose(qr.householderQ(), qr.matrixQR());
     }
     if (dividend_var && adj_b) *adj_b += y;
@@ -237,15 +258,15 @@ void left_adjoint(const MatD& a, const MatD& x, const MatD& g, bool divisor_var,
   }
 }
 
-template <SolveKind Kind>
-void right_adjoint(const MatD& a, const MatD& x, const MatD& g,
-                   bool divisor_var, bool dividend_var, MatD* adj_a,
-                   MatD* adj_b) {
+template <SolveKind Kind, int N = kDyn, int K = kDyn>
+void right_adjoint(const FMat<N, N>& a, const FMat<K, N>& x,
+                   const FMat<K, N>& g, bool divisor_var, bool dividend_var,
+                   FMat<N, N>* adj_a, FMat<K, N>* adj_b) {
   constexpr Eigen::UpLoType kFlipped =
       Kind == SolveKind::TriLow ? Eigen::Upper : Eigen::Lower;
-  MatD adj_a_t = MatD::Zero(a.cols(), a.rows());
-  MatD adj_b_t = MatD::Zero(x.cols(), x.rows());
-  left_adjoint<Kind, kFlipped>(
+  FMat<N, N> adj_a_t = FMat<N, N>::Zero(a.cols(), a.rows());
+  FMat<N, K> adj_b_t = FMat<N, K>::Zero(x.cols(), x.rows());
+  left_adjoint<Kind, kFlipped, N, K>(
       a.transpose(), x.transpose(), g.transpose(), divisor_var, dividend_var,
       divisor_var ? &adj_a_t : nullptr, dividend_var ? &adj_b_t : nullptr);
   if (divisor_var) {
@@ -270,6 +291,25 @@ void solve_double(KernelCtx& ctx) {
   for (Eigen::Index i = 0; i < out.size(); ++i) ctx.out.data[i] = out.data()[i];
 }
 
+template <bool Left, SolveKind Kind, bool DV, bool DD, bool Vec>
+void solve_var_sized(KernelCtx& ctx) {
+  if constexpr (Kind != SolveKind::TriLow && (Left || Kind == SolveKind::Spd)) {
+    const int64_t n = ctx.idata[0], k = ctx.idata[1];
+    if constexpr (Vec) {
+      if (n == 2 && k == 1) {
+        if constexpr (Left)
+          return solve_var<Left, Kind, DV, DD, Vec, 2, 2, 1>(ctx);
+        else
+          return solve_var<Left, Kind, DV, DD, Vec, 2, 1, 2>(ctx);
+      }
+    } else {
+      if (n == 2 && k == 2)
+        return solve_var<Left, Kind, DV, DD, Vec, 2, 2, 2>(ctx);
+    }
+  }
+  solve_var<Left, Kind, DV, DD, Vec>(ctx);
+}
+
 template <bool Left, SolveKind Kind = SolveKind::Plain>
 void solve_active_fwd(KernelCtx& ctx, bool vec) {
   // Bits 2 and 3 are the exact divisor/dividend scalar types. Activity 0 on
@@ -277,16 +317,16 @@ void solve_active_fwd(KernelCtx& ctx, bool vec) {
   // for an in-memory graph built by an older caller.
   switch ((ctx.variant >> 2u) & 3u) {
     case 1u:
-      vec ? solve_var<Left, Kind, true, false, true>(ctx)
-          : solve_var<Left, Kind, true, false, false>(ctx);
+      vec ? solve_var_sized<Left, Kind, true, false, true>(ctx)
+          : solve_var_sized<Left, Kind, true, false, false>(ctx);
       return;
     case 2u:
-      vec ? solve_var<Left, Kind, false, true, true>(ctx)
-          : solve_var<Left, Kind, false, true, false>(ctx);
+      vec ? solve_var_sized<Left, Kind, false, true, true>(ctx)
+          : solve_var_sized<Left, Kind, false, true, false>(ctx);
       return;
     default:
-      vec ? solve_var<Left, Kind, true, true, true>(ctx)
-          : solve_var<Left, Kind, true, true, false>(ctx);
+      vec ? solve_var_sized<Left, Kind, true, true, true>(ctx)
+          : solve_var_sized<Left, Kind, true, true, false>(ctx);
       return;
   }
 }
@@ -307,10 +347,11 @@ void solve_fwd(KernelCtx& ctx) {
   }
 }
 
-template <bool Left, SolveKind Kind = SolveKind::Plain>
-void solve_bwd(KernelCtx& ctx) {
+template <bool Left, SolveKind Kind, int N, int K>
+void solve_bwd_t(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0], k = ctx.idata[1];
   const int ai = Left ? 0 : 1, bi = Left ? 1 : 0;
+  constexpr int BR = Left ? N : K, BC = Left ? K : N;
   const int64_t br = Left ? n : k, bc = Left ? k : n;
   bool divisor_var = true, dividend_var = true;
   switch ((ctx.variant >> 2u) & 3u) {
@@ -323,25 +364,35 @@ void solve_bwd(KernelCtx& ctx) {
     default:
       break;
   }
-  const CMapM a(ctx.in[ai].data, n, n);
-  const CMapM x(ctx.out.data, br, bc);
-  const CMapM g(ctx.out_adj_vec.data, br, bc);
-  MatD adj_a = MatD::Zero(n, n);
-  MatD adj_b = MatD::Zero(br, bc);
+  const FMat<N, N> a = FCMap<N, N>(ctx.in[ai].data, n, n);
+  const FMat<BR, BC> x = FCMap<BR, BC>(ctx.out.data, br, bc);
+  const FMat<BR, BC> g = FCMap<BR, BC>(ctx.out_adj_vec.data, br, bc);
+  FMat<N, N> adj_a = FMat<N, N>::Zero(n, n);
+  FMat<BR, BC> adj_b = FMat<BR, BC>::Zero(br, bc);
   if constexpr (Left) {
-    left_adjoint<Kind>(a, x, g, divisor_var, dividend_var,
-                       divisor_var ? &adj_a : nullptr,
-                       dividend_var ? &adj_b : nullptr,
-                       (ctx.variant & 1u) && n > 0 ? ctx.scratch : nullptr);
+    left_adjoint<Kind, Eigen::Lower, N, K>(
+        a, x, g, divisor_var, dividend_var, divisor_var ? &adj_a : nullptr,
+        dividend_var ? &adj_b : nullptr,
+        (ctx.variant & 1u) && n > 0 ? ctx.scratch : nullptr);
   } else {
-    right_adjoint<Kind>(a, x, g, divisor_var, dividend_var,
-                        divisor_var ? &adj_a : nullptr,
-                        dividend_var ? &adj_b : nullptr);
+    right_adjoint<Kind, N, K>(a, x, g, divisor_var, dividend_var,
+                              divisor_var ? &adj_a : nullptr,
+                              dividend_var ? &adj_b : nullptr);
   }
   if (divisor_var && ctx.in_adj[ai].data)
-    MapM(ctx.in_adj[ai].data, n, n) += adj_a;
+    FMap<N, N>(ctx.in_adj[ai].data, n, n) += adj_a;
   if (dividend_var && ctx.in_adj[bi].data)
-    MapM(ctx.in_adj[bi].data, br, bc) += adj_b;
+    FMap<BR, BC>(ctx.in_adj[bi].data, br, bc) += adj_b;
+}
+
+template <bool Left, SolveKind Kind = SolveKind::Plain>
+void solve_bwd(KernelCtx& ctx) {
+  const int64_t n = ctx.idata[0], k = ctx.idata[1];
+  if constexpr (Kind != SolveKind::TriLow) {
+    if (n == 2 && k == 1) return solve_bwd_t<Left, Kind, 2, kDyn>(ctx);
+    if (n == 2 && k == 2) return solve_bwd_t<Left, Kind, 2, 2>(ctx);
+  }
+  solve_bwd_t<Left, Kind, kDyn, kDyn>(ctx);
 }
 
 int64_t left_solve_scratch(const Op& op, const Slot*) {
