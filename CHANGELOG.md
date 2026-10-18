@@ -6,6 +6,8 @@
 
 - Optimization now reports an error when generated quantities reject the
   mode. It used to return success and leave that output row unwritten.
+- The batched sqrt gradient keeps the sign of a zero adjoint, matching the
+  scalar form bit for bit.
 
 ### API changes
 
