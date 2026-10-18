@@ -44,10 +44,9 @@ if (!compilerOnly) {
   // handshake, and the one a hand-kept export list forgot once already.
   const res = await webR.evalR(`
     dyn.load('/tmp/libstanli.so')
-    syms <- c('stanli_abi_version', 'stanli_model_new', 'stanli_exact_lp',
-              'stanli_grad', 'stanli_sample_multi',
-              'stanli_sample_multi_progress', 'stanli_optimize',
-              'stanli_diagnose_text', 'stanli_wa_row')
+    syms <- c('stanli_abi_version', 'stanli_model_new_with_opts',
+              'stanli_exact_lp', 'stanli_grad', 'stanli_sample_multi_metric',
+              'stanli_optimize', 'stanli_diagnose_text', 'stanli_wa_row')
     syms[!vapply(syms, is.loaded, logical(1))]
   `);
   const missing = (await res.toJs()).values;

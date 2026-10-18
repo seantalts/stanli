@@ -125,10 +125,6 @@ class _ModelOpts(ctypes.Structure):
 def _load_lib():
     names = {"darwin": "libstanli.dylib", "linux": "libstanli.so"}
     lib = ctypes.CDLL(str(_BIN / names.get(sys.platform, "stanli.dll")))
-    lib.stanli_model_new_seeded.restype = ctypes.c_void_p
-    lib.stanli_model_new_seeded.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
-                                            ctypes.c_uint32, ctypes.c_char_p,
-                                            ctypes.c_size_t]
     lib.stanli_model_free.argtypes = [ctypes.c_void_p]
     lib.stanli_n_unconstrained.restype = ctypes.c_int64
     lib.stanli_n_unconstrained.argtypes = [ctypes.c_void_p]
@@ -145,54 +141,22 @@ def _load_lib():
     lib.stanli_n_constrained.argtypes = [ctypes.c_void_p]
     lib.stanli_constrained_name.restype = ctypes.c_char_p
     lib.stanli_constrained_name.argtypes = [ctypes.c_void_p, ctypes.c_int64]
-    lib.stanli_constrain.restype = ctypes.c_int
-    lib.stanli_constrain.argtypes = [ctypes.c_void_p,
-                                     ctypes.POINTER(ctypes.c_double),
-                                     ctypes.POINTER(ctypes.c_double)]
     lib.stanli_has_embedded_stanc.restype = ctypes.c_int
     lib.stanli_exact_lp.restype = ctypes.c_int
-    lib.stanli_model_new_from_stan_seeded.restype = ctypes.c_void_p
-    lib.stanli_model_new_from_stan_seeded.argtypes = [ctypes.c_char_p,
-                                                      ctypes.c_char_p,
-                                                      ctypes.c_uint32,
-                                                      ctypes.c_char_p,
-                                                      ctypes.c_size_t]
-    # Optional additive ABI: serial callers can still use an older runtime.
-    for name in ("stanli_model_new_threaded", "stanli_model_new_from_stan_threaded"):
-        fn = getattr(lib, name, None)
-        if fn is not None:
-            fn.restype = ctypes.c_void_p
-            fn.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint32,
-                           ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t]
-    for name, result in (("stanli_reduce_sum_count", ctypes.c_int),
-                         ("stanli_reduce_sum_fallbacks", ctypes.c_char_p)):
-        fn = getattr(lib, name, None)
-        if fn is not None:
-            fn.restype = result
-            fn.argtypes = [ctypes.c_void_p]
-    # c_void_p, not c_char_p: ctypes converts a c_char_p result to bytes
-    # and drops the pointer, which would leak the string stanli handed us
-    # ownership of.
-    lib.stanli_stan_to_mir.restype = ctypes.c_void_p
-    lib.stanli_stan_to_mir.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
-                                       ctypes.c_size_t]
-    if hasattr(lib, "stanli_stan_to_mir_with_includes"):
-        lib.stanli_stan_to_mir_with_includes.restype = ctypes.c_void_p
-        lib.stanli_stan_to_mir_with_includes.argtypes = [
-            ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_size_t,
-            ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_reduce_sum_count.restype = ctypes.c_int
+    lib.stanli_reduce_sum_count.argtypes = [ctypes.c_void_p]
+    lib.stanli_reduce_sum_fallbacks.restype = ctypes.c_char_p
+    lib.stanli_reduce_sum_fallbacks.argtypes = [ctypes.c_void_p]
     for name in ("stanli_model_new_with_opts", "stanli_model_new_from_stan_with_opts"):
-        fn = getattr(lib, name, None)
-        if fn is not None:
-            fn.restype = ctypes.c_void_p
-            fn.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
-                           ctypes.POINTER(_ModelOpts), ctypes.c_char_p,
-                           ctypes.c_size_t]
-    if hasattr(lib, "stanli_stan_to_mir_with_opts"):
-        lib.stanli_stan_to_mir_with_opts.restype = ctypes.c_void_p
-        lib.stanli_stan_to_mir_with_opts.argtypes = [
-            ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_size_t,
-            ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t]
+        fn = getattr(lib, name)
+        fn.restype = ctypes.c_void_p
+        fn.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
+                       ctypes.POINTER(_ModelOpts), ctypes.c_char_p,
+                       ctypes.c_size_t]
+    lib.stanli_stan_to_mir_with_opts.restype = ctypes.c_void_p
+    lib.stanli_stan_to_mir_with_opts.argtypes = [
+        ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_size_t,
+        ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_string_free.argtypes = [ctypes.c_void_p]
     lib.stanli_build_id.restype = ctypes.c_char_p
     lib.stanli_build_id.argtypes = []
@@ -204,9 +168,6 @@ def _load_lib():
     lib.stanli_warnings.argtypes = [ctypes.c_void_p]
     lib.stanli_transformed_data_rng.restype = ctypes.c_int
     lib.stanli_transformed_data_rng.argtypes = [ctypes.c_void_p]
-    lib.stanli_wa_seed.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-    lib.stanli_wa_seed_chain.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
-                                         ctypes.c_uint32]
     lib.stanli_wa_row.restype = ctypes.c_int
     lib.stanli_wa_row.argtypes = [ctypes.c_void_p,
                                   ctypes.POINTER(ctypes.c_double),
@@ -216,44 +177,16 @@ def _load_lib():
     lib.stanli_n_stored_draws.restype = ctypes.c_int64
     lib.stanli_n_stored_draws.argtypes = [ctypes.POINTER(_SampleOpts)]
     lib.stanli_thread_safe.restype = ctypes.c_int
-    lib.stanli_sample_multi.restype = ctypes.c_int
-    lib.stanli_sample_multi.argtypes = [ctypes.c_void_p,
-                                        ctypes.POINTER(_SampleOpts),
-                                        ctypes.POINTER(ctypes.c_double),
-                                        ctypes.POINTER(ctypes.c_double),
-                                        ctypes.c_char_p, ctypes.c_size_t]
-    lib.stanli_sample_multi_progress.restype = ctypes.c_int
-    lib.stanli_sample_multi_progress.argtypes = [
-        ctypes.c_void_p, ctypes.POINTER(_SampleOpts), ctypes.c_int,
-        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
-        _SampleProgressCallback, ctypes.c_void_p,
-        ctypes.POINTER(_SampleReport), ctypes.c_char_p, ctypes.c_size_t]
-    lib.stanli_sample_multi_interruptible.restype = ctypes.c_int
-    lib.stanli_sample_multi_interruptible.argtypes = [
-        ctypes.c_void_p, ctypes.POINTER(_SampleOpts), ctypes.c_int,
-        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
-        _SampleProgressCallback, ctypes.c_void_p, _SamplePollCallback,
-        ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
-        ctypes.POINTER(_SampleReport), ctypes.c_char_p, ctypes.c_size_t]
-    lib.stanli_sample_multi_write_array.restype = ctypes.c_int
-    lib.stanli_sample_multi_write_array.argtypes = [
-        ctypes.c_void_p, ctypes.POINTER(_SampleOpts), ctypes.c_int,
+    lib.stanli_metric_opts_init.argtypes = [ctypes.POINTER(_MetricOpts)]
+    lib.stanli_sample_multi_metric.restype = ctypes.c_int
+    lib.stanli_sample_multi_metric.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(_SampleOpts),
+        ctypes.POINTER(_MetricOpts), ctypes.c_int,
         ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
         ctypes.POINTER(ctypes.c_double),
         _SampleProgressCallback, ctypes.c_void_p, _SamplePollCallback,
         ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
         ctypes.POINTER(_SampleReport), ctypes.c_char_p, ctypes.c_size_t]
-    if hasattr(lib, "stanli_sample_multi_metric"):
-        lib.stanli_metric_opts_init.argtypes = [ctypes.POINTER(_MetricOpts)]
-        lib.stanli_sample_multi_metric.restype = ctypes.c_int
-        lib.stanli_sample_multi_metric.argtypes = [
-            ctypes.c_void_p, ctypes.POINTER(_SampleOpts),
-            ctypes.POINTER(_MetricOpts), ctypes.c_int,
-            ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
-            ctypes.POINTER(ctypes.c_double),
-            _SampleProgressCallback, ctypes.c_void_p, _SamplePollCallback,
-            ctypes.c_void_p, ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(_SampleReport), ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_pathfinder_inits.restype = ctypes.c_int
     lib.stanli_pathfinder_inits.argtypes = [
         ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_int,
@@ -572,8 +505,6 @@ def _check_fast_math(value):
 
 
 def _compile_stan(stan_code, include_paths, fast_math=False):
-    # Source without an include keeps the original compiler entry point, also
-    # allowing these bindings to work with older embedded runtimes.
     include_paths = include_paths if "#include" in stan_code else []
     if not _lib.stanli_has_embedded_stanc():
         if fast_math:
@@ -581,22 +512,10 @@ def _compile_stan(stan_code, include_paths, fast_math=False):
         return (_subprocess_mir(stan_code, include_paths) if include_paths
                 else _subprocess_mir(stan_code))
     err = ctypes.create_string_buffer(8192)
-    if fast_math:
-        compile_opts = getattr(_lib, "stanli_stan_to_mir_with_opts", None)
-        if compile_opts is None:
-            raise RuntimeError("fast_math requires a newer Stanli runtime")
-        paths = (ctypes.c_char_p * len(include_paths))(
-            *(path.encode("utf-8") for path in include_paths))
-        p = compile_opts(stan_code.encode(), paths, len(paths), 1, err, len(err))
-    elif include_paths:
-        compile_includes = getattr(_lib, "stanli_stan_to_mir_with_includes", None)
-        if compile_includes is None:
-            raise RuntimeError("Stan includes require a newer Stanli runtime")
-        paths = (ctypes.c_char_p * len(include_paths))(
-            *(path.encode("utf-8") for path in include_paths))
-        p = compile_includes(stan_code.encode(), paths, len(paths), err, len(err))
-    else:
-        p = _lib.stanli_stan_to_mir(stan_code.encode(), err, len(err))
+    paths = (ctypes.c_char_p * len(include_paths))(
+        *(path.encode("utf-8") for path in include_paths))
+    p = _lib.stanli_stan_to_mir_with_opts(
+        stan_code.encode(), paths, len(paths), int(fast_math), err, len(err))
     if not p:
         raise RuntimeError(err.value.decode())
     try:
@@ -1164,20 +1083,10 @@ class Model:
         else:
             text, name = (_subprocess_mir(stan_code, (), self._fast_math),
                           "stanli_model_new")
-        args = [text.encode(), data_json.encode(), seed]
-        if self._fast_math:
-            fn = getattr(_lib, name + "_with_opts", None)
-            if fn is None:
-                raise RuntimeError("fast_math requires a newer Stanli runtime")
-            args[2] = ctypes.byref(_ModelOpts(seed, threads_per_chain, 1))
-        elif threads_per_chain > 1:
-            fn = getattr(_lib, name + "_threaded", None)
-            if fn is None:
-                raise RuntimeError("threads_per_chain requires a newer Stanli runtime")
-            args.append(threads_per_chain)
-        else:
-            fn = getattr(_lib, name + "_seeded")
-        m = fn(*args, err, len(err))
+        fn = getattr(_lib, name + "_with_opts")
+        opts = _ModelOpts(seed, threads_per_chain, int(self._fast_math))
+        m = fn(text.encode(), data_json.encode(), ctypes.byref(opts), err,
+               len(err))
         if not m:
             raise RuntimeError(err.value.decode())
         return m
@@ -1195,14 +1104,12 @@ class Model:
     @property
     def reduce_sum_count(self):
         """Number of retained native parallel reductions in the prepared graph."""
-        fn = getattr(_lib, "stanli_reduce_sum_count", None)
-        return fn(self._m) if fn is not None else 0
+        return _lib.stanli_reduce_sum_count(self._m)
 
     @property
     def reduce_sum_fallbacks(self):
         """Graph-lowering refusal reasons; opaque runtime regions are not inventoried."""
-        fn = getattr(_lib, "stanli_reduce_sum_fallbacks", None)
-        return fn(self._m).decode().splitlines() if fn is not None else []
+        return _lib.stanli_reduce_sum_fallbacks(self._m).decode().splitlines()
 
     def _prepare_run(self, seed, threads_per_chain):
         construction_seed = (seed if _lib.stanli_transformed_data_rng(self._m)
@@ -1473,33 +1380,24 @@ class Model:
                     f"scale, got {init_arr.shape}")
             opts.inits = _dptr(init_arr)
 
-        metric_fn = getattr(_lib, "stanli_sample_multi_metric", None)
-        default_metric = (metric == "diag_e" and inv_metric is None
-                          and step_size is None and adapt_engaged)
-        if metric_fn is None and not default_metric:
-            raise RuntimeError(
-                "metric, inv_metric, step_size and adapt_engaged require a "
-                "newer Stanli runtime")
         metric_opts = _MetricOpts()
+        _lib.stanli_metric_opts_init(ctypes.byref(metric_opts))
+        metric_opts.metric = _METRICS.index(metric)
+        metric_opts.step_size = step_size_value
+        metric_opts.adapt_engaged = 1 if adapt_engaged else 0
         inv_metric_arr = None
-        adapted_step = None
+        if inv_metric is not None:
+            inv_metric_arr = _inv_metric_buffer(
+                inv_metric, metric, opts.chains, self.n_unconstrained)
+            metric_opts.inv_metric = _dptr(inv_metric_arr)
+        adapted_step = np.full(opts.chains, np.nan)
+        metric_opts.adapted_step_size = _dptr(adapted_step)
         adapted_inv = None
-        if metric_fn is not None:
-            _lib.stanli_metric_opts_init(ctypes.byref(metric_opts))
-            metric_opts.metric = _METRICS.index(metric)
-            metric_opts.step_size = step_size_value
-            metric_opts.adapt_engaged = 1 if adapt_engaged else 0
-            if inv_metric is not None:
-                inv_metric_arr = _inv_metric_buffer(
-                    inv_metric, metric, opts.chains, self.n_unconstrained)
-                metric_opts.inv_metric = _dptr(inv_metric_arr)
-            adapted_step = np.full(opts.chains, np.nan)
-            metric_opts.adapted_step_size = _dptr(adapted_step)
-            if metric != "unit_e":
-                width = self.n_unconstrained * (
-                    self.n_unconstrained if metric == "dense_e" else 1)
-                adapted_inv = np.full((opts.chains, width), np.nan)
-                metric_opts.adapted_inv_metric = _dptr(adapted_inv)
+        if metric != "unit_e":
+            width = self.n_unconstrained * (
+                self.n_unconstrained if metric == "dense_e" else 1)
+            adapted_inv = np.full((opts.chains, width), np.nan)
+            metric_opts.adapted_inv_metric = _dptr(adapted_inv)
 
         n_stored = _lib.stanli_n_stored_draws(ctypes.byref(opts))
         raw = np.empty((opts.chains, n_stored, self.n_unconstrained))
@@ -1530,17 +1428,11 @@ class Model:
         interrupted = ctypes.c_int(0)
         watch = _InterruptWatch()
         with watch:
-            if metric_fn is None:
-                failed = _lib.stanli_sample_multi_write_array(
-                    self._m, ctypes.byref(opts), refresh, _dptr(raw),
-                    _dptr(stats), _dptr(out), progress_cb, None, watch.poll,
-                    None, ctypes.byref(interrupted), reports, err, len(err))
-            else:
-                failed = metric_fn(
-                    self._m, ctypes.byref(opts), ctypes.byref(metric_opts),
-                    refresh, _dptr(raw), _dptr(stats), _dptr(out), progress_cb,
-                    None, watch.poll, None, ctypes.byref(interrupted), reports,
-                    err, len(err))
+            failed = _lib.stanli_sample_multi_metric(
+                self._m, ctypes.byref(opts), ctypes.byref(metric_opts),
+                refresh, _dptr(raw), _dptr(stats), _dptr(out), progress_cb,
+                None, watch.poll, None, ctypes.byref(interrupted), reports,
+                err, len(err))
         del init_arr, inv_metric_arr
         if interrupted.value:
             watch.raise_interrupt()

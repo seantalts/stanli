@@ -10,7 +10,7 @@ cstan_fixture <- function(warmup = 20L, samples = 80L, thin = 1L, save_warmup = 
   structure(list(draws=draws, sampler=sampler, columns=columns, model=NULL,
     warmup=warmup, samples=samples, thin=thin, chains=4L, save_warmup=save_warmup,
     warmup_draws=if(save_warmup) ceiling(warmup/thin) else 0L, seed=1L, delta=.8,
-    max_depth=10L, report=list(available=TRUE,warmup_seconds=1:4,sampling_seconds=5:8)),
+    max_depth=10L, report=list(warmup_seconds=1:4,sampling_seconds=5:8)),
     class="stanli_fit")
 }
 
@@ -114,8 +114,6 @@ test_that("CmdStan-style views preserve warmup metadata and reject invalid reque
   expect_error(as_cstanfit(raw),"metadata")
   raw <- cstan_fixture(); raw$thin <- NULL
   expect_error(as_cstanfit(raw),"lacks sampling metadata")
-  raw <- cstan_fixture(); raw$report$available <- FALSE
-  expect_true(all(is.na(as_cstanfit(raw)$time()$chains$warmup)))
 })
 
 test_that("serialized CmdStan-style methods load without either Stan frontend or runtime", {

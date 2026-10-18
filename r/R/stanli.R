@@ -368,9 +368,7 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   interrupt; no fit is returned.
 #' @return An object of class `stanli_fit`. Its `report` element contains
 #'   per-chain warmup and sampling times plus exact divergence and
-#'   maximum-treedepth counts. With a compatible older runtime that predates
-#'   progress reporting, `report$available` is `FALSE` and those values are
-#'   `NA`. Sampling metadata (`warmup`, `samples`, `thin`, `save_warmup`,
+#'   maximum-treedepth counts. Sampling metadata (`warmup`, `samples`, `thin`, `save_warmup`,
 #'   `chains`, and `delta`) records the configuration for downstream conversion;
 #'   iteration counts are before thinning.
 #'
@@ -378,9 +376,7 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   step size each chain holds after warmup (the value CmdStan writes as
 #'   "Step size"). `inv_metric` is a list with one element per chain holding
 #'   the inverse metric after warmup: a numeric vector for `"diag_e"`, an
-#'   n x n matrix for `"dense_e"` and `NULL` for `"unit_e"`. With a runtime
-#'   that predates these options, `step_size` is `NA` and `inv_metric` holds
-#'   `NULL`s. Passing `inv_metric = fit$inv_metric`, `step_size =
+#'   n x n matrix for `"dense_e"` and `NULL` for `"unit_e"`. Passing `inv_metric = fit$inv_metric`, `step_size =
 #'   mean(fit$step_size)` and `adapt_engaged = FALSE` to a later call reuses
 #'   an adapted metric and step size.
 #' @export
@@ -471,8 +467,7 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                       dim = c(model$n_unconstrained, ndraw, nchain)),
                 c(2, 3, 1))
 
-  report <- list(available = res$report_available,
-                 warmup_seconds = res$warmup_seconds,
+  report <- list(warmup_seconds = res$warmup_seconds,
                  sampling_seconds = res$sampling_seconds,
                  n_divergent = res$n_divergent,
                  n_max_treedepth = res$n_max_treedepth)
