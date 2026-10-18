@@ -29,11 +29,13 @@ import threading
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
+from bench_build_cache import cache_key
 from cmdstan_ref import compile_cmd
 from corpus_inventory import corpus_cases
 
 PROTOCOL = "stanli-corpus-v4"
 GRADIENT_BUDGET = 20000
+CACHE_STEM = "model"
 BENCH = REPO / "build-rel/bench_grad"
 STANC = REPO / "deps/stanc3/stanc"
 VECTORIZE_PROBE = REPO / "deps/stanc3/stanli-vectorize-probe"
@@ -288,6 +290,28 @@ def build_model(name, stan, data, work, runner, args, setup=None):
         args.build_timeout)
     executables = {"stanli": [args.bench, mir, data], "cmdstan": [gradient, data]}
     return executables, source
+
+
+def driver_command(cmdstan, hpp, driver, gradient):
+    return compile_cmd(cmdstan, hpp, driver, gradient, opt="-O3")
+
+
+def make_command(exe, stanc, stancflags):
+    return ["make", exe, f"STANC={stanc}", f"STANCFLAGS={stancflags}"]
+
+
+def cache_context(args, expected):
+    """Everything besides the .stan bytes that determines the CmdStan binaries."""
+    cmdstan = args.cmdstan.resolve()
+    sources = expected["sources"]
+    return dict(
+        stanc_sha256=expected["executables"]["stanc"], stancflags=args.stancflags,
+        driver_sha256=sources["tools/bench_cmdstan_grad.cpp"],
+        timer_sha256=sources["tools/benchmark_timer.hpp"],
+        toolchains={k: v for k, v in expected["toolchains"].items() if not k.startswith("stanli_")},
+        cmdstan=str(cmdstan),
+        driver_command=list(map(str, driver_command(cmdstan, f"{CACHE_STEM}.hpp", "{driver}", "gradbench"))),
+        make_command=list(map(str, make_command("{exe}", "{stanc}", args.stancflags))))
 
 
 def setup_estimates(row, setup):
