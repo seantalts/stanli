@@ -1314,6 +1314,7 @@ struct LoopState : KernelState {
   BlockArena arena;
   std::vector<double> workspace;
   MappedVector<Version> versions;
+  std::unordered_map<int64_t, std::vector<uint8_t>> constant_cells;
   std::vector<int64_t> bindings;
   std::vector<int64_t> handles;
   std::vector<double> undo;
@@ -1396,6 +1397,7 @@ struct LoopState : KernelState {
   }
 
   void release() {
+    constant_cells.clear();
     arena.clear();
     version_peak = std::max(version_peak, versions.size());
     versions.right_size(version_peak);
@@ -1558,6 +1560,23 @@ struct Execution {
       if (!is_const(s.bindings[op.in[k]])) return false;
     return true;
   }
+  bool selected_cells_const(const Node& n, const Op& op,
+                            const KernelCtx& c) const {
+    if (!s.building || !gather_eligible(n, op)) return false;
+    const auto it = s.constant_cells.find(s.bindings[op.in[0]]);
+    if (it == s.constant_cells.end()) return false;
+    const auto& cells = it->second;
+    const auto& spec = *static_cast<const DynamicIndexSpec*>(op.udata);
+    const int64_t fixed = fixed_scalar_index(spec, c, false);
+    if (fixed >= 0) return cells[static_cast<size_t>(fixed)] != 0;
+    const IndexRuntime runtime = validate_index(spec, c, false);
+    if (runtime.selected != c.out.len) return false;
+    bool constant = true;
+    selected_positions(spec, runtime, [&](int64_t, int64_t at) {
+      constant = constant && cells[static_cast<size_t>(at)];
+    });
+    return constant;
+  }
   double* materialize(int64_t version, int64_t len) {
     double* v = s.versions[static_cast<size_t>(version)].value;
     if (!is_const(version) || !in_workspace(v)) return v;
@@ -1663,7 +1682,7 @@ struct Execution {
     c.scratch = w;
     bind_inputs(op, c);
     n.forward(c);
-    const bool folded = inputs_const(op);
+    const bool folded = inputs_const(op) || selected_cells_const(n, op, c);
     s.bindings[op.out] = s.node_version[n.site];
     s.versions[static_cast<size_t>(s.node_version[n.site])].constant = folded;
     if (op.out2 >= 0) {
@@ -1695,7 +1714,7 @@ struct Execution {
     c.scratch = n.kernel_scratch ? block + out_len + out2_len : nullptr;
     bind_inputs(op, c);
     n.forward(c);
-    const bool folded = inputs_const(op);
+    const bool folded = inputs_const(op) || selected_cells_const(n, op, c);
     const int64_t out =
         make_version(block, n.active ? reserve_adjoint(out_len) : -1, folded);
     s.bindings[op.out] = out;
@@ -1731,6 +1750,14 @@ struct Execution {
       const bool needs_adjoint = !write_const && (rhs_active || active(base));
       const int64_t fresh = make_version(
           copy, needs_adjoint ? reserve_adjoint(len) : -1, write_const);
+      if (s.building && !write_const) {
+        if (is_const(base)) {
+          s.constant_cells.emplace(fresh, std::vector<uint8_t>(len, 1));
+        } else if (auto it = s.constant_cells.find(base);
+                   it != s.constant_cells.end()) {
+          s.constant_cells.emplace(fresh, it->second);
+        }
+      }
       s.versions[static_cast<size_t>(fresh)].owner = base_slot;
       if (!write_const) {
         s.records.push_back(Record{Record::Copy, n.site, 0, base, fresh});
@@ -1753,6 +1780,17 @@ struct Execution {
     double* values = s.versions[static_cast<size_t>(base)].value;
     c.out.data = values;
     const double* source = c.in[layout.rhs].data;
+    std::vector<uint8_t>* cells = nullptr;
+    const std::vector<uint8_t>* rhs_cells = nullptr;
+    const bool rhs_constant = is_const(rhs);
+    if (s.building && !write_const) {
+      if (auto it = s.constant_cells.find(rhs); it != s.constant_cells.end())
+        rhs_cells = &it->second;
+      auto it = s.constant_cells.find(base);
+      if (it == s.constant_cells.end() && (rhs_constant || rhs_cells))
+        it = s.constant_cells.emplace(base, std::vector<uint8_t>(len, 0)).first;
+      if (it != s.constant_cells.end()) cells = &it->second;
+    }
     const int64_t undo = static_cast<int64_t>(s.undo.size());
     const uint32_t pos_offset =
         s.building ? static_cast<uint32_t>(s.building->inplace_pos.size()) : 0;
@@ -1769,6 +1807,9 @@ struct Execution {
         s.undo.push_back(values[at]);
       }
       values[at] = source[i];
+      if (cells)
+        (*cells)[static_cast<size_t>(at)] =
+            rhs_constant || (rhs_cells && (*rhs_cells)[static_cast<size_t>(i)]);
     };
     const int64_t fixed = fixed_scalar_index(spec, c, true);
     if (fixed >= 0) {
@@ -2377,6 +2418,7 @@ void freeze(LoopState& s) {
     st.output_adjoint.push_back(adj_of(v));
   }
   s.versions.reset();
+  decltype(s.constant_cells){}.swap(s.constant_cells);
 
   compact_snapshot(s, st.arena);
   std::vector<int64_t>().swap(st.inplace_base_len);
