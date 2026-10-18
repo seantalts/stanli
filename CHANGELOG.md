@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixes
+
+- Optimization now reports an error when generated quantities reject the
+  mode. It used to return success and leave that output row unwritten.
+
 ### API changes
 
 - The C API now has one entry point per operation, and its ABI version is 2.
