@@ -820,14 +820,6 @@ constexpr BackwardPrimalReads backward_reads_inputs_only(uint8_t variant) {
   return BackwardPrimalReads{BackwardPrimalReads::kAllInputs, 0};
 }
 
-// OP_NONE_ is the graph's unregistered sentinel. A specialized Program::CALL
-// temporarily claims that otherwise-unused table slot for its fixed-size,
-// allocation-free three-lane softmax; ordinary graph ops never carry either
-// private value. Registration happens only after the specialization is
-// admitted, and refuses the optimization if the sentinel ever gains a kernel.
-constexpr uint16_t kProgramSoftmax3Opcode = OP_NONE_;
-constexpr uint8_t kProgramSoftmax3Variant = 0xffu;
-
 // Opt-in facts shared by graph rewrites. An unknown/new opcode has none.
 namespace op_trait {
 constexpr uint8_t kRerollDensity = 1 << 0;

@@ -1196,33 +1196,16 @@ struct Carver {
     }
     int64_t packed = 0;
     for (int o : c.live_outs) packed += g.slots[o].len;
-    std::shared_ptr<const Program> optimized;
-    if (!std::getenv("STANLI_NO_ISLAND_SOFTMAX3"))
-      optimized = specialize_softmax3(c.prog);
-    const bool specialized = static_cast<bool>(optimized);
     Op is;
     is.opcode = OP_ISLAND;
-    is.variant = specialized            ? kIslandSoftmax3Variant
-                 : c.prog.calls.empty() ? 0
-                                        : kIslandCallVariant;
+    is.variant = c.prog.calls.empty() ? 0 : kIslandCallVariant;
     is.n_in = (int)c.live_in_slots.size();
     for (int k = 0; k < is.n_in; ++k) is.in[k] = c.live_in_slots[k];
     is.out = g.add_slot(packed, false);
     slot_active.resize(g.slots.size(), 1);
-    if (specialized) {
-      auto specialized_prog = std::make_shared<Softmax3IslandProg>();
-      static_cast<IslandProg&>(*specialized_prog) = std::move(c.prog);
-      specialized_prog->optimized_double = std::move(optimized);
-      // Erase the converted base pointer, not the derived pointer: readers
-      // shared with OP_ISLAND recover IslandProg directly from udata.
-      std::shared_ptr<IslandProg> prog = std::move(specialized_prog);
-      is.udata = prog.get();
-      g.udata_pool.push_back(std::move(prog));
-    } else {
-      auto prog = std::make_shared<IslandProg>(std::move(c.prog));
-      is.udata = prog.get();
-      g.udata_pool.push_back(std::move(prog));
-    }
+    auto prog = std::make_shared<IslandProg>(std::move(c.prog));
+    is.udata = prog.get();
+    g.udata_pool.push_back(std::move(prog));
     result.push_back(is);
     // Extractions write the ORIGINAL slot ids, so downstream readers,
     // roots, and target terms are untouched -- except for the

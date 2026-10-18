@@ -286,8 +286,8 @@ per path, so a regression cannot hide as skips.
 
 Focused tests hold the specialized paths to the same bitwise standard.
 [`tests/test_adjoint.cpp`](tests/test_adjoint.cpp) compares each generated
-island backward ([`runtime/src/adjoint.cpp`](runtime/src/adjoint.cpp)) and the
-three-lane softmax forward against their canonical forms. `test_island` covers
+island backward ([`runtime/src/adjoint.cpp`](runtime/src/adjoint.cpp)) against
+its canonical replay. `test_island` covers
 the proof that lets islands reuse buffers. `test_ode_prog` and
 `test_odevariadic` compare the direct RK path with the Stan Math solve on
 solution bits, Jacobians, pullbacks, whole-model gradients, every activity

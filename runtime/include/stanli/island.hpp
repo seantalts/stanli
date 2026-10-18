@@ -78,25 +78,6 @@ struct IslandProg : Program {
   std::optional<bool> replay_initialized;
 };
 
-// Payload used only by OP_ISLAND with kIslandSoftmax3Variant. Ordinary islands
-// retain the exact IslandProg size and allocation they had before this
-// optimization existed.
-// The inherited canonical Program stays untouched and remains the replay
-// oracle wherever var replay is supported.
-struct Softmax3IslandProg : IslandProg {
-  std::shared_ptr<const Program> optimized_double;
-};
-
-// This value selects the derived payload's double-only plan while retaining
-// the ordinary island opcode and kernel-table layout. Setting it on a plain
-// IslandProg violates the tagged payload contract; the graph carver is the
-// only production producer. Its
-// forward must leave outputs and scratch bitwise-identical to OP_ISLAND's
-// canonical forward: direct kernel-table callers use that path, and the
-// generated adjoint consumes either register file. Both executor modes use
-// the same bound specialized forward.
-// test_softmax3_double_exact enforces this contract.
-constexpr uint8_t kIslandSoftmax3Variant = 1;
 // Generic variant for a canonical IslandProg whose forward bytecode contains
 // Program::CALL. Executor binding selects its context-reusing forward once;
 // ordinary islands retain the context-free evaluator with no runtime check.
@@ -128,13 +109,6 @@ bool compact_island_gated(IslandProg& p, bool enable_destination_forwarding);
 // Generate p.adj, appending checkpoint saves to p's forward code. False
 // leaves p untouched and keeps the replay.
 bool gen_adjoint(IslandProg& p, bool keep_every_clear = false);
-
-// After gen_adjoint has captured the original forward program, return a
-// double-only clone that replaces sufficiently common SOFTMAX(3) instructions
-// with calls to an allocation-free private Program kernel. Null means refused;
-// the canonical bytecode stays unchanged.
-std::shared_ptr<const Program> specialize_softmax3(const IslandProg& p,
-                                                   size_t min_count = 32);
 
 // Evaluate on T = double (forward) or stan::math::var (backward replay,
 // inside the caller's nested_rev_autodiff). The register file is reused
