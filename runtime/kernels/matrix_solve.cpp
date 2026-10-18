@@ -22,8 +22,8 @@ constexpr int fmat_options =
 template <int Self, int Other>
 constexpr int fmat_bound = (Self == kDyn && Other == 2) ? 2 : Self;
 template <int R, int C>
-using FMat = Eigen::Matrix<double, R, C, fmat_options<R, C>,
-                           fmat_bound<R, C>, fmat_bound<C, R>>;
+using FMat = Eigen::Matrix<double, R, C, fmat_options<R, C>, fmat_bound<R, C>,
+                           fmat_bound<C, R>>;
 template <int R, int C>
 using FMap = Eigen::Map<FMat<R, C>>;
 template <int R, int C>
@@ -223,10 +223,9 @@ void solve_var(KernelCtx& ctx) {
 
 template <SolveKind Kind, Eigen::UpLoType Tri = Eigen::Lower, int N = kDyn,
           int K = kDyn>
-void left_adjoint(const FMat<N, N>& a, const FMat<N, K>& x,
-                  const FMat<N, K>& g, bool divisor_var, bool dividend_var,
-                  FMat<N, N>* adj_a, FMat<N, K>* adj_b,
-                  const double* qr_scratch = nullptr) {
+void left_adjoint(const FMat<N, N>& a, const FMat<N, K>& x, const FMat<N, K>& g,
+                  bool divisor_var, bool dividend_var, FMat<N, N>* adj_a,
+                  FMat<N, K>* adj_b, const double* qr_scratch = nullptr) {
   using Sq = FMat<N, N>;
   using Rect = FMat<N, K>;
   if constexpr (Kind == SolveKind::Spd) {
@@ -263,7 +262,8 @@ void left_adjoint(const FMat<N, N>& a, const FMat<N, K>& x,
     Rect y;
     if (qr_scratch) {
       const Sq qr = FCMap<N, N>(qr_scratch, a.rows(), a.cols());
-      const FMat<N, 1> coefficients = FCMap<N, 1>(qr_scratch + a.size(), a.rows());
+      const FMat<N, 1> coefficients =
+          FCMap<N, 1>(qr_scratch + a.size(), a.rows());
       y = solve_transpose(Eigen::householderSequence(qr, coefficients), qr);
     } else {
       // Right plain solves and direct kernel callers without scratch keep
@@ -408,7 +408,8 @@ template <bool Left, SolveKind Kind = SolveKind::Plain>
 void solve_bwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0], k = ctx.idata[1];
   if constexpr (Kind != SolveKind::TriLow) {
-    if (!fixed_small_matrices()) return solve_bwd_t<Left, Kind, kDyn, kDyn>(ctx);
+    if (!fixed_small_matrices())
+      return solve_bwd_t<Left, Kind, kDyn, kDyn>(ctx);
     if (n == 2 && k == 1) return solve_bwd_t<Left, Kind, 2, kDyn>(ctx);
     if (n == 2 && k == 2) return solve_bwd_t<Left, Kind, 2, 2>(ctx);
   }

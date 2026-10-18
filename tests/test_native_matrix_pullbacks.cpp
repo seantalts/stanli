@@ -607,7 +607,8 @@ static Outcome run_problem(const Problem& p, bool fixed) {
   }
   set_fixed_small_matrices(true);
   result.bits = out;
-  for (const Buf& a : adj) result.bits.insert(result.bits.end(), a.begin(), a.end());
+  for (const Buf& a : adj)
+    result.bits.insert(result.bits.end(), a.begin(), a.end());
   return result;
 }
 
@@ -671,7 +672,8 @@ static void apply_flavor(Flavor f, std::vector<Buf>& in, int n_square,
       break;
     case kZeros:
       for (Buf& b : in)
-        for (size_t i = 0; i < b.size(); i += 2) b[i] = (i % 4 == 0) ? 0.0 : -0.0;
+        for (size_t i = 0; i < b.size(); i += 2)
+          b[i] = (i % 4 == 0) ? 0.0 : -0.0;
       if (spd)
         for (int i = 0; i < n_square; ++i) a[i * n_square + i] = n_square + 1.0;
       else if (square_symmetric)
@@ -769,9 +771,8 @@ static void differential_quad_form() {
               apply_flavor(f, in, n, sym && f != kAsymmetric, false);
               const int64_t out_len = vec ? 1 : m * m;
               compare_paths(make_problem(
-                  sym ? stanli::OP_QUAD_FORM_SYM : stanli::OP_QUAD_FORM,
-                  {n, m}, variant, in, {(mask & 1) != 0, (mask & 2) != 0},
-                  out_len, rng,
+                  sym ? stanli::OP_QUAD_FORM_SYM : stanli::OP_QUAD_FORM, {n, m},
+                  variant, in, {(mask & 1) != 0, (mask & 2) != 0}, out_len, rng,
                   std::string(sym ? "quad_form_sym" : "quad_form") +
                       " n=" + std::to_string(n) + " m=" + std::to_string(m) +
                       " variant=" + std::to_string(variant) +
@@ -818,8 +819,8 @@ static void differential_cholesky() {
         apply_flavor(f, in, n, f != kAsymmetric, f != kIndefinite);
         compare_paths(make_problem(
             stanli::OP_CHOLESKY, {n}, 0, in, {active}, n * n, rng,
-            "cholesky n=" + std::to_string(n) + " active=" +
-                std::to_string(active) + " " + kFlavorName[f]));
+            "cholesky n=" + std::to_string(n) +
+                " active=" + std::to_string(active) + " " + kFlavorName[f]));
       }
 }
 
@@ -840,12 +841,13 @@ static void differential_solves() {
         for (int vec = 0; vec <= (k == 1 ? 1 : 0); ++vec)
           for (int activity = 0; activity <= 3; ++activity)
             for (unsigned scratch_bit : {0u, 1u})
-              for (Flavor f : {kPlain, kZeros, kNan, kAsymmetric, kIndefinite}) {
+              for (Flavor f :
+                   {kPlain, kZeros, kNan, kAsymmetric, kIndefinite}) {
                 const int br = fam.left ? n : k, bc = fam.left ? k : n;
                 std::vector<Buf> in = {random_buffer(rng, n * n),
                                        random_buffer(rng, br * bc)};
-                apply_flavor(f, in, n, false, fam.spd && f != kAsymmetric &&
-                                                  f != kIndefinite);
+                apply_flavor(f, in, n, false,
+                             fam.spd && f != kAsymmetric && f != kIndefinite);
                 if (!fam.spd) {
                   if (f == kZeros) in[0][0] = in[0][3 % in[0].size()] = 0.0;
                   for (int i = 0; i < n; ++i) in[0][i * n + i] += n + 1.0;
@@ -860,10 +862,10 @@ static void differential_solves() {
                                             fam.left ? dividend : divisor};
                 compare_paths(make_problem(
                     fam.opcode, {n, k}, variant, in, active, br * bc, rng,
-                    "solve op=" + std::to_string(fam.opcode) + " n=" +
-                        std::to_string(n) + " k=" + std::to_string(k) +
-                        " vec=" + std::to_string(vec) + " act=" +
-                        std::to_string(activity) + " scratch=" +
+                    "solve op=" + std::to_string(fam.opcode) +
+                        " n=" + std::to_string(n) + " k=" + std::to_string(k) +
+                        " vec=" + std::to_string(vec) +
+                        " act=" + std::to_string(activity) + " scratch=" +
                         std::to_string(scratch_bit) + " " + kFlavorName[f]));
               }
 }
@@ -890,9 +892,9 @@ static void differential_solve_signed_zeros() {
           if ((n == 1 ? a[0] : a[0] * a[3] - a[1] * a[2]) == 0.0) continue;
           if (!left) std::swap(in[0], in[1]);
           compare_paths(make_problem(
-              left ? stanli::OP_MDIVIDE_LEFT : stanli::OP_MDIVIDE_RIGHT,
-              {n, k}, (uint8_t)(1u | (k == 1 ? 2u : 0u)), in, {true, true},
-              br * bc, rng,
+              left ? stanli::OP_MDIVIDE_LEFT : stanli::OP_MDIVIDE_RIGHT, {n, k},
+              (uint8_t)(1u | (k == 1 ? 2u : 0u)), in, {true, true}, br * bc,
+              rng,
               std::string("solve signed zeros ") + (left ? "left" : "right") +
                   " n=" + std::to_string(n) + " k=" + std::to_string(k)));
         }
@@ -901,8 +903,8 @@ static void differential_solve_signed_zeros() {
 
 static void differential_multi_normal_cholesky() {
   std::mt19937 rng(15);
-  const uint8_t variants[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
-                              0x07, 0x84, 0x87, 0x83, 0x81};
+  const uint8_t variants[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+                              0x06, 0x07, 0x84, 0x87, 0x83, 0x81};
   for (int n = 1; n <= 3; ++n)
     for (uint8_t variant : variants)
       for (int layout = 0; layout < 2; ++layout)
@@ -912,7 +914,8 @@ static void differential_multi_normal_cholesky() {
           Buf raw = random_buffer(rng, n * n);
           for (int i = 0; i < n; ++i)
             for (int j = 0; j <= i; ++j)
-              L[j * n + i] = i == j ? 1.0 + std::abs(raw[j * n + i]) : raw[j * n + i];
+              L[j * n + i] =
+                  i == j ? 1.0 + std::abs(raw[j * n + i]) : raw[j * n + i];
           if (f == kZeros) {
             for (int i = 0; i < n; ++i)
               for (int j = 0; j < i; ++j) L[j * n + i] = 0.0;
@@ -926,11 +929,11 @@ static void differential_multi_normal_cholesky() {
               stanli::OP_MULTI_NORMAL_CHOL_LPDF,
               layout ? std::initializer_list<int>{n, -1, -1}
                      : std::initializer_list<int>{n, 1},
-              variant, in,
-              {(mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0}, 1, rng,
-              "multi_normal_cholesky n=" + std::to_string(n) + " variant=" +
-                  std::to_string(variant) + " layout=" +
-                  std::to_string(layout) + " " + kFlavorName[f]);
+              variant, in, {(mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0},
+              1, rng,
+              "multi_normal_cholesky n=" + std::to_string(n) +
+                  " variant=" + std::to_string(variant) +
+                  " layout=" + std::to_string(layout) + " " + kFlavorName[f]);
           compare_paths(p);
         }
 }
@@ -946,8 +949,10 @@ static void fixed_small_vs_dynamic() {
   differential_multi_normal_cholesky();
   for (const auto& kv : g_tag_failures)
     std::printf("  %5d  %s\n", kv.second, kv.first.c_str());
-  std::printf("fixed vs dynamic: %d cases, %d rejected with equal messages, %d failures\n",
-              g_differential_cases, g_rejected_cases, failures);
+  std::printf(
+      "fixed vs dynamic: %d cases, %d rejected with equal messages, %d "
+      "failures\n",
+      g_differential_cases, g_rejected_cases, failures);
 }
 
 int main(int argc, char** argv) {

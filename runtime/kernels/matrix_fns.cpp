@@ -44,7 +44,6 @@ using IntC = std::integral_constant<int, V>;
 template <typename F>
 void with_small_nm(int64_t n, int64_t m, F&& f) {
   if (fixed_small_matrices()) {
-    if (n == 1 && m == 1) return f(IntC<1>{}, IntC<1>{});
     if (n == 2 && m == 1) return f(IntC<2>{}, IntC<1>{});
     if (n == 2 && m == 2) return f(IntC<2>{}, IntC<2>{});
   }
@@ -257,9 +256,10 @@ struct MatrixAdjointView {
 };
 void chol_bwd_small(KernelCtx& ctx, int n) {
   const double* L_A = ctx.out.data;
-  double adjL[16], adjA[16] = {};
+  double adjL[4], adjA[4] = {};
   for (int i = 0; i < n; ++i)
-    for (int j = 0; j <= i; ++j) adjL[i * n + j] = ctx.out_adj_vec.data[j * n + i];
+    for (int j = 0; j <= i; ++j)
+      adjL[i * n + j] = ctx.out_adj_vec.data[j * n + i];
   for (int i = n - 1; i >= 0; --i) {
     for (int j = i; j >= 0; --j) {
       if (i == j) {
@@ -279,7 +279,7 @@ void chol_bwd_small(KernelCtx& ctx, int n) {
 void chol_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   const int64_t n = ctx.idata[0];
-  if (n <= 4 && fixed_small_matrices())
+  if (n <= 2 && fixed_small_matrices())
     return chol_bwd_small(ctx, static_cast<int>(n));
   CMapM factor(ctx.out.data, n, n);
   MatrixAdjointView out{MapM(ctx.out_adj_vec.data, n, n)};
@@ -391,7 +391,8 @@ void log_det_bwd(KernelCtx& ctx) {
 // expression. The active vector overload associates B' * A * B, whereas the
 // primitive overload uses B.dot(A * B).
 template <int N, typename A, typename B>
-FixM<N == Eigen::Dynamic ? Eigen::Dynamic : 1, N == Eigen::Dynamic ? Eigen::Dynamic : 1>
+FixM<N == Eigen::Dynamic ? Eigen::Dynamic : 1,
+     N == Eigen::Dynamic ? Eigen::Dynamic : 1>
 quad_vec_chain(const A& a, const B& b) {
   if constexpr (N == Eigen::Dynamic) {
     return b.transpose() * a * b;
@@ -438,21 +439,16 @@ template <typename F>
 void qf_shape_dispatch(const KernelCtx& ctx, F&& f) {
   const int64_t n = ctx.idata[0];
   const bool vec = ctx.variant & 1u;
-  if ((n == 1 || n == 2) && fixed_small_matrices()) {
-    if (vec) {
-      if (n == 1) return f(IntC<1>{}, IntC<1>{}, std::true_type{});
-      return f(IntC<2>{}, IntC<1>{}, std::true_type{});
-    }
-    if (n == 2 && ctx.idata[1] == 2)
-      return f(IntC<2>{}, IntC<2>{}, std::false_type{});
+  if (n == 2 && fixed_small_matrices()) {
+    if (vec) return f(IntC<2>{}, IntC<1>{}, std::true_type{});
+    if (ctx.idata[1] == 2) return f(IntC<2>{}, IntC<2>{}, std::false_type{});
   }
   if (vec) return f(IntC<-1>{}, IntC<-1>{}, std::true_type{});
   f(IntC<-1>{}, IntC<-1>{}, std::false_type{});
 }
 void qf_fwd(KernelCtx& ctx) {
-  qf_shape_dispatch(ctx, [&](auto N, auto M, auto Vec) {
-    qf_fwd_t<N, M, Vec>(ctx);
-  });
+  qf_shape_dispatch(
+      ctx, [&](auto N, auto M, auto Vec) { qf_fwd_t<N, M, Vec>(ctx); });
 }
 template <int N, int M>
 void qf_bwd_t(KernelCtx& ctx, bool vec) {
@@ -473,9 +469,8 @@ void qf_bwd_t(KernelCtx& ctx, bool vec) {
         a * b * g.transpose() + a.transpose() * b * g;
 }
 void qf_bwd_impl(KernelCtx& ctx, bool vec) {
-  with_small_nm(ctx.idata[0], vec ? 1 : ctx.idata[1], [&](auto N, auto M) {
-    qf_bwd_t<N, M>(ctx, vec);
-  });
+  with_small_nm(ctx.idata[0], vec ? 1 : ctx.idata[1],
+                [&](auto N, auto M) { qf_bwd_t<N, M>(ctx, vec); });
 }
 void qf_bwd(KernelCtx& ctx) { qf_bwd_impl(ctx, ctx.variant & 1u); }
 
@@ -559,9 +554,8 @@ void qfs_fwd_t(KernelCtx& ctx) {
   }
 }
 void qfs_fwd(KernelCtx& ctx) {
-  qf_shape_dispatch(ctx, [&](auto N, auto M, auto Vec) {
-    qfs_fwd_t<N, M, Vec>(ctx);
-  });
+  qf_shape_dispatch(
+      ctx, [&](auto N, auto M, auto Vec) { qfs_fwd_t<N, M, Vec>(ctx); });
 }
 void qfs_bwd(KernelCtx& ctx) { qf_bwd_impl(ctx, ctx.variant & 1u); }
 
@@ -902,8 +896,7 @@ inline MncPath mnc_path(uint8_t variant, const int* idata, int64_t n_idata,
   const int64_t n = idata[0];
   if (len_y != n || len_mu != n || len_l != n * n) return kMncGeneric;
   const unsigned mask = variant == 0 ? 7u : (variant & 7u);
-  if (n >= 1 && n <= 2 && mask != 0 && fixed_small_matrices())
-    return kMncSmall;
+  if (n >= 1 && n <= 2 && mask != 0 && fixed_small_matrices()) return kMncSmall;
   return variant == 0x84u ? kMncLegacy : kMncGeneric;
 }
 
@@ -1052,70 +1045,74 @@ int64_t mnc_scratch(const Op& op, const Slot* slots) {
 
 // ---- general matrix product: out = A * B ----------------------------------
 // idata = {rows_a, cols_a, cols_b}; either side may carry adjoints.
-template <int RA, int CA, int CB>
-void gemm_fwd_t(KernelCtx& ctx) {
+void gemm_fwd_dynamic(KernelCtx& ctx) {
   const int64_t ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
-  FixCMap<RA, CA> A(ctx.in[0].data, ra, ca);
-  FixCMap<CA, CB> B(ctx.in[1].data, ca, cb);
-  if constexpr (RA == 2) {
-    FixMap<RA, CB>(ctx.out.data, ra, cb) =
-        (A * B).eval() + FixM<RA, CB>::Zero();
-  } else {
-    FixMap<RA, CB>(ctx.out.data, ra, cb) = A * B;
-  }
+  CMapM A(ctx.in[0].data, ra, ca);
+  CMapM B(ctx.in[1].data, ca, cb);
+  MapM(ctx.out.data, ra, cb) = A * B;
 }
-template <int RA, int CA, int CB>
-void gemm_bwd_t(KernelCtx& ctx) {
+void gemm_bwd_dynamic(KernelCtx& ctx) {
   const int64_t ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
-  FixCMap<RA, CA> A(ctx.in[0].data, ra, ca);
-  FixCMap<CA, CB> B(ctx.in[1].data, ca, cb);
-  FixCMap<RA, CB> dO(ctx.out_adj_vec.data, ra, cb);
+  CMapM A(ctx.in[0].data, ra, ca);
+  CMapM B(ctx.in[1].data, ca, cb);
+  CMapM dO(ctx.out_adj_vec.data, ra, cb);
   const auto scalar_adjoint = dO.unaryExpr([](double value) { return value; });
   // The mixed Stan Math overloads consume Matrix<var>::adj_op() directly;
   // only the two-active-input overload evaluates that view into doubles.
   if (ctx.in_adj[0].data) {
-    FixMap<RA, CA> dA(ctx.in_adj[0].data, ra, ca);
+    if (ctx.in_adj[1].data)
+      MapM(ctx.in_adj[0].data, ra, ca) += dO * B.transpose();
+    else
+      MapM(ctx.in_adj[0].data, ra, ca) += scalar_adjoint * B.transpose();
+  }
+  if (ctx.in_adj[1].data) {
+    if (ctx.in_adj[0].data)
+      MapM(ctx.in_adj[1].data, ca, cb) += A.transpose() * dO;
+    else
+      MapM(ctx.in_adj[1].data, ca, cb) += A.transpose() * scalar_adjoint;
+  }
+}
+template <int CB>
+void gemm_fwd_2x2(KernelCtx& ctx) {
+  const int64_t cb = ctx.idata[2];
+  FixCMap<2, 2> A(ctx.in[0].data, 2, 2);
+  FixCMap<2, CB> B(ctx.in[1].data, 2, cb);
+  FixMap<2, CB>(ctx.out.data, 2, cb) = (A * B).eval() + FixM<2, CB>::Zero();
+}
+template <int CB>
+void gemm_bwd_2x2(KernelCtx& ctx) {
+  const int64_t cb = ctx.idata[2];
+  FixCMap<2, 2> A(ctx.in[0].data, 2, 2);
+  FixCMap<2, CB> B(ctx.in[1].data, 2, cb);
+  FixCMap<2, CB> dO(ctx.out_adj_vec.data, 2, cb);
+  const auto scalar_adjoint = dO.unaryExpr([](double value) { return value; });
+  if (ctx.in_adj[0].data) {
+    FixMap<2, 2> dA(ctx.in_adj[0].data, 2, 2);
     if (ctx.in_adj[1].data)
       dA += dO * B.transpose();
     else
       dA += scalar_adjoint * B.transpose();
   }
   if (ctx.in_adj[1].data) {
-    FixMap<CA, CB> dB(ctx.in_adj[1].data, ca, cb);
+    FixMap<2, CB> dB(ctx.in_adj[1].data, 2, cb);
     if (ctx.in_adj[0].data)
       dB += A.transpose() * dO;
     else
       dB += A.transpose() * scalar_adjoint;
   }
 }
-template <bool Bwd>
-void gemm_dispatch(KernelCtx& ctx) {
-  const int ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
-  const auto run = [&](auto RA, auto CA, auto CB) {
-    if constexpr (Bwd)
-      gemm_bwd_t<RA, CA, CB>(ctx);
-    else
-      gemm_fwd_t<RA, CA, CB>(ctx);
-  };
-  const bool tiny =
-      fixed_small_matrices() && ca >= 1 && ca <= 2 && cb >= 1 && cb <= 2;
-  const bool a_only = Bwd && ctx.in_adj[0].data && !ctx.in_adj[1].data;
-  if (tiny && ra == 2 && !(a_only && ca == 1 && cb == 2)) {
-    if (ca == 1 && cb == 1) return run(IntC<2>{}, IntC<1>{}, IntC<1>{});
-    if (ca == 1) return run(IntC<2>{}, IntC<1>{}, IntC<2>{});
-    if (cb == 1) return run(IntC<2>{}, IntC<2>{}, IntC<1>{});
-    return run(IntC<2>{}, IntC<2>{}, IntC<2>{});
-  }
-  if (tiny && ra == 1 && !(Bwd && ca == 2 && cb == 2)) {
-    if (ca == 1 && cb == 1) return run(IntC<1>{}, IntC<1>{}, IntC<1>{});
-    if (ca == 1) return run(IntC<1>{}, IntC<1>{}, IntC<2>{});
-    if (cb == 1) return run(IntC<1>{}, IntC<2>{}, IntC<1>{});
-    return run(IntC<1>{}, IntC<2>{}, IntC<2>{});
-  }
-  run(IntC<-1>{}, IntC<-1>{}, IntC<-1>{});
+bool gemm_is_2x2(const KernelCtx& ctx) {
+  return fixed_small_matrices() && ctx.idata[0] == 2 && ctx.idata[1] == 2 &&
+         (ctx.idata[2] == 1 || ctx.idata[2] == 2);
 }
-void gemm_fwd(KernelCtx& ctx) { gemm_dispatch<false>(ctx); }
-void gemm_bwd(KernelCtx& ctx) { gemm_dispatch<true>(ctx); }
+void gemm_fwd(KernelCtx& ctx) {
+  if (!gemm_is_2x2(ctx)) return gemm_fwd_dynamic(ctx);
+  ctx.idata[2] == 1 ? gemm_fwd_2x2<1>(ctx) : gemm_fwd_2x2<2>(ctx);
+}
+void gemm_bwd(KernelCtx& ctx) {
+  if (!gemm_is_2x2(ctx)) return gemm_bwd_dynamic(ctx);
+  ctx.idata[2] == 1 ? gemm_bwd_2x2<1>(ctx) : gemm_bwd_2x2<2>(ctx);
+}
 
 // ---- crossprod(A): out = A' * A ------------------------------------------
 // idata = {rows, cols}; variant bit 0 records an autodiff result. Stan Math's
