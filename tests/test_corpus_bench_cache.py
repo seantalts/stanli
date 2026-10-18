@@ -389,6 +389,134 @@ class PrebuildTests(BuildFixture):
         self.assertTrue(self.runner.killed)
 
 
+class DirectoryRunner(FakeRunner):
+    def __init__(self, directory):
+        super().__init__()
+        self.directory = directory
+
+
+class MainWiringTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+        for name in ("bench", "stanc", "probe"):
+            (self.root / name).write_text(name)
+        for name in ("cmdstan", "pdb", "home"):
+            (self.root / name).mkdir()
+        self.cases = {}
+        for name in ("a", "b"):
+            source, data = self.root / f"{name}.stan", self.root / f"{name}.json"
+            source.write_text(f"parameters {{ real {name}; }} model {{ {name} ~ normal(0, 1); }}")
+            data.write_text("{}")
+            self.cases[name] = SimpleNamespace(source=source, data=data, collection="posteriordb")
+        self.runners, self.measured = [], []
+        environment = {"PATH": os.environ["PATH"], "HOME": str(self.root / "home")}
+        for patch in (mock.patch.dict(os.environ, environment, clear=True),
+                      mock.patch.object(corpus_bench, "corpus_cases", lambda *a: self.cases),
+                      mock.patch.object(corpus_bench, "checkout_identity",
+                                        lambda path: dict(head="h", tracked_diff_sha256="d")),
+                      mock.patch.object(corpus_bench, "library_identity", lambda path: {}),
+                      mock.patch.object(corpus_bench, "compile_cmd", fake_compile),
+                      mock.patch.object(corpus_bench, "Runner", self.make_runner),
+                      mock.patch.object(corpus_bench, "measure_model", self.measure)):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def make_runner(self, directory):
+        runner = DirectoryRunner(directory)
+        self.runners.append(runner)
+        return runner
+
+    def measure(self, name, stan, data, directory, manifest, runner, args, build=None):
+        self.measured.append((name, build, len(runner.calls)))
+        record = dict(model=name, status="ok", row=dict(model=name, note=""))
+        (directory / f"{name}.result.json").write_text(json.dumps(record))
+        return record
+
+    def run_main(self, *extra, output="out.tsv"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            status = corpus_bench.main([str(self.root / "cmdstan"), str(self.root / "pdb"),
+                str(self.root / output), "--stanc", str(self.root / "stanc"),
+                "--bench", str(self.root / "bench"), "--vectorize-probe", str(self.root / "probe"),
+                *extra])
+        return status, pathlib.Path(str(self.root / output) + ".run")
+
+    def test_every_build_finishes_before_the_first_measurement(self):
+        cache = self.root / "cache"
+        status, run = self.run_main("--build-cache", str(cache), "--build-jobs", "3")
+        self.assertEqual(status, 0)
+        self.assertEqual([m[2] for m in self.measured], [6, 6])
+        self.assertEqual(len(list(cache.iterdir())), 2)
+        for name, build, _ in self.measured:
+            self.assertEqual(build["cache"]["hit"], False)
+            self.assertTrue(build["gradient"].is_file())
+        (line,) = (run / "build-prepass.jsonl").read_text().splitlines()
+        evidence = json.loads(line)
+        self.assertEqual((evidence["jobs"], evidence["cache_directory"]), (3, str(cache)))
+        self.assertEqual({m: v["hit"] for m, v in evidence["models"].items()}, {"a": False, "b": False})
+
+    def test_warm_run_hits_every_model_and_runs_no_cmdstan_commands(self):
+        cache = self.root / "cache"
+        self.run_main("--build-cache", str(cache))
+        self.measured.clear()
+        self.run_main("--build-cache", str(cache), output="again.tsv")
+        self.assertEqual(self.runners[1].calls, [])
+        self.assertEqual([m[1]["cache"]["hit"] for m in self.measured], [True, True])
+        run = pathlib.Path(str(self.root / "again.tsv") + ".run")
+        evidence = json.loads((run / "build-prepass.jsonl").read_text())
+        self.assertEqual({v["hit"] for v in evidence["models"].values()}, {True})
+
+    def test_cache_options_are_not_part_of_the_frozen_identity(self):
+        _, first = self.run_main("--build-cache", str(self.root / "cache"), "--build-jobs", "2")
+        _, second = self.run_main("--no-build-cache", output="plain.tsv")
+        configs = [json.loads((run / "manifest.json").read_text())["identity"]["config"]
+                   for run in (first, second)]
+        self.assertEqual(configs[0], configs[1])
+        for key in ("build_cache", "no_build_cache", "build_jobs"):
+            self.assertNotIn(key, configs[0])
+
+    def test_default_location_prefers_the_environment_then_the_home_cache(self):
+        home_cache = self.root / "home/.cache/stanli/corpus-bench"
+        self.run_main()
+        self.assertEqual(len(list(home_cache.iterdir())), 2)
+        with mock.patch.dict(os.environ, {"STANLI_BENCH_CACHE": str(self.root / "env-cache")}):
+            self.run_main(output="env.tsv")
+        self.assertEqual(len(list((self.root / "env-cache").iterdir())), 2)
+        self.assertEqual(len(list(home_cache.iterdir())), 2)
+
+    def test_explicit_directory_beats_the_environment(self):
+        with mock.patch.dict(os.environ, {"STANLI_BENCH_CACHE": str(self.root / "env-cache")}):
+            self.run_main("--build-cache", str(self.root / "explicit"))
+        self.assertFalse((self.root / "env-cache").exists())
+        self.assertEqual(len(list((self.root / "explicit").iterdir())), 2)
+
+    def test_no_build_cache_builds_in_the_run_directory(self):
+        _, run = self.run_main("--no-build-cache")
+        self.assertFalse((self.root / "home/.cache").exists())
+        self.assertTrue((run / "a/gradbench").is_file())
+        self.assertEqual([m[1]["cache"] for m in self.measured], [dict(directory=None, hit=False)] * 2)
+        evidence = json.loads((run / "build-prepass.jsonl").read_text())
+        self.assertIsNone(evidence["cache_directory"])
+
+    def test_cache_flags_conflict_and_job_count_must_be_positive(self):
+        for extra in (["--build-cache", "x", "--no-build-cache"], ["--build-jobs", "0"]):
+            with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit) as raised:
+                self.run_main(*extra)
+            self.assertEqual(raised.exception.code, 2)
+
+    def test_resume_builds_only_models_without_a_saved_result(self):
+        self.run_main("--no-build-cache")
+        run = pathlib.Path(str(self.root / "out.tsv") + ".run")
+        (run / "b.result.json").unlink()
+        self.measured.clear()
+        self.run_main("--no-build-cache", "--resume")
+        self.assertEqual([m[0] for m in self.measured], ["b"])
+        phases = {call["phase"].split("/")[0] for call in self.runners[1].calls}
+        self.assertEqual(phases, {"b"})
+
+
 class CacheKeyTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

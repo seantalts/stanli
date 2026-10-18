@@ -7,6 +7,8 @@ is a fixed-work proxy, not measured HMC or sampling time.
 A sibling fresh.tsv.run directory holds the frozen manifest and raw evidence.
 --resume requires identical inputs, binaries and settings. Historical TSVs are
 never appended to, and candidate-only refreshes cannot create paired results.
+CmdStan builds run in parallel (--build-jobs) before any timing and are reused
+across runs from --build-cache; --no-build-cache builds inside the run directory.
 """
 import argparse
 import csv
@@ -30,13 +32,14 @@ import threading
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
-from bench_build_cache import cache_key
+from bench_build_cache import BuildCache, cache_key
 from cmdstan_ref import compile_cmd
 from corpus_inventory import corpus_cases
 
 PROTOCOL = "stanli-corpus-v4"
 GRADIENT_BUDGET = 20000
 CACHE_STEM = "model"
+DEFAULT_CACHE = pathlib.Path("~/.cache/stanli/corpus-bench")
 BENCH = REPO / "build-rel/bench_grad"
 STANC = REPO / "deps/stanc3/stanc"
 VECTORIZE_PROBE = REPO / "deps/stanc3/stanli-vectorize-probe"
@@ -488,7 +491,7 @@ def setup_estimates(row, setup):
 
 def run_config(args):
     config = {k: str(v) if isinstance(v, pathlib.Path) else v for k, v in vars(args).items()
-              if k not in ("resume", "output")}
+              if k not in ("resume", "output", "build_cache", "no_build_cache", "build_jobs")}
     if not config.get("fast_math"):
         config.pop("fast_math", None)
     return config
@@ -585,7 +588,18 @@ def main(argv=None):
     parser.add_argument("--vectorize-probe", type=pathlib.Path, default=VECTORIZE_PROBE)
     parser.add_argument("--fast-math", action="store_true",
                         help="build stanli MIR in fast mode and run bench_grad --fast-math")
+    parser.add_argument("--build-cache", type=pathlib.Path,
+                        help="directory of reusable CmdStan builds "
+                             f"(default: $STANLI_BENCH_CACHE or {DEFAULT_CACHE})")
+    parser.add_argument("--no-build-cache", action="store_true",
+                        help="build every CmdStan binary inside the run directory")
+    parser.add_argument("--build-jobs", type=int, default=8,
+                        help="CmdStan builds to run at once before timing starts")
     args = parser.parse_args(argv)
+    if args.build_cache and args.no_build_cache:
+        parser.error("--build-cache and --no-build-cache are exclusive")
+    if args.build_jobs < 1:
+        parser.error("--build-jobs must be at least one")
     if args.rounds < 2 or args.rounds % 2:
         parser.error("--rounds must be even and at least two for balanced engine order")
     if not all(1 <= n <= 60000 for n in (args.warmup_ms, args.measure_ms)):
@@ -597,6 +611,11 @@ def main(argv=None):
         parser.error("gradient timeout must exceed warmup plus measurement")
     for key in ("cmdstan", "pdb", "output", "bench", "stanc", "vectorize_probe"):
         setattr(args, key, getattr(args, key).absolute())
+    if args.no_build_cache:
+        args.build_cache = None
+    else:
+        args.build_cache = pathlib.Path(args.build_cache or os.getenv("STANLI_BENCH_CACHE")
+                                        or DEFAULT_CACHE).expanduser().absolute()
     if any(os.getenv(k, "0") != "0" for k in ("STANLI_PROFILE", "STANLI_PROFILE_PREP")):
         parser.error("disable profiling for comparative measurements")
     # Compiler and runtime overrides change which code is measured. Require
@@ -667,13 +686,27 @@ def main(argv=None):
                 copies.append(copied)
             inputs[name] = tuple(copies)
         runner, records = Runner(directory), {}
-        for name, (stan, data) in inputs.items():
+        for name in inputs:
             saved = directory / f"{name}.result.json"
             if args.resume and saved.exists():
                 records[name] = json.loads(saved.read_text())
-            else:
+        pending = {name: copies for name, copies in inputs.items() if name not in records}
+        cache = (CmdstanCache(BuildCache(args.build_cache), cache_context(args, expected),
+                              manifest["run_id"]) if args.build_cache else None)
+        started = time.perf_counter()
+        builds = prebuild(pending, directory, runner, args, cache)
+        with (directory / "build-prepass.jsonl").open("a") as stream:
+            stream.write(json.dumps(dict(
+                started_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), jobs=args.build_jobs,
+                cache_directory=str(args.build_cache) if cache else None,
+                wall_s=time.perf_counter() - started,
+                models={name: dict(hit=build["cache"]["hit"], key=build["cache"].get("key"))
+                        for name, build in builds.items()}), allow_nan=False) + "\n")
+        for name, (stan, data) in inputs.items():
+            if name not in records:
                 print(f"{name}: paired gradient measurements", flush=True)
-                records[name] = measure_model(name, stan, data, directory, manifest, runner, args)
+                records[name] = measure_model(name, stan, data, directory, manifest, runner, args,
+                                              builds[name])
             write_summary(args.output, records)
             print(f"{name}: {records[name]['status']} {records[name]['row']['note']}", flush=True)
         return int(any(r["status"] != "ok" for r in records.values()))
