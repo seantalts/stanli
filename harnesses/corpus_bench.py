@@ -287,26 +287,124 @@ def setup_phase(runner, setup, key, phase, argv, timeout, cwd=None):
     event = runner.run(phase, argv, timeout, cwd)
     setup[key] = event
     if event["status"] != "ok":
-        raise PhaseFailure(f"{phase}: {event['status']} (event {event['id']})")
+        raise PhaseFailure(failure_note(phase, event))
     return event
 
 
-def build_model(name, stan, data, work, runner, args, setup=None):
-    setup = {} if setup is None else setup
+def failure_note(phase, event):
+    return f"{phase}: {event['status']} (event {event['id']})"
+
+
+def stanli_compile(name, stan, work, runner, args, setup):
     work.mkdir(exist_ok=True)
-    source, hpp, mir = work / f"{name}.stan", work / f"{name}.hpp", work / "model.sexp"
+    source, mir = work / f"{name}.stan", work / "model.sexp"
     source.write_bytes(stan.read_bytes())
     fast = ["--fast-math"] if getattr(args, "fast_math", False) else []
     setup_phase(runner, setup, "stanli_compile", f"{name}/stanli-mir",
         [args.vectorize_probe, "--vectorize-loops", "on", *fast, "--output", mir, source],
         args.build_timeout)
-    setup_phase(runner, setup, "cmdstan_stanc", f"{name}/stanc-cpp",
-        [args.stanc, source, f"--o={hpp}", *shlex.split(args.stancflags)], args.build_timeout)
-    gradient = work / "gradbench"
-    runner.require(f"{name}/gradient-driver-build",
-        compile_cmd(args.cmdstan, hpp, REPO / "tools/bench_cmdstan_grad.cpp", gradient, opt="-O3"),
-        args.build_timeout)
-    executables = {"stanli": [args.bench, mir, data], "cmdstan": [gradient, data]}
+    return mir, source
+
+
+class CmdstanCache:
+    def __init__(self, store, context, run_id):
+        self.store, self.context, self.run_id = store, context, run_id
+
+    def key(self, stan):
+        return cache_key(self.context, sha(stan))
+
+
+def run_cmdstan_build(name, directory, stem, runner, args):
+    """stanc, the gradient driver, then the ordinary make target, one after another."""
+    cmdstan = args.cmdstan.resolve()
+    build = dict(setup={}, gradient=None, executable=None, gradient_failure=None, build_failure=None)
+    phase = f"{name}/stanc-cpp"
+    event = build["setup"]["cmdstan_stanc"] = runner.run(
+        phase, [args.stanc, f"{stem}.stan", f"--o={stem}.hpp", *shlex.split(args.stancflags)],
+        args.build_timeout, directory)
+    if event["status"] != "ok":
+        build["gradient_failure"] = failure_note(phase, event)
+        return build
+    phase = f"{name}/gradient-driver-build"
+    event = runner.run(phase, driver_command(cmdstan, f"{stem}.hpp",
+                                             REPO / "tools/bench_cmdstan_grad.cpp", "gradbench"),
+                       args.build_timeout, directory)
+    build["driver_build_s"] = event["elapsed_s"]
+    if event["status"] == "ok":
+        build["gradient"] = directory / "gradbench"
+    else:
+        build["gradient_failure"] = failure_note(phase, event)
+    phase = f"{name}/cmdstan-build"
+    event = build["setup"]["cmdstan_build"] = runner.run(
+        phase, make_command(directory / stem, args.stanc, args.stancflags), args.build_timeout, cmdstan)
+    if event["status"] == "ok":
+        build["executable"] = directory / stem
+    else:
+        build["build_failure"] = failure_note(phase, event)
+    return build
+
+
+def cached_build(name, key, meta, cache):
+    reused = dict(status="ok", returncode=0, cached=True, cache_key=key, cache_run_id=meta["run_id"])
+    entry = cache.store.entry(key)
+    return dict(
+        setup={"cmdstan_stanc": dict(reused, phase=f"{name}/stanc-cpp", elapsed_s=meta["stanc_s"]),
+               "cmdstan_build": dict(reused, phase=f"{name}/cmdstan-build", elapsed_s=meta["build_s"])},
+        gradient=entry / "gradbench", executable=entry / CACHE_STEM,
+        gradient_failure=None, build_failure=None,
+        cache=dict(directory=str(cache.store.root), key=key, hit=True, run_id=meta["run_id"]))
+
+
+def cmdstan_build(name, stan, work, runner, args, cache=None):
+    """Build the CmdStan binaries for one model, or reuse the cached ones."""
+    work.mkdir(exist_ok=True)
+    if cache is None:
+        (work / f"{name}.stan").write_bytes(stan.read_bytes())
+        build = run_cmdstan_build(name, work, name, runner, args)
+        return dict(build, cache=dict(directory=None, hit=False))
+    key = cache.key(stan)
+    meta = cache.store.lookup(key)
+    if meta is not None:
+        return cached_build(name, key, meta, cache)
+    scratch = cache.store.scratch(key)
+    try:
+        (scratch / f"{CACHE_STEM}.stan").write_bytes(stan.read_bytes())
+        build = run_cmdstan_build(name, scratch, CACHE_STEM, runner, args)
+        build["cache"] = dict(directory=str(cache.store.root), key=key, hit=False)
+        if build["gradient_failure"] or build["build_failure"]:
+            kept = work / "cmdstan-build"
+            shutil.rmtree(kept, ignore_errors=True)
+            shutil.move(str(scratch), kept)
+            for field in ("gradient", "executable"):
+                if build[field]:
+                    build[field] = kept / build[field].name
+            return build
+        setup = build["setup"]
+        files = [f"{CACHE_STEM}.stan", f"{CACHE_STEM}.hpp", "gradbench", CACHE_STEM]
+        meta = dict(files=files, run_id=cache.run_id, key=key,
+                    created_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    stanc_s=setup["cmdstan_stanc"]["elapsed_s"], build_s=setup["cmdstan_build"]["elapsed_s"],
+                    driver_build_s=build["driver_build_s"],
+                    driver_sha256=sha(scratch / "gradbench"), executable_sha256=sha(scratch / CACHE_STEM))
+        if not cache.store.commit(scratch, key, meta):
+            build["cache"]["raced"] = True
+        entry = cache.store.entry(key)
+        build["gradient"], build["executable"] = entry / "gradbench", entry / CACHE_STEM
+        return build
+    finally:
+        cache.store.discard(scratch)
+
+
+def build_model(name, stan, data, work, runner, args, setup=None, build=None):
+    setup = {} if setup is None else setup
+    build = {} if build is None else build
+    mir, source = stanli_compile(name, stan, work, runner, args, setup)
+    if not build:
+        build.update(cmdstan_build(name, stan, work, runner, args))
+    setup["cmdstan_stanc"] = build["setup"]["cmdstan_stanc"]
+    if build["gradient_failure"]:
+        raise PhaseFailure(build["gradient_failure"])
+    executables = {"stanli": [args.bench, mir, data], "cmdstan": [build["gradient"], data]}
     return executables, source
 
 
@@ -357,16 +455,16 @@ def run_config(args):
     return config
 
 
-def measure_model(name, stan, data, directory, manifest, runner, args):
+def measure_model(name, stan, data, directory, manifest, runner, args, build=None):
     row = dict(model=name, run_id=manifest["run_id"], gradient_budget=GRADIENT_BUDGET)
     record = dict(model=name, inputs={"stan": sha(stan), "data": sha(data)}, row=row,
                   gradients=[], setup={}, preparation_s=[], status="failed")
-    notes = []
+    notes, build = [], {} if build is None else build
     fast = ["--fast-math"] if getattr(args, "fast_math", False) else []
     source = directory / name / f"{name}.stan"
     try:
         commands, source = build_model(name, stan, data, directory / name, runner, args,
-                                       record["setup"])
+                                       record["setup"], build)
         record["executables"] = {engine: sha(command[0]) for engine, command in commands.items()}
         for round_index in range(args.rounds):
             pair = {}
@@ -397,18 +495,19 @@ def measure_model(name, stan, data, directory, manifest, runner, args):
         row["stanli_prep_s"] = statistics.median(record["preparation_s"])
     except (PhaseFailure, ValueError) as exc:
         notes.append(str(exc))
-    # An ordinary CmdStan executable is setup for the fixed-work proxy. Build
-    # it independently of gradient/preparation success, without executing it.
-    # Its failure must not discard already accepted gradient measurements.
-    if record["setup"].get("cmdstan_stanc", {}).get("status") == "ok":
-        try:
-            exe = source.with_suffix("")
-            setup_phase(runner, record["setup"], "cmdstan_build", f"{name}/cmdstan-build",
-                        ["make", exe, f"STANC={args.stanc}", f"STANCFLAGS={args.stancflags}"],
-                        args.build_timeout, args.cmdstan)
-            record["cmdstan_executable_sha256"] = sha(exe)
-        except (PhaseFailure, ValueError) as exc:
-            notes.append(str(exc))
+    # An ordinary CmdStan executable is setup for the fixed-work proxy. It is
+    # built independently of gradient/preparation success and never executed,
+    # and its failure must not discard already accepted gradient measurements.
+    if record["setup"].get("cmdstan_stanc", {}).get("status") == "ok" and "cmdstan_build" in build["setup"]:
+        record["setup"]["cmdstan_build"] = build["setup"]["cmdstan_build"]
+        if build["build_failure"]:
+            notes.append(build["build_failure"])
+        else:
+            try:
+                record["cmdstan_executable_sha256"] = sha(build["executable"])
+            except (OSError, ValueError) as exc:
+                notes.append(str(exc))
+    record["build_cache"] = build.get("cache")
     try:
         setup_estimates(row, record["setup"])
     except ValueError as exc:
