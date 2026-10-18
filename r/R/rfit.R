@@ -180,12 +180,8 @@ get_sampler_params <- function(object, inc_warmup = TRUE) {
 #' @rdname as_rfit
 #' @export
 get_elapsed_time <- function(object) {
-  out <- matrix(NA_real_, nrow = dim(object$draws)[2L], ncol = 2L,
-                 dimnames = list(paste0("chain:", seq_len(dim(object$draws)[2L])),
-                                 c("warmup", "sample")))
-  if (isTRUE(object$report$available)) {
-    out[, "warmup"] <- object$report$warmup_seconds
-    out[, "sample"] <- object$report$sampling_seconds
-  }
+  out <- cbind(warmup = object$report$warmup_seconds,
+               sample = object$report$sampling_seconds)
+  rownames(out) <- paste0("chain:", seq_len(nrow(out)))
   out
 }

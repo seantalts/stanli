@@ -47,7 +47,8 @@ std::string execution_report(const CompiledModel& model,
 std::string execution_trace_report(const ExecutionTrace& trace);
 // Optional host-selection event through the existing diagnostic sink. No
 // environment lookup is added to evaluation/gradient loops.
-void report_execution_host(const char* host, const char* value_engine,
-                           const char* probe_status, const std::string& reason);
+void report_execution_host(const char* host, const CompiledModel& cm,
+                           bool interpreter, bool bound_graph,
+                           const char* neither, const std::string& reason);
 }  // namespace stanli
 #endif

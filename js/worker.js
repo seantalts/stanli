@@ -97,7 +97,7 @@ function diagnose(M, req) {
 // but the climb itself streams out iterate by iterate so the page can
 // animate it.
 //
-// chain_id is 1, which is what stanli_sample_stream passes too, so
+// chain_id is 1, which is what stanli_sample_stream_stats_init passes too, so
 // Pathfinder and a NUTS chain given the same seed start from the exact
 // same point. lp and lp_approx per draw are available from the same
 // call and left unasked-for here: k-hat, the one thing the page shows
@@ -189,21 +189,14 @@ onmessage = async (e) => {
     const errPtr = M._malloc(errLen);
     // The construction seed CmdStan would use: transformed data draws
     // from it once, at build time, so every chain of this run shares them.
-    let model;
-    if (req.fastMath) {
-      const optsPtr = M._malloc(12);
-      M._stanli_model_opts_init(optsPtr);
-      const fields = new Uint32Array(M.HEAPF64.buffer, optsPtr, 3);
-      fields[0] = (req.seed ?? 1) >>> 0;
-      fields[2] = 1;
-      model = M._stanli_model_new_with_opts(mirPtr, dataPtr, optsPtr, errPtr,
-                                            errLen);
-      M._free(optsPtr);
-    } else {
-      model = M._stanli_model_new_seeded(mirPtr, dataPtr,
-                                         (req.seed ?? 1) >>> 0, errPtr,
-                                         errLen);
-    }
+    const optsPtr = M._malloc(12);
+    M._stanli_model_opts_init(optsPtr);
+    const fields = new Uint32Array(M.HEAPF64.buffer, optsPtr, 3);
+    fields[0] = (req.seed ?? 1) >>> 0;
+    fields[2] = req.fastMath ? 1 : 0;
+    const model = M._stanli_model_new_with_opts(mirPtr, dataPtr, optsPtr,
+                                                errPtr, errLen);
+    M._free(optsPtr);
     M._free(mirPtr);
     M._free(dataPtr);
     if (!model) throw new Error(M.UTF8ToString(errPtr));
@@ -278,13 +271,9 @@ onmessage = async (e) => {
             ? M._stanli_sample_walnuts_stream(model, req.seed >>> 0, warmup,
                                               samples, +req.maxError || 0,
                                               drawsPtr, cbPtr, 0, errPtr, errLen)
-            : req.pathfinderInit
-            ? M._stanli_sample_stream_stats_init(
-                model, req.seed >>> 0, warmup, samples, +req.delta, initPtr,
-                drawsPtr, statsPtr, cbPtr, 0, errPtr, errLen)
-            : M._stanli_sample_stream_stats(
-                model, req.seed >>> 0, warmup, samples, +req.delta, drawsPtr,
-                statsPtr, cbPtr, 0, errPtr, errLen);
+            : M._stanli_sample_stream_stats_init(
+                model, req.seed >>> 0, warmup, samples, +req.delta,
+                initPtr, drawsPtr, statsPtr, cbPtr, 0, errPtr, errLen);
         if (rc !== 0) throw new Error(M.UTF8ToString(errPtr));
         if (statsPtr)
           samplerStats = M.HEAPF64.slice(statsPtr / 8, statsPtr / 8 + samples * 7);

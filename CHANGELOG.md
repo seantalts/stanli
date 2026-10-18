@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### API changes
+
+- The C API now has one entry point per operation, and its ABI version is 2.
+  Packages built against ABI version 1 (R packages before this release) refuse
+  the new runtime. The removed functions and their replacements:
+  - `stanli_model_new`, `stanli_model_new_seeded` and
+    `stanli_model_new_threaded`: use `stanli_model_new_with_opts`.
+  - `stanli_model_new_from_stan`, `stanli_model_new_from_stan_seeded` and
+    `stanli_model_new_from_stan_threaded`: use
+    `stanli_model_new_from_stan_with_opts`.
+  - `stanli_stan_to_mir` and `stanli_stan_to_mir_with_includes`: use
+    `stanli_stan_to_mir_with_opts`.
+  - `stanli_sample`, `stanli_sample_stream` and `stanli_sample_stream_stats`:
+    use `stanli_sample_stream_stats_init`.
+  - `stanli_sample_multi`, `stanli_sample_multi_progress`,
+    `stanli_sample_multi_interruptible` and `stanli_sample_multi_write_array`:
+    use `stanli_sample_multi_metric`.
+
 ## 0.21.0
 
 Faster multilevel brms and cognitive models, multi-core brms `threading()`,

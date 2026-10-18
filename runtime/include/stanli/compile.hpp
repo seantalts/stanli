@@ -249,6 +249,16 @@ std::string interpreter_error(const CompiledModel& cm);
 std::string interpreter_warning(const CompiledModel& cm,
                                 const std::string& probe_failure = "");
 
+// The unconstrained point for constrained `inits` keyed by parameter name,
+// written to `out` (n_unconstrained values). Throws std::runtime_error saying
+// why when the model has no usable inverse transforms. The JSON form takes a
+// null `json` as an empty document.
+void unconstrain_inits(const CompiledModel& cm,
+                       const std::map<std::string, DataMap::Entry>& inits,
+                       double* out);
+void unconstrain_inits_json(const CompiledModel& cm, const char* json,
+                            double* out);
+
 }  // namespace stanli
 
 #endif

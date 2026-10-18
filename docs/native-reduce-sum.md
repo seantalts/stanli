@@ -31,8 +31,7 @@ Changing the thread setting prepares a new graph before sampling. Python
 updates the model in place; R returns the prepared model in `fit$model`.
 Constructors also accept `threads_per_chain` for direct gradient calls;
 sampling has its own setting, which defaults to one. A thread count above one
-needs a thread-safe runtime and the new constructor entry points. Older
-runtimes still run serially and reject requests for within-chain parallelism.
+needs a thread-safe runtime.
 
 The reduction count says how many `reduce_sum` calls were kept parallel; zero
 means every call uses the ordinary serial path. The fallback reasons say why a
@@ -42,12 +41,12 @@ regions. The CLI prints the count and the reasons. When a model with a large
 cheap size check, so a call it names may still be refused when threads are
 requested.
 
-C callers use `stanli_model_new_threaded` or
-`stanli_model_new_from_stan_threaded`, which take the construction seed and the
-thread count. The model owns its worker team, and multi-chain sampling gives
-each executor clone its own team. The existing C constructors and sampling
-structs keep their ABI and serial defaults. `stanli_reduce_sum_count` and
-`stanli_reduce_sum_fallbacks` return the same diagnostics.
+C callers set `threads_per_chain` in `stanli_model_opts` and pass it to
+`stanli_model_new_with_opts` or `stanli_model_new_from_stan_with_opts`, which
+also take the construction seed. The model owns its worker team, and
+multi-chain sampling gives each executor clone its own team. The default is one
+thread. `stanli_reduce_sum_count` and `stanli_reduce_sum_fallbacks` return the
+same diagnostics.
 
 ```cpp
 #include <stanli/compile.hpp>

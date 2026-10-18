@@ -530,7 +530,8 @@ stanli_function* stanli_function_new_from_stan(const char* stan_code,
     return nullptr;
   }
 #if STANLI_FUNCTION_HAS_CAPI
-  char* mir = stanli_stan_to_mir(stan_code, err, err_len);
+  char* mir =
+      stanli_stan_to_mir_with_opts(stan_code, nullptr, 0, 0, err, err_len);
   if (mir == nullptr) return nullptr;
   stanli_function* out =
       stanli_function_new_from_mir(mir, function_name, err, err_len);

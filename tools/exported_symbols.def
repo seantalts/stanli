@@ -9,20 +9,12 @@
 ; data exports, hence the DATA keyword.
 EXPORTS
   stanli_abi_version
-  stanli_model_new
-  stanli_model_new_from_stan
-  stanli_model_new_seeded
-  stanli_model_new_from_stan_seeded
-  stanli_model_new_threaded
-  stanli_model_new_from_stan_threaded
   stanli_model_opts_init
   stanli_model_new_with_opts
   stanli_model_new_from_stan_with_opts
   stanli_reduce_sum_count
   stanli_reduce_sum_fallbacks
   stanli_has_embedded_stanc
-  stanli_stan_to_mir
-  stanli_stan_to_mir_with_includes
   stanli_stan_to_mir_with_opts
   stanli_string_free
   stanli_function_new_from_stan
@@ -36,9 +28,6 @@ EXPORTS
   stanli_n_unconstrained
   stanli_unconstrain_inits
   stanli_grad
-  stanli_sample
-  stanli_sample_stream
-  stanli_sample_stream_stats
   stanli_sample_stream_stats_init
   stanli_sample_walnuts_stream
   stanli_run_pathfinder
@@ -57,10 +46,6 @@ EXPORTS
   stanli_sample_opts_init
   stanli_n_stored_draws
   stanli_thread_safe
-  stanli_sample_multi
-  stanli_sample_multi_progress
-  stanli_sample_multi_interruptible
-  stanli_sample_multi_write_array
   stanli_metric_opts_init
   stanli_sample_multi_metric
   stanli_sampler_column_name

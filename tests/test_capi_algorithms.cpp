@@ -51,8 +51,8 @@ stanli_model* load(const std::string& stem) {
   const std::string mir = slurp("tests/fixtures/" + stem + ".tmir.sexp");
   const std::string data = slurp("tests/fixtures/" + stem + ".json");
   char err[4096]{};
-  stanli_model* m =
-      stanli_model_new(mir.c_str(), data.c_str(), err, sizeof err);
+  stanli_model* m = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
+                                               nullptr, err, sizeof err);
   if (m == nullptr) {
     ++failures;
     std::printf("FAIL loading %s: %s\n", stem.c_str(), err);
@@ -617,6 +617,22 @@ void test_variational(stanli_model* m) {
 
 }  // namespace
 
+void test_optimize_rejected_mode() {
+  stanli_model* m = load("alg_reject_mode");
+  if (m == nullptr) return;
+  char err[4096]{};
+  stanli_optimize_opts o;
+  stanli_optimize_opts_init(&o);
+  o.seed = 5;
+  o.jacobian = 1;
+  double q = 0, value[2] = {0, 0}, lp = 0;
+  const int rc = stanli_optimize(m, &o, &q, value, &lp, err, sizeof err);
+  expect("optimize reports a mode row that write_array rejects", rc != 0);
+  expect("optimize names the rejection",
+         std::strstr(err, "negative") != nullptr);
+  stanli_model_free(m);
+}
+
 int main() {
   stanli_model* m = load("alg_gauss");
   if (m != nullptr) {
@@ -629,12 +645,14 @@ int main() {
     // The algorithms borrow the model's executor; it must still sample.
     std::vector<double> draws(200 * 3);
     char err[4096]{};
-    expect(
-        "the model still samples afterwards",
-        stanli_sample(m, 1, 200, 200, 0.8, draws.data(), err, sizeof err) == 0);
+    expect("the model still samples afterwards",
+           stanli_sample_stream_stats_init(m, 1, 200, 200, 0.8, nullptr,
+                                           draws.data(), nullptr, nullptr,
+                                           nullptr, err, sizeof err) == 0);
     stanli_model_free(m);
   }
   test_noparam();
+  test_optimize_rejected_mode();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;
