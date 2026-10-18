@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- 2x2 matrix products, quadratic forms, Cholesky factors, solves and
+  `multi_normal_cholesky` run without heap allocation. ctsem gradients are
+  about 2.8x faster, and `s2_logistic_normal` about 3.7x faster. Results are
+  bitwise identical to the previous code.
+
 ## 0.22.0
 
 Faster brms and cognitive models through R and Python on Linux, faster

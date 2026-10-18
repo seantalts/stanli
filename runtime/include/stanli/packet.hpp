@@ -46,6 +46,12 @@ bool values_only();
 // packet path's reference is `stanc --O1` CmdStan, checked separately.
 void set_packet_math(bool on);
 
+// True unless a test turns it off: 1x1 and 2x2 matrix kernels then run on
+// fixed-size Eigen types. Off selects the dynamic-size code, the reference
+// the fixed paths must match bit for bit.
+bool fixed_small_matrices();
+void set_fixed_small_matrices(bool on);
+
 }  // namespace stanli
 
 #endif

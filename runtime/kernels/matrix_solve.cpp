@@ -15,10 +15,15 @@ using CMapM = Eigen::Map<const MatD>;
 using CMapV = Eigen::Map<const VecD>;
 constexpr int kDyn = Eigen::Dynamic;
 template <int R, int C>
-using FMat = Eigen::Matrix<
-    double, R, C,
-    (R == 1 && C != 1) ? Eigen::RowMajor : (C == 1 && R != 1 ? Eigen::ColMajor : 0),
-    (R == kDyn && C == 2) ? 2 : R, (C == kDyn && R == 2) ? 2 : C>;
+constexpr int fmat_options =
+    (R == 1 && C != 1) ? Eigen::RowMajor : Eigen::ColMajor;
+// A dynamic extent next to a fixed 2 gets a compile-time bound of 2: Eigen
+// then picks the same product algorithm as the all-dynamic type, without heap.
+template <int Self, int Other>
+constexpr int fmat_bound = (Self == kDyn && Other == 2) ? 2 : Self;
+template <int R, int C>
+using FMat = Eigen::Matrix<double, R, C, fmat_options<R, C>,
+                           fmat_bound<R, C>, fmat_bound<C, R>>;
 template <int R, int C>
 using FMap = Eigen::Map<FMat<R, C>>;
 template <int R, int C>
@@ -144,7 +149,20 @@ auto solve_active_left_values(const FMat<N, N>& a, const B& b,
       FMap<N, N>(qr_scratch, a.rows(), a.cols()) = factor.matrixQR();
       FMap<N, 1>(qr_scratch + a.size(), a.rows()) = factor.hCoeffs();
     }
-    return Result(factor.solve(b));
+    if constexpr (N == 2 && B::ColsAtCompileTime == 2) {
+      Result x = b;
+      Eigen::Map<MatD> xm(x.data(), 2, 2);
+      Eigen::Map<const MatD> qr(factor.matrixQR().data(), 2, 2);
+      Eigen::Map<const VecD> tau(factor.hCoeffs().data(), 2);
+      Eigen::Matrix<double, 1, kDyn, Eigen::RowMajor, 1, 2> workspace;
+      Eigen::HouseholderSequence<Eigen::Map<const MatD>, Eigen::Map<const VecD>>
+          q(qr, tau);
+      q.setLength(2).transpose().applyThisOnTheLeft(xm, workspace);
+      factor.matrixQR().template triangularView<Eigen::Upper>().solveInPlace(x);
+      return x;
+    } else {
+      return Result(factor.solve(b));
+    }
   }
 }
 
@@ -294,6 +312,7 @@ void solve_double(KernelCtx& ctx) {
 template <bool Left, SolveKind Kind, bool DV, bool DD, bool Vec>
 void solve_var_sized(KernelCtx& ctx) {
   if constexpr (Kind != SolveKind::TriLow && (Left || Kind == SolveKind::Spd)) {
+    if (!fixed_small_matrices()) return solve_var<Left, Kind, DV, DD, Vec>(ctx);
     const int64_t n = ctx.idata[0], k = ctx.idata[1];
     if constexpr (Vec) {
       if (n == 2 && k == 1) {
@@ -389,6 +408,7 @@ template <bool Left, SolveKind Kind = SolveKind::Plain>
 void solve_bwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0], k = ctx.idata[1];
   if constexpr (Kind != SolveKind::TriLow) {
+    if (!fixed_small_matrices()) return solve_bwd_t<Left, Kind, kDyn, kDyn>(ctx);
     if (n == 2 && k == 1) return solve_bwd_t<Left, Kind, 2, kDyn>(ctx);
     if (n == 2 && k == 2) return solve_bwd_t<Left, Kind, 2, 2>(ctx);
   }
