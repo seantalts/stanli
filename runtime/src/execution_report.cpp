@@ -284,10 +284,16 @@ std::string execution_report(const CompiledModel& model,
   r.w.EndArray();
   return r.finish();
 }
-void report_execution_host(const char* host, const char* value_engine,
-                           const char* probe_status,
-                           const std::string& reason) {
+void report_execution_host(const char* host, const CompiledModel& cm,
+                           bool interpreter, bool bound_graph,
+                           const char* neither, const std::string& reason) {
   if (!execution_reporting_enabled()) return;
+  const char* value_engine = interpreter   ? "mir_interpreter"
+                             : bound_graph ? "bound_graph"
+                                           : neither;
+  const char* probe_status = cm.write_array && cm.write_array->interp
+                                 ? (interpreter ? "passed" : "failed")
+                                 : "not_required";
   Report r;
   r.start("execution_host_selection");
   r.str("host", host);

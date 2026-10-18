@@ -219,23 +219,12 @@ int main(int argc, char** argv) {
         !wi && cm.write_array && !cm.write_array->columns.empty();
     const std::string note = stanli::interpreter_warning(cm);
     if (!note.empty()) std::fprintf(stderr, "%s\n", note.c_str());
-    bool columns_known = !wi;
-    if (wi) {
-      for (int variant = 0; variant < 3 && !columns_known; ++variant) {
-        for (int64_t i = 0; i < ex.n_params(); ++i)
-          ex.params_data()[i] = stanli::wa_probe_point(i, variant);
-        try {
-          ex.run_forward_only();
-          stanli::WaRng probe_rng(1);
-          wi->eval(cm.constrained_env(ex), probe_rng);
-          columns_known = true;
-        } catch (const std::exception&) {
-          // The real chain may reach support where all probe points fail.
-          // Such chains discover their columns independently on their first
-          // successful row; failed prefixes stay in bounded CSV spools.
-        }
-      }
-    }
+    // The real chain may reach support where all probe points fail. Such
+    // chains discover their columns independently on their first successful
+    // row; failed prefixes stay in bounded CSV spools.
+    std::string probe_failure;
+    const bool columns_known =
+        !wi || stanli::probe_wa_columns(*wi, cm, ex, probe_failure) >= 0;
     std::vector<std::string> col_names =
         columns_known
             ? stanli::CompiledModel::csv_names(wi ? wi->columns()

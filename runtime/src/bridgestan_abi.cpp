@@ -329,36 +329,13 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
     if (m->cm.write_array) {
       auto& wa = *m->cm.write_array;
       if (wa.interp) {
-        // The interpreted section's columns only exist after one
-        // evaluation, and a model can be out of support at one probe
-        // point and fine at the next, so walk all three variants.
-        m->wa_interp = wa.interp;
-        std::vector<double> q((size_t)m->ex->n_params());
-        bool found = false;
-        for (int variant = 0; variant < 3 && !found; ++variant) {
-          for (size_t i = 0; i < q.size(); ++i)
-            q[i] = stanli::wa_probe_point((int64_t)i, variant);
-          try {
-            // A scratch stream: discovery is the runtime probing the
-            // model, not a draw any caller asked for.
-            stanli::WaRng probe(1);
-            auto lease = m->pool->acquire();
-            std::memcpy(lease->params_data(), q.data(),
-                        sizeof(double) * q.size());
-            lease->run_forward_only();
-            (void)m->wa_interp->eval(m->cm.constrained_env(*lease), probe);
-            found = true;
-          } catch (const std::exception& e) {
-            probe_failure = e.what();
-          }
-        }
-        if (found) {
-          probe_failure.clear();
+        auto lease = m->pool->acquire();
+        if (stanli::probe_wa_columns(*wa.interp, m->cm, *lease,
+                                     probe_failure) >= 0) {
+          m->wa_interp = wa.interp;
           m->cols = m->wa_interp->columns();
           m->n_tp_start = m->wa_interp->n_tp_start();
           m->n_gq_start = m->wa_interp->n_gq_start();
-        } else {
-          m->wa_interp.reset();
         }
       } else if (!wa.columns.empty()) {
         m->wa_ex.reset(new stanli::Executor(std::move(wa.graph)));
@@ -369,13 +346,8 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
         m->n_gq_start = wa.n_gq_start;
       }
     }
-    stanli::report_execution_host("bridgestan",
-                                  m->wa_interp ? "mir_interpreter"
-                                  : m->wa_ex   ? "bound_graph"
-                                               : "parameters_only",
-                                  m->cm.write_array && m->cm.write_array->interp
-                                      ? (m->wa_interp ? "passed" : "failed")
-                                      : "not_required",
+    stanli::report_execution_host("bridgestan", m->cm, m->wa_interp != nullptr,
+                                  m->wa_ex != nullptr, "parameters_only",
                                   probe_failure);
     {
       const std::string note =

@@ -76,51 +76,48 @@ struct stanli_model {
 
 namespace {
 
-// One interpreted write_array row: the main executor's forward pass
-// supplies the constrained parameter values by name.
-std::vector<double> interp_wa_row(stanli_model& m, const double* q,
-                                  stanli::WaRng& rng) {
-  stanli::Executor& ex = *m.ex;
-  std::memcpy(ex.params_data(), q, sizeof(double) * ex.n_params());
+void constrained_row(stanli::Executor& ex, const stanli::CompiledModel& cm,
+                     const double* q, double* out) {
+  std::memcpy(ex.params_data(), q, sizeof(double) * (size_t)ex.n_params());
   ex.run_forward_only();
-  return m.wa_interp->eval(m.cm.constrained_env(ex), rng);
+  int64_t at = 0;
+  for (const auto& v : cm.views) {
+    const double* p = std::as_const(ex).value_ptr(v.slot);
+    for (int64_t i = 0; i < v.len; ++i) out[at++] = p[v.storage_index(i)];
+  }
 }
 
 int64_t row_width(const stanli_model& m) {
   return m.wa_n > 0 ? m.wa_n : m.n_con;
 }
 
-// One output row at unconstrained q on the model's own executors, drawing
-// generated quantities from the caller's stream rather than the model's.
-// Throws what the evaluation throws; the caller decides what a rejection is.
-void write_row(stanli_model& m, const double* q, double* out,
+// One output row at unconstrained q, drawing generated quantities from the
+// caller's stream. `ex` is a main executor and `wa_ex` a write_array one
+// (null when the model has none). Throws what the evaluation throws.
+void write_row(const stanli_model& m, stanli::Executor& ex,
+               stanli::Executor* wa_ex, const double* q, double* out,
                stanli::WaRng& rng) {
-  const int64_t width = row_width(m);
   if (m.wa_interp) {
-    const auto row = interp_wa_row(m, q, rng);
+    std::memcpy(ex.params_data(), q, sizeof(double) * (size_t)ex.n_params());
+    ex.run_forward_only();
+    const auto row = m.wa_interp->eval(m.cm.constrained_env(ex), rng);
+    const int64_t width = row_width(m);
     if ((int64_t)row.size() != width)
       throw std::runtime_error("write_array produced " +
                                std::to_string(row.size()) +
                                " columns, expected " + std::to_string(width));
     std::memcpy(out, row.data(), sizeof(double) * (size_t)width);
-  } else if (m.wa_ex) {
-    std::memcpy(m.wa_ex->params_data(), q,
-                sizeof(double) * (size_t)m.wa_ex->n_params());
-    m.wa_ex->run_forward_only(stanli::EvalState{&rng});
+  } else if (wa_ex) {
+    std::memcpy(wa_ex->params_data(), q,
+                sizeof(double) * (size_t)wa_ex->n_params());
+    wa_ex->run_forward_only(stanli::EvalState{&rng});
     int64_t at = 0;
     for (const auto& col : m.wa_cols) {
-      const double* p = std::as_const(*m.wa_ex).value_ptr(col.slot);
+      const double* p = std::as_const(*wa_ex).value_ptr(col.slot);
       for (int64_t i = 0; i < col.len; ++i) out[at++] = p[i];
     }
   } else {
-    stanli::Executor& ex = *m.ex;
-    std::memcpy(ex.params_data(), q, sizeof(double) * (size_t)ex.n_params());
-    ex.run_forward_only();
-    int64_t at = 0;
-    for (const auto& v : m.cm.views) {
-      const double* p = std::as_const(ex).value_ptr(v.slot);
-      for (int64_t i = 0; i < v.len; ++i) out[at++] = p[v.storage_index(i)];
-    }
+    constrained_row(ex, m.cm, q, out);
   }
 }
 
@@ -131,7 +128,7 @@ stanli::AlgorithmHost algorithm_host(stanli_model* m, stanli_log_cb log,
   stanli::AlgorithmHost host;
   host.names = m->wa_n > 0 ? m->wa_names : m->flat_names;
   host.row = [m](const double* q, double* out, stanli::WaRng& rng) {
-    write_row(*m, q, out, rng);
+    write_row(*m, *m->ex, m->wa_ex.get(), q, out, rng);
   };
   if (log != nullptr)
     host.log = [log, log_user](int level, const std::string& text) {
@@ -237,34 +234,16 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
     if (m->cm.write_array) {
       auto& wa = *m->cm.write_array;
       if (wa.interp) {
-        // Column discovery needs one evaluation; walk the probe points
-        // and disable write_array only if every one fails.
-        m->wa_interp = wa.interp;
-        std::vector<double> q(m->ex->n_params());
-        bool found = false;
-        for (int variant = 0; variant < 3 && !found; ++variant) {
-          for (size_t i = 0; i < q.size(); ++i)
-            q[i] = stanli::wa_probe_point((int64_t)i, variant);
-          try {
-            // A scratch stream: discovery is the runtime probing the
-            // model, not a draw the caller asked for, so it must not
-            // advance the stream stanli_wa_seed names.
-            stanli::WaRng probe_rng(1);
-            const auto row = interp_wa_row(*m, q.data(), probe_rng);
-            m->wa_n = (int64_t)row.size();
-            m->wa_names =
-                stanli::CompiledModel::csv_names(m->wa_interp->columns());
-            m->wa_gq_start = scalar_column_start(m->wa_interp->columns(),
-                                                 m->wa_interp->n_gq_start());
-            found = true;
-          } catch (const std::exception& e) {
-            probe_failure = e.what();
-          }
+        const int64_t n =
+            stanli::probe_wa_columns(*wa.interp, m->cm, *m->ex, probe_failure);
+        if (n >= 0) {
+          m->wa_interp = wa.interp;
+          m->wa_n = n;
+          const auto& cols = m->wa_interp->columns();
+          m->wa_names = stanli::CompiledModel::csv_names(cols);
+          m->wa_gq_start =
+              scalar_column_start(cols, m->wa_interp->n_gq_start());
         }
-        if (found)
-          probe_failure.clear();
-        else
-          m->wa_interp.reset();
       } else if (!wa.columns.empty()) {
         m->wa_ex = std::make_unique<stanli::Executor>(std::move(wa.graph));
         wa.bind(*m->wa_ex);
@@ -275,13 +254,8 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
       }
     }
     m->warnings = stanli::interpreter_warning(m->cm, probe_failure);
-    stanli::report_execution_host("capi",
-                                  m->wa_interp ? "mir_interpreter"
-                                  : m->wa_ex   ? "bound_graph"
-                                               : "unavailable_or_empty",
-                                  m->cm.write_array && m->cm.write_array->interp
-                                      ? (m->wa_interp ? "passed" : "failed")
-                                      : "not_required",
+    stanli::report_execution_host("capi", m->cm, m->wa_interp != nullptr,
+                                  m->wa_ex != nullptr, "unavailable_or_empty",
                                   probe_failure);
     return m.release();
   } catch (const std::exception& e) {
@@ -927,40 +901,9 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
                    const stanli::SamplerRow&) {
         if (row >= n_stored) return;
         double* out = values + ((int64_t)c * n_stored + row) * width;
-        stanli::Executor& main_ex = *execs[(size_t)c];
         try {
-          if (m->wa_interp) {
-            std::memcpy(main_ex.params_data(), q,
-                        sizeof(double) * (size_t)main_ex.n_params());
-            main_ex.run_forward_only();
-            const auto r =
-                m->wa_interp->eval(m->cm.constrained_env(main_ex), rng);
-            if ((int64_t)r.size() != width)
-              throw std::runtime_error(
-                  "write_array produced " + std::to_string(r.size()) +
-                  " columns, expected " + std::to_string(width));
-            std::memcpy(out, r.data(), sizeof(double) * (size_t)width);
-          } else if (m->wa_ex) {
-            stanli::Executor& wa_ex = *wa_execs[(size_t)c];
-            std::memcpy(wa_ex.params_data(), q,
-                        sizeof(double) * (size_t)wa_ex.n_params());
-            wa_ex.run_forward_only(stanli::EvalState{&rng});
-            int64_t at = 0;
-            for (const auto& col : m->wa_cols) {
-              const double* p = std::as_const(wa_ex).value_ptr(col.slot);
-              for (int64_t i = 0; i < col.len; ++i) out[at++] = p[i];
-            }
-          } else {
-            std::memcpy(main_ex.params_data(), q,
-                        sizeof(double) * (size_t)main_ex.n_params());
-            main_ex.run_forward_only();
-            int64_t at = 0;
-            for (const auto& v : m->cm.views) {
-              const double* p = std::as_const(main_ex).value_ptr(v.slot);
-              for (int64_t i = 0; i < v.len; ++i)
-                out[at++] = p[v.storage_index(i)];
-            }
-          }
+          write_row(*m, *execs[(size_t)c],
+                    m->wa_ex ? wa_execs[(size_t)c] : nullptr, q, out, rng);
         } catch (const std::domain_error&) {
           // Match the CLI: a rejected output row does not discard the chain
           // or restore any randomness consumed before the rejection.
@@ -1120,11 +1063,7 @@ int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
     stanli::WriteArray wa;
     wa.names = m->wa_n > 0 ? m->wa_names : m->flat_names;
     wa.row = [m](const double* q, double* out) {
-      if (m->wa_n > 0) {
-        stanli_wa_row(m, q, out);
-      } else {
-        stanli_constrain(m, q, out);
-      }
+      write_row(*m, *m->ex, m->wa_ex.get(), q, out, m->wa_rng);
     };
 
     const stanli::OptimizeResult r = stanli::run_optimize(*m->ex, &wa, cfg);
@@ -1427,44 +1366,22 @@ void stanli_wa_seed_chain(stanli_model* m, uint32_t seed, uint32_t chain) {
 }
 
 int stanli_wa_row(stanli_model* m, const double* q, double* out) {
+  if (!m->wa_interp && !m->wa_ex) return 1;
   try {
-    if (m->wa_interp) {
-      const auto row = interp_wa_row(*m, q, m->wa_rng);
-      if ((int64_t)row.size() != m->wa_n) return 1;
-      std::memcpy(out, row.data(), sizeof(double) * (size_t)m->wa_n);
-      return 0;
-    }
-    if (m->wa_ex) {
-      std::memcpy(m->wa_ex->params_data(), q,
-                  sizeof(double) * m->wa_ex->n_params());
-      m->wa_ex->run_forward_only(stanli::EvalState{&m->wa_rng});
-      int64_t at = 0;
-      for (const auto& c : m->wa_cols) {
-        const double* p = std::as_const(*m->wa_ex).value_ptr(c.slot);
-        for (int64_t i = 0; i < c.len; ++i) out[at++] = p[i];
-      }
-      return 0;
-    }
-    return 1;
+    write_row(*m, *m->ex, m->wa_ex.get(), q, out, m->wa_rng);
+    return 0;
   } catch (const std::exception&) {
     return 1;
   }
 }
 
 int stanli_constrain(stanli_model* m, const double* q, double* out) {
-  const int64_t n = m->ex->n_params();
-  std::memcpy(m->ex->params_data(), q, sizeof(double) * n);
   try {
-    m->ex->run_forward_only();
+    constrained_row(*m->ex, m->cm, q, out);
+    return 0;
   } catch (const std::exception&) {
     return 1;
   }
-  int64_t k = 0;
-  for (const auto& v : m->cm.views) {
-    const double* p = std::as_const(*m->ex).value_ptr(v.slot);
-    for (int64_t i = 0; i < v.len; ++i) out[k++] = p[v.storage_index(i)];
-  }
-  return 0;
 }
 
 }  // extern "C"

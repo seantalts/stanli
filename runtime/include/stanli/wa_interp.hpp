@@ -91,10 +91,11 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
                           DataMap::Entry* out, WaRng& rng);
 
 // The columns only exist after one evaluation, so every driver that wants
-// them at construction time has to probe. These two are that probe, shared
-// so the C ABI and the BridgeStan facade discover the SAME columns: a
-// driver with its own probe schedule would find a model in support where
-// the other found it out of support, and quietly serve a shorter row.
+// them at construction time has to probe. wa_probe_point and
+// probe_wa_columns are that probe, shared so the C ABI and the BridgeStan
+// facade discover the SAME columns: a driver with its own probe schedule
+// would find a model in support where the other found it out of support,
+// and quietly serve a shorter row.
 
 // Probe point i under variant 0, 1 or 2. A model can be out of support at
 // one variant and fine at the next, so callers walk all three.
@@ -135,6 +136,12 @@ class WaInterp {
   // the optimizer substituted away (see write_param).
   std::string last_written_;
 };
+
+// Evaluates `interp` on `ex` at the probe points until one succeeds, with a
+// scratch stream that leaves every caller's untouched. Returns the row size
+// and clears `failure`, or returns -1 with the last error in `failure`.
+int64_t probe_wa_columns(WaInterp& interp, const CompiledModel& cm,
+                         Executor& ex, std::string& failure);
 
 }  // namespace stanli
 

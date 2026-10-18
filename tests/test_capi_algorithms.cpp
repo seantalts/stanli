@@ -617,6 +617,22 @@ void test_variational(stanli_model* m) {
 
 }  // namespace
 
+void test_optimize_rejected_mode() {
+  stanli_model* m = load("alg_reject_mode");
+  if (m == nullptr) return;
+  char err[4096]{};
+  stanli_optimize_opts o;
+  stanli_optimize_opts_init(&o);
+  o.seed = 5;
+  o.jacobian = 1;
+  double q = 0, value[2] = {0, 0}, lp = 0;
+  const int rc = stanli_optimize(m, &o, &q, value, &lp, err, sizeof err);
+  expect("optimize reports a mode row that write_array rejects", rc != 0);
+  expect("optimize names the rejection",
+         std::strstr(err, "negative") != nullptr);
+  stanli_model_free(m);
+}
+
 int main() {
   stanli_model* m = load("alg_gauss");
   if (m != nullptr) {
@@ -635,6 +651,7 @@ int main() {
     stanli_model_free(m);
   }
   test_noparam();
+  test_optimize_rejected_mode();
   if (failures) {
     std::printf("%d failures\n", failures);
     return 1;
