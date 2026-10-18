@@ -848,71 +848,15 @@ __attribute__((noinline)) static void ranged_step(const AdjInstr& I,
         adj[I.a + ka] -= take(k);
       });
       break;
-    case Program::EXP:
-      unary([&](int32_t k, int32_t ka, int32_t, int32_t) {
-        adj[I.a + ka] += take(k) * val[I.vd + k];
-      });
-      break;
-    case Program::LOG:
-      unary([&](int32_t k, int32_t ka, int32_t, int32_t) {
-        adj[I.a + ka] += take(k) / val[I.va + ka];
-      });
-      break;
-    case Program::SQRT:
-      unary([&](int32_t k, int32_t ka, int32_t, int32_t) {
-        const double u = take(k);
-        if (val[I.vd + k] != 0.0) adj[I.a + ka] += u / (2.0 * val[I.vd + k]);
-      });
-      break;
-    case Program::SQUARE:
-      unary([&](int32_t k, int32_t ka, int32_t, int32_t) {
-        adj[I.a + ka] += take(k) * 2.0 * val[I.va + ka];
-      });
-      break;
-    case Program::INV:
-      unary([&](int32_t k, int32_t ka, int32_t, int32_t) {
-        adj[I.a + ka] -= take(k) / (val[I.va + ka] * val[I.va + ka]);
-      });
-      break;
-    case Program::FABS:
-      unary([&](int32_t k, int32_t ka, int32_t, int32_t) {
-        fabs_rule(take(k), val[I.va + ka], adj[I.a + ka]);
-      });
-      break;
-    case Program::INV_LOGIT:
-      unary([&](int32_t k, int32_t ka, int32_t, int32_t) {
-        adj[I.a + ka] += take(k) * val[I.vd + k] * (1.0 - val[I.vd + k]);
-      });
-      break;
-    case Program::LOG1M:
-      unary([&](int32_t k, int32_t ka, int32_t, int32_t) {
-        adj[I.a + ka] += take(k) / (val[I.va + ka] - 1.0);
-      });
-      break;
-    case Program::LOG1P_EXP:
-      unary([&](int32_t k, int32_t ka, int32_t, int32_t) {
-        adj[I.a + ka] += take(k) * stan::math::inv_logit(val[I.va + ka]);
-      });
-      break;
-    case Program::TANH:
-      unary([&](int32_t k, int32_t ka, int32_t, int32_t) {
-        const double u = take(k);
-        const double ch = std::cosh(val[I.va + ka]);
-        adj[I.a + ka] += u / (ch * ch);
-      });
-      break;
-#define STANLI_NATIVE_MATH_RANGED(code, op)                  \
-  case Program::code:                                        \
-    unary([&](int32_t k, int32_t ka, int32_t, int32_t) {     \
-      const double u = take(k);                              \
-      const double x = val[I.va + ka];                       \
-      if (unary_has_pullback(UnaryRule<op>::topology, x))    \
-        adj[I.a + ka] += UnaryRule<op>::delta(               \
-            x, std::numeric_limits<double>::quiet_NaN(), u); \
-    });                                                      \
+#define STANLI_UNARY_RANGED(code, fn, from_out, pullback)                  \
+  case Program::code:                                                       \
+    unary([&](int32_t k, int32_t ka, int32_t, int32_t) {                    \
+      STANLI_UNARY_PULLBACK(from_out, pullback, take(k), val[I.va + ka],    \
+                            val[I.vd + k], adj[I.a + ka])                   \
+    });                                                                     \
     break;
-      STANLI_NATIVE_MATH_LIST(STANLI_NATIVE_MATH_RANGED)
-#undef STANLI_NATIVE_MATH_RANGED
+      STANLI_PROGRAM_UNARY_LIST(STANLI_UNARY_RANGED)
+#undef STANLI_UNARY_RANGED
     case Program::LSE2:
       binary([&](int32_t k, int32_t ka, int32_t kb, int32_t) {
         lse2_rule(take(k), val[I.va + ka], val[I.vb + kb], adj[I.a + ka],
@@ -1064,62 +1008,14 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
           adj[I.dst] = 0.0;
           adj[I.a] -= t;
           break;
-        case Program::EXP:
-          adj[I.dst] = 0.0;
-          adj[I.a] += t * val[I.vd];
-          break;
-        case Program::LOG:
-          adj[I.dst] = 0.0;
-          adj[I.a] += t / val[I.va];
-          break;
-        case Program::SQRT:
-          adj[I.dst] = 0.0;
-          if (val[I.vd] != 0.0) adj[I.a] += t / (2.0 * val[I.vd]);
-          break;
-        case Program::SQUARE:
-          adj[I.dst] = 0.0;
-          adj[I.a] += t * 2.0 * val[I.va];
-          break;
-        case Program::INV:
-          adj[I.dst] = 0.0;
-          adj[I.a] -= t / (val[I.va] * val[I.va]);
-          break;
-        case Program::FABS:
-          adj[I.dst] = 0.0;
-          fabs_rule(t, val[I.va], adj[I.a]);
-          break;
-        case Program::INV_LOGIT:
-          adj[I.dst] = 0.0;
-          adj[I.a] += t * val[I.vd] * (1.0 - val[I.vd]);
-          break;
-        case Program::LOG1M:
-          adj[I.dst] = 0.0;
-          adj[I.a] += t / (val[I.va] - 1.0);
-          break;
-        // The derivative stan-math precomputes for its own reverse rule, and
-        // the one OP_LOG1P_EXP carries on the graph side: the two paths have
-        // to agree to the bit, and one expression is how that stays true.
-        case Program::LOG1P_EXP:
-          adj[I.dst] = 0.0;
-          adj[I.a] += t * stan::math::inv_logit(val[I.va]);
-          break;
-        case Program::TANH: {
-          adj[I.dst] = 0.0;
-          const double ch = std::cosh(val[I.va]);
-          adj[I.a] += t / (ch * ch);
-          break;
-        }
-#define STANLI_NATIVE_MATH_SCALAR(code, op)                \
-  case Program::code: {                                    \
-    adj[I.dst] = 0.0;                                      \
-    const double x = val[I.va];                            \
-    if (unary_has_pullback(UnaryRule<op>::topology, x))    \
-      adj[I.a] += UnaryRule<op>::delta(                    \
-          x, std::numeric_limits<double>::quiet_NaN(), t); \
-    break;                                                 \
-  }
-          STANLI_NATIVE_MATH_LIST(STANLI_NATIVE_MATH_SCALAR)
-#undef STANLI_NATIVE_MATH_SCALAR
+#define STANLI_UNARY_SCALAR(code, fn, from_out, pullback)                \
+  case Program::code:                                                    \
+    adj[I.dst] = 0.0;                                                    \
+    STANLI_UNARY_PULLBACK(from_out, pullback, t, val[I.va], val[I.vd],   \
+                          adj[I.a])                                      \
+    break;
+          STANLI_PROGRAM_UNARY_LIST(STANLI_UNARY_SCALAR)
+#undef STANLI_UNARY_SCALAR
         // Comparisons produce a plain 0/1 the forward already computed; they
         // have no derivative, but they did write the register.
         case Program::GT:

@@ -121,9 +121,7 @@ bool elementwise_ins(const Graph& g, const Op& op) {
 }
 
 // The scalar unaries the island machine speaks, paired with the
-// instruction each compiles to. File-local on purpose: the MIR front
-// end's unary chain (mir_prog.hpp) is a different set -- it has INV and
-// FABS and lacks LOG1M and TANH -- so there is nothing to share.
+// instruction each compiles to.
 #define STANLI_ISLAND_UNARY_LIST(X) \
   X(OP_NEG, NEG)                    \
   X(OP_EXPV, EXP)                   \

@@ -137,11 +137,46 @@ struct UnaryRule;
 STANLI_SCALAR_UNARY_LIST(STANLI_DEFINE_UNARY_RULE)
 #undef STANLI_DEFINE_UNARY_RULE
 
-#define STANLI_NATIVE_MATH_LIST(X) \
-  X(ERFC, OP_ERFC)                 \
-  X(LOG1P, OP_LOG1P)               \
-  X(LOG1M_EXP, OP_LOG1M_EXP)       \
-  X(INV_SQUARE, OP_INV_SQUARE)
+#define STANLI_NATIVE_PULLBACK(op)                    \
+  if (unary_has_pullback(UnaryRule<op>::topology, x)) \
+  acc += UnaryRule<op>::delta(x, y, seed)
+
+#define STANLI_PROGRAM_CORE_UNARY_LIST(X)                                     \
+  X(EXP, exp, true, acc += seed * y)                                          \
+  X(LOG, log, false, acc += seed / x)                                         \
+  X(SQRT, sqrt, true, if (y != 0.0) acc += seed / (2.0 * y))                  \
+  X(SQUARE, square, false, acc += seed * 2.0 * x)                             \
+  X(INV, inv, false, STANLI_NATIVE_PULLBACK(OP_INV))                          \
+  X(FABS, fabs, false, fabs_rule(seed, x, acc))                               \
+  X(INV_LOGIT, inv_logit, true, acc += seed * y * (1.0 - y))                  \
+  X(LOG1M, log1m, false, acc += seed / (x - 1.0))                             \
+  X(LOG1P_EXP, log1p_exp, false, STANLI_NATIVE_PULLBACK(OP_LOG1P_EXP))        \
+  X(TANH, tanh, false, {                                                      \
+    const double ch = std::cosh(x);                                           \
+    acc += seed / (ch * ch);                                                  \
+  })
+
+#define STANLI_PROGRAM_NATIVE_UNARY_LIST(X)                                   \
+  X(ERFC, erfc, false, STANLI_NATIVE_PULLBACK(OP_ERFC))                       \
+  X(LOG1P, log1p, false, STANLI_NATIVE_PULLBACK(OP_LOG1P))                    \
+  X(LOG1M_EXP, log1m_exp, false, STANLI_NATIVE_PULLBACK(OP_LOG1M_EXP))        \
+  X(INV_SQUARE, inv_square, false, STANLI_NATIVE_PULLBACK(OP_INV_SQUARE))
+
+#define STANLI_PROGRAM_UNARY_LIST(X) \
+  STANLI_PROGRAM_CORE_UNARY_LIST(X)  \
+  STANLI_PROGRAM_NATIVE_UNARY_LIST(X)
+
+#define STANLI_UNARY_PULLBACK(from_out, pullback, seed_value, x_value,         \
+                              y_value, accumulator)                            \
+  {                                                                            \
+    const double seed = (seed_value);                                          \
+    [[maybe_unused]] const double x =                                          \
+        (from_out) ? std::numeric_limits<double>::quiet_NaN() : (x_value);     \
+    [[maybe_unused]] const double y =                                          \
+        (from_out) ? (y_value) : std::numeric_limits<double>::quiet_NaN();     \
+    double& acc = (accumulator);                                               \
+    pullback;                                                                  \
+  }
 
 }  // namespace stanli
 

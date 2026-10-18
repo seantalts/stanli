@@ -376,72 +376,17 @@ void run_range(const Program::Instr& I, T* reg) {
     case Program::NEG:
       unary([](T& o, const T& a, const T&, const T&) { o = -a; });
       break;
-    case Program::EXP:
-      unary(
-          [](T& o, const T& a, const T&, const T&) { o = stan::math::exp(a); });
-      break;
-    case Program::LOG:
-      unary(
-          [](T& o, const T& a, const T&, const T&) { o = stan::math::log(a); });
-      break;
-    case Program::SQRT:
-      unary([](T& o, const T& a, const T&, const T&) {
-        o = stan::math::sqrt(a);
-      });
-      break;
-    case Program::SQUARE:
-      unary([](T& o, const T& a, const T&, const T&) {
-        o = stan::math::square(a);
-      });
-      break;
-    case Program::INV:
-      unary(
-          [](T& o, const T& a, const T&, const T&) { o = stan::math::inv(a); });
-      break;
-    case Program::FABS:
-      unary([](T& o, const T& a, const T&, const T&) {
-        o = stan::math::fabs(a);
-      });
-      break;
-    case Program::INV_LOGIT:
-      unary(
-          [](T& o, const T& a, const T&, const T&) { o = inv_logit_range(a); });
-      break;
-    case Program::LOG1M:
-      unary([](T& o, const T& a, const T&, const T&) {
-        o = stan::math::log1m(a);
-      });
-      break;
-    case Program::LOG1P_EXP:
-      unary([](T& o, const T& a, const T&, const T&) {
-        o = stan::math::log1p_exp(a);
-      });
-      break;
-    case Program::TANH:
-      unary([](T& o, const T& a, const T&, const T&) {
-        o = stan::math::tanh(a);
-      });
-      break;
-    case Program::ERFC:
-      unary([](T& o, const T& a, const T&, const T&) {
-        o = stan::math::erfc(a);
-      });
-      break;
-    case Program::LOG1P:
-      unary([](T& o, const T& a, const T&, const T&) {
-        o = stan::math::log1p(a);
-      });
-      break;
-    case Program::LOG1M_EXP:
-      unary([](T& o, const T& a, const T&, const T&) {
-        o = stan::math::log1m_exp(a);
-      });
-      break;
-    case Program::INV_SQUARE:
-      unary([](T& o, const T& a, const T&, const T&) {
-        o = stan::math::inv_square(a);
-      });
-      break;
+#define STANLI_PROGRAM_UNARY_RANGED(code, fn, from_out, pullback)         \
+  case Program::code:                                                     \
+    unary([](T& o, const T& a, const T&, const T&) {                      \
+      if constexpr (Program::code == Program::INV_LOGIT)                  \
+        o = inv_logit_range(a);                                           \
+      else                                                                \
+        o = stan::math::fn(a);                                            \
+    });                                                                   \
+    break;
+    STANLI_PROGRAM_UNARY_LIST(STANLI_PROGRAM_UNARY_RANGED)
+#undef STANLI_PROGRAM_UNARY_RANGED
     case Program::LSE2:
       binary([](T& o, const T& a, const T& b, const T&) {
         o = stan::math::log_sum_exp(a, b);
