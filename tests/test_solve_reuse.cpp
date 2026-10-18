@@ -224,45 +224,65 @@ int main() {
   direct_and_island_calls();
   for (int n : {2, 10, 55})
     for (int k : {1, 3})
-      for (int rows : {0, 1, 33}) {
-        Kernel without = original;
-        without.forward = recompute_forward;
-        without.backward = recompute_backward;
-        without.scratch_size = nullptr;
-        register_kernel(OP_MDIVIDE_LEFT, without);
-        const Graph reference = graph(n, k, rows, k == 1);
-        register_kernel(OP_MDIVIDE_LEFT, original);
-        const Graph candidate = graph(n, k, rows, k == 1);
-        Executor expected(reference);
-        test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
-        Executor actual(candidate);
-        test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
-        stanli_test::StdoutCapture captured(stderr);
-        for (int point : {0, 1, 2, 0}) {
-          check(identical(evaluate(actual, n, k, point),
-                          evaluate(expected, n, k, point)),
-                "each backward reads its own forward factor");
-          const double v = actual.forward_value_only();
-          const double w = expected.forward_value_only();
-          check(std::memcmp(&v, &w, sizeof(double)) == 0,
-                "value-only retains the prim solve arithmetic");
-        }
-        Executor copy(actual);
-        check(identical(evaluate(copy, n, k, 3), evaluate(expected, n, k, 3)),
-              "copied executor independently records factors");
-        check(identical(evaluate(actual, n, k, 4), evaluate(expected, n, k, 4)),
+      for (int rows : {0, 1, 33})
+        for (bool frames : {false, true}) {
+          Kernel without = original;
+          without.forward = recompute_forward;
+          without.backward = recompute_backward;
+          without.scratch_size = nullptr;
+          register_kernel(OP_MDIVIDE_LEFT, without);
+          const Graph reference = graph(n, k, rows, k == 1);
+          register_kernel(OP_MDIVIDE_LEFT, original);
+          const Graph candidate = graph(n, k, rows, k == 1);
+          test_setenv("STANLI_STRUCTURED_FRAMES", frames ? "1" : "0");
+          Executor expected(reference);
+          test_setenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "1");
+          Executor actual(candidate);
+          test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
+          stanli_test::StdoutCapture captured(stderr);
+          for (int point : {0, 1, 2, 0}) {
+            check(identical(evaluate(actual, n, k, point),
+                            evaluate(expected, n, k, point)),
+                  "each backward reads its own forward factor");
+            const double v = actual.forward_value_only();
+            const double w = expected.forward_value_only();
+            check(std::memcmp(&v, &w, sizeof(double)) == 0,
+                  "value-only retains the prim solve arithmetic");
+          }
+          Executor copy(actual);
+          check(identical(evaluate(copy, n, k, 3), evaluate(expected, n, k, 3)),
+                "copied executor independently records factors");
+          check(
+              identical(evaluate(actual, n, k, 4), evaluate(expected, n, k, 4)),
               "copy leaves the original factor storage independent");
-        const auto diagnostics = captured.finish();
-        if (rows > 0) {
-          const bool respecialized =
-              diagnostics.find("respecialized=2") != std::string::npos;
-          if (!respecialized && failures < 2)
-            std::printf("n=%d k=%d rows=%d\n%s\n", n, k, rows,
-                        diagnostics.c_str());
-          check(respecialized,
-                "changed branches re-record factors at least twice");
+          const auto diagnostics = captured.finish();
+          if (frames && rows == 33)
+            check(diagnostics.find("stanli_structured frames:") !=
+                      std::string::npos,
+                  "factor lifetime check reaches numerical frames");
+          if (rows > 0) {
+            // Frames return before the stream's respecialized counter is
+            // printed. Count their completed recordings instead: the first
+            // recording plus the two parameter-controlled branch changes.
+            size_t recordings = 0, position = 0;
+            while ((position = diagnostics.find("stanli_structured frames:",
+                                                position)) !=
+                   std::string::npos) {
+              ++recordings;
+              ++position;
+            }
+            const bool respecialized =
+                frames
+                    ? recordings >= 3
+                    : diagnostics.find("respecialized=2") != std::string::npos;
+            if (!respecialized && failures < 2)
+              std::printf("n=%d k=%d rows=%d frames=%d\n%s\n", n, k, rows,
+                          frames, diagnostics.c_str());
+            check(respecialized,
+                  "changed branches re-record factors at least twice");
+          }
+          test_unsetenv("STANLI_STRUCTURED_FRAMES");
         }
-      }
   std::printf("test_solve_reuse: %d failures\n", failures);
   return failures ? 1 : 0;
 }

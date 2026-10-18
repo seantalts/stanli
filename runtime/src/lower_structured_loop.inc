@@ -1372,7 +1372,8 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
                   [&](const Val& input) {
         return g.slots[input.slot].len > 0 && !input.autodiff &&
                input.si.param_free;
-      });
+      }) &&
+      std::getenv("STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS") == nullptr;
   if (direct_inputs) {
     const auto remap = [&](int64_t* offset, int* input) {
       for (size_t i = 0; i < indices.size(); ++i) {

@@ -144,8 +144,8 @@ auto solve_active_left_values(const FMat<N, N>& a, const B& b,
     }
     const Eigen::HouseholderQR<FMat<N, N>> factor(a);
     if (qr_scratch) {
-      // Per-execution scratch is retained and rebound by the executor. It
-      // must not be shared by repeated calls at a site.
+      // Per-execution scratch is retained and rebound by the executor and
+      // numerical frames. It must not be shared by repeated calls at a site.
       FMap<N, N>(qr_scratch, a.rows(), a.cols()) = factor.matrixQR();
       FMap<N, 1>(qr_scratch + a.size(), a.rows()) = factor.hCoeffs();
     }
