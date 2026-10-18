@@ -411,8 +411,10 @@ class MainWiringTests(unittest.TestCase):
             data.write_text("{}")
             self.cases[name] = SimpleNamespace(source=source, data=data, collection="posteriordb")
         self.runners, self.measured = [], []
-        environment = {"PATH": os.environ["PATH"], "HOME": str(self.root / "home")}
+        environment = {"PATH": os.environ["PATH"], "HOME": str(self.root / "home"),
+                       "USERPROFILE": str(self.root / "home")}
         for patch in (mock.patch.dict(os.environ, environment, clear=True),
+                      mock.patch.object(corpus_bench.shutil, "which", lambda name: str(self.root / "stanc")),
                       mock.patch.object(corpus_bench, "corpus_cases", lambda *a: self.cases),
                       mock.patch.object(corpus_bench, "checkout_identity",
                                         lambda path: dict(head="h", tracked_diff_sha256="d")),
@@ -716,6 +718,7 @@ class CacheKeyTests(unittest.TestCase):
         with mock.patch("harnesses.corpus_bench.REPO", pathlib.Path("/another/worktree")):
             self.assertEqual(self.key(), base)
 
+    @unittest.skipUnless(os.name == "posix", "symlinks need privileges on Windows")
     def test_symlinked_cmdstan_directory_keys_like_its_target(self):
         link = self.root / "link"
         link.symlink_to(self.root / "cmdstan")

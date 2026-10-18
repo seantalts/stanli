@@ -133,7 +133,10 @@ class Runner:
             processes = list(self.active)
         for process in processes:
             try:
-                os.killpg(process.pid, signal.SIGKILL)
+                if os.name == "posix":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
             except (ProcessLookupError, PermissionError):
                 pass
 
