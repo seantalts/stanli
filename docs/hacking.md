@@ -144,12 +144,6 @@ Step by step:
    CmdStan's dropped-constant rules (see "the variant byte" below);
    and any statement whose control flow depends on a parameter is
    compiled for the register machine (its own section below).
-   A proven subset of terminal scalar loops (one indexed real-data read,
-   parameter addition, multiplication or FMA, then an optional
-   `exp`/`square` chain) is priced before its iterations are expanded,
-   and when profitable lowering emits the vector kernels directly.
-   `STANLI_SYMBOLIC_LANES=0` disables this shortcut; unset or `1` keeps
-   automatic selection, and any other value disables it.
 
 4. **The passes rewrite the list.** In pipeline order: in-place
    updates, store-to-load forwarding, constant folding, loop

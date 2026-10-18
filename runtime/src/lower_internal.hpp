@@ -907,11 +907,6 @@ struct Lowering {
   // its collapsed trip counts. TargetPE consumes the product at the edge,
   // so nested invariant loops still emit one scale rather than a MUL chain.
   double target_scale = 1.0;
-  // Automatic symbolic-lane probe: only the terminal unconditional model loop.
-  // False leaves ordinary lowering untouched; true handles the whole loop.
-  const mir::Stmt* symbolic_lane_tail = nullptr;
-  bool try_lower_symbolic_lane_tail(const mir::Stmt& s, int64_t first,
-                                    int64_t last);
   // OR of the actual real/container scalar types for the current inlined
   // UDF. Generic AutoDiffable locals and returns instantiate to this type.
   bool udf_autodiff_ctx = false;
