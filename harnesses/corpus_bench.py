@@ -687,11 +687,6 @@ def main(argv=None):
         parser.error("gradient timeout must exceed warmup plus measurement")
     for key in ("cmdstan", "pdb", "output", "bench", "stanc", "vectorize_probe"):
         setattr(args, key, getattr(args, key).absolute())
-    if args.no_build_cache:
-        args.build_cache = None
-    else:
-        args.build_cache = pathlib.Path(args.build_cache or os.getenv("STANLI_BENCH_CACHE")
-                                        or DEFAULT_CACHE).expanduser().absolute()
     if any(os.getenv(k, "0") != "0" for k in ("STANLI_PROFILE", "STANLI_PROFILE_PREP")):
         parser.error("disable profiling for comparative measurements")
     # Compiler and runtime overrides change which code is measured. Require
@@ -705,6 +700,11 @@ def main(argv=None):
                                 "STANLI_DEBUG_", "STANLI_DUMP_")))]
     if overrides:
         parser.error("unset benchmark environment overrides: " + ", ".join(sorted(overrides)))
+    if args.no_build_cache:
+        args.build_cache = None
+    else:
+        args.build_cache = pathlib.Path(args.build_cache or os.getenv("STANLI_BENCH_CACHE")
+                                        or DEFAULT_CACHE).expanduser().absolute()
     # Resolve inputs in a separate temporary cache before freezing their identities.
     import tempfile
     with tempfile.TemporaryDirectory(prefix="stanli-bench-inputs-") as cache:
@@ -721,7 +721,7 @@ def main(argv=None):
             parser.error("no models selected")
         config = run_config(args)
         config["gradient_budget"] = GRADIENT_BUDGET
-        identities = {str(p.relative_to(REPO)): sha(p) for p in (
+        identities = {p.relative_to(REPO).as_posix(): sha(p) for p in (
             REPO / "harnesses/corpus_bench.py", REPO / "tools/benchmark_timer.hpp",
             REPO / "tools/bench_grad.cpp", REPO / "tools/bench_cmdstan_grad.cpp",
             REPO / "tools/cmdstan_ref.py", REPO / "tools/verify_refs.py",
