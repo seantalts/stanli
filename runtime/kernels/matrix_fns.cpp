@@ -32,6 +32,22 @@ using MatD = Eigen::MatrixXd;
 using VecD = Eigen::VectorXd;
 using MapM = Eigen::Map<MatD>;
 using CMapM = Eigen::Map<const MatD>;
+template <int R, int C>
+using FixM = Eigen::Matrix<double, R, C>;
+template <int R, int C>
+using FixMap = Eigen::Map<FixM<R, C>>;
+template <int R, int C>
+using FixCMap = Eigen::Map<const FixM<R, C>>;
+template <int V>
+using IntC = std::integral_constant<int, V>;
+
+template <typename F>
+void with_small_nm(int64_t n, int64_t m, F&& f) {
+  if (n == 1 && m == 1) return f(IntC<1>{}, IntC<1>{});
+  if (n == 2 && m == 1) return f(IntC<2>{}, IntC<1>{});
+  if (n == 2 && m == 2) return f(IntC<2>{}, IntC<2>{});
+  f(IntC<-1>{}, IntC<-1>{});
+}
 using CMapV = Eigen::Map<const VecD>;
 using VarV = Eigen::Matrix<stan::math::var, -1, 1>;
 using VarM = Eigen::Matrix<stan::math::var, -1, -1>;
@@ -343,45 +359,70 @@ void log_det_bwd(KernelCtx& ctx) {
 // quad_form_sym convention: bit 0 marks vector B and bit 1 marks an active
 // expression. The active vector overload associates B' * A * B, whereas the
 // primitive overload uses B.dot(A * B).
-void qf_fwd(KernelCtx& ctx) {
+template <int N, int M, bool Vec>
+void qf_fwd_t(KernelCtx& ctx) {
+  constexpr int K = (N == Eigen::Dynamic) ? Eigen::Dynamic : (Vec ? 1 : M);
   const int64_t n = ctx.idata[0], m = ctx.idata[1];
-  const CMapM a(ctx.in[0].data, n, n);
-  if (!(ctx.variant & 1u)) {
-    MapM(ctx.out.data, m, m) =
-        stan::math::quad_form(a, CMapM(ctx.in[1].data, n, m));
-    return;
+  const FixCMap<N, N> a(ctx.in[0].data, n, n);
+  if constexpr (!Vec) {
+    FixMap<M, M>(ctx.out.data, m, m) =
+        stan::math::quad_form(a, FixCMap<N, M>(ctx.in[1].data, n, m));
+  } else {
+    const FixM<N, 1> b = Eigen::Map<const FixM<N, 1>>(ctx.in[1].data, n);
+    if (!(ctx.variant & 2u)) {
+      ctx.out.data[0] = stan::math::quad_form(a, b);
+      return;
+    }
+    stan::math::check_square("quad_form", "A", a);
+    stan::math::check_multiplicable("quad_form", "A", a, "B", b);
+    const FixM<K, K> c = b.transpose() * a * b;
+    ctx.out.data[0] = c(0, 0);
   }
-  const VecD b = CMapV(ctx.in[1].data, n);
-  if (!(ctx.variant & 2u)) {
-    ctx.out.data[0] = stan::math::quad_form(a, b);
-    return;
-  }
-  stan::math::check_square("quad_form", "A", a);
-  stan::math::check_multiplicable("quad_form", "A", a, "B", b);
-  const MatD c = b.transpose() * a * b;
-  ctx.out.data[0] = c(0, 0);
 }
-void qf_bwd_impl(KernelCtx& ctx, int64_t n, int64_t m, bool vec) {
+template <typename F>
+void qf_shape_dispatch(const KernelCtx& ctx, F&& f) {
+  const int64_t n = ctx.idata[0];
+  const bool vec = ctx.variant & 1u;
+  if (n == 1 || n == 2) {
+    if (vec) {
+      if (n == 1) return f(IntC<1>{}, IntC<1>{}, std::true_type{});
+      return f(IntC<2>{}, IntC<1>{}, std::true_type{});
+    }
+    if (n == 2 && ctx.idata[1] == 2)
+      return f(IntC<2>{}, IntC<2>{}, std::false_type{});
+  }
+  if (vec) return f(IntC<-1>{}, IntC<-1>{}, std::true_type{});
+  f(IntC<-1>{}, IntC<-1>{}, std::false_type{});
+}
+void qf_fwd(KernelCtx& ctx) {
+  qf_shape_dispatch(ctx, [&](auto N, auto M, auto Vec) {
+    qf_fwd_t<N, M, Vec>(ctx);
+  });
+}
+template <int N, int M>
+void qf_bwd_t(KernelCtx& ctx, bool vec) {
   if (!ctx.in_adj[0].data && !ctx.in_adj[1].data) return;
-  const CMapM a(ctx.in[0].data, n, n);
-  const CMapM b(ctx.in[1].data, n, m);
-  MatD g(m, m);
+  const int64_t n = ctx.idata[0], m = vec ? 1 : ctx.idata[1];
+  const FixCMap<N, N> a(ctx.in[0].data, n, n);
+  const FixCMap<N, M> b(ctx.in[1].data, n, m);
+  FixM<M, M> g(m, m);
   if (vec) {
     g(0, 0) = ctx.out_adj;
   } else {
-    g = CMapM(ctx.out_adj_vec.data, m, m);
+    g = FixCMap<M, M>(ctx.out_adj_vec.data, m, m);
   }
   if (ctx.in_adj[0].data)
-    MapM(ctx.in_adj[0].data, n, n) += b * g * b.transpose();
+    FixMap<N, N>(ctx.in_adj[0].data, n, n) += b * g * b.transpose();
   if (ctx.in_adj[1].data)
-    MapM(ctx.in_adj[1].data, n, m) +=
+    FixMap<N, M>(ctx.in_adj[1].data, n, m) +=
         a * b * g.transpose() + a.transpose() * b * g;
 }
-void qf_bwd(KernelCtx& ctx) {
-  const int64_t n = ctx.idata[0];
-  const bool vec = ctx.variant & 1u;
-  qf_bwd_impl(ctx, n, vec ? 1 : ctx.idata[1], vec);
+void qf_bwd_impl(KernelCtx& ctx, bool vec) {
+  with_small_nm(ctx.idata[0], vec ? 1 : ctx.idata[1], [&](auto N, auto M) {
+    qf_bwd_t<N, M>(ctx, vec);
+  });
 }
+void qf_bwd(KernelCtx& ctx) { qf_bwd_impl(ctx, ctx.variant & 1u); }
 
 // ---- add_diag(A, d) -------------------------------------------------------
 // idata = {rows, cols}; variant 0 is a vector diagonal, 1 is a scalar.
@@ -426,31 +467,34 @@ void add_diag_bwd(KernelCtx& ctx) {
 // B.dot(A * B), a gemv and then a dot, while the rev path builds a
 // quad_form_vari over a column vector and evaluates B' * A * B, grouping
 // from the other end. The matrix overload has one association in both.
-void qfs_fwd(KernelCtx& ctx) {
+template <int N, int M, bool Vec>
+void qfs_fwd_t(KernelCtx& ctx) {
+  constexpr int K = (N == Eigen::Dynamic) ? Eigen::Dynamic : (Vec ? 1 : M);
   const int64_t n = ctx.idata[0], m = ctx.idata[1];
-  const CMapM a(ctx.in[0].data, n, n);
-  if (!(ctx.variant & 1u)) {
-    const CMapM b(ctx.in[1].data, n, m);
-    MapM(ctx.out.data, m, m) = stan::math::quad_form_sym(a, b);
-    return;
+  const FixCMap<N, N> a(ctx.in[0].data, n, n);
+  if constexpr (!Vec) {
+    const FixCMap<N, M> b(ctx.in[1].data, n, m);
+    FixMap<M, M>(ctx.out.data, m, m) = stan::math::quad_form_sym(a, b);
+  } else {
+    const FixM<N, 1> b = Eigen::Map<const FixM<N, 1>>(ctx.in[1].data, n);
+    if (!(ctx.variant & 2u)) {
+      ctx.out.data[0] = stan::math::quad_form_sym(a, b);
+      return;
+    }
+    stan::math::check_multiplicable("quad_form_sym", "A", a, "B", b);
+    stan::math::check_symmetric("quad_form_sym", "A", a);
+    FixM<K, K> c = b.transpose() * a * b;
+    const FixM<K, K> sym = 0.5 * (c + c.transpose());
+    c = sym;
+    ctx.out.data[0] = c(0, 0);
   }
-  const VecD b = CMapV(ctx.in[1].data, n);
-  if (!(ctx.variant & 2u)) {
-    ctx.out.data[0] = stan::math::quad_form_sym(a, b);
-    return;
-  }
-  stan::math::check_multiplicable("quad_form_sym", "A", a, "B", b);
-  stan::math::check_symmetric("quad_form_sym", "A", a);
-  MatD c = b.transpose() * a * b;
-  const MatD sym = 0.5 * (c + c.transpose());
-  c = sym;
-  ctx.out.data[0] = c(0, 0);
 }
-void qfs_bwd(KernelCtx& ctx) {
-  const int64_t n = ctx.idata[0];
-  const bool vec = ctx.variant & 1u;
-  qf_bwd_impl(ctx, n, vec ? 1 : ctx.idata[1], vec);
+void qfs_fwd(KernelCtx& ctx) {
+  qf_shape_dispatch(ctx, [&](auto N, auto M, auto Vec) {
+    qfs_fwd_t<N, M, Vec>(ctx);
+  });
 }
+void qfs_bwd(KernelCtx& ctx) { qf_bwd_impl(ctx, ctx.variant & 1u); }
 
 // Bind a slot as a var matrix or vector, and scatter the adjoints back
 // afterwards. Shared by the multivariate densities below and by the tail
@@ -865,33 +909,64 @@ int64_t mnc_scratch(const Op& op, const Slot* slots) {
 
 // ---- general matrix product: out = A * B ----------------------------------
 // idata = {rows_a, cols_a, cols_b}; either side may carry adjoints.
-void gemm_fwd(KernelCtx& ctx) {
+template <int RA, int CA, int CB>
+void gemm_fwd_t(KernelCtx& ctx) {
   const int64_t ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
-  CMapM A(ctx.in[0].data, ra, ca);
-  CMapM B(ctx.in[1].data, ca, cb);
-  MapM(ctx.out.data, ra, cb) = A * B;
+  FixCMap<RA, CA> A(ctx.in[0].data, ra, ca);
+  FixCMap<CA, CB> B(ctx.in[1].data, ca, cb);
+  FixMap<RA, CB>(ctx.out.data, ra, cb) = A * B;
 }
-void gemm_bwd(KernelCtx& ctx) {
+template <int RA, int CA, int CB>
+void gemm_bwd_t(KernelCtx& ctx) {
   const int64_t ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
-  CMapM A(ctx.in[0].data, ra, ca);
-  CMapM B(ctx.in[1].data, ca, cb);
-  CMapM dO(ctx.out_adj_vec.data, ra, cb);
+  FixCMap<RA, CA> A(ctx.in[0].data, ra, ca);
+  FixCMap<CA, CB> B(ctx.in[1].data, ca, cb);
+  FixCMap<RA, CB> dO(ctx.out_adj_vec.data, ra, cb);
   const auto scalar_adjoint = dO.unaryExpr([](double value) { return value; });
   // The mixed Stan Math overloads consume Matrix<var>::adj_op() directly;
   // only the two-active-input overload evaluates that view into doubles.
   if (ctx.in_adj[0].data) {
+    FixMap<RA, CA> dA(ctx.in_adj[0].data, ra, ca);
     if (ctx.in_adj[1].data)
-      MapM(ctx.in_adj[0].data, ra, ca) += dO * B.transpose();
+      dA += dO * B.transpose();
     else
-      MapM(ctx.in_adj[0].data, ra, ca) += scalar_adjoint * B.transpose();
+      dA += scalar_adjoint * B.transpose();
   }
   if (ctx.in_adj[1].data) {
+    FixMap<CA, CB> dB(ctx.in_adj[1].data, ca, cb);
     if (ctx.in_adj[0].data)
-      MapM(ctx.in_adj[1].data, ca, cb) += A.transpose() * dO;
+      dB += A.transpose() * dO;
     else
-      MapM(ctx.in_adj[1].data, ca, cb) += A.transpose() * scalar_adjoint;
+      dB += A.transpose() * scalar_adjoint;
   }
 }
+template <bool Bwd>
+void gemm_dispatch(KernelCtx& ctx) {
+  const int ra = ctx.idata[0], ca = ctx.idata[1], cb = ctx.idata[2];
+  const auto run = [&](auto RA, auto CA, auto CB) {
+    if constexpr (Bwd)
+      gemm_bwd_t<RA, CA, CB>(ctx);
+    else
+      gemm_fwd_t<RA, CA, CB>(ctx);
+  };
+  const bool tiny = ca >= 1 && ca <= 2 && cb >= 1 && cb <= 2;
+  const bool a_only = Bwd && ctx.in_adj[0].data && !ctx.in_adj[1].data;
+  if (tiny && ra == 2 && !(a_only && ca == 1 && cb == 2)) {
+    if (ca == 1 && cb == 1) return run(IntC<2>{}, IntC<1>{}, IntC<1>{});
+    if (ca == 1) return run(IntC<2>{}, IntC<1>{}, IntC<2>{});
+    if (cb == 1) return run(IntC<2>{}, IntC<2>{}, IntC<1>{});
+    return run(IntC<2>{}, IntC<2>{}, IntC<2>{});
+  }
+  if (tiny && ra == 1 && !(Bwd && ca == 2 && cb == 2)) {
+    if (ca == 1 && cb == 1) return run(IntC<1>{}, IntC<1>{}, IntC<1>{});
+    if (ca == 1) return run(IntC<1>{}, IntC<1>{}, IntC<2>{});
+    if (cb == 1) return run(IntC<1>{}, IntC<2>{}, IntC<1>{});
+    return run(IntC<1>{}, IntC<2>{}, IntC<2>{});
+  }
+  run(IntC<-1>{}, IntC<-1>{}, IntC<-1>{});
+}
+void gemm_fwd(KernelCtx& ctx) { gemm_dispatch<false>(ctx); }
+void gemm_bwd(KernelCtx& ctx) { gemm_dispatch<true>(ctx); }
 
 // ---- crossprod(A): out = A' * A ------------------------------------------
 // idata = {rows, cols}; variant bit 0 records an autodiff result. Stan Math's
