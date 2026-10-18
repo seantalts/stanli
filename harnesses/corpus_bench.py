@@ -7,6 +7,9 @@ is a fixed-work proxy, not measured HMC or sampling time.
 A sibling fresh.tsv.run directory holds the frozen manifest and raw evidence.
 --resume requires identical inputs, binaries and settings. Historical TSVs are
 never appended to, and candidate-only refreshes cannot create paired results.
+CmdStan builds finish before any timing: stanc and make run one at a time, gradient
+drivers in parallel (--build-jobs). Builds are reused across runs from --build-cache;
+--no-build-cache builds inside the run directory.
 """
 import argparse
 import csv
@@ -21,6 +24,7 @@ import signal
 import shutil
 import shlex
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import statistics
 import subprocess
 import sys
@@ -29,11 +33,14 @@ import threading
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
+from bench_build_cache import BuildCache, cache_key
 from cmdstan_ref import compile_cmd
 from corpus_inventory import corpus_cases
 
 PROTOCOL = "stanli-corpus-v4"
 GRADIENT_BUDGET = 20000
+CACHE_STEM = "model"
+DEFAULT_CACHE = pathlib.Path("~/.cache/stanli/corpus-bench")
 BENCH = REPO / "build-rel/bench_grad"
 STANC = REPO / "deps/stanc3/stanc"
 VECTORIZE_PROBE = REPO / "deps/stanc3/stanli-vectorize-probe"
@@ -116,11 +123,28 @@ class Runner:
         self.directory = directory
         (directory / "logs").mkdir(exist_ok=True)
         self.events = directory / "events.jsonl"
-        self.next_id = sum(1 for _ in self.events.open()) if self.events.exists() else 0
+        self.lock = threading.Lock()
+        self.active = set()
+        recorded = ([json.loads(line)["id"] for line in self.events.read_text().splitlines()]
+                    if self.events.exists() else [])
+        self.next_id = max(recorded, default=-1) + 1
+
+    def kill_active(self):
+        with self.lock:
+            processes = list(self.active)
+        for process in processes:
+            try:
+                if os.name == "posix":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+            except (ProcessLookupError, PermissionError):
+                pass
 
     def run(self, phase, argv, timeout, cwd=None):
-        event_id = self.next_id
-        self.next_id += 1
+        with self.lock:
+            event_id = self.next_id
+            self.next_id += 1
         stdout = self.directory / "logs" / f"{event_id:06d}.stdout"
         stderr = self.directory / "logs" / f"{event_id:06d}.stderr"
         record = dict(id=event_id, phase=phase, argv=list(map(str, argv)),
@@ -134,6 +158,8 @@ class Runner:
                 process = subprocess.Popen(record["argv"], cwd=record["cwd"],
                     stdout=out, stderr=err, env={**os.environ, **THREAD_ENV},
                     start_new_session=(os.name == "posix"))
+                with self.lock:
+                    self.active.add(process)
                 # wait(timeout=...) polls with sleeps up to 50 ms on POSIX.
                 # A separate deadline lets waitpid observe short runs promptly.
                 expired = threading.Event()
@@ -163,13 +189,15 @@ class Runner:
                     record["status"] = "interrupted"
                     raise
                 finally:
+                    with self.lock:
+                        self.active.discard(process)
                     timer.cancel()
                     timer.join()
             except OSError as exc:
                 record.update(status="failed", returncode=None, error=str(exc))
             finally:
                 record["elapsed_s"] = time.perf_counter() - start
-                with self.events.open("a") as events:
+                with self.lock, self.events.open("a") as events:
                     events.write(json.dumps(record, allow_nan=False) + "\n")
         return record
 
@@ -267,27 +295,257 @@ def setup_phase(runner, setup, key, phase, argv, timeout, cwd=None):
     event = runner.run(phase, argv, timeout, cwd)
     setup[key] = event
     if event["status"] != "ok":
-        raise PhaseFailure(f"{phase}: {event['status']} (event {event['id']})")
+        raise PhaseFailure(failure_note(phase, event))
     return event
 
 
-def build_model(name, stan, data, work, runner, args, setup=None):
-    setup = {} if setup is None else setup
+def failure_note(phase, event):
+    return f"{phase}: {event['status']} (event {event['id']})"
+
+
+def stanli_compile(name, stan, work, runner, args, setup):
     work.mkdir(exist_ok=True)
-    source, hpp, mir = work / f"{name}.stan", work / f"{name}.hpp", work / "model.sexp"
+    source, mir = work / f"{name}.stan", work / "model.sexp"
     source.write_bytes(stan.read_bytes())
     fast = ["--fast-math"] if getattr(args, "fast_math", False) else []
     setup_phase(runner, setup, "stanli_compile", f"{name}/stanli-mir",
         [args.vectorize_probe, "--vectorize-loops", "on", *fast, "--output", mir, source],
         args.build_timeout)
-    setup_phase(runner, setup, "cmdstan_stanc", f"{name}/stanc-cpp",
-        [args.stanc, source, f"--o={hpp}", *shlex.split(args.stancflags)], args.build_timeout)
-    gradient = work / "gradbench"
-    runner.require(f"{name}/gradient-driver-build",
-        compile_cmd(args.cmdstan, hpp, REPO / "tools/bench_cmdstan_grad.cpp", gradient, opt="-O3"),
-        args.build_timeout)
-    executables = {"stanli": [args.bench, mir, data], "cmdstan": [gradient, data]}
+    return mir, source
+
+
+class CmdstanCache:
+    def __init__(self, store, context, run_id):
+        self.store, self.context, self.run_id = store, context, run_id
+
+    def key(self, stan):
+        return cache_key(self.context, sha(stan))
+
+
+def cached_build(name, key, meta, cache):
+    reused = dict(status="ok", returncode=0, cached=True, cache_key=key, cache_run_id=meta["run_id"])
+    entry = cache.store.entry(key)
+    return dict(
+        setup={"cmdstan_stanc": dict(reused, phase=f"{name}/stanc-cpp", elapsed_s=meta["stanc_s"]),
+               "cmdstan_build": dict(reused, phase=f"{name}/cmdstan-build", elapsed_s=meta["build_s"])},
+        gradient=entry / "gradbench", executable=entry / CACHE_STEM,
+        gradient_failure=None, build_failure=None,
+        cache=dict(directory=str(cache.store.root), key=key, hit=True, run_id=meta["run_id"]))
+
+
+class CmdstanJob:
+    """One model's CmdStan build in stages, so a caller can serialize the timed ones."""
+    def __init__(self, name, stan, work, cache=None):
+        self.name, self.stan, self.work, self.cache = name, stan, work, cache
+        self.scratch = None
+        work.mkdir(parents=True, exist_ok=True)
+        if cache is None:
+            self.directory, self.stem = work, name
+            self.build = dict(setup={}, gradient=None, executable=None, gradient_failure=None,
+                              build_failure=None, cache=dict(directory=None, hit=False))
+            (work / f"{name}.stan").write_bytes(stan.read_bytes())
+            return
+        self.key = cache.key(stan)
+        meta = cache.store.lookup(self.key)
+        if meta is not None:
+            self.build = cached_build(name, self.key, meta, cache)
+            return
+        self.scratch = self.directory = cache.store.scratch(self.key)
+        self.stem = CACHE_STEM
+        self.build = dict(setup={}, gradient=None, executable=None, gradient_failure=None,
+                          build_failure=None, cache=dict(directory=str(cache.store.root),
+                                                         key=self.key, hit=False))
+        (self.directory / f"{CACHE_STEM}.stan").write_bytes(stan.read_bytes())
+
+    @property
+    def hit(self):
+        return self.build["cache"]["hit"]
+
+    def stanc(self, runner, args):
+        phase = f"{self.name}/stanc-cpp"
+        event = self.build["setup"]["cmdstan_stanc"] = runner.run(
+            phase, [args.stanc, f"{self.stem}.stan", f"--o={self.stem}.hpp", *shlex.split(args.stancflags)],
+            args.build_timeout, self.directory)
+        if event["status"] != "ok":
+            self.build["gradient_failure"] = failure_note(phase, event)
+
+    def header_ready(self):
+        return self.build["setup"].get("cmdstan_stanc", {}).get("status") == "ok"
+
+    def driver(self, runner, args):
+        phase = f"{self.name}/gradient-driver-build"
+        event = runner.run(phase, driver_command(args.cmdstan.resolve(), f"{self.stem}.hpp",
+                                                 REPO / "tools/bench_cmdstan_grad.cpp", "gradbench"),
+                           args.build_timeout, self.directory)
+        self.build["driver_build_s"] = event["elapsed_s"]
+        if event["status"] == "ok":
+            self.build["gradient"] = self.directory / "gradbench"
+        else:
+            self.build["gradient_failure"] = failure_note(phase, event)
+
+    def make(self, runner, args):
+        phase = f"{self.name}/cmdstan-build"
+        executable = self.directory / self.stem
+        event = self.build["setup"]["cmdstan_build"] = runner.run(
+            phase, make_command(executable, args.stanc, args.stancflags), args.build_timeout,
+            args.cmdstan.resolve())
+        if event["status"] == "ok":
+            self.build["executable"] = executable
+        else:
+            self.build["build_failure"] = failure_note(phase, event)
+
+    def finish(self):
+        """Publish a complete build into the cache; keep an incomplete one in the run."""
+        build = self.build
+        if self.scratch is None:
+            return build
+        store, scratch = self.cache.store, self.scratch
+        try:
+            if build["gradient_failure"] or build["build_failure"]:
+                kept = self.work / "cmdstan-build"
+                shutil.rmtree(kept, ignore_errors=True)
+                shutil.move(str(scratch), kept)
+                for field in ("gradient", "executable"):
+                    if build[field]:
+                        build[field] = kept / build[field].name
+                return build
+            setup = build["setup"]
+            files = [f"{CACHE_STEM}.stan", f"{CACHE_STEM}.hpp", "gradbench", CACHE_STEM]
+            meta = dict(files=files, run_id=self.cache.run_id, key=self.key,
+                        created_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        stanc_s=setup["cmdstan_stanc"]["elapsed_s"], build_s=setup["cmdstan_build"]["elapsed_s"],
+                        driver_build_s=build["driver_build_s"],
+                        driver_sha256=sha(scratch / "gradbench"), executable_sha256=sha(scratch / CACHE_STEM))
+            if not store.commit(scratch, self.key, meta):
+                build["cache"]["raced"] = True
+            entry = store.entry(self.key)
+            build["gradient"], build["executable"] = entry / "gradbench", entry / CACHE_STEM
+            return build
+        finally:
+            store.discard(scratch)
+
+    def abort(self):
+        if self.scratch is not None:
+            self.cache.store.discard(self.scratch)
+
+
+def cmdstan_build(name, stan, work, runner, args, cache=None):
+    """Build the CmdStan binaries for one model, or reuse the cached ones."""
+    job = CmdstanJob(name, stan, work, cache)
+    try:
+        if not job.hit:
+            job.stanc(runner, args)
+            if job.header_ready():
+                job.driver(runner, args)
+                job.make(runner, args)
+        return job.finish()
+    except BaseException:
+        job.abort()
+        raise
+
+
+def prebuild(inputs, directory, runner, args, cache=None):
+    """Build every CmdStan binary before any timing starts; a failure stays with its model.
+
+    The stanc and make durations are published, so those commands run one at a
+    time with nothing else building. Only the unpublished gradient drivers run in parallel.
+    """
+    leaders, twins, seen = [], [], set()
+    for name, (stan, _) in inputs.items():
+        try:
+            key = cache.key(stan) if cache else name
+        except OSError:
+            key = name
+        (twins if key in seen else leaders).append(name)
+        seen.add(key)
+
+    builds, jobs = {}, {}
+
+    def broken(name, exc):
+        builds[name] = dict(setup={}, gradient=None, executable=None, build_failure=None,
+                            gradient_failure=f"{name}/cmdstan-build: error ({exc})",
+                            cache=dict(directory=str(cache.store.root) if cache else None, hit=False))
+
+    def guarded(name, step):
+        try:
+            step(jobs[name])
+        except Exception as exc:
+            jobs.pop(name).abort()
+            broken(name, exc)
+
+    def report(name):
+        build = builds[name]
+        failed = build["gradient_failure"] or build["build_failure"]
+        print(f"{name}: cmdstan build {'failed' if failed else 'cached' if build['cache']['hit'] else 'built'}",
+              flush=True)
+
+    pool = ThreadPoolExecutor(max_workers=args.build_jobs)
+    try:
+        for wave in (leaders, twins):
+            for name in wave:
+                try:
+                    jobs[name] = CmdstanJob(name, inputs[name][0], directory / name, cache)
+                except Exception as exc:
+                    broken(name, exc)
+            misses = [n for n in wave if n in jobs and not jobs[n].hit]
+            for name in misses:
+                guarded(name, lambda job: job.stanc(runner, args))
+            ready = [n for n in misses if n in jobs and jobs[n].header_ready()]
+            for future in as_completed([pool.submit(guarded, n, lambda job: job.driver(runner, args))
+                                        for n in ready]):
+                future.result()
+            for name in ready:
+                if name in jobs:
+                    guarded(name, lambda job: job.make(runner, args))
+            for name in wave:
+                if name in jobs:
+                    guarded(name, lambda job: builds.__setitem__(name, job.finish()))
+                report(name)
+    except BaseException:
+        pool.shutdown(wait=False, cancel_futures=True)
+        runner.kill_active()
+        for job in jobs.values():
+            job.abort()
+        raise
+    finally:
+        pool.shutdown(wait=True)
+    return {name: builds[name] for name in inputs}
+
+
+def build_model(name, stan, data, work, runner, args, setup=None, build=None):
+    setup = {} if setup is None else setup
+    build = {} if build is None else build
+    mir, source = stanli_compile(name, stan, work, runner, args, setup)
+    if not build:
+        build.update(cmdstan_build(name, stan, work, runner, args))
+    if "cmdstan_stanc" in build["setup"]:
+        setup["cmdstan_stanc"] = build["setup"]["cmdstan_stanc"]
+    if build["gradient_failure"]:
+        raise PhaseFailure(build["gradient_failure"])
+    executables = {"stanli": [args.bench, mir, data], "cmdstan": [build["gradient"], data]}
     return executables, source
+
+
+def driver_command(cmdstan, hpp, driver, gradient):
+    return compile_cmd(cmdstan, hpp, driver, gradient, opt="-O3")
+
+
+def make_command(exe, stanc, stancflags):
+    return ["make", exe, f"STANC={stanc}", f"STANCFLAGS={stancflags}"]
+
+
+def cache_context(args, expected):
+    """Everything besides the .stan bytes that determines the CmdStan binaries."""
+    cmdstan = args.cmdstan.resolve()
+    sources = expected["sources"]
+    return dict(
+        stanc_sha256=expected["executables"]["stanc"], stancflags=args.stancflags,
+        driver_sha256=sources["tools/bench_cmdstan_grad.cpp"],
+        timer_sha256=sources["tools/benchmark_timer.hpp"],
+        toolchains={k: v for k, v in expected["toolchains"].items() if not k.startswith("stanli_")},
+        cmdstan=str(cmdstan),
+        driver_command=list(map(str, driver_command(cmdstan, f"{CACHE_STEM}.hpp", "{driver}", "gradbench"))),
+        make_command=list(map(str, make_command("{exe}", "{stanc}", args.stancflags))))
 
 
 def setup_estimates(row, setup):
@@ -309,22 +567,22 @@ def setup_estimates(row, setup):
 
 def run_config(args):
     config = {k: str(v) if isinstance(v, pathlib.Path) else v for k, v in vars(args).items()
-              if k not in ("resume", "output")}
+              if k not in ("resume", "output", "build_cache", "no_build_cache", "build_jobs")}
     if not config.get("fast_math"):
         config.pop("fast_math", None)
     return config
 
 
-def measure_model(name, stan, data, directory, manifest, runner, args):
+def measure_model(name, stan, data, directory, manifest, runner, args, build=None):
     row = dict(model=name, run_id=manifest["run_id"], gradient_budget=GRADIENT_BUDGET)
     record = dict(model=name, inputs={"stan": sha(stan), "data": sha(data)}, row=row,
                   gradients=[], setup={}, preparation_s=[], status="failed")
-    notes = []
+    notes, build = [], {} if build is None else build
     fast = ["--fast-math"] if getattr(args, "fast_math", False) else []
     source = directory / name / f"{name}.stan"
     try:
         commands, source = build_model(name, stan, data, directory / name, runner, args,
-                                       record["setup"])
+                                       record["setup"], build)
         record["executables"] = {engine: sha(command[0]) for engine, command in commands.items()}
         for round_index in range(args.rounds):
             pair = {}
@@ -358,15 +616,16 @@ def measure_model(name, stan, data, directory, manifest, runner, args):
     # An ordinary CmdStan executable is setup for the fixed-work proxy. Build
     # it independently of gradient/preparation success, without executing it.
     # Its failure must not discard already accepted gradient measurements.
-    if record["setup"].get("cmdstan_stanc", {}).get("status") == "ok":
-        try:
-            exe = source.with_suffix("")
-            setup_phase(runner, record["setup"], "cmdstan_build", f"{name}/cmdstan-build",
-                        ["make", exe, f"STANC={args.stanc}", f"STANCFLAGS={args.stancflags}"],
-                        args.build_timeout, args.cmdstan)
-            record["cmdstan_executable_sha256"] = sha(exe)
-        except (PhaseFailure, ValueError) as exc:
-            notes.append(str(exc))
+    if record["setup"].get("cmdstan_stanc", {}).get("status") == "ok" and "cmdstan_build" in build["setup"]:
+        record["setup"]["cmdstan_build"] = build["setup"]["cmdstan_build"]
+        if build["build_failure"]:
+            notes.append(build["build_failure"])
+        else:
+            try:
+                record["cmdstan_executable_sha256"] = sha(build["executable"])
+            except (OSError, ValueError) as exc:
+                notes.append(str(exc))
+    record["build_cache"] = build.get("cache")
     try:
         setup_estimates(row, record["setup"])
     except ValueError as exc:
@@ -405,7 +664,18 @@ def main(argv=None):
     parser.add_argument("--vectorize-probe", type=pathlib.Path, default=VECTORIZE_PROBE)
     parser.add_argument("--fast-math", action="store_true",
                         help="build stanli MIR in fast mode and run bench_grad --fast-math")
+    parser.add_argument("--build-cache", type=pathlib.Path,
+                        help="directory of reusable CmdStan builds "
+                             f"(default: $STANLI_BENCH_CACHE or {DEFAULT_CACHE})")
+    parser.add_argument("--no-build-cache", action="store_true",
+                        help="build every CmdStan binary inside the run directory")
+    parser.add_argument("--build-jobs", type=int, default=8,
+                        help="gradient driver builds to run at once before timing starts")
     args = parser.parse_args(argv)
+    if args.build_cache and args.no_build_cache:
+        parser.error("--build-cache and --no-build-cache are exclusive")
+    if args.build_jobs < 1:
+        parser.error("--build-jobs must be at least one")
     if args.rounds < 2 or args.rounds % 2:
         parser.error("--rounds must be even and at least two for balanced engine order")
     if not all(1 <= n <= 60000 for n in (args.warmup_ms, args.measure_ms)):
@@ -430,6 +700,11 @@ def main(argv=None):
                                 "STANLI_DEBUG_", "STANLI_DUMP_")))]
     if overrides:
         parser.error("unset benchmark environment overrides: " + ", ".join(sorted(overrides)))
+    if args.no_build_cache:
+        args.build_cache = None
+    else:
+        args.build_cache = pathlib.Path(args.build_cache or os.getenv("STANLI_BENCH_CACHE")
+                                        or DEFAULT_CACHE).expanduser().absolute()
     # Resolve inputs in a separate temporary cache before freezing their identities.
     import tempfile
     with tempfile.TemporaryDirectory(prefix="stanli-bench-inputs-") as cache:
@@ -446,7 +721,7 @@ def main(argv=None):
             parser.error("no models selected")
         config = run_config(args)
         config["gradient_budget"] = GRADIENT_BUDGET
-        identities = {str(p.relative_to(REPO)): sha(p) for p in (
+        identities = {p.relative_to(REPO).as_posix(): sha(p) for p in (
             REPO / "harnesses/corpus_bench.py", REPO / "tools/benchmark_timer.hpp",
             REPO / "tools/bench_grad.cpp", REPO / "tools/bench_cmdstan_grad.cpp",
             REPO / "tools/cmdstan_ref.py", REPO / "tools/verify_refs.py",
@@ -487,13 +762,27 @@ def main(argv=None):
                 copies.append(copied)
             inputs[name] = tuple(copies)
         runner, records = Runner(directory), {}
-        for name, (stan, data) in inputs.items():
+        for name in inputs:
             saved = directory / f"{name}.result.json"
             if args.resume and saved.exists():
                 records[name] = json.loads(saved.read_text())
-            else:
+        pending = {name: copies for name, copies in inputs.items() if name not in records}
+        cache = (CmdstanCache(BuildCache(args.build_cache), cache_context(args, expected),
+                              manifest["run_id"]) if args.build_cache else None)
+        started = time.perf_counter()
+        builds = prebuild(pending, directory, runner, args, cache)
+        with (directory / "build-prepass.jsonl").open("a") as stream:
+            stream.write(json.dumps(dict(
+                started_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), jobs=args.build_jobs,
+                cache_directory=str(args.build_cache) if cache else None,
+                wall_s=time.perf_counter() - started,
+                models={name: dict(hit=build["cache"]["hit"], key=build["cache"].get("key"))
+                        for name, build in builds.items()}), allow_nan=False) + "\n")
+        for name, (stan, data) in inputs.items():
+            if name not in records:
                 print(f"{name}: paired gradient measurements", flush=True)
-                records[name] = measure_model(name, stan, data, directory, manifest, runner, args)
+                records[name] = measure_model(name, stan, data, directory, manifest, runner, args,
+                                              builds[name])
             write_summary(args.output, records)
             print(f"{name}: {records[name]['status']} {records[name]['row']['note']}", flush=True)
         return int(any(r["status"] != "ok" for r in records.values()))

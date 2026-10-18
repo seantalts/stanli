@@ -14,7 +14,10 @@ def artifact_fixture():
             inputs={name: dict(stan=name + "-stan", data=name + "-data", collection="posteriordb")
                     for name in ("good", "failed")},
             executables=dict(bench="bench-hash", vectorize_probe="probe-hash", stanc="b" * 64),
-            threads={"STAN_NUM_THREADS": "1"}))
+            threads={"STAN_NUM_THREADS": "1"},
+            sources={"harnesses/corpus_bench.py": "harness-hash", "tools/bench_cmdstan_grad.cpp": "driver-hash",
+                     "tools/benchmark_timer.hpp": "timer-hash"},
+            machine=dict(platform="macOS-arm64", host="host", processor="arm", logical_cpus=32)))
     pairs = []
     for index, (s, c) in enumerate(zip((100, 200, 300, 400, 500, 600),
                                       (1000, 300, 400, 900, 600, 800))):

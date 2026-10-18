@@ -325,6 +325,7 @@ VECTORIZED_ROOT = CATALOG_ROOT / "output/corpus-performance-vectorized"
 CATALOG_GRADIENT_BUDGET = 2000
 GRADIENT_FIELDS = ("stanli_ns_grad", "stanli_ns_grad_mad", "cmdstan_ns_grad",
                    "cmdstan_ns_grad_mad", "paired_speedup", "paired_speedup_mad")
+CACHE_FIELDS = ("cached", "cache_key", "cache_run_id")
 SETUP_PHASES = {"stanli_compile": "stanli-mir", "cmdstan_stanc": "stanc-cpp",
                 "cmdstan_build": "cmdstan-build"}
 
@@ -440,6 +441,11 @@ def _catalog_setup(model, record, row, config, gradients):
                 raise ValueError(f"Invalid setup event: {model} {key}")
             if event["status"] == "ok" and event.get("returncode") != 0:
                 raise ValueError(f"Successful setup event lacks exit status zero: {model} {key}")
+            if any(field in event for field in CACHE_FIELDS) and (
+                    key == "stanli_compile" or event["status"] != "ok" or event.get("cached") is not True
+                    or any(not isinstance(event.get(field), str) or not event[field]
+                           for field in CACHE_FIELDS[1:])):
+                raise ValueError(f"Invalid setup event: {model} {key}")
             expected = duration if event["status"] == "ok" else None
         field = key + "_s"
         values[field] = _catalog_number(row, field)
@@ -557,6 +563,18 @@ def _catalog_tables(rows, details, speedup_field="paired_speedup"):
     return "\n".join(output) + "\n"
 
 
+def _cached_models(details):
+    return sum(1 for record in details.values()
+               if any(event.get("cached") for event in record.get("setup", {}).values()))
+
+
+def _reuse_note(count, total, where="this run"):
+    if not count:
+        return ""
+    return (f"CmdStan stanc and build times for {count} of {total} models were reused from "
+            f"the build cache and not remeasured in {where}.\n\n")
+
+
 def render_catalog(summary_path=CATALOG_SUMMARY, records_path=CATALOG_RECORDS,
                    manifest_path=CATALOG_MANIFEST, allow_filter=False):
     """One current setup-plus-fixed-gradient proxy table, never sampling time."""
@@ -567,7 +585,7 @@ def render_catalog(summary_path=CATALOG_SUMMARY, records_path=CATALOG_RECORDS,
         f"Run `{_catalog_cell(manifest['run_id'])}` ({_catalog_cell(manifest['started_utc'][:10])}): "
         f"{len(rows)} models, {config['rounds']} alternating gradient pairs.\n\n"
     )
-    return intro + _catalog_tables(rows, details)
+    return intro + _reuse_note(_cached_models(details), len(rows)) + _catalog_tables(rows, details)
 
 
 DEFAULT_ROOT = CATALOG_ROOT / "output/corpus-performance"
@@ -584,6 +602,14 @@ def _cmdstan_toolchain(identity):
             if not key.startswith("stanli_")}
 
 
+REUSE_SOURCES = ("tools/bench_cmdstan_grad.cpp", "tools/benchmark_timer.hpp")
+
+
+def _machine(identity):
+    machine = identity.get("machine")
+    return {key: value for key, value in machine.items() if key != "host"} if machine else None
+
+
 def _check_optimized_run(manifest, default, provenance):
     identity, baseline = manifest["identity"], default["identity"]
     config, default_config = identity["config"], _catalog_config(default)
@@ -596,6 +622,12 @@ def _check_optimized_run(manifest, default, provenance):
         raise ValueError("Vectorized/default thread settings differ")
     if _cmdstan_toolchain(identity) != _cmdstan_toolchain(baseline):
         raise ValueError("Vectorized/default CmdStan toolchain differs")
+    if any(not identity.get("sources", {}).get(path)
+           or identity["sources"][path] != baseline.get("sources", {}).get(path)
+           for path in REUSE_SOURCES):
+        raise ValueError("Vectorized/default CmdStan driver sources differ")
+    if _machine(identity) is None or _machine(identity) != _machine(baseline):
+        raise ValueError("Vectorized/default machine differs")
     if (provenance.get("optimization") != "O1 plus vectorize_loops"
             or provenance.get("binary_sha256") != identity["executables"].get("stanc")
             or not re.fullmatch(r"[0-9a-f]{40}", provenance.get("source_sha", ""))
@@ -663,7 +695,7 @@ def combined_vectorized_rows(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
         else:
             merged["stanli_ns_grad"] = merged["cmdstan_ns_grad"] = ""
         output.append(merged)
-        statuses[model] = {"status": status}
+        statuses[model] = {"status": status, "cached": bool(_cached_models({model: details[model]}))}
     return output, statuses, default, {run_id: manifest for run_id, (_, manifest, _) in runs.items()}
 
 
@@ -682,7 +714,9 @@ def render_gradient_catalog(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
     intro = (f"Stanli timings are from the default run `{_catalog_cell(default['run_id'])}`. "
              f"The CmdStan timings with loop vectorization are reused from {describe(main)}."
              f"{supplements} Each ratio is CmdStan's median gradient time divided by Stanli's.\n\n")
-    return intro + _catalog_tables(rows, statuses, "median_ratio")
+    reused = _reuse_note(sum(status["cached"] for status in statuses.values()), len(rows),
+                         "the runs that report them")
+    return intro + reused + _catalog_tables(rows, statuses, "median_ratio")
 
 
 def require_historical_tsv(col):
