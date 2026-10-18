@@ -18,7 +18,7 @@ template <int R, int C>
 using FMat = Eigen::Matrix<
     double, R, C,
     (R == 1 && C != 1) ? Eigen::RowMajor : (C == 1 && R != 1 ? Eigen::ColMajor : 0),
-    (R == kDyn && C != kDyn) ? 2 : R, (C == kDyn && R != kDyn) ? 2 : C>;
+    (R == kDyn && C == 2) ? 2 : R, (C == kDyn && R == 2) ? 2 : C>;
 template <int R, int C>
 using FMap = Eigen::Map<FMat<R, C>>;
 template <int R, int C>
