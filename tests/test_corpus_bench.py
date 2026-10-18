@@ -770,6 +770,14 @@ class VectorizedCatalogTests(VectorizedFixture):
         with self.assertRaisesRegex(ValueError, "toolchain"):
             self.render()
 
+    def test_stanli_checkouts_may_differ_from_reused_run(self):
+        self.default[0]["identity"]["toolchains"]["stanli_math"] = {"tracked_diff_sha256": "new"}
+        self.sources["old"][0]["identity"]["toolchains"]["stanli_math"] = {"tracked_diff_sha256": "old"}
+        self.assertIn("| `good` | 4x |", self.render())
+        self.sources["old"][0]["identity"]["toolchains"]["clang_sha256"] = "other"
+        with self.assertRaisesRegex(ValueError, "toolchain"):
+            self.render()
+
     def test_gradient_protocol_must_match_default_run(self):
         self.sources["old"][0]["identity"]["config"]["measure_ms"] = 300
         with self.assertRaisesRegex(ValueError, "configuration differs"):

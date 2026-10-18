@@ -1,12 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.22.0
+
+Faster brms and cognitive models through R and Python on Linux, faster
+ctsem on large data, and a smaller C API.
 
 ### Performance
 
-- Large ctsem-style retained loops no longer seal frames. Gradients are
-  about 1.09x faster on large datasets, and peak memory is about 2x higher
-  (0.74 GB to 1.6 GB at 64,000 rows).
+- On Linux x86-64, the runtime library that R and Python load reaches Stan
+  Math's thread-local autodiff stack without a function call per access.
+  Models whose functions run Stan Math autodiff inside, such as
+  `wiener_lpdf`, get faster: on an i9-13900K the brms DDM-4 program from
+  issue #455 is 1.25-1.37x faster per gradient than in 0.21.0, and about 1.1x
+  faster than CmdStan. Results are bitwise identical. On other platforms the
+  reverse pass now looks up the autodiff stack once instead of once per
+  node.
+- ctsem models with large datasets: gradients are about 1.09x faster, and
+  peak memory is about 2x higher (0.74 GB to 1.6 GB at 64,000 rows).
 
 ### Fixes
 
@@ -14,6 +24,9 @@
   mode. It used to return success and leave that output row unwritten.
 - The batched sqrt gradient keeps the sign of a zero adjoint, matching the
   scalar form bit for bit.
+- The web page runs every posteriordb model with 1000 warmup iterations and
+  1000 draws, the same as the built-in presets. It used 100 of each, too
+  short for many models to converge.
 
 ### API changes
 
@@ -32,6 +45,10 @@
   - `stanli_sample_multi`, `stanli_sample_multi_progress`,
     `stanli_sample_multi_interruptible` and `stanli_sample_multi_write_array`:
     use `stanli_sample_multi_metric`.
+
+### Docs
+
+- The user docs are reorganized and shorter, one page per topic.
 
 ## 0.21.0
 
