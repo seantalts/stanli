@@ -601,6 +601,40 @@ class CachedSetupVectorizedTests(existing.VectorizedFixture):
                       "and not remeasured in the runs that report them.", intro)
 
 
+class VectorizedReuseIdentityTests(existing.VectorizedFixture):
+    def test_driver_and_timer_sources_must_match_the_default_run(self):
+        for path in ("tools/bench_cmdstan_grad.cpp", "tools/benchmark_timer.hpp"):
+            self.sources["old"][0]["identity"]["sources"][path] = "edited"
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, "sources"):
+                self.render()
+            self.sources["old"][0]["identity"]["sources"][path] = self.default[0]["identity"]["sources"][path]
+        self.assertIn("| `good` | 4x |", self.render())
+
+    def test_harness_and_stanli_side_sources_may_differ(self):
+        sources = self.sources["old"][0]["identity"]["sources"]
+        sources["harnesses/corpus_bench.py"] = "older-harness"
+        sources["tools/bench_grad.cpp"] = "older-stanli-driver"
+        self.assertIn("| `good` | 4x |", self.render())
+
+    def test_missing_driver_identity_is_not_a_match(self):
+        del self.sources["old"][0]["identity"]["sources"]["tools/benchmark_timer.hpp"]
+        with self.assertRaisesRegex(ValueError, "sources"):
+            self.render()
+
+    def test_machine_must_match_the_default_run(self):
+        for field, value in (("platform", "Linux-x86_64"), ("processor", "x86_64"), ("logical_cpus", 8)):
+            machine = self.sources["old"][0]["identity"]["machine"]
+            original = machine[field]
+            machine[field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "machine"):
+                self.render()
+            machine[field] = original
+
+    def test_a_renamed_host_is_the_same_machine(self):
+        self.sources["old"][0]["identity"]["machine"]["host"] = "Host.local"
+        self.assertIn("| `good` | 4x |", self.render())
+
+
 class CacheKeyTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

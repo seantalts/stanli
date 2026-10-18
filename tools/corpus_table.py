@@ -602,6 +602,14 @@ def _cmdstan_toolchain(identity):
             if not key.startswith("stanli_")}
 
 
+REUSE_SOURCES = ("tools/bench_cmdstan_grad.cpp", "tools/benchmark_timer.hpp")
+
+
+def _machine(identity):
+    machine = identity.get("machine")
+    return {key: value for key, value in machine.items() if key != "host"} if machine else None
+
+
 def _check_optimized_run(manifest, default, provenance):
     identity, baseline = manifest["identity"], default["identity"]
     config, default_config = identity["config"], _catalog_config(default)
@@ -614,6 +622,12 @@ def _check_optimized_run(manifest, default, provenance):
         raise ValueError("Vectorized/default thread settings differ")
     if _cmdstan_toolchain(identity) != _cmdstan_toolchain(baseline):
         raise ValueError("Vectorized/default CmdStan toolchain differs")
+    if any(not identity.get("sources", {}).get(path)
+           or identity["sources"][path] != baseline.get("sources", {}).get(path)
+           for path in REUSE_SOURCES):
+        raise ValueError("Vectorized/default CmdStan driver sources differ")
+    if _machine(identity) is None or _machine(identity) != _machine(baseline):
+        raise ValueError("Vectorized/default machine differs")
     if (provenance.get("optimization") != "O1 plus vectorize_loops"
             or provenance.get("binary_sha256") != identity["executables"].get("stanc")
             or not re.fullmatch(r"[0-9a-f]{40}", provenance.get("source_sha", ""))
