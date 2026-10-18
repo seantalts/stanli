@@ -118,11 +118,25 @@ class Runner:
         self.directory = directory
         (directory / "logs").mkdir(exist_ok=True)
         self.events = directory / "events.jsonl"
-        self.next_id = sum(1 for _ in self.events.open()) if self.events.exists() else 0
+        self.lock = threading.Lock()
+        self.active = set()
+        recorded = ([json.loads(line)["id"] for line in self.events.read_text().splitlines()]
+                    if self.events.exists() else [])
+        self.next_id = max(recorded, default=-1) + 1
+
+    def kill_active(self):
+        with self.lock:
+            processes = list(self.active)
+        for process in processes:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
 
     def run(self, phase, argv, timeout, cwd=None):
-        event_id = self.next_id
-        self.next_id += 1
+        with self.lock:
+            event_id = self.next_id
+            self.next_id += 1
         stdout = self.directory / "logs" / f"{event_id:06d}.stdout"
         stderr = self.directory / "logs" / f"{event_id:06d}.stderr"
         record = dict(id=event_id, phase=phase, argv=list(map(str, argv)),
@@ -136,6 +150,8 @@ class Runner:
                 process = subprocess.Popen(record["argv"], cwd=record["cwd"],
                     stdout=out, stderr=err, env={**os.environ, **THREAD_ENV},
                     start_new_session=(os.name == "posix"))
+                with self.lock:
+                    self.active.add(process)
                 # wait(timeout=...) polls with sleeps up to 50 ms on POSIX.
                 # A separate deadline lets waitpid observe short runs promptly.
                 expired = threading.Event()
@@ -165,13 +181,15 @@ class Runner:
                     record["status"] = "interrupted"
                     raise
                 finally:
+                    with self.lock:
+                        self.active.discard(process)
                     timer.cancel()
                     timer.join()
             except OSError as exc:
                 record.update(status="failed", returncode=None, error=str(exc))
             finally:
                 record["elapsed_s"] = time.perf_counter() - start
-                with self.events.open("a") as events:
+                with self.lock, self.events.open("a") as events:
                     events.write(json.dumps(record, allow_nan=False) + "\n")
         return record
 

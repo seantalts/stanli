@@ -16,7 +16,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from harnesses import corpus_bench
-from harnesses.corpus_bench import cache_context
+from harnesses.corpus_bench import Runner, cache_context
 
 STAN = "a" * 64
 
@@ -200,6 +200,57 @@ class BuildCacheStoreTests(unittest.TestCase):
         self.cache.discard(scratch)
         self.assertFalse(scratch.exists())
         self.assertEqual(list(self.root.iterdir()), [])
+
+
+class ConcurrentRunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+
+    def test_parallel_commands_get_distinct_ids_and_whole_event_lines(self):
+        runner = Runner(self.root)
+        barrier, results = threading.Barrier(16), []
+        def work(index):
+            barrier.wait()
+            results.append(runner.run(f"job/{index}", [sys.executable, "-c", f"print({index})"], 30))
+        threads = [threading.Thread(target=work, args=(i,)) for i in range(16)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        events = [json.loads(line) for line in runner.events.read_text().splitlines()]
+        self.assertEqual(sorted(event["id"] for event in events), list(range(16)))
+        for event in events:
+            self.assertEqual(event["status"], "ok")
+            self.assertEqual(runner.text(event).strip(), event["phase"].split("/")[1])
+
+    def test_resumed_runner_continues_after_the_highest_recorded_id(self):
+        (self.root / "events.jsonl").write_text(
+            "".join(json.dumps(dict(id=i)) + "\n" for i in (0, 2, 3)))
+        self.assertEqual(Runner(self.root).next_id, 4)
+
+    def test_kill_active_stops_running_commands_and_marks_them_interrupted(self):
+        runner = Runner(self.root)
+        started, outcome = threading.Event(), []
+        def work():
+            try:
+                outcome.append(runner.run("slow", [sys.executable, "-c",
+                    "import time; print('up', flush=True); time.sleep(60)"], 120))
+            except BaseException as exc:
+                outcome.append(exc)
+        thread = threading.Thread(target=work)
+        thread.start()
+        deadline = threading.Event()
+        for _ in range(200):
+            if runner.active:
+                break
+            deadline.wait(0.05)
+        runner.kill_active()
+        thread.join(30)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(outcome[0]["status"], "failed")
+        self.assertEqual(runner.active, set())
 
 
 if __name__ == "__main__":
