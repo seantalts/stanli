@@ -31,5 +31,11 @@ establish enough benefit and were removed. September 19 incremental frames had
 different contracts and reduced the recorded 4,000-row peak from about 10.4 to
 1.52 GB; those measurements are not a promise for every loop. September 28
 callback-history prototypes were also removed; see [execution research](execution.md).
+October 2026: the frame path, its recording programs and the cached primals
+of active invariant calls were removed. On ctsem at 320 to 64,000 rows,
+results stayed bitwise identical, the warm gradient was 1.09x faster without
+frames, and peak memory was about 2x higher (1.6 GB at 64,000 rows). The
+other mechanisms were flat on every measure. The per-cell constant proof
+stays: removing it cost about 2%.
 Native generation/stencil JIT remains tabled. First recording, warm gradients,
 preparation and retained/peak storage must be measured separately.

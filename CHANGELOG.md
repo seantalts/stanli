@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Performance
+
+- Large ctsem-style retained loops no longer seal frames. Gradients are
+  about 1.09x faster on large datasets, and peak memory is about 2x higher
+  (0.74 GB to 1.6 GB at 64,000 rows).
+
 ### Fixes
 
 - Optimization now reports an error when generated quantities reject the
