@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
                           std::istreambuf_iterator<char>());
     char err[8192] = {};
     std::unique_ptr<stanli_model, decltype(&stanli_model_free)> model(
-        stanli_model_new(mir.c_str(), "{}", err, sizeof err),
+        stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err),
         stanli_model_free);
     if (!model) throw std::runtime_error(err);
     std::cout << "{\"columns\":" << stanli_wa_n_columns(model.get()) << "}\n";

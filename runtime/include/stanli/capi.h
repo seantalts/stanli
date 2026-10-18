@@ -16,9 +16,9 @@ typedef struct stanli_model stanli_model;
 
 /* The layout version of this ABI. Bump it whenever an existing struct
  * gains, loses or reorders a field, or an existing function changes
- * signature. Adding a NEW function does not need a bump: a binding that
- * does not know about it never looks it up, and one that does gets a
- * named dlsym failure rather than a misread.
+ * signature or is removed. Adding a NEW function does not need a bump: a
+ * binding that does not know about it never looks it up, and one that does gets
+ * a named dlsym failure rather than a misread.
  *
  * This exists because the Python wheel ships its library inside the
  * package while the R package downloads one -- so on R, the binding and
@@ -27,40 +27,24 @@ typedef struct stanli_model stanli_model;
  * from the wrong seed with the wrong step size. A binding must compare
  * this against the value it was compiled against before calling
  * anything, and refuse on a mismatch. */
-#define STANLI_ABI_VERSION 1
+#define STANLI_ABI_VERSION 2
 int stanli_abi_version(void);
 
-/* Compile either stanli portable MIR or legacy MIR S-expression text (from
- * `stanc --O1 --debug-optimized-mir`) against JSON data (CmdStan conventions).
- * The unoptimized --debug-transformed-mir S-expression is also accepted.
- * Returns null on failure with a message in err. */
-stanli_model* stanli_model_new(const char* mir_text, const char* data_json,
-                               char* err, size_t err_len);
-
-/* Like stanli_model_new but takes Stan source code directly, compiled by the
- * embedded stanc3 (in-process; no subprocess). Fails with a message if this
- * build does not embed stanc. */
-stanli_model* stanli_model_new_from_stan(const char* stan_code,
-                                         const char* data_json, char* err,
-                                         size_t err_len);
-/* The seeded forms of the two constructors. seed is the model-construction
- * seed: RNG calls in transformed data draw from create_rng(seed, 0) once,
- * when the model is built, exactly as CmdStan's generated constructor does,
- * so the same seed reproduces the same transformed data. The unseeded
- * constructors use seed 1. Generated-quantities draws are separate; see
- * stanli_wa_seed_chain. */
-stanli_model* stanli_model_new_seeded(const char* mir_text,
-                                      const char* data_json, uint32_t seed,
-                                      char* err, size_t err_len);
-stanli_model* stanli_model_new_from_stan_seeded(const char* stan_code,
-                                                const char* data_json,
-                                                uint32_t seed, char* err,
-                                                size_t err_len);
 /* 1 if this build embeds stanc3, else 0. */
 int stanli_has_embedded_stanc(void);
 
 /* Model construction options. Call stanli_model_opts_init before setting
  * fields: seed 1, one thread per chain, fast_math 0.
+ *
+ * seed is the model-construction seed: RNG calls in transformed data draw from
+ * create_rng(seed, 0) once, when the model is built, exactly as CmdStan's
+ * generated constructor does, so the same seed reproduces the same transformed
+ * data. Generated-quantities draws are separate; see stanli_wa_seed_chain.
+ *
+ * threads_per_chain must be positive; >1 requires stanli_thread_safe().
+ * Eligible reduce_sum calls compile to partitioned graphs, with a persistent
+ * worker team owned by this handle. Sampling clones get their own teams.
+ * One thread retains the existing serial graph. Ineligible calls stay serial.
  *
  * fast_math opts this model into numerics that may differ from CmdStan in the
  * last bits in exchange for speed. For a model built from Stan source it also
@@ -75,35 +59,35 @@ typedef struct {
 } stanli_model_opts;
 void stanli_model_opts_init(stanli_model_opts* o);
 
-/* The two constructors above and the threaded forms below, taking their
- * settings from opts. A null opts means the defaults. */
+/* Compile either stanli portable MIR or legacy MIR S-expression text (from
+ * `stanc --O1 --debug-optimized-mir`) against JSON data (CmdStan conventions).
+ * The unoptimized --debug-transformed-mir S-expression is also accepted.
+ * Returns null on failure with a message in err. A null opts means the
+ * defaults. */
 stanli_model* stanli_model_new_with_opts(const char* mir_text,
                                          const char* data_json,
                                          const stanli_model_opts* opts,
                                          char* err, size_t err_len);
+
+/* Like stanli_model_new_with_opts but takes Stan source code directly,
+ * compiled by the embedded stanc3 (in-process; no subprocess). Fails with a
+ * message if this build does not embed stanc. */
 stanli_model* stanli_model_new_from_stan_with_opts(
     const char* stan_code, const char* data_json, const stanli_model_opts* opts,
     char* err, size_t err_len);
 
 /* Compile Stan source to transformed-MIR text WITHOUT building a model,
  * for a caller that wants to keep the MIR: cache it, ship it, or hand it
- * to stanli_model_new later or elsewhere. Returns null on failure with a
- * message in err; on success the caller owns the string and frees it with
- * stanli_string_free. Needs a build that embeds stanc3. */
-char* stanli_stan_to_mir(const char* stan_code, char* err, size_t err_len);
-
-/* As above, with directories searched in order for Stan #include directives.
- * No implicit directory is added. Paths and source are UTF-8; the array and
- * its strings are borrowed for this call only. A null array is valid only
- * when include_path_count is zero. Nested includes use the same search path.
- * Stan's preprocessor owns expansion, cycle detection, and diagnostics. */
-char* stanli_stan_to_mir_with_includes(const char* stan_code,
-                                       const char* const* include_paths,
-                                       size_t include_path_count, char* err,
-                                       size_t err_len);
-
-/* stanli_stan_to_mir_with_includes with the fast_math setting of
- * stanli_model_opts. include_paths may be null with a zero count. */
+ * to stanli_model_new_with_opts later or elsewhere. Returns null on failure
+ * with a message in err; on success the caller owns the string and frees it
+ * with stanli_string_free. Needs a build that embeds stanc3.
+ *
+ * Directories in include_paths are searched in order for Stan #include
+ * directives. No implicit directory is added. Paths and source are UTF-8; the
+ * array and its strings are borrowed for this call only. A null array is valid
+ * only when include_path_count is zero. Nested includes use the same search
+ * path. Stan's preprocessor owns expansion, cycle detection, and diagnostics.
+ * fast_math is the setting of stanli_model_opts. */
 char* stanli_stan_to_mir_with_opts(const char* stan_code,
                                    const char* const* include_paths,
                                    size_t include_path_count, int fast_math,
@@ -128,21 +112,6 @@ const char* stanli_build_id(void);
  * seed and expect the same bytes, should check this. */
 int stanli_exact_lp(void);
 
-/* Threaded constructors: seed has the same meaning as in the seeded forms.
- * threads_per_chain must be positive; >1 requires stanli_thread_safe().
- * Eligible reduce_sum calls compile to partitioned graphs, with a persistent
- * worker team owned by this handle. Sampling clones get their own teams.
- * One thread retains the existing serial graph. Ineligible calls stay serial.
- * Additive: all existing constructors and option layouts are unchanged. */
-stanli_model* stanli_model_new_threaded(const char* mir_text,
-                                        const char* data_json, uint32_t seed,
-                                        int threads_per_chain, char* err,
-                                        size_t err_len);
-stanli_model* stanli_model_new_from_stan_threaded(const char* stan_code,
-                                                  const char* data_json,
-                                                  uint32_t seed,
-                                                  int threads_per_chain,
-                                                  char* err, size_t err_len);
 /* Retained native reduction count and newline-separated lowering refusals.
  * Diagnostics cover graph lowering, not calls inside opaque runtime regions.
  * The string is owned by the model. */
@@ -173,12 +142,6 @@ int stanli_unconstrain_inits(stanli_model* m, const char* inits_json, double* q,
                              char* err, size_t err_len);
 
 int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad);
-
-/* NUTS with diagonal-metric adaptation. draws must hold
- * samples * n_unconstrained doubles (row-major, one draw per row).
- * Returns 0 on success, nonzero with message in err otherwise. */
-int stanli_sample(stanli_model* m, uint32_t seed, int warmup, int samples,
-                  double delta, double* draws, char* err, size_t err_len);
 
 /* ---- multi-chain sampling ------------------------------------------------
  *
@@ -236,19 +199,6 @@ int64_t stanli_n_stored_draws(const stanli_sample_opts* o);
  * one. */
 int stanli_thread_safe(void);
 
-/* Run opts->chains chains. draws holds
- * chains * stanli_n_stored_draws(opts) * n_unconstrained doubles; stats,
- * when non-null, holds chains * stanli_n_stored_draws(opts) * 7 (the
- * CmdStan sampler columns, see stanli_sampler_column_name).
- *
- * Returns 0 when every chain succeeded. Returns the NUMBER OF FAILED
- * CHAINS otherwise, with the first failure's message in err: a run where
- * three of four chains sampled is a partial result the caller may want,
- * and the failed chains' rows are left untouched. */
-int stanli_sample_multi(stanli_model* m, const stanli_sample_opts* opts,
-                        double* draws, double* stats, char* err,
-                        size_t err_len);
-
 /* Per-chain facts that are not properties of one stored draw. Counts cover
  * every post-warmup transition even when thinning drops rows. */
 typedef struct {
@@ -261,58 +211,15 @@ typedef struct {
 /* A completed transition selected by `refresh`. The iteration is one-based
  * across warmup and sampling together, `total` is warmup + samples, and
  * warmup is nonzero for the warmup phase. Callbacks are serialized on the
- * thread that called stanli_sample_multi_progress, never a sampler worker, so
+ * thread that called stanli_sample_multi_metric, never a sampler worker, so
  * language bindings may safely write to their own consoles. */
 typedef void (*stanli_sample_progress_cb)(int32_t chain_id, int64_t iteration,
                                           int64_t total, int32_t warmup,
                                           void* user);
 
-/* Progress-capable form of stanli_sample_multi. `refresh` follows CmdStan's
- * convention: in each phase, report the first transition, every refresh-th
- * transition, and the phase's final transition.
- * Zero disables callbacks; negative values are rejected. `reports`, when
- * non-null, holds opts->chains entries. This is an additive entry point, so
- * stanli_sample_opts and STANLI_ABI_VERSION remain unchanged. */
-int stanli_sample_multi_progress(
-    stanli_model* m, const stanli_sample_opts* opts, int refresh, double* draws,
-    double* stats, stanli_sample_progress_cb progress, void* progress_user,
-    stanli_sample_report* reports, char* err, size_t err_len);
-
 /* Asked on the calling thread about every 100 ms while chains run. A nonzero
  * answer stops every chain after its current transition. */
 typedef int (*stanli_sample_poll_cb)(void* user);
-
-/* stanli_sample_multi_progress plus cooperative interruption. A stopped run
- * returns 0 with `*interrupted` set to 1 and only the rows stored before the
- * stop written; the binding raises its language's interrupt from that. `poll`
- * and `interrupted` may be null. Additive, like the progress entry point. */
-int stanli_sample_multi_interruptible(
-    stanli_model* m, const stanli_sample_opts* opts, int refresh, double* draws,
-    double* stats, stanli_sample_progress_cb progress, void* progress_user,
-    stanli_sample_poll_cb poll, void* poll_user, int* interrupted,
-    stanli_sample_report* reports, char* err, size_t err_len);
-
-/* stanli_sample_multi_interruptible, with each chain also writing its stored
- * draws through write_array on its own thread as they are stored, so the work
- * runs in parallel across chains, inside the sampling progress.
- *
- * `values` receives chains * stanli_n_stored_draws(opts) rows of W doubles,
- * chain-major exactly like `draws`, where W is stanli_wa_n_columns(m) when
- * that is positive and stanli_n_constrained(m) otherwise. Generated quantities
- * advance the live sampler RNG between stored transitions, as in CmdStan.
- * Thus RNG-bearing models have different seeded trajectories from the
- * parameter-only sampling entries, which do not run generated quantities.
- * The model's own stanli_wa_seed stream is untouched. A null `values` makes
- * this identical to stanli_sample_multi_interruptible.
- *
- * A domain error while producing a row fills that output row with NaNs and
- * sampling continues, retaining any consumed randomness. Other exceptions
- * fail the chain and err names its chain and draw. */
-int stanli_sample_multi_write_array(
-    stanli_model* m, const stanli_sample_opts* opts, int refresh, double* draws,
-    double* stats, double* values, stanli_sample_progress_cb progress,
-    void* progress_user, stanli_sample_poll_cb poll, void* poll_user,
-    int* interrupted, stanli_sample_report* reports, char* err, size_t err_len);
 
 /* Metric kinds for stanli_metric_opts::metric, as CmdStan's unit_e, diag_e and
  * dense_e. */
@@ -346,10 +253,45 @@ typedef struct {
 /* Fill with diag, identity, step size 1, adaptation engaged, no outputs. */
 void stanli_metric_opts_init(stanli_metric_opts* o);
 
-/* stanli_sample_multi_write_array with the metric controls in `metric`
- * (null means the defaults of stanli_metric_opts_init). An invalid metric,
- * inverse metric or step size fails before any chain starts, returns nonzero,
- * and puts Stan's message in err. Additive, like the entry points above. */
+/* Run opts->chains chains. draws holds
+ * chains * stanli_n_stored_draws(opts) * n_unconstrained doubles; stats,
+ * when non-null, holds chains * stanli_n_stored_draws(opts) * 7 (the
+ * CmdStan sampler columns, see stanli_sampler_column_name).
+ *
+ * Returns 0 when every chain succeeded. Returns the NUMBER OF FAILED
+ * CHAINS otherwise, with the first failure's message in err: a run where
+ * three of four chains sampled is a partial result the caller may want,
+ * and the failed chains' rows are left untouched.
+ *
+ * `refresh` follows CmdStan's convention: in each phase, report the first
+ * transition, every refresh-th transition, and the phase's final transition.
+ * Zero disables callbacks; negative values are rejected. `reports`, when
+ * non-null, holds opts->chains entries.
+ *
+ * `poll` is asked on the calling thread about every 100 ms. A stopped run
+ * returns 0 with `*interrupted` set to 1 and only the rows stored before the
+ * stop written; the binding raises its language's interrupt from that. `poll`,
+ * `progress` and `interrupted` may be null.
+ *
+ * Each chain also writes its stored draws through write_array on its own
+ * thread as they are stored, so the work runs in parallel across chains,
+ * inside the sampling progress. `values` receives
+ * chains * stanli_n_stored_draws(opts) rows of W doubles, chain-major exactly
+ * like `draws`, where W is stanli_wa_n_columns(m) when that is positive and
+ * stanli_n_constrained(m) otherwise. Generated quantities advance the live
+ * sampler RNG between stored transitions, as in CmdStan. Thus RNG-bearing
+ * models have different seeded trajectories when `values` is null, since
+ * generated quantities then do not run. The model's own stanli_wa_seed stream
+ * is untouched.
+ *
+ * A domain error while producing a row fills that output row with NaNs and
+ * sampling continues, retaining any consumed randomness. Other exceptions
+ * fail the chain and err names its chain and draw.
+ *
+ * `metric` holds the metric controls (null means the defaults of
+ * stanli_metric_opts_init). An invalid metric, inverse metric or step size
+ * fails before any chain starts, returns nonzero, and puts Stan's message in
+ * err. */
 int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
                                const stanli_metric_opts* metric, int refresh,
                                double* draws, double* stats, double* values,
@@ -456,30 +398,17 @@ int64_t stanli_n_constrained(const stanli_model* m);
 const char* stanli_constrained_name(const stanli_model* m, int64_t i);
 int stanli_constrain(stanli_model* m, const double* q, double* out);
 
-/* Streaming variant of stanli_sample: `cb`, when non-null, fires after
- * every transition. During warmup (`warmup` nonzero) the buffer is
- * untouched; after it, draw `i` is written to `draws` before its
- * callback, so rows [0, i] are readable mid-run. */
+/* Single-chain NUTS with diagonal-metric adaptation. `cb`, when non-null,
+ * fires after every transition. During warmup (`warmup` nonzero) the buffer is
+ * untouched; after it, draw `i` is written to `draws` before its callback, so
+ * rows [0, i] are readable mid-run. draws must hold samples * n_unconstrained
+ * doubles (row-major, one draw per row). `init`, when non-null, is one
+ * n_unconstrained vector on the unconstrained scale. On success, `stats`, when
+ * non-null, receives samples * STANLI_N_SAMPLER_COLS doubles in draw-major
+ * order, excluding warmup; stats are available after return, not during
+ * callbacks. The maximum treedepth is 10. Returns 0 on success, nonzero with
+ * message in err otherwise. */
 typedef void (*stanli_draw_cb)(int32_t i, int32_t warmup, void* user);
-int stanli_sample_stream(stanli_model* m, uint32_t seed, int warmup,
-                         int samples, double delta, double* draws,
-                         stanli_draw_cb cb, void* user, char* err,
-                         size_t err_len);
-
-/* Same draws, RNG stream, and callbacks as stanli_sample_stream. On success,
- * `stats`, when non-null, receives samples * STANLI_N_SAMPLER_COLS doubles
- * in draw-major order, excluding warmup. Both streaming entry points use
- * the default maximum treedepth of 10. Stats are available after return,
- * not during callbacks. */
-int stanli_sample_stream_stats(stanli_model* m, uint32_t seed, int warmup,
-                               int samples, double delta, double* draws,
-                               double* stats, stanli_draw_cb cb, void* user,
-                               char* err, size_t err_len);
-
-/* Explicit-init form of stanli_sample_stream_stats. `init` is one
- * n_unconstrained vector on the unconstrained scale. This is an additive
- * entry point so existing stream callers and stanli_sample_opts keep their
- * version-1 layouts. */
 int stanli_sample_stream_stats_init(stanli_model* m, uint32_t seed, int warmup,
                                     int samples, double delta,
                                     const double* init, double* draws,
@@ -487,8 +416,8 @@ int stanli_sample_stream_stats_init(stanli_model* m, uint32_t seed, int warmup,
                                     void* user, char* err, size_t err_len);
 
 /* WALNUTS (within-orbit adaptive step-length NUTS, arXiv:2506.18746),
- * same streaming contract as stanli_sample_stream. `max_error` is the
- * sampler's tunable in place of NUTS's `delta`: the largest drift in
+ * same streaming contract as stanli_sample_stream_stats_init. `max_error` is
+ * the sampler's tunable in place of NUTS's `delta`: the largest drift in
  * the joint log density allowed across one macro step before the step
  * is halved within the trajectory; pass 0 for the default (0.5). */
 int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
@@ -499,8 +428,8 @@ int stanli_sample_walnuts_stream(stanli_model* m, uint32_t seed, int warmup,
 /* Single-path Pathfinder: a normal approximation fitted along an L-BFGS
  * path, drawn from in milliseconds where a sampler takes seconds. Draws
  * come back UNCONSTRAINED, num_draws rows of stanli_n_unconstrained
- * doubles, the same layout stanli_sample writes, so the same
- * stanli_wa_row call constrains them.
+ * doubles, the same layout stanli_sample_stream_stats_init writes, so the
+ * same stanli_wa_row call constrains them.
  *
  * `lp` and `lp_approx` each receive num_draws doubles: the model's log
  * density at the draw, and the approximation's. Their difference is the

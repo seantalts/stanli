@@ -185,17 +185,6 @@ void copy_out(double* to, const std::vector<double>& from) {
 
 extern "C" {
 
-stanli_model* stanli_model_new(const char* tmir_sexp, const char* data_json,
-                               char* err, size_t err_len) {
-  return stanli_model_new_seeded(tmir_sexp, data_json, 1, err, err_len);
-}
-
-stanli_model* stanli_model_new_seeded(const char* tmir_sexp,
-                                      const char* data_json, uint32_t seed,
-                                      char* err, size_t err_len) {
-  return stanli_model_new_threaded(tmir_sexp, data_json, seed, 1, err, err_len);
-}
-
 static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
                                uint32_t seed, int threads_per_chain,
                                bool fast_math, char* err, size_t err_len) {
@@ -264,14 +253,6 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
   }
 }
 
-stanli_model* stanli_model_new_threaded(const char* tmir_sexp,
-                                        const char* data_json, uint32_t seed,
-                                        int threads_per_chain, char* err,
-                                        size_t err_len) {
-  return model_new(tmir_sexp, data_json, seed, threads_per_chain, false, err,
-                   err_len);
-}
-
 void stanli_model_opts_init(stanli_model_opts* o) {
   if (o == nullptr) return;
   *o = stanli_model_opts{};
@@ -305,21 +286,6 @@ extern "C" char* stanli_stanc_model_tmir_fast(const char* stan_code);
 extern "C" void stanli_stanc_free(char* p);
 #endif
 
-stanli_model* stanli_model_new_from_stan(const char* stan_code,
-                                         const char* data_json, char* err,
-                                         size_t err_len) {
-  return stanli_model_new_from_stan_seeded(stan_code, data_json, 1, err,
-                                           err_len);
-}
-
-stanli_model* stanli_model_new_from_stan_seeded(const char* stan_code,
-                                                const char* data_json,
-                                                uint32_t seed, char* err,
-                                                size_t err_len) {
-  return stanli_model_new_from_stan_threaded(stan_code, data_json, seed, 1, err,
-                                             err_len);
-}
-
 static stanli_model* model_new_from_stan(const char* stan_code,
                                          const char* data_json, uint32_t seed,
                                          int threads_per_chain, bool fast_math,
@@ -347,15 +313,6 @@ static stanli_model* model_new_from_stan(const char* stan_code,
 #endif
 }
 
-stanli_model* stanli_model_new_from_stan_threaded(const char* stan_code,
-                                                  const char* data_json,
-                                                  uint32_t seed,
-                                                  int threads_per_chain,
-                                                  char* err, size_t err_len) {
-  return model_new_from_stan(stan_code, data_json, seed, threads_per_chain,
-                             false, err, err_len);
-}
-
 stanli_model* stanli_model_new_from_stan_with_opts(
     const char* stan_code, const char* data_json, const stanli_model_opts* opts,
     char* err, size_t err_len) {
@@ -364,18 +321,6 @@ stanli_model* stanli_model_new_from_stan_with_opts(
   if (opts != nullptr) o = *opts;
   return model_new_from_stan(stan_code, data_json, o.seed, o.threads_per_chain,
                              o.fast_math != 0, err, err_len);
-}
-
-char* stanli_stan_to_mir(const char* stan_code, char* err, size_t err_len) {
-  return stanli_stan_to_mir_with_includes(stan_code, nullptr, 0, err, err_len);
-}
-
-char* stanli_stan_to_mir_with_includes(const char* stan_code,
-                                       const char* const* include_paths,
-                                       size_t include_path_count, char* err,
-                                       size_t err_len) {
-  return stanli_stan_to_mir_with_opts(stan_code, include_paths,
-                                      include_path_count, 0, err, err_len);
 }
 
 char* stanli_stan_to_mir_with_opts(const char* stan_code,
@@ -479,29 +424,6 @@ int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad) {
     *lp = -std::numeric_limits<double>::infinity();
     return 1;
   }
-}
-
-int stanli_sample(stanli_model* m, uint32_t seed, int warmup, int samples,
-                  double delta, double* draws, char* err, size_t err_len) {
-  return stanli_sample_stream(m, seed, warmup, samples, delta, draws, nullptr,
-                              nullptr, err, err_len);
-}
-
-int stanli_sample_stream(stanli_model* m, uint32_t seed, int warmup,
-                         int samples, double delta, double* draws,
-                         stanli_draw_cb cb, void* user, char* err,
-                         size_t err_len) {
-  return stanli_sample_stream_stats(m, seed, warmup, samples, delta, draws,
-                                    nullptr, cb, user, err, err_len);
-}
-
-int stanli_sample_stream_stats(stanli_model* m, uint32_t seed, int warmup,
-                               int samples, double delta, double* draws,
-                               double* stats, stanli_draw_cb cb, void* user,
-                               char* err, size_t err_len) {
-  return stanli_sample_stream_stats_init(m, seed, warmup, samples, delta,
-                                         nullptr, draws, stats, cb, user, err,
-                                         err_len);
 }
 
 int stanli_sample_stream_stats_init(stanli_model* m, uint32_t seed, int warmup,
@@ -716,49 +638,12 @@ const char* stanli_sampler_column_name(int i) {
   return kNames[i];
 }
 
-int stanli_sample_multi(stanli_model* m, const stanli_sample_opts* opts,
-                        double* draws, double* stats, char* err,
-                        size_t err_len) {
-  return stanli_sample_multi_progress(m, opts, 0, draws, stats, nullptr,
-                                      nullptr, nullptr, err, err_len);
-}
-
-int stanli_sample_multi_progress(
-    stanli_model* m, const stanli_sample_opts* opts, int refresh, double* draws,
-    double* stats, stanli_sample_progress_cb progress, void* progress_user,
-    stanli_sample_report* reports, char* err, size_t err_len) {
-  return stanli_sample_multi_interruptible(
-      m, opts, refresh, draws, stats, progress, progress_user, nullptr, nullptr,
-      nullptr, reports, err, err_len);
-}
-
-int stanli_sample_multi_interruptible(
-    stanli_model* m, const stanli_sample_opts* opts, int refresh, double* draws,
-    double* stats, stanli_sample_progress_cb progress, void* progress_user,
-    stanli_sample_poll_cb poll, void* poll_user, int* interrupted,
-    stanli_sample_report* reports, char* err, size_t err_len) {
-  return stanli_sample_multi_write_array(
-      m, opts, refresh, draws, stats, nullptr, progress, progress_user, poll,
-      poll_user, interrupted, reports, err, err_len);
-}
-
 void stanli_metric_opts_init(stanli_metric_opts* o) {
   if (o == nullptr) return;
   *o = stanli_metric_opts{};
   o->metric = STANLI_METRIC_DIAG;
   o->step_size = 1.0;
   o->adapt_engaged = 1;
-}
-
-int stanli_sample_multi_write_array(
-    stanli_model* m, const stanli_sample_opts* opts, int refresh, double* draws,
-    double* stats, double* values, stanli_sample_progress_cb progress,
-    void* progress_user, stanli_sample_poll_cb poll, void* poll_user,
-    int* interrupted, stanli_sample_report* reports, char* err,
-    size_t err_len) {
-  return stanli_sample_multi_metric(
-      m, opts, nullptr, refresh, draws, stats, values, progress, progress_user,
-      poll, poll_user, interrupted, reports, err, err_len);
 }
 
 int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
@@ -824,9 +709,7 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
       stanli::validate_metric_config(probe, n);
     }
 
-    // Chain 0 samples on the model's own executor; the rest get clones,
-    // so a single-chain run allocates no second arena and behaves exactly
-    // as stanli_sample always has.
+    // Chain 0 samples on the model's own executor; the rest get clones.
     // Teams outlive the clones that borrow them. Chain 0 already owns a team.
     std::vector<std::unique_ptr<stanli::ReduceExecutionContext>> reduce_teams;
     auto clones = stanli::clone_executors(*m->ex, n_chains - 1);

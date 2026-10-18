@@ -51,8 +51,8 @@ stanli_model* load(const std::string& stem) {
   const std::string mir = slurp("tests/fixtures/" + stem + ".tmir.sexp");
   const std::string data = slurp("tests/fixtures/" + stem + ".json");
   char err[4096]{};
-  stanli_model* m =
-      stanli_model_new(mir.c_str(), data.c_str(), err, sizeof err);
+  stanli_model* m = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
+                                               nullptr, err, sizeof err);
   if (m == nullptr) {
     ++failures;
     std::printf("FAIL loading %s: %s\n", stem.c_str(), err);
@@ -645,9 +645,10 @@ int main() {
     // The algorithms borrow the model's executor; it must still sample.
     std::vector<double> draws(200 * 3);
     char err[4096]{};
-    expect(
-        "the model still samples afterwards",
-        stanli_sample(m, 1, 200, 200, 0.8, draws.data(), err, sizeof err) == 0);
+    expect("the model still samples afterwards",
+           stanli_sample_stream_stats_init(m, 1, 200, 200, 0.8, nullptr,
+                                           draws.data(), nullptr, nullptr,
+                                           nullptr, err, sizeof err) == 0);
     stanli_model_free(m);
   }
   test_noparam();

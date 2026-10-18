@@ -17,15 +17,15 @@ args = parser.parse_args()
 libpath, manifest_path, name = args.library, args.manifest, args.model
 lib=c.CDLL(libpath)
 ptr=c.c_void_p; doubles=c.POINTER(c.c_double)
-lib.stanli_model_new.argtypes=[c.c_char_p,c.c_char_p,c.c_char_p,c.c_size_t]
-lib.stanli_model_new.restype=ptr
+lib.stanli_model_new_with_opts.argtypes=[c.c_char_p,c.c_char_p,ptr,c.c_char_p,c.c_size_t]
+lib.stanli_model_new_with_opts.restype=ptr
 lib.stanli_model_free.argtypes=[ptr]
 lib.stanli_n_unconstrained.argtypes=[ptr];lib.stanli_n_unconstrained.restype=c.c_int64
 lib.stanli_wa_n_columns.argtypes=[ptr];lib.stanli_wa_n_columns.restype=c.c_int64
 lib.stanli_wa_row.argtypes=[ptr,doubles,doubles]
 lib.stanli_grad.argtypes=[ptr,doubles,doubles,doubles]
-lib.stanli_sample.argtypes=[ptr,c.c_uint32,c.c_int,c.c_int,c.c_double,doubles,c.c_char_p,c.c_size_t]
-lib.stanli_stan_to_mir.argtypes=[c.c_char_p,c.c_char_p,c.c_size_t];lib.stanli_stan_to_mir.restype=ptr
+lib.stanli_sample_stream_stats_init.argtypes=[ptr,c.c_uint32,c.c_int,c.c_int,c.c_double,doubles,doubles,doubles,ptr,ptr,c.c_char_p,c.c_size_t]
+lib.stanli_stan_to_mir_with_opts.argtypes=[c.c_char_p,ptr,c.c_size_t,c.c_int,c.c_char_p,c.c_size_t];lib.stanli_stan_to_mir_with_opts.restype=ptr
 lib.stanli_string_free.argtypes=[ptr]
 entry = next(row for row in json.loads(pathlib.Path(manifest_path).read_text())
              if row['model'] == name)
@@ -46,12 +46,12 @@ def warm_measure(f):
     return (time.perf_counter_ns()-start)/n/1000
 
 def compile_source():
-    p=lib.stanli_stan_to_mir(source,err,len(err));assert p,err.value
+    p=lib.stanli_stan_to_mir_with_opts(source,None,0,0,err,len(err));assert p,err.value
     lib.stanli_string_free(p)
 compile_source()
 source_us=warm_measure(compile_source)
 def prep():
-    p=lib.stanli_model_new(mir,data,err,len(err));assert p,err.value
+    p=lib.stanli_model_new_with_opts(mir,data,None,err,len(err));assert p,err.value
     return p
 p=prep();lib.stanli_model_free(p)
 prep_us=warm_measure(lambda:lib.stanli_model_free(prep()))
@@ -67,7 +67,7 @@ inference_us = None
 if not args.skip_inference:
     draws=(c.c_double*(100*n))()
     start=time.perf_counter_ns()
-    assert lib.stanli_sample(p,1234,100,100,0.8,draws,err,len(err))==0,err.value
+    assert lib.stanli_sample_stream_stats_init(p,1234,100,100,0.8,None,draws,None,None,None,err,len(err))==0,err.value
     # Include output generation for every posterior draw; sampling excludes it.
     for i in range(100):
         q=(c.c_double*n)(*draws[i*n:(i+1)*n]);row()
