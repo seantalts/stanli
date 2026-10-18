@@ -234,10 +234,16 @@ void diag_bwd(KernelCtx& ctx) {
 }
 
 // ---- cholesky_decompose(A) ------------------------------------------------
+template <int N>
+void chol_fwd_t(KernelCtx& ctx) {
+  const int64_t n = ctx.idata[0];
+  FixM<N, N> a = FixCMap<N, N>(ctx.in[0].data, n, n);
+  FixMap<N, N>(ctx.out.data, n, n) = stan::math::cholesky_decompose(a);
+}
 void chol_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
-  MatD a = CMapM(ctx.in[0].data, n, n);
-  MapM(ctx.out.data, n, n) = stan::math::cholesky_decompose(a);
+  if (n == 2) return chol_fwd_t<2>(ctx);
+  chol_fwd_t<Eigen::Dynamic>(ctx);
 }
 // Minimal adjoint views let the pinned Stan Math pullbacks operate directly
 // on the saved factor and executor adjoints, with no vari or nested tape.
@@ -247,9 +253,31 @@ struct MatrixAdjointView {
   Eigen::Index cols() const { return storage.cols(); }
   MapM& adj() { return storage; }
 };
+void chol_bwd_small(KernelCtx& ctx, int n) {
+  const double* L_A = ctx.out.data;
+  double adjL[16], adjA[16] = {};
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j <= i; ++j) adjL[i * n + j] = ctx.out_adj_vec.data[j * n + i];
+  for (int i = n - 1; i >= 0; --i) {
+    for (int j = i; j >= 0; --j) {
+      if (i == j) {
+        adjA[j * n + i] = 0.5 * adjL[i * n + j] / L_A[j * n + i];
+      } else {
+        adjA[j * n + i] = adjL[i * n + j] / L_A[j * n + j];
+        adjL[j * n + j] -= adjL[i * n + j] * L_A[j * n + i] / L_A[j * n + j];
+      }
+      for (int k = j - 1; k >= 0; --k) {
+        adjL[i * n + k] -= adjA[j * n + i] * L_A[k * n + j];
+        adjL[j * n + k] -= adjA[j * n + i] * L_A[k * n + i];
+      }
+    }
+  }
+  for (int i = 0; i < n * n; ++i) ctx.in_adj[0].data[i] += adjA[i];
+}
 void chol_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
   const int64_t n = ctx.idata[0];
+  if (n <= 4) return chol_bwd_small(ctx, static_cast<int>(n));
   CMapM factor(ctx.out.data, n, n);
   MatrixAdjointView out{MapM(ctx.out_adj_vec.data, n, n)};
   MatrixAdjointView in{MapM(ctx.in_adj[0].data, n, n)};
