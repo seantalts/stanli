@@ -132,5 +132,75 @@ class CacheKeyTests(unittest.TestCase):
         self.assertEqual(self.key(args=fake_args(self.root, cmdstan=link)), self.key())
 
 
+class BuildCacheStoreTests(unittest.TestCase):
+    def setUp(self):
+        from bench_build_cache import BuildCache
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name) / "cache"
+        self.cache = BuildCache(self.root)
+
+    def build(self, key, text="built"):
+        scratch = self.cache.scratch(key)
+        (scratch / "model.stan").write_text(text)
+        (scratch / "gradbench").write_text(text)
+        return scratch
+
+    def meta(self, **values):
+        return dict(files=["model.stan", "gradbench"], **values)
+
+    def test_commit_publishes_the_whole_directory_with_its_metadata(self):
+        key = "k" * 64
+        scratch = self.build(key)
+        self.assertTrue(self.cache.commit(scratch, key, self.meta(run_id="r")))
+        self.assertFalse(scratch.exists())
+        self.assertEqual((self.root / key / "gradbench").read_text(), "built")
+        self.assertEqual(self.cache.lookup(key)["run_id"], "r")
+        self.assertEqual(self.cache.entry(key), self.root / key)
+        self.assertEqual([p.name for p in self.root.iterdir()], [key])
+
+    def test_missing_or_damaged_entries_are_misses(self):
+        key = "k" * 64
+        self.assertIsNone(self.cache.lookup(key))
+        self.cache.commit(self.build(key), key, self.meta())
+        (self.root / key / "gradbench").unlink()
+        self.assertIsNone(self.cache.lookup(key))
+        self.cache.entry(key).joinpath("meta.json").write_text("{")
+        self.assertIsNone(self.cache.lookup(key))
+
+    def test_losing_a_race_discards_our_directory_and_keeps_the_winner(self):
+        key = "k" * 64
+        self.assertTrue(self.cache.commit(self.build(key, "first"), key, self.meta(run_id="first")))
+        loser = self.build(key, "second")
+        self.assertFalse(self.cache.commit(loser, key, self.meta(run_id="second")))
+        self.assertFalse(loser.exists())
+        self.assertEqual((self.root / key / "gradbench").read_text(), "first")
+        self.assertEqual(self.cache.lookup(key)["run_id"], "first")
+        self.assertEqual([p.name for p in self.root.iterdir()], [key])
+
+    def test_simultaneous_commits_leave_exactly_one_complete_entry(self):
+        key = "k" * 64
+        scratches = [self.build(key, f"writer {i}") for i in range(8)]
+        barrier, wins = threading.Barrier(8), []
+        def commit(index):
+            barrier.wait()
+            wins.append(self.cache.commit(scratches[index], key, self.meta(run_id=str(index))))
+        threads = [threading.Thread(target=commit, args=(i,)) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(sum(wins), 1)
+        winner = self.cache.lookup(key)["run_id"]
+        self.assertEqual((self.root / key / "gradbench").read_text(), f"writer {winner}")
+        self.assertEqual([p.name for p in self.root.iterdir()], [key])
+
+    def test_discard_removes_an_unfinished_build(self):
+        scratch = self.build("k" * 64)
+        self.cache.discard(scratch)
+        self.assertFalse(scratch.exists())
+        self.assertEqual(list(self.root.iterdir()), [])
+
+
 if __name__ == "__main__":
     unittest.main()
