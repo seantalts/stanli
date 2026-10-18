@@ -156,9 +156,7 @@ test_that("source, configuration, and missing timings survive conversion", {
   expect_true(methods::validObject(restored))
   expect_identical(as.array(restored), as.array(sf))
   expect_identical(rstan::get_sampler_params(restored), rstan::get_sampler_params(sf))
-  fit$report$available <- FALSE
   fit$model <- NULL
-  expect_true(all(is.na(rstan::get_elapsed_time(as_stanfit(fit)))))
   expect_identical(as_stanfit(fit)@model_name, "stanli_model")
   fit$thin <- NULL
   expect_error(as_stanfit(fit), "lacks sampling metadata")

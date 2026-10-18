@@ -52,7 +52,7 @@ function loadAdhoc(M) {
   const mirPtr = M.stringToNewUTF8(mir);
   const dataPtr = M.stringToNewUTF8(data);
   const errPtr = M._malloc(8192);
-  const model = M._stanli_model_new(mirPtr, dataPtr, errPtr, 8192);
+  const model = M._stanli_model_new_with_opts(mirPtr, dataPtr, 0, errPtr, 8192);
   M._free(mirPtr);
   M._free(dataPtr);
   if (!model) {
@@ -98,7 +98,7 @@ function loadModel(M, stem, dataFile) {
   const mirPtr = M.stringToNewUTF8(mir);
   const dataPtr = M.stringToNewUTF8(data);
   const errPtr = M._malloc(8192);
-  const model = M._stanli_model_new(mirPtr, dataPtr, errPtr, 8192);
+  const model = M._stanli_model_new_with_opts(mirPtr, dataPtr, 0, errPtr, 8192);
   M._free(mirPtr);
   M._free(dataPtr);
   if (!model) {

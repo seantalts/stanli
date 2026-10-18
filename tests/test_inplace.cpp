@@ -340,7 +340,7 @@ static void test_slice_invalidates_store_forwarding(bool strided) {
   // Keep the INDEX itself out of the root set so forwarding would really
   // drop it if the intervening slice failed to invalidate the cache.
   const int result = g.add_slot(1, false);
-  g.add_op(OP_EXP, {read}, result);
+  g.add_op(OP_EXPV, {read}, result);
   g.result_slot = result;
 
   Graph ref = g;
@@ -563,7 +563,7 @@ static Graph build_double_store(int L, Between between, Fills& fills,
       terms.push_back(lse);
     }
     const int e = g.add_slot(1, false);
-    g.add_op(OP_EXP, {rd}, e);
+    g.add_op(OP_EXPV, {rd}, e);
     const int second = g.add_slot(L, false);
     g.add_op(OP_SET_INDEX, {first, e}, second, {n});
     prev = second;

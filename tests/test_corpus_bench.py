@@ -28,8 +28,8 @@ class EnvironmentTests(unittest.TestCase):
     def test_compiler_experiment_overrides_are_rejected_before_measurement(self):
         from harnesses.corpus_bench import main
         for key in ("STANLI_BOUNDED_SPECIALIZATION", "STANLI_STRUCTURED_LOOPS",
-                    "STANLI_SYMBOLIC_LANES", "STANLI_ISLAND_ALWAYS",
-                    "STANLI_WA_FORCE_INTERP", "STANLI_PACKET_MATH"):
+                    "STANLI_ISLAND_ALWAYS", "STANLI_WA_FORCE_INTERP",
+                    "STANLI_PACKET_MATH"):
             with self.subTest(key=key), mock.patch.dict(os.environ, {key: "0"}, clear=True):
                 error = io.StringIO()
                 with contextlib.redirect_stderr(error), self.assertRaises(SystemExit) as raised:

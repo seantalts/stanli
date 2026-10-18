@@ -368,7 +368,7 @@ int main() {
   const int b = g.add_slot(1, /*is_param=*/true);
   const int ea = g.add_slot(1, false);
   const int lp = g.add_slot(1, false);
-  g.add_op(OP_EXP, {a}, ea);
+  g.add_op(OP_EXPV, {a}, ea);
   g.add_op(OP_ADD_N, {ea, b}, lp);
   g.result_slot = lp;
 
@@ -548,7 +548,7 @@ int main() {
   Graph no_result;
   const int nr_in = no_result.add_slot(1, false);
   const int nr_out = no_result.add_slot(1, false);
-  no_result.add_op(OP_EXP, {nr_in}, nr_out);
+  no_result.add_op(OP_EXPV, {nr_in}, nr_out);
   Executor nr_ex(std::move(no_result));
   *nr_ex.value_ptr(nr_in) = -0.4;
   nr_ex.run_forward_only();

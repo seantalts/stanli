@@ -2407,14 +2407,6 @@ void lower_region_stmt(const mir::Stmt& s) {
       fail("unsupported structured statement");
   }
 }
-static int64_t region_setting(const char* name, int64_t fallback) {
-  const char* raw = std::getenv(name);
-  if (!raw || !*raw) return fallback;
-  char* end = nullptr;
-  const long long value = std::strtoll(raw, &end, 10);
-  return end && *end == 0 && value >= 0 ? static_cast<int64_t>(value)
-                                        : fallback;
-}
 static bool region_condition_data(const mir::Expr& e) {
   if (e.data_only) return true;
   if (e.kind != mir::Expr::FunApp && e.kind != mir::Expr::EAnd &&
@@ -2544,8 +2536,7 @@ bool region_unroll_profitable(const mir::Stmt& s) {
   if (count > 4) return false;
   for (const auto& c : s.body)
     if (!region_scalar_body(c)) return false;
-  const uint64_t limit = static_cast<uint64_t>(std::min<int64_t>(
-      128, region_setting("STANLI_STRUCTURED_UNROLL_LIMIT", 65536)));
+  const uint64_t limit = 128;
   return region_cost(s, limit + 1) <= limit;
 }
 uint64_t region_cost(const mir::Stmt& s, uint64_t limit, unsigned depth = 0) {

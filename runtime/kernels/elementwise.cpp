@@ -23,20 +23,6 @@ namespace {
 #define STANLI_ALIGN_FUNCTION_64
 #endif
 
-// OP_EXP: scalar out = exp(in). Partial is the output itself; no scratch.
-void exp_fwd(KernelCtx& ctx) { ctx.out.data[0] = std::exp(ctx.in[0].data[0]); }
-void exp_bwd(KernelCtx& ctx) {
-  if (ctx.in_adj[0].data)
-    ctx.in_adj[0].data[0] += ctx.out_adj * ctx.out.data[0];
-}
-
-bool exp_micro(const KernelCtx& ctx, std::vector<BwdMicro>& out) {
-  if (ctx.in_adj[0].data)
-    out.push_back(bwd_micro(kMicroScaled, ctx.in_adj[0].data,
-                            ctx.out_adj_vec.data, ctx.out.data));
-  return true;
-}
-
 // OP_ADD_N: scalar out = sum of scalar inputs.
 void add_n_fwd(KernelCtx& ctx) { add_n_fold<>(ctx); }
 
@@ -489,8 +475,6 @@ extern void (*const canonical_add_n_forward)(KernelCtx&) = add_n_fwd;
 // Called from Executor's constructor path; a static registrar object in a
 // static library dropped by the linker.
 void register_elementwise_kernels() {
-  register_kernel(
-      OP_EXP, with_cached_micro(Kernel{exp_fwd, exp_bwd, nullptr}, exp_micro));
   register_kernel(OP_ADD_N, Kernel{add_n_fwd, add_n_bwd, nullptr});
   register_kernel(OP_BCAST_FMA, Kernel{fma_fwd, fma_bwd, nullptr});
   register_kernel(OP_MATVEC, Kernel{matvec_fwd, matvec_bwd, nullptr});

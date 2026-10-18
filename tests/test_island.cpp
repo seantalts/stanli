@@ -1767,12 +1767,7 @@ static void test_vector_copies_carved() {
     expect_close("copies v" + std::to_string(i), got[i], want[i]);
 }
 
-// The SOFTMAX(3) specialization is selected only after a graph run has been
-// compiled, admitted by the island cost model, and given a native adjoint.
-// Exercise that whole route rather than calling specialize_softmax3 directly:
-// 32 softmaxes clear its activation threshold, their selected lanes feed one
-// scalar recurrence, and the target op remains graph-visible after carving.
-static HmmGraph build_softmax3_island() {
+static HmmGraph build_softmax_island() {
   HmmGraph h;
   Graph& g = h.g;
   const int logits = g.add_slot(3, true);
@@ -1831,164 +1826,19 @@ static void test_grouped_softmax_island_refusal() {
   }
 }
 
-static void test_softmax3_island_executor() {
-  HmmGraph ref = build_softmax3_island();
+static void test_softmax_island_executor() {
+  HmmGraph ref = build_softmax_island();
   const std::vector<double> want = run_grad(std::move(ref.g), ref.fills);
 
-  HmmGraph disabled = build_softmax3_island();
-  test_setenv("STANLI_NO_ISLAND_SOFTMAX3", "1", 1);
-  const int disabled_carved =
-      carve_islands(disabled.g, disabled.fills, disabled.terms, {});
-  test_unsetenv("STANLI_NO_ISLAND_SOFTMAX3");
-  expect_eq("softmax3 opt-out still carves", disabled_carved, 1);
-  int ordinary_islands = 0;
-  for (const Op& op : disabled.g.ops) {
-    if (op.opcode != OP_ISLAND) continue;
-    ++ordinary_islands;
-    expect("softmax3 opt-out ordinary variant", op.variant == 0);
-    const auto* program = static_cast<const IslandProg*>(op.udata);
-    expect("softmax3 opt-out canonical payload", program != nullptr);
-  }
-  expect_eq("softmax3 opt-out ordinary island count", ordinary_islands, 1);
-  const std::vector<double> disabled_got =
-      run_grad_twice(std::move(disabled.g), disabled.fills);
-  expect("softmax3 opt-out result size", disabled_got.size() == want.size());
-  for (size_t i = 0; i < want.size() && i < disabled_got.size(); ++i)
-    expect_close("softmax3 opt-out v" + std::to_string(i), disabled_got[i],
-                 want[i]);
-
-  HmmGraph optimized = build_softmax3_island();
-  expect("softmax3 e2e body above island threshold", optimized.body_ops >= 32);
-  expect("softmax3 e2e carved",
-         carve_islands(optimized.g, optimized.fills, optimized.terms, {}) == 1);
-
-  const Softmax3IslandProg* program = nullptr;
-  int specialized_islands = 0;
-  for (const Op& op : optimized.g.ops) {
-    if (op.opcode != OP_ISLAND || op.variant != kIslandSoftmax3Variant)
-      continue;
-    ++specialized_islands;
-    const auto* base = static_cast<const IslandProg*>(op.udata);
-    program = static_cast<const Softmax3IslandProg*>(base);
-  }
-  expect_eq("softmax3 e2e specialized island count", specialized_islands, 1);
-  expect("softmax3 e2e payload", program != nullptr);
-  if (program) {
-    expect("softmax3 e2e native adjoint", program->native_adj);
-    expect("softmax3 e2e optimized clone",
-           static_cast<bool>(program->optimized_double));
-    int canonical_softmaxes = 0;
-    for (const Program::Instr& I : program->code)
-      if (I.code == Program::SOFTMAX && I.len == 3) ++canonical_softmaxes;
-    expect_eq("softmax3 e2e canonical softmaxes", canonical_softmaxes, 32);
-
-    if (program->optimized_double) {
-      int optimized_calls = 0;
-      for (const Program::Call& call : program->optimized_double->calls)
-        if (call.opcode == kProgramSoftmax3Opcode &&
-            call.variant == kProgramSoftmax3Variant)
-          ++optimized_calls;
-      expect_eq("softmax3 e2e optimized calls", optimized_calls, 32);
-    }
-  }
-
+  HmmGraph carved = build_softmax_island();
+  expect("softmax e2e body above island threshold", carved.body_ops >= 32);
+  expect("softmax e2e carved",
+         carve_islands(carved.g, carved.fills, carved.terms, {}) == 1);
   const std::vector<double> got =
-      run_grad_twice(std::move(optimized.g), optimized.fills);
-  expect("softmax3 e2e result size", got.size() == want.size());
+      run_grad_twice(std::move(carved.g), carved.fills);
+  expect("softmax e2e result size", got.size() == want.size());
   for (size_t i = 0; i < want.size() && i < got.size(); ++i)
-    expect_close("softmax3 e2e v" + std::to_string(i), got[i], want[i]);
-}
-
-// Once specialization registers its private OP_NONE_ table slot, malformed
-// graph IR must still fail exactly as loudly as it did when that slot was
-// null. Check both routes: the carver must not turn it into a private CALL,
-// and the executor must reject it before the helper can see an arbitrary
-// scalar context as a three-lane softmax.
-static Graph build_rogue_none_graph() {
-  Graph g;
-  int value = g.add_slot(1, true);
-  for (int i = 0; i < 32; ++i) {
-    const int next = g.add_slot(1, false);
-    g.add_op(OP_NONE_, {value}, next);
-    value = next;
-  }
-  g.result_slot = value;
-  return g;
-}
-
-static void test_softmax3_private_slot_stays_invalid_graph_ir() {
-  expect("softmax3 rogue guard kernel is registered",
-         find_kernel(kProgramSoftmax3Opcode) != nullptr);
-
-  Graph carver_graph = build_rogue_none_graph();
-  const std::vector<int> terms{carver_graph.result_slot};
-  test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);
-  expect("softmax3 rogue guard not callable",
-         carve_islands(carver_graph, Fills{}, terms, {}) == 0);
-  test_unsetenv("STANLI_ISLAND_ALWAYS");
-
-  bool threw = false;
-  try {
-    Executor invalid(build_rogue_none_graph());
-  } catch (const std::runtime_error&) {
-    threw = true;
-  }
-  expect("softmax3 rogue guard executor throws", threw);
-}
-
-// Copy an Executor whose only opaque payload is a specialized island, then
-// destroy the source before evaluation.  The idata-free graph isolates the
-// shared derived-owner contract from unrelated raw graph-immediate pointers.
-static void test_softmax3_payload_copy_lifetime() {
-  Graph g;
-  const int logits = g.add_slot(3, true);
-  const int probs = g.add_slot(3, false);
-  const int lp = g.add_slot(1, false);
-
-  auto specialized = std::make_shared<Softmax3IslandProg>();
-  specialized->n_regs = 6;
-  specialized->ins.push_back(IslandProg::LiveIn{0, 3});
-  specialized->code.push_back(Program::Instr{Program::SOFTMAX, 3, 0, 0, 0, 3});
-  specialized->out_regs = {3, 4, 5};
-  expect("softmax3 copy generated adjoint", gen_adjoint(*specialized));
-  specialized->native_adj = true;
-  specialized->optimized_double = specialize_softmax3(*specialized, 1);
-  expect("softmax3 copy optimized plan",
-         static_cast<bool>(specialized->optimized_double));
-
-  std::weak_ptr<Softmax3IslandProg> lifetime = specialized;
-  std::shared_ptr<IslandProg> owner = std::move(specialized);
-  expect("softmax3 copy transfers local owner", !specialized);
-  Op island;
-  island.opcode = OP_ISLAND;
-  island.variant = kIslandSoftmax3Variant;
-  island.n_in = 1;
-  island.in[0] = logits;
-  island.out = probs;
-  island.udata = owner.get();
-  g.udata_pool.push_back(std::move(owner));
-  g.ops.push_back(island);
-  g.add_op(OP_SUM_VEC, {probs}, lp);
-  g.result_slot = lp;
-
-  std::unique_ptr<Executor> copy;
-  {
-    Executor source(std::move(g));
-    source.params_data()[0] = 0.3;
-    source.params_data()[1] = 0.7;
-    source.params_data()[2] = 1.4;
-    copy = std::make_unique<Executor>(source);
-  }
-  expect("softmax3 copy keeps payload alive", !lifetime.expired());
-  double first_grad[3] = {};
-  double second_grad[3] = {};
-  const double first = copy->gradient(first_grad);
-  const double second = copy->gradient(second_grad);
-  expect("softmax3 copy value stable", first == second);
-  for (int i = 0; i < 3; ++i)
-    expect("softmax3 copy gradient stable", first_grad[i] == second_grad[i]);
-  copy.reset();
-  expect("softmax3 copy releases payload", lifetime.expired());
+    expect_close("softmax e2e v" + std::to_string(i), got[i], want[i]);
 }
 
 // A measured-cost boundary made from the same two facts as iohmm_reg:
@@ -3382,9 +3232,7 @@ int main() {
   test_liveness_search_budget();
   test_dot_width_estimate_moves_together();
   test_const_count_does_not_grow_island_cost();
-  test_softmax3_island_executor();
-  test_softmax3_private_slot_stays_invalid_graph_ir();
-  test_softmax3_payload_copy_lifetime();
+  test_softmax_island_executor();
   test_compact_adjoint_cost_boundary();
   test_scalar_chain_carved();
   test_native_extras_carved();

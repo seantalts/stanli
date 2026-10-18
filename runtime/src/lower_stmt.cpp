@@ -1,5 +1,4 @@
 #include "lower_internal.hpp"
-#include "reroll_plan.hpp"
 
 namespace stanli {
 namespace lower_detail {
@@ -47,8 +46,6 @@ static bool bounded_while_guard(const mir::Expr& e) {
     if (!bounded_while_guard(a)) return false;
   return true;
 }
-
-#include "lower_symbolic_lane.inc"
 
 bool Lowering::expr_has_jacobian(const mir::Expr& e) {
   if (e.kind == mir::Expr::FunApp) {
@@ -625,8 +622,6 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
   for (int len : out_lens) packed += len;
   Op is;
   is.opcode = OP_ISLAND;
-  // Variant stays zero: kIslandSoftmax3Variant is a tagged-payload contract
-  // and may only accompany Softmax3IslandProg (the graph carver creates it).
   std::vector<int> inputs = pack_island_inputs(*prog, reg.in_slots);
   if (!prog->native_adj) {
     std::vector<std::pair<int, int>> input_ranges;
@@ -1629,8 +1624,6 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
           static_cast<long double>(hi) - lo + 1 >
               specialization_step_limit - specialization_steps)
         throw SpecializationRefused{};
-      if (&s == symbolic_lane_tail && try_lower_symbolic_lane_tail(s, lo, hi))
-        return;
       // Both the pre-control target fold and the ordinary path ask the same
       // structural question.  A nonselected automatic candidate reaches
       // both sites, so retain the answer for this lowering encounter rather
@@ -1640,11 +1633,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         if (!repeatable_target) repeatable_target = repeatable_target_body(s);
         return *repeatable_target;
       };
-      // Both cheap invariant folding and retained selection precede the
-      // per-iteration control scan. Neither needs an expanded graph.
-      if ((structured_policy == StructuredMode::Prefer ||
-           structured_policy == StructuredMode::Force) &&
-          lo != hi && has_repeatable_target()) {
+      const auto fold_repeatable_target = [&]() {
         const double old_scale = target_scale;
         target_scale *= static_cast<double>(hi) - static_cast<double>(lo) + 1;
         int_env[s.loopvar] = lo;
@@ -1657,6 +1646,13 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         }
         target_scale = old_scale;
         int_env.erase(s.loopvar);
+      };
+      // Both cheap invariant folding and retained selection precede the
+      // per-iteration control scan. Neither needs an expanded graph.
+      if ((structured_policy == StructuredMode::Prefer ||
+           structured_policy == StructuredMode::Force) &&
+          lo != hi && has_repeatable_target()) {
+        fold_repeatable_target();
         return;
       }
       // A loop that only counts into integer locals from values known now
@@ -1714,18 +1710,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         return;
       }
       if (lo != hi && has_repeatable_target()) {
-        const double old_scale = target_scale;
-        target_scale *= static_cast<double>(hi) - static_cast<double>(lo) + 1.0;
-        int_env[s.loopvar] = lo;
-        try {
-          for (const auto& child : s.body) lower_stmt(child);
-        } catch (...) {
-          target_scale = old_scale;
-          int_env.erase(s.loopvar);
-          throw;
-        }
-        target_scale = old_scale;
-        int_env.erase(s.loopvar);
+        fold_repeatable_target();
         return;
       }
       const int unrolled =

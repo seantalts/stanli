@@ -79,8 +79,8 @@ void expect_names(const char* fixture, const std::string& data,
                   int64_t expected_wa_gq_start = -1) {
   const std::string mir = slurp(fixture);
   char err[8192]{};
-  stanli_model* model =
-      stanli_model_new(mir.c_str(), data.c_str(), err, sizeof err);
+  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
+                                                   nullptr, err, sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL model construction for %s: %s\n", fixture, err);
@@ -131,8 +131,8 @@ void expect_structured_arrays(int B) {
   const std::string mir = slurp(fixture.c_str());
   const std::string data = "{\"B\":" + std::to_string(B) + "}";
   char err[8192]{};
-  stanli_model* model =
-      stanli_model_new(mir.c_str(), data.c_str(), err, sizeof err);
+  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
+                                                   nullptr, err, sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL %s construction: %s\n", tag.c_str(), err);
@@ -201,8 +201,8 @@ void expect_unconstrain_inits_round_trip() {
   const std::string mir = slurp("tests/fixtures/initrt.tmir.sexp");
   const std::string data = slurp("tests/fixtures/initrt.json");
   char err[8192]{};
-  stanli_model* model =
-      stanli_model_new(mir.c_str(), data.c_str(), err, sizeof err);
+  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
+                                                   nullptr, err, sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL initrt construction: %s\n", err);
@@ -307,8 +307,8 @@ void expect_unconstrain_inits_round_trip() {
 void expect_parameterless_unconstrain() {
   const std::string mir = slurp("tests/fixtures/view_gq_data_matrix.tmir.sexp");
   char err[8192]{};
-  stanli_model* model = stanli_model_new(
-      mir.c_str(), R"({"M":[[1,2,3],[4,5,6]]})", err, sizeof err);
+  stanli_model* model = stanli_model_new_with_opts(
+      mir.c_str(), R"({"M":[[1,2,3],[4,5,6]]})", nullptr, err, sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL parameterless model construction: %s\n", err);
@@ -326,8 +326,8 @@ void expect_parameterless_unconstrain() {
 void expect_invalid_data_rejected() {
   const std::string mir = slurp("tests/fixtures/newtrans.tmir.sexp");
   char err[8192]{};
-  stanli_model* model =
-      stanli_model_new(mir.c_str(), R"({"m":0.3,"s":-1})", err, sizeof err);
+  stanli_model* model = stanli_model_new_with_opts(
+      mir.c_str(), R"({"m":0.3,"s":-1})", nullptr, err, sizeof err);
   if (model != nullptr) {
     ++failures;
     std::printf("FAIL C API accepted data below its declared bound\n");
@@ -341,10 +341,10 @@ void expect_invalid_data_rejected() {
 void expect_runtime_bound_rejected() {
   const std::string mir = slurp("tests/fixtures/data_and_tp_checks.tmir.sexp");
   char err[8192]{};
-  stanli_model* model = stanli_model_new(
+  stanli_model* model = stanli_model_new_with_opts(
       mir.c_str(),
       R"({"d":0,"raw":0,"N":1,"M":1,"lo":[-10],"R":1,"C":1,"BR":1,"BC":1,"matrix_lo":[[-10]]})",
-      err, sizeof err);
+      nullptr, err, sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL C API bound-check model construction: %s\n", err);
@@ -384,8 +384,8 @@ void expect_structured_checks() {
   bad.replace(at, valid_leaf.size(), "[0.2, 0.3, 0.6]");
 
   char err[8192]{};
-  stanli_model* model =
-      stanli_model_new(mir.c_str(), bad.c_str(), err, sizeof err);
+  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), bad.c_str(),
+                                                   nullptr, err, sizeof err);
   if (model != nullptr) {
     ++failures;
     std::printf("FAIL C API accepted invalid simplex data\n");
@@ -395,7 +395,8 @@ void expect_structured_checks() {
     std::printf("FAIL C API invalid simplex error: %s\n", err);
   }
 
-  model = stanli_model_new(mir.c_str(), good.c_str(), err, sizeof err);
+  model = stanli_model_new_with_opts(mir.c_str(), good.c_str(), nullptr, err,
+                                     sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL C API structured-check construction: %s\n", err);
@@ -424,8 +425,9 @@ void expect_structured_checks() {
 void expect_categorical_check() {
   const std::string mir = categorical_check_mir("categorical_lpmf", true, 1, 3);
   char err[8192]{};
-  stanli_model* model = stanli_model_new(
-      mir.c_str(), R"({"outcome":4,"arg":[0.2,0.3,0.5]})", err, sizeof err);
+  stanli_model* model = stanli_model_new_with_opts(
+      mir.c_str(), R"({"outcome":4,"arg":[0.2,0.3,0.5]})", nullptr, err,
+      sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL C API categorical-check construction: %s\n", err);
@@ -447,8 +449,8 @@ void expect_categorical_interpreted_write_array() {
       slurp("tests/fixtures/cat.tmir.sexp"), "categorical_lpmf", false, false,
       false, true);
   char err[8192]{};
-  stanli_model* model = stanli_model_new(
-      mir.c_str(), R"({"K":3,"y":2,"ys":[3,1,3]})", err, sizeof err);
+  stanli_model* model = stanli_model_new_with_opts(
+      mir.c_str(), R"({"K":3,"y":2,"ys":[3,1,3]})", nullptr, err, sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL C API interpreted categorical construction: %s\n", err);
@@ -482,7 +484,8 @@ void expect_categorical_interpreted_write_array() {
 void expect_compiled_scalar_rng() {
   const std::string mir = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
   char err[8192]{};
-  stanli_model* model = stanli_model_new(mir.c_str(), "{}", err, sizeof err);
+  stanli_model* model =
+      stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL C API scalar RNG construction: %s\n", err);
@@ -517,8 +520,8 @@ void expect_compiled_scalar_rng() {
 void expect_necessity_effects() {
   const std::string mir = slurp("tests/fixtures/necessity_effects.tmir.sexp");
   char err[8192]{};
-  stanli_model* model =
-      stanli_model_new(mir.c_str(), "{\"mode\":1}", err, sizeof err);
+  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), "{\"mode\":1}",
+                                                   nullptr, err, sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL C API refused necessity print: %s\n", err);
@@ -535,7 +538,8 @@ void expect_necessity_effects() {
   }
 
   std::fill(std::begin(err), std::end(err), '\0');
-  model = stanli_model_new(mir.c_str(), "{\"mode\":2}", err, sizeof err);
+  model = stanli_model_new_with_opts(mir.c_str(), "{\"mode\":2}", nullptr, err,
+                                     sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL C API refused dynamic necessity reject: %s\n", err);
@@ -565,8 +569,8 @@ void expect_pathfinder() {
   const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
   const std::string data = slurp("tests/fixtures/eight_schools.json");
   char err[8192]{};
-  stanli_model* model =
-      stanli_model_new(mir.c_str(), data.c_str(), err, sizeof err);
+  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
+                                                   nullptr, err, sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL C API pathfinder construction: %s\n", err);
@@ -685,7 +689,8 @@ void expect_interruptible_sampling() {
   const std::string mir = slurp("tests/fixtures/gqconst.tmir.sexp");
   const char* data = R"({"rectangular":[[1,4],[2,5],[3,6]]})";
   char err[8192]{};
-  stanli_model* model = stanli_model_new(mir.c_str(), data, err, sizeof err);
+  stanli_model* model =
+      stanli_model_new_with_opts(mir.c_str(), data, nullptr, err, sizeof err);
   expect_true("interruptible sampling model builds", model != nullptr);
   if (model == nullptr) return;
   stanli_sample_opts opts;
@@ -707,9 +712,10 @@ void expect_interruptible_sampling() {
     int polls = 0;
     int interrupted = -1;
     err[0] = '\0';
-    int rc = stanli_sample_multi_interruptible(
-        model, &opts, 0, draws.data(), stats.data(), nullptr, nullptr,
-        poll_stop_after_pause, &polls, &interrupted, reports, err, sizeof err);
+    int rc = stanli_sample_multi_metric(model, &opts, nullptr, 0, draws.data(),
+                                        stats.data(), nullptr, nullptr, nullptr,
+                                        poll_stop_after_pause, &polls,
+                                        &interrupted, reports, err, sizeof err);
     expect_true("a stop answer ends sampling cleanly" + mode,
                 rc == 0 && interrupted == 1 && polls >= 1);
     expect_true("a stop before the first transition stores nothing" + mode,
@@ -720,15 +726,17 @@ void expect_interruptible_sampling() {
 
     std::vector<double> plain_draws(n_draws), plain_stats(n_stats);
     stanli_sample_report plain_reports[2];
-    rc = stanli_sample_multi_progress(model, &opts, 0, plain_draws.data(),
-                                      plain_stats.data(), nullptr, nullptr,
-                                      plain_reports, err, sizeof err);
+    rc = stanli_sample_multi_metric(model, &opts, nullptr, 0,
+                                    plain_draws.data(), plain_stats.data(),
+                                    nullptr, nullptr, nullptr, nullptr, nullptr,
+                                    nullptr, plain_reports, err, sizeof err);
     expect_true("plain sampling succeeds" + mode, rc == 0);
     polls = 0;
     interrupted = -1;
-    rc = stanli_sample_multi_interruptible(
-        model, &opts, 0, draws.data(), stats.data(), nullptr, nullptr,
-        poll_keep_going, &polls, &interrupted, reports, err, sizeof err);
+    rc = stanli_sample_multi_metric(model, &opts, nullptr, 0, draws.data(),
+                                    stats.data(), nullptr, nullptr, nullptr,
+                                    poll_keep_going, &polls, &interrupted,
+                                    reports, err, sizeof err);
     expect_true(
         "a poll that never stops is observational" + mode,
         rc == 0 && interrupted == 0 && polls >= 1 && draws == plain_draws &&
@@ -766,9 +774,10 @@ void expect_in_worker_write_array_on(const char* label, stanli_model* model,
     std::vector<double> want_draws(n_draws), want_stats(n_stats);
     stanli_sample_report want_reports[2];
     err[0] = '\0';
-    int rc = stanli_sample_multi_interruptible(
-        model, &opts, 0, want_draws.data(), want_stats.data(), nullptr, nullptr,
-        nullptr, nullptr, nullptr, want_reports, err, sizeof err);
+    int rc = stanli_sample_multi_metric(
+        model, &opts, nullptr, 0, want_draws.data(), want_stats.data(), nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, want_reports, err,
+        sizeof err);
     expect_true("post-hoc reference run succeeds" + mode, rc == 0);
 
     std::vector<double> want_values(n_values);
@@ -792,9 +801,10 @@ void expect_in_worker_write_array_on(const char* label, stanli_model* model,
     stanli_sample_report reports[2];
     int interrupted = -1;
     err[0] = '\0';
-    rc = stanli_sample_multi_write_array(
-        model, &opts, 0, draws.data(), stats.data(), values.data(), nullptr,
-        nullptr, nullptr, nullptr, &interrupted, reports, err, sizeof err);
+    rc = stanli_sample_multi_metric(model, &opts, nullptr, 0, draws.data(),
+                                    stats.data(), values.data(), nullptr,
+                                    nullptr, nullptr, nullptr, &interrupted,
+                                    reports, err, sizeof err);
     expect_true("in-worker write_array sampling succeeds" + mode,
                 rc == 0 && interrupted == 0);
     expect_true("live RNG changes only random-output trajectories" + mode,
@@ -814,20 +824,20 @@ void expect_in_worker_write_array_on(const char* label, stanli_model* model,
 
     std::vector<double> null_draws(n_draws, -1.0), null_stats(n_stats, -1.0);
     err[0] = '\0';
-    rc = stanli_sample_multi_write_array(
-        model, &opts, 0, null_draws.data(), null_stats.data(), nullptr, nullptr,
-        nullptr, nullptr, nullptr, nullptr, reports, err, sizeof err);
+    rc = stanli_sample_multi_metric(
+        model, &opts, nullptr, 0, null_draws.data(), null_stats.data(), nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, reports, err, sizeof err);
     expect_true(
-        "a null values buffer is the interruptible entry" + mode,
+        "a null values buffer skips generated quantities" + mode,
         rc == 0 && null_draws == want_draws && null_stats == want_stats);
   }
 }
 
 void expect_in_worker_write_array() {
   char err[8192]{};
-  stanli_model* graph = stanli_model_new(
+  stanli_model* graph = stanli_model_new_with_opts(
       slurp("tests/fixtures/gqconst.tmir.sexp").c_str(),
-      R"({"rectangular":[[1,4],[2,5],[3,6]]})", err, sizeof err);
+      R"({"rectangular":[[1,4],[2,5],[3,6]]})", nullptr, err, sizeof err);
   expect_true("in-worker write_array graph model builds", graph != nullptr);
   if (graph != nullptr) {
     expect_in_worker_write_array_on("graph", graph);
@@ -838,8 +848,9 @@ void expect_in_worker_write_array() {
       slurp("tests/fixtures/cat.tmir.sexp"), "categorical_lpmf", false, false,
       false, true);
   err[0] = '\0';
-  stanli_model* interp = stanli_model_new(
-      interp_mir.c_str(), R"({"K":3,"y":2,"ys":[3,1,3]})", err, sizeof err);
+  stanli_model* interp = stanli_model_new_with_opts(
+      interp_mir.c_str(), R"({"K":3,"y":2,"ys":[3,1,3]})", nullptr, err,
+      sizeof err);
   expect_true("in-worker write_array interpreted model builds",
               interp != nullptr);
   if (interp != nullptr) {
@@ -847,9 +858,9 @@ void expect_in_worker_write_array() {
     stanli_model_free(interp);
   }
 
-  stanli_model* random =
-      stanli_model_new(slurp("tests/fixtures/gq_scalar_rng.tmir.sexp").c_str(),
-                       "{}", err, sizeof err);
+  stanli_model* random = stanli_model_new_with_opts(
+      slurp("tests/fixtures/gq_scalar_rng.tmir.sexp").c_str(), "{}", nullptr,
+      err, sizeof err);
   expect_true("random compiled write_array model builds", random != nullptr);
   if (random) {
     expect_in_worker_write_array_on("random graph", random, true);
@@ -857,9 +868,9 @@ void expect_in_worker_write_array() {
   }
 
   err[0] = '\0';
-  stanli_model* reject =
-      stanli_model_new(slurp("tests/fixtures/gq_row_reject.tmir.sexp").c_str(),
-                       "{}", err, sizeof err);
+  stanli_model* reject = stanli_model_new_with_opts(
+      slurp("tests/fixtures/gq_row_reject.tmir.sexp").c_str(), "{}", nullptr,
+      err, sizeof err);
   expect_true("in-worker write_array reject model builds", reject != nullptr);
   if (reject == nullptr) return;
   expect_true("in-worker write_array reject model has columns",
@@ -879,9 +890,10 @@ void expect_in_worker_write_array() {
   stanli_sample_report reports[1];
   int interrupted = -1;
   err[0] = '\0';
-  const int rc = stanli_sample_multi_write_array(
-      reject, &opts, 0, draws.data(), stats.data(), values.data(), nullptr,
-      nullptr, nullptr, nullptr, &interrupted, reports, err, sizeof err);
+  const int rc = stanli_sample_multi_metric(
+      reject, &opts, nullptr, 0, draws.data(), stats.data(), values.data(),
+      nullptr, nullptr, nullptr, nullptr, &interrupted, reports, err,
+      sizeof err);
   expect_true("a rejected output row does not stop the chain",
               rc == 0 && interrupted == 0 &&
                   std::all_of(draws.begin(), draws.end(),
@@ -899,8 +911,10 @@ void expect_sampling_progress() {
   const std::string mir = slurp("tests/fixtures/gqconst.tmir.sexp");
   const char* data = R"({"rectangular":[[1,4],[2,5],[3,6]]})";
   char err[8192]{};
-  stanli_model* quiet = stanli_model_new(mir.c_str(), data, err, sizeof err);
-  stanli_model* observed = stanli_model_new(mir.c_str(), data, err, sizeof err);
+  stanli_model* quiet =
+      stanli_model_new_with_opts(mir.c_str(), data, nullptr, err, sizeof err);
+  stanli_model* observed =
+      stanli_model_new_with_opts(mir.c_str(), data, nullptr, err, sizeof err);
   if (quiet == nullptr || observed == nullptr) {
     ++failures;
     std::printf("FAIL C API progress model construction: %s\n", err);
@@ -925,13 +939,15 @@ void expect_sampling_progress() {
   std::vector<double> observed_draws(quiet_draws.size());
   std::vector<double> observed_stats(quiet_stats.size());
 
-  const int quiet_failed = stanli_sample_multi(
-      quiet, &opts, quiet_draws.data(), quiet_stats.data(), err, sizeof err);
+  const int quiet_failed = stanli_sample_multi_metric(
+      quiet, &opts, nullptr, 0, quiet_draws.data(), quiet_stats.data(), nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
   ProgressCapture capture{std::this_thread::get_id()};
   std::vector<stanli_sample_report> reports((size_t)opts.chains);
-  const int observed_failed = stanli_sample_multi_progress(
-      observed, &opts, 2, observed_draws.data(), observed_stats.data(),
-      capture_progress, &capture, reports.data(), err, sizeof err);
+  const int observed_failed = stanli_sample_multi_metric(
+      observed, &opts, nullptr, 2, observed_draws.data(), observed_stats.data(),
+      nullptr, capture_progress, &capture, nullptr, nullptr, nullptr,
+      reports.data(), err, sizeof err);
   expect_true("C API progress runs succeed",
               quiet_failed == 0 && observed_failed == 0);
   expect_true("C API progress leaves draws bitwise unchanged",
@@ -965,9 +981,10 @@ void expect_sampling_progress() {
 
   ProgressCapture rejected{std::this_thread::get_id()};
   err[0] = '\0';
-  const int negative = stanli_sample_multi_progress(
-      observed, &opts, -1, observed_draws.data(), observed_stats.data(),
-      capture_progress, &rejected, reports.data(), err, sizeof err);
+  const int negative = stanli_sample_multi_metric(
+      observed, &opts, nullptr, -1, observed_draws.data(),
+      observed_stats.data(), nullptr, capture_progress, &rejected, nullptr,
+      nullptr, nullptr, reports.data(), err, sizeof err);
   expect_true("C API rejects negative refresh",
               negative != 0 &&
                   std::string(err).find("refresh") != std::string::npos &&
@@ -1005,7 +1022,8 @@ void expect_inits_run_in_parallel() {
   const std::string mir = slurp("tests/fixtures/rejectprint.tmir.sexp");
   const char* data = R"({"N":3,"lim":1.0})";
   char err[8192]{};
-  stanli_model* model = stanli_model_new(mir.c_str(), data, err, sizeof err);
+  stanli_model* model =
+      stanli_model_new_with_opts(mir.c_str(), data, nullptr, err, sizeof err);
   expect_true("per-chain inits model builds", model != nullptr);
   if (model == nullptr) return;
   stanli_sample_opts opts;
@@ -1037,8 +1055,10 @@ void expect_inits_run_in_parallel() {
         (size_t)(opts.chains * rows * STANLI_N_SAMPLER_COLS));
     opts.num_threads = 1;
     print_thread_capture = {std::this_thread::get_id()};
-    int rc = stanli_sample_multi(model, &opts, serial_draws.data(),
-                                 serial_stats.data(), err, sizeof err);
+    int rc = stanli_sample_multi_metric(
+        model, &opts, nullptr, 0, serial_draws.data(), serial_stats.data(),
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err,
+        sizeof err);
     expect_true(std::string("sequential run with inits succeeds: ") + labels[k],
                 rc == 0);
     expect_true(
@@ -1051,9 +1071,10 @@ void expect_inits_run_in_parallel() {
     ProgressCapture capture{std::this_thread::get_id()};
     opts.num_threads = opts.chains;
     print_thread_capture = {std::this_thread::get_id()};
-    rc = stanli_sample_multi_progress(model, &opts, 1, draws.data(),
-                                      stats.data(), capture_progress, &capture,
-                                      nullptr, err, sizeof err);
+    rc = stanli_sample_multi_metric(model, &opts, nullptr, 1, draws.data(),
+                                    stats.data(), nullptr, capture_progress,
+                                    &capture, nullptr, nullptr, nullptr,
+                                    nullptr, err, sizeof err);
     expect_true(std::string("threaded run with inits succeeds: ") + labels[k],
                 rc == 0);
     expect_true(
@@ -1084,7 +1105,8 @@ void expect_streaming_stats() {
   const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
   const std::string data = slurp("tests/fixtures/es.json");
   char err[8192]{};
-  auto* model = stanli_model_new(mir.c_str(), data.c_str(), err, sizeof err);
+  auto* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(), nullptr,
+                                           err, sizeof err);
   expect_true("stream stats model", model != nullptr);
   if (!model) return;
   stanli_sample_opts opts;
@@ -1097,8 +1119,10 @@ void expect_streaming_stats() {
   std::vector<double> reference((size_t)(opts.samples * n));
   std::vector<double> stats((size_t)(opts.samples * STANLI_N_SAMPLER_COLS));
   expect_true("reference sampling",
-              stanli_sample_multi(model, &opts, reference.data(), stats.data(),
-                                  err, sizeof err) == 0);
+              stanli_sample_multi_metric(
+                  model, &opts, nullptr, 0, reference.data(), stats.data(),
+                  nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                  err, sizeof err) == 0);
   std::vector<double> streamed(reference.size());
   std::vector<double> streamed_stats(stats.size());
   struct Capture {
@@ -1118,28 +1142,26 @@ void expect_streaming_stats() {
     }
   };
   expect_true("streaming stats sampling",
-              stanli_sample_stream_stats(
+              stanli_sample_stream_stats_init(
                   model, opts.seed, opts.warmup, opts.samples, opts.delta,
-                  streamed.data(), streamed_stats.data(), callback, &capture,
-                  err, sizeof err) == 0);
+                  nullptr, streamed.data(), streamed_stats.data(), callback,
+                  &capture, err, sizeof err) == 0);
   expect_true("streamed draws match multi-chain bytes", streamed == reference);
   expect_true("streamed stats match multi-chain bytes",
               streamed_stats == stats);
   expect_true("callback sees completed rows", capture.observed == reference);
   expect_true("warmup is excluded from stats",
               capture.warmup == opts.warmup && capture.samples == opts.samples);
-  expect_true("old sampler succeeds",
-              stanli_sample(model, opts.seed, opts.warmup, opts.samples,
-                            opts.delta, streamed.data(), err, sizeof err) == 0);
-  expect_true("old sampler retains identical draws", streamed == reference);
 
   // The browser's additive explicit-init stream is the one-chain multi API,
   // byte for byte. This is the handoff Pathfinder initialization uses.
   std::vector<double> init((size_t)n, 0.0);
   opts.inits = init.data();
   expect_true("explicit-init multi sampling",
-              stanli_sample_multi(model, &opts, reference.data(), stats.data(),
-                                  err, sizeof err) == 0);
+              stanli_sample_multi_metric(
+                  model, &opts, nullptr, 0, reference.data(), stats.data(),
+                  nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                  err, sizeof err) == 0);
   expect_true("explicit-init streaming sampling",
               stanli_sample_stream_stats_init(
                   model, opts.seed, opts.warmup, opts.samples, opts.delta,
@@ -1160,7 +1182,8 @@ void expect_interpreter_policy(const char* fixture,
   const std::string tag(fixture);
   char err[8192]{};
   test_setenv("STANLI_NO_INTERPRETER", "1", 1);
-  stanli_model* model = stanli_model_new(mir.c_str(), "{}", err, sizeof err);
+  stanli_model* model =
+      stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err);
   test_unsetenv("STANLI_NO_INTERPRETER");
   if (expected_reason == nullptr) {
     if (model == nullptr) {
@@ -1184,7 +1207,8 @@ void expect_interpreter_policy(const char* fixture,
       tag + " error points at the issue tracker: " + error,
       error.find("github.com/seantalts/stanli/issues") != std::string::npos);
 
-  model = stanli_model_new(mir.c_str(), "{}", err, sizeof err);
+  model =
+      stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err);
   if (model == nullptr) {
     ++failures;
     std::printf("FAIL default model construction for %s: %s\n", fixture, err);
@@ -1198,16 +1222,20 @@ void expect_interpreter_policy(const char* fixture,
   stanli_model_free(model);
 }
 
-// The unseeded constructor builds with seed 1; only the same construction
-// seed reproduces a model's transformed data.
+// Null options build with seed 1; only the same construction seed reproduces
+// a model's transformed data.
 void test_transformed_data_seed() {
   const std::string mir = slurp("tests/fixtures/tdrng.tmir.sexp");
   char err[8192]{};
-  stanli_model* one = stanli_model_new(mir.c_str(), "{}", err, sizeof err);
+  stanli_model* one =
+      stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err);
+  stanli_model_opts opts;
+  stanli_model_opts_init(&opts);
   stanli_model* seeded =
-      stanli_model_new_seeded(mir.c_str(), "{}", 1, err, sizeof err);
+      stanli_model_new_with_opts(mir.c_str(), "{}", &opts, err, sizeof err);
+  opts.seed = 2;
   stanli_model* other =
-      stanli_model_new_seeded(mir.c_str(), "{}", 2, err, sizeof err);
+      stanli_model_new_with_opts(mir.c_str(), "{}", &opts, err, sizeof err);
   expect_true(std::string("transformed-data seed construction: ") + err,
               one != nullptr && seeded != nullptr && other != nullptr);
   if (one != nullptr && seeded != nullptr && other != nullptr) {
@@ -1232,7 +1260,8 @@ void test_transformed_data_seed() {
   stanli_model_free(other);
   // Generated-quantities draws do not make a model seed-dependent.
   const std::string gq = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
-  stanli_model* gq_only = stanli_model_new(gq.c_str(), "{}", err, sizeof err);
+  stanli_model* gq_only =
+      stanli_model_new_with_opts(gq.c_str(), "{}", nullptr, err, sizeof err);
   expect_true("generated-quantities-only RNG model construction",
               gq_only != nullptr);
   if (gq_only != nullptr)
@@ -1244,7 +1273,11 @@ void test_transformed_data_seed() {
 void test_reduce_sum_threads() {
   // Validate counts before parsing, even without an embedded compiler.
   char err[8192]{};
-  auto* invalid = stanli_model_new_threaded("", "{}", 1, 0, err, sizeof err);
+  stanli_model_opts model_opts;
+  stanli_model_opts_init(&model_opts);
+  model_opts.threads_per_chain = 0;
+  auto* invalid =
+      stanli_model_new_with_opts("", "{}", &model_opts, err, sizeof err);
   expect_true(
       "zero within-chain thread count rejected",
       invalid == nullptr &&
@@ -1254,10 +1287,11 @@ void test_reduce_sum_threads() {
   std::string data = "{\"N\":100000,\"y\":[0.5";
   for (int i = 1; i < 100000; ++i) data += ",0.5";
   data += "]}";
-  auto* serial =
-      stanli_model_new_seeded(mir.c_str(), data.c_str(), 1, err, sizeof err);
-  auto* parallel = stanli_model_new_threaded(mir.c_str(), data.c_str(), 1, 4,
-                                             err, sizeof err);
+  auto* serial = stanli_model_new_with_opts(mir.c_str(), data.c_str(), nullptr,
+                                            err, sizeof err);
+  model_opts.threads_per_chain = 4;
+  auto* parallel = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
+                                              &model_opts, err, sizeof err);
   expect_true("serial ABI reduction construction", serial != nullptr);
   if (!stanli_thread_safe()) {
     expect_true("nonthreaded ABI rejects workers",
@@ -1292,12 +1326,16 @@ void test_reduce_sum_threads() {
     opts.num_threads = 2;
     std::vector<double> a(10), b(10);
     expect_true("ABI threaded sampling",
-                stanli_sample_multi(parallel, &opts, a.data(), nullptr, err,
-                                    sizeof err) == 0);
+                stanli_sample_multi_metric(parallel, &opts, nullptr, 0,
+                                           a.data(), nullptr, nullptr, nullptr,
+                                           nullptr, nullptr, nullptr, nullptr,
+                                           nullptr, err, sizeof err) == 0);
     opts.num_threads = 1;
     expect_true("ABI repeated sampling",
-                stanli_sample_multi(parallel, &opts, b.data(), nullptr, err,
-                                    sizeof err) == 0);
+                stanli_sample_multi_metric(parallel, &opts, nullptr, 0,
+                                           b.data(), nullptr, nullptr, nullptr,
+                                           nullptr, nullptr, nullptr, nullptr,
+                                           nullptr, err, sizeof err) == 0);
     expect_true("ABI chain scheduling preserves draws", a == b);
     // The model-owned team must still be live after sampling destroys clones.
     expect_true("ABI team survives sample return",
@@ -1310,9 +1348,9 @@ void test_reduce_sum_threads() {
 
 void expect_metric_options() {
   char err[8192]{};
-  stanli_model* model = stanli_model_new(
+  stanli_model* model = stanli_model_new_with_opts(
       slurp("tests/fixtures/gq_scalar_rng_container_guard.tmir.sexp").c_str(),
-      "{}", err, sizeof err);
+      "{}", nullptr, err, sizeof err);
   expect_true("metric model builds", model != nullptr);
   if (model == nullptr) return;
   const int64_t n = stanli_n_unconstrained(model);
@@ -1338,9 +1376,9 @@ void expect_metric_options() {
 
   std::vector<double> want_draws(n_draws), want_stats(n_stats);
   err[0] = '\0';
-  int rc = stanli_sample_multi_write_array(
-      model, &opts, 0, want_draws.data(), want_stats.data(), nullptr, nullptr,
-      nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+  int rc = stanli_sample_multi_metric(
+      model, &opts, nullptr, 0, want_draws.data(), want_stats.data(), nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
   expect_true("metric reference run succeeds", rc == 0);
 
   std::vector<double> draws(n_draws, -1.0), stats(n_stats, -1.0);
@@ -1462,25 +1500,26 @@ void expect_metric_options() {
 void test_source_include_paths() {
   char err[8192]{};
   expect_true("null include array is rejected",
-              stanli_stan_to_mir_with_includes("model {}", nullptr, 1, err,
-                                               sizeof err) == nullptr);
+              stanli_stan_to_mir_with_opts("model {}", nullptr, 1, 0, err,
+                                           sizeof err) == nullptr);
   expect_true("null include array names the error",
               std::strstr(err, "include_paths") != nullptr);
   const char* null_path[] = {nullptr};
   expect_true("null include element is rejected",
-              stanli_stan_to_mir_with_includes("model {}", null_path, 1, err,
-                                               sizeof err) == nullptr);
+              stanli_stan_to_mir_with_opts("model {}", null_path, 1, 0, err,
+                                           sizeof err) == nullptr);
   if (!stanli_has_embedded_stanc()) return;
 
   // Enough copied path strings to collect while marshalling under a small
   // OCaml minor heap. All arguments must remain live until the callback ends.
   const std::vector<const char*> paths(1024, "tests/compiler");
   const char* code = "#include portable_include.stan\n";
-  char* mir = stanli_stan_to_mir_with_includes(code, paths.data(), paths.size(),
-                                               err, sizeof err);
+  char* mir = stanli_stan_to_mir_with_opts(code, paths.data(), paths.size(), 0,
+                                           err, sizeof err);
   expect_true(std::string("embedded nested includes: ") + err, mir != nullptr);
   if (mir) {
-    stanli_model* model = stanli_model_new(mir, "{}", err, sizeof err);
+    stanli_model* model =
+        stanli_model_new_with_opts(mir, "{}", nullptr, err, sizeof err);
     stanli_string_free(mir);
     expect_true(std::string("included MIR loads: ") + err, model != nullptr);
     if (model) {
@@ -1491,12 +1530,13 @@ void test_source_include_paths() {
       stanli_model_free(model);
     }
   }
-  mir = stanli_stan_to_mir(code, err, sizeof err);
-  expect_true("include paths do not leak to old entry point", mir == nullptr);
+  mir = stanli_stan_to_mir_with_opts(code, nullptr, 0, 0, err, sizeof err);
+  expect_true("include paths do not leak between calls", mir == nullptr);
   stanli_string_free(mir);
   expect_true("missing include keeps its filename",
               std::strstr(err, "portable_include.stan") != nullptr);
-  mir = stanli_stan_to_mir("model {}", err, sizeof err);
+  mir =
+      stanli_stan_to_mir_with_opts("model {}", nullptr, 0, 0, err, sizeof err);
   expect_true("compiler recovers after include error", mir != nullptr);
   stanli_string_free(mir);
 }
@@ -1515,13 +1555,10 @@ void test_fast_math_options() {
   char* plain = stanli_stan_to_mir_with_opts(code.c_str(), nullptr, 0, 0, err,
                                              sizeof err);
   expect_true(std::string("mir without fast math: ") + err, plain != nullptr);
-  char* legacy = stanli_stan_to_mir(code.c_str(), err, sizeof err);
   char* fast = stanli_stan_to_mir_with_opts(code.c_str(), nullptr, 0, 1, err,
                                             sizeof err);
   expect_true(std::string("mir with fast math: ") + err, fast != nullptr);
-  if (plain && legacy && fast) {
-    expect_true("fast_math 0 matches the unflagged entry point",
-                std::strcmp(plain, legacy) == 0);
+  if (plain && fast) {
     expect_true("fast_math 1 changes the MIR", std::strcmp(plain, fast) != 0);
   }
   const char* include_paths[] = {"tests/compiler"};
@@ -1533,8 +1570,8 @@ void test_fast_math_options() {
 
   const double q[3] = {0.3, 0.7, -0.2};
   double lp_plain = 0, lp_fast = 0, g_plain[3]{}, g_fast[3]{};
-  stanli_model* a =
-      stanli_model_new_from_stan(code.c_str(), data, err, sizeof err);
+  stanli_model* a = stanli_model_new_from_stan_with_opts(
+      code.c_str(), data, nullptr, err, sizeof err);
   expect_true(std::string("model without opts: ") + err, a != nullptr);
   stanli_model_opts fast_opts = defaults;
   fast_opts.fast_math = 1;
@@ -1566,7 +1603,6 @@ void test_fast_math_options() {
   stanli_model_free(c);
   stanli_model_free(d);
   stanli_string_free(plain);
-  stanli_string_free(legacy);
   stanli_string_free(fast);
 }
 

@@ -840,23 +840,6 @@ CompiledModel Lowering::run(const mir::Program& p) {
              target_terms.size(), out.views.size());
   dump("bind_data", {});
   const auto lower_time = prep.start();
-  const char* symbolic_lanes = std::getenv("STANLI_SYMBOLIC_LANES");
-  if (!symbolic_lanes || std::string_view(symbolic_lanes) == "1") {
-    const auto terminal =
-        [&](const auto& self,
-            const std::vector<mir::Stmt>& body) -> const mir::Stmt* {
-      for (auto it = body.rbegin(); it != body.rend(); ++it) {
-        if (it->kind == mir::Stmt::Skip) continue;
-        if (it->kind == mir::Stmt::Block || it->kind == mir::Stmt::SList) {
-          if (const auto* tail = self(self, it->body)) return tail;
-          continue;
-        }
-        return &*it;
-      }
-      return nullptr;
-    };
-    symbolic_lane_tail = terminal(terminal, p.log_prob);
-  }
   for (const auto& s : p.log_prob) lower_stmt(s);
   prep.graph(prep_graph, "lower", lower_time, g, out.fills, target_terms.size(),
              out.views.size());

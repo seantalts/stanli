@@ -176,8 +176,7 @@ int benchmark_main(int argc, char** argv) {
   const double fwd_ns =
       std::chrono::duration<double, std::nano>(t3 - t2).count() / N;
   report_driver(driver_ns, warmup_ns, warmup_evals);
-  // Machine-readable: <ns/grad> <sink> <ns/forward> <n_params>, consumed by
-  // tools/bench_models.py (which reads field 0 and the last field).
+  // Machine-readable: <ns/grad> <sink> <ns/forward> <n_params>.
   std::printf("%.1f %.6g %.1f %lld\n", ns, sink, fwd_ns, (long long)n);
   return 0;
 }

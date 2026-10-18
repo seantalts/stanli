@@ -144,12 +144,6 @@ Step by step:
    CmdStan's dropped-constant rules (see "the variant byte" below);
    and any statement whose control flow depends on a parameter is
    compiled for the register machine (its own section below).
-   A proven subset of terminal scalar loops (one indexed real-data read,
-   parameter addition, multiplication or FMA, then an optional
-   `exp`/`square` chain) is priced before its iterations are expanded,
-   and when profitable lowering emits the vector kernels directly.
-   `STANLI_SYMBOLIC_LANES=0` disables this shortcut; unset or `1` keeps
-   automatic selection, and any other value disables it.
 
 4. **The passes rewrite the list.** In pipeline order: in-place
    updates, store-to-load forwarding, constant folding, loop
@@ -198,7 +192,7 @@ ones through every stage, op list and register programs included.
 | [`runtime/src/stanc_embed_c.cpp`](../runtime/src/stanc_embed_c.cpp), [`tools/stanc_embed/`](../tools/stanc_embed/) | The native OCaml-runtime bridge plus exact-source overlay, provenance, and Windows cross-build tooling. |
 | [`js/`](../js/), [`web/`](../web/) | The npm package (a one-call `sample()` over a worker) and the demo page. The worker prefers the portable compiler and keeps stock stancjs as a one-cycle legacy fallback. [`tools/build_web.sh`](../tools/build_web.sh) builds the page from the package, so the two cannot drift. |
 | [`tools/`](../tools/) | Small programs and scripts; the important ones are listed below. |
-| [`harnesses/`](../harnesses/) | Corpus sweeps that need a local posteriordb: [`wa_coverage.py`](../harnesses/wa_coverage.py), [`ab_corpus.py`](../harnesses/ab_corpus.py), [`fn_sweep.py`](../harnesses/fn_sweep.py), benchmarks. |
+| [`harnesses/`](../harnesses/) | Corpus sweeps that need a local posteriordb: [`ab_corpus.py`](../harnesses/ab_corpus.py), [`fn_sweep.py`](../harnesses/fn_sweep.py), benchmarks. |
 | [`tests/`](../tests/) | One `test_*.cpp` per subsystem, plus [`fixtures/`](../tests/fixtures/) with checked-in `.stan` sources. CMake generates ignored MIR before its consumers; run [`tools/gen_fixtures.sh`](../tools/gen_fixtures.sh) to do so explicitly. |
 
 The tools you will reach for most:
@@ -442,7 +436,7 @@ whichever branch actually executed. That is the same arithmetic
 CmdStan's generated C++ performs for the same statement, so the
 derivatives agree by construction.
 
-Three front ends produce these programs:
+Six front ends produce these programs:
 
 - `compile_rhs` ([`ode_prog.cpp`](../runtime/src/ode_prog.cpp)) for
   ODE right-hand sides.
@@ -452,10 +446,20 @@ Three front ends produce these programs:
   `STANLI_NO_ISLAND=1` turns it off, and `STANLI_ISLAND_ALWAYS=1`
   makes it skip the cost estimate.
 - `lower_runtime_ifelse` / `lower_runtime_ternary`
-  ([`lower.cpp`](../runtime/src/lower.cpp)) for control flow whose condition
-  is unavailable while the graph is built. This includes genuine parameter
-  branches and data-only predicates computed in graph-local storage. It is
-  not an optimization: without it those models do not compile.
+  ([`lower_stmt.cpp`](../runtime/src/lower_stmt.cpp)) for control flow
+  whose condition is unavailable while the graph is built (`if`, `while`
+  and the ternary operator). This includes genuine parameter branches and
+  data-only predicates computed in graph-local storage. It is not an
+  optimization: without it those models do not compile.
+- `lower_region_map` ([`lower_region_map.cpp`](../runtime/src/lower_region_map.cpp))
+  for long loops with parameter-dependent control whose body only adds to
+  the target.
+- The segments of a structured loop (`OP_LOOP`,
+  [`structured_loop.cpp`](../runtime/src/structured_loop.cpp)), which run
+  a register program per trip.
+- Standalone Stan functions
+  ([`function.cpp`](../runtime/src/function.cpp)), called from the C API
+  and R and Python bindings.
 
 The machine's instruction set covers ordinary arithmetic, every scalar
 continuous density (the `DENSITY` instruction, backed by one table

@@ -62,16 +62,9 @@ bool exact_ode_adjoint_opcode(Program::Code code) {
     case Program::DIV:
     case Program::POW:
     case Program::NEG:
-    case Program::EXP:
-    case Program::LOG:
-    case Program::SQRT:
-    case Program::SQUARE:
-    case Program::INV:
-    case Program::FABS:
-    case Program::INV_LOGIT:
-    case Program::LOG1M:
-    case Program::LOG1P_EXP:
-    case Program::TANH:
+#define STANLI_ODE_UNARY(code, fn, from_out, pullback) case Program::code:
+      STANLI_PROGRAM_CORE_UNARY_LIST(STANLI_ODE_UNARY)
+#undef STANLI_ODE_UNARY
     case Program::GT:
     case Program::GE:
     case Program::LT:

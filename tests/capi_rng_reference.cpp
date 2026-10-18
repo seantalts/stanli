@@ -23,7 +23,7 @@ int main(int argc, char** argv) {
                           std::istreambuf_iterator<char>());
     char err[8192] = {};
     std::unique_ptr<stanli_model, decltype(&stanli_model_free)> model(
-        stanli_model_new(mir.c_str(), "{}", err, sizeof err),
+        stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err),
         stanli_model_free);
     if (!model) throw std::runtime_error(err);
     const int64_t width = stanli_wa_n_columns(model.get());
@@ -50,10 +50,10 @@ int main(int argc, char** argv) {
                          (opts.samples + opts.thin - 1) / opts.thin;
     const int64_t count = opts.chains * rows;
     std::vector<double> q(count * n), stats(count * 7), values(count * width);
-    if (stanli_sample_multi_write_array(model.get(), &opts, 0, q.data(),
-                                        stats.data(), values.data(), nullptr,
-                                        nullptr, nullptr, nullptr, nullptr,
-                                        nullptr, err, sizeof err) != 0)
+    if (stanli_sample_multi_metric(model.get(), &opts, nullptr, 0, q.data(),
+                                   stats.data(), values.data(), nullptr,
+                                   nullptr, nullptr, nullptr, nullptr, nullptr,
+                                   err, sizeof err) != 0)
       throw std::runtime_error(err);
 
     // Round-trip every double so the Python comparison remains bitwise,

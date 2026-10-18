@@ -20,6 +20,7 @@
 #ifndef STANLI_PROGRAM_HPP
 #define STANLI_PROGRAM_HPP
 
+#include <stanli/adjoint_rules.hpp>
 #include <stanli/callable_transform.hpp>
 #include <stanli/extrema_grouping.hpp>
 #include <stanli/kernel_types.hpp>
@@ -643,48 +644,12 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
       case Program::NEG:
         d() = -ra();
         break;
-      case Program::EXP:
-        d() = stan::math::exp(ra());
-        break;
-      case Program::LOG:
-        d() = stan::math::log(ra());
-        break;
-      case Program::SQRT:
-        d() = stan::math::sqrt(ra());
-        break;
-      case Program::SQUARE:
-        d() = stan::math::square(ra());
-        break;
-      case Program::INV:
-        d() = stan::math::inv(ra());
-        break;
-      case Program::FABS:
-        d() = stan::math::fabs(ra());
-        break;
-      case Program::INV_LOGIT:
-        d() = stan::math::inv_logit(ra());
-        break;
-      case Program::LOG1M:
-        d() = stan::math::log1m(ra());
-        break;
-      case Program::LOG1P_EXP:
-        d() = stan::math::log1p_exp(ra());
-        break;
-      case Program::TANH:
-        d() = stan::math::tanh(ra());
-        break;
-      case Program::ERFC:
-        d() = stan::math::erfc(ra());
-        break;
-      case Program::LOG1P:
-        d() = stan::math::log1p(ra());
-        break;
-      case Program::LOG1M_EXP:
-        d() = stan::math::log1m_exp(ra());
-        break;
-      case Program::INV_SQUARE:
-        d() = stan::math::inv_square(ra());
-        break;
+#define STANLI_PROGRAM_UNARY_FORWARD(code, fn, from_out, pullback) \
+  case Program::code:                                              \
+    d() = stan::math::fn(ra());                                    \
+    break;
+        STANLI_PROGRAM_UNARY_LIST(STANLI_PROGRAM_UNARY_FORWARD)
+#undef STANLI_PROGRAM_UNARY_FORWARD
       case Program::GT:
         d() = T(stan::math::value_of(ra()) > stan::math::value_of(rb()));
         break;

@@ -122,9 +122,9 @@ void print_island_body(std::string& out, const Graph& g, size_t u, int n) {
   const auto& p = *static_cast<const IslandProg*>(op.udata);
   appendf(out,
           "\n== island %d (graph op %zu): %zu instrs, %d regs, "
-          "%zu calls, adjoint %zu instrs, native_adj=%d, softmax3=%d\n",
+          "%zu calls, adjoint %zu instrs, native_adj=%d\n",
           n, u, p.code.size(), p.n_regs, p.calls.size(), p.adj.code.size(),
-          (int)p.native_adj, (int)(op.variant == kIslandSoftmax3Variant));
+          (int)p.native_adj);
   appendf(out, "  live-ins:");
   for (size_t k = 0; k < p.ins.size(); ++k)
     appendf(out, " slot%d->r%d[len %d]", op.in[k], p.ins[k].reg, p.ins[k].len);

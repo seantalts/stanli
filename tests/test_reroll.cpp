@@ -120,7 +120,7 @@ static void test_scalar_density_traits() {
   expect("matrix density stays excluded",
          !has_op_trait(OP_MULTI_NORMAL_LPDF, op_trait::kRerollDensity));
   expect("unrelated opcode stays excluded",
-         !has_op_trait(OP_EXP, op_trait::kRerollDensity));
+         !has_op_trait(OP_EXPV, op_trait::kRerollDensity));
 }
 
 static void test_scalar_math_widenable_traits() {
@@ -2886,66 +2886,6 @@ static void test_bail_message_ops() {
 // Pricing is a read-only gate, not permission inferred from the lane count.
 // In particular, the four-lane cancellation fixture must retain scalar
 // accumulation while a larger distinct-lane region may use the vector plan.
-struct ProvenDistinctHashSource : stanli::detail::reroll_plan::GraphSource {
-  static constexpr bool kDistinctLaneHashes = true;
-};
-
-static void test_proven_lane_pricing() {
-  namespace rp = stanli::detail::reroll_plan;
-  // This synthetic source has the same one-varying-field proof as symbolic
-  // lowering. Virtual slot IDs near INT_MAX stress identity arithmetic without
-  // allocating those graph slots. Pricing must not dereference them.
-  Graph g;
-  g.add_slot(1, true);
-  g.add_slot(1, true);
-  for (uint16_t anchor : {OP_FMA, OP_ADD, OP_MUL}) {
-    const int arity = anchor == OP_FMA ? 3 : 2;
-    for (int lanes : {1, 3, 4, 5, 6, 7, 8, 16, 33, 4096}) {
-      for (int period : {1, 2, 4}) {
-        for (int varying = 0; varying < arity; ++varying) {
-          for (bool near_limit : {false, true}) {
-            const int stride = period + 1;
-            const int first = near_limit ? INT_MAX - lanes * stride : 2;
-            rp::CandidatePlan plan;
-            plan.lanes = lanes;
-            plan.positions.resize(period);
-            for (int p = 0; p < period; ++p) {
-              auto& pos = plan.positions[p];
-              pos.ins.resize(p == 0 ? arity : 1);
-              for (int j = 0; j < (p == 0 ? arity : 1); ++j) {
-                pos.ins[j].kind = p              ? rp::InKind::kLaneLocal
-                                  : j == varying ? rp::InKind::kConstLanes
-                                                 : rp::InKind::kInvariant;
-              }
-            }
-            plan.positions.back().term_widen = true;
-            std::vector<Op> ops;
-            for (int lane = 0; lane < lanes; ++lane) {
-              const int read = first + lane * stride;
-              for (int p = 0; p < period; ++p) {
-                Op op;
-                op.opcode = p ? OP_EXPV : anchor;
-                op.n_in = p ? 1 : arity;
-                for (int j = 0; j < op.n_in; ++j)
-                  op.in[j] = p ? read + p : j == varying ? read : j % 2;
-                op.out = read + p + 1;
-                ops.push_back(op);
-              }
-            }
-            const rp::GraphSource hashed{ops.data(), period};
-            ProvenDistinctHashSource proven;
-            proven.ops = ops.data();
-            proven.period = period;
-            expect("proven unique hashes preserve exact lane selection",
-                   rp::profitable(g, plan, hashed) ==
-                       rp::profitable(g, plan, proven));
-          }
-        }
-      }
-    }
-  }
-}
-
 static void test_lane_plan_boundary() {
   namespace rp = stanli::detail::reroll_plan;
   for (int lanes : {4, 8}) {
@@ -3003,8 +2943,7 @@ static void test_lane_plan_boundary() {
                  g.udata_pool.size() == before.udata_pool.size());
       expect("lane pricing leaves fills/targets unchanged",
              fills == old_fills && terms == old_terms);
-      auto accepted =
-          rp::SelectedPlan<rp::GraphSource>::select(g, plan, source);
+      auto accepted = rp::SelectedPlan::select(g, plan, source);
       expect("selection follows unchanged price",
              accepted.has_value() == selected);
       if (!selected) {
@@ -3141,7 +3080,6 @@ int main() {
   test_fast_fuses_shared_parameter();
   test_shared_gradient_source_order();
   test_opaque_payload_not_hoisted();
-  test_proven_lane_pricing();
   test_lane_plan_boundary();
   test_scalar_density_traits();
   test_scalar_math_widenable_traits();

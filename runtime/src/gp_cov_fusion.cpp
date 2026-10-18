@@ -12,9 +12,7 @@ int fuse_gp_diagonal_updates(Graph& g, const std::vector<int>& roots) {
     return op.opcode == OP_GP_COV && op.n_in == 3 && op.variant != kGpExpQuad &&
            op.n_idata == 2 && op.idata[0] > 0;
   };
-  if (std::getenv("STANLI_NO_GP_DIAGONAL_FUSION") ||
-      std::none_of(g.ops.begin(), g.ops.end(), candidate))
-    return 0;
+  if (std::none_of(g.ops.begin(), g.ops.end(), candidate)) return 0;
 
   std::vector<int> uses(g.slots.size(), 0), writes(g.slots.size(), 0);
   for (const Op& op : g.ops) {

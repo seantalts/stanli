@@ -60,7 +60,7 @@ static const char* dl_error(void) {
  * runtime reports its own through stanli_abi_version(), and
  * stanli_bridge_load() refuses to bind when the two disagree -- see
  * there for why a mismatch cannot be allowed to proceed. */
-#define STANLI_R_ABI_VERSION 1
+#define STANLI_R_ABI_VERSION 2
 
 /* Mirrors stanli_sample_opts in runtime/include/stanli/capi.h. Field
  * order and types must match exactly; R never sees this struct, but a
@@ -80,9 +80,7 @@ typedef struct {
   int num_threads;
 } stanli_sample_opts;
 
-/* Mirrors the result-only struct used by stanli_sample_multi_progress. It is
- * part of that new entry point rather than stanli_sample_opts, so adding it
- * does not change the version-1 options layout above. */
+/* Mirrors the per-chain result struct of stanli_sample_multi_metric. */
 typedef struct {
   double warmup_seconds;
   double sampling_seconds;
@@ -189,21 +187,8 @@ static void* g_lib = NULL;
 
 /* Every entry point the R side uses. */
 static int (*p_abi_version)(void);
-static void* (*p_model_new_threaded)(const char*, const char*, uint32_t, int,
-                                     char*, size_t);
-static void* (*p_model_new_from_stan_threaded)(const char*, const char*,
-                                               uint32_t, int, char*, size_t);
 static int (*p_reduce_sum_count)(const void*);
 static const char* (*p_reduce_sum_fallbacks)(const void*);
-static void* (*p_model_new_from_stan)(const char*, const char*, char*, size_t);
-static void* (*p_model_new)(const char*, const char*, char*, size_t);
-/* The seeded constructors are additive: an older runtime has neither, and
- * rejects every _rng call in transformed data, so under it the seed has
- * nothing to affect and the unseeded constructors serve. */
-static void* (*p_model_new_from_stan_seeded)(const char*, const char*, uint32_t,
-                                             char*, size_t);
-static void* (*p_model_new_seeded)(const char*, const char*, uint32_t, char*,
-                                   size_t);
 typedef struct {
   uint32_t seed;
   int threads_per_chain;
@@ -218,8 +203,6 @@ static char* (*p_stan_to_mir_with_opts)(const char*, const char* const*, size_t,
                                         int, char*, size_t);
 static void (*p_model_free)(void*);
 static int (*p_has_embedded_stanc)(void);
-static char* (*p_stan_to_mir_with_includes)(const char*, const char* const*,
-                                            size_t, char*, size_t);
 static void (*p_string_free)(char*);
 static int (*p_exact_lp)(void);
 static int (*p_thread_safe)(void);
@@ -231,23 +214,6 @@ static const char* (*p_constrained_name)(const void*, int64_t);
 static int (*p_constrain)(void*, const double*, double*);
 static void (*p_sample_opts_init)(stanli_sample_opts*);
 static int64_t (*p_n_stored_draws)(const stanli_sample_opts*);
-static int (*p_sample_multi)(void*, const stanli_sample_opts*, double*, double*,
-                             char*, size_t);
-static int (*p_sample_multi_progress)(void*, const stanli_sample_opts*, int,
-                                      double*, double*,
-                                      stanli_sample_progress_cb, void*,
-                                      stanli_sample_report*, char*, size_t);
-static int (*p_sample_multi_interruptible)(void*, const stanli_sample_opts*,
-                                           int, double*, double*,
-                                           stanli_sample_progress_cb, void*,
-                                           stanli_sample_poll_cb, void*, int*,
-                                           stanli_sample_report*, char*,
-                                           size_t);
-static int (*p_sample_multi_write_array)(void*, const stanli_sample_opts*, int,
-                                         double*, double*, double*,
-                                         stanli_sample_progress_cb, void*,
-                                         stanli_sample_poll_cb, void*, int*,
-                                         stanli_sample_report*, char*, size_t);
 static int (*p_sample_multi_metric)(void*, const stanli_sample_opts*,
                                     const stanli_metric_opts*, int, double*,
                                     double*, double*, stanli_sample_progress_cb,
@@ -308,21 +274,10 @@ SEXP stanli_bridge_load(SEXP path) {
   g_lib = dl_open(CHAR(STRING_ELT(path, 0)));
   if (g_lib == NULL) return mkString(dl_error());
 
-  /* Before anything else. The two opts structs above are copies of the
-   * runtime's, and this package and the runtime are separately
-   * versioned artifacts -- the library is downloaded, not linked. If a
-   * field moved, every call would still succeed and read the wrong
-   * offsets: a run at the wrong seed and the wrong step size, with no
-   * error anywhere. Refuse instead. */
-  *(void**)(&p_abi_version) = dl_sym(g_lib, "stanli_abi_version");
-  if (p_abi_version == NULL) {
-    dl_close(g_lib);
-    g_lib = NULL;
-    return mkString(
-        "this stanli runtime predates the versioned ABI and is "
-        "too old for this package. Run "
-        "stanli_install(overwrite = TRUE).");
-  }
+  /* Before anything else. The opts structs above are copies of the
+   * runtime's: if a field moved, every call would still succeed and read the
+   * wrong offsets. Refuse instead. */
+  BIND("stanli_abi_version", p_abi_version);
   if (p_abi_version() != STANLI_R_ABI_VERSION) {
     char msg[256];
     snprintf(msg, sizeof msg,
@@ -335,55 +290,26 @@ SEXP stanli_bridge_load(SEXP path) {
     return mkString(msg);
   }
 
-  BIND("stanli_model_new_from_stan", p_model_new_from_stan);
-  BIND("stanli_model_new", p_model_new);
-  *(void**)(&p_model_new_threaded) = dl_sym(g_lib, "stanli_model_new_threaded");
-  *(void**)(&p_model_new_from_stan_threaded) =
-      dl_sym(g_lib, "stanli_model_new_from_stan_threaded");
-  *(void**)(&p_reduce_sum_count) = dl_sym(g_lib, "stanli_reduce_sum_count");
-  *(void**)(&p_reduce_sum_fallbacks) =
-      dl_sym(g_lib, "stanli_reduce_sum_fallbacks");
-  *(void**)(&p_model_new_from_stan_seeded) =
-      dl_sym(g_lib, "stanli_model_new_from_stan_seeded");
-  *(void**)(&p_model_new_seeded) = dl_sym(g_lib, "stanli_model_new_seeded");
-  *(void**)(&p_model_new_with_opts) =
-      dl_sym(g_lib, "stanli_model_new_with_opts");
-  *(void**)(&p_model_new_from_stan_with_opts) =
-      dl_sym(g_lib, "stanli_model_new_from_stan_with_opts");
-  *(void**)(&p_stan_to_mir_with_opts) =
-      dl_sym(g_lib, "stanli_stan_to_mir_with_opts");
+  BIND("stanli_model_new_with_opts", p_model_new_with_opts);
+  BIND("stanli_model_new_from_stan_with_opts", p_model_new_from_stan_with_opts);
+  BIND("stanli_reduce_sum_count", p_reduce_sum_count);
+  BIND("stanli_reduce_sum_fallbacks", p_reduce_sum_fallbacks);
+  BIND("stanli_stan_to_mir_with_opts", p_stan_to_mir_with_opts);
   BIND("stanli_model_free", p_model_free);
   BIND("stanli_has_embedded_stanc", p_has_embedded_stanc);
-  *(void**)(&p_stan_to_mir_with_includes) =
-      dl_sym(g_lib, "stanli_stan_to_mir_with_includes");
-  *(void**)(&p_string_free) = dl_sym(g_lib, "stanli_string_free");
+  BIND("stanli_string_free", p_string_free);
   BIND("stanli_exact_lp", p_exact_lp);
   BIND("stanli_thread_safe", p_thread_safe);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
   BIND("stanli_grad", p_grad);
-  /* Added without an ABI bump: keep older version-1 runtimes loadable and
-   * report the unavailable feature only if a caller asks for it. */
-  *(void**)(&p_unconstrain_inits) = dl_sym(g_lib, "stanli_unconstrain_inits");
+  BIND("stanli_unconstrain_inits", p_unconstrain_inits);
   BIND("stanli_n_constrained", p_n_constrained);
   BIND("stanli_constrained_name", p_constrained_name);
   BIND("stanli_constrain", p_constrain);
   BIND("stanli_sample_opts_init", p_sample_opts_init);
   BIND("stanli_n_stored_draws", p_n_stored_draws);
-  BIND("stanli_sample_multi", p_sample_multi);
-  /* Added without an ABI bump: a version-1 runtime may legitimately predate
-   * progress reporting. Keep the old sampler as the compatibility path rather
-   * than making an optional feature prevent the library loading. */
-  *(void**)(&p_sample_multi_progress) =
-      dl_sym(g_lib, "stanli_sample_multi_progress");
-  *(void**)(&p_sample_multi_interruptible) =
-      dl_sym(g_lib, "stanli_sample_multi_interruptible");
-  *(void**)(&p_sample_multi_write_array) =
-      dl_sym(g_lib, "stanli_sample_multi_write_array");
-  *(void**)(&p_sample_multi_metric) =
-      dl_sym(g_lib, "stanli_sample_multi_metric");
-  /* Pathfinder initialization is also additive. Only callers that request it
-   * require a runtime new enough to provide the symbol. */
-  *(void**)(&p_pathfinder_inits) = dl_sym(g_lib, "stanli_pathfinder_inits");
+  BIND("stanli_sample_multi_metric", p_sample_multi_metric);
+  BIND("stanli_pathfinder_inits", p_pathfinder_inits);
   BIND("stanli_sampler_column_name", p_sampler_column_name);
   BIND("stanli_summary_stats", p_summary_stats);
   BIND("stanli_diagnose_text", p_diagnose_text);
@@ -391,28 +317,20 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_wa_column_name", p_wa_column_name);
   BIND("stanli_wa_seed_chain", p_wa_seed_chain);
   BIND("stanli_wa_row", p_wa_row);
-  *(void**)(&p_warnings) = dl_sym(g_lib, "stanli_warnings");
-  *(void**)(&p_transformed_data_rng) =
-      dl_sym(g_lib, "stanli_transformed_data_rng");
+  BIND("stanli_warnings", p_warnings);
+  BIND("stanli_transformed_data_rng", p_transformed_data_rng);
   BIND("stanli_optimize_opts_init", p_optimize_opts_init);
   BIND("stanli_optimize", p_optimize);
-  /* The other inference algorithms are additive too: an older version-1
-   * runtime loads, and only a caller that asks for one of them is told. */
-  *(void**)(&p_fixed_param_opts_init) =
-      dl_sym(g_lib, "stanli_fixed_param_opts_init");
-  *(void**)(&p_fixed_param_n_draws) =
-      dl_sym(g_lib, "stanli_fixed_param_n_draws");
-  *(void**)(&p_fixed_param) = dl_sym(g_lib, "stanli_fixed_param");
-  *(void**)(&p_laplace_opts_init) = dl_sym(g_lib, "stanli_laplace_opts_init");
-  *(void**)(&p_laplace_sample) = dl_sym(g_lib, "stanli_laplace_sample");
-  *(void**)(&p_pathfinder_opts_init) =
-      dl_sym(g_lib, "stanli_pathfinder_opts_init");
-  *(void**)(&p_pathfinder_max_draws) =
-      dl_sym(g_lib, "stanli_pathfinder_max_draws");
-  *(void**)(&p_pathfinder) = dl_sym(g_lib, "stanli_pathfinder");
-  *(void**)(&p_variational_opts_init) =
-      dl_sym(g_lib, "stanli_variational_opts_init");
-  *(void**)(&p_variational) = dl_sym(g_lib, "stanli_variational");
+  BIND("stanli_fixed_param_opts_init", p_fixed_param_opts_init);
+  BIND("stanli_fixed_param_n_draws", p_fixed_param_n_draws);
+  BIND("stanli_fixed_param", p_fixed_param);
+  BIND("stanli_laplace_opts_init", p_laplace_opts_init);
+  BIND("stanli_laplace_sample", p_laplace_sample);
+  BIND("stanli_pathfinder_opts_init", p_pathfinder_opts_init);
+  BIND("stanli_pathfinder_max_draws", p_pathfinder_max_draws);
+  BIND("stanli_pathfinder", p_pathfinder);
+  BIND("stanli_variational_opts_init", p_variational_opts_init);
+  BIND("stanli_variational", p_variational);
   return mkString("");
 }
 
@@ -430,7 +348,7 @@ static void require_loaded(void) {
  * until the session ends. */
 static void model_finalizer(SEXP ext) {
   void* m = R_ExternalPtrAddr(ext);
-  if (m != NULL && p_model_free != NULL) {
+  if (m != NULL) {
     p_model_free(m);
     R_ClearExternalPtr(ext);
   }
@@ -453,32 +371,10 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
   const uint32_t construction_seed = (uint32_t)asReal(seed);
   const int threads = asInteger(threads_per_chain);
   if (threads < 1) error("threads_per_chain must be positive");
-  if (asLogical(fast_math) == TRUE) {
-    if (p_model_new_with_opts == NULL ||
-        p_model_new_from_stan_with_opts == NULL)
-      error("fast_math requires a newer Stanli runtime; run stanli_install()");
-    model_opts opts = {construction_seed, threads, 1};
-    m = asLogical(is_mir)
-            ? p_model_new_with_opts(text, data, &opts, err, sizeof err)
-            : p_model_new_from_stan_with_opts(text, data, &opts, err,
-                                              sizeof err);
-  } else if (threads > 1) {
-    if (p_model_new_threaded == NULL || p_model_new_from_stan_threaded == NULL)
-      error("threads_per_chain requires a newer Stanli runtime");
-    m = asLogical(is_mir)
-            ? p_model_new_threaded(text, data, construction_seed, threads, err,
-                                   sizeof err)
-            : p_model_new_from_stan_threaded(text, data, construction_seed,
-                                             threads, err, sizeof err);
-  } else if (asLogical(is_mir))
-    m = p_model_new_seeded != NULL
-            ? p_model_new_seeded(text, data, construction_seed, err, sizeof err)
-            : p_model_new(text, data, err, sizeof err);
-  else
-    m = p_model_new_from_stan_seeded != NULL
-            ? p_model_new_from_stan_seeded(text, data, construction_seed, err,
-                                           sizeof err)
-            : p_model_new_from_stan(text, data, err, sizeof err);
+  model_opts opts = {construction_seed, threads, asLogical(fast_math) == TRUE};
+  m = asLogical(is_mir)
+          ? p_model_new_with_opts(text, data, &opts, err, sizeof err)
+          : p_model_new_from_stan_with_opts(text, data, &opts, err, sizeof err);
   if (m == NULL) error("%s", err[0] ? err : "stanli: model compilation failed");
   SEXP ext = PROTECT(R_MakeExternalPtr(m, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(ext, model_finalizer, TRUE);
@@ -488,13 +384,11 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
 
 SEXP stanli_r_reduce_sum_count(SEXP m) {
   require_loaded();
-  return ScalarInteger(p_reduce_sum_count ? p_reduce_sum_count(model_ptr(m))
-                                          : 0);
+  return ScalarInteger(p_reduce_sum_count(model_ptr(m)));
 }
 SEXP stanli_r_reduce_sum_fallbacks(SEXP m) {
   require_loaded();
-  return mkString(p_reduce_sum_fallbacks ? p_reduce_sum_fallbacks(model_ptr(m))
-                                         : "");
+  return mkString(p_reduce_sum_fallbacks(model_ptr(m)));
 }
 
 SEXP stanli_r_has_embedded_stanc(void) {
@@ -504,22 +398,14 @@ SEXP stanli_r_has_embedded_stanc(void) {
 
 SEXP stanli_r_stan_to_mir(SEXP code, SEXP include_paths, SEXP fast_math) {
   require_loaded();
-  const int fast = asLogical(fast_math) == TRUE;
-  if (fast && (p_stan_to_mir_with_opts == NULL || p_string_free == NULL))
-    error("fast_math requires a newer Stanli runtime; run stanli_install()");
-  if (!fast && (p_stan_to_mir_with_includes == NULL || p_string_free == NULL))
-    error("Stan includes require a newer Stanli runtime; run stanli_install()");
   const size_t count = (size_t)XLENGTH(include_paths);
   const char** paths = (const char**)R_alloc(count, sizeof(char*));
   for (size_t i = 0; i < count; ++i)
     paths[i] = Rf_translateCharUTF8(STRING_ELT(include_paths, i));
   char err[8192] = {0};
-  char* mir =
-      fast ? p_stan_to_mir_with_opts(Rf_translateCharUTF8(STRING_ELT(code, 0)),
-                                     paths, count, 1, err, sizeof err)
-           : p_stan_to_mir_with_includes(
-                 Rf_translateCharUTF8(STRING_ELT(code, 0)), paths, count, err,
-                 sizeof err);
+  char* mir = p_stan_to_mir_with_opts(
+      Rf_translateCharUTF8(STRING_ELT(code, 0)), paths, count,
+      asLogical(fast_math) == TRUE, err, sizeof err);
   if (mir == NULL) error("%s", err[0] ? err : "Stan source compilation failed");
   SEXP result = PROTECT(ScalarString(mkCharCE(mir, CE_UTF8)));
   p_string_free(mir);
@@ -560,7 +446,6 @@ SEXP stanli_r_column_names(SEXP m) {
 
 SEXP stanli_r_warnings(SEXP m) {
   require_loaded();
-  if (p_warnings == NULL) return mkString("");
   const char* s = p_warnings(model_ptr(m));
   return mkString(s ? s : "");
 }
@@ -624,16 +509,11 @@ SEXP stanli_r_log_prob(SEXP m, SEXP q) {
 
 SEXP stanli_r_transformed_data_rng(SEXP m) {
   require_loaded();
-  return ScalarLogical(p_transformed_data_rng != NULL &&
-                       p_transformed_data_rng(model_ptr(m)));
+  return ScalarLogical(p_transformed_data_rng(model_ptr(m)));
 }
 
 SEXP stanli_r_unconstrain_inits(SEXP m, SEXP json) {
   require_loaded();
-  if (p_unconstrain_inits == NULL)
-    error(
-        "this stanli runtime predates constrained-scale starting values; "
-        "run stanli_install(overwrite = TRUE) to update it");
   void* mm = model_ptr(m);
   const int64_t n = p_n_unconstrained(mm);
   SEXP q = PROTECT(allocVector(REALSXP, (R_xlen_t)n));
@@ -755,10 +635,6 @@ static void print_sample_reports(const stanli_sample_opts* o, int64_t nchain,
 
 SEXP stanli_r_pathfinder_inits(SEXP m, SEXP seed, SEXP chains, SEXP options) {
   require_loaded();
-  if (p_pathfinder_inits == NULL)
-    error(
-        "Pathfinder initialization is unavailable with this older stanli "
-        "runtime. Run stanli_install(overwrite = TRUE) to update.");
   void* mm = model_ptr(m);
   const int nchain = asInteger(chains);
   if (nchain <= 0) error("chains must be positive");
@@ -808,8 +684,6 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   SEXP vals = PROTECT(allocVector(REALSXP, (R_xlen_t)(nchain * rows * ncol)));
   char err[4096];
   err[0] = '\0';
-  const int have_reports = p_sample_multi_progress != NULL;
-  const int in_worker = p_sample_multi_write_array != NULL;
 
   stanli_metric_opts mo;
   mo.metric = asInteger(VECTOR_ELT(metric_list, 0));
@@ -823,15 +697,6 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
     UNPROTECT(3);
     error("inv_metric must hold %lld values", (long long)(nchain * metric_len));
   }
-  const int have_metric = p_sample_multi_metric != NULL;
-  if (!have_metric && (mo.metric != 1 || mo.inv_metric != NULL ||
-                       mo.step_size != 1.0 || !mo.adapt_engaged)) {
-    UNPROTECT(3);
-    error(
-        "Metric, inverse metric and step size options are unavailable with "
-        "this older stanli runtime. Run stanli_install(overwrite = TRUE) to "
-        "update.");
-  }
   SEXP adapted_step = PROTECT(allocVector(REALSXP, (R_xlen_t)nchain));
   SEXP adapted_inv =
       PROTECT(allocVector(REALSXP, (R_xlen_t)(nchain * metric_len)));
@@ -840,36 +705,11 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
     REAL(adapted_inv)[i] = NA_REAL;
   mo.adapted_step_size = REAL(adapted_step);
   mo.adapted_inv_metric = metric_len > 0 ? REAL(adapted_inv) : NULL;
-  if (!have_reports && refresh_rate > 0) {
-    Rprintf(
-        "Sampling progress is unavailable with this older stanli runtime; "
-        "sampling will continue without automatic output. Run "
-        "stanli_install(overwrite = TRUE) to update.\n");
-    R_FlushConsole();
-  }
   int interrupted = 0;
-  const int failed =
-      have_metric
-          ? p_sample_multi_metric(
-                mm, &o, &mo, refresh_rate, REAL(raw), REAL(stats), REAL(vals),
-                refresh_rate > 0 ? sample_progress : NULL, NULL, sample_poll,
-                NULL, &interrupted, reports, err, sizeof err)
-      : in_worker
-          ? p_sample_multi_write_array(
-                mm, &o, refresh_rate, REAL(raw), REAL(stats), REAL(vals),
-                refresh_rate > 0 ? sample_progress : NULL, NULL, sample_poll,
-                NULL, &interrupted, reports, err, sizeof err)
-      : p_sample_multi_interruptible != NULL
-          ? p_sample_multi_interruptible(
-                mm, &o, refresh_rate, REAL(raw), REAL(stats),
-                refresh_rate > 0 ? sample_progress : NULL, NULL, sample_poll,
-                NULL, &interrupted, reports, err, sizeof err)
-      : have_reports
-          ? p_sample_multi_progress(mm, &o, refresh_rate, REAL(raw),
-                                    REAL(stats),
-                                    refresh_rate > 0 ? sample_progress : NULL,
-                                    NULL, reports, err, sizeof err)
-          : p_sample_multi(mm, &o, REAL(raw), REAL(stats), err, sizeof err);
+  const int failed = p_sample_multi_metric(
+      mm, &o, &mo, refresh_rate, REAL(raw), REAL(stats), REAL(vals),
+      refresh_rate > 0 ? sample_progress : NULL, NULL, sample_poll, NULL,
+      &interrupted, reports, err, sizeof err);
   if (failed) {
     UNPROTECT(5);
     if (err[0] && strncmp(err, "chain ", 6) != 0) error("%s", err);
@@ -883,36 +723,7 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
     UNPROTECT(6);
     return out;
   }
-  if (have_reports && refresh_rate > 0)
-    print_sample_reports(&o, nchain, reports);
-
-  /* Older runtimes write nothing during sampling: constrain every stored
-   * draw here, per chain, so the RNG stream in generated quantities differs
-   * by chain the way CmdStan's does. */
-  if (!in_worker) {
-    double* vp = REAL(vals);
-    double* rp = REAL(raw);
-    double* row = (double*)R_alloc((size_t)ncol, sizeof(double));
-    const uint32_t first_chain = (uint32_t)(o.chain_id > 0 ? o.chain_id : 1);
-    for (int64_t c = 0; c < nchain; ++c) {
-      if (wa) p_wa_seed_chain(mm, o.seed, first_chain + (uint32_t)c);
-      if (refresh_rate > 0) {
-        Rprintf("Chain [%d] Writing %lld draws\n", first_chain + (int)c,
-                (long long)rows);
-        R_FlushConsole();
-      }
-      for (int64_t i = 0; i < rows; ++i) {
-        const double* q = rp + (c * rows + i) * n;
-        const int rc = wa ? p_wa_row(mm, q, row) : p_constrain(mm, q, row);
-        if (rc != 0) {
-          UNPROTECT(5);
-          error("failed to write draw %lld of chain %lld", (long long)i,
-                (long long)c);
-        }
-        memcpy(vp + (c * rows + i) * ncol, row, sizeof(double) * (size_t)ncol);
-      }
-    }
-  }
+  if (refresh_rate > 0) print_sample_reports(&o, nchain, reports);
 
   SEXP warmup_seconds = PROTECT(allocVector(REALSXP, (R_xlen_t)nchain));
   SEXP sampling_seconds = PROTECT(allocVector(REALSXP, (R_xlen_t)nchain));
@@ -923,14 +734,13 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   double* divergent_out = REAL(n_divergent);
   double* treedepth_out = REAL(n_max_treedepth);
   for (int64_t c = 0; c < nchain; ++c) {
-    warmup_out[c] = have_reports ? reports[c].warmup_seconds : NA_REAL;
-    sampling_out[c] = have_reports ? reports[c].sampling_seconds : NA_REAL;
-    divergent_out[c] = have_reports ? (double)reports[c].n_divergent : NA_REAL;
-    treedepth_out[c] =
-        have_reports ? (double)reports[c].n_max_treedepth : NA_REAL;
+    warmup_out[c] = reports[c].warmup_seconds;
+    sampling_out[c] = reports[c].sampling_seconds;
+    divergent_out[c] = (double)reports[c].n_divergent;
+    treedepth_out[c] = (double)reports[c].n_max_treedepth;
   }
 
-  SEXP out = PROTECT(allocVector(VECSXP, 12));
+  SEXP out = PROTECT(allocVector(VECSXP, 11));
   SET_VECTOR_ELT(out, 0, vals);
   SET_VECTOR_ELT(out, 1, stats);
   SET_VECTOR_ELT(out, 2, ScalarInteger((int)nchain));
@@ -940,10 +750,9 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   SET_VECTOR_ELT(out, 6, sampling_seconds);
   SET_VECTOR_ELT(out, 7, n_divergent);
   SET_VECTOR_ELT(out, 8, n_max_treedepth);
-  SET_VECTOR_ELT(out, 9, ScalarLogical(have_reports));
-  SET_VECTOR_ELT(out, 10, adapted_step);
-  SET_VECTOR_ELT(out, 11, have_metric ? adapted_inv : allocVector(REALSXP, 0));
-  SEXP nm = PROTECT(allocVector(STRSXP, 12));
+  SET_VECTOR_ELT(out, 9, adapted_step);
+  SET_VECTOR_ELT(out, 10, adapted_inv);
+  SEXP nm = PROTECT(allocVector(STRSXP, 11));
   SET_STRING_ELT(nm, 0, mkChar("values"));
   SET_STRING_ELT(nm, 1, mkChar("stats"));
   SET_STRING_ELT(nm, 2, mkChar("chains"));
@@ -953,9 +762,8 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   SET_STRING_ELT(nm, 6, mkChar("sampling_seconds"));
   SET_STRING_ELT(nm, 7, mkChar("n_divergent"));
   SET_STRING_ELT(nm, 8, mkChar("n_max_treedepth"));
-  SET_STRING_ELT(nm, 9, mkChar("report_available"));
-  SET_STRING_ELT(nm, 10, mkChar("step_size"));
-  SET_STRING_ELT(nm, 11, mkChar("inv_metric"));
+  SET_STRING_ELT(nm, 9, mkChar("step_size"));
+  SET_STRING_ELT(nm, 10, mkChar("inv_metric"));
   setAttrib(out, R_NamesSymbol, nm);
   UNPROTECT(11);
   return out;
@@ -1039,15 +847,6 @@ SEXP stanli_r_optimize(SEXP m, SEXP optlist, SEXP init) {
 
 /* ---- fixed_param, Laplace, Pathfinder, ADVI ------------------------------ */
 
-static void require_algorithm(int available, const char* what) {
-  require_loaded();
-  if (!available)
-    error(
-        "%s is unavailable with this older stanli runtime. Run "
-        "stanli_install(overwrite = TRUE) to update.",
-        what);
-}
-
 /* What a run said. The runtime calls back on the thread that entered it, so
  * printing is safe. Information is printed when the caller asked for
  * progress; warnings, errors and Stan's "Informational Message" lines (how
@@ -1112,7 +911,7 @@ static SEXP interrupted_result(void) {
 
 /* optlist: seed, chains, samples, thin, init_radius, refresh. */
 SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
-  require_algorithm(p_fixed_param != NULL, "Fixed-parameter sampling");
+  require_loaded();
   void* mm = model_ptr(m);
   stanli_fixed_param_opts o;
   p_fixed_param_opts_init(&o);
@@ -1160,7 +959,7 @@ SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
 
 /* optlist: seed, draws, jacobian, calculate_lp, refresh. */
 SEXP stanli_r_laplace(SEXP m, SEXP optlist, SEXP mode) {
-  require_algorithm(p_laplace_sample != NULL, "Laplace sampling");
+  require_loaded();
   void* mm = model_ptr(m);
   stanli_laplace_opts o;
   p_laplace_opts_init(&o);
@@ -1207,7 +1006,7 @@ SEXP stanli_r_laplace(SEXP m, SEXP optlist, SEXP mode) {
  * tol_rel_grad, tol_param, init_radius, psis_resample, calculate_lp,
  * refresh. */
 SEXP stanli_r_pathfinder(SEXP m, SEXP optlist, SEXP inits) {
-  require_algorithm(p_pathfinder != NULL, "Pathfinder");
+  require_loaded();
   void* mm = model_ptr(m);
   stanli_pathfinder_opts o;
   p_pathfinder_opts_init(&o);
@@ -1273,7 +1072,7 @@ SEXP stanli_r_pathfinder(SEXP m, SEXP optlist, SEXP inits) {
  * adapt_engaged, adapt_iter, tol_rel_obj, eval_elbo, output_samples,
  * init_radius, refresh. */
 SEXP stanli_r_variational(SEXP m, SEXP optlist, SEXP init) {
-  require_algorithm(p_variational != NULL, "Variational inference");
+  require_loaded();
   void* mm = model_ptr(m);
   stanli_variational_opts o;
   p_variational_opts_init(&o);

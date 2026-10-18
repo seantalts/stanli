@@ -14,7 +14,6 @@ namespace stanli {
 // One list, two uses: the enum and the name table are generated from it,
 // so a new op cannot be added to one and forgotten in the other.
 #define STANLI_OPCODE_LIST(X)         \
-  X(OP_EXP)                           \
   X(OP_ADD_N)                         \
   X(OP_BCAST_FMA)                     \
   X(OP_MATVEC)                        \
@@ -819,14 +818,6 @@ constexpr BackwardPrimalReads backward_reads_inputs_only(uint8_t variant) {
   (void)variant;
   return BackwardPrimalReads{BackwardPrimalReads::kAllInputs, 0};
 }
-
-// OP_NONE_ is the graph's unregistered sentinel. A specialized Program::CALL
-// temporarily claims that otherwise-unused table slot for its fixed-size,
-// allocation-free three-lane softmax; ordinary graph ops never carry either
-// private value. Registration happens only after the specialization is
-// admitted, and refuses the optimization if the sentinel ever gains a kernel.
-constexpr uint16_t kProgramSoftmax3Opcode = OP_NONE_;
-constexpr uint8_t kProgramSoftmax3Variant = 0xffu;
 
 // Opt-in facts shared by graph rewrites. An unknown/new opcode has none.
 namespace op_trait {

@@ -93,7 +93,7 @@ createStanli().then((M) => {
   const dataPtr = M.stringToNewUTF8(data);
   const errLen = 8192;
   const errPtr = M._malloc(errLen);
-  const model = M._stanli_model_new(mirPtr, dataPtr, errPtr, errLen);
+  const model = M._stanli_model_new_with_opts(mirPtr, dataPtr, 0, errPtr, errLen);
   if (!model) fail("model_new: " + M.UTF8ToString(errPtr));
   M._free(mirPtr);
   M._free(dataPtr);
@@ -118,8 +118,8 @@ createStanli().then((M) => {
   // Sample and check the posterior mean of mu, like the wheel smoke test.
   const warmup = 1000, samples = 1000;
   const drawsPtr = M._malloc(8 * samples * n);
-  const rc = M._stanli_sample(model, 1, warmup, samples, 0.8, drawsPtr,
-                              errPtr, errLen);
+  const rc = M._stanli_sample_stream_stats_init(
+      model, 1, warmup, samples, 0.8, 0, drawsPtr, 0, 0, 0, errPtr, errLen);
   if (rc !== 0) fail("sample: " + M.UTF8ToString(errPtr));
 
   const nCon = Number(M._stanli_n_constrained(model));
@@ -227,8 +227,8 @@ createStanli().then((M) => {
     const gqMirPtr = M.stringToNewUTF8(String(gqCompiled.result));
     const gqDataPtr = M.stringToNewUTF8(
         fs.readFileSync(path.join(fixtures, "gqrng.json"), "utf8"));
-    const gqModel = M._stanli_model_new(
-        gqMirPtr, gqDataPtr, errPtr, errLen);
+    const gqModel = M._stanli_model_new_with_opts(
+        gqMirPtr, gqDataPtr, 0, errPtr, errLen);
     M._free(gqMirPtr);
     M._free(gqDataPtr);
     if (!gqModel) fail("gqrng model_new: " + M.UTF8ToString(errPtr));

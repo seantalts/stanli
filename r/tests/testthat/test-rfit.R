@@ -7,7 +7,7 @@ rfit_fixture <- function() {
   structure(list(draws=draws,sampler=sampler,columns=columns,model=NULL,
     unconstrained=array(0,c(100,4,7)),warmup=20L,samples=80L,thin=1L,chains=4L,
     save_warmup=TRUE,warmup_draws=20L,seed=1L,delta=0.8,max_depth=10L,
-    report=list(available=TRUE,warmup_seconds=1:4,sampling_seconds=5:8)),class="stanli_fit")
+    report=list(warmup_seconds=1:4,sampling_seconds=5:8)),class="stanli_fit")
 }
 
 test_that("native extraction preserves shapes, warmup and joint draws", {

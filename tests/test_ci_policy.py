@@ -90,9 +90,7 @@ class CiPolicyTest(unittest.TestCase):
             "Advance restored model timestamps past their sources",
             "Conformance against reference BridgeStan")]
         items += [self.step("r-tests", name) for name in (
-            "Fetch the previous release and the legacy anchor",
-            "Both cross-release compiler and runtime directions",
-            "Measure fresh-session time to first posterior")]
+            "Measure fresh-session time to first posterior",)]
         items += [step for job in ("build", "r-tests")
                   for step in self.jobs[job]["steps"]
                   if step.get("with", {}).get("name") in (

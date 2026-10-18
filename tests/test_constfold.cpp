@@ -158,7 +158,7 @@ int main() {
   {  // kernels register through the first Executor
     Graph g;
     const int a = g.add_slot(1, true), o = g.add_slot(1, false);
-    g.add_op(OP_EXP, {a}, o);
+    g.add_op(OP_EXPV, {a}, o);
     g.result_slot = o;
     Executor warm(std::move(g));
     (void)warm.n_params();

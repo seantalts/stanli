@@ -1580,42 +1580,12 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
     case Program::NEG:
       t.unary(o, I, m, [](double a) { return -a; });
       break;
-    case Program::EXP:
-      t.unary(o, I, m, [](double a) { return stan::math::exp(a); });
-      break;
-    case Program::INV_LOGIT:
-      t.unary(o, I, m, [](double a) { return stan::math::inv_logit(a); });
-      break;
-    case Program::LOG:
-      t.unary(o, I, m, [](double a) { return stan::math::log(a); });
-      break;
-    case Program::LOG1P_EXP:
-      t.unary(o, I, m, [](double a) { return stan::math::log1p_exp(a); });
-      break;
-    case Program::ERFC:
-      t.unary(o, I, m, [](double a) { return stan::math::erfc(a); });
-      break;
-    case Program::LOG1P:
-      t.unary(o, I, m, [](double a) { return stan::math::log1p(a); });
-      break;
-    case Program::LOG1M_EXP:
-      t.unary(o, I, m, [](double a) { return stan::math::log1m_exp(a); });
-      break;
-    case Program::INV_SQUARE:
-      t.unary(o, I, m, [](double a) { return stan::math::inv_square(a); });
-      break;
-    case Program::SQRT:
-      t.unary(o, I, m, [](double a) { return stan::math::sqrt(a); });
-      break;
-    case Program::SQUARE:
-      t.unary(o, I, m, [](double a) { return stan::math::square(a); });
-      break;
-    case Program::INV:
-      t.unary(o, I, m, [](double a) { return stan::math::inv(a); });
-      break;
-    case Program::FABS:
-      t.unary(o, I, m, [](double a) { return stan::math::fabs(a); });
-      break;
+#define STANLI_LANE_UNARY_FORWARD(code, fn, from_out, pullback)   \
+  case Program::code:                                             \
+    t.unary(o, I, m, [](double a) { return stan::math::fn(a); }); \
+    break;
+      STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_FORWARD)
+#undef STANLI_LANE_UNARY_FORWARD
     case Program::GT:
       t.binary(o, I, m, [](double a, double b) { return double(a > b); });
       break;
@@ -2159,120 +2129,21 @@ void lane_adjoint_instruction(const RegionMapProg& p, AdjointTile& t, int pc,
       });
       return;
     }
-    case Program::EXP: {
-      double* const d = cells(o.dst);
-      double* const a = t.acc(I.a, o.a);
-      t.with(o.vd, I.vd, [&](auto vd) {
-        t.each(m, [&](int l) {
-          const double u = d[l];
-          d[l] = 0.0;
-          a[l] += u * vd[l];
-        });
-      });
-      return;
-    }
-    case Program::INV_LOGIT: {
-      double* const d = cells(o.dst);
-      double* const a = t.acc(I.a, o.a);
-      t.with(o.vd, I.vd, [&](auto vd) {
-        t.each(m, [&](int l) {
-          const double u = d[l];
-          d[l] = 0.0;
-          a[l] += u * vd[l] * (1.0 - vd[l]);
-        });
-      });
-      return;
-    }
-    case Program::LOG: {
-      double* const d = cells(o.dst);
-      double* const a = t.acc(I.a, o.a);
-      t.with(o.va, I.va, [&](auto va) {
-        t.each(m, [&](int l) {
-          const double u = d[l];
-          d[l] = 0.0;
-          a[l] += u / va[l];
-        });
-      });
-      return;
-    }
-    case Program::LOG1P_EXP: {
-      double* const d = cells(o.dst);
-      double* const a = t.acc(I.a, o.a);
-      t.with(o.va, I.va, [&](auto va) {
-        t.each(m, [&](int l) {
-          const double u = d[l];
-          d[l] = 0.0;
-          a[l] += u * stan::math::inv_logit(va[l]);
-        });
-      });
-      return;
-    }
-#define STANLI_LANE_NATIVE_MATH_ADJOINT(code, op)              \
-  case Program::code: {                                        \
-    double* const d = cells(o.dst);                            \
-    double* const a = t.acc(I.a, o.a);                         \
-    t.with(o.va, I.va, [&](auto va) {                          \
-      t.each(m, [&](int l) {                                   \
-        const double u = d[l];                                 \
-        d[l] = 0.0;                                            \
-        const double x = va[l];                                \
-        if (unary_has_pullback(UnaryRule<op>::topology, x))    \
-          a[l] += UnaryRule<op>::delta(                        \
-              x, std::numeric_limits<double>::quiet_NaN(), u); \
-      });                                                      \
-    });                                                        \
-    return;                                                    \
+#define STANLI_LANE_UNARY_ADJOINT(code, fn, from_out, pullback)          \
+  case Program::code: {                                                  \
+    double* const d = cells(o.dst);                                      \
+    double* const a = t.acc(I.a, o.a);                                   \
+    t.with(from_out ? o.vd : o.va, from_out ? I.vd : I.va, [&](auto v) { \
+      t.each(m, [&](int l) {                                             \
+        const double u = d[l];                                           \
+        d[l] = 0.0;                                                      \
+        STANLI_UNARY_PULLBACK(from_out, pullback, u, v[l], v[l], a[l])   \
+      });                                                                \
+    });                                                                  \
+    return;                                                              \
   }
-      STANLI_NATIVE_MATH_LIST(STANLI_LANE_NATIVE_MATH_ADJOINT)
-#undef STANLI_LANE_NATIVE_MATH_ADJOINT
-    case Program::SQRT: {
-      double* const d = cells(o.dst);
-      double* const a = t.acc(I.a, o.a);
-      t.with(o.vd, I.vd, [&](auto vd) {
-        t.each(m, [&](int l) {
-          const double u = d[l];
-          d[l] = 0.0;
-          if (vd[l] != 0.0) a[l] += u / (2.0 * vd[l]);
-        });
-      });
-      return;
-    }
-    case Program::SQUARE: {
-      double* const d = cells(o.dst);
-      double* const a = t.acc(I.a, o.a);
-      t.with(o.va, I.va, [&](auto va) {
-        t.each(m, [&](int l) {
-          const double u = d[l];
-          d[l] = 0.0;
-          a[l] += u * 2.0 * va[l];
-        });
-      });
-      return;
-    }
-    case Program::INV: {
-      double* const d = cells(o.dst);
-      double* const a = t.acc(I.a, o.a);
-      t.with(o.va, I.va, [&](auto va) {
-        t.each(m, [&](int l) {
-          const double u = d[l];
-          d[l] = 0.0;
-          a[l] -= u / (va[l] * va[l]);
-        });
-      });
-      return;
-    }
-    case Program::FABS: {
-      double* const d = cells(o.dst);
-      double* const a = t.acc(I.a, o.a);
-      t.with(o.va, I.va, [&](auto va) {
-        t.each(m, [&](int l) {
-          const double u = d[l];
-          d[l] = 0.0;
-          fabs_rule(u, va[l], a[l]);
-        });
-      });
-      return;
-    }
+      STANLI_PROGRAM_UNARY_LIST(STANLI_LANE_UNARY_ADJOINT)
+#undef STANLI_LANE_UNARY_ADJOINT
     case Program::LSE2:
     case Program::LOG_DIFF_EXP: {
       double* const d = cells(o.dst);

@@ -56,52 +56,6 @@ static void replacement_add_backward(stanli::KernelCtx& ctx) {
   ctx.in_adj[1].data[0] += 50.0 * ctx.out_adj;
 }
 
-static std::shared_ptr<stanli::Softmax3IslandProg> make_specialized_softmax() {
-  auto p = std::make_shared<stanli::Softmax3IslandProg>();
-  p->n_regs = 6;
-  p->ins.push_back(stanli::IslandProg::LiveIn{0, 3});
-  p->out_regs = {3, 4, 5};
-  p->code.push_back(
-      stanli::Program::Instr{stanli::Program::SOFTMAX, 3, 0, 0, 0, 3});
-  p->native_adj = true;
-  p->optimized_double = stanli::specialize_softmax3(*p, 1);
-  return p;
-}
-
-static void test_specialized_forward_profile_parity() {
-  using namespace stanli;
-  auto payload = make_specialized_softmax();
-  expect("profile specialized plan",
-         static_cast<bool>(payload->optimized_double));
-
-  Graph g;
-  const int input = g.add_slot(3, true);
-  const int probs = g.add_slot(3, false);
-  const int result = g.add_slot(1, false);
-  g.add_op(OP_ISLAND, {input}, probs);
-  g.ops.back().variant = kIslandSoftmax3Variant;
-  g.ops.back().udata = payload.get();
-  g.udata_pool.push_back(payload);
-  g.add_op(OP_INDEX, {probs}, result, {1});
-  g.result_slot = result;
-
-  Executor ex(std::move(g));
-  ex.param_ptr(input)[0] = 1.2;
-  ex.param_ptr(input)[1] = -0.7;
-  ex.param_ptr(input)[2] = 0.4;
-  ex.run_forward_only();
-  const double ordinary = ex.forward();
-  double ordinary_probs[3];
-  std::memcpy(ordinary_probs, ex.value_ptr(probs), sizeof ordinary_probs);
-
-  ex.set_profile(true);
-  const double profiled = ex.forward();
-  expect("specialized profiled value", profiled == ordinary);
-  expect("specialized profiled lanes",
-         std::memcmp(ordinary_probs, ex.value_ptr(probs),
-                     sizeof ordinary_probs) == 0);
-}
-
 static void test_bound_kernel_survives_post_bind_override() {
   using namespace stanli;
   const Kernel saved = *find_kernel(OP_ADD_N);
@@ -150,7 +104,7 @@ int main() {
   const int ea = g.add_slot(1, false);
   const int lp = g.add_slot(1, false);
   const int control = g.add_slot(1, false);
-  g.add_op(OP_EXP, {a}, ea);
+  g.add_op(OP_EXPV, {a}, ea);
   g.add_op(OP_COMPARE, {a, b}, control);
   g.add_op(OP_ADD_N, {ea, b}, lp);
   g.result_slot = lp;
@@ -174,7 +128,7 @@ int main() {
   expect("report names EXP", rep.find("EXP") != std::string::npos);
   expect("report names ADD_N", rep.find("ADD_N") != std::string::npos);
   // 11 profiled gradient evaluations, one op instance of each opcode.
-  expect("counts EXP calls", calls_for(rep, "OP_EXP") == 11);
+  expect("counts EXP calls", calls_for(rep, "OP_EXPV") == 11);
   expect("counts ADD_N calls", calls_for(rep, "OP_ADD_N") == 11);
   expect("report has totals", rep.find("total") != std::string::npos);
   expect("forward-only gap is profiled", calls_for(rep, "OP_COMPARE") == 11);
@@ -192,7 +146,6 @@ int main() {
   ex.gradient(grad);
   expect("no growth when off", ex.profile_report() == before);
 
-  test_specialized_forward_profile_parity();
   test_bound_kernel_survives_post_bind_override();
 
   if (failures == 0) std::printf("test_profile: all ok\n");

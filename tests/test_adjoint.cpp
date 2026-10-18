@@ -96,15 +96,13 @@ static std::vector<double> replay_adjoints(const IslandProg& p,
 static std::vector<double> native_adjoints(const IslandProg& p,
                                            const std::vector<double>& in,
                                            const std::vector<double>& seed,
-                                           std::vector<double>* out_vals,
-                                           const Program* optimized = nullptr) {
+                                           std::vector<double>* out_vals) {
   std::vector<double> val((size_t)p.n_regs, 0.0);
   int64_t off = 0;
   for (const auto& li : p.ins)
     for (int i = 0; i < li.len; ++i)
       val[(size_t)(li.reg + i)] = in[(size_t)off++];
-  run_program(optimized ? *optimized : static_cast<const Program&>(p),
-              val.data());
+  run_program(static_cast<const Program&>(p), val.data());
   for (size_t m = 0; m < p.out_regs.size(); ++m)
     out_vals->push_back(val[(size_t)p.out_regs[m]]);
 
@@ -425,8 +423,7 @@ static void test_call_primal_read_contract() {
 // a reassociation and not an error: measured against the op graph these
 // islands replace, the generated adjoint is CLOSER than the replay is
 // (docs/benchmarks.md carries the numbers).
-static bool check(const std::string& name, Case c, int64_t tol = 0,
-                  bool use_softmax3 = false) {
+static bool check(const std::string& name, Case c, int64_t tol = 0) {
   const IslandProg orig = c.p;  // before checkpoints are inserted
   const bool ok = gen_adjoint(c.p);
   if (!ok) {
@@ -434,24 +431,10 @@ static bool check(const std::string& name, Case c, int64_t tol = 0,
     std::printf("FAIL %s: gen_adjoint refused the program\n", name.c_str());
     return false;
   }
-  std::shared_ptr<const Program> optimized;
-  if (use_softmax3) {
-    c.p.native_adj = true;
-    optimized = specialize_softmax3(c.p, 1);
-    if (!optimized) {
-      ++failures;
-      std::printf("FAIL %s: SOFTMAX(3) specialization refused the program\n",
-                  name.c_str());
-      return false;
-    }
-  }
   bool passed = true;
   std::vector<double> want_v, got_v;
-  const IslandProg& replay = use_softmax3 ? c.p : orig;
-  const std::vector<double> want =
-      replay_adjoints(replay, c.in, c.seed, &want_v);
-  const std::vector<double> got =
-      native_adjoints(c.p, c.in, c.seed, &got_v, optimized.get());
+  const std::vector<double> want = replay_adjoints(orig, c.in, c.seed, &want_v);
+  const std::vector<double> got = native_adjoints(c.p, c.in, c.seed, &got_v);
   // Values, to the same tolerance as the adjoints. They are normally
   // identical, but DOT is deliberately not the same reduction on the two
   // scalars -- program.hpp runs an Eigen array product for double to match
@@ -1230,228 +1213,11 @@ static void test_zero_length_output() {
          got.size() == 2 && got[0] == 3.5 && got[1] == 1.25);
 }
 
-// The double interpreter has a stack-backed SOFTMAX(3) result.  Compare it
-// directly with the owning Stan Math expression it replaces, including every
-// legal overlap between the three-lane source and destination ranges.  Full
-// register-file memcmp pins NaN payloads, signed zero, and untouched cells as
-// well as the ordinary finite result.
-static void test_softmax3_double_exact() {
-  using Vec = Eigen::Matrix<double, Eigen::Dynamic, 1>;
-  const double inf = std::numeric_limits<double>::infinity();
-  const auto from_bits = [](uint64_t bits) {
-    double value;
-    std::memcpy(&value, &bits, sizeof(value));
-    return value;
-  };
-  const double qnan = from_bits(UINT64_C(0x7ff8000000001234));
-  const double snan = from_bits(UINT64_C(0x7ff0000000001234));
-  std::vector<std::vector<double>> cases{
-      {0.0, -36.7368005696771, -36.7368005696771},
-      {-0.0, 0.0, -0.0},
-      {2.0, 2.0, -3.0},
-      {inf, inf, 0.0},
-      {-inf, -inf, -inf},
-      {qnan, 0.0, -1.0},
-      {0.0, qnan, -1.0},
-      {0.0, -1.0, qnan},
-      {snan, 0.0, -1.0},
-      {0.0, snan, -1.0},
-      {0.0, -1.0, snan},
-  };
-  for (int i = 0; i < 256; ++i) {
-    cases.push_back({73.0 * std::sin(0.71 * i), 91.0 * std::cos(0.43 * i + 0.2),
-                     57.0 * std::sin(1.13 * i - 0.4)});
-  }
-
-  constexpr int src = 4;
-  for (size_t trial = 0; trial < cases.size(); ++trial) {
-    for (int delta = -2; delta <= 2; ++delta) {
-      const int dst = src + delta;
-      std::vector<double> before{101.0, 102.0, 103.0, 104.0, 105.0, 106.0,
-                                 107.0, 108.0, 109.0, 110.0, 111.0, 112.0};
-      for (int i = 0; i < 3; ++i)
-        before[(size_t)(src + i)] = cases[trial][(size_t)i];
-
-      std::vector<double> want = before;
-      const Eigen::Map<const Vec> input(&want[(size_t)src], 3);
-      const Vec result = stan::math::softmax(input);
-      for (int i = 0; i < 3; ++i) want[(size_t)(dst + i)] = result(i);
-
-      IslandProg p;
-      p.n_regs = (int)before.size();
-      p.code.push_back(Program::Instr{Program::SOFTMAX, dst, src, 0, 0, 3});
-      p.native_adj = true;
-      const auto optimized = specialize_softmax3(p, 1);
-      expect("softmax3 exact specialized", static_cast<bool>(optimized));
-      std::vector<double> got = before;
-      if (optimized) run_program(*optimized, got.data());
-
-      const bool same = std::memcmp(got.data(), want.data(),
-                                    got.size() * sizeof(double)) == 0;
-      if (!same) {
-        ++failures;
-        std::printf("FAIL softmax3 exact trial %zu overlap %+d\n", trial,
-                    delta);
-      }
-    }
-  }
-}
-
-static void test_softmax3_activation() {
-  // Both reused kernels are built-ins: lookup must work before any program
-  // has been specialized, through the same thread-safe registry as all other
-  // executor kernels. Keeping this first catches a return to lazy writes.
-  expect("softmax3 program kernel registered",
-         find_kernel(OP_SOFTMAX) != nullptr);
-  expect("softmax3 island kernel registered",
-         find_kernel(OP_ISLAND) != nullptr);
-  expect("softmax3 private slot initially empty",
-         find_kernel(kProgramSoftmax3Opcode) == nullptr);
-
-  const auto make_program = [](int n) {
-    IslandProg p;
-    p.native_adj = true;
-    p.n_regs = 16;
-    for (int i = 0; i < n; ++i)
-      p.code.push_back(Program::Instr{Program::SOFTMAX, 4, 0, 0, 0, 3});
-    return p;
-  };
-  const auto seed_existing_payload = [](IslandProg& p) {
-    Program::Call call;
-    call.opcode = OP_EXP;
-    call.n_in = 1;
-    call.in[0] = 7;
-    call.in_len[0] = 1;
-    call.out = 8;
-    call.out_len = 1;
-    call.idata = {11, 13, 17};
-    p.calls.push_back(std::move(call));
-    p.code.insert(p.code.begin(), Program::Instr{Program::CALL, 8, 0, 0, 0, 0});
-    p.out_regs = {8};
-  };
-  const auto same_instr = [](const Program::Instr& a, const Program::Instr& b) {
-    return a.code == b.code && a.dst == b.dst && a.a == b.a && a.b == b.b &&
-           a.c == b.c && a.len == b.len;
-  };
-  const auto pad_clone_bytes = [](IslandProg& p, size_t target) {
-    size_t bytes = p.code.size() * sizeof(Program::Instr) +
-                   p.calls.size() * sizeof(Program::Call) +
-                   p.pool.size() * sizeof(double) +
-                   p.out_regs.size() * sizeof(int);
-    for (const auto& call : p.calls) bytes += call.idata.size() * sizeof(int);
-    size_t sites = 0;
-    for (const auto& I : p.code)
-      if (I.code == Program::SOFTMAX && I.len == 3) ++sites;
-    bytes += sites * sizeof(Program::Call);
-    expect("softmax3 boundary target fits", bytes <= target);
-    expect("softmax3 boundary padding aligned",
-           (target - bytes) % sizeof(double) == 0);
-    if (bytes <= target && (target - bytes) % sizeof(double) == 0)
-      p.pool.resize(p.pool.size() + (target - bytes) / sizeof(double));
-  };
-
-  IslandProg replay = make_program(32);
-  replay.native_adj = false;
-  expect("softmax3 native gate", !specialize_softmax3(replay));
-  expect("softmax3 native gate leaves opcode",
-         replay.code[0].code == Program::SOFTMAX);
-
-  IslandProg below = make_program(31);
-  expect("softmax3 count gate", !specialize_softmax3(below));
-
-  // Equality is admitted and one allocation unit beyond is refused at both
-  // limits.  32 sites exercise the per-site bound; 513 make the 2 MiB
-  // absolute cap tighter than the per-site allowance.
-  constexpr size_t per_site_limit = 32 * 4096;
-  IslandProg per_site_exact = make_program(32);
-  seed_existing_payload(per_site_exact);
-  pad_clone_bytes(per_site_exact, per_site_limit);
-  const auto per_site_plan = specialize_softmax3(per_site_exact);
-  expect("softmax3 per-site equality", static_cast<bool>(per_site_plan));
-  IslandProg per_site_over = make_program(32);
-  seed_existing_payload(per_site_over);
-  pad_clone_bytes(per_site_over, per_site_limit);
-  const std::vector<Program::Instr> per_site_canonical = per_site_over.code;
-  per_site_over.calls.front().idata.push_back(19);
-  expect("softmax3 per-site byte gate", !specialize_softmax3(per_site_over));
-  expect(
-      "softmax3 per-site gate leaves canonical code",
-      per_site_over.code.size() == per_site_canonical.size() &&
-          same_instr(per_site_over.code.front(), per_site_canonical.front()));
-
-  constexpr size_t absolute_limit = 2 * 1024 * 1024;
-  IslandProg absolute_exact = make_program(513);
-  pad_clone_bytes(absolute_exact, absolute_limit);
-  const auto absolute_plan = specialize_softmax3(absolute_exact);
-  expect("softmax3 absolute equality", static_cast<bool>(absolute_plan));
-  IslandProg absolute_over = make_program(513);
-  pad_clone_bytes(absolute_over, absolute_limit);
-  const std::vector<Program::Instr> absolute_canonical = absolute_over.code;
-  Program::Call absolute_extra;
-  absolute_extra.idata.push_back(1);
-  absolute_over.calls.push_back(std::move(absolute_extra));
-  expect("softmax3 absolute byte gate", !specialize_softmax3(absolute_over));
-  expect(
-      "softmax3 absolute gate leaves canonical code",
-      absolute_over.code.size() == absolute_canonical.size() &&
-          same_instr(absolute_over.code.front(), absolute_canonical.front()));
-
-  IslandProg empty = make_program(0);
-  expect("softmax3 empty min zero", !specialize_softmax3(empty, 0));
-
-  IslandProg eligible = make_program(32);
-  Program::Call existing;
-  existing.opcode = OP_EXP;
-  existing.n_in = 1;
-  existing.in[0] = 7;
-  existing.in_len[0] = 1;
-  existing.out = 8;
-  existing.out_len = 1;
-  eligible.calls.push_back(existing);
-  eligible.code.insert(eligible.code.begin(),
-                       Program::Instr{Program::CALL, 8, 0, 0, 0, 0});
-  eligible.code.push_back(Program::Instr{Program::SOFTMAX, 8, 0, 0, 0, 4});
-  const std::vector<Program::Instr> canonical = eligible.code;
-  const auto optimized_plan = specialize_softmax3(eligible);
-  expect("softmax3 threshold activates", static_cast<bool>(optimized_plan));
-  expect("softmax3 private kernel registered",
-         find_kernel(kProgramSoftmax3Opcode) != nullptr);
-  expect("softmax3 canonical code size",
-         eligible.code.size() == canonical.size());
-  bool canonical_same = eligible.code.size() == canonical.size();
-  for (size_t i = 0; i < eligible.code.size() && canonical_same; ++i)
-    canonical_same = same_instr(eligible.code[i], canonical[i]);
-  expect("softmax3 canonical bytecode", canonical_same);
-  expect("softmax3 canonical calls", eligible.calls.size() == 1);
-
-  const Program& optimized = *optimized_plan;
-  expect("softmax3 clone keeps existing call",
-         optimized.code[0].code == Program::CALL && optimized.code[0].a == 0 &&
-             optimized.calls[0].opcode == OP_EXP);
-  size_t rewritten = 0;
-  for (size_t i = 1; i + 1 < optimized.code.size(); ++i) {
-    const auto& I = optimized.code[i];
-    if (I.code != Program::CALL) continue;
-    ++rewritten;
-    const auto& call = optimized.calls[(size_t)I.a];
-    expect("softmax3 call opcode", call.opcode == kProgramSoftmax3Opcode);
-    expect("softmax3 call variant", call.variant == kProgramSoftmax3Variant);
-    expect("softmax3 call input",
-           call.n_in == 1 && call.in[0] == 0 && call.in_len[0] == 3);
-    expect("softmax3 call output", call.out == 4 && call.out_len == 3);
-  }
-  expect("softmax3 rewrites threshold", rewritten == 32);
-  expect("softmax3 leaves other lengths",
-         optimized.code.back().code == Program::SOFTMAX &&
-             optimized.code.back().len == 4);
-  expect("softmax3 appends calls", optimized.calls.size() == 33);
-}
-
 static void test_reductions() {
   {
     Build b({0.3, 0.7, 1.4}, 3);
     const int d = b.emit(Program::SOFTMAX, 0, 0, 0, 3, 3);
-    check("softmax3", b.done({d, d + 1, d + 2}, {1.1, -0.4, 2.0}), 0, true);
+    check("softmax3", b.done({d, d + 1, d + 2}, {1.1, -0.4, 2.0}));
   }
   {
     Build b({0.3, 0.7, 1.4, 0.2}, 4);
@@ -1536,7 +1302,7 @@ static void test_in_place_ranges() {
   {
     Build b({0.3, 0.7, 1.4}, 3);
     b.emit_to(Program::SOFTMAX, 0, 0, 0, 0, 3);
-    check("in-place softmax3", b.done({0, 1, 2}, {1.1, -0.4, 2.0}), 0, true);
+    check("in-place softmax3", b.done({0, 1, 2}, {1.1, -0.4, 2.0}));
   }
   const std::vector<double> v{0.3, 0.7, 1.4, 0.2};
   const Program::Code codes[] = {Program::SOFTMAX, Program::EXP_RANGE,
@@ -2351,8 +2117,6 @@ int main() {
   test_ranged();
   test_elementwise_width();
   test_zero_length_output();
-  test_softmax3_activation();
-  test_softmax3_double_exact();
   test_in_place_ranges();
   test_nan_operands();
   test_extremum_instantiations();
