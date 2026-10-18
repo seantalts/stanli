@@ -14,7 +14,6 @@ namespace stanli {
 // One list, two uses: the enum and the name table are generated from it,
 // so a new op cannot be added to one and forgotten in the other.
 #define STANLI_OPCODE_LIST(X)         \
-  X(OP_EXP)                           \
   X(OP_ADD_N)                         \
   X(OP_BCAST_FMA)                     \
   X(OP_MATVEC)                        \

@@ -247,7 +247,7 @@ static void test_interleaved_lanes() {
   for (int l = 0; l < L; ++l) {
     if (l == 4) {
       const int e = b.g.add_slot(1, false);
-      b.g.add_op(OP_EXP, {b.sigma}, e);
+      b.g.add_op(OP_EXPV, {b.sigma}, e);
       const int lp = b.g.add_slot(1, false);
       const int id = b.g.add_op(OP_NORMAL_LPDF, {c, e, b.sigma}, lp);
       b.g.ops[(size_t)id].variant = 0x06;
@@ -269,7 +269,7 @@ static void test_interleaved_lanes() {
   Fills f2 = b.fills;
   const PartitionStats st = partition_lanes(b.g, f2, tt, {});
   expect("interleaved one group", st.groups == 1 && st.lanes == 8);
-  expect("interleaved keeps the intruder", count_opcode(b.g, OP_EXP) == 1);
+  expect("interleaved keeps the intruder", count_opcode(b.g, OP_EXPV) == 1);
   expect("interleaved op count", b.g.ops.size() == 3);
   expect("interleaved two terms", tt.size() == 2 && tt[1] == foreign_term);
   expect_same_grad("interleaved", std::move(b.g), f2, tt, want);
@@ -1318,7 +1318,7 @@ int main() {
   {  // kernels register through the first Executor
     Graph g;
     const int a = g.add_slot(1, true), o = g.add_slot(1, false);
-    g.add_op(OP_EXP, {a}, o);
+    g.add_op(OP_EXPV, {a}, o);
     g.result_slot = o;
     Executor warm(std::move(g));
     (void)warm.n_params();

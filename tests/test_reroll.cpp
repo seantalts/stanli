@@ -120,7 +120,7 @@ static void test_scalar_density_traits() {
   expect("matrix density stays excluded",
          !has_op_trait(OP_MULTI_NORMAL_LPDF, op_trait::kRerollDensity));
   expect("unrelated opcode stays excluded",
-         !has_op_trait(OP_EXP, op_trait::kRerollDensity));
+         !has_op_trait(OP_EXPV, op_trait::kRerollDensity));
 }
 
 static void test_scalar_math_widenable_traits() {

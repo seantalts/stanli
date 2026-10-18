@@ -47,7 +47,7 @@ inline EightSchools eight_schools() {
   const int lp4 = g.add_slot(1, false);
   const int lp = g.add_slot(1, false);
 
-  g.add_op(OP_EXP, {m.log_tau}, tau);
+  g.add_op(OP_EXPV, {m.log_tau}, tau);
   g.add_op(OP_BCAST_FMA, {m.mu, tau, m.theta_tilde}, theta);
   g.add_op(OP_NORMAL_LPDF, {m.y, theta, m.sigma}, lp1);
   g.add_op(OP_NORMAL_LPDF, {m.theta_tilde, zero, one}, lp2);

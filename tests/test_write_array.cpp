@@ -3212,7 +3212,7 @@ void test_product_exact_grouping() {
     Graph graph;
     const int in = graph.add_slot(1, true);
     const int out = graph.add_slot(1, false);
-    graph.add_op(OP_EXP, {in}, out);
+    graph.add_op(OP_EXPV, {in}, out);
     graph.result_slot = out;
     Executor warm(std::move(graph));
   }

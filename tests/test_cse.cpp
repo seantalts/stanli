@@ -58,8 +58,8 @@ static void test_merges_identical_ops() {
   Fills fills;
   const int p = g.add_slot(1, true);
   const int e1 = g.add_slot(1, false), e2 = g.add_slot(1, false);
-  g.add_op(OP_EXP, {p}, e1);
-  g.add_op(OP_EXP, {p}, e2);
+  g.add_op(OP_EXPV, {p}, e1);
+  g.add_op(OP_EXPV, {p}, e2);
   const int s = g.add_slot(1, false);
   g.add_op(OP_ADD, {e1, e2}, s);
   g.result_slot = s;
@@ -70,7 +70,7 @@ static void test_merges_identical_ops() {
   std::vector<int> terms;
   const CseStats st = cse(g, fills, terms, {});
   expect("one primal shared", st.primals_shared == 1 && st.ops_removed == 0);
-  expect("two EXP pullbacks", count_opcode(g, OP_EXP) == 2);
+  expect("two EXP pullbacks", count_opcode(g, OP_EXPV) == 2);
   expect("adjoint identities retained",
          g.ops[2].in[0] == e1 && g.ops[2].in[1] == e2);
   Executor storage(g);
@@ -92,8 +92,8 @@ static void test_rewrites_target_terms() {
   Fills fills;
   const int p = g.add_slot(1, true);
   const int t1 = g.add_slot(1, false), t2 = g.add_slot(1, false);
-  g.add_op(OP_EXP, {p}, t1);
-  g.add_op(OP_EXP, {p}, t2);
+  g.add_op(OP_EXPV, {p}, t1);
+  g.add_op(OP_EXPV, {p}, t2);
   std::vector<int> terms{t1, t2};
   const CseStats st = cse(g, fills, terms, {});
   expect("duplicate term primal shared", st.primals_shared == 1);
@@ -221,8 +221,8 @@ static void test_keeps_roots() {
   Fills fills;
   const int p = g.add_slot(1, true);
   const int e1 = g.add_slot(1, false), e2 = g.add_slot(1, false);
-  g.add_op(OP_EXP, {p}, e1);
-  g.add_op(OP_EXP, {p}, e2);
+  g.add_op(OP_EXPV, {p}, e1);
+  g.add_op(OP_EXPV, {p}, e2);
   g.result_slot = e1;
   std::vector<int> terms;
   const CseStats st = cse(g, fills, terms, {e2});
@@ -235,8 +235,8 @@ static void test_env_disable() {
   Fills fills;
   const int p = g.add_slot(1, true);
   const int e1 = g.add_slot(1, false), e2 = g.add_slot(1, false);
-  g.add_op(OP_EXP, {p}, e1);
-  g.add_op(OP_EXP, {p}, e2);
+  g.add_op(OP_EXPV, {p}, e1);
+  g.add_op(OP_EXPV, {p}, e2);
   const int s = g.add_slot(1, false);
   g.add_op(OP_ADD, {e1, e2}, s);
   g.result_slot = s;
@@ -339,7 +339,7 @@ static SharedBackwardGraph build_shared_backward_graph() {
   dup([&](int o) { g.add_op(OP_SUB, {p0, p1}, o); });
   dup([&](int o) { g.add_op(OP_NEG, {p1}, o); });
   dup([&](int o) { g.add_op(OP_MUL, {p0, p1}, o); });
-  dup([&](int o) { g.add_op(OP_EXP, {p1}, o); });
+  dup([&](int o) { g.add_op(OP_EXPV, {p1}, o); });
   dup([&](int o) { g.add_op(OP_INV_LOGIT, {p1}, o); });
   dup([&](int o) { g.add_op(OP_LOG1M, {theta}, o); });
   dup([&](int o) { g.add_op(OP_LOGV, {theta}, o); });
@@ -448,8 +448,8 @@ static void test_fast_merges_active_duplicates() {
   Fills fills;
   const int p = g.add_slot(1, true);
   const int e1 = g.add_slot(1, false), e2 = g.add_slot(1, false);
-  g.add_op(OP_EXP, {p}, e1);
-  g.add_op(OP_EXP, {p}, e2);
+  g.add_op(OP_EXPV, {p}, e1);
+  g.add_op(OP_EXPV, {p}, e2);
   const int s = g.add_slot(1, false);
   g.add_op(OP_ADD, {e1, e2}, s);
   g.result_slot = s;
@@ -462,12 +462,12 @@ static void test_fast_merges_active_duplicates() {
   const CseStats st_off = cse(off, fills, terms, {}, false);
   expect("explicit off shares primal only", st_off.primals_shared == 1 &&
                                                 st_off.ops_removed == 0 &&
-                                                count_opcode(off, OP_EXP) == 2);
+                                                count_opcode(off, OP_EXPV) == 2);
 
   const CseStats st = cse(g, fills, terms, {}, true);
   expect("fast removes the duplicate", st.ops_removed == 1);
   expect("fast shares no primal", st.primals_shared == 0);
-  expect("one EXP remains", count_opcode(g, OP_EXP) == 1);
+  expect("one EXP remains", count_opcode(g, OP_EXPV) == 1);
   expect("both ADD inputs are the survivor",
          g.ops.back().in[0] == e1 && g.ops.back().in[1] == e1);
   expect_same_values("fast value and gradient", run_grad(std::move(g), fills),
@@ -479,8 +479,8 @@ static void test_fast_merge_target_terms() {
   Fills fills;
   const int p = g.add_slot(1, true);
   const int t1 = g.add_slot(1, false), t2 = g.add_slot(1, false);
-  g.add_op(OP_EXP, {p}, t1);
-  g.add_op(OP_EXP, {p}, t2);
+  g.add_op(OP_EXPV, {p}, t1);
+  g.add_op(OP_EXPV, {p}, t2);
   std::vector<int> terms{t1, t2};
   Graph ref = g;
   testutil::reduce_into_result(ref, terms);
@@ -523,8 +523,8 @@ static void test_fast_keeps_active_roots_and_effects() {
   Fills fills;
   const int p = g.add_slot(1, true);
   const int e1 = g.add_slot(1, false), e2 = g.add_slot(1, false);
-  g.add_op(OP_EXP, {p}, e1);
-  g.add_op(OP_EXP, {p}, e2);
+  g.add_op(OP_EXPV, {p}, e1);
+  g.add_op(OP_EXPV, {p}, e2);
   g.result_slot = e1;
   std::vector<int> terms;
   const CseStats st = cse(g, fills, terms, {e2}, true);
@@ -572,7 +572,7 @@ int main() {
   {  // kernels register through the first Executor
     Graph g;
     const int a = g.add_slot(1, true), o = g.add_slot(1, false);
-    g.add_op(OP_EXP, {a}, o);
+    g.add_op(OP_EXPV, {a}, o);
     g.result_slot = o;
     Executor warm(std::move(g));
     (void)warm.n_params();

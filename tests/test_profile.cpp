@@ -104,7 +104,7 @@ int main() {
   const int ea = g.add_slot(1, false);
   const int lp = g.add_slot(1, false);
   const int control = g.add_slot(1, false);
-  g.add_op(OP_EXP, {a}, ea);
+  g.add_op(OP_EXPV, {a}, ea);
   g.add_op(OP_COMPARE, {a, b}, control);
   g.add_op(OP_ADD_N, {ea, b}, lp);
   g.result_slot = lp;
@@ -128,7 +128,7 @@ int main() {
   expect("report names EXP", rep.find("EXP") != std::string::npos);
   expect("report names ADD_N", rep.find("ADD_N") != std::string::npos);
   // 11 profiled gradient evaluations, one op instance of each opcode.
-  expect("counts EXP calls", calls_for(rep, "OP_EXP") == 11);
+  expect("counts EXP calls", calls_for(rep, "OP_EXPV") == 11);
   expect("counts ADD_N calls", calls_for(rep, "OP_ADD_N") == 11);
   expect("report has totals", rep.find("total") != std::string::npos);
   expect("forward-only gap is profiled", calls_for(rep, "OP_COMPARE") == 11);

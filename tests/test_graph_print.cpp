@@ -28,7 +28,7 @@ static Graph build_graph() {
   const int s = g.add_slot(1, false);  // s4
   const int r = g.add_slot(1, false);  // s5
   const int j = g.add_slot(1, false);  // s6
-  g.add_op(OP_EXP, {p}, e);
+  g.add_op(OP_EXPV, {p}, e);
   g.add_op(OP_MUL, {d, e}, m, {7, 8, 9});
   g.ops.back().variant = 0x03;
   g.add_op(OP_SUM_VEC, {m}, s);
@@ -56,7 +56,7 @@ static const char* kGolden =
     "jac_slots: s6\n"
     "views: mu=s3 y=s1\n"
     "fills: s1[3]=0.5,1.5,2.5\n"
-    "s2[1] = EXP s0[1,P]\n"
+    "s2[1] = EXPV s0[1,P]\n"
     "s3[3] = MUL.v=0x03 s1[3] s2[1] idata=[7,8,9]\n"
     "s4[1] = SUM_VEC s3[3]\n"
     "s5[1] = ADD s4[1] s2[1] out2=s6\n";
