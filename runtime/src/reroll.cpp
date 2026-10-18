@@ -808,8 +808,7 @@ static RerollStats reroll_impl(
       bool layout_set = false;  // has the region committed to a convention
       bool& layout_cols = plan.column_major;  // column-major, once committed
       int64_t Luse = doomed ? 0 : L;
-      using SelectedPlan =
-          detail::reroll_plan::SelectedPlan<detail::reroll_plan::GraphSource>;
+      using SelectedPlan = detail::reroll_plan::SelectedPlan;
       std::optional<SelectedPlan> selected;
       for (int attempt = 0;
            !doomed && attempt < kMaxClassifyAttempts && Luse >= kMinLanes;
