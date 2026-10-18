@@ -413,9 +413,7 @@ visiting the tree. Each branch, loop condition and index that depended on a
 parameter during recording carries a guard holding the value it took; a
 replay checks the guards where they occur, and the first mismatch discards
 the stream and records again. `write_array` replays the same loops forward
-only. Large recordings are sealed into per-iteration numerical frames; the
-frame mechanics, the recording-time specializations, their switches and the
-ctsem measurements are in
+only. The switches are listed in
 [`OPTIMIZATIONS.md`](../runtime/src/OPTIMIZATIONS.md#retained-loops).
 
 ## Measured behavior and limits
