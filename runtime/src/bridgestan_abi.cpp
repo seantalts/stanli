@@ -15,9 +15,6 @@
 // error, which is far worse than a refusal at load time.
 //
 // The unsupported set, all refusing honestly:
-//   * bs_param_unconstrain / bs_param_unconstrain_json and
-//     bs_param_initialize with non-null JSON (stanli has forward
-//     constraint transforms only),
 //   * bs_log_density_hessian / ..._vector_product (no second derivatives),
 //   * any density flags other than propto=true, jacobian=true (that is the
 //     single quantity a stanli graph bakes in).
@@ -98,21 +95,12 @@ stanli::DataMap load_data(const char* data) {
   return stanli::DataMap::from_json(s);
 }
 
-// The model's inverse parameter transforms, or null with the reason. A model
-// compiled from a MIR that predates the transform_inits section has none, and
-// so does one whose section could not be prepared.
-const stanli::InitInterp* init_interp(const bs_model* m, std::string* why);
-
 // A flat constrained block, split into the named values the init interpreter
 // reads. `theta` is bs_param_num(m, false, false) values: the constrained
 // parameters only, in CSV order, which is each parameter's serial order in
 // declaration order -- exactly what `views` describes.
 std::map<std::string, stanli::DataMap::Entry> inits_from_flat(
     const stanli::CompiledModel& cm, const double* theta);
-
-// The same, from a CmdStan-style JSON object. The complete object is retained
-// so the interpreter can report both missing and unknown names.
-std::map<std::string, stanli::DataMap::Entry> inits_from_json(const char* json);
 
 // The names of one declared parameter's UNCONSTRAINED values.
 //
@@ -530,21 +518,6 @@ int bs_param_constrain(const bs_model* m, bool include_tp, bool include_gq,
 
 namespace {
 
-const stanli::InitInterp* init_interp(const bs_model* m, std::string* why) {
-  if (!m->cm.transform_inits) {
-    *why =
-        "this model has no inverse parameter transforms: its MIR carries no "
-        "transform_inits section";
-    return nullptr;
-  }
-  if (!m->cm.transform_inits->interp) {
-    *why = "this model's inverse parameter transforms are unavailable: " +
-           m->cm.transform_inits->truncated;
-    return nullptr;
-  }
-  return m->cm.transform_inits->interp.get();
-}
-
 std::map<std::string, stanli::DataMap::Entry> inits_from_flat(
     const stanli::CompiledModel& cm, const double* theta) {
   std::map<std::string, stanli::DataMap::Entry> out;
@@ -557,32 +530,6 @@ std::map<std::string, stanli::DataMap::Entry> inits_from_flat(
     at += view.len;
   }
   return out;
-}
-
-std::map<std::string, stanli::DataMap::Entry> inits_from_json(
-    const char* json) {
-  const stanli::DataMap supplied =
-      stanli::DataMap::from_json(json == nullptr ? "{}" : json);
-  return std::map<std::string, stanli::DataMap::Entry>(
-      supplied.entries().begin(), supplied.entries().end());
-}
-
-// Shared by the three entry points below: unconstrain, then check the result
-// is the length the sampler reads.
-int unconstrain_into(const bs_model* m,
-                     const std::map<std::string, stanli::DataMap::Entry>& inits,
-                     double* theta_unc, char** error_msg) {
-  std::string why;
-  const stanli::InitInterp* interp = init_interp(m, &why);
-  if (interp == nullptr) return refuse(error_msg, why);
-  const std::vector<double> unc = interp->eval(inits);
-  if ((int64_t)unc.size() != m->cm.n_unconstrained)
-    return refuse(error_msg, "the inverse transforms produced " +
-                                 std::to_string(unc.size()) +
-                                 " unconstrained values, expected " +
-                                 std::to_string(m->cm.n_unconstrained));
-  std::copy(unc.begin(), unc.end(), theta_unc);
-  return 0;
 }
 
 }  // namespace
@@ -600,8 +547,8 @@ int bs_param_unconstrain(const bs_model* m, const double* theta,
                         " constrained values but this model reports " +
                         std::to_string(m->count(false, false)) +
                         "; theta cannot be split");
-    return unconstrain_into(m, inits_from_flat(m->cm, theta), theta_unc,
-                            error_msg);
+    stanli::unconstrain_inits(m->cm, inits_from_flat(m->cm, theta), theta_unc);
+    return 0;
   } catch (const std::exception& e) {
     return refuse(error_msg, e.what());
   } catch (...) {
@@ -612,10 +559,8 @@ int bs_param_unconstrain(const bs_model* m, const double* theta,
 int bs_param_unconstrain_json(const bs_model* m, const char* json,
                               double* theta_unc, char** error_msg) {
   try {
-    std::string why;
-    const stanli::InitInterp* interp = init_interp(m, &why);
-    if (interp == nullptr) return refuse(error_msg, why);
-    return unconstrain_into(m, inits_from_json(json), theta_unc, error_msg);
+    stanli::unconstrain_inits_json(m->cm, json, theta_unc);
+    return 0;
   } catch (const std::exception& e) {
     return refuse(error_msg, e.what());
   } catch (...) {
@@ -632,12 +577,7 @@ int bs_param_initialize(const bs_model* m, const char* json, bs_rng* rng,
       // An explicit point is taken as given: the retries below exist to find
       // a random start in support, and silently replacing a point the caller
       // chose would hide the real problem.
-      std::string why;
-      const stanli::InitInterp* interp = init_interp(m, &why);
-      if (interp == nullptr) return refuse(error_msg, why);
-      const int rc =
-          unconstrain_into(m, inits_from_json(json), theta_unc, error_msg);
-      if (rc != 0) return rc;
+      stanli::unconstrain_inits_json(m->cm, json, theta_unc);
       double lp = 0;
       try {
         lp = m->density(theta_unc, nullptr);

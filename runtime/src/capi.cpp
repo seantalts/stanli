@@ -454,34 +454,7 @@ int64_t stanli_n_unconstrained(const stanli_model* m) {
 int stanli_unconstrain_inits(stanli_model* m, const char* inits_json, double* q,
                              char* err, size_t err_len) {
   try {
-    if (!m->cm.transform_inits) {
-      put_err(err, err_len,
-              "this model has no inverse parameter transforms: its MIR "
-              "carries no transform_inits section");
-      return 1;
-    }
-    if (!m->cm.transform_inits->interp) {
-      put_err(err, err_len,
-              ("this model's inverse parameter transforms are unavailable: " +
-               m->cm.transform_inits->truncated)
-                  .c_str());
-      return 1;
-    }
-    const stanli::InitInterp& interp = *m->cm.transform_inits->interp;
-    const stanli::DataMap supplied =
-        stanli::DataMap::from_json(inits_json == nullptr ? "{}" : inits_json);
-    // Preserve the complete document so InitInterp can reject unknown names
-    // as well as report missing declared parameters.
-    const std::map<std::string, stanli::DataMap::Entry> inits(
-        supplied.entries().begin(), supplied.entries().end());
-    const std::vector<double> unc = interp.eval(inits);
-    if ((int64_t)unc.size() != m->ex->n_params()) {
-      put_err(err, err_len,
-              "the inverse transforms produced the wrong number of "
-              "unconstrained values");
-      return 1;
-    }
-    std::copy(unc.begin(), unc.end(), q);
+    stanli::unconstrain_inits_json(m->cm, inits_json, q);
     return 0;
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());
