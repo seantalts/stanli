@@ -1,5 +1,5 @@
 // Print a model's lowered op sequence, or (max_ops < 0) a shape census of
-// the scalar work left. Feeds harnesses/ab_corpus.py and op_census.py.
+// the scalar work left. Feeds harnesses/ab_corpus.py.
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>

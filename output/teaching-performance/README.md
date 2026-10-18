@@ -256,9 +256,11 @@ Gradient results in the CSV use six alternating pairs at the same parameter poin
 Retain the original run directory, including model headers, inputs, logs and per-seed CSVs. After the timed sweep finishes, run:
 
 ```sh
-python3 tools/teaching_diagnostic_jobs.py RUN_DIRECTORY /tmp/teaching-jobs.json
+python3 tools/corpus_diagnostic_jobs.py RUN_DIRECTORY /tmp/teaching-jobs.json
 Rscript tools/summarize_rethinking_bench.R /tmp/teaching-jobs.json /tmp/teaching-diagnostics.json
-python3 tools/report_teaching.py RUN_DIRECTORY /tmp/teaching-diagnostics.json output/teaching-performance
+python3 tools/report_corpus.py RUN_DIRECTORY /tmp/teaching-diagnostics.json output/teaching-performance
+mv output/teaching-performance/corpus-results.json output/teaching-performance/teaching-results.json
+mv output/teaching-performance/corpus-timings.csv output/teaching-performance/teaching-timings.csv
 ```
 
 The jobs file contains absolute CSV paths; regenerate it after relocating the evidence directory. The exporter refuses an unfinished sweep. See the [benchmark protocol](../../docs/benchmarks.md#how-we-measure).
