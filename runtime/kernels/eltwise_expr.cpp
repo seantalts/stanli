@@ -503,7 +503,7 @@ void sqrtv_bwd(KernelCtx& ctx) {
     if (ctx.out.data[0] != 0.0)
       ctx.in_adj[0].data[0] += ctx.out_adj / (2.0 * ctx.out.data[0]);
   } else {
-    dx_a(ctx, 0) += (out_v != 0.0).select(dout_a(ctx) / (2.0 * out_v), 0.0);
+    dx_a(ctx, 0) += (out_v != 0.0).select(dout_a(ctx) / (2.0 * out_v), -0.0);
   }
 }
 void squarev_fwd(KernelCtx& ctx) { out_a(ctx) = in_a(ctx, 0).square(); }
