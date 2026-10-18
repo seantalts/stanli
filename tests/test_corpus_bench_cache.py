@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Focused tests for the corpus benchmark's CmdStan build cache and build pre-pass."""
 
+import contextlib
 import copy
+import io
 import shutil
 import json
 import os
@@ -18,7 +20,7 @@ sys.path.insert(0, str(REPO))
 
 import test_corpus_bench as existing
 from harnesses import corpus_bench
-from harnesses.corpus_bench import CmdstanCache, Runner, cache_context, cmdstan_build
+from harnesses.corpus_bench import CmdstanCache, Runner, cache_context, cmdstan_build, prebuild
 
 STAN = "a" * 64
 
@@ -54,6 +56,11 @@ class FakeRunner:
         self.calls, self.fail, self.hooks = [], {}, {}
         self.delay, self.lock = delay, threading.Lock()
         self.running = self.peak = 0
+
+    def kill_active(self):
+        self.killed = True
+
+    killed = False
 
     def run(self, phase, argv, timeout, cwd=None):
         step = phase.split("/")[-1]
@@ -289,6 +296,97 @@ class PrebuiltMeasureTests(existing.SetupEstimateTests):
         self.assertNotIn("cmdstan-build", phases)
         self.assertNotIn("gradient-driver-build", phases)
         self.assertEqual(json.loads((self.root / "m.result.json").read_text()), record)
+
+
+class PrebuildTests(BuildFixture):
+    def setUp(self):
+        super().setUp()
+        self.args.build_jobs = 2
+        self.inputs = {}
+        for name in ("a", "b", "c", "d", "e"):
+            stan = self.root / f"{name}.stan"
+            stan.write_text(f"parameters {{ real {name}; }} model {{ {name} ~ normal(0, 1); }}")
+            self.inputs[name] = (stan, self.root / f"{name}.json")
+
+    def prebuild(self, cache="default", runner=None, inputs=None):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return prebuild(inputs or self.inputs, self.root / "run", runner or self.runner, self.args,
+                            self.cache if cache == "default" else cache)
+
+    def test_builds_every_model_without_exceeding_the_job_limit(self):
+        self.runner = FakeRunner(delay=.03)
+        builds = self.prebuild()
+        self.assertEqual(sorted(builds), list(self.inputs))
+        self.assertEqual(self.runner.peak, 2)
+        for build in builds.values():
+            self.assertTrue(build["gradient"].is_file())
+            self.assertEqual(build["cache"]["hit"], False)
+        self.assertEqual(len(self.entries()), 5)
+
+    def test_runs_only_cmdstan_build_phases(self):
+        self.prebuild()
+        steps = {call["phase"].split("/")[-1] for call in self.runner.calls}
+        self.assertEqual(steps, {"stanc-cpp", "gradient-driver-build", "cmdstan-build"})
+        self.assertEqual(len(self.runner.calls), 15)
+
+    def test_one_models_failure_or_timeout_does_not_stop_the_others(self):
+        self.runner.fail.update({"b/stanc-cpp": "failed", "c/cmdstan-build": "timeout",
+                                 "d/gradient-driver-build": "failed"})
+        builds = self.prebuild()
+        self.assertEqual(sorted(builds), list(self.inputs))
+        self.assertRegex(builds["b"]["gradient_failure"], r"^b/stanc-cpp: failed \(event \d+\)$")
+        self.assertRegex(builds["c"]["build_failure"], r"^c/cmdstan-build: timeout \(event \d+\)$")
+        self.assertRegex(builds["d"]["gradient_failure"], r"^d/gradient-driver-build: failed")
+        for name in ("a", "e"):
+            self.assertIsNone(builds[name]["gradient_failure"])
+            self.assertIsNone(builds[name]["build_failure"])
+        self.assertEqual(self.entries(), sorted(self.cache.key(self.inputs[n][0]) for n in ("a", "e")))
+
+    def test_an_unexpected_error_in_one_build_is_that_models_failure(self):
+        self.inputs["c"][0].unlink()
+        builds = self.prebuild()
+        self.assertRegex(builds["c"]["gradient_failure"], r"^c/cmdstan-build: error \(")
+        self.assertIsNone(builds["a"]["gradient_failure"])
+        self.assertIsNone(builds["e"]["gradient_failure"])
+
+    def test_models_sharing_a_source_build_once_and_the_rest_reuse_the_entry(self):
+        self.inputs["twin"] = (self.inputs["a"][0], self.root / "twin.json")
+        builds = self.prebuild()
+        stanc = [c for c in self.runner.calls if c["phase"].endswith("/stanc-cpp")]
+        self.assertEqual(len(stanc), 5)
+        self.assertEqual(builds["a"]["cache"]["hit"], False)
+        self.assertEqual(builds["twin"]["cache"]["hit"], True)
+        self.assertEqual(builds["twin"]["cache"]["run_id"], "run-1")
+        self.assertEqual(builds["twin"]["gradient"], builds["a"]["gradient"])
+        self.assertEqual(builds["twin"]["setup"]["cmdstan_stanc"]["phase"], "twin/stanc-cpp")
+
+    def test_a_failed_shared_source_is_retried_by_its_twin_not_assumed_cached(self):
+        self.inputs["twin"] = (self.inputs["a"][0], self.root / "twin.json")
+        self.runner.fail["a/stanc-cpp"] = "failed"
+        builds = self.prebuild()
+        self.assertEqual(builds["twin"]["cache"]["hit"], False)
+        self.assertIsNone(builds["twin"]["gradient_failure"])
+
+    def test_without_a_cache_models_build_in_parallel_in_the_run_directory(self):
+        self.runner = FakeRunner(delay=.03)
+        builds = self.prebuild(cache=None)
+        self.assertEqual(self.runner.peak, 2)
+        self.assertFalse(self.store.root.exists())
+        self.assertEqual(builds["a"]["gradient"], self.root / "run" / "a" / "gradbench")
+        self.assertEqual({b["cache"]["directory"] for b in builds.values()}, {None})
+
+    def test_second_pass_over_the_same_sources_runs_no_commands(self):
+        self.prebuild()
+        again = FakeRunner()
+        builds = self.prebuild(runner=again)
+        self.assertEqual(again.calls, [])
+        self.assertEqual({b["cache"]["hit"] for b in builds.values()}, {True})
+
+    def test_interrupt_stops_running_commands_and_propagates(self):
+        self.runner.hooks["b/stanc-cpp"] = lambda: (_ for _ in ()).throw(KeyboardInterrupt())
+        with self.assertRaises(KeyboardInterrupt):
+            self.prebuild()
+        self.assertTrue(self.runner.killed)
 
 
 class CacheKeyTests(unittest.TestCase):

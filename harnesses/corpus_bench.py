@@ -21,6 +21,7 @@ import signal
 import shutil
 import shlex
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import statistics
 import subprocess
 import sys
@@ -357,7 +358,7 @@ def cached_build(name, key, meta, cache):
 
 def cmdstan_build(name, stan, work, runner, args, cache=None):
     """Build the CmdStan binaries for one model, or reuse the cached ones."""
-    work.mkdir(exist_ok=True)
+    work.mkdir(parents=True, exist_ok=True)
     if cache is None:
         (work / f"{name}.stan").write_bytes(stan.read_bytes())
         build = run_cmdstan_build(name, work, name, runner, args)
@@ -395,13 +396,51 @@ def cmdstan_build(name, stan, work, runner, args, cache=None):
         cache.store.discard(scratch)
 
 
+def prebuild(inputs, directory, runner, args, cache=None):
+    """Build every CmdStan binary before any timing starts; a failure stays with its model."""
+    leaders, twins, seen = [], [], set()
+    for name, (stan, _) in inputs.items():
+        try:
+            key = cache.key(stan) if cache else name
+        except OSError:
+            key = name
+        (twins if key in seen else leaders).append(name)
+        seen.add(key)
+
+    def build(name):
+        try:
+            return cmdstan_build(name, inputs[name][0], directory / name, runner, args, cache)
+        except Exception as exc:
+            return dict(setup={}, gradient=None, executable=None, build_failure=None,
+                        gradient_failure=f"{name}/cmdstan-build: error ({exc})",
+                        cache=dict(directory=str(cache.store.root) if cache else None, hit=False))
+
+    builds = {}
+    with ThreadPoolExecutor(max_workers=args.build_jobs) as pool:
+        try:
+            for wave in (leaders, twins):
+                futures = {pool.submit(build, name): name for name in wave}
+                for future in as_completed(futures):
+                    name = futures[future]
+                    builds[name] = future.result()
+                    failed = builds[name]["gradient_failure"] or builds[name]["build_failure"]
+                    print(f"{name}: cmdstan build {'failed' if failed else 'cached' if builds[name]['cache']['hit'] else 'built'}",
+                          flush=True)
+        except BaseException:
+            runner.kill_active()
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
+    return {name: builds[name] for name in inputs}
+
+
 def build_model(name, stan, data, work, runner, args, setup=None, build=None):
     setup = {} if setup is None else setup
     build = {} if build is None else build
     mir, source = stanli_compile(name, stan, work, runner, args, setup)
     if not build:
         build.update(cmdstan_build(name, stan, work, runner, args))
-    setup["cmdstan_stanc"] = build["setup"]["cmdstan_stanc"]
+    if "cmdstan_stanc" in build["setup"]:
+        setup["cmdstan_stanc"] = build["setup"]["cmdstan_stanc"]
     if build["gradient_failure"]:
         raise PhaseFailure(build["gradient_failure"])
     executables = {"stanli": [args.bench, mir, data], "cmdstan": [build["gradient"], data]}
