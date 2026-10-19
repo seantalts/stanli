@@ -144,7 +144,7 @@ class ParameterControl {
   }
 };
 
-constexpr size_t kMaxRegionMapCode = 131072;
+constexpr size_t kMaxRegionMapCode = 16384;
 constexpr int64_t kMaxRegionMapSavedCells = int64_t{1} << 24;
 constexpr int kRegionMapMaxSavedPerIteration = 1024;
 

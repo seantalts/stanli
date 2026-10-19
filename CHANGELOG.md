@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- The cognitive-model inverse Gaussian family (`cm_invgaussian`) gets
+  gradients about 1.9x faster: loops whose compiled per-iteration body is very
+  large now use the retained loop, which replays only the branches each
+  iteration takes, instead of the region map, which runs every branch.
+- Large ctsem models get gradients about 1.03x faster from cheaper adjoint
+  lookups in the retained loop's backward pass.
+
 ## 0.22.1
 
 Fixes the 0.22.0 memory regression on large ctsem models and makes small

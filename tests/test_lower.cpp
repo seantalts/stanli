@@ -2905,7 +2905,7 @@ void test_lane_cogmod() {
       {"cm_gamma", true, true},
       {"cm_geg", true, true},
       {"cm_invgamma", true, true},
-      {"cm_invgaussian", true, true},
+      {"cm_invgaussian", false, false},
       {"cm_invweibull", true, true},
       {"cm_lba1", true, true},
       {"cm_lba2", true, true},
