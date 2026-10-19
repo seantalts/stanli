@@ -1,15 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.22.2
+
+Faster inverse Gaussian cognitive models and refreshed benchmark tables.
 
 ### Performance
 
-- The cognitive-model inverse Gaussian family (`cm_invgaussian`) gets
-  gradients about 1.9x faster: loops whose compiled per-iteration body is very
-  large now use the retained loop, which replays only the branches each
-  iteration takes, instead of the region map, which runs every branch.
-- Large ctsem models get gradients about 1.03x faster from cheaper adjoint
-  lookups in the retained loop's backward pass.
+- The inverse Gaussian cognitive model (`cm_invgaussian`) gets gradients
+  about 1.9x faster. Loops with a very large body now run only the branch
+  each iteration takes, instead of every branch.
+- Large ctsem models get gradients about 1.03x faster.
+
+### Docs
+
+- The benchmark tables are rerun for this release, so they include the
+  0.22.1 speedups for small ctsem models and `s2_logistic_normal`.
 
 ## 0.22.1
 
