@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixes
+
+- Large ctsem datasets use far less memory again: 0.22.0 stopped sealing
+  retained loops into frames, which raised peak memory on a 4,000-row ctsem
+  model from 1.5 GB to 10.3 GB per chain. Frames are back, and gradients on
+  large data are about 1.1x slower than in 0.22.0.
+
 ### Performance
 
 - 2x2 matrix products, quadratic forms, Cholesky factors, solves and
