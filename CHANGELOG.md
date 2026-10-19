@@ -1,20 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.22.1
 
-### Fixes
-
-- Large ctsem datasets use far less memory again: 0.22.0 stopped sealing
-  retained loops into frames, which raised peak memory on a 4,000-row ctsem
-  model from 1.5 GB to 10.3 GB per chain. Frames are back, and gradients on
-  large data are about 1.1x slower than in 0.22.0.
+Fixes the 0.22.0 memory regression on large ctsem models and makes small
+ctsem models faster.
 
 ### Performance
 
-- 2x2 matrix products, quadratic forms, Cholesky factors, solves and
-  `multi_normal_cholesky` run without heap allocation. ctsem gradients are
-  about 2.8x faster, and `s2_logistic_normal` about 3.7x faster. Results are
-  bitwise identical to the previous code.
+- ctsem models with two observed variables get gradients about 2.8x faster,
+  and `s2_logistic_normal` about 3.7x faster: 2x2 matrix products, solves,
+  Cholesky factors and `multi_normal_cholesky` no longer allocate on the
+  heap. Larger ctsem models are unchanged. Results are bitwise identical.
+
+### Fixes
+
+- Large ctsem models use far less memory again. 0.22.0 raised peak memory on
+  the 4,000-row ctsem model from issue #248 from 1.5 GB to 10.3 GB per chain.
+  Gradients on that model are back to their speed before 0.22.0, about 1.15x
+  slower than in 0.22.0.
+- A `return` inside some user-defined functions no longer aborts the
+  process.
 
 ## 0.22.0
 
@@ -33,6 +38,7 @@ ctsem on large data, and a smaller C API.
   node.
 - ctsem models with large datasets: gradients are about 1.09x faster, and
   peak memory is about 2x higher (0.74 GB to 1.6 GB at 64,000 rows).
+  On large models memory rose much more; see 0.22.1.
 
 ### Fixes
 
