@@ -583,17 +583,27 @@ struct FrameExecution {
   LoopState& s;
   KernelCtx& outer;
   LoopFrame& frame;
+  std::vector<double*>* resolved = nullptr;
+  double* values = frame.values.data();
+  double* const* bound = frame.bindings.data();
+  double* adjoints = s.frames->adjoints.data() + frame.adjoint_base;
   double* value(uint64_t raw) const {
     const int64_t ref = static_cast<int64_t>(raw);
+    if (ref >= 0) return values + ref;
     if (ref == frame_null) return nullptr;
-    return ref >= 0 ? frame.values.data() + ref : frame.bindings[-ref - 1];
+    return bound[-ref - 1];
   }
   double* adjoint(uint64_t raw) const {
     const int64_t ref = static_cast<int64_t>(raw);
+    if (ref >= 0) return adjoints + ref;
     if (ref == frame_null) return nullptr;
-    return ref >= 0 ? s.frames->adjoints.data() + frame.adjoint_base + ref
-                    : frame_adjoint_ptr(frame.adj_bindings[-ref - 1], *s.frames,
-                                        s.p, outer);
+    return (*resolved)[-ref - 1];
+  }
+  void resolve_adjoints() {
+    resolved->resize(frame.adj_bindings.size());
+    for (size_t k = 0; k < frame.adj_bindings.size(); ++k)
+      (*resolved)[k] =
+          frame_adjoint_ptr(frame.adj_bindings[k], *s.frames, s.p, outer);
   }
   void call(const uint64_t* w, bool reverse) {
     const size_t site = w[0], flags = w[1], n_in = w[2];
@@ -673,6 +683,7 @@ struct FrameExecution {
     return true;
   }
   void backward() {
+    resolve_adjoints();
     const auto& code = *frame.code;
     for (size_t i = code.backward.size(); i-- > 0;) {
       const auto at = code.backward[i];
@@ -890,6 +901,7 @@ void frames_backward(LoopState& s, KernelCtx& ctx) {
     for (const auto& a : tape.target_adjoints)
       if (double* ptr = frame_adjoint_ptr(a, tape, s.p, ctx))
         *ptr += ctx.out_adj_vec.data[at];
+  std::vector<double*> resolved;
   for (size_t k = tape.frames.size(); k-- > 0;)
-    FrameExecution{s, ctx, *tape.frames[k]}.backward();
+    FrameExecution{s, ctx, *tape.frames[k], &resolved}.backward();
 }
