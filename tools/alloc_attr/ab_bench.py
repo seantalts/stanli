@@ -21,10 +21,12 @@ def once(binary, model_dir, warmup, measure, env):
     out = subprocess.run(
         [binary, os.path.join(model_dir, "model.tmir.sexp"),
          os.path.join(model_dir, "data.json"), "--timed",
-         "--warmup-ms", str(warmup), "--measure-ms", str(measure)],
+         "--warmup-ms", str(warmup), "--measure-ms", str(measure),
+         "--points", "1"],
         capture_output=True, text=True, check=True, env=env).stdout
     j = json.loads(out)
-    return j["elapsed_ns"] / j["iterations"]
+    point = j["points"][0]
+    return point["elapsed_ns"] / point["iterations"]
 
 
 def mad(xs):

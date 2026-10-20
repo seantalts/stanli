@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a complete v4 corpus run without rerunning measurements.
+"""Publish a complete v4 or v5 corpus run without rerunning measurements.
 
 python3 tools/publish_corpus_bench.py RUN.tsv OUTPUT_DIRECTORY
 python3 tools/publish_corpus_bench.py --vectorized OUTPUT_DIRECTORY \

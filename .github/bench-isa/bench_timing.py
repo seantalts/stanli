@@ -19,7 +19,7 @@ def run_bench(binary, mir, data, warmup, measure, timeout):
     try:
         p = subprocess.run(
             [str(binary), str(mir), str(data), "--timed", "--warmup-ms",
-             str(warmup), "--measure-ms", str(measure)],
+             str(warmup), "--measure-ms", str(measure), "--points", "1"],
             capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return None, "timeout"
@@ -130,8 +130,9 @@ def measure(row, model, stan, data, variants, base_dir, tmp, args):
             if result is None:
                 row["status"] = f"{name}: {err}"[:120]
                 return
-            samples[name].append(result["elapsed_ns"] / result["iterations"])
-            values.setdefault(name, result["values"])
+            point = result["points"][0]
+            samples[name].append(point["elapsed_ns"] / point["iterations"])
+            values.setdefault(name, point["values"])
     row["n_values"] = len(values[names[0]])
     med = {n: statistics.median(samples[n]) for n in names}
     for n in names:

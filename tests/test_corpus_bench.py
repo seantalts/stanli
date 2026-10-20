@@ -75,43 +75,112 @@ class UpgradeHeaderTests(unittest.TestCase):
         self.assertEqual(header, "\t".join(COLS))
 
 
+def driver_output(ns=250000, points=3, dropped=(), iterations=1000, values=None, **top):
+    """What the --timed drivers print: one record per evaluation point."""
+    per_point = ns if isinstance(ns, (list, tuple)) else [ns] * points
+    entries = []
+    for k in range(points):
+        if k in dropped:
+            entries.append(dict(point=k, finite=False))
+            continue
+        entries.append(dict(point=k, finite=True, iterations=iterations, batch=8,
+                            elapsed_ns=int(per_point[k] * iterations),
+                            values=values(k) if values else [-3.0 - k, 2.0 + k]))
+    return dict(dict(protocol="stanli-gradient-v3", warmup_iterations=5000,
+                     warmup_elapsed_ns=20000000, points=entries), **top)
+
+
 class TimingTests(unittest.TestCase):
-    def timing(self, ns=250000000, iterations=1000, values=None):
-        return dict(protocol="stanli-gradient-v2", iterations=iterations,
-                    elapsed_ns=ns, batch=8, warmup_iterations=5000,
-                    warmup_elapsed_ns=200000000, values=values or [-3.0, 2.0])
-
     def test_print_output_before_json_is_allowed(self):
-        result = self.timing()
-        self.assertEqual(parse_timing("Stan print\n" + json.dumps(result), 200, 250), result)
+        result = driver_output()
+        self.assertEqual(parse_timing("Stan print\n" + json.dumps(result), 20, 40, 3), result)
 
-    def test_rejects_short_warmup_nonfinite_and_malformed_results(self):
-        for change in (dict(warmup_elapsed_ns=1000), dict(iterations=0),
-                       dict(values=[float("nan")]), dict(elapsed_ns=1),
-                       dict(protocol="old"), dict(values=[])):
-            with self.subTest(change=change), self.assertRaises(PhaseFailure):
-                parse_timing(json.dumps(dict(self.timing(), **change)), 200, 250)
+    def test_rejects_short_windows_and_malformed_results(self):
+        def point(index, **change):
+            def edit(result):
+                result["points"][index].update(change)
+            return edit
+        def drop(index, key):
+            def edit(result):
+                del result["points"][index][key]
+            return edit
+        def replace(**change):
+            return lambda result: result.update(change)
+        edits = {
+            "short warmup": replace(warmup_elapsed_ns=1000),
+            "no warmup iterations": replace(warmup_iterations=0),
+            "zero iterations": point(1, iterations=0),
+            "short measurement": point(2, elapsed_ns=1),
+            "zero batch": point(0, batch=0),
+            "nan value": point(0, values=[float("nan")]),
+            "empty values": point(0, values=[]),
+            "missing values": drop(0, "values"),
+            "old protocol": replace(protocol="stanli-gradient-v2"),
+            "unknown protocol": replace(protocol="old"),
+            "too few points": lambda result: result["points"].pop(),
+            "wrong index": point(1, point=5),
+            "finite is not a bool": point(0, finite=1),
+            "values on a dropped point": lambda result: result["points"][1].update(
+                finite=False, values=[1.0]),
+            "no finite point": lambda result: [point(k, finite=False)(result) for k in range(3)],
+        }
+        for label, edit in edits.items():
+            result = driver_output()
+            edit(result)
+            with self.subTest(label), self.assertRaises(PhaseFailure):
+                parse_timing(json.dumps(result), 20, 40, 3)
         with self.assertRaises(PhaseFailure):
-            parse_timing("not JSON", 200, 250)
+            parse_timing("not JSON", 20, 40, 3)
 
-    def test_pair_checks_full_gradient_not_just_density(self):
-        good = self.timing()
-        with self.assertRaises(PhaseFailure):
-            check_pair(dict(stanli=good, cmdstan=self.timing(values=[-3.0, 4.0])))
-        with self.assertRaises(PhaseFailure):
-            check_pair(dict(stanli=good, cmdstan=self.timing(values=[-3.0])))
-        self.assertEqual(check_pair(dict(stanli=good, cmdstan=good)), 0)
+    def test_non_finite_points_are_accepted_without_measurements(self):
+        result = driver_output(dropped=(1,))
+        self.assertEqual(parse_timing(json.dumps(result), 20, 40, 3), result)
+
+    def pair(self, stanli=None, cmdstan=None):
+        return dict(stanli=stanli or driver_output(), cmdstan=cmdstan or driver_output())
+
+    def test_pair_checks_full_gradient_at_every_point(self):
+        with self.assertRaisesRegex(PhaseFailure, "point 2.*mismatch"):
+            check_pair(self.pair(cmdstan=driver_output(
+                values=lambda k: [-3.0 - k, 4.0 + k if k == 2 else 2.0 + k])))
+        with self.assertRaisesRegex(PhaseFailure, "point 0.*widths"):
+            check_pair(self.pair(cmdstan=driver_output(values=lambda k: [-3.0 - k])))
+        checked = check_pair(self.pair())
+        self.assertEqual(checked, dict(kept_points=[0, 1, 2], dropped_points=[], max_scaled_error=0))
+
+    def test_points_non_finite_in_both_engines_are_dropped(self):
+        checked = check_pair(self.pair(driver_output(dropped=(0, 2)), driver_output(dropped=(0, 2))))
+        self.assertEqual((checked["kept_points"], checked["dropped_points"]), ([1], [0, 2]))
+
+    def test_point_non_finite_in_one_engine_fails_the_model(self):
+        with self.assertRaisesRegex(PhaseFailure, "point 1.*stanli"):
+            check_pair(self.pair(stanli=driver_output(dropped=(2,)), cmdstan=driver_output(dropped=(1, 2))))
+        with self.assertRaisesRegex(PhaseFailure, "point 1.*cmdstan"):
+            check_pair(self.pair(cmdstan=driver_output(dropped=(1,))))
+
+    def test_no_kept_point_fails(self):
+        every = driver_output(dropped=(0, 1, 2))
+        with self.assertRaisesRegex(PhaseFailure, "no point"):
+            check_pair(self.pair(every, every))
 
     def test_balanced_order_and_paired_statistics(self):
         self.assertEqual([paired_order(i)[0] for i in range(6)],
                          ["stanli", "cmdstan"] * 3)
-        pairs = [dict(stanli=self.timing(ns=s, iterations=1),
-                      cmdstan=self.timing(ns=c, iterations=1))
+        pairs = [dict(stanli=driver_output(ns=s, iterations=10**8),
+                      cmdstan=driver_output(ns=c, iterations=10**8))
                  for s, c in ((1, 2), (2, 2), (10, 30), (4, 4))]
         result = summarize_pairs(pairs)
         self.assertEqual(result["stanli_ns_grad"], 3)
         self.assertEqual(result["stanli_ns_grad_mad"], 1.5)
         self.assertEqual(result["paired_speedup"], 1.5)
+
+    def test_process_time_is_the_mean_over_kept_points(self):
+        pairs = [dict(stanli=driver_output(ns=[100, 200, 300, 9999], points=4, dropped=(3,)),
+                      cmdstan=driver_output(ns=[400, 400, 400, 1], points=4, dropped=(3,)))]
+        result = summarize_pairs(pairs)
+        self.assertEqual(result["stanli_ns_grad"], 200)
+        self.assertEqual(result["cmdstan_ns_grad"], 400)
+        self.assertEqual(result["paired_speedup"], 2)
 
 
 class RunnerTests(unittest.TestCase):
@@ -178,11 +247,12 @@ class SetupEstimateTests(unittest.TestCase):
         self.data.write_text("{}")
         self.args = SimpleNamespace(vectorize_probe=self.root / "probe",
             stanc=self.root / "stanc", stancflags="--O1", build_timeout=900,
-            gradient_timeout=60, rounds=2, warmup_ms=200, measure_ms=250,
+            gradient_timeout=60, rounds=2, warmup_ms=20, measure_ms=40, points=3,
             cmdstan=self.root / "cmdstan", bench=self.root / "bench")
         self.events, self.failures = [], {}
         self.preparation = iter(["0.25 s", "0.75 s"])
-        self.mismatch = False
+        self.mismatch = None
+        self.dropped = {}
         self.runner = mock.Mock()
         self.runner.run.side_effect = self.run_command
         self.runner.require.side_effect = self.require
@@ -205,11 +275,12 @@ class SetupEstimateTests(unittest.TestCase):
     def text(self, event):
         if "/prepare/" in event["phase"]:
             return next(self.preparation)
-        cmdstan = event["phase"].endswith("/cmdstan")
-        return json.dumps(dict(protocol="stanli-gradient-v2", iterations=1000,
-            elapsed_ns=500000000 if cmdstan else 250000000, batch=8,
-            warmup_iterations=5000, warmup_elapsed_ns=200000000,
-            values=[-3.0, 20.0 if self.mismatch and cmdstan else 2.0]))
+        _, _, round_index, engine = event["phase"].split("/")
+        dropped = self.dropped.get((int(round_index), engine), self.dropped.get(engine, ()))
+        bad = self.mismatch if engine == "cmdstan" else None
+        return json.dumps(driver_output(
+            ns=500000 if engine == "cmdstan" else 250000, dropped=dropped,
+            values=lambda k: [-3.0 - k, 20.0 if k == bad else 2.0 + k]))
 
     def measure(self):
         with mock.patch("harnesses.corpus_bench.compile_cmd", return_value=["c++"]), \
@@ -220,7 +291,7 @@ class SetupEstimateTests(unittest.TestCase):
     def test_proxy_includes_each_setup_component_but_not_driver_build(self):
         record = self.measure()
         row = record["row"]
-        self.assertEqual(PROTOCOL, "stanli-corpus-v4")
+        self.assertEqual(PROTOCOL, "stanli-corpus-v5")
         self.assertEqual(record["status"], "ok")
         self.assertEqual(GRADIENT_BUDGET, 20000)
         self.assertEqual(row["gradient_budget"], 20000)
@@ -268,13 +339,48 @@ class SetupEstimateTests(unittest.TestCase):
         self.assertEqual(record["row"]["paired_rounds"], 2)
 
     def test_numerical_failure_has_no_gradient_proxy_but_keeps_setup_measurements(self):
-        self.mismatch = True
+        self.mismatch = 2
         record = self.measure()
         self.assertEqual(record["status"], "failed")
+        self.assertRegex(record["row"]["note"], "point 2")
         self.assertNotIn("paired_speedup", record["row"])
         self.assertNotIn("stanli_estimated_s", record["row"])
         self.assertNotIn("cmdstan_estimated_s", record["row"])
         self.assertEqual(record["row"]["cmdstan_build_s"], 5)
+
+    def test_gradient_commands_carry_the_window_and_point_settings(self):
+        self.measure()
+        timed = [e["argv"] for e in self.events if "--timed" in e["argv"]]
+        self.assertEqual(len(timed), 4)
+        for argv in timed:
+            self.assertEqual(argv[argv.index("--timed"):argv.index("--timed") + 7],
+                             ["--timed", "--warmup-ms", "20", "--measure-ms", "40",
+                              "--points", "3"])
+
+    def test_points_non_finite_in_both_engines_are_dropped_and_recorded(self):
+        self.dropped = {"stanli": (1,), "cmdstan": (1,)}
+        record = self.measure()
+        self.assertEqual(record["status"], "ok")
+        self.assertEqual((record["row"]["points_kept"], record["row"]["points_dropped"]), (2, 1))
+        self.assertTrue(all(g["dropped_points"] == [1] and g["kept_points"] == [0, 2]
+                            for g in record["gradients"]))
+        self.assertEqual(record["row"]["params"], 1)
+        self.assertEqual(record["row"]["stanli_ns_grad"], 250000)
+
+    def test_a_point_non_finite_in_one_engine_fails_the_model(self):
+        self.dropped = {"cmdstan": (1,)}
+        record = self.measure()
+        self.assertEqual(record["status"], "failed")
+        self.assertRegex(record["row"]["note"], "point 1")
+        self.assertNotIn("paired_speedup", record["row"])
+        self.assertEqual(record["row"]["cmdstan_build_s"], 5)
+
+    def test_every_round_must_keep_the_same_points(self):
+        self.dropped = {(1, "stanli"): (2,), (1, "cmdstan"): (2,)}
+        record = self.measure()
+        self.assertEqual(record["status"], "failed")
+        self.assertRegex(record["row"]["note"], "points differ")
+        self.assertNotIn("stanli_ns_grad", record["row"])
 
     def test_source_compile_failure_keeps_event_without_setup_estimate(self):
         self.failures["m/stanli-mir"] = "failed"
@@ -351,11 +457,12 @@ class FastMathModeTests(SetupEstimateTests):
         self.assertTrue(any(a[0] == str(self.args.bench) for a in commands))
 
     def test_mode_is_part_of_the_run_identity_only_when_on(self):
-        base = dict(rounds=2, warmup_ms=1, resume=False, output="x")
+        base = dict(rounds=2, warmup_ms=1, points=4, resume=False, output="x")
         self.assertEqual(run_config(SimpleNamespace(**base, fast_math=False)),
                          run_config(SimpleNamespace(**base)))
         self.assertNotIn("fast_math", run_config(SimpleNamespace(**base, fast_math=False)))
         self.assertIs(run_config(SimpleNamespace(**base, fast_math=True))["fast_math"], True)
+        self.assertEqual(run_config(SimpleNamespace(**base))["points"], 4)
 
 
 class CorpusInventoryTests(unittest.TestCase):
@@ -630,7 +737,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         for field, value in (("gradient_budget", 2000), ("sampling", True), ("filter", "good")):
             config = copy.deepcopy(self.manifest["identity"]["config"])
             self.manifest["identity"]["config"][field] = value
-            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "unfiltered v4"):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "unfiltered v4 or v5"):
                 self.render()
             self.manifest["identity"]["config"] = config
         self.manifest["identity"]["protocol"] = "stanli-corpus-v3"
@@ -643,8 +750,83 @@ class BenchmarkCatalogTests(unittest.TestCase):
             self.render()
 
     def test_numerical_mismatch_is_not_timing_evidence(self):
+        self.records[0]["gradients"][0]["cmdstan"]["points"][1]["values"] = [-10, 2]
+        with self.assertRaisesRegex(ValueError, "numerical gate"):
+            self.render()
+
+    def test_every_point_is_gated(self):
+        for engine in ("stanli", "cmdstan"):
+            self.records[0]["gradients"][1][engine]["points"][2]["values"] = [-3.0, 9.0]
+            with self.subTest(engine=engine), self.assertRaisesRegex(ValueError, "numerical gate"):
+                self.render()
+            self.records[0]["gradients"][1][engine]["points"][2]["values"] = [-3.0, 4.0]
+
+    def test_published_means_are_recomputed_from_every_point(self):
+        point = self.records[0]["gradients"][2]["stanli"]["points"][1]
+        point["elapsed_ns"] *= 2
+        with self.assertRaisesRegex(ValueError, "artifacts disagree"):
+            self.render()
+
+    def test_point_lists_must_match_the_configured_count(self):
+        self.records[0]["gradients"][0]["stanli"]["points"].pop()
+        with self.assertRaisesRegex(ValueError, "Invalid raw gradient trial"):
+            self.render()
+
+    def test_short_point_window_is_rejected(self):
+        self.records[0]["gradients"][0]["cmdstan"]["points"][0]["elapsed_ns"] = 1000
+        with self.assertRaisesRegex(ValueError, "Invalid raw gradient trial"):
+            self.render()
+
+    def test_kept_and_dropped_points_must_match_the_raw_trials(self):
+        self.records[0]["gradients"][0]["kept_points"] = [0, 1]
+        with self.assertRaisesRegex(ValueError, "numerical gate"):
+            self.render()
+
+    def test_points_non_finite_in_both_engines_are_dropped_and_noted(self):
+        from benchmark_artifact_fixture import artifact_fixture
+        from tools.corpus_table import _catalog_notes
+        self.manifest, self.records, self.rows = artifact_fixture(dropped=(1,))
+        self.assertIn("1.42x", self.render())
+        record = dict(self.records[0], status="failed")
+        self.assertEqual(_catalog_notes(self.rows[0], record),
+                         "failed; 1 of 3 points non-finite in both engines; dropped")
+        self.assertEqual(_catalog_notes(self.rows[0], self.records[0]),
+                         "1 of 3 points non-finite in both engines; dropped")
+        self.assertEqual(_catalog_notes(self.rows[1], self.records[1]), "failed; gradient build failed")
+
+    def test_kept_point_counts_in_the_summary_must_match_the_raw_trials(self):
+        from benchmark_artifact_fixture import artifact_fixture
+        self.manifest, self.records, self.rows = artifact_fixture(dropped=(1,))
+        self.update_row(points_kept=3, points_dropped=0)
+        with self.assertRaisesRegex(ValueError, "artifacts disagree"):
+            self.render()
+
+    def test_a_point_finite_in_one_engine_only_is_rejected(self):
+        from benchmark_artifact_fixture import artifact_fixture
+        self.manifest, self.records, self.rows = artifact_fixture(dropped=(1,))
+        self.records[0]["gradients"][0]["cmdstan"]["points"][1] = dict(
+            point=1, finite=True, values=[-2.0, 3.0], iterations=1000000,
+            elapsed_ns=100000000, batch=1)
+        with self.assertRaisesRegex(ValueError, "numerical gate"):
+            self.render()
+
+    def test_retained_v4_artifacts_still_render(self):
+        from benchmark_artifact_fixture import artifact_fixture
+        self.manifest, self.records, self.rows = artifact_fixture(protocol=4)
+        rendered = self.render()
+        self.assertIn("1.42x", rendered)
+        self.assertNotIn("points non-finite", rendered)
+
+    def test_v4_numerical_gate_still_applies(self):
+        from benchmark_artifact_fixture import artifact_fixture
+        self.manifest, self.records, self.rows = artifact_fixture(protocol=4)
         self.records[0]["gradients"][0]["cmdstan"]["values"] = [-10, 2]
         with self.assertRaisesRegex(ValueError, "numerical gate"):
+            self.render()
+
+    def test_v5_requires_a_point_count(self):
+        del self.manifest["identity"]["config"]["points"]
+        with self.assertRaisesRegex(ValueError, "Invalid gradient configuration: points"):
             self.render()
 
     def test_missing_artifacts_have_no_historical_fallback(self):
@@ -654,11 +836,17 @@ class BenchmarkCatalogTests(unittest.TestCase):
                             for path in self.render_catalog.__defaults__[:3]))
 
 
+def _measured(trial):
+    return [point for point in trial.get("points", [trial]) if point.get("finite", True)]
+
+
 def _scale_engine(record, engine, factor):
     import statistics
     for pair in record["gradients"]:
-        pair[engine]["elapsed_ns"] = int(pair[engine]["elapsed_ns"] * factor)
-    times = {name: [p[name]["elapsed_ns"] / p[name]["iterations"] for p in record["gradients"]]
+        for point in _measured(pair[engine]):
+            point["elapsed_ns"] = int(point["elapsed_ns"] * factor)
+    times = {name: [statistics.fmean(m["elapsed_ns"] / m["iterations"] for m in _measured(p[name]))
+                    for p in record["gradients"]]
              for name in ("stanli", "cmdstan")}
     series = {"stanli_ns_grad": times["stanli"], "cmdstan_ns_grad": times["cmdstan"],
               "paired_speedup": [c / s for s, c in zip(times["stanli"], times["cmdstan"])]}
@@ -782,7 +970,7 @@ class VectorizedCatalogTests(VectorizedFixture):
         self.sources["old"][0]["identity"]["config"]["measure_ms"] = 300
         with self.assertRaisesRegex(ValueError, "configuration differs"):
             self.render()
-        self.sources["old"][0]["identity"]["config"]["measure_ms"] = 250
+        self.sources["old"][0]["identity"]["config"]["measure_ms"] = 40
         self.sources["old"][0]["identity"]["threads"] = {"STAN_NUM_THREADS": "2"}
         with self.assertRaisesRegex(ValueError, "thread"):
             self.render()
@@ -804,8 +992,8 @@ class VectorizedCatalogTests(VectorizedFixture):
 
     def test_new_stanli_values_must_agree_with_reused_cmdstan_values(self):
         for pair in self.sources["old"][1][0]["gradients"]:
-            pair["cmdstan"]["values"] = [-1.0, 2.001]
-            pair["stanli"]["values"] = [-1.0, 2.001]
+            for engine in ("cmdstan", "stanli"):
+                pair[engine]["points"][1]["values"] = [-1.0, 2.001]
         rendered = self.render()
         complete, incomplete = rendered.split("**Incomplete results**")
         self.assertNotIn("`good`", complete)

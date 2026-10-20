@@ -37,7 +37,7 @@ from bench_build_cache import BuildCache, cache_key
 from cmdstan_ref import compile_cmd
 from corpus_inventory import corpus_cases
 
-PROTOCOL = "stanli-corpus-v4"
+PROTOCOL = "stanli-corpus-v5"
 GRADIENT_BUDGET = 20000
 CACHE_STEM = "model"
 DEFAULT_CACHE = pathlib.Path("~/.cache/stanli/corpus-bench")
@@ -47,7 +47,8 @@ VECTORIZE_PROBE = REPO / "deps/stanc3/stanli-vectorize-probe"
 COLS = ["model", "params", "stanli_compile_s", "stanli_prep_s",
         "cmdstan_stanc_s", "cmdstan_build_s", "stanli_ns_grad", "cmdstan_ns_grad",
         "stanli_ns_grad_mad", "cmdstan_ns_grad_mad", "paired_speedup",
-        "paired_speedup_mad", "paired_rounds", "gradient_budget",
+        "paired_speedup_mad", "paired_rounds", "points_kept", "points_dropped",
+        "gradient_budget",
         "stanli_estimated_s", "cmdstan_estimated_s", "run_id", "note"]
 THREAD_ENV = {k: "1" for k in ("STAN_NUM_THREADS", "OMP_NUM_THREADS",
                                "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
@@ -211,42 +212,80 @@ class Runner:
         return result
 
 
-def parse_timing(text, warmup_ms, measure_ms):
+def parse_timing(text, warmup_ms, measure_ms, points):
     # Stan transformed-data print statements can precede the driver's JSON.
     lines = [line for line in text.splitlines() if line.strip()]
     try:
         result = json.loads(lines[-1])
-        if result["protocol"] != "stanli-gradient-v2":
+        if result["protocol"] != "stanli-gradient-v3":
             raise ValueError("wrong timing protocol")
-        for key in ("iterations", "elapsed_ns", "batch", "warmup_iterations", "warmup_elapsed_ns"):
+        for key in ("warmup_iterations", "warmup_elapsed_ns"):
             if type(result[key]) is not int or result[key] <= 0:
                 raise ValueError(f"invalid {key}")
         if result["warmup_elapsed_ns"] < warmup_ms * 1e6:
             raise ValueError("warmup ended early")
-        if result["elapsed_ns"] < measure_ms * 1e6:
-            raise ValueError("measurement ended early")
-        values = result["values"]
-        if not isinstance(values, list) or not values:
-            raise ValueError("missing density and gradient")
-        if not all(type(v) in (int, float) and math.isfinite(v) for v in values):
-            raise ValueError("non-finite density or gradient")
+        entries = result["points"]
+        if not isinstance(entries, list) or len(entries) != points:
+            raise ValueError(f"expected {points} points")
+        for index, entry in enumerate(entries):
+            if entry["point"] != index or type(entry["finite"]) is not bool:
+                raise ValueError(f"invalid point {index}")
+            if not entry["finite"]:
+                if set(entry) != {"point", "finite"}:
+                    raise ValueError(f"point {index} has measurements but is not finite")
+                continue
+            for key in ("iterations", "elapsed_ns", "batch"):
+                if type(entry[key]) is not int or entry[key] <= 0:
+                    raise ValueError(f"point {index}: invalid {key}")
+            if entry["elapsed_ns"] < measure_ms * 1e6:
+                raise ValueError(f"point {index}: measurement ended early")
+            values = entry["values"]
+            if not isinstance(values, list) or not values:
+                raise ValueError(f"point {index}: missing density and gradient")
+            if not all(type(v) in (int, float) and math.isfinite(v) for v in values):
+                raise ValueError(f"point {index}: non-finite density or gradient")
+        if not any(entry["finite"] for entry in entries):
+            raise ValueError("no finite point")
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise PhaseFailure(f"invalid timing output: {exc}") from exc
     return result
 
 
+def kept_points(pair):
+    return [a["point"] for a, b in zip(pair["stanli"]["points"], pair["cmdstan"]["points"])
+            if a["finite"] and b["finite"]]
+
+
 def check_pair(pair):
-    a, b = pair["stanli"]["values"], pair["cmdstan"]["values"]
-    if len(a) != len(b):
-        raise PhaseFailure("density/gradient widths differ")
-    worst = max(abs(x - y) / max(abs(x), abs(y), 1) for x, y in zip(a, b))
-    if worst > 1e-9:
-        raise PhaseFailure(f"density/gradient mismatch: scaled error {worst:.3g}")
-    return worst
+    kept, dropped = [], []
+    worst = 0
+    for a, b in zip(pair["stanli"]["points"], pair["cmdstan"]["points"]):
+        k = a["point"]
+        if not a["finite"] and not b["finite"]:
+            dropped.append(k)
+            continue
+        if a["finite"] != b["finite"]:
+            bad, good = ("stanli", "cmdstan") if b["finite"] else ("cmdstan", "stanli")
+            raise PhaseFailure(f"point {k} is non-finite in {bad} but finite in {good}")
+        if len(a["values"]) != len(b["values"]):
+            raise PhaseFailure(f"point {k}: density/gradient widths differ")
+        error = max(abs(x - y) / max(abs(x), abs(y), 1) for x, y in zip(a["values"], b["values"]))
+        if error > 1e-9:
+            raise PhaseFailure(f"point {k}: density/gradient mismatch: scaled error {error:.3g}")
+        kept.append(k)
+        worst = max(worst, error)
+    if not kept:
+        raise PhaseFailure("no point is finite in both engines")
+    return dict(kept_points=kept, dropped_points=dropped, max_scaled_error=worst)
+
+
+def mean_ns(result, kept):
+    entries = {entry["point"]: entry for entry in result["points"]}
+    return statistics.fmean(entries[k]["elapsed_ns"] / entries[k]["iterations"] for k in kept)
 
 
 def summarize_pairs(pairs):
-    times = {engine: [p[engine]["elapsed_ns"] / p[engine]["iterations"] for p in pairs]
+    times = {engine: [mean_ns(p[engine], kept_points(p)) for p in pairs]
              for engine in ("stanli", "cmdstan")}
     result = {}
     for engine, values in times.items():
@@ -590,14 +629,21 @@ def measure_model(name, stan, data, directory, manifest, runner, args, build=Non
             for engine in order:
                 event = runner.require(f"{name}/gradient/{round_index}/{engine}",
                     commands[engine] + ["--timed", "--warmup-ms", str(args.warmup_ms),
-                                        "--measure-ms", str(args.measure_ms)]
+                                        "--measure-ms", str(args.measure_ms),
+                                        "--points", str(args.points)]
                     + (fast if engine == "stanli" else []), args.gradient_timeout)
-                pair[engine] = parse_timing(runner.text(event), args.warmup_ms, args.measure_ms)
+                pair[engine] = parse_timing(runner.text(event), args.warmup_ms, args.measure_ms,
+                                             args.points)
                 pair[engine]["event"] = event["id"]
-            deviation = check_pair(pair)
-            record["gradients"].append(dict(pair, order=list(order), max_scaled_error=deviation))
+            checked = check_pair(pair)
+            record["gradients"].append(dict(pair, order=list(order), **checked))
+        if any(g["kept_points"] != record["gradients"][0]["kept_points"] for g in record["gradients"]):
+            raise PhaseFailure("points differ between rounds")
+        first = record["gradients"][0]
         row.update(summarize_pairs(record["gradients"]))
-        row["params"] = len(record["gradients"][0]["stanli"]["values"]) - 1
+        row["points_kept"] = len(first["kept_points"])
+        row["points_dropped"] = len(first["dropped_points"])
+        row["params"] = len(first["stanli"]["points"][first["kept_points"][0]]["values"]) - 1
         # Binding existing MIR excludes the separately measured source compiler.
         for i in range(args.rounds):
             event = runner.require(f"{name}/prepare/{i}",
@@ -652,8 +698,11 @@ def main(argv=None):
     parser.add_argument("--corpus", choices=("all", "posteriordb", "educational", "rethinking", "brms", "cogmod", "ctsem", "teaching"), default="all")
     parser.add_argument("--filter", default="")
     parser.add_argument("--rounds", type=int, default=6)
-    parser.add_argument("--warmup-ms", type=int, default=200)
-    parser.add_argument("--measure-ms", type=int, default=250)
+    parser.add_argument("--warmup-ms", type=int, default=20)
+    parser.add_argument("--measure-ms", type=int, default=40,
+                        help="measured window per evaluation point")
+    parser.add_argument("--points", type=int, default=10,
+                        help="evaluation points; gradient time is their mean")
     parser.add_argument("--gradient-timeout", type=float, default=60)
     parser.add_argument("--build-timeout", type=float, default=900)
     parser.add_argument("--resume", action="store_true")
@@ -683,7 +732,9 @@ def main(argv=None):
     if not all(math.isfinite(n) and n > 0 for n in
                (args.gradient_timeout, args.build_timeout)):
         parser.error("phase timeouts must be finite and positive")
-    if args.gradient_timeout <= (args.warmup_ms + args.measure_ms) / 1000:
+    if not 1 <= args.points <= 100:
+        parser.error("--points must be 1..100")
+    if args.gradient_timeout <= (args.warmup_ms + args.points * (args.measure_ms + 2)) / 1000:
         parser.error("gradient timeout must exceed warmup plus measurement")
     for key in ("cmdstan", "pdb", "output", "bench", "stanc", "vectorize_probe"):
         setattr(args, key, getattr(args, key).absolute())
