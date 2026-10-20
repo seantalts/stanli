@@ -263,10 +263,10 @@ On Windows the compiler runs as a short-lived `stanli-compile.exe` subprocess.
   <!--gen:corpus_bitwise-->55<!--/gen--> of them bitwise, with a worst
   relative error of <!--gen:corpus_worst-->7.1e-13<!--/gen-->. See
   [TESTING.md](https://github.com/seantalts/stanli/blob/main/TESTING.md).
-- Speed: in the <!--gen:benchmark_date-->2026-10-18<!--/gen--> run,
+- Speed: in the <!--gen:benchmark_date-->2026-10-19<!--/gen--> run,
   <!--gen:corpus_n_grad-->337<!--/gen--> of
   <!--gen:benchmark_models-->343<!--/gen--> models produced paired gradient
-  timings. The median gradient is <!--gen:corpus_median-->2.10x<!--/gen-->
+  timings. The median gradient is <!--gen:corpus_median-->2.14x<!--/gen-->
   faster than CmdStan's, and <!--gen:corpus_at_par-->321<!--/gen--> are at
   least as fast. See
   [docs/benchmarks.md](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md).
