@@ -8,6 +8,8 @@ import statistics
 
 POINTS = 3
 POINTS_SHA = "ab" * 32
+REFERENCE_SHA = "ef" * 32
+REFERENCE_COUNT = 2000
 
 
 def raw_trial(ns, dropped=()):
@@ -23,7 +25,7 @@ def raw_trial(ns, dropped=()):
                 warmup_elapsed_ns=20000000, points=points)
 
 
-def artifact_fixture(dropped=(), point_sources=None):
+def artifact_fixture(dropped=(), point_sources=None, counts=None):
     config = dict(corpus="all", filter="", rounds=6, gradient_budget=20000,
                   stancflags="", warmup_ms=20, measure_ms=40, points=POINTS,
                   gradient_timeout=60)
@@ -39,10 +41,15 @@ def artifact_fixture(dropped=(), point_sources=None):
     if point_sources is not None:
         identity = manifest["identity"]
         identity["protocol"] = "stanli-corpus-v6"
+        del identity["config"]["gradient_budget"]
         for name, source in point_sources.items():
-            identity["inputs"][name]["point_source"] = source
-            if source == "prior":
-                identity["inputs"][name]["points_sha256"] = POINTS_SHA
+            wanted = identity["inputs"][name]
+            wanted["point_source"] = source
+            wanted["gradient_count"] = (5000 if source == "fixed"
+                                        else (counts or {}).get(name, REFERENCE_COUNT))
+            wanted["reference_sha256"] = REFERENCE_SHA
+            if source == "reference_run":
+                wanted["points_sha256"] = POINTS_SHA
     pairs = []
     for index, (s, c) in enumerate(zip((100, 200, 300, 400, 500, 600),
                                       (1000, 300, 400, 900, 600, 800))):
@@ -78,8 +85,15 @@ def artifact_fixture(dropped=(), point_sources=None):
         inputs = manifest["identity"]["inputs"]
         for record in records:
             wanted = inputs[record["model"]]
-            record["inputs"].update({k: wanted[k] for k in ("point_source", "points_sha256") if k in wanted})
+            record["inputs"].update({k: wanted[k] for k in ("point_source", "gradient_count",
+                                                            "reference_sha256", "points_sha256")
+                                     if k in wanted})
+            record["row"].pop("gradient_budget")
             record["row"]["point_source"] = wanted["point_source"]
+            record["row"]["gradient_count"] = wanted["gradient_count"]
+        count = inputs["good"]["gradient_count"]
+        records[0]["row"].update(stanli_estimated_s=.1 + .02 + count * 350 / 1e9,
+                                 cmdstan_estimated_s=.2 + 2 + count * 700 / 1e9)
     return manifest, records, [copy.deepcopy(record["row"]) for record in records]
 
 

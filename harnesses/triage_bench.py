@@ -22,7 +22,7 @@ def main():
     path = pathlib.Path(sys.argv[1])
     with path.open(newline="") as f:
         reader = csv.DictReader(f, delimiter="\t")
-        estimated = "gradient_budget" in (reader.fieldnames or [])
+        estimated = bool({"gradient_count", "gradient_budget"} & set(reader.fieldnames or []))
         rows.extend(reader)
 
     done = len(rows)
@@ -43,7 +43,7 @@ def main():
 
     print(f"{done} models measured; {len(grad_ratios)} with both gradients")
     if estimated:
-        print("  Estimated seconds: measured setup + 20,000 warm gradients (proxy, not HMC time)")
+        print("  Estimated seconds: measured setup + reference-run gradients (proxy, not HMC time)")
     else:
         print("  Historical sampling seconds: recorded full CLI runs")
     if grad_ratios:

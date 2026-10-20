@@ -309,7 +309,7 @@ class SplitCacheTests(BuildFixture):
 
 class PrebuiltMeasureTests(existing.SetupEstimateTests):
     """Every outcome the inline build produces is the same when the build ran earlier."""
-    def measure(self, points=None):
+    def measure(self, reference=None):
         work = self.root / "m"
         with mock.patch("harnesses.corpus_bench.compile_cmd", return_value=["c++"]), \
              mock.patch("harnesses.corpus_bench.sha", return_value="test-hash"):
@@ -317,7 +317,7 @@ class PrebuiltMeasureTests(existing.SetupEstimateTests):
             self.prebuild_events = len(self.events)
             return corpus_bench.measure_model("m", self.source, self.data, self.root,
                                               {"run_id": "test-run"}, self.runner, self.args, build,
-                                              points)
+                                              reference)
 
     def test_source_compile_failure_keeps_event_without_setup_estimate(self):
         self.failures["m/stanli-mir"] = "failed"
@@ -359,7 +359,7 @@ class PrebuiltMeasureTests(existing.SetupEstimateTests):
                                                 {"run_id": "this-run"}, self.runner, self.args, build)
         self.assertEqual(record["status"], "ok")
         self.assertEqual((record["row"]["cmdstan_stanc_s"], record["row"]["cmdstan_build_s"]), (.5, 3.))
-        self.assertEqual(record["row"]["cmdstan_estimated_s"], .5 + 3. + 20000 * 500000 / 1e9)
+        self.assertEqual(record["row"]["cmdstan_estimated_s"], .5 + 3. + 5000 * 500000 / 1e9)
         for key in ("cmdstan_stanc", "cmdstan_build"):
             self.assertEqual(record["setup"][key]["cached"], True)
             self.assertEqual(record["setup"][key]["cache_run_id"], "older-run")
@@ -544,14 +544,33 @@ class MainWiringTests(unittest.TestCase):
         self.runners.append(runner)
         return runner
 
-    def measure(self, name, stan, data, directory, manifest, runner, args, build=None, points=None):
+    def measure(self, name, stan, data, directory, manifest, runner, args, build=None, reference=None):
         self.measured.append((name, build, len(runner.calls)))
-        self.points[name] = points
+        self.points[name] = reference
         record = dict(model=name, status="ok", row=dict(model=name, note=""))
         (directory / f"{name}.result.json").write_text(json.dumps(record))
         return record
 
+    def points_file(self, **changes):
+        import benchmark_points as bp
+        phases = lambda a, b: dict(warmup=a, sampling=b)
+        models = {}
+        for name, case in self.cases.items():
+            hashes = dict(stan_sha256=bp.sha256(case.source), data_sha256=bp.sha256(case.data))
+            if name == "a":
+                models[name] = dict(hashes, source="reference_run", n_params=1,
+                                    points=[[0.1 * k] for k in range(10)], iterations=list(range(10)),
+                                    gradients=dict(warmup=40, sampling=60, total=100),
+                                    divergences=phases(0, 0), max_treedepth=phases(0, 0), **changes)
+            else:
+                models[name] = dict(hashes, source="fixed", reason="reference run timed out")
+        path = self.root / "points.json.gz"
+        bp.write(path, dict(schema=bp.SCHEMA, settings=dict(points=10, warmup=5, draws=5), models=models))
+        return path
+
     def run_main(self, *extra, output="out.tsv"):
+        if "--points-file" not in extra:
+            extra = (*extra, "--points-file", str(self.points_file()))
         with contextlib.redirect_stdout(io.StringIO()):
             status = corpus_bench.main([str(self.root / "cmdstan"), str(self.root / "pdb"),
                 str(self.root / output), "--stanc", str(self.root / "stanc"),
@@ -559,40 +578,33 @@ class MainWiringTests(unittest.TestCase):
                 *extra])
         return status, pathlib.Path(str(self.root / output) + ".run")
 
-    def prior_file(self, **changes):
-        import benchmark_points as bp
-        stan, data = self.cases["a"].source, self.cases["a"].data
-        stan.write_text("data { int prior_only; }\nparameters { real a; }\nmodel { a ~ normal(0, 1); }\n")
-        entry = dict(source="prior", stan_sha256=bp.sha256(stan), data_sha256=bp.sha256(data),
-                     n_params=1, points=[[0.1 * k] for k in range(10)])
-        path = self.root / "points.json.gz"
-        bp.write(path, dict(schema=bp.SCHEMA, settings=dict(selected_draws=list(range(10))),
-                            models={"a": dict(entry, **changes)}, fallbacks={}))
-        return path
-
-    def test_prior_points_are_frozen_in_the_run_and_recorded_in_the_manifest(self):
-        status, run = self.run_main("--no-build-cache", "--prior-points", str(self.prior_file()))
+    def test_reference_inputs_are_frozen_in_the_run_and_recorded_in_the_manifest(self):
+        status, run = self.run_main("--no-build-cache")
         self.assertEqual(status, 0)
         frozen = run / "inputs" / "a.points.json"
         self.assertEqual(json.loads(frozen.read_text()), [[0.1 * k] for k in range(10)])
-        self.assertEqual(self.points, {"a": frozen, "b": None})
-        inputs = json.loads((run / "manifest.json").read_text())["identity"]["inputs"]
-        self.assertEqual((inputs["a"]["point_source"], inputs["b"]["point_source"]), ("prior", "fixed"))
+        self.assertEqual(self.points["a"]["points"], frozen)
+        self.assertEqual((self.points["a"]["source"], self.points["a"]["gradient_count"]),
+                         ("reference_run", 100))
+        self.assertIsNone(self.points["b"]["points"])
+        self.assertEqual(self.points["b"]["gradient_count"], 5000)
+        identity = json.loads((run / "manifest.json").read_text())["identity"]
+        inputs = identity["inputs"]
+        self.assertEqual((inputs["a"]["point_source"], inputs["b"]["point_source"]),
+                         ("reference_run", "fixed"))
+        self.assertEqual((inputs["a"]["gradient_count"], inputs["b"]["gradient_count"]), (100, 5000))
         self.assertEqual(inputs["a"]["points_sha256"], corpus_bench.sha(frozen))
+        for name in ("a", "b"):
+            self.assertEqual(inputs[name]["reference_sha256"],
+                             corpus_bench.sha(run / "inputs" / f"{name}.reference.json"))
         self.assertNotIn("points_sha256", inputs["b"])
-
-    def test_no_prior_points_uses_fixed_points_for_every_model(self):
-        status, run = self.run_main("--no-build-cache", "--prior-points", str(self.prior_file()),
-                                    "--no-prior-points")
-        self.assertEqual(status, 0)
-        self.assertEqual(self.points, {"a": None, "b": None})
-        inputs = json.loads((run / "manifest.json").read_text())["identity"]["inputs"]
-        self.assertEqual({v["point_source"] for v in inputs.values()}, {"fixed"})
+        self.assertEqual(identity["points_file_sha256"], corpus_bench.sha(self.root / "points.json.gz"))
+        self.assertEqual(identity["reference_settings"]["points"], 10)
 
     def test_a_points_file_that_no_longer_matches_the_source_is_an_error(self):
-        path = self.prior_file(stan_sha256="0" * 64)
+        path = self.points_file(stan_sha256="0" * 64)
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()) as err:
-            self.run_main("--no-build-cache", "--prior-points", str(path))
+            self.run_main("--no-build-cache", "--points-file", str(path))
         self.assertIn("stan source changed", err.getvalue())
         self.assertEqual(self.measured, [])
 

@@ -26,7 +26,7 @@ import statistics
 import sys
 import warnings
 
-from corpus_table import CATALOG_GRADIENT_BUDGET, render_catalog, render_gradient_catalog
+from corpus_table import FIXED_GRADIENT_COUNT, render_catalog, render_gradient_catalog
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # The demo page carries headline numbers too, and its markers are HTML
@@ -63,12 +63,13 @@ def corpus_stats(rows):
 
 
 def total_sampling_median(rows):
-    """Median CmdStan/Stanli ratio of setup plus the catalog's gradient budget."""
+    """Median CmdStan/Stanli ratio of setup plus each model's gradient count times its gradient time."""
     def total(row, fields):
         values = [row.get(field) for field in fields]
         if not all(values):
             return None
-        return float(values[0]) + float(values[1]) + CATALOG_GRADIENT_BUDGET * float(values[2]) / 1e9
+        count = int(row.get("gradient_count") or FIXED_GRADIENT_COUNT)
+        return float(values[0]) + float(values[1]) + count * float(values[2]) / 1e9
     ratios = []
     for row in rows:
         stanli = total(row, ("stanli_compile_s", "stanli_prep_s", "stanli_ns_grad"))
@@ -131,7 +132,6 @@ def compute():
         "corpus_n_grad": str(c_n),
         "corpus_at_par": str(c_par),
         "corpus_total_median": f"{t_med:.0f}x" if t_med is not None else "unavailable",
-        "benchmark_gradient_budget": f"{CATALOG_GRADIENT_BUDGET:,}",
     }
 
 

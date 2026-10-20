@@ -8,8 +8,8 @@ with CmdStan on **<!--gen:benchmark_models-->343<!--/gen--> application models**
 - The median model's gradient is **<!--gen:corpus_median-->2.20x<!--/gen--> faster** in Stanli than in
   CmdStan. Stanli is as fast or faster on <!--gen:corpus_at_par-->324<!--/gen--> of the
   <!--gen:corpus_n_grad-->336<!--/gen--> models that pass the numerical check.
-- In the total-sampling column, which adds setup to <!--gen:benchmark_gradient_budget-->5,000<!--/gen-->
-  gradients, the median model is <!--gen:corpus_total_median-->137x<!--/gen--> faster, mostly because
+- In the total-sampling column, which adds setup to the gradients a full
+  1,000 warmup + 1,000 draw run takes, the median model is <!--gen:corpus_total_median-->137x<!--/gen--> faster, mostly because
   CmdStan builds C++ for each model. The longer the run, the closer this gets
   to the gradient speedup.
 - Regressions, GLMs and IRT models gain the most. Models dominated by dense
@@ -31,8 +31,8 @@ Every application model uses the same settings. Language-conformance fixtures
 belong to the [numerical corpus](corpus-status.md) and are not timed here.
 CmdStan uses its default compiler settings. The `CmdStan / Stanli` column is
 how many times faster Stanli's gradient is; complete results are sorted by it,
-fastest first. Total sampling is each engine's setup time plus <!--gen:benchmark_gradient_budget-->5,000<!--/gen-->
-warm gradients; no sampler runs ([details](#total-sampling-estimate)).
+fastest first. Total sampling is each engine's setup time plus the warm gradients of a full run, with the gradient count
+measured once per model; the benchmark itself runs no sampler ([details](#total-sampling-estimate)).
 Incomplete results follow each table.
 
 <!--gen:benchmark_catalog-->
@@ -829,25 +829,30 @@ which.
 
 Both engines evaluate the same model, data and unconstrained parameter vectors
 with the sampling log density (`propto=true`) and the Jacobian adjustment.
-There are ten evaluation points. They come from one of two sources.
+There are ten evaluation points per model. Each model also has a gradient
+count. Both come from one reference run per model: Stanli's NUTS sampler on the
+real data, one chain, seed 1, 1,000 warmup and 1,000 draws, default adaptation,
+with the warmup iterations saved. The run records `n_leapfrog__` for every
+iteration, and each leapfrog step is one gradient. The gradient count is the
+total over warmup and sampling. The file also records the divergent and
+maximum-treedepth iterations.
 
-Most models use fixed points. Point 0 has coordinate `i` equal to
+The points are ten iterations of that run, chosen by systematic selection over
+the cumulative gradient count of warmup and sampling together. Iteration `i` is
+chosen for point `k` (0 to 9) when it is the first whose cumulative count
+reaches `(k + 0.5) / 10` of the total. Busy parts of the run, where the sampler
+spends its gradients, therefore get more points. The sampler already reports
+unconstrained draws, and the points are those values unchanged.
+
+A model falls back to the fixed points if the reference run fails, times out
+after 30 minutes, or has a selected point with a non-finite density or
+gradient. Point 0 of the fixed points has coordinate `i` equal to
 `0.1 + 0.05 * (i % 7) - 0.15 * (i % 3)`. Points 1 to 9 draw each coordinate
 uniformly from (-2, 2) with a fixed integer generator seeded from the point
-and coordinate.
-
-Models that declare `int prior_only;` in their data block (the brms-style
-models) use ten draws from their own prior where they can. Stanli's NUTS
-sampler runs one chain with the likelihood switched off (`prior_only=1`), 1,000
-warmup and 1,000 draws, seed 1, and the points are draws 50, 150, ..., 950 on
-the unconstrained scale. A model keeps the fixed points if the sampler fails,
-if a draw has a non-finite density or gradient on the real data, or if a draw
-exceeds 1,000 in absolute value. The last rule catches flat priors, whose
-prior-only chain drifts without bound. Of the 149 models that declare the flag,
-14 have usable prior draws. The vectors and the reason for each fallback are in
+and coordinate. A fallback model uses 5,000 gradients. The vectors, the
+counts and the reason for each fallback are in
 [`benchmark-points.json.gz`](internal/artifacts/benchmark-points.json.gz).
-Both engines read the same vectors, and the tables mark models that use them
-with †.
+Both engines read the same vectors. The tables mark fallback models with †.
 
 ### Gradient time
 
@@ -907,13 +912,17 @@ event is marked `cached` with the run that measured it.
 
 ### Total sampling estimate
 
-Each engine's setup time plus <!--gen:benchmark_gradient_budget-->5,000<!--/gen--> times its
-warm gradient time, the mean over the evaluation points. No sampler runs. Adaptation, tree building,
-generated quantities and CSV output are left out, and a fixed gradient budget
-says nothing about how long each engine needs to reach the same inference
-quality. The run manifests record a 20,000-gradient budget; the tables
-recompute totals for <!--gen:benchmark_gradient_budget-->5,000<!--/gen--> gradients from the same measurements. A missing
-setup component leaves the estimate blank and keeps the gradient result.
+Each engine's setup time plus the model's reference-run gradient count times
+its warm gradient time, the mean over the ten points. The same count is used for
+both engines. The benchmark itself runs no sampler. Adaptation, tree building,
+generated quantities and CSV output are left out. The count comes from Stanli's
+sampler, so it assumes CmdStan's sampler would take about as many gradients on
+the same model. `tools/validate_total_estimates.py` checks this: it runs full
+sampling in both engines for a sample of models and compares the real sampler
+time with the estimate.
+
+A fallback model uses 5,000 gradients. A missing setup component leaves the
+estimate blank and keeps the gradient result.
 
 ### Loop-vectorization comparison
 
@@ -942,7 +951,7 @@ and stock and patched MIR for a scalar normal-likelihood loop are kept with the
 | --- | --- |
 | Scope | All 343 application models, `--corpus all` |
 | Gradient trials | Six alternating pairs; per process 20 ms warmup, then 40 ms of measurement at each of 10 evaluation points |
-| Displayed workload | Setup + <!--gen:benchmark_gradient_budget-->5,000<!--/gen--> × mean warm gradient time over the points |
+| Displayed workload | Setup + reference-run gradient count × mean warm gradient time over the points |
 | Stanli build | Release clang++, `-O3 -DNDEBUG`; full runtime, threads enabled, lite mode disabled |
 | Upstream source base | `2c9d67b98b196e800dc051460aaaf653ac811ace`; exact measured checkpoint and hashes in manifests |
 | Default reference compiler | Stock pinned stanc3, no additional flags |
@@ -961,7 +970,7 @@ loop-vectorization sweep with separate output paths:
 ```sh
 ./tools/dev_setup.sh
 cmake --build build-rel --target bench_grad stanli_shared -j 4
-python3 tools/gen_benchmark_points.py --lib build-rel/libstanli.dylib
+python3 tools/gen_benchmark_points.py --lib build-rel/libstanli.dylib --jobs 8
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
   build/corpus-current/default.tsv --bench build-rel/bench_grad \
   --corpus all --rounds 6 --warmup-ms 20 --measure-ms 40 --points 10 \
@@ -975,10 +984,11 @@ python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
 ```
 
 `--corpus` selects a source collection and `--filter` selects model IDs.
-`tools/gen_benchmark_points.py` rewrites the committed prior points (use
-`libstanli.so` on Linux); the harness reads them by default, refuses a model
-whose source or data no longer matches, and `--no-prior-points` uses the fixed
-points for every model.
+`tools/gen_benchmark_points.py` reruns the reference runs and rewrites the
+committed points file (use `libstanli.so` on Linux; `--jobs` and `--timeout`
+set the parallelism and the per-model limit). The harness reads the file by
+default through `--points-file` and refuses a model whose source or data no
+longer matches.
 CmdStan binaries are built once and reused from a content-addressed cache,
 `$STANLI_BENCH_CACHE` or `~/.cache/stanli/corpus-bench`; `--build-cache DIR`
 overrides it and `--no-build-cache` builds inside the run directory.

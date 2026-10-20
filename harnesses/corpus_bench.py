@@ -2,8 +2,9 @@
 """Paired, reproducible corpus benchmarks. See docs/benchmarks.md.
 
 python3 harnesses/corpus_bench.py CMDSTAN PDB fresh.tsv [--corpus rethinking]
-Measures source/setup costs and warm gradients. Setup plus 20,000 gradients
-is a fixed-work proxy, not measured HMC or sampling time.
+Measures source/setup costs and warm gradients. Setup plus a per-model gradient
+count (from the Stanli reference run in the points file) is a proxy, not measured
+HMC or sampling time.
 A sibling fresh.tsv.run directory holds the frozen manifest and raw evidence.
 --resume requires identical inputs, binaries and settings. Historical TSVs are
 never appended to, and candidate-only refreshes cannot create paired results.
@@ -39,7 +40,6 @@ from cmdstan_ref import compile_cmd
 from corpus_inventory import corpus_cases
 
 PROTOCOL = "stanli-corpus-v6"
-GRADIENT_BUDGET = 20000
 CACHE_STEM = "model"
 DEFAULT_CACHE = pathlib.Path("~/.cache/stanli/corpus-bench")
 BENCH = REPO / "build-rel/bench_grad"
@@ -49,7 +49,7 @@ COLS = ["model", "params", "stanli_compile_s", "stanli_prep_s",
         "cmdstan_stanc_s", "cmdstan_build_s", "stanli_ns_grad", "cmdstan_ns_grad",
         "stanli_ns_grad_mad", "cmdstan_ns_grad_mad", "paired_speedup",
         "paired_speedup_mad", "paired_rounds", "points_kept", "points_dropped",
-        "point_source", "gradient_budget",
+        "point_source", "gradient_count",
         "stanli_estimated_s", "cmdstan_estimated_s", "run_id", "note"]
 THREAD_ENV = {k: "1" for k in ("STAN_NUM_THREADS", "OMP_NUM_THREADS",
                                "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
@@ -652,8 +652,8 @@ def cache_context(args, expected):
                                                         "gradbench")))))
 
 
-def setup_estimates(row, setup):
-    """Populate measured setup and fixed-work estimates only with all components."""
+def setup_estimates(row, setup, gradient_count):
+    """Populate measured setup and total-sampling estimates only with all components."""
     for key in ("stanli_compile", "cmdstan_stanc", "cmdstan_build"):
         event = setup.get(key, {})
         if event.get("status") == "ok":
@@ -666,41 +666,55 @@ def setup_estimates(row, setup):
         grad = row.get(engine + "_ns_grad")
         if grad is not None and all(field in row for field in fields):
             row[engine + "_estimated_s"] = (sum(row[field] for field in fields)
-                                            + GRADIENT_BUDGET * grad / 1e9)
+                                            + gradient_count * grad / 1e9)
 
 
-def prior_point_files(inputs, document, points, directory):
-    """Write each prior-point model's vectors to directory; other models keep the fixed points."""
+def reference_inputs(inputs, document, points, directory):
+    """Write each model's reference entry (and its points) to directory.
+
+    Returns, per model, the point source, the gradient count and the paths of
+    the frozen files. A model without reference points keeps the fixed points
+    and the default gradient count.
+    """
     found = {}
-    if document is None:
-        return found
+    directory = pathlib.Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    if document["settings"]["points"] != points:
+        raise ValueError(f"the points file holds {document['settings']['points']} points per model "
+                         f"but --points is {points}")
     for name, (stan, data) in sorted(inputs.items()):
-        vectors = benchmark_points.points_for(document, name, sha(stan), sha(data),
-                                              pathlib.Path(stan).read_text())
-        if vectors is None:
-            continue
-        if len(vectors) != points:
-            raise ValueError(f"{name}: the points file has {len(vectors)} points but --points is {points}")
-        pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
-        found[name] = pathlib.Path(directory) / f"{name}.points.json"
-        found[name].write_text(json.dumps(vectors, allow_nan=False))
+        entry = benchmark_points.entry_for(document, name, sha(stan), sha(data))
+        reference = directory / f"{name}.reference.json"
+        reference.write_bytes(benchmark_points.dumps(entry))
+        vectors = benchmark_points.points_of(entry)
+        frozen = None
+        if vectors is not None:
+            frozen = directory / f"{name}.points.json"
+            frozen.write_text(json.dumps(vectors, allow_nan=False))
+        found[name] = dict(source=entry["source"], gradient_count=benchmark_points.gradient_count(entry),
+                           reference=reference, points=frozen)
     return found
 
 
 def run_config(args):
     config = {k: str(v) if isinstance(v, pathlib.Path) else v for k, v in vars(args).items()
               if k not in ("resume", "output", "build_cache", "no_build_cache", "build_jobs",
-                           "prior_points", "no_prior_points")}
+                           "points_file")}
     if not config.get("fast_math"):
         config.pop("fast_math", None)
     return config
 
 
-def measure_model(name, stan, data, directory, manifest, runner, args, build=None, points=None):
-    source = "prior" if points else "fixed"
-    row = dict(model=name, run_id=manifest["run_id"], gradient_budget=GRADIENT_BUDGET,
-               point_source=source)
-    inputs = {"stan": sha(stan), "data": sha(data), "point_source": source}
+def measure_model(name, stan, data, directory, manifest, runner, args, build=None, reference=None):
+    reference = reference or dict(source="fixed", gradient_count=benchmark_points.DEFAULT_GRADIENTS,
+                                  reference=None, points=None)
+    points = reference["points"]
+    row = dict(model=name, run_id=manifest["run_id"], gradient_count=reference["gradient_count"],
+               point_source=reference["source"])
+    inputs = {"stan": sha(stan), "data": sha(data), "point_source": reference["source"],
+              "gradient_count": reference["gradient_count"]}
+    if reference["reference"]:
+        inputs["reference_sha256"] = sha(reference["reference"])
     if points:
         inputs["points_sha256"] = sha(points)
     record = dict(model=name, inputs=inputs, row=row,
@@ -764,7 +778,7 @@ def measure_model(name, stan, data, directory, manifest, runner, args, build=Non
                 notes.append(str(exc))
     record["build_cache"] = build.get("cache")
     try:
-        setup_estimates(row, record["setup"])
+        setup_estimates(row, record["setup"], reference["gradient_count"])
     except ValueError as exc:
         notes.append(str(exc))
     record["status"] = ("ok" if not notes else
@@ -794,11 +808,8 @@ def main(argv=None):
                         help="measured window per evaluation point")
     parser.add_argument("--points", type=int, default=10,
                         help="evaluation points; gradient time is their mean")
-    parser.add_argument("--prior-points", type=pathlib.Path, default=benchmark_points.DEFAULT_PATH,
-                        help="evaluation points drawn from the prior of brms-style models; "
-                             "other models use the fixed points")
-    parser.add_argument("--no-prior-points", action="store_true",
-                        help="use the fixed points for every model")
+    parser.add_argument("--points-file", type=pathlib.Path, default=benchmark_points.DEFAULT_PATH,
+                        help="reference-run points and gradient counts (tools/gen_benchmark_points.py)")
     parser.add_argument("--gradient-timeout", type=float, default=60)
     parser.add_argument("--build-timeout", type=float, default=900)
     parser.add_argument("--resume", action="store_true")
@@ -832,7 +843,7 @@ def main(argv=None):
         parser.error("--points must be 1..100")
     if args.gradient_timeout <= (args.warmup_ms + args.points * (args.measure_ms + 2)) / 1000:
         parser.error("gradient timeout must exceed warmup plus measurement")
-    for key in ("cmdstan", "pdb", "output", "bench", "stanc", "vectorize_probe", "prior_points"):
+    for key in ("cmdstan", "pdb", "output", "bench", "stanc", "vectorize_probe", "points_file"):
         setattr(args, key, getattr(args, key).absolute())
     if any(os.getenv(k, "0") != "0" for k in ("STANLI_PROFILE", "STANLI_PROFILE_PREP")):
         parser.error("disable profiling for comparative measurements")
@@ -867,13 +878,11 @@ def main(argv=None):
         if not inputs:
             parser.error("no models selected")
         try:
-            prior_document = None if args.no_prior_points else benchmark_points.load(args.prior_points)
-            staged_points = prior_point_files(inputs, prior_document, args.points,
-                                              pathlib.Path(cache) / "points")
+            document = benchmark_points.load(args.points_file)
+            staged = reference_inputs(inputs, document, args.points, pathlib.Path(cache) / "points")
         except (OSError, ValueError) as exc:
             parser.error(str(exc))
         config = run_config(args)
-        config["gradient_budget"] = GRADIENT_BUDGET
         identities = {p.relative_to(REPO).as_posix(): sha(p) for p in (
             REPO / "harnesses/corpus_bench.py", REPO / "tools/benchmark_timer.hpp",
             REPO / "tools/bench_grad.cpp", REPO / "tools/bench_cmdstan_grad.cpp",
@@ -898,10 +907,14 @@ def main(argv=None):
                                         ("CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "MAKEFLAGS")}},
                         inputs={m: {"stan": sha(s), "data": sha(d),
                                     "collection": cases[m].collection,
-                                    **({"point_source": "prior", "points_sha256": sha(staged_points[m])}
-                                       if m in staged_points else {"point_source": "fixed"})}
+                                    "point_source": staged[m]["source"],
+                                    "gradient_count": staged[m]["gradient_count"],
+                                    "reference_sha256": sha(staged[m]["reference"]),
+                                    **({"points_sha256": sha(staged[m]["points"])}
+                                       if staged[m]["points"] else {})}
                                 for m, (s, d) in inputs.items()},
-                        prior_points_sha256=None if prior_document is None else sha(args.prior_points))
+                        points_file_sha256=sha(args.points_file),
+                        reference_settings=document["settings"])
         try:
             directory, manifest = open_run(args.output, expected, args.resume)
         except ValueError as exc:
@@ -917,13 +930,18 @@ def main(argv=None):
                 copied.write_bytes(source.read_bytes())
                 copies.append(copied)
             inputs[name] = tuple(copies)
-        point_files = {}
-        for name, staged in staged_points.items():
-            copied = directory / "inputs" / f"{name}.points.json"
-            if copied.exists() and sha(copied) != sha(staged):
-                parser.error(f"retained input was modified: {copied}")
-            copied.write_bytes(staged.read_bytes())
-            point_files[name] = copied
+        references = {}
+        for name, item in staged.items():
+            frozen = dict(item)
+            for key, suffix in (("reference", ".reference.json"), ("points", ".points.json")):
+                if item[key] is None:
+                    continue
+                copied = directory / "inputs" / (name + suffix)
+                if copied.exists() and sha(copied) != sha(item[key]):
+                    parser.error(f"retained input was modified: {copied}")
+                copied.write_bytes(item[key].read_bytes())
+                frozen[key] = copied
+            references[name] = frozen
         runner, records = Runner(directory), {}
         for name in inputs:
             saved = directory / f"{name}.result.json"
@@ -947,7 +965,7 @@ def main(argv=None):
             if name not in records:
                 print(f"{name}: paired gradient measurements", flush=True)
                 records[name] = measure_model(name, stan, data, directory, manifest, runner, args,
-                                              builds[name], point_files.get(name))
+                                              builds[name], references[name])
             write_summary(args.output, records)
             print(f"{name}: {records[name]['status']} {records[name]['row']['note']}", flush=True)
         return int(any(r["status"] != "ok" for r in records.values()))

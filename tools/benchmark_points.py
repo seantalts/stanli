@@ -1,8 +1,10 @@
-"""Committed evaluation points for the gradient benchmark.
+"""Committed evaluation points and gradient counts for the corpus benchmark.
 
-Models that declare `int prior_only;` in their data block are benchmarked at
-draws from their own prior; every other model keeps the fixed points built into
-the timing drivers.
+Each model has one entry, recorded from a Stanli NUTS reference run on the
+benchmark data. A reference_run entry holds ten points taken from that run and
+the number of gradient evaluations the run took. A fixed entry says why the run
+could not supply points: the benchmark then uses the fixed points built into the
+timing drivers and the default gradient count.
 """
 
 import gzip
@@ -13,10 +15,12 @@ import math
 import pathlib
 import re
 
-SCHEMA = 1
+SCHEMA = 2
+DEFAULT_GRADIENTS = 5000
 DEFAULT_PATH = pathlib.Path(__file__).resolve().parent.parent / "docs/internal/artifacts/benchmark-points.json.gz"
+SOURCES = ("reference_run", "fixed")
 _HEX = re.compile(r"[0-9a-f]{64}")
-_PRIOR_ONLY = re.compile(r"\bint\s*(<[^>]*>)?\s+prior_only\s*;")
+_PHASES = ("warmup", "sampling")
 
 
 def sha256(path):
@@ -27,53 +31,75 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def _strip_comments(text):
-    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
-    return re.sub(r"(//|#)[^\n]*", " ", text)
+def select_iterations(leapfrogs, points=10):
+    """Systematic selection at cumulative-leapfrog quantiles (k + 0.5) / points.
 
-
-def _data_block(text):
-    for match in re.finditer(r"(?<![\w])data\s*\{", text):
-        before = text[:match.start()].rstrip()
-        if before.endswith("transformed"):
-            continue
-        depth, at = 1, match.end()
-        while at < len(text) and depth:
-            depth += {"{": 1, "}": -1}.get(text[at], 0)
+    Returns, for each k, the first iteration whose cumulative leapfrog count
+    reaches that fraction of the total. The comparison is in integers.
+    """
+    total = sum(leapfrogs)
+    if not leapfrogs or total <= 0:
+        raise ValueError("benchmark points: the reference run did no leapfrog steps")
+    chosen, cumulative, at = [], 0, 0
+    for k in range(points):
+        while True:
+            reached = cumulative + leapfrogs[at]
+            if 2 * points * reached >= (2 * k + 1) * total:
+                break
+            cumulative = reached
             at += 1
-        return text[match.end():at - 1]
-    return ""
-
-
-def prior_only_model(text):
-    return bool(_PRIOR_ONLY.search(_data_block(_strip_comments(text))))
+        chosen.append(at)
+    return chosen
 
 
 def _fail(message):
     raise ValueError(f"benchmark points: {message}")
 
 
-def _check_hashes(where, entry):
-    for key in ("stan_sha256", "data_sha256"):
-        if not isinstance(entry.get(key), str) or not _HEX.fullmatch(entry[key]):
-            _fail(f"{where}: {key} is not a sha256 digest")
+def _count(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _check_phases(where, entry, key):
+    block = entry.get(key)
+    if not isinstance(block, dict) or not all(_count(block.get(phase)) for phase in _PHASES):
+        _fail(f"{where}: {key} needs warmup and sampling counts")
+    return block
+
+
+def _check_statistics(where, entry):
+    gradients = _check_phases(where, entry, "gradients")
+    if not _count(gradients.get("total")) or gradients["total"] != gradients["warmup"] + gradients["sampling"]:
+        _fail(f"{where}: gradients.total is not warmup + sampling")
+    _check_phases(where, entry, "divergences")
+    _check_phases(where, entry, "max_treedepth")
 
 
 def _validate(doc):
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
         _fail(f"unsupported schema (expected {SCHEMA})")
-    settings, models, fallbacks = doc.get("settings"), doc.get("models"), doc.get("fallbacks")
-    if not isinstance(settings, dict) or not isinstance(models, dict) or not isinstance(fallbacks, dict):
-        _fail("settings, models and fallbacks are required")
-    count = len(settings.get("selected_draws", ()))
-    if count < 1:
-        _fail("settings.selected_draws is empty")
+    settings, models = doc.get("settings"), doc.get("models")
+    if not isinstance(settings, dict) or not isinstance(models, dict):
+        _fail("settings and models are required")
+    count, total = settings.get("points"), settings.get("warmup", 0) + settings.get("draws", 0)
+    if not _count(count) or count < 1:
+        _fail("settings.points must be a positive integer")
     for name, entry in models.items():
-        if entry.get("source") != "prior":
-            _fail(f"{name}: source must be 'prior'")
-        _check_hashes(name, entry)
-        n, points = entry.get("n_params"), entry.get("points")
-        if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+        if entry.get("source") not in SOURCES:
+            _fail(f"{name}: source must be one of {SOURCES}")
+        for key in ("stan_sha256", "data_sha256"):
+            if not isinstance(entry.get(key), str) or not _HEX.fullmatch(entry[key]):
+                _fail(f"{name}: {key} is not a sha256 digest")
+        if entry["source"] == "fixed":
+            if not isinstance(entry.get("reason"), str) or not entry["reason"]:
+                _fail(f"{name}: a fixed entry needs a reason")
+            if "points" in entry or "iterations" in entry:
+                _fail(f"{name}: a fixed entry has no points")
+            if "gradients" in entry:
+                _check_statistics(name, entry)
+            continue
+        n, points, iterations = entry.get("n_params"), entry.get("points"), entry.get("iterations")
+        if not _count(n) or n < 1:
             _fail(f"{name}: n_params must be a positive integer")
         if not isinstance(points, list) or len(points) != count:
             _fail(f"{name}: expected {count} points")
@@ -82,12 +108,11 @@ def _validate(doc):
                     or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
                                and math.isfinite(v) for v in point)):
                 _fail(f"{name}: point {k} is not {n} finite numbers")
-    for name, entry in fallbacks.items():
-        if name in models:
-            _fail(f"{name}: listed as both prior and fallback")
-        if not isinstance(entry.get("reason"), str) or not entry["reason"]:
-            _fail(f"{name}: fallback needs a reason")
-        _check_hashes(name, entry)
+        if (not isinstance(iterations, list) or len(iterations) != count
+                or not all(_count(i) and i < total for i in iterations)
+                or iterations != sorted(iterations)):
+            _fail(f"{name}: iterations must be {count} increasing indices below {total}")
+        _check_statistics(name, entry)
     return doc
 
 
@@ -108,19 +133,21 @@ def load(path):
         return _validate(json.loads(stream.read()))
 
 
-def points_for(doc, name, stan_sha256, data_sha256, source_text=None):
-    """Vectors for a prior-point model, None for a fixed-point model.
-
-    A model with a recorded entry whose stan or data hash differs raises; so
-    does a prior-only model with no entry.
-    """
-    entry = doc["models"].get(name) or doc["fallbacks"].get(name)
+def entry_for(doc, name, stan_sha256, data_sha256):
+    """The model's entry, after checking that its stan and data hashes still match."""
+    entry = doc["models"].get(name)
     if entry is None:
-        if source_text is not None and prior_only_model(source_text):
-            _fail(f"{name}: declares prior_only but has no entry; regenerate with tools/gen_benchmark_points.py")
-        return None
+        _fail(f"{name}: no entry; regenerate with tools/gen_benchmark_points.py")
     if entry["stan_sha256"] != stan_sha256:
         _fail(f"{name}: stan source changed since the points were generated")
     if entry["data_sha256"] != data_sha256:
         _fail(f"{name}: data changed since the points were generated")
-    return entry["points"] if name in doc["models"] else None
+    return entry
+
+
+def points_of(entry):
+    return entry["points"] if entry["source"] == "reference_run" else None
+
+
+def gradient_count(entry):
+    return entry["gradients"]["total"] if entry["source"] == "reference_run" else DEFAULT_GRADIENTS

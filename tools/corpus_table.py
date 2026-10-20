@@ -16,11 +16,13 @@ Prints markdown to stdout; the appendix is edited by hand around it.
 
 --catalog requires the current full-corpus v5 or v6 summary, raw model records and
 manifest under output/corpus-performance; it never substitutes historical measurements.
-Its setup-plus-5,000-gradients estimate is a fixed-work proxy, not measured sampling.
-Gradient times are means over the recorded evaluation points; a v6 run also records whether
-each model used the fixed points or draws from its own prior. The records keep per-point
-timings and scaled errors, not density or gradient values; the run enforced the gate.
-The run is validated against its recorded 20,000-gradient budget.
+Its total-sampling estimate is setup plus a gradient count times the mean gradient time,
+not measured sampling. A v6 run takes each model's count from a Stanli reference run
+(1,000 warmup and 1,000 draws) and times the gradient at ten points of that run; a model
+whose reference run failed uses the fixed points and 5,000 gradients. A v5 run uses the
+fixed points and 5,000 gradients for every model. Gradient times are means over the
+recorded evaluation points. The records keep per-point timings and scaled errors, not
+density or gradient values; the run enforced the gate.
 
 --gradients INPUT.tsv renders only the fixed-point gradient comparison.
 
@@ -325,13 +327,14 @@ CATALOG_SUMMARY = CATALOG_ROOT / "output/corpus-performance/benchmark-summary.ts
 CATALOG_RECORDS = CATALOG_ROOT / "output/corpus-performance/model-results.json.gz"
 CATALOG_MANIFEST = CATALOG_ROOT / "output/corpus-performance/benchmark-manifest.json"
 VECTORIZED_ROOT = CATALOG_ROOT / "output/corpus-performance-vectorized"
-CATALOG_GRADIENT_BUDGET = 5000
+FIXED_GRADIENT_COUNT = 5000
+LEGACY_GRADIENT_BUDGET = 20000
 GRADIENT_FIELDS = ("stanli_ns_grad", "stanli_ns_grad_mad", "cmdstan_ns_grad",
                    "cmdstan_ns_grad_mad", "paired_speedup", "paired_speedup_mad")
 CACHE_FIELDS = ("cached", "cache_key", "cache_run_id")
 PROTOCOLS = ("stanli-corpus-v5", "stanli-corpus-v6")
-POINT_SOURCES = ("fixed", "prior")
-PRIOR_MARK = "†"
+POINT_SOURCES = ("fixed", "reference_run")
+FALLBACK_MARK = "†"
 SETUP_PHASES = {"stanli_compile": "stanli-mir", "cmdstan_stanc": "stanc-cpp",
                 "cmdstan_build": "cmdstan-build"}
 
@@ -362,22 +365,29 @@ def _catalog_agrees(model, field, actual, expected):
         raise ValueError(f"Benchmark artifacts disagree: {model} {field}")
 
 
+def _is_digest(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
 def _point_source(model, protocol, manifest_input, record, row):
-    """The recorded point source, which the manifest, raw record and summary row must agree on."""
-    keys = ("point_source", "points_sha256")
+    """The recorded gradient count, which the manifest, raw record and summary row must agree on."""
+    keys = ("point_source", "points_sha256", "gradient_count", "reference_sha256")
     if protocol == "stanli-corpus-v5":
         if any(key in source for source in (manifest_input, record["inputs"], row) for key in keys):
             raise ValueError(f"v5 runs have no point source: {model}")
-        return "fixed"
-    source = manifest_input.get("point_source")
-    digest = manifest_input.get("points_sha256")
-    if (source not in POINT_SOURCES
-            or record["inputs"].get("point_source") != source or row.get("point_source") != source
-            or (source == "prior") != (digest is not None)
-            or (digest is not None and (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)))
-            or record["inputs"].get("points_sha256") != digest):
+        return FIXED_GRADIENT_COUNT
+    source, count = manifest_input.get("point_source"), manifest_input.get("gradient_count")
+    inputs = record["inputs"]
+    if (source not in POINT_SOURCES or type(count) is not int or count < 1
+            or (source == "fixed" and count != FIXED_GRADIENT_COUNT)
+            or not _is_digest(manifest_input.get("reference_sha256"))
+            or (source == "reference_run") != ("points_sha256" in manifest_input)
+            or ("points_sha256" in manifest_input and not _is_digest(manifest_input["points_sha256"]))
+            or row.get("point_source") != source or row.get("gradient_count") != str(count)
+            or any(inputs.get(key) != manifest_input.get(key)
+                   for key in ("point_source", "gradient_count", "reference_sha256", "points_sha256"))):
         raise ValueError(f"Invalid or inconsistent point source: {model}")
-    return source
+    return count
 
 
 def _catalog_cell(value):
@@ -387,13 +397,16 @@ def _catalog_cell(value):
 def _catalog_config(manifest, allow_filter=False):
     identity = manifest["identity"]
     config = identity["config"]
+    legacy = identity.get("protocol") == "stanli-corpus-v5"
     if (not manifest.get("run_id")
             or identity.get("protocol") not in PROTOCOLS
             or config.get("corpus") != "all" or (config.get("filter") and not allow_filter)
             or type(config.get("rounds")) is not int or config["rounds"] <= 0
-            or type(config.get("gradient_budget")) is not int or config["gradient_budget"] != 20000
+            or ("gradient_budget" in config) != legacy
+            or (legacy and (type(config["gradient_budget"]) is not int
+                            or config["gradient_budget"] != LEGACY_GRADIENT_BUDGET))
             or any(key in config for key in ("sampling", "seeds", "iter_sampling", "iter_warmup", "run"))):
-        raise ValueError("Catalog requires an unfiltered v5 or v6 setup/gradient run with budget 20000")
+        raise ValueError("Catalog requires an unfiltered v5 or v6 setup/gradient run")
     for key in ("warmup_ms", "measure_ms"):
         value = config.get(key)
         if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
@@ -485,7 +498,7 @@ def _catalog_pairs(model, record, row, config):
     return values
 
 
-def _catalog_setup(model, record, row, config, gradients):
+def _catalog_setup(model, record, row, config, gradients, count):
     """Each setup cell requires a successful event; estimates require all terms."""
     setup = record.get("setup", {})
     if not isinstance(setup, dict) or set(setup) - set(SETUP_PHASES):
@@ -517,12 +530,13 @@ def _catalog_setup(model, record, row, config, gradients):
     values["stanli_prep_s"] = _catalog_number(row, "stanli_prep_s")
     _catalog_agrees(model, "stanli_prep_s", values["stanli_prep_s"],
                     statistics.median(preparations) if len(preparations) == config["rounds"] else None)
-    if _catalog_number(row, "gradient_budget") != config["gradient_budget"]:
+    legacy = "gradient_budget" in config
+    if legacy and _catalog_number(row, "gradient_budget") != config["gradient_budget"]:
         raise ValueError(f"Gradient budget differs: {model}")
     for engine, keys in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
                          ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
         components = [values[key] for key in keys] + [gradients[engine + "_ns_grad"]]
-        expected = (components[0] + components[1] + config["gradient_budget"] * components[2] / 1e9
+        expected = (components[0] + components[1] + (config["gradient_budget"] if legacy else count) * components[2] / 1e9
                     if all(value is not None for value in components) else None)
         field = engine + "_estimated_s"
         values[field] = _catalog_number(row, field)
@@ -560,9 +574,9 @@ def validated_catalog(summary_path, records_path, manifest_path, allow_filter=Fa
         if (record.get("status") not in ("ok", "failed", "censored") or "sampling" in record
                 or any(key in row for key in ("stanli_sample_s", "cmdstan_sample_s"))):
             raise ValueError(f"Invalid gradient/setup record: {model}")
-        _point_source(model, manifest["identity"]["protocol"], inputs[model], record, row)
+        count = _point_source(model, manifest["identity"]["protocol"], inputs[model], record, row)
         gradients = _catalog_pairs(model, record, row, config)
-        _catalog_setup(model, record, row, config, gradients)
+        _catalog_setup(model, record, row, config, gradients, count)
     return rows, manifest, details
 
 
@@ -605,13 +619,14 @@ def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
     for row in (*complete, *incomplete_rows):
         speedup = _catalog_number(row, speedup_field)
         name = _catalog_model(row["model"])
-        if row.get("point_source") == "prior":
-            name += f" {PRIOR_MARK}"
+        if row.get("point_source") == "fixed":
+            name += f" {FALLBACK_MARK}"
         cells = [name, f"{speedup:.3g}x" if speedup is not None else "—"]
         for engine, fields in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
                                ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
             components = [_catalog_number(row, field) for field in (*fields, engine + "_ns_grad")]
-            estimate = (components[0] + components[1] + CATALOG_GRADIENT_BUDGET * components[2] / 1e9
+            count = int(row.get("gradient_count") or FIXED_GRADIENT_COUNT)
+            estimate = (components[0] + components[1] + count * components[2] / 1e9
                         if all(value is not None for value in components) else None)
             cells.append(f"{estimate:.3g}" if estimate is not None else "—")
         record = details[row["model"]]
@@ -620,13 +635,20 @@ def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
         else:
             cells.append(_catalog_notes(row, record))
             incomplete.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
-    output.extend([
-        "", f"Total sampling is an estimate: each engine's measured setup time + {CATALOG_GRADIENT_BUDGET:,} × "
-        f"its warm gradient time, averaged over {points} evaluation points. Full sampling is not run.",
-    ])
-    priors = sum(1 for row in rows if row.get("point_source") == "prior")
-    if priors:
-        output.extend(["", f"{PRIOR_MARK} Timed at {points} draws from the model's prior instead of the fixed points."])
+    referenced = any(row.get("point_source") == "reference_run" for row in rows)
+    if referenced:
+        output.extend([
+            "", "Total sampling is an estimate: each engine's measured setup time + the number of gradients "
+            "a 1,000 warmup + 1,000 draw run takes (measured once per model) × its warm gradient time, "
+            f"averaged over {points} points of that run. The same gradient count is used for both engines. "
+            "Full sampling is not run."])
+        if any(row.get("point_source") == "fixed" for row in rows):
+            output.extend(["", f"{FALLBACK_MARK} The reference run did not finish, so this model uses "
+                               f"{FIXED_GRADIENT_COUNT:,} gradients at the fixed points."])
+    else:
+        output.extend([
+            "", f"Total sampling is an estimate: each engine's measured setup time + {FIXED_GRADIENT_COUNT:,} × "
+            f"its warm gradient time, averaged over {points} evaluation points. Full sampling is not run."])
     if incomplete:
         output.extend(["", "**Incomplete results**", "",
                        "Missing measurements are —; available timings are retained.", "",
@@ -743,7 +765,7 @@ def combined_vectorized_rows(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
             status, note = details[model]["status"], source.get("note", "")
         merged = dict(model=model, run_id=sources[model], note=note,
                       **{key: row.get(key, "") for key in ("stanli_compile_s", "stanli_prep_s",
-                                                           "stanli_ns_grad", "point_source")},
+                                                           "stanli_ns_grad", "point_source", "gradient_count")},
                       **{key: source.get(key, "") for key in ("cmdstan_stanc_s", "cmdstan_build_s",
                                                               "cmdstan_ns_grad")})
         if status == "ok":
@@ -779,7 +801,7 @@ def render_gradient_catalog(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
 
 
 def require_historical_tsv(col):
-    if "gradient_budget" in col.columns:
+    if "gradient_budget" in col.columns or "gradient_count" in col.columns:
         raise SystemExit("Current TSVs require raw evidence validation: publish with "
                          "tools/publish_corpus_bench.py, then use tools/corpus_table.py --catalog "
                          "(or --vectorized-catalog). Plain TSV mode is historical only.")
