@@ -163,6 +163,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="stanli-validate-") as temporary:
         workdir = (args.workdir or pathlib.Path(temporary)).absolute()
         all_cases = corpus_cases(args.pdb, "all")
+        (workdir / "data").mkdir(parents=True, exist_ok=True)
         cases = {name: (all_cases[name].source, materialize_data(all_cases[name], workdir / "data"))
                  for name in models}
         results = validate(models, cases, document, gradient_times(args.summary), args.lib.absolute(),
