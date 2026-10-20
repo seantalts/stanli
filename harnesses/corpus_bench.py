@@ -257,8 +257,7 @@ def kept_points(pair):
 
 
 def check_pair(pair):
-    kept, dropped = [], []
-    worst = 0
+    kept, dropped, errors, width = [], [], [], None
     for a, b in zip(pair["stanli"]["points"], pair["cmdstan"]["points"]):
         k = a["point"]
         if not a["finite"] and not b["finite"]:
@@ -273,10 +272,18 @@ def check_pair(pair):
         if error > 1e-9:
             raise PhaseFailure(f"point {k}: density/gradient mismatch: scaled error {error:.3g}")
         kept.append(k)
-        worst = max(worst, error)
+        errors.append(error)
+        width = len(a["values"])
     if not kept:
         raise PhaseFailure("no point is finite in both engines")
-    return dict(kept_points=kept, dropped_points=dropped, max_scaled_error=worst)
+    return dict(kept_points=kept, dropped_points=dropped, scaled_errors=errors,
+                max_scaled_error=max(errors), width=width)
+
+
+def strip_values(pair):
+    for engine in ("stanli", "cmdstan"):
+        for point in pair[engine]["points"]:
+            point.pop("values", None)
 
 
 def mean_ns(result, kept):
@@ -636,6 +643,7 @@ def measure_model(name, stan, data, directory, manifest, runner, args, build=Non
                                              args.points)
                 pair[engine]["event"] = event["id"]
             checked = check_pair(pair)
+            strip_values(pair)
             record["gradients"].append(dict(pair, order=list(order), **checked))
         if any(g["kept_points"] != record["gradients"][0]["kept_points"] for g in record["gradients"]):
             raise PhaseFailure("points differ between rounds")
@@ -643,7 +651,7 @@ def measure_model(name, stan, data, directory, manifest, runner, args, build=Non
         row.update(summarize_pairs(record["gradients"]))
         row["points_kept"] = len(first["kept_points"])
         row["points_dropped"] = len(first["dropped_points"])
-        row["params"] = len(first["stanli"]["points"][first["kept_points"][0]]["values"]) - 1
+        row["params"] = first["width"] - 1
         # Binding existing MIR excludes the separately measured source compiler.
         for i in range(args.rounds):
             event = runner.require(f"{name}/prepare/{i}",
