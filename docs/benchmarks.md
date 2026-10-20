@@ -1098,3 +1098,11 @@ Collect six alternating baseline/candidate pairs in fresh processes with
 nothing else running, keep raw samples, hashes and build settings, and check
 numerical parity separately. These focused runs do not replace the corpus run
 or change its published tables.
+
+---
+
+<sub>On macOS, CmdStan's makefile links TBB's malloc replacement
+(`tbbmalloc_proxy`) into every model. The benchmark's CmdStan driver links
+only `tbb`, as CmdStan does on Linux, and that makes CmdStan faster than a
+default Mac build on allocation-heavy models. In a spot check the default build
+was 1.7x slower on `ch12_m12_4` and 1.5x slower on `gpcm_latent_reg_irt`.</sub>
