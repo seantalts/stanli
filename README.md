@@ -63,12 +63,12 @@ same example in their language.
 
 ## What is verified, and how fast
 
-- Speed. In the <!--gen:benchmark_date-->2026-10-19<!--/gen--> native run,
-  <!--gen:corpus_n_grad-->337<!--/gen--> of
+- Speed. In the <!--gen:benchmark_date-->2026-10-20<!--/gen--> native run,
+  <!--gen:corpus_n_grad-->336<!--/gen--> of
   <!--gen:benchmark_models-->343<!--/gen--> models produced paired gradient
   measurements. The median gradient is
-  <!--gen:corpus_median-->2.14x<!--/gen--> faster than CmdStan's, and
-  <!--gen:corpus_at_par-->321<!--/gen--> models are at least as fast.
+  <!--gen:corpus_median-->2.20x<!--/gen--> faster than CmdStan's, and
+  <!--gen:corpus_at_par-->324<!--/gen--> models are at least as fast.
   Failed or capped runs stay in the [full benchmark](docs/benchmarks.md).
 - Model coverage. <!--gen:corpus_reference_models-->353<!--/gen--> models
   share one three-point CmdStan reference replay. Within the posteriordb

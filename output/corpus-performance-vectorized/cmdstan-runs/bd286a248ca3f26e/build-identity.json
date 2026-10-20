@@ -1,10 +1,10 @@
 {
-  "runtime_base": "dc795df9ef0c6643fe1a423e2ade4c9be1574437",
+  "runtime_base": "078563476b08f3a92677ed63a5c7b24639fc9f9a",
   "files": {
-    "build-rel/bench_grad": "f1e5f3714259d25bd23a7eef21445e1f1e3bc6abef8a54bb0676904ce8a29398",
-    "build-rel/stanli_run": "304e40af7f05f6f96e41437bf088c41b6a7b2fa08e40d660bac2e742a7605a31",
-    "build-rel/stanli_check": "73b7991eeadb62ab41694883ad126ee6a8e5c4cc427b24fe1e2b26da9539a682",
-    "build-rel/CMakeCache.txt": "881dd299db7ad84e0988b5564cb19da453b5b75564cdfa703c0a1d6a4584962a",
+    "build-rel/CMakeCache.txt": "ae4cfda80238c5655caf0cbd18225547b9e76d30ed1805b10adb137a05dddb9c",
+    "build-rel/bench_grad": "29ad889e18b666d6a8b8ac0eba69152e8a3f5ebc0090d2fb42def34b94973f19",
+    "build-rel/stanli_check": "e7bfbd5c4ab0daf658c77bfdf597dbce9ed26a6b07e2f809f3c48f468c6d8883",
+    "build-rel/stanli_run": "5659caf3d1564327eaa66b4df338d296f799fb4cf4a855a19e2127ad26c8c943",
     "deps/stanc3/stanc": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
     "deps/stanc3/stanc_embed.o": "d98c403a4af46b32b8362831e89e11d41ff07ab6d51f07844820bfaab544a8ed",
     "deps/stanc3/stanc_embed.o.stamp": "5e16815a2a878fa44d03c1e87734f63520a07c14bfed58cfba050495faa0556f",
@@ -13,7 +13,6 @@
   },
   "configuration": [
     "CMAKE_BUILD_TYPE:STRING=Release",
-    "CMAKE_CXX_COMPILER:STRING=/usr/bin/clang++",
     "CMAKE_CXX_FLAGS:STRING=",
     "CMAKE_CXX_FLAGS_DEBUG:STRING=-g",
     "CMAKE_CXX_FLAGS_MINSIZEREL:STRING=-Os -DNDEBUG",
@@ -30,9 +29,9 @@
     "STANLI_PORTABLE_COMPILER:FILEPATH=",
     "STANLI_SANITIZE:STRING=",
     "STANLI_SHARED_TEST_RUNTIME:BOOL=ON",
-    "STANLI_STANC_EMBED_OBJ:FILEPATH=/Users/xitrium/claud/stanrt/deps/stanc3/stanc_embed.o",
-    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/claud/stanrt/.worktrees/release-0.21.0/deps/stanc3/stanc",
-    "STANLI_STAN_DENSITY_ORACLE:BOOL=ON",
+    "STANLI_STANC_EMBED_OBJ:FILEPATH=",
+    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/stanc3/stanc",
+    "STANLI_STAN_DENSITY_ORACLE:BOOL=OFF",
     "STANLI_THREADS:BOOL=ON",
     "STANLI_WASM_SIDE:BOOL=OFF"
   ],

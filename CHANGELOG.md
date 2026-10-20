@@ -9,8 +9,8 @@
 - Total sampling in the benchmark tables is setup plus 5,000 gradients
   instead of 2,000.
 - Benchmark gradient times are now the mean over 10 evaluation points
-  instead of one. The published tables show the single-point runs until
-  the next sweep.
+  instead of one, and the tables are rerun that way. Three models that
+  passed at the old point fail the numerical check at a new one.
 
 ## 0.22.2
 

@@ -1,23 +1,24 @@
 {
   "identity": {
     "config": {
-      "bench": "/Users/xitrium/claud/stanrt/.worktrees/release-0.22.0/build-rel/bench_grad",
+      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/build-rel/bench_grad",
       "build_timeout": 900.0,
-      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/release-0.22.0/deps/cmdstan",
+      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/cmdstan",
       "corpus": "all",
       "filter": "",
       "gradient_budget": 20000,
       "gradient_timeout": 60.0,
-      "measure_ms": 250,
-      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/release-0.22.0/deps/posteriordb",
+      "measure_ms": 40,
+      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/posteriordb",
+      "points": 10,
       "rounds": 6,
-      "stanc": "/Users/xitrium/claud/stanrt/.worktrees/release-0.22.0/deps/stanc3/stanc",
+      "stanc": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/stanc3/stanc",
       "stancflags": "",
-      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/release-0.22.0/deps/stanc3/stanli-vectorize-probe",
-      "warmup_ms": 200
+      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/stanc3/stanli-vectorize-probe",
+      "warmup_ms": 20
     },
     "executables": {
-      "bench": "f0ee3df371c81c30d394fc1b5512e5c46571e819f61f40b4f6bd730a39071035",
+      "bench": "29ad889e18b666d6a8b8ac0eba69152e8a3f5ebc0090d2fb42def34b94973f19",
       "stanc": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
       "vectorize_probe": "8e6d3f59ee9965ad281392ffee716557090330622849dd93eed47444333a3068"
     },
@@ -1744,18 +1745,18 @@
       "platform": "macOS-26.6.2-arm64-arm-64bit",
       "processor": "arm"
     },
-    "protocol": "stanli-corpus-v4",
+    "protocol": "stanli-corpus-v5",
     "sources": {
-      "harnesses/corpus_bench.py": "5d66df0eb5e8abee782d42337879df8869b0ec8a4ebd0d7cdc585806429cc5af",
-      "tools/bench_cmdstan_grad.cpp": "e377628e54d3783d0a3a4c1ed73fe1f0c5c015d19a65e8e58cb4ab2b2f361fdf",
-      "tools/bench_grad.cpp": "89bf77efb710113e9260e7b1538f0fb700b5c32d15a9e9e620bbbbd80be698da",
-      "tools/benchmark_timer.hpp": "96846e97f74cec6b7334c543d53355ddba1254e4b891aa5507cb4458f5b1c57b",
+      "harnesses/corpus_bench.py": "622e871eb08c7c9f640cbd7a42323c50943e1663d63a40a7b18fb4a31a27117b",
+      "tools/bench_cmdstan_grad.cpp": "f314ca5ee0f9bc4d46b4f4c1871e0a85c874bc9b594e9408841e6ad599845176",
+      "tools/bench_grad.cpp": "528c488c9bd03327e320804d935f622267c4e2adf0eebb43bcd8361de20c4a10",
+      "tools/benchmark_timer.hpp": "f15df64d5501110e7e8e65e926a454e1107c50ecfe403bc4df7d2dad39fa0dba",
       "tools/cmdstan_ref.py": "7d61e5a95f5b3ee3fe38f8360c29dcc216363711b55a30f7b52b4deb86c163c4",
       "tools/corpus_inventory.py": "61653eb2071d0b792e3f2e7e99b22038cef724ad254b3adc1f9fcbfcd68a46bf",
       "tools/verify_refs.py": "96ad2334b6547e4706be8e3d1a52fe9e985007b8c6974df3a5be98fde9ccf1c4"
     },
     "stanli_source": {
-      "head": "df943024313f873ee00e9a9e191e4129c2250274",
+      "head": "078563476b08f3a92677ed63a5c7b24639fc9f9a",
       "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "threads": {
@@ -1811,6 +1812,6 @@
       }
     }
   },
-  "run_id": "25ec9a23201be97b",
-  "started_utc": "2026-10-19T23:54:31Z"
+  "run_id": "ebc312444363220e",
+  "started_utc": "2026-10-20T03:35:00Z"
 }

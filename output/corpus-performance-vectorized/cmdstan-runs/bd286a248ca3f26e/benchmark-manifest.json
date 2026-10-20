@@ -1,23 +1,24 @@
 {
   "identity": {
     "config": {
-      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/build-rel/bench_grad",
+      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/build-rel/bench_grad",
       "build_timeout": 900.0,
-      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/cmdstan",
+      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/cmdstan",
       "corpus": "all",
       "filter": "",
       "gradient_budget": 20000,
       "gradient_timeout": 60.0,
-      "measure_ms": 250,
-      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/posteriordb",
+      "measure_ms": 40,
+      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/posteriordb",
+      "points": 10,
       "rounds": 6,
       "stanc": "/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src/_build/default/src/stanc/stanc.exe",
       "stancflags": "--O1",
-      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-main/deps/stanc3/stanli-vectorize-probe",
-      "warmup_ms": 200
+      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/stanc3/stanli-vectorize-probe",
+      "warmup_ms": 20
     },
     "executables": {
-      "bench": "dbf56546c47a47d527e6c07845d3ba43f46c7aa7ee26a7295edb9b2ea79c4ee0",
+      "bench": "29ad889e18b666d6a8b8ac0eba69152e8a3f5ebc0090d2fb42def34b94973f19",
       "stanc": "359c905c882a4263811b17636817ce349f0b8c743a07769e5348e389dc81173c",
       "vectorize_probe": "8e6d3f59ee9965ad281392ffee716557090330622849dd93eed47444333a3068"
     },
@@ -635,6 +636,11 @@
       "ctsem_ctsm": {
         "collection": "ctsem",
         "data": "24daa78a42c818eff28a686f013e785eda5e42030e026d35142c831bb6092735",
+        "stan": "b148f5b3f129f981e7a3bfbd966e825c28fbc7314d14e2896d18c7c6bc1b01d2"
+      },
+      "ctsem_ctsm_400": {
+        "collection": "ctsem",
+        "data": "0296a568dd2cfbc37814f63799468c902177a9794cdec8fba0f3b1dbb318c365",
         "stan": "b148f5b3f129f981e7a3bfbd966e825c28fbc7314d14e2896d18c7c6bc1b01d2"
       },
       "diamonds": {
@@ -1734,23 +1740,23 @@
       }
     },
     "machine": {
-      "host": "Seans-Mac-Studio.local",
+      "host": "SeansMacStudio",
       "logical_cpus": 32,
       "platform": "macOS-26.6.2-arm64-arm-64bit",
       "processor": "arm"
     },
-    "protocol": "stanli-corpus-v4",
+    "protocol": "stanli-corpus-v5",
     "sources": {
-      "harnesses/corpus_bench.py": "aa0dca35696d4d66ec66586490874b7d29725e9a23481e26a26193d058153e9f",
-      "tools/bench_cmdstan_grad.cpp": "e377628e54d3783d0a3a4c1ed73fe1f0c5c015d19a65e8e58cb4ab2b2f361fdf",
-      "tools/bench_grad.cpp": "e2b915b6a7c690f06c96786aed1a82e05d79f956697fc21d46bcf8bace4201b2",
-      "tools/benchmark_timer.hpp": "96846e97f74cec6b7334c543d53355ddba1254e4b891aa5507cb4458f5b1c57b",
+      "harnesses/corpus_bench.py": "622e871eb08c7c9f640cbd7a42323c50943e1663d63a40a7b18fb4a31a27117b",
+      "tools/bench_cmdstan_grad.cpp": "f314ca5ee0f9bc4d46b4f4c1871e0a85c874bc9b594e9408841e6ad599845176",
+      "tools/bench_grad.cpp": "528c488c9bd03327e320804d935f622267c4e2adf0eebb43bcd8361de20c4a10",
+      "tools/benchmark_timer.hpp": "f15df64d5501110e7e8e65e926a454e1107c50ecfe403bc4df7d2dad39fa0dba",
       "tools/cmdstan_ref.py": "7d61e5a95f5b3ee3fe38f8360c29dcc216363711b55a30f7b52b4deb86c163c4",
       "tools/corpus_inventory.py": "61653eb2071d0b792e3f2e7e99b22038cef724ad254b3adc1f9fcbfcd68a46bf",
-      "tools/verify_refs.py": "249aac6abd414fa76e6a600cffd421394e6b07c97dbfc4358dee483bebf12d8b"
+      "tools/verify_refs.py": "96ad2334b6547e4706be8e3d1a52fe9e985007b8c6974df3a5be98fde9ccf1c4"
     },
     "stanli_source": {
-      "head": "84e607961fdaff7efe9910eea5247a35ac9edfe4",
+      "head": "078563476b08f3a92677ed63a5c7b24639fc9f9a",
       "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "threads": {
@@ -1798,7 +1804,7 @@
       },
       "stanli_math": {
         "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
-        "tracked_diff_sha256": "c275d2e64906811660bf407bfc02e8f77dfb31c38234f699b0e382aca66125e0"
+        "tracked_diff_sha256": "a46ab8328d3da9cfaa9b5787dc73261f9f96d46bf6a935d1af1e1aed6a8040eb"
       },
       "stanli_stan": {
         "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
@@ -1806,6 +1812,6 @@
       }
     }
   },
-  "run_id": "8ab8978d93458c88",
-  "started_utc": "2026-10-10T11:33:04Z"
+  "run_id": "bd286a248ca3f26e",
+  "started_utc": "2026-10-20T04:44:03Z"
 }
