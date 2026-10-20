@@ -568,7 +568,7 @@ class CachedSetupCatalogTests(unittest.TestCase):
         intro = rendered.split("| Model")[0]
         self.assertIn("CmdStan stanc and build times for 1 of 2 models were reused from the build cache", intro)
         self.assertIn("1.42x", rendered)
-        self.assertIn("| 0.121 | 2.2 |", rendered)
+        self.assertIn("| 0.122 | 2.2 |", rendered)
 
     def test_intro_is_unchanged_when_nothing_was_reused(self):
         self.assertNotIn("build cache", self.render())

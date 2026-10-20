@@ -529,13 +529,13 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.rows[0].update(values)
         self.records[0]["row"].update(values)
 
-    def test_proxy_uses_all_setup_terms_and_two_thousand_gradients(self):
+    def test_proxy_uses_all_setup_terms_and_five_thousand_gradients(self):
         rendered = self.render()
         self.assertIn("1.42x", rendered)
         self.assertNotIn("| 2x |", rendered)
-        self.assertIn("| 0.121 | 2.2 |", rendered)
+        self.assertIn("| 0.122 | 2.2 |", rendered)
         self.assertIn("Full sampling is not run", rendered)
-        self.assertIn("2,000", rendered)
+        self.assertIn("5,000", rendered)
         complete, incomplete = rendered.split("**Incomplete results**")
         self.assertIn("`good`", complete)
         self.assertNotIn("`failed`", complete)
@@ -590,7 +590,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.update_row(cmdstan_build_s="", cmdstan_estimated_s="", note="ordinary build failed")
         rendered = self.render()
         self.assertIn("1.42x", rendered)
-        self.assertIn("| 0.121 | — | failed; ordinary build failed", rendered)
+        self.assertIn("| 0.122 | — | failed; ordinary build failed", rendered)
 
     def test_partial_preparation_preserves_gradient_and_reference_estimate(self):
         self.records[0]["status"] = "censored"
@@ -736,7 +736,7 @@ class VectorizedCatalogTests(VectorizedFixture):
     def test_stanli_side_comes_from_default_run_and_cmdstan_side_from_reused_run(self):
         rendered = self.render()
         self.assertIn("| `good` | 4x |", rendered)
-        self.assertIn("| 0.121 | 2.2 |", rendered)
+        self.assertIn("| 0.122 | 2.21 |", rendered)
         self.assertIn("`failed` | — | — | — | failed; gradient build failed", rendered)
         self.assertIn("reused from run `old`", rendered)
         self.assertIn("2026-09-21", rendered)

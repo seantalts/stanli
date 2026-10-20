@@ -16,7 +16,7 @@ Prints markdown to stdout; the appendix is edited by hand around it.
 
 --catalog requires the current full-corpus v4 summary, raw model records and
 manifest under output/corpus-performance; it never substitutes historical measurements.
-Its setup-plus-2,000-gradients estimate is a fixed-work proxy, not measured sampling.
+Its setup-plus-5,000-gradients estimate is a fixed-work proxy, not measured sampling.
 The retained v4 artifacts are still validated against their recorded 20,000-gradient budget.
 
 --gradients INPUT.tsv renders only the fixed-point gradient comparison.
@@ -322,7 +322,7 @@ CATALOG_SUMMARY = CATALOG_ROOT / "output/corpus-performance/benchmark-summary.ts
 CATALOG_RECORDS = CATALOG_ROOT / "output/corpus-performance/model-results.json.gz"
 CATALOG_MANIFEST = CATALOG_ROOT / "output/corpus-performance/benchmark-manifest.json"
 VECTORIZED_ROOT = CATALOG_ROOT / "output/corpus-performance-vectorized"
-CATALOG_GRADIENT_BUDGET = 2000
+CATALOG_GRADIENT_BUDGET = 5000
 GRADIENT_FIELDS = ("stanli_ns_grad", "stanli_ns_grad_mad", "cmdstan_ns_grad",
                    "cmdstan_ns_grad_mad", "paired_speedup", "paired_speedup_mad")
 CACHE_FIELDS = ("cached", "cache_key", "cache_run_id")
