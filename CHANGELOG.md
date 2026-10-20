@@ -7,10 +7,8 @@
 - The benchmark page opens with a short summary, and the measurement
   details move to an appendix after the tables.
 - Benchmark gradient times are now the mean over 10 evaluation points
-  instead of one, and the tables are rerun that way. Three models that
-  passed at the old point fail the numerical check at a new one.
-- The 10 points come from a real Stanli sampling run of each model, and
-  total sampling in the tables is setup plus the number of gradients that run
+  instead of one. The points come from a real Stanli sampling run of each
+  model, and total sampling in the tables is setup plus the number of gradients that run
   took, instead of a fixed 2,000. Models whose run fails keep the fixed points
   and 5,000 gradients, marked †. `tools/gen_benchmark_points.py` makes the
   points file, and `tools/validate_total_estimates.py` compares the estimate
