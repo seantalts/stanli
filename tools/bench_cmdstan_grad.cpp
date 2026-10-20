@@ -21,7 +21,7 @@ int benchmark_main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: bench_cmdstan_grad data.json N|--timed "
-                 "[--warmup-ms N --measure-ms N]\n");
+                 "[--warmup-ms N --measure-ms N --points N]\n");
     return 2;
   }
   const bool timed = std::string(argv[2]) == "--timed";
@@ -35,10 +35,7 @@ int benchmark_main(int argc, char** argv) {
   stan::model::model_base& model = new_model(data, 1, &std::cerr);
 
   const int64_t n = static_cast<int64_t>(model.num_params_r());
-  std::vector<double> q(n), grad(n);
-  for (int64_t i = 0; i < n; ++i)
-    q[i] = 0.1 + 0.05 * static_cast<double>(i % 7) -
-           0.15 * static_cast<double>(i % 3);
+  std::vector<double> q = stanli_benchmark::evaluation_point(0, n), grad(n);
 
   double lp = 0;
   auto one = [&]() {
@@ -56,16 +53,13 @@ int benchmark_main(int argc, char** argv) {
   // depend on which arm happened to run first on a cold core.
   if (timed) {
     const auto opts = stanli_benchmark::options(argc, argv, 3);
-    one();
-    if (!std::isfinite(lp) ||
-        !std::all_of(grad.begin(), grad.end(),
-                     [](double x) { return std::isfinite(x); }))
-      throw std::runtime_error(
-          "benchmark point has non-finite density or gradient");
-    const auto warm = stanli_benchmark::window(one, opts.warmup_ns, 1, true);
-    const auto measured =
-        stanli_benchmark::window(one, opts.measure_ns, warm.batch);
-    stanli_benchmark::output(warm, measured, lp, grad);
+    stanli_benchmark::timed(
+        opts, n, [&](const std::vector<double>& point) { q = point; }, one,
+        [&]() {
+          std::vector<double> out{lp};
+          out.insert(out.end(), grad.begin(), grad.end());
+          return out;
+        });
     return 0;
   }
   stanli_benchmark::window(one, 200'000'000, 1, true);
