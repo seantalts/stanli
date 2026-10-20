@@ -366,49 +366,73 @@ class CmdstanCache:
         self.store, self.context, self.run_id = store, context, run_id
 
     def key(self, stan):
-        return cache_key(self.context, sha(stan))
+        return model_key(self.context, sha(stan))
+
+    def driver_key(self, stan):
+        return driver_key(self.context, sha(stan))
 
 
-def cached_build(name, key, meta, cache):
+def model_key(context, stan_sha256):
+    return cache_key(context["model"], stan_sha256)
+
+
+def driver_key(context, stan_sha256):
+    return cache_key(dict(model_key=model_key(context, stan_sha256), driver=context["driver"]),
+                     stan_sha256)
+
+
+def cached_events(name, key, meta):
     reused = dict(status="ok", returncode=0, cached=True, cache_key=key, cache_run_id=meta["run_id"])
-    entry = cache.store.entry(key)
-    return dict(
-        setup={"cmdstan_stanc": dict(reused, phase=f"{name}/stanc-cpp", elapsed_s=meta["stanc_s"]),
-               "cmdstan_build": dict(reused, phase=f"{name}/cmdstan-build", elapsed_s=meta["build_s"])},
-        gradient=entry / "gradbench", executable=entry / CACHE_STEM,
-        gradient_failure=None, build_failure=None,
-        cache=dict(directory=str(cache.store.root), key=key, hit=True, run_id=meta["run_id"]))
+    return {"cmdstan_stanc": dict(reused, phase=f"{name}/stanc-cpp", elapsed_s=meta["stanc_s"]),
+            "cmdstan_build": dict(reused, phase=f"{name}/cmdstan-build", elapsed_s=meta["build_s"])}
 
 
 class CmdstanJob:
-    """One model's CmdStan build in stages, so a caller can serialize the timed ones."""
+    """One model's CmdStan build in stages, so a caller can serialize the timed ones.
+
+    With a cache the build is two entries: the model (header and ordinary
+    executable) and the gradient driver compiled against that header.
+    """
     def __init__(self, name, stan, work, cache=None):
         self.name, self.stan, self.work, self.cache = name, stan, work, cache
-        self.scratch = None
+        self.scratch = self.driver_scratch = None
+        self.model_meta = self.driver_meta = None
         work.mkdir(parents=True, exist_ok=True)
+        self.build = dict(setup={}, gradient=None, executable=None, gradient_failure=None,
+                          build_failure=None, cache=dict(directory=None, hit=False))
         if cache is None:
             self.directory, self.stem = work, name
-            self.build = dict(setup={}, gradient=None, executable=None, gradient_failure=None,
-                              build_failure=None, cache=dict(directory=None, hit=False))
             (work / f"{name}.stan").write_bytes(stan.read_bytes())
             return
-        self.key = cache.key(stan)
-        meta = cache.store.lookup(self.key)
-        if meta is not None:
-            self.build = cached_build(name, self.key, meta, cache)
-            return
-        self.scratch = self.directory = cache.store.scratch(self.key)
+        self.key, self.driver_key = cache.key(stan), cache.driver_key(stan)
+        self.model_meta = cache.store.lookup(self.key)
+        self.driver_meta = cache.store.lookup(self.driver_key)
         self.stem = CACHE_STEM
-        self.build = dict(setup={}, gradient=None, executable=None, gradient_failure=None,
-                          build_failure=None, cache=dict(directory=str(cache.store.root),
-                                                         key=self.key, hit=False))
-        (self.directory / f"{CACHE_STEM}.stan").write_bytes(stan.read_bytes())
+        entry, driver = cache.store.entry(self.key), cache.store.entry(self.driver_key)
+        info = dict(directory=str(cache.store.root), key=self.key, driver_key=self.driver_key,
+                    hit=self.model_meta is not None and self.driver_meta is not None,
+                    model_hit=self.model_meta is not None, driver_hit=self.driver_meta is not None)
+        if self.model_meta is not None:
+            info["run_id"] = self.model_meta["run_id"]
+            self.build["setup"] = cached_events(name, self.key, self.model_meta)
+            self.build["executable"] = entry / CACHE_STEM
+            self.directory = entry
+        else:
+            self.scratch = self.directory = cache.store.scratch(self.key)
+            (self.directory / f"{CACHE_STEM}.stan").write_bytes(stan.read_bytes())
+        if self.driver_meta is not None:
+            info["driver_run_id"] = self.driver_meta["run_id"]
+            self.build["gradient"] = driver / "gradbench"
+            self.build["driver_build_s"] = self.driver_meta["driver_build_s"]
+        self.build["cache"] = info
 
     @property
     def hit(self):
         return self.build["cache"]["hit"]
 
     def stanc(self, runner, args):
+        if self.model_meta is not None:
+            return
         phase = f"{self.name}/stanc-cpp"
         event = self.build["setup"]["cmdstan_stanc"] = runner.run(
             phase, [args.stanc, f"{self.stem}.stan", f"--o={self.stem}.hpp", *shlex.split(args.stancflags)],
@@ -417,20 +441,29 @@ class CmdstanJob:
             self.build["gradient_failure"] = failure_note(phase, event)
 
     def header_ready(self):
-        return self.build["setup"].get("cmdstan_stanc", {}).get("status") == "ok"
+        return (self.model_meta is not None
+                or self.build["setup"].get("cmdstan_stanc", {}).get("status") == "ok")
 
     def driver(self, runner, args):
+        if self.driver_meta is not None:
+            return
         phase = f"{self.name}/gradient-driver-build"
+        directory = self.directory
+        if self.cache is not None:
+            self.driver_scratch = directory = self.cache.store.scratch(self.driver_key)
+            shutil.copyfile(self.directory / f"{self.stem}.hpp", directory / f"{self.stem}.hpp")
         event = runner.run(phase, driver_command(args.cmdstan.resolve(), f"{self.stem}.hpp",
                                                  REPO / "tools/bench_cmdstan_grad.cpp", "gradbench"),
-                           args.build_timeout, self.directory)
+                           args.build_timeout, directory)
         self.build["driver_build_s"] = event["elapsed_s"]
         if event["status"] == "ok":
-            self.build["gradient"] = self.directory / "gradbench"
+            self.build["gradient"] = directory / "gradbench"
         else:
             self.build["gradient_failure"] = failure_note(phase, event)
 
     def make(self, runner, args):
+        if self.model_meta is not None:
+            return
         phase = f"{self.name}/cmdstan-build"
         executable = self.directory / self.stem
         event = self.build["setup"]["cmdstan_build"] = runner.run(
@@ -442,38 +475,54 @@ class CmdstanJob:
             self.build["build_failure"] = failure_note(phase, event)
 
     def finish(self):
-        """Publish a complete build into the cache; keep an incomplete one in the run."""
+        """Publish complete builds into the cache; keep an incomplete one in the run."""
         build = self.build
-        if self.scratch is None:
+        if self.cache is None:
             return build
-        store, scratch = self.cache.store, self.scratch
+        store = self.cache.store
         try:
             if build["gradient_failure"] or build["build_failure"]:
-                kept = self.work / "cmdstan-build"
-                shutil.rmtree(kept, ignore_errors=True)
-                shutil.move(str(scratch), kept)
-                for field in ("gradient", "executable"):
-                    if build[field]:
-                        build[field] = kept / build[field].name
+                if self.scratch is not None:
+                    kept = self.work / "cmdstan-build"
+                    shutil.rmtree(kept, ignore_errors=True)
+                    shutil.move(str(self.scratch), kept)
+                    if build["executable"]:
+                        build["executable"] = kept / build["executable"].name
+                    if build["gradient"] and self.driver_scratch is not None:
+                        shutil.move(str(self.driver_scratch / "gradbench"), kept / "gradbench")
+                        build["gradient"] = kept / "gradbench"
                 return build
-            setup = build["setup"]
-            files = [f"{CACHE_STEM}.stan", f"{CACHE_STEM}.hpp", "gradbench", CACHE_STEM]
-            meta = dict(files=files, run_id=self.cache.run_id, key=self.key,
-                        created_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                        stanc_s=setup["cmdstan_stanc"]["elapsed_s"], build_s=setup["cmdstan_build"]["elapsed_s"],
-                        driver_build_s=build["driver_build_s"],
-                        driver_sha256=sha(scratch / "gradbench"), executable_sha256=sha(scratch / CACHE_STEM))
-            if not store.commit(scratch, self.key, meta):
-                build["cache"]["raced"] = True
-            entry = store.entry(self.key)
-            build["gradient"], build["executable"] = entry / "gradbench", entry / CACHE_STEM
+            created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            if self.scratch is not None:
+                setup = build["setup"]
+                meta = dict(files=[f"{CACHE_STEM}.stan", f"{CACHE_STEM}.hpp", CACHE_STEM],
+                            run_id=self.cache.run_id, key=self.key, created_utc=created,
+                            stanc_s=setup["cmdstan_stanc"]["elapsed_s"],
+                            build_s=setup["cmdstan_build"]["elapsed_s"],
+                            executable_sha256=sha(self.scratch / CACHE_STEM))
+                if not store.commit(self.scratch, self.key, meta):
+                    build["cache"]["raced"] = True
+                self.scratch = None
+                build["executable"] = store.entry(self.key) / CACHE_STEM
+            if self.driver_scratch is not None:
+                (self.driver_scratch / f"{self.stem}.hpp").unlink()
+                meta = dict(files=["gradbench"], run_id=self.cache.run_id, key=self.driver_key,
+                            model_key=self.key, created_utc=created,
+                            driver_build_s=build["driver_build_s"],
+                            driver_sha256=sha(self.driver_scratch / "gradbench"))
+                if not store.commit(self.driver_scratch, self.driver_key, meta):
+                    build["cache"]["raced"] = True
+                self.driver_scratch = None
+                build["gradient"] = store.entry(self.driver_key) / "gradbench"
             return build
         finally:
-            store.discard(scratch)
+            self.abort()
 
     def abort(self):
-        if self.scratch is not None:
-            self.cache.store.discard(self.scratch)
+        for scratch in (self.scratch, self.driver_scratch):
+            if scratch is not None:
+                self.cache.store.discard(scratch)
+        self.scratch = self.driver_scratch = None
 
 
 def cmdstan_build(name, stan, work, runner, args, cache=None):
@@ -523,8 +572,9 @@ def prebuild(inputs, directory, runner, args, cache=None):
     def report(name):
         build = builds[name]
         failed = build["gradient_failure"] or build["build_failure"]
-        print(f"{name}: cmdstan build {'failed' if failed else 'cached' if build['cache']['hit'] else 'built'}",
-              flush=True)
+        state = ("failed" if failed else "cached" if build["cache"]["hit"] else
+                 "model cached, driver rebuilt" if build["cache"].get("model_hit") else "built")
+        print(f"{name}: cmdstan build {state}", flush=True)
 
     pool = ThreadPoolExecutor(max_workers=args.build_jobs)
     try:
@@ -582,17 +632,24 @@ def make_command(exe, stanc, stancflags):
 
 
 def cache_context(args, expected):
-    """Everything besides the .stan bytes that determines the CmdStan binaries."""
+    """Everything besides the .stan bytes that determines the CmdStan binaries.
+
+    The driver and timer sources and the driver command belong to the driver
+    entry only, so editing them leaves the header and ordinary executable cached.
+    """
     cmdstan = args.cmdstan.resolve()
     sources = expected["sources"]
     return dict(
-        stanc_sha256=expected["executables"]["stanc"], stancflags=args.stancflags,
-        driver_sha256=sources["tools/bench_cmdstan_grad.cpp"],
-        timer_sha256=sources["tools/benchmark_timer.hpp"],
-        toolchains={k: v for k, v in expected["toolchains"].items() if not k.startswith("stanli_")},
-        cmdstan=str(cmdstan),
-        driver_command=list(map(str, driver_command(cmdstan, f"{CACHE_STEM}.hpp", "{driver}", "gradbench"))),
-        make_command=list(map(str, make_command("{exe}", "{stanc}", args.stancflags))))
+        model=dict(
+            stanc_sha256=expected["executables"]["stanc"], stancflags=args.stancflags,
+            toolchains={k: v for k, v in expected["toolchains"].items() if not k.startswith("stanli_")},
+            cmdstan=str(cmdstan),
+            make_command=list(map(str, make_command("{exe}", "{stanc}", args.stancflags)))),
+        driver=dict(
+            driver_sha256=sources["tools/bench_cmdstan_grad.cpp"],
+            timer_sha256=sources["tools/benchmark_timer.hpp"],
+            driver_command=list(map(str, driver_command(cmdstan, f"{CACHE_STEM}.hpp", "{driver}",
+                                                        "gradbench")))))
 
 
 def setup_estimates(row, setup):
@@ -882,7 +939,9 @@ def main(argv=None):
                 started_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), jobs=args.build_jobs,
                 cache_directory=str(args.build_cache) if cache else None,
                 wall_s=time.perf_counter() - started,
-                models={name: dict(hit=build["cache"]["hit"], key=build["cache"].get("key"))
+                models={name: dict(hit=build["cache"]["hit"], key=build["cache"].get("key"),
+                                   model_hit=build["cache"].get("model_hit"),
+                                   driver_hit=build["cache"].get("driver_hit"))
                         for name, build in builds.items()}), allow_nan=False) + "\n")
         for name, (stan, data) in inputs.items():
             if name not in records:
