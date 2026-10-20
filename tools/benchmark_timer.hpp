@@ -8,8 +8,11 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -78,23 +81,94 @@ struct Options {
   int64_t warmup_ns = 20'000'000;
   int64_t measure_ns = 40'000'000;
   int points = 10;
+  std::vector<std::vector<double>> given;
 };
+
+inline std::vector<std::vector<double>> parse_points(const std::string& text) {
+  size_t at = 0;
+  const auto fail = [&](const char* what) {
+    throw std::invalid_argument(std::string("evaluation points: ") + what);
+  };
+  const auto skip = [&] {
+    while (at < text.size() && std::string(" \t\r\n").find(text[at]) !=
+                                   std::string::npos)
+      ++at;
+  };
+  const auto expect = [&](char c) {
+    skip();
+    if (at >= text.size() || text[at] != c)
+      fail("expected a JSON array of arrays of numbers");
+    ++at;
+  };
+  std::vector<std::vector<double>> result;
+  expect('[');
+  skip();
+  while (true) {
+    expect('[');
+    std::vector<double> row;
+    while (true) {
+      skip();
+      const size_t start = at;
+      while (at < text.size() &&
+             std::string("0123456789+-.eE").find(text[at]) != std::string::npos)
+        ++at;
+      if (start == at) fail("expected a number");
+      const std::string token = text.substr(start, at - start);
+      char* end = nullptr;
+      const double value = std::strtod(token.c_str(), &end);
+      if (*end != '\0' || !std::isfinite(value)) fail("not a finite number");
+      row.push_back(value);
+      skip();
+      if (at < text.size() && text[at] == ',') {
+        ++at;
+        continue;
+      }
+      expect(']');
+      break;
+    }
+    if (!result.empty() && row.size() != result.front().size())
+      fail("points have different lengths");
+    result.push_back(std::move(row));
+    skip();
+    if (at < text.size() && text[at] == ',') {
+      ++at;
+      continue;
+    }
+    expect(']');
+    break;
+  }
+  skip();
+  if (at != text.size()) fail("trailing text");
+  return result;
+}
 
 inline Options options(int argc, char** argv, int first) {
   Options result;
+  bool points_given = false;
   for (int i = first; i < argc; i += 2) {
     const std::string flag(argv[i]);
     if (i + 1 >= argc ||
-        (flag != "--warmup-ms" && flag != "--measure-ms" && flag != "--points"))
+        (flag != "--warmup-ms" && flag != "--measure-ms" &&
+         flag != "--points" && flag != "--points-file"))
       throw std::invalid_argument(
-          "expected --warmup-ms N, --measure-ms N or --points N");
+          "expected --warmup-ms N, --measure-ms N, --points N or "
+          "--points-file PATH");
     size_t consumed = 0;
     const std::string value(argv[i + 1]);
+    if (flag == "--points-file") {
+      std::ifstream file(value);
+      if (!file) throw std::invalid_argument("cannot read points file " + value);
+      std::ostringstream text;
+      text << file.rdbuf();
+      result.given = parse_points(text.str());
+      continue;
+    }
     if (flag == "--points") {
       const long points = std::stol(value, &consumed);
       if (consumed != value.size() || points < 1 || points > 1000)
         throw std::invalid_argument("benchmark points must be 1..1000");
       result.points = static_cast<int>(points);
+      points_given = true;
       continue;
     }
     const double ms = std::stod(value, &consumed);
@@ -103,6 +177,14 @@ inline Options options(int argc, char** argv, int first) {
           "benchmark windows must be 1..60000 milliseconds");
     (flag == "--warmup-ms" ? result.warmup_ns : result.measure_ns) =
         static_cast<int64_t>(ms * 1e6);
+  }
+  if (!result.given.empty()) {
+    if (points_given)
+      throw std::invalid_argument(
+          "--points and --points-file are mutually exclusive");
+    if (result.given.size() > 1000)
+      throw std::invalid_argument("benchmark points must be 1..1000");
+    result.points = static_cast<int>(result.given.size());
   }
   return result;
 }
@@ -121,8 +203,13 @@ void timed(const Options& opts, int64_t n, Set&& set, One&& one,
   std::vector<Point> points(static_cast<size_t>(opts.points));
   std::vector<std::vector<double>> q(points.size());
   int first = -1;
+  for (const auto& row : opts.given)
+    if (static_cast<int64_t>(row.size()) != n)
+      throw std::invalid_argument(
+          "evaluation point has " + std::to_string(row.size()) +
+          " values but the model has " + std::to_string(n) + " parameters");
   for (int k = 0; k < opts.points; ++k) {
-    q[k] = evaluation_point(k, n);
+    q[k] = opts.given.empty() ? evaluation_point(k, n) : opts.given[k];
     try {
       set(q[k]);
       one();

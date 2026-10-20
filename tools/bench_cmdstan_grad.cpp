@@ -21,7 +21,7 @@ int benchmark_main(int argc, char** argv) {
   if (argc < 3) {
     std::fprintf(stderr,
                  "usage: bench_cmdstan_grad data.json N|--timed "
-                 "[--warmup-ms N --measure-ms N --points N]\n");
+                 "[--warmup-ms N --measure-ms N --points N | --points-file PATH]\n");
     return 2;
   }
   const bool timed = std::string(argv[2]) == "--timed";

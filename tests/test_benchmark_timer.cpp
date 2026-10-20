@@ -3,6 +3,8 @@
 #endif
 #include "../tools/benchmark_timer.hpp"
 #include <cassert>
+#include <cstdio>
+#include <fstream>
 #include <sstream>
 
 struct FakeClock {
@@ -145,5 +147,82 @@ int main() {
       rejected_points = true;
     }
     assert(rejected_points);
+  }
+  {
+    const auto given = stanli_benchmark::parse_points(
+        " [[0.5, -1e-3, 3],\n [1.7976931348623157e+308, 0, -2.25]] ");
+    assert(given.size() == 2 && given[0].size() == 3);
+    assert(given[0][0] == 0.5 && given[0][1] == -1e-3 && given[0][2] == 3);
+    assert(given[1][0] == 1.7976931348623157e+308 && given[1][2] == -2.25);
+    for (const char* bad :
+         {"", "[]", "[[]]", "[[1,2],[3]]", "[[1,2]", "[[1,x]]", "[[1,2]] 7",
+          "[[1e999]]", "[[nan]]", "[[Infinity]]", "[1,2]"}) {
+      bool rejected_text = false;
+      try {
+        stanli_benchmark::parse_points(bad);
+      } catch (const std::invalid_argument&) {
+        rejected_text = true;
+      }
+      assert(rejected_text);
+    }
+  }
+  {
+    stanli_benchmark::Options options;
+    options.points = 2;
+    options.warmup_ns = 50'000;
+    options.measure_ns = 100'000;
+    options.given = {{0.25, -0.5, 1.0}, {2.0, 2.0, 2.0}};
+    std::vector<std::vector<double>> seen;
+    const auto set = [&](const std::vector<double>& x) { seen.push_back(x); };
+    const auto one = [] { FakeClock::ticks += 100; };
+    const auto values = []() -> std::vector<double> { return {1.0, 2.0}; };
+    std::ostringstream out;
+    stanli_benchmark::timed<FakeClock>(options, 3, set, one, values, out);
+    assert(seen.front() == options.given[0]);
+    assert(count(out.str(), "\"finite\":true") == 2);
+    assert(count(out.str(), "\"point\":") == 2);
+    for (const auto& x : seen)
+      assert(x == options.given[0] || x == options.given[1]);
+    bool narrow_rejected = false;
+    try {
+      stanli_benchmark::timed<FakeClock>(options, 4, set, one, values, out);
+    } catch (const std::invalid_argument&) {
+      narrow_rejected = true;
+    }
+    assert(narrow_rejected);
+  }
+  {
+    const char* path = "benchmark_timer_points.json";
+    {
+      std::ofstream file(path);
+      file << "[[1,2],[3,4],[5,6]]";
+    }
+    char program[] = "driver";
+    char flag[] = "--points-file";
+    char file_name[] = "benchmark_timer_points.json";
+    char* argv[] = {program, flag, file_name};
+    const auto options = stanli_benchmark::options(3, argv, 1);
+    assert(options.points == 3 && options.given.size() == 3);
+    assert(options.given[2][1] == 6);
+    char pts[] = "--points";
+    char two[] = "2";
+    char* both[] = {program, flag, file_name, pts, two};
+    bool exclusive = false;
+    try {
+      stanli_benchmark::options(5, both, 1);
+    } catch (const std::invalid_argument&) {
+      exclusive = true;
+    }
+    assert(exclusive);
+    char missing_name[] = "benchmark_timer_no_such_file.json";
+    char* missing[] = {program, flag, missing_name};
+    bool unreadable = false;
+    try {
+      stanli_benchmark::options(3, missing, 1);
+    } catch (const std::invalid_argument&) {
+      unreadable = true;
+    }
+    assert(unreadable);
+    std::remove(path);
   }
 }
