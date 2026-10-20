@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Docs
+
+- The benchmark page opens with a short summary, and the measurement
+  details move to an appendix after the tables.
+- Total sampling in the benchmark tables is setup plus 5,000 gradients
+  instead of 2,000.
+
 ## 0.22.2
 
 Faster inverse Gaussian cognitive models and refreshed benchmark tables.

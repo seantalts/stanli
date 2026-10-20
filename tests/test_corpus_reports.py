@@ -119,6 +119,15 @@ class CorpusReports(unittest.TestCase):
         rows.append(dict(model='failed', paired_speedup=''))
         self.assertEqual(docs.corpus_stats(rows), (5, 10, 5))
 
+    def test_total_sampling_median_adds_setup_to_the_gradient_budget(self):
+        budget = docs.CATALOG_GRADIENT_BUDGET
+        row = dict(paired_speedup='2', stanli_compile_s='0.5', stanli_prep_s='0.5',
+                   stanli_ns_grad=str(1e9 / budget), cmdstan_stanc_s='1',
+                   cmdstan_build_s='5', cmdstan_ns_grad=str(2e9 / budget))
+        failed = dict(row, paired_speedup='')
+        missing = dict(row, cmdstan_build_s='')
+        self.assertEqual(docs.total_sampling_median([row, failed, missing]), 4)
+
     def test_real_fixture_directory_layouts(self):
         self.assertEqual(report.collection('aalto_bern'), 'educational')
         self.assertEqual(report.collection('ch09_m9_1'), 'rethinking')
