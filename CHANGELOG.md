@@ -8,6 +8,9 @@
   details move to an appendix after the tables.
 - Total sampling in the benchmark tables is setup plus 5,000 gradients
   instead of 2,000.
+- Benchmark gradient times are now the mean over 10 evaluation points
+  instead of one. The published tables show the single-point runs until
+  the next sweep.
 
 ## 0.22.2
 

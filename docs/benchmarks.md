@@ -825,28 +825,37 @@ which.
 
 ## Appendix: how we measure
 
-Both engines evaluate the same model, data and unconstrained parameter vector
+Both engines evaluate the same model, data and unconstrained parameter vectors
 with the sampling log density (`propto=true`) and the Jacobian adjustment.
-Coordinate `i` of the parameter vector is `0.1 + 0.05 * (i % 7) - 0.15 * (i % 3)`.
+There are ten evaluation points. Point 0 has coordinate `i` equal to
+`0.1 + 0.05 * (i % 7) - 0.15 * (i % 3)`. Points 1 to 9 draw each coordinate
+uniformly from (-2, 2) with a fixed integer generator seeded from the point
+and coordinate, so both engines get identical vectors.
 
 ### Gradient time
 
-Each engine builds its model and checks the point outside
-the timed window, warms up for at least 200 ms, then measures batches of
-gradients for at least 250 ms. Each measurement is a fresh process, and only
-one engine runs at a time. Six pairs alternate the order (Stanli first, then
-CmdStan first). The reported speedup is the median of the six within-pair
-CmdStan/Stanli time ratios, so above 1x means Stanli is faster. The artifacts
-keep the median absolute deviation (MAD) of the ratios and of each engine's
-latency; read a small difference with that dispersion. The drivers share
+Each engine builds its model and evaluates every point once outside the
+timed window. It then warms up for at least 20 ms at the first finite point.
+At each finite point it calibrates a batch size, then measures batches of
+gradients for at least 40 ms. A process's gradient time is the mean of its
+per-point times, which is about 0.45 s of measurement per process. Each
+measurement is a fresh process, and only one engine runs at a time. Six pairs
+alternate the order (Stanli first, then CmdStan first). The reported speedup
+is the median of the six within-pair CmdStan/Stanli ratios of those means, so
+above 1x means Stanli is faster. The artifacts keep the median absolute
+deviation (MAD) of the ratios and of each engine's mean latency; read a small
+difference with that dispersion. The drivers share
 [`benchmark_timer.hpp`](../tools/benchmark_timer.hpp).
 
 ### Numerical gate
 
 Every accepted pair must agree on the log density and
-every gradient component within scaled error
-`abs(a-b) / max(abs(a), abs(b), 1) <= 1e-9`. Non-finite values, unequal widths
-and failed commands produce no accepted pair. The independent
+every gradient component at every point within scaled error
+`abs(a-b) / max(abs(a), abs(b), 1) <= 1e-9`. A point that is non-finite in both
+engines is dropped and recorded, and the mean covers the remaining points. A
+point that is non-finite in only one engine, unequal widths and failed commands
+produce no accepted pair, as does a model with no point finite in both engines.
+All six pairs must keep the same points. The independent
 [three-point corpus replay](../TESTING.md#comparison-with-cmdstan-on-complete-models)
 checks correctness separately.
 
@@ -876,7 +885,7 @@ event is marked `cached` with the run that measured it.
 ### Total sampling estimate
 
 Each engine's setup time plus <!--gen:benchmark_gradient_budget-->5,000<!--/gen--> times its
-median warm gradient time. No sampler runs. Adaptation, tree building,
+warm gradient time, the mean over the evaluation points. No sampler runs. Adaptation, tree building,
 generated quantities and CSV output are left out, and a fixed gradient budget
 says nothing about how long each engine needs to reach the same inference
 quality. The run manifests record a 20,000-gradient budget; the tables
@@ -893,7 +902,7 @@ default run's. The CmdStan timings are reused from earlier runs of the same
 CmdStan build and toolchain with the same inputs and settings; models those
 runs lack are timed again. Every Stanli gradient passes the same numerical gate
 against the reused CmdStan gradients. Because the two sides come from separate
-runs, the ratio is CmdStan's median gradient time divided by Stanli's.
+runs, the ratio is CmdStan's mean gradient time divided by Stanli's.
 
 The [compiler provenance](../output/corpus-performance-vectorized/compiler-provenance.json)
 records the pinned source, build commands, tool versions and binary hash. The
@@ -908,8 +917,8 @@ and stock and patched MIR for a scalar normal-likelihood loop are kept with the
 | Item | Configuration |
 | --- | --- |
 | Scope | All 343 application models, `--corpus all` |
-| Gradient trials | Six alternating pairs, 200 ms warmup and 250 ms measurement per process |
-| Displayed workload | Setup + <!--gen:benchmark_gradient_budget-->5,000<!--/gen--> × median warm gradient time |
+| Gradient trials | Six alternating pairs; per process 20 ms warmup, then 40 ms of measurement at each of 10 evaluation points |
+| Displayed workload | Setup + <!--gen:benchmark_gradient_budget-->5,000<!--/gen--> × mean warm gradient time over the points |
 | Stanli build | Release clang++, `-O3 -DNDEBUG`; full runtime, threads enabled, lite mode disabled |
 | Upstream source base | `2c9d67b98b196e800dc051460aaaf653ac811ace`; exact measured checkpoint and hashes in manifests |
 | Default reference compiler | Stock pinned stanc3, no additional flags |
@@ -929,12 +938,12 @@ loop-vectorization sweep with separate output paths:
 ./tools/dev_setup.sh
 cmake --build build-rel --target bench_grad -j 4
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  build/corpus-current/default-v4.tsv --bench build-rel/bench_grad \
-  --corpus all --rounds 6 --warmup-ms 200 --measure-ms 250 \
+  build/corpus-current/default.tsv --bench build-rel/bench_grad \
+  --corpus all --rounds 6 --warmup-ms 20 --measure-ms 40 --points 10 \
   --gradient-timeout 60 --build-timeout 900
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
-  build/corpus-current/vectorized-v4.tsv --bench build-rel/bench_grad \
-  --corpus all --rounds 6 --warmup-ms 200 --measure-ms 250 \
+  build/corpus-current/vectorized.tsv --bench build-rel/bench_grad \
+  --corpus all --rounds 6 --warmup-ms 20 --measure-ms 40 --points 10 \
   --gradient-timeout 60 --build-timeout 900 \
   --stanc build/corpus-current/stanc-o1vec-src/_build/default/src/stanc/stanc.exe \
   --stancflags=--O1
@@ -966,10 +975,10 @@ derived from these records.
 Publish the complete runs, then regenerate the docs and browser catalog:
 
 ```sh
-python3 tools/publish_corpus_bench.py build/corpus-current/default-v4.tsv \
+python3 tools/publish_corpus_bench.py build/corpus-current/default.tsv \
   output/corpus-performance
 V=output/corpus-performance-vectorized
-python3 tools/publish_corpus_bench.py build/corpus-current/vectorized-v4.tsv \
+python3 tools/publish_corpus_bench.py build/corpus-current/vectorized.tsv \
   $V/cmdstan-runs/RUN_ID --compiler-evidence build/corpus-current
 python3 tools/publish_corpus_bench.py --vectorized $V \
   --stanli-run output/corpus-performance \
