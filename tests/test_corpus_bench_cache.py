@@ -239,14 +239,15 @@ class BuildCacheOrchestrationTests(BuildFixture):
 
 class PrebuiltMeasureTests(existing.SetupEstimateTests):
     """Every outcome the inline build produces is the same when the build ran earlier."""
-    def measure(self):
+    def measure(self, points=None):
         work = self.root / "m"
         with mock.patch("harnesses.corpus_bench.compile_cmd", return_value=["c++"]), \
              mock.patch("harnesses.corpus_bench.sha", return_value="test-hash"):
             build = cmdstan_build("m", self.source, work, self.runner, self.args)
             self.prebuild_events = len(self.events)
             return corpus_bench.measure_model("m", self.source, self.data, self.root,
-                                              {"run_id": "test-run"}, self.runner, self.args, build)
+                                              {"run_id": "test-run"}, self.runner, self.args, build,
+                                              points)
 
     def test_source_compile_failure_keeps_event_without_setup_estimate(self):
         self.failures["m/stanli-mir"] = "failed"
@@ -435,7 +436,7 @@ class MainWiringTests(unittest.TestCase):
             source.write_text(f"parameters {{ real {name}; }} model {{ {name} ~ normal(0, 1); }}")
             data.write_text("{}")
             self.cases[name] = SimpleNamespace(source=source, data=data, collection="posteriordb")
-        self.runners, self.measured = [], []
+        self.runners, self.measured, self.points = [], [], {}
         environment = {"PATH": os.environ["PATH"], "HOME": str(self.root / "home"),
                        "USERPROFILE": str(self.root / "home")}
         for patch in (mock.patch.dict(os.environ, environment, clear=True),
@@ -455,8 +456,9 @@ class MainWiringTests(unittest.TestCase):
         self.runners.append(runner)
         return runner
 
-    def measure(self, name, stan, data, directory, manifest, runner, args, build=None):
+    def measure(self, name, stan, data, directory, manifest, runner, args, build=None, points=None):
         self.measured.append((name, build, len(runner.calls)))
+        self.points[name] = points
         record = dict(model=name, status="ok", row=dict(model=name, note=""))
         (directory / f"{name}.result.json").write_text(json.dumps(record))
         return record
@@ -468,6 +470,43 @@ class MainWiringTests(unittest.TestCase):
                 "--bench", str(self.root / "bench"), "--vectorize-probe", str(self.root / "probe"),
                 *extra])
         return status, pathlib.Path(str(self.root / output) + ".run")
+
+    def prior_file(self, **changes):
+        import benchmark_points as bp
+        stan, data = self.cases["a"].source, self.cases["a"].data
+        stan.write_text("data { int prior_only; }\nparameters { real a; }\nmodel { a ~ normal(0, 1); }\n")
+        entry = dict(source="prior", stan_sha256=bp.sha256(stan), data_sha256=bp.sha256(data),
+                     n_params=1, points=[[0.1 * k] for k in range(10)])
+        path = self.root / "points.json.gz"
+        bp.write(path, dict(schema=bp.SCHEMA, settings=dict(selected_draws=list(range(10))),
+                            models={"a": dict(entry, **changes)}, fallbacks={}))
+        return path
+
+    def test_prior_points_are_frozen_in_the_run_and_recorded_in_the_manifest(self):
+        status, run = self.run_main("--no-build-cache", "--prior-points", str(self.prior_file()))
+        self.assertEqual(status, 0)
+        frozen = run / "inputs" / "a.points.json"
+        self.assertEqual(json.loads(frozen.read_text()), [[0.1 * k] for k in range(10)])
+        self.assertEqual(self.points, {"a": frozen, "b": None})
+        inputs = json.loads((run / "manifest.json").read_text())["identity"]["inputs"]
+        self.assertEqual((inputs["a"]["point_source"], inputs["b"]["point_source"]), ("prior", "fixed"))
+        self.assertEqual(inputs["a"]["points_sha256"], corpus_bench.sha(frozen))
+        self.assertNotIn("points_sha256", inputs["b"])
+
+    def test_no_prior_points_uses_fixed_points_for_every_model(self):
+        status, run = self.run_main("--no-build-cache", "--prior-points", str(self.prior_file()),
+                                    "--no-prior-points")
+        self.assertEqual(status, 0)
+        self.assertEqual(self.points, {"a": None, "b": None})
+        inputs = json.loads((run / "manifest.json").read_text())["identity"]["inputs"]
+        self.assertEqual({v["point_source"] for v in inputs.values()}, {"fixed"})
+
+    def test_a_points_file_that_no_longer_matches_the_source_is_an_error(self):
+        path = self.prior_file(stan_sha256="0" * 64)
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.run_main("--no-build-cache", "--prior-points", str(path))
+        self.assertIn("stan source changed", err.getvalue())
+        self.assertEqual(self.measured, [])
 
     def test_every_build_finishes_before_the_first_measurement(self):
         cache = self.root / "cache"

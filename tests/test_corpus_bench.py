@@ -288,16 +288,16 @@ class SetupEstimateTests(unittest.TestCase):
             ns=500000 if engine == "cmdstan" else 250000, dropped=dropped,
             values=lambda k: [-3.0 - k, 20.0 if k == bad else 2.0 + k]))
 
-    def measure(self):
+    def measure(self, points=None):
         with mock.patch("harnesses.corpus_bench.compile_cmd", return_value=["c++"]), \
              mock.patch("harnesses.corpus_bench.sha", return_value="test-hash"):
             return measure_model("m", self.source, self.data, self.root,
-                                 {"run_id": "test-run"}, self.runner, self.args)
+                                 {"run_id": "test-run"}, self.runner, self.args, points=points)
 
     def test_proxy_includes_each_setup_component_but_not_driver_build(self):
         record = self.measure()
         row = record["row"]
-        self.assertEqual(PROTOCOL, "stanli-corpus-v5")
+        self.assertEqual(PROTOCOL, "stanli-corpus-v6")
         self.assertEqual(record["status"], "ok")
         self.assertEqual(GRADIENT_BUDGET, 20000)
         self.assertEqual(row["gradient_budget"], 20000)
@@ -363,6 +363,28 @@ class SetupEstimateTests(unittest.TestCase):
                              ["--timed", "--warmup-ms", "20", "--measure-ms", "40",
                               "--points", "3"])
 
+    def test_prior_points_replace_the_point_count_in_both_engines(self):
+        frozen = self.root / "m.points.json"
+        record = self.measure(points=frozen)
+        timed = [e["argv"] for e in self.events if "--timed" in e["argv"]]
+        self.assertEqual(len(timed), 4)
+        for argv in timed:
+            start = argv.index("--timed")
+            self.assertEqual(argv[start:start + 7],
+                             ["--timed", "--warmup-ms", "20", "--measure-ms", "40",
+                              "--points-file", str(frozen)])
+            self.assertNotIn("--points", argv)
+        self.assertEqual(record["row"]["point_source"], "prior")
+        self.assertEqual(record["inputs"], dict(stan="test-hash", data="test-hash",
+                                                point_source="prior", points_sha256="test-hash"))
+
+    def test_fixed_points_are_recorded_as_such(self):
+        record = self.measure()
+        self.assertEqual(record["row"]["point_source"], "fixed")
+        self.assertEqual(record["inputs"], dict(stan="test-hash", data="test-hash",
+                                                point_source="fixed"))
+        self.assertIn("point_source", COLS)
+
     def test_records_keep_timings_and_scaled_errors_but_not_values(self):
         record = self.measure()
         self.assertEqual(record["status"], "ok")
@@ -427,6 +449,60 @@ class SetupEstimateTests(unittest.TestCase):
                     self.assertRaises(SystemExit) as raised:
                 main(["unused-cmdstan", "unused-pdb", "unused.tsv", option])
             self.assertEqual(raised.exception.code, 2)
+
+
+class PriorPointSelectionTests(unittest.TestCase):
+    PRIOR = "data { int prior_only; }\nparameters { real x; }\nmodel { x ~ normal(0, 1); }\n"
+
+    def setUp(self):
+        import benchmark_points as bp
+        self.bp = bp
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+        self.stan, self.data = self.root / "m.stan", self.root / "m.json"
+        self.stan.write_text(self.PRIOR)
+        self.data.write_text('{"prior_only": 0}')
+        self.other = self.root / "o.stan"
+        self.other.write_text("parameters { real x; }\nmodel { x ~ normal(0, 1); }\n")
+        self.doc = dict(schema=bp.SCHEMA,
+                        settings=dict(selected_draws=[1, 2, 3]),
+                        models={"m": dict(source="prior", stan_sha256=bp.sha256(self.stan),
+                                          data_sha256=bp.sha256(self.data), n_params=1,
+                                          points=[[0.5], [1.5], [-0.5]])},
+                        fallbacks={})
+
+    def select(self, doc, points=3, **inputs):
+        from harnesses.corpus_bench import prior_point_files
+        inputs = inputs or {"m": (self.stan, self.data)}
+        return prior_point_files(inputs, doc, points, self.root / "frozen")
+
+    def test_matching_models_get_a_frozen_file_and_others_none(self):
+        found = self.select(self.doc, m=(self.stan, self.data), o=(self.other, self.data))
+        self.assertEqual(sorted(found), ["m"])
+        self.assertEqual(json.loads(found["m"].read_text()), [[0.5], [1.5], [-0.5]])
+        self.assertEqual(found["m"].parent, self.root / "frozen")
+
+    def test_no_document_means_fixed_points_everywhere(self):
+        self.assertEqual(self.select(None), {})
+
+    def test_a_changed_source_or_data_file_is_an_error(self):
+        self.stan.write_text(self.PRIOR + "\n")
+        with self.assertRaisesRegex(ValueError, "stan source changed"):
+            self.select(self.doc)
+        self.stan.write_text(self.PRIOR)
+        self.data.write_text('{"prior_only": 0, "x": 1}')
+        with self.assertRaisesRegex(ValueError, "data changed"):
+            self.select(self.doc)
+
+    def test_a_prior_model_missing_from_the_file_is_an_error(self):
+        self.doc["models"].clear()
+        with self.assertRaisesRegex(ValueError, "no entry"):
+            self.select(self.doc)
+
+    def test_the_point_count_must_match_the_run(self):
+        with self.assertRaisesRegex(ValueError, "3 points but --points is 10"):
+            self.select(self.doc, points=10)
 
 
 class CompilerSelectionTests(unittest.TestCase):
@@ -852,6 +928,73 @@ class BenchmarkCatalogTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "numerical gate"):
             self.render()
 
+    def v6(self, **sources):
+        from benchmark_artifact_fixture import artifact_fixture
+        self.manifest, self.records, self.rows = artifact_fixture(
+            point_sources=dict(dict(good="fixed", failed="fixed"), **sources))
+
+    def test_v5_runs_carry_no_point_source_and_render_without_a_marker(self):
+        rendered = self.render()
+        self.assertNotIn("†", rendered)
+
+    def test_v6_marks_prior_models_and_explains_the_marker(self):
+        self.v6(good="prior")
+        rendered = self.render()
+        self.assertIn("`good` †", rendered)
+        self.assertNotIn("`failed` †", rendered)
+        self.assertRegex(rendered, "† .*draws from the model's prior")
+
+    def test_v6_with_only_fixed_points_has_no_marker(self):
+        self.v6()
+        self.assertNotIn("†", self.render())
+
+    def test_v6_requires_a_recorded_source_for_every_input(self):
+        self.v6()
+        del self.manifest["identity"]["inputs"]["good"]["point_source"]
+        with self.assertRaisesRegex(ValueError, "point source"):
+            self.render()
+
+    def test_v6_rejects_an_unknown_source(self):
+        self.v6()
+        self.manifest["identity"]["inputs"]["good"]["point_source"] = "random"
+        with self.assertRaisesRegex(ValueError, "point source"):
+            self.render()
+
+    def test_the_summary_source_must_match_the_manifest(self):
+        self.v6(good="prior")
+        self.update_row(point_source="fixed")
+        with self.assertRaisesRegex(ValueError, "point source"):
+            self.render()
+
+    def test_the_record_source_must_match_the_manifest(self):
+        self.v6(good="prior")
+        self.records[0]["inputs"]["point_source"] = "fixed"
+        with self.assertRaisesRegex(ValueError, "point source"):
+            self.render()
+
+    def test_prior_models_need_a_points_hash_that_the_record_repeats(self):
+        self.v6(good="prior")
+        self.records[0]["inputs"]["points_sha256"] = "cd" * 32
+        with self.assertRaisesRegex(ValueError, "point source"):
+            self.render()
+        self.v6(good="prior")
+        del self.manifest["identity"]["inputs"]["good"]["points_sha256"]
+        del self.records[0]["inputs"]["points_sha256"]
+        with self.assertRaisesRegex(ValueError, "point source"):
+            self.render()
+
+    def test_fixed_models_cannot_carry_a_points_hash(self):
+        self.v6()
+        self.manifest["identity"]["inputs"]["good"]["points_sha256"] = "ab" * 32
+        self.records[0]["inputs"]["points_sha256"] = "ab" * 32
+        with self.assertRaisesRegex(ValueError, "point source"):
+            self.render()
+
+    def test_v5_runs_cannot_claim_a_point_source(self):
+        self.manifest["identity"]["inputs"]["good"]["point_source"] = "prior"
+        with self.assertRaisesRegex(ValueError, "point source"):
+            self.render()
+
     def test_v5_requires_a_point_count(self):
         del self.manifest["identity"]["config"]["points"]
         with self.assertRaisesRegex(ValueError, "Invalid gradient configuration: points"):
@@ -985,6 +1128,13 @@ class VectorizedCatalogTests(VectorizedFixture):
         self.sources["old"][0]["identity"]["inputs"]["good"]["data"] = "changed"
         self.sources["old"][1][0]["inputs"]["data"] = "changed"
         with self.assertRaisesRegex(ValueError, "input"):
+            self.render()
+
+    def test_prior_points_in_the_default_run_need_matching_cmdstan_points(self):
+        from benchmark_artifact_fixture import artifact_fixture
+        self.default = artifact_fixture(point_sources=dict(good="prior", failed="fixed"))
+        self.default[0]["identity"]["toolchains"] = {"cmdstan": {"head": "cmdstan-head"}}
+        with self.assertRaisesRegex(ValueError, "input hashes differ"):
             self.render()
 
     def test_cmdstan_toolchain_must_match_default_run(self):

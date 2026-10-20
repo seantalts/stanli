@@ -1,4 +1,4 @@
-"""Small synthetic v5 artifacts shared by renderer and publication tests."""
+"""Small synthetic v5 and v6 artifacts shared by renderer and publication tests."""
 import copy
 import csv
 import gzip
@@ -7,6 +7,7 @@ import statistics
 
 
 POINTS = 3
+POINTS_SHA = "ab" * 32
 
 
 def raw_trial(ns, dropped=()):
@@ -22,7 +23,7 @@ def raw_trial(ns, dropped=()):
                 warmup_elapsed_ns=20000000, points=points)
 
 
-def artifact_fixture(dropped=()):
+def artifact_fixture(dropped=(), point_sources=None):
     config = dict(corpus="all", filter="", rounds=6, gradient_budget=20000,
                   stancflags="", warmup_ms=20, measure_ms=40, points=POINTS,
                   gradient_timeout=60)
@@ -35,6 +36,13 @@ def artifact_fixture(dropped=()):
             sources={"harnesses/corpus_bench.py": "harness-hash", "tools/bench_cmdstan_grad.cpp": "driver-hash",
                      "tools/benchmark_timer.hpp": "timer-hash"},
             machine=dict(platform="macOS-arm64", host="host", processor="arm", logical_cpus=32)))
+    if point_sources is not None:
+        identity = manifest["identity"]
+        identity["protocol"] = "stanli-corpus-v6"
+        for name, source in point_sources.items():
+            identity["inputs"][name]["point_source"] = source
+            if source == "prior":
+                identity["inputs"][name]["points_sha256"] = POINTS_SHA
     pairs = []
     for index, (s, c) in enumerate(zip((100, 200, 300, 400, 500, 600),
                                       (1000, 300, 400, 900, 600, 800))):
@@ -66,6 +74,12 @@ def artifact_fixture(dropped=()):
                     row=dict(model="failed", run_id="current", gradient_budget=20000,
                              note="gradient build failed"),
                     gradients=[], setup={}, preparation_s=[], status="failed")]
+    if point_sources is not None:
+        inputs = manifest["identity"]["inputs"]
+        for record in records:
+            wanted = inputs[record["model"]]
+            record["inputs"].update({k: wanted[k] for k in ("point_source", "points_sha256") if k in wanted})
+            record["row"]["point_source"] = wanted["point_source"]
     return manifest, records, [copy.deepcopy(record["row"]) for record in records]
 
 

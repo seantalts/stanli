@@ -14,10 +14,11 @@ stopped them. Missing numbers sort to the bottom because missing is not slow.
 Usage: python3 tools/corpus_table.py docs/internal/artifacts/corpus-bench.tsv
 Prints markdown to stdout; the appendix is edited by hand around it.
 
---catalog requires the current full-corpus v5 summary, raw model records and
+--catalog requires the current full-corpus v5 or v6 summary, raw model records and
 manifest under output/corpus-performance; it never substitutes historical measurements.
 Its setup-plus-5,000-gradients estimate is a fixed-work proxy, not measured sampling.
-Gradient times are means over the recorded evaluation points. The records keep per-point
+Gradient times are means over the recorded evaluation points; a v6 run also records whether
+each model used the fixed points or draws from its own prior. The records keep per-point
 timings and scaled errors, not density or gradient values; the run enforced the gate.
 The run is validated against its recorded 20,000-gradient budget.
 
@@ -328,6 +329,9 @@ CATALOG_GRADIENT_BUDGET = 5000
 GRADIENT_FIELDS = ("stanli_ns_grad", "stanli_ns_grad_mad", "cmdstan_ns_grad",
                    "cmdstan_ns_grad_mad", "paired_speedup", "paired_speedup_mad")
 CACHE_FIELDS = ("cached", "cache_key", "cache_run_id")
+PROTOCOLS = ("stanli-corpus-v5", "stanli-corpus-v6")
+POINT_SOURCES = ("fixed", "prior")
+PRIOR_MARK = "†"
 SETUP_PHASES = {"stanli_compile": "stanli-mir", "cmdstan_stanc": "stanc-cpp",
                 "cmdstan_build": "cmdstan-build"}
 
@@ -358,6 +362,24 @@ def _catalog_agrees(model, field, actual, expected):
         raise ValueError(f"Benchmark artifacts disagree: {model} {field}")
 
 
+def _point_source(model, protocol, manifest_input, record, row):
+    """The recorded point source, which the manifest, raw record and summary row must agree on."""
+    keys = ("point_source", "points_sha256")
+    if protocol == "stanli-corpus-v5":
+        if any(key in source for source in (manifest_input, record["inputs"], row) for key in keys):
+            raise ValueError(f"v5 runs have no point source: {model}")
+        return "fixed"
+    source = manifest_input.get("point_source")
+    digest = manifest_input.get("points_sha256")
+    if (source not in POINT_SOURCES
+            or record["inputs"].get("point_source") != source or row.get("point_source") != source
+            or (source == "prior") != (digest is not None)
+            or (digest is not None and (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)))
+            or record["inputs"].get("points_sha256") != digest):
+        raise ValueError(f"Invalid or inconsistent point source: {model}")
+    return source
+
+
 def _catalog_cell(value):
     return str(value).replace("|", "\\|").replace("\n", " ")
 
@@ -366,12 +388,12 @@ def _catalog_config(manifest, allow_filter=False):
     identity = manifest["identity"]
     config = identity["config"]
     if (not manifest.get("run_id")
-            or identity.get("protocol") != "stanli-corpus-v5"
+            or identity.get("protocol") not in PROTOCOLS
             or config.get("corpus") != "all" or (config.get("filter") and not allow_filter)
             or type(config.get("rounds")) is not int or config["rounds"] <= 0
             or type(config.get("gradient_budget")) is not int or config["gradient_budget"] != 20000
             or any(key in config for key in ("sampling", "seeds", "iter_sampling", "iter_warmup", "run"))):
-        raise ValueError("Catalog requires an unfiltered v5 setup/gradient run with budget 20000")
+        raise ValueError("Catalog requires an unfiltered v5 or v6 setup/gradient run with budget 20000")
     for key in ("warmup_ms", "measure_ms"):
         value = config.get(key)
         if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
@@ -538,6 +560,7 @@ def validated_catalog(summary_path, records_path, manifest_path, allow_filter=Fa
         if (record.get("status") not in ("ok", "failed", "censored") or "sampling" in record
                 or any(key in row for key in ("stanli_sample_s", "cmdstan_sample_s"))):
             raise ValueError(f"Invalid gradient/setup record: {model}")
+        _point_source(model, manifest["identity"]["protocol"], inputs[model], record, row)
         gradients = _catalog_pairs(model, record, row, config)
         _catalog_setup(model, record, row, config, gradients)
     return rows, manifest, details
@@ -581,7 +604,10 @@ def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
     )
     for row in (*complete, *incomplete_rows):
         speedup = _catalog_number(row, speedup_field)
-        cells = [_catalog_model(row["model"]), f"{speedup:.3g}x" if speedup is not None else "—"]
+        name = _catalog_model(row["model"])
+        if row.get("point_source") == "prior":
+            name += f" {PRIOR_MARK}"
+        cells = [name, f"{speedup:.3g}x" if speedup is not None else "—"]
         for engine, fields in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
                                ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
             components = [_catalog_number(row, field) for field in (*fields, engine + "_ns_grad")]
@@ -598,6 +624,9 @@ def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
         "", f"Total sampling is an estimate: each engine's measured setup time + {CATALOG_GRADIENT_BUDGET:,} × "
         f"its warm gradient time, averaged over {points} evaluation points. Full sampling is not run.",
     ])
+    priors = sum(1 for row in rows if row.get("point_source") == "prior")
+    if priors:
+        output.extend(["", f"{PRIOR_MARK} Timed at {points} draws from the model's prior instead of the fixed points."])
     if incomplete:
         output.extend(["", "**Incomplete results**", "",
                        "Missing measurements are —; available timings are retained.", "",
@@ -714,7 +743,7 @@ def combined_vectorized_rows(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
             status, note = details[model]["status"], source.get("note", "")
         merged = dict(model=model, run_id=sources[model], note=note,
                       **{key: row.get(key, "") for key in ("stanli_compile_s", "stanli_prep_s",
-                                                           "stanli_ns_grad")},
+                                                           "stanli_ns_grad", "point_source")},
                       **{key: source.get(key, "") for key in ("cmdstan_stanc_s", "cmdstan_build_s",
                                                               "cmdstan_ns_grad")})
         if status == "ok":
