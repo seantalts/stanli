@@ -11,6 +11,9 @@
 - Benchmark gradient times are now the mean over 10 evaluation points
   instead of one, and the tables are rerun that way. Three models that
   passed at the old point fail the numerical check at a new one.
+- The benchmark can time brms-style models at ten draws from their own prior
+  (`tools/gen_benchmark_points.py`). 14 of the 149 models that declare
+  `prior_only` have usable draws; the others keep the fixed points.
 
 ## 0.22.2
 

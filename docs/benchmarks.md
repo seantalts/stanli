@@ -829,10 +829,25 @@ which.
 
 Both engines evaluate the same model, data and unconstrained parameter vectors
 with the sampling log density (`propto=true`) and the Jacobian adjustment.
-There are ten evaluation points. Point 0 has coordinate `i` equal to
+There are ten evaluation points. They come from one of two sources.
+
+Most models use fixed points. Point 0 has coordinate `i` equal to
 `0.1 + 0.05 * (i % 7) - 0.15 * (i % 3)`. Points 1 to 9 draw each coordinate
 uniformly from (-2, 2) with a fixed integer generator seeded from the point
-and coordinate, so both engines get identical vectors.
+and coordinate.
+
+Models that declare `int prior_only;` in their data block (the brms-style
+models) use ten draws from their own prior where they can. Stanli's NUTS
+sampler runs one chain with the likelihood switched off (`prior_only=1`), 1,000
+warmup and 1,000 draws, seed 1, and the points are draws 50, 150, ..., 950 on
+the unconstrained scale. A model keeps the fixed points if the sampler fails,
+if a draw has a non-finite density or gradient on the real data, or if a draw
+exceeds 1,000 in absolute value. The last rule catches flat priors, whose
+prior-only chain drifts without bound. Of the 149 models that declare the flag,
+14 have usable prior draws. The vectors and the reason for each fallback are in
+[`benchmark-points.json.gz`](internal/artifacts/benchmark-points.json.gz).
+Both engines read the same vectors, and the tables mark models that use them
+with †.
 
 ### Gradient time
 
@@ -945,7 +960,8 @@ loop-vectorization sweep with separate output paths:
 
 ```sh
 ./tools/dev_setup.sh
-cmake --build build-rel --target bench_grad -j 4
+cmake --build build-rel --target bench_grad stanli_shared -j 4
+python3 tools/gen_benchmark_points.py --lib build-rel/libstanli.dylib
 python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
   build/corpus-current/default.tsv --bench build-rel/bench_grad \
   --corpus all --rounds 6 --warmup-ms 20 --measure-ms 40 --points 10 \
@@ -959,6 +975,10 @@ python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
 ```
 
 `--corpus` selects a source collection and `--filter` selects model IDs.
+`tools/gen_benchmark_points.py` rewrites the committed prior points (use
+`libstanli.so` on Linux); the harness reads them by default, refuses a model
+whose source or data no longer matches, and `--no-prior-points` uses the fixed
+points for every model.
 CmdStan binaries are built once and reused from a content-addressed cache,
 `$STANLI_BENCH_CACHE` or `~/.cache/stanli/corpus-bench`; `--build-cache DIR`
 overrides it and `--no-build-cache` builds inside the run directory.
