@@ -13,6 +13,8 @@
   and 5,000 gradients, marked †. `tools/gen_benchmark_points.py` makes the
   points file, and `tools/validate_total_estimates.py` compares the estimate
   with full sampling runs.
+- The benchmark tables label the first ratio as the gradient ratio and add a
+  last column with CmdStan / Stanli for total sampling.
 
 ## 0.22.2
 
