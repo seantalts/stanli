@@ -1,10 +1,10 @@
 {
-  "runtime_base": "b61aca0299627f7e1d79c5b949d6b923c56163ef",
+  "runtime_base": "051bb4ba6834a7d6f313bdbabc2adc861bcf7b1d",
   "files": {
-    "build-rel/CMakeCache.txt": "ae4cfda80238c5655caf0cbd18225547b9e76d30ed1805b10adb137a05dddb9c",
-    "build-rel/bench_grad": "e38c80a6b3a7cc43e6bd2582816650cda712cdbfa9e144a69351d7bcafb0ff82",
-    "build-rel/stanli_check": "e7bfbd5c4ab0daf658c77bfdf597dbce9ed26a6b07e2f809f3c48f468c6d8883",
-    "build-rel/stanli_run": "5659caf3d1564327eaa66b4df338d296f799fb4cf4a855a19e2127ad26c8c943",
+    "build-rel/CMakeCache.txt": "bc6cc2baa9f60a11364a7fd7368a2a59103a3eb887c3b961425a6edd3989454b",
+    "build-rel/bench_grad": "c55a22ec9a686d1c41a5a07d6b5762c6c8e43c2c68f98a543333afd58a41d79e",
+    "build-rel/stanli_check": "68f2d396c3789439bcd2eb870c89fb58725675f7b20197866197fc3b553f149b",
+    "build-rel/stanli_run": "71aa5bf95965fd12e26358b1f00682feeea757d1be5244a6aa78e38064e412d5",
     "deps/stanc3/stanc": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
     "deps/stanc3/stanc_embed.o": "d98c403a4af46b32b8362831e89e11d41ff07ab6d51f07844820bfaab544a8ed",
     "deps/stanc3/stanc_embed.o.stamp": "5e16815a2a878fa44d03c1e87734f63520a07c14bfed58cfba050495faa0556f",
@@ -29,9 +29,9 @@
     "STANLI_PORTABLE_COMPILER:FILEPATH=",
     "STANLI_SANITIZE:STRING=",
     "STANLI_SHARED_TEST_RUNTIME:BOOL=ON",
-    "STANLI_STANC_EMBED_OBJ:FILEPATH=",
-    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/stanc3/stanc",
-    "STANLI_STAN_DENSITY_ORACLE:BOOL=OFF",
+    "STANLI_STANC_EMBED_OBJ:FILEPATH=/Users/xitrium/claud/stanrt/deps/stanc3/stanc_embed.o",
+    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/claud/stanrt/.worktrees/gate-fails/deps/stanc3/stanc",
+    "STANLI_STAN_DENSITY_ORACLE:BOOL=ON",
     "STANLI_THREADS:BOOL=ON",
     "STANLI_WASM_SIDE:BOOL=OFF"
   ],

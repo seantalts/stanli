@@ -7,6 +7,7 @@ is derived from recorded artifacts:
 
   docs/internal/artifacts/verification.json   written by tools/verify_sample.py
   output/corpus-performance/  one current full-corpus benchmark
+  output/corpus-performance-fast/  the fast-mode run of the same corpus
 
 The docs carry <!--gen:key-->...<!--/gen--> markers; this script replaces
 the marked spans with values computed from the artifacts.
@@ -20,10 +21,12 @@ The prose around the markers is hand-written; only the numbers move.
 import csv
 import gzip
 import json
+import math
 import pathlib
 import re
 import statistics
 import sys
+import textwrap
 import warnings
 
 import toolchain
@@ -34,7 +37,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # comments, so the same substitution works there.
 TARGETS = [REPO / "README.md", REPO / "python" / "README.md",
            REPO / "web" / "index.html", REPO / "tests" / "rethinking" / "README.md",
-           REPO / "docs" / "benchmarks.md"]
+           REPO / "docs" / "benchmarks.md", REPO / "docs" / "fast-mode.md"]
 MARK = re.compile(r"(<!--gen:([a-z_]+)-->)(.*?)(<!--/gen-->)", re.S)
 
 
@@ -54,6 +57,109 @@ def current_benchmark():
         rows = list(csv.DictReader(stream, delimiter="\t"))
     manifest = json.loads(manifest_path.read_text())
     return catalog, rows, manifest
+
+
+def fast_mode_benchmark():
+    directory = REPO / "output" / "corpus-performance-fast"
+    with (directory / "benchmark-summary.tsv").open(newline="") as stream:
+        rows = list(csv.DictReader(stream, delimiter="\t"))
+    return rows, json.loads((directory / "benchmark-manifest.json").read_text())
+
+
+def _timing(row):
+    try:
+        stanli, cmdstan = float(row["stanli_ns_grad"]), float(row["cmdstan_ns_grad"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if row.get("note") or not (math.isfinite(stanli) and math.isfinite(cmdstan)):
+        return None
+    return (stanli, cmdstan) if stanli > 0 and cmdstan > 0 else None
+
+
+def _geomean(values):
+    return math.exp(sum(math.log(v) for v in values) / len(values))
+
+
+def _micros(ns):
+    micros = ns / 1000
+    return f"{micros:.0f}" if micros >= 100 else f"{micros:.3g}"
+
+
+def _gain(ratio):
+    return f"{ratio:.0f}x faster" if ratio >= 10 else f"{ratio:.1f}x faster"
+
+
+def fast_mode_figures(default_rows, fast_rows, default_manifest, fast_manifest):
+    default = {row["model"]: row for row in default_rows}
+    fast = {row["model"]: row for row in fast_rows}
+    models = sorted(m for m in fast if m in default and _timing(default[m]) and _timing(fast[m]))
+    if not models:
+        return {key: "unavailable" for key in FAST_KEYS}
+    gain = {m: _timing(default[m])[0] / _timing(fast[m])[0] for m in models}
+    ranked = sorted(models, key=lambda m: (-gain[m], m))
+    paired = lambda rows: _geomean([float(rows[m]["paired_speedup"]) for m in models])
+    beats = lambda rows: sum(_timing(rows[m])[1] > _timing(rows[m])[0] for m in models)
+
+    table = ["| model | default | fast | fast vs default |", "| --- | ---: | ---: | ---: |"]
+    for m in ranked[:8]:
+        table.append(f"| `{m}` | {_micros(_timing(default[m])[0])} | {_micros(_timing(fast[m])[0])} "
+                     f"| {_gain(gain[m])} |")
+
+    slowest = min(models, key=lambda m: (gain[m], m))
+    if gain[slowest] >= 1:
+        slow_sentence = "No model is slower in fast mode."
+    else:
+        slowdown = 1 / gain[slowest]
+        amount = f"{slowdown:.2f}x" if f"{slowdown:.2f}" != "1.00" else "less than 1.01x"
+        slow_sentence = f"The slowest model in fast mode, `{slowest}`, is {amount} slower."
+
+    def run(manifest):
+        return manifest["started_utc"][:10], manifest["identity"]["stanli_source"]["head"][:8]
+
+    fast_date, fast_head = run(fast_manifest)
+    default_date, default_head = run(default_manifest)
+    same = (fast_manifest["identity"]["executables"]["bench"]
+            == default_manifest["identity"]["executables"]["bench"]
+            and fast_head == default_head)
+    if same:
+        lead = (f"These figures are from {fast_date} (Stanli source `{fast_head}`). "
+                "[Fast mode](fast-mode.md) used the same protocol, inputs and "
+                "binaries as the default run, with models compiled and run in "
+                "fast mode (`corpus_bench.py --fast-math`).")
+        runs = f"{fast_date}, Stanli source `{fast_head}`, default and fast mode from the same binaries"
+    else:
+        lead = (f"The fast mode run is from {fast_date} (Stanli source `{fast_head}`), "
+                "with models compiled and run in fast mode "
+                "(`corpus_bench.py --fast-math`). "
+                f"The default mode run is from {default_date} (Stanli source `{default_head}`). "
+                "The two runs used different binaries, so the comparison below "
+                "is between runs.")
+        runs = f"fast mode {fast_date} (`{fast_head}`), default mode {default_date} (`{default_head}`)"
+    top_two = ", ".join(f"{m} {gain[m]:.0f}x" for m in ranked[:2])
+
+    ratios = list(gain.values())
+    return {
+        "fast_population": str(len(models)),
+        "fast_geomean": f"{_geomean(ratios):.2f}x",
+        "fast_median": f"{statistics.median(ratios):.2f}x",
+        "fast_ge_two": str(sum(r >= 2 for r in ratios)),
+        "fast_ge_ten": str(sum(r >= 10 for r in ratios)),
+        "fast_ge_hundred": str(sum(r >= 100 for r in ratios)),
+        "fast_cmdstan_default": f"{paired(default):.2f}x",
+        "fast_cmdstan_fast": f"{paired(fast):.2f}x",
+        "fast_beats_default": str(beats(default)),
+        "fast_beats_fast": str(beats(fast)),
+        "fast_top_table": "\n".join(table),
+        "fast_top_two": top_two,
+        "fast_slowest": slow_sentence,
+        "fast_lead": textwrap.fill(lead, 78, break_on_hyphens=False, break_long_words=False),
+        "fast_runs": runs,
+    }
+
+
+FAST_KEYS = ("fast_population fast_geomean fast_median fast_ge_two fast_ge_ten fast_ge_hundred "
+             "fast_cmdstan_default fast_cmdstan_fast fast_beats_default fast_beats_fast "
+             "fast_top_table fast_top_two fast_slowest fast_lead fast_runs").split()
 
 
 def cmdstan_pin():
@@ -125,7 +231,10 @@ def compute():
     t_med = total_sampling_median(benchmark_rows)
     toolchains = manifest["identity"]["toolchains"]
 
+    fast_rows, fast_manifest = fast_mode_benchmark()
+
     return {
+        **fast_mode_figures(benchmark_rows, fast_rows, manifest, fast_manifest),
         "benchmark_catalog": catalog,
         "benchmark_models": str(len(manifest["identity"]["inputs"])),
         "benchmark_cmdstan": cmdstan_label(toolchains["cmdstan"]["head"], cmdstan_pin()),

@@ -1,23 +1,23 @@
 {
   "identity": {
     "config": {
-      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/build-rel/bench_grad",
+      "bench": "/Users/xitrium/claud/stanrt/.worktrees/gate-fails/build-rel/bench_grad",
       "build_timeout": 900.0,
-      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/cmdstan",
+      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/gate-fails/deps/cmdstan",
       "corpus": "all",
       "filter": "",
       "gradient_timeout": 60.0,
       "measure_ms": 40,
-      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/posteriordb",
+      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/gate-fails/deps/posteriordb",
       "points": 10,
       "rounds": 6,
       "stanc": "/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src/_build/default/src/stanc/stanc.exe",
       "stancflags": "--O1",
-      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-5k/deps/stanc3/stanli-vectorize-probe",
+      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/gate-fails/deps/stanc3/stanli-vectorize-probe",
       "warmup_ms": 20
     },
     "executables": {
-      "bench": "e38c80a6b3a7cc43e6bd2582816650cda712cdbfa9e144a69351d7bcafb0ff82",
+      "bench": "c55a22ec9a686d1c41a5a07d6b5762c6c8e43c2c68f98a543333afd58a41d79e",
       "stanc": "359c905c882a4263811b17636817ce349f0b8c743a07769e5348e389dc81173c",
       "vectorize_probe": "8e6d3f59ee9965ad281392ffee716557090330622849dd93eed47444333a3068"
     },
@@ -3127,16 +3127,16 @@
       "warmup": 1000
     },
     "sources": {
-      "harnesses/corpus_bench.py": "8a0097516a1831da033e65df6aec0198cbe8a5b4fa92472e52f4829b8b5ab948",
-      "tools/bench_cmdstan_grad.cpp": "1f96c0041babffe9fc4a9b892f27e19119c06313f473bdfed8f3d169c7d4da24",
-      "tools/bench_grad.cpp": "79f738d559bba91748a162438592add26526b04dcec95ca8d2d193ebe3df738f",
-      "tools/benchmark_timer.hpp": "f77efead4e5ed83af767ee5b7573839cbccb0c68f76ab5e4d5bd9ba5e15b9b10",
+      "harnesses/corpus_bench.py": "b0f0162ec2238c8f4de9f7623f2281161dfaccd9c6c57a7eff6846c5039d2aea",
+      "tools/bench_cmdstan_grad.cpp": "eb4ef7c0bb27aac34a189f605af5ed0ea0869928293ce5f0aa1793a3a782536f",
+      "tools/bench_grad.cpp": "3da34a4972de0ab3e6bf1a3648be52e13143cdd402d7e9e8946201b4e2121949",
+      "tools/benchmark_timer.hpp": "08c7b09589d126d78b91b8f81e53b8f772f58dbcdc906bad9ca70397d13181d4",
       "tools/cmdstan_ref.py": "7d61e5a95f5b3ee3fe38f8360c29dcc216363711b55a30f7b52b4deb86c163c4",
       "tools/corpus_inventory.py": "61653eb2071d0b792e3f2e7e99b22038cef724ad254b3adc1f9fcbfcd68a46bf",
-      "tools/verify_refs.py": "96ad2334b6547e4706be8e3d1a52fe9e985007b8c6974df3a5be98fde9ccf1c4"
+      "tools/verify_refs.py": "8b4d9d1a8d24af051758db248b1d6a77b7da3de351a677e444452fc61af1736d"
     },
     "stanli_source": {
-      "head": "b61aca0299627f7e1d79c5b949d6b923c56163ef",
+      "head": "051bb4ba6834a7d6f313bdbabc2adc861bcf7b1d",
       "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     "threads": {
@@ -3158,24 +3158,24 @@
       },
       "clang_sha256": "b8763cf250e607a778bb4603cecb5b90338814d0a3dfcba0d57b1de242f610e9",
       "cmdstan": {
-        "head": "11cb052d3e1fc8c799e0fec559e2ee5452b38d27",
+        "head": "d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6",
         "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "libraries": {
-        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_cvodes.a": "ff02832646b7027836fec6f0cbe3a8878ebc995e2bfc6720d0af30d109657473",
-        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_idas.a": "0435dedceb3b3bc85b0734ab5530a64a7cfb5c85297f1a166b64aacbf7ba0942",
-        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_kinsol.a": "8b584280a4198d33acfcffd3b46419fa1b10063c6cf3d9ad4caafe9730ea06a9",
-        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_nvecserial.a": "d1fb253c1830e30f51b3ad0e9f190143a71d7429b46bbec46f2c13782c4c3ce9",
-        "stan/lib/stan_math/lib/tbb/libtbb.dylib": "bb8cc7df94931fccb41d6af1372b168958a7791aba95438bcdd3994b8ce0c0e5",
-        "stan/lib/stan_math/lib/tbb/libtbbmalloc.dylib": "c9816fff8e1bba5787e936e02caae5fbc0966b98ef7ac3de27cdaa7539d02e45",
-        "stan/lib/stan_math/lib/tbb/libtbbmalloc_proxy.dylib": "fc5788a0e339562b33a4d3e6961eddbb53da7eceed09a8f791fd14e71ee90105"
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_cvodes.a": "c8856313043f4c9410c1997ca4c9fb45ce6a6951e3aa762cd9a3dec7ce845263",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_idas.a": "3ee324ca3baaffa680cd8546e9e5538044a151b995cfe984971317db0e3cfcef",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_kinsol.a": "67c65262a416a45effba37f47a163a739484576ab70a24897cffb393f9c2ba97",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_nvecserial.a": "e02e34ba8bc93339c5f06e553fc0962e8126b62b7a6b0e5515f322325bcb763d",
+        "stan/lib/stan_math/lib/tbb/libtbb.dylib": "d68d1f14e8a561b07021d3d26178a6ade7045232489b7f3e6ca6d1318a297dab",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc.dylib": "e5ed0f84665edccfc757100c22fde23c284e2f46f6879dc9058d4169bff4d7c0",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc_proxy.dylib": "c7d9decd8bc88e824e1b0c86a44457aedebc0b9f8158c22b31a7bcfc96063c87"
       },
       "math": {
-        "head": "8f326d14599d3030c626c46532d8e8534c1cdbec",
+        "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
         "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "stan": {
-        "head": "c96d04115d35cb04f42e45c5a69a82f9704798f1",
+        "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
         "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
       },
       "stanli_fmt": {
@@ -3192,6 +3192,6 @@
       }
     }
   },
-  "run_id": "0b1edfdec4d6010b",
-  "started_utc": "2026-10-20T21:00:29Z"
+  "run_id": "7103c79930334f45",
+  "started_utc": "2026-10-21T13:36:12Z"
 }
