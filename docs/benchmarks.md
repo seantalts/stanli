@@ -891,6 +891,11 @@ Five models fail the gate in both tables and appear in the incomplete
 results. `kronecker_gp`, `s2_mi_trunc_lb` and `sw_cens` have scaled errors of
 `0.072`, `6.9e-5` and `1.0e-6`; `irt_2pl` and `logistic_regression_rhs` have
 `4.7e-8` and `3.8e-8`. No model drops a point.
+The `kronecker_gp` gradient passes through `eigenvectors_sym`, which is
+ill-conditioned for its first covariance matrix. At the ten benchmark points
+the smallest eigenvalue gap is 6e-18 to 5e-17, which is 1e-18 to 8e-18 of the
+eigenvalue and below double precision
+([known limits](../TESTING.md#known-limits)).
 [TESTING.md](../TESTING.md#comparison-with-cmdstan-on-complete-models)
 lists the numerical exceptions.
 
@@ -955,8 +960,8 @@ and stock and patched MIR for a scalar normal-likelihood loop are kept with the
 | Stanli build | Release clang++, `-O3 -DNDEBUG`; full runtime, threads enabled, lite mode disabled |
 | Upstream source base | `2c9d67b98b196e800dc051460aaaf653ac811ace`; exact measured checkpoint and hashes in manifests |
 | Default reference compiler | Stock pinned stanc3, no additional flags |
-| CmdStan | 2.40.0, `d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6` |
-| Stan Math | `5252d51d47c1d5e78005fc043ad996fad6dd8da8` |
+| CmdStan | <!--gen:benchmark_cmdstan-->`11cb052d3e1fc8c799e0fec559e2ee5452b38d27` (not the pinned 2.40.0)<!--/gen--> |
+| Stan Math | <!--gen:benchmark_stan_math-->`8f326d14599d3030c626c46532d8e8534c1cdbec`<!--/gen--> |
 | Timeouts | Gradient command 60 s; build 900 s |
 | Host | Apple M3 Ultra, macOS arm64, 32 logical CPUs, 96 GiB RAM |
 
@@ -993,6 +998,8 @@ CmdStan binaries are built once and reused from a content-addressed cache,
 `$STANLI_BENCH_CACHE` or `~/.cache/stanli/corpus-bench`; `--build-cache DIR`
 overrides it and `--no-build-cache` builds inside the run directory.
 `--build-jobs N` (default 8) sets how many gradient driver builds run at once.
+The harness refuses a CmdStan checkout whose HEAD differs from `CMDSTAN_SHA` in
+`tools/dev_setup.sh`; `--allow-unpinned-cmdstan` overrides that and the manifest records it.
 An entry is keyed by the `.stan` bytes, the stanc binary and flags, the gradient
 driver and timer sources, the CmdStan checkout, library, compiler and
 environment identity, and the CmdStan path, so worktrees share entries. It holds

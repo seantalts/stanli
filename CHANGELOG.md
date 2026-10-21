@@ -13,6 +13,10 @@
   and 5,000 gradients, marked †. `tools/gen_benchmark_points.py` makes the
   points file, and `tools/validate_total_estimates.py` compares the estimate
   with full sampling runs.
+- The benchmark now runs against the pinned CmdStan 2.40.0. Earlier tables
+  used a pre-release CmdStan snapshot, whose `bernoulli_logit` gradient was
+  wrong above a predictor of 20; `corpus_bench.py` now refuses an unpinned
+  CmdStan checkout unless given `--allow-unpinned-cmdstan`.
 
 ## 0.22.2
 

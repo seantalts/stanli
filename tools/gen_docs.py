@@ -55,6 +55,20 @@ def current_benchmark():
     return catalog, rows, manifest
 
 
+def cmdstan_pin():
+    """The CmdStan commit and release that tools/dev_setup.sh installs."""
+    text = (pathlib.Path(__file__).resolve().parent / "dev_setup.sh").read_text()
+    match = re.search(r"^CMDSTAN_SHA=([0-9a-f]{40})(?:[ \t]*#[ \t]*v?(\d+\.\d+\.\d+))?", text, re.M)
+    return match.group(1), match.group(2)
+
+
+def cmdstan_label(head, pin):
+    sha, version = pin
+    if head == sha:
+        return f"{version}, `{head}`" if version else f"`{head}`"
+    return f"`{head}` (not the pinned {version})" if version else f"`{head}`"
+
+
 def corpus_stats(rows):
     """Current per-model paired ratios; all source collections participate."""
     ratios = [float(row["paired_speedup"]) for row in rows if row.get("paired_speedup")]
@@ -111,10 +125,13 @@ def compute():
     catalog, benchmark_rows, manifest = current_benchmark()
     c_n, c_med, c_par = corpus_stats(benchmark_rows)
     t_med = total_sampling_median(benchmark_rows)
+    toolchains = manifest["identity"]["toolchains"]
 
     return {
         "benchmark_catalog": catalog,
         "benchmark_models": str(len(manifest["identity"]["inputs"])),
+        "benchmark_cmdstan": cmdstan_label(toolchains["cmdstan"]["head"], cmdstan_pin()),
+        "benchmark_stan_math": f"`{toolchains['math']['head']}`",
         "benchmark_date": manifest["started_utc"][:10],
         "benchmark_vectorized_catalog": render_gradient_catalog().rstrip(),
         "corpus_reference_models": str(len(references)),
