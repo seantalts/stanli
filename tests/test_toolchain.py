@@ -4,6 +4,7 @@
 import hashlib
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -100,6 +101,7 @@ def commit_repo(path, files):
     return git(path, "rev-parse", "HEAD")
 
 
+@unittest.skipUnless(shutil.which("git"), "needs git")
 class GuardTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -204,6 +206,7 @@ class GuardTests(unittest.TestCase):
         self.assertIn("not a CmdStan git checkout", str(raised.exception))
 
 
+@unittest.skipUnless(shutil.which("git"), "needs git")
 class BuildStampTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

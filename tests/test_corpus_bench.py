@@ -10,6 +10,8 @@ import tempfile
 import zipfile
 import io
 import pathlib
+import shutil
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -38,13 +40,13 @@ class EnvironmentTests(unittest.TestCase):
                 self.assertIn(key, error.getvalue())
 
 
+@unittest.skipUnless(shutil.which("git"), "needs git")
 class CmdstanPinTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.checkout = pathlib.Path(self.temp.name)
         git = ["git", "-C", str(self.checkout), "-c", "user.name=t", "-c", "user.email=t@example.com"]
-        import subprocess
         subprocess.run([*git, "init", "-q"], check=True)
         subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "x"], check=True)
         for nested in ("stan", "stan/lib/stan_math"):
