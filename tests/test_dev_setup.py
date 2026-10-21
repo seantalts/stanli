@@ -49,7 +49,8 @@ printf '#!/usr/bin/env bash\nexit 0\n' > deps/stanc3/stanli-vectorize-probe
 chmod +x deps/stanc3/stanli-vectorize-probe
 """)
         self.script("tools/stanc_embed/install_overlay.sh", "true\n")
-        self.script("harnesses/conformance/fetch_cmdstan.sh", "true\n")
+        self.script("harnesses/conformance/fetch_cmdstan.sh",
+                    "echo \"fetch_cmdstan <$*>\" >> \"$SETUP_TEST_LOG\"\n")
         self.script(".venv-conformance/bin/python", "echo Python-3-test\n")
         (self.root / "deps/stanc3-src").mkdir()
         (self.root / "deps/posteriordb/.git").mkdir(parents=True)
@@ -147,6 +148,18 @@ echo library > build-rel/libstanli.so
         self.assertNotIn("ctest", self.log.read_text())
         self.setup()
         self.assertIn("ctest", self.log.read_text())
+
+    def fetch_calls(self):
+        return [line for line in self.log.read_text().splitlines()
+                if line.startswith("fetch_cmdstan")]
+
+    def test_corpus_uses_the_shared_cmdstan_setup(self):
+        self.setup("--no-build", "--corpus")
+        self.assertEqual(self.fetch_calls(), ["fetch_cmdstan <>"])
+
+    def test_conformance_adds_bridgestan_to_the_shared_cmdstan_setup(self):
+        self.setup("--no-build", "--conformance")
+        self.assertEqual(self.fetch_calls(), ["fetch_cmdstan <--bridgestan>"])
 
     def test_arm64_requires_explicit_no_embed(self):
         self.script("fake-bin/uname", "echo MINGW64_NT\n")

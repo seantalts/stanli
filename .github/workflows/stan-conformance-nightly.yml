@@ -74,7 +74,7 @@ jobs:
       - name: Validate the complete pinned reference toolchain
         run: |
           ./deps/fetch.sh
-          ./harnesses/conformance/fetch_cmdstan.sh
+          ./harnesses/conformance/fetch_cmdstan.sh --bridgestan
 
       - name: Build the public stanli Python runtime
         run: |
@@ -146,7 +146,7 @@ jobs:
       - name: Revalidate restored reference inputs
         run: |
           ./deps/fetch.sh
-          ./harnesses/conformance/fetch_cmdstan.sh
+          ./harnesses/conformance/fetch_cmdstan.sh --bridgestan
 
       - uses: actions/download-artifact@v4
         with:
