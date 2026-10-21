@@ -261,7 +261,7 @@ paths and hashes in raw records unchanged.
 | --- | --- |
 | [Corpus benchmark evidence](../../output/corpus-performance-vectorized/README.md) | Published run/report provenance; retains recorded revision. |
 | [Corpus benchmark evidence](../../output/corpus-performance/README.md) | Published run/report provenance; retains recorded revision. |
-| [Rethinking report evidence](../../output/rethinking-report/README.md) | Published run/report provenance; retains recorded revision. |
-| [Rethinking models: speedup and numerical differences](../../output/rethinking-report/rethinking-report.md) | Published run/report provenance; retains recorded revision. |
-| [Teaching sweep: evidence and reproduction](../../output/teaching-performance/EVIDENCE.md) | Published run/report provenance; retains recorded revision. |
-| [Teaching model performance](../../output/teaching-performance/README.md) | Published run/report provenance; retains recorded revision. |
+| [Rethinking report evidence](../../output/rethinking-report/README.md) | Published 2026-09-16 against a pre-release CmdStan snapshot (`11cb052`); the sampling harness that produced it was removed, so it is not rerun. |
+| [Rethinking models: speedup and numerical differences](../../output/rethinking-report/rethinking-report.md) | Published 2026-09-16 against a pre-release CmdStan snapshot (`11cb052`); the sampling harness that produced it was removed, so it is not rerun. |
+| [Teaching sweep: evidence and reproduction](../../output/teaching-performance/EVIDENCE.md) | Published 2026-09-16 against a pre-release CmdStan snapshot (`11cb052`); the sampling harness that produced it was removed, so it is not rerun. |
+| [Teaching model performance](../../output/teaching-performance/README.md) | Published 2026-09-16 against a pre-release CmdStan snapshot (`11cb052`); the sampling harness that produced it was removed, so it is not rerun. |
