@@ -315,7 +315,7 @@ static void check_tail_glm(const std::string& tag, uint16_t opcode, bool propto,
   const int ss = g.add_slot(1, false);
   const int total = g.add_slot(1, false);
   const int op = g.add_op(opcode, {Xs, as, bs}, lp, idata);
-  g.ops[(size_t)op].variant = propto ? 0x80u : 0x00u;
+  g.ops[(size_t)op].variant = propto ? 0x87u : 0x00u;
   g.add_op(OP_MUL, {lp, ss}, total);
   g.result_slot = total;
 

@@ -1584,6 +1584,7 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_cmdstan_replay
            COMMAND ${Python3_EXECUTABLE} tests/test_cmdstan_replay.py
                    --build ${CMAKE_CURRENT_BINARY_DIR}
+                   --stanc ${STANLI_STANC_EXECUTABLE}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # Friendly local entry points. These deliberately invoke CTest rather than
   # duplicating discovery in a shell script, so a developer runs exactly the

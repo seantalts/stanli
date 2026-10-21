@@ -1242,6 +1242,12 @@ double nid_glm_eval(KernelCtx& ctx) {
   const auto beta = as_rvar(ctx.in[3]);
   const auto sigma = as_rvar(ctx.in[4]);
   const bool one_a = ctx.in[2].len == 1, one_s = ctx.in[4].len == 1;
+  const bool legacy = ctx.variant == 0;
+  const bool sigma_data = propto && !legacy && (ctx.variant & 0x10u) == 0;
+  const bool others_data = propto && !legacy && (ctx.variant & 0xfu) == 0;
+  if (!values_only() && sigma_data)
+    for (int k = others_data ? 2 : 4; k <= 4; ++k)
+      if (s.buf[k]) std::fill_n(s.buf[k], ctx.in[k].len, 0.0);
   auto call = [&](const auto& y, const auto& x, const auto& a,
                   const auto& scale) {
     record_probability_call([&] {
@@ -1250,15 +1256,35 @@ double nid_glm_eval(KernelCtx& ctx) {
                  : stan::math::normal_id_glm_lpdf<false>(y, x, a, beta, scale);
     });
   };
-  auto dispatch = [&](const auto& y, const auto& x) {
-    if (one_a && one_s)
-      call(y, x, alpha(0), sigma(0));
-    else if (one_a)
-      call(y, x, alpha(0), sigma);
-    else if (one_s)
-      call(y, x, alpha, sigma(0));
+  auto call_data_scale = [&](const auto& y, const auto& x, const auto& a,
+                             const auto& b, const auto& scale) {
+    record_probability_call([&] {
+      return stan::math::normal_id_glm_lpdf<true>(y, x, a, b, scale);
+    });
+  };
+  auto with_scale_data = [&](auto&& f) {
+    if (one_s)
+      f(ctx.in[4].data[0]);
     else
+      f(CMapV(ctx.in[4].data, ctx.in[4].len));
+  };
+  auto dispatch = [&](const auto& y, const auto& x) {
+    if (sigma_data) {
+      with_scale_data([&](const auto& scale) {
+        if (one_a)
+          call_data_scale(y, x, alpha(0), beta, scale);
+        else
+          call_data_scale(y, x, alpha, beta, scale);
+      });
+    } else if (one_a && one_s) {
+      call(y, x, alpha(0), sigma(0));
+    } else if (one_a) {
+      call(y, x, alpha(0), sigma);
+    } else if (one_s) {
+      call(y, x, alpha, sigma(0));
+    } else {
       call(y, x, alpha, sigma);
+    }
   };
   const bool row_x = ctx.n_idata >= 5 && ctx.idata[4] == 1;
   auto pick_x = [&](const auto& y) {
@@ -1273,7 +1299,28 @@ double nid_glm_eval(KernelCtx& ctx) {
       dispatch(y, Xd);
     }
   };
-  if (y_var) {
+  if (sigma_data && others_data) {
+    const CMapV beta_data(ctx.in[3].data, ctx.in[3].len);
+    auto all_data = [&](const auto& y, const auto& x) {
+      with_scale_data([&](const auto& scale) {
+        if (one_a)
+          call_data_scale(y, x, ctx.in[2].data[0], beta_data, scale);
+        else
+          call_data_scale(y, x, CMapV(ctx.in[2].data, ctx.in[2].len), beta_data,
+                          scale);
+      });
+    };
+    auto pick_data_x = [&](const auto& y) {
+      if (row_x)
+        all_data(y, Xd.row(0));
+      else
+        all_data(y, Xd);
+    };
+    if (one_y)
+      pick_data_x(ctx.in[0].data[0]);
+    else
+      pick_data_x(yd);
+  } else if (y_var) {
     if (one_y)
       pick_x(yv(0));
     else
@@ -1601,6 +1648,22 @@ double ordered_eval(KernelCtx& ctx) {
   const int cuts_encoded = ctx.idata[ctx.n_idata - 1];
   const bool propto = (ctx.variant & 0x80u) != 0;
   std::vector<int> y(ctx.idata, ctx.idata + N);
+  if constexpr (Kind == kOrderedLogistic) {
+    if (propto && (ctx.variant & 0x3u) == 0) {
+      if constexpr (Grad) return 0.0;
+      Eigen::VectorXd location =
+          Eigen::Map<const Eigen::VectorXd>(ctx.in[0].data, ctx.in[0].len);
+      auto data_cuts = mvt_vectors<double>(ctx.in[1], K, cuts_encoded);
+      double value = 0;
+      with_mvt_argument(data_cuts, cuts_encoded, [&](const auto& cutpoints) {
+        value = ctx.in[0].len == 1 ? stan::math::ordered_logistic_lpmf<true>(
+                                         y, location(0), cutpoints)
+                                   : stan::math::ordered_logistic_lpmf<true>(
+                                         y, location, cutpoints);
+      });
+      return value;
+    }
+  }
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   // ordered_probit does not condition its summands on propto or the scalar
@@ -1771,7 +1834,8 @@ void ologistic_fwd(KernelCtx& ctx) {
   // validation semantics are unchanged.
   if (ctx.n_idata < 4 ||
       ctx.idata[ctx.n_idata - 3] != kVectorizedDensityLayoutMarker ||
-      ctx.idata[ctx.n_idata - 1] >= 0) {
+      ctx.idata[ctx.n_idata - 1] >= 0 ||
+      ((ctx.variant & 0x80u) && (ctx.variant & 0x3u) == 0)) {
     ctx.out.data[0] = ordered_eval<false, kOrderedLogistic>(ctx);
     return;
   }
@@ -2051,6 +2115,26 @@ double tglm_eval(KernelCtx& ctx) {
   const unsigned scalar_mask =
       scalar_layout ? (unsigned)ctx.idata[ctx.n_idata - 1] : 0u;
   const bool propto = (ctx.variant & 0x80u) != 0;
+  if constexpr (Kind == kBinomLogitGlm) {
+    if (propto && (ctx.variant & 0x7u) == 0) {
+      std::vector<int> nn(ctx.idata, ctx.idata + rows);
+      std::vector<int> NN(ctx.idata + rows, ctx.idata + 2 * rows);
+      const CMapM Xd(ctx.in[0].data, rows, cols);
+      const CMapV beta_d(ctx.in[2].data, cols);
+      if (!values_only())
+        std::fill_n(ctx.scratch, ctx.in[0].len + ctx.in[1].len + ctx.in[2].len,
+                    0.0);
+      return with_glm_integer(nn, scalar_mask & 1u, [&](const auto& n_arg) {
+        return with_glm_integer(NN, scalar_mask & 2u, [&](const auto& N_arg) {
+          if (ctx.in[1].len == 1)
+            return stan::math::binomial_logit_glm_lpmf<true>(
+                n_arg, N_arg, Xd, ctx.in[1].data[0], beta_d);
+          return stan::math::binomial_logit_glm_lpmf<true>(
+              n_arg, N_arg, Xd, CMapV(ctx.in[1].data, rows), beta_d);
+        });
+      });
+    }
+  }
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   VarM X = tail_m(ctx, 0, rows, cols);
@@ -2111,6 +2195,19 @@ void clglm_fwd(KernelCtx& ctx) {
   std::vector<int> y(ctx.idata, ctx.idata + rows);
   sink s = recorded_tail_sink<3>(ctx);
   sink_scope active(s);
+  if ((ctx.variant & 0x80u) && (ctx.variant & 0x7u) == 0) {
+    const CMapM Xd(ctx.in[0].data, rows, cols);
+    const CMapV alpha_d(ctx.in[1].data, ctx.in[1].len);
+    const CMapM beta_d(ctx.in[2].data, cols, ctx.in[2].len / cols);
+    with_glm_integer(y, scalar_y, [&](const auto& outcome) {
+      record_probability_call([&] {
+        return stan::math::categorical_logit_glm_lpmf<true>(outcome, Xd,
+                                                            alpha_d, beta_d);
+      });
+    });
+    ctx.out.data[0] = s.value;
+    return;
+  }
   const auto X = as_rvar_matrix(ctx.in[0], rows, cols);
   const auto alpha = as_rvar(ctx.in[1]);
   const auto beta = as_rvar_matrix(ctx.in[2], cols, ctx.in[2].len / cols);
@@ -2138,6 +2235,19 @@ void olglm_fwd(KernelCtx& ctx) {
   std::vector<int> y(ctx.idata, ctx.idata + rows);
   sink s = recorded_tail_sink<3>(ctx);
   sink_scope active(s);
+  if ((ctx.variant & 0x80u) && (ctx.variant & 0x7u) == 0) {
+    const CMapM Xd(ctx.in[0].data, rows, cols);
+    const CMapV beta_d(ctx.in[1].data, ctx.in[1].len);
+    const CMapV cuts_d(ctx.in[2].data, ctx.in[2].len);
+    with_glm_integer(y, scalar_y, [&](const auto& outcome) {
+      record_probability_call([&] {
+        return stan::math::ordered_logistic_glm_lpmf<true>(outcome, Xd, beta_d,
+                                                           cuts_d);
+      });
+    });
+    ctx.out.data[0] = s.value;
+    return;
+  }
   const auto X = as_rvar_matrix(ctx.in[0], rows, cols);
   const auto beta = as_rvar(ctx.in[1]), cuts = as_rvar(ctx.in[2]);
   with_glm_integer(y, scalar_y, [&](const auto& outcome) {

@@ -51,6 +51,21 @@ void glm_bind_x_alpha(KernelCtx& ctx, Call&& call) {
                                              shape.cols));
 }
 
+bool glm_inactive(const KernelCtx& ctx, unsigned bits) {
+  return (ctx.variant & 0x80u) != 0 && (ctx.variant & bits) == 0;
+}
+
+template <typename Call>
+void glm_bind_data_x_alpha(KernelCtx& ctx, Call&& call) {
+  const GlmShape shape = glm_shape(ctx);
+  const Eigen::Map<const Eigen::MatrixXd> X(ctx.in[0].data, shape.rows,
+                                            shape.cols);
+  if (ctx.in[1].len == 1)
+    call(X, ctx.in[1].data[0]);
+  else
+    call(X, Eigen::Map<const Eigen::VectorXd>(ctx.in[1].data, ctx.in[1].len));
+}
+
 }  // namespace
 
 // bernoulli_logit_glm(y | X, alpha, beta): X is mapped column-major like
@@ -73,6 +88,19 @@ void bernoulli_logit_glm_fwd(KernelCtx& ctx) {
     return stan::math::bernoulli_logit_glm_lpmf<false>(outcome, X, alpha,
                                                        as_rvar(ctx.in[2]));
   };
+  if (glm_inactive(ctx, 0x7u)) {
+    const Eigen::Map<const Eigen::VectorXd> beta(ctx.in[2].data, ctx.in[2].len);
+    glm_bind_data_x_alpha(ctx, [&](const auto& X, const auto& alpha) {
+      record_probability_call([&] {
+        return shape.scalar_y ? stan::math::bernoulli_logit_glm_lpmf<true>(
+                                    y(0), X, alpha, beta)
+                              : stan::math::bernoulli_logit_glm_lpmf<true>(
+                                    y, X, alpha, beta);
+      });
+    });
+    ctx.out.data[0] = s.value;
+    return;
+  }
   glm_bind_x_alpha(ctx, [&](const auto& X, const auto& alpha) {
     return shape.scalar_y ? with_y(X, y(0), alpha) : with_y(X, y, alpha);
   });
@@ -101,6 +129,19 @@ void poisson_log_glm_fwd(KernelCtx& ctx) {
     return stan::math::poisson_log_glm_lpmf<false>(outcome, X, alpha,
                                                    as_rvar(ctx.in[2]));
   };
+  if (glm_inactive(ctx, 0x7u)) {
+    const Eigen::Map<const Eigen::VectorXd> beta(ctx.in[2].data, ctx.in[2].len);
+    glm_bind_data_x_alpha(ctx, [&](const auto& X, const auto& alpha) {
+      record_probability_call([&] {
+        return shape.scalar_y
+                   ? stan::math::poisson_log_glm_lpmf<true>(y(0), X, alpha,
+                                                            beta)
+                   : stan::math::poisson_log_glm_lpmf<true>(y, X, alpha, beta);
+      });
+    });
+    ctx.out.data[0] = s.value;
+    return;
+  }
   glm_bind_x_alpha(ctx, [&](const auto& X, const auto& alpha) {
     return shape.scalar_y ? with_y(X, y(0), alpha) : with_y(X, y, alpha);
   });
@@ -132,6 +173,44 @@ void neg_binomial_2_log_glm_fwd(KernelCtx& ctx) {
     return stan::math::neg_binomial_2_log_glm_lpmf<false>(
         outcome, X, alpha, as_rvar(ctx.in[2]), as_rvar(ctx.in[3]));
   };
+  const bool phi_data = glm_inactive(ctx, 0x8u);
+  const bool abx_data = glm_inactive(ctx, 0x7u);
+  if (phi_data || abx_data) {
+    const auto with_phi = [&](auto&& f) -> rvar {
+      if (phi_data) {
+        if (ctx.in[3].len == 1) return f(ctx.in[3].data[0]);
+        return f(
+            Eigen::Map<const Eigen::VectorXd>(ctx.in[3].data, ctx.in[3].len));
+      }
+      if (ctx.in[3].len == 1) return f(rvar(ctx.in[3].data[0]));
+      return f(as_rvar(ctx.in[3]));
+    };
+    const auto lpmf = [&](const auto& X, const auto& alpha, const auto& beta,
+                          const auto& phi) -> rvar {
+      return shape.scalar_y ? stan::math::neg_binomial_2_log_glm_lpmf<true>(
+                                  y(0), X, alpha, beta, phi)
+                            : stan::math::neg_binomial_2_log_glm_lpmf<true>(
+                                  y, X, alpha, beta, phi);
+    };
+    if (abx_data) {
+      const Eigen::Map<const Eigen::VectorXd> beta(ctx.in[2].data,
+                                                   ctx.in[2].len);
+      glm_bind_data_x_alpha(ctx, [&](const auto& X, const auto& alpha) {
+        record_probability_call([&] {
+          return with_phi(
+              [&](const auto& phi) { return lpmf(X, alpha, beta, phi); });
+        });
+      });
+    } else {
+      glm_bind_x_alpha(ctx, [&](const auto& X, const auto& alpha) {
+        return with_phi([&](const auto& phi) {
+          return lpmf(X, alpha, as_rvar(ctx.in[2]), phi);
+        });
+      });
+    }
+    ctx.out.data[0] = s.value;
+    return;
+  }
   glm_bind_x_alpha(ctx, [&](const auto& X, const auto& alpha) {
     return shape.scalar_y ? with_y(X, y(0), alpha) : with_y(X, y, alpha);
   });

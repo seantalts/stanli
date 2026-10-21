@@ -386,10 +386,12 @@ DensityCallPlan density_call_plan(
     if (arguments[1].active) plan.variant |= kCategoricalArgAutodiff;
     if (scalar) plan.variant |= kCategoricalScalarOutcome;
   } else {
-    plan.variant =
-        spec.fixed_variant |
-        (spec.activity_mask < 0 ? plan.activity_mask
-                                : static_cast<uint8_t>(spec.activity_mask));
+    const bool all_data_glm =
+        spec.glm_layout && spec.activity_mask >= 0 && plan.activity_mask == 0;
+    plan.variant = spec.fixed_variant |
+                   (spec.activity_mask < 0 ? plan.activity_mask
+                    : all_data_glm ? uint8_t{0}
+                                   : static_cast<uint8_t>(spec.activity_mask));
   }
 
   if (spec.shape == DensityShape::FirstMatrixRows) {

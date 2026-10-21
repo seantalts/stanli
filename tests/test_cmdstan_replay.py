@@ -3,7 +3,9 @@
 
 Every tests/fixtures/cmdstan_replay/NAME.stan has a NAME.ref.json recorded
 once with tools/record_replay_refs.py, so a CmdStan checkout is not needed
-on every run. A point where CmdStan's value is finite must match to 1e-9.
+on every run. Each fixture is replayed through the embedded compiler and
+through the stock stanc, which optimizes at --O1 and so reaches the GLM
+rewrites. Every recorded point must match to 1e-9.
 """
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ import argparse
 import json
 import math
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,7 +32,7 @@ def parse_ok(output):
     raise ValueError("no OK line in stanli_check output:\n" + output)
 
 
-def replay(stan, check):
+def replay(stan, check, stanc):
     reference = json.loads(stan.with_suffix(".ref.json").read_text())
     if reference["source_sha256"] != source_digest(stan):
         raise ValueError(stan.name + ": source changed; re-record with "
@@ -38,12 +41,17 @@ def replay(stan, check):
     with tempfile.TemporaryDirectory() as tmp:
         data_path = pathlib.Path(tmp) / "data.json"
         data_path.write_text(json.dumps(reference["data"]), encoding="utf-8")
+        model = pathlib.Path(tmp) / stan.name
+        shutil.copyfile(stan, model)
         for want in reference["points"]:
-            result = subprocess.run(
-                [str(check), str(stan), str(data_path),
-                 "--point", str(want["point"])],
-                cwd=REPO, text=True, capture_output=True, timeout=120)
-            where = f"{stan.name} point {want['point']}"
+            command = [str(check), str(model), str(data_path),
+                       "--point", str(want["point"])]
+            if stanc is not None:
+                command += ["--stanc", str(stanc)]
+            result = subprocess.run(command, cwd=REPO, text=True,
+                                    capture_output=True, timeout=120)
+            where = (f"{stan.name} point {want['point']}"
+                     + (" (stock stanc)" if stanc else ""))
             try:
                 lp, grad = parse_ok(result.stdout)
             except ValueError:
@@ -64,11 +72,13 @@ def replay(stan, check):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", type=pathlib.Path, default=REPO / "build-rel")
+    parser.add_argument("--stanc", type=pathlib.Path,
+                        default=REPO / "deps/stanc3/stanc")
     args = parser.parse_args()
     check = (args.build / "stanli_check").resolve()
     failed = 0
     for stan in sorted(FIXTURES.glob("*.stan")):
-        problems = replay(stan, check)
+        problems = replay(stan, check, None) + replay(stan, check, args.stanc)
         if problems:
             failed += 1
             print("FAIL " + "\n     ".join(problems))

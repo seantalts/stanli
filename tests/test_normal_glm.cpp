@@ -55,19 +55,44 @@ double reference_normal_glm(KernelCtx& ctx) {
   for (int64_t i = 0; i < ctx.in[4].len; ++i) sigma(i) = ctx.in[4].data[i];
   var out;
   const bool one_a = ctx.in[2].len == 1, one_s = ctx.in[4].len == 1;
-  auto call = [&](auto&& y, auto&& x, auto&& a, auto&& s) {
-    return propto ? stan::math::normal_id_glm_lpdf<true>(y, x, a, beta, s)
-                  : stan::math::normal_id_glm_lpdf<false>(y, x, a, beta, s);
+  const bool legacy = ctx.variant == 0;
+  const bool sigma_data = propto && !legacy && (ctx.variant & 0x10u) == 0;
+  const bool others_data = propto && !legacy && (ctx.variant & 0xfu) == 0;
+  CMapV alpha_d(ctx.in[2].data, ctx.in[2].len);
+  CMapV beta_d(ctx.in[3].data, ctx.in[3].len);
+  CMapV sigma_d(ctx.in[4].data, ctx.in[4].len);
+  auto call = [&](auto&& y, auto&& x, auto&& a, auto&& b, auto&& s) {
+    if (propto) return var(stan::math::normal_id_glm_lpdf<true>(y, x, a, b, s));
+    return var(stan::math::normal_id_glm_lpdf<false>(y, x, a, b, s));
   };
   auto dispatch = [&](auto&& y, auto&& x) {
-    if (one_a && one_s)
-      out = call(y, x, alpha(0), sigma(0));
-    else if (one_a)
-      out = call(y, x, alpha(0), sigma);
-    else if (one_s)
-      out = call(y, x, alpha, sigma(0));
-    else
-      out = call(y, x, alpha, sigma);
+    if (others_data && sigma_data) {
+      if (one_a && one_s)
+        out = call(y, x, alpha_d(0), beta_d, sigma_d(0));
+      else if (one_a)
+        out = call(y, x, alpha_d(0), beta_d, sigma_d);
+      else if (one_s)
+        out = call(y, x, alpha_d, beta_d, sigma_d(0));
+      else
+        out = call(y, x, alpha_d, beta_d, sigma_d);
+    } else if (sigma_data) {
+      if (one_a && one_s)
+        out = call(y, x, alpha(0), beta, sigma_d(0));
+      else if (one_a)
+        out = call(y, x, alpha(0), beta, sigma_d);
+      else if (one_s)
+        out = call(y, x, alpha, beta, sigma_d(0));
+      else
+        out = call(y, x, alpha, beta, sigma_d);
+    } else if (one_a && one_s) {
+      out = call(y, x, alpha(0), beta, sigma(0));
+    } else if (one_a) {
+      out = call(y, x, alpha(0), beta, sigma);
+    } else if (one_s) {
+      out = call(y, x, alpha, beta, sigma(0));
+    } else {
+      out = call(y, x, alpha, beta, sigma);
+    }
   };
   const bool row_x = ctx.n_idata >= 5 && ctx.idata[4] == 1;
   auto pick_x = [&](auto&& y) {
