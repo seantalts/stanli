@@ -21,6 +21,7 @@ import math
 import os
 import pathlib
 import platform
+import re
 import signal
 import shutil
 import shlex
@@ -85,6 +86,28 @@ def checkout_identity(path):
         return subprocess.check_output(["git", "-C", str(path), *args])
     return dict(head=git("rev-parse", "HEAD").decode().strip(),
                 tracked_diff_sha256=hashlib.sha256(git("diff", "HEAD", "--binary")).hexdigest())
+
+
+def pinned_cmdstan_sha():
+    text = (REPO / "tools/dev_setup.sh").read_text()
+    match = re.search(r"^CMDSTAN_SHA=([0-9a-f]{40})\b", text, re.M)
+    if not match:
+        raise ValueError("tools/dev_setup.sh has no CMDSTAN_SHA pin")
+    return match.group(1)
+
+
+def require_pinned_cmdstan(cmdstan, allow_unpinned):
+    try:
+        head = checkout_identity(cmdstan)["head"]
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError(f"{cmdstan} is not a CmdStan git checkout") from exc
+    pin = pinned_cmdstan_sha()
+    if head != pin and not allow_unpinned:
+        raise ValueError(
+            f"CmdStan checkout {cmdstan} is at {head}, but tools/dev_setup.sh "
+            f"pins {pin}. Run tools/dev_setup.sh to install the pinned "
+            "checkout, or pass --allow-unpinned-cmdstan to measure against "
+            "this one and record that in the manifest.")
 
 
 def library_identity(cmdstan):
@@ -700,8 +723,9 @@ def run_config(args):
     config = {k: str(v) if isinstance(v, pathlib.Path) else v for k, v in vars(args).items()
               if k not in ("resume", "output", "build_cache", "no_build_cache", "build_jobs",
                            "points_file")}
-    if not config.get("fast_math"):
-        config.pop("fast_math", None)
+    for flag in ("fast_math", "allow_unpinned_cmdstan"):
+        if not config.get(flag):
+            config.pop(flag, None)
     return config
 
 
@@ -825,6 +849,9 @@ def main(argv=None):
                              f"(default: $STANLI_BENCH_CACHE or {DEFAULT_CACHE})")
     parser.add_argument("--no-build-cache", action="store_true",
                         help="build every CmdStan binary inside the run directory")
+    parser.add_argument("--allow-unpinned-cmdstan", action="store_true",
+                        help="measure against a CmdStan checkout other than the "
+                             "CMDSTAN_SHA pinned in tools/dev_setup.sh")
     parser.add_argument("--build-jobs", type=int, default=8,
                         help="gradient driver builds to run at once before timing starts")
     args = parser.parse_args(argv)
@@ -858,6 +885,10 @@ def main(argv=None):
                                 "STANLI_DEBUG_", "STANLI_DUMP_")))]
     if overrides:
         parser.error("unset benchmark environment overrides: " + ", ".join(sorted(overrides)))
+    try:
+        require_pinned_cmdstan(args.cmdstan, args.allow_unpinned_cmdstan)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.no_build_cache:
         args.build_cache = None
     else:
