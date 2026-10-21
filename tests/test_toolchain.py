@@ -16,14 +16,19 @@ sys.path.insert(0, str(REPO / "tools"))
 
 import toolchain
 
-KEYS = ("CMDSTAN_TAG", "CMDSTAN_SHA", "STAN_SHA", "MATH_SHA", "MATH_VERSION",
-        "STANC3_SRC_REPO", "STANC3_SRC_SHA", "STANC3_VERSION", "BRIDGESTAN_SHA",
+KEYS = ("CMDSTAN_TAG", "CMDSTAN_SHA", "STAN_SHA", "MATH_SHA",
+        "STANC3_SRC_REPO", "STANC3_SRC_SHA", "BRIDGESTAN_SHA",
         "PDB_SHA", "FMT_SHA", "OCAML_VERSION", "OPAM_SWITCH")
 SHAS = ("CMDSTAN_SHA", "STAN_SHA", "MATH_SHA", "STANC3_SRC_SHA",
         "BRIDGESTAN_SHA", "PDB_SHA", "FMT_SHA")
 
 
 class PinsFileTests(unittest.TestCase):
+    def test_no_pin_shadows_a_cmdstan_or_bridgestan_make_variable(self):
+        reserved = {"STANC3_VERSION", "STANC", "STANCFLAGS", "MATH", "STAN", "CMDSTAN",
+                    "TBB_LIBRARIES", "CXX", "CXXFLAGS", "O"}
+        self.assertFalse(reserved & set(toolchain.pins()))
+
     def test_every_key_is_present_and_nothing_else(self):
         self.assertEqual(set(toolchain.pins()), set(KEYS))
 
@@ -36,8 +41,6 @@ class PinsFileTests(unittest.TestCase):
     def test_release_labels_have_the_expected_shape(self):
         pins = toolchain.pins()
         self.assertRegex(pins["CMDSTAN_TAG"], r"^v\d+\.\d+\.\d+$")
-        self.assertRegex(pins["MATH_VERSION"], r"^\d+\.\d+\.\d+$")
-        self.assertRegex(pins["STANC3_VERSION"], r"^\d+\.\d+\.\d+$")
         self.assertEqual(toolchain.cmdstan_version(), pins["CMDSTAN_TAG"][1:])
 
     def test_a_recorded_head_is_named_by_release_only_when_it_is_the_pin(self):
