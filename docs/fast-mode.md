@@ -54,17 +54,17 @@ positions are fused into vector operations.
 
 ## How much faster
 
-On the shared test corpus (<!--gen:fast_population-->334<!--/gen--> models with timings, Apple M3 Ultra,
-<!--gen:fast_runs-->fast mode 2026-10-10 (`84e60796`), default mode 2026-10-20 (`b61aca02`)<!--/gen-->):
+On the shared test corpus (<!--gen:fast_population-->342<!--/gen--> models with timings, Apple M3 Ultra,
+<!--gen:fast_runs-->2026-10-21, Stanli source `051bb4ba`, default and fast mode from the same binaries<!--/gen-->):
 
-- Fast mode is <!--gen:fast_geomean-->1.87x<!--/gen--> faster than default mode in geometric mean. The median
+- Fast mode is <!--gen:fast_geomean-->1.92x<!--/gen--> faster than default mode in geometric mean. The median
   model is <!--gen:fast_median-->1.03x<!--/gen--> faster. Most models gain little, and models with repeated
-  observations or repeated work gain a lot. <!--gen:fast_ge_two-->91<!--/gen--> models are at least 2x
-  faster, <!--gen:fast_ge_ten-->42<!--/gen--> at least 10x, and <!--gen:fast_ge_hundred-->7<!--/gen--> at least 100x (<!--gen:fast_top_two-->radon_pooled 508x, nes 255x<!--/gen-->).
-- Against CmdStan, stanli's geometric-mean speedup goes from <!--gen:fast_cmdstan_default-->2.25x<!--/gen--> in
-  default mode to <!--gen:fast_cmdstan_fast-->3.96x<!--/gen--> in fast mode, and fast mode is faster than CmdStan
-  on <!--gen:fast_beats_fast-->319<!--/gen--> of the <!--gen:fast_population-->334<!--/gen--> models.
-- <!--gen:fast_slowest-->The slowest model in fast mode, `s2_com_poisson`, is 11.53x slower.<!--/gen-->
+  observations or repeated work gain a lot. <!--gen:fast_ge_two-->81<!--/gen--> models are at least 2x
+  faster, <!--gen:fast_ge_ten-->42<!--/gen--> at least 10x, and <!--gen:fast_ge_hundred-->8<!--/gen--> at least 100x (<!--gen:fast_top_two-->radon_pooled 511x, nes 259x<!--/gen-->).
+- Against CmdStan, stanli's geometric-mean speedup goes from <!--gen:fast_cmdstan_default-->2.24x<!--/gen--> in
+  default mode to <!--gen:fast_cmdstan_fast-->4.28x<!--/gen--> in fast mode, and fast mode is faster than CmdStan
+  on <!--gen:fast_beats_fast-->334<!--/gen--> of the <!--gen:fast_population-->342<!--/gen--> models.
+- <!--gen:fast_slowest-->The slowest model in fast mode, `s2_invgaussian`, is 1.06x slower.<!--/gen-->
 
 Details and the per-model table are in [Benchmarks](benchmarks.md#fast-mode).
 
