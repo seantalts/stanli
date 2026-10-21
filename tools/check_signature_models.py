@@ -44,6 +44,7 @@ import time
 
 from check_function_models import digest, parse, source_digest
 from cmdstan_ref import compile_cmd
+import toolchain
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "harnesses"))
 from function_signature_common import CONTEXT_DATA  # noqa: E402
@@ -333,6 +334,7 @@ def main():
                              + ", ".join(sorted(missing)))
         models = {name: models[name] for name in args.model}
     if args.record:
+        toolchain.require_pinned_toolchain(args.cmdstan, args.stanc)
         record(models, complete=not args.model and not args.manifest,
                args=args)
     if not args.reference.exists():

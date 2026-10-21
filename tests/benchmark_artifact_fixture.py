@@ -35,6 +35,8 @@ def artifact_fixture(dropped=(), point_sources=None, counts=None):
                     for name in ("good", "failed")},
             executables=dict(bench="bench-hash", vectorize_probe="probe-hash", stanc="b" * 64),
             threads={"STAN_NUM_THREADS": "1"},
+            stanli_source=dict(head="s" * 40),
+            toolchains=dict(cmdstan=dict(head="c" * 40), math=dict(head="m" * 40)),
             sources={"harnesses/corpus_bench.py": "harness-hash", "tools/bench_cmdstan_grad.cpp": "driver-hash",
                      "tools/benchmark_timer.hpp": "timer-hash"},
             machine=dict(platform="macOS-arm64", host="host", processor="arm", logical_cpus=32)))

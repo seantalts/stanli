@@ -9,8 +9,6 @@ permissions:
   contents: read
 
 env:
-  # Must match tools/dev_setup.sh and wheels.yml; only used when the
-  # toolchain cache misses and the pinned stanc is rebuilt from source.
   OPAM_VERSION: 2.5.2
 
 concurrency:
@@ -24,7 +22,7 @@ jobs:
   # is downloaded but two files, and no unreviewed compiler runs. Its
   # own job, so a toolchain-build failure cannot hide the report.
   # Reporting only: a frozen toolchain cannot *test* a new signature --
-  # that is a reviewed pin advance (STANC3_SRC_SHA in dev_setup.sh).
+  # that is a reviewed pin advance (STANC3_SRC_SHA in deps/pins.env).
   signature-watch:
     runs-on: ubuntu-24.04
     steps:
@@ -47,8 +45,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang
 
-      # dev_setup.sh is in the key: the stanc pin (STANC3_SRC_SHA)
-      # lives there, so advancing it rolls this cache.
+      # deps/pins.env is in the key, so advancing any pin rolls this cache.
       - name: Restore pinned Stan and CmdStan sources
         uses: actions/cache@v4
         with:
@@ -58,7 +55,7 @@ jobs:
             deps/stanc3
             deps/cmdstan
             deps/bridgestan
-          key: conformance-deps-linux-x86_64-${{ hashFiles('deps/fetch.sh', 'harnesses/conformance/fetch_cmdstan.sh', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
+          key: conformance-deps-linux-x86_64-${{ hashFiles('deps/pins.env', 'deps/fetch.sh', 'harnesses/conformance/fetch_cmdstan.sh', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
 
       # Only exercised when the cache misses: fetch_cmdstan.sh builds
       # the pinned stanc from source then, and the build needs opam.
@@ -77,7 +74,7 @@ jobs:
       - name: Validate the complete pinned reference toolchain
         run: |
           ./deps/fetch.sh
-          ./harnesses/conformance/fetch_cmdstan.sh
+          ./harnesses/conformance/fetch_cmdstan.sh --bridgestan
 
       - name: Build the public stanli Python runtime
         run: |
@@ -130,7 +127,7 @@ jobs:
             deps/stanc3
             deps/cmdstan
             deps/bridgestan
-          key: conformance-deps-linux-x86_64-${{ hashFiles('deps/fetch.sh', 'harnesses/conformance/fetch_cmdstan.sh', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
+          key: conformance-deps-linux-x86_64-${{ hashFiles('deps/pins.env', 'deps/fetch.sh', 'harnesses/conformance/fetch_cmdstan.sh', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
 
       # Insurance for the cache evaporating between inventory and here:
       # revalidation would then rebuild stanc from source, which needs
@@ -149,7 +146,7 @@ jobs:
       - name: Revalidate restored reference inputs
         run: |
           ./deps/fetch.sh
-          ./harnesses/conformance/fetch_cmdstan.sh
+          ./harnesses/conformance/fetch_cmdstan.sh --bridgestan
 
       - uses: actions/download-artifact@v4
         with:

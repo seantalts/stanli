@@ -15,6 +15,20 @@
   with full sampling runs.
 - The benchmark tables label the first ratio as the gradient ratio and add a
   last column with CmdStan / Stanli for total sampling.
+- Every pinned Stan toolchain version now lives in `deps/pins.env`: CmdStan,
+  Stan, Stan Math, stanc3, BridgeStan, posteriordb, fmt and the OCaml
+  switch. The scripts, workflows and tools read it, and the benchmark page
+  takes its CmdStan and source rows from the run manifest.
+- `harnesses/conformance/fetch_cmdstan.sh` is the one way to set up CmdStan
+  (`tools/dev_setup.sh --corpus` calls it). It installs the pinned stanc and
+  rebuilds CmdStan when the pins, the stanc or the compiler change; when
+  nothing changed it does nothing.
+- The benchmark and every other tool that compiles models against CmdStan now
+  refuse a checkout that does not match the pins, instead of measuring or
+  recording against it. `corpus_bench.py` keeps `--allow-unpinned-cmdstan`
+  and records the mismatch in the manifest. Earlier benchmark tables used a
+  pre-release CmdStan snapshot whose `bernoulli_logit` gradient was wrong
+  above a predictor of 20.
 
 ## 0.22.2
 

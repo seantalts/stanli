@@ -11,6 +11,7 @@ import re
 import shutil
 import statistics
 import sys
+import toolchain
 from xml.sax.saxutils import escape
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -149,7 +150,9 @@ settings = ('Seeds 1-4; target acceptance 0.8; maximum tree depth 10; random ini
             'iteration budget. The book\'s model-specific tuning and chain-count choices were not reproduced. '
             'CmdStan ran first for each seed. Stanli had a limit of three times that CmdStan CLI duration or 900 seconds, '
             'whichever was smaller; CmdStan also had a 900-second limit. All book runs completed. Sampling order was not counterbalanced.')
-hardware = ('Apple M3 Ultra, 96 GiB RAM, macOS ARM64; Release build; one engine at a time. Rethinking 2.42, CmdStan 2.39.0 '
+cmdstan_release = toolchain.cmdstan_release(manifest['identity']['toolchains']['cmdstan']['head'])
+hardware = ('Apple M3 Ultra, 96 GiB RAM, macOS ARM64; Release build; one engine at a time. Rethinking 2.42, '
+            f'CmdStan {cmdstan_release} '
             'and posterior 1.7.0. Runtime/compiler revision 6e462c2e; run '+manifest['run_id']+'. '
             'The toolchain was already installed. The manifest records executable, dependency and input identities.')
 scope = ('All 61 ulam() call sites in the chapters 4-16 supplement are listed, representing 58 distinct Stan/data pairs. '

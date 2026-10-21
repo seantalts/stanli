@@ -532,6 +532,8 @@ class MainWiringTests(unittest.TestCase):
                       mock.patch.object(corpus_bench, "corpus_cases", lambda *a: self.cases),
                       mock.patch.object(corpus_bench, "checkout_identity",
                                         lambda path: dict(head="h", tracked_diff_sha256="d")),
+                      mock.patch.object(corpus_bench.toolchain, "require_pinned_toolchain",
+                                        lambda *a, **k: dict(mismatches=[], stanc_sha256="s")),
                       mock.patch.object(corpus_bench, "library_identity", lambda path: {}),
                       mock.patch.object(corpus_bench, "compile_cmd", fake_compile),
                       mock.patch.object(corpus_bench, "Runner", self.make_runner),

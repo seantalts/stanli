@@ -11,7 +11,7 @@ LABEL org.opencontainers.image.source="https://github.com/seantalts/stanli"
 # image removes two repository-metadata refreshes from every wheel build.
 RUN dnf install -y epel-release \
     && dnf install -y \
-        unzip which diffutils patch rsync glibc-static ccache time \
+        unzip which diffutils patch rsync glibc-static ccache time git \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 

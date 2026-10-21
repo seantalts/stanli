@@ -21,6 +21,7 @@ import math
 import os
 import pathlib
 import platform
+import re
 import signal
 import shutil
 import shlex
@@ -35,6 +36,7 @@ import threading
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 import benchmark_points
+import toolchain
 from bench_build_cache import BuildCache, cache_key
 from cmdstan_ref import compile_cmd
 from corpus_inventory import corpus_cases
@@ -700,8 +702,9 @@ def run_config(args):
     config = {k: str(v) if isinstance(v, pathlib.Path) else v for k, v in vars(args).items()
               if k not in ("resume", "output", "build_cache", "no_build_cache", "build_jobs",
                            "points_file")}
-    if not config.get("fast_math"):
-        config.pop("fast_math", None)
+    for flag in ("fast_math", "allow_unpinned_cmdstan"):
+        if not config.get(flag):
+            config.pop(flag, None)
     return config
 
 
@@ -825,6 +828,9 @@ def main(argv=None):
                              f"(default: $STANLI_BENCH_CACHE or {DEFAULT_CACHE})")
     parser.add_argument("--no-build-cache", action="store_true",
                         help="build every CmdStan binary inside the run directory")
+    parser.add_argument("--allow-unpinned-cmdstan", action="store_true",
+                        help="measure against a CmdStan checkout other than the "
+                             "CMDSTAN_SHA pinned in deps/pins.env")
     parser.add_argument("--build-jobs", type=int, default=8,
                         help="gradient driver builds to run at once before timing starts")
     args = parser.parse_args(argv)
@@ -858,6 +864,13 @@ def main(argv=None):
                                 "STANLI_DEBUG_", "STANLI_DUMP_")))]
     if overrides:
         parser.error("unset benchmark environment overrides: " + ", ".join(sorted(overrides)))
+    try:
+        pin_check = toolchain.require_pinned_toolchain(
+            args.cmdstan, args.stanc, args.allow_unpinned_cmdstan,
+            stanc_declared=args.stanc != STANC.absolute())
+    except ValueError as exc:
+        parser.error(str(exc) + "\nOr pass --allow-unpinned-cmdstan to measure against "
+                     "this one and record that in the manifest.")
     if args.no_build_cache:
         args.build_cache = None
     else:
@@ -895,7 +908,9 @@ def main(argv=None):
                         stanli_source=checkout_identity(REPO),
                         executables={k: sha(getattr(args, k)) for k in
                                      ("bench", "stanc", "vectorize_probe")},
-                        toolchains={"cmdstan": checkout_identity(args.cmdstan),
+                        toolchains={**({"unpinned": pin_check["mismatches"]}
+                                       if pin_check["mismatches"] else {}),
+                                    "cmdstan": checkout_identity(args.cmdstan),
                                     "stan": checkout_identity(args.cmdstan / "stan"),
                                     "math": checkout_identity(args.cmdstan / "stan/lib/stan_math"),
                                     "stanli_math": checkout_identity(REPO / "deps/math"),

@@ -27,12 +27,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$PWD
 
-STANC3_SRC_REPO=https://github.com/stan-dev/stanc3.git
-STANC3_SRC_SHA=d58446e631b02cacc5355e373defc6092a684554
-PDB_SHA=28f8d3d6e975315f42aa274a8399f21e07a43b30
-CMDSTAN_SHA=d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6
-OPAM_SWITCH=stanc3-55
-OCAML_VERSION=5.5.0
+source deps/pins.env
 source tools/stanc_embed/provenance.sh
 source tools/build_jobs.sh
 BUILD_JOBS=$(stanli_detect_build_jobs)
@@ -210,22 +205,8 @@ if [ "$WANT_CORPUS" = 1 ]; then
   git -C deps/posteriordb fetch -q origin "$PDB_SHA"
   git -C deps/posteriordb checkout -q "$PDB_SHA"
 
-  step "CmdStan at $CMDSTAN_SHA (deps/cmdstan; used by tools/verify_sample.py)"
-  if [ ! -d deps/cmdstan/.git ]; then
-    git clone https://github.com/stan-dev/cmdstan.git deps/cmdstan
-  fi
-  git -C deps/cmdstan fetch -q origin "$CMDSTAN_SHA"
-  git -C deps/cmdstan checkout -q "$CMDSTAN_SHA"
-  git -C deps/cmdstan submodule update --init --recursive --quiet
-
-  if [ ! -f deps/cmdstan/stan/lib/stan_math/lib/tbb/libtbb.dylib ] &&
-     [ ! -f deps/cmdstan/stan/lib/stan_math/lib/tbb/libtbb.so.2 ] &&
-     [ ! -f deps/cmdstan/stan/lib/stan_math/lib/tbb/tbb.dll ]; then
-    step "building CmdStan (one-time; provides TBB + the bench comparator)"
-    make -C deps/cmdstan -j"$BUILD_JOBS" build
-  else
-    echo "CmdStan already built"
-  fi
+  step "CmdStan at $CMDSTAN_SHA (deps/cmdstan; the reference for the corpus tools)"
+  ./harnesses/conformance/fetch_cmdstan.sh
 
   step "corpus scoreboard"
   "$PYTHON" tools/corpus.py deps/posteriordb || true
@@ -234,14 +215,14 @@ fi
 # --- Stan conformance reference stack (optional) ---------------------------
 # The nightly sweep's oracle, locally: the pinned stanc built from source,
 # the exact CmdStan/Stan/Stan Math triple BridgeStan compiles against, and
-# the pinned reference client. fetch_cmdstan.sh already does the first three
-# and already refuses to proceed on a pin mismatch, so this adds only the
-# client and the staged runtime -- and every part of it is a no-op on the
+# the pinned reference client. fetch_cmdstan.sh --bridgestan already does the
+# first three and already refuses to proceed on a pin mismatch, so this adds
+# only the client and the staged runtime -- and every part of it is a no-op on the
 # second run. The cost people remember is the one-time stanc build; it is
 # once per machine per pin, not once per session, and core pays it too.
 if [ "$WANT_CONFORMANCE" = 1 ]; then
   step "conformance reference toolchain (stanc from source, CmdStan, BridgeStan)"
-  ./harnesses/conformance/fetch_cmdstan.sh
+  ./harnesses/conformance/fetch_cmdstan.sh --bridgestan
 
   step "conformance reference client ($CONFORMANCE_VENV)"
   [ -f "$VENV_PYTHON" ] || "$PYTHON" -m venv "$CONFORMANCE_VENV"

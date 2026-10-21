@@ -14,6 +14,7 @@ on:
     paths:
       - CMakeLists.txt
       - deps/fetch.sh
+      - deps/pins.env
       - compiler/native/**
       - compiler/ocaml/**
       - tools/stanc_embed/**
@@ -40,10 +41,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Keep these pins and the cache keys below identical to wheels.yml.
-  STANC3_SRC_REPO: https://github.com/stan-dev/stanc3.git
-  STANC3_SRC_SHA: d58446e631b02cacc5355e373defc6092a684554
-  OCAML_VERSION: 5.5.0
   OPAM_VERSION: 2.5.2
 
 jobs:
@@ -62,6 +59,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/pins
 
       - name: Install the PR compiler
         run: manylinux-install-clang
@@ -82,7 +81,7 @@ jobs:
         with:
           path: .ccache
           key: >-
-            ccache-manylinux_2_28_x86_64-release-clang-v6-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', '.github/manylinux/**', '.github/workflows/clang-ccache-seed.yml', '.github/workflows/wheels.yml', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh') }}
+            ccache-manylinux_2_28_x86_64-release-clang-v6-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', '.github/manylinux/**', '.github/workflows/clang-ccache-seed.yml', '.github/workflows/wheels.yml', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh', 'deps/pins.env') }}
           restore-keys: >-
             ccache-manylinux_2_28_x86_64-release-clang-v6-${{ steps.toolchain.outputs.id }}-
 
@@ -92,16 +91,10 @@ jobs:
           path: |
             deps/math
             deps/stan
-          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/fetch.sh') }}
+          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/pins.env', 'deps/fetch.sh') }}
 
       - name: Fetch pinned dependencies
         run: |
-          setup_repo=$(sed -n 's/^STANC3_SRC_REPO=\([^ ]*\).*/\1/p' \
-                         tools/dev_setup.sh)
-          setup_pin=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
-                        tools/dev_setup.sh)
-          test "$setup_repo" = "$STANC3_SRC_REPO"
-          test "$setup_pin" = "$STANC3_SRC_SHA"
           ./deps/fetch.sh
 
       # Configure with the embedded object too, so stanc_embed_c.cpp gets the
@@ -140,7 +133,7 @@ jobs:
         with:
           path: .ci-opam
           key: >-
-            stanc-toolchain-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
+            stanc-toolchain-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh', 'deps/pins.env') }}
 
       # Dune validates changed inputs itself. A prefix hit can reuse compiled
       # upstream modules after an overlay edit, but never supplies final artifacts.
@@ -151,9 +144,9 @@ jobs:
         with:
           path: deps/stanc3-src
           key: >-
-            stanc-dune-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+            stanc-dune-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh', 'deps/pins.env') }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
           restore-keys: >-
-            stanc-dune-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}-
+            stanc-dune-v1-manylinux_2_28_x86_64-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh', 'deps/pins.env') }}-
 
       - name: Install opam ${{ env.OPAM_VERSION }}
         if: steps.stanc-cache.outputs.cache-hit != 'true'
@@ -190,7 +183,7 @@ jobs:
           opam init --bare --disable-sandboxing --no-setup -y
           ./tools/dev_setup.sh --embed --no-build
           mkdir -p deps/ocaml-include
-          cp -R "$(opam var lib --switch=stanc3-55)/ocaml/caml" \
+          cp -R "$(opam var lib --switch=$OPAM_SWITCH)/ocaml/caml" \
                 deps/ocaml-include/
         env:
           OPAMYES: '1'
@@ -200,11 +193,11 @@ jobs:
         run: |
           source tools/stanc_embed/provenance.sh
           stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
-            "$STANC3_SRC_SHA" stanc3-55
+            "$STANC3_SRC_SHA" "$OPAM_SWITCH"
           test -x deps/stanc3/stanli-vectorize-probe
           stanc_embed_artifact_matches \
             deps/stanc3/stanli-vectorize-probe \
-            "$STANC3_SRC_SHA" stanc3-55
+            "$STANC3_SRC_SHA" "$OPAM_SWITCH"
           for symbol in caml_c_thread_register caml_c_thread_unregister; do
             nm -g deps/stanc3/stanc_embed.o | awk -v wanted="$symbol" '
               ($NF == wanted || $NF == "_" wanted) &&

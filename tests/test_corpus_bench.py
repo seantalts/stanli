@@ -10,6 +10,8 @@ import tempfile
 import zipfile
 import io
 import pathlib
+import shutil
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -36,6 +38,50 @@ class EnvironmentTests(unittest.TestCase):
                     main(["unused-cmdstan", "unused-pdb", "unused.tsv"])
                 self.assertEqual(raised.exception.code, 2)
                 self.assertIn(key, error.getvalue())
+
+
+@unittest.skipUnless(shutil.which("git"), "needs git")
+class CmdstanPinTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.checkout = pathlib.Path(self.temp.name)
+        git = ["git", "-C", str(self.checkout), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+        for nested in ("stan", "stan/lib/stan_math"):
+            (self.checkout / nested).mkdir(parents=True, exist_ok=True)
+            nested_git = ["git", "-C", str(self.checkout / nested), "-c", "user.name=t",
+                          "-c", "user.email=t@example.com"]
+            subprocess.run([*nested_git, "init", "-q"], check=True)
+            subprocess.run([*nested_git, "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+
+    def run_main(self, *extra):
+        from harnesses.corpus_bench import main
+        error = self.stderr = io.StringIO()
+        with mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if not k.startswith("STANLI_")}, clear=True), \
+                mock.patch("harnesses.corpus_bench.corpus_cases", side_effect=RuntimeError("past the guard")), \
+                contextlib.redirect_stderr(error):
+            main([str(self.checkout), "unused-pdb", "unused.tsv", *extra])
+        return error.getvalue()
+
+    def test_main_refuses_to_start_on_an_unpinned_checkout(self):
+        with self.assertRaises(SystemExit) as raised:
+            self.run_main()
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("deps/pins.env", self.stderr.getvalue())
+        self.assertIn("--allow-unpinned-cmdstan", self.stderr.getvalue())
+
+    def test_main_with_the_flag_gets_past_the_guard(self):
+        with self.assertRaisesRegex(RuntimeError, "past the guard"):
+            self.run_main("--allow-unpinned-cmdstan")
+
+    def test_the_flag_is_recorded_in_the_run_config_only_when_given(self):
+        base = dict(rounds=2, warmup_ms=1, points=4, resume=False, output="x")
+        self.assertNotIn("allow_unpinned_cmdstan",
+                         run_config(SimpleNamespace(**base, allow_unpinned_cmdstan=False)))
+        self.assertIs(run_config(SimpleNamespace(**base, allow_unpinned_cmdstan=True))
+                      ["allow_unpinned_cmdstan"], True)
 
 
 class RowLineTests(unittest.TestCase):

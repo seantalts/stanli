@@ -20,6 +20,7 @@ import subprocess
 import sys
 
 from cmdstan_ref import compile_cmd
+import toolchain
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "tests/function_coverage"
@@ -130,6 +131,7 @@ def main():
     if not names or (args.manifest is None and len(names) != 10):
         raise ValueError("Expected a nonempty manifest (ten models for the default suite)")
     if args.record:
+        toolchain.require_pinned_toolchain(args.cmdstan, args.stanc)
         args.toolchain = {
             "stanc_sha256": digest(args.stanc),
             "stanc_version": run([args.stanc, "--version"]).strip(),

@@ -13,11 +13,11 @@ BUILD_JOBS=$(stanli_detect_build_jobs)
 STANC3_SRC_SHA=$(stanc_embed_read_setup STANC3_SRC_SHA)
 STANC3_SRC_REPO=$(stanc_embed_read_setup STANC3_SRC_REPO)
 if [[ ! "$STANC3_SRC_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "could not read an exact STANC3_SRC_SHA from tools/dev_setup.sh" >&2
+  echo "could not read an exact STANC3_SRC_SHA from deps/pins.env" >&2
   exit 1
 fi
 if [ -z "$STANC3_SRC_REPO" ]; then
-  echo "could not read STANC3_SRC_REPO from tools/dev_setup.sh" >&2
+  echo "could not read STANC3_SRC_REPO from deps/pins.env" >&2
   exit 1
 fi
 EMBED_OBJECT=deps/stanc3/stanc_embed.o

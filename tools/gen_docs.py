@@ -26,6 +26,7 @@ import statistics
 import sys
 import warnings
 
+import toolchain
 from corpus_table import FIXED_GRADIENT_COUNT, render_catalog, render_gradient_catalog
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -53,6 +54,17 @@ def current_benchmark():
         rows = list(csv.DictReader(stream, delimiter="\t"))
     manifest = json.loads(manifest_path.read_text())
     return catalog, rows, manifest
+
+
+def cmdstan_pin():
+    return toolchain.pins()["CMDSTAN_SHA"], toolchain.cmdstan_version()
+
+
+def cmdstan_label(head, pin):
+    sha, version = pin
+    if head == sha:
+        return f"{version}, `{head}`" if version else f"`{head}`"
+    return f"`{head}` (not the pinned {version})" if version else f"`{head}`"
 
 
 def corpus_stats(rows):
@@ -111,10 +123,14 @@ def compute():
     catalog, benchmark_rows, manifest = current_benchmark()
     c_n, c_med, c_par = corpus_stats(benchmark_rows)
     t_med = total_sampling_median(benchmark_rows)
+    toolchains = manifest["identity"]["toolchains"]
 
     return {
         "benchmark_catalog": catalog,
         "benchmark_models": str(len(manifest["identity"]["inputs"])),
+        "benchmark_cmdstan": cmdstan_label(toolchains["cmdstan"]["head"], cmdstan_pin()),
+        "benchmark_stan_math": f"`{toolchains['math']['head']}`",
+        "benchmark_source": f"`{manifest['identity']['stanli_source']['head']}`",
         "benchmark_date": manifest["started_utc"][:10],
         "benchmark_vectorized_catalog": render_gradient_catalog().rstrip(),
         "corpus_reference_models": str(len(references)),

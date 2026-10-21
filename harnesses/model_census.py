@@ -95,6 +95,7 @@ from cmdstan_ref import compile_cmd  # noqa: E402
 # see the note at its definition. A census that scored agreement its own
 # way would be a second opinion nobody asked for.
 from verify_refs import default_check_bin, pair_dev  # noqa: E402
+import toolchain  # noqa: E402
 
 CORPUS = REPO / "deps" / "stanc3-src" / "test" / "integration" / "good"
 CACHE = REPO / "model-census-cache"
@@ -1061,6 +1062,14 @@ def main():
     if args.differential and not args.cmdstan:
         print("--differential needs --cmdstan DIR", file=sys.stderr)
         return 2
+    if args.differential:
+        try:
+            toolchain.require_pinned_toolchain(
+                args.cmdstan.resolve(), args.stanc,
+                stanc_declared=args.stanc.resolve() != STANC.resolve())
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
 
     # abspath, not resolve: deps/ is a symlink in every worktree and
     # resolving it puts the corpus outside the checkout, which turns every

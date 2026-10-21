@@ -30,6 +30,7 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import benchmark_points as bp
 import gen_benchmark_points as gen
+import toolchain
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 STANC = REPO / "deps/stanc3/stanc"
@@ -158,6 +159,8 @@ def main():
     parser.add_argument("--json", type=pathlib.Path, help="also write the raw results here")
     parser.add_argument("--timeout", type=int, default=3600)
     args = parser.parse_args()
+    toolchain.require_pinned_toolchain(args.cmdstan.resolve(), args.stanc,
+                                       stanc_declared=args.stanc.resolve() != STANC.resolve())
     document = bp.load(args.points_file)
     models = args.models.split(",")
     with tempfile.TemporaryDirectory(prefix="stanli-validate-") as temporary:

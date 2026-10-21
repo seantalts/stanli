@@ -8,7 +8,7 @@ _stanli_embed_repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 stanc_embed_read_setup() {
   local key=${1:?setup key}
   sed -n "s/^${key}=\\([^ ]*\\).*/\\1/p" \
-    "$_stanli_embed_repo_root/tools/dev_setup.sh"
+    "$_stanli_embed_repo_root/deps/pins.env"
 }
 
 _stanc_embed_sha256_stream() {
