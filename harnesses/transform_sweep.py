@@ -31,6 +31,7 @@ import tempfile
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from cmdstan_ref import build_reference, compare_points  # noqa: E402
+import toolchain  # noqa: E402
 
 # name -> (parameters block, target expression). The target has to touch
 # every element of the constrained value, or a transform could be wrong in
@@ -166,6 +167,7 @@ def main():
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args()
     cs = pathlib.Path(args.cmdstan).resolve()
+    toolchain.require_pinned_toolchain(cs, REPO / "deps/stanc3/stanc")
     cases = [c for c in CASES if args.filter in c[0]]
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="transform_sweep_"))

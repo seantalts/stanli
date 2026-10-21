@@ -47,6 +47,7 @@ import tempfile
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from cmdstan_ref import build_reference, compare_points  # noqa: E402
+import toolchain  # noqa: E402
 
 # Which build tree to test. --build points it elsewhere; the default
 # is the Release tree the wheel ships from.
@@ -302,6 +303,7 @@ def main():
                     help="build tree holding stanli_check and bench_grad")
     args = ap.parse_args()
     BUILD = args.build
+    toolchain.require_pinned_toolchain(args.cmdstan.resolve(), REPO / "deps/stanc3/stanc")
 
     have = claimed()
     density = not args.from_stanc

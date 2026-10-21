@@ -89,24 +89,6 @@ def checkout_identity(path):
                 tracked_diff_sha256=hashlib.sha256(git("diff", "HEAD", "--binary")).hexdigest())
 
 
-def pinned_cmdstan_sha():
-    return toolchain.pins()["CMDSTAN_SHA"]
-
-
-def require_pinned_cmdstan(cmdstan, allow_unpinned):
-    try:
-        head = checkout_identity(cmdstan)["head"]
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise ValueError(f"{cmdstan} is not a CmdStan git checkout") from exc
-    pin = pinned_cmdstan_sha()
-    if head != pin and not allow_unpinned:
-        raise ValueError(
-            f"CmdStan checkout {cmdstan} is at {head}, but deps/pins.env "
-            f"pins {pin}. Run tools/dev_setup.sh to install the pinned "
-            "checkout, or pass --allow-unpinned-cmdstan to measure against "
-            "this one and record that in the manifest.")
-
-
 def library_identity(cmdstan):
     # These ignored build products can change without changing a git diff.
     lib = cmdstan / "stan/lib/stan_math/lib"
@@ -883,9 +865,12 @@ def main(argv=None):
     if overrides:
         parser.error("unset benchmark environment overrides: " + ", ".join(sorted(overrides)))
     try:
-        require_pinned_cmdstan(args.cmdstan, args.allow_unpinned_cmdstan)
+        pin_check = toolchain.require_pinned_toolchain(
+            args.cmdstan, args.stanc, args.allow_unpinned_cmdstan,
+            stanc_declared=args.stanc != STANC.absolute())
     except ValueError as exc:
-        parser.error(str(exc))
+        parser.error(str(exc) + "\nOr pass --allow-unpinned-cmdstan to measure against "
+                     "this one and record that in the manifest.")
     if args.no_build_cache:
         args.build_cache = None
     else:
@@ -923,7 +908,9 @@ def main(argv=None):
                         stanli_source=checkout_identity(REPO),
                         executables={k: sha(getattr(args, k)) for k in
                                      ("bench", "stanc", "vectorize_probe")},
-                        toolchains={"cmdstan": checkout_identity(args.cmdstan),
+                        toolchains={**({"unpinned": pin_check["mismatches"]}
+                                       if pin_check["mismatches"] else {}),
+                                    "cmdstan": checkout_identity(args.cmdstan),
                                     "stan": checkout_identity(args.cmdstan / "stan"),
                                     "math": checkout_identity(args.cmdstan / "stan/lib/stan_math"),
                                     "stanli_math": checkout_identity(REPO / "deps/math"),

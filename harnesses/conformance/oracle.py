@@ -13,6 +13,9 @@ import threading
 import time
 from typing import Dict, Mapping, Optional, Sequence, Tuple
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "tools"))
+import toolchain  # noqa: E402
+
 
 class OracleError(RuntimeError):
     pass
@@ -117,15 +120,13 @@ def validate_toolchain(cmdstan: pathlib.Path, stanc: pathlib.Path,
     """Prove BridgeStan will use the exact Stan sources pinned by stanli."""
     cmdstan, deps = pathlib.Path(cmdstan).resolve(), pathlib.Path(deps).resolve()
     bridgestan = deps / "bridgestan"
-    expected_stan, expected_math = (_git_head(deps / "stan"),
-                                    _git_head(deps / "math"))
+    try:
+        toolchain.require_pinned_toolchain(cmdstan, stanc)
+    except ValueError as exc:
+        raise OracleError(f"reference version mismatch: {exc}") from exc
     actual_stan = _git_head(cmdstan / "stan")
     actual_math = _git_head(cmdstan / "stan" / "lib" / "stan_math")
     problems = []
-    if actual_stan != expected_stan:
-        problems.append(f"Stan {actual_stan} != stanli pin {expected_stan}")
-    if actual_math != expected_math:
-        problems.append(f"Stan Math {actual_math} != stanli pin {expected_math}")
 
     stanc_build_id, stanc_sha256 = _stanc_identity(stanc)
     cmdstan_stanc = cmdstan / "bin" / ("stanc.exe" if sys.platform == "win32"

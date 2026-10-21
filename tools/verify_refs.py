@@ -43,6 +43,7 @@ import tempfile
 import zipfile
 
 from corpus_inventory import corpus_cases, local_cases, source_digest
+import toolchain
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # Corpora carried in the tree, each a directory of model.stan next to
@@ -423,7 +424,8 @@ def cmdstan_header(cmdstan, work, stan, data):
     local = work / stan.name
     local.write_bytes(stan.read_bytes())
     exe = work / stan.stem
-    built = subprocess.run(["make", str(exe)], cwd=cmdstan,
+    built = subprocess.run(["make", str(exe), f"STANC={toolchain.PINNED_STANC}"],
+                           cwd=cmdstan,
                            capture_output=True, text=True)
     if built.returncode != 0:
         lines = built.stderr.strip().splitlines()
@@ -1021,6 +1023,10 @@ def main():
     if args.models and all(model in skip for model in args.models):
         ap.error("--skip excludes every requested model")
     if args.wa_headers:
+        try:
+            toolchain.require_pinned_toolchain(args.wa_headers.resolve())
+        except ValueError as exc:
+            ap.error(str(exc))
         return check_wa_headers(pdb, check_bin, args.wa_headers.resolve(),
                                 args.models, skip)
     if args.wa_report:

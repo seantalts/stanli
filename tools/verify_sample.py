@@ -40,6 +40,7 @@ import threading
 
 from corpus_inventory import corpus_cases, source_digest
 from cmdstan_ref import compile_cmd
+import toolchain
 # The deviation arithmetic and the reference format live in the replay
 # script, not here, so a change to either cannot land in the recorder
 # without landing in the CI gate.
@@ -386,6 +387,10 @@ def main():
     args = ap.parse_intermixed_args()
 
     cs = args.cmdstan
+    try:
+        toolchain.require_pinned_toolchain(cs.resolve(), REPO / "deps/stanc3/stanc")
+    except ValueError as exc:
+        ap.error(str(exc))
     pdb = args.pdb / "posterior_database"
     models = list(args.models)
     if args.from_refs:

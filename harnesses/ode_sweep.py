@@ -29,6 +29,7 @@ import tempfile
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from cmdstan_ref import build_reference, compare_points  # noqa: E402
+import toolchain  # noqa: E402
 
 # The gate, as a RELATIVE difference rather than in ULPs. An ODE solve is
 # iterative, so bitwise is not a bar an integrator can be held to the way
@@ -268,6 +269,7 @@ def main():
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args()
     cs = pathlib.Path(args.cmdstan).resolve()
+    toolchain.require_pinned_toolchain(cs, REPO / "deps/stanc3/stanc")
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="ode_sweep_"))
     cases = [(c, False) for c in CASES if args.filter in c[0]]

@@ -21,8 +21,7 @@ sys.path.insert(0, str(REPO))
 from harnesses.corpus_bench import (COLS, PROTOCOL, row_line,
     upgrade_header, Runner, PhaseFailure, parse_timing, check_pair,
     summarize_pairs, paired_order, open_run, measure_model,
-    benchmark_cases, materialize_data, build_model, run_config,
-    pinned_cmdstan_sha, require_pinned_cmdstan)
+    benchmark_cases, materialize_data, build_model, run_config)
 
 
 class EnvironmentTests(unittest.TestCase):
@@ -48,37 +47,16 @@ class CmdstanPinTests(unittest.TestCase):
         import subprocess
         subprocess.run([*git, "init", "-q"], check=True)
         subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "x"], check=True)
-        self.head = subprocess.check_output([*git, "rev-parse", "HEAD"]).decode().strip()
-
-    def test_the_pin_is_the_sha_in_the_pins_file(self):
-        text = (REPO / "deps/pins.env").read_text()
-        self.assertIn("CMDSTAN_SHA=" + pinned_cmdstan_sha(), text)
-        self.assertRegex(pinned_cmdstan_sha(), r"^[0-9a-f]{40}$")
-
-    def test_a_checkout_at_the_pin_is_accepted(self):
-        with mock.patch("harnesses.corpus_bench.pinned_cmdstan_sha", return_value=self.head):
-            require_pinned_cmdstan(self.checkout, False)
-
-    def test_another_head_is_refused_naming_both_shas_and_the_setup_script(self):
-        with self.assertRaises(ValueError) as raised:
-            require_pinned_cmdstan(self.checkout, False)
-        message = str(raised.exception)
-        self.assertIn(self.head, message)
-        self.assertIn(pinned_cmdstan_sha(), message)
-        self.assertIn("deps/pins.env", message)
-        self.assertIn("--allow-unpinned-cmdstan", message)
-
-    def test_the_flag_allows_another_head(self):
-        require_pinned_cmdstan(self.checkout, True)
-
-    def test_a_path_that_is_not_a_checkout_is_refused_even_with_the_flag(self):
-        with tempfile.TemporaryDirectory() as plain:
-            with self.assertRaises(ValueError):
-                require_pinned_cmdstan(pathlib.Path(plain), True)
+        for nested in ("stan", "stan/lib/stan_math"):
+            (self.checkout / nested).mkdir(parents=True, exist_ok=True)
+            nested_git = ["git", "-C", str(self.checkout / nested), "-c", "user.name=t",
+                          "-c", "user.email=t@example.com"]
+            subprocess.run([*nested_git, "init", "-q"], check=True)
+            subprocess.run([*nested_git, "commit", "-q", "--allow-empty", "-m", "x"], check=True)
 
     def run_main(self, *extra):
         from harnesses.corpus_bench import main
-        error = io.StringIO()
+        error = self.stderr = io.StringIO()
         with mock.patch.dict(os.environ, {}, clear=True), \
                 mock.patch("harnesses.corpus_bench.corpus_cases", side_effect=RuntimeError("past the guard")), \
                 contextlib.redirect_stderr(error):
@@ -86,10 +64,11 @@ class CmdstanPinTests(unittest.TestCase):
         return error.getvalue()
 
     def test_main_refuses_to_start_on_an_unpinned_checkout(self):
-        error = io.StringIO()
-        with self.assertRaises(SystemExit) as raised, contextlib.redirect_stderr(error):
+        with self.assertRaises(SystemExit) as raised:
             self.run_main()
         self.assertEqual(raised.exception.code, 2)
+        self.assertIn("deps/pins.env", self.stderr.getvalue())
+        self.assertIn("--allow-unpinned-cmdstan", self.stderr.getvalue())
 
     def test_main_with_the_flag_gets_past_the_guard(self):
         with self.assertRaisesRegex(RuntimeError, "past the guard"):

@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """deps/pins.env is the one place the Stan toolchain is pinned."""
 
+import hashlib
 import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
@@ -73,6 +76,171 @@ class UpstreamAgreementTests(unittest.TestCase):
         self.assertEqual(stan, self.pins["STAN_SHA"])
         math = self.pointer(self.checkout / "stan", "lib/stan_math", stan)
         self.assertEqual(math, self.pins["MATH_SHA"])
+
+
+def git(path, *args):
+    return subprocess.run(
+        ["git", "-C", str(path), "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+        check=True, capture_output=True, text=True).stdout.strip()
+
+
+def commit_repo(path, files):
+    path.mkdir(parents=True, exist_ok=True)
+    git(path, "init", "-q")
+    for name, content in files.items():
+        (path / name).parent.mkdir(parents=True, exist_ok=True)
+        (path / name).write_text(content)
+    git(path, "add", "-A")
+    git(path, "commit", "-q", "-m", "x")
+    return git(path, "rev-parse", "HEAD")
+
+
+class GuardTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = pathlib.Path(self.temp.name)
+        self.cmdstan = root / "cmdstan"
+        self.heads = dict(
+            cmdstan=commit_repo(self.cmdstan, {"makefile": "all:\n", "make/local": "# local\n"}),
+            stan=commit_repo(self.cmdstan / "stan", {"a": "1"}),
+            math=commit_repo(self.cmdstan / "stan/lib/stan_math", {"b": "2"}))
+        self.pinned = root / "stanc-pinned"
+        self.pinned.write_bytes(b"pinned stanc")
+        self.pinned.chmod(0o755)
+        pathlib.Path(str(self.pinned) + ".src").write_text("s" * 40 + "\n")
+        (self.cmdstan / "bin").mkdir()
+        (self.cmdstan / "bin/stanc").write_bytes(b"pinned stanc")
+        pins = {"CMDSTAN_SHA": self.heads["cmdstan"], "STAN_SHA": self.heads["stan"],
+                "MATH_SHA": self.heads["math"], "STANC3_SRC_SHA": "s" * 40}
+        for patcher in (mock.patch.object(toolchain, "pins", lambda: pins),
+                        mock.patch.object(toolchain, "PINNED_STANC", self.pinned)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def checks(self, **kwargs):
+        found = toolchain.require_pinned_toolchain(self.cmdstan, allow_unpinned=True, **kwargs)
+        return [m["check"] for m in found["mismatches"]]
+
+    def test_a_pinned_toolchain_passes_and_records_the_stanc(self):
+        found = toolchain.require_pinned_toolchain(self.cmdstan)
+        self.assertEqual(found["mismatches"], [])
+        self.assertEqual(found["stanc_sha256"], hashlib.sha256(b"pinned stanc").hexdigest())
+
+    def test_untracked_files_and_make_local_edits_are_allowed(self):
+        (self.cmdstan / "make/local").write_text("CXX=clang++\n")
+        (self.cmdstan / "stray.txt").write_text("x")
+        self.assertEqual(self.checks(), [])
+
+    def test_a_modified_tracked_file_is_refused_with_the_fix(self):
+        (self.cmdstan / "makefile").write_text("all:\n\t@true\n")
+        with self.assertRaises(ValueError) as raised:
+            toolchain.require_pinned_toolchain(self.cmdstan)
+        message = str(raised.exception)
+        self.assertIn("makefile", message)
+        self.assertIn("fetch_cmdstan.sh", message)
+        self.assertEqual(self.checks(), ["cmdstan_tree"])
+
+    def test_another_cmdstan_head_names_both_shas(self):
+        git(self.cmdstan, "commit", "-q", "--allow-empty", "-m", "y")
+        new = git(self.cmdstan, "rev-parse", "HEAD")
+        with self.assertRaises(ValueError) as raised:
+            toolchain.require_pinned_toolchain(self.cmdstan)
+        message = str(raised.exception)
+        self.assertIn(self.heads["cmdstan"], message)
+        self.assertIn(new, message)
+        self.assertIn("harnesses/conformance/fetch_cmdstan.sh", message)
+        found = toolchain.require_pinned_toolchain(self.cmdstan, allow_unpinned=True)
+        self.assertEqual(found["mismatches"],
+                         [dict(check="cmdstan_head", expected=self.heads["cmdstan"], found=new)])
+
+    def test_stan_and_math_heads_are_checked(self):
+        git(self.cmdstan / "stan", "commit", "-q", "--allow-empty", "-m", "y")
+        git(self.cmdstan / "stan/lib/stan_math", "commit", "-q", "--allow-empty", "-m", "y")
+        self.assertEqual(self.checks(), ["stan_head", "math_head"])
+
+    def test_a_different_default_stanc_is_refused(self):
+        (self.cmdstan / "bin/stanc").write_bytes(b"nightly")
+        with self.assertRaises(ValueError) as raised:
+            toolchain.require_pinned_toolchain(self.cmdstan)
+        self.assertIn("bin/stanc", str(raised.exception))
+        self.assertEqual(self.checks(), ["cmdstan_stanc"])
+
+    def test_an_explicit_stanc_must_be_the_pinned_one(self):
+        other = pathlib.Path(self.temp.name) / "patched"
+        other.write_bytes(b"patched stanc")
+        self.assertEqual(self.checks(stanc_path=other), ["stanc"])
+        same = pathlib.Path(self.temp.name) / "copy"
+        same.write_bytes(b"pinned stanc")
+        self.assertEqual(self.checks(stanc_path=same), [])
+
+    def test_a_declared_stanc_is_accepted_and_its_sha_recorded(self):
+        other = pathlib.Path(self.temp.name) / "patched"
+        other.write_bytes(b"patched stanc")
+        found = toolchain.require_pinned_toolchain(self.cmdstan, stanc_path=other,
+                                                   stanc_declared=True)
+        self.assertEqual(found["mismatches"], [])
+        self.assertEqual(found["stanc_sha256"], hashlib.sha256(b"patched stanc").hexdigest())
+
+    def test_a_declared_stanc_does_not_excuse_the_installed_one(self):
+        (self.cmdstan / "bin/stanc").write_bytes(b"nightly")
+        other = pathlib.Path(self.temp.name) / "patched"
+        other.write_bytes(b"patched stanc")
+        self.assertEqual(self.checks(stanc_path=other, stanc_declared=True), ["cmdstan_stanc"])
+
+    def test_a_pinned_stanc_built_from_another_revision_is_refused(self):
+        pathlib.Path(str(self.pinned) + ".src").write_text("t" * 40 + "\n")
+        self.assertEqual(self.checks(), ["pinned_stanc_provenance"])
+
+    def test_a_directory_that_is_not_a_checkout_is_refused_even_when_unpinned_is_allowed(self):
+        with tempfile.TemporaryDirectory() as plain:
+            with self.assertRaises(ValueError) as raised:
+                toolchain.require_pinned_toolchain(pathlib.Path(plain), allow_unpinned=True)
+        self.assertIn("not a CmdStan git checkout", str(raised.exception))
+
+
+class BuildStampTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = pathlib.Path(self.temp.name)
+        self.cmdstan = root / "cmdstan"
+        commit_repo(self.cmdstan, {"makefile": "all:\n"})
+        commit_repo(self.cmdstan / "stan", {"a": "1"})
+        commit_repo(self.cmdstan / "stan/lib/stan_math", {"b": "2"})
+        (self.cmdstan / "bin").mkdir()
+        (self.cmdstan / "bin/stanc").write_bytes(b"stanc one")
+        patcher = mock.patch.object(toolchain, "compiler_identity", lambda cmdstan: "clang 1")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_stamp_names_the_three_heads_the_stanc_and_the_compiler(self):
+        stamp = toolchain.build_stamp(self.cmdstan)
+        for head in (toolchain.git_head(self.cmdstan),
+                     toolchain.git_head(self.cmdstan / "stan"),
+                     toolchain.git_head(self.cmdstan / "stan/lib/stan_math"),
+                     hashlib.sha256(b"stanc one").hexdigest(), "clang 1"):
+            self.assertIn(head, stamp)
+
+    def test_the_stamp_is_stable_and_moves_with_every_input(self):
+        stamp = toolchain.build_stamp(self.cmdstan)
+        self.assertEqual(toolchain.build_stamp(self.cmdstan), stamp)
+        (self.cmdstan / "bin/stanc").write_bytes(b"stanc two")
+        self.assertNotEqual(toolchain.build_stamp(self.cmdstan), stamp)
+        (self.cmdstan / "bin/stanc").write_bytes(b"stanc one")
+        git(self.cmdstan / "stan/lib/stan_math", "commit", "-q", "--allow-empty", "-m", "y")
+        self.assertNotEqual(toolchain.build_stamp(self.cmdstan), stamp)
+        git(self.cmdstan / "stan/lib/stan_math", "reset", "-q", "--hard", "HEAD~1")
+        self.assertEqual(toolchain.build_stamp(self.cmdstan), stamp)
+        with mock.patch.object(toolchain, "compiler_identity", lambda cmdstan: "clang 2"):
+            self.assertNotEqual(toolchain.build_stamp(self.cmdstan), stamp)
+
+    def test_a_missing_or_different_stamp_file_is_stale(self):
+        self.assertFalse(toolchain.stamp_is_current(self.cmdstan))
+        (self.cmdstan / toolchain.STAMP_NAME).write_text(toolchain.build_stamp(self.cmdstan))
+        self.assertTrue(toolchain.stamp_is_current(self.cmdstan))
+        (self.cmdstan / "bin/stanc").write_bytes(b"stanc two")
+        self.assertFalse(toolchain.stamp_is_current(self.cmdstan))
 
 
 if __name__ == "__main__":

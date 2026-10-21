@@ -45,6 +45,8 @@ import sys
 import tempfile
 import zipfile
 
+import toolchain
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 COLS = ["lp__", "accept_stat__", "stepsize__", "treedepth__",
         "n_leapfrog__", "divergent__", "energy__"]
@@ -120,7 +122,8 @@ def run_cmdstan(stan, data, args, cmdstan, tmp):
     work.mkdir(parents=True, exist_ok=True)
     shutil.copy(stan, work / f"{name}.stan")
     exe = work / name
-    r = subprocess.run(["make", str(exe.resolve())], cwd=cmdstan,
+    r = subprocess.run(["make", str(exe.resolve()), f"STANC={toolchain.PINNED_STANC}"],
+                       cwd=cmdstan,
                        capture_output=True, text=True, timeout=1800)
     if r.returncode != 0:
         raise RuntimeError(f"cmdstan build failed: "
@@ -188,6 +191,10 @@ def main():
     ap.add_argument("--tol-stepsize", type=float, default=0.5)
     ap.add_argument("--tol-lp", type=float, default=0.5)
     args = ap.parse_args()
+    try:
+        toolchain.require_pinned_toolchain(args.cmdstan.resolve())
+    except ValueError as exc:
+        ap.error(str(exc))
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_trace_"))
     jobs = []
