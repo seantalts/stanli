@@ -609,8 +609,9 @@ def _count(n):
 
 def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
     """Present both compiler configurations with the same public workload."""
-    header = "| Model | CmdStan / Stanli | Gradients | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) |"
-    output = [header, "| --- | ---: | ---: | ---: | ---: |"]
+    header = ("| Model | CmdStan / Stanli<br>gradient | Gradients | Stanli total<br>sampling (s) "
+              "| CmdStan total<br>sampling (s) | CmdStan / Stanli<br>total sampling |")
+    output = [header, "| --- | ---: | ---: | ---: | ---: | ---: |"]
     incomplete = []
     complete = sorted(
         (row for row in rows if details[row["model"]]["status"] == "ok"),
@@ -627,14 +628,19 @@ def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
             name += f" {FALLBACK_MARK}"
         count = int(row.get("gradient_count") or FIXED_GRADIENT_COUNT)
         cells = [name, f"{speedup:.3g}x" if speedup is not None else "—", _count(count)]
+        estimates = []
         for engine, fields in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
                                ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
             components = [_catalog_number(row, field) for field in (*fields, engine + "_ns_grad")]
             estimate = (components[0] + components[1] + count * components[2] / 1e9
                         if all(value is not None for value in components) else None)
+            estimates.append(estimate)
             cells.append(f"{estimate:.3g}" if estimate is not None else "—")
         if cells[3:] == ["—", "—"]:
             cells[2] = "—"
+        stanli_total, cmdstan_total = estimates
+        cells.append(f"{cmdstan_total / stanli_total:.3g}x"
+                     if stanli_total and cmdstan_total is not None else "—")
         record = details[row["model"]]
         if record["status"] == "ok":
             output.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
@@ -658,7 +664,7 @@ def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
     if incomplete:
         output.extend(["", "**Incomplete results**", "",
                        "Missing measurements are —; available timings are retained.", "",
-                       header + " Reason |", "| --- | ---: | ---: | ---: | ---: | --- |", *incomplete])
+                       header + " Reason |", "| --- | ---: | ---: | ---: | ---: | ---: | --- |", *incomplete])
     return "\n".join(output) + "\n"
 
 

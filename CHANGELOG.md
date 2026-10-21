@@ -13,6 +13,8 @@
   and 5,000 gradients, marked †. `tools/gen_benchmark_points.py` makes the
   points file, and `tools/validate_total_estimates.py` compares the estimate
   with full sampling runs.
+- The benchmark tables label the first ratio as the gradient ratio and add a
+  last column with CmdStan / Stanli for total sampling.
 - Every pinned Stan toolchain version now lives in `deps/pins.env`: CmdStan,
   Stan, Stan Math, stanc3, BridgeStan, posteriordb, fmt and the OCaml
   switch. The scripts, workflows and tools read it, and the benchmark page
