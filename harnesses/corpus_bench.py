@@ -2,8 +2,9 @@
 """Paired, reproducible corpus benchmarks. See docs/benchmarks.md.
 
 python3 harnesses/corpus_bench.py CMDSTAN PDB fresh.tsv [--corpus rethinking]
-Measures source/setup costs and warm gradients. Setup plus 20,000 gradients
-is a fixed-work proxy, not measured HMC or sampling time.
+Measures source/setup costs and warm gradients. Setup plus a per-model gradient
+count (from the Stanli reference run in the points file) is a proxy, not measured
+HMC or sampling time.
 A sibling fresh.tsv.run directory holds the frozen manifest and raw evidence.
 --resume requires identical inputs, binaries and settings. Historical TSVs are
 never appended to, and candidate-only refreshes cannot create paired results.
@@ -33,12 +34,12 @@ import threading
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
+import benchmark_points
 from bench_build_cache import BuildCache, cache_key
 from cmdstan_ref import compile_cmd
 from corpus_inventory import corpus_cases
 
-PROTOCOL = "stanli-corpus-v4"
-GRADIENT_BUDGET = 20000
+PROTOCOL = "stanli-corpus-v6"
 CACHE_STEM = "model"
 DEFAULT_CACHE = pathlib.Path("~/.cache/stanli/corpus-bench")
 BENCH = REPO / "build-rel/bench_grad"
@@ -47,7 +48,8 @@ VECTORIZE_PROBE = REPO / "deps/stanc3/stanli-vectorize-probe"
 COLS = ["model", "params", "stanli_compile_s", "stanli_prep_s",
         "cmdstan_stanc_s", "cmdstan_build_s", "stanli_ns_grad", "cmdstan_ns_grad",
         "stanli_ns_grad_mad", "cmdstan_ns_grad_mad", "paired_speedup",
-        "paired_speedup_mad", "paired_rounds", "gradient_budget",
+        "paired_speedup_mad", "paired_rounds", "points_kept", "points_dropped",
+        "point_source", "gradient_count",
         "stanli_estimated_s", "cmdstan_estimated_s", "run_id", "note"]
 THREAD_ENV = {k: "1" for k in ("STAN_NUM_THREADS", "OMP_NUM_THREADS",
                                "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
@@ -211,42 +213,87 @@ class Runner:
         return result
 
 
-def parse_timing(text, warmup_ms, measure_ms):
+def parse_timing(text, warmup_ms, measure_ms, points):
     # Stan transformed-data print statements can precede the driver's JSON.
     lines = [line for line in text.splitlines() if line.strip()]
     try:
         result = json.loads(lines[-1])
-        if result["protocol"] != "stanli-gradient-v2":
+        if result["protocol"] != "stanli-gradient-v3":
             raise ValueError("wrong timing protocol")
-        for key in ("iterations", "elapsed_ns", "batch", "warmup_iterations", "warmup_elapsed_ns"):
+        for key in ("warmup_iterations", "warmup_elapsed_ns"):
             if type(result[key]) is not int or result[key] <= 0:
                 raise ValueError(f"invalid {key}")
         if result["warmup_elapsed_ns"] < warmup_ms * 1e6:
             raise ValueError("warmup ended early")
-        if result["elapsed_ns"] < measure_ms * 1e6:
-            raise ValueError("measurement ended early")
-        values = result["values"]
-        if not isinstance(values, list) or not values:
-            raise ValueError("missing density and gradient")
-        if not all(type(v) in (int, float) and math.isfinite(v) for v in values):
-            raise ValueError("non-finite density or gradient")
+        entries = result["points"]
+        if not isinstance(entries, list) or len(entries) != points:
+            raise ValueError(f"expected {points} points")
+        for index, entry in enumerate(entries):
+            if entry["point"] != index or type(entry["finite"]) is not bool:
+                raise ValueError(f"invalid point {index}")
+            if not entry["finite"]:
+                if set(entry) != {"point", "finite"}:
+                    raise ValueError(f"point {index} has measurements but is not finite")
+                continue
+            for key in ("iterations", "elapsed_ns", "batch"):
+                if type(entry[key]) is not int or entry[key] <= 0:
+                    raise ValueError(f"point {index}: invalid {key}")
+            if entry["elapsed_ns"] < measure_ms * 1e6:
+                raise ValueError(f"point {index}: measurement ended early")
+            values = entry["values"]
+            if not isinstance(values, list) or not values:
+                raise ValueError(f"point {index}: missing density and gradient")
+            if not all(type(v) in (int, float) and math.isfinite(v) for v in values):
+                raise ValueError(f"point {index}: non-finite density or gradient")
+        if not any(entry["finite"] for entry in entries):
+            raise ValueError("no finite point")
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise PhaseFailure(f"invalid timing output: {exc}") from exc
     return result
 
 
+def kept_points(pair):
+    return [a["point"] for a, b in zip(pair["stanli"]["points"], pair["cmdstan"]["points"])
+            if a["finite"] and b["finite"]]
+
+
 def check_pair(pair):
-    a, b = pair["stanli"]["values"], pair["cmdstan"]["values"]
-    if len(a) != len(b):
-        raise PhaseFailure("density/gradient widths differ")
-    worst = max(abs(x - y) / max(abs(x), abs(y), 1) for x, y in zip(a, b))
-    if worst > 1e-9:
-        raise PhaseFailure(f"density/gradient mismatch: scaled error {worst:.3g}")
-    return worst
+    kept, dropped, errors, width = [], [], [], None
+    for a, b in zip(pair["stanli"]["points"], pair["cmdstan"]["points"]):
+        k = a["point"]
+        if not a["finite"] and not b["finite"]:
+            dropped.append(k)
+            continue
+        if a["finite"] != b["finite"]:
+            bad, good = ("stanli", "cmdstan") if b["finite"] else ("cmdstan", "stanli")
+            raise PhaseFailure(f"point {k} is non-finite in {bad} but finite in {good}")
+        if len(a["values"]) != len(b["values"]):
+            raise PhaseFailure(f"point {k}: density/gradient widths differ")
+        error = max(abs(x - y) / max(abs(x), abs(y), 1) for x, y in zip(a["values"], b["values"]))
+        if error > 1e-9:
+            raise PhaseFailure(f"point {k}: density/gradient mismatch: scaled error {error:.3g}")
+        kept.append(k)
+        errors.append(error)
+        width = len(a["values"])
+    if not kept:
+        raise PhaseFailure("no point is finite in both engines")
+    return dict(kept_points=kept, dropped_points=dropped, scaled_errors=errors,
+                max_scaled_error=max(errors), width=width)
+
+
+def strip_values(pair):
+    for engine in ("stanli", "cmdstan"):
+        for point in pair[engine]["points"]:
+            point.pop("values", None)
+
+
+def mean_ns(result, kept):
+    entries = {entry["point"]: entry for entry in result["points"]}
+    return statistics.fmean(entries[k]["elapsed_ns"] / entries[k]["iterations"] for k in kept)
 
 
 def summarize_pairs(pairs):
-    times = {engine: [p[engine]["elapsed_ns"] / p[engine]["iterations"] for p in pairs]
+    times = {engine: [mean_ns(p[engine], kept_points(p)) for p in pairs]
              for engine in ("stanli", "cmdstan")}
     result = {}
     for engine, values in times.items():
@@ -319,49 +366,73 @@ class CmdstanCache:
         self.store, self.context, self.run_id = store, context, run_id
 
     def key(self, stan):
-        return cache_key(self.context, sha(stan))
+        return model_key(self.context, sha(stan))
+
+    def driver_key(self, stan):
+        return driver_key(self.context, sha(stan))
 
 
-def cached_build(name, key, meta, cache):
+def model_key(context, stan_sha256):
+    return cache_key(context["model"], stan_sha256)
+
+
+def driver_key(context, stan_sha256):
+    return cache_key(dict(model_key=model_key(context, stan_sha256), driver=context["driver"]),
+                     stan_sha256)
+
+
+def cached_events(name, key, meta):
     reused = dict(status="ok", returncode=0, cached=True, cache_key=key, cache_run_id=meta["run_id"])
-    entry = cache.store.entry(key)
-    return dict(
-        setup={"cmdstan_stanc": dict(reused, phase=f"{name}/stanc-cpp", elapsed_s=meta["stanc_s"]),
-               "cmdstan_build": dict(reused, phase=f"{name}/cmdstan-build", elapsed_s=meta["build_s"])},
-        gradient=entry / "gradbench", executable=entry / CACHE_STEM,
-        gradient_failure=None, build_failure=None,
-        cache=dict(directory=str(cache.store.root), key=key, hit=True, run_id=meta["run_id"]))
+    return {"cmdstan_stanc": dict(reused, phase=f"{name}/stanc-cpp", elapsed_s=meta["stanc_s"]),
+            "cmdstan_build": dict(reused, phase=f"{name}/cmdstan-build", elapsed_s=meta["build_s"])}
 
 
 class CmdstanJob:
-    """One model's CmdStan build in stages, so a caller can serialize the timed ones."""
+    """One model's CmdStan build in stages, so a caller can serialize the timed ones.
+
+    With a cache the build is two entries: the model (header and ordinary
+    executable) and the gradient driver compiled against that header.
+    """
     def __init__(self, name, stan, work, cache=None):
         self.name, self.stan, self.work, self.cache = name, stan, work, cache
-        self.scratch = None
+        self.scratch = self.driver_scratch = None
+        self.model_meta = self.driver_meta = None
         work.mkdir(parents=True, exist_ok=True)
+        self.build = dict(setup={}, gradient=None, executable=None, gradient_failure=None,
+                          build_failure=None, cache=dict(directory=None, hit=False))
         if cache is None:
             self.directory, self.stem = work, name
-            self.build = dict(setup={}, gradient=None, executable=None, gradient_failure=None,
-                              build_failure=None, cache=dict(directory=None, hit=False))
             (work / f"{name}.stan").write_bytes(stan.read_bytes())
             return
-        self.key = cache.key(stan)
-        meta = cache.store.lookup(self.key)
-        if meta is not None:
-            self.build = cached_build(name, self.key, meta, cache)
-            return
-        self.scratch = self.directory = cache.store.scratch(self.key)
+        self.key, self.driver_key = cache.key(stan), cache.driver_key(stan)
+        self.model_meta = cache.store.lookup(self.key)
+        self.driver_meta = cache.store.lookup(self.driver_key)
         self.stem = CACHE_STEM
-        self.build = dict(setup={}, gradient=None, executable=None, gradient_failure=None,
-                          build_failure=None, cache=dict(directory=str(cache.store.root),
-                                                         key=self.key, hit=False))
-        (self.directory / f"{CACHE_STEM}.stan").write_bytes(stan.read_bytes())
+        entry, driver = cache.store.entry(self.key), cache.store.entry(self.driver_key)
+        info = dict(directory=str(cache.store.root), key=self.key, driver_key=self.driver_key,
+                    hit=self.model_meta is not None and self.driver_meta is not None,
+                    model_hit=self.model_meta is not None, driver_hit=self.driver_meta is not None)
+        if self.model_meta is not None:
+            info["run_id"] = self.model_meta["run_id"]
+            self.build["setup"] = cached_events(name, self.key, self.model_meta)
+            self.build["executable"] = entry / CACHE_STEM
+            self.directory = entry
+        else:
+            self.scratch = self.directory = cache.store.scratch(self.key)
+            (self.directory / f"{CACHE_STEM}.stan").write_bytes(stan.read_bytes())
+        if self.driver_meta is not None:
+            info["driver_run_id"] = self.driver_meta["run_id"]
+            self.build["gradient"] = driver / "gradbench"
+            self.build["driver_build_s"] = self.driver_meta["driver_build_s"]
+        self.build["cache"] = info
 
     @property
     def hit(self):
         return self.build["cache"]["hit"]
 
     def stanc(self, runner, args):
+        if self.model_meta is not None:
+            return
         phase = f"{self.name}/stanc-cpp"
         event = self.build["setup"]["cmdstan_stanc"] = runner.run(
             phase, [args.stanc, f"{self.stem}.stan", f"--o={self.stem}.hpp", *shlex.split(args.stancflags)],
@@ -370,20 +441,29 @@ class CmdstanJob:
             self.build["gradient_failure"] = failure_note(phase, event)
 
     def header_ready(self):
-        return self.build["setup"].get("cmdstan_stanc", {}).get("status") == "ok"
+        return (self.model_meta is not None
+                or self.build["setup"].get("cmdstan_stanc", {}).get("status") == "ok")
 
     def driver(self, runner, args):
+        if self.driver_meta is not None:
+            return
         phase = f"{self.name}/gradient-driver-build"
+        directory = self.directory
+        if self.cache is not None:
+            self.driver_scratch = directory = self.cache.store.scratch(self.driver_key)
+            shutil.copyfile(self.directory / f"{self.stem}.hpp", directory / f"{self.stem}.hpp")
         event = runner.run(phase, driver_command(args.cmdstan.resolve(), f"{self.stem}.hpp",
                                                  REPO / "tools/bench_cmdstan_grad.cpp", "gradbench"),
-                           args.build_timeout, self.directory)
+                           args.build_timeout, directory)
         self.build["driver_build_s"] = event["elapsed_s"]
         if event["status"] == "ok":
-            self.build["gradient"] = self.directory / "gradbench"
+            self.build["gradient"] = directory / "gradbench"
         else:
             self.build["gradient_failure"] = failure_note(phase, event)
 
     def make(self, runner, args):
+        if self.model_meta is not None:
+            return
         phase = f"{self.name}/cmdstan-build"
         executable = self.directory / self.stem
         event = self.build["setup"]["cmdstan_build"] = runner.run(
@@ -395,38 +475,54 @@ class CmdstanJob:
             self.build["build_failure"] = failure_note(phase, event)
 
     def finish(self):
-        """Publish a complete build into the cache; keep an incomplete one in the run."""
+        """Publish complete builds into the cache; keep an incomplete one in the run."""
         build = self.build
-        if self.scratch is None:
+        if self.cache is None:
             return build
-        store, scratch = self.cache.store, self.scratch
+        store = self.cache.store
         try:
             if build["gradient_failure"] or build["build_failure"]:
-                kept = self.work / "cmdstan-build"
-                shutil.rmtree(kept, ignore_errors=True)
-                shutil.move(str(scratch), kept)
-                for field in ("gradient", "executable"):
-                    if build[field]:
-                        build[field] = kept / build[field].name
+                if self.scratch is not None:
+                    kept = self.work / "cmdstan-build"
+                    shutil.rmtree(kept, ignore_errors=True)
+                    shutil.move(str(self.scratch), kept)
+                    if build["executable"]:
+                        build["executable"] = kept / build["executable"].name
+                    if build["gradient"] and self.driver_scratch is not None:
+                        shutil.move(str(self.driver_scratch / "gradbench"), kept / "gradbench")
+                        build["gradient"] = kept / "gradbench"
                 return build
-            setup = build["setup"]
-            files = [f"{CACHE_STEM}.stan", f"{CACHE_STEM}.hpp", "gradbench", CACHE_STEM]
-            meta = dict(files=files, run_id=self.cache.run_id, key=self.key,
-                        created_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                        stanc_s=setup["cmdstan_stanc"]["elapsed_s"], build_s=setup["cmdstan_build"]["elapsed_s"],
-                        driver_build_s=build["driver_build_s"],
-                        driver_sha256=sha(scratch / "gradbench"), executable_sha256=sha(scratch / CACHE_STEM))
-            if not store.commit(scratch, self.key, meta):
-                build["cache"]["raced"] = True
-            entry = store.entry(self.key)
-            build["gradient"], build["executable"] = entry / "gradbench", entry / CACHE_STEM
+            created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            if self.scratch is not None:
+                setup = build["setup"]
+                meta = dict(files=[f"{CACHE_STEM}.stan", f"{CACHE_STEM}.hpp", CACHE_STEM],
+                            run_id=self.cache.run_id, key=self.key, created_utc=created,
+                            stanc_s=setup["cmdstan_stanc"]["elapsed_s"],
+                            build_s=setup["cmdstan_build"]["elapsed_s"],
+                            executable_sha256=sha(self.scratch / CACHE_STEM))
+                if not store.commit(self.scratch, self.key, meta):
+                    build["cache"]["raced"] = True
+                self.scratch = None
+                build["executable"] = store.entry(self.key) / CACHE_STEM
+            if self.driver_scratch is not None:
+                (self.driver_scratch / f"{self.stem}.hpp").unlink()
+                meta = dict(files=["gradbench"], run_id=self.cache.run_id, key=self.driver_key,
+                            model_key=self.key, created_utc=created,
+                            driver_build_s=build["driver_build_s"],
+                            driver_sha256=sha(self.driver_scratch / "gradbench"))
+                if not store.commit(self.driver_scratch, self.driver_key, meta):
+                    build["cache"]["raced"] = True
+                self.driver_scratch = None
+                build["gradient"] = store.entry(self.driver_key) / "gradbench"
             return build
         finally:
-            store.discard(scratch)
+            self.abort()
 
     def abort(self):
-        if self.scratch is not None:
-            self.cache.store.discard(self.scratch)
+        for scratch in (self.scratch, self.driver_scratch):
+            if scratch is not None:
+                self.cache.store.discard(scratch)
+        self.scratch = self.driver_scratch = None
 
 
 def cmdstan_build(name, stan, work, runner, args, cache=None):
@@ -476,8 +572,9 @@ def prebuild(inputs, directory, runner, args, cache=None):
     def report(name):
         build = builds[name]
         failed = build["gradient_failure"] or build["build_failure"]
-        print(f"{name}: cmdstan build {'failed' if failed else 'cached' if build['cache']['hit'] else 'built'}",
-              flush=True)
+        state = ("failed" if failed else "cached" if build["cache"]["hit"] else
+                 "model cached, driver rebuilt" if build["cache"].get("model_hit") else "built")
+        print(f"{name}: cmdstan build {state}", flush=True)
 
     pool = ThreadPoolExecutor(max_workers=args.build_jobs)
     try:
@@ -535,21 +632,28 @@ def make_command(exe, stanc, stancflags):
 
 
 def cache_context(args, expected):
-    """Everything besides the .stan bytes that determines the CmdStan binaries."""
+    """Everything besides the .stan bytes that determines the CmdStan binaries.
+
+    The driver and timer sources and the driver command belong to the driver
+    entry only, so editing them leaves the header and ordinary executable cached.
+    """
     cmdstan = args.cmdstan.resolve()
     sources = expected["sources"]
     return dict(
-        stanc_sha256=expected["executables"]["stanc"], stancflags=args.stancflags,
-        driver_sha256=sources["tools/bench_cmdstan_grad.cpp"],
-        timer_sha256=sources["tools/benchmark_timer.hpp"],
-        toolchains={k: v for k, v in expected["toolchains"].items() if not k.startswith("stanli_")},
-        cmdstan=str(cmdstan),
-        driver_command=list(map(str, driver_command(cmdstan, f"{CACHE_STEM}.hpp", "{driver}", "gradbench"))),
-        make_command=list(map(str, make_command("{exe}", "{stanc}", args.stancflags))))
+        model=dict(
+            stanc_sha256=expected["executables"]["stanc"], stancflags=args.stancflags,
+            toolchains={k: v for k, v in expected["toolchains"].items() if not k.startswith("stanli_")},
+            cmdstan=str(cmdstan),
+            make_command=list(map(str, make_command("{exe}", "{stanc}", args.stancflags)))),
+        driver=dict(
+            driver_sha256=sources["tools/bench_cmdstan_grad.cpp"],
+            timer_sha256=sources["tools/benchmark_timer.hpp"],
+            driver_command=list(map(str, driver_command(cmdstan, f"{CACHE_STEM}.hpp", "{driver}",
+                                                        "gradbench")))))
 
 
-def setup_estimates(row, setup):
-    """Populate measured setup and fixed-work estimates only with all components."""
+def setup_estimates(row, setup, gradient_count):
+    """Populate measured setup and total-sampling estimates only with all components."""
     for key in ("stanli_compile", "cmdstan_stanc", "cmdstan_build"):
         event = setup.get(key, {})
         if event.get("status") == "ok":
@@ -562,20 +666,58 @@ def setup_estimates(row, setup):
         grad = row.get(engine + "_ns_grad")
         if grad is not None and all(field in row for field in fields):
             row[engine + "_estimated_s"] = (sum(row[field] for field in fields)
-                                            + GRADIENT_BUDGET * grad / 1e9)
+                                            + gradient_count * grad / 1e9)
+
+
+def reference_inputs(inputs, document, points, directory):
+    """Write each model's reference entry (and its points) to directory.
+
+    Returns, per model, the point source, the gradient count and the paths of
+    the frozen files. A model without reference points keeps the fixed points
+    and the default gradient count.
+    """
+    found = {}
+    directory = pathlib.Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    if document["settings"]["points"] != points:
+        raise ValueError(f"the points file holds {document['settings']['points']} points per model "
+                         f"but --points is {points}")
+    for name, (stan, data) in sorted(inputs.items()):
+        entry = benchmark_points.entry_for(document, name, sha(stan), sha(data))
+        reference = directory / f"{name}.reference.json"
+        reference.write_bytes(benchmark_points.dumps(entry))
+        vectors = benchmark_points.points_of(entry)
+        frozen = None
+        if vectors is not None:
+            frozen = directory / f"{name}.points.json"
+            frozen.write_text(json.dumps(vectors, allow_nan=False))
+        found[name] = dict(source=entry["source"], gradient_count=benchmark_points.gradient_count(entry),
+                           reference=reference, points=frozen)
+    return found
 
 
 def run_config(args):
     config = {k: str(v) if isinstance(v, pathlib.Path) else v for k, v in vars(args).items()
-              if k not in ("resume", "output", "build_cache", "no_build_cache", "build_jobs")}
+              if k not in ("resume", "output", "build_cache", "no_build_cache", "build_jobs",
+                           "points_file")}
     if not config.get("fast_math"):
         config.pop("fast_math", None)
     return config
 
 
-def measure_model(name, stan, data, directory, manifest, runner, args, build=None):
-    row = dict(model=name, run_id=manifest["run_id"], gradient_budget=GRADIENT_BUDGET)
-    record = dict(model=name, inputs={"stan": sha(stan), "data": sha(data)}, row=row,
+def measure_model(name, stan, data, directory, manifest, runner, args, build=None, reference=None):
+    reference = reference or dict(source="fixed", gradient_count=benchmark_points.DEFAULT_GRADIENTS,
+                                  reference=None, points=None)
+    points = reference["points"]
+    row = dict(model=name, run_id=manifest["run_id"], gradient_count=reference["gradient_count"],
+               point_source=reference["source"])
+    inputs = {"stan": sha(stan), "data": sha(data), "point_source": reference["source"],
+              "gradient_count": reference["gradient_count"]}
+    if reference["reference"]:
+        inputs["reference_sha256"] = sha(reference["reference"])
+    if points:
+        inputs["points_sha256"] = sha(points)
+    record = dict(model=name, inputs=inputs, row=row,
                   gradients=[], setup={}, preparation_s=[], status="failed")
     notes, build = [], {} if build is None else build
     fast = ["--fast-math"] if getattr(args, "fast_math", False) else []
@@ -590,14 +732,23 @@ def measure_model(name, stan, data, directory, manifest, runner, args, build=Non
             for engine in order:
                 event = runner.require(f"{name}/gradient/{round_index}/{engine}",
                     commands[engine] + ["--timed", "--warmup-ms", str(args.warmup_ms),
-                                        "--measure-ms", str(args.measure_ms)]
+                                        "--measure-ms", str(args.measure_ms),
+                                        *(["--points-file", str(points)] if points
+                                          else ["--points", str(args.points)])]
                     + (fast if engine == "stanli" else []), args.gradient_timeout)
-                pair[engine] = parse_timing(runner.text(event), args.warmup_ms, args.measure_ms)
+                pair[engine] = parse_timing(runner.text(event), args.warmup_ms, args.measure_ms,
+                                             args.points)
                 pair[engine]["event"] = event["id"]
-            deviation = check_pair(pair)
-            record["gradients"].append(dict(pair, order=list(order), max_scaled_error=deviation))
+            checked = check_pair(pair)
+            strip_values(pair)
+            record["gradients"].append(dict(pair, order=list(order), **checked))
+        if any(g["kept_points"] != record["gradients"][0]["kept_points"] for g in record["gradients"]):
+            raise PhaseFailure("points differ between rounds")
+        first = record["gradients"][0]
         row.update(summarize_pairs(record["gradients"]))
-        row["params"] = len(record["gradients"][0]["stanli"]["values"]) - 1
+        row["points_kept"] = len(first["kept_points"])
+        row["points_dropped"] = len(first["dropped_points"])
+        row["params"] = first["width"] - 1
         # Binding existing MIR excludes the separately measured source compiler.
         for i in range(args.rounds):
             event = runner.require(f"{name}/prepare/{i}",
@@ -627,7 +778,7 @@ def measure_model(name, stan, data, directory, manifest, runner, args, build=Non
                 notes.append(str(exc))
     record["build_cache"] = build.get("cache")
     try:
-        setup_estimates(row, record["setup"])
+        setup_estimates(row, record["setup"], reference["gradient_count"])
     except ValueError as exc:
         notes.append(str(exc))
     record["status"] = ("ok" if not notes else
@@ -652,8 +803,13 @@ def main(argv=None):
     parser.add_argument("--corpus", choices=("all", "posteriordb", "educational", "rethinking", "brms", "cogmod", "ctsem", "teaching"), default="all")
     parser.add_argument("--filter", default="")
     parser.add_argument("--rounds", type=int, default=6)
-    parser.add_argument("--warmup-ms", type=int, default=200)
-    parser.add_argument("--measure-ms", type=int, default=250)
+    parser.add_argument("--warmup-ms", type=int, default=20)
+    parser.add_argument("--measure-ms", type=int, default=40,
+                        help="measured window per evaluation point")
+    parser.add_argument("--points", type=int, default=10,
+                        help="evaluation points; gradient time is their mean")
+    parser.add_argument("--points-file", type=pathlib.Path, default=benchmark_points.DEFAULT_PATH,
+                        help="reference-run points and gradient counts (tools/gen_benchmark_points.py)")
     parser.add_argument("--gradient-timeout", type=float, default=60)
     parser.add_argument("--build-timeout", type=float, default=900)
     parser.add_argument("--resume", action="store_true")
@@ -683,9 +839,11 @@ def main(argv=None):
     if not all(math.isfinite(n) and n > 0 for n in
                (args.gradient_timeout, args.build_timeout)):
         parser.error("phase timeouts must be finite and positive")
-    if args.gradient_timeout <= (args.warmup_ms + args.measure_ms) / 1000:
+    if not 1 <= args.points <= 100:
+        parser.error("--points must be 1..100")
+    if args.gradient_timeout <= (args.warmup_ms + args.points * (args.measure_ms + 2)) / 1000:
         parser.error("gradient timeout must exceed warmup plus measurement")
-    for key in ("cmdstan", "pdb", "output", "bench", "stanc", "vectorize_probe"):
+    for key in ("cmdstan", "pdb", "output", "bench", "stanc", "vectorize_probe", "points_file"):
         setattr(args, key, getattr(args, key).absolute())
     if any(os.getenv(k, "0") != "0" for k in ("STANLI_PROFILE", "STANLI_PROFILE_PREP")):
         parser.error("disable profiling for comparative measurements")
@@ -719,8 +877,12 @@ def main(argv=None):
             inputs[name] = (stan, data)
         if not inputs:
             parser.error("no models selected")
+        try:
+            document = benchmark_points.load(args.points_file)
+            staged = reference_inputs(inputs, document, args.points, pathlib.Path(cache) / "points")
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
         config = run_config(args)
-        config["gradient_budget"] = GRADIENT_BUDGET
         identities = {p.relative_to(REPO).as_posix(): sha(p) for p in (
             REPO / "harnesses/corpus_bench.py", REPO / "tools/benchmark_timer.hpp",
             REPO / "tools/bench_grad.cpp", REPO / "tools/bench_cmdstan_grad.cpp",
@@ -744,8 +906,15 @@ def main(argv=None):
                                     "build_environment": {k: os.getenv(k) for k in
                                         ("CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "MAKEFLAGS")}},
                         inputs={m: {"stan": sha(s), "data": sha(d),
-                                    "collection": cases[m].collection}
-                                for m, (s, d) in inputs.items()})
+                                    "collection": cases[m].collection,
+                                    "point_source": staged[m]["source"],
+                                    "gradient_count": staged[m]["gradient_count"],
+                                    "reference_sha256": sha(staged[m]["reference"]),
+                                    **({"points_sha256": sha(staged[m]["points"])}
+                                       if staged[m]["points"] else {})}
+                                for m, (s, d) in inputs.items()},
+                        points_file_sha256=sha(args.points_file),
+                        reference_settings=document["settings"])
         try:
             directory, manifest = open_run(args.output, expected, args.resume)
         except ValueError as exc:
@@ -761,6 +930,18 @@ def main(argv=None):
                 copied.write_bytes(source.read_bytes())
                 copies.append(copied)
             inputs[name] = tuple(copies)
+        references = {}
+        for name, item in staged.items():
+            frozen = dict(item)
+            for key, suffix in (("reference", ".reference.json"), ("points", ".points.json")):
+                if item[key] is None:
+                    continue
+                copied = directory / "inputs" / (name + suffix)
+                if copied.exists() and sha(copied) != sha(item[key]):
+                    parser.error(f"retained input was modified: {copied}")
+                copied.write_bytes(item[key].read_bytes())
+                frozen[key] = copied
+            references[name] = frozen
         runner, records = Runner(directory), {}
         for name in inputs:
             saved = directory / f"{name}.result.json"
@@ -776,13 +957,15 @@ def main(argv=None):
                 started_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), jobs=args.build_jobs,
                 cache_directory=str(args.build_cache) if cache else None,
                 wall_s=time.perf_counter() - started,
-                models={name: dict(hit=build["cache"]["hit"], key=build["cache"].get("key"))
+                models={name: dict(hit=build["cache"]["hit"], key=build["cache"].get("key"),
+                                   model_hit=build["cache"].get("model_hit"),
+                                   driver_hit=build["cache"].get("driver_hit"))
                         for name, build in builds.items()}), allow_nan=False) + "\n")
         for name, (stan, data) in inputs.items():
             if name not in records:
                 print(f"{name}: paired gradient measurements", flush=True)
                 records[name] = measure_model(name, stan, data, directory, manifest, runner, args,
-                                              builds[name])
+                                              builds[name], references[name])
             write_summary(args.output, records)
             print(f"{name}: {records[name]['status']} {records[name]['row']['note']}", flush=True)
         return int(any(r["status"] != "ok" for r in records.values()))

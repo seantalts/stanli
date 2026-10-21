@@ -119,6 +119,9 @@ class BuildFixture(unittest.TestCase):
     def key(self, stan=None):
         return self.cache.key(stan or self.stan)
 
+    def driver_key(self, stan=None):
+        return self.cache.driver_key(stan or self.stan)
+
     def entries(self):
         return sorted(p.name for p in self.store.root.iterdir()) if self.store.root.exists() else []
 
@@ -126,21 +129,22 @@ class BuildFixture(unittest.TestCase):
 class BuildCacheOrchestrationTests(BuildFixture):
     def test_miss_builds_in_the_entry_from_a_stable_relative_path(self):
         build = self.build()
-        key = self.key()
-        entry = self.store.entry(key)
-        self.assertEqual(self.entries(), [key])
-        self.assertEqual(build["cache"]["hit"], False)
-        self.assertEqual(build["cache"]["key"], key)
-        self.assertEqual(build["cache"]["directory"], str(self.store.root))
+        key, dkey = self.key(), self.driver_key()
+        entry, driver = self.store.entry(key), self.store.entry(dkey)
+        self.assertEqual(self.entries(), sorted([key, dkey]))
+        self.assertEqual(build["cache"], dict(directory=str(self.store.root), key=key, driver_key=dkey,
+                                              hit=False, model_hit=False, driver_hit=False))
         self.assertEqual(sorted(p.name for p in entry.iterdir()),
-                         ["gradbench", "meta.json", "model", "model.hpp", "model.stan"])
+                         ["meta.json", "model", "model.hpp", "model.stan"])
+        self.assertEqual(sorted(p.name for p in driver.iterdir()), ["gradbench", "meta.json"])
         self.assertEqual((entry / "model.stan").read_bytes(), self.stan.read_bytes())
-        self.assertEqual(build["gradient"], entry / "gradbench")
+        self.assertEqual(build["gradient"], driver / "gradbench")
         self.assertEqual(build["executable"], entry / "model")
         stanc = self.runner.calls[0]
         self.assertEqual(stanc["argv"][1:3], ["model.stan", "--o=model.hpp"])
         for call in self.runner.calls[:2]:
             self.assertTrue(str(call["cwd"]).startswith(str(self.store.root)))
+        self.assertIn("model.hpp", self.runner.calls[1]["argv"])
         self.assertNotIn(str(self.root / "run"), json.dumps(self.runner.calls, default=str))
         self.assertEqual((entry / "model.hpp").read_text(), "// stanc read model.stan\n")
         self.assertEqual([c["phase"] for c in self.runner.calls],
@@ -150,12 +154,18 @@ class BuildCacheOrchestrationTests(BuildFixture):
     def test_metadata_records_original_durations_hashes_and_builder(self):
         self.build()
         meta = self.store.lookup(self.key())
-        self.assertEqual((meta["stanc_s"], meta["build_s"], meta["driver_build_s"]), (.5, 3., 8.))
+        self.assertEqual((meta["stanc_s"], meta["build_s"]), (.5, 3.))
+        self.assertNotIn("driver_build_s", meta)
         self.assertEqual(meta["run_id"], "run-1")
         self.assertRegex(meta["created_utc"], r"^\d{4}-\d\d-\d\dT")
         entry = self.store.entry(self.key())
-        self.assertEqual(meta["driver_sha256"], corpus_bench.sha(entry / "gradbench"))
         self.assertEqual(meta["executable_sha256"], corpus_bench.sha(entry / "model"))
+        driver_meta = self.store.lookup(self.driver_key())
+        self.assertEqual(driver_meta["driver_build_s"], 8.)
+        self.assertEqual(driver_meta["model_key"], self.key())
+        self.assertEqual(driver_meta["run_id"], "run-1")
+        self.assertEqual(driver_meta["driver_sha256"],
+                         corpus_bench.sha(self.store.entry(self.driver_key()) / "gradbench"))
 
     def test_hit_runs_no_commands_and_marks_the_reused_setup_events(self):
         self.build()
@@ -165,8 +175,10 @@ class BuildCacheOrchestrationTests(BuildFixture):
         key = self.key()
         self.assertEqual(again.calls, [])
         self.assertEqual(build["cache"], dict(directory=str(self.store.root), key=key,
-                                              hit=True, run_id="run-1"))
-        self.assertEqual(build["gradient"], self.store.entry(key) / "gradbench")
+                                              driver_key=self.driver_key(), hit=True, model_hit=True,
+                                              driver_hit=True, run_id="run-1", driver_run_id="run-1"))
+        self.assertEqual(build["driver_build_s"], 8.)
+        self.assertEqual(build["gradient"], self.store.entry(self.driver_key()) / "gradbench")
         stanc, make = build["setup"]["cmdstan_stanc"], build["setup"]["cmdstan_build"]
         self.assertEqual((stanc["phase"], stanc["elapsed_s"]), ("copy/stanc-cpp", .5))
         self.assertEqual((make["phase"], make["elapsed_s"]), ("copy/cmdstan-build", 3.))
@@ -181,7 +193,7 @@ class BuildCacheOrchestrationTests(BuildFixture):
         other = self.root / "other.stan"
         other.write_text("parameters { real y; } model { y ~ normal(0, 1); }")
         self.build("other", stan=other)
-        self.assertEqual(len(self.entries()), 2)
+        self.assertEqual(len(self.entries()), 4)
 
     def test_without_a_cache_the_build_stays_in_the_run_directory(self):
         build = self.build(cache=None)
@@ -222,31 +234,90 @@ class BuildCacheOrchestrationTests(BuildFixture):
         key = self.key()
         def winner():
             scratch = self.store.scratch(key)
-            for name in ("model.stan", "model.hpp", "gradbench", "model"):
+            for name in ("model.stan", "model.hpp", "model"):
                 (scratch / name).write_text("winner " + name)
-            self.store.commit(scratch, key, dict(files=["model.stan", "model.hpp", "gradbench", "model"],
+            self.store.commit(scratch, key, dict(files=["model.stan", "model.hpp", "model"],
                                                  run_id="other-run", stanc_s=9., build_s=9.))
         self.runner.hooks["m/cmdstan-build"] = winner
         build = self.build()
-        self.assertEqual(self.entries(), [key])
-        self.assertEqual((self.store.entry(key) / "gradbench").read_text(), "winner gradbench")
-        self.assertEqual(build["gradient"], self.store.entry(key) / "gradbench")
+        self.assertEqual(self.entries(), sorted([key, self.driver_key()]))
+        self.assertEqual((self.store.entry(key) / "model").read_text(), "winner model")
+        self.assertEqual(build["executable"], self.store.entry(key) / "model")
         self.assertEqual(build["cache"]["hit"], False)
         self.assertEqual(build["cache"]["raced"], True)
         self.assertEqual(build["setup"]["cmdstan_build"]["elapsed_s"], 3.)
         self.assertNotIn("cached", build["setup"]["cmdstan_build"])
 
 
+class SplitCacheTests(BuildFixture):
+    def rebuilt_with(self, driver="driver2"):
+        expected = fake_expected()
+        expected["sources"]["tools/bench_cmdstan_grad.cpp"] = driver
+        self.cache = CmdstanCache(self.store, cache_context(self.args, expected), "run-2")
+
+    def test_a_driver_change_rebuilds_only_the_driver(self):
+        first = self.build()
+        self.rebuilt_with()
+        again = FakeRunner()
+        build = self.build("copy", runner=again)
+        self.assertEqual([c["phase"] for c in again.calls], ["copy/gradient-driver-build"])
+        self.assertEqual(build["cache"], dict(directory=str(self.store.root), key=self.key(),
+                                              driver_key=self.driver_key(), hit=False, model_hit=True,
+                                              driver_hit=False, run_id="run-1"))
+        self.assertEqual(build["executable"], first["executable"])
+        self.assertNotEqual(build["gradient"], first["gradient"])
+        self.assertEqual(build["driver_build_s"], 8.)
+        self.assertEqual(len(self.entries()), 3)
+        self.assertEqual(build["setup"]["cmdstan_stanc"]["cached"], True)
+        self.assertEqual(build["setup"]["cmdstan_build"]["elapsed_s"], 3.)
+        self.assertEqual(self.store.lookup(self.driver_key())["run_id"], "run-2")
+
+    def test_the_rebuilt_driver_compiles_against_the_cached_header(self):
+        self.build()
+        self.rebuilt_with()
+        again = FakeRunner()
+        self.build("copy", runner=again)
+        cwd = pathlib.Path(again.calls[0]["cwd"])
+        self.assertTrue(str(cwd).startswith(str(self.store.root)))
+        self.assertIn("model.hpp", again.calls[0]["argv"])
+        self.assertEqual(sorted(p.name for p in self.store.entry(self.driver_key()).iterdir()),
+                         ["gradbench", "meta.json"])
+        self.assertEqual([p for p in self.store.root.iterdir() if p.name.startswith(".tmp-")], [])
+
+    def test_a_failed_driver_rebuild_keeps_the_model_entry_and_fails_the_gradient(self):
+        self.build()
+        self.rebuilt_with()
+        again = FakeRunner()
+        again.fail["copy/gradient-driver-build"] = "failed"
+        build = self.build("copy", runner=again)
+        self.assertRegex(build["gradient_failure"], r"^copy/gradient-driver-build: failed")
+        self.assertIsNone(build["gradient"])
+        self.assertEqual(len(self.entries()), 2)
+        self.assertIsNone(build["build_failure"])
+
+    def test_a_model_change_rebuilds_everything(self):
+        self.build()
+        again = FakeRunner()
+        self.args.stancflags = "--O1 --other"
+        self.cache = CmdstanCache(self.store, cache_context(self.args, fake_expected()), "run-2")
+        build = self.build("copy", runner=again)
+        self.assertEqual([c["phase"].split("/")[-1] for c in again.calls],
+                         ["stanc-cpp", "gradient-driver-build", "cmdstan-build"])
+        self.assertEqual(build["cache"]["model_hit"], False)
+        self.assertEqual(len(self.entries()), 4)
+
+
 class PrebuiltMeasureTests(existing.SetupEstimateTests):
     """Every outcome the inline build produces is the same when the build ran earlier."""
-    def measure(self):
+    def measure(self, reference=None):
         work = self.root / "m"
         with mock.patch("harnesses.corpus_bench.compile_cmd", return_value=["c++"]), \
              mock.patch("harnesses.corpus_bench.sha", return_value="test-hash"):
             build = cmdstan_build("m", self.source, work, self.runner, self.args)
             self.prebuild_events = len(self.events)
             return corpus_bench.measure_model("m", self.source, self.data, self.root,
-                                              {"run_id": "test-run"}, self.runner, self.args, build)
+                                              {"run_id": "test-run"}, self.runner, self.args, build,
+                                              reference)
 
     def test_source_compile_failure_keeps_event_without_setup_estimate(self):
         self.failures["m/stanli-mir"] = "failed"
@@ -288,13 +359,14 @@ class PrebuiltMeasureTests(existing.SetupEstimateTests):
                                                 {"run_id": "this-run"}, self.runner, self.args, build)
         self.assertEqual(record["status"], "ok")
         self.assertEqual((record["row"]["cmdstan_stanc_s"], record["row"]["cmdstan_build_s"]), (.5, 3.))
-        self.assertEqual(record["row"]["cmdstan_estimated_s"], .5 + 3. + 20000 * 500000 / 1e9)
+        self.assertEqual(record["row"]["cmdstan_estimated_s"], .5 + 3. + 5000 * 500000 / 1e9)
         for key in ("cmdstan_stanc", "cmdstan_build"):
             self.assertEqual(record["setup"][key]["cached"], True)
             self.assertEqual(record["setup"][key]["cache_run_id"], "older-run")
         self.assertNotIn("cached", record["setup"]["stanli_compile"])
         self.assertEqual(record["build_cache"]["hit"], True)
         self.assertEqual(record["build_cache"]["key"], cache.key(self.source))
+        self.assertEqual(record["build_cache"]["driver_key"], cache.driver_key(self.source))
         phases = [event["phase"].split("/")[-1] for event in self.events]
         self.assertNotIn("stanc-cpp", phases)
         self.assertNotIn("cmdstan-build", phases)
@@ -325,7 +397,7 @@ class PrebuildTests(BuildFixture):
         for build in builds.values():
             self.assertTrue(build["gradient"].is_file())
             self.assertEqual(build["cache"]["hit"], False)
-        self.assertEqual(len(self.entries()), 5)
+        self.assertEqual(len(self.entries()), 10)
 
     def test_published_setup_events_never_overlap_another_command(self):
         self.runner = FakeRunner(delay=.03)
@@ -365,7 +437,8 @@ class PrebuildTests(BuildFixture):
         for name in ("a", "e"):
             self.assertIsNone(builds[name]["gradient_failure"])
             self.assertIsNone(builds[name]["build_failure"])
-        self.assertEqual(self.entries(), sorted(self.cache.key(self.inputs[n][0]) for n in ("a", "e")))
+        self.assertEqual(self.entries(), sorted(k(self.inputs[n][0]) for n in ("a", "e")
+                                                for k in (self.cache.key, self.cache.driver_key)))
 
     def test_an_unexpected_error_in_one_build_is_that_models_failure(self):
         self.inputs["c"][0].unlink()
@@ -407,6 +480,22 @@ class PrebuildTests(BuildFixture):
         self.assertEqual(again.calls, [])
         self.assertEqual({b["cache"]["hit"] for b in builds.values()}, {True})
 
+    def test_a_driver_change_reports_the_model_as_cached_and_rebuilds_only_drivers(self):
+        self.prebuild()
+        expected = fake_expected()
+        expected["sources"]["tools/benchmark_timer.hpp"] = "newer"
+        self.cache = CmdstanCache(self.store, cache_context(self.args, expected), "run-2")
+        again = FakeRunner()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            builds = prebuild(self.inputs, self.root / "run", again, self.args, self.cache)
+        self.assertEqual({c["phase"].split("/")[-1] for c in again.calls}, {"gradient-driver-build"})
+        self.assertEqual(len(again.calls), 5)
+        self.assertEqual({(b["cache"]["model_hit"], b["cache"]["driver_hit"]) for b in builds.values()},
+                         {(True, False)})
+        self.assertIn("a: cmdstan build model cached, driver rebuilt", out.getvalue())
+        self.assertEqual(len(self.entries()), 15)
+
     def test_interrupt_stops_running_commands_and_propagates(self):
         self.runner.hooks["b/stanc-cpp"] = lambda: (_ for _ in ()).throw(KeyboardInterrupt())
         with self.assertRaises(KeyboardInterrupt):
@@ -435,7 +524,7 @@ class MainWiringTests(unittest.TestCase):
             source.write_text(f"parameters {{ real {name}; }} model {{ {name} ~ normal(0, 1); }}")
             data.write_text("{}")
             self.cases[name] = SimpleNamespace(source=source, data=data, collection="posteriordb")
-        self.runners, self.measured = [], []
+        self.runners, self.measured, self.points = [], [], {}
         environment = {"PATH": os.environ["PATH"], "HOME": str(self.root / "home"),
                        "USERPROFILE": str(self.root / "home")}
         for patch in (mock.patch.dict(os.environ, environment, clear=True),
@@ -455,13 +544,33 @@ class MainWiringTests(unittest.TestCase):
         self.runners.append(runner)
         return runner
 
-    def measure(self, name, stan, data, directory, manifest, runner, args, build=None):
+    def measure(self, name, stan, data, directory, manifest, runner, args, build=None, reference=None):
         self.measured.append((name, build, len(runner.calls)))
+        self.points[name] = reference
         record = dict(model=name, status="ok", row=dict(model=name, note=""))
         (directory / f"{name}.result.json").write_text(json.dumps(record))
         return record
 
+    def points_file(self, **changes):
+        import benchmark_points as bp
+        phases = lambda a, b: dict(warmup=a, sampling=b)
+        models = {}
+        for name, case in self.cases.items():
+            hashes = dict(stan_sha256=bp.sha256(case.source), data_sha256=bp.sha256(case.data))
+            if name == "a":
+                models[name] = dict(hashes, source="reference_run", n_params=1,
+                                    points=[[0.1 * k] for k in range(10)], iterations=list(range(10)),
+                                    gradients=dict(warmup=40, sampling=60, total=100),
+                                    divergences=phases(0, 0), max_treedepth=phases(0, 0), **changes)
+            else:
+                models[name] = dict(hashes, source="fixed", reason="reference run timed out")
+        path = self.root / "points.json.gz"
+        bp.write(path, dict(schema=bp.SCHEMA, settings=dict(points=10, warmup=5, draws=5), models=models))
+        return path
+
     def run_main(self, *extra, output="out.tsv"):
+        if "--points-file" not in extra:
+            extra = (*extra, "--points-file", str(self.points_file()))
         with contextlib.redirect_stdout(io.StringIO()):
             status = corpus_bench.main([str(self.root / "cmdstan"), str(self.root / "pdb"),
                 str(self.root / output), "--stanc", str(self.root / "stanc"),
@@ -469,12 +578,42 @@ class MainWiringTests(unittest.TestCase):
                 *extra])
         return status, pathlib.Path(str(self.root / output) + ".run")
 
+    def test_reference_inputs_are_frozen_in_the_run_and_recorded_in_the_manifest(self):
+        status, run = self.run_main("--no-build-cache")
+        self.assertEqual(status, 0)
+        frozen = run / "inputs" / "a.points.json"
+        self.assertEqual(json.loads(frozen.read_text()), [[0.1 * k] for k in range(10)])
+        self.assertEqual(self.points["a"]["points"], frozen)
+        self.assertEqual((self.points["a"]["source"], self.points["a"]["gradient_count"]),
+                         ("reference_run", 100))
+        self.assertIsNone(self.points["b"]["points"])
+        self.assertEqual(self.points["b"]["gradient_count"], 5000)
+        identity = json.loads((run / "manifest.json").read_text())["identity"]
+        inputs = identity["inputs"]
+        self.assertEqual((inputs["a"]["point_source"], inputs["b"]["point_source"]),
+                         ("reference_run", "fixed"))
+        self.assertEqual((inputs["a"]["gradient_count"], inputs["b"]["gradient_count"]), (100, 5000))
+        self.assertEqual(inputs["a"]["points_sha256"], corpus_bench.sha(frozen))
+        for name in ("a", "b"):
+            self.assertEqual(inputs[name]["reference_sha256"],
+                             corpus_bench.sha(run / "inputs" / f"{name}.reference.json"))
+        self.assertNotIn("points_sha256", inputs["b"])
+        self.assertEqual(identity["points_file_sha256"], corpus_bench.sha(self.root / "points.json.gz"))
+        self.assertEqual(identity["reference_settings"]["points"], 10)
+
+    def test_a_points_file_that_no_longer_matches_the_source_is_an_error(self):
+        path = self.points_file(stan_sha256="0" * 64)
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.run_main("--no-build-cache", "--points-file", str(path))
+        self.assertIn("stan source changed", err.getvalue())
+        self.assertEqual(self.measured, [])
+
     def test_every_build_finishes_before_the_first_measurement(self):
         cache = self.root / "cache"
         status, run = self.run_main("--build-cache", str(cache), "--build-jobs", "3")
         self.assertEqual(status, 0)
         self.assertEqual([m[2] for m in self.measured], [6, 6])
-        self.assertEqual(len(list(cache.iterdir())), 2)
+        self.assertEqual(len(list(cache.iterdir())), 4)
         for name, build, _ in self.measured:
             self.assertEqual(build["cache"]["hit"], False)
             self.assertTrue(build["gradient"].is_file())
@@ -506,17 +645,17 @@ class MainWiringTests(unittest.TestCase):
     def test_default_location_prefers_the_environment_then_the_home_cache(self):
         home_cache = self.root / "home/.cache/stanli/corpus-bench"
         self.run_main()
-        self.assertEqual(len(list(home_cache.iterdir())), 2)
+        self.assertEqual(len(list(home_cache.iterdir())), 4)
         with mock.patch.dict(os.environ, {"STANLI_BENCH_CACHE": str(self.root / "env-cache")}):
             self.run_main(output="env.tsv")
-        self.assertEqual(len(list((self.root / "env-cache").iterdir())), 2)
-        self.assertEqual(len(list(home_cache.iterdir())), 2)
+        self.assertEqual(len(list((self.root / "env-cache").iterdir())), 4)
+        self.assertEqual(len(list(home_cache.iterdir())), 4)
 
     def test_explicit_directory_beats_the_environment(self):
         with mock.patch.dict(os.environ, {"STANLI_BENCH_CACHE": str(self.root / "env-cache")}):
             self.run_main("--build-cache", str(self.root / "explicit"))
         self.assertFalse((self.root / "env-cache").exists())
-        self.assertEqual(len(list((self.root / "explicit").iterdir())), 2)
+        self.assertEqual(len(list((self.root / "explicit").iterdir())), 4)
 
     def test_no_build_cache_builds_in_the_run_directory(self):
         _, run = self.run_main("--no-build-cache")
@@ -568,7 +707,7 @@ class CachedSetupCatalogTests(unittest.TestCase):
         intro = rendered.split("| Model")[0]
         self.assertIn("CmdStan stanc and build times for 1 of 2 models were reused from the build cache", intro)
         self.assertIn("1.42x", rendered)
-        self.assertIn("| 0.121 | 2.2 |", rendered)
+        self.assertIn("| 0.122 | 2.2 |", rendered)
 
     def test_intro_is_unchanged_when_nothing_was_reused(self):
         self.assertNotIn("build cache", self.render())
@@ -672,9 +811,12 @@ class CacheKeyTests(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def key(self, args=None, expected=None, stan=STAN):
-        from bench_build_cache import cache_key
         context = cache_context(args or fake_args(self.root), expected or fake_expected())
-        return cache_key(context, stan)
+        return corpus_bench.model_key(context, stan)
+
+    def driver_key(self, args=None, expected=None, stan=STAN):
+        context = cache_context(args or fake_args(self.root), expected or fake_expected())
+        return corpus_bench.driver_key(context, stan)
 
     def test_key_is_a_stable_sha256(self):
         key = self.key()
@@ -691,8 +833,6 @@ class CacheKeyTests(unittest.TestCase):
             return apply
         changes = {
             "stanc binary": edit(("executables", "stanc"), "other"),
-            "driver source": edit(("sources", "tools/bench_cmdstan_grad.cpp"), "other"),
-            "timer header": edit(("sources", "tools/benchmark_timer.hpp"), "other"),
             "cmdstan checkout": edit(("toolchains", "cmdstan", "head"), "other"),
             "cmdstan diff": edit(("toolchains", "cmdstan", "tracked_diff_sha256"), "other"),
             "stan checkout": edit(("toolchains", "stan", "head"), "other"),
@@ -712,6 +852,24 @@ class CacheKeyTests(unittest.TestCase):
                 keys.add(key)
         self.assertEqual(len(keys), len(changes) + 1)
 
+    def test_driver_and_timer_sources_change_only_the_driver_key(self):
+        base, base_driver = self.key(), self.driver_key()
+        for label, source in (("driver", "tools/bench_cmdstan_grad.cpp"),
+                              ("timer", "tools/benchmark_timer.hpp")):
+            expected = fake_expected()
+            expected["sources"][source] = "other"
+            with self.subTest(label=label):
+                self.assertEqual(self.key(expected=expected), base)
+                self.assertNotEqual(self.driver_key(expected=expected), base_driver)
+
+    def test_every_model_component_also_changes_the_driver_key(self):
+        base = self.driver_key()
+        expected = fake_expected()
+        expected["executables"]["stanc"] = "other"
+        self.assertNotEqual(self.driver_key(expected=expected), base)
+        self.assertNotEqual(self.driver_key(stan="b" * 64), base)
+        self.assertNotEqual(self.driver_key(), self.key())
+
     def test_source_flags_realpath_and_cache_version_change_the_key(self):
         base = self.key()
         self.assertNotEqual(self.key(stan="b" * 64), base)
@@ -722,11 +880,12 @@ class CacheKeyTests(unittest.TestCase):
         with mock.patch("bench_build_cache.VERSION", 999):
             self.assertNotEqual(self.key(), base)
 
-    def test_driver_command_and_make_invocation_change_the_key(self):
-        base = self.key()
+    def test_driver_command_changes_only_the_driver_key_and_make_changes_both(self):
+        base, base_driver = self.key(), self.driver_key()
         with mock.patch("harnesses.corpus_bench.compile_cmd",
                         side_effect=lambda *a, **k: fake_compile(*a, **k) + ["-DNEW"]):
-            self.assertNotEqual(self.key(), base)
+            self.assertEqual(self.key(), base)
+            self.assertNotEqual(self.driver_key(), base_driver)
         with mock.patch("harnesses.corpus_bench.make_command",
                         side_effect=lambda *a, **k: ["make", "-j2", "{exe}"]):
             self.assertNotEqual(self.key(), base)

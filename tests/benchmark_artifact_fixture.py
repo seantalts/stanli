@@ -1,4 +1,4 @@
-"""Small synthetic v4 artifacts shared by renderer and publication tests."""
+"""Small synthetic v5 and v6 artifacts shared by renderer and publication tests."""
 import copy
 import csv
 import gzip
@@ -6,11 +6,31 @@ import json
 import statistics
 
 
-def artifact_fixture():
+POINTS = 3
+POINTS_SHA = "ab" * 32
+REFERENCE_SHA = "ef" * 32
+REFERENCE_COUNT = 2000
+
+
+def raw_trial(ns, dropped=()):
+    """One driver output whose every finite point costs ns per gradient."""
+    points = []
+    for k in range(POINTS):
+        if k in dropped:
+            points.append(dict(point=k, finite=False))
+        else:
+            points.append(dict(point=k, finite=True, iterations=1000000,
+                               elapsed_ns=ns * 1000000, batch=1))
+    return dict(protocol="stanli-gradient-v3", warmup_iterations=200000,
+                warmup_elapsed_ns=20000000, points=points)
+
+
+def artifact_fixture(dropped=(), point_sources=None, counts=None):
     config = dict(corpus="all", filter="", rounds=6, gradient_budget=20000,
-                  stancflags="", warmup_ms=200, measure_ms=250, gradient_timeout=60)
+                  stancflags="", warmup_ms=20, measure_ms=40, points=POINTS,
+                  gradient_timeout=60)
     manifest = dict(run_id="current", started_utc="2026-09-21T00:00:00Z",
-        identity=dict(protocol="stanli-corpus-v4", config=config,
+        identity=dict(protocol="stanli-corpus-v5", config=config,
             inputs={name: dict(stan=name + "-stan", data=name + "-data", collection="posteriordb")
                     for name in ("good", "failed")},
             executables=dict(bench="bench-hash", vectorize_probe="probe-hash", stanc="b" * 64),
@@ -18,19 +38,33 @@ def artifact_fixture():
             sources={"harnesses/corpus_bench.py": "harness-hash", "tools/bench_cmdstan_grad.cpp": "driver-hash",
                      "tools/benchmark_timer.hpp": "timer-hash"},
             machine=dict(platform="macOS-arm64", host="host", processor="arm", logical_cpus=32)))
+    if point_sources is not None:
+        identity = manifest["identity"]
+        identity["protocol"] = "stanli-corpus-v6"
+        del identity["config"]["gradient_budget"]
+        for name, source in point_sources.items():
+            wanted = identity["inputs"][name]
+            wanted["point_source"] = source
+            wanted["gradient_count"] = (5000 if source == "fixed"
+                                        else (counts or {}).get(name, REFERENCE_COUNT))
+            wanted["reference_sha256"] = REFERENCE_SHA
+            if source == "reference_run":
+                wanted["points_sha256"] = POINTS_SHA
     pairs = []
     for index, (s, c) in enumerate(zip((100, 200, 300, 400, 500, 600),
                                       (1000, 300, 400, 900, 600, 800))):
+        kept = [k for k in range(POINTS) if k not in dropped]
+        errors = [1e-12 * (k + 1) for k in kept]
         pair = dict(order=["stanli", "cmdstan"] if index % 2 == 0 else ["cmdstan", "stanli"],
-                    max_scaled_error=0)
+                    kept_points=kept, dropped_points=list(dropped),
+                    scaled_errors=errors, max_scaled_error=max(errors), width=2)
         for engine, ns in (("stanli", s), ("cmdstan", c)):
-            pair[engine] = dict(protocol="stanli-gradient-v2", iterations=3000000,
-                elapsed_ns=ns * 3000000, batch=1, warmup_iterations=2000000,
-                warmup_elapsed_ns=200000000, values=[-1.0, 2.0])
+            pair[engine] = raw_trial(ns, dropped)
         pairs.append(pair)
     row = dict(model="good", run_id="current", params=1, gradient_budget=20000,
                paired_rounds=6, stanli_compile_s=.1, stanli_prep_s=.02,
                cmdstan_stanc_s=.2, cmdstan_build_s=2, note="")
+    row.update(points_kept=POINTS - len(dropped), points_dropped=len(dropped))
     for field, values in (("stanli_ns_grad", [100,200,300,400,500,600]),
                           ("cmdstan_ns_grad", [1000,300,400,900,600,800]),
                           ("paired_speedup", [10,1.5,4/3,2.25,1.2,4/3])):
@@ -47,6 +81,19 @@ def artifact_fixture():
                     row=dict(model="failed", run_id="current", gradient_budget=20000,
                              note="gradient build failed"),
                     gradients=[], setup={}, preparation_s=[], status="failed")]
+    if point_sources is not None:
+        inputs = manifest["identity"]["inputs"]
+        for record in records:
+            wanted = inputs[record["model"]]
+            record["inputs"].update({k: wanted[k] for k in ("point_source", "gradient_count",
+                                                            "reference_sha256", "points_sha256")
+                                     if k in wanted})
+            record["row"].pop("gradient_budget")
+            record["row"]["point_source"] = wanted["point_source"]
+            record["row"]["gradient_count"] = wanted["gradient_count"]
+        count = inputs["good"]["gradient_count"]
+        records[0]["row"].update(stanli_estimated_s=.1 + .02 + count * 350 / 1e9,
+                                 cmdstan_estimated_s=.2 + 2 + count * 700 / 1e9)
     return manifest, records, [copy.deepcopy(record["row"]) for record in records]
 
 

@@ -1,4 +1,4 @@
-// Per-gradient latency at a fixed point, or file-to-bound-executor latency
+// Per-gradient latency at fixed points, or file-to-bound-executor latency
 // with --prep (no warmup or model evaluation).
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
@@ -37,7 +37,8 @@ int benchmark_main(int argc, char** argv) {
   if (argc < 4) {
     std::fprintf(stderr,
                  "usage: bench_grad mir.sexp data.json N|--prep|--timed "
-                 "[--fast-math] [--warmup-ms N --measure-ms N]\n");
+                 "[--fast-math] [--warmup-ms N --measure-ms N --points N | "
+                 "--points-file PATH]\n");
     return 2;
   }
   const bool prep_only = std::string(argv[3]) == "--prep";
@@ -130,8 +131,8 @@ int benchmark_main(int argc, char** argv) {
   const char* prof_env = std::getenv("STANLI_PROFILE");
   const bool profile = prof_env && prof_env[0] != '0';
   const int64_t n = ex.n_params();
-  Eigen::VectorXd q(n);
-  for (int64_t i = 0; i < n; ++i) q(i) = 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3);
+  Eigen::VectorXd q = Eigen::Map<const Eigen::VectorXd>(
+      stanli_benchmark::evaluation_point(0, n).data(), n);
   Eigen::VectorXd grad(n);
   double sink = 0;
   double lp = 0;
@@ -140,14 +141,17 @@ int benchmark_main(int argc, char** argv) {
   const auto one = [&]() { stan::model::gradient(model, q, lp, grad, logger); };
   if (timed) {
     const auto opts = stanli_benchmark::options(argc, argv, 4);
-    one();
-    if (!std::isfinite(lp) || !grad.allFinite())
-      throw std::runtime_error(
-          "benchmark point has non-finite density or gradient");
-    const auto warm = stanli_benchmark::window(one, opts.warmup_ns, 1, true);
-    const auto measured =
-        stanli_benchmark::window(one, opts.measure_ns, warm.batch);
-    stanli_benchmark::output(warm, measured, lp, grad);
+    stanli_benchmark::timed(
+        opts, n,
+        [&](const std::vector<double>& point) {
+          q = Eigen::Map<const Eigen::VectorXd>(point.data(), n);
+        },
+        one,
+        [&]() {
+          std::vector<double> out{lp};
+          out.insert(out.end(), grad.data(), grad.data() + n);
+          return out;
+        });
     return 0;
   }
   // Warm up by time, not by count: 1000 evaluations is nothing on a scalar

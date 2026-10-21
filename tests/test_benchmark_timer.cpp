@@ -3,6 +3,9 @@
 #endif
 #include "../tools/benchmark_timer.hpp"
 #include <cassert>
+#include <cstdio>
+#include <fstream>
+#include <sstream>
 
 struct FakeClock {
   using duration = std::chrono::nanoseconds;
@@ -41,4 +44,187 @@ int main() {
     rejected = true;
   }
   assert(rejected);
+
+  assert(stanli_benchmark::splitmix64(0) == 0xE220A8397B1DCDAFULL);
+  const auto origin = stanli_benchmark::evaluation_point(0, 9);
+  assert(origin.size() == 9);
+  for (int64_t i = 0; i < 9; ++i)
+    assert(origin[i] == 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3));
+  const auto narrow = stanli_benchmark::evaluation_point(3, 4);
+  const auto wide = stanli_benchmark::evaluation_point(3, 8);
+  for (int64_t i = 0; i < 4; ++i) {
+    assert(narrow[i] == wide[i]);
+    assert(narrow[i] >= -2 && narrow[i] < 2);
+  }
+  assert(narrow != stanli_benchmark::evaluation_point(4, 4));
+  assert(narrow == stanli_benchmark::evaluation_point(3, 4));
+
+  const auto field = [](const std::string& text, const std::string& point,
+                        const std::string& key) {
+    const auto start = text.find(point);
+    assert(start != std::string::npos);
+    const auto at = text.find(key, start);
+    assert(at != std::string::npos);
+    return std::stoll(text.substr(at + key.size()));
+  };
+  const auto count = [](const std::string& text, const std::string& what) {
+    int64_t found = 0;
+    for (auto at = text.find(what); at != std::string::npos;
+         at = text.find(what, at + 1))
+      ++found;
+    return found;
+  };
+  {
+    stanli_benchmark::Options options;
+    options.points = 4;
+    options.warmup_ns = 50'000;
+    options.measure_ns = 100'000;
+    std::vector<double> q;
+    const auto set = [&](const std::vector<double>& x) { q = x; };
+    const auto is = [&](int k) {
+      return q == stanli_benchmark::evaluation_point(k, 3);
+    };
+    const auto one = [&] {
+      if (is(3)) throw std::domain_error("rejected");
+      FakeClock::ticks += is(1) ? 200 : 100;
+    };
+    const auto values = [&]() -> std::vector<double> {
+      return {is(2) ? std::nan("") : -1.5, 2.0, 3.0};
+    };
+    std::ostringstream out;
+    stanli_benchmark::timed<FakeClock>(options, 3, set, one, values, out);
+    const auto text = out.str();
+    assert(text.find("\"protocol\":\"stanli-gradient-v3\"") !=
+           std::string::npos);
+    assert(text.find("\"warmup_iterations\":") != std::string::npos);
+    assert(text.find("\"point\":0,\"finite\":true,\"values\":[-1.5,2,3]") !=
+           std::string::npos);
+    assert(text.find("\"point\":2,\"finite\":false}") != std::string::npos);
+    assert(text.find("\"point\":3,\"finite\":false}") != std::string::npos);
+    assert(count(text, "\"iterations\":") == 2);
+    assert(count(text, "\"elapsed_ns\":") == 2);
+    for (const char* point : {"\"point\":0", "\"point\":1"})
+      assert(field(text, point, "\"elapsed_ns\":") >= 100'000);
+    const auto cheap = field(text, "\"point\":0", "\"elapsed_ns\":") /
+                       field(text, "\"point\":0", "\"iterations\":");
+    const auto dear = field(text, "\"point\":1", "\"elapsed_ns\":") /
+                      field(text, "\"point\":1", "\"iterations\":");
+    assert(cheap == 100 && dear == 200);
+  }
+  {
+    stanli_benchmark::Options options;
+    options.points = 2;
+    const auto set = [](const std::vector<double>&) {};
+    const auto one = [] { FakeClock::ticks += 1; };
+    const auto values = []() -> std::vector<double> { return {std::nan("")}; };
+    std::ostringstream out;
+    bool failed = false;
+    try {
+      stanli_benchmark::timed<FakeClock>(options, 1, set, one, values, out);
+    } catch (const std::runtime_error&) {
+      failed = true;
+    }
+    assert(failed);
+    assert(out.str().empty());
+  }
+  {
+    char program[] = "driver";
+    char warm[] = "--warmup-ms";
+    char warm_value[] = "7";
+    char pts[] = "--points";
+    char pts_value[] = "3";
+    char* argv[] = {program, warm, warm_value, pts, pts_value};
+    const auto options = stanli_benchmark::options(5, argv, 1);
+    assert(options.warmup_ns == 7'000'000);
+    assert(options.measure_ns == 40'000'000);
+    assert(options.points == 3);
+    const auto defaults = stanli_benchmark::options(1, argv, 1);
+    assert(defaults.warmup_ns == 20'000'000 && defaults.points == 10);
+    char zero[] = "0";
+    char* bad[] = {program, pts, zero};
+    bool rejected_points = false;
+    try {
+      stanli_benchmark::options(3, bad, 1);
+    } catch (const std::invalid_argument&) {
+      rejected_points = true;
+    }
+    assert(rejected_points);
+  }
+  {
+    const auto given = stanli_benchmark::parse_points(
+        " [[0.5, -1e-3, 3],\n [1.7976931348623157e+308, 0, -2.25]] ");
+    assert(given.size() == 2 && given[0].size() == 3);
+    assert(given[0][0] == 0.5 && given[0][1] == -1e-3 && given[0][2] == 3);
+    assert(given[1][0] == 1.7976931348623157e+308 && given[1][2] == -2.25);
+    for (const char* bad :
+         {"", "[]", "[[]]", "[[1,2],[3]]", "[[1,2]", "[[1,x]]", "[[1,2]] 7",
+          "[[1e999]]", "[[nan]]", "[[Infinity]]", "[1,2]"}) {
+      bool rejected_text = false;
+      try {
+        stanli_benchmark::parse_points(bad);
+      } catch (const std::invalid_argument&) {
+        rejected_text = true;
+      }
+      assert(rejected_text);
+    }
+  }
+  {
+    stanli_benchmark::Options options;
+    options.points = 2;
+    options.warmup_ns = 50'000;
+    options.measure_ns = 100'000;
+    options.given = {{0.25, -0.5, 1.0}, {2.0, 2.0, 2.0}};
+    std::vector<std::vector<double>> seen;
+    const auto set = [&](const std::vector<double>& x) { seen.push_back(x); };
+    const auto one = [] { FakeClock::ticks += 100; };
+    const auto values = []() -> std::vector<double> { return {1.0, 2.0}; };
+    std::ostringstream out;
+    stanli_benchmark::timed<FakeClock>(options, 3, set, one, values, out);
+    assert(seen.front() == options.given[0]);
+    assert(count(out.str(), "\"finite\":true") == 2);
+    assert(count(out.str(), "\"point\":") == 2);
+    for (const auto& x : seen)
+      assert(x == options.given[0] || x == options.given[1]);
+    bool narrow_rejected = false;
+    try {
+      stanli_benchmark::timed<FakeClock>(options, 4, set, one, values, out);
+    } catch (const std::invalid_argument&) {
+      narrow_rejected = true;
+    }
+    assert(narrow_rejected);
+  }
+  {
+    const char* path = "benchmark_timer_points.json";
+    {
+      std::ofstream file(path);
+      file << "[[1,2],[3,4],[5,6]]";
+    }
+    char program[] = "driver";
+    char flag[] = "--points-file";
+    char file_name[] = "benchmark_timer_points.json";
+    char* argv[] = {program, flag, file_name};
+    const auto options = stanli_benchmark::options(3, argv, 1);
+    assert(options.points == 3 && options.given.size() == 3);
+    assert(options.given[2][1] == 6);
+    char pts[] = "--points";
+    char two[] = "2";
+    char* both[] = {program, flag, file_name, pts, two};
+    bool exclusive = false;
+    try {
+      stanli_benchmark::options(5, both, 1);
+    } catch (const std::invalid_argument&) {
+      exclusive = true;
+    }
+    assert(exclusive);
+    char missing_name[] = "benchmark_timer_no_such_file.json";
+    char* missing[] = {program, flag, missing_name};
+    bool unreadable = false;
+    try {
+      stanli_benchmark::options(3, missing, 1);
+    } catch (const std::invalid_argument&) {
+      unreadable = true;
+    }
+    assert(unreadable);
+    std::remove(path);
+  }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a complete v4 corpus run without rerunning measurements.
+"""Publish a complete v5 or v6 corpus run without rerunning measurements.
 
 python3 tools/publish_corpus_bench.py RUN.tsv OUTPUT_DIRECTORY
 python3 tools/publish_corpus_bench.py --vectorized OUTPUT_DIRECTORY \
@@ -50,9 +50,8 @@ def publish(summary, output, compiler_evidence=None, build_identity=None):
             f"records {len(records)} application models.\n\n"
             "The manifest identifies the exact sources, inputs, binaries and settings. "
             "The summary, raw paired observations and command events are retained here. "
-            "The summary retains the protocol's setup-plus-20,000-gradient estimate; "
-            "the table below recalculates totals for 2,000 gradients from the same measurements. "
-            "Full sampling is not run. Failures remain in the inventory.\n\n"
+            "The table below gives each model's setup time plus its gradient count times its "
+            "measured gradient time. Full sampling is not run. Failures remain in the inventory.\n\n"
             f"Full inputs, generated code and command logs remain locally at `{run}`; "
             "these larger artifacts are not hosted with this report.\n\n" + table)
         _checksums(staging)
@@ -88,7 +87,7 @@ def publish_vectorized(output, stanli_run, cmdstan_runs):
         "`combined.json` names the default Stanli run and, for each model, the published "
         "vectorized CmdStan run under `cmdstan-runs/` whose timings are used. Each run "
         "directory keeps that run's manifest, summary, raw observations and events. "
-        "The table recalculates totals for 2,000 gradients. Full sampling is not run.\n\n" + table)
+        "The table uses each model's gradient count from the default run. Full sampling is not run.\n\n" + table)
     _checksums(output)
     print(f"Published {len(combined['cmdstan_runs'])} vectorized comparisons to {output}")
 

@@ -6,8 +6,8 @@ python3 harnesses/ab_bench_corpus.py PDB OUT_DIR --arm base=BIN --arm new=BIN \
     [--fast-math] [--arm-env new:STANLI_NO_COLLAPSE=1]
 
 Uses the protocol of harnesses/corpus_bench.py (docs/benchmarks.md#how-we-measure):
-MIR from the vectorizing stanc, bench_grad --timed with a 200 ms warmup and a
-250 ms window, one fresh process per sample, one thread requested, one
+MIR from the vectorizing stanc, bench_grad --timed at one evaluation point with
+a 200 ms warmup and a 250 ms window, one fresh process per sample, one thread requested, one
 process at a time, the first arm rotating each round. Nothing here compares
 against CmdStan. OUT_DIR/results.jsonl holds one record per model (every
 sample, the order, the load average, the density and gradient values);
@@ -115,11 +115,13 @@ def main():
                         f"{name}/gradient/{round_index}/{arm}",
                         [*(["env", *arm_env[arm]] if arm_env[arm] else []),
                          binaries[arm], mir, data_json, "--timed", *fast, "--warmup-ms",
-                         str(args.warmup_ms), "--measure-ms", str(args.measure_ms)],
+                         str(args.warmup_ms), "--measure-ms", str(args.measure_ms),
+                         "--points", "1"],
                         args.timeout)
-                    timing = parse_timing(runner.text(event), args.warmup_ms, args.measure_ms)
-                    record["samples"][arm].append(timing["elapsed_ns"] / timing["iterations"])
-                    record["values"].setdefault(arm, timing["values"])
+                    timing = parse_timing(runner.text(event), args.warmup_ms, args.measure_ms, 1)
+                    point = timing["points"][0]
+                    record["samples"][arm].append(point["elapsed_ns"] / point["iterations"])
+                    record["values"].setdefault(arm, point["values"])
             record["status"] = "ok"
         except (PhaseFailure, ValueError) as exc:
             record["note"] = str(exc)

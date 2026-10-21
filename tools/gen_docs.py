@@ -26,7 +26,7 @@ import statistics
 import sys
 import warnings
 
-from corpus_table import render_catalog, render_gradient_catalog
+from corpus_table import FIXED_GRADIENT_COUNT, render_catalog, render_gradient_catalog
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # The demo page carries headline numbers too, and its markers are HTML
@@ -62,6 +62,23 @@ def corpus_stats(rows):
             sum(ratio >= 1.0 for ratio in ratios))
 
 
+def total_sampling_median(rows):
+    """Median CmdStan/Stanli ratio of setup plus each model's gradient count times its gradient time."""
+    def total(row, fields):
+        values = [row.get(field) for field in fields]
+        if not all(values):
+            return None
+        count = int(row.get("gradient_count") or FIXED_GRADIENT_COUNT)
+        return float(values[0]) + float(values[1]) + count * float(values[2]) / 1e9
+    ratios = []
+    for row in rows:
+        stanli = total(row, ("stanli_compile_s", "stanli_prep_s", "stanli_ns_grad"))
+        cmdstan = total(row, ("cmdstan_stanc_s", "cmdstan_build_s", "cmdstan_ns_grad"))
+        if row.get("paired_speedup") and stanli and cmdstan:
+            ratios.append(cmdstan / stanli)
+    return statistics.median(ratios) if ratios else None
+
+
 def compute():
     ver = json.loads((REPO / "docs" / "internal" / "artifacts" / "verification.json").read_text())
     # The same record holds three corpora, and the sentences about them
@@ -93,6 +110,7 @@ def compute():
 
     catalog, benchmark_rows, manifest = current_benchmark()
     c_n, c_med, c_par = corpus_stats(benchmark_rows)
+    t_med = total_sampling_median(benchmark_rows)
 
     return {
         "benchmark_catalog": catalog,
@@ -113,6 +131,7 @@ def compute():
         "corpus_median": f"{c_med:.2f}x" if c_med is not None else "unavailable",
         "corpus_n_grad": str(c_n),
         "corpus_at_par": str(c_par),
+        "corpus_total_median": f"{t_med:.0f}x" if t_med is not None else "unavailable",
     }
 
 

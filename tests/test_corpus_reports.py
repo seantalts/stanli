@@ -119,6 +119,16 @@ class CorpusReports(unittest.TestCase):
         rows.append(dict(model='failed', paired_speedup=''))
         self.assertEqual(docs.corpus_stats(rows), (5, 10, 5))
 
+    def test_total_sampling_median_adds_setup_to_each_models_gradient_count(self):
+        row = dict(paired_speedup='2', stanli_compile_s='0.5', stanli_prep_s='0.5',
+                   stanli_ns_grad=str(1e9 / 4000), cmdstan_stanc_s='1',
+                   cmdstan_build_s='5', cmdstan_ns_grad=str(2e9 / 4000), gradient_count='4000')
+        fallback = dict(row, gradient_count='', stanli_ns_grad=str(1e9 / 5000),
+                        cmdstan_ns_grad=str(2e9 / 5000))
+        failed = dict(row, paired_speedup='')
+        missing = dict(row, cmdstan_build_s='')
+        self.assertEqual(docs.total_sampling_median([row, fallback, failed, missing]), 4)
+
     def test_real_fixture_directory_layouts(self):
         self.assertEqual(report.collection('aalto_bern'), 'educational')
         self.assertEqual(report.collection('ch09_m9_1'), 'rethinking')
