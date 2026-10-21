@@ -20,12 +20,15 @@ import json
 import pathlib
 import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "harnesses"))
 
-from model_census import (BASELINE_SCHEMA, STATUSES,  # noqa: E402
+import model_census  # noqa: E402
+from model_census import (BASELINE_SCHEMA, POINTS, STATUSES,  # noqa: E402
                           _CENSUS_RUNG, compare_baseline, load_baseline,
                           write_baseline)
 
@@ -382,6 +385,73 @@ class UpdateRefusalTest(unittest.TestCase):
             self.record(report(row("a.stan")),
                         into=report(row("a.stan", differential="verified")))
         self.assertIn("--differential", str(caught.exception))
+
+
+class DegeneratePointsTest(unittest.TestCase):
+    """Points where the model has no value to agree on are named, not hidden."""
+
+    def differential(self, path, reference, ours):
+        record = {"cache_hit": True, "build_seconds": 0.0,
+                  "points": {str(p): line for p, line in reference.items()}}
+
+        def run(cmd, timeout, **kw):
+            point = cmd[-1]
+            return types.SimpleNamespace(stdout=ours[int(point)])
+
+        entry = {"path": path, "sha256": "1" * 64, "data_sha256": "2" * 64}
+        with mock.patch.object(model_census, "reference_points",
+                               return_value=record), \
+                mock.patch.object(model_census, "run", run):
+            return model_census.differential_one(
+                entry, pathlib.Path("corpus"), pathlib.Path("cache"),
+                "check", "stanc", "shim", pathlib.Path("cmdstan"), "-O1",
+                1e-10, 60)
+
+    AGREE = "OK 1.0 2.0"
+    DEAD_GRADIENT = ("OK 1.0 nan", "OK 1.0 0.0")
+
+    def split(self, path, bad_point):
+        reference = {p: self.AGREE for p in POINTS}
+        ours = {p: self.AGREE for p in POINTS}
+        reference[bad_point], ours[bad_point] = self.DEAD_GRADIENT
+        return self.differential(
+            path, reference, ours)
+
+    def test_a_listed_point_is_excluded_and_reported(self):
+        result = self.split("math/matrix/matrix_division.stan", 1)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(result["excluded_points"], [1, 2])
+        self.assertTrue(result["excluded_reason"])
+
+    def test_the_same_split_at_an_unlisted_point_still_mismatches(self):
+        result = self.split("math/matrix/matrix_division.stan", 0)
+        self.assertEqual(result["status"], "mismatch")
+
+    def test_the_same_split_in_an_unlisted_model_still_mismatches(self):
+        result = self.split("math/matrix/other_model.stan", 1)
+        self.assertEqual(result["status"], "mismatch")
+
+    def test_other_points_of_a_listed_model_are_still_compared(self):
+        result = self.differential(
+            "math/matrix/sd.stan", {p: self.AGREE for p in POINTS},
+            {0: self.AGREE, 1: "OK 1.5 2.0", 2: self.AGREE})
+        self.assertEqual(result["status"], "mismatch")
+
+    def test_the_table_names_each_known_degeneracy(self):
+        table = {e["name"]: e["points"]
+                 for e in model_census.DEGENERATE_POINTS}
+        self.assertEqual(table, {"matrix_division": (1, 2),
+                                 "mdivide_left": (1, 2),
+                                 "mdivide_right_spd": (1, 2),
+                                 "sd": (2,)})
+
+    def test_every_entry_keeps_a_point_and_gives_one_line_of_reason(self):
+        names = [e["name"] for e in model_census.DEGENERATE_POINTS]
+        self.assertEqual(len(names), len(set(names)))
+        for entry in model_census.DEGENERATE_POINTS:
+            self.assertTrue(set(entry["points"]) < set(POINTS), entry)
+            self.assertTrue(entry["reason"].strip(), entry)
+            self.assertNotIn("\n", entry["reason"])
 
 
 class CheckedInBaselineTest(unittest.TestCase):

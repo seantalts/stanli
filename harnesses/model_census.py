@@ -107,6 +107,37 @@ DRIVER = REPO / "tools" / "ref_driver.cpp"
 # is why both drivers agree on the list. Same three, same order.
 POINTS = (0, 1, 2)
 
+# Points at which a model has no value for the two engines to agree on:
+# the reference and stanli both evaluate it, and one side's answer is an
+# artifact of a singular or zero-variance input. `--differential` leaves
+# the listed points out of the comparison and reports them on the row.
+# Matched on the model's file name; the other points of the model are
+# still compared at the same tolerance.
+DEGENERATE_POINTS = (
+    {"name": "matrix_division", "points": (1, 2),
+     "reason": "p_matrix is singular, so the dead gradients are NaN in "
+               "CmdStan and 0 in stanli"},
+    {"name": "mdivide_left", "points": (1, 2),
+     "reason": "p_matrix is singular, so the dead gradients are NaN in "
+               "CmdStan and 0 in stanli"},
+    {"name": "mdivide_right_spd", "points": (1, 2),
+     "reason": "p_matrix is singular, so the dead gradients are NaN in "
+               "CmdStan and 0 in stanli"},
+    {"name": "sd", "points": (2,),
+     "reason": "zero variance, where the var-matrix sd is 0/0 in CmdStan "
+               "and 1/sqrt(n) in stanli"},
+)
+
+
+def degenerate_points(model):
+    """(points, reason) the differential skips for this model, or ((), "")."""
+    stem = pathlib.Path(model).stem
+    for entry in DEGENERATE_POINTS:
+        if entry["name"] == stem:
+            return set(entry["points"]), entry["reason"]
+    return set(), ""
+
+
 # One status per model, and the set is closed. Anything a row could be
 # that is not here is a bug in this file, not a new kind of outcome.
 STATUSES = (
@@ -576,7 +607,10 @@ def differential_one(entry, corpus, cache, check, stanc, shim, cmdstan, opt,
     mir = cache / "mir" / entry["sha256"][:2] / f"{entry['sha256']}.sexp.gz"
     env = dict(os.environ, STANLI_CENSUS_MIR=str(mir))
     worst_rel, worst_ulp, compared, agreed_refusals = 0.0, 0, 0, 0
+    skipped, reason = degenerate_points(model)
     for point in POINTS:
+        if point in skipped:
+            continue
         reference = _ok_values(record["points"].get(str(point), ""))
         result = run([check, model, data, "--stanc", shim,
                       "--point", point], timeout, cwd=REPO, env=env)
@@ -609,10 +643,13 @@ def differential_one(entry, corpus, cache, check, stanc, shim, cmdstan, opt,
         # engines said so. fn_sweep counts that as agreement.
         return dict(cost, status="rejected_both",
                     detail=f"{agreed_refusals} points refused by both")
-    return dict(cost,
-                status="verified" if worst_rel < max_rel else "mismatch",
-                max_rel=worst_rel, max_ulp=worst_ulp, n_values=compared,
-                detail="")
+    result = dict(cost,
+                  status="verified" if worst_rel < max_rel else "mismatch",
+                  max_rel=worst_rel, max_ulp=worst_ulp, n_values=compared,
+                  detail="")
+    if skipped:
+        result.update(excluded_points=sorted(skipped), excluded_reason=reason)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1013,6 +1050,11 @@ def summarize(report, limit):
             print(f"  {len(built)} references built, "
                   f"{sum(built) / len(built):.1f}s each on average, "
                   f"{sum(built) / 60.0:.1f} CPU-minutes total")
+        for r in diffs:
+            d = r["differential"]
+            if d.get("excluded_points"):
+                print(f"  - {r['path']}: points {d['excluded_points']} "
+                      f"excluded: {d['excluded_reason']}")
         for r in kinds.get("mismatch", []) + kinds.get("shape_mismatch", []) \
                 + kinds.get("one_side_threw", []):
             d = r["differential"]
