@@ -59,7 +59,7 @@ class CmdstanPinTests(unittest.TestCase):
     def run_main(self, *extra):
         from harnesses.corpus_bench import main
         error = self.stderr = io.StringIO()
-        with mock.patch.dict(os.environ, {"PATH": os.environ.get("PATH", "")}, clear=True), \
+        with mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if not k.startswith("STANLI_")}, clear=True), \
                 mock.patch("harnesses.corpus_bench.corpus_cases", side_effect=RuntimeError("past the guard")), \
                 contextlib.redirect_stderr(error):
             main([str(self.checkout), "unused-pdb", "unused.tsv", *extra])
