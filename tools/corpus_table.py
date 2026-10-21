@@ -603,10 +603,14 @@ def _catalog_model(model):
     return "<br>".join(f"<code>{html.escape(line)}</code>" for line in lines)
 
 
+def _count(n):
+    return f"{n / 1e6:.3g}M" if n >= 1e6 else f"{n / 1e3:.3g}k"
+
+
 def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
     """Present both compiler configurations with the same public workload."""
-    header = "| Model | CmdStan / Stanli | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) |"
-    output = [header, "| --- | ---: | ---: | ---: |"]
+    header = "| Model | CmdStan / Stanli | Gradients | Stanli total<br>sampling (s) | CmdStan total<br>sampling (s) |"
+    output = [header, "| --- | ---: | ---: | ---: | ---: |"]
     incomplete = []
     complete = sorted(
         (row for row in rows if details[row["model"]]["status"] == "ok"),
@@ -621,14 +625,16 @@ def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
         name = _catalog_model(row["model"])
         if row.get("point_source") == "fixed":
             name += f" {FALLBACK_MARK}"
-        cells = [name, f"{speedup:.3g}x" if speedup is not None else "—"]
+        count = int(row.get("gradient_count") or FIXED_GRADIENT_COUNT)
+        cells = [name, f"{speedup:.3g}x" if speedup is not None else "—", _count(count)]
         for engine, fields in (("stanli", ("stanli_compile_s", "stanli_prep_s")),
                                ("cmdstan", ("cmdstan_stanc_s", "cmdstan_build_s"))):
             components = [_catalog_number(row, field) for field in (*fields, engine + "_ns_grad")]
-            count = int(row.get("gradient_count") or FIXED_GRADIENT_COUNT)
             estimate = (components[0] + components[1] + count * components[2] / 1e9
                         if all(value is not None for value in components) else None)
             cells.append(f"{estimate:.3g}" if estimate is not None else "—")
+        if cells[3:] == ["—", "—"]:
+            cells[2] = "—"
         record = details[row["model"]]
         if record["status"] == "ok":
             output.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
@@ -652,7 +658,7 @@ def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
     if incomplete:
         output.extend(["", "**Incomplete results**", "",
                        "Missing measurements are —; available timings are retained.", "",
-                       header + " Reason |", "| --- | ---: | ---: | ---: | --- |", *incomplete])
+                       header + " Reason |", "| --- | ---: | ---: | ---: | ---: | --- |", *incomplete])
     return "\n".join(output) + "\n"
 
 

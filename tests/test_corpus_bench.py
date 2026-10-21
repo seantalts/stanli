@@ -750,7 +750,8 @@ class BenchmarkCatalogTests(unittest.TestCase):
         rendered = self.render()
         self.assertIn("1.42x", rendered)
         self.assertNotIn("| 2x |", rendered)
-        self.assertIn("| 0.122 | 2.2 |", rendered)
+        self.assertIn("| Gradients |", rendered)
+        self.assertIn("| 1.42x | 5k | 0.122 | 2.2 |", rendered)
         self.assertIn("Full sampling is not run", rendered)
         self.assertIn("5,000", rendered)
         complete, incomplete = rendered.split("**Incomplete results**")
@@ -758,7 +759,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertNotIn("`failed`", complete)
         self.assertNotIn("±", complete)
         self.assertNotIn("Notes", complete)
-        self.assertIn("`failed` | — | — | — | failed; gradient build failed", incomplete)
+        self.assertIn("`failed` | — | — | — | — | failed; gradient build failed", incomplete)
 
     def test_missing_failed_row_is_not_complete_inventory(self):
         self.rows.pop()
@@ -1160,7 +1161,7 @@ class VectorizedCatalogTests(VectorizedFixture):
         rendered = self.render()
         self.assertIn("| `good` | 4x |", rendered)
         self.assertIn("| 0.122 | 2.21 |", rendered)
-        self.assertIn("`failed` | — | — | — | failed; gradient build failed", rendered)
+        self.assertIn("`failed` | — | — | — | — | failed; gradient build failed", rendered)
         self.assertIn("reused from run `old`", rendered)
         self.assertIn("2026-09-21", rendered)
         self.assertNotIn("paired", rendered.split("\n\n", 1)[0])
