@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixes
+
+- A model with a NaN constant, such as a NaN data value or
+  `not_a_number()`, no longer corrupts other constants in the same model.
+  Before, literals like `0` or `1` elsewhere in the model could read as NaN.
+- GLM log densities (`normal_id_glm`, `poisson_log_glm`, `bernoulli_logit_glm`,
+  `neg_binomial_2_log_glm`, `binomial_logit_glm`, `categorical_logit_glm`,
+  `ordered_logistic_glm`) and `ordered_logistic` now drop the same constant
+  terms as CmdStan when an argument is data. This also covers ordinary
+  models such as `y ~ normal(x * b, sigma)` with data `sigma`, which stanc
+  rewrites into a GLM. Gradients were already correct; the reported log
+  density was off by a constant.
+
 ### Docs
 
 - The benchmark page opens with a short summary, and the measurement
