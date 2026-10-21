@@ -16,8 +16,8 @@
 - The benchmark tables label the first ratio as the gradient ratio and add a
   last column with CmdStan / Stanli for total sampling.
 - The benchmark tables, the fast-mode figures and the loop-vectorization
-  comparison are rerun against the pinned CmdStan 2.40.0. Earlier tables used
-  a pre-release CmdStan snapshot. With 2.40.0 only `kronecker_gp` fails the
+  comparison are rerun against the pinned CmdStan 2.40.0. With it only
+  `kronecker_gp` fails the
   numerical check, and CmdStan's median model build drops from 3.6 s to 2.4 s.
   The fast-mode figures are generated from the published runs.
 - Every pinned Stan toolchain version now lives in `deps/pins.env`: CmdStan,
