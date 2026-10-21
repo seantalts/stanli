@@ -62,7 +62,9 @@ class CmdstanPinTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if not k.startswith("STANLI_")}, clear=True), \
                 mock.patch("harnesses.corpus_bench.corpus_cases", side_effect=RuntimeError("past the guard")), \
                 contextlib.redirect_stderr(error):
-            main([str(self.checkout), "unused-pdb", "unused.tsv", *extra])
+            stanc = self.checkout / "stanc"
+            stanc.write_bytes(b"")
+            main([str(self.checkout), "unused-pdb", "unused.tsv", "--stanc", str(stanc), *extra])
         return error.getvalue()
 
     def test_main_refuses_to_start_on_an_unpinned_checkout(self):
