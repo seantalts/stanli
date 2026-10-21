@@ -68,9 +68,9 @@ inline std::vector<double> evaluation_point(int point, int64_t n) {
              0.15 * static_cast<double>(i % 3);
       continue;
     }
-    const uint64_t seed = splitmix64(static_cast<uint64_t>(point) *
-                                     0x9E3779B97F4A7C15ULL) ^
-                          static_cast<uint64_t>(i);
+    const uint64_t seed =
+        splitmix64(static_cast<uint64_t>(point) * 0x9E3779B97F4A7C15ULL) ^
+        static_cast<uint64_t>(i);
     const double u = static_cast<double>(splitmix64(seed) >> 11) * 0x1.0p-53;
     q[i] = -2.0 + 4.0 * u;
   }
@@ -90,8 +90,8 @@ inline std::vector<std::vector<double>> parse_points(const std::string& text) {
     throw std::invalid_argument(std::string("evaluation points: ") + what);
   };
   const auto skip = [&] {
-    while (at < text.size() && std::string(" \t\r\n").find(text[at]) !=
-                                   std::string::npos)
+    while (at < text.size() &&
+           std::string(" \t\r\n").find(text[at]) != std::string::npos)
       ++at;
   };
   const auto expect = [&](char c) {
@@ -147,9 +147,8 @@ inline Options options(int argc, char** argv, int first) {
   bool points_given = false;
   for (int i = first; i < argc; i += 2) {
     const std::string flag(argv[i]);
-    if (i + 1 >= argc ||
-        (flag != "--warmup-ms" && flag != "--measure-ms" &&
-         flag != "--points" && flag != "--points-file"))
+    if (i + 1 >= argc || (flag != "--warmup-ms" && flag != "--measure-ms" &&
+                          flag != "--points" && flag != "--points-file"))
       throw std::invalid_argument(
           "expected --warmup-ms N, --measure-ms N, --points N or "
           "--points-file PATH");
@@ -157,7 +156,8 @@ inline Options options(int argc, char** argv, int first) {
     const std::string value(argv[i + 1]);
     if (flag == "--points-file") {
       std::ifstream file(value);
-      if (!file) throw std::invalid_argument("cannot read points file " + value);
+      if (!file)
+        throw std::invalid_argument("cannot read points file " + value);
       std::ostringstream text;
       text << file.rdbuf();
       result.given = parse_points(text.str());

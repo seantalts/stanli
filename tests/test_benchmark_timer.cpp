@@ -81,7 +81,9 @@ int main() {
     options.measure_ns = 100'000;
     std::vector<double> q;
     const auto set = [&](const std::vector<double>& x) { q = x; };
-    const auto is = [&](int k) { return q == stanli_benchmark::evaluation_point(k, 3); };
+    const auto is = [&](int k) {
+      return q == stanli_benchmark::evaluation_point(k, 3);
+    };
     const auto one = [&] {
       if (is(3)) throw std::domain_error("rejected");
       FakeClock::ticks += is(1) ? 200 : 100;

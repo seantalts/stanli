@@ -37,7 +37,8 @@ int benchmark_main(int argc, char** argv) {
   if (argc < 4) {
     std::fprintf(stderr,
                  "usage: bench_grad mir.sexp data.json N|--prep|--timed "
-                 "[--fast-math] [--warmup-ms N --measure-ms N --points N | --points-file PATH]\n");
+                 "[--fast-math] [--warmup-ms N --measure-ms N --points N | "
+                 "--points-file PATH]\n");
     return 2;
   }
   const bool prep_only = std::string(argv[3]) == "--prep";

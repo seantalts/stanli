@@ -1021,6 +1021,7 @@ endforeach()
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 add_executable(test_benchmark_timer tests/test_benchmark_timer.cpp)
+target_compile_options(test_benchmark_timer PRIVATE -ffp-contract=off)
 add_test(NAME test_benchmark_timer COMMAND test_benchmark_timer)
 target_link_libraries(bench_grad PRIVATE stanli)
 add_dependencies(bench_grad stanli_mir_fixtures)

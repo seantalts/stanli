@@ -19,9 +19,10 @@ stan::model::model_base& new_model(stan::io::var_context& data_context,
 
 int benchmark_main(int argc, char** argv) {
   if (argc < 3) {
-    std::fprintf(stderr,
-                 "usage: bench_cmdstan_grad data.json N|--timed "
-                 "[--warmup-ms N --measure-ms N --points N | --points-file PATH]\n");
+    std::fprintf(
+        stderr,
+        "usage: bench_cmdstan_grad data.json N|--timed "
+        "[--warmup-ms N --measure-ms N --points N | --points-file PATH]\n");
     return 2;
   }
   const bool timed = std::string(argv[2]) == "--timed";
