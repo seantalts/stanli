@@ -54,19 +54,17 @@ positions are fused into vector operations.
 
 ## How much faster
 
-On the shared test corpus (336 models with timings, Apple M3 Ultra,
-2026-10-10, Stanli 0.20.0, default and fast mode from the same build):
+On the shared test corpus (<!--gen:fast_population-->334<!--/gen--> models with timings, Apple M3 Ultra,
+<!--gen:fast_runs-->fast mode 2026-10-10 (`84e60796`), default mode 2026-10-20 (`b61aca02`)<!--/gen-->):
 
-- Fast mode is 2.03x faster than default mode in geometric mean. The median
-  model is 1.06x faster. Most models gain little, and models with repeated
-  observations or repeated work gain a lot. 87 models are at least 2x
-  faster, 43 at least 10x, and 7 at least 100x (radon_pooled 493x, nes
-  251x).
-- Against CmdStan, stanli's geometric-mean speedup goes from 1.95x in
-  default mode to 3.95x in fast mode, and fast mode is faster than CmdStan
-  on 321 of the 336 models.
-- No model is measurably slower in fast mode. The few that timed up to 6%
-  slower were within noise when rechecked in CPU cycles.
+- Fast mode is <!--gen:fast_geomean-->1.87x<!--/gen--> faster than default mode in geometric mean. The median
+  model is <!--gen:fast_median-->1.03x<!--/gen--> faster. Most models gain little, and models with repeated
+  observations or repeated work gain a lot. <!--gen:fast_ge_two-->91<!--/gen--> models are at least 2x
+  faster, <!--gen:fast_ge_ten-->42<!--/gen--> at least 10x, and <!--gen:fast_ge_hundred-->7<!--/gen--> at least 100x (<!--gen:fast_top_two-->radon_pooled 508x, nes 255x<!--/gen-->).
+- Against CmdStan, stanli's geometric-mean speedup goes from <!--gen:fast_cmdstan_default-->2.25x<!--/gen--> in
+  default mode to <!--gen:fast_cmdstan_fast-->3.96x<!--/gen--> in fast mode, and fast mode is faster than CmdStan
+  on <!--gen:fast_beats_fast-->319<!--/gen--> of the <!--gen:fast_population-->334<!--/gen--> models.
+- <!--gen:fast_slowest-->The slowest model in fast mode, `s2_com_poisson`, is 11.53x slower.<!--/gen-->
 
 Details and the per-model table are in [Benchmarks](benchmarks.md#fast-mode).
 

@@ -17,8 +17,7 @@ with CmdStan on **<!--gen:benchmark_models-->343<!--/gen--> application models**
   run slower.
 - Models that fail the numerical check are listed under each table with the
   reason.
-- [Fast mode](#fast-mode), measured separately on an earlier run, has its own
-  section.
+- [Fast mode](#fast-mode) is measured separately and has its own section.
 
 The results tables come first. [How we measure](#how-we-measure) and
 [reproduction](#reproduction) are appendices at the end.
@@ -770,36 +769,38 @@ Missing measurements are —; available timings are retained.
 
 ## Fast mode
 
-These figures are from 2026-10-10 (Stanli 0.20.0, main `84e60796`) and have
-not been remeasured. [Fast mode](fast-mode.md) used the same protocol, inputs
-and binaries as that day's default run, with models compiled and run in fast
-mode (`corpus_bench.py --fast-math`). The default-mode figures here come from
-the same 2026-10-10 run. Gradient times, 336 models with paired timings, Apple
-M3 Ultra:
+<!--gen:fast_lead-->
+The fast mode run is from 2026-10-10 (Stanli source `84e60796`), with models
+compiled and run in fast mode (`corpus_bench.py --fast-math`). The default
+mode run is from 2026-10-20 (Stanli source `b61aca02`). The two runs used
+different binaries, so the comparison below is between runs.
+<!--/gen-->
+Gradient times, <!--gen:fast_population-->334<!--/gen--> models with paired timings, Apple M3 Ultra:
 
-- Fast mode is 2.03x faster than default mode in geometric mean; the median
-  model is 1.06x faster. 87 models are at least 2x faster, 43 at least 10x
-  and 7 at least 100x. Most of the large gains are models whose likelihood
+- Fast mode is <!--gen:fast_geomean-->1.87x<!--/gen--> faster than default mode in geometric mean; the median
+  model is <!--gen:fast_median-->1.03x<!--/gen--> faster. <!--gen:fast_ge_two-->91<!--/gen--> models are at least 2x faster, <!--gen:fast_ge_ten-->42<!--/gen--> at least 10x
+  and <!--gen:fast_ge_hundred-->7<!--/gen--> at least 100x. Most of the large gains are models whose likelihood
   repeats over the data, which fast mode evaluates once per distinct row or
   group.
-- Against CmdStan, the geometric-mean speedup is 1.95x in default mode and
-  3.95x in fast mode. Fast mode beats CmdStan on 321 of the 336 models,
-  default mode on 307.
-- No model is measurably slower in fast mode. The few that timed up to 6%
-  slower were within noise when rechecked in CPU cycles.
+- Against CmdStan, the geometric-mean speedup is <!--gen:fast_cmdstan_default-->2.25x<!--/gen--> in default mode and
+  <!--gen:fast_cmdstan_fast-->3.96x<!--/gen--> in fast mode. Fast mode beats CmdStan on <!--gen:fast_beats_fast-->319<!--/gen--> of the <!--gen:fast_population-->334<!--/gen--> models,
+  default mode on <!--gen:fast_beats_default-->321<!--/gen-->.
+- <!--gen:fast_slowest-->The slowest model in fast mode, `s2_com_poisson`, is 11.53x slower.<!--/gen-->
 
 The largest gains, gradient time in microseconds:
 
+<!--gen:fast_top_table-->
 | model | default | fast | fast vs default |
 | --- | ---: | ---: | ---: |
-| `radon_pooled` | 40.1 | 0.081 | 493x faster |
-| `nes` | 18.2 | 0.072 | 251x faster |
-| `logearn_interaction_z` | 8.15 | 0.051 | 159x faster |
-| `diamonds` | 33.6 | 0.311 | 108x faster |
-| `ch12_m12_4` | 65.8 | 0.666 | 99x faster |
-| `aalto_poisson_hurdle` | 7.34 | 0.208 | 35x faster |
-| `kidscore_momiq` | 1.39 | 0.053 | 26x faster |
-| `M0_model` | 2.45 | 0.241 | 10x faster |
+| `radon_pooled` | 41.3 | 0.0812 | 508x faster |
+| `nes` | 18.4 | 0.0723 | 255x faster |
+| `logearn_interaction` | 7.9 | 0.05 | 158x faster |
+| `logearn_interaction_z` | 7.93 | 0.0511 | 155x faster |
+| `logearn_logheight_male` | 5.64 | 0.0438 | 129x faster |
+| `logearn_height_male` | 5.56 | 0.0438 | 127x faster |
+| `diamonds` | 32.9 | 0.311 | 106x faster |
+| `ch12_m12_4` | 66.6 | 0.666 | 100x faster |
+<!--/gen-->
 
 The per-model fast-mode table, raw observations and build identity are in
 [`output/corpus-performance-fast/`](../output/corpus-performance-fast/README.md).
