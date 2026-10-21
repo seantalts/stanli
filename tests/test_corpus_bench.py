@@ -759,7 +759,7 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertNotIn("`failed`", complete)
         self.assertNotIn("±", complete)
         self.assertNotIn("Notes", complete)
-        self.assertIn("`failed` | — | — | — | — | failed; gradient build failed", incomplete)
+        self.assertIn("`failed` | — | — | — | — | — | failed; gradient build failed", incomplete)
 
     def test_missing_failed_row_is_not_complete_inventory(self):
         self.rows.pop()
@@ -808,13 +808,13 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.update_row(cmdstan_build_s="", cmdstan_estimated_s="", note="ordinary build failed")
         rendered = self.render()
         self.assertIn("1.42x", rendered)
-        self.assertIn("| 0.122 | — | failed; ordinary build failed", rendered)
+        self.assertIn("| 0.122 | — | — | failed; ordinary build failed", rendered)
 
     def test_partial_preparation_preserves_gradient_and_reference_estimate(self):
         self.records[0]["status"] = "censored"
         self.records[0]["preparation_s"].pop()
         self.update_row(stanli_prep_s="", stanli_estimated_s="", note="prepare timed out")
-        self.assertIn("| — | 2.2 | censored; prepare timed out", self.render())
+        self.assertIn("| — | 2.2 | — | censored; prepare timed out", self.render())
 
     def test_failed_setup_cannot_supply_a_duration(self):
         self.records[0]["setup"]["cmdstan_build"]["status"] = "failed"
@@ -1160,8 +1160,8 @@ class VectorizedCatalogTests(VectorizedFixture):
     def test_stanli_side_comes_from_default_run_and_cmdstan_side_from_reused_run(self):
         rendered = self.render()
         self.assertIn("| `good` | 4x |", rendered)
-        self.assertIn("| 0.122 | 2.21 |", rendered)
-        self.assertIn("`failed` | — | — | — | — | failed; gradient build failed", rendered)
+        self.assertIn("| 0.122 | 2.21 | 18.1x |", rendered)
+        self.assertIn("`failed` | — | — | — | — | — | failed; gradient build failed", rendered)
         self.assertIn("reused from run `old`", rendered)
         self.assertIn("2026-09-21", rendered)
         self.assertNotIn("paired", rendered.split("\n\n", 1)[0])
