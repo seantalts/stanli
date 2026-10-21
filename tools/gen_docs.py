@@ -152,7 +152,7 @@ def fast_mode_figures(default_rows, fast_rows, default_manifest, fast_manifest):
         "fast_top_table": "\n".join(table),
         "fast_top_two": top_two,
         "fast_slowest": slow_sentence,
-        "fast_lead": textwrap.fill(lead, 78),
+        "fast_lead": textwrap.fill(lead, 78, break_on_hyphens=False, break_long_words=False),
         "fast_runs": runs,
     }
 

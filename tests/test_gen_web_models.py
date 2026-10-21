@@ -207,6 +207,7 @@ class FastModeFigureTests(unittest.TestCase):
         self.assertIn("2026-10-10", figures["fast_lead"])
         self.assertIn("`ffffffff`", figures["fast_lead"])
         self.assertIn("same protocol, inputs and binaries as the default run", " ".join(figures["fast_lead"].split()))
+        self.assertIn("`corpus_bench.py --fast-math`", " ".join(figures["fast_lead"].split()))
         self.assertEqual(figures["fast_runs"], "2026-10-10, Stanli source `ffffffff`, default and fast mode from the same binaries")
 
     def test_lead_names_each_run_when_binaries_or_source_differ(self):
