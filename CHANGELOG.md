@@ -60,6 +60,9 @@
   and records the mismatch in the manifest. Earlier benchmark tables used a
   pre-release CmdStan snapshot whose `bernoulli_logit` gradient was wrong
   above a predictor of 20.
+- `output/brms-end-to-end` is re-recorded with brms's current master and
+  this release, against the cmdstanr backend on CmdStan 2.40.0 instead of
+  rstan. The brms branch is now `stanli-backend` on `seantalts/brms`.
 
 ## 0.22.2
 

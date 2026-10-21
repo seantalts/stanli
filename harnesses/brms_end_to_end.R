@@ -15,7 +15,8 @@
 # BRMS_E2E_SHARD=k/n runs every n-th case starting at the k-th, so a backend
 # that compiles each model can be spread over processes.
 #
-# Needs brms with the backend, mgcv, mice and splines2. A backend other than
+# Needs brms with the backend (https://github.com/seantalts/brms/tree/stanli-backend),
+# mgcv, mice and splines2. A backend other than
 # "stanli" needs its own toolchain.
 
 suppressMessages({library(brms); library(mgcv)})
