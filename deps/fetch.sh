@@ -3,9 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-MATH_SHA=5252d51d47c1d5e78005fc043ad996fad6dd8da8
-STAN_SHA=a6806ef8477a7b5f65b27449ec33528c162bc024
-FMT_SHA=40626af88bd7df9a5fb80be7b25ac85b122d6c21 # 11.2.0, CLI CSV formatting
+source ./pins.env
 
 fetch() { # name url sha sparse-paths...
   local name=$1 url=$2 sha=$3
@@ -63,12 +61,6 @@ EOF
 # tools/dev_setup.sh builds the native compiler from STANC3_SRC_SHA when a
 # requested mode needs it; the wheel workflow does the corresponding source
 # build for Windows.
-STANC3_SRC_SHA=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
-                   ../tools/dev_setup.sh)
-if [ -z "$STANC3_SRC_SHA" ]; then
-  echo "could not read STANC3_SRC_SHA from tools/dev_setup.sh" >&2
-  exit 1
-fi
 if [ -e stanc3/stanc ] &&
    { [ ! -x stanc3/stanc ] ||
      [ "$(cat stanc3/stanc.src 2>/dev/null || true)" != "$STANC3_SRC_SHA" ];

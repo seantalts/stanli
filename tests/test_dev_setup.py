@@ -31,6 +31,8 @@ class DevSetupTest(unittest.TestCase):
             dest = self.root / "tools" / name
             dest.parent.mkdir(exist_ok=True)
             shutil.copyfile(SOURCE / "tools" / name, dest)
+        (self.root / "deps").mkdir(exist_ok=True)
+        shutil.copyfile(SOURCE / "deps" / "pins.env", self.root / "deps" / "pins.env")
         self.script("tools/stanc_embed/provenance.sh", """
 stanc_embed_artifact_matches() { test -f "$1"; }
 """)
@@ -39,7 +41,7 @@ stanc_embed_artifact_matches() { test -f "$1"; }
 mkdir -p deps/stanc3
 printf '#!/usr/bin/env bash\necho test-stanc\n' > deps/stanc3/stanc-pinned
 chmod +x deps/stanc3/stanc-pinned
-sed -n 's/^STANC3_SRC_SHA=//p' tools/dev_setup.sh > deps/stanc3/stanc-pinned.src
+sed -n 's/^STANC3_SRC_SHA=//p' deps/pins.env > deps/stanc3/stanc-pinned.src
 """)
         self.script("tools/stanc_embed/build.sh", """
 touch deps/stanc3/stanc_embed.o
@@ -58,7 +60,7 @@ chmod +x deps/stanc3/stanli-vectorize-probe
         self.script("tools/corpus.py", "", shell=False)
         self.script("fake-bin/git", """
 if [[ "$*" == *'rev-parse HEAD' ]]; then
-  sed -n 's/^STANC3_SRC_SHA=//p' tools/dev_setup.sh
+  sed -n 's/^STANC3_SRC_SHA=//p' deps/pins.env
 fi
 """)
         for tool in ("clang", "clang++"):

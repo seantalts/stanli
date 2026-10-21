@@ -79,7 +79,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: windows-dev-ccache-v1-${{ matrix.os }}-${{ matrix.msystem }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('.github/workflows/dev-setup-windows.yml', 'CMakeLists.txt', 'runtime/**', 'tests/**', 'tools/**', 'deps/fetch.sh') }}
+          key: windows-dev-ccache-v1-${{ matrix.os }}-${{ matrix.msystem }}-${{ steps.toolchain.outputs.id }}-${{ hashFiles('.github/workflows/dev-setup-windows.yml', 'CMakeLists.txt', 'runtime/**', 'tests/**', 'tools/**', 'deps/fetch.sh', 'deps/pins.env') }}
           restore-keys: windows-dev-ccache-v1-${{ matrix.os }}-${{ matrix.msystem }}-${{ steps.toolchain.outputs.id }}-
 
       - name: Install opam and configure PATH
@@ -124,7 +124,7 @@ jobs:
           path: |
             deps/stanc3
             deps/stanc3-src
-          key: windows-stanc-v1-${{ matrix.os }}-${{ matrix.msystem }}-${{ steps.toolchain.outputs.id }}-${{ env.OPAM_VERSION }}-${{ steps.toolchain.outputs.ocaml }}-${{ steps.toolchain.outputs.stanc }}-${{ hashFiles('compiler/**', 'tools/stanc_embed/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
+          key: windows-stanc-v1-${{ matrix.os }}-${{ matrix.msystem }}-${{ steps.toolchain.outputs.id }}-${{ env.OPAM_VERSION }}-${{ steps.toolchain.outputs.ocaml }}-${{ steps.toolchain.outputs.stanc }}-${{ hashFiles('compiler/**', 'tools/stanc_embed/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh', 'deps/pins.env') }}
           restore-keys: windows-stanc-v1-${{ matrix.os }}-${{ matrix.msystem }}-${{ steps.toolchain.outputs.id }}-${{ env.OPAM_VERSION }}-${{ steps.toolchain.outputs.ocaml }}-${{ steps.toolchain.outputs.stanc }}-
 
       - name: Prepare and validate the compilers

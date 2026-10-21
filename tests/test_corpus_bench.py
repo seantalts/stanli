@@ -50,8 +50,8 @@ class CmdstanPinTests(unittest.TestCase):
         subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "x"], check=True)
         self.head = subprocess.check_output([*git, "rev-parse", "HEAD"]).decode().strip()
 
-    def test_the_pin_is_the_sha_dev_setup_installs(self):
-        text = (REPO / "tools/dev_setup.sh").read_text()
+    def test_the_pin_is_the_sha_in_the_pins_file(self):
+        text = (REPO / "deps/pins.env").read_text()
         self.assertIn("CMDSTAN_SHA=" + pinned_cmdstan_sha(), text)
         self.assertRegex(pinned_cmdstan_sha(), r"^[0-9a-f]{40}$")
 
@@ -65,7 +65,7 @@ class CmdstanPinTests(unittest.TestCase):
         message = str(raised.exception)
         self.assertIn(self.head, message)
         self.assertIn(pinned_cmdstan_sha(), message)
-        self.assertIn("tools/dev_setup.sh", message)
+        self.assertIn("deps/pins.env", message)
         self.assertIn("--allow-unpinned-cmdstan", message)
 
     def test_the_flag_allows_another_head(self):

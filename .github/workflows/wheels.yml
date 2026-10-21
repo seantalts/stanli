@@ -51,14 +51,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Must match tools/dev_setup.sh. The embedded compiler cache is keyed on
-  # the commit, so bumping it there and here invalidates the cache once.
-  STANC3_SRC_REPO: https://github.com/stan-dev/stanc3.git
-  STANC3_SRC_SHA: d58446e631b02cacc5355e373defc6092a684554
-  OCAML_VERSION: 5.5.0
   OPAM_VERSION: 2.5.2
-  # Must match tools/dev_setup.sh; pins the corpus the reference check reads.
-  PDB_SHA: 28f8d3d6e975315f42aa274a8399f21e07a43b30
 
 jobs:
   # Keep the required workflow present on every PR, but distinguish changes
@@ -163,7 +156,7 @@ jobs:
           path: |
             deps/math
             deps/stan
-          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/fetch.sh') }}
+          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/pins.env', 'deps/fetch.sh') }}
       - run: ./deps/fetch.sh
       - run: which ccache || sudo apt-get install -y ccache
       - name: Restore the compiler cache
@@ -171,7 +164,7 @@ jobs:
         with:
           path: .ccache
           key: >-
-            ccache-no-stdio-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tools/check_no_stdio.sh', 'deps/fetch.sh') }}
+            ccache-no-stdio-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tools/check_no_stdio.sh', 'deps/fetch.sh', 'deps/pins.env') }}
           restore-keys: ccache-no-stdio-
       - name: Build stanli_runtime_objects under STANLI_NO_STDIO
         run: |
@@ -208,6 +201,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/pins
+
       - name: Clang frontend (pull requests)
         if: matrix.container != '' && github.event_name == 'pull_request'
         run: |
@@ -243,7 +238,7 @@ jobs:
         with:
           path: .ccache
           key: >-
-            ccache-${{ matrix.plat }}-${{ github.event_name == 'pull_request' && 'release-clang-v6' || 'release-v4' }}-${{ steps.toolchain.outputs.id }}-${{ github.event_name == 'pull_request' && hashFiles('CMakeLists.txt', '.github/manylinux/**', '.github/workflows/clang-ccache-seed.yml', '.github/workflows/wheels.yml', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh') || hashFiles('CMakeLists.txt', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh') }}
+            ccache-${{ matrix.plat }}-${{ github.event_name == 'pull_request' && 'release-clang-v6' || 'release-v4' }}-${{ steps.toolchain.outputs.id }}-${{ github.event_name == 'pull_request' && hashFiles('CMakeLists.txt', '.github/manylinux/**', '.github/workflows/clang-ccache-seed.yml', '.github/workflows/wheels.yml', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh', 'deps/pins.env') || hashFiles('CMakeLists.txt', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh', 'deps/pins.env') }}
           restore-keys: ccache-${{ matrix.plat }}-${{ github.event_name == 'pull_request' && 'release-clang-v6' || 'release-v4' }}-${{ steps.toolchain.outputs.id }}-
 
       - name: System packages (macOS)
@@ -275,16 +270,10 @@ jobs:
           path: |
             deps/math
             deps/stan
-          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/fetch.sh') }}
+          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/pins.env', 'deps/fetch.sh') }}
 
       - name: Vendored dependencies
         run: |
-          setup_repo=$(sed -n 's/^STANC3_SRC_REPO=\([^ ]*\).*/\1/p' \
-                         tools/dev_setup.sh)
-          setup_pin=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
-                        tools/dev_setup.sh)
-          test "$setup_repo" = "$STANC3_SRC_REPO"
-          test "$setup_pin" = "$STANC3_SRC_SHA"
           ./deps/fetch.sh
 
       # Restore this after every broader dependency archive. The order is a
@@ -325,7 +314,7 @@ jobs:
         with:
           path: .ci-opam
           key: >-
-            stanc-toolchain-v1-${{ matrix.plat }}-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}
+            stanc-toolchain-v1-${{ matrix.plat }}-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh', 'deps/pins.env') }}
 
       # Dune validates changed inputs itself. A prefix hit can reuse compiled
       # upstream modules after an overlay edit, but never supplies final artifacts.
@@ -336,9 +325,9 @@ jobs:
         with:
           path: deps/stanc3-src
           key: >-
-            stanc-dune-v1-${{ matrix.plat }}-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+            stanc-dune-v1-${{ matrix.plat }}-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh', 'deps/pins.env') }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
           restore-keys: >-
-            stanc-dune-v1-${{ matrix.plat }}-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh') }}-
+            stanc-dune-v1-${{ matrix.plat }}-${{ steps.stanc-toolchain.outputs.id }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-opam${{ env.OPAM_VERSION }}-${{ hashFiles('.github/manylinux/**', 'harnesses/conformance/build_stanc.sh', 'tools/dev_setup.sh', 'deps/pins.env') }}-
 
       # The pinned release binary, not install.sh: the installer prompts for
       # its target directory and takes no positional argument, so it is not
@@ -381,7 +370,7 @@ jobs:
           opam init --bare --disable-sandboxing --no-setup -y
           ./tools/dev_setup.sh --embed --no-build
           mkdir -p deps/ocaml-include
-          cp -R "$(opam var lib --switch=stanc3-55)/ocaml/caml" \
+          cp -R "$(opam var lib --switch=$OPAM_SWITCH)/ocaml/caml" \
                 deps/ocaml-include/
         env:
           OPAMYES: '1'
@@ -391,11 +380,11 @@ jobs:
         run: |
           source tools/stanc_embed/provenance.sh
           stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
-            "$STANC3_SRC_SHA" stanc3-55
+            "$STANC3_SRC_SHA" "$OPAM_SWITCH"
           test -x deps/stanc3/stanli-vectorize-probe
           stanc_embed_artifact_matches \
             deps/stanc3/stanli-vectorize-probe \
-            "$STANC3_SRC_SHA" stanc3-55
+            "$STANC3_SRC_SHA" "$OPAM_SWITCH"
           for symbol in caml_c_thread_register caml_c_thread_unregister; do
             nm -g deps/stanc3/stanc_embed.o | awk -v wanted="$symbol" '
               ($NF == wanted || $NF == "_" wanted) &&
@@ -645,7 +634,7 @@ jobs:
           source tools/stanc_embed/provenance.sh
           stanc_embed_artifact_matches \
             deps/stanc3/stanli-vectorize-probe \
-            "$STANC3_SRC_SHA" stanc3-55
+            "$STANC3_SRC_SHA" "$OPAM_SWITCH"
           baseline_args=()
           if [ -f /tmp/vectorize-baseline/graphs.jsonl ]; then
             baseline_args=(--baseline /tmp/vectorize-baseline)
@@ -992,6 +981,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/pins
+
       - uses: actions/download-artifact@v4
         with:
           name: runtime-linux-x86_64
@@ -1193,14 +1184,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the Windows compiler source pin
-        run: |
-          setup_repo=$(sed -n 's/^STANC3_SRC_REPO=\([^ ]*\).*/\1/p' \
-                         tools/dev_setup.sh)
-          setup_pin=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
-                        tools/dev_setup.sh)
-          test "$setup_repo" = "$STANC3_SRC_REPO"
-          test "$setup_pin" = "$STANC3_SRC_SHA"
+      - uses: ./.github/actions/pins
 
       # On a warm setup-ocaml cache this job still spent 73 seconds in setup
       # and 187 seconds cloning, installing 68 cross packages, and building.
@@ -1320,6 +1304,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/pins
+
       - uses: actions/download-artifact@v4
         with:
           name: windows-compilers
@@ -1396,6 +1382,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/pins
+
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -1423,7 +1411,7 @@ jobs:
         with:
           path: .ccache
           key: >-
-            ccache-win_amd64-ucrt64-release-v2-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh') }}
+            ccache-win_amd64-ucrt64-release-v2-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh', 'deps/pins.env') }}
           restore-keys: ccache-win_amd64-ucrt64-release-v2-${{ steps.toolchain.outputs.id }}-
 
       - name: Fetch pinned dependencies
@@ -1563,6 +1551,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/pins
       - name: Install the Clang C/C++ compiler
         run: |
           sudo apt-get update
@@ -1580,7 +1570,7 @@ jobs:
           # never be handed to, or taken from, the wheel build's cache.
           path: .ccache
           key: >-
-            ccache-asan-clang-o1-g1-v3-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh') }}
+            ccache-asan-clang-o1-g1-v3-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/**/*.cpp', 'tests/**/*.hpp', 'tools/**/*.cpp', 'tools/**/*.hpp', 'deps/fetch.sh', 'deps/pins.env') }}
           restore-keys: ccache-asan-clang-o1-g1-v3-${{ steps.toolchain.outputs.id }}-
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
@@ -1746,6 +1736,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/pins
       - name: Install the Clang C/C++ compiler
         run: |
           sudo apt-get update
@@ -1821,7 +1813,7 @@ jobs:
           # whose -fPIC objects cannot satisfy this browser build; after every
           # main run a PR therefore restored the wrong ~500 MB cache first.
           key: >-
-            ccache-wasm-browser-emsdk6.0.6-v4-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/tbb_stub.cpp', 'deps/fetch.sh') }}
+            ccache-wasm-browser-emsdk6.0.6-v4-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/tbb_stub.cpp', 'deps/fetch.sh', 'deps/pins.env') }}
           restore-keys: ccache-wasm-browser-emsdk6.0.6-v4-${{ steps.toolchain.outputs.id }}-
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
@@ -1902,7 +1894,7 @@ jobs:
         with:
           path: .ccache
           key: >-
-            ccache-wasm-webr-emsdk4.0.8-side-v4-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/tbb_stub.cpp', 'deps/fetch.sh') }}
+            ccache-wasm-webr-emsdk4.0.8-side-v4-${{ steps.toolchain.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'runtime/**', 'tests/tbb_stub.cpp', 'deps/fetch.sh', 'deps/pins.env') }}
           restore-keys: ccache-wasm-webr-emsdk4.0.8-side-v4-${{ steps.toolchain.outputs.id }}-
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
@@ -1970,6 +1962,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/pins
+
       - name: Restore browser compilers
         id: stancjs-cache
         uses: actions/cache@v4
@@ -2000,12 +1994,6 @@ jobs:
         if: steps.stancjs-cache.outputs.cache-hit != 'true'
         run: |
           opam switch create stancjs "ocaml-base-compiler.$OCAML_VERSION" -y
-          setup_repo=$(sed -n 's/^STANC3_SRC_REPO=\([^ ]*\).*/\1/p' \
-                         tools/dev_setup.sh)
-          setup_pin=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
-                        tools/dev_setup.sh)
-          test "$setup_repo" = "$STANC3_SRC_REPO"
-          test "$setup_pin" = "$STANC3_SRC_SHA"
           git clone "$STANC3_SRC_REPO" deps/stanc3-src
           git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
           test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
@@ -2154,6 +2142,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/pins
 
       - uses: actions/download-artifact@v4
         with:

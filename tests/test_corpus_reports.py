@@ -126,7 +126,7 @@ class CorpusReports(unittest.TestCase):
                          '`' + 'a' * 40 + '` (not the pinned 2.40.0)')
         self.assertEqual(docs.cmdstan_label('a' * 40, ('d' * 40, None)), '`' + 'a' * 40 + '`')
 
-    def test_the_pin_is_read_from_the_setup_script(self):
+    def test_the_pin_is_read_from_the_pins_file(self):
         sha, version = docs.cmdstan_pin()
         self.assertRegex(sha, r'^[0-9a-f]{40}$')
         self.assertRegex(version, r'^\d+\.\d+\.\d+$')

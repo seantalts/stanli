@@ -27,12 +27,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO=$PWD
 
-STANC3_SRC_REPO=https://github.com/stan-dev/stanc3.git
-STANC3_SRC_SHA=d58446e631b02cacc5355e373defc6092a684554
-PDB_SHA=28f8d3d6e975315f42aa274a8399f21e07a43b30
-CMDSTAN_SHA=d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6 # v2.40.0
-OPAM_SWITCH=stanc3-55
-OCAML_VERSION=5.5.0
+source deps/pins.env
 source tools/stanc_embed/provenance.sh
 source tools/build_jobs.sh
 BUILD_JOBS=$(stanli_detect_build_jobs)

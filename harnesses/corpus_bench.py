@@ -36,6 +36,7 @@ import threading
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 import benchmark_points
+import toolchain
 from bench_build_cache import BuildCache, cache_key
 from cmdstan_ref import compile_cmd
 from corpus_inventory import corpus_cases
@@ -89,11 +90,7 @@ def checkout_identity(path):
 
 
 def pinned_cmdstan_sha():
-    text = (REPO / "tools/dev_setup.sh").read_text()
-    match = re.search(r"^CMDSTAN_SHA=([0-9a-f]{40})\b", text, re.M)
-    if not match:
-        raise ValueError("tools/dev_setup.sh has no CMDSTAN_SHA pin")
-    return match.group(1)
+    return toolchain.pins()["CMDSTAN_SHA"]
 
 
 def require_pinned_cmdstan(cmdstan, allow_unpinned):
@@ -104,7 +101,7 @@ def require_pinned_cmdstan(cmdstan, allow_unpinned):
     pin = pinned_cmdstan_sha()
     if head != pin and not allow_unpinned:
         raise ValueError(
-            f"CmdStan checkout {cmdstan} is at {head}, but tools/dev_setup.sh "
+            f"CmdStan checkout {cmdstan} is at {head}, but deps/pins.env "
             f"pins {pin}. Run tools/dev_setup.sh to install the pinned "
             "checkout, or pass --allow-unpinned-cmdstan to measure against "
             "this one and record that in the manifest.")
@@ -851,7 +848,7 @@ def main(argv=None):
                         help="build every CmdStan binary inside the run directory")
     parser.add_argument("--allow-unpinned-cmdstan", action="store_true",
                         help="measure against a CmdStan checkout other than the "
-                             "CMDSTAN_SHA pinned in tools/dev_setup.sh")
+                             "CMDSTAN_SHA pinned in deps/pins.env")
     parser.add_argument("--build-jobs", type=int, default=8,
                         help="gradient driver builds to run at once before timing starts")
     args = parser.parse_args(argv)

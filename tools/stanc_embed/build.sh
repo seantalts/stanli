@@ -12,7 +12,7 @@ SRC=${1:?stanc3 source dir}
 SWITCH=${2:-stanc3-55}
 STANC3_SRC_SHA=$(stanc_embed_read_setup STANC3_SRC_SHA)
 if [[ ! "$STANC3_SRC_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "could not read an exact STANC3_SRC_SHA from tools/dev_setup.sh" >&2
+  echo "could not read an exact STANC3_SRC_SHA from deps/pins.env" >&2
   exit 1
 fi
 ACTUAL_SRC_SHA=$(git -C "$SRC" rev-parse HEAD 2>/dev/null || true)

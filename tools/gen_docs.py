@@ -26,6 +26,7 @@ import statistics
 import sys
 import warnings
 
+import toolchain
 from corpus_table import FIXED_GRADIENT_COUNT, render_catalog, render_gradient_catalog
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -56,10 +57,7 @@ def current_benchmark():
 
 
 def cmdstan_pin():
-    """The CmdStan commit and release that tools/dev_setup.sh installs."""
-    text = (pathlib.Path(__file__).resolve().parent / "dev_setup.sh").read_text()
-    match = re.search(r"^CMDSTAN_SHA=([0-9a-f]{40})(?:[ \t]*#[ \t]*v?(\d+\.\d+\.\d+))?", text, re.M)
-    return match.group(1), match.group(2)
+    return toolchain.pins()["CMDSTAN_SHA"], toolchain.cmdstan_version()
 
 
 def cmdstan_label(head, pin):

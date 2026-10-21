@@ -5,6 +5,7 @@ tools/build_wheel.sh text eol=lf
 tools/dev_setup.sh text eol=lf
 tools/dev_setup_windows.sh text eol=lf
 deps/fetch.sh text eol=lf
+deps/pins.env text eol=lf
 tools/build_jobs.sh text eol=lf
 harnesses/conformance/build_stanc.sh text eol=lf
 harnesses/conformance/fetch_cmdstan.sh text eol=lf

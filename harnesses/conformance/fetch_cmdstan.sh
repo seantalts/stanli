@@ -6,10 +6,11 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
 cmdstan_dir=${1:-"$repo_root/deps/cmdstan"}
 
-cmdstan_sha=d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6
-stan_sha=a6806ef8477a7b5f65b27449ec33528c162bc024
-math_sha=5252d51d47c1d5e78005fc043ad996fad6dd8da8
-bridgestan_sha=49e248f351d4dac18d7fd154dbc3a0ab39c5de10
+source "$repo_root/deps/pins.env"
+cmdstan_sha=$CMDSTAN_SHA
+stan_sha=$STAN_SHA
+math_sha=$MATH_SHA
+bridgestan_sha=$BRIDGESTAN_SHA
 
 # The conformance stanc is built from source at STANC3_SRC_SHA -- the
 # revision the wheels embed -- not downloaded from stanc3's `nightly`
@@ -19,8 +20,7 @@ bridgestan_sha=49e248f351d4dac18d7fd154dbc3a0ab39c5de10
 # tests the frontend the shipped runtime actually uses.
 "$repo_root/harnesses/conformance/build_stanc.sh"
 stanc_pinned="$repo_root/deps/stanc3/stanc-pinned"
-stanc3_src_sha=$(sed -n 's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' \
-                 "$repo_root/tools/dev_setup.sh")
+stanc3_src_sha=$STANC3_SRC_SHA
 if [[ "$(cat "$stanc_pinned.src" 2>/dev/null)" != "$stanc3_src_sha" ]]; then
   echo "conformance stanc provenance mismatch: built from" \
        "'$(cat "$stanc_pinned.src" 2>/dev/null)', pin is '$stanc3_src_sha'" >&2

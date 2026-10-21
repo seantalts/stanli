@@ -9,11 +9,6 @@ permissions:
   contents: read
   packages: read
 
-env:
-  STANC3_SRC_SHA: d58446e631b02cacc5355e373defc6092a684554
-  OCAML_VERSION: 5.5.0
-  PDB_SHA: 28f8d3d6e975315f42aa274a8399f21e07a43b30
-
 jobs:
   bench:
     runs-on: ubuntu-latest
@@ -25,6 +20,8 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/pins
 
       - name: CPU and compiler
         id: cpu
@@ -76,7 +73,7 @@ jobs:
           path: |
             deps/math
             deps/stan
-          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/fetch.sh') }}
+          key: deps-${{ runner.os }}-sources3-${{ hashFiles('deps/pins.env', 'deps/fetch.sh') }}
 
       - name: Vendored dependencies
         run: ./deps/fetch.sh

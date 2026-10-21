@@ -64,6 +64,7 @@ import time
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from corpus_inventory import corpus_cases  # noqa: E402
+import toolchain  # noqa: E402
 from verify_refs import (KNOWN_GAPS, POINTS, accepted, corpus_input,  # noqa: E402
                          gate_for, load_refs, model_files,
                          pair_dev, parse_status, parse_wa, worst_pair)
@@ -170,15 +171,6 @@ def sha256_file(path):
         for block in iter(lambda: stream.read(1 << 20), b""):
             digest.update(block)
     return digest.hexdigest()
-
-
-def setup_value(key):
-    pattern = re.compile(rf"^{re.escape(key)}=([^ ]+)")
-    for line in (REPO / "tools" / "dev_setup.sh").read_text().splitlines():
-        match = pattern.match(line)
-        if match:
-            return match.group(1)
-    return None
 
 
 def git_revision(path):
@@ -1449,9 +1441,10 @@ def main():
     if not probe_stamp_path.is_file():
         parser.error(f"missing compiler provenance: {probe_stamp_path}")
     probe_stamp = read_stamp(probe_stamp_path)
-    stanc_pin = setup_value("STANC3_SRC_SHA")
-    stanc_repo = setup_value("STANC3_SRC_REPO")
-    opam_switch = setup_value("OPAM_SWITCH")
+    pins = toolchain.pins()
+    stanc_pin = pins["STANC3_SRC_SHA"]
+    stanc_repo = pins["STANC3_SRC_REPO"]
+    opam_switch = pins["OPAM_SWITCH"]
     if probe_stamp.get("stanc3_src_sha") != stanc_pin:
         parser.error("compiler provenance does not match STANC3_SRC_SHA")
     provenance_ok, provenance_error = probe_provenance_matches(
@@ -1474,7 +1467,7 @@ def main():
         parser.error("no recorded or posteriordb inputs for: "
                      + ", ".join(missing_models))
 
-    pdb_pin = setup_value("PDB_SHA")
+    pdb_pin = pins["PDB_SHA"]
     pdb_revision = git_revision(pdb_checkout)
     if recorded.get("posteriordb") != pdb_pin:
         parser.error("reference provenance does not match PDB_SHA")

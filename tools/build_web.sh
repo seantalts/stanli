@@ -14,7 +14,7 @@ STANC3_SRC_SHA=$(stanc_embed_read_setup STANC3_SRC_SHA)
 OPAM_SWITCH=$(stanc_embed_read_setup OPAM_SWITCH)
 if [[ -z "$STANC3_SRC_REPO" || ! "$STANC3_SRC_SHA" =~ ^[0-9a-f]{40}$ ||
       -z "$OPAM_SWITCH" ]]; then
-  echo "could not read the stanc3 repository, revision, and switch from tools/dev_setup.sh" >&2
+  echo "could not read the stanc3 repository, revision, and switch from deps/pins.env" >&2
   exit 1
 fi
 

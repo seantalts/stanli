@@ -1,0 +1,7 @@
+name: Load the toolchain pins
+description: Export every setting in deps/pins.env to the environment of the later steps in the job.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: grep -E '^[A-Z0-9_]+=' deps/pins.env >> "$GITHUB_ENV"

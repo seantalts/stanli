@@ -8,7 +8,7 @@
 # first cold cache after an upstream publish stranded the job with a
 # binary that no longer exists anywhere. A git SHA is fetchable forever.
 #
-# The source is STANC3_SRC_REPO at STANC3_SRC_SHA in tools/dev_setup.sh --
+# The source is STANC3_SRC_REPO at STANC3_SRC_SHA in deps/pins.env --
 # the same revision the wheels embed -- so the conformance run exercises
 # the frontend the shipped runtime actually uses, not a nearby nightly.
 #
@@ -24,19 +24,11 @@ source "$repo_root/tools/build_jobs.sh"
 BUILD_JOBS=$(stanli_detect_build_jobs)
 export OPAMJOBS=$BUILD_JOBS
 
-# Local source builds read the repository, commit, switch, and OCaml version
-# from dev_setup.sh. CI mirrors the source pair and asserts that it matches.
-read_setup() {
-  sed -n "s/^$1=\\([^ ]*\\).*/\\1/p" "$repo_root/tools/dev_setup.sh"
-}
-switch=${1:-$(read_setup OPAM_SWITCH)}
-ocaml_version=$(read_setup OCAML_VERSION)
-src_sha=$(read_setup STANC3_SRC_SHA)
-src_repo=$(read_setup STANC3_SRC_REPO)
-if [[ -z "$src_repo" || -z "$src_sha" ]]; then
-  echo "Could not read STANC3_SRC_REPO/STANC3_SRC_SHA from tools/dev_setup.sh" >&2
-  exit 1
-fi
+source "$repo_root/deps/pins.env"
+switch=${1:-$OPAM_SWITCH}
+ocaml_version=$OCAML_VERSION
+src_sha=$STANC3_SRC_SHA
+src_repo=$STANC3_SRC_REPO
 
 out="$repo_root/deps/stanc3/stanc-pinned"
 src_dir="$repo_root/deps/stanc3-src"

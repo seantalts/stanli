@@ -20,6 +20,7 @@ on:
       - 'compiler/ocaml/**'
       - 'runtime/include/stanli/capi.h'
       - 'tools/dev_setup.sh'
+      - 'deps/pins.env'
       - 'tools/stanc_embed/**'
       - '.github/workflows/r.yml'
   pull_request:
@@ -29,6 +30,7 @@ on:
       - 'compiler/ocaml/**'
       - 'runtime/include/stanli/capi.h'
       - 'tools/dev_setup.sh'
+      - 'deps/pins.env'
       - 'tools/stanc_embed/**'
       - '.github/workflows/r.yml'
   workflow_dispatch:
@@ -54,6 +56,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/pins
+
       - run: |
           rt=$(sed -n 's/^#define STANLI_ABI_VERSION \([0-9]*\).*/\1/p' \
                runtime/include/stanli/capi.h)
@@ -67,10 +72,8 @@ jobs:
           source tools/stanc_embed/provenance.sh
           record=r/inst/js/stanc.js.src
           recorded() { sed -n "s/^$1=//p" "$record"; }
-          expected_repo=$(sed -n \
-            's/^STANC3_SRC_REPO=\([^ ]*\).*/\1/p' tools/dev_setup.sh)
-          expected_revision=$(sed -n \
-            's/^STANC3_SRC_SHA=\([0-9a-f]*\).*/\1/p' tools/dev_setup.sh)
+          expected_repo=$STANC3_SRC_REPO
+          expected_revision=$STANC3_SRC_SHA
           actual_sha=$(sha256sum r/inst/js/stanc.js | cut -d' ' -f1)
 
           [ -n "$expected_repo" ]
@@ -81,7 +84,7 @@ jobs:
           # Switch names are local labels; compiler versions below identify the toolchain.
           [ -n "$(recorded opam_switch)" ]
           [ "$(recorded ocaml_version)" = \
-            "$(stanc_embed_read_setup OCAML_VERSION)" ]
+            "$OCAML_VERSION" ]
           [ -n "$(recorded ocaml_target)" ]
           [ -n "$(recorded dune_version)" ]
           [ "$(recorded js_of_ocaml_version)" = 6.4.1 ]
