@@ -39,6 +39,11 @@ class PinsFileTests(unittest.TestCase):
         self.assertRegex(pins["STANC3_VERSION"], r"^\d+\.\d+\.\d+$")
         self.assertEqual(toolchain.cmdstan_version(), pins["CMDSTAN_TAG"][1:])
 
+    def test_a_recorded_head_is_named_by_release_only_when_it_is_the_pin(self):
+        pinned = toolchain.pins()["CMDSTAN_SHA"]
+        self.assertEqual(toolchain.cmdstan_release(pinned), toolchain.cmdstan_version())
+        self.assertEqual(toolchain.cmdstan_release("a" * 40), "a" * 12)
+
     def test_the_file_is_sourceable_by_bash(self):
         out = subprocess.run(
             ["bash", "-c", 'set -eu; . "$1"; echo "$CMDSTAN_SHA $OPAM_SWITCH"',

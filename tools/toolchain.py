@@ -41,6 +41,10 @@ def cmdstan_version():
     return pins()["CMDSTAN_TAG"].removeprefix("v")
 
 
+def cmdstan_release(head):
+    return cmdstan_version() if head == pins()["CMDSTAN_SHA"] else head[:12]
+
+
 def _git(path, *args):
     path = pathlib.Path(path)
     return subprocess.check_output(

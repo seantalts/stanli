@@ -11,6 +11,7 @@ import pathlib
 import statistics
 import sys
 
+import toolchain
 from corpus_inventory import local_cases
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -18,6 +19,10 @@ ENGINES = ('stanli', 'cmdstan')
 AUDITED_RUN = 'fae5494c296cd547'
 # Practical elapsed-time target; independent of the experiment timeout and diagnostics.
 MIN_CLI_RATIO = 0.8
+
+
+def cmdstan_release(manifest):
+    return toolchain.cmdstan_release(manifest['identity']['toolchains']['cmdstan']['head'])
 
 
 def environment_note(manifest):
@@ -231,7 +236,7 @@ def export(run, diagnostics, output):
            f"and {config['iter_sampling']} retained draws per seed, target acceptance 0.8, tree depth 10, and random initialization. "
            'The table reports median [minimum–maximum] CLI seconds. Stanli includes model preparation; CmdStan starts from '
            'a compiled model. Both include generated quantities and CSV output. Toolchain installation is excluded.', '',
-           ('CSV precision follows the CLI defaults: eight significant digits for CmdStan 2.39 and 17 for Stanli. '
+           (f'CSV precision follows the CLI defaults: eight significant digits for CmdStan {cmdstan_release(manifest)} and 17 for Stanli. '
             if manifest['run_id'] == AUDITED_RUN else 'CSV precision follows the recorded CLI defaults. ') +
            'The numerical oracle uses separate high-precision values; sampling diagnostics use these retained CSVs.', '',
            'CmdStan compilation is measured once, including Stan translation and the C++ model build. Adding it to the '

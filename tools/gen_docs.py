@@ -130,6 +130,7 @@ def compute():
         "benchmark_models": str(len(manifest["identity"]["inputs"])),
         "benchmark_cmdstan": cmdstan_label(toolchains["cmdstan"]["head"], cmdstan_pin()),
         "benchmark_stan_math": f"`{toolchains['math']['head']}`",
+        "benchmark_source": f"`{manifest['identity']['stanli_source']['head']}`",
         "benchmark_date": manifest["started_utc"][:10],
         "benchmark_vectorized_catalog": render_gradient_catalog().rstrip(),
         "corpus_reference_models": str(len(references)),

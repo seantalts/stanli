@@ -137,6 +137,11 @@ class CorpusReports(unittest.TestCase):
         self.assertIn(manifest['cmdstan']['head'], values['benchmark_cmdstan'])
         self.assertEqual(values['benchmark_stan_math'], '`' + manifest['math']['head'] + '`')
 
+    def test_source_row_comes_from_the_current_manifest(self):
+        values = docs.compute()
+        source = docs.current_benchmark()[2]['identity']['stanli_source']['head']
+        self.assertEqual(values['benchmark_source'], '`' + source + '`')
+
     def test_total_sampling_median_adds_setup_to_each_models_gradient_count(self):
         row = dict(paired_speedup='2', stanli_compile_s='0.5', stanli_prep_s='0.5',
                    stanli_ns_grad=str(1e9 / 4000), cmdstan_stanc_s='1',

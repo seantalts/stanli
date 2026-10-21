@@ -958,7 +958,7 @@ and stock and patched MIR for a scalar normal-likelihood loop are kept with the
 | Gradient trials | Six alternating pairs; per process 20 ms warmup, then 40 ms of measurement at each of 10 evaluation points |
 | Displayed workload | Setup + reference-run gradient count × mean warm gradient time over the points |
 | Stanli build | Release clang++, `-O3 -DNDEBUG`; full runtime, threads enabled, lite mode disabled |
-| Upstream source base | `2c9d67b98b196e800dc051460aaaf653ac811ace`; exact measured checkpoint and hashes in manifests |
+| Measured source | <!--gen:benchmark_source-->`b61aca0299627f7e1d79c5b949d6b923c56163ef`<!--/gen-->; tracked differences and executable hashes in manifests |
 | Default reference compiler | Stock pinned stanc3, no additional flags |
 | CmdStan | <!--gen:benchmark_cmdstan-->`11cb052d3e1fc8c799e0fec559e2ee5452b38d27` (not the pinned 2.40.0)<!--/gen--> |
 | Stan Math | <!--gen:benchmark_stan_math-->`8f326d14599d3030c626c46532d8e8534c1cdbec`<!--/gen--> |
@@ -998,8 +998,9 @@ CmdStan binaries are built once and reused from a content-addressed cache,
 `$STANLI_BENCH_CACHE` or `~/.cache/stanli/corpus-bench`; `--build-cache DIR`
 overrides it and `--no-build-cache` builds inside the run directory.
 `--build-jobs N` (default 8) sets how many gradient driver builds run at once.
-The harness refuses a CmdStan checkout whose HEAD differs from `CMDSTAN_SHA` in
-`tools/dev_setup.sh`; `--allow-unpinned-cmdstan` overrides that and the manifest records it.
+The harness refuses a CmdStan checkout that differs from `deps/pins.env` in its CmdStan,
+Stan or Stan Math head, its tracked files or its `bin/stanc`; `--allow-unpinned-cmdstan`
+overrides that and the manifest records it.
 An entry is keyed by the `.stan` bytes, the stanc binary and flags, the gradient
 driver and timer sources, the CmdStan checkout, library, compiler and
 environment identity, and the CmdStan path, so worktrees share entries. It holds

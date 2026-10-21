@@ -76,6 +76,7 @@ class CurrentBenchmarkTests(unittest.TestCase):
         self.assertEqual(stats["benchmark_vectorized_catalog"], "validated vector table")
         self.assertEqual(stats["benchmark_models"], "2")
         self.assertEqual(stats["benchmark_stan_math"], "`" + "m" * 40 + "`")
+        self.assertEqual(stats["benchmark_source"], "`" + "s" * 40 + "`")
         self.assertTrue(stats["benchmark_cmdstan"].startswith("`" + "c" * 40 + "`"))
         self.assertNotIn("benchmark_n_sampling", stats)
         self.assertEqual(stats["corpus_median"], "1.42x")
