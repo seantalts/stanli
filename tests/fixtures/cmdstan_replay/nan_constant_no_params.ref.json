@@ -1,0 +1,21 @@
+{
+ "source_sha256": "1b7b1273f096552a6cfb5db12176862e3e5dfaf746a4ad26c6004628926a0a3c",
+ "data": {},
+ "points": [
+  {
+   "point": 0,
+   "lp": 1.0,
+   "grad": []
+  },
+  {
+   "point": 1,
+   "lp": 1.0,
+   "grad": []
+  },
+  {
+   "point": 2,
+   "lp": 1.0,
+   "grad": []
+  }
+ ]
+}

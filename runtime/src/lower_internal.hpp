@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #ifdef _WIN32
 #include <direct.h>
 #else
@@ -852,7 +853,7 @@ struct Lowering {
   // -1 means the entire runtime logical extent, excluding unused capacity.
   // Only bounded output reductions consume that stronger shape-aware proof.
   std::map<int, int64_t> int_initialized_prefix;
-  std::map<double, int> const_cache;
+  std::map<uint64_t, int> const_cache;
   struct ObservationKey {
     int slot;
     SlotInfo si;
@@ -1056,11 +1057,13 @@ struct Lowering {
                                        const std::string& raw);
 
   int const_slot(double v) {
-    auto it = const_cache.find(v);
+    uint64_t bits;
+    std::memcpy(&bits, &v, sizeof bits);
+    auto it = const_cache.find(bits);
     if (it != const_cache.end()) return it->second;
     const int s = add_slot(1, false);
     out.fills.emplace_back(s, std::vector<double>{v});
-    const_cache[v] = s;
+    const_cache[bits] = s;
     return s;
   }
   Val constant(double v) {
