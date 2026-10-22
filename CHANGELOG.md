@@ -1,9 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.23.0
+
+Two wrong-answer fixes, `as_stanfit()` support for the brms
+`stanli` backend, and benchmarks rerun against CmdStan 2.40.0.
 
 ### Fixes
 
+- A model with a NaN constant, such as a NaN data value or
+  `not_a_number()`, no longer corrupts other constants in the same model.
+  Before, literals like `0` or `1` elsewhere in the model could read as NaN.
+- GLM log densities (`normal_id_glm`, `poisson_log_glm`, `bernoulli_logit_glm`,
+  `neg_binomial_2_log_glm`, `binomial_logit_glm`, `categorical_logit_glm`,
+  `ordered_logistic_glm`) and `ordered_logistic` now drop the same constant
+  terms as CmdStan when an argument is data. This also covers ordinary
+  models such as `y ~ normal(x * b, sigma)` with data `sigma`, which stanc
+  rewrites into a GLM. Gradients were already correct; the reported log
+  density was off by a constant.
 - `as_stanfit()` now records the sampler a fit used. A fit run with
   `metric = "dense_e"` or `"unit_e"` reports `NUTS(dense_e)` or
   `NUTS(unit_e)`, each chain's `control` includes `metric`,
@@ -17,16 +30,6 @@
   returns a `stanli_stanfit` with the model attached, so `log_prob()` and the
   other density methods work on it, also after brms has renamed the
   variables. A model with different Stan code is refused.
-- A model with a NaN constant, such as a NaN data value or
-  `not_a_number()`, no longer corrupts other constants in the same model.
-  Before, literals like `0` or `1` elsewhere in the model could read as NaN.
-- GLM log densities (`normal_id_glm`, `poisson_log_glm`, `bernoulli_logit_glm`,
-  `neg_binomial_2_log_glm`, `binomial_logit_glm`, `categorical_logit_glm`,
-  `ordered_logistic_glm`) and `ordered_logistic` now drop the same constant
-  terms as CmdStan when an argument is data. This also covers ordinary
-  models such as `y ~ normal(x * b, sigma)` with data `sigma`, which stanc
-  rewrites into a GLM. Gradients were already correct; the reported log
-  density was off by a constant.
 
 ### Docs
 
@@ -46,6 +49,12 @@
   `kronecker_gp` fails the
   numerical check, and CmdStan's median model build drops from 3.6 s to 2.4 s.
   The fast-mode figures are generated from the published runs.
+- `output/brms-end-to-end` is re-recorded with brms's current master and
+  this release, against the cmdstanr backend on CmdStan 2.40.0 instead of
+  rstan. The brms branch is now `stanli-backend` on `seantalts/brms`.
+
+### Internal
+
 - Every pinned Stan toolchain version now lives in `deps/pins.env`: CmdStan,
   Stan, Stan Math, stanc3, BridgeStan, posteriordb, fmt and the OCaml
   switch. The scripts, workflows and tools read it, and the benchmark page
@@ -60,9 +69,6 @@
   and records the mismatch in the manifest. Earlier benchmark tables used a
   pre-release CmdStan snapshot whose `bernoulli_logit` gradient was wrong
   above a predictor of 20.
-- `output/brms-end-to-end` is re-recorded with brms's current master and
-  this release, against the cmdstanr backend on CmdStan 2.40.0 instead of
-  rstan. The brms branch is now `stanli-backend` on `seantalts/brms`.
 
 ## 0.22.2
 
