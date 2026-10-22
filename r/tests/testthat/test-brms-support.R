@@ -143,3 +143,18 @@ test_that("brm(backend = \"stanli\") works where brms provides it", {
   expect_identical(bf$backend, "stanli")
   expect_identical(posterior::ndraws(bf), 400L)
 })
+
+test_that("brms reads the metric from a converted fit", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  skip_if_not_installed("brms")
+  d <- data.frame(y = c(0.1, -0.3, 0.8, 0.2, -0.5, 0.4, 1.1, -0.2), x = 1:8 / 8)
+  model <- stanli_model(code = brms::make_stancode(y ~ x, d),
+                        data = unclass(brms::make_standata(y ~ x, d)))
+  fit <- sample_model(model, chains = 2, warmup = 100, samples = 100,
+                      refresh = 0, metric = "dense_e")
+  bf <- brms::brm(y ~ x, d, backend = "mock", mock_fit = as_stanfit(fit))
+  expect_identical(brms::control_params(bf)$metric, "dense_e")
+  expect_identical(brms::control_params(bf, pars = "adapt_engaged")$adapt_engaged,
+                   TRUE)
+})
