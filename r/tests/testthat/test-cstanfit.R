@@ -3,8 +3,8 @@ cstan_fixture <- function(warmup = 20L, samples = 80L, thin = 1L, save_warmup = 
   columns <- c("mu", "theta[1]", "theta[2]", "A[1,1]", "A[2,1]", "A[1,2]", "A[2,2]",
                 "log_lik[1]", "log_lik[2]")
   n <- ceiling(samples / thin) + if (save_warmup) ceiling(warmup / thin) else 0L
-  draws <- array(rnorm(n*4*9), c(n,4,9), dimnames=list(NULL,NULL,columns))
-  sampler <- array(rnorm(n*4*7), c(n,4,7), dimnames=list(NULL,NULL,
+  draws <- array(round(rnorm(n*4*9)*1024)/1024, c(n,4,9), dimnames=list(NULL,NULL,columns))
+  sampler <- array(round(rnorm(n*4*7)*1024)/1024, c(n,4,7), dimnames=list(NULL,NULL,
     c("lp__","accept_stat__","stepsize__","treedepth__","n_leapfrog__","divergent__","energy__")))
   sampler[, , "divergent__"] <- 0
   structure(list(draws=draws, sampler=sampler, columns=columns, model=NULL,
