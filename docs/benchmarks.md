@@ -1,8 +1,7 @@
 # Benchmarks
 
-**<!--gen:corpus_median-->2.15x<!--/gen--> faster gradients and
-<!--gen:corpus_total_median-->23x<!--/gen--> faster total sampling than CmdStan**,
-for the median of **<!--gen:benchmark_models-->343<!--/gen--> application models**.
+Stanli has **<!--gen:corpus_median-->2.15x<!--/gen-->** faster gradients and **<!--gen:corpus_total_median-->23x<!--/gen-->** faster total sampling than CmdStan
+for the median of <!--gen:benchmark_models-->343<!--/gen--> application models.
 
 Stanli runs Stan models without a per-model C++ build. Total sampling is
 setup plus the gradients of a full 1,000 warmup + 1,000 draw run, so it
@@ -12,8 +11,8 @@ engines model by model.
 ## TL;DR
 
 - The median model's gradient is **<!--gen:corpus_median-->2.15x<!--/gen--> faster** in Stanli than in
-  CmdStan. Stanli is as fast or faster on <!--gen:corpus_at_par-->327<!--/gen--> of the
-  <!--gen:corpus_n_grad-->342<!--/gen--> models that pass the numerical check.
+  CmdStan. Stanli is as fast or faster on <!--gen:corpus_at_par-->327<!--/gen--> 
+  of the <!--gen:corpus_n_grad-->342<!--/gen--> models that pass the numerical check.
 - In the total-sampling column, which adds setup to the gradients a full
   1,000 warmup + 1,000 draw run takes, the median model is <!--gen:corpus_total_median-->23x<!--/gen--> faster, mostly because
   CmdStan builds C++ for each model. The longer the run, the closer this gets
@@ -788,10 +787,10 @@ Gradient times, <!--gen:fast_population-->342<!--/gen--> models with paired timi
   and <!--gen:fast_ge_hundred-->8<!--/gen--> at least 100x. Most of the large gains are models whose likelihood
   repeats over the data, which fast mode evaluates once per distinct row or
   group.
-- Against CmdStan, the geometric-mean speedup is <!--gen:fast_cmdstan_default-->2.24x<!--/gen--> in default mode and
-  <!--gen:fast_cmdstan_fast-->4.28x<!--/gen--> in fast mode. Fast mode beats CmdStan on <!--gen:fast_beats_fast-->334<!--/gen--> of the <!--gen:fast_population-->342<!--/gen--> models,
+- Against CmdStan, the geometric-mean speedup is <!--gen:fast_cmdstan_default-->2.24x<!--/gen--> 
+  in default mode and <!--gen:fast_cmdstan_fast-->4.28x<!--/gen--> in fast mode. Fast mode beats CmdStan on <!--gen:fast_beats_fast-->334<!--/gen--> of the <!--gen:fast_population-->342<!--/gen--> models,
   default mode on <!--gen:fast_beats_default-->328<!--/gen-->.
-- <!--gen:fast_slowest-->The slowest model in fast mode, `s2_invgaussian`, is 1.06x slower.<!--/gen-->
+- In fast mode, <!--gen:fast_slowest-->the slowest model, `s2_invgaussian`, is 1.06x slower.<!--/gen-->
 
 The largest gains, gradient time in microseconds:
 

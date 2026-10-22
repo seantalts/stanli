@@ -54,8 +54,8 @@ positions are fused into vector operations.
 
 ## How much faster
 
-On the shared test corpus (<!--gen:fast_population-->342<!--/gen--> models with timings, Apple M3 Ultra,
-<!--gen:fast_runs-->2026-10-21, Stanli source `051bb4ba`, default and fast mode from the same binaries<!--/gen-->):
+On the shared test corpus (<!--gen:fast_population-->342<!--/gen--> models with timings,
+Apple M3 Ultra, <!--gen:fast_runs-->2026-10-21, Stanli source `051bb4ba`, default and fast mode from the same binaries<!--/gen-->):
 
 - Fast mode is <!--gen:fast_geomean-->1.92x<!--/gen--> faster than default mode in geometric mean. The median
   model is <!--gen:fast_median-->1.03x<!--/gen--> faster. Most models gain little, and models with repeated
@@ -64,7 +64,7 @@ On the shared test corpus (<!--gen:fast_population-->342<!--/gen--> models with 
 - Against CmdStan, stanli's geometric-mean speedup goes from <!--gen:fast_cmdstan_default-->2.24x<!--/gen--> in
   default mode to <!--gen:fast_cmdstan_fast-->4.28x<!--/gen--> in fast mode, and fast mode is faster than CmdStan
   on <!--gen:fast_beats_fast-->334<!--/gen--> of the <!--gen:fast_population-->342<!--/gen--> models.
-- <!--gen:fast_slowest-->The slowest model in fast mode, `s2_invgaussian`, is 1.06x slower.<!--/gen-->
+- In fast mode, <!--gen:fast_slowest-->the slowest model, `s2_invgaussian`, is 1.06x slower.<!--/gen-->
 
 Details and the per-model table are in [Benchmarks](benchmarks.md#fast-mode).
 
