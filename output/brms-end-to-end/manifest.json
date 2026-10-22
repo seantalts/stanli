@@ -2,7 +2,7 @@
  "recorded": "2026-10-21",
  "stanli_commit": "7c2638f1",
  "stanli_r_package": "0.22.2 from r/ at that commit, with the runtime built from it",
- "brms": "2.23.2, branch stanli-backend at 4f964504 on paul-buerkner/brms e5f19666 (https://github.com/seantalts/brms/tree/stanli-backend)",
+ "brms": "2.23.2, branch stanli-backend at 1859abf2 on paul-buerkner/brms e5f19666 (https://github.com/seantalts/brms/tree/stanli-backend)",
  "comparison_backend": "cmdstanr 0.9.0 with CmdStan 2.40.0 (the version in deps/pins.env)",
  "rstan": "2.32.7, used only for the stanfit class",
  "posterior": "1.7.0",
