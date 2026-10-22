@@ -17,6 +17,8 @@
 
 ### Docs
 
+- The README and benchmark page open with the median speedups over CmdStan,
+  for gradients and for total sampling.
 - The benchmark page opens with a short summary, and the measurement
   details move to an appendix after the tables.
 - Benchmark gradient times are now the mean over 10 evaluation points

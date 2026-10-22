@@ -1,7 +1,14 @@
 # stanli
 
 The Stan Language Interpreter runs Stan models without generating machine
-code for them. It turns each model into a graph of operations over precompiled stan-math
+code for them, and it is fast. On <!--gen:benchmark_models-->343<!--/gen--> real
+Stan models, the median model's gradient is
+**<!--gen:corpus_median-->2.15x<!--/gen--> faster** than CmdStan's, and a full
+1,000 warmup + 1,000 draw run, setup included, is
+**<!--gen:corpus_total_median-->23x<!--/gen--> faster** because there is no
+per-model C++ build ([benchmarks](docs/benchmarks.md)).
+
+Stanli turns each model into a graph of operations over precompiled stan-math
 kernels and runs Stan's own NUTS sampler on it. There is no C++ toolchain,
 no LLVM and no per-model compile on your machine. Log densities and
 gradients are checked against CmdStan's on a corpus of hundreds of models.
