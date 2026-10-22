@@ -88,7 +88,8 @@ if "$PYTHON" "$repo_root/tools/toolchain.py" stamp-current "$cmdstan_dir"; then
 else
   make -C "$cmdstan_dir" clean-all
   install_stanc
-  make -C "$cmdstan_dir" -j"$BUILD_JOBS" build
+  read -r -a make_flags < <("$PYTHON" "$repo_root/tools/toolchain.py" make-flags)
+  make -C "$cmdstan_dir" -j"$BUILD_JOBS" build "${make_flags[@]}"
   "$PYTHON" "$repo_root/tools/toolchain.py" require "$cmdstan_dir"
   "$PYTHON" "$repo_root/tools/toolchain.py" write-stamp "$cmdstan_dir"
 fi

@@ -9,6 +9,7 @@ PINS_FILE = REPO / "deps" / "pins.env"
 PINNED_STANC = REPO / "deps" / "stanc3" / "stanc-pinned"
 STAMP_NAME = ".stanli-build-stamp"
 SETUP_COMMAND = "harnesses/conformance/fetch_cmdstan.sh"
+MAKE_FLAGS = ("CXXFLAGS_OPTIM_SUNDIALS=-fPIC",)
 LABELS = {
     "cmdstan_head": "CmdStan HEAD",
     "stan_head": "Stan (stan submodule) HEAD",
@@ -143,7 +144,8 @@ def build_stamp(cmdstan_dir):
     return "".join(f"{key}={value}\n" for key, value in (
         ("cmdstan", heads["cmdstan"]), ("stan", heads["stan"]), ("math", heads["math"]),
         ("stanc_sha256", sha256_file(stanc)),
-        ("compiler", compiler_identity(cmdstan_dir))))
+        ("compiler", compiler_identity(cmdstan_dir)),
+        ("make_flags", " ".join(MAKE_FLAGS))))
 
 
 def stamp_is_current(cmdstan_dir):
@@ -152,6 +154,9 @@ def stamp_is_current(cmdstan_dir):
 
 
 def main(argv):
+    if argv[1:] == ["make-flags"]:
+        print(" ".join(MAKE_FLAGS))
+        return 0
     command, cmdstan_dir = argv[1], pathlib.Path(argv[2])
     if command == "require":
         try:
@@ -165,7 +170,8 @@ def main(argv):
     if command == "write-stamp":
         (cmdstan_dir / STAMP_NAME).write_text(build_stamp(cmdstan_dir))
         return 0
-    print("usage: toolchain.py require|stamp-current|write-stamp CMDSTAN_DIR", file=sys.stderr)
+    print("usage: toolchain.py require|stamp-current|write-stamp CMDSTAN_DIR | make-flags",
+          file=sys.stderr)
     return 2
 
 
