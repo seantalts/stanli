@@ -188,18 +188,18 @@ class FastModeFigureTests(unittest.TestCase):
 
     def test_slowest_model_is_named_with_its_slowdown(self):
         self.assertEqual(self.figures()["fast_slowest"],
-                         "The slowest model in fast mode, `b`, is 2.00x slower.")
+                         "the slowest model, `b`, is 2.00x slower.")
 
     def test_slowest_sentence_when_nothing_is_slower(self):
         self.fast = [dict(row, stanli_ns_grad=str(float(row["stanli_ns_grad"]) / 2))
                      for row in self.default]
-        self.assertEqual(self.figures()["fast_slowest"], "No model is slower in fast mode.")
+        self.assertEqual(self.figures()["fast_slowest"], "no model is slower.")
 
     def test_slowdown_that_rounds_to_one_is_not_printed_as_1_00x(self):
         self.default = [fast_row("x", 1000, 2000)]
         self.fast = [fast_row("x", 1001, 2000)]
         self.assertEqual(self.figures()["fast_slowest"],
-                         "The slowest model in fast mode, `x`, is less than 1.01x slower.")
+                         "the slowest model, `x`, is less than 1.01x slower.")
 
     def test_lead_for_same_binaries_and_source(self):
         self.dm = fast_manifest("2026-10-10", "f" * 40)
