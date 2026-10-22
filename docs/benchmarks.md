@@ -1,13 +1,13 @@
 # Benchmarks
 
-Stanli runs Stan models without a per-model C++ build, and on most real
-models it is faster than CmdStan. This page compares the two on
-**<!--gen:benchmark_models-->343<!--/gen--> application models**:
+**<!--gen:corpus_median-->2.15x<!--/gen--> faster gradients and
+<!--gen:corpus_total_median-->23x<!--/gen--> faster total sampling than CmdStan**,
+for the median of **<!--gen:benchmark_models-->343<!--/gen--> application models**.
 
-| Median model, CmdStan / Stanli | |
-| --- | ---: |
-| Gradient | **<!--gen:corpus_median-->2.15x<!--/gen--> faster** |
-| Total sampling, setup included | **<!--gen:corpus_total_median-->23x<!--/gen--> faster** |
+Stanli runs Stan models without a per-model C++ build. Total sampling is
+setup plus the gradients of a full 1,000 warmup + 1,000 draw run, so it
+includes CmdStan's C++ build for each model. This page compares the two
+engines model by model.
 
 ## TL;DR
 
