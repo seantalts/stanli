@@ -50,7 +50,7 @@ the list; any platform but macOS on Apple silicon. The previous recording
 The seconds are not a benchmark. cmdstanr's include compiling each model, and
 the cmdstanr fits ran in eight processes at once while stanli's ran in one.
 For scale only: 157 seconds in total for stanli (median 0.3 per model) and
-916 for cmdstanr (median 5.4).
+898 for cmdstanr (median 5.4).
 
 ## Reproducing
 
