@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.23.2
+
+Windows arm64 binaries on R-universe.
+
+### Docs
+
+- The README opens with what Stanli is and its median speedups.
+- TESTING.md matches what CI and the tools check today: the cross-path
+  ledger's 17 entries, the census on CmdStan 2.40.0, the R ecosystem rule,
+  the brms comparison, and the toolchain pins.
+
+### Internal
+
+- The cstanfit test's CSV fixture uses values every CSV parser reads
+  exactly. On Windows arm64, cmdstanr's reader came back one ULP off, which
+  changed rhat and failed R-universe's check, so no arm64 binary was
+  published.
+- `fetch_cmdstan.sh` builds CmdStan's SUNDIALS with `-fPIC`, so BridgeStan
+  can link the conformance reference models on Linux x86-64.
+
 ## 0.23.1
 
 The 0.23.0 runtime and R package, which did not publish.
