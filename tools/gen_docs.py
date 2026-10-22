@@ -107,11 +107,11 @@ def fast_mode_figures(default_rows, fast_rows, default_manifest, fast_manifest):
 
     slowest = min(models, key=lambda m: (gain[m], m))
     if gain[slowest] >= 1:
-        slow_sentence = "No model is slower in fast mode."
+        slow_sentence = "no model is slower."
     else:
         slowdown = 1 / gain[slowest]
         amount = f"{slowdown:.2f}x" if f"{slowdown:.2f}" != "1.00" else "less than 1.01x"
-        slow_sentence = f"The slowest model in fast mode, `{slowest}`, is {amount} slower."
+        slow_sentence = f"the slowest model, `{slowest}`, is {amount} slower."
 
     def run(manifest):
         return manifest["started_utc"][:10], manifest["identity"]["stanli_source"]["head"][:8]
@@ -298,6 +298,16 @@ def render_problems(path):
             f"literal pipes)"]
 
 
+def line_start_markers(path):
+    """Inline values whose marker starts a line, which GitHub renders as raw HTML."""
+    if path.suffix != ".md":
+        return []
+    rel = path.relative_to(REPO)
+    return [f"{rel}:{n}: an inline marker starts the line; put text before it"
+            for n, line in enumerate(path.read_text().splitlines(), 1)
+            if re.match(r"\s*<!--gen:[a-z_]+-->.+", line)]
+
+
 def main():
     check = "--check" in sys.argv
     stats = compute()
@@ -327,7 +337,8 @@ def main():
         new = MARK.sub(sub, text)
         if not check and new != text:
             path.write_text(new)
-    broken = [p for path in TARGETS for p in render_problems(path)]
+    broken = [p for path in TARGETS
+              for p in line_start_markers(path) + render_problems(path)]
     if broken:
         print("the rendered page would be wrong:")
         for b in broken:

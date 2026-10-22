@@ -43,6 +43,9 @@ Two wrong-answer fixes, `as_stanfit()` support for the brms
 
 ### Docs
 
+- Fixed generated numbers that broke the markdown around them on GitHub,
+  including the bold speedup line at the top of the README. `gen_docs.py
+  --check` now fails when a generated value starts a line.
 - The README and benchmark page open with the median speedups over CmdStan,
   for gradients and for total sampling.
 - The benchmark page opens with a short summary, and the measurement

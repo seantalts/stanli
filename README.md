@@ -1,7 +1,6 @@
 # stanli
 
-**<!--gen:corpus_median-->2.15x<!--/gen--> faster gradients and
-<!--gen:corpus_total_median-->23x<!--/gen--> faster sampling than CmdStan**,
+Stanli has **<!--gen:corpus_median-->2.15x<!--/gen-->** faster gradients and **<!--gen:corpus_total_median-->23x<!--/gen-->** faster sampling than CmdStan
 for the median of <!--gen:benchmark_models-->343<!--/gen--> real Stan models.
 
 Sampling time is setup plus a full 1,000 warmup + 1,000 draw run. It gains
@@ -71,19 +70,18 @@ same example in their language.
 
 ## What is verified, and how fast
 
-- Speed. In the <!--gen:benchmark_date-->2026-10-21<!--/gen--> native run,
-  <!--gen:corpus_n_grad-->342<!--/gen--> of
-  <!--gen:benchmark_models-->343<!--/gen--> models produced paired gradient
-  measurements. The median gradient is
-  <!--gen:corpus_median-->2.15x<!--/gen--> faster than CmdStan's, and
-  <!--gen:corpus_at_par-->327<!--/gen--> models are at least as fast.
+- Speed. In the <!--gen:benchmark_date-->2026-10-21<!--/gen--> native
+  run, <!--gen:corpus_n_grad-->342<!--/gen-->
+  of <!--gen:benchmark_models-->343<!--/gen--> models produced paired gradient
+  measurements. The median gradient
+  is <!--gen:corpus_median-->2.15x<!--/gen--> faster than CmdStan's,
+  and <!--gen:corpus_at_par-->327<!--/gen--> models are at least as fast.
   Failed or capped runs stay in the [full benchmark](docs/benchmarks.md).
 - Model coverage. <!--gen:corpus_reference_models-->353<!--/gen--> models
   share one three-point CmdStan reference replay. Within the posteriordb
   subset, <!--gen:corpus_verified-->118/120<!--/gen--> models match
-  CmdStan's log density and full gradient. Of those
-  <!--gen:corpus_verified_n-->118<!--/gen-->,
-  <!--gen:corpus_bitwise-->55<!--/gen--> are bitwise identical, and the worst
+  CmdStan's log density and full gradient.
+  Of those <!--gen:corpus_verified_n-->118<!--/gen-->, <!--gen:corpus_bitwise-->55<!--/gen--> are bitwise identical, and the worst
   relative deviation is <!--gen:corpus_worst-->7.1e-13<!--/gen-->. Every model
   is listed in [docs/corpus-status.md](docs/corpus-status.md).
 - Language coverage. <!--gen:lang_verified-->11/11<!--/gen--> models lifted

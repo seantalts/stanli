@@ -12,7 +12,7 @@ Every `.stan` is the unchanged `stancode()` output of rethinking 2.42 at the
 formulas and preparation from the pinned book supplement rather than
 transcribing them. It fails if any book call is missing from its inventory.
 
-<!--gen:rethinking_verified-->62/62<!--/gen--> fixtures have recorded CmdStan
+Currently <!--gen:rethinking_verified-->62/62<!--/gen--> fixtures have recorded CmdStan
 references: all 186 log-density/gradient points and all 186 output rows. The
 latest Release build (`ea4d7e24`) completes all 62 fixtures and compares
 32,349 values with a worst scaled error of 1.48e-13. This is pointwise
