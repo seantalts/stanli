@@ -85,12 +85,16 @@ In the "when" column, "PR" means a pull request that changes source. A PR
 that touches only allowlisted Markdown, `notes/` or `web/index.html` runs the
 static checks alone, and an unknown path takes the full source path. The
 required `manylinux_2_28_x86_64` status cannot pass on a failed, cancelled or
-skipped prerequisite. "Post-merge" means pushes to `main`, nightly runs,
-release tags and manual dispatch; `gh workflow run wheels.yml --ref BRANCH`
-runs it on a branch. The jobs are in
-[`wheels.yml`](.github/workflows/wheels.yml),
-[`lint.yml`](.github/workflows/lint.yml) and
-[`stan-conformance-nightly.yml`](.github/workflows/stan-conformance-nightly.yml).
+skipped prerequisite. A PR builds and tests on Linux x86-64 (manylinux,
+Clang) and Windows x64 (CTest, wheel tests and compiler parity).
+"Post-merge" means pushes to `main`, nightly runs, release tags and manual
+dispatch; it adds macOS arm64 and x86-64, Linux aarch64, and a GCC build on
+Linux x86-64. `gh workflow run wheels.yml --ref BRANCH` runs it on a branch.
+The jobs are in [`wheels.yml`](.github/workflows/wheels.yml),
+[`lint.yml`](.github/workflows/lint.yml),
+[`stan-conformance-nightly.yml`](.github/workflows/stan-conformance-nightly.yml),
+[`r.yml`](.github/workflows/r.yml) and
+[`rethinking.yml`](.github/workflows/rethinking.yml).
 
 | check | compares | against | when | cannot see |
 | --- | --- | --- | --- | --- |
@@ -110,13 +114,17 @@ runs it on a branch. The jobs are in
 | [generated conformance sweep](#testing-stan-language-coverage) | 24,322 generated signature and construct cases | reference BridgeStan from the same pins | nightly | operator-only behavior; cases the generator cannot build |
 | [coverage ratchet](#testing-stan-language-coverage) | each generated case's status | the checked-in baseline | nightly | the coverage totals themselves |
 | [integrated function models](#testing-stan-language-coverage) | 10 models using 430 function names, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | every overload of each name |
-| [model census](#testing-stan-language-coverage) | stanc3's 1,231 integration models | a per-model baseline | by hand | numerical agreement unless run with `--differential` |
-| installed clients | the built wheel, R package and BridgeStan transport | API tests and ecosystem consumers; skips fail | PR | platforms other than Linux and Windows x64 |
+| [signature replay](#testing-stan-language-coverage) | 73 generated models covering 19,518 signatures, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | signatures the generators exclude |
+| [model census](#testing-stan-language-coverage) | the 1,244 files in stanc3's integration tests | a per-model baseline | by hand | numerical agreement unless run with `--differential` |
+| Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly | |
+| [installed clients](#installed-clients) | the built wheel, R package and BridgeStan transport | API tests and R ecosystem consumers; skips fail | PR on Linux and Windows x64; post-merge adds wheel tests on macOS and Linux aarch64 and R tests on macOS arm64 | macOS and aarch64 before merge |
+| [brms end to end](#samplers-and-other-algorithms) | `brm()` fits of the 124 brms formulas with the `stanli` backend | the same fits with brms's `cmdstanr` backend | by hand | anything beyond posterior means; platforms other than macOS arm64 |
 | BridgeStan C ABI | 4 fixture models: values, names, counts, shapes | reference BridgeStan | post-merge | other models |
 | downstream `stanr` | `stanr` built against this runtime, its backend tests | its own expectations | release tags, on demand | other R consumers |
 | no-stdio build | undefined symbols of the runtime objects (via [`tools/check_no_stdio.sh`](tools/check_no_stdio.sh)) | the stdout, `printf`, `abort` and `exit` symbols `R CMD check` rejects | post-merge | |
-| AddressSanitizer, ThreadSanitizer | the full CTest suite | no diagnostics | post-merge except release tags | a stale `vari` that points into reused arena memory |
-| WebAssembly replay | the corpus through the wasm build | the same references and gates | by hand | `nn_rbm1bJ100`, whose compile does not fit in 4 GB |
+| AddressSanitizer | the full CTest suite | no diagnostics | post-merge except release tags | a stale `vari` that points into reused arena memory |
+| ThreadSanitizer | `test_capi`, `test_pool` and `test_multichain` | no diagnostics | post-merge except release tags | the other tests |
+| WebAssembly replay | log density and gradient of the corpus through the wasm build | the same references and gates | by hand | `write_array`; `nn_rbm1bJ100`, whose compile does not fit in 4 GB |
 | Safari 17 bundle check | the js_of_ocaml bundles | no line ending in `static` | PR | |
 | docs and formatting | stamped numbers, C/C++ formatting | their artifacts ([`tools/gen_docs.py --check`](tools/gen_docs.py)), the pinned formatter | every PR | |
 
@@ -124,7 +132,17 @@ Release tags also check that `python/stanli/__init__.py`, `js/package.json`
 and `r/R/install.R` carry the tag's version, that six runtime tarballs exist,
 and that the PyPI description renders. Performance is measured separately with
 the [benchmark method](docs/benchmarks.md#how-we-measure) and is never a
-correctness gate.
+correctness gate. The benchmark accepts a timing pair only when both engines
+agree within 1e-9 scaled error at its ten points per model.
+
+<a id="installed-clients"></a>
+
+The R jobs run [`tools/test_r_ecosystem.R`](tools/test_r_ecosystem.R) against
+the installed package. Every testthat file matching
+`bayesplot|loo|posterior-ecosystem|ecosystem-registration|stanfit` must pass
+with no skip, failure, error or warning. A test that needs a package these jobs
+do not install, such as brms, goes in another file. The PR job runs on Linux;
+after merge the same script runs on macOS arm64 and Windows.
 
 ## Comparison with CmdStan on complete models
 
@@ -163,6 +181,16 @@ gradient that differs by 244 ULP between Clang and GCC. The
 replay picks a reference from the platform and from `stanli_check --compiler`
 before evaluating anything. It never picks whichever answer is closest.
 Missing points, changed inputs or mismatched pins fail the run.
+
+Every toolchain pin (CmdStan, Stan, Math, stanc3, BridgeStan, posteriordb) is
+in [`deps/pins.env`](deps/pins.env).
+[`harnesses/conformance/fetch_cmdstan.sh`](harnesses/conformance/fetch_cmdstan.sh)
+is the one way to set up CmdStan; it rebuilds CmdStan when a pin, the stanc or
+the C++ compiler changes. The tools that compile models against CmdStan,
+including the reference recorders, the benchmark and the census, refuse a
+checkout that does not match the pins
+([`tools/toolchain.py`](tools/toolchain.py)). The benchmark's
+`--allow-unpinned-cmdstan` overrides this and records the mismatch.
 
 Of the 1059 points, 1011 are `VERIFIED`, 39 imported points are `RECORDED`,
 six are `REJECTED_BOTH` and three are `MISMATCH`. The three mismatches belong
@@ -276,13 +304,23 @@ CmdStan replay covers them with a matched seed.
 
 The gate is bitwise for every row. A divergence fails unless
 [`tests/cross_path_ledger.json`](tests/cross_path_ledger.json) declares it
-with a bound and a reason, so a new 1 ULP difference is still reported. Four
-entries exist. Three are operations the `write_array` graph supports and the
-interpreter does not (`dirichlet_lpdf`, `ode_rk45`, `to_matrix`). The fourth
-is `array[0] matrix[2, 3]`, which the interpreter rejects while the graph
-returns a value. [`tests/test_cross_path.cpp`](tests/test_cross_path.cpp)
-drives the matrix over every generated fixture and enforces minimum counts
-per path, so a regression cannot hide as skips.
+with a reason and a bound in ULP, so a new 1 ULP difference is still
+reported. A bound of -1 excuses any distance. There are 17 entries:
+
+- Three operations the `write_array` graph supports and the interpreter does
+  not (`dirichlet_lpdf`, `ode_rk45`, `to_matrix`).
+- `array[0] matrix[2, 3]`, which the interpreter rejects while the graph
+  returns a value. The graph is the wrong side.
+- Ten open bugs with bound -1: one gradient entry of
+  `higher_order_all_contexts` and one of `ode_adjoint_region`, each against
+  five configurations. They are bitwise on Linux and macOS. On Windows one run
+  differed by 84,225,866 ULP. The cause is not yet found.
+- Three region-map loops whose per-iteration sums are grouped differently,
+  bounded at 2, 2 and 10 ULP.
+
+[`tests/test_cross_path.cpp`](tests/test_cross_path.cpp) drives the matrix
+over every generated fixture and enforces minimum counts per path, so a
+regression cannot hide as skips.
 
 Focused tests hold the specialized paths to the same bitwise standard.
 [`tests/test_adjoint.cpp`](tests/test_adjoint.cpp) compares each generated
@@ -353,12 +391,26 @@ case it cannot generate, and does not measure cost.
 of that gap: 430 names, including data-only helpers, RNGs, solvers and five
 operators, checked against recorded CmdStan values, gradients and outputs.
 
+CTest also replays 73 generated signature models on every PR
+([`tools/check_signature_models.py`](tools/check_signature_models.py)): 35
+models cover 7,387 builtin signatures and 38 cover 12,131 density signatures.
+Each case reads its own parameter and writes its own output, so a failure
+names the signature. They are compared with recorded CmdStan values at the
+three corpus points under the 1e-9 gate. The manifests in
+[`tests/function_coverage/`](tests/function_coverage/README.md) list what the
+generators exclude.
+
 [`harnesses/model_census.py`](harnesses/model_census.py) applies the same
-baseline idea to stanc3's 1,231 integration models, which hold syntax and type
-combinations that posteriordb and the generator miss. A model that stops
-lowering fails by name with a reproduction command. With `--differential`, a
-model that stops matching CmdStan fails too. `crashed` and `timed_out` always
-fail.
+baseline idea to the 1,244 files in stanc3's integration tests, which hold
+syntax and type combinations that posteriordb and the generator miss. A model
+that stops lowering fails by name with a reproduction command. With
+`--differential`, a model that stops matching CmdStan within 1e-10 fails too.
+`crashed` and `timed_out` always fail. The
+[baseline](docs/internal/artifacts/census-baseline.json.gz) was recorded with
+stanc3 and CmdStan 2.40.0: 524 models lower, 512 of them match CmdStan, and
+in 12 one engine throws. `DEGENERATE_POINTS` in the harness names four models
+whose points with a singular or zero-variance input have no value to agree
+on; those points are left out of the comparison.
 
 ## Samplers and other algorithms
 
@@ -399,6 +451,19 @@ Fast-mode posteriors are compared with default-mode and posteriordb reference
 posteriors by [`harnesses/fast_sampling_check.py`](harnesses/fast_sampling_check.py),
 run by hand; its flag rules are tested in CTest.
 
+[`harnesses/brms_end_to_end.R`](harnesses/brms_end_to_end.R) fits each of the
+124 brms formulas through `brm()` with one backend and records rhat and
+whether `summary()`, `as_draws_df()`, `posterior_predict()` and `log_lik()`
+succeed.
+[`harnesses/brms_compare_backends.R`](harnesses/brms_compare_backends.R)
+compares two runs' posterior means in units of their combined Monte Carlo
+standard error. The [recording](output/brms-end-to-end/README.md) of
+2026-10-21 compares the `stanli` backend with brms's `cmdstanr` backend on
+CmdStan 2.40.0, on macOS arm64. All 124 formulas fit with both and store the
+same variables. On the 102 models where both converge, the largest difference
+is 3.4 standard errors. The four post-processing calls succeed or fail the
+same way with both backends.
+
 ## Known limits
 
 stanli is built and tested in CI on macOS (arm64, x86-64), Linux (x86-64,
@@ -437,8 +502,8 @@ covering it in CI would need a second full stan-math compile. See
 [docs/lp-constant.md](docs/lp-constant.md).
 
 The conformance backlog is 27 `unexpected_unsupported` cases, each with a
-reproduction command. The cross-path ledger has four open entries, one of which
-records a known graph error.
+reproduction command. The cross-path ledger has 11 open bugs: the graph error on
+`array[0] matrix[2, 3]` and the ten unbounded Windows gradient entries.
 
 AddressSanitizer cannot see every lifetime error in stan-math's arena: a stale
 `vari` can point into memory already reused by a live allocation. The
@@ -470,7 +535,7 @@ The A/B, cross-path, sampler and census tools use release-build targets:
 ```sh
 ./tools/dev_setup.sh --conformance   # the reference stack for the sweep
 cmake --build build-rel --parallel "$(tools/build_jobs.sh)" \
-  --target stanli_check dump_ops
+  --target stanli_check dump_ops stanli_shared
 python3 harnesses/ab_corpus.py deps/posteriordb            # pass A/B
 build-rel/stanli_check model.stan data.json --cross        # cross-path
 python3 tools/check_corpus_sampling.py --build build-rel   # sampling smoke
@@ -478,7 +543,14 @@ python3 tools/sampler_trace.py \
   deps/cmdstan deps/posteriordb eight_schools_noncentered
 python3 harnesses/model_census.py --differential \
   --cmdstan deps/cmdstan --jobs 10
+cp build-rel/libstanli.* python/stanli/_bin/   # the sweep loads this copy
+.venv-conformance/bin/python harnesses/stan_conformance.py \
+  --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan \
+  --build build-rel --stanli-pythonpath python --filter log1p
 ```
+
+The conformance harness needs Python 3.11 or later, or `tomli`; run it with
+the `.venv-conformance` interpreter that `--conformance` creates.
 
 AddressSanitizer is one CMake option:
 
@@ -496,7 +568,7 @@ dependencies CI uses:
 ./tools/build_web.sh
 python3 tools/verify_refs.py deps/posteriordb \
   --check tools/wasm_check.sh --target-platform 'WebAssembly wasm32' \
-  --skip nn_rbm1bJ100
+  --no-wa --skip nn_rbm1bJ100
 ```
 
 [docs/hacking.md](docs/hacking.md) has the per-change recipes, and
