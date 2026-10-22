@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.23.1
+
+The 0.23.0 runtime and R package, which did not publish.
+
+### Internal
+
+- A brms test moves out of the runtime ecosystem job, which does not
+  install brms and fails on a skipped test. That failure stopped the 0.23.0
+  runtime release after PyPI and npm had published.
+
 ## 0.23.0
 
 Two wrong-answer fixes, `as_stanfit()` support for the brms
