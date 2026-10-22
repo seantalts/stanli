@@ -1,17 +1,18 @@
 # stanli
 
-Stanli has **<!--gen:corpus_median-->2.15x<!--/gen-->** faster gradients and **<!--gen:corpus_total_median-->23x<!--/gen-->** faster sampling than CmdStan
-for the median of <!--gen:benchmark_models-->343<!--/gen--> real Stan models.
+Stanli is a Stan Language Interpreter. It uses upstream Stan code from Stan
+Math, the Stan services and algorithms, and the Stan compiler, but it does not
+require a C++ toolchain. On the median of <!--gen:benchmark_models-->343<!--/gen--> real
+models, gradients are **<!--gen:corpus_median-->2.15x<!--/gen-->** faster than
+CmdStan's and sampling is **<!--gen:corpus_total_median-->23x<!--/gen-->** faster
+([benchmarks](docs/benchmarks.md)).
 
-Sampling time is setup plus a full 1,000 warmup + 1,000 draw run. It gains
-more than the gradient because CmdStan builds C++ for each model and Stanli
-does not ([benchmarks](docs/benchmarks.md)).
-
-The Stan Language Interpreter runs Stan models without generating machine
-code for them. It turns each model into a graph of operations over precompiled stan-math
-kernels and runs Stan's own NUTS sampler on it. There is no C++ toolchain,
-no LLVM and no per-model compile on your machine. Log densities and
-gradients are checked against CmdStan's on a corpus of hundreds of models.
+Stanli turns each model into a graph of operations over precompiled Stan Math
+kernels and runs Stan's own NUTS sampler on it, with no per-model compile.
+Sampling time here is setup plus a full 1,000 warmup + 1,000 draw run, so it
+gains more than the gradient: CmdStan builds C++ for each model and Stanli
+does not. Log densities and gradients are checked against CmdStan's on a
+corpus of hundreds of models.
 
 [![PyPI](https://img.shields.io/pypi/v/stanli.svg)](https://pypi.org/project/stanli/)
 [![npm](https://img.shields.io/npm/v/@seantalts/stanli.svg)](https://www.npmjs.com/package/@seantalts/stanli)
