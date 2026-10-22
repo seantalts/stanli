@@ -88,7 +88,9 @@ test_that("each chain records its sampler settings as rstan does", {
   skip_if_not_installed("rstan")
   sf <- as_stanfit(brms_support_fit())
   control <- attr(sf@sim$samples[[2L]], "args")$control
-  expect_identical(control, list(adapt_delta = 0.9, max_treedepth = 8))
+  expect_identical(control, list(adapt_delta = 0.9, max_treedepth = 8,
+                                 metric = "diag_e", adapt_engaged = TRUE,
+                                 stepsize = 1))
 })
 
 test_that("stanli_check_syntax accepts valid code and reports invalid code", {

@@ -48,6 +48,37 @@ stanfit_column_layout <- function(columns) {
   list(parameters = parameters, dimensions = dims)
 }
 
+stanfit_nuts_control <- function(x) {
+  engaged <- if (is.null(x$adapt_engaged)) TRUE else isTRUE(x$adapt_engaged)
+  start <- x$initial_step_size
+  if (is.null(start) && !engaged && length(x$step_size) > 0L &&
+      all(is.finite(x$step_size)) && length(unique(x$step_size)) == 1L)
+    start <- x$step_size[1L]
+  c(list(adapt_delta = x$delta, max_treedepth = x$max_depth,
+         metric = if (is.null(x$metric)) "diag_e" else x$metric,
+         adapt_engaged = engaged),
+    if (!is.null(start)) list(stepsize = as.double(start)))
+}
+
+stanfit_adaptation_info <- function(x, chain, control) {
+  if (!control$adapt_engaged || length(x$step_size) < chain ||
+      !is.finite(x$step_size[chain]))
+    return("")
+  number <- function(values) formatC(values, digits = 6L, format = "g")
+  inv_metric <- if (length(x$inv_metric) >= chain) x$inv_metric[[chain]]
+  metric_lines <- switch(control$metric,
+    unit_e = "No free parameters for unit metric",
+    diag_e = if (is.numeric(inv_metric))
+      c("Diagonal elements of inverse mass matrix:",
+        paste(number(inv_metric), collapse = ", ")),
+    dense_e = if (is.matrix(inv_metric))
+      c("Elements of inverse mass matrix:",
+        apply(inv_metric, 1L, function(row) paste(number(row), collapse = ", "))))
+  paste0(paste0("# ", c("Adaptation terminated",
+                         paste("Step size =", number(x$step_size[chain])),
+                         metric_lines), collapse = "\n"), "\n")
+}
+
 # Keep this function in the namespace rather than capturing the conversion's
 # evaluation frame, which contains the source fit and its runtime pointer.
 stanfit_no_cppmodule <- function(...) {
@@ -80,14 +111,18 @@ stanfit_vb_diagnostics <- function(samples, log_ratio) {
 #'
 #' @param x A fitted object. A `stanli_fit` must contain the sampling metadata
 #'   recorded by the current [sample_model()]. A `stanli_stanfit` is returned
-#'   unchanged unless a replacement `model` is supplied.
+#'   unchanged unless a replacement `model` is supplied. A plain `stanfit`,
+#'   such as `rstan::sflist2stanfit()` returns from fits of the same model,
+#'   needs a `model` and becomes a `stanli_stanfit` with it.
 #' @param model A `stanli_model` made with the original code and data. Defaults
 #'   to the model retained by a `stanli_fit`. Use `NULL` for a draws-only result.
 #'   A replacement must match the fit's output columns and parameter count.
 #' @param ... Reserved for methods.
 #' @return An S4 object inheriting from `stanfit`, with samples, sampler
-#'   statistics, timings, and parameter dimensions. Initial values and
-#'   adaptation text are empty: the first saved draw is not the initial state.
+#'   statistics, timings, and parameter dimensions. Initial values are empty:
+#'   the first saved draw is not the initial state. Each chain's
+#'   `adaptation_info` holds the step size and inverse metric after warmup,
+#'   as RStan prints them, and is empty without adaptation.
 #'
 #'   A fit from [variational_model()], [pathfinder_model()] or
 #'   [laplace_model()] becomes a one-chain fit without warmup or sampler
@@ -197,8 +232,8 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
   sampler_names <- if (nuts) c("accept_stat__", "treedepth__", "stepsize__",
                                "divergent__", "n_leapfrog__", "energy__")
                    else if (approximate) character(0) else "accept_stat__"
-  control <- if (nuts) list(adapt_delta = x$delta, max_treedepth = x$max_depth)
-  sampler_t <- if (nuts) "NUTS(diag_e)" else if (!approximate) "Fixed_param"
+  control <- if (nuts) stanfit_nuts_control(x)
+  sampler_t <- if (nuts) paste0("NUTS(", control$metric, ")") else if (!approximate) "Fixed_param"
   method_args <- switch(algorithm,
     sampling = list(method = "sampling", algorithm = "NUTS"),
     fixed_param = list(method = "sampling", algorithm = "Fixed_param"),
@@ -222,7 +257,8 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     attr(draws, "args") <- c(list(chain_id = chain),
                              if (!is.null(sampler_t)) list(sampler_t = sampler_t),
                              if (nuts) list(control = control))
-    attr(draws, "adaptation_info") <- ""
+    attr(draws, "adaptation_info") <-
+      if (nuts) stanfit_adaptation_info(x, chain, control) else ""
     attr(draws, "elapsed_time") <- c(warmup = x$report$warmup_seconds[chain],
                                      sample = x$report$sampling_seconds[chain])
     averages <- colMeans(values[posterior_rows, , drop = FALSE])
@@ -287,4 +323,33 @@ as_stanfit.stanli_stanfit <- function(x, model, ...) {
   misc$stanli_model <- model
   x@.MISC <- misc
   x
+}
+
+#' @rdname as_stanfit
+#' @export
+as_stanfit.stanfit <- function(x, model, ...) {
+  if (missing(model) || is.null(model))
+    stop("a plain stanfit has nothing stanli can convert; supply the ",
+         "stanli_model it was fitted with", call. = FALSE)
+  if (!requireNamespace("rstan", quietly = TRUE))
+    stop("as_stanfit() needs rstan.", call. = FALSE)
+  register_stanfit_class()
+  columns <- x@sim$fnames_oi[x@sim$fnames_oi != "lp__"]
+  code <- as.character(x@stanmodel@model_code)
+  if (length(code) == 1L && nzchar(code)) {
+    if (!inherits(model, "stanli_model") ||
+        !identical(as.character(model$model_code), code) ||
+        length(columns) > length(model$columns))
+      stop("model must match the fit's parameter dimensions and output columns",
+           call. = FALSE)
+  } else {
+    stanfit_check_model(model, columns, model$n_unconstrained)
+  }
+  misc <- new.env(parent = asNamespace("rstan"))
+  misc$stanli_model <- model
+  misc$stanli_n_unconstrained <- model$n_unconstrained
+  misc$stanli_columns <- model$columns
+  result <- methods::new("stanli_stanfit", x)
+  result@.MISC <- misc
+  result
 }

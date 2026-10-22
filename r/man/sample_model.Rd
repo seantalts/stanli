@@ -116,7 +116,8 @@ An object of class `stanli_fit`. Its `report` element contains
   the inverse metric after warmup: a numeric vector for `"diag_e"`, an
   n x n matrix for `"dense_e"` and `NULL` for `"unit_e"`. Passing `inv_metric = fit$inv_metric`, `step_size =
   mean(fit$step_size)` and `adapt_engaged = FALSE` to a later call reuses
-  an adapted metric and step size.
+  an adapted metric and step size. `initial_step_size` is the step size the
+  chains started from: `step_size` as passed, or 1.
 }
 \description{
 Four chains by default, run in parallel: R-hat needs more than one

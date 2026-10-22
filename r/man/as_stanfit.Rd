@@ -4,6 +4,7 @@
 \alias{as_stanfit}
 \alias{as_stanfit.stanli_fit}
 \alias{as_stanfit.stanli_stanfit}
+\alias{as_stanfit.stanfit}
 \title{Convert draws to an RStan fit without compilation}
 \usage{
 as_stanfit(x, ...)
@@ -11,11 +12,15 @@ as_stanfit(x, ...)
 \method{as_stanfit}{stanli_fit}(x, model = x$model, exclude = NULL, ...)
 
 \method{as_stanfit}{stanli_stanfit}(x, model, ...)
+
+\method{as_stanfit}{stanfit}(x, model, ...)
 }
 \arguments{
 \item{x}{A fitted object. A `stanli_fit` must contain the sampling metadata
 recorded by the current [sample_model()]. A `stanli_stanfit` is returned
-unchanged unless a replacement `model` is supplied.}
+unchanged unless a replacement `model` is supplied. A plain `stanfit`,
+such as `rstan::sflist2stanfit()` returns from fits of the same model,
+needs a `model` and becomes a `stanli_stanfit` with it.}
 
 \item{...}{Reserved for methods.}
 
@@ -29,8 +34,10 @@ of a named container is dropped. The live model is unaffected.}
 }
 \value{
 An S4 object inheriting from `stanfit`, with samples, sampler
-  statistics, timings, and parameter dimensions. Initial values and
-  adaptation text are empty: the first saved draw is not the initial state.
+  statistics, timings, and parameter dimensions. Initial values are empty:
+  the first saved draw is not the initial state. Each chain's
+  `adaptation_info` holds the step size and inverse metric after warmup,
+  as RStan prints them, and is empty without adaptation.
 
   A fit from [variational_model()], [pathfinder_model()] or
   [laplace_model()] becomes a one-chain fit without warmup or sampler

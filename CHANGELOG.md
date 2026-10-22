@@ -4,6 +4,19 @@
 
 ### Fixes
 
+- `as_stanfit()` now records the sampler a fit used. A fit run with
+  `metric = "dense_e"` or `"unit_e"` reports `NUTS(dense_e)` or
+  `NUTS(unit_e)`, each chain's `control` includes `metric`,
+  `adapt_engaged` and the initial `stepsize`, and
+  `rstan::get_adaptation_info()` returns the adapted step size and inverse
+  metric of each chain. Before, every fit was reported as `NUTS(diag_e)`
+  with no adaptation text. `brms::control_params()` on a fit from the
+  `stanli` backend shows the same settings.
+- `as_stanfit(x, model = m)` now accepts a plain `stanfit`, such as the
+  combined fit `rstan::sflist2stanfit()` returns for `brm_multiple()`. It
+  returns a `stanli_stanfit` with the model attached, so `log_prob()` and the
+  other density methods work on it, also after brms has renamed the
+  variables. A model with different Stan code is refused.
 - A model with a NaN constant, such as a NaN data value or
   `not_a_number()`, no longer corrupts other constants in the same model.
   Before, literals like `0` or `1` elsewhere in the model could read as NaN.
