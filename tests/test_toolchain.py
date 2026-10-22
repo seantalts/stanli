@@ -2,6 +2,7 @@
 """deps/pins.env is the one place the Stan toolchain is pinned."""
 
 import hashlib
+import io
 import pathlib
 import re
 import shutil
@@ -232,6 +233,13 @@ class BuildStampTests(unittest.TestCase):
                      toolchain.git_head(self.cmdstan / "stan/lib/stan_math"),
                      hashlib.sha256(b"stanc one").hexdigest(), "clang 1"):
             self.assertIn(head, stamp)
+
+    def test_the_stamp_names_the_make_flags_and_main_prints_them(self):
+        self.assertIn("CXXFLAGS_OPTIM_SUNDIALS=-fPIC", toolchain.MAKE_FLAGS)
+        self.assertIn(" ".join(toolchain.MAKE_FLAGS), toolchain.build_stamp(self.cmdstan))
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            self.assertEqual(toolchain.main(["toolchain.py", "make-flags"]), 0)
+        self.assertEqual(out.getvalue().split(), list(toolchain.MAKE_FLAGS))
 
     def test_the_stamp_is_stable_and_moves_with_every_input(self):
         stamp = toolchain.build_stamp(self.cmdstan)
