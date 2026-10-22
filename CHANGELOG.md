@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.23.0
+
+Two wrong-answer fixes, `as_stanfit()` support for the brms
+`stanli` backend, and benchmarks rerun against CmdStan 2.40.0.
 
 ### Fixes
 
@@ -14,6 +17,19 @@
   models such as `y ~ normal(x * b, sigma)` with data `sigma`, which stanc
   rewrites into a GLM. Gradients were already correct; the reported log
   density was off by a constant.
+- `as_stanfit()` now records the sampler a fit used. A fit run with
+  `metric = "dense_e"` or `"unit_e"` reports `NUTS(dense_e)` or
+  `NUTS(unit_e)`, each chain's `control` includes `metric`,
+  `adapt_engaged` and the initial `stepsize`, and
+  `rstan::get_adaptation_info()` returns the adapted step size and inverse
+  metric of each chain. Before, every fit was reported as `NUTS(diag_e)`
+  with no adaptation text. `brms::control_params()` on a fit from the
+  `stanli` backend shows the same settings.
+- `as_stanfit(x, model = m)` now accepts a plain `stanfit`, such as the
+  combined fit `rstan::sflist2stanfit()` returns for `brm_multiple()`. It
+  returns a `stanli_stanfit` with the model attached, so `log_prob()` and the
+  other density methods work on it, also after brms has renamed the
+  variables. A model with different Stan code is refused.
 
 ### Docs
 
@@ -35,6 +51,12 @@
   `kronecker_gp` fails the
   numerical check, and CmdStan's median model build drops from 3.6 s to 2.4 s.
   The fast-mode figures are generated from the published runs.
+- `output/brms-end-to-end` is re-recorded with brms's current master and
+  this release, against the cmdstanr backend on CmdStan 2.40.0 instead of
+  rstan. The brms branch is now `stanli-backend` on `seantalts/brms`.
+
+### Internal
+
 - Every pinned Stan toolchain version now lives in `deps/pins.env`: CmdStan,
   Stan, Stan Math, stanc3, BridgeStan, posteriordb, fmt and the OCaml
   switch. The scripts, workflows and tools read it, and the benchmark page

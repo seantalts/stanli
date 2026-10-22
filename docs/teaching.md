@@ -92,10 +92,11 @@ brms::loo(bf)
 `summary()`, `posterior_predict()`, `log_lik()`, `loo()`,
 `conditional_effects()` and `pp_check()` work on such a fit. Methods that
 sample again (`update()`, `kfold()`) do not, because brms does not know how
-the fit was made. A `backend = "stanli"` for brms itself exists as a branch
+the fit was made. A `backend = "stanli"` for brms itself is on the branch
+[`stanli-backend`](https://github.com/seantalts/brms/tree/stanli-backend),
 outside any brms release;
 [output/brms-end-to-end](../output/brms-end-to-end/README.md) compares it with
-the rstan backend on the corpus's brms formulas.
+the cmdstanr backend on the corpus's brms formulas.
 
 ## Models from Rethinking
 

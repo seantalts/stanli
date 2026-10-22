@@ -378,7 +378,8 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   the inverse metric after warmup: a numeric vector for `"diag_e"`, an
 #'   n x n matrix for `"dense_e"` and `NULL` for `"unit_e"`. Passing `inv_metric = fit$inv_metric`, `step_size =
 #'   mean(fit$step_size)` and `adapt_engaged = FALSE` to a later call reuses
-#'   an adapted metric and step size.
+#'   an adapted metric and step size. `initial_step_size` is the step size the
+#'   chains started from: `step_size` as passed, or 1.
 #' @export
 sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          samples = 1000, thin = 1, delta = 0.8,
@@ -480,6 +481,7 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                  samples = as.integer(samples), save_warmup = isTRUE(save_warmup),
                  chains = as.integer(nchain), delta = as.double(delta),
                  metric = metric, step_size = res$step_size,
+                 initial_step_size = if (is.null(step_size)) 1 else as.double(step_size),
                  inv_metric = split_inv_metric(res$inv_metric, metric, nchain,
                                                model$n_unconstrained),
                  adapt_engaged = adapt_engaged),

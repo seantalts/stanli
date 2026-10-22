@@ -142,7 +142,8 @@ test_that("source, configuration, and missing timings survive conversion", {
   expect_identical(sf@model_name, tools::file_path_sans_ext(basename(file)))
   expect_match(sf@stanmodel@model_code, code, fixed = TRUE)
   expect_identical(sf@stan_args[[1]]$control,
-                   list(adapt_delta = 0.9, max_treedepth = 8))
+                   list(adapt_delta = 0.9, max_treedepth = 8, metric = "diag_e",
+                        adapt_engaged = TRUE, stepsize = 1))
   expect_equal(sf@stan_args[[1]][c("iter", "warmup", "thin", "seed", "chain_id")],
                list(iter = 24, warmup = 11, thin = 2, seed = 7, chain_id = 1))
   expect_identical(sf@stan_args[[1]]$method, "sampling")

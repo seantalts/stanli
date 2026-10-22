@@ -1,0 +1,125 @@
+slug	fit	seconds	max_rhat	divergent	summary	draws	predict	log_lik	warnings
+i319_pois_re	ok	11.4818840026855	1.00745680422382	0	ok	ok	ok	ok	NA
+i320_sratio_cs	ok	17.6757619380951	1.00316159948672	0	ok	ok	ok	ok	NA
+sw_exgaussian	ok	4.52852702140808	1.00363601113615	13	ok	ok	ok	ok	NA
+sw_binomial	ok	4.32577896118164	1.00134892944101	0	ok	ok	ok	ok	NA
+sw_hurdle_lognormal	ok	4.21840000152588	1.00134300800389	0	ok	ok	ok	ok	NA
+sw_categorical	ok	5.12697601318359	1.00227641938179	0	ok	ok	ok	ok	NA
+sw_ar	ok	5.13212895393372	1.00236551605053	0	ok	ok	ok	ok	NA
+sw_trunc	ok	5.12836909294128	1.01715604183189	20	ok	ok	ok	ok	NA
+s2_dirichlet	ok	6.22401714324951	1.003541766666	0	ok	ok	ok	ok	NA
+s2_wiener	ok	6.086266040802	1.00169015474369	0	ok	ok	ERR: object 'pwiener' of mode 'function' was not found	ERR: Please install the 'RWiener' package.	NA
+s2_hurdle_cumulative	ok	5.44981718063354	1.00184760066137	0	ok	ok	ok	ok	NA
+s2_mmc	ok	8.96638178825378	1.00447037554076	7	ok	ok	ok	ok	NA
+s2_sar	ok	5.31347584724426	1.00177424017636	0	ok	ok	ok	ok	NA
+s2_rate	ok	4.38585186004639	1.00227370428608	0	ok	ok	ok	ok	NA
+s2_nlf	ok	4.79732799530029	1.00331934992476	0	ok	ok	ok	ok	NA
+s2_me2	ok	10.1364889144897	1.01454584126193	0	ok	ok	ok	ok	NA
+i319_pois_re2	ok	19.0002839565277	1.00439766735331	0	ok	ok	ok	ok	NA
+i320_sratio_plain	ok	10.44859790802	1.00097152565448	0	ok	ok	ok	ok	NA
+sw_asymlaplace	ok	4.3466260433197	1.00217357499222	0	ok	ok	ok	ok	NA
+sw_poisson	ok	3.61063003540039	1.00137524737847	0	ok	ok	ok	ok	NA
+sw_cumulative	ok	5.44791507720947	1.00213946216851	0	ok	ok	ok	ok	NA
+sw_re_slope	ok	8.76185297966003	1.00644286651752	23	ok	ok	ok	ok	NA
+sw_ma	ok	5.40766501426697	1.00129975867301	0	ok	ok	ok	ok	NA
+sw_cens	ok	5.16803407669067	1.00244761033117	0	ok	ok	ok	ok	NA
+s2_logistic_normal	ok	9.30414700508118	1.00281582399896	0	ok	ok	ok	ok	NA
+s2_cox	ok	5.40070700645447	1.00140941447849	0	ok	ok	ERR: Cannot sample from the posterior predictive distribution for family 'cox'.	ok	NA
+s2_hurdle_negbin	ok	4.59259104728699	1.00265049333343	2	ok	ok	ok	ok	NA
+s2_gr_by	ok	5.97296190261841	1.01110090618879	17	ok	ok	ok	ok	NA
+s2_sar_error	ok	5.40042781829834	1.00191796322269	0	ok	ok	ok	ok	NA
+s2_mv_subset	ok	4.33038783073425	1.00146307762045	0	ok	ok	ERR: Argument 'resp' must be a single variable name for models using addition argument 'subset'.	ERR: Argument 'resp' must be a single variable name for models using addition argument 'subset'.	NA
+s2_s_cc	ok	5.21026802062988	1.00678987184585	6	ok	ok	ok	ok	NA
+s2_me2_nomecor	ok	6.21670699119568	1.01631888755693	0	ok	ok	ok	ok	NA
+i319_negbin_re	ok	10.6868600845337	1.00392990785849	0	ok	ok	ok	ok	NA
+i320_pois_trunc_ub	ok	6.27498698234558	1.0026607607185	0	ok	ok	ok	ok	NA
+sw_lognormal	ok	4.47231912612915	1.00192234796346	0	ok	ok	ok	ok	NA
+sw_negbinomial	ok	18.2029268741608	Inf	477	ok	ok	ok	ok	NA
+sw_sratio	ok	8.50439190864563	1.00101134883978	0	ok	ok	ok	ok	NA
+sw_mono	ok	4.74996399879456	1.00542310031766	0	ok	ok	ok	ok	NA
+sw_arma	ok	6.04394602775574	1.00364380750583	132	ok	ok	ok	ok	NA
+sw_weights	ok	4.20614099502563	1.00173080541301	0	ok	ok	ok	ok	NA
+s2_multinomial	ok	5.42089200019836	1.00213107601701	0	ok	ok	ok	ok	NA
+s2_cox_cens	ok	6.57128500938416	1.00405517512684	0	ok	ok	ERR: Cannot sample from the posterior predictive distribution for family 'cox'.	ok	NA
+s2_cumulative_probit	ok	4.77992606163025	1.00180584764478	0	ok	ok	ok	ok	NA
+s2_gr_student	ok	6.62540102005005	1.00844297293101	4	ok	ok	ok	ok	NA
+s2_fcor	ok	6.32432794570923	1.00101409454118	0	ok	ok	ok	ok	NA
+s2_index_mi	ok	5.03835821151733	1.00325948297909	0	ok	ok	ok	ok	NA
+s2_s_by	ok	9.05976796150208	1.0066226473546	31	ok	ok	ok	ok	NA
+s2_mixture_theta	ok	13.6085801124573	2.13352947500818	1450	ok	ok	ok	ok	NA
+i319_pois_fixed	ok	4.80091190338135	1.00212520277398	0	ok	ok	ok	ok	NA
+i320_pois_trunc_both	ok	7.22162985801697	1.0026607607185	0	ok	ok	ok	ok	NA
+sw_gamma	ok	4.41198205947876	1.00323294101003	0	ok	ok	ok	ok	NA
+sw_zi_poisson	ok	4.02493596076965	1.00186721964414	0	ok	ok	ok	ok	NA
+sw_cratio	ok	8.48037004470825	1.00101134883978	0	ok	ok	ok	ok	NA
+sw_me	ok	5.29919290542603	1.0179540458776	0	ok	ok	ok	ok	NA
+sw_mv_rescor	ok	7.86344003677368	1.00239815224905	0	ok	ok	ok	ok	NA
+sw_se	ok	4.17188596725464	1.00233597450673	0	ok	ok	ok	ok	NA
+s2_beta_binomial	ok	4.47162389755249	1.00214713620966	0	ok	ok	ok	ERR: Please install the 'extraDistr' package.	NA
+s2_discrete_weibull	ok	4.62464094161987	1.00314292024889	0	ok	ok	ok	ok	NA
+s2_cumulative_cloglog	ok	4.40491414070129	1.0022964335745	0	ok	ok	ok	ok	NA
+s2_mv_shared_re	ok	8.97189807891846	1.00338525275979	3	ok	ok	ok	ok	NA
+s2_unstr	ok	11.5541977882385	1.00438414330199	168	ok	ok	ok	ok	NA
+s2_mi_trunc_lb	ok	6.58840703964233	1.00340850216083	2	ok	ok	ok	ok	NA
+s2_t2_by	ok	8.14629006385803	1.00287202216956	0	ok	ok	ok	ok	NA
+s2_threading	ok	4.91887092590332	1.0014646751399	0	ok	ok	ok	ok	NA
+i319_negbin_fixed	ok	5.61333107948303	1.00260319326632	0	ok	ok	ok	ok	NA
+i320_mi_nhanes	ok	8.6313169002533	1.00551255183996	0	ok	ok	ok	ok	NA
+sw_weibull	ok	4.66432094573975	1.00196685921489	0	ok	ok	ok	ok	NA
+sw_zi_negbin	ok	4.19129395484924	1.00228469635233	4	ok	ok	ok	ok	NA
+sw_acat	ok	17.4741880893707	1.0018829075696	0	ok	ok	ok	ok	NA
+sw_mi	ok	4.6159131526947	1.00394810282992	0	ok	ok	ok	ok	NA
+sw_mv_norescor	ok	4.17198085784912	1.0030701699492	0	ok	ok	ok	ok	NA
+sw_re_pois	ok	5.44205713272095	1.00317017190096	11	ok	ok	ok	ok	NA
+s2_zoi_beta	ok	4.88821983337402	1.00118040671195	0	ok	ok	ok	ok	NA
+s2_com_poisson	ok	8.25273418426514	1.00256122047169	0	ok	ok	ok	ok	NA
+s2_cumulative_cauchit	ok	4.83039307594299	1.00111301938675	0	ok	ok	ok	ok	NA
+s2_dist_sigma_re	ok	6.36429500579834	1.00652159246084	14	ok	ok	ok	ok	NA
+s2_ar_cov	ok	9.13326811790466	1.00304076342193	0	ok	ok	ok	ok	NA
+s2_mi_lognormal	ok	5.66693186759949	1.00409043729826	0	ok	ok	ok	ok	NA
+s2_gp_by_gr	ok	13.966521024704	1.00561978224486	8	ok	ok	ok	ok	NA
+i319_gauss_re	ok	7.55525588989258	1.00537561452609	0	ok	ok	ok	ok	
+sw_gaussian	ok	3.71563506126404	1.00198413340489	0	ok	ok	ok	ok	
+sw_beta	ok	4.59171891212463	1.0012732461513	0	ok	ok	ok	ok	
+sw_zi_binomial	ok	4.07874488830566	1.00178610063083	0	ok	ok	ok	ok	
+sw_cumulative_cs	ok	12.3379430770874	1.0018076895779	97	ok	ok	ok	ok	Category specific effects for this family should be considered experimental and there may be convergence issues.
+sw_spline_s	ok	5.69980382919312	1.02187385483335	68	ok	ok	ok	ok	
+sw_nonlinear	ok	4.6078667640686	1.00743307376715	0	ok	ok	ok	ok	
+sw_re_bern	ok	5.64181089401245	1.00243500200829	0	ok	ok	ok	ok	
+s2_zi_beta	ok	4.70313596725464	1.00259971300899	0	ok	ok	ok	ok	
+s2_frechet	ok	5.33026385307312	1.00338471895406	0	ok	ok	ok	ok	
+s2_categorical_re	ok	7.92003703117371	1.00452759262278	2	ok	ok	ok	ok	
+s2_car	ok	5.68497610092163	1.02169050453941	28	ok	ok	ok	ok	
+s2_cosy	ok	8.36332082748413	1.00360990920766	0	ok	ok	ok	ok	
+s2_custom_vint	ok	4.2674298286438	1.00101127256792	0	ok	ok	ERR: object 'posterior_predict_beta_binomial2' not found	ERR: object 'log_lik_beta_binomial2' not found	
+s2_gp_approx	ok	6.74225807189941	1.00634306710213	49	ok	ok	ok	ok	
+i320_gp_matern32	ok	15.5018949508667	1.01849887521093	33	ok	ok	ok	ok	
+sw_student	ok	4.66588306427002	1.00217913991894	0	ok	ok	ok	ok	
+sw_vonmises	ok	10.9117710590363	1.91729487658203	0	ok	ok	ok	ok	
+sw_hurdle_pois	ok	3.86107611656189	1.00131206218054	0	ok	ok	ok	ok	
+sw_cratio_cs	ok	13.9272749423981	1.00108750219628	0	ok	ok	ok	ok	
+sw_spline_t2	ok	6.4782350063324	1.00315172066875	8	ok	ok	ok	ok	
+sw_mixture	ok	17.1227331161499	2.7091201401904	67	ok	ok	ok	ok	
+sw_re_negbin	ok	21.6793169975281	9.4201286525504	241	ok	ok	ok	ok	
+s2_zi_asymlaplace	ok	4.8283679485321	1.00840342875045	0	ok	ok	ok	ok	
+s2_gev	ok	4.64382290840149	1.00208328902389	0	ok	ok	ok	ok	The 'gen_extreme_value' family is deprecated and will be removed in the future.
+s2_mm	ok	5.44901895523071	1.00440219124295	12	ok	ok	ok	ok	
+s2_car_esicar	ok	5.09002208709717	1.02333366694422	164	ok	ok	ok	ok	
+s2_cens_interval	ok	4.24339294433594	1.0009735072836	0	ok	ok	ok	ok	
+s2_custom_vreal	ok	3.86891603469849	1.00124351610933	0	ok	ok	ERR: object 'posterior_predict_gauss_off' not found	ERR: object 'log_lik_gauss_off' not found	
+s2_gp_by_approx	ok	6.91210198402405	1.00259048626022	11	ok	ok	ok	ok	
+i320_gp_expquad	ok	12.4142160415649	1.00688583701715	8	ok	ok	ok	ok	NA
+sw_skewnormal	ok	4.71408486366272	1.00397015563243	0	ok	ok	ok	ok	NA
+sw_bernoulli	ok	3.90112900733948	1.00179692536316	0	ok	ok	ok	ok	NA
+sw_hurdle_gamma	ok	4.20746517181396	1.00220740964863	0	ok	ok	ok	ok	NA
+sw_acat_cs	ok	29.414822101593	1.00292173268339	0	ok	ok	ok	ok	NA
+sw_gp	ok	12.830411195755	1.00981717949722	13	ok	ok	ok	ok	NA
+sw_dist_sigma	ok	4.54714703559875	1.00242472003487	0	ok	ok	ok	ok	NA
+sw_re_gauss	ok	5.52549314498901	1.00390719965883	4	ok	ok	ok	ok	NA
+s2_shifted_lognormal	ok	4.67238402366638	1.00109811688561	0	ok	ok	ok	ok	NA
+s2_invgaussian	ok	4.4328122138977	1.00994518611642	1675	ok	ok	ok	ok	NA
+s2_mm_weights	ok	5.63263297080994	1.0030316738973	1	ok	ok	ok	ok	NA
+s2_car_icar	ok	23.2031519412994	1.00405414318531	0	ok	ok	ok	ok	NA
+s2_weights_trunc	ok	4.80820512771606	1.00684029866747	8	ok	ok	ok	ok	NA
+s2_nl_noloop	ok	4.75232195854187	1.01354869794013	20	ok	ok	ok	ok	NA
+s2_mo_simo_prior	ok	4.35904312133789	1.00275222322132	0	ok	ok	ok	ok	NA
