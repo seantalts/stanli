@@ -24,7 +24,8 @@ sample_model(
   metric = c("diag_e", "dense_e", "unit_e"),
   inv_metric = NULL,
   step_size = NULL,
-  adapt_engaged = TRUE
+  adapt_engaged = TRUE,
+  chain_id = 1L
 )
 }
 \arguments{
@@ -102,6 +103,14 @@ TRUE`, stanli still runs Stan's initial step size search, as Stan's
 adaptive sampler does, so the step size in use differs from `step_size`.
 To use a supplied step size exactly, set `adapt_engaged = FALSE`, as with
 CmdStanR.}
+
+\item{chain_id}{Id of the first chain, a positive integer, default 1.
+Chain `c` of the run is labelled `chain_id + c - 1` and uses that id's
+random stream, as in CmdStan. A run of chains 1 to 4 gives the same
+draws, chain for chain, as four one-chain runs with `chain_id = 1:4` and
+the same `seed`. With `pathfinder_init` the starts of all chains come from
+one Pathfinder run seeded by the first chain's id, so that equality does
+not hold.}
 }
 \value{
 An object of class `stanli_fit`. Its `report` element contains
@@ -122,7 +131,8 @@ An object of class `stanli_fit`. Its `report` element contains
 \description{
 Four chains by default, run in parallel: R-hat needs more than one
 chain, and a single-chain run cannot be checked for convergence at
-all. Chain `c` uses CmdStan's stream for `(seed, chain id c + 1)`.
+all. Chain `c` of the run uses CmdStan's stream for
+`(seed, chain_id + c - 1)`.
 }
 \details{
 Interrupting R (Ctrl-C, or the stop button in RStudio) stops

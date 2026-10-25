@@ -571,6 +571,7 @@ static void fill_sample_opts(stanli_sample_opts* o, SEXP l) {
   o->save_warmup = asLogical(VECTOR_ELT(l, 7));
   o->init_radius = asReal(VECTOR_ELT(l, 8));
   o->num_threads = asInteger(VECTOR_ELT(l, 9));
+  o->chain_id = asInteger(VECTOR_ELT(l, 10));
 }
 
 /* The runtime guarantees this is called on the thread that entered
@@ -633,7 +634,8 @@ static void print_sample_reports(const stanli_sample_opts* o, int64_t nchain,
   R_FlushConsole();
 }
 
-SEXP stanli_r_pathfinder_inits(SEXP m, SEXP seed, SEXP chains, SEXP options) {
+SEXP stanli_r_pathfinder_inits(SEXP m, SEXP seed, SEXP chains, SEXP options,
+                               SEXP chain_id) {
   require_loaded();
   void* mm = model_ptr(m);
   const int nchain = asInteger(chains);
@@ -643,7 +645,7 @@ SEXP stanli_r_pathfinder_inits(SEXP m, SEXP seed, SEXP chains, SEXP options) {
   char err[4096];
   err[0] = '\0';
   const int rc = p_pathfinder_inits(
-      mm, (uint32_t)asInteger(seed), 1, nchain,
+      mm, (uint32_t)asInteger(seed), asInteger(chain_id), nchain,
       asInteger(VECTOR_ELT(options, 0)), asInteger(VECTOR_ELT(options, 1)),
       asInteger(VECTOR_ELT(options, 2)), asReal(VECTOR_ELT(options, 3)), raw,
       NULL, NULL, err, sizeof err);
@@ -909,7 +911,7 @@ static SEXP interrupted_result(void) {
   return out;
 }
 
-/* optlist: seed, chains, samples, thin, init_radius, refresh. */
+/* optlist: seed, chains, samples, thin, init_radius, refresh, chain_id. */
 SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
   require_loaded();
   void* mm = model_ptr(m);
@@ -921,6 +923,7 @@ SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
   o.thin = asInteger(VECTOR_ELT(optlist, 3));
   o.init_radius = asReal(VECTOR_ELT(optlist, 4));
   o.refresh = asInteger(VECTOR_ELT(optlist, 5));
+  o.chain_id = asInteger(VECTOR_ELT(optlist, 6));
   if (XLENGTH(inits) > 0) o.inits = REAL(inits);
   if (o.chains < 1) error("chains must be positive");
 

@@ -93,13 +93,13 @@ approximation_fit <- function(model, algorithm, seed, values, diagnostics,
 
 # sample_model(fixed_param = TRUE).
 fixed_param_fit <- function(model, chains, seed, samples, thin, init,
-                            init_radius, refresh) {
+                            init_radius, refresh, chain_id = 1L) {
   chains <- algorithm_count(chains, "chains")
   samples <- algorithm_count(samples, "samples")
   thin <- algorithm_count(thin, "thin")
   opts <- list(as.integer(seed), chains, samples, thin,
                algorithm_number(init_radius, "init_radius", positive = FALSE),
-               as.integer(refresh))
+               as.integer(refresh), chain_id)
   res <- .Call("stanli_r_fixed_param", model$ptr, opts,
                algorithm_inits(model, init, chains))
   algorithm_interrupt(res, "sampling")
@@ -115,8 +115,8 @@ fixed_param_fit <- function(model, chains, seed, samples, thin, init,
                  unconstrained = array(numeric(0),
                                        dim = c(0L, res$chains,
                                                model$n_unconstrained)),
-                 columns = model$columns, seed = seed, model = model,
-                 algorithm = "fixed_param",
+                 columns = model$columns, seed = seed, chain_id = chain_id,
+                 model = model, algorithm = "fixed_param",
                  report = list(warmup_seconds = rep(0, res$chains),
                                sampling_seconds = res$seconds),
                  warmup_draws = 0L, warmup = 0L, thin = thin,

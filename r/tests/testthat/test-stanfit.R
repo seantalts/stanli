@@ -211,3 +211,17 @@ test_that("shinystan imports a stanfit without compiling a model", {
                       refresh = 0)
   expect_s4_class(shinystan::as.shinystan(as_stanfit(fit)), "shinystan")
 })
+
+test_that("a fit started at a later chain id keeps those ids in the stanfit", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  model <- progress_model()
+  fit <- sample_model(model, chains = 2, chain_id = 3, seed = 6, warmup = 20,
+                      samples = 10, refresh = 0)
+  sf <- as_stanfit(fit)
+  expect_identical(vapply(sf@stan_args, function(a) a$chain_id, integer(1)),
+                   3:4)
+  expect_identical(vapply(sf@sim$samples,
+                          function(d) attr(d, "args")$chain_id, integer(1)),
+                   3:4)
+})

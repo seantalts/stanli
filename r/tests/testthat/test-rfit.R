@@ -113,3 +113,14 @@ test_that("native conversion refuses inconsistent saved-fit metadata", {
   raw$columns <- rev(raw$columns)
   expect_error(as_rfit(raw),"do not agree")
 })
+
+test_that("chains are labelled with the fit's chain ids", {
+  raw <- rfit_fixture()
+  raw$chain_id <- 5L
+  fit <- as_rfit(raw)
+  expect_identical(dimnames(extract(fit, permuted = FALSE))$chains,
+                   paste0("chain:", 5:8))
+  expect_identical(rownames(get_elapsed_time(fit)), paste0("chain:", 5:8))
+  expect_identical(rownames(get_elapsed_time(as_rfit(rfit_fixture()))),
+                   paste0("chain:", 1:4))
+})

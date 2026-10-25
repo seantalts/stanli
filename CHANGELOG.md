@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- `sample_model()` takes `chain_id`, the id of the first chain, as CmdStan
+  does. Chains are labelled `chain_id`, `chain_id + 1`, ... in the progress
+  output, the fit, `as_stanfit()`, `as_rfit()` and `as_cstanfit()`, and each
+  chain uses that id's random stream. Four chains run together give the same
+  draws as four one-chain runs with `chain_id = 1:4` and the same seed. This
+  also applies to `fixed_param = TRUE`. With `pathfinder_init`, the starts of
+  all chains come from one Pathfinder run seeded by the first chain's id.
+
 ## 0.23.2
 
 Windows arm64 binaries on R-universe.

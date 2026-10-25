@@ -34,3 +34,8 @@ as_draws_array <- function(x, include_sampler = FALSE, inc_warmup = FALSE) {
   }
   arr
 }
+
+fit_chain_ids <- function(x, chains = x$chains) {
+  first <- if (is.null(x$chain_id)) 1L else x$chain_id
+  first + seq_len(chains) - 1L
+}

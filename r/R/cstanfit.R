@@ -120,7 +120,7 @@ cstan_metadata <- function(x) {
   list(method = "sample", algorithm = "hmc", engine = "nuts",
     model_name = x$model$model_name, iter_warmup = x$warmup, iter_sampling = x$samples,
     thin = x$thin, save_warmup = x$save_warmup, chains = x$chains,
-    id = seq_len(x$chains), variables = c("lp__", x$columns),
+    id = fit_chain_ids(x), variables = c("lp__", x$columns),
     stan_variables = layout$parameters,
     stan_variable_sizes = lapply(layout$dimensions, function(d) if (length(d)) d else 1L),
     sampler_diagnostics = cstan_diagnostic_names(), adapt_delta = x$delta,
@@ -146,13 +146,13 @@ cstan_inv_metric <- function(x, matrix = TRUE) {
     }
     m
   })
-  names(out) <- as.character(seq_len(x$chains))
+  names(out) <- as.character(fit_chain_ids(x))
   out
 }
 
 cstan_time <- function(x) {
   elapsed <- get_elapsed_time(x)
-  chains <- data.frame(chain_id = seq_len(x$chains), warmup = elapsed[, "warmup"],
+  chains <- data.frame(chain_id = fit_chain_ids(x), warmup = elapsed[, "warmup"],
                         sampling = elapsed[, "sample"], row.names = NULL)
   chains$total <- chains$warmup + chains$sampling
   list(total = NA_real_, chains = chains)

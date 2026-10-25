@@ -69,7 +69,7 @@ rfit_array <- function(object, inc_warmup = FALSE) {
   arr <- array(c(object$draws, object$sampler[, , "lp__", drop = FALSE]),
                dim = c(d[1:2], d[3] + 1L),
                dimnames = list(iterations = NULL,
-                               chains = paste0("chain:", seq_len(d[2])),
+                               chains = paste0("chain:", fit_chain_ids(object, d[2])),
                                parameters = c(object$columns, "lp__")))
   arr[rows, , , drop = FALSE]
 }
@@ -182,6 +182,6 @@ get_sampler_params <- function(object, inc_warmup = TRUE) {
 get_elapsed_time <- function(object) {
   out <- cbind(warmup = object$report$warmup_seconds,
                sample = object$report$sampling_seconds)
-  rownames(out) <- paste0("chain:", seq_len(nrow(out)))
+  rownames(out) <- paste0("chain:", fit_chain_ids(object, nrow(out)))
   out
 }

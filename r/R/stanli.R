@@ -302,7 +302,8 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'
 #' Four chains by default, run in parallel: R-hat needs more than one
 #' chain, and a single-chain run cannot be checked for convergence at
-#' all. Chain `c` uses CmdStan's stream for `(seed, chain id c + 1)`.
+#' all. Chain `c` of the run uses CmdStan's stream for
+#' `(seed, chain_id + c - 1)`.
 #'
 #' @param model A `stanli_model`.
 #' @param chains,seed,warmup,samples,thin Sampler configuration. `seed` is
@@ -324,6 +325,13 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   Pathfinder's own `init_radius` (2). Uses `seed`, returns one start per
 #'   chain, and cannot be combined with `init`. Single-path Pathfinder does
 #'   not perform PSIS resampling.
+#' @param chain_id Id of the first chain, a positive integer, default 1.
+#'   Chain `c` of the run is labelled `chain_id + c - 1` and uses that id's
+#'   random stream, as in CmdStan. A run of chains 1 to 4 gives the same
+#'   draws, chain for chain, as four one-chain runs with `chain_id = 1:4` and
+#'   the same `seed`. With `pathfinder_init` the starts of all chains come from
+#'   one Pathfinder run seeded by the first chain's id, so that equality does
+#'   not hold.
 #' @param threads_per_chain Positive thread count per chain for eligible native
 #'   `reduce_sum` calls, default 1. Small or unsupported calls stay serial.
 #'   Changing this setting prepares a new graph; reduction rounding and NUTS
@@ -389,8 +397,10 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          threads_per_chain = 1, fixed_param = FALSE,
                          metric = c("diag_e", "dense_e", "unit_e"),
                          inv_metric = NULL, step_size = NULL,
-                         adapt_engaged = TRUE) {
+                         adapt_engaged = TRUE, chain_id = 1L) {
   cstan_integer(threads_per_chain, "threads_per_chain")
+  check_chain_id(chain_id, chains)
+  chain_id <- as.integer(chain_id)
   stanfit_flag(fixed_param, "fixed_param")
   metric <- match.arg(metric)
   stanfit_flag(adapt_engaged, "adapt_engaged")
@@ -421,11 +431,11 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
   model <- with_run_seed(model, seed, threads_per_chain)
   if (fixed_param)
     return(fixed_param_fit(model, chains, seed, samples, thin, init,
-                           init_radius, refresh))
+                           init_radius, refresh, chain_id))
   if (is.null(parallel_chains)) parallel_chains <- chains
   if (!is.null(pathfinder_init)) {
     init <- .Call("stanli_r_pathfinder_inits", model$ptr, as.integer(seed),
-                  as.integer(chains), unname(pathfinder_init))
+                  as.integer(chains), unname(pathfinder_init), chain_id)
   }
   init_vec <- numeric(0)
   if (!is.null(init)) {
@@ -441,7 +451,8 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
   opts <- list(as.integer(seed), as.integer(chains), as.integer(warmup),
                as.integer(samples), as.integer(thin), as.double(delta),
                as.integer(max_depth), isTRUE(save_warmup),
-               as.double(init_radius), as.integer(parallel_chains))
+               as.double(init_radius), as.integer(parallel_chains),
+               chain_id)
   metric_opts <- metric_options(metric, inv_metric, step_size, adapt_engaged,
                                 as.integer(chains), model$n_unconstrained)
   res <- .Call("stanli_r_sample", model$ptr, opts, init_vec, refresh,
@@ -484,8 +495,19 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                  initial_step_size = if (is.null(step_size)) 1 else as.double(step_size),
                  inv_metric = split_inv_metric(res$inv_metric, metric, nchain,
                                                model$n_unconstrained),
-                 adapt_engaged = adapt_engaged),
+                 adapt_engaged = adapt_engaged, chain_id = chain_id),
             class = "stanli_fit")
+}
+
+check_chain_id <- function(chain_id, chains) {
+  if (length(chain_id) != 1L || !is.numeric(chain_id) || is.na(chain_id) ||
+      !is.finite(chain_id) || chain_id < 1 || chain_id != floor(chain_id) ||
+      (is.numeric(chains) && length(chains) == 1L && is.finite(chains) &&
+       chain_id + chains - 1 > .Machine$integer.max) ||
+      chain_id > .Machine$integer.max)
+    stop("chain_id must be a positive integer, and chain_id + chains - 1 ",
+         "must fit in an integer", call. = FALSE)
+  invisible(NULL)
 }
 
 check_step_size <- function(step_size) {

@@ -243,6 +243,7 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     stop("unknown algorithm '", algorithm, "'", call. = FALSE))
   chains <- vector("list", x$chains)
   arguments <- vector("list", x$chains)
+  chain_ids <- fit_chain_ids(x)
   for (chain in seq_len(x$chains)) {
     values <- cbind(matrix(x$draws[, chain, kept_columns], nrow = shape[1L]),
                     matrix(x$sampler[, chain, special], nrow = shape[1L]))
@@ -254,7 +255,7 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     attr(draws, "sampler_params") <- as.data.frame(diagnostics)
     # rstan keeps each chain's sampler settings here too, and brms reads
     # them from here (control_params()).
-    attr(draws, "args") <- c(list(chain_id = chain),
+    attr(draws, "args") <- c(list(chain_id = chain_ids[chain]),
                              if (!is.null(sampler_t)) list(sampler_t = sampler_t),
                              if (nuts) list(control = control))
     attr(draws, "adaptation_info") <-
@@ -267,7 +268,7 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     attr(draws, "mean_lp__") <- averages["lp__"]
     chains[[chain]] <- draws
     arguments[[chain]] <- c(
-      list(chain_id = chain, seed = x$seed, iter = x$warmup + x$samples,
+      list(chain_id = chain_ids[chain], seed = x$seed, iter = x$warmup + x$samples,
            warmup = x$warmup, thin = x$thin, save_warmup = x$save_warmup),
       if (nuts) list(control = control), method_args,
       if (!is.null(sampler_t)) list(sampler_t = sampler_t))
