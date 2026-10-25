@@ -336,6 +336,16 @@ check_start_names <- function(values) {
          call. = FALSE)
 }
 
+preserve_random_seed <- function(expr) {
+  env <- globalenv()
+  had <- exists(".Random.seed", envir = env, inherits = FALSE)
+  old <- if (had) get(".Random.seed", envir = env)
+  on.exit(if (had) assign(".Random.seed", old, envir = env) else
+    if (exists(".Random.seed", envir = env, inherits = FALSE))
+      rm(".Random.seed", envir = env))
+  expr
+}
+
 complete_partial_inits <- function(model, values, init_radius, seed) {
   check_start_names(values)
   if (length(init_radius) != 1L || !is.numeric(init_radius) ||
@@ -349,15 +359,14 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
                  utils::head(model$columns, length(columns))))
     stop("this model's outputs do not begin with its parameters; partial ",
          "starting values are unavailable", call. = FALSE)
-  if (!is.null(seed)) {
-    # Leave the caller's random stream as it was.
-    old <- if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
-      get(".Random.seed", envir = globalenv()) else NULL
-    on.exit(if (is.null(old)) rm(".Random.seed", envir = globalenv()) else
-      assign(".Random.seed", old, envir = globalenv()), add = TRUE)
-    set.seed(seed)
+  point <- if (is.null(seed)) {
+    stats::runif(model$n_unconstrained, -init_radius, init_radius)
+  } else {
+    preserve_random_seed({
+      set.seed(seed)
+      stats::runif(model$n_unconstrained, -init_radius, init_radius)
+    })
   }
-  point <- stats::runif(model$n_unconstrained, -init_radius, init_radius)
   drawn <- utils::head(.Call("stanli_r_write_array", model$ptr, point),
                        length(columns))
   filled <- split(drawn, factor(declared, levels = unique(declared)))

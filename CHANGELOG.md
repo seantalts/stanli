@@ -4,6 +4,16 @@
 
 ### Features
 
+- `as_stanmodel(code)` wraps Stan code, a `.stan` file or an rstan `stanmodel`
+  so that `rstan::sampling()` and `rstan::vb()` run on stanli and return a
+  `stanli_stanfit`. It follows rstan's arguments, including `init` in all its
+  forms, `pars`, `include`, `control`, `cores` and `algorithm = "Fixed_param"`;
+  unsupported arguments and `control` entries are errors that name them, and
+  `optimizing()` is an error that points to `optimize_model()`. Precompiled
+  models inside other packages, such as rstanarm, are not supported.
+- `as_stanfit(x, plain = TRUE)` returns an object of class exactly `stanfit`,
+  for code that checks the class by equality. It keeps the draws and drops the
+  model.
 - `sample_model()` takes `chain_id`, the id of the first chain, as CmdStan
   does. Chains are labelled `chain_id`, `chain_id + 1`, ... in the progress
   output, the fit, `as_stanfit()`, `as_rfit()` and `as_cstanfit()`, and each

@@ -3,8 +3,12 @@
 .stanfit_registry <- new.env(parent = emptyenv())
 
 register_stanfit_hook <- function() {
-  if ("rstan" %in% loadedNamespaces()) register_stanfit_class()
-  setHook(packageEvent("rstan", "onLoad"), function(...) register_stanfit_class())
+  register <- function(...) {
+    register_stanfit_class()
+    register_stanmodel_class()
+  }
+  if ("rstan" %in% loadedNamespaces()) register()
+  setHook(packageEvent("rstan", "onLoad"), register)
 }
 
 register_stanfit_class <- function() {

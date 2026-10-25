@@ -104,6 +104,50 @@ stanfit_vb_diagnostics <- function(samples, log_ratio) {
   list(theta_pareto_k = khat, mcse = rep(NaN, n), n_eff = rep(NaN, n))
 }
 
+# cxxdso validity requires a nonempty signature list and the host system.
+# RStan handles remain absent, including .MISC$stan_fit_instance. Subclass
+# methods use the separately retained stanli model, never a fake Rcpp object.
+# model_cpp names the model so that brms sees a fit with a model attached;
+# rstan reaches the missing module only through mk_cppmodule, which stops.
+stanfit_stanmodel <- function(name, code) {
+  dso <- methods::new("cxxdso", sig = list(character(0)), dso_saved = FALSE,
+                      system = R.version$system,
+                      .CXXDSOMISC = new.env(parent = emptyenv()))
+  methods::new("stanmodel", model_name = name, model_code = code,
+               model_cpp = list(model_cppname = "stanli", model_cppcode = ""),
+               dso = dso, mk_cppmodule = stanfit_no_cppmodule)
+}
+
+# A namespace parent makes serialized fits load RStan (and its registration
+# hook) when restored, without loading RStan during ordinary stanli startup.
+# The model's own output columns are kept for checking a model attached later:
+# the stored draws may by then have lost variables (`exclude`) or been
+# renamed by the package that holds the fit.
+stanfit_misc <- function(model, n_unconstrained, columns) {
+  misc <- new.env(parent = asNamespace("rstan"))
+  misc$stanli_model <- model
+  misc$stanli_n_unconstrained <- n_unconstrained
+  misc$stanli_columns <- columns
+  misc
+}
+
+stanfit_plain <- function(x) {
+  plain <- methods::as(x, "stanfit", strict = TRUE)
+  plain@.MISC <- new.env(parent = emptyenv())
+  plain
+}
+
+stanfit_empty <- function(model) {
+  layout <- stanfit_column_layout(c(model$columns, "lp__"))
+  name <- if (is.null(model$model_name)) "stanli_model" else model$model_name
+  code <- if (is.null(model$model_code)) character(0) else model$model_code
+  methods::new("stanli_stanfit", model_name = name, model_pars = layout$parameters,
+               par_dims = layout$dimensions, sim = list(), stan_args = list(),
+               stanmodel = stanfit_stanmodel(name, code), mode = 2L, date = date(),
+               inits = list(),
+               .MISC = stanfit_misc(model, model$n_unconstrained, model$columns))
+}
+
 #' Convert draws to an RStan fit without compilation
 #'
 #' Build a `stanli_stanfit`, an S4 subclass of `rstan::stanfit`, directly from
@@ -171,6 +215,12 @@ stanfit_vb_diagnostics <- function(samples, log_ratio) {
 #' @param exclude Names of variables to leave out of the stored draws, as
 #'   `pars` with `include = FALSE` does in `rstan::sampling()`. Every element
 #'   of a named container is dropped. The live model is unaffected.
+#' @param plain `TRUE` returns an object whose class is exactly `stanfit`, with
+#'   the stored draws and no stanli model. Every `rstan` function that only
+#'   reads draws works on it, and code that checks `class(x) == "stanfit"` or
+#'   `identical(class(x), "stanfit")` accepts it. `log_prob()` and the other
+#'   model methods do not. Attach a model again with
+#'   `as_stanfit(plain_fit, model = model)`.
 #' @examples
 #' \dontrun{
 #' m <- stanli_model(code = "parameters { real mu; } model { mu ~ normal(0, 1); }")
@@ -181,11 +231,12 @@ stanfit_vb_diagnostics <- function(samples, log_ratio) {
 #' rstan::constrain_pars(sf, upars = 0)
 #' }
 #' @export
-as_stanfit <- function(x, ...) UseMethod("as_stanfit")
+as_stanfit <- function(x, ..., plain = FALSE) UseMethod("as_stanfit")
 
 #' @rdname as_stanfit
 #' @export
-as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
+as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...,
+                                  plain = FALSE) {
   if (!requireNamespace("rstan", quietly = TRUE))
     stop("as_stanfit() needs rstan. Install a compatible binary with ",
          "install.packages('rstan', type = 'binary') on macOS/Windows; ",
@@ -292,36 +343,18 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
   description <- if (is.null(live_model)) x$model else live_model
   name <- if (is.null(description$model_name)) "stanli_model" else description$model_name
   code <- if (is.null(description$model_code)) character(0) else description$model_code
-  # cxxdso validity requires a nonempty signature list and the host system.
-  # RStan handles remain absent, including .MISC$stan_fit_instance. Subclass
-  # methods use the separately retained stanli model, never a fake Rcpp object.
-  # model_cpp names the model so that brms sees a fit with a model attached;
-  # rstan reaches the missing module only through mk_cppmodule, which stops.
-  dso <- methods::new("cxxdso", sig = list(character(0)), dso_saved = FALSE,
-                      system = R.version$system,
-                      .CXXDSOMISC = new.env(parent = emptyenv()))
-  model <- methods::new("stanmodel", model_name = name, model_code = code,
-                        model_cpp = list(model_cppname = "stanli", model_cppcode = ""),
-                        dso = dso, mk_cppmodule = stanfit_no_cppmodule)
-  # A namespace parent makes serialized fits load RStan (and its registration
-  # hook) when restored, without loading RStan during ordinary stanli startup.
-  misc <- new.env(parent = asNamespace("rstan"))
-  misc$stanli_model <- live_model
-  misc$stanli_n_unconstrained <- dim(x$unconstrained)[3L]
-  # The model's own output columns, for checking a model attached later:
-  # the stored draws may by then have lost variables (`exclude`) or been
-  # renamed by the package that holds the fit.
-  misc$stanli_columns <- x$columns
-  methods::new("stanli_stanfit", model_name = name, model_pars = layout$parameters,
+  misc <- stanfit_misc(live_model, dim(x$unconstrained)[3L], x$columns)
+  result <- methods::new("stanli_stanfit", model_name = name, model_pars = layout$parameters,
                par_dims = layout$dimensions, sim = simulation, stan_args = arguments,
-               stanmodel = model, mode = 0L, date = date(), inits = list(),
-               .MISC = misc)
+               stanmodel = stanfit_stanmodel(name, code), mode = 0L, date = date(),
+               inits = list(), .MISC = misc)
+  if (plain) stanfit_plain(result) else result
 }
 
 #' @rdname as_stanfit
 #' @export
-as_stanfit.stanli_stanfit <- function(x, model, ...) {
-  if (missing(model)) return(x)
+as_stanfit.stanli_stanfit <- function(x, model, ..., plain = FALSE) {
+  if (missing(model)) return(if (plain) stanfit_plain(x) else x)
   columns <- x@.MISC$stanli_columns
   # a fit converted before the columns were recorded
   if (is.null(columns)) columns <- x@sim$fnames_oi[x@sim$fnames_oi != "lp__"]
@@ -331,12 +364,13 @@ as_stanfit.stanli_stanfit <- function(x, model, ...) {
   misc <- list2env(as.list(x@.MISC, all.names = TRUE), parent = asNamespace("rstan"))
   misc$stanli_model <- model
   x@.MISC <- misc
-  x
+  if (plain) stanfit_plain(x) else x
 }
 
 #' @rdname as_stanfit
 #' @export
-as_stanfit.stanfit <- function(x, model, ...) {
+as_stanfit.stanfit <- function(x, model, ..., plain = FALSE) {
+  if (missing(model) && plain) return(stanfit_plain(x))
   if (missing(model) || is.null(model))
     stop("a plain stanfit has nothing stanli can convert; supply the ",
          "stanli_model it was fitted with", call. = FALSE)
@@ -354,11 +388,8 @@ as_stanfit.stanfit <- function(x, model, ...) {
   } else {
     stanfit_check_model(model, columns, model$n_unconstrained)
   }
-  misc <- new.env(parent = asNamespace("rstan"))
-  misc$stanli_model <- model
-  misc$stanli_n_unconstrained <- model$n_unconstrained
-  misc$stanli_columns <- model$columns
+  misc <- stanfit_misc(model, model$n_unconstrained, model$columns)
   result <- methods::new("stanli_stanfit", x)
   result@.MISC <- misc
-  result
+  if (plain) stanfit_plain(result) else result
 }
