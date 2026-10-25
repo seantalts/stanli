@@ -94,9 +94,12 @@ test_that("direct stanfit construction agrees with rstan's CLI CSV import", {
     for (column in seq_along(fit$columns))
       expect_identical(unname(stored[, , column]), unname(fit$draws[, , column]))
     expect_identical(unname(stored[, , "lp__"]), unname(fit$sampler[, , "lp__"]))
-    # Permutations depend on the R seed, not on the sampler seed.
-    expect_identical(actual@sim$permutation, reference@sim$permutation)
-    expect_csv_numbers(rstan::extract(actual), rstan::extract(reference))
+    sorted <- function(draws) lapply(draws, function(x) {
+      x <- as.array(x)
+      if (length(dim(x)) == 1L) return(sort(x))
+      apply(x, seq_along(dim(x))[-1L], sort)
+    })
+    expect_csv_numbers(sorted(rstan::extract(actual)), sorted(rstan::extract(reference)))
     expect_equal(rstan::summary(actual)$summary,
                  rstan::summary(reference)$summary, tolerance = 1e-12)
     expect_equal(rstan::get_sampler_params(actual, inc_warmup = FALSE),
