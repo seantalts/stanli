@@ -87,21 +87,25 @@ Lowering::BuiltinDispatch Lowering::resolve_builtin(const mir::Expr& e) {
 // at model evaluation rather than move to construction. Propto densities
 // never fold because their value is instantiation-dependent.
 bool Lowering::expr_effectful(const mir::Expr& e) {
-  if (mir::stateful_intrinsic_kind(e)) return true;
+  return expr_effects(e) != 0;
+}
+unsigned Lowering::expr_effects(const mir::Expr& e) {
+  unsigned effects = 0;
+  if (mir::stateful_intrinsic_kind(e)) effects |= kStatefulEffect;
   if (e.kind == mir::Expr::FunApp && e.name.size() >= 4 &&
       e.name.compare(e.name.size() - 4, 4, "_rng") == 0)
-    return true;
-  if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined &&
-      fun_effectful(e.name))
-    return true;
-  // reduce_sum reaches its partial-sum function through a Var, so the
-  // UserDefined test above cannot see a print or reject in that body.
-  if (mir::is_reduce_sum(e) && reduce_sum_effectful(e)) return true;
-  for (const auto& a : e.args)
-    if (expr_effectful(a)) return true;
-  return false;
+    effects |= kStatefulEffect;
+  if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
+    effects |= fun_effects(e.name);
+  if (mir::is_reduce_sum(e) && reduce_sum_effectful(e))
+    effects |= kStatefulEffect;
+  for (const auto& a : e.args) effects |= expr_effects(a);
+  return effects;
 }
 bool Lowering::fun_effectful(const std::string& name) {
+  return fun_effects(name) != 0;
+}
+unsigned Lowering::fun_effects(const std::string& name) {
   auto memo = effectful_cache.find(name);
   if (memo != effectful_cache.end()) return memo->second;
 
@@ -111,66 +115,65 @@ bool Lowering::fun_effectful(const std::string& name) {
   // intermediate node: in an effectful recursive component its answer can
   // depend on statements that the outer frame has not visited yet.
   std::set<std::string> visiting;
-  std::function<bool(const std::string&)> visit_fun;
-  std::function<bool(const mir::Expr&)> visit_expr;
-  std::function<bool(const mir::Stmt&)> visit_stmt;
+  std::function<unsigned(const std::string&)> visit_fun;
+  std::function<unsigned(const mir::Expr&)> visit_expr;
+  std::function<unsigned(const mir::Stmt&)> visit_stmt;
 
-  visit_fun = [&](const std::string& called) {
+  visit_fun = [&](const std::string& called) -> unsigned {
     auto known = effectful_cache.find(called);
     if (known != effectful_cache.end()) return known->second;
-    if (!visiting.insert(called).second) return false;
-    bool found = false;
+    if (!visiting.insert(called).second) return 0;
+    unsigned found = 0;
     auto f = fun_defs.find(called);
     if (f != fun_defs.end())
-      for (const auto& s : f->second->body)
-        if (visit_stmt(s)) {
-          found = true;
-          break;
-        }
+      for (const auto& s : f->second->body) found |= visit_stmt(s);
     visiting.erase(called);
     return found;
   };
 
-  visit_expr = [&](const mir::Expr& e) {
-    if (mir::stateful_intrinsic_kind(e)) return true;
+  visit_expr = [&](const mir::Expr& e) -> unsigned {
+    unsigned found = 0;
+    if (mir::stateful_intrinsic_kind(e)) found |= kStatefulEffect;
     if (e.kind == mir::Expr::FunApp && e.name.size() >= 4 &&
         e.name.compare(e.name.size() - 4, 4, "_rng") == 0)
-      return true;
-    if (e.kind == mir::Expr::FunApp &&
-        e.fn_lib == mir::Expr::Lib::UserDefined && visit_fun(e.name))
-      return true;
+      found |= kStatefulEffect;
+    if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
+      found |= visit_fun(e.name);
     if (mir::is_reduce_sum(e)) {
-      if (e.args.empty() || e.args[0].kind != mir::Expr::Var) return true;
-      bool propto = false;
-      const mir::FunDef* partial = mir::resolve_callback(
-          fun_defs, mir::reduce_sum_partial_name(e.args[0].name, &propto),
-          mir::reduce_sum_partial_views(e));
-      if (partial == nullptr || visit_fun(partial->name)) return true;
+      if (e.args.empty() || e.args[0].kind != mir::Expr::Var) {
+        found |= kStatefulEffect;
+      } else {
+        bool propto = false;
+        const mir::FunDef* partial = mir::resolve_callback(
+            fun_defs, mir::reduce_sum_partial_name(e.args[0].name, &propto),
+            mir::reduce_sum_partial_views(e));
+        if (partial == nullptr)
+          found |= kStatefulEffect;
+        else if (visit_fun(partial->name))
+          found |= kStatefulEffect;
+      }
     }
-    for (const auto& a : e.args)
-      if (visit_expr(a)) return true;
-    return false;
+    for (const auto& a : e.args) found |= visit_expr(a);
+    return found;
   };
 
-  visit_stmt = [&](const mir::Stmt& s) {
-    if (s.kind == mir::Stmt::TargetPE) return true;
-    if (s.kind == mir::Stmt::NRFunApp && message_action(s.fn_name)) return true;
-    for (const auto& e : s.fn_args)
-      if (visit_expr(e)) return true;
-    if (s.has_init && visit_expr(s.init)) return true;
-    if (visit_expr(s.rhs) || visit_expr(s.target) || visit_expr(s.lower) ||
-        visit_expr(s.upper) || visit_expr(s.cond))
-      return true;
-    for (const auto& e : s.lhs_idx)
-      if (visit_expr(e)) return true;
-    for (const auto& child : s.body)
-      if (visit_stmt(child)) return true;
-    return false;
+  visit_stmt = [&](const mir::Stmt& s) -> unsigned {
+    unsigned found = 0;
+    if (s.kind == mir::Stmt::TargetPE) found |= kStatefulEffect;
+    if (s.kind == mir::Stmt::NRFunApp && message_action(s.fn_name))
+      found |= kMessageEffect;
+    for (const auto& e : s.fn_args) found |= visit_expr(e);
+    if (s.has_init) found |= visit_expr(s.init);
+    found |= visit_expr(s.rhs) | visit_expr(s.target) | visit_expr(s.lower) |
+             visit_expr(s.upper) | visit_expr(s.cond);
+    for (const auto& e : s.lhs_idx) found |= visit_expr(e);
+    for (const auto& child : s.body) found |= visit_stmt(child);
+    return found;
   };
 
-  const bool effect = visit_fun(name);
-  effectful_cache[name] = effect;
-  return effect;
+  const unsigned effects = visit_fun(name);
+  effectful_cache[name] = effects;
+  return effects;
 }
 // Integer argument of a density/pmf: values must be known at compile
 // time (int data, loop variables, or compile-time expressions).

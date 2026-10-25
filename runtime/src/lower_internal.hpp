@@ -872,7 +872,9 @@ struct Lowering {
   // A generic UDF keeps one scalar template type per formal. Locals and its
   // return use the promoted type, but a direct formal reference keeps its own.
   std::map<std::string, bool> udf_formal_autodiff;
-  std::map<std::string, bool> effectful_cache;
+  std::map<std::string, unsigned> effectful_cache;
+  std::map<std::string, long> data_extent_memo;
+  bool data_extent_scope = false;
   std::set<std::string> int_locals;
   // SInt locals in log_prob (data-only)
   int udf_depth = 0;
@@ -1688,7 +1690,12 @@ struct Lowering {
   // expressions and Stan validation failures decline; the latter must stay
   // at model evaluation rather than move to construction. Propto densities
   // never fold because their value is instantiation-dependent.
+  static constexpr unsigned kMessageEffect = 1;
+  static constexpr unsigned kStatefulEffect = 2;
   bool expr_effectful(const mir::Expr& e);
+  unsigned expr_effects(const mir::Expr& e);
+  static std::string expr_signature(const mir::Expr& e);
+  unsigned fun_effects(const std::string& name);
 
   struct UdfBinding {
     bool is_int = false;
@@ -2072,7 +2079,8 @@ struct Lowering {
     CompiledModel out;
     std::map<int, IntRange> int_ranges;
     std::map<int, RealRange> real_ranges;
-    size_t n_fills = 0, n_ops = 0, n_slots = 0, n_idata = 0, td_mark = 0;
+    size_t n_fills = 0, n_ops = 0, n_slots = 0, n_idata = 0, n_udata = 0,
+           td_mark = 0;
   };
   WaSnapshot wa_snapshot() {
     WaSnapshot s;
@@ -2093,6 +2101,7 @@ struct Lowering {
     s.n_ops = g.ops.size();
     s.n_slots = g.slots.size();
     s.n_idata = g.idata_pool.size();
+    s.n_udata = g.udata_pool.size();
     s.td_mark = td_journal.size();
     return s;
   }
@@ -2115,6 +2124,7 @@ struct Lowering {
     g.ops.resize(s.n_ops);
     g.slots.resize(s.n_slots);
     g.idata_pool.resize(s.n_idata);
+    g.udata_pool.resize(s.n_udata);
     td_rollback(s.td_mark);
   }
 #include "lower_structured_loop.inc"

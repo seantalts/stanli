@@ -227,6 +227,11 @@ bool Lowering::canonical_input_rebuild(const mir::Stmt& s,
   return true;
 }
 void Lowering::bind_data(const mir::Program& p) {
+  struct ExtentScope {
+    bool& flag;
+    explicit ExtentScope(bool& f) : flag(f) { flag = true; }
+    ~ExtentScope() { flag = false; }
+  };
   std::set<std::string> input_names;
   bool all_inputs_bound = true;
   bool use_prebound = std::getenv("STANLI_NO_DATA_PRELOAD") == nullptr;
@@ -267,6 +272,7 @@ void Lowering::bind_data(const mir::Program& p) {
     // The generated reconstruction allocated the MIR-declared shape and
     // copied exactly that many flat elements. Normalize to the same shape;
     // a malformed length falls back to that checked interpreter path.
+    ExtentScope extents(data_extent_scope);
     for (const auto& [name, type] : p.input_vars) {
       DataMap::Entry& dst = td.env().at(name);
       if (static_cast<int64_t>(dst.r.size()) != sized_len(type)) {
@@ -295,12 +301,22 @@ void Lowering::bind_data(const mir::Program& p) {
     sh.si = view_of(type, true);
     decls[name] = sh;
   };
-  for (const auto& [name, type] : p.input_vars) {
-    record(name, type);
-    validate_data_dims(name, type);
+  {
+    ExtentScope extents(data_extent_scope);
+    for (const auto& [name, type] : p.input_vars) {
+      record(name, type);
+      validate_data_dims(name, type);
+    }
   }
   for (const auto& st : p.prepare_data) {
-    if (st.kind == mir::Stmt::Decl) record(st.decl_id, st.decl_type);
+    if (st.kind == mir::Stmt::Decl) {
+      if (input_names.count(st.decl_id)) {
+        ExtentScope extents(data_extent_scope);
+        record(st.decl_id, st.decl_type);
+      } else {
+        record(st.decl_id, st.decl_type);
+      }
+    }
     // stanc's prepare_data first rebuilds every input from a flat
     // FnReadData buffer. DataMap has already parsed that buffer into the
     // same typed, column-major representation above. Replaying the
@@ -315,6 +331,19 @@ void Lowering::bind_data(const mir::Program& p) {
          canonical_input_rebuild(st, input_names)))
       continue;
     record_interpreter_event("prepare_data", "statement_entry");
+    if (st.kind == mir::Stmt::Decl && st.has_init) {
+      const auto sized = data_extent_memo.find(expr_signature(st.init));
+      if (sized != data_extent_memo.end()) {
+        mir::Stmt resolved = st;
+        resolved.init = mir::Expr{};
+        resolved.init.kind = mir::Expr::LitInt;
+        resolved.init.lit_i = sized->second;
+        resolved.init.type_ = "UInt";
+        resolved.init.data_only = true;
+        td.exec(resolved);
+        continue;
+      }
+    }
     td.exec(st);
   }
   for (auto& [name, e] : td.env()) {

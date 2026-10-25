@@ -40,6 +40,9 @@ models copied from stanc3's test suite (BSD 3-Clause, the same license as
 this repository), used as test inputs. Provenance and the few documented
 runnable adaptations are in `tests/stanc3/README.md`.
 
+`tests/stanc3/while_udf_slices.stan` also contains two small functions from
+rbmi (Apache-2.0); the license text is in `tests/stanc3/licenses/`.
+
 Also in the repository, not in the binary: `tests/brms/` holds Stan models
 and data written by brms 2.23.0 (GPL-2), used as test inputs. Parts of a
 generated model are brms's own code, the `scale_r_cor` helper and the

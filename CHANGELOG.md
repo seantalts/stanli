@@ -39,6 +39,17 @@
   extraction come from the fit's `seed`, so the same fit gives the same
   `extract()` draws in every session. `sample_model()` never touched the
   stream.
+- Models whose sizes come from a `while` loop now run. A counter loop that
+  ends before a `vector[k] z = mu[1:k]` declaration, and a user function
+  that walks a vector with `while (j <= num_elements(vec))` and slices it
+  by the counter, both failed with "needs unknown int" or "not known at
+  compile time" errors. These forms appear in rbmi's MMRM model.
+- A data size computed by a user function that calls `reject()` or
+  `print()` now works, as in OncoBayes2's `array[M] vector[max_int(Nc)] w`.
+  The size is computed once, so a `print` in that function fires once, and
+  data that makes the function reject stops at data load with the
+  function's message, as CmdStan does. Functions that draw random numbers
+  are still refused in a size.
 
 ## 0.23.2
 

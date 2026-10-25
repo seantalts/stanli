@@ -1462,6 +1462,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "reject_udf_data_size": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 2,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "s2_ar_cov": {
   "max_rel": 3.3076817185734873e-16,
   "max_ulp": 2,
@@ -2383,6 +2390,20 @@
   "max_rel": 0.0,
   "max_ulp": 0,
   "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "while_counter_size": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 8,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "while_udf_slices": {
+  "max_rel": 1.3664283380001927e-16,
+  "max_ulp": 1,
+  "n_values": 7,
   "point": 0,
   "status": "VERIFIED"
  }
