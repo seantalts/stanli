@@ -26,6 +26,11 @@
 
 ### Fixes
 
+- A fit from `as_stanfit()` now counts as holding a compiled model for brms,
+  so brms no longer starts an RStan recompile to evaluate the log density on
+  macOS and Linux. `brms::bridge_sampler()` and `brms::loo_moment_match()`
+  still refresh the fit with a zero-chain `brm()` call, which needs a backend
+  that samples with stanli.
 - `as_stanfit()`, `as_rfit()` and `extract()` no longer draw from or change
   your R random stream. The per-chain permutations used for permuted
   extraction come from the fit's `seed`, so the same fit gives the same

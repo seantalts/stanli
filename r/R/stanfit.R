@@ -157,9 +157,14 @@ stanfit_vb_diagnostics <- function(samples, log_ratio) {
 #'
 #'   Per-chain permutations are fixed by the fit's `seed` and do not read or
 #'   change R's random stream, so permuted extraction gives the same draws in
-#'   every session. Stored draw order is unchanged. Empty variables cannot be inferred from
-#'   column names and are omitted, as in CSV import. Packages that insist on
-#'   exact class equality instead of checking inheritance may need adaptation.
+#'   every session. Stored draw order is unchanged. Empty variables cannot be
+#'   inferred from column names and are omitted, as in CSV import. Packages that
+#'   insist on exact class equality instead of checking inheritance may need
+#'   adaptation.
+#'
+#'   The converted model reports a model name to `brms`, so `brms` treats the
+#'   fit as holding a compiled model and does not recompile it with RStan.
+#'   RStan itself still cannot sample from it.
 #'
 #'   Install rstan from a CRAN binary on supported macOS/Windows R versions to
 #'   avoid a toolchain. On Linux, provision a compatible binary installation.
@@ -290,10 +295,13 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
   # cxxdso validity requires a nonempty signature list and the host system.
   # RStan handles remain absent, including .MISC$stan_fit_instance. Subclass
   # methods use the separately retained stanli model, never a fake Rcpp object.
+  # model_cpp names the model so that brms sees a fit with a model attached;
+  # rstan reaches the missing module only through mk_cppmodule, which stops.
   dso <- methods::new("cxxdso", sig = list(character(0)), dso_saved = FALSE,
                       system = R.version$system,
                       .CXXDSOMISC = new.env(parent = emptyenv()))
   model <- methods::new("stanmodel", model_name = name, model_code = code,
+                        model_cpp = list(model_cppname = "stanli", model_cppcode = ""),
                         dso = dso, mk_cppmodule = stanfit_no_cppmodule)
   # A namespace parent makes serialized fits load RStan (and its registration
   # hook) when restored, without loading RStan during ordinary stanli startup.
