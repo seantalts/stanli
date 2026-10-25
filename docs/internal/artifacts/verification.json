@@ -1455,6 +1455,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "rbmi_mmrm": {
+  "max_rel": 2.1743569697112637e-16,
+  "max_ulp": 1,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "reductions_allowed": {
   "max_rel": 0.0,
   "max_ulp": 0,

@@ -1292,8 +1292,7 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
   // The register engine already implements Stan's integer division and
   // remainder, including zero-divisor errors. Preserve the selected integer
   // overload even when its result is subsequently promoted to real.
-  if (write_array_unregioned() &&
-      ((builtin && builtin->result == FunctionArgumentKind::Integer &&
+  if (((builtin && builtin->result == FunctionArgumentKind::Integer &&
         builtin->opcode == OP_DIV) ||
        (e.name == "Modulo__" && e.args.size() == 2 &&
         std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& arg) {

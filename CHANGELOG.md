@@ -50,6 +50,10 @@
   data that makes the function reject stops at data load with the
   function's message, as CmdStan does. Functions that draw random numbers
   are still refused in a size.
+- Integer division in a model-block expression, such as the bound
+  `lower=-1 / (n - 1)` or `print(7 / 2)`, now gives Stan's integer result.
+  It was computed as real division when the value was used where a real is
+  expected, so rbmi's MMRM model disagreed with CmdStan.
 
 ## 0.23.2
 

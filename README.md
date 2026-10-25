@@ -78,14 +78,14 @@ same example in their language.
   is <!--gen:corpus_median-->2.15x<!--/gen--> faster than CmdStan's,
   and <!--gen:corpus_at_par-->327<!--/gen--> models are at least as fast.
   Failed or capped runs stay in the [full benchmark](docs/benchmarks.md).
-- Model coverage. <!--gen:corpus_reference_models-->356<!--/gen--> models
+- Model coverage. <!--gen:corpus_reference_models-->357<!--/gen--> models
   share one three-point CmdStan reference replay. Within the posteriordb
   subset, <!--gen:corpus_verified-->118/120<!--/gen--> models match
   CmdStan's log density and full gradient.
   Of those <!--gen:corpus_verified_n-->118<!--/gen-->, <!--gen:corpus_bitwise-->55<!--/gen--> are bitwise identical, and the worst
   relative deviation is <!--gen:corpus_worst-->7.1e-13<!--/gen-->. Every model
   is listed in [docs/corpus-status.md](docs/corpus-status.md).
-- Language coverage. <!--gen:lang_verified-->14/14<!--/gen--> models lifted
+- Language coverage. <!--gen:lang_verified-->15/15<!--/gen--> models lifted
   from stanc3's own test suite, for the type and language constructs no
   real posterior uses, are verified the same way
   ([tests/stanc3/README.md](tests/stanc3/README.md)).
