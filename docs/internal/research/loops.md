@@ -18,6 +18,7 @@ recover the recording time or transient peak already paid.
 | [Proof packets](../../../notes/performance/2026-09-20-ctsem-proof-packets.md) | Eligibility, adversarial cases and measured consequences of checked layouts/data proofs. |
 | [Remaining architecture results](../../../notes/performance/2026-09-20-ctsem-remaining-architecture.md) | Decisions about QR retention, recording/encoding, reuse and numerical alternatives. |
 | [Implementation/review trail](../archive/plans/2026-09-20-ctsem-remaining-architecture.md) | Integration details, derivative lifetime tests and direct-entry control cases. |
+| [Data-loop memo](../../../notes/performance/2026-10-25-ctsem-data-loop-memo.md) | First recording of data-controlled scans, the keys and proofs that let a trace replay, and the measured 2.3x first-gradient gain. |
 | [Ordinary-model controls](../../../notes/performance/2026-09-20-ctsem-ordinary-model-controls.md) | Unresolved preparation/RSS observations and A/A attribution; not a universal no-regression claim. |
 
 Keep data dependence separate from derivative activity. A memoized result needs
