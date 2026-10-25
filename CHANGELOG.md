@@ -2,9 +2,15 @@
 
 ## Unreleased
 
+## 0.24.0
+
+Run RStan-style sampling and variational inference on Stanli, pass richer
+R data, and run more Stan models without source workarounds. The macOS
+arm64 packages also prepare large ctsem models faster.
+
 ### Features
 
-- `as_stanmodel(code)` wraps Stan code, a `.stan` file or an rstan `stanmodel`
+- `as_stanmodel()` wraps Stan code, a `.stan` file or an rstan `stanmodel`
   so that `rstan::sampling()` and `rstan::vb()` run on stanli and return a
   `stanli_stanfit`. It follows rstan's arguments, including `init` in all its
   forms, `pars`, `include`, `control`, `cores` and `algorithm = "Fixed_param"`;
@@ -37,6 +43,16 @@
   `row_vector`. Parameters pass through `sort_asc` and `sort_desc` with
   gradients, and `sort_asc` and `sort_desc` reject NaN as Stan Math does.
 
+### Performance
+
+- The macOS arm64 wheel and R runtime use a newer Apple Clang toolchain.
+  On the 4,000-row, 580-parameter ctsem model from Stan Discourse thread
+  41545, time to the first gradient fell from about 22 s with the 0.23.2
+  wheel to 13 s with the new build; warm gradients stayed about 0.35 s.
+  Three ordinary brms, rethinking and cognitive models were unchanged or
+  slightly faster in the measured phases. The minimum supported macOS
+  version remains 11.0.
+
 ### Fixes
 
 - A fit from `as_stanfit()` now counts as holding a compiled model for brms,
@@ -64,6 +80,15 @@
   `lower=-1 / (n - 1)` or `print(7 / 2)`, now gives Stan's integer result.
   It was computed as real division when the value was used where a real is
   expected, so rbmi's MMRM model disagreed with CmdStan.
+
+### Docs
+
+- The brms end-to-end comparison now includes eight-seed reruns of the
+  twelve models that exceeded R-hat 1.01 with only one backend in the
+  original run. Across those reruns, 29 of 96 Stanli fits and 32 of 96
+  CmdStanR fits exceeded that threshold; no model consistently failed with
+  one backend while converging with the other. The report retains every
+  run, and the harness accepts `BRMS_E2E_SEED` to reproduce them.
 
 ## 0.23.2
 
