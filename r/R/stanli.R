@@ -250,6 +250,29 @@ log_prob_grad <- function(model, q) {
   .Call("stanli_r_grad", model$ptr, as.double(q))
 }
 
+#' Names of a model's parameters
+#'
+#' The variables declared in the `parameters` block, in declaration order.
+#' Transformed parameters and generated quantities are not included, so this is
+#' the set of names [unconstrain()] accepts.
+#'
+#' @param model A `stanli_model`.
+#' @param scalars `FALSE` returns one name per declared variable (`"sigma"`).
+#'   `TRUE` returns one name per scalar element in Stan's column order
+#'   (`"sigma[1]"`, `"sigma[2]"`, `"B[2,3]"`), as `model$columns` and draw
+#'   columns spell them.
+#' @return A character vector.
+#' @export
+parameter_names <- function(model, scalars = FALSE) {
+  if (!inherits(model, "stanli_model"))
+    stop("model must be a stanli_model", call. = FALSE)
+  if (!is.logical(scalars) || length(scalars) != 1L || is.na(scalars))
+    stop("scalars must be TRUE or FALSE", call. = FALSE)
+  columns <- .Call("stanli_r_parameter_columns", model$ptr)
+  if (scalars) stan_variable_names(columns)
+  else unique(sub("\\..*$", "", columns))
+}
+
 #' Starting values on the constrained scale, as the free vector
 #'
 #' Unless `partial = TRUE`, every declared parameter must appear, at its
@@ -273,12 +296,25 @@ log_prob_grad <- function(model, q) {
 #' @param init_radius Radius of that draw.
 #' @param seed Seed for that draw. `NULL` uses, and advances, R's random
 #'   stream; a number leaves the stream untouched.
+#' @param ignore_unknown `TRUE` drops the entries of a `values` list whose names
+#'   are not declared parameters, as RStan does with transformed parameters,
+#'   generated quantities and other extra entries, instead of refusing them.
+#'   See [parameter_names()]. Only for a list, not a JSON string.
 #' @return A numeric vector of length `model$n_unconstrained`.
 #' @export
 unconstrain <- function(model, values, partial = FALSE, init_radius = 2,
-                        seed = NULL) {
+                        seed = NULL, ignore_unknown = FALSE) {
   if (!is.logical(partial) || length(partial) != 1L || is.na(partial))
     stop("partial must be TRUE or FALSE", call. = FALSE)
+  if (!is.logical(ignore_unknown) || length(ignore_unknown) != 1L ||
+      is.na(ignore_unknown))
+    stop("ignore_unknown must be TRUE or FALSE", call. = FALSE)
+  if (ignore_unknown) {
+    if (!is.list(values))
+      stop("ignore_unknown needs values as a list", call. = FALSE)
+    check_start_names(values)
+    values <- values[names(values) %in% parameter_names(model)]
+  }
   if (partial && is.list(values))
     values <- complete_partial_inits(model, values, init_radius, seed)
   json <- if (is.character(values) && length(values) == 1) {
@@ -293,11 +329,15 @@ unconstrain <- function(model, values, partial = FALSE, init_radius = 2,
 # unconstrained coordinate uniformly in (-init_radius, init_radius), map that
 # point to the constrained scale, and keep its values for the parameters that
 # were not given. The result names every parameter with elements.
-complete_partial_inits <- function(model, values, init_radius, seed) {
+check_start_names <- function(values) {
   if (length(values) && (is.null(names(values)) || anyNA(names(values)) ||
       any(!nzchar(names(values))) || anyDuplicated(names(values))))
     stop("starting values must be a list with unique parameter names",
          call. = FALSE)
+}
+
+complete_partial_inits <- function(model, values, init_radius, seed) {
+  check_start_names(values)
   if (length(init_radius) != 1L || !is.numeric(init_radius) ||
       !is.finite(init_radius) || init_radius < 0)
     stop("init_radius must be finite and nonnegative", call. = FALSE)

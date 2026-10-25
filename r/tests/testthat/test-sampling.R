@@ -112,6 +112,52 @@ test_that("unconstrain names a parameter it cannot use", {
     "not_a_parameter")
 })
 
+test_that("parameter_names lists declared parameters, not outputs", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    parameters { real mu; vector<lower=0>[2] sigma; matrix[2, 3] B; }
+    transformed parameters { real tp = mu; }
+    model { mu ~ normal(0, 1); sigma ~ normal(0, 1); to_vector(B) ~ normal(0, 1); }
+    generated quantities { real g = mu; }")
+  expect_identical(parameter_names(m), c("mu", "sigma", "B"))
+  scalars <- parameter_names(m, scalars = TRUE)
+  expect_length(scalars, m$n_unconstrained)
+  expect_identical(scalars[1:3], c("mu", "sigma[1]", "sigma[2]"))
+  expect_true("B[2,3]" %in% scalars)
+  expect_false(any(c("tp", "g") %in% scalars))
+  expect_error(parameter_names(m, scalars = NA), "scalars")
+  expect_error(parameter_names(list()), "stanli_model")
+  none <- stanli_model(code = "data { int N; } model { }", data = list(N = 1L))
+  expect_identical(parameter_names(none), character(0))
+})
+
+test_that("unconstrain can drop names that are not parameters", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    parameters { real mu; real<lower=0> sigma; }
+    transformed parameters { real tp = mu; }
+    model { mu ~ normal(0, 1); sigma ~ normal(0, 1); }")
+  values <- list(mu = 0.5, sigma = 2, tp = 9, extra = 1:3)
+  expect_error(unconstrain(m, values), "extra")
+  expect_equal(unconstrain(m, values, ignore_unknown = TRUE),
+               c(0.5, log(2)))
+  expect_equal(unconstrain(m, values, partial = TRUE, ignore_unknown = TRUE),
+               c(0.5, log(2)))
+  some <- unconstrain(m, list(sigma = 2, tp = 1), partial = TRUE,
+                      ignore_unknown = TRUE, seed = 3)
+  expect_equal(some, unconstrain(m, list(sigma = 2), partial = TRUE, seed = 3))
+  expect_equal(unconstrain(m, list(other = 1), partial = TRUE,
+                           ignore_unknown = TRUE, init_radius = 0),
+               c(0, 0))
+  expect_error(unconstrain(m, values, ignore_unknown = NA), "ignore_unknown")
+  expect_error(unconstrain(m, '{"mu": 1, "sigma": 1}', ignore_unknown = TRUE),
+               "list")
+  q <- unconstrain(m, values, ignore_unknown = TRUE)
+  fit <- sample_model(m, chains = 1, warmup = 50, samples = 20, seed = 1, init = q,
+                      refresh = 0)
+  expect_equal(dim(fit$draws)[1], 20)
+})
+
 test_that("refresh is a single nonnegative integer", {
   bad <- list(-1, 1.5, NA_real_, NaN, Inf, c(1, 2), "1", TRUE, NULL)
   for (value in bad)

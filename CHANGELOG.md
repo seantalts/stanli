@@ -17,6 +17,13 @@
   vectors is `array[K] vector[N]`. Before, three-dimensional arrays were
   refused. Arrays with a zero-length extent are written correctly.
 
+- `parameter_names(model)` lists the variables declared in the `parameters`
+  block. `scalars = TRUE` gives one name per scalar element, such as
+  `"sigma[1]"`.
+- `unconstrain()` takes `ignore_unknown = TRUE` to drop list entries that are
+  not declared parameters, such as transformed parameters, instead of
+  refusing them. The result is what `sample_model(init = )` takes.
+
 ### Fixes
 
 - `as_stanfit()`, `as_rfit()` and `extract()` no longer draw from or change
