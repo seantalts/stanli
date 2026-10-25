@@ -155,9 +155,9 @@ stanfit_vb_diagnostics <- function(samples, log_ratio) {
 #'   Serialized workers likewise cannot use live handles. No model recompiles
 #'   automatically on loading or conversion.
 #'
-#'   Per-chain permutations use R's current RNG, as CSV import does. Set the
-#'   same R seed before both conversions to compare permuted extraction.
-#'   Stored draw order is unchanged. Empty variables cannot be inferred from
+#'   Per-chain permutations are fixed by the fit's `seed` and do not read or
+#'   change R's random stream, so permuted extraction gives the same draws in
+#'   every session. Stored draw order is unchanged. Empty variables cannot be inferred from
 #'   column names and are omitted, as in CSV import. Packages that insist on
 #'   exact class equality instead of checking inheritance may need adaptation.
 #'
@@ -277,7 +277,7 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     samples = chains, chains = x$chains, iter = x$warmup + x$samples,
     warmup = x$warmup, thin = x$thin,
     n_save = rep(shape[1L], x$chains), warmup2 = rep(saved_warmup, x$chains),
-    permutation = replicate(x$chains, sample.int(kept), simplify = FALSE),
+    permutation = fit_permutations(x$seed, x$chains, kept),
     pars_oi = layout$parameters, dims_oi = layout$dimensions,
     fnames_oi = flat_names, n_flatnames = length(flat_names)
   )

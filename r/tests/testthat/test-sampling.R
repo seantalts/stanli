@@ -609,3 +609,21 @@ test_that("Pathfinder starts are keyed on the first chain id", {
                            samples = 10, refresh = 0, init = starts)
   expect_identical(fit$draws, explicit$draws)
 })
+
+test_that("sampling never touches the caller's random stream", {
+  skip_without_runtime()
+  m <- chain_id_model()
+  set.seed(21)
+  before <- random_state()
+  sample_model(m, chains = 2, seed = 3, warmup = 10, samples = 5, refresh = 0)
+  sample_model(m, chains = 2, seed = 3, warmup = 10, samples = 5, refresh = 0,
+               pathfinder_init = list())
+  sample_model(m, chains = 2, seed = 3, samples = 5, refresh = 0,
+               fixed_param = TRUE)
+  expect_identical(random_state(), before)
+  without_random_state({
+    sample_model(m, chains = 1, seed = 3, warmup = 10, samples = 5,
+                 refresh = 0)
+    expect_null(random_state())
+  })
+})

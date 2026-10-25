@@ -17,6 +17,14 @@
   vectors is `array[K] vector[N]`. Before, three-dimensional arrays were
   refused. Arrays with a zero-length extent are written correctly.
 
+### Fixes
+
+- `as_stanfit()`, `as_rfit()` and `extract()` no longer draw from or change
+  your R random stream. The per-chain permutations used for permuted
+  extraction come from the fit's `seed`, so the same fit gives the same
+  `extract()` draws in every session. `sample_model()` never touched the
+  stream.
+
 ## 0.23.2
 
 Windows arm64 binaries on R-universe.

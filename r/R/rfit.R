@@ -17,8 +17,9 @@
 #' @param ... Reserved; unsupported arguments produce an error.
 #' @details `extract()` returns a named list of draw-first arrays when permuted,
 #'   or an iteration-by-chain-by-parameter array otherwise. `as_rfit()` creates
-#'   per-chain permutations using R's RNG; extraction from the converted fit
-#'   does not advance that RNG.
+#'   per-chain permutations from the fit's `seed`, so permuted extraction is the
+#'   same in every session; neither it nor extraction reads or changes R's
+#'   random stream.
 #'   All parameters share the same permutations, preserving joint draws.
 #'
 #'   `summary()` returns `summary` and `c_summary` matrices/arrays in RStan's
@@ -56,7 +57,7 @@ as_rfit <- function(x) {
   n <- length(post_warmup_rows(x))
   if (n < 1L) stop("fit has no post-warmup draws", call. = FALSE)
   stanfit_column_layout(c(x$columns, "lp__"))
-  x$rfit_permutation <- replicate(dim(x$draws)[2L], sample.int(n), simplify = FALSE)
+  x$rfit_permutation <- fit_permutations(x$seed, dim(x$draws)[2L], n)
   class(x) <- c("stanli_rfit", class(x))
   x
 }

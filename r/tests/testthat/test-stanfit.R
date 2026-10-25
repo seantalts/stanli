@@ -225,3 +225,24 @@ test_that("a fit started at a later chain id keeps those ids in the stanfit", {
                           function(d) attr(d, "args")$chain_id, integer(1)),
                    3:4)
 })
+
+test_that("as_stanfit leaves the random stream alone and permutes by seed", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  model <- progress_model()
+  fit <- sample_model(model, chains = 2, seed = 8, warmup = 20, samples = 12,
+                      refresh = 0)
+  set.seed(5)
+  before <- random_state()
+  sf <- as_stanfit(fit)
+  expect_identical(random_state(), before)
+  set.seed(77)
+  runif(3)
+  again <- as_stanfit(fit)
+  expect_identical(sf@sim$permutation, again@sim$permutation)
+  expect_identical(sf@sim$permutation, as_rfit(fit)$rfit_permutation)
+  other <- fit
+  other$seed <- 9
+  expect_false(identical(as_stanfit(other)@sim$permutation,
+                         sf@sim$permutation))
+})

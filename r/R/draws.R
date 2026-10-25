@@ -39,3 +39,16 @@ fit_chain_ids <- function(x, chains = x$chains) {
   first <- if (is.null(x$chain_id)) 1L else x$chain_id
   first + seq_len(chains) - 1L
 }
+
+fit_permutations <- function(seed, chains, n) {
+  seed <- suppressWarnings(as.integer(seed))
+  if (length(seed) != 1L || is.na(seed)) seed <- 0L
+  had <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+  old <- if (had) get(".Random.seed", envir = globalenv())
+  on.exit(if (had) assign(".Random.seed", old, envir = globalenv()) else
+    if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+      rm(".Random.seed", envir = globalenv()), add = TRUE)
+  set.seed(seed, kind = "Mersenne-Twister", normal.kind = "Inversion",
+           sample.kind = "Rejection")
+  replicate(chains, sample.int(n), simplify = FALSE)
+}
