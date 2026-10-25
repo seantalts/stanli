@@ -11,27 +11,53 @@ json_scalar <- function(x) {
 }
 
 # Stan's JSON data format, written without a JSON dependency: the values
-# are numbers, arrays of numbers, and nested arrays, which is a small
-# enough grammar to emit directly. Matrices go out ROW-major, as Stan's
-# JSON reader expects an array of rows.
+# are numbers, strings, and arrays nested to any depth, a small enough
+# grammar to emit directly. A named list is an object; an unnamed list is
+# an array of its elements. An R array goes out with its first index
+# outermost, the way Stan's JSON reader nests it, so a matrix is an array
+# of rows.
 to_json <- function(x) {
+  if (is.list(x) && (length(x) == 0L || !is.null(names(x)))) return(json_object(x))
+  if (is.list(x))
+    stop("a data list must have names for every element", call. = FALSE)
+  json_value(x)
+}
+
+json_object <- function(x) {
+  nms <- names(x)
+  if (length(x) && (is.null(nms) || anyNA(nms) || any(!nzchar(nms))))
+    stop("a list with names must name every element", call. = FALSE)
+  parts <- vapply(seq_along(x), function(i) {
+    paste0("\"", nms[i], "\": ", json_value(x[[i]]))
+  }, character(1))
+  paste0("{", paste(parts, collapse = ", "), "}")
+}
+
+json_value <- function(x) {
   if (is.list(x)) {
-    parts <- vapply(seq_along(x), function(i) {
-      paste0("\"", names(x)[i], "\": ", to_json(x[[i]]))
-    }, character(1))
-    return(paste0("{", paste(parts, collapse = ", "), "}"))
+    if (!is.null(names(x)) && length(x) > 0L) return(json_object(x))
+    return(paste0("[", paste(vapply(x, json_value, character(1)),
+                             collapse = ", "), "]"))
   }
-  if (is.matrix(x)) {
-    rows <- apply(x, 1, function(r) paste0("[", paste(vapply(r, json_scalar,
-      character(1)), collapse = ", "), "]"))
-    return(paste0("[", paste(rows, collapse = ", "), "]"))
+  shape <- dim(x)
+  if (is.null(shape)) {
+    if (length(x) == 1L) return(json_scalar(x))
+    shape <- length(x)
+  } else if (length(shape) > 1L) {
+    x <- aperm(x, rev(seq_along(shape)))
   }
-  if (is.array(x) && length(dim(x)) > 2)
-    stop("arrays with more than two dimensions are not supported by this ",
-         "data writer yet; pass the model a flattened form", call. = FALSE)
-  if (length(x) == 1 && is.null(dim(x))) return(json_scalar(x))
-  paste0("[", paste(vapply(x, json_scalar, character(1)), collapse = ", "),
-         "]")
+  json_nest(vapply(as.vector(x), json_scalar, character(1)), shape)
+}
+
+json_nest <- function(flat, shape) {
+  if (shape[1L] == 0L) return("[]")
+  if (length(shape) == 1L)
+    return(paste0("[", paste(flat, collapse = ", "), "]"))
+  chunk <- prod(shape[-1L])
+  parts <- vapply(seq_len(shape[1L]), function(i)
+    json_nest(flat[(i - 1L) * chunk + seq_len(chunk)], shape[-1L]),
+    character(1))
+  paste0("[", paste(parts, collapse = ", "), "]")
 }
 
 read_utf8_file <- function(path) {
@@ -47,7 +73,11 @@ read_utf8_file <- function(path) {
 #'
 #' @param file Path to a `.stan` file.
 #' @param code Model source, as an alternative to `file`.
-#' @param data A named list of data, or a path to a JSON data file.
+#' @param data A named list of data, or a path to a JSON data file. An R
+#'   array of any rank is written with its first index outermost, so a
+#'   matrix is an array of rows; an unnamed list is an array of its elements,
+#'   which is how to pass `array[K] matrix[N, M]`, `array[K] vector[N]` and
+#'   arrays of them. Zero-length extents are kept.
 #' @param mir Transformed MIR text, for a build without the embedded
 #'   compiler. Rarely needed.
 #' @param threads_per_chain Positive thread count for eligible native `reduce_sum`

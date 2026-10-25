@@ -20,7 +20,11 @@ stanli_model(
 
 \item{code}{Model source, as an alternative to `file`.}
 
-\item{data}{A named list of data, or a path to a JSON data file.}
+\item{data}{A named list of data, or a path to a JSON data file. An R
+array of any rank is written with its first index outermost, so a
+matrix is an array of rows; an unnamed list is an array of its elements,
+which is how to pass `array[K] matrix[N, M]`, `array[K] vector[N]` and
+arrays of them. Zero-length extents are kept.}
 
 \item{mir}{Transformed MIR text, for a build without the embedded
 compiler. Rarely needed.}

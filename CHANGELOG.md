@@ -11,6 +11,11 @@
   draws as four one-chain runs with `chain_id = 1:4` and the same seed. This
   also applies to `fixed_param = TRUE`. With `pathfinder_init`, the starts of
   all chains come from one Pathfinder run seeded by the first chain's id.
+- Data given to `stanli_model()` can be an R array of any rank, not only
+  vectors and matrices, and an unnamed list is written as an array of its
+  elements. A list of matrices is `array[K] matrix[N, M]`, and a list of
+  vectors is `array[K] vector[N]`. Before, three-dimensional arrays were
+  refused. Arrays with a zero-length extent are written correctly.
 
 ## 0.23.2
 
