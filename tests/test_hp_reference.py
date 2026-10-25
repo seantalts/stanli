@@ -173,6 +173,15 @@ class Builtins(unittest.TestCase):
         self.assertIsInstance(r, Mat)
         self.assertEqual([[float(x) for x in row] for row in r], [[1.0, 3.0], [2.0, 4.0]])
 
+    def test_sort_and_rank(self):
+        x = Vec([mpf(2), mpf(-1), mpf(7), mpf(0)])
+        self.assertIsInstance(mpfun.F["sort_asc"](x), Vec)
+        self.assertEqual([float(v) for v in mpfun.F["sort_asc"](x)], [-1.0, 0.0, 2.0, 7.0])
+        self.assertEqual([float(v) for v in mpfun.F["sort_desc"](x)], [7.0, 2.0, 0.0, -1.0])
+        self.assertEqual(mpfun.F["sort_indices_asc"](x), [2, 4, 1, 3])
+        self.assertEqual(mpfun.F["sort_indices_desc"](x), [3, 1, 4, 2])
+        self.assertEqual([mpfun.F["rank"](x, k) for k in range(1, 5)], [2, 0, 3, 1])
+
     def test_matrix_exp_of_nilpotent(self):
         r = mpfun.F["matrix_exp"](Mat([[mpf(0), mpf(1)], [mpf(0), mpf(0)]]))
         self.assertEqual([[float(x) for x in row] for row in r], [[1.0, 1.0], [0.0, 1.0]])

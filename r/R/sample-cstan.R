@@ -72,7 +72,7 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
                         include_paths = include_paths)
   unconstrained <- NULL
   if (!is.null(init)) {
-    declared <- unique(sub("\\..*$", "", .Call("stanli_r_parameter_columns", model$ptr)))
+    declared <- parameter_names(model)
     per_chain <- is.list(init) && is.null(names(init))
     if (per_chain && (length(init) != chains || !all(vapply(init, is.list, logical(1)))))
       stop("init must supply one named list per chain", call. = FALSE)

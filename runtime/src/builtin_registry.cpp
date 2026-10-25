@@ -11,6 +11,10 @@
 #include <stan/math/prim/fun/identity_matrix.hpp>
 #include <stan/math/prim/fun/linspaced_array.hpp>
 #include <stan/math/prim/fun/linspaced_int_array.hpp>
+#include <stan/math/prim/fun/rank.hpp>
+#include <stan/math/prim/fun/sort_asc.hpp>
+#include <stan/math/prim/fun/sort_desc.hpp>
+#include <stan/math/prim/fun/sort_indices.hpp>
 #include <stan/math/prim/fun/linspaced_row_vector.hpp>
 #include <stan/math/prim/fun/linspaced_vector.hpp>
 #include <stan/math/prim/fun/one_hot_array.hpp>
@@ -1447,6 +1451,37 @@ int evaluate_predicate_builtin(const BuiltinSpec& spec, double lhs,
       break;
   }
   throw std::invalid_argument("descriptor is not a predicate");
+}
+
+std::vector<int> evaluate_ordering_builtin(const BuiltinSpec& spec,
+                                           const std::vector<double>& values,
+                                           int position) {
+  return evaluate_ordering(spec.ordering, values, position);
+}
+
+std::vector<int> evaluate_ordering(BuiltinOrdering kind,
+                                   const std::vector<double>& values,
+                                   int position) {
+  switch (kind) {
+    case BuiltinOrdering::SortAsc:
+    case BuiltinOrdering::SortDesc: {
+      std::vector<int> integers(values.size());
+      for (size_t k = 0; k < values.size(); ++k)
+        integers[k] = static_cast<int>(std::llround(values[k]));
+      return kind == BuiltinOrdering::SortAsc
+                 ? stan::math::sort_asc(std::move(integers))
+                 : stan::math::sort_desc(std::move(integers));
+    }
+    case BuiltinOrdering::IndicesAsc:
+      return stan::math::sort_indices<true>(values);
+    case BuiltinOrdering::IndicesDesc:
+      return stan::math::sort_indices<false>(values);
+    case BuiltinOrdering::Rank:
+      return {stan::math::rank(values, position)};
+    case BuiltinOrdering::None:
+      break;
+  }
+  throw std::invalid_argument("descriptor is not an ordering function");
 }
 
 int evaluate_integer_binary_builtin(const BuiltinSpec& spec, int lhs, int rhs) {

@@ -11,27 +11,53 @@ json_scalar <- function(x) {
 }
 
 # Stan's JSON data format, written without a JSON dependency: the values
-# are numbers, arrays of numbers, and nested arrays, which is a small
-# enough grammar to emit directly. Matrices go out ROW-major, as Stan's
-# JSON reader expects an array of rows.
+# are numbers, strings, and arrays nested to any depth, a small enough
+# grammar to emit directly. A named list is an object; an unnamed list is
+# an array of its elements. An R array goes out with its first index
+# outermost, the way Stan's JSON reader nests it, so a matrix is an array
+# of rows.
 to_json <- function(x) {
+  if (is.list(x) && (length(x) == 0L || !is.null(names(x)))) return(json_object(x))
+  if (is.list(x))
+    stop("a data list must have names for every element", call. = FALSE)
+  json_value(x)
+}
+
+json_object <- function(x) {
+  nms <- names(x)
+  if (length(x) && (is.null(nms) || anyNA(nms) || any(!nzchar(nms))))
+    stop("a list with names must name every element", call. = FALSE)
+  parts <- vapply(seq_along(x), function(i) {
+    paste0("\"", nms[i], "\": ", json_value(x[[i]]))
+  }, character(1))
+  paste0("{", paste(parts, collapse = ", "), "}")
+}
+
+json_value <- function(x) {
   if (is.list(x)) {
-    parts <- vapply(seq_along(x), function(i) {
-      paste0("\"", names(x)[i], "\": ", to_json(x[[i]]))
-    }, character(1))
-    return(paste0("{", paste(parts, collapse = ", "), "}"))
+    if (!is.null(names(x)) && length(x) > 0L) return(json_object(x))
+    return(paste0("[", paste(vapply(x, json_value, character(1)),
+                             collapse = ", "), "]"))
   }
-  if (is.matrix(x)) {
-    rows <- apply(x, 1, function(r) paste0("[", paste(vapply(r, json_scalar,
-      character(1)), collapse = ", "), "]"))
-    return(paste0("[", paste(rows, collapse = ", "), "]"))
+  shape <- dim(x)
+  if (is.null(shape)) {
+    if (length(x) == 1L) return(json_scalar(x))
+    shape <- length(x)
+  } else if (length(shape) > 1L) {
+    x <- aperm(x, rev(seq_along(shape)))
   }
-  if (is.array(x) && length(dim(x)) > 2)
-    stop("arrays with more than two dimensions are not supported by this ",
-         "data writer yet; pass the model a flattened form", call. = FALSE)
-  if (length(x) == 1 && is.null(dim(x))) return(json_scalar(x))
-  paste0("[", paste(vapply(x, json_scalar, character(1)), collapse = ", "),
-         "]")
+  json_nest(vapply(as.vector(x), json_scalar, character(1)), shape)
+}
+
+json_nest <- function(flat, shape) {
+  if (shape[1L] == 0L) return("[]")
+  if (length(shape) == 1L)
+    return(paste0("[", paste(flat, collapse = ", "), "]"))
+  chunk <- prod(shape[-1L])
+  parts <- vapply(seq_len(shape[1L]), function(i)
+    json_nest(flat[(i - 1L) * chunk + seq_len(chunk)], shape[-1L]),
+    character(1))
+  paste0("[", paste(parts, collapse = ", "), "]")
 }
 
 read_utf8_file <- function(path) {
@@ -47,7 +73,11 @@ read_utf8_file <- function(path) {
 #'
 #' @param file Path to a `.stan` file.
 #' @param code Model source, as an alternative to `file`.
-#' @param data A named list of data, or a path to a JSON data file.
+#' @param data A named list of data, or a path to a JSON data file. An R
+#'   array of any rank is written with its first index outermost, so a
+#'   matrix is an array of rows; an unnamed list is an array of its elements,
+#'   which is how to pass `array[K] matrix[N, M]`, `array[K] vector[N]` and
+#'   arrays of them. Zero-length extents are kept.
 #' @param mir Transformed MIR text, for a build without the embedded
 #'   compiler. Rarely needed.
 #' @param threads_per_chain Positive thread count for eligible native `reduce_sum`
@@ -220,6 +250,29 @@ log_prob_grad <- function(model, q) {
   .Call("stanli_r_grad", model$ptr, as.double(q))
 }
 
+#' Names of a model's parameters
+#'
+#' The variables declared in the `parameters` block, in declaration order.
+#' Transformed parameters and generated quantities are not included, so this is
+#' the set of names [unconstrain()] accepts.
+#'
+#' @param model A `stanli_model`.
+#' @param scalars `FALSE` returns one name per declared variable (`"sigma"`).
+#'   `TRUE` returns one name per scalar element in Stan's column order
+#'   (`"sigma[1]"`, `"sigma[2]"`, `"B[2,3]"`), as `model$columns` and draw
+#'   columns spell them.
+#' @return A character vector.
+#' @export
+parameter_names <- function(model, scalars = FALSE) {
+  if (!inherits(model, "stanli_model"))
+    stop("model must be a stanli_model", call. = FALSE)
+  if (!is.logical(scalars) || length(scalars) != 1L || is.na(scalars))
+    stop("scalars must be TRUE or FALSE", call. = FALSE)
+  columns <- .Call("stanli_r_parameter_columns", model$ptr)
+  if (scalars) stan_variable_names(columns)
+  else unique(sub("\\..*$", "", columns))
+}
+
 #' Starting values on the constrained scale, as the free vector
 #'
 #' Unless `partial = TRUE`, every declared parameter must appear, at its
@@ -243,12 +296,25 @@ log_prob_grad <- function(model, q) {
 #' @param init_radius Radius of that draw.
 #' @param seed Seed for that draw. `NULL` uses, and advances, R's random
 #'   stream; a number leaves the stream untouched.
+#' @param ignore_unknown `TRUE` drops the entries of a `values` list whose names
+#'   are not declared parameters, as RStan does with transformed parameters,
+#'   generated quantities and other extra entries, instead of refusing them.
+#'   See [parameter_names()]. Only for a list, not a JSON string.
 #' @return A numeric vector of length `model$n_unconstrained`.
 #' @export
 unconstrain <- function(model, values, partial = FALSE, init_radius = 2,
-                        seed = NULL) {
+                        seed = NULL, ignore_unknown = FALSE) {
   if (!is.logical(partial) || length(partial) != 1L || is.na(partial))
     stop("partial must be TRUE or FALSE", call. = FALSE)
+  if (!is.logical(ignore_unknown) || length(ignore_unknown) != 1L ||
+      is.na(ignore_unknown))
+    stop("ignore_unknown must be TRUE or FALSE", call. = FALSE)
+  if (ignore_unknown) {
+    if (!is.list(values))
+      stop("ignore_unknown needs values as a list", call. = FALSE)
+    check_start_names(values)
+    values <- values[names(values) %in% parameter_names(model)]
+  }
   if (partial && is.list(values))
     values <- complete_partial_inits(model, values, init_radius, seed)
   json <- if (is.character(values) && length(values) == 1) {
@@ -263,11 +329,15 @@ unconstrain <- function(model, values, partial = FALSE, init_radius = 2,
 # unconstrained coordinate uniformly in (-init_radius, init_radius), map that
 # point to the constrained scale, and keep its values for the parameters that
 # were not given. The result names every parameter with elements.
-complete_partial_inits <- function(model, values, init_radius, seed) {
+check_start_names <- function(values) {
   if (length(values) && (is.null(names(values)) || anyNA(names(values)) ||
       any(!nzchar(names(values))) || anyDuplicated(names(values))))
     stop("starting values must be a list with unique parameter names",
          call. = FALSE)
+}
+
+complete_partial_inits <- function(model, values, init_radius, seed) {
+  check_start_names(values)
   if (length(init_radius) != 1L || !is.numeric(init_radius) ||
       !is.finite(init_radius) || init_radius < 0)
     stop("init_radius must be finite and nonnegative", call. = FALSE)
@@ -302,7 +372,8 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'
 #' Four chains by default, run in parallel: R-hat needs more than one
 #' chain, and a single-chain run cannot be checked for convergence at
-#' all. Chain `c` uses CmdStan's stream for `(seed, chain id c + 1)`.
+#' all. Chain `c` of the run uses CmdStan's stream for
+#' `(seed, chain_id + c - 1)`.
 #'
 #' @param model A `stanli_model`.
 #' @param chains,seed,warmup,samples,thin Sampler configuration. `seed` is
@@ -324,6 +395,13 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   Pathfinder's own `init_radius` (2). Uses `seed`, returns one start per
 #'   chain, and cannot be combined with `init`. Single-path Pathfinder does
 #'   not perform PSIS resampling.
+#' @param chain_id Id of the first chain, a positive integer, default 1.
+#'   Chain `c` of the run is labelled `chain_id + c - 1` and uses that id's
+#'   random stream, as in CmdStan. A run of chains 1 to 4 gives the same
+#'   draws, chain for chain, as four one-chain runs with `chain_id = 1:4` and
+#'   the same `seed`. With `pathfinder_init` the starts of all chains come from
+#'   one Pathfinder run seeded by the first chain's id, so that equality does
+#'   not hold.
 #' @param threads_per_chain Positive thread count per chain for eligible native
 #'   `reduce_sum` calls, default 1. Small or unsupported calls stay serial.
 #'   Changing this setting prepares a new graph; reduction rounding and NUTS
@@ -389,8 +467,10 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          threads_per_chain = 1, fixed_param = FALSE,
                          metric = c("diag_e", "dense_e", "unit_e"),
                          inv_metric = NULL, step_size = NULL,
-                         adapt_engaged = TRUE) {
+                         adapt_engaged = TRUE, chain_id = 1L) {
   cstan_integer(threads_per_chain, "threads_per_chain")
+  check_chain_id(chain_id, chains)
+  chain_id <- as.integer(chain_id)
   stanfit_flag(fixed_param, "fixed_param")
   metric <- match.arg(metric)
   stanfit_flag(adapt_engaged, "adapt_engaged")
@@ -421,11 +501,11 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
   model <- with_run_seed(model, seed, threads_per_chain)
   if (fixed_param)
     return(fixed_param_fit(model, chains, seed, samples, thin, init,
-                           init_radius, refresh))
+                           init_radius, refresh, chain_id))
   if (is.null(parallel_chains)) parallel_chains <- chains
   if (!is.null(pathfinder_init)) {
     init <- .Call("stanli_r_pathfinder_inits", model$ptr, as.integer(seed),
-                  as.integer(chains), unname(pathfinder_init))
+                  as.integer(chains), unname(pathfinder_init), chain_id)
   }
   init_vec <- numeric(0)
   if (!is.null(init)) {
@@ -441,7 +521,8 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
   opts <- list(as.integer(seed), as.integer(chains), as.integer(warmup),
                as.integer(samples), as.integer(thin), as.double(delta),
                as.integer(max_depth), isTRUE(save_warmup),
-               as.double(init_radius), as.integer(parallel_chains))
+               as.double(init_radius), as.integer(parallel_chains),
+               chain_id)
   metric_opts <- metric_options(metric, inv_metric, step_size, adapt_engaged,
                                 as.integer(chains), model$n_unconstrained)
   res <- .Call("stanli_r_sample", model$ptr, opts, init_vec, refresh,
@@ -484,8 +565,19 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                  initial_step_size = if (is.null(step_size)) 1 else as.double(step_size),
                  inv_metric = split_inv_metric(res$inv_metric, metric, nchain,
                                                model$n_unconstrained),
-                 adapt_engaged = adapt_engaged),
+                 adapt_engaged = adapt_engaged, chain_id = chain_id),
             class = "stanli_fit")
+}
+
+check_chain_id <- function(chain_id, chains) {
+  if (length(chain_id) != 1L || !is.numeric(chain_id) || is.na(chain_id) ||
+      !is.finite(chain_id) || chain_id < 1 || chain_id != floor(chain_id) ||
+      (is.numeric(chains) && length(chains) == 1L && is.finite(chains) &&
+       chain_id + chains - 1 > .Machine$integer.max) ||
+      chain_id > .Machine$integer.max)
+    stop("chain_id must be a positive integer, and chain_id + chains - 1 ",
+         "must fit in an integer", call. = FALSE)
+  invisible(NULL)
 }
 
 check_step_size <- function(step_size) {

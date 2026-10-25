@@ -54,8 +54,9 @@ Existing `stanli_fit` summary behavior is unchanged until explicitly converted.
 \details{
 `extract()` returns a named list of draw-first arrays when permuted,
   or an iteration-by-chain-by-parameter array otherwise. `as_rfit()` creates
-  per-chain permutations using R's RNG; extraction from the converted fit
-  does not advance that RNG.
+  per-chain permutations from the fit's `seed`, so permuted extraction is the
+  same in every session; neither it nor extraction reads or changes R's
+  random stream.
   All parameters share the same permutations, preserving joint draws.
 
   `summary()` returns `summary` and `c_summary` matrices/arrays in RStan's

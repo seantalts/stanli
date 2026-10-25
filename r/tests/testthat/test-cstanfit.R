@@ -245,3 +245,16 @@ test_that("fits without adapted metric fields say so", {
   expect_identical(meta$metric, "diag_e")
   expect_identical(meta$step_size_adaptation, rep(NA_real_, 4))
 })
+
+test_that("metadata, timings and metrics carry the fit's chain ids", {
+  raw <- cstan_fixture()
+  raw$chain_id <- 5L
+  raw$metric <- "diag_e"
+  raw$inv_metric <- lapply(1:4, function(i) rep(1, 3))
+  raw$unconstrained <- array(0, c(dim(raw$draws)[1], 4, 3))
+  fit <- as_cstanfit(raw)
+  expect_identical(fit$metadata()$id, 5:8)
+  expect_identical(fit$time()$chains$chain_id, 5:8)
+  expect_identical(names(fit$inv_metric()), as.character(5:8))
+  expect_identical(as_cstanfit(cstan_fixture())$metadata()$id, 1:4)
+})

@@ -113,3 +113,55 @@ test_that("native conversion refuses inconsistent saved-fit metadata", {
   raw$columns <- rev(raw$columns)
   expect_error(as_rfit(raw),"do not agree")
 })
+
+test_that("chains are labelled with the fit's chain ids", {
+  raw <- rfit_fixture()
+  raw$chain_id <- 5L
+  fit <- as_rfit(raw)
+  expect_identical(dimnames(extract(fit, permuted = FALSE))$chains,
+                   paste0("chain:", 5:8))
+  expect_identical(rownames(get_elapsed_time(fit)), paste0("chain:", 5:8))
+  expect_identical(rownames(get_elapsed_time(as_rfit(rfit_fixture()))),
+                   paste0("chain:", 1:4))
+})
+
+test_that("conversion and extraction leave the caller's random stream alone", {
+  raw <- rfit_fixture()
+  set.seed(314)
+  before <- random_state()
+  fit <- as_rfit(raw)
+  extract(fit)
+  summary(fit)
+  expect_identical(random_state(), before)
+  without_random_state({
+    fit <- as_rfit(raw)
+    extract(fit)
+    expect_null(random_state())
+  })
+})
+
+test_that("permuted extraction does not depend on the session's random state", {
+  raw <- rfit_fixture()
+  set.seed(1)
+  first <- extract(as_rfit(raw))
+  set.seed(2)
+  runif(5)
+  kinds <- RNGkind()
+  on.exit(suppressWarnings(RNGkind(kinds[1], kinds[2], kinds[3])), add = TRUE)
+  suppressWarnings(RNGkind(sample.kind = "Rounding"))
+  second <- extract(as_rfit(raw))
+  expect_identical(first, second)
+  other <- raw
+  other$seed <- 2L
+  expect_false(identical(extract(as_rfit(other))$mu, first$mu))
+})
+
+test_that("permutations are fixed by the fit's seed", {
+  raw <- rfit_fixture()
+  permutation <- as_rfit(raw)$rfit_permutation
+  expect_length(permutation, 4L)
+  expect_true(all(vapply(permutation, function(p) identical(sort(p), 1:80),
+                         logical(1))))
+  expect_length(unique(permutation), 4L)
+  expect_identical(as_rfit(raw)$rfit_permutation, permutation)
+})

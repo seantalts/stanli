@@ -158,3 +158,18 @@ test_that("brms reads the metric from a converted fit", {
   expect_identical(brms::control_params(bf, pars = "adapt_engaged")$adapt_engaged,
                    TRUE)
 })
+
+test_that("a converted fit counts as holding a compiled rstan model for brms", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  skip_if_not_installed("brms")
+  skip_on_os("windows")
+  sf <- as_stanfit(brms_support_fit())
+  x <- structure(list(fit = sf, backend = "rstan"), class = "brmsfit")
+  expect_true(brms:::has_rstan_model(x))
+  expect_no_message(again <- brms:::update_misc_env(x, only_windows = TRUE))
+  expect_identical(again, x)
+  expect_identical(rstan::get_cppcode(sf@stanmodel), "")
+  expect_error(rstan::sampling(sf@stanmodel, data = list(N = 1L), chains = 1))
+  expect_error(rstan::log_prob(sf, c(0, 0, 0, 0)), NA)
+})

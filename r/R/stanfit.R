@@ -155,11 +155,16 @@ stanfit_vb_diagnostics <- function(samples, log_ratio) {
 #'   Serialized workers likewise cannot use live handles. No model recompiles
 #'   automatically on loading or conversion.
 #'
-#'   Per-chain permutations use R's current RNG, as CSV import does. Set the
-#'   same R seed before both conversions to compare permuted extraction.
-#'   Stored draw order is unchanged. Empty variables cannot be inferred from
-#'   column names and are omitted, as in CSV import. Packages that insist on
-#'   exact class equality instead of checking inheritance may need adaptation.
+#'   Per-chain permutations are fixed by the fit's `seed` and do not read or
+#'   change R's random stream, so permuted extraction gives the same draws in
+#'   every session. Stored draw order is unchanged. Empty variables cannot be
+#'   inferred from column names and are omitted, as in CSV import. Packages that
+#'   insist on exact class equality instead of checking inheritance may need
+#'   adaptation.
+#'
+#'   The converted model reports a model name to `brms`, so `brms` treats the
+#'   fit as holding a compiled model and does not recompile it with RStan.
+#'   RStan itself still cannot sample from it.
 #'
 #'   Install rstan from a CRAN binary on supported macOS/Windows R versions to
 #'   avoid a toolchain. On Linux, provision a compatible binary installation.
@@ -243,6 +248,7 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     stop("unknown algorithm '", algorithm, "'", call. = FALSE))
   chains <- vector("list", x$chains)
   arguments <- vector("list", x$chains)
+  chain_ids <- fit_chain_ids(x)
   for (chain in seq_len(x$chains)) {
     values <- cbind(matrix(x$draws[, chain, kept_columns], nrow = shape[1L]),
                     matrix(x$sampler[, chain, special], nrow = shape[1L]))
@@ -254,7 +260,7 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     attr(draws, "sampler_params") <- as.data.frame(diagnostics)
     # rstan keeps each chain's sampler settings here too, and brms reads
     # them from here (control_params()).
-    attr(draws, "args") <- c(list(chain_id = chain),
+    attr(draws, "args") <- c(list(chain_id = chain_ids[chain]),
                              if (!is.null(sampler_t)) list(sampler_t = sampler_t),
                              if (nuts) list(control = control))
     attr(draws, "adaptation_info") <-
@@ -267,7 +273,7 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     attr(draws, "mean_lp__") <- averages["lp__"]
     chains[[chain]] <- draws
     arguments[[chain]] <- c(
-      list(chain_id = chain, seed = x$seed, iter = x$warmup + x$samples,
+      list(chain_id = chain_ids[chain], seed = x$seed, iter = x$warmup + x$samples,
            warmup = x$warmup, thin = x$thin, save_warmup = x$save_warmup),
       if (nuts) list(control = control), method_args,
       if (!is.null(sampler_t)) list(sampler_t = sampler_t))
@@ -276,7 +282,7 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
     samples = chains, chains = x$chains, iter = x$warmup + x$samples,
     warmup = x$warmup, thin = x$thin,
     n_save = rep(shape[1L], x$chains), warmup2 = rep(saved_warmup, x$chains),
-    permutation = replicate(x$chains, sample.int(kept), simplify = FALSE),
+    permutation = fit_permutations(x$seed, x$chains, kept),
     pars_oi = layout$parameters, dims_oi = layout$dimensions,
     fnames_oi = flat_names, n_flatnames = length(flat_names)
   )
@@ -289,10 +295,13 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...) {
   # cxxdso validity requires a nonempty signature list and the host system.
   # RStan handles remain absent, including .MISC$stan_fit_instance. Subclass
   # methods use the separately retained stanli model, never a fake Rcpp object.
+  # model_cpp names the model so that brms sees a fit with a model attached;
+  # rstan reaches the missing module only through mk_cppmodule, which stops.
   dso <- methods::new("cxxdso", sig = list(character(0)), dso_saved = FALSE,
                       system = R.version$system,
                       .CXXDSOMISC = new.env(parent = emptyenv()))
   model <- methods::new("stanmodel", model_name = name, model_code = code,
+                        model_cpp = list(model_cppname = "stanli", model_cppcode = ""),
                         dso = dso, mk_cppmodule = stanfit_no_cppmodule)
   # A namespace parent makes serialized fits load RStan (and its registration
   # hook) when restored, without loading RStan during ordinary stanli startup.

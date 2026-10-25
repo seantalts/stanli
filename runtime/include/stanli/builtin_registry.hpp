@@ -60,6 +60,7 @@ enum class BuiltinShapePolicy : uint8_t {
   // graph opcode; the shared resolver validates the square divisor and
   // conformable dividend and reports the result shape.
   Solve,
+  Ordering,
 };
 
 // Which factorization a Solve descriptor's kernel applies to the divisor.
@@ -95,6 +96,15 @@ enum class BuiltinShapeQueryKind : uint8_t {
   Size,
   NumElements,
   Dims,
+};
+
+enum class BuiltinOrdering : uint8_t {
+  None,
+  SortAsc,
+  SortDesc,
+  IndicesAsc,
+  IndicesDesc,
+  Rank,
 };
 
 // Which matrix kernel a MatrixOp descriptor drives. The kernels themselves
@@ -225,6 +235,7 @@ struct BuiltinSpec {
   // the opcode field carries the solve kernel.
   bool solve_left = false;
   BuiltinSolveKind solve = BuiltinSolveKind::None;
+  BuiltinOrdering ordering = BuiltinOrdering::None;
 };
 
 inline bool builtin_argument_is_integer(const BuiltinSpec& spec, size_t i) {
@@ -262,6 +273,13 @@ struct ConstructorValue {
 };
 ConstructorValue evaluate_constructor_builtin(
     const BuiltinSpec& spec, const std::vector<double>& arguments);
+
+std::vector<int> evaluate_ordering_builtin(const BuiltinSpec& spec,
+                                           const std::vector<double>& values,
+                                           int position = 0);
+std::vector<int> evaluate_ordering(BuiltinOrdering kind,
+                                   const std::vector<double>& values,
+                                   int position = 0);
 
 // One SliceView selection resolved to flat source cells: every output cell k
 // reads exactly one input cell -- offset + k (Contiguous), offset + k*stride

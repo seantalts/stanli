@@ -112,6 +112,52 @@ test_that("unconstrain names a parameter it cannot use", {
     "not_a_parameter")
 })
 
+test_that("parameter_names lists declared parameters, not outputs", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    parameters { real mu; vector<lower=0>[2] sigma; matrix[2, 3] B; }
+    transformed parameters { real tp = mu; }
+    model { mu ~ normal(0, 1); sigma ~ normal(0, 1); to_vector(B) ~ normal(0, 1); }
+    generated quantities { real g = mu; }")
+  expect_identical(parameter_names(m), c("mu", "sigma", "B"))
+  scalars <- parameter_names(m, scalars = TRUE)
+  expect_length(scalars, m$n_unconstrained)
+  expect_identical(scalars[1:3], c("mu", "sigma[1]", "sigma[2]"))
+  expect_true("B[2,3]" %in% scalars)
+  expect_false(any(c("tp", "g") %in% scalars))
+  expect_error(parameter_names(m, scalars = NA), "scalars")
+  expect_error(parameter_names(list()), "stanli_model")
+  none <- stanli_model(code = "data { int N; } model { }", data = list(N = 1L))
+  expect_identical(parameter_names(none), character(0))
+})
+
+test_that("unconstrain can drop names that are not parameters", {
+  skip_without_runtime()
+  m <- stanli_model(code = "
+    parameters { real mu; real<lower=0> sigma; }
+    transformed parameters { real tp = mu; }
+    model { mu ~ normal(0, 1); sigma ~ normal(0, 1); }")
+  values <- list(mu = 0.5, sigma = 2, tp = 9, extra = 1:3)
+  expect_error(unconstrain(m, values), "extra")
+  expect_equal(unconstrain(m, values, ignore_unknown = TRUE),
+               c(0.5, log(2)))
+  expect_equal(unconstrain(m, values, partial = TRUE, ignore_unknown = TRUE),
+               c(0.5, log(2)))
+  some <- unconstrain(m, list(sigma = 2, tp = 1), partial = TRUE,
+                      ignore_unknown = TRUE, seed = 3)
+  expect_equal(some, unconstrain(m, list(sigma = 2), partial = TRUE, seed = 3))
+  expect_equal(unconstrain(m, list(other = 1), partial = TRUE,
+                           ignore_unknown = TRUE, init_radius = 0),
+               c(0, 0))
+  expect_error(unconstrain(m, values, ignore_unknown = NA), "ignore_unknown")
+  expect_error(unconstrain(m, '{"mu": 1, "sigma": 1}', ignore_unknown = TRUE),
+               "list")
+  q <- unconstrain(m, values, ignore_unknown = TRUE)
+  fit <- sample_model(m, chains = 1, warmup = 50, samples = 20, seed = 1, init = q,
+                      refresh = 0)
+  expect_equal(dim(fit$draws)[1], 20)
+})
+
 test_that("refresh is a single nonnegative integer", {
   bad <- list(-1, 1.5, NA_real_, NaN, Inf, c(1, 2), "1", TRUE, NULL)
   for (value in bad)
@@ -529,4 +575,101 @@ test_that("fixed_param refuses metric options", {
                                               fixed_param = TRUE, refresh = 0),
                                          args)),
                  "fixed_param")
+})
+
+chain_id_model <- function() {
+  stanli_model(code = "
+    parameters { real mu; real<lower=0> tau; }
+    model { mu ~ normal(0, 3); tau ~ lognormal(0, 1); }
+    generated quantities { real draw = normal_rng(mu, tau); }")
+}
+
+test_that("four chains equal four one-chain runs started at chain ids 1 to 4", {
+  skip_without_runtime()
+  m <- chain_id_model()
+  args <- list(m, seed = 11, warmup = 60, samples = 40, refresh = 0)
+  together <- do.call(sample_model, c(args, list(chains = 4)))
+  for (k in 1:4) {
+    alone <- do.call(sample_model, c(args, list(chains = 1, chain_id = k)))
+    expect_identical(alone$draws[, 1, ], together$draws[, k, ])
+    expect_identical(alone$sampler[, 1, ], together$sampler[, k, ])
+    expect_identical(alone$unconstrained[, 1, ], together$unconstrained[, k, ])
+    expect_identical(alone$step_size, together$step_size[k])
+    expect_identical(alone$chain_id, as.integer(k))
+  }
+  expect_identical(together$chain_id, 1L)
+})
+
+test_that("chain_id continues across chains and defaults to 1", {
+  skip_without_runtime()
+  m <- chain_id_model()
+  fit <- sample_model(m, chains = 3, chain_id = 5, seed = 2, warmup = 20,
+                      samples = 10, refresh = 0)
+  expect_identical(fit$chain_id, 5L)
+  tail <- sample_model(m, chains = 2, chain_id = 7, seed = 2, warmup = 20,
+                       samples = 10, refresh = 0)
+  expect_identical(fit$draws[, 3, ], tail$draws[, 1, ])
+})
+
+test_that("chain_id is validated", {
+  skip_without_runtime()
+  m <- chain_id_model()
+  for (bad in list(0, -1, 1.5, NA, NA_integer_, c(1, 2), "1", Inf, TRUE,
+                   .Machine$integer.max))
+    expect_error(sample_model(m, chains = 2, chain_id = bad, warmup = 5,
+                              samples = 5, refresh = 0), "chain_id")
+})
+
+test_that("progress and timing report the chain ids in use", {
+  skip_without_runtime()
+  m <- chain_id_model()
+  text <- capture.output(
+    sample_model(m, chains = 2, chain_id = 3, seed = 7, warmup = 2,
+                 samples = 2, init_radius = 0, parallel_chains = 1,
+                 refresh = 1))
+  expect_true(any(grepl("^Chain \\[3\\] Iteration:", text)))
+  expect_true(any(grepl("^Chain \\[4\\] Iteration:", text)))
+  expect_false(any(grepl("^Chain \\[[12]\\] ", text)))
+  expect_true(any(grepl("^Chain \\[4\\] Elapsed Time", text)))
+})
+
+test_that("fixed_param chains follow chain_id", {
+  skip_without_runtime()
+  m <- chain_id_model()
+  together <- sample_model(m, fixed_param = TRUE, chains = 3, seed = 4,
+                           samples = 10, refresh = 0)
+  alone <- sample_model(m, fixed_param = TRUE, chains = 1, chain_id = 3,
+                        seed = 4, samples = 10, refresh = 0)
+  expect_identical(alone$draws[, 1, ], together$draws[, 3, ])
+  expect_identical(alone$chain_id, 3L)
+})
+
+test_that("Pathfinder starts are keyed on the first chain id", {
+  skip_without_runtime()
+  m <- chain_id_model()
+  fit <- sample_model(m, chains = 1, chain_id = 2, seed = 5, warmup = 30,
+                      samples = 10, refresh = 0, pathfinder_init = list())
+  starts <- .Call("stanli_r_pathfinder_inits", m$ptr, 5L, 1L,
+                  unname(stanli:::.pathfinder_init_options(list())), 2L)
+  explicit <- sample_model(m, chains = 1, chain_id = 2, seed = 5, warmup = 30,
+                           samples = 10, refresh = 0, init = starts)
+  expect_identical(fit$draws, explicit$draws)
+})
+
+test_that("sampling never touches the caller's random stream", {
+  skip_without_runtime()
+  m <- chain_id_model()
+  set.seed(21)
+  before <- random_state()
+  sample_model(m, chains = 2, seed = 3, warmup = 10, samples = 5, refresh = 0)
+  sample_model(m, chains = 2, seed = 3, warmup = 10, samples = 5, refresh = 0,
+               pathfinder_init = list())
+  sample_model(m, chains = 2, seed = 3, samples = 5, refresh = 0,
+               fixed_param = TRUE)
+  expect_identical(random_state(), before)
+  without_random_state({
+    sample_model(m, chains = 1, seed = 3, warmup = 10, samples = 5,
+                 refresh = 0)
+    expect_null(random_state())
+  })
 })

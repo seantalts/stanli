@@ -4,7 +4,14 @@
 \alias{unconstrain}
 \title{Starting values on the constrained scale, as the free vector}
 \usage{
-unconstrain(model, values, partial = FALSE, init_radius = 2, seed = NULL)
+unconstrain(
+  model,
+  values,
+  partial = FALSE,
+  init_radius = 2,
+  seed = NULL,
+  ignore_unknown = FALSE
+)
 }
 \arguments{
 \item{model}{A `stanli_model`.}
@@ -21,6 +28,11 @@ unconstrained scale. Only for a list, not a JSON string.}
 
 \item{seed}{Seed for that draw. `NULL` uses, and advances, R's random
 stream; a number leaves the stream untouched.}
+
+\item{ignore_unknown}{`TRUE` drops the entries of a `values` list whose names
+are not declared parameters, as RStan does with transformed parameters,
+generated quantities and other extra entries, instead of refusing them.
+See [parameter_names()]. Only for a list, not a JSON string.}
 }
 \value{
 A numeric vector of length `model$n_unconstrained`.

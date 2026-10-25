@@ -94,9 +94,12 @@ test_that("direct stanfit construction agrees with rstan's CLI CSV import", {
     for (column in seq_along(fit$columns))
       expect_identical(unname(stored[, , column]), unname(fit$draws[, , column]))
     expect_identical(unname(stored[, , "lp__"]), unname(fit$sampler[, , "lp__"]))
-    # Permutations depend on the R seed, not on the sampler seed.
-    expect_identical(actual@sim$permutation, reference@sim$permutation)
-    expect_csv_numbers(rstan::extract(actual), rstan::extract(reference))
+    sorted <- function(draws) lapply(draws, function(x) {
+      x <- as.array(x)
+      if (length(dim(x)) == 1L) return(sort(x))
+      apply(x, seq_along(dim(x))[-1L], sort)
+    })
+    expect_csv_numbers(sorted(rstan::extract(actual)), sorted(rstan::extract(reference)))
     expect_equal(rstan::summary(actual)$summary,
                  rstan::summary(reference)$summary, tolerance = 1e-12)
     expect_equal(rstan::get_sampler_params(actual, inc_warmup = FALSE),
@@ -210,4 +213,39 @@ test_that("shinystan imports a stanfit without compiling a model", {
   fit <- sample_model(es_model(), chains = 4, warmup = 500, samples = 500,
                       refresh = 0)
   expect_s4_class(shinystan::as.shinystan(as_stanfit(fit)), "shinystan")
+})
+
+test_that("a fit started at a later chain id keeps those ids in the stanfit", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  model <- progress_model()
+  fit <- sample_model(model, chains = 2, chain_id = 3, seed = 6, warmup = 20,
+                      samples = 10, refresh = 0)
+  sf <- as_stanfit(fit)
+  expect_identical(vapply(sf@stan_args, function(a) a$chain_id, integer(1)),
+                   3:4)
+  expect_identical(vapply(sf@sim$samples,
+                          function(d) attr(d, "args")$chain_id, integer(1)),
+                   3:4)
+})
+
+test_that("as_stanfit leaves the random stream alone and permutes by seed", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  model <- progress_model()
+  fit <- sample_model(model, chains = 2, seed = 8, warmup = 20, samples = 12,
+                      refresh = 0)
+  set.seed(5)
+  before <- random_state()
+  sf <- as_stanfit(fit)
+  expect_identical(random_state(), before)
+  set.seed(77)
+  runif(3)
+  again <- as_stanfit(fit)
+  expect_identical(sf@sim$permutation, again@sim$permutation)
+  expect_identical(sf@sim$permutation, as_rfit(fit)$rfit_permutation)
+  other <- fit
+  other$seed <- 9
+  expect_false(identical(as_stanfit(other)@sim$permutation,
+                         sf@sim$permutation))
 })

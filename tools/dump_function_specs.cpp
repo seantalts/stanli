@@ -43,6 +43,8 @@ const char* layout(const stanli::FunctionSpec& spec) {
         return "product";
       case stanli::BuiltinShapePolicy::Solve:
         return "solve";
+      case stanli::BuiltinShapePolicy::Ordering:
+        return "ordering";
       case stanli::BuiltinShapePolicy::Elementwise:
         return "elementwise";
     }

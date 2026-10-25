@@ -121,12 +121,12 @@ stanfit_unconstrain_pars <- function(object, pars) {
       (is.null(names(pars)) || anyNA(names(pars)) ||
        any(!nzchar(names(pars))) || anyDuplicated(names(pars)))))
     stop("pars must be a list with unique parameter names", call. = FALSE)
-  declared <- unique(sub("\\..*$", "", .Call("stanli_r_parameter_columns", model$ptr)))
+  declared <- parameter_names(model)
   # RStan's initialization context ignores non-parameter entries, including
   # transformed parameters and GQ returned by constrain_pars().
   values <- pars[intersect(names(pars), declared)]
   # The inverse-transform interpreter accepts flat Stan-order values and owns
-  # the declared shapes. This also avoids the JSON writer's rank-two limit.
+  # the declared shapes.
   values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
   unconstrain(model, values)
 }

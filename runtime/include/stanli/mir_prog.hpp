@@ -111,6 +111,7 @@ inline void check_program_integer_contract(
             value.args[0].lit_i >= -(int64_t)std::numeric_limits<int>::max() &&
             value.args[0].lit_i <= std::numeric_limits<int>::max();
         if (!native_integer && !literal_negation &&
+            spec->builtin()->ordering == BuiltinOrdering::None &&
             policy != BuiltinShapePolicy::Predicate &&
             policy != BuiltinShapePolicy::ShapeQuery &&
             policy != BuiltinShapePolicy::SliceView &&
@@ -2612,6 +2613,18 @@ struct ProgramCompiler {
     for (const mir::Expr& arg : e.args) args.push_back(expr(arg));
     const BuiltinLayout layout = resolved_builtin_layout(e, spec, args);
     Range out = args[layout.result_argument];
+    if (spec.shape == BuiltinShapePolicy::Ordering) {
+      out.kind = ViewKind::Flat;
+      out.rows = out.cols = 0;
+      out.dims.clear();
+      out.leaf = ViewKind::Flat;
+      if (spec.ordering == BuiltinOrdering::Rank) {
+        out.len = 1;
+      } else {
+        out.kind = ViewKind::Array;
+        out.dims = {out.len};
+      }
+    }
     out = typed(out, e.type_);
     std::vector<int> idata;
     if (layout.groups >= 0)
@@ -2627,8 +2640,11 @@ struct ProgramCompiler {
       if (e.args[k].data_only || int_operand(e.args[k]))
         activity &= (uint8_t)~(1u << k);
     }
-    return kernel_call(spec.opcode, args, out, 0, activity, std::move(idata),
-                       {}, e.name);
+    const uint8_t variant =
+        spec.opcode == OP_ORDERING ? static_cast<uint8_t>(spec.ordering) : 0;
+    if (spec.opcode == OP_ORDERING) activity = 0;
+    return kernel_call(spec.opcode, args, out, variant, activity,
+                       std::move(idata), {}, e.name);
   }
 
   static Program::Code integer_instruction(Program::Code code) {

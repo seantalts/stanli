@@ -76,11 +76,16 @@ Extraction, summaries, plots, and ordinary LOO inherit RStan's
   Serialized workers likewise cannot use live handles. No model recompiles
   automatically on loading or conversion.
 
-  Per-chain permutations use R's current RNG, as CSV import does. Set the
-  same R seed before both conversions to compare permuted extraction.
-  Stored draw order is unchanged. Empty variables cannot be inferred from
-  column names and are omitted, as in CSV import. Packages that insist on
-  exact class equality instead of checking inheritance may need adaptation.
+  Per-chain permutations are fixed by the fit's `seed` and do not read or
+  change R's random stream, so permuted extraction gives the same draws in
+  every session. Stored draw order is unchanged. Empty variables cannot be
+  inferred from column names and are omitted, as in CSV import. Packages that
+  insist on exact class equality instead of checking inheritance may need
+  adaptation.
+
+  The converted model reports a model name to `brms`, so `brms` treats the
+  fit as holding a compiled model and does not recompile it with RStan.
+  RStan itself still cannot sample from it.
 
   Install rstan from a CRAN binary on supported macOS/Windows R versions to
   avoid a toolchain. On Linux, provision a compatible binary installation.
