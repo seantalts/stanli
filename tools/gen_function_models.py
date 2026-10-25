@@ -170,6 +170,13 @@ def render():
     for name in ("student_t_qf", "poisson_binomial_lpmf", "poisson_binomial_cdf",
                  "poisson_binomial_lcdf", "poisson_binomial_lccdf", "poisson_binomial_rng"):
         focused[name] = "tests/fixtures/stan240_functions.stan; fresh CmdStan 2.40 references in stan240_references.json.gz"
+    for name in ("sort_asc", "sort_desc", "sort_indices_asc", "sort_indices_desc",
+                 "rank"):
+        focused[name] = (
+            "tests/fixtures/sort_functions.stan; data and parameter inputs in "
+            "transformed data, model, and generated quantities; fresh CmdStan "
+            "2.40 references in sort_references.json.gz"
+        )
     for name in ("to_vector_array", "to_row_vector_array"):
         focused[name] = "tests/fixtures/stan240_containers.stan; rectangular and zero-extent round trips"
     focused["integrate_ode"] = (

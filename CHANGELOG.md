@@ -16,13 +16,16 @@
   elements. A list of matrices is `array[K] matrix[N, M]`, and a list of
   vectors is `array[K] vector[N]`. Before, three-dimensional arrays were
   refused. Arrays with a zero-length extent are written correctly.
-
 - `parameter_names(model)` lists the variables declared in the `parameters`
   block. `scalars = TRUE` gives one name per scalar element, such as
   `"sigma[1]"`.
 - `unconstrain()` takes `ignore_unknown = TRUE` to drop list entries that are
   not declared parameters, such as transformed parameters, instead of
   refusing them. The result is what `sample_model(init = )` takes.
+- `sort_asc`, `sort_desc`, `sort_indices_asc`, `sort_indices_desc` and `rank`
+  run in the runtime. They take `array[] real`, `array[] int`, `vector` and
+  `row_vector`. Parameters pass through `sort_asc` and `sort_desc` with
+  gradients, and `sort_asc` and `sort_desc` reject NaN as Stan Math does.
 
 ### Fixes
 

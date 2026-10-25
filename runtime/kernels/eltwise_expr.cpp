@@ -2,6 +2,7 @@
 // stan-math REV overloads' forward Eigen expressions and their backward
 // accumulation shapes (see constrain.cpp for why: packet math vs libm).
 // Shape dispatch is runtime: len==1 broadcasts.
+#include <stanli/builtin_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/packet.hpp>
@@ -439,6 +440,47 @@ void cumsum_bwd(KernelCtx& ctx) {
   ctx.in_adj[0].data[0] += radj[0];
 }
 
+template <bool Ascending>
+void sort_fwd(KernelCtx& ctx) {
+  const int64_t n = ctx.in[0].len;
+  const double* x = ctx.in[0].data;
+  stan::math::check_not_nan(
+      "sort_asc", "container argument",
+      Eigen::Map<const Eigen::Matrix<double, -1, 1>>(x, n));
+  double* order = ctx.scratch;
+  for (int64_t k = 0; k < n; ++k) order[k] = static_cast<double>(k);
+  std::sort(order, order + n, [x](double i, double j) {
+    const double a = x[static_cast<int64_t>(i)];
+    const double b = x[static_cast<int64_t>(j)];
+    return Ascending ? a < b : a > b;
+  });
+  for (int64_t k = 0; k < n; ++k)
+    ctx.out.data[k] = x[static_cast<int64_t>(order[k])];
+}
+void sort_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
+  const int64_t n = ctx.out.len;
+  const double* order = ctx.scratch;
+  const double* radj = n == 1 ? &ctx.out_adj : ctx.out_adj_vec.data;
+  for (int64_t k = 0; k < n; ++k)
+    ctx.in_adj[0].data[static_cast<int64_t>(order[k])] += radj[k];
+}
+int64_t sort_scratch(const Op& op, const Slot* slots) {
+  return slots[op.in[0]].len;
+}
+
+void ordering_fwd(KernelCtx& ctx) {
+  const double* x = ctx.in[0].data;
+  const std::vector<double> values(x, x + ctx.in[0].len);
+  const int position =
+      ctx.n_in > 1 ? static_cast<int>(std::llround(ctx.in[1].data[0])) : 0;
+  const std::vector<int> result = evaluate_ordering(
+      static_cast<BuiltinOrdering>(ctx.variant), values, position);
+  for (size_t k = 0; k < result.size(); ++k)
+    ctx.out.data[k] = static_cast<double>(result[k]);
+}
+void ordering_bwd(KernelCtx&) {}
+
 // Eigen's packet log, a ulp off libm on some arguments. The matching packet
 // exp is NOT taken: it puts kronecker_gp over its reference gate.
 void logv_fwd(KernelCtx& ctx) { out_a(ctx) = in_a(ctx, 0).log(); }
@@ -759,6 +801,10 @@ void register_eltwise_kernels() {
   register_kernel(OP_EXPV, Kernel{expv_fwd, expv_bwd, nullptr});
   register_kernel(OP_TANHV, Kernel{tanhv_fwd, tanhv_bwd, nullptr});
   register_kernel(OP_CUMSUM, Kernel{cumsum_fwd, cumsum_bwd, nullptr});
+  register_kernel(OP_SORT_ASC, Kernel{sort_fwd<true>, sort_bwd, sort_scratch});
+  register_kernel(OP_SORT_DESC,
+                  Kernel{sort_fwd<false>, sort_bwd, sort_scratch});
+  register_kernel(OP_ORDERING, Kernel{ordering_fwd, ordering_bwd, nullptr});
   register_kernel(OP_LOGV,
                   with_cached_micro(Kernel{logv_fwd, logv_bwd, nullptr},
                                     unary_fn_micro<logv_delta>));

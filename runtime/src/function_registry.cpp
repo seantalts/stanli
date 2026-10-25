@@ -271,6 +271,37 @@ constexpr BuiltinSpec unary_builtin(uint16_t opcode) {
           0x1};
 }
 
+constexpr BuiltinSpec sort_builtin(
+    uint16_t opcode, BuiltinOrdering kind,
+    FunctionArgumentKind element = FunctionArgumentKind::Real) {
+  BuiltinSpec spec{static_cast<uint16_t>(
+                       element == FunctionArgumentKind::Real ? opcode
+                                                             : OP_ORDERING),
+                   1,
+                   {element},
+                   element,
+                   BuiltinShapePolicy::WholeValue,
+                   BuiltinCompatibilityPolicy::LogicalShape,
+                   static_cast<uint8_t>(
+                       element == FunctionArgumentKind::Real ? 0x1 : 0)};
+  spec.ordering = kind;
+  return spec;
+}
+
+constexpr BuiltinSpec ordering_builtin(
+    BuiltinOrdering kind, uint8_t arity,
+    FunctionArgumentKind element = FunctionArgumentKind::Real) {
+  BuiltinSpec spec{OP_ORDERING,
+                   arity,
+                   {element, BuiltinArgumentKind::Integer},
+                   FunctionArgumentKind::Integer,
+                   BuiltinShapePolicy::Ordering,
+                   BuiltinCompatibilityPolicy::LogicalShape,
+                   0};
+  spec.ordering = kind;
+  return spec;
+}
+
 DensitySpec all_integer_spec(int arity, AllIntegerDensity density) {
   DensitySpec spec{OP_ALL_INTEGER_DENSITY, arity, arity};
   spec.fixed_variant = static_cast<uint8_t>(density);
@@ -438,6 +469,23 @@ const std::vector<FunctionSpec>& function_specs() {
     builtin("tanh", unary_builtin(OP_TANHV));
     builtin("cumulative_sum", unary_builtin(OP_CUMSUM));
     builtin("log_softmax", unary_builtin(OP_LOG_SOFTMAX));
+    builtin("sort_asc", sort_builtin(OP_SORT_ASC, BuiltinOrdering::SortAsc));
+    builtin("sort_asc", sort_builtin(OP_SORT_ASC, BuiltinOrdering::SortAsc,
+                                     BuiltinArgumentKind::Integer));
+    builtin("sort_desc", sort_builtin(OP_SORT_DESC, BuiltinOrdering::SortDesc));
+    builtin("sort_desc", sort_builtin(OP_SORT_DESC, BuiltinOrdering::SortDesc,
+                                      BuiltinArgumentKind::Integer));
+    builtin("sort_indices_asc", ordering_builtin(BuiltinOrdering::IndicesAsc, 1));
+    builtin("sort_indices_asc", ordering_builtin(BuiltinOrdering::IndicesAsc, 1,
+                                                 BuiltinArgumentKind::Integer));
+    builtin("sort_indices_desc",
+            ordering_builtin(BuiltinOrdering::IndicesDesc, 1));
+    builtin("sort_indices_desc",
+            ordering_builtin(BuiltinOrdering::IndicesDesc, 1,
+                             BuiltinArgumentKind::Integer));
+    builtin("rank", ordering_builtin(BuiltinOrdering::Rank, 2));
+    builtin("rank", ordering_builtin(BuiltinOrdering::Rank, 2,
+                                     BuiltinArgumentKind::Integer));
     // Whole-container-to-scalar reductions. sum's integer-container overload
     // and prod/min/max's provenance-aware phased lowerings stay outside the
     // registry deliberately.

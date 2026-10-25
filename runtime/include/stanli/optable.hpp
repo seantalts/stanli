@@ -124,6 +124,9 @@ namespace stanli {
   X(OP_TANHV)                         \
   X(OP_TRIGAMMA)                      \
   X(OP_CUMSUM)                        \
+  X(OP_SORT_ASC)                      \
+  X(OP_SORT_DESC)                     \
+  X(OP_ORDERING)                      \
   X(OP_FMA)                           \
   X(OP_ATAN2)                         \
   X(OP_BETA_FN)                       \

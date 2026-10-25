@@ -1754,6 +1754,34 @@ class MirInterp {
       for (size_t i = 0; i < a.r.size(); ++i) o.r[i] = f(a.r[i]);
       return o;
     };
+    if (const BuiltinSpec* ordering =
+            builtin != nullptr && builtin->ordering != BuiltinOrdering::None &&
+                    builtin->result == FunctionArgumentKind::Integer
+                ? builtin
+                : nullptr) {
+      const Value a = eval(e.args[0]);
+      std::vector<double> values;
+      if (a.is_int && !a.i.empty()) {
+        values.assign(a.i.begin(), a.i.end());
+      } else {
+        values.reserve(a.r.size());
+        for (const T& lane : a.r) values.push_back(val(lane));
+      }
+      const int position =
+          ordering->ordering == BuiltinOrdering::Rank ? (int)as_int(e.args[1])
+                                                      : 0;
+      Value o;
+      o.is_int = true;
+      o.i = evaluate_ordering_builtin(*ordering, values, position);
+      o.r.reserve(o.i.size());
+      for (const int value : o.i) o.r.push_back(T((double)value));
+      if (ordering->ordering == BuiltinOrdering::SortAsc ||
+          ordering->ordering == BuiltinOrdering::SortDesc)
+        o.dims = a.dims;
+      else if (ordering->ordering != BuiltinOrdering::Rank)
+        o.dims = {(int64_t)o.i.size()};
+      return o;
+    }
     if (builtin != nullptr &&
         builtin->shape == BuiltinShapePolicy::Elementwise &&
         builtin->result == FunctionArgumentKind::Integer) {

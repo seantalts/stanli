@@ -1165,7 +1165,8 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
     }
   }
   if (auto v = fold_const(e)) return *v;
-  if (shaped_builtin_spec(e.name, e.args.size(), BuiltinShapePolicy::Predicate))
+  if (shaped_builtin_spec(e.name, e.args.size(), BuiltinShapePolicy::Predicate) ||
+      shaped_builtin_spec(e.name, e.args.size(), BuiltinShapePolicy::Ordering))
     return lower_program_expression(e);
   fail("unsupported function " + e.name);
 }
@@ -1847,7 +1848,9 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
 
   if (builtin != nullptr && builtin->arity == 1 &&
       (builtin->shape == BuiltinShapePolicy::Elementwise ||
-       builtin->shape == BuiltinShapePolicy::WholeValue)) {
+       builtin->shape == BuiltinShapePolicy::WholeValue) &&
+      !(builtin->ordering != BuiltinOrdering::None &&
+        builtin->result == FunctionArgumentKind::Integer)) {
     actuals.require_arity(1);
     Val a = actuals.at(0).value();
     const BuiltinLayout resolved =

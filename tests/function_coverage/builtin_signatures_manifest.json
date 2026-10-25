@@ -1,5 +1,5 @@
 {
-  "dumped_registry_name_count": 205,
+  "dumped_registry_name_count": 210,
   "excluded": {
     "arity mismatch": [
       "log10()=>real",
@@ -1856,10 +1856,11 @@
         "pow",
         "quad_form",
         "quad_form_sym",
+        "rank",
         "rep_array"
       ],
-      "source_bytes": 106044,
-      "source_sha256": "0e2cfc5b0fda91d025781c9a6e06c7bf61fb174b67fddfc955f19b4d744708f5"
+      "source_bytes": 105465,
+      "source_sha256": "c4bb4b9f836d5d77536f336ea7ca1fb242c14834ace66472cb02ac7214bdc5f2"
     },
     {
       "case_count": 360,
@@ -1882,15 +1883,19 @@
         "sinh",
         "size",
         "softmax",
-        "sqrt"
+        "sort_asc"
       ],
-      "source_bytes": 98385,
-      "source_sha256": "1e756d906c7dafa93ecf508bc653df2d2d1bbe929a9bd5704706c5b9cdfdccde"
+      "source_bytes": 98229,
+      "source_sha256": "eb13d89ad9ef056ab1a584f90d062dede7c2ec8d3d50cfcddc94acd77985a94b"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_31.stan",
       "functions": [
+        "sort_asc",
+        "sort_desc",
+        "sort_indices_asc",
+        "sort_indices_desc",
         "sqrt",
         "square",
         "squared_distance",
@@ -1899,8 +1904,8 @@
         "step",
         "student_t_qf"
       ],
-      "source_bytes": 110086,
-      "source_sha256": "3d34f8026cbfe65ad75ea47d2e29bd80d694f3ce53ea9c8c7abdf74d942cfbad"
+      "source_bytes": 108047,
+      "source_sha256": "f61b8fa0a3a4737a49bfcc5d0f8734d4042f93ec58d7bc2415059c0ebc7aae06"
     },
     {
       "case_count": 360,
@@ -1908,8 +1913,8 @@
       "functions": [
         "student_t_qf"
       ],
-      "source_bytes": 117981,
-      "source_sha256": "abde0c0c090a24ef3a57a653257df0cec6c8cb59f1843b174bef652e081978ba"
+      "source_bytes": 118173,
+      "source_sha256": "64568ab93dc0d0d12d330c58b83b0fa802f16643231852a7365a0f94dc39c07e"
     },
     {
       "case_count": 360,
@@ -1917,8 +1922,8 @@
       "functions": [
         "student_t_qf"
       ],
-      "source_bytes": 119417,
-      "source_sha256": "8ecedf9542bd5e7387aa9a63421a3a8f9cb005feca7fecfcd12ecd77be7b2f5a"
+      "source_bytes": 119337,
+      "source_sha256": "627cc5a7e653a251b2294d48bb6b3f5f684189f95827f0bc55cfe3ec77a1f534"
     },
     {
       "case_count": 360,
@@ -1926,11 +1931,11 @@
       "functions": [
         "student_t_qf"
       ],
-      "source_bytes": 118969,
-      "source_sha256": "8c245f00e44ba1086e072c2c135c7f9bfa11217a12a4e956de735a447be97aa9"
+      "source_bytes": 119001,
+      "source_sha256": "a84b8d35d2cec408380d8a6259b26323156192128ce7e1ededa3fd4066b58274"
     },
     {
-      "case_count": 325,
+      "case_count": 345,
       "file": "tests/fixtures/builtin_signatures_35.stan",
       "functions": [
         "student_t_qf",
@@ -1957,13 +1962,13 @@
         "zeros_row_vector",
         "zeros_vector"
       ],
-      "source_bytes": 83768,
-      "source_sha256": "74aa694f813627d8741f3cea23502580c5fda6a325133ab220c605474e8f59ad"
+      "source_bytes": 90331,
+      "source_sha256": "5deca03af9aa5ff46fdc20144f934a2485162ce6a630bb47924a2a6a247211ec"
     }
   ],
-  "registry_name_count": 227,
+  "registry_name_count": 232,
   "signature_dump_sha256": "acc42ed71be9740fb5c4b644954c04fa250063f01e81372e8dc1eaeadef5aaee",
   "stanc_build_id": "stanc3 v2.40.0",
-  "tested_case_count": 12565,
-  "tested_signature_count": 7387
+  "tested_case_count": 12585,
+  "tested_signature_count": 7407
 }

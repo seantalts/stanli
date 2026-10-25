@@ -17,8 +17,8 @@ The checked-in conformance baseline
 ([`conformance-baseline.json.gz`](internal/artifacts/conformance-baseline.json.gz))
 was produced with stanc3 2.40.0 (`d58446e6`). It holds 24,291 Stan Math
 signatures and 31 language-construct cases, of which 19,009 are verified
-against CmdStan. A separate generated replay covers 7,387 builtin and 12,131
-density signatures as 66,678 cases across 73 models, including mixed
+against CmdStan. A separate generated replay covers 7,407 builtin and 12,131
+density signatures as 66,698 cases across 73 models, including mixed
 data/parameter arguments.
 
 | family | name metric | verified | unexpected unsupported | generator gaps | inapplicable |

@@ -1326,7 +1326,7 @@ set(STANLI_TESTS
   test_mnc test_stan240
   test_legacy test_eight_schools test_glm test_normal_glm test_nuts test_walnuts test_sexp
   test_model_adapter test_sampler_parity
-  test_mir test_mir_decode test_transforms test_eltwise test_scalar_binary
+  test_mir test_mir_decode test_transforms test_eltwise test_sort test_scalar_binary
   test_lower
   test_lower_views
   test_native_matrix_pullbacks
@@ -1485,6 +1485,15 @@ if(Python3_Interpreter_FOUND)
              --manifest tests/function_coverage/stan240_manifest.json
              --reference tests/function_coverage/stan240_references.json.gz)
   set_tests_properties(test_stan240_reference PROPERTIES
+                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_sort_reference
+           COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
+             --build ${CMAKE_CURRENT_BINARY_DIR}
+             --stanc ${STANLI_STANC_EXECUTABLE}
+             --fixtures tests/fixtures
+             --manifest tests/function_coverage/sort_manifest.json
+             --reference tests/function_coverage/sort_references.json.gz)
+  set_tests_properties(test_sort_reference PROPERTIES
                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_builtin_signature_model_generation
            COMMAND ${Python3_EXECUTABLE}

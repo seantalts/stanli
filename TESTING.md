@@ -114,7 +114,7 @@ The jobs are in [`wheels.yml`](.github/workflows/wheels.yml),
 | [generated conformance sweep](#testing-stan-language-coverage) | 24,322 generated signature and construct cases | reference BridgeStan from the same pins | nightly | operator-only behavior; cases the generator cannot build |
 | [coverage ratchet](#testing-stan-language-coverage) | each generated case's status | the checked-in baseline | nightly | the coverage totals themselves |
 | [integrated function models](#testing-stan-language-coverage) | 10 models using 430 function names, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | every overload of each name |
-| [signature replay](#testing-stan-language-coverage) | 73 generated models covering 19,518 signatures, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | signatures the generators exclude |
+| [signature replay](#testing-stan-language-coverage) | 73 generated models covering 19,538 signatures, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | signatures the generators exclude |
 | [model census](#testing-stan-language-coverage) | the 1,244 files in stanc3's integration tests | a per-model baseline | by hand | numerical agreement unless run with `--differential` |
 | Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly | |
 | [installed clients](#installed-clients) | the built wheel, R package and BridgeStan transport | API tests and R ecosystem consumers; skips fail | PR on Linux and Windows x64; post-merge adds wheel tests on macOS and Linux aarch64 and R tests on macOS arm64 | macOS and aarch64 before merge |
@@ -393,7 +393,7 @@ operators, checked against recorded CmdStan values, gradients and outputs.
 
 CTest also replays 73 generated signature models on every PR
 ([`tools/check_signature_models.py`](tools/check_signature_models.py)): 35
-models cover 7,387 builtin signatures and 38 cover 12,131 density signatures.
+models cover 7,407 builtin signatures and 38 cover 12,131 density signatures.
 Each case reads its own parameter and writes its own output, so a failure
 names the signature. They are compared with recorded CmdStan values at the
 three corpus points under the 1e-9 gate. The manifests in

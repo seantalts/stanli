@@ -85,7 +85,7 @@ def scalar_profile(signature: Signature, descriptor: RegistrySpec) \
             centers = (1, 1)
         else:
             centers = (1,)
-    elif descriptor.layout == "slice_view":
+    elif descriptor.layout in {"slice_view", "ordering"}:
         # Every rendered container has unit extents, so index 1 (and count 1)
         # is the one in-bounds choice for each integer index argument.
         # Container arguments (appends take two) keep their profile centers.
@@ -103,12 +103,12 @@ def scalar_profile(signature: Signature, descriptor: RegistrySpec) \
     data_positions = set(profile_data)
     # Constructor arguments are data by contract: the underlying Stan Math
     # builders take doubles, so every rendered argument must be a literal.
-    # Predicate arguments render as literals too: an integer-typed result
-    # computed from parameter-dependent scalars would drag every context
-    # onto the runtime-control machinery, which the dedicated stress models
-    # cover; this inventory exercises registry dispatch and the shared
-    # evaluator.
-    if descriptor.layout in {"constructor", "predicate"}:
+    # Predicate and ordering arguments render as literals too: an
+    # integer-typed result computed from parameter-dependent scalars would
+    # drag every context onto the runtime-control machinery, which the
+    # dedicated stress models cover; this inventory exercises registry
+    # dispatch and the shared evaluator.
+    if descriptor.layout in {"constructor", "predicate", "ordering"}:
         data_positions.update(range(len(signature.arguments)))
     # Slice indexes must be compile-time integers in the graph and
     # register-machine backends, so render them as literals; container
