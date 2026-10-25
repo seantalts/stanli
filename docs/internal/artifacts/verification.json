@@ -1455,10 +1455,24 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "rbmi_mmrm": {
+  "max_rel": 2.1743569697112637e-16,
+  "max_ulp": 1,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "reductions_allowed": {
   "max_rel": 0.0,
   "max_ulp": 0,
   "n_values": 151,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "reject_udf_data_size": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 2,
   "point": 0,
   "status": "VERIFIED"
  },
@@ -2383,6 +2397,20 @@
   "max_rel": 0.0,
   "max_ulp": 0,
   "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "while_counter_size": {
+  "max_rel": 0.0,
+  "max_ulp": 0,
+  "n_values": 8,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "while_udf_slices": {
+  "max_rel": 1.3664283380001927e-16,
+  "max_ulp": 1,
+  "n_values": 7,
   "point": 0,
   "status": "VERIFIED"
  }

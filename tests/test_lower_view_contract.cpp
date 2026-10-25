@@ -1,12 +1,14 @@
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 
+#include "env_helpers.hpp"
 #include "stdout_capture.hpp"
 
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <fstream>
 #include <optional>
@@ -272,6 +274,54 @@ void test_udf_array_matrix_order() {
     eq("write_array ordered value " + std::to_string(i), values[i],
        want_values[i]);
 }
+
+void test_data_size_effect_runs_once() {
+  auto data = stanli::DataMap::from_json_file(
+      "tests/fixtures/data_size_print_once.json");
+  std::optional<stanli::CompiledModel> model;
+  std::string printed;
+  {
+    stanli_test::StdoutCapture captured;
+    model = stanli::compile_model(
+        slurp("tests/fixtures/data_size_print_once.tmir.sexp"), data);
+    printed = captured.finish();
+  }
+  check(printed == "sizing 3\n",
+        "data size print fires once, got '" + printed + "'");
+  stanli::Executor ex(std::move(model->graph));
+  model->bind(ex);
+  ex.params_data()[0] = 0.5;
+  double grad[1] = {};
+  stanli_test::StdoutCapture captured;
+  ex.gradient(grad);
+  check(captured.finish().empty(), "data size print absent at evaluation");
+}
+
+std::string lower_dump(const std::string& stem, const std::string& dir) {
+  std::filesystem::remove_all(dir);
+  test_setenv("STANLI_DUMP_PASSES", dir.c_str(), 1);
+  auto data = stanli::DataMap::from_json_file(
+      "tests/fixtures/while_fallback_unroll.json");
+  try {
+    stanli::compile_model(slurp("tests/fixtures/" + stem + ".tmir.sexp"), data);
+  } catch (...) {
+    test_unsetenv("STANLI_DUMP_PASSES");
+    throw;
+  }
+  test_unsetenv("STANLI_DUMP_PASSES");
+  return slurp(dir + "/02-log_prob-lower.txt");
+}
+
+void test_while_fallback_leaves_no_trace() {
+  const auto root = std::filesystem::temp_directory_path() / "stanli_while_fb";
+  const std::string looped =
+      lower_dump("while_fallback_unroll", (root / "loop").string());
+  const std::string by_hand =
+      lower_dump("while_fallback_unroll_by_hand", (root / "hand").string());
+  check(!looped.empty() && looped == by_hand,
+        "fallback-unrolled while lowers to the hand-unrolled graph");
+}
+
 }  // namespace
 
 int main() {
@@ -287,6 +337,9 @@ int main() {
   run_case("region array-of-matrix", test_region_array_matrix);
   run_case("zero row ternary", test_zero_row_ternary);
   run_case("UDF array-matrix order", test_udf_array_matrix_order);
+  run_case("data size effect runs once", test_data_size_effect_runs_once);
+  run_case("while fallback leaves no trace",
+           test_while_fallback_leaves_no_trace);
   if (failures == 0) std::printf("test_lower_view_contract OK\n");
   return failures == 0 ? 0 : 1;
 }

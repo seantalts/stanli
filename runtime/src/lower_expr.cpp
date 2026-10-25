@@ -166,10 +166,41 @@ long Lowering::answer_shape_query(const mir::Expr& e, const SlotInfo& si,
   }
 }
 
+static void append_signature(const mir::Expr& e, std::string* out) {
+  *out += '(';
+  *out += std::to_string(static_cast<int>(e.kind));
+  *out += ' ';
+  *out += std::to_string(static_cast<int>(e.fn_lib));
+  *out += ' ';
+  *out += e.name;
+  *out += ' ';
+  *out += std::to_string(e.lit_i);
+  *out += ' ';
+  *out += std::to_string(e.lit);
+  *out += ' ';
+  *out += e.lit_s;
+  for (const auto& a : e.args) append_signature(a, out);
+  *out += ')';
+}
+
+std::string Lowering::expr_signature(const mir::Expr& e) {
+  std::string out;
+  append_signature(e, &out);
+  return out;
+}
+
 long Lowering::eval_int(const mir::Expr& e) {
-  if (expr_effectful(e))
-    fail("effectful expression cannot be used as a compile-time integer",
-         e.raw);
+  if (const unsigned effects = expr_effects(e)) {
+    if (!data_extent_scope || effects != kMessageEffect)
+      fail("effectful expression cannot be used as a compile-time integer",
+           e.raw);
+    std::string key = expr_signature(e);
+    auto memo = data_extent_memo.find(key);
+    if (memo != data_extent_memo.end()) return memo->second;
+    const long value = td.as_int(e);
+    data_extent_memo.emplace(std::move(key), value);
+    return value;
+  }
   switch (e.kind) {
     case mir::Expr::LitInt:
       return e.lit_i;
