@@ -2097,7 +2097,8 @@ jobs:
   pr-gate:
     name: manylinux_2_28_x86_64
     if: always() && github.event_name == 'pull_request'
-    needs: [changes, static_checks, build, windows, browser-compiler, r-tests]
+    needs: [changes, static_checks, build, windows, browser-compiler, r-tests,
+            stanc-windows, windows-compiler]
     runs-on: ubuntu-latest
     steps:
       - name: Verify the required validation path
@@ -2109,6 +2110,8 @@ jobs:
           WINDOWS_RESULT: ${{ needs.windows.result }}
           COMPILER_RESULT: ${{ needs.browser-compiler.result }}
           R_RESULT: ${{ needs.r-tests.result }}
+          STANC_WINDOWS_RESULT: ${{ needs.stanc-windows.result }}
+          WINDOWS_COMPILER_RESULT: ${{ needs.windows-compiler.result }}
         run: |
           test "$CHANGE_RESULT" = success
           test "$STATIC_RESULT" = success
@@ -2117,12 +2120,16 @@ jobs:
             test "$WINDOWS_RESULT" = success
             test "$COMPILER_RESULT" = success
             test "$R_RESULT" = success
+            test "$STANC_WINDOWS_RESULT" = success
+            test "$WINDOWS_COMPILER_RESULT" = success
           else
             test "$HEAVY" = false
             test "$BUILD_RESULT" = skipped
             test "$WINDOWS_RESULT" = skipped
             test "$COMPILER_RESULT" = skipped
             test "$R_RESULT" = skipped
+            test "$STANC_WINDOWS_RESULT" = skipped
+            test "$WINDOWS_COMPILER_RESULT" = skipped
           fi
 
   # The public demo: web/ plus the runtime and compiler artifacts, deployed
