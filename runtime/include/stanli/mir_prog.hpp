@@ -2640,9 +2640,8 @@ struct ProgramCompiler {
       if (e.args[k].data_only || int_operand(e.args[k]))
         activity &= (uint8_t)~(1u << k);
     }
-    const uint8_t variant = spec.opcode == OP_ORDERING
-                                ? static_cast<uint8_t>(spec.ordering)
-                                : 0;
+    const uint8_t variant =
+        spec.opcode == OP_ORDERING ? static_cast<uint8_t>(spec.ordering) : 0;
     if (spec.opcode == OP_ORDERING) activity = 0;
     return kernel_call(spec.opcode, args, out, variant, activity,
                        std::move(idata), {}, e.name);

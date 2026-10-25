@@ -45,7 +45,8 @@ void check_sort_gradient(const std::string& tag, uint16_t opcode,
   g.result_slot = lp;
   const stanli::testutil::Fills fills = {{ws, w}};
   const auto got = stanli::testutil::run_grad(
-      std::move(g), fills, [&](int64_t i) { return x[static_cast<size_t>(i)]; });
+      std::move(g), fills,
+      [&](int64_t i) { return x[static_cast<size_t>(i)]; });
 
   stan::math::nested_rev_autodiff scope;
   Eigen::Matrix<var, -1, 1> v(static_cast<Eigen::Index>(n));
@@ -54,7 +55,8 @@ void check_sort_gradient(const std::string& tag, uint16_t opcode,
       ascending ? Eigen::Matrix<var, -1, 1>(stan::math::sort_asc(v))
                 : Eigen::Matrix<var, -1, 1>(stan::math::sort_desc(v));
   var total = 0;
-  for (size_t k = 0; k < n; ++k) total += s(static_cast<Eigen::Index>(k)) * w[k];
+  for (size_t k = 0; k < n; ++k)
+    total += s(static_cast<Eigen::Index>(k)) * w[k];
   total.grad();
 
   expect(got[0] == total.val(), tag + " lp");
@@ -155,7 +157,9 @@ void check_empty() {
 
 int main() {
   const std::vector<std::vector<double>> inputs = {
-      {0.5}, {2.0, -1.0}, {0.5, -1.2, 2.0, 0.3, 1.1},
+      {0.5},
+      {2.0, -1.0},
+      {0.5, -1.2, 2.0, 0.3, 1.1},
       {2.0, 1.0, 2.0, 0.0, 1.0, 2.0}};
   for (const auto& x : inputs) {
     const std::string n = std::to_string(x.size());

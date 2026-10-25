@@ -274,16 +274,15 @@ constexpr BuiltinSpec unary_builtin(uint16_t opcode) {
 constexpr BuiltinSpec sort_builtin(
     uint16_t opcode, BuiltinOrdering kind,
     FunctionArgumentKind element = FunctionArgumentKind::Real) {
-  BuiltinSpec spec{static_cast<uint16_t>(
-                       element == FunctionArgumentKind::Real ? opcode
-                                                             : OP_ORDERING),
-                   1,
-                   {element},
-                   element,
-                   BuiltinShapePolicy::WholeValue,
-                   BuiltinCompatibilityPolicy::LogicalShape,
-                   static_cast<uint8_t>(
-                       element == FunctionArgumentKind::Real ? 0x1 : 0)};
+  BuiltinSpec spec{
+      static_cast<uint16_t>(
+          element == FunctionArgumentKind::Real ? opcode : OP_ORDERING),
+      1,
+      {element},
+      element,
+      BuiltinShapePolicy::WholeValue,
+      BuiltinCompatibilityPolicy::LogicalShape,
+      static_cast<uint8_t>(element == FunctionArgumentKind::Real ? 0x1 : 0)};
   spec.ordering = kind;
   return spec;
 }
@@ -475,7 +474,8 @@ const std::vector<FunctionSpec>& function_specs() {
     builtin("sort_desc", sort_builtin(OP_SORT_DESC, BuiltinOrdering::SortDesc));
     builtin("sort_desc", sort_builtin(OP_SORT_DESC, BuiltinOrdering::SortDesc,
                                       BuiltinArgumentKind::Integer));
-    builtin("sort_indices_asc", ordering_builtin(BuiltinOrdering::IndicesAsc, 1));
+    builtin("sort_indices_asc",
+            ordering_builtin(BuiltinOrdering::IndicesAsc, 1));
     builtin("sort_indices_asc", ordering_builtin(BuiltinOrdering::IndicesAsc, 1,
                                                  BuiltinArgumentKind::Integer));
     builtin("sort_indices_desc",

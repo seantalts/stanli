@@ -1767,9 +1767,9 @@ class MirInterp {
         values.reserve(a.r.size());
         for (const T& lane : a.r) values.push_back(val(lane));
       }
-      const int position =
-          ordering->ordering == BuiltinOrdering::Rank ? (int)as_int(e.args[1])
-                                                      : 0;
+      const int position = ordering->ordering == BuiltinOrdering::Rank
+                               ? (int)as_int(e.args[1])
+                               : 0;
       Value o;
       o.is_int = true;
       o.i = evaluate_ordering_builtin(*ordering, values, position);
