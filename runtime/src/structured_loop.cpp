@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #if defined(__APPLE__)
@@ -1668,6 +1669,7 @@ void reserve_remaining_trips(Stream& st, const RecordingPoolSizes& before,
 }
 
 #include "structured_recording.inc"
+#include "structured_memo.inc"
 
 struct Execution {
   const StructuredLoop& p;
@@ -1677,6 +1679,29 @@ struct Execution {
   std::unique_ptr<RecordingProgram> recording[2];
   int recording_enabled = -1;
   Flow recording_forward(const Node& root, size_t which);
+  static constexpr size_t no_memo = std::numeric_limits<size_t>::max();
+  template <bool Trace>
+  size_t dispatch(RecordingProgram& program, size_t pc, size_t stop,
+                  DataLoopTrace* trace);
+  size_t memo_enter(RecordingProgram& program, size_t pc);
+  bool memo_key(RecordingProgram& program, const DataLoopCandidate& candidate);
+  void memo_replay(RecordingProgram& program, const DataLoopMemo& memo);
+  void run_step(RecordingProgram& program, size_t pc);
+  void trace_inputs(RecordingProgram& program, DataLoopTrace& trace,
+                    const Op& op);
+  void trace_condition(RecordingProgram& program, DataLoopTrace& trace,
+                       int slot);
+  void trace_stepped(RecordingProgram& program, DataLoopTrace& trace, int slot);
+  void trace_bump(DataLoopTrace& trace, int loop);
+  void trace_cells(RecordingProgram& program, DataLoopTrace& trace,
+                   const Node& n, int slot);
+  void trace_bound(RecordingProgram& program, DataLoopTrace& trace, int slot);
+  void trace_unbound(RecordingProgram& program, int slot);
+  void trace_capture(RecordingProgram& program, DataLoopTrace& trace, int slot,
+                     int64_t length);
+  void trace_kernel(RecordingProgram& program, DataLoopTrace& trace, size_t pc);
+  void trace_alias(RecordingProgram& program, DataLoopTrace& trace, size_t pc);
+  void trace_target(RecordingProgram& program, DataLoopTrace& trace, size_t pc);
 
   double* value(int slot) const {
     return s.versions[static_cast<size_t>(s.bindings[slot])].value;
@@ -2372,14 +2397,24 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
       emit_diagnostic("stanli_structured compiled_recording: instructions=" +
                       std::to_string(owned->code.size()));
   }
-  auto& program = *owned;
-  size_t pc = 0;
-  while (pc < program.code.size()) {
+  const size_t pc = dispatch<false>(*owned, 0, 0, nullptr);
+  return pc == RecordingProgram::exit_break      ? Break
+         : pc == RecordingProgram::exit_continue ? Continue
+                                                 : Normal;
+}
+
+template <bool Trace>
+size_t Execution::dispatch(RecordingProgram& program, size_t pc, size_t stop,
+                           DataLoopTrace* trace) {
+  const size_t end = Trace ? stop : program.code.size();
+  while (pc < end) {
     auto& instruction = program.code[pc];
+    if constexpr (Trace) ++trace->executed;
     switch (instruction.kind) {
       case RecordingProgram::DataKernel: {
         const Node& n = *instruction.node;
         const auto& op = p.body.ops[n.op];
+        if constexpr (Trace) trace_inputs(program, *trace, op);
         auto& context = s.ctx[n.site];
         for (int k = 0; k < op.n_in; ++k) context.in[k].data = value(op.in[k]);
         n.forward(context);
@@ -2390,6 +2425,7 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
           s.versions[static_cast<size_t>(version)].constant = 1;
           instruction.jump = 1;
         }
+        if constexpr (Trace) trace_cells(program, *trace, n, op.out);
         ++pc;
         break;
       }
@@ -2397,6 +2433,7 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
       case RecordingProgram::DataBranch: {
         const Node& n = *instruction.node;
         const auto& op = p.body.ops[n.op];
+        if constexpr (Trace) trace_inputs(program, *trace, op);
         auto& context = s.ctx[n.site];
         for (int k = 0; k < op.n_in; ++k) context.in[k].data = value(op.in[k]);
         n.forward(context);
@@ -2407,12 +2444,14 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
           s.versions[static_cast<size_t>(version)].constant = 1;
           instruction.kind = RecordingProgram::DataBranch;
         }
+        if constexpr (Trace) trace_cells(program, *trace, n, op.out);
         pc = context.out.data[0] != 0.0 ? pc + 2 : instruction.jump;
         break;
       }
       case RecordingProgram::DataIndex: {
         const Node& n = *instruction.node;
         const auto& op = p.body.ops[n.op];
+        if constexpr (Trace) trace_inputs(program, *trace, op);
         auto& context = s.ctx[n.site];
         for (int k = 0; k < op.n_in; ++k) context.in[k].data = value(op.in[k]);
         if (!instruction.jump) {
@@ -2440,28 +2479,40 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
           context.out.data[0] = context.in[0].data[position];
         }
         ++s.effects;
+        if constexpr (Trace) trace_cells(program, *trace, n, op.out);
         ++pc;
         break;
       }
       case RecordingProgram::Kernel:
-        execute_kernel(*instruction.node);
+        if constexpr (Trace)
+          trace_kernel(program, *trace, pc);
+        else
+          execute_kernel(*instruction.node);
         ++pc;
         break;
       case RecordingProgram::Alias:
-        execute_alias(*instruction.node);
+        if constexpr (Trace)
+          trace_alias(program, *trace, pc);
+        else
+          execute_alias(*instruction.node);
         ++pc;
         break;
       case RecordingProgram::Target:
-        execute_target(*instruction.node);
+        if constexpr (Trace)
+          trace_target(program, *trace, pc);
+        else
+          execute_target(*instruction.node);
         ++pc;
         break;
       case RecordingProgram::Leaf:
+        if constexpr (Trace) trace->ok = false;
         (void)run(*instruction.node);
         ++pc;
         break;
       case RecordingProgram::Branch:
       case RecordingProgram::WhileTest: {
         const Node& n = *instruction.node;
+        if constexpr (Trace) trace_condition(program, *trace, n.condition);
         const double* condition = value(n.condition);
         const bool taken = condition[0] != 0.0;
         if (s.building && !is_const(s.bindings[n.condition]))
@@ -2469,9 +2520,19 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
         pc = taken ? pc + 1 : instruction.jump;
         break;
       }
+      case RecordingProgram::MemoForEnter:
+        if constexpr (!Trace) {
+          const size_t next = memo_enter(program, pc);
+          if (next != no_memo) {
+            pc = next;
+            break;
+          }
+        }
+        [[fallthrough]];
       case RecordingProgram::ForEnter: {
         const Node& n = *instruction.node;
         ++s.loop_generation[n.loop_index];
+        if constexpr (Trace) trace_bump(*trace, n.loop_index);
         const double lo = value(n.lower)[0], hi = value(n.upper)[0];
         if (!std::isfinite(lo) || !std::isfinite(hi) || std::trunc(lo) != lo ||
             std::trunc(hi) != hi || lo < std::numeric_limits<int32_t>::min() ||
@@ -2485,10 +2546,15 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
         cursor.iteration = 0;
         cursor.constant =
             is_const(s.bindings[n.lower]) && is_const(s.bindings[n.upper]);
+        if constexpr (Trace) {
+          trace_condition(program, *trace, n.lower);
+          trace_condition(program, *trace, n.upper);
+        }
         if (s.building && !cursor.constant)
           log_guard_for(value(n.lower), value(n.upper), lo, hi);
         if (cursor.count) {
           bind_iterator(n, lo, cursor.constant);
+          if constexpr (Trace) trace_cells(program, *trace, n, n.iterator);
           ++pc;
         } else {
           pc = instruction.jump;
@@ -2501,6 +2567,7 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
         if (++cursor.iteration < cursor.count) {
           bind_iterator(n, cursor.lower + static_cast<double>(cursor.iteration),
                         cursor.constant);
+          if constexpr (Trace) trace_cells(program, *trace, n, n.iterator);
           pc = instruction.jump;
         } else {
           ++pc;
@@ -2515,14 +2582,25 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
         if (++cursor.iteration < cursor.count) {
           s.workspace[n.workspace] =
               cursor.lower + static_cast<double>(cursor.iteration);
+          if constexpr (Trace) trace_cells(program, *trace, n, n.iterator);
           pc = instruction.jump;
         } else {
           ++pc;
         }
         break;
       }
+      case RecordingProgram::MemoWhileEnter:
+        if constexpr (!Trace) {
+          const size_t next = memo_enter(program, pc);
+          if (next != no_memo) {
+            pc = next;
+            break;
+          }
+        }
+        [[fallthrough]];
       case RecordingProgram::WhileEnter:
         ++s.loop_generation[instruction.node->loop_index];
+        if constexpr (Trace) trace_bump(*trace, instruction.node->loop_index);
         ++pc;
         break;
       case RecordingProgram::ExitJump:
@@ -2533,10 +2611,10 @@ Execution::Flow Execution::recording_forward(const Node& root, size_t which) {
         break;
     }
   }
-  return pc == RecordingProgram::exit_break      ? Break
-         : pc == RecordingProgram::exit_continue ? Continue
-                                                 : Normal;
+  return pc;
 }
+
+#include "structured_memo_run.inc"
 
 void collect_live_ranges(LoopState& s, Stream& st,
                          std::vector<std::pair<const double*, int64_t>>& live) {
@@ -3429,6 +3507,38 @@ void structured_loop_forward(KernelCtx& ctx) {
                             instruction.jump != 0;
         }
       }
+      size_t memo_candidates = 0, memo_invariants = 0, memo_hits = 0,
+             memo_misses = 0, memo_aborted = 0, memo_skipped = 0,
+             memo_events = 0, memo_bytes = 0;
+      for (const auto& program : e.recording) {
+        if (!program) continue;
+        for (const auto& candidate : program->candidates) {
+          ++memo_candidates;
+          memo_invariants += candidate.invariants.size();
+          memo_hits += candidate.hits;
+          memo_misses += candidate.misses;
+          memo_aborted += candidate.aborted;
+          memo_skipped += candidate.skipped;
+          memo_events += candidate.events;
+          for (const auto& bucket : candidate.memos)
+            for (const auto& memo : bucket.second)
+              memo_bytes +=
+                  sizeof(DataLoopMemo) +
+                  memo->key.capacity() * sizeof(uint64_t) +
+                  (memo->events.capacity() + memo->finals.capacity()) *
+                      sizeof(DataLoopMemo::Event) +
+                  memo->pool.capacity() * sizeof(double);
+        }
+      }
+      emit_diagnostic("stanli_structured data_loop_memo: memo_candidates=" +
+                      std::to_string(memo_candidates) +
+                      " memo_invariants=" + std::to_string(memo_invariants) +
+                      " memo_hits=" + std::to_string(memo_hits) +
+                      " memo_misses=" + std::to_string(memo_misses) +
+                      " memo_aborted=" + std::to_string(memo_aborted) +
+                      " memo_skipped=" + std::to_string(memo_skipped) +
+                      " memo_events=" + std::to_string(memo_events) +
+                      " memo_bytes=" + std::to_string(memo_bytes));
       emit_diagnostic("stanli_structured recording_proofs: data_kernels=" +
                       std::to_string(spans) +
                       " data_published=" + std::to_string(published) +
