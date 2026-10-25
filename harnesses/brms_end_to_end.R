@@ -12,6 +12,7 @@
 # Beside OUT.tsv it writes OUT.summaries.rds: per model, the posterior mean,
 # standard deviation and Monte Carlo standard error of every variable, for
 # comparing two backends (harnesses/brms_compare_backends.R).
+# BRMS_E2E_SEED sets the sampler seed (default 20261009).
 # BRMS_E2E_SHARD=k/n runs every n-th case starting at the k-th, so a backend
 # that compiles each model can be spread over processes.
 #
@@ -27,6 +28,7 @@ only <- if (length(args) >= 3) args[3] else "."
 chains <- 4L
 iter <- 2000L
 shard <- as.integer(strsplit(Sys.getenv("BRMS_E2E_SHARD", "1/1"), "/")[[1L]])
+seed <- as.integer(Sys.getenv("BRMS_E2E_SEED", "20261009"))
 seen <- 0L
 summaries <- list()
 
@@ -44,7 +46,7 @@ case <- function(slug, ...) {
   if ((seen - 1L) %% shard[2L] != shard[1L] - 1L) return(invisible())
   args <- list(...)
   fit_args <- c(args, list(backend = backend, chains = chains, iter = iter,
-                           seed = 20261009L, silent = 2, refresh = 0))
+                           seed = seed, silent = 2, refresh = 0))
   warned <- character()
   started <- Sys.time()
   fit <- withCallingHandlers(
