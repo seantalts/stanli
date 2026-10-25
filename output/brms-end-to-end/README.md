@@ -24,14 +24,40 @@ brms, one commit on brms's current master; it is not in any brms release.
   converge with either), 7 only with stanli and 5 only with cmdstanr. Of
   those twelve, ten are between 1.01 and 1.04. The other two are stanli's
   `sw_re_pois` (1.20) and `s2_categorical_re` (1.11), each with one chain
-  stuck at this seed. Over six other seeds both backends gave rhat between
-  1.002 and 1.026 on both models, with similar divergence counts. The data
-  are 40 simulated rows; the comparison says nothing about these models.
+  stuck at this seed. The data are 40 simulated rows; the comparison says
+  nothing about these models. The seed rerun below shows the twelve
+  one-sided models miss the bar about as often with either backend.
 - `summary()`, `as_draws_df()`, `posterior_predict()` and `log_lik()` succeed
   or fail the same way with both backends on every model. The failures are
   brms's own: a custom family without R functions, `posterior_predict()` for
   `cox`, a missing optional package, `posterior_predict()` without `resp` for
   a multivariate model with `subset`.
+
+## Seed rerun
+
+The twelve models that exceeded rhat 1.01 with only one backend were fitted
+again with seeds 1 to 8 on both backends (`BRMS_E2E_SEED`), 96 runs each.
+`seeds.tsv` has every run.
+
+| model | stanli runs ≥ 1.01 | stanli max rhat | cmdstanr runs ≥ 1.01 | cmdstanr max rhat |
+| --- | ---: | ---: | ---: | ---: |
+| `s2_categorical_re` | 1 | 1.011 | 0 | 1.008 |
+| `s2_gr_by` | 1 | 1.123 | 1 | 1.018 |
+| `s2_me2` | 6 | 1.019 | 6 | 1.017 |
+| `s2_me2_nomecor` | 4 | 1.020 | 4 | 1.024 |
+| `s2_mv_shared_re` | 0 | 1.005 | 2 | 1.022 |
+| `s2_weights_trunc` | 1 | 1.015 | 4 | 1.021 |
+| `sw_arma` | 5 | 1.043 | 5 | 1.054 |
+| `sw_exgaussian` | 3 | 1.055 | 2 | 1.016 |
+| `sw_re_pois` | 0 | 1.009 | 2 | 1.026 |
+| `sw_spline_s` | 3 | 1.025 | 4 | 1.055 |
+| `sw_spline_t2` | 0 | 1.006 | 0 | 1.007 |
+| `sw_trunc` | 5 | 1.019 | 2 | 1.015 |
+| all | 29 of 96 | | 32 of 96 | |
+
+No model converges with one backend and fails with the other across seeds.
+The largest difference, `sw_trunc` at 5 against 2 of 8, is within what
+chance gives for two samplers with the same failure rate.
 
 What this does not show: agreement beyond posterior means; any formula not in
 the list; any platform but macOS on Apple silicon. The previous recording
@@ -45,6 +71,7 @@ the list; any platform but macOS on Apple silicon. The previous recording
   succeeded.
 - `compare.tsv`: from `harnesses/brms_compare_backends.R`, with stanli as `a`
   and cmdstanr as `b`.
+- `seeds.tsv`: the seed rerun, one row per backend, seed and model.
 - `manifest.json`.
 
 The seconds are not a benchmark. cmdstanr's include compiling each model, and
@@ -58,6 +85,7 @@ For scale only: 158 seconds in total for stanli (median 0.3 per model) and
 Rscript harnesses/brms_end_to_end.R stanli stanli.tsv
 Rscript harnesses/brms_end_to_end.R cmdstanr cmdstanr.tsv   # needs CmdStan
 Rscript harnesses/brms_compare_backends.R stanli.tsv cmdstanr.tsv compare.tsv
+BRMS_E2E_SEED=3 Rscript harnesses/brms_end_to_end.R stanli seed3.tsv '^sw_trunc$'
 ```
 
 The cmdstanr run here was split with `BRMS_E2E_SHARD=k/8` and the eight tables
