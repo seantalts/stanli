@@ -180,6 +180,11 @@ jobs:
         shell: msys2 {0}
         run: python tools/probe_windows_exceptions.py embedded
 
+      - name: Compare embedding with dynamic C++ libraries
+        if: failure() && matrix.os == 'windows-latest'
+        shell: msys2 {0}
+        run: python tools/probe_windows_exceptions.py embedded-dynamic
+
       - name: Compare without embedding after test failure
         if: failure() && matrix.os == 'windows-latest'
         shell: msys2 {0}
@@ -188,6 +193,11 @@ jobs:
           cmake -B build -DSTANLI_STANC_EMBED_OBJ= -DSTANLI_OCAML_STDLIB=
           cmake --build build --target stanli_check --parallel "$(stanli_detect_build_jobs)"
           python tools/probe_windows_exceptions.py external
+
+      - name: Compare without embedding with static C++ libraries
+        if: failure() && matrix.os == 'windows-latest'
+        shell: msys2 {0}
+        run: python tools/probe_windows_exceptions.py external-static
 
       - uses: actions/upload-artifact@v4
         if: failure() && matrix.os == 'windows-latest'

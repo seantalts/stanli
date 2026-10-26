@@ -3,6 +3,7 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -26,13 +27,24 @@ def main():
     data = out / "nonfinite.json"
     data.write_text('{"N": Infinity}', encoding="utf-8")
     binary = Path("build/stanli_check.exe").resolve()
+    if args.stage == "embedded-dynamic":
+        link = Path("build/CMakeFiles/stanli_check.dir/link.txt")
+        link.write_text(re.sub(r"(?<!\S)-static(?!\S)", "", link.read_text()))
+        subprocess.run(["cmake", "-E", "cmake_link_script",
+                        "CMakeFiles/stanli_check.dir/link.txt", "--verbose=1"],
+                       cwd="build", check=True)
+    elif args.stage == "external-static":
+        subprocess.run(["cmake", "-B", "build",
+                        "-DCMAKE_EXE_LINKER_FLAGS=-static"], check=True)
+        subprocess.run(["cmake", "--build", "build", "--target", "stanli_check"],
+                       check=True)
     compiler = Path("probe-compilers/stanli-compile.exe").resolve()
     if not compiler.exists():
         compiler = Path("probe-compilers/stanli-compile").resolve()
     stock = Path("deps/stanc3/stanc.exe").resolve()
     if not stock.exists():
         stock = Path("deps/stanc3/stanc").resolve()
-    if args.stage == "external":
+    if args.stage.startswith("external"):
         shutil.copy2(compiler, binary.parent / "stanli-compile.exe")
     cases = [
         ("nonfinite", Path("tests/lit/issue_320/nonfinite_int_data_rejected.stan"),
