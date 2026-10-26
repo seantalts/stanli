@@ -431,9 +431,7 @@ and <!--gen:fast_ge_hundred-->8<!--/gen--> at least 100x. The large gains are mo
 the data: fast mode evaluates it once per distinct row or group. The geometric
 mean is <!--gen:fast_geomean-->1.92x<!--/gen--> faster.
 
-- Against CmdStan, the geometric-mean speedup goes from <!--gen:fast_cmdstan_default-->2.24x<!--/gen--> in default
-  mode to <!--gen:fast_cmdstan_fast-->4.28x<!--/gen--> in fast mode. Fast mode beats
-  CmdStan on <!--gen:fast_beats_fast-->334<!--/gen--> models, default mode on <!--gen:fast_beats_default-->328<!--/gen-->.
+- Fast mode beats CmdStan on <!--gen:fast_beats_fast-->334<!--/gen--> models, default mode on <!--gen:fast_beats_default-->328<!--/gen-->.
 - In fast mode, <!--gen:fast_slowest-->the slowest model, `s2_invgaussian`, is 1.06x slower.<!--/gen-->
 
 The largest gains, gradient time in microseconds:
