@@ -69,14 +69,21 @@ in documentation directories.
 
 ### Compiler diagnostics
 
-Fix compiler errors and warnings encountered in the affected builds, including
-pre-existing diagnostics. Before proposing or merging a code change, rebuild
-the affected targets and inspect the complete compiler output. Force those
-targets to recompile when cached objects would hide diagnostics, and repeat
-the build after fixes to verify that the errors and warnings are gone. Do not
+Fix compiler errors and warnings caused by project-owned code or build
+configuration, including pre-existing diagnostics. Before proposing or merging
+a code change, rebuild the affected targets and inspect the complete compiler
+output. Force those targets to recompile when cached objects would hide
+diagnostics, and repeat the build after fixes to verify the result. Do not
 silence warnings, lower warning levels, or ignore a failing compiler to obtain
-a green result. Report any diagnostic that cannot be resolved as unfinished
-validation; do not describe that build as clean.
+a green result. Report unresolved project diagnostics as unfinished validation.
+
+Warnings originating in third-party dependency source do not need to be fixed
+and are not merge blockers on their own. Record their provenance separately;
+do not describe a build containing them as warning-free. Avoid local patches
+to dependencies. Prefer supported dependency versions, upstream fixes, or
+changes to our own integration when a dependency causes a build failure or a
+demonstrated correctness or compatibility problem. Do not expand a task into
+dependency warning cleanup.
 
 ### Compiler-pipeline performance
 
@@ -116,6 +123,18 @@ diagnosis and portability coverage without duplicating the PR numerical
 oracle. Run the relevant focused or post-submit check before landing when a
 change specifically needs that evidence; do not add every broad sweep to
 every PR. Preserve release validation dependencies.
+
+Pull requests do not edit `CHANGELOG.md`. The release commit writes the
+release's entry from the pull requests merged since the previous tag (see
+[`RELEASING.md`](RELEASING.md)), so describe user-visible changes in the
+pull request body.
+
+Before pushing, run `tools/format.sh --check` with the clang-format version
+`lint.yml` pins, and the tests for what changed. R interface changes also
+need the relevant R tests with `STANLI_RUN`. Open the pull request with auto-merge on
+(`gh pr merge --auto --merge`): the required `manylinux_2_28_x86_64` gate
+waits for the required build, interface and compiler checks, and branch
+protection also requires `format`.
 
 [`TESTING.md`](TESTING.md) documents the actual numerical gates, exceptions,
 and CI coverage; [`docs/benchmarks.md`](docs/benchmarks.md#how-we-measure)

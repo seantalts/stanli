@@ -722,8 +722,8 @@ Stan language sweep runnable locally; see
 On Windows, run `bash tools/dev_setup.sh` from Git Bash or MSYS2 Bash.
 Setup reuses the installation providing `pacman` on `PATH`, or checks
 `C:/msys64` and installs `MSYS2.MSYS2` with winget if absent. It prepends
-the UCRT64 directories on x86_64, or the CLANGARM64 directories on ARM64,
-to `PATH`. Pacman provides Git, Python, make, Clang and CMake, and a
+the CLANG64 directories on x86_64, or the CLANGARM64 directories on ARM64,
+to `PATH`. Pacman provides Git, Python, make, Clang, LLD and CMake, and a
 missing opam comes from winget. Windows ARM64 needs `--no-embed` because
 its OCaml compiler runs under x64 emulation while the runtime is native
 ARM64. MinGW `RelWithDebInfo` builds use `-g1` to keep objects and

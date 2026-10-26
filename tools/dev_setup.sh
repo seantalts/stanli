@@ -13,7 +13,7 @@
 #
 # Core needs: git, curl, python3 (or python), and opam (the OCaml 5.5.0 switch for the
 # pinned stanc is built automatically). The default C++ build additionally
-# needs CMake plus clang/clang++. Windows uses MSYS2's UCRT64 libraries on
+# needs CMake plus clang/clang++. Windows uses MSYS2's CLANG64 libraries on
 # x86_64 and CLANGARM64 on ARM64.
 # Windows: run from Git Bash or MSYS2 Bash; setup uses winget and pacman.
 # --corpus adds: ~2 GB of checkouts under deps/ and a CmdStan build.
