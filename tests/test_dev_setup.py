@@ -168,6 +168,31 @@ echo library > build-rel/libstanli.so
         self.assertIn("Rerun with --no-embed", result.stderr)
         self.assertFalse(self.log.exists())
 
+    def test_windows_uses_matching_clang_environment(self):
+        self.script("msys/usr/bin/pacman", "true\n")
+        self.script("msys/usr/bin/pacman.exe", "true\n")
+        for name in ("lld", "python"):
+            self.script("fake-bin/" + name, "true\n")
+        for environment in ("ucrt64", "clang64", "clangarm64"):
+            for compiler in ("clang", "clang++"):
+                self.script(f"msys/{environment}/bin/{compiler}",
+                            f"echo {environment}\n")
+        self.env["PATH"] = (str(self.root / "msys/usr/bin") + os.pathsep
+                            + self.env["PATH"])
+        for architecture, expected in ((9, "clang64"), (12, "clangarm64")):
+            with self.subTest(architecture=architecture):
+                self.script("fake-bin/powershell.exe",
+                            f"echo {architecture}\n")
+                result = subprocess.run([
+                    self.bash, "-c",
+                    'set -eu; WANT_EMBED=0; '
+                    'have() { command -v "$1" >/dev/null 2>&1; }; '
+                    'source tools/dev_setup_windows.sh; clang++ --version'
+                ], cwd=self.root, env=self.env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0,
+                                 result.stdout + result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
+
 
 if __name__ == "__main__":
     unittest.main()
