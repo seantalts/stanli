@@ -15,6 +15,7 @@ struct DataLoopMemo {
   };
   std::vector<uint64_t> key;
   std::vector<Event> events, finals;
+  std::vector<int32_t> disowned;
   std::vector<double> pool;
   uint64_t skipped_effects = 0;
   bool usable = false;
@@ -42,6 +43,7 @@ struct DataLoopTrace {
   std::vector<uint32_t> cells;
   std::vector<const StructuredLoop::Node*> written;
   std::unordered_set<const StructuredLoop::Node*> seen;
+  std::unordered_set<int> disowned;
   uint64_t effects_start = 0, step_effects = 0;
   size_t executed = 0;
 

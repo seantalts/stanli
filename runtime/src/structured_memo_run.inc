@@ -156,6 +156,8 @@ void Execution::trace_alias(RecordingProgram& program, DataLoopTrace& trace,
     pure = false;
   }
   if (pure) {
+    if (!program.memo_bound[n.src] && trace.disowned.insert(n.src).second)
+      trace.memo->disowned.push_back(n.src);
     execute_alias(n);
     trace_bound(program, trace, n.dst);
     return;
@@ -218,6 +220,8 @@ void Execution::memo_replay(RecordingProgram& program,
         break;
     }
   };
+  for (int32_t slot : memo.disowned)
+    s.versions[static_cast<size_t>(s.bindings[slot])].owner = -1;
   for (const auto& e : memo.events) apply(e);
   for (const auto& e : memo.finals) apply(e);
   s.effects += memo.skipped_effects;
@@ -357,6 +361,7 @@ size_t Execution::memo_enter(RecordingProgram& program, size_t pc) {
     memo->usable = true;
     memo->events.shrink_to_fit();
     memo->finals.shrink_to_fit();
+    memo->disowned.shrink_to_fit();
     memo->pool.shrink_to_fit();
   } else {
     ++candidate.aborted;

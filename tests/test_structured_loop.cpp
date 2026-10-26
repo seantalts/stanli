@@ -7013,7 +7013,9 @@ struct FuzzPlan {
   int zero = 0, one = 0, six = 0;
   std::vector<int> hots, carried;
   std::vector<int> literals;
+  std::vector<int> copies;
   bool carry = false;
+  bool aliasing = false;
   int loop_depth = 0;
 
   int fresh() { return plan->body.add_slot(1, false); }
@@ -7144,9 +7146,48 @@ struct FuzzPlan {
     pool.push_back(slot);
   }
 
+  void alias_write_statement(std::vector<Node>& out) {
+    const bool use_store = random.chance(50);
+    const int source = use_store ? store : vector;
+    int& next = use_store ? store_next : vector_next;
+    const int write_index = safe_index(out, pick(), six, 6);
+    Node write = call(
+        *plan, OP_SET_INDEX_DYNAMIC,
+        {source, write_index, random.chance(50) ? pool[1] : operand()}, next);
+    attach(*plan, write.op, single_spec(6));
+    out.push_back(std::move(write));
+    out.push_back(alias(source, next));
+    next = plan->body.add_slot(6, false);
+    const int hot = plan->body.add_slot(6, false), dot = fresh();
+    out.push_back(
+        call(*plan, OP_MUL, {random.chance(70) ? theta : beta, source}, hot));
+    out.push_back(call(*plan, OP_DOT, {hot, source}, dot));
+    out.push_back(target(dot));
+    const int copy = copies[static_cast<size_t>(random.below(copies.size()))];
+    if (random.chance(70)) {
+      const int iterator = fresh(), cond = fresh();
+      std::vector<Node> inside;
+      inside.push_back(
+          compare_node(*plan, iterator, literal(), cond, random.below(6)));
+      inside.push_back(
+          branch(cond, sequence({alias(copy, source)}), sequence({})));
+      out.push_back(counted(one, six, iterator, sequence(std::move(inside))));
+    } else {
+      out.push_back(alias(copy, source));
+    }
+    const int index = safe_index(out, pick(), six, 6);
+    const int slot = fresh();
+    out.push_back(read_node(*plan, copy, 6, index, slot));
+    pool.push_back(slot);
+  }
+
   void statement(std::vector<Node>& out, int depth) {
     if (carry && random.chance(15)) {
       carry_statement(out);
+      return;
+    }
+    if (aliasing && random.chance(20)) {
+      alias_write_statement(out);
       return;
     }
     const int kind = random.below(depth >= 3 ? 5 : 11);
@@ -7237,9 +7278,11 @@ struct FuzzPlan {
   }
 };
 
-static std::optional<ScanFixture> fuzz_plan(uint64_t seed, bool carry) {
+static std::optional<ScanFixture> fuzz_plan(uint64_t seed, bool carry,
+                                            bool aliasing = false) {
   FuzzPlan f;
   f.carry = carry;
+  f.aliasing = aliasing;
   f.random.state = seed * 2654435761ULL + 12345;
   f.plan = std::make_shared<StructuredLoop>();
   auto& plan = *f.plan;
@@ -7274,6 +7317,11 @@ static std::optional<ScanFixture> fuzz_plan(uint64_t seed, bool carry) {
   std::vector<Node> head;
   head.push_back(alias(f.vector, base));
   head.push_back(alias(f.store, base));
+  if (aliasing)
+    for (int i = 0; i < 2; ++i) {
+      f.copies.push_back(plan.body.add_slot(6, false));
+      head.push_back(alias(f.copies.back(), base));
+    }
   head.push_back(arith_node(plan, trip, f.literals[1], key, 4));
   {
     const int index = f.safe_index(head, trip, f.six, 6);
@@ -7285,6 +7333,12 @@ static std::optional<ScanFixture> fuzz_plan(uint64_t seed, bool carry) {
   head.push_back(counted(
       f.one, f.six, cells,
       sequence({read_node(plan, f.vector, 6, cells, cell), target(cell)})));
+  for (int copy : f.copies) {
+    const int hot = plan.body.add_slot(6, false), dot = f.fresh();
+    head.push_back(call(plan, OP_MUL, {f.theta, copy}, hot));
+    head.push_back(call(plan, OP_DOT, {hot, copy}, dot));
+    head.push_back(target(dot));
+  }
   const int trips = scalar(plan, 6);
   if (seed % 3 == 0) {
     const int counter = f.fresh(), next = f.fresh(), running = f.fresh();
@@ -7722,21 +7776,23 @@ static void data_loop_memo_fuzz_tests() {
   struct Case {
     uint64_t seed;
     bool carry;
+    bool aliasing;
   };
   // Plans that a stale-step read of a cached folded kernel, and a carried
   // local that a step reads before the loop rewrites it, once made wrong.
-  std::vector<Case> order = {{5028, false},
-                             {5361, false},
-                             {8431, false},
-                             {12243, false},
-                             {14265, false}};
-  for (const uint64_t seed : CARRY_SEEDS) order.push_back({seed, true});
-  for (const bool carry : {false, true})
+  std::vector<Case> order = {{5028, false, false},
+                             {5361, false, false},
+                             {8431, false, false},
+                             {12243, false, false},
+                             {14265, false, false}};
+  for (const uint64_t seed : CARRY_SEEDS) order.push_back({seed, true, false});
+  for (const Case mode :
+       {Case{0, false, false}, Case{0, true, false}, Case{0, false, true}})
     for (uint64_t seed = 1; seed <= seeds; ++seed)
-      order.push_back({seed, carry});
+      order.push_back({seed, mode.carry, mode.aliasing});
   size_t built = 0, hits = 0;
-  for (const auto& [seed, carry] : order) {
-    const auto f = fuzz_plan(seed, carry);
+  for (const auto& [seed, carry, aliasing] : order) {
+    const auto f = fuzz_plan(seed, carry, aliasing);
     if (!f) continue;
     ++built;
     std::vector<double> table(6);
@@ -7749,7 +7805,9 @@ static void data_loop_memo_fuzz_tests() {
         memo_run(f->plan, f->lens, {table}, false, 0, {changed});
     if (!memo_same(on, off))
       std::printf("  fuzz seed %llu%s\n", static_cast<unsigned long long>(seed),
-                  carry ? " (carry)" : "");
+                  carry      ? " (carry)"
+                  : aliasing ? " (aliasing)"
+                             : "");
     check(memo_same(on, off),
           "data loop memo fuzz plan matches memo off bitwise");
     const size_t seen = memo_field(on, "memo_hits=");
