@@ -381,8 +381,16 @@ jobs:
             # being deleted. Stream their complete output into the retained
             # setup log; the hostdeps-v2 key forces this diagnostic rebuild.
             export OPAMVERBOSE=1
+            # Single-module linkage is already the default on supported macOS
+            # targets. Tell libtool not to request the obsolete compatibility
+            # flag; this does not add -multi_module or alter the selected mode.
+            export LT_MULTI_MODULE=1
           fi
           opam init --bare --disable-sandboxing --no-setup -y
+          if [ "$(uname -s)" = Darwin ]; then
+            opam option --global \
+              "pre-build-commands=[ [\"python3\" \"$GITHUB_WORKSPACE/.github/macos/patch-ocaml-build-tools.py\" \"%{name}%\" \"%{version}%\"] ]"
+          fi
           ./tools/dev_setup.sh --embed --no-build 2>&1 | tee "$RUNNER_TEMP/stanli-ocaml-build.log"
           mkdir -p deps/ocaml-include
           cp -R "$(opam var lib --switch=$OPAM_SWITCH)/ocaml/caml" \
