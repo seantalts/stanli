@@ -30,6 +30,11 @@ def main():
     workdir = source / directory
     ocamlopt = command[0]
     stdlib = Path(output(ocamlopt, "-where"))
+    # OCaml's relocatable COFF object needs GNU ld; CLANG64's ambient ld is
+    # LLD, which cannot perform this partial link. Ask OCaml's configured
+    # C compiler for its linker without changing the final C++ toolchain.
+    ocaml_cc = shlex.split(output(ocamlopt, "-config-var", "c_compiler"))
+    partial_linker = output(*ocaml_cc, "-print-prog-name=ld")
     libraries = [workdir / arg for arg in command if arg.endswith(".cmxa")]
     library_dirs = [lib.parent for lib in libraries] + [stdlib]
     archives = []
@@ -59,7 +64,7 @@ def main():
         command[command.index("-o") + 1] = str(tmp / "ocaml.o")
         subprocess.run(command, cwd=workdir, check=True)
         combined = tmp / "combined.o"
-        subprocess.run(["ld", "-r", "-u", "caml_startup", "-o", combined,
+        subprocess.run([partial_linker, "-r", "-u", "caml_startup", "-o", combined,
                         tmp / "ocaml.o", *archives, runtime_support], check=True)
 
         defined = {line.split()[0] for line in output(
@@ -77,7 +82,7 @@ def main():
             f".globl {name}\n{name}:\n.quad {name[6:]}\n" for name in imports)
         (tmp / "imports.s").write_text(assembly)
         subprocess.run([compiler, "-c", tmp / "imports.s", "-o", tmp / "imports.o"], check=True)
-        subprocess.run(["ld", "-r", "--disable-auto-import", "-o", destination,
+        subprocess.run([partial_linker, "-r", "--disable-auto-import", "-o", destination,
                         combined, tmp / "imports.o"], check=True)
 
 
