@@ -66,6 +66,9 @@ fi
 """)
         for tool in ("clang", "clang++"):
             self.script("fake-bin/" + tool, "echo clang-test\n")
+        # Setup's generic prerequisites must not depend on the host runner;
+        # the Windows wheel environment uses Ninja and need not have make.
+        self.script("fake-bin/make", "true\n")
         self.script("fake-bin/uname", "echo Linux\n")
         self.script("fake-bin/opam", """
 case "$1" in

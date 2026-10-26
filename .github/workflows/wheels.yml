@@ -1400,6 +1400,9 @@ jobs:
             unzip
             curl
 
+      - name: Check setup script contracts before the expensive build
+        run: python tests/test_dev_setup.py
+
       - name: Fingerprint the C++ compiler
         id: toolchain
         run: |
