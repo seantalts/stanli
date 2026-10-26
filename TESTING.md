@@ -464,6 +464,79 @@ same variables. On the 102 models where both converge, the largest difference
 is 3.4 standard errors. The four post-processing calls succeed or fail the
 same way with both backends.
 
+## Benchmarking a change
+
+[Benchmarks](docs/benchmarks.md) defines the corpus measurements and how to
+reproduce them. These notes cover benchmarking a change to the code.
+
+### Compiler-pipeline regression checks
+
+A change to the compiler pipeline must benchmark both the current default
+branch and the candidate before merge. Run the full inventory
+(`--corpus all`, no `--filter`) with the shipped configuration for both
+revisions, on matched hardware, compiler, build mode, threads, inputs and
+settings, with separate output paths.
+
+Compare each model's source-to-MIR time, preparation time, warm gradient and
+setup-plus-gradient estimate as `100 * (candidate / baseline - 1)`. A change of
+2% or more is a major slowdown. Show per-model and per-phase results, since
+an aggregate win can hide a regression. Missing, failed or timed-out
+observations stay visible and cannot count as a pass, and every existing
+numerical check still applies.
+
+Shared CI hosts can be noisier than 2%. Investigate a threshold crossing with a
+separate experiment on an idle host: at least six alternating fresh-process
+baseline/candidate pairs for the affected phases, all samples kept, with
+identical-binary controls when needed. Do not rerun until a favorable sample
+appears. Fix a confirmed regression before merge. The PR lists both revision
+SHAs, build identities, exact commands, coverage, the phase comparison and
+links to the raw results. The `mir-vectorization-measurements` CI artifact
+compares pass-on and pass-off behavior on a small gradient set and does not
+replace this check.
+
+### Focused execution-path benchmarks
+
+The corpus run times gradients only. For generated quantities, standalone
+function calls and interpreter fallback cliffs, use the public-API phase
+benchmarks:
+
+```sh
+# From the repository root, after building the runtime and MIR fixtures.
+python3 tools/bench_model_phases.py /absolute/path/libstanli.dylib \
+  tools/bench_execution_paths.json ode_nested_for
+python3 tools/bench_function_paths.py /absolute/path/libstanli.dylib affine
+```
+
+The [execution-path manifest](tools/bench_execution_paths.json) lists the
+workloads: nested loops, runtime indexing, loop and branch callbacks, RNG
+output and arguments, runtime integer expressions, solver controls in
+generated quantities, bounded generated-quantity temporaries, and canaries
+that must stay on the interpreter. `bench_function_paths.py` accepts `affine`,
+`branch_exit`, `sized`, `nested_identity`, `nested_scalars` and
+`nested_matrices`; the nested cases take an optional outer extent (default 4).
+
+`bench_model_phases.py` reports source compilation, preparation, first and
+warm gradients, first and warm output rows, and a seeded 100-warmup/100-draw
+fit (`--skip-inference` omits the fit). It includes Python/ctypes overhead;
+confirm native gradients with `bench_grad --timed`. Peak RSS is whole-process
+`getrusage` memory (bytes on macOS, KiB on Linux).
+
+Collect six alternating baseline/candidate pairs in fresh processes with
+nothing else running, keep raw samples, hashes and build settings, and check
+numerical parity separately. These focused runs do not replace the corpus run
+or change its published tables.
+
+### Corpus benchmark build cache
+
+An entry is keyed by the `.stan` bytes, the stanc binary and flags, the
+gradient driver and timer sources, the CmdStan checkout, library, compiler and
+environment identity, and the CmdStan path, so worktrees share entries. It
+holds the model header, the gradient driver, the ordinary executable and the
+original stanc and build durations; Stanli compilation, preparation and every
+gradient are always measured fresh. The run directory records the cache
+location and each model's hit or miss in `build-prepass.jsonl` and
+`*.result.json`.
+
 ## Known limits
 
 stanli is built and tested in CI on macOS (arm64, x86-64), Linux (x86-64,

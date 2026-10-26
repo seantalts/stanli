@@ -809,6 +809,38 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.assertNotIn("Notes", complete)
         self.assertIn("`failed` | — | — | — | — | — | failed; gradient build failed", incomplete)
 
+    def sections(self):
+        from benchmark_artifact_fixture import write_artifacts
+        from tools.corpus_table import render_catalog_sections
+        write_artifacts(*self.paths, self.rows, self.records, self.manifest)
+        return render_catalog_sections(*self.paths)
+
+    def test_sections_split_the_table_from_run_notes_and_failures(self):
+        sections = self.sections()
+        self.assertIn("| `good` | 1.42x |", sections["table"])
+        self.assertNotIn("failed", sections["table"])
+        self.assertNotIn("Run `", sections["table"])
+        self.assertEqual(sections["notes"], "Run `current` (2026-09-21).")
+        self.assertEqual(sections["runs"], "Every CmdStan stanc and build time was measured in this run.")
+        self.assertEqual(sections["failures"],
+                         "### Not measured\n\n- `failed`: failed; gradient build failed")
+
+    def test_numerical_failures_are_listed_with_their_scaled_error(self):
+        self.update_row()
+        self.rows[1].update(note="point 0: density/gradient mismatch: scaled error 0.0723")
+        self.records[1]["row"].update(note="point 0: density/gradient mismatch: scaled error 0.0723")
+        failures = self.sections()["failures"]
+        self.assertTrue(failures.startswith("### Fails the numerical check"))
+        self.assertIn("- `failed`: point 0: density/gradient mismatch: scaled error 0.0723", failures)
+        self.assertNotIn("Not measured", failures)
+
+    def test_no_failures_say_so(self):
+        self.rows.pop()
+        self.records.pop()
+        self.manifest["identity"]["inputs"].pop("failed")
+        self.assertEqual(self.sections()["failures"],
+                         "### Fails the numerical check\n\nNo model fails.")
+
     def test_missing_failed_row_is_not_complete_inventory(self):
         self.rows.pop()
         self.records.pop()
@@ -1213,6 +1245,20 @@ class VectorizedCatalogTests(VectorizedFixture):
         self.assertIn("reused from run `old`", rendered)
         self.assertIn("2026-09-21", rendered)
         self.assertNotIn("paired", rendered.split("\n\n", 1)[0])
+
+    def test_summary_reports_medians_changes_and_largest_movers(self):
+        from benchmark_artifact_fixture import write_artifacts
+        from tools.corpus_table import render_vectorized_sections
+        default_dir = self.write()
+        sections = render_vectorized_sections(self.vector, default_dir)
+        self.assertIn("median model's gradient is 4.00x faster in Stanli than in CmdStan, "
+                      "against 1.42x for default CmdStan", sections["summary"])
+        self.assertIn("changes by more than 10% on 1 of 1 models: it shrinks on 0 and grows on 1",
+                      sections["summary"])
+        self.assertIn("| `good` | 1.42x | 4x |", sections["summary"])
+        self.assertNotIn("failed", sections["summary"])
+        self.assertIn("default run. The CmdStan timings with loop vectorization are reused from run `old`",
+                      sections["runs"])
 
     def test_models_missing_from_the_reused_run_take_a_supplement_run(self):
         self.add_source("supp", ("good",), cmdstan_factor=3)

@@ -607,12 +607,9 @@ def _count(n):
     return f"{n / 1e6:.3g}M" if n >= 1e6 else f"{n / 1e3:.3g}k"
 
 
-def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
-    """Present both compiler configurations with the same public workload."""
-    header = ("| Model | CmdStan / Stanli<br>gradient | Gradients | Stanli total<br>sampling (s) "
-              "| CmdStan total<br>sampling (s) | CmdStan / Stanli<br>total sampling |")
-    output = [header, "| --- | ---: | ---: | ---: | ---: | ---: |"]
-    incomplete = []
+def _catalog_parts(rows, details, speedup_field="paired_speedup"):
+    """Complete-row lines, incomplete-row lines and the incomplete rows' reasons."""
+    complete_lines, incomplete_lines, reasons = [], [], []
     complete = sorted(
         (row for row in rows if details[row["model"]]["status"] == "ok"),
         key=lambda row: (-_catalog_number(row, speedup_field), row["model"]),
@@ -643,10 +640,23 @@ def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
                      if stanli_total and cmdstan_total is not None else "—")
         record = details[row["model"]]
         if record["status"] == "ok":
-            output.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
+            complete_lines.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
         else:
-            cells.append(_catalog_notes(row, record))
-            incomplete.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
+            note = _catalog_notes(row, record)
+            reasons.append((row["model"], note))
+            cells.append(note)
+            incomplete_lines.append("| " + " | ".join(_catalog_cell(cell) for cell in cells) + " |")
+    return complete_lines, incomplete_lines, reasons
+
+
+CATALOG_HEADER = ("| Model | CmdStan / Stanli<br>gradient | Gradients | Stanli total<br>sampling (s) "
+                  "| CmdStan total<br>sampling (s) | CmdStan / Stanli<br>total sampling |")
+
+
+def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
+    """Present both compiler configurations with the same public workload."""
+    complete, incomplete, _ = _catalog_parts(rows, details, speedup_field)
+    output = [CATALOG_HEADER, "| --- | ---: | ---: | ---: | ---: | ---: |", *complete]
     referenced = any(row.get("point_source") == "reference_run" for row in rows)
     if referenced:
         output.extend([
@@ -664,8 +674,25 @@ def _catalog_tables(rows, details, points, speedup_field="paired_speedup"):
     if incomplete:
         output.extend(["", "**Incomplete results**", "",
                        "Missing measurements are —; available timings are retained.", "",
-                       header + " Reason |", "| --- | ---: | ---: | ---: | ---: | ---: | --- |", *incomplete])
+                       CATALOG_HEADER + " Reason |", "| --- | ---: | ---: | ---: | ---: | ---: | --- |", *incomplete])
     return "\n".join(output) + "\n"
+
+
+def _failure_lists(reasons):
+    """Lists of the models left out of every speedup, grouped by why."""
+    numerical = [(model, note) for model, note in reasons if "scaled error" in note]
+    other = [(model, note) for model, note in reasons if "scaled error" not in note]
+    blocks = []
+    if numerical:
+        blocks.append("### Fails the numerical check\n\n"
+                      "These models are left out of every speedup on this page. "
+                      "The gate is 1e-9 scaled error ([details](#numerical-gate)).\n\n"
+                      + "\n".join(f"- `{model}`: {note.removeprefix('failed; ')}"
+                                  for model, note in numerical))
+    if other:
+        blocks.append("### Not measured\n\n"
+                      + "\n".join(f"- `{model}`: {note}" for model, note in other))
+    return "\n\n".join(blocks) or "### Fails the numerical check\n\nNo model fails."
 
 
 def _cached_models(details):
@@ -692,6 +719,28 @@ def render_catalog(summary_path=CATALOG_SUMMARY, records_path=CATALOG_RECORDS,
     )
     return (intro + _reuse_note(_cached_models(details), len(rows))
             + _catalog_tables(rows, details, config["points"]))
+
+
+def render_catalog_sections(summary_path=CATALOG_SUMMARY, records_path=CATALOG_RECORDS,
+                            manifest_path=CATALOG_MANIFEST, allow_filter=False):
+    """The pieces of the full-corpus section of docs/benchmarks.md, one string each."""
+    rows, manifest, details = validated_catalog(summary_path, records_path, manifest_path,
+                                                allow_filter)
+    complete, _, reasons = _catalog_parts(rows, details)
+    notes = [f"Run `{_catalog_cell(manifest['run_id'])}` ({_catalog_cell(manifest['started_utc'][:10])})."]
+    if any(row.get("point_source") == "fixed" for row in rows):
+        notes.append(f"{FALLBACK_MARK} The reference run did not finish, so this model uses "
+                     f"{FIXED_GRADIENT_COUNT:,} gradients at the fixed points.")
+    reused = _cached_models(details)
+    runs = (f"CmdStan stanc and build times for {reused} of {len(rows)} models were reused from "
+            "the build cache and not remeasured." if reused
+            else "Every CmdStan stanc and build time was measured in this run.")
+    return {
+        "table": "\n".join([CATALOG_HEADER, "| --- | ---: | ---: | ---: | ---: | ---: |", *complete]),
+        "notes": "\n\n".join(notes),
+        "runs": runs,
+        "failures": _failure_lists(reasons),
+    }
 
 
 DEFAULT_ROOT = CATALOG_ROOT / "output/corpus-performance"
@@ -790,9 +839,7 @@ def combined_vectorized_rows(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
     return output, statuses, default, {run_id: manifest for run_id, (_, manifest, _) in runs.items()}
 
 
-def render_gradient_catalog(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
-    """O1+vectorization CmdStan timings reused from earlier runs against the default Stanli run."""
-    rows, statuses, default, manifests = combined_vectorized_rows(root, default_root)
+def _vectorized_sources(rows, manifests):
     counts = {}
     for row in rows:
         counts[row["run_id"]] = counts.get(row["run_id"], 0) + 1
@@ -802,14 +849,55 @@ def render_gradient_catalog(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
     supplements = "".join(
         " " + ", ".join(f"`{row['model']}`" for row in rows if row["run_id"] == run_id)
         + f" is from {describe(run_id)}." for run_id in extra)
-    intro = (f"Stanli timings are from the default run `{_catalog_cell(default['run_id'])}`. "
-             f"The CmdStan timings with loop vectorization are reused from {describe(main)}."
-             f"{supplements} Each ratio is CmdStan's median gradient time divided by Stanli's"
-             f", each averaged over {default['identity']['config']['points']} evaluation points.\n\n")
+    return f"The CmdStan timings with loop vectorization are reused from {describe(main)}.{supplements}"
+
+
+def _vectorized_intro(rows, manifests, default):
+    return (f"Stanli timings are from the default run `{_catalog_cell(default['run_id'])}`. "
+            f"{_vectorized_sources(rows, manifests)} Each ratio is CmdStan's median gradient time "
+            f"divided by Stanli's, each averaged over {default['identity']['config']['points']} "
+            "evaluation points.\n\n")
+
+
+def render_gradient_catalog(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
+    """O1+vectorization CmdStan timings reused from earlier runs against the default Stanli run."""
+    rows, statuses, default, manifests = combined_vectorized_rows(root, default_root)
+    intro = _vectorized_intro(rows, manifests, default)
     reused = _reuse_note(sum(status["cached"] for status in statuses.values()), len(rows),
                          "the runs that report them")
     return intro + reused + _catalog_tables(rows, statuses, default["identity"]["config"]["points"],
                                             "median_ratio")
+
+
+VECTORIZED_TOP = 10
+VECTORIZED_CHANGE = 0.10
+
+
+def render_vectorized_sections(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
+    """Summary of the loop-vectorization comparison; the full table is the evidence README."""
+    rows, statuses, default, manifests = combined_vectorized_rows(root, default_root)
+    default_rows, _, _ = _run_artifacts(default_root)
+    baseline = {row["model"]: _catalog_number(row, "paired_speedup") for row in default_rows}
+    pairs = [(row["model"], baseline[row["model"]], row["median_ratio"])
+             for row in rows if statuses[row["model"]]["status"] == "ok"
+             and baseline.get(row["model"]) and row["median_ratio"]]
+    default_median = statistics.median(value for _, value, _ in pairs)
+    vectorized_median = statistics.median(value for _, _, value in pairs)
+    limit = 1 + VECTORIZED_CHANGE
+    smaller = sum(vectorized * limit < value for _, value, vectorized in pairs)
+    larger = sum(vectorized > value * limit for _, value, vectorized in pairs)
+    top = sorted(pairs, key=lambda pair: (-max(pair[1] / pair[2], pair[2] / pair[1]), pair[0]))
+    table = ["| Model | Default CmdStan | Vectorized CmdStan |", "| --- | ---: | ---: |"]
+    table += [f"| `{model}` | {value:.3g}x | {vectorized:.3g}x |"
+              for model, value, vectorized in top[:VECTORIZED_TOP]]
+    summary = (
+        f"With loop vectorization on, the median model's gradient is {vectorized_median:.2f}x faster in "
+        f"Stanli than in CmdStan, against {default_median:.2f}x for default CmdStan. The speedup changes by "
+        f"more than {VECTORIZED_CHANGE:.0%} on {smaller + larger} of {len(pairs)} models: it shrinks on "
+        f"{smaller} and grows on {larger}. These {VECTORIZED_TOP} models change most, in how many times "
+        "faster Stanli's gradient is:\n\n" + "\n".join(table))
+    runs = "Stanli timings in the loop-vectorization comparison are from the default run. " + _vectorized_sources(rows, manifests)
+    return {"summary": summary, "runs": runs}
 
 
 def require_historical_tsv(col):

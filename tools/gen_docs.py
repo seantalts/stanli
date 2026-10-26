@@ -30,7 +30,8 @@ import textwrap
 import warnings
 
 import toolchain
-from corpus_table import FIXED_GRADIENT_COUNT, render_catalog, render_gradient_catalog
+from corpus_table import (FIXED_GRADIENT_COUNT, render_catalog_sections,
+                          render_vectorized_sections)
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # The demo page carries headline numbers too, and its markers are HTML
@@ -52,11 +53,19 @@ def current_benchmark():
     summary = directory / "benchmark-summary.tsv"
     records = directory / "model-results.json.gz"
     manifest_path = directory / "benchmark-manifest.json"
-    catalog = render_catalog(summary, records, manifest_path).rstrip()
+    catalog = render_catalog_sections(summary, records, manifest_path)
     with summary.open(newline="") as stream:
         rows = list(csv.DictReader(stream, delimiter="\t"))
     manifest = json.loads(manifest_path.read_text())
     return catalog, rows, manifest
+
+
+def host_description(machine):
+    """Chip, operating system, logical CPUs and memory of the machine that ran the default benchmark."""
+    chip, memory = json.loads(
+        (REPO / "output" / "corpus-performance" / "build-identity.json").read_text())["host"]
+    return (chip, f"{chip}, {machine['platform']}, {machine['logical_cpus']} logical CPUs, "
+                  f"{round(int(memory) / 2**30)} GiB RAM")
 
 
 def fast_mode_benchmark():
@@ -227,6 +236,8 @@ def compute():
     lang_verified = sum(1 for v in lang.values() if v["status"] == "VERIFIED")
 
     catalog, benchmark_rows, manifest = current_benchmark()
+    vectorized = render_vectorized_sections()
+    hardware, host = host_description(manifest["identity"]["machine"])
     c_n, c_med, c_par = corpus_stats(benchmark_rows)
     t_med = total_sampling_median(benchmark_rows)
     toolchains = manifest["identity"]["toolchains"]
@@ -235,13 +246,18 @@ def compute():
 
     return {
         **fast_mode_figures(benchmark_rows, fast_rows, manifest, fast_manifest),
-        "benchmark_catalog": catalog,
+        "benchmark_table": catalog["table"],
+        "benchmark_table_notes": catalog["notes"],
+        "benchmark_runs": catalog["runs"] + "\n\n" + vectorized["runs"],
+        "benchmark_failures": catalog["failures"],
+        "benchmark_hardware": hardware,
+        "benchmark_host": host,
         "benchmark_models": str(len(manifest["identity"]["inputs"])),
         "benchmark_cmdstan": cmdstan_label(toolchains["cmdstan"]["head"], cmdstan_pin()),
         "benchmark_stan_math": f"`{toolchains['math']['head']}`",
         "benchmark_source": f"`{manifest['identity']['stanli_source']['head']}`",
         "benchmark_date": manifest["started_utc"][:10],
-        "benchmark_vectorized_catalog": render_gradient_catalog().rstrip(),
+        "benchmark_vectorized_summary": vectorized["summary"],
         "corpus_reference_models": str(len(references)),
         "corpus_reference_points": str(sum(len(row["points"]) for row in references.values())),
         "corpus_verified": f"{len(verified)}/{n_total}",
