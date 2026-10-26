@@ -42,5 +42,7 @@ for tool in git make; do
   have "$tool" || pacman -S --needed --noconfirm "$tool"
 done
 for tool in clang lld cmake python; do
-  have "$tool" || pacman -S --needed --noconfirm "$msys_package_prefix-$tool"
+  # An older UCRT64 or system installation must not satisfy this check.
+  [ -x "$msys_root/$msys_env/bin/$tool.exe" ] ||
+    pacman -S --needed --noconfirm "$msys_package_prefix-$tool"
 done

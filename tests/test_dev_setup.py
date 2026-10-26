@@ -174,6 +174,8 @@ echo library > build-rel/libstanli.so
         for name in ("lld", "python"):
             self.script("fake-bin/" + name, "true\n")
         for environment in ("ucrt64", "clang64", "clangarm64"):
+            for tool in ("clang", "lld", "cmake", "python"):
+                self.script(f"msys/{environment}/bin/{tool}.exe", "true\n")
             for compiler in ("clang", "clang++"):
                 self.script(f"msys/{environment}/bin/{compiler}",
                             f"echo {environment}\n")
@@ -192,6 +194,31 @@ echo library > build-rel/libstanli.so
                 self.assertEqual(result.returncode, 0,
                                  result.stdout + result.stderr)
                 self.assertEqual(result.stdout.strip(), expected)
+
+    def test_windows_installs_tools_from_selected_environment(self):
+        self.script("msys/usr/bin/pacman", 'echo "$*" >> "$SETUP_TEST_LOG"\n')
+        self.script("msys/usr/bin/pacman.exe", "true\n")
+        for tool in ("clang", "lld", "cmake", "python"):
+            self.script(f"msys/ucrt64/bin/{tool}", "true\n")
+        self.env["PATH"] = (str(self.root / "msys/usr/bin") + os.pathsep
+                            + str(self.root / "msys/ucrt64/bin") + os.pathsep
+                            + self.env["PATH"])
+        for architecture, target in ((9, "x86_64"), (12, "aarch64")):
+            with self.subTest(architecture=architecture):
+                self.log.unlink(missing_ok=True)
+                self.script("fake-bin/powershell.exe", f"echo {architecture}\n")
+                result = subprocess.run([
+                    self.bash, "-c",
+                    'set -eu; WANT_EMBED=0; '
+                    'have() { command -v "$1" >/dev/null 2>&1; }; '
+                    'source tools/dev_setup_windows.sh'
+                ], cwd=self.root, env=self.env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0,
+                                 result.stdout + result.stderr)
+                self.assertEqual(self.log.read_text().splitlines(), [
+                    f"-S --needed --noconfirm mingw-w64-clang-{target}-{tool}"
+                    for tool in ("clang", "lld", "cmake", "python")
+                ])
 
 
 if __name__ == "__main__":
