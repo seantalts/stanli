@@ -581,6 +581,27 @@ function(stanli_embed_stanc TGT)
         message(FATAL_ERROR "Could not read OCaml's native link libraries")
       endif()
       separate_arguments(_ocaml_libraries NATIVE_COMMAND "${_ocaml_libraries}")
+      if("-lgcc_eh" IN_LIST _ocaml_libraries)
+        # OCaml's GCC support archive lives with its C compiler, outside
+        # CLANG64's search paths. Keep that dependency explicit rather than
+        # adding the GCC library directory to every C++ runtime search.
+        execute_process(
+          COMMAND "${STANLI_OCAML_STDLIB}/../../bin/ocamlopt.exe"
+                  -config-var c_compiler
+          OUTPUT_VARIABLE _ocaml_cc OUTPUT_STRIP_TRAILING_WHITESPACE
+          COMMAND_ERROR_IS_FATAL ANY)
+        separate_arguments(_ocaml_cc NATIVE_COMMAND "${_ocaml_cc}")
+        execute_process(
+          COMMAND ${_ocaml_cc} -print-file-name=libgcc_eh.a
+          OUTPUT_VARIABLE _ocaml_gcc_eh OUTPUT_STRIP_TRAILING_WHITESPACE
+          COMMAND_ERROR_IS_FATAL ANY)
+        if(NOT IS_ABSOLUTE "${_ocaml_gcc_eh}" OR NOT EXISTS "${_ocaml_gcc_eh}")
+          message(FATAL_ERROR "Could not locate OCaml's libgcc_eh.a: ${_ocaml_gcc_eh}")
+        endif()
+        list(FIND _ocaml_libraries "-lgcc_eh" _ocaml_gcc_eh_index)
+        list(REMOVE_AT _ocaml_libraries ${_ocaml_gcc_eh_index})
+        list(INSERT _ocaml_libraries ${_ocaml_gcc_eh_index} "${_ocaml_gcc_eh}")
+      endif()
       target_link_libraries(${TGT} PRIVATE ${_ocaml_libraries})
     endif()
   endif()
