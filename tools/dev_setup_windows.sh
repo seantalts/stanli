@@ -23,7 +23,8 @@ case "$(powershell.exe -NoProfile -NonInteractive -Command \
     fi
     msys_env=clangarm64; msys_package_prefix=mingw-w64-clang-aarch64
     ;;
-  9) msys_env=ucrt64; msys_package_prefix=mingw-w64-ucrt-x86_64 ;;        # x64
+  # Keep Clang, the linker, and the C++ exception runtime from one toolchain.
+  9) msys_env=clang64; msys_package_prefix=mingw-w64-clang-x86_64 ;;      # x64
   *) echo "Unsupported Windows architecture" >&2; exit 1 ;;
 esac
 
@@ -40,6 +41,8 @@ export PATH="$msys_root/$msys_env/bin:$msys_root/usr/bin:$PATH"
 for tool in git make; do
   have "$tool" || pacman -S --needed --noconfirm "$tool"
 done
-for tool in clang cmake python; do
-  have "$tool" || pacman -S --needed --noconfirm "$msys_package_prefix-$tool"
+for tool in clang lld cmake python; do
+  # An older UCRT64 or system installation must not satisfy this check.
+  [ -x "$msys_root/$msys_env/bin/$tool.exe" ] ||
+    pacman -S --needed --noconfirm "$msys_package_prefix-$tool"
 done
