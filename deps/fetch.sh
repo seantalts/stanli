@@ -68,6 +68,29 @@ git -C math apply <<'EOF'
 +#endif
 
  #endif //#ifndef BOOST_INTRUSIVE_DETAIL_STD_FWD_HPP
+--- a/lib/boost_1.87.0/boost/move/detail/iterator_traits.hpp
++++ b/lib/boost_1.87.0/boost/move/detail/iterator_traits.hpp
+@@ -58,6 +58,12 @@
+ #include <cstddef>
+ #include <boost/move/detail/type_traits.hpp>
+
++#if defined(_LIBCPP_VERSION)
++#include <iterator>
++#if _LIBCPP_STD_VER > 17
++#define BOOST_MOVE_CONTIGUOUS_ITERATOR_TAG
++#endif
++#else
+ #include <boost/move/detail/std_ns_begin.hpp>
+
+ BOOST_MOVE_STD_NS_BEG
+@@ -82,6 +88,7 @@ struct contiguous_iterator_tag;
+ BOOST_MOVE_STD_NS_END
+
+ #include <boost/move/detail/std_ns_end.hpp>
++#endif
+
+ namespace boost{  namespace movelib{
+
 EOF
 
 # The adjoint ODE's backward quadrature callback accumulates into the CVODES
