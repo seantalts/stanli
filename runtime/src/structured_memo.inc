@@ -176,7 +176,7 @@ void RecordingProgram::compile_memo(LoopState& s) {
   }
 
   std::vector<uint8_t> wall(slot_count, 0), exposed(slot_count, 0),
-      covered(slot_count, 0);
+      carried(slot_count, 0), covered(slot_count, 0);
   std::vector<int32_t> compact(slot_count, -1);
   std::vector<uint32_t> reads_inside(slot_count, 0);
   std::vector<std::vector<uint32_t>> incoming(size + 1);
@@ -220,7 +220,7 @@ void RecordingProgram::compile_memo(LoopState& s) {
     std::vector<int> pure_written, touched;
     const auto reset = [&]() {
       for (int slot : touched) {
-        wall[slot] = exposed[slot] = covered[slot] = 0;
+        wall[slot] = exposed[slot] = carried[slot] = covered[slot] = 0;
         compact[slot] = -1;
         reads_inside[slot] = 0;
       }
@@ -283,10 +283,16 @@ void RecordingProgram::compile_memo(LoopState& s) {
     std::unordered_map<int, std::vector<size_t>> readers;
     for (size_t pc = b; pc < e; ++pc) {
       const uint64_t* row = def_in.data() + (pc - b) * words;
+      const auto undefined = [&](int slot) {
+        const int32_t at = compact[slot];
+        return at < 0 || !((row[at / 64] >> (at % 64)) & 1);
+      };
+      all_reads(pc, [&](int slot) {
+        if (undefined(slot)) carried[slot] = 1;
+      });
       pure_reads(pc, [&](int slot) {
         readers[slot].push_back(pc);
-        const int32_t at = compact[slot];
-        if (at < 0 || !((row[at / 64] >> (at % 64)) & 1)) exposed[slot] = 1;
+        if (undefined(slot)) exposed[slot] = 1;
       });
     }
 
@@ -353,7 +359,7 @@ void RecordingProgram::compile_memo(LoopState& s) {
     candidate.live_out.assign(slot_count, 0);
     for (int slot : touched)
       candidate.live_out[slot] =
-          reads[slot] > reads_inside[slot] || exposed[slot];
+          reads[slot] > reads_inside[slot] || carried[slot];
     reset();
 
     for (size_t pc = b; pc < e; ++pc) {

@@ -1692,6 +1692,7 @@ struct Execution {
   void trace_condition(RecordingProgram& program, DataLoopTrace& trace,
                        int slot);
   void trace_stepped(RecordingProgram& program, DataLoopTrace& trace, int slot);
+  void trace_event(DataLoopTrace& trace, const DataLoopMemo::Event& event);
   void trace_bump(DataLoopTrace& trace, int loop);
   void trace_cells(RecordingProgram& program, DataLoopTrace& trace,
                    const Node& n, int slot);

@@ -28,7 +28,7 @@ struct DataLoopCandidate {
   std::vector<uint8_t> live_out;
   bool disabled = false;
   size_t hits = 0, misses = 0, aborted = 0, skipped = 0, events = 0;
-  size_t stored = 0, pool_doubles = 0;
+  size_t stored = 0, words = 0;
   std::unordered_map<uint64_t, std::vector<std::unique_ptr<DataLoopMemo>>>
       memos;
 };
@@ -44,6 +44,12 @@ struct DataLoopTrace {
   std::unordered_set<const StructuredLoop::Node*> seen;
   uint64_t effects_start = 0, step_effects = 0;
   size_t executed = 0;
+
+  void fail() {
+    ok = false;
+    std::vector<DataLoopMemo::Event>().swap(memo->events);
+    std::vector<double>().swap(memo->pool);
+  }
 };
 
 // A temporary recording program, built only after frame admission. Explicit

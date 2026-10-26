@@ -1,5 +1,14 @@
 // Replay and tracing of memoized data loops (see structured_memo.inc).
 
+void Execution::trace_event(DataLoopTrace& trace,
+                            const DataLoopMemo::Event& event) {
+  if (!trace.ok) return;
+  auto& memo = *trace.memo;
+  memo.events.push_back(event);
+  if (memo.events.size() > kMemoMaxEvents || memo.pool.size() > kMemoMaxPool)
+    trace.fail();
+}
+
 void Execution::trace_stepped(RecordingProgram& program, DataLoopTrace& trace,
                               int slot) {
   if (!program.memo_stepped[slot]) trace.stepped.push_back(slot);
@@ -9,19 +18,18 @@ void Execution::trace_stepped(RecordingProgram& program, DataLoopTrace& trace,
 void Execution::trace_inputs(RecordingProgram& program, DataLoopTrace& trace,
                              const Op& op) {
   for (int k = 0; k < op.n_in; ++k)
-    if (program.memo_stepped[op.in[k]]) trace.ok = false;
+    if (program.memo_stepped[op.in[k]]) trace.fail();
 }
 
 void Execution::trace_condition(RecordingProgram& program, DataLoopTrace& trace,
                                 int slot) {
-  if (!is_const(s.bindings[slot]) || program.memo_stepped[slot])
-    trace.ok = false;
+  if (!is_const(s.bindings[slot]) || program.memo_stepped[slot]) trace.fail();
 }
 
 void Execution::trace_bump(DataLoopTrace& trace, int loop) {
   const auto& loops = trace.candidate->bump_loops;
   if (std::find(loops.begin(), loops.end(), loop) == loops.end()) return;
-  trace.memo->events.push_back({DataLoopMemo::Bump, loop, 0, 0});
+  trace_event(trace, {DataLoopMemo::Bump, loop, 0, 0});
 }
 
 void Execution::trace_bound(RecordingProgram& program, DataLoopTrace& trace,
@@ -55,14 +63,16 @@ void Execution::trace_cells(RecordingProgram& program, DataLoopTrace& trace,
 
 void Execution::trace_capture(RecordingProgram& program, DataLoopTrace& trace,
                               int slot, int64_t length) {
+  if (!trace.ok) return;
   auto& memo = *trace.memo;
   if (program.memo_bound[slot] == 1) {
     const double* ptr = value(slot);
-    memo.events.push_back({DataLoopMemo::Slot, slot,
-                           static_cast<uint32_t>(memo.pool.size()),
-                           static_cast<uint32_t>(length)});
+    const DataLoopMemo::Event event{DataLoopMemo::Slot, slot,
+                                    static_cast<uint32_t>(memo.pool.size()),
+                                    static_cast<uint32_t>(length)};
     memo.pool.insert(memo.pool.end(), ptr, ptr + length);
     program.memo_bound[slot] = 2;
+    trace_event(trace, event);
     return;
   }
   if (program.memo_bound[slot] == 2) return;
@@ -77,10 +87,12 @@ void Execution::trace_capture(RecordingProgram& program, DataLoopTrace& trace,
     size_t j = i;
     while (j < static_cast<size_t>(length) && program.memo_cells[first + j])
       ++j;
-    memo.events.push_back({DataLoopMemo::Cells, static_cast<int32_t>(first + i),
-                           static_cast<uint32_t>(memo.pool.size()),
-                           static_cast<uint32_t>(j - i)});
+    const DataLoopMemo::Event event{
+        DataLoopMemo::Cells, static_cast<int32_t>(first + i),
+        static_cast<uint32_t>(memo.pool.size()), static_cast<uint32_t>(j - i)};
     memo.pool.insert(memo.pool.end(), ptr + i, ptr + j);
+    trace_event(trace, event);
+    if (!trace.ok) return;
     i = j;
   }
 }
@@ -89,13 +101,12 @@ void Execution::trace_kernel(RecordingProgram& program, DataLoopTrace& trace,
                              size_t pc) {
   const Node& n = *program.code[pc].node;
   const Op& op = p.body.ops[n.op];
-  auto& memo = *trace.memo;
   bool pure = program.pure_candidate[pc] != 0;
   for (int k = 0; pure && k < op.n_in; ++k) {
     if (!is_const(s.bindings[op.in[k]])) {
       pure = false;
     } else if (program.memo_stepped[op.in[k]]) {
-      trace.ok = false;
+      trace.fail();
       pure = false;
     }
   }
@@ -106,7 +117,7 @@ void Execution::trace_kernel(RecordingProgram& program, DataLoopTrace& trace,
     execute_kernel(n);
     if (s.building->program.size() != logged || s.adjoint_size != adjoints ||
         !is_const(s.bindings[op.out])) {
-      trace.ok = false;
+      trace.fail();
       trace_unbound(program, op.out);
       return;
     }
@@ -119,8 +130,7 @@ void Execution::trace_kernel(RecordingProgram& program, DataLoopTrace& trace,
         (op.dyn_lengths & (1u << k)) ? op.dyn_capacity : p.body.slots[slot].len;
     trace_capture(program, trace, slot, length);
   }
-  memo.events.push_back({DataLoopMemo::Step, static_cast<int32_t>(pc), 0, 0});
-  if (memo.events.size() > kMemoMaxEvents) trace.ok = false;
+  trace_event(trace, {DataLoopMemo::Step, static_cast<int32_t>(pc), 0, 0});
   execute_kernel(n);
   trace.step_effects += s.effects - effects_before;
   if (n.storage == Node::InPlace) {
@@ -142,7 +152,7 @@ void Execution::trace_alias(RecordingProgram& program, DataLoopTrace& trace,
   bool pure = program.pure_candidate[pc] && is_const(version);
   if (pure && (program.memo_stepped[n.src] ||
                in_workspace(s.versions[static_cast<size_t>(version)].value))) {
-    trace.ok = false;
+    trace.fail();
     pure = false;
   }
   if (pure) {
@@ -151,8 +161,7 @@ void Execution::trace_alias(RecordingProgram& program, DataLoopTrace& trace,
     return;
   }
   trace_capture(program, trace, n.src, p.body.slots[n.src].len);
-  trace.memo->events.push_back(
-      {DataLoopMemo::Step, static_cast<int32_t>(pc), 0, 0});
+  trace_event(trace, {DataLoopMemo::Step, static_cast<int32_t>(pc), 0, 0});
   const uint64_t effects_before = s.effects;
   execute_alias(n);
   trace.step_effects += s.effects - effects_before;
@@ -164,8 +173,7 @@ void Execution::trace_target(RecordingProgram& program, DataLoopTrace& trace,
                              size_t pc) {
   const Node& n = *program.code[pc].node;
   trace_capture(program, trace, n.src, p.body.slots[n.src].len);
-  trace.memo->events.push_back(
-      {DataLoopMemo::Step, static_cast<int32_t>(pc), 0, 0});
+  trace_event(trace, {DataLoopMemo::Step, static_cast<int32_t>(pc), 0, 0});
   const uint64_t effects_before = s.effects;
   execute_target(n);
   trace.step_effects += s.effects - effects_before;
@@ -285,7 +293,7 @@ size_t Execution::memo_enter(RecordingProgram& program, size_t pc) {
       return candidate.exit;
     }
   if (candidate.stored >= kMemoMaxMemos ||
-      candidate.pool_doubles >= kMemoMaxCandidatePool) {
+      candidate.words >= kMemoMaxCandidatePool) {
     ++candidate.skipped;
     retire();
     return no_memo;
@@ -315,13 +323,13 @@ size_t Execution::memo_enter(RecordingProgram& program, size_t pc) {
   const size_t next = dispatch<true>(program, pc, candidate.exit, &trace);
   if (next != candidate.exit || memo->events.size() > kMemoMaxEvents ||
       memo->pool.size() > kMemoMaxPool)
-    trace.ok = false;
+    trace.fail();
   if (trace.executed < program.memo_min_work) {
     candidate.disabled = true;
-    trace.ok = false;
+    trace.fail();
   }
   if (trace.executed < program.memo_min_ratio * (memo->events.size() + 1))
-    trace.ok = false;
+    trace.fail();
   if (trace.ok) {
     for (int slot : trace.bound)
       if (program.memo_bound[slot] == 1 && candidate.live_out[slot]) {
@@ -347,12 +355,15 @@ size_t Execution::memo_enter(RecordingProgram& program, size_t pc) {
     memo->skipped_effects =
         (s.effects - trace.effects_start) - trace.step_effects;
     memo->usable = true;
+    memo->events.shrink_to_fit();
+    memo->finals.shrink_to_fit();
+    memo->pool.shrink_to_fit();
   } else {
     ++candidate.aborted;
-    memo->events.clear();
-    memo->pool.clear();
+    trace.fail();
   }
-  candidate.pool_doubles += memo->pool.size();
+  candidate.words += memo->key.size() + memo->pool.size() +
+                     2 * (memo->events.size() + memo->finals.size());
   ++candidate.stored;
   candidate.memos[hash].push_back(std::move(memo));
   retire();

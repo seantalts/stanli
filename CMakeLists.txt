@@ -1448,6 +1448,10 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tests/test_ctsem_engine.py
                    $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_data_loop_memo
+           COMMAND ${Python3_EXECUTABLE} tests/test_data_loop_memo.py
+                   $<TARGET_FILE:stanli_check>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_diagnostics
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_diagnostics.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
