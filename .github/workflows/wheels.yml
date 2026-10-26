@@ -362,6 +362,7 @@ jobs:
 
       - name: Build the embedded stanc3 object
         if: steps.stanc-cache.outputs.cache-hit != 'true'
+        shell: bash
         run: |
           # The stanc-embed cache missed, so any object on disk came from
           # another cache and is stale by definition.
@@ -375,8 +376,13 @@ jobs:
           if [ -d deps/stanc3-src/.git ]; then
             git -C deps/stanc3-src clean -ffd -e _build
           fi
+          if [ "$(uname -s)" = Darwin ]; then
+            # opam normally deletes successful compiler output before the
+            # artifact step can retain it for diagnostic review.
+            export OPAMKEEPLOGS=1
+          fi
           opam init --bare --disable-sandboxing --no-setup -y
-          ./tools/dev_setup.sh --embed --no-build
+          ./tools/dev_setup.sh --embed --no-build 2>&1 | tee "$RUNNER_TEMP/stanli-ocaml-build.log"
           mkdir -p deps/ocaml-include
           cp -R "$(opam var lib --switch=$OPAM_SWITCH)/ocaml/caml" \
                 deps/ocaml-include/
@@ -394,7 +400,8 @@ jobs:
           name: macos-ocaml-build-logs-${{ matrix.plat }}
           path: |
             ~/.opam/log/*.out
-            deps/stanc3-src/_build/log
+            ${{ runner.temp }}/stanli-ocaml-build.log
+          if-no-files-found: error
           include-hidden-files: true
 
       - name: Validate the embedded stanc3 object
