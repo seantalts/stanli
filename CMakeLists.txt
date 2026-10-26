@@ -581,30 +581,11 @@ function(stanli_embed_stanc TGT)
         message(FATAL_ERROR "Could not read OCaml's native link libraries")
       endif()
       separate_arguments(_ocaml_libraries NATIVE_COMMAND "${_ocaml_libraries}")
-      if("-lgcc_eh" IN_LIST _ocaml_libraries)
-        # OCaml's GCC support archive lives with its C compiler, outside
-        # CLANG64's search paths. Keep that dependency explicit rather than
-        # adding the GCC library directory to every C++ runtime search.
-        execute_process(
-          COMMAND "${STANLI_OCAML_STDLIB}/../../bin/ocamlopt.exe"
-                  -config-var c_compiler
-          OUTPUT_VARIABLE _ocaml_cc OUTPUT_STRIP_TRAILING_WHITESPACE
-          RESULT_VARIABLE _ocaml_cc_result)
-        if(NOT _ocaml_cc_result EQUAL 0)
-          message(FATAL_ERROR "Could not read OCaml's C compiler")
-        endif()
-        separate_arguments(_ocaml_cc NATIVE_COMMAND "${_ocaml_cc}")
-        execute_process(
-          COMMAND ${_ocaml_cc} -print-file-name=libgcc_eh.a
-          OUTPUT_VARIABLE _ocaml_gcc_eh OUTPUT_STRIP_TRAILING_WHITESPACE
-          RESULT_VARIABLE _ocaml_gcc_eh_result)
-        if(NOT _ocaml_gcc_eh_result EQUAL 0 OR
-           NOT IS_ABSOLUTE "${_ocaml_gcc_eh}" OR NOT EXISTS "${_ocaml_gcc_eh}")
-          message(FATAL_ERROR "Could not locate OCaml's libgcc_eh.a: ${_ocaml_gcc_eh}")
-        endif()
-        list(FIND _ocaml_libraries "-lgcc_eh" _ocaml_gcc_eh_index)
-        list(REMOVE_AT _ocaml_libraries ${_ocaml_gcc_eh_index})
-        list(INSERT _ocaml_libraries ${_ocaml_gcc_eh_index} "${_ocaml_gcc_eh}")
+      if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        # OCaml records GCC's unwinder in its C link dependencies. Let the
+        # C++ driver select the matching unwinder instead: CLANG64 uses
+        # LLVM's libunwind, while UCRT64 Clang selects GCC's runtime itself.
+        list(REMOVE_ITEM _ocaml_libraries "-lgcc_eh")
       endif()
       target_link_libraries(${TGT} PRIVATE ${_ocaml_libraries})
     endif()
