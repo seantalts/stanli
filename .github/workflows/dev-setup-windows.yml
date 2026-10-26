@@ -39,9 +39,9 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            msystem: UCRT64
+            msystem: CLANG64
             setup_args: ''
-            ocaml_packages: ''
+            ocaml_packages: mingw-w64-x86_64-gcc
           - os: windows-11-arm
             msystem: CLANGARM64
             setup_args: --no-embed

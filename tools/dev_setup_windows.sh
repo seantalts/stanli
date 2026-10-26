@@ -23,7 +23,8 @@ case "$(powershell.exe -NoProfile -NonInteractive -Command \
     fi
     msys_env=clangarm64; msys_package_prefix=mingw-w64-clang-aarch64
     ;;
-  9) msys_env=ucrt64; msys_package_prefix=mingw-w64-ucrt-x86_64 ;;        # x64
+  # Keep Clang, the linker, and the C++ exception runtime from one toolchain.
+  9) msys_env=clang64; msys_package_prefix=mingw-w64-clang-x86_64 ;;      # x64
   *) echo "Unsupported Windows architecture" >&2; exit 1 ;;
 esac
 
