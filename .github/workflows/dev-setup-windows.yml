@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # Full native setup is postsubmit; PRs keep the fast setup contract checks.
 # Let cache-producing runs finish so later main builds can reuse their work.
@@ -41,12 +42,7 @@ jobs:
           - os: windows-latest
             msystem: CLANG64
             setup_args: ''
-            ocaml_packages: mingw-w64-x86_64-gcc
-          - os: windows-11-arm
-            msystem: CLANGARM64
-            setup_args: --no-embed
-            # OCaml runs as x64 on ARM; these live outside the OPAMROOT cache.
-            ocaml_packages: mingw-w64-x86_64-gcc
+            ocaml_packages: mingw-w64-x86_64-gcc mingw-w64-x86_64-gdb
     steps:
       - uses: actions/checkout@v7
 
@@ -149,22 +145,39 @@ jobs:
             deps/stanc3-src
           key: ${{ steps.stanc-cache.outputs.cache-primary-key }}
 
-      - name: Build development and release configurations
-        run: bash tools/dev_setup.sh --no-test ${{ matrix.setup_args }}
-        shell: pwsh
-
-      - name: Save completed C++ compilation
-        if: steps.ccache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+      - uses: actions/download-artifact@v4
         with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ steps.ccache.outputs.cache-primary-key }}
+          name: windows-compilers
+          run-id: 40263738456
+          github-token: ${{ github.token }}
+          path: probe-compilers
 
-      - name: Run the full test suite
+      - name: Build the diagnostic CLI with native embedding
         shell: msys2 {0}
         run: |
           source tools/build_jobs.sh
-          ctest --test-dir build --parallel "$(stanli_detect_build_jobs)" --output-on-failure
+          source deps/pins.env
+          cmake -B build -G 'MSYS Makefiles' -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_EXE_LINKER_FLAGS=-Wl,-Map=stanli-check.map \
+            "-DSTANLI_STANC_EMBED_OBJ=$PWD/deps/stanc3/stanc_embed.o" \
+            "-DSTANLI_OCAML_STDLIB=$(opam var --switch="$OPAM_SWITCH" lib)/ocaml"
+          cmake --build build --target stanli_check --parallel "$(stanli_detect_build_jobs)"
+          python tools/probe_windows_exceptions.py embedded
+
+      - name: Relink the same runtime without embedding and compare
+        shell: msys2 {0}
+        run: |
+          source tools/build_jobs.sh
+          cmake -B build -DSTANLI_STANC_EMBED_OBJ= -DSTANLI_OCAML_STDLIB=
+          cmake --build build --target stanli_check --parallel "$(stanli_detect_build_jobs)"
+          python tools/probe_windows_exceptions.py external
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-exception-probe
+          path: exception-probe
 
       - name: C++ cache statistics
         if: always()
