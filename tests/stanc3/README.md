@@ -33,6 +33,21 @@ looks in posteriordb, so nothing about the CI step changed.
 Everything upstream is BSD-3-Clause, the same license as this repository;
 see `THIRD_PARTY_LICENSES.md`.
 
+Four further models are not from stanc3. They are programs, or reductions
+of programs, that failed to lower, and they live here so the oracle checks them
+like the rest.
+
+| model | origin | what it reaches |
+| --- | --- | --- |
+| `while_counter_size` | written for this directory | a `while` loop counting up to a size, then `vector[k] z = mu[1:k]` in the model and transformed parameters blocks |
+| `while_udf_slices` | `integer_division` and `to_vector_of_arrays` from rbmi (Apache-2.0, see `licenses/rbmi-Apache-2.0`), reshaped into a small model | a user function slicing a vector by a `while` counter, and a data size computed by a `while` loop in a user function |
+| `rbmi_mmrm` | rbmi's MMRM model (Apache-2.0, see `licenses/rbmi-Apache-2.0`), unchanged, with small data written for this directory | the counter and slicing loops in one model, plus `-1/(n_visit - 1)` as a parameter bound, an integer division |
+| `reject_udf_data_size` | the shape of OncoBayes2's `max_int`, rewritten | a data size, `array[M] vector[max_int(Nc)]`, computed by a user function that calls `reject()` |
+
+`reject_udf_data_size` is valid at the committed data. With an empty `Nc` the
+function rejects, and both CmdStan and stanli stop at data load with the
+function's message.
+
 ## Where the data comes from
 
 stanc3's test models carry no data, which is why

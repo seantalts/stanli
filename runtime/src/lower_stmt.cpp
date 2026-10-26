@@ -107,9 +107,17 @@ bool Lowering::while_sizes_from_loop_state(const mir::Stmt& s) {
 // the caller.
 bool Lowering::unroll_while(const mir::Stmt& s) {
   for (long trip = 0; trip < kWhileUnrollLimit; ++trip) {
-    auto evaluated = try_eval_pure(s.cond);
-    if (!evaluated) return false;
-    if (evaluated->r.at(0) == 0.0) return true;
+    bool open = false;
+    if (auto evaluated = try_eval_pure(s.cond)) {
+      open = evaluated->r.at(0) != 0.0;
+    } else {
+      try {
+        open = eval_int(s.cond) != 0;
+      } catch (const CompileError&) {
+        return false;
+      }
+    }
+    if (!open) return true;
     try {
       for (const auto& child : s.body) lower_stmt(child);
     } catch (LoopContinue&) {
@@ -1759,6 +1767,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         --while_unroll_depth;
         if (complete) return;
       }
+      if (static_int_bookkeeping(s.body) && unroll_while(s)) return;
       if (try_lower_region(s)) return;
       // Unlike `for`, a `while` has no statically supplied trip count.
       // Compile it as one structured register-program island, which
@@ -1766,6 +1775,26 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       // iterations under autodiff.  This deliberately has no lowering-time
       // iteration cap: nontermination is the model's runtime behaviour,
       // not a reason to silently truncate or reject a finite long loop.
+      auto snapshot = wa_snapshot();
+      try {
+        lower_runtime_ifelse(s);
+        return;
+      } catch (const CompileError&) {
+      } catch (const std::logic_error&) {
+      }
+      wa_restore(snapshot);
+      auto unrolled = wa_snapshot();
+      ++while_unroll_depth;
+      bool complete = false;
+      try {
+        complete = unroll_while(s);
+      } catch (...) {
+        --while_unroll_depth;
+        throw;
+      }
+      --while_unroll_depth;
+      if (complete) return;
+      wa_restore(unrolled);
       lower_runtime_ifelse(s);
       return;
     }

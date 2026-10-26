@@ -2,8 +2,24 @@
 
 ## Unreleased
 
+## 0.24.0
+
+Run RStan-style sampling and variational inference on Stanli, pass richer
+R data, and run more Stan models without source workarounds. The macOS
+arm64 packages also prepare large ctsem models faster.
+
 ### Features
 
+- `as_stanmodel()` wraps Stan code, a `.stan` file or an rstan `stanmodel`
+  so that `rstan::sampling()` and `rstan::vb()` run on stanli and return a
+  `stanli_stanfit`. It follows rstan's arguments, including `init` in all its
+  forms, `pars`, `include`, `control`, `cores` and `algorithm = "Fixed_param"`;
+  unsupported arguments and `control` entries are errors that name them, and
+  `optimizing()` is an error that points to `optimize_model()`. Precompiled
+  models inside other packages, such as rstanarm, are not supported.
+- `as_stanfit(x, plain = TRUE)` returns an object of class exactly `stanfit`,
+  for code that checks the class by equality. It keeps the draws and drops the
+  model.
 - `sample_model()` takes `chain_id`, the id of the first chain, as CmdStan
   does. Chains are labelled `chain_id`, `chain_id + 1`, ... in the progress
   output, the fit, `as_stanfit()`, `as_rfit()` and `as_cstanfit()`, and each
@@ -27,6 +43,16 @@
   `row_vector`. Parameters pass through `sort_asc` and `sort_desc` with
   gradients, and `sort_asc` and `sort_desc` reject NaN as Stan Math does.
 
+### Performance
+
+- The macOS arm64 wheel and R runtime use a newer Apple Clang toolchain.
+  On the 4,000-row, 580-parameter ctsem model from Stan Discourse thread
+  41545, time to the first gradient fell from about 22 s with the 0.23.2
+  wheel to 13 s with the new build; warm gradients stayed about 0.35 s.
+  Three ordinary brms, rethinking and cognitive models were unchanged or
+  slightly faster in the measured phases. The minimum supported macOS
+  version remains 11.0.
+
 ### Fixes
 
 - A fit from `as_stanfit()` now counts as holding a compiled model for brms,
@@ -39,6 +65,30 @@
   extraction come from the fit's `seed`, so the same fit gives the same
   `extract()` draws in every session. `sample_model()` never touched the
   stream.
+- Models whose sizes come from a `while` loop now run. A counter loop that
+  ends before a `vector[k] z = mu[1:k]` declaration, and a user function
+  that walks a vector with `while (j <= num_elements(vec))` and slices it
+  by the counter, both failed with "needs unknown int" or "not known at
+  compile time" errors. These forms appear in rbmi's MMRM model.
+- A data size computed by a user function that calls `reject()` or
+  `print()` now works, as in OncoBayes2's `array[M] vector[max_int(Nc)] w`.
+  The size is computed once, so a `print` in that function fires once, and
+  data that makes the function reject stops at data load with the
+  function's message, as CmdStan does. Functions that draw random numbers
+  are still refused in a size.
+- Integer division in a model-block expression, such as the bound
+  `lower=-1 / (n - 1)` or `print(7 / 2)`, now gives Stan's integer result.
+  It was computed as real division when the value was used where a real is
+  expected, so rbmi's MMRM model disagreed with CmdStan.
+
+### Docs
+
+- The brms end-to-end comparison now includes eight-seed reruns of the
+  twelve models that exceeded R-hat 1.01 with only one backend in the
+  original run. Across those reruns, 29 of 96 Stanli fits and 32 of 96
+  CmdStanR fits exceeded that threshold; no model consistently failed with
+  one backend while converging with the other. The report retains every
+  run, and the harness accepts `BRMS_E2E_SEED` to reproduce them.
 
 ## 0.23.2
 

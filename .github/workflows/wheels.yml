@@ -197,7 +197,7 @@ jobs:
         include: >-
           ${{ fromJSON(github.event_name == 'pull_request'
               && '[{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"ghcr.io/seantalts/stanli-manylinux:2_28-x86_64","opam_arch":"x86_64-linux","build_jobs":2,"runtime":"linux-x86_64"}]'
-              || '[{"os":"macos-15","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4,"runtime":"darwin-arm64"},{"os":"macos-15-intel","plat":"macosx_10_15_x86_64","macos_target":"10.15","opam_arch":"x86_64-macos","build_jobs":4,"runtime":"darwin-x86_64"},{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"ghcr.io/seantalts/stanli-manylinux:2_28-x86_64","opam_arch":"x86_64-linux","build_jobs":2,"runtime":"linux-x86_64"},{"os":"ubuntu-24.04-arm","plat":"manylinux_2_28_aarch64","container":"ghcr.io/seantalts/stanli-manylinux:2_28-aarch64","opam_arch":"arm64-linux","build_jobs":2,"runtime":"linux-arm64"}]') }}
+              || '[{"os":"macos-26","plat":"macosx_11_0_arm64","macos_target":"11.0","opam_arch":"arm64-macos","build_jobs":4,"runtime":"darwin-arm64"},{"os":"macos-15-intel","plat":"macosx_10_15_x86_64","macos_target":"10.15","opam_arch":"x86_64-macos","build_jobs":4,"runtime":"darwin-x86_64"},{"os":"ubuntu-24.04","plat":"manylinux_2_28_x86_64","container":"ghcr.io/seantalts/stanli-manylinux:2_28-x86_64","opam_arch":"x86_64-linux","build_jobs":2,"runtime":"linux-x86_64"},{"os":"ubuntu-24.04-arm","plat":"manylinux_2_28_aarch64","container":"ghcr.io/seantalts/stanli-manylinux:2_28-aarch64","opam_arch":"arm64-linux","build_jobs":2,"runtime":"linux-arm64"}]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -293,7 +293,7 @@ jobs:
             deps/stanc3/stanli-vectorize-probe.stamp
             deps/ocaml-include
           key: >-
-            stanc-embed-v2-${{ matrix.plat }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+            stanc-embed-v2-${{ matrix.plat }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}${{ runner.os == 'macOS' && format('-hostdeps-v2-{0}', hashFiles('.github/macos/**')) || '' }}
 
       # Finished artifacts remain exact-keyed. On a miss, reuse the expensive
       # OCaml switch independently of edits to our compiler overlay. Use an
@@ -352,8 +352,17 @@ jobs:
             install -m 755 /tmp/opam /usr/local/bin/opam
           opam --version
 
+      - name: Build deployment-compatible zstd for OCaml tools
+        if: matrix.container == '' && steps.stanc-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          prefix="$RUNNER_TEMP/stanli-ocaml-zstd"
+          bash .github/macos/build-ocaml-zstd.sh "$prefix"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+
       - name: Build the embedded stanc3 object
         if: steps.stanc-cache.outputs.cache-hit != 'true'
+        shell: bash
         run: |
           # The stanc-embed cache missed, so any object on disk came from
           # another cache and is stale by definition.
@@ -367,13 +376,34 @@ jobs:
           if [ -d deps/stanc3-src/.git ]; then
             git -C deps/stanc3-src clean -ffd -e _build
           fi
+          if [ "$(uname -s)" = Darwin ]; then
+            # OPAMKEEPLOGS does not prevent successful package logs from
+            # being deleted. Stream their complete output into the retained
+            # setup log; the hostdeps-v2 key forces this diagnostic rebuild.
+            export OPAMVERBOSE=1
+          fi
           opam init --bare --disable-sandboxing --no-setup -y
-          ./tools/dev_setup.sh --embed --no-build
+          ./tools/dev_setup.sh --embed --no-build 2>&1 | tee "$RUNNER_TEMP/stanli-ocaml-build.log"
           mkdir -p deps/ocaml-include
           cp -R "$(opam var lib --switch=$OPAM_SWITCH)/ocaml/caml" \
                 deps/ocaml-include/
+          if [ "$(uname -s)" = Darwin ]; then
+            config="$(opam var lib --switch=$OPAM_SWITCH)/ocaml/Makefile.config"
+            grep '^ZSTD_LIBS=' "$config" | grep -F -- "$RUNNER_TEMP/stanli-ocaml-zstd/lib"
+          fi
         env:
           OPAMYES: '1'
+
+      - name: Retain macOS OCaml build logs
+        if: always() && matrix.container == '' && steps.stanc-cache.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-ocaml-build-logs-${{ matrix.plat }}
+          path: |
+            ~/.opam/log/*.out
+            ${{ runner.temp }}/stanli-ocaml-build.log
+          if-no-files-found: error
+          include-hidden-files: true
 
       - name: Validate the embedded stanc3 object
         shell: bash
@@ -1399,6 +1429,9 @@ jobs:
             git
             unzip
             curl
+
+      - name: Check setup script contracts before the expensive build
+        run: python tests/test_dev_setup.py
 
       - name: Fingerprint the C++ compiler
         id: toolchain

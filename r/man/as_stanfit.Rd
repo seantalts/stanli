@@ -7,13 +7,13 @@
 \alias{as_stanfit.stanfit}
 \title{Convert draws to an RStan fit without compilation}
 \usage{
-as_stanfit(x, ...)
+as_stanfit(x, ..., plain = FALSE)
 
-\method{as_stanfit}{stanli_fit}(x, model = x$model, exclude = NULL, ...)
+\method{as_stanfit}{stanli_fit}(x, model = x$model, exclude = NULL, ..., plain = FALSE)
 
-\method{as_stanfit}{stanli_stanfit}(x, model, ...)
+\method{as_stanfit}{stanli_stanfit}(x, model, ..., plain = FALSE)
 
-\method{as_stanfit}{stanfit}(x, model, ...)
+\method{as_stanfit}{stanfit}(x, model, ..., plain = FALSE)
 }
 \arguments{
 \item{x}{A fitted object. A `stanli_fit` must contain the sampling metadata
@@ -23,6 +23,13 @@ such as `rstan::sflist2stanfit()` returns from fits of the same model,
 needs a `model` and becomes a `stanli_stanfit` with it.}
 
 \item{...}{Reserved for methods.}
+
+\item{plain}{`TRUE` returns an object whose class is exactly `stanfit`, with
+the stored draws and no stanli model. Every `rstan` function that only
+reads draws works on it, and code that checks `class(x) == "stanfit"` or
+`identical(class(x), "stanfit")` accepts it. `log_prob()` and the other
+model methods do not. Attach a model again with
+`as_stanfit(plain_fit, model = model)`.}
 
 \item{model}{A `stanli_model` made with the original code and data. Defaults
 to the model retained by a `stanli_fit`. Use `NULL` for a draws-only result.

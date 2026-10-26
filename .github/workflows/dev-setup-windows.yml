@@ -39,9 +39,9 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            msystem: UCRT64
+            msystem: CLANG64
             setup_args: ''
-            ocaml_packages: ''
+            ocaml_packages: mingw-w64-x86_64-gcc
           - os: windows-11-arm
             msystem: CLANGARM64
             setup_args: --no-embed
@@ -58,7 +58,7 @@ jobs:
           # Keep the action-installed opam on PATH in the MSYS2 shell.
           path-type: inherit
           install: git make curl ${{ matrix.ocaml_packages }}
-          pacboy: clang:p llvm-tools:p cmake:p python:p ccache:p
+          pacboy: clang:p lld:p llvm-tools:p cmake:p python:p ccache:p
 
       - name: Check setup script contracts before the expensive build
         shell: msys2 {0}

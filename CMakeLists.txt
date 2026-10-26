@@ -78,6 +78,12 @@ endif()
 if(MINGW)
   # Keep source lines without duplicating full type information in every test.
   add_compile_options("$<$<CONFIG:RelWithDebInfo>:-g1>")
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    # GNU ld warns about differently padded COMDAT sections when Clang
+    # objects link static libstdc++. Use LLVM's linker for this toolchain.
+    # https://github.com/llvm/llvm-project/issues/171026
+    add_link_options(-fuse-ld=lld)
+  endif()
 endif()
 
 set(DEPS ${CMAKE_CURRENT_SOURCE_DIR}/deps)
@@ -548,7 +554,8 @@ elseif(UNIX)
 endif()
 
 # In-process stanc3: link the OCaml-compiled embed object
-# (tools/stanc_embed/build.sh produces deps/stanc3/stanc_embed.o).
+# (tools/stanc_embed/build.sh produces deps/stanc3/stanc_embed.o, an archive
+# of the original objects on Windows to preserve PE unwind relocations).
 set(STANLI_STANC_EMBED_OBJ "" CACHE FILEPATH
     "stanc_embed.o built by tools/stanc_embed/build.sh; enables in-process stanc")
 set(STANLI_OCAML_STDLIB "" CACHE PATH
@@ -558,8 +565,15 @@ set(STANLI_OCAML_STDLIB "" CACHE PATH
 # static library every target shares.
 function(stanli_embed_stanc TGT)
   if(STANLI_STANC_EMBED_OBJ)
-    target_sources(${TGT} PRIVATE
-      runtime/src/stanc_embed_c.cpp ${STANLI_STANC_EMBED_OBJ})
+    target_sources(${TGT} PRIVATE runtime/src/stanc_embed_c.cpp)
+    if(WIN32)
+      # This artifact is an archive on Windows. Treating it as a source
+      # nests it inside CMake's objects.a with Makefile generators, which
+      # the final linker cannot consume as an object member.
+      target_link_libraries(${TGT} PRIVATE ${STANLI_STANC_EMBED_OBJ})
+    else()
+      target_sources(${TGT} PRIVATE ${STANLI_STANC_EMBED_OBJ})
+    endif()
     target_include_directories(${TGT} PRIVATE ${STANLI_OCAML_STDLIB})
     target_compile_definitions(${TGT} PRIVATE STANLI_EMBED_STANC)
     target_link_libraries(${TGT} PRIVATE ${CMAKE_DL_LIBS} pthread)
@@ -575,6 +589,12 @@ function(stanli_embed_stanc TGT)
         message(FATAL_ERROR "Could not read OCaml's native link libraries")
       endif()
       separate_arguments(_ocaml_libraries NATIVE_COMMAND "${_ocaml_libraries}")
+      if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        # OCaml records GCC's unwinder in its C link dependencies. Let the
+        # C++ driver select the matching unwinder instead: CLANG64 uses
+        # LLVM's libunwind, while UCRT64 Clang selects GCC's runtime itself.
+        list(REMOVE_ITEM _ocaml_libraries "-lgcc_eh")
+      endif()
       target_link_libraries(${TGT} PRIVATE ${_ocaml_libraries})
     endif()
   endif()
@@ -1460,6 +1480,16 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_conformance_harness
            COMMAND ${Python3_EXECUTABLE} tests/test_conformance.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_pe_unwind
+           COMMAND ${Python3_EXECUTABLE} tests/test_pe_unwind.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  if(WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$")
+    add_test(NAME test_windows_unwind_tables
+             COMMAND ${Python3_EXECUTABLE} tools/check_pe_unwind.py
+                     $<TARGET_FILE:stanli_check> $<TARGET_FILE:stanli_run>
+                     $<TARGET_FILE:stanli_shared>
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endif()
   add_test(NAME test_function_model_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_function_models.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

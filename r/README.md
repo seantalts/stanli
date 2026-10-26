@@ -160,7 +160,7 @@ Three views of a fit serve code written against RStan or CmdStanR:
 
 | Adapter | Returns | Needs | Limit |
 | --- | --- | --- | --- |
-| `as_stanfit(fit)` | An S4 subclass of `rstan::stanfit` with live density, gradient and transform methods | RStan, loaded on conversion only | Passes `inherits(x, "stanfit")`; exact class-equality checks and RStan's native resampling do not work |
+| `as_stanfit(fit)` | An S4 subclass of `rstan::stanfit` with live density, gradient and transform methods | RStan, loaded on conversion only | Passes `inherits(x, "stanfit")`; exact class-equality checks fail unless `plain = TRUE`, and RStan's native resampling does not work |
 | `as_rfit(fit)` | An S3 object with RStan-style `extract()`, `summary()$summary`, `get_sampler_params()` and `get_elapsed_time()` | stanli, plus posterior for summaries | Not an RStan object: code calling `rstan::extract()` must call `stanli::extract()` |
 | `as_cstanfit(fit)`, `sample_cstan()`, `cstan_model(code)$sample()` | An object with CmdStanR-style `$draws()`, `$summary()`, `$sampler_diagnostics()`, `$metadata()`, `$inv_metric()`, `$num_chains()`, `$time()` and `$loo()` | stanli, plus posterior and loo for those methods | Its own `stanli_cstanfit` class; no CSV, executable or `$output()` methods, no LOO moment matching |
 
@@ -252,6 +252,48 @@ columns are in alphabetical order, so select them by name. Overall wall time
 is not recorded, only per-chain times. `$stanli_fit()` returns the original
 fit.
 
+## rstan-style code
+
+`as_stanmodel()` wraps Stan code so that `rstan::sampling()` and `rstan::vb()`
+run on stanli, with no C++ compilation:
+
+```r
+m <- as_stanmodel(code)                      # or a .stan path, or an rstan stanmodel
+fit <- rstan::sampling(m, data = d, chains = 4, iter = 2000, seed = 1)
+rstan::extract(fit); print(fit); rstan::log_prob(fit, q)
+```
+
+The result is a `stanli_stanfit`, and stanli does not change anything in
+rstan's namespace. This works for plain rstan workflows, and for packages that
+call `sampling()` on a model you can supply, such as a function taking a
+`stanmodel` argument.
+
+`iter`, `warmup`, `thin`, `chains`, `seed`, `init`, `pars`, `include`, `cores`,
+`control` and `algorithm = "Fixed_param"` follow rstan. `control` takes
+`adapt_delta`, `max_treedepth`, `stepsize`, `metric` and `adapt_engaged`; any
+other entry is an error that names it, as are `algorithm = "HMC"`,
+`sample_file` and `diagnostic_file`. `init` takes every rstan form: `"random"`,
+a radius, `"0"`, a list, a list of lists with one per chain, or a function with
+or without a `chain_id` argument. Parameters a list leaves out start at random
+points, and names that are not parameters are ignored. A start with a
+non-finite log density or gradient is redrawn up to 100 times. Your random
+seed is advanced by the default `seed` draw, as in rstan, and nothing else.
+
+What does not work:
+
+- Models compiled ahead of time inside other packages, such as rstanarm, RBesT,
+  OncoBayes2 and prophet. They call into their own compiled models, not
+  `sampling()` on code.
+- `rstan::optimizing()`. stanli's log density always includes the
+  change-of-variables Jacobian, so it would not return rstan's mode. The call
+  is an error that points to `optimize_model()`.
+- `vb()` with `importance_resampling = TRUE` or `keep_every` other than 1.
+
+`as_stanfit(fit, plain = TRUE)` returns an object of class exactly `stanfit`
+for code that checks `class(x) == "stanfit"`. It keeps the draws and drops the
+model, so `log_prob()` and the other model methods stop working;
+`as_stanfit(plain_fit, model = m)` attaches a model again.
+
 ## API reference
 
 ```r
@@ -277,7 +319,8 @@ laplace_model(m, mode = NULL, draws = 1000, ...)
 
 summary(fit); stanli_diagnose(fit); log_lik(fit)
 as_draws_array(fit, include_sampler = FALSE, inc_warmup = FALSE)
-as_stanfit(fit); as_rfit(fit); as_cstanfit(fit)
+as_stanfit(fit, plain = FALSE); as_rfit(fit); as_cstanfit(fit)
+as_stanmodel(code, model_name = NULL)   # rstan::sampling() and vb() on stanli
 sample_cstan(model_code, data, ...); cstan_model(model_code)
 ```
 

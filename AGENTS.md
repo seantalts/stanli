@@ -69,14 +69,21 @@ in documentation directories.
 
 ### Compiler diagnostics
 
-Fix compiler errors and warnings encountered in the affected builds, including
-pre-existing diagnostics. Before proposing or merging a code change, rebuild
-the affected targets and inspect the complete compiler output. Force those
-targets to recompile when cached objects would hide diagnostics, and repeat
-the build after fixes to verify that the errors and warnings are gone. Do not
+Fix compiler errors and warnings caused by project-owned code or build
+configuration, including pre-existing diagnostics. Before proposing or merging
+a code change, rebuild the affected targets and inspect the complete compiler
+output. Force those targets to recompile when cached objects would hide
+diagnostics, and repeat the build after fixes to verify the result. Do not
 silence warnings, lower warning levels, or ignore a failing compiler to obtain
-a green result. Report any diagnostic that cannot be resolved as unfinished
-validation; do not describe that build as clean.
+a green result. Report unresolved project diagnostics as unfinished validation.
+
+Warnings originating in third-party dependency source do not need to be fixed
+and are not merge blockers on their own. Record their provenance separately;
+do not describe a build containing them as warning-free. Avoid local patches
+to dependencies. Prefer supported dependency versions, upstream fixes, or
+changes to our own integration when a dependency causes a build failure or a
+demonstrated correctness or compatibility problem. Do not expand a task into
+dependency warning cleanup.
 
 ### Compiler-pipeline performance
 
