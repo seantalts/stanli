@@ -293,7 +293,7 @@ jobs:
             deps/stanc3/stanli-vectorize-probe.stamp
             deps/ocaml-include
           key: >-
-            stanc-embed-v2-${{ matrix.plat }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}${{ runner.os == 'macOS' && format('-hostdeps-{0}', hashFiles('.github/macos/**')) || '' }}
+            stanc-embed-v2-${{ matrix.plat }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}${{ runner.os == 'macOS' && format('-hostdeps-v2-{0}', hashFiles('.github/macos/**')) || '' }}
 
       # Finished artifacts remain exact-keyed. On a miss, reuse the expensive
       # OCaml switch independently of edits to our compiler overlay. Use an
@@ -377,9 +377,10 @@ jobs:
             git -C deps/stanc3-src clean -ffd -e _build
           fi
           if [ "$(uname -s)" = Darwin ]; then
-            # opam normally deletes successful compiler output before the
-            # artifact step can retain it for diagnostic review.
-            export OPAMKEEPLOGS=1
+            # OPAMKEEPLOGS does not prevent successful package logs from
+            # being deleted. Stream their complete output into the retained
+            # setup log; the hostdeps-v2 key forces this diagnostic rebuild.
+            export OPAMVERBOSE=1
           fi
           opam init --bare --disable-sandboxing --no-setup -y
           ./tools/dev_setup.sh --embed --no-build 2>&1 | tee "$RUNNER_TEMP/stanli-ocaml-build.log"
