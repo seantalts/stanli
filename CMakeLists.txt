@@ -589,13 +589,17 @@ function(stanli_embed_stanc TGT)
           COMMAND "${STANLI_OCAML_STDLIB}/../../bin/ocamlopt.exe"
                   -config-var c_compiler
           OUTPUT_VARIABLE _ocaml_cc OUTPUT_STRIP_TRAILING_WHITESPACE
-          COMMAND_ERROR_IS_FATAL ANY)
+          RESULT_VARIABLE _ocaml_cc_result)
+        if(NOT _ocaml_cc_result EQUAL 0)
+          message(FATAL_ERROR "Could not read OCaml's C compiler")
+        endif()
         separate_arguments(_ocaml_cc NATIVE_COMMAND "${_ocaml_cc}")
         execute_process(
           COMMAND ${_ocaml_cc} -print-file-name=libgcc_eh.a
           OUTPUT_VARIABLE _ocaml_gcc_eh OUTPUT_STRIP_TRAILING_WHITESPACE
-          COMMAND_ERROR_IS_FATAL ANY)
-        if(NOT IS_ABSOLUTE "${_ocaml_gcc_eh}" OR NOT EXISTS "${_ocaml_gcc_eh}")
+          RESULT_VARIABLE _ocaml_gcc_eh_result)
+        if(NOT _ocaml_gcc_eh_result EQUAL 0 OR
+           NOT IS_ABSOLUTE "${_ocaml_gcc_eh}" OR NOT EXISTS "${_ocaml_gcc_eh}")
           message(FATAL_ERROR "Could not locate OCaml's libgcc_eh.a: ${_ocaml_gcc_eh}")
         endif()
         list(FIND _ocaml_libraries "-lgcc_eh" _ocaml_gcc_eh_index)
