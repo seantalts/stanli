@@ -1,0 +1,62 @@
+name: GCC triangular adjoint probe
+on:
+  push:
+    branches: [diagnostic/gcc-triangular-adjoint]
+permissions:
+  contents: read
+  packages: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/seantalts/stanli-manylinux:2_28-x86_64
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./deps/fetch.sh
+      - name: Baseline
+        shell: bash
+        run: |
+          mkdir evidence
+          g++ --version | tee evidence/compiler.txt
+          flags=(-std=c++17 -O3 -DNDEBUG -D_REENTRANT -DBOOST_DISABLE_ASSERTS -ffp-contract=off
+            -Ideps/math -Ideps/math/lib/eigen_5.0.1 -Ideps/math/lib/boost_1.87.0
+            -Ideps/math/lib/sundials_6.1.1/include -Ideps/math/lib/tbb_2020.3/include)
+          g++ "${flags[@]}" tests/triangular_adjoint_probe.cpp tests/tbb_stub.cpp -o evidence/baseline 2>&1 | tee evidence/baseline-build.log
+          evidence/baseline > evidence/baseline-values.txt
+      - name: Explicit adjoint ownership
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('deps/math/stan/math/rev/fun/mdivide_left_tri.hpp')
+          s = p.read_text()
+          old = '''    matrix_d adjB;
+
+              adjB = Map<matrix_d>(A_, M_, M_)
+                         .template triangularView<TriView>()
+                         .transpose()
+                         .solve(Map<matrix_vi>(variRefC_, M_, N_).adj());'''
+          new = '''    matrix_d adjB = Map<matrix_vi>(variRefC_, M_, N_).adj();
+
+              Map<matrix_d>(A_, M_, M_)
+                  .template triangularView<TriView>()
+                  .transpose()
+                  .solveInPlace(adjB);'''
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, new))
+          PY
+          flags=(-std=c++17 -O3 -DNDEBUG -D_REENTRANT -DBOOST_DISABLE_ASSERTS -ffp-contract=off
+            -Ideps/math -Ideps/math/lib/eigen_5.0.1 -Ideps/math/lib/boost_1.87.0
+            -Ideps/math/lib/sundials_6.1.1/include -Ideps/math/lib/tbb_2020.3/include)
+          g++ "${flags[@]}" -Werror=free-nonheap-object tests/triangular_adjoint_probe.cpp tests/tbb_stub.cpp -o evidence/candidate 2>&1 | tee evidence/candidate-build.log
+          evidence/candidate > evidence/candidate-values.txt
+          diff -u evidence/baseline-values.txt evidence/candidate-values.txt
+          git -C deps/math diff > evidence/dependency.patch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gcc-triangular-adjoint-evidence
+          path: evidence/
