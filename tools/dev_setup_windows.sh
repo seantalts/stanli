@@ -40,6 +40,6 @@ export PATH="$msys_root/$msys_env/bin:$msys_root/usr/bin:$PATH"
 for tool in git make; do
   have "$tool" || pacman -S --needed --noconfirm "$tool"
 done
-for tool in clang cmake python; do
+for tool in clang lld cmake python; do
   have "$tool" || pacman -S --needed --noconfirm "$msys_package_prefix-$tool"
 done

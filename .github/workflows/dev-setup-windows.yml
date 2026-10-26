@@ -58,7 +58,7 @@ jobs:
           # Keep the action-installed opam on PATH in the MSYS2 shell.
           path-type: inherit
           install: git make curl ${{ matrix.ocaml_packages }}
-          pacboy: clang:p llvm-tools:p cmake:p python:p ccache:p
+          pacboy: clang:p lld:p llvm-tools:p cmake:p python:p ccache:p
 
       - name: Check setup script contracts before the expensive build
         shell: msys2 {0}

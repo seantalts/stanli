@@ -78,6 +78,12 @@ endif()
 if(MINGW)
   # Keep source lines without duplicating full type information in every test.
   add_compile_options("$<$<CONFIG:RelWithDebInfo>:-g1>")
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    # GNU ld warns about differently padded COMDAT sections when Clang
+    # objects link static libstdc++. Use LLVM's linker for this toolchain.
+    # https://github.com/llvm/llvm-project/issues/171026
+    add_link_options(-fuse-ld=lld)
+  endif()
 endif()
 
 set(DEPS ${CMAKE_CURRENT_SOURCE_DIR}/deps)
