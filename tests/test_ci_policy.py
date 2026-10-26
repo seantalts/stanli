@@ -201,7 +201,9 @@ class CiPolicyTest(unittest.TestCase):
                         "build": "success" if heavy == "true" else "skipped",
                         "windows": "success" if heavy == "true" else "skipped",
                         "browser-compiler": "success" if heavy == "true" else "skipped",
-                        "r-tests": "success" if heavy == "true" else "skipped"}
+                        "r-tests": "success" if heavy == "true" else "skipped",
+                        "stanc-windows": "success" if heavy == "true" else "skipped",
+                        "windows-compiler": "success" if heavy == "true" else "skipped"}
             self.assertEqual(self.gate(heavy, expected), 0)
             for job in expected:
                 for result in ("success", "failure", "cancelled", "skipped", ""):

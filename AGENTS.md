@@ -129,11 +129,12 @@ release's entry from the pull requests merged since the previous tag (see
 [`RELEASING.md`](RELEASING.md)), so describe user-visible changes in the
 pull request body.
 
-Before pushing, run `tools/format.sh` with the clang-format version
-`lint.yml` pins, and the tests for what changed, including R tests that
-need `STANLI_RUN`. Open the pull request with auto-merge on
+Before pushing, run `tools/format.sh --check` with the clang-format version
+`lint.yml` pins, and the tests for what changed. R interface changes also
+need the relevant R tests with `STANLI_RUN`. Open the pull request with auto-merge on
 (`gh pr merge --auto --merge`): the required `manylinux_2_28_x86_64` gate
-waits for every PR job, and branch protection also requires `format`.
+waits for the required build, interface and compiler checks, and branch
+protection also requires `format`.
 
 [`TESTING.md`](TESTING.md) documents the actual numerical gates, exceptions,
 and CI coverage; [`docs/benchmarks.md`](docs/benchmarks.md#how-we-measure)
