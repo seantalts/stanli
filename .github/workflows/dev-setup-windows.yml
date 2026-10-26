@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 # Full native setup is postsubmit; PRs keep the fast setup contract checks.
 # Let cache-producing runs finish so later main builds can reuse their work.
@@ -42,7 +41,7 @@ jobs:
           - os: windows-latest
             msystem: CLANG64
             setup_args: ''
-            ocaml_packages: mingw-w64-x86_64-gcc mingw-w64-x86_64-gdb
+            ocaml_packages: mingw-w64-x86_64-gcc
           - os: windows-11-arm
             msystem: CLANGARM64
             setup_args: --no-embed
@@ -166,44 +165,6 @@ jobs:
         run: |
           source tools/build_jobs.sh
           ctest --test-dir build --parallel "$(stanli_detect_build_jobs)" --output-on-failure
-
-      - uses: actions/download-artifact@v4
-        if: failure() && matrix.os == 'windows-latest'
-        with:
-          name: windows-compilers
-          run-id: 40263738456
-          github-token: ${{ github.token }}
-          path: probe-compilers
-
-      - name: Diagnose native embedding after test failure
-        if: failure() && matrix.os == 'windows-latest'
-        shell: msys2 {0}
-        run: python tools/probe_windows_exceptions.py embedded
-
-      - name: Compare embedding with dynamic C++ libraries
-        if: failure() && matrix.os == 'windows-latest'
-        shell: msys2 {0}
-        run: python tools/probe_windows_exceptions.py embedded-dynamic
-
-      - name: Compare without embedding after test failure
-        if: failure() && matrix.os == 'windows-latest'
-        shell: msys2 {0}
-        run: |
-          source tools/build_jobs.sh
-          cmake -B build -DSTANLI_STANC_EMBED_OBJ= -DSTANLI_OCAML_STDLIB=
-          cmake --build build --target stanli_check --parallel "$(stanli_detect_build_jobs)"
-          python tools/probe_windows_exceptions.py external
-
-      - name: Compare without embedding with static C++ libraries
-        if: failure() && matrix.os == 'windows-latest'
-        shell: msys2 {0}
-        run: python tools/probe_windows_exceptions.py external-static
-
-      - uses: actions/upload-artifact@v4
-        if: failure() && matrix.os == 'windows-latest'
-        with:
-          name: windows-exception-probe
-          path: exception-probe
 
       - name: C++ cache statistics
         if: always()

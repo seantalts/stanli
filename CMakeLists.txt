@@ -554,7 +554,8 @@ elseif(UNIX)
 endif()
 
 # In-process stanc3: link the OCaml-compiled embed object
-# (tools/stanc_embed/build.sh produces deps/stanc3/stanc_embed.o).
+# (tools/stanc_embed/build.sh produces deps/stanc3/stanc_embed.o, an archive
+# of the original objects on Windows to preserve PE unwind relocations).
 set(STANLI_STANC_EMBED_OBJ "" CACHE FILEPATH
     "stanc_embed.o built by tools/stanc_embed/build.sh; enables in-process stanc")
 set(STANLI_OCAML_STDLIB "" CACHE PATH
@@ -1472,6 +1473,16 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_conformance_harness
            COMMAND ${Python3_EXECUTABLE} tests/test_conformance.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_pe_unwind
+           COMMAND ${Python3_EXECUTABLE} tests/test_pe_unwind.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  if(WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$")
+    add_test(NAME test_windows_unwind_tables
+             COMMAND ${Python3_EXECUTABLE} tools/check_pe_unwind.py
+                     $<TARGET_FILE:stanli_check> $<TARGET_FILE:stanli_run>
+                     $<TARGET_FILE:stanli_shared>
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endif()
   add_test(NAME test_function_model_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_function_models.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

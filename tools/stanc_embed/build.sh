@@ -50,6 +50,8 @@ fi
    src/stanc_embed)
 if [ "$OCAML_OS_TYPE" = Win32 ]; then
   "${PYTHON:-python}" tools/stanc_embed/build_windows.py "$SRC" "$BUILD_JOBS"
+  # Windows keeps the original C objects in an archive under the established
+  # artifact name; partial linking would corrupt their PE unwind records.
   OBJ="$SRC/_build/stanc_embed.static.o"
 else
   if ! (cd "$SRC" && dune build -j "$BUILD_JOBS" --profile release \
