@@ -55,9 +55,9 @@ if [ "$OCAML_OS_TYPE" = Win32 ]; then
   OBJ="$SRC/_build/stanc_embed.static.o"
 else
   if ! (cd "$SRC" && dune build -j "$BUILD_JOBS" --profile release \
-      src/stanc_embed/stanc_embed.exe.o 2>&1 | tail -5); then
+      src/stanc_embed/stanc_embed.exe.o); then
     (cd "$SRC" && dune build -j "$BUILD_JOBS" --profile release \
-      src/stanc_embed 2>&1 | tail -5)
+      src/stanc_embed)
   fi
   OBJ=$(find "$SRC/_build" -path '*/src/stanc_embed/stanc_embed*.o' | head -1)
 fi
