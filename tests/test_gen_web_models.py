@@ -53,7 +53,8 @@ class CurrentBenchmarkTests(unittest.TestCase):
     def test_current_headlines_use_validated_paired_ratios(self):
         self.write()
         catalog, rows, manifest = gen_docs.current_benchmark()
-        self.assertIn("good", catalog)
+        self.assertIn("`good`", catalog["table"])
+        self.assertIn("`failed`", catalog["failures"])
         self.assertEqual(gen_docs.corpus_stats(rows), (1, self.row["paired_speedup"], 1))
         self.assertEqual(manifest["started_utc"][:10], "2026-09-21")
 
@@ -83,12 +84,19 @@ class CurrentBenchmarkTests(unittest.TestCase):
         (self.root / "docs/internal/artifacts/corpus-refs.json.gz").write_bytes(gzip.compress(json.dumps({
             "models": {"pdb_case": {"points": [{}, {}, {}]}}}).encode()))
         self.write_fast()
-        with mock.patch.object(gen_docs, "render_gradient_catalog", return_value="validated vector table") as vector:
+        (self.directory / "build-identity.json").write_text(json.dumps(
+            {"host": ["Test Chip", str(8 * 2**30)]}))
+        sections = {"summary": "validated vector summary", "runs": "validated vector runs"}
+        with mock.patch.object(gen_docs, "render_vectorized_sections", return_value=sections) as vector:
             stats = gen_docs.compute()
         vector.assert_called_once_with()
         self.assertEqual(stats["fast_geomean"], "2.00x")
         self.assertEqual(stats["fast_population"], "1")
-        self.assertEqual(stats["benchmark_vectorized_catalog"], "validated vector table")
+        self.assertEqual(stats["benchmark_vectorized_summary"], "validated vector summary")
+        self.assertTrue(stats["benchmark_runs"].endswith("validated vector runs"))
+        self.assertEqual(stats["benchmark_hardware"], "Test Chip")
+        self.assertEqual(stats["benchmark_host"], "Test Chip, " + self.manifest["identity"]["machine"]["platform"]
+                         + f", {self.manifest['identity']['machine']['logical_cpus']} logical CPUs, 8 GiB RAM")
         self.assertEqual(stats["benchmark_models"], "2")
         self.assertEqual(stats["benchmark_stan_math"], "`" + "m" * 40 + "`")
         self.assertEqual(stats["benchmark_source"], "`" + "s" * 40 + "`")
@@ -106,7 +114,7 @@ class CurrentBenchmarkTests(unittest.TestCase):
         for row in (self.row, self.records[0]["row"]):
             row.update(cmdstan_build_s="", cmdstan_estimated_s="", note="build failed")
         self.write()
-        with mock.patch.object(gen_docs, "render_gradient_catalog", return_value="validated vector table"):
+        with mock.patch.object(gen_docs, "render_vectorized_sections", return_value=sections):
             stats = gen_docs.compute()
         self.assertEqual(stats["benchmark_models"], "2")
         self.assertNotIn("benchmark_n_sampling", stats)
