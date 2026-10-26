@@ -565,8 +565,15 @@ set(STANLI_OCAML_STDLIB "" CACHE PATH
 # static library every target shares.
 function(stanli_embed_stanc TGT)
   if(STANLI_STANC_EMBED_OBJ)
-    target_sources(${TGT} PRIVATE
-      runtime/src/stanc_embed_c.cpp ${STANLI_STANC_EMBED_OBJ})
+    target_sources(${TGT} PRIVATE runtime/src/stanc_embed_c.cpp)
+    if(WIN32)
+      # This artifact is an archive on Windows. Treating it as a source
+      # nests it inside CMake's objects.a with Makefile generators, which
+      # the final linker cannot consume as an object member.
+      target_link_libraries(${TGT} PRIVATE ${STANLI_STANC_EMBED_OBJ})
+    else()
+      target_sources(${TGT} PRIVATE ${STANLI_STANC_EMBED_OBJ})
+    endif()
     target_include_directories(${TGT} PRIVATE ${STANLI_OCAML_STDLIB})
     target_compile_definitions(${TGT} PRIVATE STANLI_EMBED_STANC)
     target_link_libraries(${TGT} PRIVATE ${CMAKE_DL_LIBS} pthread)
