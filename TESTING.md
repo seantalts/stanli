@@ -157,8 +157,8 @@ holds 353 models at 3 deterministic points each: 1059 points and 364,814 log
 density and gradient values. The models are 119 posteriordb models that
 evaluate, 11 language fixtures adapted from stanc3's tests, 124 brms 2.23.0
 models, 62 Rethinking fixtures, 13 Aalto lesson fixtures, 22 models from the
-cogmod package's custom brms families, and ctsem's state-space template at two
-data sizes. 351 models also carry `write_array` rows at the same points (1050
+cogmod package's custom brms families, and ctsem's state-space template with three
+data sets. 351 models also carry `write_array` rows at the same points (1050
 rows, 678,933 values over constrained parameters, transformed parameters and
 generated quantities), with column names compared exactly. Both drivers seed
 Stan's RNG with 1234 and chain 0, so generated quantities compare too. An

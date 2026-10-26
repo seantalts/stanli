@@ -6388,6 +6388,1435 @@ static void recording_shape_tests() {
   }
 }
 
+struct MemoResult {
+  std::vector<std::vector<double>> evaluations;
+  std::string diagnostics, error;
+};
+
+static Node compare_node(StructuredLoop& plan, int a, int b, int out,
+                         int variant) {
+  Node n = call(plan, OP_COMPARE, {a, b}, out);
+  plan.body.ops[n.op].variant = variant;
+  return n;
+}
+
+static Node arith_node(StructuredLoop& plan, int a, int b, int out,
+                       int variant) {
+  Node n = call(plan, OP_INT_ARITH, {a, b}, out);
+  plan.body.ops[n.op].variant = variant;
+  return n;
+}
+
+static Node read_node(StructuredLoop& plan, int table, int64_t extent,
+                      int selector, int out) {
+  Node n = call(plan, OP_INDEX_DYNAMIC, {table, selector}, out);
+  attach(plan, n.op, single_spec(extent));
+  return n;
+}
+
+static Node flow_node(Node::Kind kind) {
+  Node n;
+  n.kind = kind;
+  return n;
+}
+
+static MemoResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
+                           const std::vector<int64_t>& data_lens,
+                           const std::vector<std::vector<double>>& data,
+                           bool memo, size_t extra_params = 0,
+                           const std::vector<std::vector<double>>& changed = {},
+                           bool shipped = false) {
+  std::vector<int64_t> param_lens = {1, 1};
+  if (extra_params) param_lens.push_back(static_cast<int64_t>(extra_params));
+  const Graph graph = outer(plan, param_lens, data_lens);
+  test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+  if (!shipped) {
+    test_setenv("STANLI_DATA_LOOP_MEMO_MIN_WORK", "0");
+    test_setenv("STANLI_DATA_LOOP_MEMO_MIN_RATIO", "0");
+  }
+  Executor executor = diagnosed_executor(graph);
+  test_unsetenv("STANLI_STRUCTURED_FRAMES");
+  const size_t first_data = param_lens.size();
+  for (size_t i = 0; i < data.size(); ++i)
+    std::copy(data[i].begin(), data[i].end(),
+              executor.value_ptr(first_data + i));
+  if (memo)
+    test_unsetenv("STANLI_NO_DATA_LOOP_MEMO");
+  else
+    test_setenv("STANLI_NO_DATA_LOOP_MEMO", "1");
+  MemoResult result;
+  for (double theta : {.25, -.5, .25, .75, -.25}) {
+    if (result.evaluations.size() == 3 && !changed.empty())
+      for (size_t i = 0; i < changed.size(); ++i)
+        std::copy(changed[i].begin(), changed[i].end(),
+                  executor.value_ptr(first_data + i));
+    for (size_t k = 0; k < extra_params; ++k)
+      executor.params_data()[2 + k] = .3 + .17 * static_cast<double>(k) * theta;
+    stanli_test::StdoutCapture capture(stderr);
+    try {
+      executor.params_data()[0] = theta;
+      executor.params_data()[1] = .5;
+      std::vector<double> gradient(static_cast<size_t>(executor.n_params()));
+      const double value = executor.gradient(gradient.data());
+      gradient.insert(gradient.begin(), value);
+      result.evaluations.push_back(std::move(gradient));
+    } catch (const std::exception& error) {
+      result.error = error.what();
+    }
+    const auto diagnostics = capture.finish();
+    if (result.diagnostics.empty()) result.diagnostics = diagnostics;
+    if (!result.error.empty()) break;
+  }
+  test_unsetenv("STANLI_NO_DATA_LOOP_MEMO");
+  test_unsetenv("STANLI_DATA_LOOP_MEMO_MIN_WORK");
+  test_unsetenv("STANLI_DATA_LOOP_MEMO_MIN_RATIO");
+  return result;
+}
+
+static bool memo_same(const MemoResult& a, const MemoResult& b) {
+  if (a.error != b.error || a.evaluations.size() != b.evaluations.size())
+    return false;
+  for (size_t i = 0; i < a.evaluations.size(); ++i)
+    if (a.evaluations[i].size() != b.evaluations[i].size() ||
+        std::memcmp(a.evaluations[i].data(), b.evaluations[i].data(),
+                    a.evaluations[i].size() * sizeof(double)) != 0)
+      return false;
+  return true;
+}
+
+static size_t memo_field(const MemoResult& result, const char* name) {
+  return reported_field(result.diagnostics, name);
+}
+
+// Compares memo on and off bitwise. A negative expectation skips that count.
+static MemoResult memo_check(const char* name,
+                             const std::shared_ptr<StructuredLoop>& plan,
+                             const std::vector<int64_t>& data_lens,
+                             const std::vector<std::vector<double>>& data,
+                             long hits, long misses = -1,
+                             size_t extra_params = 0) {
+  const MemoResult on = memo_run(plan, data_lens, data, true, extra_params);
+  const MemoResult off = memo_run(plan, data_lens, data, false, extra_params);
+  const std::string label = std::string("data loop memo ") + name;
+  check(on.error == off.error, (label + " preserves the error").c_str());
+  check(memo_same(on, off),
+        (label + " is bitwise identical to memo off").c_str());
+  const auto counts = [&]() {
+    std::printf(
+        "  candidates=%zu hits=%zu misses=%zu aborted=%zu skipped=%zu\n",
+        memo_field(on, "memo_candidates="), memo_field(on, "memo_hits="),
+        memo_field(on, "memo_misses="), memo_field(on, "memo_aborted="),
+        memo_field(on, "memo_skipped="));
+  };
+  if (hits >= 0 && memo_field(on, "memo_hits=") != static_cast<size_t>(hits)) {
+    counts();
+    check(false, (label + " hit count").c_str());
+  }
+  if (misses >= 0 &&
+      memo_field(on, "memo_misses=") != static_cast<size_t>(misses)) {
+    counts();
+    check(false, (label + " miss count").c_str());
+  }
+  if (off.error.empty())
+    check(memo_field(off, "memo_hits=") == 0 &&
+              memo_field(off, "memo_candidates=") == 0,
+          (label + " is inert when disabled").c_str());
+  return on;
+}
+
+struct ScanFixture {
+  std::shared_ptr<StructuredLoop> plan;
+  std::vector<int64_t> lens;
+};
+
+enum class ScanKey { Modulo, Trip, Flag, FlagAndRaw };
+
+static ScanFixture scan_plan(ScanKey key_mode, bool flag_after = false,
+                             bool exits = false) {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh(), trips = fresh(), rows = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int trip = fresh(), key = fresh(), row = fresh(), picked = fresh();
+  const int same = fresh(), hot = fresh(), changed = fresh();
+  const int gate = fresh(), shifted = fresh(), shifted_hot = fresh();
+  const int skip = fresh(), stop = fresh();
+  const int one = scalar(*plan, 1), zero = scalar(*plan, 0);
+  const int three = scalar(*plan, 3), five = scalar(*plan, 5);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true},
+                   {trips, 3, 0, false, true},
+                   {rows, 4, 0, false, true}};
+  std::vector<Node> head;
+  if (key_mode == ScanKey::Modulo)
+    head.push_back(arith_node(*plan, trip, three, key, 4));
+  else
+    head.push_back(arith_node(*plan, trip, zero, key, 0));
+  std::vector<Node> body;
+  body.push_back(read_node(*plan, tab, 6, row, picked));
+  if (key_mode == ScanKey::Flag || key_mode == ScanKey::FlagAndRaw) {
+    body.push_back(compare_node(*plan, trip, three, gate, 2));
+    body.push_back(compare_node(*plan, picked, zero, same, 2));
+  } else {
+    body.push_back(compare_node(*plan, picked, key, same, 4));
+  }
+  if (exits) {
+    body.push_back(compare_node(*plan, row, one, skip, 4));
+    body.push_back(branch(skip, flow_node(Node::Continue), sequence({})));
+    body.push_back(compare_node(*plan, row, five, stop, 4));
+    body.push_back(branch(stop, flow_node(Node::Break), sequence({})));
+  }
+  std::vector<Node> then;
+  then.push_back(call(*plan, OP_MUL, {theta, picked}, hot));
+  then.push_back(target(hot));
+  if (flag_after) then.push_back(alias(changed, one));
+  if (key_mode == ScanKey::FlagAndRaw) {
+    then.push_back(arith_node(*plan, trip, row, shifted, 0));
+    then.push_back(call(*plan, OP_MUL, {theta, shifted}, shifted_hot));
+    then.push_back(target(shifted_hot));
+  }
+  if (key_mode == ScanKey::Flag || key_mode == ScanKey::FlagAndRaw) {
+    body.push_back(branch(gate,
+                          branch(same, sequence(std::move(then)), sequence({})),
+                          sequence({})));
+  } else {
+    body.push_back(branch(same, sequence(std::move(then)), sequence({})));
+  }
+  head.push_back(counted(one, rows, row, sequence(std::move(body))));
+  if (flag_after) {
+    head.insert(head.begin(), alias(changed, zero));
+    head.push_back(branch(changed, target(theta), target(beta)));
+  }
+  plan->root = counted(one, trips, trip, sequence(std::move(head)));
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6, 1, 1}};
+}
+
+static void data_loop_memo_basic_tests() {
+  const std::vector<double> table = {0, 1, 0, 1, 1, 0};
+  {
+    const auto f = scan_plan(ScanKey::Modulo);
+    memo_check("repeated keys", f.plan, f.lens, {table, {6}, {6}}, 3, 3);
+  }
+  {
+    const auto f = scan_plan(ScanKey::Trip);
+    memo_check("outer-varying control", f.plan, f.lens,
+               {{1, 2, 3, 1, 2, 3}, {6}, {6}}, 0, 6);
+  }
+  {
+    const auto f = scan_plan(ScanKey::Trip);
+    memo_check("keys that never repeat stop being traced", f.plan, f.lens,
+               {{1, 2, 3, 1, 2, 3}, {40}, {6}}, 0, 32);
+  }
+  {
+    const auto f = scan_plan(ScanKey::Modulo, true);
+    memo_check("loop-written local read after the loop", f.plan, f.lens,
+               {table, {6}, {6}}, 3, 3);
+  }
+  {
+    const auto f = scan_plan(ScanKey::Modulo, false, true);
+    memo_check("break and continue", f.plan, f.lens, {table, {6}, {6}}, 3, 3);
+  }
+  {
+    const auto f = scan_plan(ScanKey::Flag);
+    memo_check("invariant comparison keys on its result", f.plan, f.lens,
+               {table, {6}, {6}}, 4, 2);
+  }
+  {
+    const auto f = scan_plan(ScanKey::FlagAndRaw);
+    memo_check("raw and invariant read of one outer value", f.plan, f.lens,
+               {table, {6}, {6}}, 0, 6);
+  }
+}
+
+static ScanFixture nested_memo_plan() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh(), trips = fresh(), rows = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int inner_tab = plan->body.add_slot(3, false);
+  const int trip = fresh(), key = fresh(), row = fresh(), picked = fresh();
+  const int count = fresh(), next_count = fresh(), q = fresh(), qv = fresh();
+  const int match = fresh(), counter = fresh(), next_counter = fresh();
+  const int running = fresh(), positive = fresh(), hot = fresh();
+  const int one = scalar(*plan, 1), zero = scalar(*plan, 0);
+  const int two = scalar(*plan, 2), three = scalar(*plan, 3);
+  plan->imports = {{theta, 0, 0, true, false}, {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true},   {trips, 3, 0, false, true},
+                   {rows, 4, 0, false, true},  {inner_tab, 5, 0, false, true}};
+  Node inner = counted(
+      one, three, q,
+      sequence({read_node(*plan, inner_tab, 3, q, qv),
+                compare_node(*plan, qv, key, match, 4),
+                branch(match,
+                       sequence({arith_node(*plan, count, one, next_count, 0),
+                                 alias(count, next_count)}),
+                       sequence({}))}));
+  Node spin = while_loop(
+      running, sequence({compare_node(*plan, counter, two, running, 0)}),
+      sequence({arith_node(*plan, counter, one, next_counter, 0),
+                alias(counter, next_counter)}));
+  Node scan = counted(
+      one, rows, row,
+      sequence({read_node(*plan, tab, 6, row, picked), alias(count, zero),
+                std::move(inner), alias(counter, zero), std::move(spin),
+                compare_node(*plan, count, zero, positive, 2),
+                branch(positive,
+                       sequence({call(*plan, OP_MUL, {theta, count}, hot),
+                                 target(hot)}),
+                       sequence({}))}));
+  plan->root = counted(
+      one, trips, trip,
+      sequence({arith_node(*plan, trip, three, key, 4), std::move(scan)}));
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6, 1, 1, 3}};
+}
+
+static ScanFixture limit_plan() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh(), trips = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int limits = plan->body.add_slot(6, false);
+  const int trip = fresh(), limit = fresh(), row = fresh(), picked = fresh();
+  const int hot = fresh();
+  const int one = scalar(*plan, 1);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true},
+                   {trips, 3, 0, false, true},
+                   {limits, 4, 0, false, true}};
+  Node scan = counted(
+      one, limit, row,
+      sequence({read_node(*plan, tab, 6, row, picked),
+                call(*plan, OP_MUL, {theta, picked}, hot), target(hot)}));
+  plan->root = counted(
+      one, trips, trip,
+      sequence({read_node(*plan, limits, 6, trip, limit), std::move(scan)}));
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6, 1, 6}};
+}
+
+static ScanFixture matrix_step_plan() {
+  constexpr int rows_count = 6, matrix_rows = 3, matrix_cols = 2;
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int row_table = plan->body.add_slot(rows_count, false);
+  const int col_table = plan->body.add_slot(rows_count, false);
+  const int kind_table = plan->body.add_slot(rows_count, false);
+  const int matrix = plan->body.add_slot(matrix_rows * matrix_cols, false);
+  const int updated = plan->body.add_slot(matrix_rows * matrix_cols, false);
+  const int trip = fresh(), key = fresh(), row = fresh(), r = fresh();
+  const int c = fresh(), kind = fresh(), same = fresh(), value = fresh();
+  const int cell = fresh(), cells = fresh();
+  const int one = scalar(*plan, 1), three = scalar(*plan, 3);
+  const int six = scalar(*plan, matrix_rows * matrix_cols);
+  const int trips = scalar(*plan, 6), rows = scalar(*plan, rows_count);
+  plan->fills.push_back({matrix, std::vector<double>(6, 0.0)});
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {row_table, 2, 0, false, true},
+                   {col_table, 3, 0, false, true},
+                   {kind_table, 4, 0, false, true}};
+  Node write =
+      call(*plan, OP_SET_INDEX_DYNAMIC, {matrix, r, c, value}, updated);
+  {
+    auto spec = std::make_shared<DynamicIndexSpec>();
+    spec->selected_size = 1;
+    spec->input_count = 4;
+    spec->rhs_input = 3;
+    spec->axes.push_back(
+        {DynamicIndexSpec::Axis::Single, matrix_rows, matrix_cols, 1, 0});
+    spec->axes.push_back(
+        {DynamicIndexSpec::Axis::Single, matrix_cols, 1, 1, 0});
+    spec->axes[0].selector_input = 1;
+    spec->axes[1].selector_input = 2;
+    attach(*plan, write.op, spec);
+  }
+  Node scan = counted(
+      one, rows, row,
+      sequence(
+          {read_node(*plan, kind_table, rows_count, row, kind),
+           compare_node(*plan, kind, key, same, 4),
+           branch(same,
+                  sequence({read_node(*plan, row_table, rows_count, row, r),
+                            read_node(*plan, col_table, rows_count, row, c),
+                            call(*plan, OP_MUL, {theta, kind}, value),
+                            std::move(write), alias(matrix, updated)}),
+                  sequence({}))}));
+  Node sum = counted(
+      one, six, cells,
+      sequence(
+          {read_node(*plan, matrix, matrix_rows * matrix_cols, cells, cell),
+           target(cell)}));
+  plan->root = counted(
+      one, trips, trip,
+      sequence({arith_node(*plan, trip, three, key, 4), std::move(scan)}));
+  Node whole = sequence({std::move(plan->root), std::move(sum)});
+  plan->root = std::move(whole);
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {rows_count, rows_count, rows_count}};
+}
+
+static void data_loop_memo_retry_tests() {
+  const auto f = limit_plan();
+  std::vector<double> results[2];
+  for (int memo = 0; memo < 2; ++memo) {
+    const Graph graph = outer(f.plan, {1, 1}, f.lens);
+    test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+    test_setenv("STANLI_DATA_LOOP_MEMO_MIN_WORK", "0");
+    test_setenv("STANLI_DATA_LOOP_MEMO_MIN_RATIO", "0");
+    Executor executor(graph);
+    test_unsetenv("STANLI_STRUCTURED_FRAMES");
+    if (memo)
+      test_unsetenv("STANLI_NO_DATA_LOOP_MEMO");
+    else
+      test_setenv("STANLI_NO_DATA_LOOP_MEMO", "1");
+    const double table[] = {1, 2, 3, 4, 5, 6};
+    std::copy_n(table, 6, executor.value_ptr(2));
+    executor.value_ptr(3)[0] = 6;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+      const double bad[] = {3, 3, 3, 3, 7, 3}, good[] = {3, 3, 3, 3, 3, 3};
+      std::copy_n(attempt == 1 ? good : bad, 6, executor.value_ptr(4));
+      bool threw = false;
+      try {
+        const auto value = evaluate(executor, .25 * (attempt + 1), .5);
+        results[memo].push_back(value.value);
+        results[memo].push_back(value.gradient[0]);
+      } catch (const std::out_of_range&) {
+        threw = true;
+        results[memo].push_back(-1);
+      }
+      check(threw == (attempt != 1),
+            "data loop memo recording retries after a failed recording");
+    }
+    test_unsetenv("STANLI_NO_DATA_LOOP_MEMO");
+    test_unsetenv("STANLI_DATA_LOOP_MEMO_MIN_WORK");
+    test_unsetenv("STANLI_DATA_LOOP_MEMO_MIN_RATIO");
+  }
+  check(results[0].size() == results[1].size() &&
+            std::memcmp(results[0].data(), results[1].data(),
+                        results[0].size() * sizeof(double)) == 0,
+        "data loop memo failed recordings leave no stale state");
+}
+
+static std::vector<double> memo_call_log;
+static void memo_logged_mul(KernelCtx& context) {
+  memo_call_log.push_back(context.in[0].data[0]);
+  memo_call_log.push_back(context.in[1].data[0]);
+  find_kernel(OP_MUL)->forward(context);
+}
+
+static void data_loop_memo_order_tests() {
+  auto f = scan_plan(ScanKey::Modulo);
+  int mul_op = -1;
+  for (size_t i = 0; i < f.plan->body.ops.size(); ++i)
+    if (f.plan->body.ops[i].opcode == OP_MUL) mul_op = static_cast<int>(i);
+  check(set_forward(f.plan->root, mul_op, memo_logged_mul),
+        "data loop memo order fixture installs its callback");
+  std::vector<double> logs[2];
+  for (int memo = 0; memo < 2; ++memo) {
+    memo_call_log.clear();
+    const auto result =
+        memo_run(f.plan, f.lens, {{0, 1, 0, 1, 1, 0}, {6}, {6}}, memo != 0);
+    logs[memo] = memo_call_log;
+    check(memo == 0 || memo_field(result, "memo_hits=") == 3,
+          "data loop memo order fixture still memoizes its loop");
+  }
+  check(!logs[0].empty() && logs[0] == logs[1],
+        "data loop memo preserves the order and operands of effectful steps");
+}
+
+static void data_loop_memo_structure_tests() {
+  {
+    const auto f = nested_memo_plan();
+    memo_check("nested for and while loops", f.plan, f.lens,
+               {{0, 1, 2, 1, 1, 0}, {6}, {6}, {0, 1, 1}}, 3, 3);
+  }
+  {
+    const auto f = limit_plan();
+    const std::vector<double> table = {1, 2, 3, 4, 5, 6};
+    memo_check("repeated bounds", f.plan, f.lens,
+               {table, {6}, {3, 3, 3, 3, 3, 3}}, 5, 1);
+    memo_check("bounds that vary with the outer iteration", f.plan, f.lens,
+               {table, {6}, {1, 2, 3, 4, 5, 6}}, 0, 6);
+    memo_check("index failure on the first outer iteration", f.plan, f.lens,
+               {table, {6}, {7, 6, 6, 6, 6, 6}}, -1);
+    memo_check("index failure on a later outer iteration", f.plan, f.lens,
+               {table, {6}, {6, 6, 6, 6, 7, 6}}, -1);
+    memo_check("index failure after repeated keys", f.plan, f.lens,
+               {table, {6}, {3, 3, 3, 3, 7, 3}}, -1);
+  }
+  {
+    const auto f = matrix_step_plan();
+    memo_check(
+        "updates whose data operands change with the row", f.plan, f.lens,
+        {{1, 2, 3, 1, 2, 3}, {1, 2, 1, 2, 1, 2}, {0, 1, 2, 0, 1, 2}}, 3, 3);
+  }
+}
+
+static Node matrix_read(StructuredLoop& plan, int table, int64_t rows,
+                        int64_t columns, int row, int column, int out) {
+  Node n = call(plan, OP_INDEX_DYNAMIC, {table, row, column}, out);
+  auto spec = std::make_shared<DynamicIndexSpec>();
+  spec->selected_size = 1;
+  spec->input_count = 3;
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, rows, columns, 1, 0});
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, columns, 1, 1, 0});
+  spec->axes[0].selector_input = 1;
+  spec->axes[1].selector_input = 2;
+  attach(plan, n.op, spec);
+  return n;
+}
+
+static Node cell_write(StructuredLoop& plan, int base, int r, int c, int value,
+                       int out, int64_t rows, int64_t columns) {
+  Node n = call(plan, OP_SET_INDEX_DYNAMIC, {base, r, c, value}, out);
+  auto spec = std::make_shared<DynamicIndexSpec>();
+  spec->selected_size = 1;
+  spec->input_count = 4;
+  spec->rhs_input = 3;
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, rows, columns, 1, 0});
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, columns, 1, 1, 0});
+  spec->axes[0].selector_input = 1;
+  spec->axes[1].selector_input = 2;
+  attach(plan, n.op, spec);
+  return n;
+}
+
+// A scan over a setup table in the shape of a generated model: a per-row
+// boolean chain built from folded kernels and aliases, a population/individual
+// test on the outer subject, a counting loop, and parameter-dependent matrix
+// updates addressed by table columns.
+static ScanFixture setup_scan_plan(bool vary_subject) {
+  constexpr int setup_rows = 8, setup_columns = 5, out_rows = 3, out_cols = 2;
+  constexpr int pars = 3, trips_count = 6;
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tf = plan->body.add_slot(pars, false);
+  const int setup = plan->body.add_slot(setup_rows * setup_columns, false);
+  const int subjects = plan->body.add_slot(trips_count, false);
+  const int base = plan->body.add_slot(out_rows * out_cols, false);
+  const int matrix = plan->body.add_slot(out_rows * out_cols, false);
+  const int updated = plan->body.add_slot(out_rows * out_cols, false);
+  const int trip = fresh(), si = fresh(), row = fresh(), id = fresh();
+  const int wanted = fresh(), population = fresh(), varied = fresh();
+  const int allowed = fresh(), go = fresh(), changed = fresh();
+  const int dest_row = fresh(), dest_col = fresh(), par = fresh();
+  const int value = fresh(), cell = fresh(), cells = fresh(), flag = fresh();
+  const int when = fresh(), counter = fresh(), next_counter = fresh();
+  const int running = fresh(), seen = fresh();
+  const int one = scalar(*plan, 1), zero = scalar(*plan, 0);
+  const int two = scalar(*plan, 2), three = scalar(*plan, 3);
+  const int four = scalar(*plan, 4), five = scalar(*plan, 5);
+  const int rows_literal = scalar(*plan, setup_rows);
+  const int trips = scalar(*plan, trips_count);
+  const int matrix_cells = scalar(*plan, out_rows * out_cols);
+  const int wanted_id = scalar(*plan, 2);
+  plan->fills.push_back({base, std::vector<double>(out_rows * out_cols, 0.0)});
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tf, 2, 0, true, false},
+                   {setup, 3, 0, false, true},
+                   {subjects, 4, 0, false, true}};
+  const auto column = [&](int col, int out) {
+    return matrix_read(*plan, setup, setup_rows, setup_columns, row,
+                       col == 1   ? one
+                       : col == 2 ? two
+                       : col == 3 ? three
+                       : col == 4 ? four
+                                  : five,
+                       out);
+  };
+  Node pick_par = call(*plan, OP_INDEX_DYNAMIC, {tf, par}, value);
+  attach(*plan, pick_par.op, single_spec(pars));
+  Node individual =
+      sequence({column(5, varied), compare_node(*plan, varied, zero, flag, 2),
+                alias(allowed, flag)});
+  Node update =
+      sequence({alias(changed, one), column(4, par), column(2, dest_row),
+                column(3, dest_col), std::move(pick_par),
+                cell_write(*plan, matrix, dest_row, dest_col, value, updated,
+                           out_rows, out_cols),
+                alias(matrix, updated)});
+  Node scan = counted(
+      one, rows_literal, row,
+      sequence({column(1, id), compare_node(*plan, id, wanted_id, wanted, 4),
+                branch(wanted,
+                       sequence({compare_node(*plan, si, zero, population, 4),
+                                 branch(population, alias(allowed, one),
+                                        std::move(individual)),
+                                 alias(counter, zero),
+                                 while_loop(
+                                     running,
+                                     sequence({compare_node(*plan, counter, two,
+                                                            running, 0)}),
+                                     sequence({arith_node(*plan, counter, one,
+                                                          next_counter, 0),
+                                               alias(counter, next_counter)})),
+                                 compare_node(*plan, counter, two, seen, 4),
+                                 arith_node(*plan, allowed, seen, go, 2),
+                                 branch(go, std::move(update), sequence({}))}),
+                       sequence({}))}));
+  Node reduce = counted(
+      one, matrix_cells, cells,
+      sequence({read_node(*plan, matrix, out_rows * out_cols, cells, cell),
+                target(cell)}));
+  plan->root = counted(
+      one, trips, trip,
+      sequence({read_node(*plan, subjects, trips_count, trip, si),
+                alias(changed, zero), alias(matrix, base), std::move(scan),
+                branch(changed, std::move(reduce), sequence({}))}));
+  (void)when;
+  (void)vary_subject;
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {setup_rows * setup_columns, trips_count}};
+}
+
+static void data_loop_memo_setup_scan_tests() {
+  const std::vector<double> setup = {2, 1, 1, 1, 1, 1, 1, 2, 2, 0, 2, 2, 1, 3,
+                                     1, 2, 3, 2, 2, 0, 3, 1, 1, 1, 1, 2, 2, 2,
+                                     1, 1, 2, 3, 1, 3, 0, 1, 2, 2, 2, 1};
+  const auto f = setup_scan_plan(true);
+  memo_check("setup-table scan with a population test", f.plan, f.lens,
+             {setup, {0, 5, 7, 0, 9, 3}}, 9, 3, 3);
+  memo_check("setup-table scan with all-population subjects", f.plan, f.lens,
+             {setup, {0, 0, 0, 0, 0, 0}}, 10, 2, 3);
+}
+
+struct FuzzRandom {
+  uint64_t state;
+  uint32_t next() {
+    state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+    return static_cast<uint32_t>(state >> 33);
+  }
+  int below(int n) {
+    return static_cast<int>(next() % static_cast<uint32_t>(n));
+  }
+  bool chance(int percent) { return below(100) < percent; }
+};
+
+struct FuzzPlan {
+  std::shared_ptr<StructuredLoop> plan;
+  FuzzRandom random;
+  std::vector<int> pool, variables;
+  int theta = 0, beta = 0, table = 0, vector = 0, vector_next = 0;
+  int store = 0, store_next = 0, base = 0;
+  int zero = 0, one = 0, six = 0;
+  std::vector<int> hots, carried;
+  std::vector<int> literals;
+  std::vector<int> copies;
+  bool carry = false;
+  bool aliasing = false;
+  int loop_depth = 0;
+
+  int fresh() { return plan->body.add_slot(1, false); }
+  int pick() { return pool[static_cast<size_t>(random.below(pool.size()))]; }
+  int literal() {
+    return literals[static_cast<size_t>(random.below(literals.size()))];
+  }
+  int operand() { return random.chance(25) ? literal() : pick(); }
+
+  int safe_index(std::vector<Node>& out, int source, int extent_literal,
+                 int extent_value) {
+    const int a = fresh(), b = fresh(), c = fresh(), d = fresh();
+    out.push_back(arith_node(*plan, source, extent_literal, a, 4));
+    out.push_back(arith_node(*plan, a, extent_literal, b, 0));
+    out.push_back(arith_node(*plan, b, extent_literal, c, 4));
+    out.push_back(arith_node(*plan, c, one, d, 0));
+    (void)extent_value;
+    return d;
+  }
+
+  int condition(std::vector<Node>& out) {
+    const int slot = fresh();
+    out.push_back(
+        compare_node(*plan, operand(), operand(), slot, random.below(6)));
+    return slot;
+  }
+
+  void data_statement(std::vector<Node>& out) {
+    int slot;
+    if (carry && !carried.empty() && random.chance(30)) {
+      slot = carried.back();
+      carried.pop_back();
+    } else {
+      slot = fresh();
+    }
+    switch (random.below(5)) {
+      case 0:
+        out.push_back(
+            compare_node(*plan, operand(), operand(), slot, random.below(6)));
+        break;
+      case 1:
+        out.push_back(
+            arith_node(*plan, pick(), operand(), slot, random.below(2)));
+        break;
+      case 2:
+        out.push_back(arith_node(*plan, pick(),
+                                 literals[static_cast<size_t>(random.below(3))],
+                                 slot, 4));
+        break;
+      case 3: {
+        const int index = safe_index(out, pick(), six, 6);
+        out.push_back(read_node(*plan, table, 6, index, slot));
+        break;
+      }
+      default:
+        out.push_back(arith_node(*plan, pick(), literals[0], slot, 2));
+        break;
+    }
+    pool.push_back(slot);
+  }
+
+  void store_statement(std::vector<Node>& out) {
+    const int index = safe_index(out, pick(), six, 6);
+    Node write = call(*plan, OP_SET_INDEX_DYNAMIC, {store, index, operand()},
+                      store_next);
+    attach(*plan, write.op, single_spec(6));
+    out.push_back(std::move(write));
+    out.push_back(alias(store, store_next));
+    store_next = plan->body.add_slot(6, false);
+    const int read_index = safe_index(out, pick(), six, 6);
+    const int slot = fresh();
+    out.push_back(read_node(*plan, store, 6, read_index, slot));
+    pool.push_back(slot);
+  }
+
+  void step_statement(std::vector<Node>& out) {
+    const int hot = fresh();
+    hots.push_back(hot);
+    out.push_back(
+        call(*plan, OP_MUL, {random.chance(70) ? theta : beta, pick()}, hot));
+    if (random.chance(3)) pool.push_back(hot);
+    if (random.chance(50)) {
+      out.push_back(target(hot));
+      return;
+    }
+    const int index = safe_index(out, pick(), six, 6);
+    Node write =
+        call(*plan, OP_SET_INDEX_DYNAMIC, {vector, index, hot}, vector_next);
+    attach(*plan, write.op, single_spec(6));
+    out.push_back(std::move(write));
+    out.push_back(alias(vector, vector_next));
+    vector_next = plan->body.add_slot(6, false);
+  }
+
+  Node block(int depth) {
+    std::vector<Node> out;
+    const int count = 1 + random.below(4);
+    for (int i = 0; i < count; ++i) statement(out, depth);
+    return sequence(std::move(out));
+  }
+
+  void carry_statement(std::vector<Node>& out) {
+    const int slot = fresh(), hot = fresh();
+    out.push_back(
+        call(*plan, OP_MUL, {random.chance(70) ? theta : beta, slot}, hot));
+    out.push_back(target(hot));
+    std::vector<Node> write;
+    switch (random.below(3)) {
+      case 0:
+        write.push_back(arith_node(*plan, pick(), operand(), slot, 0));
+        break;
+      case 1: {
+        const int index = safe_index(write, pick(), six, 6);
+        write.push_back(read_node(*plan, table, 6, index, slot));
+        break;
+      }
+      default:
+        write.push_back(
+            compare_node(*plan, operand(), operand(), slot, random.below(6)));
+        break;
+    }
+    if (random.chance(40)) {
+      const int cond = condition(out);
+      out.push_back(branch(cond, sequence(std::move(write)), sequence({})));
+    } else {
+      for (auto& node : write) out.push_back(std::move(node));
+    }
+    pool.push_back(slot);
+  }
+
+  void alias_write_statement(std::vector<Node>& out) {
+    const bool use_store = random.chance(50);
+    const int source = use_store ? store : vector;
+    int& next = use_store ? store_next : vector_next;
+    const int write_index = safe_index(out, pick(), six, 6);
+    Node write = call(
+        *plan, OP_SET_INDEX_DYNAMIC,
+        {source, write_index, random.chance(50) ? pool[1] : operand()}, next);
+    attach(*plan, write.op, single_spec(6));
+    out.push_back(std::move(write));
+    out.push_back(alias(source, next));
+    next = plan->body.add_slot(6, false);
+    const int hot = plan->body.add_slot(6, false), dot = fresh();
+    out.push_back(
+        call(*plan, OP_MUL, {random.chance(70) ? theta : beta, source}, hot));
+    out.push_back(call(*plan, OP_DOT, {hot, source}, dot));
+    out.push_back(target(dot));
+    const int copy = copies[static_cast<size_t>(random.below(copies.size()))];
+    if (random.chance(70)) {
+      const int iterator = fresh(), cond = fresh();
+      std::vector<Node> inside;
+      inside.push_back(
+          compare_node(*plan, iterator, literal(), cond, random.below(6)));
+      inside.push_back(
+          branch(cond, sequence({alias(copy, source)}), sequence({})));
+      out.push_back(counted(one, six, iterator, sequence(std::move(inside))));
+    } else {
+      out.push_back(alias(copy, source));
+    }
+    const int index = safe_index(out, pick(), six, 6);
+    const int slot = fresh();
+    out.push_back(read_node(*plan, copy, 6, index, slot));
+    pool.push_back(slot);
+  }
+
+  void statement(std::vector<Node>& out, int depth) {
+    if (carry && random.chance(15)) {
+      carry_statement(out);
+      return;
+    }
+    if (aliasing && random.chance(20)) {
+      alias_write_statement(out);
+      return;
+    }
+    const int kind = random.below(depth >= 3 ? 5 : 11);
+    switch (kind) {
+      case 0:
+      case 1:
+      case 2:
+        data_statement(out);
+        break;
+      case 3:
+        if (random.chance(15)) {
+          out.push_back(alias(random.chance(50) ? store : vector, base));
+        } else if (!variables.empty()) {
+          const int variable =
+              variables[static_cast<size_t>(random.below(variables.size()))];
+          out.push_back(alias(variable, operand()));
+          pool.push_back(variable);
+        } else {
+          data_statement(out);
+        }
+        break;
+      case 4:
+        if (random.chance(25)) {
+          store_statement(out);
+        } else if (random.chance(20) && !hots.empty()) {
+          if (!variables.empty()) {
+            const int variable =
+                variables[static_cast<size_t>(random.below(variables.size()))];
+            out.push_back(
+                alias(variable,
+                      hots[static_cast<size_t>(random.below(hots.size()))]));
+          }
+        } else if (random.chance(15)) {
+          out.push_back(target(pick()));
+        } else {
+          step_statement(out);
+        }
+        break;
+      case 5:
+      case 6: {
+        const int cond = condition(out);
+        out.push_back(
+            branch(cond, block(depth + 1),
+                   random.chance(50) ? block(depth + 1) : sequence({})));
+        break;
+      }
+      case 7:
+      case 8: {
+        const int bound = fresh(), iterator = fresh();
+        out.push_back(arith_node(*plan, pick(), literals[0], bound, 4));
+        const int saved = static_cast<int>(pool.size());
+        pool.push_back(iterator);
+        ++loop_depth;
+        Node body = block(depth + 1);
+        --loop_depth;
+        out.push_back(counted(one, bound, iterator, std::move(body)));
+        pool.resize(static_cast<size_t>(saved));
+        pool.push_back(bound);
+        break;
+      }
+      case 9: {
+        const int counter = fresh(), next = fresh(), running = fresh();
+        out.push_back(alias(counter, zero));
+        ++loop_depth;
+        std::vector<Node> inside;
+        inside.push_back(arith_node(*plan, counter, one, next, 0));
+        inside.push_back(alias(counter, next));
+        inside.push_back(block(depth + 1));
+        --loop_depth;
+        out.push_back(while_loop(
+            running,
+            sequence({compare_node(*plan, counter, literals[1], running, 0)}),
+            sequence(std::move(inside))));
+        break;
+      }
+      default: {
+        if (!loop_depth) {
+          data_statement(out);
+          break;
+        }
+        const int cond = condition(out);
+        out.push_back(branch(
+            cond, flow_node(random.chance(50) ? Node::Break : Node::Continue),
+            sequence({})));
+        break;
+      }
+    }
+  }
+};
+
+static std::optional<ScanFixture> fuzz_plan(uint64_t seed, bool carry,
+                                            bool aliasing = false) {
+  FuzzPlan f;
+  f.carry = carry;
+  f.aliasing = aliasing;
+  f.random.state = seed * 2654435761ULL + 12345;
+  f.plan = std::make_shared<StructuredLoop>();
+  auto& plan = *f.plan;
+  f.theta = f.fresh();
+  f.beta = f.fresh();
+  f.table = plan.body.add_slot(6, false);
+  f.vector = plan.body.add_slot(6, false);
+  f.vector_next = plan.body.add_slot(6, false);
+  const int base = plan.body.add_slot(6, false);
+  f.base = base;
+  f.store = plan.body.add_slot(6, false);
+  f.store_next = plan.body.add_slot(6, false);
+  f.zero = scalar(plan, 0);
+  f.one = scalar(plan, 1);
+  f.six = scalar(plan, 6);
+  f.literals = {f.six, scalar(plan, 3), scalar(plan, 2),
+                f.one, f.zero,          scalar(plan, 5)};
+  for (int i = 0; i < 4; ++i) f.variables.push_back(f.fresh());
+  plan.fills.push_back({base, std::vector<double>(6, 0.0)});
+  plan.imports = {{f.theta, 0, 0, true, false},
+                  {f.beta, 1, 0, true, false},
+                  {f.table, 2, 0, false, true}};
+  const int trip = f.fresh(), key = f.fresh(), aux = f.fresh();
+  f.pool = {trip, key, aux, f.one, f.zero};
+  if (carry) {
+    for (int v : f.variables) f.pool.push_back(v);
+    for (int i = 0; i < 4; ++i) {
+      f.carried.push_back(f.fresh());
+      f.pool.push_back(f.carried.back());
+    }
+  }
+  std::vector<Node> head;
+  head.push_back(alias(f.vector, base));
+  head.push_back(alias(f.store, base));
+  if (aliasing)
+    for (int i = 0; i < 2; ++i) {
+      f.copies.push_back(plan.body.add_slot(6, false));
+      head.push_back(alias(f.copies.back(), base));
+    }
+  head.push_back(arith_node(plan, trip, f.literals[1], key, 4));
+  {
+    const int index = f.safe_index(head, trip, f.six, 6);
+    head.push_back(read_node(plan, f.table, 6, index, aux));
+  }
+  const int count = 2 + f.random.below(4);
+  for (int i = 0; i < count; ++i) f.statement(head, 0);
+  const int cells = f.fresh(), cell = f.fresh();
+  head.push_back(counted(
+      f.one, f.six, cells,
+      sequence({read_node(plan, f.vector, 6, cells, cell), target(cell)})));
+  for (int copy : f.copies) {
+    const int hot = plan.body.add_slot(6, false), dot = f.fresh();
+    head.push_back(call(plan, OP_MUL, {f.theta, copy}, hot));
+    head.push_back(call(plan, OP_DOT, {hot, copy}, dot));
+    head.push_back(target(dot));
+  }
+  const int trips = scalar(plan, 6);
+  if (seed % 3 == 0) {
+    const int counter = f.fresh(), next = f.fresh(), running = f.fresh();
+    head.insert(head.begin(), alias(trip, counter));
+    head.push_back(arith_node(plan, counter, f.one, next, 0));
+    head.push_back(alias(counter, next));
+    plan.root = sequence(
+        {alias(counter, f.zero),
+         while_loop(running,
+                    sequence({compare_node(plan, counter, trips, running, 0)}),
+                    sequence(std::move(head)))});
+  } else {
+    plan.root = counted(f.one, trips, trip, sequence(std::move(head)));
+  }
+  if (carry) {
+    std::vector<Node> init;
+    for (int v : f.variables) init.push_back(alias(v, f.zero));
+    init.push_back(std::move(plan.root));
+    plan.root = sequence(std::move(init));
+  }
+  plan.has_target = true;
+  try {
+    plan.prepare();
+  } catch (const std::exception&) {
+    return std::nullopt;
+  }
+  return ScanFixture{f.plan, {6}};
+}
+
+static ScanFixture carried_read_plan(bool kernel_write) {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int trip = fresh(), j = fresh(), last = fresh(), hot = fresh(),
+            picked = fresh();
+  const int one = scalar(*plan, 1), zero = scalar(*plan, 0),
+            six = scalar(*plan, 6), trips = scalar(*plan, 4);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true}};
+  std::vector<Node> inner;
+  inner.push_back(call(*plan, OP_MUL, {theta, last}, hot));
+  inner.push_back(target(hot));
+  if (kernel_write) {
+    inner.push_back(read_node(*plan, tab, 6, j, picked));
+    inner.push_back(arith_node(*plan, picked, zero, last, 0));
+  } else {
+    inner.push_back(read_node(*plan, tab, 6, j, last));
+  }
+  plan->root = sequence(
+      {alias(last, zero),
+       counted(one, trips, trip,
+               sequence({counted(one, six, j, sequence(std::move(inner)))}))});
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6}};
+}
+
+static ScanFixture carried_fill_plan() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int trip = fresh(), j = fresh(), hot = fresh();
+  const int last = scalar(*plan, 0);
+  const int one = scalar(*plan, 1), six = scalar(*plan, 6),
+            trips = scalar(*plan, 4);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true}};
+  plan->root = counted(
+      one, trips, trip,
+      sequence({counted(
+          one, six, j,
+          sequence({call(*plan, OP_MUL, {theta, last}, hot), target(hot),
+                    read_node(*plan, tab, 6, j, last)}))}));
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6}};
+}
+
+static ScanFixture carried_keyed_write_plan() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int trip = fresh(), key = fresh(), j = fresh(), last = fresh(),
+            hot = fresh(), picked = fresh(), even = fresh();
+  const int one = scalar(*plan, 1), zero = scalar(*plan, 0),
+            two = scalar(*plan, 2), six = scalar(*plan, 6),
+            trips = scalar(*plan, 6);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true}};
+  Node inner = counted(
+      one, six, j,
+      sequence({call(*plan, OP_MUL, {theta, last}, hot), target(hot),
+                compare_node(*plan, key, zero, even, 4),
+                branch(even,
+                       sequence({read_node(*plan, tab, 6, j, picked),
+                                 arith_node(*plan, picked, zero, last, 0)}),
+                       sequence({}))}));
+  plan->root = sequence({alias(last, zero),
+                         counted(one, trips, trip,
+                                 sequence({arith_node(*plan, trip, two, key, 4),
+                                           std::move(inner)}))});
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6}};
+}
+
+static ScanFixture lag_scan_plan(int rows_count) {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(rows_count, false);
+  const int trip = fresh(), row = fresh(), picked = fresh(), match = fresh(),
+            hot = fresh(), prev = fresh();
+  const int one = scalar(*plan, 1), zero = scalar(*plan, 0),
+            seven = scalar(*plan, 7), rows = scalar(*plan, rows_count),
+            trips = scalar(*plan, 4);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true}};
+  Node scan = counted(
+      one, rows, row,
+      sequence({read_node(*plan, tab, rows_count, row, picked),
+                compare_node(*plan, picked, seven, match, 4),
+                branch(match,
+                       sequence({call(*plan, OP_MUL, {theta, prev}, hot),
+                                 target(hot)}),
+                       sequence({})),
+                arith_node(*plan, picked, zero, prev, 0)}));
+  plan->root =
+      sequence({alias(prev, zero),
+                counted(one, trips, trip, sequence({std::move(scan)}))});
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {rows_count}};
+}
+
+static ScanFixture alias_of_index_plan() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int trip = fresh(), j = fresh(), v = fresh(), z = fresh(),
+            hot = fresh(), is3 = fresh();
+  const int one = scalar(*plan, 1), zero = scalar(*plan, 0),
+            three = scalar(*plan, 3), six = scalar(*plan, 6),
+            trips = scalar(*plan, 4);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true}};
+  Node inner =
+      counted(one, six, j,
+              sequence({read_node(*plan, tab, 6, j, v),
+                        compare_node(*plan, j, three, is3, 4),
+                        branch(is3, alias(z, v), sequence({})),
+                        call(*plan, OP_MUL, {theta, z}, hot), target(hot)}));
+  plan->root =
+      counted(one, trips, trip, sequence({alias(z, zero), std::move(inner)}));
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6}};
+}
+
+static ScanFixture target_of_data_plan(bool with_parameter) {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int trip = fresh(), j = fresh(), v = fresh(), hot = fresh(),
+            is2 = fresh();
+  const int one = scalar(*plan, 1), two = scalar(*plan, 2),
+            six = scalar(*plan, 6), trips = scalar(*plan, 4);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true}};
+  std::vector<Node> then;
+  then.push_back(target(v));
+  if (with_parameter) {
+    then.push_back(call(*plan, OP_MUL, {theta, v}, hot));
+    then.push_back(target(hot));
+  }
+  Node inner =
+      counted(one, six, j,
+              sequence({read_node(*plan, tab, 6, j, v),
+                        compare_node(*plan, j, two, is2, 4),
+                        branch(is2, sequence(std::move(then)), sequence({}))}));
+  plan->root = counted(one, trips, trip, sequence({std::move(inner)}));
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6}};
+}
+
+static ScanFixture wide_rows_plan(int rows_count, int columns,
+                                  int trips_count) {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int matrix = plan->body.add_slot(int64_t{rows_count} * columns, false);
+  const int trip = fresh(), row = fresh(), shifted = fresh(), hot = fresh(),
+            product = fresh();
+  const int row_values = plan->body.add_slot(columns, false);
+  const int weights = plan->body.add_slot(columns, false);
+  const int one = scalar(*plan, 1), rows = scalar(*plan, rows_count),
+            trips = scalar(*plan, trips_count);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {weights, 2, 0, true, false},
+                   {matrix, 3, 0, false, true}};
+  Node read = call(*plan, OP_INDEX_DYNAMIC, {matrix, row}, row_values);
+  auto spec = std::make_shared<DynamicIndexSpec>();
+  spec->selected_size = columns;
+  spec->axes.push_back(
+      {DynamicIndexSpec::Axis::Single, rows_count, columns, 1, 0});
+  spec->axes.push_back({DynamicIndexSpec::Axis::All, columns, 1, columns, 0});
+  attach(*plan, read.op, spec);
+  Node scan = counted(
+      one, rows, row,
+      sequence({arith_node(*plan, row, trip, shifted, 0), std::move(read),
+                call(*plan, OP_DOT, {row_values, weights}, product),
+                target(product)}));
+  plan->root = counted(one, trips, trip,
+                       sequence({call(*plan, OP_MUL, {theta, theta}, hot),
+                                 target(hot), std::move(scan)}));
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {int64_t{rows_count} * columns}};
+}
+
+static void data_loop_memo_carry_tests() {
+  const std::vector<double> table = {1, 2, 3, 4, 5, 6};
+  const auto engaged = [](const MemoResult& result) {
+    const size_t hits = memo_field(result, "memo_hits=");
+    return hits != std::numeric_limits<size_t>::max() && hits > 0;
+  };
+  {
+    const auto f = carried_read_plan(false);
+    check(engaged(memo_check("carried local read by a step, index write",
+                             f.plan, f.lens, {table}, -1)),
+          "data loop memo carried index write still memoizes");
+  }
+  {
+    const auto f = carried_read_plan(true);
+    check(engaged(memo_check("carried local read by a step, kernel write",
+                             f.plan, f.lens, {table}, -1)),
+          "data loop memo carried kernel write still memoizes");
+  }
+  {
+    const auto f = carried_fill_plan();
+    memo_check("carried fill read by a step", f.plan, f.lens, {table}, -1);
+  }
+  {
+    const auto f = carried_keyed_write_plan();
+    memo_check("carried local written under one key", f.plan, f.lens, {table},
+               -1);
+  }
+  {
+    const auto f = alias_of_index_plan();
+    memo_check("alias of an indexed data value", f.plan, f.lens, {table}, -1);
+  }
+  for (const bool with_parameter : {false, true}) {
+    const auto f = target_of_data_plan(with_parameter);
+    memo_check("target of a workspace data value", f.plan, f.lens, {table}, -1);
+  }
+  {
+    std::vector<double> rows(300);
+    for (size_t i = 0; i < rows.size(); ++i)
+      rows[i] = static_cast<double>((i * 37) % 11);
+    rows[0] = 7;
+    rows[200] = 7;
+    for (size_t i = 0; i < rows.size(); ++i)
+      if (i != 0 && i != 200 && rows[i] == 7) rows[i] = 8;
+    rows[299] = 5;
+    rows[199] = 3;
+    const auto f = lag_scan_plan(300);
+    const MemoResult on = memo_run(f.plan, f.lens, {rows}, true, 0, {}, true);
+    const MemoResult off = memo_run(f.plan, f.lens, {rows}, false, 0, {}, true);
+    check(memo_same(on, off),
+          "data loop memo lag scan at the shipped thresholds matches memo off");
+    check(engaged(on),
+          "data loop memo lag scan at the shipped thresholds hits");
+  }
+}
+
+static void data_loop_memo_memory_tests() {
+  constexpr int rows = 20000, columns = 50;
+  const auto f = wide_rows_plan(rows, columns, 6);
+  std::vector<double> matrix(static_cast<size_t>(rows) * columns);
+  for (size_t i = 0; i < matrix.size(); ++i)
+    matrix[i] = static_cast<double>(i % 7);
+  const MemoResult on =
+      memo_run(f.plan, f.lens, {matrix}, true, columns, {}, true);
+  const MemoResult off =
+      memo_run(f.plan, f.lens, {matrix}, false, columns, {}, true);
+  check(memo_same(on, off), "data loop memo wide scan matches memo off");
+  check(memo_field(on, "memo_aborted=") > 0 &&
+            memo_field(on, "memo_bytes=") < (size_t{1} << 20),
+        "data loop memo releases the storage of refused traces");
+}
+
+static ScanFixture nested_carry_plan(int trips_count) {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int trip = fresh(), k = fresh(), j = fresh(), last = fresh(),
+            hot = fresh(), picked = fresh(), tk = fresh(), big = fresh(),
+            hot2 = fresh();
+  const int one = scalar(*plan, 1), zero = scalar(*plan, 0),
+            three = scalar(*plan, 3), six = scalar(*plan, 6),
+            thousand = scalar(*plan, 1000), trips = scalar(*plan, trips_count);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true}};
+  Node inner =
+      counted(one, six, j,
+              sequence({call(*plan, OP_MUL, {theta, last}, hot), target(hot),
+                        read_node(*plan, tab, 6, j, picked),
+                        arith_node(*plan, picked, k, last, 0)}));
+  Node middle =
+      counted(one, three, k,
+              sequence({arith_node(*plan, trip, k, tk, 0),
+                        compare_node(*plan, tk, thousand, big, 2),
+                        branch(big,
+                               sequence({call(*plan, OP_MUL, {beta, tk}, hot2),
+                                         target(hot2)}),
+                               sequence({})),
+                        std::move(inner)}));
+  plan->root = counted(one, trips, trip,
+                       sequence({alias(last, zero), std::move(middle)}));
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6}};
+}
+
+static ScanFixture while_carry_plan() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int trip = fresh(), key = fresh(), limit = fresh(), counter = fresh(),
+            next = fresh(), running = fresh(), prev = fresh(), hot = fresh(),
+            picked = fresh();
+  const int one = scalar(*plan, 1), zero = scalar(*plan, 0),
+            two = scalar(*plan, 2), three = scalar(*plan, 3),
+            trips = scalar(*plan, 8);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true}};
+  Node loop = while_loop(
+      running, sequence({compare_node(*plan, counter, limit, running, 0)}),
+      sequence({arith_node(*plan, counter, one, next, 0), alias(counter, next),
+                call(*plan, OP_MUL, {theta, prev}, hot), target(hot),
+                read_node(*plan, tab, 6, counter, picked),
+                arith_node(*plan, picked, key, prev, 0)}));
+  plan->root =
+      sequence({alias(prev, zero),
+                counted(one, trips, trip,
+                        sequence({arith_node(*plan, trip, two, key, 4),
+                                  arith_node(*plan, key, three, limit, 0),
+                                  alias(counter, zero), std::move(loop)}))});
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6}};
+}
+
+static ScanFixture alias_liveout_plan() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int va = plan->body.add_slot(6, false),
+            vb = plan->body.add_slot(6, false);
+  const int found = plan->body.add_slot(6, false);
+  const int trip = fresh(), key = fresh(), j = fresh(), picked = fresh(),
+            match = fresh(), x = fresh(), hot = fresh(), pos = fresh();
+  const int one = scalar(*plan, 1), two = scalar(*plan, 2),
+            six = scalar(*plan, 6), trips = scalar(*plan, 6);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true},
+                   {va, 3, 0, false, true},
+                   {vb, 4, 0, false, true}};
+  Node inner =
+      counted(one, six, j,
+              sequence({read_node(*plan, tab, 6, j, picked),
+                        compare_node(*plan, picked, key, match, 4),
+                        branch(match, alias(found, va), alias(found, vb))}));
+  plan->root =
+      counted(one, trips, trip,
+              sequence({arith_node(*plan, trip, two, key, 4), std::move(inner),
+                        arith_node(*plan, trip, one, pos, 2),
+                        read_node(*plan, found, 6, pos, x),
+                        call(*plan, OP_MUL, {theta, x}, hot), target(hot)}));
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6, 6, 6}};
+}
+
+static void data_loop_memo_sibling_tests() {
+  const std::vector<double> table = {1, 2, 3, 4, 5, 6};
+  {
+    const auto f = nested_carry_plan(40);
+    memo_check("nested loops carrying a value, outer loop retires", f.plan,
+               f.lens, {table}, 21, 35);
+  }
+  {
+    const auto f = nested_carry_plan(6);
+    memo_check("nested loops carrying a value", f.plan, f.lens, {table}, 0, 6);
+  }
+  {
+    const auto f = while_carry_plan();
+    memo_check("while loop with a key-dependent trip count and a carry", f.plan,
+               f.lens, {table}, 6, 2);
+  }
+  {
+    const auto f = alias_liveout_plan();
+    memo_check(
+        "live-out through an alias chosen under the key", f.plan, f.lens,
+        {{0, 1, 0, 1, 1, 0}, {10, 20, 30, 40, 50, 60}, {1, 2, 3, 4, 5, 6}}, 4,
+        2);
+  }
+}
+
+static const uint64_t CARRY_SEEDS[] = {461, 903, 909, 932, 1837};
+
+static void data_loop_memo_fuzz_tests() {
+  const char* seeds_option = std::getenv("STANLI_FUZZ_SEEDS");
+  const uint64_t seeds =
+      seeds_option ? std::strtoull(seeds_option, nullptr, 10) : 400;
+  struct Case {
+    uint64_t seed;
+    bool carry;
+    bool aliasing;
+  };
+  // Plans that a stale-step read of a cached folded kernel, and a carried
+  // local that a step reads before the loop rewrites it, once made wrong.
+  std::vector<Case> order = {{5028, false, false},
+                             {5361, false, false},
+                             {8431, false, false},
+                             {12243, false, false},
+                             {14265, false, false}};
+  for (const uint64_t seed : CARRY_SEEDS) order.push_back({seed, true, false});
+  for (const Case mode :
+       {Case{0, false, false}, Case{0, true, false}, Case{0, false, true}})
+    for (uint64_t seed = 1; seed <= seeds; ++seed)
+      order.push_back({seed, mode.carry, mode.aliasing});
+  size_t built = 0, hits = 0;
+  for (const auto& [seed, carry, aliasing] : order) {
+    const auto f = fuzz_plan(seed, carry, aliasing);
+    if (!f) continue;
+    ++built;
+    std::vector<double> table(6);
+    for (size_t i = 0; i < table.size(); ++i)
+      table[i] = static_cast<double>((seed + i * 7) % 4);
+    const std::vector<double> changed(table.rbegin(), table.rend());
+    const MemoResult on =
+        memo_run(f->plan, f->lens, {table}, true, 0, {changed});
+    const MemoResult off =
+        memo_run(f->plan, f->lens, {table}, false, 0, {changed});
+    if (!memo_same(on, off))
+      std::printf("  fuzz seed %llu%s\n", static_cast<unsigned long long>(seed),
+                  carry      ? " (carry)"
+                  : aliasing ? " (aliasing)"
+                             : "");
+    check(memo_same(on, off),
+          "data loop memo fuzz plan matches memo off bitwise");
+    const size_t seen = memo_field(on, "memo_hits=");
+    hits += seen != std::numeric_limits<size_t>::max() && seen > 0;
+  }
+  check(built > order.size() * 3 / 4, "data loop memo fuzz builds most plans");
+  check(hits > order.size() / 10, "data loop memo fuzz exercises hits");
+}
+
 int main() {
   // This suite exercises retained plans, including their automatic selector.
   // Whole-program specialization has its own differential tests in test_lower.
@@ -6396,6 +7825,10 @@ int main() {
   test_unsetenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS");
   test_unsetenv("STANLI_STRUCTURED_FRAMES");
   test_setenv("STANLI_STRUCTURED_CHECK_REMAP", "1");
+  if (std::getenv("STANLI_FUZZ_SEEDS")) {
+    data_loop_memo_fuzz_tests();
+    return failures != 0;
+  }
   transient_classification_tests();
   invariant_active_reuse_tests();
   invariant_gradient_order_test();
@@ -6461,6 +7894,17 @@ int main() {
   prepared_index_failure_tests();
   prepared_iterator_tests();
   recording_shape_tests();
+  data_loop_memo_basic_tests();
+  data_loop_memo_structure_tests();
+  data_loop_memo_order_tests();
+  data_loop_memo_retry_tests();
+  data_loop_memo_carry_tests();
+  data_loop_memo_sibling_tests();
+  data_loop_memo_memory_tests();
+  data_loop_memo_setup_scan_tests();
+  data_loop_memo_carry_tests();
+  data_loop_memo_memory_tests();
+  data_loop_memo_fuzz_tests();
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   test_unsetenv("STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS");
   if (failures == 0) std::printf("test_structured_loop OK\n");

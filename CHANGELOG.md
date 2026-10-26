@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Performance
+
+- The first gradient of a model that scans a data table inside a long loop,
+  such as ctsem's `ctsm.stan`, is about 2.3 times faster. At 4,000 rows it
+  fell from 12.5 s to 5.4 s. Each scan's decisions about the data are made once
+  per distinct input and reused. Log densities, gradients, warm gradient time
+  and preparation time are unchanged, and peak memory grows by about 2 MB.
+  `STANLI_NO_DATA_LOOP_MEMO=1` turns it off.
+
 ## 0.24.0
 
 Run RStan-style sampling and variational inference on Stanli, pass richer

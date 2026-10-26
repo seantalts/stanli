@@ -1,3 +1,59 @@
+constexpr size_t kMemoMaxEvents = size_t{1} << 16;
+constexpr size_t kMemoMaxPool = size_t{1} << 20;
+constexpr size_t kMemoMaxMemos = 256;
+constexpr size_t kMemoMaxCandidatePool = size_t{1} << 22;
+
+// A recorded execution of a data-controlled loop. Steps are the instructions
+// that must run again on a hit; the remaining events restore the data state
+// the skipped instructions would have left behind.
+struct DataLoopMemo {
+  enum Kind : uint8_t { Step, Cells, Slot, Bump };
+  struct Event {
+    Kind kind;
+    int32_t arg;
+    uint32_t offset, length;
+  };
+  std::vector<uint64_t> key;
+  std::vector<Event> events, finals;
+  std::vector<int32_t> disowned;
+  std::vector<double> pool;
+  uint64_t skipped_effects = 0;
+  bool usable = false;
+};
+
+struct DataLoopCandidate {
+  size_t begin = 0, exit = 0;
+  std::vector<int> raw;
+  std::vector<const StructuredLoop::Node*> invariants;
+  std::vector<int> bump_loops;
+  std::vector<uint8_t> live_out;
+  bool disabled = false;
+  size_t hits = 0, misses = 0, aborted = 0, skipped = 0, events = 0;
+  size_t stored = 0, words = 0;
+  std::unordered_map<uint64_t, std::vector<std::unique_ptr<DataLoopMemo>>>
+      memos;
+};
+
+// Scratch for one recorded execution of a candidate loop.
+struct DataLoopTrace {
+  DataLoopMemo* memo = nullptr;
+  const DataLoopCandidate* candidate = nullptr;
+  bool ok = true;
+  std::vector<int> bound, stepped;
+  std::vector<uint32_t> cells;
+  std::vector<const StructuredLoop::Node*> written;
+  std::unordered_set<const StructuredLoop::Node*> seen;
+  std::unordered_set<int> disowned;
+  uint64_t effects_start = 0, step_effects = 0;
+  size_t executed = 0;
+
+  void fail() {
+    ok = false;
+    std::vector<DataLoopMemo::Event>().swap(memo->events);
+    std::vector<double>().swap(memo->pool);
+  }
+};
+
 // A temporary recording program, built only after frame admission. Explicit
 // jumps replace the control-tree walk; proven data calls bypass recording
 // bookkeeping while preserving every kernel, validation and control guard.
@@ -18,13 +74,16 @@ struct RecordingProgram {
     WhileEnter,
     WhileTest,
     Jump,
-    ExitJump
+    ExitJump,
+    MemoForEnter,
+    MemoWhileEnter
   };
   struct Instruction {
     Kind kind;
     const Node* node;
     // Jump destination for control; successful publication for data calls.
     size_t jump = 0;
+    uint32_t candidate = 0;
   };
   struct Cursor {
     double lower = 0;
@@ -37,8 +96,15 @@ struct RecordingProgram {
   static constexpr size_t exit_break = std::numeric_limits<size_t>::max();
   static constexpr size_t exit_continue = exit_break - 1;
   void compile_data(LoopState& s);
+  void compile_memo(LoopState& s);
   std::vector<Instruction> code;
   std::vector<Cursor> cursors;
+  std::vector<uint8_t> varying, mutable_output, pure_candidate;
+  std::vector<DataLoopCandidate> candidates;
+  std::vector<uint8_t> memo_bound, memo_cells, memo_stepped;
+  std::vector<uint64_t> memo_key;
+  std::vector<double> memo_scratch;
+  size_t memo_min_work = 256, memo_min_ratio = 8;
 
   size_t emit(Kind kind, const Node* node = nullptr, size_t jump = 0) {
     code.push_back({kind, node, jump});
@@ -116,6 +182,10 @@ struct RecordingProgram {
     patch(outer.continues, exit_continue);
     const char* option = std::getenv("STANLI_STRUCTURED_DATA_RECORDING");
     if (!option || option[0] != '0') compile_data(s);
+    if (const char* work = std::getenv("STANLI_DATA_LOOP_MEMO_MIN_WORK"))
+      memo_min_work = std::strtoull(work, nullptr, 10);
+    if (const char* ratio = std::getenv("STANLI_DATA_LOOP_MEMO_MIN_RATIO"))
+      memo_min_ratio = std::strtoull(ratio, nullptr, 10);
   }
 };
 
@@ -125,8 +195,8 @@ void RecordingProgram::compile_data(LoopState& s) {
   // Constancy here is conditional on the recorder's existing guards. No
   // control flow or kernel is removed, reordered, or hoisted. This is not
   // loop invariance or proof that parameter-controlled assignments commute.
-  std::vector<uint8_t> varying(p.body.slots.size(), 0);
-  std::vector<uint8_t> mutable_output(p.body.slots.size(), 0);
+  varying.assign(p.body.slots.size(), 0);
+  mutable_output.assign(p.body.slots.size(), 0);
   for (const auto& in : p.imports)
     if (!in.data_only) varying[in.slot] = 1;
   const auto inspect = [&](const auto& self, const Node& n) -> void {
@@ -242,6 +312,7 @@ void RecordingProgram::compile_data(LoopState& s) {
       instruction.jump = branch.jump;
     }
   }
+  if (!std::getenv("STANLI_NO_DATA_LOOP_MEMO")) compile_memo(s);
   if (s.diagnostics)
     emit_diagnostic("stanli_structured data_recording: kernels=" +
                     std::to_string(kernels));

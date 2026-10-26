@@ -62,6 +62,13 @@ static double eval_point(int64_t i, int variant) {
   }
 }
 
+static void print_sweep_point(int k, double lp,
+                              const std::vector<double>& grad) {
+  std::printf("SWEEP_POINT %d %.17g", k, lp);
+  for (double g : grad) std::printf(" %.17g", g);
+  std::printf("\n");
+}
+
 static std::string read_mir(const std::string& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) throw std::runtime_error("cannot open MIR file " + path);
@@ -401,7 +408,7 @@ int main(int argc, char** argv) {
                                 0.2 * (k - sweep / 2);
         try {
           std::fill(grad.begin(), grad.end(), 0.0);
-          ex.gradient(grad.data());
+          print_sweep_point(k, ex.gradient(grad.data()), grad);
           ++evaluated;
         } catch (const std::exception& e) {
           if (std::string(e.what()).find("region_map_check_clean") !=
@@ -413,7 +420,7 @@ int main(int argc, char** argv) {
       for (int64_t i = 0; i < n; ++i)
         ex.params_data()[i] = eval_point(i, variant);
       std::fill(grad.begin(), grad.end(), 0.0);
-      ex.gradient(grad.data());
+      print_sweep_point(0, ex.gradient(grad.data()), grad);
     }
     std::printf("OK %.17g", lp);
     for (double g : grad) std::printf(" %.17g", g);

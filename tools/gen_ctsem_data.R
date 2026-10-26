@@ -22,6 +22,15 @@
 #
 # Usage:
 #   Rscript tools/gen_ctsem_data.R OUT.json [--seed N] [--subjects N]
+#   Rscript tools/gen_ctsem_data.R OUT.json --generator post4 [--subjects N]
+#
+# --generator post4 reproduces the data of post #4 by Charles Driver (ctsem's
+# author) in https://discourse.mc-stan.org/t/41545: 10 latent and 10 manifest
+# variables, 2 time points per subject, two equal groups with different T0VAR
+# and a time-independent predictor TI1 (0 or 1), and ctFit defaults
+# (intoverpop=1) with priors=TRUE. The generator code is the post's, with the
+# per-group subject count (1000 in the post) taken as --subjects / 2. The
+# default seed is the post's, 1. The post's subject count is --subjects 2000.
 #
 # Model and data-generation choices (documented, not arbitrary):
 #   - Generating model: the two-process "leading indicator" example from
@@ -59,9 +68,17 @@ opt <- function(flag, default) {
   if (length(i) == 0) return(default)
   args[[i + 1]]
 }
-seed <- as.integer(opt("--seed", "20260903"))
-n_subjects <- as.integer(opt("--subjects", "40"))
-tpoints <- 8L # ctsem ?ctGenerate example value; see header comment
+generator <- opt("--generator", "leading-indicator")
+if (!generator %in% c("leading-indicator", "post4")) {
+  stop("--generator must be leading-indicator or post4")
+}
+post4 <- generator == "post4"
+seed <- as.integer(opt("--seed", if (post4) "1" else "20260903"))
+n_subjects <- as.integer(opt("--subjects", if (post4) "2000" else "40"))
+tpoints <- if (post4) 2L else 8L # ctsem ?ctGenerate example value; see header
+if (post4 && (n_subjects < 2 || n_subjects > 4000 || n_subjects %% 2 != 0)) {
+  stop("--subjects must be an even number between 2 and 4000 for post4")
+}
 
 CTSEM_REV <- "a0f1e69b7282c1dcaed820919ae0d8b280d076c4"
 CTSM_STAN_SHA256 <- "b148f5b3f129f981e7a3bfbd966e825c28fbc7314d14e2896d18c7c6bc1b01d2"
@@ -91,44 +108,74 @@ cat("ctsm.stan hash OK:", actual_sha256, "\n")
 
 set.seed(seed)
 
-# ---- generating model: bivariate leading-indicator, per ?ctGenerate ----
-generatingModel <- ctModel(
-  Tpoints = tpoints, n.latent = 2, n.TDpred = 0, n.TIpred = 0, n.manifest = 2,
-  MANIFESTVAR = diag(.1, 2),
-  LAMBDA = diag(1, 2),
-  DRIFT = matrix(c(-.2, -.05, -.1, -.1), nrow = 2),
-  DIFFUSION = matrix(c(1, .2, 0, 4), 2),
-  CINT = matrix(c(1, 0), nrow = 2),
-  T0MEANS = matrix(0, ncol = 1, nrow = 2),
-  T0VAR = diag(1, 2))
+if (post4) {
+  ndim <- 10L
+  per_group <- n_subjects %/% 2L
+  cmat <- diag(.5, ndim) + 1
+  cmat <- t(chol(cmat %*% t(cmat)))
+  cmat2 <- diag(.5, ndim) + 1
+  cmat2[(ndim %/% 2):ndim, ] <- cmat2[(ndim %/% 2):ndim, ] * -1
+  cmat2 <- t(chol(cmat2 %*% t(cmat2)))
+  gm <- ctModel(type = "omx", LAMBDA = diag(1, ndim), DRIFT = diag(-1, ndim),
+                T0VAR = cmat, DIFFUSION = diag(1, ndim), Tpoints = tpoints)
+  d1 <- data.frame(ctGenerate(ctmodelobj = gm, n.subjects = per_group,
+                              burnin = 0))
+  gm <- ctModel(type = "omx", LAMBDA = diag(1, ndim), DRIFT = diag(-1, ndim),
+                T0VAR = cmat2, DIFFUSION = diag(1, ndim), Tpoints = tpoints)
+  d2 <- data.frame(ctGenerate(ctmodelobj = gm, n.subjects = per_group,
+                              burnin = 0))
+  d2$id <- d2$id + 2000
+  datalong <- rbind(d1, d2)
+  datalong$TI1 <- 0
+  datalong$TI1[datalong$id > 2000] <- 1
+  cat("simulated", nrow(datalong), "rows,", n_subjects, "subjects,",
+      tpoints, "timepoints/subject\n")
+  fittingModel <- ctModel(LAMBDA = diag(1, ndim),
+                          manifestNames = paste0("Y", 1:ndim),
+                          type = "ct", TIpredNames = "TI1")
+  fit <- ctFit(datalong = datalong, model = fittingModel, priors = TRUE,
+               cores = 1, verbose = 0, fit = FALSE)
+  standata <- fit$standata
+} else {
+  # ---- generating model: bivariate leading-indicator, per ?ctGenerate ----
+  generatingModel <- ctModel(
+    Tpoints = tpoints, n.latent = 2, n.TDpred = 0, n.TIpred = 0, n.manifest = 2,
+    MANIFESTVAR = diag(.1, 2),
+    LAMBDA = diag(1, 2),
+    DRIFT = matrix(c(-.2, -.05, -.1, -.1), nrow = 2),
+    DIFFUSION = matrix(c(1, .2, 0, 4), 2),
+    CINT = matrix(c(1, 0), nrow = 2),
+    T0MEANS = matrix(0, ncol = 1, nrow = 2),
+    T0VAR = diag(1, 2))
 
-traitChol <- matrix(c(.5, .2, 0, .8), nrow = 2)
-subjectCint <- t(replicate(n_subjects, as.numeric(traitChol %*% rnorm(2))))
-datalist <- vector("list", n_subjects)
-for (i in seq_len(n_subjects)) {
-  subjectModel <- generatingModel
-  subjectModel$CINT <- matrix(subjectCint[i, ], ncol = 1)
-  d <- ctGenerate(subjectModel, n.subjects = 1, burnin = 10)
-  d[, "id"] <- i
-  datalist[[i]] <- d
+  traitChol <- matrix(c(.5, .2, 0, .8), nrow = 2)
+  subjectCint <- t(replicate(n_subjects, as.numeric(traitChol %*% rnorm(2))))
+  datalist <- vector("list", n_subjects)
+  for (i in seq_len(n_subjects)) {
+    subjectModel <- generatingModel
+    subjectModel$CINT <- matrix(subjectCint[i, ], ncol = 1)
+    d <- ctGenerate(subjectModel, n.subjects = 1, burnin = 10)
+    d[, "id"] <- i
+    datalist[[i]] <- d
+  }
+  datalong <- do.call(rbind, datalist)
+  cat("simulated", nrow(datalong), "rows,", n_subjects, "subjects,",
+      tpoints, "timepoints/subject\n")
+
+  # ---- fitting model: Stan-side ctModel matching the generator ----
+  fittingModel <- ctModel(
+    type = "ct",
+    latentNames = c("eta1", "eta2"),
+    manifestNames = c("Y1", "Y2"),
+    LAMBDA = diag(1, 2),
+    MANIFESTVAR = diag(.1, 2),
+    CINT = matrix(c("cint1", "cint2"), ncol = 1),
+    MANIFESTMEANS = matrix(0, nrow = 2)) # fixed: CINT is already free+indvarying
+
+  fit <- ctFit(datalong = datalong, model = fittingModel,
+               fit = FALSE, optimize = FALSE, priors = TRUE)
+  standata <- fit$standata
 }
-datalong <- do.call(rbind, datalist)
-cat("simulated", nrow(datalong), "rows,", n_subjects, "subjects,",
-    tpoints, "timepoints/subject\n")
-
-# ---- fitting model: Stan-side ctModel matching the generator ----
-fittingModel <- ctModel(
-  type = "ct",
-  latentNames = c("eta1", "eta2"),
-  manifestNames = c("Y1", "Y2"),
-  LAMBDA = diag(1, 2),
-  MANIFESTVAR = diag(.1, 2),
-  CINT = matrix(c("cint1", "cint2"), ncol = 1),
-  MANIFESTMEANS = matrix(0, nrow = 2)) # fixed: CINT is already free+indvarying
-
-fit <- ctFit(datalong = datalong, model = fittingModel,
-             fit = FALSE, optimize = FALSE, priors = TRUE)
-standata <- fit$standata
 
 # ---- filter to exactly ctsm.stan's data block, in its field order ----
 data_block_fields <- c(

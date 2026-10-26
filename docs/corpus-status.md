@@ -136,6 +136,7 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `covid19imperial_v3` | posteriordb | 52 | 8.2e-16 | 7 |
 | `ctsem_ctsm` | ctsem | 182 | 2.0e-15 | 224 |
 | `ctsem_ctsm_400` | ctsem | 1622 | 2.4e-14 | 192 |
+| `ctsem_ctsm_post4_100` | ctsem | 581 | 1.1e-13 | 2976 |
 | `declare-define-multi` | stanc3 | 376 | 0 (bitwise) | 0 |
 | `diamonds` | posteriordb | 27 | 0 (bitwise) | 0 |
 | `dogs` | posteriordb | 4 | 5.5e-15 | 31 |
@@ -499,6 +500,7 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `covid19imperial_v3` | 8457 |
 | `ctsem_ctsm` | 648 |
 | `ctsem_ctsm_400` | 4968 |
+| `ctsem_ctsm_post4_100` | 4929 |
 | `declare-define-multi` | 452 |
 | `diamonds` | 27 |
 | `dogs` | 2253 |
