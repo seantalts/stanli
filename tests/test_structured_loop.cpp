@@ -7589,6 +7589,130 @@ static void data_loop_memo_memory_tests() {
         "data loop memo releases the storage of refused traces");
 }
 
+static ScanFixture nested_carry_plan(int trips_count) {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int trip = fresh(), k = fresh(), j = fresh(), last = fresh(),
+            hot = fresh(), picked = fresh(), tk = fresh(), big = fresh(),
+            hot2 = fresh();
+  const int one = scalar(*plan, 1), zero = scalar(*plan, 0),
+            three = scalar(*plan, 3), six = scalar(*plan, 6),
+            thousand = scalar(*plan, 1000), trips = scalar(*plan, trips_count);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true}};
+  Node inner =
+      counted(one, six, j,
+              sequence({call(*plan, OP_MUL, {theta, last}, hot), target(hot),
+                        read_node(*plan, tab, 6, j, picked),
+                        arith_node(*plan, picked, k, last, 0)}));
+  Node middle =
+      counted(one, three, k,
+              sequence({arith_node(*plan, trip, k, tk, 0),
+                        compare_node(*plan, tk, thousand, big, 2),
+                        branch(big,
+                               sequence({call(*plan, OP_MUL, {beta, tk}, hot2),
+                                         target(hot2)}),
+                               sequence({})),
+                        std::move(inner)}));
+  plan->root = counted(one, trips, trip,
+                       sequence({alias(last, zero), std::move(middle)}));
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6}};
+}
+
+static ScanFixture while_carry_plan() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int trip = fresh(), key = fresh(), limit = fresh(), counter = fresh(),
+            next = fresh(), running = fresh(), prev = fresh(), hot = fresh(),
+            picked = fresh();
+  const int one = scalar(*plan, 1), zero = scalar(*plan, 0),
+            two = scalar(*plan, 2), three = scalar(*plan, 3),
+            trips = scalar(*plan, 8);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true}};
+  Node loop = while_loop(
+      running, sequence({compare_node(*plan, counter, limit, running, 0)}),
+      sequence({arith_node(*plan, counter, one, next, 0), alias(counter, next),
+                call(*plan, OP_MUL, {theta, prev}, hot), target(hot),
+                read_node(*plan, tab, 6, counter, picked),
+                arith_node(*plan, picked, key, prev, 0)}));
+  plan->root =
+      sequence({alias(prev, zero),
+                counted(one, trips, trip,
+                        sequence({arith_node(*plan, trip, two, key, 4),
+                                  arith_node(*plan, key, three, limit, 0),
+                                  alias(counter, zero), std::move(loop)}))});
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6}};
+}
+
+static ScanFixture alias_liveout_plan() {
+  auto plan = std::make_shared<StructuredLoop>();
+  const auto fresh = [&]() { return plan->body.add_slot(1, false); };
+  const int theta = fresh(), beta = fresh();
+  const int tab = plan->body.add_slot(6, false);
+  const int va = plan->body.add_slot(6, false),
+            vb = plan->body.add_slot(6, false);
+  const int found = plan->body.add_slot(6, false);
+  const int trip = fresh(), key = fresh(), j = fresh(), picked = fresh(),
+            match = fresh(), x = fresh(), hot = fresh(), pos = fresh();
+  const int one = scalar(*plan, 1), two = scalar(*plan, 2),
+            six = scalar(*plan, 6), trips = scalar(*plan, 6);
+  plan->imports = {{theta, 0, 0, true, false},
+                   {beta, 1, 0, true, false},
+                   {tab, 2, 0, false, true},
+                   {va, 3, 0, false, true},
+                   {vb, 4, 0, false, true}};
+  Node inner =
+      counted(one, six, j,
+              sequence({read_node(*plan, tab, 6, j, picked),
+                        compare_node(*plan, picked, key, match, 4),
+                        branch(match, alias(found, va), alias(found, vb))}));
+  plan->root =
+      counted(one, trips, trip,
+              sequence({arith_node(*plan, trip, two, key, 4), std::move(inner),
+                        arith_node(*plan, trip, one, pos, 2),
+                        read_node(*plan, found, 6, pos, x),
+                        call(*plan, OP_MUL, {theta, x}, hot), target(hot)}));
+  plan->has_target = true;
+  plan->prepare();
+  return {plan, {6, 6, 6}};
+}
+
+static void data_loop_memo_sibling_tests() {
+  const std::vector<double> table = {1, 2, 3, 4, 5, 6};
+  {
+    const auto f = nested_carry_plan(40);
+    memo_check("nested loops carrying a value, outer loop retires", f.plan,
+               f.lens, {table}, 21, 35);
+  }
+  {
+    const auto f = nested_carry_plan(6);
+    memo_check("nested loops carrying a value", f.plan, f.lens, {table}, 0, 6);
+  }
+  {
+    const auto f = while_carry_plan();
+    memo_check("while loop with a key-dependent trip count and a carry", f.plan,
+               f.lens, {table}, 6, 2);
+  }
+  {
+    const auto f = alias_liveout_plan();
+    memo_check(
+        "live-out through an alias chosen under the key", f.plan, f.lens,
+        {{0, 1, 0, 1, 1, 0}, {10, 20, 30, 40, 50, 60}, {1, 2, 3, 4, 5, 6}}, 4,
+        2);
+  }
+}
+
 static const uint64_t CARRY_SEEDS[] = {461, 903, 909, 932, 1837};
 
 static void data_loop_memo_fuzz_tests() {
@@ -7717,6 +7841,7 @@ int main() {
   data_loop_memo_order_tests();
   data_loop_memo_retry_tests();
   data_loop_memo_carry_tests();
+  data_loop_memo_sibling_tests();
   data_loop_memo_memory_tests();
   data_loop_memo_setup_scan_tests();
   data_loop_memo_carry_tests();
