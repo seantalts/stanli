@@ -18,7 +18,10 @@ schools from a clean installed environment.
 Bump the version in `python/stanli/__init__.py`, `js/package.json`,
 `r/DESCRIPTION`, and `r/R/install.R` in one commit (`stanli_runtime_release`
 there pins the runtime the R package downloads), add a `CHANGELOG.md`
-entry, then tag:
+entry, then tag. Pull requests do not touch `CHANGELOG.md`; write the
+entry from the pull requests merged since the previous tag
+(`gh pr list --state merged --search "merged:>DATE"`), grouped as
+Performance, Features, Fixes, then Docs and Internal:
 
 ```
 git tag -a v0.21.0 -m "stanli 0.21.0" && git push origin v0.21.0
