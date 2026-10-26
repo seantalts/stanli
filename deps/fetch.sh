@@ -93,6 +93,34 @@ git -C math apply <<'EOF'
 
 EOF
 
+# Copy the output adjoints into their owning matrix before the triangular
+# solve. Eigen's solve assignment performs this same copy and in-place solve,
+# but first compares the destination with the non-owning adjoint view. GCC 14
+# diagnoses a possible free of that view's interior pointer after inlining the
+# alias check. The fresh matrix cannot alias the arena-backed adjoints.
+git -C math apply <<'EOF'
+--- a/stan/math/rev/fun/mdivide_left_tri.hpp
++++ b/stan/math/rev/fun/mdivide_left_tri.hpp
+@@ -74,12 +74,12 @@
+   virtual void chain() {
+     using Eigen::Map;
+     matrix_d adjA;
+-    matrix_d adjB;
++    matrix_d adjB = Map<matrix_vi>(variRefC_, M_, N_).adj();
+
+-    adjB = Map<matrix_d>(A_, M_, M_)
+-               .template triangularView<TriView>()
+-               .transpose()
+-               .solve(Map<matrix_vi>(variRefC_, M_, N_).adj());
++    Map<matrix_d>(A_, M_, M_)
++        .template triangularView<TriView>()
++        .transpose()
++        .solveInPlace(adjB);
+     adjA = -adjB * Map<matrix_d>(C_, M_, N_).transpose();
+
+     size_t pos = 0;
+EOF
+
 # The adjoint ODE's backward quadrature callback accumulates into the CVODES
 # output vector without assigning it first, so it inherits whatever the
 # vector held: uninitialized memory on the first call, the previous step's
