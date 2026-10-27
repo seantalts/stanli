@@ -1255,7 +1255,10 @@ graph op (`lower.cpp`, `structured_loop.cpp`, `structured_recording.inc`).
 [How it works](../../docs/how-it-works.md#retained-loops) explains selection,
 recording and guarded replay. Large recordings are sealed into per-iteration
 numerical frames, and frame admission enables a temporary recording program
-with data-only specializations. The
+with data-only specializations. A trip whose program and recorder state
+repeat an earlier trip's is built from that trip's frame instead of being
+recorded: its data operations rerun with relocated operands, skipping those
+whose inputs repeat, and its frame then runs forward. The
 [recording-site experiment](../../docs/internal/archive/plans/2026-09-20-ctsem-index-recording.md)
 and the [ctsem memory record](../../docs/internal/archive/plans/2026-09-19-ctsem-memory.md)
 have the proofs and ctsem measurements.
@@ -1270,6 +1273,8 @@ have the proofs and ctsem measurements.
 | `STANLI_STRUCTURED_DATA_RECORDING=0` | disable data-only call specialization in that program | `structured_recording.inc` |
 | `STANLI_STRUCTURED_PREPARED_INDEX=0` | disable prepared data-only point reads | `structured_recording.inc` |
 | `STANLI_STRUCTURED_PREPARED_ITERATOR=0` | disable transient iterator rebinding reuse | `structured_recording.inc` |
+| `STANLI_NO_STRUCTURED_FRAME_INSTANCE=1` | record every frame instead of building repeated frames from a template | `structured_instance_run.inc` |
+| `STANLI_STRUCTURED_CHECK_FRAME_INSTANCE=1` | also record each instantiated frame and require the same frame and recorder state | `structured_instance_run.inc` |
 
 ## Executor details (`executor.cpp`)
 
