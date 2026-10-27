@@ -907,7 +907,7 @@ namespace {
 // representation, rather than broadening this proof through another engine.
 bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
   bool controlled_loop = false;
-  std::function<bool(const mir::Expr&)> expression = [&](const mir::Expr& e) {
+  std::function<bool(const mir::Expr&)> shape = [&](const mir::Expr& e) {
     // Expansion gains were established for single selectors. Range/gather
     // bodies also expose different reduction/fusion choices; keep their
     // established representation until that separate arithmetic is proved.
@@ -916,10 +916,12 @@ bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
       return false;
     if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
       return false;
-    if (lo.expr_effectful(e)) return false;
     for (const auto& a : e.args)
-      if (!expression(a)) return false;
+      if (!shape(a)) return false;
     return true;
+  };
+  const auto expression = [&](const mir::Expr& e) {
+    return shape(e) && !lo.expr_effectful(e);
   };
   std::function<bool(const mir::Stmt&)> statement = [&](const mir::Stmt& s) {
     if (s.kind == mir::Stmt::NRFunApp && s.fn_name != "FnCheck" &&
