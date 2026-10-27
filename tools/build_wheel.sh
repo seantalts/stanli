@@ -26,6 +26,10 @@ if ! grep -q '^STANLI_STAN_DENSITY_ORACLE:BOOL=OFF' build-rel/CMakeCache.txt 2>/
        "configure it with -DSTANLI_STAN_DENSITY_ORACLE=OFF for a release wheel" >&2
 fi
 cmake --build build-rel --parallel "$BUILD_JOBS" --target stanli_shared
+# Configure has already refused a stale embed object, so the cache entry
+# alone says whether this library carries the compiler.
+EMBED_SETTING=$(sed -n 's/^STANLI_STANC_EMBED_OBJ:[A-Z]*=//p' \
+  build-rel/CMakeCache.txt)
 
 mkdir -p python/stanli/_bin
 rm -f python/stanli/_bin/*
@@ -55,7 +59,7 @@ cp THIRD_PARTY_LICENSES.md LICENSE python/stanli/
 # Without the embedded compiler the package needs subprocess compilers. Windows
 # ships stanli's portable-MIR producer and keeps pristine stock stanc beside it
 # for one rollback cycle; other non-embedded development builds keep stock stanc.
-if [ ! -f "$EMBED_OBJECT" ]; then
+if [ -z "$EMBED_SETTING" ]; then
   if [ ! -f deps/stanc3/stanc ] || [ ! -f deps/stanc3/stanc.src ] ||
      [ "$(cat deps/stanc3/stanc.src 2>/dev/null || true)" != "$STANC3_SRC_SHA" ]; then
     echo "wheel needs a compiler built from $STANC3_SRC_SHA" >&2
