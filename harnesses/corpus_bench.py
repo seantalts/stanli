@@ -46,7 +46,7 @@ CACHE_STEM = "model"
 DEFAULT_CACHE = pathlib.Path("~/.cache/stanli/corpus-bench")
 BENCH = REPO / "build-rel/bench_grad"
 STANC = REPO / "deps/stanc3" / ("stanc.exe" if os.name == "nt" else "stanc")
-VECTORIZE_PROBE = REPO / "deps/stanc3/stanli-vectorize-probe"
+VECTORIZE_PROBE = toolchain.vectorize_probe()
 COLS = ["model", "params", "stanli_compile_s", "stanli_prep_s",
         "cmdstan_stanc_s", "cmdstan_build_s", "stanli_ns_grad", "cmdstan_ns_grad",
         "stanli_ns_grad_mad", "cmdstan_ns_grad_mad", "paired_speedup",

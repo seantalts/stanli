@@ -1384,7 +1384,7 @@ def main():
     parser.add_argument("models", nargs="*")
     parser.add_argument(
         "--compiler", type=pathlib.Path,
-        default=REPO / "deps" / "stanc3" / "stanli-vectorize-probe")
+        default=toolchain.vectorize_probe())
     parser.add_argument(
         "--candidate-pass", choices=CANDIDATE_PASSES,
         default=VECTORIZE_LOOPS)

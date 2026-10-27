@@ -14,6 +14,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 
 import benchmark_points as bp
+import toolchain
 
 
 def digest(text):
@@ -161,7 +162,7 @@ def stanli_library():
     return next((c for c in candidates if c.exists()), None)
 
 
-PROBE = REPO / "deps/stanc3/stanli-vectorize-probe"
+PROBE = toolchain.vectorize_probe()
 GOOD = """data { int<lower=0> N; vector[N] y; }
 parameters { real mu; real<lower=0> sigma; }
 model {

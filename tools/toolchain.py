@@ -21,6 +21,21 @@ LABELS = {
 }
 
 
+def embed_dir():
+    """Directory holding the embedded-stanc artifacts for this source tree."""
+    script = "source tools/stanc_embed/provenance.sh && stanc_embed_dir"
+    try:
+        out = subprocess.check_output(["bash", "-c", script], cwd=REPO, text=True,
+                                      stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        return REPO / "deps" / "stanc3" / "embed" / "unavailable"
+    return pathlib.Path(out.strip())
+
+
+def vectorize_probe():
+    return embed_dir() / "stanli-vectorize-probe"
+
+
 def parse_pins(text):
     pins = {}
     for number, line in enumerate(text.splitlines(), 1):
