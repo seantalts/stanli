@@ -289,5 +289,29 @@ class NetworkRetryTest(unittest.TestCase):
                         self.assertIn("with_retry.sh", code)
 
 
+class RunawayJobTest(unittest.TestCase):
+    workflows = sorted((ROOT / ".github/workflows").glob("*.yml"))
+
+    def test_every_job_has_a_timeout(self):
+        for path in self.workflows:
+            for name, job in workflow(path.name)["jobs"].items():
+                if "uses" in job:
+                    continue
+                with self.subTest(workflow=path.name, job=name):
+                    self.assertIn("timeout-minutes", job)
+
+    def test_every_ctest_run_has_a_per_test_timeout(self):
+        calls = 0
+        for path in self.workflows:
+            text = path.read_text().replace("\\\n", " ")
+            for line in text.splitlines():
+                match = re.search(r"(?:^|[\s;&|])ctest\s.*", line.split("#")[0])
+                if match and "--test-dir" in match[0]:
+                    calls += 1
+                    with self.subTest(workflow=path.name, line=line.strip()):
+                        self.assertRegex(match[0], r"--timeout \d+")
+        self.assertGreaterEqual(calls, 5)
+
+
 if __name__ == "__main__":
     unittest.main()

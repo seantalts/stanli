@@ -54,6 +54,7 @@ jobs:
   abi:
     name: the ABI constants agree
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -99,6 +100,7 @@ jobs:
     name: ${{ matrix.os }} (${{ matrix.r }})
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
@@ -111,10 +113,10 @@ jobs:
           # which is a WARNING and an ERROR for something the package
           # did not do. Providing pdflatex keeps this a meaningful package
           # check rather than an environment failure.
-          - {os: ubuntu-latest,  r: 'release', args: '"--as-cran"', tex: true}
-          - {os: ubuntu-latest,  r: 'devel',   args: '"--no-manual"'}
-          - {os: macos-latest,   r: 'release', args: '"--no-manual"'}
-          - {os: windows-latest, r: 'release', args: '"--no-manual"'}
+          - {os: ubuntu-latest,  r: 'release', args: '"--as-cran"', tex: true, timeout: 90}
+          - {os: ubuntu-latest,  r: 'devel',   args: '"--no-manual"', timeout: 120}
+          - {os: macos-latest,   r: 'release', args: '"--no-manual"', timeout: 30}
+          - {os: windows-latest, r: 'release', args: '"--no-manual"', timeout: 30}
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes

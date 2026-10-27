@@ -19,6 +19,7 @@ permissions:
 jobs:
   regenerate:
     runs-on: macos-15
+    timeout-minutes: 20
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
     steps:

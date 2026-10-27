@@ -164,7 +164,7 @@ jobs:
         shell: msys2 {0}
         run: |
           source tools/build_jobs.sh
-          ctest --test-dir build --parallel "$(stanli_detect_build_jobs)" --output-on-failure
+          ctest --test-dir build --timeout 600 --parallel "$(stanli_detect_build_jobs)" --output-on-failure
 
       - name: C++ cache statistics
         if: always()
