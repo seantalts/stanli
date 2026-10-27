@@ -1759,9 +1759,18 @@ struct Execution {
     });
     return constant;
   }
+  int64_t hold(int64_t version) {
+    Version& entry = s.versions[static_cast<size_t>(version)];
+    if (entry.constant) entry.owner = -1;
+    return version;
+  }
   double* materialize(int64_t version, int64_t len) {
     double* v = s.versions[static_cast<size_t>(version)].value;
-    if (!is_const(version) || !in_workspace(v)) return v;
+    if (!is_const(version)) return v;
+    if (!in_workspace(v)) {
+      hold(version);
+      return v;
+    }
     double* copy = s.arena.allocate(len);
     std::copy_n(v, len, copy);
     return copy;
@@ -1882,7 +1891,7 @@ struct Execution {
     if (n.active && !s.building) {
       handles = static_cast<int64_t>(s.handles.size());
       for (int k = 0; k < op.n_in; ++k)
-        s.handles.push_back(s.bindings[op.in[k]]);
+        s.handles.push_back(hold(s.bindings[op.in[k]]));
     }
     const int64_t out_len = p.body.slots[op.out].len,
                   out2_len = op.out2 >= 0 ? c.out2.len : 0;
@@ -1921,7 +1930,7 @@ struct Execution {
     if (!s.building) {
       handles = static_cast<int64_t>(s.handles.size());
       for (int k = 0; k < op.n_in; ++k)
-        s.handles.push_back(s.bindings[op.in[k]]);
+        s.handles.push_back(hold(s.bindings[op.in[k]]));
     }
     const bool folded = is_const(cached);
     const int64_t out = make_version(
@@ -2265,7 +2274,7 @@ struct Execution {
     if (n.active && !s.building) {
       handles = static_cast<int64_t>(s.handles.size());
       for (const auto& in : segment.ins)
-        s.handles.push_back(s.bindings[in.slot]);
+        s.handles.push_back(hold(s.bindings[in.slot]));
     }
     const bool log_inputs = s.building && !folded;
     const uint32_t seg_in_offset =

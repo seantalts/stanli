@@ -6425,17 +6425,20 @@ static MemoResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
                            const std::vector<std::vector<double>>& data,
                            bool memo, size_t extra_params = 0,
                            const std::vector<std::vector<double>>& changed = {},
-                           bool shipped = false) {
+                           bool shipped = false, bool tree = false,
+                           bool frames = true) {
   std::vector<int64_t> param_lens = {1, 1};
   if (extra_params) param_lens.push_back(static_cast<int64_t>(extra_params));
   const Graph graph = outer(plan, param_lens, data_lens);
-  test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+  if (frames) test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+  if (tree) test_setenv("STANLI_NO_STRUCTURED_REPLAY", "1");
   if (!shipped) {
     test_setenv("STANLI_DATA_LOOP_MEMO_MIN_WORK", "0");
     test_setenv("STANLI_DATA_LOOP_MEMO_MIN_RATIO", "0");
   }
   Executor executor = diagnosed_executor(graph);
   test_unsetenv("STANLI_STRUCTURED_FRAMES");
+  test_unsetenv("STANLI_NO_STRUCTURED_REPLAY");
   const size_t first_data = param_lens.size();
   for (size_t i = 0; i < data.size(); ++i)
     std::copy(data[i].begin(), data[i].end(),
@@ -7016,6 +7019,7 @@ struct FuzzPlan {
   std::vector<int> copies;
   bool carry = false;
   bool aliasing = false;
+  bool inplace_reads = false;
   int loop_depth = 0;
 
   int fresh() { return plan->body.add_slot(1, false); }
@@ -7181,9 +7185,34 @@ struct FuzzPlan {
     pool.push_back(slot);
   }
 
+  void inplace_read_statement(std::vector<Node>& out) {
+    const bool use_store = random.chance(50);
+    const int source = use_store ? store : vector;
+    int& next = use_store ? store_next : vector_next;
+    const int hot = plan->body.add_slot(6, false), dot = fresh();
+    out.push_back(
+        call(*plan, OP_MUL, {random.chance(70) ? theta : beta, source}, hot));
+    out.push_back(call(*plan, OP_DOT, {hot, source}, dot));
+    out.push_back(target(dot));
+    const int write_index = safe_index(out, pick(), six, 6);
+    const int value = random.chance(30) && !hots.empty()
+                          ? hots[static_cast<size_t>(random.below(hots.size()))]
+                          : operand();
+    Node write =
+        call(*plan, OP_SET_INDEX_DYNAMIC, {source, write_index, value}, next);
+    attach(*plan, write.op, single_spec(6));
+    out.push_back(std::move(write));
+    out.push_back(alias(source, next));
+    next = plan->body.add_slot(6, false);
+  }
+
   void statement(std::vector<Node>& out, int depth) {
     if (carry && random.chance(15)) {
       carry_statement(out);
+      return;
+    }
+    if (inplace_reads && random.chance(30)) {
+      inplace_read_statement(out);
       return;
     }
     if (aliasing && random.chance(20)) {
@@ -7279,10 +7308,12 @@ struct FuzzPlan {
 };
 
 static std::optional<ScanFixture> fuzz_plan(uint64_t seed, bool carry,
-                                            bool aliasing = false) {
+                                            bool aliasing = false,
+                                            bool inplace_reads = false) {
   FuzzPlan f;
   f.carry = carry;
   f.aliasing = aliasing;
+  f.inplace_reads = inplace_reads;
   f.random.state = seed * 2654435761ULL + 12345;
   f.plan = std::make_shared<StructuredLoop>();
   auto& plan = *f.plan;
@@ -7777,6 +7808,7 @@ static void data_loop_memo_fuzz_tests() {
     uint64_t seed;
     bool carry;
     bool aliasing;
+    bool inplace_reads = false;
   };
   // Plans that a stale-step read of a cached folded kernel, and a carried
   // local that a step reads before the loop rewrites it, once made wrong.
@@ -7786,13 +7818,13 @@ static void data_loop_memo_fuzz_tests() {
                              {12243, false, false},
                              {14265, false, false}};
   for (const uint64_t seed : CARRY_SEEDS) order.push_back({seed, true, false});
-  for (const Case mode :
-       {Case{0, false, false}, Case{0, true, false}, Case{0, false, true}})
+  for (const Case mode : {Case{0, false, false}, Case{0, true, false},
+                          Case{0, false, true}, Case{0, false, false, true}})
     for (uint64_t seed = 1; seed <= seeds; ++seed)
-      order.push_back({seed, mode.carry, mode.aliasing});
+      order.push_back({seed, mode.carry, mode.aliasing, mode.inplace_reads});
   size_t built = 0, hits = 0;
-  for (const auto& [seed, carry, aliasing] : order) {
-    const auto f = fuzz_plan(seed, carry, aliasing);
+  for (const auto& [seed, carry, aliasing, inplace_reads] : order) {
+    const auto f = fuzz_plan(seed, carry, aliasing, inplace_reads);
     if (!f) continue;
     ++built;
     std::vector<double> table(6);
@@ -7805,11 +7837,26 @@ static void data_loop_memo_fuzz_tests() {
         memo_run(f->plan, f->lens, {table}, false, 0, {changed});
     if (!memo_same(on, off))
       std::printf("  fuzz seed %llu%s\n", static_cast<unsigned long long>(seed),
-                  carry      ? " (carry)"
-                  : aliasing ? " (aliasing)"
-                             : "");
+                  carry           ? " (carry)"
+                  : aliasing      ? " (aliasing)"
+                  : inplace_reads ? " (inplace reads)"
+                                  : "");
     check(memo_same(on, off),
           "data loop memo fuzz plan matches memo off bitwise");
+    if (inplace_reads) {
+      const MemoResult tree =
+          memo_run(f->plan, f->lens, {table}, false, 0, {changed}, false, true);
+      const MemoResult stream = memo_run(f->plan, f->lens, {table}, false, 0,
+                                         {changed}, false, false, false);
+      if (!memo_same(off, tree) || !memo_same(stream, tree))
+        std::printf("  fuzz seed %llu (inplace reads) frames=%d stream=%d\n",
+                    static_cast<unsigned long long>(seed), memo_same(off, tree),
+                    memo_same(stream, tree));
+      check(memo_same(off, tree),
+            "framed replay after in-place writes matches the tree walk");
+      check(memo_same(stream, tree),
+            "stream replay after in-place writes matches the tree walk");
+    }
     const size_t seen = memo_field(on, "memo_hits=");
     hits += seen != std::numeric_limits<size_t>::max() && seen > 0;
   }

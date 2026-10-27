@@ -7,6 +7,11 @@ writes the original in place on the next row. Frames are forced because the
 memo only runs when frames are recorded. Each model is swept over several
 points and back to the first, and every log density and gradient on the way
 must match memo off, since a stale memo shows only on a later evaluation.
+
+inplace_logged_read.stan and inplace_logged_matrix.stan write a data-valued
+local in place after a parameter-dependent call has read it. They run with
+the shipped selector and with the retained path forced, and every swept
+point must match STANLI_STRUCTURED_LOOPS=0.
 """
 import os
 from pathlib import Path
@@ -28,7 +33,33 @@ def gradient(check, stan, data, memo_off):
     return run.stdout.splitlines(), hits
 
 
+def sweep(check, stan, data, **overrides):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("STANLI_STRUCTURED")}
+    env["STANLI_STRUCTURED_LOOP_DIAGNOSTICS"] = "1"
+    env.update(overrides)
+    run = subprocess.run([check, str(stan), str(data), "--point", "0", "--sweep", "4"],
+                         check=True, text=True, capture_output=True, env=env)
+    lines = [line for line in run.stdout.splitlines() if line.startswith(("SWEEP_POINT ", "OK "))]
+    return lines, "stanli_structured selected" in run.stderr
+
+
+def check_retained_matches_off(check, name):
+    stan = DIRECTORY / f"{name}.stan"
+    data = stan.with_suffix(".json")
+    off, engaged = sweep(check, stan, data, STANLI_STRUCTURED_LOOPS="0")
+    assert not engaged, f"{name}: loops were retained with STANLI_STRUCTURED_LOOPS=0"
+    assert len(off) == 6, f"{name}: expected four swept points, the return and the result: {len(off)} lines"
+    for label, overrides in (("auto", {}), ("forced", {"STANLI_STRUCTURED_LOOPS": "1"})):
+        on, engaged = sweep(check, stan, data, **overrides)
+        assert engaged, f"{name}: the retained path did not engage under {label}"
+        for at, (a, b) in enumerate(zip(on, off)):
+            assert a == b, f"{name} ({label}): line {at}: {a[:70]} vs loops off {b[:70]}"
+        print(f"{name}: {label} matches loops off at every swept point")
+
+
 def main(check):
+    for name in ("inplace_logged_read", "inplace_logged_matrix"):
+        check_retained_matches_off(check, name)
     for name in ("lag", "alias_then_write"):
         stan = DIRECTORY / f"{name}.stan"
         data = stan.with_suffix(".json")
