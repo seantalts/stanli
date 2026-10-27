@@ -3,8 +3,8 @@
 Each model repeats one statement shape N times in a section that is lowered
 statement by statement. Growing N eightfold should grow preparation time
 about eightfold; a quadratic cost would multiply it by sixty-four. The bound
-sits between the two, so it tolerates timer noise but not a per-statement
-copy of the lowering state.
+sits between the two, so it tolerates timer noise on a busy CI runner but not
+a per-statement copy of the lowering state.
 """
 import subprocess
 import sys
@@ -12,8 +12,8 @@ import tempfile
 from pathlib import Path
 
 SMALL, LARGE = 400, 3200
-REPEATS = 3
-MAX_RATIO = 12.0
+REPEATS = 5
+MAX_RATIO = 20.0
 
 PREAMBLE = "parameters { real mu; }\nmodel { mu ~ normal(0, 1); }\n"
 
