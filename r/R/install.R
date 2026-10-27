@@ -151,8 +151,49 @@ stanli_install <- function(version = stanli_runtime_release, quiet = FALSE,
   invisible(dest)
 }
 
+native_state <- new.env(parent = emptyenv())
+
+# The .Call routines named anywhere in this package's R code.
+native_routines_used <- function() {
+  ns <- asNamespace("stanli")
+  names <- lapply(ls(ns, all.names = TRUE), function(name) {
+    f <- get(name, envir = ns)
+    if (!is.function(f)) return(NULL)
+    text <- paste(deparse(f), collapse = "\n")
+    found <- regmatches(text, gregexpr('\\.Call\\("[A-Za-z0-9_]+"', text))[[1]]
+    sub('^\\.Call\\("', "", sub('"$', "", found))
+  })
+  sort(unique(unlist(names)))
+}
+
+native_routines_registered <- function() {
+  names(getDLLRegisteredRoutines(getLoadedDLLs()[["stanli"]])$.Call)
+}
+
+missing_native_routines <- function(registered = native_routines_registered()) {
+  setdiff(native_routines_used(), registered)
+}
+
+# Updating stanli while it is loaded can leave R code from the new install
+# calling compiled code from the old one, which fails with "not resolved
+# from current namespace". Say what happened instead.
+check_native_routines <- function(registered = native_routines_registered()) {
+  missing <- missing_native_routines(registered)
+  if (length(missing))
+    stop("stanli's R code and its compiled code come from different ",
+         "installs (the compiled code lacks ", paste(missing, collapse = ", "),
+         "). This happens when stanli is updated while it is loaded. ",
+         "Please restart R; if the error persists, reinstall stanli.",
+         call. = FALSE)
+  invisible(TRUE)
+}
+
 # Bind the C ABI. Idempotent: the bridge returns immediately once loaded.
 load_runtime <- function(path = stanli_runtime_path()) {
+  if (!isTRUE(native_state$checked)) {
+    check_native_routines()
+    native_state$checked <- TRUE
+  }
   if (.Call("stanli_bridge_loaded")) return(invisible(TRUE))
   if (!file.exists(path)) {
     stop("the stanli runtime is not installed. Run stanli_install() once, ",
