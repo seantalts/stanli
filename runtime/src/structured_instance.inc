@@ -35,17 +35,31 @@ struct PlanOp {
   int64_t a = 0, b = 0, c = 0;
 };
 
-enum PlanWriteMode : uint8_t {
+enum PlanMode : uint8_t {
   kWriteConst = 1,
   kWriteCells = 2,
   kWriteRhsConst = 4,
   kWriteRhsCells = 8,
-  kWriteLocal = 16
+  kWriteLocal = 16,
+  kPrepared = 32
 };
 
+enum class Use { Read, Write, Touch };
+
+struct Access {
+  uint32_t first = 0, last = 0;
+  Use use = Use::Read;
+  bool rhs = false;
+  int32_t ref = -1;
+  int64_t len = 0;
+};
+
+// Base 0 is the workspace, 1 the new frame's values, 2 scratch for arena
+// cells the frame does not keep; later bases are earlier frames or
+// absolute addresses.
 struct PlanRef {
   int32_t base = -1;
-  int64_t offset = 0;
+  int32_t offset = 0;
 };
 
 struct Positional {
@@ -56,7 +70,8 @@ struct Positional {
 
 // Frames are tape indices. Local is the frame being built.
 struct FrameLoc {
-  static constexpr int64_t Workspace = -1, Null = -2, Absolute = -3, Local = -4;
+  static constexpr int64_t Workspace = -1, Null = -2, Absolute = -3, Local = -4,
+                           Scratch = -5;
   int64_t frame = Null;
   int64_t offset = 0;
   bool operator==(const FrameLoc& b) const {
@@ -86,6 +101,7 @@ struct StateImage {
 struct TripCapture {
   std::vector<PlanOp> ops;
   std::vector<const double*> ptrs;
+  std::vector<double> seen;
   std::vector<int64_t> positions;
   std::vector<Positional> positional;
   std::vector<uint8_t> key_flags;
@@ -105,14 +121,12 @@ struct TripCapture {
         static_cast<uint32_t>(stream->program.size() - stream->targets.size());
     ops.push_back(op);
   }
-  // Zero-length operands may point anywhere, even into another frame.
-  static const double* sized(const Op& op, int bit, const Desc& d) {
-    const bool empty =
-        (op.dyn_lengths & (1u << bit)) ? op.dyn_capacity == 0 : d.len == 0;
-    return empty ? nullptr : d.data;
+  void operand(const double* ptr, bool scalar = false) {
+    ptrs.push_back(ptr);
+    seen.push_back(scalar && ptr ? *ptr : 0.0);
   }
   void inputs(const Op& op, const KernelCtx& c) {
-    for (int k = 0; k < op.n_in; ++k) ptrs.push_back(sized(op, k, c.in[k]));
+    for (int k = 0; k < op.n_in; ++k) operand(c.in[k].data, c.in[k].len == 1);
   }
   template <class T>
   void place(const T* at, size_t count) {
@@ -127,38 +141,38 @@ struct TripCapture {
               bool prepared = false) {
     push(prepared ? PlanOp::Index : PlanOp::Kernel, n.site);
     inputs(op, c);
-    ptrs.push_back(sized(op, 6, c.out));
+    operand(c.out.data);
     if (prepared) return;
-    if (op.out2 >= 0) ptrs.push_back(c.out2.len ? c.out2.data : nullptr);
-    ptrs.push_back(n.kernel_scratch ? c.scratch : nullptr);
+    if (op.out2 >= 0) operand(c.out2.data);
+    operand(c.scratch);
   }
   void decide(const double* cell, bool taken) {
     push(PlanOp::Decide);
     ops.back().expect = taken;
-    ptrs.push_back(cell);
+    operand(cell, true);
   }
   void bounds(int loop, const double* lower, const double* upper,
               int64_t count) {
     push(PlanOp::Bounds, static_cast<uint32_t>(loop));
     ops.back().a = count;
-    ptrs.push_back(lower);
-    ptrs.push_back(upper);
+    operand(lower, true);
+    operand(upper, true);
   }
   void iterate(const double* cell, int loop, int64_t iteration) {
     push(PlanOp::Iterate, static_cast<uint32_t>(loop));
     ops.back().a = iteration;
-    ptrs.push_back(cell);
+    operand(cell);
   }
   void outer_iterate(const double* cell) {
     push(PlanOp::OuterIterate);
-    ptrs.push_back(cell);
+    operand(cell);
   }
   void copy(const double* from, const double* to, int64_t len) {
     if (len <= 0) return;
     push(PlanOp::Copy);
     ops.back().a = len;
-    ptrs.push_back(from);
-    ptrs.push_back(to);
+    operand(from);
+    operand(to);
   }
   template <class T>
   void write(const Node& n, const Op& op, const KernelCtx& c, int64_t base,
@@ -205,7 +219,7 @@ struct TripCapture {
     chose(chosen, trace);
   }
   void key(const double* ptr, bool constant) {
-    ptrs.push_back(ptr);
+    operand(ptr);
     key_flags.push_back(constant);
   }
   void chose(const DataLoopMemo* chosen, bool trace) {
@@ -220,22 +234,34 @@ struct FrameTemplate {
   int flow = 0;
   std::vector<PlanOp> ops;
   std::vector<PlanRef> refs;
+  std::vector<double> seen, values;
+  std::vector<std::pair<uint32_t, double>> checks;
   std::vector<int64_t> positions;
   std::vector<Positional> positional;
   std::vector<uint8_t> key_flags;
   std::vector<FrameLoc> bases;
   size_t image_size = 0;
-  struct Range {
-    size_t image, frame, len;
-  };
-  std::vector<Range> ranges;
   std::vector<FrameLoc> bindings;
   std::vector<uint8_t> fixed_slots, fixed_adj_slots;
   StateImage pre, post;
   std::vector<std::pair<int64_t, int64_t>> flag_remap, promotion_writes;
   std::vector<std::pair<FrameLoc, FrameAdjoint>> targets;
   std::vector<uint32_t> ws_plan;
-  size_t flag_count = 0;
+  // Ops that repeat the template's inputs need not run; see plan_schedule.
+  std::vector<double> workspace;
+  std::vector<uint32_t> schedule, frame_restore;
+  std::vector<std::pair<uint32_t, double>> ws_restore;
+  std::vector<int64_t> flag_restore;
+  std::unordered_map<int64_t, std::vector<uint8_t>> final_flags;
+  std::vector<uint8_t> varying;
+  std::vector<int64_t> bounds, flag_units;
+  std::vector<Access> accesses;
+  std::vector<uint32_t> access_at, array_checks;
+  std::unordered_map<uint32_t, std::pair<size_t, int64_t>> array_at;
+  std::vector<double> array_values;
+  bool reads_initial = false;
+  size_t reschedules = 0;
+  bool stale = false;
 };
 
 struct FrameInstanceRestart {};
@@ -254,6 +280,9 @@ struct FrameInstances {
   std::unique_ptr<TripCapture> capture;
   std::map<const double*, size_t> by_address;
   size_t indexed = 0;
+  // Where commit placed each version, while no recording has changed them.
+  std::vector<FrameLoc> placed;
+  bool placed_valid = false;
   std::vector<double> image, registers, workspace;
   std::vector<int64_t> shifts, scratch;
   std::vector<double*> bases;

@@ -9,7 +9,9 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -844,11 +846,20 @@ bool selected_cells_constant(const std::vector<uint8_t>& cells,
   return constant;
 }
 
-// Successful first use proved immutable descriptor/slot geometry. Fixed
-// Single axes have logical strides equal to physical strides. Check live
-// selectors in the validator's original axis order; its capacity proof bounds
-// this exact integer sum.
-void prepared_index_read(const DynamicIndexSpec& spec, KernelCtx& context) {
+bool single_selection(const DynamicIndexSpec& spec) {
+  return spec.selected_size == 1 &&
+         std::all_of(spec.axes.begin(), spec.axes.end(), [](const auto& a) {
+           return a.kind == DynamicIndexSpec::Axis::Single && a.count == 1 &&
+                  a.count_input_offset < 0 && a.extent_input_offset < 0;
+         });
+}
+
+// For a single_selection whose successful first use proved immutable
+// descriptor/slot geometry. Fixed Single axes have logical strides equal to
+// physical strides. Check live selectors in the validator's original axis
+// order; its capacity proof bounds this exact integer sum.
+int64_t prepared_position(const DynamicIndexSpec& spec,
+                          const KernelCtx& context) {
   int64_t position = 0;
   for (const auto& a : spec.axes) {
     const double raw = context.in[a.selector_input].data[a.input_offset];
@@ -857,7 +868,47 @@ void prepared_index_read(const DynamicIndexSpec& spec, KernelCtx& context) {
       index_out_of_range();
     position += (static_cast<int64_t>(raw) - 1) * a.stride;
   }
-  context.out.data[0] = context.in[0].data[position];
+  return position;
+}
+
+void prepared_index_read(const DynamicIndexSpec& spec, KernelCtx& context) {
+  context.out.data[0] = context.in[0].data[prepared_position(spec, context)];
+}
+
+bool static_selection(const DynamicIndexSpec& spec) {
+  return std::all_of(spec.axes.begin(), spec.axes.end(), [](const auto& a) {
+    return a.count_input_offset < 0 && a.extent_input_offset < 0;
+  });
+}
+
+// index_positions for a static_selection whose successful first use proved
+// its geometry, so only the selector values need checking.
+template <class F>
+void prepared_positions(const DynamicIndexSpec& p, const KernelCtx& c, F&& f) {
+  IndexRuntime runtime(p.axes.size());
+  for (size_t d = 0; d < p.axes.size(); ++d) {
+    const auto& axis = p.axes[d];
+    auto& state = runtime.axes[d];
+    state.extent = axis.extent;
+    state.count = axis.count;
+    state.stride = axis.stride;
+    runtime.selected *= axis.count;
+    if (axis.kind == DynamicIndexSpec::Axis::All) continue;
+    state.selector = c.in[axis.selector_input].data;
+    if (axis.kind == DynamicIndexSpec::Axis::Range && axis.count == 0) continue;
+    const int64_t width =
+        axis.kind == DynamicIndexSpec::Axis::Multi ? axis.count : 1;
+    for (int64_t j = 0; j < width; ++j) {
+      const double raw = state.selector[axis.input_offset + j];
+      const double last = axis.kind == DynamicIndexSpec::Axis::Range
+                              ? raw + static_cast<double>(axis.count - 1)
+                              : raw;
+      if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
+          last > static_cast<double>(axis.extent))
+        index_out_of_range();
+    }
+  }
+  selected_positions(p, runtime, f);
 }
 
 int64_t scalar_index_forward(KernelCtx& c) {
@@ -1424,6 +1475,9 @@ struct FrameTape {
   int64_t adjoint_base = 0;
   size_t version_peak = 0, recording_cells = 0;
   size_t layout_attempts = 0, layout_matches = 0;
+  // Offsets in the first frame of the initial slot values. Their versions are
+  // never owned, so no in-place write changes them during an evaluation.
+  std::vector<std::pair<int64_t, int64_t>> initial;
   bool ready = false;
 };
 
@@ -1508,6 +1562,7 @@ struct LoopState : KernelState {
   bool frame_clone = std::getenv("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
   bool frame_instance =
       std::getenv("STANLI_NO_STRUCTURED_FRAME_INSTANCE") == nullptr;
+  const double* initial = nullptr;
   bool check_frame_instance =
       std::getenv("STANLI_STRUCTURED_CHECK_FRAME_INSTANCE") != nullptr;
   std::vector<uint8_t> observable;
@@ -1743,12 +1798,17 @@ struct Execution {
   void end_trip(Flow flow);
   void end_loop();
   FrameInstances::Context context(size_t back) const;
+  bool predicted_current() const;
   void note_frame();
   void adopt(Flow flow, size_t instructions);
+  template <class F>
+  void plan_operands(const FrameTemplate& t, const PlanOp& op, F&& f) const;
+  void plan_accesses(FrameTemplate& t) const;
+  void plan_schedule(FrameTemplate& t) const;
   bool admit(const FrameTemplate& t, Relocation& r);
   double* place(const Relocation& r, const FrameLoc& at, LoopFrame& local,
                 bool& ok) const;
-  bool run_plan(const FrameTemplate& t, const Relocation& r,
+  bool run_plan(FrameTemplate& t, const Relocation& r, LoopFrame& frame,
                 double outer_value);
   bool shift_bindings(const FrameTemplate& t, LoopFrame& frame);
   void commit(const FrameTemplate& t, const Relocation& r,
@@ -3524,6 +3584,7 @@ void start_recording(LoopState& s, Execution& e, KernelCtx& ctx) {
   if (!s.no_replay) s.building = std::make_unique<Stream>();
   if (s.frame_mode) s.frames = std::make_unique<FrameTape>();
   double* initial = s.arena.allocate(p.initial_size);
+  s.initial = initial;
   std::fill_n(initial, p.initial_size, 0.0);
   s.bindings.resize(p.body.slots.size());
   for (size_t slot = 0; slot < p.body.slots.size(); ++slot)

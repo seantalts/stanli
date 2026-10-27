@@ -487,6 +487,15 @@ void seal_frame(LoopState& s) {
     total += len;
     i = j;
   }
+  if (tape.frames.empty() && s.initial)
+    for (const auto& r : snapshot.ranges) {
+      const double* from = std::max<const double*>(r.base, s.initial);
+      const double* to = std::min<const double*>(
+          r.base + r.used, s.initial + s.p.initial_size);
+      if (from < to)
+        tape.initial.emplace_back(
+            static_cast<int64_t>(r.offset) + (from - r.base), to - from);
+    }
   auto frame = std::make_unique<LoopFrame>();
   frame->values.resize(total);
   for (const auto& r : snapshot.ranges)

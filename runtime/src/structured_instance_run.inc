@@ -86,9 +86,10 @@ std::vector<uint8_t> Execution::generations() const {
 
 void Execution::begin_trip() {
   if (!instances) return;
+  instances->placed_valid = false;
   capture = nullptr;
   instances->capture.reset();
-  if (!instances->enabled || observed) return;
+  if (!instances->enabled || observed || predicted_current()) return;
   instances->capture = std::make_unique<TripCapture>();
   capture = instances->capture.get();
   capture->stream = s.building.get();
@@ -120,6 +121,18 @@ void Execution::end_trip(Flow flow) {
     instances->capture.reset();
   }
   note_frame();
+}
+
+// Whether the template this trip was predicted to repeat is still usable, so
+// a fresh capture would replace it with an equivalent one.
+bool Execution::predicted_current() const {
+  const auto& frames = s.frames->frames;
+  if (frames.size() < 2) return false;
+  const auto next = instances->successor.find(context(0));
+  if (next == instances->successor.end()) return false;
+  const auto found =
+      instances->templates.find({frames.back()->code.get(), next->second});
+  return found != instances->templates.end() && !found->second->stale;
 }
 
 FrameInstances::Context Execution::context(size_t back) const {
@@ -231,19 +244,33 @@ void Execution::adopt(Flow flow, size_t instructions) {
     return false;
   };
 
-  t->bases = {{FrameLoc::Workspace, 0}, {FrameLoc::Local, 0}};
+  t->bases = {
+      {FrameLoc::Workspace, 0}, {FrameLoc::Local, 0}, {FrameLoc::Scratch, 0}};
+  t->ops = std::move(c.ops);
+  std::vector<int64_t> lengths(c.ptrs.size(), -1);
+  for (const PlanOp& op : t->ops)
+    plan_operands(*t, op,
+                  [&](uint32_t r, int64_t len, Use) { lengths[r] = len; });
   std::map<std::pair<int64_t, int64_t>, int32_t> known;
   t->refs.reserve(c.ptrs.size());
-  for (const double* ptr : c.ptrs) {
+  for (size_t i = 0; i < c.ptrs.size(); ++i) {
+    const double* ptr = c.ptrs[i];
     PlanRef ref;
     size_t offset;
     if (!ptr) {
+    } else if (lengths[i] == 0) {
+      ref = {0, 0};
     } else if (in_arena(ptr, offset)) {
-      ref = {1, static_cast<int64_t>(offset)};
+      if (offset > static_cast<size_t>(std::numeric_limits<int32_t>::max()))
+        return refuse();
+      ref = {2, static_cast<int32_t>(offset)};
     } else {
       FrameLoc at = locate(ptr);
+      if (at.offset > std::numeric_limits<int32_t>::max() &&
+          at.frame != FrameLoc::Absolute)
+        return refuse();
       if (at.frame == FrameLoc::Workspace) {
-        ref = {0, at.offset};
+        ref = {0, static_cast<int32_t>(at.offset)};
       } else {
         if (at.frame >= static_cast<int64_t>(index)) return refuse();
         const auto key = at.frame == FrameLoc::Absolute
@@ -252,21 +279,57 @@ void Execution::adopt(Flow flow, size_t instructions) {
         const auto [entry, fresh] =
             known.emplace(key, static_cast<int32_t>(t->bases.size()));
         if (fresh) t->bases.push_back({key.first, key.second});
-        ref = {entry->second, at.frame == FrameLoc::Absolute ? 0 : at.offset};
+        ref = {entry->second, at.frame == FrameLoc::Absolute
+                                  ? 0
+                                  : static_cast<int32_t>(at.offset)};
       }
     }
     t->refs.push_back(ref);
   }
-  t->ops = std::move(c.ops);
+  t->seen = std::move(c.seen);
+  t->values = frame.values;
+  t->workspace = s.workspace;
   t->positions = std::move(c.positions);
   t->positional = std::move(c.positional);
   t->key_flags = std::move(c.key_flags);
 
+  struct Range {
+    size_t image, frame, len;
+  };
+  std::vector<Range> ranges;
   for (const auto& r : tape.sealing->snapshot.ranges) {
     size_t offset;
     if (!in_arena(r.base, offset)) return refuse();
-    t->ranges.push_back({offset, r.offset, r.used});
+    ranges.push_back({offset, r.offset, r.used});
   }
+  // Arena operands the frame keeps refer to its values; the rest are scratch.
+  std::sort(ranges.begin(), ranges.end(),
+            [](const auto& a, const auto& b) { return a.image < b.image; });
+  t->image_size = 0;
+  std::vector<uint8_t> moved(t->refs.size(), 0);
+  bool split = false;
+  const auto keep = [&](uint32_t r, int64_t len) {
+    PlanRef& ref = t->refs[r];
+    if (ref.base != 2 || moved[r]) return;
+    moved[r] = 1;
+    const size_t at = static_cast<size_t>(ref.offset);
+    const size_t end = at + static_cast<size_t>(std::max<int64_t>(len, 1));
+    auto range = std::upper_bound(
+        ranges.begin(), ranges.end(), at,
+        [](size_t x, const auto& range) { return x < range.image; });
+    if (range != ranges.begin() && at < (range - 1)->image + (range - 1)->len) {
+      --range;
+      split = split || end > range->image + range->len;
+      ref = {1, static_cast<int32_t>(range->frame + (at - range->image))};
+      return;
+    }
+    split = split || (range != ranges.end() && end > range->image);
+    t->image_size = std::max(t->image_size, end);
+  };
+  for (const PlanOp& op : t->ops)
+    plan_operands(*t, op, [&](uint32_t r, int64_t len, Use) { keep(r, len); });
+  for (uint32_t r = 0; r < t->refs.size(); ++r) keep(r, 1);
+  if (split) return refuse();
   for (double* ptr : frame.bindings) {
     const FrameLoc at = locate(ptr);
     if (at.frame >= static_cast<int64_t>(index) || at.frame == FrameLoc::Null)
@@ -359,43 +422,26 @@ void Execution::adopt(Flow flow, size_t instructions) {
                  }
                });
   if (foreign) return refuse();
-  const auto plan_write = [&](const PlanOp& op, uint32_t r, int64_t len) {
-    const PlanRef& ref = t->refs[r];
-    if (ref.base == 0)
-      for (int64_t k = 0; k < len; ++k)
-        plan_last[static_cast<size_t>(ref.offset + k)] = op.clock;
-  };
   for (auto& op : t->ops) {
-    switch (op.kind) {
-      case PlanOp::Kernel: {
-        const Node& n = *s.sites[op.site];
-        const Op& o = s.p.body.ops[n.op];
-        uint32_t r = op.refs + static_cast<uint32_t>(o.n_in);
-        plan_write(op, r++, operand_length(s.p, n, o, o.out, 6));
-        if (o.out2 >= 0) plan_write(op, r++, s.p.body.slots[o.out2].len);
-        plan_write(op, r, n.kernel_scratch);
-        break;
-      }
-      case PlanOp::Index:
-        plan_write(op,
-                   op.refs + static_cast<uint32_t>(
-                                 s.p.body.ops[s.sites[op.site]->op].n_in),
-                   1);
-        break;
-      case PlanOp::Iterate:
-      case PlanOp::OuterIterate:
-        plan_write(op, op.refs, 1);
-        break;
-      case PlanOp::Copy:
-        plan_write(op, op.refs + 1, op.a);
-        break;
-      case PlanOp::Write:
-        if (t->refs[op.refs].base == 0) return refuse();
-        if (t->refs[op.refs].base == 1) op.mode |= kWriteLocal;
-        break;
-      default:
-        break;
+    if (op.kind == PlanOp::Write) {
+      if (t->refs[op.refs].base == 0) return refuse();
+      if (t->refs[op.refs].base <= 2) op.mode |= kWriteLocal;
     }
+    const auto* spec = op.kind == PlanOp::Write || op.kind == PlanOp::Gather ||
+                               op.kind == PlanOp::Cells ||
+                               (op.kind == PlanOp::Kernel &&
+                                s.sites[op.site]->forward == index_forward &&
+                                !s.ctx[op.site].dyn_lengths)
+                           ? static_cast<const DynamicIndexSpec*>(
+                                 s.p.body.ops[s.sites[op.site]->op].udata)
+                           : nullptr;
+    if (spec && static_selection(*spec)) op.mode |= kPrepared;
+    plan_operands(*t, op, [&](uint32_t r, int64_t len, Use use) {
+      const PlanRef& ref = t->refs[r];
+      if (use == Use::Write && ref.base == 0)
+        for (int64_t k = 0; k < len; ++k)
+          plan_last[static_cast<size_t>(ref.offset + k)] = op.clock;
+    });
   }
   for (size_t cell = 0; cell < plan_last.size(); ++cell)
     if (plan_last[cell] > code_last[cell])
@@ -408,14 +454,380 @@ void Execution::adopt(Flow flow, size_t instructions) {
     if (remap[static_cast<size_t>(key)] >= 0)
       t->flag_remap.emplace_back(key, remap[static_cast<size_t>(key)]);
   if (t->flag_remap.size() != t->post.flag_keys.size()) return refuse();
-  t->flag_count = c.keys.size();
   t->promotion_writes = std::move(c.promotions);
   for (size_t k = t->pre.targets; k < tape.targets.size(); ++k) {
     FrameLoc at = locate(tape.targets[k]);
     if (at.frame == static_cast<int64_t>(index)) at.frame = FrameLoc::Local;
     t->targets.emplace_back(at, tape.target_adjoints[k]);
   }
-  in.templates[context(0)] = std::move(t);
+  for (const auto& [key, version] : t->flag_remap)
+    t->final_flags[key] = s.constant_cells.at(version);
+  plan_accesses(*t);
+  std::vector<const Access*> outside;
+  for (const Access& a : t->accesses)
+    if (a.use != Use::Read && a.first == a.last && a.ref >= 0 &&
+        t->refs[a.ref].base > 2)
+      outside.push_back(&a);
+  for (const Access& a : t->accesses) {
+    if (a.use != Use::Read || a.first != a.last || a.ref < 0 || a.len < 2 ||
+        a.len > (int64_t{1} << 16) || t->array_at.count(a.ref))
+      continue;
+    const PlanRef& ref = t->refs[a.ref];
+    if (ref.base < 3 || a.len > 4096 ||
+        std::any_of(outside.begin(), outside.end(), [&](const Access* w) {
+          const PlanRef& to = t->refs[w->ref];
+          return to.base == ref.base && to.offset < ref.offset + a.len &&
+                 ref.offset < to.offset + w->len;
+        }))
+      continue;
+    const FrameLoc& base = t->bases[static_cast<size_t>(ref.base)];
+    const double* from =
+        base.frame == FrameLoc::Absolute
+            ? reinterpret_cast<const double*>(
+                  static_cast<intptr_t>(base.offset))
+            : tape.frames[static_cast<size_t>(base.frame)]->values.data();
+    t->array_at[a.ref] = {t->array_values.size(), a.len};
+    t->array_values.insert(t->array_values.end(), from + ref.offset,
+                           from + ref.offset + a.len);
+  }
+  auto& kept = in.templates[context(0)];
+  t->varying.assign(t->refs.size(), 0);
+  if (kept && kept->refs.size() == t->refs.size()) t->varying = kept->varying;
+  plan_schedule(*t);
+  kept = std::move(t);
+}
+
+// Visits each operand an op reads, writes, or may write at positions it
+// computes, with its length.
+template <class F>
+void Execution::plan_operands(const FrameTemplate& t, const PlanOp& op,
+                              F&& f) const {
+  uint32_t r = op.refs;
+  const auto inputs = [&](int first) {
+    const Op& o = p.body.ops[s.sites[op.site]->op];
+    for (int k = first; k < o.n_in; ++k)
+      f(r + static_cast<uint32_t>(k), p.body.slots[o.in[k]].len, Use::Read);
+  };
+  switch (op.kind) {
+    case PlanOp::Kernel: {
+      const Node& n = *s.sites[op.site];
+      const Op& o = p.body.ops[n.op];
+      for (int k = 0; k < o.n_in; ++k)
+        f(r++, operand_length(p, n, o, o.in[k], k), Use::Read);
+      f(r++, operand_length(p, n, o, o.out, 6), Use::Write);
+      if (o.out2 >= 0) f(r++, p.body.slots[o.out2].len, Use::Write);
+      f(r, n.kernel_scratch, Use::Write);
+      break;
+    }
+    case PlanOp::Index: {
+      const Op& o = p.body.ops[s.sites[op.site]->op];
+      inputs(0);
+      f(r + static_cast<uint32_t>(o.n_in), 1, Use::Write);
+      break;
+    }
+    case PlanOp::Decide:
+      f(r, 1, Use::Read);
+      break;
+    case PlanOp::Bounds:
+      f(r, 1, Use::Read);
+      f(r + 1, 1, Use::Read);
+      break;
+    case PlanOp::Iterate:
+    case PlanOp::OuterIterate:
+      f(r, 1, Use::Write);
+      break;
+    case PlanOp::Copy:
+      f(r, op.a, Use::Read);
+      f(r + 1, op.a, Use::Write);
+      break;
+    case PlanOp::Write:
+      f(r, p.body.slots[p.body.ops[s.sites[op.site]->op].in[0]].len,
+        Use::Touch);
+      inputs(1);
+      break;
+    case PlanOp::Gather:
+    case PlanOp::Cells:
+      inputs(1);
+      break;
+    case PlanOp::Memo: {
+      if (op.expect) break;
+      const auto& program = *reinterpret_cast<const RecordingProgram*>(op.b);
+      const auto& candidate = program.candidates[program.code[op.a].candidate];
+      for (int slot : candidate.raw) f(r++, p.body.slots[slot].len, Use::Read);
+      for (const Node* node : candidate.invariants) {
+        const Op& o = p.body.ops[node->op];
+        for (int k = 0; k < o.n_in; ++k)
+          f(r++, p.body.slots[o.in[k]].len, Use::Read);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+// Lists each op's accesses once per template. Workspace and arena storage is
+// split into segments between the bounds of all operand ranges; each flag
+// vector the plan touches is one more unit after them. Other storage is
+// outside the trip and has no unit.
+void Execution::plan_accesses(FrameTemplate& t) const {
+  const int64_t workspace = static_cast<int64_t>(s.workspace.size());
+  const int64_t frame = static_cast<int64_t>(t.values.size());
+  const auto start = [&](const PlanRef& ref) -> int64_t {
+    if (ref.base == 0) return ref.offset;
+    if (ref.base == 1) return workspace + ref.offset;
+    if (ref.base == 2) return workspace + frame + ref.offset;
+    return -1;
+  };
+  std::vector<uint8_t> marks(
+      static_cast<size_t>(workspace + frame) + t.image_size + 1, 0);
+  for (const PlanOp& op : t.ops)
+    plan_operands(t, op, [&](uint32_t r, int64_t len, Use) {
+      const int64_t at = start(t.refs[r]);
+      if (at < 0 || len <= 0) return;
+      marks[static_cast<size_t>(at)] = 1;
+      marks[static_cast<size_t>(at + len)] = 1;
+    });
+  t.bounds.clear();
+  for (size_t k = 0; k < marks.size(); ++k)
+    if (marks[k]) t.bounds.push_back(static_cast<int64_t>(k));
+  const uint32_t segments =
+      t.bounds.empty() ? 0 : static_cast<uint32_t>(t.bounds.size() - 1);
+  std::unordered_map<int64_t, uint32_t> flags;
+  t.flag_units.clear();
+  const auto flag = [&](int64_t version) {
+    const auto [entry, fresh] = flags.emplace(
+        version, segments + static_cast<uint32_t>(t.flag_units.size()));
+    if (fresh) t.flag_units.push_back(version);
+    return entry->second;
+  };
+  t.accesses.clear();
+  t.access_at.assign(t.ops.size() + 1, 0);
+  for (size_t i = 0; i < t.ops.size(); ++i) {
+    const PlanOp& op = t.ops[i];
+    t.access_at[i] = static_cast<uint32_t>(t.accesses.size());
+    int rhs = -1;
+    if (op.kind == PlanOp::Write)
+      rhs = require_index_input_layout(
+                *static_cast<const DynamicIndexSpec*>(
+                    p.body.ops[s.sites[op.site]->op].udata),
+                true)
+                .rhs;
+    plan_operands(t, op, [&](uint32_t r, int64_t len, Use use) {
+      Access access{0, 0, use, false, static_cast<int32_t>(r), len};
+      access.rhs = rhs >= 0 && r == op.refs + static_cast<uint32_t>(rhs);
+      const int64_t at = start(t.refs[r]);
+      if (at >= 0 && len > 0) {
+        const auto first =
+            std::lower_bound(t.bounds.begin(), t.bounds.end(), at);
+        const auto last = std::lower_bound(first, t.bounds.end(), at + len);
+        access.first = static_cast<uint32_t>(first - t.bounds.begin());
+        access.last = static_cast<uint32_t>(last - t.bounds.begin());
+      }
+      t.accesses.push_back(access);
+    });
+    const auto flag_access = [&](int64_t version, Use use) {
+      const uint32_t unit = flag(version);
+      t.accesses.push_back({unit, unit + 1, use, false, -1, 0});
+    };
+    if (op.kind == PlanOp::FlagsOnes || op.kind == PlanOp::FlagsZeros)
+      flag_access(op.a, Use::Write);
+    if (op.kind == PlanOp::FlagsCopy) {
+      flag_access(op.b, Use::Read);
+      flag_access(op.a, Use::Write);
+    }
+    if (op.kind == PlanOp::Write && (op.mode & kWriteCells))
+      flag_access(op.a, Use::Touch);
+    if (op.kind == PlanOp::Write && (op.mode & kWriteRhsCells))
+      flag_access(op.b, Use::Read);
+    if (op.kind == PlanOp::Cells) flag_access(op.a, Use::Read);
+  }
+  t.access_at[t.ops.size()] = static_cast<uint32_t>(t.accesses.size());
+}
+
+// An op whose inputs repeat the template's has the template's results. Such
+// an op runs only when a later running op reads what it writes; storage and
+// flags it writes last get the template's final values instead. Inputs from
+// before the trip are compared with the template's first.
+void Execution::plan_schedule(FrameTemplate& t) const {
+  if (t.access_at.empty()) plan_accesses(t);
+  const int64_t workspace = static_cast<int64_t>(s.workspace.size());
+  const size_t segments = t.bounds.empty() ? 0 : t.bounds.size() - 1;
+  const size_t units = segments + t.flag_units.size();
+  const auto accesses = [&](size_t i) {
+    return std::make_pair(t.accesses.data() + t.access_at[i],
+                          t.accesses.data() + t.access_at[i + 1]);
+  };
+  std::vector<std::vector<std::pair<int64_t, int64_t>>> written(t.bases.size());
+  const auto initial = [&](const PlanRef& ref, int64_t len) {
+    if (t.bases[static_cast<size_t>(ref.base)].frame != 0) return false;
+    for (const auto& [from, size] : s.frames->initial)
+      if (ref.offset >= from && ref.offset + len <= from + size) return true;
+    return false;
+  };
+  t.reads_initial = false;
+  const auto untouched = [&](const PlanRef& ref, int64_t len) {
+    for (const auto& [from, to] : written[static_cast<size_t>(ref.base)])
+      if (ref.offset < to && ref.offset + len > from) return false;
+    return true;
+  };
+  enum : uint8_t { Unwritten, Repeated, Varying };
+  std::vector<uint8_t> state(units, Unwritten), loop(p.loop_count, Varying);
+  std::vector<uint8_t> repeated(t.ops.size(), 0);
+  std::map<std::pair<int32_t, int64_t>, uint32_t> checks;
+  std::vector<uint32_t> pending, arrays;
+  for (size_t i = 0; i < t.ops.size(); ++i) {
+    const PlanOp& op = t.ops[i];
+    bool same = false;
+    switch (op.kind) {
+      case PlanOp::Kernel:
+        same = !s.ctx[op.site].dyn_lengths;
+        break;
+      case PlanOp::Write:
+        same = (op.mode & kWriteLocal) != 0;
+        break;
+      case PlanOp::Iterate:
+        same = loop[op.site] == Repeated;
+        break;
+      case PlanOp::Decide:
+      case PlanOp::Bounds:
+      case PlanOp::Gather:
+      case PlanOp::Cells:
+      case PlanOp::Copy:
+      case PlanOp::FlagsOnes:
+      case PlanOp::FlagsZeros:
+      case PlanOp::FlagsCopy:
+        same = true;
+        break;
+      default:
+        break;
+    }
+    const bool relevant_rhs =
+        op.kind != PlanOp::Write ||
+        (op.mode & (kWriteConst | kWriteRhsConst | kWriteRhsCells));
+    pending.clear();
+    arrays.clear();
+    const auto [begin, end] = accesses(i);
+    for (const Access* a = begin; same && a != end; ++a) {
+      if (a->use == Use::Write || (a->rhs && !relevant_rhs)) continue;
+      if (a->first < a->last) {
+        for (uint32_t k = a->first; k < a->last; ++k)
+          same = same && state[k] == Repeated;
+        if (same || a->use == Use::Touch || state[a->first] != Unwritten)
+          continue;
+        same = a->last - a->first == 1 && a->len == 1 &&
+               t.refs[a->ref].base == 0 && !t.varying[a->ref];
+        if (same) pending.push_back(a->ref);
+        continue;
+      }
+      if (a->ref < 0 || a->len == 0) continue;
+      const PlanRef& ref = t.refs[a->ref];
+      if (ref.base < 0) continue;
+      if (a->use != Use::Touch && initial(ref, a->len)) {
+        t.reads_initial = true;
+      } else if (a->use == Use::Touch || !untouched(ref, a->len) ||
+                 t.varying[a->ref]) {
+        same = false;
+      } else if (a->len == 1) {
+        pending.push_back(a->ref);
+      } else {
+        same = t.array_at.count(static_cast<uint32_t>(a->ref)) != 0;
+        if (same) arrays.push_back(static_cast<uint32_t>(a->ref));
+      }
+    }
+    if (same) {
+      for (uint32_t r : pending)
+        checks.emplace(std::make_pair(t.refs[r].base, t.refs[r].offset), r);
+      for (uint32_t r : arrays)
+        checks.emplace(
+            std::make_pair(-1 - t.refs[r].base,
+                           t.refs[r].offset * 65536 + t.array_at.at(r).second),
+            r);
+    }
+    repeated[i] = same;
+    if (op.kind == PlanOp::Bounds) loop[op.site] = same ? Repeated : Varying;
+    for (const Access* a = begin; a != end; ++a) {
+      if (a->use == Use::Read) continue;
+      if (a->first < a->last) {
+        std::fill(state.begin() + a->first, state.begin() + a->last,
+                  same ? Repeated : Varying);
+      } else if (a->ref >= 0 && t.refs[a->ref].base >= 0) {
+        const PlanRef& ref = t.refs[a->ref];
+        written[static_cast<size_t>(ref.base)].emplace_back(
+            ref.offset, ref.offset + a->len);
+      }
+    }
+  }
+  std::vector<uint8_t> needed(units, 0), loop_needed(p.loop_count, 0),
+      runs(t.ops.size(), 0);
+  for (size_t i = t.ops.size(); i-- > 0;) {
+    const PlanOp& op = t.ops[i];
+    const auto [begin, end] = accesses(i);
+    bool run =
+        !repeated[i] || (op.kind == PlanOp::Bounds && loop_needed[op.site]);
+    for (const Access* a = begin; !run && a != end; ++a)
+      if (a->use != Use::Read)
+        run = std::any_of(needed.begin() + a->first, needed.begin() + a->last,
+                          [](uint8_t v) { return v != 0; });
+    runs[i] = run;
+    if (!run) continue;
+    for (const Access* a = begin; a != end; ++a)
+      if (a->use == Use::Write)
+        std::fill(needed.begin() + a->first, needed.begin() + a->last, 0);
+    if (op.kind == PlanOp::Bounds) loop_needed[op.site] = 0;
+    for (const Access* a = begin; a != end; ++a)
+      if (a->use != Use::Write)
+        std::fill(needed.begin() + a->first, needed.begin() + a->last, 1);
+    if (op.kind == PlanOp::Iterate) loop_needed[op.site] = 1;
+  }
+  std::vector<int64_t> writer(units, -1);
+  t.schedule.clear();
+  for (size_t i = 0; i < t.ops.size(); ++i) {
+    if (runs[i]) t.schedule.push_back(static_cast<uint32_t>(i));
+    const auto [begin, end] = accesses(i);
+    for (const Access* a = begin; a != end; ++a)
+      if (a->use != Use::Read)
+        std::fill(writer.begin() + a->first, writer.begin() + a->last,
+                  static_cast<int64_t>(i));
+  }
+  std::map<std::pair<int32_t, int32_t>, double> known;
+  for (const auto& [r, value] : t.checks)
+    known.emplace(std::make_pair(t.refs[r].base, t.refs[r].offset), value);
+  t.checks.clear();
+  t.array_checks.clear();
+  for (const auto& [key, r] : checks) {
+    if (key.first < 0) {
+      t.array_checks.push_back(r);
+      continue;
+    }
+    const auto value = known.find({t.refs[r].base, t.refs[r].offset});
+    t.checks.emplace_back(r, value != known.end() ? value->second : t.seen[r]);
+  }
+  std::vector<uint8_t> restore(units, 0);
+  for (size_t k = 0; k < units; ++k)
+    restore[k] = writer[k] >= 0 && !runs[static_cast<size_t>(writer[k])];
+  const auto restored = [&](int64_t at) {
+    const auto it = std::upper_bound(t.bounds.begin(), t.bounds.end(), at);
+    return it != t.bounds.begin() && it != t.bounds.end() &&
+           restore[static_cast<size_t>(it - t.bounds.begin() - 1)];
+  };
+  t.ws_restore.clear();
+  for (int64_t k = 0; k < workspace; ++k)
+    if (restored(k))
+      t.ws_restore.emplace_back(static_cast<uint32_t>(k),
+                                t.workspace[static_cast<size_t>(k)]);
+  t.frame_restore.clear();
+  for (size_t k = 0; k < t.values.size(); ++k)
+    if (restored(workspace + static_cast<int64_t>(k)))
+      t.frame_restore.push_back(static_cast<uint32_t>(k));
+  t.flag_restore.clear();
+  for (size_t k = 0; k < t.flag_units.size(); ++k)
+    if (restore[segments + k]) t.flag_restore.push_back(t.flag_units[k]);
+  std::vector<double>().swap(t.seen);
+  std::vector<Access>().swap(t.accesses);
+  std::vector<uint32_t>().swap(t.access_at);
+  std::vector<int64_t>().swap(t.bounds);
+  std::vector<int64_t>().swap(t.flag_units);
 }
 
 bool Execution::admit(const FrameTemplate& t, Relocation& r) {
@@ -433,7 +845,8 @@ bool Execution::admit(const FrameTemplate& t, Relocation& r) {
   for (size_t i = 0; i < pre.versions.size(); ++i) {
     const VersionImage& a = pre.versions[i];
     const Version& v = s.versions[i];
-    const FrameLoc at = locate(v.value);
+    const auto& in = *instances;
+    const FrameLoc at = in.placed_valid ? in.placed[i] : locate(v.value);
     if (v.owner != a.owner || v.constant != a.constant) return false;
     if (a.value.frame >= 0) {
       if (at.frame < 0 || at.offset != a.value.offset) return false;
@@ -521,20 +934,18 @@ FrameAdjoint relocate_frame_adjoint(const FrameTemplate& t, const Relocation& r,
   return a;
 }
 
-bool Execution::run_plan(const FrameTemplate& t, const Relocation& r,
-                         double outer_value) {
+bool Execution::run_plan(FrameTemplate& t, const Relocation& r,
+                         LoopFrame& frame, double outer_value) {
   auto& in = *instances;
   in.image.resize(t.image_size);
-  const auto& source = t.frame->values;
-  for (const auto& range : t.ranges)
-    std::copy_n(source.data() + range.frame, range.len,
-                in.image.data() + range.image);
   in.bases.resize(t.bases.size());
   for (size_t b = 0; b < t.bases.size(); ++b) {
     const FrameLoc& base = t.bases[b];
     if (base.frame == FrameLoc::Workspace) {
       in.bases[b] = s.workspace.data();
     } else if (base.frame == FrameLoc::Local) {
+      in.bases[b] = frame.values.data();
+    } else if (base.frame == FrameLoc::Scratch) {
       in.bases[b] = in.image.data();
     } else if (base.frame == FrameLoc::Absolute) {
       in.bases[b] =
@@ -551,12 +962,11 @@ bool Execution::run_plan(const FrameTemplate& t, const Relocation& r,
                        : in.bases[static_cast<size_t>(at.base)] + at.offset;
   };
   const bool checking = !in.written.empty();
-  std::vector<uint8_t> image_written(checking ? t.image_size : 0, 0);
   const auto wrote = [&](const double* ptr, int64_t len) {
-    if (!checking || !ptr || ptr < in.image.data() ||
-        ptr >= in.image.data() + in.image.size())
+    if (!checking || !ptr || ptr < frame.values.data() ||
+        ptr >= frame.values.data() + frame.values.size())
       return;
-    std::fill_n(image_written.begin() + (ptr - in.image.data()), len, 1);
+    std::fill_n(in.written.begin() + (ptr - frame.values.data()), len, 1);
   };
   in.registers.resize(p.loop_count);
   in.shifts.assign(t.positional.size(), 0);
@@ -576,7 +986,29 @@ bool Execution::run_plan(const FrameTemplate& t, const Relocation& r,
     in.shifts[index] = expected.count ? in.scratch[0] - pos[0] : 0;
     return true;
   };
-  for (const PlanOp& op : t.ops) {
+  bool full = false;
+  const auto vary = [&](uint32_t i) {
+    for (size_t k = 0; k < t.refs.size(); ++k)
+      if (t.refs[k].base == t.refs[i].base &&
+          t.refs[k].offset == t.refs[i].offset)
+        t.varying[k] = 1;
+    full = true;
+  };
+  for (const auto& [i, value] : t.checks)
+    if (std::memcmp(ref(i), &value, sizeof(double)) != 0) vary(i);
+  for (uint32_t i : t.array_checks) {
+    const auto& [at, len] = t.array_at.at(i);
+    if (std::memcmp(ref(i), t.array_values.data() + at,
+                    static_cast<size_t>(len) * sizeof(double)) != 0)
+      vary(i);
+  }
+  if (full && ++t.reschedules > 4)
+    for (const auto& check : t.checks) vary(check.first);
+  if (full) plan_schedule(t);
+  if (t.reads_initial && r.frames[0] != 0) full = true;
+  const size_t count = full ? t.ops.size() : t.schedule.size();
+  for (size_t step = 0; step < count; ++step) {
+    const PlanOp& op = t.ops[full ? step : t.schedule[step]];
     switch (op.kind) {
       case PlanOp::Kernel: {
         const Node& n = *s.sites[op.site];
@@ -587,7 +1019,15 @@ bool Execution::run_plan(const FrameTemplate& t, const Relocation& r,
         if (o.out2 >= 0) c.out2.data = ref(at++);
         c.scratch = ref(at);
         if (c.dyn_lengths) apply_dynamic_length(c);
-        n.forward(c);
+        if (op.mode & kPrepared) {
+          std::fill_n(c.out.data, c.out.len, 0.0);
+          prepared_positions(*static_cast<const DynamicIndexSpec*>(o.udata), c,
+                             [&](int64_t i, int64_t from) {
+                               c.out.data[i] = c.in[0].data[from];
+                             });
+        } else {
+          n.forward(c);
+        }
         wrote(c.out.data, operand_length(p, n, o, o.out, 6));
         if (o.out2 >= 0) wrote(c.out2.data, p.body.slots[o.out2].len);
         wrote(c.scratch, n.kernel_scratch);
@@ -657,7 +1097,7 @@ bool Execution::run_plan(const FrameTemplate& t, const Relocation& r,
                                              : &in.revert;
         const bool rhs_constant = op.mode & kWriteRhsConst;
         in.scratch.clear();
-        index_positions(spec, c, true, [&](int64_t i, int64_t at) {
+        const auto write = [&](int64_t i, int64_t at) {
           if (undo) undo->emplace_back(values + at, values[at]);
           values[at] = rhs[i];
           wrote(values + at, 1);
@@ -666,7 +1106,11 @@ bool Execution::run_plan(const FrameTemplate& t, const Relocation& r,
                 rhs_constant ||
                 (rhs_cells && (*rhs_cells)[static_cast<size_t>(i)]);
           in.scratch.push_back(at);
-        });
+        };
+        if (op.mode & kPrepared)
+          prepared_positions(spec, c, write);
+        else
+          index_positions(spec, c, true, write);
         if (!(op.mode & kWriteConst) &&
             !same_positions(static_cast<size_t>(op.c)))
           return false;
@@ -678,9 +1122,12 @@ bool Execution::run_plan(const FrameTemplate& t, const Relocation& r,
         KernelCtx& c = s.ctx[op.site];
         bind(c, o, op.refs);
         in.scratch.clear();
-        index_positions(*static_cast<const DynamicIndexSpec*>(o.udata), c,
-                        false,
-                        [&](int64_t, int64_t at) { in.scratch.push_back(at); });
+        const auto& spec = *static_cast<const DynamicIndexSpec*>(o.udata);
+        const auto add = [&](int64_t, int64_t at) { in.scratch.push_back(at); };
+        if (op.mode & kPrepared)
+          prepared_positions(spec, c, add);
+        else
+          index_positions(spec, c, false, add);
         if (!same_positions(static_cast<size_t>(op.c))) return false;
         break;
       }
@@ -690,11 +1137,20 @@ bool Execution::run_plan(const FrameTemplate& t, const Relocation& r,
         KernelCtx& c = s.ctx[op.site];
         bind(c, o, op.refs);
         const auto found = in.flags.find(op.a);
-        if (found == in.flags.end() ||
-            selected_cells_constant(
-                found->second, *static_cast<const DynamicIndexSpec*>(o.udata),
-                c) != op.expect)
-          return false;
+        if (found == in.flags.end()) return false;
+        const auto& spec = *static_cast<const DynamicIndexSpec*>(o.udata);
+        bool constant = true;
+        if (op.mode & kPrepared) {
+          int64_t selected = 0;
+          prepared_positions(spec, c, [&](int64_t, int64_t at) {
+            ++selected;
+            constant = constant && found->second[static_cast<size_t>(at)];
+          });
+          constant = constant && selected == c.out.len;
+        } else {
+          constant = selected_cells_constant(found->second, spec, c);
+        }
+        if (constant != op.expect) return false;
         break;
       }
       case PlanOp::FlagsOnes:
@@ -734,11 +1190,20 @@ bool Execution::run_plan(const FrameTemplate& t, const Relocation& r,
       }
     }
   }
-  if (checking)
-    for (const auto& range : t.ranges)
-      for (size_t k = 0; k < range.len; ++k)
-        in.written[range.frame + k] |= image_written[range.image + k];
-  return in.flags.size() == t.flag_count;
+  if (!full) {
+    for (const auto& [cell, value] : t.ws_restore) s.workspace[cell] = value;
+    for (uint32_t at : t.frame_restore) {
+      frame.values[at] = t.values[at];
+      wrote(frame.values.data() + at, 1);
+    }
+    for (int64_t version : t.flag_restore) {
+      const auto found = t.final_flags.find(version);
+      if (found != t.final_flags.end()) in.flags[version] = found->second;
+    }
+  }
+  for (const auto& entry : t.flag_remap)
+    if (!in.flags.count(entry.first)) return false;
+  return true;
 }
 
 // Everything a trip can change, for the instance checker.
@@ -796,6 +1261,7 @@ void Execution::snapshot(RecorderSnapshot& out) const {
 void Execution::restore(const RecorderSnapshot& from) {
   FrameTape& tape = *s.frames;
   auto& in = *instances;
+  in.placed_valid = false;
   while (tape.frames.size() > from.frames) {
     in.by_address.erase(tape.frames.back()->values.data());
     tape.frames.pop_back();
@@ -956,7 +1422,7 @@ bool Execution::instance_trip(double outer_value, Flow& flow,
   const auto found =
       in.templates.find({tape.frames.back()->code.get(), next->second});
   if (found == in.templates.end()) return false;
-  const FrameTemplate& t = *found->second;
+  FrameTemplate& t = *found->second;
   const auto failed = [&]() {
     ++in.fallback;
     if (in.fallback > 64 && in.fallback > 4 * in.instantiated)
@@ -964,7 +1430,10 @@ bool Execution::instance_trip(double outer_value, Flow& flow,
     return false;
   };
   Relocation r;
-  if (!admit(t, r)) return failed();
+  if (!admit(t, r)) {
+    t.stale = true;
+    return failed();
+  }
   std::unique_ptr<RecorderSnapshot> before;
   if (s.check_frame_instance) {
     before = std::make_unique<RecorderSnapshot>();
@@ -974,7 +1443,7 @@ bool Execution::instance_trip(double outer_value, Flow& flow,
   auto frame = std::make_unique<LoopFrame>();
   frame->code = t.frame->code;
   frame->adjoint_base = tape.adjoint_base;
-  frame->values.resize(t.frame->values.size());
+  frame->values = t.values;
   frame->old.assign(t.frame->old.size(), 0.0);
   bool ok = true;
   for (const FrameLoc& at : t.bindings)
@@ -988,7 +1457,7 @@ bool Execution::instance_trip(double outer_value, Flow& flow,
   in.revert.clear();
   in.memo_undo.clear();
   try {
-    ok = run_plan(t, r, outer_value);
+    ok = run_plan(t, r, *frame, outer_value);
   } catch (const std::exception&) {
     ok = false;
   }
@@ -1006,6 +1475,7 @@ bool Execution::instance_trip(double outer_value, Flow& flow,
       m.candidate->events = m.events;
       m.candidate->disabled = m.disabled;
     }
+    t.stale = true;
     return failed();
   }
   for (size_t k = in.revert.size(); k-- > 0;)
@@ -1071,15 +1541,21 @@ void Execution::commit(const FrameTemplate& t, const Relocation& r,
   auto& in = *instances;
   FrameTape& tape = *s.frames;
   LoopFrame& f = *frame;
-  for (const auto& range : t.ranges)
-    std::copy_n(in.image.data() + range.image, range.len,
-                f.values.data() + range.frame);
   bool ok = true;
   s.versions.clear();
-  for (const VersionImage& v : t.post.versions)
+  in.placed.clear();
+  for (const VersionImage& v : t.post.versions) {
     s.versions.push_back(Version{place(r, v.value, f, ok),
                                  relocate_adjoint(t, r, v.adjoint, ok), v.owner,
                                  v.constant});
+    FrameLoc at = v.value;
+    if (at.frame == FrameLoc::Local)
+      at.frame = static_cast<int64_t>(tape.frames.size());
+    else if (at.frame >= 0)
+      at.frame = r.frames[static_cast<size_t>(at.frame)];
+    in.placed.push_back(at);
+  }
+  in.placed_valid = true;
   s.bindings = t.post.bindings;
   s.node_version = t.post.node_version;
   s.node_version2 = t.post.node_version2;
