@@ -1063,11 +1063,15 @@ set_tests_properties(test_prep_only PROPERTIES
   ENVIRONMENT "STANLI_PROFILE_PREP=0"
   PASS_REGULAR_EXPRESSION "[0-9]+\\.[0-9]+ 24"
   FAIL_REGULAR_EXPRESSION "stanli_prep")
-add_test(NAME test_prep_deep_expression
-         COMMAND ${Python3_EXECUTABLE} tests/test_prep_deep_expression.py
-                 $<TARGET_FILE:bench_grad>
-         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-set_tests_properties(test_prep_deep_expression PROPERTIES RUN_SERIAL TRUE)
+# Sanitizers inflate stack frames and run times, so the depths and the time
+# bound this test checks do not apply to those builds.
+if(NOT STANLI_SANITIZE)
+  add_test(NAME test_prep_deep_expression
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_deep_expression.py
+                   $<TARGET_FILE:bench_grad>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_prep_deep_expression PROPERTIES RUN_SERIAL TRUE)
+endif()
 add_test(NAME test_prep_profile
          COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
                  tests/fixtures/ar1.json --prep
