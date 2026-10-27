@@ -155,14 +155,17 @@ int64_t operand_length(const StructuredLoop& p, const Op& op, int slot,
 }
 }  // namespace
 
-// Calls f(raw, len, positions, write) for each value operand of a frame
-// program in execution order. A positioned operand covers base + positions.
+// Calls f(raw, len, positions, write, instruction, scratch) for each value
+// operand of a frame program in execution order. A positioned operand covers
+// base + positions.
 template <class F>
 void frame_values(const LoopState& s, const FrameCode& code, F&& visit) {
   const auto& p = s.p;
   int64_t instruction = -1;
-  const auto f = [&](uint64_t raw, int64_t len, const int64_t* pos,
-                     bool write) { visit(raw, len, pos, write, instruction); };
+  const auto f = [&](uint64_t raw, int64_t len, const int64_t* pos, bool write,
+                     bool scratch = false) {
+    visit(raw, len, pos, write, instruction, scratch);
+  };
   for (size_t pc = 0; pc < code.words.size();) {
     const uint64_t header = code.words[pc];
     const uint64_t* w = code.words.data() + pc + 1;
@@ -180,7 +183,7 @@ void frame_values(const LoopState& s, const FrameCode& code, F&& visit) {
         f(*at++, operand_length(p, op, op.out, 6), nullptr, call);
         if (w[1] & kFrozenCallHasOut2)
           f(*at++, p.body.slots[op.out2].len, nullptr, call);
-        f(*at, n.kernel_scratch, nullptr, call);
+        f(*at, n.kernel_scratch, nullptr, call, true);
         break;
       }
       case StreamInstr::InPlace: {
@@ -406,7 +409,7 @@ void Execution::adopt(Flow flow, size_t instructions) {
   bool foreign = false;
   frame_values(s, code,
                [&](uint64_t raw, int64_t len, const int64_t* pos, bool write,
-                   int64_t instruction) {
+                   int64_t instruction, bool) {
                  const int64_t ref = static_cast<int64_t>(raw);
                  if (ref >= 0 || ref == frame_null || len <= 0) return;
                  const FrameLoc& at =
@@ -1339,17 +1342,19 @@ void Execution::check_instance(const RecorderSnapshot& before,
               equivalent_frames(frame, copy),
           "frame program");
   require(same(frame.old, copy.old), "old values");
-  std::vector<uint8_t> used(frame.values.size(), 0);
-  frame_values(
-      s, *frame.code,
-      [&](uint64_t raw, int64_t len, const int64_t* pos, bool, int64_t) {
-        const int64_t ref = static_cast<int64_t>(raw);
-        if (ref < 0) return;
-        for (int64_t k = 0; k < len; ++k)
-          used[static_cast<size_t>(ref + (pos ? pos[k] : k))] = 1;
-      });
+  enum : uint8_t { Unused, Used, Scratch };
+  std::vector<uint8_t> used(frame.values.size(), Unused);
+  frame_values(s, *frame.code,
+               [&](uint64_t raw, int64_t len, const int64_t* pos, bool, int64_t,
+                   bool scratch) {
+                 const int64_t ref = static_cast<int64_t>(raw);
+                 if (ref < 0) return;
+                 for (int64_t k = 0; k < len; ++k)
+                   used[static_cast<size_t>(ref + (pos ? pos[k] : k))] =
+                       scratch ? Scratch : Used;
+               });
   for (size_t k = 0; k < used.size(); ++k)
-    if ((used[k] || plan_cells[k]) &&
+    if ((used[k] == Used || (plan_cells[k] && used[k] != Scratch)) &&
         std::memcmp(&frame.values[k], &copy.values[k], sizeof(double)) != 0)
       throw std::logic_error("structured frame instance check: frame value " +
                              std::to_string(k) + " of " +

@@ -8352,6 +8352,34 @@ static InstanceFixture moving_binding_fixture() {
   return f;
 }
 
+// Scalar normal_lpdf leaves some scratch cells unwritten; they hold what an
+// earlier trip left in the arena.
+static InstanceFixture kernel_scratch_fixture(int rows) {
+  RowPlan r(rows);
+  const int column = r.vec(rows), mean = r.fresh(), next = r.fresh();
+  r.plan->imports.push_back({column, 3, 0, false, true});
+  std::vector<Node> head = {alias(mean, r.zero)};
+  std::vector<Node> body;
+  const int y = r.read(body, r.tab, r.rows, r.row);
+  const int g = r.read(body, column, r.rows, r.row);
+  const int odd = r.compare(body, g, r.zero, 4);
+  body.push_back(branch(odd,
+                        sequence({call(*r.plan, OP_ADD, {mean, r.theta}, next),
+                                  alias(mean, next)}),
+                        sequence({})));
+  const int lp = r.fresh();
+  Node density = call(*r.plan, OP_NORMAL_LPDF, {y, mean, r.one}, lp);
+  r.plan->body.ops[density.op].variant = 2;
+  body.push_back(std::move(density));
+  body.push_back(target(lp));
+  std::vector<double> table(static_cast<size_t>(rows));
+  for (int i = 0; i < rows; ++i) table[i] = std::pow(10.0, i % 6);
+  auto f = r.finish(std::move(head), std::move(body), std::move(table));
+  f.lens.push_back(rows);
+  f.data.push_back(periodic_table(rows, 2));
+  return f;
+}
+
 static void frame_instance_tests() {
   instance_check("on row-indexed folded reads", folded_rows_fixture(),
                  {-1, 0, -1, 0, true});
@@ -8385,6 +8413,9 @@ static void frame_instance_tests() {
                  moving_binding_fixture(), {-1, 0, -1, 0, true});
   instance_check("on a while outer loop", while_rows_fixture(),
                  {-1, -1, -1, 0, true});
+  for (int rows : {24})
+    instance_check("on partly written kernel scratch",
+                   kernel_scratch_fixture(rows), {-1, -1, -1, 0, true});
   {
     const auto on = instance_check("on parameter guards flipping between rows",
                                    parameter_guard_fixture(), {});
