@@ -7864,6 +7864,880 @@ static void data_loop_memo_fuzz_tests() {
   check(hits > order.size() / 10, "data loop memo fuzz exercises hits");
 }
 
+struct InstanceResult {
+  std::vector<std::vector<double>> evaluations;
+  std::string diagnostics, error;
+};
+
+struct InstanceFixture {
+  std::shared_ptr<StructuredLoop> plan;
+  std::vector<int64_t> params = {1, 1};
+  std::vector<int64_t> lens;
+  std::vector<std::vector<double>> data;
+  std::vector<std::vector<double>> changed;
+};
+
+static size_t total_field(const std::string& diagnostics,
+                          const std::string& name) {
+  size_t total = 0;
+  for (size_t at = diagnostics.find(name); at != std::string::npos;
+       at = diagnostics.find(name, at + name.size()))
+    total += std::stoul(diagnostics.substr(at + name.size()));
+  return total;
+}
+
+static std::atomic<int> instance_effects{0};
+
+static InstanceResult instance_run(const InstanceFixture& f, bool instance,
+                                   bool checked,
+                                   const std::vector<double>& thetas = {
+                                       .25, -.5, .25, .75, -.25}) {
+  test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+  test_setenv("STANLI_DATA_LOOP_MEMO_MIN_WORK", "0");
+  test_setenv("STANLI_DATA_LOOP_MEMO_MIN_RATIO", "0");
+  if (!instance) test_setenv("STANLI_NO_STRUCTURED_FRAME_INSTANCE", "1");
+  if (checked) test_setenv("STANLI_STRUCTURED_CHECK_FRAME_INSTANCE", "1");
+  Executor executor = diagnosed_executor(outer(f.plan, f.params, f.lens));
+  test_unsetenv("STANLI_STRUCTURED_FRAMES");
+  test_unsetenv("STANLI_NO_STRUCTURED_FRAME_INSTANCE");
+  test_unsetenv("STANLI_STRUCTURED_CHECK_FRAME_INSTANCE");
+  const size_t first_data = f.params.size();
+  for (size_t i = 0; i < f.data.size(); ++i)
+    std::copy(f.data[i].begin(), f.data[i].end(),
+              executor.value_ptr(first_data + i));
+  InstanceResult result;
+  instance_effects = 0;
+  for (size_t step = 0; step < thetas.size(); ++step) {
+    if (step == 3)
+      for (size_t i = 0; i < f.changed.size(); ++i)
+        std::copy(f.changed[i].begin(), f.changed[i].end(),
+                  executor.value_ptr(first_data + i));
+    const double theta = thetas[step];
+    int64_t extra = 0;
+    for (size_t k = 2; k < f.params.size(); ++k) extra += f.params[k];
+    for (int64_t j = 0; j < extra; ++j)
+      executor.params_data()[2 + j] = .3 + .17 * static_cast<double>(j) * theta;
+    stanli_test::StdoutCapture capture(stderr);
+    try {
+      executor.params_data()[0] = theta;
+      executor.params_data()[1] = .5;
+      std::vector<double> gradient(static_cast<size_t>(executor.n_params()));
+      const double value = executor.gradient(gradient.data());
+      gradient.insert(gradient.begin(), value);
+      gradient.push_back(static_cast<double>(instance_effects.load()));
+      result.evaluations.push_back(std::move(gradient));
+    } catch (const std::exception& error) {
+      result.error = error.what();
+    }
+    result.diagnostics += capture.finish();
+    if (!result.error.empty()) break;
+  }
+  test_unsetenv("STANLI_DATA_LOOP_MEMO_MIN_WORK");
+  test_unsetenv("STANLI_DATA_LOOP_MEMO_MIN_RATIO");
+  return result;
+}
+
+static bool instance_same(const InstanceResult& a, const InstanceResult& b) {
+  if (a.error != b.error || a.evaluations.size() != b.evaluations.size())
+    return false;
+  for (size_t i = 0; i < a.evaluations.size(); ++i)
+    if (a.evaluations[i].size() != b.evaluations[i].size() ||
+        std::memcmp(a.evaluations[i].data(), b.evaluations[i].data(),
+                    a.evaluations[i].size() * sizeof(double)) != 0)
+      return false;
+  return true;
+}
+
+struct InstanceExpect {
+  long instantiated = -1;
+  long fallback = -1;
+  long refused = -1;
+  long restarts = -1;
+  bool some = false;
+};
+
+// Runs instantiation off, on, and on with the per-frame checker. Returns the
+// counts of the unchecked run.
+static InstanceResult instance_check(const char* name, const InstanceFixture& f,
+                                     InstanceExpect expect = {}) {
+  const InstanceResult off = instance_run(f, false, false);
+  const InstanceResult on = instance_run(f, true, false);
+  const InstanceResult checked = instance_run(f, true, true);
+  const std::string label = std::string("frame instance ") + name;
+  if (!instance_same(on, off) || !instance_same(checked, off))
+    std::printf("  on: %s | checked: %s | off: %s\n", on.error.c_str(),
+                checked.error.c_str(), off.error.c_str());
+  check(instance_same(on, off),
+        (label + " is bitwise identical to instantiation off").c_str());
+  check(instance_same(checked, off),
+        (label + " passes the frame instance checker").c_str());
+  check(total_field(off.diagnostics, "instantiated=") == 0,
+        (label + " is inert when disabled").c_str());
+  const auto count = [&](long expected, const char* field) {
+    if (expected < 0) return;
+    const size_t actual = total_field(on.diagnostics, field);
+    if (actual != static_cast<size_t>(expected)) {
+      std::printf("  %s%zu, expected %ld\n", field, actual, expected);
+      check(false, (label + " " + field).c_str());
+    }
+  };
+  count(expect.instantiated, "instantiated=");
+  count(expect.fallback, "fallback=");
+  count(expect.refused, "refused=");
+  count(expect.restarts, "restarts=");
+  if (expect.some)
+    check(total_field(on.diagnostics, "instantiated=") > 0,
+          (label + " instantiates frames").c_str());
+  return on;
+}
+
+static Node mul_node(StructuredLoop& plan, int a, int b, int out) {
+  return call(plan, OP_MUL, {a, b}, out);
+}
+
+static Node write_node(StructuredLoop& plan, int base, int extent, int index,
+                       int value, int out) {
+  Node write = call(plan, OP_SET_INDEX_DYNAMIC, {base, index, value}, out);
+  attach(plan, write.op, single_spec(extent));
+  return write;
+}
+
+struct RowPlan {
+  std::shared_ptr<StructuredLoop> plan = std::make_shared<StructuredLoop>();
+  int rows = 0;
+  int theta = 0, beta = 0, tab = 0, row = 0, one = 0, zero = 0, count = 0;
+  explicit RowPlan(int rows_count) : rows(rows_count) {
+    theta = fresh();
+    beta = fresh();
+    tab = plan->body.add_slot(rows, false);
+    row = fresh();
+    one = scalar(*plan, 1);
+    zero = scalar(*plan, 0);
+    count = scalar(*plan, rows);
+    plan->imports = {{theta, 0, 0, true, false},
+                     {beta, 1, 0, true, false},
+                     {tab, 2, 0, false, true}};
+  }
+  int fresh() { return plan->body.add_slot(1, false); }
+  int vec(int64_t len) { return plan->body.add_slot(len, false); }
+  int read(std::vector<Node>& out, int table, int extent, int index) {
+    const int slot = fresh();
+    out.push_back(read_node(*plan, table, extent, index, slot));
+    return slot;
+  }
+  int compare(std::vector<Node>& out, int a, int b, int variant) {
+    const int slot = fresh();
+    out.push_back(compare_node(*plan, a, b, slot, variant));
+    return slot;
+  }
+  int step(std::vector<Node>& out, int param, int value) {
+    const int hot = fresh();
+    out.push_back(mul_node(*plan, param, value, hot));
+    out.push_back(target(hot));
+    return hot;
+  }
+  InstanceFixture finish(std::vector<Node> head, std::vector<Node> body,
+                         std::vector<double> table,
+                         std::vector<Node> tail = {}) {
+    head.push_back(counted(one, count, row, sequence(std::move(body))));
+    for (auto& node : tail) head.push_back(std::move(node));
+    plan->root = sequence(std::move(head));
+    plan->has_target = true;
+    plan->prepare();
+    InstanceFixture f;
+    f.plan = plan;
+    f.lens = {rows};
+    f.data = {std::move(table)};
+    return f;
+  }
+};
+
+static std::vector<double> periodic_table(int rows, int period,
+                                          std::vector<int> anomalies = {},
+                                          double anomaly = 7) {
+  std::vector<double> table(static_cast<size_t>(rows));
+  for (int i = 0; i < rows; ++i) table[i] = static_cast<double>(i % period);
+  for (int at : anomalies) table[static_cast<size_t>(at)] = anomaly;
+  return table;
+}
+
+static InstanceFixture folded_rows_fixture() {
+  RowPlan r(24);
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  r.step(body, r.theta, x);
+  return r.finish({}, std::move(body), periodic_table(24, 5));
+}
+
+static InstanceFixture data_branch_fixture(int period, bool nan_rows) {
+  RowPlan r(30);
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  const int z =
+      nan_rows ? r.compare(body, x, x, 7) : r.compare(body, x, r.zero, 4);
+  std::vector<Node> yes, no;
+  r.step(yes, r.theta, r.row);
+  r.step(no, r.beta, x);
+  const int y = r.fresh();
+  no.push_back(mul_node(*r.plan, x, x, y));
+  r.step(no, r.theta, y);
+  body.push_back(branch(z, sequence(std::move(yes)), sequence(std::move(no))));
+  auto table = periodic_table(30, period, {7, 19}, period == 1 ? 0 : 5);
+  if (nan_rows)
+    for (int at : {4, 5, 17})
+      table[at] = std::numeric_limits<double>::quiet_NaN();
+  return r.finish({}, std::move(body), std::move(table));
+}
+
+static InstanceFixture carried_counter_fixture() {
+  RowPlan r(24);
+  const int counter = r.fresh(), next = r.fresh();
+  std::vector<Node> head = {alias(counter, r.zero)};
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  body.push_back(arith_node(*r.plan, counter, x, next, 0));
+  body.push_back(alias(counter, next));
+  r.step(body, r.theta, counter);
+  return r.finish(std::move(head), std::move(body), periodic_table(24, 3));
+}
+
+static InstanceFixture memo_key_fixture() {
+  RowPlan r(30);
+  const int small = r.vec(6);
+  r.plan->imports.push_back({small, 3, 0, false, true});
+  const int j = r.fresh();
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  const int key = r.fresh();
+  body.push_back(arith_node(*r.plan, x, r.zero, key, 0));
+  std::vector<Node> scan;
+  const int v = r.read(scan, small, 6, j);
+  const int match = r.compare(scan, v, key, 4);
+  std::vector<Node> then;
+  r.step(then, r.theta, v);
+  scan.push_back(branch(match, sequence(std::move(then)), sequence({})));
+  const int six = scalar(*r.plan, 6);
+  body.push_back(counted(r.one, six, j, sequence(std::move(scan))));
+  auto f = r.finish({}, std::move(body), periodic_table(30, 1, {11, 17}, 2));
+  f.lens.push_back(6);
+  f.data.push_back({0, 1, 2, 1, 0, 2});
+  return f;
+}
+
+// A constant container read by logged code is copied before a later
+// constant write (#508), in every frame.
+static InstanceFixture held_container_fixture() {
+  RowPlan r(20);
+  const int acc = r.vec(6), next = r.vec(6), hot = r.vec(6), dot = r.fresh();
+  const int base = r.vec(6);
+  r.plan->fills.push_back({base, std::vector<double>(6, 1.0)});
+  std::vector<Node> head = {alias(acc, base)};
+  std::vector<Node> body;
+  body.push_back(mul_node(*r.plan, r.theta, acc, hot));
+  body.push_back(call(*r.plan, OP_DOT, {hot, acc}, dot));
+  body.push_back(target(dot));
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  const int six = scalar(*r.plan, 6);
+  const int a = r.fresh(), b = r.fresh();
+  body.push_back(arith_node(*r.plan, r.row, six, a, 4));
+  body.push_back(arith_node(*r.plan, a, r.one, b, 0));
+  body.push_back(write_node(*r.plan, acc, 6, b, x, next));
+  body.push_back(alias(acc, next));
+  return r.finish(std::move(head), std::move(body), periodic_table(20, 4));
+}
+
+// The ctsem likelihood pattern: ll[row] += parameter term, then sum(ll).
+static InstanceFixture row_accumulator_fixture(bool parameter_selector) {
+  RowPlan r(24);
+  const int ll = r.vec(24), next = r.vec(24), base = r.vec(24);
+  r.plan->fills.push_back({base, std::vector<double>(24, 0.0)});
+  const int sum = r.fresh(), old = r.fresh(), added = r.fresh();
+  std::vector<Node> head = {alias(ll, base)};
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  int index = r.row;
+  if (parameter_selector) {
+    index = r.fresh();
+    const int big = r.compare(body, r.theta, r.one, 2);
+    body.push_back(branch(big, alias(index, r.one), alias(index, r.row)));
+  }
+  body.push_back(read_node(*r.plan, ll, 24, index, old));
+  const int hot = r.fresh();
+  body.push_back(mul_node(*r.plan, r.theta, x, hot));
+  body.push_back(call(*r.plan, OP_ADD, {old, hot}, added));
+  body.push_back(write_node(*r.plan, ll, 24, index, added, next));
+  body.push_back(alias(ll, next));
+  std::vector<Node> tail;
+  tail.push_back(call(*r.plan, OP_SUM_VEC, {ll}, sum));
+  tail.push_back(target(sum));
+  return r.finish(std::move(head), std::move(body), periodic_table(24, 4),
+                  std::move(tail));
+}
+
+// An inactive container owned without an adjoint is promoted by a later
+// parameter write; earlier frames observe the promotion.
+static InstanceFixture promotion_fixture() {
+  RowPlan r(24);
+  const int state = r.vec(3), cold = r.vec(3), hot = r.vec(3);
+  const int base = r.vec(3), sum = r.fresh(), term = r.fresh();
+  const int seven = scalar(*r.plan, 7), three = scalar(*r.plan, 3);
+  r.plan->fills.push_back({base, {10, 20, 30}});
+  std::vector<Node> head = {alias(state, base)};
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  const int a = r.fresh(), b = r.fresh();
+  body.push_back(arith_node(*r.plan, r.row, three, a, 4));
+  body.push_back(arith_node(*r.plan, a, r.one, b, 0));
+  const int quiet = r.compare(body, x, r.zero, 4);
+  body.push_back(
+      branch(quiet,
+             sequence({write_node(*r.plan, state, 3, b, seven, cold),
+                       alias(state, cold)}),
+             sequence({write_node(*r.plan, state, 3, b, r.theta, hot),
+                       alias(state, hot)})));
+  body.push_back(call(*r.plan, OP_SUM_VEC, {state}, sum));
+  body.push_back(mul_node(*r.plan, sum, r.theta, term));
+  body.push_back(target(term));
+  return r.finish(std::move(head), std::move(body),
+                  periodic_table(24, 6, {2, 3}, 0));
+}
+
+static InstanceFixture invariant_fixture() {
+  RowPlan r(24);
+  const int j = r.fresh(), three = scalar(*r.plan, 3);
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  std::vector<Node> inner;
+  const int square = r.fresh(), scaled = r.fresh(), both = r.fresh();
+  inner.push_back(mul_node(*r.plan, r.theta, r.theta, square));
+  inner.push_back(mul_node(*r.plan, r.beta, x, scaled));
+  inner.push_back(call(*r.plan, OP_ADD, {square, scaled}, both));
+  inner.push_back(target(both));
+  body.push_back(counted(r.one, three, j, sequence(std::move(inner))));
+  return r.finish({}, std::move(body), periodic_table(24, 2));
+}
+
+static InstanceFixture outer_break_fixture(bool continue_rows) {
+  RowPlan r(24);
+  const int nine = scalar(*r.plan, 9);
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  const int stop = r.compare(body, x, nine, 4);
+  body.push_back(branch(stop,
+                        flow_node(continue_rows ? Node::Continue : Node::Break),
+                        sequence({})));
+  r.step(body, r.theta, x);
+  auto table = periodic_table(24, 3, {17}, 9);
+  if (continue_rows) table[9] = 9;
+  return r.finish({}, std::move(body), std::move(table));
+}
+
+static InstanceFixture parameter_guard_fixture() {
+  RowPlan r(30);
+  const int limit = scalar(*r.plan, .3);
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  const int hot = r.step(body, r.theta, x);
+  const int big = r.compare(body, hot, limit, 2);
+  std::vector<Node> yes, no;
+  r.step(yes, r.theta, r.theta);
+  r.step(no, r.beta, x);
+  body.push_back(
+      branch(big, sequence(std::move(yes)), sequence(std::move(no))));
+  return r.finish({}, std::move(body), periodic_table(30, 1, {6, 13, 21}, 3),
+                  {});
+}
+
+static void instance_parameter_error(KernelCtx& context) {
+  const double value = context.in[0].data[0] * context.in[1].data[0];
+  if (value < -2) throw std::domain_error("parameter term below -2");
+  context.out.data[0] = value;
+}
+
+static void instance_effect(KernelCtx& context) {
+  ++instance_effects;
+  context.out.data[0] = 0;
+}
+
+// Row `parameter_row` throws in a parameter kernel and row `data_row` reads
+// out of range. Either order must report the earlier row's error.
+static InstanceFixture error_order_fixture(int parameter_row, int data_row) {
+  RowPlan r(24);
+  const int column = r.vec(24), other = r.vec(4);
+  r.plan->imports.push_back({column, 3, 0, false, true});
+  r.plan->imports.push_back({other, 4, 0, false, true});
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  const int hot = r.fresh();
+  Node term = mul_node(*r.plan, r.theta, x, hot);
+  term.forward = instance_parameter_error;
+  body.push_back(std::move(term));
+  body.push_back(target(hot));
+  const int y = r.read(body, column, r.rows, r.row);
+  const int picked = r.read(body, other, 4, y);
+  r.step(body, r.beta, picked);
+  auto table = periodic_table(24, 2);
+  table[static_cast<size_t>(parameter_row)] = -9;
+  auto selectors = periodic_table(24, 4);
+  for (auto& v : selectors) v += 1;
+  selectors[static_cast<size_t>(data_row)] = 9;
+  auto f = r.finish({}, std::move(body), std::move(table));
+  f.lens.push_back(24);
+  f.lens.push_back(4);
+  f.data.push_back(std::move(selectors));
+  f.data.push_back({1, 2, 3, 4});
+  return f;
+}
+
+static InstanceFixture effect_fixture() {
+  RowPlan r(24);
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  const int loud = r.compare(body, x, r.zero, 4);
+  const int printed = r.fresh();
+  Node effect = call(*r.plan, OP_PRINT, {x}, printed);
+  effect.forward = instance_effect;
+  body.push_back(branch(loud, std::move(effect), sequence({})));
+  r.step(body, r.theta, x);
+  std::vector<double> table(24, 1.0);
+  table[15] = 0;
+  return r.finish({}, std::move(body), std::move(table));
+}
+
+static InstanceFixture while_rows_fixture() {
+  RowPlan r(24);
+  const int counter = r.fresh(), next = r.fresh(), running = r.fresh();
+  std::vector<Node> body;
+  body.push_back(arith_node(*r.plan, counter, r.one, next, 0));
+  body.push_back(alias(counter, next));
+  const int x = r.read(body, r.tab, r.rows, counter);
+  r.step(body, r.theta, x);
+  r.plan->root = sequence(
+      {alias(counter, r.zero),
+       while_loop(
+           running,
+           sequence({compare_node(*r.plan, counter, r.count, running, 0)}),
+           sequence(std::move(body)))});
+  r.plan->has_target = true;
+  r.plan->prepare();
+  InstanceFixture f;
+  f.plan = r.plan;
+  f.lens = {r.rows};
+  f.data = {periodic_table(24, 3)};
+  return f;
+}
+
+// A parameter vector gathered at a data-chosen row moves its binding every
+// frame; so does the adjoint of a row-indexed in-place write.
+static InstanceFixture moving_binding_fixture() {
+  RowPlan r(20);
+  const int weights = r.vec(20), dot = r.fresh();
+  const int ll = r.vec(20), next = r.vec(20), base = r.vec(20);
+  r.plan->fills.push_back({base, std::vector<double>(20, 0.0)});
+  r.plan->imports.push_back({weights, 2, 0, true, false});
+  r.plan->imports[2].input = 3;
+  std::vector<Node> head = {alias(ll, base)};
+  std::vector<Node> body;
+  const int x = r.read(body, r.tab, r.rows, r.row);
+  const int w = r.read(body, weights, 20, r.row);
+  body.push_back(mul_node(*r.plan, w, x, dot));
+  body.push_back(target(dot));
+  body.push_back(write_node(*r.plan, ll, 20, r.row, dot, next));
+  body.push_back(alias(ll, next));
+  const int sum = r.fresh();
+  std::vector<Node> tail = {call(*r.plan, OP_SUM_VEC, {ll}, sum), target(sum)};
+  auto f = r.finish(std::move(head), std::move(body), periodic_table(20, 3),
+                    std::move(tail));
+  f.params = {1, 1, 20};
+  return f;
+}
+
+static void frame_instance_tests() {
+  instance_check("on row-indexed folded reads", folded_rows_fixture(),
+                 {-1, 0, -1, 0, true});
+  instance_check("on a row-dependent data branch",
+                 data_branch_fixture(1, false), {-1, -1, -1, 0, true});
+  instance_check("on programs repeating every 2 frames",
+                 data_branch_fixture(2, false), {-1, -1, -1, 0, true});
+  instance_check("on programs repeating every 3 frames",
+                 data_branch_fixture(3, false), {-1, -1, -1, 0, true});
+  instance_check("on NaN rows", data_branch_fixture(2, true),
+                 {-1, -1, -1, 0, true});
+  instance_check("on a data counter carried across frames",
+                 carried_counter_fixture(), {-1, -1, -1, 0, true});
+  instance_check("on row-dependent memo keys", memo_key_fixture(),
+                 {-1, -1, -1, 0, true});
+  instance_check("on a held container written in later frames",
+                 held_container_fixture(), {-1, -1, -1, 0, true});
+  instance_check("on a row accumulator", row_accumulator_fixture(false),
+                 {-1, -1, -1, 0, true});
+  instance_check("on a parameter-chosen write selector",
+                 row_accumulator_fixture(true), {-1, -1, -1, -1});
+  instance_check("on a later adjoint promotion", promotion_fixture(),
+                 {-1, -1, -1, 0, true});
+  instance_check("on loop-invariant sites", invariant_fixture(),
+                 {-1, -1, -1, 0, true});
+  instance_check("on an outer break", outer_break_fixture(false),
+                 {-1, -1, -1, 0, true});
+  instance_check("on outer continues", outer_break_fixture(true),
+                 {-1, -1, -1, 0, true});
+  instance_check("on moving gather and adjoint bindings",
+                 moving_binding_fixture(), {-1, 0, -1, 0, true});
+  instance_check("on a while outer loop", while_rows_fixture(),
+                 {-1, -1, -1, 0, true});
+  {
+    const auto on = instance_check("on parameter guards flipping between rows",
+                                   parameter_guard_fixture(), {});
+    check(total_field(on.diagnostics, "restarts=") > 0,
+          "frame instance parameter guard flip restarts the recording");
+  }
+  for (const auto& rows : {std::pair<int, int>{5, 14}, {14, 5}, {9, 9}}) {
+    const auto f = error_order_fixture(rows.first, rows.second);
+    const auto on = instance_check("on errors in row order", f, {});
+    check(on.error == (rows.first <= rows.second
+                           ? "parameter term below -2"
+                           : "structured index out of range"),
+          "frame instance error fixture reports the earlier row");
+  }
+  {
+    const auto on = instance_check("on effectful sites", effect_fixture(), {});
+    check(total_field(on.diagnostics, "refused=") > 0,
+          "frame instance refuses templates with effects");
+  }
+  {
+    // Frame cloning copies instantiated frames like recorded ones.
+    const auto f = row_accumulator_fixture(false);
+    for (bool instance : {false, true}) {
+      test_setenv("STANLI_STRUCTURED_FRAMES", "1");
+      if (!instance) test_setenv("STANLI_NO_STRUCTURED_FRAME_INSTANCE", "1");
+      Executor source(outer(f.plan, f.params, f.lens));
+      std::copy(f.data[0].begin(), f.data[0].end(), source.value_ptr(2));
+      (void)evaluate(source, .25, .5);
+      Executor copied(source);
+      test_unsetenv("STANLI_NO_STRUCTURED_FRAME_INSTANCE");
+      test_unsetenv("STANLI_STRUCTURED_FRAMES");
+      static Evaluation reference[2];
+      reference[instance] = evaluate(copied, -.5, .5);
+      if (instance)
+        check(
+            std::memcmp(&reference[0], &reference[1], sizeof(Evaluation)) == 0,
+            "frame instance clone matches instantiation off");
+    }
+  }
+}
+
+// Fuzzed outer loops over data rows. Each arm enables a family of hazards.
+struct InstanceFuzz {
+  RowPlan r;
+  FuzzRandom random;
+  bool carry = false, memo = false, guards = false, errors = false,
+       effects = false, moving = false;
+  std::vector<int> pool;
+  int other = -1, small = -1, weights = -1, ll = -1, store = -1;
+  std::vector<int> carried;
+  int depth = 0, loop_depth = 0;
+
+  explicit InstanceFuzz(int rows) : r(rows) {}
+  int pick() { return pool[static_cast<size_t>(random.below(pool.size()))]; }
+  int literal(int max) { return scalar(*r.plan, random.below(max)); }
+  int bounded(std::vector<Node>& out, int value, int extent) {
+    const int e = scalar(*r.plan, extent);
+    const int a = r.fresh(), b = r.fresh(), c = r.fresh(), d = r.fresh();
+    out.push_back(arith_node(*r.plan, value, e, a, 4));
+    out.push_back(arith_node(*r.plan, a, e, b, 0));
+    out.push_back(arith_node(*r.plan, b, e, c, 4));
+    out.push_back(arith_node(*r.plan, c, r.one, d, 0));
+    return d;
+  }
+  int row_read(std::vector<Node>& out) {
+    const int offset = random.below(3);
+    int index = r.row;
+    if (offset) {
+      const int shifted = r.fresh();
+      out.push_back(
+          arith_node(*r.plan, r.row, scalar(*r.plan, offset), shifted, 0));
+      index = bounded(out, shifted, r.rows);
+    }
+    return r.read(out, r.tab, r.rows, index);
+  }
+  int hot(std::vector<Node>& out) {
+    const int slot = r.fresh();
+    out.push_back(
+        mul_node(*r.plan, random.chance(70) ? r.theta : r.beta, pick(), slot));
+    return slot;
+  }
+  Node block() {
+    std::vector<Node> out;
+    const int n = 1 + random.below(3);
+    ++depth;
+    for (int i = 0; i < n; ++i) statement(out);
+    --depth;
+    return sequence(std::move(out));
+  }
+  void statement(std::vector<Node>& out) {
+    const int kinds = depth >= 2 ? 6 : 13;
+    switch (random.below(kinds)) {
+      case 0:
+        pool.push_back(row_read(out));
+        break;
+      case 1: {
+        const int slot = r.fresh();
+        out.push_back(
+            arith_node(*r.plan, pick(), literal(4), slot, random.below(3)));
+        pool.push_back(slot);
+        break;
+      }
+      case 2:
+      case 3: {
+        const int h = hot(out);
+        if (random.chance(60) || ll < 0) {
+          out.push_back(target(h));
+        } else {
+          const int old = r.fresh(), sum = r.fresh(), next = r.vec(r.rows);
+          out.push_back(read_node(*r.plan, ll, r.rows, r.row, old));
+          out.push_back(call(*r.plan, OP_ADD, {old, h}, sum));
+          out.push_back(write_node(*r.plan, ll, r.rows, r.row, sum, next));
+          out.push_back(alias(ll, next));
+        }
+        break;
+      }
+      case 4: {
+        const int index = bounded(out, pick(), 6);
+        const int next = r.vec(6);
+        out.push_back(write_node(*r.plan, store, 6, index,
+                                 random.chance(30) ? hot(out) : pick(), next));
+        out.push_back(alias(store, next));
+        const int read_index = bounded(out, pick(), 6);
+        pool.push_back(r.read(out, store, 6, read_index));
+        break;
+      }
+      case 5: {
+        if (!carry || carried.empty()) {
+          pool.push_back(row_read(out));
+          break;
+        }
+        const int c =
+            carried[static_cast<size_t>(random.below(carried.size()))];
+        const int next = r.fresh();
+        out.push_back(arith_node(*r.plan, c, pick(), next, random.below(2)));
+        const int bounded_next = bounded(out, next, 50);
+        out.push_back(alias(c, bounded_next));
+        break;
+      }
+      case 6:
+      case 7: {
+        const int cond = r.compare(out, pick(), literal(4), random.below(6));
+        out.push_back(
+            branch(cond, block(), random.chance(50) ? block() : sequence({})));
+        break;
+      }
+      case 8: {
+        if (!guards) {
+          pool.push_back(row_read(out));
+          break;
+        }
+        const int h = hot(out);
+        const int cond = r.compare(
+            out, h, scalar(*r.plan, .2 * random.below(5)), random.below(4));
+        out.push_back(branch(cond, block(), block()));
+        break;
+      }
+      case 9: {
+        const int bound = r.fresh(), j = r.fresh();
+        out.push_back(
+            arith_node(*r.plan, pick(), scalar(*r.plan, 3), bound, 4));
+        const size_t saved = pool.size();
+        pool.push_back(j);
+        ++loop_depth;
+        Node inner = block();
+        --loop_depth;
+        pool.resize(saved);
+        out.push_back(counted(r.one, bound, j, std::move(inner)));
+        break;
+      }
+      case 10: {
+        if (!memo) {
+          pool.push_back(row_read(out));
+          break;
+        }
+        const int key = r.fresh(), j = r.fresh();
+        out.push_back(arith_node(*r.plan, pick(), scalar(*r.plan, 3), key, 4));
+        std::vector<Node> scan;
+        const int v = r.read(scan, small, 6, j);
+        const int match = r.compare(scan, v, key, 4);
+        std::vector<Node> then;
+        const int h = r.fresh();
+        then.push_back(mul_node(*r.plan, r.theta, v, h));
+        then.push_back(target(h));
+        scan.push_back(branch(match, sequence(std::move(then)), sequence({})));
+        out.push_back(
+            counted(r.one, scalar(*r.plan, 6), j, sequence(std::move(scan))));
+        break;
+      }
+      case 11: {
+        if (moving) {
+          const int index = bounded(out, pick(), r.rows);
+          const int w = r.read(out, weights, r.rows, index);
+          const int h = r.fresh();
+          out.push_back(mul_node(*r.plan, w, pick(), h));
+          out.push_back(target(h));
+        } else if (errors) {
+          const int h = r.fresh();
+          Node term = mul_node(*r.plan, r.theta, pick(), h);
+          term.forward = instance_parameter_error;
+          out.push_back(std::move(term));
+          out.push_back(target(h));
+          const int index = r.fresh();
+          out.push_back(arith_node(*r.plan, pick(), r.zero, index, 0));
+          pool.push_back(r.read(out, other, 4, index));
+        } else if (effects) {
+          const int printed = r.fresh();
+          Node effect = call(*r.plan, OP_PRINT, {pick()}, printed);
+          effect.forward = instance_effect;
+          const int cond = r.compare(out, pick(), literal(4), 4);
+          out.push_back(branch(cond, std::move(effect), sequence({})));
+        } else {
+          pool.push_back(row_read(out));
+        }
+        break;
+      }
+      default: {
+        if (depth == 0 || random.chance(50)) {
+          pool.push_back(row_read(out));
+          break;
+        }
+        const int cond = r.compare(out, pick(), literal(4), 4);
+        out.push_back(branch(
+            cond, flow_node(random.chance(50) ? Node::Break : Node::Continue),
+            sequence({})));
+        break;
+      }
+    }
+  }
+};
+
+enum class InstanceArm { Base, Carry, Guards, Errors, Effects, Moving };
+
+static std::optional<InstanceFixture> instance_fuzz_plan(uint64_t seed,
+                                                         InstanceArm arm) {
+  const int rows = 12 + static_cast<int>(seed % 13);
+  InstanceFuzz f(rows);
+  f.random.state = seed * 2862933555777941757ULL + 3037000493ULL;
+  f.carry = arm == InstanceArm::Carry;
+  f.memo = arm == InstanceArm::Carry || arm == InstanceArm::Base;
+  f.guards = arm == InstanceArm::Guards;
+  f.errors = arm == InstanceArm::Errors;
+  f.effects = arm == InstanceArm::Effects;
+  f.moving = arm == InstanceArm::Moving;
+  auto& r = f.r;
+  InstanceFixture fixture;
+  fixture.lens = {rows};
+  std::vector<Node> head, body, tail;
+  f.other = r.vec(4);
+  r.plan->imports.push_back({f.other, 3, 0, false, true});
+  fixture.lens.push_back(4);
+  f.small = r.vec(6);
+  r.plan->imports.push_back({f.small, 4, 0, false, true});
+  fixture.lens.push_back(6);
+  if (f.moving) {
+    f.weights = r.vec(rows);
+    r.plan->imports.push_back({f.weights, 2, 0, true, false});
+    for (int i = 2; i < 5; ++i) ++r.plan->imports[static_cast<size_t>(i)].input;
+    fixture.params = {1, 1, rows};
+  }
+  const int ll_base = r.vec(rows), store_base = r.vec(6);
+  r.plan->fills.push_back({ll_base, std::vector<double>(rows, 0.0)});
+  r.plan->fills.push_back({store_base, std::vector<double>(6, 1.0)});
+  f.ll = r.vec(rows);
+  f.store = r.vec(6);
+  head.push_back(alias(f.ll, ll_base));
+  head.push_back(alias(f.store, store_base));
+  if (f.carry)
+    for (int i = 0; i < 3; ++i) {
+      f.carried.push_back(r.fresh());
+      head.push_back(alias(f.carried.back(), r.zero));
+    }
+  f.pool = {r.row, r.one, r.zero};
+  for (int c : f.carried) f.pool.push_back(c);
+  f.pool.push_back(f.row_read(body));
+  const int count = 2 + f.random.below(5);
+  for (int i = 0; i < count; ++i) f.statement(body);
+  const int total = r.fresh();
+  tail.push_back(call(*r.plan, OP_SUM_VEC, {f.ll}, total));
+  tail.push_back(target(total));
+  if (f.random.chance(40)) {
+    const int value = r.fresh();
+    tail.push_back(read_node(*r.plan, f.store, 6, r.one, value));
+    tail.push_back(target(value));
+  }
+  try {
+    auto made = r.finish(std::move(head), std::move(body), {}, std::move(tail));
+    fixture.plan = made.plan;
+  } catch (const std::exception&) {
+    return std::nullopt;
+  }
+  const int period = 1 + static_cast<int>(seed % 3);
+  std::vector<double> table(static_cast<size_t>(rows));
+  for (int i = 0; i < rows; ++i)
+    table[static_cast<size_t>(i)] =
+        static_cast<double>((i % period) + (seed % 2));
+  for (int k = 0; k < 2; ++k)
+    if (f.random.chance(50))
+      table[static_cast<size_t>(f.random.below(rows))] = f.random.below(4);
+  if (arm == InstanceArm::Errors && f.random.chance(50))
+    table[static_cast<size_t>(f.random.below(rows))] = 9;
+  fixture.data = {table, {1, 2, 3, 4}, {0, 1, 2, 1, 0, 2}};
+  std::vector<double> changed = table;
+  changed[static_cast<size_t>(f.random.below(rows))] = f.random.below(4);
+  fixture.changed = {changed};
+  return fixture;
+}
+
+// Plans that once failed the instance checker.
+static const std::pair<uint64_t, InstanceArm> INSTANCE_SEEDS[] = {
+    {1177, InstanceArm::Base},   {398, InstanceArm::Carry},
+    {334, InstanceArm::Guards},  {863, InstanceArm::Guards},
+    {1642, InstanceArm::Guards}, {863, InstanceArm::Errors},
+    {863, InstanceArm::Effects}, {863, InstanceArm::Moving}};
+
+static void frame_instance_fuzz_tests() {
+  const char* option = std::getenv("STANLI_INSTANCE_FUZZ_SEEDS");
+  const uint64_t seeds = option ? std::strtoull(option, nullptr, 10) : 60;
+  const char* first_option = std::getenv("STANLI_INSTANCE_FUZZ_FIRST");
+  const uint64_t first =
+      first_option ? std::strtoull(first_option, nullptr, 10) : 1;
+  const char* arm_option = std::getenv("STANLI_INSTANCE_FUZZ_ARM");
+  std::vector<std::pair<uint64_t, InstanceArm>> order(
+      std::begin(INSTANCE_SEEDS), std::end(INSTANCE_SEEDS));
+  if (option) order.clear();
+  for (int arm = 0; arm < 6; ++arm) {
+    if (arm_option && std::atoi(arm_option) != arm) continue;
+    for (uint64_t seed = first; seed < first + seeds; ++seed)
+      order.push_back({seed, static_cast<InstanceArm>(arm)});
+  }
+  size_t built = 0, instanced = 0;
+  for (const auto& [seed, arm] : order) {
+    const auto f = instance_fuzz_plan(seed, arm);
+    if (!f) continue;
+    ++built;
+    const InstanceResult off = instance_run(*f, false, false);
+    const InstanceResult on = instance_run(*f, true, false);
+    const InstanceResult checked = instance_run(*f, true, true);
+    const bool ok = instance_same(on, off) && instance_same(checked, off);
+    if (!ok)
+      std::printf(
+          "  instance fuzz seed %llu arm %d: on '%s' checked '%s' off '%s'\n",
+          static_cast<unsigned long long>(seed), static_cast<int>(arm),
+          on.error.c_str(), checked.error.c_str(), off.error.c_str());
+    check(ok, "frame instance fuzz plan matches instantiation off bitwise");
+    instanced += total_field(on.diagnostics, "instantiated=") > 0;
+  }
+  check(built > order.size() * 3 / 4, "frame instance fuzz builds most plans");
+  check(instanced > built / 3, "frame instance fuzz instantiates frames");
+  std::printf("  frame instance fuzz: built=%zu instanced=%zu\n", built,
+              instanced);
+}
+
 int main() {
   // This suite exercises retained plans, including their automatic selector.
   // Whole-program specialization has its own differential tests in test_lower.
@@ -7874,6 +8748,10 @@ int main() {
   test_setenv("STANLI_STRUCTURED_CHECK_REMAP", "1");
   if (std::getenv("STANLI_FUZZ_SEEDS")) {
     data_loop_memo_fuzz_tests();
+    return failures != 0;
+  }
+  if (std::getenv("STANLI_INSTANCE_FUZZ_SEEDS")) {
+    frame_instance_fuzz_tests();
     return failures != 0;
   }
   transient_classification_tests();
@@ -7952,6 +8830,8 @@ int main() {
   data_loop_memo_carry_tests();
   data_loop_memo_memory_tests();
   data_loop_memo_fuzz_tests();
+  frame_instance_tests();
+  frame_instance_fuzz_tests();
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
   test_unsetenv("STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS");
   if (failures == 0) std::printf("test_structured_loop OK\n");

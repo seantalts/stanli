@@ -205,10 +205,14 @@ void Execution::memo_replay(RecordingProgram& program,
       case DataLoopMemo::Cells:
         std::copy_n(memo.pool.data() + e.offset, e.length,
                     s.workspace.data() + e.arg);
+        if (capture)
+          capture->copy(memo.pool.data() + e.offset, s.workspace.data() + e.arg,
+                        e.length);
         break;
       case DataLoopMemo::Slot: {
         double* cell = s.arena.allocate(e.length);
         std::copy_n(memo.pool.data() + e.offset, e.length, cell);
+        if (capture) capture->copy(memo.pool.data() + e.offset, cell, e.length);
         s.bindings[e.arg] = make_version(cell, -1, true);
         break;
       }
@@ -276,7 +280,7 @@ void retire(DataLoopCandidate& candidate) {
 }
 
 // Chooses a stored memo for the key just built, or no memo, and counts the
-// choice; or asks for a new trace.
+// choice; or asks for a new trace. A frame instance repeats the choice.
 const DataLoopMemo* Execution::memo_select(RecordingProgram& program, size_t pc,
                                            bool keyed, bool& trace,
                                            uint64_t& hash) {
@@ -315,15 +319,21 @@ const DataLoopMemo* Execution::memo_select(RecordingProgram& program, size_t pc,
 
 size_t Execution::memo_enter(RecordingProgram& program, size_t pc) {
   auto& candidate = program.candidates[program.code[pc].candidate];
-  if (candidate.disabled) return no_memo;
+  if (candidate.disabled) {
+    if (capture) capture->memo(program, pc, nullptr, false, true);
+    return no_memo;
+  }
+  if (capture) capture->memo(program, pc, nullptr, false, false);
   const bool keyed = memo_key(program, candidate, [&](int slot) {
     const int64_t version = s.bindings[slot];
-    return std::make_pair(s.versions[static_cast<size_t>(version)].value,
-                          is_const(version));
+    const double* ptr = s.versions[static_cast<size_t>(version)].value;
+    if (capture) capture->key(ptr, is_const(version));
+    return std::make_pair(ptr, is_const(version));
   });
   bool new_trace;
   uint64_t hash;
   const DataLoopMemo* chosen = memo_select(program, pc, keyed, new_trace, hash);
+  if (capture) capture->chose(chosen, new_trace || !keyed);
   if (chosen) {
     memo_replay(program, *chosen);
     return candidate.exit;
