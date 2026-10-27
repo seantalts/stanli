@@ -1,5 +1,6 @@
 """Exercise workflow routing and the actual required-gate shell (needs PyYAML)."""
 import ast
+import json
 import os
 from pathlib import Path
 import re
@@ -348,6 +349,40 @@ class SetupRetryTest(unittest.TestCase):
                         self.assertEqual(
                             retry["if"], "steps.%s.outcome == 'failure'" % step["id"])
         self.assertGreaterEqual(uses, 4)
+
+
+class NpmPublishTest(unittest.TestCase):
+    def publish(self, view_output, view_status):
+        step = next(item for item in workflow("wheels.yml")["jobs"]["npm-publish"]["steps"]
+                    if item.get("name") == "Publish")
+        version = json.loads((ROOT / "js/package.json").read_text())["version"]
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "log"
+            fake = Path(tmp) / "npm"
+            fake.write_text(
+                '#!/usr/bin/env bash\necho "npm $*" >> "$NPM_LOG"\n'
+                'if [ "$1" = view ]; then\n'
+                '  printf "%s" "$NPM_VIEW"; exit "$NPM_VIEW_STATUS"\n'
+                'fi\n')
+            fake.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+                cwd=ROOT, capture_output=True, text=True,
+                env=dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"],
+                         NPM_LOG=str(log), NPM_VIEW_STATUS=str(view_status),
+                         NPM_VIEW=view_output.replace("VERSION", version)))
+            return result.returncode, log.read_text() if log.exists() else ""
+
+    def test_rerun_of_a_published_version_skips_publish(self):
+        status, log = self.publish("VERSION", 0)
+        self.assertEqual(status, 0)
+        self.assertIn("npm view", log)
+        self.assertNotIn("npm publish", log)
+
+    def test_unpublished_version_is_published(self):
+        status, log = self.publish("", 1)
+        self.assertEqual(status, 0)
+        self.assertIn("npm publish", log)
 
 
 if __name__ == "__main__":
