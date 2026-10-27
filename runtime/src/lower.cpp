@@ -38,16 +38,32 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
   decls = prepared_context.declarations;
   prep.plain(prep_graph, "env_copy", env_copy_time);
 }
-Lowering::Lowering(Lowering& parent, RegionTrialTag)
+template <typename Map>
+static void copy_named(Map& to, const Map& from,
+                       const std::set<std::string>* names) {
+  if (!names) {
+    to = from;
+    return;
+  }
+  for (const std::string& name : *names)
+    if (const auto found = from.find(name); found != from.end())
+      to.emplace(name, found->second);
+}
+Lowering::Lowering(Lowering& parent, RegionTrialTag,
+                   const std::set<std::string>* names)
     : Lowering(parent.data, parent.prep, parent.dumper, parent.prep_graph,
                parent.td_rng,
                std::make_shared<ShapeInterner>(*parent.shape_pool)) {
   compile_options = parent.compile_options;
   fun_defs = parent.fun_defs;
-  decls = parent.decls;
-  td.env() = parent.td.env();
-  int_env = parent.int_env;
-  int_locals = parent.int_locals;
+  copy_named(decls, parent.decls, names);
+  copy_named(td.env(), parent.td.env(), names);
+  copy_named(int_env, parent.int_env, names);
+  if (!names)
+    int_locals = parent.int_locals;
+  else
+    for (const std::string& name : *names)
+      if (parent.int_locals.count(name)) int_locals.insert(name);
   propto_ctx = parent.propto_ctx;
   udf_depth = parent.udf_depth;
   udf_autodiff_ctx = parent.udf_autodiff_ctx;
@@ -58,8 +74,8 @@ PreparedContext Lowering::prepared_context() {
     throw std::logic_error("lowering has not prepared model data");
   return {td_rng, shape_pool, td.env(), int_env_data, decls};
 }
-Lowering Lowering::fork_region_trial() {
-  return Lowering(*this, RegionTrialTag{});
+Lowering Lowering::fork_region_trial(const std::set<std::string>* names) {
+  return Lowering(*this, RegionTrialTag{}, names);
 }
 void Lowering::dump_named(const std::string& label, const std::string& name,
                           const std::vector<int>& roots, bool unfiltered) {

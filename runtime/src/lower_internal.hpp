@@ -881,6 +881,15 @@ struct Lowering {
   // Names the reduce_sum rewrite binds its lowered slice under, kept
   // distinct so nested calls do not share one.
   int reduce_sum_slices = 0;
+  // Scope entries bound under names no statement spells, in creation
+  // order, so a write_array rollback can drop the ones made after its mark.
+  std::vector<std::string> synthetic_names;
+  void bind_synthetic(const std::string& name, const Val& value,
+                      const DeclView& decl) {
+    scope[name] = value;
+    decls[name] = decl;
+    synthetic_names.push_back(name);
+  }
   CompileOptions compile_options;
   // int_env as bind_data left it, before either section's locals and loop
   // variables were folded in; the write_array lowering starts from this.
@@ -929,10 +938,11 @@ struct Lowering {
   Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
            const char* graph_name, const PreparedContext& prepared_context);
   struct RegionTrialTag {};
-  Lowering(Lowering& parent, RegionTrialTag);
+  Lowering(Lowering& parent, RegionTrialTag,
+           const std::set<std::string>* names);
 
   PreparedContext prepared_context();
-  Lowering fork_region_trial();
+  Lowering fork_region_trial(const std::set<std::string>* names = nullptr);
 
   void dump_named(const std::string& label, const std::string& name,
                   const std::vector<int>& roots, bool unfiltered);
@@ -1610,7 +1620,9 @@ struct Lowering {
                     Range* expr_out, std::shared_ptr<IslandProg>* prog_out);
 
   void configure_island_compiler(ProgramCompiler& c, IslandProg& prog,
-                                 IslandRegion& region, const mir::Stmt* s);
+                                 IslandRegion& region,
+                                 const std::set<std::string>& names,
+                                 const mir::Stmt* s);
   void finalize_island_program(IslandProg& prog, bool native,
                                bool keep_every_clear = false,
                                bool propagate_copies = false);
@@ -2076,18 +2088,19 @@ struct Lowering {
     size_t n_fills = 0, n_ops = 0, n_slots = 0, n_idata = 0, n_udata = 0,
            td_mark = 0;
     size_t n_param_names = 0, n_views = 0, n_unc_params = 0,
-           n_interpreter_fallbacks = 0, n_reduce_sum_fallbacks = 0;
+           n_interpreter_fallbacks = 0, n_reduce_sum_fallbacks = 0,
+           n_synthetic_names = 0;
     int64_t n_unconstrained = 0;
     std::string reduce_sum_notice;
     bool transformed_data_draws = false;
   };
+  template <typename T>
+  using NamedSaves = std::vector<std::pair<std::string, std::optional<T>>>;
   struct WaSnapshot : WaMark {
-    std::map<std::string, Val> scope;
-    std::map<std::string, DeclView> decls;
-    std::map<std::string, long> int_env;
-    std::set<std::string> int_locals;
-    std::map<int, IntRange> int_ranges;
-    std::map<int, RealRange> real_ranges;
+    NamedSaves<Val> scope;
+    NamedSaves<DeclView> decls;
+    NamedSaves<long> int_env;
+    std::vector<std::pair<std::string, bool>> int_locals;
   };
   WaMark wa_mark() {
     WaMark m;
@@ -2095,6 +2108,7 @@ struct Lowering {
     m.n_gq_start = n_gq_start;
     m.n_fills = out.fills.size();
     m.n_ops = g.ops.size();
+    m.n_synthetic_names = synthetic_names.size();
     m.n_slots = g.slots.size();
     m.n_idata = g.idata_pool.size();
     m.n_udata = g.udata_pool.size();
@@ -2129,25 +2143,63 @@ struct Lowering {
     g.idata_pool.resize(m.n_idata);
     g.udata_pool.resize(m.n_udata);
     td_rollback(m.td_mark);
+    for (size_t i = m.n_synthetic_names; i < synthetic_names.size(); ++i) {
+      scope.erase(synthetic_names[i]);
+      decls.erase(synthetic_names[i]);
+    }
+    truncate(synthetic_names, m.n_synthetic_names);
   }
-  WaSnapshot wa_snapshot() {
+  template <typename Map>
+  static NamedSaves<typename Map::mapped_type> save_named(
+      const Map& map, const std::set<std::string>& names) {
+    NamedSaves<typename Map::mapped_type> saves;
+    saves.reserve(names.size());
+    for (const std::string& name : names) {
+      const auto found = map.find(name);
+      saves.emplace_back(name, found == map.end()
+                                   ? std::nullopt
+                                   : std::optional(found->second));
+    }
+    return saves;
+  }
+  template <typename Map>
+  static void restore_named(Map& map,
+                            NamedSaves<typename Map::mapped_type>& saves) {
+    for (auto& [name, value] : saves) {
+      if (value)
+        map.insert_or_assign(name, std::move(*value));
+      else
+        map.erase(name);
+    }
+  }
+  // Restores only the given names, which must include every name the
+  // rolled-back statement can declare or assign. Slot-keyed range entries
+  // for slots the rollback removes are dropped.
+  WaSnapshot wa_snapshot(const std::set<std::string>& names) {
     WaSnapshot s;
     static_cast<WaMark&>(s) = wa_mark();
-    s.scope = scope;
-    s.decls = decls;
-    s.int_env = int_env;
-    s.int_locals = int_locals;
-    s.int_ranges = int_ranges;
-    s.real_ranges = real_ranges;
+    s.scope = save_named(scope, names);
+    s.decls = save_named(decls, names);
+    s.int_env = save_named(int_env, names);
+    s.int_locals.reserve(names.size());
+    for (const std::string& name : names)
+      s.int_locals.emplace_back(name, int_locals.count(name) > 0);
     return s;
   }
   void wa_restore(WaSnapshot& s) {
-    scope = std::move(s.scope);
-    decls = std::move(s.decls);
-    int_env = std::move(s.int_env);
-    int_locals = std::move(s.int_locals);
-    int_ranges = std::move(s.int_ranges);
-    real_ranges = std::move(s.real_ranges);
+    restore_named(scope, s.scope);
+    restore_named(decls, s.decls);
+    restore_named(int_env, s.int_env);
+    for (const auto& [name, present] : s.int_locals) {
+      if (present)
+        int_locals.insert(name);
+      else
+        int_locals.erase(name);
+    }
+    int_ranges.erase(int_ranges.lower_bound(static_cast<int>(s.n_slots)),
+                     int_ranges.end());
+    real_ranges.erase(real_ranges.lower_bound(static_cast<int>(s.n_slots)),
+                      real_ranges.end());
     wa_rollback(s);
   }
 #include "lower_structured_loop.inc"

@@ -1,19 +1,19 @@
 """Preparation time must grow linearly with the number of statements.
 
 Each model repeats one statement shape N times in a section that is lowered
-statement by statement. Quadrupling N should roughly quadruple preparation
-time; a quadratic cost would multiply it by sixteen. The bound sits between
-the two, so it tolerates timer noise but not a per-statement copy of the
-lowering state.
+statement by statement. Growing N eightfold should grow preparation time
+about eightfold; a quadratic cost would multiply it by sixty-four. The bound
+sits between the two, so it tolerates timer noise on a busy CI runner but not
+a per-statement copy of the lowering state.
 """
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-SMALL, LARGE = 300, 1200
-REPEATS = 3
-MAX_RATIO = 9.0
+SMALL, LARGE = 400, 3200
+REPEATS = 5
+MAX_RATIO = 20.0
 
 PREAMBLE = "parameters { real mu; }\nmodel { mu ~ normal(0, 1); }\n"
 
@@ -38,6 +38,18 @@ def transformed_parameter_chain(n):
 
 MODELS = {
     "scalar generated quantities": generated_quantities(lambda i: f"real g{i} = mu + {i};"),
+    "generated quantities for loops": generated_quantities(
+        lambda i: f"array[4] real a{i};\nfor (k in 1:4) a{i}[k] = mu * k + {i};"),
+    "generated quantities if/else": generated_quantities(
+        lambda i: f"real h{i};\nif (mu > {i % 7}) h{i} = mu + {i}; else h{i} = mu - {i};"),
+    "generated quantities while loops": generated_quantities(
+        lambda i: f"real w{i} = mu;\n{{ int c{i} = 0; while (c{i} < 3) {{ w{i} += mu; c{i} += 1; }} }}"),
+    "generated quantities nested control and rng": generated_quantities(
+        lambda i: (f"array[3] real d{i};\n"
+                   f"for (n in 1:3) {{ real step = 0; int k = 0; "
+                   f"while (k < 2) {{ step += mu; k += 1; }} "
+                   f"if (step > 0) d{i}[n] = normal_rng(mu, 1.0); "
+                   f"else d{i}[n] = normal_rng(-mu, 1.0); }}")),
     "constrained parameters": constrained_parameters,
     "transformed parameter chain": transformed_parameter_chain,
 }

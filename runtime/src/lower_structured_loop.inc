@@ -2643,7 +2643,9 @@ bool try_lower_region(
       // Keep the complete trial seed in one audited helper. The candidate owns
       // its mutable interpreter and shape state until every refusal point has
       // passed; only the shape interner is published below.
-      Lowering trial = fork_region_trial();
+      std::set<std::string> mentioned;
+      mir::collect_names(s, &mentioned);
+      Lowering trial = fork_region_trial(&mentioned);
       trial.in_write_array = in_write_array;
       trial.bounded_output = output_references != nullptr;
       auto p = std::make_shared<StructuredLoop>();
@@ -2663,22 +2665,25 @@ bool try_lower_region(
       // Runtime geometry slots can be anonymous declaration snapshots, so
       // collect them explicitly rather than assuming every imported slot
       // has its own source-level name.
-      for (const auto& item : scope) {
-        if (output_references && !output_references->count(item.first))
-          continue;
+      const auto imported_scope = [&](const auto& visit) {
+        for (const std::string& name : mentioned) {
+          if (output_references && !output_references->count(name)) continue;
+          if (const auto item = scope.find(name); item != scope.end())
+            visit(*item);
+        }
+      };
+      imported_scope([&](const auto& item) {
         import_slot(item.second.slot, item.second.autodiff,
                     item.second.si.param_free);
         for (int dim : item.second.runtime_dims) import_slot(dim, false, true);
-      }
+      });
       for (const auto& in : imported) {
         if (auto range = int_ranges.find(in.first); range != int_ranges.end())
           trial.int_ranges[in.second] = range->second;
         if (auto range = real_ranges.find(in.first); range != real_ranges.end())
           trial.real_ranges[in.second] = range->second;
       }
-      for (const auto& item : scope) {
-        if (output_references && !output_references->count(item.first))
-          continue;
+      imported_scope([&](const auto& item) {
         Val value = item.second;
         value.slot = imported.at(item.second.slot);
         for (int& dim : value.runtime_dims)
@@ -2690,7 +2695,7 @@ bool try_lower_region(
             declaration != trial.decls.end())
           for (int& dim : declaration->second.runtime_dims)
             if (dim >= 0) dim = imported.at(dim);
-      }
+      });
       std::vector<std::string> candidate_names;
       std::vector<Val> candidate_results;
       std::vector<int> candidate_inputs;
