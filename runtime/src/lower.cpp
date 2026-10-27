@@ -1033,6 +1033,7 @@ std::string report_request() {
 }
 
 constexpr uint64_t kParallelWriteArrayMinWork = 1000;
+constexpr uint64_t kParallelWriteArrayMaxDataBytes = uint64_t{64} << 20;
 
 enum class ParallelWriteArray { Off, Auto, Force };
 
@@ -1088,6 +1089,8 @@ class WriteArrayLowering {
         execution_trace_active())
       return false;
     if (policy == ParallelWriteArray::Force) return true;
+    if (data_payload_bytes(log_prob.td.env()) > kParallelWriteArrayMaxDataBytes)
+      return false;
     LoweringWork work(prog_, log_prob.int_env_data, log_prob.td.env(),
                       kParallelWriteArrayMinWork);
     return work.of(prog_.generate_quantities) >= kParallelWriteArrayMinWork &&

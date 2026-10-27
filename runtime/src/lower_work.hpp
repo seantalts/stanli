@@ -13,6 +13,15 @@
 namespace stanli {
 namespace lower_detail {
 
+inline uint64_t data_payload_bytes(
+    const std::map<std::string, DataMap::Entry>& env) {
+  uint64_t bytes = 0;
+  for (const auto& e : env)
+    bytes +=
+        e.second.r.size() * sizeof(double) + e.second.i.size() * sizeof(int);
+  return bytes;
+}
+
 class LoweringWork {
  public:
   static constexpr uint64_t kUnknownTrips = 8;

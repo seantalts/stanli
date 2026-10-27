@@ -7,6 +7,7 @@
 // what it would have got alone.
 #include "env_helpers.hpp"
 #include "lowering_digest.hpp"
+#include "../runtime/src/lower_work.hpp"
 #include "../runtime/src/lower_worker.hpp"
 #include "../runtime/third_party/bridgestan.h"
 
@@ -276,6 +277,22 @@ void test_deep_nesting(const std::vector<Fixture>& fixtures) {
   expect(par.parallel == kThreaded, "the deep model used the second thread");
   expect_same("deeply nested model, parallel vs sequential", par.text,
               seq.text);
+}
+
+void test_data_payload() {
+  std::map<std::string, stanli::DataMap::Entry> env;
+  expect(stanli::lower_detail::data_payload_bytes(env) == 0,
+         "no data, no payload");
+  stanli::DataMap::Entry reals, ints;
+  reals.r.assign(1000, 0.0);
+  ints.is_int = true;
+  ints.i.assign(500, 1);
+  ints.r.assign(500, 1.0);
+  env["y"] = reals;
+  env["n"] = ints;
+  expect(stanli::lower_detail::data_payload_bytes(env) ==
+             (1000 + 500) * sizeof(double) + 500 * sizeof(int),
+         "payload counts the real and integer arrays an entry holds");
 }
 
 void test_gates(const std::vector<Fixture>& fixtures) {
@@ -660,6 +677,8 @@ int main() {
   test_default_choice(fixtures);
   phase("deep nesting");
   test_deep_nesting(fixtures);
+  phase("data payload");
+  test_data_payload();
   phase("gates");
   test_gates(fixtures);
   phase("threads joined");
