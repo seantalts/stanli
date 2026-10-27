@@ -13,7 +13,7 @@ from pathlib import Path
 
 SMALL, LARGE = 400, 3200
 REPEATS = 3
-MAX_RATIO = 20.0
+MAX_RATIO = 12.0
 
 PREAMBLE = "parameters { real mu; }\nmodel { mu ~ normal(0, 1); }\n"
 
@@ -42,6 +42,8 @@ MODELS = {
         lambda i: f"array[4] real a{i};\nfor (k in 1:4) a{i}[k] = mu * k + {i};"),
     "generated quantities if/else": generated_quantities(
         lambda i: f"real h{i};\nif (mu > {i % 7}) h{i} = mu + {i}; else h{i} = mu - {i};"),
+    "generated quantities while loops": generated_quantities(
+        lambda i: f"real w{i} = mu;\n{{ int c{i} = 0; while (c{i} < 3) {{ w{i} += mu; c{i} += 1; }} }}"),
     "constrained parameters": constrained_parameters,
     "transformed parameter chain": transformed_parameter_chain,
 }

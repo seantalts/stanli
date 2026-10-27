@@ -929,10 +929,11 @@ struct Lowering {
   Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
            const char* graph_name, const PreparedContext& prepared_context);
   struct RegionTrialTag {};
-  Lowering(Lowering& parent, RegionTrialTag);
+  Lowering(Lowering& parent, RegionTrialTag,
+           const std::set<std::string>* names);
 
   PreparedContext prepared_context();
-  Lowering fork_region_trial();
+  Lowering fork_region_trial(const std::set<std::string>* names = nullptr);
 
   void dump_named(const std::string& label, const std::string& name,
                   const std::vector<int>& roots, bool unfiltered);
