@@ -765,6 +765,7 @@ jobs:
       # OCaml toolchain; this closes the producer/schema drift gap in CI.
       - name: Typed producer matches exact-source legacy MIR
         if: matrix.runtime == 'linux-x86_64'
+        shell: bash
         run: |
           source tools/stanc_embed/provenance.sh
           probe=$(stanc_embed_dir)/stanli-vectorize-probe
