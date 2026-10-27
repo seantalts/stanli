@@ -481,10 +481,7 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
       return true;
     };
   }
-  std::set<std::string> outer_names;
-  for (const auto& [name, value] : scope) outer_names.insert(name);
-  for (const auto& [name, value] : decls) outer_names.insert(name);
-  const std::set<std::string> outer_int_names = int_locals;
+  std::set<std::string> outer_names, outer_int_names;
   // `target +=` inside the region accumulates into a register of its
   // own, seeded to zero, and the total leaves as one more live-out that
   // lowering registers as a target term. A `~` statement cannot go here
@@ -507,6 +504,10 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
       // has to leave it that way.
       std::vector<std::string> pre;
       assigned_names(*s, &pre);
+      for (const std::string& name : pre) {
+        if (scope.count(name) || decls.count(name)) outer_names.insert(name);
+        if (int_locals.count(name)) outer_int_names.insert(name);
+      }
       for (const std::string& name : pre) {
         if (scope.count(name) || int_locals.count(name)) continue;
         auto dl = decls.find(name);
