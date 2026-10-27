@@ -806,23 +806,10 @@ jobs:
               /tmp/stanli-es.portable-mir
             gzip -c /tmp/stanli-es.legacy-mir | wc -c
             gzip -c /tmp/stanli-es.portable-mir | wc -c
-            legacy_decode=$(build-rel/bench_mir_decode \
-              /tmp/stanli-es.legacy-mir 51)
-            portable_decode=$(build-rel/bench_mir_decode \
-              /tmp/stanli-es.portable-mir 51)
-            echo "$legacy_decode"
-            echo "$portable_decode"
-            legacy_ns=$(sed -n 's/.*median_ns=\([0-9]*\).*/\1/p' \
-              <<<"$legacy_decode")
-            portable_ns=$(sed -n 's/.*median_ns=\([0-9]*\).*/\1/p' \
-              <<<"$portable_decode")
+            tools/check_mir_decode_speed.sh build-rel/bench_mir_decode \
+              /tmp/stanli-es.legacy-mir /tmp/stanli-es.portable-mir
             legacy_bytes=$(wc -c < /tmp/stanli-es.legacy-mir)
             portable_bytes=$(wc -c < /tmp/stanli-es.portable-mir)
-            [[ "$legacy_ns" =~ ^[0-9]+$ && "$portable_ns" =~ ^[0-9]+$ ]]
-            if ((portable_ns * 2 > legacy_ns)); then
-              echo "compact MIR median decode is not at least 2x faster" >&2
-              exit 1
-            fi
             if ((portable_bytes * 2 > legacy_bytes)); then
               echo "compact MIR is not at least 2x smaller" >&2
               exit 1
