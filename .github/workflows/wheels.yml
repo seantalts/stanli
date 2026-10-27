@@ -133,6 +133,7 @@ jobs:
         run: |
           python3 tests/test_dev_setup.py
           bash tests/test_cached_ocaml_switch.sh
+          bash tests/test_stanc_embed_key.sh
       - name: Check the Windows C ABI exports
         run: python3 tests/test_windows_exports.py
       - name: Check the x86-64 baseline ISA guard
@@ -307,15 +308,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            deps/stanc3/stanc_embed.o
-            deps/stanc3/stanc_embed.o.stamp
+            deps/stanc3/embed
             deps/stanc3/stanc
             deps/stanc3/stanc.src
-            deps/stanc3/stanli-vectorize-probe
-            deps/stanc3/stanli-vectorize-probe.stamp
             deps/ocaml-include
           key: >-
-            stanc-embed-v2-${{ matrix.plat }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}${{ runner.os == 'macOS' && format('-hostdeps-v2-{0}', hashFiles('.github/macos/**')) || '' }}
+            stanc-embed-v3-${{ matrix.plat }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}${{ runner.os == 'macOS' && format('-hostdeps-v2-{0}', hashFiles('.github/macos/**')) || '' }}
 
       # Finished artifacts remain exact-keyed. On a miss, reuse the expensive
       # OCaml switch independently of edits to our compiler overlay. Use an
@@ -388,10 +386,8 @@ jobs:
         run: |
           # The stanc-embed cache missed, so any object on disk came from
           # another cache and is stale by definition.
-          rm -f deps/stanc3/stanc_embed.o deps/stanc3/stanc_embed.o.stamp \
-            deps/stanc3/stanc deps/stanc3/stanc.src \
-            deps/stanc3/stanli-vectorize-probe \
-            deps/stanc3/stanli-vectorize-probe.stamp
+          rm -rf deps/stanc3/embed
+          rm -f deps/stanc3/stanc deps/stanc3/stanc.src
           # Remove old untracked overlay sources (including deleted modules),
           # retaining Dune's dependency-checked build state. The builder resets
           # tracked sources to the exact upstream pin before applying this overlay.
@@ -431,14 +427,15 @@ jobs:
         shell: bash
         run: |
           source tools/stanc_embed/provenance.sh
-          stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
+          embed_dir=$(stanc_embed_dir)
+          stanc_embed_artifact_matches "$embed_dir/stanc_embed.o" \
             "$STANC3_SRC_SHA" "$OPAM_SWITCH"
-          test -x deps/stanc3/stanli-vectorize-probe
+          test -x "$embed_dir/stanli-vectorize-probe"
           stanc_embed_artifact_matches \
-            deps/stanc3/stanli-vectorize-probe \
+            "$embed_dir/stanli-vectorize-probe" \
             "$STANC3_SRC_SHA" "$OPAM_SWITCH"
           for symbol in caml_c_thread_register caml_c_thread_unregister; do
-            nm -g deps/stanc3/stanc_embed.o | awk -v wanted="$symbol" '
+            nm -g "$embed_dir/stanc_embed.o" | awk -v wanted="$symbol" '
               ($NF == wanted || $NF == "_" wanted) &&
                   $(NF - 1) ~ /^[Tt]$/ { found = 1 }
               END { exit found ? 0 : 1 }
@@ -498,7 +495,7 @@ jobs:
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DSTANLI_STANC_EMBED_OBJ="$PWD/deps/stanc3/stanc_embed.o" \
+            -DSTANLI_STANC_EMBED_OBJ=auto \
             -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
           # Bounded, not bare -j. The containers ran at -j1 because one
           # densities.cpp compile peaked at 7.57 GB, so two at once
@@ -575,7 +572,7 @@ jobs:
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DSTANLI_STANC_EMBED_OBJ="$PWD/deps/stanc3/stanc_embed.o" \
+            -DSTANLI_STANC_EMBED_OBJ=auto \
             -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
           cmake --build build-oracle -j ${{ matrix.build_jobs }} \
             --target test_density_fused test_ordered_logistic_fused \
@@ -680,17 +677,17 @@ jobs:
         timeout-minutes: 60
         shell: bash
         run: |
-          test -x deps/stanc3/stanli-vectorize-probe
           source tools/stanc_embed/provenance.sh
-          stanc_embed_artifact_matches \
-            deps/stanc3/stanli-vectorize-probe \
+          probe=$(stanc_embed_dir)/stanli-vectorize-probe
+          test -x "$probe"
+          stanc_embed_artifact_matches "$probe" \
             "$STANC3_SRC_SHA" "$OPAM_SWITCH"
           baseline_args=()
           if [ -f /tmp/vectorize-baseline/graphs.jsonl ]; then
             baseline_args=(--baseline /tmp/vectorize-baseline)
           fi
           python3 harnesses/vectorize_ab.py deps/posteriordb \
-            --compiler deps/stanc3/stanli-vectorize-probe \
+            --compiler "$probe" \
             --check build-rel/stanli_check \
             --bench build-rel/bench_grad --dump build-rel/dump_ops \
             --timeout 300 --gradient-timeout 20 --prep-samples 2 \
@@ -775,13 +772,15 @@ jobs:
       - name: Typed producer matches exact-source legacy MIR
         if: matrix.runtime == 'linux-x86_64'
         run: |
-          test -x deps/stanc3/stanli-vectorize-probe
+          source tools/stanc_embed/provenance.sh
+          probe=$(stanc_embed_dir)/stanli-vectorize-probe
+          test -x "$probe"
           cp tests/fixtures/es.stan /tmp/stanli-portable-es.stan
           cp tests/fixtures/view_udf_local_data_branch.stan \
             /tmp/stanli-portable-nested-udf.stan
           cp tests/stanc3/mother.stan /tmp/stanli-portable-mother.stan
           for name in es nested-udf mother; do
-            deps/stanc3/stanli-vectorize-probe --vectorize-loops off \
+            "$probe" --vectorize-loops off \
               --legacy-output /tmp/stanli-$name.legacy-mir \
               --output /tmp/stanli-$name.portable-mir \
               /tmp/stanli-portable-$name.stan

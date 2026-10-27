@@ -104,15 +104,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            deps/stanc3/stanc_embed.o
-            deps/stanc3/stanc_embed.o.stamp
+            deps/stanc3/embed
             deps/stanc3/stanc
             deps/stanc3/stanc.src
-            deps/stanc3/stanli-vectorize-probe
-            deps/stanc3/stanli-vectorize-probe.stamp
             deps/ocaml-include
           key: >-
-            stanc-embed-v2-manylinux_2_28_x86_64-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+            stanc-embed-v3-manylinux_2_28_x86_64-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
 
       # Finished artifacts remain exact-keyed. On a miss, reuse the expensive
       # OCaml switch independently of edits to our compiler overlay. Use an
@@ -170,10 +167,8 @@ jobs:
       - name: Build the embedded stanc3 object
         if: steps.stanc-cache.outputs.cache-hit != 'true'
         run: |
-          rm -f deps/stanc3/stanc_embed.o deps/stanc3/stanc_embed.o.stamp \
-            deps/stanc3/stanc deps/stanc3/stanc.src \
-            deps/stanc3/stanli-vectorize-probe \
-            deps/stanc3/stanli-vectorize-probe.stamp
+          rm -rf deps/stanc3/embed
+          rm -f deps/stanc3/stanc deps/stanc3/stanc.src
           # Remove old untracked overlay sources (including deleted modules),
           # retaining Dune's dependency-checked build state. The builder resets
           # tracked sources to the exact upstream pin before applying this overlay.
@@ -192,14 +187,15 @@ jobs:
         shell: bash
         run: |
           source tools/stanc_embed/provenance.sh
-          stanc_embed_artifact_matches deps/stanc3/stanc_embed.o \
+          embed_dir=$(stanc_embed_dir)
+          stanc_embed_artifact_matches "$embed_dir/stanc_embed.o" \
             "$STANC3_SRC_SHA" "$OPAM_SWITCH"
-          test -x deps/stanc3/stanli-vectorize-probe
+          test -x "$embed_dir/stanli-vectorize-probe"
           stanc_embed_artifact_matches \
-            deps/stanc3/stanli-vectorize-probe \
+            "$embed_dir/stanli-vectorize-probe" \
             "$STANC3_SRC_SHA" "$OPAM_SWITCH"
           for symbol in caml_c_thread_register caml_c_thread_unregister; do
-            nm -g deps/stanc3/stanc_embed.o | awk -v wanted="$symbol" '
+            nm -g "$embed_dir/stanc_embed.o" | awk -v wanted="$symbol" '
               ($NF == wanted || $NF == "_" wanted) &&
                   $(NF - 1) ~ /^[Tt]$/ { found = 1 }
               END { exit found ? 0 : 1 }
@@ -238,7 +234,7 @@ jobs:
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DSTANLI_STANC_EMBED_OBJ="$PWD/deps/stanc3/stanc_embed.o" \
+            -DSTANLI_STANC_EMBED_OBJ=auto \
             -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
           cmake --build build-rel -j2
           ccache -s

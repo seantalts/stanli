@@ -719,6 +719,21 @@ Python library when embedding is disabled, and makes the differential
 Stan language sweep runnable locally; see
 [`harnesses/conformance/README.md`](../harnesses/conformance/README.md).
 
+The embedded compiler object and the vectorization probe live in
+`deps/stanc3/embed/<key>/`, where `<key>` hashes the stanc3 pin, the OCaml
+version and the files in `compiler/native`, `compiler/ocaml` and
+`tools/stanc_embed`. Switching branches selects another directory instead of
+overwriting the object. Configure with `-DSTANLI_STANC_EMBED_OBJ=auto` to link
+the object for the current tree, as `dev_setup.sh` does; an explicit path
+works too, and an empty value (the CMake default) builds without embedding.
+Every configure checks the object's provenance stamp and fails with the
+rebuild command if it is missing or stale. A change to any of those inputs
+reruns the configure on the next `cmake --build`. When
+`STANLI_STANC_EXECUTABLE` is left at `deps/stanc3/stanc`, configure also
+requires its `stanc.src` to match `STANC3_SRC_SHA` in `deps/pins.env`.
+Old key directories are not pruned; delete `deps/stanc3/embed` to reclaim
+the space.
+
 On Windows, run `bash tools/dev_setup.sh` from Git Bash or MSYS2 Bash.
 Setup reuses the installation providing `pacman` on `PATH`, or checks
 `C:/msys64` and installs `MSYS2.MSYS2` with winget if absent. It prepends

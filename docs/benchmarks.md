@@ -636,7 +636,7 @@ The harness refuses a CmdStan checkout that differs from `deps/pins.env` in its 
 Stan or Stan Math head, its tracked files or its `bin/stanc`; `--allow-unpinned-cmdstan`
 overrides that and the manifest records it.
 `--stanc` (alias `--cmdstan-stanc`) and `--stancflags` choose CmdStan's
-compiler; Stanli uses `deps/stanc3/stanli-vectorize-probe`. `--resume`
+compiler; Stanli uses the `stanli-vectorize-probe` in `deps/stanc3/embed/<key>/`. `--resume`
 requires identical sources, inputs, binaries and settings. Timeouts kill the
 command's process group and never count as a completed measurement.
 

@@ -82,15 +82,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            deps/stanc3/stanc_embed.o
-            deps/stanc3/stanc_embed.o.stamp
+            deps/stanc3/embed
             deps/stanc3/stanc
             deps/stanc3/stanc.src
-            deps/stanc3/stanli-vectorize-probe
-            deps/stanc3/stanli-vectorize-probe.stamp
             deps/ocaml-include
           key: >-
-            stanc-embed-v2-manylinux_2_28_x86_64-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
+            stanc-embed-v3-manylinux_2_28_x86_64-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
           fail-on-cache-miss: true
 
       - name: Restore posteriordb (models and data only)
@@ -137,7 +134,7 @@ jobs:
               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
               -DCMAKE_C_COMPILER_LAUNCHER=ccache \
               -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-              -DSTANLI_STANC_EMBED_OBJ="$PWD/deps/stanc3/stanc_embed.o" \
+              -DSTANLI_STANC_EMBED_OBJ=auto \
               -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
             python3 .github/bench-isa/check_flags.py "$dir" "$name" "$flags" |
               tee "out/flags-$name.txt"
