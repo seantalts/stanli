@@ -22,6 +22,7 @@ struct NestingTooDeep : std::runtime_error {
 };
 
 // The deepest statement/expression nesting a reader accepts on this thread.
+// Emscripten has no threads, so it keeps to what its 8 MB stack holds.
 unsigned nesting_limit();
 
 // True when threads cannot be started with a chosen stack size (Emscripten).

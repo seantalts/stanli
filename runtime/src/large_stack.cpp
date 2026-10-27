@@ -14,6 +14,7 @@ namespace {
 // Measured worst-case stack per nesting level across the readers and passes.
 constexpr size_t kBytesPerLevel = size_t{24} * 1024;
 constexpr unsigned kMaxNesting = 40000;
+constexpr unsigned kEmscriptenNesting = 1000;
 #ifdef _WIN32
 constexpr size_t kStackBytes = size_t{256} << 20;
 #else
@@ -53,7 +54,12 @@ bool large_stack_unavailable() {
 }
 
 unsigned nesting_limit() {
-  return large_stack_limit != 0 ? large_stack_limit : kInlineNesting;
+  if (large_stack_limit != 0) return large_stack_limit;
+#ifdef __EMSCRIPTEN__
+  return kEmscriptenNesting;
+#else
+  return kInlineNesting;
+#endif
 }
 
 namespace detail {
