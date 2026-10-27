@@ -123,7 +123,7 @@ The jobs are in [`wheels.yml`](.github/workflows/wheels.yml),
 | downstream `stanr` | `stanr` built against this runtime, its backend tests | its own expectations | release tags, on demand | other R consumers |
 | no-stdio build | undefined symbols of the runtime objects (via [`tools/check_no_stdio.sh`](tools/check_no_stdio.sh)) | the stdout, `printf`, `abort` and `exit` symbols `R CMD check` rejects | post-merge | |
 | AddressSanitizer | the full CTest suite | no diagnostics | post-merge except release tags | a stale `vari` that points into reused arena memory |
-| ThreadSanitizer | `test_capi`, `test_pool` and `test_multichain` | no diagnostics | post-merge except release tags | the other tests |
+| ThreadSanitizer | `test_capi`, `test_pool`, `test_multichain`, `test_wa_parallel` and `test_wa_parallel_abi` | no diagnostics | post-merge except release tags | the other tests |
 | WebAssembly replay | log density and gradient of the corpus through the wasm build | the same references and gates | by hand | `write_array`; `nn_rbm1bJ100`, whose compile does not fit in 4 GB |
 | Safari 17 bundle check | the js_of_ocaml bundles | no line ending in `static` | PR | |
 | docs and formatting | stamped numbers, C/C++ formatting | their artifacts ([`tools/gen_docs.py --check`](tools/gen_docs.py)), the pinned formatter | every PR | |

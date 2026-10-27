@@ -189,6 +189,9 @@ struct CompiledModel {
     // Drivers prefer it over the truncated graph (see wa_interp.hpp);
     // the graph remains the fast path whenever lowering completes.
     std::shared_ptr<WaInterp> interp;
+    // Lowered on a second thread, beside the log_prob lowering. For tests;
+    // nothing branches on it.
+    bool lowered_in_parallel = false;
 
     void bind(Executor& ex) const {
       for (const auto& f : fills) {

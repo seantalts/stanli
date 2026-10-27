@@ -223,6 +223,7 @@ void ExecutionTrace::check() const {
     throw std::runtime_error(
         "strict execution diagnostic: MIR interpreter use observed");
 }
+bool execution_trace_active() { return current_scope != nullptr; }
 void record_interpreter_event(const std::string& phase, const char* event) {
   bool forbidden = false;
   for (auto* scope = current_scope; scope; scope = scope->previous_) {

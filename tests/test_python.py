@@ -1844,6 +1844,91 @@ def test_compile_errors_name_the_model_file():
                     raise AssertionError("syntax error was accepted")
 
 
+WA_FALLBACK_DATA = {"counts": [1, 2]}
+
+
+def _build_and_warn(source, data):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            model = stanli.Model(stan_code=source, data=data)
+        except RuntimeError as e:
+            return None, str(e), []
+    notes = [str(w.message) for w in caught
+             if issubclass(w.category, RuntimeWarning)]
+    return model, None, notes
+
+
+def _lowered_together_and_apart(source, data):
+    with mock.patch.dict(os.environ, {"STANLI_PARALLEL_WA": "1"}):
+        together = _build_and_warn(source, data)
+    with mock.patch.dict(os.environ, {"STANLI_PARALLEL_WA": "0"}):
+        apart = _build_and_warn(source, data)
+    return together, apart
+
+
+def test_write_array_lowered_beside_log_prob_keeps_the_interpreter_note():
+    source = (FIXTURES / "wapar_wa_fallback.stan").read_text()
+    (model, error, notes), (model_seq, error_seq, notes_seq) = \
+        _lowered_together_and_apart(source, WA_FALLBACK_DATA)
+    assert error is None and error_seq is None, (error, error_seq)
+    assert len(notes) == 1 and "MIR interpreter" in notes[0], notes
+    assert notes == notes_seq
+    assert model.constrained_names == model_seq.constrained_names
+    first = model.sample(chains=2, seed=5, warmup=20, samples=20, refresh=0)
+    second = model_seq.sample(chains=2, seed=5, warmup=20, samples=20,
+                              refresh=0)
+    assert (first.draws() == second.draws()).all()
+
+
+def test_write_array_lowered_beside_log_prob_keeps_construction_errors():
+    lp_error = (FIXTURES / "wapar_lp_error.stan").read_text()
+    both = (FIXTURES / "wapar_both_error.stan").read_text()
+    fallback = (FIXTURES / "wapar_wa_fallback.stan").read_text()
+    for source, data in ((lp_error, None), (both, WA_FALLBACK_DATA)):
+        (_, error, notes), (_, error_seq, notes_seq) = \
+            _lowered_together_and_apart(source, data)
+        assert error is not None and "append_row column mismatch" in error
+        assert error == error_seq and notes == notes_seq == []
+    with mock.patch.dict(os.environ, {"STANLI_NO_INTERPRETER": "1"}):
+        for source, data, message in (
+                (fallback, WA_FALLBACK_DATA, "STANLI_NO_INTERPRETER"),
+                (both, WA_FALLBACK_DATA, "append_row column mismatch")):
+            (_, error, _), (_, error_seq, _) = \
+                _lowered_together_and_apart(source, data)
+            assert error is not None and message in error, error
+            assert error == error_seq
+
+
+def test_models_construct_concurrently_from_python_threads():
+    source = (FIXTURES / "wapar_wa_fallback.stan").read_text()
+    with mock.patch.dict(os.environ, {"STANLI_PARALLEL_WA": "0"}):
+        reference = stanli.Model(stan_code=source, data=WA_FALLBACK_DATA)
+    names = reference.constrained_names
+    q = np.array([0.3, -0.2])
+    want = reference.log_prob_grad(q)
+    barrier = threading.Barrier(6)
+
+    def build(_):
+        barrier.wait()
+        model = stanli.Model(stan_code=source, data=WA_FALLBACK_DATA)
+        got = model.log_prob_grad(q)
+        assert model.constrained_names == names
+        assert got[0] == want[0] and (got[1] == want[1]).all()
+
+    # warnings.catch_warnings is process-wide, so it wraps the whole pool
+    # instead of each thread.
+    with mock.patch.dict(os.environ, {"STANLI_PARALLEL_WA": "1"}), \
+            warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            list(pool.map(build, range(6)))
+    notes = [str(w.message) for w in caught
+             if issubclass(w.category, RuntimeWarning)]
+    assert len(notes) == 6 and len(set(notes)) == 1, notes
+    assert "MIR interpreter" in notes[0]
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

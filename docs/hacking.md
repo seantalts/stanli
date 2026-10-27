@@ -144,6 +144,11 @@ Step by step:
    CmdStan's dropped-constant rules (see "the variant byte" below);
    and any statement whose control flow depends on a parameter is
    compiled for the register machine (its own section below).
+   `write_array` is lowered from the prepared data, so in a build with
+   threads and a model with enough to lower on both sides it runs on a
+   second thread beside the log density and is joined before
+   `compile_model` returns. `STANLI_PARALLEL_WA=0` lowers the two one after
+   the other and `STANLI_PARALLEL_WA=1` always uses the second thread.
 
 4. **The passes rewrite the list.** In pipeline order: in-place
    updates, store-to-load forwarding, constant folding, loop

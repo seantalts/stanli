@@ -175,6 +175,11 @@ struct PrepTrace {
     }
   }
 
+  void append(PrepTrace&& later) {
+    if (!enabled_) return;
+    rows_.insert(rows_.end(), later.rows_.begin(), later.rows_.end());
+  }
+
   void report() const {
     if (!enabled_) return;
     for (const Row& r : rows_) {
@@ -894,6 +899,7 @@ struct Lowering {
   // variables were folded in; the write_array lowering starts from this.
   std::map<std::string, long> int_env_data;
   bool data_prepared = false;
+  std::function<void()> after_data_prepared;
   // Lowering generate_quantities rather than log_prob: parameters are columns
   // to emit, not values to differentiate.
   bool in_write_array = false;
