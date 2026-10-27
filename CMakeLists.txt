@@ -554,10 +554,13 @@ elseif(UNIX)
 endif()
 
 # In-process stanc3: link the OCaml-compiled embed object
-# (tools/stanc_embed/build.sh produces deps/stanc3/stanc_embed.o, an archive
-# of the original objects on Windows to preserve PE unwind relocations).
-set(STANLI_STANC_EMBED_OBJ "" CACHE FILEPATH
-    "stanc_embed.o built by tools/stanc_embed/build.sh; enables in-process stanc")
+# (tools/stanc_embed/build.sh produces deps/stanc3/embed/<key>/stanc_embed.o,
+# an archive of the original objects on Windows to preserve PE unwind
+# relocations).
+set(STANLI_STANC_EMBED_OBJ "" CACHE STRING
+    "empty for no in-process stanc, \"auto\" for the object built from this tree's compiler inputs, or a path to one")
+include(cmake/StanliEmbed.cmake)
+stanli_resolve_stanc_embed()
 set(STANLI_OCAML_STDLIB "" CACHE PATH
     "OCaml stdlib dir (opam switch lib/ocaml) for caml/*.h")
 # The embed object is a whole OCaml runtime, so it can only be linked into
@@ -794,6 +797,7 @@ if(NOT EXISTS "${STANLI_STANC_EXECUTABLE}")
     "Pinned stanc not found at ${STANLI_STANC_EXECUTABLE}; "
     "run tools/dev_setup.sh --no-build or set STANLI_STANC_EXECUTABLE")
 endif()
+stanli_check_default_stanc("${_stanli_stanc_default}")
 # Keep additions and removals configuration-visible, then ask the fixture
 # generator for the authoritative subset. Generated signature models replay
 # against CmdStan references below and must not inflate this legacy corpus.
@@ -1497,14 +1501,6 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_function_model_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_function_models.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  find_program(STANLI_BASH bash)
-  if(STANLI_STANC_EMBED_OBJ AND STANLI_BASH AND NOT WIN32)
-    add_test(NAME test_stanc_embed_provenance
-             COMMAND ${STANLI_BASH} -c
-                     "source tools/stanc_embed/provenance.sh && stanc_embed_artifact_matches \"$1\" || { echo \"$1 does not match the pinned stanc3 source and compiler inputs; rebuild it with tools/stanc_embed/build.sh\" >&2; exit 1; }"
-                     provenance ${STANLI_STANC_EMBED_OBJ}
-             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  endif()
   add_test(NAME test_density_signature_model_generation
            COMMAND ${Python3_EXECUTABLE}
                    tools/generate_density_signature_model.py

@@ -83,6 +83,21 @@ stanc_embed_inputs_sha256() {
   ) | _stanc_embed_sha256_stream
 }
 
+# Names the directory holding one build of the embedded compiler. Only
+# source-derived inputs go in, so the key is known without an opam switch.
+stanc_embed_key() {
+  printf '%s\n' \
+    "stanc3_src_sha=$(stanc_embed_read_setup STANC3_SRC_SHA)" \
+    "producer_inputs_sha256=$(stanc_embed_inputs_sha256)" \
+    "ocaml_version=$(stanc_embed_read_setup OCAML_VERSION)" |
+    _stanc_embed_sha256_stream | cut -c1-16
+}
+
+stanc_embed_dir() {
+  printf '%s/deps/stanc3/embed/%s\n' "$_stanli_embed_repo_root" \
+    "$(stanc_embed_key)"
+}
+
 stanc_embed_expected_stamp() {
   local src_sha=${1:-$(stanc_embed_read_setup STANC3_SRC_SHA)}
   local opam_switch=${2:-$(stanc_embed_read_setup OPAM_SWITCH)}
