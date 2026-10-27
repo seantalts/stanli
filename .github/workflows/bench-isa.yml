@@ -102,12 +102,12 @@ jobs:
       - name: Fetch posteriordb
         if: steps.pdb-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --filter=blob:none --sparse \
+          tools/with_retry.sh git clone --filter=blob:none --sparse \
             https://github.com/stan-dev/posteriordb.git deps/posteriordb
           git -C deps/posteriordb sparse-checkout set \
             posterior_database/models/stan posterior_database/data/data \
             posterior_database/posteriors
-          git -C deps/posteriordb fetch -q origin "$PDB_SHA"
+          tools/with_retry.sh git -C deps/posteriordb fetch -q origin "$PDB_SHA"
           git -C deps/posteriordb checkout -q "$PDB_SHA"
 
       - name: Configure and build the variants

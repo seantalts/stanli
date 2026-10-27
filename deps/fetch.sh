@@ -9,11 +9,11 @@ fetch() { # name url sha sparse-paths...
   local name=$1 url=$2 sha=$3
   shift 3
   if [ ! -d "$name/.git" ]; then
-    git clone --filter=blob:none --no-checkout "$url" "$name"
+    ../tools/with_retry.sh git clone --filter=blob:none --no-checkout "$url" "$name"
     git -C "$name" sparse-checkout init --cone
   fi
   git -C "$name" sparse-checkout set "$@"
-  git -C "$name" fetch -q origin "$sha"
+  ../tools/with_retry.sh git -C "$name" fetch -q origin "$sha"
   git -C "$name" checkout -q -f "$sha"
 }
 

@@ -572,12 +572,12 @@ jobs:
       - name: Fetch posteriordb
         if: steps.pdb-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --filter=blob:none --sparse \
+          tools/with_retry.sh git clone --filter=blob:none --sparse \
             https://github.com/stan-dev/posteriordb.git deps/posteriordb
           git -C deps/posteriordb sparse-checkout set \
             posterior_database/models/stan posterior_database/data/data \
             posterior_database/posteriors
-          git -C deps/posteriordb fetch -q origin "$PDB_SHA"
+          tools/with_retry.sh git -C deps/posteriordb fetch -q origin "$PDB_SHA"
           git -C deps/posteriordb checkout -q "$PDB_SHA"
 
       # Every model the demo page offers has a hand written description,
@@ -1255,7 +1255,7 @@ jobs:
         if: steps.windows-compilers-cache.outputs.cache-hit != 'true'
         run: |
           bash tests/test_windows_provenance.sh
-          git clone "$STANC3_SRC_REPO" deps/stanc3-src
+          tools/with_retry.sh git clone "$STANC3_SRC_REPO" deps/stanc3-src
           git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
           test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
           (cd deps/stanc3-src &&
@@ -2027,7 +2027,7 @@ jobs:
         if: steps.stancjs-cache.outputs.cache-hit != 'true'
         run: |
           opam switch create stancjs "ocaml-base-compiler.$OCAML_VERSION" -y
-          git clone "$STANC3_SRC_REPO" deps/stanc3-src
+          tools/with_retry.sh git clone "$STANC3_SRC_REPO" deps/stanc3-src
           git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
           test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
           (cd deps/stanc3-src &&
@@ -2207,12 +2207,12 @@ jobs:
       - name: Fetch posteriordb
         if: steps.pdb-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --filter=blob:none --sparse \
+          tools/with_retry.sh git clone --filter=blob:none --sparse \
             https://github.com/stan-dev/posteriordb.git deps/posteriordb
           git -C deps/posteriordb sparse-checkout set \
             posterior_database/models/stan posterior_database/data/data \
             posterior_database/posteriors
-          git -C deps/posteriordb fetch -q origin "$PDB_SHA"
+          tools/with_retry.sh git -C deps/posteriordb fetch -q origin "$PDB_SHA"
           git -C deps/posteriordb checkout -q "$PDB_SHA"
       - name: Model catalog
         run: python3 tools/gen_web_models.py

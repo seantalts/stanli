@@ -215,5 +215,46 @@ class CiPolicyTest(unittest.TestCase):
                 self.assertNotEqual(self.gate(invalid_scope, expected), 0)
 
 
+class NetworkRetryTest(unittest.TestCase):
+    retry = ROOT / "tools/with_retry.sh"
+
+    def run_retry(self, fail_times, attempts="3"):
+        with tempfile.TemporaryDirectory() as tmp:
+            counter = Path(tmp) / "count"
+            counter.write_text("0")
+            script = Path(tmp) / "flaky.sh"
+            script.write_text(
+                'n=$(( $(cat "$1") + 1 )); echo $n > "$1"\n'
+                '[ "$n" -gt "$2" ]\n')
+            result = subprocess.run(
+                ["bash", str(self.retry), "bash", str(script), str(counter),
+                 str(fail_times)],
+                env=dict(os.environ, RETRY_ATTEMPTS=attempts, RETRY_DELAY="0"),
+                capture_output=True, text=True)
+            return result.returncode, int(counter.read_text())
+
+    def test_retries_until_the_command_succeeds(self):
+        self.assertEqual(self.run_retry(2), (0, 3))
+
+    def test_gives_up_after_the_last_attempt_with_its_status(self):
+        self.assertEqual(self.run_retry(5), (1, 3))
+
+    def test_does_not_rerun_a_command_that_passed(self):
+        self.assertEqual(self.run_retry(0), (0, 1))
+
+    def test_every_git_network_call_is_retried(self):
+        files = [ROOT / "deps/fetch.sh", ROOT / "tools/build_web.sh"] + sorted(
+            (ROOT / ".github/workflows").glob("*.yml"))
+        network = re.compile(r"git (clone|(-C \S+ )?fetch)\b")
+        for path in files:
+            for number, line in enumerate(path.read_text().splitlines(), 1):
+                code = line.split("#")[0]
+                if "--no-tags --depth=1 origin" in code:
+                    continue
+                if network.search(code):
+                    with self.subTest(file=path.name, line=number):
+                        self.assertIn("with_retry.sh", code)
+
+
 if __name__ == "__main__":
     unittest.main()
