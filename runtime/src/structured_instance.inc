@@ -105,8 +105,14 @@ struct TripCapture {
         static_cast<uint32_t>(stream->program.size() - stream->targets.size());
     ops.push_back(op);
   }
+  // Zero-length operands may point anywhere, even into another frame.
+  static const double* sized(const Op& op, int bit, const Desc& d) {
+    const bool empty =
+        (op.dyn_lengths & (1u << bit)) ? op.dyn_capacity == 0 : d.len == 0;
+    return empty ? nullptr : d.data;
+  }
   void inputs(const Op& op, const KernelCtx& c) {
-    for (int k = 0; k < op.n_in; ++k) ptrs.push_back(c.in[k].data);
+    for (int k = 0; k < op.n_in; ++k) ptrs.push_back(sized(op, k, c.in[k]));
   }
   template <class T>
   void place(const T* at, size_t count) {
@@ -121,10 +127,10 @@ struct TripCapture {
               bool prepared = false) {
     push(prepared ? PlanOp::Index : PlanOp::Kernel, n.site);
     inputs(op, c);
-    ptrs.push_back(c.out.data);
+    ptrs.push_back(sized(op, 6, c.out));
     if (prepared) return;
-    if (op.out2 >= 0) ptrs.push_back(c.out2.data);
-    ptrs.push_back(c.scratch);
+    if (op.out2 >= 0) ptrs.push_back(c.out2.len ? c.out2.data : nullptr);
+    ptrs.push_back(n.kernel_scratch ? c.scratch : nullptr);
   }
   void decide(const double* cell, bool taken) {
     push(PlanOp::Decide);

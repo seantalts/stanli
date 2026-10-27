@@ -602,7 +602,9 @@ struct FrameExecution {
   std::vector<double*>* resolved = nullptr;
   double* values = frame.values.data();
   double* const* bound = frame.bindings.data();
-  double* adjoints = s.frames->adjoints.data() + frame.adjoint_base;
+  double* adjoints = s.frames->adjoints.empty()
+                         ? nullptr
+                         : s.frames->adjoints.data() + frame.adjoint_base;
   double* value(uint64_t raw) const {
     const int64_t ref = static_cast<int64_t>(raw);
     if (ref >= 0) return values + ref;
