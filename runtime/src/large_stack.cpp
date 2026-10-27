@@ -11,8 +11,21 @@
 namespace stanli {
 namespace {
 
+#if defined(__SANITIZE_ADDRESS__)
+#define STANLI_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define STANLI_ASAN 1
+#endif
+#endif
+
 // Measured worst-case stack per nesting level across the readers and passes.
+// AddressSanitizer pads every frame, so it gets a larger allowance.
+#ifdef STANLI_ASAN
+constexpr size_t kBytesPerLevel = size_t{128} * 1024;
+#else
 constexpr size_t kBytesPerLevel = size_t{24} * 1024;
+#endif
 constexpr unsigned kMaxNesting = 40000;
 constexpr unsigned kEmscriptenNesting = 1000;
 #ifdef _WIN32
