@@ -1472,6 +1472,10 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tests/test_data_loop_memo.py
                    $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_prep_scaling
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_scaling.py
+                   $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_diagnostics
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_diagnostics.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

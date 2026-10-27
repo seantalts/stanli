@@ -803,12 +803,12 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   DumpOnThrow guard{*this};
   const auto lower_time = prep.start();
   for (const auto& s : p.generate_quantities) {
-    auto snapshot = wa_snapshot();
+    const auto mark = wa_mark();
     const auto fail_section = [&](const std::string& what) {
-      const char* section = snapshot.n_gq_start   ? "generated quantities"
-                            : snapshot.n_tp_start ? "transformed parameters"
-                                                  : "write_array";
-      wa_restore(snapshot);
+      const char* section = mark.n_gq_start   ? "generated quantities"
+                            : mark.n_tp_start ? "transformed parameters"
+                                              : "write_array";
+      wa_rollback(mark);
       // Keep the valid prefix for diagnostics, but drivers select WaInterp
       // whenever this marker is set and it evaluates the whole section from
       // statement zero. There is no continuation frame for an arbitrary

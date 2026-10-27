@@ -2069,40 +2069,76 @@ struct Lowering {
   }
 
   // Fills only grow and are truncated back, the graph is untouched, and the
-  // data environment is journaled, so none of them is copied.
-  struct WaSnapshot {
+  // data environment is journaled, so none of them is copied. The vectors in
+  // `out` only grow as well.
+  struct WaMark {
+    std::optional<size_t> n_tp_start, n_gq_start;
+    size_t n_fills = 0, n_ops = 0, n_slots = 0, n_idata = 0, n_udata = 0,
+           td_mark = 0;
+    size_t n_param_names = 0, n_views = 0, n_unc_params = 0,
+           n_interpreter_fallbacks = 0, n_reduce_sum_fallbacks = 0;
+    int64_t n_unconstrained = 0;
+    std::string reduce_sum_notice;
+    bool transformed_data_draws = false;
+  };
+  struct WaSnapshot : WaMark {
     std::map<std::string, Val> scope;
     std::map<std::string, DeclView> decls;
     std::map<std::string, long> int_env;
     std::set<std::string> int_locals;
-    std::optional<size_t> n_tp_start, n_gq_start;
-    CompiledModel out;
     std::map<int, IntRange> int_ranges;
     std::map<int, RealRange> real_ranges;
-    size_t n_fills = 0, n_ops = 0, n_slots = 0, n_idata = 0, n_udata = 0,
-           td_mark = 0;
   };
+  WaMark wa_mark() {
+    WaMark m;
+    m.n_tp_start = n_tp_start;
+    m.n_gq_start = n_gq_start;
+    m.n_fills = out.fills.size();
+    m.n_ops = g.ops.size();
+    m.n_slots = g.slots.size();
+    m.n_idata = g.idata_pool.size();
+    m.n_udata = g.udata_pool.size();
+    m.td_mark = td_journal.size();
+    m.n_param_names = out.param_names.size();
+    m.n_views = out.views.size();
+    m.n_unc_params = out.unc_params.size();
+    m.n_interpreter_fallbacks = out.interpreter_fallbacks.size();
+    m.n_reduce_sum_fallbacks = out.reduce_sum_fallbacks.size();
+    m.n_unconstrained = out.n_unconstrained;
+    m.reduce_sum_notice = out.reduce_sum_notice;
+    m.transformed_data_draws = out.transformed_data_draws;
+    return m;
+  }
+  void wa_rollback(const WaMark& m) {
+    n_tp_start = m.n_tp_start;
+    n_gq_start = m.n_gq_start;
+    const auto truncate = [](auto& v, size_t n) {
+      v.erase(v.begin() + (std::ptrdiff_t)n, v.end());
+    };
+    truncate(out.fills, m.n_fills);
+    truncate(out.param_names, m.n_param_names);
+    truncate(out.views, m.n_views);
+    truncate(out.unc_params, m.n_unc_params);
+    truncate(out.interpreter_fallbacks, m.n_interpreter_fallbacks);
+    truncate(out.reduce_sum_fallbacks, m.n_reduce_sum_fallbacks);
+    out.n_unconstrained = m.n_unconstrained;
+    out.reduce_sum_notice = m.reduce_sum_notice;
+    out.transformed_data_draws = m.transformed_data_draws;
+    g.ops.resize(m.n_ops);
+    g.slots.resize(m.n_slots);
+    g.idata_pool.resize(m.n_idata);
+    g.udata_pool.resize(m.n_udata);
+    td_rollback(m.td_mark);
+  }
   WaSnapshot wa_snapshot() {
     WaSnapshot s;
+    static_cast<WaMark&>(s) = wa_mark();
     s.scope = scope;
     s.decls = decls;
     s.int_env = int_env;
     s.int_locals = int_locals;
-    s.n_tp_start = n_tp_start;
-    s.n_gq_start = n_gq_start;
-    auto fills = std::move(out.fills);
-    auto graph = std::move(out.graph);
-    s.out = out;
-    out.fills = std::move(fills);
-    out.graph = std::move(graph);
-    s.n_fills = out.fills.size();
     s.int_ranges = int_ranges;
     s.real_ranges = real_ranges;
-    s.n_ops = g.ops.size();
-    s.n_slots = g.slots.size();
-    s.n_idata = g.idata_pool.size();
-    s.n_udata = g.udata_pool.size();
-    s.td_mark = td_journal.size();
     return s;
   }
   void wa_restore(WaSnapshot& s) {
@@ -2110,22 +2146,9 @@ struct Lowering {
     decls = std::move(s.decls);
     int_env = std::move(s.int_env);
     int_locals = std::move(s.int_locals);
-    n_tp_start = s.n_tp_start;
-    n_gq_start = s.n_gq_start;
-    auto fills = std::move(out.fills);
-    auto graph = std::move(out.graph);
-    out = std::move(s.out);
-    out.fills = std::move(fills);
-    out.graph = std::move(graph);
-    out.fills.erase(out.fills.begin() + (std::ptrdiff_t)s.n_fills,
-                    out.fills.end());
     int_ranges = std::move(s.int_ranges);
     real_ranges = std::move(s.real_ranges);
-    g.ops.resize(s.n_ops);
-    g.slots.resize(s.n_slots);
-    g.idata_pool.resize(s.n_idata);
-    g.udata_pool.resize(s.n_udata);
-    td_rollback(s.td_mark);
+    wa_rollback(s);
   }
 #include "lower_structured_loop.inc"
 
