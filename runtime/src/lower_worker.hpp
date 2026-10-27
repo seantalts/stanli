@@ -3,14 +3,21 @@
 
 #include <stan/math/rev/core/chainablestack.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <exception>
 #include <functional>
-#include <system_error>
-#include <thread>
 #include <utility>
-#ifndef _WIN32
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#include <process.h>
+#else
 #include <pthread.h>
+#include <sys/resource.h>
 #endif
 
 namespace stanli {
@@ -27,16 +34,16 @@ class LowerWorker {
   bool start(std::function<void()> body) {
     body_ = std::move(body);
 #ifdef _WIN32
-    try {
-      thread_ = std::thread([this] { run(); });
-    } catch (const std::system_error&) {
-      return false;
-    }
+    thread_ = reinterpret_cast<HANDLE>(_beginthreadex(
+        nullptr, static_cast<unsigned>(stack_bytes()), &LowerWorker::entry,
+        this, STACK_SIZE_PARAM_IS_RESERVATION, nullptr));
+    if (thread_ == nullptr) return false;
 #else
     pthread_attr_t attr;
     if (pthread_attr_init(&attr) != 0) return false;
-    pthread_attr_setstacksize(&attr, kStackBytes);
-    const int rc = pthread_create(&thread_, &attr, &LowerWorker::entry, this);
+    int rc = pthread_attr_setstacksize(&attr, stack_bytes());
+    if (rc == 0)
+      rc = pthread_create(&thread_, &attr, &LowerWorker::entry, this);
     pthread_attr_destroy(&attr);
     if (rc != 0) return false;
 #endif
@@ -48,7 +55,8 @@ class LowerWorker {
     if (!started_) return;
     started_ = false;
 #ifdef _WIN32
-    thread_.join();
+    WaitForSingleObject(thread_, INFINITE);
+    CloseHandle(thread_);
 #else
     pthread_join(thread_, nullptr);
 #endif
@@ -60,7 +68,17 @@ class LowerWorker {
   }
 
  private:
-  static constexpr size_t kStackBytes = size_t{64} << 20;
+  static size_t stack_bytes() {
+    size_t bytes = size_t{64} << 20;
+#ifndef _WIN32
+    rlimit limit;
+    if (getrlimit(RLIMIT_STACK, &limit) == 0 &&
+        limit.rlim_cur != RLIM_INFINITY && limit.rlim_cur > bytes)
+      bytes = std::min<size_t>(static_cast<size_t>(limit.rlim_cur),
+                               size_t{1} << 30);
+#endif
+    return bytes;
+  }
 
   void run() {
     try {
@@ -70,14 +88,18 @@ class LowerWorker {
       error_ = std::current_exception();
     }
   }
-#ifndef _WIN32
+#ifdef _WIN32
+  static unsigned __stdcall entry(void* self) {
+    static_cast<LowerWorker*>(self)->run();
+    return 0;
+  }
+  HANDLE thread_ = nullptr;
+#else
   static void* entry(void* self) {
     static_cast<LowerWorker*>(self)->run();
     return nullptr;
   }
   pthread_t thread_{};
-#else
-  std::thread thread_;
 #endif
   std::function<void()> body_;
   std::exception_ptr error_;

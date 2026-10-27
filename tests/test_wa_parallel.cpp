@@ -266,6 +266,18 @@ void test_default_choice(const std::vector<Fixture>& fixtures) {
   }
 }
 
+void test_deep_nesting(const std::vector<Fixture>& fixtures) {
+  const Fixture* deep = find(fixtures, "wapar_deep");
+  if (!deep) return;
+  const Run seq = construct_sequential(*deep);
+  expect(seq.text.compare(0, 6, "THROWS") != 0,
+         "the deeply nested model lowers on the calling thread: " + seq.text);
+  const Run par = construct_parallel(*deep);
+  expect(par.parallel == kThreaded, "the deep model used the second thread");
+  expect_same("deeply nested model, parallel vs sequential", par.text,
+              seq.text);
+}
+
 void test_gates(const std::vector<Fixture>& fixtures) {
   const Fixture* model = nullptr;
   for (const Fixture& f : fixtures)
@@ -592,7 +604,8 @@ void test_concurrent_constructions(const std::vector<Fixture>& fixtures) {
   std::map<std::string, std::string> reference;
   for (const Fixture& f : fixtures) {
     const Run r = construct_sequential(f);
-    if (!r.has_write_array) continue;
+    // Reading wapar_deep's MIR needs more stack than a std::thread has.
+    if (!r.has_write_array || f.name == "wapar_deep") continue;
     with_gq.push_back(&f);
     reference[f.name] = r.text;
   }
@@ -645,6 +658,8 @@ int main() {
   test_corpus_equivalence(fixtures);
   phase("default choice");
   test_default_choice(fixtures);
+  phase("deep nesting");
+  test_deep_nesting(fixtures);
   phase("gates");
   test_gates(fixtures);
   phase("threads joined");
