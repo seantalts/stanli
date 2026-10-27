@@ -103,7 +103,6 @@ void Execution::end_loop() {
 }
 
 void Execution::end_trip(Flow flow) {
-  FrameTape& tape = *s.frames;
   size_t instructions = 0;
   if (capture) {
     instructions = s.building->program.size();
@@ -147,8 +146,8 @@ void Execution::note_frame() {
 }
 
 namespace {
-int64_t operand_length(const StructuredLoop& p, const Node& n, const Op& op,
-                       int slot, int bit) {
+int64_t operand_length(const StructuredLoop& p, const Op& op, int slot,
+                       int bit) {
   return (op.dyn_lengths & (1u << bit)) ? op.dyn_capacity
                                         : p.body.slots[slot].len;
 }
@@ -174,9 +173,9 @@ void frame_values(const LoopState& s, const FrameCode& code, F&& visit) {
         const Op& op = p.body.ops[n.op];
         const uint64_t* at = w + 3;
         for (int k = 0; k < op.n_in; ++k)
-          f(*at++, operand_length(p, n, op, op.in[k], k), nullptr, false);
+          f(*at++, operand_length(p, op, op.in[k], k), nullptr, false);
         const bool call = (header & 255) == StreamInstr::Call;
-        f(*at++, operand_length(p, n, op, op.out, 6), nullptr, call);
+        f(*at++, operand_length(p, op, op.out, 6), nullptr, call);
         if (w[1] & kFrozenCallHasOut2)
           f(*at++, p.body.slots[op.out2].len, nullptr, call);
         f(*at, n.kernel_scratch, nullptr, call);
@@ -249,8 +248,7 @@ void Execution::adopt(Flow flow, size_t instructions) {
   t->ops = std::move(c.ops);
   std::vector<int64_t> lengths(c.ptrs.size(), -1);
   for (const PlanOp& op : t->ops)
-    plan_operands(*t, op,
-                  [&](uint32_t r, int64_t len, Use) { lengths[r] = len; });
+    plan_operands(op, [&](uint32_t r, int64_t len, Use) { lengths[r] = len; });
   std::map<std::pair<int64_t, int64_t>, int32_t> known;
   t->refs.reserve(c.ptrs.size());
   for (size_t i = 0; i < c.ptrs.size(); ++i) {
@@ -327,7 +325,7 @@ void Execution::adopt(Flow flow, size_t instructions) {
     t->image_size = std::max(t->image_size, end);
   };
   for (const PlanOp& op : t->ops)
-    plan_operands(*t, op, [&](uint32_t r, int64_t len, Use) { keep(r, len); });
+    plan_operands(op, [&](uint32_t r, int64_t len, Use) { keep(r, len); });
   for (uint32_t r = 0; r < t->refs.size(); ++r) keep(r, 1);
   if (split) return refuse();
   for (double* ptr : frame.bindings) {
@@ -436,7 +434,7 @@ void Execution::adopt(Flow flow, size_t instructions) {
                                  s.p.body.ops[s.sites[op.site]->op].udata)
                            : nullptr;
     if (spec && static_selection(*spec)) op.mode |= kPrepared;
-    plan_operands(*t, op, [&](uint32_t r, int64_t len, Use use) {
+    plan_operands(op, [&](uint32_t r, int64_t len, Use use) {
       const PlanRef& ref = t->refs[r];
       if (use == Use::Write && ref.base == 0)
         for (int64_t k = 0; k < len; ++k)
@@ -500,8 +498,7 @@ void Execution::adopt(Flow flow, size_t instructions) {
 // Visits each operand an op reads, writes, or may write at positions it
 // computes, with its length.
 template <class F>
-void Execution::plan_operands(const FrameTemplate& t, const PlanOp& op,
-                              F&& f) const {
+void Execution::plan_operands(const PlanOp& op, F&& f) const {
   uint32_t r = op.refs;
   const auto inputs = [&](int first) {
     const Op& o = p.body.ops[s.sites[op.site]->op];
@@ -513,8 +510,8 @@ void Execution::plan_operands(const FrameTemplate& t, const PlanOp& op,
       const Node& n = *s.sites[op.site];
       const Op& o = p.body.ops[n.op];
       for (int k = 0; k < o.n_in; ++k)
-        f(r++, operand_length(p, n, o, o.in[k], k), Use::Read);
-      f(r++, operand_length(p, n, o, o.out, 6), Use::Write);
+        f(r++, operand_length(p, o, o.in[k], k), Use::Read);
+      f(r++, operand_length(p, o, o.out, 6), Use::Write);
       if (o.out2 >= 0) f(r++, p.body.slots[o.out2].len, Use::Write);
       f(r, n.kernel_scratch, Use::Write);
       break;
@@ -582,7 +579,7 @@ void Execution::plan_accesses(FrameTemplate& t) const {
   std::vector<uint8_t> marks(
       static_cast<size_t>(workspace + frame) + t.image_size + 1, 0);
   for (const PlanOp& op : t.ops)
-    plan_operands(t, op, [&](uint32_t r, int64_t len, Use) {
+    plan_operands(op, [&](uint32_t r, int64_t len, Use) {
       const int64_t at = start(t.refs[r]);
       if (at < 0 || len <= 0) return;
       marks[static_cast<size_t>(at)] = 1;
@@ -613,7 +610,7 @@ void Execution::plan_accesses(FrameTemplate& t) const {
                     p.body.ops[s.sites[op.site]->op].udata),
                 true)
                 .rhs;
-    plan_operands(t, op, [&](uint32_t r, int64_t len, Use use) {
+    plan_operands(op, [&](uint32_t r, int64_t len, Use use) {
       Access access{0, 0, use, false, static_cast<int32_t>(r), len};
       access.rhs = rhs >= 0 && r == op.refs + static_cast<uint32_t>(rhs);
       const int64_t at = start(t.refs[r]);
@@ -1028,7 +1025,7 @@ bool Execution::run_plan(FrameTemplate& t, const Relocation& r,
         } else {
           n.forward(c);
         }
-        wrote(c.out.data, operand_length(p, n, o, o.out, 6));
+        wrote(c.out.data, operand_length(p, o, o.out, 6));
         if (o.out2 >= 0) wrote(c.out2.data, p.body.slots[o.out2].len);
         wrote(c.scratch, n.kernel_scratch);
         break;

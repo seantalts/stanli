@@ -1802,7 +1802,7 @@ struct Execution {
   void note_frame();
   void adopt(Flow flow, size_t instructions);
   template <class F>
-  void plan_operands(const FrameTemplate& t, const PlanOp& op, F&& f) const;
+  void plan_operands(const PlanOp& op, F&& f) const;
   void plan_accesses(FrameTemplate& t) const;
   void plan_schedule(FrameTemplate& t) const;
   bool admit(const FrameTemplate& t, Relocation& r);
