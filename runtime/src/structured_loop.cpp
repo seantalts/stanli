@@ -819,6 +819,47 @@ int64_t fixed_scalar_index(const DynamicIndexSpec& p, const KernelCtx& c,
   return static_cast<int64_t>(raw) - 1;
 }
 
+template <class F>
+void index_positions(const DynamicIndexSpec& p, const KernelCtx& c, bool update,
+                     F&& f) {
+  const int64_t fixed = fixed_scalar_index(p, c, update);
+  if (fixed >= 0) {
+    f(0, fixed);
+    return;
+  }
+  selected_positions(p, validate_index(p, c, update), f);
+}
+
+bool selected_cells_constant(const std::vector<uint8_t>& cells,
+                             const DynamicIndexSpec& spec, const KernelCtx& c) {
+  const int64_t fixed = fixed_scalar_index(spec, c, false);
+  if (fixed >= 0) return cells[static_cast<size_t>(fixed)] != 0;
+  const IndexRuntime runtime = validate_index(spec, c, false);
+  // Capacity padding is not covered by the selection proof.
+  if (runtime.selected != c.out.len) return false;
+  bool constant = true;
+  selected_positions(spec, runtime, [&](int64_t, int64_t at) {
+    constant = constant && cells[static_cast<size_t>(at)];
+  });
+  return constant;
+}
+
+// Successful first use proved immutable descriptor/slot geometry. Fixed
+// Single axes have logical strides equal to physical strides. Check live
+// selectors in the validator's original axis order; its capacity proof bounds
+// this exact integer sum.
+void prepared_index_read(const DynamicIndexSpec& spec, KernelCtx& context) {
+  int64_t position = 0;
+  for (const auto& a : spec.axes) {
+    const double raw = context.in[a.selector_input].data[a.input_offset];
+    if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
+        raw > static_cast<double>(a.extent))
+      index_out_of_range();
+    position += (static_cast<int64_t>(raw) - 1) * a.stride;
+  }
+  context.out.data[0] = context.in[0].data[position];
+}
+
 int64_t scalar_index_forward(KernelCtx& c) {
   const auto& p = *static_cast<const DynamicIndexSpec*>(c.udata);
   const int64_t fixed = fixed_scalar_index(p, c, false);
@@ -1684,7 +1725,11 @@ struct Execution {
   size_t dispatch(RecordingProgram& program, size_t pc, size_t stop,
                   DataLoopTrace* trace);
   size_t memo_enter(RecordingProgram& program, size_t pc);
-  bool memo_key(RecordingProgram& program, const DataLoopCandidate& candidate);
+  template <class Operand>
+  bool memo_key(RecordingProgram& program, const DataLoopCandidate& candidate,
+                Operand&& operand);
+  const DataLoopMemo* memo_select(RecordingProgram& program, size_t pc,
+                                  bool keyed, bool& trace, uint64_t& hash);
   void memo_replay(RecordingProgram& program, const DataLoopMemo& memo);
   void run_step(RecordingProgram& program, size_t pc);
   void trace_inputs(RecordingProgram& program, DataLoopTrace& trace,
@@ -1746,18 +1791,8 @@ struct Execution {
     // Only constant selectors can fold it; varying selectors still replay.
     const auto it = s.constant_cells.find(s.bindings[op.in[0]]);
     if (it == s.constant_cells.end()) return false;
-    const auto& cells = it->second;
-    const auto& spec = *static_cast<const DynamicIndexSpec*>(op.udata);
-    const int64_t fixed = fixed_scalar_index(spec, c, false);
-    if (fixed >= 0) return cells[static_cast<size_t>(fixed)] != 0;
-    const IndexRuntime runtime = validate_index(spec, c, false);
-    // Capacity padding is not covered by the selection proof.
-    if (runtime.selected != c.out.len) return false;
-    bool constant = true;
-    selected_positions(spec, runtime, [&](int64_t, int64_t at) {
-      constant = constant && cells[static_cast<size_t>(at)];
-    });
-    return constant;
+    return selected_cells_constant(
+        it->second, *static_cast<const DynamicIndexSpec*>(op.udata), c);
   }
   int64_t hold(int64_t version) {
     Version& entry = s.versions[static_cast<size_t>(version)];
@@ -1802,15 +1837,8 @@ struct Execution {
     Stream& st = *s.building;
     const auto& spec = *static_cast<const DynamicIndexSpec*>(op.udata);
     const uint32_t pos_offset = static_cast<uint32_t>(st.gather_pos.size());
-    const int64_t fixed = fixed_scalar_index(spec, c, false);
-    if (fixed >= 0) {
-      st.gather_pos.push_back(fixed);
-    } else {
-      const IndexRuntime runtime = validate_index(spec, c, false);
-      selected_positions(spec, runtime, [&](int64_t, int64_t at) {
-        st.gather_pos.push_back(at);
-      });
-    }
+    index_positions(spec, c, false,
+                    [&](int64_t, int64_t at) { st.gather_pos.push_back(at); });
     const uint32_t pos_count =
         static_cast<uint32_t>(st.gather_pos.size()) - pos_offset;
     double* src = materialize(s.bindings[op.in[0]], p.body.slots[op.in[0]].len);
@@ -2031,13 +2059,7 @@ struct Execution {
         (*cells)[static_cast<size_t>(at)] =
             rhs_constant || (rhs_cells && (*rhs_cells)[static_cast<size_t>(i)]);
     };
-    const int64_t fixed = fixed_scalar_index(spec, c, true);
-    if (fixed >= 0) {
-      write(0, fixed);
-    } else {
-      const IndexRuntime runtime = validate_index(spec, c, true);
-      selected_positions(spec, runtime, write);
-    }
+    index_positions(spec, c, true, write);
     if (!s.building)
       s.records.push_back(Record{Record::InPlace, n.site, undo, base, rhs});
     if (write_const) return;
@@ -2471,22 +2493,10 @@ size_t Execution::dispatch(RecordingProgram& program, size_t pc, size_t stop,
           s.versions[static_cast<size_t>(version)].constant = 1;
           instruction.jump = 1;
         } else {
-          // Successful first use proved immutable descriptor/slot geometry.
-          // Fixed Single axes have logical strides equal to physical strides.
-          // Check live selectors in the validator's original axis order; its
-          // capacity proof bounds this exact integer sum. Refreshing bindings
-          // above also handles aliases and frame compaction.
-          const auto& spec = *static_cast<const DynamicIndexSpec*>(op.udata);
-          int64_t position = 0;
-          for (const auto& a : spec.axes) {
-            const double raw =
-                context.in[a.selector_input].data[a.input_offset];
-            if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1 ||
-                raw > static_cast<double>(a.extent))
-              index_out_of_range();
-            position += (static_cast<int64_t>(raw) - 1) * a.stride;
-          }
-          context.out.data[0] = context.in[0].data[position];
+          // Refreshing bindings above also handles aliases and frame
+          // compaction.
+          prepared_index_read(*static_cast<const DynamicIndexSpec*>(op.udata),
+                              context);
         }
         ++s.effects;
         if constexpr (Trace) trace_cells(program, *trace, n, op.out);

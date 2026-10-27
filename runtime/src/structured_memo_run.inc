@@ -227,8 +227,12 @@ void Execution::memo_replay(RecordingProgram& program,
   s.effects += memo.skipped_effects;
 }
 
+// Reads each key operand through operand(slot), which returns its values
+// and constancy.
+template <class Operand>
 bool Execution::memo_key(RecordingProgram& program,
-                         const DataLoopCandidate& candidate) {
+                         const DataLoopCandidate& candidate,
+                         Operand&& operand) {
   auto& key = program.memo_key;
   key.clear();
   const auto bits = [](double x) {
@@ -237,9 +241,8 @@ bool Execution::memo_key(RecordingProgram& program,
     return word;
   };
   for (int slot : candidate.raw) {
-    const int64_t version = s.bindings[slot];
-    key.push_back(is_const(version));
-    const double* ptr = s.versions[static_cast<size_t>(version)].value;
+    const auto [ptr, constant] = operand(slot);
+    key.push_back(constant);
     const int64_t length = p.body.slots[slot].len;
     for (int64_t i = 0; i < length; ++i) key.push_back(bits(ptr[i]));
   }
@@ -247,9 +250,9 @@ bool Execution::memo_key(RecordingProgram& program,
     const Op& op = p.body.ops[node->op];
     KernelCtx context = s.ctx[node->site];
     for (int k = 0; k < op.n_in; ++k) {
-      const int64_t version = s.bindings[op.in[k]];
-      key.push_back(is_const(version));
-      context.in[k].data = s.versions[static_cast<size_t>(version)].value;
+      const auto [ptr, constant] = operand(op.in[k]);
+      key.push_back(constant);
+      context.in[k].data = const_cast<double*>(ptr);
     }
     const int64_t length = p.body.slots[op.out].len;
     auto& scratch = program.memo_scratch;
@@ -266,21 +269,26 @@ bool Execution::memo_key(RecordingProgram& program,
   return true;
 }
 
-size_t Execution::memo_enter(RecordingProgram& program, size_t pc) {
+void retire(DataLoopCandidate& candidate) {
+  const size_t refused = candidate.misses + candidate.skipped;
+  if (candidate.hits + refused >= 32 && candidate.hits < 2 * refused)
+    candidate.disabled = true;
+}
+
+// Chooses a stored memo for the key just built, or no memo, and counts the
+// choice; or asks for a new trace.
+const DataLoopMemo* Execution::memo_select(RecordingProgram& program, size_t pc,
+                                           bool keyed, bool& trace,
+                                           uint64_t& hash) {
   auto& candidate = program.candidates[program.code[pc].candidate];
-  if (candidate.disabled) return no_memo;
-  const auto retire = [&]() {
-    const size_t refused = candidate.misses + candidate.skipped;
-    if (candidate.hits + refused >= 32 && candidate.hits < 2 * refused)
-      candidate.disabled = true;
-  };
-  if (!memo_key(program, candidate)) {
+  trace = false;
+  if (!keyed) {
     ++candidate.skipped;
-    retire();
-    return no_memo;
+    retire(candidate);
+    return nullptr;
   }
   const auto& key = program.memo_key;
-  uint64_t hash = 1469598103934665603ULL;
+  hash = 1469598103934665603ULL;
   for (uint64_t word : key) hash = (hash ^ word) * 1099511628211ULL;
   const auto known = candidate.memos.find(hash);
   if (known != candidate.memos.end())
@@ -288,20 +296,40 @@ size_t Execution::memo_enter(RecordingProgram& program, size_t pc) {
       if (memo->key != key) continue;
       if (!memo->usable) {
         ++candidate.skipped;
-        retire();
-        return no_memo;
+        retire(candidate);
+        return nullptr;
       }
-      memo_replay(program, *memo);
       ++candidate.hits;
       candidate.events += memo->events.size();
-      return candidate.exit;
+      return memo.get();
     }
   if (candidate.stored >= kMemoMaxMemos ||
       candidate.words >= kMemoMaxCandidatePool) {
     ++candidate.skipped;
-    retire();
-    return no_memo;
+    retire(candidate);
+    return nullptr;
   }
+  trace = true;
+  return nullptr;
+}
+
+size_t Execution::memo_enter(RecordingProgram& program, size_t pc) {
+  auto& candidate = program.candidates[program.code[pc].candidate];
+  if (candidate.disabled) return no_memo;
+  const bool keyed = memo_key(program, candidate, [&](int slot) {
+    const int64_t version = s.bindings[slot];
+    return std::make_pair(s.versions[static_cast<size_t>(version)].value,
+                          is_const(version));
+  });
+  bool new_trace;
+  uint64_t hash;
+  const DataLoopMemo* chosen = memo_select(program, pc, keyed, new_trace, hash);
+  if (chosen) {
+    memo_replay(program, *chosen);
+    return candidate.exit;
+  }
+  if (!new_trace) return no_memo;
+  const auto& key = program.memo_key;
   if (program.memo_bound.empty()) {
     program.memo_bound.assign(p.body.slots.size(), 0);
     program.memo_stepped.assign(p.body.slots.size(), 0);
@@ -371,6 +399,6 @@ size_t Execution::memo_enter(RecordingProgram& program, size_t pc) {
                      2 * (memo->events.size() + memo->finals.size());
   ++candidate.stored;
   candidate.memos[hash].push_back(std::move(memo));
-  retire();
+  retire(candidate);
   return next;
 }
