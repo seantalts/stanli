@@ -1,5 +1,7 @@
 #include "mir_reader_internal.hpp"
 
+#include <stanli/large_stack.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -25,7 +27,6 @@ constexpr size_t kMaxTotalStringBytes = size_t{256} * 1024 * 1024;
 constexpr size_t kMaxListStorageBytes = size_t{256} * 1024 * 1024;
 constexpr uint32_t kMaxListItems = 1000000;
 constexpr size_t kMaxValues = 10000000;
-constexpr unsigned kMaxDepth = 512;
 
 [[noreturn]] void fail_wire(size_t offset, const std::string& message) {
   throw std::runtime_error("portable mir v2 at byte " + std::to_string(offset) +
@@ -181,10 +182,15 @@ class Reader {
     return size;
   }
 
+  unsigned peak_depth() const { return peak_; }
+
   class Depth {
    public:
     explicit Depth(Reader& reader) : reader_(reader) {
-      if (++reader_.depth_ > kMaxDepth) reader_.fail("nesting exceeds 512");
+      if (reader_.depth_ >= 2 * nesting_limit())
+        throw NestingTooDeep("portable mir v2: nested too deeply (more than " +
+                             std::to_string(nesting_limit()) + " levels)");
+      reader_.peak_ = std::max(reader_.peak_, ++reader_.depth_);
     }
     ~Depth() { --reader_.depth_; }
 
@@ -266,6 +272,7 @@ class Reader {
   size_t total_string_bytes_ = 0;
   size_t list_storage_bytes_ = 0;
   unsigned depth_ = 0;
+  unsigned peak_ = 0;
 };
 
 template <typename T, size_t N>
@@ -517,6 +524,7 @@ Program read_program(Reader& reader) {
     result.has_transform_inits = true;
     result.transform_inits = read_stmts(reader);
   }
+  result.nesting = (reader.peak_depth() + 1) / 2;
   return result;
 }
 

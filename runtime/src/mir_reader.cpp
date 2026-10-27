@@ -1,9 +1,11 @@
 #include <stanli/callable_transform.hpp>
 #include <stanli/function_registry.hpp>
+#include <stanli/large_stack.hpp>
 #include <stanli/mir.hpp>
 
 #include "mir_reader_internal.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -227,6 +229,25 @@ UnsizedView read_unsized(const Node& n) {
   return out;
 }
 
+struct NestingMeter {
+  unsigned depth = 0;
+  unsigned peak = 0;
+};
+thread_local NestingMeter nesting_meter;
+
+class NestingScope {
+ public:
+  NestingScope() {
+    if (nesting_meter.depth >= nesting_limit())
+      throw NestingTooDeep("mir: nested too deeply (more than " +
+                           std::to_string(nesting_limit()) + " levels)");
+    nesting_meter.peak = std::max(nesting_meter.peak, ++nesting_meter.depth);
+  }
+  ~NestingScope() { --nesting_meter.depth; }
+  NestingScope(const NestingScope&) = delete;
+  NestingScope& operator=(const NestingScope&) = delete;
+};
+
 Expr read_expr(const Node& n);
 
 Expr read_index(const Node& ix_n) {
@@ -343,6 +364,7 @@ Expr read_expr_pattern(const Node& p) {
 
 // n is `((pattern X) (meta ((type_ T) (loc _) (adlevel A))))`.
 Expr read_expr(const Node& n) {
+  NestingScope nesting;
   const Node* pat = field(n, "pattern");
   if (!pat) {
     Expr e;
@@ -452,6 +474,7 @@ void read_stmt_list(const Node& list, std::vector<Stmt>& out) {
 }
 
 Stmt read_stmt(const Node& n) {
+  NestingScope nesting;
   Stmt s;
   const Node* pat = field(n, "pattern");
   if (!pat) {
@@ -1266,6 +1289,7 @@ void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
 
 Program read_program(const sexp::Node& root) {
   Program prog;
+  nesting_meter = {};
   const Node* iv = field(root, "input_vars");
   if (!iv) throw std::runtime_error("mir: no input_vars section");
   const Node& vars = (*iv)[1];
@@ -1310,6 +1334,7 @@ Program read_program(const sexp::Node& root) {
     prog.has_transform_inits = true;
     read_stmt_list((*ti)[1], prog.transform_inits);
   }
+  prog.nesting = nesting_meter.peak;
   detail::finalize_program(prog);
   if (const Node* ov = field(root, "output_vars")) {
     // ((name <opaque> (...)) ...): parameters, transformed parameters and

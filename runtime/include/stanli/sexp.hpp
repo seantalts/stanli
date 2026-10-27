@@ -5,7 +5,10 @@
 #ifndef STANLI_SEXP_HPP
 #define STANLI_SEXP_HPP
 
+#include <stanli/large_stack.hpp>
+
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -35,12 +38,16 @@ inline void skip_ws(std::string_view s, size_t& i) {
     ++i;
 }
 
-inline Node parse_at(std::string_view s, size_t& i) {
+inline Node parse_at(std::string_view s, size_t& i, size_t depth,
+                     size_t max_depth) {
   skip_ws(s, i);
   if (i >= s.size())
     throw std::runtime_error("sexp: unexpected end at position " +
                              std::to_string(i));
   if (s[i] == '(') {
+    if (depth >= max_depth)
+      throw NestingTooDeep("sexp: nested too deeply (more than " +
+                           std::to_string(max_depth) + " lists)");
     Node n;
     n.leaf = false;
     ++i;
@@ -53,7 +60,7 @@ inline Node parse_at(std::string_view s, size_t& i) {
         ++i;
         return n;
       }
-      n.kids.push_back(parse_at(s, i));
+      n.kids.push_back(parse_at(s, i, depth + 1, max_depth));
     }
   }
   if (s[i] == ')')
@@ -83,9 +90,10 @@ inline Node parse_at(std::string_view s, size_t& i) {
 
 }  // namespace detail
 
-inline Node parse(std::string_view text) {
+inline Node parse(std::string_view text,
+                  size_t max_depth = std::numeric_limits<size_t>::max()) {
   size_t i = 0;
-  Node n = detail::parse_at(text, i);
+  Node n = detail::parse_at(text, i, 0, max_depth);
   detail::skip_ws(text, i);
   if (i != text.size())
     throw std::runtime_error("sexp: trailing content at position " +
