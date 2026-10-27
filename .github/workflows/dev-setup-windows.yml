@@ -52,6 +52,19 @@ jobs:
 
       - uses: msys2/setup-msys2@v2
         id: msys2
+        continue-on-error: true
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          # Keep the action-installed opam on PATH in the MSYS2 shell.
+          path-type: inherit
+          install: git make curl ${{ matrix.ocaml_packages }}
+          pacboy: clang:p lld:p llvm-tools:p cmake:p python:p ccache:p
+
+      - name: Set up MSYS2 again after a failed attempt
+        if: steps.msys2.outcome == 'failure'
+        id: msys2-retry
+        uses: msys2/setup-msys2@v2
         with:
           msystem: ${{ matrix.msystem }}
           update: true
@@ -91,7 +104,7 @@ jobs:
           $opamExe = Join-Path $opamDir 'opam.exe'
           Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/ocaml/opam/releases/download/${env:OPAM_VERSION}/opam-${env:OPAM_VERSION}-x86_64-windows.exe" -OutFile $opamExe
           $opamDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          $msysRoot = '${{ steps.msys2.outputs.msys2-location }}'
+          $msysRoot = '${{ steps.msys2-retry.outputs.msys2-location || steps.msys2.outputs.msys2-location }}'
           Join-Path $msysRoot 'usr\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           Join-Path $msysRoot '${{ matrix.msystem }}\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
@@ -164,7 +177,7 @@ jobs:
         shell: msys2 {0}
         run: |
           source tools/build_jobs.sh
-          ctest --test-dir build --parallel "$(stanli_detect_build_jobs)" --output-on-failure
+          ctest --test-dir build --timeout 600 --parallel "$(stanli_detect_build_jobs)" --output-on-failure
 
       - name: C++ cache statistics
         if: always()

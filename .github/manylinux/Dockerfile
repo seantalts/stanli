@@ -9,9 +9,16 @@ LABEL org.opencontainers.image.source="https://github.com/seantalts/stanli"
 
 # These are build inputs, not workflow setup: putting them in one immutable
 # image removes two repository-metadata refreshes from every wheel build.
-RUN dnf install -y epel-release \
-    && dnf install -y \
-        unzip which diffutils patch rsync glibc-static ccache time git \
+RUN for attempt in 1 2 3 4 5; do \
+        dnf install -y epel-release \
+        && dnf install -y \
+            unzip which diffutils patch rsync glibc-static ccache time git \
+        && break; \
+        [ "$attempt" -lt 5 ] || exit 1; \
+        echo "dnf attempt $attempt failed, retrying"; \
+        dnf clean all; \
+        sleep $((attempt * 15)); \
+    done \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 

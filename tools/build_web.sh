@@ -32,7 +32,7 @@ if ! git -C "$STANC3_SRC" rev-parse --git-dir >/dev/null 2>&1; then
     echo "$STANC3_SRC exists but is not a git checkout" >&2
     exit 1
   }
-  git clone --no-checkout "$STANC3_SRC_REPO" "$STANC3_SRC"
+  tools/with_retry.sh git clone --no-checkout "$STANC3_SRC_REPO" "$STANC3_SRC"
 elif git -C "$STANC3_SRC" remote get-url origin >/dev/null 2>&1; then
   git -C "$STANC3_SRC" remote set-url origin "$STANC3_SRC_REPO"
 else
@@ -41,9 +41,9 @@ fi
 # dune subst derives the embedded stanc version from release tags.  A checkout
 # that was originally cloned without them produces different JavaScript even
 # at the same commit, so refresh the version tags before building.
-git -C "$STANC3_SRC" fetch -q --force origin \
+tools/with_retry.sh git -C "$STANC3_SRC" fetch -q --force origin \
   'refs/tags/v*:refs/tags/v*'
-git -C "$STANC3_SRC" fetch -q origin "$STANC3_SRC_SHA"
+tools/with_retry.sh git -C "$STANC3_SRC" fetch -q origin "$STANC3_SRC_SHA"
 git -C "$STANC3_SRC" cat-file -e "${STANC3_SRC_SHA}^{commit}"
 
 STANCJS=deps/stanc3/stancjs.bc.js

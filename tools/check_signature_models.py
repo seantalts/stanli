@@ -40,7 +40,7 @@ import platform
 import re
 import subprocess
 import sys
-import time
+import tempfile
 
 from check_function_models import digest, parse, source_digest
 from cmdstan_ref import compile_cmd
@@ -272,38 +272,6 @@ def compare(name, source, manifest_sha, functions, reference, ledger,
     return used
 
 
-def land_seed(path, text, attempts=20, delay=0.02):
-    """Publish the shared context seed with one rename, never half written.
-
-    Concurrent ctest replays share the file, and Windows refuses to replace
-    one that another process has open, so retry, and stop as soon as the
-    file holds the text.
-    """
-    def current():
-        try:
-            return path.read_text() == text
-        except OSError:
-            return False
-
-    if current():
-        return
-    staged = path.with_name(f"{path.stem}.{os.getpid()}{path.suffix}")
-    try:
-        staged.write_text(text)
-        for attempt in range(attempts):
-            try:
-                os.replace(staged, path)
-                return
-            except PermissionError:
-                if current():
-                    return
-                if attempt == attempts - 1:
-                    raise
-                time.sleep(delay * (attempt + 1))
-    finally:
-        staged.unlink(missing_ok=True)
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", type=pathlib.Path, default=REPO / "build-rel")
@@ -323,8 +291,13 @@ def main():
     args.build, args.stanc, args.cmdstan, args.reference = (
         p.resolve() for p in (args.build, args.stanc, args.cmdstan,
                               args.reference))
-    args.data = args.build / "context_seed.json"
-    land_seed(args.data, json.dumps(CONTEXT_DATA) + "\n")
+    with tempfile.TemporaryDirectory() as seed_dir:
+        args.data = pathlib.Path(seed_dir) / "context_seed.json"
+        args.data.write_text(json.dumps(CONTEXT_DATA) + "\n")
+        return replay_all(args)
+
+
+def replay_all(args):
     models = manifest_models(args.manifest or MANIFESTS)
     ledger = load_ledger(models)
     if args.model:

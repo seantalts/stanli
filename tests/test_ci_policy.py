@@ -1,5 +1,6 @@
 """Exercise workflow routing and the actual required-gate shell (needs PyYAML)."""
 import ast
+import json
 import os
 from pathlib import Path
 import re
@@ -58,6 +59,7 @@ def enabled(item, event, heavy="true", ref="refs/heads/main"):
         "github.event_name": event,
         "github.ref": ref,
         "needs.changes.outputs.heavy": heavy,
+        "needs.changes.outputs.baseline_run": "40514957278",
         "matrix.runtime": "linux-x86_64",
         "matrix.plat": "manylinux_2_28_x86_64",
         "steps.bs-models.outputs.cache-hit": "true",
@@ -100,6 +102,20 @@ class CiPolicyTest(unittest.TestCase):
                 with self.subTest(item=item.get("name", item.get("uses")), event=event):
                     self.assertEqual(enabled(item, event), event != "pull_request")
             self.assertTrue(enabled(item, "push", ref="refs/tags/v1.0.0"))
+
+    def test_vectorization_baseline_is_optional_and_needs_no_gh_in_the_container(self):
+        step = self.step("build", "Fetch the main-branch vectorization baseline")
+        self.assertTrue(step["uses"].startswith("actions/download-artifact@"))
+        self.assertEqual(step["continue-on-error"], "true")
+        self.assertEqual(step["with"]["name"], "mir-vectorization-measurements")
+        self.assertEqual(step["with"]["path"], "/tmp/vectorize-baseline")
+        self.assertEqual(step["with"]["run-id"],
+                         "${{ needs.changes.outputs.baseline_run }}")
+        self.assertIn("github-token", step["with"])
+        self.assertNotIn("run", step)
+        self.assertIn("baseline_run != ''", step["if"])
+        self.assertIn("baseline_run", self.jobs["changes"]["outputs"])
+        self.assertIn("actions", workflow("wheels.yml")["permissions"])
 
     def test_windows_wheel_and_prerequisites_follow_source_scope(self):
         for name in ("stanc-windows", "windows-compiler", "windows"):
@@ -213,6 +229,201 @@ class CiPolicyTest(unittest.TestCase):
                         self.assertNotEqual(self.gate(heavy, dict(expected, **{job: result})), 0)
             for invalid_scope in ("", "unknown"):
                 self.assertNotEqual(self.gate(invalid_scope, expected), 0)
+
+
+class NetworkRetryTest(unittest.TestCase):
+    retry = ROOT / "tools/with_retry.sh"
+
+    def run_retry(self, fail_times, attempts="3"):
+        with tempfile.TemporaryDirectory() as tmp:
+            counter = Path(tmp) / "count"
+            counter.write_text("0")
+            script = Path(tmp) / "flaky.sh"
+            script.write_text(
+                'n=$(( $(cat "$1") + 1 )); echo $n > "$1"\n'
+                '[ "$n" -gt "$2" ]\n')
+            result = subprocess.run(
+                ["bash", str(self.retry), "bash", str(script), str(counter),
+                 str(fail_times)],
+                env=dict(os.environ, RETRY_ATTEMPTS=attempts, RETRY_DELAY="0"),
+                capture_output=True, text=True)
+            return result.returncode, int(counter.read_text())
+
+    def test_retries_until_the_command_succeeds(self):
+        self.assertEqual(self.run_retry(2), (0, 3))
+
+    def test_gives_up_after_the_last_attempt_with_its_status(self):
+        self.assertEqual(self.run_retry(5), (1, 3))
+
+    def test_does_not_rerun_a_command_that_passed(self):
+        self.assertEqual(self.run_retry(0), (0, 1))
+
+    def dockerfile_run(self):
+        text = (ROOT / ".github/manylinux/Dockerfile").read_text()
+        match = re.search(r"^RUN (.*?)(?<!\\)\n", text, re.S | re.M)
+        return match[1].replace("\\\n", " ")
+
+    def test_dnf_install_in_the_image_is_retried(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "dnf"
+            fake.write_text(
+                '#!/usr/bin/env bash\necho "dnf $*" >> "$DNF_LOG"\n'
+                'if [ "$1" = install ]; then\n'
+                '  n=$(( $(cat "$DNF_COUNT" 2>/dev/null || echo 0) + 1 ))\n'
+                '  echo $n > "$DNF_COUNT"\n'
+                '  [ "$n" -gt "$DNF_FAILURES" ]\n'
+                'fi\n')
+            fake.chmod(0o755)
+            for failures, expected in ((2, 0), (99, 1)):
+                log, count = Path(tmp) / "log", Path(tmp) / "count"
+                log.write_text("")
+                count.write_text("0")
+                with self.subTest(failures=failures):
+                    script = self.dockerfile_run().replace(
+                        "sleep $((attempt * 15))", "true").replace(
+                        "rm -rf /var/cache/dnf", "true")
+                    result = subprocess.run(
+                        ["bash", "-c", script],
+                        env=dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"],
+                                 DNF_LOG=str(log), DNF_COUNT=str(count),
+                                 DNF_FAILURES=str(failures)),
+                        capture_output=True, text=True)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    self.assertIn("install -y epel-release", log.read_text())
+
+    def test_every_git_network_call_is_retried(self):
+        files = [ROOT / "deps/fetch.sh", ROOT / "tools/build_web.sh"] + sorted(
+            (ROOT / ".github/workflows").glob("*.yml"))
+        network = re.compile(r"git (clone|(-C \S+ )?fetch)\b")
+        for path in files:
+            for number, line in enumerate(path.read_text().splitlines(), 1):
+                code = line.split("#")[0]
+                if "--no-tags --depth=1 origin" in code:
+                    continue
+                if network.search(code):
+                    with self.subTest(file=path.name, line=number):
+                        self.assertIn("with_retry.sh", code)
+
+
+class RunawayJobTest(unittest.TestCase):
+    workflows = sorted((ROOT / ".github/workflows").glob("*.yml"))
+
+    def test_every_job_has_a_timeout(self):
+        for path in self.workflows:
+            for name, job in workflow(path.name)["jobs"].items():
+                if "uses" in job:
+                    continue
+                with self.subTest(workflow=path.name, job=name):
+                    self.assertIn("timeout-minutes", job)
+
+    def test_every_ctest_run_has_a_per_test_timeout(self):
+        calls = 0
+        for path in self.workflows:
+            text = path.read_text().replace("\\\n", " ")
+            for line in text.splitlines():
+                match = re.search(r"(?:^|[\s;&|])ctest\s.*", line.split("#")[0])
+                if match and "--test-dir" in match[0]:
+                    calls += 1
+                    with self.subTest(workflow=path.name, line=line.strip()):
+                        self.assertRegex(match[0], r"--timeout \d+")
+        self.assertGreaterEqual(calls, 5)
+
+
+class SetupRetryTest(unittest.TestCase):
+    def test_msys2_setup_runs_a_second_time_after_a_failure(self):
+        uses = 0
+        for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            for name, job in workflow(path.name)["jobs"].items():
+                steps = job.get("steps", [])
+                for index, step in enumerate(steps):
+                    if not step.get("uses", "").startswith("msys2/setup-msys2@"):
+                        continue
+                    uses += 1
+                    if step.get("id", "").endswith("-retry"):
+                        continue
+                    with self.subTest(workflow=path.name, job=name):
+                        retry = steps[index + 1]
+                        self.assertEqual(step["continue-on-error"], "true")
+                        self.assertEqual(retry["uses"], step["uses"])
+                        self.assertEqual(retry["with"], step["with"])
+                        self.assertEqual(
+                            retry["if"], "steps.%s.outcome == 'failure'" % step["id"])
+        self.assertGreaterEqual(uses, 4)
+
+
+class NpmPublishTest(unittest.TestCase):
+    def publish(self, view_output, view_status):
+        step = next(item for item in workflow("wheels.yml")["jobs"]["npm-publish"]["steps"]
+                    if item.get("name") == "Publish")
+        version = json.loads((ROOT / "js/package.json").read_text())["version"]
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "log"
+            fake = Path(tmp) / "npm"
+            fake.write_text(
+                '#!/usr/bin/env bash\necho "npm $*" >> "$NPM_LOG"\n'
+                'if [ "$1" = view ]; then\n'
+                '  printf "%s" "$NPM_VIEW"; exit "$NPM_VIEW_STATUS"\n'
+                'fi\n')
+            fake.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+                cwd=ROOT, capture_output=True, text=True,
+                env=dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"],
+                         NPM_LOG=str(log), NPM_VIEW_STATUS=str(view_status),
+                         NPM_VIEW=view_output.replace("VERSION", version)))
+            return result.returncode, log.read_text() if log.exists() else ""
+
+    def test_rerun_of_a_published_version_skips_publish(self):
+        status, log = self.publish("VERSION", 0)
+        self.assertEqual(status, 0)
+        self.assertIn("npm view", log)
+        self.assertNotIn("npm publish", log)
+
+    def test_unpublished_version_is_published(self):
+        status, log = self.publish("", 1)
+        self.assertEqual(status, 0)
+        self.assertIn("npm publish", log)
+
+
+class DecodeSpeedGateTest(unittest.TestCase):
+    gate = ROOT / "tools/check_mir_decode_speed.sh"
+
+    def run_gate(self, legacy, portable):
+        line = ("bytes=1 repetitions=101 min_ns={min} q1_ns={q1} "
+                "median_ns={median} p95_ns=9 max_ns=9 checksum=1")
+        with tempfile.TemporaryDirectory() as tmp:
+            bench = Path(tmp) / "bench"
+            bench.write_text(
+                "#!/usr/bin/env bash\n"
+                '[ "$1" = --paired ] || exit 64\n'
+                "cat <<'EOF'\n%s\n%s\nEOF\n"
+                % (line.format(**legacy), line.format(**portable)))
+            bench.chmod(0o755)
+            return subprocess.run(
+                ["bash", str(self.gate), str(bench), "legacy.mir", "portable.mir"],
+                capture_output=True, text=True)
+
+    def test_passes_on_the_flaked_run_whose_median_was_noisy(self):
+        # Run 40324681901: 1.80x by median, 3.06x by minimum.
+        result = self.run_gate(
+            dict(min=3060, q1=3200, median=1800), dict(min=1000, q1=1400, median=1000))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_fails_when_the_lower_quartile_is_under_2x(self):
+        result = self.run_gate(
+            dict(min=2000, q1=2100, median=3000), dict(min=1000, q1=1100, median=1000))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not at least 2x faster", result.stderr)
+
+    def test_boundary_of_exactly_2x_passes(self):
+        result = self.run_gate(
+            dict(min=2000, q1=2000, median=2000), dict(min=1000, q1=1000, median=1000))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_unparseable_benchmark_output(self):
+        result = self.run_gate(
+            dict(min=1, q1="x", median=1), dict(min=1, q1=1, median=1))
+        self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

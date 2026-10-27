@@ -6,6 +6,7 @@ on:
 jobs:
   format:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       # The same binary that produced the tree's formatting: output

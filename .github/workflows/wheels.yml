@@ -35,6 +35,7 @@ on:
 permissions:
   contents: read
   packages: read
+  actions: read
 
 # One run per branch. Pushing twice to a pull request used to leave both
 # runs alive, competing for the same macOS runners, so the run that
@@ -60,8 +61,10 @@ jobs:
   changes:
     name: classify changed files
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       heavy: ${{ steps.scope.outputs.heavy }}
+      baseline_run: ${{ steps.baseline.outputs.run_id }}
     steps:
       - uses: actions/checkout@v4
       - name: Select the validation scope
@@ -89,12 +92,29 @@ jobs:
           fi
           echo "heavy=$heavy" | tee -a "$GITHUB_OUTPUT"
 
+      # The newest unexpired vectorization measurements from a main run other
+      # than this one. The build job downloads them as the A/B baseline.
+      - name: Find the main-branch vectorization baseline
+        id: baseline
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=mir-vectorization-measurements&per_page=100" \
+            --jq '[.artifacts[] | select(.expired == false and .workflow_run.head_branch == "main" and .workflow_run.id != (env.GITHUB_RUN_ID | tonumber))] | .[0].workflow_run.id // empty' \
+            || true)
+          echo "baseline run: ${run_id:-none}"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
   # This is intentionally independent of the compiled runtime. In particular,
   # generated prose and the web index should not need a 30-minute C++ build to
   # prove that their measured tables and markers are current.
   static_checks:
     name: static project checks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -117,7 +137,7 @@ jobs:
         run: python3 tests/test_windows_exports.py
       - name: Check the x86-64 baseline ISA guard
         run: python3 tests/test_isa_baseline.py
-      - name: Check the signature replay seed landing
+      - name: Check each signature replay writes its own seed
         run: python3 tests/test_signature_seed.py
       - name: Check portable build parallelism
         shell: bash
@@ -148,6 +168,7 @@ jobs:
     name: runtime without stdio
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Restore the vendored dependencies
@@ -178,6 +199,7 @@ jobs:
       github.event_name != 'pull_request' ||
       needs.changes.outputs.heavy == 'true'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
     container:
       image: ${{ matrix.container }}
       credentials:
@@ -533,7 +555,7 @@ jobs:
         run: |
           cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
           echo "runner: $cores cores, testing -j$cores"
-          ctest --test-dir build-rel --parallel "$cores" --output-on-failure
+          ctest --test-dir build-rel --timeout 600 --parallel "$cores" --output-on-failure
 
       # build-rel is the shipped configuration and has no Stan Math kernels for
       # the fused densities. This builds the same sources with them kept, to
@@ -558,7 +580,7 @@ jobs:
           cmake --build build-oracle -j ${{ matrix.build_jobs }} \
             --target test_density_fused test_ordered_logistic_fused \
                      test_student_t_fused
-          ctest --test-dir build-oracle --output-on-failure \
+          ctest --test-dir build-oracle --timeout 600 --output-on-failure \
             -R '^test_(density|ordered_logistic|student_t)_fused$'
 
       # The models and data the corpus check reads: ~24 MB out of
@@ -572,12 +594,12 @@ jobs:
       - name: Fetch posteriordb
         if: steps.pdb-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --filter=blob:none --sparse \
+          tools/with_retry.sh git clone --filter=blob:none --sparse \
             https://github.com/stan-dev/posteriordb.git deps/posteriordb
           git -C deps/posteriordb sparse-checkout set \
             posterior_database/models/stan posterior_database/data/data \
             posterior_database/posteriors
-          git -C deps/posteriordb fetch -q origin "$PDB_SHA"
+          tools/with_retry.sh git -C deps/posteriordb fetch -q origin "$PDB_SHA"
           git -C deps/posteriordb checkout -q "$PDB_SHA"
 
       # Every model the demo page offers has a hand written description,
@@ -621,24 +643,22 @@ jobs:
           python3 tools/verify_refs.py deps/posteriordb \
             --check build-rel/stanli_check --fast-math --jobs 4
 
-      # Report-only: never fails the job. A missing or unreachable baseline
-      # (first run, expired retention, rate limit) leaves the directory
-      # absent and the harness skips the comparison.
+      # Report-only: never fails the job. gh is not installed in the manylinux
+      # container, so the changes job finds the run and this step downloads
+      # its artifact. No run id (first run, expired retention, API error)
+      # skips the step and the harness skips the comparison.
       - name: Fetch the main-branch vectorization baseline
-        if: matrix.runtime == 'linux-x86_64' && github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
+        if: >-
+          matrix.runtime == 'linux-x86_64' &&
+          github.event_name != 'pull_request' &&
+          needs.changes.outputs.baseline_run != ''
         continue-on-error: true
-        run: |
-          rm -rf /tmp/vectorize-baseline
-          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --branch main \
-            --workflow wheels.yml --status success \
-            --json databaseId --jq '.[0].databaseId' || true)
-          if [ -n "$run_id" ]; then
-            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
-              -n mir-vectorization-measurements -D /tmp/vectorize-baseline \
-              || true
-          fi
+        uses: actions/download-artifact@v4
+        with:
+          name: mir-vectorization-measurements
+          path: /tmp/vectorize-baseline
+          run-id: ${{ needs.changes.outputs.baseline_run }}
+          github-token: ${{ github.token }}
 
       # This does not select the candidate source pass for any producer. The
       # test-only OCaml probe emits both inputs, and stanli_check consumes the
@@ -786,23 +806,10 @@ jobs:
               /tmp/stanli-es.portable-mir
             gzip -c /tmp/stanli-es.legacy-mir | wc -c
             gzip -c /tmp/stanli-es.portable-mir | wc -c
-            legacy_decode=$(build-rel/bench_mir_decode \
-              /tmp/stanli-es.legacy-mir 51)
-            portable_decode=$(build-rel/bench_mir_decode \
-              /tmp/stanli-es.portable-mir 51)
-            echo "$legacy_decode"
-            echo "$portable_decode"
-            legacy_ns=$(sed -n 's/.*median_ns=\([0-9]*\).*/\1/p' \
-              <<<"$legacy_decode")
-            portable_ns=$(sed -n 's/.*median_ns=\([0-9]*\).*/\1/p' \
-              <<<"$portable_decode")
+            tools/check_mir_decode_speed.sh build-rel/bench_mir_decode \
+              /tmp/stanli-es.legacy-mir /tmp/stanli-es.portable-mir
             legacy_bytes=$(wc -c < /tmp/stanli-es.legacy-mir)
             portable_bytes=$(wc -c < /tmp/stanli-es.portable-mir)
-            [[ "$legacy_ns" =~ ^[0-9]+$ && "$portable_ns" =~ ^[0-9]+$ ]]
-            if ((portable_ns * 2 > legacy_ns)); then
-              echo "compact MIR median decode is not at least 2x faster" >&2
-              exit 1
-            fi
             if ((portable_bytes * 2 > legacy_bytes)); then
               echo "compact MIR is not at least 2x smaller" >&2
               exit 1
@@ -1008,6 +1015,7 @@ jobs:
     name: R package against the runtime
     needs: [build, browser-compiler]
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -1140,6 +1148,7 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: [build, windows]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -1209,6 +1218,7 @@ jobs:
       github.event_name != 'pull_request' ||
       needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
     env:
       WINDOWS_DUNE_VERSION: 3.24.2
     steps:
@@ -1255,7 +1265,7 @@ jobs:
         if: steps.windows-compilers-cache.outputs.cache-hit != 'true'
         run: |
           bash tests/test_windows_provenance.sh
-          git clone "$STANC3_SRC_REPO" deps/stanc3-src
+          tools/with_retry.sh git clone "$STANC3_SRC_REPO" deps/stanc3-src
           git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
           test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
           (cd deps/stanc3-src &&
@@ -1328,6 +1338,7 @@ jobs:
       github.event_name != 'pull_request' ||
       needs.changes.outputs.heavy == 'true'
     runs-on: windows-2022
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
@@ -1406,6 +1417,7 @@ jobs:
       github.event_name != 'pull_request' ||
       needs.changes.outputs.heavy == 'true'
     runs-on: windows-2022
+    timeout-minutes: 90
     defaults:
       run:
         shell: msys2 {0}
@@ -1415,6 +1427,27 @@ jobs:
       - uses: ./.github/actions/pins
 
       - uses: msys2/setup-msys2@v2
+        id: msys2-first
+        continue-on-error: true
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-ccache
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+            mingw-w64-ucrt-x86_64-python-setuptools
+            git
+            unzip
+            curl
+
+      - name: Set up MSYS2 again after a failed attempt
+        if: steps.msys2-first.outcome == 'failure'
+        id: msys2-retry
+        uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
           update: false
@@ -1485,7 +1518,7 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build build-rel -j4
           ccache -s
-          ctest --test-dir build-rel --parallel 4 --output-on-failure
+          ctest --test-dir build-rel --timeout 600 --parallel 4 --output-on-failure
 
       - name: Build the wheel
         run: |
@@ -1739,7 +1772,7 @@ jobs:
           key: >-
             ${{ steps.asan-cache.outputs.cache-primary-key }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
       - name: ctest
-        run: ctest --test-dir build-asan --output-on-failure
+        run: ctest --test-dir build-asan --timeout 600 --output-on-failure
         env:
           # LeakSanitizer, which is a separate tool that ASan turns on by
           # default on Linux. What it would find is stan-math's autodiff
@@ -1797,7 +1830,7 @@ jobs:
             --target test_capi test_pool test_multichain
       - name: ctest
         run: >-
-          ctest --test-dir build-tsan --output-on-failure
+          ctest --test-dir build-tsan --timeout 600 --output-on-failure
           -R '^(test_capi|test_pool|test_multichain)$'
 
   # Build and link the browser runtime after merge, nightly, on demand, and
@@ -1807,6 +1840,7 @@ jobs:
     name: wasm (browser build)
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       # actions-cache-folder is not just a download cache: it pins WHERE emsdk
@@ -1888,6 +1922,7 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: browser-compiler
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -1992,6 +2027,7 @@ jobs:
       github.event_name != 'pull_request' ||
       needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -2027,7 +2063,7 @@ jobs:
         if: steps.stancjs-cache.outputs.cache-hit != 'true'
         run: |
           opam switch create stancjs "ocaml-base-compiler.$OCAML_VERSION" -y
-          git clone "$STANC3_SRC_REPO" deps/stanc3-src
+          tools/with_retry.sh git clone "$STANC3_SRC_REPO" deps/stanc3-src
           git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
           test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
           (cd deps/stanc3-src &&
@@ -2133,6 +2169,7 @@ jobs:
     needs: [changes, static_checks, build, windows, browser-compiler, r-tests,
             stanc-windows, windows-compiler]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Verify the required validation path
         env:
@@ -2173,6 +2210,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [static_checks, wasm, browser-compiler]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       pages: write
@@ -2207,12 +2245,12 @@ jobs:
       - name: Fetch posteriordb
         if: steps.pdb-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --filter=blob:none --sparse \
+          tools/with_retry.sh git clone --filter=blob:none --sparse \
             https://github.com/stan-dev/posteriordb.git deps/posteriordb
           git -C deps/posteriordb sparse-checkout set \
             posterior_database/models/stan posterior_database/data/data \
             posterior_database/posteriors
-          git -C deps/posteriordb fetch -q origin "$PDB_SHA"
+          tools/with_retry.sh git -C deps/posteriordb fetch -q origin "$PDB_SHA"
           git -C deps/posteriordb checkout -q "$PDB_SHA"
       - name: Model catalog
         run: python3 tools/gen_web_models.py
@@ -2275,6 +2313,7 @@ jobs:
        needs.stanr.result == 'success')
     needs: [static_checks, wasm, browser-compiler, stanr]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: npm
     permissions:
       contents: read
@@ -2326,8 +2365,16 @@ jobs:
           npm install -g npm@latest
           npm --version
 
+      # npm refuses to publish over an existing version, so rerunning a
+      # release whose publish already succeeded must not try again.
       - name: Publish
         run: |
+          name=$(python3 -c "import json; print(json.load(open('js/package.json'))['name'])")
+          version=$(python3 -c "import json; print(json.load(open('js/package.json'))['version'])")
+          if [ "$(npm view "$name@$version" version 2>/dev/null || true)" = "$version" ]; then
+            echo "$name@$version is already on npm; nothing to publish"
+            exit 0
+          fi
           ls -la js/
           cd js && npm publish
 
@@ -2343,6 +2390,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [static_checks, build, windows, wasm-webr, stanr, r-tests, r-platform-tests]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write  # create the release and attach assets to it
     steps:
@@ -2401,6 +2449,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [static_checks, build, windows, stanr]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: pypi
     permissions:
       contents: read   # naming any permission zeroes the rest, so restate it
