@@ -12,6 +12,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -501,6 +502,33 @@ struct Stmt {
   std::vector<Stmt> body;
   std::string raw;
 };
+
+// Every identifier a statement or expression spells: variables, declared
+// names, loop variables and call names. Over-approximating is safe for
+// callers that restrict lowering state to these names.
+inline void collect_names(const Expr& e, std::set<std::string>* names) {
+  if (!e.name.empty()) names->insert(e.name);
+  for (const Expr& arg : e.args) collect_names(arg, names);
+}
+
+inline void collect_names(const Stmt& s, std::set<std::string>* names) {
+  for (const std::string* name :
+       {&s.decl_id, &s.lhs, &s.loopvar, &s.fn_name, &s.check_var_name})
+    if (!name->empty()) names->insert(*name);
+  for (const Expr* e :
+       {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+    collect_names(*e, names);
+  for (const auto* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
+    for (const Expr& e : *expressions) collect_names(e, names);
+  for (const Expr& dim : s.decl_type.dims) collect_names(dim, names);
+  for (const Transform* transform :
+       {s.read_transform ? &*s.read_transform : nullptr,
+        s.check_transform ? &*s.check_transform : nullptr,
+        s.write_transform ? &*s.write_transform : nullptr})
+    if (transform)
+      for (const Expr& e : transform->args) collect_names(e, names);
+  for (const Stmt& child : s.body) collect_names(child, names);
+}
 
 // stanc3 separates write_array's three CSV sections with early-return
 // guards rather than nested blocks:

@@ -335,7 +335,9 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   IslandRegion reg;
   ProgramCompiler c{*prog, fun_defs};
   c.checked_region = &loop;
-  configure_island_compiler(c, *prog, reg, &loop);
+  std::set<std::string> names;
+  mir::collect_names(loop, &names);
+  configure_island_compiler(c, *prog, reg, names, &loop);
   try {
     const int target_reg = c.alloc(1);
     const double zero = 0.0;

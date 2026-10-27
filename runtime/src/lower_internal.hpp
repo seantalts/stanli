@@ -1610,7 +1610,9 @@ struct Lowering {
                     Range* expr_out, std::shared_ptr<IslandProg>* prog_out);
 
   void configure_island_compiler(ProgramCompiler& c, IslandProg& prog,
-                                 IslandRegion& region, const mir::Stmt* s);
+                                 IslandRegion& region,
+                                 const std::set<std::string>& names,
+                                 const mir::Stmt* s);
   void finalize_island_program(IslandProg& prog, bool native,
                                bool keep_every_clear = false,
                                bool propagate_copies = false);

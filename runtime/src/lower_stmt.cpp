@@ -317,10 +317,13 @@ bool Lowering::peel_terminal_return(mir::Stmt* s, mir::Expr* value) {
 void Lowering::configure_island_compiler(ProgramCompiler& c,
                                          IslandProg& prog_ref,
                                          IslandRegion& region,
+                                         const std::set<std::string>& names,
                                          const mir::Stmt* s) {
   IslandProg* const prog = &prog_ref;
   IslandRegion* const reg = &region;
-  for (const auto& [name, v] : int_env) c.ints[name] = {v};
+  for (const std::string& name : names)
+    if (const auto found = int_env.find(name); found != int_env.end())
+      c.ints[name] = {found->second};
   // Data the region reads as a compile-time integer, answered by the
   // same interpreter that answers a size expression. The region has
   // already resolved the indices, so what arrives is a literal read of a
@@ -362,7 +365,10 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
     if (s) assigned_names(*s, &region_assigned);
     const std::set<std::string> reassigned(region_assigned.begin(),
                                            region_assigned.end());
-    for (const auto& [name, value] : scope) {
+    for (const std::string& name : names) {
+      const auto found = scope.find(name);
+      if (found == scope.end()) continue;
+      const Val& value = found->second;
       if (reassigned.count(name) || value.slot < 0 ||
           value.slot >= (int)g.slots.size() || !is_scalar(value))
         continue;
@@ -470,7 +476,10 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
   // Non-returning statement calls may print or reject. A register program
   // would replay them during reverse mode, so ProgramCompiler refuses them
   // until necessity islands have an execute-once effect path.
-  configure_island_compiler(c, *prog, *reg, s);
+  std::set<std::string> names;
+  if (s) mir::collect_names(*s, &names);
+  if (e) mir::collect_names(*e, &names);
+  configure_island_compiler(c, *prog, *reg, names, s);
   if (!in_write_array) {
     c.bind_target = [&](Range* r) {
       const int slot = current_target_slot();
