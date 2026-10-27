@@ -507,8 +507,8 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     const std::string sum = "(region map sum " + std::to_string(op.out) + ")";
     SlotInfo si = view_of("UReal");
     si.param_free = false;
-    scope[sum] = Val{op.out, scalar_autodiff(), si};
-    decls[sum] = DeclView{1, scalar_autodiff(), si, false, false};
+    bind_synthetic(sum, Val{op.out, scalar_autodiff(), si},
+                   DeclView{1, scalar_autodiff(), si, false, false});
     mir::Stmt update;
     update.kind = mir::Stmt::Assignment;
     update.lhs = accumulator;

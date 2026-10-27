@@ -881,6 +881,15 @@ struct Lowering {
   // Names the reduce_sum rewrite binds its lowered slice under, kept
   // distinct so nested calls do not share one.
   int reduce_sum_slices = 0;
+  // Scope entries bound under names no statement spells, in creation
+  // order, so a write_array rollback can drop the ones made after its mark.
+  std::vector<std::string> synthetic_names;
+  void bind_synthetic(const std::string& name, const Val& value,
+                      const DeclView& decl) {
+    scope[name] = value;
+    decls[name] = decl;
+    synthetic_names.push_back(name);
+  }
   CompileOptions compile_options;
   // int_env as bind_data left it, before either section's locals and loop
   // variables were folded in; the write_array lowering starts from this.
@@ -2079,7 +2088,8 @@ struct Lowering {
     size_t n_fills = 0, n_ops = 0, n_slots = 0, n_idata = 0, n_udata = 0,
            td_mark = 0;
     size_t n_param_names = 0, n_views = 0, n_unc_params = 0,
-           n_interpreter_fallbacks = 0, n_reduce_sum_fallbacks = 0;
+           n_interpreter_fallbacks = 0, n_reduce_sum_fallbacks = 0,
+           n_synthetic_names = 0;
     int64_t n_unconstrained = 0;
     std::string reduce_sum_notice;
     bool transformed_data_draws = false;
@@ -2098,6 +2108,7 @@ struct Lowering {
     m.n_gq_start = n_gq_start;
     m.n_fills = out.fills.size();
     m.n_ops = g.ops.size();
+    m.n_synthetic_names = synthetic_names.size();
     m.n_slots = g.slots.size();
     m.n_idata = g.idata_pool.size();
     m.n_udata = g.udata_pool.size();
@@ -2132,6 +2143,11 @@ struct Lowering {
     g.idata_pool.resize(m.n_idata);
     g.udata_pool.resize(m.n_udata);
     td_rollback(m.td_mark);
+    for (size_t i = m.n_synthetic_names; i < synthetic_names.size(); ++i) {
+      scope.erase(synthetic_names[i]);
+      decls.erase(synthetic_names[i]);
+    }
+    truncate(synthetic_names, m.n_synthetic_names);
   }
   template <typename Map>
   static NamedSaves<typename Map::mapped_type> save_named(

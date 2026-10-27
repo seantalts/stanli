@@ -1054,9 +1054,9 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   // the same purpose.
   const std::string bound =
       "(reduce_sum slice " + std::to_string(reduce_sum_slices++) + ")";
-  scope[bound] = slice;
-  decls[bound] =
-      DeclView{g.slots[slice.slot].len, slice.autodiff, slice.si, false, false};
+  bind_synthetic(bound, slice,
+                 DeclView{g.slots[slice.slot].len, slice.autodiff, slice.si,
+                          false, false});
 
   mir::Expr call;
   call.kind = mir::Expr::FunApp;
