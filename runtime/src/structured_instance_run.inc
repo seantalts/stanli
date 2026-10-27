@@ -89,7 +89,9 @@ void Execution::begin_trip() {
   instances->placed_valid = false;
   capture = nullptr;
   instances->capture.reset();
-  if (!instances->enabled || observed || predicted_current()) return;
+  if (!instances->enabled || observed || s.frames->frames.size() < 2 ||
+      !instances->successor.count(context(0)) || predicted_current())
+    return;
   instances->capture = std::make_unique<TripCapture>();
   capture = instances->capture.get();
   capture->stream = s.building.get();
@@ -221,7 +223,7 @@ void Execution::adopt(Flow flow, size_t instructions) {
   const LoopFrame& frame = *tape.frames.back();
   const size_t index = tape.frames.size() - 1;
   const auto refuse = [&]() { ++in.refused; };
-  if (c.refused || !frame.literals.empty() || index == 0) return refuse();
+  if (c.refused || !frame.literals.empty()) return refuse();
 
   auto t = std::make_unique<FrameTemplate>();
   t->frame = &frame;
@@ -983,13 +985,9 @@ bool Execution::run_plan(FrameTemplate& t, const Relocation& r,
     in.shifts[index] = expected.count ? in.scratch[0] - pos[0] : 0;
     return true;
   };
-  bool full = false;
+  std::set<std::pair<int32_t, int32_t>> changed;
   const auto vary = [&](uint32_t i) {
-    for (size_t k = 0; k < t.refs.size(); ++k)
-      if (t.refs[k].base == t.refs[i].base &&
-          t.refs[k].offset == t.refs[i].offset)
-        t.varying[k] = 1;
-    full = true;
+    changed.emplace(t.refs[i].base, t.refs[i].offset);
   };
   for (const auto& [i, value] : t.checks)
     if (std::memcmp(ref(i), &value, sizeof(double)) != 0) vary(i);
@@ -999,9 +997,14 @@ bool Execution::run_plan(FrameTemplate& t, const Relocation& r,
                     static_cast<size_t>(len) * sizeof(double)) != 0)
       vary(i);
   }
+  bool full = !changed.empty();
   if (full && ++t.reschedules > 4)
     for (const auto& check : t.checks) vary(check.first);
-  if (full) plan_schedule(t);
+  if (full) {
+    for (size_t k = 0; k < t.refs.size(); ++k)
+      if (changed.count({t.refs[k].base, t.refs[k].offset})) t.varying[k] = 1;
+    plan_schedule(t);
+  }
   if (t.reads_initial && r.frames[0] != 0) full = true;
   const size_t count = full ? t.ops.size() : t.schedule.size();
   for (size_t step = 0; step < count; ++step) {
