@@ -1424,6 +1424,27 @@ jobs:
       - uses: ./.github/actions/pins
 
       - uses: msys2/setup-msys2@v2
+        id: msys2-first
+        continue-on-error: true
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-ccache
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-python-pip
+            mingw-w64-ucrt-x86_64-python-setuptools
+            git
+            unzip
+            curl
+
+      - name: Set up MSYS2 again after a failed attempt
+        if: steps.msys2-first.outcome == 'failure'
+        id: msys2-retry
+        uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
           update: false

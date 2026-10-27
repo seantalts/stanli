@@ -313,5 +313,27 @@ class RunawayJobTest(unittest.TestCase):
         self.assertGreaterEqual(calls, 5)
 
 
+class SetupRetryTest(unittest.TestCase):
+    def test_msys2_setup_runs_a_second_time_after_a_failure(self):
+        uses = 0
+        for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            for name, job in workflow(path.name)["jobs"].items():
+                steps = job.get("steps", [])
+                for index, step in enumerate(steps):
+                    if not step.get("uses", "").startswith("msys2/setup-msys2@"):
+                        continue
+                    uses += 1
+                    if step.get("id", "").endswith("-retry"):
+                        continue
+                    with self.subTest(workflow=path.name, job=name):
+                        retry = steps[index + 1]
+                        self.assertEqual(step["continue-on-error"], "true")
+                        self.assertEqual(retry["uses"], step["uses"])
+                        self.assertEqual(retry["with"], step["with"])
+                        self.assertEqual(
+                            retry["if"], "steps.%s.outcome == 'failure'" % step["id"])
+        self.assertGreaterEqual(uses, 4)
+
+
 if __name__ == "__main__":
     unittest.main()
