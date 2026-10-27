@@ -8698,7 +8698,8 @@ static const std::pair<uint64_t, InstanceArm> INSTANCE_SEEDS[] = {
     {1177, InstanceArm::Base},   {398, InstanceArm::Carry},
     {334, InstanceArm::Guards},  {863, InstanceArm::Guards},
     {1642, InstanceArm::Guards}, {863, InstanceArm::Errors},
-    {863, InstanceArm::Effects}, {863, InstanceArm::Moving}};
+    {863, InstanceArm::Effects}, {863, InstanceArm::Moving},
+    {18186, InstanceArm::Base}};
 
 static void frame_instance_fuzz_tests() {
   const char* option = std::getenv("STANLI_INSTANCE_FUZZ_SEEDS");
