@@ -561,6 +561,8 @@ struct Program {
   // quantities) in FnWriteParam emission order, from the MIR's
   // output_vars section.
   std::vector<std::string> output_vars;
+  // Deepest nesting of statements and expressions the reader met.
+  unsigned nesting = 0;
 };
 
 // Higher-order Stan functions carry their callback as a bare Var rather than

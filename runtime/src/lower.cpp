@@ -3,6 +3,7 @@
 #include "build_id.hpp"
 #include <stanli/gp_cov_fusion.hpp>
 #include <stanli/execution_report.hpp>
+#include <stanli/large_stack.hpp>
 
 namespace stanli {
 namespace lower_detail {
@@ -1023,6 +1024,15 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   // model's whole life.
   const auto parse_time = prep.start();
   auto prog = std::make_shared<mir::Program>(decode_program(mir_text));
+  if (prog->nesting > kInlineNesting && nesting_limit() == kInlineNesting) {
+    try {
+      run_on_large_stack([&] { prog.reset(); });
+      return run_on_large_stack(
+          [&] { return compile_model(mir_text, data, seed, options); });
+    } catch (const NestingTooDeep& e) {
+      throw CompileError(e.what());
+    }
+  }
   prep.plain("compile", "parse_mir", parse_time, PrepTrace::Extra::MirBytes,
              static_cast<int64_t>(mir_text.size()));
   Lowering lo(data, prep, dumper, "log_prob", WaRng(seed));

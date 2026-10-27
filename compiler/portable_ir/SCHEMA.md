@@ -329,7 +329,7 @@ The decoder enforces these limits before or during allocation:
 | One list | 1,000,000 items |
 | Aggregate list backing storage | 268,435,456 bytes |
 | Scalar/list values | 10,000,000 |
-| Active reader scopes | 512 |
+| Active reader scopes | 80,000 |
 
 A list count larger than the remaining payload, or one that would exceed the
 aggregate backing-storage budget, is rejected before `reserve()`.
@@ -337,7 +337,9 @@ All fixed-width reads and strings check remaining bytes before advancing. The
 base64 decoder validates the envelope size before reserving its output.
 The nesting counter advances once for a decoded node and once for each decoded
 list containing it. A unary chain therefore consumes roughly two reader scopes
-per node; 512 is the scope budget, not a promise of 512 nested MIR nodes.
+per node. Up to 256 nested nodes are read on the calling thread; deeper input
+is read on a helper thread with a large stack, up to the 80,000 scope budget,
+and anything deeper is rejected as nested too deeply.
 
 ## Canonical bytes and conformance
 

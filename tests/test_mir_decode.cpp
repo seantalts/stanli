@@ -1667,8 +1667,11 @@ void check_v2_rejections() {
   const mir::Program legal_depth = decode_program(v2_wire(nested_program(200)));
   check(legal_depth.log_prob.size() == 1 &&
             legal_depth.log_prob.front().kind == mir::Stmt::Block,
-        "v2 accepts a deeply nested program within the reader-scope budget");
-  expect_error(v2_wire(nested_program(520)), "nesting exceeds 512",
+        "v2 accepts a nested program on the calling thread");
+  const mir::Program deep = decode_program(v2_wire(nested_program(5000)));
+  check(deep.log_prob.size() == 1 && deep.nesting > 5000,
+        "v2 decodes a program nested past the calling thread's limit");
+  expect_error(v2_wire(nested_program(100000)), "nested too deeply",
                "v2 nesting limit");
 }
 
