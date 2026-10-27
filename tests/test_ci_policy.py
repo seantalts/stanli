@@ -242,6 +242,39 @@ class NetworkRetryTest(unittest.TestCase):
     def test_does_not_rerun_a_command_that_passed(self):
         self.assertEqual(self.run_retry(0), (0, 1))
 
+    def dockerfile_run(self):
+        text = (ROOT / ".github/manylinux/Dockerfile").read_text()
+        match = re.search(r"^RUN (.*?)(?<!\\)\n", text, re.S | re.M)
+        return match[1].replace("\\\n", " ")
+
+    def test_dnf_install_in_the_image_is_retried(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "dnf"
+            fake.write_text(
+                '#!/usr/bin/env bash\necho "dnf $*" >> "$DNF_LOG"\n'
+                'if [ "$1" = install ]; then\n'
+                '  n=$(( $(cat "$DNF_COUNT" 2>/dev/null || echo 0) + 1 ))\n'
+                '  echo $n > "$DNF_COUNT"\n'
+                '  [ "$n" -gt "$DNF_FAILURES" ]\n'
+                'fi\n')
+            fake.chmod(0o755)
+            for failures, expected in ((2, 0), (99, 1)):
+                log, count = Path(tmp) / "log", Path(tmp) / "count"
+                log.write_text("")
+                count.write_text("0")
+                with self.subTest(failures=failures):
+                    script = self.dockerfile_run().replace(
+                        "sleep $((attempt * 15))", "true").replace(
+                        "rm -rf /var/cache/dnf", "true")
+                    result = subprocess.run(
+                        ["bash", "-c", script],
+                        env=dict(os.environ, PATH=tmp + os.pathsep + os.environ["PATH"],
+                                 DNF_LOG=str(log), DNF_COUNT=str(count),
+                                 DNF_FAILURES=str(failures)),
+                        capture_output=True, text=True)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    self.assertIn("install -y epel-release", log.read_text())
+
     def test_every_git_network_call_is_retried(self):
         files = [ROOT / "deps/fetch.sh", ROOT / "tools/build_web.sh"] + sorted(
             (ROOT / ".github/workflows").glob("*.yml"))
