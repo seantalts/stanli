@@ -2084,13 +2084,13 @@ struct Lowering {
     std::string reduce_sum_notice;
     bool transformed_data_draws = false;
   };
+  template <typename T>
+  using NamedSaves = std::vector<std::pair<std::string, std::optional<T>>>;
   struct WaSnapshot : WaMark {
-    std::map<std::string, Val> scope;
-    std::map<std::string, DeclView> decls;
-    std::map<std::string, long> int_env;
-    std::set<std::string> int_locals;
-    std::map<int, IntRange> int_ranges;
-    std::map<int, RealRange> real_ranges;
+    NamedSaves<Val> scope;
+    NamedSaves<DeclView> decls;
+    NamedSaves<long> int_env;
+    std::vector<std::pair<std::string, bool>> int_locals;
   };
   WaMark wa_mark() {
     WaMark m;
@@ -2133,24 +2133,57 @@ struct Lowering {
     g.udata_pool.resize(m.n_udata);
     td_rollback(m.td_mark);
   }
-  WaSnapshot wa_snapshot() {
+  template <typename Map>
+  static NamedSaves<typename Map::mapped_type> save_named(
+      const Map& map, const std::set<std::string>& names) {
+    NamedSaves<typename Map::mapped_type> saves;
+    saves.reserve(names.size());
+    for (const std::string& name : names) {
+      const auto found = map.find(name);
+      saves.emplace_back(name, found == map.end()
+                                   ? std::nullopt
+                                   : std::optional(found->second));
+    }
+    return saves;
+  }
+  template <typename Map>
+  static void restore_named(Map& map,
+                            NamedSaves<typename Map::mapped_type>& saves) {
+    for (auto& [name, value] : saves) {
+      if (value)
+        map.insert_or_assign(name, std::move(*value));
+      else
+        map.erase(name);
+    }
+  }
+  // Restores only the given names, which must include every name the
+  // rolled-back statement can declare or assign. Slot-keyed range entries
+  // for slots the rollback removes are dropped.
+  WaSnapshot wa_snapshot(const std::set<std::string>& names) {
     WaSnapshot s;
     static_cast<WaMark&>(s) = wa_mark();
-    s.scope = scope;
-    s.decls = decls;
-    s.int_env = int_env;
-    s.int_locals = int_locals;
-    s.int_ranges = int_ranges;
-    s.real_ranges = real_ranges;
+    s.scope = save_named(scope, names);
+    s.decls = save_named(decls, names);
+    s.int_env = save_named(int_env, names);
+    s.int_locals.reserve(names.size());
+    for (const std::string& name : names)
+      s.int_locals.emplace_back(name, int_locals.count(name) > 0);
     return s;
   }
   void wa_restore(WaSnapshot& s) {
-    scope = std::move(s.scope);
-    decls = std::move(s.decls);
-    int_env = std::move(s.int_env);
-    int_locals = std::move(s.int_locals);
-    int_ranges = std::move(s.int_ranges);
-    real_ranges = std::move(s.real_ranges);
+    restore_named(scope, s.scope);
+    restore_named(decls, s.decls);
+    restore_named(int_env, s.int_env);
+    for (const auto& [name, present] : s.int_locals) {
+      if (present)
+        int_locals.insert(name);
+      else
+        int_locals.erase(name);
+    }
+    int_ranges.erase(int_ranges.lower_bound(static_cast<int>(s.n_slots)),
+                     int_ranges.end());
+    real_ranges.erase(real_ranges.lower_bound(static_cast<int>(s.n_slots)),
+                      real_ranges.end());
     wa_rollback(s);
   }
 #include "lower_structured_loop.inc"

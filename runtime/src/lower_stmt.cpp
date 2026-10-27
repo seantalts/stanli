@@ -1374,7 +1374,9 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         return;
       if (!write_array_known_static && in_write_array &&
           needs_runtime_control(s)) {
-        auto snapshot = wa_snapshot();
+        std::set<std::string> mentioned;
+        mir::collect_names(s, &mentioned);
+        auto snapshot = wa_snapshot(mentioned);
         try {
           lower_runtime_ifelse(s);
           return;
@@ -1785,7 +1787,9 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       // iterations under autodiff.  This deliberately has no lowering-time
       // iteration cap: nontermination is the model's runtime behaviour,
       // not a reason to silently truncate or reject a finite long loop.
-      auto snapshot = wa_snapshot();
+      std::set<std::string> mentioned;
+      mir::collect_names(s, &mentioned);
+      auto snapshot = wa_snapshot(mentioned);
       try {
         lower_runtime_ifelse(s);
         return;
@@ -1793,7 +1797,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       } catch (const std::logic_error&) {
       }
       wa_restore(snapshot);
-      auto unrolled = wa_snapshot();
+      auto unrolled = wa_snapshot(mentioned);
       ++while_unroll_depth;
       bool complete = false;
       try {

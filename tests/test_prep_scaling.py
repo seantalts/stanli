@@ -44,6 +44,12 @@ MODELS = {
         lambda i: f"real h{i};\nif (mu > {i % 7}) h{i} = mu + {i}; else h{i} = mu - {i};"),
     "generated quantities while loops": generated_quantities(
         lambda i: f"real w{i} = mu;\n{{ int c{i} = 0; while (c{i} < 3) {{ w{i} += mu; c{i} += 1; }} }}"),
+    "generated quantities nested control and rng": generated_quantities(
+        lambda i: (f"array[3] real d{i};\n"
+                   f"for (n in 1:3) {{ real step = 0; int k = 0; "
+                   f"while (k < 2) {{ step += mu; k += 1; }} "
+                   f"if (step > 0) d{i}[n] = normal_rng(mu, 1.0); "
+                   f"else d{i}[n] = normal_rng(-mu, 1.0); }}")),
     "constrained parameters": constrained_parameters,
     "transformed parameter chain": transformed_parameter_chain,
 }

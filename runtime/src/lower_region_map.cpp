@@ -325,7 +325,9 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
     }
   }
 
-  auto snapshot = wa_snapshot();
+  std::set<std::string> names;
+  mir::collect_names(loop, &names);
+  auto snapshot = wa_snapshot(names);
   const auto abandon = [&](const std::string& why) {
     wa_restore(snapshot);
     return refuse(why);
@@ -335,8 +337,6 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   IslandRegion reg;
   ProgramCompiler c{*prog, fun_defs};
   c.checked_region = &loop;
-  std::set<std::string> names;
-  mir::collect_names(loop, &names);
   configure_island_compiler(c, *prog, reg, names, &loop);
   try {
     const int target_reg = c.alloc(1);
