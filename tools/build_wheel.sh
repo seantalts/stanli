@@ -20,13 +20,6 @@ if [ -z "$STANC3_SRC_REPO" ]; then
   echo "could not read STANC3_SRC_REPO from deps/pins.env" >&2
   exit 1
 fi
-EMBED_OBJECT=deps/stanc3/stanc_embed.o
-if [ -f "$EMBED_OBJECT" ] &&
-   ! stanc_embed_artifact_matches "$EMBED_OBJECT" "$STANC3_SRC_SHA"; then
-  echo "$EMBED_OBJECT has absent or mismatched provenance" >&2
-  echo "run ./tools/dev_setup.sh --no-build to rebuild it" >&2
-  exit 1
-fi
 
 if ! grep -q '^STANLI_STAN_DENSITY_ORACLE:BOOL=OFF' build-rel/CMakeCache.txt 2>/dev/null; then
   echo "warning: build-rel keeps Stan Math's kernels for the fused densities;" \

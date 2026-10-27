@@ -35,6 +35,7 @@ class DevSetupTest(unittest.TestCase):
         shutil.copyfile(SOURCE / "deps" / "pins.env", self.root / "deps" / "pins.env")
         self.script("tools/stanc_embed/provenance.sh", """
 stanc_embed_artifact_matches() { test -f "$1"; }
+stanc_embed_dir() { echo "$PWD/deps/stanc3/embed/testkey"; }
 """)
         self.script("deps/fetch.sh", "true\n")
         self.script("harnesses/conformance/build_stanc.sh", """
@@ -44,9 +45,11 @@ chmod +x deps/stanc3/stanc-pinned
 sed -n 's/^STANC3_SRC_SHA=//p' deps/pins.env > deps/stanc3/stanc-pinned.src
 """)
         self.script("tools/stanc_embed/build.sh", """
-touch deps/stanc3/stanc_embed.o
-printf '#!/usr/bin/env bash\nexit 0\n' > deps/stanc3/stanli-vectorize-probe
-chmod +x deps/stanc3/stanli-vectorize-probe
+mkdir -p deps/stanc3/embed/testkey
+touch deps/stanc3/embed/testkey/stanc_embed.o
+printf '#!/usr/bin/env bash\nexit 0\n' > deps/stanc3/embed/testkey/stanli-vectorize-probe
+chmod +x deps/stanc3/embed/testkey/stanli-vectorize-probe
+echo build >> embed-builds.log
 """)
         self.script("tools/stanc_embed/install_overlay.sh", "true\n")
         self.script("harnesses/conformance/fetch_cmdstan.sh",
@@ -114,7 +117,7 @@ echo library > build-rel/libstanli.so
         self.assertEqual(len(configs), 2)
         for line in configs:
             if embedded:
-                self.assertIn("/deps/stanc3/stanc_embed.o>", line)
+                self.assertIn("<-DSTANLI_STANC_EMBED_OBJ=auto>", line)
                 self.assertIn("<-DSTANLI_OCAML_STDLIB=/test-opam/lib/ocaml>", line)
             else:
                 self.assertIn("<-DSTANLI_STANC_EMBED_OBJ=>", line)
@@ -128,6 +131,18 @@ echo library > build-rel/libstanli.so
         self.assertTrue((self.root / "deps/stanc3/stanli-compile").is_file())
         self.setup("--embed")
         self.assert_mode(True)
+
+    def test_embed_is_built_once_per_key(self):
+        builds = self.root / "embed-builds.log"
+        self.setup("--no-build")
+        self.assertEqual(builds.read_text().count("build"), 1)
+        self.assertTrue(
+            (self.root / "deps/stanc3/embed/testkey/stanc_embed.o").is_file())
+        self.setup("--no-build")
+        self.assertEqual(builds.read_text().count("build"), 1)
+        shutil.rmtree(self.root / "deps/stanc3/embed")
+        self.setup("--no-build")
+        self.assertEqual(builds.read_text().count("build"), 2)
 
     def test_all_respects_no_embed_in_both_orders_and_stages_compiler(self):
         for args in (("--no-embed", "--all"), ("--all", "--no-embed")):
