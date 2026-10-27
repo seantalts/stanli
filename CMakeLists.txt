@@ -557,40 +557,38 @@ endif()
 # (tools/stanc_embed/build.sh produces deps/stanc3/embed/<key>/stanc_embed.o,
 # an archive of the original objects on Windows to preserve PE unwind
 # relocations).
-set(STANLI_STANC_EMBED_OBJ "" CACHE STRING
-    "empty for no in-process stanc, \"auto\" for the object built from this tree's compiler inputs, or a path to one")
+option(STANLI_EMBED_STANC
+       "Link stanc3 into the runtime (build it with tools/dev_setup.sh --embed)" OFF)
+# Build trees configured before the option named the object by path.
+if(STANLI_STANC_EMBED_OBJ)
+  set(STANLI_EMBED_STANC ON CACHE BOOL "" FORCE)
+endif()
+unset(STANLI_STANC_EMBED_OBJ CACHE)
+unset(STANLI_OCAML_STDLIB CACHE)
 include(cmake/StanliEmbed.cmake)
 stanli_resolve_stanc_embed()
-set(STANLI_OCAML_STDLIB "" CACHE PATH
-    "OCaml stdlib dir (opam switch lib/ocaml) for caml/*.h")
 # The embed object is a whole OCaml runtime, so it can only be linked into
 # one artifact at a time -- hence a function rather than adding it to the
 # static library every target shares.
 function(stanli_embed_stanc TGT)
-  if(STANLI_STANC_EMBED_OBJ)
+  if(STANLI_EMBED_OBJECT)
     target_sources(${TGT} PRIVATE runtime/src/stanc_embed_c.cpp)
     if(WIN32)
       # This artifact is an archive on Windows. Treating it as a source
       # nests it inside CMake's objects.a with Makefile generators, which
       # the final linker cannot consume as an object member.
-      target_link_libraries(${TGT} PRIVATE ${STANLI_STANC_EMBED_OBJ})
+      target_link_libraries(${TGT} PRIVATE ${STANLI_EMBED_OBJECT})
     else()
-      target_sources(${TGT} PRIVATE ${STANLI_STANC_EMBED_OBJ})
+      target_sources(${TGT} PRIVATE ${STANLI_EMBED_OBJECT})
     endif()
-    target_include_directories(${TGT} PRIVATE ${STANLI_OCAML_STDLIB})
+    target_include_directories(${TGT} PRIVATE ${STANLI_EMBED_INCLUDE})
     target_compile_definitions(${TGT} PRIVATE STANLI_EMBED_STANC)
     target_link_libraries(${TGT} PRIVATE ${CMAKE_DL_LIBS} pthread)
     if(WIN32)
       target_link_options(${TGT} PRIVATE -static)
       target_compile_definitions(${TGT} PRIVATE CAMLDLLIMPORT=)
-      execute_process(
-        COMMAND "${STANLI_OCAML_STDLIB}/../../bin/ocamlopt.exe"
-                -config-var native_c_libraries
-        OUTPUT_VARIABLE _ocaml_libraries OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _ocaml_config_result)
-      if(NOT _ocaml_config_result EQUAL 0)
-        message(FATAL_ERROR "Could not read OCaml's native link libraries")
-      endif()
+      file(STRINGS "${STANLI_EMBED_INCLUDE}/native_c_libraries"
+           _ocaml_libraries LIMIT_COUNT 1)
       separate_arguments(_ocaml_libraries NATIVE_COMMAND "${_ocaml_libraries}")
       if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         # OCaml records GCC's unwinder in its C link dependencies. Let the
@@ -950,7 +948,7 @@ endif()
 # its executable, stanli-compile, which it looks for beside itself.
 set(STANLI_PORTABLE_COMPILER "" CACHE FILEPATH
     "stanli-compile executable deployed with the native tools when no embedded stanc3 object is linked")
-if(NOT STANLI_STANC_EMBED_OBJ)
+if(NOT STANLI_EMBED_OBJECT)
   if(NOT STANLI_PORTABLE_COMPILER)
     foreach(_stanli_cli_candidate
             "stanli-compile${CMAKE_EXECUTABLE_SUFFIX}" "stanli-compile")
@@ -1316,7 +1314,7 @@ if(_stanli_core_type STREQUAL "SHARED_LIBRARY")
                  INSTALL_RPATH "${_stanli_tool_rpath}")
   endif()
 endif()
-if(NOT STANLI_STANC_EMBED_OBJ AND STANLI_PORTABLE_COMPILER)
+if(NOT STANLI_EMBED_OBJECT AND STANLI_PORTABLE_COMPILER)
   install(PROGRAMS "${STANLI_PORTABLE_COMPILER}"
           DESTINATION ${CMAKE_INSTALL_BINDIR}
           RENAME "stanli-compile${CMAKE_EXECUTABLE_SUFFIX}"
@@ -1329,7 +1327,7 @@ install(TARGETS stanli_shared
 install(DIRECTORY runtime/include/stanli
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-if(STANLI_STANC_EMBED_OBJ OR STANLI_PORTABLE_COMPILER)
+if(STANLI_EMBED_OBJECT OR STANLI_PORTABLE_COMPILER)
   add_test(NAME test_compiler_deployment
            COMMAND ${CMAKE_COMMAND}
                    -DBUILD_DIR=${CMAKE_CURRENT_BINARY_DIR}
@@ -1338,7 +1336,7 @@ if(STANLI_STANC_EMBED_OBJ OR STANLI_PORTABLE_COMPILER)
                    -DBINDIR=${CMAKE_INSTALL_BINDIR}
                    -DCONFIG=$<CONFIG>
                    -DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
-                   -DEMBEDDED=$<BOOL:${STANLI_STANC_EMBED_OBJ}>
+                   -DEMBEDDED=$<BOOL:${STANLI_EMBED_OBJECT}>
                    -DSTANC=${STANLI_STANC_EXECUTABLE}
                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_compiler_deployment.cmake)
 endif()

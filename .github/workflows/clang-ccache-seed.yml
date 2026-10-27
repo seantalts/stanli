@@ -107,7 +107,6 @@ jobs:
             deps/stanc3/embed
             deps/stanc3/stanc
             deps/stanc3/stanc.src
-            deps/ocaml-include
           key: >-
             stanc-embed-v3-manylinux_2_28_x86_64-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}
 
@@ -177,9 +176,6 @@ jobs:
           fi
           opam init --bare --disable-sandboxing --no-setup -y
           ./tools/dev_setup.sh --embed --no-build
-          mkdir -p deps/ocaml-include
-          cp -R "$(opam var lib --switch=$OPAM_SWITCH)/ocaml/caml" \
-                deps/ocaml-include/
         env:
           OPAMYES: '1'
 
@@ -234,8 +230,7 @@ jobs:
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DSTANLI_STANC_EMBED_OBJ=auto \
-            -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
+            -DSTANLI_EMBED_STANC=ON
           cmake --build build-rel -j2
           ccache -s
 

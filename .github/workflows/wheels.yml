@@ -311,7 +311,6 @@ jobs:
             deps/stanc3/embed
             deps/stanc3/stanc
             deps/stanc3/stanc.src
-            deps/ocaml-include
           key: >-
             stanc-embed-v3-${{ matrix.plat }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-${{ hashFiles('compiler/native/**', 'compiler/ocaml/**', 'tools/stanc_embed/**') }}${{ runner.os == 'macOS' && format('-hostdeps-v2-{0}', hashFiles('.github/macos/**')) || '' }}
 
@@ -402,9 +401,6 @@ jobs:
           fi
           opam init --bare --disable-sandboxing --no-setup -y
           ./tools/dev_setup.sh --embed --no-build 2>&1 | tee "$RUNNER_TEMP/stanli-ocaml-build.log"
-          mkdir -p deps/ocaml-include
-          cp -R "$(opam var lib --switch=$OPAM_SWITCH)/ocaml/caml" \
-                deps/ocaml-include/
           if [ "$(uname -s)" = Darwin ]; then
             config="$(opam var lib --switch=$OPAM_SWITCH)/ocaml/Makefile.config"
             grep '^ZSTD_LIBS=' "$config" | grep -F -- "$RUNNER_TEMP/stanli-ocaml-zstd/lib"
@@ -495,8 +491,7 @@ jobs:
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DSTANLI_STANC_EMBED_OBJ=auto \
-            -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
+            -DSTANLI_EMBED_STANC=ON
           # Bounded, not bare -j. The containers ran at -j1 because one
           # densities.cpp compile peaked at 7.57 GB, so two at once
           # OOM-killed a 16 GB runner (exit 137). Sharded, the largest
@@ -572,8 +567,7 @@ jobs:
             "${compiler_args[@]}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DSTANLI_STANC_EMBED_OBJ=auto \
-            -DSTANLI_OCAML_STDLIB="$PWD/deps/ocaml-include"
+            -DSTANLI_EMBED_STANC=ON
           cmake --build build-oracle -j ${{ matrix.build_jobs }} \
             --target test_density_fused test_ordered_logistic_fused \
                      test_student_t_fused

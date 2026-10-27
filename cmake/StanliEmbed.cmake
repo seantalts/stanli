@@ -15,12 +15,13 @@ function(_stanli_bash_in_root OUT_RESULT OUT_TEXT SCRIPT)
   set(${OUT_TEXT} "${_text}" PARENT_SCOPE)
 endfunction()
 
-# STANLI_STANC_EMBED_OBJ is empty (no embedded compiler), "auto" (the object
-# this tree's sources produce, in deps/stanc3/embed/<key>/), or a path to
-# an object. Either way the object must carry the provenance stamp for
-# this tree's compiler inputs, so a stale one cannot be linked.
+# With STANLI_EMBED_STANC on, link the object tools/stanc_embed/build.sh
+# produced from this tree's compiler inputs, found in deps/stanc3/embed/<key>/.
+# Sets STANLI_EMBED_OBJECT and STANLI_EMBED_INCLUDE; both stay empty when off.
 function(stanli_resolve_stanc_embed)
-  if(NOT STANLI_STANC_EMBED_OBJ)
+  set(STANLI_EMBED_OBJECT "" PARENT_SCOPE)
+  set(STANLI_EMBED_INCLUDE "" PARENT_SCOPE)
+  if(NOT STANLI_EMBED_STANC)
     return()
   endif()
   if(NOT STANLI_BASH)
@@ -34,24 +35,21 @@ function(stanli_resolve_stanc_embed)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
                ${_inputs} "${_STANLI_EMBED_ROOT}/deps/pins.env")
 
-  set(_object "${STANLI_STANC_EMBED_OBJ}")
-  if(_object STREQUAL "auto")
-    _stanli_bash_in_root(_result _directory stanc_embed_dir)
-    if(NOT _result EQUAL 0)
-      message(FATAL_ERROR "Could not compute the embedded stanc directory")
-    endif()
-    set(_object "${_directory}/stanc_embed.o")
-  endif()
-  file(TO_CMAKE_PATH "${_object}" _object)
-
-  _stanli_bash_in_root(_result _unused "stanc_embed_artifact_matches \"$1\"" "${_object}")
+  _stanli_bash_in_root(_result _directory stanc_embed_dir)
   if(NOT _result EQUAL 0)
+    message(FATAL_ERROR "Could not compute the embedded stanc directory")
+  endif()
+  file(TO_CMAKE_PATH "${_directory}" _directory)
+  set(_object "${_directory}/stanc_embed.o")
+  _stanli_bash_in_root(_result _unused "stanc_embed_artifact_matches \"$1\"" "${_object}")
+  if(NOT _result EQUAL 0 OR NOT EXISTS "${_directory}/include/caml")
     message(FATAL_ERROR
       "${_object} is missing or does not match this tree's pinned stanc3 "
       "source and compiler inputs. Build it with: tools/dev_setup.sh --embed --no-build "
       "(or tools/stanc_embed/build.sh deps/stanc3-src)")
   endif()
-  set(STANLI_STANC_EMBED_OBJ "${_object}" PARENT_SCOPE)
+  set(STANLI_EMBED_OBJECT "${_object}" PARENT_SCOPE)
+  set(STANLI_EMBED_INCLUDE "${_directory}/include" PARENT_SCOPE)
 endfunction()
 
 # The default stanc executable must come from the pinned source revision.

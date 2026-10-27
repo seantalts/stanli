@@ -169,12 +169,9 @@ fi
 # --- cmake builds ----------------------------------------------------------
 if [ "$WANT_BUILD" = 1 ]; then
   step "configuring and building with $BUILD_JOBS jobs (build/ dev, build-rel/ benchmarks)"
-  EMBED_FLAGS=(-DSTANLI_STANC_EMBED_OBJ= -DSTANLI_OCAML_STDLIB=)
+  EMBED_FLAGS=(-DSTANLI_EMBED_STANC=OFF)
   if [ "$WANT_EMBED" = 1 ]; then
-    EMBED_FLAGS=(
-      -DSTANLI_STANC_EMBED_OBJ=auto
-      "-DSTANLI_OCAML_STDLIB=$(opam var --switch="$OPAM_SWITCH" lib 2>/dev/null)/ocaml"
-    )
+    EMBED_FLAGS=(-DSTANLI_EMBED_STANC=ON)
   fi
   cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     "${CMAKE_FLAGS[@]}" \

@@ -23,13 +23,14 @@ cp cmake/StanliEmbed.cmake "$tree/cmake/"
 cat > "$tree/CMakeLists.txt" <<'CMAKE'
 cmake_minimum_required(VERSION 3.16)
 project(embed_check NONE)
-set(STANLI_STANC_EMBED_OBJ "" CACHE STRING "")
+option(STANLI_EMBED_STANC "" OFF)
 set(STANLI_STANC_EXECUTABLE "${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/stanc"
     CACHE FILEPATH "")
 include(cmake/StanliEmbed.cmake)
 stanli_resolve_stanc_embed()
 stanli_check_default_stanc("${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3/stanc")
-message(STATUS "embed object: [${STANLI_STANC_EMBED_OBJ}]")
+message(STATUS "embed object: [${STANLI_EMBED_OBJECT}]")
+message(STATUS "embed include: [${STANLI_EMBED_INCLUDE}]")
 CMAKE
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -59,6 +60,7 @@ publish() {
   local dir=$1
   mkdir -p "$dir"
   : > "$dir/stanc_embed.o"
+  mkdir -p "$dir/include/caml"
   printf '%s\n' \
     format=stanli-stanc-embed-v3 \
     "stanc3_src_sha=$(pin STANC3_SRC_SHA)" \
@@ -81,33 +83,36 @@ expect_refused() {
 printf '#!/bin/sh\n' > "$tree/deps/stanc3/stanc"
 pin STANC3_SRC_SHA > "$tree/deps/stanc3/stanc.src"
 
-expect_configures -DSTANLI_STANC_EMBED_OBJ=
-grep -Fq 'embed object: []' "$work/out" || fail "empty request embedded something"
+expect_configures -DSTANLI_EMBED_STANC=OFF
+grep -Fq 'embed object: []' "$work/out" || fail "OFF embedded something"
 
-expect_refused 'tools/dev_setup.sh --embed --no-build' -DSTANLI_STANC_EMBED_OBJ=auto
+expect_refused 'tools/dev_setup.sh --embed --no-build' -DSTANLI_EMBED_STANC=ON
 grep -Fq "embed/$key" "$work/out" || fail "message does not name the keyed directory"
 
 publish "$tree/deps/stanc3/embed/$key"
-expect_configures -DSTANLI_STANC_EMBED_OBJ=auto
+expect_configures -DSTANLI_EMBED_STANC=ON
 grep -Fq "embed object: [$tree/deps/stanc3/embed/$key/stanc_embed.o]" "$work/out" ||
-  fail "auto did not resolve the keyed object"
-expect_configures -DSTANLI_STANC_EMBED_OBJ="$tree/deps/stanc3/embed/$key/stanc_embed.o"
+  fail "ON did not resolve the keyed object"
+grep -Fq "embed include: [$tree/deps/stanc3/embed/$key/include]" "$work/out" ||
+  fail "ON did not resolve the keyed headers"
 
 echo '(* edit *)' >> "$tree/compiler/ocaml/portable_mir.ml"
-expect_refused 'tools/dev_setup.sh --embed --no-build' -DSTANLI_STANC_EMBED_OBJ=auto
+expect_refused 'tools/dev_setup.sh --embed --no-build' -DSTANLI_EMBED_STANC=ON
 cp compiler/ocaml/portable_mir.ml "$tree/compiler/ocaml/portable_mir.ml"
-expect_configures -DSTANLI_STANC_EMBED_OBJ=auto
+expect_configures -DSTANLI_EMBED_STANC=ON
 
-stale=$work/stale
-publish "$stale"
-sed -i.bak 's/^producer_inputs_sha256=.*/producer_inputs_sha256=stale/' "$stale/stanc_embed.o.stamp"
-expect_refused 'does not match' -DSTANLI_STANC_EMBED_OBJ="$stale/stanc_embed.o"
-expect_refused 'does not match' -DSTANLI_STANC_EMBED_OBJ="$work/absent.o"
+stamp=$tree/deps/stanc3/embed/$key/stanc_embed.o.stamp
+cp "$stamp" "$work/stamp"
+sed -i.bak 's/^producer_inputs_sha256=.*/producer_inputs_sha256=stale/' "$stamp"
+expect_refused 'does not match' -DSTANLI_EMBED_STANC=ON
+cp "$work/stamp" "$stamp"
+rm -r "$tree/deps/stanc3/embed/$key/include"
+expect_refused 'does not match' -DSTANLI_EMBED_STANC=ON
 
 echo 0000000000000000000000000000000000000000 > "$tree/deps/stanc3/stanc.src"
-expect_refused 'tools/dev_setup.sh --no-build' -DSTANLI_STANC_EMBED_OBJ=
+expect_refused 'tools/dev_setup.sh --no-build' -DSTANLI_EMBED_STANC=OFF
 rm "$tree/deps/stanc3/stanc.src"
-expect_refused 'tools/dev_setup.sh --no-build' -DSTANLI_STANC_EMBED_OBJ=
-expect_configures -DSTANLI_STANC_EMBED_OBJ= -DSTANLI_STANC_EXECUTABLE=/bin/true
+expect_refused 'tools/dev_setup.sh --no-build' -DSTANLI_EMBED_STANC=OFF
+expect_configures -DSTANLI_EMBED_STANC=OFF -DSTANLI_STANC_EXECUTABLE=/bin/true
 
 echo 'stanc embed key tests passed'

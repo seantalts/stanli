@@ -117,11 +117,9 @@ echo library > build-rel/libstanli.so
         self.assertEqual(len(configs), 2)
         for line in configs:
             if embedded:
-                self.assertIn("<-DSTANLI_STANC_EMBED_OBJ=auto>", line)
-                self.assertIn("<-DSTANLI_OCAML_STDLIB=/test-opam/lib/ocaml>", line)
+                self.assertIn("<-DSTANLI_EMBED_STANC=ON>", line)
             else:
-                self.assertIn("<-DSTANLI_STANC_EMBED_OBJ=>", line)
-                self.assertIn("<-DSTANLI_OCAML_STDLIB=>", line)
+                self.assertIn("<-DSTANLI_EMBED_STANC=OFF>", line)
 
     def test_default_and_cached_mode_transitions(self):
         self.setup()
