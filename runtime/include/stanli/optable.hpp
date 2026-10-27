@@ -198,7 +198,8 @@ namespace stanli {
   X(OP_HYPERGEOMETRIC_1F0)            \
   X(OP_NORMAL_GROUPED_LPDF)           \
   X(OP_LINEAR_GAUSSIAN_LPDF)          \
-  X(OP_FAMILY_GROUPED_LPDF)
+  X(OP_FAMILY_GROUPED_LPDF)           \
+  X(OP_SEGMENT_SUM)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry
@@ -915,6 +916,7 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     case OP_LOG_SUM_EXP:
     case OP_LOG_SUM_EXP_ROWS:
     case OP_SUM_ROWS:
+    case OP_SEGMENT_SUM:
       return op_trait::kBackwardValueFree;
 
     case OP_PROD_VEC:

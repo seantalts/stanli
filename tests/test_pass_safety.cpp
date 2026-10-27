@@ -116,6 +116,10 @@ static std::vector<double> route_adjoints(uint16_t oc, bool poison) {
       idata = {3};  // two packed rows of width three
       out_len = 2;
       break;
+    case OP_SEGMENT_SUM:
+      idata = {0, 2, 2, 6};  // a pair, an empty segment, then four
+      out_len = 3;
+      break;
     case OP_ADD:
       // Vector plus a broadcast scalar.
       ctx.n_in = 2;
