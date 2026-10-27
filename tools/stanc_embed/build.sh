@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Build the embeddable stanc object: copies the shim into a stanc3 checkout,
-# builds with dune (-output-complete-obj), and drops stanc_embed.o into
-# deps/stanc3/.
+# builds with dune (-output-complete-obj), and installs stanc_embed.o into
+# deps/stanc3/embed/<key>/, where <key> comes from stanc_embed_key. The OCaml
+# headers and C link libraries the object was built against go beside it, so
+# a build that links it needs no opam switch.
 # Usage: tools/stanc_embed/build.sh /path/to/stanc3-src [opam-switch]
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -20,7 +22,8 @@ if [ "$ACTUAL_SRC_SHA" != "$STANC3_SRC_SHA" ]; then
   echo "stanc3 source is at ${ACTUAL_SRC_SHA:-an unknown revision}; expected $STANC3_SRC_SHA" >&2
   exit 1
 fi
-mkdir -p deps/stanc3
+OUT_DIR=$(stanc_embed_dir)
+mkdir -p "$OUT_DIR"
 tools/stanc_embed/install_overlay.sh native "$SRC"
 eval "$(opam env --switch="$SWITCH")"
 
@@ -79,22 +82,29 @@ PROBE=$(find "$SRC/_build" \
 # recomputed from the source pin and every local producer input, so callers can
 # reject a cache entry left behind by an earlier encoder or build recipe. Each
 # stamp moves last and therefore commits the artifact beside it.
-OUT=deps/stanc3/stanc_embed.o
-PROBE_OUT=deps/stanc3/stanli-vectorize-probe
+OUT=$OUT_DIR/stanc_embed.o
+PROBE_OUT=$OUT_DIR/stanli-vectorize-probe
 TMP_OBJECT="${OUT}.tmp.$$"
 TMP_STAMP="${OUT}.stamp.tmp.$$"
 TMP_PROBE="${PROBE_OUT}.tmp.$$"
 TMP_PROBE_STAMP="${PROBE_OUT}.stamp.tmp.$$"
+TMP_INCLUDE="$OUT_DIR/include.tmp.$$"
 cleanup() {
   rm -f "$TMP_OBJECT" "$TMP_STAMP" "$TMP_PROBE" "$TMP_PROBE_STAMP"
+  rm -rf "$TMP_INCLUDE"
 }
 trap cleanup EXIT
 cp -f "$OBJ" "$TMP_OBJECT"
 chmod u+w "$TMP_OBJECT"
 cp -f "$PROBE" "$TMP_PROBE"
 chmod 755 "$TMP_PROBE"
+mkdir -p "$TMP_INCLUDE"
+cp -R "$(ocamlc -where)/caml" "$TMP_INCLUDE/"
+ocamlopt -config-var native_c_libraries > "$TMP_INCLUDE/native_c_libraries"
 stanc_embed_expected_stamp "$STANC3_SRC_SHA" "$SWITCH" > "$TMP_STAMP"
 cp -f "$TMP_STAMP" "$TMP_PROBE_STAMP"
+rm -rf "$OUT_DIR/include"
+mv "$TMP_INCLUDE" "$OUT_DIR/include"
 mv -f "$TMP_OBJECT" "$OUT"
 mv -f "$TMP_STAMP" "${OUT}.stamp"
 mv -f "$TMP_PROBE" "$PROBE_OUT"

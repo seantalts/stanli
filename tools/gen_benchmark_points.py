@@ -25,9 +25,10 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import benchmark_points as bp
+import toolchain
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-PROBE = REPO / "deps/stanc3/stanli-vectorize-probe"
+PROBE = toolchain.vectorize_probe()
 POINTS = 10
 SAMPLER_COLS = 7
 STAT_TREEDEPTH, STAT_LEAPFROG, STAT_DIVERGENT = 3, 4, 5

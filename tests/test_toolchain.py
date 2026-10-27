@@ -65,6 +65,17 @@ class PinsFileTests(unittest.TestCase):
             toolchain.parse_pins("A=1\nnot a pin\n")
 
 
+class EmbedDirTests(unittest.TestCase):
+    def test_probe_lives_in_the_keyed_embed_directory(self):
+        out = subprocess.check_output(
+            ["bash", "-c", "source tools/stanc_embed/provenance.sh && stanc_embed_dir"],
+            cwd=REPO, text=True).strip()
+        self.assertEqual(toolchain.embed_dir(), pathlib.Path(out))
+        self.assertRegex(out, r"/deps/stanc3/embed/[0-9a-f]{16}$")
+        self.assertEqual(toolchain.vectorize_probe(),
+                         pathlib.Path(out) / "stanli-vectorize-probe")
+
+
 class UpstreamAgreementTests(unittest.TestCase):
     def setUp(self):
         self.pins = toolchain.pins()

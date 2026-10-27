@@ -20,19 +20,15 @@ if [ -z "$STANC3_SRC_REPO" ]; then
   echo "could not read STANC3_SRC_REPO from deps/pins.env" >&2
   exit 1
 fi
-EMBED_OBJECT=deps/stanc3/stanc_embed.o
-if [ -f "$EMBED_OBJECT" ] &&
-   ! stanc_embed_artifact_matches "$EMBED_OBJECT" "$STANC3_SRC_SHA"; then
-  echo "$EMBED_OBJECT has absent or mismatched provenance" >&2
-  echo "run ./tools/dev_setup.sh --no-build to rebuild it" >&2
-  exit 1
-fi
 
 if ! grep -q '^STANLI_STAN_DENSITY_ORACLE:BOOL=OFF' build-rel/CMakeCache.txt 2>/dev/null; then
   echo "warning: build-rel keeps Stan Math's kernels for the fused densities;" \
        "configure it with -DSTANLI_STAN_DENSITY_ORACLE=OFF for a release wheel" >&2
 fi
 cmake --build build-rel --parallel "$BUILD_JOBS" --target stanli_shared
+# Configure has already refused a stale embed object, so the cache entry
+# alone says whether this library carries the compiler.
+EMBED_SETTING=$(sed -n 's/^STANLI_EMBED_STANC:BOOL=//p' build-rel/CMakeCache.txt)
 
 mkdir -p python/stanli/_bin
 rm -f python/stanli/_bin/*
@@ -62,7 +58,7 @@ cp THIRD_PARTY_LICENSES.md LICENSE python/stanli/
 # Without the embedded compiler the package needs subprocess compilers. Windows
 # ships stanli's portable-MIR producer and keeps pristine stock stanc beside it
 # for one rollback cycle; other non-embedded development builds keep stock stanc.
-if [ ! -f "$EMBED_OBJECT" ]; then
+if [ "$EMBED_SETTING" != ON ]; then
   if [ ! -f deps/stanc3/stanc ] || [ ! -f deps/stanc3/stanc.src ] ||
      [ "$(cat deps/stanc3/stanc.src 2>/dev/null || true)" != "$STANC3_SRC_SHA" ]; then
     echo "wheel needs a compiler built from $STANC3_SRC_SHA" >&2
