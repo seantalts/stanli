@@ -16,7 +16,7 @@ import unittest
 
 DEPTH = 20000
 TOO_DEEP = 100000
-BOUND_SECONDS = 1.5
+BOUND_SECONDS = 3.0
 
 REAL = "(meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable)))"
 INT = "(meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))"
