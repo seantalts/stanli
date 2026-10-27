@@ -54,7 +54,7 @@ struct Lcg {
     s = s * 6364136223846793005ULL + 1442695040888963407ULL;
     return (double)(s >> 11) / (double)(1ULL << 53);
   }
-  double signed_unit() { return 2.0 * next() - 1.0; }
+  double signed_unit() { return std::round(16.0 * next() - 8.0) / 8.0; }
 };
 
 struct Csr {
@@ -246,7 +246,7 @@ void test_values() {
             false);
   std::vector<int> lens;
   for (int r = 0; r < 1200; ++r) lens.push_back(r % 5 == 3 ? 0 : 1 + r % 4);
-  check_all("large", make_csr(150, lens, 10), true, 10.0);
+  check_all("large", make_csr(150, lens, 10), true);
 }
 
 size_t arena_length(const stanli::Graph& g) {
