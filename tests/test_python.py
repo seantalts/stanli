@@ -279,6 +279,38 @@ def test_sample_eight_schools():
     assert 3.0 < mu < 6.0, mu
 
 
+def test_omitted_zero_size_data_matches_explicit_empty():
+    src = ("data { int N; array[N] real y; int K; vector[K] x; "
+           "matrix[K, 2] M; }\n"
+           "parameters { real mu; }\n"
+           "model { y ~ normal(mu, 1); target += sum(x) + sum(M); }\n")
+    omitted = stanli.Model(stan_code=src, data={"N": 2, "y": [0.5, 1.5],
+                                                "K": 0})
+    explicit = stanli.Model(stan_code=src, data={"N": 2, "y": [0.5, 1.5],
+                                                 "K": 0, "x": [],
+                                                 "M": np.zeros((0, 2))})
+    q = np.array([0.3])
+    lp0, g0 = omitted.log_prob_grad(q)
+    lp1, g1 = explicit.log_prob_grad(q)
+    assert lp0 == lp1 and np.array_equal(g0, g1), (lp0, lp1, g0, g1)
+    a = omitted.sample(chains=1, seed=3, warmup=50, samples=20, refresh=0)
+    b = explicit.sample(chains=1, seed=3, warmup=50, samples=20, refresh=0)
+    np.testing.assert_array_equal(a["mu"], b["mu"])
+
+
+def test_omitted_scalar_data_is_still_an_error():
+    src = ("data { int N; array[N] real y; int K; vector[K] x; }\n"
+           "parameters { real mu; }\nmodel { y ~ normal(mu, 1); }\n")
+    for data, names in (({"N": 2, "y": [0.5, 1.5]}, "K, x"),
+                        ({"K": 0, "x": []}, "N, y")):
+        try:
+            stanli.Model(stan_code=src, data=data)
+        except Exception as e:  # noqa: BLE001
+            assert f"missing data for {names}" in str(e), e
+        else:
+            raise AssertionError("expected an error for " + names)
+
+
 def test_model_seed_draws_transformed_data():
     # The construction seed owns transformed data's RNG draws, so the log
     # density at a fixed point repeats under the same seed and moves under

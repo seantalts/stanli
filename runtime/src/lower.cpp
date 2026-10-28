@@ -34,6 +34,7 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
                prepared_context.shapes) {
   const auto env_copy_time = prep.start();
   td.env() = prepared_context.environment;
+  omitted_data = prepared_context.omitted_data;
   int_env = prepared_context.integers;
   decls = prepared_context.declarations;
   prep.plain(prep_graph, "env_copy", env_copy_time);
@@ -55,6 +56,7 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
                parent.td_rng,
                std::make_shared<ShapeInterner>(*parent.shape_pool)) {
   compile_options = parent.compile_options;
+  omitted_data = parent.omitted_data;
   fun_defs = parent.fun_defs;
   copy_named(decls, parent.decls, names);
   copy_named(td.env(), parent.td.env(), names);
@@ -72,7 +74,7 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
 PreparedContext Lowering::prepared_context() {
   if (!data_prepared)
     throw std::logic_error("lowering has not prepared model data");
-  return {td_rng, shape_pool, td.env(), int_env_data, decls};
+  return {td_rng, shape_pool, td.env(), int_env_data, decls, omitted_data};
 }
 Lowering Lowering::fork_region_trial(const std::set<std::string>* names) {
   return Lowering(*this, RegionTrialTag{}, names);
@@ -140,8 +142,9 @@ void Lowering::observe_indexed_rhs(const mir::Expr& rhs, const Val& v) {
 // out to the supplied count is the shape the reader would produce.
 void Lowering::validate_data_dims(const std::string& name,
                                   const mir::SizedType& t) {
-  if (!data.has(name)) return;
-  const DataMap::Entry& en = data.at(name);
+  const DataMap::Entry* supplied = data_entry(name);
+  if (!supplied) return;
+  const DataMap::Entry& en = *supplied;
   // A declared-int variable must arrive integer-typed, as CmdStan's
   // var_context requires (JSON 1.0 is not an int there either). Without
   // this the entry binds as typeless reals and the failure surfaces at
@@ -246,23 +249,45 @@ bool Lowering::canonical_input_rebuild(const mir::Stmt& s,
 void Lowering::report_missing_data(const mir::Program& p) {
   std::string names;
   for (const auto& input : p.input_vars)
-    if (!data.has(input.first))
+    if (!data_entry(input.first))
       names += (names.empty() ? "" : ", ") + input.first;
   fail("missing data for " + names +
        "; the data must give every variable in the data block");
 }
+namespace {
+struct ExtentScope {
+  bool& flag;
+  explicit ExtentScope(bool& f) : flag(f) { flag = true; }
+  ~ExtentScope() { flag = false; }
+};
+}  // namespace
+void Lowering::omit_zero_size(const std::string& name,
+                              const mir::SizedType& type) {
+  if (type.dims.empty()) return;
+  std::vector<int64_t> dims;
+  try {
+    ExtentScope extents(data_extent_scope);
+    dims = sized_dims(type);
+  } catch (const CompileError&) {
+    return;
+  }
+  int64_t size = 1;
+  for (int64_t d : dims) size *= d;
+  if (size != 0) return;
+  if (type.base == "SInt" ||
+      (type.base == "SArray" && type.elem_base == "SInt"))
+    omitted_data.set_int_array(name, {}, std::move(dims));
+  else
+    omitted_data.set_real_array(name, {}, std::move(dims));
+}
 void Lowering::bind_data(const mir::Program& p) {
-  struct ExtentScope {
-    bool& flag;
-    explicit ExtentScope(bool& f) : flag(f) { flag = true; }
-    ~ExtentScope() { flag = false; }
-  };
   std::set<std::string> input_names;
   bool all_inputs_bound = true;
   bool use_prebound = std::getenv("STANLI_NO_DATA_PRELOAD") == nullptr;
   for (const auto& [name, type] : p.input_vars) {
     input_names.insert(name);
-    if (!data.has(name)) {
+    if (!data_entry(name)) omit_zero_size(name, type);
+    if (!data_entry(name)) {
       all_inputs_bound = false;
       continue;
     }
@@ -270,7 +295,7 @@ void Lowering::bind_data(const mir::Program& p) {
     // integer tokens carry an int mirror even when the declaration is
     // real. Reconstruct the typed value directly, without copying an
     // irrelevant mirror for a large real matrix.
-    const DataMap::Entry& src = data.at(name);
+    const DataMap::Entry& src = *data_entry(name);
     if (!use_prebound) {
       td.env()[name] = src;
       continue;

@@ -487,6 +487,7 @@ struct PreparedContext {
   const std::map<std::string, DataMap::Entry>& environment;
   const std::map<std::string, long>& integers;
   const std::map<std::string, DeclView>& declarations;
+  const DataMap& omitted_data;
 };
 
 struct Lowering {
@@ -794,6 +795,12 @@ struct Lowering {
     return query == "cols" ? 1 : 0;
   }
   const DataMap& data;
+  DataMap omitted_data;
+  const DataMap::Entry* data_entry(const std::string& name) const {
+    if (data.has(name)) return &data.at(name);
+    if (omitted_data.has(name)) return &omitted_data.at(name);
+    return nullptr;
+  }
   std::shared_ptr<ShapeInterner> shape_pool;
   PrepTrace& prep;
   PassDumper& dumper;
@@ -818,7 +825,7 @@ struct Lowering {
   MirInterp<double> td{
       fun_defs, "prepare_data",
       MirHooks{[this](const std::string& n) -> const DataMap::Entry* {
-                 return data.has(n) ? &data.at(n) : nullptr;
+                 return data_entry(n);
                },
                [this](const std::string& n, long* out) {
                  auto it = int_env.find(n);
@@ -1412,6 +1419,7 @@ struct Lowering {
 
   void bind_data(const mir::Program& p);
   void report_missing_data(const mir::Program& p);
+  void omit_zero_size(const std::string& name, const mir::SizedType& type);
 
   // Lazily materialize an env value as a data slot when log_prob uses it.
   int env_slot(const std::string& name);
