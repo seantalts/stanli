@@ -1414,6 +1414,7 @@ struct Lowering {
                                       const std::set<std::string>& inputs);
 
   void bind_data(const mir::Program& p);
+  void report_missing_data(const mir::Program& p);
 
   // Lazily materialize an env value as a data slot when log_prob uses it.
   int env_slot(const std::string& name);

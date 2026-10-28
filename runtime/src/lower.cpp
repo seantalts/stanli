@@ -243,6 +243,14 @@ bool Lowering::canonical_input_rebuild(const mir::Stmt& s,
     if (!allowed(name)) return false;
   return true;
 }
+void Lowering::report_missing_data(const mir::Program& p) {
+  std::string names;
+  for (const auto& input : p.input_vars)
+    if (!data.has(input.first))
+      names += (names.empty() ? "" : ", ") + input.first;
+  fail("missing data for " + names +
+       "; the data must give every variable in the data block");
+}
 void Lowering::bind_data(const mir::Program& p) {
   struct ExtentScope {
     bool& flag;
@@ -284,6 +292,7 @@ void Lowering::bind_data(const mir::Program& p) {
     }
     td.env()[name] = std::move(dst);
   }
+  if (!all_inputs_bound) report_missing_data(p);
   use_prebound = use_prebound && all_inputs_bound;
   if (use_prebound) {
     // The generated reconstruction allocated the MIR-declared shape and
