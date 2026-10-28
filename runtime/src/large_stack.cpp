@@ -6,14 +6,15 @@
 #include <cstddef>
 #include <exception>
 
-#ifndef __EMSCRIPTEN__
-#include <pthread.h>
-#endif
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
+
+#include <process.h>
+#elif !defined(__EMSCRIPTEN__)
+#include <pthread.h>
 #endif
 
 namespace stanli {
@@ -65,6 +66,37 @@ void* run_job(void* p) {
     job->error = std::current_exception();
   }
   return nullptr;
+}
+
+// Runs the job on a new thread with a stack of the given size and waits for
+// it; false when the thread could not be started. On Windows the size is
+// only reserved: winpthreads would commit all of it.
+#ifdef _WIN32
+unsigned __stdcall run_job_entry(void* p) {
+  run_job(p);
+  return 0;
+}
+#endif
+
+bool run_on_new_thread(Job& job, size_t bytes) {
+#ifdef _WIN32
+  HANDLE thread = reinterpret_cast<HANDLE>(
+      _beginthreadex(nullptr, static_cast<unsigned>(bytes), run_job_entry, &job,
+                     STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr));
+  if (thread == nullptr) return false;
+  WaitForSingleObject(thread, INFINITE);
+  CloseHandle(thread);
+#else
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_t thread;
+  const bool started = pthread_attr_setstacksize(&attr, bytes) == 0 &&
+                       pthread_create(&thread, &attr, run_job, &job) == 0;
+  pthread_attr_destroy(&attr);
+  if (!started) return false;
+  pthread_join(thread, nullptr);
+#endif
+  return true;
 }
 #endif
 
@@ -122,14 +154,7 @@ void run_on_large_stack(void (*body)(void*), void* context) {
             static_cast<unsigned>(
                 std::min<size_t>(kMaxNesting, bytes / kBytesPerLevel)),
             detail::X87ControlWord::of_this_thread(), nullptr};
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_t thread;
-    const bool started = pthread_attr_setstacksize(&attr, bytes) == 0 &&
-                         pthread_create(&thread, &attr, run_job, &job) == 0;
-    pthread_attr_destroy(&attr);
-    if (!started) continue;
-    pthread_join(thread, nullptr);
+    if (!run_on_new_thread(job, bytes)) continue;
     if (job.error) std::rethrow_exception(job.error);
     return;
   }
