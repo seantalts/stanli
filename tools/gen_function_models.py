@@ -179,6 +179,12 @@ def render():
         )
     for name in ("to_vector_array", "to_row_vector_array"):
         focused[name] = "tests/fixtures/stan240_containers.stan; rectangular and zero-extent round trips"
+    for name in ("to_int", "to_array_2d"):
+        focused[name] = (
+            f"tests/fixtures/{name}.stan; transformed data, model, transformed "
+            "parameters, UDF, and generated quantities against hand-derived "
+            "values in test_lower"
+        )
     focused["integrate_ode"] = (
         "tests/fixtures/higher_order_all_contexts.stan exercises transformed-data, "
         "graph, runtime-control, and interpreted write_array execution"

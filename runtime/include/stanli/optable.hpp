@@ -199,7 +199,8 @@ namespace stanli {
   X(OP_NORMAL_GROUPED_LPDF)           \
   X(OP_LINEAR_GAUSSIAN_LPDF)          \
   X(OP_FAMILY_GROUPED_LPDF)           \
-  X(OP_SEGMENT_SUM)
+  X(OP_SEGMENT_SUM)                   \
+  X(OP_TO_INT)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry

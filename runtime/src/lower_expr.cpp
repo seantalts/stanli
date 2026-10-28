@@ -229,23 +229,24 @@ long Lowering::eval_int(const mir::Expr& e) {
       if (e.args.size() == 1) return eval_int(e.args[0]);
       DataMap::Entry* en =
           e.args[0].kind == mir::Expr::Var ? td.find(e.args[0].name) : nullptr;
-      if (en && en->is_int && e.args.size() == 2 &&
-          e.args[1].name == "IndexSingle") {
-        const long index = eval_int(e.args[1].args[0]);
-        if (index < 1 || (size_t)index > en->i.size())
-          fail("integer index " + std::to_string(index) +
-                   " out of bounds for size " + std::to_string(en->i.size()),
-               e.raw);
-        return en->i[(size_t)index - 1];
-      }
-      if (en && en->is_int && e.args.size() == 3 &&
-          e.args[1].name == "IndexSingle" && e.args[2].name == "IndexSingle" &&
-          en->dims.size() == 2) {
-        const long row = eval_int(e.args[1].args[0]);
-        const long col = eval_int(e.args[2].args[0]);
-        if (row < 1 || row > en->dims[0] || col < 1 || col > en->dims[1])
-          fail("integer matrix index out of bounds", e.raw);
-        return en->i[(size_t)((col - 1) * en->dims[0] + row - 1)];
+      bool all_single = en && en->is_int;
+      for (size_t k = 1; all_single && k < e.args.size(); ++k)
+        all_single = e.args[k].name == "IndexSingle";
+      const size_t rank = en ? std::max<size_t>(en->dims.size(), 1) : 0;
+      if (all_single && e.args.size() - 1 == rank) {
+        size_t offset = 0, stride = 1;
+        for (size_t d = 0; d < rank; ++d) {
+          const int64_t extent =
+              en->dims.empty() ? (int64_t)en->i.size() : en->dims[d];
+          const long index = eval_int(e.args[d + 1].args[0]);
+          if (index < 1 || index > extent)
+            fail("integer index " + std::to_string(index) +
+                     " out of bounds for size " + std::to_string(extent),
+                 e.raw);
+          offset += (size_t)(index - 1) * stride;
+          stride *= (size_t)extent;
+        }
+        return en->i.at(offset);
       }
       // dims(x)[k] and friends: evaluate the base as a compile-time
       // sequence, then index it.
@@ -281,6 +282,12 @@ long Lowering::eval_int(const mir::Expr& e) {
           function->builtin()->shape == BuiltinShapePolicy::Elementwise &&
           function->result() == FunctionArgumentKind::Integer) {
         const BuiltinSpec& spec = *function->builtin();
+        if (spec.arity == 1 && !builtin_argument_is_integer(spec, 0)) {
+          const std::vector<double> value = const_values(e.args[0]);
+          if (value.size() != 1)
+            fail(e.name + ": expected a scalar argument", e.raw);
+          return evaluate_real_to_integer_builtin(spec, value[0]);
+        }
         if (spec.arity == 1)
           return evaluate_integer_unary_builtin(
               spec, static_cast<int>(eval_int(e.args[0])));

@@ -101,7 +101,8 @@ inline void check_program_integer_contract(
         const auto op = spec->builtin()->opcode;
         const bool native_integer =
             op == OP_ADD || op == OP_SUB || op == OP_MUL || op == OP_DIV ||
-            op == OP_NEG || op == OP_ABS || op == OP_CHOOSE || op == OP_SUM_VEC;
+            op == OP_NEG || op == OP_ABS || op == OP_CHOOSE ||
+            op == OP_SUM_VEC || op == OP_TO_INT;
         // Stanc retains a negative integer literal as unary negation even
         // when a real comparison consumes it. Its exact value is proven here
         // without invoking integer arithmetic on unknown runtime operands.
@@ -1030,6 +1031,11 @@ struct ProgramCompiler {
             function->builtin()->shape == BuiltinShapePolicy::Elementwise &&
             function->result() == FunctionArgumentKind::Integer) {
           const BuiltinSpec* spec = function->builtin();
+          if (spec->arity == 1 && !builtin_argument_is_integer(*spec, 0)) {
+            double value = 0.0;
+            if (!try_creal(e.args[0], &value)) bail("integer builtin operand");
+            return evaluate_real_to_integer_builtin(*spec, value);
+          }
           if (spec->arity == 1)
             return evaluate_integer_unary_builtin(
                 *spec, static_cast<int>(cint(e.args[0])));

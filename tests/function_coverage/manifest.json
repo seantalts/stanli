@@ -455,6 +455,8 @@
     "sort_indices_asc": "tests/fixtures/sort_functions.stan; data and parameter inputs in transformed data, model, and generated quantities; fresh CmdStan 2.40 references in sort_references.json.gz",
     "sort_indices_desc": "tests/fixtures/sort_functions.stan; data and parameter inputs in transformed data, model, and generated quantities; fresh CmdStan 2.40 references in sort_references.json.gz",
     "student_t_qf": "tests/fixtures/stan240_functions.stan; fresh CmdStan 2.40 references in stan240_references.json.gz",
+    "to_array_2d": "tests/fixtures/to_array_2d.stan; transformed data, model, transformed parameters, UDF, and generated quantities against hand-derived values in test_lower",
+    "to_int": "tests/fixtures/to_int.stan; transformed data, model, transformed parameters, UDF, and generated quantities against hand-derived values in test_lower",
     "to_row_vector_array": "tests/fixtures/stan240_containers.stan; rectangular and zero-extent round trips",
     "to_vector_array": "tests/fixtures/stan240_containers.stan; rectangular and zero-extent round trips",
     "uniform_simplex": "generated tests/fixtures/builtin_signatures fixtures execute every registered constructor overload in transformed data, graph, runtime-control, and generated-quantities contexts",

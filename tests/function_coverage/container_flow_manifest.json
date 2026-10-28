@@ -1,0 +1,7974 @@
+{
+"count_label": "container cases",
+"generator": "tools/gen_container_flow_models.py",
+"models": {
+"container_flow_builtin_i1": {
+"cases": [
+{
+"container": "i1",
+"name": "td_i1_builtin",
+"write": "builtin"
+},
+{
+"container": "i1",
+"name": "tp_i1_builtin",
+"write": "builtin"
+},
+{
+"container": "i1",
+"name": "m_i1_builtin",
+"write": "builtin"
+},
+{
+"container": "i1",
+"name": "gq_i1_builtin",
+"write": "builtin"
+},
+{
+"container": "i1",
+"name": "fn_i1_builtin",
+"write": "builtin"
+}
+],
+"gradient": [
+"q",
+"m_i1_builtin__m_cells[1]",
+"m_i1_builtin__m_cells[2]",
+"m_i1_builtin__m_cells[3]",
+"m_i1_builtin__m_cells[4]",
+"fn_i1_builtin__m_cells[1]",
+"fn_i1_builtin__m_cells[2]",
+"fn_i1_builtin__m_cells[3]",
+"fn_i1_builtin__m_cells[4]"
+],
+"skipped": []
+},
+"container_flow_builtin_i2": {
+"cases": [
+{
+"container": "i2",
+"name": "td_i2_builtin",
+"write": "builtin"
+},
+{
+"container": "i2",
+"name": "tp_i2_builtin",
+"write": "builtin"
+},
+{
+"container": "i2",
+"name": "m_i2_builtin",
+"write": "builtin"
+},
+{
+"container": "i2",
+"name": "gq_i2_builtin",
+"write": "builtin"
+},
+{
+"container": "i2",
+"name": "fn_i2_builtin",
+"write": "builtin"
+}
+],
+"gradient": [
+"q",
+"m_i2_builtin__m_cells[1, 1]",
+"m_i2_builtin__m_cells[1, 2]",
+"m_i2_builtin__m_cells[1, 3]",
+"m_i2_builtin__m_cells[1, 4]",
+"m_i2_builtin__m_cells[2, 1]",
+"m_i2_builtin__m_cells[2, 2]",
+"m_i2_builtin__m_cells[2, 3]",
+"m_i2_builtin__m_cells[2, 4]",
+"m_i2_builtin__m_cells[3, 1]",
+"m_i2_builtin__m_cells[3, 2]",
+"m_i2_builtin__m_cells[3, 3]",
+"m_i2_builtin__m_cells[3, 4]",
+"fn_i2_builtin__m_cells[1, 1]",
+"fn_i2_builtin__m_cells[1, 2]",
+"fn_i2_builtin__m_cells[1, 3]",
+"fn_i2_builtin__m_cells[1, 4]",
+"fn_i2_builtin__m_cells[2, 1]",
+"fn_i2_builtin__m_cells[2, 2]",
+"fn_i2_builtin__m_cells[2, 3]",
+"fn_i2_builtin__m_cells[2, 4]",
+"fn_i2_builtin__m_cells[3, 1]",
+"fn_i2_builtin__m_cells[3, 2]",
+"fn_i2_builtin__m_cells[3, 3]",
+"fn_i2_builtin__m_cells[3, 4]"
+],
+"skipped": []
+},
+"container_flow_builtin_i3": {
+"cases": [
+{
+"container": "i3",
+"name": "td_i3_builtin",
+"write": "builtin"
+},
+{
+"container": "i3",
+"name": "tp_i3_builtin",
+"write": "builtin"
+},
+{
+"container": "i3",
+"name": "m_i3_builtin",
+"write": "builtin"
+},
+{
+"container": "i3",
+"name": "gq_i3_builtin",
+"write": "builtin"
+},
+{
+"container": "i3",
+"name": "fn_i3_builtin",
+"write": "builtin"
+}
+],
+"gradient": [
+"q",
+"m_i3_builtin__m_cells[1, 1, 1]",
+"m_i3_builtin__m_cells[1, 1, 2]",
+"m_i3_builtin__m_cells[1, 1, 3]",
+"m_i3_builtin__m_cells[1, 1, 4]",
+"m_i3_builtin__m_cells[1, 2, 1]",
+"m_i3_builtin__m_cells[1, 2, 2]",
+"m_i3_builtin__m_cells[1, 2, 3]",
+"m_i3_builtin__m_cells[1, 2, 4]",
+"m_i3_builtin__m_cells[2, 1, 1]",
+"m_i3_builtin__m_cells[2, 1, 2]",
+"m_i3_builtin__m_cells[2, 1, 3]",
+"m_i3_builtin__m_cells[2, 1, 4]",
+"m_i3_builtin__m_cells[2, 2, 1]",
+"m_i3_builtin__m_cells[2, 2, 2]",
+"m_i3_builtin__m_cells[2, 2, 3]",
+"m_i3_builtin__m_cells[2, 2, 4]",
+"m_i3_builtin__m_cells[3, 1, 1]",
+"m_i3_builtin__m_cells[3, 1, 2]",
+"m_i3_builtin__m_cells[3, 1, 3]",
+"m_i3_builtin__m_cells[3, 1, 4]",
+"m_i3_builtin__m_cells[3, 2, 1]",
+"m_i3_builtin__m_cells[3, 2, 2]",
+"m_i3_builtin__m_cells[3, 2, 3]",
+"m_i3_builtin__m_cells[3, 2, 4]",
+"fn_i3_builtin__m_cells[1, 1, 1]",
+"fn_i3_builtin__m_cells[1, 1, 2]",
+"fn_i3_builtin__m_cells[1, 1, 3]",
+"fn_i3_builtin__m_cells[1, 1, 4]",
+"fn_i3_builtin__m_cells[1, 2, 1]",
+"fn_i3_builtin__m_cells[1, 2, 2]",
+"fn_i3_builtin__m_cells[1, 2, 3]",
+"fn_i3_builtin__m_cells[1, 2, 4]",
+"fn_i3_builtin__m_cells[2, 1, 1]",
+"fn_i3_builtin__m_cells[2, 1, 2]",
+"fn_i3_builtin__m_cells[2, 1, 3]",
+"fn_i3_builtin__m_cells[2, 1, 4]",
+"fn_i3_builtin__m_cells[2, 2, 1]",
+"fn_i3_builtin__m_cells[2, 2, 2]",
+"fn_i3_builtin__m_cells[2, 2, 3]",
+"fn_i3_builtin__m_cells[2, 2, 4]",
+"fn_i3_builtin__m_cells[3, 1, 1]",
+"fn_i3_builtin__m_cells[3, 1, 2]",
+"fn_i3_builtin__m_cells[3, 1, 3]",
+"fn_i3_builtin__m_cells[3, 1, 4]",
+"fn_i3_builtin__m_cells[3, 2, 1]",
+"fn_i3_builtin__m_cells[3, 2, 2]",
+"fn_i3_builtin__m_cells[3, 2, 3]",
+"fn_i3_builtin__m_cells[3, 2, 4]"
+],
+"skipped": []
+},
+"container_flow_builtin_m": {
+"cases": [
+{
+"container": "m",
+"name": "td_m_builtin",
+"write": "builtin"
+},
+{
+"container": "m",
+"name": "tp_m_builtin",
+"write": "builtin"
+},
+{
+"container": "m",
+"name": "m_m_builtin",
+"write": "builtin"
+},
+{
+"container": "m",
+"name": "gq_m_builtin",
+"write": "builtin"
+},
+{
+"container": "m",
+"name": "fn_m_builtin",
+"write": "builtin"
+}
+],
+"gradient": [
+"q",
+"m_m_builtin__m_cells[1, 1]",
+"m_m_builtin__m_cells[1, 2]",
+"m_m_builtin__m_cells[1, 3]",
+"m_m_builtin__m_cells[1, 4]",
+"m_m_builtin__m_cells[2, 1]",
+"m_m_builtin__m_cells[2, 2]",
+"m_m_builtin__m_cells[2, 3]",
+"m_m_builtin__m_cells[2, 4]",
+"m_m_builtin__m_cells[3, 1]",
+"m_m_builtin__m_cells[3, 2]",
+"m_m_builtin__m_cells[3, 3]",
+"m_m_builtin__m_cells[3, 4]",
+"fn_m_builtin__m_cells[1, 1]",
+"fn_m_builtin__m_cells[1, 2]",
+"fn_m_builtin__m_cells[1, 3]",
+"fn_m_builtin__m_cells[1, 4]",
+"fn_m_builtin__m_cells[2, 1]",
+"fn_m_builtin__m_cells[2, 2]",
+"fn_m_builtin__m_cells[2, 3]",
+"fn_m_builtin__m_cells[2, 4]",
+"fn_m_builtin__m_cells[3, 1]",
+"fn_m_builtin__m_cells[3, 2]",
+"fn_m_builtin__m_cells[3, 3]",
+"fn_m_builtin__m_cells[3, 4]"
+],
+"skipped": []
+},
+"container_flow_builtin_r1": {
+"cases": [
+{
+"container": "r1",
+"name": "td_r1_builtin",
+"write": "builtin"
+},
+{
+"container": "r1",
+"name": "tp_r1_builtin",
+"write": "builtin"
+},
+{
+"container": "r1",
+"name": "m_r1_builtin",
+"write": "builtin"
+},
+{
+"container": "r1",
+"name": "gq_r1_builtin",
+"write": "builtin"
+},
+{
+"container": "r1",
+"name": "fn_r1_builtin",
+"write": "builtin"
+}
+],
+"gradient": [
+"q",
+"m_r1_builtin__m_cells[1]",
+"m_r1_builtin__m_cells[2]",
+"m_r1_builtin__m_cells[3]",
+"m_r1_builtin__m_cells[4]",
+"fn_r1_builtin__m_cells[1]",
+"fn_r1_builtin__m_cells[2]",
+"fn_r1_builtin__m_cells[3]",
+"fn_r1_builtin__m_cells[4]"
+],
+"skipped": []
+},
+"container_flow_builtin_r2": {
+"cases": [
+{
+"container": "r2",
+"name": "td_r2_builtin",
+"write": "builtin"
+},
+{
+"container": "r2",
+"name": "tp_r2_builtin",
+"write": "builtin"
+},
+{
+"container": "r2",
+"name": "m_r2_builtin",
+"write": "builtin"
+},
+{
+"container": "r2",
+"name": "gq_r2_builtin",
+"write": "builtin"
+},
+{
+"container": "r2",
+"name": "fn_r2_builtin",
+"write": "builtin"
+}
+],
+"gradient": [
+"q",
+"m_r2_builtin__m_cells[1, 1]",
+"m_r2_builtin__m_cells[1, 2]",
+"m_r2_builtin__m_cells[1, 3]",
+"m_r2_builtin__m_cells[1, 4]",
+"m_r2_builtin__m_cells[2, 1]",
+"m_r2_builtin__m_cells[2, 2]",
+"m_r2_builtin__m_cells[2, 3]",
+"m_r2_builtin__m_cells[2, 4]",
+"m_r2_builtin__m_cells[3, 1]",
+"m_r2_builtin__m_cells[3, 2]",
+"m_r2_builtin__m_cells[3, 3]",
+"m_r2_builtin__m_cells[3, 4]",
+"fn_r2_builtin__m_cells[1, 1]",
+"fn_r2_builtin__m_cells[1, 2]",
+"fn_r2_builtin__m_cells[1, 3]",
+"fn_r2_builtin__m_cells[1, 4]",
+"fn_r2_builtin__m_cells[2, 1]",
+"fn_r2_builtin__m_cells[2, 2]",
+"fn_r2_builtin__m_cells[2, 3]",
+"fn_r2_builtin__m_cells[2, 4]",
+"fn_r2_builtin__m_cells[3, 1]",
+"fn_r2_builtin__m_cells[3, 2]",
+"fn_r2_builtin__m_cells[3, 3]",
+"fn_r2_builtin__m_cells[3, 4]"
+],
+"skipped": []
+},
+"container_flow_builtin_rv": {
+"cases": [
+{
+"container": "rv",
+"name": "td_rv_builtin",
+"write": "builtin"
+},
+{
+"container": "rv",
+"name": "tp_rv_builtin",
+"write": "builtin"
+},
+{
+"container": "rv",
+"name": "m_rv_builtin",
+"write": "builtin"
+},
+{
+"container": "rv",
+"name": "gq_rv_builtin",
+"write": "builtin"
+},
+{
+"container": "rv",
+"name": "fn_rv_builtin",
+"write": "builtin"
+}
+],
+"gradient": [
+"q",
+"m_rv_builtin__m_cells[1]",
+"m_rv_builtin__m_cells[2]",
+"m_rv_builtin__m_cells[3]",
+"m_rv_builtin__m_cells[4]",
+"fn_rv_builtin__m_cells[1]",
+"fn_rv_builtin__m_cells[2]",
+"fn_rv_builtin__m_cells[3]",
+"fn_rv_builtin__m_cells[4]"
+],
+"skipped": []
+},
+"container_flow_builtin_v": {
+"cases": [
+{
+"container": "v",
+"name": "td_v_builtin",
+"write": "builtin"
+},
+{
+"container": "v",
+"name": "tp_v_builtin",
+"write": "builtin"
+},
+{
+"container": "v",
+"name": "m_v_builtin",
+"write": "builtin"
+},
+{
+"container": "v",
+"name": "gq_v_builtin",
+"write": "builtin"
+},
+{
+"container": "v",
+"name": "fn_v_builtin",
+"write": "builtin"
+}
+],
+"gradient": [
+"q",
+"m_v_builtin__m_cells[1]",
+"m_v_builtin__m_cells[2]",
+"m_v_builtin__m_cells[3]",
+"m_v_builtin__m_cells[4]",
+"fn_v_builtin__m_cells[1]",
+"fn_v_builtin__m_cells[2]",
+"fn_v_builtin__m_cells[3]",
+"fn_v_builtin__m_cells[4]"
+],
+"skipped": []
+},
+"container_flow_fn_am": {
+"cases": [
+{
+"container": "am",
+"name": "fn_am_lit",
+"write": "lit"
+},
+{
+"container": "am",
+"name": "fn_am_assign",
+"write": "assign"
+},
+{
+"container": "am",
+"name": "fn_am_udf",
+"write": "udf"
+},
+{
+"container": "am",
+"name": "fn_am_loop",
+"write": "loop"
+},
+{
+"container": "am",
+"name": "fn_am_row",
+"write": "row"
+},
+{
+"container": "am",
+"name": "fn_am_rowslice",
+"write": "rowslice"
+},
+{
+"container": "am",
+"name": "fn_am_colslice",
+"write": "colslice"
+},
+{
+"container": "am",
+"name": "fn_am_range",
+"write": "range"
+},
+{
+"container": "am",
+"name": "fn_am_multi",
+"write": "multi"
+},
+{
+"container": "am",
+"name": "fn_am_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "am",
+"name": "fn_am_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "am",
+"name": "fn_am_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"fn_am_lit__m_cells[1, 1, 1]",
+"fn_am_lit__m_cells[1, 1, 2]",
+"fn_am_lit__m_cells[1, 1, 3]",
+"fn_am_lit__m_cells[1, 1, 4]",
+"fn_am_lit__m_cells[1, 2, 1]",
+"fn_am_lit__m_cells[1, 2, 2]",
+"fn_am_lit__m_cells[1, 2, 3]",
+"fn_am_lit__m_cells[1, 2, 4]",
+"fn_am_lit__m_cells[2, 1, 1]",
+"fn_am_lit__m_cells[2, 1, 2]",
+"fn_am_lit__m_cells[2, 1, 3]",
+"fn_am_lit__m_cells[2, 1, 4]",
+"fn_am_lit__m_cells[2, 2, 1]",
+"fn_am_lit__m_cells[2, 2, 2]",
+"fn_am_lit__m_cells[2, 2, 3]",
+"fn_am_lit__m_cells[2, 2, 4]",
+"fn_am_lit__m_cells[3, 1, 1]",
+"fn_am_lit__m_cells[3, 1, 2]",
+"fn_am_lit__m_cells[3, 1, 3]",
+"fn_am_lit__m_cells[3, 1, 4]",
+"fn_am_lit__m_cells[3, 2, 1]",
+"fn_am_lit__m_cells[3, 2, 2]",
+"fn_am_lit__m_cells[3, 2, 3]",
+"fn_am_lit__m_cells[3, 2, 4]",
+"fn_am_assign__m_cells[1, 1, 1]",
+"fn_am_assign__m_cells[1, 1, 2]",
+"fn_am_assign__m_cells[1, 1, 3]",
+"fn_am_assign__m_cells[1, 1, 4]",
+"fn_am_assign__m_cells[1, 2, 1]",
+"fn_am_assign__m_cells[1, 2, 2]",
+"fn_am_assign__m_cells[1, 2, 3]",
+"fn_am_assign__m_cells[1, 2, 4]",
+"fn_am_assign__m_cells[2, 1, 1]",
+"fn_am_assign__m_cells[2, 1, 2]",
+"fn_am_assign__m_cells[2, 1, 3]",
+"fn_am_assign__m_cells[2, 1, 4]",
+"fn_am_assign__m_cells[2, 2, 1]",
+"fn_am_assign__m_cells[2, 2, 2]",
+"fn_am_assign__m_cells[2, 2, 3]",
+"fn_am_assign__m_cells[2, 2, 4]",
+"fn_am_assign__m_cells[3, 1, 1]",
+"fn_am_assign__m_cells[3, 1, 2]",
+"fn_am_assign__m_cells[3, 1, 3]",
+"fn_am_assign__m_cells[3, 1, 4]",
+"fn_am_assign__m_cells[3, 2, 1]",
+"fn_am_assign__m_cells[3, 2, 2]",
+"fn_am_assign__m_cells[3, 2, 3]",
+"fn_am_assign__m_cells[3, 2, 4]",
+"fn_am_udf__m_cells[1, 1, 1]",
+"fn_am_udf__m_cells[1, 1, 2]",
+"fn_am_udf__m_cells[1, 1, 3]",
+"fn_am_udf__m_cells[1, 1, 4]",
+"fn_am_udf__m_cells[1, 2, 1]",
+"fn_am_udf__m_cells[1, 2, 2]",
+"fn_am_udf__m_cells[1, 2, 3]",
+"fn_am_udf__m_cells[1, 2, 4]",
+"fn_am_udf__m_cells[2, 1, 1]",
+"fn_am_udf__m_cells[2, 1, 2]",
+"fn_am_udf__m_cells[2, 1, 3]",
+"fn_am_udf__m_cells[2, 1, 4]",
+"fn_am_udf__m_cells[2, 2, 1]",
+"fn_am_udf__m_cells[2, 2, 2]",
+"fn_am_udf__m_cells[2, 2, 3]",
+"fn_am_udf__m_cells[2, 2, 4]",
+"fn_am_udf__m_cells[3, 1, 1]",
+"fn_am_udf__m_cells[3, 1, 2]",
+"fn_am_udf__m_cells[3, 1, 3]",
+"fn_am_udf__m_cells[3, 1, 4]",
+"fn_am_udf__m_cells[3, 2, 1]",
+"fn_am_udf__m_cells[3, 2, 2]",
+"fn_am_udf__m_cells[3, 2, 3]",
+"fn_am_udf__m_cells[3, 2, 4]",
+"fn_am_loop__m_cells[1, 1, 1]",
+"fn_am_loop__m_cells[1, 1, 2]",
+"fn_am_loop__m_cells[1, 1, 3]",
+"fn_am_loop__m_cells[1, 1, 4]",
+"fn_am_loop__m_cells[1, 2, 1]",
+"fn_am_loop__m_cells[1, 2, 2]",
+"fn_am_loop__m_cells[1, 2, 3]",
+"fn_am_loop__m_cells[1, 2, 4]",
+"fn_am_loop__m_cells[2, 1, 1]",
+"fn_am_loop__m_cells[2, 1, 2]",
+"fn_am_loop__m_cells[2, 1, 3]",
+"fn_am_loop__m_cells[2, 1, 4]",
+"fn_am_loop__m_cells[2, 2, 1]",
+"fn_am_loop__m_cells[2, 2, 2]",
+"fn_am_loop__m_cells[2, 2, 3]",
+"fn_am_loop__m_cells[2, 2, 4]",
+"fn_am_loop__m_cells[3, 1, 1]",
+"fn_am_loop__m_cells[3, 1, 2]",
+"fn_am_loop__m_cells[3, 1, 3]",
+"fn_am_loop__m_cells[3, 1, 4]",
+"fn_am_loop__m_cells[3, 2, 1]",
+"fn_am_loop__m_cells[3, 2, 2]",
+"fn_am_loop__m_cells[3, 2, 3]",
+"fn_am_loop__m_cells[3, 2, 4]",
+"fn_am_row__m_cells[1, 1, 1]",
+"fn_am_row__m_cells[1, 1, 2]",
+"fn_am_row__m_cells[1, 1, 3]",
+"fn_am_row__m_cells[1, 1, 4]",
+"fn_am_row__m_cells[1, 2, 1]",
+"fn_am_row__m_cells[1, 2, 2]",
+"fn_am_row__m_cells[1, 2, 3]",
+"fn_am_row__m_cells[1, 2, 4]",
+"fn_am_row__m_cells[2, 1, 1]",
+"fn_am_row__m_cells[2, 1, 2]",
+"fn_am_row__m_cells[2, 1, 3]",
+"fn_am_row__m_cells[2, 1, 4]",
+"fn_am_row__m_cells[2, 2, 1]",
+"fn_am_row__m_cells[2, 2, 2]",
+"fn_am_row__m_cells[2, 2, 3]",
+"fn_am_row__m_cells[2, 2, 4]",
+"fn_am_row__m_cells[3, 1, 1]",
+"fn_am_row__m_cells[3, 1, 2]",
+"fn_am_row__m_cells[3, 1, 3]",
+"fn_am_row__m_cells[3, 1, 4]",
+"fn_am_row__m_cells[3, 2, 1]",
+"fn_am_row__m_cells[3, 2, 2]",
+"fn_am_row__m_cells[3, 2, 3]",
+"fn_am_row__m_cells[3, 2, 4]",
+"fn_am_rowslice__m_cells[1, 1, 1]",
+"fn_am_rowslice__m_cells[1, 1, 2]",
+"fn_am_rowslice__m_cells[1, 1, 3]",
+"fn_am_rowslice__m_cells[1, 1, 4]",
+"fn_am_rowslice__m_cells[1, 2, 1]",
+"fn_am_rowslice__m_cells[1, 2, 2]",
+"fn_am_rowslice__m_cells[1, 2, 3]",
+"fn_am_rowslice__m_cells[1, 2, 4]",
+"fn_am_rowslice__m_cells[2, 1, 1]",
+"fn_am_rowslice__m_cells[2, 1, 2]",
+"fn_am_rowslice__m_cells[2, 1, 3]",
+"fn_am_rowslice__m_cells[2, 1, 4]",
+"fn_am_rowslice__m_cells[2, 2, 1]",
+"fn_am_rowslice__m_cells[2, 2, 2]",
+"fn_am_rowslice__m_cells[2, 2, 3]",
+"fn_am_rowslice__m_cells[2, 2, 4]",
+"fn_am_rowslice__m_cells[3, 1, 1]",
+"fn_am_rowslice__m_cells[3, 1, 2]",
+"fn_am_rowslice__m_cells[3, 1, 3]",
+"fn_am_rowslice__m_cells[3, 1, 4]",
+"fn_am_rowslice__m_cells[3, 2, 1]",
+"fn_am_rowslice__m_cells[3, 2, 2]",
+"fn_am_rowslice__m_cells[3, 2, 3]",
+"fn_am_rowslice__m_cells[3, 2, 4]",
+"fn_am_colslice__m_cells[1, 1, 1]",
+"fn_am_colslice__m_cells[1, 1, 2]",
+"fn_am_colslice__m_cells[1, 1, 3]",
+"fn_am_colslice__m_cells[1, 1, 4]",
+"fn_am_colslice__m_cells[1, 2, 1]",
+"fn_am_colslice__m_cells[1, 2, 2]",
+"fn_am_colslice__m_cells[1, 2, 3]",
+"fn_am_colslice__m_cells[1, 2, 4]",
+"fn_am_colslice__m_cells[2, 1, 1]",
+"fn_am_colslice__m_cells[2, 1, 2]",
+"fn_am_colslice__m_cells[2, 1, 3]",
+"fn_am_colslice__m_cells[2, 1, 4]",
+"fn_am_colslice__m_cells[2, 2, 1]",
+"fn_am_colslice__m_cells[2, 2, 2]",
+"fn_am_colslice__m_cells[2, 2, 3]",
+"fn_am_colslice__m_cells[2, 2, 4]",
+"fn_am_colslice__m_cells[3, 1, 1]",
+"fn_am_colslice__m_cells[3, 1, 2]",
+"fn_am_colslice__m_cells[3, 1, 3]",
+"fn_am_colslice__m_cells[3, 1, 4]",
+"fn_am_colslice__m_cells[3, 2, 1]",
+"fn_am_colslice__m_cells[3, 2, 2]",
+"fn_am_colslice__m_cells[3, 2, 3]",
+"fn_am_colslice__m_cells[3, 2, 4]",
+"fn_am_range__m_cells[1, 1, 1]",
+"fn_am_range__m_cells[1, 1, 2]",
+"fn_am_range__m_cells[1, 1, 3]",
+"fn_am_range__m_cells[1, 1, 4]",
+"fn_am_range__m_cells[1, 2, 1]",
+"fn_am_range__m_cells[1, 2, 2]",
+"fn_am_range__m_cells[1, 2, 3]",
+"fn_am_range__m_cells[1, 2, 4]",
+"fn_am_range__m_cells[2, 1, 1]",
+"fn_am_range__m_cells[2, 1, 2]",
+"fn_am_range__m_cells[2, 1, 3]",
+"fn_am_range__m_cells[2, 1, 4]",
+"fn_am_range__m_cells[2, 2, 1]",
+"fn_am_range__m_cells[2, 2, 2]",
+"fn_am_range__m_cells[2, 2, 3]",
+"fn_am_range__m_cells[2, 2, 4]",
+"fn_am_range__m_cells[3, 1, 1]",
+"fn_am_range__m_cells[3, 1, 2]",
+"fn_am_range__m_cells[3, 1, 3]",
+"fn_am_range__m_cells[3, 1, 4]",
+"fn_am_range__m_cells[3, 2, 1]",
+"fn_am_range__m_cells[3, 2, 2]",
+"fn_am_range__m_cells[3, 2, 3]",
+"fn_am_range__m_cells[3, 2, 4]",
+"fn_am_multi__m_cells[1, 1, 1]",
+"fn_am_multi__m_cells[1, 1, 2]",
+"fn_am_multi__m_cells[1, 1, 3]",
+"fn_am_multi__m_cells[1, 1, 4]",
+"fn_am_multi__m_cells[1, 2, 1]",
+"fn_am_multi__m_cells[1, 2, 2]",
+"fn_am_multi__m_cells[1, 2, 3]",
+"fn_am_multi__m_cells[1, 2, 4]",
+"fn_am_multi__m_cells[2, 1, 1]",
+"fn_am_multi__m_cells[2, 1, 2]",
+"fn_am_multi__m_cells[2, 1, 3]",
+"fn_am_multi__m_cells[2, 1, 4]",
+"fn_am_multi__m_cells[2, 2, 1]",
+"fn_am_multi__m_cells[2, 2, 2]",
+"fn_am_multi__m_cells[2, 2, 3]",
+"fn_am_multi__m_cells[2, 2, 4]",
+"fn_am_multi__m_cells[3, 1, 1]",
+"fn_am_multi__m_cells[3, 1, 2]",
+"fn_am_multi__m_cells[3, 1, 3]",
+"fn_am_multi__m_cells[3, 1, 4]",
+"fn_am_multi__m_cells[3, 2, 1]",
+"fn_am_multi__m_cells[3, 2, 2]",
+"fn_am_multi__m_cells[3, 2, 3]",
+"fn_am_multi__m_cells[3, 2, 4]",
+"fn_am_cpdelem__m_cells[1, 1, 1]",
+"fn_am_cpdelem__m_cells[1, 1, 2]",
+"fn_am_cpdelem__m_cells[1, 1, 3]",
+"fn_am_cpdelem__m_cells[1, 1, 4]",
+"fn_am_cpdelem__m_cells[1, 2, 1]",
+"fn_am_cpdelem__m_cells[1, 2, 2]",
+"fn_am_cpdelem__m_cells[1, 2, 3]",
+"fn_am_cpdelem__m_cells[1, 2, 4]",
+"fn_am_cpdelem__m_cells[2, 1, 1]",
+"fn_am_cpdelem__m_cells[2, 1, 2]",
+"fn_am_cpdelem__m_cells[2, 1, 3]",
+"fn_am_cpdelem__m_cells[2, 1, 4]",
+"fn_am_cpdelem__m_cells[2, 2, 1]",
+"fn_am_cpdelem__m_cells[2, 2, 2]",
+"fn_am_cpdelem__m_cells[2, 2, 3]",
+"fn_am_cpdelem__m_cells[2, 2, 4]",
+"fn_am_cpdelem__m_cells[3, 1, 1]",
+"fn_am_cpdelem__m_cells[3, 1, 2]",
+"fn_am_cpdelem__m_cells[3, 1, 3]",
+"fn_am_cpdelem__m_cells[3, 1, 4]",
+"fn_am_cpdelem__m_cells[3, 2, 1]",
+"fn_am_cpdelem__m_cells[3, 2, 2]",
+"fn_am_cpdelem__m_cells[3, 2, 3]",
+"fn_am_cpdelem__m_cells[3, 2, 4]",
+"fn_am_cpdrow__m_cells[1, 1, 1]",
+"fn_am_cpdrow__m_cells[1, 1, 2]",
+"fn_am_cpdrow__m_cells[1, 1, 3]",
+"fn_am_cpdrow__m_cells[1, 1, 4]",
+"fn_am_cpdrow__m_cells[1, 2, 1]",
+"fn_am_cpdrow__m_cells[1, 2, 2]",
+"fn_am_cpdrow__m_cells[1, 2, 3]",
+"fn_am_cpdrow__m_cells[1, 2, 4]",
+"fn_am_cpdrow__m_cells[2, 1, 1]",
+"fn_am_cpdrow__m_cells[2, 1, 2]",
+"fn_am_cpdrow__m_cells[2, 1, 3]",
+"fn_am_cpdrow__m_cells[2, 1, 4]",
+"fn_am_cpdrow__m_cells[2, 2, 1]",
+"fn_am_cpdrow__m_cells[2, 2, 2]",
+"fn_am_cpdrow__m_cells[2, 2, 3]",
+"fn_am_cpdrow__m_cells[2, 2, 4]",
+"fn_am_cpdrow__m_cells[3, 1, 1]",
+"fn_am_cpdrow__m_cells[3, 1, 2]",
+"fn_am_cpdrow__m_cells[3, 1, 3]",
+"fn_am_cpdrow__m_cells[3, 1, 4]",
+"fn_am_cpdrow__m_cells[3, 2, 1]",
+"fn_am_cpdrow__m_cells[3, 2, 2]",
+"fn_am_cpdrow__m_cells[3, 2, 3]",
+"fn_am_cpdrow__m_cells[3, 2, 4]",
+"fn_am_reads__m_real",
+"fn_am_reads__m_arith",
+"fn_am_reads__m_size",
+"fn_am_reads__m_dims",
+"fn_am_reads__m_rowcopy",
+"fn_am_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_fn_arv": {
+"cases": [
+{
+"container": "arv",
+"name": "fn_arv_lit",
+"write": "lit"
+},
+{
+"container": "arv",
+"name": "fn_arv_assign",
+"write": "assign"
+},
+{
+"container": "arv",
+"name": "fn_arv_udf",
+"write": "udf"
+},
+{
+"container": "arv",
+"name": "fn_arv_loop",
+"write": "loop"
+},
+{
+"container": "arv",
+"name": "fn_arv_row",
+"write": "row"
+},
+{
+"container": "arv",
+"name": "fn_arv_rowslice",
+"write": "rowslice"
+},
+{
+"container": "arv",
+"name": "fn_arv_colslice",
+"write": "colslice"
+},
+{
+"container": "arv",
+"name": "fn_arv_range",
+"write": "range"
+},
+{
+"container": "arv",
+"name": "fn_arv_multi",
+"write": "multi"
+},
+{
+"container": "arv",
+"name": "fn_arv_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "arv",
+"name": "fn_arv_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "arv",
+"name": "fn_arv_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"fn_arv_lit__m_cells[1, 1]",
+"fn_arv_lit__m_cells[1, 2]",
+"fn_arv_lit__m_cells[1, 3]",
+"fn_arv_lit__m_cells[1, 4]",
+"fn_arv_lit__m_cells[2, 1]",
+"fn_arv_lit__m_cells[2, 2]",
+"fn_arv_lit__m_cells[2, 3]",
+"fn_arv_lit__m_cells[2, 4]",
+"fn_arv_lit__m_cells[3, 1]",
+"fn_arv_lit__m_cells[3, 2]",
+"fn_arv_lit__m_cells[3, 3]",
+"fn_arv_lit__m_cells[3, 4]",
+"fn_arv_assign__m_cells[1, 1]",
+"fn_arv_assign__m_cells[1, 2]",
+"fn_arv_assign__m_cells[1, 3]",
+"fn_arv_assign__m_cells[1, 4]",
+"fn_arv_assign__m_cells[2, 1]",
+"fn_arv_assign__m_cells[2, 2]",
+"fn_arv_assign__m_cells[2, 3]",
+"fn_arv_assign__m_cells[2, 4]",
+"fn_arv_assign__m_cells[3, 1]",
+"fn_arv_assign__m_cells[3, 2]",
+"fn_arv_assign__m_cells[3, 3]",
+"fn_arv_assign__m_cells[3, 4]",
+"fn_arv_udf__m_cells[1, 1]",
+"fn_arv_udf__m_cells[1, 2]",
+"fn_arv_udf__m_cells[1, 3]",
+"fn_arv_udf__m_cells[1, 4]",
+"fn_arv_udf__m_cells[2, 1]",
+"fn_arv_udf__m_cells[2, 2]",
+"fn_arv_udf__m_cells[2, 3]",
+"fn_arv_udf__m_cells[2, 4]",
+"fn_arv_udf__m_cells[3, 1]",
+"fn_arv_udf__m_cells[3, 2]",
+"fn_arv_udf__m_cells[3, 3]",
+"fn_arv_udf__m_cells[3, 4]",
+"fn_arv_loop__m_cells[1, 1]",
+"fn_arv_loop__m_cells[1, 2]",
+"fn_arv_loop__m_cells[1, 3]",
+"fn_arv_loop__m_cells[1, 4]",
+"fn_arv_loop__m_cells[2, 1]",
+"fn_arv_loop__m_cells[2, 2]",
+"fn_arv_loop__m_cells[2, 3]",
+"fn_arv_loop__m_cells[2, 4]",
+"fn_arv_loop__m_cells[3, 1]",
+"fn_arv_loop__m_cells[3, 2]",
+"fn_arv_loop__m_cells[3, 3]",
+"fn_arv_loop__m_cells[3, 4]",
+"fn_arv_row__m_cells[1, 1]",
+"fn_arv_row__m_cells[1, 2]",
+"fn_arv_row__m_cells[1, 3]",
+"fn_arv_row__m_cells[1, 4]",
+"fn_arv_row__m_cells[2, 1]",
+"fn_arv_row__m_cells[2, 2]",
+"fn_arv_row__m_cells[2, 3]",
+"fn_arv_row__m_cells[2, 4]",
+"fn_arv_row__m_cells[3, 1]",
+"fn_arv_row__m_cells[3, 2]",
+"fn_arv_row__m_cells[3, 3]",
+"fn_arv_row__m_cells[3, 4]",
+"fn_arv_rowslice__m_cells[1, 1]",
+"fn_arv_rowslice__m_cells[1, 2]",
+"fn_arv_rowslice__m_cells[1, 3]",
+"fn_arv_rowslice__m_cells[1, 4]",
+"fn_arv_rowslice__m_cells[2, 1]",
+"fn_arv_rowslice__m_cells[2, 2]",
+"fn_arv_rowslice__m_cells[2, 3]",
+"fn_arv_rowslice__m_cells[2, 4]",
+"fn_arv_rowslice__m_cells[3, 1]",
+"fn_arv_rowslice__m_cells[3, 2]",
+"fn_arv_rowslice__m_cells[3, 3]",
+"fn_arv_rowslice__m_cells[3, 4]",
+"fn_arv_colslice__m_cells[1, 1]",
+"fn_arv_colslice__m_cells[1, 2]",
+"fn_arv_colslice__m_cells[1, 3]",
+"fn_arv_colslice__m_cells[1, 4]",
+"fn_arv_colslice__m_cells[2, 1]",
+"fn_arv_colslice__m_cells[2, 2]",
+"fn_arv_colslice__m_cells[2, 3]",
+"fn_arv_colslice__m_cells[2, 4]",
+"fn_arv_colslice__m_cells[3, 1]",
+"fn_arv_colslice__m_cells[3, 2]",
+"fn_arv_colslice__m_cells[3, 3]",
+"fn_arv_colslice__m_cells[3, 4]",
+"fn_arv_range__m_cells[1, 1]",
+"fn_arv_range__m_cells[1, 2]",
+"fn_arv_range__m_cells[1, 3]",
+"fn_arv_range__m_cells[1, 4]",
+"fn_arv_range__m_cells[2, 1]",
+"fn_arv_range__m_cells[2, 2]",
+"fn_arv_range__m_cells[2, 3]",
+"fn_arv_range__m_cells[2, 4]",
+"fn_arv_range__m_cells[3, 1]",
+"fn_arv_range__m_cells[3, 2]",
+"fn_arv_range__m_cells[3, 3]",
+"fn_arv_range__m_cells[3, 4]",
+"fn_arv_multi__m_cells[1, 1]",
+"fn_arv_multi__m_cells[1, 2]",
+"fn_arv_multi__m_cells[1, 3]",
+"fn_arv_multi__m_cells[1, 4]",
+"fn_arv_multi__m_cells[2, 1]",
+"fn_arv_multi__m_cells[2, 2]",
+"fn_arv_multi__m_cells[2, 3]",
+"fn_arv_multi__m_cells[2, 4]",
+"fn_arv_multi__m_cells[3, 1]",
+"fn_arv_multi__m_cells[3, 2]",
+"fn_arv_multi__m_cells[3, 3]",
+"fn_arv_multi__m_cells[3, 4]",
+"fn_arv_cpdelem__m_cells[1, 1]",
+"fn_arv_cpdelem__m_cells[1, 2]",
+"fn_arv_cpdelem__m_cells[1, 3]",
+"fn_arv_cpdelem__m_cells[1, 4]",
+"fn_arv_cpdelem__m_cells[2, 1]",
+"fn_arv_cpdelem__m_cells[2, 2]",
+"fn_arv_cpdelem__m_cells[2, 3]",
+"fn_arv_cpdelem__m_cells[2, 4]",
+"fn_arv_cpdelem__m_cells[3, 1]",
+"fn_arv_cpdelem__m_cells[3, 2]",
+"fn_arv_cpdelem__m_cells[3, 3]",
+"fn_arv_cpdelem__m_cells[3, 4]",
+"fn_arv_cpdrow__m_cells[1, 1]",
+"fn_arv_cpdrow__m_cells[1, 2]",
+"fn_arv_cpdrow__m_cells[1, 3]",
+"fn_arv_cpdrow__m_cells[1, 4]",
+"fn_arv_cpdrow__m_cells[2, 1]",
+"fn_arv_cpdrow__m_cells[2, 2]",
+"fn_arv_cpdrow__m_cells[2, 3]",
+"fn_arv_cpdrow__m_cells[2, 4]",
+"fn_arv_cpdrow__m_cells[3, 1]",
+"fn_arv_cpdrow__m_cells[3, 2]",
+"fn_arv_cpdrow__m_cells[3, 3]",
+"fn_arv_cpdrow__m_cells[3, 4]",
+"fn_arv_reads__m_real",
+"fn_arv_reads__m_arith",
+"fn_arv_reads__m_size",
+"fn_arv_reads__m_dims",
+"fn_arv_reads__m_rowcopy",
+"fn_arv_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_fn_av": {
+"cases": [
+{
+"container": "av",
+"name": "fn_av_lit",
+"write": "lit"
+},
+{
+"container": "av",
+"name": "fn_av_assign",
+"write": "assign"
+},
+{
+"container": "av",
+"name": "fn_av_udf",
+"write": "udf"
+},
+{
+"container": "av",
+"name": "fn_av_loop",
+"write": "loop"
+},
+{
+"container": "av",
+"name": "fn_av_row",
+"write": "row"
+},
+{
+"container": "av",
+"name": "fn_av_rowslice",
+"write": "rowslice"
+},
+{
+"container": "av",
+"name": "fn_av_colslice",
+"write": "colslice"
+},
+{
+"container": "av",
+"name": "fn_av_range",
+"write": "range"
+},
+{
+"container": "av",
+"name": "fn_av_multi",
+"write": "multi"
+},
+{
+"container": "av",
+"name": "fn_av_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "av",
+"name": "fn_av_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "av",
+"name": "fn_av_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"fn_av_lit__m_cells[1, 1]",
+"fn_av_lit__m_cells[1, 2]",
+"fn_av_lit__m_cells[1, 3]",
+"fn_av_lit__m_cells[1, 4]",
+"fn_av_lit__m_cells[2, 1]",
+"fn_av_lit__m_cells[2, 2]",
+"fn_av_lit__m_cells[2, 3]",
+"fn_av_lit__m_cells[2, 4]",
+"fn_av_lit__m_cells[3, 1]",
+"fn_av_lit__m_cells[3, 2]",
+"fn_av_lit__m_cells[3, 3]",
+"fn_av_lit__m_cells[3, 4]",
+"fn_av_assign__m_cells[1, 1]",
+"fn_av_assign__m_cells[1, 2]",
+"fn_av_assign__m_cells[1, 3]",
+"fn_av_assign__m_cells[1, 4]",
+"fn_av_assign__m_cells[2, 1]",
+"fn_av_assign__m_cells[2, 2]",
+"fn_av_assign__m_cells[2, 3]",
+"fn_av_assign__m_cells[2, 4]",
+"fn_av_assign__m_cells[3, 1]",
+"fn_av_assign__m_cells[3, 2]",
+"fn_av_assign__m_cells[3, 3]",
+"fn_av_assign__m_cells[3, 4]",
+"fn_av_udf__m_cells[1, 1]",
+"fn_av_udf__m_cells[1, 2]",
+"fn_av_udf__m_cells[1, 3]",
+"fn_av_udf__m_cells[1, 4]",
+"fn_av_udf__m_cells[2, 1]",
+"fn_av_udf__m_cells[2, 2]",
+"fn_av_udf__m_cells[2, 3]",
+"fn_av_udf__m_cells[2, 4]",
+"fn_av_udf__m_cells[3, 1]",
+"fn_av_udf__m_cells[3, 2]",
+"fn_av_udf__m_cells[3, 3]",
+"fn_av_udf__m_cells[3, 4]",
+"fn_av_loop__m_cells[1, 1]",
+"fn_av_loop__m_cells[1, 2]",
+"fn_av_loop__m_cells[1, 3]",
+"fn_av_loop__m_cells[1, 4]",
+"fn_av_loop__m_cells[2, 1]",
+"fn_av_loop__m_cells[2, 2]",
+"fn_av_loop__m_cells[2, 3]",
+"fn_av_loop__m_cells[2, 4]",
+"fn_av_loop__m_cells[3, 1]",
+"fn_av_loop__m_cells[3, 2]",
+"fn_av_loop__m_cells[3, 3]",
+"fn_av_loop__m_cells[3, 4]",
+"fn_av_row__m_cells[1, 1]",
+"fn_av_row__m_cells[1, 2]",
+"fn_av_row__m_cells[1, 3]",
+"fn_av_row__m_cells[1, 4]",
+"fn_av_row__m_cells[2, 1]",
+"fn_av_row__m_cells[2, 2]",
+"fn_av_row__m_cells[2, 3]",
+"fn_av_row__m_cells[2, 4]",
+"fn_av_row__m_cells[3, 1]",
+"fn_av_row__m_cells[3, 2]",
+"fn_av_row__m_cells[3, 3]",
+"fn_av_row__m_cells[3, 4]",
+"fn_av_rowslice__m_cells[1, 1]",
+"fn_av_rowslice__m_cells[1, 2]",
+"fn_av_rowslice__m_cells[1, 3]",
+"fn_av_rowslice__m_cells[1, 4]",
+"fn_av_rowslice__m_cells[2, 1]",
+"fn_av_rowslice__m_cells[2, 2]",
+"fn_av_rowslice__m_cells[2, 3]",
+"fn_av_rowslice__m_cells[2, 4]",
+"fn_av_rowslice__m_cells[3, 1]",
+"fn_av_rowslice__m_cells[3, 2]",
+"fn_av_rowslice__m_cells[3, 3]",
+"fn_av_rowslice__m_cells[3, 4]",
+"fn_av_colslice__m_cells[1, 1]",
+"fn_av_colslice__m_cells[1, 2]",
+"fn_av_colslice__m_cells[1, 3]",
+"fn_av_colslice__m_cells[1, 4]",
+"fn_av_colslice__m_cells[2, 1]",
+"fn_av_colslice__m_cells[2, 2]",
+"fn_av_colslice__m_cells[2, 3]",
+"fn_av_colslice__m_cells[2, 4]",
+"fn_av_colslice__m_cells[3, 1]",
+"fn_av_colslice__m_cells[3, 2]",
+"fn_av_colslice__m_cells[3, 3]",
+"fn_av_colslice__m_cells[3, 4]",
+"fn_av_range__m_cells[1, 1]",
+"fn_av_range__m_cells[1, 2]",
+"fn_av_range__m_cells[1, 3]",
+"fn_av_range__m_cells[1, 4]",
+"fn_av_range__m_cells[2, 1]",
+"fn_av_range__m_cells[2, 2]",
+"fn_av_range__m_cells[2, 3]",
+"fn_av_range__m_cells[2, 4]",
+"fn_av_range__m_cells[3, 1]",
+"fn_av_range__m_cells[3, 2]",
+"fn_av_range__m_cells[3, 3]",
+"fn_av_range__m_cells[3, 4]",
+"fn_av_multi__m_cells[1, 1]",
+"fn_av_multi__m_cells[1, 2]",
+"fn_av_multi__m_cells[1, 3]",
+"fn_av_multi__m_cells[1, 4]",
+"fn_av_multi__m_cells[2, 1]",
+"fn_av_multi__m_cells[2, 2]",
+"fn_av_multi__m_cells[2, 3]",
+"fn_av_multi__m_cells[2, 4]",
+"fn_av_multi__m_cells[3, 1]",
+"fn_av_multi__m_cells[3, 2]",
+"fn_av_multi__m_cells[3, 3]",
+"fn_av_multi__m_cells[3, 4]",
+"fn_av_cpdelem__m_cells[1, 1]",
+"fn_av_cpdelem__m_cells[1, 2]",
+"fn_av_cpdelem__m_cells[1, 3]",
+"fn_av_cpdelem__m_cells[1, 4]",
+"fn_av_cpdelem__m_cells[2, 1]",
+"fn_av_cpdelem__m_cells[2, 2]",
+"fn_av_cpdelem__m_cells[2, 3]",
+"fn_av_cpdelem__m_cells[2, 4]",
+"fn_av_cpdelem__m_cells[3, 1]",
+"fn_av_cpdelem__m_cells[3, 2]",
+"fn_av_cpdelem__m_cells[3, 3]",
+"fn_av_cpdelem__m_cells[3, 4]",
+"fn_av_cpdrow__m_cells[1, 1]",
+"fn_av_cpdrow__m_cells[1, 2]",
+"fn_av_cpdrow__m_cells[1, 3]",
+"fn_av_cpdrow__m_cells[1, 4]",
+"fn_av_cpdrow__m_cells[2, 1]",
+"fn_av_cpdrow__m_cells[2, 2]",
+"fn_av_cpdrow__m_cells[2, 3]",
+"fn_av_cpdrow__m_cells[2, 4]",
+"fn_av_cpdrow__m_cells[3, 1]",
+"fn_av_cpdrow__m_cells[3, 2]",
+"fn_av_cpdrow__m_cells[3, 3]",
+"fn_av_cpdrow__m_cells[3, 4]",
+"fn_av_reads__m_real",
+"fn_av_reads__m_arith",
+"fn_av_reads__m_size",
+"fn_av_reads__m_dims",
+"fn_av_reads__m_rowcopy",
+"fn_av_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_fn_i1": {
+"cases": [
+{
+"container": "i1",
+"name": "fn_i1_lit",
+"write": "lit"
+},
+{
+"container": "i1",
+"name": "fn_i1_assign",
+"write": "assign"
+},
+{
+"container": "i1",
+"name": "fn_i1_udf",
+"write": "udf"
+},
+{
+"container": "i1",
+"name": "fn_i1_loop",
+"write": "loop"
+},
+{
+"container": "i1",
+"name": "fn_i1_range",
+"write": "range"
+},
+{
+"container": "i1",
+"name": "fn_i1_multi",
+"write": "multi"
+},
+{
+"container": "i1",
+"name": "fn_i1_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i1",
+"name": "fn_i1_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"fn_i1_lit__m_cells[1]",
+"fn_i1_lit__m_cells[2]",
+"fn_i1_lit__m_cells[3]",
+"fn_i1_lit__m_cells[4]",
+"fn_i1_assign__m_cells[1]",
+"fn_i1_assign__m_cells[2]",
+"fn_i1_assign__m_cells[3]",
+"fn_i1_assign__m_cells[4]",
+"fn_i1_udf__m_cells[1]",
+"fn_i1_udf__m_cells[2]",
+"fn_i1_udf__m_cells[3]",
+"fn_i1_udf__m_cells[4]",
+"fn_i1_loop__m_cells[1]",
+"fn_i1_loop__m_cells[2]",
+"fn_i1_loop__m_cells[3]",
+"fn_i1_loop__m_cells[4]",
+"fn_i1_range__m_cells[1]",
+"fn_i1_range__m_cells[2]",
+"fn_i1_range__m_cells[3]",
+"fn_i1_range__m_cells[4]",
+"fn_i1_multi__m_cells[1]",
+"fn_i1_multi__m_cells[2]",
+"fn_i1_multi__m_cells[3]",
+"fn_i1_multi__m_cells[4]",
+"fn_i1_cpdelem__m_cells[1]",
+"fn_i1_cpdelem__m_cells[2]",
+"fn_i1_cpdelem__m_cells[3]",
+"fn_i1_cpdelem__m_cells[4]",
+"fn_i1_reads__m_int",
+"fn_i1_reads__m_real",
+"fn_i1_reads__m_arith",
+"fn_i1_reads__m_loop",
+"fn_i1_reads__m_index",
+"fn_i1_reads__m_gather",
+"fn_i1_reads__m_size",
+"fn_i1_reads__m_dims",
+"fn_i1_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "fn_i1_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "fn_i1_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "fn_i1_colslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "fn_i1_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_fn_i2": {
+"cases": [
+{
+"container": "i2",
+"name": "fn_i2_lit",
+"write": "lit"
+},
+{
+"container": "i2",
+"name": "fn_i2_assign",
+"write": "assign"
+},
+{
+"container": "i2",
+"name": "fn_i2_udf",
+"write": "udf"
+},
+{
+"container": "i2",
+"name": "fn_i2_loop",
+"write": "loop"
+},
+{
+"container": "i2",
+"name": "fn_i2_row",
+"write": "row"
+},
+{
+"container": "i2",
+"name": "fn_i2_rowslice",
+"write": "rowslice"
+},
+{
+"container": "i2",
+"name": "fn_i2_colslice",
+"write": "colslice"
+},
+{
+"container": "i2",
+"name": "fn_i2_range",
+"write": "range"
+},
+{
+"container": "i2",
+"name": "fn_i2_multi",
+"write": "multi"
+},
+{
+"container": "i2",
+"name": "fn_i2_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i2",
+"name": "fn_i2_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"fn_i2_lit__m_cells[1, 1]",
+"fn_i2_lit__m_cells[1, 2]",
+"fn_i2_lit__m_cells[1, 3]",
+"fn_i2_lit__m_cells[1, 4]",
+"fn_i2_lit__m_cells[2, 1]",
+"fn_i2_lit__m_cells[2, 2]",
+"fn_i2_lit__m_cells[2, 3]",
+"fn_i2_lit__m_cells[2, 4]",
+"fn_i2_lit__m_cells[3, 1]",
+"fn_i2_lit__m_cells[3, 2]",
+"fn_i2_lit__m_cells[3, 3]",
+"fn_i2_lit__m_cells[3, 4]",
+"fn_i2_assign__m_cells[1, 1]",
+"fn_i2_assign__m_cells[1, 2]",
+"fn_i2_assign__m_cells[1, 3]",
+"fn_i2_assign__m_cells[1, 4]",
+"fn_i2_assign__m_cells[2, 1]",
+"fn_i2_assign__m_cells[2, 2]",
+"fn_i2_assign__m_cells[2, 3]",
+"fn_i2_assign__m_cells[2, 4]",
+"fn_i2_assign__m_cells[3, 1]",
+"fn_i2_assign__m_cells[3, 2]",
+"fn_i2_assign__m_cells[3, 3]",
+"fn_i2_assign__m_cells[3, 4]",
+"fn_i2_udf__m_cells[1, 1]",
+"fn_i2_udf__m_cells[1, 2]",
+"fn_i2_udf__m_cells[1, 3]",
+"fn_i2_udf__m_cells[1, 4]",
+"fn_i2_udf__m_cells[2, 1]",
+"fn_i2_udf__m_cells[2, 2]",
+"fn_i2_udf__m_cells[2, 3]",
+"fn_i2_udf__m_cells[2, 4]",
+"fn_i2_udf__m_cells[3, 1]",
+"fn_i2_udf__m_cells[3, 2]",
+"fn_i2_udf__m_cells[3, 3]",
+"fn_i2_udf__m_cells[3, 4]",
+"fn_i2_loop__m_cells[1, 1]",
+"fn_i2_loop__m_cells[1, 2]",
+"fn_i2_loop__m_cells[1, 3]",
+"fn_i2_loop__m_cells[1, 4]",
+"fn_i2_loop__m_cells[2, 1]",
+"fn_i2_loop__m_cells[2, 2]",
+"fn_i2_loop__m_cells[2, 3]",
+"fn_i2_loop__m_cells[2, 4]",
+"fn_i2_loop__m_cells[3, 1]",
+"fn_i2_loop__m_cells[3, 2]",
+"fn_i2_loop__m_cells[3, 3]",
+"fn_i2_loop__m_cells[3, 4]",
+"fn_i2_row__m_cells[1, 1]",
+"fn_i2_row__m_cells[1, 2]",
+"fn_i2_row__m_cells[1, 3]",
+"fn_i2_row__m_cells[1, 4]",
+"fn_i2_row__m_cells[2, 1]",
+"fn_i2_row__m_cells[2, 2]",
+"fn_i2_row__m_cells[2, 3]",
+"fn_i2_row__m_cells[2, 4]",
+"fn_i2_row__m_cells[3, 1]",
+"fn_i2_row__m_cells[3, 2]",
+"fn_i2_row__m_cells[3, 3]",
+"fn_i2_row__m_cells[3, 4]",
+"fn_i2_rowslice__m_cells[1, 1]",
+"fn_i2_rowslice__m_cells[1, 2]",
+"fn_i2_rowslice__m_cells[1, 3]",
+"fn_i2_rowslice__m_cells[1, 4]",
+"fn_i2_rowslice__m_cells[2, 1]",
+"fn_i2_rowslice__m_cells[2, 2]",
+"fn_i2_rowslice__m_cells[2, 3]",
+"fn_i2_rowslice__m_cells[2, 4]",
+"fn_i2_rowslice__m_cells[3, 1]",
+"fn_i2_rowslice__m_cells[3, 2]",
+"fn_i2_rowslice__m_cells[3, 3]",
+"fn_i2_rowslice__m_cells[3, 4]",
+"fn_i2_colslice__m_cells[1, 1]",
+"fn_i2_colslice__m_cells[1, 2]",
+"fn_i2_colslice__m_cells[1, 3]",
+"fn_i2_colslice__m_cells[1, 4]",
+"fn_i2_colslice__m_cells[2, 1]",
+"fn_i2_colslice__m_cells[2, 2]",
+"fn_i2_colslice__m_cells[2, 3]",
+"fn_i2_colslice__m_cells[2, 4]",
+"fn_i2_colslice__m_cells[3, 1]",
+"fn_i2_colslice__m_cells[3, 2]",
+"fn_i2_colslice__m_cells[3, 3]",
+"fn_i2_colslice__m_cells[3, 4]",
+"fn_i2_range__m_cells[1, 1]",
+"fn_i2_range__m_cells[1, 2]",
+"fn_i2_range__m_cells[1, 3]",
+"fn_i2_range__m_cells[1, 4]",
+"fn_i2_range__m_cells[2, 1]",
+"fn_i2_range__m_cells[2, 2]",
+"fn_i2_range__m_cells[2, 3]",
+"fn_i2_range__m_cells[2, 4]",
+"fn_i2_range__m_cells[3, 1]",
+"fn_i2_range__m_cells[3, 2]",
+"fn_i2_range__m_cells[3, 3]",
+"fn_i2_range__m_cells[3, 4]",
+"fn_i2_multi__m_cells[1, 1]",
+"fn_i2_multi__m_cells[1, 2]",
+"fn_i2_multi__m_cells[1, 3]",
+"fn_i2_multi__m_cells[1, 4]",
+"fn_i2_multi__m_cells[2, 1]",
+"fn_i2_multi__m_cells[2, 2]",
+"fn_i2_multi__m_cells[2, 3]",
+"fn_i2_multi__m_cells[2, 4]",
+"fn_i2_multi__m_cells[3, 1]",
+"fn_i2_multi__m_cells[3, 2]",
+"fn_i2_multi__m_cells[3, 3]",
+"fn_i2_multi__m_cells[3, 4]",
+"fn_i2_cpdelem__m_cells[1, 1]",
+"fn_i2_cpdelem__m_cells[1, 2]",
+"fn_i2_cpdelem__m_cells[1, 3]",
+"fn_i2_cpdelem__m_cells[1, 4]",
+"fn_i2_cpdelem__m_cells[2, 1]",
+"fn_i2_cpdelem__m_cells[2, 2]",
+"fn_i2_cpdelem__m_cells[2, 3]",
+"fn_i2_cpdelem__m_cells[2, 4]",
+"fn_i2_cpdelem__m_cells[3, 1]",
+"fn_i2_cpdelem__m_cells[3, 2]",
+"fn_i2_cpdelem__m_cells[3, 3]",
+"fn_i2_cpdelem__m_cells[3, 4]",
+"fn_i2_reads__m_int",
+"fn_i2_reads__m_real",
+"fn_i2_reads__m_arith",
+"fn_i2_reads__m_loop",
+"fn_i2_reads__m_index",
+"fn_i2_reads__m_gather",
+"fn_i2_reads__m_size",
+"fn_i2_reads__m_dims",
+"fn_i2_reads__m_rowcopy",
+"fn_i2_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "fn_i2_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_fn_i3": {
+"cases": [
+{
+"container": "i3",
+"name": "fn_i3_lit",
+"write": "lit"
+},
+{
+"container": "i3",
+"name": "fn_i3_assign",
+"write": "assign"
+},
+{
+"container": "i3",
+"name": "fn_i3_udf",
+"write": "udf"
+},
+{
+"container": "i3",
+"name": "fn_i3_loop",
+"write": "loop"
+},
+{
+"container": "i3",
+"name": "fn_i3_row",
+"write": "row"
+},
+{
+"container": "i3",
+"name": "fn_i3_rowslice",
+"write": "rowslice"
+},
+{
+"container": "i3",
+"name": "fn_i3_colslice",
+"write": "colslice"
+},
+{
+"container": "i3",
+"name": "fn_i3_range",
+"write": "range"
+},
+{
+"container": "i3",
+"name": "fn_i3_multi",
+"write": "multi"
+},
+{
+"container": "i3",
+"name": "fn_i3_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i3",
+"name": "fn_i3_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"fn_i3_lit__m_cells[1, 1, 1]",
+"fn_i3_lit__m_cells[1, 1, 2]",
+"fn_i3_lit__m_cells[1, 1, 3]",
+"fn_i3_lit__m_cells[1, 1, 4]",
+"fn_i3_lit__m_cells[1, 2, 1]",
+"fn_i3_lit__m_cells[1, 2, 2]",
+"fn_i3_lit__m_cells[1, 2, 3]",
+"fn_i3_lit__m_cells[1, 2, 4]",
+"fn_i3_lit__m_cells[2, 1, 1]",
+"fn_i3_lit__m_cells[2, 1, 2]",
+"fn_i3_lit__m_cells[2, 1, 3]",
+"fn_i3_lit__m_cells[2, 1, 4]",
+"fn_i3_lit__m_cells[2, 2, 1]",
+"fn_i3_lit__m_cells[2, 2, 2]",
+"fn_i3_lit__m_cells[2, 2, 3]",
+"fn_i3_lit__m_cells[2, 2, 4]",
+"fn_i3_lit__m_cells[3, 1, 1]",
+"fn_i3_lit__m_cells[3, 1, 2]",
+"fn_i3_lit__m_cells[3, 1, 3]",
+"fn_i3_lit__m_cells[3, 1, 4]",
+"fn_i3_lit__m_cells[3, 2, 1]",
+"fn_i3_lit__m_cells[3, 2, 2]",
+"fn_i3_lit__m_cells[3, 2, 3]",
+"fn_i3_lit__m_cells[3, 2, 4]",
+"fn_i3_assign__m_cells[1, 1, 1]",
+"fn_i3_assign__m_cells[1, 1, 2]",
+"fn_i3_assign__m_cells[1, 1, 3]",
+"fn_i3_assign__m_cells[1, 1, 4]",
+"fn_i3_assign__m_cells[1, 2, 1]",
+"fn_i3_assign__m_cells[1, 2, 2]",
+"fn_i3_assign__m_cells[1, 2, 3]",
+"fn_i3_assign__m_cells[1, 2, 4]",
+"fn_i3_assign__m_cells[2, 1, 1]",
+"fn_i3_assign__m_cells[2, 1, 2]",
+"fn_i3_assign__m_cells[2, 1, 3]",
+"fn_i3_assign__m_cells[2, 1, 4]",
+"fn_i3_assign__m_cells[2, 2, 1]",
+"fn_i3_assign__m_cells[2, 2, 2]",
+"fn_i3_assign__m_cells[2, 2, 3]",
+"fn_i3_assign__m_cells[2, 2, 4]",
+"fn_i3_assign__m_cells[3, 1, 1]",
+"fn_i3_assign__m_cells[3, 1, 2]",
+"fn_i3_assign__m_cells[3, 1, 3]",
+"fn_i3_assign__m_cells[3, 1, 4]",
+"fn_i3_assign__m_cells[3, 2, 1]",
+"fn_i3_assign__m_cells[3, 2, 2]",
+"fn_i3_assign__m_cells[3, 2, 3]",
+"fn_i3_assign__m_cells[3, 2, 4]",
+"fn_i3_udf__m_cells[1, 1, 1]",
+"fn_i3_udf__m_cells[1, 1, 2]",
+"fn_i3_udf__m_cells[1, 1, 3]",
+"fn_i3_udf__m_cells[1, 1, 4]",
+"fn_i3_udf__m_cells[1, 2, 1]",
+"fn_i3_udf__m_cells[1, 2, 2]",
+"fn_i3_udf__m_cells[1, 2, 3]",
+"fn_i3_udf__m_cells[1, 2, 4]",
+"fn_i3_udf__m_cells[2, 1, 1]",
+"fn_i3_udf__m_cells[2, 1, 2]",
+"fn_i3_udf__m_cells[2, 1, 3]",
+"fn_i3_udf__m_cells[2, 1, 4]",
+"fn_i3_udf__m_cells[2, 2, 1]",
+"fn_i3_udf__m_cells[2, 2, 2]",
+"fn_i3_udf__m_cells[2, 2, 3]",
+"fn_i3_udf__m_cells[2, 2, 4]",
+"fn_i3_udf__m_cells[3, 1, 1]",
+"fn_i3_udf__m_cells[3, 1, 2]",
+"fn_i3_udf__m_cells[3, 1, 3]",
+"fn_i3_udf__m_cells[3, 1, 4]",
+"fn_i3_udf__m_cells[3, 2, 1]",
+"fn_i3_udf__m_cells[3, 2, 2]",
+"fn_i3_udf__m_cells[3, 2, 3]",
+"fn_i3_udf__m_cells[3, 2, 4]",
+"fn_i3_loop__m_cells[1, 1, 1]",
+"fn_i3_loop__m_cells[1, 1, 2]",
+"fn_i3_loop__m_cells[1, 1, 3]",
+"fn_i3_loop__m_cells[1, 1, 4]",
+"fn_i3_loop__m_cells[1, 2, 1]",
+"fn_i3_loop__m_cells[1, 2, 2]",
+"fn_i3_loop__m_cells[1, 2, 3]",
+"fn_i3_loop__m_cells[1, 2, 4]",
+"fn_i3_loop__m_cells[2, 1, 1]",
+"fn_i3_loop__m_cells[2, 1, 2]",
+"fn_i3_loop__m_cells[2, 1, 3]",
+"fn_i3_loop__m_cells[2, 1, 4]",
+"fn_i3_loop__m_cells[2, 2, 1]",
+"fn_i3_loop__m_cells[2, 2, 2]",
+"fn_i3_loop__m_cells[2, 2, 3]",
+"fn_i3_loop__m_cells[2, 2, 4]",
+"fn_i3_loop__m_cells[3, 1, 1]",
+"fn_i3_loop__m_cells[3, 1, 2]",
+"fn_i3_loop__m_cells[3, 1, 3]",
+"fn_i3_loop__m_cells[3, 1, 4]",
+"fn_i3_loop__m_cells[3, 2, 1]",
+"fn_i3_loop__m_cells[3, 2, 2]",
+"fn_i3_loop__m_cells[3, 2, 3]",
+"fn_i3_loop__m_cells[3, 2, 4]",
+"fn_i3_row__m_cells[1, 1, 1]",
+"fn_i3_row__m_cells[1, 1, 2]",
+"fn_i3_row__m_cells[1, 1, 3]",
+"fn_i3_row__m_cells[1, 1, 4]",
+"fn_i3_row__m_cells[1, 2, 1]",
+"fn_i3_row__m_cells[1, 2, 2]",
+"fn_i3_row__m_cells[1, 2, 3]",
+"fn_i3_row__m_cells[1, 2, 4]",
+"fn_i3_row__m_cells[2, 1, 1]",
+"fn_i3_row__m_cells[2, 1, 2]",
+"fn_i3_row__m_cells[2, 1, 3]",
+"fn_i3_row__m_cells[2, 1, 4]",
+"fn_i3_row__m_cells[2, 2, 1]",
+"fn_i3_row__m_cells[2, 2, 2]",
+"fn_i3_row__m_cells[2, 2, 3]",
+"fn_i3_row__m_cells[2, 2, 4]",
+"fn_i3_row__m_cells[3, 1, 1]",
+"fn_i3_row__m_cells[3, 1, 2]",
+"fn_i3_row__m_cells[3, 1, 3]",
+"fn_i3_row__m_cells[3, 1, 4]",
+"fn_i3_row__m_cells[3, 2, 1]",
+"fn_i3_row__m_cells[3, 2, 2]",
+"fn_i3_row__m_cells[3, 2, 3]",
+"fn_i3_row__m_cells[3, 2, 4]",
+"fn_i3_rowslice__m_cells[1, 1, 1]",
+"fn_i3_rowslice__m_cells[1, 1, 2]",
+"fn_i3_rowslice__m_cells[1, 1, 3]",
+"fn_i3_rowslice__m_cells[1, 1, 4]",
+"fn_i3_rowslice__m_cells[1, 2, 1]",
+"fn_i3_rowslice__m_cells[1, 2, 2]",
+"fn_i3_rowslice__m_cells[1, 2, 3]",
+"fn_i3_rowslice__m_cells[1, 2, 4]",
+"fn_i3_rowslice__m_cells[2, 1, 1]",
+"fn_i3_rowslice__m_cells[2, 1, 2]",
+"fn_i3_rowslice__m_cells[2, 1, 3]",
+"fn_i3_rowslice__m_cells[2, 1, 4]",
+"fn_i3_rowslice__m_cells[2, 2, 1]",
+"fn_i3_rowslice__m_cells[2, 2, 2]",
+"fn_i3_rowslice__m_cells[2, 2, 3]",
+"fn_i3_rowslice__m_cells[2, 2, 4]",
+"fn_i3_rowslice__m_cells[3, 1, 1]",
+"fn_i3_rowslice__m_cells[3, 1, 2]",
+"fn_i3_rowslice__m_cells[3, 1, 3]",
+"fn_i3_rowslice__m_cells[3, 1, 4]",
+"fn_i3_rowslice__m_cells[3, 2, 1]",
+"fn_i3_rowslice__m_cells[3, 2, 2]",
+"fn_i3_rowslice__m_cells[3, 2, 3]",
+"fn_i3_rowslice__m_cells[3, 2, 4]",
+"fn_i3_colslice__m_cells[1, 1, 1]",
+"fn_i3_colslice__m_cells[1, 1, 2]",
+"fn_i3_colslice__m_cells[1, 1, 3]",
+"fn_i3_colslice__m_cells[1, 1, 4]",
+"fn_i3_colslice__m_cells[1, 2, 1]",
+"fn_i3_colslice__m_cells[1, 2, 2]",
+"fn_i3_colslice__m_cells[1, 2, 3]",
+"fn_i3_colslice__m_cells[1, 2, 4]",
+"fn_i3_colslice__m_cells[2, 1, 1]",
+"fn_i3_colslice__m_cells[2, 1, 2]",
+"fn_i3_colslice__m_cells[2, 1, 3]",
+"fn_i3_colslice__m_cells[2, 1, 4]",
+"fn_i3_colslice__m_cells[2, 2, 1]",
+"fn_i3_colslice__m_cells[2, 2, 2]",
+"fn_i3_colslice__m_cells[2, 2, 3]",
+"fn_i3_colslice__m_cells[2, 2, 4]",
+"fn_i3_colslice__m_cells[3, 1, 1]",
+"fn_i3_colslice__m_cells[3, 1, 2]",
+"fn_i3_colslice__m_cells[3, 1, 3]",
+"fn_i3_colslice__m_cells[3, 1, 4]",
+"fn_i3_colslice__m_cells[3, 2, 1]",
+"fn_i3_colslice__m_cells[3, 2, 2]",
+"fn_i3_colslice__m_cells[3, 2, 3]",
+"fn_i3_colslice__m_cells[3, 2, 4]",
+"fn_i3_range__m_cells[1, 1, 1]",
+"fn_i3_range__m_cells[1, 1, 2]",
+"fn_i3_range__m_cells[1, 1, 3]",
+"fn_i3_range__m_cells[1, 1, 4]",
+"fn_i3_range__m_cells[1, 2, 1]",
+"fn_i3_range__m_cells[1, 2, 2]",
+"fn_i3_range__m_cells[1, 2, 3]",
+"fn_i3_range__m_cells[1, 2, 4]",
+"fn_i3_range__m_cells[2, 1, 1]",
+"fn_i3_range__m_cells[2, 1, 2]",
+"fn_i3_range__m_cells[2, 1, 3]",
+"fn_i3_range__m_cells[2, 1, 4]",
+"fn_i3_range__m_cells[2, 2, 1]",
+"fn_i3_range__m_cells[2, 2, 2]",
+"fn_i3_range__m_cells[2, 2, 3]",
+"fn_i3_range__m_cells[2, 2, 4]",
+"fn_i3_range__m_cells[3, 1, 1]",
+"fn_i3_range__m_cells[3, 1, 2]",
+"fn_i3_range__m_cells[3, 1, 3]",
+"fn_i3_range__m_cells[3, 1, 4]",
+"fn_i3_range__m_cells[3, 2, 1]",
+"fn_i3_range__m_cells[3, 2, 2]",
+"fn_i3_range__m_cells[3, 2, 3]",
+"fn_i3_range__m_cells[3, 2, 4]",
+"fn_i3_multi__m_cells[1, 1, 1]",
+"fn_i3_multi__m_cells[1, 1, 2]",
+"fn_i3_multi__m_cells[1, 1, 3]",
+"fn_i3_multi__m_cells[1, 1, 4]",
+"fn_i3_multi__m_cells[1, 2, 1]",
+"fn_i3_multi__m_cells[1, 2, 2]",
+"fn_i3_multi__m_cells[1, 2, 3]",
+"fn_i3_multi__m_cells[1, 2, 4]",
+"fn_i3_multi__m_cells[2, 1, 1]",
+"fn_i3_multi__m_cells[2, 1, 2]",
+"fn_i3_multi__m_cells[2, 1, 3]",
+"fn_i3_multi__m_cells[2, 1, 4]",
+"fn_i3_multi__m_cells[2, 2, 1]",
+"fn_i3_multi__m_cells[2, 2, 2]",
+"fn_i3_multi__m_cells[2, 2, 3]",
+"fn_i3_multi__m_cells[2, 2, 4]",
+"fn_i3_multi__m_cells[3, 1, 1]",
+"fn_i3_multi__m_cells[3, 1, 2]",
+"fn_i3_multi__m_cells[3, 1, 3]",
+"fn_i3_multi__m_cells[3, 1, 4]",
+"fn_i3_multi__m_cells[3, 2, 1]",
+"fn_i3_multi__m_cells[3, 2, 2]",
+"fn_i3_multi__m_cells[3, 2, 3]",
+"fn_i3_multi__m_cells[3, 2, 4]",
+"fn_i3_cpdelem__m_cells[1, 1, 1]",
+"fn_i3_cpdelem__m_cells[1, 1, 2]",
+"fn_i3_cpdelem__m_cells[1, 1, 3]",
+"fn_i3_cpdelem__m_cells[1, 1, 4]",
+"fn_i3_cpdelem__m_cells[1, 2, 1]",
+"fn_i3_cpdelem__m_cells[1, 2, 2]",
+"fn_i3_cpdelem__m_cells[1, 2, 3]",
+"fn_i3_cpdelem__m_cells[1, 2, 4]",
+"fn_i3_cpdelem__m_cells[2, 1, 1]",
+"fn_i3_cpdelem__m_cells[2, 1, 2]",
+"fn_i3_cpdelem__m_cells[2, 1, 3]",
+"fn_i3_cpdelem__m_cells[2, 1, 4]",
+"fn_i3_cpdelem__m_cells[2, 2, 1]",
+"fn_i3_cpdelem__m_cells[2, 2, 2]",
+"fn_i3_cpdelem__m_cells[2, 2, 3]",
+"fn_i3_cpdelem__m_cells[2, 2, 4]",
+"fn_i3_cpdelem__m_cells[3, 1, 1]",
+"fn_i3_cpdelem__m_cells[3, 1, 2]",
+"fn_i3_cpdelem__m_cells[3, 1, 3]",
+"fn_i3_cpdelem__m_cells[3, 1, 4]",
+"fn_i3_cpdelem__m_cells[3, 2, 1]",
+"fn_i3_cpdelem__m_cells[3, 2, 2]",
+"fn_i3_cpdelem__m_cells[3, 2, 3]",
+"fn_i3_cpdelem__m_cells[3, 2, 4]",
+"fn_i3_reads__m_int",
+"fn_i3_reads__m_real",
+"fn_i3_reads__m_arith",
+"fn_i3_reads__m_loop",
+"fn_i3_reads__m_index",
+"fn_i3_reads__m_gather",
+"fn_i3_reads__m_size",
+"fn_i3_reads__m_dims",
+"fn_i3_reads__m_rowcopy",
+"fn_i3_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "fn_i3_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_fn_m": {
+"cases": [
+{
+"container": "m",
+"name": "fn_m_lit",
+"write": "lit"
+},
+{
+"container": "m",
+"name": "fn_m_assign",
+"write": "assign"
+},
+{
+"container": "m",
+"name": "fn_m_udf",
+"write": "udf"
+},
+{
+"container": "m",
+"name": "fn_m_loop",
+"write": "loop"
+},
+{
+"container": "m",
+"name": "fn_m_row",
+"write": "row"
+},
+{
+"container": "m",
+"name": "fn_m_rowslice",
+"write": "rowslice"
+},
+{
+"container": "m",
+"name": "fn_m_colslice",
+"write": "colslice"
+},
+{
+"container": "m",
+"name": "fn_m_range",
+"write": "range"
+},
+{
+"container": "m",
+"name": "fn_m_multi",
+"write": "multi"
+},
+{
+"container": "m",
+"name": "fn_m_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "m",
+"name": "fn_m_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "m",
+"name": "fn_m_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"fn_m_lit__m_cells[1, 1]",
+"fn_m_lit__m_cells[1, 2]",
+"fn_m_lit__m_cells[1, 3]",
+"fn_m_lit__m_cells[1, 4]",
+"fn_m_lit__m_cells[2, 1]",
+"fn_m_lit__m_cells[2, 2]",
+"fn_m_lit__m_cells[2, 3]",
+"fn_m_lit__m_cells[2, 4]",
+"fn_m_lit__m_cells[3, 1]",
+"fn_m_lit__m_cells[3, 2]",
+"fn_m_lit__m_cells[3, 3]",
+"fn_m_lit__m_cells[3, 4]",
+"fn_m_assign__m_cells[1, 1]",
+"fn_m_assign__m_cells[1, 2]",
+"fn_m_assign__m_cells[1, 3]",
+"fn_m_assign__m_cells[1, 4]",
+"fn_m_assign__m_cells[2, 1]",
+"fn_m_assign__m_cells[2, 2]",
+"fn_m_assign__m_cells[2, 3]",
+"fn_m_assign__m_cells[2, 4]",
+"fn_m_assign__m_cells[3, 1]",
+"fn_m_assign__m_cells[3, 2]",
+"fn_m_assign__m_cells[3, 3]",
+"fn_m_assign__m_cells[3, 4]",
+"fn_m_udf__m_cells[1, 1]",
+"fn_m_udf__m_cells[1, 2]",
+"fn_m_udf__m_cells[1, 3]",
+"fn_m_udf__m_cells[1, 4]",
+"fn_m_udf__m_cells[2, 1]",
+"fn_m_udf__m_cells[2, 2]",
+"fn_m_udf__m_cells[2, 3]",
+"fn_m_udf__m_cells[2, 4]",
+"fn_m_udf__m_cells[3, 1]",
+"fn_m_udf__m_cells[3, 2]",
+"fn_m_udf__m_cells[3, 3]",
+"fn_m_udf__m_cells[3, 4]",
+"fn_m_loop__m_cells[1, 1]",
+"fn_m_loop__m_cells[1, 2]",
+"fn_m_loop__m_cells[1, 3]",
+"fn_m_loop__m_cells[1, 4]",
+"fn_m_loop__m_cells[2, 1]",
+"fn_m_loop__m_cells[2, 2]",
+"fn_m_loop__m_cells[2, 3]",
+"fn_m_loop__m_cells[2, 4]",
+"fn_m_loop__m_cells[3, 1]",
+"fn_m_loop__m_cells[3, 2]",
+"fn_m_loop__m_cells[3, 3]",
+"fn_m_loop__m_cells[3, 4]",
+"fn_m_row__m_cells[1, 1]",
+"fn_m_row__m_cells[1, 2]",
+"fn_m_row__m_cells[1, 3]",
+"fn_m_row__m_cells[1, 4]",
+"fn_m_row__m_cells[2, 1]",
+"fn_m_row__m_cells[2, 2]",
+"fn_m_row__m_cells[2, 3]",
+"fn_m_row__m_cells[2, 4]",
+"fn_m_row__m_cells[3, 1]",
+"fn_m_row__m_cells[3, 2]",
+"fn_m_row__m_cells[3, 3]",
+"fn_m_row__m_cells[3, 4]",
+"fn_m_rowslice__m_cells[1, 1]",
+"fn_m_rowslice__m_cells[1, 2]",
+"fn_m_rowslice__m_cells[1, 3]",
+"fn_m_rowslice__m_cells[1, 4]",
+"fn_m_rowslice__m_cells[2, 1]",
+"fn_m_rowslice__m_cells[2, 2]",
+"fn_m_rowslice__m_cells[2, 3]",
+"fn_m_rowslice__m_cells[2, 4]",
+"fn_m_rowslice__m_cells[3, 1]",
+"fn_m_rowslice__m_cells[3, 2]",
+"fn_m_rowslice__m_cells[3, 3]",
+"fn_m_rowslice__m_cells[3, 4]",
+"fn_m_colslice__m_cells[1, 1]",
+"fn_m_colslice__m_cells[1, 2]",
+"fn_m_colslice__m_cells[1, 3]",
+"fn_m_colslice__m_cells[1, 4]",
+"fn_m_colslice__m_cells[2, 1]",
+"fn_m_colslice__m_cells[2, 2]",
+"fn_m_colslice__m_cells[2, 3]",
+"fn_m_colslice__m_cells[2, 4]",
+"fn_m_colslice__m_cells[3, 1]",
+"fn_m_colslice__m_cells[3, 2]",
+"fn_m_colslice__m_cells[3, 3]",
+"fn_m_colslice__m_cells[3, 4]",
+"fn_m_range__m_cells[1, 1]",
+"fn_m_range__m_cells[1, 2]",
+"fn_m_range__m_cells[1, 3]",
+"fn_m_range__m_cells[1, 4]",
+"fn_m_range__m_cells[2, 1]",
+"fn_m_range__m_cells[2, 2]",
+"fn_m_range__m_cells[2, 3]",
+"fn_m_range__m_cells[2, 4]",
+"fn_m_range__m_cells[3, 1]",
+"fn_m_range__m_cells[3, 2]",
+"fn_m_range__m_cells[3, 3]",
+"fn_m_range__m_cells[3, 4]",
+"fn_m_multi__m_cells[1, 1]",
+"fn_m_multi__m_cells[1, 2]",
+"fn_m_multi__m_cells[1, 3]",
+"fn_m_multi__m_cells[1, 4]",
+"fn_m_multi__m_cells[2, 1]",
+"fn_m_multi__m_cells[2, 2]",
+"fn_m_multi__m_cells[2, 3]",
+"fn_m_multi__m_cells[2, 4]",
+"fn_m_multi__m_cells[3, 1]",
+"fn_m_multi__m_cells[3, 2]",
+"fn_m_multi__m_cells[3, 3]",
+"fn_m_multi__m_cells[3, 4]",
+"fn_m_cpdelem__m_cells[1, 1]",
+"fn_m_cpdelem__m_cells[1, 2]",
+"fn_m_cpdelem__m_cells[1, 3]",
+"fn_m_cpdelem__m_cells[1, 4]",
+"fn_m_cpdelem__m_cells[2, 1]",
+"fn_m_cpdelem__m_cells[2, 2]",
+"fn_m_cpdelem__m_cells[2, 3]",
+"fn_m_cpdelem__m_cells[2, 4]",
+"fn_m_cpdelem__m_cells[3, 1]",
+"fn_m_cpdelem__m_cells[3, 2]",
+"fn_m_cpdelem__m_cells[3, 3]",
+"fn_m_cpdelem__m_cells[3, 4]",
+"fn_m_cpdrow__m_cells[1, 1]",
+"fn_m_cpdrow__m_cells[1, 2]",
+"fn_m_cpdrow__m_cells[1, 3]",
+"fn_m_cpdrow__m_cells[1, 4]",
+"fn_m_cpdrow__m_cells[2, 1]",
+"fn_m_cpdrow__m_cells[2, 2]",
+"fn_m_cpdrow__m_cells[2, 3]",
+"fn_m_cpdrow__m_cells[2, 4]",
+"fn_m_cpdrow__m_cells[3, 1]",
+"fn_m_cpdrow__m_cells[3, 2]",
+"fn_m_cpdrow__m_cells[3, 3]",
+"fn_m_cpdrow__m_cells[3, 4]",
+"fn_m_reads__m_real",
+"fn_m_reads__m_arith",
+"fn_m_reads__m_size",
+"fn_m_reads__m_dims",
+"fn_m_reads__m_rowcopy",
+"fn_m_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_fn_r1": {
+"cases": [
+{
+"container": "r1",
+"name": "fn_r1_lit",
+"write": "lit"
+},
+{
+"container": "r1",
+"name": "fn_r1_assign",
+"write": "assign"
+},
+{
+"container": "r1",
+"name": "fn_r1_udf",
+"write": "udf"
+},
+{
+"container": "r1",
+"name": "fn_r1_loop",
+"write": "loop"
+},
+{
+"container": "r1",
+"name": "fn_r1_range",
+"write": "range"
+},
+{
+"container": "r1",
+"name": "fn_r1_multi",
+"write": "multi"
+},
+{
+"container": "r1",
+"name": "fn_r1_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r1",
+"name": "fn_r1_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"fn_r1_lit__m_cells[1]",
+"fn_r1_lit__m_cells[2]",
+"fn_r1_lit__m_cells[3]",
+"fn_r1_lit__m_cells[4]",
+"fn_r1_assign__m_cells[1]",
+"fn_r1_assign__m_cells[2]",
+"fn_r1_assign__m_cells[3]",
+"fn_r1_assign__m_cells[4]",
+"fn_r1_udf__m_cells[1]",
+"fn_r1_udf__m_cells[2]",
+"fn_r1_udf__m_cells[3]",
+"fn_r1_udf__m_cells[4]",
+"fn_r1_loop__m_cells[1]",
+"fn_r1_loop__m_cells[2]",
+"fn_r1_loop__m_cells[3]",
+"fn_r1_loop__m_cells[4]",
+"fn_r1_range__m_cells[1]",
+"fn_r1_range__m_cells[2]",
+"fn_r1_range__m_cells[3]",
+"fn_r1_range__m_cells[4]",
+"fn_r1_multi__m_cells[1]",
+"fn_r1_multi__m_cells[2]",
+"fn_r1_multi__m_cells[3]",
+"fn_r1_multi__m_cells[4]",
+"fn_r1_cpdelem__m_cells[1]",
+"fn_r1_cpdelem__m_cells[2]",
+"fn_r1_cpdelem__m_cells[3]",
+"fn_r1_cpdelem__m_cells[4]",
+"fn_r1_reads__m_real",
+"fn_r1_reads__m_arith",
+"fn_r1_reads__m_size",
+"fn_r1_reads__m_dims",
+"fn_r1_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "fn_r1_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "fn_r1_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "fn_r1_colslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "fn_r1_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_fn_r2": {
+"cases": [
+{
+"container": "r2",
+"name": "fn_r2_lit",
+"write": "lit"
+},
+{
+"container": "r2",
+"name": "fn_r2_assign",
+"write": "assign"
+},
+{
+"container": "r2",
+"name": "fn_r2_udf",
+"write": "udf"
+},
+{
+"container": "r2",
+"name": "fn_r2_loop",
+"write": "loop"
+},
+{
+"container": "r2",
+"name": "fn_r2_row",
+"write": "row"
+},
+{
+"container": "r2",
+"name": "fn_r2_rowslice",
+"write": "rowslice"
+},
+{
+"container": "r2",
+"name": "fn_r2_colslice",
+"write": "colslice"
+},
+{
+"container": "r2",
+"name": "fn_r2_range",
+"write": "range"
+},
+{
+"container": "r2",
+"name": "fn_r2_multi",
+"write": "multi"
+},
+{
+"container": "r2",
+"name": "fn_r2_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r2",
+"name": "fn_r2_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"fn_r2_lit__m_cells[1, 1]",
+"fn_r2_lit__m_cells[1, 2]",
+"fn_r2_lit__m_cells[1, 3]",
+"fn_r2_lit__m_cells[1, 4]",
+"fn_r2_lit__m_cells[2, 1]",
+"fn_r2_lit__m_cells[2, 2]",
+"fn_r2_lit__m_cells[2, 3]",
+"fn_r2_lit__m_cells[2, 4]",
+"fn_r2_lit__m_cells[3, 1]",
+"fn_r2_lit__m_cells[3, 2]",
+"fn_r2_lit__m_cells[3, 3]",
+"fn_r2_lit__m_cells[3, 4]",
+"fn_r2_assign__m_cells[1, 1]",
+"fn_r2_assign__m_cells[1, 2]",
+"fn_r2_assign__m_cells[1, 3]",
+"fn_r2_assign__m_cells[1, 4]",
+"fn_r2_assign__m_cells[2, 1]",
+"fn_r2_assign__m_cells[2, 2]",
+"fn_r2_assign__m_cells[2, 3]",
+"fn_r2_assign__m_cells[2, 4]",
+"fn_r2_assign__m_cells[3, 1]",
+"fn_r2_assign__m_cells[3, 2]",
+"fn_r2_assign__m_cells[3, 3]",
+"fn_r2_assign__m_cells[3, 4]",
+"fn_r2_udf__m_cells[1, 1]",
+"fn_r2_udf__m_cells[1, 2]",
+"fn_r2_udf__m_cells[1, 3]",
+"fn_r2_udf__m_cells[1, 4]",
+"fn_r2_udf__m_cells[2, 1]",
+"fn_r2_udf__m_cells[2, 2]",
+"fn_r2_udf__m_cells[2, 3]",
+"fn_r2_udf__m_cells[2, 4]",
+"fn_r2_udf__m_cells[3, 1]",
+"fn_r2_udf__m_cells[3, 2]",
+"fn_r2_udf__m_cells[3, 3]",
+"fn_r2_udf__m_cells[3, 4]",
+"fn_r2_loop__m_cells[1, 1]",
+"fn_r2_loop__m_cells[1, 2]",
+"fn_r2_loop__m_cells[1, 3]",
+"fn_r2_loop__m_cells[1, 4]",
+"fn_r2_loop__m_cells[2, 1]",
+"fn_r2_loop__m_cells[2, 2]",
+"fn_r2_loop__m_cells[2, 3]",
+"fn_r2_loop__m_cells[2, 4]",
+"fn_r2_loop__m_cells[3, 1]",
+"fn_r2_loop__m_cells[3, 2]",
+"fn_r2_loop__m_cells[3, 3]",
+"fn_r2_loop__m_cells[3, 4]",
+"fn_r2_row__m_cells[1, 1]",
+"fn_r2_row__m_cells[1, 2]",
+"fn_r2_row__m_cells[1, 3]",
+"fn_r2_row__m_cells[1, 4]",
+"fn_r2_row__m_cells[2, 1]",
+"fn_r2_row__m_cells[2, 2]",
+"fn_r2_row__m_cells[2, 3]",
+"fn_r2_row__m_cells[2, 4]",
+"fn_r2_row__m_cells[3, 1]",
+"fn_r2_row__m_cells[3, 2]",
+"fn_r2_row__m_cells[3, 3]",
+"fn_r2_row__m_cells[3, 4]",
+"fn_r2_rowslice__m_cells[1, 1]",
+"fn_r2_rowslice__m_cells[1, 2]",
+"fn_r2_rowslice__m_cells[1, 3]",
+"fn_r2_rowslice__m_cells[1, 4]",
+"fn_r2_rowslice__m_cells[2, 1]",
+"fn_r2_rowslice__m_cells[2, 2]",
+"fn_r2_rowslice__m_cells[2, 3]",
+"fn_r2_rowslice__m_cells[2, 4]",
+"fn_r2_rowslice__m_cells[3, 1]",
+"fn_r2_rowslice__m_cells[3, 2]",
+"fn_r2_rowslice__m_cells[3, 3]",
+"fn_r2_rowslice__m_cells[3, 4]",
+"fn_r2_colslice__m_cells[1, 1]",
+"fn_r2_colslice__m_cells[1, 2]",
+"fn_r2_colslice__m_cells[1, 3]",
+"fn_r2_colslice__m_cells[1, 4]",
+"fn_r2_colslice__m_cells[2, 1]",
+"fn_r2_colslice__m_cells[2, 2]",
+"fn_r2_colslice__m_cells[2, 3]",
+"fn_r2_colslice__m_cells[2, 4]",
+"fn_r2_colslice__m_cells[3, 1]",
+"fn_r2_colslice__m_cells[3, 2]",
+"fn_r2_colslice__m_cells[3, 3]",
+"fn_r2_colslice__m_cells[3, 4]",
+"fn_r2_range__m_cells[1, 1]",
+"fn_r2_range__m_cells[1, 2]",
+"fn_r2_range__m_cells[1, 3]",
+"fn_r2_range__m_cells[1, 4]",
+"fn_r2_range__m_cells[2, 1]",
+"fn_r2_range__m_cells[2, 2]",
+"fn_r2_range__m_cells[2, 3]",
+"fn_r2_range__m_cells[2, 4]",
+"fn_r2_range__m_cells[3, 1]",
+"fn_r2_range__m_cells[3, 2]",
+"fn_r2_range__m_cells[3, 3]",
+"fn_r2_range__m_cells[3, 4]",
+"fn_r2_multi__m_cells[1, 1]",
+"fn_r2_multi__m_cells[1, 2]",
+"fn_r2_multi__m_cells[1, 3]",
+"fn_r2_multi__m_cells[1, 4]",
+"fn_r2_multi__m_cells[2, 1]",
+"fn_r2_multi__m_cells[2, 2]",
+"fn_r2_multi__m_cells[2, 3]",
+"fn_r2_multi__m_cells[2, 4]",
+"fn_r2_multi__m_cells[3, 1]",
+"fn_r2_multi__m_cells[3, 2]",
+"fn_r2_multi__m_cells[3, 3]",
+"fn_r2_multi__m_cells[3, 4]",
+"fn_r2_cpdelem__m_cells[1, 1]",
+"fn_r2_cpdelem__m_cells[1, 2]",
+"fn_r2_cpdelem__m_cells[1, 3]",
+"fn_r2_cpdelem__m_cells[1, 4]",
+"fn_r2_cpdelem__m_cells[2, 1]",
+"fn_r2_cpdelem__m_cells[2, 2]",
+"fn_r2_cpdelem__m_cells[2, 3]",
+"fn_r2_cpdelem__m_cells[2, 4]",
+"fn_r2_cpdelem__m_cells[3, 1]",
+"fn_r2_cpdelem__m_cells[3, 2]",
+"fn_r2_cpdelem__m_cells[3, 3]",
+"fn_r2_cpdelem__m_cells[3, 4]",
+"fn_r2_reads__m_real",
+"fn_r2_reads__m_arith",
+"fn_r2_reads__m_size",
+"fn_r2_reads__m_dims",
+"fn_r2_reads__m_rowcopy",
+"fn_r2_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "fn_r2_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_fn_r3": {
+"cases": [
+{
+"container": "r3",
+"name": "fn_r3_lit",
+"write": "lit"
+},
+{
+"container": "r3",
+"name": "fn_r3_assign",
+"write": "assign"
+},
+{
+"container": "r3",
+"name": "fn_r3_udf",
+"write": "udf"
+},
+{
+"container": "r3",
+"name": "fn_r3_loop",
+"write": "loop"
+},
+{
+"container": "r3",
+"name": "fn_r3_row",
+"write": "row"
+},
+{
+"container": "r3",
+"name": "fn_r3_rowslice",
+"write": "rowslice"
+},
+{
+"container": "r3",
+"name": "fn_r3_colslice",
+"write": "colslice"
+},
+{
+"container": "r3",
+"name": "fn_r3_range",
+"write": "range"
+},
+{
+"container": "r3",
+"name": "fn_r3_multi",
+"write": "multi"
+},
+{
+"container": "r3",
+"name": "fn_r3_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r3",
+"name": "fn_r3_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"fn_r3_lit__m_cells[1, 1, 1]",
+"fn_r3_lit__m_cells[1, 1, 2]",
+"fn_r3_lit__m_cells[1, 1, 3]",
+"fn_r3_lit__m_cells[1, 1, 4]",
+"fn_r3_lit__m_cells[1, 2, 1]",
+"fn_r3_lit__m_cells[1, 2, 2]",
+"fn_r3_lit__m_cells[1, 2, 3]",
+"fn_r3_lit__m_cells[1, 2, 4]",
+"fn_r3_lit__m_cells[2, 1, 1]",
+"fn_r3_lit__m_cells[2, 1, 2]",
+"fn_r3_lit__m_cells[2, 1, 3]",
+"fn_r3_lit__m_cells[2, 1, 4]",
+"fn_r3_lit__m_cells[2, 2, 1]",
+"fn_r3_lit__m_cells[2, 2, 2]",
+"fn_r3_lit__m_cells[2, 2, 3]",
+"fn_r3_lit__m_cells[2, 2, 4]",
+"fn_r3_lit__m_cells[3, 1, 1]",
+"fn_r3_lit__m_cells[3, 1, 2]",
+"fn_r3_lit__m_cells[3, 1, 3]",
+"fn_r3_lit__m_cells[3, 1, 4]",
+"fn_r3_lit__m_cells[3, 2, 1]",
+"fn_r3_lit__m_cells[3, 2, 2]",
+"fn_r3_lit__m_cells[3, 2, 3]",
+"fn_r3_lit__m_cells[3, 2, 4]",
+"fn_r3_assign__m_cells[1, 1, 1]",
+"fn_r3_assign__m_cells[1, 1, 2]",
+"fn_r3_assign__m_cells[1, 1, 3]",
+"fn_r3_assign__m_cells[1, 1, 4]",
+"fn_r3_assign__m_cells[1, 2, 1]",
+"fn_r3_assign__m_cells[1, 2, 2]",
+"fn_r3_assign__m_cells[1, 2, 3]",
+"fn_r3_assign__m_cells[1, 2, 4]",
+"fn_r3_assign__m_cells[2, 1, 1]",
+"fn_r3_assign__m_cells[2, 1, 2]",
+"fn_r3_assign__m_cells[2, 1, 3]",
+"fn_r3_assign__m_cells[2, 1, 4]",
+"fn_r3_assign__m_cells[2, 2, 1]",
+"fn_r3_assign__m_cells[2, 2, 2]",
+"fn_r3_assign__m_cells[2, 2, 3]",
+"fn_r3_assign__m_cells[2, 2, 4]",
+"fn_r3_assign__m_cells[3, 1, 1]",
+"fn_r3_assign__m_cells[3, 1, 2]",
+"fn_r3_assign__m_cells[3, 1, 3]",
+"fn_r3_assign__m_cells[3, 1, 4]",
+"fn_r3_assign__m_cells[3, 2, 1]",
+"fn_r3_assign__m_cells[3, 2, 2]",
+"fn_r3_assign__m_cells[3, 2, 3]",
+"fn_r3_assign__m_cells[3, 2, 4]",
+"fn_r3_udf__m_cells[1, 1, 1]",
+"fn_r3_udf__m_cells[1, 1, 2]",
+"fn_r3_udf__m_cells[1, 1, 3]",
+"fn_r3_udf__m_cells[1, 1, 4]",
+"fn_r3_udf__m_cells[1, 2, 1]",
+"fn_r3_udf__m_cells[1, 2, 2]",
+"fn_r3_udf__m_cells[1, 2, 3]",
+"fn_r3_udf__m_cells[1, 2, 4]",
+"fn_r3_udf__m_cells[2, 1, 1]",
+"fn_r3_udf__m_cells[2, 1, 2]",
+"fn_r3_udf__m_cells[2, 1, 3]",
+"fn_r3_udf__m_cells[2, 1, 4]",
+"fn_r3_udf__m_cells[2, 2, 1]",
+"fn_r3_udf__m_cells[2, 2, 2]",
+"fn_r3_udf__m_cells[2, 2, 3]",
+"fn_r3_udf__m_cells[2, 2, 4]",
+"fn_r3_udf__m_cells[3, 1, 1]",
+"fn_r3_udf__m_cells[3, 1, 2]",
+"fn_r3_udf__m_cells[3, 1, 3]",
+"fn_r3_udf__m_cells[3, 1, 4]",
+"fn_r3_udf__m_cells[3, 2, 1]",
+"fn_r3_udf__m_cells[3, 2, 2]",
+"fn_r3_udf__m_cells[3, 2, 3]",
+"fn_r3_udf__m_cells[3, 2, 4]",
+"fn_r3_loop__m_cells[1, 1, 1]",
+"fn_r3_loop__m_cells[1, 1, 2]",
+"fn_r3_loop__m_cells[1, 1, 3]",
+"fn_r3_loop__m_cells[1, 1, 4]",
+"fn_r3_loop__m_cells[1, 2, 1]",
+"fn_r3_loop__m_cells[1, 2, 2]",
+"fn_r3_loop__m_cells[1, 2, 3]",
+"fn_r3_loop__m_cells[1, 2, 4]",
+"fn_r3_loop__m_cells[2, 1, 1]",
+"fn_r3_loop__m_cells[2, 1, 2]",
+"fn_r3_loop__m_cells[2, 1, 3]",
+"fn_r3_loop__m_cells[2, 1, 4]",
+"fn_r3_loop__m_cells[2, 2, 1]",
+"fn_r3_loop__m_cells[2, 2, 2]",
+"fn_r3_loop__m_cells[2, 2, 3]",
+"fn_r3_loop__m_cells[2, 2, 4]",
+"fn_r3_loop__m_cells[3, 1, 1]",
+"fn_r3_loop__m_cells[3, 1, 2]",
+"fn_r3_loop__m_cells[3, 1, 3]",
+"fn_r3_loop__m_cells[3, 1, 4]",
+"fn_r3_loop__m_cells[3, 2, 1]",
+"fn_r3_loop__m_cells[3, 2, 2]",
+"fn_r3_loop__m_cells[3, 2, 3]",
+"fn_r3_loop__m_cells[3, 2, 4]",
+"fn_r3_row__m_cells[1, 1, 1]",
+"fn_r3_row__m_cells[1, 1, 2]",
+"fn_r3_row__m_cells[1, 1, 3]",
+"fn_r3_row__m_cells[1, 1, 4]",
+"fn_r3_row__m_cells[1, 2, 1]",
+"fn_r3_row__m_cells[1, 2, 2]",
+"fn_r3_row__m_cells[1, 2, 3]",
+"fn_r3_row__m_cells[1, 2, 4]",
+"fn_r3_row__m_cells[2, 1, 1]",
+"fn_r3_row__m_cells[2, 1, 2]",
+"fn_r3_row__m_cells[2, 1, 3]",
+"fn_r3_row__m_cells[2, 1, 4]",
+"fn_r3_row__m_cells[2, 2, 1]",
+"fn_r3_row__m_cells[2, 2, 2]",
+"fn_r3_row__m_cells[2, 2, 3]",
+"fn_r3_row__m_cells[2, 2, 4]",
+"fn_r3_row__m_cells[3, 1, 1]",
+"fn_r3_row__m_cells[3, 1, 2]",
+"fn_r3_row__m_cells[3, 1, 3]",
+"fn_r3_row__m_cells[3, 1, 4]",
+"fn_r3_row__m_cells[3, 2, 1]",
+"fn_r3_row__m_cells[3, 2, 2]",
+"fn_r3_row__m_cells[3, 2, 3]",
+"fn_r3_row__m_cells[3, 2, 4]",
+"fn_r3_rowslice__m_cells[1, 1, 1]",
+"fn_r3_rowslice__m_cells[1, 1, 2]",
+"fn_r3_rowslice__m_cells[1, 1, 3]",
+"fn_r3_rowslice__m_cells[1, 1, 4]",
+"fn_r3_rowslice__m_cells[1, 2, 1]",
+"fn_r3_rowslice__m_cells[1, 2, 2]",
+"fn_r3_rowslice__m_cells[1, 2, 3]",
+"fn_r3_rowslice__m_cells[1, 2, 4]",
+"fn_r3_rowslice__m_cells[2, 1, 1]",
+"fn_r3_rowslice__m_cells[2, 1, 2]",
+"fn_r3_rowslice__m_cells[2, 1, 3]",
+"fn_r3_rowslice__m_cells[2, 1, 4]",
+"fn_r3_rowslice__m_cells[2, 2, 1]",
+"fn_r3_rowslice__m_cells[2, 2, 2]",
+"fn_r3_rowslice__m_cells[2, 2, 3]",
+"fn_r3_rowslice__m_cells[2, 2, 4]",
+"fn_r3_rowslice__m_cells[3, 1, 1]",
+"fn_r3_rowslice__m_cells[3, 1, 2]",
+"fn_r3_rowslice__m_cells[3, 1, 3]",
+"fn_r3_rowslice__m_cells[3, 1, 4]",
+"fn_r3_rowslice__m_cells[3, 2, 1]",
+"fn_r3_rowslice__m_cells[3, 2, 2]",
+"fn_r3_rowslice__m_cells[3, 2, 3]",
+"fn_r3_rowslice__m_cells[3, 2, 4]",
+"fn_r3_colslice__m_cells[1, 1, 1]",
+"fn_r3_colslice__m_cells[1, 1, 2]",
+"fn_r3_colslice__m_cells[1, 1, 3]",
+"fn_r3_colslice__m_cells[1, 1, 4]",
+"fn_r3_colslice__m_cells[1, 2, 1]",
+"fn_r3_colslice__m_cells[1, 2, 2]",
+"fn_r3_colslice__m_cells[1, 2, 3]",
+"fn_r3_colslice__m_cells[1, 2, 4]",
+"fn_r3_colslice__m_cells[2, 1, 1]",
+"fn_r3_colslice__m_cells[2, 1, 2]",
+"fn_r3_colslice__m_cells[2, 1, 3]",
+"fn_r3_colslice__m_cells[2, 1, 4]",
+"fn_r3_colslice__m_cells[2, 2, 1]",
+"fn_r3_colslice__m_cells[2, 2, 2]",
+"fn_r3_colslice__m_cells[2, 2, 3]",
+"fn_r3_colslice__m_cells[2, 2, 4]",
+"fn_r3_colslice__m_cells[3, 1, 1]",
+"fn_r3_colslice__m_cells[3, 1, 2]",
+"fn_r3_colslice__m_cells[3, 1, 3]",
+"fn_r3_colslice__m_cells[3, 1, 4]",
+"fn_r3_colslice__m_cells[3, 2, 1]",
+"fn_r3_colslice__m_cells[3, 2, 2]",
+"fn_r3_colslice__m_cells[3, 2, 3]",
+"fn_r3_colslice__m_cells[3, 2, 4]",
+"fn_r3_range__m_cells[1, 1, 1]",
+"fn_r3_range__m_cells[1, 1, 2]",
+"fn_r3_range__m_cells[1, 1, 3]",
+"fn_r3_range__m_cells[1, 1, 4]",
+"fn_r3_range__m_cells[1, 2, 1]",
+"fn_r3_range__m_cells[1, 2, 2]",
+"fn_r3_range__m_cells[1, 2, 3]",
+"fn_r3_range__m_cells[1, 2, 4]",
+"fn_r3_range__m_cells[2, 1, 1]",
+"fn_r3_range__m_cells[2, 1, 2]",
+"fn_r3_range__m_cells[2, 1, 3]",
+"fn_r3_range__m_cells[2, 1, 4]",
+"fn_r3_range__m_cells[2, 2, 1]",
+"fn_r3_range__m_cells[2, 2, 2]",
+"fn_r3_range__m_cells[2, 2, 3]",
+"fn_r3_range__m_cells[2, 2, 4]",
+"fn_r3_range__m_cells[3, 1, 1]",
+"fn_r3_range__m_cells[3, 1, 2]",
+"fn_r3_range__m_cells[3, 1, 3]",
+"fn_r3_range__m_cells[3, 1, 4]",
+"fn_r3_range__m_cells[3, 2, 1]",
+"fn_r3_range__m_cells[3, 2, 2]",
+"fn_r3_range__m_cells[3, 2, 3]",
+"fn_r3_range__m_cells[3, 2, 4]",
+"fn_r3_multi__m_cells[1, 1, 1]",
+"fn_r3_multi__m_cells[1, 1, 2]",
+"fn_r3_multi__m_cells[1, 1, 3]",
+"fn_r3_multi__m_cells[1, 1, 4]",
+"fn_r3_multi__m_cells[1, 2, 1]",
+"fn_r3_multi__m_cells[1, 2, 2]",
+"fn_r3_multi__m_cells[1, 2, 3]",
+"fn_r3_multi__m_cells[1, 2, 4]",
+"fn_r3_multi__m_cells[2, 1, 1]",
+"fn_r3_multi__m_cells[2, 1, 2]",
+"fn_r3_multi__m_cells[2, 1, 3]",
+"fn_r3_multi__m_cells[2, 1, 4]",
+"fn_r3_multi__m_cells[2, 2, 1]",
+"fn_r3_multi__m_cells[2, 2, 2]",
+"fn_r3_multi__m_cells[2, 2, 3]",
+"fn_r3_multi__m_cells[2, 2, 4]",
+"fn_r3_multi__m_cells[3, 1, 1]",
+"fn_r3_multi__m_cells[3, 1, 2]",
+"fn_r3_multi__m_cells[3, 1, 3]",
+"fn_r3_multi__m_cells[3, 1, 4]",
+"fn_r3_multi__m_cells[3, 2, 1]",
+"fn_r3_multi__m_cells[3, 2, 2]",
+"fn_r3_multi__m_cells[3, 2, 3]",
+"fn_r3_multi__m_cells[3, 2, 4]",
+"fn_r3_cpdelem__m_cells[1, 1, 1]",
+"fn_r3_cpdelem__m_cells[1, 1, 2]",
+"fn_r3_cpdelem__m_cells[1, 1, 3]",
+"fn_r3_cpdelem__m_cells[1, 1, 4]",
+"fn_r3_cpdelem__m_cells[1, 2, 1]",
+"fn_r3_cpdelem__m_cells[1, 2, 2]",
+"fn_r3_cpdelem__m_cells[1, 2, 3]",
+"fn_r3_cpdelem__m_cells[1, 2, 4]",
+"fn_r3_cpdelem__m_cells[2, 1, 1]",
+"fn_r3_cpdelem__m_cells[2, 1, 2]",
+"fn_r3_cpdelem__m_cells[2, 1, 3]",
+"fn_r3_cpdelem__m_cells[2, 1, 4]",
+"fn_r3_cpdelem__m_cells[2, 2, 1]",
+"fn_r3_cpdelem__m_cells[2, 2, 2]",
+"fn_r3_cpdelem__m_cells[2, 2, 3]",
+"fn_r3_cpdelem__m_cells[2, 2, 4]",
+"fn_r3_cpdelem__m_cells[3, 1, 1]",
+"fn_r3_cpdelem__m_cells[3, 1, 2]",
+"fn_r3_cpdelem__m_cells[3, 1, 3]",
+"fn_r3_cpdelem__m_cells[3, 1, 4]",
+"fn_r3_cpdelem__m_cells[3, 2, 1]",
+"fn_r3_cpdelem__m_cells[3, 2, 2]",
+"fn_r3_cpdelem__m_cells[3, 2, 3]",
+"fn_r3_cpdelem__m_cells[3, 2, 4]",
+"fn_r3_reads__m_real",
+"fn_r3_reads__m_arith",
+"fn_r3_reads__m_size",
+"fn_r3_reads__m_dims",
+"fn_r3_reads__m_rowcopy",
+"fn_r3_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "fn_r3_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_fn_rv": {
+"cases": [
+{
+"container": "rv",
+"name": "fn_rv_lit",
+"write": "lit"
+},
+{
+"container": "rv",
+"name": "fn_rv_assign",
+"write": "assign"
+},
+{
+"container": "rv",
+"name": "fn_rv_udf",
+"write": "udf"
+},
+{
+"container": "rv",
+"name": "fn_rv_loop",
+"write": "loop"
+},
+{
+"container": "rv",
+"name": "fn_rv_range",
+"write": "range"
+},
+{
+"container": "rv",
+"name": "fn_rv_multi",
+"write": "multi"
+},
+{
+"container": "rv",
+"name": "fn_rv_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "rv",
+"name": "fn_rv_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "rv",
+"name": "fn_rv_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"fn_rv_lit__m_cells[1]",
+"fn_rv_lit__m_cells[2]",
+"fn_rv_lit__m_cells[3]",
+"fn_rv_lit__m_cells[4]",
+"fn_rv_assign__m_cells[1]",
+"fn_rv_assign__m_cells[2]",
+"fn_rv_assign__m_cells[3]",
+"fn_rv_assign__m_cells[4]",
+"fn_rv_udf__m_cells[1]",
+"fn_rv_udf__m_cells[2]",
+"fn_rv_udf__m_cells[3]",
+"fn_rv_udf__m_cells[4]",
+"fn_rv_loop__m_cells[1]",
+"fn_rv_loop__m_cells[2]",
+"fn_rv_loop__m_cells[3]",
+"fn_rv_loop__m_cells[4]",
+"fn_rv_range__m_cells[1]",
+"fn_rv_range__m_cells[2]",
+"fn_rv_range__m_cells[3]",
+"fn_rv_range__m_cells[4]",
+"fn_rv_multi__m_cells[1]",
+"fn_rv_multi__m_cells[2]",
+"fn_rv_multi__m_cells[3]",
+"fn_rv_multi__m_cells[4]",
+"fn_rv_cpdelem__m_cells[1]",
+"fn_rv_cpdelem__m_cells[2]",
+"fn_rv_cpdelem__m_cells[3]",
+"fn_rv_cpdelem__m_cells[4]",
+"fn_rv_cpdrow__m_cells[1]",
+"fn_rv_cpdrow__m_cells[2]",
+"fn_rv_cpdrow__m_cells[3]",
+"fn_rv_cpdrow__m_cells[4]",
+"fn_rv_reads__m_real",
+"fn_rv_reads__m_arith",
+"fn_rv_reads__m_size",
+"fn_rv_reads__m_dims",
+"fn_rv_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "fn_rv_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "fn_rv_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "fn_rv_colslice",
+"reason": "not applicable: rank 1 has no row"
+}
+]
+},
+"container_flow_fn_v": {
+"cases": [
+{
+"container": "v",
+"name": "fn_v_lit",
+"write": "lit"
+},
+{
+"container": "v",
+"name": "fn_v_assign",
+"write": "assign"
+},
+{
+"container": "v",
+"name": "fn_v_udf",
+"write": "udf"
+},
+{
+"container": "v",
+"name": "fn_v_loop",
+"write": "loop"
+},
+{
+"container": "v",
+"name": "fn_v_range",
+"write": "range"
+},
+{
+"container": "v",
+"name": "fn_v_multi",
+"write": "multi"
+},
+{
+"container": "v",
+"name": "fn_v_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "v",
+"name": "fn_v_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "v",
+"name": "fn_v_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"fn_v_lit__m_cells[1]",
+"fn_v_lit__m_cells[2]",
+"fn_v_lit__m_cells[3]",
+"fn_v_lit__m_cells[4]",
+"fn_v_assign__m_cells[1]",
+"fn_v_assign__m_cells[2]",
+"fn_v_assign__m_cells[3]",
+"fn_v_assign__m_cells[4]",
+"fn_v_udf__m_cells[1]",
+"fn_v_udf__m_cells[2]",
+"fn_v_udf__m_cells[3]",
+"fn_v_udf__m_cells[4]",
+"fn_v_loop__m_cells[1]",
+"fn_v_loop__m_cells[2]",
+"fn_v_loop__m_cells[3]",
+"fn_v_loop__m_cells[4]",
+"fn_v_range__m_cells[1]",
+"fn_v_range__m_cells[2]",
+"fn_v_range__m_cells[3]",
+"fn_v_range__m_cells[4]",
+"fn_v_multi__m_cells[1]",
+"fn_v_multi__m_cells[2]",
+"fn_v_multi__m_cells[3]",
+"fn_v_multi__m_cells[4]",
+"fn_v_cpdelem__m_cells[1]",
+"fn_v_cpdelem__m_cells[2]",
+"fn_v_cpdelem__m_cells[3]",
+"fn_v_cpdelem__m_cells[4]",
+"fn_v_cpdrow__m_cells[1]",
+"fn_v_cpdrow__m_cells[2]",
+"fn_v_cpdrow__m_cells[3]",
+"fn_v_cpdrow__m_cells[4]",
+"fn_v_reads__m_real",
+"fn_v_reads__m_arith",
+"fn_v_reads__m_size",
+"fn_v_reads__m_dims",
+"fn_v_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "fn_v_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "fn_v_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "fn_v_colslice",
+"reason": "not applicable: rank 1 has no row"
+}
+]
+},
+"container_flow_gq_am": {
+"cases": [
+{
+"container": "am",
+"name": "gq_am_lit",
+"write": "lit"
+},
+{
+"container": "am",
+"name": "gq_am_assign",
+"write": "assign"
+},
+{
+"container": "am",
+"name": "gq_am_udf",
+"write": "udf"
+},
+{
+"container": "am",
+"name": "gq_am_loop",
+"write": "loop"
+},
+{
+"container": "am",
+"name": "gq_am_row",
+"write": "row"
+},
+{
+"container": "am",
+"name": "gq_am_rowslice",
+"write": "rowslice"
+},
+{
+"container": "am",
+"name": "gq_am_colslice",
+"write": "colslice"
+},
+{
+"container": "am",
+"name": "gq_am_range",
+"write": "range"
+},
+{
+"container": "am",
+"name": "gq_am_multi",
+"write": "multi"
+},
+{
+"container": "am",
+"name": "gq_am_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "am",
+"name": "gq_am_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "am",
+"name": "gq_am_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": []
+},
+"container_flow_gq_arv": {
+"cases": [
+{
+"container": "arv",
+"name": "gq_arv_lit",
+"write": "lit"
+},
+{
+"container": "arv",
+"name": "gq_arv_assign",
+"write": "assign"
+},
+{
+"container": "arv",
+"name": "gq_arv_udf",
+"write": "udf"
+},
+{
+"container": "arv",
+"name": "gq_arv_loop",
+"write": "loop"
+},
+{
+"container": "arv",
+"name": "gq_arv_row",
+"write": "row"
+},
+{
+"container": "arv",
+"name": "gq_arv_rowslice",
+"write": "rowslice"
+},
+{
+"container": "arv",
+"name": "gq_arv_colslice",
+"write": "colslice"
+},
+{
+"container": "arv",
+"name": "gq_arv_range",
+"write": "range"
+},
+{
+"container": "arv",
+"name": "gq_arv_multi",
+"write": "multi"
+},
+{
+"container": "arv",
+"name": "gq_arv_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "arv",
+"name": "gq_arv_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "arv",
+"name": "gq_arv_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": []
+},
+"container_flow_gq_av": {
+"cases": [
+{
+"container": "av",
+"name": "gq_av_lit",
+"write": "lit"
+},
+{
+"container": "av",
+"name": "gq_av_assign",
+"write": "assign"
+},
+{
+"container": "av",
+"name": "gq_av_udf",
+"write": "udf"
+},
+{
+"container": "av",
+"name": "gq_av_loop",
+"write": "loop"
+},
+{
+"container": "av",
+"name": "gq_av_row",
+"write": "row"
+},
+{
+"container": "av",
+"name": "gq_av_rowslice",
+"write": "rowslice"
+},
+{
+"container": "av",
+"name": "gq_av_colslice",
+"write": "colslice"
+},
+{
+"container": "av",
+"name": "gq_av_range",
+"write": "range"
+},
+{
+"container": "av",
+"name": "gq_av_multi",
+"write": "multi"
+},
+{
+"container": "av",
+"name": "gq_av_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "av",
+"name": "gq_av_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "av",
+"name": "gq_av_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": []
+},
+"container_flow_gq_i1": {
+"cases": [
+{
+"container": "i1",
+"name": "gq_i1_lit",
+"write": "lit"
+},
+{
+"container": "i1",
+"name": "gq_i1_assign",
+"write": "assign"
+},
+{
+"container": "i1",
+"name": "gq_i1_udf",
+"write": "udf"
+},
+{
+"container": "i1",
+"name": "gq_i1_loop",
+"write": "loop"
+},
+{
+"container": "i1",
+"name": "gq_i1_range",
+"write": "range"
+},
+{
+"container": "i1",
+"name": "gq_i1_multi",
+"write": "multi"
+},
+{
+"container": "i1",
+"name": "gq_i1_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i1",
+"name": "gq_i1_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": [
+{
+"case": "gq_i1_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "gq_i1_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "gq_i1_colslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "gq_i1_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_gq_i2": {
+"cases": [
+{
+"container": "i2",
+"name": "gq_i2_lit",
+"write": "lit"
+},
+{
+"container": "i2",
+"name": "gq_i2_assign",
+"write": "assign"
+},
+{
+"container": "i2",
+"name": "gq_i2_udf",
+"write": "udf"
+},
+{
+"container": "i2",
+"name": "gq_i2_loop",
+"write": "loop"
+},
+{
+"container": "i2",
+"name": "gq_i2_row",
+"write": "row"
+},
+{
+"container": "i2",
+"name": "gq_i2_rowslice",
+"write": "rowslice"
+},
+{
+"container": "i2",
+"name": "gq_i2_colslice",
+"write": "colslice"
+},
+{
+"container": "i2",
+"name": "gq_i2_range",
+"write": "range"
+},
+{
+"container": "i2",
+"name": "gq_i2_multi",
+"write": "multi"
+},
+{
+"container": "i2",
+"name": "gq_i2_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i2",
+"name": "gq_i2_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": [
+{
+"case": "gq_i2_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_gq_i3": {
+"cases": [
+{
+"container": "i3",
+"name": "gq_i3_lit",
+"write": "lit"
+},
+{
+"container": "i3",
+"name": "gq_i3_assign",
+"write": "assign"
+},
+{
+"container": "i3",
+"name": "gq_i3_udf",
+"write": "udf"
+},
+{
+"container": "i3",
+"name": "gq_i3_loop",
+"write": "loop"
+},
+{
+"container": "i3",
+"name": "gq_i3_row",
+"write": "row"
+},
+{
+"container": "i3",
+"name": "gq_i3_rowslice",
+"write": "rowslice"
+},
+{
+"container": "i3",
+"name": "gq_i3_colslice",
+"write": "colslice"
+},
+{
+"container": "i3",
+"name": "gq_i3_range",
+"write": "range"
+},
+{
+"container": "i3",
+"name": "gq_i3_multi",
+"write": "multi"
+},
+{
+"container": "i3",
+"name": "gq_i3_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i3",
+"name": "gq_i3_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": [
+{
+"case": "gq_i3_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_gq_m": {
+"cases": [
+{
+"container": "m",
+"name": "gq_m_lit",
+"write": "lit"
+},
+{
+"container": "m",
+"name": "gq_m_assign",
+"write": "assign"
+},
+{
+"container": "m",
+"name": "gq_m_udf",
+"write": "udf"
+},
+{
+"container": "m",
+"name": "gq_m_loop",
+"write": "loop"
+},
+{
+"container": "m",
+"name": "gq_m_row",
+"write": "row"
+},
+{
+"container": "m",
+"name": "gq_m_rowslice",
+"write": "rowslice"
+},
+{
+"container": "m",
+"name": "gq_m_colslice",
+"write": "colslice"
+},
+{
+"container": "m",
+"name": "gq_m_range",
+"write": "range"
+},
+{
+"container": "m",
+"name": "gq_m_multi",
+"write": "multi"
+},
+{
+"container": "m",
+"name": "gq_m_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "m",
+"name": "gq_m_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "m",
+"name": "gq_m_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": []
+},
+"container_flow_gq_r1": {
+"cases": [
+{
+"container": "r1",
+"name": "gq_r1_lit",
+"write": "lit"
+},
+{
+"container": "r1",
+"name": "gq_r1_assign",
+"write": "assign"
+},
+{
+"container": "r1",
+"name": "gq_r1_udf",
+"write": "udf"
+},
+{
+"container": "r1",
+"name": "gq_r1_loop",
+"write": "loop"
+},
+{
+"container": "r1",
+"name": "gq_r1_range",
+"write": "range"
+},
+{
+"container": "r1",
+"name": "gq_r1_multi",
+"write": "multi"
+},
+{
+"container": "r1",
+"name": "gq_r1_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r1",
+"name": "gq_r1_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": [
+{
+"case": "gq_r1_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "gq_r1_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "gq_r1_colslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "gq_r1_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_gq_r2": {
+"cases": [
+{
+"container": "r2",
+"name": "gq_r2_lit",
+"write": "lit"
+},
+{
+"container": "r2",
+"name": "gq_r2_assign",
+"write": "assign"
+},
+{
+"container": "r2",
+"name": "gq_r2_udf",
+"write": "udf"
+},
+{
+"container": "r2",
+"name": "gq_r2_loop",
+"write": "loop"
+},
+{
+"container": "r2",
+"name": "gq_r2_row",
+"write": "row"
+},
+{
+"container": "r2",
+"name": "gq_r2_rowslice",
+"write": "rowslice"
+},
+{
+"container": "r2",
+"name": "gq_r2_colslice",
+"write": "colslice"
+},
+{
+"container": "r2",
+"name": "gq_r2_range",
+"write": "range"
+},
+{
+"container": "r2",
+"name": "gq_r2_multi",
+"write": "multi"
+},
+{
+"container": "r2",
+"name": "gq_r2_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r2",
+"name": "gq_r2_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": [
+{
+"case": "gq_r2_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_gq_r3": {
+"cases": [
+{
+"container": "r3",
+"name": "gq_r3_lit",
+"write": "lit"
+},
+{
+"container": "r3",
+"name": "gq_r3_assign",
+"write": "assign"
+},
+{
+"container": "r3",
+"name": "gq_r3_udf",
+"write": "udf"
+},
+{
+"container": "r3",
+"name": "gq_r3_loop",
+"write": "loop"
+},
+{
+"container": "r3",
+"name": "gq_r3_row",
+"write": "row"
+},
+{
+"container": "r3",
+"name": "gq_r3_rowslice",
+"write": "rowslice"
+},
+{
+"container": "r3",
+"name": "gq_r3_colslice",
+"write": "colslice"
+},
+{
+"container": "r3",
+"name": "gq_r3_range",
+"write": "range"
+},
+{
+"container": "r3",
+"name": "gq_r3_multi",
+"write": "multi"
+},
+{
+"container": "r3",
+"name": "gq_r3_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r3",
+"name": "gq_r3_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": [
+{
+"case": "gq_r3_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_gq_rv": {
+"cases": [
+{
+"container": "rv",
+"name": "gq_rv_lit",
+"write": "lit"
+},
+{
+"container": "rv",
+"name": "gq_rv_assign",
+"write": "assign"
+},
+{
+"container": "rv",
+"name": "gq_rv_udf",
+"write": "udf"
+},
+{
+"container": "rv",
+"name": "gq_rv_loop",
+"write": "loop"
+},
+{
+"container": "rv",
+"name": "gq_rv_range",
+"write": "range"
+},
+{
+"container": "rv",
+"name": "gq_rv_multi",
+"write": "multi"
+},
+{
+"container": "rv",
+"name": "gq_rv_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "rv",
+"name": "gq_rv_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "rv",
+"name": "gq_rv_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": [
+{
+"case": "gq_rv_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "gq_rv_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "gq_rv_colslice",
+"reason": "not applicable: rank 1 has no row"
+}
+]
+},
+"container_flow_gq_v": {
+"cases": [
+{
+"container": "v",
+"name": "gq_v_lit",
+"write": "lit"
+},
+{
+"container": "v",
+"name": "gq_v_assign",
+"write": "assign"
+},
+{
+"container": "v",
+"name": "gq_v_udf",
+"write": "udf"
+},
+{
+"container": "v",
+"name": "gq_v_loop",
+"write": "loop"
+},
+{
+"container": "v",
+"name": "gq_v_range",
+"write": "range"
+},
+{
+"container": "v",
+"name": "gq_v_multi",
+"write": "multi"
+},
+{
+"container": "v",
+"name": "gq_v_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "v",
+"name": "gq_v_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "v",
+"name": "gq_v_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": [
+{
+"case": "gq_v_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "gq_v_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "gq_v_colslice",
+"reason": "not applicable: rank 1 has no row"
+}
+]
+},
+"container_flow_m_am": {
+"cases": [
+{
+"container": "am",
+"name": "m_am_lit",
+"write": "lit"
+},
+{
+"container": "am",
+"name": "m_am_assign",
+"write": "assign"
+},
+{
+"container": "am",
+"name": "m_am_udf",
+"write": "udf"
+},
+{
+"container": "am",
+"name": "m_am_loop",
+"write": "loop"
+},
+{
+"container": "am",
+"name": "m_am_row",
+"write": "row"
+},
+{
+"container": "am",
+"name": "m_am_rowslice",
+"write": "rowslice"
+},
+{
+"container": "am",
+"name": "m_am_colslice",
+"write": "colslice"
+},
+{
+"container": "am",
+"name": "m_am_range",
+"write": "range"
+},
+{
+"container": "am",
+"name": "m_am_multi",
+"write": "multi"
+},
+{
+"container": "am",
+"name": "m_am_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "am",
+"name": "m_am_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "am",
+"name": "m_am_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"m_am_lit__m_cells[1, 1, 1]",
+"m_am_lit__m_cells[1, 1, 2]",
+"m_am_lit__m_cells[1, 1, 3]",
+"m_am_lit__m_cells[1, 1, 4]",
+"m_am_lit__m_cells[1, 2, 1]",
+"m_am_lit__m_cells[1, 2, 2]",
+"m_am_lit__m_cells[1, 2, 3]",
+"m_am_lit__m_cells[1, 2, 4]",
+"m_am_lit__m_cells[2, 1, 1]",
+"m_am_lit__m_cells[2, 1, 2]",
+"m_am_lit__m_cells[2, 1, 3]",
+"m_am_lit__m_cells[2, 1, 4]",
+"m_am_lit__m_cells[2, 2, 1]",
+"m_am_lit__m_cells[2, 2, 2]",
+"m_am_lit__m_cells[2, 2, 3]",
+"m_am_lit__m_cells[2, 2, 4]",
+"m_am_lit__m_cells[3, 1, 1]",
+"m_am_lit__m_cells[3, 1, 2]",
+"m_am_lit__m_cells[3, 1, 3]",
+"m_am_lit__m_cells[3, 1, 4]",
+"m_am_lit__m_cells[3, 2, 1]",
+"m_am_lit__m_cells[3, 2, 2]",
+"m_am_lit__m_cells[3, 2, 3]",
+"m_am_lit__m_cells[3, 2, 4]",
+"m_am_assign__m_cells[1, 1, 1]",
+"m_am_assign__m_cells[1, 1, 2]",
+"m_am_assign__m_cells[1, 1, 3]",
+"m_am_assign__m_cells[1, 1, 4]",
+"m_am_assign__m_cells[1, 2, 1]",
+"m_am_assign__m_cells[1, 2, 2]",
+"m_am_assign__m_cells[1, 2, 3]",
+"m_am_assign__m_cells[1, 2, 4]",
+"m_am_assign__m_cells[2, 1, 1]",
+"m_am_assign__m_cells[2, 1, 2]",
+"m_am_assign__m_cells[2, 1, 3]",
+"m_am_assign__m_cells[2, 1, 4]",
+"m_am_assign__m_cells[2, 2, 1]",
+"m_am_assign__m_cells[2, 2, 2]",
+"m_am_assign__m_cells[2, 2, 3]",
+"m_am_assign__m_cells[2, 2, 4]",
+"m_am_assign__m_cells[3, 1, 1]",
+"m_am_assign__m_cells[3, 1, 2]",
+"m_am_assign__m_cells[3, 1, 3]",
+"m_am_assign__m_cells[3, 1, 4]",
+"m_am_assign__m_cells[3, 2, 1]",
+"m_am_assign__m_cells[3, 2, 2]",
+"m_am_assign__m_cells[3, 2, 3]",
+"m_am_assign__m_cells[3, 2, 4]",
+"m_am_udf__m_cells[1, 1, 1]",
+"m_am_udf__m_cells[1, 1, 2]",
+"m_am_udf__m_cells[1, 1, 3]",
+"m_am_udf__m_cells[1, 1, 4]",
+"m_am_udf__m_cells[1, 2, 1]",
+"m_am_udf__m_cells[1, 2, 2]",
+"m_am_udf__m_cells[1, 2, 3]",
+"m_am_udf__m_cells[1, 2, 4]",
+"m_am_udf__m_cells[2, 1, 1]",
+"m_am_udf__m_cells[2, 1, 2]",
+"m_am_udf__m_cells[2, 1, 3]",
+"m_am_udf__m_cells[2, 1, 4]",
+"m_am_udf__m_cells[2, 2, 1]",
+"m_am_udf__m_cells[2, 2, 2]",
+"m_am_udf__m_cells[2, 2, 3]",
+"m_am_udf__m_cells[2, 2, 4]",
+"m_am_udf__m_cells[3, 1, 1]",
+"m_am_udf__m_cells[3, 1, 2]",
+"m_am_udf__m_cells[3, 1, 3]",
+"m_am_udf__m_cells[3, 1, 4]",
+"m_am_udf__m_cells[3, 2, 1]",
+"m_am_udf__m_cells[3, 2, 2]",
+"m_am_udf__m_cells[3, 2, 3]",
+"m_am_udf__m_cells[3, 2, 4]",
+"m_am_loop__m_cells[1, 1, 1]",
+"m_am_loop__m_cells[1, 1, 2]",
+"m_am_loop__m_cells[1, 1, 3]",
+"m_am_loop__m_cells[1, 1, 4]",
+"m_am_loop__m_cells[1, 2, 1]",
+"m_am_loop__m_cells[1, 2, 2]",
+"m_am_loop__m_cells[1, 2, 3]",
+"m_am_loop__m_cells[1, 2, 4]",
+"m_am_loop__m_cells[2, 1, 1]",
+"m_am_loop__m_cells[2, 1, 2]",
+"m_am_loop__m_cells[2, 1, 3]",
+"m_am_loop__m_cells[2, 1, 4]",
+"m_am_loop__m_cells[2, 2, 1]",
+"m_am_loop__m_cells[2, 2, 2]",
+"m_am_loop__m_cells[2, 2, 3]",
+"m_am_loop__m_cells[2, 2, 4]",
+"m_am_loop__m_cells[3, 1, 1]",
+"m_am_loop__m_cells[3, 1, 2]",
+"m_am_loop__m_cells[3, 1, 3]",
+"m_am_loop__m_cells[3, 1, 4]",
+"m_am_loop__m_cells[3, 2, 1]",
+"m_am_loop__m_cells[3, 2, 2]",
+"m_am_loop__m_cells[3, 2, 3]",
+"m_am_loop__m_cells[3, 2, 4]",
+"m_am_row__m_cells[1, 1, 1]",
+"m_am_row__m_cells[1, 1, 2]",
+"m_am_row__m_cells[1, 1, 3]",
+"m_am_row__m_cells[1, 1, 4]",
+"m_am_row__m_cells[1, 2, 1]",
+"m_am_row__m_cells[1, 2, 2]",
+"m_am_row__m_cells[1, 2, 3]",
+"m_am_row__m_cells[1, 2, 4]",
+"m_am_row__m_cells[2, 1, 1]",
+"m_am_row__m_cells[2, 1, 2]",
+"m_am_row__m_cells[2, 1, 3]",
+"m_am_row__m_cells[2, 1, 4]",
+"m_am_row__m_cells[2, 2, 1]",
+"m_am_row__m_cells[2, 2, 2]",
+"m_am_row__m_cells[2, 2, 3]",
+"m_am_row__m_cells[2, 2, 4]",
+"m_am_row__m_cells[3, 1, 1]",
+"m_am_row__m_cells[3, 1, 2]",
+"m_am_row__m_cells[3, 1, 3]",
+"m_am_row__m_cells[3, 1, 4]",
+"m_am_row__m_cells[3, 2, 1]",
+"m_am_row__m_cells[3, 2, 2]",
+"m_am_row__m_cells[3, 2, 3]",
+"m_am_row__m_cells[3, 2, 4]",
+"m_am_rowslice__m_cells[1, 1, 1]",
+"m_am_rowslice__m_cells[1, 1, 2]",
+"m_am_rowslice__m_cells[1, 1, 3]",
+"m_am_rowslice__m_cells[1, 1, 4]",
+"m_am_rowslice__m_cells[1, 2, 1]",
+"m_am_rowslice__m_cells[1, 2, 2]",
+"m_am_rowslice__m_cells[1, 2, 3]",
+"m_am_rowslice__m_cells[1, 2, 4]",
+"m_am_rowslice__m_cells[2, 1, 1]",
+"m_am_rowslice__m_cells[2, 1, 2]",
+"m_am_rowslice__m_cells[2, 1, 3]",
+"m_am_rowslice__m_cells[2, 1, 4]",
+"m_am_rowslice__m_cells[2, 2, 1]",
+"m_am_rowslice__m_cells[2, 2, 2]",
+"m_am_rowslice__m_cells[2, 2, 3]",
+"m_am_rowslice__m_cells[2, 2, 4]",
+"m_am_rowslice__m_cells[3, 1, 1]",
+"m_am_rowslice__m_cells[3, 1, 2]",
+"m_am_rowslice__m_cells[3, 1, 3]",
+"m_am_rowslice__m_cells[3, 1, 4]",
+"m_am_rowslice__m_cells[3, 2, 1]",
+"m_am_rowslice__m_cells[3, 2, 2]",
+"m_am_rowslice__m_cells[3, 2, 3]",
+"m_am_rowslice__m_cells[3, 2, 4]",
+"m_am_colslice__m_cells[1, 1, 1]",
+"m_am_colslice__m_cells[1, 1, 2]",
+"m_am_colslice__m_cells[1, 1, 3]",
+"m_am_colslice__m_cells[1, 1, 4]",
+"m_am_colslice__m_cells[1, 2, 1]",
+"m_am_colslice__m_cells[1, 2, 2]",
+"m_am_colslice__m_cells[1, 2, 3]",
+"m_am_colslice__m_cells[1, 2, 4]",
+"m_am_colslice__m_cells[2, 1, 1]",
+"m_am_colslice__m_cells[2, 1, 2]",
+"m_am_colslice__m_cells[2, 1, 3]",
+"m_am_colslice__m_cells[2, 1, 4]",
+"m_am_colslice__m_cells[2, 2, 1]",
+"m_am_colslice__m_cells[2, 2, 2]",
+"m_am_colslice__m_cells[2, 2, 3]",
+"m_am_colslice__m_cells[2, 2, 4]",
+"m_am_colslice__m_cells[3, 1, 1]",
+"m_am_colslice__m_cells[3, 1, 2]",
+"m_am_colslice__m_cells[3, 1, 3]",
+"m_am_colslice__m_cells[3, 1, 4]",
+"m_am_colslice__m_cells[3, 2, 1]",
+"m_am_colslice__m_cells[3, 2, 2]",
+"m_am_colslice__m_cells[3, 2, 3]",
+"m_am_colslice__m_cells[3, 2, 4]",
+"m_am_range__m_cells[1, 1, 1]",
+"m_am_range__m_cells[1, 1, 2]",
+"m_am_range__m_cells[1, 1, 3]",
+"m_am_range__m_cells[1, 1, 4]",
+"m_am_range__m_cells[1, 2, 1]",
+"m_am_range__m_cells[1, 2, 2]",
+"m_am_range__m_cells[1, 2, 3]",
+"m_am_range__m_cells[1, 2, 4]",
+"m_am_range__m_cells[2, 1, 1]",
+"m_am_range__m_cells[2, 1, 2]",
+"m_am_range__m_cells[2, 1, 3]",
+"m_am_range__m_cells[2, 1, 4]",
+"m_am_range__m_cells[2, 2, 1]",
+"m_am_range__m_cells[2, 2, 2]",
+"m_am_range__m_cells[2, 2, 3]",
+"m_am_range__m_cells[2, 2, 4]",
+"m_am_range__m_cells[3, 1, 1]",
+"m_am_range__m_cells[3, 1, 2]",
+"m_am_range__m_cells[3, 1, 3]",
+"m_am_range__m_cells[3, 1, 4]",
+"m_am_range__m_cells[3, 2, 1]",
+"m_am_range__m_cells[3, 2, 2]",
+"m_am_range__m_cells[3, 2, 3]",
+"m_am_range__m_cells[3, 2, 4]",
+"m_am_multi__m_cells[1, 1, 1]",
+"m_am_multi__m_cells[1, 1, 2]",
+"m_am_multi__m_cells[1, 1, 3]",
+"m_am_multi__m_cells[1, 1, 4]",
+"m_am_multi__m_cells[1, 2, 1]",
+"m_am_multi__m_cells[1, 2, 2]",
+"m_am_multi__m_cells[1, 2, 3]",
+"m_am_multi__m_cells[1, 2, 4]",
+"m_am_multi__m_cells[2, 1, 1]",
+"m_am_multi__m_cells[2, 1, 2]",
+"m_am_multi__m_cells[2, 1, 3]",
+"m_am_multi__m_cells[2, 1, 4]",
+"m_am_multi__m_cells[2, 2, 1]",
+"m_am_multi__m_cells[2, 2, 2]",
+"m_am_multi__m_cells[2, 2, 3]",
+"m_am_multi__m_cells[2, 2, 4]",
+"m_am_multi__m_cells[3, 1, 1]",
+"m_am_multi__m_cells[3, 1, 2]",
+"m_am_multi__m_cells[3, 1, 3]",
+"m_am_multi__m_cells[3, 1, 4]",
+"m_am_multi__m_cells[3, 2, 1]",
+"m_am_multi__m_cells[3, 2, 2]",
+"m_am_multi__m_cells[3, 2, 3]",
+"m_am_multi__m_cells[3, 2, 4]",
+"m_am_cpdelem__m_cells[1, 1, 1]",
+"m_am_cpdelem__m_cells[1, 1, 2]",
+"m_am_cpdelem__m_cells[1, 1, 3]",
+"m_am_cpdelem__m_cells[1, 1, 4]",
+"m_am_cpdelem__m_cells[1, 2, 1]",
+"m_am_cpdelem__m_cells[1, 2, 2]",
+"m_am_cpdelem__m_cells[1, 2, 3]",
+"m_am_cpdelem__m_cells[1, 2, 4]",
+"m_am_cpdelem__m_cells[2, 1, 1]",
+"m_am_cpdelem__m_cells[2, 1, 2]",
+"m_am_cpdelem__m_cells[2, 1, 3]",
+"m_am_cpdelem__m_cells[2, 1, 4]",
+"m_am_cpdelem__m_cells[2, 2, 1]",
+"m_am_cpdelem__m_cells[2, 2, 2]",
+"m_am_cpdelem__m_cells[2, 2, 3]",
+"m_am_cpdelem__m_cells[2, 2, 4]",
+"m_am_cpdelem__m_cells[3, 1, 1]",
+"m_am_cpdelem__m_cells[3, 1, 2]",
+"m_am_cpdelem__m_cells[3, 1, 3]",
+"m_am_cpdelem__m_cells[3, 1, 4]",
+"m_am_cpdelem__m_cells[3, 2, 1]",
+"m_am_cpdelem__m_cells[3, 2, 2]",
+"m_am_cpdelem__m_cells[3, 2, 3]",
+"m_am_cpdelem__m_cells[3, 2, 4]",
+"m_am_cpdrow__m_cells[1, 1, 1]",
+"m_am_cpdrow__m_cells[1, 1, 2]",
+"m_am_cpdrow__m_cells[1, 1, 3]",
+"m_am_cpdrow__m_cells[1, 1, 4]",
+"m_am_cpdrow__m_cells[1, 2, 1]",
+"m_am_cpdrow__m_cells[1, 2, 2]",
+"m_am_cpdrow__m_cells[1, 2, 3]",
+"m_am_cpdrow__m_cells[1, 2, 4]",
+"m_am_cpdrow__m_cells[2, 1, 1]",
+"m_am_cpdrow__m_cells[2, 1, 2]",
+"m_am_cpdrow__m_cells[2, 1, 3]",
+"m_am_cpdrow__m_cells[2, 1, 4]",
+"m_am_cpdrow__m_cells[2, 2, 1]",
+"m_am_cpdrow__m_cells[2, 2, 2]",
+"m_am_cpdrow__m_cells[2, 2, 3]",
+"m_am_cpdrow__m_cells[2, 2, 4]",
+"m_am_cpdrow__m_cells[3, 1, 1]",
+"m_am_cpdrow__m_cells[3, 1, 2]",
+"m_am_cpdrow__m_cells[3, 1, 3]",
+"m_am_cpdrow__m_cells[3, 1, 4]",
+"m_am_cpdrow__m_cells[3, 2, 1]",
+"m_am_cpdrow__m_cells[3, 2, 2]",
+"m_am_cpdrow__m_cells[3, 2, 3]",
+"m_am_cpdrow__m_cells[3, 2, 4]",
+"m_am_reads__m_real",
+"m_am_reads__m_arith",
+"m_am_reads__m_size",
+"m_am_reads__m_dims",
+"m_am_reads__m_rowcopy",
+"m_am_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_m_arv": {
+"cases": [
+{
+"container": "arv",
+"name": "m_arv_lit",
+"write": "lit"
+},
+{
+"container": "arv",
+"name": "m_arv_assign",
+"write": "assign"
+},
+{
+"container": "arv",
+"name": "m_arv_udf",
+"write": "udf"
+},
+{
+"container": "arv",
+"name": "m_arv_loop",
+"write": "loop"
+},
+{
+"container": "arv",
+"name": "m_arv_row",
+"write": "row"
+},
+{
+"container": "arv",
+"name": "m_arv_rowslice",
+"write": "rowslice"
+},
+{
+"container": "arv",
+"name": "m_arv_colslice",
+"write": "colslice"
+},
+{
+"container": "arv",
+"name": "m_arv_range",
+"write": "range"
+},
+{
+"container": "arv",
+"name": "m_arv_multi",
+"write": "multi"
+},
+{
+"container": "arv",
+"name": "m_arv_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "arv",
+"name": "m_arv_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "arv",
+"name": "m_arv_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"m_arv_lit__m_cells[1, 1]",
+"m_arv_lit__m_cells[1, 2]",
+"m_arv_lit__m_cells[1, 3]",
+"m_arv_lit__m_cells[1, 4]",
+"m_arv_lit__m_cells[2, 1]",
+"m_arv_lit__m_cells[2, 2]",
+"m_arv_lit__m_cells[2, 3]",
+"m_arv_lit__m_cells[2, 4]",
+"m_arv_lit__m_cells[3, 1]",
+"m_arv_lit__m_cells[3, 2]",
+"m_arv_lit__m_cells[3, 3]",
+"m_arv_lit__m_cells[3, 4]",
+"m_arv_assign__m_cells[1, 1]",
+"m_arv_assign__m_cells[1, 2]",
+"m_arv_assign__m_cells[1, 3]",
+"m_arv_assign__m_cells[1, 4]",
+"m_arv_assign__m_cells[2, 1]",
+"m_arv_assign__m_cells[2, 2]",
+"m_arv_assign__m_cells[2, 3]",
+"m_arv_assign__m_cells[2, 4]",
+"m_arv_assign__m_cells[3, 1]",
+"m_arv_assign__m_cells[3, 2]",
+"m_arv_assign__m_cells[3, 3]",
+"m_arv_assign__m_cells[3, 4]",
+"m_arv_udf__m_cells[1, 1]",
+"m_arv_udf__m_cells[1, 2]",
+"m_arv_udf__m_cells[1, 3]",
+"m_arv_udf__m_cells[1, 4]",
+"m_arv_udf__m_cells[2, 1]",
+"m_arv_udf__m_cells[2, 2]",
+"m_arv_udf__m_cells[2, 3]",
+"m_arv_udf__m_cells[2, 4]",
+"m_arv_udf__m_cells[3, 1]",
+"m_arv_udf__m_cells[3, 2]",
+"m_arv_udf__m_cells[3, 3]",
+"m_arv_udf__m_cells[3, 4]",
+"m_arv_loop__m_cells[1, 1]",
+"m_arv_loop__m_cells[1, 2]",
+"m_arv_loop__m_cells[1, 3]",
+"m_arv_loop__m_cells[1, 4]",
+"m_arv_loop__m_cells[2, 1]",
+"m_arv_loop__m_cells[2, 2]",
+"m_arv_loop__m_cells[2, 3]",
+"m_arv_loop__m_cells[2, 4]",
+"m_arv_loop__m_cells[3, 1]",
+"m_arv_loop__m_cells[3, 2]",
+"m_arv_loop__m_cells[3, 3]",
+"m_arv_loop__m_cells[3, 4]",
+"m_arv_row__m_cells[1, 1]",
+"m_arv_row__m_cells[1, 2]",
+"m_arv_row__m_cells[1, 3]",
+"m_arv_row__m_cells[1, 4]",
+"m_arv_row__m_cells[2, 1]",
+"m_arv_row__m_cells[2, 2]",
+"m_arv_row__m_cells[2, 3]",
+"m_arv_row__m_cells[2, 4]",
+"m_arv_row__m_cells[3, 1]",
+"m_arv_row__m_cells[3, 2]",
+"m_arv_row__m_cells[3, 3]",
+"m_arv_row__m_cells[3, 4]",
+"m_arv_rowslice__m_cells[1, 1]",
+"m_arv_rowslice__m_cells[1, 2]",
+"m_arv_rowslice__m_cells[1, 3]",
+"m_arv_rowslice__m_cells[1, 4]",
+"m_arv_rowslice__m_cells[2, 1]",
+"m_arv_rowslice__m_cells[2, 2]",
+"m_arv_rowslice__m_cells[2, 3]",
+"m_arv_rowslice__m_cells[2, 4]",
+"m_arv_rowslice__m_cells[3, 1]",
+"m_arv_rowslice__m_cells[3, 2]",
+"m_arv_rowslice__m_cells[3, 3]",
+"m_arv_rowslice__m_cells[3, 4]",
+"m_arv_colslice__m_cells[1, 1]",
+"m_arv_colslice__m_cells[1, 2]",
+"m_arv_colslice__m_cells[1, 3]",
+"m_arv_colslice__m_cells[1, 4]",
+"m_arv_colslice__m_cells[2, 1]",
+"m_arv_colslice__m_cells[2, 2]",
+"m_arv_colslice__m_cells[2, 3]",
+"m_arv_colslice__m_cells[2, 4]",
+"m_arv_colslice__m_cells[3, 1]",
+"m_arv_colslice__m_cells[3, 2]",
+"m_arv_colslice__m_cells[3, 3]",
+"m_arv_colslice__m_cells[3, 4]",
+"m_arv_range__m_cells[1, 1]",
+"m_arv_range__m_cells[1, 2]",
+"m_arv_range__m_cells[1, 3]",
+"m_arv_range__m_cells[1, 4]",
+"m_arv_range__m_cells[2, 1]",
+"m_arv_range__m_cells[2, 2]",
+"m_arv_range__m_cells[2, 3]",
+"m_arv_range__m_cells[2, 4]",
+"m_arv_range__m_cells[3, 1]",
+"m_arv_range__m_cells[3, 2]",
+"m_arv_range__m_cells[3, 3]",
+"m_arv_range__m_cells[3, 4]",
+"m_arv_multi__m_cells[1, 1]",
+"m_arv_multi__m_cells[1, 2]",
+"m_arv_multi__m_cells[1, 3]",
+"m_arv_multi__m_cells[1, 4]",
+"m_arv_multi__m_cells[2, 1]",
+"m_arv_multi__m_cells[2, 2]",
+"m_arv_multi__m_cells[2, 3]",
+"m_arv_multi__m_cells[2, 4]",
+"m_arv_multi__m_cells[3, 1]",
+"m_arv_multi__m_cells[3, 2]",
+"m_arv_multi__m_cells[3, 3]",
+"m_arv_multi__m_cells[3, 4]",
+"m_arv_cpdelem__m_cells[1, 1]",
+"m_arv_cpdelem__m_cells[1, 2]",
+"m_arv_cpdelem__m_cells[1, 3]",
+"m_arv_cpdelem__m_cells[1, 4]",
+"m_arv_cpdelem__m_cells[2, 1]",
+"m_arv_cpdelem__m_cells[2, 2]",
+"m_arv_cpdelem__m_cells[2, 3]",
+"m_arv_cpdelem__m_cells[2, 4]",
+"m_arv_cpdelem__m_cells[3, 1]",
+"m_arv_cpdelem__m_cells[3, 2]",
+"m_arv_cpdelem__m_cells[3, 3]",
+"m_arv_cpdelem__m_cells[3, 4]",
+"m_arv_cpdrow__m_cells[1, 1]",
+"m_arv_cpdrow__m_cells[1, 2]",
+"m_arv_cpdrow__m_cells[1, 3]",
+"m_arv_cpdrow__m_cells[1, 4]",
+"m_arv_cpdrow__m_cells[2, 1]",
+"m_arv_cpdrow__m_cells[2, 2]",
+"m_arv_cpdrow__m_cells[2, 3]",
+"m_arv_cpdrow__m_cells[2, 4]",
+"m_arv_cpdrow__m_cells[3, 1]",
+"m_arv_cpdrow__m_cells[3, 2]",
+"m_arv_cpdrow__m_cells[3, 3]",
+"m_arv_cpdrow__m_cells[3, 4]",
+"m_arv_reads__m_real",
+"m_arv_reads__m_arith",
+"m_arv_reads__m_size",
+"m_arv_reads__m_dims",
+"m_arv_reads__m_rowcopy",
+"m_arv_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_m_av": {
+"cases": [
+{
+"container": "av",
+"name": "m_av_lit",
+"write": "lit"
+},
+{
+"container": "av",
+"name": "m_av_assign",
+"write": "assign"
+},
+{
+"container": "av",
+"name": "m_av_udf",
+"write": "udf"
+},
+{
+"container": "av",
+"name": "m_av_loop",
+"write": "loop"
+},
+{
+"container": "av",
+"name": "m_av_row",
+"write": "row"
+},
+{
+"container": "av",
+"name": "m_av_rowslice",
+"write": "rowslice"
+},
+{
+"container": "av",
+"name": "m_av_colslice",
+"write": "colslice"
+},
+{
+"container": "av",
+"name": "m_av_range",
+"write": "range"
+},
+{
+"container": "av",
+"name": "m_av_multi",
+"write": "multi"
+},
+{
+"container": "av",
+"name": "m_av_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "av",
+"name": "m_av_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "av",
+"name": "m_av_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"m_av_lit__m_cells[1, 1]",
+"m_av_lit__m_cells[1, 2]",
+"m_av_lit__m_cells[1, 3]",
+"m_av_lit__m_cells[1, 4]",
+"m_av_lit__m_cells[2, 1]",
+"m_av_lit__m_cells[2, 2]",
+"m_av_lit__m_cells[2, 3]",
+"m_av_lit__m_cells[2, 4]",
+"m_av_lit__m_cells[3, 1]",
+"m_av_lit__m_cells[3, 2]",
+"m_av_lit__m_cells[3, 3]",
+"m_av_lit__m_cells[3, 4]",
+"m_av_assign__m_cells[1, 1]",
+"m_av_assign__m_cells[1, 2]",
+"m_av_assign__m_cells[1, 3]",
+"m_av_assign__m_cells[1, 4]",
+"m_av_assign__m_cells[2, 1]",
+"m_av_assign__m_cells[2, 2]",
+"m_av_assign__m_cells[2, 3]",
+"m_av_assign__m_cells[2, 4]",
+"m_av_assign__m_cells[3, 1]",
+"m_av_assign__m_cells[3, 2]",
+"m_av_assign__m_cells[3, 3]",
+"m_av_assign__m_cells[3, 4]",
+"m_av_udf__m_cells[1, 1]",
+"m_av_udf__m_cells[1, 2]",
+"m_av_udf__m_cells[1, 3]",
+"m_av_udf__m_cells[1, 4]",
+"m_av_udf__m_cells[2, 1]",
+"m_av_udf__m_cells[2, 2]",
+"m_av_udf__m_cells[2, 3]",
+"m_av_udf__m_cells[2, 4]",
+"m_av_udf__m_cells[3, 1]",
+"m_av_udf__m_cells[3, 2]",
+"m_av_udf__m_cells[3, 3]",
+"m_av_udf__m_cells[3, 4]",
+"m_av_loop__m_cells[1, 1]",
+"m_av_loop__m_cells[1, 2]",
+"m_av_loop__m_cells[1, 3]",
+"m_av_loop__m_cells[1, 4]",
+"m_av_loop__m_cells[2, 1]",
+"m_av_loop__m_cells[2, 2]",
+"m_av_loop__m_cells[2, 3]",
+"m_av_loop__m_cells[2, 4]",
+"m_av_loop__m_cells[3, 1]",
+"m_av_loop__m_cells[3, 2]",
+"m_av_loop__m_cells[3, 3]",
+"m_av_loop__m_cells[3, 4]",
+"m_av_row__m_cells[1, 1]",
+"m_av_row__m_cells[1, 2]",
+"m_av_row__m_cells[1, 3]",
+"m_av_row__m_cells[1, 4]",
+"m_av_row__m_cells[2, 1]",
+"m_av_row__m_cells[2, 2]",
+"m_av_row__m_cells[2, 3]",
+"m_av_row__m_cells[2, 4]",
+"m_av_row__m_cells[3, 1]",
+"m_av_row__m_cells[3, 2]",
+"m_av_row__m_cells[3, 3]",
+"m_av_row__m_cells[3, 4]",
+"m_av_rowslice__m_cells[1, 1]",
+"m_av_rowslice__m_cells[1, 2]",
+"m_av_rowslice__m_cells[1, 3]",
+"m_av_rowslice__m_cells[1, 4]",
+"m_av_rowslice__m_cells[2, 1]",
+"m_av_rowslice__m_cells[2, 2]",
+"m_av_rowslice__m_cells[2, 3]",
+"m_av_rowslice__m_cells[2, 4]",
+"m_av_rowslice__m_cells[3, 1]",
+"m_av_rowslice__m_cells[3, 2]",
+"m_av_rowslice__m_cells[3, 3]",
+"m_av_rowslice__m_cells[3, 4]",
+"m_av_colslice__m_cells[1, 1]",
+"m_av_colslice__m_cells[1, 2]",
+"m_av_colslice__m_cells[1, 3]",
+"m_av_colslice__m_cells[1, 4]",
+"m_av_colslice__m_cells[2, 1]",
+"m_av_colslice__m_cells[2, 2]",
+"m_av_colslice__m_cells[2, 3]",
+"m_av_colslice__m_cells[2, 4]",
+"m_av_colslice__m_cells[3, 1]",
+"m_av_colslice__m_cells[3, 2]",
+"m_av_colslice__m_cells[3, 3]",
+"m_av_colslice__m_cells[3, 4]",
+"m_av_range__m_cells[1, 1]",
+"m_av_range__m_cells[1, 2]",
+"m_av_range__m_cells[1, 3]",
+"m_av_range__m_cells[1, 4]",
+"m_av_range__m_cells[2, 1]",
+"m_av_range__m_cells[2, 2]",
+"m_av_range__m_cells[2, 3]",
+"m_av_range__m_cells[2, 4]",
+"m_av_range__m_cells[3, 1]",
+"m_av_range__m_cells[3, 2]",
+"m_av_range__m_cells[3, 3]",
+"m_av_range__m_cells[3, 4]",
+"m_av_multi__m_cells[1, 1]",
+"m_av_multi__m_cells[1, 2]",
+"m_av_multi__m_cells[1, 3]",
+"m_av_multi__m_cells[1, 4]",
+"m_av_multi__m_cells[2, 1]",
+"m_av_multi__m_cells[2, 2]",
+"m_av_multi__m_cells[2, 3]",
+"m_av_multi__m_cells[2, 4]",
+"m_av_multi__m_cells[3, 1]",
+"m_av_multi__m_cells[3, 2]",
+"m_av_multi__m_cells[3, 3]",
+"m_av_multi__m_cells[3, 4]",
+"m_av_cpdelem__m_cells[1, 1]",
+"m_av_cpdelem__m_cells[1, 2]",
+"m_av_cpdelem__m_cells[1, 3]",
+"m_av_cpdelem__m_cells[1, 4]",
+"m_av_cpdelem__m_cells[2, 1]",
+"m_av_cpdelem__m_cells[2, 2]",
+"m_av_cpdelem__m_cells[2, 3]",
+"m_av_cpdelem__m_cells[2, 4]",
+"m_av_cpdelem__m_cells[3, 1]",
+"m_av_cpdelem__m_cells[3, 2]",
+"m_av_cpdelem__m_cells[3, 3]",
+"m_av_cpdelem__m_cells[3, 4]",
+"m_av_cpdrow__m_cells[1, 1]",
+"m_av_cpdrow__m_cells[1, 2]",
+"m_av_cpdrow__m_cells[1, 3]",
+"m_av_cpdrow__m_cells[1, 4]",
+"m_av_cpdrow__m_cells[2, 1]",
+"m_av_cpdrow__m_cells[2, 2]",
+"m_av_cpdrow__m_cells[2, 3]",
+"m_av_cpdrow__m_cells[2, 4]",
+"m_av_cpdrow__m_cells[3, 1]",
+"m_av_cpdrow__m_cells[3, 2]",
+"m_av_cpdrow__m_cells[3, 3]",
+"m_av_cpdrow__m_cells[3, 4]",
+"m_av_reads__m_real",
+"m_av_reads__m_arith",
+"m_av_reads__m_size",
+"m_av_reads__m_dims",
+"m_av_reads__m_rowcopy",
+"m_av_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_m_i1": {
+"cases": [
+{
+"container": "i1",
+"name": "m_i1_lit",
+"write": "lit"
+},
+{
+"container": "i1",
+"name": "m_i1_assign",
+"write": "assign"
+},
+{
+"container": "i1",
+"name": "m_i1_udf",
+"write": "udf"
+},
+{
+"container": "i1",
+"name": "m_i1_loop",
+"write": "loop"
+},
+{
+"container": "i1",
+"name": "m_i1_range",
+"write": "range"
+},
+{
+"container": "i1",
+"name": "m_i1_multi",
+"write": "multi"
+},
+{
+"container": "i1",
+"name": "m_i1_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i1",
+"name": "m_i1_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"m_i1_lit__m_cells[1]",
+"m_i1_lit__m_cells[2]",
+"m_i1_lit__m_cells[3]",
+"m_i1_lit__m_cells[4]",
+"m_i1_assign__m_cells[1]",
+"m_i1_assign__m_cells[2]",
+"m_i1_assign__m_cells[3]",
+"m_i1_assign__m_cells[4]",
+"m_i1_udf__m_cells[1]",
+"m_i1_udf__m_cells[2]",
+"m_i1_udf__m_cells[3]",
+"m_i1_udf__m_cells[4]",
+"m_i1_loop__m_cells[1]",
+"m_i1_loop__m_cells[2]",
+"m_i1_loop__m_cells[3]",
+"m_i1_loop__m_cells[4]",
+"m_i1_range__m_cells[1]",
+"m_i1_range__m_cells[2]",
+"m_i1_range__m_cells[3]",
+"m_i1_range__m_cells[4]",
+"m_i1_multi__m_cells[1]",
+"m_i1_multi__m_cells[2]",
+"m_i1_multi__m_cells[3]",
+"m_i1_multi__m_cells[4]",
+"m_i1_cpdelem__m_cells[1]",
+"m_i1_cpdelem__m_cells[2]",
+"m_i1_cpdelem__m_cells[3]",
+"m_i1_cpdelem__m_cells[4]",
+"m_i1_reads__m_int",
+"m_i1_reads__m_real",
+"m_i1_reads__m_arith",
+"m_i1_reads__m_loop",
+"m_i1_reads__m_index",
+"m_i1_reads__m_gather",
+"m_i1_reads__m_size",
+"m_i1_reads__m_dims",
+"m_i1_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "m_i1_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "m_i1_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "m_i1_colslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "m_i1_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_m_i2": {
+"cases": [
+{
+"container": "i2",
+"name": "m_i2_lit",
+"write": "lit"
+},
+{
+"container": "i2",
+"name": "m_i2_assign",
+"write": "assign"
+},
+{
+"container": "i2",
+"name": "m_i2_udf",
+"write": "udf"
+},
+{
+"container": "i2",
+"name": "m_i2_loop",
+"write": "loop"
+},
+{
+"container": "i2",
+"name": "m_i2_row",
+"write": "row"
+},
+{
+"container": "i2",
+"name": "m_i2_rowslice",
+"write": "rowslice"
+},
+{
+"container": "i2",
+"name": "m_i2_colslice",
+"write": "colslice"
+},
+{
+"container": "i2",
+"name": "m_i2_range",
+"write": "range"
+},
+{
+"container": "i2",
+"name": "m_i2_multi",
+"write": "multi"
+},
+{
+"container": "i2",
+"name": "m_i2_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i2",
+"name": "m_i2_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"m_i2_lit__m_cells[1, 1]",
+"m_i2_lit__m_cells[1, 2]",
+"m_i2_lit__m_cells[1, 3]",
+"m_i2_lit__m_cells[1, 4]",
+"m_i2_lit__m_cells[2, 1]",
+"m_i2_lit__m_cells[2, 2]",
+"m_i2_lit__m_cells[2, 3]",
+"m_i2_lit__m_cells[2, 4]",
+"m_i2_lit__m_cells[3, 1]",
+"m_i2_lit__m_cells[3, 2]",
+"m_i2_lit__m_cells[3, 3]",
+"m_i2_lit__m_cells[3, 4]",
+"m_i2_assign__m_cells[1, 1]",
+"m_i2_assign__m_cells[1, 2]",
+"m_i2_assign__m_cells[1, 3]",
+"m_i2_assign__m_cells[1, 4]",
+"m_i2_assign__m_cells[2, 1]",
+"m_i2_assign__m_cells[2, 2]",
+"m_i2_assign__m_cells[2, 3]",
+"m_i2_assign__m_cells[2, 4]",
+"m_i2_assign__m_cells[3, 1]",
+"m_i2_assign__m_cells[3, 2]",
+"m_i2_assign__m_cells[3, 3]",
+"m_i2_assign__m_cells[3, 4]",
+"m_i2_udf__m_cells[1, 1]",
+"m_i2_udf__m_cells[1, 2]",
+"m_i2_udf__m_cells[1, 3]",
+"m_i2_udf__m_cells[1, 4]",
+"m_i2_udf__m_cells[2, 1]",
+"m_i2_udf__m_cells[2, 2]",
+"m_i2_udf__m_cells[2, 3]",
+"m_i2_udf__m_cells[2, 4]",
+"m_i2_udf__m_cells[3, 1]",
+"m_i2_udf__m_cells[3, 2]",
+"m_i2_udf__m_cells[3, 3]",
+"m_i2_udf__m_cells[3, 4]",
+"m_i2_loop__m_cells[1, 1]",
+"m_i2_loop__m_cells[1, 2]",
+"m_i2_loop__m_cells[1, 3]",
+"m_i2_loop__m_cells[1, 4]",
+"m_i2_loop__m_cells[2, 1]",
+"m_i2_loop__m_cells[2, 2]",
+"m_i2_loop__m_cells[2, 3]",
+"m_i2_loop__m_cells[2, 4]",
+"m_i2_loop__m_cells[3, 1]",
+"m_i2_loop__m_cells[3, 2]",
+"m_i2_loop__m_cells[3, 3]",
+"m_i2_loop__m_cells[3, 4]",
+"m_i2_row__m_cells[1, 1]",
+"m_i2_row__m_cells[1, 2]",
+"m_i2_row__m_cells[1, 3]",
+"m_i2_row__m_cells[1, 4]",
+"m_i2_row__m_cells[2, 1]",
+"m_i2_row__m_cells[2, 2]",
+"m_i2_row__m_cells[2, 3]",
+"m_i2_row__m_cells[2, 4]",
+"m_i2_row__m_cells[3, 1]",
+"m_i2_row__m_cells[3, 2]",
+"m_i2_row__m_cells[3, 3]",
+"m_i2_row__m_cells[3, 4]",
+"m_i2_rowslice__m_cells[1, 1]",
+"m_i2_rowslice__m_cells[1, 2]",
+"m_i2_rowslice__m_cells[1, 3]",
+"m_i2_rowslice__m_cells[1, 4]",
+"m_i2_rowslice__m_cells[2, 1]",
+"m_i2_rowslice__m_cells[2, 2]",
+"m_i2_rowslice__m_cells[2, 3]",
+"m_i2_rowslice__m_cells[2, 4]",
+"m_i2_rowslice__m_cells[3, 1]",
+"m_i2_rowslice__m_cells[3, 2]",
+"m_i2_rowslice__m_cells[3, 3]",
+"m_i2_rowslice__m_cells[3, 4]",
+"m_i2_colslice__m_cells[1, 1]",
+"m_i2_colslice__m_cells[1, 2]",
+"m_i2_colslice__m_cells[1, 3]",
+"m_i2_colslice__m_cells[1, 4]",
+"m_i2_colslice__m_cells[2, 1]",
+"m_i2_colslice__m_cells[2, 2]",
+"m_i2_colslice__m_cells[2, 3]",
+"m_i2_colslice__m_cells[2, 4]",
+"m_i2_colslice__m_cells[3, 1]",
+"m_i2_colslice__m_cells[3, 2]",
+"m_i2_colslice__m_cells[3, 3]",
+"m_i2_colslice__m_cells[3, 4]",
+"m_i2_range__m_cells[1, 1]",
+"m_i2_range__m_cells[1, 2]",
+"m_i2_range__m_cells[1, 3]",
+"m_i2_range__m_cells[1, 4]",
+"m_i2_range__m_cells[2, 1]",
+"m_i2_range__m_cells[2, 2]",
+"m_i2_range__m_cells[2, 3]",
+"m_i2_range__m_cells[2, 4]",
+"m_i2_range__m_cells[3, 1]",
+"m_i2_range__m_cells[3, 2]",
+"m_i2_range__m_cells[3, 3]",
+"m_i2_range__m_cells[3, 4]",
+"m_i2_multi__m_cells[1, 1]",
+"m_i2_multi__m_cells[1, 2]",
+"m_i2_multi__m_cells[1, 3]",
+"m_i2_multi__m_cells[1, 4]",
+"m_i2_multi__m_cells[2, 1]",
+"m_i2_multi__m_cells[2, 2]",
+"m_i2_multi__m_cells[2, 3]",
+"m_i2_multi__m_cells[2, 4]",
+"m_i2_multi__m_cells[3, 1]",
+"m_i2_multi__m_cells[3, 2]",
+"m_i2_multi__m_cells[3, 3]",
+"m_i2_multi__m_cells[3, 4]",
+"m_i2_cpdelem__m_cells[1, 1]",
+"m_i2_cpdelem__m_cells[1, 2]",
+"m_i2_cpdelem__m_cells[1, 3]",
+"m_i2_cpdelem__m_cells[1, 4]",
+"m_i2_cpdelem__m_cells[2, 1]",
+"m_i2_cpdelem__m_cells[2, 2]",
+"m_i2_cpdelem__m_cells[2, 3]",
+"m_i2_cpdelem__m_cells[2, 4]",
+"m_i2_cpdelem__m_cells[3, 1]",
+"m_i2_cpdelem__m_cells[3, 2]",
+"m_i2_cpdelem__m_cells[3, 3]",
+"m_i2_cpdelem__m_cells[3, 4]",
+"m_i2_reads__m_int",
+"m_i2_reads__m_real",
+"m_i2_reads__m_arith",
+"m_i2_reads__m_loop",
+"m_i2_reads__m_index",
+"m_i2_reads__m_gather",
+"m_i2_reads__m_size",
+"m_i2_reads__m_dims",
+"m_i2_reads__m_rowcopy",
+"m_i2_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "m_i2_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_m_i3": {
+"cases": [
+{
+"container": "i3",
+"name": "m_i3_lit",
+"write": "lit"
+},
+{
+"container": "i3",
+"name": "m_i3_assign",
+"write": "assign"
+},
+{
+"container": "i3",
+"name": "m_i3_udf",
+"write": "udf"
+},
+{
+"container": "i3",
+"name": "m_i3_loop",
+"write": "loop"
+},
+{
+"container": "i3",
+"name": "m_i3_row",
+"write": "row"
+},
+{
+"container": "i3",
+"name": "m_i3_rowslice",
+"write": "rowslice"
+},
+{
+"container": "i3",
+"name": "m_i3_colslice",
+"write": "colslice"
+},
+{
+"container": "i3",
+"name": "m_i3_range",
+"write": "range"
+},
+{
+"container": "i3",
+"name": "m_i3_multi",
+"write": "multi"
+},
+{
+"container": "i3",
+"name": "m_i3_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i3",
+"name": "m_i3_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"m_i3_lit__m_cells[1, 1, 1]",
+"m_i3_lit__m_cells[1, 1, 2]",
+"m_i3_lit__m_cells[1, 1, 3]",
+"m_i3_lit__m_cells[1, 1, 4]",
+"m_i3_lit__m_cells[1, 2, 1]",
+"m_i3_lit__m_cells[1, 2, 2]",
+"m_i3_lit__m_cells[1, 2, 3]",
+"m_i3_lit__m_cells[1, 2, 4]",
+"m_i3_lit__m_cells[2, 1, 1]",
+"m_i3_lit__m_cells[2, 1, 2]",
+"m_i3_lit__m_cells[2, 1, 3]",
+"m_i3_lit__m_cells[2, 1, 4]",
+"m_i3_lit__m_cells[2, 2, 1]",
+"m_i3_lit__m_cells[2, 2, 2]",
+"m_i3_lit__m_cells[2, 2, 3]",
+"m_i3_lit__m_cells[2, 2, 4]",
+"m_i3_lit__m_cells[3, 1, 1]",
+"m_i3_lit__m_cells[3, 1, 2]",
+"m_i3_lit__m_cells[3, 1, 3]",
+"m_i3_lit__m_cells[3, 1, 4]",
+"m_i3_lit__m_cells[3, 2, 1]",
+"m_i3_lit__m_cells[3, 2, 2]",
+"m_i3_lit__m_cells[3, 2, 3]",
+"m_i3_lit__m_cells[3, 2, 4]",
+"m_i3_assign__m_cells[1, 1, 1]",
+"m_i3_assign__m_cells[1, 1, 2]",
+"m_i3_assign__m_cells[1, 1, 3]",
+"m_i3_assign__m_cells[1, 1, 4]",
+"m_i3_assign__m_cells[1, 2, 1]",
+"m_i3_assign__m_cells[1, 2, 2]",
+"m_i3_assign__m_cells[1, 2, 3]",
+"m_i3_assign__m_cells[1, 2, 4]",
+"m_i3_assign__m_cells[2, 1, 1]",
+"m_i3_assign__m_cells[2, 1, 2]",
+"m_i3_assign__m_cells[2, 1, 3]",
+"m_i3_assign__m_cells[2, 1, 4]",
+"m_i3_assign__m_cells[2, 2, 1]",
+"m_i3_assign__m_cells[2, 2, 2]",
+"m_i3_assign__m_cells[2, 2, 3]",
+"m_i3_assign__m_cells[2, 2, 4]",
+"m_i3_assign__m_cells[3, 1, 1]",
+"m_i3_assign__m_cells[3, 1, 2]",
+"m_i3_assign__m_cells[3, 1, 3]",
+"m_i3_assign__m_cells[3, 1, 4]",
+"m_i3_assign__m_cells[3, 2, 1]",
+"m_i3_assign__m_cells[3, 2, 2]",
+"m_i3_assign__m_cells[3, 2, 3]",
+"m_i3_assign__m_cells[3, 2, 4]",
+"m_i3_udf__m_cells[1, 1, 1]",
+"m_i3_udf__m_cells[1, 1, 2]",
+"m_i3_udf__m_cells[1, 1, 3]",
+"m_i3_udf__m_cells[1, 1, 4]",
+"m_i3_udf__m_cells[1, 2, 1]",
+"m_i3_udf__m_cells[1, 2, 2]",
+"m_i3_udf__m_cells[1, 2, 3]",
+"m_i3_udf__m_cells[1, 2, 4]",
+"m_i3_udf__m_cells[2, 1, 1]",
+"m_i3_udf__m_cells[2, 1, 2]",
+"m_i3_udf__m_cells[2, 1, 3]",
+"m_i3_udf__m_cells[2, 1, 4]",
+"m_i3_udf__m_cells[2, 2, 1]",
+"m_i3_udf__m_cells[2, 2, 2]",
+"m_i3_udf__m_cells[2, 2, 3]",
+"m_i3_udf__m_cells[2, 2, 4]",
+"m_i3_udf__m_cells[3, 1, 1]",
+"m_i3_udf__m_cells[3, 1, 2]",
+"m_i3_udf__m_cells[3, 1, 3]",
+"m_i3_udf__m_cells[3, 1, 4]",
+"m_i3_udf__m_cells[3, 2, 1]",
+"m_i3_udf__m_cells[3, 2, 2]",
+"m_i3_udf__m_cells[3, 2, 3]",
+"m_i3_udf__m_cells[3, 2, 4]",
+"m_i3_loop__m_cells[1, 1, 1]",
+"m_i3_loop__m_cells[1, 1, 2]",
+"m_i3_loop__m_cells[1, 1, 3]",
+"m_i3_loop__m_cells[1, 1, 4]",
+"m_i3_loop__m_cells[1, 2, 1]",
+"m_i3_loop__m_cells[1, 2, 2]",
+"m_i3_loop__m_cells[1, 2, 3]",
+"m_i3_loop__m_cells[1, 2, 4]",
+"m_i3_loop__m_cells[2, 1, 1]",
+"m_i3_loop__m_cells[2, 1, 2]",
+"m_i3_loop__m_cells[2, 1, 3]",
+"m_i3_loop__m_cells[2, 1, 4]",
+"m_i3_loop__m_cells[2, 2, 1]",
+"m_i3_loop__m_cells[2, 2, 2]",
+"m_i3_loop__m_cells[2, 2, 3]",
+"m_i3_loop__m_cells[2, 2, 4]",
+"m_i3_loop__m_cells[3, 1, 1]",
+"m_i3_loop__m_cells[3, 1, 2]",
+"m_i3_loop__m_cells[3, 1, 3]",
+"m_i3_loop__m_cells[3, 1, 4]",
+"m_i3_loop__m_cells[3, 2, 1]",
+"m_i3_loop__m_cells[3, 2, 2]",
+"m_i3_loop__m_cells[3, 2, 3]",
+"m_i3_loop__m_cells[3, 2, 4]",
+"m_i3_row__m_cells[1, 1, 1]",
+"m_i3_row__m_cells[1, 1, 2]",
+"m_i3_row__m_cells[1, 1, 3]",
+"m_i3_row__m_cells[1, 1, 4]",
+"m_i3_row__m_cells[1, 2, 1]",
+"m_i3_row__m_cells[1, 2, 2]",
+"m_i3_row__m_cells[1, 2, 3]",
+"m_i3_row__m_cells[1, 2, 4]",
+"m_i3_row__m_cells[2, 1, 1]",
+"m_i3_row__m_cells[2, 1, 2]",
+"m_i3_row__m_cells[2, 1, 3]",
+"m_i3_row__m_cells[2, 1, 4]",
+"m_i3_row__m_cells[2, 2, 1]",
+"m_i3_row__m_cells[2, 2, 2]",
+"m_i3_row__m_cells[2, 2, 3]",
+"m_i3_row__m_cells[2, 2, 4]",
+"m_i3_row__m_cells[3, 1, 1]",
+"m_i3_row__m_cells[3, 1, 2]",
+"m_i3_row__m_cells[3, 1, 3]",
+"m_i3_row__m_cells[3, 1, 4]",
+"m_i3_row__m_cells[3, 2, 1]",
+"m_i3_row__m_cells[3, 2, 2]",
+"m_i3_row__m_cells[3, 2, 3]",
+"m_i3_row__m_cells[3, 2, 4]",
+"m_i3_rowslice__m_cells[1, 1, 1]",
+"m_i3_rowslice__m_cells[1, 1, 2]",
+"m_i3_rowslice__m_cells[1, 1, 3]",
+"m_i3_rowslice__m_cells[1, 1, 4]",
+"m_i3_rowslice__m_cells[1, 2, 1]",
+"m_i3_rowslice__m_cells[1, 2, 2]",
+"m_i3_rowslice__m_cells[1, 2, 3]",
+"m_i3_rowslice__m_cells[1, 2, 4]",
+"m_i3_rowslice__m_cells[2, 1, 1]",
+"m_i3_rowslice__m_cells[2, 1, 2]",
+"m_i3_rowslice__m_cells[2, 1, 3]",
+"m_i3_rowslice__m_cells[2, 1, 4]",
+"m_i3_rowslice__m_cells[2, 2, 1]",
+"m_i3_rowslice__m_cells[2, 2, 2]",
+"m_i3_rowslice__m_cells[2, 2, 3]",
+"m_i3_rowslice__m_cells[2, 2, 4]",
+"m_i3_rowslice__m_cells[3, 1, 1]",
+"m_i3_rowslice__m_cells[3, 1, 2]",
+"m_i3_rowslice__m_cells[3, 1, 3]",
+"m_i3_rowslice__m_cells[3, 1, 4]",
+"m_i3_rowslice__m_cells[3, 2, 1]",
+"m_i3_rowslice__m_cells[3, 2, 2]",
+"m_i3_rowslice__m_cells[3, 2, 3]",
+"m_i3_rowslice__m_cells[3, 2, 4]",
+"m_i3_colslice__m_cells[1, 1, 1]",
+"m_i3_colslice__m_cells[1, 1, 2]",
+"m_i3_colslice__m_cells[1, 1, 3]",
+"m_i3_colslice__m_cells[1, 1, 4]",
+"m_i3_colslice__m_cells[1, 2, 1]",
+"m_i3_colslice__m_cells[1, 2, 2]",
+"m_i3_colslice__m_cells[1, 2, 3]",
+"m_i3_colslice__m_cells[1, 2, 4]",
+"m_i3_colslice__m_cells[2, 1, 1]",
+"m_i3_colslice__m_cells[2, 1, 2]",
+"m_i3_colslice__m_cells[2, 1, 3]",
+"m_i3_colslice__m_cells[2, 1, 4]",
+"m_i3_colslice__m_cells[2, 2, 1]",
+"m_i3_colslice__m_cells[2, 2, 2]",
+"m_i3_colslice__m_cells[2, 2, 3]",
+"m_i3_colslice__m_cells[2, 2, 4]",
+"m_i3_colslice__m_cells[3, 1, 1]",
+"m_i3_colslice__m_cells[3, 1, 2]",
+"m_i3_colslice__m_cells[3, 1, 3]",
+"m_i3_colslice__m_cells[3, 1, 4]",
+"m_i3_colslice__m_cells[3, 2, 1]",
+"m_i3_colslice__m_cells[3, 2, 2]",
+"m_i3_colslice__m_cells[3, 2, 3]",
+"m_i3_colslice__m_cells[3, 2, 4]",
+"m_i3_range__m_cells[1, 1, 1]",
+"m_i3_range__m_cells[1, 1, 2]",
+"m_i3_range__m_cells[1, 1, 3]",
+"m_i3_range__m_cells[1, 1, 4]",
+"m_i3_range__m_cells[1, 2, 1]",
+"m_i3_range__m_cells[1, 2, 2]",
+"m_i3_range__m_cells[1, 2, 3]",
+"m_i3_range__m_cells[1, 2, 4]",
+"m_i3_range__m_cells[2, 1, 1]",
+"m_i3_range__m_cells[2, 1, 2]",
+"m_i3_range__m_cells[2, 1, 3]",
+"m_i3_range__m_cells[2, 1, 4]",
+"m_i3_range__m_cells[2, 2, 1]",
+"m_i3_range__m_cells[2, 2, 2]",
+"m_i3_range__m_cells[2, 2, 3]",
+"m_i3_range__m_cells[2, 2, 4]",
+"m_i3_range__m_cells[3, 1, 1]",
+"m_i3_range__m_cells[3, 1, 2]",
+"m_i3_range__m_cells[3, 1, 3]",
+"m_i3_range__m_cells[3, 1, 4]",
+"m_i3_range__m_cells[3, 2, 1]",
+"m_i3_range__m_cells[3, 2, 2]",
+"m_i3_range__m_cells[3, 2, 3]",
+"m_i3_range__m_cells[3, 2, 4]",
+"m_i3_multi__m_cells[1, 1, 1]",
+"m_i3_multi__m_cells[1, 1, 2]",
+"m_i3_multi__m_cells[1, 1, 3]",
+"m_i3_multi__m_cells[1, 1, 4]",
+"m_i3_multi__m_cells[1, 2, 1]",
+"m_i3_multi__m_cells[1, 2, 2]",
+"m_i3_multi__m_cells[1, 2, 3]",
+"m_i3_multi__m_cells[1, 2, 4]",
+"m_i3_multi__m_cells[2, 1, 1]",
+"m_i3_multi__m_cells[2, 1, 2]",
+"m_i3_multi__m_cells[2, 1, 3]",
+"m_i3_multi__m_cells[2, 1, 4]",
+"m_i3_multi__m_cells[2, 2, 1]",
+"m_i3_multi__m_cells[2, 2, 2]",
+"m_i3_multi__m_cells[2, 2, 3]",
+"m_i3_multi__m_cells[2, 2, 4]",
+"m_i3_multi__m_cells[3, 1, 1]",
+"m_i3_multi__m_cells[3, 1, 2]",
+"m_i3_multi__m_cells[3, 1, 3]",
+"m_i3_multi__m_cells[3, 1, 4]",
+"m_i3_multi__m_cells[3, 2, 1]",
+"m_i3_multi__m_cells[3, 2, 2]",
+"m_i3_multi__m_cells[3, 2, 3]",
+"m_i3_multi__m_cells[3, 2, 4]",
+"m_i3_cpdelem__m_cells[1, 1, 1]",
+"m_i3_cpdelem__m_cells[1, 1, 2]",
+"m_i3_cpdelem__m_cells[1, 1, 3]",
+"m_i3_cpdelem__m_cells[1, 1, 4]",
+"m_i3_cpdelem__m_cells[1, 2, 1]",
+"m_i3_cpdelem__m_cells[1, 2, 2]",
+"m_i3_cpdelem__m_cells[1, 2, 3]",
+"m_i3_cpdelem__m_cells[1, 2, 4]",
+"m_i3_cpdelem__m_cells[2, 1, 1]",
+"m_i3_cpdelem__m_cells[2, 1, 2]",
+"m_i3_cpdelem__m_cells[2, 1, 3]",
+"m_i3_cpdelem__m_cells[2, 1, 4]",
+"m_i3_cpdelem__m_cells[2, 2, 1]",
+"m_i3_cpdelem__m_cells[2, 2, 2]",
+"m_i3_cpdelem__m_cells[2, 2, 3]",
+"m_i3_cpdelem__m_cells[2, 2, 4]",
+"m_i3_cpdelem__m_cells[3, 1, 1]",
+"m_i3_cpdelem__m_cells[3, 1, 2]",
+"m_i3_cpdelem__m_cells[3, 1, 3]",
+"m_i3_cpdelem__m_cells[3, 1, 4]",
+"m_i3_cpdelem__m_cells[3, 2, 1]",
+"m_i3_cpdelem__m_cells[3, 2, 2]",
+"m_i3_cpdelem__m_cells[3, 2, 3]",
+"m_i3_cpdelem__m_cells[3, 2, 4]",
+"m_i3_reads__m_int",
+"m_i3_reads__m_real",
+"m_i3_reads__m_arith",
+"m_i3_reads__m_loop",
+"m_i3_reads__m_index",
+"m_i3_reads__m_gather",
+"m_i3_reads__m_size",
+"m_i3_reads__m_dims",
+"m_i3_reads__m_rowcopy",
+"m_i3_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "m_i3_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_m_m": {
+"cases": [
+{
+"container": "m",
+"name": "m_m_lit",
+"write": "lit"
+},
+{
+"container": "m",
+"name": "m_m_assign",
+"write": "assign"
+},
+{
+"container": "m",
+"name": "m_m_udf",
+"write": "udf"
+},
+{
+"container": "m",
+"name": "m_m_loop",
+"write": "loop"
+},
+{
+"container": "m",
+"name": "m_m_row",
+"write": "row"
+},
+{
+"container": "m",
+"name": "m_m_rowslice",
+"write": "rowslice"
+},
+{
+"container": "m",
+"name": "m_m_colslice",
+"write": "colslice"
+},
+{
+"container": "m",
+"name": "m_m_range",
+"write": "range"
+},
+{
+"container": "m",
+"name": "m_m_multi",
+"write": "multi"
+},
+{
+"container": "m",
+"name": "m_m_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "m",
+"name": "m_m_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "m",
+"name": "m_m_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"m_m_lit__m_cells[1, 1]",
+"m_m_lit__m_cells[1, 2]",
+"m_m_lit__m_cells[1, 3]",
+"m_m_lit__m_cells[1, 4]",
+"m_m_lit__m_cells[2, 1]",
+"m_m_lit__m_cells[2, 2]",
+"m_m_lit__m_cells[2, 3]",
+"m_m_lit__m_cells[2, 4]",
+"m_m_lit__m_cells[3, 1]",
+"m_m_lit__m_cells[3, 2]",
+"m_m_lit__m_cells[3, 3]",
+"m_m_lit__m_cells[3, 4]",
+"m_m_assign__m_cells[1, 1]",
+"m_m_assign__m_cells[1, 2]",
+"m_m_assign__m_cells[1, 3]",
+"m_m_assign__m_cells[1, 4]",
+"m_m_assign__m_cells[2, 1]",
+"m_m_assign__m_cells[2, 2]",
+"m_m_assign__m_cells[2, 3]",
+"m_m_assign__m_cells[2, 4]",
+"m_m_assign__m_cells[3, 1]",
+"m_m_assign__m_cells[3, 2]",
+"m_m_assign__m_cells[3, 3]",
+"m_m_assign__m_cells[3, 4]",
+"m_m_udf__m_cells[1, 1]",
+"m_m_udf__m_cells[1, 2]",
+"m_m_udf__m_cells[1, 3]",
+"m_m_udf__m_cells[1, 4]",
+"m_m_udf__m_cells[2, 1]",
+"m_m_udf__m_cells[2, 2]",
+"m_m_udf__m_cells[2, 3]",
+"m_m_udf__m_cells[2, 4]",
+"m_m_udf__m_cells[3, 1]",
+"m_m_udf__m_cells[3, 2]",
+"m_m_udf__m_cells[3, 3]",
+"m_m_udf__m_cells[3, 4]",
+"m_m_loop__m_cells[1, 1]",
+"m_m_loop__m_cells[1, 2]",
+"m_m_loop__m_cells[1, 3]",
+"m_m_loop__m_cells[1, 4]",
+"m_m_loop__m_cells[2, 1]",
+"m_m_loop__m_cells[2, 2]",
+"m_m_loop__m_cells[2, 3]",
+"m_m_loop__m_cells[2, 4]",
+"m_m_loop__m_cells[3, 1]",
+"m_m_loop__m_cells[3, 2]",
+"m_m_loop__m_cells[3, 3]",
+"m_m_loop__m_cells[3, 4]",
+"m_m_row__m_cells[1, 1]",
+"m_m_row__m_cells[1, 2]",
+"m_m_row__m_cells[1, 3]",
+"m_m_row__m_cells[1, 4]",
+"m_m_row__m_cells[2, 1]",
+"m_m_row__m_cells[2, 2]",
+"m_m_row__m_cells[2, 3]",
+"m_m_row__m_cells[2, 4]",
+"m_m_row__m_cells[3, 1]",
+"m_m_row__m_cells[3, 2]",
+"m_m_row__m_cells[3, 3]",
+"m_m_row__m_cells[3, 4]",
+"m_m_rowslice__m_cells[1, 1]",
+"m_m_rowslice__m_cells[1, 2]",
+"m_m_rowslice__m_cells[1, 3]",
+"m_m_rowslice__m_cells[1, 4]",
+"m_m_rowslice__m_cells[2, 1]",
+"m_m_rowslice__m_cells[2, 2]",
+"m_m_rowslice__m_cells[2, 3]",
+"m_m_rowslice__m_cells[2, 4]",
+"m_m_rowslice__m_cells[3, 1]",
+"m_m_rowslice__m_cells[3, 2]",
+"m_m_rowslice__m_cells[3, 3]",
+"m_m_rowslice__m_cells[3, 4]",
+"m_m_colslice__m_cells[1, 1]",
+"m_m_colslice__m_cells[1, 2]",
+"m_m_colslice__m_cells[1, 3]",
+"m_m_colslice__m_cells[1, 4]",
+"m_m_colslice__m_cells[2, 1]",
+"m_m_colslice__m_cells[2, 2]",
+"m_m_colslice__m_cells[2, 3]",
+"m_m_colslice__m_cells[2, 4]",
+"m_m_colslice__m_cells[3, 1]",
+"m_m_colslice__m_cells[3, 2]",
+"m_m_colslice__m_cells[3, 3]",
+"m_m_colslice__m_cells[3, 4]",
+"m_m_range__m_cells[1, 1]",
+"m_m_range__m_cells[1, 2]",
+"m_m_range__m_cells[1, 3]",
+"m_m_range__m_cells[1, 4]",
+"m_m_range__m_cells[2, 1]",
+"m_m_range__m_cells[2, 2]",
+"m_m_range__m_cells[2, 3]",
+"m_m_range__m_cells[2, 4]",
+"m_m_range__m_cells[3, 1]",
+"m_m_range__m_cells[3, 2]",
+"m_m_range__m_cells[3, 3]",
+"m_m_range__m_cells[3, 4]",
+"m_m_multi__m_cells[1, 1]",
+"m_m_multi__m_cells[1, 2]",
+"m_m_multi__m_cells[1, 3]",
+"m_m_multi__m_cells[1, 4]",
+"m_m_multi__m_cells[2, 1]",
+"m_m_multi__m_cells[2, 2]",
+"m_m_multi__m_cells[2, 3]",
+"m_m_multi__m_cells[2, 4]",
+"m_m_multi__m_cells[3, 1]",
+"m_m_multi__m_cells[3, 2]",
+"m_m_multi__m_cells[3, 3]",
+"m_m_multi__m_cells[3, 4]",
+"m_m_cpdelem__m_cells[1, 1]",
+"m_m_cpdelem__m_cells[1, 2]",
+"m_m_cpdelem__m_cells[1, 3]",
+"m_m_cpdelem__m_cells[1, 4]",
+"m_m_cpdelem__m_cells[2, 1]",
+"m_m_cpdelem__m_cells[2, 2]",
+"m_m_cpdelem__m_cells[2, 3]",
+"m_m_cpdelem__m_cells[2, 4]",
+"m_m_cpdelem__m_cells[3, 1]",
+"m_m_cpdelem__m_cells[3, 2]",
+"m_m_cpdelem__m_cells[3, 3]",
+"m_m_cpdelem__m_cells[3, 4]",
+"m_m_cpdrow__m_cells[1, 1]",
+"m_m_cpdrow__m_cells[1, 2]",
+"m_m_cpdrow__m_cells[1, 3]",
+"m_m_cpdrow__m_cells[1, 4]",
+"m_m_cpdrow__m_cells[2, 1]",
+"m_m_cpdrow__m_cells[2, 2]",
+"m_m_cpdrow__m_cells[2, 3]",
+"m_m_cpdrow__m_cells[2, 4]",
+"m_m_cpdrow__m_cells[3, 1]",
+"m_m_cpdrow__m_cells[3, 2]",
+"m_m_cpdrow__m_cells[3, 3]",
+"m_m_cpdrow__m_cells[3, 4]",
+"m_m_reads__m_real",
+"m_m_reads__m_arith",
+"m_m_reads__m_size",
+"m_m_reads__m_dims",
+"m_m_reads__m_rowcopy",
+"m_m_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_m_r1": {
+"cases": [
+{
+"container": "r1",
+"name": "m_r1_lit",
+"write": "lit"
+},
+{
+"container": "r1",
+"name": "m_r1_assign",
+"write": "assign"
+},
+{
+"container": "r1",
+"name": "m_r1_udf",
+"write": "udf"
+},
+{
+"container": "r1",
+"name": "m_r1_loop",
+"write": "loop"
+},
+{
+"container": "r1",
+"name": "m_r1_range",
+"write": "range"
+},
+{
+"container": "r1",
+"name": "m_r1_multi",
+"write": "multi"
+},
+{
+"container": "r1",
+"name": "m_r1_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r1",
+"name": "m_r1_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"m_r1_lit__m_cells[1]",
+"m_r1_lit__m_cells[2]",
+"m_r1_lit__m_cells[3]",
+"m_r1_lit__m_cells[4]",
+"m_r1_assign__m_cells[1]",
+"m_r1_assign__m_cells[2]",
+"m_r1_assign__m_cells[3]",
+"m_r1_assign__m_cells[4]",
+"m_r1_udf__m_cells[1]",
+"m_r1_udf__m_cells[2]",
+"m_r1_udf__m_cells[3]",
+"m_r1_udf__m_cells[4]",
+"m_r1_loop__m_cells[1]",
+"m_r1_loop__m_cells[2]",
+"m_r1_loop__m_cells[3]",
+"m_r1_loop__m_cells[4]",
+"m_r1_range__m_cells[1]",
+"m_r1_range__m_cells[2]",
+"m_r1_range__m_cells[3]",
+"m_r1_range__m_cells[4]",
+"m_r1_multi__m_cells[1]",
+"m_r1_multi__m_cells[2]",
+"m_r1_multi__m_cells[3]",
+"m_r1_multi__m_cells[4]",
+"m_r1_cpdelem__m_cells[1]",
+"m_r1_cpdelem__m_cells[2]",
+"m_r1_cpdelem__m_cells[3]",
+"m_r1_cpdelem__m_cells[4]",
+"m_r1_reads__m_real",
+"m_r1_reads__m_arith",
+"m_r1_reads__m_size",
+"m_r1_reads__m_dims",
+"m_r1_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "m_r1_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "m_r1_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "m_r1_colslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "m_r1_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_m_r2": {
+"cases": [
+{
+"container": "r2",
+"name": "m_r2_lit",
+"write": "lit"
+},
+{
+"container": "r2",
+"name": "m_r2_assign",
+"write": "assign"
+},
+{
+"container": "r2",
+"name": "m_r2_udf",
+"write": "udf"
+},
+{
+"container": "r2",
+"name": "m_r2_loop",
+"write": "loop"
+},
+{
+"container": "r2",
+"name": "m_r2_row",
+"write": "row"
+},
+{
+"container": "r2",
+"name": "m_r2_rowslice",
+"write": "rowslice"
+},
+{
+"container": "r2",
+"name": "m_r2_colslice",
+"write": "colslice"
+},
+{
+"container": "r2",
+"name": "m_r2_range",
+"write": "range"
+},
+{
+"container": "r2",
+"name": "m_r2_multi",
+"write": "multi"
+},
+{
+"container": "r2",
+"name": "m_r2_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r2",
+"name": "m_r2_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"m_r2_lit__m_cells[1, 1]",
+"m_r2_lit__m_cells[1, 2]",
+"m_r2_lit__m_cells[1, 3]",
+"m_r2_lit__m_cells[1, 4]",
+"m_r2_lit__m_cells[2, 1]",
+"m_r2_lit__m_cells[2, 2]",
+"m_r2_lit__m_cells[2, 3]",
+"m_r2_lit__m_cells[2, 4]",
+"m_r2_lit__m_cells[3, 1]",
+"m_r2_lit__m_cells[3, 2]",
+"m_r2_lit__m_cells[3, 3]",
+"m_r2_lit__m_cells[3, 4]",
+"m_r2_assign__m_cells[1, 1]",
+"m_r2_assign__m_cells[1, 2]",
+"m_r2_assign__m_cells[1, 3]",
+"m_r2_assign__m_cells[1, 4]",
+"m_r2_assign__m_cells[2, 1]",
+"m_r2_assign__m_cells[2, 2]",
+"m_r2_assign__m_cells[2, 3]",
+"m_r2_assign__m_cells[2, 4]",
+"m_r2_assign__m_cells[3, 1]",
+"m_r2_assign__m_cells[3, 2]",
+"m_r2_assign__m_cells[3, 3]",
+"m_r2_assign__m_cells[3, 4]",
+"m_r2_udf__m_cells[1, 1]",
+"m_r2_udf__m_cells[1, 2]",
+"m_r2_udf__m_cells[1, 3]",
+"m_r2_udf__m_cells[1, 4]",
+"m_r2_udf__m_cells[2, 1]",
+"m_r2_udf__m_cells[2, 2]",
+"m_r2_udf__m_cells[2, 3]",
+"m_r2_udf__m_cells[2, 4]",
+"m_r2_udf__m_cells[3, 1]",
+"m_r2_udf__m_cells[3, 2]",
+"m_r2_udf__m_cells[3, 3]",
+"m_r2_udf__m_cells[3, 4]",
+"m_r2_loop__m_cells[1, 1]",
+"m_r2_loop__m_cells[1, 2]",
+"m_r2_loop__m_cells[1, 3]",
+"m_r2_loop__m_cells[1, 4]",
+"m_r2_loop__m_cells[2, 1]",
+"m_r2_loop__m_cells[2, 2]",
+"m_r2_loop__m_cells[2, 3]",
+"m_r2_loop__m_cells[2, 4]",
+"m_r2_loop__m_cells[3, 1]",
+"m_r2_loop__m_cells[3, 2]",
+"m_r2_loop__m_cells[3, 3]",
+"m_r2_loop__m_cells[3, 4]",
+"m_r2_row__m_cells[1, 1]",
+"m_r2_row__m_cells[1, 2]",
+"m_r2_row__m_cells[1, 3]",
+"m_r2_row__m_cells[1, 4]",
+"m_r2_row__m_cells[2, 1]",
+"m_r2_row__m_cells[2, 2]",
+"m_r2_row__m_cells[2, 3]",
+"m_r2_row__m_cells[2, 4]",
+"m_r2_row__m_cells[3, 1]",
+"m_r2_row__m_cells[3, 2]",
+"m_r2_row__m_cells[3, 3]",
+"m_r2_row__m_cells[3, 4]",
+"m_r2_rowslice__m_cells[1, 1]",
+"m_r2_rowslice__m_cells[1, 2]",
+"m_r2_rowslice__m_cells[1, 3]",
+"m_r2_rowslice__m_cells[1, 4]",
+"m_r2_rowslice__m_cells[2, 1]",
+"m_r2_rowslice__m_cells[2, 2]",
+"m_r2_rowslice__m_cells[2, 3]",
+"m_r2_rowslice__m_cells[2, 4]",
+"m_r2_rowslice__m_cells[3, 1]",
+"m_r2_rowslice__m_cells[3, 2]",
+"m_r2_rowslice__m_cells[3, 3]",
+"m_r2_rowslice__m_cells[3, 4]",
+"m_r2_colslice__m_cells[1, 1]",
+"m_r2_colslice__m_cells[1, 2]",
+"m_r2_colslice__m_cells[1, 3]",
+"m_r2_colslice__m_cells[1, 4]",
+"m_r2_colslice__m_cells[2, 1]",
+"m_r2_colslice__m_cells[2, 2]",
+"m_r2_colslice__m_cells[2, 3]",
+"m_r2_colslice__m_cells[2, 4]",
+"m_r2_colslice__m_cells[3, 1]",
+"m_r2_colslice__m_cells[3, 2]",
+"m_r2_colslice__m_cells[3, 3]",
+"m_r2_colslice__m_cells[3, 4]",
+"m_r2_range__m_cells[1, 1]",
+"m_r2_range__m_cells[1, 2]",
+"m_r2_range__m_cells[1, 3]",
+"m_r2_range__m_cells[1, 4]",
+"m_r2_range__m_cells[2, 1]",
+"m_r2_range__m_cells[2, 2]",
+"m_r2_range__m_cells[2, 3]",
+"m_r2_range__m_cells[2, 4]",
+"m_r2_range__m_cells[3, 1]",
+"m_r2_range__m_cells[3, 2]",
+"m_r2_range__m_cells[3, 3]",
+"m_r2_range__m_cells[3, 4]",
+"m_r2_multi__m_cells[1, 1]",
+"m_r2_multi__m_cells[1, 2]",
+"m_r2_multi__m_cells[1, 3]",
+"m_r2_multi__m_cells[1, 4]",
+"m_r2_multi__m_cells[2, 1]",
+"m_r2_multi__m_cells[2, 2]",
+"m_r2_multi__m_cells[2, 3]",
+"m_r2_multi__m_cells[2, 4]",
+"m_r2_multi__m_cells[3, 1]",
+"m_r2_multi__m_cells[3, 2]",
+"m_r2_multi__m_cells[3, 3]",
+"m_r2_multi__m_cells[3, 4]",
+"m_r2_cpdelem__m_cells[1, 1]",
+"m_r2_cpdelem__m_cells[1, 2]",
+"m_r2_cpdelem__m_cells[1, 3]",
+"m_r2_cpdelem__m_cells[1, 4]",
+"m_r2_cpdelem__m_cells[2, 1]",
+"m_r2_cpdelem__m_cells[2, 2]",
+"m_r2_cpdelem__m_cells[2, 3]",
+"m_r2_cpdelem__m_cells[2, 4]",
+"m_r2_cpdelem__m_cells[3, 1]",
+"m_r2_cpdelem__m_cells[3, 2]",
+"m_r2_cpdelem__m_cells[3, 3]",
+"m_r2_cpdelem__m_cells[3, 4]",
+"m_r2_reads__m_real",
+"m_r2_reads__m_arith",
+"m_r2_reads__m_size",
+"m_r2_reads__m_dims",
+"m_r2_reads__m_rowcopy",
+"m_r2_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "m_r2_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_m_r3": {
+"cases": [
+{
+"container": "r3",
+"name": "m_r3_lit",
+"write": "lit"
+},
+{
+"container": "r3",
+"name": "m_r3_assign",
+"write": "assign"
+},
+{
+"container": "r3",
+"name": "m_r3_udf",
+"write": "udf"
+},
+{
+"container": "r3",
+"name": "m_r3_loop",
+"write": "loop"
+},
+{
+"container": "r3",
+"name": "m_r3_row",
+"write": "row"
+},
+{
+"container": "r3",
+"name": "m_r3_rowslice",
+"write": "rowslice"
+},
+{
+"container": "r3",
+"name": "m_r3_colslice",
+"write": "colslice"
+},
+{
+"container": "r3",
+"name": "m_r3_range",
+"write": "range"
+},
+{
+"container": "r3",
+"name": "m_r3_multi",
+"write": "multi"
+},
+{
+"container": "r3",
+"name": "m_r3_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r3",
+"name": "m_r3_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"m_r3_lit__m_cells[1, 1, 1]",
+"m_r3_lit__m_cells[1, 1, 2]",
+"m_r3_lit__m_cells[1, 1, 3]",
+"m_r3_lit__m_cells[1, 1, 4]",
+"m_r3_lit__m_cells[1, 2, 1]",
+"m_r3_lit__m_cells[1, 2, 2]",
+"m_r3_lit__m_cells[1, 2, 3]",
+"m_r3_lit__m_cells[1, 2, 4]",
+"m_r3_lit__m_cells[2, 1, 1]",
+"m_r3_lit__m_cells[2, 1, 2]",
+"m_r3_lit__m_cells[2, 1, 3]",
+"m_r3_lit__m_cells[2, 1, 4]",
+"m_r3_lit__m_cells[2, 2, 1]",
+"m_r3_lit__m_cells[2, 2, 2]",
+"m_r3_lit__m_cells[2, 2, 3]",
+"m_r3_lit__m_cells[2, 2, 4]",
+"m_r3_lit__m_cells[3, 1, 1]",
+"m_r3_lit__m_cells[3, 1, 2]",
+"m_r3_lit__m_cells[3, 1, 3]",
+"m_r3_lit__m_cells[3, 1, 4]",
+"m_r3_lit__m_cells[3, 2, 1]",
+"m_r3_lit__m_cells[3, 2, 2]",
+"m_r3_lit__m_cells[3, 2, 3]",
+"m_r3_lit__m_cells[3, 2, 4]",
+"m_r3_assign__m_cells[1, 1, 1]",
+"m_r3_assign__m_cells[1, 1, 2]",
+"m_r3_assign__m_cells[1, 1, 3]",
+"m_r3_assign__m_cells[1, 1, 4]",
+"m_r3_assign__m_cells[1, 2, 1]",
+"m_r3_assign__m_cells[1, 2, 2]",
+"m_r3_assign__m_cells[1, 2, 3]",
+"m_r3_assign__m_cells[1, 2, 4]",
+"m_r3_assign__m_cells[2, 1, 1]",
+"m_r3_assign__m_cells[2, 1, 2]",
+"m_r3_assign__m_cells[2, 1, 3]",
+"m_r3_assign__m_cells[2, 1, 4]",
+"m_r3_assign__m_cells[2, 2, 1]",
+"m_r3_assign__m_cells[2, 2, 2]",
+"m_r3_assign__m_cells[2, 2, 3]",
+"m_r3_assign__m_cells[2, 2, 4]",
+"m_r3_assign__m_cells[3, 1, 1]",
+"m_r3_assign__m_cells[3, 1, 2]",
+"m_r3_assign__m_cells[3, 1, 3]",
+"m_r3_assign__m_cells[3, 1, 4]",
+"m_r3_assign__m_cells[3, 2, 1]",
+"m_r3_assign__m_cells[3, 2, 2]",
+"m_r3_assign__m_cells[3, 2, 3]",
+"m_r3_assign__m_cells[3, 2, 4]",
+"m_r3_udf__m_cells[1, 1, 1]",
+"m_r3_udf__m_cells[1, 1, 2]",
+"m_r3_udf__m_cells[1, 1, 3]",
+"m_r3_udf__m_cells[1, 1, 4]",
+"m_r3_udf__m_cells[1, 2, 1]",
+"m_r3_udf__m_cells[1, 2, 2]",
+"m_r3_udf__m_cells[1, 2, 3]",
+"m_r3_udf__m_cells[1, 2, 4]",
+"m_r3_udf__m_cells[2, 1, 1]",
+"m_r3_udf__m_cells[2, 1, 2]",
+"m_r3_udf__m_cells[2, 1, 3]",
+"m_r3_udf__m_cells[2, 1, 4]",
+"m_r3_udf__m_cells[2, 2, 1]",
+"m_r3_udf__m_cells[2, 2, 2]",
+"m_r3_udf__m_cells[2, 2, 3]",
+"m_r3_udf__m_cells[2, 2, 4]",
+"m_r3_udf__m_cells[3, 1, 1]",
+"m_r3_udf__m_cells[3, 1, 2]",
+"m_r3_udf__m_cells[3, 1, 3]",
+"m_r3_udf__m_cells[3, 1, 4]",
+"m_r3_udf__m_cells[3, 2, 1]",
+"m_r3_udf__m_cells[3, 2, 2]",
+"m_r3_udf__m_cells[3, 2, 3]",
+"m_r3_udf__m_cells[3, 2, 4]",
+"m_r3_loop__m_cells[1, 1, 1]",
+"m_r3_loop__m_cells[1, 1, 2]",
+"m_r3_loop__m_cells[1, 1, 3]",
+"m_r3_loop__m_cells[1, 1, 4]",
+"m_r3_loop__m_cells[1, 2, 1]",
+"m_r3_loop__m_cells[1, 2, 2]",
+"m_r3_loop__m_cells[1, 2, 3]",
+"m_r3_loop__m_cells[1, 2, 4]",
+"m_r3_loop__m_cells[2, 1, 1]",
+"m_r3_loop__m_cells[2, 1, 2]",
+"m_r3_loop__m_cells[2, 1, 3]",
+"m_r3_loop__m_cells[2, 1, 4]",
+"m_r3_loop__m_cells[2, 2, 1]",
+"m_r3_loop__m_cells[2, 2, 2]",
+"m_r3_loop__m_cells[2, 2, 3]",
+"m_r3_loop__m_cells[2, 2, 4]",
+"m_r3_loop__m_cells[3, 1, 1]",
+"m_r3_loop__m_cells[3, 1, 2]",
+"m_r3_loop__m_cells[3, 1, 3]",
+"m_r3_loop__m_cells[3, 1, 4]",
+"m_r3_loop__m_cells[3, 2, 1]",
+"m_r3_loop__m_cells[3, 2, 2]",
+"m_r3_loop__m_cells[3, 2, 3]",
+"m_r3_loop__m_cells[3, 2, 4]",
+"m_r3_row__m_cells[1, 1, 1]",
+"m_r3_row__m_cells[1, 1, 2]",
+"m_r3_row__m_cells[1, 1, 3]",
+"m_r3_row__m_cells[1, 1, 4]",
+"m_r3_row__m_cells[1, 2, 1]",
+"m_r3_row__m_cells[1, 2, 2]",
+"m_r3_row__m_cells[1, 2, 3]",
+"m_r3_row__m_cells[1, 2, 4]",
+"m_r3_row__m_cells[2, 1, 1]",
+"m_r3_row__m_cells[2, 1, 2]",
+"m_r3_row__m_cells[2, 1, 3]",
+"m_r3_row__m_cells[2, 1, 4]",
+"m_r3_row__m_cells[2, 2, 1]",
+"m_r3_row__m_cells[2, 2, 2]",
+"m_r3_row__m_cells[2, 2, 3]",
+"m_r3_row__m_cells[2, 2, 4]",
+"m_r3_row__m_cells[3, 1, 1]",
+"m_r3_row__m_cells[3, 1, 2]",
+"m_r3_row__m_cells[3, 1, 3]",
+"m_r3_row__m_cells[3, 1, 4]",
+"m_r3_row__m_cells[3, 2, 1]",
+"m_r3_row__m_cells[3, 2, 2]",
+"m_r3_row__m_cells[3, 2, 3]",
+"m_r3_row__m_cells[3, 2, 4]",
+"m_r3_rowslice__m_cells[1, 1, 1]",
+"m_r3_rowslice__m_cells[1, 1, 2]",
+"m_r3_rowslice__m_cells[1, 1, 3]",
+"m_r3_rowslice__m_cells[1, 1, 4]",
+"m_r3_rowslice__m_cells[1, 2, 1]",
+"m_r3_rowslice__m_cells[1, 2, 2]",
+"m_r3_rowslice__m_cells[1, 2, 3]",
+"m_r3_rowslice__m_cells[1, 2, 4]",
+"m_r3_rowslice__m_cells[2, 1, 1]",
+"m_r3_rowslice__m_cells[2, 1, 2]",
+"m_r3_rowslice__m_cells[2, 1, 3]",
+"m_r3_rowslice__m_cells[2, 1, 4]",
+"m_r3_rowslice__m_cells[2, 2, 1]",
+"m_r3_rowslice__m_cells[2, 2, 2]",
+"m_r3_rowslice__m_cells[2, 2, 3]",
+"m_r3_rowslice__m_cells[2, 2, 4]",
+"m_r3_rowslice__m_cells[3, 1, 1]",
+"m_r3_rowslice__m_cells[3, 1, 2]",
+"m_r3_rowslice__m_cells[3, 1, 3]",
+"m_r3_rowslice__m_cells[3, 1, 4]",
+"m_r3_rowslice__m_cells[3, 2, 1]",
+"m_r3_rowslice__m_cells[3, 2, 2]",
+"m_r3_rowslice__m_cells[3, 2, 3]",
+"m_r3_rowslice__m_cells[3, 2, 4]",
+"m_r3_colslice__m_cells[1, 1, 1]",
+"m_r3_colslice__m_cells[1, 1, 2]",
+"m_r3_colslice__m_cells[1, 1, 3]",
+"m_r3_colslice__m_cells[1, 1, 4]",
+"m_r3_colslice__m_cells[1, 2, 1]",
+"m_r3_colslice__m_cells[1, 2, 2]",
+"m_r3_colslice__m_cells[1, 2, 3]",
+"m_r3_colslice__m_cells[1, 2, 4]",
+"m_r3_colslice__m_cells[2, 1, 1]",
+"m_r3_colslice__m_cells[2, 1, 2]",
+"m_r3_colslice__m_cells[2, 1, 3]",
+"m_r3_colslice__m_cells[2, 1, 4]",
+"m_r3_colslice__m_cells[2, 2, 1]",
+"m_r3_colslice__m_cells[2, 2, 2]",
+"m_r3_colslice__m_cells[2, 2, 3]",
+"m_r3_colslice__m_cells[2, 2, 4]",
+"m_r3_colslice__m_cells[3, 1, 1]",
+"m_r3_colslice__m_cells[3, 1, 2]",
+"m_r3_colslice__m_cells[3, 1, 3]",
+"m_r3_colslice__m_cells[3, 1, 4]",
+"m_r3_colslice__m_cells[3, 2, 1]",
+"m_r3_colslice__m_cells[3, 2, 2]",
+"m_r3_colslice__m_cells[3, 2, 3]",
+"m_r3_colslice__m_cells[3, 2, 4]",
+"m_r3_range__m_cells[1, 1, 1]",
+"m_r3_range__m_cells[1, 1, 2]",
+"m_r3_range__m_cells[1, 1, 3]",
+"m_r3_range__m_cells[1, 1, 4]",
+"m_r3_range__m_cells[1, 2, 1]",
+"m_r3_range__m_cells[1, 2, 2]",
+"m_r3_range__m_cells[1, 2, 3]",
+"m_r3_range__m_cells[1, 2, 4]",
+"m_r3_range__m_cells[2, 1, 1]",
+"m_r3_range__m_cells[2, 1, 2]",
+"m_r3_range__m_cells[2, 1, 3]",
+"m_r3_range__m_cells[2, 1, 4]",
+"m_r3_range__m_cells[2, 2, 1]",
+"m_r3_range__m_cells[2, 2, 2]",
+"m_r3_range__m_cells[2, 2, 3]",
+"m_r3_range__m_cells[2, 2, 4]",
+"m_r3_range__m_cells[3, 1, 1]",
+"m_r3_range__m_cells[3, 1, 2]",
+"m_r3_range__m_cells[3, 1, 3]",
+"m_r3_range__m_cells[3, 1, 4]",
+"m_r3_range__m_cells[3, 2, 1]",
+"m_r3_range__m_cells[3, 2, 2]",
+"m_r3_range__m_cells[3, 2, 3]",
+"m_r3_range__m_cells[3, 2, 4]",
+"m_r3_multi__m_cells[1, 1, 1]",
+"m_r3_multi__m_cells[1, 1, 2]",
+"m_r3_multi__m_cells[1, 1, 3]",
+"m_r3_multi__m_cells[1, 1, 4]",
+"m_r3_multi__m_cells[1, 2, 1]",
+"m_r3_multi__m_cells[1, 2, 2]",
+"m_r3_multi__m_cells[1, 2, 3]",
+"m_r3_multi__m_cells[1, 2, 4]",
+"m_r3_multi__m_cells[2, 1, 1]",
+"m_r3_multi__m_cells[2, 1, 2]",
+"m_r3_multi__m_cells[2, 1, 3]",
+"m_r3_multi__m_cells[2, 1, 4]",
+"m_r3_multi__m_cells[2, 2, 1]",
+"m_r3_multi__m_cells[2, 2, 2]",
+"m_r3_multi__m_cells[2, 2, 3]",
+"m_r3_multi__m_cells[2, 2, 4]",
+"m_r3_multi__m_cells[3, 1, 1]",
+"m_r3_multi__m_cells[3, 1, 2]",
+"m_r3_multi__m_cells[3, 1, 3]",
+"m_r3_multi__m_cells[3, 1, 4]",
+"m_r3_multi__m_cells[3, 2, 1]",
+"m_r3_multi__m_cells[3, 2, 2]",
+"m_r3_multi__m_cells[3, 2, 3]",
+"m_r3_multi__m_cells[3, 2, 4]",
+"m_r3_cpdelem__m_cells[1, 1, 1]",
+"m_r3_cpdelem__m_cells[1, 1, 2]",
+"m_r3_cpdelem__m_cells[1, 1, 3]",
+"m_r3_cpdelem__m_cells[1, 1, 4]",
+"m_r3_cpdelem__m_cells[1, 2, 1]",
+"m_r3_cpdelem__m_cells[1, 2, 2]",
+"m_r3_cpdelem__m_cells[1, 2, 3]",
+"m_r3_cpdelem__m_cells[1, 2, 4]",
+"m_r3_cpdelem__m_cells[2, 1, 1]",
+"m_r3_cpdelem__m_cells[2, 1, 2]",
+"m_r3_cpdelem__m_cells[2, 1, 3]",
+"m_r3_cpdelem__m_cells[2, 1, 4]",
+"m_r3_cpdelem__m_cells[2, 2, 1]",
+"m_r3_cpdelem__m_cells[2, 2, 2]",
+"m_r3_cpdelem__m_cells[2, 2, 3]",
+"m_r3_cpdelem__m_cells[2, 2, 4]",
+"m_r3_cpdelem__m_cells[3, 1, 1]",
+"m_r3_cpdelem__m_cells[3, 1, 2]",
+"m_r3_cpdelem__m_cells[3, 1, 3]",
+"m_r3_cpdelem__m_cells[3, 1, 4]",
+"m_r3_cpdelem__m_cells[3, 2, 1]",
+"m_r3_cpdelem__m_cells[3, 2, 2]",
+"m_r3_cpdelem__m_cells[3, 2, 3]",
+"m_r3_cpdelem__m_cells[3, 2, 4]",
+"m_r3_reads__m_real",
+"m_r3_reads__m_arith",
+"m_r3_reads__m_size",
+"m_r3_reads__m_dims",
+"m_r3_reads__m_rowcopy",
+"m_r3_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "m_r3_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_m_rv": {
+"cases": [
+{
+"container": "rv",
+"name": "m_rv_lit",
+"write": "lit"
+},
+{
+"container": "rv",
+"name": "m_rv_assign",
+"write": "assign"
+},
+{
+"container": "rv",
+"name": "m_rv_udf",
+"write": "udf"
+},
+{
+"container": "rv",
+"name": "m_rv_loop",
+"write": "loop"
+},
+{
+"container": "rv",
+"name": "m_rv_range",
+"write": "range"
+},
+{
+"container": "rv",
+"name": "m_rv_multi",
+"write": "multi"
+},
+{
+"container": "rv",
+"name": "m_rv_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "rv",
+"name": "m_rv_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "rv",
+"name": "m_rv_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"m_rv_lit__m_cells[1]",
+"m_rv_lit__m_cells[2]",
+"m_rv_lit__m_cells[3]",
+"m_rv_lit__m_cells[4]",
+"m_rv_assign__m_cells[1]",
+"m_rv_assign__m_cells[2]",
+"m_rv_assign__m_cells[3]",
+"m_rv_assign__m_cells[4]",
+"m_rv_udf__m_cells[1]",
+"m_rv_udf__m_cells[2]",
+"m_rv_udf__m_cells[3]",
+"m_rv_udf__m_cells[4]",
+"m_rv_loop__m_cells[1]",
+"m_rv_loop__m_cells[2]",
+"m_rv_loop__m_cells[3]",
+"m_rv_loop__m_cells[4]",
+"m_rv_range__m_cells[1]",
+"m_rv_range__m_cells[2]",
+"m_rv_range__m_cells[3]",
+"m_rv_range__m_cells[4]",
+"m_rv_multi__m_cells[1]",
+"m_rv_multi__m_cells[2]",
+"m_rv_multi__m_cells[3]",
+"m_rv_multi__m_cells[4]",
+"m_rv_cpdelem__m_cells[1]",
+"m_rv_cpdelem__m_cells[2]",
+"m_rv_cpdelem__m_cells[3]",
+"m_rv_cpdelem__m_cells[4]",
+"m_rv_cpdrow__m_cells[1]",
+"m_rv_cpdrow__m_cells[2]",
+"m_rv_cpdrow__m_cells[3]",
+"m_rv_cpdrow__m_cells[4]",
+"m_rv_reads__m_real",
+"m_rv_reads__m_arith",
+"m_rv_reads__m_size",
+"m_rv_reads__m_dims",
+"m_rv_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "m_rv_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "m_rv_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "m_rv_colslice",
+"reason": "not applicable: rank 1 has no row"
+}
+]
+},
+"container_flow_m_v": {
+"cases": [
+{
+"container": "v",
+"name": "m_v_lit",
+"write": "lit"
+},
+{
+"container": "v",
+"name": "m_v_assign",
+"write": "assign"
+},
+{
+"container": "v",
+"name": "m_v_udf",
+"write": "udf"
+},
+{
+"container": "v",
+"name": "m_v_loop",
+"write": "loop"
+},
+{
+"container": "v",
+"name": "m_v_range",
+"write": "range"
+},
+{
+"container": "v",
+"name": "m_v_multi",
+"write": "multi"
+},
+{
+"container": "v",
+"name": "m_v_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "v",
+"name": "m_v_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "v",
+"name": "m_v_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"m_v_lit__m_cells[1]",
+"m_v_lit__m_cells[2]",
+"m_v_lit__m_cells[3]",
+"m_v_lit__m_cells[4]",
+"m_v_assign__m_cells[1]",
+"m_v_assign__m_cells[2]",
+"m_v_assign__m_cells[3]",
+"m_v_assign__m_cells[4]",
+"m_v_udf__m_cells[1]",
+"m_v_udf__m_cells[2]",
+"m_v_udf__m_cells[3]",
+"m_v_udf__m_cells[4]",
+"m_v_loop__m_cells[1]",
+"m_v_loop__m_cells[2]",
+"m_v_loop__m_cells[3]",
+"m_v_loop__m_cells[4]",
+"m_v_range__m_cells[1]",
+"m_v_range__m_cells[2]",
+"m_v_range__m_cells[3]",
+"m_v_range__m_cells[4]",
+"m_v_multi__m_cells[1]",
+"m_v_multi__m_cells[2]",
+"m_v_multi__m_cells[3]",
+"m_v_multi__m_cells[4]",
+"m_v_cpdelem__m_cells[1]",
+"m_v_cpdelem__m_cells[2]",
+"m_v_cpdelem__m_cells[3]",
+"m_v_cpdelem__m_cells[4]",
+"m_v_cpdrow__m_cells[1]",
+"m_v_cpdrow__m_cells[2]",
+"m_v_cpdrow__m_cells[3]",
+"m_v_cpdrow__m_cells[4]",
+"m_v_reads__m_real",
+"m_v_reads__m_arith",
+"m_v_reads__m_size",
+"m_v_reads__m_dims",
+"m_v_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "m_v_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "m_v_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "m_v_colslice",
+"reason": "not applicable: rank 1 has no row"
+}
+]
+},
+"container_flow_td_am": {
+"cases": [
+{
+"container": "am",
+"name": "td_am_lit",
+"write": "lit"
+},
+{
+"container": "am",
+"name": "td_am_assign",
+"write": "assign"
+},
+{
+"container": "am",
+"name": "td_am_udf",
+"write": "udf"
+},
+{
+"container": "am",
+"name": "td_am_loop",
+"write": "loop"
+},
+{
+"container": "am",
+"name": "td_am_row",
+"write": "row"
+},
+{
+"container": "am",
+"name": "td_am_rowslice",
+"write": "rowslice"
+},
+{
+"container": "am",
+"name": "td_am_colslice",
+"write": "colslice"
+},
+{
+"container": "am",
+"name": "td_am_range",
+"write": "range"
+},
+{
+"container": "am",
+"name": "td_am_multi",
+"write": "multi"
+},
+{
+"container": "am",
+"name": "td_am_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "am",
+"name": "td_am_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "am",
+"name": "td_am_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"td_am_row__m_cells[1, 1, 1]",
+"td_am_row__m_cells[1, 1, 2]",
+"td_am_row__m_cells[1, 1, 3]",
+"td_am_row__m_cells[1, 1, 4]",
+"td_am_row__m_cells[1, 2, 1]",
+"td_am_row__m_cells[1, 2, 2]",
+"td_am_row__m_cells[1, 2, 3]",
+"td_am_row__m_cells[1, 2, 4]",
+"td_am_row__m_cells[2, 1, 1]",
+"td_am_row__m_cells[2, 1, 2]",
+"td_am_row__m_cells[2, 1, 3]",
+"td_am_row__m_cells[2, 1, 4]",
+"td_am_row__m_cells[2, 2, 1]",
+"td_am_row__m_cells[2, 2, 2]",
+"td_am_row__m_cells[2, 2, 3]",
+"td_am_row__m_cells[2, 2, 4]",
+"td_am_row__m_cells[3, 1, 1]",
+"td_am_row__m_cells[3, 1, 2]",
+"td_am_row__m_cells[3, 1, 3]",
+"td_am_row__m_cells[3, 1, 4]",
+"td_am_row__m_cells[3, 2, 1]",
+"td_am_row__m_cells[3, 2, 2]",
+"td_am_row__m_cells[3, 2, 3]",
+"td_am_row__m_cells[3, 2, 4]",
+"td_am_reads__m_real",
+"td_am_reads__m_arith",
+"td_am_reads__m_size",
+"td_am_reads__m_dims",
+"td_am_reads__m_rowcopy",
+"td_am_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_td_arv": {
+"cases": [
+{
+"container": "arv",
+"name": "td_arv_lit",
+"write": "lit"
+},
+{
+"container": "arv",
+"name": "td_arv_assign",
+"write": "assign"
+},
+{
+"container": "arv",
+"name": "td_arv_udf",
+"write": "udf"
+},
+{
+"container": "arv",
+"name": "td_arv_loop",
+"write": "loop"
+},
+{
+"container": "arv",
+"name": "td_arv_row",
+"write": "row"
+},
+{
+"container": "arv",
+"name": "td_arv_rowslice",
+"write": "rowslice"
+},
+{
+"container": "arv",
+"name": "td_arv_colslice",
+"write": "colslice"
+},
+{
+"container": "arv",
+"name": "td_arv_range",
+"write": "range"
+},
+{
+"container": "arv",
+"name": "td_arv_multi",
+"write": "multi"
+},
+{
+"container": "arv",
+"name": "td_arv_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "arv",
+"name": "td_arv_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "arv",
+"name": "td_arv_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"td_arv_row__m_cells[1, 1]",
+"td_arv_row__m_cells[1, 2]",
+"td_arv_row__m_cells[1, 3]",
+"td_arv_row__m_cells[1, 4]",
+"td_arv_row__m_cells[2, 1]",
+"td_arv_row__m_cells[2, 2]",
+"td_arv_row__m_cells[2, 3]",
+"td_arv_row__m_cells[2, 4]",
+"td_arv_row__m_cells[3, 1]",
+"td_arv_row__m_cells[3, 2]",
+"td_arv_row__m_cells[3, 3]",
+"td_arv_row__m_cells[3, 4]",
+"td_arv_reads__m_real",
+"td_arv_reads__m_arith",
+"td_arv_reads__m_size",
+"td_arv_reads__m_dims",
+"td_arv_reads__m_rowcopy",
+"td_arv_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_td_av": {
+"cases": [
+{
+"container": "av",
+"name": "td_av_lit",
+"write": "lit"
+},
+{
+"container": "av",
+"name": "td_av_assign",
+"write": "assign"
+},
+{
+"container": "av",
+"name": "td_av_udf",
+"write": "udf"
+},
+{
+"container": "av",
+"name": "td_av_loop",
+"write": "loop"
+},
+{
+"container": "av",
+"name": "td_av_row",
+"write": "row"
+},
+{
+"container": "av",
+"name": "td_av_rowslice",
+"write": "rowslice"
+},
+{
+"container": "av",
+"name": "td_av_colslice",
+"write": "colslice"
+},
+{
+"container": "av",
+"name": "td_av_range",
+"write": "range"
+},
+{
+"container": "av",
+"name": "td_av_multi",
+"write": "multi"
+},
+{
+"container": "av",
+"name": "td_av_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "av",
+"name": "td_av_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "av",
+"name": "td_av_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"td_av_row__m_cells[1, 1]",
+"td_av_row__m_cells[1, 2]",
+"td_av_row__m_cells[1, 3]",
+"td_av_row__m_cells[1, 4]",
+"td_av_row__m_cells[2, 1]",
+"td_av_row__m_cells[2, 2]",
+"td_av_row__m_cells[2, 3]",
+"td_av_row__m_cells[2, 4]",
+"td_av_row__m_cells[3, 1]",
+"td_av_row__m_cells[3, 2]",
+"td_av_row__m_cells[3, 3]",
+"td_av_row__m_cells[3, 4]",
+"td_av_reads__m_real",
+"td_av_reads__m_arith",
+"td_av_reads__m_size",
+"td_av_reads__m_dims",
+"td_av_reads__m_rowcopy",
+"td_av_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_td_i1": {
+"cases": [
+{
+"container": "i1",
+"name": "td_i1_lit",
+"write": "lit"
+},
+{
+"container": "i1",
+"name": "td_i1_assign",
+"write": "assign"
+},
+{
+"container": "i1",
+"name": "td_i1_udf",
+"write": "udf"
+},
+{
+"container": "i1",
+"name": "td_i1_loop",
+"write": "loop"
+},
+{
+"container": "i1",
+"name": "td_i1_range",
+"write": "range"
+},
+{
+"container": "i1",
+"name": "td_i1_multi",
+"write": "multi"
+},
+{
+"container": "i1",
+"name": "td_i1_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i1",
+"name": "td_i1_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"td_i1_range__m_cells[1]",
+"td_i1_range__m_cells[2]",
+"td_i1_range__m_cells[3]",
+"td_i1_range__m_cells[4]",
+"td_i1_reads__m_int",
+"td_i1_reads__m_real",
+"td_i1_reads__m_arith",
+"td_i1_reads__m_loop",
+"td_i1_reads__m_index",
+"td_i1_reads__m_gather",
+"td_i1_reads__m_size",
+"td_i1_reads__m_dims",
+"td_i1_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "td_i1_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "td_i1_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "td_i1_colslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "td_i1_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_td_i2": {
+"cases": [
+{
+"container": "i2",
+"name": "td_i2_lit",
+"write": "lit"
+},
+{
+"container": "i2",
+"name": "td_i2_assign",
+"write": "assign"
+},
+{
+"container": "i2",
+"name": "td_i2_udf",
+"write": "udf"
+},
+{
+"container": "i2",
+"name": "td_i2_loop",
+"write": "loop"
+},
+{
+"container": "i2",
+"name": "td_i2_row",
+"write": "row"
+},
+{
+"container": "i2",
+"name": "td_i2_rowslice",
+"write": "rowslice"
+},
+{
+"container": "i2",
+"name": "td_i2_colslice",
+"write": "colslice"
+},
+{
+"container": "i2",
+"name": "td_i2_range",
+"write": "range"
+},
+{
+"container": "i2",
+"name": "td_i2_multi",
+"write": "multi"
+},
+{
+"container": "i2",
+"name": "td_i2_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i2",
+"name": "td_i2_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"td_i2_row__m_cells[1, 1]",
+"td_i2_row__m_cells[1, 2]",
+"td_i2_row__m_cells[1, 3]",
+"td_i2_row__m_cells[1, 4]",
+"td_i2_row__m_cells[2, 1]",
+"td_i2_row__m_cells[2, 2]",
+"td_i2_row__m_cells[2, 3]",
+"td_i2_row__m_cells[2, 4]",
+"td_i2_row__m_cells[3, 1]",
+"td_i2_row__m_cells[3, 2]",
+"td_i2_row__m_cells[3, 3]",
+"td_i2_row__m_cells[3, 4]",
+"td_i2_reads__m_int",
+"td_i2_reads__m_real",
+"td_i2_reads__m_arith",
+"td_i2_reads__m_loop",
+"td_i2_reads__m_index",
+"td_i2_reads__m_gather",
+"td_i2_reads__m_size",
+"td_i2_reads__m_dims",
+"td_i2_reads__m_rowcopy",
+"td_i2_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "td_i2_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_td_i3": {
+"cases": [
+{
+"container": "i3",
+"name": "td_i3_lit",
+"write": "lit"
+},
+{
+"container": "i3",
+"name": "td_i3_assign",
+"write": "assign"
+},
+{
+"container": "i3",
+"name": "td_i3_udf",
+"write": "udf"
+},
+{
+"container": "i3",
+"name": "td_i3_loop",
+"write": "loop"
+},
+{
+"container": "i3",
+"name": "td_i3_row",
+"write": "row"
+},
+{
+"container": "i3",
+"name": "td_i3_rowslice",
+"write": "rowslice"
+},
+{
+"container": "i3",
+"name": "td_i3_colslice",
+"write": "colslice"
+},
+{
+"container": "i3",
+"name": "td_i3_range",
+"write": "range"
+},
+{
+"container": "i3",
+"name": "td_i3_multi",
+"write": "multi"
+},
+{
+"container": "i3",
+"name": "td_i3_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i3",
+"name": "td_i3_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"td_i3_row__m_cells[1, 1, 1]",
+"td_i3_row__m_cells[1, 1, 2]",
+"td_i3_row__m_cells[1, 1, 3]",
+"td_i3_row__m_cells[1, 1, 4]",
+"td_i3_row__m_cells[1, 2, 1]",
+"td_i3_row__m_cells[1, 2, 2]",
+"td_i3_row__m_cells[1, 2, 3]",
+"td_i3_row__m_cells[1, 2, 4]",
+"td_i3_row__m_cells[2, 1, 1]",
+"td_i3_row__m_cells[2, 1, 2]",
+"td_i3_row__m_cells[2, 1, 3]",
+"td_i3_row__m_cells[2, 1, 4]",
+"td_i3_row__m_cells[2, 2, 1]",
+"td_i3_row__m_cells[2, 2, 2]",
+"td_i3_row__m_cells[2, 2, 3]",
+"td_i3_row__m_cells[2, 2, 4]",
+"td_i3_row__m_cells[3, 1, 1]",
+"td_i3_row__m_cells[3, 1, 2]",
+"td_i3_row__m_cells[3, 1, 3]",
+"td_i3_row__m_cells[3, 1, 4]",
+"td_i3_row__m_cells[3, 2, 1]",
+"td_i3_row__m_cells[3, 2, 2]",
+"td_i3_row__m_cells[3, 2, 3]",
+"td_i3_row__m_cells[3, 2, 4]",
+"td_i3_reads__m_int",
+"td_i3_reads__m_real",
+"td_i3_reads__m_arith",
+"td_i3_reads__m_loop",
+"td_i3_reads__m_index",
+"td_i3_reads__m_gather",
+"td_i3_reads__m_size",
+"td_i3_reads__m_dims",
+"td_i3_reads__m_rowcopy",
+"td_i3_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "td_i3_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_td_m": {
+"cases": [
+{
+"container": "m",
+"name": "td_m_lit",
+"write": "lit"
+},
+{
+"container": "m",
+"name": "td_m_assign",
+"write": "assign"
+},
+{
+"container": "m",
+"name": "td_m_udf",
+"write": "udf"
+},
+{
+"container": "m",
+"name": "td_m_loop",
+"write": "loop"
+},
+{
+"container": "m",
+"name": "td_m_row",
+"write": "row"
+},
+{
+"container": "m",
+"name": "td_m_rowslice",
+"write": "rowslice"
+},
+{
+"container": "m",
+"name": "td_m_colslice",
+"write": "colslice"
+},
+{
+"container": "m",
+"name": "td_m_range",
+"write": "range"
+},
+{
+"container": "m",
+"name": "td_m_multi",
+"write": "multi"
+},
+{
+"container": "m",
+"name": "td_m_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "m",
+"name": "td_m_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "m",
+"name": "td_m_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"td_m_row__m_cells[1, 1]",
+"td_m_row__m_cells[1, 2]",
+"td_m_row__m_cells[1, 3]",
+"td_m_row__m_cells[1, 4]",
+"td_m_row__m_cells[2, 1]",
+"td_m_row__m_cells[2, 2]",
+"td_m_row__m_cells[2, 3]",
+"td_m_row__m_cells[2, 4]",
+"td_m_row__m_cells[3, 1]",
+"td_m_row__m_cells[3, 2]",
+"td_m_row__m_cells[3, 3]",
+"td_m_row__m_cells[3, 4]",
+"td_m_reads__m_real",
+"td_m_reads__m_arith",
+"td_m_reads__m_size",
+"td_m_reads__m_dims",
+"td_m_reads__m_rowcopy",
+"td_m_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_td_r1": {
+"cases": [
+{
+"container": "r1",
+"name": "td_r1_lit",
+"write": "lit"
+},
+{
+"container": "r1",
+"name": "td_r1_assign",
+"write": "assign"
+},
+{
+"container": "r1",
+"name": "td_r1_udf",
+"write": "udf"
+},
+{
+"container": "r1",
+"name": "td_r1_loop",
+"write": "loop"
+},
+{
+"container": "r1",
+"name": "td_r1_range",
+"write": "range"
+},
+{
+"container": "r1",
+"name": "td_r1_multi",
+"write": "multi"
+},
+{
+"container": "r1",
+"name": "td_r1_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r1",
+"name": "td_r1_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"td_r1_range__m_cells[1]",
+"td_r1_range__m_cells[2]",
+"td_r1_range__m_cells[3]",
+"td_r1_range__m_cells[4]",
+"td_r1_reads__m_real",
+"td_r1_reads__m_arith",
+"td_r1_reads__m_size",
+"td_r1_reads__m_dims",
+"td_r1_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "td_r1_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "td_r1_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "td_r1_colslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "td_r1_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_td_r2": {
+"cases": [
+{
+"container": "r2",
+"name": "td_r2_lit",
+"write": "lit"
+},
+{
+"container": "r2",
+"name": "td_r2_assign",
+"write": "assign"
+},
+{
+"container": "r2",
+"name": "td_r2_udf",
+"write": "udf"
+},
+{
+"container": "r2",
+"name": "td_r2_loop",
+"write": "loop"
+},
+{
+"container": "r2",
+"name": "td_r2_row",
+"write": "row"
+},
+{
+"container": "r2",
+"name": "td_r2_rowslice",
+"write": "rowslice"
+},
+{
+"container": "r2",
+"name": "td_r2_colslice",
+"write": "colslice"
+},
+{
+"container": "r2",
+"name": "td_r2_range",
+"write": "range"
+},
+{
+"container": "r2",
+"name": "td_r2_multi",
+"write": "multi"
+},
+{
+"container": "r2",
+"name": "td_r2_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r2",
+"name": "td_r2_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"td_r2_row__m_cells[1, 1]",
+"td_r2_row__m_cells[1, 2]",
+"td_r2_row__m_cells[1, 3]",
+"td_r2_row__m_cells[1, 4]",
+"td_r2_row__m_cells[2, 1]",
+"td_r2_row__m_cells[2, 2]",
+"td_r2_row__m_cells[2, 3]",
+"td_r2_row__m_cells[2, 4]",
+"td_r2_row__m_cells[3, 1]",
+"td_r2_row__m_cells[3, 2]",
+"td_r2_row__m_cells[3, 3]",
+"td_r2_row__m_cells[3, 4]",
+"td_r2_reads__m_real",
+"td_r2_reads__m_arith",
+"td_r2_reads__m_size",
+"td_r2_reads__m_dims",
+"td_r2_reads__m_rowcopy",
+"td_r2_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "td_r2_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_td_r3": {
+"cases": [
+{
+"container": "r3",
+"name": "td_r3_lit",
+"write": "lit"
+},
+{
+"container": "r3",
+"name": "td_r3_assign",
+"write": "assign"
+},
+{
+"container": "r3",
+"name": "td_r3_udf",
+"write": "udf"
+},
+{
+"container": "r3",
+"name": "td_r3_loop",
+"write": "loop"
+},
+{
+"container": "r3",
+"name": "td_r3_row",
+"write": "row"
+},
+{
+"container": "r3",
+"name": "td_r3_rowslice",
+"write": "rowslice"
+},
+{
+"container": "r3",
+"name": "td_r3_colslice",
+"write": "colslice"
+},
+{
+"container": "r3",
+"name": "td_r3_range",
+"write": "range"
+},
+{
+"container": "r3",
+"name": "td_r3_multi",
+"write": "multi"
+},
+{
+"container": "r3",
+"name": "td_r3_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r3",
+"name": "td_r3_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"td_r3_row__m_cells[1, 1, 1]",
+"td_r3_row__m_cells[1, 1, 2]",
+"td_r3_row__m_cells[1, 1, 3]",
+"td_r3_row__m_cells[1, 1, 4]",
+"td_r3_row__m_cells[1, 2, 1]",
+"td_r3_row__m_cells[1, 2, 2]",
+"td_r3_row__m_cells[1, 2, 3]",
+"td_r3_row__m_cells[1, 2, 4]",
+"td_r3_row__m_cells[2, 1, 1]",
+"td_r3_row__m_cells[2, 1, 2]",
+"td_r3_row__m_cells[2, 1, 3]",
+"td_r3_row__m_cells[2, 1, 4]",
+"td_r3_row__m_cells[2, 2, 1]",
+"td_r3_row__m_cells[2, 2, 2]",
+"td_r3_row__m_cells[2, 2, 3]",
+"td_r3_row__m_cells[2, 2, 4]",
+"td_r3_row__m_cells[3, 1, 1]",
+"td_r3_row__m_cells[3, 1, 2]",
+"td_r3_row__m_cells[3, 1, 3]",
+"td_r3_row__m_cells[3, 1, 4]",
+"td_r3_row__m_cells[3, 2, 1]",
+"td_r3_row__m_cells[3, 2, 2]",
+"td_r3_row__m_cells[3, 2, 3]",
+"td_r3_row__m_cells[3, 2, 4]",
+"td_r3_reads__m_real",
+"td_r3_reads__m_arith",
+"td_r3_reads__m_size",
+"td_r3_reads__m_dims",
+"td_r3_reads__m_rowcopy",
+"td_r3_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "td_r3_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_td_rv": {
+"cases": [
+{
+"container": "rv",
+"name": "td_rv_lit",
+"write": "lit"
+},
+{
+"container": "rv",
+"name": "td_rv_assign",
+"write": "assign"
+},
+{
+"container": "rv",
+"name": "td_rv_udf",
+"write": "udf"
+},
+{
+"container": "rv",
+"name": "td_rv_loop",
+"write": "loop"
+},
+{
+"container": "rv",
+"name": "td_rv_range",
+"write": "range"
+},
+{
+"container": "rv",
+"name": "td_rv_multi",
+"write": "multi"
+},
+{
+"container": "rv",
+"name": "td_rv_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "rv",
+"name": "td_rv_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "rv",
+"name": "td_rv_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"td_rv_range__m_cells[1]",
+"td_rv_range__m_cells[2]",
+"td_rv_range__m_cells[3]",
+"td_rv_range__m_cells[4]",
+"td_rv_reads__m_real",
+"td_rv_reads__m_arith",
+"td_rv_reads__m_size",
+"td_rv_reads__m_dims",
+"td_rv_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "td_rv_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "td_rv_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "td_rv_colslice",
+"reason": "not applicable: rank 1 has no row"
+}
+]
+},
+"container_flow_td_v": {
+"cases": [
+{
+"container": "v",
+"name": "td_v_lit",
+"write": "lit"
+},
+{
+"container": "v",
+"name": "td_v_assign",
+"write": "assign"
+},
+{
+"container": "v",
+"name": "td_v_udf",
+"write": "udf"
+},
+{
+"container": "v",
+"name": "td_v_loop",
+"write": "loop"
+},
+{
+"container": "v",
+"name": "td_v_range",
+"write": "range"
+},
+{
+"container": "v",
+"name": "td_v_multi",
+"write": "multi"
+},
+{
+"container": "v",
+"name": "td_v_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "v",
+"name": "td_v_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "v",
+"name": "td_v_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"td_v_range__m_cells[1]",
+"td_v_range__m_cells[2]",
+"td_v_range__m_cells[3]",
+"td_v_range__m_cells[4]",
+"td_v_reads__m_real",
+"td_v_reads__m_arith",
+"td_v_reads__m_size",
+"td_v_reads__m_dims",
+"td_v_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "td_v_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "td_v_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "td_v_colslice",
+"reason": "not applicable: rank 1 has no row"
+}
+]
+},
+"container_flow_tp_am": {
+"cases": [
+{
+"container": "am",
+"name": "tp_am_lit",
+"write": "lit"
+},
+{
+"container": "am",
+"name": "tp_am_assign",
+"write": "assign"
+},
+{
+"container": "am",
+"name": "tp_am_udf",
+"write": "udf"
+},
+{
+"container": "am",
+"name": "tp_am_loop",
+"write": "loop"
+},
+{
+"container": "am",
+"name": "tp_am_row",
+"write": "row"
+},
+{
+"container": "am",
+"name": "tp_am_rowslice",
+"write": "rowslice"
+},
+{
+"container": "am",
+"name": "tp_am_colslice",
+"write": "colslice"
+},
+{
+"container": "am",
+"name": "tp_am_range",
+"write": "range"
+},
+{
+"container": "am",
+"name": "tp_am_multi",
+"write": "multi"
+},
+{
+"container": "am",
+"name": "tp_am_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "am",
+"name": "tp_am_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "am",
+"name": "tp_am_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"tp_am_reads__m_real",
+"tp_am_reads__m_arith",
+"tp_am_reads__m_size",
+"tp_am_reads__m_dims",
+"tp_am_reads__m_rowcopy",
+"tp_am_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_tp_arv": {
+"cases": [
+{
+"container": "arv",
+"name": "tp_arv_lit",
+"write": "lit"
+},
+{
+"container": "arv",
+"name": "tp_arv_assign",
+"write": "assign"
+},
+{
+"container": "arv",
+"name": "tp_arv_udf",
+"write": "udf"
+},
+{
+"container": "arv",
+"name": "tp_arv_loop",
+"write": "loop"
+},
+{
+"container": "arv",
+"name": "tp_arv_row",
+"write": "row"
+},
+{
+"container": "arv",
+"name": "tp_arv_rowslice",
+"write": "rowslice"
+},
+{
+"container": "arv",
+"name": "tp_arv_colslice",
+"write": "colslice"
+},
+{
+"container": "arv",
+"name": "tp_arv_range",
+"write": "range"
+},
+{
+"container": "arv",
+"name": "tp_arv_multi",
+"write": "multi"
+},
+{
+"container": "arv",
+"name": "tp_arv_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "arv",
+"name": "tp_arv_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "arv",
+"name": "tp_arv_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"tp_arv_reads__m_real",
+"tp_arv_reads__m_arith",
+"tp_arv_reads__m_size",
+"tp_arv_reads__m_dims",
+"tp_arv_reads__m_rowcopy",
+"tp_arv_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_tp_av": {
+"cases": [
+{
+"container": "av",
+"name": "tp_av_lit",
+"write": "lit"
+},
+{
+"container": "av",
+"name": "tp_av_assign",
+"write": "assign"
+},
+{
+"container": "av",
+"name": "tp_av_udf",
+"write": "udf"
+},
+{
+"container": "av",
+"name": "tp_av_loop",
+"write": "loop"
+},
+{
+"container": "av",
+"name": "tp_av_row",
+"write": "row"
+},
+{
+"container": "av",
+"name": "tp_av_rowslice",
+"write": "rowslice"
+},
+{
+"container": "av",
+"name": "tp_av_colslice",
+"write": "colslice"
+},
+{
+"container": "av",
+"name": "tp_av_range",
+"write": "range"
+},
+{
+"container": "av",
+"name": "tp_av_multi",
+"write": "multi"
+},
+{
+"container": "av",
+"name": "tp_av_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "av",
+"name": "tp_av_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "av",
+"name": "tp_av_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"tp_av_reads__m_real",
+"tp_av_reads__m_arith",
+"tp_av_reads__m_size",
+"tp_av_reads__m_dims",
+"tp_av_reads__m_rowcopy",
+"tp_av_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_tp_i1": {
+"cases": [
+{
+"container": "i1",
+"name": "tp_i1_lit",
+"write": "lit"
+},
+{
+"container": "i1",
+"name": "tp_i1_assign",
+"write": "assign"
+},
+{
+"container": "i1",
+"name": "tp_i1_udf",
+"write": "udf"
+},
+{
+"container": "i1",
+"name": "tp_i1_loop",
+"write": "loop"
+},
+{
+"container": "i1",
+"name": "tp_i1_range",
+"write": "range"
+},
+{
+"container": "i1",
+"name": "tp_i1_multi",
+"write": "multi"
+},
+{
+"container": "i1",
+"name": "tp_i1_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i1",
+"name": "tp_i1_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": [
+{
+"case": "tp_i1_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "tp_i1_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "tp_i1_colslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "tp_i1_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_tp_i2": {
+"cases": [
+{
+"container": "i2",
+"name": "tp_i2_lit",
+"write": "lit"
+},
+{
+"container": "i2",
+"name": "tp_i2_assign",
+"write": "assign"
+},
+{
+"container": "i2",
+"name": "tp_i2_udf",
+"write": "udf"
+},
+{
+"container": "i2",
+"name": "tp_i2_loop",
+"write": "loop"
+},
+{
+"container": "i2",
+"name": "tp_i2_row",
+"write": "row"
+},
+{
+"container": "i2",
+"name": "tp_i2_rowslice",
+"write": "rowslice"
+},
+{
+"container": "i2",
+"name": "tp_i2_colslice",
+"write": "colslice"
+},
+{
+"container": "i2",
+"name": "tp_i2_range",
+"write": "range"
+},
+{
+"container": "i2",
+"name": "tp_i2_multi",
+"write": "multi"
+},
+{
+"container": "i2",
+"name": "tp_i2_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i2",
+"name": "tp_i2_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": [
+{
+"case": "tp_i2_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_tp_i3": {
+"cases": [
+{
+"container": "i3",
+"name": "tp_i3_lit",
+"write": "lit"
+},
+{
+"container": "i3",
+"name": "tp_i3_assign",
+"write": "assign"
+},
+{
+"container": "i3",
+"name": "tp_i3_udf",
+"write": "udf"
+},
+{
+"container": "i3",
+"name": "tp_i3_loop",
+"write": "loop"
+},
+{
+"container": "i3",
+"name": "tp_i3_row",
+"write": "row"
+},
+{
+"container": "i3",
+"name": "tp_i3_rowslice",
+"write": "rowslice"
+},
+{
+"container": "i3",
+"name": "tp_i3_colslice",
+"write": "colslice"
+},
+{
+"container": "i3",
+"name": "tp_i3_range",
+"write": "range"
+},
+{
+"container": "i3",
+"name": "tp_i3_multi",
+"write": "multi"
+},
+{
+"container": "i3",
+"name": "tp_i3_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "i3",
+"name": "tp_i3_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q"
+],
+"skipped": [
+{
+"case": "tp_i3_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_tp_m": {
+"cases": [
+{
+"container": "m",
+"name": "tp_m_lit",
+"write": "lit"
+},
+{
+"container": "m",
+"name": "tp_m_assign",
+"write": "assign"
+},
+{
+"container": "m",
+"name": "tp_m_udf",
+"write": "udf"
+},
+{
+"container": "m",
+"name": "tp_m_loop",
+"write": "loop"
+},
+{
+"container": "m",
+"name": "tp_m_row",
+"write": "row"
+},
+{
+"container": "m",
+"name": "tp_m_rowslice",
+"write": "rowslice"
+},
+{
+"container": "m",
+"name": "tp_m_colslice",
+"write": "colslice"
+},
+{
+"container": "m",
+"name": "tp_m_range",
+"write": "range"
+},
+{
+"container": "m",
+"name": "tp_m_multi",
+"write": "multi"
+},
+{
+"container": "m",
+"name": "tp_m_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "m",
+"name": "tp_m_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "m",
+"name": "tp_m_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"tp_m_reads__m_real",
+"tp_m_reads__m_arith",
+"tp_m_reads__m_size",
+"tp_m_reads__m_dims",
+"tp_m_reads__m_rowcopy",
+"tp_m_reads__m_colcopy"
+],
+"skipped": []
+},
+"container_flow_tp_r1": {
+"cases": [
+{
+"container": "r1",
+"name": "tp_r1_lit",
+"write": "lit"
+},
+{
+"container": "r1",
+"name": "tp_r1_assign",
+"write": "assign"
+},
+{
+"container": "r1",
+"name": "tp_r1_udf",
+"write": "udf"
+},
+{
+"container": "r1",
+"name": "tp_r1_loop",
+"write": "loop"
+},
+{
+"container": "r1",
+"name": "tp_r1_range",
+"write": "range"
+},
+{
+"container": "r1",
+"name": "tp_r1_multi",
+"write": "multi"
+},
+{
+"container": "r1",
+"name": "tp_r1_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r1",
+"name": "tp_r1_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"tp_r1_reads__m_real",
+"tp_r1_reads__m_arith",
+"tp_r1_reads__m_size",
+"tp_r1_reads__m_dims",
+"tp_r1_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "tp_r1_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "tp_r1_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "tp_r1_colslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "tp_r1_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_tp_r2": {
+"cases": [
+{
+"container": "r2",
+"name": "tp_r2_lit",
+"write": "lit"
+},
+{
+"container": "r2",
+"name": "tp_r2_assign",
+"write": "assign"
+},
+{
+"container": "r2",
+"name": "tp_r2_udf",
+"write": "udf"
+},
+{
+"container": "r2",
+"name": "tp_r2_loop",
+"write": "loop"
+},
+{
+"container": "r2",
+"name": "tp_r2_row",
+"write": "row"
+},
+{
+"container": "r2",
+"name": "tp_r2_rowslice",
+"write": "rowslice"
+},
+{
+"container": "r2",
+"name": "tp_r2_colslice",
+"write": "colslice"
+},
+{
+"container": "r2",
+"name": "tp_r2_range",
+"write": "range"
+},
+{
+"container": "r2",
+"name": "tp_r2_multi",
+"write": "multi"
+},
+{
+"container": "r2",
+"name": "tp_r2_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r2",
+"name": "tp_r2_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"tp_r2_reads__m_real",
+"tp_r2_reads__m_arith",
+"tp_r2_reads__m_size",
+"tp_r2_reads__m_dims",
+"tp_r2_reads__m_rowcopy",
+"tp_r2_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "tp_r2_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_tp_r3": {
+"cases": [
+{
+"container": "r3",
+"name": "tp_r3_lit",
+"write": "lit"
+},
+{
+"container": "r3",
+"name": "tp_r3_assign",
+"write": "assign"
+},
+{
+"container": "r3",
+"name": "tp_r3_udf",
+"write": "udf"
+},
+{
+"container": "r3",
+"name": "tp_r3_loop",
+"write": "loop"
+},
+{
+"container": "r3",
+"name": "tp_r3_row",
+"write": "row"
+},
+{
+"container": "r3",
+"name": "tp_r3_rowslice",
+"write": "rowslice"
+},
+{
+"container": "r3",
+"name": "tp_r3_colslice",
+"write": "colslice"
+},
+{
+"container": "r3",
+"name": "tp_r3_range",
+"write": "range"
+},
+{
+"container": "r3",
+"name": "tp_r3_multi",
+"write": "multi"
+},
+{
+"container": "r3",
+"name": "tp_r3_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "r3",
+"name": "tp_r3_reads",
+"write": "row"
+}
+],
+"gradient": [
+"q",
+"tp_r3_reads__m_real",
+"tp_r3_reads__m_arith",
+"tp_r3_reads__m_size",
+"tp_r3_reads__m_dims",
+"tp_r3_reads__m_rowcopy",
+"tp_r3_reads__m_colcopy"
+],
+"skipped": [
+{
+"case": "tp_r3_cpdrow",
+"reason": "stanc rejects: += is not defined on arrays"
+}
+]
+},
+"container_flow_tp_rv": {
+"cases": [
+{
+"container": "rv",
+"name": "tp_rv_lit",
+"write": "lit"
+},
+{
+"container": "rv",
+"name": "tp_rv_assign",
+"write": "assign"
+},
+{
+"container": "rv",
+"name": "tp_rv_udf",
+"write": "udf"
+},
+{
+"container": "rv",
+"name": "tp_rv_loop",
+"write": "loop"
+},
+{
+"container": "rv",
+"name": "tp_rv_range",
+"write": "range"
+},
+{
+"container": "rv",
+"name": "tp_rv_multi",
+"write": "multi"
+},
+{
+"container": "rv",
+"name": "tp_rv_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "rv",
+"name": "tp_rv_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "rv",
+"name": "tp_rv_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"tp_rv_reads__m_real",
+"tp_rv_reads__m_arith",
+"tp_rv_reads__m_size",
+"tp_rv_reads__m_dims",
+"tp_rv_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "tp_rv_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "tp_rv_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "tp_rv_colslice",
+"reason": "not applicable: rank 1 has no row"
+}
+]
+},
+"container_flow_tp_v": {
+"cases": [
+{
+"container": "v",
+"name": "tp_v_lit",
+"write": "lit"
+},
+{
+"container": "v",
+"name": "tp_v_assign",
+"write": "assign"
+},
+{
+"container": "v",
+"name": "tp_v_udf",
+"write": "udf"
+},
+{
+"container": "v",
+"name": "tp_v_loop",
+"write": "loop"
+},
+{
+"container": "v",
+"name": "tp_v_range",
+"write": "range"
+},
+{
+"container": "v",
+"name": "tp_v_multi",
+"write": "multi"
+},
+{
+"container": "v",
+"name": "tp_v_cpdelem",
+"write": "cpdelem"
+},
+{
+"container": "v",
+"name": "tp_v_cpdrow",
+"write": "cpdrow"
+},
+{
+"container": "v",
+"name": "tp_v_reads",
+"write": "range"
+}
+],
+"gradient": [
+"q",
+"tp_v_reads__m_real",
+"tp_v_reads__m_arith",
+"tp_v_reads__m_size",
+"tp_v_reads__m_dims",
+"tp_v_reads__m_rowcopy"
+],
+"skipped": [
+{
+"case": "tp_v_row",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "tp_v_rowslice",
+"reason": "not applicable: rank 1 has no row"
+},
+{
+"case": "tp_v_colslice",
+"reason": "not applicable: rank 1 has no row"
+}
+]
+}
+},
+"name_count": 670,
+"skipped_builtins": [
+{
+"case": "td_r3_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "tp_r3_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "m_r3_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "gq_r3_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "fn_r3_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "td_av_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "tp_av_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "m_av_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "gq_av_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "fn_av_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "td_arv_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "tp_arv_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "m_arv_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "gq_arv_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "fn_arv_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "td_am_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "tp_am_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "m_am_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "gq_am_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+},
+{
+"case": "fn_am_builtin",
+"reason": "generator limitation: no builtin builds distinct cells of this type"
+}
+]
+}

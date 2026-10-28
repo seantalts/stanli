@@ -121,6 +121,10 @@ def scalar_profile(signature: Signature, descriptor: RegistrySpec) \
         _, data_only = unwrap_data(argument)
         if data_only:
             data_positions.add(index)
+    # stanc accepts to_int only on data, but the inventory omits the
+    # qualifier on its array overloads.
+    if signature.name == "to_int":
+        data_positions.update(range(len(signature.arguments)))
     return tuple(centers), perturbation, tuple(sorted(data_positions))
 
 
