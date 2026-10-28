@@ -279,6 +279,38 @@ def test_sample_eight_schools():
     assert 3.0 < mu < 6.0, mu
 
 
+def test_omitted_zero_size_data_matches_explicit_empty():
+    src = ("data { int N; array[N] real y; int K; vector[K] x; "
+           "matrix[K, 2] M; }\n"
+           "parameters { real mu; }\n"
+           "model { y ~ normal(mu, 1); target += sum(x) + sum(M); }\n")
+    omitted = stanli.Model(stan_code=src, data={"N": 2, "y": [0.5, 1.5],
+                                                "K": 0})
+    explicit = stanli.Model(stan_code=src, data={"N": 2, "y": [0.5, 1.5],
+                                                 "K": 0, "x": [],
+                                                 "M": np.zeros((0, 2))})
+    q = np.array([0.3])
+    lp0, g0 = omitted.log_prob_grad(q)
+    lp1, g1 = explicit.log_prob_grad(q)
+    assert lp0 == lp1 and np.array_equal(g0, g1), (lp0, lp1, g0, g1)
+    a = omitted.sample(chains=1, seed=3, warmup=50, samples=20, refresh=0)
+    b = explicit.sample(chains=1, seed=3, warmup=50, samples=20, refresh=0)
+    np.testing.assert_array_equal(a["mu"], b["mu"])
+
+
+def test_omitted_scalar_data_is_still_an_error():
+    src = ("data { int N; array[N] real y; int K; vector[K] x; }\n"
+           "parameters { real mu; }\nmodel { y ~ normal(mu, 1); }\n")
+    for data, names in (({"N": 2, "y": [0.5, 1.5]}, "K, x"),
+                        ({"K": 0, "x": []}, "N, y")):
+        try:
+            stanli.Model(stan_code=src, data=data)
+        except Exception as e:  # noqa: BLE001
+            assert f"missing data for {names}" in str(e), e
+        else:
+            raise AssertionError("expected an error for " + names)
+
+
 def test_model_seed_draws_transformed_data():
     # The construction seed owns transformed data's RNG draws, so the log
     # density at a fixed point repeats under the same seed and moves under
@@ -537,9 +569,8 @@ def test_fit_uses_full_transition_report_counts():
     assert text.count("Elapsed Time:") == 2
 
 
-def _capture_process_stdout(run):
-    # The runtime's own messages go to the C stdout, below sys.stdout, so
-    # redirect_stdout cannot see them.
+def _capture_fd1(run):
+    # What reaches the process's own file descriptor 1, below sys.stdout.
     sys.stdout.flush()
     saved = os.dup(1)
     with tempfile.TemporaryFile() as sink:
@@ -553,6 +584,14 @@ def _capture_process_stdout(run):
         sink.seek(0)
         # Windows writes the C stdout in text mode, with CRLF line ends.
         return result, sink.read().decode().replace("\r\n", "\n")
+
+
+def _capture_stdout(run):
+    # What a notebook, a test runner or contextlib.redirect_stdout sees.
+    stream = io.StringIO()
+    with contextlib.redirect_stdout(stream):
+        result = run()
+    return result, stream.getvalue()
 
 
 REJECTING = """
@@ -571,13 +610,103 @@ model { y ~ normal(0, 3); x ~ normal(0, exp(y / 2)); }
 SEE_WARNINGS = "See https://mc-stan.org/misc/warnings for details."
 
 
+PRINTING = """
+transformed data { print("td says hello"); }
+parameters { real mu; }
+model { print("model mu=", mu); mu ~ normal(0, 1); }
+generated quantities { print("gq mu=", mu); }
+"""
+
+
+def _assert_no_leak_to_fd1(run):
+    result, leaked = _capture_fd1(lambda: _capture_stdout(run))
+    assert leaked == "", f"output leaked to the process stdout: {leaked!r}"
+    return result
+
+
+def test_model_print_goes_through_sys_stdout():
+    def build():
+        return stanli.Model(stan_code=PRINTING)
+
+    m, text = _assert_no_leak_to_fd1(build)
+    assert text == "td says hello\n", text
+
+    def evaluate():
+        return m.log_prob_grad(np.array([0.5]))
+
+    _, text = _assert_no_leak_to_fd1(evaluate)
+    assert text == "model mu=0.5\n", text
+
+    _, text = _assert_no_leak_to_fd1(
+        lambda: m.sample(chains=1, warmup=3, samples=2, refresh=0, seed=1))
+    lines = text.splitlines()
+    assert any(line.startswith("model mu=") for line in lines), text
+    assert sum(line.startswith("gq mu=") for line in lines) == 2, text
+    assert all(re.fullmatch(r"(model|gq) mu=\S+", line) for line in lines), text
+
+    _, text = _assert_no_leak_to_fd1(lambda: m.optimize(seed=1))
+    assert "model mu=" in text, text
+
+
+def test_model_print_from_parallel_chains_arrives_whole():
+    m = stanli.Model(stan_code=PRINTING)
+    _, text = _assert_no_leak_to_fd1(
+        lambda: m.sample(chains=4, warmup=50, samples=50, refresh=0, seed=3,
+                         parallel_chains=4))
+    lines = text.splitlines()
+    assert len(lines) > 400, len(lines)
+    assert all(re.fullmatch(r"(model|gq) mu=\S+", line) for line in lines), \
+        [line for line in lines
+         if not re.fullmatch(r"(model|gq) mu=\S+", line)][:5]
+    assert sum(line.startswith("gq mu=") for line in lines) == 200
+
+
+def test_print_and_progress_share_one_stream_in_order():
+    m = stanli.Model(stan_code=PRINTING)
+    _, text = _assert_no_leak_to_fd1(
+        lambda: m.sample(chains=1, warmup=4, samples=3, refresh=1, seed=2,
+                         parallel_chains=1))
+    lines = text.splitlines()
+    first = next(i for i, line in enumerate(lines) if "Iteration:" in line)
+    last = max(i for i, line in enumerate(lines) if "Iteration:" in line)
+    assert any(line.startswith("model mu=") for line in lines[:first + 1]), \
+        text
+    assert any(line.startswith("gq mu=") for line in lines[first:last]), text
+    assert lines.index(next(line for line in lines if "Elapsed Time" in line)) \
+        > last, text
+
+
+def test_sampling_notices_and_warnings_go_through_sys_stdout():
+    reject = stanli.Model(stan_code=REJECTING)
+    _, text = _assert_no_leak_to_fd1(
+        lambda: reject.sample(chains=2, warmup=100, samples=100, seed=3,
+                              refresh=50))
+    assert "Chain [1] Informational Message" in text, text
+    assert "Chain [2] Informational Message" in text, text
+    funnel = stanli.Model(stan_code=FUNNEL)
+    _, text = _assert_no_leak_to_fd1(
+        lambda: funnel.sample(chains=1, warmup=100, samples=500, seed=42,
+                              refresh=1000))
+    assert "transitions ended with a divergence." in text, text
+    assert SEE_WARNINGS in text, text
+
+
+def test_function_print_goes_through_sys_stdout():
+    code = ("functions { real noisy(real x) { print(\"in noisy x=\", x); "
+            "return x; } } model {}")
+    f, _ = _assert_no_leak_to_fd1(
+        lambda: stanli.Function("noisy", stan_code=code))
+    _, text = _assert_no_leak_to_fd1(lambda: f(x=2.5))
+    assert text == "in noisy x=2.5\n", text
+
+
 def test_sampling_reports_rejected_proposals_with_the_chain():
     m = stanli.Model(stan_code=REJECTING)
-    _, quiet = _capture_process_stdout(
+    _, quiet = _capture_stdout(
         lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
                          refresh=0))
     assert quiet == "", quiet
-    _, text = _capture_process_stdout(
+    _, text = _capture_stdout(
         lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
                          refresh=50))
     assert ("Chain [1] Informational Message: The current Metropolis "
@@ -590,7 +719,7 @@ def test_sampling_reports_rejected_proposals_with_the_chain():
 
 def test_sampling_warnings_are_automatic_and_shared():
     m = stanli.Model(stan_code=FUNNEL)
-    fit, text = _capture_process_stdout(
+    fit, text = _capture_stdout(
         lambda: m.sample(chains=1, warmup=100, samples=500, seed=42,
                          refresh=1000))
     assert re.search(r"Warning: \d+ of 500 \(\d+\.\d%\) transitions ended "
@@ -600,17 +729,17 @@ def test_sampling_warnings_are_automatic_and_shared():
     low_ebfmi = ("Warning: 1 of 1 chains had an E-BFMI less than 0.3.\n"
                  + SEE_WARNINGS)
     assert (low_ebfmi in text) == bool(fit.ebfmi()[0] < 0.3), text
-    _, treedepth = _capture_process_stdout(
+    _, treedepth = _capture_stdout(
         lambda: m.sample(chains=1, warmup=50, samples=100, seed=1,
                          max_depth=3, refresh=1000))
     assert re.search(r"Warning: \d+ of 100 \(\d+\.\d%\) transitions hit the "
                      r"maximum treedepth limit of 3\.\n"
                      + re.escape(SEE_WARNINGS), treedepth), treedepth
-    _, quiet = _capture_process_stdout(
+    _, quiet = _capture_stdout(
         lambda: m.sample(chains=1, warmup=100, samples=500, seed=42,
                          refresh=0))
     assert quiet == "", quiet
-    _, healthy = _capture_process_stdout(
+    _, healthy = _capture_stdout(
         lambda: _normal().sample(chains=2, warmup=200, samples=100, seed=1,
                                  refresh=1000))
     assert "Warning" not in healthy, healthy
@@ -623,11 +752,11 @@ def test_unused_threads_per_chain_is_noted_once():
     note = ("Note: threads_per_chain = 2 has no effect on this model, "
             "which has no reduce_sum call to run in parallel.")
     m = _normal()
-    _, text = _capture_process_stdout(
+    _, text = _capture_stdout(
         lambda: m.sample(chains=2, warmup=50, samples=50, refresh=100,
                          threads_per_chain=2))
     assert text.count(note) == 1, text
-    _, text = _capture_process_stdout(
+    _, text = _capture_stdout(
         lambda: m.sample(chains=2, warmup=50, samples=50, refresh=0,
                          threads_per_chain=2))
     assert note not in text, text

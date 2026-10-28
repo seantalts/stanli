@@ -47,3 +47,19 @@ test_that("a model built from MIR needs no source file", {
   mir <- stanli:::stanc_mir("parameters { real x; } model { x ~ normal(0, 1); }")
   expect_s3_class(stanli_model(mir = mir), "stanli_model")
 })
+
+test_that("data variables left out are accepted when their declared size is zero", {
+  skip_without_runtime()
+  code <- paste("data { int N; array[N] real y; int K; vector[K] x; matrix[K, 2] M; }",
+                "parameters { real mu; }",
+                "model { y ~ normal(mu, 1); target += sum(x) + sum(M); }")
+  omitted <- stanli_model(code = code, data = list(N = 2L, y = c(0.5, 1.5), K = 0L))
+  explicit <- stanli_model(code = code,
+                           data = list(N = 2L, y = c(0.5, 1.5), K = 0L,
+                                       x = numeric(0), M = matrix(0, 0, 2)))
+  expect_identical(log_prob_grad(omitted, 0.3), log_prob_grad(explicit, 0.3))
+  expect_error(stanli_model(code = code, data = list(N = 2L, y = c(0.5, 1.5))),
+               "missing data for K, x, M", fixed = TRUE)
+  expect_error(stanli_model(code = code, data = list(N = 2L, K = 0L)),
+               "missing data for y;", fixed = TRUE)
+})

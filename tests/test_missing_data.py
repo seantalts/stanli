@@ -14,11 +14,18 @@ model { y ~ bernoulli(p); }
 """
 
 
-def prepare(data):
+ZERO_SIZE_MODEL = """
+data { int N; array[N] real y; int K; vector[K] x; matrix[K, 2] M; }
+parameters { real mu; }
+model { y ~ normal(mu, 1); target += sum(x) + sum(M); }
+"""
+
+
+def prepare(data, model=MODEL):
     with tempfile.TemporaryDirectory() as directory:
         directory = Path(directory)
         stan = directory / "model.stan"
-        stan.write_text(MODEL)
+        stan.write_text(model)
         mir = subprocess.run([STANC, "--O1", "--debug-optimized-mir", str(stan)],
                              check=True, capture_output=True, text=True).stdout
         (directory / "model.sexp").write_text(mir)
@@ -42,6 +49,30 @@ class MissingData(unittest.TestCase):
     def test_complete_data_prepares(self):
         run = prepare({"I": 2, "y": [0, 1], "J": 1, "x": [0.5]})
         self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_omitted_zero_size_variables_prepare(self):
+        run = prepare({"N": 2, "y": [0.5, 1.5], "K": 0}, ZERO_SIZE_MODEL)
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_omitted_zero_size_matches_explicit_empty(self):
+        run = prepare({"N": 2, "y": [0.5, 1.5], "K": 0, "x": [], "M": []},
+                      ZERO_SIZE_MODEL)
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_omitted_scalar_is_still_missing(self):
+        run = prepare({"N": 2, "y": [0.5, 1.5]}, ZERO_SIZE_MODEL)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("missing data for K, x, M", run.stderr)
+
+    def test_omitted_nonempty_array_is_still_missing(self):
+        run = prepare({"N": 2, "K": 0}, ZERO_SIZE_MODEL)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("missing data for y;", run.stderr)
+
+    def test_omitted_array_of_nonzero_declared_size_is_missing(self):
+        run = prepare({"N": 2, "y": [0.5, 1.5], "K": 1}, ZERO_SIZE_MODEL)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("missing data for x, M", run.stderr)
 
 
 if __name__ == "__main__":

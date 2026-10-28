@@ -382,7 +382,7 @@ std::optional<DataMap::Entry> region_bounded_data_value(const mir::Expr& e) {
   int64_t steps = 0;
   MirHooks hooks;
   hooks.data = [this](const std::string& name) -> const DataMap::Entry* {
-    return data.has(name) ? &data.at(name) : nullptr;
+    return data_entry(name);
   };
   hooks.int_var = [this](const std::string& name, long* value) {
     const auto found = int_env.find(name);
@@ -467,7 +467,7 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
   if (!collect(e)) return {};
   const auto unresolvable = [&](const auto& self, const mir::Expr& value) -> bool {
     if (value.kind == mir::Expr::Var)
-      return !variables.count(value.name) && !data.has(value.name) &&
+      return !variables.count(value.name) && !data_entry(value.name) &&
              !int_env.count(value.name) && !td.find(value.name);
     if (value.kind == mir::Expr::EAnd || value.kind == mir::Expr::EOr ||
         value.kind == mir::Expr::TernaryIf)
@@ -495,7 +495,7 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
             grid != variables.end()) {
           key += "G" + value.name + ":" + std::to_string(grid->second.lo) +
                  "," + std::to_string(grid->second.hi) + ";";
-        } else if (!data.has(value.name)) {
+        } else if (!data_entry(value.name)) {
           if (const auto local = int_env.find(value.name);
               local != int_env.end()) {
             key += "N" + value.name + ":" + std::to_string(local->second) +
