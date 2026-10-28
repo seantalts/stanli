@@ -157,6 +157,15 @@ def _load_lib():
     lib.stanli_stan_to_mir_with_opts.argtypes = [
         ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_size_t,
         ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_stan_to_mir_named.restype = ctypes.c_void_p
+    lib.stanli_stan_to_mir_named.argtypes = [
+        ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p),
+        ctypes.c_size_t, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_model_new_from_stan_named.restype = ctypes.c_void_p
+    lib.stanli_model_new_from_stan_named.argtypes = [
+        ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
+        ctypes.POINTER(_ModelOpts), ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_string_free.argtypes = [ctypes.c_void_p]
     lib.stanli_build_id.restype = ctypes.c_char_p
     lib.stanli_build_id.argtypes = []
@@ -388,7 +397,7 @@ def _pathfinder_init_options(value):
 
 
 def _compiler_command(model_path: pathlib.Path, include_paths=(),
-                      fast_math=False):
+                      fast_math=False, filename=None):
     """The packaged compiler argv, preferring stanli's portable producer."""
     suffix = ".exe" if sys.platform == "win32" else ""
     portable = _BIN / ("stanli-compile" + suffix)
@@ -396,6 +405,8 @@ def _compiler_command(model_path: pathlib.Path, include_paths=(),
         flags = [arg for path in include_paths for arg in ("--include-path", path)]
         if fast_math:
             flags.insert(0, "--fast-math")
+        if filename is not None:
+            flags.extend(["--filename", filename])
         return [str(portable), *flags, str(model_path)]
 
     # One-cycle rollback path: pristine stanc3 emits the legacy s-expression
@@ -410,14 +421,28 @@ def _compiler_command(model_path: pathlib.Path, include_paths=(),
             raise ValueError("the legacy stanc compiler cannot use include_paths "
                              "containing commas")
         flags = ["--include-paths=" + ",".join(include_paths)] if include_paths else []
+        if filename is not None:
+            flags.append("--filename-in-msg=" + filename)
         return [str(stanc), "--O1", "--debug-optimized-mir", *flags, str(model_path)]
     raise RuntimeError(
         "the bundled Stan compiler is missing "
         f"(expected {portable.name} or {stanc.name} in {_BIN})")
 
 
-def _stanc_mir(model_path: pathlib.Path, include_paths=(), fast_math=False) -> str:
-    argv = _compiler_command(model_path, include_paths, fast_math)
+def _warn_compile(text):
+    """Report compiler warnings once, attributed to the first caller outside
+    this package."""
+    if not text:
+        return
+    level, frame = 1, sys._getframe(1)
+    while frame is not None and frame.f_globals.get("__package__") == __package__:
+        level, frame = level + 1, frame.f_back
+    warnings.warn(text, RuntimeWarning, stacklevel=level + 1)
+
+
+def _stanc_mir(model_path: pathlib.Path, include_paths=(), fast_math=False,
+               filename=None) -> str:
+    argv = _compiler_command(model_path, include_paths, fast_math, filename)
     try:
         r = subprocess.run(argv, capture_output=True, text=True,
                            encoding="utf-8")
@@ -426,10 +451,12 @@ def _stanc_mir(model_path: pathlib.Path, include_paths=(), fast_math=False) -> s
             from exc
     if r.returncode != 0 or not r.stdout:
         raise RuntimeError(f"stanc failed:\n{r.stderr}")
+    _warn_compile(r.stderr.strip())
     return r.stdout
 
 
-def _subprocess_mir(stan_code: str, include_paths=(), fast_math=False) -> str:
+def _subprocess_mir(stan_code: str, include_paths=(), fast_math=False,
+                    filename=None) -> str:
     """Compile source in an isolated directory and remove every side effect."""
     import tempfile
     with tempfile.TemporaryDirectory(prefix="stanli-compile-") as tmpdir:
@@ -438,9 +465,11 @@ def _subprocess_mir(stan_code: str, include_paths=(), fast_math=False) -> str:
         # of text-mode files on Windows. Stock stanc also writes model.hpp next
         # to this file; TemporaryDirectory removes that rollback-path artifact.
         source.write_bytes(stan_code.encode("utf-8"))
+        extra = {} if filename is None else {"filename": filename}
         if fast_math:
-            return _stanc_mir(source, include_paths, True)
-        return _stanc_mir(source, include_paths) if include_paths else _stanc_mir(source)
+            return _stanc_mir(source, include_paths, True, **extra)
+        return (_stanc_mir(source, include_paths, **extra) if include_paths
+                else _stanc_mir(source, **extra))
 
 
 def _read_utf8_file(path) -> str:
@@ -511,18 +540,28 @@ def _check_fast_math(value):
     return value
 
 
-def _compile_stan(stan_code, include_paths, fast_math=False):
+def _compile_stan(stan_code, include_paths, fast_math=False, filename=None):
     include_paths = include_paths if "#include" in stan_code else []
     if not _lib.stanli_has_embedded_stanc():
+        extra = {} if filename is None else {"filename": filename}
         if fast_math:
-            return _subprocess_mir(stan_code, include_paths, True)
-        return (_subprocess_mir(stan_code, include_paths) if include_paths
-                else _subprocess_mir(stan_code))
+            return _subprocess_mir(stan_code, include_paths, True, **extra)
+        return (_subprocess_mir(stan_code, include_paths, **extra)
+                if include_paths else _subprocess_mir(stan_code, **extra))
     err = ctypes.create_string_buffer(8192)
     paths = (ctypes.c_char_p * len(include_paths))(
         *(path.encode("utf-8") for path in include_paths))
-    p = _lib.stanli_stan_to_mir_with_opts(
-        stan_code.encode(), paths, len(paths), int(fast_math), err, len(err))
+    compiler_warnings = ctypes.c_void_p()
+    p = _lib.stanli_stan_to_mir_named(
+        stan_code.encode(), None if filename is None else filename.encode(),
+        paths, len(paths), int(fast_math), ctypes.byref(compiler_warnings),
+        err, len(err))
+    try:
+        if compiler_warnings:
+            _warn_compile(ctypes.cast(compiler_warnings,
+                                      ctypes.c_char_p).value.decode())
+    finally:
+        _lib.stanli_string_free(compiler_warnings)
     if not p:
         raise RuntimeError(err.value.decode())
     try:
@@ -540,11 +579,16 @@ def _runtime_lib_path() -> pathlib.Path:
                    else "stanli.dll")
 
 
+def _source_label(stan_file, stan_code):
+    return None if stan_code is not None or stan_file is None else os.fspath(stan_file)
+
+
 def _resolve_program(stan_file, stan_code, mir, name, include_paths=None):
     """(mir, name) from whichever form the caller has, compiling if needed."""
     if mir is None:
+        label = _source_label(stan_file, stan_code)
         stan_code, paths = _read_stan_source(stan_file, stan_code, include_paths)
-        mir = _compile_stan(stan_code, paths)
+        mir = _compile_stan(stan_code, paths, filename=label)
     if name is None:
         name = pathlib.Path(stan_file).stem if stan_file else "stanli_model"
     return mir, name
@@ -1104,10 +1148,13 @@ class Model:
         threads_per_chain = _threads_per_chain(threads_per_chain)
         seed = _seed_arg(seed)
         self._fast_math = _check_fast_math(fast_math)
+        self._label = None
         if mir is None:
+            self._label = _source_label(stan_file, stan_code)
             stan_code, paths = _read_stan_source(stan_file, stan_code, include_paths)
-            if "#include" in stan_code:
-                mir = _compile_stan(stan_code, paths, self._fast_math)
+            if "#include" in stan_code or not _lib.stanli_has_embedded_stanc():
+                mir = _compile_stan(stan_code, paths, self._fast_math,
+                                    self._label)
         self._source = (mir, stan_code, _data_to_json(data))
         self._m = None
         self._adopt(self._construct(seed, threads_per_chain), seed, threads_per_chain)
@@ -1135,17 +1182,16 @@ class Model:
     def _construct(self, seed, threads_per_chain):
         mir, stan_code, data_json = self._source
         err = ctypes.create_string_buffer(8192)
-        if mir is not None:
-            text, name = mir, "stanli_model_new"
-        elif _lib.stanli_has_embedded_stanc():
-            text, name = stan_code, "stanli_model_new_from_stan"
-        else:
-            text, name = (_subprocess_mir(stan_code, (), self._fast_math),
-                          "stanli_model_new")
-        fn = getattr(_lib, name + "_with_opts")
         opts = _ModelOpts(seed, threads_per_chain, int(self._fast_math))
-        m = fn(text.encode(), data_json.encode(), ctypes.byref(opts), err,
-               len(err))
+        if mir is not None:
+            m = _lib.stanli_model_new_with_opts(
+                mir.encode(), data_json.encode(), ctypes.byref(opts), err,
+                len(err))
+        else:
+            m = _lib.stanli_model_new_from_stan_named(
+                stan_code.encode(),
+                None if self._label is None else self._label.encode(),
+                data_json.encode(), ctypes.byref(opts), err, len(err))
         if not m:
             raise RuntimeError(err.value.decode())
         return m

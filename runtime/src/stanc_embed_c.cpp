@@ -89,19 +89,20 @@ extern "C" {
 // Called with the OCaml runtime lock held. Root every allocation while building
 // the argument array: copying a later path may collect the earlier strings.
 static char* invoke_callback(const value* fn, const char* stan_code,
+                             const char* filename,
                              const char* const* include_paths,
-                             size_t include_path_count) {
+                             size_t include_path_count, int flags) {
   CAMLparam0();
-  CAMLlocal3(code, paths, res);
+  CAMLlocal3(code, paths, name);
+  CAMLlocal2(res, flag_value);
   code = caml_copy_string(stan_code);
-  if (include_paths == nullptr) {
-    res = caml_callback_exn(*fn, code);
-  } else {
-    paths = caml_alloc(include_path_count, 0);
-    for (size_t i = 0; i < include_path_count; ++i)
-      Store_field(paths, i, caml_copy_string(include_paths[i]));
-    res = caml_callback2_exn(*fn, code, paths);
-  }
+  paths = caml_alloc(include_path_count, 0);
+  for (size_t i = 0; i < include_path_count; ++i)
+    Store_field(paths, i, caml_copy_string(include_paths[i]));
+  name = caml_copy_string(filename != nullptr ? filename : "");
+  flag_value = Val_int(flags);
+  value args[4] = {code, paths, name, flag_value};
+  res = caml_callbackN_exn(*fn, 4, args);
   char* out =
       Is_exception_result(res)
           ? error_result("embedded stanc callback raised an OCaml exception")
@@ -109,10 +110,11 @@ static char* invoke_callback(const value* fn, const char* stan_code,
   CAMLreturnT(char*, out);
 }
 
-// "OK<MIR>" or "ERR<message>"; caller frees with stanli_stanc_free.
-static char* compile_callback(const char* stan_code, const char* entry,
-                              const char* const* include_paths = nullptr,
-                              size_t include_path_count = 0) {
+// "W<n>:<n bytes of warnings>" then "OK<MIR>" or "ERR<message>"; caller frees
+// with stanli_stanc_free. A failure before the callback runs has no W prefix.
+char* stanli_stanc_compile(const char* stan_code, const char* filename,
+                           const char* const* include_paths,
+                           size_t include_path_count, int flags) {
   if (stan_code == nullptr) return error_result("Stan source is null");
 
   std::lock_guard<std::mutex> serial(compile_mutex);
@@ -125,48 +127,13 @@ static char* compile_callback(const char* stan_code, const char* entry,
   }
 
   RuntimeLock runtime;
-  const value* fn = caml_named_value(entry);
+  const value* fn = caml_named_value("stanc_compile");
   if (fn == nullptr) {
     return error_result("embedded stanc entry point not registered");
   }
 
-  return invoke_callback(fn, stan_code, include_paths, include_path_count);
-}
-
-char* stanli_stanc_tmir(const char* stan_code) {
-  return compile_callback(stan_code, "stanc_compile_tmir");
-}
-
-char* stanli_stanc_model_tmir(const char* stan_code) {
-  return compile_callback(stan_code, "stanc_compile_model_tmir");
-}
-
-char* stanli_stanc_tmir_with_includes(const char* stan_code,
-                                      const char* const* include_paths,
-                                      size_t include_path_count) {
-  // A non-null pointer selects the two-argument callback even for an empty
-  // list.
-  const char* empty = nullptr;
-  return compile_callback(stan_code, "stanc_compile_tmir_with_includes",
-                          include_paths ? include_paths : &empty,
-                          include_path_count);
-}
-
-char* stanli_stanc_tmir_fast(const char* stan_code) {
-  return compile_callback(stan_code, "stanc_compile_tmir_fast");
-}
-
-char* stanli_stanc_model_tmir_fast(const char* stan_code) {
-  return compile_callback(stan_code, "stanc_compile_model_tmir_fast");
-}
-
-char* stanli_stanc_tmir_with_includes_fast(const char* stan_code,
-                                           const char* const* include_paths,
-                                           size_t include_path_count) {
-  const char* empty = nullptr;
-  return compile_callback(stan_code, "stanc_compile_tmir_with_includes_fast",
-                          include_paths ? include_paths : &empty,
-                          include_path_count);
+  return invoke_callback(fn, stan_code, filename, include_paths,
+                         include_path_count, flags);
 }
 
 void stanli_stanc_free(char* p) { std::free(p); }

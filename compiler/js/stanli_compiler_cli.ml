@@ -2,15 +2,19 @@ let () =
   let model_only = ref false in
   let fast_math = ref false in
   let include_paths = ref [] in
+  let filename = ref None in
   let model = ref None in
   let usage =
-    "usage: stanli_compiler_cli [--model-only] [--fast-math] [--include-path DIR]... MODEL.stan" in
+    "usage: stanli_compiler_cli [--model-only] [--fast-math] [--include-path DIR]... [--filename NAME] MODEL.stan" in
   Arg.parse
     [ ("--model-only", Arg.Set model_only, "compile only model entry points")
     ; ("--fast-math", Arg.Set fast_math, "enable partial evaluation")
     ; ( "--include-path"
       , Arg.String (fun path -> include_paths := path :: !include_paths)
-      , "directory to search for Stan includes (repeatable)" ) ]
+      , "directory to search for Stan includes (repeatable)" )
+    ; ( "--filename"
+      , Arg.String (fun name -> filename := Some name)
+      , "file name to print in diagnostics instead of 'string'" ) ]
     (fun path ->
       match !model with
       | None -> model := Some path
@@ -29,7 +33,7 @@ let () =
   in
   List.iter
     (fun warning ->
-      Fmt.epr "%a@." (Frontend.Warnings.pp ?printed_filename:None) warning)
+      Fmt.epr "%a@." (Frontend.Warnings.pp ?printed_filename:!filename) warning)
     compilation.warnings;
   List.iter
     (fun diagnostic ->
@@ -42,6 +46,6 @@ let () =
       exit 1
   | Error (Stanli_pipeline.Frontend_error error) ->
       Fmt.epr "%a@."
-        (Frontend.Errors.pp ?printed_filename:None ~code)
+        (Frontend.Errors.pp ?printed_filename:!filename ~code)
         error;
       exit 1

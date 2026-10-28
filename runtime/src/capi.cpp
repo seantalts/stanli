@@ -9,6 +9,7 @@
 #include <stanli/message_sink.hpp>
 #include <stanli/nuts.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/stanc_result.hpp>
 #include <stanli/reduce_sum.hpp>
 #include <stanli/walnuts.hpp>
 #include <stanli/wa_interp.hpp>
@@ -19,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -275,37 +277,59 @@ stanli_model* stanli_model_new_with_opts(const char* mir_text,
 }
 
 #ifdef STANLI_EMBED_STANC
-extern "C" char* stanli_stanc_tmir(const char* stan_code);
-extern "C" char* stanli_stanc_tmir_with_includes(
-    const char* stan_code, const char* const* include_paths,
-    size_t include_path_count);
-extern "C" char* stanli_stanc_model_tmir(const char* stan_code);
-extern "C" char* stanli_stanc_tmir_fast(const char* stan_code);
-extern "C" char* stanli_stanc_tmir_with_includes_fast(
-    const char* stan_code, const char* const* include_paths,
-    size_t include_path_count);
-extern "C" char* stanli_stanc_model_tmir_fast(const char* stan_code);
+extern "C" char* stanli_stanc_compile(const char* stan_code,
+                                      const char* filename,
+                                      const char* const* include_paths,
+                                      size_t include_path_count, int flags);
 extern "C" void stanli_stanc_free(char* p);
+
+namespace {
+constexpr int kStancModelOnly = 1;
+constexpr int kStancFastMath = 2;
+
+char* dup_string(const std::string& text) {
+  char* out = static_cast<char*>(std::malloc(text.size() + 1));
+  if (out != nullptr) std::memcpy(out, text.c_str(), text.size() + 1);
+  return out;
+}
+
+stanli::StancResult embedded_compile(const char* stan_code,
+                                     const char* filename,
+                                     const char* const* include_paths,
+                                     size_t include_path_count, int flags) {
+  char* raw = stanli_stanc_compile(stan_code, filename, include_paths,
+                                   include_path_count, flags);
+  stanli::StancResult result = stanli::parse_stanc_result(raw);
+  if (raw != nullptr) stanli_stanc_free(raw);
+  return result;
+}
+}  // namespace
 #endif
 
 static stanli_model* model_new_from_stan(const char* stan_code,
+                                         const char* filename,
                                          const char* data_json, uint32_t seed,
                                          int threads_per_chain, bool fast_math,
                                          char* err, size_t err_len) {
 #ifdef STANLI_EMBED_STANC
-  char* res = fast_math ? stanli_stanc_model_tmir_fast(stan_code)
-                        : stanli_stanc_model_tmir(stan_code);
-  if (std::strncmp(res, "OK", 2) != 0) {
-    put_err(err, err_len, res + (std::strncmp(res, "ERR", 3) == 0 ? 3 : 0));
-    stanli_stanc_free(res);
+  const stanli::StancResult compiled = embedded_compile(
+      stan_code, filename, nullptr, 0,
+      kStancModelOnly | (fast_math ? kStancFastMath : 0));
+  if (!compiled.ok) {
+    put_err(err, err_len, compiled.body.c_str());
     return nullptr;
   }
-  stanli_model* m = model_new(res + 2, data_json, seed, threads_per_chain,
-                              fast_math, err, err_len);
-  stanli_stanc_free(res);
+  stanli_model* m = model_new(compiled.body.c_str(), data_json, seed,
+                              threads_per_chain, fast_math, err, err_len);
+  if (m != nullptr && !compiled.warnings.empty()) {
+    m->warnings = m->warnings.empty()
+                      ? compiled.warnings
+                      : compiled.warnings + "\n" + m->warnings;
+  }
   return m;
 #else
   (void)stan_code;
+  (void)filename;
   (void)data_json;
   (void)seed;
   (void)threads_per_chain;
@@ -318,17 +342,27 @@ static stanli_model* model_new_from_stan(const char* stan_code,
 stanli_model* stanli_model_new_from_stan_with_opts(
     const char* stan_code, const char* data_json, const stanli_model_opts* opts,
     char* err, size_t err_len) {
+  return stanli_model_new_from_stan_named(stan_code, nullptr, data_json, opts,
+                                          err, err_len);
+}
+
+stanli_model* stanli_model_new_from_stan_named(
+    const char* stan_code, const char* filename, const char* data_json,
+    const stanli_model_opts* opts, char* err, size_t err_len) {
   stanli_model_opts o;
   stanli_model_opts_init(&o);
   if (opts != nullptr) o = *opts;
-  return model_new_from_stan(stan_code, data_json, o.seed, o.threads_per_chain,
-                             o.fast_math != 0, err, err_len);
+  return model_new_from_stan(stan_code, filename, data_json, o.seed,
+                             o.threads_per_chain, o.fast_math != 0, err,
+                             err_len);
 }
 
-char* stanli_stan_to_mir_with_opts(const char* stan_code,
-                                   const char* const* include_paths,
-                                   size_t include_path_count, int fast_math,
-                                   char* err, size_t err_len) {
+char* stanli_stan_to_mir_named(const char* stan_code, const char* filename,
+                               const char* const* include_paths,
+                               size_t include_path_count, int fast_math,
+                               char** warnings_out, char* err,
+                               size_t err_len) {
+  if (warnings_out != nullptr) *warnings_out = nullptr;
   if (stan_code == nullptr ||
       (include_path_count && include_paths == nullptr)) {
     put_err(err, err_len, "Stan source or include_paths is null");
@@ -341,39 +375,38 @@ char* stanli_stan_to_mir_with_opts(const char* stan_code,
     }
   }
 #ifdef STANLI_EMBED_STANC
-  char* res = fast_math
-                  ? (include_path_count
-                         ? stanli_stanc_tmir_with_includes_fast(
-                               stan_code, include_paths, include_path_count)
-                         : stanli_stanc_tmir_fast(stan_code))
-                  : (include_path_count
-                         ? stanli_stanc_tmir_with_includes(
-                               stan_code, include_paths, include_path_count)
-                         : stanli_stanc_tmir(stan_code));
-  if (res == nullptr) {
-    put_err(err, err_len, "out of memory");
+  const stanli::StancResult compiled =
+      embedded_compile(stan_code, filename, include_paths, include_path_count,
+                       fast_math ? kStancFastMath : 0);
+  if (!compiled.warnings.empty()) {
+    if (warnings_out != nullptr) {
+      *warnings_out = dup_string(compiled.warnings);
+    } else {
+      std::fprintf(stderr, "%s\n", compiled.warnings.c_str());
+    }
+  }
+  if (!compiled.ok) {
+    put_err(err, err_len, compiled.body.c_str());
     return nullptr;
   }
-  if (std::strncmp(res, "OK", 2) != 0) {
-    put_err(err, err_len, res + (std::strncmp(res, "ERR", 3) == 0 ? 3 : 0));
-    stanli_stanc_free(res);
-    return nullptr;
-  }
-  // Hand back the MIR alone, on its own allocation: the caller frees this
-  // with stanli_string_free and never sees the "OK" the OCaml side
-  // prefixes its result with.
-  const size_t n = std::strlen(res + 2);
-  char* out = (char*)std::malloc(n + 1);
-  if (out != nullptr) std::memcpy(out, res + 2, n + 1);
-  stanli_stanc_free(res);
+  char* out = dup_string(compiled.body);
   if (out == nullptr) put_err(err, err_len, "out of memory");
   return out;
 #else
-  (void)stan_code;
+  (void)filename;
   (void)fast_math;
   put_err(err, err_len, "this build does not embed stanc3");
   return nullptr;
 #endif
+}
+
+char* stanli_stan_to_mir_with_opts(const char* stan_code,
+                                   const char* const* include_paths,
+                                   size_t include_path_count, int fast_math,
+                                   char* err, size_t err_len) {
+  return stanli_stan_to_mir_named(stan_code, nullptr, include_paths,
+                                  include_path_count, fast_math, nullptr, err,
+                                  err_len);
 }
 
 void stanli_string_free(char* p) { std::free(p); }

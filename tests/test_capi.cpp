@@ -1893,7 +1893,62 @@ void test_fast_math_options() {
   stanli_string_free(fast);
 }
 
+void test_named_source_and_warnings() {
+  char err[8192]{};
+  char* compiler_warnings = nullptr;
+  char* mir = stanli_stan_to_mir_named("", "dir/empty.stan", nullptr, 0, 0,
+                                       &compiler_warnings, err, sizeof err);
+  if (!stanli_has_embedded_stanc()) {
+    expect_true("no embedded stanc is reported", mir == nullptr);
+    return;
+  }
+  expect_true(std::string("empty model compiles: ") + err, mir != nullptr);
+  stanli_string_free(mir);
+  expect_true("warnings are returned",
+              compiler_warnings != nullptr &&
+                  std::strstr(compiler_warnings, "Empty model detected") !=
+                      nullptr);
+  expect_true("warnings name the file",
+              compiler_warnings != nullptr &&
+                  std::strstr(compiler_warnings, "dir/empty.stan") != nullptr);
+  stanli_string_free(compiler_warnings);
+
+  compiler_warnings = nullptr;
+  mir = stanli_stan_to_mir_named("model {}", nullptr, nullptr, 0, 0,
+                                 &compiler_warnings, err, sizeof err);
+  expect_true("a clean model has no warnings",
+              mir != nullptr && compiler_warnings == nullptr);
+  stanli_string_free(mir);
+
+  const char* broken = "parameters { real x }\nmodel { x ~ normal(0, 1); }\n";
+  mir = stanli_stan_to_mir_named(broken, "dir/broken.stan", nullptr, 0, 0,
+                                 nullptr, err, sizeof err);
+  expect_true("a syntax error is reported", mir == nullptr);
+  expect_true(std::string("the error names the file: ") + err,
+              std::strstr(err, "dir/broken.stan") != nullptr &&
+                  std::strstr(err, "'string'") == nullptr);
+
+  stanli_model_opts defaults;
+  stanli_model_opts_init(&defaults);
+  stanli_model* model = stanli_model_new_from_stan_named(
+      "", "dir/empty.stan", "{}", &defaults, err, sizeof err);
+  expect_true(std::string("named empty model builds: ") + err, model != nullptr);
+  if (model) {
+    const std::string note = stanli_warnings(model);
+    expect_true("model warnings carry the compiler warning",
+                note.find("Empty model detected") != std::string::npos &&
+                    note.find("dir/empty.stan") != std::string::npos);
+    stanli_model_free(model);
+  }
+  model = stanli_model_new_from_stan_named(broken, "dir/broken.stan", "{}",
+                                           &defaults, err, sizeof err);
+  expect_true("named build reports syntax errors",
+              model == nullptr &&
+                  std::strstr(err, "dir/broken.stan") != nullptr);
+}
+
 int main() {
+  test_named_source_and_warnings();
   test_fast_math_options();
   test_source_include_paths();
   test_reduce_sum_threads();
