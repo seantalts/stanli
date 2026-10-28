@@ -167,6 +167,9 @@ def _load_lib():
         ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
         ctypes.POINTER(_ModelOpts), ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_string_free.argtypes = [ctypes.c_void_p]
+    lib.stanli_capture_messages.argtypes = [ctypes.c_int]
+    lib.stanli_take_messages.restype = ctypes.c_void_p
+    lib.stanli_take_messages.argtypes = []
     lib.stanli_build_id.restype = ctypes.c_char_p
     lib.stanli_build_id.argtypes = []
     lib.stanli_wa_n_columns.restype = ctypes.c_int64
@@ -236,6 +239,37 @@ def _load_lib():
 
 
 _lib = _load_lib()
+_lib.stanli_capture_messages(1)
+
+
+def _flush_messages():
+    """Write the runtime's queued messages to the current sys.stdout."""
+    p = _lib.stanli_take_messages()
+    if not p:
+        return
+    try:
+        text = ctypes.cast(p, ctypes.c_char_p).value.decode("utf-8", "replace")
+    finally:
+        _lib.stanli_string_free(p)
+    out = sys.stdout
+    if out is not None:
+        out.write(text)
+        out.flush()
+
+
+class _native_output:
+    """Delivers the runtime's printed messages when a native call ends."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, *_rest):
+        try:
+            _flush_messages()
+        except Exception:
+            if exc_type is None:
+                raise
+        return False
 
 # The column names are the ABI's, not ours; the R bridge reads the same
 # accessor.
@@ -325,7 +359,16 @@ class _InterruptWatch:
     def __init__(self):
         self.tripped = False
         self.previous = None
-        self.poll = _SamplePollCallback(lambda _user: 1 if self.tripped else 0)
+        self.flush_error = None
+        self.poll = _SamplePollCallback(self._poll)
+
+    def _poll(self, _user):
+        if self.flush_error is None:
+            try:
+                _flush_messages()
+            except BaseException as exc:  # ctypes cannot propagate it
+                self.flush_error = exc
+        return 1 if self.tripped else 0
 
     def _handle(self, _signum, _frame):
         self.tripped = True
@@ -552,10 +595,11 @@ def _compile_stan(stan_code, include_paths, fast_math=False, filename=None):
     paths = (ctypes.c_char_p * len(include_paths))(
         *(path.encode("utf-8") for path in include_paths))
     compiler_warnings = ctypes.c_void_p()
-    p = _lib.stanli_stan_to_mir_named(
-        stan_code.encode(), None if filename is None else filename.encode(),
-        paths, len(paths), int(fast_math), ctypes.byref(compiler_warnings),
-        err, len(err))
+    with _native_output():
+        p = _lib.stanli_stan_to_mir_named(
+            stan_code.encode(), None if filename is None else filename.encode(),
+            paths, len(paths), int(fast_math), ctypes.byref(compiler_warnings),
+            err, len(err))
     try:
         if compiler_warnings:
             _warn_compile(ctypes.cast(compiler_warnings,
@@ -1183,15 +1227,16 @@ class Model:
         mir, stan_code, data_json = self._source
         err = ctypes.create_string_buffer(8192)
         opts = _ModelOpts(seed, threads_per_chain, int(self._fast_math))
-        if mir is not None:
-            m = _lib.stanli_model_new_with_opts(
-                mir.encode(), data_json.encode(), ctypes.byref(opts), err,
-                len(err))
-        else:
-            m = _lib.stanli_model_new_from_stan_named(
-                stan_code.encode(),
-                None if self._label is None else self._label.encode(),
-                data_json.encode(), ctypes.byref(opts), err, len(err))
+        with _native_output():
+            if mir is not None:
+                m = _lib.stanli_model_new_with_opts(
+                    mir.encode(), data_json.encode(), ctypes.byref(opts), err,
+                    len(err))
+            else:
+                m = _lib.stanli_model_new_from_stan_named(
+                    stan_code.encode(),
+                    None if self._label is None else self._label.encode(),
+                    data_json.encode(), ctypes.byref(opts), err, len(err))
         if not m:
             raise RuntimeError(err.value.decode())
         return m
@@ -1252,7 +1297,9 @@ class Model:
                              f"{self.n_unconstrained} unconstrained parameters")
         lp = ctypes.c_double()
         grad = np.empty(self.n_unconstrained)
-        rc = _lib.stanli_grad(self._handle, _dptr(q), ctypes.byref(lp), _dptr(grad))
+        with _native_output():
+            rc = _lib.stanli_grad(self._handle, _dptr(q), ctypes.byref(lp),
+                                  _dptr(grad))
         if rc != 0:
             # The gradient buffer is uninitialized on failure; never let a
             # caller see it.
@@ -1280,8 +1327,9 @@ class Model:
         document = _data_to_json(values).encode()
         q = np.empty(self.n_unconstrained)
         err = ctypes.create_string_buffer(4096)
-        rc = _lib.stanli_unconstrain_inits(self._handle, document, _dptr(q), err,
-                                           len(err))
+        with _native_output():
+            rc = _lib.stanli_unconstrain_inits(self._handle, document,
+                                               _dptr(q), err, len(err))
         if rc != 0:
             raise ValueError(err.value.decode())
         return q
@@ -1350,8 +1398,10 @@ class Model:
         vals = np.empty(len(names))
         lp = ctypes.c_double()
         err = ctypes.create_string_buffer(4096)
-        rc = _lib.stanli_optimize(self._handle, ctypes.byref(opts), _dptr(q),
-                                  _dptr(vals), ctypes.byref(lp), err, len(err))
+        with _native_output():
+            rc = _lib.stanli_optimize(self._handle, ctypes.byref(opts),
+                                      _dptr(q), _dptr(vals), ctypes.byref(lp),
+                                      err, len(err))
         del init_arr
         if rc != 0:
             raise RuntimeError(f"optimize failed: {err.value.decode()}")
@@ -1490,11 +1540,12 @@ class Model:
             pf = _pathfinder_init_options(pathfinder_init)
             init_arr = np.empty((opts.chains, self.n_unconstrained))
             err = ctypes.create_string_buffer(4096)
-            rc = _lib.stanli_pathfinder_inits(
-                self._handle, opts.seed, opts.chain_id, opts.chains,
-                pf["num_iterations"], pf["num_elbo_draws"],
-                pf["history_size"], pf["init_radius"], _dptr(init_arr),
-                None, None, err, len(err))
+            with _native_output():
+                rc = _lib.stanli_pathfinder_inits(
+                    self._handle, opts.seed, opts.chain_id, opts.chains,
+                    pf["num_iterations"], pf["num_elbo_draws"],
+                    pf["history_size"], pf["init_radius"], _dptr(init_arr),
+                    None, None, err, len(err))
             if rc != 0:
                 raise RuntimeError(
                     f"Pathfinder initialization failed: {err.value.decode()}")
@@ -1546,6 +1597,7 @@ class Model:
                 if callback_errors:
                     return
                 try:
+                    _flush_messages()
                     _print_sample_progress(chain_id, iteration, total,
                                            is_warmup)
                 except BaseException as exc:  # ctypes cannot propagate it
@@ -1558,7 +1610,7 @@ class Model:
 
         interrupted = ctypes.c_int(0)
         watch = _InterruptWatch()
-        with watch:
+        with watch, _native_output():
             failed = _lib.stanli_sample_multi_metric(
                 self._handle, ctypes.byref(opts), ctypes.byref(metric_opts),
                 refresh, _dptr(raw), _dptr(stats), _dptr(out), progress_cb,
@@ -1575,6 +1627,8 @@ class Model:
                 f"{err.value.decode()}")
         if callback_errors:
             raise callback_errors[0]
+        if watch.flush_error is not None:
+            raise watch.flush_error
 
         first_chain = opts.chain_id if opts.chain_id > 0 else 1
         n = self.n_unconstrained

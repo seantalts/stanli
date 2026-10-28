@@ -4,7 +4,7 @@ from collections.abc import Mapping
 
 import numpy as np
 
-from . import _lib, _resolve_program
+from . import _lib, _native_output, _resolve_program
 
 
 _INT_MIN = np.iinfo(np.intc).min
@@ -97,8 +97,9 @@ class Function:
         self.name = name
         mir, _ = _resolve_program(stan_file, stan_code, mir, None, include_paths)
         err = ctypes.create_string_buffer(8192)
-        self._function = _lib.stanli_function_new_from_mir(
-            mir.encode(), name.encode(), err, len(err))
+        with _native_output():
+            self._function = _lib.stanli_function_new_from_mir(
+                mir.encode(), name.encode(), err, len(err))
         if not self._function:
             raise RuntimeError(err.value.decode())
 
@@ -167,9 +168,10 @@ class Function:
         result = {"value": None, "error": None}
         context = ctypes.py_object(result)
         err = ctypes.create_string_buffer(8192)
-        rc = _lib.stanli_function_call_values(
-            self._function, native, len(native), _write_result,
-            ctypes.byref(context), err, len(err))
+        with _native_output():
+            rc = _lib.stanli_function_call_values(
+                self._function, native, len(native), _write_result,
+                ctypes.byref(context), err, len(err))
         if result["error"] is not None:
             raise result["error"]
         if rc:
