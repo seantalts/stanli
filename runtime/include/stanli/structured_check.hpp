@@ -7,7 +7,9 @@
 #include <stanli/mir.hpp>
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace stanli {
@@ -24,6 +26,25 @@ struct StructuredCheckSpec {
   // vector length or matrix rows/columns last.
   std::vector<int64_t> dims;
 };
+
+// Stan Math prefixes every validator message with the calling function's name.
+// stanli has none worth showing, so validators are called with an empty name
+// and the resulting ": " is dropped here.
+template <typename F>
+inline void without_check_prefix(F&& check) {
+  const auto trimmed = [](const char* what) {
+    std::string text(what);
+    if (text.compare(0, 2, ": ") == 0) text.erase(0, 2);
+    return text;
+  };
+  try {
+    std::forward<F>(check)();
+  } catch (const std::domain_error& e) {
+    throw std::domain_error(trimmed(e.what()));
+  } catch (const std::invalid_argument& e) {
+    throw std::invalid_argument(trimmed(e.what()));
+  }
+}
 
 // Invoke the corresponding Stan Math validator once per structured leaf.
 // Throws its exact domain_error/invalid_argument on a bad value and

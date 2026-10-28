@@ -5,4 +5,4 @@ model {
 }
 
 // STANLI-LIT: PASS
-// STANLI-LIT-EXPECT: COMPILE_FAIL stanli compile: runtime-control region: Plus__: incompatible logical views
+// STANLI-LIT-EXPECT: COMPILE_FAIL runtime-control region: Plus__: incompatible logical views

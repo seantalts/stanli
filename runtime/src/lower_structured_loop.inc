@@ -393,7 +393,7 @@ std::optional<DataMap::Entry> region_bounded_data_value(const mir::Expr& e) {
   hooks.stmt = [&](const mir::Stmt&) {
     if (++steps > 4096)
       throw CompileError(
-          "stanli compile: structured data probe budget exceeded");
+          "structured data probe budget exceeded");
     return false;
   };
   try {

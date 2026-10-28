@@ -51,7 +51,8 @@ size_t leaf_rank(stanli::mir::UnsizedLeaf leaf) {
     case Leaf::Matrix:
       return 2;
     case Leaf::Complex:
-      throw std::runtime_error("complex function arguments are unsupported");
+      throw std::runtime_error(
+          "complex numbers are not supported yet in function arguments");
     case Leaf::Unknown:
       throw std::runtime_error("function has unknown argument type");
   }

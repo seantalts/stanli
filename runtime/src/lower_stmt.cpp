@@ -173,7 +173,7 @@ bool Lowering::scan_block(const mir::Stmt& s,
                  !child.decl_type.base.empty()) {
         try {
           DeclView sh;
-          sh.len = sized_len(child.decl_type);
+          sh.len = sized_len(child.decl_type, nullptr, nullptr, child.decl_id);
           sh.si = view_of(child.decl_type);
           const auto old = decls.find(child.decl_id);
           local_views.emplace_back(child.decl_id,
@@ -1107,7 +1107,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         // not constrain the fresh variable's width.
         scope.erase(s.decl_id);
         DeclView sh;
-        sh.len = sized_len(s.decl_type);
+        sh.len = sized_len(s.decl_type, nullptr, nullptr, s.decl_id);
         sh.autodiff = !s.decl_data_only && scalar_autodiff();
         sh.si = view_of(s.decl_type);
         // CmdStan fills every uninitialized integer container with the
@@ -1474,7 +1474,8 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             s.check_transform->kind == mir::Transform::Lower   ? OP_CHECK_LOWER
             : s.check_transform->kind == mir::Transform::Upper ? OP_CHECK_UPPER
                                                                : 0;
-        if (opcode == 0) fail("unsupported FnCheck transform", s.raw);
+        if (opcode == 0)
+          fail("this constraint check is not supported yet", s.raw);
 
         const Val value = lower_expr(s.fn_args[0]);
         const Val bound = lower_expr(s.fn_args[1]);
@@ -1612,7 +1613,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         out.views.push_back(pv);
         return;
       }
-      fail("unsupported statement function " + s.fn_name);
+      fail("this kind of statement is not supported yet", s.raw);
     case mir::Stmt::For: {
       // Unrolled graphs and counted structured loops capture their upper
       // bound. Mutable or effectful bounds need the register loop's repeated

@@ -301,7 +301,8 @@ void Lowering::bind_data(const mir::Program& p) {
     ExtentScope extents(data_extent_scope);
     for (const auto& [name, type] : p.input_vars) {
       DataMap::Entry& dst = td.env().at(name);
-      if (static_cast<int64_t>(dst.r.size()) != sized_len(type)) {
+      if (static_cast<int64_t>(dst.r.size()) !=
+          sized_len(type, nullptr, nullptr, name)) {
         use_prebound = false;
         break;
       }
@@ -323,7 +324,7 @@ void Lowering::bind_data(const mir::Program& p) {
   auto record = [&](const std::string& name, const mir::SizedType& type) {
     if (type.base == "SInt") return;
     DeclView sh;
-    sh.len = sized_len(type);
+    sh.len = sized_len(type, nullptr, nullptr, name);
     sh.si = view_of(type, true);
     decls[name] = sh;
   };
@@ -514,7 +515,8 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
   }
 
   SlotInfo psi = view_of(s.decl_type);
-  const int64_t declared_len = sized_len(s.decl_type);
+  const int64_t declared_len =
+      sized_len(s.decl_type, nullptr, nullptr, s.decl_id);
   if (declared_len != con_len)
     fail("parameter view length does not match constrained storage", s.raw);
   validate_view(psi, con_len, "parameter " + s.decl_id);
@@ -614,7 +616,7 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
       opcode = OP_CONSTRAIN_CHOL_COV;
       break;
     default:
-      fail("unsupported parameter transform", tr.raw);
+      fail("this parameter constraint is not supported yet", tr.raw);
   }
   const int jac = add_slot(1, false);
   std::vector<int> tr_idata;

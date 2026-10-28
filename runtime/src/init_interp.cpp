@@ -14,9 +14,7 @@
 namespace stanli {
 namespace {
 
-[[noreturn]] void refuse(const std::string& what) {
-  throw CompileError("stanli init: " + what);
-}
+[[noreturn]] void refuse(const std::string& what) { throw CompileError(what); }
 
 int64_t product(const std::vector<int64_t>& dims) {
   int64_t n = 1;

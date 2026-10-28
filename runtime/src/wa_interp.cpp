@@ -431,7 +431,7 @@ bool WaInterp::read_param(MirInterp<double>& in, const mir::Stmt& s,
   auto it = params.find(s.decl_id);
   if (it == params.end())
     throw CompileError(
-        "stanli write_array: no constrained value supplied "
+        "no constrained value supplied "
         "for parameter " +
         s.decl_id);
   DataMap::Entry e = it->second;
@@ -443,8 +443,7 @@ bool WaInterp::read_param(MirInterp<double>& in, const mir::Stmt& s,
       len *= dims.back();
     }
     if (len != (int64_t)std::max(e.r.size(), e.i.size()))
-      throw CompileError("stanli write_array: constrained shape mismatch for " +
-                         s.decl_id);
+      throw CompileError("constrained shape mismatch for " + s.decl_id);
     e.dims = std::move(dims);
   }
   in.env()[s.decl_id] = std::move(e);
@@ -466,7 +465,8 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       for (size_t k = base->args.size(); k-- > 1;) {
         if (base->args[k].name != "IndexSingle")
           throw CompileError(
-              "stanli write_array: FnWriteParam under a non-scalar index");
+              "cannot name an output parameter written through a non-scalar "
+              "index");
         ixs.push_back(in.as_int(base->args[k].args[0]));
       }
       base = &base->args[0];
@@ -486,7 +486,7 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       }
       if (idx >= ov.size())
         throw CompileError(
-            "stanli write_array: cannot name a substituted FnWriteParam");
+            "cannot name an output parameter after optimization");
       name = ov[idx];
     }
     last_written_ = name;
