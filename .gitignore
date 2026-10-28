@@ -72,6 +72,8 @@ conformance-cache/
 model-census-cache
 model-census.json
 /tests/function_coverage/*.hpp
+/tests/function_coverage/container_flow/*.hpp
+tests/oncobayes2/*.hpp
 
 # Compiler output beside generated teaching fixtures.
 tests/rethinking/*.hpp
