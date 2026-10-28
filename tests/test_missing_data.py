@@ -1,6 +1,7 @@
 """Data that leaves out a data-block variable is a clear error naming every
 missing variable."""
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -20,8 +21,15 @@ parameters { real mu; }
 model { y ~ normal(mu, 1); target += sum(x) + sum(M); }
 """
 
+ZERO_SIZE_GQ_MODEL = """
+data { int N; array[N] real y; int K; vector[K] x; }
+parameters { real mu; }
+model { y ~ normal(mu, 1); }
+generated quantities { real s = sum(x); int n = num_elements(x); }
+"""
 
-def prepare(data, model=MODEL):
+
+def prepare(data, model=MODEL, env=None):
     with tempfile.TemporaryDirectory() as directory:
         directory = Path(directory)
         stan = directory / "model.stan"
@@ -32,7 +40,8 @@ def prepare(data, model=MODEL):
         (directory / "data.json").write_text(json.dumps(data))
         return subprocess.run([BENCH_GRAD, str(directory / "model.sexp"),
                                str(directory / "data.json"), "--prep"],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True,
+                              env={**os.environ, **(env or {})})
 
 
 class MissingData(unittest.TestCase):
@@ -58,6 +67,13 @@ class MissingData(unittest.TestCase):
         run = prepare({"N": 2, "y": [0.5, 1.5], "K": 0, "x": [], "M": []},
                       ZERO_SIZE_MODEL)
         self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_omitted_zero_size_variable_reaches_write_array(self):
+        for mode in ("0", "force"):
+            with self.subTest(STANLI_PARALLEL_WA=mode):
+                run = prepare({"N": 2, "y": [0.5, 1.5], "K": 0},
+                              ZERO_SIZE_GQ_MODEL, {"STANLI_PARALLEL_WA": mode})
+                self.assertEqual(run.returncode, 0, run.stderr)
 
     def test_omitted_scalar_is_still_missing(self):
         run = prepare({"N": 2, "y": [0.5, 1.5]}, ZERO_SIZE_MODEL)
