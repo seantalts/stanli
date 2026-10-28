@@ -323,6 +323,11 @@ long Lowering::eval_int(const mir::Expr& e) {
         for (int v : const_ints(e.args[0])) acc += v;
         return acc;
       }
+      // Stock stanc's --O1 folds an integer a * b + c into fma(a, b, c).
+      if (e.name == "fma" && e.args.size() == 3 &&
+          std::all_of(e.args.begin(), e.args.end(),
+                      [](const mir::Expr& a) { return a.type_ == "UInt"; }))
+        return eval_int(e.args[0]) * eval_int(e.args[1]) + eval_int(e.args[2]);
       if (const BuiltinSpec* pred =
               e.args.size() == 2 ? shaped_builtin_spec(
                                        e.name, 2, BuiltinShapePolicy::Predicate)

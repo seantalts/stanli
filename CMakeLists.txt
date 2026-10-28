@@ -1572,6 +1572,11 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tools/check_wa_fallbacks.py
              --build ${CMAKE_CURRENT_BINARY_DIR}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_wa_fallback_ledger_stanc
+           COMMAND ${Python3_EXECUTABLE} tools/check_wa_fallbacks.py
+             --build ${CMAKE_CURRENT_BINARY_DIR}
+             --stanc ${STANLI_STANC_EXECUTABLE}
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_builtin_signature_model_generation
            COMMAND ${Python3_EXECUTABLE}
                    tools/generate_builtin_signature_models.py
