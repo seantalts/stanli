@@ -7,6 +7,12 @@
 #ifndef __EMSCRIPTEN__
 #include <pthread.h>
 #endif
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace stanli {
 namespace {
@@ -30,6 +36,8 @@ constexpr unsigned kMaxNesting = 40000;
 constexpr unsigned kEmscriptenNesting = 1000;
 #ifdef _WIN32
 constexpr size_t kStackBytes = size_t{256} << 20;
+// Left for the frames below the recursion and the guard page.
+constexpr size_t kInlineSlackBytes = size_t{128} * 1024;
 #else
 constexpr size_t kStackBytes = size_t{1} << 30;
 #endif
@@ -66,13 +74,35 @@ bool large_stack_unavailable() {
 #endif
 }
 
-unsigned nesting_limit() {
-  if (large_stack_limit != 0) return large_stack_limit;
+// A Windows thread has the stack its executable asks for, 1 MB by default,
+// where kInlineNesting assumes the 8 MB of a POSIX main thread.
+static unsigned inline_nesting_limit() {
 #ifdef __EMSCRIPTEN__
   return kEmscriptenNesting;
+#elif defined(_WIN32)
+  thread_local const unsigned limit = [] {
+    ULONG_PTR low = 0, high = 0;
+    GetCurrentThreadStackLimits(&low, &high);
+    const size_t bytes = high - low;
+    const size_t usable =
+        bytes > kInlineSlackBytes ? bytes - kInlineSlackBytes : 0;
+    return static_cast<unsigned>(
+        std::min<size_t>(kInlineNesting, usable / kBytesPerLevel));
+  }();
+  return limit;
 #else
   return kInlineNesting;
 #endif
+}
+
+unsigned nesting_limit() {
+  if (large_stack_limit != 0) return large_stack_limit;
+  return inline_nesting_limit();
+}
+
+bool needs_large_stack(unsigned nesting) {
+  return large_stack_limit == 0 && !large_stack_unavailable() &&
+         nesting > inline_nesting_limit();
 }
 
 namespace detail {

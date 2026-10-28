@@ -1,6 +1,7 @@
 // Readers and passes recurse once per nesting level of the MIR, so a long
 // left-associated sum or a deep chain of calls needs stack in proportion to
-// its length. Programs nested no deeper than kInlineNesting run on the
+// its length. Programs nested no deeper than kInlineNesting (fewer on
+// Windows, where the calling thread's stack is usually 1 MB) run on the
 // calling thread, as they always have. A deeper one is read and lowered on a
 // helper thread that has a large stack, and nesting beyond what that stack
 // holds is a CompileError rather than an overflow.
@@ -24,6 +25,10 @@ struct NestingTooDeep : std::runtime_error {
 // The deepest statement/expression nesting a reader accepts on this thread.
 // Emscripten has no threads, so it keeps to what its 8 MB stack holds.
 unsigned nesting_limit();
+
+// True when a program this deeply nested must be lowered on the large stack
+// and this thread is not already on it.
+bool needs_large_stack(unsigned nesting);
 
 // True when threads cannot be started with a chosen stack size (Emscripten).
 bool large_stack_unavailable();
