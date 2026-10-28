@@ -145,6 +145,7 @@ enum class BuiltinSlice : uint8_t {
   ToRowVector,
   ToMatrix,
   ToArray1d,
+  ToArray2d,
   ToVectorArray,
   ToRowVectorArray,
   // Expansions: broadcasts of one value or container, and two-container
@@ -307,6 +308,7 @@ inline bool builtin_slice_is_reshape(BuiltinSlice slice) {
   return slice == BuiltinSlice::Transpose || slice == BuiltinSlice::ToVector ||
          slice == BuiltinSlice::ToRowVector ||
          slice == BuiltinSlice::ToMatrix || slice == BuiltinSlice::ToArray1d ||
+         slice == BuiltinSlice::ToArray2d ||
          slice == BuiltinSlice::ToVectorArray ||
          slice == BuiltinSlice::ToRowVectorArray;
 }
@@ -486,6 +488,8 @@ int evaluate_integer_binary_builtin(const BuiltinSpec& spec, int lhs, int rhs);
 // generated integer kernels); the descriptor form above delegates here.
 int evaluate_integer_binary_builtin(uint16_t opcode, int lhs, int rhs);
 int evaluate_integer_unary_builtin(const BuiltinSpec& spec, int value);
+// to_int on a real: Stan Math's truncation and range check.
+int evaluate_real_to_integer_builtin(const BuiltinSpec& spec, double value);
 
 }  // namespace stanli
 

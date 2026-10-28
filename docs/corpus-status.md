@@ -1,11 +1,11 @@
 # Corpus status
 
-Evaluating: 353/354
-CmdStan reference coverage: 353/354 models, 1059 evaluation points.
+Evaluating: 361/362
+CmdStan reference coverage: 361/362 models, 1083 evaluation points.
 
-The shared corpus includes posteriordb, generated brms and cogmod models, ctsem's state-space template, imported teaching models, and language fixtures. Collection labels retain their source provenance; all references use the same replay in `tools/verify_refs.py`.
+The shared corpus includes posteriordb, generated brms and cogmod models, ctsem's state-space template, OncoBayes2's dose-escalation model, imported teaching models, and language fixtures. Collection labels retain their source provenance; all references use the same replay in `tools/verify_refs.py`.
 
-Recording-time primary-point comparison metrics retained for 338 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
+Recording-time primary-point comparison metrics retained for 346 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
 
 A model counts as passing only when tools/verify_sample.py matches CmdStan's log_prob and full gradient at the shared deterministic point. Accuracy below is the worst deviation over lp and every gradient component: relative, and in ULPs (0 = bitwise identical to CmdStan). Bitwise counts are reported for information; the replay uses a 1e-9 scaled-error gate with documented ill-conditioned exceptions. Models that evaluate but are not verified are listed separately and are not counted.
 
@@ -214,6 +214,9 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `nn_rbm1bJ100` | posteriordb | 79412 | 1.1e-13 | 735 |
 | `normal_mixture` | posteriordb | 4 | 0 (bitwise) | 0 |
 | `normal_mixture_k` | posteriordb | 15 | 1.2e-13 | 1086 |
+| `oncobayes2_blrm_exnex_combo2` | oncobayes2 | 53 | 0 (bitwise) | 0 |
+| `oncobayes2_blrm_exnex_combo3` | oncobayes2 | 100 | 3.8e-15 | 94 |
+| `oncobayes2_blrm_exnex_sa` | oncobayes2 | 10 | 0 (bitwise) | 0 |
 | `one_comp_mm_elim_abs` | posteriordb | 5 | 6.9e-15 | 256 |
 | `operators` | stanc3 | 25 | 0 (bitwise) | 0 |
 | `pilots` | posteriordb | 19 | 1.4e-16 | 2 |
@@ -232,7 +235,9 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `radon_variable_slope_centered` | posteriordb | 391 | 3.0e-14 | 168 |
 | `radon_variable_slope_noncentered` | posteriordb | 391 | 1.5e-14 | 848 |
 | `rats_model` | posteriordb | 66 | 4.1e-16 | 3 |
+| `rbmi_mmrm` | stanc3 | 5 | 2.2e-16 | 1 |
 | `reductions_allowed` | stanc3 | 151 | 0 (bitwise) | 0 |
+| `reject_udf_data_size` | stanc3 | 2 | 0 (bitwise) | 0 |
 | `s2_ar_cov` | brms | 5 | 3.3e-16 | 2 |
 | `s2_beta_binomial` | brms | 4 | 2.2e-16 | 2 |
 | `s2_car` | brms | 11 | 1.6e-16 | 4 |
@@ -363,6 +368,8 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `wells_dist100ars_model` | posteriordb | 4 | 0 (bitwise) | 0 |
 | `wells_interaction_c_model` | posteriordb | 5 | 0 (bitwise) | 0 |
 | `wells_interaction_model` | posteriordb | 5 | 0 (bitwise) | 0 |
+| `while_counter_size` | stanc3 | 8 | 0 (bitwise) | 0 |
+| `while_udf_slices` | stanc3 | 7 | 1.4e-16 | 1 |
 
 Numerical notes:
 
@@ -578,6 +585,9 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `nn_rbm1bJ100` | 79411 |
 | `normal_mixture` | 3 |
 | `normal_mixture_k` | 15 |
+| `oncobayes2_blrm_exnex_combo2` | 143 |
+| `oncobayes2_blrm_exnex_combo3` | 271 |
+| `oncobayes2_blrm_exnex_sa` | 23 |
 | `one_comp_mm_elim_abs` | 44 |
 | `operators` | 35 |
 | `pilots` | 58 |
@@ -596,7 +606,9 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `radon_variable_slope_centered` | 390 |
 | `radon_variable_slope_noncentered` | 776 |
 | `rats_model` | 66 |
+| `rbmi_mmrm` | 15 |
 | `reductions_allowed` | 251 |
+| `reject_udf_data_size` | 1 |
 | `s2_ar_cov` | 70 |
 | `s2_beta_binomial` | 5 |
 | `s2_car` | 12 |
@@ -727,6 +739,8 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `wells_dist100ars_model` | 3 |
 | `wells_interaction_c_model` | 4 |
 | `wells_interaction_model` | 4 |
+| `while_counter_size` | 8 |
+| `while_udf_slices` | 6 |
 
 ## Rejected by both engines
 

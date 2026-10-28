@@ -34,18 +34,6 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
       dumper(dump_to),
       prep_graph(graph_name),
       td_rng(std::move(stream)) {}
-Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
-                   const char* graph_name,
-                   const PreparedContext& prepared_context)
-    : Lowering(d, p, dump_to, graph_name, prepared_context.rng,
-               std::make_shared<ShapeInterner>(*prepared_context.shapes)) {
-  const auto env_copy_time = prep.start();
-  td.env() = prepared_context.environment;
-  omitted_data = prepared_context.omitted_data;
-  int_env = prepared_context.integers;
-  decls = prepared_context.declarations;
-  prep.plain(prep_graph, "env_copy", env_copy_time);
-}
 template <typename Map>
 static void copy_named(Map& to, const Map& from,
                        const std::set<std::string>* names) {
@@ -56,6 +44,19 @@ static void copy_named(Map& to, const Map& from,
   for (const std::string& name : *names)
     if (const auto found = from.find(name); found != from.end())
       to.emplace(name, found->second);
+}
+Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
+                   const char* graph_name,
+                   const PreparedContext& prepared_context)
+    : Lowering(d, p, dump_to, graph_name, prepared_context.rng,
+               std::make_shared<ShapeInterner>(*prepared_context.shapes)) {
+  const auto env_copy_time = prep.start();
+  copy_named(td.env(), prepared_context.environment, &prepared_context.names);
+  omitted_data = prepared_context.omitted_data;
+  int_env = prepared_context.integers;
+  copy_named(decls, prepared_context.declarations, &prepared_context.names);
+  prepared_names = prepared_context.names;
+  prep.plain(prep_graph, "env_copy", env_copy_time);
 }
 Lowering::Lowering(Lowering& parent, RegionTrialTag,
                    const std::set<std::string>* names)
@@ -81,7 +82,8 @@ Lowering::Lowering(Lowering& parent, RegionTrialTag,
 PreparedContext Lowering::prepared_context() {
   if (!data_prepared)
     throw std::logic_error("lowering has not prepared model data");
-  return {td_rng, shape_pool, td.env(), int_env_data, decls, omitted_data};
+  return {td_rng, shape_pool,   td.env(),      int_env_data,
+          decls,  omitted_data, prepared_names};
 }
 Lowering Lowering::fork_region_trial(const std::set<std::string>* names) {
   return Lowering(*this, RegionTrialTag{}, names);
@@ -405,6 +407,20 @@ void Lowering::bind_data(const mir::Program& p) {
     }
     td.exec(st);
   }
+  // The interpreter keeps a block's locals after the block ends. Drop them,
+  // so a later local of the same name cannot start from transformed data's
+  // last value for it.
+  prepared_names = input_names;
+  const auto top_level = [&](const auto& self, const mir::Stmt& st) -> void {
+    if (st.kind == mir::Stmt::Decl) prepared_names.insert(st.decl_id);
+    if (st.kind == mir::Stmt::SList)
+      for (const auto& k : st.body) self(self, k);
+  };
+  for (const auto& st : p.prepare_data) top_level(top_level, st);
+  for (auto it = td.env().begin(); it != td.env().end();)
+    it = prepared_names.count(it->first) ? std::next(it) : td.env().erase(it);
+  for (auto it = decls.begin(); it != decls.end();)
+    it = prepared_names.count(it->first) ? std::next(it) : decls.erase(it);
   for (auto& [name, e] : td.env()) {
     if (e.is_int && e.i.size() == 1 && e.dims.empty()) int_env[name] = e.i[0];
   }
@@ -1128,10 +1144,11 @@ class WriteArrayLowering {
   void build_after_log_prob(Lowering& log_prob) {
     const std::map<std::string, DataMap::Entry> no_environment;
     const std::map<std::string, DeclView> no_declarations;
-    wa_.emplace(data_, trace_, dumper_, "write_array",
-                PreparedContext{log_prob.td_rng, log_prob.shape_pool,
-                                no_environment, log_prob.int_env_data,
-                                no_declarations, log_prob.omitted_data});
+    wa_.emplace(
+        data_, trace_, dumper_, "write_array",
+        PreparedContext{log_prob.td_rng, log_prob.shape_pool, no_environment,
+                        log_prob.int_env_data, no_declarations,
+                        log_prob.omitted_data, log_prob.prepared_names});
     const auto select_time = trace_.start();
     for (const std::string& name : bound_env_) {
       const auto it = log_prob.td.env().find(name);
@@ -1326,20 +1343,24 @@ std::string interpreter_error(const CompiledModel& cm) {
          report_request();
 }
 
-std::string interpreter_warning(const CompiledModel& cm,
-                                const std::string& probe_failure) {
+std::string interpreter_warning(const CompiledModel& cm) {
   if (cm.interpreter_fallbacks.empty()) return "";
-  std::string text =
-      "stanli: parts of this model have no compiled path and run through the "
-      "MIR interpreter, which is far slower: " +
-      fallback_items(cm) + ".";
-  if (!probe_failure.empty())
-    text += " The interpreter also failed at every probe point (" +
-            probe_failure +
-            "), so transformed parameters and generated quantities are "
-            "unavailable and draws carry only the constrained parameters.";
-  return text + " " + report_request() +
+  return "stanli: parts of this model have no compiled path and run through "
+         "the MIR interpreter, which is far slower: " +
+         fallback_items(cm) + ". " + report_request() +
          " Set STANLI_NO_INTERPRETER=1 to refuse such models.";
+}
+
+std::string interpreter_probe_error(const CompiledModel& cm,
+                                    const std::string& failure) {
+  return "stanli: transformed parameters and generated quantities run "
+         "through the MIR interpreter here, and it failed at every probe "
+         "point (" +
+         failure + "), so their columns cannot be found. " +
+         (cm.interpreter_fallbacks.empty()
+              ? std::string()
+              : "No compiled path because: " + fallback_items(cm) + ". ") +
+         report_request();
 }
 
 }  // namespace stanli

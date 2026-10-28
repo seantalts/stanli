@@ -792,8 +792,10 @@ That is the 119 runnable posteriordb posteriors, the language
 models in [`tests/stanc3/`](../tests/stanc3/README.md), which exercise
 type and language constructs no real posterior uses, the brms
 output in [`tests/brms/`](../tests/brms/README.md), cogmod's custom
-brms families in [`tests/cogmod/`](../tests/cogmod/README.md), and ctsem's
-state-space template in [`tests/ctsem/`](../tests/ctsem/README.md). It is the
+brms families in [`tests/cogmod/`](../tests/cogmod/README.md), ctsem's
+state-space template in [`tests/ctsem/`](../tests/ctsem/README.md), and
+OncoBayes2's dose-escalation model in
+[`tests/oncobayes2/`](../tests/oncobayes2/README.md). It is the
 strongest oracle in the project. It
 runs in CI on every push, and
 [`tools/wasm_check.sh`](../tools/wasm_check.sh) drives the same replay

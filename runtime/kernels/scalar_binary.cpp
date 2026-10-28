@@ -123,6 +123,11 @@ void binary_integer_fwd(KernelCtx& ctx, uint16_t opcode) {
 
 void binary_integer_bwd(KernelCtx&) {}
 
+void to_int_fwd(KernelCtx& ctx) {
+  for (int64_t i = 0; i < ctx.out.len; ++i)
+    ctx.out.data[i] = stan::math::to_int(ctx.in[0].data[i]);
+}
+
 #define STANLI_DEFINE_BINARY_INTEGER(code, name, fn) \
   void name##_2ifwd(KernelCtx& ctx) { binary_integer_fwd(ctx, code); }
 STANLI_SCALAR_BINARY_INTEGER_LIST(STANLI_DEFINE_BINARY_INTEGER)
@@ -241,6 +246,7 @@ void register_scalar_binary_kernels() {
   register_kernel(code, Kernel{name##_2ifwd, binary_integer_bwd, nullptr});
   STANLI_SCALAR_BINARY_INTEGER_LIST(STANLI_REGISTER_INTEGER_BINARY)
 #undef STANLI_REGISTER_INTEGER_BINARY
+  register_kernel(OP_TO_INT, Kernel{to_int_fwd, binary_integer_bwd, nullptr});
 }
 
 }  // namespace stanli

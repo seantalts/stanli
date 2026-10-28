@@ -71,6 +71,44 @@ static std::string slurp(const std::string& path) {
   return ss.str();
 }
 
+// One write_array row in column order from the compiled graph, or from the
+// interpreter when `interp` forces it. Empty when that path is unavailable.
+static std::vector<double> write_array_row(const std::string& mir,
+                                           const stanli::DataMap& data,
+                                           const std::vector<double>& params,
+                                           bool interp) {
+  using namespace stanli;
+  if (interp) test_setenv("STANLI_WA_FORCE_INTERP", "1", 1);
+  CompiledModel lm = compile_model(mir, data);
+  if (interp) test_unsetenv("STANLI_WA_FORCE_INTERP");
+  std::vector<double> out;
+  if (!lm.write_array) return out;
+  if (interp) {
+    if (!lm.write_array->interp) return out;
+    Executor ex(std::move(lm.graph));
+    lm.bind(ex);
+    std::copy(params.begin(), params.end(), ex.params_data());
+    ex.run_forward_only();
+    WaRng rng(1234);
+    const std::vector<double> row =
+        lm.write_array->interp->eval(lm.constrained_env(ex), rng);
+    for (const auto& col : lm.write_array->interp->columns())
+      out.insert(out.end(), row.begin() + col.slot,
+                 row.begin() + col.slot + col.len);
+    return out;
+  }
+  if (!lm.write_array->truncated.empty()) return out;
+  Executor wex(std::move(lm.write_array->graph));
+  lm.write_array->bind(wex);
+  std::copy(params.begin(), params.end(), wex.params_data());
+  wex.run_forward_only();
+  for (const auto& col : lm.write_array->columns) {
+    const double* value = wex.value_ptr(col.slot);
+    out.insert(out.end(), value, value + col.len);
+  }
+  return out;
+}
+
 static stanli::CompiledModel compile_without_optional_islands(
     const std::string& mir, const stanli::DataMap& data) {
   test_setenv("STANLI_NO_ISLAND", "1", 1);
@@ -6025,6 +6063,63 @@ int main() {
     for (int k = 0; k < 6; ++k)
       expect_eq("tomatrix g" + std::to_string(k), grad[k], x(k).adj());
     stan::math::recover_memory();
+  }
+
+  // to_array_2d: Stan's a[i, j] is m(i, j). The weights differ on every
+  // cell, so a transposed or flattened fill moves the gradient. M's
+  // unconstrained order is column-major: M11 M21 M12 M22 M13 M23.
+  {
+    const std::string mir = slurp("tests/fixtures/to_array_2d.tmir.sexp");
+    DataMap d = DataMap::from_json(slurp("tests/fixtures/to_array_2d.json"));
+    CompiledModel lm = compile_model(mir, d);
+    check(lm.n_unconstrained == 6, "to_array_2d 6 unconstrained");
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    const std::vector<double> q{0.25, -0.5, 0.75, 1.25, -1.5, 2.0};
+    std::copy(q.begin(), q.end(), lex.params_data());
+    double grad[6];
+    const double lp = lex.gradient(grad);
+    // td_pick = d[2, 1] + 10 * d[1, 3] = 34; corner(M) is M[2, 3].
+    const double weight[6] = {0, 10, 100, 34, 1000, 10000};
+    double want = 0;
+    for (int k = 0; k < 6; ++k) want += weight[k] * q[k];
+    expect_eq("to_array_2d lp", lp, want);
+    for (int k = 0; k < 6; ++k)
+      expect_eq("to_array_2d g" + std::to_string(k), grad[k], weight[k]);
+    // Columns M, tp, g (each column-major), then b = g[2, 1] = M[2, 1].
+    std::vector<double> want_row;
+    for (int copy = 0; copy < 3; ++copy)
+      want_row.insert(want_row.end(), q.begin(), q.end());
+    want_row.push_back(q[1]);
+    check(write_array_row(mir, d, q, false) == want_row,
+          "to_array_2d write_array graph");
+    check(write_array_row(mir, d, q, true) == want_row,
+          "to_array_2d write_array interp");
+  }
+
+  // to_int truncates toward zero (-2.7 -> -2, -0.5 -> 0, 2.9 -> 2), where
+  // rounding would give -3, -1 (or 0), and 3. r = [[1.9, -2.9], [3.5, -0.5]]
+  // truncates to [[1, -2], [3, 0]]; the model's coefficient on q is
+  //   -2 + 10*3 + 100*(-2) + 1000*7 + 10000*(2 - 1 + 5) + 100000*1
+  //   + 1000000*(-3) = -2833172.
+  {
+    const std::string mir = slurp("tests/fixtures/to_int.tmir.sexp");
+    DataMap d = DataMap::from_json(slurp("tests/fixtures/to_int.json"));
+    CompiledModel lm = compile_model(mir, d);
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    const std::vector<double> q{0.75};
+    lex.params_data()[0] = q[0];
+    double grad[1];
+    const double lp = lex.gradient(grad);
+    expect_eq("to_int lp", lp, -0.5 * 0.75 * 0.75 - 2833172 * 0.75);
+    expect_eq("to_int grad", grad[0], -0.75 - 2833172);
+    // Columns q, tq = 3q, gi and gl (column-major), b = gl[2, 1].
+    const std::vector<double> want_row{0.75, 2.25, 1, 3, -2, 0, 1, 3, 2, 4, 3};
+    check(write_array_row(mir, d, q, false) == want_row,
+          "to_int write_array graph");
+    check(write_array_row(mir, d, q, true) == want_row,
+          "to_int write_array interp");
   }
 
   // Compare acceptance against Stan Math independently of the flat gather

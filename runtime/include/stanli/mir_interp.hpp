@@ -404,7 +404,7 @@ class MirInterp {
         // same write with an explicit `:` for every remaining dimension.
         // First-index-fast storage makes those trailing values a strided
         // sequence at offset + prefix_stride*k.
-        if (en->dims.size() > 2 && !st.lhs_idx.empty()) {
+        if (en->dims.size() >= 2 && !st.lhs_idx.empty()) {
           size_t prefix_len = 0;
           while (prefix_len < st.lhs_idx.size() &&
                  st.lhs_idx[prefix_len].name == "IndexSingle")
@@ -448,13 +448,6 @@ class MirInterp {
                                      : en->dims.front();
           if (ix < 1 || ix > extent)
             fail("indexed assignment index out of bounds", st.raw);
-          if (en->dims.size() == 2) {
-            // Row write into a matrix (A[i] = row_vector), col-major strided.
-            const int64_t R = en->dims[0], C = en->dims[1];
-            if ((int64_t)v.r.size() != C) fail("row write size mismatch");
-            for (int64_t j = 0; j < C; ++j) en->r.at(j * R + (ix - 1)) = v.r[j];
-            return;
-          }
           en->r.at(ix - 1) = v.r.at(0);
           if (en->is_int) {
             en->i.at(ix - 1) =
@@ -1797,6 +1790,21 @@ class MirInterp {
         }
       };
       restore_legacy_integer(0, &a);
+      if (builtin->arity == 1 && !builtin_argument_is_integer(*builtin, 0)) {
+        (void)resolve_registered({a});
+        Value o;
+        o.is_int = true;
+        o.dims = a.dims;
+        o.i.resize(a.r.size());
+        o.r.resize(a.r.size());
+        for (size_t i = 0; i < a.r.size(); ++i) {
+          const int value =
+              evaluate_real_to_integer_builtin(*builtin, val(a.r[i]));
+          o.i[i] = value;
+          o.r[i] = T((double)value);
+        }
+        return o;
+      }
       if (!a.is_int) fail(e.name + ": expected integer arguments", e.raw);
       if (builtin->arity == 1) {
         (void)resolve_registered({a});

@@ -803,7 +803,7 @@ def main(argv=None):
     parser.add_argument("cmdstan", type=pathlib.Path)
     parser.add_argument("pdb", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
-    parser.add_argument("--corpus", choices=("all", "posteriordb", "educational", "rethinking", "brms", "cogmod", "ctsem", "teaching"), default="all")
+    parser.add_argument("--corpus", choices=("all", "posteriordb", "educational", "rethinking", "brms", "cogmod", "ctsem", "oncobayes2", "teaching"), default="all")
     parser.add_argument("--filter", default="")
     parser.add_argument("--rounds", type=int, default=6)
     parser.add_argument("--warmup-ms", type=int, default=20)

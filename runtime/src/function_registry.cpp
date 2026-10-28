@@ -445,6 +445,14 @@ const std::vector<FunctionSpec>& function_specs() {
     builtin("PMinus__", integer_unary_builtin(OP_NEG));
     builtin("minus", integer_unary_builtin(OP_NEG));
     builtin("abs", integer_unary_builtin(OP_ABS));
+    builtin("to_int", integer_unary_builtin(OP_TO_INT));
+    builtin("to_int", {OP_TO_INT,
+                       1,
+                       {BuiltinArgumentKind::Real},
+                       FunctionArgumentKind::Integer,
+                       BuiltinShapePolicy::Elementwise,
+                       BuiltinCompatibilityPolicy::LogicalShape,
+                       0});
     builtin("fabs", unary_builtin(OP_ABS));
     builtin("std_normal_qf", unary_builtin(OP_INV_PHI));
     builtin("trigamma", unary_builtin(OP_TRIGAMMA));
@@ -703,6 +711,7 @@ const std::vector<FunctionSpec>& function_specs() {
     builtin("to_matrix", slice_builtin(BuiltinSlice::ToMatrix, 4));
     builtin("to_array_1d", slice_builtin(BuiltinSlice::ToArray1d, 1));
     builtin("to_array_1d", slice_builtin(BuiltinSlice::ToArray1d, 1, kInt));
+    builtin("to_array_2d", slice_builtin(BuiltinSlice::ToArray2d, 1));
     // Expansions: broadcasts and concatenations. The graph keeps its
     // specialized lowerings (dynamic rep extents, the dedicated broadcast
     // kernels, append_array's data-value observations); the interpreter and

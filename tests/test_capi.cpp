@@ -1613,6 +1613,25 @@ void expect_interpreter_policy(const char* fixture,
   stanli_model_free(model);
 }
 
+// When the interpreter throws at every probe point there are no columns for
+// transformed parameters or generated quantities. Construction fails rather
+// than returning a model whose draws silently lack them (#523).
+void test_interpreter_probe_failure() {
+  const std::string mir =
+      slurp("tests/fixtures/execution_rng_reject.tmir.sexp");
+  char err[8192]{};
+  stanli_model* model =
+      stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err);
+  const std::string error(err);
+  expect_true("probe failure refuses the model", model == nullptr);
+  if (model != nullptr) stanli_model_free(model);
+  expect_true("probe failure error carries the interpreter's error: " + error,
+              error.find("Shape parameter") != std::string::npos);
+  expect_true(
+      "probe failure error points at the issue tracker: " + error,
+      error.find("github.com/seantalts/stanli/issues") != std::string::npos);
+}
+
 // Null options build with seed 1; only the same construction seed reproduces
 // a model's transformed data.
 void test_transformed_data_seed() {
@@ -2065,6 +2084,7 @@ int main() {
                             "oversized shape");
   expect_interpreter_policy("tests/fixtures/interp_fallback_ode.tmir.sexp",
                             "the ODE right-hand side rhs");
+  test_interpreter_probe_failure();
   expect_unconstrain_inits_round_trip();
   expect_parameterless_unconstrain();
 

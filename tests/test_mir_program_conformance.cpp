@@ -987,6 +987,42 @@ void test_guarded_constructor_error() {
                         "checked\n", "linspaced_vector");
 }
 
+void test_to_int() {
+  // to_int truncates toward zero: {2.9, -1.7, 5.5} -> {2, -1, 5}, summing to
+  // 6 (rounding would give 7), and -2.7 -> -2 (not -3).
+  const auto scaled = [](double x) {
+    return fun("Times__", {var("t", "UReal"), lit_real(x)}, "UReal");
+  };
+  Expr reals =
+      make_array({scaled(2.9), scaled(-1.7), scaled(5.5)}, "(UArray UReal)");
+  reals.unsized = {1, UnsizedLeaf::Real};
+  Expr ints = fun("to_int", {std::move(reals)}, "(UArray UInt)");
+  ints.unsized = {1, UnsizedLeaf::Int};
+  Expr truncated = fun("sum", {std::move(ints)}, "UInt");
+  run_program_case(
+      "to_int array", "to_int rounds each element toward zero",
+      {rhs_function("to_int_array_rhs",
+                    {return_value(make_array({std::move(truncated)}))})},
+      1.0, {6.0});
+  run_program_case(
+      "to_int scalar", "to_int rounds toward zero",
+      {rhs_function(
+          "to_int_scalar_rhs",
+          {return_value(make_array({fun("to_int", {scaled(-2.7)}, "UInt")}))})},
+      1.0, {-2.0});
+  // Stan Math's check_bounded rejects NaN and values outside int's range.
+  for (double bad : {std::numeric_limits<double>::quiet_NaN(), 3e9, -3e9}) {
+    FunDef reject = rhs_function(
+        "to_int_reject_rhs",
+        {return_value(make_array({fun("to_int", {scaled(bad)}, "UInt")}))});
+    run_domain_error_case(
+        "to_int rejects", "to_int needs a finite int value", {reject}, 1.0,
+        std::isnan(bad) ? "to_int: x is nan, but must be in the interval "
+                          "[-2147483648, 2147483647]"
+                        : "");
+  }
+}
+
 void test_unknown_nrfunapp_fails_loud() {
   // Erasing an unrecognized non-returning call invents semantics. Until its
   // effect is implemented, both routes must fail loudly rather than return.
@@ -1344,6 +1380,7 @@ int main() {
   test_early_return_effects();
   test_guarded_constructor_error();
   test_unknown_nrfunapp_fails_loud();
+  test_to_int();
   if (failures == 0)
     std::printf("test_mir_program_conformance: all cases passed\n");
   else
