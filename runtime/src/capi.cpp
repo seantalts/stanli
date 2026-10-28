@@ -312,9 +312,9 @@ static stanli_model* model_new_from_stan(const char* stan_code,
                                          int threads_per_chain, bool fast_math,
                                          char* err, size_t err_len) {
 #ifdef STANLI_EMBED_STANC
-  const stanli::StancResult compiled = embedded_compile(
-      stan_code, filename, nullptr, 0,
-      kStancModelOnly | (fast_math ? kStancFastMath : 0));
+  const stanli::StancResult compiled =
+      embedded_compile(stan_code, filename, nullptr, 0,
+                       kStancModelOnly | (fast_math ? kStancFastMath : 0));
   if (!compiled.ok) {
     put_err(err, err_len, compiled.body.c_str());
     return nullptr;
@@ -322,9 +322,8 @@ static stanli_model* model_new_from_stan(const char* stan_code,
   stanli_model* m = model_new(compiled.body.c_str(), data_json, seed,
                               threads_per_chain, fast_math, err, err_len);
   if (m != nullptr && !compiled.warnings.empty()) {
-    m->warnings = m->warnings.empty()
-                      ? compiled.warnings
-                      : compiled.warnings + "\n" + m->warnings;
+    m->warnings = m->warnings.empty() ? compiled.warnings
+                                      : compiled.warnings + "\n" + m->warnings;
   }
   return m;
 #else
@@ -346,9 +345,11 @@ stanli_model* stanli_model_new_from_stan_with_opts(
                                           err, err_len);
 }
 
-stanli_model* stanli_model_new_from_stan_named(
-    const char* stan_code, const char* filename, const char* data_json,
-    const stanli_model_opts* opts, char* err, size_t err_len) {
+stanli_model* stanli_model_new_from_stan_named(const char* stan_code,
+                                               const char* filename,
+                                               const char* data_json,
+                                               const stanli_model_opts* opts,
+                                               char* err, size_t err_len) {
   stanli_model_opts o;
   stanli_model_opts_init(&o);
   if (opts != nullptr) o = *opts;
@@ -360,8 +361,7 @@ stanli_model* stanli_model_new_from_stan_named(
 char* stanli_stan_to_mir_named(const char* stan_code, const char* filename,
                                const char* const* include_paths,
                                size_t include_path_count, int fast_math,
-                               char** warnings_out, char* err,
-                               size_t err_len) {
+                               char** warnings_out, char* err, size_t err_len) {
   if (warnings_out != nullptr) *warnings_out = nullptr;
   if (stan_code == nullptr ||
       (include_path_count && include_paths == nullptr)) {

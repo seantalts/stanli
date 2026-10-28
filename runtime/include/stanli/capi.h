@@ -79,9 +79,11 @@ stanli_model* stanli_model_new_from_stan_with_opts(
 /* Like stanli_model_new_from_stan_with_opts, naming the source file in
  * compiler messages (null filename: the compiler's default label). Compiler
  * warnings are appended to stanli_warnings(model). */
-stanli_model* stanli_model_new_from_stan_named(
-    const char* stan_code, const char* filename, const char* data_json,
-    const stanli_model_opts* opts, char* err, size_t err_len);
+stanli_model* stanli_model_new_from_stan_named(const char* stan_code,
+                                               const char* filename,
+                                               const char* data_json,
+                                               const stanli_model_opts* opts,
+                                               char* err, size_t err_len);
 
 /* Compile Stan source to transformed-MIR text WITHOUT building a model,
  * for a caller that wants to keep the MIR: cache it, ship it, or hand it
