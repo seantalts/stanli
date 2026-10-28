@@ -276,13 +276,15 @@ sampling_output <- function(code, data, ...) {
   skip_if_not_installed("callr")
   out <- tempfile()
   on.exit(unlink(out))
-  callr::r(function(code, data, args) {
+  low_ebfmi <- callr::r(function(code, data, args) {
     library(stanli)
     m <- stanli_model(code = code, data = data)
-    invisible(do.call(sample_model, c(list(m), args)))
+    fit <- do.call(sample_model, c(list(m), args))
+    report <- utils::capture.output(stanli_diagnose(fit))
+    any(grepl("E-BFMI is below", report, fixed = TRUE))
   }, args = list(code = code, data = data, args = list(...)), stdout = out,
   stderr = "2>&1")
-  paste(readLines(out), collapse = "\n")
+  structure(paste(readLines(out), collapse = "\n"), low_ebfmi = low_ebfmi)
 }
 
 reject_code <- "
@@ -317,9 +319,11 @@ test_that("divergence and low E-BFMI warnings come with every sampling run", {
   expect_match(loud, paste0(
     "Warning: [0-9]+ of 500 \\([0-9]+\\.[0-9]%\\) transitions ended with a ",
     "divergence\\.\nSee https://mc-stan.org/misc/warnings for details\\."))
-  expect_match(loud, paste0(
+  # The draws, and so the E-BFMI, differ across platforms' math libraries.
+  expect_identical(grepl(paste0(
     "Warning: 1 of 1 chains had an E-BFMI less than 0.3.\n",
-    "See https://mc-stan.org/misc/warnings for details."), fixed = TRUE)
+    "See https://mc-stan.org/misc/warnings for details."), loud, fixed = TRUE),
+    attr(loud, "low_ebfmi"))
   quiet <- sampling_output(funnel_code, list(), chains = 1, seed = 42,
                            warmup = 100, samples = 500, refresh = 0)
   expect_false(grepl("Warning", quiet, fixed = TRUE))

@@ -275,6 +275,4 @@ test_that("sample_cstan prints the shared sampling warnings", {
   expect_match(text, paste0(
     "Warning: [0-9]+ of 500 \\([0-9]+\\.[0-9]%\\) transitions ended with a ",
     "divergence\\.\nSee https://mc-stan.org/misc/warnings for details\\."))
-  expect_match(text, "Warning: 1 of 1 chains had an E-BFMI less than 0.3.",
-               fixed = TRUE)
 })
