@@ -411,6 +411,19 @@ char* stanli_stan_to_mir_with_opts(const char* stan_code,
 
 void stanli_string_free(char* p) { std::free(p); }
 
+void stanli_capture_messages(int enable) {
+  stanli::set_message_capture(enable != 0);
+}
+
+char* stanli_take_messages(void) {
+  const std::string text = stanli::take_captured_messages();
+  if (text.empty()) return nullptr;
+  char* out = static_cast<char*>(std::malloc(text.size() + 1));
+  if (out == nullptr) return nullptr;
+  std::memcpy(out, text.c_str(), text.size() + 1);
+  return out;
+}
+
 const char* stanli_build_id(void) { return stanli::runtime_build_id(); }
 
 int stanli_abi_version(void) { return STANLI_ABI_VERSION; }

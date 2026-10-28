@@ -19,6 +19,8 @@ EXPORTS
   stanli_stan_to_mir_with_opts
   stanli_stan_to_mir_named
   stanli_string_free
+  stanli_capture_messages
+  stanli_take_messages
   stanli_function_new_from_stan
   stanli_function_new_from_mir
   stanli_function_free

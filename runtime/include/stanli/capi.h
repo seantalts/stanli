@@ -115,6 +115,20 @@ char* stanli_stan_to_mir_named(const char* stan_code, const char* filename,
 /* Frees a string this library returned ownership of. */
 void stanli_string_free(char* p);
 
+/* Where the model's text output goes: print() statements, the sampler's
+ * "Chain [n]" notices and warnings. By default each line is written to
+ * stdout as it is emitted, from whichever thread emitted it. A host that
+ * prints through its own console (R, Python) cannot do that from a sampler
+ * thread, so it calls stanli_capture_messages(1) once and then collects the
+ * text on its own thread with stanli_take_messages: every line emitted since
+ * the last call, each followed by a newline, in emission order, or null when
+ * there is none. The result is freed with stanli_string_free. Collect after
+ * every call into the library, on error paths too, and periodically from a
+ * long call's poll callback; nothing is dropped, but text waits until taken.
+ * The setting is process-wide. */
+void stanli_capture_messages(int enable);
+char* stanli_take_messages(void);
+
 /* Identifies this runtime binary: source revision plus the build choices
  * that change what that source produces. Callers caching artifacts beside
  * a particular library (a compiled MIR, a manifest) key them on this and

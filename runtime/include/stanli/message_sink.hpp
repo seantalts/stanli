@@ -38,6 +38,14 @@ void set_message_sink(MessageSink sink);
 // One print() line, from either path.
 void emit_message(const std::string& text);
 
+// Hold messages instead of writing them to stdout, for a host that prints
+// them itself. The sampler emits from worker threads, which a host such as
+// R or Python must not print from, so the host calls take_captured_messages
+// on its own thread: each message comes back as its line plus a newline, in
+// the order it was emitted. An installed sink still takes precedence.
+void set_message_capture(bool on);
+std::string take_captured_messages();
+
 // Install a sink for emit_diagnostic, or pass nullptr to restore the
 // stderr default.
 void set_diagnostic_sink(MessageSink sink);

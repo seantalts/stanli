@@ -1253,6 +1253,110 @@ void expect_sampling_messages() {
   stanli_model_free(model);
 }
 
+std::string take_messages() {
+  char* raw = stanli_take_messages();
+  if (raw == nullptr) return {};
+  std::string text(raw);
+  stanli_string_free(raw);
+  return text;
+}
+
+size_t count_substring(const std::string& text, const std::string& needle) {
+  size_t n = 0;
+  for (size_t at = text.find(needle); at != std::string::npos;
+       at = text.find(needle, at + needle.size()))
+    ++n;
+  return n;
+}
+
+void expect_captured_messages() {
+  expect_true("nothing is waiting before capture starts",
+              stanli_take_messages() == nullptr);
+  stanli_capture_messages(1);
+  char err[8192]{};
+
+  const std::string print_mir = slurp("tests/fixtures/rejectprint.tmir.sexp");
+  stanli_model* printer = stanli_model_new_with_opts(
+      print_mir.c_str(), R"({"N":3,"lim":1.0})", nullptr, err, sizeof err);
+  expect_true("capture: print model builds", printer != nullptr);
+  if (printer == nullptr) {
+    stanli_capture_messages(0);
+    return;
+  }
+  expect_eq("transformed data print is held, not written",
+            take_messages(), "compiled with N = 3\n");
+  expect_true("taking empties the queue", stanli_take_messages() == nullptr);
+
+  std::vector<double> q((size_t)stanli_n_unconstrained(printer), 0.25);
+  std::vector<double> grad(q.size());
+  double lp = 0;
+  expect_true("capture: gradient succeeds",
+              stanli_grad(printer, q.data(), &lp, grad.data()) == 0);
+  expect_eq("model print is held", take_messages(),
+            "drawing at x = 0.25 v = [0.25,0.25]\n");
+
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.seed = 5;
+  opts.chains = 4;
+  opts.warmup = 20;
+  opts.samples = 20;
+  opts.num_threads = stanli_thread_safe() ? 4 : 1;
+  const int64_t n = stanli_n_unconstrained(printer);
+  const int64_t rows = stanli_n_stored_draws(&opts);
+  std::vector<double> draws((size_t)(opts.chains * rows * n));
+  int polls = 0;
+  std::string seen_during_poll;
+  struct PollState {
+    int* polls;
+    std::string* seen;
+  } state{&polls, &seen_during_poll};
+  auto poll = [](void* user) -> int {
+    auto* st = static_cast<PollState*>(user);
+    ++*st->polls;
+    *st->seen += take_messages();
+    return 0;
+  };
+  int rc = stanli_sample_multi_metric(printer, &opts, nullptr, 0, draws.data(),
+                                      nullptr, nullptr, nullptr, nullptr, poll,
+                                      &state, nullptr, nullptr, err, sizeof err);
+  expect_true("capture: threaded sample succeeds", rc == 0);
+  const std::string sampled = seen_during_poll + take_messages();
+  const size_t lines = count_substring(sampled, "\n");
+  expect_true("every chain's prints arrive whole",
+              lines > 0 && count_substring(sampled, "drawing at x = ") == lines);
+  expect_true("held text ends on a line boundary",
+              !sampled.empty() && sampled.back() == '\n');
+  stanli_model_free(printer);
+
+  const std::string reject_mir = slurp("tests/fixtures/sample_reject.tmir.sexp");
+  stanli_model* rejecting = stanli_model_new_with_opts(
+      reject_mir.c_str(), "{\"y\":0.5,\"cutoff\":0}", nullptr, err,
+      sizeof err);
+  expect_true("capture: rejecting model builds", rejecting != nullptr);
+  if (rejecting != nullptr) {
+    opts.warmup = 300;
+    opts.samples = 300;
+    std::vector<double> d((size_t)(opts.chains *
+                                   stanli_n_stored_draws(&opts) *
+                                   stanli_n_unconstrained(rejecting)));
+    rc = stanli_sample_multi_metric(rejecting, &opts, nullptr, 100, d.data(),
+                                    nullptr, nullptr, nullptr, nullptr, nullptr,
+                                    nullptr, nullptr, nullptr, err, sizeof err);
+    expect_true("capture: refresh run succeeds", rc == 0);
+    const std::string notices = take_messages();
+    expect_true("sampler notices are held with their chain",
+                notices.find("Chain [1] Informational Message") !=
+                        std::string::npos &&
+                    notices.find("Chain [4] Informational Message") !=
+                        std::string::npos);
+    stanli_model_free(rejecting);
+  }
+
+  stanli_capture_messages(0);
+  expect_true("nothing is left over", stanli_take_messages() == nullptr);
+}
+
 void expect_sampling_warnings_api() {
   const std::string mir = slurp("tests/fixtures/sample_reject.tmir.sexp");
   char err[8192]{};
@@ -2008,6 +2112,7 @@ int main() {
   expect_in_worker_write_array();
   expect_metric_options();
   expect_sampling_messages();
+  expect_captured_messages();
   expect_sampling_warnings_api();
   expect_streaming_stats();
   expect_sample_options_validated();
