@@ -1283,8 +1283,8 @@ void expect_captured_messages() {
     stanli_capture_messages(0);
     return;
   }
-  expect_eq("transformed data print is held, not written",
-            take_messages(), "compiled with N = 3\n");
+  expect_eq("transformed data print is held, not written", take_messages(),
+            "compiled with N = 3\n");
   expect_true("taking empties the queue", stanli_take_messages() == nullptr);
 
   std::vector<double> q((size_t)stanli_n_unconstrained(printer), 0.25);
@@ -1317,39 +1317,39 @@ void expect_captured_messages() {
     *st->seen += take_messages();
     return 0;
   };
-  int rc = stanli_sample_multi_metric(printer, &opts, nullptr, 0, draws.data(),
-                                      nullptr, nullptr, nullptr, nullptr, poll,
-                                      &state, nullptr, nullptr, err, sizeof err);
+  int rc = stanli_sample_multi_metric(
+      printer, &opts, nullptr, 0, draws.data(), nullptr, nullptr, nullptr,
+      nullptr, poll, &state, nullptr, nullptr, err, sizeof err);
   expect_true("capture: threaded sample succeeds", rc == 0);
   const std::string sampled = seen_during_poll + take_messages();
   const size_t lines = count_substring(sampled, "\n");
-  expect_true("every chain's prints arrive whole",
-              lines > 0 && count_substring(sampled, "drawing at x = ") == lines);
+  expect_true(
+      "every chain's prints arrive whole",
+      lines > 0 && count_substring(sampled, "drawing at x = ") == lines);
   expect_true("held text ends on a line boundary",
               !sampled.empty() && sampled.back() == '\n');
   stanli_model_free(printer);
 
-  const std::string reject_mir = slurp("tests/fixtures/sample_reject.tmir.sexp");
+  const std::string reject_mir =
+      slurp("tests/fixtures/sample_reject.tmir.sexp");
   stanli_model* rejecting = stanli_model_new_with_opts(
-      reject_mir.c_str(), "{\"y\":0.5,\"cutoff\":0}", nullptr, err,
-      sizeof err);
+      reject_mir.c_str(), "{\"y\":0.5,\"cutoff\":0}", nullptr, err, sizeof err);
   expect_true("capture: rejecting model builds", rejecting != nullptr);
   if (rejecting != nullptr) {
     opts.warmup = 300;
     opts.samples = 300;
-    std::vector<double> d((size_t)(opts.chains *
-                                   stanli_n_stored_draws(&opts) *
+    std::vector<double> d((size_t)(opts.chains * stanli_n_stored_draws(&opts) *
                                    stanli_n_unconstrained(rejecting)));
     rc = stanli_sample_multi_metric(rejecting, &opts, nullptr, 100, d.data(),
                                     nullptr, nullptr, nullptr, nullptr, nullptr,
                                     nullptr, nullptr, nullptr, err, sizeof err);
     expect_true("capture: refresh run succeeds", rc == 0);
     const std::string notices = take_messages();
-    expect_true("sampler notices are held with their chain",
-                notices.find("Chain [1] Informational Message") !=
-                        std::string::npos &&
-                    notices.find("Chain [4] Informational Message") !=
-                        std::string::npos);
+    expect_true(
+        "sampler notices are held with their chain",
+        notices.find("Chain [1] Informational Message") != std::string::npos &&
+            notices.find("Chain [4] Informational Message") !=
+                std::string::npos);
     stanli_model_free(rejecting);
   }
 
