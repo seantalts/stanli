@@ -1389,11 +1389,26 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         }
         Val nv = prev_v;
         if (!cells->empty()) {
+          // Each element of a known right-hand side is known too, so the
+          // written container stays known.
+          const DataMap::Entry* known = observation(rhs_v);
+          const auto known_at =
+              known ? observed_positions(rhs_v) : std::nullopt;
           for (int64_t k = 0; k < map.count; ++k) {
             const int cell =
                 checked_immediate((*cells)[(size_t)k], "assignment cell");
             const Val el =
                 emit_value(OP_INDEX, {rhs_v}, 1, view_of("UReal"), {(int)k});
+            if (known_at) {
+              const size_t from = (size_t)(*known_at)[(size_t)k];
+              DataMap::Entry one;
+              one.r = {known->r.at(from)};
+              if (known->is_int && !known->i.empty()) {
+                one.is_int = true;
+                one.i = {known->i.at(from)};
+              }
+              observe(el, std::move(one));
+            }
             const Val next = emit_value(OP_SET_INDEX, {nv, el},
                                         g.slots[prev].len, out_si, {cell});
             propagate_int_update(next, nv, el, (*cells)[(size_t)k], 1);
