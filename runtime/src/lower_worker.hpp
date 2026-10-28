@@ -36,7 +36,7 @@ class LowerWorker {
 #ifdef _WIN32
     thread_ = reinterpret_cast<HANDLE>(_beginthreadex(
         nullptr, static_cast<unsigned>(stack_bytes()), &LowerWorker::entry,
-        this, STACK_SIZE_PARAM_IS_RESERVATION, nullptr));
+        this, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr));
     if (thread_ == nullptr) return false;
 #else
     pthread_attr_t attr;
