@@ -2021,42 +2021,32 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       if (column < 1 || column > cols)
         fail(e.name + ": v contains an out-of-range column", e.raw);
 
-    Val result{-1, false, {}};
+    std::vector<int> offsets;
+    offsets.reserve((size_t)rows + 1);
     for (int64_t row = 0; row < rows; ++row) {
       const int64_t begin = starts[(size_t)row] - 1;
       const int64_t end = starts[(size_t)row + 1] - 1;
       if (begin < 0 || end < begin || end > nnz)
         fail(e.name + ": u is not monotone or is out of range", e.raw);
-      Val row_sum;
-      if (begin == end) {
-        row_sum = constant(0.0);
-      } else {
-        const int64_t len = end - begin;
-        Val row_weights = with_layout(
-            emit_value(OP_SLICE, {weights}, len, view_of("UVector"),
-                       {checked_immediate(begin, "csr weight offset")}),
-            contiguous_layout(weights, begin, "csr weights"));
-        std::vector<int> gather;
-        gather.reserve((size_t)len);
-        for (int64_t k = begin; k < end; ++k)
-          gather.push_back(columns[(size_t)k] - 1);
-        Val row_vector =
-            emit_value(OP_GATHER, {vector}, len, view_of("UVector"), gather);
-        Val products =
-            with_layout(emit_value(OP_MUL, {row_weights, row_vector}, len,
-                                   view_of("UVector")),
-                        elementwise_layout({row_weights, row_vector}));
-        row_sum = with_layout(emit_value(OP_SUM_VEC, {products}, 1),
-                              ExpressionLayout::scalar());
-      }
-      result = row == 0 ? row_sum
-                        : with_layout(emit_value(OP_CONCAT2, {result, row_sum},
-                                                 row + 1, view_of("UVector")),
-                                      owning_layout(view_of("UVector")));
+      offsets.push_back(checked_immediate(begin, "csr row offset"));
     }
-    result.si = view_of("UVector");
-    result.layout = owning_layout(result.si);
-    return result;
+    offsets.push_back(checked_immediate(nnz, "csr row offset"));
+
+    if (nnz == 0)
+      return with_layout(
+          emit_value(OP_REP_VEC, {constant(0.0)}, rows, view_of("UVector")),
+          owning_layout(view_of("UVector")));
+    std::vector<int> gather;
+    gather.reserve((size_t)nnz);
+    for (int column : columns) gather.push_back(column - 1);
+    Val picked =
+        emit_value(OP_GATHER, {vector}, nnz, view_of("UVector"), gather);
+    Val products = with_layout(
+        emit_value(OP_MUL, {weights, picked}, nnz, view_of("UVector")),
+        elementwise_layout({weights, picked}));
+    return with_layout(emit_value(OP_SEGMENT_SUM, {products}, rows,
+                                  view_of("UVector"), offsets),
+                       owning_layout(view_of("UVector")));
   }
 
   return std::nullopt;

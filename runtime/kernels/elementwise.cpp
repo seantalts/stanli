@@ -98,6 +98,25 @@ void sum_vec_bwd(KernelCtx& ctx) {
       ctx.in_adj[0].data[i] += ctx.out_adj;
 }
 
+// OP_SEGMENT_SUM: out[r] = sum of in[idata[r] .. idata[r+1]), ascending from
+// zero, so an empty segment is 0.0. idata holds out.len + 1 offsets.
+void segment_sum_fwd(KernelCtx& ctx) {
+  for (int64_t r = 0; r < ctx.out.len; ++r) {
+    double acc = 0;
+    for (int64_t k = ctx.idata[r]; k < ctx.idata[r + 1]; ++k)
+      acc += ctx.in[0].data[k];
+    ctx.out.data[r] = acc;
+  }
+}
+void segment_sum_bwd(KernelCtx& ctx) {
+  if (!ctx.in_adj[0].data) return;
+  const double* dout =
+      ctx.out_adj_vec.data != nullptr ? ctx.out_adj_vec.data : &ctx.out_adj;
+  for (int64_t r = 0; r < ctx.out.len; ++r)
+    for (int64_t k = ctx.idata[r]; k < ctx.idata[r + 1]; ++k)
+      ctx.in_adj[0].data[k] += dout[r];
+}
+
 // OP_PROD_VEC: product of a vector/row-vector.
 // Bit 0 preserves the ascending scalar reduction selected by Eigen when the
 // source expression contains a strided matrix row. Bit 1 marks an active
@@ -479,6 +498,8 @@ void register_elementwise_kernels() {
   register_kernel(OP_BCAST_FMA, Kernel{fma_fwd, fma_bwd, nullptr});
   register_kernel(OP_MATVEC, Kernel{matvec_fwd, matvec_bwd, nullptr});
   register_kernel(OP_SUM_VEC, Kernel{sum_vec_fwd, sum_vec_bwd, nullptr});
+  register_kernel(OP_SEGMENT_SUM,
+                  Kernel{segment_sum_fwd, segment_sum_bwd, nullptr});
   register_kernel(OP_PROD_VEC, Kernel{prod_vec_fwd, prod_vec_bwd, nullptr});
   register_kernel(OP_EXTREMA_VEC,
                   Kernel{extrema_vec_fwd, extrema_vec_bwd, extrema_scratch});
