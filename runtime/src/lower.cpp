@@ -1203,7 +1203,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   // model's whole life.
   const auto parse_time = prep.start();
   auto prog = std::make_shared<mir::Program>(decode_program(mir_text));
-  if (prog->nesting > kInlineNesting && nesting_limit() == kInlineNesting) {
+  if (needs_large_stack(prog->nesting)) {
     try {
       run_on_large_stack([&] { prog.reset(); });
       return run_on_large_stack(

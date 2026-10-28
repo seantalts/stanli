@@ -1,6 +1,8 @@
 #ifndef STANLI_LOWER_WORKER_HPP
 #define STANLI_LOWER_WORKER_HPP
 
+#include "x87_control.hpp"
+
 #include <stan/math/rev/core/chainablestack.hpp>
 
 #include <algorithm>
@@ -33,6 +35,7 @@ class LowerWorker {
   // False when the thread could not be created; the body has not run.
   bool start(std::function<void()> body) {
     body_ = std::move(body);
+    fp_ = detail::X87ControlWord::of_this_thread();
 #ifdef _WIN32
     thread_ = reinterpret_cast<HANDLE>(_beginthreadex(
         nullptr, static_cast<unsigned>(stack_bytes()), &LowerWorker::entry,
@@ -81,6 +84,7 @@ class LowerWorker {
   }
 
   void run() {
+    fp_.apply_to_this_thread();
     try {
       stan::math::ChainableStack autodiff_stack_of_this_thread;
       body_();
@@ -102,6 +106,7 @@ class LowerWorker {
   pthread_t thread_{};
 #endif
   std::function<void()> body_;
+  detail::X87ControlWord fp_;
   std::exception_ptr error_;
   bool started_ = false;
 };
