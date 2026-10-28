@@ -9,6 +9,19 @@ functions {
     for (i in 1:size(obs)) acc += rr[obs[i]] * Xm[obs[i], 2] * i;
     return acc;
   }
+  real comp_branch(array[] int obs, data array[] int rr, data matrix Xm, vector b) {
+    int m = size(obs);
+    vector[m] mu;
+    for (i in 1:m) {
+      int o = obs[i];
+      if (rr[o] == 0) {
+        mu[i] = o;
+      } else {
+        mu[i] = Xm[o] * b;
+      }
+    }
+    return sum(mu);
+  }
   array[] int rev_ix(array[] int a) {
     return reverse(a);
   }
@@ -39,12 +52,18 @@ transformed data {
   vector[1500] w;
   for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
+  array[G] int vs_td_last;
+  for (g in 1:G) {
+    array[sz[g]] int ix = rows[g, 1:sz[g]];
+    vs_td_last[g] = ix[sz[g]];
+  }
 }
 parameters {
   real q;
   vector[2] beta;
 }
 transformed parameters {
+  array[3] real tp_vs_td_shadow__acc;
   array[3] real tp_vs_int__int;
   array[3] real tp_vs_elemfill__int;
   array[3] real tp_vs_gather__real;
@@ -53,6 +72,15 @@ transformed parameters {
   array[3] real tp_vs_udf_comp__lp;
   array[3] real tp_vs_udf_slice_arg__lp;
   array[3] real tp_vs_udf_loop__acc;
+  array[3] real tp_vs_udf_branch__acc;
+  {
+    {
+      for (g in 1:G) {
+        array[sz[g]] int ix = rows[g, 1:sz[g]];
+        tp_vs_td_shadow__acc[g] = comp_branch(ix, r, X, beta) + vs_td_last[g];
+      }
+    }
+  }
   {
     {
       for (g in 1:G) {
@@ -122,6 +150,14 @@ transformed parameters {
       for (g in 1:G) {
         array[sz[g]] int ix = rows[g, 1:sz[g]];
         tp_vs_udf_loop__acc[g] = comp_loop(ix, r, X);
+      }
+    }
+  }
+  {
+    {
+      for (g in 1:G) {
+        array[sz[g]] int ix = rows[g, 1:sz[g]];
+        tp_vs_udf_branch__acc[g] = comp_branch(ix, r, X, beta);
       }
     }
   }

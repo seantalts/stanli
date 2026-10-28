@@ -146,6 +146,15 @@ bool Lowering::scan_block(const mir::Stmt& s,
   // view the query threw here and sent the whole write_array section to
   // the interpreter.
   std::vector<std::pair<std::string, std::optional<DeclView>>> local_views;
+  // Their values too: a local declared again on each pass of an enclosing
+  // loop must not be read with the previous pass's value or extent.
+  struct LocalValue {
+    std::string name;
+    std::optional<DataMap::Entry> data;
+    std::optional<Val> value;
+  };
+  std::vector<LocalValue> local_values;
+  std::set<std::string> local_containers;
   const auto restore = [&] {
     int_env = saved;
     for (auto it = local_views.rbegin(); it != local_views.rend(); ++it) {
@@ -154,6 +163,25 @@ bool Lowering::scan_block(const mir::Stmt& s,
       else
         decls.erase(it->first);
     }
+    for (auto it = local_values.rbegin(); it != local_values.rend(); ++it) {
+      if (it->data)
+        td.env()[it->name] = *it->data;
+      else
+        td.env().erase(it->name);
+      if (it->value)
+        scope[it->name] = *it->value;
+      else
+        scope.erase(it->name);
+    }
+  };
+  const auto set_local_value = [&](const std::string& name,
+                                   const mir::Expr* rhs) {
+    std::optional<DataMap::Entry> value;
+    if (rhs) value = try_eval_pure(*rhs);
+    if (value)
+      td.env()[name] = std::move(*value);
+    else
+      td.env().erase(name);
   };
   bool found = false;
   try {
@@ -185,6 +213,22 @@ bool Lowering::scan_block(const mir::Stmt& s,
           // A runtime-sized local answers nothing here; the scan went on
           // without it before and still does.
         }
+        const auto data = td.env().find(child.decl_id);
+        const auto value = scope.find(child.decl_id);
+        local_values.push_back(
+            {child.decl_id,
+             data == td.env().end()
+                 ? std::nullopt
+                 : std::optional<DataMap::Entry>(data->second),
+             value == scope.end() ? std::nullopt
+                                  : std::optional<Val>(value->second)});
+        scope.erase(child.decl_id);
+        local_containers.insert(child.decl_id);
+        set_local_value(child.decl_id, child.has_init ? &child.init : nullptr);
+      } else if (child.kind == mir::Stmt::Assignment &&
+                 local_containers.count(child.lhs)) {
+        set_local_value(child.lhs,
+                        child.lhs_idx.empty() ? &child.rhs : nullptr);
       }
     }
   } catch (...) {

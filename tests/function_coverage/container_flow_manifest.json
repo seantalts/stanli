@@ -21848,6 +21848,11 @@
 "container": "varsize",
 "name": "fn_vs_udf_loop",
 "write": "vs_udf_loop"
+},
+{
+"container": "varsize",
+"name": "fn_vs_udf_branch",
+"write": "vs_udf_branch"
 }
 ],
 "gradient": [
@@ -21919,12 +21924,20 @@
 "fn_vs_udf_slice_arg__lp[3]",
 "fn_vs_udf_loop__acc[1]",
 "fn_vs_udf_loop__acc[2]",
-"fn_vs_udf_loop__acc[3]"
+"fn_vs_udf_loop__acc[3]",
+"fn_vs_udf_branch__acc[1]",
+"fn_vs_udf_branch__acc[2]",
+"fn_vs_udf_branch__acc[3]"
 ],
 "skipped": []
 },
 "container_flow_varsize_gq": {
 "cases": [
+{
+"container": "varsize",
+"name": "gq_vs_td_shadow",
+"write": "vs_td_shadow"
+},
 {
 "container": "varsize",
 "name": "gq_vs_int",
@@ -21964,6 +21977,11 @@
 "container": "varsize",
 "name": "gq_vs_udf_loop",
 "write": "vs_udf_loop"
+},
+{
+"container": "varsize",
+"name": "gq_vs_udf_branch",
+"write": "vs_udf_branch"
 }
 ],
 "gradient": [
@@ -22014,6 +22032,11 @@
 "container": "varsize",
 "name": "m_vs_udf_loop",
 "write": "vs_udf_loop"
+},
+{
+"container": "varsize",
+"name": "m_vs_udf_branch",
+"write": "vs_udf_branch"
 },
 {
 "container": "varsize",
@@ -22090,7 +22113,10 @@
 "m_vs_udf_slice_arg__lp[3]",
 "m_vs_udf_loop__acc[1]",
 "m_vs_udf_loop__acc[2]",
-"m_vs_udf_loop__acc[3]"
+"m_vs_udf_loop__acc[3]",
+"m_vs_udf_branch__acc[1]",
+"m_vs_udf_branch__acc[2]",
+"m_vs_udf_branch__acc[3]"
 ],
 "skipped": []
 },
@@ -22135,6 +22161,11 @@
 "container": "varsize",
 "name": "td_vs_udf_loop",
 "write": "vs_udf_loop"
+},
+{
+"container": "varsize",
+"name": "td_vs_udf_branch",
+"write": "vs_udf_branch"
 }
 ],
 "gradient": [
@@ -22146,6 +22177,11 @@
 },
 "container_flow_varsize_tp": {
 "cases": [
+{
+"container": "varsize",
+"name": "tp_vs_td_shadow",
+"write": "vs_td_shadow"
+},
 {
 "container": "varsize",
 "name": "tp_vs_int",
@@ -22185,6 +22221,11 @@
 "container": "varsize",
 "name": "tp_vs_udf_loop",
 "write": "vs_udf_loop"
+},
+{
+"container": "varsize",
+"name": "tp_vs_udf_branch",
+"write": "vs_udf_branch"
 }
 ],
 "gradient": [
@@ -23891,7 +23932,7 @@
 ]
 }
 },
-"name_count": 1873,
+"name_count": 1880,
 "skipped_builtins": [
 {
 "case": "td_r3_builtin",

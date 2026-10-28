@@ -9,6 +9,19 @@ functions {
     for (i in 1:size(obs)) acc += rr[obs[i]] * Xm[obs[i], 2] * i;
     return acc;
   }
+  real comp_branch(array[] int obs, data array[] int rr, data matrix Xm, vector b) {
+    int m = size(obs);
+    vector[m] mu;
+    for (i in 1:m) {
+      int o = obs[i];
+      if (rr[o] == 0) {
+        mu[i] = o;
+      } else {
+        mu[i] = Xm[o] * b;
+      }
+    }
+    return sum(mu);
+  }
   array[] int rev_ix(array[] int a) {
     return reverse(a);
   }
@@ -43,7 +56,7 @@ transformed data {
 parameters {
   real q;
   vector[2] beta;
-  vector[66] p;
+  vector[69] p;
 }
 model {
   q ~ std_normal();
@@ -117,6 +130,14 @@ model {
       for (g in 1:G) {
         array[sz[g]] int ix = rows[g, 1:sz[g]];
         target += comp_loop(ix, r, X) * p[63 + g];
+      }
+    }
+  }
+  {
+    {
+      for (g in 1:G) {
+        array[sz[g]] int ix = rows[g, 1:sz[g]];
+        target += comp_branch(ix, r, X, beta) * p[66 + g];
       }
     }
   }

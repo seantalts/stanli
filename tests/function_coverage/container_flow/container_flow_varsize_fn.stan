@@ -9,6 +9,19 @@ functions {
     for (i in 1:size(obs)) acc += rr[obs[i]] * Xm[obs[i], 2] * i;
     return acc;
   }
+  real comp_branch(array[] int obs, data array[] int rr, data matrix Xm, vector b) {
+    int m = size(obs);
+    vector[m] mu;
+    for (i in 1:m) {
+      int o = obs[i];
+      if (rr[o] == 0) {
+        mu[i] = o;
+      } else {
+        mu[i] = Xm[o] * b;
+      }
+    }
+    return sum(mu);
+  }
   array[] int rev_ix(array[] int a) {
     return reverse(a);
   }
@@ -100,6 +113,16 @@ functions {
     }
     return res;
   }
+  array[] real fn_vs_udf_branch(data int n0, data int n2, data int n3, data array[] int k, data array[] int perm2, data array[] int perm3, data array[] int perm4, data array[] int empty, data int G, data array[] int sz, data array[,] int rows, data int N, data array[] int r, data array[] int nn, data matrix X, data array[,] int ind, data array[] int a1, data array[,] int a2, data vector probs, data vector beta0, data vector w, data vector ramp4, vector beta, real s) {
+    array[3] real res;
+    {
+      for (g in 1:G) {
+        array[sz[g]] int ix = rows[g, 1:sz[g]];
+        res[0 + g] = comp_branch(ix, r, X, beta);
+      }
+    }
+    return res;
+  }
 }
 data {
   int<lower=0> n0;
@@ -131,7 +154,7 @@ transformed data {
 parameters {
   real q;
   vector[2] beta;
-  vector[66] p;
+  vector[69] p;
 }
 model {
   q ~ std_normal();
@@ -168,6 +191,10 @@ model {
     array[3] real rr = fn_vs_udf_loop(n0, n2, n3, k, perm2, perm3, perm4, empty, G, sz, rows, N, r, nn, X, ind, a1, a2, probs, beta0, w, ramp4, beta, q);
     for (t in 1:3) target += rr[t] * p[63 + t];
   }
+  {
+    array[3] real rr = fn_vs_udf_branch(n0, n2, n3, k, perm2, perm3, perm4, empty, G, sz, rows, N, r, nn, X, ind, a1, a2, probs, beta0, w, ramp4, beta, q);
+    for (t in 1:3) target += rr[t] * p[66 + t];
+  }
 }
 generated quantities {
   array[3] real fn_vs_int__gq = fn_vs_int(n0, n2, n3, k, perm2, perm3, perm4, empty, G, sz, rows, N, r, nn, X, ind, a1, a2, probs, beta0, w, ramp4, beta, q);
@@ -178,4 +205,5 @@ generated quantities {
   array[3] real fn_vs_udf_comp__gq = fn_vs_udf_comp(n0, n2, n3, k, perm2, perm3, perm4, empty, G, sz, rows, N, r, nn, X, ind, a1, a2, probs, beta0, w, ramp4, beta, q);
   array[3] real fn_vs_udf_slice_arg__gq = fn_vs_udf_slice_arg(n0, n2, n3, k, perm2, perm3, perm4, empty, G, sz, rows, N, r, nn, X, ind, a1, a2, probs, beta0, w, ramp4, beta, q);
   array[3] real fn_vs_udf_loop__gq = fn_vs_udf_loop(n0, n2, n3, k, perm2, perm3, perm4, empty, G, sz, rows, N, r, nn, X, ind, a1, a2, probs, beta0, w, ramp4, beta, q);
+  array[3] real fn_vs_udf_branch__gq = fn_vs_udf_branch(n0, n2, n3, k, perm2, perm3, perm4, empty, G, sz, rows, N, r, nn, X, ind, a1, a2, probs, beta0, w, ramp4, beta, q);
 }

@@ -493,6 +493,7 @@ struct PreparedContext {
   const std::map<std::string, long>& integers;
   const std::map<std::string, DeclView>& declarations;
   const DataMap& omitted_data;
+  const std::set<std::string>& names;
 };
 
 struct Lowering {
@@ -905,6 +906,10 @@ struct Lowering {
   // int_env as bind_data left it, before either section's locals and loop
   // variables were folded in; the write_array lowering starts from this.
   std::map<std::string, long> int_env_data;
+  // The data and transformed data names bind_data left in td and decls. The
+  // log_prob lowering adds model-block locals to both; a write_array local
+  // of the same name must not start from the model block's last value.
+  std::set<std::string> prepared_names;
   bool data_prepared = false;
   std::function<void()> after_data_prepared;
   // Lowering generate_quantities rather than log_prob: parameters are columns

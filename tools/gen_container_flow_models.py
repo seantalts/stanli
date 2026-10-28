@@ -889,6 +889,19 @@ VARSIZE_FUNCTIONS = [
     "  for (i in 1:size(obs)) acc += rr[obs[i]] * Xm[obs[i], 2] * i;",
     "  return acc;",
     "}",
+    "real comp_branch(array[] int obs, data array[] int rr, data matrix Xm, vector b) {",
+    "  int m = size(obs);",
+    "  vector[m] mu;",
+    "  for (i in 1:m) {",
+    "    int o = obs[i];",
+    "    if (rr[o] == 0) {",
+    "      mu[i] = o;",
+    "    } else {",
+    "      mu[i] = Xm[o] * b;",
+    "    }",
+    "  }",
+    "  return sum(mu);",
+    "}",
 ]
 SLICE = "array[sz[g]] int ix = rows[g, 1:sz[g]];"
 
@@ -925,7 +938,20 @@ def build_varsize(block, keep=None):
             put, lambda put: [put("g", f"comp_lpmf(r | nn, rows[g, 1:sz[g]], X, {b})")])),
         "vs_udf_loop": lambda sink, off, b, nm: sink.cells(f"{nm}__acc", 3, False, lambda put: per_group(
             put, lambda put: [SLICE, put("g", "comp_loop(ix, r, X)")])),
+        "vs_udf_branch": lambda sink, off, b, nm: sink.cells(f"{nm}__acc", 3, False, lambda put: per_group(
+            put, lambda put: [SLICE, put("g", f"comp_branch(ix, r, X, {b})")])),
     }
+    if block in ("tp", "gq"):
+        # Transformed data leaves a same-named local whose last extent (1) is
+        # smaller than this block's first (2). First in the block, because an
+        # earlier case's own `ix` hid the stale one.
+        cases = {"vs_td_shadow": lambda sink, off, b, nm: sink.cells(
+            f"{nm}__acc", 3, False, lambda put: per_group(
+                put, lambda put: [SLICE, put("g", f"comp_branch(ix, r, X, {b}) + vs_td_last[g]")])),
+                 **cases}
+        model.tdata += ["array[G] int vs_td_last;",
+                        "for (g in 1:G) {", "  " + SLICE,
+                        "  vs_td_last[g] = ix[sz[g]];", "}"]
     model.functions += ["array[] int rev_ix(array[] int a) {", "  return reverse(a);", "}"]
     for form, fn in cases.items():
         name = f"{block}_{form}"

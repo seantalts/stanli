@@ -54,24 +54,6 @@
     "since": "2026-10-28"
   },
   {
-    "model": "container_flow_mread_fn",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_mread_gq",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_mread_tp",
-    "interpreted": "transformed parameters (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
     "model": "container_flow_rt_fn_i1",
     "interpreted": "generated quantities (unknown variable inline_fn_i1_rt_multi_x_sym44__ (type UArray))",
     "cause": "A GQ/TP/UDF-local int array used as a gather index or multi-index write target has no graph value.",
@@ -79,14 +61,14 @@
   },
   {
     "model": "container_flow_rt_fn_i2",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
+    "interpreted": "generated quantities (unknown variable inline_fn_i2_rt_loop_x_sym7__ (type UArray))",
+    "cause": "A GQ/TP/UDF-local int array used as a gather index or multi-index write target has no graph value.",
     "since": "2026-10-28"
   },
   {
     "model": "container_flow_rt_fn_i3",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
+    "interpreted": "generated quantities (unknown variable inline_fn_i3_rt_loop_x_sym7__ (type UArray))",
+    "cause": "A GQ/TP/UDF-local int array used as a gather index or multi-index write target has no graph value.",
     "since": "2026-10-28"
   },
   {
@@ -97,14 +79,14 @@
   },
   {
     "model": "container_flow_rt_gq_i2",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
+    "interpreted": "generated quantities (unknown variable x (type UArray))",
+    "cause": "A GQ/TP/UDF-local int array used as a gather index or multi-index write target has no graph value.",
     "since": "2026-10-28"
   },
   {
     "model": "container_flow_rt_gq_i3",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
+    "interpreted": "generated quantities (unknown variable x (type UArray))",
+    "cause": "A GQ/TP/UDF-local int array used as a gather index or multi-index write target has no graph value.",
     "since": "2026-10-28"
   },
   {
@@ -115,14 +97,14 @@
   },
   {
     "model": "container_flow_rt_tp_i2",
-    "interpreted": "transformed parameters (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
+    "interpreted": "transformed parameters (unknown variable x (type UArray))",
+    "cause": "A GQ/TP/UDF-local int array used as a gather index or multi-index write target has no graph value.",
     "since": "2026-10-28"
   },
   {
     "model": "container_flow_rt_tp_i3",
-    "interpreted": "transformed parameters (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
+    "interpreted": "transformed parameters (unknown variable x (type UArray))",
+    "cause": "A GQ/TP/UDF-local int array used as a gather index or multi-index write target has no graph value.",
     "since": "2026-10-28"
   },
   {
@@ -163,8 +145,8 @@
   },
   {
     "model": "oncobayes2_blrm_exnex_combo2",
-    "interpreted": "generated quantities (integer index 8 out of bounds for size 7)",
-    "cause": "OncoBayes2 combo2: lowering a per-group local whose extent changes on each loop pass.",
+    "interpreted": "generated quantities (runtime index needs one outer array dimension)",
+    "cause": "A row of a 2-D int array selected by a run-time int (OncoBayes2: mix_idx_beta[mix_config_ind], mix_config_ind from categorical_rng).",
     "since": "2026-10-28"
   },
   {

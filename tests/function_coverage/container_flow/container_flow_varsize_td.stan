@@ -9,6 +9,19 @@ functions {
     for (i in 1:size(obs)) acc += rr[obs[i]] * Xm[obs[i], 2] * i;
     return acc;
   }
+  real comp_branch(array[] int obs, data array[] int rr, data matrix Xm, vector b) {
+    int m = size(obs);
+    vector[m] mu;
+    for (i in 1:m) {
+      int o = obs[i];
+      if (rr[o] == 0) {
+        mu[i] = o;
+      } else {
+        mu[i] = Xm[o] * b;
+      }
+    }
+    return sum(mu);
+  }
   array[] int rev_ix(array[] int a) {
     return reverse(a);
   }
@@ -119,6 +132,15 @@ transformed data {
       }
     }
   }
+  array[3] real td_vs_udf_branch__acc;
+  {
+    {
+      for (g in 1:G) {
+        array[sz[g]] int ix = rows[g, 1:sz[g]];
+        td_vs_udf_branch__acc[g] = comp_branch(ix, r, X, beta0);
+      }
+    }
+  }
 }
 parameters {
   real q;
@@ -137,4 +159,5 @@ generated quantities {
   array[3] real out_td_vs_udf_comp__lp = td_vs_udf_comp__lp;
   array[3] real out_td_vs_udf_slice_arg__lp = td_vs_udf_slice_arg__lp;
   array[3] real out_td_vs_udf_loop__acc = td_vs_udf_loop__acc;
+  array[3] real out_td_vs_udf_branch__acc = td_vs_udf_branch__acc;
 }
