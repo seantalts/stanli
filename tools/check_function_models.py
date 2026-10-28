@@ -67,9 +67,17 @@ def parse(text):
     return fields
 
 
+def data_for(name, args):
+    """A model's own NAME.json beside it, else the shared empty data."""
+    own = FIXTURES / (name + ".json")
+    return own if own.exists() else getattr(args, "data", None)
+
+
 def record_one(name, args):
     source = FIXTURES / (name + ".stan")
+    data = data_for(name, args)
     identity = hashlib.sha256((source_digest(source) + source_digest(REPO / "tools/ref_driver.cpp")
+                              + source_digest(data)
                               + json.dumps(args.toolchain, sort_keys=True)).encode()).hexdigest()[:16]
     cache = args.build / "function-refs" / (name + "-" + identity)
     cache.mkdir(parents=True, exist_ok=True)
@@ -77,9 +85,12 @@ def record_one(name, args):
     if not exe.exists():
         run([args.stanc, source, f"--o={hpp}"])
         run(compile_cmd(args.cmdstan, hpp, REPO / "tools/ref_driver.cpp", exe))
-    points = [parse(run([exe, args.data, p])) for p in range(3)]
+    points = [parse(run([exe, data, p])) for p in range(3)]
     print(f"recorded {name}", flush=True)
-    return name, {"source_sha256": source_digest(source), "points": points}
+    recorded = {"source_sha256": source_digest(source), "points": points}
+    if data != args.data:
+        recorded["data_sha256"] = source_digest(data)
+    return name, recorded
 
 
 def compare(name, reference, args, gradient_labels=None):
@@ -88,11 +99,16 @@ def compare(name, reference, args, gradient_labels=None):
     source = FIXTURES / (name + ".stan")
     if reference["source_sha256"] != source_digest(source):
         raise ValueError(name + ": source changed; re-record the CmdStan reference")
+    data = data_for(name, args)
+    own = data != getattr(args, "data", None)
+    if own != ("data_sha256" in reference) or (
+            own and reference["data_sha256"] != source_digest(data)):
+        raise ValueError(name + ": data changed; re-record the CmdStan reference")
     if len(reference["points"]) != 3:
         raise ValueError(name + ": expected exactly three reference points")
     worst, mismatches = 0.0, []
     for point, want in enumerate(reference["points"]):
-        command = [args.build / "stanli_check", source, args.data,
+        command = [args.build / "stanli_check", source, data,
                    "--point", point]
         got = parse(run(command + ["--wa-values"]))
         if got["names"] != want["names"]:

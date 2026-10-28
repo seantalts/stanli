@@ -6,8 +6,8 @@ functions {
   }
 }
 transformed data {
-  vector[500] w;
-  for (n in 1:500) w[n] = n + n * n / 1024.0;
+  vector[1500] w;
+  for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
   vector[4] td_v_lit = [100 + 0.25, 200 + 0.25, 300 + 0.25, 400 + 0.25]';
   array[4] real td_v_lit__td_cells;

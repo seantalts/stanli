@@ -6,8 +6,8 @@ functions {
   }
 }
 transformed data {
-  vector[500] w;
-  for (n in 1:500) w[n] = n + n * n / 1024.0;
+  vector[1500] w;
+  for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
   array[3, 2, 4] int td_i3_lit = {{{111, 112, 113, 114}, {121, 122, 123, 124}}, {{211, 212, 213, 214}, {221, 222, 223, 224}}, {{311, 312, 313, 314}, {321, 322, 323, 324}}};
   array[24] int td_i3_lit__td_cells;
@@ -210,6 +210,76 @@ transformed data {
   { int v = td_i3_colslice[3, 2, 2]; td_i3_colslice__td_cells[22] = v; }
   { int v = td_i3_colslice[3, 2, 3]; td_i3_colslice__td_cells[23] = v; }
   { int v = td_i3_colslice[3, 2, 4]; td_i3_colslice__td_cells[24] = v; }
+  array[3, 2, 4] int td_i3_prefix2;
+  td_i3_prefix2[1, 1] = {111, 112, 113, 114};
+  td_i3_prefix2[1, 2] = {121, 122, 123, 124};
+  td_i3_prefix2[2, 1] = {211, 212, 213, 214};
+  td_i3_prefix2[2, 2] = {221, 222, 223, 224};
+  td_i3_prefix2[3, 1] = {311, 312, 313, 314};
+  td_i3_prefix2[3, 2] = {321, 322, 323, 324};
+  array[24] int td_i3_prefix2__td_cells;
+  { int v = td_i3_prefix2[1, 1, 1]; td_i3_prefix2__td_cells[1] = v; }
+  { int v = td_i3_prefix2[1, 1, 2]; td_i3_prefix2__td_cells[2] = v; }
+  { int v = td_i3_prefix2[1, 1, 3]; td_i3_prefix2__td_cells[3] = v; }
+  { int v = td_i3_prefix2[1, 1, 4]; td_i3_prefix2__td_cells[4] = v; }
+  { int v = td_i3_prefix2[1, 2, 1]; td_i3_prefix2__td_cells[5] = v; }
+  { int v = td_i3_prefix2[1, 2, 2]; td_i3_prefix2__td_cells[6] = v; }
+  { int v = td_i3_prefix2[1, 2, 3]; td_i3_prefix2__td_cells[7] = v; }
+  { int v = td_i3_prefix2[1, 2, 4]; td_i3_prefix2__td_cells[8] = v; }
+  { int v = td_i3_prefix2[2, 1, 1]; td_i3_prefix2__td_cells[9] = v; }
+  { int v = td_i3_prefix2[2, 1, 2]; td_i3_prefix2__td_cells[10] = v; }
+  { int v = td_i3_prefix2[2, 1, 3]; td_i3_prefix2__td_cells[11] = v; }
+  { int v = td_i3_prefix2[2, 1, 4]; td_i3_prefix2__td_cells[12] = v; }
+  { int v = td_i3_prefix2[2, 2, 1]; td_i3_prefix2__td_cells[13] = v; }
+  { int v = td_i3_prefix2[2, 2, 2]; td_i3_prefix2__td_cells[14] = v; }
+  { int v = td_i3_prefix2[2, 2, 3]; td_i3_prefix2__td_cells[15] = v; }
+  { int v = td_i3_prefix2[2, 2, 4]; td_i3_prefix2__td_cells[16] = v; }
+  { int v = td_i3_prefix2[3, 1, 1]; td_i3_prefix2__td_cells[17] = v; }
+  { int v = td_i3_prefix2[3, 1, 2]; td_i3_prefix2__td_cells[18] = v; }
+  { int v = td_i3_prefix2[3, 1, 3]; td_i3_prefix2__td_cells[19] = v; }
+  { int v = td_i3_prefix2[3, 1, 4]; td_i3_prefix2__td_cells[20] = v; }
+  { int v = td_i3_prefix2[3, 2, 1]; td_i3_prefix2__td_cells[21] = v; }
+  { int v = td_i3_prefix2[3, 2, 2]; td_i3_prefix2__td_cells[22] = v; }
+  { int v = td_i3_prefix2[3, 2, 3]; td_i3_prefix2__td_cells[23] = v; }
+  { int v = td_i3_prefix2[3, 2, 4]; td_i3_prefix2__td_cells[24] = v; }
+  array[3, 2, 4] int td_i3_midslice;
+  td_i3_midslice[1, :, 1] = {111, 121};
+  td_i3_midslice[1, :, 2] = {112, 122};
+  td_i3_midslice[1, :, 3] = {113, 123};
+  td_i3_midslice[1, :, 4] = {114, 124};
+  td_i3_midslice[2, :, 1] = {211, 221};
+  td_i3_midslice[2, :, 2] = {212, 222};
+  td_i3_midslice[2, :, 3] = {213, 223};
+  td_i3_midslice[2, :, 4] = {214, 224};
+  td_i3_midslice[3, :, 1] = {311, 321};
+  td_i3_midslice[3, :, 2] = {312, 322};
+  td_i3_midslice[3, :, 3] = {313, 323};
+  td_i3_midslice[3, :, 4] = {314, 324};
+  array[24] int td_i3_midslice__td_cells;
+  { int v = td_i3_midslice[1, 1, 1]; td_i3_midslice__td_cells[1] = v; }
+  { int v = td_i3_midslice[1, 1, 2]; td_i3_midslice__td_cells[2] = v; }
+  { int v = td_i3_midslice[1, 1, 3]; td_i3_midslice__td_cells[3] = v; }
+  { int v = td_i3_midslice[1, 1, 4]; td_i3_midslice__td_cells[4] = v; }
+  { int v = td_i3_midslice[1, 2, 1]; td_i3_midslice__td_cells[5] = v; }
+  { int v = td_i3_midslice[1, 2, 2]; td_i3_midslice__td_cells[6] = v; }
+  { int v = td_i3_midslice[1, 2, 3]; td_i3_midslice__td_cells[7] = v; }
+  { int v = td_i3_midslice[1, 2, 4]; td_i3_midslice__td_cells[8] = v; }
+  { int v = td_i3_midslice[2, 1, 1]; td_i3_midslice__td_cells[9] = v; }
+  { int v = td_i3_midslice[2, 1, 2]; td_i3_midslice__td_cells[10] = v; }
+  { int v = td_i3_midslice[2, 1, 3]; td_i3_midslice__td_cells[11] = v; }
+  { int v = td_i3_midslice[2, 1, 4]; td_i3_midslice__td_cells[12] = v; }
+  { int v = td_i3_midslice[2, 2, 1]; td_i3_midslice__td_cells[13] = v; }
+  { int v = td_i3_midslice[2, 2, 2]; td_i3_midslice__td_cells[14] = v; }
+  { int v = td_i3_midslice[2, 2, 3]; td_i3_midslice__td_cells[15] = v; }
+  { int v = td_i3_midslice[2, 2, 4]; td_i3_midslice__td_cells[16] = v; }
+  { int v = td_i3_midslice[3, 1, 1]; td_i3_midslice__td_cells[17] = v; }
+  { int v = td_i3_midslice[3, 1, 2]; td_i3_midslice__td_cells[18] = v; }
+  { int v = td_i3_midslice[3, 1, 3]; td_i3_midslice__td_cells[19] = v; }
+  { int v = td_i3_midslice[3, 1, 4]; td_i3_midslice__td_cells[20] = v; }
+  { int v = td_i3_midslice[3, 2, 1]; td_i3_midslice__td_cells[21] = v; }
+  { int v = td_i3_midslice[3, 2, 2]; td_i3_midslice__td_cells[22] = v; }
+  { int v = td_i3_midslice[3, 2, 3]; td_i3_midslice__td_cells[23] = v; }
+  { int v = td_i3_midslice[3, 2, 4]; td_i3_midslice__td_cells[24] = v; }
   array[3, 2, 4] int td_i3_range;
   td_i3_range[2:3] = {{{211, 212, 213, 214}, {221, 222, 223, 224}}, {{311, 312, 313, 314}, {321, 322, 323, 324}}};
   td_i3_range[1:1] = {{{111, 112, 113, 114}, {121, 122, 123, 124}}};
@@ -423,6 +493,8 @@ generated quantities {
   array[24] int td_i3_row__gq_cells;
   array[24] int out_td_i3_rowslice__td_cells = td_i3_rowslice__td_cells;
   array[24] int out_td_i3_colslice__td_cells = td_i3_colslice__td_cells;
+  array[24] int out_td_i3_prefix2__td_cells = td_i3_prefix2__td_cells;
+  array[24] int out_td_i3_midslice__td_cells = td_i3_midslice__td_cells;
   array[24] int out_td_i3_range__td_cells = td_i3_range__td_cells;
   array[24] int out_td_i3_multi__td_cells = td_i3_multi__td_cells;
   array[24] int out_td_i3_cpdelem__td_cells = td_i3_cpdelem__td_cells;

@@ -51,6 +51,32 @@ functions {
     x[:, 2] = {{121 + s, 122 + s, 123 + s, 124 + s}, {221 + s, 222 + s, 223 + s, 224 + s}, {321 + s, 322 + s, 323 + s, 324 + s}};
     return x;
   }
+  array[,,] real fn_r3_prefix2(real s) {
+    array[3, 2, 4] real x;
+    x[1, 1] = {111 + s, 112 + s, 113 + s, 114 + s};
+    x[1, 2] = {121 + s, 122 + s, 123 + s, 124 + s};
+    x[2, 1] = {211 + s, 212 + s, 213 + s, 214 + s};
+    x[2, 2] = {221 + s, 222 + s, 223 + s, 224 + s};
+    x[3, 1] = {311 + s, 312 + s, 313 + s, 314 + s};
+    x[3, 2] = {321 + s, 322 + s, 323 + s, 324 + s};
+    return x;
+  }
+  array[,,] real fn_r3_midslice(real s) {
+    array[3, 2, 4] real x;
+    x[1, :, 1] = {111 + s, 121 + s};
+    x[1, :, 2] = {112 + s, 122 + s};
+    x[1, :, 3] = {113 + s, 123 + s};
+    x[1, :, 4] = {114 + s, 124 + s};
+    x[2, :, 1] = {211 + s, 221 + s};
+    x[2, :, 2] = {212 + s, 222 + s};
+    x[2, :, 3] = {213 + s, 223 + s};
+    x[2, :, 4] = {214 + s, 224 + s};
+    x[3, :, 1] = {311 + s, 321 + s};
+    x[3, :, 2] = {312 + s, 322 + s};
+    x[3, :, 3] = {313 + s, 323 + s};
+    x[3, :, 4] = {314 + s, 324 + s};
+    return x;
+  }
   array[,,] real fn_r3_range(real s) {
     array[3, 2, 4] real x;
     x[2:3] = {{{211 + s, 212 + s, 213 + s, 214 + s}, {221 + s, 222 + s, 223 + s, 224 + s}}, {{311 + s, 312 + s, 313 + s, 314 + s}, {321 + s, 322 + s, 323 + s, 324 + s}}};
@@ -76,13 +102,13 @@ functions {
   }
 }
 transformed data {
-  vector[500] w;
-  for (n in 1:500) w[n] = n + n * n / 1024.0;
+  vector[1500] w;
+  for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
 }
 parameters {
   real q;
-  vector[246] p;
+  vector[294] p;
 }
 model {
   q ~ std_normal();
@@ -276,7 +302,7 @@ model {
     target += x[3, 2, 4] * p[168];
   }
   {
-    array[3, 2, 4] real x = fn_r3_range(q);
+    array[3, 2, 4] real x = fn_r3_prefix2(q);
     target += x[1, 1, 1] * p[169];
     target += x[1, 1, 2] * p[170];
     target += x[1, 1, 3] * p[171];
@@ -303,7 +329,7 @@ model {
     target += x[3, 2, 4] * p[192];
   }
   {
-    array[3, 2, 4] real x = fn_r3_multi(q);
+    array[3, 2, 4] real x = fn_r3_midslice(q);
     target += x[1, 1, 1] * p[193];
     target += x[1, 1, 2] * p[194];
     target += x[1, 1, 3] * p[195];
@@ -330,7 +356,7 @@ model {
     target += x[3, 2, 4] * p[216];
   }
   {
-    array[3, 2, 4] real x = fn_r3_cpdelem(q);
+    array[3, 2, 4] real x = fn_r3_range(q);
     target += x[1, 1, 1] * p[217];
     target += x[1, 1, 2] * p[218];
     target += x[1, 1, 3] * p[219];
@@ -357,30 +383,84 @@ model {
     target += x[3, 2, 4] * p[240];
   }
   {
+    array[3, 2, 4] real x = fn_r3_multi(q);
+    target += x[1, 1, 1] * p[241];
+    target += x[1, 1, 2] * p[242];
+    target += x[1, 1, 3] * p[243];
+    target += x[1, 1, 4] * p[244];
+    target += x[1, 2, 1] * p[245];
+    target += x[1, 2, 2] * p[246];
+    target += x[1, 2, 3] * p[247];
+    target += x[1, 2, 4] * p[248];
+    target += x[2, 1, 1] * p[249];
+    target += x[2, 1, 2] * p[250];
+    target += x[2, 1, 3] * p[251];
+    target += x[2, 1, 4] * p[252];
+    target += x[2, 2, 1] * p[253];
+    target += x[2, 2, 2] * p[254];
+    target += x[2, 2, 3] * p[255];
+    target += x[2, 2, 4] * p[256];
+    target += x[3, 1, 1] * p[257];
+    target += x[3, 1, 2] * p[258];
+    target += x[3, 1, 3] * p[259];
+    target += x[3, 1, 4] * p[260];
+    target += x[3, 2, 1] * p[261];
+    target += x[3, 2, 2] * p[262];
+    target += x[3, 2, 3] * p[263];
+    target += x[3, 2, 4] * p[264];
+  }
+  {
+    array[3, 2, 4] real x = fn_r3_cpdelem(q);
+    target += x[1, 1, 1] * p[265];
+    target += x[1, 1, 2] * p[266];
+    target += x[1, 1, 3] * p[267];
+    target += x[1, 1, 4] * p[268];
+    target += x[1, 2, 1] * p[269];
+    target += x[1, 2, 2] * p[270];
+    target += x[1, 2, 3] * p[271];
+    target += x[1, 2, 4] * p[272];
+    target += x[2, 1, 1] * p[273];
+    target += x[2, 1, 2] * p[274];
+    target += x[2, 1, 3] * p[275];
+    target += x[2, 1, 4] * p[276];
+    target += x[2, 2, 1] * p[277];
+    target += x[2, 2, 2] * p[278];
+    target += x[2, 2, 3] * p[279];
+    target += x[2, 2, 4] * p[280];
+    target += x[3, 1, 1] * p[281];
+    target += x[3, 1, 2] * p[282];
+    target += x[3, 1, 3] * p[283];
+    target += x[3, 1, 4] * p[284];
+    target += x[3, 2, 1] * p[285];
+    target += x[3, 2, 2] * p[286];
+    target += x[3, 2, 3] * p[287];
+    target += x[3, 2, 4] * p[288];
+  }
+  {
     array[3, 2, 4] real x = fn_r3_reads(q);
     {
       real r = x[2, 1, 3];
-      target += r * p[241];
+      target += r * p[289];
     }
     {
-      target += x[2, 1, 3] * 2 + 1 * p[242];
+      target += x[2, 1, 3] * 2 + 1 * p[290];
     }
     {
-      target += size(x) * p[243];
+      target += size(x) * p[291];
     }
     {
       array[3] int dd = dims(x);
       int s = 0;
       for (t in 1:size(dd)) s = s * 10 + dd[t];
-      target += s * p[244];
+      target += s * p[292];
     }
     {
       array[2, 4] real cp = x[2];
-      target += cp[1, 3] * p[245];
+      target += cp[1, 3] * p[293];
     }
     {
       array[3, 4] real cp = x[:, 1];
-      target += cp[2, 3] * p[246];
+      target += cp[2, 3] * p[294];
     }
   }
 }
@@ -392,6 +472,8 @@ generated quantities {
   array[24] real fn_r3_row__gq_cells;
   array[24] real fn_r3_rowslice__gq_cells;
   array[24] real fn_r3_colslice__gq_cells;
+  array[24] real fn_r3_prefix2__gq_cells;
+  array[24] real fn_r3_midslice__gq_cells;
   array[24] real fn_r3_range__gq_cells;
   array[24] real fn_r3_multi__gq_cells;
   array[24] real fn_r3_cpdelem__gq_cells;
@@ -589,6 +671,60 @@ generated quantities {
     fn_r3_colslice__gq_cells[22] = x[3, 2, 2];
     fn_r3_colslice__gq_cells[23] = x[3, 2, 3];
     fn_r3_colslice__gq_cells[24] = x[3, 2, 4];
+  }
+  {
+    array[3, 2, 4] real x = fn_r3_prefix2(q);
+    fn_r3_prefix2__gq_cells[1] = x[1, 1, 1];
+    fn_r3_prefix2__gq_cells[2] = x[1, 1, 2];
+    fn_r3_prefix2__gq_cells[3] = x[1, 1, 3];
+    fn_r3_prefix2__gq_cells[4] = x[1, 1, 4];
+    fn_r3_prefix2__gq_cells[5] = x[1, 2, 1];
+    fn_r3_prefix2__gq_cells[6] = x[1, 2, 2];
+    fn_r3_prefix2__gq_cells[7] = x[1, 2, 3];
+    fn_r3_prefix2__gq_cells[8] = x[1, 2, 4];
+    fn_r3_prefix2__gq_cells[9] = x[2, 1, 1];
+    fn_r3_prefix2__gq_cells[10] = x[2, 1, 2];
+    fn_r3_prefix2__gq_cells[11] = x[2, 1, 3];
+    fn_r3_prefix2__gq_cells[12] = x[2, 1, 4];
+    fn_r3_prefix2__gq_cells[13] = x[2, 2, 1];
+    fn_r3_prefix2__gq_cells[14] = x[2, 2, 2];
+    fn_r3_prefix2__gq_cells[15] = x[2, 2, 3];
+    fn_r3_prefix2__gq_cells[16] = x[2, 2, 4];
+    fn_r3_prefix2__gq_cells[17] = x[3, 1, 1];
+    fn_r3_prefix2__gq_cells[18] = x[3, 1, 2];
+    fn_r3_prefix2__gq_cells[19] = x[3, 1, 3];
+    fn_r3_prefix2__gq_cells[20] = x[3, 1, 4];
+    fn_r3_prefix2__gq_cells[21] = x[3, 2, 1];
+    fn_r3_prefix2__gq_cells[22] = x[3, 2, 2];
+    fn_r3_prefix2__gq_cells[23] = x[3, 2, 3];
+    fn_r3_prefix2__gq_cells[24] = x[3, 2, 4];
+  }
+  {
+    array[3, 2, 4] real x = fn_r3_midslice(q);
+    fn_r3_midslice__gq_cells[1] = x[1, 1, 1];
+    fn_r3_midslice__gq_cells[2] = x[1, 1, 2];
+    fn_r3_midslice__gq_cells[3] = x[1, 1, 3];
+    fn_r3_midslice__gq_cells[4] = x[1, 1, 4];
+    fn_r3_midslice__gq_cells[5] = x[1, 2, 1];
+    fn_r3_midslice__gq_cells[6] = x[1, 2, 2];
+    fn_r3_midslice__gq_cells[7] = x[1, 2, 3];
+    fn_r3_midslice__gq_cells[8] = x[1, 2, 4];
+    fn_r3_midslice__gq_cells[9] = x[2, 1, 1];
+    fn_r3_midslice__gq_cells[10] = x[2, 1, 2];
+    fn_r3_midslice__gq_cells[11] = x[2, 1, 3];
+    fn_r3_midslice__gq_cells[12] = x[2, 1, 4];
+    fn_r3_midslice__gq_cells[13] = x[2, 2, 1];
+    fn_r3_midslice__gq_cells[14] = x[2, 2, 2];
+    fn_r3_midslice__gq_cells[15] = x[2, 2, 3];
+    fn_r3_midslice__gq_cells[16] = x[2, 2, 4];
+    fn_r3_midslice__gq_cells[17] = x[3, 1, 1];
+    fn_r3_midslice__gq_cells[18] = x[3, 1, 2];
+    fn_r3_midslice__gq_cells[19] = x[3, 1, 3];
+    fn_r3_midslice__gq_cells[20] = x[3, 1, 4];
+    fn_r3_midslice__gq_cells[21] = x[3, 2, 1];
+    fn_r3_midslice__gq_cells[22] = x[3, 2, 2];
+    fn_r3_midslice__gq_cells[23] = x[3, 2, 3];
+    fn_r3_midslice__gq_cells[24] = x[3, 2, 4];
   }
   {
     array[3, 2, 4] real x = fn_r3_range(q);

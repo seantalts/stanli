@@ -6,8 +6,8 @@ functions {
   }
 }
 transformed data {
-  vector[500] w;
-  for (n in 1:500) w[n] = n + n * n / 1024.0;
+  vector[1500] w;
+  for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
   array[3, 4] int td_i2_lit = {{110, 120, 130, 140}, {210, 220, 230, 240}, {310, 320, 330, 340}};
   array[12] int td_i2_lit__td_cells;

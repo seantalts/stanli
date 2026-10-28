@@ -6,13 +6,13 @@ functions {
   }
 }
 transformed data {
-  vector[500] w;
-  for (n in 1:500) w[n] = n + n * n / 1024.0;
+  vector[1500] w;
+  for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
 }
 parameters {
   real q;
-  vector[250] p;
+  vector[298] p;
 }
 model {
   q ~ std_normal();
@@ -225,89 +225,161 @@ model {
     { int v = m_i3_colslice[3, 2, 4]; target += v * p[168]; }
   }
   {
+    array[3, 2, 4] int m_i3_prefix2;
+    m_i3_prefix2[1, 1] = {111, 112, 113, 114};
+    m_i3_prefix2[1, 2] = {121, 122, 123, 124};
+    m_i3_prefix2[2, 1] = {211, 212, 213, 214};
+    m_i3_prefix2[2, 2] = {221, 222, 223, 224};
+    m_i3_prefix2[3, 1] = {311, 312, 313, 314};
+    m_i3_prefix2[3, 2] = {321, 322, 323, 324};
+    { int v = m_i3_prefix2[1, 1, 1]; target += v * p[169]; }
+    { int v = m_i3_prefix2[1, 1, 2]; target += v * p[170]; }
+    { int v = m_i3_prefix2[1, 1, 3]; target += v * p[171]; }
+    { int v = m_i3_prefix2[1, 1, 4]; target += v * p[172]; }
+    { int v = m_i3_prefix2[1, 2, 1]; target += v * p[173]; }
+    { int v = m_i3_prefix2[1, 2, 2]; target += v * p[174]; }
+    { int v = m_i3_prefix2[1, 2, 3]; target += v * p[175]; }
+    { int v = m_i3_prefix2[1, 2, 4]; target += v * p[176]; }
+    { int v = m_i3_prefix2[2, 1, 1]; target += v * p[177]; }
+    { int v = m_i3_prefix2[2, 1, 2]; target += v * p[178]; }
+    { int v = m_i3_prefix2[2, 1, 3]; target += v * p[179]; }
+    { int v = m_i3_prefix2[2, 1, 4]; target += v * p[180]; }
+    { int v = m_i3_prefix2[2, 2, 1]; target += v * p[181]; }
+    { int v = m_i3_prefix2[2, 2, 2]; target += v * p[182]; }
+    { int v = m_i3_prefix2[2, 2, 3]; target += v * p[183]; }
+    { int v = m_i3_prefix2[2, 2, 4]; target += v * p[184]; }
+    { int v = m_i3_prefix2[3, 1, 1]; target += v * p[185]; }
+    { int v = m_i3_prefix2[3, 1, 2]; target += v * p[186]; }
+    { int v = m_i3_prefix2[3, 1, 3]; target += v * p[187]; }
+    { int v = m_i3_prefix2[3, 1, 4]; target += v * p[188]; }
+    { int v = m_i3_prefix2[3, 2, 1]; target += v * p[189]; }
+    { int v = m_i3_prefix2[3, 2, 2]; target += v * p[190]; }
+    { int v = m_i3_prefix2[3, 2, 3]; target += v * p[191]; }
+    { int v = m_i3_prefix2[3, 2, 4]; target += v * p[192]; }
+  }
+  {
+    array[3, 2, 4] int m_i3_midslice;
+    m_i3_midslice[1, :, 1] = {111, 121};
+    m_i3_midslice[1, :, 2] = {112, 122};
+    m_i3_midslice[1, :, 3] = {113, 123};
+    m_i3_midslice[1, :, 4] = {114, 124};
+    m_i3_midslice[2, :, 1] = {211, 221};
+    m_i3_midslice[2, :, 2] = {212, 222};
+    m_i3_midslice[2, :, 3] = {213, 223};
+    m_i3_midslice[2, :, 4] = {214, 224};
+    m_i3_midslice[3, :, 1] = {311, 321};
+    m_i3_midslice[3, :, 2] = {312, 322};
+    m_i3_midslice[3, :, 3] = {313, 323};
+    m_i3_midslice[3, :, 4] = {314, 324};
+    { int v = m_i3_midslice[1, 1, 1]; target += v * p[193]; }
+    { int v = m_i3_midslice[1, 1, 2]; target += v * p[194]; }
+    { int v = m_i3_midslice[1, 1, 3]; target += v * p[195]; }
+    { int v = m_i3_midslice[1, 1, 4]; target += v * p[196]; }
+    { int v = m_i3_midslice[1, 2, 1]; target += v * p[197]; }
+    { int v = m_i3_midslice[1, 2, 2]; target += v * p[198]; }
+    { int v = m_i3_midslice[1, 2, 3]; target += v * p[199]; }
+    { int v = m_i3_midslice[1, 2, 4]; target += v * p[200]; }
+    { int v = m_i3_midslice[2, 1, 1]; target += v * p[201]; }
+    { int v = m_i3_midslice[2, 1, 2]; target += v * p[202]; }
+    { int v = m_i3_midslice[2, 1, 3]; target += v * p[203]; }
+    { int v = m_i3_midslice[2, 1, 4]; target += v * p[204]; }
+    { int v = m_i3_midslice[2, 2, 1]; target += v * p[205]; }
+    { int v = m_i3_midslice[2, 2, 2]; target += v * p[206]; }
+    { int v = m_i3_midslice[2, 2, 3]; target += v * p[207]; }
+    { int v = m_i3_midslice[2, 2, 4]; target += v * p[208]; }
+    { int v = m_i3_midslice[3, 1, 1]; target += v * p[209]; }
+    { int v = m_i3_midslice[3, 1, 2]; target += v * p[210]; }
+    { int v = m_i3_midslice[3, 1, 3]; target += v * p[211]; }
+    { int v = m_i3_midslice[3, 1, 4]; target += v * p[212]; }
+    { int v = m_i3_midslice[3, 2, 1]; target += v * p[213]; }
+    { int v = m_i3_midslice[3, 2, 2]; target += v * p[214]; }
+    { int v = m_i3_midslice[3, 2, 3]; target += v * p[215]; }
+    { int v = m_i3_midslice[3, 2, 4]; target += v * p[216]; }
+  }
+  {
     array[3, 2, 4] int m_i3_range;
     m_i3_range[2:3] = {{{211, 212, 213, 214}, {221, 222, 223, 224}}, {{311, 312, 313, 314}, {321, 322, 323, 324}}};
     m_i3_range[1:1] = {{{111, 112, 113, 114}, {121, 122, 123, 124}}};
-    { int v = m_i3_range[1, 1, 1]; target += v * p[169]; }
-    { int v = m_i3_range[1, 1, 2]; target += v * p[170]; }
-    { int v = m_i3_range[1, 1, 3]; target += v * p[171]; }
-    { int v = m_i3_range[1, 1, 4]; target += v * p[172]; }
-    { int v = m_i3_range[1, 2, 1]; target += v * p[173]; }
-    { int v = m_i3_range[1, 2, 2]; target += v * p[174]; }
-    { int v = m_i3_range[1, 2, 3]; target += v * p[175]; }
-    { int v = m_i3_range[1, 2, 4]; target += v * p[176]; }
-    { int v = m_i3_range[2, 1, 1]; target += v * p[177]; }
-    { int v = m_i3_range[2, 1, 2]; target += v * p[178]; }
-    { int v = m_i3_range[2, 1, 3]; target += v * p[179]; }
-    { int v = m_i3_range[2, 1, 4]; target += v * p[180]; }
-    { int v = m_i3_range[2, 2, 1]; target += v * p[181]; }
-    { int v = m_i3_range[2, 2, 2]; target += v * p[182]; }
-    { int v = m_i3_range[2, 2, 3]; target += v * p[183]; }
-    { int v = m_i3_range[2, 2, 4]; target += v * p[184]; }
-    { int v = m_i3_range[3, 1, 1]; target += v * p[185]; }
-    { int v = m_i3_range[3, 1, 2]; target += v * p[186]; }
-    { int v = m_i3_range[3, 1, 3]; target += v * p[187]; }
-    { int v = m_i3_range[3, 1, 4]; target += v * p[188]; }
-    { int v = m_i3_range[3, 2, 1]; target += v * p[189]; }
-    { int v = m_i3_range[3, 2, 2]; target += v * p[190]; }
-    { int v = m_i3_range[3, 2, 3]; target += v * p[191]; }
-    { int v = m_i3_range[3, 2, 4]; target += v * p[192]; }
+    { int v = m_i3_range[1, 1, 1]; target += v * p[217]; }
+    { int v = m_i3_range[1, 1, 2]; target += v * p[218]; }
+    { int v = m_i3_range[1, 1, 3]; target += v * p[219]; }
+    { int v = m_i3_range[1, 1, 4]; target += v * p[220]; }
+    { int v = m_i3_range[1, 2, 1]; target += v * p[221]; }
+    { int v = m_i3_range[1, 2, 2]; target += v * p[222]; }
+    { int v = m_i3_range[1, 2, 3]; target += v * p[223]; }
+    { int v = m_i3_range[1, 2, 4]; target += v * p[224]; }
+    { int v = m_i3_range[2, 1, 1]; target += v * p[225]; }
+    { int v = m_i3_range[2, 1, 2]; target += v * p[226]; }
+    { int v = m_i3_range[2, 1, 3]; target += v * p[227]; }
+    { int v = m_i3_range[2, 1, 4]; target += v * p[228]; }
+    { int v = m_i3_range[2, 2, 1]; target += v * p[229]; }
+    { int v = m_i3_range[2, 2, 2]; target += v * p[230]; }
+    { int v = m_i3_range[2, 2, 3]; target += v * p[231]; }
+    { int v = m_i3_range[2, 2, 4]; target += v * p[232]; }
+    { int v = m_i3_range[3, 1, 1]; target += v * p[233]; }
+    { int v = m_i3_range[3, 1, 2]; target += v * p[234]; }
+    { int v = m_i3_range[3, 1, 3]; target += v * p[235]; }
+    { int v = m_i3_range[3, 1, 4]; target += v * p[236]; }
+    { int v = m_i3_range[3, 2, 1]; target += v * p[237]; }
+    { int v = m_i3_range[3, 2, 2]; target += v * p[238]; }
+    { int v = m_i3_range[3, 2, 3]; target += v * p[239]; }
+    { int v = m_i3_range[3, 2, 4]; target += v * p[240]; }
   }
   {
     array[3, 2, 4] int m_i3_multi;
     m_i3_multi[{3, 1, 2}] = {{{311, 312, 313, 314}, {321, 322, 323, 324}}, {{111, 112, 113, 114}, {121, 122, 123, 124}}, {{211, 212, 213, 214}, {221, 222, 223, 224}}};
-    { int v = m_i3_multi[1, 1, 1]; target += v * p[193]; }
-    { int v = m_i3_multi[1, 1, 2]; target += v * p[194]; }
-    { int v = m_i3_multi[1, 1, 3]; target += v * p[195]; }
-    { int v = m_i3_multi[1, 1, 4]; target += v * p[196]; }
-    { int v = m_i3_multi[1, 2, 1]; target += v * p[197]; }
-    { int v = m_i3_multi[1, 2, 2]; target += v * p[198]; }
-    { int v = m_i3_multi[1, 2, 3]; target += v * p[199]; }
-    { int v = m_i3_multi[1, 2, 4]; target += v * p[200]; }
-    { int v = m_i3_multi[2, 1, 1]; target += v * p[201]; }
-    { int v = m_i3_multi[2, 1, 2]; target += v * p[202]; }
-    { int v = m_i3_multi[2, 1, 3]; target += v * p[203]; }
-    { int v = m_i3_multi[2, 1, 4]; target += v * p[204]; }
-    { int v = m_i3_multi[2, 2, 1]; target += v * p[205]; }
-    { int v = m_i3_multi[2, 2, 2]; target += v * p[206]; }
-    { int v = m_i3_multi[2, 2, 3]; target += v * p[207]; }
-    { int v = m_i3_multi[2, 2, 4]; target += v * p[208]; }
-    { int v = m_i3_multi[3, 1, 1]; target += v * p[209]; }
-    { int v = m_i3_multi[3, 1, 2]; target += v * p[210]; }
-    { int v = m_i3_multi[3, 1, 3]; target += v * p[211]; }
-    { int v = m_i3_multi[3, 1, 4]; target += v * p[212]; }
-    { int v = m_i3_multi[3, 2, 1]; target += v * p[213]; }
-    { int v = m_i3_multi[3, 2, 2]; target += v * p[214]; }
-    { int v = m_i3_multi[3, 2, 3]; target += v * p[215]; }
-    { int v = m_i3_multi[3, 2, 4]; target += v * p[216]; }
+    { int v = m_i3_multi[1, 1, 1]; target += v * p[241]; }
+    { int v = m_i3_multi[1, 1, 2]; target += v * p[242]; }
+    { int v = m_i3_multi[1, 1, 3]; target += v * p[243]; }
+    { int v = m_i3_multi[1, 1, 4]; target += v * p[244]; }
+    { int v = m_i3_multi[1, 2, 1]; target += v * p[245]; }
+    { int v = m_i3_multi[1, 2, 2]; target += v * p[246]; }
+    { int v = m_i3_multi[1, 2, 3]; target += v * p[247]; }
+    { int v = m_i3_multi[1, 2, 4]; target += v * p[248]; }
+    { int v = m_i3_multi[2, 1, 1]; target += v * p[249]; }
+    { int v = m_i3_multi[2, 1, 2]; target += v * p[250]; }
+    { int v = m_i3_multi[2, 1, 3]; target += v * p[251]; }
+    { int v = m_i3_multi[2, 1, 4]; target += v * p[252]; }
+    { int v = m_i3_multi[2, 2, 1]; target += v * p[253]; }
+    { int v = m_i3_multi[2, 2, 2]; target += v * p[254]; }
+    { int v = m_i3_multi[2, 2, 3]; target += v * p[255]; }
+    { int v = m_i3_multi[2, 2, 4]; target += v * p[256]; }
+    { int v = m_i3_multi[3, 1, 1]; target += v * p[257]; }
+    { int v = m_i3_multi[3, 1, 2]; target += v * p[258]; }
+    { int v = m_i3_multi[3, 1, 3]; target += v * p[259]; }
+    { int v = m_i3_multi[3, 1, 4]; target += v * p[260]; }
+    { int v = m_i3_multi[3, 2, 1]; target += v * p[261]; }
+    { int v = m_i3_multi[3, 2, 2]; target += v * p[262]; }
+    { int v = m_i3_multi[3, 2, 3]; target += v * p[263]; }
+    { int v = m_i3_multi[3, 2, 4]; target += v * p[264]; }
   }
   {
     array[3, 2, 4] int m_i3_cpdelem = {{{111, 112, 113, 114}, {121, 122, 123, 124}}, {{211, 212, 213, 214}, {221, 222, 223, 224}}, {{311, 312, 313, 314}, {321, 322, 323, 324}}};
     m_i3_cpdelem[2, 1, 3] += 5;
-    { int v = m_i3_cpdelem[1, 1, 1]; target += v * p[217]; }
-    { int v = m_i3_cpdelem[1, 1, 2]; target += v * p[218]; }
-    { int v = m_i3_cpdelem[1, 1, 3]; target += v * p[219]; }
-    { int v = m_i3_cpdelem[1, 1, 4]; target += v * p[220]; }
-    { int v = m_i3_cpdelem[1, 2, 1]; target += v * p[221]; }
-    { int v = m_i3_cpdelem[1, 2, 2]; target += v * p[222]; }
-    { int v = m_i3_cpdelem[1, 2, 3]; target += v * p[223]; }
-    { int v = m_i3_cpdelem[1, 2, 4]; target += v * p[224]; }
-    { int v = m_i3_cpdelem[2, 1, 1]; target += v * p[225]; }
-    { int v = m_i3_cpdelem[2, 1, 2]; target += v * p[226]; }
-    { int v = m_i3_cpdelem[2, 1, 3]; target += v * p[227]; }
-    { int v = m_i3_cpdelem[2, 1, 4]; target += v * p[228]; }
-    { int v = m_i3_cpdelem[2, 2, 1]; target += v * p[229]; }
-    { int v = m_i3_cpdelem[2, 2, 2]; target += v * p[230]; }
-    { int v = m_i3_cpdelem[2, 2, 3]; target += v * p[231]; }
-    { int v = m_i3_cpdelem[2, 2, 4]; target += v * p[232]; }
-    { int v = m_i3_cpdelem[3, 1, 1]; target += v * p[233]; }
-    { int v = m_i3_cpdelem[3, 1, 2]; target += v * p[234]; }
-    { int v = m_i3_cpdelem[3, 1, 3]; target += v * p[235]; }
-    { int v = m_i3_cpdelem[3, 1, 4]; target += v * p[236]; }
-    { int v = m_i3_cpdelem[3, 2, 1]; target += v * p[237]; }
-    { int v = m_i3_cpdelem[3, 2, 2]; target += v * p[238]; }
-    { int v = m_i3_cpdelem[3, 2, 3]; target += v * p[239]; }
-    { int v = m_i3_cpdelem[3, 2, 4]; target += v * p[240]; }
+    { int v = m_i3_cpdelem[1, 1, 1]; target += v * p[265]; }
+    { int v = m_i3_cpdelem[1, 1, 2]; target += v * p[266]; }
+    { int v = m_i3_cpdelem[1, 1, 3]; target += v * p[267]; }
+    { int v = m_i3_cpdelem[1, 1, 4]; target += v * p[268]; }
+    { int v = m_i3_cpdelem[1, 2, 1]; target += v * p[269]; }
+    { int v = m_i3_cpdelem[1, 2, 2]; target += v * p[270]; }
+    { int v = m_i3_cpdelem[1, 2, 3]; target += v * p[271]; }
+    { int v = m_i3_cpdelem[1, 2, 4]; target += v * p[272]; }
+    { int v = m_i3_cpdelem[2, 1, 1]; target += v * p[273]; }
+    { int v = m_i3_cpdelem[2, 1, 2]; target += v * p[274]; }
+    { int v = m_i3_cpdelem[2, 1, 3]; target += v * p[275]; }
+    { int v = m_i3_cpdelem[2, 1, 4]; target += v * p[276]; }
+    { int v = m_i3_cpdelem[2, 2, 1]; target += v * p[277]; }
+    { int v = m_i3_cpdelem[2, 2, 2]; target += v * p[278]; }
+    { int v = m_i3_cpdelem[2, 2, 3]; target += v * p[279]; }
+    { int v = m_i3_cpdelem[2, 2, 4]; target += v * p[280]; }
+    { int v = m_i3_cpdelem[3, 1, 1]; target += v * p[281]; }
+    { int v = m_i3_cpdelem[3, 1, 2]; target += v * p[282]; }
+    { int v = m_i3_cpdelem[3, 1, 3]; target += v * p[283]; }
+    { int v = m_i3_cpdelem[3, 1, 4]; target += v * p[284]; }
+    { int v = m_i3_cpdelem[3, 2, 1]; target += v * p[285]; }
+    { int v = m_i3_cpdelem[3, 2, 2]; target += v * p[286]; }
+    { int v = m_i3_cpdelem[3, 2, 3]; target += v * p[287]; }
+    { int v = m_i3_cpdelem[3, 2, 4]; target += v * p[288]; }
   }
   {
     array[3, 2, 4] int m_i3_reads;
@@ -315,42 +387,42 @@ model {
     m_i3_reads[2] = {{211, 212, 213, 214}, {221, 222, 223, 224}};
     m_i3_reads[3] = {{311, 312, 313, 314}, {321, 322, 323, 324}};
     {
-      target += m_i3_reads[2, 1, 3] * p[241];
+      target += m_i3_reads[2, 1, 3] * p[289];
     }
     {
       real r = m_i3_reads[2, 1, 3];
-      target += r * p[242];
+      target += r * p[290];
     }
     {
-      target += m_i3_reads[2, 1, 3] * 2 + 1 * p[243];
+      target += m_i3_reads[2, 1, 3] * 2 + 1 * p[291];
     }
     {
       int n = 0;
       for (t in 1:m_i3_reads[2, 1, 3]) n += 1;
-      target += n * p[244];
+      target += n * p[292];
     }
     {
-      target += w[m_i3_reads[2, 1, 3]] * p[245];
+      target += w[m_i3_reads[2, 1, 3]] * p[293];
     }
     {
-      target += dot_product(w[m_i3_reads[2, 1]], ramp4) * p[246];
+      target += dot_product(w[m_i3_reads[2, 1]], ramp4) * p[294];
     }
     {
-      target += size(m_i3_reads) * p[247];
+      target += size(m_i3_reads) * p[295];
     }
     {
       array[3] int dd = dims(m_i3_reads);
       int s = 0;
       for (t in 1:size(dd)) s = s * 10 + dd[t];
-      target += s * p[248];
+      target += s * p[296];
     }
     {
       array[2, 4] int cp = m_i3_reads[2];
-      target += cp[1, 3] * p[249];
+      target += cp[1, 3] * p[297];
     }
     {
       array[3, 4] int cp = m_i3_reads[:, 1];
-      target += cp[2, 3] * p[250];
+      target += cp[2, 3] * p[298];
     }
   }
 }

@@ -1258,6 +1258,12 @@ std::vector<int64_t> builtin_shape_query(const BuiltinSpec& spec,
           shape.dimensions.end() - (std::ptrdiff_t)leaf_rank);
       const auto* leaf_extents =
           shape.dimensions.data() + (shape.dimensions.size() - leaf_rank);
+      // Stan Math recurses into x[0], so an empty array ends the list.
+      for (size_t d = 0; d < extents.size(); ++d)
+        if (extents[d] == 0) {
+          extents.resize(d + 1);
+          return extents;
+        }
       switch (leaf) {
         case FunctionContainerKind::Vector:
           extents.push_back(leaf_extents[0]);

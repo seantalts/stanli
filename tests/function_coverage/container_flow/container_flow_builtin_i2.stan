@@ -10,8 +10,8 @@ functions {
   }
 }
 transformed data {
-  vector[500] w;
-  for (n in 1:500) w[n] = n + n * n / 1024.0;
+  vector[1500] w;
+  for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
   array[3, 4] int td_i2_builtin = to_int({{110.0, 120.0, 130.0, 140.0}, {210.0, 220.0, 230.0, 240.0}, {310.0, 320.0, 330.0, 340.0}});
   array[12] int td_i2_builtin__td_cells;

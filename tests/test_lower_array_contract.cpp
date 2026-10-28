@@ -87,13 +87,9 @@ void test_contextual_zero_shapes() {
   data.set_real_array("rows", {}, {0, 5});
   data.set_real_array("matrices", {}, {0, 2, 3});
   data.set_real_array("scalars", {}, {0, 3});
+  // dims() of an empty array is {0}: Stan Math does not look inside it.
   check_gradient("tests/fixtures/viewa_contextual_empty.tmir.sexp", data,
-                 // 32, not the 36 the pre-registry dims rule produced:
-                 // Stan Math's dims() pushes rows and columns for any Eigen
-                 // leaf, so dims(array[] row_vector)[2] is the inserted row
-                 // extent 1, not the row length (CmdStan prints
-                 // dims(array[4] vector[2]) as [4,2,1]).
-                 {0.25}, 32.0, {4}, "zero outer container dimensions");
+                 {0.25}, 5.0, {4}, "zero outer container dimensions");
 }
 
 void test_explicit_zero_vectors() {
@@ -111,7 +107,7 @@ void test_empty_data_array_matrix() {
   model.bind(ex);
   ex.params_data()[0] = 0.25;
   double grad[1] = {};
-  eq("empty data array-matrix lp", ex.gradient(grad), 23.25);
+  eq("empty data array-matrix lp", ex.gradient(grad), 10.25);
   eq("empty data array-matrix grad", grad[0], 1.0);
 
   check(model.write_array.has_value(), "empty array-matrix write_array exists");
@@ -132,7 +128,7 @@ void test_empty_data_array_matrix() {
     eq("empty array-matrix write q",
        wx.value_ptr(model.write_array->columns[0].slot)[0], 0.25);
     eq("empty array-matrix write proof",
-       wx.value_ptr(model.write_array->columns[1].slot)[0], 23.0);
+       wx.value_ptr(model.write_array->columns[1].slot)[0], 10.0);
   } else {
     check(false, "empty array-matrix has two scalar write views");
   }

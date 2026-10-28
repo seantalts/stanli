@@ -6,13 +6,13 @@ functions {
   }
 }
 transformed data {
-  vector[500] w;
-  for (n in 1:500) w[n] = n + n * n / 1024.0;
+  vector[1500] w;
+  for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
 }
 parameters {
   real q;
-  vector[246] p;
+  vector[294] p;
 }
 model {
   q ~ std_normal();
@@ -225,89 +225,161 @@ model {
     target += m_r3_colslice[3, 2, 4] * p[168];
   }
   {
+    array[3, 2, 4] real m_r3_prefix2;
+    m_r3_prefix2[1, 1] = {111 + q, 112 + q, 113 + q, 114 + q};
+    m_r3_prefix2[1, 2] = {121 + q, 122 + q, 123 + q, 124 + q};
+    m_r3_prefix2[2, 1] = {211 + q, 212 + q, 213 + q, 214 + q};
+    m_r3_prefix2[2, 2] = {221 + q, 222 + q, 223 + q, 224 + q};
+    m_r3_prefix2[3, 1] = {311 + q, 312 + q, 313 + q, 314 + q};
+    m_r3_prefix2[3, 2] = {321 + q, 322 + q, 323 + q, 324 + q};
+    target += m_r3_prefix2[1, 1, 1] * p[169];
+    target += m_r3_prefix2[1, 1, 2] * p[170];
+    target += m_r3_prefix2[1, 1, 3] * p[171];
+    target += m_r3_prefix2[1, 1, 4] * p[172];
+    target += m_r3_prefix2[1, 2, 1] * p[173];
+    target += m_r3_prefix2[1, 2, 2] * p[174];
+    target += m_r3_prefix2[1, 2, 3] * p[175];
+    target += m_r3_prefix2[1, 2, 4] * p[176];
+    target += m_r3_prefix2[2, 1, 1] * p[177];
+    target += m_r3_prefix2[2, 1, 2] * p[178];
+    target += m_r3_prefix2[2, 1, 3] * p[179];
+    target += m_r3_prefix2[2, 1, 4] * p[180];
+    target += m_r3_prefix2[2, 2, 1] * p[181];
+    target += m_r3_prefix2[2, 2, 2] * p[182];
+    target += m_r3_prefix2[2, 2, 3] * p[183];
+    target += m_r3_prefix2[2, 2, 4] * p[184];
+    target += m_r3_prefix2[3, 1, 1] * p[185];
+    target += m_r3_prefix2[3, 1, 2] * p[186];
+    target += m_r3_prefix2[3, 1, 3] * p[187];
+    target += m_r3_prefix2[3, 1, 4] * p[188];
+    target += m_r3_prefix2[3, 2, 1] * p[189];
+    target += m_r3_prefix2[3, 2, 2] * p[190];
+    target += m_r3_prefix2[3, 2, 3] * p[191];
+    target += m_r3_prefix2[3, 2, 4] * p[192];
+  }
+  {
+    array[3, 2, 4] real m_r3_midslice;
+    m_r3_midslice[1, :, 1] = {111 + q, 121 + q};
+    m_r3_midslice[1, :, 2] = {112 + q, 122 + q};
+    m_r3_midslice[1, :, 3] = {113 + q, 123 + q};
+    m_r3_midslice[1, :, 4] = {114 + q, 124 + q};
+    m_r3_midslice[2, :, 1] = {211 + q, 221 + q};
+    m_r3_midslice[2, :, 2] = {212 + q, 222 + q};
+    m_r3_midslice[2, :, 3] = {213 + q, 223 + q};
+    m_r3_midslice[2, :, 4] = {214 + q, 224 + q};
+    m_r3_midslice[3, :, 1] = {311 + q, 321 + q};
+    m_r3_midslice[3, :, 2] = {312 + q, 322 + q};
+    m_r3_midslice[3, :, 3] = {313 + q, 323 + q};
+    m_r3_midslice[3, :, 4] = {314 + q, 324 + q};
+    target += m_r3_midslice[1, 1, 1] * p[193];
+    target += m_r3_midslice[1, 1, 2] * p[194];
+    target += m_r3_midslice[1, 1, 3] * p[195];
+    target += m_r3_midslice[1, 1, 4] * p[196];
+    target += m_r3_midslice[1, 2, 1] * p[197];
+    target += m_r3_midslice[1, 2, 2] * p[198];
+    target += m_r3_midslice[1, 2, 3] * p[199];
+    target += m_r3_midslice[1, 2, 4] * p[200];
+    target += m_r3_midslice[2, 1, 1] * p[201];
+    target += m_r3_midslice[2, 1, 2] * p[202];
+    target += m_r3_midslice[2, 1, 3] * p[203];
+    target += m_r3_midslice[2, 1, 4] * p[204];
+    target += m_r3_midslice[2, 2, 1] * p[205];
+    target += m_r3_midslice[2, 2, 2] * p[206];
+    target += m_r3_midslice[2, 2, 3] * p[207];
+    target += m_r3_midslice[2, 2, 4] * p[208];
+    target += m_r3_midslice[3, 1, 1] * p[209];
+    target += m_r3_midslice[3, 1, 2] * p[210];
+    target += m_r3_midslice[3, 1, 3] * p[211];
+    target += m_r3_midslice[3, 1, 4] * p[212];
+    target += m_r3_midslice[3, 2, 1] * p[213];
+    target += m_r3_midslice[3, 2, 2] * p[214];
+    target += m_r3_midslice[3, 2, 3] * p[215];
+    target += m_r3_midslice[3, 2, 4] * p[216];
+  }
+  {
     array[3, 2, 4] real m_r3_range;
     m_r3_range[2:3] = {{{211 + q, 212 + q, 213 + q, 214 + q}, {221 + q, 222 + q, 223 + q, 224 + q}}, {{311 + q, 312 + q, 313 + q, 314 + q}, {321 + q, 322 + q, 323 + q, 324 + q}}};
     m_r3_range[1:1] = {{{111 + q, 112 + q, 113 + q, 114 + q}, {121 + q, 122 + q, 123 + q, 124 + q}}};
-    target += m_r3_range[1, 1, 1] * p[169];
-    target += m_r3_range[1, 1, 2] * p[170];
-    target += m_r3_range[1, 1, 3] * p[171];
-    target += m_r3_range[1, 1, 4] * p[172];
-    target += m_r3_range[1, 2, 1] * p[173];
-    target += m_r3_range[1, 2, 2] * p[174];
-    target += m_r3_range[1, 2, 3] * p[175];
-    target += m_r3_range[1, 2, 4] * p[176];
-    target += m_r3_range[2, 1, 1] * p[177];
-    target += m_r3_range[2, 1, 2] * p[178];
-    target += m_r3_range[2, 1, 3] * p[179];
-    target += m_r3_range[2, 1, 4] * p[180];
-    target += m_r3_range[2, 2, 1] * p[181];
-    target += m_r3_range[2, 2, 2] * p[182];
-    target += m_r3_range[2, 2, 3] * p[183];
-    target += m_r3_range[2, 2, 4] * p[184];
-    target += m_r3_range[3, 1, 1] * p[185];
-    target += m_r3_range[3, 1, 2] * p[186];
-    target += m_r3_range[3, 1, 3] * p[187];
-    target += m_r3_range[3, 1, 4] * p[188];
-    target += m_r3_range[3, 2, 1] * p[189];
-    target += m_r3_range[3, 2, 2] * p[190];
-    target += m_r3_range[3, 2, 3] * p[191];
-    target += m_r3_range[3, 2, 4] * p[192];
+    target += m_r3_range[1, 1, 1] * p[217];
+    target += m_r3_range[1, 1, 2] * p[218];
+    target += m_r3_range[1, 1, 3] * p[219];
+    target += m_r3_range[1, 1, 4] * p[220];
+    target += m_r3_range[1, 2, 1] * p[221];
+    target += m_r3_range[1, 2, 2] * p[222];
+    target += m_r3_range[1, 2, 3] * p[223];
+    target += m_r3_range[1, 2, 4] * p[224];
+    target += m_r3_range[2, 1, 1] * p[225];
+    target += m_r3_range[2, 1, 2] * p[226];
+    target += m_r3_range[2, 1, 3] * p[227];
+    target += m_r3_range[2, 1, 4] * p[228];
+    target += m_r3_range[2, 2, 1] * p[229];
+    target += m_r3_range[2, 2, 2] * p[230];
+    target += m_r3_range[2, 2, 3] * p[231];
+    target += m_r3_range[2, 2, 4] * p[232];
+    target += m_r3_range[3, 1, 1] * p[233];
+    target += m_r3_range[3, 1, 2] * p[234];
+    target += m_r3_range[3, 1, 3] * p[235];
+    target += m_r3_range[3, 1, 4] * p[236];
+    target += m_r3_range[3, 2, 1] * p[237];
+    target += m_r3_range[3, 2, 2] * p[238];
+    target += m_r3_range[3, 2, 3] * p[239];
+    target += m_r3_range[3, 2, 4] * p[240];
   }
   {
     array[3, 2, 4] real m_r3_multi;
     m_r3_multi[{3, 1, 2}] = {{{311 + q, 312 + q, 313 + q, 314 + q}, {321 + q, 322 + q, 323 + q, 324 + q}}, {{111 + q, 112 + q, 113 + q, 114 + q}, {121 + q, 122 + q, 123 + q, 124 + q}}, {{211 + q, 212 + q, 213 + q, 214 + q}, {221 + q, 222 + q, 223 + q, 224 + q}}};
-    target += m_r3_multi[1, 1, 1] * p[193];
-    target += m_r3_multi[1, 1, 2] * p[194];
-    target += m_r3_multi[1, 1, 3] * p[195];
-    target += m_r3_multi[1, 1, 4] * p[196];
-    target += m_r3_multi[1, 2, 1] * p[197];
-    target += m_r3_multi[1, 2, 2] * p[198];
-    target += m_r3_multi[1, 2, 3] * p[199];
-    target += m_r3_multi[1, 2, 4] * p[200];
-    target += m_r3_multi[2, 1, 1] * p[201];
-    target += m_r3_multi[2, 1, 2] * p[202];
-    target += m_r3_multi[2, 1, 3] * p[203];
-    target += m_r3_multi[2, 1, 4] * p[204];
-    target += m_r3_multi[2, 2, 1] * p[205];
-    target += m_r3_multi[2, 2, 2] * p[206];
-    target += m_r3_multi[2, 2, 3] * p[207];
-    target += m_r3_multi[2, 2, 4] * p[208];
-    target += m_r3_multi[3, 1, 1] * p[209];
-    target += m_r3_multi[3, 1, 2] * p[210];
-    target += m_r3_multi[3, 1, 3] * p[211];
-    target += m_r3_multi[3, 1, 4] * p[212];
-    target += m_r3_multi[3, 2, 1] * p[213];
-    target += m_r3_multi[3, 2, 2] * p[214];
-    target += m_r3_multi[3, 2, 3] * p[215];
-    target += m_r3_multi[3, 2, 4] * p[216];
+    target += m_r3_multi[1, 1, 1] * p[241];
+    target += m_r3_multi[1, 1, 2] * p[242];
+    target += m_r3_multi[1, 1, 3] * p[243];
+    target += m_r3_multi[1, 1, 4] * p[244];
+    target += m_r3_multi[1, 2, 1] * p[245];
+    target += m_r3_multi[1, 2, 2] * p[246];
+    target += m_r3_multi[1, 2, 3] * p[247];
+    target += m_r3_multi[1, 2, 4] * p[248];
+    target += m_r3_multi[2, 1, 1] * p[249];
+    target += m_r3_multi[2, 1, 2] * p[250];
+    target += m_r3_multi[2, 1, 3] * p[251];
+    target += m_r3_multi[2, 1, 4] * p[252];
+    target += m_r3_multi[2, 2, 1] * p[253];
+    target += m_r3_multi[2, 2, 2] * p[254];
+    target += m_r3_multi[2, 2, 3] * p[255];
+    target += m_r3_multi[2, 2, 4] * p[256];
+    target += m_r3_multi[3, 1, 1] * p[257];
+    target += m_r3_multi[3, 1, 2] * p[258];
+    target += m_r3_multi[3, 1, 3] * p[259];
+    target += m_r3_multi[3, 1, 4] * p[260];
+    target += m_r3_multi[3, 2, 1] * p[261];
+    target += m_r3_multi[3, 2, 2] * p[262];
+    target += m_r3_multi[3, 2, 3] * p[263];
+    target += m_r3_multi[3, 2, 4] * p[264];
   }
   {
     array[3, 2, 4] real m_r3_cpdelem = {{{111 + q, 112 + q, 113 + q, 114 + q}, {121 + q, 122 + q, 123 + q, 124 + q}}, {{211 + q, 212 + q, 213 + q, 214 + q}, {221 + q, 222 + q, 223 + q, 224 + q}}, {{311 + q, 312 + q, 313 + q, 314 + q}, {321 + q, 322 + q, 323 + q, 324 + q}}};
     m_r3_cpdelem[2, 1, 3] += 5;
-    target += m_r3_cpdelem[1, 1, 1] * p[217];
-    target += m_r3_cpdelem[1, 1, 2] * p[218];
-    target += m_r3_cpdelem[1, 1, 3] * p[219];
-    target += m_r3_cpdelem[1, 1, 4] * p[220];
-    target += m_r3_cpdelem[1, 2, 1] * p[221];
-    target += m_r3_cpdelem[1, 2, 2] * p[222];
-    target += m_r3_cpdelem[1, 2, 3] * p[223];
-    target += m_r3_cpdelem[1, 2, 4] * p[224];
-    target += m_r3_cpdelem[2, 1, 1] * p[225];
-    target += m_r3_cpdelem[2, 1, 2] * p[226];
-    target += m_r3_cpdelem[2, 1, 3] * p[227];
-    target += m_r3_cpdelem[2, 1, 4] * p[228];
-    target += m_r3_cpdelem[2, 2, 1] * p[229];
-    target += m_r3_cpdelem[2, 2, 2] * p[230];
-    target += m_r3_cpdelem[2, 2, 3] * p[231];
-    target += m_r3_cpdelem[2, 2, 4] * p[232];
-    target += m_r3_cpdelem[3, 1, 1] * p[233];
-    target += m_r3_cpdelem[3, 1, 2] * p[234];
-    target += m_r3_cpdelem[3, 1, 3] * p[235];
-    target += m_r3_cpdelem[3, 1, 4] * p[236];
-    target += m_r3_cpdelem[3, 2, 1] * p[237];
-    target += m_r3_cpdelem[3, 2, 2] * p[238];
-    target += m_r3_cpdelem[3, 2, 3] * p[239];
-    target += m_r3_cpdelem[3, 2, 4] * p[240];
+    target += m_r3_cpdelem[1, 1, 1] * p[265];
+    target += m_r3_cpdelem[1, 1, 2] * p[266];
+    target += m_r3_cpdelem[1, 1, 3] * p[267];
+    target += m_r3_cpdelem[1, 1, 4] * p[268];
+    target += m_r3_cpdelem[1, 2, 1] * p[269];
+    target += m_r3_cpdelem[1, 2, 2] * p[270];
+    target += m_r3_cpdelem[1, 2, 3] * p[271];
+    target += m_r3_cpdelem[1, 2, 4] * p[272];
+    target += m_r3_cpdelem[2, 1, 1] * p[273];
+    target += m_r3_cpdelem[2, 1, 2] * p[274];
+    target += m_r3_cpdelem[2, 1, 3] * p[275];
+    target += m_r3_cpdelem[2, 1, 4] * p[276];
+    target += m_r3_cpdelem[2, 2, 1] * p[277];
+    target += m_r3_cpdelem[2, 2, 2] * p[278];
+    target += m_r3_cpdelem[2, 2, 3] * p[279];
+    target += m_r3_cpdelem[2, 2, 4] * p[280];
+    target += m_r3_cpdelem[3, 1, 1] * p[281];
+    target += m_r3_cpdelem[3, 1, 2] * p[282];
+    target += m_r3_cpdelem[3, 1, 3] * p[283];
+    target += m_r3_cpdelem[3, 1, 4] * p[284];
+    target += m_r3_cpdelem[3, 2, 1] * p[285];
+    target += m_r3_cpdelem[3, 2, 2] * p[286];
+    target += m_r3_cpdelem[3, 2, 3] * p[287];
+    target += m_r3_cpdelem[3, 2, 4] * p[288];
   }
   {
     array[3, 2, 4] real m_r3_reads;
@@ -316,27 +388,27 @@ model {
     m_r3_reads[3] = {{311 + q, 312 + q, 313 + q, 314 + q}, {321 + q, 322 + q, 323 + q, 324 + q}};
     {
       real r = m_r3_reads[2, 1, 3];
-      target += r * p[241];
+      target += r * p[289];
     }
     {
-      target += m_r3_reads[2, 1, 3] * 2 + 1 * p[242];
+      target += m_r3_reads[2, 1, 3] * 2 + 1 * p[290];
     }
     {
-      target += size(m_r3_reads) * p[243];
+      target += size(m_r3_reads) * p[291];
     }
     {
       array[3] int dd = dims(m_r3_reads);
       int s = 0;
       for (t in 1:size(dd)) s = s * 10 + dd[t];
-      target += s * p[244];
+      target += s * p[292];
     }
     {
       array[2, 4] real cp = m_r3_reads[2];
-      target += cp[1, 3] * p[245];
+      target += cp[1, 3] * p[293];
     }
     {
       array[3, 4] real cp = m_r3_reads[:, 1];
-      target += cp[2, 3] * p[246];
+      target += cp[2, 3] * p[294];
     }
   }
 }

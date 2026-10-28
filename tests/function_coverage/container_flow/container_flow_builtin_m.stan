@@ -10,8 +10,8 @@ functions {
   }
 }
 transformed data {
-  vector[500] w;
-  for (n in 1:500) w[n] = n + n * n / 1024.0;
+  vector[1500] w;
+  for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
   matrix[3, 4] td_m_builtin = to_matrix({110 + 0.25, 210 + 0.25, 310 + 0.25, 120 + 0.25, 220 + 0.25, 320 + 0.25, 130 + 0.25, 230 + 0.25, 330 + 0.25, 140 + 0.25, 240 + 0.25, 340 + 0.25}, 3, 4);
   array[12] real td_m_builtin__td_cells;

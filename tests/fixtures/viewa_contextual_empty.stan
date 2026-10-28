@@ -1,19 +1,19 @@
 functions {
   real vector_shape(array[] vector x, real q) {
     return q + 1000 * size(x) + 100 * num_elements(x)
-           + 10 * dims(x)[1] + dims(x)[2];
+           + 10 * dims(x)[1] + size(dims(x));
   }
   real row_vector_shape(array[] row_vector x, real q) {
     return q + 1000 * size(x) + 100 * num_elements(x)
-           + 10 * dims(x)[1] + dims(x)[2];
+           + 10 * dims(x)[1] + size(dims(x));
   }
   real matrix_shape(array[] matrix x, real q) {
     return q + 10000 * size(x) + 1000 * num_elements(x)
-           + 100 * dims(x)[1] + 10 * dims(x)[2] + dims(x)[3];
+           + 100 * dims(x)[1] + size(dims(x));
   }
   real scalar_array_shape(array[,] real x, real q) {
     return q + 1000 * size(x) + 100 * num_elements(x)
-           + 10 * dims(x)[1] + dims(x)[2];
+           + 10 * dims(x)[1] + size(dims(x));
   }
 }
 data {

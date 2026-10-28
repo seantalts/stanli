@@ -51,6 +51,32 @@ functions {
     x[:, 2] = {{121, 122, 123, 124}, {221, 222, 223, 224}, {321, 322, 323, 324}};
     return x;
   }
+  array[,,] int fn_i3_prefix2() {
+    array[3, 2, 4] int x;
+    x[1, 1] = {111, 112, 113, 114};
+    x[1, 2] = {121, 122, 123, 124};
+    x[2, 1] = {211, 212, 213, 214};
+    x[2, 2] = {221, 222, 223, 224};
+    x[3, 1] = {311, 312, 313, 314};
+    x[3, 2] = {321, 322, 323, 324};
+    return x;
+  }
+  array[,,] int fn_i3_midslice() {
+    array[3, 2, 4] int x;
+    x[1, :, 1] = {111, 121};
+    x[1, :, 2] = {112, 122};
+    x[1, :, 3] = {113, 123};
+    x[1, :, 4] = {114, 124};
+    x[2, :, 1] = {211, 221};
+    x[2, :, 2] = {212, 222};
+    x[2, :, 3] = {213, 223};
+    x[2, :, 4] = {214, 224};
+    x[3, :, 1] = {311, 321};
+    x[3, :, 2] = {312, 322};
+    x[3, :, 3] = {313, 323};
+    x[3, :, 4] = {314, 324};
+    return x;
+  }
   array[,,] int fn_i3_range() {
     array[3, 2, 4] int x;
     x[2:3] = {{{211, 212, 213, 214}, {221, 222, 223, 224}}, {{311, 312, 313, 314}, {321, 322, 323, 324}}};
@@ -76,13 +102,13 @@ functions {
   }
 }
 transformed data {
-  vector[500] w;
-  for (n in 1:500) w[n] = n + n * n / 1024.0;
+  vector[1500] w;
+  for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
 }
 parameters {
   real q;
-  vector[250] p;
+  vector[298] p;
 }
 model {
   q ~ std_normal();
@@ -276,7 +302,7 @@ model {
     { int v = x[3, 2, 4]; target += v * p[168]; }
   }
   {
-    array[3, 2, 4] int x = fn_i3_range();
+    array[3, 2, 4] int x = fn_i3_prefix2();
     { int v = x[1, 1, 1]; target += v * p[169]; }
     { int v = x[1, 1, 2]; target += v * p[170]; }
     { int v = x[1, 1, 3]; target += v * p[171]; }
@@ -303,7 +329,7 @@ model {
     { int v = x[3, 2, 4]; target += v * p[192]; }
   }
   {
-    array[3, 2, 4] int x = fn_i3_multi();
+    array[3, 2, 4] int x = fn_i3_midslice();
     { int v = x[1, 1, 1]; target += v * p[193]; }
     { int v = x[1, 1, 2]; target += v * p[194]; }
     { int v = x[1, 1, 3]; target += v * p[195]; }
@@ -330,7 +356,7 @@ model {
     { int v = x[3, 2, 4]; target += v * p[216]; }
   }
   {
-    array[3, 2, 4] int x = fn_i3_cpdelem();
+    array[3, 2, 4] int x = fn_i3_range();
     { int v = x[1, 1, 1]; target += v * p[217]; }
     { int v = x[1, 1, 2]; target += v * p[218]; }
     { int v = x[1, 1, 3]; target += v * p[219]; }
@@ -357,44 +383,98 @@ model {
     { int v = x[3, 2, 4]; target += v * p[240]; }
   }
   {
+    array[3, 2, 4] int x = fn_i3_multi();
+    { int v = x[1, 1, 1]; target += v * p[241]; }
+    { int v = x[1, 1, 2]; target += v * p[242]; }
+    { int v = x[1, 1, 3]; target += v * p[243]; }
+    { int v = x[1, 1, 4]; target += v * p[244]; }
+    { int v = x[1, 2, 1]; target += v * p[245]; }
+    { int v = x[1, 2, 2]; target += v * p[246]; }
+    { int v = x[1, 2, 3]; target += v * p[247]; }
+    { int v = x[1, 2, 4]; target += v * p[248]; }
+    { int v = x[2, 1, 1]; target += v * p[249]; }
+    { int v = x[2, 1, 2]; target += v * p[250]; }
+    { int v = x[2, 1, 3]; target += v * p[251]; }
+    { int v = x[2, 1, 4]; target += v * p[252]; }
+    { int v = x[2, 2, 1]; target += v * p[253]; }
+    { int v = x[2, 2, 2]; target += v * p[254]; }
+    { int v = x[2, 2, 3]; target += v * p[255]; }
+    { int v = x[2, 2, 4]; target += v * p[256]; }
+    { int v = x[3, 1, 1]; target += v * p[257]; }
+    { int v = x[3, 1, 2]; target += v * p[258]; }
+    { int v = x[3, 1, 3]; target += v * p[259]; }
+    { int v = x[3, 1, 4]; target += v * p[260]; }
+    { int v = x[3, 2, 1]; target += v * p[261]; }
+    { int v = x[3, 2, 2]; target += v * p[262]; }
+    { int v = x[3, 2, 3]; target += v * p[263]; }
+    { int v = x[3, 2, 4]; target += v * p[264]; }
+  }
+  {
+    array[3, 2, 4] int x = fn_i3_cpdelem();
+    { int v = x[1, 1, 1]; target += v * p[265]; }
+    { int v = x[1, 1, 2]; target += v * p[266]; }
+    { int v = x[1, 1, 3]; target += v * p[267]; }
+    { int v = x[1, 1, 4]; target += v * p[268]; }
+    { int v = x[1, 2, 1]; target += v * p[269]; }
+    { int v = x[1, 2, 2]; target += v * p[270]; }
+    { int v = x[1, 2, 3]; target += v * p[271]; }
+    { int v = x[1, 2, 4]; target += v * p[272]; }
+    { int v = x[2, 1, 1]; target += v * p[273]; }
+    { int v = x[2, 1, 2]; target += v * p[274]; }
+    { int v = x[2, 1, 3]; target += v * p[275]; }
+    { int v = x[2, 1, 4]; target += v * p[276]; }
+    { int v = x[2, 2, 1]; target += v * p[277]; }
+    { int v = x[2, 2, 2]; target += v * p[278]; }
+    { int v = x[2, 2, 3]; target += v * p[279]; }
+    { int v = x[2, 2, 4]; target += v * p[280]; }
+    { int v = x[3, 1, 1]; target += v * p[281]; }
+    { int v = x[3, 1, 2]; target += v * p[282]; }
+    { int v = x[3, 1, 3]; target += v * p[283]; }
+    { int v = x[3, 1, 4]; target += v * p[284]; }
+    { int v = x[3, 2, 1]; target += v * p[285]; }
+    { int v = x[3, 2, 2]; target += v * p[286]; }
+    { int v = x[3, 2, 3]; target += v * p[287]; }
+    { int v = x[3, 2, 4]; target += v * p[288]; }
+  }
+  {
     array[3, 2, 4] int x = fn_i3_reads();
     {
-      target += x[2, 1, 3] * p[241];
+      target += x[2, 1, 3] * p[289];
     }
     {
       real r = x[2, 1, 3];
-      target += r * p[242];
+      target += r * p[290];
     }
     {
-      target += x[2, 1, 3] * 2 + 1 * p[243];
+      target += x[2, 1, 3] * 2 + 1 * p[291];
     }
     {
       int n = 0;
       for (t in 1:x[2, 1, 3]) n += 1;
-      target += n * p[244];
+      target += n * p[292];
     }
     {
-      target += w[x[2, 1, 3]] * p[245];
+      target += w[x[2, 1, 3]] * p[293];
     }
     {
-      target += dot_product(w[x[2, 1]], ramp4) * p[246];
+      target += dot_product(w[x[2, 1]], ramp4) * p[294];
     }
     {
-      target += size(x) * p[247];
+      target += size(x) * p[295];
     }
     {
       array[3] int dd = dims(x);
       int s = 0;
       for (t in 1:size(dd)) s = s * 10 + dd[t];
-      target += s * p[248];
+      target += s * p[296];
     }
     {
       array[2, 4] int cp = x[2];
-      target += cp[1, 3] * p[249];
+      target += cp[1, 3] * p[297];
     }
     {
       array[3, 4] int cp = x[:, 1];
-      target += cp[2, 3] * p[250];
+      target += cp[2, 3] * p[298];
     }
   }
 }
@@ -406,6 +486,8 @@ generated quantities {
   array[24] int fn_i3_row__gq_cells;
   array[24] int fn_i3_rowslice__gq_cells;
   array[24] int fn_i3_colslice__gq_cells;
+  array[24] int fn_i3_prefix2__gq_cells;
+  array[24] int fn_i3_midslice__gq_cells;
   array[24] int fn_i3_range__gq_cells;
   array[24] int fn_i3_multi__gq_cells;
   array[24] int fn_i3_cpdelem__gq_cells;
@@ -607,6 +689,60 @@ generated quantities {
     { int v = x[3, 2, 2]; fn_i3_colslice__gq_cells[22] = v; }
     { int v = x[3, 2, 3]; fn_i3_colslice__gq_cells[23] = v; }
     { int v = x[3, 2, 4]; fn_i3_colslice__gq_cells[24] = v; }
+  }
+  {
+    array[3, 2, 4] int x = fn_i3_prefix2();
+    { int v = x[1, 1, 1]; fn_i3_prefix2__gq_cells[1] = v; }
+    { int v = x[1, 1, 2]; fn_i3_prefix2__gq_cells[2] = v; }
+    { int v = x[1, 1, 3]; fn_i3_prefix2__gq_cells[3] = v; }
+    { int v = x[1, 1, 4]; fn_i3_prefix2__gq_cells[4] = v; }
+    { int v = x[1, 2, 1]; fn_i3_prefix2__gq_cells[5] = v; }
+    { int v = x[1, 2, 2]; fn_i3_prefix2__gq_cells[6] = v; }
+    { int v = x[1, 2, 3]; fn_i3_prefix2__gq_cells[7] = v; }
+    { int v = x[1, 2, 4]; fn_i3_prefix2__gq_cells[8] = v; }
+    { int v = x[2, 1, 1]; fn_i3_prefix2__gq_cells[9] = v; }
+    { int v = x[2, 1, 2]; fn_i3_prefix2__gq_cells[10] = v; }
+    { int v = x[2, 1, 3]; fn_i3_prefix2__gq_cells[11] = v; }
+    { int v = x[2, 1, 4]; fn_i3_prefix2__gq_cells[12] = v; }
+    { int v = x[2, 2, 1]; fn_i3_prefix2__gq_cells[13] = v; }
+    { int v = x[2, 2, 2]; fn_i3_prefix2__gq_cells[14] = v; }
+    { int v = x[2, 2, 3]; fn_i3_prefix2__gq_cells[15] = v; }
+    { int v = x[2, 2, 4]; fn_i3_prefix2__gq_cells[16] = v; }
+    { int v = x[3, 1, 1]; fn_i3_prefix2__gq_cells[17] = v; }
+    { int v = x[3, 1, 2]; fn_i3_prefix2__gq_cells[18] = v; }
+    { int v = x[3, 1, 3]; fn_i3_prefix2__gq_cells[19] = v; }
+    { int v = x[3, 1, 4]; fn_i3_prefix2__gq_cells[20] = v; }
+    { int v = x[3, 2, 1]; fn_i3_prefix2__gq_cells[21] = v; }
+    { int v = x[3, 2, 2]; fn_i3_prefix2__gq_cells[22] = v; }
+    { int v = x[3, 2, 3]; fn_i3_prefix2__gq_cells[23] = v; }
+    { int v = x[3, 2, 4]; fn_i3_prefix2__gq_cells[24] = v; }
+  }
+  {
+    array[3, 2, 4] int x = fn_i3_midslice();
+    { int v = x[1, 1, 1]; fn_i3_midslice__gq_cells[1] = v; }
+    { int v = x[1, 1, 2]; fn_i3_midslice__gq_cells[2] = v; }
+    { int v = x[1, 1, 3]; fn_i3_midslice__gq_cells[3] = v; }
+    { int v = x[1, 1, 4]; fn_i3_midslice__gq_cells[4] = v; }
+    { int v = x[1, 2, 1]; fn_i3_midslice__gq_cells[5] = v; }
+    { int v = x[1, 2, 2]; fn_i3_midslice__gq_cells[6] = v; }
+    { int v = x[1, 2, 3]; fn_i3_midslice__gq_cells[7] = v; }
+    { int v = x[1, 2, 4]; fn_i3_midslice__gq_cells[8] = v; }
+    { int v = x[2, 1, 1]; fn_i3_midslice__gq_cells[9] = v; }
+    { int v = x[2, 1, 2]; fn_i3_midslice__gq_cells[10] = v; }
+    { int v = x[2, 1, 3]; fn_i3_midslice__gq_cells[11] = v; }
+    { int v = x[2, 1, 4]; fn_i3_midslice__gq_cells[12] = v; }
+    { int v = x[2, 2, 1]; fn_i3_midslice__gq_cells[13] = v; }
+    { int v = x[2, 2, 2]; fn_i3_midslice__gq_cells[14] = v; }
+    { int v = x[2, 2, 3]; fn_i3_midslice__gq_cells[15] = v; }
+    { int v = x[2, 2, 4]; fn_i3_midslice__gq_cells[16] = v; }
+    { int v = x[3, 1, 1]; fn_i3_midslice__gq_cells[17] = v; }
+    { int v = x[3, 1, 2]; fn_i3_midslice__gq_cells[18] = v; }
+    { int v = x[3, 1, 3]; fn_i3_midslice__gq_cells[19] = v; }
+    { int v = x[3, 1, 4]; fn_i3_midslice__gq_cells[20] = v; }
+    { int v = x[3, 2, 1]; fn_i3_midslice__gq_cells[21] = v; }
+    { int v = x[3, 2, 2]; fn_i3_midslice__gq_cells[22] = v; }
+    { int v = x[3, 2, 3]; fn_i3_midslice__gq_cells[23] = v; }
+    { int v = x[3, 2, 4]; fn_i3_midslice__gq_cells[24] = v; }
   }
   {
     array[3, 2, 4] int x = fn_i3_range();

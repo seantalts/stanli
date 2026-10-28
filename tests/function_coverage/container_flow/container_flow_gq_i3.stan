@@ -6,8 +6,8 @@ functions {
   }
 }
 transformed data {
-  vector[500] w;
-  for (n in 1:500) w[n] = n + n * n / 1024.0;
+  vector[1500] w;
+  for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
 }
 parameters {
@@ -31,6 +31,10 @@ generated quantities {
   array[24] int gq_i3_rowslice__gq_cells;
   array[3, 2, 4] int gq_i3_colslice;
   array[24] int gq_i3_colslice__gq_cells;
+  array[3, 2, 4] int gq_i3_prefix2;
+  array[24] int gq_i3_prefix2__gq_cells;
+  array[3, 2, 4] int gq_i3_midslice;
+  array[24] int gq_i3_midslice__gq_cells;
   array[3, 2, 4] int gq_i3_range;
   array[24] int gq_i3_range__gq_cells;
   array[3, 2, 4] int gq_i3_multi;
@@ -235,6 +239,72 @@ generated quantities {
   { int v = gq_i3_colslice[3, 2, 2]; gq_i3_colslice__gq_cells[22] = v; }
   { int v = gq_i3_colslice[3, 2, 3]; gq_i3_colslice__gq_cells[23] = v; }
   { int v = gq_i3_colslice[3, 2, 4]; gq_i3_colslice__gq_cells[24] = v; }
+  gq_i3_prefix2[1, 1] = {111, 112, 113, 114};
+  gq_i3_prefix2[1, 2] = {121, 122, 123, 124};
+  gq_i3_prefix2[2, 1] = {211, 212, 213, 214};
+  gq_i3_prefix2[2, 2] = {221, 222, 223, 224};
+  gq_i3_prefix2[3, 1] = {311, 312, 313, 314};
+  gq_i3_prefix2[3, 2] = {321, 322, 323, 324};
+  { int v = gq_i3_prefix2[1, 1, 1]; gq_i3_prefix2__gq_cells[1] = v; }
+  { int v = gq_i3_prefix2[1, 1, 2]; gq_i3_prefix2__gq_cells[2] = v; }
+  { int v = gq_i3_prefix2[1, 1, 3]; gq_i3_prefix2__gq_cells[3] = v; }
+  { int v = gq_i3_prefix2[1, 1, 4]; gq_i3_prefix2__gq_cells[4] = v; }
+  { int v = gq_i3_prefix2[1, 2, 1]; gq_i3_prefix2__gq_cells[5] = v; }
+  { int v = gq_i3_prefix2[1, 2, 2]; gq_i3_prefix2__gq_cells[6] = v; }
+  { int v = gq_i3_prefix2[1, 2, 3]; gq_i3_prefix2__gq_cells[7] = v; }
+  { int v = gq_i3_prefix2[1, 2, 4]; gq_i3_prefix2__gq_cells[8] = v; }
+  { int v = gq_i3_prefix2[2, 1, 1]; gq_i3_prefix2__gq_cells[9] = v; }
+  { int v = gq_i3_prefix2[2, 1, 2]; gq_i3_prefix2__gq_cells[10] = v; }
+  { int v = gq_i3_prefix2[2, 1, 3]; gq_i3_prefix2__gq_cells[11] = v; }
+  { int v = gq_i3_prefix2[2, 1, 4]; gq_i3_prefix2__gq_cells[12] = v; }
+  { int v = gq_i3_prefix2[2, 2, 1]; gq_i3_prefix2__gq_cells[13] = v; }
+  { int v = gq_i3_prefix2[2, 2, 2]; gq_i3_prefix2__gq_cells[14] = v; }
+  { int v = gq_i3_prefix2[2, 2, 3]; gq_i3_prefix2__gq_cells[15] = v; }
+  { int v = gq_i3_prefix2[2, 2, 4]; gq_i3_prefix2__gq_cells[16] = v; }
+  { int v = gq_i3_prefix2[3, 1, 1]; gq_i3_prefix2__gq_cells[17] = v; }
+  { int v = gq_i3_prefix2[3, 1, 2]; gq_i3_prefix2__gq_cells[18] = v; }
+  { int v = gq_i3_prefix2[3, 1, 3]; gq_i3_prefix2__gq_cells[19] = v; }
+  { int v = gq_i3_prefix2[3, 1, 4]; gq_i3_prefix2__gq_cells[20] = v; }
+  { int v = gq_i3_prefix2[3, 2, 1]; gq_i3_prefix2__gq_cells[21] = v; }
+  { int v = gq_i3_prefix2[3, 2, 2]; gq_i3_prefix2__gq_cells[22] = v; }
+  { int v = gq_i3_prefix2[3, 2, 3]; gq_i3_prefix2__gq_cells[23] = v; }
+  { int v = gq_i3_prefix2[3, 2, 4]; gq_i3_prefix2__gq_cells[24] = v; }
+  gq_i3_midslice[1, :, 1] = {111, 121};
+  gq_i3_midslice[1, :, 2] = {112, 122};
+  gq_i3_midslice[1, :, 3] = {113, 123};
+  gq_i3_midslice[1, :, 4] = {114, 124};
+  gq_i3_midslice[2, :, 1] = {211, 221};
+  gq_i3_midslice[2, :, 2] = {212, 222};
+  gq_i3_midslice[2, :, 3] = {213, 223};
+  gq_i3_midslice[2, :, 4] = {214, 224};
+  gq_i3_midslice[3, :, 1] = {311, 321};
+  gq_i3_midslice[3, :, 2] = {312, 322};
+  gq_i3_midslice[3, :, 3] = {313, 323};
+  gq_i3_midslice[3, :, 4] = {314, 324};
+  { int v = gq_i3_midslice[1, 1, 1]; gq_i3_midslice__gq_cells[1] = v; }
+  { int v = gq_i3_midslice[1, 1, 2]; gq_i3_midslice__gq_cells[2] = v; }
+  { int v = gq_i3_midslice[1, 1, 3]; gq_i3_midslice__gq_cells[3] = v; }
+  { int v = gq_i3_midslice[1, 1, 4]; gq_i3_midslice__gq_cells[4] = v; }
+  { int v = gq_i3_midslice[1, 2, 1]; gq_i3_midslice__gq_cells[5] = v; }
+  { int v = gq_i3_midslice[1, 2, 2]; gq_i3_midslice__gq_cells[6] = v; }
+  { int v = gq_i3_midslice[1, 2, 3]; gq_i3_midslice__gq_cells[7] = v; }
+  { int v = gq_i3_midslice[1, 2, 4]; gq_i3_midslice__gq_cells[8] = v; }
+  { int v = gq_i3_midslice[2, 1, 1]; gq_i3_midslice__gq_cells[9] = v; }
+  { int v = gq_i3_midslice[2, 1, 2]; gq_i3_midslice__gq_cells[10] = v; }
+  { int v = gq_i3_midslice[2, 1, 3]; gq_i3_midslice__gq_cells[11] = v; }
+  { int v = gq_i3_midslice[2, 1, 4]; gq_i3_midslice__gq_cells[12] = v; }
+  { int v = gq_i3_midslice[2, 2, 1]; gq_i3_midslice__gq_cells[13] = v; }
+  { int v = gq_i3_midslice[2, 2, 2]; gq_i3_midslice__gq_cells[14] = v; }
+  { int v = gq_i3_midslice[2, 2, 3]; gq_i3_midslice__gq_cells[15] = v; }
+  { int v = gq_i3_midslice[2, 2, 4]; gq_i3_midslice__gq_cells[16] = v; }
+  { int v = gq_i3_midslice[3, 1, 1]; gq_i3_midslice__gq_cells[17] = v; }
+  { int v = gq_i3_midslice[3, 1, 2]; gq_i3_midslice__gq_cells[18] = v; }
+  { int v = gq_i3_midslice[3, 1, 3]; gq_i3_midslice__gq_cells[19] = v; }
+  { int v = gq_i3_midslice[3, 1, 4]; gq_i3_midslice__gq_cells[20] = v; }
+  { int v = gq_i3_midslice[3, 2, 1]; gq_i3_midslice__gq_cells[21] = v; }
+  { int v = gq_i3_midslice[3, 2, 2]; gq_i3_midslice__gq_cells[22] = v; }
+  { int v = gq_i3_midslice[3, 2, 3]; gq_i3_midslice__gq_cells[23] = v; }
+  { int v = gq_i3_midslice[3, 2, 4]; gq_i3_midslice__gq_cells[24] = v; }
   gq_i3_range[2:3] = {{{211, 212, 213, 214}, {221, 222, 223, 224}}, {{311, 312, 313, 314}, {321, 322, 323, 324}}};
   gq_i3_range[1:1] = {{{111, 112, 113, 114}, {121, 122, 123, 124}}};
   { int v = gq_i3_range[1, 1, 1]; gq_i3_range__gq_cells[1] = v; }

@@ -3,7 +3,7 @@ functions {
     return x;
   }
   real shape_code(array[] matrix x, real q) {
-    return q + 100 * dims(x)[1] + 10 * dims(x)[2] + dims(x)[3]
+    return q + 100 * dims(x)[1] + 10 * size(dims(x))
            + 1000 * size(x) + 10000 * num_elements(x);
   }
 }

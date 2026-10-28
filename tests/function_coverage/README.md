@@ -85,6 +85,15 @@ are read through int-typed paths. Each read lands in its own output column,
 or in the model block multiplies its own element of `p`; the manifest names
 every gradient element and lists the skipped combinations and why.
 
+Further families read `NAME.json` data beside each model (the replay uses a
+model's own data file when one exists): writes and reads through run-time
+indices (loop variables, data ints, ints read from other containers, run-time
+ranges and multi-indices) per block and container; multi-index reads with
+data index arrays; zero-size containers whose extent comes from data; locals
+whose size changes on each loop pass, including per-group likelihood UDFs
+called with a different-length index array; and int arrays returned from
+UDFs, sliced, row-selected, or chosen by a `categorical_rng` draw.
+
 These models are not in `tests/fixtures`, so the cross-path matrix does not
 run them: their model blocks sum many `read * p[k]` terms, and rerolling and
 constant folding regroup that sum by 1-2 ULP.

@@ -51,6 +51,32 @@ functions {
     x[:, 2] = {[121 + s, 122 + s, 123 + s, 124 + s], [221 + s, 222 + s, 223 + s, 224 + s], [321 + s, 322 + s, 323 + s, 324 + s]};
     return x;
   }
+  array[] matrix fn_am_prefix2(real s) {
+    array[3] matrix[2, 4] x;
+    x[1, 1] = [111 + s, 112 + s, 113 + s, 114 + s];
+    x[1, 2] = [121 + s, 122 + s, 123 + s, 124 + s];
+    x[2, 1] = [211 + s, 212 + s, 213 + s, 214 + s];
+    x[2, 2] = [221 + s, 222 + s, 223 + s, 224 + s];
+    x[3, 1] = [311 + s, 312 + s, 313 + s, 314 + s];
+    x[3, 2] = [321 + s, 322 + s, 323 + s, 324 + s];
+    return x;
+  }
+  array[] matrix fn_am_midslice(real s) {
+    array[3] matrix[2, 4] x;
+    x[1, :, 1] = [111 + s, 121 + s]';
+    x[1, :, 2] = [112 + s, 122 + s]';
+    x[1, :, 3] = [113 + s, 123 + s]';
+    x[1, :, 4] = [114 + s, 124 + s]';
+    x[2, :, 1] = [211 + s, 221 + s]';
+    x[2, :, 2] = [212 + s, 222 + s]';
+    x[2, :, 3] = [213 + s, 223 + s]';
+    x[2, :, 4] = [214 + s, 224 + s]';
+    x[3, :, 1] = [311 + s, 321 + s]';
+    x[3, :, 2] = [312 + s, 322 + s]';
+    x[3, :, 3] = [313 + s, 323 + s]';
+    x[3, :, 4] = [314 + s, 324 + s]';
+    return x;
+  }
   array[] matrix fn_am_range(real s) {
     array[3] matrix[2, 4] x;
     x[2:3] = {[[211 + s, 212 + s, 213 + s, 214 + s], [221 + s, 222 + s, 223 + s, 224 + s]], [[311 + s, 312 + s, 313 + s, 314 + s], [321 + s, 322 + s, 323 + s, 324 + s]]};
@@ -81,13 +107,13 @@ functions {
   }
 }
 transformed data {
-  vector[500] w;
-  for (n in 1:500) w[n] = n + n * n / 1024.0;
+  vector[1500] w;
+  for (n in 1:1500) w[n] = n + n * n / 1024.0;
   vector[4] ramp4 = [1, 2, 3, 4]';
 }
 parameters {
   real q;
-  vector[270] p;
+  vector[318] p;
 }
 model {
   q ~ std_normal();
@@ -281,7 +307,7 @@ model {
     target += x[3, 2, 4] * p[168];
   }
   {
-    array[3] matrix[2, 4] x = fn_am_range(q);
+    array[3] matrix[2, 4] x = fn_am_prefix2(q);
     target += x[1, 1, 1] * p[169];
     target += x[1, 1, 2] * p[170];
     target += x[1, 1, 3] * p[171];
@@ -308,7 +334,7 @@ model {
     target += x[3, 2, 4] * p[192];
   }
   {
-    array[3] matrix[2, 4] x = fn_am_multi(q);
+    array[3] matrix[2, 4] x = fn_am_midslice(q);
     target += x[1, 1, 1] * p[193];
     target += x[1, 1, 2] * p[194];
     target += x[1, 1, 3] * p[195];
@@ -335,7 +361,7 @@ model {
     target += x[3, 2, 4] * p[216];
   }
   {
-    array[3] matrix[2, 4] x = fn_am_cpdelem(q);
+    array[3] matrix[2, 4] x = fn_am_range(q);
     target += x[1, 1, 1] * p[217];
     target += x[1, 1, 2] * p[218];
     target += x[1, 1, 3] * p[219];
@@ -362,7 +388,7 @@ model {
     target += x[3, 2, 4] * p[240];
   }
   {
-    array[3] matrix[2, 4] x = fn_am_cpdrow(q);
+    array[3] matrix[2, 4] x = fn_am_multi(q);
     target += x[1, 1, 1] * p[241];
     target += x[1, 1, 2] * p[242];
     target += x[1, 1, 3] * p[243];
@@ -389,30 +415,84 @@ model {
     target += x[3, 2, 4] * p[264];
   }
   {
+    array[3] matrix[2, 4] x = fn_am_cpdelem(q);
+    target += x[1, 1, 1] * p[265];
+    target += x[1, 1, 2] * p[266];
+    target += x[1, 1, 3] * p[267];
+    target += x[1, 1, 4] * p[268];
+    target += x[1, 2, 1] * p[269];
+    target += x[1, 2, 2] * p[270];
+    target += x[1, 2, 3] * p[271];
+    target += x[1, 2, 4] * p[272];
+    target += x[2, 1, 1] * p[273];
+    target += x[2, 1, 2] * p[274];
+    target += x[2, 1, 3] * p[275];
+    target += x[2, 1, 4] * p[276];
+    target += x[2, 2, 1] * p[277];
+    target += x[2, 2, 2] * p[278];
+    target += x[2, 2, 3] * p[279];
+    target += x[2, 2, 4] * p[280];
+    target += x[3, 1, 1] * p[281];
+    target += x[3, 1, 2] * p[282];
+    target += x[3, 1, 3] * p[283];
+    target += x[3, 1, 4] * p[284];
+    target += x[3, 2, 1] * p[285];
+    target += x[3, 2, 2] * p[286];
+    target += x[3, 2, 3] * p[287];
+    target += x[3, 2, 4] * p[288];
+  }
+  {
+    array[3] matrix[2, 4] x = fn_am_cpdrow(q);
+    target += x[1, 1, 1] * p[289];
+    target += x[1, 1, 2] * p[290];
+    target += x[1, 1, 3] * p[291];
+    target += x[1, 1, 4] * p[292];
+    target += x[1, 2, 1] * p[293];
+    target += x[1, 2, 2] * p[294];
+    target += x[1, 2, 3] * p[295];
+    target += x[1, 2, 4] * p[296];
+    target += x[2, 1, 1] * p[297];
+    target += x[2, 1, 2] * p[298];
+    target += x[2, 1, 3] * p[299];
+    target += x[2, 1, 4] * p[300];
+    target += x[2, 2, 1] * p[301];
+    target += x[2, 2, 2] * p[302];
+    target += x[2, 2, 3] * p[303];
+    target += x[2, 2, 4] * p[304];
+    target += x[3, 1, 1] * p[305];
+    target += x[3, 1, 2] * p[306];
+    target += x[3, 1, 3] * p[307];
+    target += x[3, 1, 4] * p[308];
+    target += x[3, 2, 1] * p[309];
+    target += x[3, 2, 2] * p[310];
+    target += x[3, 2, 3] * p[311];
+    target += x[3, 2, 4] * p[312];
+  }
+  {
     array[3] matrix[2, 4] x = fn_am_reads(q);
     {
       real r = x[2, 1, 3];
-      target += r * p[265];
+      target += r * p[313];
     }
     {
-      target += x[2, 1, 3] * 2 + 1 * p[266];
+      target += x[2, 1, 3] * 2 + 1 * p[314];
     }
     {
-      target += size(x) * p[267];
+      target += size(x) * p[315];
     }
     {
       array[3] int dd = dims(x);
       int s = 0;
       for (t in 1:size(dd)) s = s * 10 + dd[t];
-      target += s * p[268];
+      target += s * p[316];
     }
     {
       matrix[2, 4] cp = x[2];
-      target += cp[1, 3] * p[269];
+      target += cp[1, 3] * p[317];
     }
     {
       array[3] row_vector[4] cp = x[:, 1];
-      target += cp[2, 3] * p[270];
+      target += cp[2, 3] * p[318];
     }
   }
 }
@@ -424,6 +504,8 @@ generated quantities {
   array[24] real fn_am_row__gq_cells;
   array[24] real fn_am_rowslice__gq_cells;
   array[24] real fn_am_colslice__gq_cells;
+  array[24] real fn_am_prefix2__gq_cells;
+  array[24] real fn_am_midslice__gq_cells;
   array[24] real fn_am_range__gq_cells;
   array[24] real fn_am_multi__gq_cells;
   array[24] real fn_am_cpdelem__gq_cells;
@@ -622,6 +704,60 @@ generated quantities {
     fn_am_colslice__gq_cells[22] = x[3, 2, 2];
     fn_am_colslice__gq_cells[23] = x[3, 2, 3];
     fn_am_colslice__gq_cells[24] = x[3, 2, 4];
+  }
+  {
+    array[3] matrix[2, 4] x = fn_am_prefix2(q);
+    fn_am_prefix2__gq_cells[1] = x[1, 1, 1];
+    fn_am_prefix2__gq_cells[2] = x[1, 1, 2];
+    fn_am_prefix2__gq_cells[3] = x[1, 1, 3];
+    fn_am_prefix2__gq_cells[4] = x[1, 1, 4];
+    fn_am_prefix2__gq_cells[5] = x[1, 2, 1];
+    fn_am_prefix2__gq_cells[6] = x[1, 2, 2];
+    fn_am_prefix2__gq_cells[7] = x[1, 2, 3];
+    fn_am_prefix2__gq_cells[8] = x[1, 2, 4];
+    fn_am_prefix2__gq_cells[9] = x[2, 1, 1];
+    fn_am_prefix2__gq_cells[10] = x[2, 1, 2];
+    fn_am_prefix2__gq_cells[11] = x[2, 1, 3];
+    fn_am_prefix2__gq_cells[12] = x[2, 1, 4];
+    fn_am_prefix2__gq_cells[13] = x[2, 2, 1];
+    fn_am_prefix2__gq_cells[14] = x[2, 2, 2];
+    fn_am_prefix2__gq_cells[15] = x[2, 2, 3];
+    fn_am_prefix2__gq_cells[16] = x[2, 2, 4];
+    fn_am_prefix2__gq_cells[17] = x[3, 1, 1];
+    fn_am_prefix2__gq_cells[18] = x[3, 1, 2];
+    fn_am_prefix2__gq_cells[19] = x[3, 1, 3];
+    fn_am_prefix2__gq_cells[20] = x[3, 1, 4];
+    fn_am_prefix2__gq_cells[21] = x[3, 2, 1];
+    fn_am_prefix2__gq_cells[22] = x[3, 2, 2];
+    fn_am_prefix2__gq_cells[23] = x[3, 2, 3];
+    fn_am_prefix2__gq_cells[24] = x[3, 2, 4];
+  }
+  {
+    array[3] matrix[2, 4] x = fn_am_midslice(q);
+    fn_am_midslice__gq_cells[1] = x[1, 1, 1];
+    fn_am_midslice__gq_cells[2] = x[1, 1, 2];
+    fn_am_midslice__gq_cells[3] = x[1, 1, 3];
+    fn_am_midslice__gq_cells[4] = x[1, 1, 4];
+    fn_am_midslice__gq_cells[5] = x[1, 2, 1];
+    fn_am_midslice__gq_cells[6] = x[1, 2, 2];
+    fn_am_midslice__gq_cells[7] = x[1, 2, 3];
+    fn_am_midslice__gq_cells[8] = x[1, 2, 4];
+    fn_am_midslice__gq_cells[9] = x[2, 1, 1];
+    fn_am_midslice__gq_cells[10] = x[2, 1, 2];
+    fn_am_midslice__gq_cells[11] = x[2, 1, 3];
+    fn_am_midslice__gq_cells[12] = x[2, 1, 4];
+    fn_am_midslice__gq_cells[13] = x[2, 2, 1];
+    fn_am_midslice__gq_cells[14] = x[2, 2, 2];
+    fn_am_midslice__gq_cells[15] = x[2, 2, 3];
+    fn_am_midslice__gq_cells[16] = x[2, 2, 4];
+    fn_am_midslice__gq_cells[17] = x[3, 1, 1];
+    fn_am_midslice__gq_cells[18] = x[3, 1, 2];
+    fn_am_midslice__gq_cells[19] = x[3, 1, 3];
+    fn_am_midslice__gq_cells[20] = x[3, 1, 4];
+    fn_am_midslice__gq_cells[21] = x[3, 2, 1];
+    fn_am_midslice__gq_cells[22] = x[3, 2, 2];
+    fn_am_midslice__gq_cells[23] = x[3, 2, 3];
+    fn_am_midslice__gq_cells[24] = x[3, 2, 4];
   }
   {
     array[3] matrix[2, 4] x = fn_am_range(q);

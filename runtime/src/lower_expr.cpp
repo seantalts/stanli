@@ -885,28 +885,31 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                        {checked_immediate(offset, "range offset")}),
             contiguous_layout(base, offset, "range"));
       }
-      // A data gather on a one-dimensional scalar array keeps an exact
-      // one-dimensional Array view. More structural forms need strides
-      // and therefore stay fail-loud rather than masquerading as vectors.
+      // A data gather over the outer array dimension copies whole outer
+      // elements, which graph storage keeps contiguous.
       if (e.args.size() == 2 && is_array(base.si) &&
           e.args[1].name == "IndexMulti") {
         const ArrayShape& sh = array_shape(base.si);
-        if (sh.leaf != ViewKind::Flat || sh.dims.size() != 1)
-          fail("unsupported index expression", e.raw);
         DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
         if (!iv.is_int || iv.i.size() != iv.r.size())
           fail("gather index must be int data", e.raw);
+        const std::vector<int64_t> suffix(sh.dims.begin() + 1, sh.dims.end());
+        const int64_t width = checked_product(suffix, "array element");
+        std::vector<int64_t> out_dims = sh.dims;
+        out_dims[0] = (int64_t)iv.i.size();
+        const int64_t len = checked_product(out_dims, "array gather");
         std::vector<int> idata;
-        idata.reserve(iv.i.size());
+        idata.reserve((size_t)len);
         for (int x : iv.i) {
           if (x < 1 || x > sh.dims[0])
             fail("array gather out of bounds", e.raw);
-          idata.push_back(x - 1);
+          for (int64_t k = 0; k < width; ++k)
+            idata.push_back(checked_immediate((x - 1) * width + k,
+                                                   "array gather offset"));
         }
-        SlotInfo si = array_view({(int64_t)idata.size()}, ViewKind::Flat);
-        return with_layout(
-            emit_value(OP_GATHER, {base}, (int64_t)idata.size(), si, idata),
-            owning_layout(si));
+        SlotInfo si = array_view(std::move(out_dims), sh.leaf);
+        return with_layout(emit_value(OP_GATHER, {base}, len, si, idata),
+                           owning_layout(si));
       }
       // Gather by a data int array: v[idx].
       if (e.args.size() == 2 && e.args[1].name == "IndexMulti") {
