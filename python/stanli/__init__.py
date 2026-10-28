@@ -174,6 +174,9 @@ def _load_lib():
                                   ctypes.POINTER(ctypes.c_double)]
     # Multi-chain sampling, summaries, diagnostics.
     lib.stanli_sample_opts_init.argtypes = [ctypes.POINTER(_SampleOpts)]
+    lib.stanli_sample_opts_check.restype = ctypes.c_int
+    lib.stanli_sample_opts_check.argtypes = [
+        ctypes.POINTER(_SampleOpts), ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_n_stored_draws.restype = ctypes.c_int64
     lib.stanli_n_stored_draws.argtypes = [ctypes.POINTER(_SampleOpts)]
     lib.stanli_thread_safe.restype = ctypes.c_int
@@ -964,6 +967,58 @@ class OptimizeResult(dict):
         return True
 
 
+_C_INT_MAX = 2 ** (8 * ctypes.sizeof(ctypes.c_int) - 1) - 1
+
+
+def _whole_number(value):
+    if isinstance(value, (bool, np.bool_)):
+        return None
+    try:
+        return operator.index(value)
+    except TypeError:
+        pass
+    if (isinstance(value, numbers.Real) and math.isfinite(value)
+            and value == int(value)):
+        return int(value)
+    return None
+
+
+def _int_arg(name, value):
+    """A C int for the sampler; the runtime judges the range of values."""
+    n = _whole_number(value)
+    if n is None:
+        raise ValueError(f"{name} must be an integer")
+    if n > _C_INT_MAX:
+        raise ValueError(f"{name} must be an integer no larger than {_C_INT_MAX}")
+    return max(n, -_C_INT_MAX)
+
+
+def _seed_arg(seed):
+    n = _whole_number(seed)
+    if n is None or n < 0:
+        raise ValueError("seed must be an integer >= 0")
+    if n > 2 ** 32 - 1:
+        raise ValueError(f"seed must be at most {2 ** 32 - 1}")
+    return n
+
+
+def _real_arg(name, value):
+    if (isinstance(value, (bool, np.bool_))
+            or not isinstance(value, numbers.Real)):
+        raise ValueError(f"{name} must be a number")
+    return float(value)
+
+
+def _reject_named_start(name, value):
+    rows = value if isinstance(value, (list, tuple)) else [value]
+    if any(isinstance(v, (Mapping, str)) for v in rows):
+        raise TypeError(
+            f"{name} must be the start as a vector on the unconstrained "
+            f"scale (or one row per chain), not named values. To start from "
+            f"named constrained values, convert them first: "
+            f"{name}=model.unconstrain({{'theta': ...}})")
+
+
 def _check_step_size(step_size):
     if step_size is None:
         return 1.0
@@ -1044,6 +1099,7 @@ class Model:
                  seed=1, threads_per_chain=1, include_paths=None,
                  fast_math=False):
         threads_per_chain = _threads_per_chain(threads_per_chain)
+        seed = _seed_arg(seed)
         self._fast_math = _check_fast_math(fast_math)
         if mir is None:
             stan_code, paths = _read_stan_source(stan_file, stan_code, include_paths)
@@ -1092,6 +1148,18 @@ class Model:
         return m
 
     @property
+    def _handle(self):
+        m = getattr(self, "_m", None)
+        if not m:
+            raise RuntimeError("stanli model handle is no longer valid")
+        return m
+
+    def __reduce__(self):
+        raise TypeError(
+            "stanli models cannot be copied or pickled; build another with "
+            "Model(...)")
+
+    @property
     def fast_math(self):
         """Whether this model was built in fast mode."""
         return self._fast_math
@@ -1104,15 +1172,15 @@ class Model:
     @property
     def reduce_sum_count(self):
         """Number of retained native parallel reductions in the prepared graph."""
-        return _lib.stanli_reduce_sum_count(self._m)
+        return _lib.stanli_reduce_sum_count(self._handle)
 
     @property
     def reduce_sum_fallbacks(self):
         """Graph-lowering refusal reasons; opaque runtime regions are not inventoried."""
-        return _lib.stanli_reduce_sum_fallbacks(self._m).decode().splitlines()
+        return _lib.stanli_reduce_sum_fallbacks(self._handle).decode().splitlines()
 
     def _prepare_run(self, seed, threads_per_chain):
-        construction_seed = (seed if _lib.stanli_transformed_data_rng(self._m)
+        construction_seed = (seed if _lib.stanli_transformed_data_rng(self._handle)
                              else self._seed)
         if (construction_seed != self._seed or
                 threads_per_chain != self.threads_per_chain):
@@ -1135,7 +1203,7 @@ class Model:
                              f"{self.n_unconstrained} unconstrained parameters")
         lp = ctypes.c_double()
         grad = np.empty(self.n_unconstrained)
-        rc = _lib.stanli_grad(self._m, _dptr(q), ctypes.byref(lp), _dptr(grad))
+        rc = _lib.stanli_grad(self._handle, _dptr(q), ctypes.byref(lp), _dptr(grad))
         if rc != 0:
             # The gradient buffer is uninitialized on failure; never let a
             # caller see it.
@@ -1163,7 +1231,7 @@ class Model:
         document = _data_to_json(values).encode()
         q = np.empty(self.n_unconstrained)
         err = ctypes.create_string_buffer(4096)
-        rc = _lib.stanli_unconstrain_inits(self._m, document, _dptr(q), err,
+        rc = _lib.stanli_unconstrain_inits(self._handle, document, _dptr(q), err,
                                            len(err))
         if rc != 0:
             raise ValueError(err.value.decode())
@@ -1175,9 +1243,9 @@ class Model:
         Every column CmdStan would write when the model has a generated
         quantities section; the constrained parameters otherwise.
         """
-        n_wa = _lib.stanli_wa_n_columns(self._m)
+        n_wa = _lib.stanli_wa_n_columns(self._handle)
         if n_wa > 0:
-            return [_bracket(_lib.stanli_wa_column_name(self._m, i).decode())
+            return [_bracket(_lib.stanli_wa_column_name(self._handle, i).decode())
                     for i in range(n_wa)], True
         return list(self.constrained_names), False
 
@@ -1197,6 +1265,15 @@ class Model:
         returning the other quantity -- the two differ for any
         constrained parameter, which is most models.
         """
+        seed = _seed_arg(seed)
+        iter = _int_arg("iter", iter)
+        init_radius = _real_arg("init_radius", init_radius)
+        if iter < 1:
+            raise ValueError("iter must be an integer >= 1")
+        if not (math.isfinite(init_radius) and init_radius >= 0):
+            raise ValueError("init_radius must be a finite number >= 0")
+        if init is not None:
+            _reject_named_start("init", init)
         self._forward_seed(seed)
         if not jacobian:
             raise NotImplementedError(
@@ -1207,9 +1284,9 @@ class Model:
         opts = _OptimizeOpts()
         _lib.stanli_optimize_opts_init(ctypes.byref(opts))
         opts.seed = seed
-        opts.iter = int(iter)
+        opts.iter = iter
         opts.jacobian = 1
-        opts.init_radius = float(init_radius)
+        opts.init_radius = init_radius
         init_arr = None
         if init is not None:
             init_arr = np.ascontiguousarray(init, dtype=np.float64)
@@ -1224,7 +1301,7 @@ class Model:
         vals = np.empty(len(names))
         lp = ctypes.c_double()
         err = ctypes.create_string_buffer(4096)
-        rc = _lib.stanli_optimize(self._m, ctypes.byref(opts), _dptr(q),
+        rc = _lib.stanli_optimize(self._handle, ctypes.byref(opts), _dptr(q),
                                   _dptr(vals), ctypes.byref(lp), err, len(err))
         del init_arr
         if rc != 0:
@@ -1311,13 +1388,15 @@ class Model:
         section, and the constrained parameters otherwise.
         """
         threads_per_chain = _threads_per_chain(threads_per_chain)
+        seed = _seed_arg(seed)
+        if inits is not None:
+            _reject_named_start("inits", inits)
         if metric not in _METRICS:
             raise ValueError(
                 f"metric must be one of {', '.join(_METRICS)}, got {metric!r}")
         step_size_value = _check_step_size(step_size)
         if not isinstance(adapt_engaged, (bool, np.bool_)):
             raise TypeError("adapt_engaged must be a bool")
-        self._prepare_run(seed, threads_per_chain)
         if isinstance(refresh, (bool, np.bool_)):
             raise TypeError("refresh must be a nonnegative integer")
         try:
@@ -1333,18 +1412,24 @@ class Model:
         opts = _SampleOpts()
         _lib.stanli_sample_opts_init(ctypes.byref(opts))
         opts.seed = seed
-        opts.chains = int(chains)
-        opts.warmup = int(warmup)
-        opts.samples = int(samples)
-        opts.thin = int(thin)
-        opts.delta = float(delta)
-        opts.max_depth = int(max_depth)
+        opts.chains = _int_arg("chains", chains)
+        opts.warmup = _int_arg("warmup", warmup)
+        opts.samples = _int_arg("samples", samples)
+        opts.thin = _int_arg("thin", thin)
+        opts.delta = _real_arg("delta", delta)
+        opts.max_depth = _int_arg("max_depth", max_depth)
         opts.save_warmup = 1 if save_warmup else 0
-        opts.init_radius = float(init_radius)
+        opts.init_radius = _real_arg("init_radius", init_radius)
         if parallel_chains is None:
-            import os
-            parallel_chains = min(opts.chains, os.cpu_count() or 1)
-        opts.num_threads = int(parallel_chains)
+            parallel_chains = min(max(opts.chains, 1), os.cpu_count() or 1)
+        parallel_chains = _int_arg("parallel_chains", parallel_chains)
+        if parallel_chains < 1:
+            raise ValueError("parallel_chains must be an integer >= 1")
+        opts.num_threads = parallel_chains
+        err = ctypes.create_string_buffer(4096)
+        if _lib.stanli_sample_opts_check(ctypes.byref(opts), err, len(err)):
+            raise ValueError(err.value.decode())
+        self._prepare_run(seed, threads_per_chain)
 
         # Held in a local until sample_multi returns: opts.inits borrows
         # this buffer, so letting it fall out of scope would hand the
@@ -1353,14 +1438,11 @@ class Model:
         if inits is not None and pathfinder_init is not None:
             raise ValueError("inits and pathfinder_init are mutually exclusive")
         if pathfinder_init is not None:
-            if opts.chains <= 0:
-                raise ValueError(
-                    "chains must be positive with Pathfinder initialization")
             pf = _pathfinder_init_options(pathfinder_init)
             init_arr = np.empty((opts.chains, self.n_unconstrained))
             err = ctypes.create_string_buffer(4096)
             rc = _lib.stanli_pathfinder_inits(
-                self._m, opts.seed, opts.chain_id, opts.chains,
+                self._handle, opts.seed, opts.chain_id, opts.chains,
                 pf["num_iterations"], pf["num_elbo_draws"],
                 pf["history_size"], pf["init_radius"], _dptr(init_arr),
                 None, None, err, len(err))
@@ -1429,7 +1511,7 @@ class Model:
         watch = _InterruptWatch()
         with watch:
             failed = _lib.stanli_sample_multi_metric(
-                self._m, ctypes.byref(opts), ctypes.byref(metric_opts),
+                self._handle, ctypes.byref(opts), ctypes.byref(metric_opts),
                 refresh, _dptr(raw), _dptr(stats), _dptr(out), progress_cb,
                 None, watch.poll, None, ctypes.byref(interrupted), reports,
                 err, len(err))
