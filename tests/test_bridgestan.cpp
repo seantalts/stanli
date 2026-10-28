@@ -566,12 +566,8 @@ void test_constrain_compiled_rng() {
 }
 
 // Generated quantities built out of operators rather than function calls:
-// integer `%` and `%/%`, and the two matrix solves. The facade discovers
-// columns by evaluating the section at probe points and drops write_array
-// entirely when every probe throws -- so an operator the section's path
-// does not know does not surface as an error, it silently shortens the CSV
-// to the constrained parameters. That is what this pins: the columns are
-// all there, and they carry the right values.
+// integer `%` and `%/%`, and the two matrix solves. This pins that the
+// columns are all there and carry the right values.
 void test_constrain_operators() {
   const std::string mir = slurp("tests/fixtures/gqops.tmir.sexp");
   char* err = nullptr;

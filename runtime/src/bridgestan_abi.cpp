@@ -337,14 +337,16 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
     stanli::report_execution_host("bridgestan", m->cm, m->wa_interp != nullptr,
                                   m->wa_ex != nullptr, "parameters_only",
                                   probe_failure);
+    if (!probe_failure.empty())
+      throw std::runtime_error(
+          stanli::interpreter_probe_error(m->cm, probe_failure));
     {
-      const std::string note =
-          stanli::interpreter_warning(m->cm, probe_failure);
+      const std::string note = stanli::interpreter_warning(m->cm);
       if (!note.empty()) stanli::emit_message(note);
     }
     if (m->cols.empty()) {
-      // No write_array (or none that could be evaluated): the constrained
-      // parameters are the whole CSV, and there is no tp or gq section.
+      // No write_array: the constrained parameters are the whole CSV, and
+      // there is no tp or gq section.
       m->cols = m->cm.views;
       m->n_tp_start = m->cols.size();
       m->n_gq_start = m->cols.size();

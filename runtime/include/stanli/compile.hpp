@@ -246,11 +246,13 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                             unsigned seed, const CompileOptions& options);
 
 // The warning a host shows once per model with interpreter_fallbacks, and
-// the compile error STANLI_NO_INTERPRETER turns it into. `probe_failure` is
-// what the interpreter threw when a host probed it.
+// the compile error STANLI_NO_INTERPRETER turns it into.
 std::string interpreter_error(const CompiledModel& cm);
-std::string interpreter_warning(const CompiledModel& cm,
-                                const std::string& probe_failure = "");
+std::string interpreter_warning(const CompiledModel& cm);
+// The error a host raises when the interpreter threw `failure` at every
+// probe point, leaving no columns to report.
+std::string interpreter_probe_error(const CompiledModel& cm,
+                                    const std::string& failure);
 
 // The unconstrained point for constrained `inits` keyed by parameter name,
 // written to `out` (n_unconstrained values). Throws std::runtime_error saying

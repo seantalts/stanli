@@ -1343,20 +1343,24 @@ std::string interpreter_error(const CompiledModel& cm) {
          report_request();
 }
 
-std::string interpreter_warning(const CompiledModel& cm,
-                                const std::string& probe_failure) {
+std::string interpreter_warning(const CompiledModel& cm) {
   if (cm.interpreter_fallbacks.empty()) return "";
-  std::string text =
-      "stanli: parts of this model have no compiled path and run through the "
-      "MIR interpreter, which is far slower: " +
-      fallback_items(cm) + ".";
-  if (!probe_failure.empty())
-    text += " The interpreter also failed at every probe point (" +
-            probe_failure +
-            "), so transformed parameters and generated quantities are "
-            "unavailable and draws carry only the constrained parameters.";
-  return text + " " + report_request() +
+  return "stanli: parts of this model have no compiled path and run through "
+         "the MIR interpreter, which is far slower: " +
+         fallback_items(cm) + ". " + report_request() +
          " Set STANLI_NO_INTERPRETER=1 to refuse such models.";
+}
+
+std::string interpreter_probe_error(const CompiledModel& cm,
+                                    const std::string& failure) {
+  return "stanli: transformed parameters and generated quantities run "
+         "through the MIR interpreter here, and it failed at every probe "
+         "point (" +
+         failure + "), so their columns cannot be found. " +
+         (cm.interpreter_fallbacks.empty()
+              ? std::string()
+              : "No compiled path because: " + fallback_items(cm) + ". ") +
+         report_request();
 }
 
 }  // namespace stanli

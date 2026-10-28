@@ -44,10 +44,15 @@ def main(tool, host):
         ("execution_legacy_ode", "bound_graph", "not_required"),
     ]:
         command = [host, str(fixtures / (name + ".tmir.sexp"))]
-        ordinary = run_checked(command,
-                               env={**os.environ, "STANLI_EXECUTION_REPORT": "0"})
-        observed = run_checked(command,
-                               env={**os.environ, "STANLI_EXECUTION_REPORT": "1"})
+        # A failed probe still reports the selection, then refuses the model.
+        run = run_checked if probe != "failed" else (
+            lambda c, **kw: subprocess.run(c, text=True, capture_output=True, **kw))
+        ordinary = run(command, env={**os.environ, "STANLI_EXECUTION_REPORT": "0"})
+        observed = run(command, env={**os.environ, "STANLI_EXECUTION_REPORT": "1"})
+        if probe == "failed":
+            for result in (ordinary, observed):
+                assert result.returncode == 1, result
+                assert "failed at every probe point" in result.stderr, result.stderr
         assert ordinary.stdout == observed.stdout
         assert '"kind":"execution_' not in ordinary.stderr
         events = [json.loads(line) for line in observed.stderr.splitlines()

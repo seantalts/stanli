@@ -246,10 +246,13 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
         m->wa_gq_start = scalar_column_start(wa.columns, wa.n_gq_start);
       }
     }
-    m->warnings = stanli::interpreter_warning(m->cm, probe_failure);
+    m->warnings = stanli::interpreter_warning(m->cm);
     stanli::report_execution_host("capi", m->cm, m->wa_interp != nullptr,
                                   m->wa_ex != nullptr, "unavailable_or_empty",
                                   probe_failure);
+    if (!probe_failure.empty())
+      throw std::runtime_error(
+          stanli::interpreter_probe_error(m->cm, probe_failure));
     return m.release();
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());
