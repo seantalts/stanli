@@ -129,8 +129,9 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
       paths <- stan_include_paths(include_paths, source_file)
     if (has_includes || fast_math) {
       mir <- if (.Call("stanli_r_has_embedded_stanc"))
-        .Call("stanli_r_stan_to_mir", code, paths, fast_math) else
-        stanc_mir(code, include_paths = paths, fast_math = fast_math)
+        embedded_mir(code, paths, fast_math, source_file) else
+        stanc_mir(code, include_paths = paths, fast_math = fast_math,
+                  file = source_file)
     }
   }
   data_json <- if (is.null(data)) {
@@ -138,6 +139,7 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
   } else if (is.character(data) && length(data) == 1 && file.exists(data)) {
     read_utf8_file(data)
   } else if (is.character(data) && length(data) == 1) {
+    if (looks_like_path(data)) stop("data file not found: ", data, call. = FALSE)
     data
   } else {
     to_json(as.list(data))
@@ -147,14 +149,15 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
     # A runtime without the embedded compiler needs the MIR handed to it.
     # The release builds embed stanc3; a source build and the Windows
     # runtime do not, and ship a stanc binary beside the library instead.
-    mir <- stanc_mir(code)
+    mir <- stanc_mir(code, file = source_file)
     is_mir <- TRUE
   }
   model <- build_model(if (is_mir) mir else code, data_json, is_mir, seed,
     model_name = if (is.null(file)) "stanli_model" else
       tools::file_path_sans_ext(basename(file)),
     model_code = if (is.null(code)) character(0) else code,
-    threads_per_chain = threads_per_chain, fast_math = fast_math)
+    threads_per_chain = threads_per_chain, fast_math = fast_math,
+    file = source_file)
   note <- .Call("stanli_r_warnings", model$ptr)
   if (nzchar(note)) warning(note, call. = FALSE)
   model
@@ -179,9 +182,22 @@ stanli_check_syntax <- function(code, include_paths = NULL) {
   if (grepl("#include", code, fixed = TRUE) || !is.null(include_paths))
     paths <- stan_include_paths(include_paths, NULL)
   if (.Call("stanli_r_has_embedded_stanc"))
-    .Call("stanli_r_stan_to_mir", code, paths, FALSE) else
+    embedded_mir(code, paths, FALSE, NULL) else
     stanc_mir(code, include_paths = paths)
   invisible(TRUE)
+}
+
+embedded_mir <- function(code, paths, fast_math, file) {
+  mir <- .Call("stanli_r_stan_to_mir", code, paths, fast_math, file)
+  note <- attr(mir, "warnings", exact = TRUE)
+  if (!is.null(note)) warn_compiler(note)
+  attr(mir, "warnings") <- NULL
+  mir
+}
+
+looks_like_path <- function(x) {
+  !grepl("{", x, fixed = TRUE) &&
+    (grepl("\\.json$", x, ignore.case = TRUE) || grepl("[/\\\\]", x))
 }
 
 # The whole object, from its source: everything a `stanli_model` carries
@@ -191,9 +207,10 @@ stanli_check_syntax <- function(code, include_paths = NULL) {
 # vector length and the columns along with the draws.
 build_model <- function(code, data_json, is_mir, seed,
                         model_name = "stanli_model", model_code = character(0),
-                        threads_per_chain = 1, fast_math = FALSE) {
+                        threads_per_chain = 1, fast_math = FALSE, file = NULL) {
   ptr <- .Call("stanli_r_model_new", code, data_json, is_mir,
-               as.numeric(seed), as.integer(threads_per_chain), fast_math)
+               as.numeric(seed), as.integer(threads_per_chain), fast_math,
+               file)
   structure(list(ptr = ptr,
                  n_unconstrained = .Call("stanli_r_n_unconstrained", ptr),
                  columns = stan_variable_names(

@@ -58,6 +58,25 @@ test_that("the bundled JavaScript compiler applies O1", {
   expect_false(raw_contains(payload, "student_t_lpdf"))
 })
 
+test_that("the bundled JavaScript compiler names the model file and reports warnings", {
+  skip_if_not_installed("V8")
+  skip_if_not_installed("jsonlite")
+  skip_if(!nzchar(stanli:::stanc_js_path()) ||
+            !file.exists(stanli:::stanc_js_path()),
+          "stanc.js is not in this installation")
+
+  err <- tryCatch(
+    stanli:::mir_from_js("parameters { real mu } model { }",
+                         file = "models/broken.stan"),
+    error = conditionMessage)
+  expect_match(err, "models/broken.stan", fixed = TRUE)
+  expect_no_match(err, "'string'", fixed = TRUE)
+
+  expect_warning(stanli:::mir_from_js("", file = "models/empty.stan"),
+                 "Empty model", fixed = TRUE)
+  expect_warning(stanli:::mir_from_js(""), "Empty model", fixed = TRUE)
+})
+
 test_that("the V8 helper prefers portable output and never retries its errors", {
   skip_if_not_installed("V8")
   skip_if_not_installed("jsonlite")
@@ -86,9 +105,10 @@ test_that("the V8 helper prefers portable output and never retries its errors", 
   state$ctx <- ctx
 
   source <- enc2utf8("transformed data { print(\"π ☃ θ\"); } model {}")
-  expect_identical(
-    stanli:::mir_from_js(source, enc2utf8("portable_π")),
-    "STANLI2:ZmFrZQ==")
+  expect_warning(
+    mir <- stanli:::mir_from_js(source, enc2utf8("portable_π")),
+    "warning with θ", fixed = TRUE)
+  expect_identical(mir, "STANLI2:ZmFrZQ==")
   calls <- jsonlite::fromJSON(
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$portable, 1L)
@@ -96,6 +116,18 @@ test_that("the V8 helper prefers portable output and never retries its errors", 
   expect_identical(calls$arguments, 3L)
   expect_identical(calls$name, enc2utf8("portable_π"))
   expect_identical(calls$source, source)
+
+  ctx$eval("globalThis.stanli_compile = function(name, source, includes, file) {
+    globalThis.__stanli_calls.arguments = arguments.length;
+    globalThis.__stanli_calls.file = file;
+    return {result: 'STANLI2:ZmFrZQ==', warnings: []};
+  };")
+  expect_no_warning(
+    stanli:::mir_from_js(source, file = "models/θ.stan"))
+  calls <- jsonlite::fromJSON(
+    ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
+  expect_identical(calls$arguments, 4L)
+  expect_identical(calls$file, "models/θ.stan")
 
   ctx$eval("globalThis.stanli_compile = function() {
     globalThis.__stanli_calls.portable += 1;
@@ -129,6 +161,16 @@ test_that("the V8 helper prefers portable output and never retries its errors", 
   expect_identical(calls$fallback_arguments, 4L)
   expect_identical(calls$fallback_flags,
                    c("O1", "debug-optimized-mir"))
+
+  ctx$eval("globalThis.stanc = function(name, source, flags) {
+    globalThis.__stanli_calls.fallback_flags = flags;
+    return {result: '(legacy MIR)', warnings: []};
+  };")
+  stanli:::mir_from_js("model {}", file = "m/x.stan")
+  calls <- jsonlite::fromJSON(
+    ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
+  expect_identical(calls$fallback_flags,
+                   c("O1", "debug-optimized-mir", "filename-in-msg=m/x.stan"))
 })
 
 test_that("the native portable compiler owns flags and keeps warnings separate", {
@@ -149,14 +191,20 @@ test_that("the native portable compiler owns flags and keeps warnings separate",
     0L
   }
 
-  expect_identical(stanli:::mir_from_binary(
-                     "fake-stanli-compile", "model { // θ\r\n}\r\n",
-                     portable = TRUE,
-                     run_stanc = run_stanc),
-                   "STANLI2:dGhldGEgzrg=")
+  expect_warning(
+    mir <- stanli:::mir_from_binary(
+      "fake-stanli-compile", "model { // θ\r\n}\r\n",
+      portable = TRUE, run_stanc = run_stanc),
+    "a successful frontend warning", fixed = TRUE)
+  expect_identical(mir, "STANLI2:dGhldGEgzrg=")
   expect_identical(seen$compiler, "fake-stanli-compile")
   expect_length(seen$args, 1)
   expect_false(dir.exists(seen$work))
+
+  suppressWarnings(stanli:::mir_from_binary(
+    "fake-stanli-compile", "model { // θ\r\n}\r\n", portable = TRUE,
+    run_stanc = run_stanc, file = "dir/m.stan"))
+  expect_identical(seen$args[1:2], c("--filename", shQuote("dir/m.stan")))
 })
 
 test_that("UTF-8 Stan files survive locale-independent compiler staging", {
@@ -205,6 +253,10 @@ test_that("the pristine stanc fallback requests O1 optimized MIR", {
   expect_identical(seen$args[1:2],
                    c("--O1", "--debug-optimized-mir"))
   expect_false(dir.exists(seen$work))
+
+  suppressWarnings(stanli:::mir_from_binary(
+    "fake-stanc", "model {}", run_stanc = run_stanc, file = "dir/m.stan"))
+  expect_true(shQuote("--filename-in-msg=dir/m.stan") %in% seen$args)
 })
 
 test_that("a failing preferred compiler is not hidden by partial output", {
@@ -321,9 +373,10 @@ test_that("the webR helper selects by presence and never retries errors", {
 
   source <- enc2utf8("model { // π ☃ θ\n}")
   model_name <- enc2utf8("webr_'π\\name")
-  expect_identical(
-    stanli:::mir_from_webr(eval_js, source, model_name),
-    "STANLI2:ZmFrZQ==")
+  expect_warning(
+    mir <- stanli:::mir_from_webr(eval_js, source, model_name),
+    "warning with ☃", fixed = TRUE)
+  expect_identical(mir, "STANLI2:ZmFrZQ==")
   calls <- jsonlite::fromJSON(
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
   expect_identical(calls$portable, 1L)
@@ -333,6 +386,19 @@ test_that("the webR helper selects by presence and never retries errors", {
   expect_identical(calls$source, source)
   expect_identical(calls$warnings, 1L)
 
+  ctx$eval("globalThis.stanli_compile = function(name, source, includes, file) {
+    globalThis.__stanli_calls.portable += 1;
+    globalThis.__stanli_calls.arguments = arguments.length;
+    globalThis.__stanli_calls.file = file;
+    return {result: 'STANLI2:ZmFrZQ==', warnings: []};
+  };")
+  expect_no_warning(
+    stanli:::mir_from_webr(eval_js, "model {}", file = "models/θ.stan"))
+  calls <- jsonlite::fromJSON(
+    ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
+  expect_identical(calls$arguments, 4L)
+  expect_identical(calls$file, "models/θ.stan")
+
   ctx$eval("globalThis.stanli_compile = function() {
     globalThis.__stanli_calls.portable += 1;
     return {errors: ['portable failure'], warnings: []};
@@ -341,7 +407,7 @@ test_that("the webR helper selects by presence and never retries errors", {
                "stanli_compile: portable failure", fixed = TRUE)
   calls <- jsonlite::fromJSON(
     ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
-  expect_identical(calls$portable, 2L)
+  expect_identical(calls$portable, 3L)
   expect_identical(calls$classic, 0L)
 
   ctx$eval("globalThis.stanli_compile = {};")
@@ -366,6 +432,16 @@ test_that("the webR helper selects by presence and never retries errors", {
   expect_identical(calls$arguments, 4L)
   expect_identical(calls$fallback_flags,
                    c("O1", "debug-optimized-mir"))
+
+  ctx$eval("globalThis.stanc = function(name, source, flags) {
+    globalThis.__stanli_calls.fallback_flags = flags;
+    return {result: '(legacy MIR)', warnings: []};
+  };")
+  stanli:::mir_from_webr(eval_js, "model {}", file = "m/x.stan")
+  calls <- jsonlite::fromJSON(
+    ctx$eval("JSON.stringify(globalThis.__stanli_calls)"))
+  expect_identical(calls$fallback_flags,
+                   c("O1", "debug-optimized-mir", "filename-in-msg=m/x.stan"))
 })
 
 test_that("a model that does not typecheck is an error, not empty MIR", {
