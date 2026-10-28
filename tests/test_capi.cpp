@@ -1174,6 +1174,91 @@ void expect_streaming_stats() {
   stanli_model_free(model);
 }
 
+void expect_sample_options_validated() {
+  const std::string mir = slurp("tests/fixtures/es.tmir.sexp");
+  const std::string data = slurp("tests/fixtures/es.json");
+  char err[8192]{};
+  auto* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(), nullptr,
+                                           err, sizeof err);
+  expect_true("option validation model", model != nullptr);
+  if (!model) return;
+
+  struct Case {
+    const char* what;
+    void (*mutate)(stanli_sample_opts&);
+    const char* message;
+  };
+  const Case cases[] = {
+      {"chains = 0", [](stanli_sample_opts& o) { o.chains = 0; },
+       "chains must be an integer >= 1"},
+      {"chains < 0", [](stanli_sample_opts& o) { o.chains = -3; },
+       "chains must be an integer >= 1"},
+      {"warmup < 0", [](stanli_sample_opts& o) { o.warmup = -1; },
+       "warmup must be an integer >= 0"},
+      {"samples < 0", [](stanli_sample_opts& o) { o.samples = -5; },
+       "samples must be an integer >= 0"},
+      {"thin = 0", [](stanli_sample_opts& o) { o.thin = 0; },
+       "thin must be an integer >= 1"},
+      {"max_depth = 0", [](stanli_sample_opts& o) { o.max_depth = 0; },
+       "max_depth must be an integer >= 1"},
+      {"delta = 0", [](stanli_sample_opts& o) { o.delta = 0.0; },
+       "delta must be between 0 and 1"},
+      {"delta = 1", [](stanli_sample_opts& o) { o.delta = 1.0; },
+       "delta must be between 0 and 1"},
+      {"delta = 1.5", [](stanli_sample_opts& o) { o.delta = 1.5; },
+       "delta must be between 0 and 1"},
+      {"delta = NaN",
+       [](stanli_sample_opts& o) {
+         o.delta = std::numeric_limits<double>::quiet_NaN();
+       },
+       "delta must be between 0 and 1"},
+      {"init_radius < 0", [](stanli_sample_opts& o) { o.init_radius = -1.0; },
+       "init_radius must be a finite number >= 0"},
+      {"init_radius = Inf",
+       [](stanli_sample_opts& o) {
+         o.init_radius = std::numeric_limits<double>::infinity();
+       },
+       "init_radius must be a finite number >= 0"},
+      {"chain_id = 0", [](stanli_sample_opts& o) { o.chain_id = 0; },
+       "chain_id must be an integer >= 1"},
+  };
+  for (const Case& c : cases) {
+    stanli_sample_opts opts;
+    stanli_sample_opts_init(&opts);
+    opts.chains = 1;
+    opts.warmup = 5;
+    opts.samples = 5;
+    c.mutate(opts);
+    err[0] = '\0';
+    expect_true(std::string("check rejects ") + c.what,
+                stanli_sample_opts_check(&opts, err, sizeof err) != 0 &&
+                    std::string(err) == c.message);
+
+    const int64_t n = stanli_n_unconstrained(model);
+    const int64_t chains = opts.chains > 0 ? opts.chains : 1;
+    const int64_t rows = std::max<int64_t>(
+        1, std::max<int64_t>(opts.samples, 0) + std::max(opts.warmup, 0));
+    std::vector<double> draws((size_t)(chains * rows * n));
+    err[0] = '\0';
+    const int rc = stanli_sample_multi_metric(
+        model, &opts, nullptr, 0, draws.data(), nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+    expect_true(std::string("sampling rejects ") + c.what,
+                rc != 0 && std::string(err) == c.message);
+  }
+
+  stanli_sample_opts ok;
+  stanli_sample_opts_init(&ok);
+  err[0] = '\0';
+  expect_true("default options pass the check",
+              stanli_sample_opts_check(&ok, err, sizeof err) == 0);
+  ok.warmup = 0;
+  ok.samples = 0;
+  expect_true("zero warmup and zero samples pass the check",
+              stanli_sample_opts_check(&ok, err, sizeof err) == 0);
+  stanli_model_free(model);
+}
+
 }  // namespace
 
 void expect_interpreter_policy(const char* fixture,
@@ -1665,6 +1750,7 @@ int main() {
   expect_in_worker_write_array();
   expect_metric_options();
   expect_streaming_stats();
+  expect_sample_options_validated();
 
   if (failures == 0) std::printf("test_capi OK\n");
   return failures == 0 ? 0 : 1;
