@@ -664,6 +664,23 @@ void test_bridgestan_facade(const std::vector<Fixture>& fixtures) {
   stanli::set_message_sink(nullptr);
 }
 
+// C++ starts a std::thread with its creator's floating-point environment.
+// MinGW's x64 threads start at 53-bit x87 precision instead of the main
+// thread's 64, which changes long double results.
+#if defined(_WIN32) && defined(__x86_64__)
+unsigned short x87_control_word() {
+  unsigned short cw;
+  __asm__ volatile("fnstcw %0" : "=m"(cw));
+  return cw;
+}
+void set_x87_control_word(unsigned short cw) {
+  __asm__ volatile("fldcw %0" : : "m"(cw));
+}
+#else
+unsigned short x87_control_word() { return 0; }
+void set_x87_control_word(unsigned short) {}
+#endif
+
 void test_concurrent_constructions(const std::vector<Fixture>& fixtures) {
   if (!stanli::thread_safe_build()) return;
   std::vector<const Fixture*> with_gq;
@@ -682,7 +699,9 @@ void test_concurrent_constructions(const std::vector<Fixture>& fixtures) {
   constexpr int kThreads = 6;
   std::mutex out_mutex;
   std::atomic<int> mismatches{0}, constructed{0};
+  const unsigned short control_word = x87_control_word();
   const auto worker = [&](int id, bool same_model) {
+    set_x87_control_word(control_word);
     for (size_t i = 0; i < with_gq.size(); i += 2 * kStride) {
       const Fixture& f =
           same_model ? *with_gq[0] : *with_gq[(i + id) % with_gq.size()];
