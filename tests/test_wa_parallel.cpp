@@ -9,6 +9,7 @@
 #include "lowering_digest.hpp"
 #include "../runtime/src/lower_work.hpp"
 #include "../runtime/src/lower_worker.hpp"
+#include "../runtime/src/x87_control.hpp"
 #include "../runtime/third_party/bridgestan.h"
 
 #include <stanli/bridgestan_internal.hpp>
@@ -664,22 +665,22 @@ void test_bridgestan_facade(const std::vector<Fixture>& fixtures) {
   stanli::set_message_sink(nullptr);
 }
 
-// C++ starts a std::thread with its creator's floating-point environment.
-// MinGW's x64 threads start at 53-bit x87 precision instead of the main
-// thread's 64, which changes long double results.
-#if defined(_WIN32) && defined(__x86_64__)
-unsigned short x87_control_word() {
-  unsigned short cw;
-  __asm__ volatile("fnstcw %0" : "=m"(cw));
-  return cw;
+// The large-stack thread and the write_array worker compute as their
+// creator does. intbcast's long double densities move in the last bits at
+// another x87 precision, as on a fresh MinGW x64 thread.
+void test_helper_threads_floating_point(const std::vector<Fixture>& fixtures) {
+  const Fixture* f = find(fixtures, "intbcast");
+  if (!f) return;
+  const std::string here = construct_sequential(*f).text;
+  const std::string large =
+      stanli::run_on_large_stack([&] { return construct_sequential(*f).text; });
+  expect_same("intbcast on the large-stack thread vs inline", large, here);
+  std::string worker;
+  stanli::lower_detail::LowerWorker w;
+  w.start([&] { worker = construct_sequential(*f).text; });
+  w.rethrow_if_failed();
+  expect_same("intbcast on the write_array worker vs inline", worker, here);
 }
-void set_x87_control_word(unsigned short cw) {
-  __asm__ volatile("fldcw %0" : : "m"(cw));
-}
-#else
-unsigned short x87_control_word() { return 0; }
-void set_x87_control_word(unsigned short) {}
-#endif
 
 void test_concurrent_constructions(const std::vector<Fixture>& fixtures) {
   if (!stanli::thread_safe_build()) return;
@@ -699,9 +700,11 @@ void test_concurrent_constructions(const std::vector<Fixture>& fixtures) {
   constexpr int kThreads = 6;
   std::mutex out_mutex;
   std::atomic<int> mismatches{0}, constructed{0};
-  const unsigned short control_word = x87_control_word();
+  // C++ starts a std::thread with its creator's floating-point environment;
+  // MinGW x64 threads do not.
+  const auto control_word = stanli::detail::X87ControlWord::of_this_thread();
   const auto worker = [&](int id, bool same_model) {
-    set_x87_control_word(control_word);
+    control_word.apply_to_this_thread();
     for (size_t i = 0; i < with_gq.size(); i += 2 * kStride) {
       const Fixture& f =
           same_model ? *with_gq[0] : *with_gq[(i + id) % with_gq.size()];
@@ -755,6 +758,8 @@ int main() {
   test_errors(fixtures);
   phase("worker");
   test_worker();
+  phase("helper threads floating point");
+  test_helper_threads_floating_point(fixtures);
   phase("bridgestan facade");
   test_bridgestan_facade(fixtures);
   phase("concurrent constructions");
