@@ -4,9 +4,9 @@
 Issue #523: a 2-D int array filled row by row in transformed data read back
 INT_MIN through every int-typed read while real reads were right. No corpus
 model wrote a container that way and then read it as an int, so this grid
-does it on purpose, for every container shape, write form and block.
+does it on purpose, for container shapes, write forms and blocks.
 
-Each block and container gets one model,
+Each model covers one block and one container,
 tests/function_coverage/container_flow/container_flow_<block>_<container>.stan,
 with two sweeps:
 
@@ -14,6 +14,7 @@ with two sweeps:
   reads   every read form, on the row/prefix write form
 
 Builtin-function writes get one model per container across all blocks.
+Only the models in KEEP are written.
 
 Every cell holds a distinct value (100*i + 10*j + k, plus a real offset for
 real containers) and the shapes are non-square, so a transposed or dropped
@@ -42,6 +43,23 @@ OUT_DIR = REPO / "tests/function_coverage/container_flow"
 MANIFEST = REPO / "tests/function_coverage/container_flow_manifest.json"
 PREFIX = "container_flow_"
 W_SIZE = 1500  # larger than every int cell value, so int reads can index w
+
+# Pre-#527 failure pins, a per-block container floor, then a runtime line/branch cover.
+KEEP = {
+    "builtin_i1", "builtin_i3", "builtin_m", "builtin_r1", "builtin_r2", "builtin_rv",
+    "builtin_v",
+    "td_am", "td_amm", "td_arv", "td_avv", "td_i2", "td_i3", "td_r2", "td_rv",
+    "tp_am", "tp_amm", "tp_av", "tp_avv", "tp_i2", "tp_i3", "tp_m", "tp_r3",
+    "m_am", "m_i2", "m_i3", "m_m", "m_r1",
+    "gq_am", "gq_i1", "gq_i2", "gq_i3", "gq_m", "gq_r1",
+    "fn_amm", "fn_i1", "fn_i2", "fn_i3", "fn_m", "fn_r2",
+    "rt_td_i2", "rt_tp_am", "rt_tp_i1", "rt_tp_i2", "rt_tp_i3", "rt_tp_m",
+    "rt_m_arv", "rt_m_avv", "rt_gq_i1", "rt_fn_amm", "rt_fn_i1", "rt_fn_i2",
+    "rt_fn_i3", "rt_fn_m",
+    "mread_tp", "udfint_fn", "udfint_gq", "udfint_td",
+    "varsize_fn", "varsize_gq", "varsize_td", "varsize_tp",
+    "zero_fn", "zero_gq", "zero_td", "zero_tp",
+}
 
 
 class Container:
@@ -1081,6 +1099,8 @@ def generate(keep=None):
         built[f"udfint_{b}"] = build_udfint(b, keep)
     data = json.dumps(DATA, sort_keys=True) + "\n"
     for suffix, (model, skipped) in built.items():
+        if suffix not in KEEP:
+            continue
         name = PREFIX + suffix
         files[OUT_DIR / (name + ".stan")] = model.source()
         if model.data:

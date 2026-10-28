@@ -78,8 +78,13 @@ and matrices) with write forms (initializer, whole assignment, UDF return,
 builtin, element loop, row, `[i, :]`, `[:, j]`, range, multi-index, `+=`) and
 read forms (int- and real-typed element reads, loop bounds, int indexing and
 gathers, `size`, `dims`, int arithmetic, row and column copies) in every block
-and inside a UDF. There is one model per block and container, plus one per
-container for builtin writes, because a refused case fails its whole model.
+and inside a UDF. Each model covers one block and one container, because a
+refused case fails its whole model. Builtin writes get one model per container
+across all blocks.
+`KEEP` in the generator lists the 66 models checked in, out of 168 the
+generator can write: one per failure class seen on builds before #527, int,
+real and Eigen containers and a run-time-index model in every block, then a
+greedy cover of the runtime lines and branches the full grid reached.
 Issue #523 was an int read of a container written by rows, so int containers
 are read through int-typed paths. Each read lands in its own output column,
 or in the model block multiplies its own element of `p`; the manifest names
