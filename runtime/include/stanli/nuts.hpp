@@ -80,6 +80,12 @@ struct NutsConfig {
   std::function<void(int64_t row, const double* q, WaRng& rng,
                      const SamplerRow& stats)>
       on_stored;
+  // Send the sampler's own messages to emit_message, one block per chain and
+  // transition, each line prefixed "Chain [id]": the "current Metropolis
+  // proposal is about to be rejected" notice CmdStan prints when a check
+  // throws mid-trajectory, and the adaptation-window warnings. Off, they are
+  // dropped, as before.
+  bool log_messages = false;
 };
 
 // One row per stored draw, in CmdStan's column order:

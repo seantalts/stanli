@@ -52,6 +52,7 @@ EXPORTS
   stanli_sampler_column_name
   stanli_summary_stats
   stanli_diagnose_text
+  stanli_sampling_warnings
   stanli_optimize_opts_init
   stanli_optimize
   stanli_fixed_param_opts_init

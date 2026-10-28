@@ -130,6 +130,22 @@ std::string format_summary(const std::vector<ParamSummary>& s);
 // what to do about it. Empty problems produce "no problems detected".
 std::string format_diagnostics(const FitDiagnostics& d);
 
+// What one finished chain reports about its own post-warmup transitions.
+struct ChainProblems {
+  int64_t n_divergent = 0;
+  int64_t n_max_treedepth = 0;
+  double ebfmi = 0;  // NaN when undefined
+};
+
+// The warnings printed after sampling, one paragraph per problem found, in
+// CmdStanR's wording and order: divergences, maximum treedepth, E-BFMI.
+// Empty when nothing is wrong. `transitions_per_chain` counts post-warmup
+// transitions. A chain with undefined E-BFMI is reported only when it ran at
+// least three transitions, below which the estimator has nothing to say.
+std::string format_sampling_warnings(const std::vector<ChainProblems>& chains,
+                                     int64_t transitions_per_chain,
+                                     int max_depth);
+
 }  // namespace stanli
 
 #endif

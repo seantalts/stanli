@@ -1,5 +1,6 @@
 #include <stanli/nuts.hpp>
 
+#include <stanli/message_sink.hpp>
 #include <stanli/model_adapter.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -22,6 +23,7 @@
 #include <cstdlib>
 #include <deque>
 #include <exception>
+#include <sstream>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -37,6 +39,55 @@ struct RecordingLogger : stan::callbacks::logger {
     if (!message.empty()) message += " ";
     message += m;
   }
+};
+
+class ChainLogger : public stan::callbacks::logger {
+ public:
+  ChainLogger(bool enabled, int chain_id)
+      : enabled_(enabled),
+        prefix_("Chain [" + std::to_string(chain_id) + "] ") {}
+  ~ChainLogger() override {
+    try {
+      flush();
+    } catch (...) {
+    }
+  }
+
+  void info(const std::string& m) override { add(m); }
+  void info(const std::stringstream& m) override { add(m.str()); }
+  void warn(const std::string& m) override { add(m); }
+  void warn(const std::stringstream& m) override { add(m.str()); }
+  void error(const std::string& m) override { add(m); }
+  void error(const std::stringstream& m) override { add(m.str()); }
+  void fatal(const std::string& m) override { add(m); }
+  void fatal(const std::stringstream& m) override { add(m.str()); }
+
+  void flush() {
+    if (pending_.empty()) return;
+    pending_.pop_back();
+    std::string text;
+    text.swap(pending_);
+    emit_message(text);
+  }
+
+ private:
+  void add(const std::string& m) {
+    if (!enabled_) return;
+    std::size_t at = 0;
+    for (;;) {
+      const std::size_t end = m.find('\n', at);
+      const std::size_t len = (end == std::string::npos ? m.size() : end) - at;
+      if (len > 0) pending_ += prefix_;
+      pending_.append(m, at, len);
+      pending_ += '\n';
+      if (end == std::string::npos) break;
+      at = end + 1;
+    }
+  }
+
+  bool enabled_;
+  std::string prefix_;
+  std::string pending_;
 };
 
 template <Metric M, class Sampler>
@@ -122,7 +173,7 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
   WaRng chain_rng(cfg.seed, cfg.chain_id);
   rng_t& rng = chain_rng.gen();
   Sampler sampler(model, rng);
-  stan::callbacks::logger logger;
+  ChainLogger logger(cfg.log_messages, cfg.chain_id);
 
   const int64_t n = ex.n_params();
   Eigen::VectorXd q(n);
@@ -162,6 +213,7 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
       sampler.set_window_params(cfg.warmup, 75, 50, 25, logger);
     sampler.engage_adaptation();
     sampler.init_stepsize(logger);
+    logger.flush();
   }
 
   stan::mcmc::sample s(q, 0, 0);
@@ -182,6 +234,7 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
   // transition and a thinned run still passes through the ones it drops.
   const auto step = [&](int64_t i, bool warmup, bool keep) {
     s = sampler.transition(s, logger);
+    logger.flush();
     s.cont_params(qd);
     // A report covers every post-warmup transition even when thinning drops
     // the row. Fetch the sampler parameters once when either consumer needs

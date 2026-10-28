@@ -6,6 +6,7 @@
 #include <stanli/diagnose.hpp>
 #include <stanli/estimate.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/message_sink.hpp>
 #include <stanli/nuts.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/reduce_sum.hpp>
@@ -19,6 +20,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <limits>
@@ -713,6 +715,19 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
     cfg.max_depth = opts->max_depth;
     cfg.save_warmup = opts->save_warmup != 0;
     cfg.init_radius = opts->init_radius;
+    cfg.log_messages = refresh > 0;
+    struct FlushStdout {
+      ~FlushStdout() {
+#ifndef STANLI_NO_STDIO
+        std::fflush(stdout);
+#endif
+      }
+    } flush_stdout;
+    if (refresh > 0 && m->threads_per_chain > 1 && m->reduce_sum_count == 0)
+      stanli::emit_message(
+          "Note: threads_per_chain = " + std::to_string(m->threads_per_chain) +
+          " has no effect on this model, which has no reduce_sum call to run "
+          "in parallel.");
     switch (mo.metric) {
       case STANLI_METRIC_UNIT:
         cfg.metric = stanli::Metric::Unit;
@@ -873,6 +888,40 @@ int stanli_summary_stats(const double* draws, int64_t n_chains, int64_t n_draws,
     return 0;
   } catch (const std::exception&) {
     return 1;
+  }
+}
+
+int64_t stanli_sampling_warnings(const stanli_sample_opts* opts,
+                                 const stanli_sample_report* reports,
+                                 const double* stats, char* out,
+                                 size_t out_len) {
+  try {
+    if (opts == nullptr || reports == nullptr || stats == nullptr) return 0;
+    const int64_t n_chains = opts->chains > 0 ? opts->chains : 1;
+    const int64_t n_stored = stanli_n_stored_draws(opts);
+    const int thin = opts->thin > 0 ? opts->thin : 1;
+    const int64_t kept_samples = (opts->samples + thin - 1) / thin;
+    const int64_t first = n_stored - kept_samples;
+    std::vector<stanli::ChainProblems> chains((size_t)n_chains);
+    for (int64_t c = 0; c < n_chains; ++c) {
+      auto& p = chains[(size_t)c];
+      p.n_divergent = reports[c].n_divergent;
+      p.n_max_treedepth = reports[c].n_max_treedepth;
+      p.ebfmi =
+          stanli::ebfmi(stats + (c * n_stored + first) * STANLI_N_SAMPLER_COLS +
+                            stanli::COL_ENERGY,
+                        kept_samples, STANLI_N_SAMPLER_COLS);
+    }
+    const std::string text = stanli::format_sampling_warnings(
+        chains, opts->samples, opts->max_depth > 0 ? opts->max_depth : 10);
+    if (out != nullptr && out_len > 0) {
+      const size_t k = std::min(text.size(), out_len - 1);
+      std::memcpy(out, text.data(), k);
+      out[k] = '\0';
+    }
+    return (int64_t)text.size() + 1;
+  } catch (const std::exception&) {
+    return 0;
   }
 }
 
