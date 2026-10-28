@@ -55,33 +55,55 @@ def default_stack():
     resource.setrlimit(resource.RLIMIT_STACK, (want, hard))
 
 
-def live_model(kind, depth):
-    """target += a depth-deep sum of sin(mu * k), or sin(sin(...(mu)))."""
+def deep_expr(kind, depth, meta):
+    """A depth-deep sum of sin(mu * k), or sin(sin(...(mu)))."""
     def fun(name, args):
-        return f"((pattern (FunApp (StanLib {name} FnPlain AoS) ({args}))) {REAL})"
-    mu = f"((pattern (Var mu)) {REAL})"
+        return f"((pattern (FunApp (StanLib {name} FnPlain AoS) ({args}))) {meta})"
+    mu = f"((pattern (Var mu)) {meta})"
     if kind == "call":
         expr = "".join(f"((pattern (FunApp (StanLib sin FnPlain AoS) (" for _ in range(depth))
-        expr += mu + f"))) {REAL})" * depth
-    else:
-        def term(k):
-            return fun("sin", fun("Times__", f"{mu} ((pattern (Lit Real {k}.0)) {DATA_REAL})"))
-        plus = "((pattern (FunApp (StanLib Plus__ FnPlain AoS) ("
-        parts = [plus * (depth - 1), term(1)]
-        parts += [f" {term(k)}))) {REAL})" for k in range(2, depth + 1)]
-        expr = "".join(parts)
+        return expr + mu + f"))) {meta})" * depth
+    def term(k):
+        return fun("sin", fun("Times__", f"{mu} ((pattern (Lit Real {k}.0)) {DATA_REAL})"))
+    plus = "((pattern (FunApp (StanLib Plus__ FnPlain AoS) ("
+    parts = [plus * (depth - 1), term(1)]
+    parts += [f" {term(k)}))) {meta})" for k in range(2, depth + 1)]
+    return "".join(parts)
+
+
+def live_model(kind, depth, gq_depth=0):
+    """target += a depth-deep expression of mu; with gq_depth, generated
+    quantities also computes a gq_depth-deep expression of mu."""
+    read_mu = "(FunApp (CompilerInternal (FnReadParam (constrain Identity) (dims ()) (mem_pattern AoS))) ())"
+    gq = ""
+    gq_out = ""
+    if gq_depth:
+        def write(name):
+            return (f"((pattern (NRFunApp (CompilerInternal (FnWriteParam (unconstrain_opt ()) "
+                    f"(var ((pattern (Var {name})) {DATA_REAL})))) ())) (meta <opaque>))")
+        gq = f"""
+ (generate_quantities
+  (((pattern (Decl (decl_adtype DataOnly) (decl_id mu) (decl_type (Sized SReal))
+      (initialize (Assign ((pattern {read_mu}) {REAL})))))
+    (meta <opaque>))
+   {write("mu")}
+   ((pattern (Decl (decl_adtype DataOnly) (decl_id g) (decl_type (Sized SReal))
+      (initialize (Assign {deep_expr(kind, gq_depth, DATA_REAL)}))))
+    (meta <opaque>))
+   {write("g")}))"""
+        gq_out = " (g <opaque> ((out_unconstrained_st SReal) (out_constrained_st SReal) (out_block GeneratedQuantities) (out_trans Identity)))"
     return f"""((functions_block ()) (input_vars ()) (prepare_data ())
  (log_prob
   (((pattern (Decl (decl_adtype AutoDiffable) (decl_id mu) (decl_type (Sized SReal))
-      (initialize (Assign ((pattern (FunApp (CompilerInternal (FnReadParam (constrain Identity) (dims ()) (mem_pattern AoS))) ())) {REAL})))))
+      (initialize (Assign ((pattern {read_mu}) {REAL})))))
     (meta <opaque>))
-   ((pattern (TargetPE {expr})) (meta <opaque>))))
- (output_vars ((mu <opaque> ((out_unconstrained_st SReal) (out_constrained_st SReal) (out_block Parameters) (out_trans Identity)))))
+   ((pattern (TargetPE {deep_expr(kind, depth, REAL)})) (meta <opaque>)))){gq}
+ (output_vars ((mu <opaque> ((out_unconstrained_st SReal) (out_constrained_st SReal) (out_block Parameters) (out_trans Identity))){gq_out}))
  (prog_name deep) (prog_path deep.stan))
 """
 
 
-def prepare(text):
+def prepare(text, env=None):
     with tempfile.TemporaryDirectory() as directory:
         mir = Path(directory) / "deep.sexp"
         data = Path(directory) / "data.json"
@@ -90,7 +112,7 @@ def prepare(text):
         start = time.perf_counter()
         run = subprocess.run([BENCH_GRAD, str(mir), str(data), "--prep"],
                              capture_output=True, text=True,
-                             preexec_fn=default_stack, env=dict(os.environ, STANLI_PROFILE_PREP="0"))
+                             preexec_fn=default_stack, env=dict(os.environ, STANLI_PROFILE_PREP="0", **(env or {})))
         return run, time.perf_counter() - start
 
 
@@ -116,6 +138,25 @@ class DeepExpressionPrep(unittest.TestCase):
                 run, _ = prepare(live_model(kind, TOO_DEEP))
                 self.assertEqual(run.returncode, 1, f"signal {-run.returncode}")
                 self.assertIn("nested too deeply", run.stderr)
+
+    def test_deep_generated_quantities_prepare_beside_log_prob(self):
+        for kind in ("sum", "call"):
+            cases = [(2, "force")] + [(DEPTH, mode) for mode in ("auto", "0")]
+            for depth, mode in cases:
+                with self.subTest(kind=kind, depth=depth, mode=mode):
+                    run, _ = prepare(live_model(kind, depth, gq_depth=DEPTH),
+                                     {"STANLI_PARALLEL_WA": mode})
+                    self.assertEqual(run.returncode, 0, run.stderr[-400:])
+
+    def test_excessive_generated_quantities_depth_is_the_same_error(self):
+        for kind in ("sum", "call"):
+            with self.subTest(kind=kind):
+                text = live_model(kind, 2, gq_depth=TOO_DEEP)
+                beside, _ = prepare(text, {"STANLI_PARALLEL_WA": "force"})
+                alone, _ = prepare(text, {"STANLI_PARALLEL_WA": "0"})
+                self.assertEqual(beside.returncode, 1, f"signal {-beside.returncode}")
+                self.assertIn("nested too deeply", beside.stderr)
+                self.assertEqual(beside.stderr, alone.stderr)
 
 
 if __name__ == "__main__":

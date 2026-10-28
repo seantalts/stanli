@@ -1779,9 +1779,9 @@ jobs:
           # a local run needs nothing.
           ASAN_OPTIONS: detect_leaks=0
 
-  # The tests that run chains on worker threads, under ThreadSanitizer.
-  # Three binaries rather than the suite: the instrumentation is only
-  # informative where a second thread exists, and building just those
+  # The tests that run chains, or lower write_array, on worker threads, under
+  # ThreadSanitizer. Five binaries rather than the suite: the instrumentation
+  # is only informative where a second thread exists, and building just those
   # keeps the job to minutes without a compiler cache.
   tsan:
     name: threaded tests under ThreadSanitizer
@@ -1821,11 +1821,12 @@ jobs:
             -DSTANLI_SANITIZE=thread \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX"
           cmake --build build-tsan -j2 \
-            --target test_capi test_pool test_multichain
+            --target test_capi test_pool test_multichain \
+            test_wa_parallel test_wa_parallel_abi
       - name: ctest
         run: >-
           ctest --test-dir build-tsan --timeout 600 --output-on-failure
-          -R '^(test_capi|test_pool|test_multichain)$'
+          -R '^(test_capi|test_pool|test_multichain|test_wa_parallel|test_wa_parallel_abi)$'
 
   # Build and link the browser runtime after merge, nightly, on demand, and
   # on tags. Pages and release jobs consume the artifact and run end-to-end

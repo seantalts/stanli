@@ -34,6 +34,8 @@ class ExecutionTraceScope {
 };
 
 void record_interpreter_event(const std::string& phase, const char* event);
+// True while a scope is open on the calling thread.
+bool execution_trace_active();
 bool execution_reporting_enabled();
 void report_execution_function(const std::string& name, bool compiled,
                                const std::string& refusal, int registers);

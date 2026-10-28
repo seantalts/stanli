@@ -1,9 +1,16 @@
 #include "lower_internal.hpp"
 
 #include "build_id.hpp"
+#include "lower_work.hpp"
+#include "lower_worker.hpp"
 #include <stanli/gp_cov_fusion.hpp>
 #include <stanli/execution_report.hpp>
 #include <stanli/large_stack.hpp>
+#include <stanli/threading.hpp>
+
+#include <stan/math/rev/core/chainablestack.hpp>
+
+#include <thread>
 
 namespace stanli {
 namespace lower_detail {
@@ -31,7 +38,7 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
                    const char* graph_name,
                    const PreparedContext& prepared_context)
     : Lowering(d, p, dump_to, graph_name, prepared_context.rng,
-               prepared_context.shapes) {
+               std::make_shared<ShapeInterner>(*prepared_context.shapes)) {
   const auto env_copy_time = prep.start();
   td.env() = prepared_context.environment;
   omitted_data = prepared_context.omitted_data;
@@ -403,6 +410,7 @@ void Lowering::bind_data(const mir::Program& p) {
   }
   int_env_data = int_env;
   data_prepared = true;
+  if (after_data_prepared) after_data_prepared();
 }
 // ---- statements -----------------------------------------------------------
 CompiledModel::ParamView Lowering::parameter_view(const mir::Stmt& s, int slot,
@@ -1016,7 +1024,6 @@ std::optional<CompiledModel> try_bounded_specialization(Lowering& lo,
   Lowering trial(lo.data, lo.prep, lo.dumper, "bounded_log_prob",
                  lo.prepared_context());
   trial.compile_options = lo.compile_options;
-  trial.shape_pool = std::make_shared<ShapeInterner>(*lo.shape_pool);
   trial.int_env_data = lo.int_env_data;
   trial.data_prepared = true;
   trial.out.transformed_data_draws = lo.out.transformed_data_draws;
@@ -1050,6 +1057,106 @@ std::string report_request() {
          std::string(runtime_build_id()) + ".";
 }
 
+constexpr uint64_t kParallelWriteArrayMinWork = 1000;
+constexpr uint64_t kParallelWriteArrayMaxDataBytes = uint64_t{64} << 20;
+
+enum class ParallelWriteArray { Off, Auto, Force };
+
+ParallelWriteArray read_parallel_write_array() {
+  const char* v = std::getenv("STANLI_PARALLEL_WA");
+  if (!v || !*v || std::string_view(v) == "auto")
+    return ParallelWriteArray::Auto;
+  if (std::string_view(v) == "1" || std::string_view(v) == "force")
+    return ParallelWriteArray::Force;
+  return ParallelWriteArray::Off;
+}
+
+class WriteArrayLowering {
+ public:
+  WriteArrayLowering(const DataMap& data, const mir::Program& prog,
+                     bool trace_prep, PassDumper& dumper)
+      : data_(data), prog_(prog), trace_(trace_prep), dumper_(dumper) {}
+
+  void begin(Lowering& log_prob) {
+    if (!should_run_alongside(log_prob)) {
+      for (const auto& e : log_prob.td.env()) bound_env_.push_back(e.first);
+      for (const auto& d : log_prob.decls) bound_decls_.push_back(d.first);
+      return;
+    }
+    wa_.emplace(data_, trace_, off_, "write_array",
+                log_prob.prepared_context());
+    started_ = worker_.start([this] { result_ = wa_->run_write_array(prog_); });
+  }
+
+  CompiledModel::WriteArray finish(Lowering& log_prob, PrepTrace& prep) {
+    CompiledModel::WriteArray w;
+    if (started_) {
+      worker_.rethrow_if_failed();
+      w = std::move(*result_);
+      w.lowered_in_parallel = true;
+    } else {
+      if (!wa_) build_after_log_prob(log_prob);
+      w = wa_->run_write_array(prog_);
+    }
+    prep.append(std::move(trace_));
+    return w;
+  }
+
+  const std::vector<std::string>& interpreter_fallbacks() const {
+    return wa_->out.interpreter_fallbacks;
+  }
+
+ private:
+  bool should_run_alongside(Lowering& log_prob) {
+    const ParallelWriteArray policy = read_parallel_write_array();
+    if (policy == ParallelWriteArray::Off || !thread_safe_build() ||
+        std::thread::hardware_concurrency() == 1 || dumper_.enabled() ||
+        execution_trace_active())
+      return false;
+    // A program this deep is being lowered on the large stack, which the
+    // second thread does not have.
+    if (prog_.nesting > kInlineNesting) return false;
+    if (policy == ParallelWriteArray::Force) return true;
+    if (data_payload_bytes(log_prob.td.env()) > kParallelWriteArrayMaxDataBytes)
+      return false;
+    LoweringWork work(prog_, log_prob.int_env_data, log_prob.td.env(),
+                      kParallelWriteArrayMinWork);
+    return work.of(prog_.generate_quantities) >= kParallelWriteArrayMinWork &&
+           work.of(prog_.log_prob) >= kParallelWriteArrayMinWork;
+  }
+
+  void build_after_log_prob(Lowering& log_prob) {
+    const std::map<std::string, DataMap::Entry> no_environment;
+    const std::map<std::string, DeclView> no_declarations;
+    wa_.emplace(
+        data_, trace_, dumper_, "write_array",
+        PreparedContext{log_prob.td_rng, log_prob.shape_pool, no_environment,
+                        log_prob.int_env_data, no_declarations});
+    const auto select_time = trace_.start();
+    for (const std::string& name : bound_env_) {
+      const auto it = log_prob.td.env().find(name);
+      if (it != log_prob.td.env().end())
+        wa_->td.env().emplace(name, it->second);
+    }
+    for (const std::string& name : bound_decls_) {
+      const auto it = log_prob.decls.find(name);
+      if (it != log_prob.decls.end()) wa_->decls.emplace(name, it->second);
+    }
+    trace_.plain("write_array", "env_select", select_time);
+  }
+
+  const DataMap& data_;
+  const mir::Program& prog_;
+  PrepTrace trace_;
+  PassDumper off_{nullptr, nullptr};
+  PassDumper& dumper_;
+  std::vector<std::string> bound_env_, bound_decls_;
+  std::optional<Lowering> wa_;
+  std::optional<CompiledModel::WriteArray> result_;
+  bool started_ = false;
+  LowerWorker worker_;
+};
+
 }  // namespace
 
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
@@ -1058,6 +1165,9 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
 }
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                             unsigned seed, const CompileOptions& options) {
+  std::optional<stan::math::ChainableStack> autodiff_stack_of_caller;
+  if (thread_safe_build() && stan::math::ChainableStack::instance_ == nullptr)
+    autodiff_stack_of_caller.emplace();
   const bool report_enabled = execution_reporting_enabled();
   ExecutionTrace execution_trace;
   std::optional<ExecutionTraceScope> execution_scope;
@@ -1089,17 +1199,23 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
              static_cast<int64_t>(mir_text.size()));
   Lowering lo(data, prep, dumper, "log_prob", WaRng(seed));
   lo.compile_options = options;
+  // A second lowering, over the transformed data the first one already
+  // interpreted: re-running prepare_data would double preparation time on
+  // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
+  std::optional<WriteArrayLowering> wa_lowering;
+  if (!prog->generate_quantities.empty()) {
+    wa_lowering.emplace(data, *prog, prep.enabled(), dumper);
+    lo.after_data_prepared = [&] { wa_lowering->begin(lo); };
+  }
   auto specialized = try_bounded_specialization(lo, *prog);
   CompiledModel cm = specialized ? std::move(*specialized) : lo.run(*prog);
-  if (!prog->generate_quantities.empty()) {
-    // A second lowering, over the transformed data the first one already
-    // interpreted: re-running prepare_data would double preparation time on
-    // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
+  lo.after_data_prepared = nullptr;
+  if (wa_lowering) {
     const PreparedContext prepared = lo.prepared_context();
-    Lowering wa(data, prep, dumper, "write_array", prepared);
-    CompiledModel::WriteArray w = wa.run_write_array(*prog);
-    for (const std::string& note : wa.out.interpreter_fallbacks)
+    CompiledModel::WriteArray w = wa_lowering->finish(lo, prep);
+    for (const std::string& note : wa_lowering->interpreter_fallbacks())
       add_interpreter_fallback(cm, note);
+    wa_lowering.reset();
     if (w.n_unconstrained != cm.n_unconstrained) {
       // The two graphs read the same draw; if they disagree on its length the
       // write_array cannot be driven at all. Keep the model, drop the columns,

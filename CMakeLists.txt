@@ -939,6 +939,10 @@ add_executable(stanli_check tools/stanli_check.cpp
 target_link_libraries(stanli_check PRIVATE stanli stanli_stanc_process)
 add_dependencies(stanli_check stanli_mir_fixtures)
 stanli_embed_stanc(stanli_check)
+add_executable(lowering_digest tools/lowering_digest.cpp
+  $<TARGET_OBJECTS:stanli_tbb_stub>)
+target_link_libraries(lowering_digest PRIVATE stanli stanli_stanc_process)
+stanli_embed_stanc(lowering_digest)
 if(WIN32)
   # Standalone-compiler deployments must also run without MSYS2's C++/thread
   # runtime DLLs on PATH. Embedded targets already receive these link flags.
@@ -1372,7 +1376,7 @@ set(STANLI_TESTS
   test_function_registry test_function_shape
   test_partition
   test_solve test_solve_forwards test_solve_reuse test_cross_path
-  test_write_array test_pool test_bridgestan test_mixture test_island
+  test_write_array test_wa_parallel test_pool test_bridgestan test_mixture test_island
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
   test_odevariadic test_callback_values test_algebra test_estimate test_brmsmono
   test_reduce_sum
@@ -1403,6 +1407,16 @@ if(STANLI_FAST_TEST_TUS)
   target_compile_options(test_capi PRIVATE -O0)
 endif()
 add_test(NAME test_capi COMMAND test_capi
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+# write_array lowered beside log_prob, through the same boundary.
+add_executable(test_wa_parallel_abi tests/test_wa_parallel_abi.cpp)
+target_link_libraries(test_wa_parallel_abi PRIVATE stanli_shared)
+add_dependencies(test_wa_parallel_abi stanli_mir_fixtures)
+if(STANLI_FAST_TEST_TUS)
+  target_compile_options(test_wa_parallel_abi PRIVATE -O0)
+endif()
+add_test(NAME test_wa_parallel_abi COMMAND test_wa_parallel_abi
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 # fixed_param, Laplace, Pathfinder and ADVI, through the same boundary.

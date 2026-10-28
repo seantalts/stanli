@@ -287,15 +287,9 @@ void RecordingProgram::compile_data(LoopState& s) {
     // addresses. Eligibility is nonthrowing; the first executed call still
     // runs the original kernel, including every descriptor check.
     if (prepare_indices && n.forward == index_forward && op.udata &&
-        p.body.slots[op.out].len == 1) {
-      const auto& spec = *static_cast<const DynamicIndexSpec*>(op.udata);
-      if (spec.selected_size == 1 &&
-          std::all_of(spec.axes.begin(), spec.axes.end(), [](const auto& a) {
-            return a.kind == DynamicIndexSpec::Axis::Single && a.count == 1 &&
-                   a.count_input_offset < 0 && a.extent_input_offset < 0;
-          }))
-        instruction.kind = DataIndex;
-    }
+        p.body.slots[op.out].len == 1 &&
+        single_selection(*static_cast<const DynamicIndexSpec*>(op.udata)))
+      instruction.kind = DataIndex;
     ++kernels;
   }
   // Both instructions still execute in their original order. Keep the branch

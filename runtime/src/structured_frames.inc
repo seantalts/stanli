@@ -281,109 +281,125 @@ struct FrameEncoder {
   }
 };
 
-// Optional differential proof check. Canonical encoding may use different
-// external indices or interned position offsets, so compare resolved operands
-// and backward order, rather than requiring identical representation bytes.
-void check_frame_layout(LoopState& s, const Stream& st,
-                         const ArenaSnapshot& snapshot, const LoopFrame& frame) {
-  LoopFrame oracle;
-  oracle.adjoint_base = frame.adjoint_base;
-  FrameEncoder<false> encoder{s, oracle, snapshot};
-  encoder.encode(st);
-  const auto& a = *frame.code;
-  const auto& b = encoder.code;
-  const auto require = [](bool ok) {
-    if (!ok) throw std::logic_error("structured frame layout proof mismatch");
-  };
-  require(a.words.size() == b.words.size() && a.backward == b.backward);
-  const auto value = [&](const LoopFrame& f, uint64_t raw) -> const double* {
+// Whether two frames execute the same instructions on the same operands.
+// Encodings may differ in external indices or interned position offsets, so
+// compare resolved operands and backward order rather than representation.
+bool equivalent_frames(const LoopFrame& x, const LoopFrame& y) {
+  const auto& a = *x.code;
+  const auto& b = *y.code;
+  if (a.words.size() != b.words.size() || a.backward != b.backward) return false;
+  bool ok = true;
+  const auto require = [&](bool condition) { ok = ok && condition; };
+  const auto value = [&](const LoopFrame& f, uint64_t raw) {
     const int64_t ref = static_cast<int64_t>(raw);
-    if (ref == frame_null) return nullptr;
+    if (ref == frame_null) return std::make_pair(int64_t{-1}, int64_t{0});
     if (ref >= 0) {
-      require(static_cast<size_t>(ref) < frame.values.size());
-      return frame.values.data() + ref;
+      require(static_cast<size_t>(ref) < f.values.size());
+      return std::make_pair(int64_t{0}, ref);
     }
-    require(static_cast<uint64_t>(-(ref + 1)) < f.bindings.size());
-    return f.bindings[-ref - 1];
+    const auto index = static_cast<uint64_t>(-(ref + 1));
+    require(index < f.bindings.size());
+    return std::make_pair(
+        int64_t{1}, index < f.bindings.size()
+                        ? static_cast<int64_t>(reinterpret_cast<intptr_t>(
+                              f.bindings[index]))
+                        : int64_t{0});
   };
   const auto adjoint = [&](const LoopFrame& f, uint64_t raw) {
     const int64_t ref = static_cast<int64_t>(raw);
     if (ref == frame_null) return FrameAdjoint{};
     if (ref >= 0) return FrameAdjoint{f.adjoint_base + ref, 0, -1};
-    require(static_cast<uint64_t>(-(ref + 1)) < f.adj_bindings.size());
-    auto result = f.adj_bindings[-ref - 1];
+    const auto index = static_cast<uint64_t>(-(ref + 1));
+    require(index < f.adj_bindings.size());
+    if (index >= f.adj_bindings.size()) return FrameAdjoint{};
+    auto result = f.adj_bindings[index];
     if (result.promotion < 0 && result.id >= 0) {
       result.id += result.shift;
       result.shift = 0;
     }
     return result;
   };
-  const auto v = [&](uint64_t x, uint64_t y) {
-    require(value(frame, x) == value(oracle, y));
+  const auto v = [&](uint64_t p, uint64_t q) {
+    require(value(x, p) == value(y, q));
   };
-  const auto d = [&](uint64_t x, uint64_t y) {
-    require(adjoint(frame, x) == adjoint(oracle, y));
+  const auto d = [&](uint64_t p, uint64_t q) {
+    require(adjoint(x, p) == adjoint(y, q));
   };
-  const auto literal = [&](uint64_t x, uint64_t y) {
-    require(x < frame.literals.size() && y < oracle.literals.size());
-    require(std::memcmp(&frame.literals[x], &oracle.literals[y],
-                        sizeof(double)) == 0);
+  const auto literal = [&](uint64_t p, uint64_t q) {
+    require(p < x.literals.size() && q < y.literals.size());
+    if (ok)
+      require(std::memcmp(&x.literals[p], &y.literals[q], sizeof(double)) ==
+              0);
   };
-  const auto positions = [&](uint64_t x, uint64_t y, uint64_t count) {
-    require(x <= a.positions.size() && count <= a.positions.size() - x &&
-            y <= b.positions.size() && count <= b.positions.size() - y);
-    for (size_t k = 0; k < count; ++k)
-      require(a.positions[x + k] == b.positions[y + k]);
+  const auto positions = [&](uint64_t p, uint64_t q, uint64_t count) {
+    require(p <= a.positions.size() && count <= a.positions.size() - p &&
+            q <= b.positions.size() && count <= b.positions.size() - q);
+    for (size_t k = 0; ok && k < count; ++k)
+      require(a.positions[p + k] == b.positions[q + k]);
   };
-  for (size_t pc = 0; pc < a.words.size();) {
+  for (size_t pc = 0; ok && pc < a.words.size();) {
     require(a.words[pc] == b.words[pc]);
     const auto header = a.words[pc];
-    const auto* x = a.words.data() + pc + 1;
-    const auto* y = b.words.data() + pc + 1;
+    const auto* p = a.words.data() + pc + 1;
+    const auto* q = b.words.data() + pc + 1;
     pc += header >> 8;
     switch (header & 255) {
       case StreamInstr::AdjointCall:
       case StreamInstr::Call: {
-        require(x[0] == y[0] && x[1] == y[1] && x[2] == y[2]);
+        require(p[0] == q[0] && p[1] == q[1] && p[2] == q[2]);
         size_t at = 3;
-        const size_t operands = x[2] + 1 + ((x[1] & kFrozenCallHasOut2) != 0);
-        for (size_t k = 0; k < operands + 1; ++k, ++at) v(x[at], y[at]);
-        if (x[1] & kFrozenCallActive)
-          for (size_t k = 0; k < operands; ++k, ++at) d(x[at], y[at]);
+        const size_t operands = p[2] + 1 + ((p[1] & kFrozenCallHasOut2) != 0);
+        for (size_t k = 0; k < operands + 1; ++k, ++at) v(p[at], q[at]);
+        if (p[1] & kFrozenCallActive)
+          for (size_t k = 0; k < operands; ++k, ++at) d(p[at], q[at]);
         break;
       }
       case StreamInstr::InPlace:
-        require(x[0] == y[0] && x[2] == y[2] && x[7] == y[7]);
-        positions(x[1], y[1], x[0]);
-        v(x[3], y[3]); v(x[4], y[4]);
-        d(x[5], y[5]); d(x[6], y[6]);
-        for (size_t k = 0; k < x[7]; ++k) {
-          v(x[8 + 2 * k], y[8 + 2 * k]);
-          literal(x[9 + 2 * k], y[9 + 2 * k]);
+        require(p[0] == q[0] && p[2] == q[2] && p[7] == q[7]);
+        positions(p[1], q[1], p[0]);
+        v(p[3], q[3]); v(p[4], q[4]);
+        d(p[5], q[5]); d(p[6], q[6]);
+        for (size_t k = 0; ok && k < p[7]; ++k) {
+          v(p[8 + 2 * k], q[8 + 2 * k]);
+          literal(p[9 + 2 * k], q[9 + 2 * k]);
         }
         break;
       case StreamInstr::Copy:
-        require(x[0] == y[0]);
-        v(x[1], y[1]); v(x[2], y[2]);
-        d(x[3], y[3]); d(x[4], y[4]);
+        require(p[0] == q[0]);
+        v(p[1], q[1]); v(p[2], q[2]);
+        d(p[3], q[3]); d(p[4], q[4]);
         break;
       case StreamInstr::Gather:
-        require(x[0] == y[0]);
-        positions(x[1], y[1], x[0]);
-        v(x[2], y[2]); v(x[3], y[3]);
-        d(x[4], y[4]); d(x[5], y[5]);
+        require(p[0] == q[0]);
+        positions(p[1], q[1], p[0]);
+        v(p[2], q[2]); v(p[3], q[3]);
+        d(p[4], q[4]); d(p[5], q[5]);
         break;
       case StreamInstr::GuardIf:
-        v(x[0], y[0]); require(x[1] == y[1]); break;
+        v(p[0], q[0]); require(p[1] == q[1]); break;
       case StreamInstr::GuardFor:
-        v(x[0], y[0]); v(x[1], y[1]);
-        literal(x[2], y[2]); literal(x[3], y[3]); break;
+        v(p[0], q[0]); v(p[1], q[1]);
+        literal(p[2], q[2]); literal(p[3], q[3]); break;
       case StreamInstr::Set:
-        v(x[0], y[0]); literal(x[1], y[1]); break;
+        v(p[0], q[0]); literal(p[1], q[1]); break;
       default:
         require(false);
     }
   }
+  return ok;
+}
+
+// Optional differential proof check of a matched layout.
+void check_frame_layout(LoopState& s, const Stream& st,
+                        const ArenaSnapshot& snapshot, const LoopFrame& frame) {
+  LoopFrame oracle;
+  oracle.adjoint_base = frame.adjoint_base;
+  FrameEncoder<false> encoder{s, oracle, snapshot};
+  encoder.encode(st);
+  oracle.code = std::make_shared<FrameCode>(std::move(encoder.code));
+  oracle.values.resize(frame.values.size());
+  if (!equivalent_frames(frame, oracle))
+    throw std::logic_error("structured frame layout proof mismatch");
 }
 
 void seal_frame(LoopState& s) {
@@ -471,6 +487,15 @@ void seal_frame(LoopState& s) {
     total += len;
     i = j;
   }
+  if (tape.frames.empty() && s.initial)
+    for (const auto& r : snapshot.ranges) {
+      const double* from = std::max<const double*>(r.base, s.initial);
+      const double* to = std::min<const double*>(
+          r.base + r.used, s.initial + s.p.initial_size);
+      if (from < to)
+        tape.initial.emplace_back(
+            static_cast<int64_t>(r.offset) + (from - r.base), to - from);
+    }
   auto frame = std::make_unique<LoopFrame>();
   frame->values.resize(total);
   for (const auto& r : snapshot.ranges)
@@ -586,7 +611,9 @@ struct FrameExecution {
   std::vector<double*>* resolved = nullptr;
   double* values = frame.values.data();
   double* const* bound = frame.bindings.data();
-  double* adjoints = s.frames->adjoints.data() + frame.adjoint_base;
+  double* adjoints = s.frames->adjoints.empty()
+                         ? nullptr
+                         : s.frames->adjoints.data() + frame.adjoint_base;
   double* value(uint64_t raw) const {
     const int64_t ref = static_cast<int64_t>(raw);
     if (ref >= 0) return values + ref;
