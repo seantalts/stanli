@@ -273,18 +273,14 @@ test_that("problem output uses exact unthinned report counts", {
 })
 
 sampling_output <- function(code, data, ...) {
-  skip_if_not_installed("callr")
-  out <- tempfile()
-  on.exit(unlink(out))
-  low_ebfmi <- callr::r(function(code, data, args) {
-    library(stanli)
+  low_ebfmi <- FALSE
+  text <- capture.output({
     m <- stanli_model(code = code, data = data)
-    fit <- do.call(sample_model, c(list(m), args))
-    report <- utils::capture.output(stanli_diagnose(fit))
-    any(grepl("E-BFMI is below", report, fixed = TRUE))
-  }, args = list(code = code, data = data, args = list(...)), stdout = out,
-  stderr = "2>&1")
-  structure(paste(readLines(out), collapse = "\n"), low_ebfmi = low_ebfmi)
+    fit <- sample_model(m, ...)
+    low_ebfmi <- any(grepl("E-BFMI is below",
+                           capture.output(stanli_diagnose(fit)), fixed = TRUE))
+  })
+  structure(paste(text, collapse = "\n"), low_ebfmi = low_ebfmi)
 }
 
 reject_code <- "

@@ -210,6 +210,8 @@ static char* (*p_stan_to_mir_named)(const char*, const char*,
 static void (*p_model_free)(void*);
 static int (*p_has_embedded_stanc)(void);
 static void (*p_string_free)(char*);
+static void (*p_capture_messages)(int);
+static char* (*p_take_messages)(void);
 static int (*p_exact_lp)(void);
 static int (*p_thread_safe)(void);
 static int64_t (*p_n_unconstrained)(const void*);
@@ -313,6 +315,8 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_model_free", p_model_free);
   BIND("stanli_has_embedded_stanc", p_has_embedded_stanc);
   BIND("stanli_string_free", p_string_free);
+  BIND_OPTIONAL("stanli_capture_messages", p_capture_messages);
+  BIND_OPTIONAL("stanli_take_messages", p_take_messages);
   BIND("stanli_exact_lp", p_exact_lp);
   BIND("stanli_thread_safe", p_thread_safe);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
@@ -348,6 +352,8 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_pathfinder", p_pathfinder);
   BIND("stanli_variational_opts_init", p_variational_opts_init);
   BIND("stanli_variational", p_variational);
+  if (p_capture_messages != NULL && p_take_messages != NULL)
+    p_capture_messages(1);
   return mkString("");
 }
 
@@ -382,6 +388,30 @@ static const char* file_label(SEXP file) {
   return Rf_translateCharUTF8(STRING_ELT(file, 0));
 }
 
+/* The runtime queues what the model prints and what the sampler reports,
+ * because only this thread may call R's console API. Every entry point
+ * drains the queue as soon as the native call returns, before any error()
+ * can unwind, and the sampler callbacks drain it as they run so the text
+ * keeps its order. */
+static void flush_messages(void) {
+  if (p_take_messages == NULL) return;
+  char* text = p_take_messages();
+  if (text == NULL) return;
+  const void* vmax = vmaxget();
+  const size_t len = strlen(text);
+  char* copy = R_alloc(len + 1, 1);
+  memcpy(copy, text, len + 1);
+  p_string_free(text);
+  Rprintf("%s", copy);
+  R_FlushConsole();
+  vmaxset(vmax);
+}
+
+static void flush_messages_cb(void* unused) {
+  (void)unused;
+  flush_messages();
+}
+
 SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
                         SEXP threads_per_chain, SEXP fast_math, SEXP file) {
   require_loaded();
@@ -401,6 +431,7 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
     m = p_model_new_from_stan_named(text, label, data, &opts, err, sizeof err);
   else
     m = p_model_new_from_stan_with_opts(text, data, &opts, err, sizeof err);
+  flush_messages();
   if (m == NULL) error("%s", err[0] ? err : "stanli: model compilation failed");
   SEXP ext = PROTECT(R_MakeExternalPtr(m, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(ext, model_finalizer, TRUE);
@@ -441,6 +472,7 @@ SEXP stanli_r_stan_to_mir(SEXP code, SEXP include_paths, SEXP fast_math,
     mir = p_stan_to_mir_with_opts(Rf_translateCharUTF8(STRING_ELT(code, 0)),
                                   paths, count, asLogical(fast_math) == TRUE,
                                   err, sizeof err);
+  flush_messages();
   if (mir == NULL) {
     if (compiler_warnings != NULL) p_string_free(compiler_warnings);
     error("%s", err[0] ? err : "Stan source compilation failed");
@@ -525,6 +557,7 @@ SEXP stanli_r_write_array(SEXP m, SEXP q) {
   SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)ncol));
   const int rc = wa_n > 0 ? p_wa_row(mm, REAL(q), REAL(out))
                           : p_constrain(mm, REAL(q), REAL(out));
+  flush_messages();
   if (rc != 0) {
     UNPROTECT(1);
     error(
@@ -544,7 +577,9 @@ SEXP stanli_r_log_prob(SEXP m, SEXP q) {
   if (TYPEOF(q) != REALSXP || XLENGTH(q) != n)
     error("upars must contain %lld unconstrained values", (long long)n);
   double lp = 0;
-  if (p_grad(mm, REAL(q), &lp, NULL) != 0)
+  const int rc = p_grad(mm, REAL(q), &lp, NULL);
+  flush_messages();
+  if (rc != 0)
     error(
         "log density evaluation failed at this point (domain error in a "
         "distribution or function)");
@@ -565,6 +600,7 @@ SEXP stanli_r_unconstrain_inits(SEXP m, SEXP json) {
   err[0] = '\0';
   const int rc = p_unconstrain_inits(mm, CHAR(STRING_ELT(json, 0)), REAL(q),
                                      err, sizeof err);
+  flush_messages();
   if (rc != 0) {
     UNPROTECT(1);
     error("%s", err);
@@ -583,6 +619,7 @@ SEXP stanli_r_grad(SEXP m, SEXP q) {
   SEXP grad = PROTECT(allocVector(REALSXP, (R_xlen_t)n));
   double lp = 0;
   const int rc = p_grad(mm, REAL(q), &lp, REAL(grad));
+  flush_messages();
   if (rc != 0) {
     UNPROTECT(1);
     error(
@@ -625,6 +662,7 @@ static void fill_sample_opts(stanli_sample_opts* o, SEXP l) {
 static void sample_progress(int32_t chain_id, int64_t iteration, int64_t total,
                             int32_t warmup, void* user) {
   (void)user;
+  flush_messages();
   const int pct = total > 0 ? (int)(100 * iteration / total) : 100;
   Rprintf("Chain [%d] Iteration: %4lld / %lld [%3d%%]  (%s)\n", chain_id,
           (long long)iteration, (long long)total, pct,
@@ -643,6 +681,7 @@ static void check_interrupt(void* unused) {
  * sampler has returned. */
 static int sample_poll(void* user) {
   (void)user;
+  R_ToplevelExec(flush_messages_cb, NULL);
   return R_ToplevelExec(check_interrupt, NULL) ? 0 : 1;
 }
 
@@ -683,6 +722,7 @@ SEXP stanli_r_pathfinder_inits(SEXP m, SEXP seed, SEXP chains, SEXP options,
       asInteger(VECTOR_ELT(options, 0)), asInteger(VECTOR_ELT(options, 1)),
       asInteger(VECTOR_ELT(options, 2)), asReal(VECTOR_ELT(options, 3)), raw,
       NULL, NULL, err, sizeof err);
+  flush_messages();
   if (rc != 0)
     error("Pathfinder initialization failed: %s",
           err[0] ? err : "unknown error");
@@ -762,6 +802,7 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
       mm, &o, &mo, refresh_rate, REAL(raw), REAL(stats), REAL(vals),
       refresh_rate > 0 ? sample_progress : NULL, NULL, sample_poll, NULL,
       &interrupted, reports, err, sizeof err);
+  flush_messages();
   if (failed) {
     UNPROTECT(5);
     if (err[0] && strncmp(err, "chain ", 6) != 0) error("%s", err);
@@ -880,7 +921,9 @@ SEXP stanli_r_optimize(SEXP m, SEXP optlist, SEXP init) {
   double lp = 0;
   char err[4096];
   err[0] = '\0';
-  if (p_optimize(mm, &o, REAL(q), REAL(vals), &lp, err, sizeof err) != 0) {
+  const int rc = p_optimize(mm, &o, REAL(q), REAL(vals), &lp, err, sizeof err);
+  flush_messages();
+  if (rc != 0) {
     UNPROTECT(2);
     error("optimize failed: %s", err[0] ? err : "(no message)");
   }
@@ -920,6 +963,7 @@ static void log_keep(run_log* log, const char* text) {
 
 static void run_logger(int32_t level, const char* text, void* user) {
   run_log* log = (run_log*)user;
+  flush_messages();
   if (level >= 1 || strstr(text, "Informational Message") != NULL)
     log_keep(log, text);
   if (log->verbose && level == 0) {
@@ -990,6 +1034,7 @@ SEXP stanli_r_fixed_param(SEXP m, SEXP optlist, SEXP inits) {
   const int rc =
       p_fixed_param(mm, &o, REAL(vals), REAL(seconds), run_logger, &log,
                     sample_poll, NULL, &interrupted, err, sizeof err);
+  flush_messages();
   if (rc != 0) {
     UNPROTECT(2);
     error("fixed_param failed: %s", err[0] ? err : "(no message)");
@@ -1039,6 +1084,7 @@ SEXP stanli_r_laplace(SEXP m, SEXP optlist, SEXP mode) {
   const int rc = p_laplace_sample(
       mm, &o, REAL(mode), REAL(values[0]), REAL(values[1]), REAL(values[2]),
       run_logger, &log, sample_poll, NULL, &interrupted, err, sizeof err);
+  flush_messages();
   if (rc != 0) {
     UNPROTECT(3);
     error("laplace failed: %s", err[0] ? err : "(no message)");
@@ -1099,6 +1145,7 @@ SEXP stanli_r_pathfinder(SEXP m, SEXP optlist, SEXP inits) {
   const int rc =
       p_pathfinder(mm, &o, raw, lp, lp_approx, path, &rows, run_logger, &log,
                    sample_poll, NULL, &interrupted, err, sizeof err);
+  flush_messages();
   if (rc != 0) error("pathfinder failed: %s", err[0] ? err : "(no message)");
   if (interrupted) return interrupted_result();
 
@@ -1161,6 +1208,7 @@ SEXP stanli_r_variational(SEXP m, SEXP optlist, SEXP init) {
       p_variational(mm, &o, REAL(values[0]), REAL(values[1]), REAL(values[2]),
                     REAL(values[3]), run_logger, &log, sample_poll, NULL,
                     &interrupted, err, sizeof err);
+  flush_messages();
   if (rc != 0) {
     UNPROTECT(4);
     error("variational inference failed: %s", err[0] ? err : "(no message)");

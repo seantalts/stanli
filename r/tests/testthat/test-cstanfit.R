@@ -261,17 +261,10 @@ test_that("metadata, timings and metrics carry the fit's chain ids", {
 
 test_that("sample_cstan prints the shared sampling warnings", {
   skip_without_runtime()
-  skip_if_not_installed("callr")
-  out <- tempfile()
-  on.exit(unlink(out))
-  callr::r(function() {
-    library(stanli)
-    invisible(sample_cstan(
-      "parameters { real x; real y; } model { y ~ normal(0, 3); x ~ normal(0, exp(y / 2)); }",
-      chains = 1, iter_warmup = 100, iter_sampling = 500, seed = 42,
-      refresh = 1000))
-  }, stdout = out, stderr = "2>&1")
-  text <- paste(readLines(out), collapse = "\n")
+  text <- paste(capture.output(invisible(sample_cstan(
+    "parameters { real x; real y; } model { y ~ normal(0, 3); x ~ normal(0, exp(y / 2)); }",
+    chains = 1, iter_warmup = 100, iter_sampling = 500, seed = 42,
+    refresh = 1000))), collapse = "\n")
   expect_match(text, paste0(
     "Warning: [0-9]+ of 500 \\([0-9]+\\.[0-9]%\\) transitions ended with a ",
     "divergence\\.\nSee https://mc-stan.org/misc/warnings for details\\."))
