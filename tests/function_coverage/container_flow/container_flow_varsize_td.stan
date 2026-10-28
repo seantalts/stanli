@@ -22,6 +22,15 @@ functions {
     }
     return sum(mu);
   }
+  real comp_count(array[] int obs, data array[] int rr) {
+    array[size(obs)] int ro;
+    vector[size(obs)] pos;
+    for (i in 1:size(obs)) {
+      ro[i] = rr[obs[i]];
+      pos[i] = i;
+    }
+    return sum(ro) + sum(pos) / 100;
+  }
   array[] int rev_ix(array[] int a) {
     return reverse(a);
   }
@@ -141,6 +150,15 @@ transformed data {
       }
     }
   }
+  array[3] real td_vs_udf_intsum__acc;
+  {
+    {
+      for (g in 1:G) {
+        array[sz[g]] int ix = rows[g, 1:sz[g]];
+        td_vs_udf_intsum__acc[g] = comp_count(ix, r);
+      }
+    }
+  }
 }
 parameters {
   real q;
@@ -160,4 +178,5 @@ generated quantities {
   array[3] real out_td_vs_udf_slice_arg__lp = td_vs_udf_slice_arg__lp;
   array[3] real out_td_vs_udf_loop__acc = td_vs_udf_loop__acc;
   array[3] real out_td_vs_udf_branch__acc = td_vs_udf_branch__acc;
+  array[3] real out_td_vs_udf_intsum__acc = td_vs_udf_intsum__acc;
 }

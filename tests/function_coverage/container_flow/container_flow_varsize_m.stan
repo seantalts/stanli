@@ -22,6 +22,15 @@ functions {
     }
     return sum(mu);
   }
+  real comp_count(array[] int obs, data array[] int rr) {
+    array[size(obs)] int ro;
+    vector[size(obs)] pos;
+    for (i in 1:size(obs)) {
+      ro[i] = rr[obs[i]];
+      pos[i] = i;
+    }
+    return sum(ro) + sum(pos) / 100;
+  }
   array[] int rev_ix(array[] int a) {
     return reverse(a);
   }
@@ -56,7 +65,7 @@ transformed data {
 parameters {
   real q;
   vector[2] beta;
-  vector[69] p;
+  vector[72] p;
 }
 model {
   q ~ std_normal();
@@ -138,6 +147,14 @@ model {
       for (g in 1:G) {
         array[sz[g]] int ix = rows[g, 1:sz[g]];
         target += comp_branch(ix, r, X, beta) * p[66 + g];
+      }
+    }
+  }
+  {
+    {
+      for (g in 1:G) {
+        array[sz[g]] int ix = rows[g, 1:sz[g]];
+        target += comp_count(ix, r) * p[69 + g];
       }
     }
   }

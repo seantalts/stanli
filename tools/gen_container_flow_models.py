@@ -902,6 +902,15 @@ VARSIZE_FUNCTIONS = [
     "  }",
     "  return sum(mu);",
     "}",
+    "real comp_count(array[] int obs, data array[] int rr) {",
+    "  array[size(obs)] int ro;",
+    "  vector[size(obs)] pos;",
+    "  for (i in 1:size(obs)) {",
+    "    ro[i] = rr[obs[i]];",
+    "    pos[i] = i;",
+    "  }",
+    "  return sum(ro) + sum(pos) / 100;",
+    "}",
 ]
 SLICE = "array[sz[g]] int ix = rows[g, 1:sz[g]];"
 
@@ -940,6 +949,8 @@ def build_varsize(block, keep=None):
             put, lambda put: [SLICE, put("g", "comp_loop(ix, r, X)")])),
         "vs_udf_branch": lambda sink, off, b, nm: sink.cells(f"{nm}__acc", 3, False, lambda put: per_group(
             put, lambda put: [SLICE, put("g", f"comp_branch(ix, r, X, {b})")])),
+        "vs_udf_intsum": lambda sink, off, b, nm: sink.cells(f"{nm}__acc", 3, False, lambda put: per_group(
+            put, lambda put: [SLICE, put("g", "comp_count(ix, r)")])),
     }
     if block in ("tp", "gq"):
         # Transformed data leaves a same-named local whose last extent (1) is
@@ -968,6 +979,11 @@ def build_varsize(block, keep=None):
 
 
 UDFINT_FUNCTIONS = [
+    "real count_rng(int n) {",
+    "  array[n] int d;",
+    "  for (i in 1:n) d[i] = bernoulli_rng(0.5);",
+    "  return sum(d);",
+    "}",
     "array[] int which_elem(array[] int a, int v) {",
     "  int c = 0;",
     "  for (i in 1:size(a)) if (a[i] == v) c += 1;",
@@ -1020,6 +1036,7 @@ def build_udfint(block, keep=None):
             "array[4] int row = a2[kk];"] + sink.scalar(f"{nm}__kk", "kk", True)
             + dump(sink, f"{nm}__row", "row", [4])
             + sink.scalar(f"{nm}__gather", "dot_product(w[row], ramp4)", False)),
+        "rng_intsum": (True, lambda sink, nm: sink.scalar(f"{nm}__count", "count_rng(n3) + 0.5", False)),
         "rng_row_dims": (True, lambda sink, nm: [
             "int kk = categorical_rng(probs);",
             "int nc = dims(a2)[2];",

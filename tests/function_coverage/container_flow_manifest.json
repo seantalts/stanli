@@ -21647,6 +21647,10 @@
 "reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
 },
 {
+"case": "fn_rng_intsum",
+"reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
+},
+{
 "case": "fn_rng_row_dims",
 "reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
 },
@@ -21681,6 +21685,12 @@
 "name": "gq_rng_row",
 "rng": true,
 "write": "rng_row"
+},
+{
+"container": "udfint",
+"name": "gq_rng_intsum",
+"rng": true,
+"write": "rng_intsum"
 },
 {
 "container": "udfint",
@@ -21759,6 +21769,10 @@
 "reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
 },
 {
+"case": "m_rng_intsum",
+"reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
+},
+{
 "case": "m_rng_row_dims",
 "reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
 },
@@ -21793,6 +21807,12 @@
 "name": "td_rng_row",
 "rng": true,
 "write": "rng_row"
+},
+{
+"container": "udfint",
+"name": "td_rng_intsum",
+"rng": true,
+"write": "rng_intsum"
 },
 {
 "container": "udfint",
@@ -21843,6 +21863,10 @@
 "skipped": [
 {
 "case": "tp_rng_row",
+"reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
+},
+{
+"case": "tp_rng_intsum",
 "reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
 },
 {
@@ -21901,6 +21925,11 @@
 "container": "varsize",
 "name": "fn_vs_udf_branch",
 "write": "vs_udf_branch"
+},
+{
+"container": "varsize",
+"name": "fn_vs_udf_intsum",
+"write": "vs_udf_intsum"
 }
 ],
 "gradient": [
@@ -21975,7 +22004,10 @@
 "fn_vs_udf_loop__acc[3]",
 "fn_vs_udf_branch__acc[1]",
 "fn_vs_udf_branch__acc[2]",
-"fn_vs_udf_branch__acc[3]"
+"fn_vs_udf_branch__acc[3]",
+"fn_vs_udf_intsum__acc[1]",
+"fn_vs_udf_intsum__acc[2]",
+"fn_vs_udf_intsum__acc[3]"
 ],
 "skipped": []
 },
@@ -22030,6 +22062,11 @@
 "container": "varsize",
 "name": "gq_vs_udf_branch",
 "write": "vs_udf_branch"
+},
+{
+"container": "varsize",
+"name": "gq_vs_udf_intsum",
+"write": "vs_udf_intsum"
 }
 ],
 "gradient": [
@@ -22085,6 +22122,11 @@
 "container": "varsize",
 "name": "m_vs_udf_branch",
 "write": "vs_udf_branch"
+},
+{
+"container": "varsize",
+"name": "m_vs_udf_intsum",
+"write": "vs_udf_intsum"
 },
 {
 "container": "varsize",
@@ -22164,7 +22206,10 @@
 "m_vs_udf_loop__acc[3]",
 "m_vs_udf_branch__acc[1]",
 "m_vs_udf_branch__acc[2]",
-"m_vs_udf_branch__acc[3]"
+"m_vs_udf_branch__acc[3]",
+"m_vs_udf_intsum__acc[1]",
+"m_vs_udf_intsum__acc[2]",
+"m_vs_udf_intsum__acc[3]"
 ],
 "skipped": []
 },
@@ -22214,6 +22259,11 @@
 "container": "varsize",
 "name": "td_vs_udf_branch",
 "write": "vs_udf_branch"
+},
+{
+"container": "varsize",
+"name": "td_vs_udf_intsum",
+"write": "vs_udf_intsum"
 }
 ],
 "gradient": [
@@ -22274,6 +22324,11 @@
 "container": "varsize",
 "name": "tp_vs_udf_branch",
 "write": "vs_udf_branch"
+},
+{
+"container": "varsize",
+"name": "tp_vs_udf_intsum",
+"write": "vs_udf_intsum"
 }
 ],
 "gradient": [
@@ -23980,7 +24035,7 @@
 ]
 }
 },
-"name_count": 1884,
+"name_count": 1891,
 "skipped_builtins": [
 {
 "case": "td_r3_builtin",

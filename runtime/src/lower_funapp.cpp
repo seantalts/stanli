@@ -1824,7 +1824,7 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
         if (runtime_int_sum_candidate(e) ||
             (is_int_sum_surface(e) && e.args[0].kind != mir::Expr::Var))
           return lower_runtime_int_sum(e, actuals);
-        if (!is_int_sum_surface(e))
+        if (!is_int_sum_surface(e, true))
           fail(
               "runtime integer sum needs one one-dimensional int-array "
               "argument and a scalar int result",
