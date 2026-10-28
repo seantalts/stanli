@@ -174,14 +174,33 @@ bool Lowering::scan_block(const mir::Stmt& s,
         scope.erase(it->name);
     }
   };
-  const auto set_local_value = [&](const std::string& name,
-                                   const mir::Expr* rhs) {
-    std::optional<DataMap::Entry> value;
-    if (rhs) value = try_eval_pure(*rhs);
-    if (value)
-      td.env()[name] = std::move(*value);
-    else
-      td.env().erase(name);
+  // A value the scan cannot work out yet (one written inside a nested block,
+  // say) stays unknown; lowering evaluates it in order.
+  const auto set_local_int = [&](const std::string& name,
+                                 const mir::Expr* rhs) {
+    int_env.erase(name);
+    if (!rhs) return;
+    try {
+      int_env[name] = eval_int(*rhs);
+    } catch (const CompileError&) {
+    }
+  };
+  // Container locals are mirrored by running their declaration and every
+  // assignment to them in the data interpreter, which reads loop integers
+  // from int_env. One it cannot run, or one that would draw, is dropped.
+  const auto mirror_value = [&](const mir::Stmt& st, const std::string& name) {
+    bool effectful =
+        expr_effectful(st.kind == mir::Stmt::Decl ? st.init : st.rhs);
+    for (const auto& index : st.lhs_idx)
+      effectful = effectful || expr_effectful(index);
+    if (!effectful) {
+      try {
+        td.exec(st);
+        return;
+      } catch (const std::exception&) {
+      }
+    }
+    td.env().erase(name);
   };
   bool found = false;
   try {
@@ -192,11 +211,10 @@ bool Lowering::scan_block(const mir::Stmt& s,
       }
       if (child.kind == mir::Stmt::Decl && child.decl_type.base == "SInt") {
         local_ints.insert(child.decl_id);
-        int_env.erase(child.decl_id);
-        if (child.has_init) int_env[child.decl_id] = eval_int(child.init);
+        set_local_int(child.decl_id, child.has_init ? &child.init : nullptr);
       } else if (child.kind == mir::Stmt::Assignment && child.lhs_idx.empty() &&
                  local_ints.count(child.lhs)) {
-        int_env[child.lhs] = eval_int(child.rhs);
+        set_local_int(child.lhs, &child.rhs);
       } else if (child.kind == mir::Stmt::Decl &&
                  !child.decl_type.base.empty()) {
         try {
@@ -224,11 +242,15 @@ bool Lowering::scan_block(const mir::Stmt& s,
                                   : std::optional<Val>(value->second)});
         scope.erase(child.decl_id);
         local_containers.insert(child.decl_id);
-        set_local_value(child.decl_id, child.has_init ? &child.init : nullptr);
+        mirror_value(child, child.decl_id);
       } else if (child.kind == mir::Stmt::Assignment &&
                  local_containers.count(child.lhs)) {
-        set_local_value(child.lhs,
-                        child.lhs_idx.empty() ? &child.rhs : nullptr);
+        mirror_value(child, child.lhs);
+      } else if (!local_containers.empty()) {
+        std::vector<std::string> writes;
+        assigned_names(child, &writes);
+        for (const auto& name : writes)
+          if (local_containers.count(name)) td.env().erase(name);
       }
     }
   } catch (...) {
@@ -275,9 +297,9 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
       lo = eval_int(s.lower);
       hi = eval_int(s.upper);
     } catch (const CompileError&) {
-      if (needs_runtime_value(s.lower) || needs_runtime_value(s.upper))
-        return true;
-      throw;
+      // Including a bound this scan cannot work out yet: the caller then
+      // tries a register program and otherwise lowers in order.
+      return true;
     }
     if (lo > hi) return false;
     const auto old = int_env.find(s.loopvar);

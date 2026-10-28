@@ -1,5 +1,7 @@
 #include "lower_internal.hpp"
 
+#include <numeric>
+
 namespace stanli {
 namespace lower_detail {
 
@@ -61,6 +63,19 @@ std::vector<int64_t> Lowering::index_positions(const mir::Expr& ix,
   fail(std::string("unsupported ") + what + " " + ix.name, raw);
 }
 
+// For each graph cell of v, its position in v's observation.
+std::optional<std::vector<int64_t>> Lowering::observed_positions(const Val& v) {
+  std::vector<int64_t> at((size_t)g.slots[v.slot].len);
+  std::iota(at.begin(), at.end(), int64_t{0});
+  if (!is_array(v.si)) return at;
+  const ArrayShape& shape = array_shape(v.si);
+  try {
+    return graph_container_order(
+        at, shape.dims, shape.dims.size() - (size_t)leaf_rank(shape.leaf));
+  } catch (const std::domain_error&) {
+    return std::nullopt;
+  }
+}
 // Target models build int arrays in ascending contiguous writes.  Track the
 // initialized prefix in O(1) per immutable slot: overwrites inside it are
 // safe, an adjacent write extends it, and any gap/stride fails closed.  The
@@ -70,34 +85,30 @@ void Lowering::propagate_int_update(const Val& out_v, const Val& base,
                                     const Val& rhs, int64_t start,
                                     int64_t stride) {
   // A write of an observed value into an observed base stays observed:
-  // splice the element into a copy of the base's entry. Graph slots store
-  // arrays outer-major while DataMap entries keep first-index-fast order,
-  // so splicing graph offsets is only sound where the two flat orders
-  // coincide: scalars, vectors, matrices (column-major on both sides), and
-  // one-dimensional flat arrays. Deeper and Eigen-leaf arrays drop the
-  // observation instead of recording cells under the wrong order; their
-  // reads then evaluate against the graph value itself.
-  const bool splice_orders_agree =
-      !is_array(base.si) || (array_shape(base.si).dims.size() == 1 &&
-                             array_shape(base.si).leaf == ViewKind::Flat);
-  if (const DataMap::Entry* be =
-          splice_orders_agree ? observation(base) : nullptr) {
+  // splice the elements into a copy of the base's entry. Graph slots store
+  // arrays outer-major while DataMap entries keep first-index-fast order, so
+  // each graph offset is mapped to its entry position on both sides.
+  if (const DataMap::Entry* be = observation(base)) {
     const DataMap::Entry* re = observation(rhs);
     const int64_t rl = g.slots[rhs.slot].len;
     if ((rl == 0 || re) && g.slots[out_v.slot].len == g.slots[base.slot].len) {
       DataMap::Entry en = *be;
-      bool ok = true;
-      for (int64_t k = 0; k < rl; ++k) {
+      const auto base_at = observed_positions(base);
+      const auto rhs_at = observed_positions(rhs);
+      bool ok = base_at && rhs_at;
+      for (int64_t k = 0; ok && k < rl; ++k) {
         const int64_t at = start + k * stride;
         if (at < 0 || at >= (int64_t)en.r.size()) {
           ok = false;
           break;
         }
-        const double v = k < (int64_t)re->r.size()
-                             ? re->r[(size_t)k]
-                             : static_cast<double>(re->i.at((size_t)k));
-        en.r[(size_t)at] = v;
-        if (!en.i.empty()) en.i[(size_t)at] = (int)v;
+        const size_t from = (size_t)(*rhs_at)[(size_t)k];
+        const size_t to = (size_t)(*base_at)[(size_t)at];
+        const double v = from < re->r.size()
+                             ? re->r[from]
+                             : static_cast<double>(re->i.at(from));
+        en.r[to] = v;
+        if (!en.i.empty()) en.i[to] = (int)v;
       }
       if (ok) observe(out_v, std::move(en));
     }
@@ -227,9 +238,18 @@ long Lowering::eval_int(const mir::Expr& e) {
       // O1 can leave an empty Indexed wrapper around a fully composed
       // integer access, just as it does for real-valued expressions.
       if (e.args.size() == 1) return eval_int(e.args[0]);
-      DataMap::Entry* en =
+      const DataMap::Entry* en =
           e.args[0].kind == mir::Expr::Var ? td.find(e.args[0].name) : nullptr;
       bool all_single = en && en->is_int;
+      // A local held only as a graph value is read from its observation,
+      // which keeps the same first-index-fastest order but may hold the
+      // integers as reals.
+      if (!en && e.args[0].kind == mir::Expr::Var)
+        if (const auto bound = scope.find(e.args[0].name); bound != scope.end())
+          if ((en = observation(bound->second)))
+            all_single =
+                en->is_int ? en->i.size() == en->r.size() : en->i.empty();
+      const size_t stored = !en ? 0 : en->is_int ? en->i.size() : en->r.size();
       for (size_t k = 1; all_single && k < e.args.size(); ++k)
         all_single = e.args[k].name == "IndexSingle";
       const size_t rank = en ? std::max<size_t>(en->dims.size(), 1) : 0;
@@ -237,7 +257,7 @@ long Lowering::eval_int(const mir::Expr& e) {
         size_t offset = 0, stride = 1;
         for (size_t d = 0; d < rank; ++d) {
           const int64_t extent =
-              en->dims.empty() ? (int64_t)en->i.size() : en->dims[d];
+              en->dims.empty() ? (int64_t)stored : en->dims[d];
           const long index = eval_int(e.args[d + 1].args[0]);
           if (index < 1 || index > extent)
             fail("integer index " + std::to_string(index) +
@@ -246,7 +266,8 @@ long Lowering::eval_int(const mir::Expr& e) {
           offset += (size_t)(index - 1) * stride;
           stride *= (size_t)extent;
         }
-        return en->i.at(offset);
+        if (offset >= stored) fail("integer index storage", e.raw);
+        return en->is_int ? en->i[offset] : static_cast<long>(en->r[offset]);
       }
       // dims(x)[k] and friends: evaluate the base as a compile-time
       // sequence, then index it.
@@ -904,8 +925,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           if (x < 1 || x > sh.dims[0])
             fail("array gather out of bounds", e.raw);
           for (int64_t k = 0; k < width; ++k)
-            idata.push_back(checked_immediate((x - 1) * width + k,
-                                                   "array gather offset"));
+            idata.push_back(
+                checked_immediate((x - 1) * width + k, "array gather offset"));
         }
         SlotInfo si = array_view(std::move(out_dims), sh.leaf);
         return with_layout(emit_value(OP_GATHER, {base}, len, si, idata),

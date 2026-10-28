@@ -1,59 +1,5 @@
 [
   {
-    "model": "container_flow_builtin_i1",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_builtin_i2",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_builtin_i3",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_fn_i1",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_fn_i2",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_fn_i3",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_gq_i1",
-    "interpreted": "generated quantities (value must be known at compile time: gq_i1_multi)",
-    "cause": "A GQ int array filled in a loop or by multi-index is later used where lowering needs a compile-time value.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_gq_i2",
-    "interpreted": "generated quantities (value must be known at compile time: gq_i2_loop)",
-    "cause": "A GQ int array filled in a loop or by multi-index is later used where lowering needs a compile-time value.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_gq_i3",
-    "interpreted": "generated quantities (value must be known at compile time: gq_i3_loop)",
-    "cause": "A GQ int array filled in a loop or by multi-index is later used where lowering needs a compile-time value.",
-    "since": "2026-10-28"
-  },
-  {
     "model": "container_flow_rt_fn_i1",
     "interpreted": "generated quantities (unknown variable inline_fn_i1_rt_multi_x_sym44__ (type UArray))",
     "cause": "A GQ/TP/UDF-local int array used as a gather index or multi-index write target has no graph value.",
@@ -61,13 +7,13 @@
   },
   {
     "model": "container_flow_rt_fn_i2",
-    "interpreted": "generated quantities (unknown variable inline_fn_i2_rt_loop_x_sym7__ (type UArray))",
+    "interpreted": "generated quantities (unknown variable inline_fn_i2_rt_multi_x_sym50__ (type UArray))",
     "cause": "A GQ/TP/UDF-local int array used as a gather index or multi-index write target has no graph value.",
     "since": "2026-10-28"
   },
   {
     "model": "container_flow_rt_fn_i3",
-    "interpreted": "generated quantities (unknown variable inline_fn_i3_rt_loop_x_sym7__ (type UArray))",
+    "interpreted": "generated quantities (unknown variable inline_fn_i3_rt_multi_x_sym55__ (type UArray))",
     "cause": "A GQ/TP/UDF-local int array used as a gather index or multi-index write target has no graph value.",
     "since": "2026-10-28"
   },
@@ -105,42 +51,6 @@
     "model": "container_flow_rt_tp_i3",
     "interpreted": "transformed parameters (unknown variable x (type UArray))",
     "cause": "A GQ/TP/UDF-local int array used as a gather index or multi-index write target has no graph value.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_tp_i1",
-    "interpreted": "transformed parameters (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_tp_i2",
-    "interpreted": "transformed parameters (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_tp_i3",
-    "interpreted": "transformed parameters (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_udfint_fn",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_udfint_gq",
-    "interpreted": "generated quantities (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "container_flow_udfint_tp",
-    "interpreted": "transformed parameters (unsupported int index expression)",
-    "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
     "since": "2026-10-28"
   }
 ]

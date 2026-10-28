@@ -1139,6 +1139,7 @@ struct Lowering {
   // later overflow proof.
   void propagate_int_update(const Val& out_v, const Val& base, const Val& rhs,
                             int64_t start, int64_t stride);
+  std::optional<std::vector<int64_t>> observed_positions(const Val& v);
 
   // The registered scalar shape queries, plus FnLength, the compiler
   // internal that the compile-time evaluators have always answered as size.

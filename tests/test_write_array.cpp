@@ -1549,7 +1549,8 @@ void test_write_array_bounded_blocks() {
   for (int mode = 0; mode <= 4; ++mode) {
     DataMap d;
     d.set_int("mode", mode);
-    expect_bounded_output("gq_bounded_refusals", d, false);
+    // Mode 1, an int array filled in a loop, is a bounded block.
+    expect_bounded_output("gq_bounded_refusals", d, mode == 1);
   }
   for (int mode = 0; mode <= 4; ++mode) {
     for (int capacity : {1, 2, 8}) {
