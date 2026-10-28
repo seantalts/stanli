@@ -1555,6 +1555,131 @@ def test_invalid_metric_values_raise_stans_message_before_sampling():
         raise AssertionError("negative diag inv_metric accepted")
 
 
+def _bad_sample_argument(exc, text, **kw):
+    try:
+        _metric_fit(**kw)
+    except exc as e:
+        assert str(e) == text, str(e)
+    else:
+        raise AssertionError(f"no {exc.__name__} for {kw}")
+
+
+def test_sample_rejects_bad_counts_with_clear_messages():
+    for kw, text in [
+        ({"chains": 0}, "chains must be an integer >= 1"),
+        ({"chains": -2}, "chains must be an integer >= 1"),
+        ({"warmup": -1}, "warmup must be an integer >= 0"),
+        ({"samples": -5}, "samples must be an integer >= 0"),
+        ({"thin": 0}, "thin must be an integer >= 1"),
+        ({"max_depth": 0}, "max_depth must be an integer >= 1"),
+        ({"delta": 1.5}, "delta must be between 0 and 1"),
+        ({"delta": 0}, "delta must be between 0 and 1"),
+        ({"delta": 1}, "delta must be between 0 and 1"),
+        ({"delta": float("nan")}, "delta must be between 0 and 1"),
+        ({"init_radius": -1}, "init_radius must be a finite number >= 0"),
+    ]:
+        _bad_sample_argument(ValueError, text, **kw)
+
+
+def test_sample_rejects_bad_seed_and_wrong_types():
+    for seed in ("a", None, 1.5, -1, True, [1]):
+        _bad_sample_argument(ValueError, "seed must be an integer >= 0",
+                             seed=seed)
+    _bad_sample_argument(ValueError, "seed must be at most 4294967295",
+                         seed=2 ** 32)
+    for name in ("chains", "warmup", "samples", "thin", "max_depth"):
+        for bad in ("a", None, 2.5, True):
+            _bad_sample_argument(ValueError, f"{name} must be an integer",
+                                 **{name: bad})
+        _bad_sample_argument(
+            ValueError, f"{name} must be an integer no larger than 2147483647",
+            **{name: 2 ** 40})
+    for name in ("delta", "init_radius"):
+        for bad in ("a", None, True):
+            _bad_sample_argument(ValueError, f"{name} must be a number",
+                                 **{name: bad})
+    _bad_sample_argument(ValueError, "parallel_chains must be an integer >= 1",
+                         parallel_chains=0)
+
+
+def test_sample_still_accepts_zero_warmup_and_integral_floats():
+    fit = _metric_fit(chains=2, warmup=0, samples=0 + 10, thin=1.0)
+    assert fit.n_chains == 2 and fit.n_draws == 10
+
+
+def test_optimize_rejects_bad_arguments():
+    model = _metric_model()
+    for kw, text in [
+        ({"seed": "a"}, "seed must be an integer >= 0"),
+        ({"iter": 0}, "iter must be an integer >= 1"),
+        ({"iter": -5}, "iter must be an integer >= 1"),
+        ({"iter": "a"}, "iter must be an integer"),
+        ({"init_radius": -1}, "init_radius must be a finite number >= 0"),
+    ]:
+        try:
+            model.optimize(**kw)
+        except ValueError as e:
+            assert str(e) == text, str(e)
+        else:
+            raise AssertionError(f"no ValueError for {kw}")
+
+
+def test_dict_inits_explain_the_unconstrained_scale():
+    model = _metric_model()
+    for call in (
+        lambda: model.sample(inits={"x": [0.1, 0.2, 0.3]}, refresh=0),
+        lambda: model.sample(inits=[{"x": [0.1, 0.2, 0.3]}] * 4, refresh=0),
+        lambda: model.optimize(init={"x": [0.1, 0.2, 0.3]}),
+    ):
+        try:
+            call()
+        except TypeError as e:
+            assert "unconstrained" in str(e) and "unconstrain(" in str(e), str(e)
+        else:
+            raise AssertionError("dict inits accepted")
+    start = model.unconstrain({"x": [0.1, 0.2, 0.3]})
+    assert model.sample(inits=start, chains=2, warmup=20, samples=5,
+                        refresh=0).n_chains == 2
+
+
+def _freed_model():
+    model = _metric_model()
+    model.__del__()
+    return model
+
+
+def test_freed_model_raises_instead_of_crashing():
+    message = "stanli model handle is no longer valid"
+    uses = [
+        lambda m: m.log_prob_grad(np.zeros(3)),
+        lambda m: m.unconstrain({"x": [0.1, 0.2, 0.3]}),
+        lambda m: m.sample(chains=1, warmup=5, samples=5, refresh=0),
+        lambda m: m.optimize(),
+        lambda m: m.reduce_sum_count,
+        lambda m: m.reduce_sum_fallbacks,
+    ]
+    for use in uses:
+        model = _freed_model()
+        try:
+            use(model)
+        except RuntimeError as e:
+            assert str(e) == message, str(e)
+        else:
+            raise AssertionError("freed model was used")
+
+
+def test_models_cannot_be_copied_or_pickled():
+    model = _metric_model()
+    for duplicate in (copy.copy, copy.deepcopy, pickle.dumps):
+        try:
+            duplicate(model)
+        except TypeError as e:
+            assert "cannot be copied or pickled" in str(e), str(e)
+        else:
+            raise AssertionError("a Model handle was duplicated")
+    model.log_prob_grad(np.zeros(3))
+
+
 def main():
     failed = 0
     for name, fn in sorted(globals().items()):

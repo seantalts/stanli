@@ -185,6 +185,16 @@ typedef struct {
  * the wrong starting point rather than fail. */
 void stanli_sample_opts_init(stanli_sample_opts* o);
 
+/* 0 when `o` is a request the sampler can run; else 1, with a message naming
+ * the first bad field in err: chains >= 1, warmup >= 0, samples >= 0,
+ * thin >= 1, delta strictly between 0 and 1, max_depth >= 1, init_radius
+ * finite and >= 0, chain_id >= 1 with chain_id + chains - 1 representable.
+ * stanli_sample_multi_metric applies it first and fails the
+ * same way, so a binding that sizes buffers from the options should call
+ * this before allocating them. */
+int stanli_sample_opts_check(const stanli_sample_opts* o, char* err,
+                             size_t err_len);
+
 /* Stored rows per chain under these options. This is what `draws` and
  * `stats` must be sized against, and it is not `samples` whenever thin
  * or save_warmup is set. */

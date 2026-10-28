@@ -478,8 +478,18 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          inv_metric = NULL, step_size = NULL,
                          adapt_engaged = TRUE, chain_id = 1L) {
   cstan_integer(threads_per_chain, "threads_per_chain")
+  cstan_integer(seed, "seed", 0)
   check_chain_id(chain_id, chains)
   chain_id <- as.integer(chain_id)
+  opts <- list(
+    seed = as.integer(seed), chains = sampler_integer(chains, "chains"),
+    warmup = sampler_integer(warmup, "warmup"),
+    samples = sampler_integer(samples, "samples"),
+    thin = sampler_integer(thin, "thin"),
+    delta = sampler_number(delta, "delta"),
+    max_depth = sampler_integer(max_depth, "max_depth"),
+    save_warmup = isTRUE(save_warmup),
+    init_radius = sampler_number(init_radius, "init_radius"))
   stanfit_flag(fixed_param, "fixed_param")
   metric <- match.arg(metric)
   stanfit_flag(adapt_engaged, "adapt_engaged")
@@ -500,18 +510,17 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
     stop("init and pathfinder_init are mutually exclusive", call. = FALSE)
   if (!is.null(pathfinder_init))
     pathfinder_init <- .pathfinder_init_options(pathfinder_init)
-  if (!is.null(pathfinder_init) &&
-      (length(chains) != 1L || !is.numeric(chains) || is.logical(chains) ||
-       is.na(chains) || !is.finite(chains) || chains <= 0 ||
-       chains != floor(chains) || chains > .Machine$integer.max))
-    stop("chains must be a positive integer with Pathfinder initialization",
-         call. = FALSE)
   load_runtime()
+  if (is.null(parallel_chains)) parallel_chains <- max(opts$chains, 1L)
+  cstan_integer(parallel_chains, "parallel_chains")
+  parallel_chains <- as.integer(parallel_chains)
+  opts <- unname(c(opts, list(parallel_chains = parallel_chains,
+                              chain_id = chain_id)))
+  .Call("stanli_r_check_sample_options", opts)
   model <- with_run_seed(model, seed, threads_per_chain)
   if (fixed_param)
     return(fixed_param_fit(model, chains, seed, samples, thin, init,
                            init_radius, refresh, chain_id))
-  if (is.null(parallel_chains)) parallel_chains <- chains
   if (!is.null(pathfinder_init)) {
     init <- .Call("stanli_r_pathfinder_inits", model$ptr, as.integer(seed),
                   as.integer(chains), unname(pathfinder_init), chain_id)
@@ -527,11 +536,6 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
     # The C side reads chain-major rows, so transpose before flattening.
     init_vec <- as.double(t(m))
   }
-  opts <- list(as.integer(seed), as.integer(chains), as.integer(warmup),
-               as.integer(samples), as.integer(thin), as.double(delta),
-               as.integer(max_depth), isTRUE(save_warmup),
-               as.double(init_radius), as.integer(parallel_chains),
-               chain_id)
   metric_opts <- metric_options(metric, inv_metric, step_size, adapt_engaged,
                                 as.integer(chains), model$n_unconstrained)
   res <- .Call("stanli_r_sample", model$ptr, opts, init_vec, refresh,
@@ -576,6 +580,19 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                                                model$n_unconstrained),
                  adapt_engaged = adapt_engaged, chain_id = chain_id),
             class = "stanli_fit")
+}
+
+sampler_integer <- function(x, name) {
+  if (length(x) != 1L || !is.numeric(x) || is.na(x) || !is.finite(x) ||
+      x != floor(x) || abs(x) > .Machine$integer.max)
+    stop(name, " must be an integer", call. = FALSE)
+  as.integer(x)
+}
+
+sampler_number <- function(x, name) {
+  if (length(x) != 1L || !is.numeric(x) || is.na(x))
+    stop(name, " must be a number", call. = FALSE)
+  as.double(x)
 }
 
 check_chain_id <- function(chain_id, chains) {
@@ -759,10 +776,12 @@ stanli_diagnose <- function(fit) {
 #' @export
 optimize_model <- function(model, seed = 1, iter = 2000, init = NULL,
                            init_radius = 2) {
+  cstan_integer(seed, "seed", 0)
+  iter <- sampler_integer(iter, "iter")
+  init_radius <- sampler_number(init_radius, "init_radius")
   load_runtime()
   model <- with_run_seed(model, seed)
-  opts <- list(as.integer(seed), as.integer(iter), TRUE,
-               as.double(init_radius))
+  opts <- list(as.integer(seed), iter, TRUE, init_radius)
   init_vec <- if (is.null(init)) numeric(0) else as.double(init)
   r <- .Call("stanli_r_optimize", model$ptr, opts, init_vec)
   names(r$values) <- model$columns

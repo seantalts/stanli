@@ -45,6 +45,7 @@ EXPORTS
   stanli_transformed_data_rng
   stanli_sample_opts_init
   stanli_n_stored_draws
+  stanli_sample_opts_check
   stanli_thread_safe
   stanli_metric_opts_init
   stanli_sample_multi_metric

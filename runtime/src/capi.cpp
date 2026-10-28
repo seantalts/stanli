@@ -609,6 +609,35 @@ void stanli_sample_opts_init(stanli_sample_opts* o) {
   o->num_threads = 1;
 }
 
+int stanli_sample_opts_check(const stanli_sample_opts* o, char* err,
+                             size_t err_len) {
+  const char* problem = nullptr;
+  if (o == nullptr)
+    problem = "null options";
+  else if (o->chains < 1)
+    problem = "chains must be an integer >= 1";
+  else if (o->warmup < 0)
+    problem = "warmup must be an integer >= 0";
+  else if (o->samples < 0)
+    problem = "samples must be an integer >= 0";
+  else if (o->thin < 1)
+    problem = "thin must be an integer >= 1";
+  else if (!(o->delta > 0.0 && o->delta < 1.0))
+    problem = "delta must be between 0 and 1";
+  else if (o->max_depth < 1)
+    problem = "max_depth must be an integer >= 1";
+  else if (!(std::isfinite(o->init_radius) && o->init_radius >= 0.0))
+    problem = "init_radius must be a finite number >= 0";
+  else if (o->chain_id < 1)
+    problem = "chain_id must be an integer >= 1";
+  else if ((int64_t)o->chain_id + o->chains - 1 >
+           std::numeric_limits<int>::max())
+    problem = "chain_id + chains - 1 must not exceed 2147483647";
+  if (problem == nullptr) return 0;
+  put_err(err, err_len, problem);
+  return 1;
+}
+
 int64_t stanli_n_stored_draws(const stanli_sample_opts* o) {
   if (o == nullptr) return 0;
   const int thin = o->thin > 0 ? o->thin : 1;
@@ -667,7 +696,8 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
       put_err(err, err_len, "refresh must be nonnegative");
       return 1;
     }
-    const int n_chains = opts->chains > 0 ? opts->chains : 1;
+    if (stanli_sample_opts_check(opts, err, err_len) != 0) return 1;
+    const int n_chains = opts->chains;
     const int64_t n = m->ex->n_params();
     const int64_t n_stored = stanli_n_stored_draws(opts);
     if (reports != nullptr)
@@ -675,12 +705,12 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
 
     stanli::NutsConfig cfg;
     cfg.seed = opts->seed;
-    cfg.chain_id = opts->chain_id > 0 ? opts->chain_id : 1;
+    cfg.chain_id = opts->chain_id;
     cfg.warmup = opts->warmup;
     cfg.samples = opts->samples;
-    cfg.thin = opts->thin > 0 ? opts->thin : 1;
+    cfg.thin = opts->thin;
     cfg.delta = opts->delta;
-    cfg.max_depth = opts->max_depth > 0 ? opts->max_depth : 10;
+    cfg.max_depth = opts->max_depth;
     cfg.save_warmup = opts->save_warmup != 0;
     cfg.init_radius = opts->init_radius;
     switch (mo.metric) {
@@ -899,10 +929,18 @@ int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
       put_err(err, err_len, "null options");
       return 1;
     }
+    if (opts->iter < 1) {
+      put_err(err, err_len, "iter must be an integer >= 1");
+      return 1;
+    }
+    if (!(std::isfinite(opts->init_radius) && opts->init_radius >= 0.0)) {
+      put_err(err, err_len, "init_radius must be a finite number >= 0");
+      return 1;
+    }
     stanli::OptimizeConfig cfg;
     cfg.seed = opts->seed;
     cfg.chain_id = opts->chain_id > 0 ? opts->chain_id : 1;
-    cfg.iter = opts->iter > 0 ? opts->iter : 2000;
+    cfg.iter = opts->iter;
     cfg.jacobian = opts->jacobian != 0;
     cfg.init_alpha = opts->init_alpha;
     cfg.tol_obj = opts->tol_obj;

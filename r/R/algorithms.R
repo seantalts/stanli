@@ -22,7 +22,7 @@ algorithm_count <- function(x, name, minimum = 1L) {
   if (length(x) != 1L || !is.numeric(x) || is.logical(x) || is.na(x) ||
       !is.finite(x) || x < minimum || x != floor(x) ||
       x > .Machine$integer.max)
-    stop(name, " must be a single integer of at least ", minimum, call. = FALSE)
+    stop(name, " must be an integer >= ", minimum, call. = FALSE)
   as.integer(x)
 }
 

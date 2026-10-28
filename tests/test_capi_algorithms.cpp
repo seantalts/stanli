@@ -281,6 +281,31 @@ std::vector<double> find_mode(stanli_model* m) {
   return q;
 }
 
+void test_optimize_options(stanli_model* m) {
+  char err[4096]{};
+  std::vector<double> q(3), values((size_t)kWidth);
+  double lp = 0;
+  for (int bad_iter : {0, -5}) {
+    stanli_optimize_opts o;
+    stanli_optimize_opts_init(&o);
+    o.iter = bad_iter;
+    err[0] = '\0';
+    const int rc =
+        stanli_optimize(m, &o, q.data(), values.data(), &lp, err, sizeof err);
+    expect("optimize rejects iter < 1",
+           rc != 0 && std::string(err) == "iter must be an integer >= 1");
+  }
+  stanli_optimize_opts o;
+  stanli_optimize_opts_init(&o);
+  o.init_radius = -1.0;
+  err[0] = '\0';
+  const int rc =
+      stanli_optimize(m, &o, q.data(), values.data(), &lp, err, sizeof err);
+  expect("optimize rejects a negative init_radius",
+         rc != 0 &&
+             std::string(err) == "init_radius must be a finite number >= 0");
+}
+
 void test_laplace(stanli_model* m) {
   char err[4096]{};
   const std::vector<double> mode = find_mode(m);
@@ -639,6 +664,7 @@ int main() {
     expect("alg_gauss width", stanli_wa_n_columns(m) == kWidth);
     expect("alg_gauss parameters", stanli_n_unconstrained(m) == 3);
     test_fixed_param(m);
+    test_optimize_options(m);
     test_laplace(m);
     test_pathfinder(m);
     test_variational(m);

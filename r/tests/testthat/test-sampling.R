@@ -165,6 +165,52 @@ test_that("refresh is a single nonnegative integer", {
                  "single nonnegative integer", fixed = TRUE)
 })
 
+test_that("sample_model rejects bad counts and options by name", {
+  skip_without_runtime()
+  m <- progress_model()
+  bad <- list(
+    list(list(chains = 0), "chains must be an integer >= 1"),
+    list(list(chains = -2), "chains must be an integer >= 1"),
+    list(list(warmup = -1), "warmup must be an integer >= 0"),
+    list(list(samples = -5), "samples must be an integer >= 0"),
+    list(list(thin = 0), "thin must be an integer >= 1"),
+    list(list(max_depth = 0), "max_depth must be an integer >= 1"),
+    list(list(delta = 1.5), "delta must be between 0 and 1"),
+    list(list(delta = 0), "delta must be between 0 and 1"),
+    list(list(init_radius = -1), "init_radius must be a finite number >= 0"),
+    list(list(parallel_chains = 0), "parallel_chains must be an integer >= 1"),
+    list(list(seed = -1), "seed must be an integer >= 0"),
+    list(list(seed = "a"), "seed must be an integer >= 0"),
+    list(list(chains = "a"), "chains must be an integer"),
+    list(list(samples = 2.5), "samples must be an integer"),
+    list(list(samples = NA), "samples must be an integer"),
+    list(list(delta = "a"), "delta must be a number"))
+  quick <- list(m, warmup = 5, samples = 5, refresh = 0)
+  for (case in bad)
+    expect_error(
+      do.call(sample_model, utils::modifyList(quick, case[[1]])),
+      case[[2]], fixed = TRUE)
+  expect_no_warning(try(sample_model(m, seed = "a", warmup = 5, samples = 5,
+                                     refresh = 0), silent = TRUE))
+  fit <- sample_model(m, chains = 1, warmup = 0, samples = 3, refresh = 0)
+  expect_equal(dim(fit$draws)[1], 3)
+})
+
+test_that("fixed_param and optimize name the argument they reject", {
+  skip_without_runtime()
+  m <- progress_model()
+  expect_error(sample_model(m, chains = 0, fixed_param = TRUE, refresh = 0),
+               "chains must be an integer >= 1", fixed = TRUE)
+  expect_error(optimize_model(m, iter = 0), "iter must be an integer >= 1",
+               fixed = TRUE)
+  expect_error(optimize_model(m, iter = "a"), "iter must be an integer",
+               fixed = TRUE)
+  expect_error(optimize_model(m, seed = "a"), "seed must be an integer >= 0",
+               fixed = TRUE)
+  expect_error(optimize_model(m, init_radius = -1),
+               "init_radius must be a finite number >= 0", fixed = TRUE)
+})
+
 test_that("sampling progress is informative and observational", {
   skip_without_runtime()
   m <- progress_model()

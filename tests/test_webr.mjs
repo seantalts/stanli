@@ -46,6 +46,7 @@ if (!compilerOnly) {
     dyn.load('/tmp/libstanli.so')
     syms <- c('stanli_abi_version', 'stanli_model_new_with_opts',
               'stanli_exact_lp', 'stanli_grad', 'stanli_sample_multi_metric',
+              'stanli_sample_opts_check',
               'stanli_optimize', 'stanli_diagnose_text', 'stanli_wa_row')
     syms[!vapply(syms, is.loaded, logical(1))]
   `);

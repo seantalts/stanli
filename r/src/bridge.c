@@ -214,6 +214,7 @@ static const char* (*p_constrained_name)(const void*, int64_t);
 static int (*p_constrain)(void*, const double*, double*);
 static void (*p_sample_opts_init)(stanli_sample_opts*);
 static int64_t (*p_n_stored_draws)(const stanli_sample_opts*);
+static int (*p_sample_opts_check)(const stanli_sample_opts*, char*, size_t);
 static int (*p_sample_multi_metric)(void*, const stanli_sample_opts*,
                                     const stanli_metric_opts*, int, double*,
                                     double*, double*, stanli_sample_progress_cb,
@@ -308,6 +309,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_constrain", p_constrain);
   BIND("stanli_sample_opts_init", p_sample_opts_init);
   BIND("stanli_n_stored_draws", p_n_stored_draws);
+  BIND("stanli_sample_opts_check", p_sample_opts_check);
   BIND("stanli_sample_multi_metric", p_sample_multi_metric);
   BIND("stanli_pathfinder_inits", p_pathfinder_inits);
   BIND("stanli_sampler_column_name", p_sampler_column_name);
@@ -663,18 +665,34 @@ SEXP stanli_r_pathfinder_inits(SEXP m, SEXP seed, SEXP chains, SEXP options,
   return out;
 }
 
+static void check_sample_opts(const stanli_sample_opts* o) {
+  char err[512];
+  err[0] = '\0';
+  if (p_sample_opts_check(o, err, sizeof err) != 0)
+    error("%s", err[0] ? err : "invalid sampling options");
+}
+
+SEXP stanli_r_check_sample_options(SEXP optlist) {
+  require_loaded();
+  stanli_sample_opts o;
+  fill_sample_opts(&o, optlist);
+  check_sample_opts(&o);
+  return R_NilValue;
+}
+
 SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
                      SEXP metric_list) {
   require_loaded();
   void* mm = model_ptr(m);
   stanli_sample_opts o;
   fill_sample_opts(&o, optlist);
+  check_sample_opts(&o);
   if (XLENGTH(inits) > 0) o.inits = REAL(inits);
   const int refresh_rate = asInteger(refresh);
 
   const int64_t n = p_n_unconstrained(mm);
   const int64_t rows = p_n_stored_draws(&o);
-  const int64_t nchain = o.chains > 0 ? o.chains : 1;
+  const int64_t nchain = o.chains;
   stanli_sample_report* reports =
       (stanli_sample_report*)R_alloc((size_t)nchain, sizeof(*reports));
 
