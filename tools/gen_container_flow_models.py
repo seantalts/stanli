@@ -1020,6 +1020,15 @@ def build_udfint(block, keep=None):
             "array[4] int row = a2[kk];"] + sink.scalar(f"{nm}__kk", "kk", True)
             + dump(sink, f"{nm}__row", "row", [4])
             + sink.scalar(f"{nm}__gather", "dot_product(w[row], ramp4)", False)),
+        "rng_row_dims": (True, lambda sink, nm: [
+            "int kk = categorical_rng(probs);",
+            "int nc = dims(a2)[2];",
+            "array[nc] int row = a2[kk];"] + dump(sink, f"{nm}__row", "row", [4])),
+        "rng_row_empty": (True, lambda sink, nm: [
+            "int kk = categorical_rng(probs);",
+            "array[3, n0] int z = rep_array(1, 3, n0);",
+            "int nz = dims(z)[2];",
+            "array[nz] int zr = z[kk];"] + sink.scalar(f"{nm}__size", "size(zr) * 10 + kk", True)),
     }
     for form, (rng, fn) in cases.items():
         name = f"{block}_{form}"

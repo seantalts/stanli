@@ -945,6 +945,17 @@ struct ProgramCompiler {
             bail("integer index range");
           return cint(e.args[0].args[(size_t)ix - 1]);
         }
+        // Any other one-dimensional int array a function returns, such as
+        // `dims(x)[2]`.
+        if (e.args.size() == 2 && e.args[0].kind == mir::Expr::FunApp &&
+            e.args[0].unsized.depth == 1 &&
+            e.args[0].unsized.leaf == mir::UnsizedLeaf::Int &&
+            e.args[1].name == "IndexSingle") {
+          const std::vector<long> values = cints(e.args[0]);
+          const long ix = cint(e.args[1].args[0]);
+          if (ix < 1 || (size_t)ix > values.size()) bail("integer index range");
+          return values[(size_t)ix - 1];
+        }
         if (e.args[0].kind != mir::Expr::Var) bail("integer index base");
         for (size_t k = 1; k < e.args.size(); ++k)
           if (e.args[k].name != "IndexSingle" || e.args[k].args.size() != 1)

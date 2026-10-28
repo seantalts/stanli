@@ -142,23 +142,5 @@
     "interpreted": "transformed parameters (unsupported int index expression)",
     "cause": "eval_int cannot evaluate an int container computed at run time (a GQ/TP/UDF-local int array) used as an index.",
     "since": "2026-10-28"
-  },
-  {
-    "model": "oncobayes2_blrm_exnex_combo2",
-    "interpreted": "generated quantities (runtime index needs one outer array dimension)",
-    "cause": "A row of a 2-D int array selected by a run-time int (OncoBayes2: mix_idx_beta[mix_config_ind], mix_config_ind from categorical_rng).",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "oncobayes2_blrm_exnex_combo3",
-    "interpreted": "generated quantities (runtime index needs one outer array dimension)",
-    "cause": "OncoBayes2 selects a row of a 2-D data int array by a categorical_rng draw (mix_idx_beta[mix_config_ind]).",
-    "since": "2026-10-28"
-  },
-  {
-    "model": "oncobayes2_blrm_exnex_sa",
-    "interpreted": "generated quantities (runtime index needs one outer array dimension)",
-    "cause": "OncoBayes2 selects a row of a 2-D data int array by a categorical_rng draw (mix_idx_beta[mix_config_ind]).",
-    "since": "2026-10-28"
   }
 ]

@@ -104,6 +104,27 @@ transformed data {
       td_rng_row__gather = dot_product(w[row], ramp4);
     }
   }
+  array[4] int td_rng_row_dims__row;
+  {
+    int kk = categorical_rng(probs);
+    int nc = dims(a2)[2];
+    array[nc] int row = a2[kk];
+    {
+      for (i1 in 1:4) {
+        { int v_ = row[i1]; td_rng_row_dims__row[(i1 - 1) + 1] = v_; }
+      }
+    }
+  }
+  int td_rng_row_empty__size;
+  {
+    int kk = categorical_rng(probs);
+    array[3, n0] int z = rep_array(1, 3, n0);
+    int nz = dims(z)[2];
+    array[nz] int zr = z[kk];
+    {
+      { int v_ = size(zr) * 10 + kk; td_rng_row_empty__size = v_; }
+    }
+  }
 }
 parameters {
   real q;
@@ -121,4 +142,6 @@ generated quantities {
   int out_td_rng_row__kk = td_rng_row__kk;
   array[4] int out_td_rng_row__row = td_rng_row__row;
   real out_td_rng_row__gather = td_rng_row__gather;
+  array[4] int out_td_rng_row_dims__row = td_rng_row_dims__row;
+  int out_td_rng_row_empty__size = td_rng_row_empty__size;
 }

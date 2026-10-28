@@ -66,6 +66,8 @@ generated quantities {
   int gq_rng_row__kk;
   array[4] int gq_rng_row__row;
   real gq_rng_row__gather;
+  array[4] int gq_rng_row_dims__row;
+  int gq_rng_row_empty__size;
   {
     array[3, 6] int pos = rep_array(0, 3, 6);
     for (j in 1:3) {
@@ -112,6 +114,25 @@ generated quantities {
     }
     {
       gq_rng_row__gather = dot_product(w[row], ramp4);
+    }
+  }
+  {
+    int kk = categorical_rng(probs);
+    int nc = dims(a2)[2];
+    array[nc] int row = a2[kk];
+    {
+      for (i1 in 1:4) {
+        { int v_ = row[i1]; gq_rng_row_dims__row[(i1 - 1) + 1] = v_; }
+      }
+    }
+  }
+  {
+    int kk = categorical_rng(probs);
+    array[3, n0] int z = rep_array(1, 3, n0);
+    int nz = dims(z)[2];
+    array[nz] int zr = z[kk];
+    {
+      { int v_ = size(zr) * 10 + kk; gq_rng_row_empty__size = v_; }
     }
   }
 }

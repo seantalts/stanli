@@ -21645,6 +21645,14 @@
 {
 "case": "fn_rng_row",
 "reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
+},
+{
+"case": "fn_rng_row_dims",
+"reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
+},
+{
+"case": "fn_rng_row_empty",
+"reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
 }
 ]
 },
@@ -21673,6 +21681,18 @@
 "name": "gq_rng_row",
 "rng": true,
 "write": "rng_row"
+},
+{
+"container": "udfint",
+"name": "gq_rng_row_dims",
+"rng": true,
+"write": "rng_row_dims"
+},
+{
+"container": "udfint",
+"name": "gq_rng_row_empty",
+"rng": true,
+"write": "rng_row_empty"
 }
 ],
 "gradient": [
@@ -21737,6 +21757,14 @@
 {
 "case": "m_rng_row",
 "reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
+},
+{
+"case": "m_rng_row_dims",
+"reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
+},
+{
+"case": "m_rng_row_empty",
+"reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
 }
 ]
 },
@@ -21765,6 +21793,18 @@
 "name": "td_rng_row",
 "rng": true,
 "write": "rng_row"
+},
+{
+"container": "udfint",
+"name": "td_rng_row_dims",
+"rng": true,
+"write": "rng_row_dims"
+},
+{
+"container": "udfint",
+"name": "td_rng_row_empty",
+"rng": true,
+"write": "rng_row_empty"
 }
 ],
 "gradient": [
@@ -21803,6 +21843,14 @@
 "skipped": [
 {
 "case": "tp_rng_row",
+"reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
+},
+{
+"case": "tp_rng_row_dims",
+"reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
+},
+{
+"case": "tp_rng_row_empty",
 "reason": "stanc rejects: _rng is allowed only in transformed data and generated quantities"
 }
 ]
@@ -23932,7 +23980,7 @@
 ]
 }
 },
-"name_count": 1880,
+"name_count": 1884,
 "skipped_builtins": [
 {
 "case": "td_r3_builtin",
