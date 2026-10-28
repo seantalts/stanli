@@ -19,7 +19,7 @@ using MapVec = Eigen::Map<const Vec>;
 using MapMat = Eigen::Map<const Eigen::MatrixXd>;
 
 [[noreturn]] void bad_shape(const std::string& what) {
-  throw CompileError("stanli unconstrain: " + what);
+  throw CompileError(what);
 }
 
 int64_t product(const std::vector<int64_t>& dims) {

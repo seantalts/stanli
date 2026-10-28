@@ -76,6 +76,15 @@ stanli_model* stanli_model_new_from_stan_with_opts(
     const char* stan_code, const char* data_json, const stanli_model_opts* opts,
     char* err, size_t err_len);
 
+/* Like stanli_model_new_from_stan_with_opts, naming the source file in
+ * compiler messages (null filename: the compiler's default label). Compiler
+ * warnings are appended to stanli_warnings(model). */
+stanli_model* stanli_model_new_from_stan_named(const char* stan_code,
+                                               const char* filename,
+                                               const char* data_json,
+                                               const stanli_model_opts* opts,
+                                               char* err, size_t err_len);
+
 /* Compile Stan source to transformed-MIR text WITHOUT building a model,
  * for a caller that wants to keep the MIR: cache it, ship it, or hand it
  * to stanli_model_new_with_opts later or elsewhere. Returns null on failure
@@ -92,6 +101,16 @@ char* stanli_stan_to_mir_with_opts(const char* stan_code,
                                    const char* const* include_paths,
                                    size_t include_path_count, int fast_math,
                                    char* err, size_t err_len);
+
+/* Like stanli_stan_to_mir_with_opts, with the source file named in compiler
+ * messages (null: the compiler's default label) and the compiler's warnings
+ * returned instead of printed. If warnings_out is non-null, *warnings_out is
+ * set to null or to a string freed with stanli_string_free; with a null
+ * warnings_out the warnings go to stderr. */
+char* stanli_stan_to_mir_named(const char* stan_code, const char* filename,
+                               const char* const* include_paths,
+                               size_t include_path_count, int fast_math,
+                               char** warnings_out, char* err, size_t err_len);
 
 /* Frees a string this library returned ownership of. */
 void stanli_string_free(char* p);

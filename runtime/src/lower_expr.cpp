@@ -383,7 +383,7 @@ long Lowering::eval_int(const mir::Expr& e) {
   }
 }
 int64_t Lowering::sized_len(const mir::SizedType& t, int64_t* rows,
-                            int64_t* cols) {
+                            int64_t* cols, const std::string& var) {
   if (t.base == "SInt" || t.base == "SReal") return 1;
   if (t.base == "SVector" || t.base == "SRowVector") {
     const int64_t n = eval_int(t.dims[0]);
@@ -400,7 +400,10 @@ int64_t Lowering::sized_len(const mir::SizedType& t, int64_t* rows,
   if (t.base == "SArray") {
     return checked_product(sized_dims(t), "array shape");
   }
-  fail("unsupported sized type " + t.base, t.raw);
+  const std::string where = var.empty() ? "" : " (in variable " + var + ")";
+  if (t.base.rfind("SComplex", 0) == 0)
+    fail("complex numbers are not supported yet" + where, t.raw);
+  fail("this variable type is not supported yet" + where, t.raw);
 }
 SlotInfo Lowering::view_of(const mir::SizedType& t, bool param_free) {
   SlotInfo si;

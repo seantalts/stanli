@@ -79,7 +79,7 @@ void check_leaf(const double* values, int64_t rows, int64_t cols,
   Eigen::Map<const Eigen::VectorXd> vector(values, (Eigen::Index)rows);
   Eigen::Map<const Eigen::MatrixXd> matrix(values, (Eigen::Index)rows,
                                            (Eigen::Index)cols);
-  constexpr const char* function = "stanli MIR check";
+  constexpr const char* function = "";
   switch (spec.kind) {
     case mir::Transform::Simplex:
       stan::math::check_simplex(function, name.c_str(), vector);
@@ -174,7 +174,7 @@ void check_structured_value(const double* values, int64_t len,
     if (spec.kind != mir::Transform::Correlation &&
         spec.kind != mir::Transform::Covariance)
       for (int64_t i : index) name += "[" + std::to_string(i + 1) + "]";
-    check_leaf(one, rows, cols, name, spec);
+    without_check_prefix([&] { check_leaf(one, rows, cols, name, spec); });
   }
 }
 
@@ -217,8 +217,8 @@ void check_matching_dims_fwd(KernelCtx& ctx) {
     throw std::logic_error("malformed dimension-check op");
   const auto* spec = static_cast<const BoundCheckSpec*>(ctx.udata);
   if (!spec->shapes_match)
-    throw std::invalid_argument(
-        "stanli MIR check: constraint shapes do not match for " + spec->name);
+    throw std::invalid_argument("constraint shapes do not match for " +
+                                spec->name);
   ctx.out.data[0] = 0.0;
 }
 
@@ -230,22 +230,22 @@ void check_fwd(KernelCtx& ctx) {
   const Desc& bound = ctx.in[1];
   const auto* spec = static_cast<const BoundCheckSpec*>(ctx.udata);
   if (!spec->shapes_match)
-    throw std::invalid_argument(
-        "stanli MIR check: constraint shapes do not "
-        "match for " +
-        spec->name);
+    throw std::invalid_argument("constraint shapes do not match for " +
+                                spec->name);
   if ((spec->bound_is_scalar && bound.len != 1) ||
       (!spec->bound_is_scalar && bound.len != value.len))
     throw std::logic_error("bound-check shape metadata is inconsistent");
-  for (int64_t i = 0; i < value.len; ++i) {
-    const double b = bound.data[spec->bound_is_scalar ? 0 : i];
-    if constexpr (Lower)
-      stan::math::check_greater_or_equal("stanli MIR check", spec->name.c_str(),
-                                         value.data[i], b);
-    else
-      stan::math::check_less_or_equal("stanli MIR check", spec->name.c_str(),
-                                      value.data[i], b);
-  }
+  without_check_prefix([&] {
+    for (int64_t i = 0; i < value.len; ++i) {
+      const double b = bound.data[spec->bound_is_scalar ? 0 : i];
+      if constexpr (Lower)
+        stan::math::check_greater_or_equal("", spec->name.c_str(),
+                                           value.data[i], b);
+      else
+        stan::math::check_less_or_equal("", spec->name.c_str(), value.data[i],
+                                        b);
+    }
+  });
   ctx.out.data[0] = 0.0;
 }
 

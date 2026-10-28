@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+import warnings
 from unittest import mock
 
 import numpy as np
@@ -1207,8 +1208,12 @@ def test_subprocess_compiler_preference_and_rollback_contract():
 
         with mock.patch.object(stanli, "_BIN", compiler_dir), \
                 mock.patch.object(stanli.subprocess, "run", successful_run):
-            got = stanli._stanc_mir(source)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                got = stanli._stanc_mir(source)
         assert got == "STANLI2:ZmFrZQ=="
+        assert [str(w.message) for w in caught] == [
+            "a successful frontend warning"]
         assert calls[0][0] == [str(portable), str(source)]
         assert calls[0][1]["encoding"] == "utf-8"
         assert calls[0][1]["capture_output"] is True
@@ -1232,7 +1237,8 @@ def test_subprocess_compiler_preference_and_rollback_contract():
         portable.unlink()
         calls.clear()
         with mock.patch.object(stanli, "_BIN", compiler_dir), \
-                mock.patch.object(stanli.subprocess, "run", successful_run):
+                mock.patch.object(stanli.subprocess, "run", successful_run), \
+                ignored_warnings():
             stanli._stanc_mir(source)
         assert calls[0][0] == [str(stock), "--O1",
                                "--debug-optimized-mir", str(source)]
@@ -1773,6 +1779,69 @@ def test_models_cannot_be_copied_or_pickled():
         else:
             raise AssertionError("a Model handle was duplicated")
     model.log_prob_grad(np.zeros(3))
+@contextlib.contextmanager
+def ignored_warnings():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        yield
+
+
+def _compiler_paths():
+    """Each compile path available here, as a context manager factory."""
+    paths = []
+    if stanli._lib.stanli_has_embedded_stanc():
+        paths.append(contextlib.nullcontext)
+    suffix = ".exe" if sys.platform == "win32" else ""
+    if (stanli._BIN / ("stanli-compile" + suffix)).is_file():
+        paths.append(lambda: mock.patch.object(
+            stanli._lib, "stanli_has_embedded_stanc", return_value=0))
+    return paths
+
+
+def _recorded(fn):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            fn()
+        finally:
+            pass
+    return [str(w.message) for w in caught
+            if issubclass(w.category, RuntimeWarning)]
+
+
+def test_compiler_warnings_reach_python_once():
+    for path in _compiler_paths():
+        with path():
+            for build in (lambda: stanli.Model(stan_code=""),
+                          lambda: stanli.stan_to_mir("")):
+                seen = [m for m in _recorded(build) if "Empty model" in m]
+                assert len(seen) == 1, seen
+                assert "string" in seen[0] or "model" in seen[0], seen
+            with tempfile.TemporaryDirectory() as tmp:
+                named = pathlib.Path(tmp) / "empty.stan"
+                named.write_text("", encoding="utf-8")
+                seen = [m for m in _recorded(
+                    lambda: stanli.Model(stan_file=named)) if "Empty model" in m]
+                assert len(seen) == 1 and str(named) in seen[0], seen
+            clean = "parameters { real x; } model { x ~ normal(0, 1); }"
+            assert not _recorded(lambda: stanli.Model(stan_code=clean))
+
+
+def test_compile_errors_name_the_model_file():
+    broken = "parameters { real x }\nmodel { x ~ normal(0, 1); }\n"
+    for path in _compiler_paths():
+        with path(), tempfile.TemporaryDirectory() as tmp:
+            named = pathlib.Path(tmp) / "broken.stan"
+            named.write_text(broken, encoding="utf-8")
+            for build in (lambda: stanli.Model(stan_file=named),
+                          lambda: stanli.Function("f", stan_file=named)):
+                try:
+                    build()
+                except RuntimeError as exc:
+                    assert str(named) in str(exc), str(exc)
+                    assert "'string'" not in str(exc), str(exc)
+                else:
+                    raise AssertionError("syntax error was accepted")
 
 
 def main():

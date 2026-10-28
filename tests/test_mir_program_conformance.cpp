@@ -993,12 +993,10 @@ void test_unknown_nrfunapp_fails_loud() {
   FunDef entry = rhs_function("unknown_effect_rhs",
                               {nr_fun_app("FnUnmodeledEffect", {lit_real(1)}),
                                return_value(make_array({lit_real(0)}))});
-  run_other_error_case("unknown NRFunApp",
-                       "an unmodeled statement is never a silent no-op",
-                       {std::move(entry)}, 1.0,
-                       "stanli semantic conformance: unsupported statement "
-                       "function FnUnmodeledEffect",
-                       "FnUnmodeledEffect");
+  run_other_error_case(
+      "unknown NRFunApp", "an unmodeled statement is never a silent no-op",
+      {std::move(entry)}, 1.0,
+      "unsupported statement function FnUnmodeledEffect", "FnUnmodeledEffect");
 }
 
 // Speculative unknown values are common in runtime branches. Probe lazily,

@@ -394,14 +394,13 @@ struct ShapeInterner {
 
   ShapeId intern(std::vector<int64_t> dims, ViewKind leaf) {
     if (leaf == ViewKind::Array)
-      throw CompileError("stanli compile: array shape has an array leaf");
+      throw CompileError("array shape has an array leaf");
     if (dims.size() <= (size_t)leaf_rank(leaf))
-      throw CompileError("stanli compile: incomplete logical array shape");
+      throw CompileError("incomplete logical array shape");
     int64_t n = 1;
     for (int64_t d : dims) {
       if (d < 0 || (d != 0 && n > std::numeric_limits<int64_t>::max() / d))
-        throw CompileError(
-            "stanli compile: invalid or overflowing logical array extent");
+        throw CompileError("invalid or overflowing logical array extent");
       n *= d;
     }
     const auto key = std::make_pair(dims, leaf);
@@ -415,7 +414,7 @@ struct ShapeInterner {
 
   const ArrayShape& at(ShapeId id) const {
     if (id == 0 || id >= shapes.size())
-      throw CompileError("stanli compile: invalid array shape id");
+      throw CompileError("invalid array shape id");
     return shapes[id];
   }
 };
@@ -1026,8 +1025,7 @@ struct Lowering {
       all.push_back(note);
   }
   [[noreturn]] void fail(const std::string& msg, const std::string& raw = "") {
-    throw CompileError("stanli compile: " + msg +
-                       (raw.empty() ? "" : " | in: " + raw));
+    throw CompileError(msg + (raw.empty() ? "" : " | in: " + raw));
   }
   // Every index the graph lowering sees is a bind-time constant, so the
   // bounds CmdStan checks at runtime are checked here, before an op that
@@ -1167,7 +1165,7 @@ struct Lowering {
     return dims;
   }
   int64_t sized_len(const mir::SizedType& t, int64_t* rows = nullptr,
-                    int64_t* cols = nullptr);
+                    int64_t* cols = nullptr, const std::string& var = "");
 
   SlotInfo view_of(const mir::SizedType& t, bool param_free = false);
 
@@ -1262,12 +1260,11 @@ struct Lowering {
   }
   ExpressionLayout contiguous_layout(const Val& source, int64_t offset,
                                      const std::string& what) const {
-    if (offset < 0)
-      throw CompileError("stanli compile: negative layout offset for " + what);
+    if (offset < 0) throw CompileError("negative layout offset for " + what);
     const ExpressionLayout result =
         expression_layout::contiguous(source.layout, offset);
     if (source.layout.kind == ExpressionLayout::Kind::Direct && !result.known())
-      throw CompileError("stanli compile: layout offset overflows for " + what);
+      throw CompileError("layout offset overflows for " + what);
     return result;
   }
   ExpressionLayout elementwise_layout(std::initializer_list<Val> inputs,

@@ -1072,8 +1072,7 @@ class MirInterp {
 
   [[noreturn]] void fail(const std::string& msg,
                          const std::string& raw = "") const {
-    throw CompileError("stanli " + where_ + ": " + msg +
-                       (raw.empty() ? "" : " | in: " + raw));
+    throw CompileError(msg + (raw.empty() ? "" : " | in: " + raw));
   }
 
   // The .at() reads in eval_indexed would throw a bare
@@ -1120,8 +1119,7 @@ class MirInterp {
   }
 
   [[noreturn]] void check_shape_fail(const std::string& name) const {
-    throw std::invalid_argument("stanli " + where_ +
-                                ": constraint shapes do not match for " + name);
+    throw std::invalid_argument("constraint shapes do not match for " + name);
   }
 
   void exec_matching_dims(const mir::Stmt& st) {
@@ -1217,15 +1215,15 @@ class MirInterp {
           y.r.size() != bound.r.size())
         check_shape_fail(name);
     }
-    for (size_t i = 0; i < y.r.size(); ++i) {
-      const double b = val(bound.r[b_scalar ? 0 : i]);
-      if (kind == mir::Transform::Lower)
-        stan::math::check_greater_or_equal("stanli MIR check", name.c_str(),
-                                           val(y.r[i]), b);
-      else
-        stan::math::check_less_or_equal("stanli MIR check", name.c_str(),
-                                        val(y.r[i]), b);
-    }
+    without_check_prefix([&] {
+      for (size_t i = 0; i < y.r.size(); ++i) {
+        const double b = val(bound.r[b_scalar ? 0 : i]);
+        if (kind == mir::Transform::Lower)
+          stan::math::check_greater_or_equal("", name.c_str(), val(y.r[i]), b);
+        else
+          stan::math::check_less_or_equal("", name.c_str(), val(y.r[i]), b);
+      }
+    });
   }
 
   // max-shifted log-sum-exp over a buffer; -inf on an empty or all

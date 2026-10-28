@@ -2,6 +2,8 @@
 
 #include "stanc_process.hpp"
 
+#include <stanli/stanc_result.hpp>
+
 #include <array>
 #include <cstdio>
 #include <memory>
@@ -9,8 +11,10 @@
 #include <string>
 
 #ifdef STANLI_EMBED_STANC
-extern "C" char* stanli_stanc_model_tmir(const char* stan_code);
-extern "C" char* stanli_stanc_model_tmir_fast(const char* stan_code);
+extern "C" char* stanli_stanc_compile(const char* stan_code,
+                                      const char* filename,
+                                      const char* const* include_paths,
+                                      size_t include_path_count, int flags);
 extern "C" void stanli_stanc_free(char* p);
 
 namespace stanli::tooling {
@@ -27,13 +31,14 @@ inline std::string embedded_stanc(const std::string& model,
     while ((n = fread(buf.data(), 1, buf.size(), f.get())) > 0)
       src.append(buf.data(), n);
   }
-  char* res = fast_math ? stanli_stanc_model_tmir_fast(src.c_str())
-                        : stanli_stanc_model_tmir(src.c_str());
-  const std::string out(res ? res : "ERRstanc returned nothing");
+  char* res = stanli_stanc_compile(src.c_str(), model.c_str(), nullptr, 0,
+                                   fast_math ? 3 : 1);
+  const stanli::StancResult result = stanli::parse_stanc_result(res);
   if (res) stanli_stanc_free(res);
-  if (out.compare(0, 3, "ERR") == 0)
-    throw std::runtime_error("stanc: " + out.substr(3));
-  return out.substr(2);
+  if (!result.warnings.empty())
+    std::fprintf(stderr, "%s\n", result.warnings.c_str());
+  if (!result.ok) throw std::runtime_error("stanc: " + result.body);
+  return result.body;
 }
 
 }  // namespace stanli::tooling

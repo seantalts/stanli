@@ -201,6 +201,12 @@ static void* (*p_model_new_from_stan_with_opts)(const char*, const char*,
                                                 size_t);
 static char* (*p_stan_to_mir_with_opts)(const char*, const char* const*, size_t,
                                         int, char*, size_t);
+static void* (*p_model_new_from_stan_named)(const char*, const char*,
+                                            const char*, const model_opts*,
+                                            char*, size_t);
+static char* (*p_stan_to_mir_named)(const char*, const char*,
+                                    const char* const*, size_t, int, char**,
+                                    char*, size_t);
 static void (*p_model_free)(void*);
 static int (*p_has_embedded_stanc)(void);
 static void (*p_string_free)(char*);
@@ -273,6 +279,8 @@ static int (*p_variational)(void*, const stanli_variational_opts*, double*,
     }                                                           \
   } while (0)
 
+#define BIND_OPTIONAL(fn, var) *(void**)(&var) = dl_sym(g_lib, fn)
+
 SEXP stanli_bridge_load(SEXP path) {
   if (g_lib != NULL) return mkString("");
   g_lib = dl_open(CHAR(STRING_ELT(path, 0)));
@@ -296,6 +304,9 @@ SEXP stanli_bridge_load(SEXP path) {
 
   BIND("stanli_model_new_with_opts", p_model_new_with_opts);
   BIND("stanli_model_new_from_stan_with_opts", p_model_new_from_stan_with_opts);
+  BIND_OPTIONAL("stanli_model_new_from_stan_named",
+                p_model_new_from_stan_named);
+  BIND_OPTIONAL("stanli_stan_to_mir_named", p_stan_to_mir_named);
   BIND("stanli_reduce_sum_count", p_reduce_sum_count);
   BIND("stanli_reduce_sum_fallbacks", p_reduce_sum_fallbacks);
   BIND("stanli_stan_to_mir_with_opts", p_stan_to_mir_with_opts);
@@ -366,8 +377,13 @@ static void* model_ptr(SEXP ext) {
   return m;
 }
 
+static const char* file_label(SEXP file) {
+  if (file == R_NilValue || XLENGTH(file) != 1) return NULL;
+  return Rf_translateCharUTF8(STRING_ELT(file, 0));
+}
+
 SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
-                        SEXP threads_per_chain, SEXP fast_math) {
+                        SEXP threads_per_chain, SEXP fast_math, SEXP file) {
   require_loaded();
   char err[8192];
   err[0] = '\0';
@@ -378,9 +394,13 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
   const int threads = asInteger(threads_per_chain);
   if (threads < 1) error("threads_per_chain must be positive");
   model_opts opts = {construction_seed, threads, asLogical(fast_math) == TRUE};
-  m = asLogical(is_mir)
-          ? p_model_new_with_opts(text, data, &opts, err, sizeof err)
-          : p_model_new_from_stan_with_opts(text, data, &opts, err, sizeof err);
+  const char* label = file_label(file);
+  if (asLogical(is_mir))
+    m = p_model_new_with_opts(text, data, &opts, err, sizeof err);
+  else if (p_model_new_from_stan_named != NULL)
+    m = p_model_new_from_stan_named(text, label, data, &opts, err, sizeof err);
+  else
+    m = p_model_new_from_stan_with_opts(text, data, &opts, err, sizeof err);
   if (m == NULL) error("%s", err[0] ? err : "stanli: model compilation failed");
   SEXP ext = PROTECT(R_MakeExternalPtr(m, R_NilValue, R_NilValue));
   R_RegisterCFinalizerEx(ext, model_finalizer, TRUE);
@@ -402,19 +422,37 @@ SEXP stanli_r_has_embedded_stanc(void) {
   return ScalarLogical(p_has_embedded_stanc());
 }
 
-SEXP stanli_r_stan_to_mir(SEXP code, SEXP include_paths, SEXP fast_math) {
+SEXP stanli_r_stan_to_mir(SEXP code, SEXP include_paths, SEXP fast_math,
+                          SEXP file) {
   require_loaded();
   const size_t count = (size_t)XLENGTH(include_paths);
   const char** paths = (const char**)R_alloc(count, sizeof(char*));
   for (size_t i = 0; i < count; ++i)
     paths[i] = Rf_translateCharUTF8(STRING_ELT(include_paths, i));
   char err[8192] = {0};
-  char* mir = p_stan_to_mir_with_opts(
-      Rf_translateCharUTF8(STRING_ELT(code, 0)), paths, count,
-      asLogical(fast_math) == TRUE, err, sizeof err);
-  if (mir == NULL) error("%s", err[0] ? err : "Stan source compilation failed");
+  char* compiler_warnings = NULL;
+  char* mir;
+  if (p_stan_to_mir_named != NULL)
+    mir = p_stan_to_mir_named(Rf_translateCharUTF8(STRING_ELT(code, 0)),
+                              file_label(file), paths, count,
+                              asLogical(fast_math) == TRUE, &compiler_warnings,
+                              err, sizeof err);
+  else
+    mir = p_stan_to_mir_with_opts(Rf_translateCharUTF8(STRING_ELT(code, 0)),
+                                  paths, count, asLogical(fast_math) == TRUE,
+                                  err, sizeof err);
+  if (mir == NULL) {
+    if (compiler_warnings != NULL) p_string_free(compiler_warnings);
+    error("%s", err[0] ? err : "Stan source compilation failed");
+  }
   SEXP result = PROTECT(ScalarString(mkCharCE(mir, CE_UTF8)));
   p_string_free(mir);
+  if (compiler_warnings != NULL) {
+    SEXP text = PROTECT(ScalarString(mkCharCE(compiler_warnings, CE_UTF8)));
+    p_string_free(compiler_warnings);
+    setAttrib(result, install("warnings"), text);
+    UNPROTECT(1);
+  }
   UNPROTECT(1);
   return result;
 }

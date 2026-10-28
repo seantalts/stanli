@@ -82,6 +82,12 @@ stan_include_sources <- function(code, include_paths) {
   sources
 }
 
+warn_compiler <- function(text) {
+  text <- paste(text[nzchar(text)], collapse = "\n")
+  if (nzchar(trimws(text))) warning(sub("\\s+$", "", text), call. = FALSE)
+  invisible(NULL)
+}
+
 stanc_js_path <- function() {
   system.file("js", "stanc.js", package = "stanli")
 }
@@ -106,12 +112,14 @@ stanc_js <- function() {
 }
 
 mir_from_js <- function(code, name = "stanli_model", include_paths = character(),
-                        fast_math = FALSE) {
+                        fast_math = FALSE, file = NULL) {
   ctx <- stanc_js()
   ctx$assign("stanli_fast", isTRUE(fast_math))
   ctx$assign("stanli_src", enc2utf8(code))
   ctx$assign("stanli_name", name)
   ctx$assign("stanli_includes", stan_include_sources(code, include_paths))
+  ctx$assign("stanli_named", !is.null(file))
+  ctx$assign("stanli_file", if (is.null(file)) "" else enc2utf8(file))
   # Prefer the portable producer by export presence. Once selected, its
   # diagnostics are final: a bad model must not be compiled again through the
   # legacy producer and accidentally turn a real error into different output.
@@ -141,10 +149,16 @@ mir_from_js <- function(code, name = "stanli_model", include_paths = character()
        if (typeof selected.value !== 'function')
          return JSON.stringify({e: 'export is not a function', c: compiler});
        try {
+         var named = stanli_named;
          var r = portable_export.present
-           ? selected.value(stanli_name, stanli_src, stanli_includes)
+           ? (named ? selected.value(stanli_name, stanli_src, stanli_includes,
+                                     stanli_file)
+                    : selected.value(stanli_name, stanli_src, stanli_includes))
            : selected.value(stanli_name, stanli_src,
-                            ['O1', 'debug-optimized-mir'], stanli_includes);
+                            named ? ['O1', 'debug-optimized-mir',
+                                     'filename-in-msg=' + stanli_file]
+                                  : ['O1', 'debug-optimized-mir'],
+                            stanli_includes);
          if (!r || typeof r !== 'object')
            return JSON.stringify({e: 'compiler returned no result object',
                                   c: compiler});
@@ -152,7 +166,8 @@ mir_from_js <- function(code, name = "stanli_model", include_paths = character()
            return JSON.stringify({e: String(r.errors), c: compiler});
          if (typeof r.result === 'undefined')
            return JSON.stringify({e: 'compiler returned no MIR', c: compiler});
-         return JSON.stringify({r: String(r.result), c: compiler});
+         return JSON.stringify({r: String(r.result), c: compiler,
+                                w: (r.warnings || []).map(String)});
        } catch (e) {
          return JSON.stringify({e: String(e), c: compiler});
        }
@@ -160,6 +175,7 @@ mir_from_js <- function(code, name = "stanli_model", include_paths = character()
   parsed <- jsonlite::fromJSON(out, simplifyVector = TRUE)
   if (!is.null(parsed$e))
     stop(parsed$c, ": ", paste(parsed$e, collapse = "\n"), call. = FALSE)
+  warn_compiler(parsed$w)
   parsed$r
 }
 
@@ -219,7 +235,7 @@ js_string_literal <- function(value) {
 
 mir_from_binary <- function(compiler, code, portable = FALSE,
                             run_stanc = system2, include_paths = character(),
-                            fast_math = FALSE) {
+                            fast_math = FALSE, file = NULL) {
   if (fast_math && !portable)
     stop("fast_math needs the portable stanli-compile compiler; the legacy ",
          "stanc cannot produce fast-mode MIR", call. = FALSE)
@@ -239,8 +255,12 @@ mir_from_binary <- function(compiler, code, portable = FALSE,
   include_args <- if (!length(include_paths)) character() else if (portable)
     as.vector(rbind("--include-path", shQuote(include_paths))) else
     shQuote(paste0("--include-paths=", paste(include_paths, collapse = ",")))
+  name_args <- if (is.null(file)) character() else if (portable)
+    c("--filename", shQuote(file)) else
+    shQuote(paste0("--filename-in-msg=", file))
   args <- c(if (!portable) c("--O1", "--debug-optimized-mir"),
-            if (fast_math) "--fast-math", include_args, shQuote(source))
+            if (fast_math) "--fast-math", name_args, include_args,
+            shQuote(source))
   status <- tryCatch(
     suppressWarnings(run_stanc(compiler, args, stdout = stdout_file,
                                stderr = stderr_file)),
@@ -254,8 +274,7 @@ mir_from_binary <- function(compiler, code, portable = FALSE,
     stop("stanc failed:\n",
          if (nzchar(diagnostics)) diagnostics else "stanc produced no MIR",
          call. = FALSE)
-  # Warnings live on stderr. They must not be concatenated with the MIR; the
-  # embedded compiler path also leaves successful frontend warnings internal.
+  warn_compiler(diagnostics)
   if (portable) out else sub("\\r?\\n$", "", out)
 }
 
@@ -277,7 +296,8 @@ webr_eval_js <- function() {
 }
 
 mir_from_webr <- function(eval_js, code, name = "stanli_model",
-                          include_paths = character(), fast_math = FALSE) {
+                          include_paths = character(), fast_math = FALSE,
+                          file = NULL) {
   if (is.null(stanc_js_ctx$webr_loaded)) {
     js <- stanc_js_path()
     if (!nzchar(js) || !file.exists(js))
@@ -304,6 +324,7 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
   src_js <- js_string_literal(src)
   name_js <- js_string_literal(name)
   mirf_js <- js_string_literal(mirf)
+  file_js <- if (is.null(file)) "null" else js_string_literal(file)
   status <- eval_js(sprintf("(() => {
     const src = Module.FS.readFile(%s, {encoding: 'utf8'});
     const includes = Object.create(null);
@@ -327,39 +348,51 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
       return 'ERR:JavaScript compiler: no stanli_compile() or stanc() export';
     if (typeof selected.value !== 'function')
       return 'ERR:' + compiler + ': export is not a function';
+    const file = %s;
     try {
       const r = portableExport.present
-        ? selected.value(%s, src, includes)
-        : selected.value(%s, src, ['O1', 'debug-optimized-mir'], includes);
+        ? (file === null ? selected.value(%s, src, includes)
+                         : selected.value(%s, src, includes, file))
+        : selected.value(%s, src,
+                         file === null ? ['O1', 'debug-optimized-mir']
+                           : ['O1', 'debug-optimized-mir',
+                              'filename-in-msg=' + file],
+                         includes);
       if (!r || typeof r !== 'object')
         return 'ERR:' + compiler + ': compiler returned no result object';
       if (r.errors) return 'ERR:' + compiler + ': ' + String(r.errors);
       if (typeof r.result === 'undefined')
         return 'ERR:' + compiler + ': compiler returned no MIR';
       Module.FS.writeFile(%s, String(r.result));
-      return 'ok';
+      const warned = (r.warnings || []).map(String).join('\\n');
+      return warned ? 'WARN:' + warned : 'ok';
     } catch (e) {
       return 'ERR:' + compiler + ': ' + String(e);
     }
   })()", src_js, paste(include_js, collapse = "\n"),
     if (isTRUE(fast_math)) "true" else "false",
     if (isTRUE(fast_math)) "true" else "false",
-    name_js, name_js, mirf_js))
-  if (!identical(status, "ok"))
+    file_js, name_js, name_js, name_js, mirf_js))
+  if (startsWith(status, "WARN:")) {
+    warn_compiler(substring(status, 6L))
+  } else if (!identical(status, "ok")) {
     stop(sub("^ERR:", "", status), call. = FALSE)
+  }
   read_compiler_output(mirf)
 }
 
-stanc_mir <- function(code, include_paths = character(), fast_math = FALSE) {
+stanc_mir <- function(code, include_paths = character(), fast_math = FALSE,
+                      file = NULL) {
   compiler <- find_native_compiler()
   if (!is.null(compiler))
     return(mir_from_binary(compiler$path, code,
                            portable = compiler$portable,
                            include_paths = include_paths,
-                           fast_math = fast_math))
+                           fast_math = fast_math, file = file))
   ejs <- webr_eval_js()
   if (!is.null(ejs))
     return(mir_from_webr(ejs, code, include_paths = include_paths,
-                         fast_math = fast_math))
-  mir_from_js(code, include_paths = include_paths, fast_math = fast_math)
+                         fast_math = fast_math, file = file))
+  mir_from_js(code, include_paths = include_paths, fast_math = fast_math,
+              file = file)
 }

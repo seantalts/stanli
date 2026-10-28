@@ -742,4 +742,4 @@ CmdStan and stanli both reject every shared evaluation point for these models: t
 
 ## Failures
 
-- `sir`: EVAL_FAIL stanli MIR check: y is -1.82492e-07, but must be greater than or equal to 0.000000
+- `sir`: EVAL_FAIL y is -1.82492e-07, but must be greater than or equal to 0.000000

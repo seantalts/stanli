@@ -4,4 +4,4 @@ model {
 }
 
 // STANLI-LIT: PASS
-// STANLI-LIT-EXPECT: COMPILE_FAIL stanli compile: eigenvalues_sym: needs a square matrix
+// STANLI-LIT-EXPECT: COMPILE_FAIL eigenvalues_sym: needs a square matrix
