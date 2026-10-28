@@ -64,8 +64,9 @@ differ from the default in the last bits.
 
 Chains run in parallel by default. Each chain owns its executor and RNG
 stream, so a parallel run is byte-identical to a sequential one. Sampling
-prints per-chain progress, elapsed times, and any divergence or
-maximum-treedepth warnings; `refresh = 0` silences it. Exact per-chain times
+prints per-chain progress, elapsed times, notices for rejected proposals, and
+any divergence, maximum-treedepth or low E-BFMI warnings; `refresh = 0`
+silences it. Exact per-chain times
 and problem counts are in `fit$report`. Ctrl-C (or RStudio's stop button)
 stops every chain after its current transition.
 

@@ -199,14 +199,26 @@ template <>
 inline void gradient<stanli::ExecutorModel>(const stanli::ExecutorModel& model,
                                             const Eigen::VectorXd& x, double& f,
                                             Eigen::VectorXd& grad_f,
-                                            callbacks::logger& /*logger*/) {
+                                            callbacks::logger& logger) {
   stanli::Executor& ex = model.executor();
   const int64_t n = ex.n_params();
   Eigen::Map<Eigen::VectorXd>(ex.params_data(), n) = x;
   grad_f.resize(n);
   try {
     f = ex.gradient(grad_f.data());
-  } catch (const std::exception&) {
+  } catch (const std::exception& e) {
+    logger.error(
+        "Informational Message: The current Metropolis proposal "
+        "is about to be rejected because of the following issue:");
+    logger.error(e.what());
+    logger.error(
+        "If this warning occurs sporadically, such as for highly "
+        "constrained variable types like covariance matrices, "
+        "then the sampler is fine,");
+    logger.error(
+        "but if this warning occurs often then your model may be "
+        "either severely ill-conditioned or misspecified.");
+    logger.error("");
     f = -std::numeric_limits<double>::infinity();
     grad_f.setZero();
   }

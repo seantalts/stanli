@@ -264,9 +264,84 @@ test_that("problem output uses exact unthinned report counts", {
 
   expect_gt(fit$report$n_max_treedepth, dim(fit$sampler)[1])
   expect_true(any(grepl(
-    paste0("Warning: ", fit$report$n_max_treedepth,
-           " of 20 post-warmup transitions saturated"),
+    paste0("Warning: ", fit$report$n_max_treedepth, " of 20 (",
+           sprintf("%.1f", 100 * fit$report$n_max_treedepth / 20),
+           "%) transitions hit the maximum treedepth limit of 1."),
     text, fixed = TRUE)))
+  expect_true(any(grepl("See https://mc-stan.org/misc/warnings for details.",
+                        text, fixed = TRUE)))
+})
+
+sampling_output <- function(code, data, ...) {
+  skip_if_not_installed("callr")
+  out <- tempfile()
+  on.exit(unlink(out))
+  low_ebfmi <- callr::r(function(code, data, args) {
+    library(stanli)
+    m <- stanli_model(code = code, data = data)
+    fit <- do.call(sample_model, c(list(m), args))
+    report <- utils::capture.output(stanli_diagnose(fit))
+    any(grepl("E-BFMI is below", report, fixed = TRUE))
+  }, args = list(code = code, data = data, args = list(...)), stdout = out,
+  stderr = "2>&1")
+  structure(paste(readLines(out), collapse = "\n"), low_ebfmi = low_ebfmi)
+}
+
+reject_code <- "
+  parameters { real mu; }
+  model {
+    if (mu < 0) reject(\"mu must be >= 0, found mu = \", mu);
+    mu ~ normal(0, 1);
+  }"
+
+funnel_code <- "
+  parameters { real x; real y; }
+  model { y ~ normal(0, 3); x ~ normal(0, exp(y / 2)); }"
+
+test_that("rejected proposals are reported with their chain", {
+  skip_without_runtime()
+  loud <- sampling_output(reject_code, list(), chains = 2, seed = 3,
+                          warmup = 100, samples = 100, refresh = 50)
+  expect_match(loud, paste0(
+    "Chain [1] Informational Message: The current Metropolis proposal is ",
+    "about to be rejected because of the following issue:\n",
+    "Chain [1] mu must be >= 0, found mu = "), fixed = TRUE)
+  expect_match(loud, "Chain [2] Informational Message", fixed = TRUE)
+  quiet <- sampling_output(reject_code, list(), chains = 2, seed = 3,
+                           warmup = 100, samples = 100, refresh = 0)
+  expect_false(grepl("Informational", quiet, fixed = TRUE))
+})
+
+test_that("divergence and low E-BFMI warnings come with every sampling run", {
+  skip_without_runtime()
+  loud <- sampling_output(funnel_code, list(), chains = 1, seed = 42,
+                          warmup = 100, samples = 500, refresh = 1000)
+  expect_match(loud, paste0(
+    "Warning: [0-9]+ of 500 \\([0-9]+\\.[0-9]%\\) transitions ended with a ",
+    "divergence\\.\nSee https://mc-stan.org/misc/warnings for details\\."))
+  # The draws, and so the E-BFMI, differ across platforms' math libraries.
+  expect_identical(grepl(paste0(
+    "Warning: 1 of 1 chains had an E-BFMI less than 0.3.\n",
+    "See https://mc-stan.org/misc/warnings for details."), loud, fixed = TRUE),
+    attr(loud, "low_ebfmi"))
+  quiet <- sampling_output(funnel_code, list(), chains = 1, seed = 42,
+                           warmup = 100, samples = 500, refresh = 0)
+  expect_false(grepl("Warning", quiet, fixed = TRUE))
+})
+
+test_that("threads_per_chain on a model without reduce_sum is noted once", {
+  skip_without_runtime()
+  skip_if_not(stanli_thread_safe())
+  note <- paste0("Note: threads_per_chain = 2 has no effect on this model, ",
+                 "which has no reduce_sum call to run in parallel.")
+  loud <- sampling_output("parameters { real x; } model { x ~ normal(0, 1); }",
+                          list(), chains = 2, warmup = 50, samples = 50,
+                          refresh = 100, threads_per_chain = 2)
+  expect_equal(lengths(regmatches(loud, gregexpr(note, loud, fixed = TRUE))), 1L)
+  quiet <- sampling_output("parameters { real x; } model { x ~ normal(0, 1); }",
+                           list(), chains = 2, warmup = 50, samples = 50,
+                           refresh = 0, threads_per_chain = 2)
+  expect_false(grepl(note, quiet, fixed = TRUE))
 })
 
 test_that("parallel chains report through the R console", {

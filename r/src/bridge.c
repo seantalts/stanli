@@ -229,6 +229,9 @@ static int (*p_summary_stats)(const double*, int64_t, int64_t, int64_t,
 static int64_t (*p_diagnose_text)(const double*, int64_t, int64_t, int64_t,
                                   const char* const*, const double*, int, char*,
                                   size_t);
+static int64_t (*p_sampling_warnings)(const stanli_sample_opts*,
+                                      const stanli_sample_report*,
+                                      const double*, char*, size_t);
 static int64_t (*p_wa_n_columns)(const void*);
 static const char* (*p_wa_column_name)(const void*, int64_t);
 static void (*p_wa_seed_chain)(void*, uint32_t, uint32_t);
@@ -315,6 +318,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_sampler_column_name", p_sampler_column_name);
   BIND("stanli_summary_stats", p_summary_stats);
   BIND("stanli_diagnose_text", p_diagnose_text);
+  BIND("stanli_sampling_warnings", p_sampling_warnings);
   BIND("stanli_wa_n_columns", p_wa_n_columns);
   BIND("stanli_wa_column_name", p_wa_column_name);
   BIND("stanli_wa_seed_chain", p_wa_seed_chain);
@@ -605,9 +609,8 @@ static int sample_poll(void* user) {
 }
 
 static void print_sample_reports(const stanli_sample_opts* o, int64_t nchain,
-                                 const stanli_sample_report* reports) {
-  int64_t n_divergent = 0;
-  int64_t n_max_treedepth = 0;
+                                 const stanli_sample_report* reports,
+                                 const double* stats) {
   const int first_chain = o->chain_id > 0 ? o->chain_id : 1;
   for (int64_t c = 0; c < nchain; ++c) {
     const stanli_sample_report* r = reports + c;
@@ -616,23 +619,14 @@ static void print_sample_reports(const stanli_sample_opts* o, int64_t nchain,
     Rprintf("                  %.3f seconds (Sampling)\n", r->sampling_seconds);
     Rprintf("                  %.3f seconds (Total)\n",
             r->warmup_seconds + r->sampling_seconds);
-    n_divergent += r->n_divergent;
-    n_max_treedepth += r->n_max_treedepth;
   }
 
-  const int64_t transitions = nchain * (int64_t)o->samples;
-  if (n_divergent > 0)
-    Rprintf(
-        "\nWarning: %lld of %lld post-warmup transitions diverged. "
-        "Raise delta or reparameterize.\n",
-        (long long)n_divergent, (long long)transitions);
-  if (n_max_treedepth > 0)
-    Rprintf(
-        "\nWarning: %lld of %lld post-warmup transitions saturated the "
-        "maximum treedepth of %d. Raise max_depth to allow deeper "
-        "trajectories.\n",
-        (long long)n_max_treedepth, (long long)transitions,
-        o->max_depth > 0 ? o->max_depth : 10);
+  const int64_t need = p_sampling_warnings(o, reports, stats, NULL, 0);
+  if (need > 1) {
+    char* text = R_alloc((size_t)need, 1);
+    p_sampling_warnings(o, reports, stats, text, (size_t)need);
+    Rprintf("\n%s", text);
+  }
   R_FlushConsole();
 }
 
@@ -743,7 +737,7 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
     UNPROTECT(6);
     return out;
   }
-  if (refresh_rate > 0) print_sample_reports(&o, nchain, reports);
+  if (refresh_rate > 0) print_sample_reports(&o, nchain, reports, REAL(stats));
 
   SEXP warmup_seconds = PROTECT(allocVector(REALSXP, (R_xlen_t)nchain));
   SEXP sampling_seconds = PROTECT(allocVector(REALSXP, (R_xlen_t)nchain));

@@ -349,4 +349,67 @@ std::string format_diagnostics(const FitDiagnostics& d) {
   return out;
 }
 
+std::string format_sampling_warnings(const std::vector<ChainProblems>& chains,
+                                     int64_t transitions_per_chain,
+                                     int max_depth) {
+  constexpr const char* kSeeWarnings =
+      "See https://mc-stan.org/misc/warnings for details.\n";
+  const int64_t n_chains = (int64_t)chains.size();
+  const int64_t total = n_chains * transitions_per_chain;
+  int64_t n_divergent = 0, n_max_treedepth = 0;
+  int64_t n_low = 0, n_undefined = 0;
+  for (const auto& c : chains) {
+    n_divergent += c.n_divergent;
+    n_max_treedepth += c.n_max_treedepth;
+    if (std::isnan(c.ebfmi)) {
+      if (transitions_per_chain >= 3) ++n_undefined;
+    } else if (c.ebfmi < kEbfmiThreshold) {
+      ++n_low;
+    }
+  }
+  std::string out;
+  char buf[256];
+  const auto percent = [&](int64_t k) {
+    return total > 0 ? 100.0 * (double)k / (double)total : 0.0;
+  };
+  if (n_divergent > 0) {
+    std::snprintf(buf, sizeof buf,
+                  "Warning: %lld of %lld (%.1f%%) transitions ended with a "
+                  "divergence.\n",
+                  (long long)n_divergent, (long long)total,
+                  percent(n_divergent));
+    if (!out.empty()) out += "\n";
+    out += buf;
+    out += kSeeWarnings;
+  }
+  if (n_max_treedepth > 0) {
+    std::snprintf(buf, sizeof buf,
+                  "Warning: %lld of %lld (%.1f%%) transitions hit the maximum "
+                  "treedepth limit of %d.\n",
+                  (long long)n_max_treedepth, (long long)total,
+                  percent(n_max_treedepth), max_depth);
+    if (!out.empty()) out += "\n";
+    out += buf;
+    out += kSeeWarnings;
+  }
+  if (n_undefined > 0) {
+    std::snprintf(buf, sizeof buf,
+                  "Warning: %lld of %lld chains have a NaN E-BFMI.\n",
+                  (long long)n_undefined, (long long)n_chains);
+    if (!out.empty()) out += "\n";
+    out += buf;
+    out += kSeeWarnings;
+  }
+  if (n_low > 0) {
+    std::snprintf(buf, sizeof buf,
+                  "Warning: %lld of %lld chains had an E-BFMI less than "
+                  "%.1f.\n",
+                  (long long)n_low, (long long)n_chains, kEbfmiThreshold);
+    if (!out.empty()) out += "\n";
+    out += buf;
+    out += kSeeWarnings;
+  }
+  return out;
+}
+
 }  // namespace stanli

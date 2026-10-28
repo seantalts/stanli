@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <map>
 #include <sstream>
@@ -1099,6 +1100,207 @@ void expect_inits_run_in_parallel() {
   stanli_model_free(model);
 }
 
+struct MessageCapture {
+  std::vector<std::string> messages;
+};
+
+MessageCapture* active_message_capture = nullptr;
+
+void collect_print(const char* text, size_t len) {
+  if (active_message_capture != nullptr)
+    active_message_capture->messages.emplace_back(text, len);
+}
+
+void collect_message(MessageCapture& capture,
+                     const std::function<void()>& run) {
+  char* error = nullptr;
+  active_message_capture = &capture;
+  const int rc = bs_set_print_callback(collect_print, &error);
+  bs_free_error_msg(error);
+  expect_true("install message collector", rc == 0);
+  try {
+    run();
+  } catch (...) {
+    bs_set_print_callback(nullptr, &error);
+    bs_free_error_msg(error);
+    active_message_capture = nullptr;
+    throw;
+  }
+  bs_set_print_callback(nullptr, &error);
+  bs_free_error_msg(error);
+  active_message_capture = nullptr;
+}
+
+size_t count_containing(const MessageCapture& capture,
+                        const std::string& needle) {
+  size_t n = 0;
+  for (const auto& m : capture.messages)
+    if (m.find(needle) != std::string::npos) ++n;
+  return n;
+}
+
+void expect_sampling_messages() {
+  const std::string mir = slurp("tests/fixtures/sample_reject.tmir.sexp");
+  char err[8192]{};
+  stanli_model_opts model_opts;
+  stanli_model_opts_init(&model_opts);
+  stanli_model* model = stanli_model_new_with_opts(
+      mir.c_str(), "{\"y\":0.5,\"cutoff\":0}", &model_opts, err, sizeof err);
+  expect_true("sampling messages model builds", model != nullptr);
+  if (model == nullptr) return;
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.seed = 7;
+  opts.chains = 2;
+  opts.warmup = 300;
+  opts.samples = 300;
+  opts.num_threads = 1;
+  const int64_t n = stanli_n_unconstrained(model);
+  const int64_t rows = stanli_n_stored_draws(&opts);
+  std::vector<double> draws((size_t)(opts.chains * rows * n));
+  std::vector<double> stats(
+      (size_t)(opts.chains * rows * STANLI_N_SAMPLER_COLS));
+  const auto run = [&](int refresh) {
+    ProgressCapture progress{std::this_thread::get_id()};
+    return stanli_sample_multi_metric(
+        model, &opts, nullptr, refresh, draws.data(), stats.data(), nullptr,
+        refresh > 0 ? capture_progress : nullptr, &progress, nullptr, nullptr,
+        nullptr, nullptr, err, sizeof err);
+  };
+
+  MessageCapture quiet;
+  int rc = 1;
+  collect_message(quiet, [&] { rc = run(0); });
+  expect_true("quiet run succeeds", rc == 0);
+  expect_true("refresh 0 prints no sampler messages", quiet.messages.empty());
+  const std::vector<double> quiet_draws = draws;
+
+  MessageCapture loud;
+  collect_message(loud, [&] { rc = run(100); });
+  expect_true("refresh run succeeds", rc == 0);
+  expect_true("messages leave the draws bitwise unchanged",
+              draws == quiet_draws);
+  const std::string header =
+      "Informational Message: The current Metropolis proposal is about to be "
+      "rejected because of the following issue:";
+  expect_true("rejected proposals are reported", !loud.messages.empty());
+  expect_true("every report is one block per transition",
+              count_containing(loud, header) == loud.messages.size());
+  for (const auto& m : loud.messages) {
+    if (m.rfind("Chain [1] ", 0) != 0 && m.rfind("Chain [2] ", 0) != 0) {
+      expect_true("report starts with its chain: " + m, false);
+      break;
+    }
+  }
+  expect_true("report names the reject text",
+              count_containing(loud, "mu must be >= 0, found mu = ") ==
+                  loud.messages.size());
+  expect_true("report carries CmdStan's closing note",
+              count_containing(loud,
+                               "If this warning occurs sporadically, such as "
+                               "for highly constrained variable types like "
+                               "covariance matrices, then the sampler is "
+                               "fine,\nChain [") +
+                      count_containing(
+                          loud,
+                          "but if this warning occurs often then your model "
+                          "may be either severely ill-conditioned or "
+                          "misspecified.") >
+                  0);
+  expect_true("both chains report",
+              count_containing(loud, "Chain [1] Informational") > 0 &&
+                  count_containing(loud, "Chain [2] Informational") > 0);
+  for (const auto& m : loud.messages)
+    for (size_t at = m.find("Chain ["); at != std::string::npos;
+         at = m.find("Chain [", at + 1))
+      if (at != 0 && m[at - 1] != '\n') {
+        expect_true("prefix only at line starts", false);
+        break;
+      }
+
+  if (stanli_thread_safe()) {
+    opts.num_threads = 2;
+    MessageCapture threaded;
+    collect_message(threaded, [&] { rc = run(100); });
+    expect_true("threaded refresh run succeeds", rc == 0);
+    expect_true("threaded blocks stay whole",
+                count_containing(threaded, header) == threaded.messages.size());
+    expect_true("threaded run matches sequential draws", draws == quiet_draws);
+    opts.num_threads = 1;
+  }
+
+  stanli_model_free(model);
+
+  if (!stanli_thread_safe()) return;
+  model_opts.threads_per_chain = 2;
+  model = stanli_model_new_with_opts(mir.c_str(), "{\"y\":0.5,\"cutoff\":0}",
+                                     &model_opts, err, sizeof err);
+  expect_true("threaded model builds", model != nullptr);
+  if (model == nullptr) return;
+  MessageCapture note;
+  collect_message(note, [&] { rc = run(100); });
+  expect_true("threads note run succeeds", rc == 0);
+  expect_true(
+      "unused threads_per_chain is noted once per call",
+      count_containing(note,
+                       "Note: threads_per_chain = 2 has no effect on this "
+                       "model, which has no reduce_sum call to run in "
+                       "parallel.") == 1);
+  MessageCapture note_quiet;
+  collect_message(note_quiet, [&] { rc = run(0); });
+  expect_true("refresh 0 prints no threads note",
+              count_containing(note_quiet, "threads_per_chain") == 0);
+  stanli_model_free(model);
+}
+
+void expect_sampling_warnings_api() {
+  const std::string mir = slurp("tests/fixtures/sample_reject.tmir.sexp");
+  char err[8192]{};
+  stanli_model* model = stanli_model_new_with_opts(
+      mir.c_str(), "{\"y\":0.5,\"cutoff\":-1e9}", nullptr, err, sizeof err);
+  expect_true("warnings model builds", model != nullptr);
+  if (model == nullptr) return;
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.seed = 7;
+  opts.chains = 2;
+  opts.warmup = 50;
+  opts.samples = 50;
+  opts.num_threads = 1;
+  const int64_t n = stanli_n_unconstrained(model);
+  const int64_t rows = stanli_n_stored_draws(&opts);
+  std::vector<double> draws((size_t)(opts.chains * rows * n));
+  std::vector<double> stats(
+      (size_t)(opts.chains * rows * STANLI_N_SAMPLER_COLS));
+  std::vector<stanli_sample_report> reports((size_t)opts.chains);
+  const int rc = stanli_sample_multi_metric(
+      model, &opts, nullptr, 0, draws.data(), stats.data(), nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, reports.data(), err, sizeof err);
+  expect_true("warnings run succeeds", rc == 0);
+  char text[4096];
+  expect_true("a healthy run has nothing to warn about",
+              stanli_sampling_warnings(&opts, reports.data(), stats.data(),
+                                       text, sizeof text) == 1 &&
+                  text[0] == '\0');
+  reports[0].n_divergent = 4;
+  const int64_t need =
+      stanli_sampling_warnings(&opts, reports.data(), stats.data(), nullptr, 0);
+  expect_true("the size query reports the text length", need > 1);
+  std::vector<char> big((size_t)need);
+  stanli_sampling_warnings(&opts, reports.data(), stats.data(), big.data(),
+                           big.size());
+  expect_true(
+      "the text names the divergences",
+      std::string(big.data())
+              .rfind("Warning: 4 of 100 (4.0%) transitions ended with a "
+                     "divergence.\n",
+                     0) == 0);
+  expect_true("null arguments are refused",
+              stanli_sampling_warnings(&opts, nullptr, stats.data(), text,
+                                       sizeof text) == 0);
+  stanli_model_free(model);
+}
+
 // Browser streaming must expose the same diagnostics as the existing
 // multi-chain API without changing any draw or callback-visible row.
 void expect_streaming_stats() {
@@ -1749,6 +1951,8 @@ int main() {
   expect_interruptible_sampling();
   expect_in_worker_write_array();
   expect_metric_options();
+  expect_sampling_messages();
+  expect_sampling_warnings_api();
   expect_streaming_stats();
   expect_sample_options_validated();
 

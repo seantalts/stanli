@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
@@ -239,6 +240,45 @@ int main() {
                                  t.find("R_hat") != std::string::npos);
     expect("row present", t.find("mu") != std::string::npos &&
                               t.find("1234") != std::string::npos);
+  }
+
+  // ---- the post-sampling warnings ---------------------------------------
+  {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const std::string see =
+        "See https://mc-stan.org/misc/warnings for details.\n";
+    expect(
+        "clean chains warn about nothing",
+        format_sampling_warnings({{0, 0, 0.9}, {0, 0, 0.8}}, 1000, 10).empty());
+    expect("divergence wording",
+           format_sampling_warnings({{3, 0, 0.9}, {2, 0, 0.9}}, 1000, 10) ==
+               "Warning: 5 of 2000 (0.2%) transitions ended with a "
+               "divergence.\n" +
+                   see);
+    expect("treedepth wording",
+           format_sampling_warnings({{0, 40, 0.9}, {0, 0, 0.9}}, 1000, 12) ==
+               "Warning: 40 of 2000 (2.0%) transitions hit the maximum "
+               "treedepth limit of 12.\n" +
+                   see);
+    expect("low E-BFMI wording and threshold",
+           format_sampling_warnings({{0, 0, 0.1}, {0, 0, 0.29}, {0, 0, 0.3}},
+                                    100, 10) ==
+               "Warning: 2 of 3 chains had an E-BFMI less than 0.3.\n" + see);
+    expect("NaN E-BFMI wording",
+           format_sampling_warnings({{0, 0, nan}, {0, 0, 0.9}}, 100, 10) ==
+               "Warning: 1 of 2 chains have a NaN E-BFMI.\n" + see);
+    expect("NaN E-BFMI is not reported for runs too short to estimate it",
+           format_sampling_warnings({{0, 0, nan}}, 2, 10).empty());
+    expect("paragraphs are ordered and separated by a blank line",
+           format_sampling_warnings({{1, 1, 0.1}}, 100, 10) ==
+               "Warning: 1 of 100 (1.0%) transitions ended with a "
+               "divergence.\n" +
+                   see + "\n" +
+                   "Warning: 1 of 100 (1.0%) transitions hit the maximum "
+                   "treedepth limit of 10.\n" +
+                   see + "\n" +
+                   "Warning: 1 of 1 chains had an E-BFMI less than 0.3.\n" +
+                   see);
   }
 
   if (failures == 0) std::printf("test_diagnose: all checks passed\n");

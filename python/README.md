@@ -74,7 +74,9 @@ Chain [1] Elapsed Time: 0.821 seconds (Warm-up)
 Output goes through `sys.stdout`, so notebooks and
 `contextlib.redirect_stdout()` work. Progress never changes draws or RNG
 streams. If any post-warmup transition diverges or hits the maximum treedepth,
-the final output reports the count. Ctrl-C stops every chain after its current
+or a chain's E-BFMI is below 0.3, the final output says so in CmdStan's words.
+A proposal rejected because the model threw is reported with its chain, as in
+CmdStan. Ctrl-C stops every chain after its current
 transition and raises `KeyboardInterrupt`.
 
 ```python

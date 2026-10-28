@@ -278,6 +278,11 @@ void stanli_metric_opts_init(stanli_metric_opts* o);
  * Zero disables callbacks; negative values are rejected. `reports`, when
  * non-null, holds opts->chains entries.
  *
+ * A positive `refresh` also lets the run send its own notices to the message
+ * sink (the one print() uses), each line prefixed "Chain [id]": a proposal
+ * rejected because the model threw, the adaptation-window warnings, and a
+ * note when threads_per_chain exceeds 1 on a model with no reduce_sum call.
+ *
  * `poll` is asked on the calling thread about every 100 ms. A stopped run
  * returns 0 with `*interrupted` set to 1 and only the rows stored before the
  * stop written; the binding raises its language's interrupt from that. `poll`,
@@ -362,6 +367,19 @@ int64_t stanli_diagnose_text(const double* draws, int64_t n_chains,
                              int64_t n_draws, int64_t n_cols,
                              const char* const* names, const double* stats,
                              int max_depth, char* out, size_t out_len);
+
+/* The warnings to print after a stanli_sample_multi_metric run: divergent
+ * transitions, transitions that hit the maximum treedepth, and chains whose
+ * E-BFMI is below 0.3, in CmdStanR's wording. `opts` is the options the run
+ * used, `reports` its per-chain reports and `stats` its sampler columns
+ * (STANLI_N_SAMPLER_COLS wide, chain-major, as filled by the run). E-BFMI is
+ * taken over the stored post-warmup rows. Writes at most out_len bytes
+ * including the terminator and returns the number of bytes the full text
+ * needs, 1 when nothing is wrong, 0 on bad arguments. */
+int64_t stanli_sampling_warnings(const stanli_sample_opts* opts,
+                                 const stanli_sample_report* reports,
+                                 const double* stats, char* out,
+                                 size_t out_len);
 
 /* ---- optimization --------------------------------------------------------
  *
