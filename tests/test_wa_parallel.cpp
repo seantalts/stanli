@@ -14,6 +14,7 @@
 #include <stanli/bridgestan_internal.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/execution_report.hpp>
+#include <stanli/large_stack.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/threading.hpp>
 
@@ -277,6 +278,54 @@ void test_deep_nesting(const std::vector<Fixture>& fixtures) {
   expect(par.parallel == kThreaded, "the deep model used the second thread");
   expect_same("deeply nested model, parallel vs sequential", par.text,
               seq.text);
+
+  // Deeper than kInlineNesting, the model is lowered on the large stack, and
+  // write_array stays there with it.
+  const std::string real =
+      "(meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))";
+  const std::string read_mu =
+      "((pattern (FunApp (CompilerInternal (FnReadParam (constrain Identity) "
+      "(dims ()) (mem_pattern AoS))) ())) " +
+      real + ")";
+  const auto write = [&](const std::string& name) {
+    return "((pattern (NRFunApp (CompilerInternal (FnWriteParam "
+           "(unconstrain_opt ()) (var ((pattern (Var " +
+           name + ")) " + real + ")))) ())) (meta <opaque>))";
+  };
+  std::string chain = "((pattern (Var mu)) " + real + ")";
+  for (unsigned i = 0; i < stanli::kInlineNesting + 50; ++i)
+    chain = "((pattern (FunApp (StanLib sin FnPlain AoS) (" + chain + "))) " +
+            real + ")";
+  Fixture beyond;
+  beyond.name = "beyond_inline_nesting";
+  beyond.mir =
+      "((functions_block ()) (input_vars ()) (prepare_data ())\n"
+      " (log_prob (((pattern (Decl (decl_adtype AutoDiffable) (decl_id mu) "
+      "(decl_type (Sized SReal)) (initialize (Assign " +
+      read_mu +
+      ")))) (meta <opaque>))))\n"
+      " (generate_quantities (((pattern (Decl (decl_adtype DataOnly) "
+      "(decl_id mu) (decl_type (Sized SReal)) (initialize (Assign " +
+      read_mu + ")))) (meta <opaque>)) " + write("mu") +
+      " ((pattern (Decl (decl_adtype DataOnly) (decl_id g) (decl_type (Sized "
+      "SReal)) (initialize (Assign " +
+      chain + ")))) (meta <opaque>)) " + write("g") +
+      "))\n"
+      " (output_vars ((mu <opaque> ((out_unconstrained_st SReal) "
+      "(out_constrained_st SReal) (out_block Parameters) (out_trans "
+      "Identity))) (g <opaque> ((out_unconstrained_st SReal) "
+      "(out_constrained_st SReal) (out_block GeneratedQuantities) (out_trans "
+      "Identity)))))\n"
+      " (prog_name deep) (prog_path deep.stan))\n";
+  const Run beyond_seq = construct_sequential(beyond);
+  expect(beyond_seq.has_write_array,
+         "a model nested beyond kInlineNesting lowers: " + beyond_seq.text);
+  const Run beyond_par = construct_parallel(beyond);
+  expect(!beyond_par.parallel,
+         "a model nested beyond kInlineNesting keeps write_array on the "
+         "large stack");
+  expect_same("model nested beyond kInlineNesting, forced vs sequential",
+              beyond_par.text, beyond_seq.text);
 }
 
 void test_data_payload() {

@@ -1088,6 +1088,9 @@ class WriteArrayLowering {
         std::thread::hardware_concurrency() == 1 || dumper_.enabled() ||
         execution_trace_active())
       return false;
+    // A program this deep is being lowered on the large stack, which the
+    // second thread does not have.
+    if (prog_.nesting > kInlineNesting) return false;
     if (policy == ParallelWriteArray::Force) return true;
     if (data_payload_bytes(log_prob.td.env()) > kParallelWriteArrayMaxDataBytes)
       return false;
