@@ -550,7 +550,8 @@ def _capture_process_stdout(run):
             os.dup2(saved, 1)
             os.close(saved)
         sink.seek(0)
-        return result, sink.read().decode()
+        # Windows writes the C stdout in text mode, with CRLF line ends.
+        return result, sink.read().decode().replace("\r\n", "\n")
 
 
 REJECTING = """
@@ -588,14 +589,16 @@ def test_sampling_reports_rejected_proposals_with_the_chain():
 
 def test_sampling_warnings_are_automatic_and_shared():
     m = stanli.Model(stan_code=FUNNEL)
-    _, text = _capture_process_stdout(
+    fit, text = _capture_process_stdout(
         lambda: m.sample(chains=1, warmup=100, samples=500, seed=42,
                          refresh=1000))
     assert re.search(r"Warning: \d+ of 500 \(\d+\.\d%\) transitions ended "
                      r"with a divergence\.\n" + re.escape(SEE_WARNINGS),
                      text), text
-    assert ("Warning: 1 of 1 chains had an E-BFMI less than 0.3.\n"
-            + SEE_WARNINGS) in text, text
+    # The draws, and so the E-BFMI, differ across platforms' math libraries.
+    low_ebfmi = ("Warning: 1 of 1 chains had an E-BFMI less than 0.3.\n"
+                 + SEE_WARNINGS)
+    assert (low_ebfmi in text) == bool(fit.ebfmi()[0] < 0.3), text
     _, treedepth = _capture_process_stdout(
         lambda: m.sample(chains=1, warmup=50, samples=100, seed=1,
                          max_depth=3, refresh=1000))
