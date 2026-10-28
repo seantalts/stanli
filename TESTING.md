@@ -100,7 +100,7 @@ The jobs are in [`wheels.yml`](.github/workflows/wheels.yml),
 | --- | --- | --- | --- | --- |
 | [kernel unit tests](#unit-tests-for-numerical-operations) | one operation's value and every gradient component | the stan-math `var` call CmdStan's generated C++ would make, bitwise | PR (CTest) | whether lowering selects that kernel |
 | [fused-density differential](#unit-tests-for-numerical-operations) | the seven fused densities over every activity mask and shape | Stan Math's kernels, bitwise | PR, Linux x86-64 | other platforms |
-| [corpus replay](#comparison-with-cmdstan-on-complete-models) | log density, gradient and `write_array` rows of 353 models at 3 points | recorded CmdStan values | PR on Linux x86-64; post-merge on macOS arm64 and x86-64 and Linux aarch64 | parameter values away from the 3 points |
+| [corpus replay](#comparison-with-cmdstan-on-complete-models) | log density, gradient and `write_array` rows of 361 models at 3 points | recorded CmdStan values | PR on Linux x86-64; post-merge on macOS arm64 and x86-64 and Linux aarch64 | parameter values away from the 3 points |
 | [fast-mode replay](#fast-mode) | the same models compiled in fast mode | the same references, fast-mode gate | PR, Linux x86-64 | macOS, Windows and ARM |
 | [sampling smoke](#comparison-with-cmdstan-on-complete-models) | 100 saved draws of the 13 Aalto fixtures | reference output names, draw count, finiteness | PR (CTest) | convergence |
 | [cross-path matrix](#comparing-stanli-execution-paths) | every fixture under each execution configuration | each other, bitwise | PR (CTest) | transformed data, which has one engine |
@@ -153,13 +153,14 @@ found errors that kernel tests did not reach.
 
 The primary reference file,
 [`docs/internal/artifacts/corpus-refs.json.gz`](docs/internal/artifacts/corpus-refs.json.gz),
-holds 353 models at 3 deterministic points each: 1059 points and 364,814 log
+holds 361 models at 3 deterministic points each: 1083 points and 367,112 log
 density and gradient values. The models are 119 posteriordb models that
-evaluate, 11 language fixtures adapted from stanc3's tests, 124 brms 2.23.0
+evaluate, 15 language fixtures adapted from stanc3's tests, 124 brms 2.23.0
 models, 62 Rethinking fixtures, 13 Aalto lesson fixtures, 22 models from the
-cogmod package's custom brms families, and ctsem's state-space template with three
-data sets. 351 models also carry `write_array` rows at the same points (1050
-rows, 678,933 values over constrained parameters, transformed parameters and
+cogmod package's custom brms families, ctsem's state-space template with three
+data sets, and OncoBayes2's dose-escalation model with its three example data
+sets. 359 models also carry `write_array` rows at the same points (1074
+rows, 695,121 values over constrained parameters, transformed parameters and
 generated quantities), with column names compared exactly. Both drivers seed
 Stan's RNG with 1234 and chain 0, so generated quantities compare too. An
 absent row means that output is not covered. Per-model coverage and worst
@@ -192,7 +193,7 @@ checkout that does not match the pins
 ([`tools/toolchain.py`](tools/toolchain.py)). The benchmark's
 `--allow-unpinned-cmdstan` overrides this and records the mismatch.
 
-Of the 1059 points, 1011 are `VERIFIED`, 39 imported points are `RECORDED`,
+Of the 1083 points, 1035 are `VERIFIED`, 39 imported points are `RECORDED`,
 six are `REJECTED_BOTH` and three are `MISMATCH`. The three mismatches belong
 to `kronecker_gp` (see [Known limits](#known-limits)). Intel macOS uses its
 own CmdStan recording for that model, because Intel CmdStan differs from the
