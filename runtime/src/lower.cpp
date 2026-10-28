@@ -1131,7 +1131,8 @@ class WriteArrayLowering {
     wa_.emplace(
         data_, trace_, dumper_, "write_array",
         PreparedContext{log_prob.td_rng, log_prob.shape_pool, no_environment,
-                        log_prob.int_env_data, no_declarations});
+                        log_prob.int_env_data, no_declarations,
+                        log_prob.omitted_data});
     const auto select_time = trace_.start();
     for (const std::string& name : bound_env_) {
       const auto it = log_prob.td.env().find(name);
