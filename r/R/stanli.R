@@ -116,8 +116,8 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
   if (!is.logical(fast_math) || length(fast_math) != 1L || is.na(fast_math))
     stop("fast_math must be TRUE or FALSE", call. = FALSE)
   load_runtime()
+  source_file <- NULL
   if (is.null(mir)) {
-    source_file <- NULL
     if (is.null(code)) {
       if (is.null(file)) stop("provide file, code or mir", call. = FALSE)
       code <- read_utf8_file(file)

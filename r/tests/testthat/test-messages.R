@@ -41,3 +41,9 @@ test_that("a compiler warning reaches the user once", {
     })
   expect_length(grep("Empty model", seen, fixed = TRUE), 1L)
 })
+
+test_that("a model built from MIR needs no source file", {
+  skip_without_runtime()
+  mir <- stanli:::stanc_mir("parameters { real x; } model { x ~ normal(0, 1); }")
+  expect_s3_class(stanli_model(mir = mir), "stanli_model")
+})
