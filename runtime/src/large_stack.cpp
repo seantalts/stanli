@@ -1,5 +1,7 @@
 #include <stanli/large_stack.hpp>
 
+#include "x87_control.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <exception>
@@ -48,12 +50,14 @@ struct Job {
   void (*body)(void*);
   void* context;
   unsigned limit;
+  detail::X87ControlWord fp;
   std::exception_ptr error;
 };
 
 #ifndef __EMSCRIPTEN__
 void* run_job(void* p) {
   Job* job = static_cast<Job*>(p);
+  job->fp.apply_to_this_thread();
   large_stack_limit = job->limit;
   try {
     job->body(job->context);
@@ -117,7 +121,7 @@ void run_on_large_stack(void (*body)(void*), void* context) {
     Job job{body, context,
             static_cast<unsigned>(
                 std::min<size_t>(kMaxNesting, bytes / kBytesPerLevel)),
-            nullptr};
+            detail::X87ControlWord::of_this_thread(), nullptr};
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_t thread;
