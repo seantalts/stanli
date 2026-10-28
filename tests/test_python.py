@@ -10,6 +10,7 @@ import concurrent.futures
 import contextlib
 import copy
 import io
+import os
 import pathlib
 import pickle
 import re
@@ -528,13 +529,104 @@ def test_fit_uses_full_transition_report_counts():
 
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
-        stanli._print_sample_reports(reports, first_chain=1, samples=10,
-                                     max_depth=12)
+        stanli._print_sample_reports(reports, first_chain=1,
+                                     warnings="Warning: shared text.\n")
     text = output.getvalue()
-    assert "8 of 20 post-warmup transitions (40.0%)" in text
-    assert "10 of 20 post-warmup transitions (50.0%)" in text
-    assert "maximum treedepth of 12" in text
+    assert "Warning: shared text." in text
     assert text.count("Elapsed Time:") == 2
+
+
+def _capture_process_stdout(run):
+    # The runtime's own messages go to the C stdout, below sys.stdout, so
+    # redirect_stdout cannot see them.
+    sys.stdout.flush()
+    saved = os.dup(1)
+    with tempfile.TemporaryFile() as sink:
+        os.dup2(sink.fileno(), 1)
+        try:
+            result = run()
+            sys.stdout.flush()
+        finally:
+            os.dup2(saved, 1)
+            os.close(saved)
+        sink.seek(0)
+        return result, sink.read().decode()
+
+
+REJECTING = """
+parameters { real mu; }
+model {
+  if (mu < 0) reject("mu must be >= 0, found mu = ", mu);
+  mu ~ normal(0, 1);
+}
+"""
+
+FUNNEL = """
+parameters { real x; real y; }
+model { y ~ normal(0, 3); x ~ normal(0, exp(y / 2)); }
+"""
+
+SEE_WARNINGS = "See https://mc-stan.org/misc/warnings for details."
+
+
+def test_sampling_reports_rejected_proposals_with_the_chain():
+    m = stanli.Model(stan_code=REJECTING)
+    _, quiet = _capture_process_stdout(
+        lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
+                         refresh=0))
+    assert quiet == "", quiet
+    _, text = _capture_process_stdout(
+        lambda: m.sample(chains=2, warmup=100, samples=100, seed=3,
+                         refresh=50))
+    assert ("Chain [1] Informational Message: The current Metropolis "
+            "proposal is about to be rejected because of the following "
+            "issue:\nChain [1] mu must be >= 0, found mu = ") in text, text
+    assert "Chain [2] Informational Message" in text, text
+    assert ("Chain [1] but if this warning occurs often then your model "
+            "may be either severely ill-conditioned or misspecified.") in text
+
+
+def test_sampling_warnings_are_automatic_and_shared():
+    m = stanli.Model(stan_code=FUNNEL)
+    _, text = _capture_process_stdout(
+        lambda: m.sample(chains=1, warmup=100, samples=500, seed=42,
+                         refresh=1000))
+    assert re.search(r"Warning: \d+ of 500 \(\d+\.\d%\) transitions ended "
+                     r"with a divergence\.\n" + re.escape(SEE_WARNINGS),
+                     text), text
+    assert ("Warning: 1 of 1 chains had an E-BFMI less than 0.3.\n"
+            + SEE_WARNINGS) in text, text
+    _, treedepth = _capture_process_stdout(
+        lambda: m.sample(chains=1, warmup=50, samples=100, seed=1,
+                         max_depth=3, refresh=1000))
+    assert re.search(r"Warning: \d+ of 100 \(\d+\.\d%\) transitions hit the "
+                     r"maximum treedepth limit of 3\.\n"
+                     + re.escape(SEE_WARNINGS), treedepth), treedepth
+    _, quiet = _capture_process_stdout(
+        lambda: m.sample(chains=1, warmup=100, samples=500, seed=42,
+                         refresh=0))
+    assert quiet == "", quiet
+    _, healthy = _capture_process_stdout(
+        lambda: _normal().sample(chains=2, warmup=200, samples=100, seed=1,
+                                 refresh=1000))
+    assert "Warning" not in healthy, healthy
+    assert "Informational" not in healthy, healthy
+
+
+def test_unused_threads_per_chain_is_noted_once():
+    if not stanli.thread_safe():
+        return
+    note = ("Note: threads_per_chain = 2 has no effect on this model, "
+            "which has no reduce_sum call to run in parallel.")
+    m = _normal()
+    _, text = _capture_process_stdout(
+        lambda: m.sample(chains=2, warmup=50, samples=50, refresh=100,
+                         threads_per_chain=2))
+    assert text.count(note) == 1, text
+    _, text = _capture_process_stdout(
+        lambda: m.sample(chains=2, warmup=50, samples=50, refresh=0,
+                         threads_per_chain=2))
+    assert note not in text, text
 
 
 def test_sample_opts_defaults_match_the_header():

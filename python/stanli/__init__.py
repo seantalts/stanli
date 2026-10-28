@@ -217,6 +217,10 @@ def _load_lib():
                                          ctypes.POINTER(ctypes.c_double),
                                          ctypes.c_int, ctypes.c_char_p,
                                          ctypes.c_size_t]
+    lib.stanli_sampling_warnings.restype = ctypes.c_int64
+    lib.stanli_sampling_warnings.argtypes = [
+        ctypes.POINTER(_SampleOpts), ctypes.POINTER(_SampleReport),
+        ctypes.POINTER(ctypes.c_double), ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_sampler_column_name.restype = ctypes.c_char_p
     lib.stanli_sampler_column_name.argtypes = [ctypes.c_int]
     return lib
@@ -651,8 +655,18 @@ def _print_sample_progress(chain_id, iteration, total, warmup):
           f"[{percent:3d}%]  ({phase})", flush=True)
 
 
-def _print_sample_reports(reports, first_chain, samples, max_depth):
-    """Per-chain timing and aggregate post-warmup sampler problems."""
+def _sampling_warnings(opts, reports, stats):
+    """The runtime's warnings for a finished run, "" when there are none."""
+    need = _lib.stanli_sampling_warnings(ctypes.byref(opts), reports,
+                                         _dptr(stats), None, 0)
+    buf = ctypes.create_string_buffer(max(int(need), 1))
+    _lib.stanli_sampling_warnings(ctypes.byref(opts), reports, _dptr(stats),
+                                  buf, len(buf))
+    return buf.value.decode()
+
+
+def _print_sample_reports(reports, first_chain, warnings):
+    """Per-chain timing, then the sampler warnings the runtime wrote."""
     print()
     for c, report in enumerate(reports):
         label = f"Chain [{first_chain + c}] Elapsed Time: "
@@ -662,19 +676,8 @@ def _print_sample_reports(reports, first_chain, samples, max_depth):
         print(f"{indent}{report.sampling_seconds:.3f} seconds (Sampling)")
         print(f"{indent}{total:.3f} seconds (Total)")
         print()
-
-    n_divergent = sum(r.n_divergent for r in reports)
-    n_max_depth = sum(r.n_max_treedepth for r in reports)
-    n_transitions = len(reports) * samples
-    if n_divergent:
-        percent = 100 * n_divergent / n_transitions if n_transitions else 0.0
-        print(f"Warning: {n_divergent} of {n_transitions} post-warmup "
-              f"transitions ({percent:.1f}%) ended with a divergence.")
-    if n_max_depth:
-        percent = 100 * n_max_depth / n_transitions if n_transitions else 0.0
-        print(f"Warning: {n_max_depth} of {n_transitions} post-warmup "
-              f"transitions ({percent:.1f}%) saturated the maximum "
-              f"treedepth of {max_depth}.")
+    if warnings:
+        print(warnings)
 
 
 class Summary:
@@ -1537,8 +1540,8 @@ class Model:
                   metric=metric, step_size=adapted_step,
                   inv_metric=fit_inv_metric)
         if refresh:
-            _print_sample_reports(reports, first_chain, opts.samples,
-                                  opts.max_depth)
+            _print_sample_reports(reports, first_chain,
+                                  _sampling_warnings(opts, reports, stats))
         return fit
 
 
