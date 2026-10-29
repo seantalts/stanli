@@ -37,6 +37,13 @@ inline constexpr bool kFusedOnly = false;
 using FusedKernel = void (*)(KernelCtx&);
 
 template <typename Code>
+constexpr bool has_fused_kernel(Code code) {
+  return code == OP_NORMAL_LPDF || code == OP_CAUCHY_LPDF ||
+         code == OP_STUDENT_T_LPDF || code == OP_LOGNORMAL_LPDF ||
+         code == OP_BETA_LPDF || code == OP_GAMMA_LPDF;
+}
+
+template <typename Code>
 constexpr FusedKernel fused_kernel_for(Code code) {
   if (code == OP_NORMAL_LPDF) return &normal_lpdf_fused;
   if (code == OP_CAUCHY_LPDF) return &cauchy_lpdf_fused;

@@ -369,14 +369,13 @@ int64_t density_scratch(const Op& op, const Slot* slots) {
 // lives in density_fwd_v.
 #define STANLI_DEFINE_DENSITY_FWD(code, fn, n, tier)                        \
   void fn##_fwd_gen(KernelCtx& ctx) {                                       \
-    constexpr FusedKernel fused = fused_kernel_for(code);                   \
-    if constexpr (fused != nullptr) {                                       \
+    if constexpr (has_fused_kernel(code)) {                                 \
       if (fused_density_active()) {                                         \
-        fused(ctx);                                                         \
+        fused_kernel_for(code)(ctx);                                        \
         return;                                                             \
       }                                                                     \
     }                                                                       \
-    if constexpr (!(fused != nullptr && kFusedOnly)) {                      \
+    if constexpr (!(has_fused_kernel(code) && kFusedOnly)) {                \
       density_fwd_v<n, tier>(                                               \
           ctx, [](const auto&... a) { return stan::math::fn<true>(a...); }, \
           [](const auto&... a) { return stan::math::fn<false>(a...); });    \
