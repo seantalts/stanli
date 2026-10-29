@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.25.0
+
+Faster first gradients and preparation on large models, clearer errors and
+sampling warnings in R and Python, and fixes for wrong answers from integer
+arrays filled one row at a time and from in-place writes inside long loops.
+
 ### Performance
 
 - The first gradient of a model that scans a data table inside a long loop,
@@ -10,6 +16,132 @@
   per distinct input and reused. Log densities, gradients, warm gradient time
   and preparation time are unchanged, and peak memory grows by about 2 MB.
   `STANLI_NO_DATA_LOOP_MEMO=1` turns it off.
+- Models that repeat the same loop body for many subjects, such as ctsem,
+  reuse the work of earlier subjects when building later ones, so the first
+  gradient is faster. On the ctsem model from Stan Discourse thread 41545 it
+  fell from 5.33 s to 1.34 s with 10 latent states, and from 44.9 s to
+  8.51 s with 20. Warm gradients and results are unchanged. Peak memory at
+  20 latent states grows from 8.95 GB to 9.27 GB.
+  `STANLI_NO_STRUCTURED_FRAME_INSTANCE=1` turns it off.
+- Building a model prepares generated quantities on a second thread while it
+  prepares the log density, when the model is large enough. Model
+  construction on the same ctsem models is 1.6 times faster (4.35 s to 2.71 s
+  at 20 latent states), and peak memory during construction rises from
+  310 MB to 416 MB. `STANLI_PARALLEL_WA=0` turns it off.
+- `csr_matrix_times_vector` now takes time proportional to the size of the
+  matrix. Before, it grew with the square of the number of rows. On a ctsem
+  variant that builds a 55 x 55 matrix from a 3,025-row sparse product, a
+  warm gradient fell from 47.9 s to 0.29 s, the first gradient from 52.2 s to
+  2.9 s, and peak memory from 69.2 GB to 1.4 GB. Log densities are bitwise
+  unchanged; the gradient with respect to the vector is summed in a
+  different order, so it rounds differently.
+- Preparation time now grows linearly with model size for models with many
+  generated quantities, transformed parameters, individually declared
+  constrained parameters, or loops and branches in generated quantities. At
+  3,200 statements: 3,200 generated-quantities statements went from 2.83 s to
+  0.043 s, 3,200 `real<lower=0,upper=1>` parameters from 2.03 s to 0.171 s,
+  and 3,200 `while` loops in generated quantities from 10.78 s to 0.140 s.
+  Preparation time over the corpus is unchanged.
+- OncoBayes2's `blrm_exnex` model no longer falls back to the interpreter
+  for its generated quantities. Sampling 1,000 warmup and 1,000 draws went
+  from 0.338 s to 0.053 s for one agent and from 1.58 s to 0.371 s for two
+  drugs.
+
+### Features
+
+- When a proposal is rejected during sampling, for example because a
+  transformed parameter is outside its bounds, stanli prints CmdStan's
+  "Informational Message: The current Metropolis proposal is about to be
+  rejected" notice with the reason, prefixed `Chain [n]`. These print only
+  when `refresh > 0`, as in CmdStan, and Stan's own warmup notices now
+  appear too.
+- Python `Model.sample()`, R `sample_model()` and R `sample_cstan()` print
+  the same warnings after sampling: divergences, maximum treedepth hits,
+  chains with E-BFMI below 0.3, and a link to
+  https://mc-stan.org/misc/warnings. Asking for `threads_per_chain > 1` on a
+  model without `reduce_sum` prints a note.
+- Model `print()` output, sampler progress and these warnings now go through
+  R's console and Python's `sys.stdout`. `capture.output()`, `sink()`,
+  knitr, `redirect_stdout` and Jupyter cells capture them, and in RStudio,
+  Positron and Jupyter they no longer land in the terminal.
+- stanc3's warnings, such as "Empty model detected", are shown once: as a
+  `RuntimeWarning` in Python and a `warning()` in R. Syntax and type errors
+  name the model file when you passed one.
+- Data may leave out a variable whose declared size is zero, as CmdStan
+  allows. With `int K; vector[K] x;` and `K = 0`, `x` can be omitted.
+- `to_int`, `to_array_2d`, integer reads of 3-D int arrays, and multi-index
+  reads of multi-dimensional arrays now run. They were refused before.
+
+### Fixes
+
+- Filling a 2-D int array one row at a time (`idx[i] = {...}`) left later
+  integer reads of it returning -2147483648. Depending on where the array was
+  used, this gave wrong loop bounds and silently wrong posteriors, missing
+  generated quantities, or an out-of-bounds error. OncoBayes2's `blrm_exnex`
+  model hit all three (#523).
+- A loop with at least 32 iterations and a branch on a parameter could give
+  wrong gradients and log densities with default settings when it wrote a
+  vector or matrix element in place after passing the container to a call
+  such as `normal_lpdf`. One reported model gave a gradient of 67.44 where
+  the correct value is 124.076.
+- `dims()` of an empty outer array returns `{0}`, as Stan does. It returned
+  the inner sizes too, such as `{0, 4}`.
+- A model whose generated quantities fail at every probe point is now
+  refused with the error from the generated quantities. Before, sampling
+  warned and returned draws without transformed parameters or generated
+  quantities.
+- Missing data gives one error that names every missing variable in
+  declaration order, for example `missing data for I, y, x; the data must
+  give every variable in the data block`. Before, the error named one
+  variable in internal terms, such as `size expression needs unknown int I`.
+- Sampling and optimize arguments are checked with clear messages, such as
+  "chains must be an integer >= 1" and "delta must be between 0 and 1".
+  Before, Python `chains=0` returned a fit with no chains, R ran one chain,
+  `delta=1.5` and `thin=0` were accepted, and an R `seed = "a"` became `NA`.
+  The C API returns an error for out-of-range `chains`, `thin`,
+  `max_depth`, `chain_id` or optimize `iter`, where it used to replace them
+  silently. Python `inits` given as a dict raises a `TypeError` that points
+  to `model.unconstrain()`.
+- Copying or pickling a Python `Model` is refused. A copy used after the
+  original was freed could crash the process. Calling a method on a freed
+  model raises "stanli model handle is no longer valid", as R does.
+- Error messages no longer start with internal stage names such as
+  `stanli compile:` or `stanli prepare_data:`. Unsupported types are named
+  in plain words, for example `complex numbers are not supported yet (in
+  variable z)`.
+- In R, `data =` given the path of a missing `.json` file reports `data file
+  not found: <path>`. It was parsed as inline JSON before.
+- In R, compiled code left over from an older stanli (for example after
+  updating the package while it was loaded) is reported with a message to
+  restart R. Before, it failed with a missing native routine such as
+  `"stanli_r_stan_to_mir" not resolved` (#516).
+- A single expression with more than about 1,100 terms, such as a long
+  literal sum, no longer crashes the process. Sums of 20,000 terms prepare
+  and run, and anything deeper than the stack can hold is an error saying
+  the program is nested too deeply. Programs nested more than 256 levels
+  deep are a few milliseconds slower to prepare (14 ms to 23 ms at 1,000
+  terms). On Windows the helper threads keep the calling thread's
+  floating-point precision, so results do not depend on which thread
+  prepared the model.
+
+### Docs
+
+- The benchmarks page has one summary, defines total sampling once, and
+  summarizes the loop-vectorization comparison. Fast mode leads with the
+  median. Contributor benchmarking material moved to TESTING.md.
+
+### Internal
+
+- Source builds use `-DSTANLI_EMBED_STANC=ON|OFF` in place of
+  `STANLI_STANC_EMBED_OBJ` and `STANLI_OCAML_STDLIB`. Configure checks that
+  the embedded compiler object matches the current tree and fails with the
+  rebuild command when it is stale. The object lives in
+  `deps/stanc3/embed/<key>/`, keyed by its inputs, so worktrees with
+  different compiler sources no longer overwrite each other's.
+- Windows x64 development builds keep their C++ exception tables intact, and
+  macOS host tools link a zstd built for the same minimum macOS version.
+- CI jobs have time limits, network fetches retry, and the changelog is now
+  written at release from the merged pull requests.
 
 ## 0.24.0
 
