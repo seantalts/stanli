@@ -1,5 +1,7 @@
 #include <stanli/data.hpp>
 
+#include <stanli/compile.hpp>
+
 #include <stan/io/json/json_data_handler.hpp>
 #include <rapidjson/filereadstream.h>
 #include <rapidjson/memorystream.h>
@@ -65,6 +67,15 @@ DataMap DataMap::from_json_file(const std::string& path) {
   char buffer[65536];
   rapidjson::FileReadStream input(file.get(), buffer, sizeof(buffer));
   return read_json(input);
+}
+
+void unconstrain_inits_json(const CompiledModel& cm, const char* json,
+                            double* out) {
+  const DataMap supplied = DataMap::from_json(json == nullptr ? "{}" : json);
+  unconstrain_inits(cm,
+                    std::map<std::string, DataMap::Entry>(
+                        supplied.entries().begin(), supplied.entries().end()),
+                    out);
 }
 
 }  // namespace stanli

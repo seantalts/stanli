@@ -249,14 +249,4 @@ void unconstrain_inits(const CompiledModel& cm,
   std::copy(unc.begin(), unc.end(), out);
 }
 
-void unconstrain_inits_json(const CompiledModel& cm, const char* json,
-                            double* out) {
-  transform_inits_interp(cm);
-  const DataMap supplied = DataMap::from_json(json == nullptr ? "{}" : json);
-  unconstrain_inits(cm,
-                    std::map<std::string, DataMap::Entry>(
-                        supplied.entries().begin(), supplied.entries().end()),
-                    out);
-}
-
 }  // namespace stanli
