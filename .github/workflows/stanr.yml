@@ -25,11 +25,7 @@ on:
         required: false
         default: ''
       stanr_repository:
-        description: 'stanr repository to fetch (default: upstream)'
-        required: false
-        default: ''
-      stanr_repository:
-        description: 'stanr git repository to fetch stanr_ref from (default: the pin)'
+        description: 'stanr repository to fetch (default: the pin)'
         required: false
         default: ''
       test_filter:
@@ -62,7 +58,6 @@ jobs:
       # Until andrjohns/stanr takes the Stan 2.40 update, the pin lives on
       # the seantalts fork.
       STANR_REPOSITORY: ${{ inputs.stanr_repository || 'https://github.com/seantalts/stanr.git' }}
-      STANR_REPOSITORY: ${{ inputs.stanr_repository || 'https://github.com/andrjohns/stanr.git' }}
       STANR_TEST_FILTER: ${{ inputs.test_filter || 'stanli-backend' }}
       TESTTHAT_PARALLEL: ${{ inputs.parallel || 'TRUE' }}
       MAKEFLAGS: -j4
