@@ -13,6 +13,10 @@
 #include <windows.h>
 
 #include <process.h>
+#if _WIN32_WINNT < 0x0602
+extern "C" __declspec(dllimport) void WINAPI
+GetCurrentThreadStackLimits(PULONG_PTR low, PULONG_PTR high);
+#endif
 #elif !defined(__EMSCRIPTEN__)
 #include <pthread.h>
 #endif
