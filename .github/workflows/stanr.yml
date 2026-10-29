@@ -54,7 +54,7 @@ jobs:
       # Pin the downstream source so unrelated upstream changes cannot make a
       # Stanli release fail. Refresh this together with the test if stanr
       # changes its vendoring or backend contract.
-      STANR_REF: ${{ inputs.stanr_ref || '747c11a71e7ce51512d3051678bec5ab0db21c68' }}
+      STANR_REF: ${{ inputs.stanr_ref || '86c8d99992904af6a72876287a97074f31888b5f' }}
       # Until andrjohns/stanr takes the Stan 2.40 update, the pin lives on
       # the seantalts fork.
       STANR_REPOSITORY: ${{ inputs.stanr_repository || 'https://github.com/seantalts/stanr.git' }}
