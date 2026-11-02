@@ -2785,8 +2785,26 @@ void test_multi_normal_rng_lowering_guards() {
   } else {
     draw_extent = mismatched_result.find("Int 2", draw_extent) + 4;
     mismatched_result[draw_extent] = '3';
-    expect_interp(mismatched_result, "",
-                  "multi-normal result dimension mismatch stays interpreted");
+    // CmdStan's stan::model::assign throws for vector[3] draw = a 2-vector.
+    std::string error;
+    try {
+      CompiledModel cm = compile_model(mismatched_result, DataMap{});
+      if (cm.write_array && cm.write_array->truncated.empty()) {
+        Executor wex(std::move(cm.write_array->graph));
+        cm.write_array->bind(wex);
+        WaRng rng(1234);
+        wex.run_forward_only(EvalState{&rng});
+      }
+    } catch (const std::invalid_argument& e) {
+      error = e.what();
+    }
+    if (error !=
+        "vector assign rows: assigning variable draw (3) and right "
+        "hand side rows (2) must match in size") {
+      ++failures;
+      std::printf("FAIL multi-normal result dimension mismatch: got %s\n",
+                  error.c_str());
+    }
   }
 
   std::string cholesky = base;
