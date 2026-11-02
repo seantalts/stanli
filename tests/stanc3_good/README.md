@@ -43,5 +43,6 @@ build-stanc3-ref/driver-<sha16>.o      ref_driver.cpp object (--objs only)
 Models are translated with plain `stanc` (no `--O1`). Reuse a binary only
 when `stamp.json` matches what you would build: it records the driver's
 sha256 plus either the prebuilt object directory (`--objs DIR`, holding
-`<sha256>/model.o` and a `FLAGS` file) or the stanc sha256, CmdStan HEAD,
-stanc flags and optimisation level.
+`<sha256>/{model.o,status}` and a `FLAGS` file) with the size and mtime of
+the `model.o` it linked, or the stanc sha256, CmdStan HEAD, stanc flags and
+optimisation level.
