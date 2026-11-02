@@ -29,6 +29,9 @@ inline std::optional<MessageAction> message_action(std::string_view name) {
 // chunk than value: chunk k precedes value k, and the final chunk trails it.
 struct MessageSpec {
   std::vector<std::string> chunks;
+  // A reject that throws std::invalid_argument, as stan::model::assign's
+  // size checks do, rather than reject()'s std::domain_error.
+  bool invalid_argument = false;
 };
 
 // Render through accessors instead of owning a particular backend's values.

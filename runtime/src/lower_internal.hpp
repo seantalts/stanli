@@ -1381,6 +1381,10 @@ struct Lowering {
   void sync_data_local(const std::string& name, const mir::Expr& rhs,
                        const Val& v);
 
+  // An op that throws `message` whenever the graph runs.
+  void emit_throw(const std::string& message, bool invalid_argument);
+  bool reject_assign_size(const std::string& name, const SlotInfo& declared,
+                          int64_t len, const Val& rhs);
   void assign_plain(const mir::Stmt& s);
 
   void sync_indexed_data_local(const std::string& name, const Val& v) {

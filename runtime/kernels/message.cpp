@@ -197,6 +197,8 @@ void reject_fwd(KernelCtx& ctx) {
   // stan-math's own reject throws, and it is what the executor's callers
   // and the sampler already treat as "this draw is not valid" rather than
   // as a failure of the run.
+  const auto* spec = static_cast<const MessageSpec*>(ctx.udata);
+  if (spec->invalid_argument) throw std::invalid_argument(render(ctx));
   execute_message(MessageAction::Reject, render(ctx));
 }
 

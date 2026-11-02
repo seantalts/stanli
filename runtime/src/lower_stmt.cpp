@@ -1052,16 +1052,55 @@ Lowering::Val Lowering::lower_runtime_int_sum(const mir::Expr& e,
                 has_runtime_shape(a) ? std::max<int64_t>(0, hi) : hi);
   return result;
 }
+// stan::model::assign's size check, which throws at every evaluation that
+// reaches the assignment. Graph shapes are static, so a mismatch is known
+// now; the value keeps its own shape after the throw.
+bool Lowering::reject_assign_size(const std::string& name,
+                                  const SlotInfo& declared, int64_t len,
+                                  const Val& rhs) {
+  const auto dims = [&](const SlotInfo& si, int64_t n) {
+    if (is_array(si)) return array_shape(si).dims;
+    if (is_matrix(si)) return std::vector<int64_t>{si.rows, si.cols};
+    if (si.kind == ViewKind::Flat) return std::vector<int64_t>{};
+    return std::vector<int64_t>{n};
+  };
+  const ViewKind kind =
+      is_array(declared) ? array_shape(declared).leaf : declared.kind;
+  const AssignLeaf leaf = kind == ViewKind::Matrix      ? AssignLeaf::Matrix
+                          : kind == ViewKind::Vector    ? AssignLeaf::Vector
+                          : kind == ViewKind::RowVector ? AssignLeaf::RowVector
+                                                        : AssignLeaf::Scalar;
+  const std::vector<int64_t> dst = dims(declared, len);
+  const std::string message =
+      assign_size_mismatch(name, leaf, dst.size() - leaf_rank(kind), dst,
+                           dims(rhs.si, g.slots[rhs.slot].len));
+  if (message.empty()) return false;
+  emit_throw(message, true);
+  return true;
+}
+void Lowering::emit_throw(const std::string& message, bool invalid_argument) {
+  auto spec = std::make_shared<MessageSpec>();
+  spec->chunks = {message};
+  spec->invalid_argument = invalid_argument;
+  Op op;
+  op.opcode = OP_REJECT;
+  op.out = add_slot(1, false);
+  op.udata = spec.get();
+  g.udata_pool.push_back(std::move(spec));
+  g.ops.push_back(op);
+}
 void Lowering::assign_plain(const mir::Stmt& s) {
   Val rhs = lower_expr(s.rhs);
   auto old = scope.find(s.lhs);
   if (old != scope.end()) {
-    require_binding(rhs, g.slots[old->second.slot].len, old->second.si, s.lhs,
-                    s.raw);
-    const bool param_free = rhs.si.param_free;
+    const int64_t len = g.slots[old->second.slot].len;
+    if (!reject_assign_size(s.lhs, old->second.si, len, rhs)) {
+      require_binding(rhs, len, old->second.si, s.lhs, s.raw);
+      const bool param_free = rhs.si.param_free;
+      rhs.si = old->second.si;
+      rhs.si.param_free = param_free;
+    }
     rhs.autodiff = old->second.autodiff;
-    rhs.si = old->second.si;
-    rhs.si.param_free = param_free;
   } else {
     auto dl = decls.find(s.lhs);
     if (dl != decls.end()) {
@@ -1079,6 +1118,10 @@ void Lowering::assign_plain(const mir::Stmt& s) {
         // because the returned size is the callee's business, and
         // C++ assignment resizes. Slots do not, so the first
         // whole-variable assignment defines the shape instead.
+        dl->second.len = g.slots[rhs.slot].len;
+        dl->second.si = rhs.si;
+      } else if (reject_assign_size(s.lhs, dl->second.si, dl->second.len,
+                                    rhs)) {
         dl->second.len = g.slots[rhs.slot].len;
         dl->second.si = rhs.si;
       } else {

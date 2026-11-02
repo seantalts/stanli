@@ -28,6 +28,18 @@ model {
   y ~ normal(0, 1);
 }
 """, {}, {"names": ["y", "z"], "z": 0.0}),
+    ("generated_quantity_keeps_declared_size", """
+parameters {
+  real y;
+}
+model {
+  y ~ normal(0, 1);
+}
+generated quantities {
+  matrix[2, 3] z = [[1, 2, 3, 4], [4, 5, 6, 8]];
+}
+""", {}, {"error": "matrix assign columns: assigning variable z (3) and "
+                   "right hand side columns (4) must match in size"}),
 ]
 
 
