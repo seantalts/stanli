@@ -99,10 +99,6 @@
    "4": "wa_unsupported"
   }
  },
- "code-gen/stochastic_matrices.stan": {
-  "cause": "mir: unsupported or malformed FnCheck",
-  "status": "unsupported"
- },
  "compiler-optimizations/dce-fail.stan": {
   "cause": "stanc --O1 vectorizes the source loop, so the single index the program writes reaches stanli as a multi-index; stanli reports 'vector[multi] indexing' where CmdStan, running the unvectorized program, reports 'vector[uni] indexing'.",
   "points": {
@@ -420,7 +416,7 @@
   "status": "unsupported"
  },
  "integrate_1d_good.stan": {
-  "cause": "stanli's integrate_1d does not check that the lower limit is at most the upper limit; CmdStan throws 'integrate_1d: lower limit is 0.2, but must be less than or equal to 0'.",
+  "cause": "stanc --O1, whose MIR stanli lowers, drops the unused model-block integrate_1d calls as dead code, so the one with lower limit 0.2 > upper limit 0 never runs; plain stanc keeps it and CmdStan throws 'integrate_1d: lower limit is 0.2, but must be less than or equal to 0'. stanli makes the same check when the call runs.",
   "points": {
    "0": "one_side_threw",
    "1": "one_side_threw",
@@ -615,14 +611,6 @@
  },
  "tuples/unpack_promote.stan": {
   "cause": "mir: malformed unsized declaration type",
-  "status": "unsupported"
- },
- "validate_add_var_good.stan": {
-  "cause": "mir: unsupported or malformed FnCheck",
-  "status": "unsupported"
- },
- "validate_jacobian_warning_good.stan": {
-  "cause": "multi_normal_lpdf: vectorized argument must be a matching vector or array of vectors",
   "status": "unsupported"
  },
  "warning/self-assign.stan": {
