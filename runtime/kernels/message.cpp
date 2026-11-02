@@ -197,6 +197,14 @@ void check_bound_value(const double* values, int64_t len, const double* bound,
                        int64_t bound_len, const std::string& name,
                        const CheckGeometry& geometry, bool lower) {
   const bool scalar_bound = bound_len == 1;
+  bool all_pass = true;
+  if (lower)
+    for (int64_t i = 0; i < len; ++i)
+      all_pass &= values[i] >= bound[scalar_bound ? 0 : i];
+  else
+    for (int64_t i = 0; i < len; ++i)
+      all_pass &= values[i] <= bound[scalar_bound ? 0 : i];
+  if (all_pass) return;
   const auto check = [&](const std::string& element_name, const auto& y,
                          const auto& b) {
     without_check_prefix([&] {
