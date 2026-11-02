@@ -43,6 +43,9 @@ enum class AllIntegerDensity : uint8_t {
   None,
   HypergeometricLpmf,
   DiscreteRangeLpmf,
+  DiscreteRangeCdf,
+  DiscreteRangeLcdf,
+  DiscreteRangeLccdf,
 };
 
 struct IntegerDensityArgument {

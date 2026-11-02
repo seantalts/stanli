@@ -82,6 +82,7 @@ enum class BuiltinPredicate : uint8_t {
   Negation,
   IsNan,
   IsInf,
+  IntStep,
 };
 
 // Which extent a ShapeQuery descriptor reads. FnLength, the compiler
@@ -126,6 +127,31 @@ enum class BuiltinMatrixOp : uint8_t {
   AddDiag,
   QuadForm,
   QuadFormSym,
+  Determinant,
+  LogDeterminantSpd,
+  Chol2inv,
+  GeneralizedInverse,
+  QrQ,
+  QrR,
+  QrThinQ,
+  QrThinR,
+  MatrixPower,
+  TraceQuadForm,
+  TraceGenQuadForm,
+  MatrixExpMultiply,
+  ScaleMatrixExpMultiply,
+  TraceDot,
+  Norm1,
+  Norm2,
+  Distance,
+  IncBeta,
+  InvIncBeta,
+  Hypergeometric2F1,
+  Hypergeometric3F2,
+  HypergeometricPFq,
+  LogMix,
+  HmmMarginal,
+  HmmHiddenStateProb,
 };
 
 enum class BuiltinSlice : uint8_t {
@@ -369,6 +395,7 @@ BuiltinGroupedDotMap builtin_grouped_dot_map(const BuiltinSpec& spec,
 // kernels with one association. Shape mismatches throw
 // std::invalid_argument; value-dependent validation (symmetry, positive
 // definiteness) stays in the kernels, which make Stan Math's own calls.
+inline constexpr uint8_t kMatrixActiveForward = 0x40;
 struct BuiltinMatrixMap {
   std::vector<int64_t> idata;
   uint8_t variant = 0;

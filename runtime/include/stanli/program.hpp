@@ -274,6 +274,8 @@ struct Program {
     int32_t inner_raw = 0;
     int32_t out_rows = 0;
     int32_t out_cols = 0;
+    int32_t in_rows = 0;
+    int32_t in_cols = 0;
   };
 
   // A DENSITY_VEC's payload: same density id DENSITY uses, but one or more

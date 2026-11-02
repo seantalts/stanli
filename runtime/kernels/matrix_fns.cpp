@@ -53,41 +53,6 @@ using CMapV = Eigen::Map<const VecD>;
 using VarV = Eigen::Matrix<stan::math::var, -1, 1>;
 using VarM = Eigen::Matrix<stan::math::var, -1, -1>;
 
-// Promote every input to var on a nested tape, call f, seed the output
-// adjoints, and copy back the adjoints of inputs that carry one. Inputs
-// arrive as flat vectors; f reshapes what it needs.
-template <typename F>
-void nary_bwd(KernelCtx& ctx, F&& f) {
-  stan::math::nested_rev_autodiff nested;
-  using stan::math::var;
-  std::vector<VarV> xs(ctx.n_in);
-  for (int k = 0; k < ctx.n_in; ++k) {
-    xs[k].resize(ctx.in[k].len);
-    for (int64_t i = 0; i < ctx.in[k].len; ++i) xs[k](i) = ctx.in[k].data[i];
-  }
-  auto out = f(xs);
-  // Seed without copying the result: several rev overloads return a
-  // var_value<Matrix> (SoA), and assigning that into a Matrix<var> copies
-  // values into fresh vars, silently dropping the tape connection. Seeding
-  // through stan-math ops on whatever type came back keeps it.
-  var j;
-  if constexpr (std::is_same_v<std::decay_t<decltype(out)>, var>) {
-    j = out * ctx.out_adj;
-  } else {
-    MatD seed(out.rows(), out.cols());
-    for (Eigen::Index c = 0, k = 0; c < out.cols(); ++c)
-      for (Eigen::Index r = 0; r < out.rows(); ++r, ++k)
-        seed(r, c) = ctx.out_adj_vec.data[k];
-    j = stan::math::sum(stan::math::elt_multiply(out, seed));
-  }
-  stan::math::grad(j.vi_);
-  for (int k = 0; k < ctx.n_in; ++k) {
-    if (ctx.in_adj[k].data == nullptr) continue;
-    for (int64_t i = 0; i < ctx.in[k].len; ++i)
-      ctx.in_adj[k].data[i] += xs[k](i).adj();
-  }
-}
-
 // ---- gp_*_cov(x, alpha, rho) ----------------------------------------------
 // in = {x (data, N*D), alpha, rho}; idata = {N, D}; out = N*N column-major.
 // x as array[N] real is D == 1; array[N] vector[D] flattens array-major.

@@ -2879,12 +2879,73 @@ struct ProgramCompiler {
     return out;
   }
 
+  Range inverse_transform_call(const mir::Expr& e) {
+    CallableTransformSpec spec;
+    callable_transform(e.name, &spec);
+    Program::Transform tr;
+    tr.kind = spec.kind;
+    tr.direction = spec.direction;
+    tr.n_in = 1;
+    const Range arg = expr(e.args[0]);
+    tr.in[0] = arg.reg;
+    tr.in_len[0] = arg.len;
+    ViewKind leaf = arg.kind;
+    std::vector<int64_t> dims;
+    if (leaf == ViewKind::Array) {
+      dims = arg.dims;
+      leaf = arg.leaf;
+    } else if (leaf == ViewKind::Matrix) {
+      dims = {arg.rows, arg.cols};
+    } else if (leaf == ViewKind::Vector || leaf == ViewKind::RowVector) {
+      dims = {arg.len};
+    }
+    if (leaf != ViewKind::Vector && leaf != ViewKind::Matrix)
+      bail(e.name + ": expected a vector or matrix");
+    const size_t outer_rank = dims.size() - leaf_rank(leaf);
+    int64_t batch = 1;
+    for (size_t i = 0; i < outer_rank; ++i) batch *= dims[i];
+    tr.in_rows = (int32_t)dims[outer_rank];
+    tr.in_cols = leaf == ViewKind::Matrix ? (int32_t)dims.back() : 0;
+    int64_t rows = 0, cols = 0;
+    bool out_matrix = false;
+    if (!free_leaf_shape(spec.kind, tr.in_rows, tr.in_cols, &rows, &cols,
+                         &out_matrix) ||
+        rows < 0 || cols < 0)
+      bail(e.name + ": invalid input container");
+    const int64_t inner_free = out_matrix ? rows * cols : rows;
+    if (batch > kMaxRegs || (batch && inner_free > kMaxRegs / batch))
+      bail(e.name + ": result needs too many registers");
+    tr.batch = (int32_t)batch;
+    tr.inner_raw = (int32_t)(tr.in_cols ? tr.in_rows * tr.in_cols : tr.in_rows);
+    tr.out_rows = (int32_t)rows;
+    tr.out_cols = (int32_t)cols;
+    tr.out_len = (int32_t)(batch * inner_free);
+    Range out = arg;
+    out.len = tr.out_len;
+    out.kind = outer_rank ? ViewKind::Array
+                          : (out_matrix ? ViewKind::Matrix : ViewKind::Vector);
+    out.rows = out_matrix && !outer_rank ? rows : 0;
+    out.cols = out_matrix && !outer_rank ? cols : 0;
+    if (outer_rank) {
+      out.dims.assign(dims.begin(), dims.begin() + outer_rank);
+      out.dims.push_back(rows);
+      if (out_matrix) out.dims.push_back(cols);
+      out.leaf = out_matrix ? ViewKind::Matrix : ViewKind::Vector;
+    }
+    tr.out = alloc(tr.out_len);
+    tr.jac = alloc(1);
+    out.reg = tr.out;
+    p.transforms.push_back(tr);
+    p.code.push_back(
+        Program::Instr{Program::TRANSFORM, 0, (int)p.transforms.size() - 1});
+    return out;
+  }
+
   Range transform_call(const mir::Expr& e, const CallableTransformSpec& spec) {
     if (e.args.size() != spec.arity)
       bail(e.name + ": wrong number of arguments");
     if (spec.structured && spec.direction == TransformDirection::Unconstrain)
-      bail(e.name +
-           ": structured inverse is not supported in a runtime region");
+      return inverse_transform_call(e);
 
     Program::Transform tr;
     tr.kind = spec.kind;
@@ -3278,6 +3339,8 @@ struct ProgramCompiler {
                           (int)map.group_stride, (int)map.cell_stride},
                          {}, e.name);
     }
+
+    if (e.name == "eval" && e.args.size() == 1) return expr(e.args[0]);
 
     // Registered matrix operations: the same dedicated kernels the graph
     // emits, called over the operands' column-major ranges. The active
@@ -3922,7 +3985,10 @@ struct ProgramCompiler {
               shaped_builtin_spec(e.name, 1, BuiltinShapePolicy::Predicate)) {
         const bool nan = pred->predicate == BuiltinPredicate::IsNan;
         const int rhs = nan ? -1 : konst(0.0);
-        const Program::Code c = nan ? Program::NE : Program::EQ;
+        const Program::Code c = nan ? Program::NE
+                                : pred->predicate == BuiltinPredicate::IntStep
+                                    ? Program::GT
+                                    : Program::EQ;
         const int r = alloc(a.len);
         if (pred->predicate == BuiltinPredicate::IsInf) {
           const int pos = konst(std::numeric_limits<double>::infinity());

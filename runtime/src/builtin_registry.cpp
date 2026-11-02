@@ -1109,6 +1109,149 @@ BuiltinMatrixMap builtin_matrix_map(
                                          FunctionContainerKind::Scalar, {}, 1);
       return map;
     }
+    case BuiltinMatrixOp::Determinant:
+    case BuiltinMatrixOp::LogDeterminantSpd: {
+      map.idata = {require_square(a)};
+      map.active_variant = kMatrixActiveForward;
+      map.result = make_function_shape(FunctionArgumentKind::Real,
+                                       FunctionContainerKind::Scalar,
+                                       FunctionContainerKind::Scalar, {}, 1);
+      return map;
+    }
+    case BuiltinMatrixOp::Chol2inv:
+    case BuiltinMatrixOp::MatrixPower: {
+      const int64_t n = require_square(a);
+      map.idata = {n};
+      map.active_variant = kMatrixActiveForward;
+      map.result = matrix_shape(n, n);
+      return map;
+    }
+    case BuiltinMatrixOp::GeneralizedInverse:
+    case BuiltinMatrixOp::QrQ:
+    case BuiltinMatrixOp::QrR:
+    case BuiltinMatrixOp::QrThinQ:
+    case BuiltinMatrixOp::QrThinR: {
+      const AppendBlock block = require_matrix(a);
+      const int64_t m = block.rows, n = block.columns, k = std::min(m, n);
+      map.idata = {m, n};
+      map.active_variant = kMatrixActiveForward;
+      switch (spec.matrix_op) {
+        case BuiltinMatrixOp::GeneralizedInverse:
+          map.result = matrix_shape(n, m);
+          break;
+        case BuiltinMatrixOp::QrQ:
+          map.result = matrix_shape(m, m);
+          break;
+        case BuiltinMatrixOp::QrR:
+          map.result = matrix_shape(m, n);
+          break;
+        case BuiltinMatrixOp::QrThinQ:
+          map.result = matrix_shape(m, k);
+          break;
+        default:
+          map.result = matrix_shape(k, n);
+          break;
+      }
+      return map;
+    }
+    case BuiltinMatrixOp::TraceQuadForm: {
+      const int64_t n = require_square(a);
+      const BuiltinArgumentShape& b = shapes[1];
+      const bool b_matrix = b.container == FunctionContainerKind::Matrix;
+      if (!b_matrix && b.container != FunctionContainerKind::Vector)
+        throw std::invalid_argument(
+            "second argument is not a matrix or vector");
+      const int64_t rb = b_matrix ? b.dimensions[0] : b.storage_size;
+      if (rb != n)
+        throw std::invalid_argument(
+            "inner dimension mismatch (" + std::to_string(n) + "x" +
+            std::to_string(n) + " against " + std::to_string(rb) + ")");
+      map.idata = {n, b_matrix ? b.dimensions[1] : 1};
+      map.active_variant = kMatrixActiveForward;
+      map.result = make_function_shape(FunctionArgumentKind::Real,
+                                       FunctionContainerKind::Scalar,
+                                       FunctionContainerKind::Scalar, {}, 1);
+      return map;
+    }
+    case BuiltinMatrixOp::TraceGenQuadForm: {
+      const AppendBlock d = require_matrix(a);
+      const AppendBlock block_a = require_matrix(shapes[1]);
+      const AppendBlock block_b = require_matrix(shapes[2]);
+      map.idata = {d.rows,          d.columns,    block_a.rows,
+                   block_a.columns, block_b.rows, block_b.columns};
+      map.active_variant = kMatrixActiveForward;
+      map.result = make_function_shape(FunctionArgumentKind::Real,
+                                       FunctionContainerKind::Scalar,
+                                       FunctionContainerKind::Scalar, {}, 1);
+      return map;
+    }
+    case BuiltinMatrixOp::MatrixExpMultiply:
+    case BuiltinMatrixOp::ScaleMatrixExpMultiply: {
+      const bool scaled =
+          spec.matrix_op == BuiltinMatrixOp::ScaleMatrixExpMultiply;
+      const AppendBlock block_a = require_matrix(shapes[scaled ? 1 : 0]);
+      const AppendBlock block_b = require_matrix(shapes[scaled ? 2 : 1]);
+      map.idata = {block_a.rows, block_a.columns, block_b.rows,
+                   block_b.columns};
+      map.active_variant = kMatrixActiveForward;
+      map.result = matrix_shape(block_a.rows, block_b.columns);
+      return map;
+    }
+    case BuiltinMatrixOp::TraceDot:
+    case BuiltinMatrixOp::Norm1:
+    case BuiltinMatrixOp::Norm2:
+    case BuiltinMatrixOp::Distance:
+    case BuiltinMatrixOp::IncBeta:
+    case BuiltinMatrixOp::InvIncBeta:
+    case BuiltinMatrixOp::Hypergeometric2F1:
+    case BuiltinMatrixOp::Hypergeometric3F2:
+    case BuiltinMatrixOp::HypergeometricPFq: {
+      if (spec.matrix_op == BuiltinMatrixOp::TraceDot) {
+        const AppendBlock lhs = require_matrix(a);
+        const AppendBlock rhs = require_matrix(shapes[1]);
+        map.idata = {lhs.rows, lhs.columns, rhs.rows, rhs.columns};
+      }
+      map.active_variant = kMatrixActiveForward;
+      map.result = make_function_shape(FunctionArgumentKind::Real,
+                                       FunctionContainerKind::Scalar,
+                                       FunctionContainerKind::Scalar, {}, 1);
+      return map;
+    }
+    case BuiltinMatrixOp::LogMix: {
+      const BuiltinArgumentShape& lambda = shapes[1];
+      const bool nested =
+          lambda.container == FunctionContainerKind::Array &&
+          lambda.array_depth == 1 &&
+          (lambda.array_leaf == FunctionContainerKind::Vector ||
+           lambda.array_leaf == FunctionContainerKind::RowVector);
+      if (!nested && lambda.container != FunctionContainerKind::Vector &&
+          lambda.container != FunctionContainerKind::RowVector &&
+          !(lambda.container == FunctionContainerKind::Array &&
+            lambda.array_depth == 1 &&
+            lambda.array_leaf == FunctionContainerKind::Scalar))
+        throw std::invalid_argument("second argument is not a vector");
+      map.idata = nested ? std::vector<int64_t>{lambda.dimensions[0],
+                                                lambda.dimensions[1]}
+                         : std::vector<int64_t>{-1, lambda.storage_size};
+      map.active_variant = kMatrixActiveForward;
+      map.result = make_function_shape(FunctionArgumentKind::Real,
+                                       FunctionContainerKind::Scalar,
+                                       FunctionContainerKind::Scalar, {}, 1);
+      return map;
+    }
+    case BuiltinMatrixOp::HmmMarginal:
+    case BuiltinMatrixOp::HmmHiddenStateProb: {
+      const AppendBlock omega = require_matrix(a);
+      map.idata = {omega.rows, omega.columns};
+      map.active_variant = kMatrixActiveForward;
+      map.result =
+          spec.matrix_op == BuiltinMatrixOp::HmmMarginal
+              ? make_function_shape(FunctionArgumentKind::Real,
+                                    FunctionContainerKind::Scalar,
+                                    FunctionContainerKind::Scalar, {}, 1)
+              : matrix_shape(omega.rows, omega.columns);
+      return map;
+    }
     case BuiltinMatrixOp::None:
       break;
   }
@@ -1459,6 +1602,8 @@ int evaluate_predicate_builtin(const BuiltinSpec& spec, double lhs,
       return std::isnan(lhs);
     case BuiltinPredicate::IsInf:
       return std::isinf(lhs);
+    case BuiltinPredicate::IntStep:
+      return lhs > 0.0;
     case BuiltinPredicate::None:
       break;
   }
