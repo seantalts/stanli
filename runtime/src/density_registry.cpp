@@ -1,6 +1,9 @@
 #include <stanli/density_registry.hpp>
 #include <stanli/function_registry.hpp>
 
+#include <stan/math/prim/prob/discrete_range_cdf.hpp>
+#include <stan/math/prim/prob/discrete_range_lccdf.hpp>
+#include <stan/math/prim/prob/discrete_range_lcdf.hpp>
 #include <stan/math/prim/prob/discrete_range_lpmf.hpp>
 #include <stan/math/prim/prob/hypergeometric_lpmf.hpp>
 
@@ -46,6 +49,23 @@ double evaluate_all_integer(
                        ? stan::math::discrete_range_lpmf<true>(y, lower, upper)
                        : stan::math::discrete_range_lpmf<false>(y, lower,
                                                                 upper);
+          });
+        });
+      });
+    case AllIntegerDensity::DiscreteRangeCdf:
+    case AllIntegerDensity::DiscreteRangeLcdf:
+    case AllIntegerDensity::DiscreteRangeLccdf:
+      return with_integer_argument(arguments[0], [&](const auto& y) {
+        return with_integer_argument(arguments[1], [&](const auto& lower) {
+          return with_integer_argument(arguments[2], [&](const auto& upper) {
+            switch (density) {
+              case AllIntegerDensity::DiscreteRangeCdf:
+                return stan::math::discrete_range_cdf(y, lower, upper);
+              case AllIntegerDensity::DiscreteRangeLcdf:
+                return stan::math::discrete_range_lcdf(y, lower, upper);
+              default:
+                return stan::math::discrete_range_lccdf(y, lower, upper);
+            }
           });
         });
       });
@@ -112,9 +132,9 @@ std::vector<int> pack_all_integer_density_arguments(
 double evaluate_packed_all_integer_density(AllIntegerDensity density,
                                            const int* packed, int64_t size,
                                            bool propto) {
-  const int arity = density == AllIntegerDensity::HypergeometricLpmf  ? 4
-                    : density == AllIntegerDensity::DiscreteRangeLpmf ? 3
-                                                                      : 0;
+  const int arity = density == AllIntegerDensity::HypergeometricLpmf ? 4
+                    : density == AllIntegerDensity::None             ? 0
+                                                                     : 3;
   if (arity == 0) throw std::logic_error("unknown all-integer density");
   std::vector<IntegerDensityArgument> arguments;
   arguments.reserve((size_t)arity);

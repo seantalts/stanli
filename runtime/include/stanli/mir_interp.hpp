@@ -1096,7 +1096,14 @@ class MirInterp {
     activity &= spec.activity_mask;
     std::vector<std::vector<T>> inputs;
     inputs.reserve(values.size());
-    for (Value& value : values) inputs.push_back(std::move(value.r));
+    for (size_t k = 0; k < values.size(); ++k) {
+      Value& value = values[k];
+      if (e.args[k].unsized.depth != 0 && value.dims.size() > 1)
+        inputs.push_back(graph_container_order(value.r, value.dims,
+                                               e.args[k].unsized.depth));
+      else
+        inputs.push_back(std::move(value.r));
+    }
     std::vector<int> idata;
     idata.reserve(map.idata.size());
     for (const int64_t value : map.idata) idata.push_back((int)value);
@@ -2233,6 +2240,51 @@ class MirInterp {
     // the constrained value and deliberately discards the auxiliary lp.
     CallableTransformSpec transform;
     if (callable_transform(e.name, &transform) &&
+        transform.arity == e.args.size() && transform.structured &&
+        transform.direction == TransformDirection::Unconstrain) {
+      const Value a = eval(e.args[0]);
+      const size_t outer_rank = e.args[0].unsized.depth;
+      const bool input_matrix =
+          e.args[0].unsized.leaf == mir::UnsizedLeaf::Matrix;
+      if (a.dims.size() < outer_rank + (input_matrix ? 2u : 1u))
+        fail(e.name + ": incomplete input dimensions", e.raw);
+      Program::Transform tr;
+      tr.kind = transform.kind;
+      tr.direction = transform.direction;
+      tr.n_in = 1;
+      int64_t batch = 1;
+      for (size_t i = 0; i < outer_rank; ++i) batch *= a.dims[i];
+      tr.in_rows = (int32_t)a.dims[outer_rank];
+      tr.in_cols = input_matrix ? (int32_t)a.dims[outer_rank + 1] : 0;
+      int64_t rows = 0, cols = 0;
+      bool out_matrix = false;
+      if (!free_leaf_shape(transform.kind, tr.in_rows, tr.in_cols, &rows, &cols,
+                           &out_matrix))
+        fail(e.name + ": invalid input container", e.raw);
+      tr.batch = (int32_t)batch;
+      tr.inner_raw = input_matrix ? tr.in_rows * tr.in_cols : tr.in_rows;
+      tr.out_rows = (int32_t)rows;
+      tr.out_cols = (int32_t)cols;
+      tr.out_len = (int32_t)(batch * (out_matrix ? rows * cols : rows));
+      Value o;
+      o.dims.assign(a.dims.begin(), a.dims.begin() + outer_rank);
+      o.dims.push_back(rows);
+      if (out_matrix) o.dims.push_back(cols);
+      std::vector<T> reg =
+          outer_rank > 0 ? graph_container_order(a.r, a.dims, outer_rank) : a.r;
+      tr.in[0] = 0;
+      tr.in_len[0] = (int32_t)reg.size();
+      tr.out = (int32_t)reg.size();
+      reg.resize(reg.size() + (size_t)tr.out_len);
+      tr.jac = (int32_t)reg.size();
+      reg.emplace_back(T(0));
+      run_program_transform(tr, reg.data());
+      o.r.assign(reg.begin() + tr.out, reg.begin() + tr.out + tr.out_len);
+      if (outer_rank > 0)
+        o.r = serialized_container_order(o.r, o.dims, outer_rank);
+      return o;
+    }
+    if (callable_transform(e.name, &transform) &&
         transform.arity == e.args.size()) {
       if (transform.structured &&
           transform.direction == TransformDirection::Unconstrain)
@@ -2984,6 +3036,76 @@ class MirInterp {
           named_density != nullptr && named_density->density() != nullptr)
         return density_eval(e, *named_density->density());
 
+    if (e.name == "eval" && e.args.size() == 1) return eval(e.args[0]);
+    if (e.name == "log_mix" && e.args.size() == 3) {
+      const T theta = eval(e.args[0]).r.at(0);
+      const T lambda1 = eval(e.args[1]).r.at(0);
+      const T lambda2 = eval(e.args[2]).r.at(0);
+      r.r = {stan::math::log_mix(theta, lambda1, lambda2)};
+      return r;
+    }
+    if (e.name == "gaussian_dlm_obs_lpdf" && e.args.size() == 7) {
+      std::vector<Value> a;
+      for (const mir::Expr& arg : e.args) a.push_back(eval(arg));
+      if (a[0].dims.size() != 2 || a[2].dims.size() != 2)
+        fail(e.name + ": y and G must be matrices", e.raw);
+      std::vector<T> packed;
+      uint8_t packed_active = 0;
+      for (size_t k = 1; k < 7; ++k) {
+        packed.insert(packed.end(), a[k].r.begin(), a[k].r.end());
+        if constexpr (!std::is_same_v<T, double>)
+          if (!e.args[k].data_only) packed_active = 1;
+      }
+      const bool propto = e.fn_propto && propto_ctx_;
+      const bool y_active = !std::is_same_v<T, double> && !e.args[0].data_only;
+      const uint8_t activity =
+          (uint8_t)((y_active ? 1u : 0u) | (packed_active << 1));
+      const uint8_t variant =
+          (uint8_t)((propto ? 1u : 0u) |
+                    (propto && activity != 0 ? kMatrixActiveForward : 0u));
+      std::vector<std::vector<T>> inputs;
+      inputs.push_back(std::move(a[0].r));
+      inputs.push_back(std::move(packed));
+      r.r = {run_kernel_call(
+          e, OP_GAUSSIAN_DLM_OBS_LPDF, variant, activity,
+          {(int)a[0].dims[0], (int)a[0].dims[1], (int)a[2].dims[0],
+           e.args[3].unsized.leaf == mir::UnsizedLeaf::Matrix ? 1 : 0},
+          std::move(inputs), 1)[0]};
+      return r;
+    }
+    if ((e.name == "csr_matrix_times_vector" && e.args.size() == 6) ||
+        (e.name == "csr_to_dense_matrix" && e.args.size() == 5)) {
+      const bool product = e.name == "csr_matrix_times_vector";
+      std::vector<int> idata = {(int)as_int(e.args[0]), (int)as_int(e.args[1])};
+      for (size_t k = 3; k < 5; ++k) {
+        const Value value = eval(e.args[k]);
+        idata.push_back((int)value.r.size());
+        for (size_t j = 0; j < value.r.size(); ++j)
+          idata.push_back(value.i.size() == value.r.size()
+                              ? value.i[j]
+                              : (int)val(value.r[j]));
+      }
+      const int m = idata[0], n = idata[1];
+      std::vector<std::vector<T>> inputs;
+      uint8_t activity = 0;
+      inputs.push_back(eval(e.args[2]).r);
+      if constexpr (!std::is_same_v<T, double>)
+        if (!e.args[2].data_only) activity |= 1;
+      if (product) {
+        inputs.push_back(eval(e.args[5]).r);
+        if constexpr (!std::is_same_v<T, double>)
+          if (!e.args[5].data_only) activity |= 2;
+      }
+      r.r = run_kernel_call(
+          e, product ? OP_CSR_MATRIX_TIMES_VECTOR : OP_CSR_TO_DENSE_MATRIX, 0,
+          activity, std::move(idata), std::move(inputs),
+          product ? m : (int64_t)m * n);
+      if (product)
+        r.dims = {(int64_t)m};
+      else
+        r.dims = {(int64_t)m, (int64_t)n};
+      return r;
+    }
     if (e.name == "csr_extract_w" && e.args.size() == 1) {
       Value a = eval(e.args[0]);
       if (a.dims.size() != 2)

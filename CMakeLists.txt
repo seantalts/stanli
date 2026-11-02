@@ -146,6 +146,7 @@ if(NOT EMSCRIPTEN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     runtime/kernels/densities_cdf_a.cpp
     runtime/kernels/densities_cdf_b.cpp
     runtime/kernels/matrix_fns.cpp
+    runtime/kernels/library_fns.cpp
     runtime/kernels/matrix_solve.cpp
     APPEND PROPERTY COMPILE_OPTIONS -fmath-errno)
 endif()
@@ -347,6 +348,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/probability_fns.cpp
   runtime/kernels/legacy_fns.cpp
   runtime/kernels/matrix_fns.cpp
+  runtime/kernels/library_fns.cpp
   runtime/kernels/matrix_solve.cpp
   runtime/kernels/scalar_binary.cpp
   runtime/kernels/scalar_unary_ad.cpp
@@ -1566,6 +1568,15 @@ if(Python3_Interpreter_FOUND)
              --manifest tests/function_coverage/sort_manifest.json
              --reference tests/function_coverage/sort_references.json.gz)
   set_tests_properties(test_sort_reference PROPERTIES
+                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_library_reference
+           COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
+             --build ${CMAKE_CURRENT_BINARY_DIR}
+             --stanc ${STANLI_STANC_EXECUTABLE}
+             --fixtures tests/fixtures
+             --manifest tests/function_coverage/library_manifest.json
+             --reference tests/function_coverage/library_references.json.gz)
+  set_tests_properties(test_library_reference PROPERTIES
                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_container_flow_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_container_flow_models.py --check

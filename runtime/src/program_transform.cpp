@@ -49,6 +49,57 @@ void run_transform(const Program::Transform& tr, T* reg) {
     default: {
       using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
       using Mat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+      if (tr.direction == TransformDirection::Unconstrain) {
+        const int free_len = tr.out_len / std::max(tr.batch, 1);
+        for (int b = 0; b < tr.batch; ++b) {
+          const T* input = reg + tr.in[0] + b * tr.inner_raw;
+          T* output = reg + tr.out + b * free_len;
+          const auto store = [&](const auto& x) {
+            for (int i = 0; i < free_len; ++i) output[i] = x.data()[i];
+          };
+          Eigen::Map<const Mat> m(input, tr.in_rows, std::max(tr.in_cols, 1));
+          Eigen::Map<const Vec> v(input, tr.inner_raw);
+          switch (tr.kind) {
+            case CallableTransformKind::Ordered:
+              store(Vec(stan::math::ordered_free(v)));
+              break;
+            case CallableTransformKind::PositiveOrdered:
+              store(Vec(stan::math::positive_ordered_free(v)));
+              break;
+            case CallableTransformKind::Simplex:
+              store(Vec(stan::math::simplex_free(v)));
+              break;
+            case CallableTransformKind::UnitVector:
+              store(Vec(stan::math::unit_vector_free(v)));
+              break;
+            case CallableTransformKind::SumToZero:
+              if (tr.in_cols)
+                store(Mat(stan::math::sum_to_zero_free(Mat(m))));
+              else
+                store(Vec(stan::math::sum_to_zero_free(Vec(v))));
+              break;
+            case CallableTransformKind::StochasticColumn:
+              store(Mat(stan::math::stochastic_column_free(Mat(m))));
+              break;
+            case CallableTransformKind::StochasticRow:
+              store(Mat(stan::math::stochastic_row_free(Mat(m))));
+              break;
+            case CallableTransformKind::CholeskyFactorCorr:
+              store(Vec(stan::math::cholesky_corr_free(Mat(m))));
+              break;
+            case CallableTransformKind::CorrMatrix:
+              store(Vec(stan::math::corr_matrix_free(Mat(m))));
+              break;
+            case CallableTransformKind::CovMatrix:
+              store(Vec(stan::math::cov_matrix_free(Mat(m))));
+              break;
+            default:
+              store(Vec(stan::math::cholesky_factor_free(Mat(m))));
+              break;
+          }
+        }
+        break;
+      }
       const int con = tr.out_len / std::max(tr.batch, 1);
       for (int b = 0; b < tr.batch; ++b) {
         const T* input = reg + tr.in[0] + b * tr.inner_raw;
