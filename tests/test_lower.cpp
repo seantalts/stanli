@@ -4662,10 +4662,10 @@ int main() {
   }
 
   // Index bounds are data, so the lowering must reject an out-of-bounds
-  // index at bind time the way CmdStan rejects it at runtime; the silent
-  // alternative is reading a neighboring arena slot. hi < lo ranges stay
-  // empty. One fixture; the base dataset is in bounds and each violation
-  // overrides one index.
+  // index at bind time, or emit the std::out_of_range CmdStan throws at
+  // runtime; the silent alternative is reading a neighboring arena slot.
+  // hi < lo ranges stay empty. One fixture; the base dataset is in bounds
+  // and each violation overrides one index.
   {
     const auto base_data = [] {
       DataMap d = DataMap::from_json(
@@ -4731,21 +4731,34 @@ int main() {
       run_case(std::move(d), true, "oob rows-empty");
     }
 
+    const auto rejects = [&](const DataMap& d, const std::string& tag) {
+      try {
+        CompiledModel lm = compile_model(mir, d);
+        Executor lex(std::move(lm.graph));
+        lm.bind(lex);
+        lex.params_data()[0] = 0.35;
+        double grad[1] = {0};
+        try {
+          lex.gradient(grad);
+        } catch (const std::out_of_range& ex) {
+          stan::math::recover_memory();
+          return std::string(ex.what()).find(
+                     "accessing element out of range") != std::string::npos;
+        }
+        stan::math::recover_memory();
+      } catch (const std::exception& ex) {
+        if (std::string(ex.what()).find("out of bounds") != std::string::npos)
+          return true;
+        std::printf("  %s threw without 'out of bounds': %s\n", tag.c_str(),
+                    ex.what());
+      }
+      return false;
+    };
     const auto expect_oob = [&](const char* name, long v,
                                 const std::string& tag) {
       DataMap d = base_data();
       d.set_int(name, v);
-      bool threw = false;
-      try {
-        compile_model(mir, d);
-      } catch (const std::exception& ex) {
-        threw =
-            std::string(ex.what()).find("out of bounds") != std::string::npos;
-        if (!threw)
-          std::printf("  %s threw without 'out of bounds': %s\n", tag.c_str(),
-                      ex.what());
-      }
-      check(threw, tag + " rejected");
+      check(rejects(d, tag), tag + " rejected");
     };
     expect_oob("k", 7, "oob v[7]");
     expect_oob("hi", 9, "oob v[2:9]");
@@ -4756,14 +4769,7 @@ int main() {
     {
       DataMap d = base_data();
       d.set_int_array("idx", {1, 9});
-      bool threw = false;
-      try {
-        compile_model(mir, d);
-      } catch (const std::exception& ex) {
-        threw =
-            std::string(ex.what()).find("out of bounds") != std::string::npos;
-      }
-      check(threw, "oob v[[1,9]] rejected");
+      check(rejects(d, "oob v[[1,9]]"), "oob v[[1,9]] rejected");
     }
   }
 
