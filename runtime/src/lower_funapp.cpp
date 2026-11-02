@@ -388,10 +388,21 @@ Lowering::Val Lowering::free_transform(uint16_t opcode,
     return with_layout(emit_value(op, {x}, g.slots[x.slot].len, x.si),
                        elementwise_layout({x}));
   };
+  const auto check = [&](uint16_t op, const char* name) {
+    auto spec = std::make_shared<BoundCheckSpec>();
+    spec->name = name;
+    spec->bound_is_scalar = g.slots[a[1].slot].len == 1;
+    spec->shapes_match = true;
+    (void)emit_value(op, {a[0], a[1]}, 1);
+    g.ops.back().udata = spec.get();
+    g.udata_pool.push_back(std::move(spec));
+  };
   switch (opcode) {
     case OP_CONSTRAIN_LOWER:  // lb_free: log(y - lb)
+      check(OP_CHECK_LOWER, "lb_free: Lower bounded variable");
       return un(OP_LOGV, elt(OP_SUB, a[0], a[1]));
     case OP_CONSTRAIN_UPPER:  // ub_free: log(ub - y)
+      check(OP_CHECK_UPPER, "ub_free: Upper bounded variable");
       return un(OP_LOGV, elt(OP_SUB, a[1], a[0]));
     case OP_CONSTRAIN_LU:  // lub_free: logit((y - lb) / (ub - lb))
       return un(OP_LOGIT,
