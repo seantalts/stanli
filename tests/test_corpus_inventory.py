@@ -22,7 +22,7 @@ class InventoryTest(unittest.TestCase):
         (self.imported / "models").mkdir(parents=True)
         (self.imported / "LICENSE").write_text("fixture license")
         for collection in ("brms", "rethinking", "cogmod", "ctsem", "oncobayes2",
-                           "stanc3"):
+                           "regressions"):
             directory = self.root / "tests" / collection
             directory.mkdir()
             (directory / f"{collection}.stan").write_text("parameters { real x; }")
@@ -69,8 +69,8 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(set(inventory.corpus_cases(self.pdb)),
                          {"pdb_model", "import_a", "import_b", "brms", "rethinking", "cogmod",
                           "ctsem", "oncobayes2"})
-        self.assertIn("stanc3", inventory.corpus_cases(self.pdb, include_language=True))
-        self.assertEqual(set(inventory.corpus_cases(self.pdb, "stanc3")), {"stanc3"})
+        self.assertIn("regressions", inventory.corpus_cases(self.pdb, include_language=True))
+        self.assertEqual(set(inventory.corpus_cases(self.pdb, "regressions")), {"regressions"})
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "cogmod")), {"cogmod"})
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "ctsem")), {"ctsem"})
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "oncobayes2")),

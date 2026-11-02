@@ -30,16 +30,17 @@ from verify_refs import (ILL_CONDITIONED, KNOWN_GAPS,  # noqa: E402
                          LOCAL_CORPORA, POINTS, QUARANTINED, SCHEMA,
                          check_model, load_refs, model_files, parse_status,
                          probe_point)
-from cmdstan_ref import _result_line  # noqa: E402
+from cmdstan_ref import (_result_line, point_results,  # noqa: E402
+                         split_points)
 import verify_sample  # noqa: E402
 import verify_refs  # noqa: E402
 from corpus_inventory import local_cases, source_digest
 from verify_sample import evaluate, record_wa, write_refs  # noqa: E402
 
-# A model that exists under tests/stanc3, so model_files resolves real
+# A model that exists under tests/regressions, so model_files resolves real
 # paths without unpacking a posteriordb dataset. The stub never reads
 # them; they only have to be there.
-MODEL = "reductions_allowed"
+MODEL = "while_counter_size"
 # One point's reference: lp and two gradients, agreeing with CmdStan.
 VALUES = {"values": ["-3.5", "1", "-2"], "status": "VERIFIED",
           "max_rel": 0.0, "max_ulp": 0}
@@ -91,13 +92,46 @@ class StatusLineTest(unittest.TestCase):
         self.assertEqual(_result_line(out), want)
 
 
+class MultiPointOutputTest(unittest.TestCase):
+    """`--points` output is one POINT <k> block per point, on both sides."""
+
+    OUT = ("POINT 0\nOK -1.5 0.25 2\nWANAMES a,b\nWAVALS 1 2\n"
+           "POINT 3\nEVAL_FAIL bad | worse\n"
+           "POINT 1\nuser print\nOK -2 3 4\n")
+
+    def test_blocks_keep_order_and_their_own_lines(self):
+        blocks = split_points(self.OUT)
+        self.assertEqual(list(blocks), [0, 3, 1])
+        self.assertEqual(blocks[0], "OK -1.5 0.25 2\nWANAMES a,b\nWAVALS 1 2\n")
+        self.assertEqual(blocks[3], "EVAL_FAIL bad | worse\n")
+
+    def test_each_block_parses_like_a_single_point_run(self):
+        self.assertEqual(point_results(self.OUT), {
+            0: ["OK", "-1.5", "0.25", "2"],
+            3: ["EVAL_FAIL", "bad", "|", "worse"],
+            1: ["OK", "-2", "3", "4"]})
+
+    def test_a_throw_at_one_point_does_not_hide_the_others(self):
+        self.assertEqual(point_results(self.OUT)[1][0], "OK")
+
+    def test_a_failure_before_any_point_is_returned_whole(self):
+        for line in ("COMPILE_FAIL no MIR", "DATA_FAIL bad data"):
+            with self.subTest(line=line):
+                self.assertEqual(split_points(line + "\n"), {})
+                self.assertEqual(_result_line(line + "\n"), line.split())
+
+    def test_a_printed_point_prefix_is_not_a_header(self):
+        out = "POINT 0\nPOINT lies\nOK 1 2\n"
+        self.assertEqual(point_results(out), {0: ["OK", "1", "2"]})
+
+
 class ProbePointTest(unittest.TestCase):
     """One run, one verdict. probe_point returns ("OK", "") or a failure."""
 
     def verdict(self, body, point=1):
         with tempfile.TemporaryDirectory() as tmp:
-            return probe_point(MODEL, REPO / "tests" / "stanc3" / f"{MODEL}.stan",
-                               REPO / "tests" / "stanc3" / f"{MODEL}.json",
+            return probe_point(MODEL, REPO / "tests" / "regressions" / f"{MODEL}.stan",
+                               REPO / "tests" / "regressions" / f"{MODEL}.json",
                                stub(tmp, body), point, 60)
 
     def test_finite_lp_and_gradients_pass(self):
@@ -667,8 +701,8 @@ class PlatformReferenceTest(unittest.TestCase):
 
     def test_compiler_selects_one_reference_without_accepting_the_other_answer(self):
         entry = copy.deepcopy(self.entry)
-        entry["source_sha256"] = source_digest(REPO / "tests/stanc3" / f"{MODEL}.stan")
-        entry["data_sha256"] = source_digest(REPO / "tests/stanc3" / f"{MODEL}.json")
+        entry["source_sha256"] = source_digest(REPO / "tests/regressions" / f"{MODEL}.stan")
+        entry["data_sha256"] = source_digest(REPO / "tests/regressions" / f"{MODEL}.json")
         rounded = 1.0 + 244 * math.ulp(1.0)
         for pt in entry["points"].values():
             pt["values"] = ["-3.5", str(rounded), "-2"]
@@ -729,8 +763,8 @@ class SparsePlatformReferenceTest(unittest.TestCase):
             pt.update(status="MISMATCH", max_rel=0.006)
         self.entry = copy.deepcopy(self.original)
         self.entry.update(
-            source_sha256=source_digest(REPO / "tests/stanc3" / f"{MODEL}.stan"),
-            data_sha256=source_digest(REPO / "tests/stanc3" / f"{MODEL}.json"))
+            source_sha256=source_digest(REPO / "tests/regressions" / f"{MODEL}.stan"),
+            data_sha256=source_digest(REPO / "tests/regressions" / f"{MODEL}.json"))
         for pt in self.entry["points"].values():
             pt["values"] = ["-3.5", "1.01", "-2"]
 

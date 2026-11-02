@@ -1,0 +1,61 @@
+{
+ "code-gen/expressions/operators.stan": {
+  "copy": "overrides/operators.stan",
+  "data": "overrides/operators.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "code-gen/mother.stan": {
+  "data": "overrides/mother.json",
+  "note": "Transformed data vectors x and y are never initialized upstream, so CmdStan rejects every evaluation at the first algebra_solver; this copy assigns [0, 0]' and [1, 1]' as the example-models descendant does. Data was generated with N, M, K and d_int fixed to 1 to keep it reviewable.",
+  "source": "overrides/mother.stan"
+ },
+ "code-gen/sum_to_zero.stan": {
+  "data": "overrides/sum_to_zero.json",
+  "note": "Two transformed data declarations are assigned from the data block instead of left uninitialized; CmdStan validates the NaN and throws at any data.",
+  "source": "overrides/sum_to_zero.stan"
+ },
+ "compiler-optimizations/lupdf-inlining.stan": {
+  "copy": "overrides/lupdf-inlining.stan",
+  "data": "overrides/lupdf-inlining.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "compiler-optimizations/mem_patterns/reductions_allowed.stan": {
+  "copy": "overrides/reductions_allowed.stan",
+  "data": "overrides/reductions_allowed.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "declare-define-multi.stan": {
+  "copy": "overrides/declare-define-multi.stan",
+  "data": "overrides/declare-define-multi.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "function-signatures/math/matrix/csr_extract_v.stan": {
+  "data": "overrides/csr_extract_v.json",
+  "note": "Generated dense data gives csr_extract_v twelve nonzeros where the model declares five; this matrix has five."
+ },
+ "parser-generator/cholesky_cov_param_block.stan": {
+  "copy": "overrides/cholesky_cov_param_block.stan",
+  "data": "overrides/cholesky_cov_param_block.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "parser-generator/multidim_var_param_ar45_mat23.stan": {
+  "copy": "overrides/multidim_var_param_ar45_mat23.stan",
+  "data": "overrides/multidim_var_param_ar45_mat23.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "tern_op_contains_var.stan": {
+  "copy": "overrides/tern_op_contains_var.stan",
+  "data": "overrides/tern_op_contains_var.json",
+  "note": "Generated binomial outcome y exceeded its own y_max, which CmdStan rejects; y was edited by hand."
+ },
+ "validate_set_double_offset_multiplier_good.stan": {
+  "copy": "overrides/validate_set_double_offset_multiplier_good.stan",
+  "data": "overrides/validate_set_double_offset_multiplier_good.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "vector-size-stmts.stan": {
+  "copy": "overrides/vector-size-stmts.stan",
+  "data": "overrides/vector-size-stmts.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ }
+}

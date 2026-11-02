@@ -43,6 +43,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <set>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -113,6 +114,15 @@ class MirInterp {
   // extents such as array[0] vector[3].
   void set_declared_dims(const std::string& name, std::vector<int64_t> dims) {
     decl_dims_[name] = std::move(dims);
+  }
+
+  // Variables that hold their declared size for their whole life, as the
+  // generated model's transformed data members do. stanc's --O1 MIR leaves a
+  // local or generated quantity Uninit when its first use assigns all of it,
+  // and the C++ for that is an empty Eigen object that takes any size, so
+  // only these are checked.
+  void set_sized_variables(std::set<std::string> names) {
+    sized_variables_ = std::move(names);
   }
 
   Value* find(const std::string& n) {
@@ -280,6 +290,13 @@ class MirInterp {
         declared_dims.reserve(st.decl_type.dims.size());
         for (const auto& d : st.decl_type.dims)
           declared_dims.push_back(as_int(d));
+        const AssignShape shape = sized_variables_.count(st.decl_id)
+                                      ? assign_shape(st.decl_type)
+                                      : AssignShape{};
+        if (shape.leaf == AssignLeaf::None)
+          assign_shape_.erase(st.decl_id);
+        else
+          assign_shape_[st.decl_id] = shape;
         Value e;
         if (st.decl_type.base == "SInt" ||
             (st.decl_type.base == "SArray" && st.decl_type.elem_base == "SInt"))
@@ -294,6 +311,7 @@ class MirInterp {
                      st.init.fn_lib == mir::Expr::Lib::Internal)) {
           const bool want_int = e.is_int;
           e = eval(st.init);
+          check_assign_size(st.decl_id, declared_dims, e);
           if (want_int && !e.is_int) {
             // Declared int, computed through real arithmetic: coerce back.
             e.is_int = true;
@@ -351,6 +369,14 @@ class MirInterp {
         }
         if (st.lhs_idx.empty()) {
           Value v = eval(st.rhs);
+          if (const Value* current = find(st.lhs))
+            check_assign_size(
+                st.lhs,
+                current->dims.empty()
+                    ? std::vector<int64_t>{static_cast<int64_t>(
+                          std::max(current->r.size(), current->i.size()))}
+                    : current->dims,
+                v);
           // A declared numeric type stays fixed for its whole lifetime. The
           // RHS's own representation can differ: MirInterp's binary ops use
           // real registers, while an all-integer array literal is tagged int.
@@ -1058,6 +1084,93 @@ class MirInterp {
   MirHooks hooks_;
   std::map<std::string, Value> env_;
   std::map<std::string, std::vector<int64_t>> decl_dims_;
+
+  // stan::model::assign checks a sized destination against the value it
+  // receives, with CmdStan's messages. An array compares its size and then
+  // each element's, a vector or matrix compares columns and then rows, and a
+  // destination with no elements accepts anything.
+  enum class AssignLeaf { None, Scalar, Vector, RowVector, Matrix };
+  struct AssignShape {
+    AssignLeaf leaf = AssignLeaf::None;
+    size_t array_levels = 0;
+  };
+  std::map<std::string, AssignShape> assign_shape_;
+  std::set<std::string> sized_variables_;
+
+  static AssignLeaf assign_leaf(const std::string& base) {
+    if (base == "SInt" || base == "SReal") return AssignLeaf::Scalar;
+    if (base == "SVector") return AssignLeaf::Vector;
+    if (base == "SRowVector") return AssignLeaf::RowVector;
+    if (base == "SMatrix") return AssignLeaf::Matrix;
+    return AssignLeaf::None;
+  }
+
+  static AssignShape assign_shape(const mir::SizedType& t) {
+    AssignShape shape;
+    if (t.unsized.leaf != mir::UnsizedLeaf::Unknown) return shape;
+    const bool array = t.base == "SArray";
+    const AssignLeaf leaf = assign_leaf(array ? t.elem_base : t.base);
+    const size_t rank = leaf == AssignLeaf::Matrix   ? 2
+                        : leaf == AssignLeaf::Scalar ? 0
+                                                     : 1;
+    if (leaf == AssignLeaf::None || (!array && leaf == AssignLeaf::Scalar) ||
+        t.dims.size() < rank || (array && t.dims.size() == rank))
+      return shape;
+    shape.leaf = leaf;
+    shape.array_levels = t.dims.size() - rank;
+    return shape;
+  }
+
+  void check_assign_size(const std::string& name,
+                         const std::vector<int64_t>& dst, const Value& v) {
+    const auto it = assign_shape_.find(name);
+    if (it == assign_shape_.end()) return;
+    const AssignShape& shape = it->second;
+    const size_t levels = shape.array_levels;
+    const size_t rank = shape.leaf == AssignLeaf::Matrix   ? 2
+                        : shape.leaf == AssignLeaf::Scalar ? 0
+                                                           : 1;
+    if (dst.size() != levels + rank) return;
+    const auto mismatch = [&](const std::string& what, int64_t want,
+                              const std::string& rhs, int64_t got) {
+      if (want == got) return;
+      throw std::invalid_argument(what + ": assigning variable " + name + " (" +
+                                  std::to_string(want) +
+                                  ") and right hand side" + rhs + " (" +
+                                  std::to_string(got) + ") must match in size");
+    };
+    // The value's dims carry the same array levels; a vector's own length is
+    // its element count, whatever dims it carries.
+    std::vector<int64_t> src = v.dims;
+    if (src.empty())
+      src = {static_cast<int64_t>(std::max(v.r.size(), v.i.size()))};
+    // A value whose dims do not carry every array level says nothing about
+    // the element sizes, so it is not checked at all.
+    if (levels > 0 && src.size() != dst.size()) return;
+    for (size_t d = 0; d < levels; ++d) {
+      if (dst[d] == 0) return;
+      mismatch("assign array size", dst[d], "", src[d]);
+    }
+    if (rank == 0) return;
+    int64_t leaf_size = 1;
+    for (size_t d = levels; d < dst.size(); ++d) leaf_size *= dst[d];
+    if (leaf_size == 0) return;
+    if (shape.leaf == AssignLeaf::Matrix) {
+      if (src.size() != levels + 2) return;
+      mismatch("matrix assign columns", dst[levels + 1], " columns",
+               src[levels + 1]);
+      mismatch("matrix assign rows", dst[levels], " rows", src[levels]);
+      return;
+    }
+    const int64_t got =
+        levels == 0 ? static_cast<int64_t>(std::max(v.r.size(), v.i.size()))
+                    : src[levels];
+    if (shape.leaf == AssignLeaf::Vector)
+      mismatch("vector assign rows", leaf_size, " rows", got);
+    else
+      mismatch("vector assign columns", leaf_size, " columns", got);
+  }
+
   int udf_depth_ = 0;
   bool propto_ctx_ = true;
   bool probe_ = false;

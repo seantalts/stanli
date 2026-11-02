@@ -70,7 +70,8 @@ paths and hashes in raw records unchanged.
 | [Stan source lit tests](../../tests/lit/README.md) | Fixture scope, provenance or test workflow. |
 | [Provenance and licensing](../../tests/rethinking/PROVENANCE.md) | Fixture scope, provenance or test workflow. |
 | [Models from rethinking](../../tests/rethinking/README.md) | Fixture scope, provenance or test workflow. |
-| [Language models, from stanc3's own test suite](../../tests/stanc3/README.md) | Fixture scope, provenance or test workflow. |
+| [stanc3 test models against CmdStan](../../tests/stanc3_good/README.md) | Fixture scope, provenance or test workflow. |
+| [Lowering regressions](../../tests/regressions/README.md) | Fixture scope, provenance or test workflow. |
 
 ## Execution research
 

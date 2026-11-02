@@ -1,0 +1,2188 @@
+{
+ "algebra_solver_good.stan": {
+  "cause": "Exception: solve_powell: initial guess[1] is nan, but must be finite! (in 'algebra_solver_good.stan', line 23, column 2 to column 61)",
+  "status": "data_rejected"
+ },
+ "algebra_solver_newton_good.stan": {
+  "cause": "Exception: solve_newton: initial guess[1] is nan, but must be finite! (in 'algebra_solver_newton_good.stan', line 23, column 2 to column 68)",
+  "status": "data_rejected"
+ },
+ "array-expr/validate_array_expr_big.stan": {
+  "cause": "Exception: assign array size: assigning variable td_ar_int_dim1 (100) and right hand side (90) must match in size (in 'validate_array_expr_big.stan', line 3, column 2 to line 12, column 42)",
+  "status": "data_rejected"
+ },
+ "assignments.stan": {
+  "cause": "Exception: assign array size: assigning variable tx1 (2) and right hand side (3) must match in size (in 'assignments.stan', line 232, column 2 to column 14)",
+  "status": "data_rejected"
+ },
+ "assignments_double_var.stan": {
+  "cause": "assignment width mismatch for tx1",
+  "status": "unsupported"
+ },
+ "assignments_var.stan": {
+  "cause": "assignment width mismatch for tx1",
+  "status": "unsupported"
+ },
+ "break-continue.stan": {
+  "cause": "Transformed data runs `while (1) continue;`, an infinite loop with no side effects; clang compiles that undefined behavior in CmdStan's C++ to a trap, so CmdStan dies with SIGTRAP while loading data.",
+  "status": "cmdstan_crashed"
+ },
+ "code-gen/builtin-constraint.stan": {
+  "cause": "stanli write_array unsupported: sum_to_zero_unconstrain: structured inverse is unsupported",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "code-gen/complex-tuples.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/basic_op_param.stan": {
+  "cause": "parameter read dimensions do not match its declaration",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/basic_operations.stan": {
+  "cause": "complex numbers are not supported yet (in variable cmat) | in: (SComplexMatrix ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/basic_ops_mix.stan": {
+  "cause": "complex numbers are not supported yet (in variable cmat) | in: (SComplexMatrix ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/complex_data.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/complex_scalar.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/complex_vectors.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/user_function_templating.stan": {
+  "cause": "mir: indistinguishable overloads of foo",
+  "status": "unsupported"
+ },
+ "code-gen/cpp-overload-stdlib.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "code-gen/double-reject.stan": {
+  "cause": "Exception: hi there (in 'double-reject.stan', line 2, column 2 to column 21)",
+  "status": "rejected_both"
+ },
+ "code-gen/expressions/ternary_if.stan": {
+  "cause": "complex numbers are not supported yet (in variable zp)",
+  "status": "unsupported"
+ },
+ "code-gen/funcall-type-promotion.stan": {
+  "cause": "unsupported statement function (UserDefined bar FnPlain)",
+  "status": "unsupported"
+ },
+ "code-gen/jacobian_pe.stan": {
+  "cause": "unsupported statement | in: (JacobianPE ((pattern (Var x)) (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable)))))",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_bernoulli_logit.stan": {
+  "cause": "unsupported function laplace_marginal_bernoulli_logit_lpmf",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_functionals.stan": {
+  "cause": "unsupported function laplace_marginal",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_neg_binomial_2_log.stan": {
+  "cause": "unsupported function laplace_marginal_neg_binomial_2_log_lpmf",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_nested_tuple.stan": {
+  "cause": "unsupported function laplace_marginal_neg_binomial_2_log_lpmf",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_nested_tuple2.stan": {
+  "cause": "unsupported function laplace_marginal",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_nested_tuple3.stan": {
+  "cause": "unsupported function laplace_marginal",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_onepl.stan": {
+  "cause": "unsupported function laplace_marginal",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_overload_weird.stan": {
+  "cause": "unsupported function laplace_marginal",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_poisson.stan": {
+  "cause": "stanli write_array unsupported: unsupported function laplace_marginal_tol",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "code-gen/laplace_poisson_log.stan": {
+  "cause": "unsupported function laplace_marginal_poisson_log_lpmf",
+  "status": "unsupported"
+ },
+ "code-gen/motherHOF.stan": {
+  "cause": "assignment width mismatch for y_hat_tp1",
+  "status": "unsupported"
+ },
+ "code-gen/new_integrate_interface.stan": {
+  "cause": "Exception: ode_bdf_tol: initial time is 4.76244, but must be less than 0.000000 (in 'new_integrate_interface.stan', line 40, column 2 to column 58)",
+  "status": "rejected_both"
+ },
+ "code-gen/ode/ode_adjoint_test_model.stan": {
+  "cause": "assignment width mismatch for z",
+  "status": "unsupported"
+ },
+ "code-gen/ode/overloaded-ode.stan": {
+  "cause": "ode_rk45_tol: unknown right-hand side simple_SIR",
+  "status": "unsupported"
+ },
+ "code-gen/opencl/distributions.stan": {
+  "cause": "Exception: bernoulli_logit_lpmf: n is 6, but must be in the interval [0, 1] (in 'distributions.stan', line 19, column 2 to column 62)",
+  "status": "rejected_both"
+ },
+ "code-gen/opencl/restricted.stan": {
+  "cause": "Exception: bernoulli_lpmf: n[1] is 4, but must be in the interval [0, 1] (in 'restricted.stan', line 21, column 2 to column 64)",
+  "status": "rejected_both"
+ },
+ "code-gen/optimize_glm.stan": {
+  "cause": "Exception: optimize_glm_model_namespace::optimize_glm_model: k_td is -2147483648, but must be greater than or equal to 1.000000 (in 'optimize_glm.stan', line 14, column 2 to column 20)",
+  "status": "data_rejected"
+ },
+ "code-gen/promotion.stan": {
+  "cause": "Messages differ for an out-of-range array index in write_array: CmdStan says 'array[uni, ...] index: accessing element out of range. index 0 out of range; expecting index to be between 1 and 4', stanli says 'index 0 out of bounds for size 4'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
+ "code-gen/recursive-slicing.stan": {
+  "cause": "unsupported function eval",
+  "status": "unsupported"
+ },
+ "code-gen/reduce_sum_m1.stan": {
+  "cause": "g calls reduce_sum on itself while its slice has more than one element; without a threaded scheduler the slice never shrinks, and CmdStan overflows its stack.",
+  "status": "cmdstan_crashed"
+ },
+ "code-gen/reduce_sum_m3.stan": {
+  "cause": "A partial sum function calls reduce_sum on itself while its slice has more than one element; the slice never shrinks, and CmdStan overflows its stack.",
+  "status": "cmdstan_crashed"
+ },
+ "code-gen/reject-exit.stan": {
+  "cause": "runtime-control region: statement function FnFatalError requires the MIR interpreter",
+  "status": "unsupported"
+ },
+ "code-gen/return-position-types.stan": {
+  "cause": "this variable type is not supported yet (in variable inline_baz_return_sym11__) | in: (STuple ((SArray SReal ((pattern (Lit Int 0)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SReal))",
+  "status": "unsupported"
+ },
+ "code-gen/self-assign.stan": {
+  "cause": "stanli write_array unsupported: unsupported function FnMakeTuple | in: (UTuple (UReal UInt))",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "code-gen/shadowing.stan": {
+  "cause": "Plain stanc sizes the local before assigning it, so CmdStan's assign checks the size and throws; stanc --O1, whose MIR stanli lowers, leaves the local empty and Stan's assign skips the check for an empty left side.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "code-gen/stochastic_matrices.stan": {
+  "cause": "mir: unsupported or malformed FnCheck",
+  "status": "unsupported"
+ },
+ "code-gen/transform.stan": {
+  "cause": "Exception: lub_constrain: lb is 5.38018, but must be less than 2.808199 (in 'transform.stan', line 13, column 2 to column 52)",
+  "status": "rejected_both"
+ },
+ "comments.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'Found negative dimension size in variable declaration; variable=arr; dimension size expression=N; expression value=-2147483648'. stanli: 'array shape: invalid or overflowing extent'.",
+  "status": "data_message_mismatch"
+ },
+ "compiler-optimizations/dce-fail.stan": {
+  "cause": "gather index: index 0 out of bounds for size 2",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/expr-prop-fail3.stan": {
+  "cause": "gather index: index 0 out of bounds for size 1",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/expr-prop-fail6.stan": {
+  "cause": "bernoulli_lpmf: int argument must be int data (kind=6 type=UArray)",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/fuzz-div0.stan": {
+  "cause": "Exception: modulus: divisor is 0 (in 'fuzz-div0.stan', line 2, column 2 to column 66)",
+  "status": "rejected_both"
+ },
+ "compiler-optimizations/inline-functions-varmat.stan": {
+  "cause": "runtime-control region: index out of the declared range",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/inlining-fail2.stan": {
+  "cause": "bernoulli_lpmf: int argument must be int data (kind=6 type=UArray)",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/mem_patterns/complex-fails.stan": {
+  "cause": "complex numbers are not supported yet (in variable A_complex_tp) | in: (SComplexMatrix ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/mem_patterns/constraints.stan": {
+  "cause": "assignment width mismatch for mu",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/mem_patterns/indexing.stan": {
+  "cause": "normal_lpdf: Plus__: incompatible logical views",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/mem_patterns/indexing2.stan": {
+  "cause": "The size check on assigning a 5-element slice to vector[6] tp_soa_single_idx_in_upfrom_idx is present in plain stanc's C++ and absent from stanc --O1's, whose MIR stanli lowers.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "compiler-optimizations/mem_patterns/tuple_test.stan": {
+  "cause": "this variable type is not supported yet (in variable xx) | in: (STuple ((SArray (SMatrix AoS ((pattern (Lit Int 1)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 1)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) ((pattern (Lit Int 1)) (meta ((type_ UInt) (lo",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/mem_patterns/tuple_test2.stan": {
+  "cause": "this variable type is not supported yet (in variable temp) | in: (STuple ((SMatrix AoS ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SMatrix AoS ((pattern (Lit Int 3)) (meta ((type_ UI",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/overload_tilde_stanlib.stan": {
+  "cause": "With N=0, y ~ bernoulli(t) has an int y and an empty vector t. Stan Math treats a scalar as matching any size and returns 0; stanli's size check counts the int as size 1 and throws.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "compiler-optimizations/partial-eval-tuple.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple (SReal (SMatrix AoS ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/partial-eval.stan": {
+  "cause": "complex numbers are not supported yet (in variable z)",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/stalled1-failure.stan": {
+  "cause": "Exception: binomial_logit_lpmf: Successes variable is 3, but must be in the interval [0, 1] (in 'stalled1-failure.stan', line 46, column 4 to line 48, column 54)",
+  "status": "rejected_both"
+ },
+ "compiler-optimizations/tuple-adlevels.stan": {
+  "cause": "unsupported function kind for FnMakeTuple | in: (UTuple (UReal (UArray UMatrix)))",
+  "status": "unsupported"
+ },
+ "compound-assign/multiply_equals_container.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'multiply: Columns of m1 (3) and Rows of m2 (2) must match in size'. stanli: 'Times__: inner dimension mismatch (1x3 times 2x3)'.",
+  "status": "data_message_mismatch"
+ },
+ "compound-assign/plus_equals_row_vector.stan": {
+  "cause": "Both throw on a size mismatch in +=, but stanli's message is 'Plus__: incompatible logical views' where CmdStan says 'add: m1 (1, 3) and m2 (1, 4) must match in size'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
+ "compound-assign/plus_equals_vector.stan": {
+  "cause": "Both throw on a size mismatch in +=, but stanli's message is 'Plus__: incompatible logical views' where CmdStan says 'add: m1 (3, 1) and m2 (4, 1) must match in size'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
+ "dae_good.stan": {
+  "cause": "Exception: dae: times[1] is nan, but must be finite! (in 'dae_good.stan', line 30, column 4 to column 54)",
+  "status": "rejected_both"
+ },
+ "declarations.stan": {
+  "cause": "Exception: declarations_model_namespace::declarations_model: td_f is not a valid simplex. sum(td_f) = nan, but should be 1 (in 'declarations.stan', line 63, column 2 to column 18)",
+  "status": "data_rejected"
+ },
+ "declare-define-var-vec-runtime-error.stan": {
+  "cause": "Exception: vector assign rows: assigning variable td_b2 (8) and right hand side rows (7) must match in size (in 'declare-define-var-vec-runtime-error.stan', line 5, column 2 to column 23)",
+  "status": "data_rejected"
+ },
+ "declare-define-var-vec-types.stan": {
+  "cause": "unsupported statement function (UserDefined foo1 FnPlain)",
+  "status": "unsupported"
+ },
+ "fun-defs-lpdf.stan": {
+  "cause": "complex numbers are not supported yet (in variable z)",
+  "status": "unsupported"
+ },
+ "fun-var-constraints.stan": {
+  "cause": "no data",
+  "status": "data_unavailable"
+ },
+ "function-signatures/distributions/multivariate/continuous/dirichlet_lpdf.stan": {
+  "cause": "Exception: dirichlet_lpdf: probabilities is not a valid simplex. sum(probabilities) = 25.66921931, but should be 1 (in 'dirichlet_lpdf.stan', line 10, column 2 to column 62)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/multivariate/continuous/gaussian_dlm_obs_log.stan": {
+  "cause": "unsupported function gaussian_dlm_obs_lpdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/multivariate/continuous/hmm_marginal.stan": {
+  "cause": "unsupported function hmm_marginal",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/multivariate/continuous/lkj_corr_log.stan": {
+  "cause": "Exception: lkj_corr_lpdf: Correlation matrix is not a valid correlation matrix. Correlation matrix(1,1) is 0.1, but should be near 1.0 (in 'lkj_corr_log.stan', line 24, column 2 to column 60)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/multivariate/continuous/lkj_cov_log.stan": {
+  "cause": "Exception: lognormal_lpdf: Scale parameter is -0.05, but must be positive finite! (in 'lkj_cov_log.stan', line 24, column 2 to column 79)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/multivariate/continuous/multi_student_t_cholesky_lpdf.stan": {
+  "cause": "lp is off by a constant with gradients equal: stanli's multi_student_t_cholesky kernel treats every argument as autodiff, so under ~ it keeps the nu and log-determinant terms CmdStan drops when they are data (docs/lp-constant.md, compact densities).",
+  "points": {
+   "3": "mismatch",
+   "4": "mismatch"
+  }
+ },
+ "function-signatures/distributions/multivariate/continuous/multi_student_t_lpdf.stan": {
+  "cause": "lp is off by a constant with gradients equal: stanli's multi_student_t kernel treats every argument as autodiff, so under ~ it keeps lgamma((nu+D)/2) - lgamma(nu/2) - D/2*log(nu) - 0.5*log|Sigma| when nu and Sigma are data, which CmdStan drops (documented in docs/lp-constant.md as a compact density).",
+  "points": {
+   "3": "mismatch",
+   "4": "mismatch"
+  }
+ },
+ "function-signatures/distributions/multivariate/discrete/categorical/categorical_logit_glm.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'categorical_logit_glm_lpmf: Intercept vector has dimension = 2, expecting dimension = 3; a function was called with arguments of different scalar, array, vector, or matrix types, and they were not consistently sized;  all arguments must be scalars or multidimensional values of the same shape.'. stanli: 'categorical_logit_glm_lpmf: categorical outcome out of support[2] is 0, but must be in the interval [1, 2]'.",
+  "status": "data_message_mismatch"
+ },
+ "function-signatures/distributions/multivariate/discrete/categorical/categorical_lpmf.stan": {
+  "cause": "Exception: categorical_lpmf: Probabilities parameter is not a valid simplex. sum(Probabilities parameter) = 0.45, but should be 1 (in 'categorical_lpmf.stan', line 20, column 2 to column 62)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/multivariate/discrete/multinomial/multinomial_log.stan": {
+  "cause": "Exception: multinomial_lpmf: Probabilities parameter is not a valid simplex. sum(Probabilities parameter) = 0.45, but should be 1 (in 'multinomial_log.stan', line 17, column 2 to column 68)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/multivariate/discrete/ordered_logistic/ordered_logistic_glm_lpmf.stan": {
+  "cause": "Exception: ordered_logistic_glm_lpmf: Weight vector has dimension = 2, expecting dimension = 3; a function was called with arguments of different scalar, array, vector, or matrix types, and they were not consistently sized;  all arguments must be scalars or multidimensional values of the same shape.",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/normal/normal_id_glm.stan": {
+  "cause": "Exception: normal_id_glm_lpdf: Vector of scale parameters has dimension = 2, expecting dimension = 1; a function was called with arguments of different scalar, array, vector, or matrix types, and they were not consistently sized;  all arguments must be scalars or multidimensional values of the same ",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_ccdf_log_1.stan": {
+  "cause": "Exception: pareto_type_2_lccdf: Random variable is 6, but must be greater than or equal to 6.449101 (in 'pareto_type_2_ccdf_log_1.stan', line 111, column 2 to column 82)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_ccdf_log_2.stan": {
+  "cause": "Exception: pareto_type_2_lccdf: Random variable is 2.92846, but must be greater than or equal to 5.081790 (in 'pareto_type_2_ccdf_log_2.stan', line 36, column 2 to column 83)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_ccdf_log_3.stan": {
+  "cause": "Exception: pareto_type_2_lccdf: Random variable[2] is 2.69024, but must be greater than or equal to 2.916523 (in 'pareto_type_2_ccdf_log_3.stan', line 36, column 2 to column 85)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_ccdf_log_4.stan": {
+  "cause": "Exception: pareto_type_2_lccdf: Random variable[2] is 2.91652, but must be greater than or equal to 6.449101 (in 'pareto_type_2_ccdf_log_4.stan', line 36, column 2 to column 85)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_1.stan": {
+  "cause": "Exception: pareto_type_2_cdf: Random variable is 6, but must be greater than or equal to 6.449101 (in 'pareto_type_2_cdf_1.stan', line 111, column 2 to column 79)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_2.stan": {
+  "cause": "Exception: pareto_type_2_cdf: Random variable is 2.92846, but must be greater than or equal to 5.081790 (in 'pareto_type_2_cdf_2.stan', line 36, column 2 to column 80)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_3.stan": {
+  "cause": "Exception: pareto_type_2_cdf: Random variable[2] is 2.69024, but must be greater than or equal to 2.916523 (in 'pareto_type_2_cdf_3.stan', line 36, column 2 to column 82)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_4.stan": {
+  "cause": "Exception: pareto_type_2_cdf: Random variable[2] is 2.91652, but must be greater than or equal to 6.449101 (in 'pareto_type_2_cdf_4.stan', line 36, column 2 to column 82)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_log_1.stan": {
+  "cause": "Exception: pareto_type_2_lcdf: Random variable is 6, but must be greater than or equal to 6.449101 (in 'pareto_type_2_cdf_log_1.stan', line 111, column 2 to column 80)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_log_2.stan": {
+  "cause": "Exception: pareto_type_2_lcdf: Random variable is 2.92846, but must be greater than or equal to 5.081790 (in 'pareto_type_2_cdf_log_2.stan', line 36, column 2 to column 81)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_log_3.stan": {
+  "cause": "Exception: pareto_type_2_lcdf: Random variable[2] is 2.69024, but must be greater than or equal to 2.916523 (in 'pareto_type_2_cdf_log_3.stan', line 36, column 2 to column 83)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_log_4.stan": {
+  "cause": "Exception: pareto_type_2_lcdf: Random variable[2] is 2.91652, but must be greater than or equal to 6.449101 (in 'pareto_type_2_cdf_log_4.stan', line 36, column 2 to column 83)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_log_1.stan": {
+  "cause": "Exception: pareto_type_2_lpdf: Random variable is 6, but must be greater than or equal to 6.449101 (in 'pareto_type_2_log_1.stan', line 111, column 2 to column 81)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_log_2.stan": {
+  "cause": "Exception: pareto_type_2_lpdf: Random variable is 2.92846, but must be greater than or equal to 5.081790 (in 'pareto_type_2_log_2.stan', line 36, column 2 to column 82)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_log_3.stan": {
+  "cause": "Exception: pareto_type_2_lpdf: Random variable[2] is 2.69024, but must be greater than or equal to 2.916523 (in 'pareto_type_2_log_3.stan', line 36, column 2 to column 84)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_log_4.stan": {
+  "cause": "Exception: pareto_type_2_lpdf: Random variable[2] is 2.91652, but must be greater than or equal to 6.449101 (in 'pareto_type_2_log_4.stan', line 36, column 2 to column 84)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/uniform/uniform_cdf.stan": {
+  "cause": "Exception: uniform_cdf: Upper bound parameter is 6, but must be greater than 6.000000 (in 'uniform_cdf.stan', line 11, column 2 to column 59)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/uniform/uniform_lccdf.stan": {
+  "cause": "Exception: uniform_lccdf: Upper bound parameter is 6, but must be greater than 6.000000 (in 'uniform_lccdf.stan', line 11, column 2 to column 62)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/uniform/uniform_lcdf.stan": {
+  "cause": "Exception: uniform_lcdf: Upper bound parameter is 6, but must be greater than 6.000000 (in 'uniform_lcdf.stan', line 11, column 2 to column 61)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/uniform/uniform_lpdf.stan": {
+  "cause": "Exception: uniform_lpdf: Upper bound parameter is 6, but must be greater than 6.000000 (in 'uniform_lpdf.stan', line 11, column 2 to column 61)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lccdf_def_args.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lccdf_def_args_prec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lccdf_def_args_vec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lccdf_def_args_vec_prec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lcdf_def_args.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lcdf_def_args_prec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lcdf_def_args_vec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lcdf_def_args_vec_prec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_5_args.stan": {
+  "cause": "unsupported function wiener_lpdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_5_args_prec.stan": {
+  "cause": "unsupported function wiener_lpdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_5_args_vec.stan": {
+  "cause": "unsupported function wiener_lpdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_5_args_vec_prec.stan": {
+  "cause": "unsupported function wiener_lpdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_0.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_0_prec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_1.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_1_prec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_2.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_2_prec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_3.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_3_prec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_4.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_4_lcdf_def.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_4_lcdf_def_prec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_4_prec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_6.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_6_prec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_vec_1.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_vec_1_prec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_vec_2.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_vec_2_prec.stan": {
+  "cause": "unsupported function wiener_lccdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_0.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_0_prec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_1.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_1_prec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_2.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_2_prec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_3.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_3_prec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_4.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_4_lcdf_def.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_4_lcdf_def_prec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_4_prec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_6.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_6_prec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_vec_1.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_vec_1_prec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_vec_2.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_vec_2_prec.stan": {
+  "cause": "unsupported function wiener_lcdf_unnorm",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_0.stan": {
+  "cause": "unsupported function wiener_lpdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_0_prec.stan": {
+  "cause": "unsupported function wiener_lpdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_1.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_1.stan', line 10, column 2 to column 101)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_1_prec.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_1_prec.stan', line 10, column 2 to column 109)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_2.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_2.stan', line 11, column 2 to column 103)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_2_prec.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_2_prec.stan', line 11, column 2 to column 111)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_3.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_3.stan', line 10, column 2 to column 101)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_3_prec.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_3_prec.stan', line 10, column 2 to column 109)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_4.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_4.stan', line 11, column 2 to column 102)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_4_prec.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_4_prec.stan', line 11, column 2 to column 110)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_5.stan": {
+  "cause": "Exception: wiener_lpdf: Inter-trial variability in A-priori bias is 5.83747, but must be in the interval [0, 1] (in 'wiener_full_lpdf_5.stan', line 11, column 2 to column 103)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_5_prec.stan": {
+  "cause": "Exception: wiener_lpdf: Inter-trial variability in A-priori bias is 5.83747, but must be in the interval [0, 1] (in 'wiener_full_lpdf_5_prec.stan', line 11, column 2 to column 111)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_6.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_6.stan', line 11, column 2 to column 98)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_6_prec.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_6_prec.stan', line 11, column 2 to column 106)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_vec_1.stan": {
+  "cause": "unsupported function wiener_lpdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_vec_1_prec.stan": {
+  "cause": "unsupported function wiener_lpdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_vec_2.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[3] is -0.1, but must be positive finite! (in 'wiener_full_lpdf_vec_2.stan', line 11, column 2 to column 96)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_vec_2_prec.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[3] is -0.1, but must be positive finite! (in 'wiener_full_lpdf_vec_2_prec.stan', line 12, column 2 to column 104)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_0.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be in the interval [0, 1] (in 'wiener_log_0.stan', line 31, column 2 to column 75)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_1.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 4.51218, but must be in the interval [0, 1] (in 'wiener_log_1.stan', line 31, column 2 to column 96)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_10.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 2.92846, but must be in the interval [0, 1] (in 'wiener_log_10.stan', line 31, column 2 to column 98)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_11.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias[2] is -0.1, but must be in the interval [0, 1] (in 'wiener_log_11.stan', line 31, column 2 to column 100)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_12.stan": {
+  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_12.stan', line 31, column 2 to column 103)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_13.stan": {
+  "cause": "Exception: wiener_lpdf: Boundary separation[1] is -0.05, but must be positive finite! (in 'wiener_log_13.stan', line 31, column 2 to column 110)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_14.stan": {
+  "cause": "Exception: wiener_lpdf: Nondecision time[2] is -0.1, but must be positive finite! (in 'wiener_log_14.stan', line 31, column 2 to column 92)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_15.stan": {
+  "cause": "Exception: wiener_lpdf: Nondecision time[2] is -0.1, but must be positive finite! (in 'wiener_log_15.stan', line 31, column 2 to column 87)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_16.stan": {
+  "cause": "Exception: wiener_lpdf: Nondecision time[1] is -0.05, but must be positive finite! (in 'wiener_log_16.stan', line 31, column 2 to column 100)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_17.stan": {
+  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_17.stan', line 31, column 2 to column 94)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_18.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 6.76162, but must be in the interval [0, 1] (in 'wiener_log_18.stan', line 31, column 2 to column 86)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_19.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias[2] is -0.1, but must be in the interval [0, 1] (in 'wiener_log_19.stan', line 31, column 2 to column 95)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_2.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be in the interval [0, 1] (in 'wiener_log_2.stan', line 31, column 2 to column 86)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_20.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 6.76162, but must be in the interval [0, 1] (in 'wiener_log_20.stan', line 31, column 2 to column 90)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_21.stan": {
+  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_21.stan', line 31, column 2 to column 93)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_22.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 6.76162, but must be in the interval [0, 1] (in 'wiener_log_22.stan', line 31, column 2 to column 93)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_23.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias[1] is -0.05, but must be in the interval [0, 1] (in 'wiener_log_23.stan', line 31, column 2 to column 100)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_24.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 4.51218, but must be in the interval [0, 1] (in 'wiener_log_24.stan', line 31, column 2 to column 93)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_25.stan": {
+  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_25.stan', line 31, column 2 to column 100)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_26.stan": {
+  "cause": "Exception: wiener_lpdf: Boundary separation[1] is -0.05, but must be positive finite! (in 'wiener_log_26.stan', line 31, column 2 to column 100)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_27.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_27.stan', line 31, column 2 to column 84)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_28.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_28.stan', line 31, column 2 to column 100)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_29.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_29.stan', line 31, column 2 to column 93)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_3.stan": {
+  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_3.stan', line 31, column 2 to column 84)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_30.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_30.stan', line 31, column 2 to column 93)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_31.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_31.stan', line 31, column 2 to column 88)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_32.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_32.stan', line 31, column 2 to column 92)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_33.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_33.stan', line 31, column 2 to column 93)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_34.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_34.stan', line 31, column 2 to column 100)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_35.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[1] is -0.05, but must be positive! (in 'wiener_log_35.stan', line 31, column 2 to column 86)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_36.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[1] is -0.05, but must be positive! (in 'wiener_log_36.stan', line 31, column 2 to column 96)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_37.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[1] is -0.05, but must be positive! (in 'wiener_log_37.stan', line 31, column 2 to column 98)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_38.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[1] is -0.05, but must be positive! (in 'wiener_log_38.stan', line 31, column 2 to column 100)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_39.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable[1] is -0.05, but must be positive! (in 'wiener_log_39.stan', line 31, column 2 to column 103)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_4.stan": {
+  "cause": "Exception: wiener_lpdf: Boundary separation[1] is -0.05, but must be positive finite! (in 'wiener_log_4.stan', line 31, column 2 to column 96)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_40.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be in the interval [0, 1] (in 'wiener_log_40.stan', line 17, column 2 to column 74)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_41.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 2.92846, but must be in the interval [0, 1] (in 'wiener_log_41.stan', line 17, column 2 to column 92)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_5.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable  = 2.92846, but must be greater than nondecision time = 5.08179 (in 'wiener_log_5.stan', line 31, column 2 to column 88)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_6.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias is 2.92846, but must be in the interval [0, 1] (in 'wiener_log_6.stan', line 31, column 2 to column 83)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_7.stan": {
+  "cause": "Exception: wiener_lpdf: Random variable  = 2.92846, but must be greater than nondecision time = 6.76162 (in 'wiener_log_7.stan', line 31, column 2 to column 88)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_8.stan": {
+  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_8.stan', line 31, column 2 to column 90)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/continuous/wiener/wiener_log_9.stan": {
+  "cause": "Exception: wiener_lpdf: A-priori bias[2] is -0.1, but must be in the interval [0, 1] (in 'wiener_log_9.stan', line 31, column 2 to column 96)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/discrete/bernoulli/bernoulli_logit_glm.stan": {
+  "cause": "bernoulli_logit_glm_lpmf: density outcome does not match matrix rows",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/discrete/bernoulli/bernoulli_logit_lpmf.stan": {
+  "cause": "Exception: bernoulli_logit_lpmf: n is 6, but must be in the interval [0, 1] (in 'bernoulli_logit_lpmf.stan', line 11, column 2 to column 62)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/discrete/bernoulli/bernoulli_lpmf.stan": {
+  "cause": "Exception: bernoulli_lpmf: n is 6, but must be in the interval [0, 1] (in 'bernoulli_lpmf.stan', line 11, column 2 to column 56)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/discrete/beta_neg_binomial/beta_neg_binomial_cdf.stan": {
+  "cause": "Exception: beta_neg_binomial_cdf: Prior failure parameter[2] is -0.1, but must be positive finite! (in 'beta_neg_binomial_cdf.stan', line 329, column 2 to column 85)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/discrete/beta_neg_binomial/beta_neg_binomial_lccdf.stan": {
+  "cause": "Exception: beta_neg_binomial_lccdf: Prior failure parameter[2] is -0.1, but must be positive finite! (in 'beta_neg_binomial_lccdf.stan', line 329, column 2 to column 87)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/discrete/beta_neg_binomial/beta_neg_binomial_lcdf.stan": {
+  "cause": "Exception: beta_neg_binomial_lcdf: Prior failure parameter[2] is -0.1, but must be positive finite! (in 'beta_neg_binomial_lcdf.stan', line 329, column 2 to column 86)",
+  "status": "rejected_both"
+ },
+ "function-signatures/distributions/univariate/discrete/binomial/binomial_logit_glm.stan": {
+  "cause": "binomial_logit_glm_lpmf: integer density argument does not match matrix rows",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/discrete/binomial/binomial_lpmf.stan": {
+  "cause": "Exception: binomial_lpmf: Probability parameter is 6, but must be in the interval [0, 1] (in 'binomial_lpmf.stan', line 11, column 2 to column 62)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/discrete/discrete_range/discrete_range_cdf.stan": {
+  "cause": "unsupported function discrete_range_cdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/discrete/discrete_range/discrete_range_lccdf.stan": {
+  "cause": "unsupported function discrete_range_lccdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/discrete/discrete_range/discrete_range_lcdf.stan": {
+  "cause": "unsupported function discrete_range_lcdf",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/discrete/discrete_range/discrete_range_lpmf.stan": {
+  "cause": "Exception: discrete_range_lpmf: Upper bound parameter[1] is 0, but must be greater than or equal to 6.000000 (in 'discrete_range_lpmf.stan', line 8, column 2 to column 74)",
+  "status": "data_rejected"
+ },
+ "function-signatures/distributions/univariate/discrete/neg_binomial_2/neg_binomial_2_log_glm.stan": {
+  "cause": "neg_binomial_2_log_glm_lpmf: density outcome does not match matrix rows",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/discrete/poisson/poisson_log_glm.stan": {
+  "cause": "poisson_log_glm_lpmf: density outcome does not match matrix rows",
+  "status": "unsupported"
+ },
+ "function-signatures/distributions/univariate/discrete/yule_simon/yule_simon_rng.stan": {
+  "cause": "unsupported function yule_simon_rng",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/bessel_second_kind.stan": {
+  "cause": "Boost names the precision it was called at: CmdStan's message says bessel_yn<long double>, stanli's bessel_yn<double>.",
+  "points": {
+   "1": "message_mismatch",
+   "2": "message_mismatch"
+  }
+ },
+ "function-signatures/math/functions/gamma_q.stan": {
+  "cause": "Boost names the precision it was called at: CmdStan's message says gamma_p<long double>, stanli's gamma_p<double>.",
+  "points": {
+   "1": "message_mismatch",
+   "2": "message_mismatch"
+  }
+ },
+ "function-signatures/math/functions/generate_laplace_options.stan": {
+  "cause": "this variable type is not supported yet (in variable transformed_data_tols) | in: (STuple ((SVector AoS ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SReal SInt SInt SInt SInt))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/get_imag.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/get_real.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/hmm_hidden_states_prob.stan": {
+  "cause": "unsupported function hmm_hidden_state_prob",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/hypergeometric_2F1.stan": {
+  "cause": "unsupported function hypergeometric_2F1",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/hypergeometric_3F2.stan": {
+  "cause": "unsupported function hypergeometric_3F2",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/hypergeometric_pFq.stan": {
+  "cause": "unsupported function hypergeometric_pFq",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/inc_beta.stan": {
+  "cause": "unsupported function inc_beta",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/int_step.stan": {
+  "cause": "unsupported function int_step",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/inv_inc_beta.stan": {
+  "cause": "unsupported function inv_inc_beta",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/lambert.stan": {
+  "cause": "Exception: Error in function boost::math::lambert_wm1<RealType>(<RealType>): Argument z = 6 is out of range (z <= 0) for Lambert W-1 branch! (Try Lambert W0 branch?) (in 'lambert.stan', line 11, column 2 to column 45)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/functions/log_mix.stan": {
+  "cause": "unsupported function log_mix",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/max.stan": {
+  "cause": "min/max expression surface stays on WaInterp",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/min.stan": {
+  "cause": "min/max expression surface stays on WaInterp",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/modified_bessel_second_kind.stan": {
+  "cause": "Boost names the precision it was called at: CmdStan's message says bessel_kn<long double>, stanli's bessel_kn<double>.",
+  "points": {
+   "1": "message_mismatch",
+   "2": "message_mismatch"
+  }
+ },
+ "function-signatures/math/functions/norm1.stan": {
+  "cause": "unsupported function norm1",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/norm2.stan": {
+  "cause": "unsupported function norm2",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/quantile.stan": {
+  "cause": "unsupported function quantile",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/to_complex.stan": {
+  "cause": "complex numbers are not supported yet (in variable transformed_data_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/abs.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/acosh.stan": {
+  "cause": "Exception: acosh: x is -0.15, but must be greater than or equal to 1.000000 (in 'acosh.stan', line 106, column 2 to column 45)",
+  "status": "rejected_both"
+ },
+ "function-signatures/math/matrix/add_diag.stan": {
+  "cause": "complex numbers are not supported yet (in variable C) | in: (SComplexMatrix ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/append_col.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/append_row.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/bessel_first_kind.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'Binary function: size of x (2) and size of y (6) must match in size'. stanli: 'bessel_first_kind: arguments must match in size'.",
+  "status": "data_message_mismatch"
+ },
+ "function-signatures/math/matrix/bessel_second_kind.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'Binary function: size of x (2) and size of y (6) must match in size'. stanli: 'bessel_second_kind: arguments must match in size'.",
+  "status": "data_message_mismatch"
+ },
+ "function-signatures/math/matrix/binary_log_loss.stan": {
+  "cause": "Exception: log1m: x is 4.70969, but must be less than or equal to 1.000000 (in 'binary_log_loss.stan', line 43, column 2 to column 69)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/matrix/block.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/chol2inv.stan": {
+  "cause": "unsupported function chol2inv",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/col.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/cols.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/columns_dot_product.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/columns_dot_self.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/complex_schur_decompose.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/conj.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/csr_extract.stan": {
+  "cause": "this variable type is not supported yet (in variable td_wvu) | in: (STuple ((SVector AoS ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SArray SInt ((pattern (Lit Int 5)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SArray SInt ((pattern (Lit Int 5)) ",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/csr_extract_u.stan": {
+  "cause": "Exception: assign array size: assigning variable u (5) and right hand side (4) must match in size (in 'csr_extract_u.stan', line 6, column 2 to column 25)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/matrix/csr_extract_v.stan": {
+  "cause": "Plain stanc sizes the local before assigning it, so CmdStan's assign checks the size and throws; stanc --O1, whose MIR stanli lowers, leaves the local empty and Stan's assign skips the check for an empty left side.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "function-signatures/math/matrix/csr_extract_w.stan": {
+  "cause": "Exception: vector assign rows: assigning variable w_d (3) and right hand side rows (12) must match in size (in 'csr_extract_w.stan', line 6, column 2 to column 27)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/matrix/csr_matrix_times_vector.stan": {
+  "cause": "unsupported function csr_matrix_times_vector",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/csr_to_dense_matrix.stan": {
+  "cause": "unsupported function csr_to_dense_matrix",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/determinant.stan": {
+  "cause": "unsupported function determinant",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/diag_matrix.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/diag_post_multiply.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/diag_pre_multiply.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/diagonal.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/dims.stan": {
+  "cause": "Exception: assign array size: assigning variable val1 (1) and right hand side (2) must match in size (in 'dims.stan', line 41, column 2 to column 19)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/matrix/distance.stan": {
+  "cause": "unsupported function distance",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/dot_product.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/dot_self.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigendecompose.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigendecompose_sym.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigenvalues.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigenvalues_sym.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigenvectors.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigenvectors_sym.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/elementwise_products.stan": {
+  "cause": "Divide__: needs a row_vector or matrix dividend",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/falling_factorial.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'Binary function: size of x (6) and size of y (2) must match in size'. stanli: 'falling_factorial: arguments must match in size'.",
+  "status": "data_message_mismatch"
+ },
+ "function-signatures/math/matrix/fft.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/gamma_q.stan": {
+  "cause": "Boost names the precision it was called at: CmdStan's message says gamma_p<long double>, stanli's gamma_p<double>.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch"
+  }
+ },
+ "function-signatures/math/matrix/generalized_inverse.stan": {
+  "cause": "unsupported function generalized_inverse",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/get_imag.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/get_real.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/inv_Phi.stan": {
+  "cause": "Exception: inv_Phi: Probability variable is -5, but must be in the interval [0, 1] (in 'inv_Phi.stan', line 46, column 2 to column 41)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/matrix/inv_erfc.stan": {
+  "cause": "Exception: Error in function boost::math::erfc_inv<double>(double, double): Argument outside range [0,2] in inverse erfc function (got p=4.2357067890126228). (in 'inv_erfc.stan', line 44, column 2 to column 47)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/matrix/inv_fft.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/lambert.stan": {
+  "cause": "Exception: Error in function boost::math::lambert_wm1<RealType>(<RealType>): Argument z = 4.2357067890126228 is out of range (z <= 0) for Lambert W-1 branch! (Try Lambert W0 branch?) (in 'lambert.stan', line 65, column 2 to column 50)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/matrix/lchoose.stan": {
+  "cause": "Exception: binomial_coefficient_log: second argument is -6, but must be greater than or equal to -1.000000 (in 'lchoose.stan', line 41, column 2 to column 60)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/matrix/ldexp.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'Binary function: size of x (6) and size of y (2) must match in size'. stanli: 'ldexp: arguments must match in size'.",
+  "status": "data_message_mismatch"
+ },
+ "function-signatures/math/matrix/lmgamma.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'Binary function: size of x (2) and size of y (6) must match in size'. stanli: 'lmgamma: arguments must match in size'.",
+  "status": "data_message_mismatch"
+ },
+ "function-signatures/math/matrix/log_determinant_spd.stan": {
+  "cause": "unsupported function log_determinant_spd",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/matrix_division.stan": {
+  "cause": "Point 2 is the all-zero point, where p_matrix is singular; gradients through the singular solve are NaN in stanli and 0 in CmdStan.",
+  "points": {
+   "2": "mismatch"
+  }
+ },
+ "function-signatures/math/matrix/matrix_exp_multiply.stan": {
+  "cause": "unsupported function matrix_exp_multiply",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/matrix_power.stan": {
+  "cause": "unsupported function matrix_power",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/max.stan": {
+  "cause": "min/max expression surface stays on WaInterp",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/mdivide_left.stan": {
+  "cause": "Point 2 is the all-zero point, where p_matrix is singular; gradients through the singular solve are NaN in stanli and 0 in CmdStan.",
+  "points": {
+   "2": "mismatch"
+  }
+ },
+ "function-signatures/math/matrix/mdivide_right.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/min.stan": {
+  "cause": "min/max expression surface stays on WaInterp",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/minus.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/modified_bessel_first_kind.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'Binary function: size of x (2) and size of y (6) must match in size'. stanli: 'modified_bessel_first_kind: arguments must match in size'.",
+  "status": "data_message_mismatch"
+ },
+ "function-signatures/math/matrix/modified_bessel_second_kind.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'Binary function: size of x (2) and size of y (6) must match in size'. stanli: 'modified_bessel_second_kind: arguments must match in size'.",
+  "status": "data_message_mismatch"
+ },
+ "function-signatures/math/matrix/num_elements.stan": {
+  "cause": "complex numbers are not supported yet (in variable cx3x) | in: (SComplexVector ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/pow.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/prod.stan": {
+  "cause": "mismatch in dimension declared and found in context; processing stage=data initialization; variable name=d_complex_array; position=0; dims declared=(6); dims found=(6,2)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/qr.stan": {
+  "cause": "this variable type is not supported yet (in variable QR_tdata) | in: (STuple ((SMatrix AoS ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SMatrix AoS ((pattern (Var d_int)) (meta ((type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/qr_Q.stan": {
+  "cause": "unsupported function qr_Q",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/qr_R.stan": {
+  "cause": "unsupported function qr_R",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/qr_thin.stan": {
+  "cause": "this variable type is not supported yet (in variable QR_tdata) | in: (STuple ((SMatrix AoS ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SMatrix AoS ((pattern (Var d_int)) (meta ((type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/qr_thin_Q.stan": {
+  "cause": "unsupported function qr_thin_Q",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/qr_thin_R.stan": {
+  "cause": "unsupported function qr_thin_R",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rep_matrix.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rep_param.stan": {
+  "cause": "assignment width mismatch for m1",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rep_row_vector.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rep_vector.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rising_factorial.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'Binary function: size of x (6) and size of y (2) must match in size'. stanli: 'rising_factorial: arguments must match in size'.",
+  "status": "data_message_mismatch"
+ },
+ "function-signatures/math/matrix/row.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rows.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rows_dot_product.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rows_dot_self.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/scale_matrix_exp_multiply.stan": {
+  "cause": "unsupported function scale_matrix_exp_multiply",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/singular_values.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/std_normal_log_qf.stan": {
+  "cause": "Exception: std_normal_log_qf: Probability variable is 6, but must be less than or equal to 0.000000 (in 'std_normal_log_qf.stan', line 46, column 2 to column 51)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/matrix/std_normal_qf.stan": {
+  "cause": "Exception: inv_Phi: Probability variable is -5, but must be in the interval [0, 1] (in 'std_normal_qf.stan', line 46, column 2 to column 47)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/matrix/sub_col.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/sub_row.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/svd.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/svd_U.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/svd_V.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/symmetrize_from_lower_tri.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_complex.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_matrix.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_row_vector.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_row_vector_array.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_vector.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_vector_array.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/trace.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/trace_dot.stan": {
+  "cause": "unsupported function trace_dot",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/trace_gen_quad_form.stan": {
+  "cause": "unsupported function trace_gen_quad_form",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/trace_quad_form.stan": {
+  "cause": "unsupported function trace_quad_form",
+  "status": "unsupported"
+ },
+ "function-signatures/math/operators/and.stan": {
+  "cause": "boolean operator on parameters unsupported",
+  "status": "unsupported"
+ },
+ "function-signatures/math/operators/and_or_interaction.stan": {
+  "cause": "boolean operator on parameters unsupported",
+  "status": "unsupported"
+ },
+ "function-signatures/math/operators/or.stan": {
+  "cause": "boolean operator on parameters unsupported",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/cholesky_factor_corr_constrain.stan": {
+  "cause": "no data",
+  "status": "data_unavailable"
+ },
+ "function-signatures/math/transforms/cholesky_factor_corr_jacobian.stan": {
+  "cause": "no data",
+  "status": "data_unavailable"
+ },
+ "function-signatures/math/transforms/cholesky_factor_corr_unconstrain.stan": {
+  "cause": "mir: malformed cholesky_factor_corr_unconstrain call: expected 2 argument(s), got 1",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/cholesky_factor_cov_constrain.stan": {
+  "cause": "no data",
+  "status": "data_unavailable"
+ },
+ "function-signatures/math/transforms/cholesky_factor_cov_jacobian.stan": {
+  "cause": "no data",
+  "status": "data_unavailable"
+ },
+ "function-signatures/math/transforms/cholesky_factor_cov_unconstrain.stan": {
+  "cause": "mir: malformed cholesky_factor_cov_unconstrain call: expected 3 argument(s), got 1",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/corr_matrix_constrain.stan": {
+  "cause": "no data",
+  "status": "data_unavailable"
+ },
+ "function-signatures/math/transforms/corr_matrix_jacobian.stan": {
+  "cause": "no data",
+  "status": "data_unavailable"
+ },
+ "function-signatures/math/transforms/corr_matrix_unconstrain.stan": {
+  "cause": "mir: malformed corr_matrix_unconstrain call: expected 2 argument(s), got 1",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/cov_matrix_constrain.stan": {
+  "cause": "no data",
+  "status": "data_unavailable"
+ },
+ "function-signatures/math/transforms/cov_matrix_jacobian.stan": {
+  "cause": "no data",
+  "status": "data_unavailable"
+ },
+ "function-signatures/math/transforms/cov_matrix_unconstrain.stan": {
+  "cause": "mir: malformed cov_matrix_unconstrain call: expected 2 argument(s), got 1",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/lower_bound_unconstrain.stan": {
+  "cause": "Both reject the data at lb_free; CmdStan names the matrix element 'Lower bounded variable[1, 1]', stanli prints no index.",
+  "status": "data_message_mismatch"
+ },
+ "function-signatures/math/transforms/lower_upper_bound_constrain.stan": {
+  "cause": "Exception: lub_constrain: lb is 5.08179, but must be less than 5.081790 (in 'lower_upper_bound_constrain.stan', line 42, column 2 to column 72)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/transforms/lower_upper_bound_jacobian.stan": {
+  "cause": "Exception: lub_constrain: lb is 5.83747, but must be less than 5.837474 (in 'lower_upper_bound_jacobian.stan', line 63, column 2 to column 78)",
+  "status": "rejected_both"
+ },
+ "function-signatures/math/transforms/lower_upper_bound_unconstrain.stan": {
+  "cause": "Exception: lub_free: Bounded variable is 6.10769, but must be in the interval [6.10769, 5.83747] (in 'lower_upper_bound_unconstrain.stan', line 43, column 2 to column 72)",
+  "status": "data_rejected"
+ },
+ "function-signatures/math/transforms/offset_multiplier_constrain.stan": {
+  "cause": "Both reject a nonpositive multiplier; CmdStan names the matrix element 'multiplier[1, 1]', stanli a flat index 'multiplier[1]'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch"
+  }
+ },
+ "function-signatures/math/transforms/offset_multiplier_unconstrain.stan": {
+  "cause": "Both reject a nonpositive multiplier; CmdStan names the matrix element 'multiplier[1, 1]', stanli a flat index 'multiplier[1]'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch"
+  }
+ },
+ "function-signatures/math/transforms/ordered_unconstrain.stan": {
+  "cause": "ordered_unconstrain: structured inverse is unsupported",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/positive_ordered_unconstrain.stan": {
+  "cause": "positive_ordered_unconstrain: structured inverse is unsupported",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/simplex_unconstrain.stan": {
+  "cause": "simplex_unconstrain: structured inverse is unsupported",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/stochastic_column_constrain.stan": {
+  "cause": "assignment width mismatch for transformed_param_matrix",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/stochastic_column_unconstrain.stan": {
+  "cause": "stochastic_column_unconstrain: structured inverse is unsupported",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/stochastic_row_jacobian.stan": {
+  "cause": "assignment width mismatch for transformed_param_matrix",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/stochastic_row_unconstrain.stan": {
+  "cause": "stochastic_row_unconstrain: structured inverse is unsupported",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/sum_to_zero_unconstrain.stan": {
+  "cause": "sum_to_zero_unconstrain: structured inverse is unsupported",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/unit_vector_constrain.stan": {
+  "cause": "Stan Math's reverse-mode unit_vector_constrain skips the positive-finite norm check that the double version makes, so CmdStan returns NaN gradients for a zero vector parameter where stanli throws.",
+  "points": {
+   "2": "one_side_threw"
+  }
+ },
+ "function-signatures/math/transforms/unit_vector_unconstrain.stan": {
+  "cause": "unit_vector_unconstrain: structured inverse is unsupported",
+  "status": "unsupported"
+ },
+ "function-signatures/math/transforms/upper_bound_unconstrain.stan": {
+  "cause": "stanli's ub_free does not check that the value is below the upper bound; CmdStan throws 'ub_free: Upper bounded variable is 0.0817899, but must be less than or equal to -0.05'.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "function-signatures/math/while.stan": {
+  "cause": "An uninitialized transformed data int is nonzero, so `while (transformed_data_int)` never ends; CmdStan aborts while loading data (stanli stops with 'while loop did not terminate').",
+  "status": "cmdstan_crashed"
+ },
+ "illegal_transformed_data.stan": {
+  "cause": "Exception: illegal_transformed_data_model_namespace::illegal_transformed_data_model: x is -1, but must be greater than or equal to 0.000000 (in 'illegal_transformed_data.stan', line 2, column 2 to column 18)",
+  "status": "data_rejected"
+ },
+ "illegal_transformed_parameters.stan": {
+  "cause": "Exception: illegal_transformed_parameters_model_namespace::log_prob: x is -1, but must be greater than or equal to 0.000000 (in 'illegal_transformed_parameters.stan', line 2, column 2 to column 18)",
+  "status": "rejected_both"
+ },
+ "indexing/good-empty-omni.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'assign array size: assigning variable c (4) and right hand side (3) must match in size'. stanli: 'full-span assignment size mismatch'.",
+  "status": "data_message_mismatch"
+ },
+ "indexing/good-ints.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'array[multi, ...] assign: accessing element out of range. index -2147483648 out of range; expecting index to be between 1 and 4'. stanli: 'multi-index assignment index out of bounds'.",
+  "status": "data_message_mismatch"
+ },
+ "indexing/good-lb.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'array[multi, ...] assign: assigning variable e (4) and right hand side size (3) must match in size'. stanli: 'multi-index assignment size mismatch'.",
+  "status": "data_message_mismatch"
+ },
+ "indexing/good-lub.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'array[multi, ...] assign: assigning variable c (9) and right hand side size (3) must match in size'. stanli: 'multi-index assignment range out of bounds'.",
+  "status": "data_message_mismatch"
+ },
+ "indexing/good-omni.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'assign array size: assigning variable c (4) and right hand side (3) must match in size'. stanli: 'full-span assignment size mismatch'.",
+  "status": "data_message_mismatch"
+ },
+ "indexing/good-omni2.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'assign array size: assigning variable c (4) and right hand side (3) must match in size'. stanli: 'full-span assignment size mismatch'.",
+  "status": "data_message_mismatch"
+ },
+ "indexing/good-omni3.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'assign array size: assigning variable c (4) and right hand side (3) must match in size'. stanli: 'full-span assignment size mismatch'.",
+  "status": "data_message_mismatch"
+ },
+ "indexing/good-ub.stan": {
+  "cause": "Both reject the data with different messages. CmdStan: 'array[multi, ...] assign: assigning variable c (2) and right hand side size (3) must match in size'. stanli: 'multi-index assignment size mismatch'.",
+  "status": "data_message_mismatch"
+ },
+ "infinite_loop_return.stan": {
+  "cause": "The program loops forever by design; CmdStan does not finish within the record timeout.",
+  "status": "cmdstan_timeout"
+ },
+ "int_overloads.stan": {
+  "cause": "Exception: atanh: x is 6, but must be in the interval [-1, 1] (in 'int_overloads.stan', line 60, column 2 to column 39)",
+  "status": "data_rejected"
+ },
+ "integrate_1d_good.stan": {
+  "cause": "stanli's integrate_1d does not check that the lower limit is at most the upper limit; CmdStan throws 'integrate_1d: lower limit is 0.2, but must be less than or equal to 0'.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "jacobian_pe.stan": {
+  "cause": "unsupported statement | in: (JacobianPE ((pattern (Var inline_foo_return_sym5__)) (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable)))))",
+  "status": "unsupported"
+ },
+ "lang/exit_model.stan": {
+  "cause": "this kind of statement is not supported yet",
+  "status": "unsupported"
+ },
+ "lang/print_reject_function_model.stan": {
+  "cause": "Exception: Exception: user-specified rejection (in 'print_reject_function_model.stan', line 4, column 4 to column 39) (in 'print_reject_function_model.stan', line 20, column 2 to column 9)",
+  "status": "rejected_both"
+ },
+ "lang/print_reject_function_tdata.stan": {
+  "cause": "unsupported statement function (UserDefined foo FnPlain)",
+  "status": "unsupported"
+ },
+ "lang/print_reject_function_tparams.stan": {
+  "cause": "Exception: Exception: user-specified rejection (in 'print_reject_function_tparams.stan', line 4, column 4 to column 39) (in 'print_reject_function_tparams.stan', line 16, column 2 to column 9)",
+  "status": "rejected_both"
+ },
+ "lang/print_reject_model_block.stan": {
+  "cause": "Exception: user-specified rejection (in 'print_reject_model_block.stan', line 14, column 2 to column 37)",
+  "status": "rejected_both"
+ },
+ "lang/print_reject_tdata_block.stan": {
+  "cause": "Exception: QUIT (in 'print_reject_tdata_block.stan', line 4, column 2 to column 17)",
+  "status": "data_rejected"
+ },
+ "lang/print_reject_tparams_block.stan": {
+  "cause": "Exception: QUIT (in 'print_reject_tparams_block.stan', line 10, column 2 to column 17)",
+  "status": "rejected_both"
+ },
+ "lang/reject_func_call_model.stan": {
+  "cause": "Exception: Exception: user-specified rejection (in 'reject_func_call_model.stan', line 3, column 4 to column 39) (in 'reject_func_call_model.stan', line 10, column 2 to column 9)",
+  "status": "rejected_both"
+ },
+ "lang/reject_func_call_transformed_data.stan": {
+  "cause": "unsupported statement function (UserDefined foo FnPlain)",
+  "status": "unsupported"
+ },
+ "lang/reject_func_call_transformed_parameters.stan": {
+  "cause": "Exception: Exception: user-specified rejection (in 'reject_func_call_transformed_parameters.stan', line 3, column 4 to column 39) (in 'reject_func_call_transformed_parameters.stan', line 11, column 2 to column 12)",
+  "status": "rejected_both"
+ },
+ "lang/reject_model.stan": {
+  "cause": "Exception: user-specified rejection (in 'reject_model.stan', line 14, column 2 to column 37)",
+  "status": "rejected_both"
+ },
+ "lang/reject_mult_args.stan": {
+  "cause": "Exception: Exception: user-specified rejection, difference above 1.2 x:-9 y:-1 (in 'reject_mult_args.stan', line 8, column 6 to column 81) (in 'reject_mult_args.stan', line 25, column 2 to column 31)",
+  "status": "rejected_both"
+ },
+ "lang/reject_transformed_data.stan": {
+  "cause": "Exception: user-specified rejection (in 'reject_transformed_data.stan', line 3, column 2 to column 37)",
+  "status": "data_rejected"
+ },
+ "lang/reject_transformed_parameters.stan": {
+  "cause": "Exception: user-specified rejection (in 'reject_transformed_parameters.stan', line 6, column 2 to column 37)",
+  "status": "rejected_both"
+ },
+ "laplace_deriv_check.stan": {
+  "cause": "stanli's write_array cannot resolve the user function ll_function passed to a laplace call ('unknown variable ll_function'); CmdStan's write_array returns values.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "map_rect.stan": {
+  "cause": "assignment width mismatch for y_hat_tp1",
+  "status": "unsupported"
+ },
+ "min-max-types.stan": {
+  "cause": "min/max expression surface stays on WaInterp",
+  "status": "unsupported"
+ },
+ "model/domain_fail.stan": {
+  "cause": "log_prob returns NaN",
+  "status": "rejected_both"
+ },
+ "ode-int-segments.stan": {
+  "cause": "segment(ts, 0, 0) is an empty segment, which Stan Math accepts; stanli rejects i = 0 even when n = 0.",
+  "status": "one_side_threw"
+ },
+ "ode-nested-quotes.stan": {
+  "cause": "Exception: integrate_ode_rk45: times[1] is nan, but must be finite! (in 'ode-nested-quotes.stan', line 14, column 2 to line 15, column 62)",
+  "status": "data_rejected"
+ },
+ "ode/ode_adjoint_test_model.stan": {
+  "cause": "assignment width mismatch for z",
+  "status": "unsupported"
+ },
+ "ode_good.stan": {
+  "cause": "Exception: integrate_ode_rk45: times is not a valid sorted vector. The element at 2 is 2.8082, but should be greater than or equal to the previous element, 5.38018 (in 'ode_good.stan', line 28, column 2 to line 34, column 31)",
+  "status": "rejected_both"
+ },
+ "overloading/dae_overloaded.stan": {
+  "cause": "runtime-control region: dae: unknown residual chem_dae",
+  "status": "unsupported"
+ },
+ "overloading/minimum_promotion.stan": {
+  "cause": "unsupported expression",
+  "status": "unsupported"
+ },
+ "overloading/reduce_sum_ordering.stan": {
+  "cause": "A partial sum function calls reduce_sum on itself; the recursion never ends, and CmdStan overflows its stack while loading data.",
+  "status": "cmdstan_crashed"
+ },
+ "overloading/sir_overloaded_odes.stan": {
+  "cause": "ode_rk45_tol: unknown right-hand side simple_SIR",
+  "status": "unsupported"
+ },
+ "overloading/stan_math.stan": {
+  "cause": "unsupported statement function (UserDefined to_vector FnPlain)",
+  "status": "unsupported"
+ },
+ "parser-generator/cholesky_cov_transform_data_block.stan": {
+  "cause": "Exception: cholesky_cov_transform_data_block_model_namespace::cholesky_cov_transform_data_block_model: cfcov_54 is not lower triangular; cfcov_54[1,2]=nan (in 'cholesky_cov_transform_data_block.stan', line 2, column 2 to column 36)",
+  "status": "data_rejected"
+ },
+ "parser-generator/cholesky_cov_transform_param_block.stan": {
+  "cause": "Exception: cholesky_cov_transform_param_block_model_namespace::log_prob: cfcov_54 is not lower triangular; cfcov_54[1,2]=nan (in 'cholesky_cov_transform_param_block.stan', line 2, column 2 to column 36)",
+  "status": "rejected_both"
+ },
+ "parser-generator/data_qualifier_scope_xformed_data.stan": {
+  "cause": "Exception: solve_powell: size of the algebraic system's output (2) and size of the vector of unknowns, x, (1) must match in size (in 'data_qualifier_scope_xformed_data.stan', line 15, column 4 to column 73)",
+  "status": "data_rejected"
+ },
+ "parser-generator/multidim_var_all_ar45_mat23.stan": {
+  "cause": "unsupported statement function (UserDefined bar FnPlain)",
+  "status": "unsupported"
+ },
+ "parser-generator/multidim_var_gen_qs_ar45_mat23.stan": {
+  "cause": "Both reject a NaN in a bounded generated quantity; CmdStan names the element 'ar_mat[1, 1][1, 1]', stanli prints only 'ar_mat'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
+ "parser-generator/multidim_var_transform_data_ar45_mat23.stan": {
+  "cause": "Both reject a NaN in bounded transformed data; CmdStan names the element 'ar_mat[1, 1][1, 1]', stanli prints only 'ar_mat'.",
+  "status": "data_message_mismatch"
+ },
+ "parser-generator/multidim_var_transform_param_ar45_mat23.stan": {
+  "cause": "Both reject a NaN in a bounded transformed parameter; CmdStan names the element 'ar_mat[1, 1][1, 1]', stanli prints only 'ar_mat'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
+ "parser-generator/ode_control.stan": {
+  "cause": "In write_array CmdStan rejects unsorted ODE output times; stanli first fails with 'ODE maximum steps must be one integer', so it never reaches the times check.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
+ "parser-generator/prim_var_transformed_data_block.stan": {
+  "cause": "Exception: prim_var_transformed_data_block_model_namespace::prim_var_transformed_data_block_model: p1 is -2147483648, but must be greater than or equal to 0.000000 (in 'prim_var_transformed_data_block.stan', line 2, column 2 to column 27)",
+  "status": "data_rejected"
+ },
+ "parser-generator/prim_var_transformed_param_block.stan": {
+  "cause": "Exception: prim_var_transformed_param_block_model_namespace::log_prob: ar_p2[1] is nan, but must be greater than or equal to 0.000000 (in 'prim_var_transformed_param_block.stan', line 3, column 2 to column 40)",
+  "status": "rejected_both"
+ },
+ "print_indexing.stan": {
+  "cause": "no data",
+  "status": "data_unavailable"
+ },
+ "promotion/array_promotion.stan": {
+  "cause": "unsupported expression",
+  "status": "unsupported"
+ },
+ "promotion/complex_functions.stan": {
+  "cause": "CmdStan's write_array throws an index error before reaching norm(complex); stanli's write_array stops earlier because it does not support norm of a complex argument.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
+ "promotion/newton_x_r_type.stan": {
+  "cause": "Exception: solve_newton: initial guess[1] is nan, but must be finite! (in 'newton_x_r_type.stan', line 31, column 2 to column 70)",
+  "status": "rejected_both"
+ },
+ "promotion/newton_x_r_type_control.stan": {
+  "cause": "Exception: solve_newton: initial guess[1] is nan, but must be finite! (in 'newton_x_r_type_control.stan', line 31, column 2 to column 86)",
+  "status": "rejected_both"
+ },
+ "promotion/return_position.stan": {
+  "cause": "complex numbers are not supported yet (in variable c) | in: (SComplexVector ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "promotion/x_r_type.stan": {
+  "cause": "Exception: solve_powell: initial guess[1] is nan, but must be finite! (in 'x_r_type.stan', line 31, column 2 to column 63)",
+  "status": "rejected_both"
+ },
+ "promotion/x_r_type_control.stan": {
+  "cause": "Exception: solve_powell: initial guess[1] is nan, but must be finite! (in 'x_r_type_control.stan', line 31, column 2 to column 79)",
+  "status": "rejected_both"
+ },
+ "runtime_errors/size_mismatch_data.stan": {
+  "cause": "Exception: matrix assign columns: assigning variable td_m23 (3) and right hand side columns (4) must match in size (in 'size_mismatch_data.stan', line 3, column 2 to column 52)",
+  "status": "data_rejected"
+ },
+ "runtime_errors/size_mismatch_fun.stan": {
+  "cause": "A function local matrix[2,3] is assigned a 2x4 value. Plain stanc's C++ checks the size and CmdStan throws 'matrix assign columns'; stanc --O1, whose MIR stanli lowers, leaves the local empty, so stanli's assignment takes any size.",
+  "status": "one_side_threw"
+ },
+ "runtime_errors/size_mismatch_gq.stan": {
+  "cause": "stanli's write_array does not check that a generated quantities matrix[2,3] declared from a 2x4 literal has the declared size; CmdStan throws 'matrix assign columns'.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "runtime_errors/size_mismatch_gq2.stan": {
+  "cause": "Both throw on a size mismatch in +, but stanli's message is 'Plus__: incompatible logical views' where CmdStan says 'add: m1 (2, 3) and m2 (2, 2) must match in size'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
+ "runtime_errors/size_mismatch_lp_local.stan": {
+  "cause": "Plain stanc sizes the local before assigning it, so CmdStan's assign checks the size and throws; stanc --O1, whose MIR stanli lowers, leaves the local empty and Stan's assign skips the check for an empty left side.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "runtime_errors/size_mismatch_tparam.stan": {
+  "cause": "assignment width mismatch for tp_m23",
+  "status": "unsupported"
+ },
+ "solve_newton_good.stan": {
+  "cause": "Exception: solve_newton: initial guess[1] is nan, but must be finite! (in 'solve_newton_good.stan', line 26, column 2 to column 59)",
+  "status": "data_rejected"
+ },
+ "solve_powell_good.stan": {
+  "cause": "Exception: solve_powell: initial guess[1] is nan, but must be finite! (in 'solve_powell_good.stan', line 26, column 2 to column 59)",
+  "status": "data_rejected"
+ },
+ "stat_comp_benchmarks_models/one_comp_mm_elim_abs.stan": {
+  "cause": "Exception: integrate_ode_bdf: times is not a valid sorted vector. The element at 2 is 2.71361, but should be greater than or equal to the previous element, 4.16731 (in 'one_comp_mm_elim_abs.stan', line 49, column 4 to line 50, column 31)",
+  "status": "rejected_both"
+ },
+ "target.stan": {
+  "cause": "target() in transformed parameters: CmdStan's write_array evaluates it as 0, stanli's write_array throws 'target() is unavailable in this context'.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "target_good.stan": {
+  "cause": "target() in transformed parameters: CmdStan's write_array evaluates it as 0, stanli's write_array throws 'target() is unavailable in this context'.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "tuples/arrays-tuples-nested.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/basic_unpacking.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/infer_tuple_ad.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/nested_unpacking.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/onepl_expr.stan": {
+  "cause": "unsupported function kind for FnMakeTuple | in: (UTuple (UReal))",
+  "status": "unsupported"
+ },
+ "tuples/onepl_type2.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple (SReal))",
+  "status": "unsupported"
+ },
+ "tuples/overloading.stan": {
+  "cause": "mir: indistinguishable overloads of f",
+  "status": "unsupported"
+ },
+ "tuples/qr_unpack.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/simple.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple (SReal SInt))",
+  "status": "unsupported"
+ },
+ "tuples/simple2.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple ((SArray SReal ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SInt))",
+  "status": "unsupported"
+ },
+ "tuples/simple3.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple ((SArray (SArray SReal ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SInt))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-constraints-data.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-constraints-params.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-dataonly.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-dataonly2.stan": {
+  "cause": "unsupported expression | in: (TupleProjection ((pattern (FunApp (CompilerInternal FnMakeTuple) (((pattern (FunApp (CompilerInternal FnMakeArray) (((pattern (Lit Real 1.0)) (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))))) (meta ((type_ (UArray UReal)) (loc <opaque>) (adlevel DataOnly)))) ",
+  "status": "unsupported"
+ },
+ "tuples/tuple-foreach.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-full.stan": {
+  "cause": "missing data for ds; the data must give every variable in the data block",
+  "status": "unsupported"
+ },
+ "tuples/tuple-ix-assign.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple (SInt SInt))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-ix-assign2.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple ((SArray SInt ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SInt))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-ix-assign3.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-ix-assign4.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple ((SArray (STuple (SInt (SArray SReal ((pattern (Lit Int 100)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))) ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SInt))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-nested-param.stan": {
+  "cause": "this variable type is not supported yet (in variable ps) | in: (STuple (SReal SReal))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-params.stan": {
+  "cause": "this variable type is not supported yet (in variable ps) | in: (STuple (SReal SReal))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-promotion.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-templating.stan": {
+  "cause": "stanli write_array unsupported: unsupported expression | in: (TupleProjection ((pattern (FunApp (CompilerInternal FnMakeTuple) (((pattern (FunApp (StanLib Plus__ FnPlain AoS) (((pattern (Var m1)) (meta ((type_ UMatrix) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var m2)) (meta ((type_ UMatrix) (",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "tuples/tuple_copying.stan": {
+  "cause": "this variable type is not supported yet (in variable data_tuple) | in: (STuple ((SMatrix AoS ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SArray SReal ((pattern (Lit Int 10)) (meta ((",
+  "status": "unsupported"
+ },
+ "tuples/tuple_exprs.stan": {
+  "cause": "stanli write_array unsupported: unsupported function FnMakeTuple | in: (UTuple ((UTuple (UComplex UInt)) (UArray UInt) UInt))",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "tuples/tuple_hof.stan": {
+  "cause": "missing data for data_m; the data must give every variable in the data block",
+  "status": "unsupported"
+ },
+ "tuples/tuple_lpmf.stan": {
+  "cause": "unsupported expression | in: (TupleProjection ((pattern (FunApp (CompilerInternal FnMakeTuple) (((pattern (Lit Int 1)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))) (meta ((type_ (UTuple (UInt UInt))) (loc ",
+  "status": "unsupported"
+ },
+ "tuples/tuple_temporary.stan": {
+  "cause": "stanli write_array unsupported: unsupported function FnMakeTuple | in: (UTuple (UReal UMatrix))",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "tuples/unpack_promote.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "unnormalized_math_fun_lpdf.stan": {
+  "cause": "gaussian_dlm_obs takes 7 arguments and an op holds 6",
+  "status": "unsupported"
+ },
+ "unnormalized_math_fun_lpmf.stan": {
+  "cause": "Exception: bernoulli_logit_glm_lpmf: Vector of dependent variables is 6, but must be in the interval [0, 1] (in 'unnormalized_math_fun_lpmf.stan', line 41, column 2 to column 50)",
+  "status": "rejected_both"
+ },
+ "validate_add_var_good.stan": {
+  "cause": "mir: unsupported or malformed FnCheck",
+  "status": "unsupported"
+ },
+ "validate_bounds_comparison.stan": {
+  "cause": "Exception: validate_bounds_comparison_model_namespace::validate_bounds_comparison_model: c is -0.104977, but must be greater than or equal to 1.000000 (in 'validate_bounds_comparison.stan', line 4, column 2 to column 52)",
+  "status": "data_rejected"
+ },
+ "validate_conditional_op_good.stan": {
+  "cause": "Exception: assign array size: assigning variable tx1 (2) and right hand side (3) must match in size (in 'validate_conditional_op_good.stan', line 79, column 2 to column 36)",
+  "status": "data_rejected"
+ },
+ "validate_jacobian_warning_good.stan": {
+  "cause": "multi_normal_lpdf: vectorized argument must be a matching vector or array of vectors",
+  "status": "unsupported"
+ },
+ "validate_validate_int_expr_good.stan": {
+  "cause": "Exception: mismatch in dimension declared and found in context; processing stage=data initialization; variable name=h; position=0; dims declared=(4,5); dims found=(5,5) (in 'validate_validate_int_expr_good.stan', line 9, column 2 to column 29)",
+  "status": "data_rejected"
+ },
+ "variational/hier_logistic.stan": {
+  "cause": "Exception: bernoulli_logit_lpmf: n[1] is 4, but must be in the interval [0, 1] (in 'hier_logistic.stan', line 20, column 2 to column 26)",
+  "status": "rejected_both"
+ },
+ "variational/hier_logistic_cp.stan": {
+  "cause": "Exception: bernoulli_logit_lpmf: n[1] is 4, but must be in the interval [0, 1] (in 'hier_logistic_cp.stan', line 23, column 2 to column 26)",
+  "status": "rejected_both"
+ },
+ "vec-expr/matrix_expr_terms.stan": {
+  "cause": "assignment width mismatch for tp_mat32",
+  "status": "unsupported"
+ },
+ "warning/data_jacobian.stan": {
+  "cause": "unsupported statement | in: (JacobianPE ((pattern (Var beta_raw)) (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "warning/integrate_ode_adams.stan": {
+  "cause": "Exception: integrate_ode_adams: times is not a valid sorted vector. The element at 3 is 2.71361, but should be greater than or equal to the previous element, 4.16731 (in 'integrate_ode_adams.stan', line 25, column 2 to column 68)",
+  "status": "rejected_both"
+ },
+ "warning/integrate_ode_bdf.stan": {
+  "cause": "Exception: integrate_ode_bdf: times is not a valid sorted vector. The element at 3 is 2.71361, but should be greater than or equal to the previous element, 4.16731 (in 'integrate_ode_bdf.stan', line 25, column 2 to column 66)",
+  "status": "rejected_both"
+ },
+ "warning/integrate_ode_rk45.stan": {
+  "cause": "Exception: integrate_ode_rk45: times is not a valid sorted vector. The element at 3 is 2.71361, but should be greater than or equal to the previous element, 4.16731 (in 'integrate_ode_rk45.stan', line 25, column 2 to column 67)",
+  "status": "rejected_both"
+ },
+ "warning/self-assign.stan": {
+  "cause": "this variable type is not supported yet (in variable tup) | in: (STuple (SReal SReal))",
+  "status": "unsupported"
+ }
+}

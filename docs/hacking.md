@@ -788,9 +788,8 @@ python3 tools/verify_refs.py deps/posteriordb --check build-rel/stanli_check --j
 
 The second command is the corpus replay: every model with a recorded reference (353 at 0.21.0), log density and
 every gradient component, compared against recorded CmdStan values.
-That is the 119 runnable posteriordb posteriors, the language
-models in [`tests/stanc3/`](../tests/stanc3/README.md), which exercise
-type and language constructs no real posterior uses, the brms
+That is the 119 runnable posteriordb posteriors, the lowering
+regressions in [`tests/regressions/`](../tests/regressions/README.md), the brms
 output in [`tests/brms/`](../tests/brms/README.md), cogmod's custom
 brms families in [`tests/cogmod/`](../tests/cogmod/README.md), ctsem's
 state-space template in [`tests/ctsem/`](../tests/ctsem/README.md), and

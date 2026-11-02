@@ -209,12 +209,12 @@ def total_sampling_median(rows):
 def compute():
     ver = json.loads((REPO / "docs" / "internal" / "artifacts" / "verification.json").read_text())
     # The same record holds three corpora, and the sentences about them
-    # say different things: posteriordb is real posteriors, tests/stanc3
-    # is language constructs no posterior happens to use, tests/brms is
+    # say different things: posteriordb is real posteriors, tests/regressions
+    # is programs that once failed to lower, tests/brms is
     # brms output. Split them here so the posteriordb numbers stay
     # posteriordb numbers.
     lang = {k: v for k, v in ver.items()
-            if (REPO / "tests" / "stanc3" / f"{k}.stan").exists()}
+            if (REPO / "tests" / "regressions" / f"{k}.stan").exists()}
     brms = {k: v for k, v in ver.items()
             if (REPO / "tests" / "brms" / f"{k}.stan").exists()}
     cogmod = {k: v for k, v in ver.items()

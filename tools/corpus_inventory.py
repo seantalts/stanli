@@ -13,7 +13,7 @@ import zipfile
 
 REPO = Path(__file__).resolve().parents[1]
 COLLECTIONS = ("all", "posteriordb", "educational", "rethinking", "brms",
-               "cogmod", "ctsem", "oncobayes2", "teaching", "stanc3")
+               "cogmod", "ctsem", "oncobayes2", "teaching", "regressions")
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ def local_cases(include_language=True):
     cases = {}
     collections = ["brms", "rethinking", "cogmod", "ctsem", "oncobayes2"]
     if include_language:
-        collections.append("stanc3")
+        collections.append("regressions")
     for collection in collections:
         for source in sorted((REPO / "tests" / collection).glob("*.stan")):
             data = source.with_suffix(".json")
@@ -84,7 +84,7 @@ def corpus_cases(pdb, collection="all", include_language=False):
     """Resolve the selected corpus, accepting a checkout or database path.
 
     PDB data remains zipped; use materialize_data for tools needing JSON.
-    Explicit stanc3 selection enables language fixtures too.
+    Explicit regressions selection enables those fixtures too.
     """
     if collection not in COLLECTIONS:
         raise ValueError(f"Unknown corpus collection: {collection}")
@@ -100,7 +100,7 @@ def corpus_cases(pdb, collection="all", include_language=False):
         _insert(cases, CorpusCase(name, pdb / "models" / "stan" / f"{name}.stan",
                                  pdb / "data" / "data" / f"{meta['data_name']}.json.zip",
                                  "posteriordb", meta))
-    for case in local_cases(include_language or collection == "stanc3").values():
+    for case in local_cases(include_language or collection == "regressions").values():
         _insert(cases, case)
     wanted = {"educational", "rethinking", "brms"} if collection == "teaching" else {collection}
     return {name: case for name, case in sorted(cases.items())

@@ -6,6 +6,9 @@ build-rel/
 # Every out-of-source tree: build-lite, build-ship, whatever a
 # measurement needs next. Named entries above are kept for clarity.
 build-*/
+# CmdStan reference binaries of tools/gen_stanc3_good_data.py and
+# tools/check_stanc3_good.py --record.
+build-stanc3-ref/
 python/stanli/_bin/
 # The conformance reference client, version-pinned separately from whatever
 # python3 the host happens to have (tools/dev_setup.sh --conformance).
@@ -29,7 +32,8 @@ tests/fixtures/*.hpp
 tests/fixtures/*.tmir.sexp
 tests/fixtures/builtin_signatures_*.stan
 tests/fixtures/density_signatures_*.stan
-tests/stanc3/*.hpp
+tests/regressions/*.hpp
+tests/stanc3_good/overrides/*.hpp
 tests/brms/*.hpp
 build-wasm/
 web/stanli.js
@@ -63,14 +67,6 @@ tests/fixtures/*.hpp
 tests/fixtures/*.o
 conformance-cache/
 
-# harnesses/model_census.py run artifacts: the invented data and CmdStan
-# reference values it caches content-addressed (once per model ever), and
-# the report it writes. The cache is a rerun's determinism, not a source.
-# No trailing slash: a worktree usually symlinks the cache in from a
-# sibling checkout rather than growing its own, and a `dir/` rule does not
-# match a symlink.
-model-census-cache
-model-census.json
 /tests/function_coverage/*.hpp
 /tests/function_coverage/container_flow/*.hpp
 tests/oncobayes2/*.hpp
