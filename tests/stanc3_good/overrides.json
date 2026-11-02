@@ -29,6 +29,10 @@
   "data": "overrides/declare-define-multi.json",
   "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
  },
+ "function-signatures/math/matrix/csr_extract_v.stan": {
+  "data": "overrides/csr_extract_v.json",
+  "note": "Generated dense data gives csr_extract_v twelve nonzeros where the model declares five; this matrix has five."
+ },
  "parser-generator/cholesky_cov_param_block.stan": {
   "copy": "overrides/cholesky_cov_param_block.stan",
   "data": "overrides/cholesky_cov_param_block.json",
