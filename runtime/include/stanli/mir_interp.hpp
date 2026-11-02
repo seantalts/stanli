@@ -30,6 +30,7 @@
 #include <stanli/function_registry.hpp>
 #include <stanli/extrema_grouping.hpp>
 #include <stanli/mir_message.hpp>
+#include <stanli/assign_size.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/program.hpp>
@@ -114,15 +115,6 @@ class MirInterp {
   // extents such as array[0] vector[3].
   void set_declared_dims(const std::string& name, std::vector<int64_t> dims) {
     decl_dims_[name] = std::move(dims);
-  }
-
-  // Variables that hold their declared size for their whole life, as the
-  // generated model's transformed data members do. stanc's --O1 MIR leaves a
-  // local or generated quantity Uninit when its first use assigns all of it,
-  // and the C++ for that is an empty Eigen object that takes any size, so
-  // only these are checked.
-  void set_sized_variables(std::set<std::string> names) {
-    sized_variables_ = std::move(names);
   }
 
   Value* find(const std::string& n) {
@@ -240,6 +232,8 @@ class MirInterp {
           probe_failed_ = true;
           return r;
         }
+        if (funs_.count(e.name))
+          fail("unsupported call taking the function " + e.name, e.raw);
         fail("unknown variable " + e.name + " (type " + e.type_ + ")", e.raw);
       }
       case mir::Expr::TernaryIf: {
@@ -290,9 +284,7 @@ class MirInterp {
         declared_dims.reserve(st.decl_type.dims.size());
         for (const auto& d : st.decl_type.dims)
           declared_dims.push_back(as_int(d));
-        const AssignShape shape = sized_variables_.count(st.decl_id)
-                                      ? assign_shape(st.decl_type)
-                                      : AssignShape{};
+        const AssignShape shape = assign_shape(st.decl_type);
         if (shape.leaf == AssignLeaf::None)
           assign_shape_.erase(st.decl_id);
         else
@@ -1094,17 +1086,11 @@ class MirInterp {
   std::map<std::string, Value> env_;
   std::map<std::string, std::vector<int64_t>> decl_dims_;
 
-  // stan::model::assign checks a sized destination against the value it
-  // receives, with CmdStan's messages. An array compares its size and then
-  // each element's, a vector or matrix compares columns and then rows, and a
-  // destination with no elements accepts anything.
-  enum class AssignLeaf { None, Scalar, Vector, RowVector, Matrix };
   struct AssignShape {
     AssignLeaf leaf = AssignLeaf::None;
     size_t array_levels = 0;
   };
   std::map<std::string, AssignShape> assign_shape_;
-  std::set<std::string> sized_variables_;
 
   static AssignLeaf assign_leaf(const std::string& base) {
     if (base == "SInt" || base == "SReal") return AssignLeaf::Scalar;
@@ -1135,48 +1121,17 @@ class MirInterp {
     const auto it = assign_shape_.find(name);
     if (it == assign_shape_.end()) return;
     const AssignShape& shape = it->second;
-    const size_t levels = shape.array_levels;
-    const size_t rank = shape.leaf == AssignLeaf::Matrix   ? 2
-                        : shape.leaf == AssignLeaf::Scalar ? 0
-                                                           : 1;
-    if (dst.size() != levels + rank) return;
-    const auto mismatch = [&](const std::string& what, int64_t want,
-                              const std::string& rhs, int64_t got) {
-      if (want == got) return;
-      throw std::invalid_argument(
-          size_match_message(what, "assigning variable " + name, want,
-                             "right hand side" + rhs, got));
-    };
-    // The value's dims carry the same array levels; a vector's own length is
-    // its element count, whatever dims it carries.
+    // A vector's own length is its element count, whatever dims it carries.
     std::vector<int64_t> src = v.dims;
-    if (src.empty())
-      src = {static_cast<int64_t>(std::max(v.r.size(), v.i.size()))};
-    // A value whose dims do not carry every array level says nothing about
-    // the element sizes, so it is not checked at all.
-    if (levels > 0 && src.size() != dst.size()) return;
-    for (size_t d = 0; d < levels; ++d) {
-      if (dst[d] == 0) return;
-      mismatch("assign array size", dst[d], "", src[d]);
-    }
-    if (rank == 0) return;
-    int64_t leaf_size = 1;
-    for (size_t d = levels; d < dst.size(); ++d) leaf_size *= dst[d];
-    if (leaf_size == 0) return;
-    if (shape.leaf == AssignLeaf::Matrix) {
-      if (src.size() != levels + 2) return;
-      mismatch("matrix assign columns", dst[levels + 1], " columns",
-               src[levels + 1]);
-      mismatch("matrix assign rows", dst[levels], " rows", src[levels]);
-      return;
-    }
-    const int64_t got =
-        levels == 0 ? static_cast<int64_t>(std::max(v.r.size(), v.i.size()))
-                    : src[levels];
-    if (shape.leaf == AssignLeaf::Vector)
-      mismatch("vector assign rows", leaf_size, " rows", got);
-    else
-      mismatch("vector assign columns", leaf_size, " columns", got);
+    const int64_t count =
+        static_cast<int64_t>(std::max(v.r.size(), v.i.size()));
+    if (src.empty() ||
+        (shape.array_levels == 0 && (shape.leaf == AssignLeaf::Vector ||
+                                     shape.leaf == AssignLeaf::RowVector)))
+      src = {count};
+    const std::string message =
+        assign_size_mismatch(name, shape.leaf, shape.array_levels, dst, src);
+    if (!message.empty()) throw std::invalid_argument(message);
   }
 
   int udf_depth_ = 0;
@@ -1789,8 +1744,12 @@ class MirInterp {
         registered != nullptr && registered->builtin() != nullptr
             ? registered->builtin()
             : nullptr;
-    if (mir::stateful_intrinsic_kind(e))
+    if (mir::stateful_intrinsic_kind(e)) {
+      if constexpr (std::is_same_v<T, double>) {
+        if (hooks_.fun && hooks_.fun(*this, e, &r)) return r;
+      }
       fail("target() is unavailable in this context", e.raw);
+    }
     if (const auto value = mir::nullary_constant(e)) {
       r.r = {T(*value)};
       return r;

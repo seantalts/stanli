@@ -1076,35 +1076,29 @@ Lowering::Val Lowering::checked_binding(const Val& v, int64_t len,
       std::vector<double>(len, std::numeric_limits<double>::quiet_NaN()));
   return placeholder;
 }
-// Stan's assign checks an array's outer size and an Eigen value's columns,
-// then rows. It replaces the elements of an array wholesale and skips the
-// check for an empty variable, so those mismatches are not errors there.
+// stan::model::assign's size check, which throws at every evaluation that
+// reaches the assignment.
 std::optional<std::string> Lowering::assign_size_error(
     const Val& v, int64_t len, const SlotInfo& expected,
     const std::string& name) {
-  const int64_t got = g.slots[v.slot].len;
-  const std::string lhs = "assigning variable " + name;
-  if (is_array(expected)) {
-    if (!is_array(v.si)) return std::nullopt;
-    const int64_t want = array_shape(expected).dims.at(0);
-    const int64_t have = array_shape(v.si).dims.at(0);
-    if (want == 0 || want == have) return std::nullopt;
-    return size_match_message("assign array size", lhs, want, "right hand side",
-                              have);
-  }
-  const bool eigen =
-      is_vector(expected) || is_row_vector(expected) || is_matrix(expected);
-  if (!eigen || len == 0 || is_array(v.si) || is_scalar(v)) return std::nullopt;
-  const LogicalDims want = logical_dims(expected, len, "assignment " + name);
-  const LogicalDims have = logical_dims(v.si, got, "assignment " + name);
-  const std::string object = is_matrix(expected) ? "matrix" : "vector";
-  if (want.cols != have.cols)
-    return size_match_message(object + " assign columns", lhs, want.cols,
-                              "right hand side columns", have.cols);
-  if (want.rows != have.rows)
-    return size_match_message(object + " assign rows", lhs, want.rows,
-                              "right hand side rows", have.rows);
-  return std::nullopt;
+  const auto dims = [&](const SlotInfo& si, int64_t n) {
+    if (is_array(si)) return array_shape(si).dims;
+    if (is_matrix(si)) return std::vector<int64_t>{si.rows, si.cols};
+    if (si.kind == ViewKind::Flat) return std::vector<int64_t>{};
+    return std::vector<int64_t>{n};
+  };
+  const ViewKind kind =
+      is_array(expected) ? array_shape(expected).leaf : expected.kind;
+  const AssignLeaf leaf = kind == ViewKind::Matrix      ? AssignLeaf::Matrix
+                          : kind == ViewKind::Vector    ? AssignLeaf::Vector
+                          : kind == ViewKind::RowVector ? AssignLeaf::RowVector
+                                                        : AssignLeaf::Scalar;
+  const std::vector<int64_t> dst = dims(expected, len);
+  const std::string message =
+      assign_size_mismatch(name, leaf, dst.size() - leaf_rank(kind), dst,
+                           dims(v.si, g.slots[v.slot].len));
+  if (message.empty()) return std::nullopt;
+  return message;
 }
 void Lowering::emit_error(MessageError error, const std::string& message) {
   auto spec = std::make_shared<MessageSpec>();

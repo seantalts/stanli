@@ -388,11 +388,30 @@ void solve_bwd_t(KernelCtx& ctx) {
   const FMat<BR, BC> g = FCMap<BR, BC>(ctx.out_adj_vec.data, br, bc);
   FMat<N, N> adj_a = FMat<N, N>::Zero(n, n);
   FMat<BR, BC> adj_b = FMat<BR, BC>::Zero(br, bc);
-  if constexpr (Left) {
+  const double* qr_scratch =
+      (ctx.variant & 1u) && n > 0 ? ctx.scratch : nullptr;
+  if constexpr (Left && Kind == SolveKind::Plain && K == kDyn) {
+    if (ctx.variant & 2u) {
+      // mdivide_left's pullback solves a dynamic vector here. Eigen's
+      // dynamic vector triangular solve leaves a zero right-hand side zero,
+      // where the matrix and fixed-size solves divide it by a zero pivot.
+      FMat<kDyn, kDyn> adj_a_dyn = FMat<kDyn, kDyn>::Zero(n, n);
+      FMat<kDyn, 1> adj_v = FMat<kDyn, 1>::Zero(n);
+      left_adjoint<Kind, Eigen::Lower, kDyn, 1>(
+          FMat<kDyn, kDyn>(a), FMat<kDyn, 1>(x), FMat<kDyn, 1>(g), divisor_var,
+          dividend_var, divisor_var ? &adj_a_dyn : nullptr,
+          dividend_var ? &adj_v : nullptr, qr_scratch);
+      adj_a += adj_a_dyn;
+      adj_b = adj_v;
+    } else {
+      left_adjoint<Kind, Eigen::Lower, N, K>(
+          a, x, g, divisor_var, dividend_var, divisor_var ? &adj_a : nullptr,
+          dividend_var ? &adj_b : nullptr, qr_scratch);
+    }
+  } else if constexpr (Left) {
     left_adjoint<Kind, Eigen::Lower, N, K>(
         a, x, g, divisor_var, dividend_var, divisor_var ? &adj_a : nullptr,
-        dividend_var ? &adj_b : nullptr,
-        (ctx.variant & 1u) && n > 0 ? ctx.scratch : nullptr);
+        dividend_var ? &adj_b : nullptr, qr_scratch);
   } else {
     right_adjoint<Kind, N, K>(a, x, g, divisor_var, dividend_var,
                               divisor_var ? &adj_a : nullptr,

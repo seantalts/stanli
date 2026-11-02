@@ -369,17 +369,6 @@ void Lowering::bind_data(const mir::Program& p) {
       validate_data_dims(name, type);
     }
   }
-  {
-    std::set<std::string> members;
-    const auto collect = [&](const auto& self, const mir::Stmt& st) -> void {
-      if (st.kind == mir::Stmt::Decl && !input_names.count(st.decl_id))
-        members.insert(st.decl_id);
-      if (st.kind == mir::Stmt::SList)
-        for (const auto& k : st.body) self(self, k);
-    };
-    for (const auto& st : p.prepare_data) collect(collect, st);
-    td.set_sized_variables(std::move(members));
-  }
   for (const auto& st : p.prepare_data) {
     if (st.kind == mir::Stmt::Decl) {
       if (input_names.count(st.decl_id)) {
@@ -700,6 +689,8 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
   }
   Val con =
       emit_raw(opcode, ins, con_len, psi, tr_idata, jac, scalar_autodiff());
+  if (opcode == OP_CONSTRAIN_UNIT_VECTOR && !scalar_autodiff())
+    g.ops.back().variant = kUnitVectorChecksNorm;
   con.layout = owning_layout(psi);
   jac_slots.push_back(jac);
   scope[s.decl_id] = con;
@@ -707,6 +698,30 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
     out.views.push_back(parameter_view(s, con.slot, con_len));
 }
 namespace {
+
+// Whether every evaluation of the log density runs all of `s`: no branch,
+// loop, short circuit or user function decides what part of it runs.
+bool always_runs(const mir::Expr& e) {
+  if (e.kind == mir::Expr::TernaryIf || e.kind == mir::Expr::EOr ||
+      e.kind == mir::Expr::EAnd ||
+      (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined))
+    return false;
+  return std::all_of(e.args.begin(), e.args.end(),
+                     [](const mir::Expr& a) { return always_runs(a); });
+}
+
+bool always_runs(const mir::Stmt& s) {
+  if (s.kind == mir::Stmt::IfElse || s.kind == mir::Stmt::While ||
+      s.kind == mir::Stmt::For)
+    return false;
+  for (const mir::Expr* e : {&s.init, &s.rhs, &s.target})
+    if (!always_runs(*e)) return false;
+  for (const auto* exprs : {&s.lhs_idx, &s.fn_args})
+    for (const mir::Expr& e : *exprs)
+      if (!always_runs(e)) return false;
+  return std::all_of(s.body.begin(), s.body.end(),
+                     [](const mir::Stmt& c) { return always_runs(c); });
+}
 
 // Stan's var accumulator folds in source order (its 128-entry buffer carries
 // each reduced prefix into the next buffer). Carry that same prefix through
@@ -957,7 +972,22 @@ CompiledModel Lowering::run(const mir::Program& p) {
              target_terms.size(), out.views.size());
   dump("bind_data", {});
   const auto lower_time = prep.start();
-  for (const auto& s : p.log_prob) lower_stmt(s);
+  for (size_t k = 0; k < p.log_prob.size(); ++k) {
+    try {
+      lower_stmt(p.log_prob[k]);
+    } catch (const std::domain_error& e) {
+      // A statement after the parameter reads that fails while lowering
+      // and always runs fails the same way at every point in CmdStan.
+      const auto read = [](const mir::Stmt& s) {
+        return s.kind == mir::Stmt::Decl && s.read_transform;
+      };
+      if (!always_runs(p.log_prob[k]) ||
+          std::any_of(p.log_prob.begin() + k, p.log_prob.end(), read))
+        throw;
+      emit_error(MessageError::Domain, e.what());
+      break;
+    }
+  }
   prep.graph(prep_graph, "lower", lower_time, g, out.fills, target_terms.size(),
              out.views.size());
   dump("lower", {});

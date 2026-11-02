@@ -484,9 +484,18 @@ auto apply_structured(Y& y, Lp& lp, const KernelCtx& ctx) {
     return stan::math::positive_ordered_constrain(y, lp);
   else if constexpr (K == StructuredKind::CholeskyCorr)
     return stan::math::cholesky_corr_constrain(y, (int)ctx.idata[2], lp);
-  else if constexpr (K == StructuredKind::UnitVector)
-    return stan::math::unit_vector_constrain(y, lp);
-  else if constexpr (K == StructuredKind::SumToZero)
+  else if constexpr (K == StructuredKind::UnitVector) {
+    if constexpr (!std::is_same_v<stan::value_type_t<Y>, double>) {
+      return stan::math::unit_vector_constrain(y, lp);
+    } else {
+      if (values_only() || (ctx.variant & kUnitVectorChecksNorm))
+        return stan::math::unit_vector_constrain(y, lp);
+      stan::math::check_nonzero_size("unit_vector", "y", y);
+      const double SN = stan::math::dot_self(y);
+      lp -= 0.5 * SN;
+      return Eigen::VectorXd(y.array() / std::sqrt(SN));
+    }
+  } else if constexpr (K == StructuredKind::SumToZero)
     // Volume preserving: intentionally leave lp untouched.
     return stan::math::sum_to_zero_constrain(y);
   else if constexpr (K == StructuredKind::StochasticColumn)
@@ -903,11 +912,25 @@ void check_offset_multiplier_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = 0.0;
 }
 
+// lub_free's check on (y, lb, ub); either bound may be one value.
+void check_lub_free_fwd(KernelCtx& ctx) {
+  const Desc& y = ctx.in[0];
+  const Desc& lb = ctx.in[1];
+  const Desc& ub = ctx.in[2];
+  for (int64_t i = 0; i < y.len; ++i)
+    stan::math::check_bounded("lub_free", "Bounded variable", y.data[i],
+                              lb.data[lb.len == 1 ? 0 : i],
+                              ub.data[ub.len == 1 ? 0 : i]);
+  ctx.out.data[0] = 0.0;
+}
+
 }  // namespace
 
 void register_constrain_kernels() {
   register_kernel(OP_CHECK_OFFSET_MULTIPLIER,
                   Kernel{check_offset_multiplier_fwd, nullptr, nullptr});
+  register_kernel(OP_CHECK_LUB_FREE,
+                  Kernel{check_lub_free_fwd, nullptr, nullptr});
   register_kernel(OP_CONSTRAIN_OFFSET_MULT,
                   Kernel{offset_mult_fwd, offset_mult_bwd, nullptr});
   register_structured<StructuredKind::UnitVector>(OP_CONSTRAIN_UNIT_VECTOR);

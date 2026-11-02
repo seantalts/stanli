@@ -201,7 +201,8 @@ namespace stanli {
   X(OP_FAMILY_GROUPED_LPDF)           \
   X(OP_SEGMENT_SUM)                   \
   X(OP_TO_INT)                        \
-  X(OP_CHECK_OFFSET_MULTIPLIER)
+  X(OP_CHECK_OFFSET_MULTIPLIER)       \
+  X(OP_CHECK_LUB_FREE)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry
@@ -928,6 +929,7 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     case OP_CHECK_LOWER:
     case OP_CHECK_UPPER:
     case OP_CHECK_MATCHING_DIMS:
+    case OP_CHECK_LUB_FREE:
     case OP_REGION_MAP:
       return op_trait::kWholeInputPayload;
     default:
@@ -951,6 +953,7 @@ constexpr bool is_effectful_op(uint16_t opcode) {
     case OP_CHECK_LOWER:
     case OP_CHECK_UPPER:
     case OP_CHECK_OFFSET_MULTIPLIER:
+    case OP_CHECK_LUB_FREE:
     case OP_CATEGORICAL:
     case OP_ALL_INTEGER_DENSITY:
     case OP_RNG:

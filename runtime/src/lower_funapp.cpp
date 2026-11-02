@@ -336,6 +336,8 @@ std::optional<Lowering::Val> Lowering::lower_callable_transform(
     const int jac = add_slot(1, false);
     Val v = emit_raw(opcode, {raw.slot}, out_len, si, std::move(idata), jac,
                      raw.autodiff);
+    if (opcode == OP_CONSTRAIN_UNIT_VECTOR && !raw.autodiff)
+      g.ops.back().variant = kUnitVectorChecksNorm;
     v.layout = owning_layout(si);
     if (tr.direction == TransformDirection::Jacobian && !in_write_array)
       target_terms.push_back(jac);
@@ -359,8 +361,43 @@ std::optional<Lowering::Val> Lowering::lower_callable_transform(
     ins.push_back(v.slot);
   }
 
-  if (tr.direction == TransformDirection::Unconstrain)
-    return free_transform(tr.opcode, a, si, n);
+  if (tr.direction == TransformDirection::Unconstrain) {
+    // Stan Math's lb_free and ub_free are the identity against an infinite
+    // bound, and lub_free with one infinite bound is the other one-sided
+    // transform. A bound known now decides which applies.
+    const auto infinite = [&](size_t k, double inf) -> std::optional<bool> {
+      const DataMap::Entry* bound = actuals.at(k).observation();
+      if (bound == nullptr) return false;
+      const auto hits = std::count(bound->r.begin(), bound->r.end(), inf);
+      if (hits == 0) return false;
+      if (hits == (long)bound->r.size()) return true;
+      return std::nullopt;
+    };
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    uint16_t opcode = tr.opcode;
+    std::optional<bool> lb_inf = false, ub_inf = false;
+    if (opcode == OP_CONSTRAIN_LOWER) lb_inf = infinite(1, -inf);
+    if (opcode == OP_CONSTRAIN_UPPER) ub_inf = infinite(1, inf);
+    if (opcode == OP_CONSTRAIN_LU) {
+      lb_inf = infinite(1, -inf);
+      ub_inf = infinite(2, inf);
+    }
+    if (!lb_inf || !ub_inf)
+      fail(e.name +
+               ": a bound that is infinite for some elements only is "
+               "unsupported",
+           e.raw);
+    if (opcode == OP_CONSTRAIN_LU && *lb_inf != *ub_inf) {
+      if (*lb_inf)
+        a.erase(a.begin() + 1);
+      else
+        a.pop_back();
+      opcode = *lb_inf ? OP_CONSTRAIN_UPPER : OP_CONSTRAIN_LOWER;
+    } else if (*lb_inf || *ub_inf) {
+      return a[0];
+    }
+    return free_transform(opcode, a, si, n);
+  }
   // The declaration kernels, unchanged: they carry the arithmetic that was
   // measured against stan-math's rev overloads, which composing exp,
   // inv_logit, and fma out of the elementwise ops would not reproduce.
@@ -392,12 +429,24 @@ Lowering::Val Lowering::free_transform(uint16_t opcode,
     return with_layout(emit_value(op, {x}, g.slots[x.slot].len, x.si),
                        elementwise_layout({x}));
   };
+  const auto check = [&](uint16_t op, const char* name) {
+    auto spec = std::make_shared<BoundCheckSpec>();
+    spec->name = name;
+    spec->bound_is_scalar = g.slots[a[1].slot].len == 1;
+    spec->shapes_match = true;
+    (void)emit_value(op, {a[0], a[1]}, 1);
+    g.ops.back().udata = spec.get();
+    g.udata_pool.push_back(std::move(spec));
+  };
   switch (opcode) {
     case OP_CONSTRAIN_LOWER:  // lb_free: log(y - lb)
+      check(OP_CHECK_LOWER, "lb_free: Lower bounded variable");
       return un(OP_LOGV, elt(OP_SUB, a[0], a[1]));
     case OP_CONSTRAIN_UPPER:  // ub_free: log(ub - y)
+      check(OP_CHECK_UPPER, "ub_free: Upper bounded variable");
       return un(OP_LOGV, elt(OP_SUB, a[1], a[0]));
     case OP_CONSTRAIN_LU:  // lub_free: logit((y - lb) / (ub - lb))
+      (void)emit_value(OP_CHECK_LUB_FREE, {a[0], a[1], a[2]}, 1);
       return un(OP_LOGIT,
                 elt(OP_DIV, elt(OP_SUB, a[0], a[1]), elt(OP_SUB, a[2], a[1])));
     default:  // offset_multiplier_free: (y - mu) / sigma
@@ -950,11 +999,14 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
   if (const auto intrinsic = mir::stateful_intrinsic_kind(e)) {
     switch (*intrinsic) {
       case mir::StatefulIntrinsicKind::Target: {
-        if (in_write_array)
-          fail("target() is unavailable in write_array", e.raw);
+        // CmdStan's write_array accumulates from lp__ = 0 without the
+        // Jacobian.
         SlotInfo si;
-        si.param_free = target_terms.empty() && jac_slots.empty();
-        return {current_target_slot(), scalar_autodiff(), si};
+        si.param_free =
+            target_terms.empty() && (in_write_array || jac_slots.empty());
+        return {
+            in_write_array ? reduce_terms(target_terms) : current_target_slot(),
+            scalar_autodiff(), si};
       }
     }
   }

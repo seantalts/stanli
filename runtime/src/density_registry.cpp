@@ -302,9 +302,16 @@ DensityCallPlan density_call_plan(
     int64_t lanes = 1;
     if (spec.glm_layout)
       lanes = matrix_dimensions(spec.glm_matrix_arg, true).first;
-    else
-      for (const DensityArgumentShape& shape : real_shapes)
+    else {
+      // Stan Math returns 0 when every container argument is empty.
+      int64_t widest = -1;
+      for (const DensityArgumentShape& shape : real_shapes) {
         lanes = std::max(lanes, shape.storage_size);
+        if (shape.container != FunctionContainerKind::Scalar)
+          widest = std::max(widest, shape.storage_size);
+      }
+      if (widest == 0) plan.idata.clear();
+    }
     if (lanes > 1) {
       const int outcome = plan.idata[0];
       plan.idata.assign(static_cast<size_t>(lanes), outcome);
