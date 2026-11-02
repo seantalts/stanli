@@ -1144,9 +1144,11 @@ class MirInterp {
     std::vector<int64_t> src = v.dims;
     if (src.empty())
       src = {static_cast<int64_t>(std::max(v.r.size(), v.i.size()))};
+    // A value whose dims do not carry every array level says nothing about
+    // the element sizes, so it is not checked at all.
+    if (levels > 0 && src.size() != dst.size()) return;
     for (size_t d = 0; d < levels; ++d) {
       if (dst[d] == 0) return;
-      if (d >= src.size()) return;
       mismatch("assign array size", dst[d], "", src[d]);
     }
     if (rank == 0) return;
@@ -1160,13 +1162,9 @@ class MirInterp {
       mismatch("matrix assign rows", dst[levels], " rows", src[levels]);
       return;
     }
-    int64_t got = 1;
-    if (levels == 0) {
-      got = static_cast<int64_t>(std::max(v.r.size(), v.i.size()));
-    } else {
-      if (src.size() != levels + 1) return;
-      got = src[levels];
-    }
+    const int64_t got =
+        levels == 0 ? static_cast<int64_t>(std::max(v.r.size(), v.i.size()))
+                    : src[levels];
     if (shape.leaf == AssignLeaf::Vector)
       mismatch("vector assign rows", leaf_size, " rows", got);
     else
