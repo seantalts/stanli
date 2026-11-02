@@ -405,7 +405,8 @@ class MirInterp {
         if (st.lhs_idx.size() == 1 && st.lhs_idx[0].name == "IndexAll") {
           if (en->dims.empty())
             fail("full-span assignment needs a container", st.raw);
-          if (assigns_to_array(st.lhs)) check_assign_size(st.lhs, en->dims, v);
+          if (assign_shape_.count(st.lhs))
+            check_assign_size(st.lhs, en->dims, v);
           if (v.r.size() != en->r.size())
             fail("full-span assignment size mismatch", st.raw);
           if (v.dims != en->dims)
@@ -885,7 +886,7 @@ class MirInterp {
       shapes.reserve(values.size());
       for (size_t k = 0; k < values.size(); ++k)
         shapes.push_back(function_argument_shape(e.args[k], values[k]));
-      layout = builtin_layout(spec, shapes, e.name);
+      layout = builtin_layout(spec, shapes, e.name, interpreter_autodiff(e));
     } catch (const std::invalid_argument& error) {
       fail(builtin_error_message(e.name, error), e.raw);
     }
@@ -986,7 +987,7 @@ class MirInterp {
         shapes.push_back(function_argument_shape(e.args[0], a));
         if (spec.arity == 2)
           shapes.push_back(function_argument_shape(e.args[1], b));
-        (void)builtin_layout(spec, shapes, e.name);
+        (void)builtin_layout(spec, shapes, e.name, interpreter_autodiff(e));
       } catch (const std::invalid_argument& error) {
         fail(builtin_error_message(e.name, error), e.raw);
       }
@@ -1143,6 +1144,10 @@ class MirInterp {
     shape.leaf = leaf;
     shape.array_levels = t.dims.size() - rank;
     return shape;
+  }
+
+  static bool interpreter_autodiff(const mir::Expr& call) {
+    return !std::is_same_v<T, double> && mir::any_argument_active(call);
   }
 
   bool assigns_to_array(const std::string& name) const {
@@ -1306,6 +1311,24 @@ class MirInterp {
       default:
         return "array[uni, ...] index";
     }
+  }
+
+  // Stan Math's label for a multi, range or open-ended selector at dimension
+  // `dim` of the read `e`; `upper` picks the end of a range. Null where the
+  // container is a matrix and the generic message stays.
+  static const char* selector_read_label(const mir::Expr& e, size_t dim,
+                                         const std::string& index,
+                                         bool upper = false) {
+    const mir::UnsizedView& base = e.args[0].unsized;
+    if (dim < base.depth || base.leaf == mir::UnsizedLeaf::Unknown ||
+        base.leaf == mir::UnsizedLeaf::Int ||
+        base.leaf == mir::UnsizedLeaf::Real)
+      return "array[..., ...] index";
+    if (base.leaf == mir::UnsizedLeaf::Matrix) return nullptr;
+    if (index == "IndexMulti") return "vector[multi] indexing";
+    if (index == "IndexUpfrom") return "vector[min] indexing";
+    return upper ? "vector[min_max] max indexing"
+                 : "vector[min_max] min indexing";
   }
 
   static double val(const T& x) { return stan::math::value_of(x); }
@@ -1746,7 +1769,8 @@ class MirInterp {
       r.dims = {(int64_t)n};
       for (size_t k = 0; k < n; ++k) {
         const long p = k < ix.i.size() ? ix.i[k] : (long)val(ix.r.at(k));
-        bounds(p, (int64_t)base.r.size(), e);
+        bounds(p, (int64_t)base.r.size(), e,
+               selector_read_label(e, 0, "IndexMulti"));
         if (probe_failed_) return r;
         r.r.push_back(base.r.at((size_t)(p - 1)));
         if (base.is_int) r.i.push_back(base.i.at((size_t)(p - 1)));
@@ -1759,9 +1783,11 @@ class MirInterp {
       const long a = as_int(e.args[1].args[0]);
       const long b = as_int(e.args[1].args[1]);
       if (b >= a) {
-        bounds(a, (int64_t)base.r.size(), e);
+        bounds(a, (int64_t)base.r.size(), e,
+               selector_read_label(e, 0, "IndexBetween"));
         if (probe_failed_) return r;
-        bounds(b, (int64_t)base.r.size(), e);
+        bounds(b, (int64_t)base.r.size(), e,
+               selector_read_label(e, 0, "IndexBetween", true));
         if (probe_failed_) return r;
       }
       r.is_int = base.is_int;
@@ -1848,7 +1874,7 @@ class MirInterp {
             const long i = k < positions.i.size()
                                ? positions.i[k]
                                : static_cast<long>(val(positions.r.at(k)));
-            bounds(i, extent, e);
+            bounds(i, extent, e, selector_read_label(e, d, index.name));
             if (probe_failed_) return r;
             selected[d].push_back(i - 1);
           }
@@ -1856,16 +1882,16 @@ class MirInterp {
           const long lo = as_int(index.args[0]);
           const long hi = as_int(index.args[1]);
           if (hi >= lo) {
-            bounds(lo, extent, e);
+            bounds(lo, extent, e, selector_read_label(e, d, index.name));
             if (probe_failed_) return r;
-            bounds(hi, extent, e);
+            bounds(hi, extent, e, selector_read_label(e, d, index.name, true));
             if (probe_failed_) return r;
           }
           selected[d].reserve(static_cast<size_t>(hi >= lo ? hi - lo + 1 : 0));
           for (long i = lo; i <= hi; ++i) selected[d].push_back(i - 1);
         } else if (index.name == "IndexUpfrom") {
           const long lo = as_int(index.args[0]);
-          bounds(lo, extent, e);
+          bounds(lo, extent, e, selector_read_label(e, d, index.name));
           if (probe_failed_) return r;
           selected[d].reserve(static_cast<size_t>(extent - lo + 1));
           for (long i = lo; i <= extent; ++i) selected[d].push_back(i - 1);
@@ -1947,7 +1973,8 @@ class MirInterp {
       try {
         for (size_t k = 0; k < values.size(); ++k)
           shapes.push_back(function_argument_shape(e.args[k], values[k]));
-        return builtin_layout(*builtin, shapes, e.name);
+        return builtin_layout(*builtin, shapes, e.name,
+                              interpreter_autodiff(e));
       } catch (const std::invalid_argument& error) {
         fail(builtin_error_message(e.name, error), e.raw);
       }
@@ -2304,6 +2331,24 @@ class MirInterp {
       Value o;
       size_t n = 1;
       bool have_container = false;
+      const Value* operands[] = {&a, &b, &c};
+      const auto check_pair = [&](size_t i, size_t j) {
+        if (is_scalar(*operands[i]) || is_scalar(*operands[j]) ||
+            (operands[i]->dims == operands[j]->dims &&
+             operands[i]->r.size() == operands[j]->r.size()))
+          return;
+        fail(matrix_dims_mismatch_message(
+                 "fma", std::string(1, "xyz"[i]),
+                 function_argument_shape(e.args[i], *operands[i]),
+                 std::string(1, "xyz"[j]),
+                 function_argument_shape(e.args[j], *operands[j])),
+             e.raw);
+      };
+      check_pair(0, 1);
+      if (!is_scalar(a) && !is_scalar(c))
+        check_pair(0, 2);
+      else
+        check_pair(1, 2);
       for (const Value* x : {&a, &b, &c}) {
         if (is_scalar(*x)) continue;
         if (have_container && (x->dims != o.dims || x->r.size() != n))

@@ -255,6 +255,13 @@ struct StanMathError : std::invalid_argument {
 std::string builtin_error_message(const std::string& function,
                                   const std::exception& error);
 
+// check_matching_dims' message for two Eigen arguments of different size.
+std::string matrix_dims_mismatch_message(const std::string& function,
+                                         const std::string& name1,
+                                         const BuiltinArgumentShape& a,
+                                         const std::string& name2,
+                                         const BuiltinArgumentShape& b);
+
 // Stan Math's message for a 1-based index outside a container of `size`
 // elements, worded as `function` (an indexing label such as
 // "array[uni, ...] index") reports it.
@@ -264,10 +271,11 @@ std::string index_out_of_range_message(const char* function, int64_t size,
 // Validate one selected overload and resolve its lane broadcasts and result
 // geometry once for every backend. A one-element container is deliberately
 // not a scalar and therefore never broadcasts. `function` is the called
-// function's MIR name, used to word a size mismatch as Stan Math does.
+// function's MIR name, and `autodiff` whether any argument is a var, which
+// together word a size mismatch as Stan Math does.
 BuiltinLayout builtin_layout(const BuiltinSpec& spec,
                              const std::vector<BuiltinArgumentShape>& arguments,
-                             const std::string& function);
+                             const std::string& function, bool autodiff);
 
 struct FunctionSpec;
 // Family views point into function_specs(); no family owns descriptor storage.

@@ -252,13 +252,32 @@ bool is_eigen_shape(const BuiltinArgumentShape& shape) {
          shape.container == FunctionContainerKind::Matrix;
 }
 
+}  // namespace
+
+std::string matrix_dims_mismatch_message(const std::string& function,
+                                         const std::string& name1,
+                                         const BuiltinArgumentShape& a,
+                                         const std::string& name2,
+                                         const BuiltinArgumentShape& b) {
+  const auto [ra, ca] = eigen_extents(a);
+  const auto [rb, cb] = eigen_extents(b);
+  return function + ": " + name1 + " (" + std::to_string(ra) + ", " +
+         std::to_string(ca) + ") and " + name2 + " (" + std::to_string(rb) +
+         ", " + std::to_string(cb) + ") must match in size";
+}
+
+namespace {
+
 // Stan Math's wording for two arguments of different size: the matrix
 // operators check m1 and m2 by rows and columns, and the vectorized binary
 // functions check x and y the same way for two Eigen arguments and by
 // outer size for anything else.
 [[noreturn]] void throw_size_mismatch(const std::string& function,
+                                      bool autodiff,
                                       const BuiltinArgumentShape& a,
-                                      const BuiltinArgumentShape& b) {
+                                      const BuiltinArgumentShape& b,
+                                      size_t first = 0, size_t second = 1,
+                                      const char* family = "Binary function") {
   const char* matrix_operator =
       function == "Plus__" || function == "add"                ? "add"
       : function == "Minus__" || function == "subtract"        ? "subtract"
@@ -266,23 +285,26 @@ bool is_eigen_shape(const BuiltinArgumentShape& shape) {
       : function == "EltDivide__" || function == "elt_divide"  ? "elt_divide"
                                                                : nullptr;
   if (matrix_operator || (is_eigen_shape(a) && is_eigen_shape(b))) {
-    const auto [ra, ca] = eigen_extents(a);
-    const auto [rb, cb] = eigen_extents(b);
-    const std::string name1 = matrix_operator ? "m1" : "x";
-    const std::string name2 = matrix_operator ? "m2" : "y";
-    throw StanMathError(
-        std::string(matrix_operator ? matrix_operator : "Binary function") +
-        ": " + name1 + " (" + std::to_string(ra) + ", " + std::to_string(ca) +
-        ") and " + name2 + " (" + std::to_string(rb) + ", " +
-        std::to_string(cb) + ") must match in size");
+    const bool rev_operator =
+        autodiff && (function == "Plus__" || function == "add" ||
+                     function == "Minus__" || function == "subtract");
+    const std::string name1 = rev_operator      ? "a"
+                              : matrix_operator ? "m1"
+                                                : std::string(1, "xyz"[first]);
+    const std::string name2 = rev_operator      ? "b"
+                              : matrix_operator ? "m2"
+                                                : std::string(1, "xyz"[second]);
+    throw StanMathError(matrix_dims_mismatch_message(
+        matrix_operator ? matrix_operator : family, name1, a, name2, b));
   }
   const auto outer = [](const BuiltinArgumentShape& shape) {
     return shape.container == FunctionContainerKind::Array ? shape.dimensions[0]
                                                            : shape.storage_size;
   };
-  throw StanMathError("Binary function: size of x (" +
-                      std::to_string(outer(a)) + ") and size of y (" +
-                      std::to_string(outer(b)) + ") must match in size");
+  throw StanMathError(std::string(family) + ": size of " + "xyz"[first] + " (" +
+                      std::to_string(outer(a)) + ") and size of " +
+                      "xyz"[second] + " (" + std::to_string(outer(b)) +
+                      ") must match in size");
 }
 
 }  // namespace
@@ -306,7 +328,7 @@ std::string index_out_of_range_message(const char* function, int64_t size,
 
 BuiltinLayout builtin_layout(const BuiltinSpec& spec,
                              const std::vector<BuiltinArgumentShape>& arguments,
-                             const std::string& function) {
+                             const std::string& function, bool autodiff) {
   if (arguments.size() != spec.arity)
     throw std::invalid_argument("wrong number of arguments");
   for (size_t k = 0; k < arguments.size(); ++k) {
@@ -347,7 +369,10 @@ BuiltinLayout builtin_layout(const BuiltinSpec& spec,
       throw std::invalid_argument("unsupported paired-reduction arity");
     if (spec.arity == 2 &&
         arguments[0].storage_size != arguments[1].storage_size)
-      throw std::invalid_argument("arguments must match in size");
+      throw StanMathError(
+          function + ": size of v1 (" +
+          std::to_string(arguments[0].storage_size) + ") and size of v2 (" +
+          std::to_string(arguments[1].storage_size) + ") must match in size");
     layout.lanes = 1;
     return layout;
   }
@@ -365,8 +390,13 @@ BuiltinLayout builtin_layout(const BuiltinSpec& spec,
                ? arguments[layout.result_argument].storage_size !=
                      arguments[k].storage_size
                : !same_builtin_shape(arguments[layout.result_argument],
-                                     arguments[k])))
-        throw std::invalid_argument("incompatible logical views");
+                                     arguments[k]))) {
+        if (spec.arity != 3)
+          throw std::invalid_argument("incompatible logical views");
+        throw_size_mismatch(function, autodiff,
+                            arguments[layout.result_argument], arguments[k],
+                            layout.result_argument, k, "Ternary function");
+      }
       shaped = true;
       layout.result_argument = static_cast<uint8_t>(k);
     }
@@ -383,7 +413,8 @@ BuiltinLayout builtin_layout(const BuiltinSpec& spec,
         spec.compatibility == BuiltinCompatibilityPolicy::LaneCount
             ? arguments[0].storage_size == arguments[1].storage_size
             : same_builtin_shape(arguments[0], arguments[1]);
-    if (!compatible) throw_size_mismatch(function, arguments[0], arguments[1]);
+    if (!compatible)
+      throw_size_mismatch(function, autodiff, arguments[0], arguments[1]);
   }
 
   if (builtin_argument_is_integer(spec, 0) !=

@@ -147,6 +147,13 @@ inline std::optional<StatefulIntrinsicKind> stateful_intrinsic_kind(
   return std::nullopt;
 }
 
+// Does any argument of the call depend on parameters?
+inline bool any_argument_active(const Expr& call) {
+  for (const Expr& arg : call.args)
+    if (!arg.data_only) return true;
+  return false;
+}
+
 // A matrix row is a non-contiguous Eigen block.  Transposing it changes the
 // logical orientation but not the stride, so an outer elementwise expression
 // containing it has no packet access and Stan Math's product reduces in

@@ -1055,6 +1055,10 @@ struct Lowering {
                " out of bounds for size " + std::to_string(n),
            raw);
   }
+  void check_uni_index(int64_t i, int64_t n, const char* stan_label,
+                       const std::string& raw) {
+    if (i < 1 || i > n) fail(index_out_of_range_message(stan_label, n, i), raw);
+  }
   // A range with hi < lo is empty and never reads, whatever the endpoints.
   void check_range(int64_t lo, int64_t hi, int64_t n, const char* what,
                    const std::string& raw) {
@@ -1277,7 +1281,8 @@ struct Lowering {
     try {
       for (size_t k = 0; k < values.size(); ++k)
         shapes.push_back(builtin_argument_shape(e.args[k], values[k]));
-      return builtin_layout(spec, shapes, e.name);
+      return builtin_layout(spec, shapes, e.name,
+                            !in_write_array && mir::any_argument_active(e));
     } catch (const std::invalid_argument& error) {
       fail(builtin_error_message(e.name, error), e.raw);
     }

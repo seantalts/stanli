@@ -1519,15 +1519,16 @@ struct ProgramCompiler {
     return out;
   }
 
-  static BuiltinLayout resolved_builtin_layout(
-      const mir::Expr& e, const BuiltinSpec& spec,
-      const std::vector<Range>& values) {
+  BuiltinLayout resolved_builtin_layout(const mir::Expr& e,
+                                        const BuiltinSpec& spec,
+                                        const std::vector<Range>& values) {
     std::vector<BuiltinArgumentShape> shapes;
     shapes.reserve(values.size());
     try {
       for (size_t k = 0; k < values.size(); ++k)
         shapes.push_back(builtin_argument_shape(e.args[k], values[k]));
-      return builtin_layout(spec, shapes, e.name);
+      return builtin_layout(spec, shapes, e.name,
+                            !in_write_array && mir::any_argument_active(e));
     } catch (const std::invalid_argument& error) {
       throw Bail{builtin_error_message(e.name, error)};
     }
