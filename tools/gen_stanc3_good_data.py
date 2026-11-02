@@ -35,7 +35,7 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
-from cmdstan_ref import compile_cmd  # noqa: E402
+from cmdstan_ref import _result_line, compile_cmd, point_results  # noqa: E402
 
 CORPUS = REPO / "deps" / "stanc3-src" / "test" / "integration" / "good"
 OUT = REPO / "tests" / "stanc3_good" / "data.json.gz"
@@ -97,6 +97,15 @@ def build(model, model_sha, want, objs):
     """Path to the cached reference binary, or (None, reason)."""
     d = CACHE / model_sha
     exe, stamp_file = d / "ref", d / "stamp.json"
+    if objs:
+        status = objs / model_sha / "status"
+        while not status.exists():
+            time.sleep(10)
+        state = status.read_text().strip()
+        if state != "ok":
+            return None, state.replace("cc_fail", "build", 1)[:200]
+        o = (objs / model_sha / "model.o").stat()
+        want = {**want, "model_o": f"{o.st_size}-{o.st_mtime_ns}"}
     if exe.exists() and stamp_file.exists() and \
             json.loads(stamp_file.read_text()) == want:
         return exe, None
@@ -112,8 +121,6 @@ def build(model, model_sha, want, objs):
             return None, "stanc: " + (last_line(r.stderr or r.stdout) if r
                                       else "timed out")
         r = run(compile_cmd(CMDSTAN, hpp, DRIVER, exe, OPT), BUILD_TIMEOUT)
-    if isinstance(r, str):
-        return None, r
     if r is None or r.returncode:
         return None, "build: " + (last_line(r.stderr) if r else "timed out")
     stamp_file.write_text(json.dumps(want, sort_keys=True, indent=1) + "\n")
@@ -134,13 +141,6 @@ def driver_object(objs):
 
 
 def link_prebuilt(objs, model_sha, exe):
-    """Link a model.o from --objs, waiting for it to be built."""
-    status = objs / model_sha / "status"
-    while not status.exists():
-        time.sleep(10)
-    state = status.read_text().strip()
-    if state != "ok":
-        return state.replace("cc_fail", "build", 1)[:200]
     flags = json.loads((objs / "FLAGS").read_text())
     tail = flags["link_tail"]
     tail = tail[:tail.index("-o")]
@@ -155,18 +155,14 @@ def evaluate(exe, data_text, work):
     r = run([exe, path, "--points", ",".join(map(str, POINTS))], RUN_TIMEOUT)
     if r is None:
         return "driver timed out", 0
-    point, verdict = None, {}
-    for line in r.stdout.splitlines():
-        head, _, rest = line.partition(" ")
-        if head == "DATA_FAIL":
-            return re.sub(r"\(in '[^']*/good/", "(in '", rest)[:200], 0
-        if head == "POINT":
-            point = rest
-        elif head == "OK" and point is not None:
-            vals = [float(v) for v in rest.split()]
-            verdict[point] = all(math.isfinite(v) for v in vals)
-        elif head == "EVAL_FAIL" and point is not None:
-            verdict[point] = False
+    head = _result_line(r.stdout)
+    if head[:1] == ["DATA_FAIL"]:
+        msg = " ".join(head[1:])
+        return re.sub(r"\(in '[^']*/good/", "(in '", msg)[:200], 0
+    verdict = {k: f[:1] == ["OK"] and all(math.isfinite(float(v))
+                                          for v in f[1:])
+               for k, f in point_results(r.stdout).items()
+               if f[:1] in (["OK"], ["EVAL_FAIL"])}
     if len(verdict) != len(POINTS):
         return f"driver exited {r.returncode}: {last_line(r.stderr)}", 0
     return None, sum(verdict.values())
@@ -188,6 +184,49 @@ def remap(value, ints=None, reals=None, top=True):
     return value
 
 
+def first(value):
+    """Every list cut to its first element, every top-level int set to 1:
+    for models that use one int as both a size and a bounded argument."""
+    if isinstance(value, list):
+        return [first(value[0])] if value else value
+    if isinstance(value, dict):
+        return {k: first(v) for k, v in value.items()}
+    return value
+
+
+def is_real_vector(v):
+    return isinstance(v, list) and v and all(type(x) is float for x in v)
+
+
+def structured(value, vector):
+    """Square real matrices become the identity and real vectors become
+    vector(v): symmetric, triangular, correlation and Cholesky arguments,
+    simplexes and ordered vectors."""
+    if isinstance(value, dict):
+        return {k: structured(v, vector) for k, v in value.items()}
+    if not isinstance(value, list):
+        return value
+    if value and all(is_real_vector(r) and len(r) == len(value)
+                     for r in value):
+        n = len(value)
+        return [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
+    if is_real_vector(value):
+        return vector(value)
+    return [structured(v, vector) for v in value]
+
+
+def simplex(v):
+    return [1.0 / len(v)] * len(v)
+
+
+def ascending(v):
+    return [float(i + 1) for i in range(len(v))]
+
+
+def ones(d):
+    return {k: 1 if type(v) is int else first(v) for k, v in d.items()}
+
+
 def binary(v):
     return v % 2
 
@@ -206,10 +245,16 @@ REPAIRS = (
     lambda d: remap(d, reals=unit),
     lambda d: {k: remap(v, ints=binary, reals=unit, top=False)
                for k, v in d.items()},
+    ones,
+    lambda d: remap(ones(d), reals=unit),
+    lambda d: structured(d, simplex),
+    lambda d: structured(d, ascending),
 )
 
 
-def generate(model, model_sha, want, max_attempts, objs):
+def generate(model, model_sha, want, max_attempts, objs, prev=None):
+    """prev, an accepted entry being improved, is kept unless a new
+    candidate is finite at more points."""
     entry = {"source_sha256": model_sha, "data": None, "origin": "generated",
              "attempts": 0, "accepted": False, "note": ""}
     exe, why = build(model, model_sha, want, objs)
@@ -220,8 +265,16 @@ def generate(model, model_sha, want, max_attempts, objs):
     best = None
     with tempfile.TemporaryDirectory(prefix="stanc3_good_data_") as work:
         work = pathlib.Path(work)
+        if prev:
+            entry["attempts"] = prev["attempts"]
+            fail, finite = evaluate(exe, json.dumps(prev["data"],
+                                                    sort_keys=True), work)
+            if not fail:
+                best = (finite, prev["data"])
         for attempt in range(1, max_attempts + 1):
-            entry["attempts"] = attempt
+            if best and best[0] == len(POINTS):
+                break
+            entry["attempts"] += 1
             g = run([STANC, "--debug-generate-data", model], RUN_TIMEOUT)
             if g is None or g.returncode:
                 entry["note"] = "stanc --debug-generate-data: " + (
@@ -237,7 +290,7 @@ def generate(model, model_sha, want, max_attempts, objs):
                 entry["data"] = data
             elif best is None or finite > best[0]:
                 best = (finite, data)
-            if (best and best[0] == len(POINTS)) or not data:
+            if not data:
                 break
     if best is None:
         entry["note"] = fails.most_common(1)[0][0]
@@ -306,6 +359,9 @@ def main():
     ap.add_argument("--max-attempts", type=int, default=20)
     ap.add_argument("--regenerate", action="store_true",
                     help="redo accepted generated entries too")
+    ap.add_argument("--improve", action="store_true",
+                    help="retry accepted entries that are not finite at "
+                         "every point, keeping the old data unless beaten")
     ap.add_argument("--objs", type=pathlib.Path,
                     help="link prebuilt <sha256>/model.o objects from DIR "
                          "(with its FLAGS file) instead of compiling")
@@ -325,7 +381,8 @@ def main():
         prev = old.get(rel)
         keep = (prev and prev["source_sha256"] == model_sha
                 and prev["accepted"] and prev["origin"] != "hand"
-                and rel not in hand and not args.regenerate)
+                and rel not in hand and not args.regenerate
+                and not (args.improve and prev["note"]))
         if args.filter in rel and not keep:
             todo[(model_sha, rel in hand and rel)].append(rel)
     want = stamp()
@@ -339,8 +396,12 @@ def main():
         rel = todo[key][0]
         if hand_rel:
             return hand_entry(CORPUS / rel, model_sha, want, hand[hand_rel], args.objs)
+        prev = old.get(rel)
+        improve = (args.improve and not args.regenerate and prev
+                   and prev["accepted"] and prev["origin"] == "generated"
+                   and prev["source_sha256"] == model_sha)
         return generate(CORPUS / rel, model_sha, want, args.max_attempts,
-                        args.objs)
+                        args.objs, prev if improve else None)
 
     def save():
         OUT.parent.mkdir(parents=True, exist_ok=True)
