@@ -246,6 +246,32 @@ CASES = [
      {"j": 4}, {"eval_fail": "matrix[..., uni] column indexing: accessing "
                              "element out of range. index 4 out of range; "
                              "expecting index to be between 1 and 3"}),
+    ("jacobian += adds to the target",
+     """parameters { real y; }
+        transformed parameters {
+          real e = exp(y);
+          jacobian += y;
+        }
+        model { e ~ exponential(1); }""",
+     {}, {"same_as": """parameters { real<lower=0> e; }
+                        model { e ~ exponential(1); }"""}),
+    ("jacobian += inside an overloaded user function",
+     """functions {
+          real ub_jacobian(real x, real ub) {
+            jacobian += x;
+            return ub - exp(x);
+          }
+          vector ub_jacobian(vector x, real ub) {
+            vector[size(x)] result;
+            for (n in 1:size(x)) result[n] = ub_jacobian(x[n], ub);
+            return result;
+          }
+        }
+        parameters { vector[2] raw; }
+        transformed parameters { vector[2] b = ub_jacobian(raw, 1); }
+        model { b ~ normal(0, 1); }""",
+     {}, {"same_as": """parameters { vector<upper=1>[2] b; }
+                        model { b ~ normal(0, 1); }"""}),
 ]
 
 

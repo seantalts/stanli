@@ -554,7 +554,9 @@ Stmt read_stmt(const Node& n) {
         s.lhs_idx.push_back(read_index(lhs[1][i]));
     }
     s.rhs = read_expr(p[p.size() - 1]);
-  } else if (head == "TargetPE") {
+  } else if (head == "TargetPE" || head == "JacobianPE") {
+    // The model is always evaluated with jacobian=true, and write_array
+    // never adds to the target, so `jacobian +=` is a target increment.
     s.kind = Stmt::TargetPE;
     s.target = read_expr(p[1]);
   } else if (head == "Block") {
@@ -1368,7 +1370,58 @@ void detail::validate_portable_program(const Program& prog) {
   validate_program_shape(prog);
 }
 
+namespace {
+
+// The portable format has no JacobianPE statement; it carries the statement
+// as stanc3's s-expression.
+void read_jacobian_statements(Stmt& s) {
+  if (s.kind == Stmt::Unsupported && s.raw.rfind("(JacobianPE ", 0) == 0) {
+    const Node pattern = sexp::parse(s.raw);
+    if (pattern.size() != 2) malformed("JacobianPE statement");
+    s.kind = Stmt::TargetPE;
+    s.target = read_expr(pattern[1]);
+  }
+  for (Stmt& child : s.body) read_jacobian_statements(child);
+}
+
+// stanc3 wraps an argument in eval() to force an Eigen expression; the value
+// is the argument's.
+void strip_eval(Expr& e) {
+  for (Expr& arg : e.args) strip_eval(arg);
+  if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::StanLib &&
+      e.name == "eval" && e.args.size() == 1) {
+    Expr inner = std::move(e.args[0]);
+    e = std::move(inner);
+  }
+}
+
+void strip_eval(Stmt& s) {
+  for (Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+    strip_eval(*e);
+  for (std::vector<Expr>* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
+    for (Expr& e : *expressions) strip_eval(e);
+  for (Expr& dim : s.decl_type.dims) strip_eval(dim);
+  for (Stmt& child : s.body) strip_eval(child);
+}
+
+void read_jacobian_statements(Program& prog) {
+  for (auto* body : {&prog.prepare_data, &prog.log_prob,
+                     &prog.generate_quantities, &prog.transform_inits})
+    for (Stmt& s : *body) {
+      read_jacobian_statements(s);
+      strip_eval(s);
+    }
+  for (FunDef& f : prog.fun_defs)
+    for (Stmt& s : f.body) {
+      read_jacobian_statements(s);
+      strip_eval(s);
+    }
+}
+
+}  // namespace
+
 void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
+  read_jacobian_statements(prog);
   unmangle(prog);
   restore_unsized_decls(prog, strict_variable_metadata);
   resolve_overloads(prog);
