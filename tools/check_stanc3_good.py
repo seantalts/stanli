@@ -652,7 +652,7 @@ def main(argv=None):
     ap.add_argument("--work", type=pathlib.Path,
                     default=REPO / "build-stanc3-ref",
                     help="recorder cache: objects it builds, driver, binaries")
-    ap.add_argument("--ref-timeout", type=float, default=60.0)
+    ap.add_argument("--ref-timeout", type=float, default=600.0)
     ap.add_argument("--data", type=pathlib.Path, default=DATA)
     ap.add_argument("--references", type=pathlib.Path, default=REFERENCES)
     ap.add_argument("--ledger", type=pathlib.Path, default=LEDGER)
