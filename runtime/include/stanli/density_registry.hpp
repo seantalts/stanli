@@ -59,6 +59,12 @@ struct IntegerDensityArgument {
 
 using DensityArgumentShape = FunctionArgumentShape;
 
+// A size mismatch Stan Math reports when the density runs. The message is
+// Stan's, without the leading "<function>: ".
+struct DensitySizeError : std::invalid_argument {
+  using std::invalid_argument::invalid_argument;
+};
+
 struct VectorizedDensityLayout {
   int64_t width = 0;
   // One entry for every set bit in DensitySpec::vectorized_vector_args, in

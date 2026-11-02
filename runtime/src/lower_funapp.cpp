@@ -1326,6 +1326,9 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
       plan = stanli::density_call_plan(spec, plan_arguments, propto(e));
     } catch (const CompileError&) {
       throw;
+    } catch (const stanli::DensitySizeError& error) {
+      emit_error(MessageError::InvalidArgument, e.name + ": " + error.what());
+      return constant(0.0);
     } catch (const std::exception& error) {
       fail(builtin_error_message(e.name, error), e.raw);
     }

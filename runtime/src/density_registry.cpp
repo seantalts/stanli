@@ -157,6 +157,33 @@ double evaluate_packed_all_integer_density(AllIntegerDensity density,
   return evaluate_all_integer(density, arguments, propto);
 }
 
+// multi_normal, multi_normal_cholesky and multi_normal_prec compare the
+// random variable with the location and then with the matrix, in this order.
+void check_multi_normal_sizes(
+    const std::vector<DensityArgumentShape>& arguments, int64_t matrix_rows) {
+  int64_t sizes[2];
+  for (size_t k = 0; k < 2; ++k) {
+    const DensityArgumentShape& arg = arguments[k];
+    const FunctionContainerKind leaf = function_leaf(arg);
+    if ((leaf != FunctionContainerKind::Vector &&
+         leaf != FunctionContainerKind::RowVector) ||
+        arg.dimensions.size() != (size_t)arg.array_depth + 1)
+      return;
+    for (size_t d = 0; d < arg.array_depth; ++d)
+      if (arg.dimensions[d] == 0) return;
+    sizes[k] = arg.dimensions.back();
+  }
+  const auto mismatch = [](int64_t y, const char* what, int64_t other) {
+    return DensitySizeError("Size of random variable (" + std::to_string(y) +
+                            ") and " + what + " (" + std::to_string(other) +
+                            ") must match in size");
+  };
+  if (sizes[0] != sizes[1])
+    throw mismatch(sizes[0], "size of location parameter", sizes[1]);
+  if (sizes[0] != matrix_rows)
+    throw mismatch(sizes[0], "rows of covariance parameter", matrix_rows);
+}
+
 VectorizedDensityLayout vectorized_density_layout(
     const DensitySpec& spec,
     const std::vector<DensityArgumentShape>& arguments) {
@@ -181,6 +208,10 @@ VectorizedDensityLayout vectorized_density_layout(
     if (matrix.storage_size != width * width)
       throw std::invalid_argument("matrix shape does not match storage");
   }
+
+  if (spec.shape == DensityShape::LastMatrixRowsAndRepetitions &&
+      spec.arity == 3)
+    check_multi_normal_sizes(arguments, width);
 
   VectorizedDensityLayout result;
   result.width = width;
