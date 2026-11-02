@@ -52,23 +52,33 @@ struct Bound {
 };
 
 // stan-math's argument checks, with its messages: a shared argument is named
-// bare and a per-element one by its 1-based index. The scan finds the first
+// bare and a per-element one by its 1-based index, or its row and column
+// when the argument is a matrix with `rows` rows. The scan finds the first
 // bad element so only a failure pays for formatting the name.
-inline std::string element_name(const char* name, bool varies, int64_t i) {
-  return varies ? std::string(name) + "[" + std::to_string(i + 1) + "]"
-                : std::string(name);
+inline std::string element_name(const char* name, bool varies, int64_t i,
+                                int64_t rows) {
+  if (!varies) return std::string(name);
+  if (rows > 0)
+    return std::string(name) + "[" + std::to_string(i % rows + 1) + ", " +
+           std::to_string(i / rows + 1) + "]";
+  return std::string(name) + "[" + std::to_string(i + 1) + "]";
 }
 
-void check_offset_multiplier(const Desc& mu, const Desc& sigma) {
+int64_t matrix_rows(const KernelCtx& ctx) {
+  return ctx.n_idata > 0 ? ctx.idata[0] : 0;
+}
+
+void check_offset_multiplier(const Desc& mu, const Desc& sigma, int64_t rows) {
   static constexpr const char* function = "offset_multiplier_constrain";
   for (int64_t i = 0; i < mu.len; ++i)
     if (!std::isfinite(mu.data[i]))
       stan::math::check_finite(
-          function, element_name("offset", mu.len > 1, i).c_str(), mu.data[i]);
+          function, element_name("offset", mu.len > 1, i, rows).c_str(),
+          mu.data[i]);
   for (int64_t i = 0; i < sigma.len; ++i)
     if (!(std::isfinite(sigma.data[i]) && sigma.data[i] > 0.0))
       stan::math::check_positive_finite(
-          function, element_name("multiplier", sigma.len > 1, i).c_str(),
+          function, element_name("multiplier", sigma.len > 1, i, rows).c_str(),
           sigma.data[i]);
 }
 
@@ -356,8 +366,9 @@ void check_lub_bounds(const Bound& lb, const Bound& ub, int64_t n) {
   const bool varies = lb.varies() || ub.varies();
   for (int64_t i = 0; i < (varies ? n : 1); ++i)
     if (!(lb[i] < ub[i]))
-      stan::math::check_less(
-          "lub_constrain", element_name("lb", varies, i).c_str(), lb[i], ub[i]);
+      stan::math::check_less("lub_constrain",
+                             element_name("lb", varies, i, 0).c_str(), lb[i],
+                             ub[i]);
 }
 
 void clu_fwd(KernelCtx& ctx) {
@@ -805,7 +816,7 @@ void offset_mult_fwd(KernelCtx& ctx) {
   const double* mu = ctx.in[1].data;
   const double* sg = ctx.in[2].data;
   const bool mu_v = ctx.in[1].len > 1, sg_v = ctx.in[2].len > 1;
-  check_offset_multiplier(ctx.in[1], ctx.in[2]);
+  check_offset_multiplier(ctx.in[1], ctx.in[2], matrix_rows(ctx));
   for (int64_t i = 0; i < n; ++i)
     ctx.out.data[i] = std::fma(sg[sg_v ? i : 0], x[i], mu[mu_v ? i : 0]);
   if (sg_v) {
@@ -899,7 +910,7 @@ void sum_to_zero_mat_bwd(KernelCtx& ctx) {
 // offset_multiplier_unconstrain is composed from elementwise ops, so its
 // argument checks run as their own op on (offset, multiplier).
 void check_offset_multiplier_fwd(KernelCtx& ctx) {
-  check_offset_multiplier(ctx.in[0], ctx.in[1]);
+  check_offset_multiplier(ctx.in[0], ctx.in[1], matrix_rows(ctx));
   ctx.out.data[0] = 0.0;
 }
 

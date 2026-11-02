@@ -2347,6 +2347,14 @@ class MirInterp {
         }
         tr.out_len = (int32_t)a[0].r.size();
         tr.inner_raw = tr.out_len;
+        if (e.args[0].unsized.depth == 0) {
+          const mir::UnsizedLeaf leaf = e.args[0].unsized.leaf;
+          tr.eigen = leaf == mir::UnsizedLeaf::Vector      ? 1
+                     : leaf == mir::UnsizedLeaf::RowVector ? 2
+                     : leaf == mir::UnsizedLeaf::Matrix    ? 3
+                                                           : 0;
+          if (tr.eigen == 3) tr.rows = static_cast<int32_t>(a[0].dims[0]);
+        }
       } else {
         outer_rank = e.args[0].unsized.depth;
         const bool input_matrix =

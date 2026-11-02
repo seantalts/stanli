@@ -364,7 +364,8 @@ std::optional<Lowering::Val> Lowering::lower_callable_transform(
   // and simply leaves it unrooted -- no term reaches the target, and its
   // adjoint stays zero, which is exactly the no-lp overload's gradient.
   const int jac = add_slot(1, /*is_param=*/false);
-  Val v = emit_raw(tr.opcode, ins, n, si, {}, jac, autodiff);
+  Val v = emit_raw(tr.opcode, ins, n, si, offset_multiplier_rows(tr.kind, si),
+                   jac, autodiff);
   v.layout = owning_layout(si);
   if (tr.direction == TransformDirection::Jacobian && !in_write_array)
     target_terms.push_back(jac);
@@ -374,6 +375,12 @@ std::optional<Lowering::Val> Lowering::lower_callable_transform(
 // `log(y - lb)` is ordinary var arithmetic, which is what these
 // elementwise ops emit, so the composition is the reference rather than an
 // approximation of it, and no new kernel is needed.
+std::vector<int> Lowering::offset_multiplier_rows(CallableTransformKind kind,
+                                                  const SlotInfo& si) {
+  if (kind != CallableTransformKind::OffsetMultiplier || !is_matrix(si))
+    return {};
+  return {checked_immediate(si.rows, "offset_multiplier rows")};
+}
 Lowering::Val Lowering::free_transform(uint16_t opcode,
                                        const std::vector<Val>& a, SlotInfo si,
                                        int64_t n) {
@@ -397,7 +404,9 @@ Lowering::Val Lowering::free_transform(uint16_t opcode,
       return un(OP_LOGIT,
                 elt(OP_DIV, elt(OP_SUB, a[0], a[1]), elt(OP_SUB, a[2], a[1])));
     default:  // offset_multiplier_free: (y - mu) / sigma
-      (void)emit_value(OP_CHECK_OFFSET_MULTIPLIER, {a[1], a[2]}, 1);
+      (void)emit_value(
+          OP_CHECK_OFFSET_MULTIPLIER, {a[1], a[2]}, 1, {},
+          offset_multiplier_rows(CallableTransformKind::OffsetMultiplier, si));
       return elt(OP_DIV, elt(OP_SUB, a[0], a[1]), a[2]);
   }
 }

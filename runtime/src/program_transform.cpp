@@ -7,14 +7,45 @@
 namespace stanli {
 namespace {
 
+// An Eigen first input with shared scalar bounds is checked as one object by
+// Stan Math, which names the bad element ("Lower bounded variable[1, 1]");
+// per-element bounds or non-Eigen inputs reach the scalar overloads, which
+// name nothing.
+template <typename T, typename Check>
+void check_eigen_input(const Program::Transform& tr, const T* reg,
+                       Check&& check) {
+  if (tr.eigen == 0 || tr.out_len == 0 || tr.in_len[1] != 1 ||
+      (tr.n_in > 2 && tr.in_len[2] != 1))
+    return;
+  std::vector<double> y(static_cast<size_t>(tr.out_len));
+  for (int i = 0; i < tr.out_len; ++i)
+    y[static_cast<size_t>(i)] = stan::math::value_of(reg[tr.in[0] + i]);
+  const auto bound = [&](int k) { return stan::math::value_of(reg[tr.in[k]]); };
+  if (tr.eigen == 1)
+    check(Eigen::Map<const Eigen::VectorXd>(y.data(), tr.out_len), bound);
+  else if (tr.eigen == 2)
+    check(Eigen::Map<const Eigen::RowVectorXd>(y.data(), tr.out_len), bound);
+  else
+    check(Eigen::Map<const Eigen::MatrixXd>(y.data(), tr.rows,
+                                            tr.out_len / tr.rows),
+          bound);
+}
+
 template <typename T>
 void run_transform(const Program::Transform& tr, T* reg) {
   T lp = 0.0;
+  const bool unconstrain = tr.direction == TransformDirection::Unconstrain;
   const auto bound = [&](int k, int i) -> const T& {
     return reg[tr.in[k] + (tr.in_len[k] == 1 ? 0 : i)];
   };
   switch (tr.kind) {
     case CallableTransformKind::Lower:
+      if (unconstrain)
+        check_eigen_input(tr, reg, [](const auto& y, const auto& bound) {
+          if (bound(1) != stan::math::NEGATIVE_INFTY)
+            stan::math::check_greater_or_equal(
+                "lb_free", "Lower bounded variable", y, bound(1));
+        });
       for (int i = 0; i < tr.out_len; ++i)
         reg[tr.out + i] =
             tr.direction == TransformDirection::Unconstrain
@@ -22,6 +53,12 @@ void run_transform(const Program::Transform& tr, T* reg) {
                 : stan::math::lb_constrain(reg[tr.in[0] + i], bound(1, i), lp);
       break;
     case CallableTransformKind::Upper:
+      if (unconstrain)
+        check_eigen_input(tr, reg, [](const auto& y, const auto& bound) {
+          if (bound(1) != stan::math::INFTY)
+            stan::math::check_less_or_equal("ub_free", "Upper bounded variable",
+                                            y, bound(1));
+        });
       for (int i = 0; i < tr.out_len; ++i)
         reg[tr.out + i] =
             tr.direction == TransformDirection::Unconstrain

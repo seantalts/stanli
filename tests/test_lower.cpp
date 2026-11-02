@@ -4732,17 +4732,17 @@ int main() {
     }
 
     const auto expect_oob = [&](const char* name, long v,
-                                const std::string& tag) {
+                                const std::string& tag,
+                                const char* message = "out of bounds") {
       DataMap d = base_data();
       d.set_int(name, v);
       bool threw = false;
       try {
         compile_model(mir, d);
       } catch (const std::exception& ex) {
-        threw =
-            std::string(ex.what()).find("out of bounds") != std::string::npos;
+        threw = std::string(ex.what()).find(message) != std::string::npos;
         if (!threw)
-          std::printf("  %s threw without 'out of bounds': %s\n", tag.c_str(),
+          std::printf("  %s threw without '%s': %s\n", tag.c_str(), message,
                       ex.what());
       }
       check(threw, tag + " rejected");
@@ -4752,7 +4752,9 @@ int main() {
     expect_oob("i1", 5, "oob M[5]");
     expect_oob("j1", 5, "oob M[:,5]");
     expect_oob("rh", 9, "oob M[2:9]");
-    expect_oob("m", 9, "oob interp xs[9]");
+    expect_oob("m", 9, "oob interp xs[9]",
+               "array[uni, ...] index: accessing element out of range. index "
+               "9 out of range");
     {
       DataMap d = base_data();
       d.set_int_array("idx", {1, 9});

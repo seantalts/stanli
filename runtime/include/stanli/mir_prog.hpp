@@ -2904,6 +2904,11 @@ struct ProgramCompiler {
           bail(e.name + ": bound is neither scalar nor the input size");
       tr.out_len = args[0].len;
       tr.inner_raw = args[0].len;
+      tr.eigen = args[0].kind == ViewKind::Vector      ? 1
+                 : args[0].kind == ViewKind::RowVector ? 2
+                 : args[0].kind == ViewKind::Matrix    ? 3
+                                                       : 0;
+      tr.rows = static_cast<int32_t>(args[0].rows);
     } else {
       ViewKind leaf = args[0].kind;
       std::vector<int64_t> dims;

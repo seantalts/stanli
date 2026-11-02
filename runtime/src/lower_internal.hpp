@@ -1222,6 +1222,9 @@ struct Lowering {
   const ArrayShape& array_shape(const SlotInfo& si) const {
     return shape_pool->at(si.shape);
   }
+  // The row count an offset_multiplier check names matrix elements by.
+  std::vector<int> offset_multiplier_rows(CallableTransformKind kind,
+                                          const SlotInfo& si);
   CheckGeometry check_geometry(const SlotInfo& si, int64_t len) const {
     CheckGeometry geometry;
     if (is_array(si)) {
