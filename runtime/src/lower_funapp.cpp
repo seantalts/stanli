@@ -1236,6 +1236,16 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
       }
     }
   }
+  if (e.name == "csr_extract_w" && e.args.size() == 1) {
+    if (!e.args[0].data_only)
+      fail(e.name +
+               ": the number of nonzero entries depends on the values, so the "
+               "matrix must be data",
+           e.raw);
+    mir::Expr data_call = e;
+    data_call.data_only = true;
+    if (auto v = fold_const(data_call)) return *v;
+  }
   if (auto v = fold_const(e)) return *v;
   if (shaped_builtin_spec(e.name, e.args.size(),
                           BuiltinShapePolicy::Predicate) ||
