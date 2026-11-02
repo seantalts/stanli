@@ -36,7 +36,7 @@ DATA = SUITE / "data.json.gz"
 REFERENCES = SUITE / "references.json.gz"
 LEDGER = SUITE / "ledger.json"
 OVERRIDES = SUITE / "overrides.json"
-POINTS = (0, 1, 2, 3)
+POINTS = (0, 1, 2, 3, 4)
 MAX_REL = 1e-9
 TIMEOUT = 120.0
 LEDGERED_TIMEOUT = 5.0
@@ -189,16 +189,22 @@ def message_core(message):
     """What stanli's message has to contain of CmdStan's.
 
     CmdStan wraps a message as "Exception: ... (in 'file', line N, ...)"
-    and may nest it; numbers are formatted differently by the two engines.
+    and may nest it. The leading function name is dropped too: stanli may
+    report the variant it called (dae_tol for dae).
     """
     text = message.replace("\n", " ")
     text = text.split("Exception: ")[-1]
     text = re.split(r" \(in '", text)[0]
+    text = re.sub(r"^[\w:]+: ", "", text)
     return normalize(text)
 
 
 def normalize(text):
+    """Numbers and element indices removed: the engines format numbers
+    differently, and stanli names the element of a vectorized argument
+    ("Scale parameter[2]") where CmdStan's scalar overload does not."""
     text = re.sub(r"-?\d+(\.\d+)?([eE][+-]?\d+)?", "N", text or "")
+    text = re.sub(r"\[[N, ]*\]", "", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text.rstrip("!. ")
 
@@ -478,12 +484,17 @@ def record(models, ctx, args):
         must([*compile_flags, "-c", driver, "-o", str(driver_o) + ".part"])
         os.replace(str(driver_o) + ".part", driver_o)
 
-    def model_object(source):
+    def model_object(path, source):
         sha = sha256(source.read_bytes())
         for root in (args.ref_objs, work / "objs"):
             status = root / sha / "status"
             if status.exists():
                 return root / sha, status.read_text().strip()
+        if "source" not in ctx["overrides"].get(path, {}):
+            # The large function-signature models need several GB each to
+            # compile; building them here beside the prebuild swaps the
+            # machine. Only adapted sources, which are small, build here.
+            raise RuntimeError(f"{path}: no CmdStan object in {args.ref_objs}")
         obj = work / "objs" / sha
         obj.mkdir(parents=True, exist_ok=True)
         r = run_process([args.stanc, *stanc_args, source,
@@ -495,6 +506,8 @@ def record(models, ctx, args):
                              obj / "model.hpp", "-o", obj / "model.o"], 1800)
             status = ("ok" if r and not r[0] else
                       "cc_fail: " + ((r[2] if r else "timeout")[-2000:]))
+        opt = next((f for f in compile_flags if f.startswith("-O")), "")
+        (obj / "opt").write_text(opt + "\n")
         (obj / "status").write_text(status + "\n")
         return obj, status
 
@@ -507,7 +520,10 @@ def record(models, ctx, args):
                               message=note or "no data")
         blob = data_bytes(data)
         entry["data_sha256"] = sha256(blob)
-        obj, status = model_object(source)
+        obj, status = model_object(path, source)
+        opt_file = obj / "opt"
+        if opt_file.exists():
+            entry["cmdstan_opt"] = opt_file.read_text().strip()
         if status.startswith("stanc_fail"):
             return path, dict(entry, outcome="stanc_fail",
                               message=strip_paths(first_line(
@@ -556,9 +572,20 @@ def record(models, ctx, args):
     done = 0
     known = set(corpus_models())
     models_out = {p: e for p, e in ctx["refs"]["models"].items() if p in known}
+    def guarded(path):
+        try:
+            return record_one(path)
+        except RuntimeError as error:
+            return path, error
+
+    errors = []
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        for path, entry in pool.map(record_one, models):
-            models_out[path] = entry
+        for path, entry in pool.map(guarded, models):
+            if isinstance(entry, RuntimeError):
+                errors.append(str(entry))
+                print(f"NOT RECORDED {entry}", flush=True)
+            else:
+                models_out[path] = entry
             done += 1
             if done % 50 == 0:
                 print(f"recorded {done}/{len(models)}", flush=True)
@@ -579,6 +606,7 @@ def record(models, ctx, args):
     write_gz(REFERENCES, {"schema": SCHEMA, "toolchain": provenance,
                           "models": dict(sorted(models_out.items()))})
     ctx["refs"] = load_gz(REFERENCES)
+    return errors
 
 
 def strip_paths(message):
@@ -650,7 +678,9 @@ def main(argv=None):
 
     if args.record:
         args.cmdstan, args.stanc = args.cmdstan.resolve(), args.stanc.resolve()
-        record(selected, ctx, args)
+        if record(selected, ctx, args):
+            print("some models were not recorded; see NOT RECORDED above")
+            return 1
 
     problems = []
     if ctx["refs"].get("schema", SCHEMA) != SCHEMA:

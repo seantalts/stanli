@@ -35,13 +35,16 @@ static double eval_point(int64_t i, int variant) {
       return 0.02 * static_cast<double>((i % 5) - 2);
     case 2:
       return 0.0;
-    case 3: {
+    case 3:
+    case 4: {
       uint64_t z = static_cast<uint64_t>(i) + 0x9E3779B97F4A7C15ull;
       z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
       z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
       z ^= z >> 31;
       const double u = static_cast<double>(z >> 11) * 0x1.0p-53;
-      return -1.5 + 3.0 * u;
+      // Variant 4 keeps every component in (0.1, 0.9), where an
+      // unconstrained real used as a scale or a probability is valid.
+      return variant == 3 ? -1.5 + 3.0 * u : 0.1 + 0.8 * u;
     }
     default:
       return 0.1 + 0.05 * static_cast<double>(i % 7) -
