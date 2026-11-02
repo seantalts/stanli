@@ -1230,6 +1230,55 @@ void resolve_calls(Stmt& s, const Overloads& overloads) {
   for (Stmt& k : s.body) resolve_calls(k, overloads);
 }
 
+void unmangle(std::string& name) {
+  constexpr std::string_view prefix = "_stan_";
+  if (name.compare(0, prefix.size(), prefix) == 0) name.erase(0, prefix.size());
+}
+
+void unmangle(Expr& e) {
+  unmangle(e.name);
+  for (Expr& arg : e.args) unmangle(arg);
+}
+
+void unmangle(SizedType& type) {
+  for (Expr& dim : type.dims) unmangle(dim);
+}
+
+void unmangle(Transform& transform) {
+  for (Expr& e : transform.args) unmangle(e);
+}
+
+void unmangle(Stmt& s) {
+  for (std::string* name :
+       {&s.decl_id, &s.lhs, &s.loopvar, &s.fn_name, &s.check_var_name})
+    unmangle(*name);
+  for (Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+    unmangle(*e);
+  for (std::vector<Expr>* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
+    for (Expr& e : *expressions) unmangle(e);
+  unmangle(s.decl_type);
+  for (std::optional<Transform>* transform :
+       {&s.read_transform, &s.check_transform, &s.write_transform})
+    if (*transform) unmangle(**transform);
+  for (Stmt& child : s.body) unmangle(child);
+}
+
+void unmangle(Program& prog) {
+  for (auto& [name, type] : prog.input_vars) {
+    unmangle(name);
+    unmangle(type);
+  }
+  for (auto* body : {&prog.prepare_data, &prog.log_prob,
+                     &prog.generate_quantities, &prog.transform_inits})
+    for (Stmt& s : *body) unmangle(s);
+  for (FunDef& f : prog.fun_defs) {
+    unmangle(f.name);
+    for (std::string& arg : f.arg_names) unmangle(arg);
+    for (Stmt& s : f.body) unmangle(s);
+  }
+  for (std::string& name : prog.output_vars) unmangle(name);
+}
+
 void restore_unsized_decls(Stmt& s, bool strict) {
   if (s.kind == Stmt::Decl && s.decl_type.base.empty()) {
     const std::string& raw = s.decl_type.raw;
@@ -1287,6 +1336,7 @@ void detail::validate_portable_program(const Program& prog) {
 }
 
 void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
+  unmangle(prog);
   restore_unsized_decls(prog, strict_variable_metadata);
   resolve_overloads(prog);
   Functions functions;
@@ -1369,8 +1419,6 @@ Program read_program(const sexp::Node& root) {
     prog.has_transform_inits = true;
     read_stmt_list((*ti)[1], prog.transform_inits);
   }
-  prog.nesting = nesting_meter.peak;
-  detail::finalize_program(prog);
   if (const Node* ov = field(root, "output_vars")) {
     // ((name <opaque> (...)) ...): parameters, transformed parameters and
     // generated quantities in declaration order -- the order FnWriteParam
@@ -1381,6 +1429,8 @@ Program read_program(const sexp::Node& root) {
     for (size_t i = 0; i < vars.size(); ++i)
       prog.output_vars.push_back(vars[i][0].atom);
   }
+  prog.nesting = nesting_meter.peak;
+  detail::finalize_program(prog);
   return prog;
 }
 
