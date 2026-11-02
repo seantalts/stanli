@@ -143,8 +143,22 @@ constexpr BuiltinSpec matrix_builtin(BuiltinMatrixOp op, uint16_t opcode,
                    FunctionArgumentKind::Real,
                    BuiltinShapePolicy::MatrixOp,
                    BuiltinCompatibilityPolicy::LogicalShape,
-                   static_cast<uint8_t>(arity == 1 ? 0x1 : 0x3)};
+                   static_cast<uint8_t>((1u << arity) - 1)};
   spec.matrix_op = op;
+  return spec;
+}
+
+constexpr BuiltinSpec matrix_power_builtin() {
+  BuiltinSpec spec =
+      matrix_builtin(BuiltinMatrixOp::MatrixPower, OP_MATRIX_POWER, 2);
+  spec.arguments[1] = BuiltinArgumentKind::Integer;
+  spec.activity_mask = 0x1;
+  return spec;
+}
+
+constexpr BuiltinSpec quantile_builtin() {
+  BuiltinSpec spec = matrix_builtin(BuiltinMatrixOp::Quantile, OP_QUANTILE, 2);
+  spec.activity_mask = 0;
   return spec;
 }
 
@@ -564,6 +578,61 @@ const std::vector<FunctionSpec>& function_specs() {
             matrix_builtin(BuiltinMatrixOp::QuadForm, OP_QUAD_FORM, 2));
     builtin("quad_form_sym",
             matrix_builtin(BuiltinMatrixOp::QuadFormSym, OP_QUAD_FORM_SYM, 2));
+    builtin("determinant",
+            matrix_builtin(BuiltinMatrixOp::Determinant, OP_DETERMINANT, 1));
+    builtin("log_determinant_spd",
+            matrix_builtin(BuiltinMatrixOp::LogDeterminantSpd,
+                           OP_LOG_DETERMINANT_SPD, 1));
+    builtin("chol2inv",
+            matrix_builtin(BuiltinMatrixOp::Chol2inv, OP_CHOL2INV, 1));
+    builtin("generalized_inverse",
+            matrix_builtin(BuiltinMatrixOp::GeneralizedInverse,
+                           OP_GENERALIZED_INVERSE, 1));
+    builtin("qr_Q", matrix_builtin(BuiltinMatrixOp::QrQ, OP_QR_Q, 1));
+    builtin("qr_R", matrix_builtin(BuiltinMatrixOp::QrR, OP_QR_R, 1));
+    builtin("qr_thin_Q",
+            matrix_builtin(BuiltinMatrixOp::QrThinQ, OP_QR_THIN_Q, 1));
+    builtin("qr_thin_R",
+            matrix_builtin(BuiltinMatrixOp::QrThinR, OP_QR_THIN_R, 1));
+    builtin("matrix_power", matrix_power_builtin());
+    builtin("quantile", quantile_builtin());
+    builtin("trace_quad_form", matrix_builtin(BuiltinMatrixOp::TraceQuadForm,
+                                              OP_TRACE_QUAD_FORM, 2));
+    builtin("trace_gen_quad_form",
+            matrix_builtin(BuiltinMatrixOp::TraceGenQuadForm,
+                           OP_TRACE_GEN_QUAD_FORM, 3));
+    builtin("matrix_exp_multiply",
+            matrix_builtin(BuiltinMatrixOp::MatrixExpMultiply,
+                           OP_MATRIX_EXP_MULTIPLY, 2));
+    builtin("scale_matrix_exp_multiply",
+            matrix_builtin(BuiltinMatrixOp::ScaleMatrixExpMultiply,
+                           OP_SCALE_MATRIX_EXP_MULTIPLY, 3));
+    builtin("trace_dot",
+            matrix_builtin(BuiltinMatrixOp::TraceDot, OP_TRACE_DOT, 2));
+    builtin("norm1", matrix_builtin(BuiltinMatrixOp::Norm1, OP_NORM1, 1));
+    builtin("norm2", matrix_builtin(BuiltinMatrixOp::Norm2, OP_NORM2, 1));
+    builtin("distance",
+            matrix_builtin(BuiltinMatrixOp::Distance, OP_DISTANCE, 2));
+    builtin("inc_beta",
+            matrix_builtin(BuiltinMatrixOp::IncBeta, OP_INC_BETA, 3));
+    builtin("inv_inc_beta",
+            matrix_builtin(BuiltinMatrixOp::InvIncBeta, OP_INV_INC_BETA, 3));
+    builtin("hypergeometric_2F1",
+            matrix_builtin(BuiltinMatrixOp::Hypergeometric2F1,
+                           OP_HYPERGEOMETRIC_2F1, 4));
+    builtin("hypergeometric_3F2",
+            matrix_builtin(BuiltinMatrixOp::Hypergeometric3F2,
+                           OP_HYPERGEOMETRIC_3F2, 3));
+    builtin("log_mix",
+            matrix_builtin(BuiltinMatrixOp::LogMix, OP_LOG_MIX_VEC, 2));
+    builtin("hmm_marginal",
+            matrix_builtin(BuiltinMatrixOp::HmmMarginal, OP_HMM_MARGINAL, 3));
+    builtin("hmm_hidden_state_prob",
+            matrix_builtin(BuiltinMatrixOp::HmmHiddenStateProb,
+                           OP_HMM_HIDDEN_STATE_PROB, 3));
+    builtin("hypergeometric_pFq",
+            matrix_builtin(BuiltinMatrixOp::HypergeometricPFq,
+                           OP_HYPERGEOMETRIC_PFQ, 3));
     // Shape queries: integer answers read from logical geometry alone.
     builtin("rows", shape_query_builtin(BuiltinShapeQueryKind::Rows));
     builtin("cols", shape_query_builtin(BuiltinShapeQueryKind::Cols));
@@ -599,6 +668,7 @@ const std::vector<FunctionSpec>& function_specs() {
             predicate_builtin(BuiltinPredicate::Negation, 1));
     builtin("is_nan", predicate_builtin(BuiltinPredicate::IsNan, 1));
     builtin("is_inf", predicate_builtin(BuiltinPredicate::IsInf, 1));
+    builtin("int_step", predicate_builtin(BuiltinPredicate::IntStep, 1));
     // The scalar RNG tranche. The container draws (multi_normal_rng,
     // dirichlet_rng, categorical_rng) and the remaining stan-math draws the
     // interpreted write_array reaches by suffix stay on their bespoke paths.
@@ -626,6 +696,7 @@ const std::vector<FunctionSpec>& function_specs() {
     builtin("weibull_rng", rng_builtin(ScalarRng::Weibull));
     builtin("neg_binomial_2_rng", rng_builtin(ScalarRng::NegBinomial2));
     builtin("neg_binomial_2_log_rng", rng_builtin(ScalarRng::NegBinomial2Log));
+    builtin("yule_simon_rng", rng_builtin(ScalarRng::YuleSimon));
 
     constexpr auto kInt = BuiltinArgumentKind::Integer;
     constexpr auto kReal = BuiltinArgumentKind::Real;
@@ -742,6 +813,12 @@ const std::vector<FunctionSpec>& function_specs() {
             all_integer_spec(4, AllIntegerDensity::HypergeometricLpmf));
     density("discrete_range_lpmf",
             all_integer_spec(3, AllIntegerDensity::DiscreteRangeLpmf));
+    density("discrete_range_cdf",
+            all_integer_spec(3, AllIntegerDensity::DiscreteRangeCdf));
+    density("discrete_range_lcdf",
+            all_integer_spec(3, AllIntegerDensity::DiscreteRangeLcdf));
+    density("discrete_range_lccdf",
+            all_integer_spec(3, AllIntegerDensity::DiscreteRangeLccdf));
 
 #define STANLI_DENSITY_ENTRY(code, fn, n, tier) density(#fn, {code, n, 0});
     STANLI_SCALAR_DENSITY_LIST(STANLI_DENSITY_ENTRY)
@@ -872,6 +949,20 @@ bool function_arity_registered(std::string_view name, size_t arity) {
   for (const FunctionSpec* spec : overloads(name))
     if (spec->arity() == arity) return true;
   return false;
+}
+
+std::optional<WienerForm> wiener_form(std::string_view name, size_t arity) {
+  if (name == "wiener_lpdf") {
+    if (arity < 6 || arity > 9) return std::nullopt;
+    return WienerForm{WienerKind::Lpdf, arity <= 7 ? 6 : 8,
+                      arity == 7 || arity == 9, 1e-4};
+  }
+  const bool lcdf = name == "wiener_lcdf_unnorm";
+  if (!lcdf && name != "wiener_lccdf_unnorm") return std::nullopt;
+  if (arity < 5 || arity > 9 || arity == 7) return std::nullopt;
+  const int reals = arity <= 6 ? 5 : 8;
+  return WienerForm{lcdf ? WienerKind::Lcdf : WienerKind::Lccdf, reals,
+                    arity == 6 || arity == 9, reals == 5 ? 1e-4 : 1e-8};
 }
 
 const FunctionSpec* function_spec(std::string_view name, size_t arity,

@@ -14,6 +14,9 @@
 
 namespace stanli {
 
+// The statistic a packed wiener op computes.
+enum class WienerKind : int { Lpdf = 0, Lcdf = 1, Lccdf = 2 };
+
 enum class DensityShape : uint8_t {
   Plain,
   // The integer outcome remains a runtime input rather than being copied to
@@ -43,6 +46,9 @@ enum class AllIntegerDensity : uint8_t {
   None,
   HypergeometricLpmf,
   DiscreteRangeLpmf,
+  DiscreteRangeCdf,
+  DiscreteRangeLcdf,
+  DiscreteRangeLccdf,
 };
 
 struct IntegerDensityArgument {

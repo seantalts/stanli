@@ -41,24 +41,7 @@ inline MessageError message_error(MessageAction action) {
                                         : MessageError::Domain;
 }
 
-// stan::math::check_range's message.
-inline std::string out_of_range_message(const std::string& function,
-                                        int64_t index, int64_t max) {
-  return function + ": accessing element out of range. index " +
-         std::to_string(index) +
-         " out of range; expecting index to be between 1 and " +
-         std::to_string(max);
-}
-
 [[noreturn]] void throw_message(MessageError error, const std::string& message);
-
-// stan::math::check_size_match's message.
-inline std::string size_match_message(const std::string& function,
-                                      const std::string& name_i, int64_t i,
-                                      const std::string& name_j, int64_t j) {
-  return function + ": " + name_i + " (" + std::to_string(i) + ") and " +
-         name_j + " (" + std::to_string(j) + ") must match in size";
-}
 
 // The shape stan_print sees: the array extents, then a vector's length or a
 // matrix's rows and columns. It prints one bracketed, comma-separated level

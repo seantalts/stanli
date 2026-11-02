@@ -53,41 +53,6 @@ using CMapV = Eigen::Map<const VecD>;
 using VarV = Eigen::Matrix<stan::math::var, -1, 1>;
 using VarM = Eigen::Matrix<stan::math::var, -1, -1>;
 
-// Promote every input to var on a nested tape, call f, seed the output
-// adjoints, and copy back the adjoints of inputs that carry one. Inputs
-// arrive as flat vectors; f reshapes what it needs.
-template <typename F>
-void nary_bwd(KernelCtx& ctx, F&& f) {
-  stan::math::nested_rev_autodiff nested;
-  using stan::math::var;
-  std::vector<VarV> xs(ctx.n_in);
-  for (int k = 0; k < ctx.n_in; ++k) {
-    xs[k].resize(ctx.in[k].len);
-    for (int64_t i = 0; i < ctx.in[k].len; ++i) xs[k](i) = ctx.in[k].data[i];
-  }
-  auto out = f(xs);
-  // Seed without copying the result: several rev overloads return a
-  // var_value<Matrix> (SoA), and assigning that into a Matrix<var> copies
-  // values into fresh vars, silently dropping the tape connection. Seeding
-  // through stan-math ops on whatever type came back keeps it.
-  var j;
-  if constexpr (std::is_same_v<std::decay_t<decltype(out)>, var>) {
-    j = out * ctx.out_adj;
-  } else {
-    MatD seed(out.rows(), out.cols());
-    for (Eigen::Index c = 0, k = 0; c < out.cols(); ++c)
-      for (Eigen::Index r = 0; r < out.rows(); ++r, ++k)
-        seed(r, c) = ctx.out_adj_vec.data[k];
-    j = stan::math::sum(stan::math::elt_multiply(out, seed));
-  }
-  stan::math::grad(j.vi_);
-  for (int k = 0; k < ctx.n_in; ++k) {
-    if (ctx.in_adj[k].data == nullptr) continue;
-    for (int64_t i = 0; i < ctx.in[k].len; ++i)
-      ctx.in_adj[k].data[i] += xs[k](i).adj();
-  }
-}
-
 // ---- gp_*_cov(x, alpha, rho) ----------------------------------------------
 // in = {x (data, N*D), alpha, rho}; idata = {N, D}; out = N*N column-major.
 // x as array[N] real is D == 1; array[N] vector[D] flattens array-major.
@@ -2030,27 +1995,42 @@ int64_t wiener_scratch(const Op& op, const Slot* slots) {
 }
 
 // wiener(y | a, t0, w, v, sv[, sw, st0], precision): the five- and
-// seven-parameter densities. Input 0 holds the real arguments argument-major,
+// seven-parameter densities, and the four- and seven-parameter unnormalized
+// log cdf and ccdf. Input 0 holds the real arguments argument-major,
 // one entry per lane; input 1 is the derivative precision. idata: argument
-// count, lane count, active-argument mask, propto. Scratch keeps the partials.
+// count, lane count, active-argument mask, propto, WienerKind. Scratch keeps
+// the partials.
 template <typename Y, typename P>
-stan::math::var wiener_packed_call(bool propto, int nargs, const Y& y,
-                                   const std::vector<P>& p, double precision) {
+stan::math::var wiener_packed_call(WienerKind kind, bool propto, int nargs,
+                                   const Y& y, const std::vector<P>& p,
+                                   double precision) {
+  namespace sm = stan::math;
+  if (kind == WienerKind::Lcdf)
+    return nargs == 5
+               ? sm::wiener_lcdf_unnorm(y, p[0], p[1], p[2], p[3], precision)
+               : sm::wiener_lcdf_unnorm(y, p[0], p[1], p[2], p[3], p[4], p[5],
+                                        p[6], precision);
+  if (kind == WienerKind::Lccdf)
+    return nargs == 5
+               ? sm::wiener_lccdf_unnorm(y, p[0], p[1], p[2], p[3], precision)
+               : sm::wiener_lccdf_unnorm(y, p[0], p[1], p[2], p[3], p[4], p[5],
+                                         p[6], precision);
   if (nargs == 6)
-    return propto ? stan::math::wiener_lpdf<true>(y, p[0], p[1], p[2], p[3],
-                                                  p[4], precision)
-                  : stan::math::wiener_lpdf<false>(y, p[0], p[1], p[2], p[3],
-                                                   p[4], precision);
-  return propto ? stan::math::wiener_lpdf<true>(y, p[0], p[1], p[2], p[3], p[4],
-                                                p[5], p[6], precision)
-                : stan::math::wiener_lpdf<false>(y, p[0], p[1], p[2], p[3],
-                                                 p[4], p[5], p[6], precision);
+    return propto ? sm::wiener_lpdf<true>(y, p[0], p[1], p[2], p[3], p[4],
+                                          precision)
+                  : sm::wiener_lpdf<false>(y, p[0], p[1], p[2], p[3], p[4],
+                                           precision);
+  return propto ? sm::wiener_lpdf<true>(y, p[0], p[1], p[2], p[3], p[4], p[5],
+                                        p[6], precision)
+                : sm::wiener_lpdf<false>(y, p[0], p[1], p[2], p[3], p[4], p[5],
+                                         p[6], precision);
 }
 void wiener_packed_fwd(KernelCtx& ctx) {
   const int nargs = ctx.idata[0];
   const int64_t lanes = ctx.idata[1];
   const unsigned active = (unsigned)ctx.idata[2];
   const bool propto = ctx.idata[3] != 0;
+  const WienerKind kind = static_cast<WienerKind>(ctx.idata[4]);
   const int64_t width = nargs * lanes;
   double* partials = values_only() ? nullptr : ctx.scratch;
   if (partials) std::fill_n(partials, width, 0.0);
@@ -2061,6 +2041,7 @@ void wiener_packed_fwd(KernelCtx& ctx) {
   const double precision = ctx.in[1].data[0];
   const double* in = ctx.in[0].data;
   const bool y_active = (active & 1u) != 0;
+  const bool y_var = y_active || kind != WienerKind::Lpdf;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   var out;
@@ -2068,8 +2049,8 @@ void wiener_packed_fwd(KernelCtx& ctx) {
     std::vector<var> p;
     for (int k = 1; k < nargs; ++k) p.emplace_back(in[k]);
     var y = in[0];
-    out = y_active ? wiener_packed_call(propto, nargs, y, p, precision)
-                   : wiener_packed_call(propto, nargs, in[0], p, precision);
+    out = y_var ? wiener_packed_call(kind, propto, nargs, y, p, precision)
+                : wiener_packed_call(kind, propto, nargs, in[0], p, precision);
     ctx.out.data[0] = out.val();
     if (!partials) return;
     stan::math::grad(out.vi_);
@@ -2082,9 +2063,9 @@ void wiener_packed_fwd(KernelCtx& ctx) {
     for (int64_t i = 0; i < lanes; ++i) p[k - 1](i) = in[k * lanes + i];
   const Eigen::Map<const Eigen::VectorXd> y_data(in, lanes);
   VarV y = y_data.cast<var>();
-  out = y_active ? wiener_packed_call(propto, nargs, y, p, precision)
-                 : wiener_packed_call(propto, nargs, Eigen::VectorXd(y_data), p,
-                                      precision);
+  out = y_var ? wiener_packed_call(kind, propto, nargs, y, p, precision)
+              : wiener_packed_call(kind, propto, nargs, Eigen::VectorXd(y_data),
+                                   p, precision);
   ctx.out.data[0] = out.val();
   if (!partials) return;
   stan::math::grad(out.vi_);

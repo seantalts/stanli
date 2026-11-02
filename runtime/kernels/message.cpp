@@ -193,6 +193,81 @@ void check_structured_value(const double* values, int64_t len,
   }
 }
 
+void check_bound_value(const double* values, int64_t len, const double* bound,
+                       int64_t bound_len, const std::string& name,
+                       const CheckGeometry& geometry, bool lower) {
+  const bool scalar_bound = bound_len == 1;
+  const auto check = [&](const std::string& element_name, const auto& y,
+                         const auto& b) {
+    without_check_prefix([&] {
+      if (lower)
+        stan::math::check_greater_or_equal("", element_name.c_str(), y, b);
+      else
+        stan::math::check_less_or_equal("", element_name.c_str(), y, b);
+    });
+  };
+  if (geometry.dims.empty() || geometry.leaf_rank == 0) {
+    for (int64_t i = 0; i < len; ++i)
+      check(name, values[i], bound[scalar_bound ? 0 : i]);
+    return;
+  }
+
+  const std::vector<int64_t>& dims = geometry.dims;
+  const size_t outer_rank = dims.size() - geometry.leaf_rank;
+  const int64_t batch = checked_product(dims, 0, outer_rank);
+  const int64_t leaf_len = checked_product(dims, outer_rank, dims.size());
+  if (batch * leaf_len != len || (!scalar_bound && bound_len != len))
+    throw std::logic_error("bound-check width does not match geometry");
+  if (len == 0) return;
+
+  std::vector<double> y_leaf((size_t)leaf_len), b_leaf((size_t)leaf_len);
+  std::vector<int64_t> index(outer_rank);
+  const auto gather = [&](const double* source, int64_t leaf,
+                          std::vector<double>& out) {
+    if (geometry.storage == StructuredStorage::ContiguousLeaves) {
+      std::copy(source + leaf * leaf_len, source + (leaf + 1) * leaf_len,
+                out.begin());
+      return;
+    }
+    int64_t outer_serial = 0, stride = 1;
+    for (size_t d = 0; d < outer_rank; ++d) {
+      outer_serial += index[d] * stride;
+      stride *= dims[d];
+    }
+    for (int64_t e = 0; e < leaf_len; ++e)
+      out[(size_t)e] = source[outer_serial + batch * e];
+  };
+  const int64_t rows = dims[outer_rank];
+  const int64_t cols = geometry.leaf_rank == 2 ? dims[outer_rank + 1] : 1;
+  for (int64_t leaf = 0; leaf < batch; ++leaf) {
+    int64_t rem = leaf;
+    for (size_t d = outer_rank; d-- > 0;) {
+      index[d] = rem % dims[d];
+      rem /= dims[d];
+    }
+    gather(values, leaf, y_leaf);
+    if (!scalar_bound) gather(bound, leaf, b_leaf);
+    std::string element_name = name;
+    for (size_t d = 0; d < outer_rank; ++d)
+      element_name += (d == 0 ? "[" : ", ") + std::to_string(index[d] + 1);
+    if (outer_rank > 0) element_name += "]";
+    using Vec = Eigen::Map<const Eigen::VectorXd>;
+    using Mat = Eigen::Map<const Eigen::MatrixXd>;
+    const auto with_bound = [&](const auto& y, auto make) {
+      if (scalar_bound)
+        check(element_name, y, bound[0]);
+      else
+        check(element_name, y, make(b_leaf.data()));
+    };
+    if (geometry.leaf_rank == 2)
+      with_bound(Mat(y_leaf.data(), rows, cols),
+                 [&](const double* p) { return Mat(p, rows, cols); });
+    else
+      with_bound(Vec(y_leaf.data(), rows),
+                 [&](const double* p) { return Vec(p, rows); });
+  }
+}
+
 namespace {
 
 // Build the message: chunk 0, then input 0, then chunk 1, then input 1,
@@ -250,17 +325,8 @@ void check_fwd(KernelCtx& ctx) {
   if ((spec->bound_is_scalar && bound.len != 1) ||
       (!spec->bound_is_scalar && bound.len != value.len))
     throw std::logic_error("bound-check shape metadata is inconsistent");
-  without_check_prefix([&] {
-    for (int64_t i = 0; i < value.len; ++i) {
-      const double b = bound.data[spec->bound_is_scalar ? 0 : i];
-      if constexpr (Lower)
-        stan::math::check_greater_or_equal("", spec->name.c_str(),
-                                           value.data[i], b);
-      else
-        stan::math::check_less_or_equal("", spec->name.c_str(), value.data[i],
-                                        b);
-    }
-  });
+  check_bound_value(value.data, value.len, bound.data, bound.len, spec->name,
+                    spec->geometry, Lower);
   ctx.out.data[0] = 0.0;
 }
 

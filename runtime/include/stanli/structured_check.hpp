@@ -27,6 +27,17 @@ struct StructuredCheckSpec {
   std::vector<int64_t> dims;
 };
 
+// The declared geometry of a value whose elements a check names. `dims` lists
+// array extents first, then the vector length or matrix rows and columns;
+// `leaf_rank` is 0 for a scalar and otherwise the number of trailing extents
+// Stan Math sees as one Eigen object (an array of scalars counts its last
+// extent as a vector).
+struct CheckGeometry {
+  std::vector<int64_t> dims;
+  size_t leaf_rank = 0;
+  StructuredStorage storage = StructuredStorage::ContiguousLeaves;
+};
+
 // Stan Math prefixes every validator message with the calling function's name.
 // stanli has none worth showing, so validators are called with an empty name
 // and the resulting ": " is dropped here.
@@ -51,6 +62,14 @@ inline void without_check_prefix(F&& check) {
 // logic_error when lowering supplied inconsistent immutable geometry.
 void check_structured_value(const double* values, int64_t len,
                             const StructuredCheckSpec& spec);
+
+// check_greater_or_equal (lower) or check_less_or_equal against `bound`, which
+// is one value or one per element, naming a bad element as Stan Math does for
+// the variable's declared type: "x[2, 3]" for an array and "[1, 2]" for a
+// matrix inside it. Without geometry the name is used as given.
+void check_bound_value(const double* values, int64_t len, const double* bound,
+                       int64_t bound_len, const std::string& name,
+                       const CheckGeometry& geometry, bool lower);
 
 }  // namespace stanli
 

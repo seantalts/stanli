@@ -253,33 +253,71 @@ int main() {
         *atan2_spec,
         {shape(BuiltinArgumentKind::Real, BuiltinContainerKind::Scalar, {}, 1),
          shape(BuiltinArgumentKind::Real, BuiltinContainerKind::Matrix, {2, 3},
-               6)});
+               6)},
+        "atan2", false);
     if (layout.lanes != 6 || layout.result_argument != 1) {
       ++failures;
       std::printf("FAIL scalar/matrix BuiltinLayout\n");
     }
-    bool rejected = false;
+    std::string rejected;
     try {
       (void)builtin_layout(*atan2_spec,
                            {shape(BuiltinArgumentKind::Real,
                                   BuiltinContainerKind::Vector, {3}, 3),
                             shape(BuiltinArgumentKind::Real,
-                                  BuiltinContainerKind::RowVector, {3}, 3)});
-    } catch (const std::invalid_argument&) {
-      rejected = true;
+                                  BuiltinContainerKind::Vector, {4}, 4)},
+                           "atan2", false);
+    } catch (const std::invalid_argument& error) {
+      rejected = builtin_error_message("atan2", error);
     }
-    if (!rejected) {
+    if (rejected !=
+        "Binary function: x (3, 1) and y (4, 1) must match in size") {
       ++failures;
-      std::printf("FAIL logical-shape mismatch accepted\n");
+      std::printf("FAIL logical-shape mismatch message: %s\n",
+                  rejected.c_str());
+    }
+    rejected.clear();
+    try {
+      (void)builtin_layout(*builtin_spec("Plus__", 2),
+                           {shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::RowVector, {3}, 3),
+                            shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::RowVector, {4}, 4)},
+                           "Plus__", false);
+    } catch (const std::invalid_argument& error) {
+      rejected = builtin_error_message("Plus__", error);
+    }
+    if (rejected != "add: m1 (1, 3) and m2 (1, 4) must match in size") {
+      ++failures;
+      std::printf("FAIL operator size mismatch message: %s\n",
+                  rejected.c_str());
+    }
+    rejected.clear();
+    try {
+      (void)builtin_layout(*builtin_spec("Plus__", 2),
+                           {shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::RowVector, {3}, 3),
+                            shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::RowVector, {4}, 4)},
+                           "Plus__", true);
+    } catch (const std::invalid_argument& error) {
+      rejected = builtin_error_message("Plus__", error);
+    }
+    if (rejected != "add: a (1, 3) and b (1, 4) must match in size") {
+      ++failures;
+      std::printf("FAIL var operator size mismatch message: %s\n",
+                  rejected.c_str());
     }
   }
   {
     const BuiltinSpec* bessel = builtin_spec("bessel_first_kind", 2);
-    const BuiltinLayout layout = builtin_layout(
-        *bessel, {shape(BuiltinArgumentKind::Integer,
-                        BuiltinContainerKind::Array, {2, 3}, 6),
-                  shape(BuiltinArgumentKind::Real, BuiltinContainerKind::Matrix,
-                        {2, 3}, 6)});
+    const BuiltinLayout layout =
+        builtin_layout(*bessel,
+                       {shape(BuiltinArgumentKind::Integer,
+                              BuiltinContainerKind::Array, {2, 3}, 6),
+                        shape(BuiltinArgumentKind::Real,
+                              BuiltinContainerKind::Matrix, {2, 3}, 6)},
+                       "bessel_first_kind", false);
     if (layout.lanes != 6 || layout.result_argument != 1 ||
         layout.integer_matrix_rows != 2 || layout.integer_matrix_cols != 3) {
       ++failures;
@@ -289,8 +327,10 @@ int main() {
   {
     const BuiltinSpec* softmax = builtin_spec("softmax", 1);
     const BuiltinLayout layout =
-        builtin_layout(*softmax, {shape(BuiltinArgumentKind::Real,
-                                        BuiltinContainerKind::Vector, {4}, 4)});
+        builtin_layout(*softmax,
+                       {shape(BuiltinArgumentKind::Real,
+                              BuiltinContainerKind::Vector, {4}, 4)},
+                       "softmax", false);
     if (layout.lanes != 4) {
       ++failures;
       std::printf("FAIL whole-value BuiltinLayout\n");

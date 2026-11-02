@@ -1519,17 +1519,18 @@ struct ProgramCompiler {
     return out;
   }
 
-  static BuiltinLayout resolved_builtin_layout(
-      const mir::Expr& e, const BuiltinSpec& spec,
-      const std::vector<Range>& values) {
+  BuiltinLayout resolved_builtin_layout(const mir::Expr& e,
+                                        const BuiltinSpec& spec,
+                                        const std::vector<Range>& values) {
     std::vector<BuiltinArgumentShape> shapes;
     shapes.reserve(values.size());
     try {
       for (size_t k = 0; k < values.size(); ++k)
         shapes.push_back(builtin_argument_shape(e.args[k], values[k]));
-      return builtin_layout(spec, shapes);
+      return builtin_layout(spec, shapes, e.name,
+                            !in_write_array && mir::any_argument_active(e));
     } catch (const std::invalid_argument& error) {
-      throw Bail{e.name + ": " + error.what()};
+      throw Bail{builtin_error_message(e.name, error)};
     }
   }
 
@@ -1855,10 +1856,10 @@ struct ProgramCompiler {
             if (ix >= 1 && ix <= b.len) return {b.reg + (int)ix - 1, 1};
             if (b.len < 1) bail("index out of the declared range");
             Program::Message message;
-            message.spec.chunks = {out_of_range_message(
+            message.spec.chunks = {index_out_of_range_message(
                 b.kind == ViewKind::Flat ? "array[uni, ...] index"
                                          : "vector[uni] indexing",
-                ix, b.len)};
+                b.len, ix)};
             message.spec.error = MessageError::OutOfRange;
             p.messages.push_back(std::move(message));
             emit(Program::REJECT, 0, (int)p.messages.size() - 1);
@@ -2843,7 +2844,7 @@ struct ProgramCompiler {
       return kernel_call(spec.opcode, args, out, plan.variant,
                          plan.activity_mask, plan.idata, {}, e.name);
     } catch (const std::exception& error) {
-      bail(e.name + ": " + error.what());
+      bail(builtin_error_message(e.name, error));
     }
 
     return {};
@@ -2888,12 +2889,73 @@ struct ProgramCompiler {
     return out;
   }
 
+  Range inverse_transform_call(const mir::Expr& e) {
+    CallableTransformSpec spec;
+    callable_transform(e.name, &spec);
+    Program::Transform tr;
+    tr.kind = spec.kind;
+    tr.direction = spec.direction;
+    tr.n_in = 1;
+    const Range arg = expr(e.args[0]);
+    tr.in[0] = arg.reg;
+    tr.in_len[0] = arg.len;
+    ViewKind leaf = arg.kind;
+    std::vector<int64_t> dims;
+    if (leaf == ViewKind::Array) {
+      dims = arg.dims;
+      leaf = arg.leaf;
+    } else if (leaf == ViewKind::Matrix) {
+      dims = {arg.rows, arg.cols};
+    } else if (leaf == ViewKind::Vector || leaf == ViewKind::RowVector) {
+      dims = {arg.len};
+    }
+    if (leaf != ViewKind::Vector && leaf != ViewKind::Matrix)
+      bail(e.name + ": expected a vector or matrix");
+    const size_t outer_rank = dims.size() - leaf_rank(leaf);
+    int64_t batch = 1;
+    for (size_t i = 0; i < outer_rank; ++i) batch *= dims[i];
+    tr.in_rows = (int32_t)dims[outer_rank];
+    tr.in_cols = leaf == ViewKind::Matrix ? (int32_t)dims.back() : 0;
+    int64_t rows = 0, cols = 0;
+    bool out_matrix = false;
+    if (!free_leaf_shape(spec.kind, tr.in_rows, tr.in_cols, &rows, &cols,
+                         &out_matrix) ||
+        rows < 0 || cols < 0)
+      bail(e.name + ": invalid input container");
+    const int64_t inner_free = out_matrix ? rows * cols : rows;
+    if (batch > kMaxRegs || (batch && inner_free > kMaxRegs / batch))
+      bail(e.name + ": result needs too many registers");
+    tr.batch = (int32_t)batch;
+    tr.inner_raw = (int32_t)(tr.in_cols ? tr.in_rows * tr.in_cols : tr.in_rows);
+    tr.out_rows = (int32_t)rows;
+    tr.out_cols = (int32_t)cols;
+    tr.out_len = (int32_t)(batch * inner_free);
+    Range out = arg;
+    out.len = tr.out_len;
+    out.kind = outer_rank ? ViewKind::Array
+                          : (out_matrix ? ViewKind::Matrix : ViewKind::Vector);
+    out.rows = out_matrix && !outer_rank ? rows : 0;
+    out.cols = out_matrix && !outer_rank ? cols : 0;
+    if (outer_rank) {
+      out.dims.assign(dims.begin(), dims.begin() + outer_rank);
+      out.dims.push_back(rows);
+      if (out_matrix) out.dims.push_back(cols);
+      out.leaf = out_matrix ? ViewKind::Matrix : ViewKind::Vector;
+    }
+    tr.out = alloc(tr.out_len);
+    tr.jac = alloc(1);
+    out.reg = tr.out;
+    p.transforms.push_back(tr);
+    p.code.push_back(
+        Program::Instr{Program::TRANSFORM, 0, (int)p.transforms.size() - 1});
+    return out;
+  }
+
   Range transform_call(const mir::Expr& e, const CallableTransformSpec& spec) {
     if (e.args.size() != spec.arity)
       bail(e.name + ": wrong number of arguments");
     if (spec.structured && spec.direction == TransformDirection::Unconstrain)
-      bail(e.name +
-           ": structured inverse is not supported in a runtime region");
+      return inverse_transform_call(e);
 
     Program::Transform tr;
     tr.kind = spec.kind;
@@ -2913,6 +2975,11 @@ struct ProgramCompiler {
           bail(e.name + ": bound is neither scalar nor the input size");
       tr.out_len = args[0].len;
       tr.inner_raw = args[0].len;
+      tr.eigen = args[0].kind == ViewKind::Vector      ? 1
+                 : args[0].kind == ViewKind::RowVector ? 2
+                 : args[0].kind == ViewKind::Matrix    ? 3
+                                                       : 0;
+      tr.rows = static_cast<int32_t>(args[0].rows);
     } else {
       ViewKind leaf = args[0].kind;
       std::vector<int64_t> dims;
@@ -3288,6 +3355,8 @@ struct ProgramCompiler {
                          {}, e.name);
     }
 
+    if (e.name == "eval" && e.args.size() == 1) return expr(e.args[0]);
+
     // Registered matrix operations: the same dedicated kernels the graph
     // emits, called over the operands' column-major ranges. The active
     // variant bit mirrors the graph's autodiff stamp -- any non-data
@@ -3310,7 +3379,7 @@ struct ProgramCompiler {
       }
       bool active = false;
       for (const mir::Expr& argument : e.args)
-        if (!argument.data_only) active = true;
+        if (!argument.data_only && !in_write_array) active = true;
       Range out{0, (int)map.result.storage_size};
       out = shaped(std::move(out), map.result);
       std::vector<int> idata;
@@ -3351,29 +3420,31 @@ struct ProgramCompiler {
         return native_builtin_call(e, *builtin, *native);
       return builtin_kernel_call(e, *builtin);
     }
-    if (e.name == "wiener_lpdf" && e.args.size() > 5) {
-      const int total = (int)e.args.size();
-      const int nargs = total == 6 || total == 8 ? total : total - 1;
+    if (const auto wiener = wiener_form(e.name, e.args.size())) {
+      const int nargs = wiener->reals;
       std::vector<Range> args;
       for (int k = 0; k < nargs; ++k) args.push_back(expr(e.args[k]));
       int lanes = 1;
       for (const Range& a : args) lanes = std::max(lanes, a.len);
       int active = 0;
       for (int k = 0; k < nargs; ++k) {
-        if (args[k].len != lanes)
-          bail("wiener_lpdf: arguments differ in length");
+        if (args[k].len != lanes) bail(e.name + ": arguments differ in length");
         if (!e.args[k].data_only) active |= 1 << k;
       }
       const int packed = alloc(nargs * lanes);
       for (int k = 0; k < nargs; ++k)
         for (int i = 0; i < lanes; ++i)
           emit(Program::MOV, packed + k * lanes + i, args[k].reg + i);
-      const Range precision =
-          nargs < total ? expr(e.args[nargs]) : Range{konst(1e-4), 1};
+      const Range precision = wiener->has_precision
+                                  ? expr(e.args[nargs])
+                                  : Range{konst(wiener->default_precision), 1};
+      const bool propto_density =
+          wiener->kind == WienerKind::Lpdf && e.fn_propto;
       return kernel_call(
           OP_WIENER_PACKED_LPDF, {Range{packed, nargs * lanes}, precision},
           Range{0, 1}, 0, active ? 0x1 : 0,
-          {nargs, lanes, active, e.fn_propto ? 1 : 0}, {}, e.name);
+          {nargs, lanes, active, propto_density ? 1 : 0, (int)wiener->kind}, {},
+          e.name);
     }
     if (registered != nullptr && registered->density() != nullptr)
       return density_call(e, *registered->density());
@@ -3756,7 +3827,7 @@ struct ProgramCompiler {
           map = builtin_product_map(builtin_argument_shape(e.args[0], a),
                                     builtin_argument_shape(e.args[1], b));
         } catch (const std::invalid_argument& error) {
-          bail(e.name + ": " + error.what());
+          bail(builtin_error_message(e.name, error));
         }
         const int64_t rows = map.m, inner = map.k, cols = map.n;
         const ViewKind result_kind =
@@ -3931,7 +4002,10 @@ struct ProgramCompiler {
               shaped_builtin_spec(e.name, 1, BuiltinShapePolicy::Predicate)) {
         const bool nan = pred->predicate == BuiltinPredicate::IsNan;
         const int rhs = nan ? -1 : konst(0.0);
-        const Program::Code c = nan ? Program::NE : Program::EQ;
+        const Program::Code c = nan ? Program::NE
+                                : pred->predicate == BuiltinPredicate::IntStep
+                                    ? Program::GT
+                                    : Program::EQ;
         const int r = alloc(a.len);
         if (pred->predicate == BuiltinPredicate::IsInf) {
           const int pos = konst(std::numeric_limits<double>::infinity());

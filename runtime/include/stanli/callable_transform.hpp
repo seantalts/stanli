@@ -4,6 +4,7 @@
 #include <stanli/optable.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <string_view>
 
 namespace stanli {
@@ -113,8 +114,65 @@ inline bool callable_transform(std::string_view name,
          OP_CONSTRAIN_CHOL_COV, 3, true};
   else
     return false;
+  if (s.structured && direction == TransformDirection::Unconstrain) s.arity = 1;
   *out = s;
   return true;
+}
+
+// The unconstrained leaf a structured inverse produces from one constrained
+// leaf of `rows` by `cols` (cols is 0 for a vector). Returns false when the
+// transform does not take that kind of leaf.
+inline bool free_leaf_shape(CallableTransformKind kind, int64_t rows,
+                            int64_t cols, int64_t* out_rows, int64_t* out_cols,
+                            bool* out_matrix) {
+  const bool matrix = cols != 0 ||
+                      kind == CallableTransformKind::StochasticColumn ||
+                      kind == CallableTransformKind::StochasticRow ||
+                      kind == CallableTransformKind::CholeskyFactorCorr ||
+                      kind == CallableTransformKind::CorrMatrix ||
+                      kind == CallableTransformKind::CovMatrix ||
+                      kind == CallableTransformKind::CholeskyFactorCov;
+  *out_cols = 0;
+  *out_matrix = false;
+  switch (kind) {
+    case CallableTransformKind::Ordered:
+    case CallableTransformKind::PositiveOrdered:
+    case CallableTransformKind::UnitVector:
+      *out_rows = rows;
+      return !matrix;
+    case CallableTransformKind::Simplex:
+      *out_rows = rows - 1;
+      return !matrix;
+    case CallableTransformKind::SumToZero:
+      *out_rows = rows - 1;
+      if (matrix) {
+        *out_cols = cols - 1;
+        *out_matrix = true;
+      }
+      return true;
+    case CallableTransformKind::StochasticColumn:
+      *out_rows = rows - 1;
+      *out_cols = cols;
+      *out_matrix = true;
+      return matrix;
+    case CallableTransformKind::StochasticRow:
+      *out_rows = rows;
+      *out_cols = cols - 1;
+      *out_matrix = true;
+      return matrix;
+    case CallableTransformKind::CholeskyFactorCorr:
+    case CallableTransformKind::CorrMatrix:
+      *out_rows = rows * (rows - 1) / 2;
+      return matrix;
+    case CallableTransformKind::CovMatrix:
+      *out_rows = rows * (rows + 1) / 2;
+      return matrix;
+    case CallableTransformKind::CholeskyFactorCov:
+      *out_rows = cols * (cols + 1) / 2 + (rows - cols) * cols;
+      return matrix;
+    default:
+      return false;
+  }
 }
 
 }  // namespace stanli

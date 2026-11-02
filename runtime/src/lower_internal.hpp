@@ -1054,7 +1054,8 @@ struct Lowering {
                      const std::string& raw) {
     if (i >= 1 && i <= n) return i;
     if (n < 1) check_index(i, n, function, raw);
-    emit_error(MessageError::OutOfRange, out_of_range_message(function, i, n));
+    emit_error(MessageError::OutOfRange,
+               index_out_of_range_message(function, n, i));
     return 1;
   }
   void check_index(int64_t i, int64_t n, const char* what,
@@ -1063,6 +1064,10 @@ struct Lowering {
       fail(std::string(what) + ": index " + std::to_string(i) +
                " out of bounds for size " + std::to_string(n),
            raw);
+  }
+  void check_uni_index(int64_t i, int64_t n, const char* stan_label,
+                       const std::string& raw) {
+    if (i < 1 || i > n) fail(index_out_of_range_message(stan_label, n, i), raw);
   }
   // A range with hi < lo is empty and never reads, whatever the endpoints.
   void check_range(int64_t lo, int64_t hi, int64_t n, const char* what,
@@ -1231,6 +1236,25 @@ struct Lowering {
   const ArrayShape& array_shape(const SlotInfo& si) const {
     return shape_pool->at(si.shape);
   }
+  // The row count an offset_multiplier check names matrix elements by.
+  std::vector<int> offset_multiplier_rows(CallableTransformKind kind,
+                                          const SlotInfo& si);
+  CheckGeometry check_geometry(const SlotInfo& si, int64_t len) const {
+    CheckGeometry geometry;
+    if (is_array(si)) {
+      const ArrayShape& shape = array_shape(si);
+      geometry.dims = shape.dims;
+      geometry.leaf_rank =
+          std::max<size_t>(1, static_cast<size_t>(leaf_rank(shape.leaf)));
+    } else if (is_matrix(si)) {
+      geometry.dims = {si.rows, si.cols};
+      geometry.leaf_rank = 2;
+    } else if (is_vector(si) || is_row_vector(si)) {
+      geometry.dims = {len};
+      geometry.leaf_rank = 1;
+    }
+    return geometry;
+  }
   SlotInfo indexed_view(const SlotInfo& base, size_t n_single, int64_t out_len,
                         const std::string& out_type);
 
@@ -1267,9 +1291,10 @@ struct Lowering {
     try {
       for (size_t k = 0; k < values.size(); ++k)
         shapes.push_back(builtin_argument_shape(e.args[k], values[k]));
-      return builtin_layout(spec, shapes);
+      return builtin_layout(spec, shapes, e.name,
+                            !in_write_array && mir::any_argument_active(e));
     } catch (const std::invalid_argument& error) {
-      fail(e.name + ": " + error.what(), e.raw);
+      fail(builtin_error_message(e.name, error), e.raw);
     }
   }
 
@@ -1422,14 +1447,13 @@ struct Lowering {
       return is_vector(si) || is_row_vector(si) || is_matrix(si);
     };
     if (!eigen(a.si) || !eigen(b.si)) return std::nullopt;
-    const LogicalDims x = logical_dims(a.si, g.slots[a.slot].len, e.name);
-    const LogicalDims y = logical_dims(b.si, g.slots[b.slot].len, e.name);
-    if (x.rows == y.rows && x.cols == y.cols) return std::nullopt;
+    if (same_view(a.si, g.slots[a.slot].len, b.si, g.slots[b.slot].len))
+      return std::nullopt;
     const bool var = !in_write_array && (a.autodiff || b.autodiff);
-    return std::string(add ? "add" : "subtract") + ": " + (var ? "a" : "m1") +
-           " (" + std::to_string(x.rows) + ", " + std::to_string(x.cols) +
-           ") and " + (var ? "b" : "m2") + " (" + std::to_string(y.rows) +
-           ", " + std::to_string(y.cols) + ") must match in size";
+    return matrix_dims_mismatch_message(
+        add ? "add" : "subtract", var ? "a" : "m1",
+        builtin_argument_shape(e.args[0], a), var ? "b" : "m2",
+        builtin_argument_shape(e.args[1], b));
   }
   void sync_data_local(const std::string& name, const mir::Expr& rhs,
                        const Val& v);
@@ -1734,7 +1758,8 @@ struct Lowering {
   // straight-line graph call and a call under dynamic control on one callback
   // binder and one kernel path instead of growing a second graph-only parser.
   Val lower_program_expression(const mir::Expr& e);
-  Val lower_wiener_packed(const mir::Expr& e, CallArguments& actuals);
+  Val lower_wiener_packed(const mir::Expr& e, CallArguments& actuals,
+                          const WienerForm& form);
 
   Val finish_emit(Op op, int64_t out_len, SlotInfo out_si,
                   std::vector<int> idata, bool autodiff) {

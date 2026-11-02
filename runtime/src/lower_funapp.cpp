@@ -226,9 +226,8 @@ std::optional<Lowering::Val> Lowering::lower_callable_transform(
   actuals.require_arity(tr.arity);
 
   if (tr.structured) {
-    // The inverse structured transforms are not needed by Jacobian calls
-    // and do not share the constrain kernels' two-output protocol.
-    if (tr.direction == TransformDirection::Unconstrain) return std::nullopt;
+    if (tr.direction == TransformDirection::Unconstrain)
+      return lower_program_expression(e);
     Val raw = actuals.at(0).value();
     ViewKind leaf = raw.si.kind;
     std::vector<int64_t> dims;
@@ -405,7 +404,8 @@ std::optional<Lowering::Val> Lowering::lower_callable_transform(
   // and simply leaves it unrooted -- no term reaches the target, and its
   // adjoint stays zero, which is exactly the no-lp overload's gradient.
   const int jac = add_slot(1, /*is_param=*/false);
-  Val v = emit_raw(tr.opcode, ins, n, si, {}, jac, autodiff);
+  Val v = emit_raw(tr.opcode, ins, n, si, offset_multiplier_rows(tr.kind, si),
+                   jac, autodiff);
   v.layout = owning_layout(si);
   if (tr.direction == TransformDirection::Jacobian && !in_write_array)
     target_terms.push_back(jac);
@@ -415,6 +415,12 @@ std::optional<Lowering::Val> Lowering::lower_callable_transform(
 // `log(y - lb)` is ordinary var arithmetic, which is what these
 // elementwise ops emit, so the composition is the reference rather than an
 // approximation of it, and no new kernel is needed.
+std::vector<int> Lowering::offset_multiplier_rows(CallableTransformKind kind,
+                                                  const SlotInfo& si) {
+  if (kind != CallableTransformKind::OffsetMultiplier || !is_matrix(si))
+    return {};
+  return {checked_immediate(si.rows, "offset_multiplier rows")};
+}
 Lowering::Val Lowering::free_transform(uint16_t opcode,
                                        const std::vector<Val>& a, SlotInfo si,
                                        int64_t n) {
@@ -450,7 +456,9 @@ Lowering::Val Lowering::free_transform(uint16_t opcode,
       return un(OP_LOGIT,
                 elt(OP_DIV, elt(OP_SUB, a[0], a[1]), elt(OP_SUB, a[2], a[1])));
     default:  // offset_multiplier_free: (y - mu) / sigma
-      (void)emit_value(OP_CHECK_OFFSET_MULTIPLIER, {a[1], a[2]}, 1);
+      (void)emit_value(
+          OP_CHECK_OFFSET_MULTIPLIER, {a[1], a[2]}, 1, {},
+          offset_multiplier_rows(CallableTransformKind::OffsetMultiplier, si));
       return elt(OP_DIV, elt(OP_SUB, a[0], a[1]), a[2]);
   }
 }
@@ -692,12 +700,13 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   ret.layout = owning_layout(ret.si);
   return ret;
 }
-// wiener_lpdf's five- and seven-parameter forms, each with an optional
-// precision. The real arguments are all scalars or all vectors of one length.
+// wiener_lpdf's five- and seven-parameter forms and the wiener cdfs, each with
+// an optional precision. The real arguments are all scalars or all vectors of
+// one length.
 Lowering::Val Lowering::lower_wiener_packed(const mir::Expr& e,
-                                            CallArguments& actuals) {
-  const int total = (int)e.args.size();
-  const int nargs = total == 6 || total == 8 ? total : total - 1;
+                                            CallArguments& actuals,
+                                            const WienerForm& form) {
+  const int nargs = form.reals;
   std::vector<Val> args;
   for (int k = 0; k < nargs; ++k) args.push_back(actuals.at(k).value());
   int64_t lanes = 1;
@@ -705,17 +714,19 @@ Lowering::Val Lowering::lower_wiener_packed(const mir::Expr& e,
   int active = 0;
   for (int k = 0; k < nargs; ++k) {
     if (g.slots[args[k].slot].len != lanes)
-      fail("wiener_lpdf: arguments differ in length", e.raw);
+      fail(e.name + ": arguments differ in length", e.raw);
     if (!args[k].si.param_free) active |= 1 << k;
   }
   Val packed = args[0];
   for (int k = 1; k < nargs; ++k)
     packed = emit_value(OP_CONCAT2, {packed, args[k]}, (k + 1) * lanes);
-  const Val precision =
-      nargs < total ? actuals.at(nargs).value() : constant(1e-4);
+  const Val precision = form.has_precision ? actuals.at(nargs).value()
+                                           : constant(form.default_precision);
+  const bool propto_density = form.kind == WienerKind::Lpdf && propto(e);
   return with_layout(
-      emit_value(OP_WIENER_PACKED_LPDF, {packed, precision}, 1, {},
-                 {nargs, (int)lanes, active, propto(e) ? 1 : 0}),
+      emit_value(
+          OP_WIENER_PACKED_LPDF, {packed, precision}, 1, {},
+          {nargs, (int)lanes, active, propto_density ? 1 : 0, (int)form.kind}),
       ExpressionLayout::scalar());
 }
 Lowering::Val Lowering::lower_multi_normal_rng(const mir::Expr& e,
@@ -1135,8 +1146,9 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
   // state at all.
   CallArguments actuals(*this, e);
   if (e.name == "dims") return lower_dims(e, actuals);
-  if (e.name == "wiener_lpdf" && e.args.size() > 5)
-    return lower_wiener_packed(e, actuals);
+  if (e.name == "eval" && e.args.size() == 1) return actuals.at(0).value();
+  if (const auto wiener = wiener_form(e.name, e.args.size()))
+    return lower_wiener_packed(e, actuals, *wiener);
   const BuiltinDispatch dispatch = resolve_builtin(e);
 
   // One family decision replaces the former chain of optional handlers.
@@ -1312,8 +1324,10 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
         plan_arguments.push_back(std::move(argument));
       }
       plan = stanli::density_call_plan(spec, plan_arguments, propto(e));
+    } catch (const CompileError&) {
+      throw;
     } catch (const std::exception& error) {
-      fail(e.name + ": " + error.what(), e.raw);
+      fail(builtin_error_message(e.name, error), e.raw);
     }
     if (plan.empty_result) return constant(0.0);
     if (extent >= 0) {
@@ -1333,13 +1347,32 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
     return dv;
   }
 
-  // gaussian_dlm_obs takes seven arguments and Op::in holds six, so it
-  // cannot be lowered as one op at all. Raising the limit would add
-  // bytes to every Op and every KernelCtx in every model for the sake
-  // of one dynamic-linear-model density, so this refuses instead and
-  // names the reason. See docs/coverage.md.
-  if (e.name == "gaussian_dlm_obs_lpdf")
-    fail("gaussian_dlm_obs takes 7 arguments and an op holds 6", e.raw);
+  // gaussian_dlm_obs takes seven arguments and Op::in holds six, so the six
+  // model matrices travel as one concatenated slot beside y.
+  if (e.name == "gaussian_dlm_obs_lpdf") {
+    actuals.require_arity(7);
+    std::vector<Val> a;
+    for (size_t k = 0; k < 7; ++k) a.push_back(actuals.at(k).value());
+    if (!is_matrix(a[0].si) || !is_matrix(a[2].si))
+      fail(e.name + ": y and G must be matrices", e.raw);
+    bool active = false;
+    for (const Val& v : a) active = active || v.autodiff;
+    Val packed = a[1];
+    for (size_t k = 2; k < 7; ++k)
+      packed = emit_value(OP_CONCAT2, {packed, a[k]},
+                          g.slots[packed.slot].len + g.slots[a[k].slot].len,
+                          view_of("UVector"));
+    Val dv = emit_value(OP_GAUSSIAN_DLM_OBS_LPDF, {a[0], packed}, 1, {},
+                        {checked_immediate(a[0].si.rows, "dlm rows"),
+                         checked_immediate(a[0].si.cols, "dlm steps"),
+                         checked_immediate(a[2].si.rows, "dlm states"),
+                         is_matrix(a[3].si) ? 1 : 0});
+    g.ops.back().variant =
+        static_cast<uint8_t>((propto(e) ? 1u : 0u) |
+                             (propto(e) && active ? kMatrixActiveForward : 0u));
+    dv.layout = ExpressionLayout::scalar();
+    return dv;
+  }
 
   return std::nullopt;
 }
@@ -1438,7 +1471,7 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
         return with_layout(emit_value(OP_MUL, {a, b}, len),
                            elementwise_layout({a, b}));
       }
-      fail(e.name + ": " + error.what(), e.raw);
+      fail(builtin_error_message(e.name, error), e.raw);
     }
     switch (map.kind) {
       case BuiltinProductMap::Kind::ScalarScale: {
@@ -1837,7 +1870,8 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       return with_layout(result, owning_layout(a.si));
     }
     std::vector<Val> args{a};
-    if (matrix->arity == 2) args.push_back(actuals.at(1).value());
+    for (size_t k = 1; k < matrix->arity; ++k)
+      args.push_back(actuals.at(k).value());
     BuiltinMatrixMap map;
     try {
       std::vector<BuiltinArgumentShape> shapes;
@@ -1856,6 +1890,9 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       case FunctionContainerKind::Vector:
         si = view_of("UVector");
         break;
+      case FunctionContainerKind::Array:
+        si = array_view(map.result.dimensions, ViewKind::Flat, true);
+        break;
       default:
         break;
     }
@@ -1865,10 +1902,17 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     idata.reserve(map.idata.size());
     for (const int64_t value : map.idata)
       idata.push_back(checked_immediate(value, e.name + " extent"));
-    Val v = matrix->arity == 2 ? emit_value(matrix->opcode, {args[0], args[1]},
-                                            map.result.storage_size, si, idata)
-                               : emit_value(matrix->opcode, {args[0]},
-                                            map.result.storage_size, si, idata);
+    Val v =
+        matrix->arity == 4
+            ? emit_value(matrix->opcode, {args[0], args[1], args[2], args[3]},
+                         map.result.storage_size, si, idata)
+        : matrix->arity == 3
+            ? emit_value(matrix->opcode, {args[0], args[1], args[2]},
+                         map.result.storage_size, si, idata)
+        : matrix->arity == 2 ? emit_value(matrix->opcode, {args[0], args[1]},
+                                          map.result.storage_size, si, idata)
+                             : emit_value(matrix->opcode, {args[0]},
+                                          map.result.storage_size, si, idata);
     g.ops.back().variant =
         (uint8_t)(map.variant | (v.autodiff ? map.active_variant : 0u));
     return with_layout(v, map.result.container == FunctionContainerKind::Scalar
@@ -2117,6 +2161,49 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     return with_layout(emit_value(OP_SEGMENT_SUM, {products}, rows,
                                   view_of("UVector"), offsets),
                        owning_layout(view_of("UVector")));
+  }
+  if (e.name == "csr_to_dense_matrix" && e.args.size() == 5) {
+    actuals.require_arity(5);
+    const int64_t rows = actuals.at(0).require_constant_int("csr rows");
+    const int64_t cols = actuals.at(1).require_constant_int("csr columns");
+    if (rows <= 0 || cols <= 0)
+      fail(e.name + ": row and column counts must be positive", e.raw);
+    Val weights = actuals.at(2).value();
+    if (!is_vector(weights.si)) fail(e.name + ": w must be a vector", e.raw);
+    const std::vector<int> columns =
+        actuals.at(3).require_constant_ints("csr columns");
+    const std::vector<int> starts =
+        actuals.at(4).require_constant_ints("csr row starts");
+    const int64_t nnz = g.slots[weights.slot].len;
+    if ((int64_t)columns.size() != nnz)
+      fail(e.name + ": w and v sizes differ", e.raw);
+    if ((int64_t)starts.size() != rows + 1 || starts.front() != 1 ||
+        starts.back() != nnz + 1)
+      fail(e.name + ": u does not describe the requested rows", e.raw);
+    const SlotInfo si = matrix_view(rows, cols);
+    if (nnz == 0)
+      return with_layout(emit_value(OP_REP_MAT, {constant(0.0)}, rows * cols,
+                                    si, {(int)rows, (int)cols, 0}),
+                         owning_layout(si));
+    std::vector<int> gather((size_t)(rows * cols),
+                            checked_immediate(nnz, "csr entry"));
+    for (int64_t row = 0; row < rows; ++row) {
+      const int64_t begin = starts[(size_t)row] - 1;
+      const int64_t end = starts[(size_t)row + 1] - 1;
+      if (begin < 0 || end < begin || end > nnz)
+        fail(e.name + ": u is not monotone or is out of range", e.raw);
+      for (int64_t k = begin; k < end; ++k) {
+        const int column = columns[(size_t)k];
+        if (column < 1 || column > cols)
+          fail(e.name + ": v contains an out-of-range column", e.raw);
+        gather[(size_t)((column - 1) * rows + row)] =
+            checked_immediate(k, "csr entry");
+      }
+    }
+    Val padded = emit_value(OP_CONCAT2, {weights, constant(0.0)}, nnz + 1,
+                            view_of("UVector"));
+    return with_layout(emit_value(OP_GATHER, {padded}, rows * cols, si, gather),
+                       owning_layout(si));
   }
 
   return std::nullopt;

@@ -1,6 +1,11 @@
 #include <stanli/density_registry.hpp>
 #include <stanli/function_registry.hpp>
 
+#include <stan/math/prim/prob/discrete_range_cdf.hpp>
+#include <stan/math/prim/prob/discrete_range_lccdf.hpp>
+#include <stan/math/prim/prob/discrete_range_lcdf.hpp>
+#include <stan/math/prim/err/check_consistent_size.hpp>
+#include <stan/math/prim/err/check_size_match.hpp>
 #include <stan/math/prim/prob/discrete_range_lpmf.hpp>
 #include <stan/math/prim/prob/hypergeometric_lpmf.hpp>
 
@@ -46,6 +51,23 @@ double evaluate_all_integer(
                        ? stan::math::discrete_range_lpmf<true>(y, lower, upper)
                        : stan::math::discrete_range_lpmf<false>(y, lower,
                                                                 upper);
+          });
+        });
+      });
+    case AllIntegerDensity::DiscreteRangeCdf:
+    case AllIntegerDensity::DiscreteRangeLcdf:
+    case AllIntegerDensity::DiscreteRangeLccdf:
+      return with_integer_argument(arguments[0], [&](const auto& y) {
+        return with_integer_argument(arguments[1], [&](const auto& lower) {
+          return with_integer_argument(arguments[2], [&](const auto& upper) {
+            switch (density) {
+              case AllIntegerDensity::DiscreteRangeCdf:
+                return stan::math::discrete_range_cdf(y, lower, upper);
+              case AllIntegerDensity::DiscreteRangeLcdf:
+                return stan::math::discrete_range_lcdf(y, lower, upper);
+              default:
+                return stan::math::discrete_range_lccdf(y, lower, upper);
+            }
           });
         });
       });
@@ -112,9 +134,9 @@ std::vector<int> pack_all_integer_density_arguments(
 double evaluate_packed_all_integer_density(AllIntegerDensity density,
                                            const int* packed, int64_t size,
                                            bool propto) {
-  const int arity = density == AllIntegerDensity::HypergeometricLpmf  ? 4
-                    : density == AllIntegerDensity::DiscreteRangeLpmf ? 3
-                                                                      : 0;
+  const int arity = density == AllIntegerDensity::HypergeometricLpmf ? 4
+                    : density == AllIntegerDensity::None             ? 0
+                                                                     : 3;
   if (arity == 0) throw std::logic_error("unknown all-integer density");
   std::vector<IntegerDensityArgument> arguments;
   arguments.reserve((size_t)arity);
@@ -333,6 +355,21 @@ DensityCallPlan density_call_plan(
           spec.integer_args == 1 ? static_cast<int64_t>(plan.idata.size()) : 1;
       for (const std::vector<int>& group : integer_groups)
         instances = std::max(instances, static_cast<int64_t>(group.size()));
+    }
+    if (spec.opcode == OP_CATEGORICAL_LOGIT_GLM_LPMF) {
+      const char* function = "categorical_logit_glm_lpmf";
+      const int64_t beta_rows = matrix_dimensions(2).first;
+      const int64_t beta_cols = matrix_dimensions(2).second;
+      try {
+        stan::math::check_consistent_size(
+            function, "Intercept vector",
+            Eigen::VectorXd(real_shapes[1].storage_size),
+            static_cast<size_t>(beta_cols));
+        stan::math::check_size_match(function, "x.cols()", cols, "beta.rows()",
+                                     beta_rows);
+      } catch (const std::invalid_argument& error) {
+        throw StanMathError(error.what());
+      }
     }
     if (spec.integer_args == 2) {
       plan.idata.clear();

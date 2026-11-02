@@ -44,7 +44,7 @@ CACHE = REPO / "build-stanc3-ref"
 STANC = REPO / "deps" / "stanc3" / "stanc"
 CMDSTAN = REPO / "deps" / "cmdstan"
 DRIVER = REPO / "tools" / "ref_driver.cpp"
-POINTS = (0, 1, 2, 3)
+POINTS = (0, 1, 2, 3, 4)
 STANC_FLAGS = []
 OPT = "-O1"
 BUILD_TIMEOUT = 900
@@ -149,23 +149,27 @@ def link_prebuilt(objs, model_sha, exe):
 
 
 def evaluate(exe, data_text, work):
-    """(data_fail_message or None, number of finite points)."""
+    """(data_fail_message or None, number of finite points, messages of the
+    points that threw)."""
     path = work / "data.json"
     path.write_text(data_text)
     r = run([exe, path, "--points", ",".join(map(str, POINTS))], RUN_TIMEOUT)
     if r is None:
-        return "driver timed out", 0
+        return "driver timed out", 0, []
     head = _result_line(r.stdout)
     if head[:1] == ["DATA_FAIL"]:
         msg = " ".join(head[1:])
-        return re.sub(r"\(in '[^']*/good/", "(in '", msg)[:200], 0
-    verdict = {k: f[:1] == ["OK"] and all(math.isfinite(float(v))
-                                          for v in f[1:])
-               for k, f in point_results(r.stdout).items()
+        return re.sub(r"\(in '[^']*/good/", "(in '", msg)[:200], 0, [msg]
+    results = {k: f for k, f in point_results(r.stdout).items()
                if f[:1] in (["OK"], ["EVAL_FAIL"])}
-    if len(verdict) != len(POINTS):
-        return f"driver exited {r.returncode}: {last_line(r.stderr)}", 0
-    return None, sum(verdict.values())
+    if len(results) != len(POINTS):
+        return f"driver exited {r.returncode}: {last_line(r.stderr)}", 0, []
+    finite = sum(f[:1] == ["OK"] and all(math.isfinite(float(v))
+                                         for v in f[1:])
+                 for f in results.values())
+    thrown = [" ".join(f[1:]) for f in results.values()
+              if f[:1] == ["EVAL_FAIL"]]
+    return None, finite, thrown
 
 
 def remap(value, ints=None, reals=None, top=True):
@@ -252,9 +256,173 @@ REPAIRS = (
 )
 
 
+# Stan Math names the offending value and the bound it broke, so a failed
+# candidate can be steered: every data leaf printed as that value is moved
+# inside the bound.
+NUM = r"(-?(?:\d+\.?\d*(?:e[-+]?\d+)?|inf|nan))"
+BOUND = re.compile(
+    r"(?: is|  ?=) " + NUM + r", but must be (?:"
+    r"in the interval \[" + NUM + r", " + NUM + r"\]"
+    r"|(less|greater) than( or equal to)?[^=\d-]*=? ?" + NUM +
+    r"|(positive|nonnegative|non-negative|finite))")
+UNSORTED = re.compile(r"not a valid sorted vector\. The element at \d+ is "
+                      + NUM)
+
+
+def near(leaf, v):
+    if type(leaf) not in (int, float) or isinstance(leaf, bool):
+        return False
+    if math.isnan(v):
+        return math.isnan(leaf)
+    return leaf == v or abs(leaf - v) <= 1e-5 * max(1.0, abs(v))
+
+
+def inside(v, m, is_int, exact=None):
+    """A value inside the bound m names; exact is the unrounded bound when
+    a data leaf holds it, so that "or equal to" can be met with equality."""
+    lo, hi, side, eq, bound, kind = (m.group(i) for i in range(2, 8))
+    if kind:
+        if kind == "finite" or math.isnan(v) or math.isinf(v):
+            return 1
+        return abs(v) or 1
+    if lo is not None:
+        lo, hi = float(lo), float(hi)
+        if is_int:
+            return math.ceil(lo) if v < lo else math.floor(hi)
+        return (lo + hi) / 2 if math.isfinite(lo + hi) else (
+            lo + 1 if math.isfinite(lo) else hi - 1)
+    b = float(bound)
+    if eq and exact is not None and not is_int:
+        return exact
+    if is_int:
+        return (math.ceil(b) if eq else math.floor(b) + 1) if side == \
+            "greater" else (math.floor(b) if eq else math.ceil(b) - 1)
+    if side == "greater":
+        return b + 1 if b >= 0 else b / 2
+    return b / 2 if b > 0 else b - 1
+
+
+def leaf_paths(value, path=()):
+    if isinstance(value, dict):
+        for k, v in value.items():
+            yield from leaf_paths(v, path + (k,))
+    elif isinstance(value, list):
+        yield path
+        for i, v in enumerate(value):
+            yield from leaf_paths(v, path + (i,))
+    else:
+        yield path
+
+
+def get(value, path):
+    for p in path:
+        value = value[p]
+    return value
+
+
+def put(value, path, new):
+    if not path:
+        return new
+    value = json.loads(json.dumps(value))
+    get(value, path[:-1])[path[-1]] = new
+    return value
+
+
+SIZES = re.compile(r"\((\d+)\) and right hand side(?: rows| columns)? "
+                   r"\((\d+)\)")
+
+
+def variants(data, new):
+    """new applied to all its leaves, to its real or int leaves alone, then
+    to each leaf alone: stanc reuses its draws, and an int may be a size."""
+    paths = list(new)
+    groups = [paths] + [[p for p in paths if type(get(data, p)) is t]
+                        for t in (float, int)] + [[p] for p in paths[:6]]
+    out = []
+    for group in groups:
+        if not group or any(group == g for g in groups[:groups.index(group)]):
+            continue
+        d = data
+        for p in group:
+            d = put(d, p, new[p])
+        out.append(d)
+    return out
+
+
+def matching(data, v, kind=None):
+    return [p for p in leaf_paths(data) if near(get(data, p), v)
+            and (kind is None or type(get(data, p)) is kind)]
+
+
+def fixes(data, message):
+    """Candidates that move the data leaves message names inside the bound
+    it broke. When the value has no leaf (a parameter), the bound's leaves
+    move to the other side of it instead."""
+    m = BOUND.search(message)
+    if m and m.group(1) != "nan":
+        v = float(m.group(1))
+        at = m.group(6) and [get(data, p)
+                             for p in matching(data, float(m.group(6)))]
+        exact = max(at) if at else None
+        kind = {p: type(get(data, p)) for p in matching(data, v)}
+        out = variants(data, {p: t(inside(v, m, t is int, exact))
+                              for p, t in kind.items()})
+        if out or m.group(6) is None:
+            return out
+        side = m.group(4)
+        far = (v / 2 if v > 0 else v - 1) if side == "greater" else (
+            2 * v if v > 0 else v + 1)
+        return variants(data, {p: far for p in
+                               matching(data, float(m.group(6)), float)})
+    m = UNSORTED.search(message)
+    if m:
+        v = float(m.group(1))
+        return variants(data, {p: sorted(get(data, p))
+                               for p in leaf_paths(data)
+                               if isinstance(get(data, p), list)
+                               and any(near(x, v) for x in get(data, p))})
+    m = SIZES.search(message)
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        return (variants(data, {p: b for p in matching(data, a, int)})
+                + variants(data, {p: a for p in matching(data, b, int)}))
+    return []
+
+
+def score(fail, finite, thrown):
+    """Loading first, then points that evaluate, then finite ones."""
+    return (fail is None, 0 if fail else len(POINTS) - len(thrown), finite)
+
+
+def steer(exe, data, work, rounds=40):
+    """Every (evaluate result, data) seen while repeatedly fixing the
+    failure messages of data."""
+    text = json.dumps(data, sort_keys=True)
+    cur = evaluate(exe, text, work)
+    seen, out = {text}, [(cur, data)]
+    for _ in range(rounds):
+        if cur[0] is None and cur[1] == len(POINTS):
+            break
+        step = None
+        for m in dict.fromkeys(cur[2]):
+            for cand in fixes(data, m):
+                t = json.dumps(cand, sort_keys=True)
+                if t in seen:
+                    continue
+                seen.add(t)
+                r = evaluate(exe, t, work)
+                out.append((r, cand))
+                if step is None or score(*r) > score(*step[0]):
+                    step = (r, cand)
+        if step is None or score(*step[0]) < score(*cur):
+            break
+        cur, data = step
+    return out
+
+
 def generate(model, model_sha, want, max_attempts, objs, prev=None):
     """prev, an accepted entry being improved, is kept unless a new
-    candidate is finite at more points."""
+    candidate evaluates at more points, or as many and finite at more."""
     entry = {"source_sha256": model_sha, "data": None, "origin": "generated",
              "attempts": 0, "accepted": False, "note": ""}
     exe, why = build(model, model_sha, want, objs)
@@ -267,12 +435,11 @@ def generate(model, model_sha, want, max_attempts, objs, prev=None):
         work = pathlib.Path(work)
         if prev:
             entry["attempts"] = prev["attempts"]
-            fail, finite = evaluate(exe, json.dumps(prev["data"],
-                                                    sort_keys=True), work)
-            if not fail:
-                best = (finite, prev["data"])
+            for r, data in steer(exe, prev["data"], work):
+                if not r[0] and (best is None or score(*r) > best[0]):
+                    best = (score(*r), data)
         for attempt in range(1, max_attempts + 1):
-            if best and best[0] == len(POINTS):
+            if best and best[0][2] == len(POINTS):
                 break
             entry["attempts"] += 1
             g = run([STANC, "--debug-generate-data", model], RUN_TIMEOUT)
@@ -280,24 +447,26 @@ def generate(model, model_sha, want, max_attempts, objs, prev=None):
                 entry["note"] = "stanc --debug-generate-data: " + (
                     last_line(g.stderr or g.stdout) if g else "timed out")
                 return entry
-            data = REPAIRS[(attempt - 1) % len(REPAIRS)](json.loads(g.stdout))
-            if not data:
+            drawn = REPAIRS[(attempt - 1) % len(REPAIRS)](json.loads(g.stdout))
+            if not drawn:
                 entry["origin"] = "none_needed"
-            text = json.dumps(data, sort_keys=True)
-            fail, finite = evaluate(exe, text, work)
-            if fail:
-                fails[fail] += 1
-                entry["data"] = data
-            elif best is None or finite > best[0]:
-                best = (finite, data)
-            if not data:
+            for r, data in steer(exe, drawn, work):
+                if r[0]:
+                    fails[r[0]] += 1
+                    entry["data"] = data
+                elif best is None or score(*r) > best[0]:
+                    best = (score(*r), data)
+            if not drawn:
                 break
     if best is None:
         entry["note"] = fails.most_common(1)[0][0]
         return entry
     entry.update(data=best[1], accepted=True)
-    if best[0] < len(POINTS):
-        entry["note"] = f"finite at {best[0]} of {len(POINTS)} points"
+    _, ok, finite = best[0]
+    if finite < len(POINTS):
+        entry["note"] = f"finite at {finite} of {len(POINTS)} points"
+    if ok > finite:
+        entry["note"] += f", evaluates at {ok}"
     return entry
 
 
@@ -310,7 +479,7 @@ def hand_entry(model, model_sha, want, spec, objs):
         entry["note"] += f" ({why})"
         return entry
     with tempfile.TemporaryDirectory(prefix="stanc3_good_data_") as work:
-        fail, _ = evaluate(exe, json.dumps(spec["data"], sort_keys=True),
+        fail, _, _ = evaluate(exe, json.dumps(spec["data"], sort_keys=True),
                            pathlib.Path(work))
     entry["accepted"] = fail is None
     if fail:
@@ -356,7 +525,8 @@ def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 8) - 4))
-    ap.add_argument("--filter", default="")
+    ap.add_argument("--filter", action="append", default=[],
+                    help="substring of the model path; repeatable")
     ap.add_argument("--max-attempts", type=int, default=20)
     ap.add_argument("--regenerate", action="store_true",
                     help="redo accepted generated entries too")
@@ -384,7 +554,7 @@ def main():
                 and prev["accepted"] and prev["origin"] != "hand"
                 and rel not in hand and not args.regenerate
                 and not (args.improve and prev["note"]))
-        if args.filter in rel and not keep:
+        if any(f in rel for f in args.filter or [""]) and not keep:
             todo[(model_sha, rel in hand and rel)].append(rel)
     want = stamp()
     if args.objs:
