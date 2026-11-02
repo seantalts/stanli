@@ -17,15 +17,21 @@ relative to that directory:
 `stanc --debug-generate-data`, retried up to `--max-attempts` times until
 CmdStan's reference driver (`tools/ref_driver.cpp`) loads it without a
 `DATA_FAIL`. Among loadable candidates it keeps the one finite at the most
-points. `accepted: false` means no candidate loaded; `note` then holds the
-most common `DATA_FAIL` message, or why the model never built (`stanc: ...`,
-`build: ...`). A model with no data has `origin: none_needed` and
-`data: {}`. Hand data lives in `hand_data.json` as
+points. Candidates are stanc's draws, then the same draws with small repairs
+(ints in containers made 0/1, reals moved into (0, 1), sizes cut to 1,
+square matrices made the identity, vectors made a simplex or ascending).
+`accepted: false` means no candidate loaded; `note` then holds the most
+common `DATA_FAIL` message, or why the model never built, and `data` is the
+last rejected candidate, not usable data. An accepted entry that is not
+finite at every point says so in `note`. A model with no data has `origin: none_needed` and
+`data: {}`. Optional hand data lives in `hand_data.json` as
 `{"<path>": {"note": "...", "data": {...}}}` and always wins over
 generation.
 
 A rerun keeps accepted entries whose source is unchanged, since stanc has
-no seed; `--regenerate` redoes them. `--check` (ctest
+no seed; `--regenerate` redoes them. `--improve` retries the accepted
+entries that are not finite at every point and keeps a new candidate only
+if it is finite at more points; `attempts` accumulates across such runs. `--check` (ctest
 `test_stanc3_good_data`) verifies the file covers exactly the pinned
 corpus with matching source hashes, and needs no CmdStan.
 
