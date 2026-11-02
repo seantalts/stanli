@@ -908,9 +908,8 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
       // rather than a failure. No adjoint reaches this -- the forward
       // already threw -- so there is nothing to do under var either.
       case Program::REJECT:
-        execute_message(MessageAction::Reject,
-                        render_program_message(p.messages[(size_t)I.a], reg));
-        break;
+        throw_message(p.messages[(size_t)I.a].spec.error,
+                      render_program_message(p.messages[(size_t)I.a], reg));
       case Program::DENSITY: {
         const int ar = program_density_arity(I.len);
         if (ar > 3) {

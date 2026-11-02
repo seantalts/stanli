@@ -4851,9 +4851,10 @@ struct ProgramCompiler {
                 message.value_reg.push_back(value.reg);
                 message.value_len.push_back(value.len);
               });
+          message.spec.error = message_error(*action);
           p.messages.push_back(std::move(message));
-          emit(*action == MessageAction::Reject ? Program::REJECT
-                                                : Program::PRINT,
+          emit(*action != MessageAction::Print ? Program::REJECT
+                                               : Program::PRINT,
                0, (int)p.messages.size() - 1);
           return;
         }

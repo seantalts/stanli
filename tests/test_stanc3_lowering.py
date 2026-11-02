@@ -152,6 +152,20 @@ CASES = [
      {"y": [[1, 0, 1], [0, 0, 0]], "a": 3, "b": 2, "none": []},
      {"same_as": """parameters { vector<lower=0, upper=1>[3] p; }
                     model { }"""}),
+    ("fatal_error in the model block",
+     """parameters { real y; }
+        model {
+          y ~ normal(0, 1);
+          fatal_error("stopped with ", y);
+        }""",
+     {}, {"eval_fail": "stopped with 0.1"}),
+    ("fatal_error behind a parameter branch",
+     """parameters { real y; }
+        model {
+          y ~ normal(0, 1);
+          if (y > 0) fatal_error("positive ", y);
+        }""",
+     {}, {"eval_fail": "positive 0.1"}),
 ]
 
 

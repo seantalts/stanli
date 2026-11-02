@@ -47,8 +47,23 @@
 
 namespace stanli {
 
+void throw_message(MessageError error, const std::string& message) {
+  switch (error) {
+    case MessageError::Runtime:
+      throw std::runtime_error(message);
+    case MessageError::InvalidArgument:
+      throw std::invalid_argument(message);
+    case MessageError::OutOfRange:
+      throw std::out_of_range(message);
+    case MessageError::Domain:
+      break;
+  }
+  throw std::domain_error(message);
+}
+
 void execute_message(MessageAction action, const std::string& message) {
-  if (action == MessageAction::Reject) throw std::domain_error(message);
+  if (action != MessageAction::Print)
+    throw_message(message_error(action), message);
   emit_message(message);
 }
 
@@ -197,16 +212,7 @@ void reject_fwd(KernelCtx& ctx) {
   // stan-math's own reject throws, and it is what the executor's callers
   // and the sampler already treat as "this draw is not valid" rather than
   // as a failure of the run.
-  const std::string message = render(ctx);
-  switch (static_cast<const MessageSpec*>(ctx.udata)->error) {
-    case MessageError::InvalidArgument:
-      throw std::invalid_argument(message);
-    case MessageError::OutOfRange:
-      throw std::out_of_range(message);
-    case MessageError::Domain:
-      break;
-  }
-  execute_message(MessageAction::Reject, message);
+  throw_message(static_cast<const MessageSpec*>(ctx.udata)->error, render(ctx));
 }
 
 void print_fwd(KernelCtx& ctx) {

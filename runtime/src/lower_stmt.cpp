@@ -1692,14 +1692,15 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
               // Op::in holds six. Keep that backend capacity check here;
               // parsing and semantic dispatch remain shared.
               if (ins.size() >= 6)
-                fail(std::string(*action == MessageAction::Reject ? "reject"
-                                                                  : "print") +
+                fail(std::string(*action == MessageAction::Print ? "print"
+                                                                 : "reject") +
                          " with more than 6 printed values",
                      s.raw);
               ins.push_back(lower_expr(argument).slot);
             });
+        spec->error = message_error(*action);
         Op op;
-        op.opcode = *action == MessageAction::Reject ? OP_REJECT : OP_PRINT;
+        op.opcode = *action == MessageAction::Print ? OP_PRINT : OP_REJECT;
         op.n_in = (int)ins.size();
         for (size_t k = 0; k < ins.size(); ++k) op.in[k] = ins[k];
         // The output is a dead scalar: every op writes somewhere, and

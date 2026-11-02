@@ -17,20 +17,33 @@
 
 namespace stanli {
 
-enum class MessageAction : uint8_t { Print, Reject };
+enum class MessageAction : uint8_t { Print, Reject, Fatal };
 
 inline std::optional<MessageAction> message_action(std::string_view name) {
   if (name == "FnPrint") return MessageAction::Print;
   if (name == "FnReject") return MessageAction::Reject;
+  if (name == "FnFatalError") return MessageAction::Fatal;
   return std::nullopt;
 }
 
 // Literal chunks surrounding runtime values.  There is exactly one more
 // chunk than value: chunk k precedes value k, and the final chunk trails it.
-// reject() throws std::domain_error. A statement that CmdStan always rejects
-// at runtime, for a reason the lowering already knows, throws the class Stan
-// Math's check would.
-enum class MessageError : uint8_t { Domain, InvalidArgument, OutOfRange };
+// reject() throws std::domain_error and fatal_error() std::runtime_error. A
+// statement that CmdStan always rejects at runtime, for a reason the lowering
+// already knows, throws the class Stan Math's check would.
+enum class MessageError : uint8_t {
+  Domain,
+  Runtime,
+  InvalidArgument,
+  OutOfRange
+};
+
+inline MessageError message_error(MessageAction action) {
+  return action == MessageAction::Fatal ? MessageError::Runtime
+                                        : MessageError::Domain;
+}
+
+[[noreturn]] void throw_message(MessageError error, const std::string& message);
 
 struct MessageSpec {
   std::vector<std::string> chunks;
