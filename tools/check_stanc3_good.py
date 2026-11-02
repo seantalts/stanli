@@ -215,8 +215,14 @@ def normalize(text):
     """Numbers and single element indices removed: the engines format
     numbers differently, and one side may name the element of a vectorized
     argument ("Scale parameter[2]") where the other's scalar overload does
-    not. A multi-dimensional index ("[1, 1]") is kept."""
-    text = re.sub(r"-?\d+(\.\d+)?([eE][+-]?\d+)?", "N", text or "")
+    not. A multi-dimensional index ("[1, 1]") is kept. Boost names the type
+    it evaluated in, which differs by platform, so the template argument of a
+    boost::math function name and its parameter types are made uniform."""
+    text = re.sub(
+        r"(boost::math::\w+)<(long double|double|__float128)>\(([^)]*)\)",
+        lambda m: f"{m[1]}<T>({re.sub(re.escape(m[2]), 'T', m[3])})",
+        text or "")
+    text = re.sub(r"-?\d+(\.\d+)?([eE][+-]?\d+)?", "N", text)
     text = text.replace("[N]", "")
     text = re.sub(r"\s+", " ", text).strip()
     return text.rstrip("!. ")
