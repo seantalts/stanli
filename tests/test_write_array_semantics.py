@@ -52,6 +52,27 @@ model {
 }
 """, {}, {"error": "unit_vector_constrain: norm is 0, but must be positive "
                    "finite"}),
+    # Not CmdStan's behavior: stanli cannot evaluate laplace_latent_rng, and
+    # says so rather than naming the function argument as unknown.
+    ("unsupported_higher_order_call", """
+functions {
+  real ll(vector theta, real eta) {
+    return normal_lpdf(theta | 0, eta);
+  }
+  matrix K(int n) {
+    return identity_matrix(n);
+  }
+}
+parameters {
+  real<lower=0> eta;
+}
+model {
+  eta ~ lognormal(0, 1);
+}
+generated quantities {
+  vector[2] theta = laplace_latent_rng(ll, (eta,), 1, K, (2,));
+}
+""", {}, {"error": "unsupported", "interp_only": True}),
 ]
 
 
@@ -78,7 +99,7 @@ def run(source, data, interp):
 
 failures = 0
 for name, source, data, want in CASES:
-    for interp in (False, True):
+    for interp in (True,) if want.get("interp_only") else (False, True):
         label = f"{name} ({'interp' if interp else 'graph'})"
         got = run(source, data, interp)
         names = got.get("WANAMES", "")

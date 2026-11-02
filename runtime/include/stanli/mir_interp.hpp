@@ -232,6 +232,8 @@ class MirInterp {
           probe_failed_ = true;
           return r;
         }
+        if (funs_.count(e.name))
+          fail("unsupported call taking the function " + e.name, e.raw);
         fail("unknown variable " + e.name + " (type " + e.type_ + ")", e.raw);
       }
       case mir::Expr::TernaryIf: {
