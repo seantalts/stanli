@@ -29,9 +29,49 @@
   "data": "overrides/declare-define-multi.json",
   "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
  },
+ "fun-var-constraints.stan": {
+  "data": "overrides/fun-var-constraints.json",
+  "note": "stanc cannot evaluate the bound foo(). CmdStan still rejects this data: transformed data bt is never assigned."
+ },
  "function-signatures/math/matrix/csr_extract_v.stan": {
   "data": "overrides/csr_extract_v.json",
   "note": "Generated dense data gives csr_extract_v twelve nonzeros where the model declares five; this matrix has five."
+ },
+ "function-signatures/math/matrix/csr_extract_w.stan": {
+  "data": "overrides/csr_extract_w.json",
+  "note": "Generated dense data gives csr_extract_w twelve nonzeros where the model declares three; this matrix has three."
+ },
+ "function-signatures/math/transforms/cholesky_factor_corr_constrain.stan": {
+  "data": "overrides/cholesky_factor_corr_constrain.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/cholesky_factor_corr_jacobian.stan": {
+  "data": "overrides/cholesky_factor_corr_jacobian.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/cholesky_factor_cov_constrain.stan": {
+  "data": "overrides/cholesky_factor_cov_constrain.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/cholesky_factor_cov_jacobian.stan": {
+  "data": "overrides/cholesky_factor_cov_jacobian.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/corr_matrix_constrain.stan": {
+  "data": "overrides/corr_matrix_constrain.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/corr_matrix_jacobian.stan": {
+  "data": "overrides/corr_matrix_jacobian.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/cov_matrix_constrain.stan": {
+  "data": "overrides/cov_matrix_constrain.json",
+  "note": "stanc cannot generate data sized by choose(). The model sizes its vectors choose(K, 2) where cov_matrix_constrain needs K + choose(K, 2), so only K = 0 loads."
+ },
+ "function-signatures/math/transforms/cov_matrix_jacobian.stan": {
+  "data": "overrides/cov_matrix_jacobian.json",
+  "note": "stanc cannot generate data sized by choose(). The model sizes its vectors choose(K, 2) where cov_matrix_constrain needs K + choose(K, 2), so only K = 0 loads."
  },
  "parser-generator/cholesky_cov_param_block.stan": {
   "copy": "overrides/cholesky_cov_param_block.stan",
@@ -42,6 +82,10 @@
   "copy": "overrides/multidim_var_param_ar45_mat23.stan",
   "data": "overrides/multidim_var_param_ar45_mat23.json",
   "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "print_indexing.stan": {
+  "data": "overrides/print_indexing.json",
+  "note": "stanc cannot evaluate the indexed sizes N[1] and N[2]."
  },
  "tern_op_contains_var.stan": {
   "copy": "overrides/tern_op_contains_var.stan",

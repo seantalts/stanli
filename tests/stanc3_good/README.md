@@ -43,10 +43,16 @@ relative to that directory:
 `tools/gen_stanc3_good_data.py` writes it. Each model's data comes from
 `stanc --debug-generate-data`, retried up to `--max-attempts` times until
 CmdStan's reference driver (`tools/ref_driver.cpp`) loads it without a
-`DATA_FAIL`. Among loadable candidates it keeps the one finite at the most
-points. Candidates are stanc's draws, then the same draws with small repairs
-(ints in containers made 0/1, reals moved into (0, 1), sizes cut to 1,
-square matrices made the identity, vectors made a simplex or ascending).
+`DATA_FAIL`. Among loadable candidates it keeps the one that evaluates at
+the most of the five points, then the one finite at the most. Candidates are
+stanc's draws, then the same draws with small repairs (ints in containers
+made 0/1, reals moved into (0, 1), sizes cut to 1, square matrices made the
+identity, vectors made a simplex or ascending). Each candidate is then
+steered by CmdStan's own messages: a value that breaks a bound ("is 6, but
+must be in the interval [0, 1]") is moved inside it in every data leaf that
+holds it, or the bound's leaf moves when the value is a parameter; unsorted
+vectors are sorted, and a size mismatch sets the int leaves of one size to
+the other.
 `accepted: false` means no candidate loaded; `note` then holds the most
 common `DATA_FAIL` message, or why the model never built, and `data` is the
 last rejected candidate; the suite runs it only to check that stanli
@@ -59,7 +65,8 @@ belongs in `overrides.json`, which wins over `data.json.gz`.
 A rerun keeps accepted entries whose source is unchanged, since stanc has
 no seed; `--regenerate` redoes them. `--improve` retries the accepted
 entries that are not finite at every point and keeps a new candidate only
-if it is finite at more points; `attempts` accumulates across such runs. `--check` (ctest
+if it evaluates at more points, or as many and is finite at more;
+`attempts` accumulates across such runs. `--check` (ctest
 `test_stanc3_good_data`) verifies the file covers exactly the pinned
 corpus with matching source hashes, and needs no CmdStan.
 
