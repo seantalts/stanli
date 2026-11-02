@@ -18,14 +18,27 @@ struct GlmShape {
   int64_t rows;
   int64_t cols;
   bool scalar_y;
+  bool row_design;
+  int64_t outcomes;
 };
 
 GlmShape glm_shape(const KernelCtx& ctx) {
   const bool scalar_layout =
       ctx.n_idata >= 4 && ctx.idata[ctx.n_idata - 2] == kGlmScalarLayoutMarker;
   const int tail = scalar_layout ? 4 : 2;
-  return {ctx.idata[ctx.n_idata - tail], ctx.idata[ctx.n_idata - tail + 1],
-          scalar_layout && (ctx.idata[ctx.n_idata - 1] & 1) != 0};
+  const int mask = scalar_layout ? ctx.idata[ctx.n_idata - 1] : 0;
+  const int64_t rows = ctx.idata[ctx.n_idata - tail];
+  return {rows, ctx.idata[ctx.n_idata - tail + 1], (mask & 1) != 0,
+          (mask & kGlmRowVectorDesign) != 0,
+          (mask & kGlmRowVectorDesign) != 0 ? ctx.n_idata - tail : rows};
+}
+
+template <typename Design, typename F>
+void with_design(const GlmShape& shape, const Design& X, F&& f) {
+  if (shape.row_design)
+    f(X.row(0));
+  else
+    f(X);
 }
 
 // Bind the design matrix by its activity bit (variant bit 0), then alpha by
@@ -45,10 +58,13 @@ void glm_bind_x_alpha(KernelCtx& ctx, Call&& call) {
   };
   const GlmShape shape = glm_shape(ctx);
   if (ctx.variant & 0x1u)
-    with_x(as_rvar_matrix(ctx.in[0], shape.rows, shape.cols));
+    with_design(shape, as_rvar_matrix(ctx.in[0], shape.rows, shape.cols),
+                with_x);
   else
-    with_x(Eigen::Map<const Eigen::MatrixXd>(ctx.in[0].data, shape.rows,
-                                             shape.cols));
+    with_design(shape,
+                Eigen::Map<const Eigen::MatrixXd>(ctx.in[0].data, shape.rows,
+                                                  shape.cols),
+                with_x);
 }
 
 bool glm_inactive(const KernelCtx& ctx, unsigned bits) {
@@ -58,12 +74,16 @@ bool glm_inactive(const KernelCtx& ctx, unsigned bits) {
 template <typename Call>
 void glm_bind_data_x_alpha(KernelCtx& ctx, Call&& call) {
   const GlmShape shape = glm_shape(ctx);
-  const Eigen::Map<const Eigen::MatrixXd> X(ctx.in[0].data, shape.rows,
-                                            shape.cols);
-  if (ctx.in[1].len == 1)
-    call(X, ctx.in[1].data[0]);
-  else
-    call(X, Eigen::Map<const Eigen::VectorXd>(ctx.in[1].data, ctx.in[1].len));
+  with_design(
+      shape,
+      Eigen::Map<const Eigen::MatrixXd>(ctx.in[0].data, shape.rows, shape.cols),
+      [&](const auto& X) {
+        if (ctx.in[1].len == 1)
+          call(X, ctx.in[1].data[0]);
+        else
+          call(X, Eigen::Map<const Eigen::VectorXd>(ctx.in[1].data,
+                                                    ctx.in[1].len));
+      });
 }
 
 }  // namespace
@@ -73,7 +93,7 @@ void glm_bind_data_x_alpha(KernelCtx& ctx, Call&& call) {
 // idata = [y..., rows, cols]. Edges are (x, alpha, beta).
 void bernoulli_logit_glm_fwd(KernelCtx& ctx) {
   const GlmShape shape = glm_shape(ctx);
-  Eigen::Map<const Eigen::VectorXi> y(ctx.idata, shape.rows);
+  Eigen::Map<const Eigen::VectorXi> y(ctx.idata, shape.outcomes);
   sink s = sink_for_args(ctx, 3);
   sink_scope active(s);
   // beta is a vector regardless of its length; alpha scalar. Honour the
@@ -116,7 +136,7 @@ void bernoulli_logit_glm_bwd(KernelCtx& ctx) { density_bwd<3>(ctx); }
 // that distinction, so all three kernels share the same length dispatch.
 void poisson_log_glm_fwd(KernelCtx& ctx) {
   const GlmShape shape = glm_shape(ctx);
-  Eigen::Map<const Eigen::VectorXi> y(ctx.idata, shape.rows);
+  Eigen::Map<const Eigen::VectorXi> y(ctx.idata, shape.outcomes);
   sink s = sink_for_args(ctx, 3);
   sink_scope active(s);
   // propto drops -lgamma(y+1), which is constant in the parameters but is
@@ -153,7 +173,7 @@ void poisson_log_glm_bwd(KernelCtx& ctx) { density_bwd<3>(ctx); }
 // Same, with the overdispersion argument on the end.
 void neg_binomial_2_log_glm_fwd(KernelCtx& ctx) {
   const GlmShape shape = glm_shape(ctx);
-  Eigen::Map<const Eigen::VectorXi> y(ctx.idata, shape.rows);
+  Eigen::Map<const Eigen::VectorXi> y(ctx.idata, shape.outcomes);
   sink s = sink_for_args(ctx, 4);
   sink_scope active(s);
   const bool propto = (ctx.variant & 0x80u) != 0;

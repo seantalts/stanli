@@ -65,6 +65,27 @@ CASES = [
         model { k ~ normal(1, 1); }""",
      {}, {"close": [1.1051709180756477, 0.33115427715290885, 3.0197405529455232],
           "rtol": 1e-6}),
+    ("GLMs with a row_vector design and an array outcome",
+     """parameters { real b; }
+        transformed parameters {
+          row_vector[2] x = [1, 2];
+          vector[2] beta = [b, -b]';
+          real p = poisson_log_glm_lpmf({1, 0} | x, 0.5, beta);
+          real l = bernoulli_logit_glm_lpmf({1, 0} | x, 0.5, beta);
+          real n = binomial_logit_glm_lpmf({1, 2} | {3, 4}, x, 0.5, beta);
+          real g = neg_binomial_2_log_glm_lpmf({1, 0} | x, 0.5, beta, 2.0);
+        }
+        model { b ~ normal(0, 1); }""",
+     {}, {"close": [0.1, 1, 2, 0.1, -0.1, -2.583649395282541,
+                    -1.4260305047999053, -2.300735008903504,
+                    -2.3863862751181735], "rtol": 1e-13}),
+    ("poisson_log_glm gradient with a row_vector design",
+     """parameters { real b; }
+        model {
+          b ~ normal(0, 1);
+          target += poisson_log_glm_lpmf({1, 0} | [1, 2], 0.5, [b, -b]');
+        }""",
+     {}, {"lp_grad": [-2.5886493952825407, 1.8836493952825406], "rtol": 1e-13}),
 ]
 
 
@@ -98,6 +119,11 @@ for name, source, data, want in CASES:
         ok = "OK" in lines and len(got) == len(want["close"]) and all(
             abs(g - w) <= want["rtol"] * abs(w)
             for g, w in zip(got, want["close"]))
+    if "lp_grad" in want:
+        got = [float(v) for v in lines.get("OK", "").split()]
+        ok = len(got) == len(want["lp_grad"]) and all(
+            abs(g - w) <= want["rtol"] * abs(w)
+            for g, w in zip(got, want["lp_grad"]))
     if "eval_fail" in want:
         ok = want["eval_fail"] in lines.get("EVAL_FAIL", "")
     if "compile_fail" in want:

@@ -313,21 +313,35 @@ DensityCallPlan density_call_plan(
 
   if (spec.glm_layout) {
     const auto [rows, cols] = matrix_dimensions(spec.glm_matrix_arg, true);
+    int64_t instances = rows;
+    const bool row_design = (spec.opcode == OP_POISSON_LOG_GLM_LPMF ||
+                             spec.opcode == OP_BERNOULLI_LOGIT_GLM_LPMF ||
+                             spec.opcode == OP_NEG_BINOMIAL_2_LOG_GLM_LPMF ||
+                             spec.opcode == OP_BINOMIAL_LOGIT_GLM_LPMF) &&
+                            real_shapes[spec.glm_matrix_arg].container ==
+                                FunctionContainerKind::RowVector;
+    if (row_design) {
+      glm_scalar_mask |= kGlmRowVectorDesign;
+      instances =
+          spec.integer_args == 1 ? static_cast<int64_t>(plan.idata.size()) : 1;
+      for (const std::vector<int>& group : integer_groups)
+        instances = std::max(instances, static_cast<int64_t>(group.size()));
+    }
     if (spec.integer_args == 2) {
       plan.idata.clear();
       for (size_t k = 0; k < integer_groups.size(); ++k) {
         std::vector<int>& group = integer_groups[k];
-        if ((glm_scalar_mask & (uint8_t{1} << k)) && rows > 1) {
+        if ((glm_scalar_mask & (uint8_t{1} << k)) && instances > 1) {
           const int value = group[0];
-          group.assign(static_cast<size_t>(rows), value);
+          group.assign(static_cast<size_t>(instances), value);
         }
-        if (static_cast<int64_t>(group.size()) != rows)
+        if (static_cast<int64_t>(group.size()) != instances)
           throw std::invalid_argument(
               "integer density argument does not match matrix rows");
         plan.idata.insert(plan.idata.end(), group.begin(), group.end());
       }
     } else if (spec.integer_args == 1 &&
-               static_cast<int64_t>(plan.idata.size()) != rows) {
+               static_cast<int64_t>(plan.idata.size()) != instances) {
       throw std::invalid_argument("density outcome does not match matrix rows");
     }
     plan.idata.push_back(as_int_extent(rows));

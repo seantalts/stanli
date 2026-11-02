@@ -112,6 +112,9 @@ inline constexpr uint8_t kCategoricalScalarOutcome = 1u << 2;
 // Separates integer outcome values from an appended vectorized-layout payload.
 inline constexpr int kVectorizedDensityLayoutMarker = -2147483647;
 inline constexpr int kGlmScalarLayoutMarker = -2147483646;
+// In the GLM scalar-layout mask: the design is one row_vector shared by every
+// outcome, so the outcome count is the instance count.
+inline constexpr int kGlmRowVectorDesign = 1 << 6;
 
 // Null means the function needs a genuinely custom contract or is not a
 // probability function.

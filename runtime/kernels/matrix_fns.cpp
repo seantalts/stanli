@@ -2114,25 +2114,37 @@ double tglm_eval(KernelCtx& ctx) {
   const int64_t cols = ctx.idata[ctx.n_idata - tail + 1];
   const unsigned scalar_mask =
       scalar_layout ? (unsigned)ctx.idata[ctx.n_idata - 1] : 0u;
+  const bool row_design = (scalar_mask & kGlmRowVectorDesign) != 0;
+  const int64_t outcomes = row_design ? (ctx.n_idata - tail) / 2 : rows;
+  const auto with_design = [&](const auto& X, auto&& f) {
+    if (row_design)
+      f(X.row(0));
+    else
+      f(X);
+  };
   const bool propto = (ctx.variant & 0x80u) != 0;
   if constexpr (Kind == kBinomLogitGlm) {
     if (propto && (ctx.variant & 0x7u) == 0) {
-      std::vector<int> nn(ctx.idata, ctx.idata + rows);
-      std::vector<int> NN(ctx.idata + rows, ctx.idata + 2 * rows);
+      std::vector<int> nn(ctx.idata, ctx.idata + outcomes);
+      std::vector<int> NN(ctx.idata + outcomes, ctx.idata + 2 * outcomes);
       const CMapM Xd(ctx.in[0].data, rows, cols);
       const CMapV beta_d(ctx.in[2].data, cols);
       if (!values_only())
         std::fill_n(ctx.scratch, ctx.in[0].len + ctx.in[1].len + ctx.in[2].len,
                     0.0);
-      return with_glm_integer(nn, scalar_mask & 1u, [&](const auto& n_arg) {
-        return with_glm_integer(NN, scalar_mask & 2u, [&](const auto& N_arg) {
-          if (ctx.in[1].len == 1)
+      double lp = 0;
+      with_design(Xd, [&](const auto& x) {
+        lp = with_glm_integer(nn, scalar_mask & 1u, [&](const auto& n_arg) {
+          return with_glm_integer(NN, scalar_mask & 2u, [&](const auto& N_arg) {
+            if (ctx.in[1].len == 1)
+              return stan::math::binomial_logit_glm_lpmf<true>(
+                  n_arg, N_arg, x, ctx.in[1].data[0], beta_d);
             return stan::math::binomial_logit_glm_lpmf<true>(
-                n_arg, N_arg, Xd, ctx.in[1].data[0], beta_d);
-          return stan::math::binomial_logit_glm_lpmf<true>(
-              n_arg, N_arg, Xd, CMapV(ctx.in[1].data, rows), beta_d);
+                n_arg, N_arg, x, CMapV(ctx.in[1].data, ctx.in[1].len), beta_d);
+          });
         });
       });
+      return lp;
     }
   }
   stan::math::nested_rev_autodiff nested;
@@ -2141,28 +2153,32 @@ double tglm_eval(KernelCtx& ctx) {
   var out;
   if constexpr (Kind == kBinomLogitGlm) {
     // idata = [n..., N..., rows, cols]
-    std::vector<int> nn(ctx.idata, ctx.idata + rows);
-    std::vector<int> NN(ctx.idata + rows, ctx.idata + 2 * rows);
+    std::vector<int> nn(ctx.idata, ctx.idata + outcomes);
+    std::vector<int> NN(ctx.idata + outcomes, ctx.idata + 2 * outcomes);
     VarV beta = tail_v(ctx, 2, cols);
     if (ctx.in[1].len == 1) {
       var alpha = ctx.in[1].data[0];
-      with_glm_integer(nn, scalar_mask & 1u, [&](const auto& n_arg) {
-        with_glm_integer(NN, scalar_mask & 2u, [&](const auto& N_arg) {
-          out = propto ? stan::math::binomial_logit_glm_lpmf<true>(
-                             n_arg, N_arg, X, alpha, beta)
-                       : stan::math::binomial_logit_glm_lpmf<false>(
-                             n_arg, N_arg, X, alpha, beta);
+      with_design(X, [&](const auto& x) {
+        with_glm_integer(nn, scalar_mask & 1u, [&](const auto& n_arg) {
+          with_glm_integer(NN, scalar_mask & 2u, [&](const auto& N_arg) {
+            out = propto ? stan::math::binomial_logit_glm_lpmf<true>(
+                               n_arg, N_arg, x, alpha, beta)
+                         : stan::math::binomial_logit_glm_lpmf<false>(
+                               n_arg, N_arg, x, alpha, beta);
+          });
         });
       });
       return tail_density_fwd(ctx, out, X, alpha, beta);
     }
-    VarV alpha = tail_v(ctx, 1, rows);
-    with_glm_integer(nn, scalar_mask & 1u, [&](const auto& n_arg) {
-      with_glm_integer(NN, scalar_mask & 2u, [&](const auto& N_arg) {
-        out = propto ? stan::math::binomial_logit_glm_lpmf<true>(n_arg, N_arg,
-                                                                 X, alpha, beta)
-                     : stan::math::binomial_logit_glm_lpmf<false>(
-                           n_arg, N_arg, X, alpha, beta);
+    VarV alpha = tail_v(ctx, 1, ctx.in[1].len);
+    with_design(X, [&](const auto& x) {
+      with_glm_integer(nn, scalar_mask & 1u, [&](const auto& n_arg) {
+        with_glm_integer(NN, scalar_mask & 2u, [&](const auto& N_arg) {
+          out = propto ? stan::math::binomial_logit_glm_lpmf<true>(
+                             n_arg, N_arg, x, alpha, beta)
+                       : stan::math::binomial_logit_glm_lpmf<false>(
+                             n_arg, N_arg, x, alpha, beta);
+        });
       });
     });
     return tail_density_fwd(ctx, out, X, alpha, beta);
