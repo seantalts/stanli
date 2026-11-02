@@ -430,11 +430,10 @@ int64_t Lowering::sized_len(const mir::SizedType& t, int64_t* rows,
     if (cols) *cols = c;
     return checked_product({r, c}, "matrix shape");
   }
-  if (t.base == "SArray") {
-    return checked_product(sized_dims(t), "array shape");
-  }
   const std::string where = var.empty() ? "" : " (in variable " + var + ")";
-  if (t.base.rfind("SComplex", 0) == 0)
+  if (t.base == "SArray" && t.elem_base.rfind("SComplex", 0) != 0)
+    return checked_product(sized_dims(t), "array shape");
+  if (t.base.rfind("SComplex", 0) == 0 || t.base == "SArray")
     fail("complex numbers are not supported yet" + where, t.raw);
   fail("this variable type is not supported yet" + where, t.raw);
 }

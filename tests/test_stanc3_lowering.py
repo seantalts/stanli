@@ -224,6 +224,11 @@ CASES = [
         }""",
      {}, {"same_as": """parameters { vector[2] v; }
                         model { v ~ normal(0, 1); }"""}),
+    ("an array of complex is refused, not written as reals",
+     """parameters { real r; }
+        transformed parameters { array[2] complex z = {r, 3}; }
+        model { r ~ normal(0, 1); }""",
+     {}, {"compile_fail": "complex numbers are not supported yet"}),
 ]
 
 
