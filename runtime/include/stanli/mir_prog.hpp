@@ -1852,8 +1852,17 @@ struct ProgramCompiler {
             bail("one-dimensional index form " + e.args[1].name);
           long ix;
           if (try_cint(e.args[1].args[0], &ix)) {
-            if (ix < 1 || ix > b.len) bail("index out of the declared range");
-            return {b.reg + (int)ix - 1, 1};
+            if (ix >= 1 && ix <= b.len) return {b.reg + (int)ix - 1, 1};
+            if (b.len < 1) bail("index out of the declared range");
+            Program::Message message;
+            message.spec.chunks = {out_of_range_message(
+                b.kind == ViewKind::Flat ? "array[uni, ...] index"
+                                         : "vector[uni] indexing",
+                ix, b.len)};
+            message.spec.error = MessageError::OutOfRange;
+            p.messages.push_back(std::move(message));
+            emit(Program::REJECT, 0, (int)p.messages.size() - 1);
+            return {b.reg, 1};
           }
           const Range iv = expr(e.args[1].args[0]);
           if (!is_scalar(iv)) bail("runtime index is not scalar");

@@ -1054,12 +1054,7 @@ struct Lowering {
                      const std::string& raw) {
     if (i >= 1 && i <= n) return i;
     if (n < 1) check_index(i, n, function, raw);
-    emit_error(MessageError::OutOfRange,
-               std::string(function) +
-                   ": accessing element out of range. index " +
-                   std::to_string(i) +
-                   " out of range; expecting index to be between 1 and " +
-                   std::to_string(n));
+    emit_error(MessageError::OutOfRange, out_of_range_message(function, i, n));
     return 1;
   }
   void check_index(int64_t i, int64_t n, const char* what,

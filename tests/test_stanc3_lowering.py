@@ -207,6 +207,23 @@ CASES = [
         model { v ~ normal(0, 1); }
         generated quantities { real g = v[i]; }""",
      {'i': 0}, {"wa_fail": 'vector[uni] indexing: accessing element out of range. index 0 out of range; expecting index to be between 1 and 2'}),
+    ("index out of range behind a parameter branch",
+     """parameters { vector[2] v; }
+        model {
+          v ~ normal(0, 1);
+          if (v[1] > 0) target += v[0];
+        }""",
+     {}, {"eval_fail": "vector[uni] indexing: accessing element out of range. "
+                       "index 0 out of range; expecting index to be between "
+                       "1 and 2"}),
+    ("index out of range in a parameter branch not taken",
+     """parameters { vector[2] v; }
+        model {
+          v ~ normal(0, 1);
+          if (v[1] > 100) target += v[3];
+        }""",
+     {}, {"same_as": """parameters { vector[2] v; }
+                        model { v ~ normal(0, 1); }"""}),
 ]
 
 

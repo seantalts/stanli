@@ -43,6 +43,15 @@ inline MessageError message_error(MessageAction action) {
                                         : MessageError::Domain;
 }
 
+// stan::math::check_range's message.
+inline std::string out_of_range_message(const std::string& function,
+                                        int64_t index, int64_t max) {
+  return function + ": accessing element out of range. index " +
+         std::to_string(index) +
+         " out of range; expecting index to be between 1 and " +
+         std::to_string(max);
+}
+
 [[noreturn]] void throw_message(MessageError error, const std::string& message);
 
 struct MessageSpec {
