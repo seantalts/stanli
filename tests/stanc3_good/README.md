@@ -24,8 +24,8 @@ NaN, and an infinity only with the same infinity.
 | --- | --- |
 | `data.json.gz` | the data for each model, keyed by its path under `good/`, with the source sha256 |
 | `references.json.xz` | CmdStan's answers per model and point, or how CmdStan failed, with toolchain provenance |
-| `ledger.json` | every model that is not fully verified, with its status and a short cause |
-| `overrides.json`, `overrides/` | hand-adapted sources or data, with a note saying why |
+| `ledger.json` | every model where stanli differs from CmdStan, with its status and a short cause |
+| `overrides.json`, `overrides/` | hand-adapted sources or data, and points whose CmdStan values are platform dependent, with a note saying why |
 
 ## Data
 
@@ -98,33 +98,58 @@ python3 tools/check_stanc3_good.py --build build-rel            # all
 python3 tools/check_stanc3_good.py --filter tuples/ --times     # some
 ```
 
-A model fails when its result differs from the ledger in either
-direction. Getting worse is a regression. Getting better means the ledger
-entry is stale: delete it, or run with `--update-ledger` and review the
-diff. Point-level entries name the points: `{"points": {"2": "mismatch"}}`.
-An entry whose cause starts with `UNTRIAGED` fails until someone names the
+At each point stanli agrees with CmdStan when both return values within
+the tolerance, or both throw with matching messages. A model that agrees
+needs no ledger entry. The ledger lists only where stanli is wrong or has
+not implemented something.
+
+A model fails when it diverges and has no ledger entry, or when its entry
+no longer matches in either direction. Getting worse is a regression.
+Getting better, up to agreeing with CmdStan, means the ledger entry is
+stale: delete it, or run with `--update-ledger` and review the diff.
+Point-level entries name the points: `{"points": {"2": "mismatch"}}`. An
+entry whose cause starts with `UNTRIAGED` fails until someone names the
 cause.
 
 | status | meaning |
 | --- | --- |
-| `unsupported` | stanli refuses to compile the model; the cause is its message |
+| `verified` | values agree at every point |
 | `rejected_both` | every point throws on both sides with matching messages |
 | `data_rejected` | CmdStan rejects every data candidate and stanli rejects the last one with a matching message |
-| `data_message_mismatch` | both reject the data with different messages |
+
+Those three agree and take no entry. These have no CmdStan answer to
+compare with and take none either; they come from the references and data,
+never from the ledger:
+
+| status | meaning |
+| --- | --- |
+| `cmdstan_timeout`, `cmdstan_crashed` | CmdStan does not finish or dies; stanli is not run |
 | `data_unavailable` | stanc could not generate data; not run |
+| `stanc_rejected` | stanc rejects the program and stanli does too |
+
+The rest diverge and need an entry with a cause:
+
+| status | meaning |
+| --- | --- |
+| `unsupported` | stanli refuses to compile the model; the cause is its message |
+| `data_message_mismatch` | both reject the data, with different messages |
 | `one_side_threw` | one side rejects the data or the compile, the other does not |
 | `points` | per point: `mismatch`, `one_side_threw`, `message_mismatch`, or `wa_unsupported` (stanli's write_array refuses a feature) |
-| `cmdstan_timeout`, `cmdstan_crashed` | CmdStan does not finish or dies; stanli is not run |
 | `timeout`, `crashed` | stanli does not finish or dies |
 
 A mismatch with CmdStan is a bug report, not a ledger line; ledger it only
 with the cause found.
 
-`"platform_dependent": ["4"]` marks points where CmdStan's own values
-depend on the platform's libm or `long double`, so references recorded on
-one machine can't match everywhere. A value mismatch at those points
-counts as agreement; a throw on one side still fails. Use it only with the
-mechanism named in the cause.
+The run prints how many models agree on values, agree on the error path,
+cannot be checked, are ledgered divergences, and fail. `--times` adds the
+count for each status.
+
+`"platform_dependent": ["4"]` in a model's `overrides.json` entry marks
+points where CmdStan's own values depend on the platform's libm or
+`long double`, so references recorded on one machine can't match
+everywhere. A value mismatch at those points counts as agreement; a throw
+on one side still fails. Use it only with the mechanism named in the
+note.
 
 ## Recording
 
@@ -155,7 +180,7 @@ and keeps the other references.
 
 Add an entry to `overrides.json` keyed by the upstream path, with `data`
 (a JSON file in `overrides/`), `source` (an adapted copy of the model) or
-both, and a `note` saying what was changed and why. `copy` names a
+both (or `platform_dependent`, above), and a `note` saying what was changed and why. `copy` names a
 byte-identical copy of the upstream source kept for another harness; the
 suite checks that it still matches. Then re-record that model with
 `--filter`.

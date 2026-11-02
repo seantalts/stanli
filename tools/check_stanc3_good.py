@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Replay every model in stanc3's test/integration/good against CmdStan.
 
-Each model runs once through stanli_check at four points, and its log
+Each model runs once through stanli_check at five points, and its log
 density, gradient and write_array row are compared with CmdStan's answers
-recorded in tests/stanc3_good/references.json.xz. A model that is not fully
-verified must have a matching entry in tests/stanc3_good/ledger.json, and an
-entry that no longer matches fails too, in either direction.
+recorded in tests/stanc3_good/references.json.xz. A model where stanli
+differs from CmdStan must have a matching entry in
+tests/stanc3_good/ledger.json, and an entry that no longer matches fails
+too, in either direction. Agreeing, including throwing the same error, needs
+no entry.
 
 Ordinary runs never touch CmdStan. `--record` rebuilds the references from
 the pinned CmdStan. See tests/stanc3_good/README.md.
@@ -43,31 +45,21 @@ TIMEOUT = 120.0
 LEDGERED_TIMEOUT = 5.0
 SCHEMA = 1
 
-# Model-level statuses, best first. A point-level result (some points
-# disagree) sits between "rejected_both" and "unsupported" when the two
-# directions are named in a failure message; equality is what gates.
-MODEL_STATUSES = (
-    "verified",
-    "rejected_both",     # every point threw on both sides, messages agree
-    "data_rejected",     # both reject the data, messages agree
-    "data_message_mismatch",  # both reject the data, messages differ
-    "unsupported",       # stanli refuses to compile it; cause is its reason
-    "stanc_rejected",    # stanc refuses the program
-    "data_unavailable",  # no data: stanc could not generate any
-    "cmdstan_timeout",   # CmdStan does not finish; stanli is not run
-    "cmdstan_crashed",   # CmdStan dies (a stack overflow, say); likewise
-    "one_side_threw",    # model-level: data or compile accepted by one side
-    "timeout",
-    "crashed",
-)
+# Statuses where stanli does what CmdStan does, including throwing the same
+# error; where there is no CmdStan answer to compare with; and the rest, which
+# need a ledger entry. "points" is a model that ran on both sides with some
+# points disagreeing.
+AGREE_VALUES = ("verified",)
+AGREE_ERRORS = ("rejected_both", "data_rejected")
+NOT_CHECKABLE = ("cmdstan_timeout", "cmdstan_crashed", "data_unavailable",
+                 "stanc_rejected")
+DIVERGES = ("points", "data_message_mismatch", "unsupported",
+            "one_side_threw", "timeout", "crashed")
 POINT_VERDICTS = ("ok", "both_threw", "mismatch", "one_side_threw",
                   "message_mismatch", "wa_unsupported")
-_RANK = {"verified": 9, "rejected_both": 8, "data_rejected": 7,
-         "data_message_mismatch": 6,
-         "points": 6, "unsupported": 5, "stanc_rejected": 5,
-         "data_unavailable": 5, "cmdstan_timeout": 5,
-         "cmdstan_crashed": 5,
+_RANK = {"points": 6, "data_message_mismatch": 6, "unsupported": 5,
          "one_side_threw": 2, "timeout": 1, "crashed": 0}
+_AGREES_RANK = 9
 
 # A Stan Math validation error. stanli reporting one of these at compile
 # time, on data CmdStan accepted, is a disagreement and not a missing feature.
@@ -312,12 +304,12 @@ def classify(ref, run, unstable=()):
     """(status, points, details) for one model.
 
     A value mismatch at a point in `unstable` counts as agreement: the
-    ledger's `platform_dependent` points, where CmdStan's own answer depends
-    on the platform's libm and long double.
+    overrides' `platform_dependent` points, where CmdStan's own answer
+    depends on the platform's libm and long double.
 
-    status is a MODEL_STATUSES entry or "points" when the model ran on both
-    sides and some points disagree; points maps each non-ok point to its
-    verdict. `run` is (returncode, stdout, stderr) or None for a timeout.
+    status is one of the status groups above; points maps each non-ok point
+    to its verdict when the status is "points". `run` is (returncode, stdout,
+    stderr) or None for a timeout.
     """
     outcome = ref["outcome"]
     if outcome == "no_data":
@@ -380,14 +372,14 @@ def ledger_verdict(status, points, entry):
     want = (("points", entry["points"]) if entry and "points" in entry
             else (entry["status"], {}) if entry and "status" in entry
             else None)
-    got = None if status == "verified" else (status, points)
+    got = (status, points) if status in DIVERGES else None
     if want == got:
         if entry and entry.get("cause", "").startswith("UNTRIAGED"):
             return "ledger entry has no named cause"
         return None
-    describe = (lambda w: "verified" if w is None
+    describe = (lambda w: "agrees" if w is None
                 else f"points {w[1]}" if w[0] == "points" else w[0])
-    rank = (lambda w: _RANK["verified"] if w is None else _RANK.get(w[0], 5))
+    rank = (lambda w: _AGREES_RANK if w is None else _RANK.get(w[0], -1))
     if rank(got) > rank(want):
         kind = "improved; update the ledger entry"
     elif rank(got) < rank(want):
@@ -423,15 +415,16 @@ def replay_one(path, ctx):
             run = run_process([ctx["check"], source, data_file, "--points",
                                ",".join(map(str, POINTS)), "--wa-values"],
                               timeout)
-    status, points, details = classify(
-        ref, run, set((entry or {}).get("platform_dependent", ())))
+    status, points, details = classify(ref, run, set(
+        ctx["overrides"].get(path, {}).get("platform_dependent", ())))
     problem = ledger_verdict(status, points, entry)
     ctx["seconds"][path] = time.monotonic() - started
     return path, status, points, details, problem
 
 
-def replay(models, ctx, jobs):
-    failures, counts = [], {}
+def replay(models, ctx, jobs, verbose=False):
+    failures, counts, groups = [], {}, dict.fromkeys(
+        ("values", "errors", "not checkable", "ledgered"), 0)
     with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
         for path, status, points, details, problem in pool.map(
                 lambda p: replay_one(p, ctx), models):
@@ -439,15 +432,24 @@ def replay(models, ctx, jobs):
             ctx["results"][path] = (status, points, details)
             if problem:
                 failures.append((path, problem, details))
+            else:
+                groups["values" if status in AGREE_VALUES
+                       else "errors" if status in AGREE_ERRORS
+                       else "not checkable" if status in NOT_CHECKABLE
+                       else "ledgered"] += 1
     for path, problem, details in failures:
         print(f"FAIL {path}: {problem}")
         for line in details[:12]:
             print(f"    {line}")
         if len(details) > 12:
             print(f"    ... {len(details) - 12} more")
-    tally = ", ".join(f"{k}={v}" for k, v in sorted(
-        counts.items(), key=lambda kv: str(kv[0])))
-    print(f"{len(models)} models: {tally}; {len(failures)} failures")
+    if verbose:
+        print(", ".join(f"{k}={v}" for k, v in sorted(
+            counts.items(), key=lambda kv: str(kv[0]))))
+    print(f"{len(models)} models: {groups['values']} agree on values, "
+          f"{groups['errors']} agree on errors, {groups['not checkable']} "
+          f"not checkable, {groups['ledgered']} ledgered divergences, "
+          f"{len(failures)} failures")
     return failures
 
 
@@ -467,12 +469,10 @@ def inventory_problems(models, refs, ledger, overrides):
             problems.append(f"override copy {copy} differs from upstream "
                             f"{path}; a changed source is a 'source' override")
     for path, entry in ledger.items():
-        kinds = ("status" in entry) + ("points" in entry)
-        if "cause" not in entry or kinds > 1 or (
-                kinds == 0 and not entry.get("platform_dependent")):
+        if "cause" not in entry or ("status" in entry) + ("points" in entry) != 1:
             problems.append(f"ledger entry {path} needs a cause and one of "
-                            "status, points or platform_dependent")
-        elif "status" in entry and entry["status"] not in MODEL_STATUSES[1:]:
+                            "status or points")
+        elif "status" in entry and entry["status"] not in DIVERGES[1:]:
             problems.append(f"ledger entry {path}: unknown status")
         elif "points" in entry and not set(entry["points"].values()) <= set(
                 POINT_VERDICTS[2:]):
@@ -484,24 +484,18 @@ def update_ledger(ledger, results):
     """Rewrite the ledger from this run, keeping causes that still apply."""
     out = {}
     for path, (status, points, details) in sorted(results.items()):
-        old = ledger.get(path, {})
-        if status in ("verified", None):
-            if old.get("platform_dependent"):
-                out[path] = {k: old[k] for k in ("platform_dependent", "cause")}
+        if status not in DIVERGES:
             continue
+        old = ledger.get(path, {})
         entry = ({"points": points} if status == "points"
                  else {"status": status})
-        if old.get("platform_dependent"):
-            entry["platform_dependent"] = old["platform_dependent"]
-        same = ({k: old.get(k) for k in entry} == entry)
-        if same and "cause" in old:
+        if {k: old.get(k) for k in entry} == entry and "cause" in old:
             entry["cause"] = old["cause"]
         elif status == "data_message_mismatch":
             entry["cause"] = "UNTRIAGED: " + " / ".join(details)[:400]
         elif status == "points" and set(points.values()) == {"wa_unsupported"}:
             entry["cause"] = details[0].split(": ", 1)[1][:300]
-        elif status in ("points", "one_side_threw", "crashed", "timeout",
-                        "cmdstan_crashed", "cmdstan_timeout"):
+        elif status != "unsupported":
             entry["cause"] = "UNTRIAGED: " + "; ".join(details[:3])[:300]
         else:
             entry["cause"] = (details[0] if details else status)[:300]
@@ -781,7 +775,7 @@ def main(argv=None):
     if not ctx["check"].exists():
         print(f"FAIL no stanli_check at {ctx['check']}")
         return 1
-    failures = replay(selected, ctx, args.jobs)
+    failures = replay(selected, ctx, args.jobs, args.times)
     if args.times:
         for path, sec in sorted(ctx["seconds"].items(),
                                 key=lambda kv: -kv[1])[:15]:

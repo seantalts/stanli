@@ -1,32 +1,4 @@
 {
- "algebra_solver_good.stan": {
-  "cause": "Exception: solve_powell: initial guess[1] is nan, but must be finite! (in 'algebra_solver_good.stan', line 23, column 2 to column 61)",
-  "status": "data_rejected"
- },
- "algebra_solver_newton_good.stan": {
-  "cause": "Exception: solve_newton: initial guess[1] is nan, but must be finite! (in 'algebra_solver_newton_good.stan', line 23, column 2 to column 68)",
-  "status": "data_rejected"
- },
- "array-expr/validate_array_expr_big.stan": {
-  "cause": "Exception: assign array size: assigning variable td_ar_int_dim1 (100) and right hand side (90) must match in size (in 'validate_array_expr_big.stan', line 3, column 2 to line 12, column 42)",
-  "status": "data_rejected"
- },
- "assignments.stan": {
-  "cause": "Exception: assign array size: assigning variable tx1 (2) and right hand side (3) must match in size (in 'assignments.stan', line 232, column 2 to column 14)",
-  "status": "data_rejected"
- },
- "assignments_double_var.stan": {
-  "cause": "Exception: assign array size: assigning variable tx1 (2) and right hand side (3) must match in size (in 'assignments_double_var.stan', line 232, column 2 to column 14)",
-  "status": "rejected_both"
- },
- "assignments_var.stan": {
-  "cause": "Exception: assign array size: assigning variable tx1 (2) and right hand side (3) must match in size (in 'assignments_var.stan', line 232, column 2 to column 14)",
-  "status": "rejected_both"
- },
- "break-continue.stan": {
-  "cause": "Transformed data runs `while (1) continue;`, an infinite loop with no side effects; clang compiles that undefined behavior in CmdStan's C++ to a trap, so CmdStan dies with SIGTRAP while loading data.",
-  "status": "cmdstan_crashed"
- },
  "code-gen/complex-tuples.stan": {
   "cause": "mir: malformed sized declaration type",
   "status": "unsupported"
@@ -62,10 +34,6 @@
  "code-gen/cpp-overload-stdlib.stan": {
   "cause": "mir: malformed unsized declaration type",
   "status": "unsupported"
- },
- "code-gen/double-reject.stan": {
-  "cause": "Exception: hi there (in 'double-reject.stan', line 2, column 2 to column 21)",
-  "status": "rejected_both"
  },
  "code-gen/expressions/ternary_if.stan": {
   "cause": "complex numbers are not supported yet (in variable zp)",
@@ -117,38 +85,6 @@
   "cause": "unsupported function laplace_marginal_poisson_log_lpmf",
   "status": "unsupported"
  },
- "code-gen/motherHOF.stan": {
-  "cause": "Exception: vector assign rows: assigning variable y_hat_tp1 (3) and right hand side rows (9) must match in size (in 'motherHOF.stan', line 60, column 2 to line 61, column 41)",
-  "status": "rejected_both"
- },
- "code-gen/ode/ode_adjoint_test_model.stan": {
-  "cause": "Exception: ode_adjoint_tol_ctl: times is not a valid sorted vector. The element at 3 is 0.1, but should be greater than or equal to the previous element, 0.2 (in 'ode_adjoint_test_model.stan', line 44, column 2 to line 45, column 105)",
-  "status": "rejected_both"
- },
- "code-gen/opencl/restricted.stan": {
-  "cause": "Exception: bernoulli_lpmf: n[1] is 4, but must be in the interval [0, 1] (in 'restricted.stan', line 21, column 2 to column 64)",
-  "status": "rejected_both"
- },
- "code-gen/optimize_glm.stan": {
-  "cause": "Exception: optimize_glm_model_namespace::optimize_glm_model: k_td is -2147483648, but must be greater than or equal to 1.000000 (in 'optimize_glm.stan', line 14, column 2 to column 20)",
-  "status": "data_rejected"
- },
- "code-gen/recursive-slicing.stan": {
-  "cause": "Exception: vector assign rows: assigning variable z_hat (6) and right hand side rows (0) must match in size (in 'recursive-slicing.stan', line 76, column 2 to column 33)",
-  "status": "rejected_both"
- },
- "code-gen/reduce_sum_m1.stan": {
-  "cause": "g calls reduce_sum on itself while its slice has more than one element; without a threaded scheduler the slice never shrinks, and CmdStan overflows its stack.",
-  "status": "cmdstan_crashed"
- },
- "code-gen/reduce_sum_m3.stan": {
-  "cause": "A partial sum function calls reduce_sum on itself while its slice has more than one element; the slice never shrinks, and CmdStan overflows its stack.",
-  "status": "cmdstan_crashed"
- },
- "code-gen/reject-exit.stan": {
-  "cause": "Exception: This is a test of the exit statement. Here is A:[[4.91944,5.83747,4.76244],[5.38018,2.8082,4.16731],[2.71361,2.92846,5.08179]] (in 'reject-exit.stan', line 12, column 4 to column 71)",
-  "status": "rejected_both"
- },
  "code-gen/return-position-types.stan": {
   "cause": "this variable type is not supported yet (in variable inline_baz_return_sym11__) | in: (STuple ((SArray SReal ((pattern (Lit Int 0)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SReal))",
   "status": "unsupported"
@@ -163,17 +99,9 @@
    "4": "wa_unsupported"
   }
  },
- "code-gen/shadowing.stan": {
-  "cause": "Exception: Exception: vector assign rows: assigning variable yp (1) and right hand side rows (4) must match in size (in 'shadowing.stan', line 3, column 4 to column 30) (in 'shadowing.stan', line 70, column 2 to column 69)",
-  "status": "rejected_both"
- },
  "code-gen/stochastic_matrices.stan": {
   "cause": "mir: unsupported or malformed FnCheck",
   "status": "unsupported"
- },
- "comments.stan": {
-  "cause": "Exception: Found negative dimension size in variable declaration; variable=arr; dimension size expression=N; expression value=-2147483648 (in 'comments.stan', line 23, column 12 to column 13)",
-  "status": "data_rejected"
  },
  "compiler-optimizations/dce-fail.stan": {
   "cause": "stanc --O1 vectorizes the source loop, so the single index the program writes reaches stanli as a multi-index; stanli reports 'vector[multi] indexing' where CmdStan, running the unvectorized program, reports 'vector[uni] indexing'.",
@@ -195,21 +123,9 @@
    "4": "message_mismatch"
   }
  },
- "compiler-optimizations/fuzz-div0.stan": {
-  "cause": "Exception: modulus: divisor is 0 (in 'fuzz-div0.stan', line 2, column 2 to column 66)",
-  "status": "rejected_both"
- },
- "compiler-optimizations/inline-functions-varmat.stan": {
-  "cause": "Exception: Exception: vector[uni] indexing: accessing element out of range. index 0 out of range; expecting index to be between 1 and 5 (in 'inline-functions-varmat.stan', line 7, column 4 to line 11, column 5) (in 'inline-functions-varmat.stan', line 22, column 2 to column 62)",
-  "status": "rejected_both"
- },
  "compiler-optimizations/mem_patterns/complex-fails.stan": {
   "cause": "complex numbers are not supported yet (in variable A_complex_tp) | in: (SComplexMatrix ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
   "status": "unsupported"
- },
- "compiler-optimizations/mem_patterns/constraints.stan": {
-  "cause": "Exception: lub_constrain: lb[1] is 4.76244, but must be less than 4.167306 (in 'constraints.stan', line 20, column 2 to column 66)",
-  "status": "rejected_both"
  },
  "compiler-optimizations/mem_patterns/indexing.stan": {
   "cause": "The model multiplies and adds containers whose sizes come from data and never match. stanli sees the sizes when it binds the data and refuses the model with Stan Math's message; CmdStan throws the same kind of error at every evaluation.",
@@ -241,625 +157,13 @@
   "cause": "complex numbers are not supported yet (in variable z)",
   "status": "unsupported"
  },
- "compiler-optimizations/stalled1-failure.stan": {
-  "cause": "Exception: binomial_logit_lpmf: Successes variable is 3, but must be in the interval [0, 1] (in 'stalled1-failure.stan', line 46, column 4 to line 48, column 54)",
-  "status": "rejected_both"
- },
  "compiler-optimizations/tuple-adlevels.stan": {
   "cause": "unsupported function kind for FnMakeTuple | in: (UTuple (UReal (UArray UMatrix)))",
   "status": "unsupported"
  },
- "compound-assign/multiply_equals_container.stan": {
-  "cause": "Exception: multiply: Columns of m1 (3) and Rows of m2 (2) must match in size (in 'multiply_equals_container.stan', line 21, column 2 to column 18)",
-  "status": "data_rejected"
- },
- "dae_good.stan": {
-  "cause": "Exception: dae: times[1] is nan, but must be finite! (in 'dae_good.stan', line 30, column 4 to column 54)",
-  "status": "rejected_both"
- },
- "declarations.stan": {
-  "cause": "Exception: declarations_model_namespace::declarations_model: td_f is not a valid simplex. sum(td_f) = nan, but should be 1 (in 'declarations.stan', line 63, column 2 to column 18)",
-  "status": "data_rejected"
- },
- "declare-define-var-vec-runtime-error.stan": {
-  "cause": "Exception: vector assign rows: assigning variable td_b2 (8) and right hand side rows (7) must match in size (in 'declare-define-var-vec-runtime-error.stan', line 5, column 2 to column 23)",
-  "status": "data_rejected"
- },
  "fun-defs-lpdf.stan": {
   "cause": "complex numbers are not supported yet (in variable z)",
   "status": "unsupported"
- },
- "fun-var-constraints.stan": {
-  "cause": "Exception: fun_var_constraints_model_namespace::fun_var_constraints_model: bt is nan, but must be greater than or equal to -100.000000 (in 'fun-var-constraints.stan', line 10, column 2 to column 34)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/multivariate/continuous/dirichlet_lpdf.stan": {
-  "cause": "Exception: dirichlet_lpdf: probabilities is not a valid simplex. sum(probabilities) = 25.66921931, but should be 1 (in 'dirichlet_lpdf.stan', line 10, column 2 to column 62)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/multivariate/continuous/hmm_marginal.stan": {
-  "cause": "Exception: hmm_marginal: Gamma[i, ] is not a valid simplex. sum(Gamma[i, ]) = nan, but should be 1 (in 'hmm_marginal.stan', line 21, column 2 to column 52)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/multivariate/continuous/lkj_corr_log.stan": {
-  "cause": "Exception: lkj_corr_lpdf: Correlation matrix is not a valid correlation matrix. Correlation matrix(1,1) is 0.1, but should be near 1.0 (in 'lkj_corr_log.stan', line 24, column 2 to column 60)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/multivariate/continuous/lkj_cov_log.stan": {
-  "cause": "Exception: lognormal_lpdf: Scale parameter is -0.05, but must be positive finite! (in 'lkj_cov_log.stan', line 24, column 2 to column 79)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/multivariate/discrete/categorical/categorical_logit_glm.stan": {
-  "cause": "Exception: categorical_logit_glm_lpmf: Intercept vector has dimension = 2, expecting dimension = 3; a function was called with arguments of different scalar, array, vector, or matrix types, and they were not consistently sized;  all arguments must be scalars or multidimensional values of the same sh",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/multivariate/discrete/categorical/categorical_lpmf.stan": {
-  "cause": "Exception: categorical_lpmf: Probabilities parameter is not a valid simplex. sum(Probabilities parameter) = 0.45, but should be 1 (in 'categorical_lpmf.stan', line 20, column 2 to column 62)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/multivariate/discrete/multinomial/multinomial_log.stan": {
-  "cause": "Exception: multinomial_lpmf: Probabilities parameter is not a valid simplex. sum(Probabilities parameter) = 0.45, but should be 1 (in 'multinomial_log.stan', line 17, column 2 to column 68)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/multivariate/discrete/ordered_logistic/ordered_logistic_glm_lpmf.stan": {
-  "cause": "Exception: ordered_logistic_glm_lpmf: Weight vector has dimension = 2, expecting dimension = 3; a function was called with arguments of different scalar, array, vector, or matrix types, and they were not consistently sized;  all arguments must be scalars or multidimensional values of the same shape.",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/normal/normal_id_glm.stan": {
-  "cause": "Exception: normal_id_glm_lpdf: Vector of scale parameters has dimension = 2, expecting dimension = 1; a function was called with arguments of different scalar, array, vector, or matrix types, and they were not consistently sized;  all arguments must be scalars or multidimensional values of the same ",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_ccdf_log_3.stan": {
-  "cause": "Exception: pareto_type_2_lccdf: Shape parameter[2] is -0.1, but must be positive finite! (in 'pareto_type_2_ccdf_log_3.stan', line 173, column 2 to column 104)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_ccdf_log_4.stan": {
-  "cause": "Exception: pareto_type_2_lccdf: Random variable[2] is -0.1, but must be nonnegative! (in 'pareto_type_2_ccdf_log_4.stan', line 196, column 2 to column 104)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_3.stan": {
-  "cause": "Exception: pareto_type_2_cdf: Shape parameter[2] is -0.1, but must be positive finite! (in 'pareto_type_2_cdf_3.stan', line 173, column 2 to column 101)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_4.stan": {
-  "cause": "Exception: pareto_type_2_cdf: Random variable[2] is -0.1, but must be nonnegative! (in 'pareto_type_2_cdf_4.stan', line 196, column 2 to column 101)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_log_3.stan": {
-  "cause": "Exception: pareto_type_2_lcdf: Shape parameter[2] is -0.1, but must be positive finite! (in 'pareto_type_2_cdf_log_3.stan', line 173, column 2 to column 102)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_cdf_log_4.stan": {
-  "cause": "Exception: pareto_type_2_lcdf: Random variable[2] is -0.1, but must be nonnegative! (in 'pareto_type_2_cdf_log_4.stan', line 196, column 2 to column 102)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_log_3.stan": {
-  "cause": "Exception: pareto_type_2_lpdf: Shape parameter[2] is -0.1, but must be positive finite! (in 'pareto_type_2_log_3.stan', line 173, column 2 to column 103)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/pareto_type_2/pareto_type_2_log_4.stan": {
-  "cause": "Exception: pareto_type_2_lpdf: Scale parameter[2] is -0.1, but must be positive finite! (in 'pareto_type_2_log_4.stan', line 196, column 2 to column 103)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_1.stan": {
-  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
-  "platform_dependent": [
-   "4"
-  ]
- },
- "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_2.stan": {
-  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
-  "platform_dependent": [
-   "4"
-  ]
- },
- "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_3.stan": {
-  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
-  "platform_dependent": [
-   "4"
-  ]
- },
- "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_4.stan": {
-  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
-  "platform_dependent": [
-   "4"
-  ]
- },
- "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_1.stan": {
-  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
-  "platform_dependent": [
-   "4"
-  ]
- },
- "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_2.stan": {
-  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
-  "platform_dependent": [
-   "4"
-  ]
- },
- "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_3.stan": {
-  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
-  "platform_dependent": [
-   "4"
-  ]
- },
- "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_4.stan": {
-  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
-  "platform_dependent": [
-   "4"
-  ]
- },
- "function-signatures/distributions/univariate/continuous/uniform/uniform_cdf.stan": {
-  "cause": "Exception: uniform_cdf: Upper bound parameter is 6, but must be greater than 6.000000 (in 'uniform_cdf.stan', line 11, column 2 to column 59)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/uniform/uniform_lccdf.stan": {
-  "cause": "Exception: uniform_lccdf: Upper bound parameter is 6, but must be greater than 6.000000 (in 'uniform_lccdf.stan', line 11, column 2 to column 62)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/uniform/uniform_lcdf.stan": {
-  "cause": "Exception: uniform_lcdf: Upper bound parameter is 6, but must be greater than 6.000000 (in 'uniform_lcdf.stan', line 11, column 2 to column 61)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/uniform/uniform_lpdf.stan": {
-  "cause": "Exception: uniform_lpdf: Upper bound parameter is 6, but must be greater than 6.000000 (in 'uniform_lpdf.stan', line 11, column 2 to column 61)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lccdf_def_args.stan": {
-  "cause": "Exception: wiener4_lccdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_4_lccdf_def_args.stan', line 8, column 2 to column 84)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lccdf_def_args_prec.stan": {
-  "cause": "Exception: wiener4_lccdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_4_lccdf_def_args_prec.stan', line 8, column 2 to column 92)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lccdf_def_args_vec.stan": {
-  "cause": "Exception: wiener4_lccdf: A-priori bias[1] is 5.83747, but must be less than 1.000000 (in 'wiener_4_lccdf_def_args_vec.stan', line 7, column 2 to column 81)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lccdf_def_args_vec_prec.stan": {
-  "cause": "Exception: wiener4_lccdf: A-priori bias[1] is 4.76244, but must be less than 1.000000 (in 'wiener_4_lccdf_def_args_vec_prec.stan', line 8, column 2 to column 89)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lcdf_def_args.stan": {
-  "cause": "Exception: wiener4_lcdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_4_lcdf_def_args.stan', line 8, column 2 to column 83)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lcdf_def_args_prec.stan": {
-  "cause": "Exception: wiener4_lcdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_4_lcdf_def_args_prec.stan', line 8, column 2 to column 91)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lcdf_def_args_vec.stan": {
-  "cause": "Exception: wiener4_lcdf: A-priori bias[1] is 5.83747, but must be less than 1.000000 (in 'wiener_4_lcdf_def_args_vec.stan', line 7, column 2 to column 80)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_4_lcdf_def_args_vec_prec.stan": {
-  "cause": "Exception: wiener4_lcdf: A-priori bias[1] is 4.76244, but must be less than 1.000000 (in 'wiener_4_lcdf_def_args_vec_prec.stan', line 8, column 2 to column 88)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_5_args.stan": {
-  "cause": "Exception: wiener5_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_5_args.stan', line 8, column 2 to column 84)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_5_args_prec.stan": {
-  "cause": "Exception: wiener5_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_5_args_prec.stan', line 8, column 2 to column 92)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_5_args_vec.stan": {
-  "cause": "Exception: wiener5_lpdf: A-priori bias[1] is 5.83747, but must be less than 1.000000 (in 'wiener_5_args_vec.stan', line 7, column 2 to column 81)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_5_args_vec_prec.stan": {
-  "cause": "Exception: wiener5_lpdf: A-priori bias[1] is 4.76244, but must be less than 1.000000 (in 'wiener_5_args_vec_prec.stan', line 8, column 2 to column 89)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_0.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lccdf_def_0.stan', line 8, column 2 to column 107)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_0_prec.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lccdf_def_0_prec.stan', line 8, column 2 to column 115)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_1.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lccdf_def_1.stan', line 10, column 2 to column 108)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_1_prec.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lccdf_def_1_prec.stan', line 10, column 2 to column 116)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_2.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lccdf_def_2.stan', line 11, column 2 to column 110)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_2_prec.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lccdf_def_2_prec.stan', line 11, column 2 to column 118)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_3.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lccdf_def_3.stan', line 10, column 2 to column 108)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_3_prec.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lccdf_def_3_prec.stan', line 10, column 2 to column 116)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_4.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lccdf_def_4.stan', line 11, column 2 to column 109)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_4_lcdf_def.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: Inter-trial variability in A-priori bias is 5.83747, but must be in the interval [0, 1] (in 'wiener_full_lccdf_def_4_lcdf_def.stan', line 11, column 2 to column 110)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_4_lcdf_def_prec.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: Inter-trial variability in A-priori bias is 5.83747, but must be in the interval [0, 1] (in 'wiener_full_lccdf_def_4_lcdf_def_prec.stan', line 11, column 2 to column 118)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_4_prec.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lccdf_def_4_prec.stan', line 11, column 2 to column 117)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_6.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lccdf_def_6.stan', line 11, column 2 to column 105)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_6_prec.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lccdf_def_6_prec.stan', line 11, column 2 to column 113)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_vec_1.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias[1] is 5.83747, but must be less than 1.000000 (in 'wiener_full_lccdf_def_vec_1.stan', line 8, column 2 to column 102)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_vec_1_prec.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: A-priori bias[1] is 5.83747, but must be less than 1.000000 (in 'wiener_full_lccdf_def_vec_1_prec.stan', line 9, column 2 to column 110)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_vec_2.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: Random variable[3] is -0.1, but must be positive finite! (in 'wiener_full_lccdf_def_vec_2.stan', line 11, column 2 to column 103)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lccdf_def_vec_2_prec.stan": {
-  "cause": "Exception: wiener_lccdf_unnorm: Random variable[3] is -0.1, but must be positive finite! (in 'wiener_full_lccdf_def_vec_2_prec.stan', line 12, column 2 to column 111)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_0.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lcdf_def_0.stan', line 8, column 2 to column 106)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_0_prec.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lcdf_def_0_prec.stan', line 8, column 2 to column 114)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_1.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lcdf_def_1.stan', line 10, column 2 to column 107)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_1_prec.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lcdf_def_1_prec.stan', line 10, column 2 to column 115)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_2.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lcdf_def_2.stan', line 11, column 2 to column 109)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_2_prec.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lcdf_def_2_prec.stan', line 11, column 2 to column 117)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_3.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lcdf_def_3.stan', line 10, column 2 to column 107)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_3_prec.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lcdf_def_3_prec.stan', line 10, column 2 to column 115)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_4.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lcdf_def_4.stan', line 11, column 2 to column 108)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_4_lcdf_def.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: Inter-trial variability in A-priori bias is 5.83747, but must be in the interval [0, 1] (in 'wiener_full_lcdf_def_4_lcdf_def.stan', line 11, column 2 to column 109)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_4_lcdf_def_prec.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: Inter-trial variability in A-priori bias is 5.83747, but must be in the interval [0, 1] (in 'wiener_full_lcdf_def_4_lcdf_def_prec.stan', line 11, column 2 to column 117)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_4_prec.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lcdf_def_4_prec.stan', line 11, column 2 to column 116)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_6.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lcdf_def_6.stan', line 11, column 2 to column 104)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_6_prec.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lcdf_def_6_prec.stan', line 11, column 2 to column 112)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_vec_1.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias[1] is 5.83747, but must be less than 1.000000 (in 'wiener_full_lcdf_def_vec_1.stan', line 8, column 2 to column 101)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_vec_1_prec.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: A-priori bias[1] is 5.83747, but must be less than 1.000000 (in 'wiener_full_lcdf_def_vec_1_prec.stan', line 9, column 2 to column 109)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_vec_2.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: Random variable[3] is -0.1, but must be positive finite! (in 'wiener_full_lcdf_def_vec_2.stan', line 11, column 2 to column 102)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lcdf_def_vec_2_prec.stan": {
-  "cause": "Exception: wiener_lcdf_unnorm: Random variable[3] is -0.1, but must be positive finite! (in 'wiener_full_lcdf_def_vec_2_prec.stan', line 12, column 2 to column 110)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_0.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_0.stan', line 8, column 2 to column 100)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_0_prec.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_0_prec.stan', line 8, column 2 to column 108)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_1.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_1.stan', line 10, column 2 to column 101)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_1_prec.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_1_prec.stan', line 10, column 2 to column 109)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_2.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_2.stan', line 11, column 2 to column 103)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_2_prec.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_2_prec.stan', line 11, column 2 to column 111)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_3.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_3.stan', line 10, column 2 to column 101)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_3_prec.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_3_prec.stan', line 10, column 2 to column 109)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_4.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_4.stan', line 11, column 2 to column 102)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_4_prec.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_4_prec.stan', line 11, column 2 to column 110)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_5.stan": {
-  "cause": "Exception: wiener_lpdf: Inter-trial variability in A-priori bias is 5.83747, but must be in the interval [0, 1] (in 'wiener_full_lpdf_5.stan', line 11, column 2 to column 103)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_5_prec.stan": {
-  "cause": "Exception: wiener_lpdf: Inter-trial variability in A-priori bias is 5.83747, but must be in the interval [0, 1] (in 'wiener_full_lpdf_5_prec.stan', line 11, column 2 to column 111)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_6.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_6.stan', line 11, column 2 to column 98)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_6_prec.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be less than 1.000000 (in 'wiener_full_lpdf_6_prec.stan', line 11, column 2 to column 106)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_vec_1.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_vec_1.stan', line 8, column 2 to column 95)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_vec_1_prec.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 5.83747, but must be less than 1.000000 (in 'wiener_full_lpdf_vec_1_prec.stan', line 9, column 2 to column 103)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_vec_2.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[3] is -0.1, but must be positive finite! (in 'wiener_full_lpdf_vec_2.stan', line 11, column 2 to column 96)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_full_lpdf_vec_2_prec.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[3] is -0.1, but must be positive finite! (in 'wiener_full_lpdf_vec_2_prec.stan', line 12, column 2 to column 104)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_0.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be in the interval [0, 1] (in 'wiener_log_0.stan', line 31, column 2 to column 75)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_1.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 4.51218, but must be in the interval [0, 1] (in 'wiener_log_1.stan', line 31, column 2 to column 96)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_10.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 2.92846, but must be in the interval [0, 1] (in 'wiener_log_10.stan', line 31, column 2 to column 98)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_11.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias[2] is -0.1, but must be in the interval [0, 1] (in 'wiener_log_11.stan', line 31, column 2 to column 100)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_12.stan": {
-  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_12.stan', line 31, column 2 to column 103)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_13.stan": {
-  "cause": "Exception: wiener_lpdf: Boundary separation[1] is -0.05, but must be positive finite! (in 'wiener_log_13.stan', line 31, column 2 to column 110)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_14.stan": {
-  "cause": "Exception: wiener_lpdf: Nondecision time[2] is -0.1, but must be positive finite! (in 'wiener_log_14.stan', line 31, column 2 to column 92)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_15.stan": {
-  "cause": "Exception: wiener_lpdf: Nondecision time[2] is -0.1, but must be positive finite! (in 'wiener_log_15.stan', line 31, column 2 to column 87)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_16.stan": {
-  "cause": "Exception: wiener_lpdf: Nondecision time[1] is -0.05, but must be positive finite! (in 'wiener_log_16.stan', line 31, column 2 to column 100)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_17.stan": {
-  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_17.stan', line 31, column 2 to column 94)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_18.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 6.76162, but must be in the interval [0, 1] (in 'wiener_log_18.stan', line 31, column 2 to column 86)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_19.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias[2] is -0.1, but must be in the interval [0, 1] (in 'wiener_log_19.stan', line 31, column 2 to column 95)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_2.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be in the interval [0, 1] (in 'wiener_log_2.stan', line 31, column 2 to column 86)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_20.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 6.76162, but must be in the interval [0, 1] (in 'wiener_log_20.stan', line 31, column 2 to column 90)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_21.stan": {
-  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_21.stan', line 31, column 2 to column 93)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_22.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 6.76162, but must be in the interval [0, 1] (in 'wiener_log_22.stan', line 31, column 2 to column 93)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_23.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias[1] is -0.05, but must be in the interval [0, 1] (in 'wiener_log_23.stan', line 31, column 2 to column 100)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_24.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias[1] is 4.51218, but must be in the interval [0, 1] (in 'wiener_log_24.stan', line 31, column 2 to column 93)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_25.stan": {
-  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_25.stan', line 31, column 2 to column 100)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_26.stan": {
-  "cause": "Exception: wiener_lpdf: Boundary separation[1] is -0.05, but must be positive finite! (in 'wiener_log_26.stan', line 31, column 2 to column 100)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_27.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_27.stan', line 31, column 2 to column 84)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_28.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_28.stan', line 31, column 2 to column 100)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_29.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_29.stan', line 31, column 2 to column 93)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_3.stan": {
-  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_3.stan', line 31, column 2 to column 84)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_30.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_30.stan', line 31, column 2 to column 93)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_31.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_31.stan', line 31, column 2 to column 88)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_32.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_32.stan', line 31, column 2 to column 92)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_33.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_33.stan', line 31, column 2 to column 93)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_34.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[2] is -0.1, but must be positive! (in 'wiener_log_34.stan', line 31, column 2 to column 100)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_35.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[1] is -0.05, but must be positive! (in 'wiener_log_35.stan', line 31, column 2 to column 86)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_36.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[1] is -0.05, but must be positive! (in 'wiener_log_36.stan', line 31, column 2 to column 96)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_37.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[1] is -0.05, but must be positive! (in 'wiener_log_37.stan', line 31, column 2 to column 98)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_38.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[1] is -0.05, but must be positive! (in 'wiener_log_38.stan', line 31, column 2 to column 100)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_39.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable[1] is -0.05, but must be positive! (in 'wiener_log_39.stan', line 31, column 2 to column 103)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_4.stan": {
-  "cause": "Exception: wiener_lpdf: Boundary separation[1] is -0.05, but must be positive finite! (in 'wiener_log_4.stan', line 31, column 2 to column 96)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_40.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 6, but must be in the interval [0, 1] (in 'wiener_log_40.stan', line 17, column 2 to column 74)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_41.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 2.92846, but must be in the interval [0, 1] (in 'wiener_log_41.stan', line 17, column 2 to column 92)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_5.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable  = 2.92846, but must be greater than nondecision time = 5.08179 (in 'wiener_log_5.stan', line 31, column 2 to column 88)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_6.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias is 2.92846, but must be in the interval [0, 1] (in 'wiener_log_6.stan', line 31, column 2 to column 83)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_7.stan": {
-  "cause": "Exception: wiener_lpdf: Random variable  = 2.92846, but must be greater than nondecision time = 6.76162 (in 'wiener_log_7.stan', line 31, column 2 to column 88)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_8.stan": {
-  "cause": "Exception: wiener_lpdf: Boundary separation[2] is -0.1, but must be positive finite! (in 'wiener_log_8.stan', line 31, column 2 to column 90)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/continuous/wiener/wiener_log_9.stan": {
-  "cause": "Exception: wiener_lpdf: A-priori bias[2] is -0.1, but must be in the interval [0, 1] (in 'wiener_log_9.stan', line 31, column 2 to column 96)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/discrete/beta_neg_binomial/beta_neg_binomial_cdf.stan": {
-  "cause": "Exception: beta_neg_binomial_cdf: Prior failure parameter[2] is -0.1, but must be positive finite! (in 'beta_neg_binomial_cdf.stan', line 329, column 2 to column 85)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/discrete/beta_neg_binomial/beta_neg_binomial_lccdf.stan": {
-  "cause": "Exception: beta_neg_binomial_lccdf: Prior failure parameter[2] is -0.1, but must be positive finite! (in 'beta_neg_binomial_lccdf.stan', line 329, column 2 to column 87)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/discrete/beta_neg_binomial/beta_neg_binomial_lcdf.stan": {
-  "cause": "Exception: beta_neg_binomial_lcdf: Prior failure parameter[2] is -0.1, but must be positive finite! (in 'beta_neg_binomial_lcdf.stan', line 329, column 2 to column 86)",
-  "status": "rejected_both"
- },
- "function-signatures/distributions/univariate/discrete/discrete_range/discrete_range_cdf.stan": {
-  "cause": "Exception: discrete_range_cdf: Upper bound parameter[1] is 0, but must be greater than or equal to 6.000000 (in 'discrete_range_cdf.stan', line 8, column 2 to column 72)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/discrete/discrete_range/discrete_range_lccdf.stan": {
-  "cause": "Exception: discrete_range_lccdf: Upper bound parameter[1] is 0, but must be greater than or equal to 6.000000 (in 'discrete_range_lccdf.stan', line 8, column 2 to column 75)",
-  "status": "data_rejected"
- },
- "function-signatures/distributions/univariate/discrete/discrete_range/discrete_range_lcdf.stan": {
-  "cause": "Exception: discrete_range_lcdf: Upper bound parameter[1] is 0, but must be greater than or equal to 6.000000 (in 'discrete_range_lcdf.stan', line 8, column 2 to column 74)",
-  "status": "data_rejected"
  },
  "function-signatures/math/functions/generate_laplace_options.stan": {
   "cause": "this variable type is not supported yet (in variable transformed_data_tols) | in: (STuple ((SVector AoS ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SReal SInt SInt SInt SInt))",
@@ -873,18 +177,6 @@
   "cause": "complex numbers are not supported yet (in variable d_complex)",
   "status": "unsupported"
  },
- "function-signatures/math/functions/hypergeometric_3F2.stan": {
-  "cause": "Exception: hypergeometric_3F2: a (6) and 3 (3) must match in size (in 'hypergeometric_3F2.stan', line 18, column 2 to column 73)",
-  "status": "data_rejected"
- },
- "function-signatures/math/functions/inc_beta.stan": {
-  "cause": "Exception: Error in function boost::math::ibeta<double>(double, double, double): The argument x to the incomplete beta function must be in [0,1] (got x=2.7000000000000002). (in 'inc_beta.stan', line 4, column 2 to column 26)",
-  "status": "data_rejected"
- },
- "function-signatures/math/functions/lambert.stan": {
-  "cause": "Exception: Error in function boost::math::lambert_wm1<RealType>(<RealType>): Argument z = 6 is out of range (z <= 0) for Lambert W-1 branch! (Try Lambert W0 branch?) (in 'lambert.stan', line 11, column 2 to column 45)",
-  "status": "data_rejected"
- },
  "function-signatures/math/functions/to_complex.stan": {
   "cause": "complex numbers are not supported yet (in variable transformed_data_complex)",
   "status": "unsupported"
@@ -892,10 +184,6 @@
  "function-signatures/math/matrix/abs.stan": {
   "cause": "mir: malformed sized declaration type",
   "status": "unsupported"
- },
- "function-signatures/math/matrix/acosh.stan": {
-  "cause": "Exception: acosh: x is -0.15, but must be greater than or equal to 1.000000 (in 'acosh.stan', line 106, column 2 to column 45)",
-  "status": "rejected_both"
  },
  "function-signatures/math/matrix/add_diag.stan": {
   "cause": "complex numbers are not supported yet (in variable C) | in: (SComplexMatrix ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
@@ -908,18 +196,6 @@
  "function-signatures/math/matrix/append_row.stan": {
   "cause": "complex numbers are not supported yet (in variable d_complex)",
   "status": "unsupported"
- },
- "function-signatures/math/matrix/bessel_first_kind.stan": {
-  "cause": "Exception: Binary function: size of x (2) and size of y (6) must match in size (in 'bessel_first_kind.stan', line 59, column 2 to line 60, column 68)",
-  "status": "data_rejected"
- },
- "function-signatures/math/matrix/bessel_second_kind.stan": {
-  "cause": "Exception: Binary function: size of x (2) and size of y (6) must match in size (in 'bessel_second_kind.stan', line 59, column 2 to line 60, column 69)",
-  "status": "data_rejected"
- },
- "function-signatures/math/matrix/binary_log_loss.stan": {
-  "cause": "Exception: log1m: x is 4.70969, but must be less than or equal to 1.000000 (in 'binary_log_loss.stan', line 43, column 2 to column 69)",
-  "status": "data_rejected"
  },
  "function-signatures/math/matrix/block.stan": {
   "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
@@ -953,10 +229,6 @@
   "cause": "this variable type is not supported yet (in variable td_wvu) | in: (STuple ((SVector AoS ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SArray SInt ((pattern (Lit Int 5)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SArray SInt ((pattern (Lit Int 5)) ",
   "status": "unsupported"
  },
- "function-signatures/math/matrix/csr_extract_u.stan": {
-  "cause": "Exception: assign array size: assigning variable u (5) and right hand side (4) must match in size (in 'csr_extract_u.stan', line 6, column 2 to column 25)",
-  "status": "data_rejected"
- },
  "function-signatures/math/matrix/csr_extract_v.stan": {
   "cause": "Plain stanc sizes the local before assigning it, so CmdStan's assign checks the size and throws; stanc --O1, whose MIR stanli lowers, leaves the local empty and Stan's assign skips the check for an empty left side.",
   "points": {
@@ -970,14 +242,6 @@
  "function-signatures/math/matrix/csr_extract_w.stan": {
   "cause": "unsupported function csr_extract_w",
   "status": "unsupported"
- },
- "function-signatures/math/matrix/csr_matrix_times_vector.stan": {
-  "cause": "Exception: csr_matrix_times_vector: n (4) and b (3) must match in size (in 'csr_matrix_times_vector.stan', line 11, column 2 to column 55)",
-  "status": "data_rejected"
- },
- "function-signatures/math/matrix/csr_to_dense_matrix.stan": {
-  "cause": "Exception: csr_to_dense_matrix: m (3) and u (6) must match in size (in 'csr_to_dense_matrix.stan', line 7, column 2 to column 46)",
-  "status": "data_rejected"
  },
  "function-signatures/math/matrix/diag_matrix.stan": {
   "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
@@ -994,10 +258,6 @@
  "function-signatures/math/matrix/diagonal.stan": {
   "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
   "status": "unsupported"
- },
- "function-signatures/math/matrix/dims.stan": {
-  "cause": "Exception: assign array size: assigning variable val1 (1) and right hand side (2) must match in size (in 'dims.stan', line 41, column 2 to column 19)",
-  "status": "data_rejected"
  },
  "function-signatures/math/matrix/dot_product.stan": {
   "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
@@ -1031,10 +291,6 @@
   "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
   "status": "unsupported"
  },
- "function-signatures/math/matrix/falling_factorial.stan": {
-  "cause": "Exception: Binary function: size of x (6) and size of y (2) must match in size (in 'falling_factorial.stan', line 67, column 2 to line 68, column 68)",
-  "status": "data_rejected"
- },
  "function-signatures/math/matrix/fft.stan": {
   "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
   "status": "unsupported"
@@ -1047,33 +303,9 @@
   "cause": "mir: malformed sized declaration type",
   "status": "unsupported"
  },
- "function-signatures/math/matrix/inv_Phi.stan": {
-  "cause": "Exception: inv_Phi: Probability variable is -5, but must be in the interval [0, 1] (in 'inv_Phi.stan', line 46, column 2 to column 41)",
-  "status": "data_rejected"
- },
- "function-signatures/math/matrix/inv_erfc.stan": {
-  "cause": "Exception: Error in function boost::math::erfc_inv<double>(double, double): Argument outside range [0,2] in inverse erfc function (got p=4.2357067890126228). (in 'inv_erfc.stan', line 44, column 2 to column 47)",
-  "status": "data_rejected"
- },
  "function-signatures/math/matrix/inv_fft.stan": {
   "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
   "status": "unsupported"
- },
- "function-signatures/math/matrix/lambert.stan": {
-  "cause": "Exception: Error in function boost::math::lambert_wm1<RealType>(<RealType>): Argument z = 4.2357067890126228 is out of range (z <= 0) for Lambert W-1 branch! (Try Lambert W0 branch?) (in 'lambert.stan', line 65, column 2 to column 50)",
-  "status": "data_rejected"
- },
- "function-signatures/math/matrix/lchoose.stan": {
-  "cause": "Exception: binomial_coefficient_log: second argument is -6, but must be greater than or equal to -1.000000 (in 'lchoose.stan', line 41, column 2 to column 60)",
-  "status": "data_rejected"
- },
- "function-signatures/math/matrix/ldexp.stan": {
-  "cause": "Exception: Binary function: size of x (6) and size of y (2) must match in size (in 'ldexp.stan', line 57, column 2 to column 72)",
-  "status": "data_rejected"
- },
- "function-signatures/math/matrix/lmgamma.stan": {
-  "cause": "Exception: Binary function: size of x (2) and size of y (6) must match in size (in 'lmgamma.stan', line 57, column 2 to column 74)",
-  "status": "data_rejected"
  },
  "function-signatures/math/matrix/mdivide_right.stan": {
   "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
@@ -1082,14 +314,6 @@
  "function-signatures/math/matrix/minus.stan": {
   "cause": "mir: malformed sized declaration type",
   "status": "unsupported"
- },
- "function-signatures/math/matrix/modified_bessel_first_kind.stan": {
-  "cause": "Exception: Binary function: size of x (2) and size of y (6) must match in size (in 'modified_bessel_first_kind.stan', line 67, column 2 to line 68, column 77)",
-  "status": "data_rejected"
- },
- "function-signatures/math/matrix/modified_bessel_second_kind.stan": {
-  "cause": "Exception: Binary function: size of x (2) and size of y (6) must match in size (in 'modified_bessel_second_kind.stan', line 68, column 2 to line 69, column 78)",
-  "status": "data_rejected"
  },
  "function-signatures/math/matrix/num_elements.stan": {
   "cause": "complex numbers are not supported yet (in variable cx3x) | in: (SComplexVector ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
@@ -1115,10 +339,6 @@
   "cause": "complex numbers are not supported yet (in variable d_complex)",
   "status": "unsupported"
  },
- "function-signatures/math/matrix/rep_param.stan": {
-  "cause": "Exception: assign array size: assigning variable m1 (9) and right hand side (6) must match in size (in 'rep_param.stan', line 60, column 2 to column 24)",
-  "status": "rejected_both"
- },
  "function-signatures/math/matrix/rep_row_vector.stan": {
   "cause": "complex numbers are not supported yet (in variable d_complex)",
   "status": "unsupported"
@@ -1126,10 +346,6 @@
  "function-signatures/math/matrix/rep_vector.stan": {
   "cause": "complex numbers are not supported yet (in variable d_complex)",
   "status": "unsupported"
- },
- "function-signatures/math/matrix/rising_factorial.stan": {
-  "cause": "Exception: Binary function: size of x (6) and size of y (2) must match in size (in 'rising_factorial.stan', line 67, column 2 to line 68, column 67)",
-  "status": "data_rejected"
  },
  "function-signatures/math/matrix/row.stan": {
   "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
@@ -1150,14 +366,6 @@
  "function-signatures/math/matrix/singular_values.stan": {
   "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
   "status": "unsupported"
- },
- "function-signatures/math/matrix/std_normal_log_qf.stan": {
-  "cause": "Exception: std_normal_log_qf: Probability variable is 6, but must be less than or equal to 0.000000 (in 'std_normal_log_qf.stan', line 46, column 2 to column 51)",
-  "status": "data_rejected"
- },
- "function-signatures/math/matrix/std_normal_qf.stan": {
-  "cause": "Exception: inv_Phi: Probability variable is -5, but must be in the interval [0, 1] (in 'std_normal_qf.stan', line 46, column 2 to column 47)",
-  "status": "data_rejected"
  },
  "function-signatures/math/matrix/sub_col.stan": {
   "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
@@ -1211,130 +419,6 @@
   "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
   "status": "unsupported"
  },
- "function-signatures/math/transforms/cholesky_factor_corr_unconstrain.stan": {
-  "cause": "Exception: cholesky_corr_free: x is not lower triangular; x[1,2]=0.4 (in 'cholesky_factor_corr_unconstrain.stan', line 52, column 2 to column 72)",
-  "status": "rejected_both"
- },
- "function-signatures/math/transforms/cholesky_factor_cov_unconstrain.stan": {
-  "cause": "Exception: cholesky_factor_free: y is not lower triangular; y[1,2]=0.4 (in 'cholesky_factor_cov_unconstrain.stan', line 52, column 2 to column 71)",
-  "status": "rejected_both"
- },
- "function-signatures/math/transforms/corr_matrix_unconstrain.stan": {
-  "cause": "Exception: corr_matrix_free: factor_cov_matrix failed on y         0.1         0.4        0.35         0.3        0.25         0.2 | 2.77556e-17       -0.05        0.25         0.2        0.15         0.1 |        -0.1       -0.15        -0.2         0.1        0.05 5.55112e-17 |        0.25        ",
-  "status": "rejected_both"
- },
- "function-signatures/math/transforms/cov_matrix_unconstrain.stan": {
-  "cause": "Exception: cov_matrix_free: y is not symmetric. y[1,2] = 0.4, but y[2,1] = 2.77556e-17 (in 'cov_matrix_unconstrain.stan', line 52, column 2 to column 62)",
-  "status": "rejected_both"
- },
- "function-signatures/math/transforms/lower_bound_unconstrain.stan": {
-  "cause": "Exception: lb_free: Lower bounded variable[1, 1] is 5.08179, but must be greater than or equal to 5.837474 (in 'lower_bound_unconstrain.stan', line 43, column 2 to column 56)",
-  "status": "data_rejected"
- },
- "function-signatures/math/transforms/lower_upper_bound_constrain.stan": {
-  "cause": "Exception: lub_constrain: lb is 5.08179, but must be less than 5.081790 (in 'lower_upper_bound_constrain.stan', line 42, column 2 to column 72)",
-  "status": "data_rejected"
- },
- "function-signatures/math/transforms/lower_upper_bound_jacobian.stan": {
-  "cause": "Exception: lub_constrain: lb is 5.83747, but must be less than 5.837474 (in 'lower_upper_bound_jacobian.stan', line 63, column 2 to column 78)",
-  "status": "rejected_both"
- },
- "function-signatures/math/transforms/lower_upper_bound_unconstrain.stan": {
-  "cause": "Exception: lub_free: Bounded variable is 6.10769, but must be in the interval [6.10769, 5.83747] (in 'lower_upper_bound_unconstrain.stan', line 43, column 2 to column 72)",
-  "status": "data_rejected"
- },
- "function-signatures/math/transforms/ordered_unconstrain.stan": {
-  "cause": "Exception: stan::math::ordered_free: Ordered variable is not a valid ordered vector. The element at 2 is 4.76244, but should be greater than the previous element, 5.83747 (in 'ordered_unconstrain.stan', line 18, column 2 to column 44)",
-  "status": "data_rejected"
- },
- "function-signatures/math/transforms/positive_ordered_unconstrain.stan": {
-  "cause": "Exception: stan::math::positive_ordered_free: Positive ordered variable is not a valid ordered vector. The element at 2 is 4.76244, but should be greater than the previous element, 5.83747 (in 'positive_ordered_unconstrain.stan', line 18, column 2 to column 53)",
-  "status": "data_rejected"
- },
- "function-signatures/math/transforms/simplex_unconstrain.stan": {
-  "cause": "Exception: stan::math::simplex_free: Simplex variable is not a valid simplex. sum(Simplex variable) = 0.85, but should be 1 (in 'simplex_unconstrain.stan', line 40, column 2 to column 59)",
-  "status": "rejected_both"
- },
- "function-signatures/math/transforms/stochastic_column_constrain.stan": {
-  "cause": "Exception: matrix assign rows: assigning variable transformed_param_matrix (6) and right hand side rows (7) must match in size (in 'stochastic_column_constrain.stan', line 39, column 2 to column 67)",
-  "status": "rejected_both"
- },
- "function-signatures/math/transforms/stochastic_column_unconstrain.stan": {
-  "cause": "Exception: stan::math::simplex_free: Simplex variable is not a valid simplex. sum(Simplex variable) = 30.36774299, but should be 1 (in 'stochastic_column_unconstrain.stan', line 18, column 2 to column 54)",
-  "status": "data_rejected"
- },
- "function-signatures/math/transforms/stochastic_row_jacobian.stan": {
-  "cause": "Exception: matrix assign columns: assigning variable transformed_param_matrix (6) and right hand side columns (7) must match in size (in 'stochastic_row_jacobian.stan', line 26, column 2 to column 63)",
-  "status": "rejected_both"
- },
- "function-signatures/math/transforms/stochastic_row_unconstrain.stan": {
-  "cause": "Exception: stan::math::simplex_free: Simplex variable is not a valid simplex. sum(Simplex variable) = 1.75, but should be 1 (in 'stochastic_row_unconstrain.stan', line 40, column 2 to column 66)",
-  "status": "rejected_both"
- },
- "function-signatures/math/transforms/sum_to_zero_unconstrain.stan": {
-  "cause": "Exception: stan::math::sum_to_zero_free: sum_to_zero variable does not sum to zero. sum(sum_to_zero variable) = 209.6181719, but should be 0 (in 'sum_to_zero_unconstrain.stan', line 26, column 2 to column 48)",
-  "status": "data_rejected"
- },
- "function-signatures/math/transforms/unit_vector_unconstrain.stan": {
-  "cause": "Exception: stan::math::unit_vector_free: Unit vector variable is not a valid unit vector. The sum of the squares of the elements should be 1, but is 118.319 (in 'unit_vector_unconstrain.stan', line 18, column 2 to column 48)",
-  "status": "data_rejected"
- },
- "function-signatures/math/transforms/upper_bound_unconstrain.stan": {
-  "cause": "Exception: ub_free: Upper bounded variable is 0.0817899, but must be less than or equal to -0.050000 (in 'upper_bound_unconstrain.stan', line 116, column 2 to column 73)",
-  "status": "rejected_both"
- },
- "function-signatures/math/while.stan": {
-  "cause": "An uninitialized transformed data int is nonzero, so `while (transformed_data_int)` never ends; CmdStan aborts while loading data (stanli stops with 'while loop did not terminate').",
-  "status": "cmdstan_crashed"
- },
- "illegal_transformed_data.stan": {
-  "cause": "Exception: illegal_transformed_data_model_namespace::illegal_transformed_data_model: x is -1, but must be greater than or equal to 0.000000 (in 'illegal_transformed_data.stan', line 2, column 2 to column 18)",
-  "status": "data_rejected"
- },
- "illegal_transformed_parameters.stan": {
-  "cause": "Exception: illegal_transformed_parameters_model_namespace::log_prob: x is -1, but must be greater than or equal to 0.000000 (in 'illegal_transformed_parameters.stan', line 2, column 2 to column 18)",
-  "status": "rejected_both"
- },
- "indexing/good-empty-omni.stan": {
-  "cause": "Exception: assign array size: assigning variable c (4) and right hand side (3) must match in size (in 'good-empty-omni.stan', line 67, column 2 to column 13)",
-  "status": "data_rejected"
- },
- "indexing/good-ints.stan": {
-  "cause": "Exception: array[multi, ...] assign: accessing element out of range. index -2147483648 out of range; expecting index to be between 1 and 4 (in 'good-ints.stan', line 67, column 2 to column 12)",
-  "status": "data_rejected"
- },
- "indexing/good-lb.stan": {
-  "cause": "Exception: array[multi, ...] assign: assigning variable e (4) and right hand side size (3) must match in size (in 'good-lb.stan', line 78, column 2 to column 14)",
-  "status": "data_rejected"
- },
- "indexing/good-lub.stan": {
-  "cause": "Exception: array[multi, ...] assign: assigning variable c (9) and right hand side size (3) must match in size (in 'good-lub.stan', line 89, column 2 to column 16)",
-  "status": "data_rejected"
- },
- "indexing/good-omni.stan": {
-  "cause": "Exception: assign array size: assigning variable c (4) and right hand side (3) must match in size (in 'good-empty-omni.stan', line 67, column 2 to column 13)",
-  "status": "data_rejected"
- },
- "indexing/good-omni2.stan": {
-  "cause": "Exception: assign array size: assigning variable c (4) and right hand side (3) must match in size (in 'good-omni2.stan', line 67, column 2 to column 13)",
-  "status": "data_rejected"
- },
- "indexing/good-omni3.stan": {
-  "cause": "Exception: assign array size: assigning variable c (4) and right hand side (3) must match in size (in 'good-omni3.stan', line 67, column 2 to column 13)",
-  "status": "data_rejected"
- },
- "indexing/good-ub.stan": {
-  "cause": "Exception: array[multi, ...] assign: assigning variable c (2) and right hand side size (3) must match in size (in 'good-ub.stan', line 65, column 2 to column 14)",
-  "status": "data_rejected"
- },
- "infinite_loop_return.stan": {
-  "cause": "The program loops forever by design; CmdStan does not finish within the record timeout.",
-  "status": "cmdstan_timeout"
- },
- "int_overloads.stan": {
-  "cause": "Exception: acosh: x is 0.1, but must be greater than or equal to 1.000000 (in 'int_overloads.stan', line 109, column 2 to column 41)",
-  "status": "rejected_both"
- },
  "integrate_1d_good.stan": {
   "cause": "stanli's integrate_1d does not check that the lower limit is at most the upper limit; CmdStan throws 'integrate_1d: lower limit is 0.2, but must be less than or equal to 0'.",
   "points": {
@@ -1344,62 +428,6 @@
    "3": "one_side_threw",
    "4": "one_side_threw"
   }
- },
- "lang/exit_model.stan": {
-  "cause": "Exception: user requested termination (in 'exit_model.stan', line 14, column 2 to column 44)",
-  "status": "rejected_both"
- },
- "lang/print_reject_function_model.stan": {
-  "cause": "Exception: Exception: user-specified rejection (in 'print_reject_function_model.stan', line 4, column 4 to column 39) (in 'print_reject_function_model.stan', line 20, column 2 to column 9)",
-  "status": "rejected_both"
- },
- "lang/print_reject_function_tdata.stan": {
-  "cause": "Exception: Exception: user-specified rejection (in 'print_reject_function_tdata.stan', line 4, column 4 to column 39) (in 'print_reject_function_tdata.stan', line 10, column 2 to column 9)",
-  "status": "data_rejected"
- },
- "lang/print_reject_function_tparams.stan": {
-  "cause": "Exception: Exception: user-specified rejection (in 'print_reject_function_tparams.stan', line 4, column 4 to column 39) (in 'print_reject_function_tparams.stan', line 16, column 2 to column 9)",
-  "status": "rejected_both"
- },
- "lang/print_reject_model_block.stan": {
-  "cause": "Exception: user-specified rejection (in 'print_reject_model_block.stan', line 14, column 2 to column 37)",
-  "status": "rejected_both"
- },
- "lang/print_reject_tdata_block.stan": {
-  "cause": "Exception: QUIT (in 'print_reject_tdata_block.stan', line 4, column 2 to column 17)",
-  "status": "data_rejected"
- },
- "lang/print_reject_tparams_block.stan": {
-  "cause": "Exception: QUIT (in 'print_reject_tparams_block.stan', line 10, column 2 to column 17)",
-  "status": "rejected_both"
- },
- "lang/reject_func_call_model.stan": {
-  "cause": "Exception: Exception: user-specified rejection (in 'reject_func_call_model.stan', line 3, column 4 to column 39) (in 'reject_func_call_model.stan', line 10, column 2 to column 9)",
-  "status": "rejected_both"
- },
- "lang/reject_func_call_transformed_data.stan": {
-  "cause": "Exception: Exception: user-specified rejection (in 'reject_func_call_transformed_data.stan', line 3, column 4 to column 39) (in 'reject_func_call_transformed_data.stan', line 8, column 2 to column 9)",
-  "status": "data_rejected"
- },
- "lang/reject_func_call_transformed_parameters.stan": {
-  "cause": "Exception: Exception: user-specified rejection (in 'reject_func_call_transformed_parameters.stan', line 3, column 4 to column 39) (in 'reject_func_call_transformed_parameters.stan', line 11, column 2 to column 12)",
-  "status": "rejected_both"
- },
- "lang/reject_model.stan": {
-  "cause": "Exception: user-specified rejection (in 'reject_model.stan', line 14, column 2 to column 37)",
-  "status": "rejected_both"
- },
- "lang/reject_mult_args.stan": {
-  "cause": "Exception: Exception: user-specified rejection, difference above 1.2 x:-9 y:-1 (in 'reject_mult_args.stan', line 8, column 6 to column 81) (in 'reject_mult_args.stan', line 25, column 2 to column 31)",
-  "status": "rejected_both"
- },
- "lang/reject_transformed_data.stan": {
-  "cause": "Exception: user-specified rejection (in 'reject_transformed_data.stan', line 3, column 2 to column 37)",
-  "status": "data_rejected"
- },
- "lang/reject_transformed_parameters.stan": {
-  "cause": "Exception: user-specified rejection (in 'reject_transformed_parameters.stan', line 6, column 2 to column 37)",
-  "status": "rejected_both"
  },
  "laplace_deriv_check.stan": {
   "cause": "stanli write_array unsupported: unsupported call taking the function ll_function | in: (UFun (((AutoDiffable UVector) (AutoDiffable UReal) (AutoDiffable UVector) (AutoDiffable (UArray UInt))) (ReturnType UReal) FnPlain AoS))",
@@ -1411,69 +439,9 @@
    "4": "wa_unsupported"
   }
  },
- "map_rect.stan": {
-  "cause": "Exception: vector assign rows: assigning variable y_hat_tp1 (3) and right hand side rows (9) must match in size (in 'map_rect.stan', line 24, column 2 to line 25, column 41)",
-  "status": "rejected_both"
- },
- "model/domain_fail.stan": {
-  "cause": "log_prob returns NaN",
-  "status": "rejected_both"
- },
- "ode-int-segments.stan": {
-  "cause": "Exception: segment: i is 0, but must be greater than 0.000000 (in 'ode-int-segments.stan', line 26, column 4 to column 75)",
-  "status": "rejected_both"
- },
- "ode-nested-quotes.stan": {
-  "cause": "Exception: integrate_ode_rk45: times[1] is nan, but must be finite! (in 'ode-nested-quotes.stan', line 14, column 2 to line 15, column 62)",
-  "status": "data_rejected"
- },
- "ode/ode_adjoint_test_model.stan": {
-  "cause": "Exception: ode_adjoint_tol_ctl: times is not a valid sorted vector. The element at 3 is 0.1, but should be greater than or equal to the previous element, 0.2 (in 'ode_adjoint_test_model.stan', line 44, column 2 to line 45, column 105)",
-  "status": "rejected_both"
- },
- "overloading/dae_overloaded.stan": {
-  "cause": "Exception: dae: times[1] is nan, but must be finite! (in 'dae_overloaded.stan', line 38, column 4 to column 54)",
-  "status": "rejected_both"
- },
  "overloading/minimum_promotion.stan": {
   "cause": "unsupported expression",
   "status": "unsupported"
- },
- "overloading/reduce_sum_ordering.stan": {
-  "cause": "A partial sum function calls reduce_sum on itself; the recursion never ends, and CmdStan overflows its stack while loading data.",
-  "status": "cmdstan_crashed"
- },
- "parser-generator/cholesky_cov_transform_data_block.stan": {
-  "cause": "Exception: cholesky_cov_transform_data_block_model_namespace::cholesky_cov_transform_data_block_model: cfcov_54 is not lower triangular; cfcov_54[1,2]=nan (in 'cholesky_cov_transform_data_block.stan', line 2, column 2 to column 36)",
-  "status": "data_rejected"
- },
- "parser-generator/cholesky_cov_transform_param_block.stan": {
-  "cause": "Exception: cholesky_cov_transform_param_block_model_namespace::log_prob: cfcov_54 is not lower triangular; cfcov_54[1,2]=nan (in 'cholesky_cov_transform_param_block.stan', line 2, column 2 to column 36)",
-  "status": "rejected_both"
- },
- "parser-generator/data_qualifier_scope_xformed_data.stan": {
-  "cause": "Exception: solve_powell: size of the algebraic system's output (2) and size of the vector of unknowns, x, (1) must match in size (in 'data_qualifier_scope_xformed_data.stan', line 15, column 4 to column 73)",
-  "status": "data_rejected"
- },
- "parser-generator/multidim_var_all_ar45_mat23.stan": {
-  "cause": "Exception: multidim_var_all_ar45_mat23_model_namespace::multidim_var_all_ar45_mat23_model: td_ar_mat[1, 1][1, 1] is nan, but must be greater than or equal to 0.000000 (in 'multidim_var_all_ar45_mat23.stan', line 12, column 2 to column 55)",
-  "status": "data_rejected"
- },
- "parser-generator/multidim_var_transform_data_ar45_mat23.stan": {
-  "cause": "Exception: multidim_var_transform_data_ar45_mat23_model_namespace::multidim_var_transform_data_ar45_mat23_model: ar_mat[1, 1][1, 1] is nan, but must be greater than or equal to 0.000000 (in 'multidim_var_transform_data_ar45_mat23.stan', line 2, column 2 to column 52)",
-  "status": "data_rejected"
- },
- "parser-generator/multidim_var_transform_param_ar45_mat23.stan": {
-  "cause": "Exception: multidim_var_transform_param_ar45_mat23_model_namespace::log_prob: ar_mat[1, 1][1, 1] is nan, but must be greater than or equal to 0.000000 (in 'multidim_var_transform_param_ar45_mat23.stan', line 2, column 2 to column 52)",
-  "status": "rejected_both"
- },
- "parser-generator/prim_var_transformed_data_block.stan": {
-  "cause": "Exception: prim_var_transformed_data_block_model_namespace::prim_var_transformed_data_block_model: p1 is -2147483648, but must be greater than or equal to 0.000000 (in 'prim_var_transformed_data_block.stan', line 2, column 2 to column 27)",
-  "status": "data_rejected"
- },
- "parser-generator/prim_var_transformed_param_block.stan": {
-  "cause": "Exception: prim_var_transformed_param_block_model_namespace::log_prob: ar_p2[1] is nan, but must be greater than or equal to 0.000000 (in 'prim_var_transformed_param_block.stan', line 3, column 2 to column 40)",
-  "status": "rejected_both"
  },
  "promotion/array_promotion.stan": {
   "cause": "unsupported expression",
@@ -1489,29 +457,9 @@
    "4": "message_mismatch"
   }
  },
- "promotion/newton_x_r_type.stan": {
-  "cause": "Exception: solve_newton: initial guess[1] is nan, but must be finite! (in 'newton_x_r_type.stan', line 31, column 2 to column 70)",
-  "status": "rejected_both"
- },
- "promotion/newton_x_r_type_control.stan": {
-  "cause": "Exception: solve_newton: initial guess[1] is nan, but must be finite! (in 'newton_x_r_type_control.stan', line 31, column 2 to column 86)",
-  "status": "rejected_both"
- },
  "promotion/return_position.stan": {
   "cause": "complex numbers are not supported yet (in variable c) | in: (SComplexVector ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
   "status": "unsupported"
- },
- "promotion/x_r_type.stan": {
-  "cause": "Exception: solve_powell: initial guess[1] is nan, but must be finite! (in 'x_r_type.stan', line 31, column 2 to column 63)",
-  "status": "rejected_both"
- },
- "promotion/x_r_type_control.stan": {
-  "cause": "Exception: solve_powell: initial guess[1] is nan, but must be finite! (in 'x_r_type_control.stan', line 31, column 2 to column 79)",
-  "status": "rejected_both"
- },
- "runtime_errors/size_mismatch_data.stan": {
-  "cause": "Exception: matrix assign columns: assigning variable td_m23 (3) and right hand side columns (4) must match in size (in 'size_mismatch_data.stan', line 3, column 2 to column 52)",
-  "status": "data_rejected"
  },
  "runtime_errors/size_mismatch_fun.stan": {
   "cause": "A function local matrix[2,3] is assigned a 2x4 value. Plain stanc's C++ checks the size and CmdStan throws 'matrix assign columns'; stanc --O1, whose MIR stanli lowers, leaves the local empty, so stanli's assignment takes any size.",
@@ -1526,18 +474,6 @@
    "3": "one_side_threw",
    "4": "one_side_threw"
   }
- },
- "runtime_errors/size_mismatch_tparam.stan": {
-  "cause": "Exception: matrix assign columns: assigning variable tp_m23 (3) and right hand side columns (4) must match in size (in 'size_mismatch_tparam.stan', line 6, column 2 to column 52)",
-  "status": "rejected_both"
- },
- "solve_newton_good.stan": {
-  "cause": "Exception: solve_newton: initial guess[1] is nan, but must be finite! (in 'solve_newton_good.stan', line 26, column 2 to column 59)",
-  "status": "data_rejected"
- },
- "solve_powell_good.stan": {
-  "cause": "Exception: solve_powell: initial guess[1] is nan, but must be finite! (in 'solve_powell_good.stan', line 26, column 2 to column 59)",
-  "status": "data_rejected"
  },
  "tuples/arrays-tuples-nested.stan": {
   "cause": "mir: malformed sized declaration type",
@@ -1681,37 +617,13 @@
   "cause": "mir: malformed unsized declaration type",
   "status": "unsupported"
  },
- "unnormalized_math_fun_lpdf.stan": {
-  "cause": "Exception: dirichlet_lpdf: prior sample sizes[3] is -0.2, but must be positive! (in 'unnormalized_math_fun_lpdf.stan', line 63, column 2 to column 34)",
-  "status": "rejected_both"
- },
- "unnormalized_math_fun_lpmf.stan": {
-  "cause": "Exception: bernoulli_logit_glm_lpmf: Vector of dependent variables is 6, but must be in the interval [0, 1] (in 'unnormalized_math_fun_lpmf.stan', line 41, column 2 to column 50)",
-  "status": "rejected_both"
- },
  "validate_add_var_good.stan": {
   "cause": "mir: unsupported or malformed FnCheck",
   "status": "unsupported"
  },
- "validate_bounds_comparison.stan": {
-  "cause": "Exception: validate_bounds_comparison_model_namespace::validate_bounds_comparison_model: c is -0.104977, but must be greater than or equal to 1.000000 (in 'validate_bounds_comparison.stan', line 4, column 2 to column 52)",
-  "status": "data_rejected"
- },
- "validate_conditional_op_good.stan": {
-  "cause": "Exception: assign array size: assigning variable tx1 (2) and right hand side (3) must match in size (in 'validate_conditional_op_good.stan', line 79, column 2 to column 36)",
-  "status": "data_rejected"
- },
  "validate_jacobian_warning_good.stan": {
   "cause": "multi_normal_lpdf: vectorized argument must be a matching vector or array of vectors",
   "status": "unsupported"
- },
- "validate_validate_int_expr_good.stan": {
-  "cause": "Exception: mismatch in dimension declared and found in context; processing stage=data initialization; variable name=h; position=0; dims declared=(4,5); dims found=(5,5) (in 'validate_validate_int_expr_good.stan', line 9, column 2 to column 29)",
-  "status": "data_rejected"
- },
- "vec-expr/matrix_expr_terms.stan": {
-  "cause": "Exception: matrix assign rows: assigning variable tp_mat32 (3) and right hand side rows (2) must match in size (in 'matrix_expr_terms.stan', line 30, column 2 to column 31)",
-  "status": "rejected_both"
  },
  "warning/self-assign.stan": {
   "cause": "this variable type is not supported yet (in variable tup) | in: (STuple (SReal SReal))",

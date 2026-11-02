@@ -6,9 +6,12 @@ here needs a build, CmdStan or the stanc3 checkout.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import pathlib
 import sys
 import unittest
+from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
@@ -37,6 +40,20 @@ def ref_ok(lp_grad=("-1", "0.5"), wa=(["a", "b"], ["1", "2"])):
 
 def all_points(status, wa=WA):
     return {k: (status, wa) for k in g.POINTS}
+
+
+def replay_stub(overrides, ref, ledger_entry, run):
+    """The problem replay_one reports for model m.stan, or None."""
+    ref = dict(ref, source_sha256="s",
+               data_sha256=g.sha256(g.data_bytes({})))
+    ctx = {"overrides": overrides, "data": {}, "timeout": 1, "seconds": {},
+           "ledger": {"m.stan": ledger_entry} if ledger_entry else {},
+           "refs": {"models": {"m.stan": ref}}, "check": "stanli_check"}
+    with mock.patch.object(g, "model_input",
+                           lambda *a: (pathlib.Path("m.stan"), {})), \
+            mock.patch.object(g, "source_digest", lambda p: "s"), \
+            mock.patch.object(g, "run_process", lambda *a: run):
+        return g.replay_one("m.stan", ctx)[4]
 
 
 class ImportTest(unittest.TestCase):
@@ -178,12 +195,64 @@ class LedgerTest(unittest.TestCase):
         points[4] = ("EVAL_FAIL boom", WA)
         self.assertEqual(g.classify(ref_ok(), stanli(points), {"4"})[:2],
                          ("points", {"4": "one_side_threw"}))
-        entry = {"platform_dependent": ["4"], "cause": "libm"}
-        self.assertIsNone(g.ledger_verdict("verified", {}, entry))
-        self.assertEqual(g.inventory_problems([], {"models": {}}, {}, {}), [])
-        self.assertEqual(g.update_ledger({"a.stan": entry},
-                                         {"a.stan": ("verified", {}, [])}),
-                         {"a.stan": entry})
+
+    def test_platform_dependent_comes_from_overrides(self):
+        points = all_points("OK -1 0.5")
+        points[4] = ("OK -1 nan", WA)
+        for marked, want in (({"platform_dependent": ["4"], "note": "libm"},
+                              None),
+                             ({"note": "libm"}, "REGRESSED")):
+            problem = replay_stub({"m.stan": marked}, ref_ok(), None,
+                                  stanli(points))
+            if want is None:
+                self.assertIsNone(problem)
+            else:
+                self.assertIn(want, problem)
+
+    def test_agreement_needs_no_entry(self):
+        for status in ("verified", "rejected_both", "data_rejected"):
+            self.assertIsNone(g.ledger_verdict(status, {}, None), status)
+
+    def test_uncheckable_needs_no_entry(self):
+        for status in ("cmdstan_timeout", "cmdstan_crashed",
+                       "data_unavailable", "stanc_rejected"):
+            self.assertIsNone(g.ledger_verdict(status, {}, None), status)
+
+    def test_cmdstan_crash_in_reference_needs_no_entry(self):
+        crashed = {"outcome": "crashed", "message": "stack overflow"}
+        self.assertIsNone(replay_stub({}, crashed, None, None))
+
+    def test_rejected_both_reference_passes_without_entry(self):
+        threw = {"outcome": "ok", "points": {
+            str(k): {"threw": "f: x is 1, but must be 2"} for k in g.POINTS}}
+        run = stanli(all_points("EVAL_FAIL f: x is 1.0, but must be 2", []))
+        self.assertIsNone(replay_stub({}, threw, None, run))
+
+    def test_entry_for_a_model_that_now_agrees_is_stale(self):
+        for status in ("rejected_both", "data_rejected", "cmdstan_crashed",
+                       "stanc_rejected"):
+            problem = g.ledger_verdict(status, {}, {"status": "unsupported",
+                                                    "cause": "foo"})
+            self.assertIn("improved", problem, status)
+
+    def test_summary_groups_statuses(self):
+        results = {
+            "a": ("verified", {}, [], None),
+            "b": ("rejected_both", {}, [], None),
+            "c": ("data_rejected", {}, [], None),
+            "d": ("cmdstan_crashed", {}, [], None),
+            "e": ("unsupported", {}, ["x"], None),
+            "f": ("points", {"1": "mismatch"}, ["x"], "REGRESSED"),
+            "g": ("verified", {}, [], "improved; update the ledger entry"),
+        }
+        out = io.StringIO()
+        with mock.patch.object(g, "replay_one",
+                               lambda p, ctx: (p,) + results[p]), \
+                contextlib.redirect_stdout(out):
+            g.replay(sorted(results), {"results": {}}, 1)
+        self.assertIn("7 models: 1 agree on values, 2 agree on errors, "
+                      "1 not checkable, 1 ledgered divergences, 2 failures",
+                      out.getvalue())
 
     def test_verified_needs_no_entry(self):
         self.assertIsNone(g.ledger_verdict("verified", {}, None))
@@ -218,6 +287,17 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(new["a.stan"]["cause"], "kept")
         self.assertNotIn("b.stan", new)
         self.assertTrue(new["c.stan"]["cause"].startswith("UNTRIAGED"))
+
+    def test_update_writes_only_divergences(self):
+        old = {"a.stan": {"status": "cmdstan_crashed", "cause": "x"},
+               "b.stan": {"status": "rejected_both", "cause": "y"}}
+        results = {"a.stan": ("cmdstan_crashed", {}, ["boom"]),
+                   "b.stan": ("rejected_both", {}, ["msg"]),
+                   "c.stan": ("data_rejected", {}, ["msg"]),
+                   "d.stan": ("stanc_rejected", {}, ["msg"]),
+                   "e.stan": ("unsupported", {}, ["no"])}
+        self.assertEqual(g.update_ledger(old, results),
+                         {"e.stan": {"status": "unsupported", "cause": "no"}})
 
 
 if __name__ == "__main__":
