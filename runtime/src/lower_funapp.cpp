@@ -1236,6 +1236,16 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
       }
     }
   }
+  if (e.name == "csr_extract_w" && e.args.size() == 1) {
+    if (!e.args[0].data_only)
+      fail(e.name +
+               ": the number of nonzero entries depends on the values, so the "
+               "matrix must be data",
+           e.raw);
+    mir::Expr data_call = e;
+    data_call.data_only = true;
+    if (auto v = fold_const(data_call)) return *v;
+  }
   if (auto v = fold_const(e)) return *v;
   if (shaped_builtin_spec(e.name, e.args.size(),
                           BuiltinShapePolicy::Predicate) ||
@@ -1326,6 +1336,9 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
       plan = stanli::density_call_plan(spec, plan_arguments, propto(e));
     } catch (const CompileError&) {
       throw;
+    } catch (const stanli::DensitySizeError& error) {
+      emit_error(MessageError::InvalidArgument, e.name + ": " + error.what());
+      return constant(0.0);
     } catch (const std::exception& error) {
       fail(builtin_error_message(e.name, error), e.raw);
     }
@@ -1710,9 +1723,25 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
       map = builtin_slice_map(*slice, builtin_argument_shape(e.args[0], a),
                               indexes, SliceStorageOrder::OuterMajor);
     } catch (const std::invalid_argument& error) {
-      // out_of_range and domain_error pass through: Stan Math's own index
-      // validation, the rejection CmdStan throws.
       fail(e.name + ": " + error.what(), e.raw);
+    } catch (const std::logic_error& error) {
+      const bool along_vector = (slice->slice == BuiltinSlice::Head ||
+                                 slice->slice == BuiltinSlice::Tail ||
+                                 slice->slice == BuiltinSlice::Segment) &&
+                                (is_vector(a.si) || is_row_vector(a.si));
+      const int64_t length = indexes.back();
+      if (!along_vector || length < 0) throw;
+      emit_error(dynamic_cast<const std::out_of_range*>(&error)
+                     ? MessageError::OutOfRange
+                     : MessageError::Domain,
+                 error.what());
+      SlotInfo si = view_of(is_vector(a.si) ? "UVector" : "URowVector");
+      Val placeholder{add_slot(length, false), false, si, owning_layout(si)};
+      out.fills.emplace_back(
+          placeholder.slot,
+          std::vector<double>(length,
+                              std::numeric_limits<double>::quiet_NaN()));
+      return placeholder;
     }
     SlotInfo si;
     switch (map.result.container) {
