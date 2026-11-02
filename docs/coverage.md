@@ -8,7 +8,7 @@ an approximation.
 This page covers probability functions, real-valued scalar math, parameter
 transforms, truncation, censoring, `print` and `reject`. For whole models see
 [corpus status](corpus-status.md); for language constructs see the
-[stanc3 fixtures](../tests/stanc3/README.md); for how the checks work and
+[stanc3 test models](../tests/stanc3_good/README.md); for how the checks work and
 their numerical limits see [TESTING.md](../TESTING.md).
 
 ## Coverage at a glance

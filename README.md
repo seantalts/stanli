@@ -85,10 +85,12 @@ same example in their language.
   Of those <!--gen:corpus_verified_n-->118<!--/gen-->, <!--gen:corpus_bitwise-->55<!--/gen--> are bitwise identical, and the worst
   relative deviation is <!--gen:corpus_worst-->7.1e-13<!--/gen-->. Every model
   is listed in [docs/corpus-status.md](docs/corpus-status.md).
-- Language coverage. <!--gen:lang_verified-->15/15<!--/gen--> models lifted
-  from stanc3's own test suite, for the type and language constructs no
-  real posterior uses, are verified the same way
-  ([tests/stanc3/README.md](tests/stanc3/README.md)).
+- Language coverage. Every model in stanc3's own test suite, for the type
+  and language constructs no real posterior uses, is compared with recorded
+  CmdStan answers ([tests/stanc3_good/README.md](tests/stanc3_good/README.md)),
+  and <!--gen:lang_verified-->4/4<!--/gen--> programs that once failed to
+  lower are verified like the corpus
+  ([tests/regressions/README.md](tests/regressions/README.md)).
 - Distribution coverage. 71 of 72 densities, all 105 cdf/lcdf/lccdf
   functions, truncation, censoring, ordinal regression and the count GLMs
   are each verified against CmdStan ([docs/coverage.md](docs/coverage.md)).

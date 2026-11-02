@@ -1698,13 +1698,28 @@ if(Python3_Interpreter_FOUND)
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     USES_TERMINAL
     COMMENT "Running known-broken Stan lit tests")
-  # The model census's coverage ratchet, over synthetic rows plus the
-  # checked-in baseline. The census itself needs deps/stanc3-src, a stanc
-  # and a CmdStan and so runs by hand; what runs here is the gate it grew,
-  # which is the part that decides whether a run failed. Pure Python and no
-  # shell stub, so no WIN32 guard.
-  add_test(NAME test_census
-           COMMAND ${Python3_EXECUTABLE} tests/test_census.py
+  # Every model in stanc3's test/integration/good against recorded CmdStan
+  # answers (tests/stanc3_good/README.md), split into shards for ctest -j.
+  # Each shard fails rather than skips when deps/stanc3-src is missing or
+  # not at the pinned commit.
+  set(STANLI_STANC3_GOOD_SHARDS 16)
+  math(EXPR _stanc3_good_last "${STANLI_STANC3_GOOD_SHARDS} - 1")
+  foreach(_shard RANGE ${_stanc3_good_last})
+    if(_shard LESS 10)
+      set(_shard_name "0${_shard}")
+    else()
+      set(_shard_name "${_shard}")
+    endif()
+    add_test(NAME test_stanc3_good_${_shard_name}
+             COMMAND ${Python3_EXECUTABLE} tools/check_stanc3_good.py
+                     --build ${CMAKE_CURRENT_BINARY_DIR}
+                     --shard ${_shard}/${STANLI_STANC3_GOOD_SHARDS} --jobs 2
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(test_stanc3_good_${_shard_name} PROPERTIES
+                         TIMEOUT 600)
+  endforeach()
+  add_test(NAME test_stanc3_good_harness
+           COMMAND ${Python3_EXECUTABLE} tests/test_stanc3_good.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # The corpus replay's per-point verdicts, over a stub stanli_check. The
   # oracle itself needs posteriordb and a real binary and so runs in CI

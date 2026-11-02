@@ -773,7 +773,7 @@ jobs:
           cp tests/fixtures/es.stan /tmp/stanli-portable-es.stan
           cp tests/fixtures/view_udf_local_data_branch.stan \
             /tmp/stanli-portable-nested-udf.stan
-          cp tests/stanc3/mother.stan /tmp/stanli-portable-mother.stan
+          cp tests/stanc3_good/overrides/mother.stan /tmp/stanli-portable-mother.stan
           for name in es nested-udf mother; do
             "$probe" --vectorize-loops off \
               --legacy-output /tmp/stanli-$name.legacy-mir \

@@ -36,10 +36,10 @@ import verify_refs  # noqa: E402
 from corpus_inventory import local_cases, source_digest
 from verify_sample import evaluate, record_wa, write_refs  # noqa: E402
 
-# A model that exists under tests/stanc3, so model_files resolves real
+# A model that exists under tests/regressions, so model_files resolves real
 # paths without unpacking a posteriordb dataset. The stub never reads
 # them; they only have to be there.
-MODEL = "reductions_allowed"
+MODEL = "while_counter_size"
 # One point's reference: lp and two gradients, agreeing with CmdStan.
 VALUES = {"values": ["-3.5", "1", "-2"], "status": "VERIFIED",
           "max_rel": 0.0, "max_ulp": 0}
@@ -96,8 +96,8 @@ class ProbePointTest(unittest.TestCase):
 
     def verdict(self, body, point=1):
         with tempfile.TemporaryDirectory() as tmp:
-            return probe_point(MODEL, REPO / "tests" / "stanc3" / f"{MODEL}.stan",
-                               REPO / "tests" / "stanc3" / f"{MODEL}.json",
+            return probe_point(MODEL, REPO / "tests" / "regressions" / f"{MODEL}.stan",
+                               REPO / "tests" / "regressions" / f"{MODEL}.json",
                                stub(tmp, body), point, 60)
 
     def test_finite_lp_and_gradients_pass(self):
@@ -667,8 +667,8 @@ class PlatformReferenceTest(unittest.TestCase):
 
     def test_compiler_selects_one_reference_without_accepting_the_other_answer(self):
         entry = copy.deepcopy(self.entry)
-        entry["source_sha256"] = source_digest(REPO / "tests/stanc3" / f"{MODEL}.stan")
-        entry["data_sha256"] = source_digest(REPO / "tests/stanc3" / f"{MODEL}.json")
+        entry["source_sha256"] = source_digest(REPO / "tests/regressions" / f"{MODEL}.stan")
+        entry["data_sha256"] = source_digest(REPO / "tests/regressions" / f"{MODEL}.json")
         rounded = 1.0 + 244 * math.ulp(1.0)
         for pt in entry["points"].values():
             pt["values"] = ["-3.5", str(rounded), "-2"]
@@ -729,8 +729,8 @@ class SparsePlatformReferenceTest(unittest.TestCase):
             pt.update(status="MISMATCH", max_rel=0.006)
         self.entry = copy.deepcopy(self.original)
         self.entry.update(
-            source_sha256=source_digest(REPO / "tests/stanc3" / f"{MODEL}.stan"),
-            data_sha256=source_digest(REPO / "tests/stanc3" / f"{MODEL}.json"))
+            source_sha256=source_digest(REPO / "tests/regressions" / f"{MODEL}.stan"),
+            data_sha256=source_digest(REPO / "tests/regressions" / f"{MODEL}.json"))
         for pt in self.entry["points"].values():
             pt["values"] = ["-3.5", "1.01", "-2"]
 
