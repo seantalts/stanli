@@ -447,6 +447,11 @@ struct SizedType {
   UnsizedView unsized;
 };
 
+inline bool is_complex(const SizedType& t) {
+  const std::string& leaf = t.base == "SArray" ? t.elem_base : t.base;
+  return leaf.rfind("SComplex", 0) == 0;
+}
+
 struct Stmt {
   enum Kind {
     Decl,

@@ -431,10 +431,9 @@ int64_t Lowering::sized_len(const mir::SizedType& t, int64_t* rows,
     return checked_product({r, c}, "matrix shape");
   }
   const std::string where = var.empty() ? "" : " (in variable " + var + ")";
-  if (t.base == "SArray" && t.elem_base.rfind("SComplex", 0) != 0)
-    return checked_product(sized_dims(t), "array shape");
-  if (t.base.rfind("SComplex", 0) == 0 || t.base == "SArray")
+  if (mir::is_complex(t))
     fail("complex numbers are not supported yet" + where, t.raw);
+  if (t.base == "SArray") return checked_product(sized_dims(t), "array shape");
   fail("this variable type is not supported yet" + where, t.raw);
 }
 SlotInfo Lowering::view_of(const mir::SizedType& t, bool param_free) {

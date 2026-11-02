@@ -272,6 +272,40 @@ CASES = [
         model { b ~ normal(0, 1); }""",
      {}, {"same_as": """parameters { vector<upper=1>[2] b; }
                         model { b ~ normal(0, 1); }"""}),
+    ("a complex generated quantity is refused, not written as reals",
+     """parameters { real r; }
+        model { r ~ normal(0, 1); }
+        generated quantities { array[2] complex z = {1, 3}; complex w = 2; }""",
+     {}, {"wa_fail": "complex numbers are not supported yet"}),
+    ("a static index on a short-circuited operand is not evaluated",
+     """data { int k; }
+        parameters { vector[2] v; }
+        model {
+          v ~ normal(0, 1);
+          if (k >= 1 && v[k] > 0) target += 1;
+          if (v[1] > 100 && v[3] > 0) target += 1;
+        }""",
+     {"k": 0}, {"same_as": """parameters { vector[2] v; }
+                              model { v ~ normal(0, 1); }"""}),
+    ("a static index in the ternary arm not taken is not evaluated",
+     """parameters { vector[2] v; }
+        model { v ~ normal(0, 1); target += v[1] > 100 ? v[3] : v[2]; }""",
+     {}, {"same_as": """parameters { vector[2] v; }
+                        model { v ~ normal(0, 1); target += v[2]; }"""}),
+    ("row_vector GLM rows in a loop",
+     """data { int N; array[N, 2] int y; array[N] row_vector[2] xr; }
+        parameters { real a; vector[2] b; }
+        model {
+          for (n in 1:N) target += poisson_log_glm_lpmf(y[n] | xr[n], a, b);
+        }""",
+     {"N": 3, "y": [[1, 0], [2, 1], [0, 3]],
+      "xr": [[1, 2], [0.5, -1], [2, 0.3]]},
+     {"same_as": """data { int N; array[N, 2] int y; array[N] row_vector[2] xr; }
+        parameters { real a; vector[2] b; }
+        model {
+          for (n in 1:N)
+            for (k in 1:2) target += poisson_log_lpmf(y[n, k] | a + xr[n] * b);
+        }"""}),
 ]
 
 

@@ -453,6 +453,11 @@ bool WaInterp::read_param(MirInterp<double>& in, const mir::Stmt& s,
 bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
                            std::vector<double>& row) {
   const mir::Expr& v = s.fn_args.at(0);
+  // CmdStan writes a real and an imaginary column; one real column is wrong.
+  if (v.unsized.leaf == mir::UnsizedLeaf::Complex ||
+      v.raw.find("UComplex") != std::string::npos)
+    throw CompileError("complex numbers are not supported yet (in output " +
+                       v.name + ")");
   DataMap::Entry e = in.eval(v);
   const int64_t len = (int64_t)std::max(e.r.size(), e.i.size());
   if (!have_cols_) {
