@@ -1567,6 +1567,11 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_container_flow_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_container_flow_models.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/deps/stanc3-src/test/integration/good)
+    add_test(NAME test_stanc3_good_data
+             COMMAND ${Python3_EXECUTABLE} tools/gen_stanc3_good_data.py --check
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  endif()
   add_test(NAME test_container_flow_reference
            COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
              --build ${CMAKE_CURRENT_BINARY_DIR}
