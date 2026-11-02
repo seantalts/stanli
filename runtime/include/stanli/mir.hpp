@@ -421,6 +421,8 @@ struct Transform {
     Correlation,
     Covariance,
     CholeskyCov,
+    StochasticColumn,
+    StochasticRow,
     Unsupported
   } kind = Identity;
   std::vector<Expr> args;
@@ -438,6 +440,22 @@ inline bool is_structured_check(Transform::Kind kind) {
     case Transform::Correlation:
     case Transform::Covariance:
     case Transform::CholeskyCov:
+    case Transform::StochasticColumn:
+    case Transform::StochasticRow:
+      return true;
+    default:
+      return false;
+  }
+}
+
+inline bool is_matrix_only_check(Transform::Kind kind) {
+  switch (kind) {
+    case Transform::CholeskyCorr:
+    case Transform::Correlation:
+    case Transform::Covariance:
+    case Transform::CholeskyCov:
+    case Transform::StochasticColumn:
+    case Transform::StochasticRow:
       return true;
     default:
       return false;

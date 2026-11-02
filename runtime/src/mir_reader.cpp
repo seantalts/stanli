@@ -448,6 +448,10 @@ Transform read_transform(const Node& n) {
       t.kind = Transform::Covariance;
     else if (n.atom == "CholeskyCov")
       t.kind = Transform::CholeskyCov;
+    else if (n.atom == "StochasticColumn")
+      t.kind = Transform::StochasticColumn;
+    else if (n.atom == "StochasticRow")
+      t.kind = Transform::StochasticRow;
     else
       t.kind = Transform::Unsupported;
     t.raw = n.atom;
@@ -793,6 +797,8 @@ void validate_transform_shape(const Transform& transform) {
     case Transform::Correlation:
     case Transform::Covariance:
     case Transform::CholeskyCov:
+    case Transform::StochasticColumn:
+    case Transform::StochasticRow:
       break;
     case Transform::Unsupported:
       for (const Expr& arg : transform.args) validate_expression_shape(arg);
@@ -1067,9 +1073,7 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
       const UnsizedLeaf leaf = s.fn_args[0].unsized.leaf;
       const bool matrix = leaf == UnsizedLeaf::Matrix;
       const bool vector = leaf == UnsizedLeaf::Vector;
-      const bool matrix_only =
-          kind == Transform::CholeskyCorr || kind == Transform::Correlation ||
-          kind == Transform::Covariance || kind == Transform::CholeskyCov;
+      const bool matrix_only = is_matrix_only_check(kind);
       const bool vector_only = kind != Transform::SumToZero && !matrix_only;
       if ((!matrix && !vector) || (matrix_only && !matrix) ||
           (vector_only && !vector))

@@ -82,13 +82,6 @@ int64_t checked_product(const std::vector<int64_t>& dims, size_t first,
   return n;
 }
 
-bool matrix_kind(mir::Transform::Kind kind) {
-  return kind == mir::Transform::CholeskyCorr ||
-         kind == mir::Transform::Correlation ||
-         kind == mir::Transform::Covariance ||
-         kind == mir::Transform::CholeskyCov;
-}
-
 void check_leaf(const double* values, int64_t rows, int64_t cols,
                 const std::string& name, const StructuredCheckSpec& spec) {
   Eigen::Map<const Eigen::VectorXd> vector(values, (Eigen::Index)rows);
@@ -126,6 +119,12 @@ void check_leaf(const double* values, int64_t rows, int64_t cols,
     case mir::Transform::CholeskyCov:
       stan::math::check_cholesky_factor(function, name.c_str(), matrix);
       return;
+    case mir::Transform::StochasticColumn:
+      stan::math::check_stochastic_column(function, name.c_str(), matrix);
+      return;
+    case mir::Transform::StochasticRow:
+      stan::math::check_stochastic_row(function, name.c_str(), matrix);
+      return;
     default:
       throw std::logic_error("unsupported structured-check kind");
   }
@@ -139,8 +138,10 @@ void check_structured_value(const double* values, int64_t len,
   if (spec.dims.size() < leaf_rank || len < 0 ||
       (len != 0 && values == nullptr))
     throw std::logic_error("malformed structured-check value");
-  if ((matrix_kind(spec.kind) && spec.leaf != StructuredLeaf::Matrix) ||
-      (!matrix_kind(spec.kind) && spec.kind != mir::Transform::SumToZero &&
+  if ((mir::is_matrix_only_check(spec.kind) &&
+       spec.leaf != StructuredLeaf::Matrix) ||
+      (!mir::is_matrix_only_check(spec.kind) &&
+       spec.kind != mir::Transform::SumToZero &&
        spec.leaf != StructuredLeaf::Vector))
     throw std::logic_error("structured-check leaf type mismatch");
 

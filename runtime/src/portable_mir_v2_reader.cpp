@@ -381,6 +381,12 @@ Transform read_transform(Reader& reader) {
   value.kind = read_tag(reader, tag, kTransformTags, "unknown transform tag");
   value.args = read_exprs(reader);
   value.raw = reader.string();
+  if (value.kind == Transform::Unsupported) {
+    if (value.raw == "StochasticColumn")
+      value.kind = Transform::StochasticColumn;
+    else if (value.raw == "StochasticRow")
+      value.kind = Transform::StochasticRow;
+  }
   return value;
 }
 
