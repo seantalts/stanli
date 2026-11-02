@@ -40,6 +40,18 @@ generated quantities {
 }
 """, {}, {"error": "matrix assign columns: assigning variable z (3) and "
                    "right hand side columns (4) must match in size"}),
+    ("unit_vector_zero_norm", """
+parameters {
+  vector[2] p;
+}
+transformed parameters {
+  vector[2] u = unit_vector_constrain(p - p);
+}
+model {
+  p ~ normal(0, 1);
+}
+""", {}, {"error": "unit_vector_constrain: norm is 0, but must be positive "
+                   "finite"}),
 ]
 
 

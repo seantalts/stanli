@@ -332,6 +332,8 @@ std::optional<Lowering::Val> Lowering::lower_callable_transform(
     const int jac = add_slot(1, false);
     Val v = emit_raw(opcode, {raw.slot}, out_len, si, std::move(idata), jac,
                      raw.autodiff);
+    if (opcode == OP_CONSTRAIN_UNIT_VECTOR && !raw.autodiff)
+      g.ops.back().variant = kUnitVectorChecksNorm;
     v.layout = owning_layout(si);
     if (tr.direction == TransformDirection::Jacobian && !in_write_array)
       target_terms.push_back(jac);

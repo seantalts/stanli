@@ -689,6 +689,8 @@ void Lowering::lower_read_param(const mir::Stmt& s) {
   }
   Val con =
       emit_raw(opcode, ins, con_len, psi, tr_idata, jac, scalar_autodiff());
+  if (opcode == OP_CONSTRAIN_UNIT_VECTOR && !scalar_autodiff())
+    g.ops.back().variant = kUnitVectorChecksNorm;
   con.layout = owning_layout(psi);
   jac_slots.push_back(jac);
   scope[s.decl_id] = con;

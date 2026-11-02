@@ -484,9 +484,18 @@ auto apply_structured(Y& y, Lp& lp, const KernelCtx& ctx) {
     return stan::math::positive_ordered_constrain(y, lp);
   else if constexpr (K == StructuredKind::CholeskyCorr)
     return stan::math::cholesky_corr_constrain(y, (int)ctx.idata[2], lp);
-  else if constexpr (K == StructuredKind::UnitVector)
-    return stan::math::unit_vector_constrain(y, lp);
-  else if constexpr (K == StructuredKind::SumToZero)
+  else if constexpr (K == StructuredKind::UnitVector) {
+    if constexpr (!std::is_same_v<stan::value_type_t<Y>, double>) {
+      return stan::math::unit_vector_constrain(y, lp);
+    } else {
+      if (values_only() || (ctx.variant & kUnitVectorChecksNorm))
+        return stan::math::unit_vector_constrain(y, lp);
+      stan::math::check_nonzero_size("unit_vector", "y", y);
+      const double SN = stan::math::dot_self(y);
+      lp -= 0.5 * SN;
+      return Eigen::VectorXd(y.array() / std::sqrt(SN));
+    }
+  } else if constexpr (K == StructuredKind::SumToZero)
     // Volume preserving: intentionally leave lp untouched.
     return stan::math::sum_to_zero_constrain(y);
   else if constexpr (K == StructuredKind::StochasticColumn)

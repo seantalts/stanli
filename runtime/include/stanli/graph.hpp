@@ -143,6 +143,10 @@ struct BoundCheckSpec {
   bool shapes_match = false;
 };
 
+// OP_CONSTRAIN_UNIT_VECTOR variant: CmdStan runs the double overload, which
+// checks that the norm is positive and finite. The var overload does not.
+inline constexpr uint8_t kUnitVectorChecksNorm = 1;
+
 class Executor {
  public:
   explicit Executor(Graph g);
