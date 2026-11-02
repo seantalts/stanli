@@ -437,6 +437,14 @@ class DegeneratePointsTest(unittest.TestCase):
             {0: self.AGREE, 1: "OK 1.5 2.0", 2: self.AGREE})
         self.assertEqual(result["status"], "mismatch")
 
+    def test_an_all_nan_row_on_both_sides_is_an_agreed_refusal(self):
+        # model/domain_fail.stan: target += -sqrt(-x) is NaN everywhere, and
+        # both engines print the same `OK nan nan`.
+        result = self.differential(
+            "model/domain_fail.stan", {p: "OK nan nan" for p in POINTS},
+            {p: "OK nan nan" for p in POINTS})
+        self.assertEqual(result["status"], "rejected_both")
+
     def test_the_table_names_each_known_degeneracy(self):
         table = {e["name"]: e["points"]
                  for e in model_census.DEGENERATE_POINTS}

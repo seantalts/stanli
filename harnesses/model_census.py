@@ -569,12 +569,13 @@ def _remember(path, record):
 def _ok_values(line):
     """The floats on an `OK ...` line, or None if the side refused.
 
-    An all-nan reference row counts as a refusal: CmdStan's log_prob
-    returns nan where stanli_check reports EVAL_FAIL and prints nothing,
-    and reading that asymmetry as disagreement would be wrong. The rule
-    is cmdstan_ref.compare_points'; it is restated here because that
-    function re-runs the reference binary on every call, which is exactly
-    the cost the cache above exists to pay once.
+    An all-nan row counts as a refusal: CmdStan's log_prob returns nan
+    where stanli_check reports EVAL_FAIL and prints nothing, and reading
+    that asymmetry as disagreement would be wrong. The rule is
+    cmdstan_ref.compare_points'; it is restated here because that function
+    re-runs the reference binary on every call, which is exactly the cost
+    the cache above exists to pay once. It applies to stanli's line too, so
+    a model that is NaN everywhere on both sides is an agreed refusal.
     """
     if not line or not line.startswith("OK"):
         return None
@@ -619,7 +620,7 @@ def differential_one(entry, corpus, cache, check, stanc, shim, cmdstan, opt,
         # refusal. Every model reaching this function already evaluated
         # inside the same timeout during the census, so it is an edge the
         # census would have caught as `crashed` first.
-        ours = [float(v) for v in detail.split()] if kind == "OK" else None
+        ours = _ok_values(f"OK {detail}") if kind == "OK" else None
         if reference is None or ours is None:
             if (reference is None) != (ours is None):
                 return dict(
