@@ -538,6 +538,19 @@ jobs:
           path: .ccache
           key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
 
+      # A cached embedded stanc3 object skips the stanc3 checkout, and the
+      # stanc3 test suites need its test models at the pinned commit.
+      - name: Fetch stanc3's test models
+        run: |
+          if [ ! -d deps/stanc3-src/.git ]; then
+            if [ -e deps/stanc3-src ]; then mv deps/stanc3-src deps/stanc3-src.build; fi
+            tools/with_retry.sh git clone --filter=blob:none --no-checkout \
+              "$STANC3_SRC_REPO" deps/stanc3-src
+            git -C deps/stanc3-src sparse-checkout set test/integration
+            git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
+          fi
+          test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
+
       # Every core, not matrix.build_jobs. That number is a memory ceiling
       # for the compile phase (one densities shard peaks near 3 GB); the
       # tests are 200-odd small processes with no such constraint. The
