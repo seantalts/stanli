@@ -21,13 +21,14 @@ constexpr int fmat_options =
 // then picks the same product algorithm as the all-dynamic type, without heap.
 template <int Self, int Other>
 constexpr int fmat_bound = (Self == kDyn && Other == 2) ? 2 : Self;
-template <int R, int C>
-using FMat = Eigen::Matrix<double, R, C, fmat_options<R, C>, fmat_bound<R, C>,
-                           fmat_bound<C, R>>;
+template <int R, int C, int B = kDyn>
+using FMat = Eigen::Matrix<double, R, C, fmat_options<R, C>,
+                           (R == kDyn && B != kDyn) ? B : fmat_bound<R, C>,
+                           (C == kDyn && B != kDyn) ? B : fmat_bound<C, R>>;
 template <int R, int C>
 using FMap = Eigen::Map<FMat<R, C>>;
-template <int R, int C>
-using FCMap = Eigen::Map<const FMat<R, C>>;
+template <int R, int C, int B = kDyn>
+using FCMap = Eigen::Map<const FMat<R, C, B>>;
 template <int V>
 using IntC = std::integral_constant<int, V>;
 
@@ -222,12 +223,13 @@ void solve_var(KernelCtx& ctx) {
 }
 
 template <SolveKind Kind, Eigen::UpLoType Tri = Eigen::Lower, int N = kDyn,
-          int K = kDyn>
-void left_adjoint(const FMat<N, N>& a, const FMat<N, K>& x, const FMat<N, K>& g,
-                  bool divisor_var, bool dividend_var, FMat<N, N>* adj_a,
-                  FMat<N, K>* adj_b, const double* qr_scratch = nullptr) {
-  using Sq = FMat<N, N>;
-  using Rect = FMat<N, K>;
+          int K = kDyn, int B = kDyn>
+void left_adjoint(const FMat<N, N, B>& a, const FMat<N, K, B>& x,
+                  const FMat<N, K, B>& g, bool divisor_var, bool dividend_var,
+                  FMat<N, N, B>* adj_a, FMat<N, K, B>* adj_b,
+                  const double* qr_scratch = nullptr) {
+  using Sq = FMat<N, N, B>;
+  using Rect = FMat<N, K, B>;
   if constexpr (Kind == SolveKind::Spd) {
     const Eigen::LLT<Sq> fac(a);
     if (dividend_var) {
@@ -261,9 +263,9 @@ void left_adjoint(const FMat<N, N>& a, const FMat<N, K>& x, const FMat<N, K>& g,
     };
     Rect y;
     if (qr_scratch) {
-      const Sq qr = FCMap<N, N>(qr_scratch, a.rows(), a.cols());
-      const FMat<N, 1> coefficients =
-          FCMap<N, 1>(qr_scratch + a.size(), a.rows());
+      const Sq qr = FCMap<N, N, B>(qr_scratch, a.rows(), a.cols());
+      const FMat<N, 1, B> coefficients =
+          FCMap<N, 1, B>(qr_scratch + a.size(), a.rows());
       y = solve_transpose(Eigen::householderSequence(qr, coefficients), qr);
     } else {
       // Right plain solves and direct kernel callers without scratch keep
@@ -383,11 +385,6 @@ void solve_bwd_t(KernelCtx& ctx) {
     default:
       break;
   }
-  const FMat<N, N> a = FCMap<N, N>(ctx.in[ai].data, n, n);
-  const FMat<BR, BC> x = FCMap<BR, BC>(ctx.out.data, br, bc);
-  const FMat<BR, BC> g = FCMap<BR, BC>(ctx.out_adj_vec.data, br, bc);
-  FMat<N, N> adj_a = FMat<N, N>::Zero(n, n);
-  FMat<BR, BC> adj_b = FMat<BR, BC>::Zero(br, bc);
   const double* qr_scratch =
       (ctx.variant & 1u) && n > 0 ? ctx.scratch : nullptr;
   if constexpr (Left && Kind == SolveKind::Plain && K == kDyn) {
@@ -395,20 +392,29 @@ void solve_bwd_t(KernelCtx& ctx) {
       // mdivide_left's pullback solves a dynamic vector here. Eigen's
       // dynamic vector triangular solve leaves a zero right-hand side zero,
       // where the matrix and fixed-size solves divide it by a zero pivot.
-      FMat<kDyn, kDyn> adj_a_dyn = FMat<kDyn, kDyn>::Zero(n, n);
-      FMat<kDyn, 1> adj_v = FMat<kDyn, 1>::Zero(n);
-      left_adjoint<Kind, Eigen::Lower, kDyn, 1>(
-          FMat<kDyn, kDyn>(a), FMat<kDyn, 1>(x), FMat<kDyn, 1>(g), divisor_var,
-          dividend_var, divisor_var ? &adj_a_dyn : nullptr,
-          dividend_var ? &adj_v : nullptr, qr_scratch);
-      adj_a += adj_a_dyn;
-      adj_b = adj_v;
-    } else {
-      left_adjoint<Kind, Eigen::Lower, N, K>(
+      using Sq = FMat<kDyn, kDyn, N>;
+      using Vec = FMat<kDyn, 1, N>;
+      const Sq a = FCMap<kDyn, kDyn, N>(ctx.in[ai].data, n, n);
+      const Vec x = FCMap<kDyn, 1, N>(ctx.out.data, n, 1);
+      const Vec g = FCMap<kDyn, 1, N>(ctx.out_adj_vec.data, n, 1);
+      Sq adj_a = Sq::Zero(n, n);
+      Vec adj_b = Vec::Zero(n);
+      left_adjoint<Kind, Eigen::Lower, kDyn, 1, N>(
           a, x, g, divisor_var, dividend_var, divisor_var ? &adj_a : nullptr,
           dividend_var ? &adj_b : nullptr, qr_scratch);
+      if (divisor_var && ctx.in_adj[ai].data)
+        FMap<N, N>(ctx.in_adj[ai].data, n, n) += adj_a;
+      if (dividend_var && ctx.in_adj[bi].data)
+        FMap<BR, BC>(ctx.in_adj[bi].data, br, bc) += adj_b;
+      return;
     }
-  } else if constexpr (Left) {
+  }
+  const FMat<N, N> a = FCMap<N, N>(ctx.in[ai].data, n, n);
+  const FMat<BR, BC> x = FCMap<BR, BC>(ctx.out.data, br, bc);
+  const FMat<BR, BC> g = FCMap<BR, BC>(ctx.out_adj_vec.data, br, bc);
+  FMat<N, N> adj_a = FMat<N, N>::Zero(n, n);
+  FMat<BR, BC> adj_b = FMat<BR, BC>::Zero(br, bc);
+  if constexpr (Left) {
     left_adjoint<Kind, Eigen::Lower, N, K>(
         a, x, g, divisor_var, dividend_var, divisor_var ? &adj_a : nullptr,
         dividend_var ? &adj_b : nullptr, qr_scratch);
