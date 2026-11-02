@@ -861,9 +861,9 @@ class MirInterp {
       shapes.reserve(values.size());
       for (size_t k = 0; k < values.size(); ++k)
         shapes.push_back(function_argument_shape(e.args[k], values[k]));
-      layout = builtin_layout(spec, shapes);
+      layout = builtin_layout(spec, shapes, e.name);
     } catch (const std::invalid_argument& error) {
-      fail(e.name + ": " + error.what(), e.raw);
+      fail(builtin_error_message(e.name, error), e.raw);
     }
     std::vector<std::vector<T>> inputs;
     inputs.reserve(values.size());
@@ -962,9 +962,9 @@ class MirInterp {
         shapes.push_back(function_argument_shape(e.args[0], a));
         if (spec.arity == 2)
           shapes.push_back(function_argument_shape(e.args[1], b));
-        (void)builtin_layout(spec, shapes);
+        (void)builtin_layout(spec, shapes, e.name);
       } catch (const std::invalid_argument& error) {
-        fail(e.name + ": " + error.what(), e.raw);
+        fail(builtin_error_message(e.name, error), e.raw);
       }
     }
     uint8_t activity = 0;
@@ -1817,9 +1817,9 @@ class MirInterp {
       try {
         for (size_t k = 0; k < values.size(); ++k)
           shapes.push_back(function_argument_shape(e.args[k], values[k]));
-        return builtin_layout(*builtin, shapes);
+        return builtin_layout(*builtin, shapes, e.name);
       } catch (const std::invalid_argument& error) {
-        fail(e.name + ": " + error.what(), e.raw);
+        fail(builtin_error_message(e.name, error), e.raw);
       }
     };
     // Elementwise with scalar broadcasting; results of real math are real
@@ -1997,7 +1997,7 @@ class MirInterp {
               oriented(a, outer_pair ? Kind::Vector : Kind::RowVector),
               oriented(b, outer_pair ? Kind::RowVector : Kind::Vector));
         } catch (const std::invalid_argument& error) {
-          fail(e.name + ": " + error.what(), e.raw);
+          fail(builtin_error_message(e.name, error), e.raw);
         }
         switch (map.kind) {
           case BuiltinProductMap::Kind::Gemm:

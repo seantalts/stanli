@@ -1381,7 +1381,7 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
         return with_layout(emit_value(OP_MUL, {a, b}, len),
                            elementwise_layout({a, b}));
       }
-      fail(e.name + ": " + error.what(), e.raw);
+      fail(builtin_error_message(e.name, error), e.raw);
     }
     switch (map.kind) {
       case BuiltinProductMap::Kind::ScalarScale: {

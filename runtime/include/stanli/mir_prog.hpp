@@ -1527,9 +1527,9 @@ struct ProgramCompiler {
     try {
       for (size_t k = 0; k < values.size(); ++k)
         shapes.push_back(builtin_argument_shape(e.args[k], values[k]));
-      return builtin_layout(spec, shapes);
+      return builtin_layout(spec, shapes, e.name);
     } catch (const std::invalid_argument& error) {
-      throw Bail{e.name + ": " + error.what()};
+      throw Bail{builtin_error_message(e.name, error)};
     }
   }
 
@@ -3747,7 +3747,7 @@ struct ProgramCompiler {
           map = builtin_product_map(builtin_argument_shape(e.args[0], a),
                                     builtin_argument_shape(e.args[1], b));
         } catch (const std::invalid_argument& error) {
-          bail(e.name + ": " + error.what());
+          bail(builtin_error_message(e.name, error));
         }
         const int64_t rows = map.m, inner = map.k, cols = map.n;
         const ViewKind result_kind =

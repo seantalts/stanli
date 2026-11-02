@@ -12,6 +12,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -243,12 +245,23 @@ inline bool builtin_argument_is_integer(const BuiltinSpec& spec, size_t i) {
   return i < spec.arity && spec.arguments[i] == BuiltinArgumentKind::Integer;
 }
 
+// An error whose text is already Stan Math's, function name included.
+struct StanMathError : std::invalid_argument {
+  using std::invalid_argument::invalid_argument;
+};
+
+// The message a lowering reports for an error thrown by the builtin
+// resolvers: a StanMathError as is, anything else behind `function`.
+std::string builtin_error_message(const std::string& function,
+                                  const std::invalid_argument& error);
+
 // Validate one selected overload and resolve its lane broadcasts and result
 // geometry once for every backend. A one-element container is deliberately
-// not a scalar and therefore never broadcasts.
-BuiltinLayout builtin_layout(
-    const BuiltinSpec& spec,
-    const std::vector<BuiltinArgumentShape>& arguments);
+// not a scalar and therefore never broadcasts. `function` is the called
+// function's MIR name, used to word a size mismatch as Stan Math does.
+BuiltinLayout builtin_layout(const BuiltinSpec& spec,
+                             const std::vector<BuiltinArgumentShape>& arguments,
+                             const std::string& function);
 
 struct FunctionSpec;
 // Family views point into function_specs(); no family owns descriptor storage.

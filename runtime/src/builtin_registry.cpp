@@ -37,6 +37,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace stanli {
 namespace {
@@ -232,11 +233,69 @@ bool slice_flat_source(const BuiltinArgumentShape& input) {
           input.dimensions.size() == 1);
 }
 
+std::pair<int64_t, int64_t> eigen_extents(const BuiltinArgumentShape& shape) {
+  switch (shape.container) {
+    case FunctionContainerKind::Vector:
+      return {shape.storage_size, 1};
+    case FunctionContainerKind::RowVector:
+      return {1, shape.storage_size};
+    case FunctionContainerKind::Matrix:
+      return {shape.dimensions[0], shape.dimensions[1]};
+    default:
+      return {0, 0};
+  }
+}
+
+bool is_eigen_shape(const BuiltinArgumentShape& shape) {
+  return shape.container == FunctionContainerKind::Vector ||
+         shape.container == FunctionContainerKind::RowVector ||
+         shape.container == FunctionContainerKind::Matrix;
+}
+
+// Stan Math's wording for two arguments of different size: the matrix
+// operators check m1 and m2 by rows and columns, and the vectorized binary
+// functions check x and y the same way for two Eigen arguments and by
+// outer size for anything else.
+[[noreturn]] void throw_size_mismatch(const std::string& function,
+                                      const BuiltinArgumentShape& a,
+                                      const BuiltinArgumentShape& b) {
+  const char* matrix_operator =
+      function == "Plus__" || function == "add"                ? "add"
+      : function == "Minus__" || function == "subtract"        ? "subtract"
+      : function == "EltTimes__" || function == "elt_multiply" ? "elt_multiply"
+      : function == "EltDivide__" || function == "elt_divide"  ? "elt_divide"
+                                                               : nullptr;
+  if (matrix_operator || (is_eigen_shape(a) && is_eigen_shape(b))) {
+    const auto [ra, ca] = eigen_extents(a);
+    const auto [rb, cb] = eigen_extents(b);
+    const std::string name1 = matrix_operator ? "m1" : "x";
+    const std::string name2 = matrix_operator ? "m2" : "y";
+    throw StanMathError(
+        std::string(matrix_operator ? matrix_operator : "Binary function") +
+        ": " + name1 + " (" + std::to_string(ra) + ", " + std::to_string(ca) +
+        ") and " + name2 + " (" + std::to_string(rb) + ", " +
+        std::to_string(cb) + ") must match in size");
+  }
+  const auto outer = [](const BuiltinArgumentShape& shape) {
+    return shape.container == FunctionContainerKind::Array ? shape.dimensions[0]
+                                                           : shape.storage_size;
+  };
+  throw StanMathError("Binary function: size of x (" +
+                      std::to_string(outer(a)) + ") and size of y (" +
+                      std::to_string(outer(b)) + ") must match in size");
+}
+
 }  // namespace
 
-BuiltinLayout builtin_layout(
-    const BuiltinSpec& spec,
-    const std::vector<BuiltinArgumentShape>& arguments) {
+std::string builtin_error_message(const std::string& function,
+                                  const std::invalid_argument& error) {
+  if (dynamic_cast<const StanMathError*>(&error)) return error.what();
+  return function + ": " + error.what();
+}
+
+BuiltinLayout builtin_layout(const BuiltinSpec& spec,
+                             const std::vector<BuiltinArgumentShape>& arguments,
+                             const std::string& function) {
   if (arguments.size() != spec.arity)
     throw std::invalid_argument("wrong number of arguments");
   for (size_t k = 0; k < arguments.size(); ++k) {
@@ -313,11 +372,7 @@ BuiltinLayout builtin_layout(
         spec.compatibility == BuiltinCompatibilityPolicy::LaneCount
             ? arguments[0].storage_size == arguments[1].storage_size
             : same_builtin_shape(arguments[0], arguments[1]);
-    if (!compatible)
-      throw std::invalid_argument(spec.compatibility ==
-                                          BuiltinCompatibilityPolicy::LaneCount
-                                      ? "arguments must match in size"
-                                      : "incompatible logical views");
+    if (!compatible) throw_size_mismatch(function, arguments[0], arguments[1]);
   }
 
   if (builtin_argument_is_integer(spec, 0) !=
@@ -1094,9 +1149,9 @@ BuiltinMatrixMap builtin_matrix_map(
       const int64_t rb = b_matrix ? b.dimensions[0] : b.storage_size;
       const int64_t m = b_matrix ? b.dimensions[1] : 1;
       if (rb != n)
-        throw std::invalid_argument(
-            "inner dimension mismatch (" + std::to_string(n) + "x" +
-            std::to_string(n) + " against " + std::to_string(rb) + ")");
+        throw std::invalid_argument("Columns of A (" + std::to_string(n) +
+                                    ") and Rows of B (" + std::to_string(rb) +
+                                    ") must match in size");
       map.idata = {n, m};
       // Bit 0 is the operand shape; the backend's active bit picks
       // stan-math's other association of the same vector product.
@@ -1124,11 +1179,11 @@ BuiltinProductMap builtin_product_map(const BuiltinArgumentShape& a,
                                FunctionContainerKind::Scalar,
                                std::move(dimensions), size);
   };
-  const auto mismatch = [](int64_t ra, int64_t ca, int64_t rb, int64_t cb) {
-    throw std::invalid_argument("inner dimension mismatch (" +
-                                std::to_string(ra) + "x" + std::to_string(ca) +
-                                " times " + std::to_string(rb) + "x" +
-                                std::to_string(cb) + ")");
+  const auto mismatch = [](const char* name1, int64_t columns,
+                           const char* name2, int64_t rows) {
+    throw StanMathError("multiply: Columns of " + std::string(name1) + " (" +
+                        std::to_string(columns) + ") and Rows of " + name2 +
+                        " (" + std::to_string(rows) + ") must match in size");
   };
   BuiltinProductMap map;
   if (a.container == Kind::Scalar || b.container == Kind::Scalar) {
@@ -1138,7 +1193,7 @@ BuiltinProductMap builtin_product_map(const BuiltinArgumentShape& a,
   }
   if (a.container == Kind::Matrix && b.container == Kind::Vector) {
     if (a.dimensions[1] != b.storage_size)
-      mismatch(a.dimensions[0], a.dimensions[1], b.storage_size, 1);
+      mismatch("m1", a.dimensions[1], "m2", b.storage_size);
     map.kind = BuiltinProductMap::Kind::MatVec;
     map.m = a.dimensions[0];
     map.k = a.dimensions[1];
@@ -1148,8 +1203,7 @@ BuiltinProductMap builtin_product_map(const BuiltinArgumentShape& a,
   }
   if (a.container == Kind::Matrix && b.container == Kind::Matrix) {
     if (a.dimensions[1] != b.dimensions[0])
-      mismatch(a.dimensions[0], a.dimensions[1], b.dimensions[0],
-               b.dimensions[1]);
+      mismatch("m1", a.dimensions[1], "m2", b.dimensions[0]);
     map.kind = BuiltinProductMap::Kind::Gemm;
     map.m = a.dimensions[0];
     map.k = a.dimensions[1];
@@ -1160,7 +1214,7 @@ BuiltinProductMap builtin_product_map(const BuiltinArgumentShape& a,
   }
   if (a.container == Kind::RowVector && b.container == Kind::Matrix) {
     if (a.storage_size != b.dimensions[0])
-      mismatch(1, a.storage_size, b.dimensions[0], b.dimensions[1]);
+      mismatch("m1", a.storage_size, "m2", b.dimensions[0]);
     map.kind = BuiltinProductMap::Kind::Gemm;
     map.m = 1;
     map.k = a.storage_size;
@@ -1179,7 +1233,7 @@ BuiltinProductMap builtin_product_map(const BuiltinArgumentShape& a,
   }
   if (a.container == Kind::RowVector && b.container == Kind::Vector) {
     if (a.storage_size != b.storage_size)
-      mismatch(1, a.storage_size, b.storage_size, 1);
+      mismatch("rv", a.storage_size, "v", b.storage_size);
     map.kind = BuiltinProductMap::Kind::Inner;
     map.m = 1;
     map.k = a.storage_size;
