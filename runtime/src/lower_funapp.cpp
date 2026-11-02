@@ -957,11 +957,14 @@ Lowering::Val Lowering::lower_funapp(const mir::Expr& e) {
   if (const auto intrinsic = mir::stateful_intrinsic_kind(e)) {
     switch (*intrinsic) {
       case mir::StatefulIntrinsicKind::Target: {
-        if (in_write_array)
-          fail("target() is unavailable in write_array", e.raw);
+        // CmdStan's write_array accumulates from lp__ = 0 without the
+        // Jacobian.
         SlotInfo si;
-        si.param_free = target_terms.empty() && jac_slots.empty();
-        return {current_target_slot(), scalar_autodiff(), si};
+        si.param_free =
+            target_terms.empty() && (in_write_array || jac_slots.empty());
+        return {
+            in_write_array ? reduce_terms(target_terms) : current_target_slot(),
+            scalar_autodiff(), si};
       }
     }
   }

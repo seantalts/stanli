@@ -1781,8 +1781,12 @@ class MirInterp {
         registered != nullptr && registered->builtin() != nullptr
             ? registered->builtin()
             : nullptr;
-    if (mir::stateful_intrinsic_kind(e))
+    if (mir::stateful_intrinsic_kind(e)) {
+      if constexpr (std::is_same_v<T, double>) {
+        if (hooks_.fun && hooks_.fun(*this, e, &r)) return r;
+      }
       fail("target() is unavailable in this context", e.raw);
+    }
     if (const auto value = mir::nullary_constant(e)) {
       r.r = {T(*value)};
       return r;

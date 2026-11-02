@@ -405,6 +405,12 @@ std::vector<double> WaInterp::eval(
   };
   h.fun = [this, &rng](MirInterp<double>& in, const mir::Expr& e,
                        DataMap::Entry* out) {
+    // The interpreter refuses `target +=`, so the target CmdStan's
+    // write_array accumulates from lp__ = 0 is still 0 here.
+    if (mir::stateful_intrinsic_kind(e)) {
+      out->r = {0.0};
+      return true;
+    }
     return interpreted_rng_call(in, e, out, rng) ||
            evaluate_retained_higher_order(
                funs_, e, [&in](const mir::Expr& arg) { return in.eval(arg); },
