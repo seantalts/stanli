@@ -341,7 +341,8 @@ def check():
             errors.append(f"source changed: {rel}")
         if e.get("origin") not in ("generated", "hand", "none_needed"):
             errors.append(f"bad origin: {rel}")
-    if serialize(doc) != OUT.read_bytes():
+    # Compare the JSON, not the gzip bytes, which differ between zlib builds.
+    if gzip.decompress(serialize(doc)) != gzip.decompress(OUT.read_bytes()):
         errors.append("file is not in canonical form")
     for e in errors:
         print(e, file=sys.stderr)
