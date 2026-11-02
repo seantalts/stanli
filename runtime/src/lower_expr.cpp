@@ -926,9 +926,9 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t len = checked_product(out_dims, "array gather");
         std::vector<int> idata;
         idata.reserve((size_t)len);
-        for (int x : iv.i) {
-          if (x < 1 || x > sh.dims[0])
-            fail("array gather out of bounds", e.raw);
+        for (int index : iv.i) {
+          const int64_t x =
+              stan_index(index, sh.dims[0], "array[..., ...] index", e.raw);
           for (int64_t k = 0; k < width; ++k)
             idata.push_back(
                 checked_immediate((x - 1) * width + k, "array gather offset"));
@@ -947,10 +947,10 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           fail("gather index must be int data", e.raw);
         std::vector<int> idata;
         idata.reserve(iv.i.size());
-        for (int x : iv.i) {
-          check_index(x, g.slots[base.slot].len, "gather index", e.raw);
-          idata.push_back(x - 1);
-        }
+        for (int x : iv.i)
+          idata.push_back(stan_index(x, g.slots[base.slot].len,
+                                     "vector[multi] indexing", e.raw) -
+                          1);
         return with_layout(emit_value(OP_GATHER, {base}, (int64_t)idata.size(),
                                       view_of(e.type_), idata),
                            ExpressionLayout::scalar());
@@ -1094,11 +1094,10 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const auto& D = *bdims;
         const bool mat = array_shape(base.si).leaf == ViewKind::Matrix;
         std::vector<int64_t> ix;
-        for (size_t d = 0; d < n_idx; ++d) {
-          const int64_t one = eval_int(e.args[1 + d].args[0]);
-          check_index(one, D[d], "array index", e.raw);
-          ix.push_back(one - 1);
-        }
+        for (size_t d = 0; d < n_idx; ++d)
+          ix.push_back(stan_index(eval_int(e.args[1 + d].args[0]), D[d],
+                                  "array[uni, ...] index", e.raw) -
+                       1);
         const Addr a = flat_addr(D, mat, ix);
         if (a.stride != 1)
           return with_layout(
@@ -1190,8 +1189,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // Row of a column-major data matrix / 2-D array: strided slice.
       if (all_single && e.args.size() == 2 && is_matrix(base.si) &&
           e.type_ != "UReal" && e.type_ != "UInt") {
-        const int64_t t = eval_int(e.args[1].args[0]);
-        check_index(t, base.si.rows, "matrix row", e.raw);
+        const int64_t t = stan_index(eval_int(e.args[1].args[0]), base.si.rows,
+                                     "matrix[uni] indexing", e.raw);
         return with_layout(
             emit_value(OP_SLICE_STRIDED, {base}, base.si.cols, view_of(e.type_),
                        {checked_immediate(t - 1, "matrix row offset"),
@@ -1208,15 +1207,17 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       int64_t flat = 0;
       if (all_single && e.args.size() == 2 &&
           (e.type_ == "UReal" || e.type_ == "UInt")) {
-        const int64_t one = eval_int(e.args[1].args[0]);
-        check_index(one, g.slots[base.slot].len, "element", e.raw);
-        flat = one - 1;
+        flat = stan_index(eval_int(e.args[1].args[0]), g.slots[base.slot].len,
+                          is_array(base.si) ? "array[uni, ...] index"
+                                            : "vector[uni] indexing",
+                          e.raw) -
+               1;
       } else if (all_single && e.args.size() == 3 && is_matrix(base.si) &&
                  (e.type_ == "UReal" || e.type_ == "UInt")) {
-        const int64_t ri = eval_int(e.args[1].args[0]);
-        const int64_t cj = eval_int(e.args[2].args[0]);
-        check_index(ri, base.si.rows, "matrix row", e.raw);
-        check_index(cj, base.si.cols, "matrix column", e.raw);
+        const int64_t ri = stan_index(eval_int(e.args[1].args[0]), base.si.rows,
+                                      "matrix[uni,uni] row indexing", e.raw);
+        const int64_t cj = stan_index(eval_int(e.args[2].args[0]), base.si.cols,
+                                      "matrix[uni,uni] column indexing", e.raw);
         flat = (cj - 1) * base.si.rows + (ri - 1);
       } else {
         // Any remaining static selection resolves through the shared

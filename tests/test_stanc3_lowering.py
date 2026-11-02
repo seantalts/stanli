@@ -166,6 +166,47 @@ CASES = [
           if (y > 0) fatal_error("positive ", y);
         }""",
      {}, {"eval_fail": "positive 0.1"}),
+    ('vector element index out of range',
+     """data { int i; }
+        parameters { vector[2] v; }
+        model { v ~ normal(0, 1); target += v[i]; }""",
+     {'i': 0}, {"eval_fail": 'vector[uni] indexing: accessing element out of range. index 0 out of range; expecting index to be between 1 and 2'}),
+    ('array element index out of range',
+     """data { int i; }
+        parameters { array[2] real a; }
+        model { a ~ normal(0, 1); target += a[i]; }""",
+     {'i': 3}, {"eval_fail": 'array[uni, ...] index: accessing element out of range. index 3 out of range; expecting index to be between 1 and 2'}),
+    ('vector multi-index out of range',
+     """data { array[2] int idx; }
+        parameters { vector[2] v; }
+        model { v ~ normal(0, 1); target += sum(v[idx]); }""",
+     {'idx': [1, 0]}, {"eval_fail": 'vector[multi] indexing: accessing element out of range. index 0 out of range; expecting index to be between 1 and 2'}),
+    ('array multi-index out of range',
+     """data { array[2] int idx; }
+        parameters { array[2] real a; }
+        model { a ~ normal(0, 1); target += sum(a[idx]); }""",
+     {'idx': [2, 5]}, {"eval_fail": 'array[..., ...] index: accessing element out of range. index 5 out of range; expecting index to be between 1 and 2'}),
+    ('matrix row index out of range',
+     """data { int i; }
+        parameters { matrix[2, 3] m; }
+        model { to_vector(m) ~ normal(0, 1); target += sum(m[i]); }""",
+     {'i': 3}, {"eval_fail": 'matrix[uni] indexing: accessing element out of range. index 3 out of range; expecting index to be between 1 and 2'}),
+    ('matrix column index out of range with the flat offset in range',
+     """data { int i; }
+        parameters { matrix[3, 2] m; }
+        model { to_vector(m) ~ normal(0, 1); target += m[i, 1]; }""",
+     {'i': 4}, {"eval_fail": 'matrix[uni,uni] row indexing: accessing element out of range. index 4 out of range; expecting index to be between 1 and 3'}),
+    ('nested array index out of range with the flat offset in range',
+     """data { int j; }
+        parameters { array[2, 3] real a; }
+        model { to_array_1d(a) ~ normal(0, 1); target += a[1, j]; }""",
+     {'j': 4}, {"eval_fail": 'array[uni, ...] index: accessing element out of range. index 4 out of range; expecting index to be between 1 and 3'}),
+    ('index out of range in generated quantities',
+     """data { int i; }
+        parameters { vector[2] v; }
+        model { v ~ normal(0, 1); }
+        generated quantities { real g = v[i]; }""",
+     {'i': 0}, {"wa_fail": 'vector[uni] indexing: accessing element out of range. index 0 out of range; expecting index to be between 1 and 2'}),
 ]
 
 

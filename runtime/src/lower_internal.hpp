@@ -1048,6 +1048,20 @@ struct Lowering {
   // Every index the graph lowering sees is a bind-time constant, so the
   // bounds CmdStan checks at runtime are checked here, before an op that
   // would silently read a neighboring arena slot can be emitted.
+  // An index CmdStan checks at runtime: out of range, its check_range error
+  // is emitted here and the first element stands in for the selection.
+  int64_t stan_index(int64_t i, int64_t n, const char* function,
+                     const std::string& raw) {
+    if (i >= 1 && i <= n) return i;
+    if (n < 1) check_index(i, n, function, raw);
+    emit_error(MessageError::OutOfRange,
+               std::string(function) +
+                   ": accessing element out of range. index " +
+                   std::to_string(i) +
+                   " out of range; expecting index to be between 1 and " +
+                   std::to_string(n));
+    return 1;
+  }
   void check_index(int64_t i, int64_t n, const char* what,
                    const std::string& raw) {
     if (i < 1 || i > n)
