@@ -1396,6 +1396,26 @@ struct Lowering {
                                                const SlotInfo& expected,
                                                const std::string& name);
   void emit_error(MessageError error, const std::string& message);
+  // Stan Math's add/subtract check_matching_dims error for two vectors or
+  // matrices of different shapes.
+  std::optional<std::string> add_size_error(const mir::Expr& e, const Val& a,
+                                            const Val& b) {
+    const bool add = e.name == "Plus__" || e.name == "add";
+    if (!add && e.name != "Minus__" && e.name != "subtract")
+      return std::nullopt;
+    const auto eigen = [](const SlotInfo& si) {
+      return is_vector(si) || is_row_vector(si) || is_matrix(si);
+    };
+    if (!eigen(a.si) || !eigen(b.si)) return std::nullopt;
+    const LogicalDims x = logical_dims(a.si, g.slots[a.slot].len, e.name);
+    const LogicalDims y = logical_dims(b.si, g.slots[b.slot].len, e.name);
+    if (x.rows == y.rows && x.cols == y.cols) return std::nullopt;
+    const bool var = !in_write_array && (a.autodiff || b.autodiff);
+    return std::string(add ? "add" : "subtract") + ": " + (var ? "a" : "m1") +
+           " (" + std::to_string(x.rows) + ", " + std::to_string(x.cols) +
+           ") and " + (var ? "b" : "m2") + " (" + std::to_string(y.rows) +
+           ", " + std::to_string(y.cols) + ") must match in size";
+  }
   void sync_data_local(const std::string& name, const mir::Expr& rhs,
                        const Val& v);
 

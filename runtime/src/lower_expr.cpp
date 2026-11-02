@@ -968,8 +968,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       }
       if (e.args.size() == 3 && is_matrix(base.si) &&
           e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle") {
-        const int64_t j = eval_int(e.args[2].args[0]);
-        check_index(j, base.si.cols, "matrix column", e.raw);
+        const int64_t j = stan_index(eval_int(e.args[2].args[0]), base.si.cols,
+                                     "matrix[..., uni] column indexing", e.raw);
         const int64_t offset = (j - 1) * base.si.rows;
         return with_layout(
             emit_value(OP_SLICE, {base}, base.si.rows, view_of(e.type_),

@@ -229,6 +229,23 @@ CASES = [
         transformed parameters { array[2] complex z = {r, 3}; }
         model { r ~ normal(0, 1); }""",
      {}, {"compile_fail": "complex numbers are not supported yet"}),
+    ("adding vectors of different sizes",
+     """parameters { vector[2] v; }
+        model { v ~ normal(0, 1); target += sum(v + [1, 2, 3]'); }""",
+     {}, {"eval_fail": "add: a (2, 1) and b (3, 1) must match in size"}),
+    ("subtracting data row vectors of different sizes",
+     """data { row_vector[2] x; row_vector[3] y; }
+        parameters { real q; }
+        model { q ~ normal(0, 1); target += q * sum(x - y); }""",
+     {"x": [1, 2], "y": [1, 2, 3]},
+     {"eval_fail": "subtract: m1 (1, 2) and m2 (1, 3) must match in size"}),
+    ("matrix column index out of range",
+     """data { int j; }
+        parameters { matrix[2, 3] m; }
+        model { to_vector(m) ~ normal(0, 1); target += sum(m[:, j]); }""",
+     {"j": 4}, {"eval_fail": "matrix[..., uni] column indexing: accessing "
+                             "element out of range. index 4 out of range; "
+                             "expecting index to be between 1 and 3"}),
 ]
 
 

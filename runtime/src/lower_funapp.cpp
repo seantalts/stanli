@@ -1463,6 +1463,18 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
     actuals.require_arity(2);
     Val a = actuals.at(0).value();
     Val b = actuals.at(1).value();
+    if (auto mismatch = add_size_error(e, a, b)) {
+      emit_error(MessageError::InvalidArgument, *mismatch);
+      SlotInfo si = a.si;
+      si.param_free = false;
+      const int64_t len = g.slots[a.slot].len;
+      Val placeholder{add_slot(len, false), a.autodiff || b.autodiff, si,
+                      owning_layout(si)};
+      out.fills.emplace_back(
+          placeholder.slot,
+          std::vector<double>(len, std::numeric_limits<double>::quiet_NaN()));
+      return placeholder;
+    }
     const std::vector<Val> values{a, b};
     const BuiltinLayout layout = resolved_builtin_layout(e, *builtin, values);
     SlotInfo si = values[layout.result_argument].si;
