@@ -114,7 +114,7 @@ The jobs are in [`wheels.yml`](.github/workflows/wheels.yml),
 | [generated conformance sweep](#testing-stan-language-coverage) | 24,322 generated signature and construct cases | reference BridgeStan from the same pins | nightly | operator-only behavior; cases the generator cannot build |
 | [coverage ratchet](#testing-stan-language-coverage) | each generated case's status | the checked-in baseline | nightly | the coverage totals themselves |
 | [integrated function models](#testing-stan-language-coverage) | 10 models using 430 function names, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | every overload of each name |
-| [signature replay](#testing-stan-language-coverage) | 73 generated models covering 19,538 signatures, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | signatures the generators exclude |
+| [signature replay](#testing-stan-language-coverage) | 74 generated models covering 19,641 signatures, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | signatures the generators exclude |
 | [stanc3 test models](#testing-stan-language-coverage) | the 1,244 models in stanc3's integration tests, lp, gradient and write_array at 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
 | Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly | |
 | [installed clients](#installed-clients) | the built wheel, R package and BridgeStan transport | API tests and R ecosystem consumers; skips fail | PR on Linux and Windows x64; post-merge adds wheel tests on macOS and Linux aarch64 and R tests on macOS arm64 | macOS and aarch64 before merge |
@@ -402,9 +402,9 @@ case it cannot generate, and does not measure cost.
 of that gap: 430 names, including data-only helpers, RNGs, solvers and five
 operators, checked against recorded CmdStan values, gradients and outputs.
 
-CTest also replays 73 generated signature models on every PR
-([`tools/check_signature_models.py`](tools/check_signature_models.py)): 35
-models cover 7,407 builtin signatures and 38 cover 12,131 density signatures.
+CTest also replays 74 generated signature models on every PR
+([`tools/check_signature_models.py`](tools/check_signature_models.py)): 36
+models cover 7,486 builtin signatures and 38 cover 12,155 density signatures.
 Each case reads its own parameter and writes its own output, so a failure
 names the signature. They are compared with recorded CmdStan values at the
 three corpus points under the 1e-9 gate. The manifests in
