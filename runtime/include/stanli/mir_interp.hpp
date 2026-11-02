@@ -664,6 +664,15 @@ class MirInterp {
               static_cast<int>(as_int(st.fn_args[2])));
           return;
         }
+        if (const auto name = mir::user_defined_statement_name(st.fn_name)) {
+          mir::Expr call;
+          call.kind = mir::Expr::FunApp;
+          call.fn_lib = mir::Expr::Lib::UserDefined;
+          call.name = st.fn_name.substr(name->first, name->second);
+          call.args = st.fn_args;
+          call_udf(call);
+          return;
+        }
         fail("unsupported statement function " + st.fn_name, st.raw);
       case mir::Stmt::Skip:
         return;  // constraint checks are not executed here

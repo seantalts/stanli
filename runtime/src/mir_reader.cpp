@@ -1199,25 +1199,58 @@ bool views_match(const std::vector<Expr>& args,
   return true;
 }
 
-void resolve_calls(Expr& e, const Overloads& overloads) {
-  for (Expr& a : e.args) resolve_calls(a, overloads);
-  if (e.kind != Expr::FunApp || e.fn_lib != Expr::Lib::UserDefined) return;
-  const auto it = overloads.find(e.name);
-  if (it == overloads.end()) return;
+template <typename Args>
+std::string resolve_overload(const Overloads::value_type& candidates,
+                             const Args& args) {
   const FunDef* match = nullptr;
-  for (const FunDef* f : it->second) {
-    if (!views_match(e.args, f->arg_views)) continue;
+  for (const FunDef* f : candidates.second) {
+    if (!views_match(args, f->arg_views)) continue;
     if (match)
-      throw std::runtime_error("mir: ambiguous overload for " + e.name);
+      throw std::runtime_error("mir: ambiguous overload for " +
+                               candidates.first);
     match = f;
   }
   if (!match)
-    throw std::runtime_error("mir: no overload of " + it->first +
+    throw std::runtime_error("mir: no overload of " + candidates.first +
                              " matches its call");
-  e.name = match->name;
+  return match->name;
+}
+
+// A function passed by name, as to ode_rk45, is typed
+// (UFun ((arg types...) (ReturnType ...) ...)) in its raw metadata.
+std::vector<UnsizedView> function_argument_views(const std::string& raw) {
+  const Node type = sexp::parse(raw);
+  if (!type.head_is("UFun") || type.size() != 2 || type[1].is_atom() ||
+      type[1].size() == 0 || type[1][0].is_atom())
+    throw std::runtime_error("mir: malformed function type " + raw);
+  std::vector<UnsizedView> views;
+  for (const Node& arg : type[1][0].kids) {
+    if (arg.is_atom() || arg.size() != 2)
+      throw std::runtime_error("mir: malformed function type " + raw);
+    views.push_back(read_unsized(arg[1]));
+  }
+  return views;
+}
+
+void resolve_calls(Expr& e, const Overloads& overloads) {
+  for (Expr& a : e.args) resolve_calls(a, overloads);
+  const bool call =
+      e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::UserDefined;
+  const bool callback = e.kind == Expr::Var && e.raw.rfind("(UFun ", 0) == 0;
+  if (!call && !callback) return;
+  const auto it = overloads.find(e.name);
+  if (it == overloads.end()) return;
+  e.name = call ? resolve_overload(*it, e.args)
+                : resolve_overload(*it, function_argument_views(e.raw));
 }
 
 void resolve_calls(Stmt& s, const Overloads& overloads) {
+  if (const auto name = user_defined_statement_name(s.fn_name)) {
+    const auto it = overloads.find(s.fn_name.substr(name->first, name->second));
+    if (it != overloads.end())
+      s.fn_name.replace(name->first, name->second,
+                        resolve_overload(*it, s.fn_args));
+  }
   for (Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
     resolve_calls(*e, overloads);
   for (auto* exprs : {&s.read_dims, &s.lhs_idx, &s.fn_args})

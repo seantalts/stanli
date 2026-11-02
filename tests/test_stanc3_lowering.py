@@ -34,6 +34,37 @@ CASES = [
         }
         model { y ~ normal(0, 1); }""",
      {"d": 3, "a": [4, -2, 9]}, {"values": [0.1, 7, 3, 9, -2]}),
+    ("user function called as a statement in transformed data",
+     """functions {
+          void show(real x) { print("show ", x); }
+          void show(int x) { print("show int ", x); }
+          void stop(real x) { reject("stopped at ", x); }
+        }
+        transformed data { show(1.5); show(2); }
+        parameters { real y; }
+        model { y ~ normal(0, 1); }""",
+     {}, {"values": [0.1], "stdout": "show 1.5\nshow int 2"}),
+    ("rejection from a user function in transformed data",
+     """functions { void stop(real x) { reject("stopped at ", x); } }
+        transformed data { stop(2.5); }
+        parameters { real y; }
+        model { y ~ normal(0, 1); }""",
+     {}, {"compile_fail": "stopped at 2.5"}),
+    ("overloaded ODE right-hand side",
+     """functions {
+          vector rhs(real t, vector y, real k) { return -k * y; }
+          vector rhs(real t, vector y, real k, int unused) { return k * y; }
+        }
+        parameters { real<lower=0> k; }
+        transformed parameters {
+          array[1] vector[1] decay = ode_rk45_tol(rhs, [1.0]', 0, {1.0},
+                                                 1e-10, 1e-10, 10000, k);
+          array[1] vector[1] grow = ode_rk45_tol(rhs, [1.0]', 0, {1.0},
+                                                1e-10, 1e-10, 10000, k, 0);
+        }
+        model { k ~ normal(1, 1); }""",
+     {}, {"close": [1.1051709180756477, 0.33115427715290885, 3.0197405529455232],
+          "rtol": 1e-6}),
 ]
 
 
@@ -62,6 +93,11 @@ for name, source, data, want in CASES:
         ok = "OK" in lines and len(got) == len(want["values"]) and all(
             abs(g - w) <= 1e-12 * max(1.0, abs(w))
             for g, w in zip(got, want["values"]))
+    if "close" in want:
+        got = [float(v) for v in lines.get("WAVALS", "").split()]
+        ok = "OK" in lines and len(got) == len(want["close"]) and all(
+            abs(g - w) <= want["rtol"] * abs(w)
+            for g, w in zip(got, want["close"]))
     if "eval_fail" in want:
         ok = want["eval_fail"] in lines.get("EVAL_FAIL", "")
     if "compile_fail" in want:

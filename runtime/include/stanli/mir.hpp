@@ -15,6 +15,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace stanli {
@@ -502,6 +503,17 @@ struct Stmt {
   std::vector<Stmt> body;
   std::string raw;
 };
+
+// A user function called as a statement keeps stanc3's spelling of its kind,
+// `(UserDefined name FnPlain)`. Returns the offset and length of the name.
+inline std::optional<std::pair<size_t, size_t>> user_defined_statement_name(
+    const std::string& fn_name) {
+  constexpr std::string_view prefix = "(UserDefined ";
+  if (fn_name.compare(0, prefix.size(), prefix) != 0) return std::nullopt;
+  const size_t end = fn_name.find(' ', prefix.size());
+  if (end == std::string::npos || end == prefix.size()) return std::nullopt;
+  return std::make_pair(prefix.size(), end - prefix.size());
+}
 
 // Every identifier a statement or expression spells: variables, declared
 // names, loop variables and call names. Over-approximating is safe for
