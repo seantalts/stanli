@@ -6,6 +6,8 @@ build-rel/
 # Every out-of-source tree: build-lite, build-ship, whatever a
 # measurement needs next. Named entries above are kept for clarity.
 build-*/
+# tools/gen_stanc3_good_data.py's reference binaries.
+build-stanc3-ref/
 python/stanli/_bin/
 # The conformance reference client, version-pinned separately from whatever
 # python3 the host happens to have (tools/dev_setup.sh --conformance).
