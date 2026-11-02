@@ -308,8 +308,12 @@ def point_verdict(want, got):
     return ("mismatch" if details else "ok"), details
 
 
-def classify(ref, run):
+def classify(ref, run, unstable=()):
     """(status, points, details) for one model.
+
+    A value mismatch at a point in `unstable` counts as agreement: the
+    ledger's `platform_dependent` points, where CmdStan's own answer depends
+    on the platform's libm and long double.
 
     status is a MODEL_STATUSES entry or "points" when the model ran on both
     sides and some points disagree; points maps each non-ok point to its
@@ -357,6 +361,8 @@ def classify(ref, run):
             want = dict(want, wa=dict(want["wa"], names=ref["wa_names"]))
         verdict, why = point_verdict(want,
                                      parsed["points"].get(k))
+        if verdict == "mismatch" and str(k) in unstable:
+            verdict, why = "ok", []
         verdicts[k] = verdict
         details += [f"point {k}: {w}" for w in why]
     bad = {str(k): v for k, v in verdicts.items()
@@ -371,9 +377,9 @@ def classify(ref, run):
 
 def ledger_verdict(status, points, entry):
     """None when the computed result matches the ledger, else a message."""
-    want = (None if entry is None
-            else ("points", entry["points"]) if "points" in entry
-            else (entry["status"], {}))
+    want = (("points", entry["points"]) if entry and "points" in entry
+            else (entry["status"], {}) if entry and "status" in entry
+            else None)
     got = None if status == "verified" else (status, points)
     if want == got:
         if entry and entry.get("cause", "").startswith("UNTRIAGED"):
@@ -417,7 +423,8 @@ def replay_one(path, ctx):
             run = run_process([ctx["check"], source, data_file, "--points",
                                ",".join(map(str, POINTS)), "--wa-values"],
                               timeout)
-    status, points, details = classify(ref, run)
+    status, points, details = classify(
+        ref, run, set((entry or {}).get("platform_dependent", ())))
     problem = ledger_verdict(status, points, entry)
     ctx["seconds"][path] = time.monotonic() - started
     return path, status, points, details, problem
@@ -460,9 +467,11 @@ def inventory_problems(models, refs, ledger, overrides):
             problems.append(f"override copy {copy} differs from upstream "
                             f"{path}; a changed source is a 'source' override")
     for path, entry in ledger.items():
-        if "cause" not in entry or ("status" in entry) == ("points" in entry):
-            problems.append(f"ledger entry {path} needs a cause and exactly "
-                            "one of status/points")
+        kinds = ("status" in entry) + ("points" in entry)
+        if "cause" not in entry or kinds > 1 or (
+                kinds == 0 and not entry.get("platform_dependent")):
+            problems.append(f"ledger entry {path} needs a cause and one of "
+                            "status, points or platform_dependent")
         elif "status" in entry and entry["status"] not in MODEL_STATUSES[1:]:
             problems.append(f"ledger entry {path}: unknown status")
         elif "points" in entry and not set(entry["points"].values()) <= set(
@@ -475,11 +484,15 @@ def update_ledger(ledger, results):
     """Rewrite the ledger from this run, keeping causes that still apply."""
     out = {}
     for path, (status, points, details) in sorted(results.items()):
-        if status in ("verified", None):
-            continue
         old = ledger.get(path, {})
+        if status in ("verified", None):
+            if old.get("platform_dependent"):
+                out[path] = {k: old[k] for k in ("platform_dependent", "cause")}
+            continue
         entry = ({"points": points} if status == "points"
                  else {"status": status})
+        if old.get("platform_dependent"):
+            entry["platform_dependent"] = old["platform_dependent"]
         same = ({k: old.get(k) for k in entry} == entry)
         if same and "cause" in old:
             entry["cause"] = old["cause"]

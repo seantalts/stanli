@@ -471,6 +471,54 @@
   "cause": "Exception: pareto_type_2_lpdf: Random variable[2] is 2.91652, but must be greater than or equal to 6.449101 (in 'pareto_type_2_log_4.stan', line 36, column 2 to column 84)",
   "status": "data_rejected"
  },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_1.stan": {
+  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_2.stan": {
+  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_3.stan": {
+  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_4.stan": {
+  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_1.stan": {
+  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_2.stan": {
+  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_3.stan": {
+  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_4.stan": {
+  "cause": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
  "function-signatures/distributions/univariate/continuous/uniform/uniform_cdf.stan": {
   "cause": "Exception: uniform_cdf: Upper bound parameter is 6, but must be greater than 6.000000 (in 'uniform_cdf.stan', line 11, column 2 to column 59)",
   "status": "data_rejected"

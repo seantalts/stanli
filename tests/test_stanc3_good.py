@@ -168,6 +168,23 @@ class ClassifyTest(unittest.TestCase):
 
 
 class LedgerTest(unittest.TestCase):
+    def test_platform_dependent_point_tolerates_only_value_mismatches(self):
+        points = all_points("OK -1 0.5")
+        points[4] = ("OK -1 nan", WA)
+        self.assertEqual(g.classify(ref_ok(), stanli(points), {"4"})[0],
+                         "verified")
+        self.assertEqual(g.classify(ref_ok(), stanli(points), {"3"})[:2],
+                         ("points", {"4": "mismatch"}))
+        points[4] = ("EVAL_FAIL boom", WA)
+        self.assertEqual(g.classify(ref_ok(), stanli(points), {"4"})[:2],
+                         ("points", {"4": "one_side_threw"}))
+        entry = {"platform_dependent": ["4"], "cause": "libm"}
+        self.assertIsNone(g.ledger_verdict("verified", {}, entry))
+        self.assertEqual(g.inventory_problems([], {"models": {}}, {}, {}), [])
+        self.assertEqual(g.update_ledger({"a.stan": entry},
+                                         {"a.stan": ("verified", {}, [])}),
+                         {"a.stan": entry})
+
     def test_verified_needs_no_entry(self):
         self.assertIsNone(g.ledger_verdict("verified", {}, None))
 

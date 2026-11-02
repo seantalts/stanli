@@ -120,6 +120,12 @@ cause.
 A mismatch with CmdStan is a bug report, not a ledger line; ledger it only
 with the cause found.
 
+`"platform_dependent": ["4"]` marks points where CmdStan's own values
+depend on the platform's libm or `long double`, so references recorded on
+one machine can't match everywhere. A value mismatch at those points
+counts as agreement; a throw on one side still fails. Use it only with the
+mechanism named in the cause.
+
 ## Recording
 
 Recording needs the pinned CmdStan in `deps/cmdstan`. Nothing else in the
