@@ -1519,17 +1519,18 @@ struct ProgramCompiler {
     return out;
   }
 
-  static BuiltinLayout resolved_builtin_layout(
-      const mir::Expr& e, const BuiltinSpec& spec,
-      const std::vector<Range>& values) {
+  BuiltinLayout resolved_builtin_layout(const mir::Expr& e,
+                                        const BuiltinSpec& spec,
+                                        const std::vector<Range>& values) {
     std::vector<BuiltinArgumentShape> shapes;
     shapes.reserve(values.size());
     try {
       for (size_t k = 0; k < values.size(); ++k)
         shapes.push_back(builtin_argument_shape(e.args[k], values[k]));
-      return builtin_layout(spec, shapes);
+      return builtin_layout(spec, shapes, e.name,
+                            !in_write_array && mir::any_argument_active(e));
     } catch (const std::invalid_argument& error) {
-      throw Bail{e.name + ": " + error.what()};
+      throw Bail{builtin_error_message(e.name, error)};
     }
   }
 
@@ -2834,7 +2835,7 @@ struct ProgramCompiler {
       return kernel_call(spec.opcode, args, out, plan.variant,
                          plan.activity_mask, plan.idata, {}, e.name);
     } catch (const std::exception& error) {
-      bail(e.name + ": " + error.what());
+      bail(builtin_error_message(e.name, error));
     }
 
     return {};
@@ -2965,6 +2966,11 @@ struct ProgramCompiler {
           bail(e.name + ": bound is neither scalar nor the input size");
       tr.out_len = args[0].len;
       tr.inner_raw = args[0].len;
+      tr.eigen = args[0].kind == ViewKind::Vector      ? 1
+                 : args[0].kind == ViewKind::RowVector ? 2
+                 : args[0].kind == ViewKind::Matrix    ? 3
+                                                       : 0;
+      tr.rows = static_cast<int32_t>(args[0].rows);
     } else {
       ViewKind leaf = args[0].kind;
       std::vector<int64_t> dims;
@@ -3812,7 +3818,7 @@ struct ProgramCompiler {
           map = builtin_product_map(builtin_argument_shape(e.args[0], a),
                                     builtin_argument_shape(e.args[1], b));
         } catch (const std::invalid_argument& error) {
-          bail(e.name + ": " + error.what());
+          bail(builtin_error_message(e.name, error));
         }
         const int64_t rows = map.m, inner = map.k, cols = map.n;
         const ViewKind result_kind =

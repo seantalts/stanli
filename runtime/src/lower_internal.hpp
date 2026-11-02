@@ -1055,6 +1055,10 @@ struct Lowering {
                " out of bounds for size " + std::to_string(n),
            raw);
   }
+  void check_uni_index(int64_t i, int64_t n, const char* stan_label,
+                       const std::string& raw) {
+    if (i < 1 || i > n) fail(index_out_of_range_message(stan_label, n, i), raw);
+  }
   // A range with hi < lo is empty and never reads, whatever the endpoints.
   void check_range(int64_t lo, int64_t hi, int64_t n, const char* what,
                    const std::string& raw) {
@@ -1222,6 +1226,25 @@ struct Lowering {
   const ArrayShape& array_shape(const SlotInfo& si) const {
     return shape_pool->at(si.shape);
   }
+  // The row count an offset_multiplier check names matrix elements by.
+  std::vector<int> offset_multiplier_rows(CallableTransformKind kind,
+                                          const SlotInfo& si);
+  CheckGeometry check_geometry(const SlotInfo& si, int64_t len) const {
+    CheckGeometry geometry;
+    if (is_array(si)) {
+      const ArrayShape& shape = array_shape(si);
+      geometry.dims = shape.dims;
+      geometry.leaf_rank =
+          std::max<size_t>(1, static_cast<size_t>(leaf_rank(shape.leaf)));
+    } else if (is_matrix(si)) {
+      geometry.dims = {si.rows, si.cols};
+      geometry.leaf_rank = 2;
+    } else if (is_vector(si) || is_row_vector(si)) {
+      geometry.dims = {len};
+      geometry.leaf_rank = 1;
+    }
+    return geometry;
+  }
   SlotInfo indexed_view(const SlotInfo& base, size_t n_single, int64_t out_len,
                         const std::string& out_type);
 
@@ -1258,9 +1281,10 @@ struct Lowering {
     try {
       for (size_t k = 0; k < values.size(); ++k)
         shapes.push_back(builtin_argument_shape(e.args[k], values[k]));
-      return builtin_layout(spec, shapes);
+      return builtin_layout(spec, shapes, e.name,
+                            !in_write_array && mir::any_argument_active(e));
     } catch (const std::invalid_argument& error) {
-      fail(e.name + ": " + error.what(), e.raw);
+      fail(builtin_error_message(e.name, error), e.raw);
     }
   }
 

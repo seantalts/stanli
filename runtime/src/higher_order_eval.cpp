@@ -218,7 +218,8 @@ std::shared_ptr<OdeSpec> ode_spec(
     if (e.args.size() == 10) {
       spec->rtol = scalar_real(eval(e.args[7]), "ODE relative tolerance");
       spec->atol = scalar_real(eval(e.args[8]), "ODE absolute tolerance");
-      spec->max_steps = scalar_int(eval(e.args[9]), "ODE maximum steps");
+      spec->max_steps =
+          static_cast<long>(scalar_real(eval(e.args[9]), "ODE maximum steps"));
     }
     spec->args.resize(3);
     spec->args[0].is_param = true;

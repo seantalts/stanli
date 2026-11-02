@@ -1253,7 +1253,8 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
               ix.reserve(s.lhs_idx.size());
               for (size_t d = 0; d < s.lhs_idx.size(); ++d) {
                 const int64_t i = eval_int(s.lhs_idx[d].args[0]);
-                check_index(i, shape.dims[d], "assignment index", s.raw);
+                check_uni_index(i, shape.dims[d], "array[uni,...] assign",
+                                s.raw);
                 ix.push_back(i - 1);
               }
               const Addr a =
@@ -1265,10 +1266,15 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
                                            s.rhs.type_);
             } else if (is_matrix(lhs_si)) {
               const int64_t i = eval_int(s.lhs_idx[0].args[0]);
-              check_index(i, lhs_si.rows, "assignment index", s.raw);
+              check_uni_index(i, lhs_si.rows,
+                              s.lhs_idx.size() == 2
+                                  ? "matrix[uni,uni] assign row"
+                                  : "matrix[uni] assign row",
+                              s.raw);
               if (s.lhs_idx.size() == 2) {
                 const int64_t j = eval_int(s.lhs_idx[1].args[0]);
-                check_index(j, lhs_si.cols, "assignment index", s.raw);
+                check_uni_index(j, lhs_si.cols, "matrix[uni,uni] assign column",
+                                s.raw);
                 map.offset = (j - 1) * lhs_si.rows + (i - 1);
                 map.count = 1;
                 expected_view = view_of("UReal");
@@ -1281,7 +1287,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
               }
             } else {
               const int64_t i = eval_int(s.lhs_idx[0].args[0]);
-              check_index(i, lhs_len, "assignment index", s.raw);
+              check_uni_index(i, lhs_len, "vector[uni] assign", s.raw);
               map.offset = i - 1;
               map.count = 1;
               expected_view = view_of("UReal");
@@ -1576,13 +1582,32 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             s.check_var_name.empty() ? s.fn_args[0].name : s.check_var_name;
         spec->bound_is_scalar = bound_is_scalar;
         spec->shapes_match = shapes_match;
+        spec->geometry = check_geometry(value.si, value_len);
         (void)emit_value(opcode, {value, bound}, 1);
         g.ops.back().udata = spec.get();
         g.udata_pool.push_back(std::move(spec));
         return;
       }
-      // Size validation remains a separate compatibility seam.
-      if (s.fn_name == "FnValidateSize") return;
+      if (s.fn_name == "FnValidateSize") {
+        if (s.fn_args.size() != 3 || s.fn_args[0].kind != mir::Expr::LitStr ||
+            s.fn_args[1].kind != mir::Expr::LitStr)
+          fail("malformed FnValidateSize", s.raw);
+        long extent;
+        try {
+          extent = eval_int(s.fn_args[2]);
+        } catch (const CompileError&) {
+          return;
+        }
+        if (extent < 0)
+          fail(
+              "Found negative dimension size in variable declaration; "
+              "variable=" +
+                  s.fn_args[0].lit_s +
+                  "; dimension size expression=" + s.fn_args[1].lit_s +
+                  "; expression value=" + std::to_string(extent),
+              s.raw);
+        return;
+      }
       if (s.fn_name == "check_matching_dims") {
         if (s.fn_args.size() != 5 || s.fn_args[0].kind != mir::Expr::LitStr ||
             s.fn_args[1].kind != mir::Expr::LitStr ||

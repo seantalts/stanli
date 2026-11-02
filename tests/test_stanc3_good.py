@@ -110,6 +110,22 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(g.classify(ref, stanli(points))[1],
                          {"2": "message_mismatch"})
 
+    def test_boost_template_argument_is_platform_dependent(self):
+        cmdstan = ("Exception: Error in function boost::math::gamma_p<long "
+                   "double>(long double, long double): Argument a to the "
+                   "incomplete gamma function must be greater than zero "
+                   "(got a=0). (in 'm.stan', line 4, column 2 to column 20)")
+        stanli_text = cmdstan.split("Exception: ")[1].split(" (in")[0]
+        for argument in ("double", "long double", "__float128"):
+            text = stanli_text.replace("<long double>(long double, long "
+                                       "double)", f"<{argument}>({argument}, "
+                                       f"{argument})")
+            self.assertTrue(g.messages_agree(cmdstan, text), argument)
+        self.assertFalse(g.messages_agree(
+            cmdstan, stanli_text.replace("gamma_p", "gamma_q")))
+        self.assertFalse(g.messages_agree(
+            "Exception: foo<double> is bad", "foo<long double> is bad"))
+
     def test_all_nan_rows_agree(self):
         ref = ref_ok(lp_grad=("nan", "nan"))
         self.assertEqual(g.classify(ref, stanli(all_points("OK nan nan")))[0],
