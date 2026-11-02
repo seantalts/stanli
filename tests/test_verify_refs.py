@@ -30,7 +30,8 @@ from verify_refs import (ILL_CONDITIONED, KNOWN_GAPS,  # noqa: E402
                          LOCAL_CORPORA, POINTS, QUARANTINED, SCHEMA,
                          check_model, load_refs, model_files, parse_status,
                          probe_point)
-from cmdstan_ref import _result_line  # noqa: E402
+from cmdstan_ref import (_result_line, point_results,  # noqa: E402
+                         split_points)
 import verify_sample  # noqa: E402
 import verify_refs  # noqa: E402
 from corpus_inventory import local_cases, source_digest
@@ -89,6 +90,39 @@ class StatusLineTest(unittest.TestCase):
         want = ["OK", "-3.5", "1", "-2"]
         self.assertEqual(parse_status(out), want)
         self.assertEqual(_result_line(out), want)
+
+
+class MultiPointOutputTest(unittest.TestCase):
+    """`--points` output is one POINT <k> block per point, on both sides."""
+
+    OUT = ("POINT 0\nOK -1.5 0.25 2\nWANAMES a,b\nWAVALS 1 2\n"
+           "POINT 3\nEVAL_FAIL bad | worse\n"
+           "POINT 1\nuser print\nOK -2 3 4\n")
+
+    def test_blocks_keep_order_and_their_own_lines(self):
+        blocks = split_points(self.OUT)
+        self.assertEqual(list(blocks), [0, 3, 1])
+        self.assertEqual(blocks[0], "OK -1.5 0.25 2\nWANAMES a,b\nWAVALS 1 2\n")
+        self.assertEqual(blocks[3], "EVAL_FAIL bad | worse\n")
+
+    def test_each_block_parses_like_a_single_point_run(self):
+        self.assertEqual(point_results(self.OUT), {
+            0: ["OK", "-1.5", "0.25", "2"],
+            3: ["EVAL_FAIL", "bad", "|", "worse"],
+            1: ["OK", "-2", "3", "4"]})
+
+    def test_a_throw_at_one_point_does_not_hide_the_others(self):
+        self.assertEqual(point_results(self.OUT)[1][0], "OK")
+
+    def test_a_failure_before_any_point_is_returned_whole(self):
+        for line in ("COMPILE_FAIL no MIR", "DATA_FAIL bad data"):
+            with self.subTest(line=line):
+                self.assertEqual(split_points(line + "\n"), {})
+                self.assertEqual(_result_line(line + "\n"), line.split())
+
+    def test_a_printed_point_prefix_is_not_a_header(self):
+        out = "POINT 0\nPOINT lies\nOK 1 2\n"
+        self.assertEqual(point_results(out), {0: ["OK", "1", "2"]})
 
 
 class ProbePointTest(unittest.TestCase):
