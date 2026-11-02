@@ -177,6 +177,12 @@ def render():
             "transformed data, model, and generated quantities; fresh CmdStan "
             "2.40 references in sort_references.json.gz"
         )
+    for name in ("wiener_lcdf_unnorm", "wiener_lccdf_unnorm"):
+        focused[name] = (
+            "tests/fixtures/wiener_cdf_forms.stan; four- and seven-parameter "
+            "forms, with and without precision, in transformed data, graph, "
+            "and runtime-control lowering against Stan Math in test_lower"
+        )
     for name in ("to_vector_array", "to_row_vector_array"):
         focused[name] = "tests/fixtures/stan240_containers.stan; rectangular and zero-extent round trips"
     for name in ("to_int", "to_array_2d"):

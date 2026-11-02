@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <variant>
@@ -45,6 +46,17 @@ struct FunctionSpec {
 const std::vector<FunctionSpec>& function_specs();
 bool function_registered(std::string_view name);
 bool function_arity_registered(std::string_view name, size_t arity);
+
+// The wiener forms that bypass the registry: wiener_lpdf with five or seven
+// parameters and wiener_lcdf_unnorm / wiener_lccdf_unnorm with four or seven,
+// each with an optional trailing precision.
+struct WienerForm {
+  WienerKind kind;
+  int reals;
+  bool has_precision;
+  double default_precision;
+};
+std::optional<WienerForm> wiener_form(std::string_view name, size_t arity);
 // Compatibility lookup for callers which only need a family payload. Typed
 // execution paths should use the overload resolver below.
 const FunctionSpec* function_spec(std::string_view name, size_t arity,

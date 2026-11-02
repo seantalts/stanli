@@ -800,6 +800,44 @@ class MirInterp {
     return result;
   }
 
+  Value wiener_packed_eval(const mir::Expr& e, const WienerForm& form) {
+    const int nargs = form.reals;
+    std::vector<Value> values;
+    values.reserve(e.args.size());
+    for (const mir::Expr& arg : e.args) values.push_back(eval(arg));
+    for (Value& v : values)
+      if (v.is_int && v.r.size() != v.i.size()) {
+        v.r.clear();
+        for (int value : v.i) v.r.push_back(T((double)value));
+      }
+    int64_t lanes = 1;
+    for (int k = 0; k < nargs; ++k)
+      lanes = std::max<int64_t>(lanes, (int64_t)values[k].r.size());
+    int active = 0;
+    std::vector<T> packed;
+    packed.reserve((size_t)(nargs * lanes));
+    for (int k = 0; k < nargs; ++k) {
+      if ((int64_t)values[k].r.size() != lanes)
+        fail(e.name + ": arguments differ in length", e.raw);
+      if constexpr (!std::is_same_v<T, double>)
+        if (!e.args[k].data_only) active |= 1 << k;
+      packed.insert(packed.end(), values[k].r.begin(), values[k].r.end());
+    }
+    const T precision = form.has_precision ? values[(size_t)nargs].r.at(0)
+                                           : T(form.default_precision);
+    const bool propto =
+        form.kind == WienerKind::Lpdf && e.fn_propto && propto_ctx_;
+    std::vector<std::vector<T>> inputs;
+    inputs.push_back(std::move(packed));
+    inputs.push_back({precision});
+    Value result;
+    result.r = {run_kernel_call(
+        e, OP_WIENER_PACKED_LPDF, 0, active ? 0x1 : 0,
+        {nargs, (int)lanes, active, propto ? 1 : 0, (int)form.kind},
+        std::move(inputs), 1)[0]};
+    return result;
+  }
+
   // Bind and execute one graph-kernel CALL over materialized inputs. Shared
   // by density_eval and builtin_kernel_eval: the double interpreter runs the
   // kernel forward directly and the var interpreter replays it through the
@@ -2933,6 +2971,8 @@ class MirInterp {
         return builtin_kernel_eval(e, *kernel_builtin, std::move(values));
     }
 
+    if (const auto wiener = wiener_form(e.name, e.args.size()))
+      return wiener_packed_eval(e, *wiener);
     if (registered != nullptr && registered->density() != nullptr)
       return density_eval(e, *registered->density());
     // Hand-built MIR without numeric metadata resolves densities by name

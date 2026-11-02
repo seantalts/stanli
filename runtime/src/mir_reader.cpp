@@ -147,6 +147,12 @@ void validate_funapp_arity(const Expr& e) {
                 std::to_string(e.args.size()));
     return;
   }
+  if (e.name == "wiener_lcdf_unnorm" || e.name == "wiener_lccdf_unnorm") {
+    if (!wiener_form(e.name, e.args.size()))
+      malformed(e.name + " call: expected 5, 6, 8 or 9 argument(s), got " +
+                std::to_string(e.args.size()));
+    return;
+  }
 
   CallableTransformSpec transform;
   if (callable_transform(e.name, &transform)) {
