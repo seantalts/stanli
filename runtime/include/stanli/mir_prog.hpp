@@ -3342,29 +3342,31 @@ struct ProgramCompiler {
         return native_builtin_call(e, *builtin, *native);
       return builtin_kernel_call(e, *builtin);
     }
-    if (e.name == "wiener_lpdf" && e.args.size() > 5) {
-      const int total = (int)e.args.size();
-      const int nargs = total == 6 || total == 8 ? total : total - 1;
+    if (const auto wiener = wiener_form(e.name, e.args.size())) {
+      const int nargs = wiener->reals;
       std::vector<Range> args;
       for (int k = 0; k < nargs; ++k) args.push_back(expr(e.args[k]));
       int lanes = 1;
       for (const Range& a : args) lanes = std::max(lanes, a.len);
       int active = 0;
       for (int k = 0; k < nargs; ++k) {
-        if (args[k].len != lanes)
-          bail("wiener_lpdf: arguments differ in length");
+        if (args[k].len != lanes) bail(e.name + ": arguments differ in length");
         if (!e.args[k].data_only) active |= 1 << k;
       }
       const int packed = alloc(nargs * lanes);
       for (int k = 0; k < nargs; ++k)
         for (int i = 0; i < lanes; ++i)
           emit(Program::MOV, packed + k * lanes + i, args[k].reg + i);
-      const Range precision =
-          nargs < total ? expr(e.args[nargs]) : Range{konst(1e-4), 1};
+      const Range precision = wiener->has_precision
+                                  ? expr(e.args[nargs])
+                                  : Range{konst(wiener->default_precision), 1};
+      const bool propto_density =
+          wiener->kind == WienerKind::Lpdf && e.fn_propto;
       return kernel_call(
           OP_WIENER_PACKED_LPDF, {Range{packed, nargs * lanes}, precision},
           Range{0, 1}, 0, active ? 0x1 : 0,
-          {nargs, lanes, active, e.fn_propto ? 1 : 0}, {}, e.name);
+          {nargs, lanes, active, propto_density ? 1 : 0, (int)wiener->kind}, {},
+          e.name);
     }
     if (registered != nullptr && registered->density() != nullptr)
       return density_call(e, *registered->density());

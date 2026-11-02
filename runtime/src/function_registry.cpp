@@ -874,6 +874,20 @@ bool function_arity_registered(std::string_view name, size_t arity) {
   return false;
 }
 
+std::optional<WienerForm> wiener_form(std::string_view name, size_t arity) {
+  if (name == "wiener_lpdf") {
+    if (arity < 6 || arity > 9) return std::nullopt;
+    return WienerForm{WienerKind::Lpdf, arity <= 7 ? 6 : 8,
+                      arity == 7 || arity == 9, 1e-4};
+  }
+  const bool lcdf = name == "wiener_lcdf_unnorm";
+  if (!lcdf && name != "wiener_lccdf_unnorm") return std::nullopt;
+  if (arity < 5 || arity > 9 || arity == 7) return std::nullopt;
+  const int reals = arity <= 6 ? 5 : 8;
+  return WienerForm{lcdf ? WienerKind::Lcdf : WienerKind::Lccdf, reals,
+                    arity == 6 || arity == 9, reals == 5 ? 1e-4 : 1e-8};
+}
+
 const FunctionSpec* function_spec(std::string_view name, size_t arity,
                                   FunctionFamily family) {
   for (const FunctionSpec* spec : overloads(name))
