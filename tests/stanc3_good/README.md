@@ -23,7 +23,7 @@ NaN, and an infinity only with the same infinity.
 | file | what it holds |
 | --- | --- |
 | `data.json.gz` | the data for each model, keyed by its path under `good/`, with the source sha256 |
-| `references.json.gz` | CmdStan's answers per model and point, or how CmdStan failed, with toolchain provenance |
+| `references.json.xz` | CmdStan's answers per model and point, or how CmdStan failed, with toolchain provenance |
 | `ledger.json` | every model that is not fully verified, with its status and a short cause |
 | `overrides.json`, `overrides/` | hand-adapted sources or data, with a note saying why |
 
@@ -49,7 +49,7 @@ points. Candidates are stanc's draws, then the same draws with small repairs
 square matrices made the identity, vectors made a simplex or ascending).
 `accepted: false` means no candidate loaded; `note` then holds the most
 common `DATA_FAIL` message, or why the model never built, and `data` is the
-last rejected candidate, not usable data. An accepted entry that is not
+last rejected candidate; the suite runs it only to check that stanli rejects it too. An accepted entry that is not
 finite at every point says so in `note`. A model with no data has `origin: none_needed` and
 `data: {}`. Optional hand data lives in `hand_data.json` as
 `{"<path>": {"note": "...", "data": {...}}}` and always wins over
@@ -95,8 +95,22 @@ direction. Getting worse is a regression. Getting better means the ledger
 entry is stale: delete it, or run with `--update-ledger` and review the
 diff. Point-level entries name the points: `{"points": {"2": "mismatch"}}`.
 An entry whose cause starts with `UNTRIAGED` fails until someone names the
-cause. A mismatch with CmdStan is a bug report, not a ledger line; ledger
-it only with the cause found.
+cause.
+
+| status | meaning |
+| --- | --- |
+| `unsupported` | stanli refuses to compile the model; the cause is its message |
+| `rejected_both` | every point throws on both sides with matching messages |
+| `data_rejected` | CmdStan rejects every data candidate and stanli rejects the last one with a matching message |
+| `data_message_mismatch` | both reject the data with different messages |
+| `data_unavailable` | stanc could not generate data; not run |
+| `one_side_threw` | one side rejects the data or the compile, the other does not |
+| `points` | per point: `mismatch`, `one_side_threw`, `message_mismatch`, or `wa_unsupported` (stanli's write_array refuses a feature) |
+| `cmdstan_timeout`, `cmdstan_crashed` | CmdStan does not finish or dies; stanli is not run |
+| `timeout`, `crashed` | stanli does not finish or dies |
+
+A mismatch with CmdStan is a bug report, not a ledger line; ledger it only
+with the cause found.
 
 ## Recording
 
@@ -104,13 +118,21 @@ Recording needs the pinned CmdStan in `deps/cmdstan`. Nothing else in the
 suite runs CmdStan.
 
 ```
-python3 tools/check_stanc3_good.py --record --ref-objs DIR
+python3 tools/check_stanc3_good.py --record --ref-objs DIR --jobs 28
 ```
 
-`DIR` holds prebuilt CmdStan model objects as `<source sha256>/model.o`
-with a `FLAGS` file giving the compile and link flags (the layout
-`--record` itself writes into `build-stanc3-ref/objs` for any model
-missing there). References use plain `stanc`, CmdStan's default. A model
+Only models whose source or data changed are recorded, unless
+`tools/ref_driver.cpp` changed or `--all` is given.
+
+`DIR` holds prebuilt CmdStan model objects as `<source sha256>/model.o`,
+with `status` and an optional `opt` file per model, and a `FLAGS` file
+giving the compile and link flags. The largest models do not fit many
+parallel compiles in memory, so `--record` builds a missing model object
+only for an adapted override source, or for every model with
+`--build-objects` (and a small `--jobs`); it writes them in the same layout
+into `build-stanc3-ref/objs`. Without a `FLAGS` file the flags are
+`tools/cmdstan_ref.py`'s. References use plain `stanc`, CmdStan's
+default; each model's C++ optimization level is kept in its reference. A model
 CmdStan does not finish within `--ref-timeout` seconds is recorded as a
 timeout and not run through stanli. `--filter` records part of the corpus
 and keeps the other references.

@@ -110,6 +110,13 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(g.classify(ref, stanli(points))[1],
                          {"2": "message_mismatch"})
 
+    def test_all_nan_rows_agree(self):
+        ref = ref_ok(lp_grad=("nan", "nan"))
+        self.assertEqual(g.classify(ref, stanli(all_points("OK nan nan")))[0],
+                         "rejected_both")
+        self.assertEqual(g.classify(ref, stanli(all_points("OK -1 0.5")))[1],
+                         {str(k): "one_side_threw" for k in g.POINTS})
+
     def test_one_side_threw_either_way(self):
         ref = ref_ok()
         ref["points"]["1"] = {"threw": "boom"}

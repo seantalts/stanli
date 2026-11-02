@@ -6,7 +6,8 @@ build-rel/
 # Every out-of-source tree: build-lite, build-ship, whatever a
 # measurement needs next. Named entries above are kept for clarity.
 build-*/
-# tools/gen_stanc3_good_data.py's reference binaries.
+# CmdStan reference binaries of tools/gen_stanc3_good_data.py and
+# tools/check_stanc3_good.py --record.
 build-stanc3-ref/
 python/stanli/_bin/
 # The conformance reference client, version-pinned separately from whatever
@@ -66,8 +67,6 @@ tests/fixtures/*.hpp
 tests/fixtures/*.o
 conformance-cache/
 
-# tools/check_stanc3_good.py --record: CmdStan objects and binaries.
-build-stanc3-ref
 /tests/function_coverage/*.hpp
 /tests/function_coverage/container_flow/*.hpp
 tests/oncobayes2/*.hpp

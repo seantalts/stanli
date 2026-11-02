@@ -3,7 +3,7 @@
 
 Each model runs once through stanli_check at four points, and its log
 density, gradient and write_array row are compared with CmdStan's answers
-recorded in tests/stanc3_good/references.json.gz. A model that is not fully
+recorded in tests/stanc3_good/references.json.xz. A model that is not fully
 verified must have a matching entry in tests/stanc3_good/ledger.json, and an
 entry that no longer matches fails too, in either direction.
 
@@ -17,6 +17,7 @@ import concurrent.futures
 import gzip
 import hashlib
 import json
+import lzma
 import os
 import pathlib
 import re
@@ -33,7 +34,7 @@ from verify_refs import pair_dev  # noqa: E402
 SUITE = REPO / "tests" / "stanc3_good"
 CORPUS = REPO / "deps" / "stanc3-src" / "test" / "integration" / "good"
 DATA = SUITE / "data.json.gz"
-REFERENCES = SUITE / "references.json.gz"
+REFERENCES = SUITE / "references.json.xz"
 LEDGER = SUITE / "ledger.json"
 OVERRIDES = SUITE / "overrides.json"
 POINTS = (0, 1, 2, 3, 4)
@@ -49,6 +50,7 @@ MODEL_STATUSES = (
     "verified",
     "rejected_both",     # every point threw on both sides, messages agree
     "data_rejected",     # both reject the data, messages agree
+    "data_message_mismatch",  # both reject the data, messages differ
     "unsupported",       # stanli refuses to compile it; cause is its reason
     "stanc_rejected",    # stanc refuses the program
     "data_unavailable",  # no data: stanc could not generate any
@@ -61,14 +63,16 @@ MODEL_STATUSES = (
 POINT_VERDICTS = ("ok", "both_threw", "mismatch", "one_side_threw",
                   "message_mismatch", "wa_unsupported")
 _RANK = {"verified": 9, "rejected_both": 8, "data_rejected": 7,
+         "data_message_mismatch": 6,
          "points": 6, "unsupported": 5, "stanc_rejected": 5,
-         "data_unavailable": 5, "cmdstan_timeout": 5, "cmdstan_crashed": 5,
+         "data_unavailable": 5, "cmdstan_timeout": 5,
+         "cmdstan_crashed": 5,
          "one_side_threw": 2, "timeout": 1, "crashed": 0}
 
 # A Stan Math validation error. stanli reporting one of these at compile
 # time, on data CmdStan accepted, is a disagreement and not a missing feature.
 _UNSUPPORTED = re.compile(r"unsupported|not supported|requires the MIR "
-                          r"interpreter")
+                          r"interpreter|^mir: ")
 _DOMAIN_ERROR = re.compile(r", but must be|is not a valid|is not positive "
                            r"definite|is not symmetric|must match in size")
 
@@ -82,12 +86,18 @@ def source_digest(path):
 
 
 def load_gz(path):
-    return json.loads(gzip.decompress(pathlib.Path(path).read_bytes()))
+    """A .json.gz or .json.xz file."""
+    raw = pathlib.Path(path).read_bytes()
+    unpack = lzma.decompress if str(path).endswith(".xz") else gzip.decompress
+    return json.loads(unpack(raw))
 
 
-def write_gz(path, value):
-    text = json.dumps(value, indent=1, sort_keys=True, allow_nan=False) + "\n"
-    pathlib.Path(path).write_bytes(gzip.compress(text.encode(), 9, mtime=0))
+def write_xz(path, value):
+    """xz: the references are 3x smaller than with gzip."""
+    text = json.dumps(value, separators=(",", ":"), sort_keys=True,
+                      allow_nan=False) + "\n"
+    pathlib.Path(path).write_bytes(
+        lzma.compress(text.encode(), preset=9 | lzma.PRESET_EXTREME))
 
 
 def check_corpus(corpus=CORPUS):
@@ -116,8 +126,10 @@ def model_input(path, overrides, data, corpus=CORPUS):
               else corpus / path)
     if "data" in override:
         return source, json.loads((SUITE / override["data"]).read_text())
-    entry = data["models"].get(path)
-    return source, (entry or {}).get("data")
+    # An entry CmdStan never accepted keeps its last rejected candidate. It
+    # is still run: CmdStan's rejection is recorded and stanli has to reject
+    # it the same way.
+    return source, (data["models"].get(path) or {}).get("data")
 
 
 def data_bytes(obj):
@@ -239,6 +251,9 @@ def compare_values(want, got, field, labels=None):
 def point_verdict(want, got):
     """(verdict, details) for one point. want is the reference entry."""
     status = got["status"] if got else None
+    if "threw" not in want and not accepted(("OK", want["lp_grad"])):
+        # An all-NaN row is how log_prob refuses without throwing.
+        want = {"threw": ""}
     if "threw" in want:
         if status and (status[0] == "EVAL_FAIL" or not accepted(status)):
             stanli_msg = status[1] if status[0] == "EVAL_FAIL" else ""
@@ -314,6 +329,9 @@ def classify(ref, run):
         if outcome == "data_fail":
             if messages_agree(ref["message"], msg):
                 return "data_rejected", {}, [ref["message"]]
+            if not _UNSUPPORTED.search(msg):
+                return "data_message_mismatch", {}, [
+                    f"CmdStan: {ref['message']}", f"stanli: {msg}"]
             return "unsupported", {}, [msg]
         if _DOMAIN_ERROR.search(msg):
             return "one_side_threw", {}, [f"stanli rejects the data: {msg}"]
@@ -327,7 +345,10 @@ def classify(ref, run):
             "stanli accepted it"]
     verdicts, details = {}, []
     for k in POINTS:
-        verdict, why = point_verdict(ref["points"][str(k)],
+        want = ref["points"][str(k)]
+        if "values" in want.get("wa", {}) and "names" not in want["wa"]:
+            want = dict(want, wa=dict(want["wa"], names=ref["wa_names"]))
+        verdict, why = point_verdict(want,
                                      parsed["points"].get(k))
         verdicts[k] = verdict
         details += [f"point {k}: {w}" for w in why]
@@ -336,7 +357,8 @@ def classify(ref, run):
     if bad:
         return "points", bad, details
     if all(v == "both_threw" for v in verdicts.values()):
-        return "rejected_both", {}, [ref["points"]["0"]["threw"]]
+        return "rejected_both", {}, [ref["points"]["0"].get(
+            "threw", "log_prob returns NaN")]
     return "verified", {}, []
 
 
@@ -352,7 +374,7 @@ def ledger_verdict(status, points, entry):
         return None
     describe = (lambda w: "verified" if w is None
                 else f"points {w[1]}" if w[0] == "points" else w[0])
-    rank = (lambda w: _RANK["verified"] if w is None else _RANK[w[0]])
+    rank = (lambda w: _RANK["verified"] if w is None else _RANK.get(w[0], 5))
     if rank(got) > rank(want):
         kind = "improved; update the ledger entry"
     elif rank(got) < rank(want):
@@ -379,7 +401,7 @@ def replay_one(path, ctx):
         return path, None, {}, [], "data changed; re-record"
     started = time.monotonic()
     run = None
-    if ref["outcome"] not in ("no_data", "timeout", "crashed"):
+    if ref["outcome"] in ("ok", "data_fail", "stanc_fail"):
         timeout = (LEDGERED_TIMEOUT if entry and entry.get("status") in
                    ("timeout",) else ctx["timeout"])
         with tempfile.TemporaryDirectory(prefix="stanc3_good_") as work:
@@ -471,10 +493,19 @@ def update_ledger(ledger, results):
 
 def record(models, ctx, args):
     toolchain.require_pinned_toolchain(args.cmdstan, args.stanc)
-    flags = json.loads((args.ref_objs / "FLAGS").read_text())
-    compile_flags = flags["compile"]
-    link_tail = flags["link_tail"][:-2]  # drop the "-o ref" placeholder
+    flags_file = args.ref_objs / "FLAGS"
+    if flags_file.exists():
+        flags = json.loads(flags_file.read_text())
+        compile_flags = flags["compile"]
+        link_tail = flags["link_tail"][:-2]  # drop the "-o ref" placeholder
+    else:
+        import cmdstan_ref  # only --record touches CmdStan
+        whole = cmdstan_ref.compile_cmd(args.cmdstan, "M", "D", "E")
+        compile_flags = whole[:whole.index("-include")]
+        link_tail = whole[whole.index("D") + 1:whole.index("-o")]
+        flags = {}
     stanc_args = flags.get("stanc_args", [])
+    default_opt = next((f for f in compile_flags if f.startswith("-O")), "")
     work = args.work.resolve()
     work.mkdir(parents=True, exist_ok=True)
     driver = REPO / "tools" / "ref_driver.cpp"
@@ -490,7 +521,8 @@ def record(models, ctx, args):
             status = root / sha / "status"
             if status.exists():
                 return root / sha, status.read_text().strip()
-        if "source" not in ctx["overrides"].get(path, {}):
+        if not args.build_objects and (
+                "source" not in ctx["overrides"].get(path, {})):
             # The large function-signature models need several GB each to
             # compile; building them here beside the prebuild swaps the
             # machine. Only adapted sources, which are small, build here.
@@ -515,15 +547,16 @@ def record(models, ctx, args):
         source, data = model_input(path, ctx["overrides"], ctx["data"])
         entry = {"source_sha256": source_digest(source)}
         if data is None:
-            note = ctx["data"]["models"].get(path, {}).get("note", "")
-            return path, dict(entry, outcome="no_data",
-                              message=note or "no data")
+            given = ctx["data"]["models"].get(path, {})
+            return path, dict(entry, outcome="no_data", message=strip_paths(
+                first_line(given.get("note", "")) or "no data"))
         blob = data_bytes(data)
         entry["data_sha256"] = sha256(blob)
         obj, status = model_object(path, source)
+        # Objects without an opt file were built with FLAGS as given.
         opt_file = obj / "opt"
-        if opt_file.exists():
-            entry["cmdstan_opt"] = opt_file.read_text().strip()
+        entry["cmdstan_opt"] = (opt_file.read_text().strip()
+                                if opt_file.exists() else default_opt)
         if status.startswith("stanc_fail"):
             return path, dict(entry, outcome="stanc_fail",
                               message=strip_paths(first_line(
@@ -567,6 +600,12 @@ def record(models, ctx, args):
             pt["wa"] = ({"threw": strip_paths(wa[1])} if wa[0] == "threw"
                         else {"names": wa[1], "values": wa[2]})
             points[str(k)] = pt
+        named = [p["wa"] for p in points.values() if "names" in p.get("wa", {})]
+        if named and all(w["names"] == named[0]["names"] for w in named):
+            # One copy of the column names; they are most of the file.
+            entry["wa_names"] = named[0]["names"]
+            for w in named:
+                del w["names"]
         return path, dict(entry, outcome="ok", points=points)
 
     done = 0
@@ -604,14 +643,15 @@ def record(models, ctx, args):
         "stanc_args": stanc_args,
         "stanc3_src": toolchain.pins()["STANC3_SRC_SHA"],
         "compiler": run_process(["clang++", "--version"], 30)[1].splitlines()[0],
-        "flags": [f for f in compile_flags[1:] if not f.startswith("-I")],
+        "flags": [f for f in compile_flags[1:]
+                  if not f.startswith(("-I", "-O"))],
         "ref_driver_sha256": source_digest(driver),
         "platform": f"{os.uname().sysname} {os.uname().machine}",
     }
     for key, sub in (("cmdstan", ""), ("stan", "stan"),
                      ("math", "stan/lib/stan_math")):
         provenance[key + "_commit"] = toolchain.git_head(args.cmdstan / sub)
-    write_gz(REFERENCES, {"schema": SCHEMA, "toolchain": provenance,
+    write_xz(REFERENCES, {"schema": SCHEMA, "toolchain": provenance,
                           "models": dict(sorted(models_out.items()))})
     ctx["refs"] = load_gz(REFERENCES)
     return errors
@@ -671,6 +711,10 @@ def main(argv=None):
     ap.add_argument("--work", type=pathlib.Path,
                     default=REPO / "build-stanc3-ref",
                     help="recorder cache: objects it builds, driver, binaries")
+    ap.add_argument("--build-objects", action="store_true",
+                    help="with --record, compile missing CmdStan model "
+                         "objects (several GB each for the largest models; "
+                         "use a small --jobs)")
     ap.add_argument("--all", action="store_true",
                     help="with --record, re-record models whose inputs and "
                          "driver are unchanged too")
