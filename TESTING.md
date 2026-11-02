@@ -363,6 +363,16 @@ determinism, error and warning parity, and the stock `stanc()` API. The
 Python, R and webR tests exercise filesystem includes through every compiler
 route.
 
+stanli should report a broken model the way stanc does.
+[`tools/check_stanc3_bad.py`](tools/check_stanc3_bad.py) (`test_stanc3_bad`)
+runs all 1,191 models in stanc3's `test/integration/bad` at the pinned
+checkout through `stanli_check` and compares the error text with stanc3's own
+`stanc.expected` files. 1,186 match exactly. The other five are listed in
+[`tests/stanc3_bad_ledger.json`](tests/stanc3_bad_ledger.json) with their
+cause: stanli reads `.stanfunctions` files as full programs, and stanc3's
+runner splits one file name that contains a space. A ledgered model that
+starts matching fails the test, so the ledger can only shrink.
+
 ## Testing Stan language coverage
 
 [`harnesses/stan_conformance.py`](harnesses/stan_conformance.py) reads every

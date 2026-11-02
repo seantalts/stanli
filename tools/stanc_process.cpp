@@ -4,10 +4,12 @@
 #include <cerrno>
 #include <climits>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -28,6 +30,12 @@
 
 namespace stanli::tooling {
 namespace {
+
+struct ProcessResult {
+  std::string out;
+  std::string err;
+  int status = 0;
+};
 
 #ifdef _WIN32
 
@@ -104,9 +112,32 @@ std::wstring quote_windows_arg(const std::wstring& arg) {
   return quoted;
 }
 
-std::string run_process_windows(const std::string& exe,
-                                const std::vector<std::string>& args,
-                                bool inherit_stderr) {
+std::string read_pipe_windows(HANDLE pipe) {
+  std::string out;
+  std::array<char, 1 << 16> buffer;
+  for (;;) {
+    DWORD read_size = 0;
+    if (!ReadFile(pipe, buffer.data(), static_cast<DWORD>(buffer.size()),
+                  &read_size, nullptr)) {
+      if (GetLastError() == ERROR_BROKEN_PIPE) break;
+      throw windows_error("ReadFile");
+    }
+    if (read_size == 0) break;
+    out.append(buffer.data(), read_size);
+  }
+  // _popen(..., "r") used to give callers a text-mode stream. Preserve that
+  // behavior now that ReadFile sees the child's raw CRLF bytes.
+  std::string normalized;
+  normalized.reserve(out.size());
+  for (size_t i = 0; i < out.size(); ++i) {
+    if (out[i] == '\r' && i + 1 < out.size() && out[i + 1] == '\n') continue;
+    normalized.push_back(out[i]);
+  }
+  return normalized;
+}
+
+ProcessResult run_process_windows(const std::string& exe,
+                                  const std::vector<std::string>& args) {
   SECURITY_ATTRIBUTES inheritable{};
   inheritable.nLength = sizeof(inheritable);
   inheritable.bInheritHandle = TRUE;
@@ -118,6 +149,14 @@ std::string run_process_windows(const std::string& exe,
   Handle read_pipe(raw_read);
   Handle write_pipe(raw_write);
   if (!SetHandleInformation(read_pipe.get(), HANDLE_FLAG_INHERIT, 0))
+    throw windows_error("SetHandleInformation");
+  HANDLE raw_err_read = INVALID_HANDLE_VALUE;
+  HANDLE raw_err_write = INVALID_HANDLE_VALUE;
+  if (!CreatePipe(&raw_err_read, &raw_err_write, &inheritable, 0))
+    throw windows_error("CreatePipe");
+  Handle err_read_pipe(raw_err_read);
+  Handle err_write_pipe(raw_err_write);
+  if (!SetHandleInformation(err_read_pipe.get(), HANDLE_FLAG_INHERIT, 0))
     throw windows_error("SetHandleInformation");
 
   Handle null_device(CreateFileW(
@@ -138,8 +177,7 @@ std::string run_process_windows(const std::string& exe,
   startup.dwFlags = STARTF_USESTDHANDLES;
   startup.hStdInput = null_device.get();
   startup.hStdOutput = write_pipe.get();
-  startup.hStdError =
-      inherit_stderr ? GetStdHandle(STD_ERROR_HANDLE) : null_device.get();
+  startup.hStdError = err_write_pipe.get();
   PROCESS_INFORMATION process{};
   if (!CreateProcessW(executable.c_str(), command_line.data(), nullptr, nullptr,
                       TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup,
@@ -148,38 +186,52 @@ std::string run_process_windows(const std::string& exe,
   Handle process_handle(process.hProcess);
   Handle thread_handle(process.hThread);
   write_pipe.reset();
+  err_write_pipe.reset();
   null_device.reset();
 
-  std::string out;
-  std::array<char, 1 << 16> buffer;
-  for (;;) {
-    DWORD read_size = 0;
-    if (!ReadFile(read_pipe.get(), buffer.data(),
-                  static_cast<DWORD>(buffer.size()), &read_size, nullptr)) {
-      if (GetLastError() == ERROR_BROKEN_PIPE) break;
-      throw windows_error("ReadFile");
+  ProcessResult result;
+  std::string error_text;
+  std::thread error_reader([&] {
+    try {
+      error_text = read_pipe_windows(err_read_pipe.get());
+    } catch (const std::exception&) {
     }
-    if (read_size == 0) break;
-    out.append(buffer.data(), read_size);
+  });
+  try {
+    result.out = read_pipe_windows(read_pipe.get());
+  } catch (...) {
+    error_reader.join();
+    throw;
   }
+  error_reader.join();
+  result.err = std::move(error_text);
   if (WaitForSingleObject(process_handle.get(), INFINITE) != WAIT_OBJECT_0)
     throw windows_error("WaitForSingleObject");
-  // _popen(..., "r") used to give callers a text-mode stream. Preserve that
-  // behavior now that ReadFile sees the child's raw CRLF bytes.
-  std::string normalized;
-  normalized.reserve(out.size());
-  for (size_t i = 0; i < out.size(); ++i) {
-    if (out[i] == '\r' && i + 1 < out.size() && out[i + 1] == '\n') continue;
-    normalized.push_back(out[i]);
-  }
-  return normalized;
+  DWORD exit_code = 0;
+  if (!GetExitCodeProcess(process_handle.get(), &exit_code))
+    throw windows_error("GetExitCodeProcess");
+  result.status = static_cast<int>(exit_code);
+  return result;
 }
 
 #else
 
-std::string run_process_posix(const std::string& exe,
-                              const std::vector<std::string>& args,
-                              bool inherit_stderr) {
+// Reads until EOF; on error returns false and leaves errno set.
+bool read_fd(int fd, std::string& out) {
+  std::array<char, 1 << 16> buffer;
+  for (;;) {
+    const ssize_t read_size = read(fd, buffer.data(), buffer.size());
+    if (read_size > 0) {
+      out.append(buffer.data(), static_cast<size_t>(read_size));
+      continue;
+    }
+    if (read_size == -1 && errno == EINTR) continue;
+    return read_size == 0;
+  }
+}
+
+ProcessResult run_process_posix(const std::string& exe,
+                                const std::vector<std::string>& args) {
   std::vector<char*> argv;
   argv.push_back(const_cast<char*>(exe.c_str()));
   for (const auto& arg : args) argv.push_back(const_cast<char*>(arg.c_str()));
@@ -189,12 +241,22 @@ std::string run_process_posix(const std::string& exe,
   if (pipe(descriptors) != 0)
     throw std::runtime_error(std::string("pipe failed: ") +
                              std::strerror(errno));
+  int error_descriptors[2];
+  if (pipe(error_descriptors) != 0) {
+    const int error = errno;
+    close(descriptors[0]);
+    close(descriptors[1]);
+    throw std::runtime_error(std::string("pipe failed: ") +
+                             std::strerror(error));
+  }
 
   const pid_t child = fork();
   if (child == -1) {
     const int error = errno;
     close(descriptors[0]);
     close(descriptors[1]);
+    close(error_descriptors[0]);
+    close(error_descriptors[1]);
     throw std::runtime_error(std::string("fork failed: ") +
                              std::strerror(error));
   }
@@ -202,55 +264,58 @@ std::string run_process_posix(const std::string& exe,
     close(descriptors[0]);
     if (dup2(descriptors[1], STDOUT_FILENO) == -1) _exit(127);
     close(descriptors[1]);
-    if (!inherit_stderr) {
-      const int null_error = open("/dev/null", O_WRONLY);
-      if (null_error == -1 || dup2(null_error, STDERR_FILENO) == -1) _exit(127);
-      close(null_error);
-    }
+    close(error_descriptors[0]);
+    if (dup2(error_descriptors[1], STDERR_FILENO) == -1) _exit(127);
+    close(error_descriptors[1]);
     execv(exe.c_str(), argv.data());
     _exit(127);
   }
 
   close(descriptors[1]);
-  std::string out;
-  std::array<char, 1 << 16> buffer;
-  for (;;) {
-    const ssize_t read_size =
-        read(descriptors[0], buffer.data(), buffer.size());
-    if (read_size > 0) {
-      out.append(buffer.data(), static_cast<size_t>(read_size));
-      continue;
-    }
-    if (read_size == -1 && errno == EINTR) continue;
-    if (read_size == -1) {
-      const int error = errno;
-      close(descriptors[0]);
-      while (waitpid(child, nullptr, 0) == -1 && errno == EINTR) {
-      }
-      throw std::runtime_error(std::string("read failed: ") +
-                               std::strerror(error));
-    }
-    break;
-  }
+  close(error_descriptors[1]);
+  // The compiler can fill either pipe, so stderr drains on its own thread.
+  ProcessResult result;
+  std::string error_text;
+  std::thread error_reader([&] { read_fd(error_descriptors[0], error_text); });
+  const bool read_ok = read_fd(descriptors[0], result.out);
+  const int read_error = errno;
   close(descriptors[0]);
-  while (waitpid(child, nullptr, 0) == -1) {
+  error_reader.join();
+  close(error_descriptors[0]);
+  result.err = std::move(error_text);
+  int status = 0;
+  while (waitpid(child, &status, 0) == -1) {
     if (errno != EINTR)
       throw std::runtime_error(std::string("waitpid failed: ") +
                                std::strerror(errno));
   }
-  return out;
+  if (!read_ok)
+    throw std::runtime_error(std::string("read failed: ") +
+                             std::strerror(read_error));
+  result.status = WIFEXITED(status) ? WEXITSTATUS(status) : 128;
+  return result;
 }
 
 #endif
 
-std::string run_process(const std::string& exe,
-                        const std::vector<std::string>& args,
-                        bool inherit_stderr) {
+// A failing compiler's stderr is its error message; a succeeding one's is
+// warnings, which pass through to ours.
+std::string run_compiler(const std::string& exe,
+                         const std::vector<std::string>& args) {
 #ifdef _WIN32
-  return run_process_windows(exe, args, inherit_stderr);
+  ProcessResult result = run_process_windows(exe, args);
 #else
-  return run_process_posix(exe, args, inherit_stderr);
+  ProcessResult result = run_process_posix(exe, args);
 #endif
+  std::string message = std::move(result.err);
+  while (!message.empty() && (message.back() == '\n' || message.back() == '\r'))
+    message.pop_back();
+  if (result.status != 0)
+    throw CompileError(message.empty() ? exe + " failed with exit status " +
+                                             std::to_string(result.status)
+                                       : message);
+  if (!message.empty()) std::fprintf(stderr, "%s\n", message.c_str());
+  return result.out;
 }
 
 bool is_executable_file(const std::string& path) {
@@ -269,15 +334,15 @@ bool is_executable_file(const std::string& path) {
 
 std::string run_stanc_process(const std::string& stanc,
                               const std::string& model) {
-  return run_process(stanc, {"--O1", "--debug-optimized-mir", model}, false);
+  return run_compiler(stanc, {"--O1", "--debug-optimized-mir", model});
 }
 
 std::string run_portable_compiler(const std::string& compiler,
                                   const std::string& model, bool fast_math) {
   std::vector<std::string> args = {"--model-only"};
   if (fast_math) args.push_back("--fast-math");
-  args.push_back(model);
-  return run_process(compiler, args, true);
+  args.insert(args.end(), {"--filename", model, model});
+  return run_compiler(compiler, args);
 }
 
 std::string executable_directory() {

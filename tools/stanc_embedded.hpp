@@ -37,7 +37,11 @@ inline std::string embedded_stanc(const std::string& model,
   if (res) stanli_stanc_free(res);
   if (!result.warnings.empty())
     std::fprintf(stderr, "%s\n", result.warnings.c_str());
-  if (!result.ok) throw std::runtime_error("stanc: " + result.body);
+  if (!result.ok) {
+    std::string message = result.body;
+    while (!message.empty() && message.back() == '\n') message.pop_back();
+    throw CompileError(message);
+  }
   return result.body;
 }
 

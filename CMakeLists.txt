@@ -928,6 +928,9 @@ endfunction()
 # stanc to find -- which is the whole point of an interpreter for a
 # language whose reference implementation compiles C++ per model.
 add_library(stanli_stanc_process STATIC tools/stanc_process.cpp)
+if(NOT EMSCRIPTEN)
+  target_link_libraries(stanli_stanc_process PRIVATE Threads::Threads)
+endif()
 add_executable(stanli_run tools/stanli_run.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(stanli_run PRIVATE stanli stanli_stanc_process)
@@ -1579,6 +1582,10 @@ if(Python3_Interpreter_FOUND)
              --reference tests/function_coverage/container_flow_references.json.gz)
   set_tests_properties(test_container_flow_reference PROPERTIES
                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_stanc3_bad
+           COMMAND ${Python3_EXECUTABLE} tools/check_stanc3_bad.py
+             --build ${CMAKE_CURRENT_BINARY_DIR}
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_wa_fallback_ledger
            COMMAND ${Python3_EXECUTABLE} tools/check_wa_fallbacks.py
              --build ${CMAKE_CURRENT_BINARY_DIR}

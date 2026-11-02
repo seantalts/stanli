@@ -162,11 +162,11 @@ int main(int argc, char** argv) {
   try {
     using Clock = std::chrono::steady_clock;
     const auto timing_start = want_timings ? Clock::now() : Clock::time_point{};
-    stanli::DataMap data = stanli::DataMap::from_json_file(datafile);
     const std::string mir =
         stanli::tooling::compile_source(stanc, compiler, model, fast_math);
     if (mir.empty())
-      throw std::runtime_error("the compiler produced no MIR (compile error?)");
+      throw std::runtime_error("the Stan compiler exited without output");
+    stanli::DataMap data = stanli::DataMap::from_json_file(datafile);
     stanli::CompileOptions compile_options;
     compile_options.reduce_sum_threads = threads_per_chain;
     compile_options.fast_math = fast_math;
@@ -445,6 +445,9 @@ int main(int argc, char** argv) {
           seconds(prepared - timing_start), seconds(sampled - prepared),
           seconds(written - sampled));
     }
+  } catch (const stanli::tooling::CompileError& e) {
+    std::fprintf(stderr, "%s\n", e.what());
+    return 1;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "stanli_run: %s\n", e.what());
     return 1;
