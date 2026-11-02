@@ -87,6 +87,8 @@ int transform_leaf_rank(mir::Transform::Kind kind) {
     case mir::Transform::Correlation:
     case mir::Transform::Covariance:
     case mir::Transform::CholeskyCov:
+    case mir::Transform::StochasticColumn:
+    case mir::Transform::StochasticRow:
       return 2;
     default:
       // Elementwise transforms take the whole value, and SumToZero's rank
@@ -130,6 +132,14 @@ int64_t free_leaf_size(mir::Transform::Kind kind,
         bad_shape("cholesky_factor_cov has fewer rows than columns");
       return cols * (cols + 1) / 2 + (rows - cols) * cols;
     }
+    case mir::Transform::StochasticColumn:
+      if (leaf_dims.size() != 2)
+        bad_shape("column_stochastic_matrix needs a matrix leaf");
+      return (leaf_dims[0] - 1) * leaf_dims[1];
+    case mir::Transform::StochasticRow:
+      if (leaf_dims.size() != 2)
+        bad_shape("row_stochastic_matrix needs a matrix leaf");
+      return leaf_dims[0] * (leaf_dims[1] - 1);
     case mir::Transform::Unsupported:
     default:
       bad_shape("no inverse for this parameter transform");
@@ -230,6 +240,14 @@ void unconstrain_leaf(mir::Transform::Kind kind,
       return;
     case mir::Transform::CholeskyCov:
       write(stan::math::cholesky_factor_free(
+          MapMat(constrained, leaf_dims[0], leaf_dims[1])));
+      return;
+    case mir::Transform::StochasticColumn:
+      write(stan::math::stochastic_column_free(
+          MapMat(constrained, leaf_dims[0], leaf_dims[1])));
+      return;
+    case mir::Transform::StochasticRow:
+      write(stan::math::stochastic_row_free(
           MapMat(constrained, leaf_dims[0], leaf_dims[1])));
       return;
     default:

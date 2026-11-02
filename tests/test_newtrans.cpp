@@ -18,6 +18,8 @@
 //      unit diagonal, a Cholesky factor has positive diagonal.
 #include <stanli/compile.hpp>
 
+#include <stan/math.hpp>
+
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -263,6 +265,57 @@ int main() {
                                             std::max(1.0, std::fabs(g[i])));
       }
       expect("stz matrix gradient vs finite differences", worst_stz < 1e-5);
+    }
+  }
+
+  // Stochastic matrices have (R-1)*C and R*(C-1) free values. The value and
+  // the log-Jacobian are compared with stan-math's own constrain functions,
+  // and the gradient with central differences.
+  {
+    DataMap none;
+    CompiledModel sm =
+        compile_model(slurp("tests/fixtures/stochastic.tmir.sexp"), none);
+    Executor sx(std::move(sm.graph));
+    sm.bind(sx);
+    expect("stochastic parameters have 9 + 9 + 2 * 4 free, got " +
+               std::to_string(sx.n_params()),
+           sx.n_params() == 26);
+    if (sx.n_params() == 26) {
+      std::vector<double> q(26);
+      for (int64_t i = 0; i < 26; ++i)
+        q[(size_t)i] = 0.2 + 0.11 * std::sin(1.3 * (double)i);
+      for (int64_t i = 0; i < 26; ++i) sx.params_data()[i] = q[(size_t)i];
+      std::vector<double> g(26);
+      const double lp = sx.gradient(g.data());
+
+      using Mat = Eigen::MatrixXd;
+      const auto block = [&](int64_t at, int rows, int cols) {
+        return Mat(Eigen::Map<const Mat>(q.data() + at, rows, cols));
+      };
+      double want = 0;
+      const Mat c =
+          stan::math::stochastic_column_constrain(block(0, 3, 3), want);
+      const Mat r = stan::math::stochastic_row_constrain(block(9, 3, 3), want);
+      const Mat a1 =
+          stan::math::stochastic_row_constrain(block(18, 2, 2), want);
+      const Mat a2 =
+          stan::math::stochastic_row_constrain(block(22, 2, 2), want);
+      want += 2 * c(0, 0) + 3 * c(1, 2) + 4 * r(0, 1) + 5 * r(2, 3);
+      want += 6 * a1(0, 1) + 7 * a2(1, 2);
+      expect_near("stochastic lp", lp, want,
+                  1e-12 * std::max(1.0, std::fabs(want)));
+
+      double worst_st = 0;
+      for (int64_t i = 0; i < 26; ++i) {
+        sx.params_data()[i] = q[(size_t)i] + 1e-6;
+        const double up = sx.forward();
+        sx.params_data()[i] = q[(size_t)i] - 1e-6;
+        const double dn = sx.forward();
+        sx.params_data()[i] = q[(size_t)i];
+        worst_st = std::max(worst_st, std::fabs((up - dn) / 2e-6 - g[i]) /
+                                          std::max(1.0, std::fabs(g[i])));
+      }
+      expect("stochastic gradient vs finite differences", worst_st < 1e-5);
     }
   }
 

@@ -1606,10 +1606,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
               (spec->leaf == StructuredLeaf::Matrix &&
                expr_leaf != mir::UnsizedLeaf::Matrix))
             fail("structured FnCheck type does not match its value", s.raw);
-          const bool matrix_only = spec->kind == mir::Transform::CholeskyCorr ||
-                                   spec->kind == mir::Transform::Correlation ||
-                                   spec->kind == mir::Transform::Covariance ||
-                                   spec->kind == mir::Transform::CholeskyCov;
+          const bool matrix_only = mir::is_matrix_only_check(spec->kind);
           const bool vector_only =
               spec->kind != mir::Transform::SumToZero && !matrix_only;
           if ((matrix_only && spec->leaf != StructuredLeaf::Matrix) ||
