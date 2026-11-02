@@ -75,6 +75,7 @@ test_that("native extraction and moment summaries agree with RStan", {
 
 test_that("native fit methods never load RStan or require a model runtime", {
   skip_if_not_installed("callr")
+  skip_if_no_subprocess()
   skip_if_not_installed("posterior")
   result <- callr::r(function(raw) {
     stopifnot(!"rstan" %in% loadedNamespaces())

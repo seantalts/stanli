@@ -1,6 +1,7 @@
 test_that("optional S4 methods register with either namespace load order", {
   skip_if_not_installed("rstan")
   skip_if_not_installed("callr")
+  skip_if_no_subprocess()
   for (first in c(TRUE, FALSE)) {
     result <- callr::r(function(first) {
       if (first) loadNamespace("rstan")
@@ -24,6 +25,7 @@ test_that("optional S4 methods register with either namespace load order", {
 test_that("a conflicting stanfit class does not prevent native APIs from loading", {
   skip_if_not_installed("rstan")
   skip_if_not_installed("callr")
+  skip_if_no_subprocess()
   result <- callr::r(function() {
     # Reproduce a package defining its own placeholder before RStan is loaded.
     registry <- new.env(parent=globalenv())

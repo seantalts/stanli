@@ -14,12 +14,18 @@ test_that("fast_math is off by default and opt-in per model", {
   expect_true(fast$fast_math)
   expect_equal(.Call("stanli_r_n_unconstrained", fast$ptr), 3L)
 
-  rebuilt <- stanli:::with_run_seed(fast, seed = 7, threads_per_chain = 2)
-  expect_true(rebuilt$fast_math)
-
   for (bad in list(1, "yes", NA, c(TRUE, FALSE), NULL))
     expect_error(stanli_model(code = fast_math_code, data = fast_math_data,
                               fast_math = bad), "fast_math")
+})
+
+test_that("fast_math survives a rebuild for a new thread count", {
+  skip_without_runtime()
+  skip_without_threads()
+  fast <- stanli_model(code = fast_math_code, data = fast_math_data,
+                       fast_math = TRUE)
+  rebuilt <- stanli:::with_run_seed(fast, seed = 7, threads_per_chain = 2)
+  expect_true(rebuilt$fast_math)
 })
 
 test_that("a fast model samples", {

@@ -46,6 +46,7 @@ test_that("saved fits retain the workflow in a fresh R session", {
   skip_if_not_installed("loo")
   skip_if_not_installed("tidybayes")
   skip_if_not_installed("callr")
+  skip_if_no_subprocess()
   fit <- sample_model(log_lik_model(), chains = 4, warmup = 500, samples = 1000,
                       refresh = 0)
   saved <- fit
