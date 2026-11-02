@@ -1129,6 +1129,10 @@ if(NOT EMSCRIPTEN)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_points_flag.py
             $<TARGET_FILE:stanli_check>
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_reserved_word_names
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_reserved_word_names.py
+            $<TARGET_FILE:stanli_check>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME vector_rng_reference
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
             $<TARGET_FILE:stanli_check> gq_vector_rng_complete
