@@ -1571,6 +1571,10 @@ if(Python3_Interpreter_FOUND)
              --reference tests/function_coverage/container_flow_references.json.gz)
   set_tests_properties(test_container_flow_reference PROPERTIES
                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_stanc3_bad
+           COMMAND ${Python3_EXECUTABLE} tools/check_stanc3_bad.py
+             --build ${CMAKE_CURRENT_BINARY_DIR}
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_wa_fallback_ledger
            COMMAND ${Python3_EXECUTABLE} tools/check_wa_fallbacks.py
              --build ${CMAKE_CURRENT_BINARY_DIR}
