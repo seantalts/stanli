@@ -1567,7 +1567,30 @@ double mst_eval(KernelCtx& ctx) {
     });
   };
   var out = with_mvt_argument(ys, y_encoded, dispatch_mu);
-  return finish_tail_density<Grad>(ctx, out, ys, nu, mus, S);
+  const double value = finish_tail_density<Grad>(ctx, out, ys, nu, mus, S);
+  // Every argument is bound as var, so Stan Math kept the terms it drops
+  // under propto when nu or Sigma is data (variant bits 1 and 3). Take
+  // them back out; with every argument data it keeps nothing.
+  const unsigned active = ctx.variant & 0xfu;
+  if (!propto) return value;
+  if (active == 0) return 0.0;
+  const double n = static_cast<double>(std::max(ys.size(), mus.size()));
+  const double nu_val = nu.val();
+  double dropped = 0.0;
+  if (!(active & 0x2u))
+    dropped +=
+        n * (stan::math::lgamma(0.5 * (nu_val + K)) -
+             stan::math::lgamma(0.5 * nu_val) - 0.5 * K * std::log(nu_val));
+  if (!(active & 0x8u)) {
+    const Eigen::MatrixXd s = stan::math::value_of(S);
+    if constexpr (Kind == kMst) {
+      auto ldlt = stan::math::make_ldlt_factor(s);
+      dropped -= n * 0.5 * stan::math::log_determinant_ldlt(ldlt);
+    } else {
+      dropped -= n * s.diagonal().array().log().sum();
+    }
+  }
+  return value - dropped;
 }
 
 // ---- multinomial family: (array[] int ns, vector theta) -----------------

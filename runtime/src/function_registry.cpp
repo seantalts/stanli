@@ -837,9 +837,9 @@ const std::vector<FunctionSpec>& function_specs() {
             {OP_MULTI_GP_CHOL_LPDF, 3, 0, false,
              DensityShape::FirstMatrixDimensions, 0x7});
     density("multi_student_t_lpdf",
-            vectorized_mvt_spec(OP_MULTI_STUDENT_T_LPDF, 4, 0x5, 0xf));
+            vectorized_mvt_spec(OP_MULTI_STUDENT_T_LPDF, 4, 0x5));
     density("multi_student_t_cholesky_lpdf",
-            vectorized_mvt_spec(OP_MULTI_STUDENT_T_CHOL_LPDF, 4, 0x5, 0xf));
+            vectorized_mvt_spec(OP_MULTI_STUDENT_T_CHOL_LPDF, 4, 0x5));
     density("multinomial_lpmf",
             {OP_MULTINOMIAL_LPMF, 2, 1, false, DensityShape::Plain, 0x1});
     density("multinomial_logit_lpmf",

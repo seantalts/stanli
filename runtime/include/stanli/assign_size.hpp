@@ -29,9 +29,9 @@ inline std::string assign_size_mismatch(const std::string& name,
     return "";
   const auto message = [&](const std::string& what, int64_t want,
                            const std::string& rhs, int64_t got) {
-    return what + ": assigning variable " + name + " (" +
-           std::to_string(want) + ") and right hand side" + rhs + " (" +
-           std::to_string(got) + ") must match in size";
+    return what + ": assigning variable " + name + " (" + std::to_string(want) +
+           ") and right hand side" + rhs + " (" + std::to_string(got) +
+           ") must match in size";
   };
   for (size_t d = 0; d < levels; ++d) {
     if (dst[d] == 0) return "";
