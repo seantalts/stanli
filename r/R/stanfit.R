@@ -148,6 +148,15 @@ stanfit_empty <- function(model) {
                .MISC = stanfit_misc(model, model$n_unconstrained, model$columns))
 }
 
+stanfit_empty_unbuilt <- function(object) {
+  name <- object@model_name
+  methods::new("stanli_stanfit", model_name = name, model_pars = character(0),
+               par_dims = list(), sim = list(), stan_args = list(),
+               stanmodel = stanfit_stanmodel(name, object@model_code), mode = 2L,
+               date = date(), inits = list(),
+               .MISC = stanfit_misc(NULL, 0L, character(0)))
+}
+
 #' Convert draws to an RStan fit without compilation
 #'
 #' Build a `stanli_stanfit`, an S4 subclass of `rstan::stanfit`, directly from

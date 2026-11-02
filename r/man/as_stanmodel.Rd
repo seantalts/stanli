@@ -34,7 +34,11 @@ The code is checked for syntax and type errors here. The model is
   "Fixed_param"` work as in rstan, and `chain_id`, `init_r`, `refresh` and
   `save_warmup` are accepted through `...`. `control` takes `adapt_delta`,
   `max_treedepth`, `stepsize`, `metric` and `adapt_engaged`; any other entry
-  is an error naming it. `algorithm = "HMC"`, `sample_file` and
+  prints an error naming it, then `sampling()` messages "error in specifying
+  arguments; sampling not done" and returns an empty fit, as rstan does. A
+  model that cannot be built from the data, such as one whose transformed data
+  rejects, is reported the same way with "failed to create the sampler;
+  sampling not done". `algorithm = "HMC"`, `sample_file` and
   `diagnostic_file` are errors. `init` may be `"random"`, a radius, `"0"`, a
   list for all chains, a list of lists with one per chain, or a function
   called as `f(chain_id = k)` when it has that argument and `f()` otherwise.

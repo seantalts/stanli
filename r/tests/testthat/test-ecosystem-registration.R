@@ -1,5 +1,6 @@
 test_that("optional generics dispatch with either namespace load order", {
   skip_if_not_installed("callr")
+  skip_if_no_subprocess()
   for (package in c("bayesplot", "loo", "tidybayes")) {
     skip_if_not_installed(package)
     for (first in c(TRUE, FALSE)) {

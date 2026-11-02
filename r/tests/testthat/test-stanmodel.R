@@ -12,6 +12,17 @@ stanmodel_fixture <- function() {
   as_stanmodel(normal_code, model_name = "normal_fixture")
 }
 
+stderr_log <- function(expr) {
+  expr <- substitute(expr)
+  env <- parent.frame()
+  capture.output(
+    withCallingHandlers(eval(expr, env), message = function(m) {
+      cat("MESSAGE:", conditionMessage(m), file = stderr())
+      invokeRestart("muffleMessage")
+    }),
+    type = "message")
+}
+
 draws_of <- function(fit, ...) rstan::extract(fit, permuted = FALSE, ...)
 
 test_that("as_stanmodel accepts code, a file, and an rstan stanmodel", {
@@ -144,10 +155,36 @@ test_that("control maps to stanli arguments and rejects the rest by name", {
   expect_equal(unit@stan_args[[1L]]$control$stepsize, 0.3)
   expect_true(all(abs(rstan::get_sampler_params(unit)[[1L]][, "stepsize__"] - 0.3) < 1e-12))
 
-  expect_error(run(control = list(adapt_gamma = 0.1)), "adapt_gamma")
-  expect_error(run(control = list(adapt_delta = 0.9, int_time = 1, epsilon = 0.1)),
+  soft <- function(...) {
+    shown <- stderr_log(fit <- run(...))
+    list(shown = paste(shown, collapse = "\n"), fit = fit)
+  }
+  adapt_gamma <- soft(control = list(adapt_gamma = 0.1))
+  expect_match(adapt_gamma$shown, "adapt_gamma")
+  expect_match(adapt_gamma$shown, "error in specifying arguments; sampling not done",
+               fixed = TRUE)
+  expect_match(soft(control = list(adapt_delta = 0.9, int_time = 1, epsilon = 0.1))$shown,
                "int_time, epsilon")
-  expect_error(run(control = list(metric = "bogus")), "metric")
+  expect_match(soft(control = list(metric = "bogus"))$shown, "metric")
+})
+
+test_that("a misspelled control entry prints the error and returns an empty fit", {
+  m <- stanmodel_fixture()
+  shown <- stderr_log(
+    result <- withVisible(rstan::sampling(
+      m, data = normal_data(), chains = 1, iter = 40, warmup = 20, seed = 1,
+      refresh = 0, control = list(aBapt_delta = 0.85))))
+  expect_false(result$visible)
+  expect_s4_class(result$value, "stanli_stanfit")
+  expect_identical(result$value@mode, 2L)
+  expect_identical(result$value@sim, list())
+  expect_identical(result$value@model_name, "normal_fixture")
+  expect_identical(result$value@model_pars, c("mu", "sigma", "ytilde", "lp__"))
+  expect_true(any(grepl("aBapt_delta", shown, fixed = TRUE)))
+  expect_true(any(grepl("MESSAGE: error in specifying arguments; sampling not done",
+                        shown, fixed = TRUE)))
+  expect_lt(grep("aBapt_delta", shown, fixed = TRUE)[1L],
+            grep("error in specifying arguments", shown, fixed = TRUE)[1L])
 })
 
 test_that("algorithm, files and unknown arguments are handled explicitly", {
@@ -198,6 +235,55 @@ test_that("chains = 0 gives rstan's empty fit", {
   expect_identical(fit@par_dims$mu, integer(0))
   expect_identical(fit@model_name, "normal_fixture")
   expect_identical(fit@stan_args, list())
+})
+
+reject_code <- "
+  transformed data { reject(\"boom marker\"); }
+  parameters { real mu; }
+  model { mu ~ normal(0, 1); }"
+
+test_that("a model that fails to construct prints the error and returns an empty fit", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  m <- as_stanmodel(reject_code, model_name = "rejecting")
+  shown <- stderr_log(
+    result <- withVisible(rstan::sampling(m, chains = 1, iter = 40, warmup = 20,
+                                          seed = 1, refresh = 0)))
+  expect_false(result$visible)
+  fit <- result$value
+  expect_s4_class(fit, "stanli_stanfit")
+  expect_identical(fit@mode, 2L)
+  expect_identical(fit@sim, list())
+  expect_identical(fit@model_name, "rejecting")
+  expect_identical(fit@stanmodel@model_code, reject_code)
+  expect_true(any(grepl("boom marker", shown, fixed = TRUE)))
+  expect_true(any(grepl("failed to create the sampler; sampling not done", shown,
+                        fixed = TRUE)))
+  expect_lt(grep("boom marker", shown, fixed = TRUE)[1L],
+            grep("failed to create the sampler", shown, fixed = TRUE)[1L])
+})
+
+test_that("the construction error survives suppressMessages with chains = 0", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  m <- as_stanmodel(reject_code)
+  shown <- capture.output(
+    fit <- suppressMessages(rstan::sampling(m, data = list(), chains = 0)),
+    type = "message")
+  expect_true(any(grepl("boom marker", shown, fixed = TRUE)))
+  expect_false(any(grepl("sampling not done", shown, fixed = TRUE)))
+  expect_identical(fit@mode, 2L)
+})
+
+test_that("a model that fails to construct leaves the caller's random stream alone", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  m <- as_stanmodel(reject_code)
+  set.seed(42)
+  before <- random_state()
+  capture.output(rstan::sampling(m, chains = 1, seed = 8, refresh = 0),
+                 type = "message")
+  expect_identical(random_state(), before)
 })
 
 test_that("the caller's random stream is untouched", {
@@ -353,6 +439,20 @@ test_that("starting values change where the chain begins", {
   }
   expect_equal(unname(first(list(mu = 4))), 4, tolerance = 1e-3)
   expect_equal(unname(first(list(mu = -3))), -3, tolerance = 1e-3)
+})
+
+test_that("vb on a model that fails to construct prints the error and returns an empty fit", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  m <- as_stanmodel(reject_code, model_name = "rejecting")
+  shown <- stderr_log(result <- withVisible(rstan::vb(m, seed = 1, refresh = 0)))
+  expect_false(result$visible)
+  expect_s4_class(result$value, "stanli_stanfit")
+  expect_identical(result$value@mode, 2L)
+  expect_identical(result$value@model_name, "rejecting")
+  expect_true(any(grepl("boom marker", shown, fixed = TRUE)))
+  expect_true(any(grepl("failed to create the sampler; sampling not done", shown,
+                        fixed = TRUE)))
 })
 
 test_that("vb runs ADVI and returns a stanfit", {
