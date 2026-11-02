@@ -150,9 +150,7 @@ def render():
     literals = set(re.findall(r'"([A-Za-z][A-Za-z0-9_]+)"', runtime))
     macros = set(re.findall(r"X\(OP_[A-Z_0-9]+,\s*([A-Za-z_0-9]+),", runtime))
     candidates = inventory_names & (literals | macros)
-    refusals = {
-        "gaussian_dlm_obs_lpdf": "Explicitly refused: seven inputs exceed the graph's six-input operation layout.",
-    }
+    refusals = {}
     focused = {
         name: "tests/fixtures/quadrature_region.stan exercises graph and runtime-control lowering"
         for name in (
@@ -176,6 +174,20 @@ def render():
             "tests/fixtures/sort_functions.stan; data and parameter inputs in "
             "transformed data, model, and generated quantities; fresh CmdStan "
             "2.40 references in sort_references.json.gz"
+        )
+    for name in ("chol2inv", "csr_to_dense_matrix", "determinant",
+                 "discrete_range_cdf", "discrete_range_lccdf",
+                 "discrete_range_lcdf", "distance", "gaussian_dlm_obs_lpdf",
+                 "generalized_inverse", "hmm_hidden_state_prob",
+                 "hmm_marginal", "hypergeometric_2F1", "hypergeometric_3F2",
+                 "hypergeometric_pFq", "inc_beta", "int_step", "inv_inc_beta",
+                 "log_determinant_spd", "matrix_exp_multiply", "matrix_power",
+                 "norm1", "norm2", "qr_Q", "qr_R", "qr_thin_Q", "qr_thin_R",
+                 "quantile", "scale_matrix_exp_multiply", "trace_dot",
+                 "trace_gen_quad_form", "trace_quad_form", "yule_simon_rng"):
+        focused[name] = (
+            "tests/fixtures/library_functions.stan; fresh CmdStan 2.40 "
+            "references in library_references.json.gz"
         )
     for name in ("to_vector_array", "to_row_vector_array"):
         focused[name] = "tests/fixtures/stan240_containers.stan; rectangular and zero-extent round trips"

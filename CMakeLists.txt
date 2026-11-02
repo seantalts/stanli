@@ -1569,6 +1569,15 @@ if(Python3_Interpreter_FOUND)
              --reference tests/function_coverage/sort_references.json.gz)
   set_tests_properties(test_sort_reference PROPERTIES
                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_library_reference
+           COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
+             --build ${CMAKE_CURRENT_BINARY_DIR}
+             --stanc ${STANLI_STANC_EXECUTABLE}
+             --fixtures tests/fixtures
+             --manifest tests/function_coverage/library_manifest.json
+             --reference tests/function_coverage/library_references.json.gz)
+  set_tests_properties(test_library_reference PROPERTIES
+                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_container_flow_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_container_flow_models.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

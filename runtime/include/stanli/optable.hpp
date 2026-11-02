@@ -227,7 +227,10 @@ namespace stanli {
   X(OP_LOG_MIX_VEC)                   \
   X(OP_HMM_MARGINAL)                  \
   X(OP_HMM_HIDDEN_STATE_PROB)         \
-  X(OP_GAUSSIAN_DLM_OBS_LPDF)
+  X(OP_GAUSSIAN_DLM_OBS_LPDF)         \
+  X(OP_QUANTILE)                      \
+  X(OP_CSR_MATRIX_TIMES_VECTOR)       \
+  X(OP_CSR_TO_DENSE_MATRIX)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry

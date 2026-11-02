@@ -156,6 +156,12 @@ constexpr BuiltinSpec matrix_power_builtin() {
   return spec;
 }
 
+constexpr BuiltinSpec quantile_builtin() {
+  BuiltinSpec spec = matrix_builtin(BuiltinMatrixOp::Quantile, OP_QUANTILE, 2);
+  spec.activity_mask = 0;
+  return spec;
+}
+
 // Names taking any numeric input register a Real and an Integer variant so
 // signature-driven tooling matches both; every lookup dispatches identically.
 constexpr BuiltinSpec shape_query_builtin(
@@ -589,6 +595,7 @@ const std::vector<FunctionSpec>& function_specs() {
     builtin("qr_thin_R",
             matrix_builtin(BuiltinMatrixOp::QrThinR, OP_QR_THIN_R, 1));
     builtin("matrix_power", matrix_power_builtin());
+    builtin("quantile", quantile_builtin());
     builtin("trace_quad_form", matrix_builtin(BuiltinMatrixOp::TraceQuadForm,
                                               OP_TRACE_QUAD_FORM, 2));
     builtin("trace_gen_quad_form",

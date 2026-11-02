@@ -1287,7 +1287,6 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
       fail(e.name + ": y and G must be matrices", e.raw);
     bool active = false;
     for (const Val& v : a) active = active || v.autodiff;
-    if (propto(e) && !active) return constant(0.0);
     Val packed = a[1];
     for (size_t k = 2; k < 7; ++k)
       packed = emit_value(OP_CONCAT2, {packed, a[k]},
@@ -1807,6 +1806,9 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
         break;
       case FunctionContainerKind::Vector:
         si = view_of("UVector");
+        break;
+      case FunctionContainerKind::Array:
+        si = array_view(map.result.dimensions, ViewKind::Flat, true);
         break;
       default:
         break;

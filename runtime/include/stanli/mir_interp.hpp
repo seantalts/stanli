@@ -3005,92 +3005,65 @@ class MirInterp {
       return r;
     }
     if (e.name == "gaussian_dlm_obs_lpdf" && e.args.size() == 7) {
-      using Mat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
-      using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
-      const auto matrix = [&](const mir::Expr& arg) {
-        const Value value = eval(arg);
-        if (value.dims.size() != 2)
-          fail(e.name + ": expected a matrix argument", e.raw);
-        Mat m(value.dims[0], value.dims[1]);
-        std::copy(value.r.begin(), value.r.end(), m.data());
-        return m;
-      };
-      const auto vector = [&](const mir::Expr& arg) {
-        const Value value = eval(arg);
-        Vec v(value.r.size());
-        std::copy(value.r.begin(), value.r.end(), v.data());
-        return v;
-      };
-      const Mat y = matrix(e.args[0]), F = matrix(e.args[1]),
-                G = matrix(e.args[2]), W = matrix(e.args[4]),
-                C0 = matrix(e.args[6]);
-      const Vec m0 = vector(e.args[5]);
-      const bool propto = e.fn_propto && propto_ctx_;
-      const auto density = [&](const auto& V) {
-        return propto ? stan::math::gaussian_dlm_obs_lpdf<true>(y, F, G, V, W,
-                                                                m0, C0)
-                      : stan::math::gaussian_dlm_obs_lpdf<false>(y, F, G, V, W,
-                                                                 m0, C0);
-      };
-      r.r = {e.args[3].unsized.leaf == mir::UnsizedLeaf::Matrix
-                 ? density(matrix(e.args[3]))
-                 : density(vector(e.args[3]))};
-      return r;
-    }
-    if (e.name == "quantile" && e.args.size() == 2) {
-      const Value x = eval(e.args[0]);
-      const Value p = eval(e.args[1]);
-      std::vector<double> samples(x.r.size());
-      for (size_t k = 0; k < samples.size(); ++k) samples[k] = val(x.r[k]);
-      if (e.args[1].unsized.depth == 0 &&
-          e.args[1].unsized.leaf != mir::UnsizedLeaf::Vector &&
-          e.args[1].unsized.leaf != mir::UnsizedLeaf::RowVector) {
-        r.r = {T(stan::math::quantile(samples, val(p.r.at(0))))};
-        return r;
+      std::vector<Value> a;
+      for (const mir::Expr& arg : e.args) a.push_back(eval(arg));
+      if (a[0].dims.size() != 2 || a[2].dims.size() != 2)
+        fail(e.name + ": y and G must be matrices", e.raw);
+      std::vector<T> packed;
+      uint8_t packed_active = 0;
+      for (size_t k = 1; k < 7; ++k) {
+        packed.insert(packed.end(), a[k].r.begin(), a[k].r.end());
+        if constexpr (!std::is_same_v<T, double>)
+          if (!e.args[k].data_only) packed_active = 1;
       }
-      std::vector<double> probabilities(p.r.size());
-      for (size_t k = 0; k < probabilities.size(); ++k)
-        probabilities[k] = val(p.r[k]);
-      const std::vector<double> q =
-          stan::math::quantile(samples, probabilities);
-      r.r.assign(q.begin(), q.end());
-      r.dims = {(int64_t)q.size()};
+      const bool propto = e.fn_propto && propto_ctx_;
+      const bool y_active = !std::is_same_v<T, double> && !e.args[0].data_only;
+      const uint8_t activity =
+          (uint8_t)((y_active ? 1u : 0u) | (packed_active << 1));
+      const uint8_t variant =
+          (uint8_t)((propto ? 1u : 0u) |
+                    (propto && activity != 0 ? kMatrixActiveForward : 0u));
+      std::vector<std::vector<T>> inputs;
+      inputs.push_back(std::move(a[0].r));
+      inputs.push_back(std::move(packed));
+      r.r = {run_kernel_call(
+          e, OP_GAUSSIAN_DLM_OBS_LPDF, variant, activity,
+          {(int)a[0].dims[0], (int)a[0].dims[1], (int)a[2].dims[0],
+           e.args[3].unsized.leaf == mir::UnsizedLeaf::Matrix ? 1 : 0},
+          std::move(inputs), 1)[0]};
       return r;
     }
     if ((e.name == "csr_matrix_times_vector" && e.args.size() == 6) ||
         (e.name == "csr_to_dense_matrix" && e.args.size() == 5)) {
       const bool product = e.name == "csr_matrix_times_vector";
-      const int m = (int)as_int(e.args[0]);
-      const int n = (int)as_int(e.args[1]);
-      const Value w = eval(e.args[2]);
-      const auto integers = [&](const mir::Expr& arg) {
-        const Value value = eval(arg);
-        if (value.i.size() == value.r.size()) return value.i;
-        std::vector<int> converted(value.r.size());
-        for (size_t k = 0; k < converted.size(); ++k)
-          converted[k] = (int)val(value.r[k]);
-        return converted;
-      };
-      const std::vector<int> v = integers(e.args[3]);
-      const std::vector<int> u = integers(e.args[4]);
-      using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
-      Vec weights(w.r.size());
-      for (size_t k = 0; k < w.r.size(); ++k) weights((Eigen::Index)k) = w.r[k];
-      if (product) {
-        const Value b = eval(e.args[5]);
-        Vec vector(b.r.size());
-        for (size_t k = 0; k < b.r.size(); ++k)
-          vector((Eigen::Index)k) = b.r[k];
-        const Vec out =
-            stan::math::csr_matrix_times_vector(m, n, weights, v, u, vector);
-        r.r.assign(out.data(), out.data() + out.size());
-        r.dims = {(int64_t)r.r.size()};
-        return r;
+      std::vector<int> idata = {(int)as_int(e.args[0]), (int)as_int(e.args[1])};
+      for (size_t k = 3; k < 5; ++k) {
+        const Value value = eval(e.args[k]);
+        idata.push_back((int)value.r.size());
+        for (size_t j = 0; j < value.r.size(); ++j)
+          idata.push_back(value.i.size() == value.r.size()
+                              ? value.i[j]
+                              : (int)val(value.r[j]));
       }
-      const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> out =
-          stan::math::csr_to_dense_matrix(m, n, weights, v, u);
-      r.r.assign(out.data(), out.data() + out.size());
-      r.dims = {(int64_t)m, (int64_t)n};
+      const int m = idata[0], n = idata[1];
+      std::vector<std::vector<T>> inputs;
+      uint8_t activity = 0;
+      inputs.push_back(eval(e.args[2]).r);
+      if constexpr (!std::is_same_v<T, double>)
+        if (!e.args[2].data_only) activity |= 1;
+      if (product) {
+        inputs.push_back(eval(e.args[5]).r);
+        if constexpr (!std::is_same_v<T, double>)
+          if (!e.args[5].data_only) activity |= 2;
+      }
+      r.r = run_kernel_call(
+          e, product ? OP_CSR_MATRIX_TIMES_VECTOR : OP_CSR_TO_DENSE_MATRIX, 0,
+          activity, std::move(idata), std::move(inputs),
+          product ? m : (int64_t)m * n);
+      if (product)
+        r.dims = {(int64_t)m};
+      else
+        r.dims = {(int64_t)m, (int64_t)n};
       return r;
     }
     if (e.name == "csr_extract_w" && e.args.size() == 1) {

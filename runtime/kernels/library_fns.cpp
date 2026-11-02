@@ -1,11 +1,8 @@
-// Stan library functions that run Stan Math itself in both sweeps. The
-// forward evaluates the call on plain doubles, or on var when the
-// expression is active in the model (so the arithmetic is the one CmdStan's
-// var overload performs); the backward replays it on a nested tape.
 #include <stanli/builtin_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/legacy.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/packet.hpp>
 
 #include <stan/math.hpp>
 
@@ -43,13 +40,14 @@ void store_output(KernelCtx& ctx, const R& result) {
   } else {
     const Eigen::MatrixXd v = stan::math::value_of(result);
     for (Eigen::Index c = 0, k = 0; c < v.cols(); ++c)
-      for (Eigen::Index r = 0; r < v.rows(); ++r, ++k) ctx.out.data[k] = v(r, c);
+      for (Eigen::Index r = 0; r < v.rows(); ++r, ++k)
+        ctx.out.data[k] = v(r, c);
   }
 }
 
 template <typename Op>
 void library_fwd(KernelCtx& ctx) {
-  if (ctx.variant & kMatrixActiveForward) {
+  if ((ctx.variant & kMatrixActiveForward) && !values_only()) {
     stan::math::nested_rev_autodiff nested;
     auto xs = load_inputs<var>(ctx);
     store_output(ctx, Op::template call<var>(ctx, xs));
@@ -277,20 +275,66 @@ struct GaussianDlmObsOp {
     packed += n;
     const Mat<S> C0 = Eigen::Map<const Mat<S>>(packed, n, n);
     const auto density = [&](const auto& V) {
-      return (ctx.variant & 1u)
-                 ? stan::math::gaussian_dlm_obs_lpdf<true>(y, F, G, V, W, m0,
-                                                           C0)
-                 : stan::math::gaussian_dlm_obs_lpdf<false>(y, F, G, V, W, m0,
-                                                            C0);
+      return (ctx.variant & 1u) ? stan::math::gaussian_dlm_obs_lpdf<true>(
+                                      y, F, G, V, W, m0, C0)
+                                : stan::math::gaussian_dlm_obs_lpdf<false>(
+                                      y, F, G, V, W, m0, C0);
     };
     return v_matrix ? density(Mat<S>(Eigen::Map<const Mat<S>>(v, r, r)))
                     : density(Vec<S>(Eigen::Map<const Vec<S>>(v, r)));
   }
 };
 
+std::vector<int> csr_ints(const KernelCtx& ctx, int64_t* at) {
+  const int64_t count = ctx.idata[*at];
+  std::vector<int> values(ctx.idata + *at + 1, ctx.idata + *at + 1 + count);
+  *at += 1 + count;
+  return values;
+}
+struct CsrMatrixTimesVectorOp {
+  template <typename S>
+  static auto call(const KernelCtx& ctx, std::vector<Vec<S>>& xs) {
+    int64_t at = 2;
+    const std::vector<int> v = csr_ints(ctx, &at);
+    const std::vector<int> u = csr_ints(ctx, &at);
+    return stan::math::csr_matrix_times_vector(static_cast<int>(ctx.idata[0]),
+                                               static_cast<int>(ctx.idata[1]),
+                                               xs[0], v, u, xs[1]);
+  }
+};
+struct CsrToDenseMatrixOp {
+  template <typename S>
+  static Mat<S> call(const KernelCtx& ctx, std::vector<Vec<S>>& xs) {
+    int64_t at = 2;
+    const std::vector<int> v = csr_ints(ctx, &at);
+    const std::vector<int> u = csr_ints(ctx, &at);
+    return stan::math::csr_to_dense_matrix(static_cast<int>(ctx.idata[0]),
+                                           static_cast<int>(ctx.idata[1]),
+                                           xs[0], v, u);
+  }
+};
+
+void quantile_fwd(KernelCtx& ctx) {
+  const std::vector<double> samples(ctx.in[0].data,
+                                    ctx.in[0].data + ctx.in[0].len);
+  if (ctx.idata[0] == 0) {
+    ctx.out.data[0] = stan::math::quantile(samples, ctx.in[1].data[0]);
+    return;
+  }
+  const std::vector<double> probabilities(ctx.in[1].data,
+                                          ctx.in[1].data + ctx.in[1].len);
+  const std::vector<double> result =
+      stan::math::quantile(samples, probabilities);
+  std::copy(result.begin(), result.end(), ctx.out.data);
+}
+void quantile_bwd(KernelCtx&) {}
+
 }  // namespace
 
 void register_library_kernels() {
+  register_kernel(OP_QUANTILE, Kernel{quantile_fwd, quantile_bwd, nullptr});
+  register_library<CsrMatrixTimesVectorOp>(OP_CSR_MATRIX_TIMES_VECTOR);
+  register_library<CsrToDenseMatrixOp>(OP_CSR_TO_DENSE_MATRIX);
   register_library<GaussianDlmObsOp>(OP_GAUSSIAN_DLM_OBS_LPDF);
   register_library<LogMixVecOp>(OP_LOG_MIX_VEC);
   register_library<HmmMarginalOp>(OP_HMM_MARGINAL);

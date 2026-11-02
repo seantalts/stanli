@@ -3364,7 +3364,7 @@ struct ProgramCompiler {
       }
       bool active = false;
       for (const mir::Expr& argument : e.args)
-        if (!argument.data_only) active = true;
+        if (!argument.data_only && !in_write_array) active = true;
       Range out{0, (int)map.result.storage_size};
       out = shaped(std::move(out), map.result);
       std::vector<int> idata;

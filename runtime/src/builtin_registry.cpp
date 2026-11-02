@@ -1252,6 +1252,20 @@ BuiltinMatrixMap builtin_matrix_map(
               : matrix_shape(omega.rows, omega.columns);
       return map;
     }
+    case BuiltinMatrixOp::Quantile: {
+      const BuiltinArgumentShape& probabilities = shapes[1];
+      const bool many = probabilities.container == FunctionContainerKind::Array;
+      map.idata = {many ? 1 : 0};
+      map.result =
+          many ? make_function_shape(
+                     FunctionArgumentKind::Real, FunctionContainerKind::Array,
+                     FunctionContainerKind::Scalar,
+                     {probabilities.storage_size}, probabilities.storage_size)
+               : make_function_shape(FunctionArgumentKind::Real,
+                                     FunctionContainerKind::Scalar,
+                                     FunctionContainerKind::Scalar, {}, 1);
+      return map;
+    }
     case BuiltinMatrixOp::None:
       break;
   }

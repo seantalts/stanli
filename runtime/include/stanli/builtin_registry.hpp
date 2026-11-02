@@ -152,6 +152,7 @@ enum class BuiltinMatrixOp : uint8_t {
   LogMix,
   HmmMarginal,
   HmmHiddenStateProb,
+  Quantile,
 };
 
 enum class BuiltinSlice : uint8_t {
