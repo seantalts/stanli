@@ -397,6 +397,7 @@ Lowering::Val Lowering::free_transform(uint16_t opcode,
       return un(OP_LOGIT,
                 elt(OP_DIV, elt(OP_SUB, a[0], a[1]), elt(OP_SUB, a[2], a[1])));
     default:  // offset_multiplier_free: (y - mu) / sigma
+      (void)emit_value(OP_CHECK_OFFSET_MULTIPLIER, {a[1], a[2]}, 1);
       return elt(OP_DIV, elt(OP_SUB, a[0], a[1]), a[2]);
   }
 }
