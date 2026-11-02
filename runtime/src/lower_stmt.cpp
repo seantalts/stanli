@@ -1576,6 +1576,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             s.check_var_name.empty() ? s.fn_args[0].name : s.check_var_name;
         spec->bound_is_scalar = bound_is_scalar;
         spec->shapes_match = shapes_match;
+        spec->geometry = check_geometry(value.si, value_len);
         (void)emit_value(opcode, {value, bound}, 1);
         g.ops.back().udata = spec.get();
         g.udata_pool.push_back(std::move(spec));

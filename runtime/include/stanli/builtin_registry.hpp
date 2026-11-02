@@ -253,7 +253,13 @@ struct StanMathError : std::invalid_argument {
 // The message a lowering reports for an error thrown by the builtin
 // resolvers: a StanMathError as is, anything else behind `function`.
 std::string builtin_error_message(const std::string& function,
-                                  const std::invalid_argument& error);
+                                  const std::exception& error);
+
+// Stan Math's message for a 1-based index outside a container of `size`
+// elements, worded as `function` (an indexing label such as
+// "array[uni, ...] index") reports it.
+std::string index_out_of_range_message(const char* function, int64_t size,
+                                       int64_t index);
 
 // Validate one selected overload and resolve its lane broadcasts and result
 // geometry once for every backend. A one-element container is deliberately

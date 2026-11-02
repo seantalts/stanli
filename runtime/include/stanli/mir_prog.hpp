@@ -2834,7 +2834,7 @@ struct ProgramCompiler {
       return kernel_call(spec.opcode, args, out, plan.variant,
                          plan.activity_mask, plan.idata, {}, e.name);
     } catch (const std::exception& error) {
-      bail(e.name + ": " + error.what());
+      bail(builtin_error_message(e.name, error));
     }
 
     return {};

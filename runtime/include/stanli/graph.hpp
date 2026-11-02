@@ -6,6 +6,7 @@
 
 #include <stanli/kernel_types.hpp>
 #include <stanli/message.hpp>
+#include <stanli/structured_check.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -141,6 +142,7 @@ struct BoundCheckSpec {
   std::string name;
   bool bound_is_scalar = false;
   bool shapes_match = false;
+  CheckGeometry geometry;
 };
 
 class Executor {

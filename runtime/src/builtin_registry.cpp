@@ -288,9 +288,20 @@ bool is_eigen_shape(const BuiltinArgumentShape& shape) {
 }  // namespace
 
 std::string builtin_error_message(const std::string& function,
-                                  const std::invalid_argument& error) {
+                                  const std::exception& error) {
   if (dynamic_cast<const StanMathError*>(&error)) return error.what();
   return function + ": " + error.what();
+}
+
+std::string index_out_of_range_message(const char* function, int64_t size,
+                                       int64_t index) {
+  try {
+    stan::math::out_of_range(function, static_cast<int>(size),
+                             static_cast<int>(index));
+  } catch (const std::out_of_range& error) {
+    return error.what();
+  }
+  return {};
 }
 
 BuiltinLayout builtin_layout(const BuiltinSpec& spec,

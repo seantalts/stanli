@@ -1257,7 +1257,7 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
       }
       plan = stanli::density_call_plan(spec, plan_arguments, propto(e));
     } catch (const std::exception& error) {
-      fail(e.name + ": " + error.what(), e.raw);
+      fail(builtin_error_message(e.name, error), e.raw);
     }
     if (plan.empty_result) return constant(0.0);
     if (extent >= 0) {

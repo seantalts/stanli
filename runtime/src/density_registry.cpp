@@ -1,6 +1,8 @@
 #include <stanli/density_registry.hpp>
 #include <stanli/function_registry.hpp>
 
+#include <stan/math/prim/err/check_consistent_size.hpp>
+#include <stan/math/prim/err/check_size_match.hpp>
 #include <stan/math/prim/prob/discrete_range_lpmf.hpp>
 #include <stan/math/prim/prob/hypergeometric_lpmf.hpp>
 
@@ -313,6 +315,21 @@ DensityCallPlan density_call_plan(
 
   if (spec.glm_layout) {
     const auto [rows, cols] = matrix_dimensions(spec.glm_matrix_arg, true);
+    if (spec.opcode == OP_CATEGORICAL_LOGIT_GLM_LPMF) {
+      const char* function = "categorical_logit_glm_lpmf";
+      const int64_t beta_rows = matrix_dimensions(2).first;
+      const int64_t beta_cols = matrix_dimensions(2).second;
+      try {
+        stan::math::check_consistent_size(
+            function, "Intercept vector",
+            Eigen::VectorXd(real_shapes[1].storage_size),
+            static_cast<size_t>(beta_cols));
+        stan::math::check_size_match(function, "x.cols()", cols, "beta.rows()",
+                                     beta_rows);
+      } catch (const std::invalid_argument& error) {
+        throw StanMathError(error.what());
+      }
+    }
     if (spec.integer_args == 2) {
       plan.idata.clear();
       for (size_t k = 0; k < integer_groups.size(); ++k) {

@@ -1222,6 +1222,22 @@ struct Lowering {
   const ArrayShape& array_shape(const SlotInfo& si) const {
     return shape_pool->at(si.shape);
   }
+  CheckGeometry check_geometry(const SlotInfo& si, int64_t len) const {
+    CheckGeometry geometry;
+    if (is_array(si)) {
+      const ArrayShape& shape = array_shape(si);
+      geometry.dims = shape.dims;
+      geometry.leaf_rank =
+          std::max<size_t>(1, static_cast<size_t>(leaf_rank(shape.leaf)));
+    } else if (is_matrix(si)) {
+      geometry.dims = {si.rows, si.cols};
+      geometry.leaf_rank = 2;
+    } else if (is_vector(si) || is_row_vector(si)) {
+      geometry.dims = {len};
+      geometry.leaf_rank = 1;
+    }
+    return geometry;
+  }
   SlotInfo indexed_view(const SlotInfo& base, size_t n_single, int64_t out_len,
                         const std::string& out_type);
 
