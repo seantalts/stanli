@@ -1706,7 +1706,10 @@ bool Lowering::specialize_static_shapes(mir::Expr* e) {
   return changed;
 }
 std::optional<Lowering::Val> Lowering::fold_const(const mir::Expr& e) {
-  if (!e.data_only || e.fn_propto || expr_effectful(e)) return std::nullopt;
+  const bool data_value =
+      e.data_only ||
+      (e.promoted && e.unsized.leaf != mir::UnsizedLeaf::Complex);
+  if (!data_value || e.fn_propto || expr_effectful(e)) return std::nullopt;
   auto evaluated = try_eval_pure(e);
   if (!evaluated) return std::nullopt;
   DataMap::Entry en = std::move(*evaluated);
