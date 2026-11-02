@@ -1634,6 +1634,12 @@ jobs:
           restore-keys: ccache-asan-clang-o1-g1-v3-${{ steps.toolchain.outputs.id }}-
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
+      - name: Fetch stanc3's test models
+        run: |
+          tools/with_retry.sh git clone --filter=blob:none --no-checkout \
+            "$STANC3_SRC_REPO" deps/stanc3-src
+          git -C deps/stanc3-src sparse-checkout set test/integration
+          git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
       - name: Install the pinned compiler from the native build
         uses: actions/download-artifact@v4
         with:
@@ -1804,6 +1810,12 @@ jobs:
           sudo apt-get install -y clang
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
+      - name: Fetch stanc3's test models
+        run: |
+          tools/with_retry.sh git clone --filter=blob:none --no-checkout \
+            "$STANC3_SRC_REPO" deps/stanc3-src
+          git -C deps/stanc3-src sparse-checkout set test/integration
+          git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
       - name: Install the pinned compiler from the native build
         uses: actions/download-artifact@v4
         with:
