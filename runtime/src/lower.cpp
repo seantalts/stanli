@@ -369,6 +369,17 @@ void Lowering::bind_data(const mir::Program& p) {
       validate_data_dims(name, type);
     }
   }
+  {
+    std::set<std::string> members;
+    const auto collect = [&](const auto& self, const mir::Stmt& st) -> void {
+      if (st.kind == mir::Stmt::Decl && !input_names.count(st.decl_id))
+        members.insert(st.decl_id);
+      if (st.kind == mir::Stmt::SList)
+        for (const auto& k : st.body) self(self, k);
+    };
+    for (const auto& st : p.prepare_data) collect(collect, st);
+    td.set_sized_variables(std::move(members));
+  }
   for (const auto& st : p.prepare_data) {
     if (st.kind == mir::Stmt::Decl) {
       if (input_names.count(st.decl_id)) {
