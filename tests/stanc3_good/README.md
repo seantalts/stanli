@@ -65,7 +65,8 @@ belongs in `overrides.json`, which wins over `data.json.gz`.
 A rerun keeps accepted entries whose source is unchanged, since stanc has
 no seed; `--regenerate` redoes them. `--improve` retries the accepted
 entries that are not finite at every point and keeps a new candidate only
-if it evaluates at more points, or finite at more; `attempts` accumulates across such runs. `--check` (ctest
+if it evaluates at more points, or as many and is finite at more;
+`attempts` accumulates across such runs. `--check` (ctest
 `test_stanc3_good_data`) verifies the file covers exactly the pinned
 corpus with matching source hashes, and needs no CmdStan.
 
