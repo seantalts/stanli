@@ -133,6 +133,25 @@ CASES = [
         model { y ~ normal(0, 1); }""",
      {}, {"eval_fail": "vector assign rows: assigning variable t (2) and "
                        "right hand side rows (3) must match in size"}),
+    ("real divided by a matrix is elementwise",
+     """parameters { real y; }
+        transformed parameters {
+          matrix[1, 2] t = 3 / [[2, 4]];
+          matrix[1, 2] u = y / [[2, 4]];
+        }
+        model { y ~ normal(0, 1); }""",
+     {}, {"values": [0.1, 1.5, 0.75, 0.05, 0.025]}),
+    ("empty integer outcomes",
+     """data { array[2, 3] int y; int a; int b; array[0] int none; }
+        parameters { vector<lower=0, upper=1>[3] p; }
+        model {
+          y[1, a:b] ~ bernoulli(p[a:b]);
+          none ~ bernoulli(p[a:b]);
+          target += bernoulli_lpmf(y[1, a:b] | p[a:b]);
+        }""",
+     {"y": [[1, 0, 1], [0, 0, 0]], "a": 3, "b": 2, "none": []},
+     {"same_as": """parameters { vector<lower=0, upper=1>[3] p; }
+                    model { }"""}),
 ]
 
 
@@ -171,6 +190,11 @@ for name, source, data, want in CASES:
         ok = len(got) == len(want["lp_grad"]) and all(
             abs(g - w) <= want["rtol"] * abs(w)
             for g, w in zip(got, want["lp_grad"]))
+    if "same_as" in want:
+        ref = run(want["same_as"], data)
+        ok = "\nOK " in "\n" + out and [
+            line for line in out.splitlines() if line.startswith("OK ")
+        ] == [line for line in ref.splitlines() if line.startswith("OK ")]
     if "eval_fail" in want:
         ok = want["eval_fail"] in lines.get("EVAL_FAIL", "")
     if "wa_fail" in want:

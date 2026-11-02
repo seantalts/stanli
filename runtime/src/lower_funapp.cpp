@@ -179,9 +179,13 @@ unsigned Lowering::fun_effects(const std::string& name) {
 // time (int data, loop variables, or compile-time expressions).
 std::vector<int> Lowering::int_arg_values(LoweredArgument& actual) {
   const mir::Expr& oc = actual.expr();
+  const auto ints = [&](const DataMap::Entry& en) {
+    return (en.is_int || oc.unsized.leaf == mir::UnsizedLeaf::Int) &&
+           en.i.size() == en.r.size();
+  };
   if (oc.kind == mir::Expr::Var) {
     DataMap::Entry* en = td.find(oc.name);
-    if (en && en->is_int && !en->i.empty()) return en->i;
+    if (en && ints(*en)) return en->i;
     if (int_env.count(oc.name)) return {static_cast<int>(int_env[oc.name])};
   }
   if (oc.kind == mir::Expr::LitInt) return {static_cast<int>(oc.lit_i)};
@@ -190,7 +194,7 @@ std::vector<int> Lowering::int_arg_values(LoweredArgument& actual) {
     // May be a slice (y[i] on a 2-D array yields a whole row), so
     // evaluate through the data interpreter, not scalar eval_int.
     DataMap::Entry v = eval_pure(oc, "an integer density argument");
-    if (v.is_int && !v.i.empty()) return v.i;
+    if (ints(v)) return v.i;
   }
   if (oc.kind == mir::Expr::FunApp) {
     // Compile-time int expression (e.g. sum(y[n]) under an unrolled loop).
@@ -1326,6 +1330,7 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
   const BuiltinSpec* solve =
       shaped_builtin_spec(e.name, e.args.size(), BuiltinShapePolicy::Solve);
   if (solve == nullptr && e.name == "Divide__" && e.args.size() == 2 &&
+      e.args.at(0).type_ != "UReal" && e.args.at(0).type_ != "UInt" &&
       e.args.at(1).type_ == "UMatrix")
     solve = shaped_builtin_spec("mdivide_right", 2, BuiltinShapePolicy::Solve);
   if (solve != nullptr) {

@@ -11,4 +11,4 @@ model {
 }
 
 // STANLI-LIT: PASS
-// STANLI-LIT-EXPECT: COMPILE_FAIL assignment logical view mismatch for B
+// STANLI-LIT-EXPECT: EVAL_FAIL assign array size: assigning variable B (2) and right hand side (3) must match in size

@@ -7,4 +7,4 @@ model {
 }
 
 // STANLI-LIT: PASS
-// STANLI-LIT-EXPECT: COMPILE_FAIL assignment logical view mismatch for a
+// STANLI-LIT-EXPECT: EVAL_FAIL matrix assign columns: assigning variable a (3) and right hand side columns (2) must match in size
