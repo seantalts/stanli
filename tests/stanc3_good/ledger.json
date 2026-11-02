@@ -1548,8 +1548,8 @@
   "status": "unsupported"
  },
  "function-signatures/math/transforms/lower_bound_unconstrain.stan": {
-  "cause": "Exception: lb_free: Lower bounded variable[1, 1] is 5.08179, but must be greater than or equal to 5.837474 (in 'lower_bound_unconstrain.stan', line 43, column 2 to column 56)",
-  "status": "data_rejected"
+  "cause": "Both reject the data at lb_free; CmdStan names the matrix element 'Lower bounded variable[1, 1]', stanli prints no index.",
+  "status": "data_message_mismatch"
  },
  "function-signatures/math/transforms/lower_upper_bound_constrain.stan": {
   "cause": "Exception: lub_constrain: lb is 5.08179, but must be less than 5.081790 (in 'lower_upper_bound_constrain.stan', line 42, column 2 to column 72)",
@@ -1562,6 +1562,24 @@
  "function-signatures/math/transforms/lower_upper_bound_unconstrain.stan": {
   "cause": "Exception: lub_free: Bounded variable is 6.10769, but must be in the interval [6.10769, 5.83747] (in 'lower_upper_bound_unconstrain.stan', line 43, column 2 to column 72)",
   "status": "data_rejected"
+ },
+ "function-signatures/math/transforms/offset_multiplier_constrain.stan": {
+  "cause": "Both reject a nonpositive multiplier; CmdStan names the matrix element 'multiplier[1, 1]', stanli a flat index 'multiplier[1]'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch"
+  }
+ },
+ "function-signatures/math/transforms/offset_multiplier_unconstrain.stan": {
+  "cause": "Both reject a nonpositive multiplier; CmdStan names the matrix element 'multiplier[1, 1]', stanli a flat index 'multiplier[1]'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch"
+  }
  },
  "function-signatures/math/transforms/ordered_unconstrain.stan": {
   "cause": "ordered_unconstrain: structured inverse is unsupported",
@@ -1811,13 +1829,29 @@
   "cause": "unsupported statement function (UserDefined bar FnPlain)",
   "status": "unsupported"
  },
+ "parser-generator/multidim_var_gen_qs_ar45_mat23.stan": {
+  "cause": "Both reject a NaN in a bounded generated quantity; CmdStan names the element 'ar_mat[1, 1][1, 1]', stanli prints only 'ar_mat'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
  "parser-generator/multidim_var_transform_data_ar45_mat23.stan": {
-  "cause": "Exception: multidim_var_transform_data_ar45_mat23_model_namespace::multidim_var_transform_data_ar45_mat23_model: ar_mat[1, 1][1, 1] is nan, but must be greater than or equal to 0.000000 (in 'multidim_var_transform_data_ar45_mat23.stan', line 2, column 2 to column 52)",
-  "status": "data_rejected"
+  "cause": "Both reject a NaN in bounded transformed data; CmdStan names the element 'ar_mat[1, 1][1, 1]', stanli prints only 'ar_mat'.",
+  "status": "data_message_mismatch"
  },
  "parser-generator/multidim_var_transform_param_ar45_mat23.stan": {
-  "cause": "Exception: multidim_var_transform_param_ar45_mat23_model_namespace::log_prob: ar_mat[1, 1][1, 1] is nan, but must be greater than or equal to 0.000000 (in 'multidim_var_transform_param_ar45_mat23.stan', line 2, column 2 to column 52)",
-  "status": "rejected_both"
+  "cause": "Both reject a NaN in a bounded transformed parameter; CmdStan names the element 'ar_mat[1, 1][1, 1]', stanli prints only 'ar_mat'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
  },
  "parser-generator/ode_control.stan": {
   "cause": "In write_array CmdStan rejects unsorted ODE output times; stanli first fails with 'ODE maximum steps must be one integer', so it never reaches the times check.",

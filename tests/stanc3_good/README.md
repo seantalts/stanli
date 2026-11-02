@@ -49,11 +49,12 @@ points. Candidates are stanc's draws, then the same draws with small repairs
 square matrices made the identity, vectors made a simplex or ascending).
 `accepted: false` means no candidate loaded; `note` then holds the most
 common `DATA_FAIL` message, or why the model never built, and `data` is the
-last rejected candidate; the suite runs it only to check that stanli rejects it too. An accepted entry that is not
-finite at every point says so in `note`. A model with no data has `origin: none_needed` and
-`data: {}`. Optional hand data lives in `hand_data.json` as
-`{"<path>": {"note": "...", "data": {...}}}` and always wins over
-generation.
+last rejected candidate; the suite runs it only to check that stanli
+rejects it too. An accepted entry that is not finite at every point says so
+in `note`. A model with no data has `origin: none_needed` and `data: {}`.
+The generator also reads hand data from an optional `hand_data.json`
+(`{"<path>": {"note": "...", "data": {...}}}`); hand data for this suite
+belongs in `overrides.json`, which wins over `data.json.gz`.
 
 A rerun keeps accepted entries whose source is unchanged, since stanc has
 no seed; `--regenerate` redoes them. `--improve` retries the accepted

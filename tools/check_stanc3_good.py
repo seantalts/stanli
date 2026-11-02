@@ -212,11 +212,12 @@ def message_core(message):
 
 
 def normalize(text):
-    """Numbers and element indices removed: the engines format numbers
-    differently, and stanli names the element of a vectorized argument
-    ("Scale parameter[2]") where CmdStan's scalar overload does not."""
+    """Numbers and single element indices removed: the engines format
+    numbers differently, and one side may name the element of a vectorized
+    argument ("Scale parameter[2]") where the other's scalar overload does
+    not. A multi-dimensional index ("[1, 1]") is kept."""
     text = re.sub(r"-?\d+(\.\d+)?([eE][+-]?\d+)?", "N", text or "")
-    text = re.sub(r"\[[N, ]*\]", "", text)
+    text = text.replace("[N]", "")
     text = re.sub(r"\s+", " ", text).strip()
     return text.rstrip("!. ")
 
@@ -476,6 +477,8 @@ def update_ledger(ledger, results):
         same = ({k: old.get(k) for k in entry} == entry)
         if same and "cause" in old:
             entry["cause"] = old["cause"]
+        elif status == "data_message_mismatch":
+            entry["cause"] = "UNTRIAGED: " + " / ".join(details)[:400]
         elif status == "points" and set(points.values()) == {"wa_unsupported"}:
             entry["cause"] = details[0].split(": ", 1)[1][:300]
         elif status in ("points", "one_side_threw", "crashed", "timeout",
@@ -733,7 +736,9 @@ def main(argv=None):
     ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {}
     overrides = json.loads(OVERRIDES.read_text())
     ctx = {"overrides": overrides, "data": data, "ledger": ledger,
-           "check": (args.build / "stanli_check").resolve(),
+           "check": next((p.resolve() for p in (
+               args.build / "stanli_check", args.build / "stanli_check.exe")
+               if p.exists()), args.build / "stanli_check"),
            "timeout": args.timeout, "seconds": {}, "results": {},
            "refs": (load_gz(REFERENCES) if REFERENCES.exists()
                     else {"models": {}})}
