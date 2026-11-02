@@ -197,7 +197,16 @@ void reject_fwd(KernelCtx& ctx) {
   // stan-math's own reject throws, and it is what the executor's callers
   // and the sampler already treat as "this draw is not valid" rather than
   // as a failure of the run.
-  execute_message(MessageAction::Reject, render(ctx));
+  const std::string message = render(ctx);
+  switch (static_cast<const MessageSpec*>(ctx.udata)->error) {
+    case MessageError::InvalidArgument:
+      throw std::invalid_argument(message);
+    case MessageError::OutOfRange:
+      throw std::out_of_range(message);
+    case MessageError::Domain:
+      break;
+  }
+  execute_message(MessageAction::Reject, message);
 }
 
 void print_fwd(KernelCtx& ctx) {

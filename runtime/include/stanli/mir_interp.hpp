@@ -1143,10 +1143,9 @@ class MirInterp {
     const auto mismatch = [&](const std::string& what, int64_t want,
                               const std::string& rhs, int64_t got) {
       if (want == got) return;
-      throw std::invalid_argument(what + ": assigning variable " + name + " (" +
-                                  std::to_string(want) +
-                                  ") and right hand side" + rhs + " (" +
-                                  std::to_string(got) + ") must match in size");
+      throw std::invalid_argument(
+          size_match_message(what, "assigning variable " + name, want,
+                             "right hand side" + rhs, got));
     };
     // The value's dims carry the same array levels; a vector's own length is
     // its element count, whatever dims it carries.

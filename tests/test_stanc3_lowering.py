@@ -86,6 +86,53 @@ CASES = [
           target += poisson_log_glm_lpmf({1, 0} | [1, 2], 0.5, [b, -b]');
         }""",
      {}, {"lp_grad": [-2.5886493952825407, 1.8836493952825406], "rtol": 1e-13}),
+    ("assignment of the wrong array size",
+     """parameters { array[2, 3] real x; }
+        transformed parameters {
+          array[2] real t = x[1, 1:2];
+          t = x[1];
+        }
+        model { to_array_1d(x) ~ normal(0, 1); }""",
+     {}, {"eval_fail": "assign array size: assigning variable t (2) and "
+                       "right hand side (3) must match in size"}),
+    ("declaration of the wrong vector size",
+     """parameters { vector[3] v; }
+        transformed parameters { vector[2] t = v; }
+        model { v ~ normal(0, 1); }""",
+     {}, {"eval_fail": "vector assign rows: assigning variable t (2) and "
+                       "right hand side rows (3) must match in size"}),
+    ("matrix assignment checks columns before rows",
+     """parameters { matrix[2, 3] m; }
+        transformed parameters {
+          matrix[3, 2] t;
+          t = m;
+        }
+        model { to_vector(m) ~ normal(0, 1); }""",
+     {}, {"eval_fail": "matrix assign columns: assigning variable t (2) and "
+                       "right hand side columns (3) must match in size"}),
+    ("wrong-size assignment in generated quantities",
+     """parameters { real y; }
+        model { y ~ normal(0, 1); }
+        generated quantities { row_vector[2] g = [y, y, y]; }""",
+     {}, {"wa_fail": "vector assign columns: assigning variable g (2) and "
+                     "right hand side columns (3) must match in size"}),
+    ("wrong-size data assigned to an array element",
+     """transformed data { array[3] real d = {1, 2, 3}; }
+        parameters { real y; }
+        transformed parameters {
+          array[2, 2] real t;
+          t[1] = d;
+        }
+        model { y ~ normal(0, 1); }""",
+     {}, {"eval_fail": "assign array size: assigning variable t (2) and "
+                       "right hand side (3) must match in size"}),
+    ("wrong-size data in a declaration",
+     """transformed data { vector[3] d = [1, 2, 3]'; }
+        parameters { real y; }
+        transformed parameters { vector[2] t = d; }
+        model { y ~ normal(0, 1); }""",
+     {}, {"eval_fail": "vector assign rows: assigning variable t (2) and "
+                       "right hand side rows (3) must match in size"}),
 ]
 
 
@@ -126,6 +173,8 @@ for name, source, data, want in CASES:
             for g, w in zip(got, want["lp_grad"]))
     if "eval_fail" in want:
         ok = want["eval_fail"] in lines.get("EVAL_FAIL", "")
+    if "wa_fail" in want:
+        ok = want["wa_fail"] in lines.get("WANAMES", "")
     if "compile_fail" in want:
         ok = want["compile_fail"] in lines.get("COMPILE_FAIL", "")
     if "stdout" in want:

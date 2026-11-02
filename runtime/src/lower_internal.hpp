@@ -1378,6 +1378,15 @@ struct Lowering {
     if (!same_view(v.si, g.slots[v.slot].len, expected, len))
       fail("assignment logical view mismatch for " + name, raw);
   }
+  // The value a whole-variable assignment binds. When CmdStan's assign would
+  // throw for the sizes, that throw is emitted here and a placeholder of the
+  // declared shape is bound instead.
+  Val checked_binding(const Val& v, int64_t len, const SlotInfo& expected,
+                      const std::string& name, const std::string& raw);
+  std::optional<std::string> assign_size_error(const Val& v, int64_t len,
+                                               const SlotInfo& expected,
+                                               const std::string& name);
+  void emit_error(MessageError error, const std::string& message);
   void sync_data_local(const std::string& name, const mir::Expr& rhs,
                        const Val& v);
 

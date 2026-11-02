@@ -1052,12 +1052,78 @@ Lowering::Val Lowering::lower_runtime_int_sum(const mir::Expr& e,
                 has_runtime_shape(a) ? std::max<int64_t>(0, hi) : hi);
   return result;
 }
+Lowering::Val Lowering::checked_binding(const Val& v, int64_t len,
+                                        const SlotInfo& expected,
+                                        const std::string& name,
+                                        const std::string& raw) {
+  validate_view(v.si, g.slots[v.slot].len, "binding " + name);
+  validate_view(expected, len, "declaration " + name);
+  if (g.slots[v.slot].len == len &&
+      same_view(v.si, g.slots[v.slot].len, expected, len))
+    return v;
+  const std::optional<std::string> error =
+      assign_size_error(v, len, expected, name);
+  if (!error) {
+    require_binding(v, len, expected, name, raw);
+    fail("assignment logical view mismatch for " + name, raw);
+  }
+  emit_error(MessageError::InvalidArgument, *error);
+  SlotInfo si = expected;
+  si.param_free = false;
+  Val placeholder{add_slot(len, false), v.autodiff, si, owning_layout(si)};
+  out.fills.emplace_back(
+      placeholder.slot,
+      std::vector<double>(len, std::numeric_limits<double>::quiet_NaN()));
+  return placeholder;
+}
+// Stan's assign checks an array's outer size and an Eigen value's columns,
+// then rows. It replaces the elements of an array wholesale and skips the
+// check for an empty variable, so those mismatches are not errors there.
+std::optional<std::string> Lowering::assign_size_error(
+    const Val& v, int64_t len, const SlotInfo& expected,
+    const std::string& name) {
+  const int64_t got = g.slots[v.slot].len;
+  const std::string lhs = "assigning variable " + name;
+  if (is_array(expected)) {
+    if (!is_array(v.si)) return std::nullopt;
+    const int64_t want = array_shape(expected).dims.at(0);
+    const int64_t have = array_shape(v.si).dims.at(0);
+    if (want == 0 || want == have) return std::nullopt;
+    return size_match_message("assign array size", lhs, want, "right hand side",
+                              have);
+  }
+  const bool eigen =
+      is_vector(expected) || is_row_vector(expected) || is_matrix(expected);
+  if (!eigen || len == 0 || is_array(v.si) || is_scalar(v)) return std::nullopt;
+  const LogicalDims want = logical_dims(expected, len, "assignment " + name);
+  const LogicalDims have = logical_dims(v.si, got, "assignment " + name);
+  const std::string object = is_matrix(expected) ? "matrix" : "vector";
+  if (want.cols != have.cols)
+    return size_match_message(object + " assign columns", lhs, want.cols,
+                              "right hand side columns", have.cols);
+  if (want.rows != have.rows)
+    return size_match_message(object + " assign rows", lhs, want.rows,
+                              "right hand side rows", have.rows);
+  return std::nullopt;
+}
+void Lowering::emit_error(MessageError error, const std::string& message) {
+  auto spec = std::make_shared<MessageSpec>();
+  spec->chunks = {message};
+  spec->error = error;
+  Op op;
+  op.opcode = OP_REJECT;
+  op.n_in = 0;
+  op.out = add_slot(1, false);
+  op.udata = spec.get();
+  g.udata_pool.push_back(std::move(spec));
+  g.ops.push_back(op);
+}
 void Lowering::assign_plain(const mir::Stmt& s) {
   Val rhs = lower_expr(s.rhs);
   auto old = scope.find(s.lhs);
   if (old != scope.end()) {
-    require_binding(rhs, g.slots[old->second.slot].len, old->second.si, s.lhs,
-                    s.raw);
+    rhs = checked_binding(rhs, g.slots[old->second.slot].len, old->second.si,
+                          s.lhs, s.raw);
     const bool param_free = rhs.si.param_free;
     rhs.autodiff = old->second.autodiff;
     rhs.si = old->second.si;
@@ -1083,7 +1149,7 @@ void Lowering::assign_plain(const mir::Stmt& s) {
         dl->second.si = rhs.si;
       } else {
         SlotInfo expected = dl->second.si;
-        require_binding(rhs, dl->second.len, expected, s.lhs, s.raw);
+        rhs = checked_binding(rhs, dl->second.len, expected, s.lhs, s.raw);
         const bool pf = rhs.si.param_free;
         rhs.si = expected;
         rhs.si.param_free = pf;
@@ -1184,8 +1250,9 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             s.decl_type.base == "SArray" && s.decl_type.elem_base == "SInt";
         if (s.has_init) {
           Val v = lower_expr(s.init);
+          v = checked_binding(v, sh.len, view_of(s.decl_type), s.decl_id,
+                              s.raw);
           SlotInfo expected = view_of(s.decl_type, v.si.param_free);
-          require_binding(v, sh.len, expected, s.decl_id, s.raw);
           v.autodiff = sh.autodiff;
           v.si = expected;
           v.layout = owning_layout(v.si);
@@ -1227,6 +1294,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         }
         BuiltinIndexMap map;
         bool empty_selection = false;
+        bool element_of_array = false;
         SlotInfo expected_view;
         if (!runtime) {
           const SlotInfo& lhs_si =
@@ -1248,6 +1316,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             map.count = lhs_len;
           } else if (all_single) {
             if (is_array(lhs_si)) {
+              element_of_array = true;
               const ArrayShape& shape = array_shape(lhs_si);
               std::vector<int64_t> ix;
               ix.reserve(s.lhs_idx.size());
@@ -1358,7 +1427,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
           observe_fill(prev_v, declared->second.int_array, initial,
                        declared->second.len);
         }
-        const Val rhs_v = lower_expr(s.rhs);
+        Val rhs_v = lower_expr(s.rhs);
         if (runtime) {
           Val nv = region_index(prev_v, s.lhs_idx, s.rhs.type_, s.rhs.unsized,
                                 &rhs_v);
@@ -1370,6 +1439,9 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         const int prev = prev_v.slot;
         if (whole)
           require_binding(rhs_v, g.slots[prev].len, prev_v.si, s.lhs, s.raw);
+        else if (element_of_array)
+          rhs_v =
+              checked_binding(rhs_v, map.count, expected_view, s.lhs, s.raw);
         else
           require_binding(rhs_v, map.count, expected_view, s.lhs, s.raw);
         if (empty_selection) {

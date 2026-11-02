@@ -27,9 +27,23 @@ inline std::optional<MessageAction> message_action(std::string_view name) {
 
 // Literal chunks surrounding runtime values.  There is exactly one more
 // chunk than value: chunk k precedes value k, and the final chunk trails it.
+// reject() throws std::domain_error. A statement that CmdStan always rejects
+// at runtime, for a reason the lowering already knows, throws the class Stan
+// Math's check would.
+enum class MessageError : uint8_t { Domain, InvalidArgument, OutOfRange };
+
 struct MessageSpec {
   std::vector<std::string> chunks;
+  MessageError error = MessageError::Domain;
 };
+
+// stan::math::check_size_match's message.
+inline std::string size_match_message(const std::string& function,
+                                      const std::string& name_i, int64_t i,
+                                      const std::string& name_j, int64_t j) {
+  return function + ": " + name_i + " (" + std::to_string(i) + ") and " +
+         name_j + " (" + std::to_string(j) + ") must match in size";
+}
 
 // Render through accessors instead of owning a particular backend's values.
 // size(k) gives the flattened width of value k; value(k, i) gives its ith
