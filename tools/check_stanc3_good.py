@@ -53,19 +53,22 @@ MODEL_STATUSES = (
     "stanc_rejected",    # stanc refuses the program
     "data_unavailable",  # no data: stanc could not generate any
     "cmdstan_timeout",   # CmdStan does not finish; stanli is not run
+    "cmdstan_crashed",   # CmdStan dies (a stack overflow, say); likewise
     "one_side_threw",    # model-level: data or compile accepted by one side
     "timeout",
     "crashed",
 )
 POINT_VERDICTS = ("ok", "both_threw", "mismatch", "one_side_threw",
-                  "message_mismatch")
+                  "message_mismatch", "wa_unsupported")
 _RANK = {"verified": 9, "rejected_both": 8, "data_rejected": 7,
          "points": 6, "unsupported": 5, "stanc_rejected": 5,
-         "data_unavailable": 5, "cmdstan_timeout": 5,
+         "data_unavailable": 5, "cmdstan_timeout": 5, "cmdstan_crashed": 5,
          "one_side_threw": 2, "timeout": 1, "crashed": 0}
 
 # A Stan Math validation error. stanli reporting one of these at compile
 # time, on data CmdStan accepted, is a disagreement and not a missing feature.
+_UNSUPPORTED = re.compile(r"unsupported|not supported|requires the MIR "
+                          r"interpreter")
 _DOMAIN_ERROR = re.compile(r", but must be|is not a valid|is not positive "
                            r"definite|is not symmetric|must match in size")
 
@@ -149,7 +152,10 @@ def parse_output(text):
             sections[current]["status"] = (
                 head, tail.split() if head == "OK" else tail.strip())
         elif head == "WANAMES":
-            if tail.startswith("FAIL"):
+            if tail == "FAIL no write_array":
+                # stanli_check's spelling of a model with no columns.
+                sections[current]["wa"] = ("ok", [], [])
+            elif tail.startswith("FAIL"):
                 sections[current]["wa"] = ("threw", tail[4:].strip())
                 names = None
             else:
@@ -258,6 +264,9 @@ def point_verdict(want, got):
                         else "message_mismatch"), details
         elif wa_got is None or wa_got[0] != "ok":
             why = wa_got[1] if wa_got else "no write_array output"
+            if _UNSUPPORTED.search(why):
+                return ("mismatch" if details else "wa_unsupported"), [
+                    f"stanli write_array unsupported: {why}"] + details
             return "one_side_threw", [f"stanli write_array threw: {why}",
                                       "CmdStan write_array returned values"
                                       ] + details
@@ -284,7 +293,7 @@ def classify(ref, run):
     if outcome == "timeout":
         return "cmdstan_timeout", {}, ["CmdStan did not finish"]
     if outcome == "crashed":
-        return "crashed", {}, ["CmdStan crashed: " + ref.get("message", "")]
+        return "cmdstan_crashed", {}, [ref.get("message", "")]
     if run is None:
         return "timeout", {}, ["stanli did not finish"]
     code, out, err = run
@@ -439,7 +448,10 @@ def update_ledger(ledger, results):
         same = ({k: old.get(k) for k in entry} == entry)
         if same and "cause" in old:
             entry["cause"] = old["cause"]
-        elif status in ("points", "one_side_threw", "crashed", "timeout"):
+        elif status == "points" and set(points.values()) == {"wa_unsupported"}:
+            entry["cause"] = details[0].split(": ", 1)[1][:300]
+        elif status in ("points", "one_side_threw", "crashed", "timeout",
+                        "cmdstan_crashed", "cmdstan_timeout"):
             entry["cause"] = "UNTRIAGED: " + "; ".join(details[:3])[:300]
         else:
             entry["cause"] = (details[0] if details else status)[:300]
@@ -498,7 +510,8 @@ def record(models, ctx, args):
         obj, status = model_object(source)
         if status.startswith("stanc_fail"):
             return path, dict(entry, outcome="stanc_fail",
-                              message=first_line(status[len("stanc_fail: "):]))
+                              message=strip_paths(first_line(
+                                  status[len("stanc_fail: "):])))
         if status != "ok":
             raise RuntimeError(f"{path}: CmdStan build failed: {status}")
         exe = work / "bin" / f"{obj.name[:24]}-{driver_sha}"
@@ -517,23 +530,25 @@ def record(models, ctx, args):
         parsed = parse_output(r[1])
         if parsed["pre"] and parsed["pre"][0] in ("DATA_FAIL", "EVAL_FAIL"):
             return path, dict(entry, outcome="data_fail",
-                              message=parsed["pre"][1])
+                              message=strip_paths(parsed["pre"][1]))
         if set(parsed["points"]) != set(POINTS) or r[0] not in (0, 1):
             tail = (r[2] or r[1]).strip().splitlines()[-1:] or [f"exit {r[0]}"]
             return path, dict(entry, outcome="crashed",
-                              message=f"exit {r[0]}: {tail[0][:300]}")
+                              message=strip_paths(
+                                  f"exit {r[0]}: {tail[0][:300]}"))
         points = {}
         for k in POINTS:
             sec = parsed["points"][k]
             st = sec["status"]
             if st is None or st[0] != "OK":
-                points[str(k)] = {"threw": st[1] if st else "no output"}
+                points[str(k)] = {"threw": strip_paths(st[1]) if st
+                                  else "no output"}
                 continue
             pt = {"lp_grad": st[1]}
             wa = sec["wa"]
             if wa is None:
                 raise RuntimeError(f"{path}: no write_array output at {k}")
-            pt["wa"] = ({"threw": wa[1]} if wa[0] == "threw"
+            pt["wa"] = ({"threw": strip_paths(wa[1])} if wa[0] == "threw"
                         else {"names": wa[1], "values": wa[2]})
             points[str(k)] = pt
         return path, dict(entry, outcome="ok", points=points)
@@ -566,6 +581,11 @@ def record(models, ctx, args):
     ctx["refs"] = load_gz(REFERENCES)
 
 
+def strip_paths(message):
+    """A message without the recording machine's directories."""
+    return re.sub(r"(/[^\s'\"]+/)([^/\s'\"]+\.(stan|hpp))", r"\2", message)
+
+
 def first_line(text):
     lines = (text or "").strip().splitlines()
     return lines[0][:300] if lines else ""
@@ -582,6 +602,7 @@ def must(argv):
 
 
 def main(argv=None):
+    global REFERENCES, LEDGER
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--build", type=pathlib.Path, default=REPO / "build-rel")
     ap.add_argument("--shard", default="",
@@ -604,13 +625,17 @@ def main(argv=None):
                     default=REPO / "build-stanc3-ref",
                     help="recorder cache: objects it builds, driver, binaries")
     ap.add_argument("--ref-timeout", type=float, default=60.0)
+    ap.add_argument("--data", type=pathlib.Path, default=DATA)
+    ap.add_argument("--references", type=pathlib.Path, default=REFERENCES)
+    ap.add_argument("--ledger", type=pathlib.Path, default=LEDGER)
     ap.add_argument("--times", action="store_true",
                     help="print the slowest models")
     args = ap.parse_args(argv)
+    REFERENCES, LEDGER = args.references, args.ledger
 
     check_corpus()
     models = corpus_models()
-    data = load_gz(DATA)
+    data = load_gz(args.data)
     ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {}
     overrides = json.loads(OVERRIDES.read_text())
     ctx = {"overrides": overrides, "data": data, "ledger": ledger,

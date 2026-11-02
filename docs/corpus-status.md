@@ -1,11 +1,11 @@
 # Corpus status
 
-Evaluating: 361/362
-CmdStan reference coverage: 361/362 models, 1083 evaluation points.
+Evaluating: 350/351
+CmdStan reference coverage: 350/351 models, 1050 evaluation points.
 
 The shared corpus includes posteriordb, generated brms and cogmod models, ctsem's state-space template, OncoBayes2's dose-escalation model, imported teaching models, and language fixtures. Collection labels retain their source provenance; all references use the same replay in `tools/verify_refs.py`.
 
-Recording-time primary-point comparison metrics retained for 346 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
+Recording-time primary-point comparison metrics retained for 335 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
 
 A model counts as passing only when tools/verify_sample.py matches CmdStan's log_prob and full gradient at the shared deterministic point. Accuracy below is the worst deviation over lp and every gradient component: relative, and in ULPs (0 = bitwise identical to CmdStan). Bitwise counts are reported for information; the replay uses a 1e-9 scaled-error gate with documented ill-conditioned exceptions. Models that evaluate but are not verified are listed separately and are not counted.
 
@@ -109,7 +109,6 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `ch15_m15_9` | rethinking | 4 | 4.7e-15 | 21 |
 | `ch16_m16_1` | rethinking | 4 | 1.8e-15 | 15 |
 | `ch16_m16_4` | rethinking | 4 | 1.7e-15 | 8 |
-| `cholesky_cov_param_block` | stanc3 | 21 | 0 (bitwise) | 0 |
 | `cm_betadiscrete` | cogmod | 5 | 3.8e-16 | 2 |
 | `cm_betagate` | cogmod | 6 | 6.6e-15 | 59 |
 | `cm_bisa` | cogmod | 6 | 0 (bitwise) | 0 |
@@ -137,7 +136,6 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `ctsem_ctsm` | ctsem | 182 | 2.0e-15 | 224 |
 | `ctsem_ctsm_400` | ctsem | 1622 | 2.4e-14 | 192 |
 | `ctsem_ctsm_post4_100` | ctsem | 581 | 1.1e-13 | 2976 |
-| `declare-define-multi` | stanc3 | 376 | 0 (bitwise) | 0 |
 | `diamonds` | posteriordb | 27 | 0 (bitwise) | 0 |
 | `dogs` | posteriordb | 4 | 5.5e-15 | 31 |
 | `dogs_hierarchical` | posteriordb | 3 | 1.2e-15 | 7 |
@@ -203,11 +201,8 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `low_dim_gauss_mix` | posteriordb | 6 | 0 (bitwise) | 0 |
 | `low_dim_gauss_mix_collapse` | posteriordb | 6 | 0 (bitwise) | 0 |
 | `lsat_model` | posteriordb | 1007 | 2.7e-15 | 96 |
-| `lupdf-inlining` | stanc3 | 2 | 0 (bitwise) | 0 |
 | `mesquite` | posteriordb | 9 | 0 (bitwise) | 0 |
-| `mother` | stanc3 | 197 | 5.9e-16 | 5 |
 | `multi_occupancy` | posteriordb | 107 | 4.8e-15 | 36 |
-| `multidim_var_param_ar45_mat23` | stanc3 | 121 | 6.8e-16 | 4 |
 | `nes` | posteriordb | 11 | 0 (bitwise) | 0 |
 | `nes_logit_model` | posteriordb | 3 | 0 (bitwise) | 0 |
 | `nn_rbm1bJ10` | posteriordb | 7952 | 4.6e-16 | 3 |
@@ -218,7 +213,6 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `oncobayes2_blrm_exnex_combo3` | oncobayes2 | 100 | 3.8e-15 | 94 |
 | `oncobayes2_blrm_exnex_sa` | oncobayes2 | 10 | 0 (bitwise) | 0 |
 | `one_comp_mm_elim_abs` | posteriordb | 5 | 6.9e-15 | 256 |
-| `operators` | stanc3 | 25 | 0 (bitwise) | 0 |
 | `pilots` | posteriordb | 19 | 1.4e-16 | 2 |
 | `prophet` | posteriordb | 63 | 3.8e-15 | 21 |
 | `radon_county` | posteriordb | 390 | 5.6e-17 | 60 |
@@ -235,9 +229,8 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `radon_variable_slope_centered` | posteriordb | 391 | 3.0e-14 | 168 |
 | `radon_variable_slope_noncentered` | posteriordb | 391 | 1.5e-14 | 848 |
 | `rats_model` | posteriordb | 66 | 4.1e-16 | 3 |
-| `rbmi_mmrm` | stanc3 | 5 | 2.2e-16 | 1 |
-| `reductions_allowed` | stanc3 | 151 | 0 (bitwise) | 0 |
-| `reject_udf_data_size` | stanc3 | 2 | 0 (bitwise) | 0 |
+| `rbmi_mmrm` | regressions | 5 | 2.2e-16 | 1 |
+| `reject_udf_data_size` | regressions | 2 | 0 (bitwise) | 0 |
 | `s2_ar_cov` | brms | 5 | 3.3e-16 | 2 |
 | `s2_beta_binomial` | brms | 4 | 2.2e-16 | 2 |
 | `s2_car` | brms | 11 | 1.6e-16 | 4 |
@@ -303,7 +296,6 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `sesame_one_pred_a` | posteriordb | 4 | 0 (bitwise) | 0 |
 | `soil_incubation` | posteriordb | 7 | 1.6e-13 | 1241 |
 | `state_space_stochastic_level_stochastic_seasonal` | posteriordb | 390 | 5.8e-16 | 12 |
-| `sum_to_zero` | stanc3 | 148 | 0 (bitwise) | 0 |
 | `surgical_model` | posteriordb | 15 | 0 (bitwise) | 0 |
 | `sw_acat` | brms | 5 | 3.7e-14 | 196 |
 | `sw_acat_cs` | brms | 8 | 4.8e-14 | 383 |
@@ -356,9 +348,6 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `sw_zi_binomial` | brms | 4 | 7.1e-16 | 4 |
 | `sw_zi_negbin` | brms | 5 | 4.2e-16 | 2 |
 | `sw_zi_poisson` | brms | 4 | 3.9e-16 | 2 |
-| `tern_op_contains_var` | stanc3 | 3 | 0 (bitwise) | 0 |
-| `validate_set_double_offset_multiplier_good` | stanc3 | 21 | 1.9e-16 | 1 |
-| `vector-size-stmts` | stanc3 | 110 | 0 (bitwise) | 0 |
 | `wells_daae_c_model` | posteriordb | 7 | 0 (bitwise) | 0 |
 | `wells_dae_c_model` | posteriordb | 6 | 0 (bitwise) | 0 |
 | `wells_dae_inter_model` | posteriordb | 8 | 0 (bitwise) | 0 |
@@ -368,8 +357,8 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `wells_dist100ars_model` | posteriordb | 4 | 0 (bitwise) | 0 |
 | `wells_interaction_c_model` | posteriordb | 5 | 0 (bitwise) | 0 |
 | `wells_interaction_model` | posteriordb | 5 | 0 (bitwise) | 0 |
-| `while_counter_size` | stanc3 | 8 | 0 (bitwise) | 0 |
-| `while_udf_slices` | stanc3 | 7 | 1.4e-16 | 1 |
+| `while_counter_size` | regressions | 8 | 0 (bitwise) | 0 |
+| `while_udf_slices` | regressions | 7 | 1.4e-16 | 1 |
 
 Numerical notes:
 
@@ -480,7 +469,6 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `ch15_m15_9` | 303 |
 | `ch16_m16_1` | 3 |
 | `ch16_m16_4` | 3 |
-| `cholesky_cov_param_block` | 29 |
 | `cm_betadiscrete` | 8 |
 | `cm_betagate` | 10 |
 | `cm_bisa` | 10 |
@@ -508,7 +496,6 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `ctsem_ctsm` | 648 |
 | `ctsem_ctsm_400` | 4968 |
 | `ctsem_ctsm_post4_100` | 4929 |
-| `declare-define-multi` | 452 |
 | `diamonds` | 27 |
 | `dogs` | 2253 |
 | `dogs_hierarchical` | 752 |
@@ -574,11 +561,8 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `low_dim_gauss_mix` | 5 |
 | `low_dim_gauss_mix_collapse` | 5 |
 | `lsat_model` | 1012 |
-| `lupdf-inlining` | 4 |
 | `mesquite` | 8 |
-| `mother` | 899 |
 | `multi_occupancy` | 312 |
-| `multidim_var_param_ar45_mat23` | 120 |
 | `nes` | 10 |
 | `nes_logit_model` | 2 |
 | `nn_rbm1bJ10` | 7951 |
@@ -589,7 +573,6 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `oncobayes2_blrm_exnex_combo3` | 271 |
 | `oncobayes2_blrm_exnex_sa` | 23 |
 | `one_comp_mm_elim_abs` | 44 |
-| `operators` | 35 |
 | `pilots` | 58 |
 | `prophet` | 62 |
 | `radon_county` | 389 |
@@ -607,7 +590,6 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `radon_variable_slope_noncentered` | 776 |
 | `rats_model` | 66 |
 | `rbmi_mmrm` | 15 |
-| `reductions_allowed` | 251 |
 | `reject_udf_data_size` | 1 |
 | `s2_ar_cov` | 70 |
 | `s2_beta_binomial` | 5 |
@@ -674,7 +656,6 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `sesame_one_pred_a` | 3 |
 | `soil_incubation` | 31 |
 | `state_space_stochastic_level_stochastic_seasonal` | 581 |
-| `sum_to_zero` | 630 |
 | `surgical_model` | 28 |
 | `sw_acat` | 9 |
 | `sw_acat_cs` | 12 |
@@ -727,9 +708,6 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `sw_zi_binomial` | 5 |
 | `sw_zi_negbin` | 6 |
 | `sw_zi_poisson` | 5 |
-| `tern_op_contains_var` | 2 |
-| `validate_set_double_offset_multiplier_good` | 22 |
-| `vector-size-stmts` | 323 |
 | `wells_daae_c_model` | 6 |
 | `wells_dae_c_model` | 5 |
 | `wells_dae_inter_model` | 7 |

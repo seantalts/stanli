@@ -594,13 +594,6 @@
   "point": 0,
   "status": "VERIFIED"
  },
- "cholesky_cov_param_block": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 21,
-  "point": 0,
-  "status": "VERIFIED"
- },
  "cm_betadiscrete": {
   "max_rel": 3.846632004976576e-16,
   "max_ulp": 2,
@@ -787,13 +780,6 @@
   "max_rel": 1.1465448463686391e-13,
   "max_ulp": 2976,
   "n_values": 581,
-  "point": 0,
-  "status": "VERIFIED"
- },
- "declare-define-multi": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 376,
   "point": 0,
   "status": "VERIFIED"
  },
@@ -1259,13 +1245,6 @@
   "point": 0,
   "status": "VERIFIED"
  },
- "lupdf-inlining": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 2,
-  "point": 0,
-  "status": "VERIFIED"
- },
  "mesquite": {
   "max_rel": 0.0,
   "max_ulp": 0,
@@ -1273,24 +1252,10 @@
   "point": 0,
   "status": "VERIFIED"
  },
- "mother": {
-  "max_rel": 5.905638507675446e-16,
-  "max_ulp": 5,
-  "n_values": 197,
-  "point": 0,
-  "status": "VERIFIED"
- },
  "multi_occupancy": {
   "max_rel": 4.833372437940825e-15,
   "max_ulp": 36,
   "n_values": 107,
-  "point": 0,
-  "status": "VERIFIED"
- },
- "multidim_var_param_ar45_mat23": {
-  "max_rel": 6.790836272931384e-16,
-  "max_ulp": 4,
-  "n_values": 121,
   "point": 0,
   "status": "VERIFIED"
  },
@@ -1361,13 +1326,6 @@
   "max_rel": 6.8833827526759706e-15,
   "max_ulp": 256,
   "n_values": 5,
-  "point": 0,
-  "status": "VERIFIED"
- },
- "operators": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 25,
   "point": 0,
   "status": "VERIFIED"
  },
@@ -1487,13 +1445,6 @@
   "max_rel": 2.1743569697112637e-16,
   "max_ulp": 1,
   "n_values": 5,
-  "point": 0,
-  "status": "VERIFIED"
- },
- "reductions_allowed": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 151,
   "point": 0,
   "status": "VERIFIED"
  },
@@ -1973,13 +1924,6 @@
   "point": 0,
   "status": "VERIFIED"
  },
- "sum_to_zero": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 148,
-  "point": 0,
-  "status": "VERIFIED"
- },
  "surgical_model": {
   "max_rel": 0.0,
   "max_ulp": 0,
@@ -2341,27 +2285,6 @@
   "max_rel": 3.892599860895256e-16,
   "max_ulp": 2,
   "n_values": 4,
-  "point": 0,
-  "status": "VERIFIED"
- },
- "tern_op_contains_var": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 3,
-  "point": 0,
-  "status": "VERIFIED"
- },
- "validate_set_double_offset_multiplier_good": {
-  "max_rel": 1.8570737506514156e-16,
-  "max_ulp": 1,
-  "n_values": 21,
-  "point": 0,
-  "status": "VERIFIED"
- },
- "vector-size-stmts": {
-  "max_rel": 0.0,
-  "max_ulp": 0,
-  "n_values": 110,
   "point": 0,
   "status": "VERIFIED"
  },
