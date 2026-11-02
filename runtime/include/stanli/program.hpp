@@ -310,7 +310,9 @@ std::string render_program_message(const Program::Message& message,
                                    const T* reg) {
   return render_message(
       message.spec, message.value_reg.size(),
-      [&](std::size_t k) { return static_cast<int64_t>(message.value_len[k]); },
+      [&](std::size_t k) -> const MessageShape& {
+        return message.spec.shapes.at(k);
+      },
       [&](std::size_t k, int64_t i) {
         return stan::math::value_of(reg[message.value_reg[k] + i]);
       });

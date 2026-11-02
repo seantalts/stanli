@@ -203,7 +203,7 @@ std::string render(const KernelCtx& ctx) {
   if (msg == nullptr) throw std::logic_error("message op has no template");
   return render_message(
       *msg, static_cast<size_t>(ctx.n_in),
-      [&](size_t k) { return ctx.in[k].len; },
+      [&](size_t k) -> const MessageShape& { return msg->shapes.at(k); },
       [&](size_t k, int64_t i) { return ctx.in[k].data[i]; });
 }
 

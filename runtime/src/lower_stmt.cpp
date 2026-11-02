@@ -1681,6 +1681,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       if (const auto action = message_action(s.fn_name)) {
         auto spec = std::make_shared<MessageSpec>();
         std::vector<int> ins;
+        std::vector<MessageShape> shapes;
         *spec =
             lower_message_arguments(s.fn_args, [&](const mir::Expr& argument) {
               // Op::in holds six. Keep that backend capacity check here;
@@ -1690,9 +1691,12 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
                                                                  : "reject") +
                          " with more than 6 printed values",
                      s.raw);
-              ins.push_back(lower_expr(argument).slot);
+              const Val v = lower_expr(argument);
+              ins.push_back(v.slot);
+              shapes.push_back(message_shape(argument, v));
             });
         spec->error = message_error(*action);
+        spec->shapes = std::move(shapes);
         Op op;
         op.opcode = *action == MessageAction::Print ? OP_PRINT : OP_REJECT;
         op.n_in = (int)ins.size();

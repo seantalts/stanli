@@ -615,19 +615,28 @@ class MirInterp {
         // refuses to build.
         if (const auto action = message_action(st.fn_name)) {
           std::vector<Value> values;
+          std::vector<MessageShape> shapes;
           const MessageSpec spec = lower_message_arguments(
               st.fn_args, [&](const mir::Expr& argument) {
                 values.push_back(eval(argument));
+                MessageShape shape;
+                shape.column_major = true;
+                shape.integer = message_integer(argument);
+                if (!message_scalar(argument))
+                  shape.dims = values.back().dims.empty()
+                                   ? std::vector<int64_t>{static_cast<int64_t>(
+                                         values.back().r.size())}
+                                   : values.back().dims;
+                shapes.push_back(std::move(shape));
               });
-          execute_message(*action,
-                          render_message(
-                              spec, values.size(),
-                              [&](size_t k) {
-                                return static_cast<int64_t>(values[k].r.size());
-                              },
-                              [&](size_t k, int64_t i) {
-                                return val(values[k].r[static_cast<size_t>(i)]);
-                              }));
+          execute_message(
+              *action,
+              render_message(
+                  spec, values.size(),
+                  [&](size_t k) -> const MessageShape& { return shapes[k]; },
+                  [&](size_t k, int64_t i) {
+                    return val(values[k].r[static_cast<size_t>(i)]);
+                  }));
           return;
         }
         if (st.fn_name == "FnCheck") {

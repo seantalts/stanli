@@ -4854,13 +4854,27 @@ struct ProgramCompiler {
         if (s.fn_name == "FnValidateSize") return;
         if (const auto action = message_action(s.fn_name)) {
           Program::Message message;
+          std::vector<MessageShape> shapes;
           message.spec = lower_message_arguments(
               s.fn_args, [&](const mir::Expr& argument) {
                 const Range value = expr(argument);
                 message.value_reg.push_back(value.reg);
                 message.value_len.push_back(value.len);
+                MessageShape shape;
+                shape.integer = message_integer(argument);
+                if (value.kind == ViewKind::Array) {
+                  shape.dims = value.dims;
+                  shape.matrix_leaf = value.leaf == ViewKind::Matrix;
+                } else if (value.kind == ViewKind::Matrix) {
+                  shape.dims = {value.rows, value.cols};
+                  shape.matrix_leaf = true;
+                } else if (!message_scalar(argument)) {
+                  shape.dims = {value.len};
+                }
+                shapes.push_back(std::move(shape));
               });
           message.spec.error = message_error(*action);
+          message.spec.shapes = std::move(shapes);
           p.messages.push_back(std::move(message));
           emit(*action != MessageAction::Print ? Program::REJECT
                                                : Program::PRINT,

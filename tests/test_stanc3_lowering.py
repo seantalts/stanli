@@ -12,6 +12,15 @@ import tempfile
 
 check = str(pathlib.Path(sys.argv[1]).resolve())
 
+# stan_print's text for each value, from stan/math/prim/fun/stan_print.hpp:
+# one bracketed level per extent, matrices by rows, scalars bare.
+PRINTED = """print([1, 2]', " ", [[1, 2, 3], [4, 5, 6]], " ", {[1, 2]', [3, 4]'});
+          print({{1, 2, 3}, {4, 5, 6}}, " ", {[[1, 2], [3, 4]], [[5, 6], [7, 8]]});
+          print([7]', " ", 7, " ", {[1, 2]});"""
+PRINT_TEXT = ("[1,2] [[1,2,3],[4,5,6]] [[1,2],[3,4]]\n"
+              "[[1,2,3],[4,5,6]] [[[1,2],[3,4]],[[5,6],[7,8]]]\n"
+              "[7] 7 [[1,2]]")
+
 CASES = [
     ("and/or of transformed data assigned to a real",
      """transformed data { int t = 1; int f = 0; }
@@ -306,6 +315,36 @@ CASES = [
           for (n in 1:N)
             for (k in 1:2) target += poisson_log_lpmf(y[n, k] | a + xr[n] * b);
         }"""}),
+    ("print renders containers as stan_print does, in transformed data",
+     """transformed data {
+          PRINTED
+        }
+        parameters { real y; }
+        model { y ~ normal(0, 1); }""".replace("PRINTED", PRINTED),
+     {}, {"stdout": PRINT_TEXT}),
+    ("print renders containers as stan_print does, in the model",
+     """parameters { real y; }
+        model {
+          y ~ normal(0, 1);
+          PRINTED
+        }""".replace("PRINTED", PRINTED),
+     {}, {"stdout": PRINT_TEXT}),
+    ("print renders containers as stan_print does, under a parameter branch",
+     """parameters { real y; }
+        model {
+          y ~ normal(0, 1);
+          if (y > 0) {
+            PRINTED
+          }
+        }""".replace("PRINTED", PRINTED),
+     {}, {"stdout": PRINT_TEXT}),
+    ("reject renders a matrix by rows",
+     """parameters { real y; }
+        model {
+          y ~ normal(0, 1);
+          reject("A:", [[1, 2], [3, 4]] + y);
+        }""",
+     {}, {"eval_fail": "A:[[1.1,2.1],[3.1,4.1]]"}),
 ]
 
 

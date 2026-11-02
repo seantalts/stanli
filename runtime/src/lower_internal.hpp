@@ -1396,6 +1396,21 @@ struct Lowering {
                                                const SlotInfo& expected,
                                                const std::string& name);
   void emit_error(MessageError error, const std::string& message);
+  MessageShape message_shape(const mir::Expr& e, const Val& v) {
+    MessageShape shape;
+    shape.integer = message_integer(e);
+    if (message_scalar(e)) return shape;
+    if (is_array(v.si)) {
+      shape.dims = array_shape(v.si).dims;
+      shape.matrix_leaf = array_shape(v.si).leaf == ViewKind::Matrix;
+    } else if (is_matrix(v.si)) {
+      shape.dims = {v.si.rows, v.si.cols};
+      shape.matrix_leaf = true;
+    } else {
+      shape.dims = {g.slots[v.slot].len};
+    }
+    return shape;
+  }
   // Stan Math's add/subtract check_matching_dims error for two vectors or
   // matrices of different shapes.
   std::optional<std::string> add_size_error(const mir::Expr& e, const Val& a,

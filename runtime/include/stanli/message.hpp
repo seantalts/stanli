@@ -26,8 +26,6 @@ inline std::optional<MessageAction> message_action(std::string_view name) {
   return std::nullopt;
 }
 
-// Literal chunks surrounding runtime values.  There is exactly one more
-// chunk than value: chunk k precedes value k, and the final chunk trails it.
 // reject() throws std::domain_error and fatal_error() std::runtime_error. A
 // statement that CmdStan always rejects at runtime, for a reason the lowering
 // already knows, throws the class Stan Math's check would.
@@ -54,11 +52,6 @@ inline std::string out_of_range_message(const std::string& function,
 
 [[noreturn]] void throw_message(MessageError error, const std::string& message);
 
-struct MessageSpec {
-  std::vector<std::string> chunks;
-  MessageError error = MessageError::Domain;
-};
-
 // stan::math::check_size_match's message.
 inline std::string size_match_message(const std::string& function,
                                       const std::string& name_i, int64_t i,
@@ -67,30 +60,76 @@ inline std::string size_match_message(const std::string& function,
          name_j + " (" + std::to_string(j) + ") must match in size";
 }
 
+// The shape stan_print sees: the array extents, then a vector's length or a
+// matrix's rows and columns. It prints one bracketed, comma-separated level
+// per extent, rows before columns, and a scalar bare. `column_major` says the
+// values are stored first index fastest (the MIR interpreter); otherwise
+// arrays are outer-major and only a matrix leaf is column-major (graph and
+// register storage).
+struct MessageShape {
+  std::vector<int64_t> dims;
+  bool matrix_leaf = false;
+  bool column_major = false;
+  bool integer = false;
+};
+
+// Literal chunks surrounding runtime values.  There is exactly one more
+// chunk than value: chunk k precedes value k, and the final chunk trails it.
+// Backends that know their value shapes when the message is built keep them
+// in `shapes`, one per value.
+struct MessageSpec {
+  std::vector<std::string> chunks;
+  MessageError error = MessageError::Domain;
+  std::vector<MessageShape> shapes;
+};
+
+inline int64_t message_offset(const MessageShape& shape,
+                              const std::vector<int64_t>& index) {
+  const size_t n = shape.dims.size();
+  int64_t offset = 0;
+  if (shape.column_major) {
+    for (size_t d = n; d-- > 0;) offset = offset * shape.dims[d] + index[d];
+    return offset;
+  }
+  const size_t outer = shape.matrix_leaf ? n - 2 : n;
+  for (size_t d = 0; d < outer; ++d) offset = offset * shape.dims[d] + index[d];
+  if (shape.matrix_leaf)
+    offset = offset * shape.dims[n - 2] * shape.dims[n - 1] +
+             index[n - 1] * shape.dims[n - 2] + index[n - 2];
+  return offset;
+}
+
 // Render through accessors instead of owning a particular backend's values.
-// size(k) gives the flattened width of value k; value(k, i) gives its ith
-// scalar as a double.  This keeps scalar/container formatting identical while
-// letting every backend reuse its ordinary expression/value representation.
-template <typename Size, typename Value>
+// shape(k) gives value k's MessageShape; value(k, i) gives the scalar at
+// storage offset i as a double.
+template <typename Shape, typename Value>
 std::string render_message(const MessageSpec& spec, std::size_t value_count,
-                           Size size, Value value) {
+                           Shape shape, Value value) {
   if (spec.chunks.size() != value_count + 1)
     throw std::logic_error("malformed message template");
   std::ostringstream out;
   for (std::size_t k = 0; k < value_count; ++k) {
     out << spec.chunks[k];
-    const int64_t len = size(k);
-    if (len < 0) throw std::logic_error("negative message value length");
-    if (len == 1) {
-      out << value(k, 0);
-      continue;
-    }
-    out << '[';
-    for (int64_t i = 0; i < len; ++i) {
-      if (i) out << ',';
-      out << value(k, i);
-    }
-    out << ']';
+    const MessageShape& s = shape(k);
+    std::vector<int64_t> index(s.dims.size(), 0);
+    const auto scalar = [&] {
+      const double x = value(k, message_offset(s, index));
+      if (s.integer)
+        out << static_cast<int64_t>(x);
+      else
+        out << x;
+    };
+    const auto level = [&](const auto& self, size_t d) -> void {
+      if (d == s.dims.size()) return scalar();
+      out << '[';
+      for (int64_t i = 0; i < s.dims[d]; ++i) {
+        if (i) out << ',';
+        index[d] = i;
+        self(self, d + 1);
+      }
+      out << ']';
+    };
+    level(level, 0);
   }
   out << spec.chunks.back();
   return out.str();
