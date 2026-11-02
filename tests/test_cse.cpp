@@ -109,7 +109,8 @@ static void test_keeps_effectful_ops() {
                                 OP_CHECK_STRUCTURED,
                                 OP_CHECK_MATCHING_DIMS,
                                 OP_CHECK_LOWER,
-                                OP_CHECK_UPPER};
+                                OP_CHECK_UPPER,
+                                OP_CHECK_OFFSET_MULTIPLIER};
   for (uint16_t oc : effectful) {
     Graph g;
     Fills fills;
