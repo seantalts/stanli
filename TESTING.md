@@ -115,7 +115,7 @@ The jobs are in [`wheels.yml`](.github/workflows/wheels.yml),
 | [coverage ratchet](#testing-stan-language-coverage) | each generated case's status | the checked-in baseline | nightly | the coverage totals themselves |
 | [integrated function models](#testing-stan-language-coverage) | 10 models using 430 function names, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | every overload of each name |
 | [signature replay](#testing-stan-language-coverage) | 73 generated models covering 19,538 signatures, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | signatures the generators exclude |
-| [stanc3 test models](#testing-stan-language-coverage) | the 1,244 models in stanc3's integration tests, lp, gradient and write_array at 4 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
+| [stanc3 test models](#testing-stan-language-coverage) | the 1,244 models in stanc3's integration tests, lp, gradient and write_array at 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
 | Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly | |
 | [installed clients](#installed-clients) | the built wheel, R package and BridgeStan transport | API tests and R ecosystem consumers; skips fail | PR on Linux and Windows x64; post-merge adds wheel tests on macOS and Linux aarch64 and R tests on macOS arm64 | macOS and aarch64 before merge |
 | [brms end to end](#samplers-and-other-algorithms) | `brm()` fits of the 124 brms formulas with the `stanli` backend | the same fits with brms's `cmdstanr` backend | by hand | anything beyond posterior means; platforms other than macOS arm64 |
@@ -405,7 +405,7 @@ generators exclude.
 models in stanc3's `test/integration/good`, which hold syntax and type
 combinations that posteriordb and the generators miss. Each model's log
 density, gradient and full write_array row, RNG draws included, are compared
-with recorded CmdStan answers at four points under the 1e-9 gate; where CmdStan
+with recorded CmdStan answers at five points under the 1e-9 gate; where CmdStan
 throws, stanli must throw with the same message. Data is generated once and
 checked in. Every model that is not fully verified is listed in
 [`tests/stanc3_good/ledger.json`](tests/stanc3_good/ledger.json) with a cause,

@@ -572,6 +572,14 @@ def record(models, ctx, args):
     done = 0
     known = set(corpus_models())
     models_out = {p: e for p, e in ctx["refs"]["models"].items() if p in known}
+    same_driver = (ctx["refs"].get("toolchain", {}).get("ref_driver_sha256")
+                   == source_digest(driver))
+    if not same_driver and args.filter and ctx["refs"]["models"]:
+        raise SystemExit("ref_driver.cpp changed: re-record the whole corpus")
+    if same_driver and not args.all:
+        models = [m for m in models if stale(m, ctx)]
+    print(f"recording {len(models)} models", flush=True)
+
     def guarded(path):
         try:
             return record_one(path)
@@ -614,6 +622,17 @@ def strip_paths(message):
     return re.sub(r"(/[^\s'\"]+/)([^/\s'\"]+\.(stan|hpp))", r"\2", message)
 
 
+def stale(path, ctx):
+    """Whether a model's recorded inputs differ from the current ones."""
+    ref = ctx["refs"]["models"].get(path)
+    if ref is None:
+        return True
+    source, data = model_input(path, ctx["overrides"], ctx["data"])
+    data_sha = None if data is None else sha256(data_bytes(data))
+    return (ref["source_sha256"] != source_digest(source)
+            or ref.get("data_sha256") != data_sha)
+
+
 def first_line(text):
     lines = (text or "").strip().splitlines()
     return lines[0][:300] if lines else ""
@@ -652,6 +671,9 @@ def main(argv=None):
     ap.add_argument("--work", type=pathlib.Path,
                     default=REPO / "build-stanc3-ref",
                     help="recorder cache: objects it builds, driver, binaries")
+    ap.add_argument("--all", action="store_true",
+                    help="with --record, re-record models whose inputs and "
+                         "driver are unchanged too")
     ap.add_argument("--ref-timeout", type=float, default=600.0)
     ap.add_argument("--data", type=pathlib.Path, default=DATA)
     ap.add_argument("--references", type=pathlib.Path, default=REFERENCES)

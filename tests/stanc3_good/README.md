@@ -3,8 +3,8 @@
 stanc3 keeps 1,244 models in `test/integration/good` to test that they
 compile. They cover syntax and type combinations that posteriordb and the
 signature generators never produce. This suite runs every one of them
-through stanli and compares the results with CmdStan's answers at four
-unconstrained points (`eval_point` variants 0 to 3 in
+through stanli and compares the results with CmdStan's answers at five
+unconstrained points (`eval_point` variants 0 to 4 in
 `tools/stanli_check.cpp` and `tools/ref_driver.cpp`):
 
 - the log density and its full gradient,
