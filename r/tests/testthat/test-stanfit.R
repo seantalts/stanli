@@ -170,6 +170,7 @@ test_that("serialized model-dependent calls fail safely without a live handle", 
   skip_without_runtime()
   skip_if_not_installed("rstan")
   skip_if_not_installed("callr")
+  skip_if_no_subprocess()
   fit <- sample_model(es_model(), chains = 1, warmup = 20, samples = 20, refresh = 0)
   sf <- as_stanfit(fit)
   # A subprocess turns a native crash into a test failure, not a lost test run.

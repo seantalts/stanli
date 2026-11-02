@@ -20,7 +20,11 @@
 #'   "Fixed_param"` work as in rstan, and `chain_id`, `init_r`, `refresh` and
 #'   `save_warmup` are accepted through `...`. `control` takes `adapt_delta`,
 #'   `max_treedepth`, `stepsize`, `metric` and `adapt_engaged`; any other entry
-#'   is an error naming it. `algorithm = "HMC"`, `sample_file` and
+#'   prints an error naming it, then `sampling()` messages "error in specifying
+#'   arguments; sampling not done" and returns an empty fit, as rstan does. A
+#'   model that cannot be built from the data, such as one whose transformed data
+#'   rejects, is reported the same way with "failed to create the sampler;
+#'   sampling not done". `algorithm = "HMC"`, `sample_file` and
 #'   `diagnostic_file` are errors. `init` may be `"random"`, a radius, `"0"`, a
 #'   list for all chains, a list of lists with one per chain, or a function
 #'   called as `f(chain_id = k)` when it has that argument and `f()` otherwise.
@@ -148,11 +152,19 @@ stanmodel_data <- function(data, caller) {
 }
 
 stanmodel_build <- function(object, data, seed, caller) {
-  model <- stanli_model(code = object@model_code,
-                        data = stanmodel_data(data, caller), seed = seed)
+  data <- stanmodel_data(data, caller)
+  model <- try(rethrow_message(
+    stanli_model(code = object@model_code, data = data, seed = seed)))
+  if (inherits(model, "try-error")) {
+    message("failed to create the sampler; sampling not done")
+    return(NULL)
+  }
   model$model_name <- object@model_name
   model
 }
+
+rethrow_message <- function(expr)
+  tryCatch(expr, error = function(e) stop(conditionMessage(e), call. = FALSE))
 
 stanmodel_seed <- function(seed) {
   if (length(seed) != 1L || !is.numeric(seed) || is.na(seed) ||
@@ -260,15 +272,20 @@ stanmodel_sampling <- function(object, data = list(), pars = NA, chains = 4,
   init_r <- if (is.null(dots$init_r)) 2 else dots$init_r
   refresh <- if (is.null(dots$refresh)) max(iter %/% 10L, 1L) else dots$refresh
   save_warmup <- if (is.null(dots$save_warmup)) TRUE else dots$save_warmup
-  settings <- if (algorithm == "NUTS") stanmodel_control(control)
   stanfit_flag(save_warmup, "save_warmup")
 
   preserve_random_seed({
     model <- stanmodel_build(object, data, seed, .caller)
+    if (is.null(model)) return(invisible(stanfit_empty_unbuilt(object)))
     exclude <- stanmodel_exclude(model, pars, include)
+    settings <- if (algorithm == "NUTS" && chains >= 1L)
+      try(rethrow_message(stanmodel_control(control)))
     if (chains < 1L) {
       message("the number of chains is less than 1; sampling not done")
-      stanfit_empty(model)
+      invisible(stanfit_empty(model))
+    } else if (inherits(settings, "try-error")) {
+      message("error in specifying arguments; sampling not done")
+      invisible(stanfit_empty(model))
     } else {
       start <- rstan_init(model, init, chains = chains, seed = seed,
                           init_r = init_r, chain_id = chain_id)
@@ -320,6 +337,7 @@ stanmodel_vb <- function(object, data = list(), pars = NA, include = TRUE,
   seed <- stanmodel_seed(seed)
   preserve_random_seed({
     model <- stanmodel_build(object, data, seed, .caller)
+    if (is.null(model)) return(invisible(stanfit_empty_unbuilt(object)))
     exclude <- stanmodel_exclude(model, pars, include)
     start <- rstan_init(model, init, chains = 1L, seed = seed,
                         init_r = option("init_r", 2))

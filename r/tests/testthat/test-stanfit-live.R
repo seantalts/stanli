@@ -77,6 +77,7 @@ test_that("a fresh session restores subclass draws and reports a missing handle"
   skip_without_runtime()
   skip_if_not_installed("rstan")
   skip_if_not_installed("callr")
+  skip_if_no_subprocess()
   fit <- sample_model(es_model(), chains = 2, warmup = 50, samples = 50, refresh = 0)
   sf <- as_stanfit(fit)
   file <- tempfile(fileext = ".rds")

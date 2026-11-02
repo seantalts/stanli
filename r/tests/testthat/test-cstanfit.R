@@ -118,6 +118,7 @@ test_that("CmdStan-style views preserve warmup metadata and reject invalid reque
 
 test_that("serialized CmdStan-style methods load without either Stan frontend or runtime", {
   skip_if_not_installed("callr")
+  skip_if_no_subprocess()
   skip_if_not_installed("posterior")
   path <- tempfile(fileext=".rds"); on.exit(unlink(path))
   fit <- as_cstanfit(cstan_fixture())

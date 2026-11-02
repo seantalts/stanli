@@ -5,6 +5,18 @@ skip_without_runtime <- function() {
   if (!stanli_available()) skip("no stanli runtime installed")
 }
 
+subprocess_available <- function(os = R.version$os, bin = R.home("bin")) {
+  !grepl("emscripten", os, fixed = TRUE) && dir.exists(bin)
+}
+
+skip_if_no_subprocess <- function(...) {
+  if (!subprocess_available(...)) skip("cannot start a subprocess here")
+}
+
+skip_without_threads <- function() {
+  if (!stanli_thread_safe()) skip("runtime built without threads")
+}
+
 es_model <- function() {
   code <- "
     data { int<lower=0> J; array[J] real y; array[J] real<lower=0> sigma; }
