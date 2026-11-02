@@ -174,8 +174,9 @@ int main(int argc, char** argv) {
                                                              argv[1], fast_math)
                            : read_mir(mir_path);
     if (mir.empty()) {
-      std::printf("COMPILE_FAIL %s produced no MIR\n",
-                  mir_path.empty() ? "the compiler" : "the MIR file");
+      std::printf("COMPILE_FAIL %s\n",
+                  mir_path.empty() ? "the Stan compiler exited without output"
+                                   : "the MIR file is empty");
       return 1;
     }
   } catch (const std::exception& e) {

@@ -928,6 +928,9 @@ endfunction()
 # stanc to find -- which is the whole point of an interpreter for a
 # language whose reference implementation compiles C++ per model.
 add_library(stanli_stanc_process STATIC tools/stanc_process.cpp)
+if(NOT EMSCRIPTEN)
+  target_link_libraries(stanli_stanc_process PRIVATE Threads::Threads)
+endif()
 add_executable(stanli_run tools/stanli_run.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(stanli_run PRIVATE stanli stanli_stanc_process)
