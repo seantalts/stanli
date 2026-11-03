@@ -138,7 +138,8 @@ jobs:
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           working-directory: r
-          extra-packages: any::rcmdcheck
+          # nutpieR is only on r-universe; skip it as CRAN would.
+          extra-packages: any::rcmdcheck, nutpieR=?ignore
           needs: check
 
       - uses: r-lib/actions/check-r-package@v2
