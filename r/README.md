@@ -159,7 +159,7 @@ wrong, more often in the spread than in the centre. Compare with
 
 `sample_nutpie()` runs the model with [nutpie](https://github.com/pymc-devs/nutpie)'s
 sampler through the BridgeStan interface that the runtime exposes. It needs the
-nutpieR package, which is not on CRAN:
+nutpieR package, version 1.9.0 or later, which is not on CRAN:
 
 ```r
 install.packages("nutpieR", repos = c("https://andytimm.r-universe.dev",

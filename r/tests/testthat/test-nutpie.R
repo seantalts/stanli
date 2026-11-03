@@ -25,8 +25,15 @@ nutpie_fit <- function(model = nutpie_eight_schools(), ...) {
 }
 
 test_that("sample_nutpie names the install when nutpieR is missing", {
-  local_mocked_bindings(nutpie_installed = function() FALSE, .package = "stanli")
-  expect_error(sample_nutpie(NULL), "nutpieR.*install\\.packages.*andytimm")
+  local_mocked_bindings(nutpie_version = function() NULL, .package = "stanli")
+  expect_error(sample_nutpie(NULL), "needs the nutpieR package.*install\\.packages.*andytimm")
+})
+
+test_that("sample_nutpie names the update when nutpieR is too old", {
+  local_mocked_bindings(nutpie_version = function() package_version("1.8.7"),
+                        .package = "stanli")
+  expect_error(sample_nutpie(NULL),
+               "nutpieR 1\\.9\\.0 or later; 1\\.8\\.7 is installed.*install\\.packages.*andytimm")
 })
 
 test_that("sample_nutpie rejects arguments it sets itself", {
