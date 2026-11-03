@@ -16,30 +16,26 @@ their numerical limits see [TESTING.md](../TESTING.md).
 The checked-in conformance baseline
 ([`conformance-baseline.json.gz`](internal/artifacts/conformance-baseline.json.gz))
 was produced with stanc3 2.40.0 (`d58446e6`). It holds 24,291 Stan Math
-signatures and 31 language-construct cases, of which 19,009 are verified
+signatures and 31 language-construct cases, of which 19,035 are verified
 against CmdStan. A separate generated replay covers 7,407 builtin and 12,131
 density signatures as 66,698 cases across 73 models, including mixed
 data/parameter arguments.
 
 | family | name metric | verified | unexpected unsupported | generator gaps | inapplicable |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| densities (`_lpdf`, `_lpmf`) | 72 / 73 | 3,852 | 6 | 188 | 9 |
+| densities (`_lpdf`, `_lpmf`) | 73 / 73 | 3,858 | 0 | 188 | 9 |
 | distribution functions (`_cdf`, `_lcdf`, `_lccdf`) | 108 / 108 | 8,068 | 0 | 18 | 24 |
-| scalar math | 94 / 100 | 89 | 6 | 0 | 5 |
+| scalar math | 100 / 100 | 95 | 0 | 0 | 5 |
 
 The name metric counts names with no `unexpected_unsupported` signature. It is
-a regression count, and a name can pass it without every overload working. For
-example, the classic five-argument `wiener_lpdf` works and its extended
-overloads do not.
+a regression count, and a name can pass it without every overload working.
 
 The status columns count signatures. For densities and distribution functions
 they cover every signature in the inventory. The scalar-math row counts names
 that have a signature with one to five `real` arguments and a `real` result,
 excluding densities, distribution functions, RNGs and quantiles (`_qf`,
 `_log_qf`); its status columns cover only those 100 all-real signatures.
-`hypergeometric_1F0(real, real)` has gained support since the baseline was
-recorded and is covered by fresh CmdStan references, so five scalar names
-remain missing. The baseline also verifies all 256 `student_t_qf` overloads.
+The baseline also verifies all 256 `student_t_qf` overloads.
 
 ## How to read the classifications
 
@@ -199,9 +195,9 @@ one X-macro entry only when an existing layout fits. See
 `python3 tools/coverage_summary.py` prints the name-metric rows above:
 
 ```text
-densities (72, 73)
+densities (73, 73)
 distribution functions (108, 108)
-scalar math (94, 100)
+scalar math (100, 100)
 ```
 
 The full differential run is
