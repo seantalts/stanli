@@ -628,6 +628,9 @@ def runtime_path() -> pathlib.Path:
                    else "stanli.dll")
 
 
+_runtime_lib_path = runtime_path
+
+
 def _source_label(stan_file, stan_code):
     return None if stan_code is not None or stan_file is None else os.fspath(stan_file)
 
