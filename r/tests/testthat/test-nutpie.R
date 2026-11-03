@@ -124,10 +124,10 @@ test_that("save_warmup puts the warmup draws first", {
                                 data = bridgestan_data(model), num_draws = 40,
                                 num_warmup = 60, num_chains = 2, seed = 5,
                                 save_warmup = TRUE, progress = "none")
-  expect_identical(unname(unclass(fit$draws[1:60, , "mu"])),
-                   unname(unclass(attr(raw, "warmup_draws")[, , "mu"])))
-  expect_identical(unname(unclass(fit$draws[61:100, , "mu"])),
-                   unname(unclass(raw[, , "mu"])))
+  warm <- unclass(attr(raw, "warmup_draws"))
+  post <- unclass(raw)
+  expect_identical(unname(fit$draws[1:60, , "mu"]), unname(warm[, , "mu"]))
+  expect_identical(unname(fit$draws[61:100, , "mu"]), unname(post[, , "mu"]))
   expect_identical(unname(dim(as_draws_array(fit))[1L]), 40L)
   expect_identical(unname(dim(as_draws_array(fit, inc_warmup = TRUE))[1L]), 100L)
   expect_true(all(fit$sampler[1:60, , "stepsize__"] > 0))
