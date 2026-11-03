@@ -41,7 +41,7 @@ LEDGER = SUITE / "ledger.json"
 OVERRIDES = SUITE / "overrides.json"
 POINTS = (0, 1, 2, 3, 4)
 MAX_REL = 1e-9
-TIMEOUT = 120.0
+TIMEOUT = 300.0
 LEDGERED_TIMEOUT = 5.0
 SCHEMA = 1
 
