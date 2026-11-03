@@ -130,7 +130,9 @@ jobs:
           # `true` is restricted to selected owners on macOS. Posit's gzip
           # binaries avoid pak's lack of zstd support (r-lib/pkgdepends#485).
           use-public-rspm: always
-          extra-repositories: https://stan-dev.r-universe.dev
+          extra-repositories: |
+            https://stan-dev.r-universe.dev
+            https://andytimm.r-universe.dev
 
       - uses: r-lib/actions/setup-tinytex@v2
         if: matrix.tex
@@ -138,7 +140,8 @@ jobs:
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           working-directory: r
-          # nutpieR is only on r-universe; skip it as CRAN would.
+          # nutpieR is only on r-universe. pak resolves it on macOS and
+          # Windows even when told to skip it, so the repository is listed.
           extra-packages: any::rcmdcheck, nutpieR=?ignore
           needs: check
 
