@@ -65,7 +65,26 @@ bridgestan_data <- function(model) {
   out
 }
 
-nutpie_installed <- function() requireNamespace("nutpieR", quietly = TRUE)
+nutpie_version <- function() {
+  if (requireNamespace("nutpieR", quietly = TRUE))
+    utils::packageVersion("nutpieR")
+}
+
+# nutpie_sample()'s adaptation argument arrived in 1.7.0, its sampling_time
+# attribute in 1.9.0.
+nutpie_minimum <- "1.9.0"
+
+nutpie_check <- function() {
+  version <- nutpie_version()
+  if (!is.null(version) && version >= nutpie_minimum) return(invisible())
+  stop("sample_nutpie() ",
+       if (is.null(version)) "needs the nutpieR package"
+       else paste0("needs nutpieR ", nutpie_minimum, " or later; ", version,
+                   " is installed"),
+       ". Install it with install.packages(\"nutpieR\", repos = c(",
+       "\"https://andytimm.r-universe.dev\", ",
+       "\"https://cloud.r-project.org\"))", call. = FALSE)
+}
 
 nutpie_reserved <- c("model", "data", "num_draws", "num_warmup", "num_chains",
                      "seed", "adaptation", "save_warmup", "store_unconstrained",
@@ -80,7 +99,8 @@ nutpie_reserved <- c("model", "data", "num_draws", "num_warmup", "num_chains",
 #' suits a model better, for instance the low-rank mass matrix on a
 #' posterior with strong correlations.
 #'
-#' nutpieR is not installed with stanli. Install it with
+#' nutpieR 1.9.0 or later is needed and is not installed with stanli. Install
+#' it with
 #' `install.packages("nutpieR", repos = c("https://andytimm.r-universe.dev",
 #' "https://cloud.r-project.org"))`.
 #'
@@ -115,11 +135,7 @@ nutpie_reserved <- c("model", "data", "num_draws", "num_warmup", "num_chains",
 sample_nutpie <- function(model, chains = 4, seed = 1, warmup = NULL,
                           samples = 1000, adaptation = c("diag", "low_rank"),
                           save_warmup = FALSE, ...) {
-  if (!nutpie_installed())
-    stop("sample_nutpie() needs the nutpieR package. Install it with ",
-         "install.packages(\"nutpieR\", repos = c(",
-         "\"https://andytimm.r-universe.dev\", ",
-         "\"https://cloud.r-project.org\"))", call. = FALSE)
+  nutpie_check()
   if (!inherits(model, "stanli_model"))
     stop("model must be a stanli_model", call. = FALSE)
   extra <- list(...)

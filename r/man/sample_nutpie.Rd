@@ -46,7 +46,8 @@ suits a model better, for instance the low-rank mass matrix on a
 posterior with strong correlations.
 }
 \details{
-nutpieR is not installed with stanli. Install it with
+nutpieR 1.9.0 or later is needed and is not installed with stanli. Install
+it with
 `install.packages("nutpieR", repos = c("https://andytimm.r-universe.dev",
 "https://cloud.r-project.org"))`.
 

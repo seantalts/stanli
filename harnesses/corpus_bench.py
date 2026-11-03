@@ -259,7 +259,16 @@ def kept_points(pair):
             if a["finite"] and b["finite"]]
 
 
-def check_pair(pair):
+# CmdStan's gradient is no reference for these models, so only lp is gated.
+# tools/verify_refs.py gates their gradients at the recorded points.
+LP_ONLY = {
+    "kronecker_gp": "eigenvectors_sym of a covariance with eigenvalue gaps "
+                    "near 1e-17: against a 160-digit reference CmdStan's "
+                    "d/d var1 is -27.2 where the truth is -11.44",
+}
+
+
+def check_pair(pair, lp_only=False):
     kept, dropped, errors, width = [], [], [], None
     for a, b in zip(pair["stanli"]["points"], pair["cmdstan"]["points"]):
         k = a["point"]
@@ -271,7 +280,8 @@ def check_pair(pair):
             raise PhaseFailure(f"point {k} is non-finite in {bad} but finite in {good}")
         if len(a["values"]) != len(b["values"]):
             raise PhaseFailure(f"point {k}: density/gradient widths differ")
-        error = max(abs(x - y) / max(abs(x), abs(y), 1) for x, y in zip(a["values"], b["values"]))
+        compared = zip(a["values"][:1], b["values"][:1]) if lp_only else zip(a["values"], b["values"])
+        error = max(abs(x - y) / max(abs(x), abs(y), 1) for x, y in compared)
         if error > 1e-9:
             raise PhaseFailure(f"point {k}: density/gradient mismatch: scaled error {error:.3g}")
         kept.append(k)
@@ -742,7 +752,7 @@ def measure_model(name, stan, data, directory, manifest, runner, args, build=Non
                 pair[engine] = parse_timing(runner.text(event), args.warmup_ms, args.measure_ms,
                                              args.points)
                 pair[engine]["event"] = event["id"]
-            checked = check_pair(pair)
+            checked = check_pair(pair, lp_only=name in LP_ONLY)
             strip_values(pair)
             record["gradients"].append(dict(pair, order=list(order), **checked))
         if any(g["kept_points"] != record["gradients"][0]["kept_points"] for g in record["gradients"]):
