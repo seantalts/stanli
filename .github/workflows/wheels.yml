@@ -1815,8 +1815,8 @@ jobs:
 
   # The tests that run chains, or lower write_array, on worker threads, under
   # ThreadSanitizer. Five binaries rather than the suite: the instrumentation
-  # is only informative where a second thread exists, and building just those
-  # keeps the job to minutes without a compiler cache.
+  # is only informative where a second thread exists. Without a compiler
+  # cache the build alone took 26-28 minutes at -j2.
   tsan:
     name: threaded tests under ThreadSanitizer
     needs: build
@@ -1827,7 +1827,7 @@ jobs:
     env:
       CC: clang
       CXX: clang++
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -1854,7 +1854,7 @@ jobs:
             -DCMAKE_C_FLAGS="-O1 -g1" -DCMAKE_CXX_FLAGS="-O1 -g1" \
             -DSTANLI_SANITIZE=thread \
             -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX"
-          cmake --build build-tsan -j2 \
+          cmake --build build-tsan -j4 \
             --target test_capi test_pool test_multichain \
             test_wa_parallel test_wa_parallel_abi
       - name: ctest
