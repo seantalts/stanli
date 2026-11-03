@@ -155,6 +155,28 @@ wrong, more often in the spread than in the centre. Compare with
 `num_elbo_draws`, `history_size` and `init_radius`, cannot be combined with
 `init`, and does no PSIS resampling.
 
+## nutpie
+
+`sample_nutpie()` runs the model with [nutpie](https://github.com/pymc-devs/nutpie)'s
+sampler through the BridgeStan interface that the runtime exposes. It needs the
+nutpieR package, which is not on CRAN:
+
+```r
+install.packages("nutpieR", repos = c("https://andytimm.r-universe.dev",
+                                      "https://cloud.r-project.org"))
+fit <- sample_nutpie(m, chains = 4, seed = 1, adaptation = "low_rank")
+```
+
+The result is a `stanli_fit`, so `summary()`, `stanli_diagnose()`,
+`as_draws_array()`, `log_lik()` and the fit adapters work on it. Its `lp__`
+is the same quantity as in `sample_model()`. `fit$inv_metric` is `NULL`
+because nutpie's mass matrix is not one `sample_model(inv_metric = )` accepts.
+Further `nutpieR::nutpie_sample()` arguments such as `target_accept` and
+`max_treedepth` go through `...`.
+
+To drive any other BridgeStan client, load `stanli_runtime_path()` as the
+model library and pass `bridgestan_data(m)` as the data argument.
+
 ## Fit adapters
 
 Three views of a fit serve code written against RStan or CmdStanR:
@@ -317,6 +339,9 @@ optimize_model(m, seed = 1, iter = 2000, init = NULL, init_radius = 2)
 variational_model(m, algorithm = "meanfield", iter = 10000, draws = 1000, ...)
 pathfinder_model(m, draws = 1000, ...)
 laplace_model(m, mode = NULL, draws = 1000, ...)
+sample_nutpie(m, chains = 4, seed = 1, warmup = NULL, samples = 1000,
+              adaptation = "diag", ...)   # needs nutpieR
+bridgestan_data(m); stanli_build_id()
 
 summary(fit); stanli_diagnose(fit); log_lik(fit)
 as_draws_array(fit, include_sampler = FALSE, inc_warmup = FALSE)

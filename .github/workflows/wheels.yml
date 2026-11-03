@@ -1083,7 +1083,9 @@ jobs:
       - uses: r-lib/actions/setup-r@v2
         with:
           use-public-rspm: true
-          extra-repositories: https://stan-dev.r-universe.dev
+          extra-repositories: |
+            https://stan-dev.r-universe.dev
+            https://andytimm.r-universe.dev
 
       # V8 and jsonlite exercise the compiler the R package actually ships.
       - uses: r-lib/actions/setup-r-dependencies@v2
@@ -1091,7 +1093,7 @@ jobs:
           working-directory: r
           extra-packages: >-
             any::testthat, any::posterior, any::V8, any::jsonlite,
-            any::bayesplot, any::loo, any::tidybayes, any::callr, any::rstan, any::shinystan, any::cmdstanr
+            any::bayesplot, any::loo, any::tidybayes, any::callr, any::rstan, any::shinystan, any::cmdstanr, any::nutpieR
           dependencies: '"hard"'
 
       # Through R CMD check rather than testthat directly, so the tests run
@@ -1112,6 +1114,10 @@ jobs:
           cat "$log"
           if grep -q 'no stanli runtime installed' "$log"; then
             echo "the sampling tests skipped: the runtime was not seen"
+            exit 1
+          fi
+          if grep -q 'nutpieR is not installed' "$log"; then
+            echo "the nutpie tests skipped: nutpieR was not installed"
             exit 1
           fi
 
@@ -1556,6 +1562,7 @@ jobs:
           $whl = Get-Item dist\*.whl
           wheeltest\Scripts\pip install $whl.FullName
           wheeltest\Scripts\python tests\test_python.py
+          wheeltest\Scripts\python tests\test_bridgestan_embed.py
 
       - uses: actions/upload-artifact@v4
         with:
