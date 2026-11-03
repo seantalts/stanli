@@ -143,6 +143,12 @@ Outcome stan_outcome(const LeafCase& c, const std::vector<double>& x) {
       case Transform::CholeskyCov:
         stan::math::check_cholesky_factor("oracle", c.name, m);
         return;
+      case Transform::StochasticColumn:
+        stan::math::check_stochastic_column("oracle", c.name, m);
+        return;
+      case Transform::StochasticRow:
+        stan::math::check_stochastic_row("oracle", c.name, m);
+        return;
       default:
         throw std::logic_error("non-structured oracle kind");
     }
@@ -225,6 +231,20 @@ void test_leaf_oracles() {
        2,
        {1, 0, 0, 0, 1, 0},
        {1, 0, 0, 0.2, 1, 0}},
+      {"column_stochastic_matrix",
+       Transform::StochasticColumn,
+       UnsizedLeaf::Matrix,
+       2,
+       2,
+       {0.3, 0.7, 0.5, 0.5},
+       {0.3, 0.8, 0.5, 0.5}},
+      {"row_stochastic_matrix",
+       Transform::StochasticRow,
+       UnsizedLeaf::Matrix,
+       2,
+       2,
+       {0.3, 0.5, 0.7, 0.5},
+       {0.3, 0.5, 0.8, 0.5}},
       // Stan Math checks the grand matrix total, not each row/column.
       {"sum_to_zero_matrix",
        Transform::SumToZero,

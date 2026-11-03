@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <map>
@@ -56,10 +57,51 @@ static double eval_point(int64_t i, int variant) {
       return 0.02 * static_cast<double>((i % 5) - 2);
     case 2:
       return 0.0;
+    case 3:
+    case 4: {
+      uint64_t z = static_cast<uint64_t>(i) + 0x9E3779B97F4A7C15ull;
+      z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+      z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+      z ^= z >> 31;
+      const double u = static_cast<double>(z >> 11) * 0x1.0p-53;
+      // Variant 4 keeps every component in (0.1, 0.9), where an
+      // unconstrained real used as a scale or a probability is valid.
+      return variant == 3 ? -1.5 + 3.0 * u : 0.1 + 0.8 * u;
+    }
     default:
       return 0.1 + 0.05 * static_cast<double>(i % 7) -
              0.15 * static_cast<double>(i % 3);
   }
+}
+
+static std::string one_line(std::string s) {
+  while (!s.empty() &&
+         (s.back() == '\n' || s.back() == '\r' || s.back() == ' '))
+    s.pop_back();
+  std::string out;
+  for (size_t i = 0; i < s.size(); ++i) {
+    if (s[i] == '\r' && i + 1 < s.size() && s[i + 1] == '\n') continue;
+    if (s[i] == '\n' || s[i] == '\r')
+      out += " | ";
+    else
+      out += s[i];
+  }
+  return out;
+}
+
+static bool parse_points(const std::string& list, std::vector<int>* out) {
+  size_t pos = 0;
+  while (pos <= list.size()) {
+    size_t comma = list.find(',', pos);
+    if (comma == std::string::npos) comma = list.size();
+    const std::string tok = list.substr(pos, comma - pos);
+    char* end = nullptr;
+    const long v = std::strtol(tok.c_str(), &end, 10);
+    if (tok.empty() || *end != '\0' || v < 0) return false;
+    out->push_back(static_cast<int>(v));
+    pos = comma + 1;
+  }
+  return true;
 }
 
 static void print_sweep_point(int k, double lp,
@@ -95,7 +137,8 @@ int main(int argc, char** argv) {
     std::fprintf(stderr,
                  "usage: stanli_check model.stan data.json "
                  "[--stanli-compile PATH | --stanc PATH | --mir PATH]\n"
-                 "       [--point N] [--sweep K] [--columns] [--fast-math]\n"
+                 "       [--point N | --points N,N,...] [--sweep K] "
+                 "[--columns] [--fast-math]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
                  "[--draw-variant N] [--ledger PATH]]\n"
                  "       [--dump-passes=STAGES] [--dump-dir=DIR]\n"
@@ -106,6 +149,7 @@ int main(int argc, char** argv) {
   std::string compiler;
   std::string mir_path;
   int variant = 0;
+  std::vector<int> points;
   int sweep = 0;
   bool columns_only = false;
   bool wa_values = false;
@@ -146,7 +190,12 @@ int main(int argc, char** argv) {
       mir_path = argv[++i];
     else if (a == "--point" && i + 1 < argc)
       variant = std::atoi(argv[++i]);
-    else if (a == "--sweep" && i + 1 < argc)
+    else if (a == "--points" && i + 1 < argc) {
+      if (!parse_points(argv[++i], &points)) {
+        std::fprintf(stderr, "stanli_check: bad --points list\n");
+        return 2;
+      }
+    } else if (a == "--sweep" && i + 1 < argc)
       sweep = std::atoi(argv[++i]);
   }
   if (!stanc.empty() + !compiler.empty() + !mir_path.empty() > 1) {
@@ -174,14 +223,17 @@ int main(int argc, char** argv) {
                                                              argv[1], fast_math)
                            : read_mir(mir_path);
     if (mir.empty()) {
-      std::printf("COMPILE_FAIL %s produced no MIR\n",
-                  mir_path.empty() ? "the compiler" : "the MIR file");
+      std::printf("COMPILE_FAIL %s\n",
+                  mir_path.empty() ? "the Stan compiler exited without output"
+                                   : "the MIR file is empty");
       return 1;
     }
   } catch (const std::exception& e) {
     const std::string what = e.what();
     std::fprintf(stderr, "%s\n", what.c_str());
-    std::printf("COMPILE_FAIL %s\n", what.substr(0, what.find('\n')).c_str());
+    std::printf("COMPILE_FAIL %s\n",
+                points.empty() ? what.substr(0, what.find('\n')).c_str()
+                               : one_line(what).c_str());
     return 1;
   }
 
@@ -258,7 +310,8 @@ int main(int argc, char** argv) {
   } catch (const std::exception& e) {
     std::string what = e.what();
     const size_t nl = what.find('\n');
-    if (nl != std::string::npos) what = what.substr(0, nl);
+    if (nl != std::string::npos && points.empty()) what = what.substr(0, nl);
+    if (!points.empty()) what = one_line(what);
     std::printf("COMPILE_FAIL %s\n", what.c_str());
     return 1;
   }
@@ -284,150 +337,192 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  try {
-    stanli::Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    // STANLI_PROFILE=1: per-opcode accounting for the single gradient
-    // evaluation, printed to stderr. Same switch as stanli_run.
-    const char* prof_env = std::getenv("STANLI_PROFILE");
-    if (prof_env && prof_env[0] != '0') ex.set_profile(true);
-    const int64_t n = ex.n_params();
-    for (int64_t i = 0; i < n; ++i)
-      ex.params_data()[i] = eval_point(i, variant);
-    std::vector<double> grad(n, 0.0);
-    const double lp = ex.gradient(grad.data());
-    // A nonfinite value is reported, not refused. ref_driver.cpp -- the
-    // CmdStan side of every comparison -- prints whatever log_prob
-    // returned, and the comparisons are all nonfinite-safe (pair_dev in
-    // verify_refs.py: the same infinity on both sides is agreement, one
-    // side alone is an infinite deviation). Refusing here made the two
-    // drivers asymmetric, so the oracle could never confirm agreement at
-    // -inf and reported a real disagreement as a run failure instead of a
-    // mismatch. bernoulli_lccdf(1 | theta) is log(0) by definition and
-    // both engines return -inf with a zero gradient; that is a pass.
-    //
-    // The diagnostic value of noticing goes to stderr, where it does not
-    // disturb the machine-readable contract on stdout.
-    int n_bad = 0;
-    for (double g : grad)
-      if (!std::isfinite(g)) ++n_bad;
-    if (!std::isfinite(lp) || n_bad > 0)
-      std::fprintf(stderr, "stanli_check: nonfinite lp=%d gradients=%d\n",
-                   std::isfinite(lp) ? 0 : 1, n_bad);
-    if (prof_env && prof_env[0] != '0')
-      std::fprintf(stderr, "%s", ex.profile_report().c_str());
-
-    // The write_array graph, exercised at the same point. Reported on stderr
-    // so the machine-readable stdout contract is unchanged; this is what the
-    // corpus sweep reads to say how many models get their transformed
-    // parameters and generated quantities.
-    if (!cm.write_array) {
-      std::fprintf(stderr, "WA none\n");
-    } else if (cm.write_array->interp) {
-      // The graph could not express the whole section; the per-draw
-      // interpreter runs all of it. Failures stay on stderr; the final
-      // machine-readable status is emitted after this section so a Stan
-      // print whose text begins with OK/EVAL_FAIL cannot shadow it.
-      try {
-        stanli::WaInterp& wi = *cm.write_array->interp;
-        stanli::WaRng rng(1234);
-        const std::vector<double> row = wi.eval(cm.constrained_env(ex), rng);
-        int64_t bad = 0;
-        for (double x : row)
-          if (!std::isfinite(x)) ++bad;
-        std::fprintf(stderr,
-                     "WA %zu vars %lld values %lld nonfinite complete "
-                     "(interpreted: %s)\n",
-                     wi.columns().size(), (long long)row.size(), (long long)bad,
-                     cm.write_array->truncated.c_str());
-        if (wa_values) {
-          std::string joined;
-          for (const auto& nm :
-               stanli::CompiledModel::csv_names(wi.columns())) {
-            if (!joined.empty()) joined += ',';
-            joined += nm;
-          }
-          std::printf("WANAMES %s\nWAVALS", joined.c_str());
-          for (double x : row) std::printf(" %.17g", x);
-          std::printf("\n");
-        }
-      } catch (const std::exception& we) {
-        std::fprintf(stderr, "WA empty interp: %s\n", we.what());
-        if (wa_values) std::printf("WANAMES FAIL %s\nWAVALS FAIL\n", we.what());
-      }
-    } else if (cm.write_array->columns.empty()) {
-      std::fprintf(stderr, "WA empty %s\n", cm.write_array->truncated.c_str());
-    } else {
-      try {
-        stanli::Executor wex(std::move(cm.write_array->graph));
-        cm.write_array->bind(wex);
-        for (int64_t i = 0; i < wex.n_params(); ++i)
-          wex.params_data()[i] = eval_point(i, variant);
-        stanli::WaRng rng(1234);
-        wex.run_forward_only(stanli::EvalState{&rng});
-        int64_t width = 0, bad = 0;
-        for (const auto& c : cm.write_array->columns) {
-          const double* p = wex.value_ptr(c.slot);
-          for (int64_t i = 0; i < c.len; ++i, ++width)
-            if (!std::isfinite(p[i])) ++bad;
-        }
-        std::fprintf(stderr, "WA %zu vars %lld values %lld nonfinite %s\n",
-                     cm.write_array->columns.size(), (long long)width,
-                     (long long)bad,
-                     cm.write_array->truncated.empty()
-                         ? "complete"
-                         : ("truncated: " + cm.write_array->truncated).c_str());
-        if (wa_values) {
-          std::string joined;
-          for (const auto& nm :
-               stanli::CompiledModel::csv_names(cm.write_array->columns)) {
-            if (!joined.empty()) joined += ',';
-            joined += nm;
-          }
-          std::printf("WANAMES %s\nWAVALS", joined.c_str());
-          for (const auto& c : cm.write_array->columns) {
-            const double* p = wex.value_ptr(c.slot);
-            for (int64_t i = 0; i < c.len; ++i) std::printf(" %.17g", p[i]);
-          }
-          std::printf("\n");
-        }
-      } catch (const std::exception& we) {
-        std::fprintf(stderr, "WA empty graph: %s\n", we.what());
-        if (wa_values) std::printf("WANAMES FAIL %s\nWAVALS FAIL\n", we.what());
-      }
-    }
-    if (wa_values && (!cm.write_array || (!cm.write_array->interp &&
-                                          cm.write_array->columns.empty())))
-      std::printf("WANAMES FAIL no write_array\nWAVALS FAIL\n");
-    if (sweep > 0) {
-      int evaluated = 0;
-      for (int k = 1; k <= sweep; ++k) {
-        for (int64_t i = 0; i < n; ++i)
-          ex.params_data()[i] = eval_point(i, variant) +
-                                0.6 * std::sin(1.9 * k + 2.3 * i + 0.4) +
-                                0.2 * (k - sweep / 2);
+  std::unique_ptr<stanli::Executor> ex_store, wex_store;
+  std::string ex_error, wex_error;
+  auto eval_at = [&](int variant, bool multi) -> int {
+    const auto msg = [multi](const std::string& s) {
+      return multi ? one_line(s) : s;
+    };
+    try {
+      if (!ex_store) {
+        if (!ex_error.empty()) throw std::runtime_error(ex_error);
         try {
-          std::fill(grad.begin(), grad.end(), 0.0);
-          print_sweep_point(k, ex.gradient(grad.data()), grad);
-          ++evaluated;
+          ex_store = std::make_unique<stanli::Executor>(std::move(cm.graph));
+          cm.bind(*ex_store);
         } catch (const std::exception& e) {
-          if (std::string(e.what()).find("region_map_check_clean") !=
-              std::string::npos)
-            throw;
+          ex_error = e.what();
+          ex_store.reset();
+          throw;
         }
       }
-      std::fprintf(stderr, "SWEEP %d points, %d evaluated\n", sweep, evaluated);
+      stanli::Executor& ex = *ex_store;
+      // STANLI_PROFILE=1: per-opcode accounting for the single gradient
+      // evaluation, printed to stderr. Same switch as stanli_run.
+      const char* prof_env = std::getenv("STANLI_PROFILE");
+      if (prof_env && prof_env[0] != '0') ex.set_profile(true);
+      const int64_t n = ex.n_params();
       for (int64_t i = 0; i < n; ++i)
         ex.params_data()[i] = eval_point(i, variant);
-      std::fill(grad.begin(), grad.end(), 0.0);
-      print_sweep_point(0, ex.gradient(grad.data()), grad);
+      std::vector<double> grad(n, 0.0);
+      const double lp = ex.gradient(grad.data());
+      // A nonfinite value is reported, not refused. ref_driver.cpp -- the
+      // CmdStan side of every comparison -- prints whatever log_prob
+      // returned, and the comparisons are all nonfinite-safe (pair_dev in
+      // verify_refs.py: the same infinity on both sides is agreement, one
+      // side alone is an infinite deviation). Refusing here made the two
+      // drivers asymmetric, so the oracle could never confirm agreement at
+      // -inf and reported a real disagreement as a run failure instead of a
+      // mismatch. bernoulli_lccdf(1 | theta) is log(0) by definition and
+      // both engines return -inf with a zero gradient; that is a pass.
+      //
+      // The diagnostic value of noticing goes to stderr, where it does not
+      // disturb the machine-readable contract on stdout.
+      int n_bad = 0;
+      for (double g : grad)
+        if (!std::isfinite(g)) ++n_bad;
+      if (!std::isfinite(lp) || n_bad > 0)
+        std::fprintf(stderr, "stanli_check: nonfinite lp=%d gradients=%d\n",
+                     std::isfinite(lp) ? 0 : 1, n_bad);
+      if (prof_env && prof_env[0] != '0')
+        std::fprintf(stderr, "%s", ex.profile_report().c_str());
+
+      // The write_array graph, exercised at the same point. Reported on stderr
+      // so the machine-readable stdout contract is unchanged; this is what the
+      // corpus sweep reads to say how many models get their transformed
+      // parameters and generated quantities.
+      if (!cm.write_array) {
+        std::fprintf(stderr, "WA none\n");
+      } else if (cm.write_array->interp) {
+        // The graph could not express the whole section; the per-draw
+        // interpreter runs all of it. Failures stay on stderr; the final
+        // machine-readable status is emitted after this section so a Stan
+        // print whose text begins with OK/EVAL_FAIL cannot shadow it.
+        try {
+          stanli::WaInterp& wi = *cm.write_array->interp;
+          stanli::WaRng rng(1234);
+          const std::vector<double> row = wi.eval(cm.constrained_env(ex), rng);
+          int64_t bad = 0;
+          for (double x : row)
+            if (!std::isfinite(x)) ++bad;
+          std::fprintf(stderr,
+                       "WA %zu vars %lld values %lld nonfinite complete "
+                       "(interpreted: %s)\n",
+                       wi.columns().size(), (long long)row.size(),
+                       (long long)bad, cm.write_array->truncated.c_str());
+          if (wa_values) {
+            std::string joined;
+            for (const auto& nm :
+                 stanli::CompiledModel::csv_names(wi.columns())) {
+              if (!joined.empty()) joined += ',';
+              joined += nm;
+            }
+            std::printf("WANAMES %s\nWAVALS", joined.c_str());
+            for (double x : row) std::printf(" %.17g", x);
+            std::printf("\n");
+          }
+        } catch (const std::exception& we) {
+          std::fprintf(stderr, "WA empty interp: %s\n", we.what());
+          if (wa_values)
+            std::printf("WANAMES FAIL %s\nWAVALS FAIL\n",
+                        msg(we.what()).c_str());
+        }
+      } else if (cm.write_array->columns.empty()) {
+        std::fprintf(stderr, "WA empty %s\n",
+                     cm.write_array->truncated.c_str());
+      } else {
+        try {
+          if (!wex_store) {
+            if (!wex_error.empty()) throw std::runtime_error(wex_error);
+            try {
+              wex_store = std::make_unique<stanli::Executor>(
+                  std::move(cm.write_array->graph));
+              cm.write_array->bind(*wex_store);
+            } catch (const std::exception& e) {
+              wex_error = e.what();
+              wex_store.reset();
+              throw;
+            }
+          }
+          stanli::Executor& wex = *wex_store;
+          for (int64_t i = 0; i < wex.n_params(); ++i)
+            wex.params_data()[i] = eval_point(i, variant);
+          stanli::WaRng rng(1234);
+          wex.run_forward_only(stanli::EvalState{&rng});
+          int64_t width = 0, bad = 0;
+          for (const auto& c : cm.write_array->columns) {
+            const double* p = wex.value_ptr(c.slot);
+            for (int64_t i = 0; i < c.len; ++i, ++width)
+              if (!std::isfinite(p[i])) ++bad;
+          }
+          std::fprintf(
+              stderr, "WA %zu vars %lld values %lld nonfinite %s\n",
+              cm.write_array->columns.size(), (long long)width, (long long)bad,
+              cm.write_array->truncated.empty()
+                  ? "complete"
+                  : ("truncated: " + cm.write_array->truncated).c_str());
+          if (wa_values) {
+            std::string joined;
+            for (const auto& nm :
+                 stanli::CompiledModel::csv_names(cm.write_array->columns)) {
+              if (!joined.empty()) joined += ',';
+              joined += nm;
+            }
+            std::printf("WANAMES %s\nWAVALS", joined.c_str());
+            for (const auto& c : cm.write_array->columns) {
+              const double* p = wex.value_ptr(c.slot);
+              for (int64_t i = 0; i < c.len; ++i) std::printf(" %.17g", p[i]);
+            }
+            std::printf("\n");
+          }
+        } catch (const std::exception& we) {
+          std::fprintf(stderr, "WA empty graph: %s\n", we.what());
+          if (wa_values)
+            std::printf("WANAMES FAIL %s\nWAVALS FAIL\n",
+                        msg(we.what()).c_str());
+        }
+      }
+      if (wa_values && (!cm.write_array || (!cm.write_array->interp &&
+                                            cm.write_array->columns.empty())))
+        std::printf("WANAMES FAIL no write_array\nWAVALS FAIL\n");
+      if (sweep > 0) {
+        int evaluated = 0;
+        for (int k = 1; k <= sweep; ++k) {
+          for (int64_t i = 0; i < n; ++i)
+            ex.params_data()[i] = eval_point(i, variant) +
+                                  0.6 * std::sin(1.9 * k + 2.3 * i + 0.4) +
+                                  0.2 * (k - sweep / 2);
+          try {
+            std::fill(grad.begin(), grad.end(), 0.0);
+            print_sweep_point(k, ex.gradient(grad.data()), grad);
+            ++evaluated;
+          } catch (const std::exception& e) {
+            if (std::string(e.what()).find("region_map_check_clean") !=
+                std::string::npos)
+              throw;
+          }
+        }
+        std::fprintf(stderr, "SWEEP %d points, %d evaluated\n", sweep,
+                     evaluated);
+        for (int64_t i = 0; i < n; ++i)
+          ex.params_data()[i] = eval_point(i, variant);
+        std::fill(grad.begin(), grad.end(), 0.0);
+        print_sweep_point(0, ex.gradient(grad.data()), grad);
+      }
+      std::printf("OK %.17g", lp);
+      for (double g : grad) std::printf(" %.17g", g);
+      std::printf("\n");
+    } catch (const std::exception& e) {
+      std::printf("EVAL_FAIL %s\n", msg(e.what()).c_str());
+      return 1;
     }
-    std::printf("OK %.17g", lp);
-    for (double g : grad) std::printf(" %.17g", g);
-    std::printf("\n");
-  } catch (const std::exception& e) {
-    std::printf("EVAL_FAIL %s\n", e.what());
-    return 1;
+    return 0;
+  };
+
+  if (points.empty()) return eval_at(variant, false);
+  for (int k : points) {
+    std::printf("POINT %d\n", k);
+    eval_at(k, true);
+    std::fflush(stdout);
   }
   return 0;
 }

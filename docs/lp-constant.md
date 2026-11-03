@@ -20,9 +20,8 @@ A compact density instantiates the template once, with every argument bound
 as autodiff. Everything is active, so stan-math keeps terms CmdStan drops, and
 `lp__` comes out higher by exactly those terms. They are constant in the
 parameters, which is the only reason CmdStan could drop them, so every partial
-derivative is identical. For example, `multi_student_t` shifts lp by
-+0.81998355873446 and `lkj_cov` by +0.28768207245200, both with zero gradient
-difference.
+derivative is identical. For example, `lkj_cov` shifts lp by
++0.28768207245200 with zero gradient difference.
 
 | | exact density | compact density or lite build |
 | --- | --- | --- |
@@ -48,15 +47,18 @@ Exact `lp__`, through activity-mask dispatch:
   `ordered_logistic` kernels, which are tested bitwise against Stan Math.
 - the discrete densities with an integer outcome, `multi_normal` and its
   Cholesky form, `lkj_corr_cholesky`, `dirichlet`, and the GLMs.
+- `multi_student_t` and its Cholesky form. Their kernel binds every argument
+  as var and then subtracts the `nu` and `Sigma` terms Stan Math drops when
+  those arguments are data, so `lp__` agrees with CmdStan to rounding rather
+  than to the bit.
 
 These are the densities corpus models use, and
 [`tools/verify_refs.py`](../tools/verify_refs.py) checks their `lp__` against
 CmdStan on every source pull request.
 
-Compact: the multivariate and multinomial tail (`multi_normal_prec`,
-`multi_student_t` and its Cholesky form, the Wishart family, `multi_gp` and
-its Cholesky form, `lkj_cov`, the multinomial family, `ordered_probit`,
-`wiener`). These kernels live in
+Compact: the multivariate and multinomial tail (`multi_normal_prec`, the
+Wishart family, `multi_gp` and its Cholesky form, `lkj_cov`, the multinomial
+family, `ordered_probit`, `wiener`). These kernels live in
 [`runtime/kernels/matrix_fns.cpp`](../runtime/kernels/matrix_fns.cpp) on a
 nested var tape.
 

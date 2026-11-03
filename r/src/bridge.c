@@ -214,6 +214,7 @@ static void (*p_capture_messages)(int);
 static char* (*p_take_messages)(void);
 static int (*p_exact_lp)(void);
 static int (*p_thread_safe)(void);
+static const char* (*p_build_id)(void);
 static int64_t (*p_n_unconstrained)(const void*);
 static int (*p_grad)(void*, const double*, double*, double*);
 static int (*p_unconstrain_inits)(void*, const char*, double*, char*, size_t);
@@ -319,6 +320,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND_OPTIONAL("stanli_take_messages", p_take_messages);
   BIND("stanli_exact_lp", p_exact_lp);
   BIND("stanli_thread_safe", p_thread_safe);
+  BIND_OPTIONAL("stanli_build_id", p_build_id);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
   BIND("stanli_grad", p_grad);
   BIND("stanli_unconstrain_inits", p_unconstrain_inits);
@@ -495,6 +497,12 @@ SEXP stanli_r_exact_lp(void) {
 SEXP stanli_r_thread_safe(void) {
   require_loaded();
   return ScalarLogical(p_thread_safe());
+}
+SEXP stanli_r_build_id(void) {
+  require_loaded();
+  if (p_build_id == NULL)
+    error("this stanli runtime does not report a build id");
+  return ScalarString(mkCharCE(p_build_id(), CE_UTF8));
 }
 
 SEXP stanli_r_n_unconstrained(SEXP m) {

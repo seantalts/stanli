@@ -538,6 +538,19 @@ jobs:
           path: .ccache
           key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
 
+      # A cached embedded stanc3 object skips the stanc3 checkout, and the
+      # stanc3 test suites need its test models at the pinned commit.
+      - name: Fetch stanc3's test models
+        run: |
+          if [ ! -d deps/stanc3-src/.git ]; then
+            if [ -e deps/stanc3-src ]; then mv deps/stanc3-src deps/stanc3-src.build; fi
+            tools/with_retry.sh git clone --filter=blob:none --no-checkout \
+              "$STANC3_SRC_REPO" deps/stanc3-src
+            git -C deps/stanc3-src sparse-checkout set test/integration
+            git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
+          fi
+          test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
+
       # Every core, not matrix.build_jobs. That number is a memory ceiling
       # for the compile phase (one densities shard peaks near 3 GB); the
       # tests are 200-odd small processes with no such constraint. The
@@ -773,7 +786,7 @@ jobs:
           cp tests/fixtures/es.stan /tmp/stanli-portable-es.stan
           cp tests/fixtures/view_udf_local_data_branch.stan \
             /tmp/stanli-portable-nested-udf.stan
-          cp tests/stanc3/mother.stan /tmp/stanli-portable-mother.stan
+          cp tests/stanc3_good/overrides/mother.stan /tmp/stanli-portable-mother.stan
           for name in es nested-udf mother; do
             "$probe" --vectorize-loops off \
               --legacy-output /tmp/stanli-$name.legacy-mir \
@@ -1070,7 +1083,9 @@ jobs:
       - uses: r-lib/actions/setup-r@v2
         with:
           use-public-rspm: true
-          extra-repositories: https://stan-dev.r-universe.dev
+          extra-repositories: |
+            https://stan-dev.r-universe.dev
+            https://andytimm.r-universe.dev
 
       # V8 and jsonlite exercise the compiler the R package actually ships.
       - uses: r-lib/actions/setup-r-dependencies@v2
@@ -1078,7 +1093,7 @@ jobs:
           working-directory: r
           extra-packages: >-
             any::testthat, any::posterior, any::V8, any::jsonlite,
-            any::bayesplot, any::loo, any::tidybayes, any::callr, any::rstan, any::shinystan, any::cmdstanr
+            any::bayesplot, any::loo, any::tidybayes, any::callr, any::rstan, any::shinystan, any::cmdstanr, any::nutpieR
           dependencies: '"hard"'
 
       # Through R CMD check rather than testthat directly, so the tests run
@@ -1099,6 +1114,10 @@ jobs:
           cat "$log"
           if grep -q 'no stanli runtime installed' "$log"; then
             echo "the sampling tests skipped: the runtime was not seen"
+            exit 1
+          fi
+          if grep -Eq 'nutpieR\}? (is not installed|cannot be loaded)' "$log"; then
+            echo "the nutpie tests skipped: nutpieR was not installed"
             exit 1
           fi
 
@@ -1476,6 +1495,12 @@ jobs:
 
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
+      - name: Fetch stanc3's test models
+        run: |
+          tools/with_retry.sh git clone --filter=blob:none --no-checkout \
+            "$STANC3_SRC_REPO" deps/stanc3-src
+          git -C deps/stanc3-src sparse-checkout set test/integration
+          git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
 
       - name: Install the source-built compilers
         uses: actions/download-artifact@v4
@@ -1537,6 +1562,7 @@ jobs:
           $whl = Get-Item dist\*.whl
           wheeltest\Scripts\pip install $whl.FullName
           wheeltest\Scripts\python tests\test_python.py
+          wheeltest\Scripts\python tests\test_bridgestan_embed.py
 
       - uses: actions/upload-artifact@v4
         with:
@@ -1634,6 +1660,12 @@ jobs:
           restore-keys: ccache-asan-clang-o1-g1-v3-${{ steps.toolchain.outputs.id }}-
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
+      - name: Fetch stanc3's test models
+        run: |
+          tools/with_retry.sh git clone --filter=blob:none --no-checkout \
+            "$STANC3_SRC_REPO" deps/stanc3-src
+          git -C deps/stanc3-src sparse-checkout set test/integration
+          git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
       - name: Install the pinned compiler from the native build
         uses: actions/download-artifact@v4
         with:
@@ -1766,7 +1798,7 @@ jobs:
           key: >-
             ${{ steps.asan-cache.outputs.cache-primary-key }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
       - name: ctest
-        run: ctest --test-dir build-asan --timeout 600 --output-on-failure
+        run: ctest --test-dir build-asan --timeout 600 --parallel "$(nproc)" --output-on-failure
         env:
           # LeakSanitizer, which is a separate tool that ASan turns on by
           # default on Linux. What it would find is stan-math's autodiff

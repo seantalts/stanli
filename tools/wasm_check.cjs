@@ -30,6 +30,16 @@ function evalPoint(i, variant) {
   switch (variant) {
     case 1: return 0.02 * ((i % 5) - 2);
     case 2: return 0.0;
+    case 3:
+    case 4: {
+      const M64 = (1n << 64n) - 1n;
+      let z = (BigInt(i) + 0x9E3779B97F4A7C15n) & M64;
+      z = ((z ^ (z >> 30n)) * 0xBF58476D1CE4E5B9n) & M64;
+      z = ((z ^ (z >> 27n)) * 0x94D049BB133111EBn) & M64;
+      z ^= z >> 31n;
+      const u = Number(z >> 11n) * 2 ** -53;
+      return variant === 3 ? -1.5 + 3.0 * u : 0.1 + 0.8 * u;
+    }
     default: return 0.1 + 0.05 * (i % 7) - 0.15 * (i % 3);
   }
 }

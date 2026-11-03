@@ -147,6 +147,12 @@ void validate_funapp_arity(const Expr& e) {
                 std::to_string(e.args.size()));
     return;
   }
+  if (e.name == "wiener_lcdf_unnorm" || e.name == "wiener_lccdf_unnorm") {
+    if (!wiener_form(e.name, e.args.size()))
+      malformed(e.name + " call: expected 5, 6, 8 or 9 argument(s), got " +
+                std::to_string(e.args.size()));
+    return;
+  }
 
   CallableTransformSpec transform;
   if (callable_transform(e.name, &transform)) {
@@ -442,6 +448,10 @@ Transform read_transform(const Node& n) {
       t.kind = Transform::Covariance;
     else if (n.atom == "CholeskyCov")
       t.kind = Transform::CholeskyCov;
+    else if (n.atom == "StochasticColumn")
+      t.kind = Transform::StochasticColumn;
+    else if (n.atom == "StochasticRow")
+      t.kind = Transform::StochasticRow;
     else
       t.kind = Transform::Unsupported;
     t.raw = n.atom;
@@ -554,7 +564,9 @@ Stmt read_stmt(const Node& n) {
         s.lhs_idx.push_back(read_index(lhs[1][i]));
     }
     s.rhs = read_expr(p[p.size() - 1]);
-  } else if (head == "TargetPE") {
+  } else if (head == "TargetPE" || head == "JacobianPE") {
+    // The model is always evaluated with jacobian=true, and write_array
+    // never adds to the target, so `jacobian +=` is a target increment.
     s.kind = Stmt::TargetPE;
     s.target = read_expr(p[1]);
   } else if (head == "Block") {
@@ -785,6 +797,8 @@ void validate_transform_shape(const Transform& transform) {
     case Transform::Correlation:
     case Transform::Covariance:
     case Transform::CholeskyCov:
+    case Transform::StochasticColumn:
+    case Transform::StochasticRow:
       break;
     case Transform::Unsupported:
       for (const Expr& arg : transform.args) validate_expression_shape(arg);
@@ -1059,9 +1073,7 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
       const UnsizedLeaf leaf = s.fn_args[0].unsized.leaf;
       const bool matrix = leaf == UnsizedLeaf::Matrix;
       const bool vector = leaf == UnsizedLeaf::Vector;
-      const bool matrix_only =
-          kind == Transform::CholeskyCorr || kind == Transform::Correlation ||
-          kind == Transform::Covariance || kind == Transform::CholeskyCov;
+      const bool matrix_only = is_matrix_only_check(kind);
       const bool vector_only = kind != Transform::SumToZero && !matrix_only;
       if ((!matrix && !vector) || (matrix_only && !matrix) ||
           (vector_only && !vector))
@@ -1199,25 +1211,58 @@ bool views_match(const std::vector<Expr>& args,
   return true;
 }
 
-void resolve_calls(Expr& e, const Overloads& overloads) {
-  for (Expr& a : e.args) resolve_calls(a, overloads);
-  if (e.kind != Expr::FunApp || e.fn_lib != Expr::Lib::UserDefined) return;
-  const auto it = overloads.find(e.name);
-  if (it == overloads.end()) return;
+template <typename Args>
+std::string resolve_overload(const Overloads::value_type& candidates,
+                             const Args& args) {
   const FunDef* match = nullptr;
-  for (const FunDef* f : it->second) {
-    if (!views_match(e.args, f->arg_views)) continue;
+  for (const FunDef* f : candidates.second) {
+    if (!views_match(args, f->arg_views)) continue;
     if (match)
-      throw std::runtime_error("mir: ambiguous overload for " + e.name);
+      throw std::runtime_error("mir: ambiguous overload for " +
+                               candidates.first);
     match = f;
   }
   if (!match)
-    throw std::runtime_error("mir: no overload of " + it->first +
+    throw std::runtime_error("mir: no overload of " + candidates.first +
                              " matches its call");
-  e.name = match->name;
+  return match->name;
+}
+
+// A function passed by name, as to ode_rk45, is typed
+// (UFun ((arg types...) (ReturnType ...) ...)) in its raw metadata.
+std::vector<UnsizedView> function_argument_views(const std::string& raw) {
+  const Node type = sexp::parse(raw);
+  if (!type.head_is("UFun") || type.size() != 2 || type[1].is_atom() ||
+      type[1].size() == 0 || type[1][0].is_atom())
+    throw std::runtime_error("mir: malformed function type " + raw);
+  std::vector<UnsizedView> views;
+  for (const Node& arg : type[1][0].kids) {
+    if (arg.is_atom() || arg.size() != 2)
+      throw std::runtime_error("mir: malformed function type " + raw);
+    views.push_back(read_unsized(arg[1]));
+  }
+  return views;
+}
+
+void resolve_calls(Expr& e, const Overloads& overloads) {
+  for (Expr& a : e.args) resolve_calls(a, overloads);
+  const bool call =
+      e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::UserDefined;
+  const bool callback = e.kind == Expr::Var && e.raw.rfind("(UFun ", 0) == 0;
+  if (!call && !callback) return;
+  const auto it = overloads.find(e.name);
+  if (it == overloads.end()) return;
+  e.name = call ? resolve_overload(*it, e.args)
+                : resolve_overload(*it, function_argument_views(e.raw));
 }
 
 void resolve_calls(Stmt& s, const Overloads& overloads) {
+  if (const auto name = user_defined_statement_name(s.fn_name)) {
+    const auto it = overloads.find(s.fn_name.substr(name->first, name->second));
+    if (it != overloads.end())
+      s.fn_name.replace(name->first, name->second,
+                        resolve_overload(*it, s.fn_args));
+  }
   for (Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
     resolve_calls(*e, overloads);
   for (auto* exprs : {&s.read_dims, &s.lhs_idx, &s.fn_args})
@@ -1228,6 +1273,55 @@ void resolve_calls(Stmt& s, const Overloads& overloads) {
     if (t)
       for (Expr& e : t->args) resolve_calls(e, overloads);
   for (Stmt& k : s.body) resolve_calls(k, overloads);
+}
+
+void unmangle(std::string& name) {
+  constexpr std::string_view prefix = "_stan_";
+  if (name.compare(0, prefix.size(), prefix) == 0) name.erase(0, prefix.size());
+}
+
+void unmangle(Expr& e) {
+  unmangle(e.name);
+  for (Expr& arg : e.args) unmangle(arg);
+}
+
+void unmangle(SizedType& type) {
+  for (Expr& dim : type.dims) unmangle(dim);
+}
+
+void unmangle(Transform& transform) {
+  for (Expr& e : transform.args) unmangle(e);
+}
+
+void unmangle(Stmt& s) {
+  for (std::string* name :
+       {&s.decl_id, &s.lhs, &s.loopvar, &s.fn_name, &s.check_var_name})
+    unmangle(*name);
+  for (Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+    unmangle(*e);
+  for (std::vector<Expr>* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
+    for (Expr& e : *expressions) unmangle(e);
+  unmangle(s.decl_type);
+  for (std::optional<Transform>* transform :
+       {&s.read_transform, &s.check_transform, &s.write_transform})
+    if (*transform) unmangle(**transform);
+  for (Stmt& child : s.body) unmangle(child);
+}
+
+void unmangle(Program& prog) {
+  for (auto& [name, type] : prog.input_vars) {
+    unmangle(name);
+    unmangle(type);
+  }
+  for (auto* body : {&prog.prepare_data, &prog.log_prob,
+                     &prog.generate_quantities, &prog.transform_inits})
+    for (Stmt& s : *body) unmangle(s);
+  for (FunDef& f : prog.fun_defs) {
+    unmangle(f.name);
+    for (std::string& arg : f.arg_names) unmangle(arg);
+    for (Stmt& s : f.body) unmangle(s);
+  }
+  for (std::string& name : prog.output_vars) unmangle(name);
 }
 
 void restore_unsized_decls(Stmt& s, bool strict) {
@@ -1286,7 +1380,59 @@ void detail::validate_portable_program(const Program& prog) {
   validate_program_shape(prog);
 }
 
+namespace {
+
+// The portable format has no JacobianPE statement; it carries the statement
+// as stanc3's s-expression.
+void read_jacobian_statements(Stmt& s) {
+  if (s.kind == Stmt::Unsupported && s.raw.rfind("(JacobianPE ", 0) == 0) {
+    const Node pattern = sexp::parse(s.raw);
+    if (pattern.size() != 2) malformed("JacobianPE statement");
+    s.kind = Stmt::TargetPE;
+    s.target = read_expr(pattern[1]);
+  }
+  for (Stmt& child : s.body) read_jacobian_statements(child);
+}
+
+// stanc3 wraps an argument in eval() to force an Eigen expression; the value
+// is the argument's.
+void strip_eval(Expr& e) {
+  for (Expr& arg : e.args) strip_eval(arg);
+  if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::StanLib &&
+      e.name == "eval" && e.args.size() == 1) {
+    Expr inner = std::move(e.args[0]);
+    e = std::move(inner);
+  }
+}
+
+void strip_eval(Stmt& s) {
+  for (Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+    strip_eval(*e);
+  for (std::vector<Expr>* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
+    for (Expr& e : *expressions) strip_eval(e);
+  for (Expr& dim : s.decl_type.dims) strip_eval(dim);
+  for (Stmt& child : s.body) strip_eval(child);
+}
+
+void read_jacobian_statements(Program& prog) {
+  for (auto* body : {&prog.prepare_data, &prog.log_prob,
+                     &prog.generate_quantities, &prog.transform_inits})
+    for (Stmt& s : *body) {
+      read_jacobian_statements(s);
+      strip_eval(s);
+    }
+  for (FunDef& f : prog.fun_defs)
+    for (Stmt& s : f.body) {
+      read_jacobian_statements(s);
+      strip_eval(s);
+    }
+}
+
+}  // namespace
+
 void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
+  read_jacobian_statements(prog);
+  unmangle(prog);
   restore_unsized_decls(prog, strict_variable_metadata);
   resolve_overloads(prog);
   Functions functions;
@@ -1369,8 +1515,6 @@ Program read_program(const sexp::Node& root) {
     prog.has_transform_inits = true;
     read_stmt_list((*ti)[1], prog.transform_inits);
   }
-  prog.nesting = nesting_meter.peak;
-  detail::finalize_program(prog);
   if (const Node* ov = field(root, "output_vars")) {
     // ((name <opaque> (...)) ...): parameters, transformed parameters and
     // generated quantities in declaration order -- the order FnWriteParam
@@ -1381,6 +1525,8 @@ Program read_program(const sexp::Node& root) {
     for (size_t i = 0; i < vars.size(); ++i)
       prog.output_vars.push_back(vars[i][0].atom);
   }
+  prog.nesting = nesting_meter.peak;
+  detail::finalize_program(prog);
   return prog;
 }
 

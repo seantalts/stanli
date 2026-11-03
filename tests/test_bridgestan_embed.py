@@ -78,7 +78,7 @@ def log_density(lib, m, q):
 
 
 def test_two_models_through_one_library():
-    lib = bind(ctypes.CDLL(str(stanli._runtime_lib_path())))
+    lib = bind(ctypes.CDLL(str(stanli.runtime_path())))
     ma, err = construct(lib, embed(NORMAL, "n"))
     check(f"the data-free model constructs ({err})", ma)
     mb, err = construct(lib, embed(DATED, "d", {"N": 3, "y": [0.1, 0.2, 0.3]}))
@@ -104,7 +104,7 @@ def test_two_models_through_one_library():
 
 
 def test_wrong_build_is_loud():
-    lib = bind(ctypes.CDLL(str(stanli._runtime_lib_path())))
+    lib = bind(ctypes.CDLL(str(stanli.runtime_path())))
     payload = json.loads(embed(NORMAL, "n"))
     payload["__stanli"]["build_id"] = "abi1-deadbeef-Linux-x86_64"
     m, err = construct(lib, json.dumps(payload))
@@ -145,7 +145,47 @@ def test_bridgestan_model_sugar():
                   == reference.log_prob_grad([0.5])[0])
 
 
+def test_bridgestan_data_is_the_embed_payload():
+    data = {"N": 3, "y": [0.1, 0.2, 0.3]}
+    text = stanli.bridgestan_data(stan_code=DATED, name="d", data=data)
+    check("bridgestan_data returns JSON text", isinstance(text, str))
+    payload = json.loads(text)
+    manifest = payload.pop("__stanli")
+    check("the manifest carries this runtime's build id",
+          manifest["build_id"] == stanli.build_id())
+    check("the manifest carries the name", manifest["name"] == "d")
+    check("the manifest carries the compiled model",
+          manifest["mir"] == stanli.stan_to_mir(DATED))
+    check("the data rides along unchanged", payload == data)
+    check("a model without data is just the manifest",
+          list(json.loads(stanli.bridgestan_data(stan_code=NORMAL))) == ["__stanli"])
+    check("the default name matches Model",
+          json.loads(stanli.bridgestan_data(stan_code=NORMAL))["__stanli"]["name"]
+          == "stanli_model")
+    check("a MIR argument is passed through",
+          json.loads(stanli.bridgestan_data(mir=stanli.stan_to_mir(NORMAL)))
+          ["__stanli"]["mir"] == stanli.stan_to_mir(NORMAL))
+
+    lib = bind(ctypes.CDLL(str(stanli.runtime_path())))
+    m, err = construct(lib, stanli.bridgestan_data(stan_code=DATED, data=data))
+    check(f"a plain BridgeStan client can construct from it ({err})", m)
+    if m:
+        want = stanli.Model(stan_code=DATED, data=data).log_prob_grad([0.5])[0]
+        check("its density matches stanli.Model",
+              log_density(lib, m, [0.5]) == want)
+        lib.bs_model_destruct(m)
+
+
+def test_runtime_path_names_the_loaded_library():
+    path = stanli.runtime_path()
+    check("runtime_path is a file", path.is_file())
+    check("runtime_path is exported",
+          "runtime_path" in stanli.__all__ and "bridgestan_data" in stanli.__all__)
+
+
 def main():
+    test_runtime_path_names_the_loaded_library()
+    test_bridgestan_data_is_the_embed_payload()
     test_two_models_through_one_library()
     test_wrong_build_is_loud()
     test_bridgestan_model_sugar()

@@ -293,7 +293,8 @@ bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
     } else if (e.args.size() == 10) {
       spec->rtol = program_scalar_real(c, e.args[7], "ODE relative tolerance");
       spec->atol = program_scalar_real(c, e.args[8], "ODE absolute tolerance");
-      spec->max_steps = program_scalar_int(c, e.args[9], "ODE maximum steps");
+      spec->max_steps = static_cast<long>(
+          program_scalar_real(c, e.args[9], "ODE maximum steps"));
     }
     spec->args.resize(3);
     spec->args[0].is_param = true;

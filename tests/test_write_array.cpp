@@ -2785,8 +2785,25 @@ void test_multi_normal_rng_lowering_guards() {
   } else {
     draw_extent = mismatched_result.find("Int 2", draw_extent) + 4;
     mismatched_result[draw_extent] = '3';
-    expect_interp(mismatched_result, "",
-                  "multi-normal result dimension mismatch stays interpreted");
+    CompiledModel cm = compile_model(mismatched_result, DataMap{});
+    std::string thrown;
+    if (cm.write_array && !cm.write_array->interp) {
+      Executor wex(std::move(cm.write_array->graph));
+      cm.write_array->bind(wex);
+      WaRng rng(1234);
+      try {
+        wex.run_forward_only(EvalState{&rng});
+      } catch (const std::invalid_argument& e) {
+        thrown = e.what();
+      }
+    }
+    if (thrown !=
+        "vector assign rows: assigning variable draw (3) and right hand side "
+        "rows (2) must match in size") {
+      ++failures;
+      std::printf("FAIL multi-normal result dimension mismatch: got '%s'\n",
+                  thrown.c_str());
+    }
   }
 
   std::string cholesky = base;
@@ -4669,6 +4686,8 @@ void test_gq_reduction_lowering_guards() {
   // A row of a matrix-valued expression need not have the matrix variable's
   // col-major stride (transpose(M) is the simplest counterexample).  Only an
   // Indexed bare matrix variable belongs to the audited scalar surface.
+  // Here the transposed row has 2 elements against rep_vector(1.0, 5), so
+  // the graph throws Stan's subtract size error instead of computing.
   std::string matrix_expression = udf_fixture;
   const size_t matrix_wa =
       matrix_expression.find("(Assignment ((LVariable target_surface)");
@@ -4688,9 +4707,21 @@ void test_gq_reduction_lowering_guards() {
   } else {
     DataMap no_data;
     CompiledModel cm = compile_model(matrix_expression, no_data);
-    if (!cm.write_array || !cm.write_array->interp) {
+    std::string thrown;
+    if (cm.write_array && !cm.write_array->interp) {
+      Executor wex(std::move(cm.write_array->graph));
+      cm.write_array->bind(wex);
+      WaRng rng(1234);
+      try {
+        wex.run_forward_only(EvalState{&rng});
+      } catch (const std::invalid_argument& e) {
+        thrown = e.what();
+      }
+    }
+    if (thrown != "subtract: m1 (5, 1) and m2 (2, 1) must match in size") {
       ++failures;
-      std::printf("FAIL matrix-expression product base did not fall back\n");
+      std::printf("FAIL matrix-expression product base: got '%s'\n",
+                  thrown.c_str());
     }
   }
 

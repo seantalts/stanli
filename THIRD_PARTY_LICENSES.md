@@ -35,14 +35,14 @@ Notes on the two that carry conditions beyond attribution:
   distribute that executable under terms of your choice"), so no relinking
   obligation attaches to the stanli binary.
 
-Not in the binary, but in the repository: `tests/stanc3/` holds Stan
-models copied from stanc3's test suite (BSD 3-Clause, the same license as
-this repository), used as test inputs. Provenance and the few documented
-runnable adaptations are in `tests/stanc3/README.md`.
+Not in the binary, but in the repository: `tests/stanc3_good/overrides/`
+holds Stan models copied from stanc3's test suite (BSD 3-Clause, the same
+license as this repository), used as test inputs. The few runnable
+adaptations are listed in `tests/stanc3_good/overrides.json`.
 
-`tests/stanc3/rbmi_mmrm.stan` is rbmi's MMRM model and
-`tests/stanc3/while_udf_slices.stan` contains two small functions from it
-(Apache-2.0); the license text is in `tests/stanc3/licenses/`.
+`tests/regressions/rbmi_mmrm.stan` is rbmi's MMRM model and
+`tests/regressions/while_udf_slices.stan` contains two small functions from
+it (Apache-2.0); the license text is in `tests/regressions/licenses/`.
 
 Also in the repository, not in the binary: `tests/brms/` holds Stan models
 and data written by brms 2.23.0 (GPL-2), used as test inputs. Parts of a

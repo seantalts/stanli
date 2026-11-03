@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -35,6 +36,15 @@ fs::path install_fake(const fs::path& self, const fs::path& target) {
   return target;
 }
 
+std::string error_from(const std::function<void()>& compile) {
+  try {
+    compile();
+  } catch (const std::exception& e) {
+    return e.what();
+  }
+  return "(no error)";
+}
+
 void expect(const std::string& got, const std::string& want, const char* what) {
   if (got != want)
     throw std::runtime_error(std::string(what) + ": got \"" + got +
@@ -46,15 +56,27 @@ void expect(const std::string& got, const std::string& want, const char* what) {
 int main(int argc, char** argv) {
   // A copied instance of this test is the fake compiler used by the parent:
   // stock stanc's argument shape, or stanli-compile's.
+  // A model whose name contains "bad" fails the way stanc3 does: the
+  // message on stderr, a blank line after it, and exit status 1.
+  const auto fail = [](const std::string& model) {
+    std::cerr << "Semantic error in '" << model << "'\n\n";
+    return 1;
+  };
   if (argc == 4) {
     if (std::string(argv[1]) != "--O1" ||
         std::string(argv[2]) != "--debug-optimized-mir")
       return 2;
+    if (std::string(argv[3]).find("bad") != std::string::npos)
+      return fail(argv[3]);
     std::cout << "MIR from " << argv[3] << '\n';
     return 0;
   }
-  if (argc == 3 && std::string(argv[1]) == "--model-only") {
-    std::cout << "PORTABLE from " << argv[2] << '\n';
+  if (argc == 5 && std::string(argv[1]) == "--model-only" &&
+      std::string(argv[2]) == "--filename") {
+    if (std::string(argv[3]) != argv[4]) return 2;
+    if (std::string(argv[4]).find("bad") != std::string::npos)
+      return fail(argv[3]);
+    std::cout << "PORTABLE from " << argv[4] << '\n';
     std::cerr << "fake compiler warning\n";
     return 0;
   }
@@ -88,6 +110,20 @@ int main(int argc, char** argv) {
         stanli::tooling::run_portable_compiler(beside.string(), model.string()),
         "PORTABLE from " + model.string() + "\n",
         "stanli-compile argument shape");
+
+    const fs::path bad = root / "bad model.stan";
+    std::ofstream(bad) << "model { y ~ normal(0, 1); }\n";
+    expect(error_from([&] {
+             stanli::tooling::run_stanc_process(compiler.string(),
+                                                bad.string());
+           }),
+           "Semantic error in '" + bad.string() + "'", "stanc error message");
+    expect(error_from([&] {
+             stanli::tooling::run_portable_compiler(beside.string(),
+                                                    bad.string());
+           }),
+           "Semantic error in '" + bad.string() + "'",
+           "stanli-compile error message");
 
     const fs::path on_path =
         install_fake(self, root / "on path" / kPortableName);

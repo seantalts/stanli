@@ -200,7 +200,38 @@ namespace stanli {
   X(OP_LINEAR_GAUSSIAN_LPDF)          \
   X(OP_FAMILY_GROUPED_LPDF)           \
   X(OP_SEGMENT_SUM)                   \
-  X(OP_TO_INT)
+  X(OP_TO_INT)                        \
+  X(OP_CHECK_OFFSET_MULTIPLIER)       \
+  X(OP_DETERMINANT)                   \
+  X(OP_LOG_DETERMINANT_SPD)           \
+  X(OP_CHOL2INV)                      \
+  X(OP_GENERALIZED_INVERSE)           \
+  X(OP_QR_Q)                          \
+  X(OP_QR_R)                          \
+  X(OP_QR_THIN_Q)                     \
+  X(OP_QR_THIN_R)                     \
+  X(OP_MATRIX_POWER)                  \
+  X(OP_TRACE_QUAD_FORM)               \
+  X(OP_TRACE_GEN_QUAD_FORM)           \
+  X(OP_MATRIX_EXP_MULTIPLY)           \
+  X(OP_SCALE_MATRIX_EXP_MULTIPLY)     \
+  X(OP_TRACE_DOT)                     \
+  X(OP_NORM1)                         \
+  X(OP_NORM2)                         \
+  X(OP_DISTANCE)                      \
+  X(OP_INC_BETA)                      \
+  X(OP_INV_INC_BETA)                  \
+  X(OP_HYPERGEOMETRIC_2F1)            \
+  X(OP_HYPERGEOMETRIC_3F2)            \
+  X(OP_HYPERGEOMETRIC_PFQ)            \
+  X(OP_LOG_MIX_VEC)                   \
+  X(OP_HMM_MARGINAL)                  \
+  X(OP_HMM_HIDDEN_STATE_PROB)         \
+  X(OP_GAUSSIAN_DLM_OBS_LPDF)         \
+  X(OP_QUANTILE)                      \
+  X(OP_CSR_MATRIX_TIMES_VECTOR)       \
+  X(OP_CSR_TO_DENSE_MATRIX)           \
+  X(OP_CHECK_LUB_FREE)
 
 // Scalar densities, one line each: this list generates the opcode, the
 // name, the kernel, its registration, and the lowering table entry
@@ -927,6 +958,7 @@ constexpr uint8_t op_traits(uint16_t opcode) {
     case OP_CHECK_LOWER:
     case OP_CHECK_UPPER:
     case OP_CHECK_MATCHING_DIMS:
+    case OP_CHECK_LUB_FREE:
     case OP_REGION_MAP:
       return op_trait::kWholeInputPayload;
     default:
@@ -949,6 +981,8 @@ constexpr bool is_effectful_op(uint16_t opcode) {
     case OP_CHECK_MATCHING_DIMS:
     case OP_CHECK_LOWER:
     case OP_CHECK_UPPER:
+    case OP_CHECK_OFFSET_MULTIPLIER:
+    case OP_CHECK_LUB_FREE:
     case OP_CATEGORICAL:
     case OP_ALL_INTEGER_DENSITY:
     case OP_RNG:

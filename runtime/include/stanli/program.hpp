@@ -274,6 +274,13 @@ struct Program {
     int32_t inner_raw = 0;
     int32_t out_rows = 0;
     int32_t out_cols = 0;
+    int32_t in_rows = 0;
+    int32_t in_cols = 0;
+    // The Eigen type of a non-structured first input (1 vector, 2 row
+    // vector, 3 matrix, 0 anything else) and its row count, so a check can
+    // name a bad element as Stan Math does.
+    uint8_t eigen = 0;
+    int32_t rows = 0;
   };
 
   // A DENSITY_VEC's payload: same density id DENSITY uses, but one or more
@@ -310,7 +317,9 @@ std::string render_program_message(const Program::Message& message,
                                    const T* reg) {
   return render_message(
       message.spec, message.value_reg.size(),
-      [&](std::size_t k) { return static_cast<int64_t>(message.value_len[k]); },
+      [&](std::size_t k) -> const MessageShape& {
+        return message.spec.shapes.at(k);
+      },
       [&](std::size_t k, int64_t i) {
         return stan::math::value_of(reg[message.value_reg[k] + i]);
       });
@@ -908,9 +917,8 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
       // rather than a failure. No adjoint reaches this -- the forward
       // already threw -- so there is nothing to do under var either.
       case Program::REJECT:
-        execute_message(MessageAction::Reject,
-                        render_program_message(p.messages[(size_t)I.a], reg));
-        break;
+        throw_message(p.messages[(size_t)I.a].spec.error,
+                      render_program_message(p.messages[(size_t)I.a], reg));
       case Program::DENSITY: {
         const int ar = program_density_arity(I.len);
         if (ar > 3) {

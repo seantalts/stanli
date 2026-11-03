@@ -44,6 +44,7 @@ enum class ScalarRng : uint8_t {
   NegBinomial2Log,
   // Container variants below also reserve 26 through 28. Future scalar
   // additions must start at 29 to preserve the existing variant numbers.
+  YuleSimon = 29,
 };
 
 // OP_RNG's first non-scalar-argument variant. Keep it outside ScalarRng:

@@ -15,5 +15,5 @@ model {
 }
 
 // STANLI-LIT: PASS
-// STANLI-LIT-EXPECT: COMPILE_FAIL assignment logical view mismatch for values
+// STANLI-LIT-EXPECT: EVAL_FAIL assign array size: assigning variable values (2) and right hand side (0) must match in size
 // STANLI-LIT-DATA: {"empty": []}

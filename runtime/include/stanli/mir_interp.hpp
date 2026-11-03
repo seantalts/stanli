@@ -30,6 +30,7 @@
 #include <stanli/function_registry.hpp>
 #include <stanli/extrema_grouping.hpp>
 #include <stanli/mir_message.hpp>
+#include <stanli/assign_size.hpp>
 #include <stanli/mir.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/program.hpp>
@@ -43,6 +44,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <set>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -230,6 +232,8 @@ class MirInterp {
           probe_failed_ = true;
           return r;
         }
+        if (funs_.count(e.name))
+          fail("unsupported call taking the function " + e.name, e.raw);
         fail("unknown variable " + e.name + " (type " + e.type_ + ")", e.raw);
       }
       case mir::Expr::TernaryIf: {
@@ -280,6 +284,11 @@ class MirInterp {
         declared_dims.reserve(st.decl_type.dims.size());
         for (const auto& d : st.decl_type.dims)
           declared_dims.push_back(as_int(d));
+        const AssignShape shape = assign_shape(st.decl_type);
+        if (shape.leaf == AssignLeaf::None)
+          assign_shape_.erase(st.decl_id);
+        else
+          assign_shape_[st.decl_id] = shape;
         Value e;
         if (st.decl_type.base == "SInt" ||
             (st.decl_type.base == "SArray" && st.decl_type.elem_base == "SInt"))
@@ -294,6 +303,7 @@ class MirInterp {
                      st.init.fn_lib == mir::Expr::Lib::Internal)) {
           const bool want_int = e.is_int;
           e = eval(st.init);
+          check_assign_size(st.decl_id, declared_dims, e);
           if (want_int && !e.is_int) {
             // Declared int, computed through real arithmetic: coerce back.
             e.is_int = true;
@@ -351,6 +361,14 @@ class MirInterp {
         }
         if (st.lhs_idx.empty()) {
           Value v = eval(st.rhs);
+          if (const Value* current = find(st.lhs))
+            check_assign_size(
+                st.lhs,
+                current->dims.empty()
+                    ? std::vector<int64_t>{static_cast<int64_t>(
+                          std::max(current->r.size(), current->i.size()))}
+                    : current->dims,
+                v);
           // A declared numeric type stays fixed for its whole lifetime. The
           // RHS's own representation can differ: MirInterp's binary ops use
           // real registers, while an all-integer array literal is tagged int.
@@ -379,6 +397,8 @@ class MirInterp {
         if (st.lhs_idx.size() == 1 && st.lhs_idx[0].name == "IndexAll") {
           if (en->dims.empty())
             fail("full-span assignment needs a container", st.raw);
+          if (assign_shape_.count(st.lhs))
+            check_assign_size(st.lhs, en->dims, v);
           if (v.r.size() != en->r.size())
             fail("full-span assignment size mismatch", st.raw);
           if (v.dims != en->dims)
@@ -419,7 +439,9 @@ class MirInterp {
             for (size_t d = 0; d < prefix_len; ++d) {
               const long i = as_int(st.lhs_idx[d].args[0]);
               if (i < 1 || i > en->dims[d])
-                fail("indexed assignment index out of bounds", st.raw);
+                fail(uni_assign_error(st.lhs, d, i, en->dims[d],
+                                      "indexed assignment index out of bounds"),
+                     st.raw);
               offset += (i - 1) * prefix_stride;
               prefix_stride *= en->dims[d];
             }
@@ -447,7 +469,9 @@ class MirInterp {
                                      ? static_cast<int64_t>(en->r.size())
                                      : en->dims.front();
           if (ix < 1 || ix > extent)
-            fail("indexed assignment index out of bounds", st.raw);
+            fail(uni_assign_error(st.lhs, 0, ix, extent,
+                                  "indexed assignment index out of bounds"),
+                 st.raw);
           en->r.at(ix - 1) = v.r.at(0);
           if (en->is_int) {
             en->i.at(ix - 1) =
@@ -470,13 +494,23 @@ class MirInterp {
           for (size_t d = 0; supported && d < st.lhs_idx.size(); ++d) {
             const int64_t extent = en->dims[d];
             const mir::Expr& index = st.lhs_idx[d];
+            if (d == 0 && assigns_to_array(st.lhs) &&
+                (index.name == "IndexAll" || index.name == "IndexBetween" ||
+                 index.name == "IndexUpfrom" || index.name == "IndexMulti")) {
+              select_leading_array(st.lhs, index, extent, v, selected[0],
+                                   st.raw);
+              continue;
+            }
             if (index.name == "IndexAll") {
               selected[d].reserve((size_t)extent);
               for (int64_t k = 0; k < extent; ++k) selected[d].push_back(k);
             } else if (index.name == "IndexSingle") {
               const long one = as_int(index.args[0]);
               if (one < 1 || one > extent)
-                fail("multi-index assignment index out of bounds", st.raw);
+                fail(uni_assign_error(st.lhs, d, one, extent,
+                                      "multi-index assignment index out of "
+                                      "bounds"),
+                     st.raw);
               selected[d].push_back(one - 1);
               drops[d] = true;
             } else if (index.name == "IndexBetween" ||
@@ -597,19 +631,28 @@ class MirInterp {
         // refuses to build.
         if (const auto action = message_action(st.fn_name)) {
           std::vector<Value> values;
+          std::vector<MessageShape> shapes;
           const MessageSpec spec = lower_message_arguments(
               st.fn_args, [&](const mir::Expr& argument) {
                 values.push_back(eval(argument));
+                MessageShape shape;
+                shape.column_major = true;
+                shape.integer = message_integer(argument);
+                if (!message_scalar(argument))
+                  shape.dims = values.back().dims.empty()
+                                   ? std::vector<int64_t>{static_cast<int64_t>(
+                                         values.back().r.size())}
+                                   : values.back().dims;
+                shapes.push_back(std::move(shape));
               });
-          execute_message(*action,
-                          render_message(
-                              spec, values.size(),
-                              [&](size_t k) {
-                                return static_cast<int64_t>(values[k].r.size());
-                              },
-                              [&](size_t k, int64_t i) {
-                                return val(values[k].r[static_cast<size_t>(i)]);
-                              }));
+          execute_message(
+              *action,
+              render_message(
+                  spec, values.size(),
+                  [&](size_t k) -> const MessageShape& { return shapes[k]; },
+                  [&](size_t k, int64_t i) {
+                    return val(values[k].r[static_cast<size_t>(i)]);
+                  }));
           return;
         }
         if (st.fn_name == "FnCheck") {
@@ -624,8 +667,17 @@ class MirInterp {
         // debt. `check_greater_or_equal` is only a static shape check in the
         // existing newtrans input; the function name is not generally pure.
         // New names must never silently join this list.
-        if (st.fn_name == "FnValidateSize" ||
-            st.fn_name == "FnValidateSizePositive" ||
+        if (st.fn_name == "FnValidateSize") {
+          if (st.fn_args.size() != 3 ||
+              st.fn_args[0].kind != mir::Expr::LitStr ||
+              st.fn_args[1].kind != mir::Expr::LitStr)
+            fail("malformed FnValidateSize", st.raw);
+          stan::math::validate_non_negative_index(
+              st.fn_args[0].lit_s.c_str(), st.fn_args[1].lit_s.c_str(),
+              static_cast<int>(as_int(st.fn_args[2])));
+          return;
+        }
+        if (st.fn_name == "FnValidateSizePositive" ||
             st.fn_name == "check_greater_or_equal")
           return;
         if (st.fn_name == "FnValidateSizeUnitVector") {
@@ -636,6 +688,15 @@ class MirInterp {
           stan::math::validate_unit_vector_index(
               st.fn_args[0].lit_s.c_str(), st.fn_args[1].lit_s.c_str(),
               static_cast<int>(as_int(st.fn_args[2])));
+          return;
+        }
+        if (const auto name = mir::user_defined_statement_name(st.fn_name)) {
+          mir::Expr call;
+          call.kind = mir::Expr::FunApp;
+          call.fn_lib = mir::Expr::Lib::UserDefined;
+          call.name = st.fn_name.substr(name->first, name->second);
+          call.args = st.fn_args;
+          call_udf(call);
           return;
         }
         fail("unsupported statement function " + st.fn_name, st.raw);
@@ -735,7 +796,7 @@ class MirInterp {
       plan =
           density_call_plan(spec, plan_arguments, e.fn_propto && propto_ctx_);
     } catch (const std::exception& error) {
-      fail(e.name + ": " + error.what(), e.raw);
+      fail(builtin_error_message(e.name, error), e.raw);
     }
     if (spec.evaluation == DensityEvaluationPolicy::AllInteger) {
       Value result;
@@ -771,6 +832,44 @@ class MirInterp {
     result.r = {run_kernel_call(e, spec.opcode, plan.variant,
                                 plan.activity_mask, std::move(plan.idata),
                                 std::move(inputs), 1)[0]};
+    return result;
+  }
+
+  Value wiener_packed_eval(const mir::Expr& e, const WienerForm& form) {
+    const int nargs = form.reals;
+    std::vector<Value> values;
+    values.reserve(e.args.size());
+    for (const mir::Expr& arg : e.args) values.push_back(eval(arg));
+    for (Value& v : values)
+      if (v.is_int && v.r.size() != v.i.size()) {
+        v.r.clear();
+        for (int value : v.i) v.r.push_back(T((double)value));
+      }
+    int64_t lanes = 1;
+    for (int k = 0; k < nargs; ++k)
+      lanes = std::max<int64_t>(lanes, (int64_t)values[k].r.size());
+    int active = 0;
+    std::vector<T> packed;
+    packed.reserve((size_t)(nargs * lanes));
+    for (int k = 0; k < nargs; ++k) {
+      if ((int64_t)values[k].r.size() != lanes)
+        fail(e.name + ": arguments differ in length", e.raw);
+      if constexpr (!std::is_same_v<T, double>)
+        if (!e.args[k].data_only) active |= 1 << k;
+      packed.insert(packed.end(), values[k].r.begin(), values[k].r.end());
+    }
+    const T precision = form.has_precision ? values[(size_t)nargs].r.at(0)
+                                           : T(form.default_precision);
+    const bool propto =
+        form.kind == WienerKind::Lpdf && e.fn_propto && propto_ctx_;
+    std::vector<std::vector<T>> inputs;
+    inputs.push_back(std::move(packed));
+    inputs.push_back({precision});
+    Value result;
+    result.r = {run_kernel_call(
+        e, OP_WIENER_PACKED_LPDF, 0, active ? 0x1 : 0,
+        {nargs, (int)lanes, active, propto ? 1 : 0, (int)form.kind},
+        std::move(inputs), 1)[0]};
     return result;
   }
 
@@ -835,9 +934,9 @@ class MirInterp {
       shapes.reserve(values.size());
       for (size_t k = 0; k < values.size(); ++k)
         shapes.push_back(function_argument_shape(e.args[k], values[k]));
-      layout = builtin_layout(spec, shapes);
+      layout = builtin_layout(spec, shapes, e.name, interpreter_autodiff(e));
     } catch (const std::invalid_argument& error) {
-      fail(e.name + ": " + error.what(), e.raw);
+      fail(builtin_error_message(e.name, error), e.raw);
     }
     std::vector<std::vector<T>> inputs;
     inputs.reserve(values.size());
@@ -936,9 +1035,9 @@ class MirInterp {
         shapes.push_back(function_argument_shape(e.args[0], a));
         if (spec.arity == 2)
           shapes.push_back(function_argument_shape(e.args[1], b));
-        (void)builtin_layout(spec, shapes);
+        (void)builtin_layout(spec, shapes, e.name, interpreter_autodiff(e));
       } catch (const std::invalid_argument& error) {
-        fail(e.name + ": " + error.what(), e.raw);
+        fail(builtin_error_message(e.name, error), e.raw);
       }
     }
     uint8_t activity = 0;
@@ -1032,7 +1131,14 @@ class MirInterp {
     activity &= spec.activity_mask;
     std::vector<std::vector<T>> inputs;
     inputs.reserve(values.size());
-    for (Value& value : values) inputs.push_back(std::move(value.r));
+    for (size_t k = 0; k < values.size(); ++k) {
+      Value& value = values[k];
+      if (e.args[k].unsized.depth != 0 && value.dims.size() > 1)
+        inputs.push_back(graph_container_order(value.r, value.dims,
+                                               e.args[k].unsized.depth));
+      else
+        inputs.push_back(std::move(value.r));
+    }
     std::vector<int> idata;
     idata.reserve(map.idata.size());
     for (const int64_t value : map.idata) idata.push_back((int)value);
@@ -1058,6 +1164,126 @@ class MirInterp {
   MirHooks hooks_;
   std::map<std::string, Value> env_;
   std::map<std::string, std::vector<int64_t>> decl_dims_;
+
+  struct AssignShape {
+    AssignLeaf leaf = AssignLeaf::None;
+    size_t array_levels = 0;
+  };
+  std::map<std::string, AssignShape> assign_shape_;
+
+  static AssignLeaf assign_leaf(const std::string& base) {
+    if (base == "SInt" || base == "SReal") return AssignLeaf::Scalar;
+    if (base == "SVector") return AssignLeaf::Vector;
+    if (base == "SRowVector") return AssignLeaf::RowVector;
+    if (base == "SMatrix") return AssignLeaf::Matrix;
+    return AssignLeaf::None;
+  }
+
+  static AssignShape assign_shape(const mir::SizedType& t) {
+    AssignShape shape;
+    if (t.unsized.leaf != mir::UnsizedLeaf::Unknown) return shape;
+    const bool array = t.base == "SArray";
+    const AssignLeaf leaf = assign_leaf(array ? t.elem_base : t.base);
+    const size_t rank = leaf == AssignLeaf::Matrix   ? 2
+                        : leaf == AssignLeaf::Scalar ? 0
+                                                     : 1;
+    if (leaf == AssignLeaf::None || (!array && leaf == AssignLeaf::Scalar) ||
+        t.dims.size() < rank || (array && t.dims.size() == rank))
+      return shape;
+    shape.leaf = leaf;
+    shape.array_levels = t.dims.size() - rank;
+    return shape;
+  }
+
+  static bool interpreter_autodiff(const mir::Expr& call) {
+    return !std::is_same_v<T, double> && mir::any_argument_active(call);
+  }
+
+  bool assigns_to_array(const std::string& name) const {
+    const auto it = assign_shape_.find(name);
+    return it != assign_shape_.end() && it->second.array_levels > 0;
+  }
+
+  // The out-of-range message Stan Math gives a single index into dimension
+  // `dim` of the sized variable `name`, or `fallback` for other containers.
+  std::string uni_assign_error(const std::string& name, size_t dim, long index,
+                               int64_t extent,
+                               const std::string& fallback) const {
+    const auto it = assign_shape_.find(name);
+    if (it == assign_shape_.end()) return fallback;
+    if (dim < it->second.array_levels)
+      return index_out_of_range_message("array[uni,...] assign", extent, index);
+    if (it->second.leaf == AssignLeaf::Vector ||
+        it->second.leaf == AssignLeaf::RowVector)
+      return index_out_of_range_message("vector[uni] assign", extent, index);
+    return fallback;
+  }
+
+  // The first index of a write into an array that selects more than one
+  // element, checked in Stan Math's order: its selection size against the
+  // right-hand side's outer size, then each selected position against the
+  // extent.
+  void select_leading_array(const std::string& name, const mir::Expr& index,
+                            int64_t extent, const Value& rhs,
+                            std::vector<int64_t>& selected,
+                            const std::string& raw) {
+    long first = 1;
+    int64_t count = extent;
+    std::vector<int> listed;
+    if (index.name == "IndexBetween" || index.name == "IndexUpfrom") {
+      first = as_int(index.args[0]);
+      const long last =
+          index.name == "IndexBetween" ? as_int(index.args[1]) : extent;
+      count = last >= first ? static_cast<int64_t>(last) - first + 1 : 0;
+    } else if (index.name == "IndexMulti") {
+      const Value positions = eval(index.args[0]);
+      if (!positions.is_int)
+        fail("multi-index assignment needs an int index array", raw);
+      listed = positions.i;
+      count = static_cast<int64_t>(listed.size());
+    }
+    const int64_t given = rhs.dims.empty() ? static_cast<int64_t>(rhs.r.size())
+                                           : rhs.dims.front();
+    if (count != given) {
+      const bool empty_range = count == 0 && index.name == "IndexBetween";
+      fail(std::string(empty_range ? "array[negative_min_max, ...] assign"
+                                   : "array[multi, ...] assign") +
+               ": assigning variable " + name + " (" + std::to_string(count) +
+               ") and right hand side" + (empty_range ? "" : " size") + " (" +
+               std::to_string(given) + ") must match in size",
+           raw);
+    }
+    selected.reserve(static_cast<size_t>(count));
+    for (int64_t k = 0; k < count; ++k) {
+      const long position = index.name == "IndexMulti"
+                                ? listed[static_cast<size_t>(k)]
+                                : static_cast<long>(first + k);
+      if (position < 1 || position > extent)
+        fail(index_out_of_range_message("array[multi, ...] assign", extent,
+                                        position),
+             raw);
+      selected.push_back(position - 1);
+    }
+  }
+
+  void check_assign_size(const std::string& name,
+                         const std::vector<int64_t>& dst, const Value& v) {
+    const auto it = assign_shape_.find(name);
+    if (it == assign_shape_.end()) return;
+    const AssignShape& shape = it->second;
+    // A vector's own length is its element count, whatever dims it carries.
+    std::vector<int64_t> src = v.dims;
+    const int64_t count =
+        static_cast<int64_t>(std::max(v.r.size(), v.i.size()));
+    if (src.empty() ||
+        (shape.array_levels == 0 && (shape.leaf == AssignLeaf::Vector ||
+                                     shape.leaf == AssignLeaf::RowVector)))
+      src = {count};
+    const std::string message =
+        assign_size_mismatch(name, shape.leaf, shape.array_levels, dst, src);
+    if (!message.empty()) throw std::invalid_argument(message);
+  }
+
   int udf_depth_ = 0;
   bool propto_ctx_ = true;
   bool probe_ = false;
@@ -1071,16 +1297,55 @@ class MirInterp {
   // The .at() reads in eval_indexed would throw a bare
   // std::out_of_range("vector"); check first so an out-of-range index
   // names the index and the extent instead.
-  void bounds(long i, int64_t n, const mir::Expr& e) const {
+  void bounds(long i, int64_t n, const mir::Expr& e,
+              const char* label = nullptr) const {
     if (i < 1 || i > n) {
       if (probe_) {
         probe_failed_ = true;
         return;
       }
-      fail("index " + std::to_string(i) + " out of bounds for size " +
-               std::to_string(n),
+      fail(label ? index_out_of_range_message(label, n, i)
+                 : "index " + std::to_string(i) + " out of bounds for size " +
+                       std::to_string(n),
            e.raw);
     }
+  }
+
+  // Stan Math's label for a single index at dimension `dim` of the read
+  // `e`, which carries `indices` indices.
+  static const char* uni_read_label(const mir::Expr& e, size_t dim,
+                                    size_t indices) {
+    const mir::UnsizedView& base = e.args[0].unsized;
+    if (dim < base.depth) return "array[uni, ...] index";
+    switch (base.leaf) {
+      case mir::UnsizedLeaf::Vector:
+      case mir::UnsizedLeaf::RowVector:
+        return "vector[uni] indexing";
+      case mir::UnsizedLeaf::Matrix:
+        if (indices < base.depth + 2) return "matrix[uni] indexing";
+        return dim == base.depth ? "matrix[uni,uni] row indexing"
+                                 : "matrix[uni,uni] column indexing";
+      default:
+        return "array[uni, ...] index";
+    }
+  }
+
+  // Stan Math's label for a multi, range or open-ended selector at dimension
+  // `dim` of the read `e`; `upper` picks the end of a range. Null where the
+  // container is a matrix and the generic message stays.
+  static const char* selector_read_label(const mir::Expr& e, size_t dim,
+                                         const std::string& index,
+                                         bool upper = false) {
+    const mir::UnsizedView& base = e.args[0].unsized;
+    if (dim < base.depth || base.leaf == mir::UnsizedLeaf::Unknown ||
+        base.leaf == mir::UnsizedLeaf::Int ||
+        base.leaf == mir::UnsizedLeaf::Real)
+      return "array[..., ...] index";
+    if (base.leaf == mir::UnsizedLeaf::Matrix) return nullptr;
+    if (index == "IndexMulti") return "vector[multi] indexing";
+    if (index == "IndexUpfrom") return "vector[min] indexing";
+    return upper ? "vector[min_max] max indexing"
+                 : "vector[min_max] min indexing";
   }
 
   static double val(const T& x) { return stan::math::value_of(x); }
@@ -1208,15 +1473,29 @@ class MirInterp {
           y.r.size() != bound.r.size())
         check_shape_fail(name);
     }
-    without_check_prefix([&] {
-      for (size_t i = 0; i < y.r.size(); ++i) {
-        const double b = val(bound.r[b_scalar ? 0 : i]);
-        if (kind == mir::Transform::Lower)
-          stan::math::check_greater_or_equal("", name.c_str(), val(y.r[i]), b);
-        else
-          stan::math::check_less_or_equal("", name.c_str(), val(y.r[i]), b);
-      }
-    });
+    std::vector<double> values, bounds;
+    for (const T& v : y.r) values.push_back(val(v));
+    for (const T& v : bound.r) bounds.push_back(val(v));
+    check_bound_value(
+        values.data(), static_cast<int64_t>(values.size()), bounds.data(),
+        static_cast<int64_t>(bounds.size()), name,
+        check_geometry(st.fn_args[0], check_dims(st.fn_args[0], y)),
+        kind == mir::Transform::Lower);
+  }
+
+  static CheckGeometry check_geometry(const mir::Expr& e,
+                                      std::vector<int64_t> dims) {
+    CheckGeometry geometry;
+    geometry.storage = StructuredStorage::FirstIndexFast;
+    const mir::UnsizedView& type = e.unsized;
+    const size_t leaf_extents = type.leaf == mir::UnsizedLeaf::Matrix      ? 2
+                                : type.leaf == mir::UnsizedLeaf::Vector    ? 1
+                                : type.leaf == mir::UnsizedLeaf::RowVector ? 1
+                                                                           : 0;
+    if (dims.size() != type.depth + leaf_extents) return geometry;
+    geometry.leaf_rank = leaf_extents == 0 && !dims.empty() ? 1 : leaf_extents;
+    geometry.dims = std::move(dims);
+    return geometry;
   }
 
   // max-shifted log-sum-exp over a buffer; -inf on an empty or all
@@ -1403,7 +1682,7 @@ class MirInterp {
     if (e.args.size() == 2 && e.args[1].name == "IndexSingle" &&
         base.dims.size() <= 1) {
       const long ix = as_int(e.args[1].args[0]);
-      bounds(ix, (int64_t)base.r.size(), e);
+      bounds(ix, (int64_t)base.r.size(), e, uni_read_label(e, 0, 1));
       if (probe_failed_) return r;
       r.is_int = base.is_int;
       if (base.is_int) r.i = {base.i.at(ix - 1)};
@@ -1418,7 +1697,7 @@ class MirInterp {
           e.args[2].name == "IndexAll"))) {
       const long i = as_int(e.args[1].args[0]);
       const int64_t R = base.dims[0], C = base.dims[1];
-      bounds(i, R, e);
+      bounds(i, R, e, uni_read_label(e, 0, 1));
       if (probe_failed_) return r;
       r.is_int = base.is_int;
       r.dims = {C};
@@ -1438,7 +1717,7 @@ class MirInterp {
         int64_t flatpos = 0, stride = 1;
         for (size_t d = 0; d < base.dims.size(); ++d) {
           const long ixd = as_int(e.args[1 + d].args[0]);
-          bounds(ixd, base.dims[d], e);
+          bounds(ixd, base.dims[d], e, uni_read_label(e, d, e.args.size() - 1));
           if (probe_failed_) return r;
           flatpos += (ixd - 1) * stride;
           stride *= base.dims[d];
@@ -1454,7 +1733,11 @@ class MirInterp {
         e.args[2].name == "IndexSingle" && base.dims.size() == 2) {
       const long j = as_int(e.args[2].args[0]);
       const int64_t R = base.dims[0];
-      bounds(j, base.dims[1], e);
+      bounds(j, base.dims[1], e,
+             e.args[0].unsized.leaf == mir::UnsizedLeaf::Matrix &&
+                     e.args[0].unsized.depth == 0
+                 ? "matrix[..., uni] column indexing"
+                 : "array[uni, ...] index");
       if (probe_failed_) return r;
       r.is_int = base.is_int;
       r.dims = {R};
@@ -1477,7 +1760,7 @@ class MirInterp {
         int64_t offset = 0, prefix_stride = 1;
         for (size_t d = 0; d < n_indices; ++d) {
           const long i = as_int(e.args[1 + d].args[0]);
-          bounds(i, base.dims[d], e);
+          bounds(i, base.dims[d], e, uni_read_label(e, d, n_indices));
           if (probe_failed_) return r;
           offset += (i - 1) * prefix_stride;
           prefix_stride *= base.dims[d];
@@ -1503,7 +1786,8 @@ class MirInterp {
       r.dims = {(int64_t)n};
       for (size_t k = 0; k < n; ++k) {
         const long p = k < ix.i.size() ? ix.i[k] : (long)val(ix.r.at(k));
-        bounds(p, (int64_t)base.r.size(), e);
+        bounds(p, (int64_t)base.r.size(), e,
+               selector_read_label(e, 0, "IndexMulti"));
         if (probe_failed_) return r;
         r.r.push_back(base.r.at((size_t)(p - 1)));
         if (base.is_int) r.i.push_back(base.i.at((size_t)(p - 1)));
@@ -1516,9 +1800,11 @@ class MirInterp {
       const long a = as_int(e.args[1].args[0]);
       const long b = as_int(e.args[1].args[1]);
       if (b >= a) {
-        bounds(a, (int64_t)base.r.size(), e);
+        bounds(a, (int64_t)base.r.size(), e,
+               selector_read_label(e, 0, "IndexBetween"));
         if (probe_failed_) return r;
-        bounds(b, (int64_t)base.r.size(), e);
+        bounds(b, (int64_t)base.r.size(), e,
+               selector_read_label(e, 0, "IndexBetween", true));
         if (probe_failed_) return r;
       }
       r.is_int = base.is_int;
@@ -1605,7 +1891,7 @@ class MirInterp {
             const long i = k < positions.i.size()
                                ? positions.i[k]
                                : static_cast<long>(val(positions.r.at(k)));
-            bounds(i, extent, e);
+            bounds(i, extent, e, selector_read_label(e, d, index.name));
             if (probe_failed_) return r;
             selected[d].push_back(i - 1);
           }
@@ -1613,16 +1899,16 @@ class MirInterp {
           const long lo = as_int(index.args[0]);
           const long hi = as_int(index.args[1]);
           if (hi >= lo) {
-            bounds(lo, extent, e);
+            bounds(lo, extent, e, selector_read_label(e, d, index.name));
             if (probe_failed_) return r;
-            bounds(hi, extent, e);
+            bounds(hi, extent, e, selector_read_label(e, d, index.name, true));
             if (probe_failed_) return r;
           }
           selected[d].reserve(static_cast<size_t>(hi >= lo ? hi - lo + 1 : 0));
           for (long i = lo; i <= hi; ++i) selected[d].push_back(i - 1);
         } else if (index.name == "IndexUpfrom") {
           const long lo = as_int(index.args[0]);
-          bounds(lo, extent, e);
+          bounds(lo, extent, e, selector_read_label(e, d, index.name));
           if (probe_failed_) return r;
           selected[d].reserve(static_cast<size_t>(extent - lo + 1));
           for (long i = lo; i <= extent; ++i) selected[d].push_back(i - 1);
@@ -1668,8 +1954,12 @@ class MirInterp {
         registered != nullptr && registered->builtin() != nullptr
             ? registered->builtin()
             : nullptr;
-    if (mir::stateful_intrinsic_kind(e))
+    if (mir::stateful_intrinsic_kind(e)) {
+      if constexpr (std::is_same_v<T, double>) {
+        if (hooks_.fun && hooks_.fun(*this, e, &r)) return r;
+      }
       fail("target() is unavailable in this context", e.raw);
+    }
     if (const auto value = mir::nullary_constant(e)) {
       r.r = {T(*value)};
       return r;
@@ -1704,9 +1994,10 @@ class MirInterp {
       try {
         for (size_t k = 0; k < values.size(); ++k)
           shapes.push_back(function_argument_shape(e.args[k], values[k]));
-        return builtin_layout(*builtin, shapes);
+        return builtin_layout(*builtin, shapes, e.name,
+                              interpreter_autodiff(e));
       } catch (const std::invalid_argument& error) {
-        fail(e.name + ": " + error.what(), e.raw);
+        fail(builtin_error_message(e.name, error), e.raw);
       }
     };
     // Elementwise with scalar broadcasting; results of real math are real
@@ -1884,7 +2175,7 @@ class MirInterp {
               oriented(a, outer_pair ? Kind::Vector : Kind::RowVector),
               oriented(b, outer_pair ? Kind::RowVector : Kind::Vector));
         } catch (const std::invalid_argument& error) {
-          fail(e.name + ": " + error.what(), e.raw);
+          fail(builtin_error_message(e.name, error), e.raw);
         }
         switch (map.kind) {
           case BuiltinProductMap::Kind::Gemm:
@@ -2061,6 +2352,24 @@ class MirInterp {
       Value o;
       size_t n = 1;
       bool have_container = false;
+      const Value* operands[] = {&a, &b, &c};
+      const auto check_pair = [&](size_t i, size_t j) {
+        if (is_scalar(*operands[i]) || is_scalar(*operands[j]) ||
+            (operands[i]->dims == operands[j]->dims &&
+             operands[i]->r.size() == operands[j]->r.size()))
+          return;
+        fail(matrix_dims_mismatch_message(
+                 "fma", std::string(1, "xyz"[i]),
+                 function_argument_shape(e.args[i], *operands[i]),
+                 std::string(1, "xyz"[j]),
+                 function_argument_shape(e.args[j], *operands[j])),
+             e.raw);
+      };
+      check_pair(0, 1);
+      if (!is_scalar(a) && !is_scalar(c))
+        check_pair(0, 2);
+      else
+        check_pair(1, 2);
       for (const Value* x : {&a, &b, &c}) {
         if (is_scalar(*x)) continue;
         if (have_container && (x->dims != o.dims || x->r.size() != n))
@@ -2081,6 +2390,51 @@ class MirInterp {
     // interpreter is used for write_array with jacobian__ false, so it keeps
     // the constrained value and deliberately discards the auxiliary lp.
     CallableTransformSpec transform;
+    if (callable_transform(e.name, &transform) &&
+        transform.arity == e.args.size() && transform.structured &&
+        transform.direction == TransformDirection::Unconstrain) {
+      const Value a = eval(e.args[0]);
+      const size_t outer_rank = e.args[0].unsized.depth;
+      const bool input_matrix =
+          e.args[0].unsized.leaf == mir::UnsizedLeaf::Matrix;
+      if (a.dims.size() < outer_rank + (input_matrix ? 2u : 1u))
+        fail(e.name + ": incomplete input dimensions", e.raw);
+      Program::Transform tr;
+      tr.kind = transform.kind;
+      tr.direction = transform.direction;
+      tr.n_in = 1;
+      int64_t batch = 1;
+      for (size_t i = 0; i < outer_rank; ++i) batch *= a.dims[i];
+      tr.in_rows = (int32_t)a.dims[outer_rank];
+      tr.in_cols = input_matrix ? (int32_t)a.dims[outer_rank + 1] : 0;
+      int64_t rows = 0, cols = 0;
+      bool out_matrix = false;
+      if (!free_leaf_shape(transform.kind, tr.in_rows, tr.in_cols, &rows, &cols,
+                           &out_matrix))
+        fail(e.name + ": invalid input container", e.raw);
+      tr.batch = (int32_t)batch;
+      tr.inner_raw = input_matrix ? tr.in_rows * tr.in_cols : tr.in_rows;
+      tr.out_rows = (int32_t)rows;
+      tr.out_cols = (int32_t)cols;
+      tr.out_len = (int32_t)(batch * (out_matrix ? rows * cols : rows));
+      Value o;
+      o.dims.assign(a.dims.begin(), a.dims.begin() + outer_rank);
+      o.dims.push_back(rows);
+      if (out_matrix) o.dims.push_back(cols);
+      std::vector<T> reg =
+          outer_rank > 0 ? graph_container_order(a.r, a.dims, outer_rank) : a.r;
+      tr.in[0] = 0;
+      tr.in_len[0] = (int32_t)reg.size();
+      tr.out = (int32_t)reg.size();
+      reg.resize(reg.size() + (size_t)tr.out_len);
+      tr.jac = (int32_t)reg.size();
+      reg.emplace_back(T(0));
+      run_program_transform(tr, reg.data());
+      o.r.assign(reg.begin() + tr.out, reg.begin() + tr.out + tr.out_len);
+      if (outer_rank > 0)
+        o.r = serialized_container_order(o.r, o.dims, outer_rank);
+      return o;
+    }
     if (callable_transform(e.name, &transform) &&
         transform.arity == e.args.size()) {
       if (transform.structured &&
@@ -2104,6 +2458,14 @@ class MirInterp {
         }
         tr.out_len = (int32_t)a[0].r.size();
         tr.inner_raw = tr.out_len;
+        if (e.args[0].unsized.depth == 0) {
+          const mir::UnsizedLeaf leaf = e.args[0].unsized.leaf;
+          tr.eigen = leaf == mir::UnsizedLeaf::Vector      ? 1
+                     : leaf == mir::UnsizedLeaf::RowVector ? 2
+                     : leaf == mir::UnsizedLeaf::Matrix    ? 3
+                                                           : 0;
+          if (tr.eigen == 3) tr.rows = static_cast<int32_t>(a[0].dims[0]);
+        }
       } else {
         outer_rank = e.args[0].unsized.depth;
         const bool input_matrix =
@@ -2820,6 +3182,8 @@ class MirInterp {
         return builtin_kernel_eval(e, *kernel_builtin, std::move(values));
     }
 
+    if (const auto wiener = wiener_form(e.name, e.args.size()))
+      return wiener_packed_eval(e, *wiener);
     if (registered != nullptr && registered->density() != nullptr)
       return density_eval(e, *registered->density());
     // Hand-built MIR without numeric metadata resolves densities by name
@@ -2831,6 +3195,76 @@ class MirInterp {
           named_density != nullptr && named_density->density() != nullptr)
         return density_eval(e, *named_density->density());
 
+    if (e.name == "eval" && e.args.size() == 1) return eval(e.args[0]);
+    if (e.name == "log_mix" && e.args.size() == 3) {
+      const T theta = eval(e.args[0]).r.at(0);
+      const T lambda1 = eval(e.args[1]).r.at(0);
+      const T lambda2 = eval(e.args[2]).r.at(0);
+      r.r = {stan::math::log_mix(theta, lambda1, lambda2)};
+      return r;
+    }
+    if (e.name == "gaussian_dlm_obs_lpdf" && e.args.size() == 7) {
+      std::vector<Value> a;
+      for (const mir::Expr& arg : e.args) a.push_back(eval(arg));
+      if (a[0].dims.size() != 2 || a[2].dims.size() != 2)
+        fail(e.name + ": y and G must be matrices", e.raw);
+      std::vector<T> packed;
+      uint8_t packed_active = 0;
+      for (size_t k = 1; k < 7; ++k) {
+        packed.insert(packed.end(), a[k].r.begin(), a[k].r.end());
+        if constexpr (!std::is_same_v<T, double>)
+          if (!e.args[k].data_only) packed_active = 1;
+      }
+      const bool propto = e.fn_propto && propto_ctx_;
+      const bool y_active = !std::is_same_v<T, double> && !e.args[0].data_only;
+      const uint8_t activity =
+          (uint8_t)((y_active ? 1u : 0u) | (packed_active << 1));
+      const uint8_t variant =
+          (uint8_t)((propto ? 1u : 0u) |
+                    (propto && activity != 0 ? kMatrixActiveForward : 0u));
+      std::vector<std::vector<T>> inputs;
+      inputs.push_back(std::move(a[0].r));
+      inputs.push_back(std::move(packed));
+      r.r = {run_kernel_call(
+          e, OP_GAUSSIAN_DLM_OBS_LPDF, variant, activity,
+          {(int)a[0].dims[0], (int)a[0].dims[1], (int)a[2].dims[0],
+           e.args[3].unsized.leaf == mir::UnsizedLeaf::Matrix ? 1 : 0},
+          std::move(inputs), 1)[0]};
+      return r;
+    }
+    if ((e.name == "csr_matrix_times_vector" && e.args.size() == 6) ||
+        (e.name == "csr_to_dense_matrix" && e.args.size() == 5)) {
+      const bool product = e.name == "csr_matrix_times_vector";
+      std::vector<int> idata = {(int)as_int(e.args[0]), (int)as_int(e.args[1])};
+      for (size_t k = 3; k < 5; ++k) {
+        const Value value = eval(e.args[k]);
+        idata.push_back((int)value.r.size());
+        for (size_t j = 0; j < value.r.size(); ++j)
+          idata.push_back(value.i.size() == value.r.size()
+                              ? value.i[j]
+                              : (int)val(value.r[j]));
+      }
+      const int m = idata[0], n = idata[1];
+      std::vector<std::vector<T>> inputs;
+      uint8_t activity = 0;
+      inputs.push_back(eval(e.args[2]).r);
+      if constexpr (!std::is_same_v<T, double>)
+        if (!e.args[2].data_only) activity |= 1;
+      if (product) {
+        inputs.push_back(eval(e.args[5]).r);
+        if constexpr (!std::is_same_v<T, double>)
+          if (!e.args[5].data_only) activity |= 2;
+      }
+      r.r = run_kernel_call(
+          e, product ? OP_CSR_MATRIX_TIMES_VECTOR : OP_CSR_TO_DENSE_MATRIX, 0,
+          activity, std::move(idata), std::move(inputs),
+          product ? m : (int64_t)m * n);
+      if (product)
+        r.dims = {(int64_t)m};
+      else
+        r.dims = {(int64_t)m, (int64_t)n};
+      return r;
+    }
     if (e.name == "csr_extract_w" && e.args.size() == 1) {
       Value a = eval(e.args[0]);
       if (a.dims.size() != 2)

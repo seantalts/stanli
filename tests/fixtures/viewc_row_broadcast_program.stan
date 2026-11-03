@@ -5,4 +5,4 @@ model {
 }
 
 // STANLI-LIT: PASS
-// STANLI-LIT-EXPECT: COMPILE_FAIL runtime-control region: Plus__: incompatible logical views
+// STANLI-LIT-EXPECT: COMPILE_FAIL runtime-control region: add: a (1, 1) and b (1, 2) must match in size

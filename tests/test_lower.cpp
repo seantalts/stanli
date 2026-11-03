@@ -972,6 +972,70 @@ static void test_wiener_forms() {
   stan::math::recover_memory();
 }
 
+// wiener_lcdf_unnorm and wiener_lccdf_unnorm, four- and seven-parameter, with
+// and without precision, scalar and vectorized, plus data-only calls that run
+// in transformed data.
+static void test_wiener_cdf_forms() {
+  using namespace stanli;
+  using stan::math::var;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/wiener_cdf_forms.json"));
+  CompiledModel cm;
+  try {
+    cm =
+        compile_model(slurp("tests/fixtures/wiener_cdf_forms.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("wiener cdf forms compile: ") + error.what());
+    return;
+  }
+  const std::vector<double>& y = data.at("y").r;
+  const double q[7] = {1.2, 0.05, 0.5, 0.3, 0.4, 0.1, 0.02};
+  std::vector<var> p(q, q + 7);
+  const var &a = p[0], &t0 = p[1], &w = p[2], &v = p[3], &sv = p[4], &sw = p[5],
+            &st0 = p[6];
+  namespace sm = stan::math;
+  double lp_data = sm::wiener_lcdf_unnorm(y[0], 1.2, 0.05, 0.5, 0.3);
+  lp_data += sm::wiener_lccdf_unnorm(y[1], 1.2, 0.05, 0.5, 0.3, 1e-5);
+  lp_data += sm::wiener_lcdf_unnorm(y[0], 1.2, 0.05, 0.5, 0.3, 0.4, 0.1, 0.02);
+  lp_data +=
+      sm::wiener_lccdf_unnorm(y[1], 1.2, 0.05, 0.5, 0.3, 0.4, 0.1, 0.02, 1e-6);
+  lp_data += sm::wiener_lpdf<false>(y[2], 1.2, 0.05, 0.5, 0.3, 0.4);
+  lp_data += sm::wiener_lpdf<false>(y[2], 1.2, 0.05, 0.5, 0.3, 0.4, 0.1, 0.02);
+  var lp = lp_data;
+  for (const double yn : y) {
+    lp += sm::wiener_lcdf_unnorm(yn, a, t0, w, v);
+    lp += sm::wiener_lcdf_unnorm(yn, a, t0, w, v, 1e-5);
+    lp += sm::wiener_lccdf_unnorm(yn, a, t0, w, v);
+    lp += sm::wiener_lccdf_unnorm(yn, a, t0, w, v, 1e-5);
+    lp += sm::wiener_lcdf_unnorm(yn, a, t0, w, v, sv, sw, st0);
+    lp += sm::wiener_lccdf_unnorm(yn, a, t0, w, v, sv, sw, st0, 1e-6);
+  }
+  const int n = (int)y.size();
+  const Eigen::VectorXd yv = Eigen::Map<const Eigen::VectorXd>(y.data(), n);
+  const auto rep = [&](const var& x) {
+    Eigen::Matrix<var, -1, 1> out(n);
+    out.setConstant(x);
+    return out;
+  };
+  lp += sm::wiener_lcdf_unnorm(yv, rep(a), rep(t0), rep(w), rep(v));
+  lp += sm::wiener_lccdf_unnorm(yv, rep(a), rep(t0), rep(w), rep(v));
+  lp += sm::wiener_lcdf_unnorm(yv, rep(a), rep(t0), rep(w), rep(v), rep(sv),
+                               rep(sw), rep(st0));
+  lp += sm::wiener_lccdf_unnorm(y[1], a, t0, w, v, sv, sw, st0, 1e-6);
+  lp += sm::wiener_lcdf_unnorm(y[1], a, t0, w, v, 1e-5);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  for (int k = 0; k < 7; ++k) ex.params_data()[k] = q[k];
+  double grad[7] = {};
+  check(std::isfinite(lp.val()), "wiener cdf forms reference is finite");
+  expect_ulp("wiener cdf forms lp", ex.gradient(grad), lp.val(), 10);
+  for (int k = 0; k < 7; ++k)
+    expect_ulp("wiener cdf forms grad " + std::to_string(k), grad[k],
+               p[k].adj(), 10);
+  stan::math::recover_memory();
+}
+
 // The op carries the activity of its arguments: the observations and the
 // nondecision time are data, and the gradient matches stan-math evaluated
 // with those arguments as doubles.
@@ -4662,10 +4726,10 @@ int main() {
   }
 
   // Index bounds are data, so the lowering must reject an out-of-bounds
-  // index at bind time the way CmdStan rejects it at runtime; the silent
-  // alternative is reading a neighboring arena slot. hi < lo ranges stay
-  // empty. One fixture; the base dataset is in bounds and each violation
-  // overrides one index.
+  // index at bind time, or emit the std::out_of_range CmdStan throws at
+  // runtime; the silent alternative is reading a neighboring arena slot.
+  // hi < lo ranges stay empty. One fixture; the base dataset is in bounds
+  // and each violation overrides one index.
   {
     const auto base_data = [] {
       DataMap d = DataMap::from_json(
@@ -4731,39 +4795,49 @@ int main() {
       run_case(std::move(d), true, "oob rows-empty");
     }
 
+    const auto rejects = [&](const DataMap& d, const std::string& tag,
+                             const char* message = "out of bounds") {
+      try {
+        CompiledModel lm = compile_model(mir, d);
+        Executor lex(std::move(lm.graph));
+        lm.bind(lex);
+        lex.params_data()[0] = 0.35;
+        double grad[1] = {0};
+        try {
+          lex.gradient(grad);
+        } catch (const std::out_of_range& ex) {
+          stan::math::recover_memory();
+          return std::string(ex.what()).find(message) != std::string::npos;
+        }
+        stan::math::recover_memory();
+      } catch (const std::exception& ex) {
+        if (std::string(ex.what()).find(message) != std::string::npos)
+          return true;
+        std::printf("  %s threw without '%s': %s\n", tag.c_str(), message,
+                    ex.what());
+      }
+      return false;
+    };
     const auto expect_oob = [&](const char* name, long v,
-                                const std::string& tag) {
+                                const std::string& tag,
+                                const char* message = "out of bounds") {
       DataMap d = base_data();
       d.set_int(name, v);
-      bool threw = false;
-      try {
-        compile_model(mir, d);
-      } catch (const std::exception& ex) {
-        threw =
-            std::string(ex.what()).find("out of bounds") != std::string::npos;
-        if (!threw)
-          std::printf("  %s threw without 'out of bounds': %s\n", tag.c_str(),
-                      ex.what());
-      }
-      check(threw, tag + " rejected");
+      check(rejects(d, tag, message), tag + " rejected");
     };
-    expect_oob("k", 7, "oob v[7]");
+    expect_oob("k", 7, "oob v[7]", "accessing element out of range");
     expect_oob("hi", 9, "oob v[2:9]");
-    expect_oob("i1", 5, "oob M[5]");
-    expect_oob("j1", 5, "oob M[:,5]");
+    expect_oob("i1", 5, "oob M[5]", "accessing element out of range");
+    expect_oob("j1", 5, "oob M[:,5]", "accessing element out of range");
     expect_oob("rh", 9, "oob M[2:9]");
-    expect_oob("m", 9, "oob interp xs[9]");
+    expect_oob("m", 9, "oob interp xs[9]",
+               "array[uni, ...] index: accessing element out of range. index "
+               "9 out of range");
     {
       DataMap d = base_data();
       d.set_int_array("idx", {1, 9});
-      bool threw = false;
-      try {
-        compile_model(mir, d);
-      } catch (const std::exception& ex) {
-        threw =
-            std::string(ex.what()).find("out of bounds") != std::string::npos;
-      }
-      check(threw, "oob v[[1,9]] rejected");
+      check(rejects(d, "oob v[[1,9]]", "accessing element out of range"),
+            "oob v[[1,9]] rejected");
     }
   }
 
@@ -11870,6 +11944,7 @@ int main() {
   test_structured_dead_after_break();
   test_structured_while_vector_return();
   test_wiener_forms();
+  test_wiener_cdf_forms();
   test_wiener_activity();
   test_wiener_scalar_calls();
   test_udf_param_branch();

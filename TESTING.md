@@ -114,8 +114,8 @@ The jobs are in [`wheels.yml`](.github/workflows/wheels.yml),
 | [generated conformance sweep](#testing-stan-language-coverage) | 24,322 generated signature and construct cases | reference BridgeStan from the same pins | nightly | operator-only behavior; cases the generator cannot build |
 | [coverage ratchet](#testing-stan-language-coverage) | each generated case's status | the checked-in baseline | nightly | the coverage totals themselves |
 | [integrated function models](#testing-stan-language-coverage) | 10 models using 430 function names, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | every overload of each name |
-| [signature replay](#testing-stan-language-coverage) | 73 generated models covering 19,538 signatures, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | signatures the generators exclude |
-| [model census](#testing-stan-language-coverage) | the 1,244 files in stanc3's integration tests | a per-model baseline | by hand | numerical agreement unless run with `--differential` |
+| [signature replay](#testing-stan-language-coverage) | 74 generated models covering 19,641 signatures, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | signatures the generators exclude |
+| [stanc3 test models](#testing-stan-language-coverage) | the 1,244 models in stanc3's integration tests, lp, gradient and write_array at 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
 | Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly | |
 | [installed clients](#installed-clients) | the built wheel, R package and BridgeStan transport | API tests and R ecosystem consumers; skips fail | PR on Linux and Windows x64; post-merge adds wheel tests on macOS and Linux aarch64 and R tests on macOS arm64 | macOS and aarch64 before merge |
 | [brms end to end](#samplers-and-other-algorithms) | `brm()` fits of the 124 brms formulas with the `stanli` backend | the same fits with brms's `cmdstanr` backend | by hand | anything beyond posterior means; platforms other than macOS arm64 |
@@ -188,7 +188,7 @@ in [`deps/pins.env`](deps/pins.env).
 [`harnesses/conformance/fetch_cmdstan.sh`](harnesses/conformance/fetch_cmdstan.sh)
 is the one way to set up CmdStan; it rebuilds CmdStan when a pin, the stanc or
 the C++ compiler changes. The tools that compile models against CmdStan,
-including the reference recorders, the benchmark and the census, refuse a
+including the reference recorders and the benchmark, refuse a
 checkout that does not match the pins
 ([`tools/toolchain.py`](tools/toolchain.py)). The benchmark's
 `--allow-unpinned-cmdstan` overrides this and records the mismatch.
@@ -363,6 +363,16 @@ determinism, error and warning parity, and the stock `stanc()` API. The
 Python, R and webR tests exercise filesystem includes through every compiler
 route.
 
+stanli should report a broken model the way stanc does.
+[`tools/check_stanc3_bad.py`](tools/check_stanc3_bad.py) (`test_stanc3_bad`)
+runs all 1,191 models in stanc3's `test/integration/bad` at the pinned
+checkout through `stanli_check` and compares the error text with stanc3's own
+`stanc.expected` files. 1,186 match exactly. The other five are listed in
+[`tests/stanc3_bad_ledger.json`](tests/stanc3_bad_ledger.json) with their
+cause: stanli reads `.stanfunctions` files as full programs, and stanc3's
+runner splits one file name that contains a space. A ledgered model that
+starts matching fails the test, so the ledger can only shrink.
+
 ## Testing Stan language coverage
 
 [`harnesses/stan_conformance.py`](harnesses/stan_conformance.py) reads every
@@ -392,26 +402,26 @@ case it cannot generate, and does not measure cost.
 of that gap: 430 names, including data-only helpers, RNGs, solvers and five
 operators, checked against recorded CmdStan values, gradients and outputs.
 
-CTest also replays 73 generated signature models on every PR
-([`tools/check_signature_models.py`](tools/check_signature_models.py)): 35
-models cover 7,407 builtin signatures and 38 cover 12,131 density signatures.
+CTest also replays 74 generated signature models on every PR
+([`tools/check_signature_models.py`](tools/check_signature_models.py)): 36
+models cover 7,486 builtin signatures and 38 cover 12,155 density signatures.
 Each case reads its own parameter and writes its own output, so a failure
 names the signature. They are compared with recorded CmdStan values at the
 three corpus points under the 1e-9 gate. The manifests in
 [`tests/function_coverage/`](tests/function_coverage/README.md) list what the
 generators exclude.
 
-[`harnesses/model_census.py`](harnesses/model_census.py) applies the same
-baseline idea to the 1,244 files in stanc3's integration tests, which hold
-syntax and type combinations that posteriordb and the generator miss. A model
-that stops lowering fails by name with a reproduction command. With
-`--differential`, a model that stops matching CmdStan within 1e-10 fails too.
-`crashed` and `timed_out` always fail. The
-[baseline](docs/internal/artifacts/census-baseline.json.gz) was recorded with
-stanc3 and CmdStan 2.40.0: 524 models lower, 512 of them match CmdStan, and
-in 12 one engine throws. `DEGENERATE_POINTS` in the harness names four models
-whose points with a singular or zero-variance input have no value to agree
-on; those points are left out of the comparison.
+[`tools/check_stanc3_good.py`](tools/check_stanc3_good.py) runs all 1,244
+models in stanc3's `test/integration/good`, which hold syntax and type
+combinations that posteriordb and the generators miss. Each model's log
+density, gradient and full write_array row, RNG draws included, are compared
+with recorded CmdStan answers at five points under the 1e-9 gate; where CmdStan
+throws, stanli must throw with the same message. Data is generated once and
+checked in. Every model that is not fully verified is listed in
+[`tests/stanc3_good/ledger.json`](tests/stanc3_good/ledger.json) with a cause,
+and a model fails when it gets worse or better than its entry says. CTest runs
+it in 16 shards (`test_stanc3_good_*`); see
+[`tests/stanc3_good/README.md`](tests/stanc3_good/README.md).
 
 ## Samplers and other algorithms
 
@@ -604,7 +614,7 @@ python3 tools/verify_refs.py deps/posteriordb \
 ctest --test-dir build --parallel "$(tools/build_jobs.sh)"
 ```
 
-The A/B, cross-path, sampler and census tools use release-build targets:
+The A/B, cross-path, sampler and stanc3-model recording tools use release-build targets:
 
 ```sh
 ./tools/dev_setup.sh --conformance   # the reference stack for the sweep
@@ -615,8 +625,7 @@ build-rel/stanli_check model.stan data.json --cross        # cross-path
 python3 tools/check_corpus_sampling.py --build build-rel   # sampling smoke
 python3 tools/sampler_trace.py \
   deps/cmdstan deps/posteriordb eight_schools_noncentered
-python3 harnesses/model_census.py --differential \
-  --cmdstan deps/cmdstan --jobs 10
+python3 tools/check_stanc3_good.py --record     # stanc3 good references
 cp build-rel/libstanli.* python/stanli/_bin/   # the sweep loads this copy
 .venv-conformance/bin/python harnesses/stan_conformance.py \
   --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan \

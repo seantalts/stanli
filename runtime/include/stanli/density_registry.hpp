@@ -14,6 +14,9 @@
 
 namespace stanli {
 
+// The statistic a packed wiener op computes.
+enum class WienerKind : int { Lpdf = 0, Lcdf = 1, Lccdf = 2 };
+
 enum class DensityShape : uint8_t {
   Plain,
   // The integer outcome remains a runtime input rather than being copied to
@@ -43,6 +46,9 @@ enum class AllIntegerDensity : uint8_t {
   None,
   HypergeometricLpmf,
   DiscreteRangeLpmf,
+  DiscreteRangeCdf,
+  DiscreteRangeLcdf,
+  DiscreteRangeLccdf,
 };
 
 struct IntegerDensityArgument {
@@ -52,6 +58,12 @@ struct IntegerDensityArgument {
 };
 
 using DensityArgumentShape = FunctionArgumentShape;
+
+// A size mismatch Stan Math reports when the density runs. The message is
+// Stan's, without the leading "<function>: ".
+struct DensitySizeError : std::invalid_argument {
+  using std::invalid_argument::invalid_argument;
+};
 
 struct VectorizedDensityLayout {
   int64_t width = 0;
@@ -112,6 +124,9 @@ inline constexpr uint8_t kCategoricalScalarOutcome = 1u << 2;
 // Separates integer outcome values from an appended vectorized-layout payload.
 inline constexpr int kVectorizedDensityLayoutMarker = -2147483647;
 inline constexpr int kGlmScalarLayoutMarker = -2147483646;
+// In the GLM scalar-layout mask: the design is one row_vector shared by every
+// outcome, so the outcome count is the instance count.
+inline constexpr int kGlmRowVectorDesign = 1 << 6;
 
 // Null means the function needs a genuinely custom contract or is not a
 // probability function.

@@ -8,7 +8,7 @@ an approximation.
 This page covers probability functions, real-valued scalar math, parameter
 transforms, truncation, censoring, `print` and `reject`. For whole models see
 [corpus status](corpus-status.md); for language constructs see the
-[stanc3 fixtures](../tests/stanc3/README.md); for how the checks work and
+[stanc3 test models](../tests/stanc3_good/README.md); for how the checks work and
 their numerical limits see [TESTING.md](../TESTING.md).
 
 ## Coverage at a glance
@@ -30,8 +30,7 @@ data/parameter arguments.
 The name metric counts names with no `unexpected_unsupported` signature. It is
 a regression count, and a name can pass it without every overload working. For
 example, the classic five-argument `wiener_lpdf` works and its extended
-overloads do not. `gaussian_dlm_obs_lpdf` has no verified overload, yet passes
-the metric because its cases are generator gaps.
+overloads do not.
 
 The status columns count signatures. For densities and distribution functions
 they cover every signature in the inventory. The scalar-math row counts names
@@ -78,15 +77,8 @@ The headline ratios hide these gaps:
 - Extended `wiener_lpdf`. The five-argument form works. The six- to
   nine-argument forms are refused because the kernel layout has five inputs
   (six unexpected-unsupported signatures and two generator gaps).
-- `gaussian_dlm_obs_lpdf`. Every call is refused: it takes seven arguments and
-  a graph operation has at most six input slots. Its two rows are generator
-  gaps, so the 72/73 metric does not show it.
-- `discrete_range_cdf`, `discrete_range_lcdf` and `discrete_range_lccdf`.
-  These are not lowered onto the log-density graph, because all their inputs
-  are integers. The harness marks all 24 signatures inapplicable.
-- `hypergeometric_2F1`, `inc_beta`, `inv_inc_beta`, `wiener_lcdf_unnorm` and
-  `wiener_lccdf_unnorm` with all-real arguments have no graph operation and are
-  refused.
+- `wiener_lcdf_unnorm` and `wiener_lccdf_unnorm` with all-real arguments have
+  no graph operation and are refused.
 - `gp_periodic_cov` has no graph operation and is refused. The
   exponentiated-quadratic, Matern 3/2, Matern 5/2 and exponential kernels work.
 - Complex arguments and results are refused by policy. The graph holds real

@@ -141,6 +141,21 @@ void structured_round_trips() {
                return as_vector(Eigen::MatrixXd(
                    stan::math::sum_to_zero_constrain(free_block)));
              });
+  // Rectangular so that swapping the two orientations shows.
+  round_trip("column_stochastic_matrix[4,3]", K::StochasticColumn, {4, 3}, 9,
+             [](const Eigen::VectorXd& y) {
+               Eigen::MatrixXd free_block =
+                   Eigen::Map<const Eigen::MatrixXd>(y.data(), 3, 3);
+               return as_vector(Eigen::MatrixXd(
+                   stan::math::stochastic_column_constrain(free_block)));
+             });
+  round_trip("row_stochastic_matrix[3,4]", K::StochasticRow, {3, 4}, 9,
+             [](const Eigen::VectorXd& y) {
+               Eigen::MatrixXd free_block =
+                   Eigen::Map<const Eigen::MatrixXd>(y.data(), 3, 3);
+               return as_vector(Eigen::MatrixXd(
+                   stan::math::stochastic_row_constrain(free_block)));
+             });
   round_trip("cholesky_factor_corr[4]", K::CholeskyCorr, {4, 4}, 6,
              [](const Eigen::VectorXd& y) {
                double lp = 0;
@@ -268,6 +283,10 @@ void free_sizes() {
         "square cholesky_factor_cov");
   check(stanli::transform_leaf_rank(K::Simplex) == 1, "simplex leaf rank");
   check(stanli::transform_leaf_rank(K::Covariance) == 2, "cov leaf rank");
+  check(stanli::transform_leaf_rank(K::StochasticColumn) == 2,
+        "column_stochastic leaf rank");
+  check(stanli::free_leaf_size(K::StochasticRow, {3, 4}) == 9,
+        "row_stochastic_matrix[3,4] frees 3x3");
   check(stanli::transform_leaf_rank(K::SumToZero) == 0,
         "sum_to_zero rank follows the declaration");
   check(stanli::transform_leaf_rank(K::Lower) == 0, "bounds take any shape");

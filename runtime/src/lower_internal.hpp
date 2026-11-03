@@ -1048,12 +1048,26 @@ struct Lowering {
   // Every index the graph lowering sees is a bind-time constant, so the
   // bounds CmdStan checks at runtime are checked here, before an op that
   // would silently read a neighboring arena slot can be emitted.
+  // An index CmdStan checks at runtime: out of range, its check_range error
+  // is emitted here and the first element stands in for the selection.
+  int64_t stan_index(int64_t i, int64_t n, const char* function,
+                     const std::string& raw) {
+    if (i >= 1 && i <= n) return i;
+    if (n < 1) check_index(i, n, function, raw);
+    emit_error(MessageError::OutOfRange,
+               index_out_of_range_message(function, n, i));
+    return 1;
+  }
   void check_index(int64_t i, int64_t n, const char* what,
                    const std::string& raw) {
     if (i < 1 || i > n)
       fail(std::string(what) + ": index " + std::to_string(i) +
                " out of bounds for size " + std::to_string(n),
            raw);
+  }
+  void check_uni_index(int64_t i, int64_t n, const char* stan_label,
+                       const std::string& raw) {
+    if (i < 1 || i > n) fail(index_out_of_range_message(stan_label, n, i), raw);
   }
   // A range with hi < lo is empty and never reads, whatever the endpoints.
   void check_range(int64_t lo, int64_t hi, int64_t n, const char* what,
@@ -1222,6 +1236,25 @@ struct Lowering {
   const ArrayShape& array_shape(const SlotInfo& si) const {
     return shape_pool->at(si.shape);
   }
+  // The row count an offset_multiplier check names matrix elements by.
+  std::vector<int> offset_multiplier_rows(CallableTransformKind kind,
+                                          const SlotInfo& si);
+  CheckGeometry check_geometry(const SlotInfo& si, int64_t len) const {
+    CheckGeometry geometry;
+    if (is_array(si)) {
+      const ArrayShape& shape = array_shape(si);
+      geometry.dims = shape.dims;
+      geometry.leaf_rank =
+          std::max<size_t>(1, static_cast<size_t>(leaf_rank(shape.leaf)));
+    } else if (is_matrix(si)) {
+      geometry.dims = {si.rows, si.cols};
+      geometry.leaf_rank = 2;
+    } else if (is_vector(si) || is_row_vector(si)) {
+      geometry.dims = {len};
+      geometry.leaf_rank = 1;
+    }
+    return geometry;
+  }
   SlotInfo indexed_view(const SlotInfo& base, size_t n_single, int64_t out_len,
                         const std::string& out_type);
 
@@ -1258,9 +1291,10 @@ struct Lowering {
     try {
       for (size_t k = 0; k < values.size(); ++k)
         shapes.push_back(builtin_argument_shape(e.args[k], values[k]));
-      return builtin_layout(spec, shapes);
+      return builtin_layout(spec, shapes, e.name,
+                            !in_write_array && mir::any_argument_active(e));
     } catch (const std::invalid_argument& error) {
-      fail(e.name + ": " + error.what(), e.raw);
+      fail(builtin_error_message(e.name, error), e.raw);
     }
   }
 
@@ -1377,6 +1411,49 @@ struct Lowering {
       fail("assignment width mismatch for " + name, raw);
     if (!same_view(v.si, g.slots[v.slot].len, expected, len))
       fail("assignment logical view mismatch for " + name, raw);
+  }
+  // The value a whole-variable assignment binds. When CmdStan's assign would
+  // throw for the sizes, that throw is emitted here and a placeholder of the
+  // declared shape is bound instead.
+  Val checked_binding(const Val& v, int64_t len, const SlotInfo& expected,
+                      const std::string& name, const std::string& raw);
+  std::optional<std::string> assign_size_error(const Val& v, int64_t len,
+                                               const SlotInfo& expected,
+                                               const std::string& name);
+  void emit_error(MessageError error, const std::string& message);
+  MessageShape message_shape(const mir::Expr& e, const Val& v) {
+    MessageShape shape;
+    shape.integer = message_integer(e);
+    if (message_scalar(e)) return shape;
+    if (is_array(v.si)) {
+      shape.dims = array_shape(v.si).dims;
+      shape.matrix_leaf = array_shape(v.si).leaf == ViewKind::Matrix;
+    } else if (is_matrix(v.si)) {
+      shape.dims = {v.si.rows, v.si.cols};
+      shape.matrix_leaf = true;
+    } else {
+      shape.dims = {g.slots[v.slot].len};
+    }
+    return shape;
+  }
+  // Stan Math's add/subtract check_matching_dims error for two vectors or
+  // matrices of different shapes.
+  std::optional<std::string> add_size_error(const mir::Expr& e, const Val& a,
+                                            const Val& b) {
+    const bool add = e.name == "Plus__" || e.name == "add";
+    if (!add && e.name != "Minus__" && e.name != "subtract")
+      return std::nullopt;
+    const auto eigen = [](const SlotInfo& si) {
+      return is_vector(si) || is_row_vector(si) || is_matrix(si);
+    };
+    if (!eigen(a.si) || !eigen(b.si)) return std::nullopt;
+    if (same_view(a.si, g.slots[a.slot].len, b.si, g.slots[b.slot].len))
+      return std::nullopt;
+    const bool var = !in_write_array && (a.autodiff || b.autodiff);
+    return matrix_dims_mismatch_message(
+        add ? "add" : "subtract", var ? "a" : "m1",
+        builtin_argument_shape(e.args[0], a), var ? "b" : "m2",
+        builtin_argument_shape(e.args[1], b));
   }
   void sync_data_local(const std::string& name, const mir::Expr& rhs,
                        const Val& v);
@@ -1681,7 +1758,8 @@ struct Lowering {
   // straight-line graph call and a call under dynamic control on one callback
   // binder and one kernel path instead of growing a second graph-only parser.
   Val lower_program_expression(const mir::Expr& e);
-  Val lower_wiener_packed(const mir::Expr& e, CallArguments& actuals);
+  Val lower_wiener_packed(const mir::Expr& e, CallArguments& actuals,
+                          const WienerForm& form);
 
   Val finish_emit(Op op, int64_t out_len, SlotInfo out_si,
                   std::vector<int> idata, bool autodiff) {

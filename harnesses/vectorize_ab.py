@@ -38,7 +38,7 @@ Bounded report:
     --output-dir build/vectorize-ab
 
 The no-model form covers the complete committed reference set, including
-the language fixtures under tests/stanc3, plus every model in posteriordb's
+the lowering regressions under tests/regressions, plus every model in posteriordb's
 one-data-per-model census. A model with no CmdStan reference is explicitly
 reported as A/B-only. Gradient timing stays bounded to a small candidate-pass
 measurement set in either form.
@@ -1507,7 +1507,7 @@ def main():
             "models": selected,
             "selected_models": len(selected),
             "selected_posteriordb_models": selected_collections.get("posteriordb", 0),
-            "selected_language_models": selected_collections.get("stanc3", 0),
+            "selected_language_models": selected_collections.get("regressions", 0),
             "selected_collection_models": selected_collections,
             "selected_referenced_models": len(selected_referenced),
             "selected_ab_only_models": len(selected_ab_only),

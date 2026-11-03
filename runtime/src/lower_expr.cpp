@@ -260,8 +260,8 @@ long Lowering::eval_int(const mir::Expr& e) {
               en->dims.empty() ? (int64_t)stored : en->dims[d];
           const long index = eval_int(e.args[d + 1].args[0]);
           if (index < 1 || index > extent)
-            fail("integer index " + std::to_string(index) +
-                     " out of bounds for size " + std::to_string(extent),
+            fail(index_out_of_range_message("array[uni, ...] index", extent,
+                                            index),
                  e.raw);
           offset += (size_t)(index - 1) * stride;
           stride *= (size_t)extent;
@@ -430,12 +430,10 @@ int64_t Lowering::sized_len(const mir::SizedType& t, int64_t* rows,
     if (cols) *cols = c;
     return checked_product({r, c}, "matrix shape");
   }
-  if (t.base == "SArray") {
-    return checked_product(sized_dims(t), "array shape");
-  }
   const std::string where = var.empty() ? "" : " (in variable " + var + ")";
-  if (t.base.rfind("SComplex", 0) == 0)
+  if (mir::is_complex(t))
     fail("complex numbers are not supported yet" + where, t.raw);
+  if (t.base == "SArray") return checked_product(sized_dims(t), "array shape");
   fail("this variable type is not supported yet" + where, t.raw);
 }
 SlotInfo Lowering::view_of(const mir::SizedType& t, bool param_free) {
@@ -926,9 +924,9 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t len = checked_product(out_dims, "array gather");
         std::vector<int> idata;
         idata.reserve((size_t)len);
-        for (int x : iv.i) {
-          if (x < 1 || x > sh.dims[0])
-            fail("array gather out of bounds", e.raw);
+        for (int index : iv.i) {
+          const int64_t x =
+              stan_index(index, sh.dims[0], "array[..., ...] index", e.raw);
           for (int64_t k = 0; k < width; ++k)
             idata.push_back(
                 checked_immediate((x - 1) * width + k, "array gather offset"));
@@ -947,10 +945,10 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           fail("gather index must be int data", e.raw);
         std::vector<int> idata;
         idata.reserve(iv.i.size());
-        for (int x : iv.i) {
-          check_index(x, g.slots[base.slot].len, "gather index", e.raw);
-          idata.push_back(x - 1);
-        }
+        for (int x : iv.i)
+          idata.push_back(stan_index(x, g.slots[base.slot].len,
+                                     "vector[multi] indexing", e.raw) -
+                          1);
         return with_layout(emit_value(OP_GATHER, {base}, (int64_t)idata.size(),
                                       view_of(e.type_), idata),
                            ExpressionLayout::scalar());
@@ -960,7 +958,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       if (e.args.size() == 3 && is_matrix(base.si) &&
           e.args[1].name == "IndexSingle" && e.args[2].name == "IndexAll") {
         const int64_t i = eval_int(e.args[1].args[0]);
-        check_index(i, base.si.rows, "matrix row", e.raw);
+        check_uni_index(i, base.si.rows, "matrix[uni] indexing", e.raw);
         return with_layout(
             emit_value(OP_SLICE_STRIDED, {base}, base.si.cols, view_of(e.type_),
                        {checked_immediate(i - 1, "matrix row offset"),
@@ -969,8 +967,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       }
       if (e.args.size() == 3 && is_matrix(base.si) &&
           e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle") {
-        const int64_t j = eval_int(e.args[2].args[0]);
-        check_index(j, base.si.cols, "matrix column", e.raw);
+        const int64_t j = stan_index(eval_int(e.args[2].args[0]), base.si.cols,
+                                     "matrix[..., uni] column indexing", e.raw);
         const int64_t offset = (j - 1) * base.si.rows;
         return with_layout(
             emit_value(OP_SLICE, {base}, base.si.rows, view_of(e.type_),
@@ -1004,7 +1002,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const StaticRange range = *static_range(e.args[2], S);
         const int64_t lo = range.lo;
         const int64_t hi = range.hi;
-        check_index(i, (*bdims)[0], "array index", e.raw);
+        check_uni_index(i, (*bdims)[0], "array[uni, ...] index", e.raw);
         check_range(lo, hi, S, "array range", e.raw);
         const int64_t len = hi >= lo ? hi - lo + 1 : 0;
         SlotInfo si = array_shape(base.si).leaf == ViewKind::Flat
@@ -1030,7 +1028,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           e.args[2].name == "IndexAll") {
         const int64_t i = eval_int(e.args[1].args[0]);
         const int64_t count = (*bdims)[0], width = (*bdims)[1];
-        check_index(i, count, "array index", e.raw);
+        check_uni_index(i, count, "array[uni, ...] index", e.raw);
         const int64_t offset = (i - 1) * width;
         SlotInfo si = view_of(e.type_);
         return with_layout(
@@ -1045,7 +1043,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t lo = range.lo;
         const int64_t hi = range.hi;
         const int64_t j = eval_int(e.args[2].args[0]);
-        check_index(j, base.si.cols, "matrix column", e.raw);
+        check_uni_index(j, base.si.cols, "matrix[..., uni] column indexing",
+                        e.raw);
         check_range(lo, hi, base.si.rows, "matrix row range", e.raw);
         const int64_t len = hi >= lo ? hi - lo + 1 : 0;
         const int64_t offset = len ? (j - 1) * base.si.rows + lo - 1 : 0;
@@ -1094,11 +1093,10 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const auto& D = *bdims;
         const bool mat = array_shape(base.si).leaf == ViewKind::Matrix;
         std::vector<int64_t> ix;
-        for (size_t d = 0; d < n_idx; ++d) {
-          const int64_t one = eval_int(e.args[1 + d].args[0]);
-          check_index(one, D[d], "array index", e.raw);
-          ix.push_back(one - 1);
-        }
+        for (size_t d = 0; d < n_idx; ++d)
+          ix.push_back(stan_index(eval_int(e.args[1 + d].args[0]), D[d],
+                                  "array[uni, ...] index", e.raw) -
+                       1);
         const Addr a = flat_addr(D, mat, ix);
         if (a.stride != 1)
           return with_layout(
@@ -1141,7 +1139,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           ix.reserve(n_arr);
           for (size_t d = 0; d < n_arr; ++d) {
             const int64_t one = eval_int(e.args[1 + d].args[0]);
-            check_index(one, (*bdims)[d], "array index", e.raw);
+            check_uni_index(one, (*bdims)[d], "array[uni, ...] index", e.raw);
             ix.push_back(one - 1);
           }
           const Addr a = flat_addr(*bdims, false, ix);
@@ -1177,8 +1175,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t N = (*bdims)[0], R = (*bdims)[1], C = (*bdims)[2];
         const int64_t ri = eval_int(e.args[2].args[0]);
         const int64_t cj = eval_int(e.args[3].args[0]);
-        check_index(ri, R, "matrix row", e.raw);
-        check_index(cj, C, "matrix column", e.raw);
+        check_uni_index(ri, R, "matrix[uni,uni] row indexing", e.raw);
+        check_uni_index(cj, C, "matrix[uni,uni] column indexing", e.raw);
         const int64_t off = (cj - 1) * R + (ri - 1);
         SlotInfo si = array_view({N}, ViewKind::Flat, base.si.param_free);
         return with_layout(
@@ -1190,8 +1188,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // Row of a column-major data matrix / 2-D array: strided slice.
       if (all_single && e.args.size() == 2 && is_matrix(base.si) &&
           e.type_ != "UReal" && e.type_ != "UInt") {
-        const int64_t t = eval_int(e.args[1].args[0]);
-        check_index(t, base.si.rows, "matrix row", e.raw);
+        const int64_t t = stan_index(eval_int(e.args[1].args[0]), base.si.rows,
+                                     "matrix[uni] indexing", e.raw);
         return with_layout(
             emit_value(OP_SLICE_STRIDED, {base}, base.si.cols, view_of(e.type_),
                        {checked_immediate(t - 1, "matrix row offset"),
@@ -1208,15 +1206,17 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       int64_t flat = 0;
       if (all_single && e.args.size() == 2 &&
           (e.type_ == "UReal" || e.type_ == "UInt")) {
-        const int64_t one = eval_int(e.args[1].args[0]);
-        check_index(one, g.slots[base.slot].len, "element", e.raw);
-        flat = one - 1;
+        flat = stan_index(eval_int(e.args[1].args[0]), g.slots[base.slot].len,
+                          is_array(base.si) ? "array[uni, ...] index"
+                                            : "vector[uni] indexing",
+                          e.raw) -
+               1;
       } else if (all_single && e.args.size() == 3 && is_matrix(base.si) &&
                  (e.type_ == "UReal" || e.type_ == "UInt")) {
-        const int64_t ri = eval_int(e.args[1].args[0]);
-        const int64_t cj = eval_int(e.args[2].args[0]);
-        check_index(ri, base.si.rows, "matrix row", e.raw);
-        check_index(cj, base.si.cols, "matrix column", e.raw);
+        const int64_t ri = stan_index(eval_int(e.args[1].args[0]), base.si.rows,
+                                      "matrix[uni,uni] row indexing", e.raw);
+        const int64_t cj = stan_index(eval_int(e.args[2].args[0]), base.si.cols,
+                                      "matrix[uni,uni] column indexing", e.raw);
         flat = (cj - 1) * base.si.rows + (ri - 1);
       } else {
         // Any remaining static selection resolves through the shared
@@ -1706,7 +1706,10 @@ bool Lowering::specialize_static_shapes(mir::Expr* e) {
   return changed;
 }
 std::optional<Lowering::Val> Lowering::fold_const(const mir::Expr& e) {
-  if (!e.data_only || e.fn_propto || expr_effectful(e)) return std::nullopt;
+  const bool data_value =
+      e.data_only ||
+      (e.promoted && e.unsized.leaf != mir::UnsizedLeaf::Complex);
+  if (!data_value || e.fn_propto || expr_effectful(e)) return std::nullopt;
   auto evaluated = try_eval_pure(e);
   if (!evaluated) return std::nullopt;
   DataMap::Entry en = std::move(*evaluated);

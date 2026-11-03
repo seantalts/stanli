@@ -1,9 +1,21 @@
 {
-  "dumped_registry_name_count": 212,
+  "dumped_registry_name_count": 240,
   "excluded": {
     "arity mismatch": [
       "log10()=>real",
-      "log2()=>real"
+      "log2()=>real",
+      "log_mix(real,real,real)=>real"
+    ],
+    "needs sizes 3 and 2, not unit extents: tests/fixtures/library_functions.stan": [
+      "hypergeometric_3F2(array[]real,array[]real,real)=>real",
+      "hypergeometric_3F2(array[]real,row_vector,real)=>real",
+      "hypergeometric_3F2(array[]real,vector,real)=>real",
+      "hypergeometric_3F2(row_vector,array[]real,real)=>real",
+      "hypergeometric_3F2(row_vector,row_vector,real)=>real",
+      "hypergeometric_3F2(row_vector,vector,real)=>real",
+      "hypergeometric_3F2(vector,array[]real,real)=>real",
+      "hypergeometric_3F2(vector,row_vector,real)=>real",
+      "hypergeometric_3F2(vector,vector,real)=>real"
     ],
     "no compatible registry overload": [
       "rep_array(array[,]complex,int)=>array[,,]complex",
@@ -913,7 +925,13 @@
       "weibull_rng(vector,int)=>array[]real",
       "weibull_rng(vector,real)=>array[]real",
       "weibull_rng(vector,row_vector)=>array[]real",
-      "weibull_rng(vector,vector)=>array[]real"
+      "weibull_rng(vector,vector)=>array[]real",
+      "yule_simon_rng(array[]int)=>array[]int",
+      "yule_simon_rng(array[]real)=>array[]int",
+      "yule_simon_rng(int)=>int",
+      "yule_simon_rng(real)=>int",
+      "yule_simon_rng(row_vector)=>array[]int",
+      "yule_simon_rng(vector)=>array[]int"
     ],
     "unsupported argument type": [
       "abs(array[,,,,,,]complex)=>array[,,,,,,]real",
@@ -1440,7 +1458,7 @@
       "transpose(complex_vector)=>complex_row_vector"
     ]
   },
-  "excluded_signature_count": 1428,
+  "excluded_signature_count": 1444,
   "generator": "tools/generate_builtin_signature_models.py",
   "missing_from_stanc": [
     "Divide__",
@@ -1529,6 +1547,7 @@
         "block",
         "cbrt",
         "ceil",
+        "chol2inv",
         "cholesky_decompose",
         "choose",
         "col",
@@ -1539,19 +1558,21 @@
         "cosh",
         "crossprod",
         "cumulative_sum",
+        "determinant",
         "diag_matrix",
         "diagonal",
         "digamma",
         "dims"
       ],
-      "source_bytes": 100449,
-      "source_sha256": "abd864526a6ba9e7b90e7f31a8c24d5bce06fdc7db118a5fcfc1e186d2b9878d"
+      "source_bytes": 100317,
+      "source_sha256": "32a82ea3608b927332fe4f71401f2ed3ebff41e9694bcd5d605e4a5ccda57bc8"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_06.stan",
       "functions": [
         "dims",
+        "distance",
         "divide",
         "dot_product",
         "dot_self",
@@ -1566,8 +1587,8 @@
         "expm1",
         "falling_factorial"
       ],
-      "source_bytes": 94960,
-      "source_sha256": "7d4024502aa17931e99093dc39022f73123b61d4867dd1604154f1cddbf71b3e"
+      "source_bytes": 92921,
+      "source_sha256": "40b14521d799fb76e2206e8e9e1c3d33857b1788f26fd035a542465a9bc4218e"
     },
     {
       "case_count": 360,
@@ -1576,8 +1597,8 @@
         "falling_factorial",
         "fdim"
       ],
-      "source_bytes": 118053,
-      "source_sha256": "b707b6707363d627979d6103023b4db42050f41cd197f23bbb6c97b5569a4b6e"
+      "source_bytes": 118853,
+      "source_sha256": "36732486104f3ab9ca40efa6850536e8b0cb14974cfd9cd38d8606cb4cfd43ae"
     },
     {
       "case_count": 360,
@@ -1587,8 +1608,8 @@
         "floor",
         "fmax"
       ],
-      "source_bytes": 113256,
-      "source_sha256": "131bec8a7eb0bc64f28bfa520576f2272c67935ac4ec03b3a4cb25e9238d9442"
+      "source_bytes": 113605,
+      "source_sha256": "b6b03cfe67c447915e843376b47171cae0e5188c6d6c1a1427d4f752e939608b"
     },
     {
       "case_count": 360,
@@ -1597,8 +1618,8 @@
         "fmax",
         "fmin"
       ],
-      "source_bytes": 115407,
-      "source_sha256": "33e69478893b0af6ac19d44fae0487907cf40d6928ccc6b076f8c5549f88e554"
+      "source_bytes": 115276,
+      "source_sha256": "3fe2567fa29b57b6f5fe89fd552233ff7eb15236f0ccefa450e8759882f77f7e"
     },
     {
       "case_count": 360,
@@ -1607,8 +1628,8 @@
         "fmin",
         "fmod"
       ],
-      "source_bytes": 114774,
-      "source_sha256": "4b9225ebcc8f01f6eb2659d1fbdb4f7f8fd89b8b0742ea06780faeeb73c782bb"
+      "source_bytes": 114741,
+      "source_sha256": "950b9e264f05baf76533149b8f3eb975efb8d6b83b992daa26f330c6a9f50291"
     },
     {
       "case_count": 360,
@@ -1617,8 +1638,8 @@
         "fmod",
         "gamma_p"
       ],
-      "source_bytes": 111755,
-      "source_sha256": "f6fd6412391b2d6895ede9731195855480e6b01b00d9ed7a46dad63dd6baa264"
+      "source_bytes": 112027,
+      "source_sha256": "2d204f3cac41f5fd02296a28ca278582563a399bb644604019c8bc64aae63bb6"
     },
     {
       "case_count": 360,
@@ -1627,20 +1648,25 @@
         "gamma_p",
         "gamma_q"
       ],
-      "source_bytes": 107497,
-      "source_sha256": "8ee0e53fe83071ca178f41e5e8fe6f1b032f9a2a4ba9c2aa9925709b7e174e58"
+      "source_bytes": 107877,
+      "source_sha256": "be9ce993f6a0be7aef29e6f53e272f02f6d7200a255f4e4eb078e3c73467a835"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_13.stan",
       "functions": [
         "gamma_q",
+        "generalized_inverse",
         "head",
+        "hmm_hidden_state_prob",
+        "hmm_marginal",
         "hypergeometric_1F0",
+        "hypergeometric_2F1",
+        "hypergeometric_pFq",
         "hypot"
       ],
-      "source_bytes": 110002,
-      "source_sha256": "b2312f1ef00947b59ca61ce45dafb6dd4177762812959802b4a07ebe707c34de"
+      "source_bytes": 109409,
+      "source_sha256": "7414187dae90660d0988fdf52fa7533503120d647a7dddb97744c77a22e597e7"
     },
     {
       "case_count": 360,
@@ -1648,19 +1674,22 @@
       "functions": [
         "hypot",
         "identity_matrix",
+        "inc_beta",
+        "int_step",
         "inv",
         "inv_Phi",
         "inv_cloglog",
-        "inv_erfc",
-        "inv_logit"
+        "inv_erfc"
       ],
-      "source_bytes": 100390,
-      "source_sha256": "c809875f96928ebec56dec26c64e0adb32d3d8717f035bd0b68528f351426d6a"
+      "source_bytes": 101398,
+      "source_sha256": "223cd12428ebca1342eab86c2903306703a7c55de45153ef8ab4fa46efa1a503"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_15.stan",
       "functions": [
+        "inv_erfc",
+        "inv_inc_beta",
         "inv_logit",
         "inv_sqrt",
         "inv_square",
@@ -1672,8 +1701,8 @@
         "lambert_wm1",
         "lbeta"
       ],
-      "source_bytes": 107981,
-      "source_sha256": "76ab4bd48a961063c484481fc14e38ad49cbb0b4345687faf54639803bec9404"
+      "source_bytes": 105607,
+      "source_sha256": "748c1db0e945f67ec0d7f60bec8305bc0ea36a1fe530b45b24b45fd35391e328"
     },
     {
       "case_count": 360,
@@ -1682,33 +1711,34 @@
         "lbeta",
         "lchoose"
       ],
-      "source_bytes": 111648,
-      "source_sha256": "ce76433d9d3ade3eb63016413179e6a082b5d4bcda79759a2dcb8e59b0ed9a94"
+      "source_bytes": 110402,
+      "source_sha256": "1a79cf18be8c61c7e0c52b4dd69033e1bf4358f9a0b32d5f64074454a7f199b9"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_17.stan",
       "functions": [
         "lchoose",
-        "ldexp",
-        "lgamma",
-        "linspaced_array",
-        "linspaced_int_array",
-        "linspaced_row_vector",
-        "linspaced_vector"
+        "ldexp"
       ],
-      "source_bytes": 107117,
-      "source_sha256": "00fcf3cdc075436598d9f2bd4ece8b0f515710af093f6f486c8308fb912aa30d"
+      "source_bytes": 110696,
+      "source_sha256": "470777912876ec538c2705d78f058743d0b97eb0c0aab17eb23eb27295cc1d05"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_18.stan",
       "functions": [
+        "ldexp",
+        "lgamma",
+        "linspaced_array",
+        "linspaced_int_array",
+        "linspaced_row_vector",
+        "linspaced_vector",
         "lmgamma",
         "lmultiply"
       ],
-      "source_bytes": 115994,
-      "source_sha256": "b0659571eef7ab0641b04237cf47f0a569fa2cb814eaf3b8e560b81f10c6ebe3"
+      "source_bytes": 114137,
+      "source_sha256": "e638b10a1f26d4a2578ec79c29568f2ca969ccc9207300db4ac0fef81dde9afa"
     },
     {
       "case_count": 360,
@@ -1719,24 +1749,25 @@
         "log10",
         "log1m",
         "log1m_exp",
-        "log1m_inv_logit",
-        "log1p",
-        "log1p_exp"
+        "log1m_inv_logit"
       ],
-      "source_bytes": 100386,
-      "source_sha256": "aeebcbd90b712263242f1fb4b9d90e58c2ef0bb59e085894840058671d6d929d"
+      "source_bytes": 102283,
+      "source_sha256": "ca0df2cd34cd8bfb6c326365375cd77b8393d17ae06aae501dabe6914c576d7b"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_20.stan",
       "functions": [
+        "log1m_inv_logit",
+        "log1p",
         "log1p_exp",
         "log2",
         "log_determinant",
+        "log_determinant_spd",
         "log_diff_exp"
       ],
-      "source_bytes": 114139,
-      "source_sha256": "dd2c8dee04b71a844c16dbea2317593bae3f6c68ad467ab2bddeac1e88bed497"
+      "source_bytes": 111247,
+      "source_sha256": "490ed980fe6a8e90536c1c933ee937e30669d84b277b41ba36f41c0707be2b0e"
     },
     {
       "case_count": 360,
@@ -1745,8 +1776,8 @@
         "log_diff_exp",
         "log_falling_factorial"
       ],
-      "source_bytes": 123963,
-      "source_sha256": "3d4611e9c51b24f2241d19ef702dbfaec8a8b6f2a915ac5f344d0d3a421ae1f7"
+      "source_bytes": 121907,
+      "source_sha256": "a1c92ea81a92c161e506f5ed9a427eff24cc3bb74c29ecbc7d9b613616cde2b6"
     },
     {
       "case_count": 360,
@@ -1756,57 +1787,59 @@
         "log_inv_logit",
         "log_inv_logit_diff"
       ],
-      "source_bytes": 123845,
-      "source_sha256": "e79402a32fffea16098f1c2ba0b470365b03fe9ead58d27cf4e75eccf68dce31"
+      "source_bytes": 123109,
+      "source_sha256": "11c2136dd2bf1d8e5ebbfb805524c78601bd1fa8a347c2053319a91f486a47ea"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_23.stan",
       "functions": [
         "log_inv_logit_diff",
+        "log_mix",
         "log_modified_bessel_first_kind"
       ],
-      "source_bytes": 126535,
-      "source_sha256": "2bc0acb6c09fbe4db867c2468d5726c85e8dba356485bdcf126fa698e187aa15"
+      "source_bytes": 118026,
+      "source_sha256": "e5675251bba544522991948081eb6465a89df3541ede7ddde12d747596454840"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_24.stan",
       "functions": [
-        "log_modified_bessel_first_kind",
-        "log_rising_factorial"
+        "log_modified_bessel_first_kind"
       ],
-      "source_bytes": 126092,
-      "source_sha256": "106f53a58a620a434a0b1a0e7f11c62fbbf07eae3ca07df6040864fcdf9316ef"
+      "source_bytes": 128866,
+      "source_sha256": "25167c04c7638b91a46194b8d33a07aa2682b29596760136f718a37b31a0051f"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_25.stan",
       "functions": [
-        "log_rising_factorial",
-        "log_softmax",
-        "log_sum_exp"
+        "log_modified_bessel_first_kind",
+        "log_rising_factorial"
       ],
-      "source_bytes": 118896,
-      "source_sha256": "295339b65b23ee68471c8c8b243aa08ce619db48cb1c9ebfe20bec6e9dbea30e"
+      "source_bytes": 123300,
+      "source_sha256": "b9ec898ecf2c4b8f1dbb70852c15c1f7fe0f440eb2330408fbca181336e2a610"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_26.stan",
       "functions": [
-        "log_sum_exp",
-        "logical_and",
-        "logical_eq",
-        "logical_gt",
-        "logical_gte"
+        "log_rising_factorial",
+        "log_softmax",
+        "log_sum_exp"
       ],
-      "source_bytes": 109985,
-      "source_sha256": "cce4a7ca3b5046cb050a93c0ea03a64d871069c16ae871b917a078617396f50e"
+      "source_bytes": 115224,
+      "source_sha256": "016adb2ca10423b60b2b2a19651e038a84c1c2cb95fdd8cdfaab042b868ea430"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_27.stan",
       "functions": [
+        "log_sum_exp",
+        "logical_and",
+        "logical_eq",
+        "logical_gt",
+        "logical_gte",
         "logical_lt",
         "logical_lte",
         "logical_negation",
@@ -1814,6 +1847,8 @@
         "logical_or",
         "logit",
         "matrix_exp",
+        "matrix_exp_multiply",
+        "matrix_power",
         "mdivide_left",
         "mdivide_left_spd",
         "mdivide_left_tri_low",
@@ -1823,18 +1858,20 @@
         "mean",
         "minus",
         "modified_bessel_first_kind",
-        "modified_bessel_second_kind",
-        "multiply",
-        "multiply_lower_tri_self_transpose",
-        "num_elements"
+        "modified_bessel_second_kind"
       ],
-      "source_bytes": 107035,
-      "source_sha256": "6cac1a5d1c92cfc86bed60f5a5327096861b25a675a4f9cd0f5d51159bfb8823"
+      "source_bytes": 107192,
+      "source_sha256": "b0f68a684e162d3d8b312ff233665b2de27591495d7a80568046e0ee09bca152"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_28.stan",
       "functions": [
+        "modified_bessel_second_kind",
+        "multiply",
+        "multiply_lower_tri_self_transpose",
+        "norm1",
+        "norm2",
         "num_elements",
         "one_hot_array",
         "one_hot_int_array",
@@ -1844,29 +1881,34 @@
         "ones_int_array",
         "ones_row_vector",
         "ones_vector",
-        "owens_t",
-        "pow"
+        "owens_t"
       ],
-      "source_bytes": 113512,
-      "source_sha256": "213ce7a0ddb2c48887e900aa942e1c963e3691738f009dcd775e5bd00661bbee"
+      "source_bytes": 109032,
+      "source_sha256": "713fb93b46e761de85cf42304cca6c2a48f8c657af6edb9e6879ef3fae2c0777"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_29.stan",
       "functions": [
-        "pow",
-        "quad_form",
-        "quad_form_sym",
-        "rank",
-        "rep_array"
+        "owens_t",
+        "pow"
       ],
-      "source_bytes": 105465,
-      "source_sha256": "a2fabb7d675ab315a869e7faa1599e33464ed959f0f918eba50258dbdc460b66"
+      "source_bytes": 109650,
+      "source_sha256": "48374e7e9f63b404eb2ebebffd3f22c2d571e07fa58bbb2ab009ccb7e17ca50a"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_30.stan",
       "functions": [
+        "pow",
+        "qr_Q",
+        "qr_R",
+        "qr_thin_Q",
+        "qr_thin_R",
+        "quad_form",
+        "quad_form_sym",
+        "quantile",
+        "rank",
         "rep_array",
         "rep_matrix",
         "rep_row_vector",
@@ -1878,21 +1920,22 @@
         "rows",
         "rows_dot_product",
         "rows_dot_self",
+        "scale_matrix_exp_multiply",
         "sd",
-        "segment",
-        "sin",
-        "sinh",
-        "size",
-        "softmax",
-        "sort_asc"
+        "segment"
       ],
-      "source_bytes": 98229,
-      "source_sha256": "c9bc43d12b420cd522b0a4f559fbfcaddb2fb305384769c1666ddb273545d69b"
+      "source_bytes": 101282,
+      "source_sha256": "f0031e845411f3f3ff8ff0137006bb7c60c98bd4ee10eb92e4b8077e998ac358"
     },
     {
       "case_count": 360,
       "file": "tests/fixtures/builtin_signatures_31.stan",
       "functions": [
+        "segment",
+        "sin",
+        "sinh",
+        "size",
+        "softmax",
         "sort_asc",
         "sort_desc",
         "sort_indices_asc",
@@ -1905,8 +1948,8 @@
         "step",
         "student_t_qf"
       ],
-      "source_bytes": 108047,
-      "source_sha256": "2dbe11e32140500320bb38421eec19bf9b85765fb3afdce92744ab6ae5a3b689"
+      "source_bytes": 96250,
+      "source_sha256": "3f5e71cfd4ba7b8b5c376c018e08e68c920c4570c0002ccc7497598b5b27ffbd"
     },
     {
       "case_count": 360,
@@ -1914,8 +1957,8 @@
       "functions": [
         "student_t_qf"
       ],
-      "source_bytes": 118173,
-      "source_sha256": "72edf7570f499d53d2293d81872af2caa7175b26f37502df6f56bd6541054360"
+      "source_bytes": 120076,
+      "source_sha256": "88df5e0fe0d18613cd479e002d3bbcb86c2db539d59c0630dccbe9b9cbf9c261"
     },
     {
       "case_count": 360,
@@ -1923,8 +1966,8 @@
       "functions": [
         "student_t_qf"
       ],
-      "source_bytes": 119337,
-      "source_sha256": "8025eb828b872a65ad29e3a007ff4e162ae87ba1dc84994ab2015de048fa849b"
+      "source_bytes": 117293,
+      "source_sha256": "0e838f5e385358a0d124b5e9c5b5db7b18e30cbbe8ca71420801114e1d45b0ed"
     },
     {
       "case_count": 360,
@@ -1932,8 +1975,8 @@
       "functions": [
         "student_t_qf"
       ],
-      "source_bytes": 119001,
-      "source_sha256": "7f7c804635260a15e14089dc67cd7a479af7324b87f5a712287ecb32ec44611e"
+      "source_bytes": 119426,
+      "source_sha256": "b52adb91d3eda5c0458441deafc5ef4e4b1b2adab3c726c8139623a15e52d942"
     },
     {
       "case_count": 360,
@@ -1947,6 +1990,15 @@
         "tan",
         "tanh",
         "tgamma",
+        "to_array_1d"
+      ],
+      "source_bytes": 104991,
+      "source_sha256": "aee4904eda12ad4c2cfe553a4d46b5629f4bd3c882b21357562fc51c74060df9"
+    },
+    {
+      "case_count": 153,
+      "file": "tests/fixtures/builtin_signatures_36.stan",
+      "functions": [
         "to_array_1d",
         "to_array_2d",
         "to_int",
@@ -1955,31 +2007,26 @@
         "to_row_vector_array",
         "to_vector",
         "to_vector_array",
+        "trace_dot",
+        "trace_gen_quad_form",
+        "trace_quad_form",
         "transpose",
         "trigamma",
         "trunc",
         "uniform_simplex",
         "variance",
         "zeros_array",
-        "zeros_int_array"
-      ],
-      "source_bytes": 93283,
-      "source_sha256": "14f2289acc8e421624147e6b8e816ba88e024a616cbdb31f64533780d5842062"
-    },
-    {
-      "case_count": 2,
-      "file": "tests/fixtures/builtin_signatures_36.stan",
-      "functions": [
+        "zeros_int_array",
         "zeros_row_vector",
         "zeros_vector"
       ],
-      "source_bytes": 1057,
-      "source_sha256": "8b4cc55e38a43e385906687227322707398424ba11ad8a3800102861436cefbf"
+      "source_bytes": 37994,
+      "source_sha256": "de9ab43a14955766be7a03084c2bbdad67934c9da18ab246df0fad836bf0683a"
     }
   ],
-  "registry_name_count": 234,
+  "registry_name_count": 262,
   "signature_dump_sha256": "acc42ed71be9740fb5c4b644954c04fa250063f01e81372e8dc1eaeadef5aaee",
   "stanc_build_id": "stanc3 v2.40.0",
-  "tested_case_count": 12602,
-  "tested_signature_count": 7424
+  "tested_case_count": 12753,
+  "tested_signature_count": 7486
 }

@@ -103,6 +103,41 @@ int main() {
                msg.find("limit 2.5") != std::string::npos);
   }
 
+  // ---- fatal_error throws std::runtime_error, never a rejection ---------
+  {
+    const std::string fatal = slurp("tests/fixtures/fatal_error.tmir.sexp");
+    const auto n = [](int value) {
+      return DataMap::from_json("{\"N\": " + std::to_string(value) + "}");
+    };
+    std::string msg;
+    try {
+      compile_model(fatal, n(-2));
+    } catch (const std::runtime_error& e) {
+      msg = e.what();
+    }
+    expect("a transformed-data fatal_error fails the compile: " + msg,
+           msg.find("N is -2") != std::string::npos);
+    for (const double x : {0.5, 20.0}) {
+      CompiledModel cm = compile_model(fatal, n(x > 10 ? 3 : 200));
+      Executor ex(std::move(cm.graph));
+      cm.bind(ex);
+      ex.params_data()[0] = x;
+      std::vector<double> g(1);
+      msg.clear();
+      bool domain = false;
+      try {
+        ex.gradient(g.data());
+      } catch (const std::domain_error&) {
+        domain = true;
+      } catch (const std::runtime_error& e) {
+        msg = e.what();
+      }
+      const std::string want = x > 10 ? "x too large: 20" : "N too large: 200";
+      expect("a model-block fatal_error throws runtime_error: " + msg,
+             !domain && msg.find(want) != std::string::npos);
+    }
+  }
+
   // ---- print goes wherever the host says --------------------------------
   // Both print paths are exercised: the transformed-data one runs in the
   // MIR interpreter at compile time, the model-block one in the OP_PRINT

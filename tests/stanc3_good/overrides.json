@@ -1,0 +1,153 @@
+{
+ "code-gen/expressions/operators.stan": {
+  "copy": "overrides/operators.stan",
+  "data": "overrides/operators.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "code-gen/mother.stan": {
+  "data": "overrides/mother.json",
+  "note": "Transformed data vectors x and y are never initialized upstream, so CmdStan rejects every evaluation at the first algebra_solver; this copy assigns [0, 0]' and [1, 1]' as the example-models descendant does. Data was generated with N, M, K and d_int fixed to 1 to keep it reviewable.",
+  "source": "overrides/mother.stan"
+ },
+ "code-gen/sum_to_zero.stan": {
+  "data": "overrides/sum_to_zero.json",
+  "note": "Two transformed data declarations are assigned from the data block instead of left uninitialized; CmdStan validates the NaN and throws at any data.",
+  "source": "overrides/sum_to_zero.stan"
+ },
+ "compiler-optimizations/lupdf-inlining.stan": {
+  "copy": "overrides/lupdf-inlining.stan",
+  "data": "overrides/lupdf-inlining.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "compiler-optimizations/mem_patterns/reductions_allowed.stan": {
+  "copy": "overrides/reductions_allowed.stan",
+  "data": "overrides/reductions_allowed.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "declare-define-multi.stan": {
+  "copy": "overrides/declare-define-multi.stan",
+  "data": "overrides/declare-define-multi.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "fun-var-constraints.stan": {
+  "data": "overrides/fun-var-constraints.json",
+  "note": "stanc cannot evaluate the bound foo(). CmdStan still rejects this data: transformed data bt is never assigned."
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_1.stan": {
+  "note": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_2.stan": {
+  "note": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_3.stan": {
+  "note": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_4.stan": {
+  "note": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_1.stan": {
+  "note": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_2.stan": {
+  "note": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_3.stan": {
+  "note": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/distributions/univariate/continuous/skew_normal/skew_normal_cdf_log_4.stan": {
+  "note": "At point 4 some elements of Stan Math's skew_normal cdf underflow: 0.5*erfc(-h/sqrt 2) - 2*owens_t(h, alpha) cancels to rounding noise near h = -37, and the gradient divides by it. Which elements come out exactly 0, and so NaN, depends on the last bit of the platform's erfc and of Boost's long-double owens_t, so CmdStan's own NaN pattern differs between Mac, Linux and Windows.",
+  "platform_dependent": [
+   "4"
+  ]
+ },
+ "function-signatures/math/matrix/csr_extract_v.stan": {
+  "data": "overrides/csr_extract_v.json",
+  "note": "Generated dense data gives csr_extract_v twelve nonzeros where the model declares five; this matrix has five."
+ },
+ "function-signatures/math/matrix/csr_extract_w.stan": {
+  "data": "overrides/csr_extract_w.json",
+  "note": "Generated dense data gives csr_extract_w twelve nonzeros where the model declares three; this matrix has three."
+ },
+ "function-signatures/math/transforms/cholesky_factor_corr_constrain.stan": {
+  "data": "overrides/cholesky_factor_corr_constrain.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/cholesky_factor_corr_jacobian.stan": {
+  "data": "overrides/cholesky_factor_corr_jacobian.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/cholesky_factor_cov_constrain.stan": {
+  "data": "overrides/cholesky_factor_cov_constrain.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/cholesky_factor_cov_jacobian.stan": {
+  "data": "overrides/cholesky_factor_cov_jacobian.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/corr_matrix_constrain.stan": {
+  "data": "overrides/corr_matrix_constrain.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/corr_matrix_jacobian.stan": {
+  "data": "overrides/corr_matrix_jacobian.json",
+  "note": "stanc cannot generate data sized by choose(); d_int is 3 and the vectors hold small fixed values."
+ },
+ "function-signatures/math/transforms/cov_matrix_constrain.stan": {
+  "data": "overrides/cov_matrix_constrain.json",
+  "note": "stanc cannot generate data sized by choose(). The model sizes its vectors choose(K, 2) where cov_matrix_constrain needs K + choose(K, 2), so only K = 0 loads."
+ },
+ "function-signatures/math/transforms/cov_matrix_jacobian.stan": {
+  "data": "overrides/cov_matrix_jacobian.json",
+  "note": "stanc cannot generate data sized by choose(). The model sizes its vectors choose(K, 2) where cov_matrix_constrain needs K + choose(K, 2), so only K = 0 loads."
+ },
+ "parser-generator/cholesky_cov_param_block.stan": {
+  "copy": "overrides/cholesky_cov_param_block.stan",
+  "data": "overrides/cholesky_cov_param_block.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "parser-generator/multidim_var_param_ar45_mat23.stan": {
+  "copy": "overrides/multidim_var_param_ar45_mat23.stan",
+  "data": "overrides/multidim_var_param_ar45_mat23.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "print_indexing.stan": {
+  "data": "overrides/print_indexing.json",
+  "note": "stanc cannot evaluate the indexed sizes N[1] and N[2]."
+ },
+ "tern_op_contains_var.stan": {
+  "copy": "overrides/tern_op_contains_var.stan",
+  "data": "overrides/tern_op_contains_var.json",
+  "note": "Generated binomial outcome y exceeded its own y_max, which CmdStan rejects; y was edited by hand."
+ },
+ "validate_set_double_offset_multiplier_good.stan": {
+  "copy": "overrides/validate_set_double_offset_multiplier_good.stan",
+  "data": "overrides/validate_set_double_offset_multiplier_good.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ },
+ "vector-size-stmts.stan": {
+  "copy": "overrides/vector-size-stmts.stan",
+  "data": "overrides/vector-size-stmts.json",
+  "note": "Data generated once by stanc and kept, with a byte-identical copy of the source, for harnesses/conformance/constructs.toml."
+ }
+}

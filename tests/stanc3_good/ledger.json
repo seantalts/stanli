@@ -1,0 +1,620 @@
+{
+ "code-gen/complex-tuples.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/basic_op_param.stan": {
+  "cause": "parameter read dimensions do not match its declaration",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/basic_operations.stan": {
+  "cause": "complex numbers are not supported yet (in variable cmat) | in: (SComplexMatrix ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/basic_ops_mix.stan": {
+  "cause": "complex numbers are not supported yet (in variable cmat) | in: (SComplexMatrix ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/complex_data.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/complex_scalar.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/complex_vectors.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "code-gen/complex_numbers/user_function_templating.stan": {
+  "cause": "mir: indistinguishable overloads of foo",
+  "status": "unsupported"
+ },
+ "code-gen/cpp-overload-stdlib.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "code-gen/expressions/ternary_if.stan": {
+  "cause": "complex numbers are not supported yet (in variable zp)",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_bernoulli_logit.stan": {
+  "cause": "unsupported function laplace_marginal_bernoulli_logit_lpmf",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_functionals.stan": {
+  "cause": "unsupported function laplace_marginal",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_neg_binomial_2_log.stan": {
+  "cause": "unsupported function laplace_marginal_neg_binomial_2_log_lpmf",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_nested_tuple.stan": {
+  "cause": "unsupported function laplace_marginal_neg_binomial_2_log_lpmf",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_nested_tuple2.stan": {
+  "cause": "unsupported function laplace_marginal",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_nested_tuple3.stan": {
+  "cause": "unsupported function laplace_marginal",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_onepl.stan": {
+  "cause": "unsupported function laplace_marginal",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_overload_weird.stan": {
+  "cause": "unsupported function laplace_marginal",
+  "status": "unsupported"
+ },
+ "code-gen/laplace_poisson.stan": {
+  "cause": "stanli write_array unsupported: unsupported function laplace_marginal_tol",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "code-gen/laplace_poisson_log.stan": {
+  "cause": "unsupported function laplace_marginal_poisson_log_lpmf",
+  "status": "unsupported"
+ },
+ "code-gen/return-position-types.stan": {
+  "cause": "this variable type is not supported yet (in variable inline_baz_return_sym11__) | in: (STuple ((SArray SReal ((pattern (Lit Int 0)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SReal))",
+  "status": "unsupported"
+ },
+ "code-gen/self-assign.stan": {
+  "cause": "stanli write_array unsupported: unsupported function FnMakeTuple | in: (UTuple (UReal UInt))",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "compiler-optimizations/dce-fail.stan": {
+  "cause": "stanc --O1 vectorizes the source loop, so the single index the program writes reaches stanli as a multi-index; stanli reports 'vector[multi] indexing' where CmdStan, running the unvectorized program, reports 'vector[uni] indexing'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
+ "compiler-optimizations/expr-prop-fail3.stan": {
+  "cause": "stanc --O1 vectorizes the source loop, so the single index the program writes reaches stanli as a multi-index; stanli reports 'vector[multi] indexing' where CmdStan, running the unvectorized program, reports 'vector[uni] indexing'.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
+ "compiler-optimizations/mem_patterns/complex-fails.stan": {
+  "cause": "complex numbers are not supported yet (in variable A_complex_tp) | in: (SComplexMatrix ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/mem_patterns/indexing.stan": {
+  "cause": "The model multiplies and adds containers whose sizes come from data and never match. stanli sees the sizes when it binds the data and refuses the model with Stan Math's message; CmdStan throws the same kind of error at every evaluation.",
+  "status": "one_side_threw"
+ },
+ "compiler-optimizations/mem_patterns/indexing2.stan": {
+  "cause": "The size check on assigning a 5-element slice to vector[6] tp_soa_single_idx_in_upfrom_idx is present in plain stanc's C++ and absent from stanc --O1's, whose MIR stanli lowers.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "compiler-optimizations/mem_patterns/tuple_test.stan": {
+  "cause": "this variable type is not supported yet (in variable xx) | in: (STuple ((SArray (SMatrix AoS ((pattern (Lit Int 1)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 1)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) ((pattern (Lit Int 1)) (meta ((type_ UInt) (lo",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/mem_patterns/tuple_test2.stan": {
+  "cause": "this variable type is not supported yet (in variable temp) | in: (STuple ((SMatrix AoS ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SMatrix AoS ((pattern (Lit Int 3)) (meta ((type_ UI",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/partial-eval-tuple.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple (SReal (SMatrix AoS ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/partial-eval.stan": {
+  "cause": "complex numbers are not supported yet (in variable z)",
+  "status": "unsupported"
+ },
+ "compiler-optimizations/tuple-adlevels.stan": {
+  "cause": "unsupported function kind for FnMakeTuple | in: (UTuple (UReal (UArray UMatrix)))",
+  "status": "unsupported"
+ },
+ "fun-defs-lpdf.stan": {
+  "cause": "complex numbers are not supported yet (in variable z)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/generate_laplace_options.stan": {
+  "cause": "this variable type is not supported yet (in variable transformed_data_tols) | in: (STuple ((SVector AoS ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SReal SInt SInt SInt SInt))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/get_imag.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/get_real.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/functions/to_complex.stan": {
+  "cause": "complex numbers are not supported yet (in variable transformed_data_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/abs.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/add_diag.stan": {
+  "cause": "complex numbers are not supported yet (in variable C) | in: (SComplexMatrix ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var N)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/append_col.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/append_row.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/block.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/col.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/cols.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/columns_dot_product.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/columns_dot_self.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/complex_schur_decompose.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/conj.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/csr_extract.stan": {
+  "cause": "this variable type is not supported yet (in variable td_wvu) | in: (STuple ((SVector AoS ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SArray SInt ((pattern (Lit Int 5)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SArray SInt ((pattern (Lit Int 5)) ",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/csr_extract_v.stan": {
+  "cause": "Plain stanc sizes the local before assigning it, so CmdStan's assign checks the size and throws; stanc --O1, whose MIR stanli lowers, leaves the local empty and Stan's assign skips the check for an empty left side.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "function-signatures/math/matrix/csr_extract_w.stan": {
+  "cause": "unsupported function csr_extract_w",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/diag_matrix.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/diag_post_multiply.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/diag_pre_multiply.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/diagonal.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/dot_product.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/dot_self.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigendecompose.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigendecompose_sym.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigenvalues.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigenvalues_sym.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigenvectors.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/eigenvectors_sym.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/fft.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/get_imag.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/get_real.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/inv_fft.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/mdivide_right.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/minus.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/num_elements.stan": {
+  "cause": "complex numbers are not supported yet (in variable cx3x) | in: (SComplexVector ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/pow.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/prod.stan": {
+  "cause": "mismatch in dimension declared and found in context; processing stage=data initialization; variable name=d_complex_array; position=0; dims declared=(6); dims found=(6,2)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/qr.stan": {
+  "cause": "this variable type is not supported yet (in variable QR_tdata) | in: (STuple ((SMatrix AoS ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SMatrix AoS ((pattern (Var d_int)) (meta ((type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/qr_thin.stan": {
+  "cause": "this variable type is not supported yet (in variable QR_tdata) | in: (STuple ((SMatrix AoS ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SMatrix AoS ((pattern (Var d_int)) (meta ((type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rep_matrix.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rep_row_vector.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rep_vector.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_complex)",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/row.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rows.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rows_dot_product.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/rows_dot_self.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/singular_values.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/sub_col.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/sub_row.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/svd.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/svd_U.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/svd_V.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/symmetrize_from_lower_tri.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_complex.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_matrix.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_row_vector.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_row_vector_array.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_vector.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/to_vector_array.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "function-signatures/math/matrix/trace.stan": {
+  "cause": "complex numbers are not supported yet (in variable d_cmatrix) | in: (SComplexMatrix ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "integrate_1d_good.stan": {
+  "cause": "stanc --O1, whose MIR stanli lowers, drops the unused model-block integrate_1d calls as dead code, so the one with lower limit 0.2 > upper limit 0 never runs; plain stanc keeps it and CmdStan throws 'integrate_1d: lower limit is 0.2, but must be less than or equal to 0'. stanli makes the same check when the call runs.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "laplace_deriv_check.stan": {
+  "cause": "stanli write_array unsupported: unsupported call taking the function ll_function | in: (UFun (((AutoDiffable UVector) (AutoDiffable UReal) (AutoDiffable UVector) (AutoDiffable (UArray UInt))) (ReturnType UReal) FnPlain AoS))",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "overloading/minimum_promotion.stan": {
+  "cause": "unsupported expression",
+  "status": "unsupported"
+ },
+ "promotion/array_promotion.stan": {
+  "cause": "unsupported expression",
+  "status": "unsupported"
+ },
+ "promotion/complex_functions.stan": {
+  "cause": "CmdStan's write_array throws an index error before reaching norm(complex); stanli's write_array stops earlier because it does not support norm of a complex argument.",
+  "points": {
+   "0": "message_mismatch",
+   "1": "message_mismatch",
+   "2": "message_mismatch",
+   "3": "message_mismatch",
+   "4": "message_mismatch"
+  }
+ },
+ "promotion/return_position.stan": {
+  "cause": "complex numbers are not supported yet (in variable c) | in: (SComplexVector ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
+  "status": "unsupported"
+ },
+ "runtime_errors/size_mismatch_fun.stan": {
+  "cause": "A function local matrix[2,3] is assigned a 2x4 value. Plain stanc's C++ checks the size and CmdStan throws 'matrix assign columns'; stanc --O1, whose MIR stanli lowers, leaves the local empty, so stanli's assignment takes any size.",
+  "status": "one_side_threw"
+ },
+ "runtime_errors/size_mismatch_lp_local.stan": {
+  "cause": "Plain stanc sizes the local before assigning it, so CmdStan's assign checks the size and throws; stanc --O1, whose MIR stanli lowers, leaves the local empty and Stan's assign skips the check for an empty left side.",
+  "points": {
+   "0": "one_side_threw",
+   "1": "one_side_threw",
+   "2": "one_side_threw",
+   "3": "one_side_threw",
+   "4": "one_side_threw"
+  }
+ },
+ "tuples/arrays-tuples-nested.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/basic_unpacking.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/infer_tuple_ad.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/nested_unpacking.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/onepl_expr.stan": {
+  "cause": "unsupported function kind for FnMakeTuple | in: (UTuple (UReal))",
+  "status": "unsupported"
+ },
+ "tuples/onepl_type2.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple (SReal))",
+  "status": "unsupported"
+ },
+ "tuples/overloading.stan": {
+  "cause": "mir: indistinguishable overloads of f",
+  "status": "unsupported"
+ },
+ "tuples/qr_unpack.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/simple.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple (SReal SInt))",
+  "status": "unsupported"
+ },
+ "tuples/simple2.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple ((SArray SReal ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SInt))",
+  "status": "unsupported"
+ },
+ "tuples/simple3.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple ((SArray (SArray SReal ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SInt))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-constraints-data.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-constraints-params.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-dataonly.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-dataonly2.stan": {
+  "cause": "unsupported expression | in: (TupleProjection ((pattern (FunApp (CompilerInternal FnMakeTuple) (((pattern (FunApp (CompilerInternal FnMakeArray) (((pattern (Lit Real 1.0)) (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))))) (meta ((type_ (UArray UReal)) (loc <opaque>) (adlevel DataOnly)))) ",
+  "status": "unsupported"
+ },
+ "tuples/tuple-foreach.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-full.stan": {
+  "cause": "missing data for ds; the data must give every variable in the data block",
+  "status": "unsupported"
+ },
+ "tuples/tuple-ix-assign.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple (SInt SInt))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-ix-assign2.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple ((SArray SInt ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SInt))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-ix-assign3.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-ix-assign4.stan": {
+  "cause": "this variable type is not supported yet (in variable x) | in: (STuple ((SArray (STuple (SInt (SArray SReal ((pattern (Lit Int 100)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))) ((pattern (Lit Int 10)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) SInt))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-nested-param.stan": {
+  "cause": "this variable type is not supported yet (in variable ps) | in: (STuple (SReal SReal))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-params.stan": {
+  "cause": "this variable type is not supported yet (in variable ps) | in: (STuple (SReal SReal))",
+  "status": "unsupported"
+ },
+ "tuples/tuple-promotion.stan": {
+  "cause": "mir: malformed sized declaration type",
+  "status": "unsupported"
+ },
+ "tuples/tuple-templating.stan": {
+  "cause": "stanli write_array unsupported: unsupported expression | in: (TupleProjection ((pattern (FunApp (CompilerInternal FnMakeTuple) (((pattern (FunApp (StanLib Plus__ FnPlain AoS) (((pattern (Var m1)) (meta ((type_ UMatrix) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Var m2)) (meta ((type_ UMatrix) (",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "tuples/tuple_copying.stan": {
+  "cause": "this variable type is not supported yet (in variable data_tuple) | in: (STuple ((SMatrix AoS ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 2)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))) (SArray SReal ((pattern (Lit Int 10)) (meta ((",
+  "status": "unsupported"
+ },
+ "tuples/tuple_exprs.stan": {
+  "cause": "stanli write_array unsupported: unsupported function FnMakeTuple | in: (UTuple ((UTuple (UComplex UInt)) (UArray UInt) UInt))",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "tuples/tuple_hof.stan": {
+  "cause": "missing data for data_m; the data must give every variable in the data block",
+  "status": "unsupported"
+ },
+ "tuples/tuple_lpmf.stan": {
+  "cause": "unsupported expression | in: (TupleProjection ((pattern (FunApp (CompilerInternal FnMakeTuple) (((pattern (Lit Int 1)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))) ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))) (meta ((type_ (UTuple (UInt UInt))) (loc ",
+  "status": "unsupported"
+ },
+ "tuples/tuple_temporary.stan": {
+  "cause": "stanli write_array unsupported: unsupported function FnMakeTuple | in: (UTuple (UReal UMatrix))",
+  "points": {
+   "0": "wa_unsupported",
+   "1": "wa_unsupported",
+   "2": "wa_unsupported",
+   "3": "wa_unsupported",
+   "4": "wa_unsupported"
+  }
+ },
+ "tuples/unpack_promote.stan": {
+  "cause": "mir: malformed unsized declaration type",
+  "status": "unsupported"
+ },
+ "warning/self-assign.stan": {
+  "cause": "this variable type is not supported yet (in variable tup) | in: (STuple (SReal SReal))",
+  "status": "unsupported"
+ }
+}

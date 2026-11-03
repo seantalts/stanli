@@ -7,14 +7,45 @@
 namespace stanli {
 namespace {
 
+// An Eigen first input with shared scalar bounds is checked as one object by
+// Stan Math, which names the bad element ("Lower bounded variable[1, 1]");
+// per-element bounds or non-Eigen inputs reach the scalar overloads, which
+// name nothing.
+template <typename T, typename Check>
+void check_eigen_input(const Program::Transform& tr, const T* reg,
+                       Check&& check) {
+  if (tr.eigen == 0 || tr.out_len == 0 || tr.in_len[1] != 1 ||
+      (tr.n_in > 2 && tr.in_len[2] != 1))
+    return;
+  std::vector<double> y(static_cast<size_t>(tr.out_len));
+  for (int i = 0; i < tr.out_len; ++i)
+    y[static_cast<size_t>(i)] = stan::math::value_of(reg[tr.in[0] + i]);
+  const auto bound = [&](int k) { return stan::math::value_of(reg[tr.in[k]]); };
+  if (tr.eigen == 1)
+    check(Eigen::Map<const Eigen::VectorXd>(y.data(), tr.out_len), bound);
+  else if (tr.eigen == 2)
+    check(Eigen::Map<const Eigen::RowVectorXd>(y.data(), tr.out_len), bound);
+  else
+    check(Eigen::Map<const Eigen::MatrixXd>(y.data(), tr.rows,
+                                            tr.out_len / tr.rows),
+          bound);
+}
+
 template <typename T>
 void run_transform(const Program::Transform& tr, T* reg) {
   T lp = 0.0;
+  const bool unconstrain = tr.direction == TransformDirection::Unconstrain;
   const auto bound = [&](int k, int i) -> const T& {
     return reg[tr.in[k] + (tr.in_len[k] == 1 ? 0 : i)];
   };
   switch (tr.kind) {
     case CallableTransformKind::Lower:
+      if (unconstrain)
+        check_eigen_input(tr, reg, [](const auto& y, const auto& bound) {
+          if (bound(1) != stan::math::NEGATIVE_INFTY)
+            stan::math::check_greater_or_equal(
+                "lb_free", "Lower bounded variable", y, bound(1));
+        });
       for (int i = 0; i < tr.out_len; ++i)
         reg[tr.out + i] =
             tr.direction == TransformDirection::Unconstrain
@@ -22,6 +53,12 @@ void run_transform(const Program::Transform& tr, T* reg) {
                 : stan::math::lb_constrain(reg[tr.in[0] + i], bound(1, i), lp);
       break;
     case CallableTransformKind::Upper:
+      if (unconstrain)
+        check_eigen_input(tr, reg, [](const auto& y, const auto& bound) {
+          if (bound(1) != stan::math::INFTY)
+            stan::math::check_less_or_equal("ub_free", "Upper bounded variable",
+                                            y, bound(1));
+        });
       for (int i = 0; i < tr.out_len; ++i)
         reg[tr.out + i] =
             tr.direction == TransformDirection::Unconstrain
@@ -49,6 +86,57 @@ void run_transform(const Program::Transform& tr, T* reg) {
     default: {
       using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
       using Mat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>;
+      if (tr.direction == TransformDirection::Unconstrain) {
+        const int free_len = tr.out_len / std::max(tr.batch, 1);
+        for (int b = 0; b < tr.batch; ++b) {
+          const T* input = reg + tr.in[0] + b * tr.inner_raw;
+          T* output = reg + tr.out + b * free_len;
+          const auto store = [&](const auto& x) {
+            for (int i = 0; i < free_len; ++i) output[i] = x.data()[i];
+          };
+          Eigen::Map<const Mat> m(input, tr.in_rows, std::max(tr.in_cols, 1));
+          Eigen::Map<const Vec> v(input, tr.inner_raw);
+          switch (tr.kind) {
+            case CallableTransformKind::Ordered:
+              store(Vec(stan::math::ordered_free(v)));
+              break;
+            case CallableTransformKind::PositiveOrdered:
+              store(Vec(stan::math::positive_ordered_free(v)));
+              break;
+            case CallableTransformKind::Simplex:
+              store(Vec(stan::math::simplex_free(v)));
+              break;
+            case CallableTransformKind::UnitVector:
+              store(Vec(stan::math::unit_vector_free(v)));
+              break;
+            case CallableTransformKind::SumToZero:
+              if (tr.in_cols)
+                store(Mat(stan::math::sum_to_zero_free(Mat(m))));
+              else
+                store(Vec(stan::math::sum_to_zero_free(Vec(v))));
+              break;
+            case CallableTransformKind::StochasticColumn:
+              store(Mat(stan::math::stochastic_column_free(Mat(m))));
+              break;
+            case CallableTransformKind::StochasticRow:
+              store(Mat(stan::math::stochastic_row_free(Mat(m))));
+              break;
+            case CallableTransformKind::CholeskyFactorCorr:
+              store(Vec(stan::math::cholesky_corr_free(Mat(m))));
+              break;
+            case CallableTransformKind::CorrMatrix:
+              store(Vec(stan::math::corr_matrix_free(Mat(m))));
+              break;
+            case CallableTransformKind::CovMatrix:
+              store(Vec(stan::math::cov_matrix_free(Mat(m))));
+              break;
+            default:
+              store(Vec(stan::math::cholesky_factor_free(Mat(m))));
+              break;
+          }
+        }
+        break;
+      }
       const int con = tr.out_len / std::max(tr.batch, 1);
       for (int b = 0; b < tr.batch; ++b) {
         const T* input = reg + tr.in[0] + b * tr.inner_raw;

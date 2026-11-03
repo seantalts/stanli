@@ -146,6 +146,7 @@ if(NOT EMSCRIPTEN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     runtime/kernels/densities_cdf_a.cpp
     runtime/kernels/densities_cdf_b.cpp
     runtime/kernels/matrix_fns.cpp
+    runtime/kernels/library_fns.cpp
     runtime/kernels/matrix_solve.cpp
     APPEND PROPERTY COMPILE_OPTIONS -fmath-errno)
 endif()
@@ -347,6 +348,7 @@ set(STANLI_RUNTIME_SOURCES
   runtime/kernels/probability_fns.cpp
   runtime/kernels/legacy_fns.cpp
   runtime/kernels/matrix_fns.cpp
+  runtime/kernels/library_fns.cpp
   runtime/kernels/matrix_solve.cpp
   runtime/kernels/scalar_binary.cpp
   runtime/kernels/scalar_unary_ad.cpp
@@ -928,6 +930,9 @@ endfunction()
 # stanc to find -- which is the whole point of an interpreter for a
 # language whose reference implementation compiles C++ per model.
 add_library(stanli_stanc_process STATIC tools/stanc_process.cpp)
+if(NOT EMSCRIPTEN)
+  target_link_libraries(stanli_stanc_process PRIVATE Threads::Threads)
+endif()
 add_executable(stanli_run tools/stanli_run.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(stanli_run PRIVATE stanli stanli_stanc_process)
@@ -1123,6 +1128,34 @@ add_dependencies(dump_ops stanli_mir_fixtures)
 if(NOT EMSCRIPTEN)
   add_test(NAME scalar_rng_reference
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
+            $<TARGET_FILE:stanli_check>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_points_flag
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_points_flag.py
+            $<TARGET_FILE:stanli_check>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_stanc3_lowering
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_stanc3_lowering.py
+            $<TARGET_FILE:stanli_check>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_reserved_word_names
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_reserved_word_names.py
+            $<TARGET_FILE:stanli_check>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_write_array_semantics
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_write_array_semantics.py
+            $<TARGET_FILE:stanli_check>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_lp_propto
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_lp_propto.py
+            $<TARGET_FILE:stanli_check>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_gradient_semantics
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gradient_semantics.py
+            $<TARGET_FILE:stanli_check>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_infinite_bounds
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_infinite_bounds.py
             $<TARGET_FILE:stanli_check>
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME vector_rng_reference
@@ -1556,8 +1589,20 @@ if(Python3_Interpreter_FOUND)
              --reference tests/function_coverage/sort_references.json.gz)
   set_tests_properties(test_sort_reference PROPERTIES
                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_library_reference
+           COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
+             --build ${CMAKE_CURRENT_BINARY_DIR}
+             --stanc ${STANLI_STANC_EXECUTABLE}
+             --fixtures tests/fixtures
+             --manifest tests/function_coverage/library_manifest.json
+             --reference tests/function_coverage/library_references.json.gz)
+  set_tests_properties(test_library_reference PROPERTIES
+                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_container_flow_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_container_flow_models.py --check
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_stanc3_good_data
+           COMMAND ${Python3_EXECUTABLE} tools/gen_stanc3_good_data.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_container_flow_reference
            COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
@@ -1568,6 +1613,10 @@ if(Python3_Interpreter_FOUND)
              --reference tests/function_coverage/container_flow_references.json.gz)
   set_tests_properties(test_container_flow_reference PROPERTIES
                        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_stanc3_bad
+           COMMAND ${Python3_EXECUTABLE} tools/check_stanc3_bad.py
+             --build ${CMAKE_CURRENT_BINARY_DIR}
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_wa_fallback_ledger
            COMMAND ${Python3_EXECUTABLE} tools/check_wa_fallbacks.py
              --build ${CMAKE_CURRENT_BINARY_DIR}
@@ -1698,13 +1747,28 @@ if(Python3_Interpreter_FOUND)
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     USES_TERMINAL
     COMMENT "Running known-broken Stan lit tests")
-  # The model census's coverage ratchet, over synthetic rows plus the
-  # checked-in baseline. The census itself needs deps/stanc3-src, a stanc
-  # and a CmdStan and so runs by hand; what runs here is the gate it grew,
-  # which is the part that decides whether a run failed. Pure Python and no
-  # shell stub, so no WIN32 guard.
-  add_test(NAME test_census
-           COMMAND ${Python3_EXECUTABLE} tests/test_census.py
+  # Every model in stanc3's test/integration/good against recorded CmdStan
+  # answers (tests/stanc3_good/README.md), split into shards for ctest -j.
+  # Each shard fails rather than skips when deps/stanc3-src is missing or
+  # not at the pinned commit.
+  set(STANLI_STANC3_GOOD_SHARDS 16)
+  math(EXPR _stanc3_good_last "${STANLI_STANC3_GOOD_SHARDS} - 1")
+  foreach(_shard RANGE ${_stanc3_good_last})
+    if(_shard LESS 10)
+      set(_shard_name "0${_shard}")
+    else()
+      set(_shard_name "${_shard}")
+    endif()
+    add_test(NAME test_stanc3_good_${_shard_name}
+             COMMAND ${Python3_EXECUTABLE} tools/check_stanc3_good.py
+                     --build ${CMAKE_CURRENT_BINARY_DIR}
+                     --shard ${_shard}/${STANLI_STANC3_GOOD_SHARDS} --jobs 2
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(test_stanc3_good_${_shard_name} PROPERTIES
+                         TIMEOUT 600)
+  endforeach()
+  add_test(NAME test_stanc3_good_harness
+           COMMAND ${Python3_EXECUTABLE} tests/test_stanc3_good.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # The corpus replay's per-point verdicts, over a stub stanli_check. The
   # oracle itself needs posteriordb and a real binary and so runs in CI

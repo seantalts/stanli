@@ -24,7 +24,7 @@ import numpy as np
 
 __all__ = ["Model", "Function", "Fit", "Summary", "OptimizeResult",
            "exact_lp", "thread_safe", "stan_to_mir", "build_id",
-           "bridgestan_model",
+           "bridgestan_model", "bridgestan_data", "runtime_path",
            "SAMPLER_COLUMNS", "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
@@ -618,9 +618,17 @@ def _lib_suffix() -> str:
     return {"darwin": ".dylib", "win32": ".dll"}.get(sys.platform, ".so")
 
 
-def _runtime_lib_path() -> pathlib.Path:
+def runtime_path() -> pathlib.Path:
+    """Path of the runtime library this package loaded.
+
+    The library a BridgeStan client loads as the model library. The model
+    itself travels in the data argument; see ``bridgestan_data``.
+    """
     return _BIN / ("libstanli" + _lib_suffix() if sys.platform != "win32"
                    else "stanli.dll")
+
+
+_runtime_lib_path = runtime_path
 
 
 def _source_label(stan_file, stan_code):
@@ -638,9 +646,9 @@ def _resolve_program(stan_file, stan_code, mir, name, include_paths=None):
     return mir, name
 
 
-def bridgestan_model(stan_file=None, stan_code=None, mir=None, data=None,
-                     name=None, include_paths=None, **kw):
-    """A ``bridgestan.StanModel`` for this program, with nothing written.
+def bridgestan_data(stan_file=None, stan_code=None, mir=None, data=None,
+                    name=None, include_paths=None) -> str:
+    """The data argument that makes the runtime serve this program to BridgeStan.
 
     The model travels inside the data argument: the manifest rides under
     the reserved key ``"__stanli"`` (never a data variable; Stan
@@ -650,23 +658,39 @@ def bridgestan_model(stan_file=None, stan_code=None, mir=None, data=None,
     copied and nothing touches disk. Path-form ``data`` is read and
     inlined to make room for the splice.
 
+    Any BridgeStan client can sample the program by loading
+    ``runtime_path()`` as the model library and passing the returned JSON
+    text as the data. ``include_paths`` has the same search order as
+    ``Model``.
+    """
+    mir, name = _resolve_program(stan_file, stan_code, mir, name, include_paths)
+    payload = json.loads(_data_to_json(data))
+    if not isinstance(payload, dict):
+        raise ValueError("data must be a JSON object")
+    payload["__stanli"] = {"build_id": build_id(), "mir": mir, "name": name}
+    return json.dumps(payload)
+
+
+def bridgestan_model(stan_file=None, stan_code=None, mir=None, data=None,
+                     name=None, include_paths=None, **kw):
+    """A ``bridgestan.StanModel`` for this program, with nothing written.
+
+    The payload is ``bridgestan_data(...)`` and the library is
+    ``runtime_path()``.
+
     ``bridgestan`` is imported lazily and is not a stanli dependency.
     Extra keyword arguments pass through to ``bridgestan.StanModel``.
     ``include_paths`` has the same search order as ``Model``.
     """
     import bridgestan
 
-    mir, name = _resolve_program(stan_file, stan_code, mir, name, include_paths)
-    payload = json.loads(_data_to_json(data))
-    if not isinstance(payload, dict):
-        raise ValueError("data must be a JSON object")
-    payload["__stanli"] = {"build_id": build_id(), "mir": mir, "name": name}
+    text = bridgestan_data(stan_file, stan_code, mir, data, name,
+                           include_paths)
     # bridgestan warns that the library is "already loaded" -- it is, by
     # stanli's own import, and sharing it is this function's design, so
     # the warning is off unless the caller asks for it.
     kw.setdefault("warn", False)
-    return bridgestan.StanModel(_runtime_lib_path(), json.dumps(payload),
-                                **kw)
+    return bridgestan.StanModel(runtime_path(), text, **kw)
 
 
 def build_id() -> str:

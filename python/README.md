@@ -229,6 +229,7 @@ r = model.optimize(seed=1, iter=2000, init=None, init_radius=2.0)
 f = stanli.Function("name", stan_file="functions.stan")
 mir = stanli.stan_to_mir(src, include_paths=None, fast_math=False)
 bs = stanli.bridgestan_model(stan_file="model.stan", data="data.json")
+lib, text = stanli.runtime_path(), stanli.bridgestan_data(stan_file="model.stan")
 ```
 
 `sample` returns every column CmdStan's CSV would carry: parameters,
@@ -239,6 +240,11 @@ uses CmdStan's RNG stream for `(seed, c + 1)`.
 `inits` are on the unconstrained scale: one vector for every chain, or one row
 per chain. Pass constrained values through `model.unconstrain()` first.
 `init_radius=0` starts every chain at the origin, CmdStan's `init=0`.
+
+`bridgestan_data()` returns the JSON text that makes the runtime serve a
+program to BridgeStan, and `runtime_path()` is the library to load. Pass them
+as the model library and the data argument of any BridgeStan client, nutpie
+included. `bridgestan_model()` wraps the two for the `bridgestan` package.
 
 ## Platforms
 

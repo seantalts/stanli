@@ -12,6 +12,7 @@ subprocesses, so those stay per-caller parameters.
 it); without it the reference binary forms FMAs and drifts a few ULP from
 what CmdStan actually computes, which is the whole point of the binary.
 """
+import re
 import subprocess
 
 SUNDIALS_LIBS = ("cvodes", "idas", "kinsol", "nvecserial")
@@ -55,9 +56,36 @@ def _result_line(out):
     """Final machine result, after any Stan print output."""
     for line in reversed(out.splitlines()):
         fields = line.split()
-        if fields and fields[0] in ("OK", "COMPILE_FAIL", "EVAL_FAIL"):
+        if fields and fields[0] in ("OK", "COMPILE_FAIL", "EVAL_FAIL", "DATA_FAIL"):
             return fields
     return []
+
+
+_POINT_HEADER = re.compile(r"POINT (\d+)")
+
+
+def split_points(out):
+    """Split `--points` output of stanli_check or ref_driver per point.
+
+    Returns {point: text} in the order the points ran, where text is
+    exactly what `--point k` would have printed. A failure that precedes
+    every point (COMPILE_FAIL, DATA_FAIL) leaves the result empty; read it
+    with _result_line on the whole output.
+    """
+    blocks, current = {}, None
+    for line in out.splitlines(keepends=True):
+        m = _POINT_HEADER.fullmatch(line.rstrip("\r\n"))
+        if m and (current is None or int(m.group(1)) not in blocks):
+            current = int(m.group(1))
+            blocks[current] = ""
+        elif current is not None:
+            blocks[current] += line
+    return blocks
+
+
+def point_results(out):
+    """{point: result fields} for `--points` output; see _result_line."""
+    return {k: _result_line(text) for k, text in split_points(out).items()}
 
 
 def build_reference(cs, workdir, stan, driver, stanc, name="ref", opt="-O1",

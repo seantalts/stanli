@@ -76,6 +76,12 @@ def scalar_profile(signature: Signature, descriptor: RegistrySpec) \
         centers = (0.3, 5.0, 0.1, 1.2)
     elif signature.name == "choose":
         centers = (5, 2)
+    elif signature.name == "quantile":
+        centers = (0.45, 0.4)
+    elif signature.name in {"hmm_hidden_state_prob", "hmm_marginal"}:
+        # With one hidden state, Gamma and rho must both be 1; the first
+        # element offset is -0.05.
+        centers = (-0.3, 1.05, 1.05)
     elif descriptor.layout == "constructor":
         # Extent 1 keeps the constructed container the same size as the
         # unit-extent result declaration; bounds and indices stay valid.
@@ -121,10 +127,13 @@ def scalar_profile(signature: Signature, descriptor: RegistrySpec) \
         _, data_only = unwrap_data(argument)
         if data_only:
             data_positions.add(index)
-    # stanc accepts to_int only on data, but the inventory omits the
-    # qualifier on its array overloads.
-    if signature.name == "to_int":
+    # stanc accepts these only on data, but the inventory omits the
+    # qualifier on some or all of their overloads.
+    if signature.name in {"to_int", "quantile", "hmm_hidden_state_prob"}:
         data_positions.update(range(len(signature.arguments)))
+    # Gamma and rho stay exactly 1, so only log_omegas can vary.
+    if signature.name == "hmm_marginal":
+        data_positions.update((1, 2))
     return tuple(centers), perturbation, tuple(sorted(data_positions))
 
 
@@ -279,7 +288,12 @@ def generate(stanc: pathlib.Path, registry: pathlib.Path,
             candidates,
             tuple(numeric_leaf_kind(value) for value in signature.arguments),
             numeric_leaf_kind(signature.result), signature.canonical_id)
-        if descriptor is not None and descriptor.layout == "rng":
+        if signature.name == "hypergeometric_3F2":
+            excluded.append({"signature": signature.canonical_id,
+                             "reason": "needs sizes 3 and 2, not unit "
+                                       "extents: tests/fixtures/"
+                                       "library_functions.stan"})
+        elif descriptor is not None and descriptor.layout == "rng":
             # _rng calls are illegal inside the generated pure-function
             # contexts, and draws are nondeterministic; the seeded census
             # replay owns their coverage.

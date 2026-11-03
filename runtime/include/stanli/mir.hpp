@@ -15,6 +15,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace stanli {
@@ -145,6 +146,13 @@ inline std::optional<StatefulIntrinsicKind> stateful_intrinsic_kind(
       e.name == "target" && e.args.empty())
     return StatefulIntrinsicKind::Target;
   return std::nullopt;
+}
+
+// Does any argument of the call depend on parameters?
+inline bool any_argument_active(const Expr& call) {
+  for (const Expr& arg : call.args)
+    if (!arg.data_only) return true;
+  return false;
 }
 
 // A matrix row is a non-contiguous Eigen block.  Transposing it changes the
@@ -413,6 +421,8 @@ struct Transform {
     Correlation,
     Covariance,
     CholeskyCov,
+    StochasticColumn,
+    StochasticRow,
     Unsupported
   } kind = Identity;
   std::vector<Expr> args;
@@ -430,6 +440,22 @@ inline bool is_structured_check(Transform::Kind kind) {
     case Transform::Correlation:
     case Transform::Covariance:
     case Transform::CholeskyCov:
+    case Transform::StochasticColumn:
+    case Transform::StochasticRow:
+      return true;
+    default:
+      return false;
+  }
+}
+
+inline bool is_matrix_only_check(Transform::Kind kind) {
+  switch (kind) {
+    case Transform::CholeskyCorr:
+    case Transform::Correlation:
+    case Transform::Covariance:
+    case Transform::CholeskyCov:
+    case Transform::StochasticColumn:
+    case Transform::StochasticRow:
       return true;
     default:
       return false;
@@ -445,6 +471,11 @@ struct SizedType {
   // shape is supplied by the first whole-variable assignment.
   UnsizedView unsized;
 };
+
+inline bool is_complex(const SizedType& t) {
+  const std::string& leaf = t.base == "SArray" ? t.elem_base : t.base;
+  return leaf.rfind("SComplex", 0) == 0;
+}
 
 struct Stmt {
   enum Kind {
@@ -502,6 +533,17 @@ struct Stmt {
   std::vector<Stmt> body;
   std::string raw;
 };
+
+// A user function called as a statement keeps stanc3's spelling of its kind,
+// `(UserDefined name FnPlain)`. Returns the offset and length of the name.
+inline std::optional<std::pair<size_t, size_t>> user_defined_statement_name(
+    const std::string& fn_name) {
+  constexpr std::string_view prefix = "(UserDefined ";
+  if (fn_name.compare(0, prefix.size(), prefix) != 0) return std::nullopt;
+  const size_t end = fn_name.find(' ', prefix.size());
+  if (end == std::string::npos || end == prefix.size()) return std::nullopt;
+  return std::make_pair(prefix.size(), end - prefix.size());
+}
 
 // Every identifier a statement or expression spells: variables, declared
 // names, loop variables and call names. Over-approximating is safe for

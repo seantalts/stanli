@@ -47,15 +47,15 @@ import toolchain
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # Corpora carried in the tree, each a directory of model.stan next to
-# model.json: language and type constructs lifted from stanc3's own test
-# suite (tests/stanc3/README.md), brms output for the families and effect
+# model.json: programs that once failed to lower (tests/regressions/README.md),
+# brms output for the families and effect
 # structures posteriordb does not contain (tests/brms/README.md), and
 # cogmod's custom brms families for parameter-dependent density branches
 # (tests/cogmod/README.md), ctsem's generic state-space template
 # (tests/ctsem/README.md), and OncoBayes2's dose-escalation model
 # (tests/oncobayes2/README.md). They go through the same oracle as posteriordb,
 # and a reference is keyed on the file name either way.
-LOCAL_CORPORA = (REPO / "tests" / "stanc3", REPO / "tests" / "brms",
+LOCAL_CORPORA = (REPO / "tests" / "regressions", REPO / "tests" / "brms",
                 REPO / "tests" / "rethinking", REPO / "tests" / "cogmod",
                 REPO / "tests" / "ctsem", REPO / "tests" / "oncobayes2")
 N_SAMPLER_COLS = 7

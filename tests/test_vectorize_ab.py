@@ -32,11 +32,11 @@ class VectorizeAbTest(unittest.TestCase):
         self.assertGreater(len(cases), len(pdb_entries))
         representatives = [next(name for name, case in cases.items()
                                 if case.collection == collection)
-                           for collection in ("brms", "rethinking", "educational", "stanc3")]
+                           for collection in ("brms", "rethinking", "educational", "regressions")]
         counts = vectorize_ab.selection_collections(
             ["covid19imperial_v3", "sir", *representatives], cases)
         self.assertEqual(counts, {"posteriordb": 2, "brms": 1, "rethinking": 1,
-                                  "educational": 1, "stanc3": 1})
+                                  "educational": 1, "regressions": 1})
         refs, _ = vectorize_ab.load_refs()
         selected = vectorize_ab.default_selection(refs, pdb_entries, known_gaps={})
         self.assertEqual(set(selected), set(refs) | {"sir"})

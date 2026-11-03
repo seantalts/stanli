@@ -132,6 +132,9 @@ cstan_metadata <- function(x) {
 
 cstan_inv_metric <- function(x, matrix = TRUE) {
   stanfit_flag(matrix, "matrix")
+  if (identical(x$sampler_backend, "nutpie"))
+    stop("a fit from sample_nutpie() has no Stan inverse metric: nutpie's ",
+         "mass matrix is not one another run can start from", call. = FALSE)
   if (is.null(x$metric) || length(x$inv_metric) != x$chains ||
       (x$metric != "unit_e" && any(vapply(x$inv_metric, is.null, logical(1)))))
     stop("this fit does not carry the adapted inverse metric; sample with ",

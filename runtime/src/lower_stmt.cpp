@@ -1052,12 +1052,72 @@ Lowering::Val Lowering::lower_runtime_int_sum(const mir::Expr& e,
                 has_runtime_shape(a) ? std::max<int64_t>(0, hi) : hi);
   return result;
 }
+Lowering::Val Lowering::checked_binding(const Val& v, int64_t len,
+                                        const SlotInfo& expected,
+                                        const std::string& name,
+                                        const std::string& raw) {
+  validate_view(v.si, g.slots[v.slot].len, "binding " + name);
+  validate_view(expected, len, "declaration " + name);
+  if (g.slots[v.slot].len == len &&
+      same_view(v.si, g.slots[v.slot].len, expected, len))
+    return v;
+  const std::optional<std::string> error =
+      assign_size_error(v, len, expected, name);
+  if (!error) {
+    require_binding(v, len, expected, name, raw);
+    fail("assignment logical view mismatch for " + name, raw);
+  }
+  emit_error(MessageError::InvalidArgument, *error);
+  SlotInfo si = expected;
+  si.param_free = false;
+  Val placeholder{add_slot(len, false), v.autodiff, si, owning_layout(si)};
+  out.fills.emplace_back(
+      placeholder.slot,
+      std::vector<double>(len, std::numeric_limits<double>::quiet_NaN()));
+  return placeholder;
+}
+// stan::model::assign's size check, which throws at every evaluation that
+// reaches the assignment.
+std::optional<std::string> Lowering::assign_size_error(
+    const Val& v, int64_t len, const SlotInfo& expected,
+    const std::string& name) {
+  const auto dims = [&](const SlotInfo& si, int64_t n) {
+    if (is_array(si)) return array_shape(si).dims;
+    if (is_matrix(si)) return std::vector<int64_t>{si.rows, si.cols};
+    if (si.kind == ViewKind::Flat) return std::vector<int64_t>{};
+    return std::vector<int64_t>{n};
+  };
+  const ViewKind kind =
+      is_array(expected) ? array_shape(expected).leaf : expected.kind;
+  const AssignLeaf leaf = kind == ViewKind::Matrix      ? AssignLeaf::Matrix
+                          : kind == ViewKind::Vector    ? AssignLeaf::Vector
+                          : kind == ViewKind::RowVector ? AssignLeaf::RowVector
+                                                        : AssignLeaf::Scalar;
+  const std::vector<int64_t> dst = dims(expected, len);
+  const std::string message =
+      assign_size_mismatch(name, leaf, dst.size() - leaf_rank(kind), dst,
+                           dims(v.si, g.slots[v.slot].len));
+  if (message.empty()) return std::nullopt;
+  return message;
+}
+void Lowering::emit_error(MessageError error, const std::string& message) {
+  auto spec = std::make_shared<MessageSpec>();
+  spec->chunks = {message};
+  spec->error = error;
+  Op op;
+  op.opcode = OP_REJECT;
+  op.n_in = 0;
+  op.out = add_slot(1, false);
+  op.udata = spec.get();
+  g.udata_pool.push_back(std::move(spec));
+  g.ops.push_back(op);
+}
 void Lowering::assign_plain(const mir::Stmt& s) {
   Val rhs = lower_expr(s.rhs);
   auto old = scope.find(s.lhs);
   if (old != scope.end()) {
-    require_binding(rhs, g.slots[old->second.slot].len, old->second.si, s.lhs,
-                    s.raw);
+    rhs = checked_binding(rhs, g.slots[old->second.slot].len, old->second.si,
+                          s.lhs, s.raw);
     const bool param_free = rhs.si.param_free;
     rhs.autodiff = old->second.autodiff;
     rhs.si = old->second.si;
@@ -1083,7 +1143,7 @@ void Lowering::assign_plain(const mir::Stmt& s) {
         dl->second.si = rhs.si;
       } else {
         SlotInfo expected = dl->second.si;
-        require_binding(rhs, dl->second.len, expected, s.lhs, s.raw);
+        rhs = checked_binding(rhs, dl->second.len, expected, s.lhs, s.raw);
         const bool pf = rhs.si.param_free;
         rhs.si = expected;
         rhs.si.param_free = pf;
@@ -1184,8 +1244,9 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             s.decl_type.base == "SArray" && s.decl_type.elem_base == "SInt";
         if (s.has_init) {
           Val v = lower_expr(s.init);
+          v = checked_binding(v, sh.len, view_of(s.decl_type), s.decl_id,
+                              s.raw);
           SlotInfo expected = view_of(s.decl_type, v.si.param_free);
-          require_binding(v, sh.len, expected, s.decl_id, s.raw);
           v.autodiff = sh.autodiff;
           v.si = expected;
           v.layout = owning_layout(v.si);
@@ -1227,6 +1288,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         }
         BuiltinIndexMap map;
         bool empty_selection = false;
+        bool element_of_array = false;
         SlotInfo expected_view;
         if (!runtime) {
           const SlotInfo& lhs_si =
@@ -1248,12 +1310,14 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             map.count = lhs_len;
           } else if (all_single) {
             if (is_array(lhs_si)) {
+              element_of_array = true;
               const ArrayShape& shape = array_shape(lhs_si);
               std::vector<int64_t> ix;
               ix.reserve(s.lhs_idx.size());
               for (size_t d = 0; d < s.lhs_idx.size(); ++d) {
                 const int64_t i = eval_int(s.lhs_idx[d].args[0]);
-                check_index(i, shape.dims[d], "assignment index", s.raw);
+                check_uni_index(i, shape.dims[d], "array[uni,...] assign",
+                                s.raw);
                 ix.push_back(i - 1);
               }
               const Addr a =
@@ -1265,10 +1329,15 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
                                            s.rhs.type_);
             } else if (is_matrix(lhs_si)) {
               const int64_t i = eval_int(s.lhs_idx[0].args[0]);
-              check_index(i, lhs_si.rows, "assignment index", s.raw);
+              check_uni_index(i, lhs_si.rows,
+                              s.lhs_idx.size() == 2
+                                  ? "matrix[uni,uni] assign row"
+                                  : "matrix[uni] assign row",
+                              s.raw);
               if (s.lhs_idx.size() == 2) {
                 const int64_t j = eval_int(s.lhs_idx[1].args[0]);
-                check_index(j, lhs_si.cols, "assignment index", s.raw);
+                check_uni_index(j, lhs_si.cols, "matrix[uni,uni] assign column",
+                                s.raw);
                 map.offset = (j - 1) * lhs_si.rows + (i - 1);
                 map.count = 1;
                 expected_view = view_of("UReal");
@@ -1281,7 +1350,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
               }
             } else {
               const int64_t i = eval_int(s.lhs_idx[0].args[0]);
-              check_index(i, lhs_len, "assignment index", s.raw);
+              check_uni_index(i, lhs_len, "vector[uni] assign", s.raw);
               map.offset = i - 1;
               map.count = 1;
               expected_view = view_of("UReal");
@@ -1358,7 +1427,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
           observe_fill(prev_v, declared->second.int_array, initial,
                        declared->second.len);
         }
-        const Val rhs_v = lower_expr(s.rhs);
+        Val rhs_v = lower_expr(s.rhs);
         if (runtime) {
           Val nv = region_index(prev_v, s.lhs_idx, s.rhs.type_, s.rhs.unsized,
                                 &rhs_v);
@@ -1370,6 +1439,9 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         const int prev = prev_v.slot;
         if (whole)
           require_binding(rhs_v, g.slots[prev].len, prev_v.si, s.lhs, s.raw);
+        else if (element_of_array)
+          rhs_v =
+              checked_binding(rhs_v, map.count, expected_view, s.lhs, s.raw);
         else
           require_binding(rhs_v, map.count, expected_view, s.lhs, s.raw);
         if (empty_selection) {
@@ -1534,10 +1606,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
               (spec->leaf == StructuredLeaf::Matrix &&
                expr_leaf != mir::UnsizedLeaf::Matrix))
             fail("structured FnCheck type does not match its value", s.raw);
-          const bool matrix_only = spec->kind == mir::Transform::CholeskyCorr ||
-                                   spec->kind == mir::Transform::Correlation ||
-                                   spec->kind == mir::Transform::Covariance ||
-                                   spec->kind == mir::Transform::CholeskyCov;
+          const bool matrix_only = mir::is_matrix_only_check(spec->kind);
           const bool vector_only =
               spec->kind != mir::Transform::SumToZero && !matrix_only;
           if ((matrix_only && spec->leaf != StructuredLeaf::Matrix) ||
@@ -1576,13 +1645,32 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             s.check_var_name.empty() ? s.fn_args[0].name : s.check_var_name;
         spec->bound_is_scalar = bound_is_scalar;
         spec->shapes_match = shapes_match;
+        spec->geometry = check_geometry(value.si, value_len);
         (void)emit_value(opcode, {value, bound}, 1);
         g.ops.back().udata = spec.get();
         g.udata_pool.push_back(std::move(spec));
         return;
       }
-      // Size validation remains a separate compatibility seam.
-      if (s.fn_name == "FnValidateSize") return;
+      if (s.fn_name == "FnValidateSize") {
+        if (s.fn_args.size() != 3 || s.fn_args[0].kind != mir::Expr::LitStr ||
+            s.fn_args[1].kind != mir::Expr::LitStr)
+          fail("malformed FnValidateSize", s.raw);
+        long extent;
+        try {
+          extent = eval_int(s.fn_args[2]);
+        } catch (const CompileError&) {
+          return;
+        }
+        if (extent < 0)
+          fail(
+              "Found negative dimension size in variable declaration; "
+              "variable=" +
+                  s.fn_args[0].lit_s +
+                  "; dimension size expression=" + s.fn_args[1].lit_s +
+                  "; expression value=" + std::to_string(extent),
+              s.raw);
+        return;
+      }
       if (s.fn_name == "check_matching_dims") {
         if (s.fn_args.size() != 5 || s.fn_args[0].kind != mir::Expr::LitStr ||
             s.fn_args[1].kind != mir::Expr::LitStr ||
@@ -1615,19 +1703,24 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       if (const auto action = message_action(s.fn_name)) {
         auto spec = std::make_shared<MessageSpec>();
         std::vector<int> ins;
+        std::vector<MessageShape> shapes;
         *spec =
             lower_message_arguments(s.fn_args, [&](const mir::Expr& argument) {
               // Op::in holds six. Keep that backend capacity check here;
               // parsing and semantic dispatch remain shared.
               if (ins.size() >= 6)
-                fail(std::string(*action == MessageAction::Reject ? "reject"
-                                                                  : "print") +
+                fail(std::string(*action == MessageAction::Print ? "print"
+                                                                 : "reject") +
                          " with more than 6 printed values",
                      s.raw);
-              ins.push_back(lower_expr(argument).slot);
+              const Val v = lower_expr(argument);
+              ins.push_back(v.slot);
+              shapes.push_back(message_shape(argument, v));
             });
+        spec->error = message_error(*action);
+        spec->shapes = std::move(shapes);
         Op op;
-        op.opcode = *action == MessageAction::Reject ? OP_REJECT : OP_PRINT;
+        op.opcode = *action == MessageAction::Print ? OP_PRINT : OP_REJECT;
         op.n_in = (int)ins.size();
         for (size_t k = 0; k < ins.size(); ++k) op.in[k] = ins[k];
         // The output is a dead scalar: every op writes somewhere, and

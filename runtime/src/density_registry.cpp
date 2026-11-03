@@ -1,6 +1,11 @@
 #include <stanli/density_registry.hpp>
 #include <stanli/function_registry.hpp>
 
+#include <stan/math/prim/prob/discrete_range_cdf.hpp>
+#include <stan/math/prim/prob/discrete_range_lccdf.hpp>
+#include <stan/math/prim/prob/discrete_range_lcdf.hpp>
+#include <stan/math/prim/err/check_consistent_size.hpp>
+#include <stan/math/prim/err/check_size_match.hpp>
 #include <stan/math/prim/prob/discrete_range_lpmf.hpp>
 #include <stan/math/prim/prob/hypergeometric_lpmf.hpp>
 
@@ -46,6 +51,23 @@ double evaluate_all_integer(
                        ? stan::math::discrete_range_lpmf<true>(y, lower, upper)
                        : stan::math::discrete_range_lpmf<false>(y, lower,
                                                                 upper);
+          });
+        });
+      });
+    case AllIntegerDensity::DiscreteRangeCdf:
+    case AllIntegerDensity::DiscreteRangeLcdf:
+    case AllIntegerDensity::DiscreteRangeLccdf:
+      return with_integer_argument(arguments[0], [&](const auto& y) {
+        return with_integer_argument(arguments[1], [&](const auto& lower) {
+          return with_integer_argument(arguments[2], [&](const auto& upper) {
+            switch (density) {
+              case AllIntegerDensity::DiscreteRangeCdf:
+                return stan::math::discrete_range_cdf(y, lower, upper);
+              case AllIntegerDensity::DiscreteRangeLcdf:
+                return stan::math::discrete_range_lcdf(y, lower, upper);
+              default:
+                return stan::math::discrete_range_lccdf(y, lower, upper);
+            }
           });
         });
       });
@@ -112,9 +134,9 @@ std::vector<int> pack_all_integer_density_arguments(
 double evaluate_packed_all_integer_density(AllIntegerDensity density,
                                            const int* packed, int64_t size,
                                            bool propto) {
-  const int arity = density == AllIntegerDensity::HypergeometricLpmf  ? 4
-                    : density == AllIntegerDensity::DiscreteRangeLpmf ? 3
-                                                                      : 0;
+  const int arity = density == AllIntegerDensity::HypergeometricLpmf ? 4
+                    : density == AllIntegerDensity::None             ? 0
+                                                                     : 3;
   if (arity == 0) throw std::logic_error("unknown all-integer density");
   std::vector<IntegerDensityArgument> arguments;
   arguments.reserve((size_t)arity);
@@ -133,6 +155,33 @@ double evaluate_packed_all_integer_density(AllIntegerDensity density,
   if (at != size)
     throw std::logic_error("trailing all-integer density payload");
   return evaluate_all_integer(density, arguments, propto);
+}
+
+// multi_normal, multi_normal_cholesky and multi_normal_prec compare the
+// random variable with the location and then with the matrix, in this order.
+void check_multi_normal_sizes(
+    const std::vector<DensityArgumentShape>& arguments, int64_t matrix_rows) {
+  int64_t sizes[2];
+  for (size_t k = 0; k < 2; ++k) {
+    const DensityArgumentShape& arg = arguments[k];
+    const FunctionContainerKind leaf = function_leaf(arg);
+    if ((leaf != FunctionContainerKind::Vector &&
+         leaf != FunctionContainerKind::RowVector) ||
+        arg.dimensions.size() != (size_t)arg.array_depth + 1)
+      return;
+    for (size_t d = 0; d < arg.array_depth; ++d)
+      if (arg.dimensions[d] == 0) return;
+    sizes[k] = arg.dimensions.back();
+  }
+  const auto mismatch = [](int64_t y, const char* what, int64_t other) {
+    return DensitySizeError("Size of random variable (" + std::to_string(y) +
+                            ") and " + what + " (" + std::to_string(other) +
+                            ") must match in size");
+  };
+  if (sizes[0] != sizes[1])
+    throw mismatch(sizes[0], "size of location parameter", sizes[1]);
+  if (sizes[0] != matrix_rows)
+    throw mismatch(sizes[0], "rows of covariance parameter", matrix_rows);
 }
 
 VectorizedDensityLayout vectorized_density_layout(
@@ -159,6 +208,10 @@ VectorizedDensityLayout vectorized_density_layout(
     if (matrix.storage_size != width * width)
       throw std::invalid_argument("matrix shape does not match storage");
   }
+
+  if (spec.shape == DensityShape::LastMatrixRowsAndRepetitions &&
+      spec.arity == 3)
+    check_multi_normal_sizes(arguments, width);
 
   VectorizedDensityLayout result;
   result.width = width;
@@ -302,9 +355,16 @@ DensityCallPlan density_call_plan(
     int64_t lanes = 1;
     if (spec.glm_layout)
       lanes = matrix_dimensions(spec.glm_matrix_arg, true).first;
-    else
-      for (const DensityArgumentShape& shape : real_shapes)
+    else {
+      // Stan Math returns 0 when every container argument is empty.
+      int64_t widest = -1;
+      for (const DensityArgumentShape& shape : real_shapes) {
         lanes = std::max(lanes, shape.storage_size);
+        if (shape.container != FunctionContainerKind::Scalar)
+          widest = std::max(widest, shape.storage_size);
+      }
+      if (widest == 0) plan.idata.clear();
+    }
     if (lanes > 1) {
       const int outcome = plan.idata[0];
       plan.idata.assign(static_cast<size_t>(lanes), outcome);
@@ -313,21 +373,50 @@ DensityCallPlan density_call_plan(
 
   if (spec.glm_layout) {
     const auto [rows, cols] = matrix_dimensions(spec.glm_matrix_arg, true);
+    int64_t instances = rows;
+    const bool row_design = (spec.opcode == OP_POISSON_LOG_GLM_LPMF ||
+                             spec.opcode == OP_BERNOULLI_LOGIT_GLM_LPMF ||
+                             spec.opcode == OP_NEG_BINOMIAL_2_LOG_GLM_LPMF ||
+                             spec.opcode == OP_BINOMIAL_LOGIT_GLM_LPMF) &&
+                            real_shapes[spec.glm_matrix_arg].container ==
+                                FunctionContainerKind::RowVector;
+    if (row_design) {
+      glm_scalar_mask |= kGlmRowVectorDesign;
+      instances =
+          spec.integer_args == 1 ? static_cast<int64_t>(plan.idata.size()) : 1;
+      for (const std::vector<int>& group : integer_groups)
+        instances = std::max(instances, static_cast<int64_t>(group.size()));
+    }
+    if (spec.opcode == OP_CATEGORICAL_LOGIT_GLM_LPMF) {
+      const char* function = "categorical_logit_glm_lpmf";
+      const int64_t beta_rows = matrix_dimensions(2).first;
+      const int64_t beta_cols = matrix_dimensions(2).second;
+      try {
+        stan::math::check_consistent_size(
+            function, "Intercept vector",
+            Eigen::VectorXd(real_shapes[1].storage_size),
+            static_cast<size_t>(beta_cols));
+        stan::math::check_size_match(function, "x.cols()", cols, "beta.rows()",
+                                     beta_rows);
+      } catch (const std::invalid_argument& error) {
+        throw StanMathError(error.what());
+      }
+    }
     if (spec.integer_args == 2) {
       plan.idata.clear();
       for (size_t k = 0; k < integer_groups.size(); ++k) {
         std::vector<int>& group = integer_groups[k];
-        if ((glm_scalar_mask & (uint8_t{1} << k)) && rows > 1) {
+        if ((glm_scalar_mask & (uint8_t{1} << k)) && instances > 1) {
           const int value = group[0];
-          group.assign(static_cast<size_t>(rows), value);
+          group.assign(static_cast<size_t>(instances), value);
         }
-        if (static_cast<int64_t>(group.size()) != rows)
+        if (static_cast<int64_t>(group.size()) != instances)
           throw std::invalid_argument(
               "integer density argument does not match matrix rows");
         plan.idata.insert(plan.idata.end(), group.begin(), group.end());
       }
     } else if (spec.integer_args == 1 &&
-               static_cast<int64_t>(plan.idata.size()) != rows) {
+               static_cast<int64_t>(plan.idata.size()) != instances) {
       throw std::invalid_argument("density outcome does not match matrix rows");
     }
     plan.idata.push_back(as_int_extent(rows));

@@ -36,6 +36,7 @@ size_t scalar_rng_arity(ScalarRng family) {
     case ScalarRng::Exponential:
     case ScalarRng::Poisson:
     case ScalarRng::BernoulliLogit:
+    case ScalarRng::YuleSimon:
       return 1;
     case ScalarRng::Uniform:
     case ScalarRng::Normal:
@@ -64,7 +65,7 @@ bool scalar_rng_is_int(ScalarRng family) {
          family == ScalarRng::Poisson || family == ScalarRng::BernoulliLogit ||
          family == ScalarRng::Binomial || family == ScalarRng::BetaBinomial ||
          family == ScalarRng::NegBinomial2 ||
-         family == ScalarRng::NegBinomial2Log;
+         family == ScalarRng::NegBinomial2Log || family == ScalarRng::YuleSimon;
 }
 
 namespace {
@@ -155,6 +156,9 @@ void container_rng_draw(ScalarRng family, const RngArgument* args, size_t nargs,
         case ScalarRng::BernoulliLogit:
           save(stan::math::bernoulli_logit_rng(a, g));
           break;
+        case ScalarRng::YuleSimon:
+          save(stan::math::yule_simon_rng(a, g));
+          break;
         default:
           throw std::logic_error("unknown unary RNG family");
       }
@@ -238,6 +242,8 @@ double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
       return stan::math::neg_binomial_2_rng(args[0], args[1], g);
     case ScalarRng::NegBinomial2Log:
       return stan::math::neg_binomial_2_log_rng(args[0], args[1], g);
+    case ScalarRng::YuleSimon:
+      return static_cast<double>(stan::math::yule_simon_rng(args[0], g));
     case ScalarRng::PoissonLog:
       return static_cast<double>(stan::math::poisson_log_rng(args[0], g));
     case ScalarRng::Uniform:
@@ -405,6 +411,12 @@ std::vector<double> WaInterp::eval(
   };
   h.fun = [this, &rng](MirInterp<double>& in, const mir::Expr& e,
                        DataMap::Entry* out) {
+    // The interpreter refuses `target +=`, so the target CmdStan's
+    // write_array accumulates from lp__ = 0 is still 0 here.
+    if (mir::stateful_intrinsic_kind(e)) {
+      out->r = {0.0};
+      return true;
+    }
     return interpreted_rng_call(in, e, out, rng) ||
            evaluate_retained_higher_order(
                funs_, e, [&in](const mir::Expr& arg) { return in.eval(arg); },
@@ -453,6 +465,11 @@ bool WaInterp::read_param(MirInterp<double>& in, const mir::Stmt& s,
 bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
                            std::vector<double>& row) {
   const mir::Expr& v = s.fn_args.at(0);
+  // CmdStan writes a real and an imaginary column; one real column is wrong.
+  if (v.unsized.leaf == mir::UnsizedLeaf::Complex ||
+      v.raw.find("UComplex") != std::string::npos)
+    throw CompileError("complex numbers are not supported yet (in output " +
+                       v.name + ")");
   DataMap::Entry e = in.eval(v);
   const int64_t len = (int64_t)std::max(e.r.size(), e.i.size());
   if (!have_cols_) {
