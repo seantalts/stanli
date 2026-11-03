@@ -113,7 +113,7 @@ The jobs are in [`wheels.yml`](.github/workflows/wheels.yml),
 | MIR wire cost | compact MIR decode time and size on Eight Schools | legacy MIR; each must be at most half | post-merge | other models |
 | [generated conformance sweep](#testing-stan-language-coverage) | 24,322 generated signature and construct cases | reference BridgeStan from the same pins | nightly | operator-only behavior; cases the generator cannot build |
 | [coverage ratchet](#testing-stan-language-coverage) | each generated case's status | the checked-in baseline | nightly | the coverage totals themselves |
-| [integrated function models](#testing-stan-language-coverage) | 10 models using 430 function names, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | every overload of each name |
+| [integrated function models](#testing-stan-language-coverage) | 10 models using 436 function names, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | every overload of each name |
 | [signature replay](#testing-stan-language-coverage) | 74 generated models covering 19,641 signatures, all outputs | recorded CmdStan values, 1e-9 | PR (CTest) | signatures the generators exclude |
 | [stanc3 test models](#testing-stan-language-coverage) | the 1,244 models in stanc3's integration tests, lp, gradient and write_array at 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
 | Rethinking regeneration | the 62 Rethinking fixtures, regenerated from the book's code with pinned `rethinking` | the checked-in files, byte for byte | nightly | |
@@ -383,8 +383,8 @@ Stan, Math and stanc. It compares the log density and full gradient at fixed
 points. The baseline
 ([`conformance-baseline.json.gz`](docs/internal/artifacts/conformance-baseline.json.gz))
 holds 24,322 cases (24,291 signatures over 571 names, plus 31 constructs):
-19,009 `verified`, 3,665 `inapplicable`, 923 `generator_gap`, 698
-`expected_unsupported` and 27 `unexpected_unsupported`.
+19,035 `verified`, 3,665 `inapplicable`, 923 `generator_gap`, 698
+`expected_unsupported` and 1 `unexpected_unsupported`.
 [docs/coverage.md](docs/coverage.md) explains the statuses and summarizes them
 by function family; the [harness README](harnesses/conformance/README.md)
 covers setup and local runs.
@@ -399,7 +399,7 @@ ratchet fails when a previously `verified` case stops verifying
 The sweep cannot reach behavior used only through operators, cannot check a
 case it cannot generate, and does not measure cost.
 [Ten integrated function models](tests/function_coverage/README.md) close part
-of that gap: 430 names, including data-only helpers, RNGs, solvers and five
+of that gap: 436 names, including data-only helpers, RNGs, solvers and five
 operators, checked against recorded CmdStan values, gradients and outputs.
 
 CTest also replays 74 generated signature models on every PR
