@@ -19,7 +19,8 @@ Encoding: UTF-8
 Depends: R (>= 4.0)
 Imports: utils, tools, methods, stats
 Suggests: V8, jsonlite, posterior, bayesplot, loo, rstantools, tidybayes,
-    callr, rstan, cmdstanr, shinystan, brms, testthat (>= 3.0.0)
-Additional_repositories: https://stan-dev.r-universe.dev
+    callr, rstan, cmdstanr, shinystan, brms, nutpieR, testthat (>= 3.0.0)
+Additional_repositories: https://stan-dev.r-universe.dev,
+    https://andytimm.r-universe.dev
 NeedsCompilation: yes
 Config/roxygen2/version: 8.1.0
