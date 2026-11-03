@@ -104,10 +104,21 @@ static bool parse_points(const std::string& list, std::vector<int>* out) {
   return true;
 }
 
+// MSVC's printf writes NaN as -nan(ind), which no reader parses.
+static void print_real(double x) {
+  if (std::isnan(x))
+    std::printf(" nan");
+  else if (std::isinf(x))
+    std::printf(x > 0 ? " inf" : " -inf");
+  else
+    std::printf(" %.17g", x);
+}
+
 static void print_sweep_point(int k, double lp,
                               const std::vector<double>& grad) {
-  std::printf("SWEEP_POINT %d %.17g", k, lp);
-  for (double g : grad) std::printf(" %.17g", g);
+  std::printf("SWEEP_POINT %d", k);
+  print_real(lp);
+  for (double g : grad) print_real(g);
   std::printf("\n");
 }
 
@@ -417,7 +428,7 @@ int main(int argc, char** argv) {
               joined += nm;
             }
             std::printf("WANAMES %s\nWAVALS", joined.c_str());
-            for (double x : row) std::printf(" %.17g", x);
+            for (double x : row) print_real(x);
             std::printf("\n");
           }
         } catch (const std::exception& we) {
@@ -470,7 +481,7 @@ int main(int argc, char** argv) {
             std::printf("WANAMES %s\nWAVALS", joined.c_str());
             for (const auto& c : cm.write_array->columns) {
               const double* p = wex.value_ptr(c.slot);
-              for (int64_t i = 0; i < c.len; ++i) std::printf(" %.17g", p[i]);
+              for (int64_t i = 0; i < c.len; ++i) print_real(p[i]);
             }
             std::printf("\n");
           }
@@ -508,8 +519,9 @@ int main(int argc, char** argv) {
         std::fill(grad.begin(), grad.end(), 0.0);
         print_sweep_point(0, ex.gradient(grad.data()), grad);
       }
-      std::printf("OK %.17g", lp);
-      for (double g : grad) std::printf(" %.17g", g);
+      std::printf("OK");
+      print_real(lp);
+      for (double g : grad) print_real(g);
       std::printf("\n");
     } catch (const std::exception& e) {
       std::printf("EVAL_FAIL %s\n", msg(e.what()).c_str());
