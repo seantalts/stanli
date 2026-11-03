@@ -202,6 +202,14 @@ class TimingTests(unittest.TestCase):
         self.assertAlmostEqual(off["scaled_errors"][1], 1e-10 / 3, delta=1e-13)
         self.assertEqual(off["max_scaled_error"], off["scaled_errors"][1])
 
+    def test_lp_only_pair_ignores_the_gradient_but_not_lp(self):
+        noisy_gradient = driver_output(values=lambda k: [-3.0 - k, 9.0])
+        self.assertEqual(check_pair(self.pair(cmdstan=noisy_gradient), lp_only=True)["kept_points"],
+                         [0, 1, 2])
+        with self.assertRaisesRegex(PhaseFailure, "point 0.*mismatch"):
+            check_pair(self.pair(cmdstan=driver_output(values=lambda k: [-2.0 - k, 2.0 + k])),
+                       lp_only=True)
+
     def test_points_non_finite_in_both_engines_are_dropped(self):
         checked = check_pair(self.pair(driver_output(dropped=(0, 2)), driver_output(dropped=(0, 2))))
         self.assertEqual((checked["kept_points"], checked["dropped_points"]), ([1], [0, 2]))
