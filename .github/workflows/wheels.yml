@@ -1116,7 +1116,7 @@ jobs:
             echo "the sampling tests skipped: the runtime was not seen"
             exit 1
           fi
-          if grep -q 'nutpieR is not installed' "$log"; then
+          if grep -Eq 'nutpieR\}? (is not installed|cannot be loaded)' "$log"; then
             echo "the nutpie tests skipped: nutpieR was not installed"
             exit 1
           fi
