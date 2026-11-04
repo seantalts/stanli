@@ -82,6 +82,16 @@ test_that("a fixed step size without adaptation is recorded and reported as give
   expect_null(rstan::get_adaptation_info(sf))
 })
 
+test_that("a step-size-only run records adapt_metric = FALSE", {
+  skip_without_runtime()
+  skip_if_not_installed("rstan")
+  sf <- as_stanfit(sampler_fit(adapt_metric = FALSE))
+  for (chain in 1:2) {
+    expect_false(attr(sf@sim$samples[[chain]], "args")$control$adapt_metric)
+    expect_false(sf@stan_args[[chain]]$control$adapt_metric)
+  }
+})
+
 test_that("an initial step size is recorded when adaptation moves it", {
   skip_without_runtime()
   skip_if_not_installed("rstan")

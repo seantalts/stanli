@@ -26,6 +26,7 @@ sample_cstan(
   inv_metric = NULL,
   step_size = NULL,
   adapt_engaged = TRUE,
+  adapt_metric = TRUE,
   ...
 )
 }
@@ -70,11 +71,11 @@ calls; see [sample_model()]. Defaults to 1.}
 \item{include_paths}{Directories searched for Stan `#include` files; see
 [stanli_model()].}
 
-\item{metric, inv_metric, step_size, adapt_engaged}{Metric kind
+\item{metric, inv_metric, step_size, adapt_engaged, adapt_metric}{Metric kind
 (`"diag_e"`, `"dense_e"` or `"unit_e"`), starting inverse metric, initial
-step size and whether adaptation is engaged, passed to [sample_model()],
-which describes them. `inv_metric` may be one vector or matrix, or a list
-with one per chain.}
+step size, whether adaptation is engaged and whether it adapts the metric,
+passed to [sample_model()], which describes them. `inv_metric` may be one
+vector or matrix, or a list with one per chain.}
 
 \item{...}{Reserved. Unsupported options produce an error.}
 }

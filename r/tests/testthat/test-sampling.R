@@ -580,7 +580,7 @@ test_that("explicit default metric options reproduce the default run", {
                     refresh = 0)
   b <- sample_model(m, chains = 2, seed = 8, warmup = 100, samples = 30,
                     metric = "diag_e", inv_metric = c(1, 1), step_size = 1,
-                    adapt_engaged = TRUE, refresh = 0)
+                    adapt_engaged = TRUE, adapt_metric = TRUE, refresh = 0)
   expect_identical(a$draws, b$draws)
   expect_identical(a$sampler, b$sampler)
 })
@@ -615,6 +615,36 @@ test_that("a supplied dense metric round-trips with adaptation off", {
                       adapt_engaged = FALSE, refresh = 0)
   expect_identical(fit$inv_metric, list(S, S))
   expect_true(all(fit$sampler[, , "stepsize__"] == 0.25))
+})
+
+test_that("adapt_metric = FALSE adapts only the step size", {
+  skip_without_runtime()
+  m <- metric_model()
+  S <- matrix(c(2, 0.5, 0.5, 1.5), 2)
+  fit <- sample_model(m, chains = 2, seed = 3, warmup = 300, samples = 20,
+                      metric = "dense_e", inv_metric = S, adapt_metric = FALSE,
+                      refresh = 0)
+  expect_identical(fit$inv_metric, list(S, S))
+  expect_true(all(fit$step_size > 0) && all(fit$step_size != 1))
+  expect_false(fit$adapt_metric)
+  adapted <- sample_model(m, chains = 2, seed = 3, warmup = 300, samples = 20,
+                          metric = "dense_e", inv_metric = S, refresh = 0)
+  expect_false(identical(adapted$inv_metric, list(S, S)))
+  expect_true(adapted$adapt_metric)
+
+  diag_fit <- sample_model(m, chains = 2, seed = 3, warmup = 300, samples = 20,
+                           adapt_metric = FALSE, refresh = 0)
+  expect_identical(diag_fit$inv_metric, list(c(1, 1), c(1, 1)))
+
+  for (args in list(list(metric = "unit_e"),
+                    list(adapt_engaged = FALSE, step_size = 0.5))) {
+    on <- do.call(sample_model, c(list(m, chains = 2, seed = 4, warmup = 100,
+                                       samples = 20, refresh = 0), args))
+    off <- do.call(sample_model, c(list(m, chains = 2, seed = 4, warmup = 100,
+                                        samples = 20, refresh = 0,
+                                        adapt_metric = FALSE), args))
+    expect_identical(on$draws, off$draws)
+  }
 })
 
 test_that("warmup = 0 searches for a step size only while adaptation is engaged", {
@@ -681,13 +711,17 @@ test_that("step_size and adapt_engaged are validated", {
   expect_error(run(step_size = c(0.1, 0.2)), "step_size")
   expect_error(run(adapt_engaged = NA), "adapt_engaged")
   expect_error(run(adapt_engaged = c(TRUE, FALSE)), "adapt_engaged")
+  expect_error(run(adapt_metric = NA), "adapt_metric")
+  expect_error(run(adapt_metric = c(TRUE, FALSE)), "adapt_metric")
+  expect_error(run(adapt_metric = "no"), "adapt_metric")
 })
 
 test_that("fixed_param refuses metric options", {
   skip_without_runtime()
   m <- progress_model()
   for (args in list(list(metric = "dense_e"), list(inv_metric = 1),
-                    list(step_size = 0.5), list(adapt_engaged = FALSE)))
+                    list(step_size = 0.5), list(adapt_engaged = FALSE),
+                    list(adapt_metric = FALSE)))
     expect_error(do.call(sample_model, c(list(m, chains = 1, samples = 5,
                                               fixed_param = TRUE, refresh = 0),
                                          args)),

@@ -44,6 +44,9 @@ struct NutsConfig {
   // CmdStan's `adapt engaged`. When false no step size search or adaptation
   // runs, and warmup iterations are plain transitions.
   bool adapt = true;
+  // With `adapt` true, false adapts only the step size and leaves the metric
+  // as supplied. Ignored for the unit metric and when `adapt` is false.
+  bool adapt_metric = true;
   // stan::mcmc::base_nuts defaults this to 5; CmdStan sets 10 and so must
   // we, or trajectories cap at 31 leapfrogs instead of 1023 and any model
   // needing deep trees is silently under-explored.

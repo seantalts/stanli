@@ -33,7 +33,8 @@ The code is checked for syntax and type errors here. The model is
   `seed`, `init`, `pars`, `include`, `cores`, `control` and `algorithm =
   "Fixed_param"` work as in rstan, and `chain_id`, `init_r`, `refresh` and
   `save_warmup` are accepted through `...`. `control` takes `adapt_delta`,
-  `max_treedepth`, `stepsize`, `metric` and `adapt_engaged`; any other entry
+  `max_treedepth`, `stepsize`, `metric`, `adapt_engaged` and, as a stanli
+  addition, `adapt_metric` (see [sample_model()]); any other entry
   prints an error naming it, then `sampling()` messages "error in specifying
   arguments; sampling not done" and returns an empty fit, as rstan does. A
   model that cannot be built from the data, such as one whose transformed data

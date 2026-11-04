@@ -11,6 +11,9 @@
 #include <stan/mcmc/hmc/nuts/adapt_dense_e_nuts.hpp>
 #include <stan/mcmc/hmc/nuts/adapt_diag_e_nuts.hpp>
 #include <stan/mcmc/hmc/nuts/adapt_unit_e_nuts.hpp>
+#include <stan/mcmc/hmc/nuts/dense_e_nuts.hpp>
+#include <stan/mcmc/hmc/nuts/diag_e_nuts.hpp>
+#include <stan/mcmc/stepsize_adapter.hpp>
 #include <stan/services/util/create_rng.hpp>
 #include <stan/services/util/validate_dense_inv_metric.hpp>
 #include <stan/services/util/validate_diag_inv_metric.hpp>
@@ -28,6 +31,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 
 namespace stanli {
 
@@ -90,6 +94,34 @@ class ChainLogger : public stan::callbacks::logger {
   std::string pending_;
 };
 
+// adapt_unit_e_nuts over a diagonal or dense metric: dual-averaging step
+// size adaptation and no metric windows.
+template <class Base>
+class adapt_stepsize_only_nuts : public Base,
+                                 public stan::mcmc::stepsize_adapter {
+ public:
+  using Base::Base;
+
+  stan::mcmc::sample transition(stan::mcmc::sample& init_sample,
+                                stan::callbacks::logger& logger) {
+    stan::mcmc::sample s = Base::transition(init_sample, logger);
+    if (this->adapt_flag_)
+      this->stepsize_adaptation_.learn_stepsize(this->nom_epsilon_,
+                                                s.accept_stat());
+    return s;
+  }
+
+  void disengage_adaptation() noexcept {
+    stan::mcmc::base_adapter::disengage_adaptation();
+    this->stepsize_adaptation_.complete_adaptation(this->nom_epsilon_);
+  }
+};
+
+template <class Sampler>
+struct has_metric_windows : std::true_type {};
+template <class Base>
+struct has_metric_windows<adapt_stepsize_only_nuts<Base>> : std::false_type {};
+
 template <Metric M, class Sampler>
 std::vector<std::vector<double>> run_nuts_with(Executor& ex,
                                                const NutsConfig& cfg,
@@ -139,12 +171,22 @@ std::vector<std::vector<double>> run_nuts(Executor& ex, const NutsConfig& cfg,
                            stan::mcmc::adapt_unit_e_nuts<ExecutorModel, rng_t>>(
           ex, cfg, stats, observe, progress, report);
     case Metric::Dense:
+      if (cfg.adapt && !cfg.adapt_metric)
+        return run_nuts_with<
+            Metric::Dense, adapt_stepsize_only_nuts<
+                               stan::mcmc::dense_e_nuts<ExecutorModel, rng_t>>>(
+            ex, cfg, stats, observe, progress, report);
       return run_nuts_with<
           Metric::Dense, stan::mcmc::adapt_dense_e_nuts<ExecutorModel, rng_t>>(
           ex, cfg, stats, observe, progress, report);
     case Metric::Diag:
       break;
   }
+  if (cfg.adapt && !cfg.adapt_metric)
+    return run_nuts_with<Metric::Diag,
+                         adapt_stepsize_only_nuts<
+                             stan::mcmc::diag_e_nuts<ExecutorModel, rng_t>>>(
+        ex, cfg, stats, observe, progress, report);
   return run_nuts_with<Metric::Diag,
                        stan::mcmc::adapt_diag_e_nuts<ExecutorModel, rng_t>>(
       ex, cfg, stats, observe, progress, report);
@@ -209,7 +251,7 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
   sampler.get_stepsize_adaptation().set_delta(cfg.delta);
   sampler.set_max_depth(cfg.max_depth);
   if (cfg.adapt) {
-    if constexpr (M != Metric::Unit)
+    if constexpr (M != Metric::Unit && has_metric_windows<Sampler>::value)
       sampler.set_window_params(cfg.warmup, 75, 50, 25, logger);
     sampler.engage_adaptation();
     sampler.init_stepsize(logger);

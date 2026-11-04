@@ -15,6 +15,9 @@
 #include <stanli/wa_interp.hpp>
 
 #include "build_id.hpp"
+#include "service_model.hpp"
+
+#include <stan/math/rev/functor/finite_diff_hessian_auto.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -27,6 +30,7 @@
 #include <map>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -477,6 +481,40 @@ int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad) {
   }
 }
 
+int stanli_hessian(stanli_model* m, const double* q, double* lp, double* grad,
+                   double* hessian, char* err, size_t err_len) {
+  try {
+    if (m == nullptr || q == nullptr || lp == nullptr || hessian == nullptr)
+      throw std::invalid_argument(
+          "stanli_hessian needs a model, a point, lp and a Hessian buffer");
+    const int64_t n = m->ex->n_params();
+    std::optional<stan::math::ChainableStack> tape;
+    if (stan::math::ChainableStack::instance_ == nullptr) tape.emplace();
+    const stanli::detail::ServiceHooks hooks;
+    const stanli::detail::ServiceModel model(*m->ex, hooks);
+    const auto density = [&](auto&& theta) {
+      return model.template log_prob<true, true, stan::math::var>(theta,
+                                                                  nullptr);
+    };
+    Eigen::VectorXd g;
+    Eigen::MatrixXd h;
+    double value = 0;
+    stan::math::internal::finite_diff_hessian_auto(
+        density, Eigen::Map<const Eigen::VectorXd>(q, n), value, g, h);
+    *lp = value;
+    if (grad != nullptr) Eigen::Map<Eigen::VectorXd>(grad, n) = g;
+    Eigen::Map<Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(hessian, n, n) =
+        h;
+    return 0;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
+  } catch (...) {
+    put_err(err, err_len, "unknown error in stanli_hessian");
+    return 1;
+  }
+}
+
 int stanli_sample_stream_stats_init(stanli_model* m, uint32_t seed, int warmup,
                                     int samples, double delta,
                                     const double* init, double* draws,
@@ -724,6 +762,7 @@ void stanli_metric_opts_init(stanli_metric_opts* o) {
   o->metric = STANLI_METRIC_DIAG;
   o->step_size = 1.0;
   o->adapt_engaged = 1;
+  o->adapt_metric = 1;
 }
 
 int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
@@ -793,6 +832,7 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
     }
     cfg.step_size = mo.step_size;
     cfg.adapt = mo.adapt_engaged != 0;
+    cfg.adapt_metric = mo.adapt_metric != 0;
     const int64_t metric_len = cfg.metric == stanli::Metric::Unit    ? 0
                                : cfg.metric == stanli::Metric::Dense ? n * n
                                                                      : n;

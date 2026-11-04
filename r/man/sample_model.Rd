@@ -25,6 +25,7 @@ sample_model(
   inv_metric = NULL,
   step_size = NULL,
   adapt_engaged = TRUE,
+  adapt_metric = TRUE,
   chain_id = 1L
 )
 }
@@ -103,6 +104,11 @@ TRUE`, stanli still runs Stan's initial step size search, as Stan's
 adaptive sampler does, so the step size in use differs from `step_size`.
 To use a supplied step size exactly, set `adapt_engaged = FALSE`, as with
 CmdStanR.}
+
+\item{adapt_metric}{`TRUE` (the default) adapts the metric during warmup
+when `adapt_engaged` is `TRUE`. `FALSE` adapts only the step size and
+keeps `inv_metric` (the identity when `NULL`) as given. It has no effect
+with `metric = "unit_e"` or `adapt_engaged = FALSE`.}
 
 \item{chain_id}{Id of the first chain, a positive integer, default 1.
 Chain `c` of the run is labelled `chain_id + c - 1` and uses that id's

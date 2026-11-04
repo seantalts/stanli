@@ -108,6 +108,7 @@ class _MetricOpts(ctypes.Structure):
         ("inv_metric", ctypes.POINTER(ctypes.c_double)),
         ("step_size", ctypes.c_double),
         ("adapt_engaged", ctypes.c_int),
+        ("adapt_metric", ctypes.c_int),
         ("adapted_step_size", ctypes.POINTER(ctypes.c_double)),
         ("adapted_inv_metric", ctypes.POINTER(ctypes.c_double)),
     ]
@@ -133,6 +134,13 @@ def _load_lib():
                                 ctypes.POINTER(ctypes.c_double),
                                 ctypes.POINTER(ctypes.c_double),
                                 ctypes.POINTER(ctypes.c_double)]
+    lib.stanli_hessian.restype = ctypes.c_int
+    lib.stanli_hessian.argtypes = [ctypes.c_void_p,
+                                   ctypes.POINTER(ctypes.c_double),
+                                   ctypes.POINTER(ctypes.c_double),
+                                   ctypes.POINTER(ctypes.c_double),
+                                   ctypes.POINTER(ctypes.c_double),
+                                   ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_unconstrain_inits.restype = ctypes.c_int
     lib.stanli_unconstrain_inits.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
                                              ctypes.POINTER(ctypes.c_double),
@@ -1331,6 +1339,31 @@ class Model:
                                "(domain error in a distribution or function)")
         return lp.value, grad
 
+    def log_prob_hessian(self, q):
+        """log density, gradient and Hessian at unconstrained q.
+
+        The density is that of `log_prob_grad`. The Hessian has shape (n, n)
+        and is symmetric: Stan's finite-difference Hessian of the gradient,
+        which costs 1 + 2n gradient evaluations. It is the routine Stan's Laplace
+        approximation uses, so the error is that of a finite difference.
+        """
+        q = np.ascontiguousarray(q, dtype=np.float64)
+        n = self.n_unconstrained
+        if q.size != n:
+            raise ValueError(f"q has {q.size} elements, model has "
+                             f"{n} unconstrained parameters")
+        lp = ctypes.c_double()
+        grad = np.empty(n)
+        hess = np.empty((n, n))
+        err = ctypes.create_string_buffer(4096)
+        with _native_output():
+            rc = _lib.stanli_hessian(self._handle, _dptr(q), ctypes.byref(lp),
+                                     _dptr(grad), _dptr(hess), err, len(err))
+        if rc != 0:
+            raise RuntimeError("Hessian evaluation failed at this point: "
+                               + err.value.decode(errors="replace"))
+        return lp.value, grad, hess
+
     def unconstrain(self, values):
         """Starting values on the CONSTRAINED scale, as the free vector.
 
@@ -1439,7 +1472,7 @@ class Model:
                inits=None, init_radius=2.0, pathfinder_init=None,
                parallel_chains=None, refresh=100, threads_per_chain=1,
                metric="diag_e", inv_metric=None, step_size=None,
-               adapt_engaged=True):
+               adapt_engaged=True, adapt_metric=True):
         """NUTS draws as a Fit.
 
         Four chains by default, because R-hat needs more than one and a
@@ -1493,6 +1526,9 @@ class Model:
         not adapt the metric and a supplied one is kept, as in CmdStan. With
         `adapt_engaged=True` and `warmup=0` Stan still runs its initial step
         size search, so use `adapt_engaged=False` to run at exactly `step_size`.
+        `adapt_metric=False` with `adapt_engaged=True` adapts only the step
+        size and keeps `inv_metric` (the identity if None) unchanged; it has
+        no effect with "unit_e" or `adapt_engaged=False`.
 
         The Fit reports `metric`, `step_size` (one per chain) and
         `inv_metric` (a list with one array per chain, None for "unit_e"):
@@ -1520,6 +1556,8 @@ class Model:
         step_size_value = _check_step_size(step_size)
         if not isinstance(adapt_engaged, (bool, np.bool_)):
             raise TypeError("adapt_engaged must be a bool")
+        if not isinstance(adapt_metric, (bool, np.bool_)):
+            raise TypeError("adapt_metric must be a bool")
         if isinstance(refresh, (bool, np.bool_)):
             raise TypeError("refresh must be a nonnegative integer")
         try:
@@ -1591,6 +1629,7 @@ class Model:
         metric_opts.metric = _METRICS.index(metric)
         metric_opts.step_size = step_size_value
         metric_opts.adapt_engaged = 1 if adapt_engaged else 0
+        metric_opts.adapt_metric = 1 if adapt_metric else 0
         inv_metric_arr = None
         if inv_metric is not None:
             inv_metric_arr = _inv_metric_buffer(

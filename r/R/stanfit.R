@@ -57,6 +57,7 @@ stanfit_nuts_control <- function(x) {
   c(list(adapt_delta = x$delta, max_treedepth = x$max_depth,
          metric = if (is.null(x$metric)) "diag_e" else x$metric,
          adapt_engaged = engaged),
+    if (identical(x$adapt_metric, FALSE)) list(adapt_metric = FALSE),
     if (!is.null(start)) list(stepsize = as.double(start)))
 }
 

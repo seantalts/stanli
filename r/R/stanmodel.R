@@ -19,7 +19,8 @@
 #'   `seed`, `init`, `pars`, `include`, `cores`, `control` and `algorithm =
 #'   "Fixed_param"` work as in rstan, and `chain_id`, `init_r`, `refresh` and
 #'   `save_warmup` are accepted through `...`. `control` takes `adapt_delta`,
-#'   `max_treedepth`, `stepsize`, `metric` and `adapt_engaged`; any other entry
+#'   `max_treedepth`, `stepsize`, `metric`, `adapt_engaged` and, as a stanli
+#'   addition, `adapt_metric` (see [sample_model()]); any other entry
 #'   prints an error naming it, then `sampling()` messages "error in specifying
 #'   arguments; sampling not done" and returns an empty fit, as rstan does. A
 #'   model that cannot be built from the data, such as one whose transformed data
@@ -209,7 +210,7 @@ stanmodel_control <- function(control) {
       (is.null(names(control)) || any(!nzchar(names(control))))))
     stop("control must be a named list", call. = FALSE)
   supported <- c("adapt_delta", "max_treedepth", "stepsize", "metric",
-                 "adapt_engaged")
+                 "adapt_engaged", "adapt_metric")
   unsupported <- setdiff(names(control), supported)
   if (length(unsupported))
     stop("control entries stanli does not support: ",
@@ -224,7 +225,9 @@ stanmodel_control <- function(control) {
          control$max_treedepth,
        step_size = control$stepsize, metric = metric,
        adapt_engaged = if (is.null(control$adapt_engaged)) TRUE else
-         control$adapt_engaged)
+         control$adapt_engaged,
+       adapt_metric = if (is.null(control$adapt_metric)) TRUE else
+         control$adapt_metric)
 }
 
 stanmodel_sampling <- function(object, data = list(), pars = NA, chains = 4,
@@ -303,6 +306,7 @@ stanmodel_sampling <- function(object, data = list(), pars = NA, chains = 4,
                      parallel_chains = min(cores, chains), refresh = refresh,
                      metric = settings$metric, step_size = settings$step_size,
                      adapt_engaged = settings$adapt_engaged,
+                     adapt_metric = settings$adapt_metric,
                      chain_id = chain_id)
       }
       as_stanfit(fit, exclude = exclude)

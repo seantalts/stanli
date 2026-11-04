@@ -27,7 +27,7 @@ typedef struct stanli_model stanli_model;
  * from the wrong seed with the wrong step size. A binding must compare
  * this against the value it was compiled against before calling
  * anything, and refuse on a mismatch. */
-#define STANLI_ABI_VERSION 2
+#define STANLI_ABI_VERSION 3
 int stanli_abi_version(void);
 
 /* 1 if this build embeds stanc3, else 0. */
@@ -176,6 +176,21 @@ int stanli_unconstrain_inits(stanli_model* m, const char* inits_json, double* q,
 
 int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad);
 
+/* The log density of stanli_grad, its gradient, and the n_unconstrained by
+ * n_unconstrained Hessian at unconstrained q[n]. The Hessian is symmetric, so
+ * row- and column-major agree. `grad` may be null.
+ *
+ * The Hessian is Stan Math's finite_diff_hessian_auto, the routine
+ * laplace_sample uses. It takes central differences of the gradient with a
+ * step chosen per coordinate, so it costs 1 + 2n gradient evaluations and its
+ * error is that of a finite difference.
+ *
+ * Returns 0 on success. Returns nonzero with a message in `err` on null
+ * arguments or when any evaluation is rejected (domain error); the outputs are
+ * then unspecified. */
+int stanli_hessian(stanli_model* m, const double* q, double* lp, double* grad,
+                   double* hessian, char* err, size_t err_len);
+
 /* ---- multi-chain sampling ------------------------------------------------
  *
  * Everything below packs draws CHAIN-MAJOR: draw i of chain c, column j
@@ -280,6 +295,13 @@ enum {
  * `stepsize`. With `adapt_engaged` zero no adaptation runs and the metric and
  * step size stay as given.
  *
+ * With `adapt_engaged` nonzero and `adapt_metric` zero, warmup adapts only the
+ * step size, by dual averaging as Stan does, and the inverse metric stays as
+ * supplied (the identity when `inv_metric` is null), so `adapted_inv_metric`
+ * equals the input bitwise. `adapt_metric` has no effect with
+ * STANLI_METRIC_UNIT, which never adapts a metric, or with `adapt_engaged`
+ * zero.
+ *
  * `adapted_step_size`, when non-null, receives one step size per chain and
  * `adapted_inv_metric`, when non-null, the metric each chain holds after
  * warmup in the layout of `inv_metric` (nothing for UNIT). Both are filled
@@ -289,11 +311,13 @@ typedef struct {
   const double* inv_metric;
   double step_size;
   int adapt_engaged;
+  int adapt_metric;
   double* adapted_step_size;
   double* adapted_inv_metric;
 } stanli_metric_opts;
 
-/* Fill with diag, identity, step size 1, adaptation engaged, no outputs. */
+/* Fill with diag, identity, step size 1, adaptation engaged for the step size
+ * and the metric, no outputs. */
 void stanli_metric_opts_init(stanli_metric_opts* o);
 
 /* Run opts->chains chains. draws holds

@@ -118,7 +118,9 @@ the sampler statistics attached.
 `inv_metric` sets the starting inverse metric: shape `(n,)` for `"diag_e"` or
 `(n, n)` for `"dense_e"`, shared by every chain, or one per chain. `step_size`
 sets the initial step size (default 1). `adapt_engaged=False` turns adaptation
-off, so the metric and step size stay as given.
+off, so the metric and step size stay as given. `adapt_metric=False` keeps
+adaptation on for the step size only and leaves `inv_metric` as supplied, for
+example a metric built from the Hessian at the mode.
 
 After sampling, `fit.metric`, `fit.step_size` and `fit.inv_metric` hold what
 each chain adapted. A pilot fit can start a later one:
@@ -212,13 +214,14 @@ model.n_unconstrained               # length of the unconstrained vector
 model.constrained_names             # ['mu', 'tau', 'theta[1]', ...]
 model.unconstrain({"mu": 0.5})      # constrained values -> unconstrained vector
 lp, grad = model.log_prob_grad(q)   # log density and gradient at q
+lp, grad, hess = model.log_prob_hessian(q)   # and the (n, n) Hessian at q
 
 fit = model.sample(chains=4, seed=1, warmup=1000, samples=1000, delta=0.8,
                    max_depth=10, thin=1, save_warmup=False, inits=None,
                    init_radius=2.0, pathfinder_init=None,
                    parallel_chains=None, refresh=100, threads_per_chain=1,
                    metric="diag_e", inv_metric=None, step_size=None,
-                   adapt_engaged=True)
+                   adapt_engaged=True, adapt_metric=True)
 fit["theta"]                        # (chains*draws, 8), declared shape
 fit["theta[1]"]                     # one column, chains concatenated
 fit["lp__"]                         # sampler columns by name too
