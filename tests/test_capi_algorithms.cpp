@@ -640,6 +640,94 @@ void test_variational(stanli_model* m) {
          rc == 0 && interrupted == 1 && asked == 1);
 }
 
+void test_hessian(stanli_model* gauss) {
+  char err[4096]{};
+  const int64_t n = 3;
+  // theta is multi_normal with S = [[1, .8], [.8, 1]], so its block is -S^-1
+  // wherever it is evaluated; log(tau) ~ normal(0, .5) after the Jacobian
+  // contributes -4. Every gradient component is linear in q.
+  const double d = 1.0 / (1.0 - 0.64);
+  const double want[9] = {-d, 0.8 * d, 0, 0.8 * d, -d, 0, 0, 0, -4.0};
+  const double points[2][3] = {{0.0, 0.0, 0.0}, {1.7, -2.3, 0.6}};
+  for (const auto& pt : points) {
+    double lp = 0, ref_lp = 0;
+    std::vector<double> grad(n, -1.0), ref_grad(n), hess(n * n, -1.0);
+    err[0] = '\0';
+    const int rc = stanli_hessian(gauss, pt, &lp, grad.data(), hess.data(), err,
+                                  sizeof err);
+    expect(std::string("hessian succeeds: ") + err, rc == 0);
+    expect(
+        "hessian log density matches stanli_grad",
+        stanli_grad(gauss, pt, &ref_lp, ref_grad.data()) == 0 && lp == ref_lp);
+    for (int64_t i = 0; i < n; ++i) {
+      expect_near("hessian gradient matches stanli_grad", grad[(size_t)i],
+                  ref_grad[(size_t)i], 0);
+      for (int64_t j = 0; j < n; ++j) {
+        expect_near("hessian equals -precision", hess[(size_t)(i * n + j)],
+                    want[i * n + j], 1e-8);
+        expect("hessian is exactly symmetric",
+               hess[(size_t)(i * n + j)] == hess[(size_t)(j * n + i)]);
+      }
+    }
+    std::vector<double> no_grad(n * n, -1.0);
+    expect("hessian accepts a null gradient",
+           stanli_hessian(gauss, pt, &lp, nullptr, no_grad.data(), err,
+                          sizeof err) == 0 &&
+               no_grad == hess);
+  }
+  const double q[3] = {0, 0, 0};
+  double lp = 0;
+  std::vector<double> hess(n * n);
+  err[0] = '\0';
+  expect("hessian rejects a null point",
+         stanli_hessian(gauss, nullptr, &lp, nullptr, hess.data(), err,
+                        sizeof err) != 0 &&
+             err[0] != '\0');
+  err[0] = '\0';
+  expect(
+      "hessian rejects a null output",
+      stanli_hessian(gauss, q, &lp, nullptr, nullptr, err, sizeof err) != 0 &&
+          err[0] != '\0');
+
+  const std::string mir = slurp("tests/fixtures/trunc_param.tmir.sexp");
+  stanli_model* tp =
+      stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err);
+  expect("trunc_param loads", tp != nullptr);
+  if (tp == nullptr) return;
+  // Nonlinear in both coordinates and coupled through the constrained scale.
+  const double tq[2] = {0.4, -0.3};
+  double tlp = 0;
+  std::vector<double> tgrad(2), thess(4, -1.0);
+  err[0] = '\0';
+  expect(std::string("trunc_param hessian: ") + err,
+         stanli_hessian(tp, tq, &tlp, tgrad.data(), thess.data(), err,
+                        sizeof err) == 0);
+  const double h = 1e-4;
+  for (int j = 0; j < 2; ++j) {
+    double up[2] = {tq[0], tq[1]}, dn[2] = {tq[0], tq[1]};
+    up[j] += h;
+    dn[j] -= h;
+    double l = 0, gu[2], gd[2];
+    expect(
+        "central difference points evaluate",
+        stanli_grad(tp, up, &l, gu) == 0 && stanli_grad(tp, dn, &l, gd) == 0);
+    for (int i = 0; i < 2; ++i)
+      expect_near("hessian matches central differences of stanli_grad",
+                  thess[(size_t)(i * 2 + j)], (gu[i] - gd[i]) / (2 * h), 1e-6);
+  }
+  expect("coupling is nonzero", std::fabs(thess[1]) > 1e-3);
+  expect("trunc_param hessian is exactly symmetric", thess[1] == thess[2]);
+
+  const double bad[2] = {0.0, -800.0};
+  err[0] = '\0';
+  const int rc =
+      stanli_hessian(tp, bad, &tlp, nullptr, thess.data(), err, sizeof err);
+  expect("hessian reports a rejected evaluation", rc != 0 && err[0] != '\0');
+  expect("the model still evaluates after a rejection",
+         stanli_grad(tp, tq, &tlp, tgrad.data()) == 0);
+  stanli_model_free(tp);
+}
+
 }  // namespace
 
 void test_optimize_rejected_mode() {
@@ -668,6 +756,7 @@ int main() {
     test_laplace(m);
     test_pathfinder(m);
     test_variational(m);
+    test_hessian(m);
     // The algorithms borrow the model's executor; it must still sample.
     std::vector<double> draws(200 * 3);
     char err[4096]{};

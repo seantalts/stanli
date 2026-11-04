@@ -1781,7 +1781,7 @@ void expect_metric_options() {
   expect_true("metric defaults",
               dm.metric == STANLI_METRIC_DIAG && dm.inv_metric == nullptr &&
                   dm.step_size == 1.0 && dm.adapt_engaged == 1 &&
-                  dm.adapted_step_size == nullptr &&
+                  dm.adapt_metric == 1 && dm.adapted_step_size == nullptr &&
                   dm.adapted_inv_metric == nullptr);
 
   std::vector<double> want_draws(n_draws), want_stats(n_stats);
@@ -1870,6 +1870,85 @@ void expect_metric_options() {
           stats[(size_t)((c * rows + i) * STANLI_N_SAMPLER_COLS + 2)] == 0.25;
   }
   expect_true("adapt off keeps the supplied step size throughout", constant);
+
+  {
+    std::vector<double> kept_step(opts.chains, -1.0),
+        kept((size_t)(opts.chains * n * n), -1.0);
+    stanli_metric_opts step_only = dense;
+    step_only.adapt_metric = 0;
+    step_only.adapted_step_size = kept_step.data();
+    step_only.adapted_inv_metric = kept.data();
+    err[0] = '\0';
+    rc = stanli_sample_multi_metric(
+        model, &opts, &step_only, 0, draws.data(), stats.data(), nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+    expect_true(std::string("dense step-size-only adaptation: ") + err,
+                rc == 0);
+    expect_true("step-size-only keeps a dense inverse metric bitwise",
+                kept == inv);
+    bool moved = true;
+    for (int64_t c = 0; c < opts.chains; ++c)
+      moved = moved && kept_step[(size_t)c] != dense.step_size &&
+              kept_step[(size_t)c] > 0 && std::isfinite(kept_step[(size_t)c]);
+    expect_true("step-size-only still adapts the step size", moved);
+    bool constant_after = true;
+    for (int64_t c = 0; c < opts.chains; ++c)
+      for (int64_t i = 0; i < rows; ++i)
+        constant_after =
+            constant_after &&
+            stats[(size_t)((c * rows + i) * STANLI_N_SAMPLER_COLS + 2)] ==
+                kept_step[(size_t)c];
+    expect_true("step-size-only samples at the adapted step size",
+                constant_after);
+
+    std::vector<double> diag_inv((size_t)(opts.chains * n));
+    for (size_t i = 0; i < diag_inv.size(); ++i) diag_inv[i] = 0.5 + 0.25 * i;
+    std::vector<double> diag_kept(diag_inv.size(), -1.0);
+    stanli_metric_opts diag_step_only = dm;
+    diag_step_only.adapt_metric = 0;
+    diag_step_only.inv_metric = diag_inv.data();
+    diag_step_only.adapted_step_size = kept_step.data();
+    diag_step_only.adapted_inv_metric = diag_kept.data();
+    rc = stanli_sample_multi_metric(
+        model, &opts, &diag_step_only, 0, draws.data(), stats.data(), nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+    expect_true("diag step-size-only keeps a supplied diagonal bitwise",
+                rc == 0 && diag_kept == diag_inv);
+
+    std::fill(diag_kept.begin(), diag_kept.end(), -1.0);
+    diag_step_only.inv_metric = nullptr;
+    rc = stanli_sample_multi_metric(
+        model, &opts, &diag_step_only, 0, draws.data(), stats.data(), nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+    expect_true("diag step-size-only with no metric keeps the identity",
+                rc == 0 && std::all_of(diag_kept.begin(), diag_kept.end(),
+                                       [](double x) { return x == 1.0; }));
+
+    std::vector<double> a_draws(n_draws), b_draws(n_draws), a_stats(n_stats),
+        b_stats(n_stats);
+    const auto same_draws = [&](const stanli_metric_opts& a,
+                                const stanli_metric_opts& b) {
+      const int ra = stanli_sample_multi_metric(
+          model, &opts, &a, 0, a_draws.data(), a_stats.data(), nullptr, nullptr,
+          nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+      const int rb = stanli_sample_multi_metric(
+          model, &opts, &b, 0, b_draws.data(), b_stats.data(), nullptr, nullptr,
+          nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+      return ra == 0 && rb == 0 && a_draws == b_draws && a_stats == b_stats;
+    };
+    stanli_metric_opts unit_off = unit;
+    unit_off.adapted_inv_metric = nullptr;
+    stanli_metric_opts unit_on = unit_off;
+    unit_off.adapt_metric = 0;
+    expect_true("adapt_metric is a no-op with the unit metric",
+                same_draws(unit_off, unit_on));
+    stanli_metric_opts fixed_off = fixed;
+    fixed_off.adapted_step_size = nullptr;
+    stanli_metric_opts fixed_on = fixed_off;
+    fixed_off.adapt_metric = 0;
+    expect_true("adapt_metric is a no-op without adaptation",
+                same_draws(fixed_off, fixed_on));
+  }
 
   std::vector<double> bad = inv;
   bad[0] = -1.0;
