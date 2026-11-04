@@ -178,13 +178,16 @@ int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad);
 
 /* The log density of stanli_grad, its gradient, and the n_unconstrained by
  * n_unconstrained Hessian at unconstrained q[n]. The Hessian is symmetric, so
- * row- and column-major agree. `grad` may be null. The Hessian is Stan Math's
- * finite_diff_hessian_auto, which laplace_sample uses: central differences of
- * the gradient with a step chosen per coordinate, so it costs 1 + 2n gradient
- * evaluations and is accurate to finite-difference error, not to rounding.
+ * row- and column-major agree. `grad` may be null.
+ *
+ * The Hessian is Stan Math's finite_diff_hessian_auto, the routine
+ * laplace_sample uses. It takes central differences of the gradient with a
+ * step chosen per coordinate, so it costs 1 + 2n gradient evaluations and its
+ * error is that of a finite difference.
+ *
  * Returns 0 on success. Returns nonzero with a message in `err` on null
- * arguments or when any of the evaluations is rejected (domain error); the
- * outputs are then unspecified. */
+ * arguments or when any evaluation is rejected (domain error); the outputs are
+ * then unspecified. */
 int stanli_hessian(stanli_model* m, const double* q, double* lp, double* grad,
                    double* hessian, char* err, size_t err_len);
 
