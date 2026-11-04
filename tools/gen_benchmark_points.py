@@ -54,6 +54,7 @@ class _SampleOpts(ctypes.Structure):
 class _MetricOpts(ctypes.Structure):
     _fields_ = [("metric", ctypes.c_int), ("inv_metric", ctypes.POINTER(ctypes.c_double)),
                 ("step_size", ctypes.c_double), ("adapt_engaged", ctypes.c_int),
+                ("adapt_metric", ctypes.c_int),
                 ("adapted_step_size", ctypes.POINTER(ctypes.c_double)),
                 ("adapted_inv_metric", ctypes.POINTER(ctypes.c_double))]
 

@@ -1674,6 +1674,7 @@ def test_metric_opts_defaults_match_the_header():
     stanli._lib.stanli_metric_opts_init(ctypes.byref(o))
     assert o.metric == 1 and not o.inv_metric
     assert o.step_size == 1.0 and o.adapt_engaged == 1
+    assert o.adapt_metric == 1
     assert not o.adapted_step_size and not o.adapted_inv_metric
 
 
@@ -1783,6 +1784,87 @@ def test_invalid_metric_values_raise_stans_message_before_sampling():
         assert "chains failed" not in str(e), str(e)
     else:
         raise AssertionError("negative diag inv_metric accepted")
+
+
+def test_adapt_metric_false_keeps_the_supplied_dense_metric():
+    m = _metric_model()
+    start = np.array([[2.0, 0.5, 0.0], [0.5, 3.0, 0.2], [0.0, 0.2, 1.5]])
+    fit = _metric_fit(m, metric="dense_e", inv_metric=start, adapt_metric=False,
+                      warmup=300)
+    for got in fit.inv_metric:
+        np.testing.assert_array_equal(got, start)
+    assert np.all(fit.step_size > 0) and np.all(fit.step_size != 1.0)
+    assert np.all(fit.sampler_stats[:, :, 2] == fit.step_size[:, None])
+    adapted = _metric_fit(m, metric="dense_e", inv_metric=start, warmup=300)
+    assert not np.array_equal(adapted.inv_metric[0], start)
+
+
+def test_adapt_metric_false_keeps_the_diag_metric_and_the_identity():
+    m = _metric_model()
+    start = np.array([1.0, 4.0, 9.0])
+    fit = _metric_fit(m, inv_metric=start, adapt_metric=False)
+    for got in fit.inv_metric:
+        np.testing.assert_array_equal(got, start)
+    fit = _metric_fit(m, adapt_metric=False)
+    for got in fit.inv_metric:
+        np.testing.assert_array_equal(got, np.ones(3))
+
+
+def test_adapt_metric_is_a_no_op_without_metric_adaptation():
+    m = _metric_model()
+    for kw in (dict(metric="unit_e"), dict(adapt_engaged=False, step_size=0.5)):
+        a = _metric_fit(m, **kw)
+        b = _metric_fit(m, adapt_metric=False, **kw)
+        np.testing.assert_array_equal(a.draws(), b.draws())
+        np.testing.assert_array_equal(a.sampler_stats, b.sampler_stats)
+
+
+def test_adapt_metric_must_be_a_bool():
+    for bad in (0, 1, None, "no", 1.0):
+        _expect(TypeError, "adapt_metric must be a bool", adapt_metric=bad)
+
+
+MVN_SOURCE = """
+parameters { vector[2] x; real<lower=0> s; }
+model {
+  x ~ multi_normal([1, -2]', [[1, 0.8], [0.8, 1]]);
+  s ~ lognormal(0, 0.5);
+}
+"""
+
+
+def test_log_prob_hessian_is_minus_the_precision():
+    m = stanli.Model(stan_code=MVN_SOURCE)
+    precision = np.linalg.inv(np.array([[1.0, 0.8], [0.8, 1.0]]))
+    want = np.zeros((3, 3))
+    want[:2, :2] = -precision
+    want[2, 2] = -4.0
+    for q in ([0.0, 0.0, 0.0], [1.7, -2.3, 0.6]):
+        lp, grad, hess = m.log_prob_hessian(q)
+        lp0, grad0 = m.log_prob_grad(q)
+        assert lp == lp0
+        np.testing.assert_allclose(grad, grad0, rtol=0, atol=0)
+        assert hess.shape == (3, 3)
+        np.testing.assert_allclose(hess, want, rtol=0, atol=1e-8)
+        np.testing.assert_array_equal(hess, hess.T)
+
+
+def test_log_prob_hessian_rejects_bad_points():
+    m = stanli.Model(stan_code=MVN_SOURCE)
+    try:
+        m.log_prob_hessian([0.0, 0.0])
+    except ValueError as e:
+        assert "unconstrained" in str(e), str(e)
+    else:
+        raise AssertionError("wrong-length q accepted")
+    bad = stanli.Model(stan_code="parameters { real<lower=0> s; real t; } "
+                       "model { t ~ normal(0, s); s ~ lognormal(0, 1); }")
+    try:
+        bad.log_prob_hessian([-800.0, 0.0])
+    except RuntimeError as e:
+        assert "Hessian" in str(e), str(e)
+    else:
+        raise AssertionError("domain error not raised")
 
 
 def _bad_sample_argument(exc, text, **kw):
