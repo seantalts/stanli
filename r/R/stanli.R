@@ -267,6 +267,22 @@ log_prob_grad <- function(model, q) {
   .Call("stanli_r_grad", model$ptr, as.double(q))
 }
 
+#' Log density, gradient and Hessian
+#'
+#' The density and gradient of [log_prob_grad()] plus the Hessian at `q`. The
+#' Hessian is Stan's finite-difference Hessian of the gradient, the routine
+#' behind its Laplace approximation, so it costs `1 + 2n` gradient evaluations
+#' for `n` unconstrained parameters and carries finite-difference error.
+#'
+#' @param model A `stanli_model`.
+#' @param q A point on the unconstrained scale.
+#' @return A list with `lp`, `grad` and `hessian`, an `n` x `n` symmetric
+#'   matrix.
+#' @export
+log_prob_hessian <- function(model, q) {
+  .Call("stanli_r_hessian", model$ptr, as.double(q))
+}
+
 #' Names of a model's parameters
 #'
 #' The variables declared in the `parameters` block, in declaration order.
@@ -467,6 +483,10 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
 #'   adaptive sampler does, so the step size in use differs from `step_size`.
 #'   To use a supplied step size exactly, set `adapt_engaged = FALSE`, as with
 #'   CmdStanR.
+#' @param adapt_metric `TRUE` (the default) adapts the metric during warmup
+#'   when `adapt_engaged` is `TRUE`. `FALSE` adapts only the step size and
+#'   keeps `inv_metric` (the identity when `NULL`) as given. It has no effect
+#'   with `metric = "unit_e"` or `adapt_engaged = FALSE`.
 #' @details Interrupting R (Ctrl-C, or the stop button in RStudio) stops
 #'   every chain after its current transition and raises the usual
 #'   interrupt; no fit is returned.
@@ -493,7 +513,8 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                          threads_per_chain = 1, fixed_param = FALSE,
                          metric = c("diag_e", "dense_e", "unit_e"),
                          inv_metric = NULL, step_size = NULL,
-                         adapt_engaged = TRUE, chain_id = 1L) {
+                         adapt_engaged = TRUE, adapt_metric = TRUE,
+                         chain_id = 1L) {
   cstan_integer(threads_per_chain, "threads_per_chain")
   cstan_integer(seed, "seed", 0)
   check_chain_id(chain_id, chains)
@@ -510,11 +531,12 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
   stanfit_flag(fixed_param, "fixed_param")
   metric <- match.arg(metric)
   stanfit_flag(adapt_engaged, "adapt_engaged")
+  stanfit_flag(adapt_metric, "adapt_metric")
   check_step_size(step_size)
   if (fixed_param && (metric != "diag_e" || !is.null(inv_metric) ||
-                      !is.null(step_size) || !adapt_engaged))
-    stop("metric, inv_metric, step_size and adapt_engaged do not apply with ",
-         "fixed_param = TRUE", call. = FALSE)
+                      !is.null(step_size) || !adapt_engaged || !adapt_metric))
+    stop("metric, inv_metric, step_size, adapt_engaged and adapt_metric do ",
+         "not apply with fixed_param = TRUE", call. = FALSE)
   if (fixed_param && !is.null(pathfinder_init))
     stop("pathfinder_init does not apply with fixed_param = TRUE",
          call. = FALSE)
@@ -554,7 +576,8 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
     init_vec <- as.double(t(m))
   }
   metric_opts <- metric_options(metric, inv_metric, step_size, adapt_engaged,
-                                as.integer(chains), model$n_unconstrained)
+                                adapt_metric, as.integer(chains),
+                                model$n_unconstrained)
   res <- .Call("stanli_r_sample", model$ptr, opts, init_vec, refresh,
                metric_opts)
   if (isTRUE(res$interrupted)) {
@@ -595,7 +618,8 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                  initial_step_size = if (is.null(step_size)) 1 else as.double(step_size),
                  inv_metric = split_inv_metric(res$inv_metric, metric, nchain,
                                                model$n_unconstrained),
-                 adapt_engaged = adapt_engaged, chain_id = chain_id),
+                 adapt_engaged = adapt_engaged, adapt_metric = adapt_metric,
+                 chain_id = chain_id),
             class = "stanli_fit")
 }
 
@@ -657,7 +681,7 @@ check_inv_metric <- function(x, metric, n) {
 }
 
 metric_options <- function(metric, inv_metric, step_size, adapt_engaged,
-                           chains, n) {
+                           adapt_metric, chains, n) {
   flat <- numeric(0)
   if (!is.null(inv_metric)) {
     if (metric == "unit_e")
@@ -675,7 +699,7 @@ metric_options <- function(metric, inv_metric, step_size, adapt_engaged,
   }
   list(unname(metric_kinds[metric]), flat,
        if (is.null(step_size)) 1 else as.double(step_size),
-       isTRUE(adapt_engaged))
+       isTRUE(adapt_engaged), isTRUE(adapt_metric))
 }
 
 split_inv_metric <- function(flat, metric, chains, n) {

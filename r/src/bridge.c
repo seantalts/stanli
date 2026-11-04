@@ -60,7 +60,7 @@ static const char* dl_error(void) {
  * runtime reports its own through stanli_abi_version(), and
  * stanli_bridge_load() refuses to bind when the two disagree -- see
  * there for why a mismatch cannot be allowed to proceed. */
-#define STANLI_R_ABI_VERSION 2
+#define STANLI_R_ABI_VERSION 3
 
 /* Mirrors stanli_sample_opts in runtime/include/stanli/capi.h. Field
  * order and types must match exactly; R never sees this struct, but a
@@ -94,6 +94,7 @@ typedef struct {
   const double* inv_metric;
   double step_size;
   int adapt_engaged;
+  int adapt_metric;
   double* adapted_step_size;
   double* adapted_inv_metric;
 } stanli_metric_opts;
@@ -217,6 +218,8 @@ static int (*p_thread_safe)(void);
 static const char* (*p_build_id)(void);
 static int64_t (*p_n_unconstrained)(const void*);
 static int (*p_grad)(void*, const double*, double*, double*);
+static int (*p_hessian)(void*, const double*, double*, double*, double*, char*,
+                        size_t);
 static int (*p_unconstrain_inits)(void*, const char*, double*, char*, size_t);
 static int64_t (*p_n_constrained)(const void*);
 static const char* (*p_constrained_name)(const void*, int64_t);
@@ -323,6 +326,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND_OPTIONAL("stanli_build_id", p_build_id);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
   BIND("stanli_grad", p_grad);
+  BIND("stanli_hessian", p_hessian);
   BIND("stanli_unconstrain_inits", p_unconstrain_inits);
   BIND("stanli_n_constrained", p_n_constrained);
   BIND("stanli_constrained_name", p_constrained_name);
@@ -645,6 +649,38 @@ SEXP stanli_r_grad(SEXP m, SEXP q) {
   return out;
 }
 
+SEXP stanli_r_hessian(SEXP m, SEXP q) {
+  require_loaded();
+  void* mm = model_ptr(m);
+  const int64_t n = p_n_unconstrained(mm);
+  if (TYPEOF(q) != REALSXP || XLENGTH(q) != n)
+    error("q has %lld elements, model has %lld unconstrained parameters",
+          (long long)XLENGTH(q), (long long)n);
+  SEXP grad = PROTECT(allocVector(REALSXP, (R_xlen_t)n));
+  SEXP hess = PROTECT(allocMatrix(REALSXP, (int)n, (int)n));
+  double lp = 0;
+  char err[4096];
+  err[0] = '\0';
+  const int rc =
+      p_hessian(mm, REAL(q), &lp, REAL(grad), REAL(hess), err, sizeof err);
+  flush_messages();
+  if (rc != 0) {
+    UNPROTECT(2);
+    error("Hessian evaluation failed at this point: %s", err);
+  }
+  SEXP out = PROTECT(allocVector(VECSXP, 3));
+  SET_VECTOR_ELT(out, 0, ScalarReal(lp));
+  SET_VECTOR_ELT(out, 1, grad);
+  SET_VECTOR_ELT(out, 2, hess);
+  SEXP nm = PROTECT(allocVector(STRSXP, 3));
+  SET_STRING_ELT(nm, 0, mkChar("lp"));
+  SET_STRING_ELT(nm, 1, mkChar("grad"));
+  SET_STRING_ELT(nm, 2, mkChar("hessian"));
+  setAttrib(out, R_NamesSymbol, nm);
+  UNPROTECT(4);
+  return out;
+}
+
 /* opts arrives from R as an unnamed positional list, so this order must
  * match sample_model() in R/stanli.R element for element. A swap of two
  * same-typed fields samples from the wrong configuration in silence. */
@@ -791,6 +827,7 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   mo.inv_metric = XLENGTH(inv_metric_in) > 0 ? REAL(inv_metric_in) : NULL;
   mo.step_size = asReal(VECTOR_ELT(metric_list, 2));
   mo.adapt_engaged = asLogical(VECTOR_ELT(metric_list, 3));
+  mo.adapt_metric = asLogical(VECTOR_ELT(metric_list, 4));
   const int64_t metric_len = mo.metric == 0 ? 0 : mo.metric == 2 ? n * n : n;
   if (XLENGTH(inv_metric_in) > 0 &&
       (int64_t)XLENGTH(inv_metric_in) != nchain * metric_len) {

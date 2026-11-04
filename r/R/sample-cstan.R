@@ -25,11 +25,11 @@
 #' @param refresh Progress interval; zero suppresses progress.
 #' @param init_radius Radius for random initialization on the unconstrained scale.
 #' @param pathfinder_init Optional Pathfinder settings passed to [sample_model()].
-#' @param metric,inv_metric,step_size,adapt_engaged Metric kind
+#' @param metric,inv_metric,step_size,adapt_engaged,adapt_metric Metric kind
 #'   (`"diag_e"`, `"dense_e"` or `"unit_e"`), starting inverse metric, initial
-#'   step size and whether adaptation is engaged, passed to [sample_model()],
-#'   which describes them. `inv_metric` may be one vector or matrix, or a list
-#'   with one per chain.
+#'   step size, whether adaptation is engaged and whether it adapts the metric,
+#'   passed to [sample_model()], which describes them. `inv_metric` may be one
+#'   vector or matrix, or a list with one per chain.
 #' @param include_paths Directories searched for Stan `#include` files; see
 #'   [stanli_model()].
 #' @param ... Reserved. Unsupported options produce an error.
@@ -47,7 +47,7 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
                          threads_per_chain = 1, include_paths = NULL,
                          metric = c("diag_e", "dense_e", "unit_e"),
                          inv_metric = NULL, step_size = NULL,
-                         adapt_engaged = TRUE, ...) {
+                         adapt_engaged = TRUE, adapt_metric = TRUE, ...) {
   if (length(list(...))) stop("unsupported sample_cstan arguments: ",
                              paste(names(list(...)), collapse = ", "), call. = FALSE)
   for (name in c("chains", "parallel_chains", "threads_per_chain", "iter_sampling", "max_treedepth", "thin"))
@@ -96,5 +96,5 @@ sample_cstan <- function(model_code, data = list(), chains = 4, parallel_chains 
     refresh = refresh, init_radius = init_radius, pathfinder_init = pathfinder_init,
     threads_per_chain = threads_per_chain, metric = metric,
     inv_metric = inv_metric, step_size = step_size,
-    adapt_engaged = adapt_engaged))
+    adapt_engaged = adapt_engaged, adapt_metric = adapt_metric))
 }

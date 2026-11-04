@@ -85,8 +85,10 @@ support. `init_radius = 0` starts at the origin.
 `inv_metric` sets the starting inverse metric: a vector for `"diag_e"`, a
 matrix for `"dense_e"`, or a list with one per chain. `step_size` sets the
 initial step size (default 1). `adapt_engaged = FALSE` turns adaptation off,
-so the metric and step size stay as given. After sampling, `fit$metric`,
-`fit$step_size` and `fit$inv_metric` hold what each chain adapted:
+so the metric and step size stay as given. `adapt_metric = FALSE` keeps
+adaptation on for the step size only and leaves `inv_metric` as supplied.
+After sampling, `fit$metric`, `fit$step_size` and `fit$inv_metric` hold what
+each chain adapted:
 
 ```r
 pilot <- sample_model(m, seed = 1, metric = "dense_e")
@@ -326,6 +328,7 @@ m <- stanli_model(file = NULL, code = NULL, data = NULL, mir = NULL, seed = 1,
                   threads_per_chain = 1, include_paths = NULL, fast_math = FALSE)
 stanli_check_syntax(code)
 log_prob_grad(m, q)                 # log density and gradient
+log_prob_hessian(m, q)              # and the Hessian at q
 unconstrain(m, values)              # constrained list -> unconstrained vector
 
 fit <- sample_model(m, chains = 4, seed = 1, warmup = 1000, samples = 1000,
@@ -334,7 +337,7 @@ fit <- sample_model(m, chains = 4, seed = 1, warmup = 1000, samples = 1000,
                     parallel_chains = NULL, refresh = 100,
                     threads_per_chain = 1, fixed_param = FALSE,
                     metric = "diag_e", inv_metric = NULL, step_size = NULL,
-                    adapt_engaged = TRUE)
+                    adapt_engaged = TRUE, adapt_metric = TRUE)
 optimize_model(m, seed = 1, iter = 2000, init = NULL, init_radius = 2)
 variational_model(m, algorithm = "meanfield", iter = 10000, draws = 1000, ...)
 pathfinder_model(m, draws = 1000, ...)
