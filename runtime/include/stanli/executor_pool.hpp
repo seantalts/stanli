@@ -3,28 +3,29 @@
 //
 // An Executor cannot be shared between threads: it owns the value and
 // adjoint arenas a sweep writes through, so two concurrent sweeps on one
-// executor produce wrong numbers rather than a crash. A sampler running
-// chains concurrently over ONE model handle still has to evaluate the
-// same graph from several threads, so each caller borrows its own clone
-// for the length of one evaluation and gives it back.
+// executor produce wrong numbers rather than a crash. Each caller borrows
+// its own clone for the length of one evaluation.
 //
-// The lease is scoped, not thread-owned. A thread_local executor would
-// pin a clone for the life of every thread that ever touched the model
-// and raise the question of what happens when the model outlives, or is
-// outlived by, the threads holding its clones. Scoping it to the call
-// answers both: the pool holds every clone, and a clone is either in the
-// free list or in exactly one lease.
+// The pool owns every clone as an entry with a busy flag. A thread
+// remembers the entry it used last in a few thread_local slots and takes it
+// back with one atomic exchange, so a steady-state lease touches no memory
+// another thread writes. Only a miss, or a nested lease, takes the mutex.
 //
-// The mutex is held only to move a pointer on and off the free list,
-// never across an evaluation. That is uncontended next to a gradient on
-// any model worth sampling; if a fast enough model ever proves otherwise
-// the free list can go lock-free without changing this interface.
+// Constraints on the thread_local state:
+//  - It holds raw values only. Nothing with a destructor lives in TLS: under
+//    MinGW's emulated TLS such destructors run after the DLL that owns them
+//    may be gone, which crashed R worker processes at exit on Windows.
+//  - Slots are matched by a per-pool generation from a process-wide counter,
+//    since a new pool is often built at the address of a dead one.
+//  - When a thread exits its entry stays in the pool, idle. A thread with no
+//    cached entry scans for an idle one before cloning.
 #ifndef STANLI_EXECUTOR_POOL_HPP
 #define STANLI_EXECUTOR_POOL_HPP
 
 #include <stanli/graph.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -32,12 +33,14 @@
 namespace stanli {
 
 class ExecutorPool {
-  struct Tape;
+  struct Entry;
+  struct Slot;
+  struct Tls;
 
  public:
   // The prototype is cloned on demand and must outlive the pool. It is
   // never handed out itself, so the caller keeps using it if it wants.
-  // Both out of line: the pooled tapes are an incomplete type here.
+  // Both out of line: entries are an incomplete type here.
   explicit ExecutorPool(const Executor& proto);
   ~ExecutorPool();
 
@@ -46,7 +49,6 @@ class ExecutorPool {
 
   class Lease {
    public:
-    Lease(ExecutorPool& pool, std::unique_ptr<Executor> ex);
     ~Lease();
     Lease(Lease&& o) noexcept;
     Lease& operator=(Lease&&) = delete;
@@ -54,41 +56,43 @@ class ExecutorPool {
     Lease& operator=(const Lease&) = delete;
 
     Executor& operator*() const { return *ex_; }
-    Executor* operator->() const { return ex_.get(); }
+    Executor* operator->() const { return ex_; }
 
    private:
-    ExecutorPool* pool_;
-    std::unique_ptr<Executor> ex_;
-    Tape* tape_;
+    friend class ExecutorPool;
+    Lease(Executor* ex, Entry* entry, Slot* slot, bool counted)
+        : ex_(ex), entry_(entry), slot_(slot), counted_(counted) {}
+
+    Executor* ex_;
+    Entry* entry_;
+    Slot* slot_;
+    bool counted_;
   };
 
   // An executor for the duration of one evaluation. Also makes sure the
   // calling thread has an autodiff stack, which stan-math requires of
   // every thread that builds a nested tape and does not create by itself:
-  // a thread without one borrows a pooled tape for as long as it holds any
-  // lease, and must release every lease on the thread that acquired it.
+  // a thread without one gets a pool-owned stack for as long as it holds
+  // any lease, and must release every lease on the thread that acquired it.
+  // That stack belongs to the entry that installed it, so a pool must not be
+  // destroyed while a lease of another pool still shares its stack.
   Lease acquire();
 
-  // Clones currently in the free list, for tests and diagnostics.
+  uint64_t generation() const { return gen_; }
+
+  // Executors the pool owns, leased or idle.
   size_t size() const {
     std::lock_guard<std::mutex> lock(mu_);
-    return free_.size();
+    return entries_.size();
   }
 
  private:
-  void give_back(std::unique_ptr<Executor> ex) {
-    std::lock_guard<std::mutex> lock(mu_);
-    free_.push_back(std::move(ex));
-  }
+  static Tls& tls();
+  Entry* acquire_slow();
 
-  Tape* take_tape();
-  void give_back_tape(Tape* tape);
-
+  const uint64_t gen_;
   mutable std::mutex mu_;
-  std::vector<std::unique_ptr<Executor>> free_;
-  // Autodiff stacks for threads that arrive without one, pooled like the
-  // executors so a lease never allocates one after a thread's first.
-  std::vector<std::unique_ptr<Tape>> free_tapes_;
+  std::vector<std::unique_ptr<Entry>> entries_;
   const Executor* proto_;
 };
 
