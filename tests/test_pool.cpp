@@ -16,7 +16,9 @@
 #include <stan/math/rev/core/chainable_alloc.hpp>
 #include <stan/math/rev/core/chainablestack.hpp>
 
+#include <atomic>
 #include <cstdio>
+#include <new>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -135,25 +137,152 @@ int main() {
 
   // The pool reuses what it is given back rather than cloning per call:
   // eight threads that have all finished leave at most eight clones, and
-  // a ninth sequential pass allocates none of them again.
+  // another pass on this thread allocates none.
   const size_t after_threads = pool.size();
-  {
+  for (int k = 0; k < 3; ++k) {
     auto lease = pool.acquire();
-    if (pool.size() != after_threads - 1) {
-      ++failures;
-      std::printf("FAIL acquire did not take from the free list (%zu -> %zu)\n",
-                  after_threads, pool.size());
-    }
   }
   if (pool.size() != after_threads) {
     ++failures;
-    std::printf("FAIL the lease did not return its executor (%zu -> %zu)\n",
-                after_threads, pool.size());
+    std::printf("FAIL sequential leases cloned (%zu -> %zu)\n", after_threads,
+                pool.size());
   }
   if (after_threads > (size_t)kThreads) {
     ++failures;
     std::printf("FAIL pool grew past the number of concurrent callers: %zu\n",
                 after_threads);
+  }
+
+  // Overlapping leases on one thread are different executors, and the
+  // second pass finds both again.
+  {
+    ExecutorPool nested(proto);
+    for (int pass = 0; pass < 3; ++pass) {
+      auto a = nested.acquire();
+      auto b = nested.acquire();
+      auto c = nested.acquire();
+      if (&*a == &*b || &*b == &*c || &*a == &*c) {
+        ++failures;
+        std::printf("FAIL nested leases share an executor\n");
+      }
+      if (nested.size() != 3) {
+        ++failures;
+        std::printf("FAIL pass %d: %zu executors for 3 nested leases\n", pass,
+                    nested.size());
+      }
+    }
+  }
+
+  // A thread that exits leaves its executor for the next caller instead of
+  // pinning it.
+  {
+    ExecutorPool churn(proto);
+    for (int i = 0; i < 24; ++i) {
+      std::thread([&] { auto lease = churn.acquire(); }).join();
+    }
+    if (churn.size() != 1) {
+      ++failures;
+      std::printf("FAIL 24 short-lived threads left %zu executors\n",
+                  churn.size());
+    }
+  }
+
+  // A pool constructed where a dead one stood must not inherit its entry
+  // from this thread's cache.
+  {
+    alignas(ExecutorPool) unsigned char buf[sizeof(ExecutorPool)];
+    uint64_t prev_gen = 0;
+    for (int round = 0; round < 4; ++round) {
+      auto* p = new (buf) ExecutorPool(proto);
+      if (p->generation() == prev_gen) {
+        ++failures;
+        std::printf("FAIL round %d: generation reused\n", round);
+      }
+      prev_gen = p->generation();
+      if (p->size() != 0) {
+        ++failures;
+        std::printf("FAIL round %d: new pool starts with %zu executors\n",
+                    round, p->size());
+      }
+      {
+        auto lease = p->acquire();
+        for (int64_t i = 0; i < n; ++i) lease->params_data()[i] = point(i, 3);
+        std::vector<double> g((size_t)n);
+        if (lease->gradient(g.data()) != want_lp[3] || g != want_g[3]) {
+          ++failures;
+          std::printf("FAIL round %d: wrong answer from a recycled address\n",
+                      round);
+        }
+      }
+      if (p->size() != 1) {
+        ++failures;
+        std::printf("FAIL round %d: %zu executors after one lease\n", round,
+                    p->size());
+      }
+      p->~ExecutorPool();
+    }
+  }
+
+  // A thread with no autodiff stack has one only while it holds a lease,
+  // across two pools and leases released in either order.
+  for (int order = 0; order < 2; ++order) {
+    ExecutorPool other(proto);
+    int good = 0;
+    std::thread([&] {
+      using stan::math::ChainableStack;
+      bool ok = ChainableStack::instance_ == nullptr;
+      auto a = std::make_unique<ExecutorPool::Lease>(pool.acquire());
+      auto* stack = ChainableStack::instance_;
+      ok &= stack != nullptr;
+      auto b = std::make_unique<ExecutorPool::Lease>(other.acquire());
+      auto c = std::make_unique<ExecutorPool::Lease>(pool.acquire());
+      ok &= ChainableStack::instance_ == stack;
+      std::unique_ptr<ExecutorPool::Lease>* seq[3] = {&a, &b, &c};
+      if (order == 1) std::swap(seq[0], seq[2]);
+      seq[0]->reset();
+      seq[1]->reset();
+      ok &= ChainableStack::instance_ == stack;
+      seq[2]->reset();
+      ok &= ChainableStack::instance_ == nullptr;
+      good = ok;
+    }).join();
+    if (!good) {
+      ++failures;
+      std::printf("FAIL order %d: stackless thread's stack not scoped\n",
+                  order);
+    }
+  }
+
+  // Many threads, leases on two pools at once, every answer checked.
+  {
+    ExecutorPool p2(proto);
+    std::atomic<int> bad{0};
+    std::vector<std::thread> workers;
+    for (int t = 0; t < 16; ++t) {
+      workers.emplace_back([&, t] {
+        std::vector<double> g((size_t)n), g2((size_t)n);
+        for (int it = 0; it < 400; ++it) {
+          const int k = (it * 7 + t) % kIters;
+          auto a = pool.acquire();
+          for (int64_t i = 0; i < n; ++i) a->params_data()[i] = point(i, k);
+          double lp = a->gradient(g.data());
+          {
+            auto b = (it % 3 == 0 ? p2 : pool).acquire();
+            const int k2 = (k + 1) % kIters;
+            for (int64_t i = 0; i < n; ++i) b->params_data()[i] = point(i, k2);
+            if (b->gradient(g2.data()) != want_lp[(size_t)k2] ||
+                g2 != want_g[(size_t)k2])
+              ++bad;
+          }
+          if (lp != want_lp[(size_t)k] || g != want_g[(size_t)k]) ++bad;
+        }
+      });
+    }
+    for (auto& w : workers) w.join();
+    if (bad != 0) {
+      ++failures;
+      std::printf("FAIL stress: %d wrong answers\n", bad.load());
+    }
   }
 
   if (failures == 0) std::printf("test_pool OK\n");
