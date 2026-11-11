@@ -2,6 +2,105 @@
 
 ## Unreleased
 
+## 0.26.0
+
+stanli now runs stanc3's own test models against CmdStan, which found and
+fixed several wrong answers and missing checks and added about 30 library
+functions. nutpie is a supported sampler, warmup can adapt the step size
+alone, and the Hessian is available at a point. The R package and runtime
+must be updated together.
+
+### Performance
+
+- Calls through the BridgeStan interface, which nutpie and walnutpie use,
+  no longer slow down as more chains run at once. On eight schools a
+  gradient took 1,661 ns per thread at 4 threads and 2,919 ns at 8; it now
+  takes 129 ns and 199 ns, 13x and 15x faster. Models with many parameters,
+  such as radon, were not affected.
+
+### Features
+
+- nutpie can sample stanli models. In R, `sample_nutpie()` runs nutpieR
+  (1.9.0 or later, from andytimm's R-universe) and returns a `stanli_fit`;
+  `bridgestan_data()` and `stanli_build_id()` give what other BridgeStan
+  clients need. Python has `bridgestan_data()` and `runtime_path()`.
+  `sample_model()` stays the default sampler.
+- `adapt_metric = FALSE` in R `sample_model()`, Python `Model.sample()` and
+  the C API keeps the metric you pass and adapts only the step size during
+  warmup. The rstan-style `sampling()` takes it as `control$adapt_metric`.
+  On a 150-dimensional random walk, a dense metric from the Hessian at the
+  mode with step-size-only warmup gave 2.0x the ESS per second of the
+  default diag_e sampler (#539).
+- `log_prob_hessian()` in R, `Model.log_prob_hessian()` in Python and
+  `stanli_hessian` in the C API return the Hessian of the log density at a
+  point, with the Jacobian included, as Stan's `laplace_sample` computes it.
+- These now run; stanli refused them before:
+  - `min`, `max` and boolean operators on parameters
+  - user functions called as statements, and overloaded ODE right-hand sides
+  - integer GLMs with a row-vector design matrix
+  - `jacobian +=`, `fatal_error` and `eval`
+  - column and row stochastic matrices
+  - about 30 library functions, including `determinant`, the `qr_*`,
+    `hypergeometric_*`, `hmm_*` and `csr_*` functions,
+    `gaussian_dlm_obs`, and the wiener lcdf and lccdf.
+- On an `as_stanmodel()` model, `sampling()` and `vb()` handle a model that
+  fails to build, or a bad `control` entry, as rstan does: the error goes
+  to stderr and they return an empty fit. RBesT's and OncoBayes2's tests
+  depend on this.
+
+### Fixes
+
+- `multi_student_t` kept its normalizing constants under `~`. They are now
+  dropped, as in CmdStan.
+- `*_unconstrain` returned infinity for a parameter with an infinite bound.
+- Sized assignments were checked only in transformed data. They are now
+  checked in every block.
+- Checks were missing for `lb_free`, `ub_free`, `lub_free`, `lub`, `offset`
+  and `multiplier`.
+- Transformed parameters and generated quantities that use `target()`
+  were written to the draws with a value different from CmdStan's.
+- Integer densities over empty containers threw. They now return 0.
+- `print` and `reject` flattened containers. They now print them as Stan
+  does.
+- Complex arrays in generated quantities were written as one column per
+  element. They are now refused until complex numbers are supported.
+- Data for a variable named `class` was looked up under stanc's internal
+  name and not found.
+- Runtime errors use Stan Math's wording. Before, some used stanli's
+  internal terms, such as `Plus__: incompatible logical views`. Size errors
+  in `multi_normal` and in `head`, `tail` and `segment` are raised when the
+  statement runs, as in CmdStan. Before, they stopped the model from
+  building.
+- Packages that vendor stanli's runtime sources without `data.cpp`, such
+  as stanr, load again. They failed with an undefined symbol since 0.22.1.
+  On Windows, R's toolchain builds them again.
+- Density kernels compile with GCC and `-fsanitize=undefined`.
+- `stanli_check` prints non-finite values as `nan`, `inf` and `-inf` on
+  every platform. On Windows it printed `-nan(ind)`, which Python could not
+  read.
+
+### Docs
+
+- TESTING.md is shorter, and the material on benchmarking a change moved to
+  the end of the benchmarks page.
+
+### Internal
+
+- The C ABI version goes from 2 to 3, because the metric options gained a
+  field. An R package from before this release refuses a newer runtime,
+  and the reverse, with the existing version-mismatch error. Update both.
+- ctest runs stanc3's 1,244 valid test models against recorded CmdStan
+  results and its 1,191 invalid ones against stanc's error text. 846 valid
+  models match CmdStan's log density, gradient and write_array at 5
+  points, 257 throw the same error, and the 135 that differ are listed
+  with a cause in `tests/stanc3_good/ledger.json`. Not yet covered:
+  complex numbers, tuples and `laplace_*`.
+- The corpus benchmark checks only the log density for kronecker_gp, whose
+  gradient depends on eigenvector rounding in CmdStan too.
+- CI: the R checks and R ecosystem jobs list andytimm's R-universe for
+  nutpieR, the ThreadSanitizer job has more time, and the stanr job is
+  pinned to a stanr commit that builds against Stan 2.40.
+
 ## 0.25.0
 
 Faster first gradients and preparation on large models, clearer errors and
