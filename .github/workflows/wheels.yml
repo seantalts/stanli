@@ -1643,8 +1643,8 @@ jobs:
       - uses: ./.github/actions/pins
       - name: Install the Clang C/C++ compiler
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang
+          tools/with_retry.sh sh -c \
+            'sudo apt-get update && sudo apt-get install -y clang'
       - name: Fingerprint the Clang C++ compiler
         id: toolchain
         run: |
@@ -1834,8 +1834,8 @@ jobs:
       - uses: ./.github/actions/pins
       - name: Install the Clang C/C++ compiler
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang
+          tools/with_retry.sh sh -c \
+            'sudo apt-get update && sudo apt-get install -y clang'
       - name: Fetch pinned dependencies
         run: ./deps/fetch.sh
       - name: Install the pinned compiler from the native build
