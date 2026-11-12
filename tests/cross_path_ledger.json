@@ -113,10 +113,10 @@
   },
   {
     "model": "region_map_hurdle_data",
-    "quantity": "grad[1]",
+    "quantity": "grad[*]",
     "pair": "default/passes_off",
-    "bound_ulp": 2,
-    "cause": "the 64 per-iteration gradient contributions of a loop whose UDF branches on data are accumulated in a different grouping with and without STANLI_NO_REROLL. The region map refuses the loop (the branch is data-only), so this is the rerolled graph's own regrouping, surfaced by this fixture.",
+    "bound_ulp": 4,
+    "cause": "the 64 per-iteration gradient contributions of a loop whose UDF branches on data are accumulated in a different grouping with and without STANLI_NO_REROLL. The region map refuses the loop (the branch is data-only), so this is the rerolled graph's own regrouping, surfaced by this fixture. Measured at three swept points: up to 4 ULP, and STANLI_NO_REROLL with STANLI_NO_PARTITION gives the same bits as passes_off.",
     "since": "2026-10-03"
   },
   {
@@ -126,5 +126,77 @@
     "bound_ulp": 10,
     "cause": "the default path runs the loop as one OP_REGION_MAP and sums the per-iteration subtotals in iteration order; STANLI_NO_NATIVE_ADJ refuses the map (it needs the generated adjoint), so the loop keeps its per-iteration regions and its running-target fold, which groups the terms differently.",
     "since": "2026-10-02"
+  },
+  {
+    "model": "region_map_data_control",
+    "quantity": "lp",
+    "pair": "default/no_partition",
+    "bound_ulp": 1,
+    "cause": "partition_lanes regroups this loop's per-iteration terms into lane SUM_VEC ops (76 ops with the pass, 110 with STANLI_NO_PARTITION, which turns them back into INDEX/ADD_N chains), so the 64 target terms sum in a different grouping. It is the only fixture on which the pass changes the graph.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_density",
+    "quantity": "lp",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 2,
+    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map (it needs the generated adjoint); see default/no_region_map on this fixture, which gives the same bits.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_density",
+    "quantity": "lp",
+    "pair": "default/no_region_map",
+    "bound_ulp": 2,
+    "cause": "the default path runs the loop as one OP_REGION_MAP and sums the per-iteration subtotals in iteration order; with STANLI_REGION_MAP=0 the loop keeps its per-iteration regions and the running-target fold. default/no_native_adj on this fixture gives the same bits at every point, because that switch refuses the map too.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_hurdle_data",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 1,
+    "cause": "the same regrouping as this fixture's grad[*] entry, 1 ULP at swept point 2; STANLI_NO_REROLL with STANLI_NO_PARTITION gives the same bits.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_multi",
+    "quantity": "lp",
+    "pair": "default/no_region_map",
+    "bound_ulp": 10,
+    "cause": "the region map's iteration-order sum of subtotals against the unmapped running-target fold, as for default/no_native_adj on this fixture: both switches remove the map and give the same bits at all three points.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_sinks",
+    "quantity": "grad[*]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 3,
+    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map; see default/no_region_map on this fixture, which gives the same bits.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_sinks",
+    "quantity": "grad[*]",
+    "pair": "default/no_region_map",
+    "bound_ulp": 3,
+    "cause": "the region map accumulates the per-iteration gradient contributions in iteration order; with STANLI_REGION_MAP=0 the per-iteration regions accumulate through the graph's own reverse sweep. default/no_native_adj gives the same bits, because it refuses the map too.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "wapar_heavy",
+    "quantity": "grad[*]",
+    "pair": "default/passes_off",
+    "bound_ulp": 5,
+    "cause": "the gradient side of this fixture's lp entry: the per-term adjoints accumulate in source order with both lane passes off, and in the fused lane loop otherwise.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "wapar_heavy",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 5,
+    "cause": "with both STANLI_NO_REROLL and STANLI_NO_PARTITION the 300 normal terms sum one by one in source order; either lane pass alone fuses them into the same lane loop and agrees with default bitwise at all three points. A retained loop (STANLI_STRUCTURED_LOOPS=1) gives the same bits as passes_off.",
+    "since": "2026-11-12"
   }
 ]
