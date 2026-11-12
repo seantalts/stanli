@@ -799,6 +799,44 @@ static void test_fixture_constants() {
   }
 }
 
+template <bool Propto, class Outcome, class Arg>
+static double categorical_density(const std::string& fn, const Outcome& y,
+                                  const Arg& arg) {
+  return fn == "categorical_lpmf"
+             ? stan::math::categorical_lpmf<Propto>(y, arg)
+             : stan::math::categorical_logit_lpmf<Propto>(y, arg);
+}
+
+static std::vector<double> categorical_arg(const std::string& fn) {
+  return fn == "categorical_lpmf" ? std::vector<double>{0.2, 0.3, 0.5}
+                                  : std::vector<double>{-1.0, 0.0, 1.0};
+}
+
+static stanli::DataMap categorical_arg_data(const std::string& fn,
+                                            int outcome) {
+  stanli::DataMap d;
+  d.set_int("outcome", outcome);
+  d.set_real_array("arg", categorical_arg(fn));
+  return d;
+}
+
+static Eigen::Map<const Eigen::VectorXd> eigen_view(
+    const std::vector<double>& v) {
+  return Eigen::Map<const Eigen::VectorXd>(v.data(), (Eigen::Index)v.size());
+}
+
+// lp and the one gradient of a single-parameter model at theta = 0.75.
+static std::pair<double, double> anchor_gradient(const std::string& mir,
+                                                 const stanli::DataMap& d) {
+  stanli::CompiledModel cm = stanli::compile_model(mir, d);
+  stanli::Executor ex(std::move(cm.graph));
+  cm.bind(ex);
+  ex.params_data()[0] = 0.75;
+  double grad = 0.0;
+  const double lp = ex.gradient(&grad);
+  return {lp, grad};
+}
+
 static void test_bounded_specialization() {
   using namespace stanli;
   const auto mir = slurp("tests/fixtures/bounded_control.tmir.sexp");
@@ -2901,25 +2939,11 @@ int main() {
     for (bool propto : {false, true}) {
       for (bool local : {false, true}) {
         for (bool body_local : {false, true}) {
-          DataMap d;
-          d.set_int("outcome", 2);
-          const std::vector<double> arg =
-              fn == "categorical_lpmf" ? std::vector<double>{0.2, 0.3, 0.5}
-                                       : std::vector<double>{-1.0, 0.0, 1.0};
-          d.set_real_array("arg", arg);
-          CompiledModel lm = compile_model(
-              categorical_udf_mir(fn, propto, local, body_local), d);
-          Executor ex(std::move(lm.graph));
-          lm.bind(ex);
-          ex.params_data()[0] = 0.75;
-          double grad = 0.0;
-          const double got = ex.gradient(&grad);
-          Eigen::VectorXd v(3);
-          for (int i = 0; i < 3; ++i) v(i) = arg[(size_t)i];
-          const double full =
-              fn == "categorical_lpmf"
-                  ? stan::math::categorical_lpmf<false>(2, v)
-                  : stan::math::categorical_logit_lpmf<false>(2, v);
+          const auto [got, grad] = anchor_gradient(
+              categorical_udf_mir(fn, propto, local, body_local),
+              categorical_arg_data(fn, 2));
+          const double full = categorical_density<false>(
+              fn, 2, eigen_view(categorical_arg(fn)));
           const double want = 0.75 + (propto && !local ? 0.0 : full);
           const std::string tag =
               fn + std::string(propto ? " propto " : " normalized ") +
@@ -2936,12 +2960,7 @@ int main() {
   // validation to model construction. On an invalid call it declines the
   // fold, leaving the exact runtime op and its original exception intact.
   for (const std::string& fn : {"categorical_lpmf", "categorical_logit_lpmf"}) {
-    DataMap d;
-    d.set_int("outcome", 4);
-    const std::vector<double> arg = fn == "categorical_lpmf"
-                                        ? std::vector<double>{0.2, 0.3, 0.5}
-                                        : std::vector<double>{-1.0, 0.0, 1.0};
-    d.set_real_array("arg", arg);
+    const DataMap d = categorical_arg_data(fn, 4);
     try {
       CompiledModel lm =
           compile_model(categorical_udf_mir(fn, false, false), d);
@@ -2959,13 +2978,10 @@ int main() {
       } catch (const std::domain_error& e) {
         got_message = e.what();
       }
-      Eigen::Map<const Eigen::VectorXd> v(arg.data(), (Eigen::Index)arg.size());
       std::string want_message;
       try {
-        if (fn == "categorical_lpmf")
-          (void)stan::math::categorical_lpmf<false>(4, v);
-        else
-          (void)stan::math::categorical_logit_lpmf<false>(4, v);
+        (void)categorical_density<false>(fn, 4,
+                                         eigen_view(categorical_arg(fn)));
       } catch (const std::domain_error& e) {
         want_message = e.what();
       }
@@ -3010,23 +3026,10 @@ int main() {
   // vector becomes a vector<var> because an otherwise-unused actual is var,
   // so an outer propto categorical call retains its summand.
   for (const std::string& fn : {"categorical_lpmf", "categorical_logit_lpmf"}) {
-    DataMap d;
-    d.set_int("outcome", 2);
-    const std::vector<double> arg = fn == "categorical_lpmf"
-                                        ? std::vector<double>{0.2, 0.3, 0.5}
-                                        : std::vector<double>{-1.0, 0.0, 1.0};
-    d.set_real_array("arg", arg);
-    CompiledModel lm = compile_model(categorical_udf_return_mir(fn), d);
-    Executor ex(std::move(lm.graph));
-    lm.bind(ex);
-    ex.params_data()[0] = 0.75;
-    double grad = 0.0;
-    const double got = ex.gradient(&grad);
-    Eigen::Map<const Eigen::VectorXd> v(arg.data(), (Eigen::Index)arg.size());
+    const auto [got, grad] = anchor_gradient(categorical_udf_return_mir(fn),
+                                             categorical_arg_data(fn, 2));
     const double density =
-        fn == "categorical_lpmf"
-            ? stan::math::categorical_lpmf<false>(2, v)
-            : stan::math::categorical_logit_lpmf<false>(2, v);
+        categorical_density<false>(fn, 2, eigen_view(categorical_arg(fn)));
     expect_ulp(fn + " UDF instantiated return value", got, 0.75 + density);
     expect_eq(fn + " UDF instantiated return gradient", grad, 1.0);
   }
@@ -3035,28 +3038,15 @@ int main() {
   // actual promotes locals and the return, but it must not turn a ternary
   // whose two arms derive from a data-instantiated vector formal into var.
   for (const std::string& fn : {"categorical_lpmf", "categorical_logit_lpmf"}) {
-    DataMap d;
-    d.set_int("outcome", 2);
-    d.set_real_array("arg", fn == "categorical_lpmf"
-                                ? std::vector<double>{0.2, 0.3, 0.5}
-                                : std::vector<double>{-1.0, 0.0, 1.0});
-    CompiledModel lm = compile_model(categorical_udf_ternary_type_mir(fn), d);
-    Executor ex(std::move(lm.graph));
-    lm.bind(ex);
-    ex.params_data()[0] = 0.75;
-    double grad = 0.0;
-    expect_eq(fn + " per-formal ternary value", ex.gradient(&grad), 0.75);
-    expect_eq(fn + " per-formal ternary gradient", grad, 1.0);
-
-    CompiledModel promoted_lm =
-        compile_model(categorical_udf_promoted_actual_mir(fn), d);
-    Executor promoted_ex(std::move(promoted_lm.graph));
-    promoted_lm.bind(promoted_ex);
-    promoted_ex.params_data()[0] = 0.75;
-    grad = 0.0;
-    expect_eq(fn + " promoted int UDF actual value",
-              promoted_ex.gradient(&grad), 0.75);
-    expect_eq(fn + " promoted int UDF actual gradient", grad, 1.0);
+    const DataMap d = categorical_arg_data(fn, 2);
+    const auto ternary =
+        anchor_gradient(categorical_udf_ternary_type_mir(fn), d);
+    expect_eq(fn + " per-formal ternary value", ternary.first, 0.75);
+    expect_eq(fn + " per-formal ternary gradient", ternary.second, 1.0);
+    const auto promoted =
+        anchor_gradient(categorical_udf_promoted_actual_mir(fn), d);
+    expect_eq(fn + " promoted int UDF actual value", promoted.first, 0.75);
+    expect_eq(fn + " promoted int UDF actual gradient", promoted.second, 1.0);
   }
 
   // A data condition selects one arm at model construction, but the C++ type
@@ -3066,26 +3056,12 @@ int main() {
   for (const std::string& fn : {"categorical_lpmf", "categorical_logit_lpmf"}) {
     for (bool through_udf : {false, true}) {
       for (int flag : {0, 1}) {
-        DataMap d;
+        DataMap d = categorical_arg_data(fn, 2);
         d.set_int("flag", flag);
-        d.set_int("outcome", 2);
-        const std::vector<double> arg =
-            fn == "categorical_lpmf" ? std::vector<double>{0.2, 0.3, 0.5}
-                                     : std::vector<double>{-1.0, 0.0, 1.0};
-        d.set_real_array("arg", arg);
-        CompiledModel lm =
-            compile_model(categorical_promoted_ternary_mir(fn, through_udf), d);
-        Executor ex(std::move(lm.graph));
-        lm.bind(ex);
-        ex.params_data()[0] = 0.75;
-        double grad = 0.0;
-        const double got = ex.gradient(&grad);
-        Eigen::Map<const Eigen::VectorXd> v(arg.data(),
-                                            (Eigen::Index)arg.size());
+        const auto [got, grad] = anchor_gradient(
+            categorical_promoted_ternary_mir(fn, through_udf), d);
         const double density =
-            fn == "categorical_lpmf"
-                ? stan::math::categorical_lpmf<false>(2, v)
-                : stan::math::categorical_logit_lpmf<false>(2, v);
+            categorical_density<false>(fn, 2, eigen_view(categorical_arg(fn)));
         const std::string tag =
             fn + std::string(through_udf ? " nested" : " direct") +
             (flag ? " data arm" : " autodiff arm");
@@ -3232,24 +3208,12 @@ int main() {
           else
             arg.setZero();
           const std::vector<int> outcomes((size_t)outcome_count, 1);
-          double want = 0.0;
-          if (fn == "categorical_lpmf") {
-            if (outcome_count == 1)
-              want = propto ? stan::math::categorical_lpmf<true>(1, arg)
-                            : stan::math::categorical_lpmf<false>(1, arg);
-            else
-              want = propto
-                         ? stan::math::categorical_lpmf<true>(outcomes, arg)
-                         : stan::math::categorical_lpmf<false>(outcomes, arg);
-          } else if (outcome_count == 1) {
-            want = propto ? stan::math::categorical_logit_lpmf<true>(1, arg)
-                          : stan::math::categorical_logit_lpmf<false>(1, arg);
-          } else {
-            want =
-                propto
-                    ? stan::math::categorical_logit_lpmf<true>(outcomes, arg)
-                    : stan::math::categorical_logit_lpmf<false>(outcomes, arg);
-          }
+          const double want =
+              outcome_count == 1
+                  ? (propto ? categorical_density<true>(fn, 1, arg)
+                            : categorical_density<false>(fn, 1, arg))
+                  : (propto ? categorical_density<true>(fn, outcomes, arg)
+                            : categorical_density<false>(fn, outcomes, arg));
           expect_eq(tag + " interpreted value", row.at((size_t)col.slot), want);
         }
         check(found, tag + " interpreted column");
@@ -3300,10 +3264,7 @@ int main() {
     Eigen::VectorXd arg = Eigen::VectorXd::Constant(3, 1.0 / 3.0);
     std::string want_message;
     try {
-      if (fn == "categorical_lpmf")
-        (void)stan::math::categorical_lpmf<true>(4, arg);
-      else
-        (void)stan::math::categorical_logit_lpmf<true>(4, arg);
+      (void)categorical_density<true>(fn, 4, arg);
     } catch (const std::domain_error& e) {
       want_message = e.what();
     }
