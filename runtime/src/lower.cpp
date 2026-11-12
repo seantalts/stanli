@@ -936,7 +936,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
       wa.truncated = std::string(section) + " (" + what + ")";
     };
     try {
-      lower_stmt(s);
+      lower_top_stmt(s);
     } catch (const CompileError& e) {
       fail_section(e.what());
       break;
@@ -991,7 +991,7 @@ CompiledModel Lowering::run(const mir::Program& p) {
   const auto lower_time = prep.start();
   for (size_t k = 0; k < p.log_prob.size(); ++k) {
     try {
-      lower_stmt(p.log_prob[k]);
+      lower_top_stmt(p.log_prob[k]);
     } catch (const std::domain_error& e) {
       // A statement after the parameter reads that fails while lowering
       // and always runs fails the same way at every point in CmdStan.

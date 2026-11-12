@@ -1888,7 +1888,13 @@ void region_prove_bounded_int_fill(const mir::Stmt& loop, int64_t capacity) {
   if (range) set_int_range(value->second, range->lo, range->hi);
 }
 
-void lower_region_stmt(const mir::Stmt& s) {
+// A retained loop or branch stays open while its body lowers, so a return
+// has no way out through it.
+void lower_region_body(const std::vector<mir::Stmt>& body) {
+  if (lower_stmts(body) != Flow::Next) fail("unbound function return");
+}
+
+Flow lower_region_stmt(const mir::Stmt& s) {
   if (bounded_output) {
     bounded_output_visits += bounded_output_multiplier;
     if (bounded_output_visits > 4096)
@@ -1899,9 +1905,9 @@ void lower_region_stmt(const mir::Stmt& s) {
     case mir::Stmt::SList:
       for (const auto& c : s.body) {
         if (region_unreachable) break;
-        lower_stmt(c);
+        if (const Flow flow = lower_stmt(c); flow != Flow::Next) return flow;
       }
-      return;
+      return Flow::Next;
     case mir::Stmt::For: {
       if (!invariant_for_upper(s))
         fail("mutable/effectful for upper bound needs a register loop", s.raw);
@@ -1950,7 +1956,7 @@ void lower_region_stmt(const mir::Stmt& s) {
       if (!bounded_output && known && lo->lo == 1 && lo->hi == 1 &&
           hi->lo == hi->hi)
         for (const auto& child : s.body) find_full_int_writes(child);
-      if (count == 0) return;
+      if (count == 0) return Flow::Next;
       bool has_loop_control = false;
       std::function<void(const mir::Stmt&)> scan_control =
           [&](const mir::Stmt& body) {
@@ -1986,7 +1992,8 @@ void lower_region_stmt(const mir::Stmt& s) {
         entry.i = {lo->lo};
         entry.r = {static_cast<double>(lo->lo)};
         td_assign(s.loopvar, std::move(entry));
-        for (const auto& child : s.body) lower_stmt(child);
+        if (const Flow flow = lower_stmts(s.body); flow != Flow::Next)
+          return flow;
         if (bounded_output && lo->lo == 1)
           region_prove_bounded_int_fill(s, hi->hi);
         if (saved_iterator)
@@ -2002,7 +2009,7 @@ void lower_region_stmt(const mir::Stmt& s) {
         else
           td_erase(s.loopvar);
         region_cells.erase(s.loopvar);
-        return;
+        return Flow::Next;
       }
       Val lower = lower_expr(s.lower), upper = lower_expr(s.upper);
       const auto saved_scope = scope.find(s.loopvar);
@@ -2031,7 +2038,7 @@ void lower_region_stmt(const mir::Stmt& s) {
       const bool saved_control = region_control_active;
       region_control_active |= !lower.si.param_free || !upper.si.param_free;
       ++region_control_depth;
-      for (const auto& c : s.body) lower_stmt(c);
+      lower_region_body(s.body);
       --region_control_depth;
       region_flush();
       region_current = parent;
@@ -2053,7 +2060,7 @@ void lower_region_stmt(const mir::Stmt& s) {
       else
         scope.erase(s.loopvar);
       region_cells.erase(s.loopvar);
-      return;
+      return Flow::Next;
     }
     case mir::Stmt::While: {
       region_prepare_cells(s);
@@ -2091,14 +2098,14 @@ void lower_region_stmt(const mir::Stmt& s) {
       const bool saved_control = region_control_active;
       region_control_active |= !condition.si.param_free;
       ++region_control_depth;
-      for (const auto& c : s.body) lower_stmt(c);
+      lower_region_body(s.body);
       --region_control_depth;
       region_flush();
       region_current = parent;
       region_append(std::move(loop));
       region_control_active = saved_control;
       region_widen_carried(s, dependencies);
-      return;
+      return Flow::Next;
     }
     case mir::Stmt::IfElse: {
       if (udf_depth > 0 && s.body.size() == 2) {
@@ -2106,7 +2113,8 @@ void lower_region_stmt(const mir::Stmt& s) {
         mir::Expr then_value, else_value;
         if (peel_terminal_return(&effects.body[0], &then_value) &&
             peel_terminal_return(&effects.body[1], &else_value)) {
-          lower_stmt(effects);
+          if (const Flow flow = lower_stmt(effects); flow != Flow::Next)
+            return flow;
           mir::Expr choice;
           choice.kind = mir::Expr::TernaryIf;
           choice.args = {s.cond, then_value, else_value};
@@ -2115,13 +2123,13 @@ void lower_region_stmt(const mir::Stmt& s) {
           choice.data_only =
               s.cond.data_only && then_value.data_only && else_value.data_only;
           choice.raw = s.raw;
-          throw LpReturn{lower_expr(choice)};
+          return_value = lower_expr(choice);
+          return Flow::Return;
         }
       }
       if (auto c = region_static_truth(s.cond)) {
         const size_t arm = *c ? 0 : 1;
-        if (arm < s.body.size()) lower_stmt(s.body[arm]);
-        return;
+        return arm < s.body.size() ? lower_stmt(s.body[arm]) : Flow::Next;
       }
       region_prepare_cells(s);
       Val condition = lower_expr(s.cond);
@@ -2158,7 +2166,8 @@ void lower_region_stmt(const mir::Stmt& s) {
         region_current = &branch.children[arm];
         ++region_control_depth;
         region_unreachable = false;
-        if (arm < s.body.size()) lower_stmt(s.body[arm]);
+        if (arm < s.body.size() && lower_stmt(s.body[arm]) != Flow::Next)
+          fail("unbound function return");
         arm_exits[arm] = region_unreachable;
         --region_control_depth;
         region_flush();
@@ -2213,7 +2222,7 @@ void lower_region_stmt(const mir::Stmt& s) {
         }
       region_current = parent;
       region_append(std::move(branch));
-      return;
+      return Flow::Next;
     }
     case mir::Stmt::Decl: {
       if (s.read_transform)
@@ -2300,7 +2309,7 @@ void lower_region_stmt(const mir::Stmt& s) {
             DeclView{capacity, false, si, int_array, false, value.runtime_dims};
         region_forget(s.decl_id);
         (void)region_cell(s.decl_id);
-        return;
+        return Flow::Next;
       }
       if (s.decl_type.base == "SInt") {
         auto range =
@@ -2317,19 +2326,19 @@ void lower_region_stmt(const mir::Stmt& s) {
         (void)region_cell(s.decl_id);
       } else {
         try {
-          lower_stmt_impl(s);
+          lower_simple_stmt(s);
         } catch (const CompileError& e) {
           fail("structured declaration " + s.decl_id + ": " + e.what());
         }
         if (!scope.count(s.decl_id)) {
           const auto declaration = decls.find(s.decl_id);
           if (declaration != decls.end() && declaration->second.deferred_shape)
-            return;
+            return Flow::Next;
           (void)uninitialized_decl_slot(s.decl_id);
         }
         (void)region_cell(s.decl_id);
       }
-      return;
+      return Flow::Next;
     }
     case mir::Stmt::Assignment: {
       // Indexed updates need a result slot as wide as the original container.
@@ -2343,9 +2352,9 @@ void lower_region_stmt(const mir::Stmt& s) {
           !region_unsized_unagreed.count(s.lhs)) {
         region_cells.erase(s.lhs);
         scope.erase(s.lhs);
-        lower_stmt_impl(s);
+        lower_simple_stmt(s);
         (void)region_cell(s.lhs);
-        return;
+        return Flow::Next;
       }
       (void)region_cell(s.lhs);
       auto range = region_range(s.rhs);
@@ -2365,7 +2374,7 @@ void lower_region_stmt(const mir::Stmt& s) {
         real_range = {};
       }
       region_assign(s.lhs, rhs, range, real_range);
-      return;
+      return Flow::Next;
     }
     case mir::Stmt::TargetPE: {
       Val t = lower_expr(s.target);
@@ -2374,7 +2383,7 @@ void lower_region_stmt(const mir::Stmt& s) {
       n.kind = RegionNode::Target;
       n.src = t.slot;
       region_append(std::move(n));
-      return;
+      return Flow::Next;
     }
     case mir::Stmt::Break:
     case mir::Stmt::Continue: {
@@ -2383,13 +2392,12 @@ void lower_region_stmt(const mir::Stmt& s) {
           s.kind == mir::Stmt::Break ? RegionNode::Break : RegionNode::Continue;
       region_append(std::move(n));
       region_unreachable = true;
-      return;
+      return Flow::Next;
     }
     case mir::Stmt::Return:
       if (region_control_depth)
         fail("structured early return needs local replay");
-      lower_stmt_impl(s);
-      return;
+      return lower_stmt_impl(s);
     case mir::Stmt::NRFunApp:
       if (bounded_output && s.fn_name == "FnValidateSize") {
         const auto range = region_range(s.fn_args.back());
@@ -2398,11 +2406,11 @@ void lower_region_stmt(const mir::Stmt& s) {
       }
       if (s.fn_name == "FnWriteParam")
         fail("structured CSV emission unsupported");
-      lower_stmt_impl(s);
+      lower_simple_stmt(s);
       region_flush();
-      return;
+      return Flow::Next;
     case mir::Stmt::Skip:
-      return;
+      return Flow::Next;
     default:
       fail("unsupported structured statement");
   }
@@ -2710,7 +2718,16 @@ bool try_lower_region(
       if (output_references && candidate_names.empty())
         trial.fail("bounded output block has no external scalar result");
       trial.region_prepare_cells(s);
-      trial.lower_stmt(s);
+      switch (trial.lower_stmt(s)) {
+        case Flow::Next:
+          break;
+        case Flow::Return:
+          trial.fail("unbound function return");
+        case Flow::Break:
+          trial.fail("unbound break");
+        case Flow::Continue:
+          trial.fail("unbound continue");
+      }
       trial.region_flush();
       if (output_references && !trial.bounded_output_dynamic)
         trial.fail("output block has no changing local extent");
@@ -2813,12 +2830,6 @@ bool try_lower_region(
       refusal = e.what();
     } catch (const std::logic_error& e) {
       refusal = e.what();
-    } catch (const LpReturn&) {
-      refusal = "unbound function return";
-    } catch (const LoopBreak&) {
-      refusal = "unbound break";
-    } catch (const LoopContinue&) {
-      refusal = "unbound continue";
     }
     if (!candidate_ready) native_refusal = refusal;
     if (!candidate_ready && std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS"))

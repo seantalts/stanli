@@ -1406,6 +1406,23 @@ Lowering::Val Lowering::emit_value(uint16_t opcode,
   if (elementwise) result.runtime_dims = {extent};
   return result;
 }
+// Whether evaluating `e` in the data interpreter reads a name it does not
+// hold. Check only eagerly evaluated operands: a missing name in a dead
+// logical/conditional arm must not prevent constant folding. Higher-order
+// and compiler-internal calls own their argument evaluation.
+bool Lowering::missing_input(const mir::Expr& e) {
+  if (e.kind == mir::Expr::Var)
+    return !td.env().count(e.name) && !int_env.count(e.name);
+  if (e.kind == mir::Expr::EAnd || e.kind == mir::Expr::EOr ||
+      e.kind == mir::Expr::TernaryIf)
+    return !e.args.empty() && missing_input(e.args[0]);
+  if (e.kind == mir::Expr::FunApp &&
+      (e.fn_lib == mir::Expr::Lib::Internal || mir::higher_order_call(e)))
+    return false;
+  for (const auto& arg : e.args)
+    if (missing_input(arg)) return true;
+  return false;
+}
 // Ask only the MIR interpreter.  Static-shape specialization below uses
 // this for selector values and for path-sensitive short-circuit decisions;
 // keeping it separate from try_eval_pure prevents recursive specialization.
@@ -1413,23 +1430,8 @@ std::optional<DataMap::Entry> Lowering::try_eval_interpreter(
     const mir::Expr& e) {
   if (expr_effectful(e)) return std::nullopt;
   // Unknown variables are an ordinary answer to a speculative probe, not
-  // an interpreter error. Check only eagerly evaluated operands: a missing
-  // name in a dead logical/conditional arm must not prevent constant folding.
-  // Higher-order and compiler-internal calls own their argument evaluation.
-  const auto missing_input = [&](const auto& self, const mir::Expr& x) -> bool {
-    if (x.kind == mir::Expr::Var)
-      return !td.env().count(x.name) && !int_env.count(x.name);
-    if (x.kind == mir::Expr::EAnd || x.kind == mir::Expr::EOr ||
-        x.kind == mir::Expr::TernaryIf)
-      return !x.args.empty() && self(self, x.args[0]);
-    if (x.kind == mir::Expr::FunApp &&
-        (x.fn_lib == mir::Expr::Lib::Internal || mir::higher_order_call(x)))
-      return false;
-    for (const auto& arg : x.args)
-      if (self(self, arg)) return true;
-    return false;
-  };
-  if (missing_input(missing_input, e)) return std::nullopt;
+  // an interpreter error.
+  if (missing_input(e)) return std::nullopt;
   if (region_current) {
     // A pure user function can still contain a huge loop. Do not execute
     // it as a speculative control/shape probe inside a retained body.
