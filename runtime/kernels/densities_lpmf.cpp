@@ -1,6 +1,6 @@
 // The integer-outcome densities: the hand-written lpmfs, the ones
 // generated from STANLI_INT_DENSITY_LIST, the binomials with their two
-// int groups (lpmf and cdf alike), beta_binomial, and the ordered pair.
+// int groups (lpmf and cdf alike), and beta_binomial.
 //
 // One of the density shards: see densities_impl.hpp for why they
 // are split and what they share.

@@ -1,9 +1,10 @@
-// Matrix-valued legacy ops: GP covariance, cholesky_decompose, diag_matrix,
-// multi_normal(_cholesky). Most forwards run the prim (double)
-// implementation and backwards replay the same call on a nested var tape,
-// seeded with the dot trick. The profiled single-vector Cholesky density below
-// is the compact native exception: it retains Stan Math's closed-form matrix
-// partials from forward to backward.
+// Matrix-valued ops and the densities with matrix arguments: GP covariance,
+// cholesky_decompose, diag_matrix, multi_normal(_cholesky), wishart, wiener,
+// the ordered and GLM densities, multinomial and the tail CDFs. Most forwards
+// run the prim (double) implementation and backwards replay the same call on a
+// nested var tape, seeded with the dot trick. The profiled single-vector
+// Cholesky density below is the compact native exception: it retains Stan
+// Math's closed-form matrix partials from forward to backward.
 //
 // Matrices live in slots column-major, matching Eigen and the rest of the
 // pipeline, so a flat slot maps straight onto Map<MatrixXd>.
@@ -1306,8 +1307,7 @@ double nid_glm_eval(KernelCtx& ctx) {
 
 int64_t nid_glm_scratch(const Op& op, const Slot* slots) {
   // The y and X sections exist only when those inputs are active (variant
-  // bits 0 and 1), but the sizing hook cannot see the variant, so reserve
-  // both unconditionally.
+  // bits 0 and 1), but this hook reserves both unconditionally.
   return slots[op.in[0]].len + slots[op.in[1]].len + slots[op.in[2]].len +
          slots[op.in[3]].len + slots[op.in[4]].len;
 }

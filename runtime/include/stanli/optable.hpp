@@ -1058,7 +1058,7 @@ inline int64_t sum_in_lens(const Op& op, const Slot* slots) {
 }
 
 Kernel& kernel(uint16_t opcode);
-// Called by kernel TUs at static-init time.
+// Called by the kernel registration functions (ensure_registered).
 void register_kernel(uint16_t opcode, Kernel k);
 
 // The registered kernel for an opcode, or null. Registers the built-in

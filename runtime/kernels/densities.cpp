@@ -22,8 +22,7 @@ void register_density_kernels() {
                                     density_micro<nreal>));
   STANLI_INT_DENSITY_LIST(STANLI_REGISTER_INT_DENSITY)
 #undef STANLI_REGISTER_INT_DENSITY
-  // The list is the default. A density whose forward needs a genuinely
-  // different argument shape registers after it and wins.
+  // Hand-written kernels for opcodes the generated lists do not cover.
   register_kernel(OP_POISSON_LOG_LPMF,
                   with_cached_micro(Kernel{poisson_log_fwd, density_bwd<1>,
                                            density_scratch<1>},
