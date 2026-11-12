@@ -602,7 +602,6 @@ void structured_fwd(KernelCtx& ctx) {
   ctx.out2.data[0] = lp;
 }
 
-template <StructuredKind K>
 void simplex_bwd_batch(KernelCtx& ctx, int64_t b, int64_t inner_raw,
                        int64_t inner_con) {
   const double* res = ctx.out.data + b * inner_con;
@@ -707,7 +706,7 @@ void structured_bwd(KernelCtx& ctx) {
   const int64_t inner_con = structured_output_width<K>(ctx);
   if constexpr (K == StructuredKind::Simplex) {
     for (int64_t b = 0; b < nb; ++b)
-      simplex_bwd_batch<K>(ctx, b, inner_raw, inner_con);
+      simplex_bwd_batch(ctx, b, inner_raw, inner_con);
     return;
   }
   if constexpr (K == StructuredKind::Ordered ||

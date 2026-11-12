@@ -1,6 +1,7 @@
 // Included inside structured_loop.cpp's anonymous namespace. This path uses
 // the same recording semantics and kernels, but never retains a whole-loop
-// instruction stream or version table.
+// instruction stream or version table. Large loops select it automatically;
+// structured_instance*.inc builds on its frame code.
 //
 // Instruction headers pack StreamInstr::Kind in the low byte and the total
 // word count above it. Remaining words are scalar operands, followed by any
@@ -249,9 +250,6 @@ struct FrameEncoder {
           word(literal(f.value));
           break;
         }
-        case StreamInstr::Seg:
-          throw std::logic_error(
-              "segments are not eligible for frame recording");
         case StreamInstr::Tgt:
           break;
       }
@@ -389,19 +387,6 @@ bool equivalent_frames(const LoopFrame& x, const LoopFrame& y) {
   return ok;
 }
 
-// Optional differential proof check of a matched layout.
-void check_frame_layout(LoopState& s, const Stream& st,
-                        const ArenaSnapshot& snapshot, const LoopFrame& frame) {
-  LoopFrame oracle;
-  oracle.adjoint_base = frame.adjoint_base;
-  FrameEncoder<false> encoder{s, oracle, snapshot};
-  encoder.encode(st);
-  oracle.code = std::make_shared<FrameCode>(std::move(encoder.code));
-  oracle.values.resize(frame.values.size());
-  if (!equivalent_frames(frame, oracle))
-    throw std::logic_error("structured frame layout proof mismatch");
-}
-
 void seal_frame(LoopState& s) {
   FrameTape& tape = *s.frames;
   Stream& st = *s.building;
@@ -511,7 +496,6 @@ void seal_frame(LoopState& s) {
       if (matcher.encode(st)) {
         frame->code = layout.code;
         ++tape.layout_matches;
-        if (s.check_frame_layout) check_frame_layout(s, st, snapshot, *frame);
         break;
       }
       frame->bindings.clear();

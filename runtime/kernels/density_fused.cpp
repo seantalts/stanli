@@ -26,8 +26,13 @@ namespace stanli {
 namespace dens {
 namespace {
 
+#ifndef STANLI_FUSED_ONLY
 std::atomic<int> g_enabled{-1};
 thread_local std::size_t g_calls = 0;
+inline void count_call() { ++g_calls; }
+#else
+inline void count_call() {}
+#endif
 
 using VecView = Eigen::Map<const Eigen::Array<double, -1, 1>>;
 using OutView = Eigen::Map<Eigen::Array<double, -1, 1>>;
@@ -740,7 +745,7 @@ void student_t_dispatch(const Y& y, const Nu& nu, const M& mu, const S& sigma,
 }
 
 void student_t_lpdf_run(KernelCtx& ctx) {
-  ++g_calls;
+  count_call();
   const unsigned variant = ctx.variant;
 #ifdef STANLI_LITE_LP
   const bool propto = false;
@@ -856,7 +861,7 @@ struct GammaOp {
 
 template <typename Op>
 void fused_lpdf(KernelCtx& ctx) {
-  ++g_calls;
+  count_call();
   const unsigned variant = ctx.variant;
 #ifdef STANLI_LITE_LP
   const bool propto = false;
@@ -917,6 +922,7 @@ struct OracleSwitchNotice {
 }  // namespace
 #endif
 
+#ifndef STANLI_FUSED_ONLY
 bool fused_density_enabled() {
   int v = g_enabled.load(std::memory_order_relaxed);
   if (v < 0) {
@@ -932,9 +938,10 @@ void set_fused_density(bool on) {
 }
 
 std::size_t fused_density_calls() { return g_calls; }
+#endif
 
 void ordered_logistic_lpmf_fused(KernelCtx& ctx) {
-  ++g_calls;
+  count_call();
   static constexpr const char* function = "ordered_logistic";
   const int64_t n = ctx.n_idata - 3;
   const int* y = ctx.idata;

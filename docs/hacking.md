@@ -442,7 +442,7 @@ whichever branch actually executed. That is the same arithmetic
 CmdStan's generated C++ performs for the same statement, so the
 derivatives agree by construction.
 
-Six front ends produce these programs:
+Five front ends produce these programs:
 
 - `compile_rhs` ([`ode_prog.cpp`](../runtime/src/ode_prog.cpp)) for
   ODE right-hand sides.
@@ -460,9 +460,6 @@ Six front ends produce these programs:
 - `lower_region_map` ([`lower_region_map.cpp`](../runtime/src/lower_region_map.cpp))
   for long loops with parameter-dependent control whose body only adds to
   the target.
-- The segments of a structured loop (`OP_LOOP`,
-  [`structured_loop.cpp`](../runtime/src/structured_loop.cpp)), which run
-  a register program per trip.
 - Standalone Stan functions
   ([`function.cpp`](../runtime/src/function.cpp)), called from the C API
   and R and Python bindings.

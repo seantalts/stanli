@@ -231,8 +231,6 @@ void extrema_vec_bwd(KernelCtx& ctx) {
   ctx.in_adj[0].data[static_cast<int64_t>(ctx.scratch[0])] += ctx.out_adj;
 }
 
-int64_t scalar_scratch(const Op&, const Slot*) { return 1; }
-
 // One selected coefficient for reverse mode. Phased reductions are emitted
 // only for the forward double path.
 int64_t extrema_scratch(const Op& op, const Slot* slots) {

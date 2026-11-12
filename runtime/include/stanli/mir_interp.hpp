@@ -1,15 +1,17 @@
 // The MIR interpreter: one evaluator for every place stanli executes MIR
 // directly instead of lowering it to ops.
 //
-// Two call sites share it. The lowering runs it on `double` over the
+// Six roles share it. The lowering runs it on `double` over the
 // prepare_data statements (transformed data is DataOnly, so it reduces to
-// concrete values before any op is emitted) and on data-only conditions and
-// size expressions inside log_prob. The ODE kernels run it on `double` and
-// on `var` to evaluate a right-hand side at whatever times the integrator
-// picks, when ode_prog could not compile the body (see ode_prog.cpp for the
-// fast path). One interpreter means one definition of indexing,
-// broadcasting, statement semantics, and the function vocabulary; a
-// function that works in transformed data works in an ODE body and vice
+// concrete values before any op is emitted) and on data-only conditions,
+// size expressions and admission probes inside log_prob. The solver kernels
+// (ODE, DAE, algebra solver, quadrature) run it on `double` and on `var` to
+// evaluate a callback at whatever points the solver picks, when ode_prog
+// could not compile the body (see ode_prog.cpp for the fast path). The
+// interpreted write_array, standalone Stan functions, and constrained
+// initialization use it too. One interpreter means one definition of
+// indexing, broadcasting, statement semantics, and the function vocabulary;
+// a function that works in transformed data works in an ODE body and vice
 // versa.
 //
 // Values carry a real buffer, an int mirror where the value is integer, and
@@ -77,7 +79,7 @@ class MirInterp;
 
 // Host hooks, all optional. The lowering installs the first three; the
 // interpreted write_array installs the last two (they only fire on the
-// double instantiation); the ODE kernels install none.
+// double instantiation); the other roles install none.
 struct MirHooks {
   // Fetch a data variable by name (FnReadData and bare data-block decls).
   std::function<const DataMap::Entry*(const std::string&)> data;
@@ -921,11 +923,11 @@ class MirInterp {
 
   // A registered real-result builtin executes through the same graph kernel
   // every lowering backend dispatches to, so a registry entry plus a kernel
-  // is complete interpreter support; the named branches in eval_fun remain
-  // only as allocation-free fast paths. The interpreter stores every
-  // container column-major, arrays included, so unlike the graph layout
-  // there is no storage-order idata: an integer array and a real matrix
-  // already pair element for element.
+  // is complete interpreter support; the named branches in eval_fun
+  // (comparisons, scalar unaries, a few special forms) bypass it. The
+  // interpreter stores every container column-major, arrays included, so unlike
+  // the graph layout there is no storage-order idata: an integer array and a
+  // real matrix already pair element for element.
   Value builtin_kernel_eval(const mir::Expr& e, const BuiltinSpec& spec,
                             std::vector<Value> values) {
     BuiltinLayout layout;
@@ -1497,9 +1499,6 @@ class MirInterp {
     geometry.dims = std::move(dims);
     return geometry;
   }
-
-  // max-shifted log-sum-exp over a buffer; -inf on an empty or all
-  // -inf input rather than NaN.
 
   static Value from_entry(const DataMap::Entry& d) {
     if constexpr (std::is_same_v<T, double>) {
@@ -2437,9 +2436,6 @@ class MirInterp {
     }
     if (callable_transform(e.name, &transform) &&
         transform.arity == e.args.size()) {
-      if (transform.structured &&
-          transform.direction == TransformDirection::Unconstrain)
-        fail(e.name + ": structured inverse is unsupported", e.raw);
       std::vector<Value> a;
       a.reserve(e.args.size());
       for (const mir::Expr& arg : e.args) a.push_back(eval(arg));
@@ -3089,10 +3085,6 @@ class MirInterp {
           eval(e.args[2]).r.at(0), eval(e.args[3]).r.at(0))};
       return r;
     }
-    // Densities as plain functions (generated quantities use them freely:
-    // the hmm Viterbi recursions, log-likelihood columns). Elementwise
-    // with scalar broadcasting, summed, which is stan-math's vectorized
-    // semantics.
     // Scalar unaries from the shared list, so transformed data and
     // generated quantities accept exactly what the log-density path does.
     // Evaluate the table's value formula on doubles on every route. An ODE
@@ -3123,9 +3115,9 @@ class MirInterp {
     // Every remaining registered real-result builtin executes through its
     // graph kernel: a registry entry plus a kernel is complete interpreter
     // support for a new function, with no branch here. The named branches
-    // above are only allocation-free fast paths for the hot operators and
-    // unaries; integer results were answered by the shared integer
-    // evaluators earlier. Policy-shaped builtins resolve by name and arity
+    // above handle comparisons, scalar unaries and a few special forms;
+    // integer results were answered by the shared integer evaluators
+    // earlier. Policy-shaped builtins resolve by name and arity
     // so that hand-built MIR without numeric metadata still dispatches.
     if (const BuiltinSpec* ctor = shaped_builtin_spec(
             e.name, e.args.size(), BuiltinShapePolicy::Constructor))

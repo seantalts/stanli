@@ -6796,12 +6796,11 @@ int main() {
 
   // A container-valued normal_lpdf inside a data-dependent while loop
   // (unsupported_normal_lpdf_container, verbatim): the loop forces the call
-  // through the register machine's runtime-control region compiler, whose
-  // DENSITY opcode only ever bound one scalar per argument. DENSITY_VEC adds
-  // the container form, calling stan-math's own vectorized normal_lpdf over
-  // an Eigen::Map per container argument -- the same call CmdStan's
-  // generated code makes -- rather than summing N scalar calls by hand,
-  // which would round differently. No parameters, so the model has one lp:
+  // through the register machine's runtime-control region compiler, which
+  // emits one kernel CALL on the registered density, so stan-math's own
+  // vectorized normal_lpdf runs -- the same call CmdStan's generated code
+  // makes -- rather than N scalar calls summed by hand, which would round
+  // differently. No parameters, so the model has one lp:
   // N identical calls (the loop body does not touch y/mu/sigma), matched
   // against N stan::math::normal_lpdf<false> calls over the same data.
   {
@@ -6825,7 +6824,7 @@ int main() {
   }
 
   // The same, with a parameter feeding one container argument (`mu`, via
-  // `rep_row_vector`): DENSITY_VEC has to run correctly as var replay too,
+  // `rep_row_vector`): the density CALL has to run correctly as var replay too,
   // not just reproduce a data-only lp.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/densityvecgrad.json"));
