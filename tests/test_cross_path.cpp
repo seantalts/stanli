@@ -208,16 +208,12 @@ int main() {
          "at least 800 write_array columns are differenced against the "
          "interpreter, got " +
              std::to_string(wa_columns_compared));
-  // STANLI_ISLAND_ALWAYS has to still switch something: a renamed
+  // The island switches have to still switch something: a renamed
   // environment variable would make every comparison above compare a
   // configuration with itself, and nothing else in this file would notice.
-  //
-  // There is no matching floor for STANLI_NO_ISLAND, and the counter above
-  // says why: the carver's cost estimate declines on every fixture at the
-  // default settings (`no_island_dropped` is 0), so the switch has nothing
-  // to remove and cannot be shown working here. Fixtures are small by
-  // design and that is the right trade; the corpus run, where the carver
-  // does fire, is where that switch becomes observable.
+  expect(no_island_dropped >= 2,
+         "STANLI_NO_ISLAND removes islands somewhere, got " +
+             std::to_string(no_island_dropped));
   expect(island_always_gained >= 1,
          "STANLI_ISLAND_ALWAYS adds islands somewhere, got " +
              std::to_string(island_always_gained));
