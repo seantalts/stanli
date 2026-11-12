@@ -358,7 +358,7 @@ int main(int argc, char** argv) {
     const auto prepared = want_timings ? Clock::now() : Clock::time_point{};
     cfg.retain_draws = false;  // the callback already writes/retains all output
     auto chain_res =
-        stanli::run_nuts_chains(execs, cfg, n_threads, {}, {}, 1, {}, write);
+        stanli::run_nuts_chains(execs, cfg, n_threads, {}, 1, {}, write);
     const auto sampled = want_timings ? Clock::now() : Clock::time_point{};
     for (size_t c = 0; c < chain_res.size(); ++c) {
       output[c].csv->finish();

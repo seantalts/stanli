@@ -905,7 +905,7 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
       };
 
     std::vector<stanli::ChainResult> res = stanli::run_nuts_chains(
-        execs, cfg, opts->num_threads, {}, progress_observer, refresh, poll_fn,
+        execs, cfg, opts->num_threads, progress_observer, refresh, poll_fn,
         writer, opts->inits, mo.inv_metric);
 
     int failed = 0;
