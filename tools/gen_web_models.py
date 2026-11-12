@@ -23,6 +23,7 @@ import pathlib
 import sys
 import zipfile
 
+from corpus_inventory import corpus_cases
 from gen_docs import current_benchmark
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -60,24 +61,17 @@ def eligible(pdb):
     {model: (posterior meta, data bytes)}, deduplicated by model the way
     tools/corpus.py does it."""
     ver = json.loads(VERIFY_JSON.read_text())
-    seen, out = set(), {}
-    for pj in sorted((pdb / "posteriors").glob("*.json")):
-        meta = json.loads(pj.read_text())
-        model = meta["model_name"]
-        if model in seen:
-            continue
-        seen.add(model)
+    out = {}
+    for model, case in corpus_cases(pdb, "posteriordb").items():
         if ver.get(model, {}).get("status") != "VERIFIED":
             continue
-        stan = pdb / "models" / "stan" / f"{model}.stan"
-        dz = pdb / "data" / "data" / f"{meta['data_name']}.json.zip"
-        if not stan.exists() or not dz.exists():
+        if not case.source.exists() or not case.data.exists():
             continue
-        with zipfile.ZipFile(dz) as z:
+        with zipfile.ZipFile(case.data) as z:
             name = z.namelist()[0]
             if z.getinfo(name).file_size > MAX_DATA_BYTES:
                 continue
-            out[model] = (meta, z.read(name))
+            out[model] = (case.metadata, z.read(name))
     return out
 
 

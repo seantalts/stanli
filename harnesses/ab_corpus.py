@@ -12,15 +12,15 @@ folding, islands), which is the end-to-end check; pass one variable to
 attribute a divergence.
 Needs build-rel/ built.
 """
-import json
 import os
 import pathlib
 import subprocess
 import sys
 import tempfile
-import zipfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tools"))
+from corpus_inventory import corpus_cases, materialize_data
 CHECK = REPO / "build-rel/stanli_check"
 DUMP = REPO / "build-rel/dump_ops"
 STANC = REPO / "deps/stanc3/stanc"
@@ -39,7 +39,7 @@ def run(cmd, env=None, timeout=TIMEOUT):
 
 
 def main():
-    pdb = pathlib.Path(sys.argv[1]) / "posterior_database"
+    pdb = pathlib.Path(sys.argv[1])
     filt = (sys.argv[sys.argv.index("--filter") + 1]
             if "--filter" in sys.argv else "")
     # Each entry is VAR or VAR=VALUE (default value "1").
@@ -53,25 +53,17 @@ def main():
     print(f"A = passes off ({', '.join(disable)}), B = passes on")
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_ab_"))
 
-    pairs = {}
-    for pj in sorted((pdb / "posteriors").glob("*.json")):
-        meta = json.loads(pj.read_text())
-        pairs.setdefault(meta["model_name"], meta["data_name"])
-
     n_same_fail = n_ok_same_graph = n_ok_rerolled = 0
     worst = (0.0, "")
     rerolled = []
     flags = []
-    for model, dname in sorted(pairs.items()):
+    for model, case in corpus_cases(pdb, "posteriordb").items():
         if filt and filt not in model:
             continue
-        stan = pdb / "models" / "stan" / f"{model}.stan"
-        dz = pdb / "data" / "data" / f"{dname}.json.zip"
-        if not stan.exists() or not dz.exists():
+        stan = case.source
+        if not stan.exists() or not case.data.exists():
             continue
-        dj = tmp / f"{model}.json"
-        with zipfile.ZipFile(dz) as z:
-            dj.write_bytes(z.read(z.namelist()[0]))
+        dj = materialize_data(case, tmp)
 
         a = run([str(CHECK), str(stan), str(dj)], disable)
         b = run([str(CHECK), str(stan), str(dj)])

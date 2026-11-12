@@ -40,9 +40,9 @@ import struct
 import subprocess
 import sys
 import tempfile
-import zipfile
 
-from corpus_inventory import corpus_cases, local_cases, source_digest
+from corpus_inventory import (CorpusCase, corpus_cases, local_cases, materialize_data,
+                              source_digest)
 import toolchain
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -312,10 +312,7 @@ def model_files(model, ref, pdb, tmp):
     dz = pdb / "data" / "data" / f"{ref['data']}.json.zip"
     if not stan.exists() or not dz.exists():
         return stan, dz
-    dj = tmp / f"{model}_data.json"
-    with zipfile.ZipFile(dz) as z:
-        dj.write_bytes(z.read(z.namelist()[0]))
-    return stan, dj
+    return stan, materialize_data(CorpusCase(model, stan, dz, "posteriordb", {}), tmp)
 
 
 def ulp_distance(a, b):

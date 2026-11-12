@@ -23,7 +23,8 @@ sys.path.insert(0, str(REPO))
 from harnesses.corpus_bench import (COLS, PROTOCOL, row_line,
     upgrade_header, Runner, PhaseFailure, parse_timing, check_pair,
     summarize_pairs, paired_order, open_run, measure_model,
-    benchmark_cases, materialize_data, build_model, run_config)
+    benchmark_cases, build_model, run_config)
+from corpus_inventory import CorpusCase, materialize_data
 
 
 class EnvironmentTests(unittest.TestCase):
@@ -664,14 +665,14 @@ class CorpusInventoryTests(unittest.TestCase):
     def test_plain_and_zipped_data_materialize_identically(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
-            plain, zipped, result = root / "data.json", root / "data.json.zip", root / "out.json"
+            plain, zipped = root / "data.json", root / "data.json.zip"
             payload = b'{"N": 2, "y": [0.25, 0.75]}\n'
             plain.write_bytes(payload)
             with zipfile.ZipFile(zipped, "w") as archive:
                 archive.writestr("data.json", payload)
             for source in [plain, zipped]:
-                materialize_data(source, result)
-                self.assertEqual(result.read_bytes(), payload)
+                case = CorpusCase("m", root / "m.stan", source, "posteriordb", {})
+                self.assertEqual(materialize_data(case, root).read_bytes(), payload)
 
 
 

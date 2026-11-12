@@ -17,15 +17,15 @@ Usage: python3 harnesses/island_ab.py deps/posteriordb [--filter SUBSTR]
                                       [--timeout SEC]
 Run from the worktree root with build-rel/ built.
 """
-import json
 import os
 import pathlib
 import subprocess
 import sys
 import tempfile
-import zipfile
 
 REPO = pathlib.Path.cwd()
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "tools"))
+from corpus_inventory import corpus_cases, materialize_data
 CHECK = REPO / "build-rel/stanli_check"
 BENCH = REPO / "build-rel/bench_grad"
 DUMP = REPO / "build-rel/dump_ops"
@@ -87,35 +87,27 @@ def n_ops(sexp, dj, env, timeout):
 
 
 def main():
-    pdb = pathlib.Path(sys.argv[1]) / "posterior_database"
+    pdb = pathlib.Path(sys.argv[1])
     filt = (sys.argv[sys.argv.index("--filter") + 1]
             if "--filter" in sys.argv else "")
     timeout = int(sys.argv[sys.argv.index("--timeout") + 1]
                   if "--timeout" in sys.argv else 300)
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_island_"))
 
-    pairs = {}
-    for pj in sorted((pdb / "posteriors").glob("*.json")):
-        meta = json.loads(pj.read_text())
-        pairs.setdefault(meta["model_name"], meta["data_name"])
-
     rows = []
     mismatched = []
-    for model, dname in sorted(pairs.items()):
+    for model, case in corpus_cases(pdb, "posteriordb").items():
         if filt and filt not in model:
             continue
-        stan = pdb / "models" / "stan" / f"{model}.stan"
-        dz = pdb / "data" / "data" / f"{dname}.json.zip"
-        if not stan.exists() or not dz.exists():
+        stan = case.source
+        if not stan.exists() or not case.data.exists():
             continue
         sexp = tmp / f"{model}.sexp"
         r = run([str(STANC), "--O1", "--debug-optimized-mir", str(stan)], None, timeout)
         if r is None or not r.stdout:
             continue
         sexp.write_text(r.stdout)
-        dj = tmp / f"{model}.json"
-        with zipfile.ZipFile(dz) as z:
-            dj.write_bytes(z.read(z.namelist()[0]))
+        dj = materialize_data(case, tmp)
 
         # Does a region compile at all? Carving replaces a run of ops with
         # one island plus its extractions, so the op count drops. (Looking
