@@ -2471,6 +2471,76 @@ bool region_runtime_control(const mir::Stmt& root) const {
   return statement(root, 0);
 }
 
+static bool same_mir_expr(const mir::Expr& a, const mir::Expr& b) {
+  if (a.kind != b.kind || a.name != b.name || a.lit_i != b.lit_i ||
+      a.lit != b.lit || a.args.size() != b.args.size())
+    return false;
+  for (size_t i = 0; i < a.args.size(); ++i)
+    if (!same_mir_expr(a.args[i], b.args[i])) return false;
+  return true;
+}
+// Whether an iteration of `loop`, or of a loop inside it, can read what an
+// earlier iteration wrote: a name from outside the loop is assigned in the
+// body and read other than at an index, shared with every write of it,
+// that depends on the loop variable.
+static bool loop_carries_value(const mir::Stmt& loop) {
+  std::set<std::string> locals;
+  for (const auto& child : loop.body) collect_loop_locals(child, &locals);
+  std::map<std::string, std::vector<const std::vector<mir::Expr>*>> writes;
+  bool inner = false;
+  std::function<void(const mir::Stmt&)> collect = [&](const mir::Stmt& s) {
+    if (s.kind == mir::Stmt::Assignment && !locals.count(s.lhs))
+      writes[s.lhs].push_back(&s.lhs_idx);
+    if (s.kind == mir::Stmt::For && loop_carries_value(s)) inner = true;
+    for (const auto& child : s.body) collect(child);
+  };
+  for (const auto& child : loop.body) collect(child);
+  if (inner) return true;
+  const auto own_element = [&](const mir::Expr& indexed) {
+    const size_t rank = indexed.args.size() - 1;
+    for (size_t k = 0; k < rank; ++k) {
+      const mir::Expr& at = indexed.args[k + 1];
+      if (!expr_references(at, loop.loopvar)) continue;
+      bool shared = true;
+      for (const auto* idx : writes.at(indexed.args[0].name))
+        shared = shared && idx->size() == rank && same_mir_expr((*idx)[k], at);
+      if (shared) return true;
+    }
+    return false;
+  };
+  bool carried = false;
+  std::function<void(const mir::Expr&)> expression = [&](const mir::Expr& e) {
+    if (carried) return;
+    if (e.kind == mir::Expr::Indexed && !e.args.empty() &&
+        e.args[0].kind == mir::Expr::Var && writes.count(e.args[0].name)) {
+      carried = !own_element(e);
+      for (size_t k = 1; k < e.args.size(); ++k) expression(e.args[k]);
+      return;
+    }
+    if (e.kind == mir::Expr::Var && writes.count(e.name)) carried = true;
+    for (const auto& a : e.args) expression(a);
+  };
+  std::function<void(const mir::Stmt&)> statement = [&](const mir::Stmt& s) {
+    mir::for_each_expr_of(s, expression);
+    for (const auto& child : s.body) statement(child);
+  };
+  if (!writes.empty())
+    for (const auto& child : loop.body) statement(child);
+  return carried;
+}
+// Unrolling pays when later passes fold the copies of the body into fewer,
+// wider operations. A value carried between iterations leaves a serial
+// chain they cannot fold, and once the write_array graph is this large each
+// unrolled operation costs several times more per draw than it does in a
+// small graph, while a retained loop replays at a flat cost per iteration.
+// covid19imperial's generated quantities unroll to 587k operations; with
+// them retained a draw is 2.6x faster.
+static constexpr size_t kRetainWriteArrayLoopOps = size_t{1} << 16;
+bool write_array_loop_retained(const mir::Stmt& s, int64_t lo, int64_t hi) {
+  return in_write_array && structured_policy == StructuredMode::Auto &&
+         g.ops.size() >= kRetainWriteArrayLoopOps && hi - lo + 1 >= 32 &&
+         !stmt_effectful(s) && loop_carries_value(s);
+}
 bool region_auto_profitable(
     const mir::Stmt& s,
     std::optional<std::pair<int64_t, int64_t>> exact_bounds) const {
@@ -2612,7 +2682,7 @@ bool try_lower_region(
   // Make the representation decision before constructing a trial graph.
   // In auto mode, incomplete cost information is evidence for nothing.
   if (!output_references && mode == StructuredMode::Auto &&
-      !region_auto_profitable(s, exact_bounds))
+      !retaining_write_array_loop && !region_auto_profitable(s, exact_bounds))
     return false;
   const bool force = mode == StructuredMode::Force && !output_references;
   const bool profitable_unroll = region_unroll_profitable(s);
@@ -2709,6 +2779,13 @@ bool try_lower_region(
       std::vector<int> candidate_inputs;
       std::vector<std::string> writes;
       assigned_names(s, &writes);
+      // Replay compares a data-only import with the value it recorded, so a
+      // loop that updates one records again on every draw.
+      if (retaining_write_array_loop)
+        for (const auto& name : writes)
+          if (const auto item = scope.find(name);
+              item != scope.end() && item->second.si.param_free)
+            trial.fail("write_array loop updates a data-only value");
       std::set<std::string> locals;
       collect_loop_locals(s, &locals);
       for (const auto& name : writes)
@@ -2808,7 +2885,10 @@ bool try_lower_region(
             if (self(self, child)) return true;
           return false;
         };
-        if (!retains_control(retains_control, p->root))
+        const bool control = retains_control(retains_control, p->root);
+        if (retaining_write_array_loop && control)
+          fail("write_array loop retains runtime control");
+        if (!retaining_write_array_loop && !control)
           fail("automatic candidate has no retained runtime control");
       }
       const auto has_target = [&](const auto& self,

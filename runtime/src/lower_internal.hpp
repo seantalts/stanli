@@ -928,6 +928,9 @@ struct Lowering {
   // to emit, not values to differentiate.
   bool in_write_array = false;
   bool write_array_known_static = false;
+  // Set while try_lower_region considers a write_array loop that
+  // write_array_loop_retained selected.
+  bool retaining_write_array_loop = false;
   // The declared emission order, and the last name emitted from it: what a
   // write whose variable --O1 substituted away is called.
   const std::vector<std::string>* output_vars = nullptr;
