@@ -1406,11 +1406,16 @@ silently. Three layers:
   with the shipped pipeline at three points. After a change to a pass, run
   it over posteriordb too, with a scaled-error tolerance because the passes
   reassociate:
-  `python3 -c 'import sys,tempfile,subprocess; sys.path.insert(0,"tools"); from corpus_inventory import corpus_cases, materialize_data; t=tempfile.mkdtemp(); [subprocess.run(["build-rel/stanli_check",str(c.source),str(materialize_data(c,t)),"--cross","--cross-rel-tol","1e-11"]) for c in corpus_cases("deps/posteriordb","posteriordb").values()]' | grep -E '^CROSS (FAIL|SKIP)'`.
+  `python3 -c 'import sys,tempfile,subprocess; sys.path.insert(0,"tools"); from corpus_inventory import corpus_cases, materialize_data; t=tempfile.mkdtemp(); [subprocess.run(["build-rel/stanli_check",str(c.source),str(materialize_data(c,t)),"--cross","--cross-rel-tol","1e-11","--cross-corpus"]) for c in corpus_cases("deps/posteriordb","posteriordb").values()]' | grep -E '^CROSS (FAIL|SKIP)'`.
   `--cross-rel-tol` passes a finite mismatch when |a - b| / max(|a|, 1e-300)
-  is at most the bound. Today only `sir` is reported, as skipped (out of
-  support at every draw). Without the tolerance 43 of the 120 models
-  report bitwise divergences, the largest 3.8e-13.
+  is at most the bound. `--cross-corpus` adds stanli_check's default point
+  and a config with rerolling, in-place, constant folding and islands off
+  together. Today `sir` is skipped (out of support at every draw) and
+  `ldaK5` fails at the default point under both pass-off configs, by up to
+  1.25e-9 in `grad[3198]`: that entry is 1.8e-6 against gradient entries up
+  to 180, and its absolute error of 2.2e-15 is reassociation error left
+  behind by cancellation. Without the tolerance 45 of the 120 models report
+  bitwise divergences, the largest elsewhere 8.7e-13.
 - Direct verification against CmdStan (`tools/verify_sample.py`) for
   models a change affects.
 
