@@ -479,6 +479,370 @@ static void reference(const double* q, double* lp_out, double* grad_out) {
 
 // Keep the planner's small-loop refusal and large-loop vector accumulation
 // decision exact. The cancellation inputs distinguish the two reverse orders.
+struct ConstantPoint {
+  std::vector<double> q;
+  double lp;
+  std::vector<double> grad;
+};
+
+struct ConstantCase {
+  const char* what;
+  const char* stem;
+  stanli::DataMap data;
+  std::vector<ConstantPoint> points;
+  int n_unconstrained = -1;
+  bool island = false;
+};
+
+static stanli::DataMap fixture_json(const std::string& stem) {
+  return stanli::DataMap::from_json(slurp("tests/fixtures/" + stem + ".json"));
+}
+
+template <class F>
+static stanli::DataMap make_data(F&& fill) {
+  stanli::DataMap d;
+  fill(d);
+  return d;
+}
+
+// Each case compiles one fixture and evaluates its points in order on one
+// executor; lp and the listed gradient entries are compared bitwise.
+static void test_fixture_constants() {
+  using stanli::DataMap;
+  const auto shape_point = [](double theta) {
+    std::vector<double> q(1, theta);
+    q.insert(q.end(), 6, 0.0);
+    q.insert(q.end(), 4, 0.25);
+    return q;
+  };
+  const std::vector<ConstantCase> cases = {
+      // A data container passed beside an active actual cannot be folded as
+      // one call. It remains observable while the UDF is inlined and must bind
+      // with the same value and activity as an ordinary data argument.
+      {"call argument cache",
+       "call_argument_cache",
+       make_data([](DataMap& d) {
+         d.set_int("N", 3);
+         d.set_real_array("x", {1.25, -0.5, 2.0}, {3});
+       }),
+       {{{-0.75}, 0.5, {1.0}}}},
+      // An integer local can be assigned a comparison of data-only real
+      // locals. This takes lowering's integer evaluator because the
+      // surrounding ternary also controls compile-time state.
+      {"int real compare",
+       "int_real_compare",
+       fixture_json("int_real_compare"),
+       {{{0.1}, -0.5 * 0.1 * 0.1 + 0.1, {-0.1 + 1.0}}}},
+      // x[idx] = rhs with a repeated index: the last write to a position
+      // wins, so a scatter must be ordered element writes, not one fused
+      // store. idx = {4, 1, 4}: x[1] = q[1], x[4] = q[2], and q[0] reaches
+      // nothing.
+      {"scatter",
+       "scatter_assign",
+       fixture_json("scatter_assign"),
+       {{{0.1, 0.0, -0.1},
+         -0.5 * (0.01 + 0.01) + 0.01,
+         {-0.1, -0.0 + 2 * 0.0, 0.1 + 2 * -0.1}}}},
+      // A[i, lo:hi] on a 2-D int array: graph order is outer-major, so a
+      // wrong offset here reads a neighbouring row and stays silent.
+      {"arr2d rowrange",
+       "arr2d_rowrange",
+       fixture_json("arr2d_rowrange"),
+       {{{0.1},
+         -0.5 * 0.1 * 0.1 + (1 + 2 + 5 + 6 + 7 + 9) * 0.1,
+         {-0.1 + (1 + 2 + 5 + 6 + 7 + 9)}}}},
+      // An uninitialized UDF local still denotes a value before its first
+      // write. A data-dependent count that comes out zero leaves the local
+      // zero-width, so the guarded loop that fills it performs no indexed
+      // assignment and the declaration is the only mention the lowering ever
+      // sees. The name still has to return an (empty) array rather than fail
+      // as unknown. No match means no `selected` term: std_normal on theta and
+      // nothing else.
+      {"empty UDF local",
+       "udf_empty_local",
+       make_data([](DataMap& d) {
+         d.set_int("N", 3);
+         d.set_int_array("input", {4, 5, 6});  // nothing equals 9
+       }),
+       {{{0.1}, -0.5 * 0.1 * 0.1, {-0.1}}}},
+      // A data-only `if` on a UDF local that lives in the graph. DataOnly is
+      // an adlevel, not a promise that the interpreter can see the values, so
+      // the condition has to compile to a region program like any other
+      // unfoldable guard. Positive entries doubled, the holes taken from the
+      // input unchanged: 2 + (-2) + (-3) + 8.
+      {"local matrix condition",
+       "localmat_cond",
+       DataMap::from_json(R"({"m": [[1.0,-2.0],[-3.0,4.0]]})"),
+       {{{0.1}, -0.5 * 0.1 * 0.1 + 5.0 * 0.1, {-0.1 + 5.0}}}},
+      // A read-only live-in can still be a declared local with no preceding
+      // assignment. Ordinary lowering gives it Stan's uninitialized NaN value;
+      // the necessity-island binder must materialize the same slot rather
+      // than rejecting the name. The negative arm avoids reading it and
+      // remains a finite identity function, while the positive arm proves the
+      // NaN fill is visible when selected.
+      {"uninitialized island",
+       "paramcond_uninitialized",
+       DataMap(),
+       {{{-0.25}, -0.25, {1.0}},
+        {{0.25}, std::numeric_limits<double>::quiet_NaN(), {}}}},
+      // stanc's O1 inliner lowers a UDF return through an early-return flag
+      // and Break statements inside a single-iteration loop. Both return paths
+      // must leave that synthetic loop without escaping the caller's
+      // surrounding control flow.
+      {"inlined early return 0",
+       "early_return",
+       make_data([](DataMap& d) { d.set_int("first", 0); }),
+       {{{0.4}, 3.0 * 0.4, {3.0}}}},
+      {"inlined early return 1",
+       "early_return",
+       make_data([](DataMap& d) { d.set_int("first", 1); }),
+       {{{0.4}, 2.0 * 0.4, {2.0}}}},
+      // rows() in a necessity island reads the logical matrix geometry rather
+      // than being rejected as an unknown register-machine function.
+      {"parameter-condition rows",
+       "paramcond_rows",
+       DataMap(),
+       {{{0.4, 0, 0, 0, 0, 0, 0}, 0.8, {2.0, 0, 0, 0, 0, 0, 0}},
+        {{-0.4, 0, 0, 0, 0, 0, 0}, -0.4, {1.0}}}},
+      // The rest of the shape queries, in the integer positions: a declared
+      // extent, an integer local, a loop bound. Each is a constant the region
+      // reads off the logical view; before, only a shape query in a
+      // real-valued context was answered, and `matrix[rows(m), cols(m)] out;`
+      // inside a parameter-dependent region was refused as an unknown integer
+      // function. num_elements(y) + cols(y) over a 2x3 matrix is 9, and the
+      // loop runs size(a) = 4 times over the array.
+      {"parameter-condition shape",
+       "paramcond_shape",
+       DataMap(),
+       {{shape_point(0.5), 5.5, {9.0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1}},
+        {shape_point(-0.5), -0.5, {1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}}},
+      // An integer assigned inside a parameter-dependent region. `n = 2` runs
+      // before the break in a loop that runs once, so the fold is sound and
+      // the lowering takes the value back for `target += n * theta + z`:
+      // without that, the statements after the region kept reading the
+      // pre-region 1, silently, in both lp and the gradient. `k` is folded
+      // within the region, where the reads are the ones the fold belongs to.
+      // The break skips k and z: 2 * theta. Without the break, z is
+      // k * theta with k folded to 4: 6 * theta.
+      {"parameter-condition int",
+       "paramcond_int",
+       DataMap(),
+       {{{0.5}, 1.0, {2.0}}, {{-0.5}, -3.0, {6.0}}}},
+      // The same integer where the assignment may not run. It becomes a
+      // runtime scalar live-out: the taken arm writes 2, while the untaken arm
+      // preserves the pre-region 1 for the target statement that follows.
+      {"conditional integer live-out",
+       "paramcond_intbranch",
+       DataMap(),
+       {{{0.5}, 3.5, {7.0}}, {{-0.5}, -0.5, {1.0}}}},
+      // The comparisons and the logical operators as compile-time integers:
+      // the `while` condition decides the trip count, and each integer local
+      // is a comparison. Before this the region compiler knew five integer
+      // functions -- the four arithmetic ones and unary minus -- so any of
+      // these refused the whole region by name. The loop stops on `hits < 3`
+      // with hits = 3, so the coefficient is 3 + 1 + 1 + 1 + 0.
+      {"parameter-condition int ops",
+       "paramcond_intops",
+       make_data([](DataMap& d) { d.set_int("k", 2); }),
+       {{{0.5}, 3.0, {6.0}}, {{-0.5}, -0.5, {1.0}}}},
+      // Integer reads the region cannot answer from its own tables: an
+      // element of a data array at rank two, and a literal array's size and
+      // elements -- the form stanc's inliner leaves where it substituted an
+      // `array[] int` argument. Before this the region compiler could index
+      // only a one-dimensional integer it had folded itself, so each of these
+      // refused the whole region. Rows 1 and 3 match on the second column,
+      // contributing 1 + 3; the literal array contributes 8, row two
+      // contributes 2 + 7, and the strided row replacement contributes 9 + 8.
+      {"parameter-condition int array",
+       "paramcond_intarray",
+       make_data([](DataMap& d) {
+         // Column-major, as the JSON reader stores a two-dimensional array.
+         d.set_int_array("idx", {1, 2, 3, 5, 7, 5}, {3, 2});
+       }),
+       {{{0.5}, 323992.0, {647984.0}}, {{-0.5}, -0.5, {1.0}}}},
+      // A parameter-dependent region whose live-outs are all zero-width. The
+      // dimension table gives the matrices no extent, so the region has
+      // nothing to carry out and no island runs; with an extent the same
+      // model compiles the ordinary way. Refusing the empty one as a region
+      // that "produces nothing" turned a model's own data into a compile
+      // error -- that message is for a region that found no live-out at all.
+      {"parameter-condition empty 0",
+       "paramcond_empty",
+       make_data([](DataMap& d) { d.set_int("n", 0); }),
+       {{{0.5}, 0.5, {1.0}}, {{-0.5}, -0.5, {1.0}}}},
+      {"parameter-condition empty 2",
+       "paramcond_empty",
+       make_data([](DataMap& d) { d.set_int("n", 2); }),
+       {{{0.5}, 0.5, {1.0}}, {{-0.5}, -0.5, {1.0}}}},
+      // rep_vector inside a region: a run the compiler fills, at an extent it
+      // knows. The repeated parameter is the part worth checking -- the
+      // gradient is the broadcast's, every element adding into the one cell
+      // the value came from -- and the empty extent has to stay empty.
+      // 3 * theta from the repeated parameter, 3 * 0.5 from the constant.
+      {"parameter-condition rep_vector",
+       "paramcond_repvector",
+       make_data([](DataMap& d) { d.set_int("n", 3); }),
+       {{{0.5}, 3.0, {3.0}}, {{-0.5}, -0.5, {1.0}}}},
+      {"parameter-condition rep_vector empty",
+       "paramcond_repvector",
+       make_data([](DataMap& d) { d.set_int("n", 0); }),
+       {{{0.5}, 0.0, {0.0}}}},
+      // log1p_exp in a region, on its own opcode. Both the value and the
+      // derivative are the expressions stan-math uses, which is what keeps
+      // the region's backward, the var replay and the graph's OP_LOG1P_EXP
+      // agreeing to the bit -- so the expectations here are those same calls
+      // rather than decimals.
+      {"parameter-condition log1p_exp",
+       "paramcond_log1pexp",
+       DataMap(),
+       {{{0.5}, stan::math::log1p_exp(1.0), {2.0 * stan::math::inv_logit(1.0)}},
+        {{-0.5}, stan::math::log1p_exp(-0.5), {stan::math::inv_logit(-0.5)}}}},
+      // A runtime-selected break targets the surrounding loop, so the loop and
+      // conditional must share one necessity island. The positive arm exits
+      // before the increment; the negative arm executes all three iterations.
+      {"parameter-condition break",
+       "paramcond_break",
+       DataMap(),
+       {{{0.4}, 0.0, {0.0}}, {{-0.4}, 3.0 * -0.4, {3.0}}}},
+      // The scan that decides whether a data-bounded for loop must share a
+      // structured region with a runtime-selected break evaluates data-only
+      // conditions under each loop-variable binding. In particular, a
+      // zero-trip loop must never inspect idx[ri], and a later iteration can
+      // be the first one that contains the runtime break.
+      {"zero-trip runtime-break scan",
+       "runtime_break_data_loop",
+       make_data([](DataMap& d) {
+         d.set_int("N", 0);
+         d.set_int_array("idx", {});
+       }),
+       {{{0.4}, 0.0, {0.0}}}},
+      {"later runtime break",
+       "runtime_break_data_loop",
+       make_data([](DataMap& d) {
+         d.set_int("N", 2);
+         d.set_int_array("idx", {0, 1});
+       }),
+       {{{0.4}, 0.4, {1.0}}, {{-0.4}, -0.8, {2.0}}}},
+      // The same region written with `~`. Runtime density calls now use the
+      // graph kernel ABI, including its argument-activity mask, so the propto
+      // instantiation drops exactly the constants that generated Stan does.
+      {"runtime propto",
+       "paramcond_tilde",
+       make_data([](DataMap& d) { d.set_real("y", 1.75); }),
+       {{{0.4}, -0.5 * (1.75 - 0.4) * (1.75 - 0.4), {1.75 - 0.4}},
+        {{-0.4}, -0.5 * (1.75 - 0.4) * (1.75 - 0.4), {-(1.75 - 0.4)}}}},
+      // A transformed-data real passed to a recursive UDF inside parameter-
+      // dependent control flow remains known. A complete pure call is
+      // evaluated once by the data interpreter instead of requiring a finite
+      // expansion of its recursive call tree, while the surrounding branch
+      // remains an island.
+      {"known-real UDF",
+       "known_real_udf",
+       DataMap(),
+       {{{0.25}, -0.5 * 0.25 * 0.25, {-0.25}}},
+       1,
+       true},
+      // Forty recursive steps exceed ProgramCompiler's inlining budget but
+      // stay within the MIR interpreter's supported call depth. This is the
+      // regression boundary: concrete pure recursion must use the latter
+      // rather than fail while trying to manufacture a finite register call
+      // stack.
+      {"deep known-real UDF",
+       "known_real_udf_deep",
+       DataMap(),
+       {{{0.25}, -0.5 * 0.25 * 0.25, {-0.25}}},
+       1,
+       true},
+      // target() is a stateful read of the density accumulated at that source
+      // point. The first read lowers directly into the graph; the reads in the
+      // parameter-dependent branch (including one in an inlined _lp UDF)
+      // receive the graph prefix as an island live-in while publishing only
+      // their local delta back to the model target.
+      {"target-read",
+       "target_read",
+       DataMap(),
+       {{{-2.0}, -2.5, {2.5}}, {{2.0}, 2.0, {-5.0}}},
+       1,
+       true},
+      // A higher-order callback inside parameter-dependent control flow uses
+      // the same argument binder and UDF inliner as an ordinary call. Serial
+      // reduce_sum supplies the complete slice and synthesized bounds while
+      // its shared real argument remains differentiable.
+      {"reduce_sum",
+       "reduce_sum_region",
+       DataMap(),
+       {{{-2.0}, -2.0, {2.0}}, {{2.0}, 10.0, {10.0}}},
+       1,
+       true},
+      // Serial map_rect has statically-shaped jobs, so a runtime-control
+      // program expands them into ordinary callback invocations and
+      // concatenates their vector results. Shared and per-job parameters
+      // retain their adjoints; each real/integer data row is bound to the
+      // matching callback call.
+      {"map_rect",
+       "map_rect_region",
+       DataMap(),
+       {{{-1.0, 2.0}, 265.5, {1.0, 102.0}}, {{1.0, 2.0}, 533.5, {-1.0, 206.0}}},
+       2,
+       true},
+      // Retained higher-order algorithms use the same graph-kernel CALL
+      // adapter as regular functions. Its owned callback specification remains
+      // attached to the runtime region and its input activity mask preserves
+      // the solver's contract that only theta, not the initial guess, is
+      // differentiated.
+      {"algebra",
+       "algebra_region",
+       DataMap(),
+       {{{-1.0, 2.0}, -2.5, {1.0, -2.0}}, {{1.0, 2.0}, 5.5, {-1.0, 2.0}}},
+       2,
+       true},
+      // Modern algebra solvers, including explicit-control variants, use their
+      // runtime-control implementation both as a direct graph producer and
+      // under a parameter-dependent branch.
+      {"shared algebra",
+       "algebra_shared",
+       DataMap(),
+       {{{-1.0, 2.0}, 5.5, {1.0, 2.0}}, {{1.0, 2.0}, 13.5, {-1.0, 6.0}}},
+       2},
+      // Every ODE frontend uses the existing OP_ODE kernel from runtime
+      // control. A zero RHS makes all solver answers exact and exposes whether
+      // initial state and callback-parameter activity are wired correctly.
+      {"ODE",
+       "ode_region",
+       DataMap(),
+       {{{-1.0, 2.0, 3.0}, -7.0, {1.0, -2.0, -3.0}},
+        {{1.0, 2.0, 3.0}, 15.0, {-1.0, 9.0, -3.0}}},
+       3,
+       true},
+  };
+  for (const ConstantCase& c : cases) {
+    const std::string what = c.what;
+    stanli::CompiledModel cm = stanli::compile_model(
+        slurp(std::string("tests/fixtures/") + c.stem + ".tmir.sexp"), c.data);
+    if (c.n_unconstrained >= 0)
+      check(cm.n_unconstrained == c.n_unconstrained, what + " parameter width");
+    if (c.island)
+      check(count_opcode(cm, stanli::OP_ISLAND) > 0, what + " runtime island");
+    stanli::Executor ex(std::move(cm.graph));
+    cm.bind(ex);
+    const size_t n = c.points.front().q.size();
+    check(ex.n_params() == static_cast<int64_t>(n), what + " parameter count");
+    std::vector<double> grad(n, 0.0);
+    for (size_t p = 0; p < c.points.size(); ++p) {
+      const ConstantPoint& point = c.points[p];
+      const std::string at = what + " point " + std::to_string(p);
+      std::copy(point.q.begin(), point.q.end(), ex.params_data());
+      const double lp = ex.gradient(grad.data());
+      if (std::isnan(point.lp))
+        check(std::isnan(lp), at + " lp is NaN");
+      else
+        expect_eq(at + " lp", lp, point.lp);
+      for (size_t i = 0; i < point.grad.size(); ++i)
+        expect_eq(at + " grad " + std::to_string(i), grad[i], point.grad[i]);
+    }
+  }
+}
+
 static void test_bounded_specialization() {
   using namespace stanli;
   const auto mir = slurp("tests/fixtures/bounded_control.tmir.sexp");
@@ -1633,22 +1997,7 @@ int main() {
     stan::math::recover_memory();
   }
 
-  // A data container passed beside an active actual cannot be folded as one
-  // call. It remains observable while the UDF is inlined and must bind with
-  // the same value and activity as an ordinary data argument.
-  {
-    DataMap d;
-    d.set_int("N", 3);
-    d.set_real_array("x", {1.25, -0.5, 2.0}, {3});
-    CompiledModel cm =
-        compile_model(slurp("tests/fixtures/call_argument_cache.tmir.sexp"), d);
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    ex.params_data()[0] = -0.75;
-    double grad = 0.0;
-    expect_eq("call argument cache lp", ex.gradient(&grad), 0.5);
-    expect_eq("call argument cache grad", grad, 1.0);
-  }
+  test_fixture_constants();
 
   // Transformed-data While loop with a short-circuit guard, append_row.
   {
@@ -1818,23 +2167,6 @@ int main() {
           "while loops lower as three control islands on the legacy path");
   }
 
-  // An integer local can be assigned a comparison of data-only real locals.
-  // This takes lowering's integer evaluator because the surrounding ternary
-  // also controls compile-time state.
-  {
-    const DataMap d =
-        DataMap::from_json(slurp("tests/fixtures/int_real_compare.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/int_real_compare.tmir.sexp"), d);
-    Executor lex(std::move(lm.graph));
-    lm.bind(lex);
-    lex.params_data()[0] = 0.1;
-    double grad = 0;
-    const double lp = lex.gradient(&grad);
-    expect_eq("int real compare lp", lp, -0.5 * 0.1 * 0.1 + 0.1);
-    expect_eq("int real compare grad", grad, -0.1 + 1.0);
-  }
-
   // The matrix vocabulary used by ctsem remains inside a genuinely runtime
   // while: no compile-time unroll participates in either the value or the
   // reverse pass.  Pin the shared register-program implementation against
@@ -1902,83 +2234,6 @@ int main() {
       }
       check(found, "structured matrix ops has score column");
     }
-  }
-
-  // x[idx] = rhs with a repeated index: the last write to a position wins,
-  // so a scatter must be ordered element writes, not one fused store.
-  {
-    const DataMap d =
-        DataMap::from_json(slurp("tests/fixtures/scatter_assign.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/scatter_assign.tmir.sexp"), d);
-    Executor lex(std::move(lm.graph));
-    lm.bind(lex);
-    const double q[3] = {0.1, 0.0, -0.1};
-    for (int i = 0; i < 3; ++i) lex.params_data()[i] = q[i];
-    double grad[3] = {0, 0, 0};
-    const double lp = lex.gradient(grad);
-    // idx = {4, 1, 4}: x[1] = q[1], x[4] = q[2], and q[0] reaches nothing.
-    expect_eq("scatter lp", lp, -0.5 * (0.01 + 0.01) + 0.01);
-    expect_eq("scatter grad dead", grad[0], -q[0]);
-    expect_eq("scatter grad x1", grad[1], -q[1] + 2 * q[1]);
-    expect_eq("scatter grad x4", grad[2], -q[2] + 2 * q[2]);
-  }
-
-  // A[i, lo:hi] on a 2-D int array: graph order is outer-major, so a wrong
-  // offset here reads a neighbouring row and stays silent.
-  {
-    const DataMap d =
-        DataMap::from_json(slurp("tests/fixtures/arr2d_rowrange.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/arr2d_rowrange.tmir.sexp"), d);
-    Executor lex(std::move(lm.graph));
-    lm.bind(lex);
-    lex.params_data()[0] = 0.1;
-    double grad = 0;
-    const double lp = lex.gradient(&grad);
-    const double sum = 1 + 2 + 5 + 6 + 7 + 9;
-    expect_eq("arr2d rowrange lp", lp, -0.5 * 0.1 * 0.1 + sum * 0.1);
-    expect_eq("arr2d rowrange grad", grad, -0.1 + sum);
-  }
-
-  // An uninitialized UDF local still denotes a value before its first write.
-  // A data-dependent count that comes out zero leaves the local zero-width,
-  // so the guarded loop that fills it performs no indexed assignment and the
-  // declaration is the only mention the lowering ever sees. The name still
-  // has to return an (empty) array rather than fail as unknown.
-  {
-    DataMap d;
-    d.set_int("N", 3);
-    d.set_int_array("input", {4, 5, 6});  // nothing equals 9
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/udf_empty_local.tmir.sexp"), d);
-    Executor lex(std::move(lm.graph));
-    lm.bind(lex);
-    lex.params_data()[0] = 0.1;
-    double grad = 0;
-    const double lp = lex.gradient(&grad);
-    // No match means no `selected` term: std_normal on theta and nothing else.
-    expect_eq("empty UDF local lp", lp, -0.5 * 0.1 * 0.1);
-    expect_eq("empty UDF local grad", grad, -0.1);
-  }
-
-  // A data-only `if` on a UDF local that lives in the graph. DataOnly is an
-  // adlevel, not a promise that the interpreter can see the values, so the
-  // condition has to compile to a region program like any other unfoldable
-  // guard.
-  {
-    DataMap d = DataMap::from_json(R"({"m": [[1.0,-2.0],[-3.0,4.0]]})");
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/localmat_cond.tmir.sexp"), d);
-    Executor lex(std::move(lm.graph));
-    lm.bind(lex);
-    lex.params_data()[0] = 0.1;
-    double grad = 0;
-    const double lp = lex.gradient(&grad);
-    // Positive entries doubled, the holes taken from the input unchanged:
-    // 2 + (-2) + (-3) + 8.
-    expect_eq("local matrix condition lp", lp, -0.5 * 0.1 * 0.1 + 5.0 * 0.1);
-    expect_eq("local matrix condition grad", grad, -0.1 + 5.0);
   }
 
   // Matrix block assignment through index lists. ridx repeats index 2, so
@@ -4611,226 +4866,6 @@ int main() {
     }
   }
 
-  // A read-only live-in can still be a declared local with no preceding
-  // assignment. Ordinary lowering gives it Stan's uninitialized NaN value;
-  // the necessity-island binder must materialize the same slot rather than
-  // rejecting the name. The negative arm avoids reading it and remains a
-  // finite identity function, while the positive arm proves the NaN fill is
-  // visible when selected.
-  {
-    CompiledModel cm = compile_model(
-        slurp("tests/fixtures/paramcond_uninitialized.tmir.sexp"), DataMap());
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    double grad = 0.0;
-    ex.params_data()[0] = -0.25;
-    const double finite_lp = ex.gradient(&grad);
-    expect_eq("uninitialized island finite arm lp", finite_lp, -0.25);
-    expect_eq("uninitialized island finite arm grad", grad, 1.0);
-    ex.params_data()[0] = 0.25;
-    const double nan_lp = ex.gradient(&grad);
-    check(std::isnan(nan_lp), "uninitialized island selected arm is NaN");
-  }
-
-  // stanc's O1 inliner lowers a UDF return through an early-return flag and
-  // Break statements inside a single-iteration loop. Both return paths must
-  // leave that synthetic loop without escaping the caller's surrounding
-  // control flow.
-  for (int first : {0, 1}) {
-    DataMap d;
-    d.set_int("first", first);
-    CompiledModel cm =
-        compile_model(slurp("tests/fixtures/early_return.tmir.sexp"), d);
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    ex.params_data()[0] = 0.4;
-    double grad = 0.0;
-    const double lp = ex.gradient(&grad);
-    const double scale = first ? 2.0 : 3.0;
-    expect_eq("inlined early return lp " + std::to_string(first), lp,
-              scale * 0.4);
-    expect_eq("inlined early return grad " + std::to_string(first), grad,
-              scale);
-  }
-
-  // rows() in a necessity island reads the logical matrix geometry rather
-  // than being rejected as an unknown register-machine function.
-  {
-    CompiledModel cm = compile_model(
-        slurp("tests/fixtures/paramcond_rows.tmir.sexp"), DataMap());
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    const int64_t n = ex.n_params();
-    check(n == 7, "parameter-condition rows parameter count");
-    for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = 0.0;
-    double grad[7] = {};
-    ex.params_data()[0] = 0.4;
-    const double positive_lp = ex.gradient(grad);
-    expect_eq("parameter-condition rows positive lp", positive_lp, 0.8);
-    expect_eq("parameter-condition rows positive theta grad", grad[0], 2.0);
-    for (int i = 1; i < 7; ++i)
-      expect_eq("parameter-condition rows matrix grad " + std::to_string(i),
-                grad[i], 0.0);
-    ex.params_data()[0] = -0.4;
-    const double negative_lp = ex.gradient(grad);
-    expect_eq("parameter-condition rows negative lp", negative_lp, -0.4);
-    expect_eq("parameter-condition rows negative theta grad", grad[0], 1.0);
-  }
-
-  // The rest of the shape queries, in the integer positions: a declared
-  // extent, an integer local, a loop bound. Each is a constant the region
-  // reads off the logical view; before, only a shape query in a
-  // real-valued context was answered, and `matrix[rows(m), cols(m)] out;`
-  // inside a parameter-dependent region was refused as an unknown integer
-  // function.
-  {
-    CompiledModel cm = compile_model(
-        slurp("tests/fixtures/paramcond_shape.tmir.sexp"), DataMap());
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    const int64_t n = ex.n_params();
-    check(n == 11, "parameter-condition shape parameter count");
-    for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = 0.0;
-    double grad[11] = {};
-    // num_elements(y) + cols(y) over a 2x3 matrix is 9, and the loop runs
-    // size(a) = 4 times over the array.
-    ex.params_data()[0] = 0.5;
-    for (int i = 7; i < 11; ++i) ex.params_data()[i] = 0.25;
-    const double positive_lp = ex.gradient(grad);
-    expect_eq("parameter-condition shape positive lp", positive_lp, 5.5);
-    expect_eq("parameter-condition shape theta grad", grad[0], 9.0);
-    for (int i = 1; i < 7; ++i)
-      expect_eq("parameter-condition shape matrix grad " + std::to_string(i),
-                grad[i], 0.0);
-    for (int i = 7; i < 11; ++i)
-      expect_eq("parameter-condition shape array grad " + std::to_string(i),
-                grad[i], 1.0);
-    ex.params_data()[0] = -0.5;
-    const double negative_lp = ex.gradient(grad);
-    expect_eq("parameter-condition shape negative lp", negative_lp, -0.5);
-    expect_eq("parameter-condition shape negative theta grad", grad[0], 1.0);
-    for (int i = 7; i < 11; ++i)
-      expect_eq(
-          "parameter-condition shape negative array grad " + std::to_string(i),
-          grad[i], 0.0);
-  }
-
-  // An integer assigned inside a parameter-dependent region. `n = 2` runs
-  // before the break in a loop that runs once, so the fold is sound and
-  // the lowering takes the value back for `target += n * theta + z`:
-  // without that, the statements after the region kept reading the
-  // pre-region 1, silently, in both lp and the gradient. `k` is folded
-  // within the region, where the reads are the ones the fold belongs to.
-  {
-    CompiledModel cm = compile_model(
-        slurp("tests/fixtures/paramcond_int.tmir.sexp"), DataMap());
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    double grad = 0.0;
-    // The break skips k and z: 2 * theta.
-    ex.params_data()[0] = 0.5;
-    expect_eq("parameter-condition int break lp", ex.gradient(&grad), 1.0);
-    expect_eq("parameter-condition int break grad", grad, 2.0);
-    // Without the break, z is k * theta with k folded to 4: 6 * theta.
-    ex.params_data()[0] = -0.5;
-    expect_eq("parameter-condition int no-break lp", ex.gradient(&grad), -3.0);
-    expect_eq("parameter-condition int no-break grad", grad, 6.0);
-  }
-
-  // The same integer where the assignment may not run. It becomes a runtime
-  // scalar live-out: the taken arm writes 2, while the untaken arm preserves
-  // the pre-region 1 for the target statement that follows.
-  {
-    CompiledModel cm = compile_model(
-        slurp("tests/fixtures/paramcond_intbranch.tmir.sexp"), DataMap());
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    double grad = 0.0;
-    ex.params_data()[0] = 0.5;
-    expect_eq("conditional integer live-out taken lp", ex.gradient(&grad), 3.5);
-    expect_eq("conditional integer live-out taken grad", grad, 7.0);
-    ex.params_data()[0] = -0.5;
-    expect_eq("conditional integer live-out untaken lp", ex.gradient(&grad),
-              -0.5);
-    expect_eq("conditional integer live-out untaken grad", grad, 1.0);
-  }
-
-  // The comparisons and the logical operators as compile-time integers:
-  // the `while` condition decides the trip count, and each integer local
-  // is a comparison. Before this the region compiler knew five integer
-  // functions -- the four arithmetic ones and unary minus -- so any of
-  // these refused the whole region by name.
-  {
-    DataMap d;
-    d.set_int("k", 2);
-    CompiledModel cm =
-        compile_model(slurp("tests/fixtures/paramcond_intops.tmir.sexp"), d);
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    double grad = 0.0;
-    // The loop stops on `hits < 3` with hits = 3, so the coefficient is
-    // 3 + 1 + 1 + 1 + 0.
-    ex.params_data()[0] = 0.5;
-    expect_eq("parameter-condition int ops lp", ex.gradient(&grad), 3.0);
-    expect_eq("parameter-condition int ops grad", grad, 6.0);
-    ex.params_data()[0] = -0.5;
-    expect_eq("parameter-condition int ops else lp", ex.gradient(&grad), -0.5);
-    expect_eq("parameter-condition int ops else grad", grad, 1.0);
-  }
-
-  // Integer reads the region cannot answer from its own tables: an
-  // element of a data array at rank two, and a literal array's size and
-  // elements -- the form stanc's inliner leaves where it substituted an
-  // `array[] int` argument. Before this the region compiler could index
-  // only a one-dimensional integer it had folded itself, so each of these
-  // refused the whole region.
-  {
-    DataMap d;
-    // Column-major, as the JSON reader stores a two-dimensional array.
-    d.set_int_array("idx", {1, 2, 3, 5, 7, 5}, {3, 2});
-    CompiledModel cm =
-        compile_model(slurp("tests/fixtures/paramcond_intarray.tmir.sexp"), d);
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    double grad = 0.0;
-    // Rows 1 and 3 match on the second column, contributing 1 + 3; the
-    // literal array contributes 8, row two contributes 2 + 7, and the
-    // strided row replacement contributes 9 + 8.
-    ex.params_data()[0] = 0.5;
-    expect_eq("parameter-condition int array lp", ex.gradient(&grad), 323992.0);
-    expect_eq("parameter-condition int array grad", grad, 647984.0);
-    ex.params_data()[0] = -0.5;
-    expect_eq("parameter-condition int array else lp", ex.gradient(&grad),
-              -0.5);
-    expect_eq("parameter-condition int array else grad", grad, 1.0);
-  }
-
-  // A parameter-dependent region whose live-outs are all zero-width. The
-  // dimension table gives the matrices no extent, so the region has
-  // nothing to carry out and no island runs; with an extent the same
-  // model compiles the ordinary way. Refusing the empty one as a region
-  // that "produces nothing" turned a model's own data into a compile
-  // error -- that message is for a region that found no live-out at all.
-  {
-    for (int extent : {0, 2}) {
-      DataMap d;
-      d.set_int("n", extent);
-      CompiledModel cm =
-          compile_model(slurp("tests/fixtures/paramcond_empty.tmir.sexp"), d);
-      Executor ex(std::move(cm.graph));
-      cm.bind(ex);
-      double grad = 0.0;
-      const std::string tag =
-          "parameter-condition empty " + std::to_string(extent) + " ";
-      ex.params_data()[0] = 0.5;
-      expect_eq(tag + "lp", ex.gradient(&grad), 0.5);
-      expect_eq(tag + "grad", grad, 1.0);
-      ex.params_data()[0] = -0.5;
-      expect_eq(tag + "else lp", ex.gradient(&grad), -0.5);
-      expect_eq(tag + "else grad", grad, 1.0);
-    }
-  }
-
   // A data-only UDF returns an integer array whose size depends on the
   // values, not only on the argument's declared extent.  The structured
   // while keeps its runtime trip count, while the MIR interpreter supplies
@@ -4945,64 +4980,6 @@ int main() {
     expect_eq(tag + "negative theta grad", grad[0], 1.0);
     for (int k = 0; k < 9; ++k)
       expect_eq(tag + "negative x grad " + std::to_string(k), grad[1 + k], 0.0);
-  }
-
-  // rep_vector inside a region: a run the compiler fills, at an extent it
-  // knows. The repeated parameter is the part worth checking -- the
-  // gradient is the broadcast's, every element adding into the one cell
-  // the value came from -- and the empty extent has to stay empty.
-  {
-    DataMap d;
-    d.set_int("n", 3);
-    CompiledModel cm =
-        compile_model(slurp("tests/fixtures/paramcond_repvector.tmir.sexp"), d);
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    double grad = 0.0;
-    // 3 * theta from the repeated parameter, 3 * 0.5 from the constant.
-    ex.params_data()[0] = 0.5;
-    expect_eq("parameter-condition rep_vector lp", ex.gradient(&grad), 3.0);
-    expect_eq("parameter-condition rep_vector grad", grad, 3.0);
-    ex.params_data()[0] = -0.5;
-    expect_eq("parameter-condition rep_vector else lp", ex.gradient(&grad),
-              -0.5);
-    expect_eq("parameter-condition rep_vector else grad", grad, 1.0);
-  }
-  {
-    DataMap d;
-    d.set_int("n", 0);
-    CompiledModel cm =
-        compile_model(slurp("tests/fixtures/paramcond_repvector.tmir.sexp"), d);
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    double grad = 0.0;
-    ex.params_data()[0] = 0.5;
-    expect_eq("parameter-condition rep_vector empty lp", ex.gradient(&grad),
-              0.0);
-    expect_eq("parameter-condition rep_vector empty grad", grad, 0.0);
-  }
-
-  // log1p_exp in a region, on its own opcode. Both the value and the
-  // derivative are the expressions stan-math uses, which is what keeps
-  // the region's backward, the var replay and the graph's OP_LOG1P_EXP
-  // agreeing to the bit -- so the expectations here are those same calls
-  // rather than decimals.
-  {
-    CompiledModel cm = compile_model(
-        slurp("tests/fixtures/paramcond_log1pexp.tmir.sexp"), DataMap());
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    double grad = 0.0;
-    ex.params_data()[0] = 0.5;
-    expect_eq("parameter-condition log1p_exp lp", ex.gradient(&grad),
-              stan::math::log1p_exp(1.0));
-    expect_eq("parameter-condition log1p_exp grad", grad,
-              2.0 * stan::math::inv_logit(1.0));
-    ex.params_data()[0] = -0.5;
-    expect_eq("parameter-condition log1p_exp else lp", ex.gradient(&grad),
-              stan::math::log1p_exp(-0.5));
-    expect_eq("parameter-condition log1p_exp else grad", grad,
-              stan::math::inv_logit(-0.5));
   }
 
   // A matrix row in a region. Two facts to pin: which elements the row is
@@ -5173,79 +5150,6 @@ int main() {
       expect_eq("parameter-condition diagonal else grad " + std::to_string(i),
                 grad[(size_t)i], i == 8 ? 1.0 : 0.0);
     expect_eq("parameter-condition diagonal else theta grad", grad[12], 1.0);
-  }
-
-  // A runtime-selected break targets the surrounding loop, so the loop and
-  // conditional must share one necessity island. The positive arm exits
-  // before the increment; the negative arm executes all three iterations.
-  {
-    CompiledModel cm = compile_model(
-        slurp("tests/fixtures/paramcond_break.tmir.sexp"), DataMap());
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    double grad = 0.0;
-    ex.params_data()[0] = 0.4;
-    const double breaking_lp = ex.gradient(&grad);
-    expect_eq("parameter-condition break lp", breaking_lp, 0.0);
-    expect_eq("parameter-condition break grad", grad, 0.0);
-    ex.params_data()[0] = -0.4;
-    const double looping_lp = ex.gradient(&grad);
-    expect_eq("parameter-condition no-break lp", looping_lp, 3.0 * -0.4);
-    expect_eq("parameter-condition no-break grad", grad, 3.0);
-  }
-
-  // The scan that decides whether a data-bounded for loop must share a
-  // structured region with a runtime-selected break evaluates data-only
-  // conditions under each loop-variable binding. In particular, a zero-trip
-  // loop must never inspect idx[ri], and a later iteration can be the first
-  // one that contains the runtime break.
-  {
-    const std::string mir =
-        slurp("tests/fixtures/runtime_break_data_loop.tmir.sexp");
-    DataMap empty;
-    empty.set_int("N", 0);
-    empty.set_int_array("idx", {});
-    CompiledModel em = compile_model(mir, empty);
-    Executor eex(std::move(em.graph));
-    em.bind(eex);
-    eex.params_data()[0] = 0.4;
-    double gradient = -1.0;
-    expect_eq("zero-trip runtime-break scan lp", eex.gradient(&gradient), 0.0);
-    expect_eq("zero-trip runtime-break scan grad", gradient, 0.0);
-
-    DataMap two;
-    two.set_int("N", 2);
-    two.set_int_array("idx", {0, 1});
-    CompiledModel tm = compile_model(mir, two);
-    Executor tex(std::move(tm.graph));
-    tm.bind(tex);
-    tex.params_data()[0] = 0.4;
-    expect_eq("later runtime break lp", tex.gradient(&gradient), 0.4);
-    expect_eq("later runtime break grad", gradient, 1.0);
-    tex.params_data()[0] = -0.4;
-    expect_eq("later runtime no-break lp", tex.gradient(&gradient), -0.8);
-    expect_eq("later runtime no-break grad", gradient, 2.0);
-  }
-
-  // The same region written with `~`. Runtime density calls now use the
-  // graph kernel ABI, including its argument-activity mask, so the propto
-  // instantiation drops exactly the constants that generated Stan does.
-  {
-    DataMap d;
-    d.set_real("y", 1.75);
-    CompiledModel pm =
-        compile_model(slurp("tests/fixtures/paramcond_tilde.tmir.sexp"), d);
-    Executor pex(std::move(pm.graph));
-    pm.bind(pex);
-    double grad = 0.0;
-    pex.params_data()[0] = 0.4;
-    expect_eq("runtime propto positive lp", pex.gradient(&grad),
-              -0.5 * (1.75 - 0.4) * (1.75 - 0.4));
-    expect_eq("runtime propto positive grad", grad, 1.75 - 0.4);
-    pex.params_data()[0] = -0.4;
-    expect_eq("runtime propto negative lp", pex.gradient(&grad),
-              -0.5 * (1.75 - 0.4) * (1.75 - 0.4));
-    expect_eq("runtime propto negative grad", grad, -(1.75 - 0.4));
   }
 
   // The same CALL bridge also carries integer groups and structured GLM
@@ -6305,88 +6209,6 @@ int main() {
     check(lp[0] != lp[1], "callable jacobians runtime branch changes target");
   }
 
-  // A transformed-data real passed to a recursive UDF inside parameter-
-  // dependent control flow remains known. A complete pure call is evaluated
-  // once by the data interpreter instead of requiring a finite expansion of
-  // its recursive call tree, while the surrounding branch remains an island.
-  {
-    CompiledModel km = compile_model(
-        slurp("tests/fixtures/known_real_udf.tmir.sexp"), DataMap());
-    check(km.n_unconstrained == 1, "known-real UDF parameter width");
-    check(count_opcode(km, OP_ISLAND) > 0, "known-real UDF runtime island");
-    Executor kex(std::move(km.graph));
-    km.bind(kex);
-    kex.params_data()[0] = 0.25;
-    double gradient[1];
-    const double lp = kex.gradient(gradient);
-    expect_eq("known-real UDF lp", lp, -0.5 * 0.25 * 0.25);
-    expect_eq("known-real UDF gradient", gradient[0], -0.25);
-  }
-
-  // Forty recursive steps exceed ProgramCompiler's inlining budget but stay
-  // within the MIR interpreter's supported call depth. This is the regression
-  // boundary: concrete pure recursion must use the latter rather than fail
-  // while trying to manufacture a finite register call stack.
-  {
-    CompiledModel km = compile_model(
-        slurp("tests/fixtures/known_real_udf_deep.tmir.sexp"), DataMap());
-    check(km.n_unconstrained == 1, "deep known-real UDF parameter width");
-    check(count_opcode(km, OP_ISLAND) > 0,
-          "deep known-real UDF runtime island");
-    Executor kex(std::move(km.graph));
-    km.bind(kex);
-    kex.params_data()[0] = 0.25;
-    double gradient[1];
-    const double lp = kex.gradient(gradient);
-    expect_eq("deep known-real UDF lp", lp, -0.5 * 0.25 * 0.25);
-    expect_eq("deep known-real UDF gradient", gradient[0], -0.25);
-  }
-
-  // target() is a stateful read of the density accumulated at that source
-  // point. The first read lowers directly into the graph; the reads in the
-  // parameter-dependent branch (including one in an inlined _lp UDF) receive
-  // the graph prefix as an island live-in while publishing only their local
-  // delta back to the model target.
-  {
-    CompiledModel tm =
-        compile_model(slurp("tests/fixtures/target_read.tmir.sexp"), DataMap());
-    check(tm.n_unconstrained == 1, "target-read parameter width");
-    check(count_opcode(tm, OP_ISLAND) > 0, "target-read runtime island");
-    Executor tex(std::move(tm.graph));
-    tm.bind(tex);
-    double gradient[1] = {};
-
-    tex.params_data()[0] = -2.0;
-    expect_eq("target-read untaken lp", tex.gradient(gradient), -2.5);
-    expect_eq("target-read untaken gradient", gradient[0], 2.5);
-
-    tex.params_data()[0] = 2.0;
-    expect_eq("target-read taken lp", tex.gradient(gradient), 2.0);
-    expect_eq("target-read taken gradient", gradient[0], -5.0);
-  }
-
-  // A higher-order callback inside parameter-dependent control flow uses the
-  // same argument binder and UDF inliner as an ordinary call. Serial
-  // reduce_sum supplies the complete slice and synthesized bounds while its
-  // shared real argument remains differentiable.
-  {
-    CompiledModel rm = compile_model(
-        slurp("tests/fixtures/reduce_sum_region.tmir.sexp"), DataMap());
-    check(rm.n_unconstrained == 1, "reduce_sum region parameter width");
-    check(count_opcode(rm, OP_ISLAND) > 0, "reduce_sum runtime island");
-    Executor rex(std::move(rm.graph));
-    rm.bind(rex);
-    double gradient[1] = {};
-
-    rex.params_data()[0] = -2.0;
-    expect_eq("reduce_sum untaken lp", rex.gradient(gradient), -2.0);
-    expect_eq("reduce_sum untaken gradient", gradient[0], 2.0);
-
-    rex.params_data()[0] = 2.0;
-    expect_eq("reduce_sum taken lp", rex.gradient(gradient), 10.0);
-    expect_eq("reduce_sum taken gradient", gradient[0], 10.0);
-  }
-
   // The preparation interpreter routes retained higher-order calls through
   // the same registered kernels as graph and runtime-control execution.
   // map_rect and reduce_sum remain shared structural interpreter operations.
@@ -6492,80 +6314,6 @@ int main() {
     }
   }
 
-  // Serial map_rect has statically-shaped jobs, so a runtime-control program
-  // expands them into ordinary callback invocations and concatenates their
-  // vector results. Shared and per-job parameters retain their adjoints;
-  // each real/integer data row is bound to the matching callback call.
-  {
-    CompiledModel mm = compile_model(
-        slurp("tests/fixtures/map_rect_region.tmir.sexp"), DataMap());
-    check(mm.n_unconstrained == 2, "map_rect region parameter width");
-    check(count_opcode(mm, OP_ISLAND) > 0, "map_rect runtime island");
-    Executor mex(std::move(mm.graph));
-    mm.bind(mex);
-    double gradient[2] = {};
-
-    mex.params_data()[0] = -1.0;
-    mex.params_data()[1] = 2.0;
-    expect_eq("map_rect untaken lp", mex.gradient(gradient), 265.5);
-    expect_eq("map_rect untaken gate gradient", gradient[0], 1.0);
-    expect_eq("map_rect untaken x gradient", gradient[1], 102.0);
-
-    mex.params_data()[0] = 1.0;
-    mex.params_data()[1] = 2.0;
-    expect_eq("map_rect taken lp", mex.gradient(gradient), 533.5);
-    expect_eq("map_rect taken gate gradient", gradient[0], -1.0);
-    expect_eq("map_rect taken x gradient", gradient[1], 206.0);
-  }
-
-  // Retained higher-order algorithms use the same graph-kernel CALL adapter
-  // as regular functions. Its owned callback specification remains attached
-  // to the runtime region and its input activity mask preserves the solver's
-  // contract that only theta, not the initial guess, is differentiated.
-  {
-    CompiledModel am = compile_model(
-        slurp("tests/fixtures/algebra_region.tmir.sexp"), DataMap());
-    check(am.n_unconstrained == 2, "algebra region parameter width");
-    check(count_opcode(am, OP_ISLAND) > 0, "algebra runtime island");
-    Executor aex(std::move(am.graph));
-    am.bind(aex);
-    double gradient[2] = {};
-
-    aex.params_data()[0] = -1.0;
-    aex.params_data()[1] = 2.0;
-    expect_eq("algebra untaken lp", aex.gradient(gradient), -2.5);
-    expect_eq("algebra untaken gate gradient", gradient[0], 1.0);
-    expect_eq("algebra untaken theta gradient", gradient[1], -2.0);
-
-    aex.params_data()[0] = 1.0;
-    expect_eq("algebra taken lp", aex.gradient(gradient), 5.5);
-    expect_eq("algebra taken gate gradient", gradient[0], -1.0);
-    expect_eq("algebra taken theta gradient", gradient[1], 2.0);
-  }
-
-  // Modern algebra solvers, including explicit-control variants, use their
-  // runtime-control implementation both as a direct graph producer and under
-  // a parameter-dependent branch.
-  {
-    CompiledModel am = compile_model(
-        slurp("tests/fixtures/algebra_shared.tmir.sexp"), DataMap());
-    check(am.n_unconstrained == 2, "shared algebra parameter width");
-    Executor aex(std::move(am.graph));
-    am.bind(aex);
-    double gradient[2] = {};
-
-    aex.params_data()[0] = -1.0;
-    aex.params_data()[1] = 2.0;
-    expect_eq("shared algebra untaken lp", aex.gradient(gradient), 5.5);
-    expect_eq("shared algebra untaken gate gradient", gradient[0], 1.0);
-    expect_eq("shared algebra untaken wanted gradient", gradient[1], 2.0);
-
-    aex.params_data()[0] = 1.0;
-    expect_eq("shared algebra taken lp", aex.gradient(gradient), 13.5);
-    expect_eq("shared algebra taken gate gradient", gradient[0], -1.0);
-    expect_eq("shared algebra taken wanted gradient", gradient[1], 6.0);
-  }
-
   // Every one-dimensional integration frontend shares one retained callback
   // ABI and one quadrature kernel. The legacy call exercises ordinary graph
   // lowering; the four modern method/tolerance forms exercise Program CALL
@@ -6604,33 +6352,6 @@ int main() {
           "quadrature taken bound gradient");
     check(std::fabs(gradient[2] - 10.0) < 1e-8,
           "quadrature taken callback gradient");
-  }
-
-  // Every ODE frontend uses the existing OP_ODE kernel from runtime control.
-  // A zero RHS makes all solver answers exact and exposes whether initial
-  // state and callback-parameter activity are wired correctly.
-  {
-    CompiledModel om =
-        compile_model(slurp("tests/fixtures/ode_region.tmir.sexp"), DataMap());
-    check(om.n_unconstrained == 3, "ODE region parameter width");
-    check(count_opcode(om, OP_ISLAND) > 0, "ODE runtime island");
-    Executor oex(std::move(om.graph));
-    om.bind(oex);
-    double gradient[3] = {};
-
-    oex.params_data()[0] = -1.0;
-    oex.params_data()[1] = 2.0;
-    oex.params_data()[2] = 3.0;
-    expect_eq("ODE untaken lp", oex.gradient(gradient), -7.0);
-    expect_eq("ODE untaken gate gradient", gradient[0], 1.0);
-    expect_eq("ODE untaken initial gradient", gradient[1], -2.0);
-    expect_eq("ODE untaken rate gradient", gradient[2], -3.0);
-
-    oex.params_data()[0] = 1.0;
-    expect_eq("ODE taken lp", oex.gradient(gradient), 15.0);
-    expect_eq("ODE taken gate gradient", gradient[0], -1.0);
-    expect_eq("ODE taken initial gradient", gradient[1], 9.0);
-    expect_eq("ODE taken rate gradient", gradient[2], -3.0);
   }
 
   // DAE and DAE_tol share the retained callback ABI and OP_DAE kernel. The
