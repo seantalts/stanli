@@ -28,7 +28,8 @@ import time
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "harnesses"))
 from corpus_bench import (PhaseFailure, Runner, VECTORIZE_PROBE,  # noqa: E402
-                          benchmark_cases, materialize_data, parse_timing)
+                          benchmark_cases, parse_timing)
+from corpus_inventory import CorpusCase, materialize_data  # noqa: E402
 
 
 def rotation(arms, round_index):
@@ -101,10 +102,9 @@ def main():
         try:
             wait_for_quiet(args.load_limit, pauses)
             record["load_before"] = os.getloadavg()
-            source, mir, data_json = (directory / "model.stan", directory / "model.sexp",
-                                      directory / "data.json")
+            source, mir = directory / "model.stan", directory / "model.sexp"
             source.write_bytes(stan.read_bytes())
-            materialize_data(data, data_json)
+            data_json = materialize_data(CorpusCase(name, stan, data, "", {}), directory)
             runner.require(f"{name}/mir", [VECTORIZE_PROBE, "--vectorize-loops", "on",
                                            *fast, "--output", mir, source], args.timeout)
             for round_index in range(args.rounds):
