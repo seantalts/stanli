@@ -44,9 +44,11 @@
 #include <stanli/compile.hpp>
 #include <stanli/data.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/graph_print.hpp>
 #include <stanli/island.hpp>
 #include <stanli/ode.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include <cmath>
@@ -177,6 +179,11 @@ inline std::string env_prefix(const std::string& config_name) {
 
 struct Paths {
   int64_t ops = 0;
+  // FNV-1a of the printed graph, island programs and region-map plans: two
+  // configurations with the same value compiled the same thing.
+  uint64_t fingerprint = 0;
+  int region_maps = 0;
+  int loops = 0;
   int islands = 0;
   // Necessity islands are not distinguishable from carved ones on the
   // island itself, so the split is derived: it is what survives
@@ -202,9 +209,29 @@ struct Paths {
   }
 };
 
+inline uint64_t fnv1a(const std::string& s,
+                      uint64_t h = 1469598103934665603ull) {
+  for (unsigned char c : s) h = (h ^ c) * 1099511628211ull;
+  return h;
+}
+
 inline void scan_graph(const Graph& g, Paths* p) {
   p->ops = (int64_t)g.ops.size();
+  std::string text;
+  print_graph(text, g);
+  print_islands(text, g);
   for (const Op& op : g.ops) {
+    if (op.opcode == OP_REGION_MAP) {
+      ++p->region_maps;
+      const auto* m = static_cast<const RegionMapProg*>(op.udata);
+      text += "\nregion_map recompute=" + std::to_string(m->recompute) +
+              " saved=" + std::to_string(m->saved_cells) +
+              " lanes=" + std::to_string(m->lanes.active) +
+              " tile_recompute=" + std::to_string(m->lanes.tile_recompute) +
+              " " + m->lanes.refusal;
+    } else if (op.opcode == OP_LOOP) {
+      ++p->loops;
+    }
     if (op.opcode == OP_ISLAND) {
       ++p->islands;
       if (static_cast<const IslandProg*>(op.udata)->native_adj) ++p->native_adj;
@@ -216,8 +243,11 @@ inline void scan_graph(const Graph& g, Paths* p) {
       else
         ++p->ode_interp;
       if (spec->direct_rk && spec->direct_rk_enabled) ++p->ode_direct_rk;
+      text += "\node program=" + std::to_string(spec->prog.ok) + " direct_rk=" +
+              std::to_string(spec->direct_rk && spec->direct_rk_enabled);
     }
   }
+  p->fingerprint = fnv1a(text);
 }
 
 // ---- one configuration's answer --------------------------------------------

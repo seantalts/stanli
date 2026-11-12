@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -77,6 +78,7 @@ int main() {
   int island_always_gained = 0, no_island_dropped = 0;
   int no_ode_direct_rk_dropped = 0;
   std::vector<std::string> skips;
+  std::map<std::string, int> changed, ops_changed;
 
   for (const std::string& name : names) {
     const std::string sexp = slurp(dir + "/" + name + ".tmir.sexp");
@@ -145,6 +147,12 @@ int main() {
     };
     if (direct_rk_of("no_ode_direct_rk") < r.paths.ode_direct_rk)
       ++no_ode_direct_rk_dropped;
+    for (const auto& [cfg, p] : r.by_config) {
+      if (cfg == "default") continue;
+      const bool compiled = r.compiled.at(cfg);
+      if (!compiled || p.fingerprint != r.paths.fingerprint) ++changed[cfg];
+      if (!compiled || p.ops != r.paths.ops) ++ops_changed[cfg];
+    }
   }
 
   std::printf(
@@ -165,6 +173,12 @@ int main() {
       "  switches: NO_ISLAND drops islands on %d, ISLAND_ALWAYS adds on %d, "
       "NO_ODE_DIRECT_RK drops direct RK on %d\n",
       no_island_dropped, island_always_gained, no_ode_direct_rk_dropped);
+  for (const cross::Config& c : cross::configs()) {
+    if (c.name == "default") continue;
+    std::printf(
+        "  config %s changes the compiled model on %d (op count on %d)\n",
+        c.name.c_str(), changed[c.name], ops_changed[c.name]);
+  }
   // Engine-coverage floors. These are measured values, not aspirations:
   // each is what the corpus reaches today, so a vocabulary regression that
   // moves work off a path (a carve that stops carving, an ODE right-hand
