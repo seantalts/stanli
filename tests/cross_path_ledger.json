@@ -198,5 +198,21 @@
     "bound_ulp": 5,
     "cause": "with both STANLI_NO_REROLL and STANLI_NO_PARTITION the 300 normal terms sum one by one in source order; either lane pass alone fuses them into the same lane loop and agrees with default bitwise at all three points. A retained loop (STANLI_STRUCTURED_LOOPS=1) gives the same bits as passes_off.",
     "since": "2026-11-12"
+  },
+  {
+    "model": "cm_betadiscrete",
+    "quantity": "lp",
+    "pair": "default/no_partition",
+    "bound_ulp": 3,
+    "cause": "STANLI_NO_PARTITION changes this model's graph (it has no region map or retained loop), so the terms partition_lanes groups into lanes sum in a different order. passes_off gives the same bits as no_partition at every one of the 13 points, so no other pass contributes.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "cm_betadiscrete",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 3,
+    "cause": "the partition_lanes regrouping of default/no_partition on this model; passes_off gives the same bits at every point.",
+    "since": "2026-11-12"
   }
 ]

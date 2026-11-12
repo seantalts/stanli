@@ -1400,12 +1400,15 @@ silently. Three layers:
   including tests that the passes refuse what they must refuse, and a
   fuzz test that runs hundreds of random graphs through all passes and
   compares gradients before and after.
-- A full-corpus A/B check (`harnesses/ab_corpus.py`): every posteriordb
-  model evaluated with the passes off and on, comparing the log density
-  and every gradient component. The passes-off graph is separately
-  verified against CmdStan, so if A and B agree, the optimized graph
-  inherits that verification. This has caught two real bugs the unit
-  tests missed. Run it after any change to a pass.
+- The cross-path matrix (`tests/cross_path.hpp`), which CTest runs over
+  every fixture and the cogmod models: each pass and path switch off or
+  forced, the log density and every gradient component compared bitwise
+  with the shipped pipeline at three points. After a change to a pass, run
+  it over posteriordb too:
+  `python3 -c 'import sys,tempfile,subprocess; sys.path.insert(0,"tools"); from corpus_inventory import corpus_cases, materialize_data; t=tempfile.mkdtemp(); [subprocess.run(["build-rel/stanli_check",str(c.source),str(materialize_data(c,t)),"--cross"]) for c in corpus_cases("deps/posteriordb","posteriordb").values()]' | grep -E '^CROSS (FAIL|SKIP)'`.
+  Lane regrouping makes some models differ by up to a few thousand ULP
+  with the passes off, so read its failures as a list to explain, not as
+  a gate.
 - Direct verification against CmdStan (`tools/verify_sample.py`) for
   models a change affects.
 
