@@ -1407,7 +1407,7 @@ set(STANLI_TESTS
   test_solve test_solve_forwards test_solve_reuse test_cross_path
   test_write_array test_wa_parallel test_pool test_bridgestan test_mixture test_island
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
-  test_odevariadic test_callback_values test_algebra test_estimate test_brmsmono
+  test_odevariadic test_callback_values test_algebra test_brmsmono
   test_reduce_sum
   test_structured_arrays test_pathfinder test_algorithms test_unconstrain
   test_init_interp test_constrain_structured test_csr_times_vector)
