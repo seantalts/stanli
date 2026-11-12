@@ -1169,8 +1169,16 @@ class WriteArrayLowering {
       w = std::move(*result_);
       w.lowered_in_parallel = true;
     } else {
-      if (!wa_) build_after_log_prob(log_prob);
+      const bool lent = !wa_;
+      if (lent) build_after_log_prob(log_prob);
       w = wa_->run_write_array(prog_);
+      if (lent) {
+        for (const std::string& name : bound_env_) {
+          const auto it = wa_->td.env().find(name);
+          if (it != wa_->td.env().end())
+            log_prob.td.env()[name] = std::move(it->second);
+        }
+      }
     }
     prep.append(std::move(trace_));
     return w;
@@ -1208,10 +1216,12 @@ class WriteArrayLowering {
                         log_prob.int_env_data, no_declarations,
                         log_prob.omitted_data, log_prob.prepared_names});
     const auto select_time = trace_.start();
+    // Moved, not copied: log_prob is done with them, and finish() moves
+    // them back.
     for (const std::string& name : bound_env_) {
       const auto it = log_prob.td.env().find(name);
       if (it != log_prob.td.env().end())
-        wa_->td.env().emplace(name, it->second);
+        wa_->td.env().emplace(name, std::move(it->second));
     }
     for (const std::string& name : bound_decls_) {
       const auto it = log_prob.decls.find(name);
