@@ -543,9 +543,7 @@ its warm gradient time, the mean over the ten points. The same count is used for
 both engines. The benchmark itself runs no sampler. Adaptation, tree building,
 generated quantities and CSV output are left out. The count comes from Stanli's
 sampler, so it assumes CmdStan's sampler would take about as many gradients on
-the same model. `tools/validate_total_estimates.py` checks this: it runs full
-sampling in both engines for a sample of models and compares the real sampler
-time with the estimate.
+the same model.
 
 A fallback model uses 5,000 gradients. A missing setup component leaves the
 estimate blank and keeps the gradient result.
@@ -705,9 +703,7 @@ baseline/candidate pairs for the affected phases, all samples kept, with
 identical-binary controls when needed. Do not rerun until a favorable sample
 appears. Fix a confirmed regression before merge. The PR lists both revision
 SHAs, build identities, exact commands, coverage, the phase comparison and
-links to the raw results. The `mir-vectorization-measurements` CI artifact
-compares pass-on and pass-off behavior on a small gradient set and does not
-replace this check.
+links to the raw results.
 
 ### Focused execution-path benchmarks
 

@@ -871,9 +871,9 @@ are not gated by this; they point at commits that already passed on
 main.
 
 Pull requests keep one Linux native build, CTest, recorded CmdStan replay,
-installed Python/R checks, and native/JavaScript compiler parity. The broad
-vectorization A/B sweep, performance comparisons, Windows/compiler and browser
-runtime builds, and full R-version matrix run after merge. See
+installed Python/R checks, and native/JavaScript compiler parity. Performance
+comparisons, Windows/compiler and browser runtime builds, and the full
+R-version matrix run after merge. See
 [`TESTING.md`](../TESTING.md#checks-run-before-and-after-merge) for the exact
 split and [`AGENTS.md`](../AGENTS.md) for project priorities.
 
