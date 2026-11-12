@@ -1406,9 +1406,9 @@ silently. Three layers:
   with the shipped pipeline at three points. After a change to a pass, run
   it over posteriordb too:
   `python3 -c 'import sys,tempfile,subprocess; sys.path.insert(0,"tools"); from corpus_inventory import corpus_cases, materialize_data; t=tempfile.mkdtemp(); [subprocess.run(["build-rel/stanli_check",str(c.source),str(materialize_data(c,t)),"--cross"]) for c in corpus_cases("deps/posteriordb","posteriordb").values()]' | grep -E '^CROSS (FAIL|SKIP)'`.
-  Lane regrouping makes some models differ by up to a few thousand ULP
-  with the passes off, so read its failures as a list to explain, not as
-  a gate.
+  43 of the 120 models report divergences today, most of them lane
+  regrouping with the passes off (up to a few thousand ULP), so run it on
+  the base revision and on the change and diff the `CROSS FAIL` lines.
 - Direct verification against CmdStan (`tools/verify_sample.py`) for
   models a change affects.
 

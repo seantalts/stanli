@@ -132,11 +132,11 @@ inline double sweep_point(int64_t i, int variant, int k) {
 
 // ---- environment -----------------------------------------------------------
 
-// What a configuration's variables can act on. Region-map variables are
-// read only while lowering or running an OP_REGION_MAP, and retained-loop
-// variables only inside an OP_LOOP, so a model whose baseline graph has
-// none compiles and runs identically and the configuration is not run.
-enum class Requires { Nothing, RegionMap, Loop };
+// Region-map variables are read only while lowering or running an
+// OP_REGION_MAP, so a model whose baseline graph has none is not run under
+// such a configuration. Running them on every fixture changes no fixture
+// this skips.
+enum class Requires { Nothing, RegionMap };
 
 // Each variable is NAME or NAME=VALUE; a bare NAME is set to "1". The
 // configuration is compared with `baseline`, or with nothing when that is
@@ -206,7 +206,8 @@ inline const std::vector<Config>& configs() {
        {"STANLI_REGION_MAP_SAVE_LIMIT=0", "STANLI_REGION_MAP_CHECK_CLEAN"},
        Requires::RegionMap},
       {"region_map_checked",
-       {"STANLI_REGION_MAP_CHECK_CLEAN"},
+       {"STANLI_REGION_MAP_TILE_CELLS=1000000000",
+        "STANLI_REGION_MAP_CHECK_CLEAN"},
        Requires::RegionMap},
       {"region_map_no_lanes",
        {"STANLI_REGION_MAP_LANES=0"},
@@ -214,10 +215,10 @@ inline const std::vector<Config>& configs() {
       {"region_map_tile_recompute",
        {"STANLI_REGION_MAP_TILE_CELLS=0", "STANLI_REGION_MAP_CHECK_CLEAN"},
        Requires::RegionMap},
-      // Retaining a loop is not itself bitwise-neutral: the retained loop
-      // accumulates its terms in source order where the graph may group
-      // them into lanes. What must be exact is every execution choice
-      // inside a retained loop, so those compare against the forced one.
+      // Retaining a loop is not bitwise-neutral: forced retention differs
+      // from the default by 1-10 ULP on a dozen fixtures. What must be
+      // exact is every execution choice inside a retained loop, so those
+      // compare against the forced one.
       {"structured_forced",
        {"STANLI_STRUCTURED_LOOPS=1", "STANLI_STRUCTURED_FRAMES=1",
         "STANLI_STRUCTURED_LOOP_DIAGNOSTICS"},
@@ -226,7 +227,7 @@ inline const std::vector<Config>& configs() {
       {"structured_no_memo",
        {"STANLI_STRUCTURED_LOOPS=1", "STANLI_STRUCTURED_FRAMES=1",
         "STANLI_STRUCTURED_LOOP_DIAGNOSTICS", "STANLI_NO_DATA_LOOP_MEMO"},
-       Requires::Loop,
+       Requires::Nothing,
        "structured_forced"},
       {"structured_plain",
        {"STANLI_STRUCTURED_LOOPS=1", "STANLI_STRUCTURED_FRAMES=0",
@@ -236,7 +237,7 @@ inline const std::vector<Config>& configs() {
         "STANLI_STRUCTURED_PREPARED_ITERATOR=0",
         "STANLI_NO_STRUCTURED_FRAME_INSTANCE",
         "STANLI_NO_STRUCTURED_CELL_CONSTANTS"},
-       Requires::Loop,
+       Requires::Nothing,
        "structured_forced"},
   };
   return c;
@@ -625,8 +626,9 @@ struct Options {
   std::string model;        // the name the report prints and the ledger keys
   std::string repro_model;  // paths for the repro line
   std::string repro_data;
-  std::string only;  // "", "lp", "grad" or "wa": limits which rows run
-  int variant = -1;  // -1 walks the variants until one is in support
+  std::string repro_mir;  // the MIR file the matrix ran, when it read one
+  std::string only;       // "", "lp", "grad" or "wa": limits which rows run
+  int variant = -1;       // -1 walks the variants until one is in support
   int points = kDefaultPoints;
 };
 
@@ -697,9 +699,7 @@ class Matrix {
           index.find(c.baseline.empty() ? "default" : c.baseline);
       if (base_it == index.end()) continue;
       const Paths& base_paths = runs[base_it->second].paths;
-      if ((c.requires_op == Requires::RegionMap &&
-           base_paths.region_maps == 0) ||
-          (c.requires_op == Requires::Loop && base_paths.loops == 0))
+      if (c.requires_op == Requires::RegionMap && base_paths.region_maps == 0)
         continue;
       index[c.name] = runs.size();
       runs.push_back(evaluate(mir_text, data, c, variant, false, points));
@@ -934,6 +934,7 @@ class Matrix {
     line("  repro: " + prefix + "build/stanli_check " +
          (opt_.repro_model.empty() ? "MODEL.stan" : opt_.repro_model) + " " +
          (opt_.repro_data.empty() ? "DATA.json" : opt_.repro_data) +
+         (opt_.repro_mir.empty() ? "" : " --mir " + opt_.repro_mir) +
          " --cross --cross-one " + row_of(quantity) + " --draw-variant " +
          std::to_string(res_.variant) +
          (opt_.points == kDefaultPoints

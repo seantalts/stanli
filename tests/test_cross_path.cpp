@@ -135,6 +135,7 @@ int main() {
     opt.model = name;
     opt.repro_model = dir + "/" + name + ".stan";
     opt.repro_data = checked_in ? json : std::string("DATA.json");
+    opt.repro_mir = dir + "/" + name + ".tmir.sexp";
     const cross::Result r = cross::run_matrix(sexp, data, opt, led);
     if (!r.report.empty()) std::fputs(r.report.c_str(), stdout);
     if (!r.ok && !generated.empty())
@@ -254,8 +255,8 @@ int main() {
       {"region_map_no_lanes", 46, 46},
       {"region_map_tile_recompute", 46, 45},
       {"structured_forced", 430, 192},
-      {"structured_no_memo", 118, 17},
-      {"structured_plain", 118, 118},
+      {"structured_no_memo", 430, 17},
+      {"structured_plain", 430, 192},
   };
   for (const cross::Config& c : cross::configs()) {
     if (c.name == "default") continue;
