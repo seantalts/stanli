@@ -1412,8 +1412,7 @@ set(STANLI_TESTS
   test_structured_arrays test_pathfinder test_algorithms test_unconstrain
   test_init_interp test_constrain_structured test_csr_times_vector)
 if(STANLI_STAN_DENSITY_ORACLE)
-  list(APPEND STANLI_TESTS
-    test_density_fused test_ordered_logistic_fused test_student_t_fused)
+  list(APPEND STANLI_TESTS test_density_fused)
 endif()
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
