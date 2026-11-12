@@ -793,7 +793,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
                          PrepTrace::Extra extra = PrepTrace::Extra::None,
                          int64_t a = 0, int64_t b = 0, bool deep = false,
                          int64_t params = 0, int64_t c = 0, int64_t d = 0,
-                         const detail::RerollDispositionStats* disp = nullptr) {
+                         const RerollStats* disp = nullptr) {
     prep.graph(prep_graph, stage, from, g, out.fills, target_terms.size(),
                out.views.size(), extra, a, b, deep, params, c, d, disp);
     dump(stage, stage_roots);
@@ -827,20 +827,12 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
           constfolded.slots_folded);
   }
   const auto reroll_time = prep.start();
-  RerollStats rerolled;
-  detail::RerollDispositionStats reroll_dispositions;
-  if (prep.enabled()) {
-    detail::ProfiledRerollStats profiled = detail::reroll_profiled(
-        g, out.fills, target_terms, roots, compile_options.fast_math);
-    rerolled = profiled.work;
-    reroll_dispositions = profiled.dispositions;
-  } else {
-    rerolled = reroll(g, out.fills, target_terms, roots,
-                      compile_options.fast_math);  // STANLI_NO_REROLL
-  }
+  const RerollStats rerolled =
+      reroll(g, out.fills, target_terms, roots,
+             compile_options.fast_math);  // STANLI_NO_REROLL
   trace("reroll", reroll_time, roots, PrepTrace::Extra::Reroll,
         rerolled.regions, rerolled.list_steps, false, 0,
-        rerolled.candidate_steps, rerolled.row_steps, &reroll_dispositions);
+        rerolled.candidate_steps, rerolled.row_steps, &rerolled);
   // Re-roll can replace many element writes with copying slice stores, and
   // may have replaced target terms with vector reductions: rebuild the
   // implicit-root set before giving those new ops the same last-use proof

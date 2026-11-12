@@ -138,7 +138,7 @@ struct PrepTrace {
              size_t terms, size_t views, Extra extra = Extra::None,
              int64_t a = 0, int64_t b = 0, bool deep = false,
              int64_t params = 0, int64_t c = 0, int64_t d = 0,
-             const detail::RerollDispositionStats* dispositions = nullptr) {
+             const RerollStats* dispositions = nullptr) {
     if (!enabled_) return;
     Row& r = next();
     r.graph = graph_name;

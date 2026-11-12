@@ -30,6 +30,12 @@ struct RerollStats {
   // unlike a wall-clock reading, so the same graph gives the same answer
   // on every machine.
   int64_t list_steps = 0;
+  // What each committed region was made of; the prep profile reports them.
+  int64_t packed_rows = 0;
+  int64_t term_density = 0;
+  int64_t element_density = 0;
+  int64_t term_widen = 0;
+  int64_t element_store = 0;
 };
 
 // In place. `fills` gains entries for materialized constant vectors.
