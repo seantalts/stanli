@@ -81,11 +81,6 @@ Lowering::BuiltinDispatch Lowering::resolve_builtin(const mir::Expr& e) {
     return {BuiltinFamily::CallableTransform};
   return {};
 }
-// Fallback for expressions with no native lowering: a data-only subtree
-// is evaluated at compile time and materialized as a constant. Unsupported
-// expressions and Stan validation failures decline; the latter must stay
-// at model evaluation rather than move to construction. Propto densities
-// never fold because their value is instantiation-dependent.
 bool Lowering::expr_effectful(const mir::Expr& e) {
   return expr_effects(e) != 0;
 }

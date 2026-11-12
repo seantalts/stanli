@@ -1,7 +1,7 @@
-// One semantic registry for ordinary pure numeric builtins.  As with
-// density_registry.hpp, backends adapt their storage to these neutral shapes,
-// ask one resolver to validate broadcasting and choose the result layout, and
-// only then materialize the call.
+// Resolvers for ordinary pure numeric builtins over the one function table in
+// function_registry.cpp.  As with density_registry.hpp, backends adapt their
+// storage to these neutral shapes, ask one resolver to validate broadcasting
+// and choose the result layout, and only then materialize the call.
 #ifndef STANLI_BUILTIN_REGISTRY_HPP
 #define STANLI_BUILTIN_REGISTRY_HPP
 

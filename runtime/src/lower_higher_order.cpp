@@ -848,7 +848,7 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
       // fallback programs and stateful kernels conservatively refuse below.
       // Imported inactive inputs are runtime bindings, not initialized fills.
       // Constant folding would evaluate their readers against zero storage.
-      trial.run_passes({result.slot}, PassPlan{false, true, true, true, false});
+      trial.run_passes({result.slot}, Lowering::kCallbackPasses);
       trial.g.result_slot = result.slot;
       std::vector<detail::Import> parameter_map;
       std::vector<int64_t> offsets;

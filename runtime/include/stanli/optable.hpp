@@ -11,8 +11,9 @@
 
 namespace stanli {
 
-// One list, two uses: the enum and the name table are generated from it,
-// so a new op cannot be added to one and forgotten in the other.
+// The enum and the name table are generated from this list. The scalar
+// binary ops also appear in the STANLI_SCALAR_BINARY*_LIST lists below, which
+// give their evaluators.
 #define STANLI_OPCODE_LIST(X)         \
   X(OP_ADD_N)                         \
   X(OP_BCAST_FMA)                     \
@@ -1058,7 +1059,7 @@ inline int64_t sum_in_lens(const Op& op, const Slot* slots) {
 }
 
 Kernel& kernel(uint16_t opcode);
-// Called by kernel TUs at static-init time.
+// Called from ensure_registered() in executor.cpp.
 void register_kernel(uint16_t opcode, Kernel k);
 
 // The registered kernel for an opcode, or null. Registers the built-in

@@ -2326,6 +2326,15 @@ struct Lowering {
     bool cse;
     bool island;
   };
+  // Every pass.
+  static constexpr PassPlan kLogProbPasses{true, true, true, true, true};
+  // Forward-only graph: no target terms to partition, no stores to elide, no
+  // islands.
+  static constexpr PassPlan kWriteArrayPasses{true, false, false, true, false};
+  // Higher-order callback body: no constfold, because imported inactive
+  // inputs are runtime bindings it would evaluate against zero storage; no
+  // islands.
+  static constexpr PassPlan kCallbackPasses{false, true, true, true, false};
   // Shared tail of both lowerings: inplace/store-forward/reroll always run;
   // the rest is gated by plan so write_array can skip the passes that assume
   // a scalar log-density result. Ordering constraints between the stages

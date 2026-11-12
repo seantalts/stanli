@@ -11,12 +11,6 @@
 
 namespace stanli {
 
-// Rewrites eligible OP_SET_INDEX / OP_SET_SLICE / OP_SET_SLICE_STRIDED ops
-// to their INPLACE forms (whose out slot IS their first input) and renames
-// later references to the dead output slot. `roots` are slots read from
-// outside the op graph (jacobian terms, constrained-parameter views, the
-// result): they are never overwritten and never renamed. Returns the number
-// of writes rewritten. STANLI_NO_INPLACE=1 disables the pass.
 // True for ops whose backward only routes adjoints or reads scratch, never
 // input OR output value buffers. The destructive rewrite is sound only when
 // both earlier readers and the producer of the current buffer version satisfy
@@ -24,6 +18,12 @@ namespace stanli {
 // claimed opcode by poisoning all values between the sweeps.
 bool backward_ignores_values(uint16_t opcode);
 
+// Rewrites eligible OP_SET_INDEX / OP_SET_SLICE / OP_SET_SLICE_STRIDED ops
+// to their INPLACE forms (whose out slot IS their first input) and renames
+// later references to the dead output slot. `roots` are slots read from
+// outside the op graph (jacobian terms, constrained-parameter views, the
+// result): they are never overwritten and never renamed. Returns the number
+// of writes rewritten. STANLI_NO_INPLACE=1 disables the pass.
 int make_inplace_updates(Graph& g, const std::vector<int>& roots);
 
 // Store-to-load forwarding, plus the dead ops it exposes. `mu[n] = e;` and

@@ -531,7 +531,7 @@ A bucket is rewritten in one of these forms:
 
 Fusing is not always a win, so each bucket is costed before it is
 emitted, in the currencies the island carver uses (`pass_util.hpp`'s
-`kOpCost`, `kDensityElem`, `kPartitionMargin`, the same ones reroll.cpp's
+`kLaneOpCost`, `kLaneDensityElem`, `kLanePartitionMargin`, the same ones reroll.cpp's
 own region pricing uses): about 5 ns per graph op against about 1 ns per
 element moved, with a density element charged six op dispatches. Two
 measured pessimizations live in that model rather
@@ -1409,9 +1409,10 @@ silently. Three layers:
 - Direct verification against CmdStan (`tools/verify_sample.py`) for
   models a change affects.
 
-The env switches (`STANLI_NO_DATA_PRELOAD`, `STANLI_NO_INPLACE`,
+Some of the env switches (`STANLI_NO_DATA_PRELOAD`, `STANLI_NO_INPLACE`,
 `STANLI_NO_CONSTFOLD`, `STANLI_NO_REROLL`, `STANLI_NO_ISLAND`,
-`STANLI_NO_ISLAND_COMPACT`, `STANLI_NO_ODE_DIRECT_RK`) exist so a wrong result
+`STANLI_NO_ISLAND_COMPACT`, `STANLI_NO_ODE_DIRECT_RK`; more are listed
+by grepping the sources for `STANLI_NO_`) exist so a wrong result
 can be attributed to one optimization quickly, and they are how each one is
 measured: every speed number is the same build with one variable set and
 unset.

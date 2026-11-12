@@ -15,7 +15,7 @@
 // form the compiler does not model. Elementwise ops compile at any width,
 // with length-1 operands broadcast. Runs shorter than kMinIslandOps stay
 // as they are: below that, per-op dispatch with scratch partials is cheaper
-// than a var replay. A compiled run is then kept only if it is cheaper
+// than an island's backward. A compiled run is then kept only if it is cheaper
 // than the ops it replaces -- see the cost estimate at the end of
 // carve_islands, which is what decides the pass is a win rather than a
 // wash. A run holding vector elementwise ops is also priced split at them,
@@ -617,8 +617,8 @@ struct Carver {
   std::vector<char> slot_active;
   std::vector<Op> result;
   int carved = 0;
-  // Strict sub-runs split_cost compiled to price a split, discarded after
-  // join_cost_floor sums their accepted island costs: emission never
+  // Strict sub-runs populate_strict_queue compiled to price a split, discarded
+  // after join_cost_floor sums their accepted island costs: emission never
   // replays a strict-sourced split (liveness_split_cost subsumes it, see
   // run()), so nothing needs these by position afterward.
   std::vector<Candidate> strict_queue;
@@ -1134,7 +1134,7 @@ struct Carver {
   }
 
   // The span liveness_split_cost already compiled and priced for [i, j),
-  // strict_candidate's counterpart for the liveness queue.
+  // the liveness queue's counterpart of a strict_queue entry.
   Candidate liveness_candidate(size_t i, size_t j) {
     if (liveness_queue_pos < liveness_queue.size()) {
       Candidate& next = liveness_queue[liveness_queue_pos];

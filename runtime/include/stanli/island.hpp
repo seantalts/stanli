@@ -10,17 +10,17 @@
 //
 // The program itself is the shared register machine (program.hpp), so
 // both kinds run the same way. Forward runs on plain doubles -- one
-// dispatch where the region had thousands. Backward replays the program
-// under stan-math nested autodiff and harvests the live-ins' adjoints:
-// the same var arithmetic CmdStan's generated code runs for the same
-// statements, so gradients match by construction. A branch on a parameter
-// differentiates the taken branch, which is exactly what the generated
-// C++ does, because it is the same autodiff seeing the same arithmetic.
+// dispatch where the region had thousands. Backward runs an adjoint
+// generated from the program, in plain doubles, each rule the matching
+// stan-math derivative transcribed. A region the generator refuses replays
+// the program under stan-math nested autodiff instead and harvests the
+// live-ins' adjoints. A branch on a parameter differentiates the taken
+// branch, which is exactly what the generated C++ does.
 //
 // Registers are mutable cells, one per element of every slot the region
 // touches; a len-k slot is k consecutive registers, so Eigen::Map works
-// on ranges. Values come only from the forward double pass; the var pass
-// exists for its adjoints.
+// on ranges. Values come only from the forward double pass; a var replay
+// exists only for its adjoints.
 //
 // Densities appear only in propto-OFF form (the carver refuses propto):
 // with no term-dropping, the forward is type-uniform and one templated

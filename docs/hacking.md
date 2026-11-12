@@ -246,7 +246,8 @@ The tools you will reach for most:
 - `STANLI_DUMP_PASSES=<dir>`: an environment variable read by anything that
   compiles a model. It writes the graph after every lowering pass to
   `<dir>/NN-<graph>-<stage>.txt`, numbered so `ls` sorts in pass order, plus
-  the input MIR as `00-mir.sexp`. Diff two consecutive files to see exactly
+  the input MIR document as `00-mir.sexp` (the shipped compilers write an
+  encoded `STANLI2:` document there rather than an S-expression). Diff two consecutive files to see exactly
   what one pass did. A pass that throws still leaves
   `NN-<graph>-FAILED-after-<stage>.txt` with the graph it died on.
 

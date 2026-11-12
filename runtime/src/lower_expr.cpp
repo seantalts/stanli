@@ -1705,6 +1705,11 @@ bool Lowering::specialize_static_shapes(mir::Expr* e) {
   for (mir::Expr& arg : e->args) changed |= specialize_static_shapes(&arg);
   return changed;
 }
+// Fallback for expressions with no native lowering: a data-only subtree
+// is evaluated at compile time and materialized as a constant. Unsupported
+// expressions and Stan validation failures decline; the latter must stay
+// at model evaluation rather than move to construction. Propto densities
+// never fold because their value is instantiation-dependent.
 std::optional<Lowering::Val> Lowering::fold_const(const mir::Expr& e) {
   const bool data_value =
       e.data_only ||

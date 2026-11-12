@@ -1,4 +1,5 @@
-// One semantic registry for probability functions. Graph lowering, the
+// Resolvers for probability functions over the one function table in
+// function_registry.cpp. Graph lowering, the
 // runtime-control register machine, and MIR interpretation use these same
 // descriptors; backends only differ in how they materialize an argument.
 #ifndef STANLI_DENSITY_REGISTRY_HPP

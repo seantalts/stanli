@@ -801,9 +801,13 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
 
   // Target terms have no consuming op yet either: reduce_terms (log_prob)
   // or the arena reads (write_array) see them only after the passes run.
-  std::vector<int> update_roots = roots;
-  update_roots.insert(update_roots.end(), target_terms.begin(),
-                      target_terms.end());
+  // Each call reflects the terms as they stand, since passes replace them.
+  const auto roots_with_terms = [&] {
+    std::vector<int> all = roots;
+    all.insert(all.end(), target_terms.begin(), target_terms.end());
+    return all;
+  };
+  const std::vector<int> update_roots = roots_with_terms();
   fuse_gp_diagonal_updates(g, update_roots);
   const auto inplace_time = prep.start();
   const int inplace =
@@ -837,9 +841,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
   // may have replaced target terms with vector reductions: rebuild the
   // implicit-root set before giving those new ops the same last-use proof
   // as the scalar stores.
-  std::vector<int> post_reroll_roots = roots;
-  post_reroll_roots.insert(post_reroll_roots.end(), target_terms.begin(),
-                           target_terms.end());
+  const std::vector<int> post_reroll_roots = roots_with_terms();
   const auto post_reroll_inplace_time = prep.start();
   const int post_reroll_inplace =
       rerolled.regions ? make_inplace_updates(g, post_reroll_roots) : 0;
@@ -855,9 +857,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     const CollapseStats collapsed = collapse_observations(
         g, out.fills, target_terms, roots, report_terms ? &report : nullptr);
     if (report_terms) print_collapse_report(report, prep_graph);
-    current_roots = roots;
-    current_roots.insert(current_roots.end(), target_terms.begin(),
-                         target_terms.end());
+    current_roots = roots_with_terms();
     trace("collapse", collapse_time, current_roots, PrepTrace::Extra::Removed,
           collapsed.ops_removed);
   }
@@ -873,9 +873,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
           parted.list_steps);
     // Same proof the slice stores re-roll makes get: rebuilt from the
     // terms partition just replaced.
-    std::vector<int> post_partition_roots = roots;
-    post_partition_roots.insert(post_partition_roots.end(),
-                                target_terms.begin(), target_terms.end());
+    const std::vector<int> post_partition_roots = roots_with_terms();
     const auto post_partition_inplace_time = prep.start();
     const int post_partition_inplace =
         parted.groups ? make_inplace_updates(g, post_partition_roots) : 0;
@@ -955,7 +953,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
              !wa.truncated.empty());
   dump("lower", roots);
 
-  run_passes(roots, PassPlan{true, false, false, true, false});
+  run_passes(roots, kWriteArrayPasses);
 
   const auto finalize_time = prep.start();
   // Nothing reads a result here, but forward() asserts a scalar result
@@ -1016,7 +1014,7 @@ CompiledModel Lowering::run(const mir::Program& p) {
   for (const auto& v : out.views) roots.push_back(v.slot);
   roots.insert(roots.end(), extra_roots.begin(), extra_roots.end());
 
-  run_passes(roots, PassPlan{true, true, true, true, true});
+  run_passes(roots, kLogProbPasses);
 
   const auto reduce_time = prep.start();
   std::vector<int> all = target_terms;

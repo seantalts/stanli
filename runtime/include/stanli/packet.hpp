@@ -5,7 +5,8 @@
 namespace stanli {
 
 // True while Executor::forward_value_only() is running: a kernel may
-// skip work whose only consumer is its own backward. See graph.hpp.
+// skip work whose only consumer is its own backward. That function and its
+// callers are documented in graph.hpp; kernels consult only this flag.
 bool values_only();
 
 // True unless a test turns it off: 1x1 and 2x2 matrix kernels then run on
