@@ -673,10 +673,11 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                 f"point {point}: {fail_detail(proc, got)}")
     if opts and interpreted(proc.stderr) != opts.interpreted:
         note = next((line for line in proc.stderr.splitlines()
-                     if line.startswith("INTERP ")), "")
+                     if line.startswith("INTERP ")
+                     or "(interpreted:" in line), "")
         return ("INTERPRETER", 0.0, 0, 0,
                 f"point {point}: " + (f"runs through the MIR interpreter: "
-                                      f"{note[7:207]}" if not opts.interpreted
+                                      f"{note[:200]}" if not opts.interpreted
                                       else "expected the MIR interpreter"))
     rv = [float(x) for x in pt["values"]]
     gv = [float(x) for x in got[1:]]
@@ -1109,7 +1110,8 @@ class Replay:
 @dataclasses.dataclass(frozen=True)
 class Corpus:
     refs: pathlib.Path
-    # name -> (source, data, gradient labels) for every model it holds.
+    # A function of a work directory giving name -> (source, data, gradient
+    # labels[, manifest source hash]); None takes the models from the archive.
     models: object
     mir: bool = False
     ulp: object = None
@@ -1234,7 +1236,7 @@ def pin_drift(recorded, required=("cmdstan", "stan", "math")):
 def replay_corpus(name, selected, check_bin, stanc, jobs, timeout):
     """Replay a local corpus against its archive. Exit status."""
     corpus = CORPORA[name]
-    refs, recorded = load_corpus_refs(corpus)
+    refs, _ = load_corpus_refs(corpus)
     with tempfile.TemporaryDirectory(prefix=f"stanli_{name}_") as tmp:
         work = pathlib.Path(tmp)
         models = (corpus.models(work) if corpus.models
