@@ -138,6 +138,28 @@ bool same_double_bytes(const std::vector<double>& a,
           std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0);
 }
 
+// Evaluates write_array at q on the graph and on its forced interpreter with
+// equal seeds; the rows must match bitwise. Returns the graph row.
+std::vector<double> cross_checked_row(const stanli::CompiledModel& cm,
+                                      stanli::Executor& pex,
+                                      stanli::Executor& wex,
+                                      const std::vector<double>& q,
+                                      unsigned seed, const std::string& what) {
+  std::copy(q.begin(), q.end(), pex.params_data());
+  pex.run_forward_only();
+  std::copy(q.begin(), q.end(), wex.params_data());
+  stanli::WaRng graph_rng(seed);
+  wex.run_forward_only(stanli::EvalState{&graph_rng});
+  std::vector<double> row = read_row(cm.write_array->columns, wex);
+  stanli::WaRng interp_rng(seed);
+  if (!same_double_bytes(row, cm.write_array->interp->eval(
+                                  cm.constrained_env(pex), interp_rng))) {
+    ++failures;
+    std::printf("FAIL %s: graph and interpreter rows differ\n", what.c_str());
+  }
+  return row;
+}
+
 std::string joined(const std::vector<stanli::CompiledModel::ParamView>& cols) {
   std::string h;
   for (const auto& n : stanli::CompiledModel::csv_names(cols)) {
@@ -1010,45 +1032,35 @@ const stanli::StructuredLoop* find_retained_loop(const stanli::Graph& g) {
 }
 }  // namespace
 
-// A data-bounded for loop, large enough that one iteration's if/else island
-// alone exceeds mir_prog.hpp's register cap, computes a transformed
-// parameter vector in the model log_prob already retains as OP_LOOP under
-// the default automatic policy. write_array has to retain the same loop
-// rather than fall back to the per-draw interpreter.
-void test_write_array_retained_loop() {
+// write_array retains the same data-bounded loop log_prob retains as
+// OP_LOOP, and its rows match the forced interpreter at three points.
+void expect_retained_write_array_loop(const std::string& stem,
+                                      const stanli::DataMap& data) {
   using namespace stanli;
-  const int n = 32;
-  DataMap data;
-  data.set_int("N", n);
-  std::vector<double> y(static_cast<size_t>(n));
-  for (int i = 0; i < n; ++i)
-    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
-  data.set_real_array("y", y);
-  const std::string text =
-      slurp("tests/fixtures/structured_wa_region.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/" + stem + ".tmir.sexp");
 
   CompiledModel cm = compile_model(text, data);
   if (find_retained_loop(cm.graph) == nullptr) {
     ++failures;
     std::printf(
-        "FAIL structured_wa_region: log_prob did not retain the "
-        "transformed-parameter loop\n");
+        "FAIL %s: log_prob did not retain the transformed-parameter loop\n",
+        stem.c_str());
   }
   if (!cm.write_array) {
     ++failures;
-    std::printf("FAIL structured_wa_region: no write_array\n");
+    std::printf("FAIL %s: no write_array\n", stem.c_str());
     return;
   }
   if (!cm.write_array->truncated.empty()) {
     ++failures;
-    std::printf("FAIL structured_wa_region write_array truncated: %s\n",
+    std::printf("FAIL %s write_array truncated: %s\n", stem.c_str(),
                 cm.write_array->truncated.c_str());
   }
   if (find_retained_loop(cm.write_array->graph) == nullptr) {
     ++failures;
     std::printf(
-        "FAIL structured_wa_region: write_array did not lower the loop as a "
-        "retained region\n");
+        "FAIL %s: write_array did not lower the loop as a retained region\n",
+        stem.c_str());
   }
 
   test_setenv("STANLI_WA_FORCE_INTERP", "1");
@@ -1056,8 +1068,8 @@ void test_write_array_retained_loop() {
   test_unsetenv("STANLI_WA_FORCE_INTERP");
   if (!cross.write_array || !cross.write_array->interp) {
     ++failures;
-    std::printf(
-        "FAIL structured_wa_region: no interpreter attached for cross-check\n");
+    std::printf("FAIL %s: no interpreter attached for cross-check\n",
+                stem.c_str());
     return;
   }
 
@@ -1066,29 +1078,33 @@ void test_write_array_retained_loop() {
   Executor wex(std::move(cross.write_array->graph));
   cross.write_array->bind(wex);
 
-  const std::vector<double> mus = {1.3, -0.7, 0.05};
   std::vector<std::vector<double>> graph_rows;
-  for (double mu : mus) {
-    pex.params_data()[0] = mu;
-    pex.run_forward_only();
-    wex.params_data()[0] = mu;
-    WaRng graph_rng(7);
-    wex.run_forward_only(EvalState{&graph_rng});
-    std::vector<double> row = read_row(cross.write_array->columns, wex);
-    WaRng interp_rng(7);
-    const std::vector<double> interp_row =
-        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
-    if (!same_double_bytes(row, interp_row)) {
-      ++failures;
-      std::printf(
-          "FAIL structured_wa_region: graph/interp rows differ at mu=%g\n", mu);
-    }
-    graph_rows.push_back(std::move(row));
-  }
+  for (double mu : {1.3, -0.7, 0.05})
+    graph_rows.push_back(cross_checked_row(
+        cross, pex, wex, {mu}, 7, stem + " at mu=" + std::to_string(mu)));
   if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
     ++failures;
-    std::printf("FAIL structured_wa_region: draws did not vary\n");
+    std::printf("FAIL %s: draws did not vary\n", stem.c_str());
   }
+}
+
+stanli::DataMap alternating_y(int n) {
+  stanli::DataMap data;
+  data.set_int("N", n);
+  std::vector<double> y(static_cast<size_t>(n));
+  for (int i = 0; i < n; ++i)
+    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+  data.set_real_array("y", y);
+  return data;
+}
+
+// A data-bounded for loop, large enough that one iteration's if/else island
+// alone exceeds mir_prog.hpp's register cap, computes a transformed
+// parameter vector in the model log_prob already retains as OP_LOOP under
+// the default automatic policy. write_array has to retain the same loop
+// rather than fall back to the per-draw interpreter.
+void test_write_array_retained_loop() {
+  expect_retained_write_array_loop("structured_wa_region", alternating_y(32));
 }
 
 // The transformed-parameter block carries a data-only sibling statement
@@ -1097,84 +1113,10 @@ void test_write_array_retained_loop() {
 // sibling forced the whole block through one register-program island
 // before write_array tried the loop as its own region.
 void test_write_array_block_order() {
-  using namespace stanli;
-  const int n = 32;
-  DataMap data;
-  data.set_int("N", n);
+  stanli::DataMap data = alternating_y(32);
   data.set_int("lim", 3);
-  std::vector<double> y(static_cast<size_t>(n));
-  for (int i = 0; i < n; ++i)
-    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
-  data.set_real_array("y", y);
   data.set_int_array("whenmat", std::vector<int>(40, 1), {8, 5});
-  const std::string text =
-      slurp("tests/fixtures/structured_wa_block_order.tmir.sexp");
-
-  CompiledModel cm = compile_model(text, data);
-  if (find_retained_loop(cm.graph) == nullptr) {
-    ++failures;
-    std::printf(
-        "FAIL structured_wa_block_order: log_prob did not retain the "
-        "transformed-parameter loop\n");
-  }
-  if (!cm.write_array) {
-    ++failures;
-    std::printf("FAIL structured_wa_block_order: no write_array\n");
-    return;
-  }
-  if (!cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf("FAIL structured_wa_block_order write_array truncated: %s\n",
-                cm.write_array->truncated.c_str());
-  }
-  if (find_retained_loop(cm.write_array->graph) == nullptr) {
-    ++failures;
-    std::printf(
-        "FAIL structured_wa_block_order: write_array did not lower the loop "
-        "as a retained region\n");
-  }
-
-  test_setenv("STANLI_WA_FORCE_INTERP", "1");
-  CompiledModel cross = compile_model(text, data);
-  test_unsetenv("STANLI_WA_FORCE_INTERP");
-  if (!cross.write_array || !cross.write_array->interp) {
-    ++failures;
-    std::printf(
-        "FAIL structured_wa_block_order: no interpreter attached for "
-        "cross-check\n");
-    return;
-  }
-
-  Executor pex(cross.graph);
-  cross.bind(pex);
-  Executor wex(std::move(cross.write_array->graph));
-  cross.write_array->bind(wex);
-
-  const std::vector<double> mus = {1.3, -0.7, 0.05};
-  std::vector<std::vector<double>> graph_rows;
-  for (double mu : mus) {
-    pex.params_data()[0] = mu;
-    pex.run_forward_only();
-    wex.params_data()[0] = mu;
-    WaRng graph_rng(7);
-    wex.run_forward_only(EvalState{&graph_rng});
-    std::vector<double> row = read_row(cross.write_array->columns, wex);
-    WaRng interp_rng(7);
-    const std::vector<double> interp_row =
-        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
-    if (!same_double_bytes(row, interp_row)) {
-      ++failures;
-      std::printf(
-          "FAIL structured_wa_block_order: graph/interp rows differ at "
-          "mu=%g\n",
-          mu);
-    }
-    graph_rows.push_back(std::move(row));
-  }
-  if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
-    ++failures;
-    std::printf("FAIL structured_wa_block_order: draws did not vary\n");
-  }
+  expect_retained_write_array_loop("structured_wa_block_order", data);
 }
 
 // normal_rng(vector, vector) and normal_rng(vector, real) both return
@@ -1213,25 +1155,12 @@ void test_write_array_vector_rng() {
 
   std::vector<std::vector<double>> graph_rows;
   for (int draw = 0; draw < 3; ++draw) {
-    for (int64_t j = 0; j < pex.n_params(); ++j)
-      pex.params_data()[j] =
-          0.2 * static_cast<double>(draw + 1) + 0.1 * static_cast<double>(j);
-    pex.run_forward_only();
-    for (int64_t j = 0; j < wex.n_params(); ++j)
-      wex.params_data()[j] =
-          0.2 * static_cast<double>(draw + 1) + 0.1 * static_cast<double>(j);
-    WaRng graph_rng(11 + draw);
-    wex.run_forward_only(EvalState{&graph_rng});
-    std::vector<double> row = read_row(cross.write_array->columns, wex);
-    WaRng interp_rng(11 + draw);
-    const std::vector<double> interp_row =
-        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
-    if (!same_double_bytes(row, interp_row)) {
-      ++failures;
-      std::printf("FAIL gqrng_vector: graph/interp rows differ at draw %d\n",
-                  draw);
-    }
-    graph_rows.push_back(std::move(row));
+    std::vector<double> q(static_cast<size_t>(pex.n_params()));
+    for (size_t j = 0; j < q.size(); ++j)
+      q[j] = 0.2 * static_cast<double>(draw + 1) + 0.1 * static_cast<double>(j);
+    graph_rows.push_back(
+        cross_checked_row(cross, pex, wex, q, 11 + draw,
+                          "gqrng_vector draw " + std::to_string(draw)));
   }
   if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
     ++failures;
@@ -1550,20 +1479,7 @@ void test_write_array_selected_loop_refused() {
   cross.bind(pex);
   Executor wex(std::move(cross.write_array->graph));
   cross.write_array->bind(wex);
-  pex.params_data()[0] = 0.4;
-  pex.run_forward_only();
-  wex.params_data()[0] = 0.4;
-  WaRng graph_rng(9);
-  wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row = read_row(cross.write_array->columns, wex);
-  WaRng interp_rng(9);
-  const std::vector<double> interp_row =
-      cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
-  if (!same_double_bytes(row, interp_row)) {
-    ++failures;
-    std::printf(
-        "FAIL gq_selected_loop_refused: graph and interpreter rows differ\n");
-  }
+  cross_checked_row(cross, pex, wex, {0.4}, 9, "gq_selected_loop_refused");
 }
 
 // The same shape, but the refused loop's body also declares a
@@ -1626,22 +1542,10 @@ void test_constant_folded_gq_column() {
 
   Executor pex(cm.graph);
   cm.bind(pex);
-  pex.params_data()[0] = 0.25;
-  pex.run_forward_only();
-
   Executor wex(std::move(cm.write_array->graph));
   cm.write_array->bind(wex);
-  wex.params_data()[0] = 0.25;
-  WaRng graph_rng(1);
-  wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row = read_row(cm.write_array->columns, wex);
-  WaRng interp_rng(1);
-  const std::vector<double> interp_row =
-      cm.write_array->interp->eval(cm.constrained_env(pex), interp_rng);
-  if (!same_double_bytes(row, interp_row)) {
-    ++failures;
-    std::printf("FAIL gqconst: graph and interpreter rows differ\n");
-  }
+  const std::vector<double> row =
+      cross_checked_row(cm, pex, wex, {0.25}, 1, "gqconst");
   if (row.size() != 4 || row[0] != 0.25 || row[1] != 3.0 || row[2] != 1.0 ||
       row[3] != 5.0) {
     ++failures;
@@ -4197,27 +4101,14 @@ void test_choose_index_gq() {
 
   Executor pex(cm.graph);
   cm.bind(pex);
-  std::copy(q.begin(), q.end(), pex.params_data());
-  pex.run_forward_only();
-
   Executor wex(std::move(cm.write_array->graph));
   cm.write_array->bind(wex);
-  std::copy(q.begin(), q.end(), wex.params_data());
-  WaRng graph_rng(5);
-  wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row = read_row(cm.write_array->columns, wex);
+  const std::vector<double> row =
+      cross_checked_row(cm, pex, wex, q, 5, "choosesize");
   expect_eq("choosesize header", joined(cm.write_array->columns),
             "z.1,z.2,z.3,z.4,z.5,z.6,A.1.1,A.2.1,A.3.1,A.4.1,A.1.2,A.2.2,"
             "A.3.2,A.4.2,A.1.3,A.2.3,A.3.3,A.4.3,A.1.4,A.2.4,A.3.4,A.4.4,"
             "cor.1,cor.2,cor.3,cor.4,cor.5,cor.6");
-
-  WaRng interp_rng(5);
-  const std::vector<double> interp_row =
-      cm.write_array->interp->eval(cm.constrained_env(pex), interp_rng);
-  if (!same_double_bytes(row, interp_row)) {
-    ++failures;
-    std::printf("FAIL choosesize: graph and interpreter rows differ\n");
-  }
   // cor holds A's strict upper triangle, column by column.
   const double want[6] = {q[10], q[14], q[15], q[18], q[19], q[20]};
   for (int i = 0; i < 6; ++i)
