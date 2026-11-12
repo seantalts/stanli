@@ -1363,6 +1363,64 @@ static void test_sparse_candidate_cost() {
   expect("sparse-candidate work stays linear", big.steps < 3 * small.steps);
 }
 
+// Groups chained by a scalar recurrence, each with its own run of densities:
+// re-roll fuses every group into a region of its own, and each region retires
+// its lanes' terms. Doing that by rewriting the whole term list per region
+// made preparation quadratic in the number of groups.
+struct ManyRegionsCost {
+  int regions;
+  int64_t steps;
+};
+
+static ManyRegionsCost many_regions_cost(int groups) {
+  Graph g;
+  Fills fills;
+  const int alpha = g.add_slot(8, true);
+  const int rho = g.add_slot(1, true);
+  const int sigma = g.add_slot(1, true);
+  int m = g.add_slot(1, true);
+  std::vector<int> terms;
+  int n = 0;
+  for (int i = 0; i < groups; ++i) {
+    const int z = g.add_slot(1, false);
+    fills.emplace_back(z, std::vector<double>{0.01 * (i % 7)});
+    const int prod = g.add_slot(1, false);
+    g.add_op(OP_MUL, {rho, m}, prod);
+    m = g.add_slot(1, false);
+    g.add_op(OP_ADD, {prod, z}, m);
+    const int lanes = 4 + (i % 5);
+    for (int l = 0; l < lanes; ++l, ++n) {
+      const int y = g.add_slot(1, false);
+      fills.emplace_back(y, std::vector<double>{0.1 * (n % 11) - 0.5});
+      const int a = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {alpha}, a, {l});
+      const int mu = g.add_slot(1, false);
+      g.add_op(OP_ADD, {m, a}, mu);
+      const int lp = g.add_slot(1, false);
+      const int id = g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+      g.ops[id].variant = 0x06;
+      terms.push_back(lp);
+    }
+  }
+  const RerollStats st = reroll(g, fills, terms, {});
+  expect("many regions leave one term each",
+         terms.size() == (size_t)st.regions);
+  return {st.regions, st.term_steps};
+}
+
+static void test_many_regions_cost() {
+  const ManyRegionsCost small = many_regions_cost(2000);
+  const ManyRegionsCost big = many_regions_cost(4000);
+  std::printf(
+      "  many-region reroll: groups=2000 %lld term steps,"
+      " groups=4000 %lld term steps (%.1fx)\n",
+      (long long)small.steps, (long long)big.steps,
+      small.steps > 0 ? (double)big.steps / (double)small.steps : 0.0);
+  expect("many regions small: one region per group", small.regions == 2000);
+  expect("many regions big: one region per group", big.regions == 4000);
+  expect("many regions term work stays linear", big.steps < 3 * small.steps);
+}
+
 static void test_write_fusion() {
   using namespace writefuse;
   for (int start : {0, 1}) {
@@ -2931,7 +2989,9 @@ static void test_lane_plan_boundary() {
       std::unordered_set<int> term_set(terms.begin(), terms.end());
       std::unordered_map<int, int> renamed;
       std::vector<Op> emitted;
-      std::move(*accepted).emit(g, fills, terms, term_set, emitted, renamed);
+      TermRetirement retired;
+      std::move(*accepted).emit(g, fills, retired, term_set, emitted, renamed);
+      retired.apply(terms);
       expect("lane emitter keeps operation order",
              emitted.size() == 3 && emitted[0].opcode == OP_FMA &&
                  emitted[1].opcode == OP_EXPV &&
@@ -3083,6 +3143,7 @@ int main() {
   test_lda_shape_cost();
   test_no_candidate_cost();
   test_sparse_candidate_cost();
+  test_many_regions_cost();
   test_write_fusion();
   test_write_fusion_bails();
   test_read_modify_write_lanes();

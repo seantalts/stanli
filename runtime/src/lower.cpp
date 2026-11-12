@@ -793,9 +793,11 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
                          PrepTrace::Extra extra = PrepTrace::Extra::None,
                          int64_t a = 0, int64_t b = 0, bool deep = false,
                          int64_t params = 0, int64_t c = 0, int64_t d = 0,
-                         const RerollStats* disp = nullptr) {
+                         const RerollStats* disp = nullptr,
+                         int64_t term_steps = 0) {
     prep.graph(prep_graph, stage, from, g, out.fills, target_terms.size(),
-               out.views.size(), extra, a, b, deep, params, c, d, disp);
+               out.views.size(), extra, a, b, deep, params, c, d, disp,
+               term_steps);
     dump(stage, stage_roots);
   };
 
@@ -836,7 +838,8 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
              compile_options.fast_math);  // STANLI_NO_REROLL
   trace("reroll", reroll_time, roots, PrepTrace::Extra::Reroll,
         rerolled.regions, rerolled.list_steps, false, 0,
-        rerolled.candidate_steps, rerolled.row_steps, &rerolled);
+        rerolled.candidate_steps, rerolled.row_steps, &rerolled,
+        rerolled.term_steps);
   // Re-roll can replace many element writes with copying slice stores, and
   // may have replaced target terms with vector reductions: rebuild the
   // implicit-root set before giving those new ops the same last-use proof
@@ -870,7 +873,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
         g, out.fills, target_terms, roots, compile_options.fast_math);
     trace("partition", partition_time, roots, PrepTrace::Extra::Partition,
           parted.groups, parted.lanes, false, 0, parted.declined,
-          parted.list_steps);
+          parted.list_steps, nullptr, parted.term_steps);
     // Same proof the slice stores re-roll makes get: rebuilt from the
     // terms partition just replaced.
     const std::vector<int> post_partition_roots = roots_with_terms();

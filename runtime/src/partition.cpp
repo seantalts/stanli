@@ -313,26 +313,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     o.idata = g.idata_pool.back().data();
     o.n_idata = (int64_t)g.idata_pool.back().size();
   };
-  // Non-contiguous dead terms are what an interleaved bucket produces, so
-  // the replacement takes the first dead entry's position and the rest of
-  // the list closes up around it.
-  const auto retire_terms = [&](const std::unordered_set<int>& dead,
-                                int new_term) {
-    std::vector<int> next;
-    next.reserve(target_terms.size());
-    bool placed = false;
-    for (int s : target_terms) {
-      if (dead.count(s) == 0) {
-        next.push_back(s);
-      } else if (!placed) {
-        next.push_back(new_term);
-        placed = true;
-      }
-    }
-    target_terms = std::move(next);
-    for (int s : dead) term_set.erase(s);
-    term_set.insert(new_term);
-  };
+  TermRetirement retired;
 
   // Everything an item's chain reads from outside has to hold still from its
   // first lane to its last, which is the proof the buckets below also make.
@@ -452,14 +433,14 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     attach_idata(lp, std::move(outcomes));
     out_ops.push_back(lp);
 
-    std::unordered_set<int> dead;
+    std::vector<int> dead;
     for (int64_t l = 0; l < n; ++l) {
-      dead.insert(at(glm.cat, l).out);
+      dead.push_back(at(glm.cat, l).out);
       for (size_t u = lanes[(size_t)ids[(size_t)l]].begin;
            u < lanes[(size_t)ids[(size_t)l]].end; ++u)
         dropped[u] = 1;
     }
-    retire_terms(dead, lp.out);
+    retired.retire(dead, lp.out, term_set);
     emit_at[lo] = (int)emitted.size();
     emitted.push_back(std::move(out_ops));
     ++st.groups;
@@ -999,9 +980,9 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       attach_idata(o, std::move(v));
     };
     const auto swap_terms = [&](int p, int new_term) {
-      std::unordered_set<int> dead;
-      for (int64_t l = 0; l < L; ++l) dead.insert(op_at(p, l).out);
-      retire_terms(dead, new_term);
+      std::vector<int> dead;
+      for (int64_t l = 0; l < L; ++l) dead.push_back(op_at(p, l).out);
+      retired.retire(dead, new_term, term_set);
     };
 
     for (int p = 0; p < k; ++p) {
@@ -1125,6 +1106,8 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     st.lanes += (int)L;
   }
 
+  retired.apply(target_terms);
+  st.term_steps = retired.steps;
   if (st.groups == 0) return st;
   std::vector<Op> result;
   result.reserve(n_ops);

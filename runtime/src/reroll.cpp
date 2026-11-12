@@ -701,6 +701,7 @@ RerollStats reroll(Graph& g,
   // are never chained: remapping the ORIGINAL name to the newest
   // replacement each time keeps lookups single-step.
   std::unordered_map<int, int> renamed;
+  TermRetirement retired;
   const auto resolve = [&renamed](int s) {
     return detail::reroll_plan::resolve_slot(renamed, s);
   };
@@ -1452,8 +1453,7 @@ RerollStats reroll(Graph& g,
 
       // Emit only the accepted plan; classification and pricing above have
       // not changed graph storage, targets or lazy renaming.
-      std::move(*selected).emit(g, fills, target_terms, term_set, result,
-                                renamed);
+      std::move(*selected).emit(g, fills, retired, term_set, result, renamed);
       i += (size_t)P * (size_t)Luse;
       ++st.regions;
       for (const Pos& committed : selected->description().positions) {
@@ -1476,6 +1476,8 @@ RerollStats reroll(Graph& g,
     }
   }
   g.ops = std::move(result);
+  retired.apply(target_terms);
+  st.term_steps = retired.steps;
   return st;
 }
 

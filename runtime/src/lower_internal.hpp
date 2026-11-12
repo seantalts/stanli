@@ -99,6 +99,7 @@ struct PrepTrace {
     int64_t b = 0;
     int64_t c = 0;
     int64_t d = 0;
+    int64_t term_steps = 0;
     int64_t packed_rows = 0;
     int64_t term_density = 0;
     int64_t element_density = 0;
@@ -138,7 +139,8 @@ struct PrepTrace {
              size_t terms, size_t views, Extra extra = Extra::None,
              int64_t a = 0, int64_t b = 0, bool deep = false,
              int64_t params = 0, int64_t c = 0, int64_t d = 0,
-             const RerollStats* dispositions = nullptr) {
+             const RerollStats* dispositions = nullptr,
+             int64_t term_steps = 0) {
     if (!enabled_) return;
     Row& r = next();
     r.graph = graph_name;
@@ -155,6 +157,7 @@ struct PrepTrace {
     r.b = b;
     r.c = c;
     r.d = d;
+    r.term_steps = term_steps;
     if (dispositions) {
       r.packed_rows = dispositions->packed_rows;
       r.term_density = dispositions->term_density;
@@ -214,6 +217,7 @@ struct PrepTrace {
           field("row_steps", r.d);
           field("list_steps", r.b);
           field("candidate_steps", r.c);
+          field("term_steps", r.term_steps);
           field("packed_rows", r.packed_rows);
           field("term_density", r.term_density);
           field("element_density", r.element_density);
@@ -225,6 +229,7 @@ struct PrepTrace {
           field("lanes", r.b);
           field("declined", r.c);
           field("list_steps", r.d);
+          field("term_steps", r.term_steps);
           break;
         case Extra::Regions:
           field("regions", r.a);
