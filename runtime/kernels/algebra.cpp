@@ -80,30 +80,12 @@ struct MirVariadicSystem {
     } else {
       const mir::FunDef* system = spec->system();
       if (!system) throw std::runtime_error("solve: missing algebraic system");
-      std::vector<std::vector<T>> reals(1);
-      reals[0].reserve((size_t)x.size());
-      for (Eigen::Index i = 0; i < x.size(); ++i) reals[0].push_back(T(x(i)));
-      std::vector<std::vector<int>> ints;
-      size_t theta_at = 0, xr_at = 0;
-      for (const RhsArg& arg : spec->args) {
-        if (arg.is_int) {
-          ints.push_back(callback_integer_values(arg, theta.data(), &theta_at));
-          continue;
-        }
-        std::vector<T> values;
-        values.reserve((size_t)arg.len);
-        if (arg.is_param) {
-          for (int i = 0; i < arg.len; ++i)
-            values.push_back(T(theta((Eigen::Index)theta_at++)));
-        } else {
-          for (int i = 0; i < arg.len; ++i)
-            values.push_back(T(spec->x_r[xr_at++]));
-        }
-        reals.push_back(std::move(values));
-      }
-      MirInterp<T> ev(*spec->funs(), "algebraic system");
-      result =
-          interpret_retained_callback(ev, *system, reals, ints, spec->args);
+      std::vector<T> unknown;
+      unknown.reserve((size_t)x.size());
+      for (Eigen::Index i = 0; i < x.size(); ++i) unknown.push_back(T(x(i)));
+      result = interpret_packed_callback<T>(
+          *spec->funs(), "algebraic system", *system, {std::move(unknown)},
+          spec->args, theta.data(), spec->x_r.data());
     }
     Eigen::Matrix<T, Eigen::Dynamic, 1> out((Eigen::Index)result.size());
     for (size_t i = 0; i < result.size(); ++i) out((Eigen::Index)i) = result[i];

@@ -23,13 +23,12 @@ namespace {
 
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 
-// The collector the previous attempt got wrong, and the reason its draws
-// came back empty: pathfinder writes each draw as an Eigen ROW vector
+// Pathfinder writes each draw as an Eigen ROW vector
 // (`Eigen::Matrix<double, 1, -1>`), and every operator() on
-// stan::callbacks::writer is a no-op unless overridden. A collector that
-// only overrode the std::vector<double> form silently discarded the whole
-// run. The header row arrives as a vector of strings, and write_times
-// afterwards uses the string and no-argument forms, which stay no-ops.
+// stan::callbacks::writer is a no-op unless overridden, so a collector
+// has to override that form. The header row arrives as a vector of strings,
+// and write_times afterwards uses the string and no-argument forms, which
+// stay no-ops.
 //
 // Row layout, fixed by the service: lp_approx__, lp__, path__, then one
 // column per constrained parameter. With no write_array attached the

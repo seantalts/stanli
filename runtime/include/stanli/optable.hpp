@@ -773,8 +773,7 @@ inline void div_partials(double u, double b, double out, double* da,
 // cost of an lp__ that differs from CmdStan's by a per-model constant on
 // every `~` statement. Gradients are untouched to the bit; the chain a
 // seed produces is not, because a shifted lp rounds differently inside
-// the Hamiltonian (docs/lp-constant.md)
-// -- which is why the browser build takes this and the wheel does not.
+// the Hamiltonian (docs/lp-constant.md).
 constexpr int density_tier(int listed) {
 #ifdef STANLI_LITE_LP
   return listed & STANLI_DENSITY_FULL_MASKS;
@@ -784,7 +783,7 @@ constexpr int density_tier(int listed) {
 }
 
 // True when this build can reproduce CmdStan's lp__ exactly, rather than
-// up to a constant. Reported by stanli_version() and checked by the
+// up to a constant. Reported by stanli_exact_lp() and checked by the
 // verification harnesses, which relax from bitwise to same-constant.
 constexpr bool exact_lp_build() {
 #ifdef STANLI_LITE_LP

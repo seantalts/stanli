@@ -513,7 +513,7 @@ add_library(stanli_shared SHARED
   $<TARGET_OBJECTS:stanli_runtime_objects>
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_include_directories(stanli_shared PUBLIC runtime/include)
-# ${CMAKE_DL_LIBS}: bs_model_construct calls dladdr to find its own path.
+# ${CMAKE_DL_LIBS}: the embedded OCaml runtime uses dlopen.
 target_link_libraries(stanli_shared
                       PUBLIC stanmath sundials Threads::Threads ${CMAKE_DL_LIBS})
 set_target_properties(stanli_shared PROPERTIES OUTPUT_NAME stanli)
@@ -647,10 +647,9 @@ if(STANLI_SANITIZE)
   endif()
 endif()
 target_include_directories(stanli PUBLIC runtime/include)
-# The BridgeStan facade is native-only: it finds its own sidecar manifest
-# with dladdr, and a browser has neither dlopen nor a second process to
-# load the pair. Nothing under wasm references a bs_ symbol, so this only
-# saves compiling it.
+# The BridgeStan facade is native-only: it is the BridgeStan C ABI that
+# native hosts load, and nothing under wasm references a bs_ symbol, so this
+# only saves compiling it.
 if(NOT EMSCRIPTEN)
   # PUBLIC, so anything linking the runtime sees the same decoration the
   # definitions were compiled with. Without it the reference header's
@@ -661,7 +660,7 @@ if(NOT EMSCRIPTEN)
 endif()
 target_link_libraries(stanli PUBLIC stanmath sundials)
 if(NOT EMSCRIPTEN)
-  # ${CMAKE_DL_LIBS}: bs_model_construct calls dladdr. Not under
+  # ${CMAKE_DL_LIBS}: the embedded OCaml runtime uses dlopen. Not under
   # Emscripten, whose libc already carries it.
   target_link_libraries(stanli PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 endif()
@@ -1119,7 +1118,6 @@ set_tests_properties(test_bench_opcost_smoke PROPERTIES
 add_executable(hp_adjoint_dump EXCLUDE_FROM_ALL
   tools/hp_adjoint_dump.cpp tests/tbb_stub.cpp)
 target_link_libraries(hp_adjoint_dump PRIVATE stanli)
-add_executable(bench_dispatch tools/bench_dispatch.cpp)
 add_executable(dump_ops tools/dump_ops.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(dump_ops PRIVATE stanli)
@@ -1492,6 +1490,12 @@ if(Python3_Interpreter_FOUND)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_historical_benchmarks
            COMMAND ${Python3_EXECUTABLE} tests/test_historical_benchmarks.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_toolchain
+           COMMAND ${Python3_EXECUTABLE} tests/test_toolchain.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_validate_total_estimates
+           COMMAND ${Python3_EXECUTABLE} tests/test_validate_total_estimates.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_sampling
            COMMAND ${Python3_EXECUTABLE} tools/check_corpus_sampling.py

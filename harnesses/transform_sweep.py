@@ -23,7 +23,6 @@ CI; `tests/test_transforms.cpp` is what guards these on every push.
 import argparse
 import json
 import pathlib
-import struct
 import subprocess
 import sys
 import tempfile
@@ -32,6 +31,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from cmdstan_ref import build_reference, compare_points  # noqa: E402
 import toolchain  # noqa: E402
+from verify_refs import ulp_distance  # noqa: E402
 
 # name -> (parameters block, target expression). The target has to touch
 # every element of the constrained value, or a transform could be wrong in
@@ -122,16 +122,6 @@ def run(cmd, **kw):
                           text=True, **kw)
 
 
-def ulps(a, b):
-    if a == b:
-        return 0
-    ia = struct.unpack("<q", struct.pack("<d", a))[0]
-    ib = struct.unpack("<q", struct.pack("<d", b))[0]
-    if (ia < 0) != (ib < 0):
-        return float("inf")
-    return abs(ia - ib)
-
-
 def sweep_one(case, cs, tmp, build):
     name, params, target = case
     d = tmp / name
@@ -155,7 +145,7 @@ def sweep_one(case, cs, tmp, build):
 
     # shape_mismatch here is the unconstrained-size check: a wrong
     # free-parameter count for corr_matrix vs cov_matrix lands exactly there.
-    worst, n_cmp, err = compare_points(exe, check, stan, data, ulps,
+    worst, n_cmp, err = compare_points(exe, check, stan, data, ulp_distance,
                                        REPO / "deps/stanc3/stanc", run=run)
     if err:
         return (name,) + err

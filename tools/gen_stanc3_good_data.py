@@ -35,6 +35,7 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
+import toolchain  # noqa: E402
 from cmdstan_ref import _result_line, compile_cmd, point_results  # noqa: E402
 
 CORPUS = REPO / "deps" / "stanc3-src" / "test" / "integration" / "good"
@@ -53,13 +54,6 @@ RUN_TIMEOUT = 60
 
 def sha256(data):
     return hashlib.sha256(data).hexdigest()
-
-
-def pinned_sha():
-    for line in (REPO / "deps" / "pins.env").read_text().splitlines():
-        if line.startswith("STANC3_SRC_SHA="):
-            return line.split("=", 1)[1].strip()
-    raise SystemExit("STANC3_SRC_SHA missing from deps/pins.env")
 
 
 def corpus_models():
@@ -496,9 +490,9 @@ def check():
     doc = load(OUT)
     if doc.get("schema") != 1:
         errors.append("schema is not 1")
-    if doc.get("stanc3_sha") != pinned_sha():
-        errors.append(f"stanc3_sha {doc.get('stanc3_sha')} is not the pinned "
-                      f"{pinned_sha()}")
+    pinned = toolchain.pins()["STANC3_SRC_SHA"]
+    if doc.get("stanc3_sha") != pinned:
+        errors.append(f"stanc3_sha {doc.get('stanc3_sha')} is not the pinned {pinned}")
     models, recorded = corpus_models(), doc.get("models", {})
     for rel in sorted(models.keys() - recorded.keys()):
         errors.append(f"missing: {rel}")
@@ -576,7 +570,7 @@ def main():
 
     def save():
         OUT.parent.mkdir(parents=True, exist_ok=True)
-        OUT.write_bytes(serialize({"schema": 1, "stanc3_sha": pinned_sha(),
+        OUT.write_bytes(serialize({"schema": 1, "stanc3_sha": toolchain.pins()["STANC3_SRC_SHA"],
                                    "models": result}))
 
     print(f"{sum(map(len, todo.values()))} models to generate, "

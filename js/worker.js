@@ -200,10 +200,8 @@ onmessage = async (e) => {
     M._free(mirPtr);
     M._free(dataPtr);
     if (!model) throw new Error(M.UTF8ToString(errPtr));
-    if (M._stanli_warnings) {
-      const note = M.UTF8ToString(M._stanli_warnings(model));
-      if (note) console.warn(note);
-    }
+    const note = M.UTF8ToString(M._stanli_warnings(model));
+    if (note) console.warn(note);
     const tCompile = performance.now();
 
     const n = Number(M._stanli_n_unconstrained(model));

@@ -218,60 +218,13 @@ double scalar_rng_draw(ScalarRng family, const double* args, size_t nargs,
                        WaRng& rng) {
   if (nargs != scalar_rng_arity(family) || (nargs != 0 && args == nullptr))
     throw std::logic_error("malformed scalar RNG arguments");
-  stan::rng_t& g = rng.gen();
-  switch (family) {
-    case ScalarRng::StdNormal:
-      return stan::math::std_normal_rng(g);
-    case ScalarRng::Gamma:
-      return stan::math::gamma_rng(args[0], args[1], g);
-    case ScalarRng::InvGamma:
-      return stan::math::inv_gamma_rng(args[0], args[1], g);
-    case ScalarRng::Beta:
-      return stan::math::beta_rng(args[0], args[1], g);
-    case ScalarRng::ChiSquare:
-      return stan::math::chi_square_rng(args[0], g);
-    case ScalarRng::Cauchy:
-      return stan::math::cauchy_rng(args[0], args[1], g);
-    case ScalarRng::DoubleExponential:
-      return stan::math::double_exponential_rng(args[0], args[1], g);
-    case ScalarRng::Logistic:
-      return stan::math::logistic_rng(args[0], args[1], g);
-    case ScalarRng::Weibull:
-      return stan::math::weibull_rng(args[0], args[1], g);
-    case ScalarRng::NegBinomial2:
-      return stan::math::neg_binomial_2_rng(args[0], args[1], g);
-    case ScalarRng::NegBinomial2Log:
-      return stan::math::neg_binomial_2_log_rng(args[0], args[1], g);
-    case ScalarRng::YuleSimon:
-      return static_cast<double>(stan::math::yule_simon_rng(args[0], g));
-    case ScalarRng::PoissonLog:
-      return static_cast<double>(stan::math::poisson_log_rng(args[0], g));
-    case ScalarRng::Uniform:
-      return stan::math::uniform_rng(args[0], args[1], g);
-    case ScalarRng::Bernoulli:
-      return static_cast<double>(stan::math::bernoulli_rng(args[0], g));
-    case ScalarRng::Normal:
-      return stan::math::normal_rng(args[0], args[1], g);
-    case ScalarRng::Lognormal:
-      return stan::math::lognormal_rng(args[0], args[1], g);
-    case ScalarRng::Binomial:
-      return static_cast<double>(
-          stan::math::binomial_rng(static_cast<int>(args[0]), args[1], g));
-    case ScalarRng::Gumbel:
-      return stan::math::gumbel_rng(args[0], args[1], g);
-    case ScalarRng::BetaBinomial:
-      return static_cast<double>(stan::math::beta_binomial_rng(
-          static_cast<int>(args[0]), args[1], args[2], g));
-    case ScalarRng::Exponential:
-      return stan::math::exponential_rng(args[0], g);
-    case ScalarRng::Poisson:
-      return static_cast<double>(stan::math::poisson_rng(args[0], g));
-    case ScalarRng::StudentT:
-      return stan::math::student_t_rng(args[0], args[1], args[2], g);
-    case ScalarRng::BernoulliLogit:
-      return static_cast<double>(stan::math::bernoulli_logit_rng(args[0], g));
-  }
-  throw std::logic_error("unknown scalar RNG family");
+  if (family == ScalarRng::StdNormal)
+    return stan::math::std_normal_rng(rng.gen());
+  RngArgument container_args[3]{};
+  for (size_t k = 0; k < nargs; ++k) container_args[k] = {args + k, 1, true};
+  double result = 0.0;
+  container_rng_draw(family, container_args, nargs, &result, 1, rng);
+  return result;
 }
 
 int vector_integer_rng_draw(const double* probabilities, size_t size,
