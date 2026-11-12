@@ -4057,13 +4057,12 @@ struct ProgramCompiler {
   }
 
   // ---- statements ----------------------------------------------------------
-  struct Returned {
-    Range r;
-  };
   // Whether control can reach the statement after the one just compiled.
   // Ended follows a runtime function exit on every path through it; branch
-  // and loop handlers still compile their other reachable paths.
-  enum class [[nodiscard]] Path { Open, Ended };
+  // and loop handlers still compile their other reachable paths. Returned
+  // is a single unconditional return whose value is the frame's result; it
+  // needs no join, so nothing after it in the function is compiled.
+  enum class [[nodiscard]] Path { Open, Ended, Returned };
   struct ReturnFrame {
     const std::vector<mir::Stmt>* body = nullptr;
     ReturnFrame* parent = nullptr;
@@ -4129,13 +4128,10 @@ struct ProgramCompiler {
       ~Scope() { current = saved; }
     } scope{return_frame, return_frame};
     return_frame = &frame;
-    try {
-      if (compile_body(body) == Path::Open)
-        bail("function can finish without returning a value");
-    } catch (Returned& returned) {
-      // A single unconditional return never needed a join or new storage.
-      return returned.r;
-    }
+    const Path path = compile_body(body);
+    if (path == Path::Returned) return frame.result;
+    if (path == Path::Open)
+      bail("function can finish without returning a value");
     if (!frame.has_result) bail("function returned no value");
     // Fall through at the final return instead of dispatching a no-op jump.
     // Path::Ended propagates only through all-return paths; handlers with a
@@ -4228,7 +4224,8 @@ struct ProgramCompiler {
 
   Path compile_body(const std::vector<mir::Stmt>& body) {
     for (const auto& child : body)
-      if (compile_stmt(child) == Path::Ended) return Path::Ended;
+      if (const Path path = compile_stmt(child); path != Path::Open)
+        return path;
     return Path::Open;
   }
 
@@ -4732,7 +4729,8 @@ struct ProgramCompiler {
           return Path::Ended;
         }
         if (!return_frame) bail("return without a function scope");
-        throw Returned{s.has_init ? expr(s.rhs) : Range{0, 0}};
+        return_frame->result = s.has_init ? expr(s.rhs) : Range{0, 0};
+        return Path::Returned;
       }
       case mir::Stmt::Break:
         if (loops.empty()) bail("break outside a loop");
@@ -4813,16 +4811,22 @@ struct ProgramCompiler {
         loops.back().branch_depth = branch_depth;
         bool broken = false;
         bool returned = false;
+        bool returned_directly = false;
         for (int64_t v = lo; v <= hi; ++v) {
-          bool path_returned = false;
+          Path path = Path::Open;
           ints[s.loopvar] = {static_cast<long>(v)};
           int_decl_at[s.loopvar] = {branch_depth, loops.size()};
           try {
-            path_returned = compile_body(s.body) == Path::Ended;
+            path = compile_body(s.body);
           } catch (CompileContinue&) {
           } catch (CompileBreak&) {
             broken = true;
           }
+          if (path == Path::Returned) {
+            returned_directly = true;
+            break;
+          }
+          const bool path_returned = path == Path::Ended;
           // A continue can reach another unrolled trip; a break reaches the
           // statements after the loop. Only an all-return iteration ends
           // the enclosing lexical path.
@@ -4840,6 +4844,7 @@ struct ProgramCompiler {
         for (int jump : loops.back().breaks)
           p.code[(size_t)jump].dst = (int)p.code.size();
         loops.pop_back();
+        if (returned_directly) return Path::Returned;
         return returned ? Path::Ended : Path::Open;
       }
       case mir::Stmt::While: {
