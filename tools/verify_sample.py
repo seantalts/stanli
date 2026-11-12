@@ -62,7 +62,6 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 PINNED = {"cmdstan": REPO / "deps" / "cmdstan",
           "stan": REPO / "deps" / "stan",
           "math": REPO / "deps" / "math",
-          "stanc3": REPO / "deps" / "stanc3-upstream-src",
           "posteriordb": REPO / "deps" / "posteriordb"}
 WRITE_LOCK = threading.Lock()
 
@@ -86,6 +85,7 @@ def provenance(cs, cxx="clang++"):
     p.update(cmdstan=head_sha(cs), stan=head_sha(cs / "stan"),
              math=head_sha(cs / "stan/lib/stan_math"))
     p["cmdstan_version"] = cmdstan_version(cs)
+    p["stanc3"] = pathlib.Path(f"{toolchain.PINNED_STANC}.src").read_text().strip()
     p["stanc_sha256"] = hashlib.sha256(toolchain.PINNED_STANC.read_bytes()).hexdigest()
     p["compiler"] = subprocess.run([cxx, "--version"], capture_output=True,
                                     text=True, check=True).stdout.splitlines()[0]
