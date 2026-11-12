@@ -95,7 +95,7 @@ BRANCH` runs it on a branch. The jobs are in
 | [stanc3 good models](#testing-stan-language-coverage) | the 1,244 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
 | [stanc3 bad models](#testing-stan-language-coverage) | compile errors of the 1,191 models in stanc3's `bad` integration tests | stanc3's expected output; a ledger | PR (CTest) | |
 | [sampling smoke](#comparison-with-cmdstan-on-complete-models) | 100 saved draws of the 13 Aalto fixtures | reference output names, draw count, finiteness | PR (CTest) | convergence |
-| [cross-path matrix](#comparing-stanli-execution-paths) | every fixture at 3 points and the 22 cogmod models at 13, under 16 execution configurations | each other, bitwise, with a ledger | PR (CTest) | transformed data, which has one engine; an error every path shares |
+| [cross-path matrix](#comparing-stanli-execution-paths) | every fixture at 3 points and the 22 cogmod models at 13, under 18 execution configurations | each other, bitwise, with a ledger | PR (CTest) | transformed data, which has one engine; an error every path shares |
 | [posteriordb cross-path](#comparing-stanli-execution-paths) | the posteriordb models under the same configurations plus one pass-off set | each other, within 1e-11 | by hand after pass changes | an error present in both cells |
 | [sampler parity](#samplers-and-other-algorithms) | NUTS draws and statistics across metrics and options | Stan's own NUTS services on the same executor, bitwise | PR (CTest) | compiler numerics (both sides share the executor) |
 | [algorithm checks](#samplers-and-other-algorithms) | optimize, Laplace, Pathfinder, ADVI, fixed_param, RNG streams | a known Gaussian posterior; Stan's generator | PR (CTest) | non-Gaussian posteriors |
@@ -255,11 +255,12 @@ operations separately, so one can be wrong while another is right.
 
 [`tests/cross_path.hpp`](tests/cross_path.hpp) compiles one model once per
 configuration and compares results at three points on one executor. `configs()`
-there lists the switches each configuration sets. They cover islands, generated
-adjoints, the direct ODE path, the graph passes, data preloading, the region
-map's plans and the choices inside a retained loop. The default configuration
-also runs the interpreter beside a complete `write_array` graph and compares
-the rows, except stochastic columns, which the CmdStan replay covers.
+there lists the switches each configuration sets. They cover islands, island
+register compaction, generated adjoints, the direct ODE path, the graph passes,
+data preloading, the region map's plans and the choices inside a retained
+loop. The default configuration also runs the interpreter beside a complete
+`write_array` graph and compares the rows, except stochastic columns, which the
+CmdStan replay covers.
 
 The check is bitwise. A divergence fails unless
 [`tests/cross_path_ledger.json`](tests/cross_path_ledger.json) declares it with
