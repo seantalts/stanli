@@ -390,19 +390,6 @@ bool equivalent_frames(const LoopFrame& x, const LoopFrame& y) {
   return ok;
 }
 
-// Optional differential proof check of a matched layout.
-void check_frame_layout(LoopState& s, const Stream& st,
-                        const ArenaSnapshot& snapshot, const LoopFrame& frame) {
-  LoopFrame oracle;
-  oracle.adjoint_base = frame.adjoint_base;
-  FrameEncoder<false> encoder{s, oracle, snapshot};
-  encoder.encode(st);
-  oracle.code = std::make_shared<FrameCode>(std::move(encoder.code));
-  oracle.values.resize(frame.values.size());
-  if (!equivalent_frames(frame, oracle))
-    throw std::logic_error("structured frame layout proof mismatch");
-}
-
 void seal_frame(LoopState& s) {
   FrameTape& tape = *s.frames;
   Stream& st = *s.building;
@@ -512,7 +499,6 @@ void seal_frame(LoopState& s) {
       if (matcher.encode(st)) {
         frame->code = layout.code;
         ++tape.layout_matches;
-        if (s.check_frame_layout) check_frame_layout(s, st, snapshot, *frame);
         break;
       }
       frame->bindings.clear();

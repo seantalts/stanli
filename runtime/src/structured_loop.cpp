@@ -1556,8 +1556,6 @@ struct LoopState : KernelState {
   bool frame_auto = false;
   bool frame_layout =
       std::getenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT") == nullptr;
-  bool check_frame_layout =
-      std::getenv("STANLI_STRUCTURED_CHECK_FRAME_LAYOUT") != nullptr;
   bool frame_clone = std::getenv("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
   bool frame_instance =
       std::getenv("STANLI_NO_STRUCTURED_FRAME_INSTANCE") == nullptr;

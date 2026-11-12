@@ -1265,16 +1265,26 @@ have the proofs and ctsem measurements.
 
 | switch | effect | source |
 | --- | --- | --- |
-| `STANLI_STRUCTURED_LOOPS=0` / `=1` | retain no loops / retain every loop | `lower.cpp` |
+| `STANLI_STRUCTURED_LOOPS=0` / `=1` / `=force` | retain no loops / prefer retaining loops / retain every loop; `auto` or unset is the default policy | `lower.cpp` |
 | `STANLI_NO_STRUCTURED_REPLAY=1` | walk the control tree on every evaluation | `structured_loop.cpp` |
 | `STANLI_NO_STRUCTURED_CELL_CONSTANTS=1` | disable the per-cell data proof for updated containers | `structured_loop.cpp` |
+| `STANLI_NO_STRUCTURED_INVARIANT_PRIMALS=1` | do not cache the primal of a loop-invariant active kernel call | `structured_loop.cpp` |
 | `STANLI_STRUCTURED_FRAMES=0` / `=1` | disable frames / force them on eligible plans | `structured_loop.cpp` |
-| `STANLI_STRUCTURED_COMPILED_RECORDING=0` | record with the tree walk instead of the temporary program | `structured_loop.cpp` |
+| `STANLI_NO_STRUCTURED_FRAME_LAYOUT=1` | do not reuse a sealed frame's code layout for later frames | `structured_loop.cpp` |
+| `STANLI_NO_STRUCTURED_FRAME_CLONE=1` | do not clone a ready frame tape into another loop state with the same plan | `structured_loop.cpp` |
+| `STANLI_NO_STRUCTURED_FRAME_INSTANCE=1` | record every frame instead of building repeated frames from a template | `structured_loop.cpp` |
+| `STANLI_STRUCTURED_CHECK_FRAME_INSTANCE=1` | also record each instantiated frame and require the same frame and recorder state | `structured_instance_run.inc` |
+| `STANLI_STRUCTURED_COMPILED_RECORDING=0` | record with the tree walk instead of the temporary program | `structured_instance_run.inc` |
 | `STANLI_STRUCTURED_DATA_RECORDING=0` | disable data-only call specialization in that program | `structured_recording.inc` |
 | `STANLI_STRUCTURED_PREPARED_INDEX=0` | disable prepared data-only point reads | `structured_recording.inc` |
 | `STANLI_STRUCTURED_PREPARED_ITERATOR=0` | disable transient iterator rebinding reuse | `structured_recording.inc` |
-| `STANLI_NO_STRUCTURED_FRAME_INSTANCE=1` | record every frame instead of building repeated frames from a template | `structured_instance_run.inc` |
-| `STANLI_STRUCTURED_CHECK_FRAME_INSTANCE=1` | also record each instantiated frame and require the same frame and recorder state | `structured_instance_run.inc` |
+| `STANLI_NO_DATA_LOOP_MEMO=1` | do not compile memoization for data-controlled loops | `structured_recording.inc` |
+| `STANLI_DATA_LOOP_MEMO_MIN_WORK=n` | minimum executed steps before a data-loop memo is kept (default 256) | `structured_recording.inc` |
+| `STANLI_DATA_LOOP_MEMO_MIN_RATIO=n` | minimum executed steps per recorded event for a kept memo (default 8) | `structured_recording.inc` |
+| `STANLI_STRUCTURED_CHECK_REMAP=1` | check that no recorded pointer still refers to a released arena block | `structured_loop.cpp` |
+| `STANLI_STRUCTURED_LOOP_DIAGNOSTICS=1` | print selection, recording and frame diagnostics to stderr (also enables the remap check) | `structured_loop.cpp`, `lower_structured_loop.inc` |
+| `STANLI_NO_REGION_RANGE_CACHE=1` | do not cache the range of an integer index expression over its loop-variable grid | `lower_structured_loop.inc` |
+| `STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS=1` | pass indexed region inputs through the packed layout instead of directly | `lower_structured_loop.inc` |
 
 ## Executor details (`executor.cpp`)
 
