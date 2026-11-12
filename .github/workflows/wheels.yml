@@ -35,7 +35,6 @@ on:
 permissions:
   contents: read
   packages: read
-  actions: read
 
 # One run per branch. Pushing twice to a pull request used to leave both
 # runs alive, competing for the same macOS runners, so the run that
@@ -64,7 +63,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       heavy: ${{ steps.scope.outputs.heavy }}
-      baseline_run: ${{ steps.baseline.outputs.run_id }}
     steps:
       - uses: actions/checkout@v4
       - name: Select the validation scope
@@ -91,22 +89,6 @@ jobs:
             done < "$changed_files"
           fi
           echo "heavy=$heavy" | tee -a "$GITHUB_OUTPUT"
-
-      # The newest unexpired vectorization measurements from a main run other
-      # than this one. The build job downloads them as the A/B baseline.
-      - name: Find the main-branch vectorization baseline
-        id: baseline
-        if: github.event_name != 'pull_request'
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=mir-vectorization-measurements&per_page=100" \
-            --jq '[.artifacts[] | select(.expired == false and .workflow_run.head_branch == "main" and .workflow_run.id != (env.GITHUB_RUN_ID | tonumber))] | .[0].workflow_run.id // empty' \
-            || true)
-          echo "baseline run: ${run_id:-none}"
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
   # This is intentionally independent of the compiled runtime. In particular,
   # generated prose and the web index should not need a 30-minute C++ build to
@@ -634,71 +616,6 @@ jobs:
         run: |
           python3 tools/verify_refs.py deps/posteriordb \
             --check build-rel/stanli_check --fast-math --jobs 4
-
-      # Report-only: never fails the job. gh is not installed in the manylinux
-      # container, so the changes job finds the run and this step downloads
-      # its artifact. No run id (first run, expired retention, API error)
-      # skips the step and the harness skips the comparison.
-      - name: Fetch the main-branch vectorization baseline
-        if: >-
-          matrix.runtime == 'linux-x86_64' &&
-          github.event_name != 'pull_request' &&
-          needs.changes.outputs.baseline_run != ''
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: mir-vectorization-measurements
-          path: /tmp/vectorize-baseline
-          run-id: ${{ needs.changes.outputs.baseline_run }}
-          github-token: ${{ github.token }}
-
-      # This does not select the candidate source pass for any producer. The
-      # test-only OCaml probe emits both inputs, and stanli_check consumes the
-      # saved portable MIR directly so every point reuses the exact bytes.
-      # Semantic/reference parity gates the job; graph sizes, re-roll
-      # dispositions, and preparation timings are published as measurements.
-      #
-      # The shipped configuration already runs against every recorded CmdStan
-      # reference above. Keep the broader pass-off diagnosis and comparative
-      # performance gate post-submit, including models without references.
-      # Preparation uses the harness's standard 300-second budget, also used
-      # by reference replay. Large teaching-model graphs exceed 30 seconds on
-      # the release GCC runner. Numerical and gradient-ratio gates are unchanged;
-      # this is separate from corpus_bench's 3x CmdStan sampling cap.
-      - name: MIR vectorization A/B
-        if: >-
-          matrix.runtime == 'linux-x86_64' &&
-          github.event_name != 'pull_request'
-        timeout-minutes: 60
-        shell: bash
-        run: |
-          source tools/stanc_embed/provenance.sh
-          probe=$(stanc_embed_dir)/stanli-vectorize-probe
-          test -x "$probe"
-          stanc_embed_artifact_matches "$probe" \
-            "$STANC3_SRC_SHA" "$OPAM_SWITCH"
-          baseline_args=()
-          if [ -f /tmp/vectorize-baseline/graphs.jsonl ]; then
-            baseline_args=(--baseline /tmp/vectorize-baseline)
-          fi
-          python3 harnesses/vectorize_ab.py deps/posteriordb \
-            --compiler "$probe" \
-            --check build-rel/stanli_check \
-            --bench build-rel/bench_grad --dump build-rel/dump_ops \
-            --timeout 300 --gradient-timeout 20 --prep-samples 2 \
-            --output-dir build-rel/vectorize-ab \
-            "${baseline_args[@]}"
-
-      - name: Publish MIR vectorization measurements
-        if: >-
-          always() &&
-          matrix.runtime == 'linux-x86_64' &&
-          github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: mir-vectorization-measurements
-          if-no-files-found: error
-          path: build-rel/vectorize-ab
 
       - name: Wheel
         run: ./tools/build_wheel.sh

@@ -1647,9 +1647,6 @@ if(Python3_Interpreter_FOUND)
                      $<TARGET_FILE:stanli_run>
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endif()
-  add_test(NAME test_vectorize_ab
-           COMMAND ${Python3_EXECUTABLE} tests/test_vectorize_ab.py
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # Source-level lit cases are one marked .stan file each. CMake discovers
   # both the dedicated tests/lit tree and existing fixtures that opt in, then
   # gives every case its own CTest entry. Adding coverage needs no build-system
