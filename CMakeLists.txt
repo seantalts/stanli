@@ -1392,7 +1392,7 @@ set(STANLI_TESTS
   test_legacy test_eight_schools test_glm test_normal_glm test_nuts test_walnuts
   test_model_adapter test_sampler_parity
   test_mir test_mir_decode test_transforms test_eltwise test_sort test_scalar_binary
-  test_lower
+  test_lower test_region_map test_copy_prop test_kernel_contracts
   test_lower_views
   test_native_matrix_pullbacks
   test_lower_view_contract test_lower_array_contract test_data test_e2e
@@ -1419,9 +1419,9 @@ foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()
 set_tests_properties(test_ode_prog PROPERTIES TIMEOUT 180)
-target_link_libraries(test_lower PRIVATE stanli_stanc_process)
-target_include_directories(test_lower PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(test_lower PRIVATE
+target_link_libraries(test_region_map PRIVATE stanli_stanc_process)
+target_include_directories(test_region_map PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(test_region_map PRIVATE
   STANLI_TEST_STANC="${STANLI_STANC_EXECUTABLE}")
 
 # The C ABI lives only in the shared library. Test it through that shipped
