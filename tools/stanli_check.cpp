@@ -151,7 +151,7 @@ int main(int argc, char** argv) {
                  "       [--point N | --points N,N,...] [--sweep K] "
                  "[--columns] [--fast-math]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
-                 "[--draw-variant N] [--ledger PATH]]\n"
+                 "[--draw-variant N] [--cross-points N] [--ledger PATH]]\n"
                  "       [--dump-passes=STAGES] [--dump-dir=DIR]\n"
                  "       stanli_check --compiler\n");
     return 2;
@@ -170,6 +170,7 @@ int main(int argc, char** argv) {
   std::string cross_one;
   std::string ledger_path = "tests/cross_path_ledger.json";
   int draw_variant = -1;
+  int cross_points = stanli::cross::kDefaultPoints;
   std::string dump_stages, dump_dir;
   for (int i = 3; i < argc; ++i) {
     const std::string a = argv[i];
@@ -191,6 +192,8 @@ int main(int argc, char** argv) {
       cross_one = argv[++i];
     else if (a == "--draw-variant" && i + 1 < argc)
       draw_variant = std::atoi(argv[++i]);
+    else if (a == "--cross-points" && i + 1 < argc)
+      cross_points = std::atoi(argv[++i]);
     else if (a == "--ledger" && i + 1 < argc)
       ledger_path = argv[++i];
     else if (a == "--stanc" && i + 1 < argc)
@@ -290,6 +293,7 @@ int main(int argc, char** argv) {
     opt.repro_data = argv[2];
     opt.only = cross_one;
     opt.variant = draw_variant;
+    opt.points = cross_points < 1 ? 1 : cross_points;
     const stanli::cross::Result r =
         stanli::cross::run_matrix(mir, data, opt, led);
     std::fputs(r.report.c_str(), stdout);
@@ -305,6 +309,11 @@ int main(int argc, char** argv) {
         r.failures, r.declared, r.wa_compared, r.wa_rng_excluded,
         r.wa_name_excluded);
     std::printf("  paths: %s\n", r.paths.line().c_str());
+    std::string changed;
+    for (const auto& [config, did] : r.changed)
+      if (did) changed += " " + config;
+    std::printf("  changed by:%s\n",
+                changed.empty() ? " none" : changed.c_str());
     return r.ok ? 0 : 1;
   }
 

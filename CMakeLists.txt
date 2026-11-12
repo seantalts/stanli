@@ -1020,29 +1020,14 @@ file(GLOB STANLI_COGMOD_SOURCES
      "${CMAKE_CURRENT_SOURCE_DIR}/tests/cogmod/cm_*.stan")
 foreach(_stanli_cogmod_source IN LISTS STANLI_COGMOD_SOURCES)
   get_filename_component(_stanli_cogmod "${_stanli_cogmod_source}" NAME_WE)
-  add_test(NAME test_region_map_clean_${_stanli_cogmod}
+  add_test(NAME test_cross_path_${_stanli_cogmod}
            COMMAND stanli_check tests/cogmod/${_stanli_cogmod}.stan
-                   tests/cogmod/${_stanli_cogmod}.json --sweep 12
+                   tests/cogmod/${_stanli_cogmod}.json --cross
+                   --cross-points 13
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  set_tests_properties(
-    test_region_map_clean_${_stanli_cogmod} PROPERTIES
-    ENVIRONMENT
-      "STANLI_REGION_MAP_CHECK_CLEAN=1;STANLI_REGION_MAP_SAVE_LIMIT=0"
-    PASS_REGULAR_EXPRESSION "OK "
-    FAIL_REGULAR_EXPRESSION "EVAL_FAIL")
-  foreach(_stanli_tile_cells IN ITEMS 1000000000 0)
-    add_test(NAME test_region_map_lane_clean_${_stanli_tile_cells}_${_stanli_cogmod}
-             COMMAND stanli_check tests/cogmod/${_stanli_cogmod}.stan
-                     tests/cogmod/${_stanli_cogmod}.json --sweep 12
-             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-    set_tests_properties(
-      test_region_map_lane_clean_${_stanli_tile_cells}_${_stanli_cogmod}
-      PROPERTIES
-      ENVIRONMENT
-        "STANLI_REGION_MAP_CHECK_CLEAN=1;STANLI_REGION_MAP_TILE_CELLS=${_stanli_tile_cells}"
-      PASS_REGULAR_EXPRESSION "OK "
-      FAIL_REGULAR_EXPRESSION "EVAL_FAIL")
-  endforeach()
+  set_tests_properties(test_cross_path_${_stanli_cogmod} PROPERTIES
+    PASS_REGULAR_EXPRESSION "CROSS OK "
+    FAIL_REGULAR_EXPRESSION "CROSS (FAIL|SKIP)")
 endforeach()
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)

@@ -36,6 +36,8 @@ using stanli::mir::UnsizedLeaf;
 using stanli_test::StdoutCapture;
 
 int failures = 0;
+int parity_compared = 0;
+int parity_not_compared = 0;
 
 Expr lit_int(long value) {
   Expr e;
@@ -380,8 +382,10 @@ void run_observation_case(const std::string& name, const char* semantics,
 
   std::printf("CASE %s: %s\n", name.c_str(), semantics);
   if (program.compile.kind == OutcomeKind::Refused)
-    std::printf("NOTE %-24s Program %s; exercised MirInterp fallback\n",
-                name.c_str(), describe(program.compile).c_str());
+    std::printf(
+        "NOTE %-24s Program %s; MirInterp fallback ran, path parity not "
+        "compared\n",
+        name.c_str(), describe(program.compile).c_str());
   if (required_acceptance && program.compile.kind != OutcomeKind::Accepted) {
     ++failures;
     std::printf("FAIL %-24s expected the Program to compile this; got %s\n",
@@ -396,8 +400,13 @@ void run_observation_case(const std::string& name, const char* semantics,
         "FAIL %-24s expected a cleared Program refusal naming %s; got %s\n",
         name.c_str(), required_refusal, describe(program.compile).c_str());
   }
-  expect_observation(name, "Program", program.outcome, want, ulps);
   expect_observation(name, "MirInterp", interpreter, want, ulps);
+  if (program.compile.kind == OutcomeKind::Refused) {
+    ++parity_not_compared;
+    return;
+  }
+  ++parity_compared;
+  expect_observation(name, "Program", program.outcome, want, ulps);
   if (!same_observation(program.outcome, interpreter)) {
     ++failures;
     std::printf("FAIL %-24s path parity Program=%s; MirInterp=%s\n",
@@ -1381,6 +1390,12 @@ int main() {
   test_guarded_constructor_error();
   test_unknown_nrfunapp_fails_loud();
   test_to_int();
+  std::printf("path parity: %d cases compared, %d not compared\n",
+              parity_compared, parity_not_compared);
+  if (parity_compared < 39) {
+    ++failures;
+    std::printf("FAIL at least 39 cases compare Program with MirInterp\n");
+  }
   if (failures == 0)
     std::printf("test_mir_program_conformance: all cases passed\n");
   else
