@@ -16,6 +16,7 @@
 #include <limits>
 #include <type_traits>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -167,6 +168,63 @@ static void check_elt(
     expect_eq(tag + " out" + std::to_string(i), f.out[i], l.out[i]);
   for (size_t i = 0; i < f.grad.size(); ++i)
     expect_eq(tag + " g" + std::to_string(i), f.grad[i], l.grad[i]);
+}
+
+// Arguments for a reference call: an active input is a var (vector or
+// scalar), an inactive one data, matching the activity the graph gives it.
+struct DensityArgs {
+  using VecV = Eigen::Matrix<stan::math::var, -1, 1>;
+  std::vector<std::vector<double>> vals;
+  std::vector<bool> active;
+  std::vector<VecV> vars;
+  DensityArgs(std::vector<std::vector<double>> v, std::vector<bool> a)
+      : vals(std::move(v)), active(std::move(a)), vars(vals.size()) {
+    for (size_t k = 0; k < vals.size(); ++k)
+      if (active[k]) {
+        vars[k].resize((Eigen::Index)vals[k].size());
+        for (size_t i = 0; i < vals[k].size(); ++i)
+          vars[k]((Eigen::Index)i) = vals[k][i];
+      }
+  }
+  void need(int k, bool want_active) const {
+    if (active[(size_t)k] != want_active)
+      throw std::logic_error("reference binds argument " + std::to_string(k) +
+                             " with the wrong activity");
+  }
+  const VecV& v(int k) const { return need(k, true), vars[(size_t)k]; }
+  stan::math::var s(int k) const { return need(k, true), vars[(size_t)k](0); }
+  Eigen::Map<Eigen::VectorXd> d(int k) {
+    need(k, false);
+    return {vals[(size_t)k].data(), (Eigen::Index)vals[(size_t)k].size()};
+  }
+  double x(int k) const { return need(k, false), vals[(size_t)k][0]; }
+};
+
+// One density op through the Executor against `ref`, bitwise: the value and
+// the gradient of every active input, in slot order.
+template <class Ref>
+static void check_density(const std::string& tag, uint16_t opcode,
+                          const std::vector<std::vector<double>>& vals,
+                          const std::vector<bool>& active,
+                          const std::vector<int>& idata, Ref ref) {
+  const auto r = stanli::testutil::run_one_op(opcode, vals, active, idata);
+  DensityArgs args(vals, active);
+  stan::math::var lp = ref(args);
+  lp.grad();
+  expect_eq(tag + " value", r.value, lp.val());
+  size_t g = 0;
+  for (size_t k = 0; k < vals.size(); ++k)
+    if (active[k])
+      for (Eigen::Index i = 0; i < args.vars[k].size(); ++i, ++g)
+        expect_eq(
+            tag + " d" + std::to_string(k) + "[" + std::to_string(i) + "]",
+            r.grad[g], args.vars[k](i).adj());
+  if (g != r.grad.size()) {
+    ++failures;
+    std::printf("FAIL %s: %zu gradients, checked %zu\n", tag.c_str(),
+                r.grad.size(), g);
+  }
+  stan::math::recover_memory();
 }
 
 static stanli::testutil::RunResult run_bernoulli_variant(
@@ -953,66 +1011,44 @@ int main() {
     expect_eq("inv_gamma elt disconnected value", value, value_ref);
   }
 
-  // ---- normal_lpdf(y_pv, mu_ps, sigma_ps): all three parameters ----------
-  {
-    auto r = testutil::run_one_op(OP_NORMAL_LPDF, {ys, {0.25}, {1.4}},
-                                  {true, true, true});
-    Eigen::Matrix<var, -1, 1> vy(N);
-    for (int i = 0; i < N; ++i) vy(i) = ys[i];
-    var vmu = 0.25, vsig = 1.4;
-    var lp = stan::math::normal_lpdf<false>(vy, vmu, vsig);
-    lp.grad();
-    expect_eq("normal ppp value", r.value, lp.val());
-    for (int i = 0; i < N; ++i)
-      expect_eq("normal ppp dy" + std::to_string(i), r.grad[i], vy(i).adj());
-    expect_eq("normal ppp dmu", r.grad[N], vmu.adj());
-    expect_eq("normal ppp dsigma", r.grad[N + 1], vsig.adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- normal_lpdf(y_data, mu_ps, sigma_ps) ------------------------------
-  {
-    auto r = testutil::run_one_op(OP_NORMAL_LPDF, {ys, {0.25}, {1.4}},
-                                  {false, true, true});
-    Eigen::Map<Eigen::VectorXd> ymap(ys.data(), N);
-    var vmu = 0.25, vsig = 1.4;
-    var lp = stan::math::normal_lpdf<false>(ymap, vmu, vsig);
-    lp.grad();
-    expect_eq("normal dpp value", r.value, lp.val());
-    expect_eq("normal dpp dmu", r.grad[0], vmu.adj());
-    expect_eq("normal dpp dsigma", r.grad[1], vsig.adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- normal_lpdf(y_data, mu_pv, sigma_data): vector location -----------
-  {
-    std::vector<double> mus{0.1, -0.2, 0.3, 0.05, -0.6};
-    std::vector<double> sigs{15, 10, 16, 11, 9};
-    auto r = testutil::run_one_op(OP_NORMAL_LPDF, {ys, mus, sigs},
-                                  {false, true, false});
-    Eigen::Map<Eigen::VectorXd> ymap(ys.data(), N);
-    Eigen::Map<Eigen::VectorXd> smap(sigs.data(), N);
-    Eigen::Matrix<var, -1, 1> vmu(N);
-    for (int i = 0; i < N; ++i) vmu(i) = mus[i];
-    var lp = stan::math::normal_lpdf<false>(ymap, vmu, smap);
-    lp.grad();
-    expect_eq("normal dpd value", r.value, lp.val());
-    for (int i = 0; i < N; ++i)
-      expect_eq("normal dpd dmu" + std::to_string(i), r.grad[i], vmu(i).adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- cauchy_lpdf(y_ps, 0_data, 5_data) ---------------------------------
-  {
-    auto r = testutil::run_one_op(OP_CAUCHY_LPDF, {{2.3}, {0.0}, {5.0}},
-                                  {true, false, false});
-    var vt = 2.3;
-    var lp = stan::math::cauchy_lpdf<false>(vt, 0.0, 5.0);
-    lp.grad();
-    expect_eq("cauchy value", r.value, lp.val());
-    expect_eq("cauchy dy", r.grad[0], vt.adj());
-    stan::math::recover_memory();
-  }
+  // Each density's value and active gradients against the same call with
+  // the same activity.
+  check_density("normal ppp", OP_NORMAL_LPDF, {ys, {0.25}, {1.4}},
+                {true, true, true}, {}, [](DensityArgs& a) {
+                  return stan::math::normal_lpdf<false>(a.v(0), a.s(1), a.s(2));
+                });
+  check_density("normal dpp", OP_NORMAL_LPDF, {ys, {0.25}, {1.4}},
+                {false, true, true}, {}, [](DensityArgs& a) {
+                  return stan::math::normal_lpdf<false>(a.d(0), a.s(1), a.s(2));
+                });
+  check_density("normal dpd", OP_NORMAL_LPDF,
+                {ys, {0.1, -0.2, 0.3, 0.05, -0.6}, {15, 10, 16, 11, 9}},
+                {false, true, false}, {}, [](DensityArgs& a) {
+                  return stan::math::normal_lpdf<false>(a.d(0), a.v(1), a.d(2));
+                });
+  check_density("cauchy", OP_CAUCHY_LPDF, {{2.3}, {0.0}, {5.0}},
+                {true, false, false}, {}, [](DensityArgs& a) {
+                  return stan::math::cauchy_lpdf<false>(a.s(0), a.x(1), a.x(2));
+                });
+  check_density("gamma", OP_GAMMA_LPDF, {pos, {2.5}, {1.3}},
+                {false, true, true}, {}, [](DensityArgs& a) {
+                  return stan::math::gamma_lpdf<false>(a.d(0), a.s(1), a.s(2));
+                });
+  check_density("beta", OP_BETA_LPDF, {unit, {2.0}, {3.0}}, {false, true, true},
+                {}, [](DensityArgs& a) {
+                  return stan::math::beta_lpdf<false>(a.d(0), a.s(1), a.s(2));
+                });
+  check_density("poisson_log", OP_POISSON_LOG_LPMF, {{0.2, 0.4, 0.6, 0.8, 1.0}},
+                {true}, {2, 0, 5, 1, 3}, [](DensityArgs& a) {
+                  return stan::math::poisson_log_lpmf<false>(
+                      std::vector<int>{2, 0, 5, 1, 3}, a.v(0));
+                });
+  check_density("bernoulli_logit", OP_BERNOULLI_LOGIT_LPMF,
+                {{0.5, -1.2, 0.3, 2.0, -0.7}}, {true}, {1, 0, 0, 1, 1},
+                [](DensityArgs& a) {
+                  return stan::math::bernoulli_logit_lpmf<false>(
+                      std::vector<int>{1, 0, 0, 1, 1}, a.v(0));
+                });
 
   // ---- student_t_lpdf(y_data, nu_ps, mu_ps, sigma_ps) --------------------
   {
@@ -1039,67 +1075,6 @@ int main() {
     expect_eq("student_t allvar dnu", r.grad[0], wnu.adj());
     expect_eq("student_t allvar dmu", r.grad[1], wmu.adj());
     expect_eq("student_t allvar dsigma", r.grad[2], wsig.adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- gamma_lpdf(y_data, alpha_ps, beta_ps) -----------------------------
-  {
-    auto r = testutil::run_one_op(OP_GAMMA_LPDF, {pos, {2.5}, {1.3}},
-                                  {false, true, true});
-    Eigen::Map<Eigen::VectorXd> ymap(pos.data(), N);
-    var va = 2.5, vb = 1.3;
-    var lp = stan::math::gamma_lpdf<false>(ymap, va, vb);
-    lp.grad();
-    expect_eq("gamma value", r.value, lp.val());
-    expect_eq("gamma dalpha", r.grad[0], va.adj());
-    expect_eq("gamma dbeta", r.grad[1], vb.adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- beta_lpdf(y_data, alpha_ps, beta_ps) ------------------------------
-  {
-    auto r = testutil::run_one_op(OP_BETA_LPDF, {unit, {2.0}, {3.0}},
-                                  {false, true, true});
-    Eigen::Map<Eigen::VectorXd> ymap(unit.data(), N);
-    var va = 2.0, vb = 3.0;
-    var lp = stan::math::beta_lpdf<false>(ymap, va, vb);
-    lp.grad();
-    expect_eq("beta value", r.value, lp.val());
-    expect_eq("beta dalpha", r.grad[0], va.adj());
-    expect_eq("beta dbeta", r.grad[1], vb.adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- poisson_log_lpmf(n_idata; alpha_pv) -------------------------------
-  {
-    std::vector<double> alpha{0.2, 0.4, 0.6, 0.8, 1.0};
-    auto r = testutil::run_one_op(OP_POISSON_LOG_LPMF, {alpha}, {true},
-                                  {2, 0, 5, 1, 3});
-    std::vector<int> n{2, 0, 5, 1, 3};
-    Eigen::Matrix<var, -1, 1> va(N);
-    for (int i = 0; i < N; ++i) va(i) = alpha[i];
-    var lp = stan::math::poisson_log_lpmf<false>(n, va);
-    lp.grad();
-    expect_eq("poisson_log value", r.value, lp.val());
-    for (int i = 0; i < N; ++i)
-      expect_eq("poisson_log da" + std::to_string(i), r.grad[i], va(i).adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- bernoulli_logit_lpmf(y_idata; alpha_pv) ---------------------------
-  {
-    std::vector<double> alpha{0.5, -1.2, 0.3, 2.0, -0.7};
-    auto r = testutil::run_one_op(OP_BERNOULLI_LOGIT_LPMF, {alpha}, {true},
-                                  {1, 0, 0, 1, 1});
-    std::vector<int> y{1, 0, 0, 1, 1};
-    Eigen::Matrix<var, -1, 1> va(N);
-    for (int i = 0; i < N; ++i) va(i) = alpha[i];
-    var lp = stan::math::bernoulli_logit_lpmf<false>(y, va);
-    lp.grad();
-    expect_eq("bernoulli_logit value", r.value, lp.val());
-    for (int i = 0; i < N; ++i)
-      expect_eq("bernoulli_logit da" + std::to_string(i), r.grad[i],
-                va(i).adj());
     stan::math::recover_memory();
   }
 
@@ -1380,105 +1355,48 @@ int main() {
   // overload, which is why each one is pinned rather than just the vector
   // case.
   {
-    using stan::math::var;
-    using VecV = Eigen::Matrix<var, -1, 1>;
     const std::vector<double> th3{0.2, 0.5, 0.75};
     const std::vector<double> a3{2.0, 3.0, 4.0};
     const std::vector<double> b3{1.3, 1.4, 1.5};
-    auto vec = [](const std::vector<double>& v) {
-      VecV x((Eigen::Index)v.size());
-      for (size_t i = 0; i < v.size(); ++i) x((Eigen::Index)i) = v[i];
-      return x;
-    };
     auto ivec = [](std::vector<int> v) {
       Eigen::VectorXi x((Eigen::Index)v.size());
       for (size_t i = 0; i < v.size(); ++i) x((Eigen::Index)i) = v[i];
       return x;
     };
     // Both groups vectors.
-    {
-      auto r = testutil::run_one_op(OP_BINOMIAL_LCDF, {th3}, {true},
-                                    {3, 1, 2, 3, 3, 5, 7, 9});
-      VecV theta = vec(th3);
-      var lp =
-          stan::math::binomial_lcdf(ivec({1, 2, 3}), ivec({5, 7, 9}), theta);
-      lp.grad();
-      expect_eq("binomial_lcdf vv value", r.value, lp.val());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("binomial_lcdf vv d" + std::to_string(i), r.grad[(size_t)i],
-                  theta(i).adj());
-      stan::math::recover_memory();
-    }
+    check_density("binomial_lcdf vv", OP_BINOMIAL_LCDF, {th3}, {true},
+                  {3, 1, 2, 3, 3, 5, 7, 9}, [&](DensityArgs& a) {
+                    return stan::math::binomial_lcdf(ivec({1, 2, 3}),
+                                                     ivec({5, 7, 9}), a.v(0));
+                  });
     // Scalar outcome against a vector of trials.
-    {
-      auto r = testutil::run_one_op(OP_BINOMIAL_LCDF, {th3}, {true},
-                                    {-1, 3, 3, 5, 7, 9});
-      VecV theta = vec(th3);
-      var lp = stan::math::binomial_lcdf(3, ivec({5, 7, 9}), theta);
-      lp.grad();
-      expect_eq("binomial_lcdf sv value", r.value, lp.val());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("binomial_lcdf sv d" + std::to_string(i), r.grad[(size_t)i],
-                  theta(i).adj());
-      stan::math::recover_memory();
-    }
+    check_density("binomial_lcdf sv", OP_BINOMIAL_LCDF, {th3}, {true},
+                  {-1, 3, 3, 5, 7, 9}, [&](DensityArgs& a) {
+                    return stan::math::binomial_lcdf(3, ivec({5, 7, 9}),
+                                                     a.v(0));
+                  });
     // Both groups scalars, broadcast across the real argument's lanes.
-    {
-      auto r =
-          testutil::run_one_op(OP_BINOMIAL_LCDF, {th3}, {true}, {-1, 3, -1, 9});
-      VecV theta = vec(th3);
-      var lp = stan::math::binomial_lcdf(3, 9, theta);
-      lp.grad();
-      expect_eq("binomial_lcdf ss value", r.value, lp.val());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("binomial_lcdf ss d" + std::to_string(i), r.grad[(size_t)i],
-                  theta(i).adj());
-      stan::math::recover_memory();
-    }
+    check_density(
+        "binomial_lcdf ss", OP_BINOMIAL_LCDF, {th3}, {true}, {-1, 3, -1, 9},
+        [](DensityArgs& a) { return stan::math::binomial_lcdf(3, 9, a.v(0)); });
     // An array of one is a container: it must not be confused with the
     // scalar form, which is what the -1 length exists to distinguish.
-    {
-      auto r = testutil::run_one_op(OP_BINOMIAL_LCCDF, {{0.4}}, {true},
-                                    {1, 2, 1, 7});
-      VecV theta = vec({0.4});
-      var lp = stan::math::binomial_lccdf(ivec({2}), ivec({7}), theta);
-      lp.grad();
-      expect_eq("binomial_lccdf 11 value", r.value, lp.val());
-      expect_eq("binomial_lccdf 11 d0", r.grad[0], theta(0).adj());
-      stan::math::recover_memory();
-    }
+    check_density("binomial_lccdf 11", OP_BINOMIAL_LCCDF, {{0.4}}, {true},
+                  {1, 2, 1, 7}, [&](DensityArgs& a) {
+                    return stan::math::binomial_lccdf(ivec({2}), ivec({7}),
+                                                      a.v(0));
+                  });
     // beta_binomial: the same two groups, then two real arguments.
-    {
-      auto r = testutil::run_one_op(OP_BETA_BINOMIAL_CDF, {a3, b3},
-                                    {true, true}, {3, 1, 2, 3, 3, 5, 7, 9});
-      VecV alpha = vec(a3), beta = vec(b3);
-      var lp = stan::math::beta_binomial_cdf(ivec({1, 2, 3}), ivec({5, 7, 9}),
-                                             alpha, beta);
-      lp.grad();
-      expect_eq("beta_binomial_cdf vv value", r.value, lp.val());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("beta_binomial_cdf vv da" + std::to_string(i),
-                  r.grad[(size_t)i], alpha(i).adj());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("beta_binomial_cdf vv db" + std::to_string(i),
-                  r.grad[(size_t)(3 + i)], beta(i).adj());
-      stan::math::recover_memory();
-    }
-    {
-      auto r = testutil::run_one_op(OP_BETA_BINOMIAL_LCCDF, {a3, b3},
-                                    {true, true}, {-1, 3, -1, 9});
-      VecV alpha = vec(a3), beta = vec(b3);
-      var lp = stan::math::beta_binomial_lccdf(3, 9, alpha, beta);
-      lp.grad();
-      expect_eq("beta_binomial_lccdf ss value", r.value, lp.val());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("beta_binomial_lccdf ss da" + std::to_string(i),
-                  r.grad[(size_t)i], alpha(i).adj());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("beta_binomial_lccdf ss db" + std::to_string(i),
-                  r.grad[(size_t)(3 + i)], beta(i).adj());
-      stan::math::recover_memory();
-    }
+    check_density("beta_binomial_cdf vv", OP_BETA_BINOMIAL_CDF, {a3, b3},
+                  {true, true}, {3, 1, 2, 3, 3, 5, 7, 9}, [&](DensityArgs& a) {
+                    return stan::math::beta_binomial_cdf(
+                        ivec({1, 2, 3}), ivec({5, 7, 9}), a.v(0), a.v(1));
+                  });
+    check_density("beta_binomial_lccdf ss", OP_BETA_BINOMIAL_LCCDF, {a3, b3},
+                  {true, true}, {-1, 3, -1, 9}, [](DensityArgs& a) {
+                    return stan::math::beta_binomial_lccdf(3, 9, a.v(0),
+                                                           a.v(1));
+                  });
   }
 
   // wiener with every argument a vector, through the all-active default
