@@ -2101,16 +2101,14 @@ double lkjcov_eval(KernelCtx& ctx) {
   return finish_tail_density<Grad>(ctx, out, S, mu, sig, eta);
 }
 
-// Binomial GLMs retain their established nested-tape path.
-// Categorical and ordered-logistic GLMs below record partials directly.
-// idata = [outcome..., rows, cols] and, for binomial, the trial counts.
-enum GlmKind { kBinomLogitGlm, kCatLogitGlm };
+// Binomial logit GLM on the nested tape.
+// idata = [n..., N..., rows, cols], optionally followed by the scalar-layout
+// marker and mask.
 template <typename F>
 decltype(auto) with_glm_integer(std::vector<int>& values, bool scalar, F&& f) {
   return scalar ? std::forward<F>(f)(values[0]) : std::forward<F>(f)(values);
 }
-template <GlmKind Kind>
-double tglm_eval(KernelCtx& ctx) {
+double blglm_eval(KernelCtx& ctx) {
   const bool scalar_layout =
       ctx.n_idata >= 4 && ctx.idata[ctx.n_idata - 2] == kGlmScalarLayoutMarker;
   const int tail = scalar_layout ? 4 : 2;
@@ -2127,54 +2125,34 @@ double tglm_eval(KernelCtx& ctx) {
       f(X);
   };
   const bool propto = (ctx.variant & 0x80u) != 0;
-  if constexpr (Kind == kBinomLogitGlm) {
-    if (propto && (ctx.variant & 0x7u) == 0) {
-      std::vector<int> nn(ctx.idata, ctx.idata + outcomes);
-      std::vector<int> NN(ctx.idata + outcomes, ctx.idata + 2 * outcomes);
-      const CMapM Xd(ctx.in[0].data, rows, cols);
-      const CMapV beta_d(ctx.in[2].data, cols);
-      if (!values_only())
-        std::fill_n(ctx.scratch, ctx.in[0].len + ctx.in[1].len + ctx.in[2].len,
-                    0.0);
-      double lp = 0;
-      with_design(Xd, [&](const auto& x) {
-        lp = with_glm_integer(nn, scalar_mask & 1u, [&](const auto& n_arg) {
-          return with_glm_integer(NN, scalar_mask & 2u, [&](const auto& N_arg) {
-            if (ctx.in[1].len == 1)
-              return stan::math::binomial_logit_glm_lpmf<true>(
-                  n_arg, N_arg, x, ctx.in[1].data[0], beta_d);
+  std::vector<int> nn(ctx.idata, ctx.idata + outcomes);
+  std::vector<int> NN(ctx.idata + outcomes, ctx.idata + 2 * outcomes);
+  if (propto && (ctx.variant & 0x7u) == 0) {
+    const CMapM Xd(ctx.in[0].data, rows, cols);
+    const CMapV beta_d(ctx.in[2].data, cols);
+    if (!values_only())
+      std::fill_n(ctx.scratch, ctx.in[0].len + ctx.in[1].len + ctx.in[2].len,
+                  0.0);
+    double lp = 0;
+    with_design(Xd, [&](const auto& x) {
+      lp = with_glm_integer(nn, scalar_mask & 1u, [&](const auto& n_arg) {
+        return with_glm_integer(NN, scalar_mask & 2u, [&](const auto& N_arg) {
+          if (ctx.in[1].len == 1)
             return stan::math::binomial_logit_glm_lpmf<true>(
-                n_arg, N_arg, x, CMapV(ctx.in[1].data, ctx.in[1].len), beta_d);
-          });
+                n_arg, N_arg, x, ctx.in[1].data[0], beta_d);
+          return stan::math::binomial_logit_glm_lpmf<true>(
+              n_arg, N_arg, x, CMapV(ctx.in[1].data, ctx.in[1].len), beta_d);
         });
       });
-      return lp;
-    }
+    });
+    return lp;
   }
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   VarM X = tail_m(ctx, 0, rows, cols);
   var out;
-  if constexpr (Kind == kBinomLogitGlm) {
-    // idata = [n..., N..., rows, cols]
-    std::vector<int> nn(ctx.idata, ctx.idata + outcomes);
-    std::vector<int> NN(ctx.idata + outcomes, ctx.idata + 2 * outcomes);
-    VarV beta = tail_v(ctx, 2, cols);
-    if (ctx.in[1].len == 1) {
-      var alpha = ctx.in[1].data[0];
-      with_design(X, [&](const auto& x) {
-        with_glm_integer(nn, scalar_mask & 1u, [&](const auto& n_arg) {
-          with_glm_integer(NN, scalar_mask & 2u, [&](const auto& N_arg) {
-            out = propto ? stan::math::binomial_logit_glm_lpmf<true>(
-                               n_arg, N_arg, x, alpha, beta)
-                         : stan::math::binomial_logit_glm_lpmf<false>(
-                               n_arg, N_arg, x, alpha, beta);
-          });
-        });
-      });
-      return tail_density_fwd(ctx, out, X, alpha, beta);
-    }
-    VarV alpha = tail_v(ctx, 1, ctx.in[1].len);
+  VarV beta = tail_v(ctx, 2, cols);
+  const auto eval = [&](const auto& alpha) {
     with_design(X, [&](const auto& x) {
       with_glm_integer(nn, scalar_mask & 1u, [&](const auto& n_arg) {
         with_glm_integer(NN, scalar_mask & 2u, [&](const auto& N_arg) {
@@ -2186,25 +2164,14 @@ double tglm_eval(KernelCtx& ctx) {
       });
     });
     return tail_density_fwd(ctx, out, X, alpha, beta);
-  } else {
-    std::vector<int> y(ctx.idata, ctx.idata + rows);
-    VarV alpha = tail_v(ctx, 1, ctx.in[1].len);
-    VarM beta = tail_m(ctx, 2, cols, ctx.in[2].len / cols);
-    with_glm_integer(y, scalar_mask & 1u, [&](const auto& y_arg) {
-      out = propto ? stan::math::categorical_logit_glm_lpmf<true>(y_arg, X,
-                                                                  alpha, beta)
-                   : stan::math::categorical_logit_glm_lpmf<false>(y_arg, X,
-                                                                   alpha, beta);
-    });
-    return tail_density_fwd(ctx, out, X, alpha, beta);
-  }
+  };
+  if (ctx.in[1].len == 1) return eval(var(ctx.in[1].data[0]));
+  return eval(tail_v(ctx, 1, ctx.in[1].len));
 }
 
 void lkjcov_fwd(KernelCtx& ctx) { ctx.out.data[0] = lkjcov_eval<false>(ctx); }
 void lkjcov_bwd(KernelCtx& ctx) { lkjcov_eval<true>(ctx); }
-void blglm_fwd(KernelCtx& ctx) {
-  ctx.out.data[0] = tglm_eval<kBinomLogitGlm>(ctx);
-}
+void blglm_fwd(KernelCtx& ctx) { ctx.out.data[0] = blglm_eval(ctx); }
 void clglm_fwd(KernelCtx& ctx) {
   const bool scalar_layout =
       ctx.n_idata >= 4 && ctx.idata[ctx.n_idata - 2] == kGlmScalarLayoutMarker;
