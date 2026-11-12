@@ -318,6 +318,12 @@ bool Lowering::needs_runtime_control(const mir::Stmt& s) {
     if (needs_runtime_control(k)) return true;
   return false;
 }
+// Whether `s` holds a break or continue of the loop around it.
+static bool has_loop_control(const mir::Stmt& s) {
+  if (s.kind == mir::Stmt::Break || s.kind == mir::Stmt::Continue) return true;
+  if (s.kind == mir::Stmt::For || s.kind == mir::Stmt::While) return false;
+  return std::any_of(s.body.begin(), s.body.end(), has_loop_control);
+}
 // A Break/Continue selected by a runtime condition cannot be lowered as a
 // standalone conditional island: its jump target belongs to the enclosing
 // loop. Promote that whole loop to the necessity island instead. Nested
@@ -1855,11 +1861,13 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       // condition such as idx[ri] is either treated as spuriously dynamic
       // or can escape static-shape specialization as an unknown variable.
       // The bounds come first so a zero-trip loop never evaluates its body.
+      // Only a break or continue can answer yes, so a body without one is
+      // not scanned.
       const auto old = int_env.find(s.loopvar);
       const bool had_old = old != int_env.end();
       const long old_value = had_old ? old->second : 0;
       bool has_runtime_loop_control = false;
-      {
+      if (std::any_of(s.body.begin(), s.body.end(), has_loop_control)) {
         const ScopeExit leave{[&] {
           if (had_old)
             int_env[s.loopvar] = old_value;
