@@ -1560,16 +1560,8 @@ if(Python3_Interpreter_FOUND)
                    --stanc ${STANLI_STANC_EXECUTABLE}
                    --registry $<TARGET_FILE:dump_function_specs> --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_stan240_reference
-           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus stan240
-                   --check $<TARGET_FILE:stanli_check>
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_sort_reference
-           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus sort
-                   --check $<TARGET_FILE:stanli_check>
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_library_reference
-           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus library
+  add_test(NAME test_sized_functions_reference
+           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus sized_functions
                    --check $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_container_flow_generation

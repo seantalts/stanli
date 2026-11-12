@@ -1155,7 +1155,8 @@ def signature_models(work):
 def fixture_models(names):
     def models(_work):
         return {name: (FIXTURES / f"{name}.stan",
-                       FIXTURES / f"{name}.json", ()) for name in names}
+                       own_data(FIXTURES / f"{name}.stan"), ())
+                for name in names}
     return models
 
 
@@ -1180,15 +1181,10 @@ CORPORA = {
     "functions": Corpus(FUNCTIONS / "references.json.gz",
                         manifest_models(FUNCTIONS / "manifest.json",
                                         FUNCTIONS)),
-    "stan240": Corpus(FUNCTIONS / "stan240_references.json.gz",
-                      manifest_models(FUNCTIONS / "stan240_manifest.json",
-                                      FIXTURES)),
-    "sort": Corpus(FUNCTIONS / "sort_references.json.gz",
-                   manifest_models(FUNCTIONS / "sort_manifest.json",
-                                   FIXTURES)),
-    "library": Corpus(FUNCTIONS / "library_references.json.gz",
-                      manifest_models(FUNCTIONS / "library_manifest.json",
-                                      FIXTURES)),
+    # Library functions at sizes the unit-extent signature models cannot
+    # reach: ordering and ties, rectangular algebra, zero extents, GLMs.
+    "sized_functions": Corpus(FUNCTIONS / "sized_functions_references.json.gz",
+                              None),
     "container_flow": Corpus(
         FUNCTIONS / "container_flow_references.json.gz",
         manifest_models(FUNCTIONS / "container_flow_manifest.json",
