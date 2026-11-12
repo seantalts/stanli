@@ -349,7 +349,12 @@ services, the ones CmdStan calls, and requires every saved row to be bitwise
 equal. The cases cover unit, diagonal and dense metrics, adaptation on and off,
 a supplied inverse metric and step size, thinning, saved warmup, chain ids, and
 the RNG that generated quantities draw between transitions. `test_sampling`
-checks the default maximum tree depth, which parity sets explicitly.
+checks the default maximum tree depth, which parity sets explicitly. It also
+samples a compiled conjugate normal with transformed data, a transformed
+parameter and generated quantities, and compares the draws with the
+closed-form posterior. That catches wrong state that one gradient call leaves
+for the next. Fixed-point replay cannot see it, and parity cannot either
+because both samplers share the executor.
 
 [`tests/test_algorithms.cpp`](tests/test_algorithms.cpp) checks that each
 algorithm draws from the random stream Stan's `create_rng` produces.
@@ -398,10 +403,6 @@ them are verified against CmdStan. The two that are not:
 No cross-path fixture hits the data-loop memo, and the matrix sets no floor on
 memo hits. [`tests/test_data_loop_memo.py`](tests/test_data_loop_memo.py) is
 its only check.
-
-No test samples a model that has transformed data, transformed parameters and
-generated quantities and compares the draws with a closed-form posterior. The
-sampling smoke runs that path without checking the posterior.
 
 On Windows x64 the embedded compiler runs six CTests; the full suite runs there
 through `stanli-compile`. Windows never replays the corpus. The
