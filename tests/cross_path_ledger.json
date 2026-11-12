@@ -262,5 +262,37 @@
     "bound_ulp": 1,
     "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
     "since": "2026-11-12"
+  },
+  {
+    "model": "cm_rdm",
+    "quantity": "grad[0]",
+    "pair": "default/no_region_map",
+    "bound_ulp": 2526,
+    "cause": "Windows x86_64 only: at point 2 the region map's grad[0] is -5.0571779386431782e-06 and the map-refused loop's is -5.0571779386410386e-06, an absolute gap of 2.1e-18. That is below one ULP of grad[1] (0.13, ULP 2.8e-17), so the 2526 ULP is cancellation in a near-zero component; grad[1] differs by 1 ULP. The two paths are bitwise on Linux and macOS at the same point, so one of the model's libm calls rounds differently between the paths under the Windows CRT; which call has not been isolated without a Windows machine.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "cm_rdm",
+    "quantity": "grad[1]",
+    "pair": "default/no_region_map",
+    "bound_ulp": 1,
+    "cause": "Windows x86_64 only: at point 2 the region map's grad[0] is -5.0571779386431782e-06 and the map-refused loop's is -5.0571779386410386e-06, an absolute gap of 2.1e-18. That is below one ULP of grad[1] (0.13, ULP 2.8e-17), so the 2526 ULP is cancellation in a near-zero component; grad[1] differs by 1 ULP. The two paths are bitwise on Linux and macOS at the same point, so one of the model's libm calls rounds differently between the paths under the Windows CRT; which call has not been isolated without a Windows machine.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "cm_rdm",
+    "quantity": "grad[0]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 2526,
+    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "cm_rdm",
+    "quantity": "grad[1]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 1,
+    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
+    "since": "2026-11-12"
   }
 ]
