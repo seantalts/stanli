@@ -75,6 +75,19 @@ else
   exit 1
 fi
 
+# The inliner turns each return into a break out of a one-pass loop. A return
+# inside a while loop, or a void return inside any loop or branch, has to set
+# the flag that breaks out of every enclosing loop too.
+RETURNS_PATCH=$(pwd)/compiler/ocaml/stanc3-inline-loop-returns.patch
+if git -C "$SRC" apply --check "$RETURNS_PATCH" >/dev/null 2>&1; then
+  git -C "$SRC" apply "$RETURNS_PATCH"
+elif git -C "$SRC" apply --reverse --check "$RETURNS_PATCH" >/dev/null 2>&1; then
+  :
+else
+  echo "stanc3 inlined loop returns do not apply to this source tree" >&2
+  exit 1
+fi
+
 cp compiler/ocaml/*.ml compiler/ocaml/*.mli "$LOCAL_DIR"/*.ml \
   "$LOCAL_DIR"/dune "$SRC/$STANC3_DIR/"
 if [ "$TARGET" = js ]; then
