@@ -48,6 +48,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 from cmdstan_ref import build_reference, compare_points  # noqa: E402
 import toolchain  # noqa: E402
+from verify_refs import ulp_distance  # noqa: E402
 
 # Which build tree to test. --build points it elsewhere; the default
 # is the Release tree the wheel ships from.
@@ -236,17 +237,6 @@ def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
-def ulps(a, b):
-    import struct
-    if a == b:
-        return 0
-    ia = struct.unpack("<q", struct.pack("<d", a))[0]
-    ib = struct.unpack("<q", struct.pack("<d", b))[0]
-    if (ia < 0) != (ib < 0):
-        return float("inf")
-    return abs(ia - ib)
-
-
 def sweep_one(spec, cs, tmp, keep, density=True):
     name, n, argv = spec
     d = tmp / name
@@ -270,7 +260,7 @@ def sweep_one(spec, cs, tmp, keep, density=True):
         return name, status, note, None, None
 
     worst, n_cmp, err = compare_points(exe, REPO / BUILD / "stanli_check",
-                                       stan, data, ulps,
+                                       stan, data, ulp_distance,
                                        REPO / "deps/stanc3/stanc", run=run)
     if err:
         return name, err[0], err[1], None, None
