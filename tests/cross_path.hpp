@@ -131,6 +131,33 @@ inline double sweep_point(int64_t i, int variant, int k) {
   return base + 0.6 * std::sin(1.9 * k + 2.3 * (double)i + 0.4) + 0.2 * (k - 1);
 }
 
+// stanli_check's evaluation points, shared with tools/ref_driver.cpp. Some
+// models are invalid at a given point (an ODE solution dips below a declared
+// lower bound, say) and both engines reject it; the harness then retries the
+// next variant so those models still get a real comparison.
+inline double check_point(int64_t i, int variant) {
+  switch (variant) {
+    case 1:
+      return 0.02 * static_cast<double>((i % 5) - 2);
+    case 2:
+      return 0.0;
+    case 3:
+    case 4: {
+      uint64_t z = static_cast<uint64_t>(i) + 0x9E3779B97F4A7C15ull;
+      z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+      z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+      z ^= z >> 31;
+      const double u = static_cast<double>(z >> 11) * 0x1.0p-53;
+      // Variant 4 keeps every component in (0.1, 0.9), where an
+      // unconstrained real used as a scale or a probability is valid.
+      return variant == 3 ? -1.5 + 3.0 * u : 0.1 + 0.8 * u;
+    }
+    default:
+      return 0.1 + 0.05 * static_cast<double>(i % 7) -
+             0.15 * static_cast<double>(i % 3);
+  }
+}
+
 // ---- environment -----------------------------------------------------------
 
 // Region-map variables are read only while lowering or running an
@@ -156,6 +183,7 @@ inline std::pair<std::string, std::string> split_var(const std::string& v) {
 }
 
 inline const std::vector<Config>& configs();
+inline const std::vector<Config>& corpus_configs();
 
 // Every variable the harness ever sets, so a scope can clear the lot
 // regardless of which config set what. A leftover STANLI_NO_ISLAND from a
@@ -163,8 +191,10 @@ inline const std::vector<Config>& configs();
 inline const std::vector<std::string>& harness_vars() {
   static const std::vector<std::string> v = [] {
     std::set<std::string> names;
-    for (const Config& c : configs())
-      for (const std::string& var : c.vars) names.insert(split_var(var).first);
+    for (const auto* list : {&configs(), &corpus_configs()})
+      for (const Config& c : *list)
+        for (const std::string& var : c.vars)
+          names.insert(split_var(var).first);
     return std::vector<std::string>(names.begin(), names.end());
   }();
   return v;
@@ -244,23 +274,38 @@ inline const std::vector<Config>& configs() {
   return c;
 }
 
+// Run only under --cross-corpus, by the posteriordb loop: the pass set the
+// old graph-pass A/B harness turned off together, islands included.
+inline const std::vector<Config>& corpus_configs() {
+  static const std::vector<Config> c = {
+      {"passes_islands_off",
+       {"STANLI_NO_REROLL", "STANLI_NO_INPLACE", "STANLI_NO_CONSTFOLD",
+        "STANLI_NO_ISLAND"}},
+  };
+  return c;
+}
+
+inline const Config* find_config(const std::string& name) {
+  for (const auto* list : {&configs(), &corpus_configs()})
+    for (const Config& c : *list)
+      if (c.name == name) return &c;
+  return nullptr;
+}
+
 inline const Config& config_named(const std::string& name) {
-  for (const Config& c : configs())
-    if (c.name == name) return c;
-  return configs()[0];
+  const Config* c = find_config(name);
+  return c ? *c : configs()[0];
 }
 
 inline std::string env_prefix(const std::string& config_name) {
-  for (const Config& c : configs())
-    if (c.name == config_name) {
-      std::string s;
-      for (const std::string& v : c.vars) {
-        const auto [name, value] = split_var(v);
-        s += name + "=" + value + " ";
-      }
-      return s;
-    }
-  return "";
+  const Config* c = find_config(config_name);
+  if (!c) return "";
+  std::string s;
+  for (const std::string& v : c->vars) {
+    const auto [name, value] = split_var(v);
+    s += name + "=" + value + " ";
+  }
+  return s;
 }
 
 // ---- which engines actually ran --------------------------------------------
@@ -360,6 +405,9 @@ struct Run {
   bool evaluated = false;
   std::string eval_error;
   std::vector<PointRun> points;
+  // stanli_check's default point, evaluated after the sweep when asked for.
+  bool has_check = false;
+  PointRun check;
   Paths paths;
 
   // Row 5's two engines, filled only for the configuration that asked for
@@ -408,14 +456,15 @@ class DiagnosticCapture {
   std::string text_;
 };
 
-// Compile and evaluate under `cfg` at `n_points` points. Never throws: a
+// Compile and evaluate under `cfg` at `n_points` points, then at
+// stanli_check's default point when `with_check` is set. Never throws: a
 // compile or evaluation failure is a first-class outcome, because "one path
 // threw and the other returned" is exactly the kind of disagreement worth
 // catching. Later points are skipped when point 0 is out of support, since
 // the caller then retries the next variant.
 inline Run evaluate(const std::string& mir_text, const DataMap& data,
                     const Config& cfg, int variant, bool want_write_array,
-                    int n_points) {
+                    int n_points, bool with_check) {
   Run r;
   r.config = cfg.name;
   EnvScope env(cfg.vars);
@@ -450,11 +499,10 @@ inline Run evaluate(const std::string& mir_text, const DataMap& data,
     return r;
   }
   const int64_t n = ex->n_params();
-  for (int k = 0; k < n_points; ++k) {
+  const auto at = [&](auto&& point) {
     PointRun pr;
     try {
-      for (int64_t i = 0; i < n; ++i)
-        ex->params_data()[i] = sweep_point(i, variant, k);
+      for (int64_t i = 0; i < n; ++i) ex->params_data()[i] = point(i);
       pr.grad.assign((size_t)n, 0.0);
       pr.lp = ex->gradient(pr.grad.data());
       pr.evaluated = true;
@@ -462,12 +510,20 @@ inline Run evaluate(const std::string& mir_text, const DataMap& data,
       pr.eval_error = e.what();
       pr.grad.clear();
     }
-    r.points.push_back(std::move(pr));
+    return pr;
+  };
+  for (int k = 0; k < n_points; ++k) {
+    r.points.push_back(
+        at([&](int64_t i) { return sweep_point(i, variant, k); }));
     if (k == 0) {
       r.evaluated = r.points[0].evaluated;
       r.eval_error = r.points[0].eval_error;
       if (!r.evaluated) break;
     }
+  }
+  if (with_check) {
+    r.check = at([](int64_t i) { return check_point(i, 0); });
+    r.has_check = true;
   }
   r.paths.memo_hits = diagnostics.sum("memo_hits=");
   r.paths.diagnostics = fnv1a(diagnostics.text());
@@ -475,7 +531,7 @@ inline Run evaluate(const std::string& mir_text, const DataMap& data,
 
   try {
     if (want_write_array && cm.write_array) {
-      if (n_points > 1) {
+      if (n_points > 1 || with_check) {
         for (int64_t i = 0; i < n; ++i)
           ex->params_data()[i] = draw_point(i, variant);
         std::vector<double> grad((size_t)n, 0.0);
@@ -636,6 +692,9 @@ struct Options {
   // |a - b| / max(|a|, 1e-300) is at most this passes. 0 keeps every row
   // bitwise, which is what CTest runs.
   double rel_tol = 0.0;
+  // Also compare at stanli_check's default point and under
+  // corpus_configs().
+  bool corpus = false;
 };
 
 struct Result {
@@ -676,12 +735,12 @@ class Matrix {
     // point is in support.
     std::vector<Run> runs;
     int variant = opt_.variant < 0 ? 0 : opt_.variant;
-    Run base =
-        evaluate(mir_text, data, configs()[0], variant, true, opt_.points);
+    Run base = evaluate(mir_text, data, configs()[0], variant, true,
+                        opt_.points, opt_.corpus);
     while (opt_.variant < 0 && base.compiled && !base.evaluated &&
            variant + 1 < kDrawVariants)
-      base =
-          evaluate(mir_text, data, configs()[0], ++variant, true, opt_.points);
+      base = evaluate(mir_text, data, configs()[0], ++variant, true,
+                      opt_.points, opt_.corpus);
     res_.variant = variant;
     res_.compiled["default"] = base.compiled;
     res_.by_config["default"] = base.paths;
@@ -700,8 +759,11 @@ class Matrix {
     if ((int)base.points.size() > points) base.points.resize(points);
     runs.push_back(std::move(base));
     std::map<std::string, size_t> index{{"default", 0}};
-    for (size_t i = 1; i < configs().size(); ++i) {
-      const Config& c = configs()[i];
+    std::vector<Config> run_configs(configs().begin() + 1, configs().end());
+    if (opt_.corpus)
+      run_configs.insert(run_configs.end(), corpus_configs().begin(),
+                         corpus_configs().end());
+    for (const Config& c : run_configs) {
       const auto base_it =
           index.find(c.baseline.empty() ? "default" : c.baseline);
       if (base_it == index.end()) continue;
@@ -709,7 +771,8 @@ class Matrix {
       if (c.requires_op == Requires::RegionMap && base_paths.region_maps == 0)
         continue;
       index[c.name] = runs.size();
-      runs.push_back(evaluate(mir_text, data, c, variant, false, points));
+      runs.push_back(
+          evaluate(mir_text, data, c, variant, false, points, opt_.corpus));
       res_.compiled[c.name] = runs.back().compiled;
       res_.by_config[c.name] = runs.back().paths;
     }
@@ -768,33 +831,38 @@ class Matrix {
       fail_outcome(a, b, pair);
       return;
     }
-    for (size_t k = 0; k < a.points.size(); ++k) {
-      const PointRun& pa = a.points[k];
-      const PointRun& pb = b.points[k];
-      const std::string at = k == 0 ? "" : "@" + std::to_string(k);
-      if (pa.evaluated != pb.evaluated ||
-          (!pa.evaluated && pa.eval_error != pb.eval_error)) {
-        emit(a, b, pair, "outcome" + at,
-             pa.evaluated ? "value lp " + fmt_value(pa.lp)
-                          : "eval_error: " + pa.eval_error,
-             pb.evaluated ? "value lp " + fmt_value(pb.lp)
-                          : "eval_error: " + pb.eval_error,
-             "");
-        continue;
+    for (size_t k = 0; k < a.points.size(); ++k)
+      compare_point(a, b, pair, a.points[k], b.points[k],
+                    k == 0 ? "" : "@" + std::to_string(k));
+    if (a.has_check && b.has_check)
+      compare_point(a, b, pair, a.check, b.check, "@check");
+  }
+
+  void compare_point(const Run& a, const Run& b, const std::string& pair,
+                     const PointRun& pa, const PointRun& pb,
+                     const std::string& at) {
+    if (pa.evaluated != pb.evaluated ||
+        (!pa.evaluated && pa.eval_error != pb.eval_error)) {
+      emit(a, b, pair, "outcome" + at,
+           pa.evaluated ? "value lp " + fmt_value(pa.lp)
+                        : "eval_error: " + pa.eval_error,
+           pb.evaluated ? "value lp " + fmt_value(pb.lp)
+                        : "eval_error: " + pb.eval_error,
+           "");
+      return;
+    }
+    if (!pa.evaluated) return;
+    if (want("lp")) check(a, b, pair, "lp" + at, pa.lp, pb.lp);
+    if (want("grad")) {
+      if (pa.grad.size() != pb.grad.size()) {
+        emit(a, b, pair, "grad.size" + at,
+             std::to_string(pa.grad.size()) + " values",
+             std::to_string(pb.grad.size()) + " values", "");
+        return;
       }
-      if (!pa.evaluated) continue;
-      if (want("lp")) check(a, b, pair, "lp" + at, pa.lp, pb.lp);
-      if (want("grad")) {
-        if (pa.grad.size() != pb.grad.size()) {
-          emit(a, b, pair, "grad.size" + at,
-               std::to_string(pa.grad.size()) + " values",
-               std::to_string(pb.grad.size()) + " values", "");
-          continue;
-        }
-        for (size_t i = 0; i < pa.grad.size(); ++i)
-          check(a, b, pair, "grad[" + std::to_string(i) + "]" + at, pa.grad[i],
-                pb.grad[i]);
-      }
+      for (size_t i = 0; i < pa.grad.size(); ++i)
+        check(a, b, pair, "grad[" + std::to_string(i) + "]" + at, pa.grad[i],
+              pb.grad[i]);
     }
   }
 
@@ -953,7 +1021,8 @@ class Matrix {
               ? std::string()
               : " --cross-points " + std::to_string(opt_.points)) +
          (opt_.rel_tol > 0.0 ? " --cross-rel-tol " + fmt_tol(opt_.rel_tol)
-                             : std::string()));
+                             : std::string()) +
+         (opt_.corpus ? " --cross-corpus" : ""));
     line("  paths: " + paths.line());
   }
 
