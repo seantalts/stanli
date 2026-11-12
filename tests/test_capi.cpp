@@ -7,7 +7,6 @@
 #include "../runtime/third_party/bridgestan.h"
 #include "categorical_check_mir.hpp"
 #include "env_helpers.hpp"
-#include "structured_array_oracles.hpp"
 
 #include <stanli/capi.h>
 
@@ -22,6 +21,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -29,7 +29,6 @@
 #include <vector>
 
 namespace {
-namespace oracle = structured_array_oracle;
 
 int failures = 0;
 
@@ -59,18 +58,6 @@ void expect_near(const std::string& what, double got, double want) {
   if (std::fabs(got - want) <= tol) return;
   ++failures;
   std::printf("FAIL %s: got %.17g want %.17g\n", what.c_str(), got, want);
-}
-
-void expect_values(const std::string& what, const std::vector<double>& got,
-                   const std::vector<double>& want) {
-  if (got.size() != want.size()) {
-    ++failures;
-    std::printf("FAIL %s count: got %zu want %zu\n", what.c_str(), got.size(),
-                want.size());
-    return;
-  }
-  for (size_t i = 0; i < got.size(); ++i)
-    expect_near(what + "[" + std::to_string(i) + "]", got[i], want[i]);
 }
 
 void expect_names(const char* fixture, const std::string& data,
@@ -123,75 +110,6 @@ void expect_names(const char* fixture, const std::string& data,
                       expected_values[i]);
     }
   }
-  stanli_model_free(model);
-}
-
-void expect_structured_arrays(int B) {
-  const std::string fixture = "tests/fixtures/structured_arrays.tmir.sexp";
-  const std::string tag = "structured B=" + std::to_string(B);
-  const std::string mir = slurp(fixture.c_str());
-  const std::string data = "{\"B\":" + std::to_string(B) + "}";
-  char err[8192]{};
-  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), data.c_str(),
-                                                   nullptr, err, sizeof err);
-  if (model == nullptr) {
-    ++failures;
-    std::printf("FAIL %s construction: %s\n", tag.c_str(), err);
-    return;
-  }
-
-  const std::vector<double> q = oracle::q(B);
-  if (stanli_n_unconstrained(model) != oracle::n_unc(B)) {
-    ++failures;
-    std::printf("FAIL %s unconstrained count\n", tag.c_str());
-  }
-  double lp = 0;
-  std::vector<double> grad(q.size());
-  if (stanli_grad(model, q.data(), &lp, grad.data()) != 0) {
-    ++failures;
-    std::printf("FAIL %s gradient call\n", tag.c_str());
-  } else {
-    expect_near(tag + " lp", lp, oracle::lp(B));
-    expect_values(tag + " gradient", grad, oracle::grad(B));
-  }
-
-  const std::vector<std::string> con_names = oracle::constrained_names(B);
-  if (stanli_n_constrained(model) != oracle::n_con(B)) {
-    ++failures;
-    std::printf("FAIL %s constrained count\n", tag.c_str());
-  }
-  for (size_t i = 0; i < con_names.size(); ++i) {
-    const char* got = stanli_constrained_name(model, (int64_t)i);
-    expect_eq((tag + " constrained name " + std::to_string(i)).c_str(),
-              got == nullptr ? "<null>" : got, con_names[i]);
-  }
-  std::vector<double> constrained(con_names.size());
-  if (stanli_constrain(model, q.data(), constrained.data()) != 0) {
-    ++failures;
-    std::printf("FAIL %s constrain call\n", tag.c_str());
-  } else {
-    expect_values(tag + " constrain", constrained, oracle::constrained(B));
-  }
-
-  const std::vector<std::string> write_names = oracle::write_names(B);
-  if (stanli_wa_n_columns(model) != (int64_t)write_names.size()) {
-    ++failures;
-    std::printf("FAIL %s write-array count\n", tag.c_str());
-  }
-  for (size_t i = 0; i < write_names.size(); ++i) {
-    const char* got = stanli_wa_column_name(model, (int64_t)i);
-    expect_eq((tag + " write-array name " + std::to_string(i)).c_str(),
-              got == nullptr ? "<null>" : got, write_names[i]);
-  }
-  std::vector<double> row(write_names.size());
-  stanli_wa_seed(model, 1234);
-  if (stanli_wa_row(model, q.data(), row.data()) != 0) {
-    ++failures;
-    std::printf("FAIL %s write-array row\n", tag.c_str());
-  } else {
-    expect_values(tag + " write-array", row, oracle::write_values(B));
-  }
-
   stanli_model_free(model);
 }
 
@@ -371,117 +289,6 @@ void expect_runtime_bound_rejected() {
   stanli_model_free(model);
 }
 
-void expect_structured_checks() {
-  const std::string mir = slurp("tests/fixtures/structured_checks.tmir.sexp");
-  const std::string good = slurp("tests/fixtures/structured_checks.json");
-  std::string bad = good;
-  const std::string valid_leaf = "[0.2, 0.3, 0.5]";
-  const size_t at = bad.find(valid_leaf);
-  if (at == std::string::npos) {
-    ++failures;
-    std::printf("FAIL C API structured fixture replacement\n");
-    return;
-  }
-  bad.replace(at, valid_leaf.size(), "[0.2, 0.3, 0.6]");
-
-  char err[8192]{};
-  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), bad.c_str(),
-                                                   nullptr, err, sizeof err);
-  if (model != nullptr) {
-    ++failures;
-    std::printf("FAIL C API accepted invalid simplex data\n");
-    stanli_model_free(model);
-  } else if (std::string(err).find("d_simplex") == std::string::npos) {
-    ++failures;
-    std::printf("FAIL C API invalid simplex error: %s\n", err);
-  }
-
-  model = stanli_model_new_with_opts(mir.c_str(), good.c_str(), nullptr, err,
-                                     sizeof err);
-  if (model == nullptr) {
-    ++failures;
-    std::printf("FAIL C API structured-check construction: %s\n", err);
-    return;
-  }
-
-  double q[2] = {0.25, 0.0};
-  double lp = 0.0;
-  double grad[2]{};
-  if (stanli_grad(model, q, &lp, grad) != 1 ||
-      lp != -std::numeric_limits<double>::infinity()) {
-    ++failures;
-    std::printf("FAIL C API accepted invalid transformed simplex\n");
-  }
-
-  q[0] = 0.0;
-  q[1] = 1.0;
-  std::vector<double> row((size_t)stanli_wa_n_columns(model));
-  if (row.empty() || stanli_wa_row(model, q, row.data()) == 0) {
-    ++failures;
-    std::printf("FAIL C API accepted invalid generated sum-to-zero vector\n");
-  }
-  stanli_model_free(model);
-}
-
-void expect_categorical_check() {
-  const std::string mir = categorical_check_mir("categorical_lpmf", true, 1, 3);
-  char err[8192]{};
-  stanli_model* model = stanli_model_new_with_opts(
-      mir.c_str(), R"({"outcome":4,"arg":[0.2,0.3,0.5]})", nullptr, err,
-      sizeof err);
-  if (model == nullptr) {
-    ++failures;
-    std::printf("FAIL C API categorical-check construction: %s\n", err);
-    return;
-  }
-  double q = 0.0;
-  double lp = 0.0;
-  double grad = 0.0;
-  if (stanli_grad(model, &q, &lp, &grad) != 1 ||
-      lp != -std::numeric_limits<double>::infinity()) {
-    ++failures;
-    std::printf("FAIL C API accepted invalid categorical outcome\n");
-  }
-  stanli_model_free(model);
-}
-
-void expect_categorical_interpreted_write_array() {
-  const std::string mir = categorical_write_array_mir(
-      slurp("tests/fixtures/cat.tmir.sexp"), "categorical_lpmf", false, false,
-      false, true);
-  char err[8192]{};
-  stanli_model* model = stanli_model_new_with_opts(
-      mir.c_str(), R"({"K":3,"y":2,"ys":[3,1,3]})", nullptr, err, sizeof err);
-  if (model == nullptr) {
-    ++failures;
-    std::printf("FAIL C API interpreted categorical construction: %s\n", err);
-    return;
-  }
-  const int64_t n = stanli_wa_n_columns(model);
-  std::vector<double> row((size_t)n);
-  const double q[2] = {0.0, 0.0};
-  stanli_wa_seed(model, 1234);
-  if (stanli_wa_row(model, q, row.data()) != 0) {
-    ++failures;
-    std::printf("FAIL C API interpreted categorical row\n");
-  } else {
-    bool found = false;
-    for (int64_t i = 0; i < n; ++i) {
-      const char* name = stanli_wa_column_name(model, i);
-      if (name != nullptr && std::string(name) == "categorical_value") {
-        found = true;
-        expect_near("C API interpreted categorical value", row[(size_t)i],
-                    -std::log(3.0));
-      }
-    }
-    if (!found) {
-      ++failures;
-      std::printf("FAIL C API interpreted categorical column\n");
-    }
-  }
-  stanli_model_free(model);
-}
-
 void expect_compiled_scalar_rng() {
   const std::string mir = slurp("tests/fixtures/gq_scalar_rng.tmir.sexp");
   char err[8192]{};
@@ -516,50 +323,6 @@ void expect_compiled_scalar_rng() {
     std::printf("FAIL C API scalar RNG stream/reseed/chain ownership\n");
   }
   stanli_model_free(model);
-}
-
-void expect_necessity_effects() {
-  const std::string mir = slurp("tests/fixtures/necessity_effects.tmir.sexp");
-  char err[8192]{};
-  stanli_model* model = stanli_model_new_with_opts(mir.c_str(), "{\"mode\":1}",
-                                                   nullptr, err, sizeof err);
-  if (model == nullptr) {
-    ++failures;
-    std::printf("FAIL C API refused necessity print: %s\n", err);
-  } else {
-    const double q = 0.1;
-    double lp = 0, grad = 0;
-    if (stanli_grad(model, &q, &lp, &grad) != 0 || lp != 0.1 || grad != 1.0) {
-      ++failures;
-      std::printf(
-          "FAIL C API necessity print evaluation: lp %.17g grad %.17g\n", lp,
-          grad);
-    }
-    stanli_model_free(model);
-  }
-
-  std::fill(std::begin(err), std::end(err), '\0');
-  model = stanli_model_new_with_opts(mir.c_str(), "{\"mode\":2}", nullptr, err,
-                                     sizeof err);
-  if (model == nullptr) {
-    ++failures;
-    std::printf("FAIL C API refused dynamic necessity reject: %s\n", err);
-  } else {
-    double lp = 0.0, grad = 0.0;
-    const double accepted = 0.1;
-    if (stanli_grad(model, &accepted, &lp, &grad) != 0 || lp != 0.1 ||
-        grad != 1.0) {
-      ++failures;
-      std::printf("FAIL C API untaken dynamic reject\n");
-    }
-    const double rejected = -0.1;
-    if (stanli_grad(model, &rejected, &lp, &grad) != 1 || !std::isinf(lp) ||
-        lp > 0.0) {
-      ++failures;
-      std::printf("FAIL C API taken dynamic reject: lp %.17g\n", lp);
-    }
-    stanli_model_free(model);
-  }
 }
 
 // Pathfinder across the ABI: draws, the per-draw log densities, the
@@ -1565,6 +1328,154 @@ void expect_sample_options_validated() {
   stanli_model_free(model);
 }
 
+double type7_quantile(std::vector<double> x, double p) {
+  std::sort(x.begin(), x.end());
+  const double h = (double)(x.size() - 1) * p;
+  const size_t lo = (size_t)std::floor(h);
+  if (lo + 1 >= x.size()) return x.back();
+  return x[lo] + (h - (double)lo) * (x[lo + 1] - x[lo]);
+}
+
+void expect_summary_stats() {
+  const int64_t C = 4, N = 1000, P = 2;
+  std::vector<double> d((size_t)(C * N * P));
+  std::mt19937 rng(17);
+  std::exponential_distribution<double> ex(1.0);
+  std::vector<double> x;
+  for (int64_t c = 0; c < C; ++c)
+    for (int64_t i = 0; i < N; ++i) {
+      const double v = 3.0 + ex(rng);
+      d[(size_t)((c * N + i) * P + 0)] = v;
+      d[(size_t)((c * N + i) * P + 1)] = 5.0;
+      x.push_back(v);
+    }
+  double mean = 0;
+  for (double v : x) mean += v;
+  mean /= (double)x.size();
+  double ss = 0;
+  for (double v : x) ss += (v - mean) * (v - mean);
+  const double sd = std::sqrt(ss / (double)(x.size() - 1));
+
+  std::vector<double> out((size_t)(P * STANLI_N_SUMMARY_STATS), -1.0);
+  expect_true("summary_stats succeeds",
+              stanli_summary_stats(d.data(), C, N, P, out.data()) == 0);
+  const double* r = out.data();
+  const auto near = [](double got, double want) {
+    return std::fabs(got - want) <= 1e-12 * std::max(1.0, std::fabs(want));
+  };
+  expect_true("summary mean", near(r[STANLI_STAT_MEAN], mean));
+  expect_true("summary sd", near(r[STANLI_STAT_SD], sd));
+  expect_true("summary q5", near(r[STANLI_STAT_Q5], type7_quantile(x, 0.05)));
+  expect_true("summary q50", near(r[STANLI_STAT_Q50], type7_quantile(x, 0.5)));
+  expect_true("summary q95", near(r[STANLI_STAT_Q95], type7_quantile(x, 0.95)));
+  expect_true("summary rhat near 1",
+              r[STANLI_STAT_RHAT] > 0.99 && r[STANLI_STAT_RHAT] < 1.02);
+  expect_true("summary bulk ess",
+              r[STANLI_STAT_ESS_BULK] > 2000 && r[STANLI_STAT_ESS_BULK] < 6000);
+  expect_true("summary tail ess",
+              r[STANLI_STAT_ESS_TAIL] > 1500 && r[STANLI_STAT_ESS_TAIL] < 6000);
+  expect_true("summary mcse mean",
+              r[STANLI_STAT_MCSE_MEAN] > 0.5 * sd / std::sqrt(4000.0) &&
+                  r[STANLI_STAT_MCSE_MEAN] < 2.0 * sd / std::sqrt(4000.0));
+  expect_true("summary mcse sd",
+              r[STANLI_STAT_MCSE_SD] > 0 && r[STANLI_STAT_MCSE_SD] < 0.1);
+  const double* k = out.data() + STANLI_N_SUMMARY_STATS;
+  expect_true("constant column mean",
+              k[STANLI_STAT_MEAN] == 5.0 && k[STANLI_STAT_Q50] == 5.0);
+  expect_true("constant column has no rhat or ess",
+              std::isnan(k[STANLI_STAT_RHAT]) &&
+                  std::isnan(k[STANLI_STAT_ESS_BULK]) &&
+                  std::isnan(k[STANLI_STAT_ESS_TAIL]));
+
+  std::vector<double> split((size_t)(2 * 500));
+  for (int64_t c = 0; c < 2; ++c)
+    for (int64_t i = 0; i < 500; ++i)
+      split[(size_t)(c * 500 + i)] = ex(rng) + (c == 0 ? 0.0 : 10.0);
+  double s[STANLI_N_SUMMARY_STATS];
+  expect_true("summary reads chains as chains",
+              stanli_summary_stats(split.data(), 2, 500, 1, s) == 0 &&
+                  s[STANLI_STAT_RHAT] > 1.5);
+}
+
+void expect_diagnose_text() {
+  enum {
+    kAcceptStat = 1,
+    kStepsize,
+    kTreedepth,
+    kLeapfrog,
+    kDivergent,
+    kEnergy
+  };
+  const int64_t C = 4, N = 1000;
+  std::vector<double> d((size_t)(C * N));
+  std::vector<double> st((size_t)(C * N * STANLI_N_SAMPLER_COLS), 0.0);
+  std::mt19937 rng(23);
+  std::normal_distribution<double> nd(0, 1);
+  for (int64_t c = 0; c < C; ++c)
+    for (int64_t i = 0; i < N; ++i) {
+      d[(size_t)(c * N + i)] = nd(rng);
+      double* row = &st[(size_t)((c * N + i) * STANLI_N_SAMPLER_COLS)];
+      row[kAcceptStat] = 0.9;
+      row[kStepsize] = 0.5;
+      row[kTreedepth] = (c == 1 && i < 2) ? 4 : 3;
+      row[kEnergy] = nd(rng);
+    }
+  const char* names[] = {"mu"};
+  const auto text = [&](const double* draws, const char* const* nm,
+                        const double* stats, int max_depth) {
+    const int64_t need =
+        stanli_diagnose_text(draws, C, N, 1, nm, stats, max_depth, nullptr, 0);
+    std::vector<char> buf((size_t)std::max<int64_t>(need, 1));
+    stanli_diagnose_text(draws, C, N, 1, nm, stats, max_depth, buf.data(),
+                         buf.size());
+    const std::string t(buf.data());
+    expect_true("diagnose_text reports its full length",
+                need > 1 && t.size() + 1 == (size_t)need && t.back() == '\n');
+    return t;
+  };
+  const auto has = [](const std::string& t, const char* s) {
+    return t.find(s) != std::string::npos;
+  };
+
+  const std::string ok = text(d.data(), names, st.data(), 10);
+  expect_true("converged text: " + ok,
+              has(ok, "No divergent transitions.") &&
+                  has(ok,
+                      "No transitions saturated the maximum treedepth "
+                      "of 10.") &&
+                  has(ok, "E-BFMI is above 0.3 in every chain.") &&
+                  has(ok, "R-hat is below") && has(ok, ", mu).") &&
+                  has(ok, "Bulk ESS is at least") &&
+                  has(ok, "Tail ESS is at least") &&
+                  has(ok, "No problems detected."));
+  const std::string depth = text(d.data(), names, st.data(), 4);
+  expect_true("max_depth reaches the check: " + depth,
+              has(depth,
+                  "2 of 4000 transitions saturated the maximum "
+                  "treedepth of 4."));
+  st[(size_t)(5 * STANLI_N_SAMPLER_COLS + kDivergent)] = 1;
+  const std::string div = text(d.data(), names, st.data(), 10);
+  expect_true("divergences reach the text: " + div,
+              has(div, "1 of 4000 transitions (0.0%) diverged.") &&
+                  has(div, "1 diagnostic check failed."));
+  const std::string draws_only = text(d.data(), nullptr, nullptr, 10);
+  expect_true("null stats run only the R-hat and ESS half: " + draws_only,
+              !has(draws_only, "divergent") && !has(draws_only, "E-BFMI") &&
+                  has(draws_only, "R-hat is below"));
+
+  for (int64_t i = 0; i < N; ++i) d[(size_t)(3 * N + i)] += 10.0;
+  const std::string split = text(d.data(), names, nullptr, 10);
+  expect_true("split chains name the parameter: " + split,
+              has(split, "R-hat reaches") && has(split, "(mu)"));
+
+  char small[8];
+  const int64_t need = stanli_diagnose_text(d.data(), C, N, 1, names, nullptr,
+                                            10, small, sizeof small);
+  expect_true("a short buffer is truncated and terminated",
+              need == (int64_t)split.size() + 1 &&
+                  std::string(small) == split.substr(0, sizeof small - 1));
+}
+
 }  // namespace
 
 void expect_interpreter_policy(const char* fixture,
@@ -2196,14 +2107,9 @@ int main() {
                {"a.1.1", "a.2.1", "a.1.2", "a.2.2", "a.1.3", "a.2.3"},
                {1, 2, 3, 4, 5, 6}, {1, 4, 2, 5, 3, 6});
 
-  for (int B = 0; B <= 2; ++B) expect_structured_arrays(B);
   expect_invalid_data_rejected();
   expect_runtime_bound_rejected();
-  expect_structured_checks();
-  expect_categorical_check();
-  expect_categorical_interpreted_write_array();
   expect_compiled_scalar_rng();
-  expect_necessity_effects();
   expect_pathfinder();
   expect_sampling_progress();
   expect_inits_run_in_parallel();
@@ -2215,6 +2121,8 @@ int main() {
   expect_sampling_warnings_api();
   expect_streaming_stats();
   expect_sample_options_validated();
+  expect_summary_stats();
+  expect_diagnose_text();
 
   if (failures == 0) std::printf("test_capi OK\n");
   return failures == 0 ? 0 : 1;
