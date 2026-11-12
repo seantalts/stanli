@@ -131,6 +131,50 @@ bool compiled_completely(const stanli::CompiledModel& cm,
   return false;
 }
 
+// The mutated MIR must compile, and write_array must fall back to the
+// interpreter with `reason` (when non-empty) in its truncation note.
+bool expect_interpreted(const std::string& text, const stanli::DataMap& data,
+                        const std::string& reason, const std::string& what,
+                        stanli::CompiledModel* out = nullptr) {
+  stanli::CompiledModel cm;
+  try {
+    cm = stanli::compile_model(text, data);
+  } catch (const std::exception& e) {
+    ++failures;
+    std::printf("FAIL %s: mutation did not parse/compile: %s\n", what.c_str(),
+                e.what());
+    return false;
+  }
+  if (!cm.write_array || !cm.write_array->interp ||
+      (!reason.empty() &&
+       cm.write_array->truncated.find(reason) == std::string::npos)) {
+    ++failures;
+    std::printf(
+        "FAIL %s: got %s\n", what.c_str(),
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    return false;
+  }
+  if (out) *out = std::move(cm);
+  return true;
+}
+
+void expect_compiled(const std::string& text, const stanli::DataMap& data,
+                     const std::string& what) {
+  try {
+    const stanli::CompiledModel cm = stanli::compile_model(text, data);
+    if (cm.write_array && !cm.write_array->interp &&
+        cm.write_array->truncated.empty())
+      return;
+    ++failures;
+    std::printf(
+        "FAIL %s: got %s\n", what.c_str(),
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+  } catch (const std::exception& e) {
+    ++failures;
+    std::printf("FAIL %s: did not compile: %s\n", what.c_str(), e.what());
+  }
+}
+
 bool same_double_bytes(const std::vector<double>& a,
                        const std::vector<double>& b) {
   return a.size() == b.size() &&
@@ -1622,24 +1666,11 @@ void test_categorical_rng_lowering_guards() {
     return;
   }
 
-  const auto expect_interp = [](const std::string& mir,
-                                const std::string& reason, const char* what) {
-    DataMap data;
-    data.set_int("K", 4);
-    try {
-      CompiledModel cm = compile_model(mir, data);
-      if (!cm.write_array || !cm.write_array->interp ||
-          cm.write_array->truncated.find(reason) == std::string::npos) {
-        ++failures;
-        std::printf("FAIL %s: got %s\n", what,
-                    cm.write_array ? cm.write_array->truncated.c_str()
-                                   : "no write_array");
-      }
-    } catch (const std::exception& e) {
-      ++failures;
-      std::printf("FAIL %s: mutation did not parse/compile: %s\n", what,
-                  e.what());
-    }
+  DataMap guard_data;
+  guard_data.set_int("K", 4);
+  const auto expect_interp = [&](const std::string& mir,
+                                 const std::string& reason, const char* what) {
+    expect_interpreted(mir, guard_data, reason, what);
   };
 
   struct BadArgument {
@@ -2019,21 +2050,7 @@ void test_multi_normal_rng_lowering_guards() {
 
   const auto expect_interp = [](const std::string& mir,
                                 const std::string& reason, const char* label) {
-    try {
-      CompiledModel cm = compile_model(mir, DataMap{});
-      if (!cm.write_array || !cm.write_array->interp ||
-          (!reason.empty() &&
-           cm.write_array->truncated.find(reason) == std::string::npos)) {
-        ++failures;
-        std::printf("FAIL %s: got %s\n", label,
-                    cm.write_array ? cm.write_array->truncated.c_str()
-                                   : "no write_array");
-      }
-    } catch (const std::exception& e) {
-      ++failures;
-      std::printf("FAIL %s: mutation did not parse/compile: %s\n", label,
-                  e.what());
-    }
+    expect_interpreted(mir, DataMap{}, reason, label);
   };
 
   const auto replace_once = [](std::string text, size_t at, size_t count,
@@ -2321,15 +2338,7 @@ void test_binomial_rng_lowering_guards() {
 
   const auto expect_interp = [](const std::string& mir,
                                 const std::string& reason, const char* what) {
-    DataMap data;
-    CompiledModel cm = compile_model(mir, data);
-    if (!cm.write_array || !cm.write_array->interp ||
-        cm.write_array->truncated.find(reason) == std::string::npos) {
-      ++failures;
-      std::printf("FAIL %s: got %s\n", what,
-                  cm.write_array ? cm.write_array->truncated.c_str()
-                                 : "no write_array");
-    }
+    expect_interpreted(mir, DataMap{}, reason, what);
   };
 
   const std::string scalar_trials =
@@ -2883,57 +2892,7 @@ static stanli::DataMap extrema_guard_data() {
 }
 
 static void expect_extrema_interp(const std::string& text, const char* what) {
-  using namespace stanli;
-  try {
-    CompiledModel cm = compile_model(text, extrema_guard_data());
-    if (cm.write_array && cm.write_array->interp) return;
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: mutation did not parse/compile: %s\n", what,
-                e.what());
-  }
-}
-
-static void expect_extrema_compiled(const std::string& text,
-                                    const stanli::DataMap& data,
-                                    const char* what) {
-  using namespace stanli;
-  try {
-    CompiledModel cm = compile_model(text, data);
-    if (cm.write_array && !cm.write_array->interp &&
-        cm.write_array->truncated.empty())
-      return;
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: did not compile: %s\n", what, e.what());
-  }
-}
-
-static void expect_extrema_fixture_compiled(const std::string& fixture,
-                                            const stanli::DataMap& data,
-                                            const char* what) {
-  using namespace stanli;
-  try {
-    CompiledModel cm = compile_model(slurp(fixture), data);
-    if (cm.write_array && !cm.write_array->interp &&
-        cm.write_array->truncated.empty())
-      return;
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: fixture did not compile: %s\n", what, e.what());
-  }
+  expect_interpreted(text, extrema_guard_data(), "", what);
 }
 
 void test_gq_extrema_lowering_guards() {
@@ -2983,7 +2942,7 @@ void test_gq_extrema_lowering_guards() {
       "DataOnly))))";
   std::string expression = base;
   expression.replace(arg_at, vector_node.size(), exp_vector);
-  expect_extrema_compiled(expression, extrema_guard_data(), "min(exp(x))");
+  expect_compiled(expression, extrema_guard_data(), "min(exp(x))");
 
   const std::string indexed =
       "((pattern\n"
@@ -3002,7 +2961,7 @@ void test_gq_extrema_lowering_guards() {
       "DataOnly))))";
   std::string view = base;
   view.replace(arg_at, vector_node.size(), indexed);
-  expect_extrema_compiled(view, extrema_guard_data(), "min(x[2:5])");
+  expect_compiled(view, extrema_guard_data(), "min(x[2:5])");
 
   std::string zero_args = base;
   zero_args.erase(arg_at, vector_node.size());
@@ -3040,7 +2999,7 @@ void test_gq_extrema_lowering_guards() {
   } else {
     udf.replace(inlined, stan_min.size(),
                 "(FunApp (UserDefined vector_min FnPlain)");
-    expect_extrema_compiled(udf, extrema_guard_data(), "dynamic UDF extrema");
+    expect_compiled(udf, extrema_guard_data(), "dynamic UDF extrema");
   }
 
   // The same opcode now serves active log_prob reductions through its stored
@@ -3065,14 +3024,14 @@ void test_gq_extrema_view_lowering_guards() {
   using namespace stanli;
   DataMap row_data;
   row_data.set_int("N", 5);
-  expect_extrema_fixture_compiled("tests/fixtures/gq_extrema_row.tmir.sexp",
-                                  row_data, "strided matrix-row extrema");
+  expect_compiled(slurp("tests/fixtures/gq_extrema_row.tmir.sexp"), row_data,
+                  "strided matrix-row extrema");
 
   DataMap gather_data;
   gather_data.set_int("N", 5);
   gather_data.set_int_array("idx", {5, 2, 2, 1, 4});
-  expect_extrema_fixture_compiled("tests/fixtures/gq_extrema_gather.tmir.sexp",
-                                  gather_data, "gathered extrema");
+  expect_compiled(slurp("tests/fixtures/gq_extrema_gather.tmir.sexp"),
+                  gather_data, "gathered extrema");
 }
 
 void test_compiled_gq_reductions() {
@@ -3200,24 +3159,7 @@ static void expect_reduction_interp(const std::string& text,
                                     bool sum_prefix = false) {
   using namespace stanli;
   CompiledModel cm;
-  try {
-    cm = compile_model(text, reduction_data());
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: mutation did not parse/compile: %s\n", what,
-                e.what());
-    return;
-  }
-  const bool fallback = cm.write_array && cm.write_array->interp &&
-                        (reason.empty() || cm.write_array->truncated.find(
-                                               reason) != std::string::npos);
-  if (!fallback) {
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!expect_interpreted(text, reduction_data(), reason, what, &cm)) return;
   if (sum_prefix) {
     int sums = 0;
     for (const Op& op : cm.write_array->graph.ops)
@@ -3227,25 +3169,6 @@ static void expect_reduction_interp(const std::string& text,
       std::printf("FAIL %s: runtime sum was not retained in graph prefix\n",
                   what);
     }
-  }
-}
-
-static void expect_reduction_compiled(const std::string& text,
-                                      const stanli::DataMap& data,
-                                      const char* what) {
-  using namespace stanli;
-  try {
-    CompiledModel cm = compile_model(text, data);
-    if (cm.write_array && !cm.write_array->interp &&
-        cm.write_array->truncated.empty())
-      return;
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: did not compile: %s\n", what, e.what());
   }
 }
 
@@ -3390,8 +3313,7 @@ void test_gq_reduction_lowering_guards() {
   } else {
     dynamic_udf.replace(inlined_prod, stan_prod.size(),
                         "(FunApp (UserDefined vector_product FnPlain)");
-    expect_reduction_compiled(dynamic_udf, reduction_data(),
-                              "dynamic UDF product");
+    expect_compiled(dynamic_udf, reduction_data(), "dynamic UDF product");
   }
 
   const size_t assignment = base.find("(Assignment ((LVariable pr)");
@@ -3425,7 +3347,7 @@ void test_gq_reduction_lowering_guards() {
     if (!replace_reduction_after(mutated, prod_call, vector_meta, replacement,
                                  bad.label))
       continue;
-    expect_reduction_compiled(
+    expect_compiled(
         mutated, reduction_data(),
         (std::string("product ") + bad.label + " uses lowered layout").c_str());
   }
@@ -3485,7 +3407,7 @@ void test_gq_reduction_lowering_guards() {
   std::string direct_view = base;
   if (replace_reduction_after(direct_view, prod_call, vector_node, segment,
                               "segment product"))
-    expect_reduction_compiled(direct_view, reduction_data(), "segment product");
+    expect_compiled(direct_view, reduction_data(), "segment product");
 
   const std::string transposed_segment =
       "((pattern\n"
@@ -3498,8 +3420,8 @@ void test_gq_reduction_lowering_guards() {
   std::string wrapped_view = base;
   if (replace_reduction_after(wrapped_view, prod_call, vector_node,
                               transposed_segment, "transposed segment product"))
-    expect_reduction_compiled(wrapped_view, reduction_data(),
-                              "transposed segment product");
+    expect_compiled(wrapped_view, reduction_data(),
+                    "transposed segment product");
 
   // A transpose of a bare vector is an address-zero row-vector view in
   // CmdStan and remains in scope for the native path.
@@ -3536,7 +3458,7 @@ void test_gq_reduction_lowering_guards() {
   std::string exp_product = base;
   if (replace_reduction_after(exp_product, prod_call, vector_node, exp_vector,
                               "exp product"))
-    expect_reduction_compiled(exp_product, reduction_data(), "prod(exp(x))");
+    expect_compiled(exp_product, reduction_data(), "prod(exp(x))");
 
   const std::string scalar_one =
       "((pattern (Lit Real 1.0))\n"
@@ -3622,15 +3544,13 @@ void test_gq_reduction_lowering_guards() {
   std::string gathered_product = base;
   if (replace_reduction_after(gathered_product, prod_call, vector_node,
                               gather_minus, "gather product"))
-    expect_reduction_compiled(gathered_product, reduction_data(),
-                              "prod(1-x[idx])");
+    expect_compiled(gathered_product, reduction_data(), "prod(1-x[idx])");
 
   // The bare gathered vector uses the same scalar grouping.
   std::string bare_gathered_product = base;
   if (replace_reduction_after(bare_gathered_product, prod_call, vector_node,
                               gather_vector, "bare gather product"))
-    expect_reduction_compiled(bare_gathered_product, reduction_data(),
-                              "prod(x[idx])");
+    expect_compiled(bare_gathered_product, reduction_data(), "prod(x[idx])");
 
   const std::string unsafe_minus =
       "((pattern\n"
@@ -3643,7 +3563,7 @@ void test_gq_reduction_lowering_guards() {
   std::string nested_math = base;
   if (replace_reduction_after(nested_math, prod_call, vector_node, unsafe_minus,
                               "nested vector math product"))
-    expect_reduction_compiled(nested_math, reduction_data(), "prod(1-exp(x))");
+    expect_compiled(nested_math, reduction_data(), "prod(1-exp(x))");
 
   // A dynamic product in log_prob uses the same opcode with stored partials.
   std::string reverse = base;
@@ -4042,8 +3962,8 @@ void test_runtime_int_sum_redeclaration_shadowing() {
       "    (meta <opaque>))\n   ";
   std::string uninitialized = base;
   uninitialized.insert(insertion, uninitialized_decl);
-  expect_reduction_compiled(uninitialized, reduction_data(),
-                            "same-id uninitialized int sentinel");
+  expect_compiled(uninitialized, reduction_data(),
+                  "same-id uninitialized int sentinel");
   std::vector<std::string> names;
   const std::vector<double> row = eval_reduction_interp(uninitialized, &names);
   bool found_sentinel = false;
