@@ -4,7 +4,6 @@
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/mir.hpp>
-#include <stanli/ode_prog.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/sexp.hpp>
 
@@ -495,44 +494,6 @@ void test_while_fallback_leaves_no_trace() {
         "fallback-unrolled while lowers to the hand-unrolled graph");
 }
 
-void test_register_array_boundary() {
-  using namespace stanli;
-  mir::Program mir =
-      mir::read_program(sexp::parse(fixture("viewa_program_arrays")));
-  std::map<std::string, const mir::FunDef*> funs;
-  for (const auto& f : mir.fun_defs) funs[f.name] = &f;
-
-  auto compile = [&](const std::string& name) {
-    auto it = funs.find(name);
-    if (it == funs.end()) {
-      check(false, "register fixture contains " + name);
-      return RhsProgram{};
-    }
-    return compile_rhs(*it->second, funs, 1, 4, 1, {2});
-  };
-
-  RhsProgram flat = compile("rhs_flat");
-  check(flat.ok,
-        "register accepts depth-1 scalar real/int arrays: " + flat.why);
-  if (flat.ok) {
-    const double y[1] = {3.0};
-    const double theta[4] = {4.0, 5.0, 6.0, 7.0};
-    const double xr[1] = {1.5};
-    std::vector<double> out;
-    std::vector<double> rhs_registers;
-    run_rhs<double>(flat, 0.0, y, theta, xr, out, rhs_registers);
-    check(out.size() == 1, "register scalar-array output width");
-    if (out.size() == 1) eq("register scalar-array value", out[0], 15.5);
-  }
-
-  for (const std::string& name :
-       {"rhs_depth2", "rhs_depth2_int", "rhs_vectors", "rhs_matrices"}) {
-    RhsProgram refused = compile(name);
-    check(!refused.ok, "register refuses " + name);
-    check(!refused.why.empty(), "register explains refusal for " + name);
-  }
-}
-
 }  // namespace
 
 int main() {
@@ -547,7 +508,6 @@ int main() {
   run_case("data size effect runs once", test_data_size_effect_runs_once);
   run_case("while fallback leaves no trace",
            test_while_fallback_leaves_no_trace);
-  run_case("register array boundary", test_register_array_boundary);
   if (failures == 0) std::printf("test_lower_views OK\n");
   return failures == 0 ? 0 : 1;
 }

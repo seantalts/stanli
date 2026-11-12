@@ -691,6 +691,44 @@ void check_nested_callbacks() {
   }
 }
 
+void test_register_array_boundary() {
+  using namespace stanli;
+  mir::Program mir = mir::read_program(
+      sexp::parse(slurp("tests/fixtures/viewa_program_arrays.tmir.sexp")));
+  std::map<std::string, const mir::FunDef*> funs;
+  for (const auto& f : mir.fun_defs) funs[f.name] = &f;
+
+  auto compile = [&](const std::string& name) {
+    auto it = funs.find(name);
+    if (it == funs.end()) {
+      expect_true("register fixture contains " + name, false);
+      return RhsProgram{};
+    }
+    return compile_rhs(*it->second, funs, 1, 4, 1, {2});
+  };
+
+  RhsProgram flat = compile("rhs_flat");
+  expect_true("register accepts depth-1 scalar real/int arrays: " + flat.why,
+              flat.ok);
+  if (flat.ok) {
+    const double y[1] = {3.0};
+    const double theta[4] = {4.0, 5.0, 6.0, 7.0};
+    const double xr[1] = {1.5};
+    std::vector<double> out;
+    std::vector<double> rhs_registers;
+    run_rhs<double>(flat, 0.0, y, theta, xr, out, rhs_registers);
+    expect_true("register scalar-array output width", out.size() == 1);
+    if (out.size() == 1) expect_eq("register scalar-array value", out[0], 15.5);
+  }
+
+  for (const std::string& name :
+       {"rhs_depth2", "rhs_depth2_int", "rhs_vectors", "rhs_matrices"}) {
+    RhsProgram refused = compile(name);
+    expect_true("register refuses " + name, !refused.ok);
+    expect_true("register explains refusal for " + name, !refused.why.empty());
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -849,6 +887,8 @@ int main() {
       std::printf("FAIL scale/2 compiled as a right-hand side\n");
     }
   }
+
+  test_register_array_boundary();
 
   return finish("test_ode_prog");
 }

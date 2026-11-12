@@ -929,6 +929,101 @@ static void fixed_small_vs_dynamic() {
       g_differential_cases, g_rejected_cases, failures);
 }
 
+// A scalar add_diag argument receives one contribution per diagonal entry.
+// The additions are created from the first coefficient to the last, so the
+// reverse tape accumulates a deliberately cancellation-sensitive seed in
+// the opposite order.
+static void test_add_diag_scalar_reverse_order() {
+  using namespace stanli;
+  const Kernel* add_diag = find_kernel(OP_ADD_DIAG);
+  expect_true("add_diag scalar kernel registration",
+              add_diag && add_diag->forward && add_diag->backward);
+  if (add_diag && add_diag->forward && add_diag->backward) {
+    constexpr int n = 3;
+    double a[n * n] = {};
+    double diagonal = 0.0;
+    double out[n * n] = {};
+    double out_adj[n * n] = {};
+    out_adj[0] = 1e16;
+    out_adj[4] = -1e16;
+    out_adj[8] = 1.0;
+    double diagonal_adj = 0.0;
+    const int dims[] = {n, n};
+    KernelCtx ctx;
+    ctx.in[0] = Desc{a, n * n};
+    ctx.in[1] = Desc{&diagonal, 1};
+    ctx.n_in = 2;
+    ctx.out = Desc{out, n * n};
+    ctx.variant = 1;
+    ctx.idata = dims;
+    ctx.n_idata = 2;
+    add_diag->forward(ctx);
+    ctx.in_adj[0] = Desc{nullptr, n * n};
+    ctx.in_adj[1] = Desc{&diagonal_adj, 1};
+    ctx.out_adj_vec = Desc{out_adj, n * n};
+    add_diag->backward(ctx);
+
+    Eigen::MatrixXd matrix = Eigen::MatrixXd::Zero(n, n);
+    Eigen::MatrixXd seed = Eigen::MatrixXd::Zero(n, n);
+    seed(0, 0) = 1e16;
+    seed(1, 1) = -1e16;
+    seed(2, 2) = 1.0;
+    stan::math::var d_ref = 0.0;
+    stan::math::var reference = stan::math::sum(
+        stan::math::elt_multiply(stan::math::add_diag(matrix, d_ref), seed));
+    reference.grad();
+    expect_eq("add_diag scalar reverse order", diagonal_adj, d_ref.adj());
+    stan::math::recover_memory();
+  }
+}
+
+// The triangular pullback must match the old nested-tape weighted sum,
+// including rectangular matrices, ignored upper entries, asymmetric seeds,
+// overflow, and accumulation into existing input adjoints.
+static void test_mult_lower_tri_self_transpose_pullback() {
+  using namespace stanli;
+  const Kernel* kernel = find_kernel(OP_MULT_LOWER_TRI_SELF_TRANSPOSE);
+  for (int nr : {1, 2, 3, 8})
+    for (int nc : {1, 2, 3, 8})
+      for (double scale : {0.0, 1.0, 1e-100, 1e100})
+        for (double weight : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308,
+                              std::numeric_limits<double>::infinity()}) {
+          stan::math::nested_rev_autodiff nested;
+          Eigen::MatrixXd a(nr, nc), seed(nr, nr), adj(nr, nc);
+          for (int i = 0; i < a.size(); ++i) {
+            a.data()[i] = scale * std::sin(0.3 * (i + 1));
+            adj.data()[i] = i % 2 ? -0.0 : 0.3125;
+          }
+          for (int i = 0; i < seed.size(); ++i)
+            seed.data()[i] = (i % 3 == 0 ? -1.0 : 1.0) * weight;
+          auto ref_a = a.cast<stan::math::var>().eval();
+          auto result = stan::math::multiply_lower_tri_self_transpose(ref_a);
+          stan::math::var loss =
+              stan::math::sum(stan::math::elt_multiply(result, seed));
+          stan::math::grad(loss.vi_);
+          std::vector<double> expected(a.size());
+          for (int i = 0; i < a.size(); ++i)
+            expected[i] = adj.data()[i] + ref_a.data()[i].adj();
+          int idata[] = {nr, nc};
+          KernelCtx ctx{};
+          ctx.n_in = 1;
+          ctx.in[0] = Desc{a.data(), a.size()};
+          ctx.in_adj[0] = Desc{adj.data(), adj.size()};
+          ctx.out_adj_vec = Desc{seed.data(), seed.size()};
+          ctx.idata = idata;
+          ctx.n_idata = 2;
+          kernel->backward(ctx);
+          for (int i = 0; i < a.size(); ++i)
+            expect_true(
+                "triangular native pullback bits",
+                (std::isnan(adj.data()[i]) && std::isnan(expected[i])) ||
+                    std::memcmp(&adj.data()[i], &expected[i], sizeof(double)) ==
+                        0);
+          ctx.in_adj[0].data = nullptr;
+          kernel->backward(ctx);
+        }
+}
+
 int main(int argc, char** argv) {
   // Optional local UBSan diagnostic: the pinned Stan Math blocked routine
   // itself binds an empty Eigen block reference at its final panel. The
@@ -986,6 +1081,8 @@ int main(int argc, char** argv) {
   qf_family(true, OP_QUAD_FORM_SYM, 2);
   std::printf("quad_form: max adj ulp=%.0f\n", g_max_qf_ulp);
 
+  test_add_diag_scalar_reverse_order();
+  test_mult_lower_tri_self_transpose_pullback();
   fixed_small_vs_dynamic();
 
   return finish("test_native_matrix_pullbacks");

@@ -230,6 +230,100 @@ static void sexp_parser_checks() {
   }
 }
 
+static void probe_mode_tests() {
+  using namespace stanli;
+  static const std::map<std::string, const mir::FunDef*> no_funs;
+  auto var_expr = [](std::string name, mir::UnsizedLeaf leaf) {
+    mir::Expr e;
+    e.kind = mir::Expr::Var;
+    e.name = std::move(name);
+    e.unsized = {0, leaf};
+    e.data_only = true;
+    return e;
+  };
+  auto index_single = [](mir::Expr idx) {
+    mir::Expr e;
+    e.kind = mir::Expr::FunApp;
+    e.name = "IndexSingle";
+    e.args = {std::move(idx)};
+    return e;
+  };
+  mir::Expr expr;
+  expr.kind = mir::Expr::Indexed;
+  expr.args = {var_expr("x", mir::UnsizedLeaf::Vector),
+               index_single(var_expr("i", mir::UnsizedLeaf::Int))};
+  expr.type_ = "UReal";
+  expr.unsized = {0, mir::UnsizedLeaf::Real};
+  expr.data_only = true;
+
+  DataMap::Entry x;
+  x.r = {10.0, 20.0, 30.0};
+  x.dims = {3};
+
+  auto evaluate = [&](bool probe) {
+    MirInterp<double> m(no_funs, "probe mode test");
+    m.env()["x"] = x;
+    std::optional<double> lo, hi;
+    for (long i = -1; i <= 5; ++i) {
+      DataMap::Entry iv;
+      iv.is_int = true;
+      iv.i = {static_cast<int>(i)};
+      iv.r = {static_cast<double>(i)};
+      m.env()["i"] = iv;
+      bool ok = true;
+      DataMap::Entry result;
+      if (probe) {
+        m.set_probe(true);
+        result = m.eval(expr);
+        if (m.probe_failed()) {
+          m.clear_probe_failed();
+          ok = false;
+        }
+        m.set_probe(false);
+      } else {
+        try {
+          result = m.eval(expr);
+        } catch (const std::exception&) {
+          ok = false;
+        }
+      }
+      if (ok && result.r.size() == 1) {
+        if (!lo) {
+          lo = hi = result.r[0];
+        } else {
+          lo = std::min(*lo, result.r[0]);
+          hi = std::max(*hi, result.r[0]);
+        }
+      }
+    }
+    return std::make_pair(lo, hi);
+  };
+
+  const auto with_throw = evaluate(false);
+  const auto with_probe = evaluate(true);
+  check(with_throw == with_probe,
+        "probe mode matches throw-and-catch over out-of-bounds indices");
+  check(with_throw.first.has_value() && *with_throw.first == 10.0 &&
+            *with_throw.second == 30.0,
+        "in-bounds combinations still contribute");
+
+  const mir::Expr unknown = var_expr("y", mir::UnsizedLeaf::Real);
+  MirInterp<double> probing(no_funs, "probe mode test");
+  probing.set_probe(true);
+  probing.eval(unknown);
+  check(probing.probe_failed(), "unresolved variable sets the probe flag");
+  probing.clear_probe_failed();
+
+  bool threw = false;
+  MirInterp<double> throwing(no_funs, "probe mode test");
+  try {
+    throwing.eval(unknown);
+  } catch (const std::exception&) {
+    threw = true;
+  }
+  check(threw, "the same expression still throws outside probe mode");
+}
+
 static std::string slurp(const char* path) {
   std::ifstream f(path);
   std::ostringstream ss;
@@ -1916,6 +2010,7 @@ int main(int argc, char** argv) {
 
   mir_checks::run();
   sexp_parser_checks();
+  probe_mode_tests();
 
   if (failures == 0) std::printf("test_mir OK\n");
   return failures == 0 ? 0 : 1;

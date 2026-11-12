@@ -362,6 +362,244 @@ static void check_tail_glms() {
                  std::numeric_limits<double>::infinity());
 }
 
+// Reverse replay must accumulate into an adjoint already written by a
+// later consumer in the same order as Stan's tape. Grouping the density's
+// two logit contributions before adding that existing 0.1 changes one bit.
+static void test_categorical_existing_adjoint() {
+  using namespace stanli;
+  Graph g;
+  const int beta = g.add_slot(3, true);
+  const int outcome = g.add_slot(1, false);
+  const int cat = g.add_slot(1, false);
+  const int cat_op = g.add_op(OP_CATEGORICAL, {outcome, beta}, cat);
+  g.ops[(size_t)cat_op].variant =
+      kCategoricalLogit | kCategoricalScalarOutcome | kCategoricalArgAutodiff;
+  const int beta0 = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {beta}, beta0, {0});
+  const int scale = g.add_slot(1, false);
+  const int linear = g.add_slot(1, false);
+  g.add_op(OP_MUL, {beta0, scale}, linear);
+  const int total = g.add_slot(1, false);
+  g.add_op(OP_ADD, {cat, linear}, total);
+  g.result_slot = total;
+
+  Executor ex(std::move(g));
+  std::fill(ex.params_data(), ex.params_data() + 3, -2.0);
+  ex.value_ptr(outcome)[0] = 1.0;
+  ex.value_ptr(scale)[0] = 0.1;
+  double got_grad[3];
+  const double got = ex.gradient(got_grad);
+
+  Eigen::Matrix<stan::math::var, -1, 1> ref_beta(3);
+  ref_beta << -2.0, -2.0, -2.0;
+  stan::math::var ref_cat =
+      stan::math::categorical_logit_lpmf<false>(1, ref_beta);
+  stan::math::var ref_linear = ref_beta(0) * 0.1;
+  stan::math::var ref = ref_cat + ref_linear;
+  ref.grad();
+  expect_eq("categorical existing-adjoint value", got, ref.val());
+  for (int i = 0; i < 3; ++i)
+    expect_eq("categorical existing-adjoint g" + std::to_string(i), got_grad[i],
+              ref_beta(i).adj());
+  stan::math::recover_memory();
+}
+
+// The native scalar probability rule has one selected reciprocal. Pin its
+// non-unit upstream seed, += into an adjoint a later consumer already
+// wrote, propto/type behavior, and value-only -> gradient reuse against the
+// exact Stan tape it replaces.
+static void test_categorical_native_scalar() {
+  using namespace stanli;
+  Graph g;
+  const int theta = g.add_slot(3, true);
+  const int outcome = g.add_slot(1, false);
+  const int cat = g.add_slot(1, false);
+  const int cat_op = g.add_op(OP_CATEGORICAL, {outcome, theta}, cat);
+  g.ops[(size_t)cat_op].variant =
+      kCategoricalScalarOutcome | kCategoricalArgAutodiff | 0x80u;
+  const int cat_scale = g.add_slot(1, false);
+  const int scaled_cat = g.add_slot(1, false);
+  g.add_op(OP_MUL, {cat, cat_scale}, scaled_cat);
+  const int selected = g.add_slot(1, false);
+  g.add_op(OP_INDEX, {theta}, selected, {1});
+  const int linear_scale = g.add_slot(1, false);
+  const int linear = g.add_slot(1, false);
+  g.add_op(OP_MUL, {selected, linear_scale}, linear);
+  const int total = g.add_slot(1, false);
+  g.add_op(OP_ADD, {scaled_cat, linear}, total);
+  g.result_slot = total;
+
+  Executor ex(std::move(g));
+  const double point[3] = {0.2, 0.7, 0.1};
+  std::copy(std::begin(point), std::end(point), ex.params_data());
+  ex.value_ptr(outcome)[0] = 2.0;
+  ex.value_ptr(cat_scale)[0] = 0.3;
+  ex.value_ptr(linear_scale)[0] = -0.2;
+  expect_eq("categorical native value-only propto", ex.forward_value_only(),
+            point[1] * -0.2);
+  double got_grad[3];
+  const double got = ex.gradient(got_grad);
+
+  Eigen::Matrix<stan::math::var, -1, 1> ref_theta(3);
+  ref_theta << point[0], point[1], point[2];
+  stan::math::var ref = stan::math::categorical_lpmf<true>(2, ref_theta) * 0.3 +
+                        ref_theta(1) * -0.2;
+  ref.grad();
+  expect_eq("categorical native scalar value", got, ref.val());
+  for (int i = 0; i < 3; ++i)
+    expect_eq("categorical native scalar g" + std::to_string(i), got_grad[i],
+              ref_theta(i).adj());
+  stan::math::recover_memory();
+}
+
+// Direct kernel edges for the same rule. A scalar categorical log only
+// connects the selected probability: an infinite seed must leave an
+// unselected signed zero untouched, while a zero seed over a selected zero
+// still follows the connected log edge and forms 0 / 0. Reusing the context
+// also pins that the native path carries no hidden scratch state.
+static void test_categorical_native_kernel_edges() {
+  using namespace stanli;
+  const Kernel* kernel = find_kernel(OP_CATEGORICAL);
+  expect_true("categorical native kernel registered", kernel != nullptr);
+  expect_true("categorical native kernel scratchless",
+              kernel && kernel->scratch_size == nullptr);
+  if (kernel) {
+    double outcome = 1.0;
+    double theta[2] = {1.0, 0.0};
+    double theta_adj[2] = {0.0, -0.0};
+    double out = 0.0;
+    KernelCtx ctx{};
+    ctx.n_in = 2;
+    ctx.in[0] = Desc{&outcome, 1};
+    ctx.in[1] = Desc{theta, 2};
+    ctx.in_adj[0] = Desc{nullptr, 1};
+    ctx.in_adj[1] = Desc{theta_adj, 2};
+    ctx.out = Desc{&out, 1};
+    ctx.variant = kCategoricalScalarOutcome | kCategoricalArgAutodiff | 0x80u;
+
+    kernel->forward(ctx);
+    ctx.out_adj = std::numeric_limits<double>::infinity();
+    kernel->backward(ctx);
+    expect_true("categorical native infinite selected adjoint",
+                std::isinf(theta_adj[0]) && theta_adj[0] > 0.0);
+    expect_true("categorical native unselected signed zero",
+                theta_adj[1] == 0.0 && std::signbit(theta_adj[1]));
+
+    theta[0] = 0.0;
+    theta[1] = 1.0;
+    theta_adj[0] = 0.0;
+    theta_adj[1] = -0.0;
+    kernel->forward(ctx);
+    expect_true("categorical native selected zero value",
+                std::isinf(out) && out < 0.0);
+    ctx.out_adj = 0.0;
+    kernel->backward(ctx);
+    expect_true("categorical native selected zero topology",
+                std::isnan(theta_adj[0]));
+    expect_true("categorical native repeated unselected zero",
+                theta_adj[1] == 0.0 && std::signbit(theta_adj[1]));
+
+    outcome = 2.0;
+    theta[0] = 0.2;
+    theta[1] = 0.8;
+    ctx.in_adj[1] = Desc{nullptr, 2};
+    kernel->forward(ctx);
+    expect_eq("categorical native null-adjoint value", out, std::log(0.8));
+    ctx.out_adj = 1.0;
+    kernel->backward(ctx);  // active source type, but no graph adjoint edge
+  }
+}
+
+// Scalar logits can bypass the var tape, but must retain the subtraction
+// and scalar-exp reverse order even for prefilled or signed-zero adjoints.
+static void test_categorical_logit_scalar_bits() {
+  using namespace stanli;
+  const Kernel* kernel = find_kernel(OP_CATEGORICAL);
+  const double inf = std::numeric_limits<double>::infinity();
+  const auto same_bits = [](double a, double b) {
+    return (std::isnan(a) && std::isnan(b)) ||
+           std::memcmp(&a, &b, sizeof(double)) == 0;
+  };
+  for (int n : {1, 2, 3, 8, 32})
+    for (int selected = 1; selected <= n; ++selected)
+      for (double scale : {0.0, 1.0, 1000.0, 1e308})
+        for (double weight : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308, inf})
+          for (bool propto : {false, true}) {
+            stan::math::nested_rev_autodiff nested;
+            Eigen::VectorXd beta(n), adj(n);
+            Eigen::Matrix<stan::math::var, -1, 1> ref_beta(n);
+            for (int i = 0; i < n; ++i) {
+              beta(i) = scale * std::sin(i + 1.0);
+              ref_beta(i) = beta(i);
+              adj(i) = i % 2 ? -0.0 : 0.3125;
+              ref_beta(i).adj() = adj(i);
+            }
+            double outcome = selected, out = 0;
+            KernelCtx ctx{};
+            ctx.n_in = 2;
+            ctx.in[0] = Desc{&outcome, 1};
+            ctx.in[1] = Desc{beta.data(), n};
+            ctx.in_adj[1] = Desc{adj.data(), n};
+            ctx.out = Desc{&out, 1};
+            ctx.out_adj = weight;
+            ctx.variant = kCategoricalScalarOutcome | kCategoricalLogit |
+                          kCategoricalArgAutodiff | (propto ? 0x80u : 0u);
+            kernel->forward(ctx);
+            kernel->backward(ctx);
+            stan::math::var lp =
+                propto ? stan::math::categorical_logit_lpmf<true>(selected,
+                                                                  ref_beta)
+                       : stan::math::categorical_logit_lpmf<false>(selected,
+                                                                   ref_beta);
+            stan::math::var ref = lp * weight;
+            stan::math::grad(ref.vi_);
+            expect_true("native scalar categorical logit value bits",
+                        same_bits(out * weight, ref.val()));
+            for (int i = 0; i < n; ++i)
+              expect_true("native scalar categorical logit gradient bits",
+                          same_bits(adj(i), ref_beta(i).adj()));
+          }
+}
+
+// Array outcomes add one callback contribution per observation. Preserve
+// that exact accumulation order under a non-unit upstream adjoint; replacing
+// it with count * adjoint changes the selected gradient's low bit. The zero
+// unselected probability also pins Stan Math's disconnected-log topology.
+static void test_categorical_array_scaled() {
+  using namespace stanli;
+  Graph g;
+  const int theta = g.add_slot(2, true);
+  const int outcomes = g.add_slot(6, false);
+  const int cat = g.add_slot(1, false);
+  const int cat_op = g.add_op(OP_CATEGORICAL, {outcomes, theta}, cat);
+  g.ops[(size_t)cat_op].variant = kCategoricalArgAutodiff;
+  const int scale = g.add_slot(1, false);
+  const int total = g.add_slot(1, false);
+  g.add_op(OP_MUL, {cat, scale}, total);
+  g.result_slot = total;
+
+  Executor ex(std::move(g));
+  ex.params_data()[0] = 1.0;
+  ex.params_data()[1] = 0.0;
+  std::fill(ex.value_ptr(outcomes), ex.value_ptr(outcomes) + 6, 1.0);
+  ex.value_ptr(scale)[0] = 0.1;
+  double got_grad[2];
+  const double got = ex.gradient(got_grad);
+
+  Eigen::Matrix<stan::math::var, -1, 1> ref_theta(2);
+  ref_theta << 1.0, 0.0;
+  const std::vector<int> ref_outcomes(6, 1);
+  stan::math::var ref =
+      stan::math::categorical_lpmf<false>(ref_outcomes, ref_theta) * 0.1;
+  ref.grad();
+  expect_eq("categorical array scaled value", got, ref.val());
+  expect_eq("categorical array scaled selected", got_grad[0],
+            ref_theta(0).adj());
+  expect_true("categorical array scaled unselected topology",
+              std::isnan(got_grad[1]) && std::isnan(ref_theta(1).adj()));
+  stan::math::recover_memory();
+}
+
 static void reference(const double* q, double* lp_out, double* grad_out) {
   using stan::math::var;
   using stanli::testmodels::LogisticGlm;
@@ -423,6 +661,12 @@ int main() {
   check_empty_glm(OP_BERNOULLI_LOGIT_GLM_LPMF, "bernoulli_logit_glm");
   check_empty_glm(OP_POISSON_LOG_GLM_LPMF, "poisson_log_glm");
   check_empty_glm(OP_NEG_BINOMIAL_2_LOG_GLM_LPMF, "neg_binomial_2_log_glm");
+
+  test_categorical_existing_adjoint();
+  test_categorical_native_scalar();
+  test_categorical_native_kernel_edges();
+  test_categorical_logit_scalar_bits();
+  test_categorical_array_scaled();
 
   return finish("test_glm");
 }
