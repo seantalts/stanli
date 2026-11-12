@@ -908,10 +908,10 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     int64_t added = 0, ops_out = 0, lane_elems = 0;
     for (int p = 0; p < k; ++p) {
       const Pos& ap = pos[(size_t)p];
-      for (const PosIn& in : ap.ins)
-        if (in.tile_wide) {
+      for (size_t j = 0; j < ap.ins.size(); ++j)
+        if (ap.ins[j].tile_wide) {
           ++ops_out;
-          added += L * ap.width;
+          added += L * g.slots[(size_t)op_at(p, 0).in[j]].len;
         }
       switch (ap.emit) {
         case Emit::kElide:
@@ -1013,12 +1013,13 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
       // always lane-major (an explicit index list or a lane-major base), so
       // this is the only mode a bucket ever needs.
       const auto tile_wide = [&](int base) {
+        const int64_t w = g.slots[(size_t)base].len;
         Op rep;
         rep.opcode = OP_REP_MAT;
         rep.n_in = 1;
         rep.in[0] = base;
-        rep.out = g.add_slot(L * ap.width, false);
-        attach_idata(rep, std::vector<int>{(int)ap.width, (int)L, 1});
+        rep.out = g.add_slot(L * w, false);
+        attach_idata(rep, std::vector<int>{(int)w, (int)L, 1});
         out_ops.push_back(rep);
         return rep.out;
       };

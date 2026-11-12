@@ -85,12 +85,12 @@ stanli::DataMap bound_check_data(int N = 1, int M = 1, int R = 1, int C = 1,
   return d;
 }
 
-std::map<std::string, stanli::DataMap::Entry> bound_check_env(
-    const stanli::DataMap& data) {
+// A WaInterp base environment: the listed data entries plus both emit flags.
+std::map<std::string, stanli::DataMap::Entry> emit_env(
+    const stanli::DataMap& data = stanli::DataMap(),
+    std::initializer_list<const char*> keys = {}) {
   std::map<std::string, stanli::DataMap::Entry> env;
-  for (const char* name :
-       {"d", "raw", "N", "M", "lo", "R", "C", "BR", "BC", "matrix_lo"})
-    env[name] = data.at(name);
+  for (const char* key : keys) env[key] = data.at(key);
   for (const char* flag :
        {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
     stanli::DataMap::Entry one;
@@ -102,11 +102,106 @@ std::map<std::string, stanli::DataMap::Entry> bound_check_env(
   return env;
 }
 
+std::map<std::string, stanli::DataMap::Entry> bound_check_env(
+    const stanli::DataMap& data) {
+  return emit_env(
+      data, {"d", "raw", "N", "M", "lo", "R", "C", "BR", "BC", "matrix_lo"});
+}
+
+std::vector<double> read_row(
+    const std::vector<stanli::CompiledModel::ParamView>& columns,
+    const stanli::Executor& ex) {
+  std::vector<double> row;
+  for (const auto& c : columns) {
+    const double* p = ex.value_ptr(c.slot);
+    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+  }
+  return row;
+}
+
+bool compiled_completely(const stanli::CompiledModel& cm,
+                         const std::string& what) {
+  if (cm.write_array && !cm.write_array->interp &&
+      cm.write_array->truncated.empty())
+    return true;
+  ++failures;
+  std::printf(
+      "FAIL %s did not compile completely: %s\n", what.c_str(),
+      cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+  return false;
+}
+
+// The mutated MIR must compile, and write_array must fall back to the
+// interpreter with `reason` (when non-empty) in its truncation note.
+bool expect_interpreted(const std::string& text, const stanli::DataMap& data,
+                        const std::string& reason, const std::string& what,
+                        stanli::CompiledModel* out = nullptr) {
+  stanli::CompiledModel cm;
+  try {
+    cm = stanli::compile_model(text, data);
+  } catch (const std::exception& e) {
+    ++failures;
+    std::printf("FAIL %s: mutation did not parse/compile: %s\n", what.c_str(),
+                e.what());
+    return false;
+  }
+  if (!cm.write_array || !cm.write_array->interp ||
+      (!reason.empty() &&
+       cm.write_array->truncated.find(reason) == std::string::npos)) {
+    ++failures;
+    std::printf(
+        "FAIL %s: got %s\n", what.c_str(),
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+    return false;
+  }
+  if (out) *out = std::move(cm);
+  return true;
+}
+
+void expect_compiled(const std::string& text, const stanli::DataMap& data,
+                     const std::string& what) {
+  try {
+    const stanli::CompiledModel cm = stanli::compile_model(text, data);
+    if (cm.write_array && !cm.write_array->interp &&
+        cm.write_array->truncated.empty())
+      return;
+    ++failures;
+    std::printf(
+        "FAIL %s: got %s\n", what.c_str(),
+        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+  } catch (const std::exception& e) {
+    ++failures;
+    std::printf("FAIL %s: did not compile: %s\n", what.c_str(), e.what());
+  }
+}
+
 bool same_double_bytes(const std::vector<double>& a,
                        const std::vector<double>& b) {
   return a.size() == b.size() &&
          (a.empty() ||
           std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0);
+}
+
+// Evaluates write_array at q on the graph and on its forced interpreter with
+// equal seeds; the rows must match bitwise. Returns the graph row.
+std::vector<double> cross_checked_row(const stanli::CompiledModel& cm,
+                                      stanli::Executor& pex,
+                                      stanli::Executor& wex,
+                                      const std::vector<double>& q,
+                                      unsigned seed, const std::string& what) {
+  std::copy(q.begin(), q.end(), pex.params_data());
+  pex.run_forward_only();
+  std::copy(q.begin(), q.end(), wex.params_data());
+  stanli::WaRng graph_rng(seed);
+  wex.run_forward_only(stanli::EvalState{&graph_rng});
+  std::vector<double> row = read_row(cm.write_array->columns, wex);
+  stanli::WaRng interp_rng(seed);
+  if (!same_double_bytes(row, cm.write_array->interp->eval(
+                                  cm.constrained_env(pex), interp_rng))) {
+    ++failures;
+    std::printf("FAIL %s: graph and interpreter rows differ\n", what.c_str());
+  }
+  return row;
 }
 
 std::string joined(const std::vector<stanli::CompiledModel::ParamView>& cols) {
@@ -227,15 +322,7 @@ void test_wanames_interpreter_schema() {
   auto prog = std::make_shared<mir::Program>(mir::read_program(
       sexp::parse(slurp("tests/fixtures/wanames.tmir.sexp"))));
 
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp wi(prog, std::move(base));
 
   std::map<std::string, DataMap::Entry> params;
@@ -346,15 +433,7 @@ void test_gq_name_shadowing() {
   // A stale three-wide `x` in the base environment must not widen the row.
   auto prog = std::make_shared<mir::Program>(mir::read_program(
       sexp::parse(slurp("tests/fixtures/gqshadow.tmir.sexp"))));
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   base["x"].r = {1.0, 1.0, 1.0};
   base["x"].dims = {3};
   WaInterp interpreted(prog, std::move(base));
@@ -374,24 +453,10 @@ void test_interpreted_gq() {
   data.set_int("N", 5);
   const std::string text = slurp("tests/fixtures/gqrng.tmir.sexp");
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf("FAIL gqrng: runtime branch did not compile completely\n");
-    return;
-  }
+  if (!compiled_completely(cm, "gqrng")) return;
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  base["N"] = data.at("N");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"N"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry sig;
@@ -451,14 +516,7 @@ void test_compiled_extra_rng() {
   data.set_int("N", 10);
   const std::string text = slurp("tests/fixtures/gqrng_extra.tmir.sexp");
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL gqrng_extra did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "gqrng_extra")) return;
   expect_eq("gqrng_extra columns", joined(cm.write_array->columns),
             "sigma,g,d.1,d.2,d.3,bb");
 
@@ -467,26 +525,12 @@ void test_compiled_extra_rng() {
   wex.params_data()[0] = std::log(1.3);  // sigma's unconstrained log_sd form
   const auto graph_row = [&](WaRng& rng) {
     wex.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& c : cm.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, wex);
   };
 
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  base["N"] = data.at("N");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"N"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry sig;
@@ -542,14 +586,7 @@ void test_compiled_region_rng() {
   data.set_int("K", 3);
   const std::string text = slurp("tests/fixtures/gqrngregion.tmir.sexp");
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL gqrngregion did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "gqrngregion")) return;
   expect_eq("gqrngregion columns", joined(cm.write_array->columns),
             "sigma,e,n,d.1,d.2,d.3,mn.1,mn.2,mn.3,i");
 
@@ -559,24 +596,11 @@ void test_compiled_region_rng() {
   wex.params_data()[0] = std::log(sigma);  // sigma's unconstrained form
   WaRng graph_rng(11);
   wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row;
-  for (const auto& c : cm.write_array->columns) {
-    const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-  }
+  std::vector<double> row = read_row(cm.write_array->columns, wex);
 
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  base["K"] = data.at("K");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"K"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry sig;
@@ -632,25 +656,13 @@ void test_region_rng_is_not_folded() {
   DataMap data = DataMap::from_json_file("tests/fixtures/gqrngfold.json");
   const std::string text = slurp("tests/fixtures/gqrngfold.tmir.sexp");
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL gqrngfold did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "gqrngfold")) return;
   Executor wex(std::move(cm.write_array->graph));
   cm.write_array->bind(wex);
   WaRng rng(5);
   const auto draw_row = [&]() {
     wex.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& c : cm.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, wex);
   };
   const std::vector<double> first = draw_row();
   const std::vector<double> second = draw_row();
@@ -690,17 +702,8 @@ void test_interpreted_gq_densities() {
   }
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* key : {"K", "counts", "y", "Sigma"})
-    base[key] = data.at(key);
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base =
+      emit_env(data, {"K", "counts", "y", "Sigma"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry mu;
@@ -739,15 +742,7 @@ void test_interpreted_gq_gp_covariances() {
   const std::string text = slurp("tests/fixtures/gpmatern.tmir.sexp");
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp wi(program, std::move(base));
 
   std::vector<Eigen::VectorXd> pts(3, Eigen::VectorXd(2));
@@ -800,14 +795,7 @@ void test_compiled_multiply_lower_tri() {
   data.set_int("M", 3);
   const std::string text = slurp("tests/fixtures/mlt.tmir.sexp");
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL mlt did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "mlt")) return;
   // Column-major A with a non-zero upper triangle that must be ignored.
   const double a[9] = {1.0, 0.4, -0.2, 5.0, 2.0, 0.7, 9.0, 8.0, 3.0};
 
@@ -816,24 +804,11 @@ void test_compiled_multiply_lower_tri() {
   std::copy(a, a + 9, wex.params_data());
   WaRng graph_rng(3);
   wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row;
-  for (const auto& c : cm.write_array->columns) {
-    const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-  }
+  std::vector<double> row = read_row(cm.write_array->columns, wex);
 
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  base["M"] = data.at("M");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"M"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry A;
@@ -927,16 +902,7 @@ void test_array_of_matrix_columns() {
   // boundary rejected outright.
   auto prog = std::make_shared<mir::Program>(
       mir::read_program(sexp::parse(slurp("tests/fixtures/amatwa.tmir.sexp"))));
-  std::map<std::string, DataMap::Entry> base;
-  base["d"] = data.at("d");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"d"});
   WaInterp interpreted(prog, std::move(base));
   WaRng rng(1234);
   const std::vector<double> interpreted_values =
@@ -970,16 +936,7 @@ void test_caller_owned_rng() {
   data.set_int("N", 5);
   auto program = std::make_shared<mir::Program>(
       mir::read_program(sexp::parse(slurp("tests/fixtures/gqrng.tmir.sexp"))));
-  std::map<std::string, DataMap::Entry> base;
-  base["N"] = data.at("N");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"N"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry sig;
@@ -1011,36 +968,6 @@ void test_caller_owned_rng() {
   if (c1[1] == a1[1]) {
     ++failures;
     std::printf("FAIL caller-owned rng: seed 43 matched seed 42\n");
-  }
-}
-
-// WaRng is the BridgeStan-compatible public stream: it must track Stan's
-// current rng_t and its create_rng(seed, chain=0) seeding convention. This
-// catches the historical drift where sampling moved to mixmax but generated
-// quantities silently stayed on ecuyer1988.
-void test_stan_rng_stream_contract() {
-  using namespace stanli;
-  constexpr unsigned seed = 1234;
-  for (const unsigned chain : {0u, 1u, 17u}) {
-    WaRng got(seed, chain);
-    stan::rng_t want = stan::services::util::create_rng(seed, chain);
-    for (int i = 0; i < 32; ++i) {
-      if (got.gen()() != want()) {
-        ++failures;
-        std::printf(
-            "FAIL WaRng does not match Stan rng_t at chain %u draw %d\n", chain,
-            i);
-        return;
-      }
-    }
-    got.seed(seed, chain);
-    want = stan::services::util::create_rng(seed, chain);
-    if (got.gen()() != want()) {
-      ++failures;
-      std::printf(
-          "FAIL WaRng reseed does not match Stan create_rng at chain %u\n",
-          chain);
-    }
   }
 }
 
@@ -1149,45 +1076,35 @@ const stanli::StructuredLoop* find_retained_loop(const stanli::Graph& g) {
 }
 }  // namespace
 
-// A data-bounded for loop, large enough that one iteration's if/else island
-// alone exceeds mir_prog.hpp's register cap, computes a transformed
-// parameter vector in the model log_prob already retains as OP_LOOP under
-// the default automatic policy. write_array has to retain the same loop
-// rather than fall back to the per-draw interpreter.
-void test_write_array_retained_loop() {
+// write_array retains the same data-bounded loop log_prob retains as
+// OP_LOOP, and its rows match the forced interpreter at three points.
+void expect_retained_write_array_loop(const std::string& stem,
+                                      const stanli::DataMap& data) {
   using namespace stanli;
-  const int n = 32;
-  DataMap data;
-  data.set_int("N", n);
-  std::vector<double> y(static_cast<size_t>(n));
-  for (int i = 0; i < n; ++i)
-    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
-  data.set_real_array("y", y);
-  const std::string text =
-      slurp("tests/fixtures/structured_wa_region.tmir.sexp");
+  const std::string text = slurp("tests/fixtures/" + stem + ".tmir.sexp");
 
   CompiledModel cm = compile_model(text, data);
   if (find_retained_loop(cm.graph) == nullptr) {
     ++failures;
     std::printf(
-        "FAIL structured_wa_region: log_prob did not retain the "
-        "transformed-parameter loop\n");
+        "FAIL %s: log_prob did not retain the transformed-parameter loop\n",
+        stem.c_str());
   }
   if (!cm.write_array) {
     ++failures;
-    std::printf("FAIL structured_wa_region: no write_array\n");
+    std::printf("FAIL %s: no write_array\n", stem.c_str());
     return;
   }
   if (!cm.write_array->truncated.empty()) {
     ++failures;
-    std::printf("FAIL structured_wa_region write_array truncated: %s\n",
+    std::printf("FAIL %s write_array truncated: %s\n", stem.c_str(),
                 cm.write_array->truncated.c_str());
   }
   if (find_retained_loop(cm.write_array->graph) == nullptr) {
     ++failures;
     std::printf(
-        "FAIL structured_wa_region: write_array did not lower the loop as a "
-        "retained region\n");
+        "FAIL %s: write_array did not lower the loop as a retained region\n",
+        stem.c_str());
   }
 
   test_setenv("STANLI_WA_FORCE_INTERP", "1");
@@ -1195,8 +1112,8 @@ void test_write_array_retained_loop() {
   test_unsetenv("STANLI_WA_FORCE_INTERP");
   if (!cross.write_array || !cross.write_array->interp) {
     ++failures;
-    std::printf(
-        "FAIL structured_wa_region: no interpreter attached for cross-check\n");
+    std::printf("FAIL %s: no interpreter attached for cross-check\n",
+                stem.c_str());
     return;
   }
 
@@ -1205,33 +1122,33 @@ void test_write_array_retained_loop() {
   Executor wex(std::move(cross.write_array->graph));
   cross.write_array->bind(wex);
 
-  const std::vector<double> mus = {1.3, -0.7, 0.05};
   std::vector<std::vector<double>> graph_rows;
-  for (double mu : mus) {
-    pex.params_data()[0] = mu;
-    pex.run_forward_only();
-    wex.params_data()[0] = mu;
-    WaRng graph_rng(7);
-    wex.run_forward_only(EvalState{&graph_rng});
-    std::vector<double> row;
-    for (const auto& c : cross.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
-    WaRng interp_rng(7);
-    const std::vector<double> interp_row =
-        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
-    if (!same_double_bytes(row, interp_row)) {
-      ++failures;
-      std::printf(
-          "FAIL structured_wa_region: graph/interp rows differ at mu=%g\n", mu);
-    }
-    graph_rows.push_back(std::move(row));
-  }
+  for (double mu : {1.3, -0.7, 0.05})
+    graph_rows.push_back(cross_checked_row(
+        cross, pex, wex, {mu}, 7, stem + " at mu=" + std::to_string(mu)));
   if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
     ++failures;
-    std::printf("FAIL structured_wa_region: draws did not vary\n");
+    std::printf("FAIL %s: draws did not vary\n", stem.c_str());
   }
+}
+
+stanli::DataMap alternating_y(int n) {
+  stanli::DataMap data;
+  data.set_int("N", n);
+  std::vector<double> y(static_cast<size_t>(n));
+  for (int i = 0; i < n; ++i)
+    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
+  data.set_real_array("y", y);
+  return data;
+}
+
+// A data-bounded for loop, large enough that one iteration's if/else island
+// alone exceeds mir_prog.hpp's register cap, computes a transformed
+// parameter vector in the model log_prob already retains as OP_LOOP under
+// the default automatic policy. write_array has to retain the same loop
+// rather than fall back to the per-draw interpreter.
+void test_write_array_retained_loop() {
+  expect_retained_write_array_loop("structured_wa_region", alternating_y(32));
 }
 
 // A loop that carries a value from one iteration to the next is retained in
@@ -1307,88 +1224,10 @@ void test_write_array_carried_loop() {
 // sibling forced the whole block through one register-program island
 // before write_array tried the loop as its own region.
 void test_write_array_block_order() {
-  using namespace stanli;
-  const int n = 32;
-  DataMap data;
-  data.set_int("N", n);
+  stanli::DataMap data = alternating_y(32);
   data.set_int("lim", 3);
-  std::vector<double> y(static_cast<size_t>(n));
-  for (int i = 0; i < n; ++i)
-    y[static_cast<size_t>(i)] = (i % 2 == 0) ? 1.5 : -1.5;
-  data.set_real_array("y", y);
   data.set_int_array("whenmat", std::vector<int>(40, 1), {8, 5});
-  const std::string text =
-      slurp("tests/fixtures/structured_wa_block_order.tmir.sexp");
-
-  CompiledModel cm = compile_model(text, data);
-  if (find_retained_loop(cm.graph) == nullptr) {
-    ++failures;
-    std::printf(
-        "FAIL structured_wa_block_order: log_prob did not retain the "
-        "transformed-parameter loop\n");
-  }
-  if (!cm.write_array) {
-    ++failures;
-    std::printf("FAIL structured_wa_block_order: no write_array\n");
-    return;
-  }
-  if (!cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf("FAIL structured_wa_block_order write_array truncated: %s\n",
-                cm.write_array->truncated.c_str());
-  }
-  if (find_retained_loop(cm.write_array->graph) == nullptr) {
-    ++failures;
-    std::printf(
-        "FAIL structured_wa_block_order: write_array did not lower the loop "
-        "as a retained region\n");
-  }
-
-  test_setenv("STANLI_WA_FORCE_INTERP", "1");
-  CompiledModel cross = compile_model(text, data);
-  test_unsetenv("STANLI_WA_FORCE_INTERP");
-  if (!cross.write_array || !cross.write_array->interp) {
-    ++failures;
-    std::printf(
-        "FAIL structured_wa_block_order: no interpreter attached for "
-        "cross-check\n");
-    return;
-  }
-
-  Executor pex(cross.graph);
-  cross.bind(pex);
-  Executor wex(std::move(cross.write_array->graph));
-  cross.write_array->bind(wex);
-
-  const std::vector<double> mus = {1.3, -0.7, 0.05};
-  std::vector<std::vector<double>> graph_rows;
-  for (double mu : mus) {
-    pex.params_data()[0] = mu;
-    pex.run_forward_only();
-    wex.params_data()[0] = mu;
-    WaRng graph_rng(7);
-    wex.run_forward_only(EvalState{&graph_rng});
-    std::vector<double> row;
-    for (const auto& c : cross.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
-    WaRng interp_rng(7);
-    const std::vector<double> interp_row =
-        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
-    if (!same_double_bytes(row, interp_row)) {
-      ++failures;
-      std::printf(
-          "FAIL structured_wa_block_order: graph/interp rows differ at "
-          "mu=%g\n",
-          mu);
-    }
-    graph_rows.push_back(std::move(row));
-  }
-  if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
-    ++failures;
-    std::printf("FAIL structured_wa_block_order: draws did not vary\n");
-  }
+  expect_retained_write_array_loop("structured_wa_block_order", data);
 }
 
 // normal_rng(vector, vector) and normal_rng(vector, real) both return
@@ -1403,26 +1242,13 @@ void test_write_array_vector_rng() {
   const std::string text = slurp("tests/fixtures/gqrng_vector.tmir.sexp");
 
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL gqrng_vector did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  }
+  compiled_completely(cm, "gqrng_vector");
 
   test_setenv("STANLI_STRUCTURED_LOOPS", "0");
   CompiledModel cm_no_loops = compile_model(text, data);
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
-  if (!cm_no_loops.write_array || cm_no_loops.write_array->interp ||
-      !cm_no_loops.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL gqrng_vector with STANLI_STRUCTURED_LOOPS=0 did not compile "
-        "completely: %s\n",
-        cm_no_loops.write_array ? cm_no_loops.write_array->truncated.c_str()
-                                : "no write_array");
-  }
+  compiled_completely(cm_no_loops,
+                      "gqrng_vector with STANLI_STRUCTURED_LOOPS=0");
 
   test_setenv("STANLI_WA_FORCE_INTERP", "1");
   CompiledModel cross = compile_model(text, data);
@@ -1440,29 +1266,12 @@ void test_write_array_vector_rng() {
 
   std::vector<std::vector<double>> graph_rows;
   for (int draw = 0; draw < 3; ++draw) {
-    for (int64_t j = 0; j < pex.n_params(); ++j)
-      pex.params_data()[j] =
-          0.2 * static_cast<double>(draw + 1) + 0.1 * static_cast<double>(j);
-    pex.run_forward_only();
-    for (int64_t j = 0; j < wex.n_params(); ++j)
-      wex.params_data()[j] =
-          0.2 * static_cast<double>(draw + 1) + 0.1 * static_cast<double>(j);
-    WaRng graph_rng(11 + draw);
-    wex.run_forward_only(EvalState{&graph_rng});
-    std::vector<double> row;
-    for (const auto& c : cross.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
-    WaRng interp_rng(11 + draw);
-    const std::vector<double> interp_row =
-        cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
-    if (!same_double_bytes(row, interp_row)) {
-      ++failures;
-      std::printf("FAIL gqrng_vector: graph/interp rows differ at draw %d\n",
-                  draw);
-    }
-    graph_rows.push_back(std::move(row));
+    std::vector<double> q(static_cast<size_t>(pex.n_params()));
+    for (size_t j = 0; j < q.size(); ++j)
+      q[j] = 0.2 * static_cast<double>(draw + 1) + 0.1 * static_cast<double>(j);
+    graph_rows.push_back(
+        cross_checked_row(cross, pex, wex, q, 11 + draw,
+                          "gqrng_vector draw " + std::to_string(draw)));
   }
   if (graph_rows[0] == graph_rows[1] || graph_rows[1] == graph_rows[2]) {
     ++failures;
@@ -1781,24 +1590,7 @@ void test_write_array_selected_loop_refused() {
   cross.bind(pex);
   Executor wex(std::move(cross.write_array->graph));
   cross.write_array->bind(wex);
-  pex.params_data()[0] = 0.4;
-  pex.run_forward_only();
-  wex.params_data()[0] = 0.4;
-  WaRng graph_rng(9);
-  wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row;
-  for (const auto& c : cross.write_array->columns) {
-    const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-  }
-  WaRng interp_rng(9);
-  const std::vector<double> interp_row =
-      cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
-  if (!same_double_bytes(row, interp_row)) {
-    ++failures;
-    std::printf(
-        "FAIL gq_selected_loop_refused: graph and interpreter rows differ\n");
-  }
+  cross_checked_row(cross, pex, wex, {0.4}, 9, "gq_selected_loop_refused");
 }
 
 // The same shape, but the refused loop's body also declares a
@@ -1861,97 +1653,14 @@ void test_constant_folded_gq_column() {
 
   Executor pex(cm.graph);
   cm.bind(pex);
-  pex.params_data()[0] = 0.25;
-  pex.run_forward_only();
-
   Executor wex(std::move(cm.write_array->graph));
   cm.write_array->bind(wex);
-  wex.params_data()[0] = 0.25;
-  WaRng graph_rng(1);
-  wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row;
-  for (const auto& c : cm.write_array->columns) {
-    const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-  }
-  WaRng interp_rng(1);
-  const std::vector<double> interp_row =
-      cm.write_array->interp->eval(cm.constrained_env(pex), interp_rng);
-  if (!same_double_bytes(row, interp_row)) {
-    ++failures;
-    std::printf("FAIL gqconst: graph and interpreter rows differ\n");
-  }
+  const std::vector<double> row =
+      cross_checked_row(cm, pex, wex, {0.25}, 1, "gqconst");
   if (row.size() != 4 || row[0] != 0.25 || row[1] != 3.0 || row[2] != 1.0 ||
       row[3] != 5.0) {
     ++failures;
     std::printf("FAIL gqconst row: got %zu values\n", row.size());
-  }
-}
-
-// Keep the shared helper a transparent call into Stan Math. In particular,
-// endpoint results must not become shortcuts: Stan Math owns validation and
-// however much of the engine it consumes, including at N=0 and p in {0,1}.
-void test_binomial_rng_helper_contract() {
-  using namespace stanli;
-  const auto helper_draw = [](int n, double p, WaRng& rng) {
-    const double args[] = {static_cast<double>(n), p};
-    return scalar_rng_draw(ScalarRng::Binomial, args, 2, rng);
-  };
-  const auto next = [](WaRng& rng) {
-    return stan::math::uniform_rng(0.0, 1.0, rng.gen());
-  };
-
-  struct ValidCase {
-    int n;
-    double p;
-  };
-  const ValidCase valid[] = {
-      {0, 0.0}, {0, 0.37}, {0, 1.0},  {9, -0.0},   {9, 0.0},
-      {9, 1.0}, {20, 0.5}, {21, 0.5}, {100, 0.49}, {100, 0.51},
-  };
-  for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i) {
-    WaRng got_rng(static_cast<unsigned>(101 + i));
-    WaRng want_rng(static_cast<unsigned>(101 + i));
-    const double got = helper_draw(valid[i].n, valid[i].p, got_rng);
-    const double want = static_cast<double>(
-        stan::math::binomial_rng(valid[i].n, valid[i].p, want_rng.gen()));
-    if (got != want || next(got_rng) != next(want_rng)) {
-      ++failures;
-      std::printf("FAIL binomial helper valid case %zu\n", i);
-    }
-  }
-
-  // Both-invalid cases pin Stan Math's validation priority. The remaining
-  // cases cover finite values just outside the interval, NaN, and infinities.
-  const ValidCase invalid[] = {
-      {-1, 0.4},
-      {-1, -0.2},
-      {4, -0.1},
-      {4, std::nextafter(1.0, std::numeric_limits<double>::infinity())},
-      {4, std::numeric_limits<double>::quiet_NaN()},
-      {4, std::numeric_limits<double>::infinity()},
-      {4, -std::numeric_limits<double>::infinity()},
-  };
-  for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
-    WaRng got_rng(static_cast<unsigned>(211 + i));
-    WaRng want_rng(static_cast<unsigned>(211 + i));
-    std::string got_message, want_message;
-    try {
-      (void)helper_draw(invalid[i].n, invalid[i].p, got_rng);
-    } catch (const std::domain_error& e) {
-      got_message = e.what();
-    }
-    try {
-      (void)stan::math::binomial_rng(invalid[i].n, invalid[i].p,
-                                     want_rng.gen());
-    } catch (const std::domain_error& e) {
-      want_message = e.what();
-    }
-    if (got_message.empty() || got_message != want_message ||
-        next(got_rng) != next(want_rng)) {
-      ++failures;
-      std::printf("FAIL binomial helper invalid case %zu\n", i);
-    }
   }
 }
 
@@ -2010,192 +1719,6 @@ static std::vector<double> direct_multi_normal_rng(
   return std::vector<double>(draw.data(), draw.data() + draw.size());
 }
 
-// categorical_rng is unusual in this opcode family: one logical argument is
-// a variable-length vector, while the result is still one Stan int. Keep the
-// shared helper byte-for-byte on Stan Math's validation and engine schedule.
-void test_categorical_rng_helper_contract() {
-  using namespace stanli;
-  const std::vector<std::vector<double>> valid = {
-      {1.0},
-      {0.0, 1.0, 0.0},
-      {-0.0, 0.0, 1.0},
-      {0.125, 0.25, 0.375, 0.25},
-      {0.5, 0.5, 0.0},
-      {1.0 + 5e-9},  // inside Stan Math's simplex tolerance
-  };
-  for (size_t c = 0; c < valid.size(); ++c) {
-    for (unsigned seed : {1u, 17u, 2026u}) {
-      WaRng got_rng(seed + static_cast<unsigned>(c));
-      WaRng want_rng(seed + static_cast<unsigned>(c));
-      const int got =
-          vector_integer_rng_draw(valid[c].data(), valid[c].size(), got_rng);
-      const int want = stan::math::categorical_rng(categorical_theta(valid[c]),
-                                                   want_rng.gen());
-      const auto got_next = got_rng.gen()();
-      const auto want_next = want_rng.gen()();
-      if (got != want || got_next != want_next) {
-        ++failures;
-        std::printf("FAIL categorical helper valid case %zu seed %u\n", c,
-                    seed);
-      }
-    }
-  }
-
-  // Sum validation precedes the element scan in check_simplex. The two
-  // negative cases distinguish those paths; empty also pins invalid_argument
-  // rather than domain_error. No rejected input may advance the stream.
-  const std::vector<std::vector<double>> invalid = {
-      {},
-      {0.0},
-      {0.2, 0.2},
-      {1.0, -0.25, 0.25},
-      {1.0, -0.25, 0.5},
-      {std::numeric_limits<double>::quiet_NaN()},
-      {std::numeric_limits<double>::infinity()},
-  };
-  for (size_t c = 0; c < invalid.size(); ++c) {
-    WaRng got_rng(static_cast<unsigned>(401 + c));
-    WaRng want_rng(static_cast<unsigned>(401 + c));
-    const RngException got = capture_rng_exception([&] {
-      (void)vector_integer_rng_draw(
-          invalid[c].empty() ? nullptr : invalid[c].data(), invalid[c].size(),
-          got_rng);
-    });
-    const RngException want = capture_rng_exception([&] {
-      (void)stan::math::categorical_rng(categorical_theta(invalid[c]),
-                                        want_rng.gen());
-    });
-    const auto got_next = got_rng.gen()();
-    const auto want_next = want_rng.gen()();
-    if (got.kind == 0 || got.kind != want.kind || got.message != want.message ||
-        got_next != want_next) {
-      ++failures;
-      std::printf("FAIL categorical helper invalid case %zu\n", c);
-    }
-  }
-
-  // This is the graph/helper ABI guard, not a Stan language input: a nonempty
-  // descriptor must carry storage. It must fail before touching the engine.
-  WaRng malformed(991), untouched(991);
-  const RngException null_input = capture_rng_exception(
-      [&] { (void)vector_integer_rng_draw(nullptr, 1, malformed); });
-  if (null_input.kind != 3 || malformed.gen()() != untouched.gen()()) {
-    ++failures;
-    std::printf("FAIL categorical helper malformed pointer contract\n");
-  }
-}
-
-void test_multi_normal_rng_helper_contract() {
-  using namespace stanli;
-  struct Valid {
-    std::vector<double> mu;
-    std::vector<double> covariance;
-  };
-  const Valid valid[] = {
-      {{-0.25}, {1.75}},
-      {{0.5, -1.25}, {1.69, 0.364, 0.364, 0.64}},
-      {{0.25, -0.5, 1.75}, {2.0, 0.25, -0.4, 0.25, 1.5, 0.3, -0.4, 0.3, 1.25}},
-  };
-  for (size_t c = 0; c < sizeof(valid) / sizeof(valid[0]); ++c) {
-    for (unsigned seed : {1u, 29u, 2026u}) {
-      const size_t k = valid[c].mu.size();
-      std::vector<double> got(k);
-      WaRng got_rng(seed + static_cast<unsigned>(c));
-      WaRng want_rng(seed + static_cast<unsigned>(c));
-      multi_normal_rng_draw(valid[c].mu.data(), k, valid[c].covariance.data(),
-                            valid[c].covariance.size(), k, k, got.data(),
-                            got.size(), got_rng);
-      const std::vector<double> want = direct_multi_normal_rng(
-          valid[c].mu, valid[c].covariance, k, k, want_rng);
-      if (!same_double_bytes(got, want) ||
-          got_rng.gen()() != want_rng.gen()()) {
-        ++failures;
-        std::printf("FAIL multi-normal helper valid case %zu seed %u\n", c,
-                    seed);
-      }
-    }
-  }
-
-  const double nan = std::numeric_limits<double>::quiet_NaN();
-  const double inf = std::numeric_limits<double>::infinity();
-  struct Invalid {
-    std::vector<double> mu;
-    std::vector<double> covariance;
-    size_t rows;
-    size_t cols;
-    const char* label;
-  };
-  // The asymmetric case uses four distinct column-major positions. Its Stan
-  // message names both off-diagonal values, catching a transposed rebuild.
-  const Invalid invalid[] = {
-      {{nan, 0.0}, {1.0, 0.0, 0.0, 1.0}, 2, 2, "NaN mean"},
-      {{inf, 0.0}, {1.0, 0.0, 0.0, 1.0}, 2, 2, "infinite mean"},
-      {{0.0, 0.0}, {1.0, 0.0, nan, 1.0}, 2, 2, "NaN covariance"},
-      {{0.0, 0.0}, {1.25, 0.75, 0.125, 0.8}, 2, 2, "asymmetric covariance"},
-      {{0.0, 0.0}, {1.0, 2.0, 2.0, 1.0}, 2, 2, "non-PD covariance"},
-      {{0.0, 0.0}, {1.0, 0.0, 0.0, 1.0}, 1, 4, "dimension mismatch"},
-      {{}, {}, 0, 0, "empty covariance"},
-  };
-  for (size_t c = 0; c < sizeof(invalid) / sizeof(invalid[0]); ++c) {
-    std::vector<double> got(invalid[c].mu.size());
-    WaRng got_rng(static_cast<unsigned>(501 + c));
-    WaRng want_rng(static_cast<unsigned>(501 + c));
-    const RngException got_error = capture_rng_exception([&] {
-      multi_normal_rng_draw(invalid[c].mu.data(), invalid[c].mu.size(),
-                            invalid[c].covariance.data(),
-                            invalid[c].covariance.size(), invalid[c].rows,
-                            invalid[c].cols, got.data(), got.size(), got_rng);
-    });
-    const RngException want_error = capture_rng_exception([&] {
-      (void)direct_multi_normal_rng(invalid[c].mu, invalid[c].covariance,
-                                    invalid[c].rows, invalid[c].cols, want_rng);
-    });
-    if (got_error.kind == 0 || got_error.kind != want_error.kind ||
-        got_error.message != want_error.message ||
-        got_rng.gen()() != want_rng.gen()()) {
-      ++failures;
-      std::printf("FAIL multi-normal helper %s contract\n", invalid[c].label);
-    }
-  }
-
-  const std::vector<double> mu{0.5, -1.25};
-  const std::vector<double> covariance{1.69, 0.364, 0.364, 0.64};
-  std::vector<double> output(2);
-  WaRng malformed(991), untouched(991);
-  const RngException mismatch = capture_rng_exception([&] {
-    multi_normal_rng_draw(mu.data(), mu.size(), covariance.data(),
-                          covariance.size(), 1, 3, output.data(), output.size(),
-                          malformed);
-  });
-  const RngException null_location = capture_rng_exception([&] {
-    multi_normal_rng_draw(nullptr, mu.size(), covariance.data(),
-                          covariance.size(), 2, 2, output.data(), output.size(),
-                          malformed);
-  });
-  if (mismatch.kind != 3 || null_location.kind != 3 ||
-      malformed.gen()() != untouched.gen()()) {
-    ++failures;
-    std::printf("FAIL multi-normal malformed helper contract\n");
-  }
-
-  // A rejected helper call is reusable at the exact untouched draw.
-  WaRng recovered(811), direct(811);
-  std::vector<double> recovered_draw(2);
-  (void)capture_rng_exception([&] {
-    const std::vector<double> bad{1.0, 2.0, 2.0, 1.0};
-    multi_normal_rng_draw(mu.data(), 2, bad.data(), 4, 2, 2,
-                          recovered_draw.data(), 2, recovered);
-  });
-  multi_normal_rng_draw(mu.data(), 2, covariance.data(), 4, 2, 2,
-                        recovered_draw.data(), 2, recovered);
-  const std::vector<double> direct_draw =
-      direct_multi_normal_rng(mu, covariance, 2, 2, direct);
-  if (recovered_draw != direct_draw || recovered.gen()() != direct.gen()()) {
-    ++failures;
-    std::printf("FAIL multi-normal helper rejected-call reuse\n");
-  }
-}
-
 void test_categorical_rng_lowering_guards() {
   using namespace stanli;
   const std::string base = slurp("tests/fixtures/gq_categorical_rng.tmir.sexp");
@@ -2210,24 +1733,11 @@ void test_categorical_rng_lowering_guards() {
     return;
   }
 
-  const auto expect_interp = [](const std::string& mir,
-                                const std::string& reason, const char* what) {
-    DataMap data;
-    data.set_int("K", 4);
-    try {
-      CompiledModel cm = compile_model(mir, data);
-      if (!cm.write_array || !cm.write_array->interp ||
-          cm.write_array->truncated.find(reason) == std::string::npos) {
-        ++failures;
-        std::printf("FAIL %s: got %s\n", what,
-                    cm.write_array ? cm.write_array->truncated.c_str()
-                                   : "no write_array");
-      }
-    } catch (const std::exception& e) {
-      ++failures;
-      std::printf("FAIL %s: mutation did not parse/compile: %s\n", what,
-                  e.what());
-    }
+  DataMap guard_data;
+  guard_data.set_int("K", 4);
+  const auto expect_interp = [&](const std::string& mir,
+                                 const std::string& reason, const char* what) {
+    expect_interpreted(mir, guard_data, reason, what);
   };
 
   struct BadArgument {
@@ -2285,14 +1795,7 @@ void test_categorical_rng_lowering_guards() {
   DataMap logit_data;
   logit_data.set_int("K", 4);
   CompiledModel logit_cm = compile_model(logit, logit_data);
-  if (!logit_cm.write_array || logit_cm.write_array->interp ||
-      !logit_cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf("FAIL categorical_logit_rng did not lower natively: %s\n",
-                logit_cm.write_array ? logit_cm.write_array->truncated.c_str()
-                                     : "no write_array");
-    return;
-  }
+  if (!compiled_completely(logit_cm, "categorical_logit_rng")) return;
 
   Executor logit_graph(std::move(logit_cm.write_array->graph));
   logit_cm.write_array->bind(logit_graph);
@@ -2323,17 +1826,7 @@ static stanli::DataMap categorical_data(int k) {
 
 static std::map<std::string, stanli::DataMap::Entry> categorical_base(
     const stanli::DataMap& data) {
-  std::map<std::string, stanli::DataMap::Entry> base;
-  base["K"] = data.at("K");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    stanli::DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
-  return base;
+  return emit_env(data, {"K"});
 }
 
 static stanli::DataMap::Entry categorical_parameter(
@@ -2359,14 +1852,7 @@ void test_compiled_categorical_rng() {
   const std::string text = slurp("tests/fixtures/gq_categorical_rng.tmir.sexp");
   const DataMap data = categorical_data(4);
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL categorical rng: write_array did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "categorical rng")) return;
 
   int categorical_ops = 0, uniform_ops = 0, other_rng_ops = 0;
   for (const Op& op : cm.write_array->graph.ops) {
@@ -2401,13 +1887,7 @@ void test_compiled_categorical_rng() {
   };
   const auto graph_row = [&](WaRng& rng) {
     graph.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& column : cm.write_array->columns) {
-      const double* values = graph.value_ptr(column.slot);
-      for (int64_t i = 0; i < column.len; ++i)
-        row.push_back(values[column.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, graph);
   };
 
   auto program =
@@ -2498,14 +1978,7 @@ void test_categorical_rng_empty_vector() {
   const std::string text = slurp("tests/fixtures/gq_categorical_rng.tmir.sexp");
   const DataMap data = categorical_data(0);
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL empty categorical vector did not compile: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "empty categorical vector")) return;
 
   Executor graph(std::move(cm.write_array->graph));
   cm.write_array->bind(graph);
@@ -2542,14 +2015,7 @@ void test_categorical_rng_dynamic_index() {
       slurp("tests/fixtures/gq_categorical_dynamic.tmir.sexp");
   const DataMap data = categorical_data(3);
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL categorical dynamic index lowering: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "categorical dynamic index lowering")) return;
 
   int categorical_ops = 0, dynamic_slices = 0;
   for (const Op& op : cm.write_array->graph.ops) {
@@ -2576,12 +2042,7 @@ void test_categorical_rng_dynamic_index() {
   std::copy(probabilities.begin(), probabilities.end(), graph.params_data());
   WaRng graph_rng(303), direct_rng(303);
   graph.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> got;
-  for (const auto& column : cm.write_array->columns) {
-    const double* values = graph.value_ptr(column.slot);
-    for (int64_t i = 0; i < column.len; ++i)
-      got.push_back(values[column.storage_index(i)]);
-  }
+  std::vector<double> got = read_row(cm.write_array->columns, graph);
   std::vector<double> want = probabilities;
   const int draw = stan::math::categorical_rng(categorical_theta(probabilities),
                                                direct_rng.gen());
@@ -2598,16 +2059,7 @@ void test_categorical_rng_dynamic_index() {
 }
 
 static std::map<std::string, stanli::DataMap::Entry> multi_normal_base() {
-  std::map<std::string, stanli::DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    stanli::DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
-  return base;
+  return emit_env();
 }
 
 static stanli::DataMap::Entry real_entry(double value) {
@@ -2642,72 +2094,6 @@ static std::vector<double> multi_normal_direct_row(
           stan::math::uniform_rng(0.0, 1.0, rng.gen())};
 }
 
-void test_multi_normal_rng_kernel_contract() {
-  using namespace stanli;
-  const Kernel* kernel = find_kernel(OP_RNG);
-  if (kernel == nullptr || kernel->forward == nullptr) {
-    ++failures;
-    std::printf("FAIL multi-normal RNG kernel is not registered\n");
-    return;
-  }
-  double mu[] = {0.5, -1.25};
-  double covariance[] = {1.69, 0.364, 0.364, 0.64};
-  double output[] = {-99.0, -99.0};
-  int k = 2;
-  WaRng rng(123), direct_rng(123);
-  EvalState state{&rng};
-  KernelCtx valid;
-  valid.variant = kMultiNormalRngVariant;
-  valid.n_in = 2;
-  valid.in[0] = Desc{mu, 2};
-  valid.in[1] = Desc{covariance, 4};
-  valid.out = Desc{output, 2};
-  valid.idata = &k;
-  valid.n_idata = 1;
-  valid.eval_state = &state;
-  kernel->forward(valid);
-  const std::vector<double> want = direct_multi_normal_rng(
-      {mu[0], mu[1]}, {1.69, 0.364, 0.364, 0.64}, 2, 2, direct_rng);
-  if (std::vector<double>(output, output + 2) != want ||
-      rng.gen()() != direct_rng.gen()()) {
-    ++failures;
-    std::printf("FAIL multi-normal RNG valid kernel contract\n");
-  }
-
-  struct Mutation {
-    const char* label;
-    void (*apply)(KernelCtx&);
-  };
-  const Mutation malformed[] = {
-      {"unknown variant", [](KernelCtx& c) { c.variant = 255; }},
-      {"arity", [](KernelCtx& c) { c.n_in = 1; }},
-      {"missing idata", [](KernelCtx& c) { c.n_idata = 0; }},
-      {"null idata", [](KernelCtx& c) { c.idata = nullptr; }},
-      {"mean length", [](KernelCtx& c) { c.in[0].len = 1; }},
-      {"covariance length", [](KernelCtx& c) { c.in[1].len = 3; }},
-      {"output length", [](KernelCtx& c) { c.out.len = 1; }},
-      {"missing evaluation state",
-       [](KernelCtx& c) { c.eval_state = nullptr; }},
-  };
-  for (size_t i = 0; i < sizeof(malformed) / sizeof(malformed[0]); ++i) {
-    WaRng got(static_cast<unsigned>(900 + i));
-    WaRng untouched(static_cast<unsigned>(900 + i));
-    EvalState got_state{&got};
-    KernelCtx ctx = valid;
-    ctx.eval_state = &got_state;
-    output[0] = output[1] = -99.0;
-    malformed[i].apply(ctx);
-    const RngException error =
-        capture_rng_exception([&] { kernel->forward(ctx); });
-    if (error.kind != 3 || got.gen()() != untouched.gen()() ||
-        output[0] != -99.0 || output[1] != -99.0) {
-      ++failures;
-      std::printf("FAIL multi-normal malformed kernel %s\n",
-                  malformed[i].label);
-    }
-  }
-}
-
 void test_multi_normal_rng_lowering_guards() {
   using namespace stanli;
   const std::string base =
@@ -2731,21 +2117,7 @@ void test_multi_normal_rng_lowering_guards() {
 
   const auto expect_interp = [](const std::string& mir,
                                 const std::string& reason, const char* label) {
-    try {
-      CompiledModel cm = compile_model(mir, DataMap{});
-      if (!cm.write_array || !cm.write_array->interp ||
-          (!reason.empty() &&
-           cm.write_array->truncated.find(reason) == std::string::npos)) {
-        ++failures;
-        std::printf("FAIL %s: got %s\n", label,
-                    cm.write_array ? cm.write_array->truncated.c_str()
-                                   : "no write_array");
-      }
-    } catch (const std::exception& e) {
-      ++failures;
-      std::printf("FAIL %s: mutation did not parse/compile: %s\n", label,
-                  e.what());
-    }
+    expect_interpreted(mir, DataMap{}, reason, label);
   };
 
   const auto replace_once = [](std::string text, size_t at, size_t count,
@@ -2878,11 +2250,7 @@ void test_multi_normal_rng_lowering_guards() {
                    std::string("multi_normal_rng").size(),
                    "multi_normal_cholesky_rng");
   auto cholesky_cm = compile_model(cholesky, DataMap{});
-  if (!cholesky_cm.write_array || cholesky_cm.write_array->interp ||
-      !cholesky_cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf("FAIL multi-normal Cholesky did not compile\n");
-  }
+  compiled_completely(cholesky_cm, "multi-normal Cholesky");
   // A new family must not weaken the shared geometry proof.
   mismatched_covariance.replace(call + std::string("(FunApp (StanLib ").size(),
                                 std::string("multi_normal_rng").size(),
@@ -2897,14 +2265,7 @@ void test_compiled_multi_normal_rng() {
   const std::string text =
       slurp("tests/fixtures/gq_multi_normal_rng.tmir.sexp");
   CompiledModel cm = compile_model(text, DataMap{});
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL multi-normal RNG did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "multi-normal RNG")) return;
   int multi_ops = 0, uniform_ops = 0, other_rng_ops = 0;
   for (const Op& op : cm.write_array->graph.ops) {
     if (op.opcode != OP_RNG) continue;
@@ -2939,13 +2300,7 @@ void test_compiled_multi_normal_rng() {
   std::copy(unconstrained.begin(), unconstrained.end(), graph.params_data());
   const auto graph_row = [&](WaRng& rng) {
     graph.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& column : cm.write_array->columns) {
-      const double* values = graph.value_ptr(column.slot);
-      for (int64_t i = 0; i < column.len; ++i)
-        row.push_back(values[column.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, graph);
   };
 
   // Obtain the exact constrained parameter bits produced by the graph; those
@@ -3050,15 +2405,7 @@ void test_binomial_rng_lowering_guards() {
 
   const auto expect_interp = [](const std::string& mir,
                                 const std::string& reason, const char* what) {
-    DataMap data;
-    CompiledModel cm = compile_model(mir, data);
-    if (!cm.write_array || !cm.write_array->interp ||
-        cm.write_array->truncated.find(reason) == std::string::npos) {
-      ++failures;
-      std::printf("FAIL %s: got %s\n", what,
-                  cm.write_array ? cm.write_array->truncated.c_str()
-                                 : "no write_array");
-    }
+    expect_interpreted(mir, DataMap{}, reason, what);
   };
 
   const std::string scalar_trials =
@@ -3114,12 +2461,7 @@ void test_compiled_scalar_rng() {
   const std::string text = slurp(path);
   DataMap data;
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf("FAIL scalar rng: write_array did not compile completely\n");
-    return;
-  }
+  if (!compiled_completely(cm, "scalar rng")) return;
   int rng_ops = 0;
   for (const Op& op : cm.write_array->graph.ops)
     if (op.opcode == OP_RNG) ++rng_ops;
@@ -3136,25 +2478,12 @@ void test_compiled_scalar_rng() {
   wex.params_data()[0] = x;
   const auto graph_row = [&](WaRng& rng) {
     wex.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& c : cm.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, wex);
   };
 
   auto prog =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp interp(prog, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   params["x"].r = {x};
@@ -3193,12 +2522,7 @@ void test_compiled_scalar_rng() {
   clone.params_data()[0] = x;
   const auto clone_row = [&](WaRng& rng) {
     clone.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& c : cm.write_array->columns) {
-      const double* p = clone.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, clone);
   };
   WaRng original_stream(123), clone_stream(123);
   if (graph_row(original_stream) != clone_row(clone_stream) ||
@@ -3275,420 +2599,7 @@ static stanli::DataMap reduction_data() {
 
 static std::map<std::string, stanli::DataMap::Entry> reduction_base(
     const stanli::DataMap& data) {
-  std::map<std::string, stanli::DataMap::Entry> base;
-  base["d"] = data.at("d");
-  base["counts"] = data.at("counts");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    stanli::DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
-  return base;
-}
-
-void test_product_exact_grouping() {
-  using namespace stanli;
-  // Direct kernel calls need the one-time registration normally performed by
-  // Executor construction.
-  {
-    Graph graph;
-    const int in = graph.add_slot(1, true);
-    const int out = graph.add_slot(1, false);
-    graph.add_op(OP_EXPV, {in}, out);
-    graph.result_slot = out;
-    Executor warm(std::move(graph));
-  }
-
-  const Kernel& product = kernel(OP_PROD_VEC);
-  if (product.backward == nullptr || product.scratch_size != nullptr) {
-    ++failures;
-    std::printf("FAIL product kernel implementation contract\n");
-  }
-
-  const double denorm = std::numeric_limits<double>::denorm_min();
-  const double inf = std::numeric_limits<double>::infinity();
-  const double nan = std::numeric_limits<double>::quiet_NaN();
-  std::vector<std::vector<double>> cases = {
-      {0.5},
-      {-0.0},
-      {denorm},
-      {inf},
-      {nan},
-      {0.5, 0.5, 0.5},
-      {0.0, inf, 2.0},
-      {-0.0, inf, 2.0},
-      {inf, 0.0, -2.0},
-      {nan, 0.0, inf},
-      {1.0 + 0x1p-52, 1.0 - 0x1p-52, 1.0 + 0x1p-51},
-      {0.5, 0.5, 0.5, 0.5, 0.5},
-      {1e200, 1e200, 1e-200, 1e-200, 3.0},
-      {1e200, 1e-200, 1e200, 1e-200, 3.0},
-      {denorm, 2.0, 2.0, 2.0, 2.0},
-      {-0.0, -1.0, -1.0, 1.0, 1.0},
-      {inf, -0.0, nan, -inf, 1.0},
-  };
-
-  // Exercise every packet boundary on the build host.  Fixed lengths 1/3/5
-  // above pin the public contract; these sizes keep the same test meaningful
-  // when Eigen is compiled for SSE, AVX2, or AVX-512.
-  const int packet_width = std::max(
-      1, static_cast<int>(Eigen::internal::packet_traits<double>::size));
-  const int packet_lengths[] = {packet_width - 1, packet_width,
-                                packet_width + 1, 2 * packet_width + 1};
-  const int exponents[] = {500, -500, 400, -400, 300, -300, 0, 0};
-  for (int n : packet_lengths) {
-    if (n <= 0) continue;  // Scalar-only Eigen has packet width one.
-    std::vector<double> values(static_cast<size_t>(n));
-    for (int i = 0; i < n; ++i) {
-      const double mantissa =
-          1.0 + static_cast<double>((i * 5 + 1) % 7) * 0x1p-52;
-      values[static_cast<size_t>(i)] =
-          std::ldexp((i % 3 == 0) ? -mantissa : mantissa, exponents[i % 8]);
-    }
-    cases.push_back(std::move(values));
-  }
-
-  std::map<std::string, const mir::FunDef*> funs;
-  MirInterp<double> interp(funs, "product grouping test");
-  mir::Expr variable;
-  variable.kind = mir::Expr::Var;
-  variable.name = "x";
-  variable.type_ = "UVector";
-  variable.unsized.leaf = mir::UnsizedLeaf::Vector;
-  mir::Expr call;
-  call.kind = mir::Expr::FunApp;
-  call.name = "prod";
-  call.fn_lib = mir::Expr::Lib::StanLib;
-  call.type_ = "UReal";
-  call.unsized.leaf = mir::UnsizedLeaf::Real;
-  call.args = {variable};
-
-  for (size_t c = 0; c < cases.size(); ++c) {
-    const std::vector<double>& values = cases[c];
-    Eigen::VectorXd pinned(static_cast<Eigen::Index>(values.size()));
-    for (size_t i = 0; i < values.size(); ++i) pinned[i] = values[i];
-    const double want = stan::math::prod(pinned);
-
-    DataMap::Entry entry;
-    entry.r = values;
-    entry.dims = {static_cast<int64_t>(values.size())};
-    interp.env()["x"] = std::move(entry);
-    const double interpreted = interp.eval(call).r.at(0);
-    if (!same_reduction_value(interpreted, want)) {
-      ++failures;
-      std::printf("FAIL product interpreter case %zu: got %llx want %llx\n", c,
-                  static_cast<unsigned long long>(reduction_bits(interpreted)),
-                  static_cast<unsigned long long>(reduction_bits(want)));
-    }
-
-    // Pin the address-independence seam at every packet-relevant shift.  A
-    // direct Eigen::Map differs at odd shifts; OP_PROD_VEC must not.
-    for (int offset = 0; offset < packet_width; ++offset) {
-      Eigen::VectorXd storage(static_cast<Eigen::Index>(
-          values.size() + static_cast<size_t>(packet_width)));
-      storage.setZero();
-      std::copy(values.begin(), values.end(), storage.data() + offset);
-      double got = 0.0;
-      KernelCtx ctx;
-      ctx.n_in = 1;
-      ctx.in[0] =
-          Desc{storage.data() + offset, static_cast<int64_t>(values.size())};
-      ctx.out = Desc{&got, 1};
-      product.forward(ctx);
-      if (!same_reduction_value(got, want)) {
-        ++failures;
-        std::printf(
-            "FAIL product kernel case %zu offset %d: got %llx want "
-            "%llx\n",
-            c, offset, static_cast<unsigned long long>(reduction_bits(got)),
-            static_cast<unsigned long long>(reduction_bits(want)));
-      }
-    }
-  }
-
-  // This tranche changes only Eigen vector/row-vector products.  Stan arrays
-  // retain MirInterp's existing ascending scalar fold.
-  mir::Expr array_variable = variable;
-  array_variable.name = "a";
-  array_variable.type_ = "(UArray UReal)";
-  array_variable.unsized.leaf = mir::UnsizedLeaf::Real;
-  array_variable.unsized.depth = 1;
-  mir::Expr array_call = call;
-  array_call.args = {array_variable};
-  const std::vector<double> array_values = {1e200, 1e200, 1e-200, 1e-200, 3.0};
-  DataMap::Entry array_entry;
-  array_entry.r = array_values;
-  array_entry.dims = {static_cast<int64_t>(array_values.size())};
-  interp.env()["a"] = std::move(array_entry);
-  double array_want = 1.0;
-  for (double value : array_values) array_want *= value;
-  const double array_got = interp.eval(array_call).r.at(0);
-  if (reduction_bits(array_got) != reduction_bits(array_want)) {
-    ++failures;
-    std::printf("FAIL array product changed its scalar left fold\n");
-  }
-
-  // Pin the actual expression surfaces admitted by lower.cpp.  CmdStan
-  // gives Eigen the unevaluated CwiseBinary expression; stanli materializes
-  // subtraction into a graph slot before OP_PROD_VEC.  Basic subtraction is
-  // lane-bit-transparent, so the two product groupings must still agree.
-  const auto check_minus_surface = [&](int n, const char* label) {
-    std::vector<Eigen::VectorXd> indexed(2, Eigen::VectorXd(n));
-    const double xs[] = {0.5,  -0.25, 2.0, -1.0, std::nextafter(1.0, 0.0),
-                         -0.5, 0.25,  1.5};
-    for (int i = 0; i < n; ++i)
-      indexed[1][i] = xs[i % static_cast<int>(sizeof(xs) / sizeof(xs[0]))];
-
-    const uint64_t direct =
-        reduction_bits(stan::math::prod(Eigen::VectorXd::Ones(n) - indexed[1]));
-    const uint64_t indexed_transpose = reduction_bits(
-        stan::math::prod(Eigen::RowVectorXd::Ones(n) - indexed[1].transpose()));
-    if (direct != indexed_transpose) {
-      ++failures;
-      std::printf(
-          "FAIL %s pinned outer-minus surfaces disagree: %llx vs "
-          "%llx\n",
-          label, static_cast<unsigned long long>(direct),
-          static_cast<unsigned long long>(indexed_transpose));
-    }
-
-    std::vector<double> materialized(static_cast<size_t>(n));
-    for (int i = 0; i < n; ++i)
-      materialized[static_cast<size_t>(i)] = 1.0 - indexed[1][i];
-    for (int offset = 0; offset < packet_width; ++offset) {
-      Eigen::VectorXd storage(n + packet_width);
-      storage.setZero();
-      std::copy(materialized.begin(), materialized.end(),
-                storage.data() + offset);
-      double got = 0.0;
-      KernelCtx ctx;
-      ctx.n_in = 1;
-      ctx.in[0] = Desc{storage.data() + offset, n};
-      ctx.out = Desc{&got, 1};
-      product.forward(ctx);
-      const uint64_t bits = reduction_bits(got);
-      if (bits != direct || bits != indexed_transpose) {
-        ++failures;
-        std::printf("FAIL %s offset %d: got %llx want %llx\n", label, offset,
-                    static_cast<unsigned long long>(bits),
-                    static_cast<unsigned long long>(direct));
-      }
-    }
-  };
-  check_minus_surface(5, "len5 outer-minus product");
-  check_minus_surface(2 * packet_width + 1,
-                      "packet-boundary outer-minus product");
-
-  // The corpus surface indexes a row of a column-major matrix and transposes
-  // it.  That Eigen block remains strided, disables packet access on the
-  // outer subtraction, and makes prod reduce from coefficient zero in
-  // ascending scalar order.  Search deterministic valid probabilities for a
-  // case that distinguishes that order from the packet variant, then pin the
-  // raw-expression oracle and the materialized graph kernel to the scalar
-  // result.  Scalar-only Eigen builds have no distinct packet order.
-  const int matrix_n = 2 * packet_width + 1;
-  Eigen::MatrixXd matrix(2, matrix_n);
-  std::vector<double> factors(static_cast<size_t>(matrix_n));
-  bool distinguished = packet_width == 1;
-  uint64_t state = 0x4d4154524958524fULL;
-  for (int trial = 0; trial < 4096 && !distinguished; ++trial) {
-    for (int i = 0; i < matrix_n; ++i) {
-      state = state * 6364136223846793005ULL + 1442695040888963407ULL;
-      const double p = 0.01 + 0.98 * static_cast<double>(state >> 11) /
-                                  static_cast<double>(uint64_t{1} << 53);
-      matrix(0, i) = 0.25;
-      matrix(1, i) = p;
-      factors[static_cast<size_t>(i)] = 1.0 - p;
-    }
-    double scalar = factors[0];
-    for (int i = 1; i < matrix_n; ++i)
-      scalar *= factors[static_cast<size_t>(i)];
-
-    double packet = 0.0;
-    KernelCtx packet_ctx;
-    packet_ctx.n_in = 1;
-    packet_ctx.in[0] = Desc{factors.data(), matrix_n};
-    packet_ctx.out = Desc{&packet, 1};
-    packet_ctx.variant = 0;
-    product.forward(packet_ctx);
-    if (reduction_bits(packet) == reduction_bits(scalar)) continue;
-
-    const double direct = stan::math::prod(Eigen::VectorXd::Ones(matrix_n) -
-                                           matrix.row(1).transpose());
-    double got = 0.0;
-    KernelCtx scalar_ctx = packet_ctx;
-    scalar_ctx.out = Desc{&got, 1};
-    scalar_ctx.variant = 1;
-    product.forward(scalar_ctx);
-    if (reduction_bits(direct) != reduction_bits(scalar) ||
-        reduction_bits(got) != reduction_bits(scalar)) {
-      ++failures;
-      std::printf("FAIL matrix-row product did not use scalar grouping\n");
-    }
-    distinguished = true;
-  }
-  if (!distinguished) {
-    ++failures;
-    std::printf("FAIL matrix-row oracle did not distinguish packet order\n");
-  }
-}
-
-void test_reduction_view_grouping() {
-  using namespace stanli;
-  const Kernel& product = kernel(OP_PROD_VEC);
-  const Kernel& extrema = kernel(OP_EXTREMA_VEC);
-  const int phase_modulus = static_cast<int>(extrema_phase_modulus());
-  const double nan = std::numeric_limits<double>::quiet_NaN();
-  const double tie_pool[] = {0.0, -0.0, 2.0, -3.0, 2.0, nan, -0.0,
-                             0.0, -4.0, 9.0, -4.0, 1.0, nan, -2.0};
-  const int tie_pool_size =
-      static_cast<int>(sizeof(tie_pool) / sizeof(*tie_pool));
-
-  // A graph value has already been materialized, so the reduction opcode
-  // carries the source view's phase explicitly. Compare both native kernels
-  // with Stan Math reducing the original Eigen segment.
-  for (int n = 1; n <= 257; ++n) {
-    for (int offset = 0; offset < phase_modulus; ++offset) {
-      Eigen::VectorXd product_base(offset + n + 2);
-      Eigen::VectorXd extrema_base(offset + n + 2);
-      for (int i = 0; i < product_base.size(); ++i) {
-        const int centered = (i * 37 + n * 11) % 29 - 14;
-        product_base[i] = 1.0 + centered * 0x1p-16;
-        extrema_base[i] = tie_pool[i % tie_pool_size];
-      }
-      const Eigen::VectorXd product_owned = product_base.segment(offset, n);
-      const Eigen::VectorXd extrema_owned = extrema_base.segment(offset, n);
-      const double product_want =
-          stan::math::prod(product_base.segment(offset, n));
-      const double extrema_wants[] = {
-          stan::math::min(extrema_base.segment(offset, n)),
-          stan::math::max(extrema_base.segment(offset, n))};
-
-      int phase = offset;
-      double product_got = 0.0;
-      KernelCtx product_ctx;
-      product_ctx.n_in = 1;
-      product_ctx.in[0] = Desc{const_cast<double*>(product_owned.data()), n};
-      product_ctx.out = Desc{&product_got, 1};
-      product_ctx.variant = 4;
-      product_ctx.idata = &phase;
-      product_ctx.n_idata = 1;
-      product.forward(product_ctx);
-      if (!same_reduction_value(product_got, product_want)) {
-        ++failures;
-        std::printf("FAIL phased product n=%d offset=%d\n", n, offset);
-      }
-
-      for (int maximum = 0; maximum < 2; ++maximum) {
-        double got = 0.0;
-        KernelCtx ctx;
-        ctx.n_in = 1;
-        ctx.in[0] = Desc{const_cast<double*>(extrema_owned.data()), n};
-        ctx.out = Desc{&got, 1};
-        ctx.variant = static_cast<uint8_t>(maximum | 4);
-        ctx.idata = &phase;
-        ctx.n_idata = 1;
-        extrema.forward(ctx);
-        if (!same_reduction_value(got, extrema_wants[maximum])) {
-          ++failures;
-          std::printf("FAIL phased extrema n=%d offset=%d %s\n", n, offset,
-                      maximum ? "max" : "min");
-        }
-      }
-    }
-  }
-
-  // The contract here is exact parity with the original view. Some Eigen
-  // configurations use the same scalar traversal for every tested size, so
-  // requiring a value difference from an unphased reduction would be brittle.
-
-  // Gathered arguments have no packet access. Repeated indices are retained
-  // in index order and the scalar reduction's reverse path must scatter back
-  // through OP_GATHER rather than treating the gather as a copy.
-  bool gather_distinguished = false;
-  for (int n = 1; n <= 20; ++n) {
-    Eigen::VectorXd source(n);
-    for (int i = 0; i < n; ++i) source[i] = tie_pool[i % tie_pool_size];
-    std::vector<int> positions(static_cast<size_t>(n));
-    std::vector<double> gathered(static_cast<size_t>(n));
-    for (int i = 0; i < n; ++i) {
-      positions[static_cast<size_t>(i)] = n - i;
-      gathered[static_cast<size_t>(i)] = source[n - i - 1];
-    }
-    const stan::model::index_multi index(positions);
-    for (int maximum = 0; maximum < 2; ++maximum) {
-      const double want =
-          maximum
-              ? stan::math::max(stan::model::rvalue(source, "source", index))
-              : stan::math::min(stan::model::rvalue(source, "source", index));
-      double got = 0.0;
-      double selected = 0.0;
-      KernelCtx ctx;
-      ctx.n_in = 1;
-      ctx.in[0] = Desc{gathered.data(), n};
-      ctx.out = Desc{&got, 1};
-      ctx.variant = static_cast<uint8_t>(maximum | 2);
-      ctx.scratch = &selected;
-      extrema.forward(ctx);
-      if (!same_reduction_value(got, want)) {
-        ++failures;
-        std::printf("FAIL gathered extrema n=%d %s\n", n,
-                    maximum ? "max" : "min");
-      }
-      const Eigen::Map<const Eigen::VectorXd> packet(gathered.data(), n);
-      const double packet_want =
-          maximum ? stan::math::max(packet) : stan::math::min(packet);
-      gather_distinguished |= !same_reduction_value(packet_want, want);
-    }
-  }
-  if (!gather_distinguished) {
-    ++failures;
-    std::printf(
-        "FAIL gathered extrema oracle never distinguished packet order\n");
-  }
-
-  {
-    Graph graph;
-    const int source = graph.add_slot(3, true);
-    const int gathered = graph.add_slot(4, false);
-    const int out = graph.add_slot(1, false);
-    graph.add_op(OP_GATHER, {source}, gathered, {2, 2, 0, 2});
-    const int product_op = graph.add_op(OP_PROD_VEC, {gathered}, out);
-    graph.ops[product_op].variant = 1;
-    graph.result_slot = out;
-    Executor executor(std::move(graph));
-    const std::array<double, 3> values = {2.0, 3.0, 5.0};
-    std::copy(values.begin(), values.end(), executor.params_data());
-    double adj[3] = {};
-    const double value = executor.gradient(adj);
-    if (value != 250.0 || adj[0] != 125.0 || adj[1] != 0.0 || adj[2] != 150.0) {
-      ++failures;
-      std::printf("FAIL gathered product adjoints were not accumulated\n");
-    }
-  }
-  {
-    Graph graph;
-    const int source = graph.add_slot(3, true);
-    const int gathered = graph.add_slot(4, false);
-    const int out = graph.add_slot(1, false);
-    graph.add_op(OP_GATHER, {source}, gathered, {1, 1, 2, 0});
-    const int extrema_op = graph.add_op(OP_EXTREMA_VEC, {gathered}, out);
-    graph.ops[extrema_op].variant = 2;
-    graph.result_slot = out;
-    Executor executor(std::move(graph));
-    const std::array<double, 3> values = {5.0, 2.0, 7.0};
-    std::copy(values.begin(), values.end(), executor.params_data());
-    double adj[3] = {};
-    const double value = executor.gradient(adj);
-    if (value != 2.0 || adj[0] != 0.0 || adj[1] != 1.0 || adj[2] != 0.0) {
-      ++failures;
-      std::printf(
-          "FAIL gathered extrema adjoint did not route through gather\n");
-    }
-  }
+  return emit_env(data, {"d", "counts"});
 }
 
 void test_layout_materialization_boundaries() {
@@ -3698,14 +2609,7 @@ void test_layout_materialization_boundaries() {
   DataMap data;
   data.set_int_array("idx", {1, 2, 3, 4, 5});
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL layout materialization fixture did not compile: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "layout materialization fixture")) return;
 
   int packet_products = 0, phased_products = 0, scalar_extrema = 0;
   for (const Op& op : cm.write_array->graph.ops) {
@@ -3769,16 +2673,7 @@ void test_layout_materialization_boundaries() {
 
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  base["idx"] = data.at("idx");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"idx"});
   WaInterp interp(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   params["x"].r = x;
@@ -3853,14 +2748,7 @@ void test_main_index_layout_metadata() {
       slurp("tests/fixtures/gq_main_index_layout.tmir.sexp");
   DataMap data;
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL main index layout fixture did not compile: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "main index layout fixture")) return;
 
   int phased_products = 0, packet_extrema = 0;
   for (const Op& op : cm.write_array->graph.ops) {
@@ -3942,15 +2830,7 @@ void test_matrix_transpose_extrema_fallback() {
 
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp interp(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   params["m"].r = values;
@@ -3972,166 +2852,6 @@ void test_matrix_transpose_extrema_fallback() {
         "want=%llx\n",
         static_cast<unsigned long long>(reduction_bits(got)),
         static_cast<unsigned long long>(reduction_bits(want)));
-  }
-}
-
-void test_extrema_exact_grouping() {
-  using namespace stanli;
-  const Kernel& extrema = kernel(OP_EXTREMA_VEC);
-  if (extrema.backward == nullptr || extrema.scratch_size == nullptr) {
-    ++failures;
-    std::printf("FAIL extrema kernel has no differentiable implementation\n");
-  }
-
-  const double inf = std::numeric_limits<double>::infinity();
-  const double nan = std::numeric_limits<double>::quiet_NaN();
-  std::vector<std::vector<double>> cases = {
-      {},
-      {1.0},
-      {0.0, -0.0},
-      {-0.0, 0.0},
-      {inf, -inf, 3.0},
-      {-inf, inf, -3.0},
-      {2.0, 2.0, -4.0, -4.0, 2.0},
-      {nan, 1.0, -2.0},
-      {1.0, nan, -2.0},
-      {1.0, -2.0, nan},
-      {nan, nan, 0.0, -0.0},
-  };
-  const int packet_width = std::max(
-      1, static_cast<int>(Eigen::internal::packet_traits<double>::size));
-  for (int n : {packet_width - 1, packet_width, packet_width + 1,
-                2 * packet_width - 1, 2 * packet_width, 2 * packet_width + 1}) {
-    if (n < 0) continue;
-    std::vector<double> values(static_cast<size_t>(n));
-    for (int i = 0; i < n; ++i) {
-      const double magnitude =
-          std::ldexp(1.0 + static_cast<double>((i * 7 + 3) % 11) * 0x1p-52,
-                     (i % 7) * 137 - 411);
-      values[static_cast<size_t>(i)] = i % 2 == 0 ? magnitude : -magnitude;
-    }
-    if (n > 2) values[static_cast<size_t>(n - 1)] = values[1];
-    cases.push_back(std::move(values));
-  }
-
-  for (size_t c = 0; c < cases.size(); ++c) {
-    const std::vector<double>& values = cases[c];
-    Eigen::VectorXd pinned(static_cast<Eigen::Index>(values.size()));
-    std::copy(values.begin(), values.end(), pinned.data());
-    const double wants[] = {stan::math::min(pinned), stan::math::max(pinned)};
-    for (int variant = 0; variant < 2; ++variant) {
-      for (int offset = 0; offset < packet_width; ++offset) {
-        Eigen::VectorXd storage(static_cast<Eigen::Index>(
-            values.size() + static_cast<size_t>(packet_width)));
-        storage.setZero();
-        std::copy(values.begin(), values.end(), storage.data() + offset);
-        double got = 0.0;
-        KernelCtx ctx;
-        ctx.n_in = 1;
-        ctx.in[0] =
-            Desc{storage.data() + offset, static_cast<int64_t>(values.size())};
-        ctx.out = Desc{&got, 1};
-        ctx.variant = static_cast<uint8_t>(variant);
-        extrema.forward(ctx);
-        if (!same_reduction_value(got, wants[variant])) {
-          ++failures;
-          std::printf(
-              "FAIL extrema kernel case %zu variant %d offset %d: got %llx "
-              "want %llx\n",
-              c, variant, offset,
-              static_cast<unsigned long long>(reduction_bits(got)),
-              static_cast<unsigned long long>(reduction_bits(wants[variant])));
-        }
-      }
-
-      std::vector<double> active_values = values;
-      Eigen::Matrix<stan::math::var, -1, 1> active(
-          static_cast<Eigen::Index>(values.size()));
-      for (size_t i = 0; i < values.size(); ++i)
-        active(static_cast<Eigen::Index>(i)) = values[i];
-      stan::math::var want_active =
-          variant == 0 ? stan::math::min(active) : stan::math::max(active);
-      double got_active = 0.0;
-      double selected = 0.0;
-      std::vector<double> adj(values.size(), 0.0);
-      KernelCtx active_ctx;
-      active_ctx.n_in = 1;
-      active_ctx.in[0] =
-          Desc{active_values.data(), static_cast<int64_t>(values.size())};
-      active_ctx.out = Desc{&got_active, 1};
-      active_ctx.scratch = &selected;
-      active_ctx.variant = static_cast<uint8_t>(variant | 2);
-      extrema.forward(active_ctx);
-      active_ctx.in_adj[0] = Desc{adj.data(), static_cast<int64_t>(adj.size())};
-      active_ctx.out_adj = 1.0;
-      extrema.backward(active_ctx);
-      want_active.grad();
-      if (!same_reduction_value(got_active, want_active.val())) {
-        ++failures;
-        std::printf("FAIL active extrema value case %zu variant %d\n", c,
-                    variant);
-      }
-      for (size_t i = 0; i < adj.size(); ++i) {
-        if (adj[i] == active(static_cast<Eigen::Index>(i)).adj()) continue;
-        ++failures;
-        std::printf(
-            "FAIL active extrema adjoint case %zu variant %d index %zu\n", c,
-            variant, i);
-      }
-      stan::math::recover_memory();
-    }
-  }
-
-  // The generic interpreter keeps scalar-fold behavior outside the audited
-  // direct write_array surface, except that Stan's defined empty-container
-  // results/errors must not become an out_of_range accident.
-  std::map<std::string, const mir::FunDef*> funs;
-  MirInterp<double> interp(funs, "empty extrema legacy test");
-  mir::Expr arg;
-  arg.kind = mir::Expr::Var;
-  arg.name = "a";
-  arg.type_ = "(UArray UReal)";
-  arg.unsized.leaf = mir::UnsizedLeaf::Real;
-  arg.unsized.depth = 1;
-  mir::Expr call;
-  call.kind = mir::Expr::FunApp;
-  call.name = "min";
-  call.fn_lib = mir::Expr::Lib::StanLib;
-  call.type_ = "UReal";
-  call.unsized.leaf = mir::UnsizedLeaf::Real;
-  call.args = {arg};
-  DataMap::Entry empty_real;
-  empty_real.dims = {0};
-  interp.env()["a"] = empty_real;
-  if (reduction_bits(interp.eval(call).r.at(0)) != reduction_bits(inf)) {
-    ++failures;
-    std::printf("FAIL empty real legacy min is not +infinity\n");
-  }
-  call.name = "max";
-  if (reduction_bits(interp.eval(call).r.at(0)) != reduction_bits(-inf)) {
-    ++failures;
-    std::printf("FAIL empty real legacy max is not -infinity\n");
-  }
-  arg.type_ = "(UArray UInt)";
-  arg.unsized.leaf = mir::UnsizedLeaf::Int;
-  call.args = {arg};
-  DataMap::Entry empty_int;
-  empty_int.is_int = true;
-  empty_int.dims = {0};
-  interp.env()["a"] = empty_int;
-  for (const char* name : {"min", "max"}) {
-    call.name = name;
-    bool invalid = false;
-    try {
-      (void)interp.eval(call);
-    } catch (const std::invalid_argument&) {
-      invalid = true;
-    }
-    if (!invalid) {
-      ++failures;
-      std::printf(
-          "FAIL empty int legacy %s did not preserve invalid_argument\n", name);
-    }
   }
 }
 
@@ -4183,26 +2903,11 @@ void test_compiled_gq_extrema() {
     std::copy(x.begin(), x.end(), graph.params_data());
     std::copy(xr.begin(), xr.end(), graph.params_data() + x.size());
     graph.run_forward_only();
-    std::vector<double> graph_row;
-    for (const auto& column : cm.write_array->columns) {
-      const double* values = graph.value_ptr(column.slot);
-      for (int64_t i = 0; i < column.len; ++i)
-        graph_row.push_back(values[column.storage_index(i)]);
-    }
+    std::vector<double> graph_row = read_row(cm.write_array->columns, graph);
 
     auto program =
         std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-    std::map<std::string, DataMap::Entry> base;
-    base["N"] = data.at("N");
-    base["d"] = data.at("d");
-    for (const char* flag :
-         {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-      DataMap::Entry one;
-      one.is_int = true;
-      one.i = {1};
-      one.r = {1.0};
-      base[flag] = one;
-    }
+    std::map<std::string, DataMap::Entry> base = emit_env(data, {"N", "d"});
     WaInterp interp(program, std::move(base));
     std::map<std::string, DataMap::Entry> params;
     params["x"].r = x;
@@ -4254,77 +2959,7 @@ static stanli::DataMap extrema_guard_data() {
 }
 
 static void expect_extrema_interp(const std::string& text, const char* what) {
-  using namespace stanli;
-  try {
-    CompiledModel cm = compile_model(text, extrema_guard_data());
-    if (cm.write_array && cm.write_array->interp) return;
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: mutation did not parse/compile: %s\n", what,
-                e.what());
-  }
-}
-
-static void expect_extrema_compiled(const std::string& text,
-                                    const stanli::DataMap& data,
-                                    const char* what) {
-  using namespace stanli;
-  try {
-    CompiledModel cm = compile_model(text, data);
-    if (cm.write_array && !cm.write_array->interp &&
-        cm.write_array->truncated.empty())
-      return;
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: did not compile: %s\n", what, e.what());
-  }
-}
-
-static void expect_extrema_fixture_interp(const std::string& fixture,
-                                          const stanli::DataMap& data,
-                                          const char* what) {
-  using namespace stanli;
-  try {
-    CompiledModel cm = compile_model(slurp(fixture), data);
-    if (cm.write_array && cm.write_array->interp &&
-        cm.write_array->truncated.find("expression surface") !=
-            std::string::npos)
-      return;
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: fixture did not parse/compile: %s\n", what, e.what());
-  }
-}
-
-static void expect_extrema_fixture_compiled(const std::string& fixture,
-                                            const stanli::DataMap& data,
-                                            const char* what) {
-  using namespace stanli;
-  try {
-    CompiledModel cm = compile_model(slurp(fixture), data);
-    if (cm.write_array && !cm.write_array->interp &&
-        cm.write_array->truncated.empty())
-      return;
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: fixture did not compile: %s\n", what, e.what());
-  }
+  expect_interpreted(text, extrema_guard_data(), "", what);
 }
 
 void test_gq_extrema_lowering_guards() {
@@ -4374,7 +3009,7 @@ void test_gq_extrema_lowering_guards() {
       "DataOnly))))";
   std::string expression = base;
   expression.replace(arg_at, vector_node.size(), exp_vector);
-  expect_extrema_compiled(expression, extrema_guard_data(), "min(exp(x))");
+  expect_compiled(expression, extrema_guard_data(), "min(exp(x))");
 
   const std::string indexed =
       "((pattern\n"
@@ -4393,7 +3028,7 @@ void test_gq_extrema_lowering_guards() {
       "DataOnly))))";
   std::string view = base;
   view.replace(arg_at, vector_node.size(), indexed);
-  expect_extrema_compiled(view, extrema_guard_data(), "min(x[2:5])");
+  expect_compiled(view, extrema_guard_data(), "min(x[2:5])");
 
   std::string zero_args = base;
   zero_args.erase(arg_at, vector_node.size());
@@ -4431,7 +3066,7 @@ void test_gq_extrema_lowering_guards() {
   } else {
     udf.replace(inlined, stan_min.size(),
                 "(FunApp (UserDefined vector_min FnPlain)");
-    expect_extrema_compiled(udf, extrema_guard_data(), "dynamic UDF extrema");
+    expect_compiled(udf, extrema_guard_data(), "dynamic UDF extrema");
   }
 
   // The same opcode now serves active log_prob reductions through its stored
@@ -4456,14 +3091,14 @@ void test_gq_extrema_view_lowering_guards() {
   using namespace stanli;
   DataMap row_data;
   row_data.set_int("N", 5);
-  expect_extrema_fixture_compiled("tests/fixtures/gq_extrema_row.tmir.sexp",
-                                  row_data, "strided matrix-row extrema");
+  expect_compiled(slurp("tests/fixtures/gq_extrema_row.tmir.sexp"), row_data,
+                  "strided matrix-row extrema");
 
   DataMap gather_data;
   gather_data.set_int("N", 5);
   gather_data.set_int_array("idx", {5, 2, 2, 1, 4});
-  expect_extrema_fixture_compiled("tests/fixtures/gq_extrema_gather.tmir.sexp",
-                                  gather_data, "gathered extrema");
+  expect_compiled(slurp("tests/fixtures/gq_extrema_gather.tmir.sexp"),
+                  gather_data, "gathered extrema");
 }
 
 void test_compiled_gq_reductions() {
@@ -4471,14 +3106,7 @@ void test_compiled_gq_reductions() {
   const std::string text = slurp("tests/fixtures/gq_reductions.tmir.sexp");
   const DataMap data = reduction_data();
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL reductions fixture did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "reductions fixture")) return;
 
   // The same fixture pins both legacy seams in log_prob: data-only prod is
   // folded rather than becoming a runtime opcode, and pure-data int
@@ -4524,13 +3152,7 @@ void test_compiled_gq_reductions() {
   for (int i = 0; i < 5; ++i) graph.params_data()[1 + i] = 0.5;
   const auto graph_row = [&](WaRng& rng) {
     graph.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& column : cm.write_array->columns) {
-      const double* values = graph.value_ptr(column.slot);
-      for (int64_t i = 0; i < column.len; ++i)
-        row.push_back(values[column.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, graph);
   };
 
   auto program =
@@ -4604,24 +3226,7 @@ static void expect_reduction_interp(const std::string& text,
                                     bool sum_prefix = false) {
   using namespace stanli;
   CompiledModel cm;
-  try {
-    cm = compile_model(text, reduction_data());
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: mutation did not parse/compile: %s\n", what,
-                e.what());
-    return;
-  }
-  const bool fallback = cm.write_array && cm.write_array->interp &&
-                        (reason.empty() || cm.write_array->truncated.find(
-                                               reason) != std::string::npos);
-  if (!fallback) {
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!expect_interpreted(text, reduction_data(), reason, what, &cm)) return;
   if (sum_prefix) {
     int sums = 0;
     for (const Op& op : cm.write_array->graph.ops)
@@ -4631,25 +3236,6 @@ static void expect_reduction_interp(const std::string& text,
       std::printf("FAIL %s: runtime sum was not retained in graph prefix\n",
                   what);
     }
-  }
-}
-
-static void expect_reduction_compiled(const std::string& text,
-                                      const stanli::DataMap& data,
-                                      const char* what) {
-  using namespace stanli;
-  try {
-    CompiledModel cm = compile_model(text, data);
-    if (cm.write_array && !cm.write_array->interp &&
-        cm.write_array->truncated.empty())
-      return;
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: did not compile: %s\n", what, e.what());
   }
 }
 
@@ -4708,24 +3294,12 @@ void test_gq_reduction_lowering_guards() {
       std::copy(x.begin(), x.end(), graph.params_data());
       std::copy(p.begin(), p.end(), graph.params_data() + x.size());
       graph.run_forward_only();
-      std::vector<double> graph_row;
-      for (const auto& column : surface.write_array->columns) {
-        const double* values = graph.value_ptr(column.slot);
-        for (int64_t i = 0; i < column.len; ++i)
-          graph_row.push_back(values[column.storage_index(i)]);
-      }
+      std::vector<double> graph_row =
+          read_row(surface.write_array->columns, graph);
 
       auto program = std::make_shared<mir::Program>(
           mir::read_program(sexp::parse(udf_fixture)));
-      std::map<std::string, DataMap::Entry> base_env;
-      for (const char* flag :
-           {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-        DataMap::Entry one;
-        one.is_int = true;
-        one.i = {1};
-        one.r = {1.0};
-        base_env[flag] = one;
-      }
+      std::map<std::string, DataMap::Entry> base_env = emit_env();
       WaInterp interp(program, std::move(base_env));
       std::map<std::string, DataMap::Entry> params;
       params["x"].r = x;
@@ -4806,8 +3380,7 @@ void test_gq_reduction_lowering_guards() {
   } else {
     dynamic_udf.replace(inlined_prod, stan_prod.size(),
                         "(FunApp (UserDefined vector_product FnPlain)");
-    expect_reduction_compiled(dynamic_udf, reduction_data(),
-                              "dynamic UDF product");
+    expect_compiled(dynamic_udf, reduction_data(), "dynamic UDF product");
   }
 
   const size_t assignment = base.find("(Assignment ((LVariable pr)");
@@ -4841,7 +3414,7 @@ void test_gq_reduction_lowering_guards() {
     if (!replace_reduction_after(mutated, prod_call, vector_meta, replacement,
                                  bad.label))
       continue;
-    expect_reduction_compiled(
+    expect_compiled(
         mutated, reduction_data(),
         (std::string("product ") + bad.label + " uses lowered layout").c_str());
   }
@@ -4901,7 +3474,7 @@ void test_gq_reduction_lowering_guards() {
   std::string direct_view = base;
   if (replace_reduction_after(direct_view, prod_call, vector_node, segment,
                               "segment product"))
-    expect_reduction_compiled(direct_view, reduction_data(), "segment product");
+    expect_compiled(direct_view, reduction_data(), "segment product");
 
   const std::string transposed_segment =
       "((pattern\n"
@@ -4914,8 +3487,8 @@ void test_gq_reduction_lowering_guards() {
   std::string wrapped_view = base;
   if (replace_reduction_after(wrapped_view, prod_call, vector_node,
                               transposed_segment, "transposed segment product"))
-    expect_reduction_compiled(wrapped_view, reduction_data(),
-                              "transposed segment product");
+    expect_compiled(wrapped_view, reduction_data(),
+                    "transposed segment product");
 
   // A transpose of a bare vector is an address-zero row-vector view in
   // CmdStan and remains in scope for the native path.
@@ -4952,7 +3525,7 @@ void test_gq_reduction_lowering_guards() {
   std::string exp_product = base;
   if (replace_reduction_after(exp_product, prod_call, vector_node, exp_vector,
                               "exp product"))
-    expect_reduction_compiled(exp_product, reduction_data(), "prod(exp(x))");
+    expect_compiled(exp_product, reduction_data(), "prod(exp(x))");
 
   const std::string scalar_one =
       "((pattern (Lit Real 1.0))\n"
@@ -5038,15 +3611,13 @@ void test_gq_reduction_lowering_guards() {
   std::string gathered_product = base;
   if (replace_reduction_after(gathered_product, prod_call, vector_node,
                               gather_minus, "gather product"))
-    expect_reduction_compiled(gathered_product, reduction_data(),
-                              "prod(1-x[idx])");
+    expect_compiled(gathered_product, reduction_data(), "prod(1-x[idx])");
 
   // The bare gathered vector uses the same scalar grouping.
   std::string bare_gathered_product = base;
   if (replace_reduction_after(bare_gathered_product, prod_call, vector_node,
                               gather_vector, "bare gather product"))
-    expect_reduction_compiled(bare_gathered_product, reduction_data(),
-                              "prod(x[idx])");
+    expect_compiled(bare_gathered_product, reduction_data(), "prod(x[idx])");
 
   const std::string unsafe_minus =
       "((pattern\n"
@@ -5059,7 +3630,7 @@ void test_gq_reduction_lowering_guards() {
   std::string nested_math = base;
   if (replace_reduction_after(nested_math, prod_call, vector_node, unsafe_minus,
                               "nested vector math product"))
-    expect_reduction_compiled(nested_math, reduction_data(), "prod(1-exp(x))");
+    expect_compiled(nested_math, reduction_data(), "prod(1-exp(x))");
 
   // A dynamic product in log_prob uses the same opcode with stored partials.
   std::string reverse = base;
@@ -5215,12 +3786,7 @@ void test_gq_reduction_lowering_guards() {
       for (int i = 0; i < 5; ++i) eex.params_data()[1 + i] = 0.5;
       WaRng erng(2026), irng(2026);
       eex.run_forward_only(EvalState{&erng});
-      std::vector<double> got;
-      for (const auto& column : em.write_array->columns) {
-        const double* values = eex.value_ptr(column.slot);
-        for (int64_t i = 0; i < column.len; ++i)
-          got.push_back(values[column.storage_index(i)]);
-      }
+      std::vector<double> got = read_row(em.write_array->columns, eex);
       auto eprogram = std::make_shared<mir::Program>(
           mir::read_program(sexp::parse(empty_sum)));
       WaInterp einterp(eprogram, reduction_base(reduction_data()));
@@ -5463,8 +4029,8 @@ void test_runtime_int_sum_redeclaration_shadowing() {
       "    (meta <opaque>))\n   ";
   std::string uninitialized = base;
   uninitialized.insert(insertion, uninitialized_decl);
-  expect_reduction_compiled(uninitialized, reduction_data(),
-                            "same-id uninitialized int sentinel");
+  expect_compiled(uninitialized, reduction_data(),
+                  "same-id uninitialized int sentinel");
   std::vector<std::string> names;
   const std::vector<double> row = eval_reduction_interp(uninitialized, &names);
   bool found_sentinel = false;
@@ -5522,31 +4088,14 @@ void test_choose_index_gq() {
 
   Executor pex(cm.graph);
   cm.bind(pex);
-  std::copy(q.begin(), q.end(), pex.params_data());
-  pex.run_forward_only();
-
   Executor wex(std::move(cm.write_array->graph));
   cm.write_array->bind(wex);
-  std::copy(q.begin(), q.end(), wex.params_data());
-  WaRng graph_rng(5);
-  wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row;
-  for (const auto& c : cm.write_array->columns) {
-    const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-  }
+  const std::vector<double> row =
+      cross_checked_row(cm, pex, wex, q, 5, "choosesize");
   expect_eq("choosesize header", joined(cm.write_array->columns),
             "z.1,z.2,z.3,z.4,z.5,z.6,A.1.1,A.2.1,A.3.1,A.4.1,A.1.2,A.2.2,"
             "A.3.2,A.4.2,A.1.3,A.2.3,A.3.3,A.4.3,A.1.4,A.2.4,A.3.4,A.4.4,"
             "cor.1,cor.2,cor.3,cor.4,cor.5,cor.6");
-
-  WaRng interp_rng(5);
-  const std::vector<double> interp_row =
-      cm.write_array->interp->eval(cm.constrained_env(pex), interp_rng);
-  if (!same_double_bytes(row, interp_row)) {
-    ++failures;
-    std::printf("FAIL choosesize: graph and interpreter rows differ\n");
-  }
   // cor holds A's strict upper triangle, column by column.
   const double want[6] = {q[10], q[14], q[15], q[18], q[19], q[20]};
   for (int i = 0; i < 6; ++i)
@@ -5615,73 +4164,9 @@ void test_interpreted_lkj() {
 void test_runtime_control_write_array() {
   using namespace stanli;
 
-  // The structural kernel selects fixed-width outer-array elements and
-  // scatters their adjoints back to the chosen block only.
-  {
-    const Kernel* k = find_kernel(OP_DYNAMIC_SLICE);
-    double base[6] = {10, 11, 20, 21, 30, 31};
-    double index = 2.0, out[2] = {0, 0};
-    double base_adj[6] = {0, 0, 0, 0, 0, 0};
-    double out_adj[2] = {3, 5};
-    const int idata[1] = {3};
-    KernelCtx ctx;
-    ctx.n_in = 2;
-    ctx.in[0] = Desc{base, 6};
-    ctx.in[1] = Desc{&index, 1};
-    ctx.out = Desc{out, 2};
-    ctx.idata = idata;
-    ctx.n_idata = 1;
-    k->forward(ctx);
-    if (out[0] != 20 || out[1] != 21) {
-      ++failures;
-      std::printf("FAIL dynamic slice selected the wrong block\n");
-    }
-    ctx.in_adj[0] = Desc{base_adj, 6};
-    ctx.out_adj_vec = Desc{out_adj, 2};
-    k->backward(ctx);
-    const double want_adj[6] = {0, 0, 3, 5, 0, 0};
-    if (!std::equal(std::begin(base_adj), std::end(base_adj), want_adj)) {
-      ++failures;
-      std::printf("FAIL dynamic slice scattered to the wrong block\n");
-    }
-    for (double bad :
-         {0.0, 1.5, 4.0, std::numeric_limits<double>::quiet_NaN()}) {
-      index = bad;
-      bool threw = false;
-      try {
-        k->forward(ctx);
-      } catch (const std::out_of_range&) {
-        threw = true;
-      }
-      if (!threw) {
-        ++failures;
-        std::printf("FAIL dynamic slice accepted invalid index %.17g\n", bad);
-      }
-    }
-    KernelCtx malformed = ctx;
-    malformed.in[0].len = 5;
-    bool malformed_threw = false;
-    try {
-      k->forward(malformed);
-    } catch (const std::logic_error&) {
-      malformed_threw = true;
-    }
-    if (!malformed_threw) {
-      ++failures;
-      std::printf("FAIL dynamic slice accepted malformed geometry\n");
-    }
-  }
-
   const std::string text = slurp("tests/fixtures/gq_runtime_control.tmir.sexp");
   CompiledModel cm = compile_model(text, DataMap{});
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL runtime-control write_array did not compile: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "runtime-control write_array")) return;
   int dynamic_slices = 0, control_regions = 0, concatenations = 0;
   for (const Op& op : cm.write_array->graph.ops) {
     dynamic_slices += op.opcode == OP_DYNAMIC_SLICE;
@@ -5717,28 +4202,14 @@ void test_runtime_control_write_array() {
   std::copy(q.begin(), q.end(), params.params_data());
   params.run_forward_only();
 
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
   WaInterp interpreted(program, std::move(base));
   const auto env = cm.constrained_env(params);
   const auto graph_row = [&](WaRng& rng) {
     graph.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& column : cm.write_array->columns) {
-      const double* values = graph.value_ptr(column.slot);
-      for (int64_t i = 0; i < column.len; ++i)
-        row.push_back(values[column.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, graph);
   };
 
   WaRng graph_rng(81), interp_rng(81);
@@ -5995,24 +4466,17 @@ int main() {
   test_choose_index_gq();
   test_interpreted_lkj();
   test_constant_folded_gq_column();
-  test_binomial_rng_helper_contract();
-  test_categorical_rng_helper_contract();
-  test_multi_normal_rng_helper_contract();
   test_categorical_rng_lowering_guards();
   test_compiled_categorical_rng();
   test_categorical_rng_empty_vector();
   test_categorical_rng_dynamic_index();
-  test_multi_normal_rng_kernel_contract();
   test_multi_normal_rng_lowering_guards();
   test_compiled_multi_normal_rng();
   test_binomial_rng_lowering_guards();
   test_compiled_scalar_rng();
-  test_product_exact_grouping();
-  test_reduction_view_grouping();
   test_layout_materialization_boundaries();
   test_main_index_layout_metadata();
   test_matrix_transpose_extrema_fallback();
-  test_extrema_exact_grouping();
   test_compiled_gq_extrema();
   test_gq_extrema_lowering_guards();
   test_gq_extrema_view_lowering_guards();
@@ -6021,7 +4485,6 @@ int main() {
   test_runtime_int_sum_is_not_compile_time();
   test_runtime_int_sum_redeclaration_shadowing();
   test_runtime_control_write_array();
-  test_stan_rng_stream_contract();
   test_caller_owned_rng();
   test_transformed_parameter_checks();
   test_write_array_retained_loop();

@@ -1,5 +1,7 @@
 // Exact forward oracle: preserve the pinned Stan overload's scalar types,
 // Eigen vector/matrix shape, validation order, and nonfinite behavior.
+#include "expect.hpp"
+
 #include <stanli/optable.hpp>
 #include <stan/math.hpp>
 #include <cmath>
@@ -13,7 +15,7 @@
 using Mat = Eigen::MatrixXd;
 using Var = stan::math::var;
 enum class Kind { Plain, Spd, Tri };
-static int failures = 0, cases = 0;
+static int cases = 0;
 
 template <bool Left, bool Vector, typename T>
 using Dividend = std::conditional_t<
@@ -166,6 +168,6 @@ int main() {
         if (fixture == 8) a.setZero();  // singular / division by zero
         both_sides(kind, a, b, 10 + fixture);
       }
-  std::printf("test_solve_forwards: %d cases, %d failures\n", cases, failures);
-  return failures ? 1 : 0;
+  std::printf("%d cases\n", cases);
+  return finish("test_solve_forwards");
 }

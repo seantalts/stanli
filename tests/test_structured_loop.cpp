@@ -54,6 +54,16 @@ static void close(double actual, double expected, const char* name) {
   }
 }
 
+template <class E, class F>
+static bool throws(F&& body, const char* message = nullptr) {
+  try {
+    body();
+  } catch (const E& error) {
+    return message == nullptr || std::string(error.what()) == message;
+  }
+  return false;
+}
+
 static Node sequence(std::vector<Node> children) {
   Node node;
   node.children = std::move(children);
@@ -575,365 +585,6 @@ static void import_reference_tests() {
     close(gradient[i], expected[i], "import ordinals preserve outer gradient");
 }
 
-static void fixed_scalar_index_tests() {
-  const Kernel& kernel = *find_kernel(OP_INDEX_DYNAMIC);
-  for (int mutation = 0; mutation < 5; ++mutation) {
-    for (double at : {-1.0, 0.0, 1.0, 2.0, 4.0, 4.5, 5.0,
-                      std::numeric_limits<double>::infinity(),
-                      std::numeric_limits<double>::quiet_NaN()}) {
-      DynamicIndexSpec spec;
-      spec.axes = {{DynamicIndexSpec::Axis::Single, 4, 1, 1, 0}};
-      spec.selected_size = 1;
-      if (mutation == 1) spec.axes[0].stride = 2;
-      if (mutation == 2) spec.axes[0].input_offset = 1;
-      if (mutation == 3) spec.axes[0].extent = 3;
-      if (mutation == 4) spec.selected_size = 2;
-      double base[] = {0.2, -0.4, 1.7, 3.1};
-      double seed = -2.75;
-      double outputs[2] = {};
-      double adjoints[2][4] = {};
-      std::string errors[2];
-      for (int path = 0; path < 2; ++path) {
-        // An extra input forces the general descriptor path but has no
-        // numerical role. The selector, shape and error obligations agree.
-        spec.input_count = path ? 3 : 2;
-        KernelCtx c{};
-        c.n_in = spec.input_count;
-        c.in[0] = {base, 4};
-        c.in[1] = {&at, 1};
-        c.in[2] = {&at, 1};
-        c.in_adj[0] = {adjoints[path], 4};
-        c.out = {outputs + path, 1};
-        c.out_adj_vec = {&seed, 1};
-        c.udata = &spec;
-        try {
-          kernel.forward(c);
-          kernel.backward(c);
-        } catch (const std::out_of_range& error) {
-          errors[path] = std::string("range:") + error.what();
-        } catch (const std::logic_error& error) {
-          errors[path] = std::string("logic:") + error.what();
-        }
-      }
-      check(errors[0] == errors[1], "scalar index preserves validation errors");
-      check(outputs[0] == outputs[1], "scalar index preserves values");
-      check(std::memcmp(adjoints[0], adjoints[1], sizeof(adjoints[0])) == 0,
-            "scalar index preserves adjoints");
-    }
-  }
-}
-
-static void direct_index_kernel_tests() {
-  fixed_scalar_index_tests();
-  const Kernel* dynamic_index = find_kernel(OP_INDEX_DYNAMIC);
-  check(dynamic_index && dynamic_index->forward && dynamic_index->backward,
-        "dynamic index kernel registered");
-  if (!dynamic_index || !dynamic_index->forward || !dynamic_index->backward)
-    return;
-
-  DynamicIndexSpec packed_spec;
-  packed_spec.matrix_leaf = true;
-  packed_spec.axes = {
-      {DynamicIndexSpec::Axis::Single, 2, 1, 1, 0},
-      {DynamicIndexSpec::Axis::Range, 3, 2, 3, 1},
-  };
-  packed_spec.axes[1].count_input_offset = 2;
-  packed_spec.selected_size = 3;
-  double base[] = {1, 2, 3, 4, 5, 6};
-  double selectors[] = {2, 1, 3};
-  double packed_output[3] = {};
-  double packed_base_adj[6] = {};
-  double seed[] = {1, 2, 3};
-  KernelCtx packed{};
-  packed.n_in = 2;
-  packed.in[0] = {base, 6};
-  packed.in[1] = {selectors, 3};
-  packed.in_adj[0] = {packed_base_adj, 6};
-  packed.in_adj[1] = {nullptr, 3};
-  packed.out = {packed_output, 3};
-  packed.out_adj_vec = {seed, 3};
-  packed.udata = &packed_spec;
-  dynamic_index->forward(packed);
-  dynamic_index->backward(packed);
-
-  DynamicIndexSpec direct_spec = packed_spec;
-  direct_spec.input_count = 4;
-  direct_spec.axes[0].selector_input = 1;
-  direct_spec.axes[0].input_offset = 0;
-  direct_spec.axes[1].selector_input = 2;
-  direct_spec.axes[1].input_offset = 0;
-  direct_spec.axes[1].count_input = 3;
-  direct_spec.axes[1].count_input_offset = 0;
-  double row = 2, lower = 1, upper = 3;
-  double direct_output[3] = {};
-  double direct_base_adj[6] = {};
-  KernelCtx direct{};
-  direct.n_in = 4;
-  direct.in[0] = {base, 6};
-  direct.in[1] = {&row, 1};
-  direct.in[2] = {&lower, 1};
-  direct.in[3] = {&upper, 1};
-  direct.in_adj[0] = {direct_base_adj, 6};
-  direct.in_adj[1] = {nullptr, 1};
-  direct.in_adj[2] = {nullptr, 1};
-  direct.in_adj[3] = {nullptr, 1};
-  direct.out = {direct_output, 3};
-  direct.out_adj_vec = {seed, 3};
-  direct.udata = &direct_spec;
-  dynamic_index->forward(direct);
-  dynamic_index->backward(direct);
-  check(std::memcmp(packed_output, direct_output, sizeof(packed_output)) == 0,
-        "direct index matches packed values bitwise");
-  check(std::memcmp(packed_base_adj, direct_base_adj,
-                    sizeof(packed_base_adj)) == 0,
-        "direct index matches packed adjoints bitwise");
-
-  upper = 0;
-  dynamic_index->forward(direct);
-  check(direct_output[0] == 0 && direct_output[1] == 0 && direct_output[2] == 0,
-        "direct dynamic range supports zero selected values");
-  upper = 4;
-  lower = 4;
-  try {
-    dynamic_index->forward(direct);
-    check(false, "direct index validates selectors");
-  } catch (const std::out_of_range& error) {
-    check(std::string(error.what()) == "structured index out of range",
-          "direct index selector message");
-  }
-  lower = 1;
-  direct.n_in = 3;
-  try {
-    dynamic_index->forward(direct);
-    check(false, "direct index validates input arity");
-  } catch (const std::logic_error& error) {
-    check(std::string(error.what()) == "invalid structured index descriptor",
-          "direct index arity message");
-  }
-  direct.n_in = 4;
-  lower = 1;
-  upper = 3;
-
-  DynamicIndexSpec invalid_route = direct_spec;
-  invalid_route.axes[0].selector_input = 0;
-  direct.udata = &invalid_route;
-  try {
-    dynamic_index->forward(direct);
-    check(false, "direct index rejects the base as a selector descriptor");
-  } catch (const std::logic_error&) {
-  }
-  invalid_route = direct_spec;
-  invalid_route.axes[1].count_input = 4;
-  direct.udata = &invalid_route;
-  try {
-    dynamic_index->forward(direct);
-    check(false, "direct index rejects an out-of-range count descriptor");
-  } catch (const std::logic_error&) {
-  }
-  direct.udata = &direct_spec;
-
-  DynamicIndexSpec extent_spec;
-  extent_spec.input_count = 2;
-  extent_spec.axes = {{DynamicIndexSpec::Axis::All, 4, 1, 4, 0}};
-  extent_spec.axes[0].extent_input = 1;
-  extent_spec.axes[0].extent_input_offset = 0;
-  extent_spec.axes[0].count_input = 1;
-  extent_spec.axes[0].count_input_offset = 0;
-  extent_spec.selected_size = 4;
-  double logical_extent = 2;
-  double extent_output[4] = {-1, -1, -1, -1};
-  KernelCtx extent{};
-  extent.n_in = 2;
-  extent.in[0] = {base, 4};
-  extent.in[1] = {&logical_extent, 1};
-  extent.out = {extent_output, 4};
-  extent.udata = &extent_spec;
-  dynamic_index->forward(extent);
-  check(extent_output[0] == 1 && extent_output[1] == 2 &&
-            extent_output[2] == 0 && extent_output[3] == 0,
-        "direct logical extent preserves output capacity and zero fill");
-
-  const Kernel* dynamic_update = find_kernel(OP_SET_INDEX_DYNAMIC);
-  check(dynamic_update && dynamic_update->forward && dynamic_update->backward,
-        "dynamic update kernel registered");
-  if (!dynamic_update || !dynamic_update->forward || !dynamic_update->backward)
-    return;
-
-  DynamicIndexSpec packed_update;
-  packed_update.matrix_leaf = true;
-  packed_update.axes = {
-      {DynamicIndexSpec::Axis::Single, 2, 1, 1, 0},
-      {DynamicIndexSpec::Axis::Range, 3, 2, 3, 1},
-  };
-  packed_update.axes[1].count_input_offset = 2;
-  packed_update.axes[1].extent_input_offset = 3;
-  packed_update.selected_size = 3;
-  double update_selectors[] = {2, 1, 3, 3};
-  double update_rhs[] = {10, 20, 30};
-  double update_seed[] = {1, 2, 3, 4, 5, 6};
-  double packed_update_output[6] = {};
-  double packed_update_base_adj[6] = {};
-  double packed_update_rhs_adj[3] = {};
-  KernelCtx packed_update_context{};
-  packed_update_context.n_in = 3;
-  packed_update_context.in[0] = {base, 6};
-  packed_update_context.in[1] = {update_selectors, 4};
-  packed_update_context.in[2] = {update_rhs, 3};
-  packed_update_context.in_adj[0] = {packed_update_base_adj, 6};
-  packed_update_context.in_adj[1] = {nullptr, 4};
-  packed_update_context.in_adj[2] = {packed_update_rhs_adj, 3};
-  packed_update_context.out = {packed_update_output, 6};
-  packed_update_context.out_adj_vec = {update_seed, 6};
-  packed_update_context.udata = &packed_update;
-  dynamic_update->forward(packed_update_context);
-  dynamic_update->backward(packed_update_context);
-
-  DynamicIndexSpec direct_update = packed_update;
-  direct_update.input_count = 6;
-  direct_update.rhs_input = 5;
-  direct_update.axes[0].selector_input = 1;
-  direct_update.axes[0].input_offset = 0;
-  direct_update.axes[1].selector_input = 2;
-  direct_update.axes[1].input_offset = 0;
-  direct_update.axes[1].count_input = 3;
-  direct_update.axes[1].count_input_offset = 0;
-  direct_update.axes[1].extent_input = 4;
-  direct_update.axes[1].extent_input_offset = 0;
-  double update_row = 2, update_lower = 1, update_upper = 3, update_extent = 3;
-  double direct_update_output[6] = {};
-  double direct_update_base_adj[6] = {};
-  double direct_update_rhs_adj[3] = {};
-  KernelCtx direct_update_context{};
-  direct_update_context.n_in = 6;
-  direct_update_context.in[0] = {base, 6};
-  direct_update_context.in[1] = {&update_row, 1};
-  direct_update_context.in[2] = {&update_lower, 1};
-  direct_update_context.in[3] = {&update_upper, 1};
-  direct_update_context.in[4] = {&update_extent, 1};
-  direct_update_context.in[5] = {update_rhs, 3};
-  direct_update_context.in_adj[0] = {direct_update_base_adj, 6};
-  direct_update_context.in_adj[1] = {nullptr, 1};
-  direct_update_context.in_adj[2] = {nullptr, 1};
-  direct_update_context.in_adj[3] = {nullptr, 1};
-  direct_update_context.in_adj[4] = {nullptr, 1};
-  direct_update_context.in_adj[5] = {direct_update_rhs_adj, 3};
-  direct_update_context.out = {direct_update_output, 6};
-  direct_update_context.out_adj_vec = {update_seed, 6};
-  direct_update_context.udata = &direct_update;
-  dynamic_update->forward(direct_update_context);
-  dynamic_update->backward(direct_update_context);
-  check(std::memcmp(packed_update_output, direct_update_output,
-                    sizeof(packed_update_output)) == 0,
-        "direct update matches packed values bitwise");
-  check(std::memcmp(packed_update_base_adj, direct_update_base_adj,
-                    sizeof(packed_update_base_adj)) == 0 &&
-            std::memcmp(packed_update_rhs_adj, direct_update_rhs_adj,
-                        sizeof(packed_update_rhs_adj)) == 0,
-        "direct update matches packed adjoints bitwise");
-
-  direct_update_context.n_in = 5;
-  try {
-    dynamic_update->forward(direct_update_context);
-    check(false, "direct update validates input arity");
-  } catch (const std::logic_error&) {
-  }
-  direct_update_context.n_in = 6;
-  DynamicIndexSpec invalid_update = direct_update;
-  invalid_update.axes[1].count_input = invalid_update.rhs_input;
-  direct_update_context.udata = &invalid_update;
-  try {
-    dynamic_update->forward(direct_update_context);
-    check(false, "direct update rejects the RHS as a selector descriptor");
-  } catch (const std::logic_error&) {
-  }
-  invalid_update = direct_update;
-  invalid_update.rhs_input = -1;
-  direct_update_context.udata = &invalid_update;
-  try {
-    dynamic_update->forward(direct_update_context);
-    check(false, "direct update requires an explicit direct RHS");
-  } catch (const std::logic_error&) {
-  }
-  DynamicIndexSpec invalid_read = direct_spec;
-  invalid_read.rhs_input = direct_spec.input_count - 1;
-  direct.udata = &invalid_read;
-  try {
-    dynamic_index->forward(direct);
-    check(false, "direct read rejects an RHS descriptor");
-  } catch (const std::logic_error&) {
-  }
-  direct.udata = &direct_spec;
-
-  DynamicIndexSpec packed_duplicate;
-  packed_duplicate.axes = {{DynamicIndexSpec::Axis::Multi, 4, 1, 3, 0}};
-  packed_duplicate.axes[0].count_input_offset = 3;
-  packed_duplicate.selected_size = 3;
-  double duplicate_base[] = {1, 2, 3, 4};
-  double duplicate_selector[] = {2, 2, 4, 3};
-  double duplicate_values[] = {10, 20, 30};
-  double duplicate_seed[] = {1, 2, 3, 4};
-  double packed_duplicate_output[4] = {};
-  double packed_duplicate_scratch[4] = {};
-  double packed_duplicate_base_adj[4] = {};
-  double packed_duplicate_rhs_adj[3] = {};
-  KernelCtx packed_duplicate_context{};
-  packed_duplicate_context.n_in = 3;
-  packed_duplicate_context.in[0] = {duplicate_base, 4};
-  packed_duplicate_context.in[1] = {duplicate_selector, 4};
-  packed_duplicate_context.in[2] = {duplicate_values, 3};
-  packed_duplicate_context.in_adj[0] = {packed_duplicate_base_adj, 4};
-  packed_duplicate_context.in_adj[1] = {nullptr, 4};
-  packed_duplicate_context.in_adj[2] = {packed_duplicate_rhs_adj, 3};
-  packed_duplicate_context.out = {packed_duplicate_output, 4};
-  packed_duplicate_context.out_adj_vec = {duplicate_seed, 4};
-  packed_duplicate_context.scratch = packed_duplicate_scratch;
-  packed_duplicate_context.udata = &packed_duplicate;
-  dynamic_update->forward(packed_duplicate_context);
-  dynamic_update->backward(packed_duplicate_context);
-
-  DynamicIndexSpec direct_duplicate = packed_duplicate;
-  direct_duplicate.input_count = 4;
-  direct_duplicate.rhs_input = 3;
-  direct_duplicate.axes[0].selector_input = 1;
-  direct_duplicate.axes[0].input_offset = 0;
-  direct_duplicate.axes[0].count_input = 2;
-  direct_duplicate.axes[0].count_input_offset = 0;
-  double duplicate_count = 3;
-  double direct_duplicate_output[4] = {};
-  double direct_duplicate_scratch[4] = {};
-  double direct_duplicate_base_adj[4] = {};
-  double direct_duplicate_rhs_adj[3] = {};
-  KernelCtx direct_duplicate_context{};
-  direct_duplicate_context.n_in = 4;
-  direct_duplicate_context.in[0] = {duplicate_base, 4};
-  direct_duplicate_context.in[1] = {duplicate_selector, 3};
-  direct_duplicate_context.in[2] = {&duplicate_count, 1};
-  direct_duplicate_context.in[3] = {duplicate_values, 3};
-  direct_duplicate_context.in_adj[0] = {direct_duplicate_base_adj, 4};
-  direct_duplicate_context.in_adj[1] = {nullptr, 3};
-  direct_duplicate_context.in_adj[2] = {nullptr, 1};
-  direct_duplicate_context.in_adj[3] = {direct_duplicate_rhs_adj, 3};
-  direct_duplicate_context.out = {direct_duplicate_output, 4};
-  direct_duplicate_context.out_adj_vec = {duplicate_seed, 4};
-  direct_duplicate_context.scratch = direct_duplicate_scratch;
-  direct_duplicate_context.udata = &direct_duplicate;
-  dynamic_update->forward(direct_duplicate_context);
-  dynamic_update->backward(direct_duplicate_context);
-  check(std::memcmp(packed_duplicate_output, direct_duplicate_output,
-                    sizeof(packed_duplicate_output)) == 0 &&
-            std::memcmp(packed_duplicate_base_adj, direct_duplicate_base_adj,
-                        sizeof(packed_duplicate_base_adj)) == 0 &&
-            std::memcmp(packed_duplicate_rhs_adj, direct_duplicate_rhs_adj,
-                        sizeof(packed_duplicate_rhs_adj)) == 0,
-        "direct duplicate update matches packed value and adjoints bitwise");
-  check(
-      direct_duplicate_output[0] == 1 && direct_duplicate_output[1] == 20 &&
-          direct_duplicate_output[2] == 3 && direct_duplicate_output[3] == 30 &&
-          direct_duplicate_rhs_adj[0] == 0 &&
-          direct_duplicate_rhs_adj[1] == 2 && direct_duplicate_rhs_adj[2] == 4,
-      "direct duplicate update preserves last-write semantics");
-}
-
 static std::string fixture_mir(const std::string& name) {
   std::ifstream input("tests/fixtures/" + name + ".tmir.sexp");
   check(bool(input), "generated MIR fixture is readable");
@@ -1432,13 +1083,8 @@ static std::shared_ptr<StructuredLoop> duplicate_node_plan() {
   Node second = first;
   plan->root = sequence({std::move(first), std::move(second)});
   plan->outputs = {product};
-  bool rejected = false;
-  try {
-    plan->prepare();
-  } catch (const std::invalid_argument&) {
-    rejected = true;
-  }
-  check(rejected, "duplicate output slots are rejected");
+  check(throws<std::invalid_argument>([&] { plan->prepare(); }),
+        "duplicate output slots are rejected");
   const int second_product = plan->body.add_slot(1, false);
   Node replacement = call(*plan, OP_MUL, {theta, beta}, second_product);
   plan->root = sequence(
@@ -1463,13 +1109,9 @@ static void iterator_history_tests() {
 
   Executor retry(outer(iterator_history_plan()));
   iterator_throw_once = true;
-  bool threw = false;
-  try {
-    (void)evaluate(retry, .25, 0);
-  } catch (const std::runtime_error& error) {
-    threw = std::string(error.what()) == "injected iterator callback failure";
-  }
-  check(threw, "forward preserves a callback exception");
+  check(throws<std::runtime_error>([&] { (void)evaluate(retry, .25, 0); },
+                                   "injected iterator callback failure"),
+        "forward preserves a callback exception");
   iterator_forward_values.clear();
   iterator_reverse_values.clear();
   const Evaluation retried = evaluate(retry, .25, 0);
@@ -2269,27 +1911,22 @@ static void integer_result_tests() {
   }
 
   Executor retry(outer(imported_integer_output_plan()));
-  bool threw = false;
-  try {
-    (void)evaluate(retry,
-                   static_cast<double>(std::numeric_limits<int32_t>::max()), 1);
-  } catch (const std::domain_error& error) {
-    threw = std::string(error.what()) ==
-            "integer arithmetic exceeds Stan integer range";
-  }
-  check(threw, "integer arithmetic exception is preserved");
+  check(throws<std::domain_error>(
+            [&] {
+              (void)evaluate(
+                  retry,
+                  static_cast<double>(std::numeric_limits<int32_t>::max()), 1);
+            },
+            "integer arithmetic exceeds Stan integer range"),
+        "integer arithmetic exception is preserved");
   const Evaluation retried = evaluate(retry, 2, 3);
   close(retried.value, 5, "integer retry value");
   close(retried.gradient[0], 0, "integer retry theta gradient");
 
   Executor division_retry(outer(imported_integer_output_plan(3)));
-  threw = false;
-  try {
-    (void)evaluate(division_retry, 4, 0);
-  } catch (const std::domain_error& error) {
-    threw = std::string(error.what()) == "integer division by zero";
-  }
-  check(threw, "integer division exception is preserved");
+  check(throws<std::domain_error>([&] { (void)evaluate(division_retry, 4, 0); },
+                                  "integer division by zero"),
+        "integer division exception is preserved");
   close(evaluate(division_retry, 4, 2).value, 2,
         "integer division retry value");
 
@@ -2326,14 +1963,9 @@ static void integer_result_tests() {
     replacement.scratch_size = inactive_workspace_size;
     ScopedKernelOverride overridden(OP_INT_ARITH, replacement);
     Executor workspace(outer(inactive_workspace_plan()));
-    bool workspace_threw = false;
-    try {
-      (void)evaluate(workspace, 0, 0);
-    } catch (const std::runtime_error& error) {
-      workspace_threw =
-          std::string(error.what()) == "injected inactive workspace failure";
-    }
-    check(workspace_threw, "transient kernel exception is preserved");
+    check(throws<std::runtime_error>([&] { (void)evaluate(workspace, 0, 0); },
+                                     "injected inactive workspace failure"),
+          "transient kernel exception is preserved");
     const Evaluation workspace_result = evaluate(workspace, 0, 0);
     close(workspace_result.value, 11,
           "transient kernel preserves second output and retry");
@@ -2382,13 +2014,10 @@ static void integer_result_tests() {
     ScopedKernelOverride overridden(OP_ADD, replacement);
     Executor retry_producer(outer(repeated_output_plan(3)));
     workspace_producer_throw_once = true;
-    bool producer_threw = false;
-    try {
-      (void)evaluate(retry_producer, 0, 0);
-    } catch (const std::runtime_error& error) {
-      producer_threw = std::string(error.what()) == "injected producer failure";
-    }
-    check(producer_threw, "producer preserves its forward exception");
+    check(throws<std::runtime_error>(
+              [&] { (void)evaluate(retry_producer, 0, 0); },
+              "injected producer failure"),
+          "producer preserves its forward exception");
     close(evaluate(retry_producer, 0, 0).value, 5,
           "producer retry rebuilds its output");
   }
@@ -2852,13 +2481,10 @@ static void control_tests() {
         "find retry control-cone callback");
   Executor retry_executor(outer(retry_plan));
   control_throw_once = true;
-  bool threw = false;
-  try {
-    (void)evaluate_invariant(retry_executor, .25);
-  } catch (const std::runtime_error& error) {
-    threw = std::string(error.what()) == "injected control failure";
-  }
-  check(threw, "transient callback preserves its forward exception");
+  check(throws<std::runtime_error>(
+            [&] { (void)evaluate_invariant(retry_executor, .25); },
+            "injected control failure"),
+        "transient callback preserves its forward exception");
   const Evaluation retry = evaluate_invariant(retry_executor, .25);
   check(std::memcmp(&direct, &retry, sizeof(Evaluation)) == 0,
         "retry after a transient failure rebuilds clean state");
@@ -3003,33 +2629,20 @@ static void failure_tests() {
   double gradient[2];
 
   fail_forward.store(true);
-  bool forward_threw = false;
-  try {
-    (void)executor.gradient(gradient);
-  } catch (const std::runtime_error& error) {
-    forward_threw =
-        std::string(error.what()) == "injected structured forward failure";
-  }
-  check(forward_threw, "forward exception is preserved");
+  check(throws<std::runtime_error>([&] { (void)executor.gradient(gradient); },
+                                   "injected structured forward failure"),
+        "forward exception is preserved");
 
   fail_backward.store(true);
-  bool backward_threw = false;
-  try {
-    (void)executor.gradient(gradient);
-  } catch (const std::runtime_error& error) {
-    backward_threw =
-        std::string(error.what()) == "injected structured backward failure";
-  }
-  check(backward_threw, "backward exception is preserved");
+  check(throws<std::runtime_error>([&] { (void)executor.gradient(gradient); },
+                                   "injected structured backward failure"),
+        "backward exception is preserved");
 
-  bool stale_reverse = false;
-  try {
-    KernelCtx stale{};
-    structured_loop_backward(stale);
-  } catch (const std::logic_error&) {
-    stale_reverse = true;
-  }
-  check(stale_reverse, "reverse without a forward is refused");
+  check(throws<std::logic_error>([] {
+          KernelCtx stale{};
+          structured_loop_backward(stale);
+        }),
+        "reverse without a forward is refused");
 
   auto reference_plan = recurrence(8);
   Executor reference(outer(reference_plan));
@@ -3051,13 +2664,8 @@ static void refusal_tests() {
     exit.kind = Node::Break;
     plan->root = sequence({std::move(exit)});
     plan->outputs = {theta};
-    bool rejected = false;
-    try {
-      plan->prepare();
-    } catch (const std::invalid_argument&) {
-      rejected = true;
-    }
-    check(rejected, "break outside a loop is rejected");
+    check(throws<std::invalid_argument>([&] { plan->prepare(); }),
+          "break outside a loop is rejected");
   }
   {
     auto plan = std::make_shared<StructuredLoop>();
@@ -3066,13 +2674,8 @@ static void refusal_tests() {
     plan->imports = {{theta, 0, 0, true}};
     plan->root = alias(wide, theta);
     plan->outputs = {wide};
-    bool rejected = false;
-    try {
-      plan->prepare();
-    } catch (const std::invalid_argument&) {
-      rejected = true;
-    }
-    check(rejected, "alias between different lengths is rejected");
+    check(throws<std::invalid_argument>([&] { plan->prepare(); }),
+          "alias between different lengths is rejected");
   }
   {
     auto plan = std::make_shared<StructuredLoop>();
@@ -3081,13 +2684,8 @@ static void refusal_tests() {
     plan->imports = {{theta, 0, 0, true}};
     plan->root = call(*plan, OP_LOOP, {theta}, result);
     plan->outputs = {result};
-    bool rejected = false;
-    try {
-      plan->prepare();
-    } catch (const std::invalid_argument&) {
-      rejected = true;
-    }
-    check(rejected, "nested OP_LOOP is rejected");
+    check(throws<std::invalid_argument>([&] { plan->prepare(); }),
+          "nested OP_LOOP is rejected");
   }
 }
 
@@ -3123,13 +2721,10 @@ static void automatic_policy_tests() {
   check(retained(renamed_auto) != nullptr,
         "alpha-renaming preserves automatic structural selection");
 
-  bool force_refused = false;
-  try {
-    (void)compile_fixture("structured_auto_refusal", 32, Mode::Force);
-  } catch (const CompileError&) {
-    force_refused = true;
-  }
-  check(force_refused, "unsupported native candidate is identified");
+  check(throws<CompileError>([] {
+          (void)compile_fixture("structured_auto_refusal", 32, Mode::Force);
+        }),
+        "unsupported native candidate is identified");
   const auto refused_auto =
       compile_fixture("structured_auto_refusal", 32, Mode::Auto);
   const auto refused_off =
@@ -3186,99 +2781,6 @@ static void automatic_policy_tests() {
   compare_gradients(while_auto, while_off, {{.3}, {-.8}},
                     "top-level while target parity",
                     "top-level while gradient parity");
-}
-
-static void probe_mode_tests() {
-  static const std::map<std::string, const mir::FunDef*> no_funs;
-  auto var_expr = [](std::string name, mir::UnsizedLeaf leaf) {
-    mir::Expr e;
-    e.kind = mir::Expr::Var;
-    e.name = std::move(name);
-    e.unsized = {0, leaf};
-    e.data_only = true;
-    return e;
-  };
-  auto index_single = [](mir::Expr idx) {
-    mir::Expr e;
-    e.kind = mir::Expr::FunApp;
-    e.name = "IndexSingle";
-    e.args = {std::move(idx)};
-    return e;
-  };
-  mir::Expr expr;
-  expr.kind = mir::Expr::Indexed;
-  expr.args = {var_expr("x", mir::UnsizedLeaf::Vector),
-               index_single(var_expr("i", mir::UnsizedLeaf::Int))};
-  expr.type_ = "UReal";
-  expr.unsized = {0, mir::UnsizedLeaf::Real};
-  expr.data_only = true;
-
-  DataMap::Entry x;
-  x.r = {10.0, 20.0, 30.0};
-  x.dims = {3};
-
-  auto evaluate = [&](bool probe) {
-    MirInterp<double> m(no_funs, "probe mode test");
-    m.env()["x"] = x;
-    std::optional<double> lo, hi;
-    for (long i = -1; i <= 5; ++i) {
-      DataMap::Entry iv;
-      iv.is_int = true;
-      iv.i = {static_cast<int>(i)};
-      iv.r = {static_cast<double>(i)};
-      m.env()["i"] = iv;
-      bool ok = true;
-      DataMap::Entry result;
-      if (probe) {
-        m.set_probe(true);
-        result = m.eval(expr);
-        if (m.probe_failed()) {
-          m.clear_probe_failed();
-          ok = false;
-        }
-        m.set_probe(false);
-      } else {
-        try {
-          result = m.eval(expr);
-        } catch (const std::exception&) {
-          ok = false;
-        }
-      }
-      if (ok && result.r.size() == 1) {
-        if (!lo) {
-          lo = hi = result.r[0];
-        } else {
-          lo = std::min(*lo, result.r[0]);
-          hi = std::max(*hi, result.r[0]);
-        }
-      }
-    }
-    return std::make_pair(lo, hi);
-  };
-
-  const auto with_throw = evaluate(false);
-  const auto with_probe = evaluate(true);
-  check(with_throw == with_probe,
-        "probe mode matches throw-and-catch over out-of-bounds indices");
-  check(with_throw.first.has_value() && *with_throw.first == 10.0 &&
-            *with_throw.second == 30.0,
-        "in-bounds combinations still contribute");
-
-  const mir::Expr unknown = var_expr("y", mir::UnsizedLeaf::Real);
-  MirInterp<double> probing(no_funs, "probe mode test");
-  probing.set_probe(true);
-  probing.eval(unknown);
-  check(probing.probe_failed(), "unresolved variable sets the probe flag");
-  probing.clear_probe_failed();
-
-  bool threw = false;
-  MirInterp<double> throwing(no_funs, "probe mode test");
-  try {
-    throwing.eval(unknown);
-  } catch (const std::exception&) {
-    threw = true;
-  }
-  check(threw, "the same expression still throws outside probe mode");
 }
 
 static std::string graph_text(const CompiledModel& cm) {
@@ -3757,28 +3259,14 @@ static void runtime_index_tests() {
   }
 }
 
-static std::atomic<int> memo_int_calls{0};
-static std::atomic<int> memo_compare_calls{0};
-static std::atomic<int> memo_index_calls{0};
-
-static void count_memo_int(KernelCtx& context) {
-  ++memo_int_calls;
+static void memo_int_forward(KernelCtx& context) {
   find_kernel(OP_INT_ARITH)->forward(context);
 }
-static void count_memo_compare(KernelCtx& context) {
-  ++memo_compare_calls;
+static void memo_compare_forward(KernelCtx& context) {
   find_kernel(OP_COMPARE)->forward(context);
 }
-static void count_memo_index(KernelCtx& context) {
-  ++memo_index_calls;
+static void memo_index_forward(KernelCtx& context) {
   find_kernel(OP_INDEX_DYNAMIC)->forward(context);
-}
-
-static const Node* find_kind(const Node& node, Node::Kind kind) {
-  if (node.kind == kind) return &node;
-  for (const auto& child : node.children)
-    if (const Node* found = find_kind(child, kind)) return found;
-  return nullptr;
 }
 
 // theta * sum(1..n) where the sum is an integer chain on the data import n.
@@ -3812,7 +3300,7 @@ static std::shared_ptr<StructuredLoop> memo_counter_plan(bool with_break) {
                          call(*plan, OP_MUL, {theta, acc}, result)});
   plan->outputs = {result};
   plan->prepare();
-  check(set_forward(plan->root, step_op, count_memo_int),
+  check(set_forward(plan->root, step_op, memo_int_forward),
         "find memo counter callback");
   return plan;
 }
@@ -3853,8 +3341,8 @@ static std::shared_ptr<StructuredLoop> memo_branch_plan(bool active_compare) {
                        alias(result, zero))});
   plan->outputs = {result};
   plan->prepare();
-  check(set_forward(plan->root, index_op, count_memo_index) &&
-            set_forward(plan->root, compare_op, count_memo_compare),
+  check(set_forward(plan->root, index_op, memo_index_forward) &&
+            set_forward(plan->root, compare_op, memo_compare_forward),
         "find memo branch callbacks");
   return plan;
 }
@@ -3934,7 +3422,7 @@ static void memo_tests() {
          call(*plan, OP_MUL, {theta, acc}, result)});
     plan->outputs = {result};
     plan->prepare();
-    check(set_forward(plan->root, step_op, count_memo_int),
+    check(set_forward(plan->root, step_op, memo_int_forward),
           "find guarded loop callback");
     Executor executor(outer(plan, {1, 1}, {1}));
     const Evaluation skipped = evaluate_memo(executor, -.5, 3);
@@ -3982,7 +3470,7 @@ static void memo_tests() {
              call(*escaping, OP_ADD, {acc, term}, next), alias(acc, next)}));
     escaping->outputs = {acc};
     prepare_kernels(*escaping);
-    check(set_forward(escaping->root, compare_op, count_memo_compare),
+    check(set_forward(escaping->root, compare_op, memo_compare_forward),
           "find escaping break callback");
     Executor escaping_executor(outer(escaping, {1, 1}, {1}));
     const Evaluation escaped = evaluate_memo(escaping_executor, .25, 10);
@@ -4041,14 +3529,17 @@ static void record_arm_mul(KernelCtx& context) {
   find_kernel(OP_MUL)->forward(context);
 }
 
-// theta * sum of the iterators whose table entry is positive; `reuse_guard`
-// also adds theta * guard after the branch so the guard value stays live.
-static std::shared_ptr<StructuredLoop> traced_branch_plan(bool reuse_guard) {
+// theta * sum of the iterators whose table entry is positive over `rows`
+// rows; `param_guard` also adds theta per row while theta > 0, and
+// `reuse_guard` adds theta * guard after the branch so the guard value stays
+// live.
+static std::shared_ptr<StructuredLoop> row_scan_plan(int rows, bool param_guard,
+                                                     bool reuse_guard = false) {
   auto plan = std::make_shared<StructuredLoop>();
   const int theta = plan->body.add_slot(1, false);
-  const int table = plan->body.add_slot(3, false);
+  const int table = plan->body.add_slot(rows, false);
   const int one = scalar(*plan, 1);
-  const int three = scalar(*plan, 3);
+  const int last = scalar(*plan, rows);
   const int zero = scalar(*plan, 0);
   const int iterator = plan->body.add_slot(1, false);
   const int picked = plan->body.add_slot(1, false);
@@ -4059,7 +3550,7 @@ static std::shared_ptr<StructuredLoop> traced_branch_plan(bool reuse_guard) {
   const int next = plan->body.add_slot(1, false);
   plan->imports = {{theta, 0, 0, true, false}, {table, 2, 0, false, true}};
   Node index = call(*plan, OP_INDEX_DYNAMIC, {table, iterator}, picked);
-  attach(*plan, index.op, single_spec(3));
+  attach(*plan, index.op, single_spec(rows));
   const int index_op = index.op;
   Node compare = call(*plan, OP_COMPARE, {picked, zero}, guard);
   plan->body.ops[static_cast<size_t>(compare.op)].variant = 2;
@@ -4081,13 +3572,24 @@ static std::shared_ptr<StructuredLoop> traced_branch_plan(bool reuse_guard) {
     body.push_back(call(*plan, OP_ADD, {acc, bonus}, bumped));
     body.push_back(alias(acc, bumped));
   }
-  plan->root = counted(one, three, iterator, sequence(std::move(body)));
+  if (param_guard) {
+    const int positive = plan->body.add_slot(1, false);
+    const int bumped = plan->body.add_slot(1, false);
+    Node sign = call(*plan, OP_COMPARE, {theta, zero}, positive);
+    plan->body.ops[static_cast<size_t>(sign.op)].variant = 2;
+    body.push_back(std::move(sign));
+    body.push_back(branch(positive,
+                          sequence({call(*plan, OP_ADD, {acc, theta}, bumped),
+                                    alias(acc, bumped)}),
+                          sequence({})));
+  }
+  plan->root = counted(one, last, iterator, sequence(std::move(body)));
   plan->outputs = {acc};
   prepare_kernels(*plan);
-  check(set_forward(plan->root, index_op, count_memo_index) &&
-            set_forward(plan->root, compare_op, count_memo_compare) &&
+  check(set_forward(plan->root, index_op, memo_index_forward) &&
+            set_forward(plan->root, compare_op, memo_compare_forward) &&
             set_forward(plan->root, scale_op, record_arm_mul),
-        "find traced branch callbacks");
+        "find row scan callbacks");
   return plan;
 }
 
@@ -4136,7 +3638,7 @@ static std::shared_ptr<StructuredLoop> traced_while_plan(bool param_break) {
                                    sequence(std::move(body)))});
   plan->outputs = {x};
   prepare_kernels(*plan);
-  check(set_forward(plan->root, compare_op, count_memo_compare) &&
+  check(set_forward(plan->root, compare_op, memo_compare_forward) &&
             set_forward(plan->root, grow_op, count_mul_forward),
         "find traced while callbacks");
   return plan;
@@ -4189,10 +3691,10 @@ static std::shared_ptr<StructuredLoop> traced_chain_plan() {
                                sequence({}))}));
   plan->outputs = {acc};
   prepare_kernels(*plan);
-  check(set_forward(plan->root, index_op, count_memo_index) &&
-            set_forward(plan->root, compare_op, count_memo_compare) &&
-            set_forward(plan->root, index2_op, count_memo_index) &&
-            set_forward(plan->root, compare2_op, count_memo_compare) &&
+  check(set_forward(plan->root, index_op, memo_index_forward) &&
+            set_forward(plan->root, compare_op, memo_compare_forward) &&
+            set_forward(plan->root, index2_op, memo_index_forward) &&
+            set_forward(plan->root, compare2_op, memo_compare_forward) &&
             set_forward(plan->root, scale_op, record_arm_mul),
         "find traced chain callbacks");
   return plan;
@@ -4212,7 +3714,7 @@ static void trace_tests() {
           "guard chain replays the recorded arms");
   }
   {
-    auto plan = traced_branch_plan(false);
+    auto plan = row_scan_plan(3, false);
     Executor executor(outer(plan, {1, 1}, {3}));
     const Evaluation first = evaluate_traced(executor, .25, {1, 0, 2});
     close(first.value, 1, "traced branch first value");
@@ -4246,7 +3748,7 @@ static void trace_tests() {
     close(early.gradient[0], 27, "untraced while early gradient");
   }
   {
-    auto plan = traced_branch_plan(true);
+    auto plan = row_scan_plan(3, false, true);
     Executor executor(outer(plan, {1, 1}, {3}));
     const Evaluation first = evaluate_traced(executor, .25, {1, 0, 2});
     close(first.value, 1.5, "live guard first value");
@@ -4258,7 +3760,7 @@ static void trace_tests() {
           "live guard replays the recorded arms");
   }
   {
-    const Graph graph = outer(traced_branch_plan(false), {1, 1}, {3});
+    const Graph graph = outer(row_scan_plan(3, false), {1, 1}, {3});
     Executor first(graph), second(graph);
     const Evaluation a = evaluate_traced(first, .25, {1, 0, 2});
     close(a.value, 1, "first executor traced value");
@@ -4276,61 +3778,6 @@ static void trace_tests() {
     check(traced_arm_iterators == std::vector<double>{2},
           "second executor replays its own arms");
   }
-}
-
-// theta * sum of the iterators whose table entry is positive over `rows`
-// rows; `param_guard` also adds theta per row while theta > 0.
-static std::shared_ptr<StructuredLoop> row_scan_plan(int rows,
-                                                     bool param_guard) {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int table = plan->body.add_slot(rows, false);
-  const int one = scalar(*plan, 1);
-  const int last = scalar(*plan, rows);
-  const int zero = scalar(*plan, 0);
-  const int iterator = plan->body.add_slot(1, false);
-  const int picked = plan->body.add_slot(1, false);
-  const int guard = plan->body.add_slot(1, false);
-  const int term = plan->body.add_slot(1, false);
-  const int acc = plan->body.add_slot(1, false);
-  plan->fills.push_back({acc, {0}});
-  const int next = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true, false}, {table, 2, 0, false, true}};
-  Node index = call(*plan, OP_INDEX_DYNAMIC, {table, iterator}, picked);
-  attach(*plan, index.op, single_spec(rows));
-  const int index_op = index.op;
-  Node compare = call(*plan, OP_COMPARE, {picked, zero}, guard);
-  plan->body.ops[static_cast<size_t>(compare.op)].variant = 2;
-  const int compare_op = compare.op;
-  Node scale = call(*plan, OP_MUL, {theta, iterator}, term);
-  const int scale_op = scale.op;
-  std::vector<Node> body;
-  body.push_back(std::move(index));
-  body.push_back(std::move(compare));
-  body.push_back(
-      branch(guard,
-             sequence({std::move(scale), call(*plan, OP_ADD, {acc, term}, next),
-                       alias(acc, next)}),
-             sequence({})));
-  if (param_guard) {
-    const int positive = plan->body.add_slot(1, false);
-    const int bumped = plan->body.add_slot(1, false);
-    Node sign = call(*plan, OP_COMPARE, {theta, zero}, positive);
-    plan->body.ops[static_cast<size_t>(sign.op)].variant = 2;
-    body.push_back(std::move(sign));
-    body.push_back(branch(positive,
-                          sequence({call(*plan, OP_ADD, {acc, theta}, bumped),
-                                    alias(acc, bumped)}),
-                          sequence({})));
-  }
-  plan->root = counted(one, last, iterator, sequence(std::move(body)));
-  plan->outputs = {acc};
-  prepare_kernels(*plan);
-  check(set_forward(plan->root, index_op, count_memo_index) &&
-            set_forward(plan->root, compare_op, count_memo_compare) &&
-            set_forward(plan->root, scale_op, record_arm_mul),
-        "find row scan callbacks");
-  return plan;
 }
 
 // theta * sum of k over the cells (k, i) of a 3 x 100 table holding a
@@ -4379,7 +3826,7 @@ static std::shared_ptr<StructuredLoop> nested_scan_plan() {
   plan->root = counted(one, three, k, sequence({std::move(inner)}));
   plan->outputs = {acc};
   prepare_kernels(*plan);
-  check(set_forward(plan->root, index_op, count_memo_index) &&
+  check(set_forward(plan->root, index_op, memo_index_forward) &&
             set_forward(plan->root, scale_op, record_arm_mul),
         "find nested scan callbacks");
   return plan;
@@ -4417,7 +3864,7 @@ static std::shared_ptr<StructuredLoop> break_scan_plan(int rows) {
                 call(*plan, OP_ADD, {acc, term}, next), alias(acc, next)}));
   plan->outputs = {acc};
   prepare_kernels(*plan);
-  check(set_forward(plan->root, index_op, count_memo_index) &&
+  check(set_forward(plan->root, index_op, memo_index_forward) &&
             set_forward(plan->root, scale_op, record_arm_mul),
         "find break scan callbacks");
   return plan;
@@ -5224,14 +4671,10 @@ static void frame_program_tests() {
     Executor automatic = diagnosed_executor(outer(plan, {1, 1}, {1}));
     automatic.value_ptr(2)[0] = 400;
     frame_failure_calls = 0;
-    bool threw = false;
     stanli_test::StdoutCapture captured(stderr);
-    try {
-      (void)evaluate(automatic, .1, .7);
-    } catch (const std::runtime_error& error) {
-      threw =
-          std::string(error.what()) == "injected failure after frame selection";
-    }
+    const bool threw =
+        throws<std::runtime_error>([&] { (void)evaluate(automatic, .1, .7); },
+                                   "injected failure after frame selection");
     const auto diagnostics = captured.finish();
     check(
         threw && (diagnostics.find("frame_selection:") != std::string::npos) ==
@@ -5385,14 +4828,9 @@ static void compiled_recording_tests() {
       ex->value_ptr(3)[0] = invalid;
       test_setenv("STANLI_STRUCTURED_COMPILED_RECORDING",
                   ex == &candidate ? "1" : "0");
-      bool threw = false;
-      try {
-        (void)evaluate(*ex, .25, 0);
-      } catch (const std::logic_error& error) {
-        threw = std::string(error.what()) ==
-                "structured loop invalid integer bounds";
-      }
-      check(threw, "compiled nested bounds retain validation failures");
+      check(throws<std::logic_error>([&] { (void)evaluate(*ex, .25, 0); },
+                                     "structured loop invalid integer bounds"),
+            "compiled nested bounds retain validation failures");
       ex->value_ptr(3)[0] = 5;
     }
     const auto expected = evaluate(tree, .25, 0);
@@ -5499,13 +4937,9 @@ static void data_recording_tests() {
       ex->value_ptr(3)[0] = 4;
       test_setenv("STANLI_STRUCTURED_DATA_RECORDING",
                   ex == &candidate ? "1" : "0");
-      bool threw = false;
-      try {
-        (void)evaluate(*ex, .25, 0);
-      } catch (const std::out_of_range& error) {
-        threw = std::string(error.what()) == "structured index out of range";
-      }
-      check(threw, "data recording preserves a later-iteration index failure");
+      check(throws<std::out_of_range>([&] { (void)evaluate(*ex, .25, 0); },
+                                      "structured index out of range"),
+            "data recording preserves a later-iteration index failure");
       ex->value_ptr(3)[0] = 3;
     }
     const auto expected = evaluate(tree, -.5, 0);
@@ -6253,13 +5687,8 @@ static void frame_clone_tests() {
   frame_failure_calls = 100;
   (void)evaluate(failed, .1, .7);
   frame_failure_calls = 0;
-  bool threw = false;
-  try {
-    (void)evaluate(failed, .1, .7);
-  } catch (const std::runtime_error&) {
-    threw = true;
-  }
-  check(threw, "clone fixture reaches a failure during recorded replay");
+  check(throws<std::runtime_error>([&] { (void)evaluate(failed, .1, .7); }),
+        "clone fixture reaches a failure during recorded replay");
   auto recovered = copy(failed, false);
   frame_failure_calls = 100;
   Executor oracle(outer(recurrence(20)));
@@ -6277,13 +5706,9 @@ static void frame_clone_tests() {
   test_unsetenv("STANLI_STRUCTURED_FRAMES");
   const auto backward_expected = evaluate(backward_failed, .1, .7);
   frame_backward_calls = 0;
-  threw = false;
-  try {
-    (void)evaluate(backward_failed, .1, .7);
-  } catch (const std::runtime_error&) {
-    threw = true;
-  }
-  check(threw, "clone fixture reaches a partially executed backward pass");
+  check(throws<std::runtime_error>(
+            [&] { (void)evaluate(backward_failed, .1, .7); }),
+        "clone fixture reaches a partially executed backward pass");
   auto backward_recovered = copy(backward_failed, false);
   frame_backward_calls = 100;
   check(same(evaluate(*backward_recovered, .1, .7), backward_expected),
@@ -6376,10 +5801,20 @@ static void recording_shape_tests() {
   }
 }
 
-struct MemoResult {
+struct RunResult {
   std::vector<std::vector<double>> evaluations;
   std::string diagnostics, error;
 };
+
+static std::vector<double> value_and_gradient(Executor& executor,
+                                              double theta) {
+  executor.params_data()[0] = theta;
+  executor.params_data()[1] = .5;
+  std::vector<double> gradient(static_cast<size_t>(executor.n_params()));
+  const double value = executor.gradient(gradient.data());
+  gradient.insert(gradient.begin(), value);
+  return gradient;
+}
 
 static Node compare_node(StructuredLoop& plan, int a, int b, int out,
                          int variant) {
@@ -6408,13 +5843,13 @@ static Node flow_node(Node::Kind kind) {
   return n;
 }
 
-static MemoResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
-                           const std::vector<int64_t>& data_lens,
-                           const std::vector<std::vector<double>>& data,
-                           bool memo, size_t extra_params = 0,
-                           const std::vector<std::vector<double>>& changed = {},
-                           bool shipped = false, bool tree = false,
-                           bool frames = true) {
+static RunResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
+                          const std::vector<int64_t>& data_lens,
+                          const std::vector<std::vector<double>>& data,
+                          bool memo, size_t extra_params = 0,
+                          const std::vector<std::vector<double>>& changed = {},
+                          bool shipped = false, bool tree = false,
+                          bool frames = true) {
   std::vector<int64_t> param_lens = {1, 1};
   if (extra_params) param_lens.push_back(static_cast<int64_t>(extra_params));
   const Graph graph = outer(plan, param_lens, data_lens);
@@ -6435,7 +5870,7 @@ static MemoResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
     test_unsetenv("STANLI_NO_DATA_LOOP_MEMO");
   else
     test_setenv("STANLI_NO_DATA_LOOP_MEMO", "1");
-  MemoResult result;
+  RunResult result;
   for (double theta : {.25, -.5, .25, .75, -.25}) {
     if (result.evaluations.size() == 3 && !changed.empty())
       for (size_t i = 0; i < changed.size(); ++i)
@@ -6445,12 +5880,7 @@ static MemoResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
       executor.params_data()[2 + k] = .3 + .17 * static_cast<double>(k) * theta;
     stanli_test::StdoutCapture capture(stderr);
     try {
-      executor.params_data()[0] = theta;
-      executor.params_data()[1] = .5;
-      std::vector<double> gradient(static_cast<size_t>(executor.n_params()));
-      const double value = executor.gradient(gradient.data());
-      gradient.insert(gradient.begin(), value);
-      result.evaluations.push_back(std::move(gradient));
+      result.evaluations.push_back(value_and_gradient(executor, theta));
     } catch (const std::exception& error) {
       result.error = error.what();
     }
@@ -6464,7 +5894,7 @@ static MemoResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
   return result;
 }
 
-static bool memo_same(const MemoResult& a, const MemoResult& b) {
+static bool same_runs(const RunResult& a, const RunResult& b) {
   if (a.error != b.error || a.evaluations.size() != b.evaluations.size())
     return false;
   for (size_t i = 0; i < a.evaluations.size(); ++i)
@@ -6475,22 +5905,22 @@ static bool memo_same(const MemoResult& a, const MemoResult& b) {
   return true;
 }
 
-static size_t memo_field(const MemoResult& result, const char* name) {
+static size_t memo_field(const RunResult& result, const char* name) {
   return reported_field(result.diagnostics, name);
 }
 
 // Compares memo on and off bitwise. A negative expectation skips that count.
-static MemoResult memo_check(const char* name,
-                             const std::shared_ptr<StructuredLoop>& plan,
-                             const std::vector<int64_t>& data_lens,
-                             const std::vector<std::vector<double>>& data,
-                             long hits, long misses = -1,
-                             size_t extra_params = 0) {
-  const MemoResult on = memo_run(plan, data_lens, data, true, extra_params);
-  const MemoResult off = memo_run(plan, data_lens, data, false, extra_params);
+static RunResult memo_check(const char* name,
+                            const std::shared_ptr<StructuredLoop>& plan,
+                            const std::vector<int64_t>& data_lens,
+                            const std::vector<std::vector<double>>& data,
+                            long hits, long misses = -1,
+                            size_t extra_params = 0) {
+  const RunResult on = memo_run(plan, data_lens, data, true, extra_params);
+  const RunResult off = memo_run(plan, data_lens, data, false, extra_params);
   const std::string label = std::string("data loop memo ") + name;
   check(on.error == off.error, (label + " preserves the error").c_str());
-  check(memo_same(on, off),
+  check(same_runs(on, off),
         (label + " is bitwise identical to memo off").c_str());
   const auto counts = [&]() {
     std::printf(
@@ -6692,6 +6122,35 @@ static ScanFixture limit_plan() {
   return {plan, {6, 1, 6}};
 }
 
+static Node matrix_read(StructuredLoop& plan, int table, int64_t rows,
+                        int64_t columns, int row, int column, int out) {
+  Node n = call(plan, OP_INDEX_DYNAMIC, {table, row, column}, out);
+  auto spec = std::make_shared<DynamicIndexSpec>();
+  spec->selected_size = 1;
+  spec->input_count = 3;
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, rows, columns, 1, 0});
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, columns, 1, 1, 0});
+  spec->axes[0].selector_input = 1;
+  spec->axes[1].selector_input = 2;
+  attach(plan, n.op, spec);
+  return n;
+}
+
+static Node cell_write(StructuredLoop& plan, int base, int r, int c, int value,
+                       int out, int64_t rows, int64_t columns) {
+  Node n = call(plan, OP_SET_INDEX_DYNAMIC, {base, r, c, value}, out);
+  auto spec = std::make_shared<DynamicIndexSpec>();
+  spec->selected_size = 1;
+  spec->input_count = 4;
+  spec->rhs_input = 3;
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, rows, columns, 1, 0});
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, columns, 1, 1, 0});
+  spec->axes[0].selector_input = 1;
+  spec->axes[1].selector_input = 2;
+  attach(plan, n.op, spec);
+  return n;
+}
+
 static ScanFixture matrix_step_plan() {
   constexpr int rows_count = 6, matrix_rows = 3, matrix_cols = 2;
   auto plan = std::make_shared<StructuredLoop>();
@@ -6715,20 +6174,7 @@ static ScanFixture matrix_step_plan() {
                    {col_table, 3, 0, false, true},
                    {kind_table, 4, 0, false, true}};
   Node write =
-      call(*plan, OP_SET_INDEX_DYNAMIC, {matrix, r, c, value}, updated);
-  {
-    auto spec = std::make_shared<DynamicIndexSpec>();
-    spec->selected_size = 1;
-    spec->input_count = 4;
-    spec->rhs_input = 3;
-    spec->axes.push_back(
-        {DynamicIndexSpec::Axis::Single, matrix_rows, matrix_cols, 1, 0});
-    spec->axes.push_back(
-        {DynamicIndexSpec::Axis::Single, matrix_cols, 1, 1, 0});
-    spec->axes[0].selector_input = 1;
-    spec->axes[1].selector_input = 2;
-    attach(*plan, write.op, spec);
-  }
+      cell_write(*plan, matrix, r, c, value, updated, matrix_rows, matrix_cols);
   Node scan = counted(
       one, rows, row,
       sequence(
@@ -6852,40 +6298,11 @@ static void data_loop_memo_structure_tests() {
   }
 }
 
-static Node matrix_read(StructuredLoop& plan, int table, int64_t rows,
-                        int64_t columns, int row, int column, int out) {
-  Node n = call(plan, OP_INDEX_DYNAMIC, {table, row, column}, out);
-  auto spec = std::make_shared<DynamicIndexSpec>();
-  spec->selected_size = 1;
-  spec->input_count = 3;
-  spec->axes.push_back({DynamicIndexSpec::Axis::Single, rows, columns, 1, 0});
-  spec->axes.push_back({DynamicIndexSpec::Axis::Single, columns, 1, 1, 0});
-  spec->axes[0].selector_input = 1;
-  spec->axes[1].selector_input = 2;
-  attach(plan, n.op, spec);
-  return n;
-}
-
-static Node cell_write(StructuredLoop& plan, int base, int r, int c, int value,
-                       int out, int64_t rows, int64_t columns) {
-  Node n = call(plan, OP_SET_INDEX_DYNAMIC, {base, r, c, value}, out);
-  auto spec = std::make_shared<DynamicIndexSpec>();
-  spec->selected_size = 1;
-  spec->input_count = 4;
-  spec->rhs_input = 3;
-  spec->axes.push_back({DynamicIndexSpec::Axis::Single, rows, columns, 1, 0});
-  spec->axes.push_back({DynamicIndexSpec::Axis::Single, columns, 1, 1, 0});
-  spec->axes[0].selector_input = 1;
-  spec->axes[1].selector_input = 2;
-  attach(plan, n.op, spec);
-  return n;
-}
-
 // A scan over a setup table in the shape of a generated model: a per-row
 // boolean chain built from folded kernels and aliases, a population/individual
 // test on the outer subject, a counting loop, and parameter-dependent matrix
 // updates addressed by table columns.
-static ScanFixture setup_scan_plan(bool vary_subject) {
+static ScanFixture setup_scan_plan() {
   constexpr int setup_rows = 8, setup_columns = 5, out_rows = 3, out_cols = 2;
   constexpr int pars = 3, trips_count = 6;
   auto plan = std::make_shared<StructuredLoop>();
@@ -6902,7 +6319,7 @@ static ScanFixture setup_scan_plan(bool vary_subject) {
   const int allowed = fresh(), go = fresh(), changed = fresh();
   const int dest_row = fresh(), dest_col = fresh(), par = fresh();
   const int value = fresh(), cell = fresh(), cells = fresh(), flag = fresh();
-  const int when = fresh(), counter = fresh(), next_counter = fresh();
+  const int counter = fresh(), next_counter = fresh();
   const int running = fresh(), seen = fresh();
   const int one = scalar(*plan, 1), zero = scalar(*plan, 0);
   const int two = scalar(*plan, 2), three = scalar(*plan, 3);
@@ -6965,8 +6382,6 @@ static ScanFixture setup_scan_plan(bool vary_subject) {
       sequence({read_node(*plan, subjects, trips_count, trip, si),
                 alias(changed, zero), alias(matrix, base), std::move(scan),
                 branch(changed, std::move(reduce), sequence({}))}));
-  (void)when;
-  (void)vary_subject;
   plan->has_target = true;
   plan->prepare();
   return {plan, {setup_rows * setup_columns, trips_count}};
@@ -6976,7 +6391,7 @@ static void data_loop_memo_setup_scan_tests() {
   const std::vector<double> setup = {2, 1, 1, 1, 1, 1, 1, 2, 2, 0, 2, 2, 1, 3,
                                      1, 2, 3, 2, 2, 0, 3, 1, 1, 1, 1, 2, 2, 2,
                                      1, 1, 2, 3, 1, 3, 0, 1, 2, 2, 2, 1};
-  const auto f = setup_scan_plan(true);
+  const auto f = setup_scan_plan();
   memo_check("setup-table scan with a population test", f.plan, f.lens,
              {setup, {0, 5, 7, 0, 9, 3}}, 9, 3, 3);
   memo_check("setup-table scan with all-population subjects", f.plan, f.lens,
@@ -7017,14 +6432,12 @@ struct FuzzPlan {
   }
   int operand() { return random.chance(25) ? literal() : pick(); }
 
-  int safe_index(std::vector<Node>& out, int source, int extent_literal,
-                 int extent_value) {
+  int safe_index(std::vector<Node>& out, int source, int extent_literal) {
     const int a = fresh(), b = fresh(), c = fresh(), d = fresh();
     out.push_back(arith_node(*plan, source, extent_literal, a, 4));
     out.push_back(arith_node(*plan, a, extent_literal, b, 0));
     out.push_back(arith_node(*plan, b, extent_literal, c, 4));
     out.push_back(arith_node(*plan, c, one, d, 0));
-    (void)extent_value;
     return d;
   }
 
@@ -7058,7 +6471,7 @@ struct FuzzPlan {
                                  slot, 4));
         break;
       case 3: {
-        const int index = safe_index(out, pick(), six, 6);
+        const int index = safe_index(out, pick(), six);
         out.push_back(read_node(*plan, table, 6, index, slot));
         break;
       }
@@ -7070,14 +6483,14 @@ struct FuzzPlan {
   }
 
   void store_statement(std::vector<Node>& out) {
-    const int index = safe_index(out, pick(), six, 6);
+    const int index = safe_index(out, pick(), six);
     Node write = call(*plan, OP_SET_INDEX_DYNAMIC, {store, index, operand()},
                       store_next);
     attach(*plan, write.op, single_spec(6));
     out.push_back(std::move(write));
     out.push_back(alias(store, store_next));
     store_next = plan->body.add_slot(6, false);
-    const int read_index = safe_index(out, pick(), six, 6);
+    const int read_index = safe_index(out, pick(), six);
     const int slot = fresh();
     out.push_back(read_node(*plan, store, 6, read_index, slot));
     pool.push_back(slot);
@@ -7093,7 +6506,7 @@ struct FuzzPlan {
       out.push_back(target(hot));
       return;
     }
-    const int index = safe_index(out, pick(), six, 6);
+    const int index = safe_index(out, pick(), six);
     Node write =
         call(*plan, OP_SET_INDEX_DYNAMIC, {vector, index, hot}, vector_next);
     attach(*plan, write.op, single_spec(6));
@@ -7120,7 +6533,7 @@ struct FuzzPlan {
         write.push_back(arith_node(*plan, pick(), operand(), slot, 0));
         break;
       case 1: {
-        const int index = safe_index(write, pick(), six, 6);
+        const int index = safe_index(write, pick(), six);
         write.push_back(read_node(*plan, table, 6, index, slot));
         break;
       }
@@ -7142,7 +6555,7 @@ struct FuzzPlan {
     const bool use_store = random.chance(50);
     const int source = use_store ? store : vector;
     int& next = use_store ? store_next : vector_next;
-    const int write_index = safe_index(out, pick(), six, 6);
+    const int write_index = safe_index(out, pick(), six);
     Node write = call(
         *plan, OP_SET_INDEX_DYNAMIC,
         {source, write_index, random.chance(50) ? pool[1] : operand()}, next);
@@ -7167,7 +6580,7 @@ struct FuzzPlan {
     } else {
       out.push_back(alias(copy, source));
     }
-    const int index = safe_index(out, pick(), six, 6);
+    const int index = safe_index(out, pick(), six);
     const int slot = fresh();
     out.push_back(read_node(*plan, copy, 6, index, slot));
     pool.push_back(slot);
@@ -7182,7 +6595,7 @@ struct FuzzPlan {
         call(*plan, OP_MUL, {random.chance(70) ? theta : beta, source}, hot));
     out.push_back(call(*plan, OP_DOT, {hot, source}, dot));
     out.push_back(target(dot));
-    const int write_index = safe_index(out, pick(), six, 6);
+    const int write_index = safe_index(out, pick(), six);
     const int value = random.chance(30) && !hots.empty()
                           ? hots[static_cast<size_t>(random.below(hots.size()))]
                           : operand();
@@ -7343,7 +6756,7 @@ static std::optional<ScanFixture> fuzz_plan(uint64_t seed, bool carry,
     }
   head.push_back(arith_node(plan, trip, f.literals[1], key, 4));
   {
-    const int index = f.safe_index(head, trip, f.six, 6);
+    const int index = f.safe_index(head, trip, f.six);
     head.push_back(read_node(plan, f.table, 6, index, aux));
   }
   const int count = 2 + f.random.below(4);
@@ -7593,7 +7006,7 @@ static ScanFixture wide_rows_plan(int rows_count, int columns,
 
 static void data_loop_memo_carry_tests() {
   const std::vector<double> table = {1, 2, 3, 4, 5, 6};
-  const auto engaged = [](const MemoResult& result) {
+  const auto engaged = [](const RunResult& result) {
     const size_t hits = memo_field(result, "memo_hits=");
     return hits != std::numeric_limits<size_t>::max() && hits > 0;
   };
@@ -7637,9 +7050,9 @@ static void data_loop_memo_carry_tests() {
     rows[299] = 5;
     rows[199] = 3;
     const auto f = lag_scan_plan(300);
-    const MemoResult on = memo_run(f.plan, f.lens, {rows}, true, 0, {}, true);
-    const MemoResult off = memo_run(f.plan, f.lens, {rows}, false, 0, {}, true);
-    check(memo_same(on, off),
+    const RunResult on = memo_run(f.plan, f.lens, {rows}, true, 0, {}, true);
+    const RunResult off = memo_run(f.plan, f.lens, {rows}, false, 0, {}, true);
+    check(same_runs(on, off),
           "data loop memo lag scan at the shipped thresholds matches memo off");
     check(engaged(on),
           "data loop memo lag scan at the shipped thresholds hits");
@@ -7652,11 +7065,11 @@ static void data_loop_memo_memory_tests() {
   std::vector<double> matrix(static_cast<size_t>(rows) * columns);
   for (size_t i = 0; i < matrix.size(); ++i)
     matrix[i] = static_cast<double>(i % 7);
-  const MemoResult on =
+  const RunResult on =
       memo_run(f.plan, f.lens, {matrix}, true, columns, {}, true);
-  const MemoResult off =
+  const RunResult off =
       memo_run(f.plan, f.lens, {matrix}, false, columns, {}, true);
-  check(memo_same(on, off), "data loop memo wide scan matches memo off");
+  check(same_runs(on, off), "data loop memo wide scan matches memo off");
   check(memo_field(on, "memo_aborted=") > 0 &&
             memo_field(on, "memo_bytes=") < (size_t{1} << 20),
         "data loop memo releases the storage of refused traces");
@@ -7819,30 +7232,30 @@ static void data_loop_memo_fuzz_tests() {
     for (size_t i = 0; i < table.size(); ++i)
       table[i] = static_cast<double>((seed + i * 7) % 4);
     const std::vector<double> changed(table.rbegin(), table.rend());
-    const MemoResult on =
+    const RunResult on =
         memo_run(f->plan, f->lens, {table}, true, 0, {changed});
-    const MemoResult off =
+    const RunResult off =
         memo_run(f->plan, f->lens, {table}, false, 0, {changed});
-    if (!memo_same(on, off))
+    if (!same_runs(on, off))
       std::printf("  fuzz seed %llu%s\n", static_cast<unsigned long long>(seed),
                   carry           ? " (carry)"
                   : aliasing      ? " (aliasing)"
                   : inplace_reads ? " (inplace reads)"
                                   : "");
-    check(memo_same(on, off),
+    check(same_runs(on, off),
           "data loop memo fuzz plan matches memo off bitwise");
     if (inplace_reads) {
-      const MemoResult tree =
+      const RunResult tree =
           memo_run(f->plan, f->lens, {table}, false, 0, {changed}, false, true);
-      const MemoResult stream = memo_run(f->plan, f->lens, {table}, false, 0,
-                                         {changed}, false, false, false);
-      if (!memo_same(off, tree) || !memo_same(stream, tree))
+      const RunResult stream = memo_run(f->plan, f->lens, {table}, false, 0,
+                                        {changed}, false, false, false);
+      if (!same_runs(off, tree) || !same_runs(stream, tree))
         std::printf("  fuzz seed %llu (inplace reads) frames=%d stream=%d\n",
-                    static_cast<unsigned long long>(seed), memo_same(off, tree),
-                    memo_same(stream, tree));
-      check(memo_same(off, tree),
+                    static_cast<unsigned long long>(seed), same_runs(off, tree),
+                    same_runs(stream, tree));
+      check(same_runs(off, tree),
             "framed replay after in-place writes matches the tree walk");
-      check(memo_same(stream, tree),
+      check(same_runs(stream, tree),
             "stream replay after in-place writes matches the tree walk");
     }
     const size_t seen = memo_field(on, "memo_hits=");
@@ -7851,11 +7264,6 @@ static void data_loop_memo_fuzz_tests() {
   check(built > order.size() * 3 / 4, "data loop memo fuzz builds most plans");
   check(hits > order.size() / 10, "data loop memo fuzz exercises hits");
 }
-
-struct InstanceResult {
-  std::vector<std::vector<double>> evaluations;
-  std::string diagnostics, error;
-};
 
 struct InstanceFixture {
   std::shared_ptr<StructuredLoop> plan;
@@ -7876,10 +7284,10 @@ static size_t total_field(const std::string& diagnostics,
 
 static std::atomic<int> instance_effects{0};
 
-static InstanceResult instance_run(const InstanceFixture& f, bool instance,
-                                   bool checked,
-                                   const std::vector<double>& thetas = {
-                                       .25, -.5, .25, .75, -.25}) {
+static RunResult instance_run(const InstanceFixture& f, bool instance,
+                              bool checked,
+                              const std::vector<double>& thetas = {
+                                  .25, -.5, .25, .75, -.25}) {
   test_setenv("STANLI_STRUCTURED_FRAMES", "1");
   test_setenv("STANLI_DATA_LOOP_MEMO_MIN_WORK", "0");
   test_setenv("STANLI_DATA_LOOP_MEMO_MIN_RATIO", "0");
@@ -7893,7 +7301,7 @@ static InstanceResult instance_run(const InstanceFixture& f, bool instance,
   for (size_t i = 0; i < f.data.size(); ++i)
     std::copy(f.data[i].begin(), f.data[i].end(),
               executor.value_ptr(first_data + i));
-  InstanceResult result;
+  RunResult result;
   instance_effects = 0;
   for (size_t step = 0; step < thetas.size(); ++step) {
     if (step == 3)
@@ -7907,11 +7315,7 @@ static InstanceResult instance_run(const InstanceFixture& f, bool instance,
       executor.params_data()[2 + j] = .3 + .17 * static_cast<double>(j) * theta;
     stanli_test::StdoutCapture capture(stderr);
     try {
-      executor.params_data()[0] = theta;
-      executor.params_data()[1] = .5;
-      std::vector<double> gradient(static_cast<size_t>(executor.n_params()));
-      const double value = executor.gradient(gradient.data());
-      gradient.insert(gradient.begin(), value);
+      auto gradient = value_and_gradient(executor, theta);
       gradient.push_back(static_cast<double>(instance_effects.load()));
       result.evaluations.push_back(std::move(gradient));
     } catch (const std::exception& error) {
@@ -7925,17 +7329,6 @@ static InstanceResult instance_run(const InstanceFixture& f, bool instance,
   return result;
 }
 
-static bool instance_same(const InstanceResult& a, const InstanceResult& b) {
-  if (a.error != b.error || a.evaluations.size() != b.evaluations.size())
-    return false;
-  for (size_t i = 0; i < a.evaluations.size(); ++i)
-    if (a.evaluations[i].size() != b.evaluations[i].size() ||
-        std::memcmp(a.evaluations[i].data(), b.evaluations[i].data(),
-                    a.evaluations[i].size() * sizeof(double)) != 0)
-      return false;
-  return true;
-}
-
 struct InstanceExpect {
   long instantiated = -1;
   long fallback = -1;
@@ -7946,18 +7339,18 @@ struct InstanceExpect {
 
 // Runs instantiation off, on, and on with the per-frame checker. Returns the
 // counts of the unchecked run.
-static InstanceResult instance_check(const char* name, const InstanceFixture& f,
-                                     InstanceExpect expect = {}) {
-  const InstanceResult off = instance_run(f, false, false);
-  const InstanceResult on = instance_run(f, true, false);
-  const InstanceResult checked = instance_run(f, true, true);
+static RunResult instance_check(const char* name, const InstanceFixture& f,
+                                InstanceExpect expect = {}) {
+  const RunResult off = instance_run(f, false, false);
+  const RunResult on = instance_run(f, true, false);
+  const RunResult checked = instance_run(f, true, true);
   const std::string label = std::string("frame instance ") + name;
-  if (!instance_same(on, off) || !instance_same(checked, off))
+  if (!same_runs(on, off) || !same_runs(checked, off))
     std::printf("  on: %s | checked: %s | off: %s\n", on.error.c_str(),
                 checked.error.c_str(), off.error.c_str());
-  check(instance_same(on, off),
+  check(same_runs(on, off),
         (label + " is bitwise identical to instantiation off").c_str());
-  check(instance_same(checked, off),
+  check(same_runs(checked, off),
         (label + " passes the frame instance checker").c_str());
   check(total_field(off.diagnostics, "instantiated=") == 0,
         (label + " is inert when disabled").c_str());
@@ -8369,41 +7762,36 @@ static InstanceFixture kernel_scratch_fixture(int rows) {
 }
 
 static void frame_instance_tests() {
+  const InstanceExpect instantiates{-1, -1, -1, 0, true};
   instance_check("on row-indexed folded reads", folded_rows_fixture(),
                  {-1, 0, -1, 0, true});
   instance_check("on a row-dependent data branch",
-                 data_branch_fixture(1, false), {-1, -1, -1, 0, true});
+                 data_branch_fixture(1, false), instantiates);
   instance_check("on programs repeating every 2 frames",
-                 data_branch_fixture(2, false), {-1, -1, -1, 0, true});
+                 data_branch_fixture(2, false), instantiates);
   instance_check("on programs repeating every 3 frames",
-                 data_branch_fixture(3, false), {-1, -1, -1, 0, true});
-  instance_check("on NaN rows", data_branch_fixture(2, true),
-                 {-1, -1, -1, 0, true});
+                 data_branch_fixture(3, false), instantiates);
+  instance_check("on NaN rows", data_branch_fixture(2, true), instantiates);
   instance_check("on a data counter carried across frames",
-                 carried_counter_fixture(), {-1, -1, -1, 0, true});
+                 carried_counter_fixture(), instantiates);
   instance_check("on row-dependent memo keys", memo_key_fixture(),
-                 {-1, -1, -1, 0, true});
+                 instantiates);
   instance_check("on a held container written in later frames",
-                 held_container_fixture(), {-1, -1, -1, 0, true});
+                 held_container_fixture(), instantiates);
   instance_check("on a row accumulator", row_accumulator_fixture(false),
-                 {-1, -1, -1, 0, true});
+                 instantiates);
   instance_check("on a parameter-chosen write selector",
                  row_accumulator_fixture(true), {-1, -1, -1, -1});
   instance_check("on a later adjoint promotion", promotion_fixture(),
-                 {-1, -1, -1, 0, true});
-  instance_check("on loop-invariant sites", invariant_fixture(),
-                 {-1, -1, -1, 0, true});
-  instance_check("on an outer break", outer_break_fixture(false),
-                 {-1, -1, -1, 0, true});
-  instance_check("on outer continues", outer_break_fixture(true),
-                 {-1, -1, -1, 0, true});
+                 instantiates);
+  instance_check("on loop-invariant sites", invariant_fixture(), instantiates);
+  instance_check("on an outer break", outer_break_fixture(false), instantiates);
+  instance_check("on outer continues", outer_break_fixture(true), instantiates);
   instance_check("on moving gather and adjoint bindings",
                  moving_binding_fixture(), {-1, 0, -1, 0, true});
-  instance_check("on a while outer loop", while_rows_fixture(),
-                 {-1, -1, -1, 0, true});
-  for (int rows : {24})
-    instance_check("on partly written kernel scratch",
-                   kernel_scratch_fixture(rows), {-1, -1, -1, 0, true});
+  instance_check("on a while outer loop", while_rows_fixture(), instantiates);
+  instance_check("on partly written kernel scratch", kernel_scratch_fixture(24),
+                 instantiates);
   {
     const auto on = instance_check("on parameter guards flipping between rows",
                                    parameter_guard_fixture(), {});
@@ -8740,10 +8128,10 @@ static void frame_instance_fuzz_tests() {
     const auto f = instance_fuzz_plan(seed, arm);
     if (!f) continue;
     ++built;
-    const InstanceResult off = instance_run(*f, false, false);
-    const InstanceResult on = instance_run(*f, true, false);
-    const InstanceResult checked = instance_run(*f, true, true);
-    const bool ok = instance_same(on, off) && instance_same(checked, off);
+    const RunResult off = instance_run(*f, false, false);
+    const RunResult on = instance_run(*f, true, false);
+    const RunResult checked = instance_run(*f, true, true);
+    const bool ok = same_runs(on, off) && same_runs(checked, off);
     if (!ok)
       std::printf(
           "  instance fuzz seed %llu arm %d: on '%s' checked '%s' off '%s'\n",
@@ -8793,7 +8181,6 @@ int main() {
   inplace_lifo_undo_tests();
   runtime_trip_tests();
   import_reference_tests();
-  direct_index_kernel_tests();
   forced_control_tests();
   iterator_history_tests();
   primal_retention_tests();
@@ -8806,7 +8193,6 @@ int main() {
   failure_tests();
   refusal_tests();
   automatic_policy_tests();
-  probe_mode_tests();
   region_range_cache_tests();
   prefer_parent_tests();
   direct_index_lowering_tests();
@@ -8847,8 +8233,6 @@ int main() {
   data_loop_memo_sibling_tests();
   data_loop_memo_memory_tests();
   data_loop_memo_setup_scan_tests();
-  data_loop_memo_carry_tests();
-  data_loop_memo_memory_tests();
   data_loop_memo_fuzz_tests();
   frame_instance_tests();
   frame_instance_fuzz_tests();

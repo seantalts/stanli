@@ -1,6 +1,7 @@
 #include <stanli/function.hpp>
 #include <stanli/capi.h>
 #include <cstdlib>
+#include "expect.hpp"
 #include "stdout_capture.hpp"
 
 #include <atomic>
@@ -15,8 +16,6 @@
 #include <vector>
 
 namespace {
-
-int failures = 0;
 
 void check(bool condition, const char* message) {
   if (!condition) {
@@ -33,13 +32,6 @@ void throws_with(F&& f, const std::string& needle, const char* message) {
   } catch (const std::exception& e) {
     check(std::string(e.what()).find(needle) != std::string::npos, message);
   }
-}
-
-std::string slurp(const char* path) {
-  std::ifstream input(path);
-  std::ostringstream text;
-  text << input.rdbuf();
-  return text.str();
 }
 
 stanli::DataMap::Entry compiled_call(const stanli::Function& function,
@@ -160,8 +152,7 @@ int main() {
       throws_with([&] { Function unavailable(source, "affine"); },
                   "does not embed stanc3",
                   "source constructor reports unavailable compiler");
-      if (failures == 0) std::printf("OK function\n");
-      return failures == 0 ? 0 : 1;
+      return finish("test_function");
     }
 
     Function affine(source, "affine");
@@ -573,6 +564,5 @@ int main() {
     ++failures;
   }
 
-  if (failures == 0) std::printf("OK function\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_function");
 }

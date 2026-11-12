@@ -59,7 +59,6 @@ def enabled(item, event, heavy="true", ref="refs/heads/main"):
         "github.event_name": event,
         "github.ref": ref,
         "needs.changes.outputs.heavy": heavy,
-        "needs.changes.outputs.baseline_run": "40514957278",
         "matrix.runtime": "linux-x86_64",
         "matrix.plat": "manylinux_2_28_x86_64",
         "steps.bs-models.outputs.cache-hit": "true",
@@ -83,8 +82,6 @@ class CiPolicyTest(unittest.TestCase):
             "no-stdio", "wasm", "wasm-webr", "r-platform-tests")]
         items.append(workflow("r.yml")["jobs"]["check"])
         items += [self.step("build", name) for name in (
-            "Fetch the main-branch vectorization baseline",
-            "MIR vectorization A/B", "Publish MIR vectorization measurements",
             "Measure portable MIR size and preparation cost",
             "Install reference BridgeStan",
             "Restore BridgeStan sources and shared build objects",
@@ -102,20 +99,6 @@ class CiPolicyTest(unittest.TestCase):
                 with self.subTest(item=item.get("name", item.get("uses")), event=event):
                     self.assertEqual(enabled(item, event), event != "pull_request")
             self.assertTrue(enabled(item, "push", ref="refs/tags/v1.0.0"))
-
-    def test_vectorization_baseline_is_optional_and_needs_no_gh_in_the_container(self):
-        step = self.step("build", "Fetch the main-branch vectorization baseline")
-        self.assertTrue(step["uses"].startswith("actions/download-artifact@"))
-        self.assertEqual(step["continue-on-error"], "true")
-        self.assertEqual(step["with"]["name"], "mir-vectorization-measurements")
-        self.assertEqual(step["with"]["path"], "/tmp/vectorize-baseline")
-        self.assertEqual(step["with"]["run-id"],
-                         "${{ needs.changes.outputs.baseline_run }}")
-        self.assertIn("github-token", step["with"])
-        self.assertNotIn("run", step)
-        self.assertIn("baseline_run != ''", step["if"])
-        self.assertIn("baseline_run", self.jobs["changes"]["outputs"])
-        self.assertIn("actions", workflow("wheels.yml")["permissions"])
 
     def test_windows_wheel_and_prerequisites_follow_source_scope(self):
         for name in ("stanc-windows", "windows-compiler", "windows"):

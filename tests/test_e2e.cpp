@@ -1,6 +1,8 @@
 // End to end through the compiler: es.stan MIR + posteriordb JSON data ->
 // NUTS -> posterior checks. Mirrors the hand-built models' statistical test
 // but with the graph produced by the compiler instead of by hand.
+#include "expect.hpp"
+
 #include <stanli/compile.hpp>
 #include <stanli/nuts.hpp>
 
@@ -10,7 +12,6 @@
 #include <sstream>
 #include <string>
 
-static int failures = 0;
 static void expect_in(const std::string& what, double got, double lo,
                       double hi) {
   if (!(got >= lo && got <= hi)) {
@@ -18,12 +19,6 @@ static void expect_in(const std::string& what, double got, double lo,
     std::printf("FAIL %-14s got %.6g want in [%g, %g]\n", what.c_str(), got, lo,
                 hi);
   }
-}
-static std::string slurp(const std::string& path) {
-  std::ifstream f(path);
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
 }
 
 int main() {
@@ -56,6 +51,5 @@ int main() {
   expect_in("mu mean", mu_mean, 2.5, 6.5);
   expect_in("tau mean", tau_mean, 2.0, 6.0);
 
-  if (failures == 0) std::printf("test_e2e OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_e2e");
 }

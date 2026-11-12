@@ -16,6 +16,8 @@
 //   3. The defining property of each constrained value: a unit_vector has
 //      norm 1, a sum_to_zero_vector sums to 0, a correlation matrix has
 //      unit diagonal, a Cholesky factor has positive diagonal.
+#include "expect.hpp"
+
 #include <stanli/compile.hpp>
 
 #include <stan/math.hpp>
@@ -27,14 +29,6 @@
 #include <string>
 #include <vector>
 
-static int failures = 0;
-
-static void expect(const std::string& what, bool ok) {
-  if (!ok) {
-    ++failures;
-    std::printf("FAIL %s\n", what.c_str());
-  }
-}
 static void expect_near(const std::string& what, double got, double want,
                         double tol) {
   if (!(std::fabs(got - want) <= tol)) {
@@ -42,12 +36,6 @@ static void expect_near(const std::string& what, double got, double want,
     std::printf("FAIL %-28s got %.12g want %.12g (tol %g)\n", what.c_str(), got,
                 want, tol);
   }
-}
-static std::string slurp(const std::string& path) {
-  std::ifstream f(path);
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
 }
 
 int main() {
@@ -67,9 +55,9 @@ int main() {
   //   + cholesky_factor_cov[3](6)  N*(N+1)/2
   //   + cholesky_factor_cov[4,3](9) N*(N+1)/2 + (M-N)*N
   const int64_t want_n = 1 + 3 + 1 + 1 + 3 + 3 + 3 + 3 + 3 + 3 + 6 + 6 + 9;
-  expect("unconstrained size is " + std::to_string(want_n) + ", got " +
-             std::to_string(ex.n_params()),
-         ex.n_params() == want_n);
+  expect_true("unconstrained size is " + std::to_string(want_n) + ", got " +
+                  std::to_string(ex.n_params()),
+              ex.n_params() == want_n);
   if (ex.n_params() != want_n) return 1;  // everything below assumes it
 
   const int64_t n = ex.n_params();
@@ -81,7 +69,7 @@ int main() {
   std::vector<double> grad((size_t)n);
   for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = q[(size_t)i];
   const double lp = ex.gradient(grad.data());
-  expect("lp is finite", std::isfinite(lp));
+  expect_true("lp is finite", std::isfinite(lp));
 
   const double h = 1e-6;
   double worst = 0;
@@ -132,19 +120,19 @@ int main() {
 
   std::vector<double> u, z, R, S, Lc, Lr, a, b, e, mu_p, sg_p;
   if (vals("u", u)) {
-    expect("unit_vector has 3 elements", u.size() == 3);
+    expect_true("unit_vector has 3 elements", u.size() == 3);
     double nrm = 0;
     for (double t : u) nrm += t * t;
     expect_near("unit_vector norm", std::sqrt(nrm), 1.0, 1e-12);
   }
   if (vals("z", z)) {
-    expect("sum_to_zero has 4 elements", z.size() == 4);
+    expect_true("sum_to_zero has 4 elements", z.size() == 4);
     double s = 0;
     for (double t : z) s += t;
     expect_near("sum_to_zero sums to 0", s, 0.0, 1e-12);
   }
   if (vals("R", R)) {
-    expect("corr_matrix is 3x3", R.size() == 9);
+    expect_true("corr_matrix is 3x3", R.size() == 9);
     for (int k = 0; k < 3; ++k)
       expect_near("corr diag " + std::to_string(k), R[(size_t)(k * 3 + k)], 1.0,
                   1e-12);
@@ -153,37 +141,38 @@ int main() {
       for (int j = 0; j < 3; ++j) {
         expect_near("corr symmetry", R[(size_t)(j * 3 + i)],
                     R[(size_t)(i * 3 + j)], 1e-12);
-        expect("corr in [-1, 1]", std::fabs(R[(size_t)(j * 3 + i)]) <= 1.0);
+        expect_true("corr in [-1, 1]",
+                    std::fabs(R[(size_t)(j * 3 + i)]) <= 1.0);
       }
   }
   if (vals("S", S)) {
-    expect("cov_matrix is 3x3", S.size() == 9);
+    expect_true("cov_matrix is 3x3", S.size() == 9);
     for (int i = 0; i < 3; ++i)
       for (int j = 0; j < 3; ++j)
         expect_near("cov symmetry", S[(size_t)(j * 3 + i)],
                     S[(size_t)(i * 3 + j)], 1e-12);
     for (int k = 0; k < 3; ++k)
-      expect("cov diag positive", S[(size_t)(k * 3 + k)] > 0);
+      expect_true("cov diag positive", S[(size_t)(k * 3 + k)] > 0);
   }
   if (vals("Lc", Lc)) {
-    expect("cholesky_factor_cov[3] is 3x3", Lc.size() == 9);
+    expect_true("cholesky_factor_cov[3] is 3x3", Lc.size() == 9);
     // Column-major, lower triangular: entry (i, j) with j > i is zero.
     for (int j = 0; j < 3; ++j)
       for (int i = 0; i < 3; ++i) {
         if (j > i)
           expect_near("Lc upper zero", Lc[(size_t)(j * 3 + i)], 0.0, 0.0);
         else if (i == j)
-          expect("Lc diag positive", Lc[(size_t)(j * 3 + i)] > 0);
+          expect_true("Lc diag positive", Lc[(size_t)(j * 3 + i)] > 0);
       }
   }
   if (vals("Lr", Lr)) {
-    expect("cholesky_factor_cov[4,3] is 4x3", Lr.size() == 12);
+    expect_true("cholesky_factor_cov[4,3] is 4x3", Lr.size() == 12);
     for (int j = 0; j < 3; ++j)
       for (int i = 0; i < 4; ++i) {
         if (j > i)
           expect_near("Lr upper zero", Lr[(size_t)(j * 4 + i)], 0.0, 0.0);
         else if (i == j)
-          expect("Lr diag positive", Lr[(size_t)(j * 4 + i)] > 0);
+          expect_true("Lr diag positive", Lr[(size_t)(j * 4 + i)] > 0);
       }
   }
 
@@ -194,7 +183,7 @@ int main() {
     expect_near("offset/multiplier scalar", a[0], std::fma(1.7, x, 0.3), 1e-13);
   }
   if (vals("b", b)) {
-    expect("offset/multiplier vector has 3 elements", b.size() == 3);
+    expect_true("offset/multiplier vector has 3 elements", b.size() == 3);
     for (int i = 0; i < 3; ++i)
       expect_near("offset/multiplier vector " + std::to_string(i), b[(size_t)i],
                   std::fma(1.7, q[(size_t)(1 + i)], 0.3), 1e-13);
@@ -223,9 +212,9 @@ int main() {
         compile_model(slurp("tests/fixtures/stzmat.tmir.sexp"), none);
     Executor sx(std::move(sm.graph));
     sm.bind(sx);
-    expect("sum_to_zero_matrix[4,5] is (4-1)*(5-1) free, got " +
-               std::to_string(sx.n_params()),
-           sx.n_params() == 12);
+    expect_true("sum_to_zero_matrix[4,5] is (4-1)*(5-1) free, got " +
+                    std::to_string(sx.n_params()),
+                sx.n_params() == 12);
     if (sx.n_params() == 12) {
       for (int64_t i = 0; i < 12; ++i)
         sx.params_data()[i] = 0.2 + 0.11 * std::sin(1.3 * (double)i);
@@ -252,7 +241,7 @@ int main() {
       // And the backward against central differences of lp.
       std::vector<double> g(12);
       const double lp0 = sx.gradient(g.data());
-      expect("stz matrix lp is finite", std::isfinite(lp0));
+      expect_true("stz matrix lp is finite", std::isfinite(lp0));
       double worst_stz = 0;
       for (int64_t i = 0; i < 12; ++i) {
         const double x = sx.params_data()[i];
@@ -264,7 +253,8 @@ int main() {
         worst_stz = std::max(worst_stz, std::fabs((up - dn) / 2e-6 - g[i]) /
                                             std::max(1.0, std::fabs(g[i])));
       }
-      expect("stz matrix gradient vs finite differences", worst_stz < 1e-5);
+      expect_true("stz matrix gradient vs finite differences",
+                  worst_stz < 1e-5);
     }
   }
 
@@ -277,9 +267,9 @@ int main() {
         compile_model(slurp("tests/fixtures/stochastic.tmir.sexp"), none);
     Executor sx(std::move(sm.graph));
     sm.bind(sx);
-    expect("stochastic parameters have 9 + 9 + 2 * 4 free, got " +
-               std::to_string(sx.n_params()),
-           sx.n_params() == 26);
+    expect_true("stochastic parameters have 9 + 9 + 2 * 4 free, got " +
+                    std::to_string(sx.n_params()),
+                sx.n_params() == 26);
     if (sx.n_params() == 26) {
       std::vector<double> q(26);
       for (int64_t i = 0; i < 26; ++i)
@@ -315,10 +305,9 @@ int main() {
         worst_st = std::max(worst_st, std::fabs((up - dn) / 2e-6 - g[i]) /
                                           std::max(1.0, std::fabs(g[i])));
       }
-      expect("stochastic gradient vs finite differences", worst_st < 1e-5);
+      expect_true("stochastic gradient vs finite differences", worst_st < 1e-5);
     }
   }
 
-  if (failures == 0) std::printf("test_newtrans: all checks passed\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_newtrans");
 }

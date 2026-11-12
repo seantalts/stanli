@@ -47,32 +47,7 @@
 #include <string>
 #include <vector>
 
-// Deterministic evaluation points, shared with tools/ref_driver.cpp. Some
-// models are invalid at a given point (an ODE solution dips below a declared
-// lower bound, say) and both engines reject it; the harness then retries the
-// next variant so those models still get a real comparison.
-static double eval_point(int64_t i, int variant) {
-  switch (variant) {
-    case 1:
-      return 0.02 * static_cast<double>((i % 5) - 2);
-    case 2:
-      return 0.0;
-    case 3:
-    case 4: {
-      uint64_t z = static_cast<uint64_t>(i) + 0x9E3779B97F4A7C15ull;
-      z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-      z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-      z ^= z >> 31;
-      const double u = static_cast<double>(z >> 11) * 0x1.0p-53;
-      // Variant 4 keeps every component in (0.1, 0.9), where an
-      // unconstrained real used as a scale or a probability is valid.
-      return variant == 3 ? -1.5 + 3.0 * u : 0.1 + 0.8 * u;
-    }
-    default:
-      return 0.1 + 0.05 * static_cast<double>(i % 7) -
-             0.15 * static_cast<double>(i % 3);
-  }
-}
+using stanli::cross::check_point;
 
 static std::string one_line(std::string s) {
   while (!s.empty() &&
@@ -151,7 +126,8 @@ int main(int argc, char** argv) {
                  "       [--point N | --points N,N,...] [--sweep K] "
                  "[--columns] [--fast-math]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
-                 "[--draw-variant N] [--ledger PATH]]\n"
+                 "[--draw-variant N] [--cross-points N] [--cross-rel-tol T]\n"
+                 "        [--cross-corpus] [--ledger PATH]]\n"
                  "       [--dump-passes=STAGES] [--dump-dir=DIR]\n"
                  "       stanli_check --compiler\n");
     return 2;
@@ -170,6 +146,9 @@ int main(int argc, char** argv) {
   std::string cross_one;
   std::string ledger_path = "tests/cross_path_ledger.json";
   int draw_variant = -1;
+  int cross_points = stanli::cross::kDefaultPoints;
+  double cross_rel_tol = 0.0;
+  bool cross_corpus = false;
   std::string dump_stages, dump_dir;
   for (int i = 3; i < argc; ++i) {
     const std::string a = argv[i];
@@ -191,6 +170,12 @@ int main(int argc, char** argv) {
       cross_one = argv[++i];
     else if (a == "--draw-variant" && i + 1 < argc)
       draw_variant = std::atoi(argv[++i]);
+    else if (a == "--cross-points" && i + 1 < argc)
+      cross_points = std::atoi(argv[++i]);
+    else if (a == "--cross-rel-tol" && i + 1 < argc)
+      cross_rel_tol = std::atof(argv[++i]);
+    else if (a == "--cross-corpus")
+      cross_corpus = true;
     else if (a == "--ledger" && i + 1 < argc)
       ledger_path = argv[++i];
     else if (a == "--stanc" && i + 1 < argc)
@@ -290,6 +275,9 @@ int main(int argc, char** argv) {
     opt.repro_data = argv[2];
     opt.only = cross_one;
     opt.variant = draw_variant;
+    opt.points = cross_points < 1 ? 1 : cross_points;
+    opt.rel_tol = cross_rel_tol;
+    opt.corpus = cross_corpus;
     const stanli::cross::Result r =
         stanli::cross::run_matrix(mir, data, opt, led);
     std::fputs(r.report.c_str(), stdout);
@@ -304,7 +292,15 @@ int main(int argc, char** argv) {
         r.ok ? "OK" : "FAIL", name.c_str(), r.variant, r.comparisons,
         r.failures, r.declared, r.wa_compared, r.wa_rng_excluded,
         r.wa_name_excluded);
+    if (opt.rel_tol > 0.0)
+      std::printf("  %d mismatches within --cross-rel-tol %g\n", r.within_tol,
+                  opt.rel_tol);
     std::printf("  paths: %s\n", r.paths.line().c_str());
+    std::string changed;
+    for (const auto& [config, did] : r.changed)
+      if (did) changed += " " + config;
+    std::printf("  changed by:%s\n",
+                changed.empty() ? " none" : changed.c_str());
     return r.ok ? 0 : 1;
   }
 
@@ -373,7 +369,7 @@ int main(int argc, char** argv) {
       if (prof_env && prof_env[0] != '0') ex.set_profile(true);
       const int64_t n = ex.n_params();
       for (int64_t i = 0; i < n; ++i)
-        ex.params_data()[i] = eval_point(i, variant);
+        ex.params_data()[i] = check_point(i, variant);
       std::vector<double> grad(n, 0.0);
       const double lp = ex.gradient(grad.data());
       // A nonfinite value is reported, not refused. ref_driver.cpp -- the
@@ -456,7 +452,7 @@ int main(int argc, char** argv) {
           }
           stanli::Executor& wex = *wex_store;
           for (int64_t i = 0; i < wex.n_params(); ++i)
-            wex.params_data()[i] = eval_point(i, variant);
+            wex.params_data()[i] = check_point(i, variant);
           stanli::WaRng rng(1234);
           wex.run_forward_only(stanli::EvalState{&rng});
           int64_t width = 0, bad = 0;
@@ -499,7 +495,7 @@ int main(int argc, char** argv) {
         int evaluated = 0;
         for (int k = 1; k <= sweep; ++k) {
           for (int64_t i = 0; i < n; ++i)
-            ex.params_data()[i] = eval_point(i, variant) +
+            ex.params_data()[i] = check_point(i, variant) +
                                   0.6 * std::sin(1.9 * k + 2.3 * i + 0.4) +
                                   0.2 * (k - sweep / 2);
           try {
@@ -515,7 +511,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "SWEEP %d points, %d evaluated\n", sweep,
                      evaluated);
         for (int64_t i = 0; i < n; ++i)
-          ex.params_data()[i] = eval_point(i, variant);
+          ex.params_data()[i] = check_point(i, variant);
         std::fill(grad.begin(), grad.end(), 0.0);
         print_sweep_point(0, ex.gradient(grad.data()), grad);
       }

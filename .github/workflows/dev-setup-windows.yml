@@ -38,15 +38,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # wheels.yml runs the full suite on Windows x64; this leg only
+          # proves the dev-setup build, embedded compiler and C API work.
           - os: windows-latest
             msystem: CLANG64
             setup_args: ''
             ocaml_packages: mingw-w64-x86_64-gcc
+            ctest_args: "-R '^(test_capi|test_e2e|test_executor|test_compiler_deployment|test_check_external_stanc|lit_densities_scalar_outcome_empty_parameter)$'"
           - os: windows-11-arm
             msystem: CLANGARM64
             setup_args: --no-embed
             # OCaml runs as x64 on ARM; these live outside the OPAMROOT cache.
             ocaml_packages: mingw-w64-x86_64-gcc
+            ctest_args: ''
     steps:
       - uses: actions/checkout@v7
 
@@ -173,11 +177,11 @@ jobs:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ steps.ccache.outputs.cache-primary-key }}
 
-      - name: Run the full test suite
+      - name: Run the tests
         shell: msys2 {0}
         run: |
           source tools/build_jobs.sh
-          ctest --test-dir build --timeout 600 --parallel "$(stanli_detect_build_jobs)" --output-on-failure
+          ctest --test-dir build --timeout 600 --parallel "$(stanli_detect_build_jobs)" --output-on-failure ${{ matrix.ctest_args }}
 
       - name: C++ cache statistics
         if: always()

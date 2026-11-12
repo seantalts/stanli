@@ -35,8 +35,9 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
+from cmdstan_ref import compile_cmd, point_results  # noqa: E402
+from verify_refs import parse_status  # noqa: E402
 import toolchain  # noqa: E402
-from cmdstan_ref import _result_line, compile_cmd, point_results  # noqa: E402
 
 CORPUS = REPO / "deps" / "stanc3-src" / "test" / "integration" / "good"
 OUT = REPO / "tests" / "stanc3_good" / "data.json.gz"
@@ -54,6 +55,10 @@ RUN_TIMEOUT = 60
 
 def sha256(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def pinned_sha():
+    return toolchain.pins()["STANC3_SRC_SHA"]
 
 
 def corpus_models():
@@ -150,7 +155,7 @@ def evaluate(exe, data_text, work):
     r = run([exe, path, "--points", ",".join(map(str, POINTS))], RUN_TIMEOUT)
     if r is None:
         return "driver timed out", 0, []
-    head = _result_line(r.stdout)
+    head = parse_status(r.stdout)
     if head[:1] == ["DATA_FAIL"]:
         msg = " ".join(head[1:])
         return re.sub(r"\(in '[^']*/good/", "(in '", msg)[:200], 0, [msg]
@@ -490,9 +495,9 @@ def check():
     doc = load(OUT)
     if doc.get("schema") != 1:
         errors.append("schema is not 1")
-    pinned = toolchain.pins()["STANC3_SRC_SHA"]
-    if doc.get("stanc3_sha") != pinned:
-        errors.append(f"stanc3_sha {doc.get('stanc3_sha')} is not the pinned {pinned}")
+    if doc.get("stanc3_sha") != pinned_sha():
+        errors.append(f"stanc3_sha {doc.get('stanc3_sha')} is not the pinned "
+                      f"{pinned_sha()}")
     models, recorded = corpus_models(), doc.get("models", {})
     for rel in sorted(models.keys() - recorded.keys()):
         errors.append(f"missing: {rel}")
@@ -570,7 +575,7 @@ def main():
 
     def save():
         OUT.parent.mkdir(parents=True, exist_ok=True)
-        OUT.write_bytes(serialize({"schema": 1, "stanc3_sha": toolchain.pins()["STANC3_SRC_SHA"],
+        OUT.write_bytes(serialize({"schema": 1, "stanc3_sha": pinned_sha(),
                                    "models": result}))
 
     print(f"{sum(map(len, todo.values()))} models to generate, "

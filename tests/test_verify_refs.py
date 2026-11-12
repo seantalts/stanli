@@ -27,12 +27,12 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 
 from verify_refs import (ILL_CONDITIONED, KNOWN_GAPS,  # noqa: E402
-                         LOCAL_CORPORA, POINTS, QUARANTINED, SCHEMA,
+                         POINTS, QUARANTINED, SCHEMA,
                          check_model, load_refs, model_files, parse_status,
                          probe_point)
-from cmdstan_ref import (_result_line, point_results,  # noqa: E402
-                         split_points)
+from cmdstan_ref import point_results, split_points  # noqa: E402
 import verify_sample  # noqa: E402
+import toolchain  # noqa: E402
 import verify_refs  # noqa: E402
 from corpus_inventory import local_cases, source_digest
 from verify_sample import evaluate, record_wa, write_refs  # noqa: E402
@@ -89,7 +89,6 @@ class StatusLineTest(unittest.TestCase):
         out = "OK generated quantity text\nOK -3.5 1 -2\n"
         want = ["OK", "-3.5", "1", "-2"]
         self.assertEqual(parse_status(out), want)
-        self.assertEqual(_result_line(out), want)
 
 
 class MultiPointOutputTest(unittest.TestCase):
@@ -118,7 +117,7 @@ class MultiPointOutputTest(unittest.TestCase):
         for line in ("COMPILE_FAIL no MIR", "DATA_FAIL bad data"):
             with self.subTest(line=line):
                 self.assertEqual(split_points(line + "\n"), {})
-                self.assertEqual(_result_line(line + "\n"), line.split())
+                self.assertEqual(parse_status(line + "\n"), line.split())
 
     def test_a_printed_point_prefix_is_not_a_header(self):
         out = "POINT 0\nPOINT lies\nOK 1 2\n"
@@ -474,16 +473,83 @@ class FastModeGateTest(unittest.TestCase):
             self.run_check(row % "1.00000001", pt, wa=False)[1], "WA_GATE")
 
 
+class CorpusOptionsTest(unittest.TestCase):
+    """The per-corpus gates CTest replays local corpora under."""
+
+    SOURCE = REPO / "tests" / "regressions" / f"{MODEL}.stan"
+    WA = {**VALUES, "wa": {"names": "a,b", "values": ["1", "2"]}}
+
+    def run_check(self, body, pt=None, wa=True, **options):
+        ref = {"points": {str(p): pt or self.WA for p in POINTS}}
+        opts = verify_refs.Replay(self.SOURCE, self.SOURCE.with_suffix(".json"),
+                                  **options)
+        with tempfile.TemporaryDirectory() as tmp:
+            return check_model(MODEL, ref, None, stub(tmp, body, wa),
+                               pathlib.Path(tmp), 60, 1e-9, opts=opts)
+
+    def row(self, values, extra=""):
+        return ('if [ -n "$wa" ]; then echo "WANAMES a,b"; '
+                f'echo "WAVALS {values}"; fi\n{extra}echo "OK -3.5 1 -2"')
+
+    def test_permuted_outputs_fail_and_name_the_column(self):
+        self.assertEqual(self.run_check(self.row("1 2"), wa=False)[1], "OK")
+        result = self.run_check(self.row("2 1"), wa=False)
+        self.assertEqual(result[1], "GATE")
+        self.assertIn("worst at a", result[5])
+
+    def test_a_gradient_failure_names_its_case(self):
+        result = self.run_check('echo "OK -3.5 1 -2.5"', VALUES,
+                                grad_labels=("f(real)=>real", "g(real)=>real"))
+        self.assertEqual(result[1], "GATE")
+        self.assertIn("grad[2] g(real)=>real", result[5])
+
+    def test_interpreter_use_must_match_the_expectation(self):
+        interp = 'echo "INTERP stanli: parts run interpreted" >&2\n'
+        self.assertEqual(self.run_check(self.row("1 2", interp), wa=False)[1],
+                         "INTERPRETER")
+        self.assertEqual(self.run_check(self.row("1 2"), wa=False,
+                                        interpreted=True)[1], "INTERPRETER")
+        self.assertEqual(self.run_check(self.row("1 2", interp), wa=False,
+                                        interpreted=True)[1], "OK")
+        wa_note = ('echo "WA 1 vars 2 values 0 nonfinite complete '
+                   '(interpreted: generated quantities)" >&2\n')
+        self.assertEqual(self.run_check(self.row("1 2", wa_note), wa=False)[1],
+                         "INTERPRETER")
+
+    def test_the_scale_floor_holds_small_values_to_an_absolute_error(self):
+        pt = {"values": ["-3.5", "1e-6", "-2"]}
+        body = 'echo "OK -3.5 1.00001e-06 -2"'
+        self.assertEqual(self.run_check(body, pt)[1], "OK")
+        self.assertEqual(self.run_check(body, pt, scale_floor=1e-3)[1], "GATE")
+
+    def test_the_ulp_limit_applies_on_every_platform(self):
+        body = f'echo "OK -3.5 {1.0 + 11 * math.ulp(1.0)!r} -2"'
+        self.assertEqual(self.run_check(body, VALUES)[1], "OK")
+        self.assertEqual(self.run_check(body, VALUES, ulp=10)[1], "ULP_GATE")
+
+    def test_a_wider_value_limit_needs_its_independent_value(self):
+        near = 1.0 + 12 * math.ulp(1.0)
+        body = f'echo "OK -3.5 {near!r} -2"'
+        limits = {1: (16, "a test", lambda outputs: near)}
+        self.assertEqual(self.run_check(body, VALUES, ulp=10)[1], "ULP_GATE")
+        self.assertEqual(self.run_check(body, VALUES, ulp=10,
+                                        value_limits=limits)[1], "OK")
+        far = {1: (16, "a test", lambda outputs: 1.0)}
+        self.assertEqual(self.run_check(body, VALUES, ulp=10,
+                                        value_limits=far)[1], "ULP_GATE")
+        wide = f'echo "OK -3.5 {1.0 + 17 * math.ulp(1.0)!r} -2"'
+        self.assertEqual(self.run_check(wide, VALUES, ulp=10,
+                                        value_limits=limits)[1], "ULP_GATE")
+
+
 class LocalCorpusTest(unittest.TestCase):
     """Models carried in the tree, resolved by name before posteriordb."""
 
     def test_every_local_model_is_found_where_it_lives(self):
-        for directory in LOCAL_CORPORA:
-            for stan in sorted(directory.glob("*.stan")):
-                found, data = model_files(stan.stem, {}, REPO / "nonexistent",
-                                          REPO / "nonexistent")
-                self.assertEqual(found, stan)
-                self.assertEqual(data, stan.with_suffix(".json"))
+        for name, case in local_cases().items():
+            found, data = model_files(name, {}, REPO / "nonexistent",
+                                      REPO / "nonexistent")
+            self.assertEqual((found, data), (case.source, case.data))
 
 
 class SharedHeaderWorkTest(unittest.TestCase):
@@ -659,6 +725,35 @@ class SchemaTest(unittest.TestCase):
             with self.assertRaises(SystemExit) as caught:
                 load_refs(path)
             self.assertIn(f"schema {SCHEMA}", str(caught.exception))
+
+
+class CorpusArchiveTest(unittest.TestCase):
+    """Every local corpus archive is the corpus schema, at the pins."""
+
+    def test_every_archive_loads_with_hashes_at_the_pins(self):
+        for name, corpus in verify_refs.CORPORA.items():
+            refs, _ = verify_refs.load_corpus_refs(corpus)
+            required = () if corpus.unpinned else ("cmdstan", "stan", "math")
+            with tempfile.TemporaryDirectory() as tmp:
+                models = (corpus.models(pathlib.Path(tmp)) if corpus.models
+                          else refs)
+            for model in models:
+                ref = refs[model]
+                with self.subTest(corpus=name, model=model):
+                    self.assertEqual(
+                        verify_refs.pin_drift(ref["recorded"], required), "")
+                    self.assertIn("source_sha256", ref)
+                    self.assertIn("data_sha256", ref)
+
+    def test_a_pin_bump_requires_a_new_recording(self):
+        recorded = {key: toolchain.pins()[pin] for key, pin in verify_refs.PINS}
+        self.assertEqual(verify_refs.pin_drift(recorded), "")
+        bumped = {**toolchain.pins(), "MATH_SHA": "0" * 40}
+        with unittest.mock.patch.object(toolchain, "pins", lambda: bumped):
+            self.assertIn("re-record", verify_refs.pin_drift(recorded))
+        self.assertIn("without its math",
+                      verify_refs.pin_drift({"cmdstan": recorded["cmdstan"],
+                                             "stan": recorded["stan"]}))
 
 
 class PlatformReferenceTest(unittest.TestCase):

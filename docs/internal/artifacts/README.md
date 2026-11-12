@@ -11,9 +11,9 @@ Embedded paths describe the original run and may refer to earlier locations.
 | `corpus-refs-linux-x86_64.json.gz`, `corpus-refs-linux-x86_64-gcc.json.gz`, `corpus-refs-darwin-x86_64.json.gz` | Platform/compiler supplements selected by the reference reader; preserve their own provenance. |
 | `verification.json` | Recording-time status/deviations used by `tools/corpus.py`, `tools/gen_docs.py` and `tools/gen_web_models.py`; not a fresh replay result. |
 | `conformance-baseline.json.gz` | Signature conformance baseline, read by the conformance harness and function-model generator. |
-| `corpus-bench.tsv` | Historical benchmark source validated by `tools/corpus_table.py` and documentation generation. |
-| `corpus-bench-o1vec.tsv`, `corpus-bench-o1vec.manifest.json` | Historical optimized-reference comparison and provenance. |
-| `educational-bench-o1.tsv`, `educational-bench-o1.manifest.json`, `educational-bench-o1.metadata.json` | Imported-model optimized-reference measurements and metadata. |
+| `corpus-bench.tsv` | Historical benchmark source cited by `runtime/src/OPTIMIZATIONS.md`; no maintained reader. |
+| `corpus-bench-o1vec.tsv`, `corpus-bench-o1vec.manifest.json` | Historical optimized-reference comparison and provenance; no maintained reader. |
+| `educational-bench-o1.tsv`, `educational-bench-o1.manifest.json`, `educational-bench-o1.metadata.json` | Imported-model optimized-reference measurements and metadata; no maintained reader. |
 | `native-reduce-sum-probe.json`, `native-reduce-sum-imports.json`, `native-reduce-sum-integration.json` | Successive prototype/import/integration experiments; [parallelism guide](../research/parallelism.md) explains their distinct scopes. |
 | `python-function-overhead.json` | Function-call overhead A/B evidence linked from the [interface guide](../research/packaging.md). |
 

@@ -1,3 +1,5 @@
+#include "expect.hpp"
+
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/packet.hpp>
@@ -16,20 +18,11 @@
 
 namespace {
 
-int failures = 0;
-
 void check(bool ok, const std::string& what) {
   if (!ok) {
     ++failures;
     std::printf("FAIL %s\n", what.c_str());
   }
-}
-
-std::string slurp(const std::string& path) {
-  std::ifstream f(path);
-  std::ostringstream out;
-  out << f.rdbuf();
-  return out.str();
 }
 
 struct Lcg {
@@ -512,10 +505,5 @@ int main() {
     ++failures;
     std::printf("FAIL exception: %s\n", e.what());
   }
-  if (failures) {
-    std::printf("%d failure(s)\n", failures);
-    return 1;
-  }
-  std::printf("ok\n");
-  return 0;
+  return finish("test_csr_times_vector");
 }

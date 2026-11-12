@@ -18,10 +18,10 @@ NUTS and generated quantities. CmdStan's executable is already compiled;
 its fresh build time is recorded separately. No models or output phases are
 excluded. These are the supplied teaching fixtures, seven with synthetic data.
 
-[Final observations](pareto-benchmark-results.json) include hashes, raw
+[Final observations](https://github.com/seantalts/stanli/blob/12d358e73/tests/educational/pareto-benchmark-results.json) include hashes, raw
 samples, dispersion, phase measurements and toolchain identities. The previous
-PR results are retained in [optimized observations](optimized-benchmark-results.json),
-and the original pre-fix baseline in [baseline observations](benchmark-results.json).
+PR results are retained in [optimized observations](https://github.com/seantalts/stanli/blob/12d358e73/tests/educational/optimized-benchmark-results.json),
+and the original pre-fix baseline in [baseline observations](https://github.com/seantalts/stanli/blob/12d358e73/tests/educational/benchmark-results.json).
 The previous column below is historical; it is not a paired revision comparison.
 
 | Model | Previous PR Stanli (ms) | Current Stanli (ms) | CmdStan (ms) | Speed vs CmdStan | Required floor |
@@ -57,7 +57,7 @@ modest and should remain guarded.
   blocks. Retain replay for loops, unsupported active derivatives and
   unproven initialization/aliasing. Generated quantities need no reverse code.
 
-A [matched five-pair revision comparison](pareto-matched-revision-results.json)
+A [matched five-pair revision comparison](https://github.com/seantalts/stanli/blob/12d358e73/tests/educational/pareto-matched-revision-results.json)
 agrees with the explanation: Pareto improves **1.790x** over PR commit
 `4c25331f`, from 49.456 to 27.632 ms. Preparation falls 25.664 → 8.450 ms
 and sampling 14.898 → 8.403 ms. GQ/CSV output measures 4.409 → 4.961 ms;
@@ -84,7 +84,7 @@ is preserved in [the first investigation](../../docs/internal/archive/plans/2026
 - 254/254 corpus models, 976,394 values under the existing numerical policy.
 - Native/JavaScript producer bytes agree in general and model-only modes.
 - ASan+UBSan adjoint, program-conformance and write-array tests pass.
-- [52 complete CSV files](pareto-revision-parity.json) match the prior PR
+- [52 complete CSV files](https://github.com/seantalts/stanli/blob/12d358e73/tests/educational/pareto-revision-parity.json) match the prior PR
   bitwise across 13 models and four seeds. The additional matched benchmark
   confirms byte equality for all six of its seeds as well.
 - Adjoint tests cover reused branch flags, nested paths, conditional copies,

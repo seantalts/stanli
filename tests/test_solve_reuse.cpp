@@ -1,5 +1,6 @@
 // The same solve site executes with a different divisor on every iteration.
 // Compare retained factors with recomputation across replay, frames and clones.
+#include "expect.hpp"
 #include "env_helpers.hpp"
 #include "stdout_capture.hpp"
 #include <stanli/graph.hpp>
@@ -15,7 +16,6 @@
 using namespace stanli;
 using Node = StructuredLoop::Node;
 static Kernel original;
-static int failures = 0;
 static void check(bool ok, const char* message) {
   if (!ok) {
     ++failures;
@@ -283,6 +283,5 @@ int main() {
           }
           test_unsetenv("STANLI_STRUCTURED_FRAMES");
         }
-  std::printf("test_solve_reuse: %d failures\n", failures);
-  return failures ? 1 : 0;
+  return finish("test_solve_reuse");
 }

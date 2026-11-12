@@ -22,14 +22,15 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import sys
 import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "harnesses"))
 from corpus_bench import (PhaseFailure, Runner, VECTORIZE_PROBE,  # noqa: E402
-                          benchmark_cases, parse_timing)
-from corpus_inventory import CorpusCase, materialize_data  # noqa: E402
+                          parse_timing)
+from corpus_inventory import corpus_cases, materialize_data  # noqa: E402
 
 
 def rotation(arms, round_index):
@@ -75,7 +76,7 @@ def main():
     done = set()
     if results.exists():
         done = {json.loads(line)["model"] for line in results.open()}
-    cases = benchmark_cases(args.pdb, "all")
+    cases = corpus_cases(args.pdb, "all")
     wanted = set(pathlib.Path(args.models).read_text().split()) if args.models else None
     selected = [n for n in sorted(cases)
                 if args.filter in n and (wanted is None or n in wanted)]
@@ -94,7 +95,7 @@ def main():
     for index, name in enumerate(selected):
         if name in done:
             continue
-        stan, data = cases[name]
+        case = cases[name]
         record = dict(model=name, status="failed", note="", samples={n: [] for n in names},
                       orders=[], values={}, load_before=os.getloadavg())
         directory = work / name
@@ -102,9 +103,10 @@ def main():
         try:
             wait_for_quiet(args.load_limit, pauses)
             record["load_before"] = os.getloadavg()
-            source, mir = directory / "model.stan", directory / "model.sexp"
-            source.write_bytes(stan.read_bytes())
-            data_json = materialize_data(CorpusCase(name, stan, data, "", {}), directory)
+            source, mir, data_json = (directory / "model.stan", directory / "model.sexp",
+                                      directory / "data.json")
+            source.write_bytes(case.source.read_bytes())
+            shutil.copyfile(materialize_data(case, directory), data_json)
             runner.require(f"{name}/mir", [VECTORIZE_PROBE, "--vectorize-loops", "on",
                                            *fast, "--output", mir, source], args.timeout)
             for round_index in range(args.rounds):

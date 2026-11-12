@@ -31,6 +31,7 @@ O0_FIXTURES = {
     "region_map_cf_variant_o0",
     "reduce_sum_arguments",
     "region_constant_shadow",
+    "region_local_shadow",
     "runtime_int_array_udf",
     "structured_dead_after_break",
     "structured_matrix_ops",

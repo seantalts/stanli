@@ -1,4 +1,6 @@
 // JSON data loading (CmdStan conventions): scalars, arrays, nested arrays.
+#include "expect.hpp"
+
 #include <stanli/data.hpp>
 
 #include <cmath>
@@ -7,7 +9,6 @@
 #include <string>
 #include <vector>
 
-static int failures = 0;
 static void check(bool ok, const std::string& what) {
   if (!ok) {
     ++failures;
@@ -127,6 +128,5 @@ int main() {
   }
   check(threw, "missing name reported");
 
-  if (failures == 0) std::printf("test_data OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_data");
 }

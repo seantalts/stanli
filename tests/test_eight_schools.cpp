@@ -1,19 +1,12 @@
 // Eight schools (non-centered): graph log_prob + full 10-dim gradient vs a
 // var reference coded with the same formulas in the same op order, at three
 // fixed parameter vectors. Bitwise.
+#include "expect.hpp"
 #include "models.hpp"
 
 #include <stan/math.hpp>
 #include <cstdio>
 #include <string>
-
-static int failures = 0;
-static void expect_eq(const std::string& what, double got, double want) {
-  if (got != want) {
-    ++failures;
-    std::printf("FAIL %-20s got %.17g want %.17g\n", what.c_str(), got, want);
-  }
-}
 
 // Reference: same math, all-var (matching kernel all-rvar activity),
 // operations in graph op order.
@@ -84,6 +77,5 @@ int main() {
       expect_eq(tag + " g" + std::to_string(i), grad[i], grad_ref[i]);
   }
 
-  if (failures == 0) std::printf("test_eight_schools OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_eight_schools");
 }

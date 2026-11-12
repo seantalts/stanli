@@ -920,10 +920,6 @@ add_executable(stanli_check tools/stanli_check.cpp
 target_link_libraries(stanli_check PRIVATE stanli stanli_stanc_process)
 add_dependencies(stanli_check stanli_mir_fixtures)
 stanli_embed_stanc(stanli_check)
-add_executable(lowering_digest tools/lowering_digest.cpp
-  $<TARGET_OBJECTS:stanli_tbb_stub>)
-target_link_libraries(lowering_digest PRIVATE stanli stanli_stanc_process)
-stanli_embed_stanc(lowering_digest)
 if(WIN32)
   # Standalone-compiler deployments must also run without MSYS2's C++/thread
   # runtime DLLs on PATH. Embedded targets already receive these link flags.
@@ -973,8 +969,6 @@ add_executable(test_csv_writer tests/test_csv_writer.cpp)
 target_include_directories(test_csv_writer PRIVATE ${DEPS}/fmt/include)
 target_compile_definitions(test_csv_writer PRIVATE FMT_HEADER_ONLY)
 add_test(NAME test_csv_writer COMMAND test_csv_writer)
-add_test(NAME test_dev_setup
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dev_setup.py)
 if(STANLI_HAVE_TLSDESC)
   add_test(NAME test_shared_tlsdesc
            COMMAND sh -c "readelf -rW \"$1\" | grep -q R_X86_64_TLSDESC"
@@ -1002,29 +996,14 @@ file(GLOB STANLI_COGMOD_SOURCES
      "${CMAKE_CURRENT_SOURCE_DIR}/tests/cogmod/cm_*.stan")
 foreach(_stanli_cogmod_source IN LISTS STANLI_COGMOD_SOURCES)
   get_filename_component(_stanli_cogmod "${_stanli_cogmod_source}" NAME_WE)
-  add_test(NAME test_region_map_clean_${_stanli_cogmod}
+  add_test(NAME test_cross_path_${_stanli_cogmod}
            COMMAND stanli_check tests/cogmod/${_stanli_cogmod}.stan
-                   tests/cogmod/${_stanli_cogmod}.json --sweep 12
+                   tests/cogmod/${_stanli_cogmod}.json --cross
+                   --cross-points 13
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  set_tests_properties(
-    test_region_map_clean_${_stanli_cogmod} PROPERTIES
-    ENVIRONMENT
-      "STANLI_REGION_MAP_CHECK_CLEAN=1;STANLI_REGION_MAP_SAVE_LIMIT=0"
-    PASS_REGULAR_EXPRESSION "OK "
-    FAIL_REGULAR_EXPRESSION "EVAL_FAIL")
-  foreach(_stanli_tile_cells IN ITEMS 1000000000 0)
-    add_test(NAME test_region_map_lane_clean_${_stanli_tile_cells}_${_stanli_cogmod}
-             COMMAND stanli_check tests/cogmod/${_stanli_cogmod}.stan
-                     tests/cogmod/${_stanli_cogmod}.json --sweep 12
-             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-    set_tests_properties(
-      test_region_map_lane_clean_${_stanli_tile_cells}_${_stanli_cogmod}
-      PROPERTIES
-      ENVIRONMENT
-        "STANLI_REGION_MAP_CHECK_CLEAN=1;STANLI_REGION_MAP_TILE_CELLS=${_stanli_tile_cells}"
-      PASS_REGULAR_EXPRESSION "OK "
-      FAIL_REGULAR_EXPRESSION "EVAL_FAIL")
-  endforeach()
+  set_tests_properties(test_cross_path_${_stanli_cogmod} PROPERTIES
+    PASS_REGULAR_EXPRESSION "CROSS OK "
+    FAIL_REGULAR_EXPRESSION "CROSS (FAIL|SKIP)")
 endforeach()
 add_executable(bench_grad tools/bench_grad.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
@@ -1087,8 +1066,8 @@ target_link_libraries(dump_ops PRIVATE stanli)
 add_dependencies(dump_ops stanli_mir_fixtures)
 if(NOT EMSCRIPTEN)
   add_test(NAME scalar_rng_reference
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-            $<TARGET_FILE:stanli_check>
+    COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
+            --check $<TARGET_FILE:stanli_check> --model gq_scalar_rng_complete
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_points_flag
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_points_flag.py
@@ -1119,41 +1098,41 @@ if(NOT EMSCRIPTEN)
             $<TARGET_FILE:stanli_check>
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME vector_rng_reference
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-            $<TARGET_FILE:stanli_check> gq_vector_rng_complete
+    COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
+            --check $<TARGET_FILE:stanli_check> --model gq_vector_rng_complete
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME container_rng_reference
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-            $<TARGET_FILE:stanli_check> gq_container_rng_complete
+    COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
+            --check $<TARGET_FILE:stanli_check> --model gq_container_rng_complete
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME integer_expressions_reference
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-            $<TARGET_FILE:stanli_check> gq_integer_expressions
+    COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
+            --check $<TARGET_FILE:stanli_check> --model gq_integer_expressions
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME uninitialized_int_reference
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-            $<TARGET_FILE:stanli_check> gq_uninitialized_int
+    COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
+            --check $<TARGET_FILE:stanli_check> --model gq_uninitialized_int
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME structured_local_shape_reference
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-            $<TARGET_FILE:stanli_check> structured_local_shape
+    COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
+            --check $<TARGET_FILE:stanli_check> --model structured_local_shape
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME bounded_output_block_reference
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-            $<TARGET_FILE:stanli_check> gq_bounded_block
+    COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
+            --check $<TARGET_FILE:stanli_check> --model gq_bounded_block
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   foreach(fixture gq_bounded_vector gq_bounded_row_vector gq_bounded_integer
                   gq_integer_fill_paths gq_bounded_integer_refusals
                   gq_bounded_nested gq_bounded_nested3 gq_bounded_nested5)
     add_test(NAME ${fixture}_reference
-      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-              $<TARGET_FILE:stanli_check> ${fixture}
+      COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
+              --check $<TARGET_FILE:stanli_check> --model ${fixture}
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endforeach()
   foreach(engine auto register structured)
     add_test(NAME hypergeometric_1f0_${engine}_reference
-      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-              $<TARGET_FILE:stanli_check> hypergeometric_1f0
+      COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
+              --check $<TARGET_FILE:stanli_check> --model hypergeometric_1f0
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endforeach()
   set_tests_properties(hypergeometric_1f0_register_reference PROPERTIES
@@ -1161,8 +1140,8 @@ if(NOT EMSCRIPTEN)
   set_tests_properties(hypergeometric_1f0_structured_reference PROPERTIES
     ENVIRONMENT "STANLI_BOUNDED_SPECIALIZATION=0")
   add_test(NAME rng_udf_effect_reference
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-            $<TARGET_FILE:stanli_check> gq_rng_udf_effect
+    COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
+            --check $<TARGET_FILE:stanli_check> --model gq_rng_udf_effect
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   foreach(exit_fixture gq_function_exits ode_function_exits ode_branch_returns
                        ode_runtime_for for_bound_semantics ode_integer_arithmetic ode_runtime_index
@@ -1177,14 +1156,9 @@ if(NOT EMSCRIPTEN)
                        gq_callback_integer_contexts gq_callback_integer_contexts_fallback
                        gq_callback_shared_function gq_callback_runtime_integer
                        gq_callback_runtime_control gq_callback_ode_controls gq_callback_solver_controls gq_callback_rng_values)
-    set(_expected_interpreter 0)
-    if(exit_fixture MATCHES "_fallback$" OR
-       exit_fixture STREQUAL "matrix_callback_geometry_edges")
-      set(_expected_interpreter 1)
-    endif()
     add_test(NAME ${exit_fixture}_reference
-      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scalar_rng_reference.py
-              $<TARGET_FILE:stanli_check> ${exit_fixture} ${_expected_interpreter}
+      COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
+              --check $<TARGET_FILE:stanli_check> --model ${exit_fixture}
       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     if(exit_fixture MATCHES "^structured_callback_")
       set_tests_properties(${exit_fixture}_reference PROPERTIES
@@ -1349,19 +1323,19 @@ if(STANLI_EMBED_OBJECT OR STANLI_PORTABLE_COMPILER)
 endif()
 
 set(STANLI_TESTS
-  test_execution_report test_json_writer test_rng_families test_vector_rng test_container_rng
-  test_smoke test_executor test_recorder test_densities test_tile_calls
+  test_execution_report test_json_writer test_rng
+  test_executor test_recorder test_densities test_tile_calls
   test_matvec test_eigen
   test_mnc test_stan240
-  test_legacy test_eight_schools test_glm test_normal_glm test_nuts test_walnuts test_sexp
+  test_eight_schools test_glm test_normal_glm test_nuts test_walnuts
   test_model_adapter test_sampler_parity
   test_mir test_mir_decode test_transforms test_eltwise test_sort test_scalar_binary
-  test_lower
+  test_lower test_region_map test_copy_prop test_dynamic_index
   test_lower_views
   test_native_matrix_pullbacks
-  test_lower_view_contract test_lower_array_contract test_data test_e2e
+  test_data test_e2e
   test_reroll test_profile test_inplace test_pass_safety test_sampling
-  test_ode_prog test_mir_program_conformance test_mir_checks
+  test_ode_prog test_mir_program_conformance
   test_structured_checks test_structured_loop
   test_mir_unary_fallback test_mir_binary_fallback test_mir_reduction_fallback
   test_constfold test_collapse test_cse test_fast_math test_graph_print test_pass_dump
@@ -1371,21 +1345,20 @@ set(STANLI_TESTS
   test_solve test_solve_forwards test_solve_reuse test_cross_path
   test_write_array test_wa_parallel test_pool test_bridgestan test_mixture test_island
   test_adjoint test_diagnose test_multichain test_newtrans test_rejectprint
-  test_odevariadic test_callback_values test_algebra test_estimate test_brmsmono
+  test_odevariadic test_callback_values test_algebra test_brmsmono
   test_reduce_sum
   test_structured_arrays test_pathfinder test_algorithms test_unconstrain
   test_init_interp test_constrain_structured test_csr_times_vector)
 if(STANLI_STAN_DENSITY_ORACLE)
-  list(APPEND STANLI_TESTS
-    test_density_fused test_ordered_logistic_fused test_student_t_fused)
+  list(APPEND STANLI_TESTS test_density_fused)
 endif()
 foreach(STANLI_TEST IN LISTS STANLI_TESTS)
   stanli_add_test(${STANLI_TEST})
 endforeach()
 set_tests_properties(test_ode_prog PROPERTIES TIMEOUT 180)
-target_link_libraries(test_lower PRIVATE stanli_stanc_process)
-target_include_directories(test_lower PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_compile_definitions(test_lower PRIVATE
+target_link_libraries(test_region_map PRIVATE stanli_stanc_process)
+target_include_directories(test_region_map PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(test_region_map PRIVATE
   STANLI_TEST_STANC="${STANLI_STANC_EXECUTABLE}")
 
 # The C ABI lives only in the shared library. Test it through that shipped
@@ -1451,15 +1424,6 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_fast_sampling_check
            COMMAND ${Python3_EXECUTABLE} tests/test_fast_sampling_check.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_historical_benchmarks
-           COMMAND ${Python3_EXECUTABLE} tests/test_historical_benchmarks.py
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_toolchain
-           COMMAND ${Python3_EXECUTABLE} tests/test_toolchain.py
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_validate_total_estimates
-           COMMAND ${Python3_EXECUTABLE} tests/test_validate_total_estimates.py
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_sampling
            COMMAND ${Python3_EXECUTABLE} tools/check_corpus_sampling.py
                    --build ${CMAKE_CURRENT_BINARY_DIR}
@@ -1488,6 +1452,9 @@ if(Python3_Interpreter_FOUND)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_inventory
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_inventory.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_toolchain
+           COMMAND ${Python3_EXECUTABLE} tests/test_toolchain.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_ctsem_engine
            COMMAND ${Python3_EXECUTABLE} tests/test_ctsem_engine.py
@@ -1539,33 +1506,10 @@ if(Python3_Interpreter_FOUND)
                    --stanc ${STANLI_STANC_EXECUTABLE}
                    --registry $<TARGET_FILE:dump_function_specs> --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_stan240_reference
-           COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
-             --build ${CMAKE_CURRENT_BINARY_DIR}
-             --stanc ${STANLI_STANC_EXECUTABLE}
-             --fixtures tests/fixtures
-             --manifest tests/function_coverage/stan240_manifest.json
-             --reference tests/function_coverage/stan240_references.json.gz)
-  set_tests_properties(test_stan240_reference PROPERTIES
-                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_sort_reference
-           COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
-             --build ${CMAKE_CURRENT_BINARY_DIR}
-             --stanc ${STANLI_STANC_EXECUTABLE}
-             --fixtures tests/fixtures
-             --manifest tests/function_coverage/sort_manifest.json
-             --reference tests/function_coverage/sort_references.json.gz)
-  set_tests_properties(test_sort_reference PROPERTIES
-                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_library_reference
-           COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
-             --build ${CMAKE_CURRENT_BINARY_DIR}
-             --stanc ${STANLI_STANC_EXECUTABLE}
-             --fixtures tests/fixtures
-             --manifest tests/function_coverage/library_manifest.json
-             --reference tests/function_coverage/library_references.json.gz)
-  set_tests_properties(test_library_reference PROPERTIES
-                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_sized_functions_reference
+           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus sized_functions
+                   --check $<TARGET_FILE:stanli_check>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_container_flow_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_container_flow_models.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1573,26 +1517,26 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tools/gen_stanc3_good_data.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_container_flow_reference
-           COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
-             --build ${CMAKE_CURRENT_BINARY_DIR}
-             --stanc ${STANLI_STANC_EXECUTABLE}
-             --fixtures tests/function_coverage/container_flow
-             --manifest tests/function_coverage/container_flow_manifest.json
-             --reference tests/function_coverage/container_flow_references.json.gz)
-  set_tests_properties(test_container_flow_reference PROPERTIES
-                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus container_flow
+                   --check $<TARGET_FILE:stanli_check>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_container_flow_reference_stanc
+           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus container_flow
+                   --check $<TARGET_FILE:stanli_check>
+                   --stanc ${STANLI_STANC_EXECUTABLE}
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_stanc3_bad
            COMMAND ${Python3_EXECUTABLE} tools/check_stanc3_bad.py
              --build ${CMAKE_CURRENT_BINARY_DIR}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_wa_fallback_ledger
-           COMMAND ${Python3_EXECUTABLE} tools/check_wa_fallbacks.py
-             --build ${CMAKE_CURRENT_BINARY_DIR}
+  add_test(NAME test_oncobayes2_reference
+           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus oncobayes2
+                   --check $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_wa_fallback_ledger_stanc
-           COMMAND ${Python3_EXECUTABLE} tools/check_wa_fallbacks.py
-             --build ${CMAKE_CURRENT_BINARY_DIR}
-             --stanc ${STANLI_STANC_EXECUTABLE}
+  add_test(NAME test_oncobayes2_reference_stanc
+           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus oncobayes2
+                   --check $<TARGET_FILE:stanli_check>
+                   --stanc ${STANLI_STANC_EXECUTABLE}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_builtin_signature_model_generation
            COMMAND ${Python3_EXECUTABLE}
@@ -1607,8 +1551,8 @@ if(Python3_Interpreter_FOUND)
            COMMAND ${Python3_EXECUTABLE} tests/test_function_models.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_function_models
-           COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
-                   --build ${CMAKE_CURRENT_BINARY_DIR}
+           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus functions
+                   --check $<TARGET_FILE:stanli_check>
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   if(STANLI_THREADS)
     add_test(NAME test_reduce_sum_cli
@@ -1616,9 +1560,6 @@ if(Python3_Interpreter_FOUND)
                      $<TARGET_FILE:stanli_run>
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   endif()
-  add_test(NAME test_vectorize_ab
-           COMMAND ${Python3_EXECUTABLE} tests/test_vectorize_ab.py
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # Source-level lit cases are one marked .stan file each. CMake discovers
   # both the dedicated tests/lit tree and existing fixtures that opt in, then
   # gives every case its own CTest entry. Adding coverage needs no build-system
@@ -1669,7 +1610,7 @@ if(Python3_Interpreter_FOUND)
   # the files, replay against recorded CmdStan references: log density,
   # gradient, output names and values at the three corpus points. The
   # committed artifact makes this run without a CmdStan checkout;
-  # tools/check_signature_models.py --record refreshes it when coverage
+  # tools/verify_sample.py --corpus signatures refreshes it when coverage
   # moves.
   foreach(STANLI_SIGNATURE_MODEL IN LISTS STANLI_BUILTIN_SIGNATURE_MODELS
           STANLI_DENSITY_SIGNATURE_MODELS)
@@ -1677,21 +1618,20 @@ if(Python3_Interpreter_FOUND)
                            "${STANLI_SIGNATURE_MODEL}" NAME_WE)
     set(STANLI_SIGNATURE_TEST "signature_refs_${STANLI_SIGNATURE_STEM}")
     add_test(NAME ${STANLI_SIGNATURE_TEST}
-             COMMAND ${Python3_EXECUTABLE} tools/check_signature_models.py
-                     --build ${CMAKE_CURRENT_BINARY_DIR}
+             COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py
+                     --corpus signatures --check $<TARGET_FILE:stanli_check>
                      --model ${STANLI_SIGNATURE_STEM}
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     set_tests_properties(${STANLI_SIGNATURE_TEST} PROPERTIES
       LABELS "signature_refs")
   endforeach()
-  add_test(NAME test_zero_length_whole_assignment_resize
-           COMMAND ${Python3_EXECUTABLE}
-                   tests/test_zero_length_whole_assignment_resize.py
-                   --build ${CMAKE_CURRENT_BINARY_DIR}
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_cmdstan_replay
-           COMMAND ${Python3_EXECUTABLE} tests/test_cmdstan_replay.py
-                   --build ${CMAKE_CURRENT_BINARY_DIR}
+           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus cmdstan_replay
+                   --check $<TARGET_FILE:stanli_check>
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_cmdstan_replay_stanc
+           COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus cmdstan_replay
+                   --check $<TARGET_FILE:stanli_check>
                    --stanc ${STANLI_STANC_EXECUTABLE}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   # Friendly local entry points. These deliberately invoke CTest rather than

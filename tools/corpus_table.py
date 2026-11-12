@@ -1,20 +1,8 @@
 #!/usr/bin/env python3
-"""Render the benchmark catalog and detailed historical appendix tables.
+"""Render the benchmark catalog for benchmarks.md.
 
 --catalog renders one complete, current benchmark run for benchmarks.md.
-The original TSV mode emits two tables for notes/performance/2026-09-11-posteriordb-benchmark.md.
-The first is every model both engines measured end to end,
-sorted by per-gradient speedup. It shows both engines' absolute gradient
-times and the wall time from Stan source to a completed 1,000-warmup,
-1,000-draw run. stanli_sample_s already includes the whole stanli process;
-CmdStan's equivalent first-run time is its separately measured build plus
-run. The second table holds models the run could not complete, with what
-stopped them. Missing numbers sort to the bottom because missing is not slow.
-
-Usage: python3 tools/corpus_table.py docs/internal/artifacts/corpus-bench.tsv
-Prints markdown to stdout; the appendix is edited by hand around it.
-
---catalog requires the current full-corpus v5 or v6 summary, raw model records and
+It requires the current full-corpus v5 or v6 summary, raw model records and
 manifest under output/corpus-performance; it never substitutes historical measurements.
 Its total-sampling estimate is setup plus a gradient count times the mean gradient time,
 not measured sampling. A v6 run takes each model's count from a Stanli reference run
@@ -24,16 +12,7 @@ fixed points and 5,000 gradients for every model. Gradient times are means over 
 recorded evaluation points. The records keep per-point timings and scaled errors, not
 density or gradient values; the run enforced the gate.
 
---gradients INPUT.tsv renders only the fixed-point gradient comparison.
-
---historical-sampling REPORT.json renders the archived paired sampling experiment:
-python3 tools/corpus_table.py --historical-sampling tests/educational/pareto-benchmark-results.json
-The old --educational spelling remains an alias for archived commands.
-
---o1vec renders docs/internal/artifacts/corpus-bench-o1vec.tsv instead: gradient and compile
-time only, no sampling columns, plus a compile+sample speedup that adds
-2,000 synthetic gradient evaluations to each side's compile time. Usage:
-python3 tools/corpus_table.py docs/internal/artifacts/corpus-bench-o1vec.tsv --o1vec
+--vectorized-catalog renders the loop-vectorization comparison.
 """
 import csv
 import gzip
@@ -45,282 +24,6 @@ import math
 import statistics
 from pathlib import Path
 import sys
-
-# The harness's machine tags, in the words a reader needs. The per-model
-# detail (why a model with a fast gradient still fails to sample inside
-# the cap) is hand-written prose in benchmarks.md, next to the table.
-WHY = {
-    "stanli_sample_timeout": "stanli sampling hit the 900 s cap",
-    "cmdstan_sample_timeout": "CmdStan sampling hit the 900 s cap",
-    "stanli_eval_fail": "stanli's gradient probe threw at the benchmark point",
-    "stanli_prep_fail": "stanli's compile-and-bind step failed",
-    "stanc_fail": "stanc could not compile the model",
-    "cmdstan_build_fail": "CmdStan could not build the model",
-    "cmdstan_grad_build_fail": "the CmdStan gradient driver would not link",
-    "cmdstan_grad_fail": "the CmdStan gradient driver would not run",
-}
-
-
-def fmt_ns(v):
-    if not v:
-        return "-"
-    ns = float(v)
-    if ns < 1_000:
-        return f"{ns:.0f} ns"
-    if ns < 1_000_000:
-        return f"{ns / 1_000:.3f} us"
-    return f"{ns / 1_000_000:.3f} ms"
-
-
-def fmt_s(v):
-    return f"{float(v):.2f} s" if v else "-"
-
-
-def fmt_prep_s(v):
-    """stanli's prep column is recorded to 0.001 s, so keep that precision."""
-    return f"{float(v):.3f} s" if v else "-"
-
-
-def fmt_cmdstan_s(v):
-    """CmdStan build inputs are recorded to 0.1 s, so totals are too."""
-    return f"{float(v):.1f} s" if v else "-"
-
-
-def ratio(a, b):
-    """b over a as a speedup string: how much faster stanli is."""
-    if not a or not b:
-        return "-"
-    return f"{float(b) / float(a):.2f}x"
-
-
-def first_run_ratio(r, col):
-    stanli = col(r, "stanli_sample_s")
-    build = col(r, "cmdstan_build_s")
-    sample = col(r, "cmdstan_sample_s")
-    if not stanli or not build or not sample:
-        return None
-    return (float(build) + float(sample)) / float(stanli)
-
-
-def fmt_first_run_ratio(value):
-    """Do not imply more precision than the 0.01/0.1 s source cells."""
-    if value < 1:
-        return f"~{value:.2f}x"
-    if value < 10:
-        return f"~{value:.1f}x"
-    if value < 100:
-        return f"~{value:.0f}x"
-    return f"~{round(value, -1):.0f}x"
-
-
-def two_k_grad_ratio(r, col):
-    """Compile time plus 2,000 gradients: the cost of a first short run."""
-    prep = col(r, "stanli_prep_s")
-    s_grad = col(r, "stanli_ns_grad")
-    build = col(r, "cmdstan_build_s")
-    c_grad = col(r, "cmdstan_ns_grad")
-    if not prep or not s_grad or not build or not c_grad:
-        return None
-    stanli_total = float(prep) + 2000 * float(s_grad) / 1e9
-    cmdstan_total = float(build) + 2000 * float(c_grad) / 1e9
-    return cmdstan_total / stanli_total
-
-
-def load_rows(path):
-    with open(path, newline="") as f:
-        reader = csv.reader(f, delimiter="\t")
-        header = next(reader)
-        idx = {name: k for k, name in enumerate(header)}
-        rows = []
-        for c in reader:
-            if len(c) < len(header):
-                c += [""] * (len(header) - len(c))
-            rows.append(c)
-
-    def col(r, name):
-        return r[idx[name]].strip()
-
-    col.columns = set(idx)
-    return rows, col
-
-
-def render_o1vec(rows, col):
-    relevant_notes = {"stanc_fail", "stanli_eval_fail", "stanli_prep_fail",
-                       "cmdstan_build_fail", "cmdstan_grad_build_fail",
-                       "cmdstan_grad_fail"}
-
-    def grad_ratio(r):
-        a, b = col(r, "stanli_ns_grad"), col(r, "cmdstan_ns_grad")
-        return float(b) / float(a) if a and b else -1.0
-
-    def why(r):
-        """Why this row is incomplete, or "" if it is not."""
-        reasons = [WHY.get(n, n) for n in col(r, "note").split(",")
-                   if n in relevant_notes]
-        if not col(r, "stanli_prep_s"):
-            reasons.append("no stanli compile time")
-        if not col(r, "stanli_ns_grad"):
-            reasons.append("no stanli gradient")
-        if not col(r, "cmdstan_build_s"):
-            reasons.append("no CmdStan compile time")
-        if not col(r, "cmdstan_ns_grad") and "eval_fail" not in col(r, "note"):
-            reasons.append("no CmdStan gradient")
-        return "; ".join(dict.fromkeys(reasons))
-
-    done = [r for r in rows if not why(r)]
-    stuck = [r for r in rows if why(r)]
-    done.sort(key=grad_ratio, reverse=True)
-    stuck.sort(key=grad_ratio, reverse=True)
-
-    print("| model | gradient speedup | stanli compile | CmdStan compile |"
-          " compile+sample speedup |")
-    print("| --- | ---: | ---: | ---: | ---: |")
-    for r in done:
-        print(f"| `{col(r, 'model')}` "
-              f"| {ratio(col(r, 'stanli_ns_grad'), col(r, 'cmdstan_ns_grad'))} "
-              f"| {fmt_prep_s(col(r, 'stanli_prep_s'))} "
-              f"| {fmt_cmdstan_s(col(r, 'cmdstan_build_s'))} "
-              f"| {fmt_first_run_ratio(two_k_grad_ratio(r, col))} |")
-
-    if not stuck:
-        return
-    print()
-    print("| model | stanli gradient | CmdStan gradient | gradient speedup |"
-          " what stopped it |")
-    print("| --- | ---: | ---: | ---: | --- |")
-    for r in stuck:
-        print(f"| `{col(r, 'model')}` "
-              f"| {fmt_ns(col(r, 'stanli_ns_grad'))} "
-              f"| {fmt_ns(col(r, 'cmdstan_ns_grad'))} "
-              f"| {ratio(col(r, 'stanli_ns_grad'), col(r, 'cmdstan_ns_grad'))} "
-              f"| {why(r)} |")
-
-
-def render_main(rows, col):
-    def grad_ratio(r):
-        if "paired_speedup" in col.columns:
-            return float(col(r, "paired_speedup")) if col(r, "paired_speedup") else -1.0
-        a, b = col(r, "stanli_ns_grad"), col(r, "cmdstan_ns_grad")
-        return float(b) / float(a) if a and b else -1.0
-
-    def why(r):
-        """Why this row is incomplete, or "" if it is not."""
-        reasons = [re.sub(r"^(stanli|cmdstan)_sample_timeout\((\d+)s\)$",
-                          lambda m: f"{'CmdStan' if m[1] == 'cmdstan' else 'stanli'} "
-                                    f"sampling hit the {m[2]} s cap",
-                          WHY.get(n, n))
-                   for n in re.split(r"[,;]\s*", col(r, "note")) if n]
-        if not col(r, "stanli_ns_grad"):
-            reasons.append("no stanli gradient")
-        if not col(r, "cmdstan_ns_grad") and "eval_fail" not in col(r, "note"):
-            reasons.append("no CmdStan gradient")
-        return "; ".join(dict.fromkeys(reasons))
-
-    if "paired_speedup" in col.columns:
-        print("Gradient timings are medians ± MAD; speedups are medians of paired ratios.")
-        print()
-        print("| model | stanli gradient | CmdStan gradient | paired speedup | pairs | status |")
-        print("| --- | ---: | ---: | ---: | ---: | --- |")
-        for r in sorted(rows, key=grad_ratio, reverse=True):
-            times = [f"{fmt_ns(col(r, e + '_ns_grad'))} ± {fmt_ns(col(r, e + '_ns_grad_mad'))}"
-                     for e in ("stanli", "cmdstan")]
-            speedup = (f"{grad_ratio(r):.2f}x ± {float(col(r, 'paired_speedup_mad')):.2f}"
-                       if grad_ratio(r) > 0 else "-")
-            status = col(r, "note").replace("sampling_not_requested", "gradients only") or "complete"
-            print(f"| `{col(r, 'model')}` | {times[0]} | {times[1]} | {speedup} "
-                  f"| {col(r, 'paired_rounds') or '-'} | {status} |")
-        if "stanli_sample_s" in col.columns and any(
-                col(r, "stanli_sample_s") or col(r, "cmdstan_sample_s") for r in rows):
-            print("\n| model | stanli CLI median | CmdStan build | CmdStan CLI median |")
-            print("| --- | ---: | ---: | ---: |")
-            for r in rows:
-                print(f"| `{col(r, 'model')}` | {fmt_s(col(r, 'stanli_sample_s'))} "
-                      f"| {fmt_s(col(r, 'cmdstan_build_s'))} | {fmt_s(col(r, 'cmdstan_sample_s'))} |")
-        return
-
-    done = [r for r in rows if not why(r)]
-    stuck = [r for r in rows if why(r)]
-    done.sort(key=grad_ratio, reverse=True)
-    stuck.sort(key=grad_ratio, reverse=True)
-
-    print("| model | stanli gradient | CmdStan gradient | gradient speedup |"
-          " stanli source-to-CSV | CmdStan build | CmdStan build + run |"
-          " approx. first-run speedup |")
-    print("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
-    for r in done:
-        cs_total = (float(col(r, "cmdstan_build_s"))
-                    + float(col(r, "cmdstan_sample_s")))
-        print(f"| `{col(r, 'model')}` "
-              f"| {fmt_ns(col(r, 'stanli_ns_grad'))} "
-              f"| {fmt_ns(col(r, 'cmdstan_ns_grad'))} "
-              f"| {ratio(col(r, 'stanli_ns_grad'), col(r, 'cmdstan_ns_grad'))} "
-              f"| {fmt_s(col(r, 'stanli_sample_s'))} "
-              f"| {fmt_cmdstan_s(col(r, 'cmdstan_build_s'))} "
-              f"| {fmt_cmdstan_s(cs_total)} "
-              f"| {fmt_first_run_ratio(first_run_ratio(r, col))} |")
-
-    ratios = sorted(g for g in (grad_ratio(r) for r in rows) if g > 0)
-    at_par = sum(1 for g in ratios if g >= 1.0)
-    med = ratios[len(ratios) // 2] if ratios else 0
-    first_runs = sorted(x for x in (first_run_ratio(r, col) for r in rows)
-                        if x is not None)
-    first_at_par = sum(1 for x in first_runs if x >= 1.0)
-    first_med = first_runs[len(first_runs) // 2] if first_runs else 0
-    print()
-    print(f"{len(rows)} models; {len(ratios)} with both gradients; median "
-          f"per-gradient speedup {med:.2f}x; {at_par}/{len(ratios)} at or "
-          f"above CmdStan.")
-    print(f"{len(first_runs)} completed first runs; median source-to-CSV "
-          f"speedup about {first_med:.1f}x; {first_at_par}/{len(first_runs)} at or "
-          f"above CmdStan including its model build.")
-
-    if not stuck:
-        return
-    print()
-    print("| model | stanli gradient | CmdStan gradient | gradient speedup |"
-          " what stopped it |")
-    print("| --- | ---: | ---: | ---: | --- |")
-    for r in stuck:
-        print(f"| `{col(r, 'model')}` "
-              f"| {fmt_ns(col(r, 'stanli_ns_grad'))} "
-              f"| {fmt_ns(col(r, 'cmdstan_ns_grad'))} "
-              f"| {ratio(col(r, 'stanli_ns_grad'), col(r, 'cmdstan_ns_grad'))} "
-              f"| {why(r)} |")
-
-
-def render_gradients(rows, col):
-    """Fixed-point throughput; no build cost or sampler trajectory in the ratio."""
-    print("| model | parameters | stanli gradient | CmdStan gradient | gradient speedup |")
-    print("| --- | ---: | ---: | ---: | ---: |")
-    for row in sorted(rows, key=lambda r: col(r, "model")):
-        a, b = col(row, "stanli_ns_grad"), col(row, "cmdstan_ns_grad")
-        if (not a or not b or not all(math.isfinite(float(v)) and float(v) > 0
-                                     for v in (a, b)) or col(row, "note")):
-            raise ValueError(f"Incomplete gradient measurement: {col(row, 'model')}")
-        print(f"| `{col(row, 'model')}` | {col(row, 'params')} "
-              f"| {fmt_ns(a)} | {fmt_ns(b)} | {ratio(a, b)} |")
-
-
-def render_historical_sampling(report):
-    """Render the paired source-to-CSV gate without inventing gradient timings."""
-    from historical_benchmarks import inventory, speed_gate, MINIMUM_SPEEDUPS
-    if set(report["models"]) != set(inventory()):
-        raise ValueError("Educational result inventory differs from the fixtures")
-    print("| model | stanli source-to-CSV | compiled CmdStan run | speedup | required floor |")
-    print("| --- | ---: | ---: | ---: | ---: |")
-    for model, entry in sorted(report["models"].items()):
-        if "error" in entry:
-            raise ValueError(f"Failed educational result: {model}")
-        bench = entry["benchmark"]
-        minimum = MINIMUM_SPEEDUPS.get(model, 0.5)
-        measured = speed_gate(bench["seconds"], minimum)
-        if not measured["pass"] or not bench["posterior_pass"]:
-            raise ValueError(f"Educational gate did not pass: {model}")
-        med = measured["medians"]
-        print(f"| `{model}` | {med['stanli'] * 1000:.2f} ms "
-              f"| {med['cmdstan'] * 1000:.2f} ms "
-              f"| {measured['speedup']:.3f}x | {minimum:.1f}x |")
-
 
 CATALOG_ROOT = Path(__file__).resolve().parents[1]
 CATALOG_SUMMARY = CATALOG_ROOT / "output/corpus-performance/benchmark-summary.tsv"
@@ -900,13 +603,6 @@ def render_vectorized_sections(root=VECTORIZED_ROOT, default_root=DEFAULT_ROOT):
     return {"summary": summary, "runs": runs}
 
 
-def require_historical_tsv(col):
-    if "gradient_budget" in col.columns or "gradient_count" in col.columns:
-        raise SystemExit("Current TSVs require raw evidence validation: publish with "
-                         "tools/publish_corpus_bench.py, then use tools/corpus_table.py --catalog "
-                         "(or --vectorized-catalog). Plain TSV mode is historical only.")
-
-
 def main():
     if "--vectorized-catalog" in sys.argv:
         print(render_gradient_catalog(), end="")
@@ -914,26 +610,7 @@ def main():
     if "--catalog" in sys.argv:
         print(render_catalog(), end="")
         return
-    if "--gradients" in sys.argv:
-        path = sys.argv[sys.argv.index("--gradients") + 1]
-        rows, col = load_rows(path)
-        require_historical_tsv(col)
-        render_gradients(rows, col)
-        return
-    if "--historical-sampling" in sys.argv or "--educational" in sys.argv:
-        flag = "--historical-sampling" if "--historical-sampling" in sys.argv else "--educational"
-        path = sys.argv[sys.argv.index(flag) + 1]
-        with open(path) as stream:
-            render_historical_sampling(json.load(stream))
-        return
-    o1vec = "--o1vec" in sys.argv
-    path = [a for a in sys.argv[1:] if a != "--o1vec"][0]
-    rows, col = load_rows(path)
-    require_historical_tsv(col)
-    if o1vec:
-        render_o1vec(rows, col)
-    else:
-        render_main(rows, col)
+    sys.exit(__doc__)
 
 
 if __name__ == "__main__":

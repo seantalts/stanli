@@ -18,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 
-from check_function_models import source_digest
+from corpus_inventory import source_digest
 from corpus_inventory import corpus_cases, materialize_data
 from verify_refs import REFS_PATH, default_check_bin, load_refs
 

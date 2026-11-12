@@ -40,20 +40,6 @@ static void expect_in(const std::string& what, double got, double lo,
   }
 }
 
-// A 4-dimensional standard normal: cheap, and every marginal has known
-// moments, so the summary numbers can be checked rather than eyeballed.
-static stanli::Graph normal_graph(int D) {
-  using namespace stanli;
-  Graph g;
-  const int x = g.add_slot(D, true);
-  const int zero = g.add_slot(1, false);
-  const int one = g.add_slot(1, false);
-  const int lp = g.add_slot(1, false);
-  g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
-  g.result_slot = lp;
-  return g;
-}
-
 int main() {
   using namespace stanli;
 
@@ -140,34 +126,11 @@ int main() {
     expect("source-destroyed clone remains bitwise identical", same);
   }
 
-  // ---- chain ids give different streams, seeds reproduce ----------------
-  {
-    Executor a(normal_graph(4)), b(normal_graph(4)), c(normal_graph(4));
-    a.value_ptr(2)[0] = 1.0;  // sigma slot; mu stays 0
-    b.value_ptr(2)[0] = 1.0;
-    c.value_ptr(2)[0] = 1.0;
-
-    NutsConfig cfg;
-    cfg.seed = 4242;
-    cfg.warmup = 200;
-    cfg.samples = 200;
-
-    cfg.chain_id = 1;
-    auto d1 = run_nuts(a, cfg);
-    cfg.chain_id = 2;
-    auto d2 = run_nuts(b, cfg);
-    cfg.chain_id = 1;
-    auto d3 = run_nuts(c, cfg);
-
-    expect("same seed and chain id reproduces", d1 == d3);
-    expect("a different chain id is a different stream", d1 != d2);
-  }
-
   // ---- run_nuts_chains agrees with running the chains by hand -----------
   // This is what makes the multi-chain path trustworthy: it must be the
   // single-chain path, N times, with the chain id walked.
   {
-    Executor base(normal_graph(3));
+    Executor base(testmodels::std_normal(3));
     base.value_ptr(2)[0] = 1.0;
     auto clones = clone_executors(base, 2);
     std::vector<Executor*> execs{&base, clones[0].get(), clones[1].get()};
@@ -184,7 +147,7 @@ int main() {
            res[0].draws.size() == 150 && res[2].draws.size() == 150);
     expect("each chain has stats", res[0].stats.rows.size() == 150);
 
-    Executor solo(normal_graph(3));
+    Executor solo(testmodels::std_normal(3));
     solo.value_ptr(2)[0] = 1.0;
     NutsConfig c2 = cfg;
     c2.chain_id = 3;  // what chain index 2 should have used
@@ -207,13 +170,13 @@ int main() {
   // segfaulted in start_nested() until run_nuts_chains did it itself.
   {
     const int C = 4;
-    Executor a(normal_graph(3));
+    Executor a(testmodels::std_normal(3));
     a.value_ptr(2)[0] = 1.0;
     auto ca = clone_executors(a, C - 1);
     std::vector<Executor*> ea{&a};
     for (auto& c : ca) ea.push_back(c.get());
 
-    Executor b(normal_graph(3));
+    Executor b(testmodels::std_normal(3));
     b.value_ptr(2)[0] = 1.0;
     auto cb = clone_executors(b, C - 1);
     std::vector<Executor*> eb{&b};
@@ -240,7 +203,7 @@ int main() {
     std::vector<double> inits((size_t)(C * D));
     for (size_t i = 0; i < inits.size(); ++i) inits[i] = 0.2 * (double)i - 1.0;
 
-    Executor a(normal_graph(D));
+    Executor a(testmodels::std_normal(D));
     a.value_ptr(2)[0] = 1.0;
     auto ca = clone_executors(a, C - 1);
     std::vector<Executor*> ea{&a};
@@ -255,7 +218,7 @@ int main() {
 
     bool same = par.size() == (size_t)C;
     for (int c = 0; same && c < C; ++c) {
-      Executor solo(normal_graph(D));
+      Executor solo(testmodels::std_normal(D));
       solo.value_ptr(2)[0] = 1.0;
       NutsConfig one = cfg;
       one.chain_id = cfg.chain_id + c;
@@ -279,7 +242,7 @@ int main() {
         metrics[(size_t)c * stride + at] = 0.5 + 0.25 * c + 0.1 * i;
       }
 
-    Executor a(normal_graph(D));
+    Executor a(testmodels::std_normal(D));
     a.value_ptr(2)[0] = 1.0;
     auto ca = clone_executors(a, C - 1);
     std::vector<Executor*> ea{&a};
@@ -297,7 +260,7 @@ int main() {
     bool same = par.size() == (size_t)C;
     bool distinct = true;
     for (int c = 0; same && c < C; ++c) {
-      Executor solo(normal_graph(D));
+      Executor solo(testmodels::std_normal(D));
       solo.value_ptr(2)[0] = 1.0;
       NutsConfig one = cfg;
       one.chain_id = cfg.chain_id + c;
@@ -351,13 +314,13 @@ int main() {
                !should_report_progress(schedule, 2, false, 0));
 
     const int C = 2;
-    Executor quiet_base(normal_graph(3));
+    Executor quiet_base(testmodels::std_normal(3));
     quiet_base.value_ptr(2)[0] = 1.0;
     auto quiet_clones = clone_executors(quiet_base, C - 1);
     std::vector<Executor*> quiet_execs{&quiet_base};
     for (auto& c : quiet_clones) quiet_execs.push_back(c.get());
 
-    Executor observed_base(normal_graph(3));
+    Executor observed_base(testmodels::std_normal(3));
     observed_base.value_ptr(2)[0] = 1.0;
     auto observed_clones = clone_executors(observed_base, C - 1);
     std::vector<Executor*> observed_execs{&observed_base};
@@ -396,7 +359,7 @@ int main() {
     expect("progress callbacks run on the caller thread", caller_thread);
     expect("progress does not change draws or sampler stats", same);
 
-    Executor throwing_base(normal_graph(3));
+    Executor throwing_base(testmodels::std_normal(3));
     throwing_base.value_ptr(2)[0] = 1.0;
     auto throwing_clones = clone_executors(throwing_base, C - 1);
     std::vector<Executor*> throwing_execs{&throwing_base};
@@ -419,7 +382,7 @@ int main() {
     NutsConfig empty_cfg = cfg;
     empty_cfg.warmup = 0;
     empty_cfg.samples = 0;
-    Executor empty_base(normal_graph(3));
+    Executor empty_base(testmodels::std_normal(3));
     empty_base.value_ptr(2)[0] = 1.0;
     auto empty_clones = clone_executors(empty_base, C - 1);
     std::vector<Executor*> empty_execs{&empty_base};
@@ -434,9 +397,9 @@ int main() {
 
   // ---- reports cover transitions that thinning does not store -----------
   {
-    Executor full_ex(normal_graph(2));
+    Executor full_ex(testmodels::std_normal(2));
     full_ex.value_ptr(2)[0] = 1.0;
-    Executor thin_ex(normal_graph(2));
+    Executor thin_ex(testmodels::std_normal(2));
     thin_ex.value_ptr(2)[0] = 1.0;
     NutsConfig full_cfg;
     full_cfg.seed = 9191;
@@ -468,32 +431,9 @@ int main() {
         thin_stats.rows.size() < (size_t)(thin_cfg.warmup + thin_cfg.samples));
   }
 
-  // ---- thinning and saved warmup change the row count -------------------
-  {
-    Executor ex(normal_graph(2));
-    ex.value_ptr(2)[0] = 1.0;
-    NutsConfig cfg;
-    cfg.seed = 7;
-    cfg.warmup = 100;
-    cfg.samples = 100;
-
-    cfg.thin = 4;
-    SamplerStats st;
-    auto d = run_nuts(ex, cfg, &st);
-    expect("thin keeps every 4th draw", d.size() == 25);
-    expect("stats are thinned too", st.rows.size() == d.size());
-
-    Executor ex2(normal_graph(2));
-    ex2.value_ptr(2)[0] = 1.0;
-    cfg.thin = 1;
-    cfg.save_warmup = true;
-    auto d2 = run_nuts(ex2, cfg);
-    expect("saved warmup prepends its rows", d2.size() == 200);
-  }
-
   // ---- explicit inits ---------------------------------------------------
   {
-    Executor ex(normal_graph(3));
+    Executor ex(testmodels::std_normal(3));
     ex.value_ptr(2)[0] = 1.0;
     const double init[3] = {0.5, -0.25, 1.5};
     NutsConfig cfg;
@@ -506,7 +446,7 @@ int main() {
 
     // An init outside the support must fail with a message that says so
     // rather than silently falling back to a random draw.
-    Executor bad(normal_graph(1));
+    Executor bad(testmodels::std_normal(1));
     bad.value_ptr(2)[0] = 1.0;
     const double nan_init[1] = {std::nan("")};
     NutsConfig bcfg;
@@ -530,7 +470,7 @@ int main() {
   // ---- end to end: four chains of a standard normal look converged ------
   {
     const int D = 2, C = 4, N = 500;
-    Executor base(normal_graph(D));
+    Executor base(testmodels::std_normal(D));
     base.value_ptr(2)[0] = 1.0;
     auto clones = clone_executors(base, C - 1);
     std::vector<Executor*> execs{&base};

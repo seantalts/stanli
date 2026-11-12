@@ -1,3 +1,4 @@
+#include "expect.hpp"
 #include "env_helpers.hpp"
 #include <stanli/compile.hpp>
 #include <stanli/data.hpp>
@@ -15,22 +16,6 @@
 namespace {
 
 using namespace stanli;
-
-int failures = 0;
-
-void expect(const std::string& what, bool ok) {
-  if (!ok) {
-    ++failures;
-    std::printf("FAIL %s\n", what.c_str());
-  }
-}
-
-std::string slurp(const std::string& path) {
-  std::ifstream f(path);
-  std::ostringstream out;
-  out << f.rdbuf();
-  return out.str();
-}
 
 struct Run {
   size_t ops = 0;
@@ -90,11 +75,11 @@ void test_active_duplicates_merge() {
   const Run base = run("fast_math_cse", CompileOptions{});
   const Run slow = run("fast_math_cse", off);
   const Run fast = run("fast_math_cse", on);
-  expect("default options match explicit false", same_bits(base, slow));
-  expect("default keeps every Bernoulli term", slow.bernoulli == 12);
-  expect("fast merges Bernoulli duplicates", fast.bernoulli == 2);
-  expect("fast graph is smaller", fast.ops < slow.ops);
-  expect("fast cse gradient matches default", close(fast, slow));
+  expect_true("default options match explicit false", same_bits(base, slow));
+  expect_true("default keeps every Bernoulli term", slow.bernoulli == 12);
+  expect_true("fast merges Bernoulli duplicates", fast.bernoulli == 2);
+  expect_true("fast graph is smaller", fast.ops < slow.ops);
+  expect_true("fast cse gradient matches default", close(fast, slow));
 }
 
 // The fusion on its own: the observation collapse would go on to replace
@@ -107,11 +92,11 @@ void test_shared_parameter_fuses() {
   test_setenv("STANLI_NO_COLLAPSE", "1");
   const Run fast = run("fast_math_shared", on);
   test_unsetenv("STANLI_NO_COLLAPSE");
-  expect("default options match explicit false", same_bits(base, slow));
-  expect("default keeps every scalar density", slow.normal == 16);
-  expect("fast fuses the loop", fast.normal == 1);
-  expect("fast graph is smaller", fast.ops < slow.ops);
-  expect("fast fused gradient matches default", close(fast, slow));
+  expect_true("default options match explicit false", same_bits(base, slow));
+  expect_true("default keeps every scalar density", slow.normal == 16);
+  expect_true("fast fuses the loop", fast.normal == 1);
+  expect_true("fast graph is smaller", fast.ops < slow.ops);
+  expect_true("fast fused gradient matches default", close(fast, slow));
 }
 
 // Sixteen observations whose locations are mu * x[n] + mu: once fused, one
@@ -121,10 +106,10 @@ void test_observations_collapse() {
   on.fast_math = true;
   const Run slow = run("fast_math_shared", off);
   const Run fast = run("fast_math_shared", on);
-  expect("default has no quadratic form", slow.quadratic == 0);
-  expect("fast collapses the fused density",
-         fast.normal == 0 && fast.quadratic == 1);
-  expect("fast collapsed gradient matches default", close(fast, slow));
+  expect_true("default has no quadratic form", slow.quadratic == 0);
+  expect_true("fast collapses the fused density",
+              fast.normal == 0 && fast.quadratic == 1);
+  expect_true("fast collapsed gradient matches default", close(fast, slow));
 }
 
 }  // namespace
@@ -133,6 +118,5 @@ int main() {
   test_active_duplicates_merge();
   test_shared_parameter_fuses();
   test_observations_collapse();
-  if (failures == 0) std::printf("test_fast_math OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_fast_math");
 }

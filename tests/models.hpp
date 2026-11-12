@@ -12,6 +12,19 @@
 namespace stanli {
 namespace testmodels {
 
+// x ~ normal(0, 1) for a D-vector x. Slot 1 holds the mean and slot 2 the
+// scale; callers fill them.
+inline Graph std_normal(int D) {
+  Graph g;
+  const int x = g.add_slot(D, true);
+  const int zero = g.add_slot(1, false);
+  const int one = g.add_slot(1, false);
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+  g.result_slot = lp;
+  return g;
+}
+
 // Non-centered eight schools.
 //   params (unconstrained): mu, log_tau, theta_tilde[8]
 //   tau = exp(log_tau)

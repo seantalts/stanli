@@ -1,25 +1,24 @@
 // Elementwise expression ops vs the stan-math var operations that stanc3's
 // C++ backend would emit for the same MIR node. lp = sum(op(args)).
+#include "expect.hpp"
 #include "graph_helpers.hpp"
 
 #include <stanli/expression_layout.hpp>
+#include <stanli/extrema_grouping.hpp>
 #include <stanli/mir.hpp>
+#include <stanli/mir_interp.hpp>
 #include <stan/math.hpp>
+#include <stan/model/indexing.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
 #include <limits>
+#include <map>
 #include <string>
 #include <vector>
-
-static int failures = 0;
-static void expect_eq(const std::string& what, double got, double want) {
-  if (got == want || (std::isnan(got) && std::isnan(want))) return;
-  ++failures;
-  std::printf("FAIL %-24s got %.17g want %.17g\n", what.c_str(), got, want);
-}
 
 using stan::math::var;
 using VecV = Eigen::Matrix<var, -1, 1>;
@@ -72,26 +71,15 @@ static void test_matrix_transpose_add() {
       kernel->forward(ctx);
       kernel->backward(ctx);
       for (int i = 0; i < n * n; ++i) {
-        expect_eq("matrix transpose add value", output[i],
-                  result.data()[i].val());
-        expect_eq("matrix transpose add gradient", gradient[i],
-                  a.data()[i].adj());
-        expect_eq("matrix transpose add direct accumulation", other[i], 0);
+        expect_eq_or_both_nan("matrix transpose add value", output[i],
+                              result.data()[i].val());
+        expect_eq_or_both_nan("matrix transpose add gradient", gradient[i],
+                              a.data()[i].adj());
+        expect_eq_or_both_nan("matrix transpose add direct accumulation",
+                              other[i], 0);
       }
     }
   }
-}
-
-// OP_LOGV takes Eigen's packet log, a ulp off libm on some arguments. The
-// gradients are 1/x and stay bitwise; only lp carries the difference, and a
-// sum that cancels reports it as several ulps of the result.
-static void expect_near_ulp(const std::string& what, double got, double want,
-                            int budget) {
-  if (got == want) return;
-  const double u = std::nextafter(std::abs(want), 1e308) - std::abs(want);
-  if (std::abs(got - want) <= budget * u) return;
-  ++failures;
-  std::printf("FAIL %-24s got %.17g want %.17g\n", what.c_str(), got, want);
 }
 
 // `params` marks which inputs the graph makes parameters; the rest reach the
@@ -110,12 +98,16 @@ static void check_case_params(const std::string& tag, uint16_t opcode,
   for (const auto& v : vals) vs.push_back(mkv(v));
   var lp = ref_fn(vs);
   lp.grad();
-  expect_near_ulp(tag + " lp", r.value, lp.val(), lp_ulp);
+  // OP_LOGV takes Eigen's packet log, a ulp off libm on some arguments. The
+  // gradients are 1/x and stay bitwise; only lp carries the difference, and a
+  // sum that cancels reports it as several ulps of the result.
+  expect_ulp_of(tag + " lp", r.value, lp.val(), lp.val(), lp_ulp);
   size_t gi = 0;
   for (size_t k = 0; k < vs.size(); ++k) {
     if (!params[k]) continue;
     for (int i = 0; i < vs[k].size(); ++i)
-      expect_eq(tag + " g" + std::to_string(gi), r.grad[gi], vs[k](i).adj()),
+      expect_eq_or_both_nan(tag + " g" + std::to_string(gi), r.grad[gi],
+                            vs[k](i).adj()),
           ++gi;
   }
   stan::math::recover_memory();
@@ -286,16 +278,6 @@ static void test_expression_layout_policy() {
   stan::math::recover_memory();
 }
 
-static int64_t ulps(double a, double b) {
-  if (a == b || (std::isnan(a) && std::isnan(b))) return 0;
-  int64_t ia, ib;
-  std::memcpy(&ia, &a, sizeof ia);
-  std::memcpy(&ib, &b, sizeof ib);
-  if ((ia < 0) != (ib < 0)) return INT64_MAX;
-  const int64_t d = ia - ib;
-  return d < 0 ? -d : d;
-}
-
 // dot(src[idata], weights) plus, for a parameter source, a second term that
 // seeds a nonzero adjoint before the gather's backward runs.
 static std::vector<double> run_gather_dot(const std::vector<int>& idx,
@@ -364,14 +346,9 @@ static void test_gather_bwd_repeated_indices() {
     const std::vector<double> got = run_gather_dot(idx, weights, j, true);
     std::vector<double> want(j, 1.0);
     for (size_t k = 0; k < idx.size(); ++k) want[idx[k]] += weights[k];
-    for (int64_t i = 0; i < j; ++i) {
-      const int64_t d = ulps(got[i], want[i]);
-      if (d > budget) {
-        ++failures;
-        std::printf("FAIL %s g%lld got %.17g want %.17g (%lld ulps)\n", tag,
-                    (long long)i, got[i], want[i], (long long)d);
-      }
-    }
+    for (int64_t i = 0; i < j; ++i)
+      expect_ulp(std::string(tag) + " g" + std::to_string(i), got[i], want[i],
+                 budget);
   };
   check("gather sorted runs", idx_sorted, weights_sorted, J, 10);
   check("gather unsorted dup", idx_unsorted, weights_unsorted, J, 0);
@@ -438,12 +415,15 @@ static void test_matrix_scalar_division() {
         k->forward(c);
         k->backward(c);
         for (int i = 0; i < n; ++i) {
-          expect_eq("matrix/scalar division value", out[i], expected_out[i]);
+          expect_eq_or_both_nan("matrix/scalar division value", out[i],
+                                expected_out[i]);
           if (active_matrix)
-            expect_eq("matrix/scalar division da", adj[i], a[i].adj());
+            expect_eq_or_both_nan("matrix/scalar division da", adj[i],
+                                  a[i].adj());
         }
         if (active_scalar)
-          expect_eq("matrix/scalar division db", scalar_adj, b.adj());
+          expect_eq_or_both_nan("matrix/scalar division db", scalar_adj,
+                                b.adj());
       }
     }
   }
@@ -480,9 +460,9 @@ static void test_power_seed_grouping() {
     implementation->forward(ctx);
     implementation->backward(ctx);
     for (int i = 0; i < n; ++i) {
-      expect_eq("power weighted value", output[i], result[i].val());
-      expect_eq("power weighted base", da[i], av[i].adj());
-      expect_eq("power weighted exponent", db[i], bv[i].adj());
+      expect_eq_or_both_nan("power weighted value", output[i], result[i].val());
+      expect_eq_or_both_nan("power weighted base", da[i], av[i].adj());
+      expect_eq_or_both_nan("power weighted exponent", db[i], bv[i].adj());
     }
   }
 }
@@ -512,24 +492,603 @@ static void test_reduction_overloads() {
     const Kernel* dot = find_kernel(OP_DOT);
     dot->forward(ctx);
     dot->backward(ctx);
-    expect_eq("dot_self value grouping", output, result.val());
+    expect_eq_or_both_nan("dot_self value grouping", output, result.val());
     for (int i = 0; i < n; ++i)
-      expect_eq("dot_self gradient grouping", adj[i], active[i].adj());
+      expect_eq_or_both_nan("dot_self gradient grouping", adj[i],
+                            active[i].adj());
 
     const Kernel* sum = find_kernel(OP_SUM_VEC);
     ctx.n_in = 1;
     ctx.variant = 1;  // owning Eigen double input
     sum->forward(ctx);
     Eigen::VectorXd owning = values.head(n);
-    expect_eq("sum owning Eigen", output, stan::math::sum(owning));
+    expect_eq_or_both_nan("sum owning Eigen", output, stan::math::sum(owning));
     int offset = 1;
     ctx.in[0] = {values.data() + 1, n};
     ctx.variant = 2;
     ctx.idata = &offset;
     ctx.n_idata = 1;
     sum->forward(ctx);
-    expect_eq("sum shifted Eigen", output,
-              stan::math::sum(values.segment(1, n)));
+    expect_eq_or_both_nan("sum shifted Eigen", output,
+                          stan::math::sum(values.segment(1, n)));
+  }
+}
+
+static uint64_t reduction_bits(double x) {
+  uint64_t out = 0;
+  std::memcpy(&out, &x, sizeof(out));
+  return out;
+}
+
+static bool same_reduction_value(double got, double want) {
+  // Eigen deliberately leaves the sign and payload of a propagated NaN
+  // unspecified.  Sanitizer instrumentation can therefore change those bits
+  // without changing the reduction's value contract.  Everything else --
+  // including signed zero and infinity -- remains a bitwise comparison.
+  if (std::isnan(got) || std::isnan(want))
+    return std::isnan(got) && std::isnan(want);
+  return reduction_bits(got) == reduction_bits(want);
+}
+
+static void test_product_exact_grouping() {
+  using namespace stanli;
+  // Direct kernel calls need the one-time registration normally performed by
+  // Executor construction.
+  {
+    Graph graph;
+    const int in = graph.add_slot(1, true);
+    const int out = graph.add_slot(1, false);
+    graph.add_op(OP_EXPV, {in}, out);
+    graph.result_slot = out;
+    Executor warm(std::move(graph));
+  }
+
+  const Kernel& product = kernel(OP_PROD_VEC);
+  if (product.backward == nullptr || product.scratch_size != nullptr) {
+    ++failures;
+    std::printf("FAIL product kernel implementation contract\n");
+  }
+
+  const double denorm = std::numeric_limits<double>::denorm_min();
+  const double inf = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  std::vector<std::vector<double>> cases = {
+      {0.5},
+      {-0.0},
+      {denorm},
+      {inf},
+      {nan},
+      {0.5, 0.5, 0.5},
+      {0.0, inf, 2.0},
+      {-0.0, inf, 2.0},
+      {inf, 0.0, -2.0},
+      {nan, 0.0, inf},
+      {1.0 + 0x1p-52, 1.0 - 0x1p-52, 1.0 + 0x1p-51},
+      {0.5, 0.5, 0.5, 0.5, 0.5},
+      {1e200, 1e200, 1e-200, 1e-200, 3.0},
+      {1e200, 1e-200, 1e200, 1e-200, 3.0},
+      {denorm, 2.0, 2.0, 2.0, 2.0},
+      {-0.0, -1.0, -1.0, 1.0, 1.0},
+      {inf, -0.0, nan, -inf, 1.0},
+  };
+
+  // Exercise every packet boundary on the build host.  Fixed lengths 1/3/5
+  // above pin the public contract; these sizes keep the same test meaningful
+  // when Eigen is compiled for SSE, AVX2, or AVX-512.
+  const int packet_width = std::max(
+      1, static_cast<int>(Eigen::internal::packet_traits<double>::size));
+  const int packet_lengths[] = {packet_width - 1, packet_width,
+                                packet_width + 1, 2 * packet_width + 1};
+  const int exponents[] = {500, -500, 400, -400, 300, -300, 0, 0};
+  for (int n : packet_lengths) {
+    if (n <= 0) continue;  // Scalar-only Eigen has packet width one.
+    std::vector<double> values(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+      const double mantissa =
+          1.0 + static_cast<double>((i * 5 + 1) % 7) * 0x1p-52;
+      values[static_cast<size_t>(i)] =
+          std::ldexp((i % 3 == 0) ? -mantissa : mantissa, exponents[i % 8]);
+    }
+    cases.push_back(std::move(values));
+  }
+
+  std::map<std::string, const mir::FunDef*> funs;
+  MirInterp<double> interp(funs, "product grouping test");
+  mir::Expr variable;
+  variable.kind = mir::Expr::Var;
+  variable.name = "x";
+  variable.type_ = "UVector";
+  variable.unsized.leaf = mir::UnsizedLeaf::Vector;
+  mir::Expr call;
+  call.kind = mir::Expr::FunApp;
+  call.name = "prod";
+  call.fn_lib = mir::Expr::Lib::StanLib;
+  call.type_ = "UReal";
+  call.unsized.leaf = mir::UnsizedLeaf::Real;
+  call.args = {variable};
+
+  for (size_t c = 0; c < cases.size(); ++c) {
+    const std::vector<double>& values = cases[c];
+    Eigen::VectorXd pinned(static_cast<Eigen::Index>(values.size()));
+    for (size_t i = 0; i < values.size(); ++i) pinned[i] = values[i];
+    const double want = stan::math::prod(pinned);
+
+    DataMap::Entry entry;
+    entry.r = values;
+    entry.dims = {static_cast<int64_t>(values.size())};
+    interp.env()["x"] = std::move(entry);
+    const double interpreted = interp.eval(call).r.at(0);
+    if (!same_reduction_value(interpreted, want)) {
+      ++failures;
+      std::printf("FAIL product interpreter case %zu: got %llx want %llx\n", c,
+                  static_cast<unsigned long long>(reduction_bits(interpreted)),
+                  static_cast<unsigned long long>(reduction_bits(want)));
+    }
+
+    // Pin the address-independence seam at every packet-relevant shift.  A
+    // direct Eigen::Map differs at odd shifts; OP_PROD_VEC must not.
+    for (int offset = 0; offset < packet_width; ++offset) {
+      Eigen::VectorXd storage(static_cast<Eigen::Index>(
+          values.size() + static_cast<size_t>(packet_width)));
+      storage.setZero();
+      std::copy(values.begin(), values.end(), storage.data() + offset);
+      double got = 0.0;
+      KernelCtx ctx;
+      ctx.n_in = 1;
+      ctx.in[0] =
+          Desc{storage.data() + offset, static_cast<int64_t>(values.size())};
+      ctx.out = Desc{&got, 1};
+      product.forward(ctx);
+      if (!same_reduction_value(got, want)) {
+        ++failures;
+        std::printf(
+            "FAIL product kernel case %zu offset %d: got %llx want "
+            "%llx\n",
+            c, offset, static_cast<unsigned long long>(reduction_bits(got)),
+            static_cast<unsigned long long>(reduction_bits(want)));
+      }
+    }
+  }
+
+  // This tranche changes only Eigen vector/row-vector products.  Stan arrays
+  // retain MirInterp's existing ascending scalar fold.
+  mir::Expr array_variable = variable;
+  array_variable.name = "a";
+  array_variable.type_ = "(UArray UReal)";
+  array_variable.unsized.leaf = mir::UnsizedLeaf::Real;
+  array_variable.unsized.depth = 1;
+  mir::Expr array_call = call;
+  array_call.args = {array_variable};
+  const std::vector<double> array_values = {1e200, 1e200, 1e-200, 1e-200, 3.0};
+  DataMap::Entry array_entry;
+  array_entry.r = array_values;
+  array_entry.dims = {static_cast<int64_t>(array_values.size())};
+  interp.env()["a"] = std::move(array_entry);
+  double array_want = 1.0;
+  for (double value : array_values) array_want *= value;
+  const double array_got = interp.eval(array_call).r.at(0);
+  if (reduction_bits(array_got) != reduction_bits(array_want)) {
+    ++failures;
+    std::printf("FAIL array product changed its scalar left fold\n");
+  }
+
+  // Pin the actual expression surfaces admitted by lower.cpp.  CmdStan
+  // gives Eigen the unevaluated CwiseBinary expression; stanli materializes
+  // subtraction into a graph slot before OP_PROD_VEC.  Basic subtraction is
+  // lane-bit-transparent, so the two product groupings must still agree.
+  const auto check_minus_surface = [&](int n, const char* label) {
+    std::vector<Eigen::VectorXd> indexed(2, Eigen::VectorXd(n));
+    const double xs[] = {0.5,  -0.25, 2.0, -1.0, std::nextafter(1.0, 0.0),
+                         -0.5, 0.25,  1.5};
+    for (int i = 0; i < n; ++i)
+      indexed[1][i] = xs[i % static_cast<int>(sizeof(xs) / sizeof(xs[0]))];
+
+    const uint64_t direct =
+        reduction_bits(stan::math::prod(Eigen::VectorXd::Ones(n) - indexed[1]));
+    const uint64_t indexed_transpose = reduction_bits(
+        stan::math::prod(Eigen::RowVectorXd::Ones(n) - indexed[1].transpose()));
+    if (direct != indexed_transpose) {
+      ++failures;
+      std::printf(
+          "FAIL %s pinned outer-minus surfaces disagree: %llx vs "
+          "%llx\n",
+          label, static_cast<unsigned long long>(direct),
+          static_cast<unsigned long long>(indexed_transpose));
+    }
+
+    std::vector<double> materialized(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i)
+      materialized[static_cast<size_t>(i)] = 1.0 - indexed[1][i];
+    for (int offset = 0; offset < packet_width; ++offset) {
+      Eigen::VectorXd storage(n + packet_width);
+      storage.setZero();
+      std::copy(materialized.begin(), materialized.end(),
+                storage.data() + offset);
+      double got = 0.0;
+      KernelCtx ctx;
+      ctx.n_in = 1;
+      ctx.in[0] = Desc{storage.data() + offset, n};
+      ctx.out = Desc{&got, 1};
+      product.forward(ctx);
+      const uint64_t bits = reduction_bits(got);
+      if (bits != direct || bits != indexed_transpose) {
+        ++failures;
+        std::printf("FAIL %s offset %d: got %llx want %llx\n", label, offset,
+                    static_cast<unsigned long long>(bits),
+                    static_cast<unsigned long long>(direct));
+      }
+    }
+  };
+  check_minus_surface(5, "len5 outer-minus product");
+  check_minus_surface(2 * packet_width + 1,
+                      "packet-boundary outer-minus product");
+
+  // The corpus surface indexes a row of a column-major matrix and transposes
+  // it.  That Eigen block remains strided, disables packet access on the
+  // outer subtraction, and makes prod reduce from coefficient zero in
+  // ascending scalar order.  Search deterministic valid probabilities for a
+  // case that distinguishes that order from the packet variant, then pin the
+  // raw-expression oracle and the materialized graph kernel to the scalar
+  // result.  Scalar-only Eigen builds have no distinct packet order.
+  const int matrix_n = 2 * packet_width + 1;
+  Eigen::MatrixXd matrix(2, matrix_n);
+  std::vector<double> factors(static_cast<size_t>(matrix_n));
+  bool distinguished = packet_width == 1;
+  uint64_t state = 0x4d4154524958524fULL;
+  for (int trial = 0; trial < 4096 && !distinguished; ++trial) {
+    for (int i = 0; i < matrix_n; ++i) {
+      state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+      const double p = 0.01 + 0.98 * static_cast<double>(state >> 11) /
+                                  static_cast<double>(uint64_t{1} << 53);
+      matrix(0, i) = 0.25;
+      matrix(1, i) = p;
+      factors[static_cast<size_t>(i)] = 1.0 - p;
+    }
+    double scalar = factors[0];
+    for (int i = 1; i < matrix_n; ++i)
+      scalar *= factors[static_cast<size_t>(i)];
+
+    double packet = 0.0;
+    KernelCtx packet_ctx;
+    packet_ctx.n_in = 1;
+    packet_ctx.in[0] = Desc{factors.data(), matrix_n};
+    packet_ctx.out = Desc{&packet, 1};
+    packet_ctx.variant = 0;
+    product.forward(packet_ctx);
+    if (reduction_bits(packet) == reduction_bits(scalar)) continue;
+
+    const double direct = stan::math::prod(Eigen::VectorXd::Ones(matrix_n) -
+                                           matrix.row(1).transpose());
+    double got = 0.0;
+    KernelCtx scalar_ctx = packet_ctx;
+    scalar_ctx.out = Desc{&got, 1};
+    scalar_ctx.variant = 1;
+    product.forward(scalar_ctx);
+    if (reduction_bits(direct) != reduction_bits(scalar) ||
+        reduction_bits(got) != reduction_bits(scalar)) {
+      ++failures;
+      std::printf("FAIL matrix-row product did not use scalar grouping\n");
+    }
+    distinguished = true;
+  }
+  if (!distinguished) {
+    ++failures;
+    std::printf("FAIL matrix-row oracle did not distinguish packet order\n");
+  }
+}
+
+static void test_reduction_view_grouping() {
+  using namespace stanli;
+  const Kernel& product = kernel(OP_PROD_VEC);
+  const Kernel& extrema = kernel(OP_EXTREMA_VEC);
+  const int phase_modulus = static_cast<int>(extrema_phase_modulus());
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double tie_pool[] = {0.0, -0.0, 2.0, -3.0, 2.0, nan, -0.0,
+                             0.0, -4.0, 9.0, -4.0, 1.0, nan, -2.0};
+  const int tie_pool_size =
+      static_cast<int>(sizeof(tie_pool) / sizeof(*tie_pool));
+
+  // A graph value has already been materialized, so the reduction opcode
+  // carries the source view's phase explicitly. Compare both native kernels
+  // with Stan Math reducing the original Eigen segment.
+  for (int n = 1; n <= 257; ++n) {
+    for (int offset = 0; offset < phase_modulus; ++offset) {
+      Eigen::VectorXd product_base(offset + n + 2);
+      Eigen::VectorXd extrema_base(offset + n + 2);
+      for (int i = 0; i < product_base.size(); ++i) {
+        const int centered = (i * 37 + n * 11) % 29 - 14;
+        product_base[i] = 1.0 + centered * 0x1p-16;
+        extrema_base[i] = tie_pool[i % tie_pool_size];
+      }
+      const Eigen::VectorXd product_owned = product_base.segment(offset, n);
+      const Eigen::VectorXd extrema_owned = extrema_base.segment(offset, n);
+      const double product_want =
+          stan::math::prod(product_base.segment(offset, n));
+      const double extrema_wants[] = {
+          stan::math::min(extrema_base.segment(offset, n)),
+          stan::math::max(extrema_base.segment(offset, n))};
+
+      int phase = offset;
+      double product_got = 0.0;
+      KernelCtx product_ctx;
+      product_ctx.n_in = 1;
+      product_ctx.in[0] = Desc{const_cast<double*>(product_owned.data()), n};
+      product_ctx.out = Desc{&product_got, 1};
+      product_ctx.variant = 4;
+      product_ctx.idata = &phase;
+      product_ctx.n_idata = 1;
+      product.forward(product_ctx);
+      if (!same_reduction_value(product_got, product_want)) {
+        ++failures;
+        std::printf("FAIL phased product n=%d offset=%d\n", n, offset);
+      }
+
+      for (int maximum = 0; maximum < 2; ++maximum) {
+        double got = 0.0;
+        KernelCtx ctx;
+        ctx.n_in = 1;
+        ctx.in[0] = Desc{const_cast<double*>(extrema_owned.data()), n};
+        ctx.out = Desc{&got, 1};
+        ctx.variant = static_cast<uint8_t>(maximum | 4);
+        ctx.idata = &phase;
+        ctx.n_idata = 1;
+        extrema.forward(ctx);
+        if (!same_reduction_value(got, extrema_wants[maximum])) {
+          ++failures;
+          std::printf("FAIL phased extrema n=%d offset=%d %s\n", n, offset,
+                      maximum ? "max" : "min");
+        }
+      }
+    }
+  }
+
+  // The contract here is exact parity with the original view. Some Eigen
+  // configurations use the same scalar traversal for every tested size, so
+  // requiring a value difference from an unphased reduction would be brittle.
+
+  // Gathered arguments have no packet access. Repeated indices are retained
+  // in index order and the scalar reduction's reverse path must scatter back
+  // through OP_GATHER rather than treating the gather as a copy.
+  bool gather_distinguished = false;
+  for (int n = 1; n <= 20; ++n) {
+    Eigen::VectorXd source(n);
+    for (int i = 0; i < n; ++i) source[i] = tie_pool[i % tie_pool_size];
+    std::vector<int> positions(static_cast<size_t>(n));
+    std::vector<double> gathered(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+      positions[static_cast<size_t>(i)] = n - i;
+      gathered[static_cast<size_t>(i)] = source[n - i - 1];
+    }
+    const stan::model::index_multi index(positions);
+    for (int maximum = 0; maximum < 2; ++maximum) {
+      const double want =
+          maximum
+              ? stan::math::max(stan::model::rvalue(source, "source", index))
+              : stan::math::min(stan::model::rvalue(source, "source", index));
+      double got = 0.0;
+      double selected = 0.0;
+      KernelCtx ctx;
+      ctx.n_in = 1;
+      ctx.in[0] = Desc{gathered.data(), n};
+      ctx.out = Desc{&got, 1};
+      ctx.variant = static_cast<uint8_t>(maximum | 2);
+      ctx.scratch = &selected;
+      extrema.forward(ctx);
+      if (!same_reduction_value(got, want)) {
+        ++failures;
+        std::printf("FAIL gathered extrema n=%d %s\n", n,
+                    maximum ? "max" : "min");
+      }
+      const Eigen::Map<const Eigen::VectorXd> packet(gathered.data(), n);
+      const double packet_want =
+          maximum ? stan::math::max(packet) : stan::math::min(packet);
+      gather_distinguished |= !same_reduction_value(packet_want, want);
+    }
+  }
+  if (!gather_distinguished) {
+    ++failures;
+    std::printf(
+        "FAIL gathered extrema oracle never distinguished packet order\n");
+  }
+
+  {
+    Graph graph;
+    const int source = graph.add_slot(3, true);
+    const int gathered = graph.add_slot(4, false);
+    const int out = graph.add_slot(1, false);
+    graph.add_op(OP_GATHER, {source}, gathered, {2, 2, 0, 2});
+    const int product_op = graph.add_op(OP_PROD_VEC, {gathered}, out);
+    graph.ops[product_op].variant = 1;
+    graph.result_slot = out;
+    Executor executor(std::move(graph));
+    const std::array<double, 3> values = {2.0, 3.0, 5.0};
+    std::copy(values.begin(), values.end(), executor.params_data());
+    double adj[3] = {};
+    const double value = executor.gradient(adj);
+    if (value != 250.0 || adj[0] != 125.0 || adj[1] != 0.0 || adj[2] != 150.0) {
+      ++failures;
+      std::printf("FAIL gathered product adjoints were not accumulated\n");
+    }
+  }
+  {
+    Graph graph;
+    const int source = graph.add_slot(3, true);
+    const int gathered = graph.add_slot(4, false);
+    const int out = graph.add_slot(1, false);
+    graph.add_op(OP_GATHER, {source}, gathered, {1, 1, 2, 0});
+    const int extrema_op = graph.add_op(OP_EXTREMA_VEC, {gathered}, out);
+    graph.ops[extrema_op].variant = 2;
+    graph.result_slot = out;
+    Executor executor(std::move(graph));
+    const std::array<double, 3> values = {5.0, 2.0, 7.0};
+    std::copy(values.begin(), values.end(), executor.params_data());
+    double adj[3] = {};
+    const double value = executor.gradient(adj);
+    if (value != 2.0 || adj[0] != 0.0 || adj[1] != 1.0 || adj[2] != 0.0) {
+      ++failures;
+      std::printf(
+          "FAIL gathered extrema adjoint did not route through gather\n");
+    }
+  }
+}
+
+static void test_extrema_exact_grouping() {
+  using namespace stanli;
+  const Kernel& extrema = kernel(OP_EXTREMA_VEC);
+  if (extrema.backward == nullptr || extrema.scratch_size == nullptr) {
+    ++failures;
+    std::printf("FAIL extrema kernel has no differentiable implementation\n");
+  }
+
+  const double inf = std::numeric_limits<double>::infinity();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  std::vector<std::vector<double>> cases = {
+      {},
+      {1.0},
+      {0.0, -0.0},
+      {-0.0, 0.0},
+      {inf, -inf, 3.0},
+      {-inf, inf, -3.0},
+      {2.0, 2.0, -4.0, -4.0, 2.0},
+      {nan, 1.0, -2.0},
+      {1.0, nan, -2.0},
+      {1.0, -2.0, nan},
+      {nan, nan, 0.0, -0.0},
+  };
+  const int packet_width = std::max(
+      1, static_cast<int>(Eigen::internal::packet_traits<double>::size));
+  for (int n : {packet_width - 1, packet_width, packet_width + 1,
+                2 * packet_width - 1, 2 * packet_width, 2 * packet_width + 1}) {
+    if (n < 0) continue;
+    std::vector<double> values(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+      const double magnitude =
+          std::ldexp(1.0 + static_cast<double>((i * 7 + 3) % 11) * 0x1p-52,
+                     (i % 7) * 137 - 411);
+      values[static_cast<size_t>(i)] = i % 2 == 0 ? magnitude : -magnitude;
+    }
+    if (n > 2) values[static_cast<size_t>(n - 1)] = values[1];
+    cases.push_back(std::move(values));
+  }
+
+  for (size_t c = 0; c < cases.size(); ++c) {
+    const std::vector<double>& values = cases[c];
+    Eigen::VectorXd pinned(static_cast<Eigen::Index>(values.size()));
+    std::copy(values.begin(), values.end(), pinned.data());
+    const double wants[] = {stan::math::min(pinned), stan::math::max(pinned)};
+    for (int variant = 0; variant < 2; ++variant) {
+      for (int offset = 0; offset < packet_width; ++offset) {
+        Eigen::VectorXd storage(static_cast<Eigen::Index>(
+            values.size() + static_cast<size_t>(packet_width)));
+        storage.setZero();
+        std::copy(values.begin(), values.end(), storage.data() + offset);
+        double got = 0.0;
+        KernelCtx ctx;
+        ctx.n_in = 1;
+        ctx.in[0] =
+            Desc{storage.data() + offset, static_cast<int64_t>(values.size())};
+        ctx.out = Desc{&got, 1};
+        ctx.variant = static_cast<uint8_t>(variant);
+        extrema.forward(ctx);
+        if (!same_reduction_value(got, wants[variant])) {
+          ++failures;
+          std::printf(
+              "FAIL extrema kernel case %zu variant %d offset %d: got %llx "
+              "want %llx\n",
+              c, variant, offset,
+              static_cast<unsigned long long>(reduction_bits(got)),
+              static_cast<unsigned long long>(reduction_bits(wants[variant])));
+        }
+      }
+
+      std::vector<double> active_values = values;
+      Eigen::Matrix<stan::math::var, -1, 1> active(
+          static_cast<Eigen::Index>(values.size()));
+      for (size_t i = 0; i < values.size(); ++i)
+        active(static_cast<Eigen::Index>(i)) = values[i];
+      stan::math::var want_active =
+          variant == 0 ? stan::math::min(active) : stan::math::max(active);
+      double got_active = 0.0;
+      double selected = 0.0;
+      std::vector<double> adj(values.size(), 0.0);
+      KernelCtx active_ctx;
+      active_ctx.n_in = 1;
+      active_ctx.in[0] =
+          Desc{active_values.data(), static_cast<int64_t>(values.size())};
+      active_ctx.out = Desc{&got_active, 1};
+      active_ctx.scratch = &selected;
+      active_ctx.variant = static_cast<uint8_t>(variant | 2);
+      extrema.forward(active_ctx);
+      active_ctx.in_adj[0] = Desc{adj.data(), static_cast<int64_t>(adj.size())};
+      active_ctx.out_adj = 1.0;
+      extrema.backward(active_ctx);
+      want_active.grad();
+      if (!same_reduction_value(got_active, want_active.val())) {
+        ++failures;
+        std::printf("FAIL active extrema value case %zu variant %d\n", c,
+                    variant);
+      }
+      for (size_t i = 0; i < adj.size(); ++i) {
+        if (adj[i] == active(static_cast<Eigen::Index>(i)).adj()) continue;
+        ++failures;
+        std::printf(
+            "FAIL active extrema adjoint case %zu variant %d index %zu\n", c,
+            variant, i);
+      }
+      stan::math::recover_memory();
+    }
+  }
+
+  // The generic interpreter keeps scalar-fold behavior outside the audited
+  // direct write_array surface, except that Stan's defined empty-container
+  // results/errors must not become an out_of_range accident.
+  std::map<std::string, const mir::FunDef*> funs;
+  MirInterp<double> interp(funs, "empty extrema legacy test");
+  mir::Expr arg;
+  arg.kind = mir::Expr::Var;
+  arg.name = "a";
+  arg.type_ = "(UArray UReal)";
+  arg.unsized.leaf = mir::UnsizedLeaf::Real;
+  arg.unsized.depth = 1;
+  mir::Expr call;
+  call.kind = mir::Expr::FunApp;
+  call.name = "min";
+  call.fn_lib = mir::Expr::Lib::StanLib;
+  call.type_ = "UReal";
+  call.unsized.leaf = mir::UnsizedLeaf::Real;
+  call.args = {arg};
+  DataMap::Entry empty_real;
+  empty_real.dims = {0};
+  interp.env()["a"] = empty_real;
+  if (reduction_bits(interp.eval(call).r.at(0)) != reduction_bits(inf)) {
+    ++failures;
+    std::printf("FAIL empty real legacy min is not +infinity\n");
+  }
+  call.name = "max";
+  if (reduction_bits(interp.eval(call).r.at(0)) != reduction_bits(-inf)) {
+    ++failures;
+    std::printf("FAIL empty real legacy max is not -infinity\n");
+  }
+  arg.type_ = "(UArray UInt)";
+  arg.unsized.leaf = mir::UnsizedLeaf::Int;
+  call.args = {arg};
+  DataMap::Entry empty_int;
+  empty_int.is_int = true;
+  empty_int.dims = {0};
+  interp.env()["a"] = empty_int;
+  for (const char* name : {"min", "max"}) {
+    call.name = name;
+    bool invalid = false;
+    try {
+      (void)interp.eval(call);
+    } catch (const std::invalid_argument&) {
+      invalid = true;
+    }
+    if (!invalid) {
+      ++failures;
+      std::printf(
+          "FAIL empty int legacy %s did not preserve invalid_argument\n", name);
+    }
   }
 }
 
@@ -540,6 +1099,9 @@ int main() {
   test_matrix_scalar_division();
   test_power_seed_grouping();
   test_reduction_overloads();
+  test_product_exact_grouping();
+  test_reduction_view_grouping();
+  test_extrema_exact_grouping();
   const int N = 4;
 
   // Binary: all shape combos. Scalars are length-1 slots; the var reference
@@ -787,10 +1349,10 @@ int main() {
       reference((Eigen::Index)i) = product_values[i];
     var want_lp = seed * stan::math::prod(reference);
     want_lp.grad();
-    expect_eq("prod active reverse lp", got_lp, want_lp.val());
+    expect_eq_or_both_nan("prod active reverse lp", got_lp, want_lp.val());
     for (size_t i = 0; i < got.size(); ++i)
-      expect_eq("prod active reverse g" + std::to_string(i), got[i],
-                reference((Eigen::Index)i).adj());
+      expect_eq_or_both_nan("prod active reverse g" + std::to_string(i), got[i],
+                            reference((Eigen::Index)i).adj());
     stan::math::recover_memory();
   }
 
@@ -822,6 +1384,5 @@ int main() {
   check_case("variance packet reduction", OP_VARIANCE, 1, {variance_values},
              [](auto& v) { return stan::math::variance(v[0]); });
 
-  if (failures == 0) std::printf("test_eltwise OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_eltwise");
 }

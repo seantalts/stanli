@@ -77,6 +77,8 @@ class InventoryTest(unittest.TestCase):
                          {"oncobayes2"})
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "teaching")),
                          {"import_a", "import_b", "brms", "rethinking"})
+        with self.assertRaisesRegex(ValueError, "Unknown corpus collection"):
+            inventory.corpus_cases(self.pdb, "typo")
 
     def test_import_size_is_manifest_driven_and_metadata_survives(self):
         cases = inventory.corpus_cases(self.pdb, "educational")

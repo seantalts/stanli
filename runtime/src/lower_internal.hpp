@@ -1605,6 +1605,26 @@ struct Lowering {
       out->push_back(s.lhs);
     for (const auto& k : s.body) assigned_names(k, out);
   }
+  // The subset of those that resolve outside `s`. Lowering's scope keeps a
+  // block's locals after the block ends, so a name `s` declares for itself
+  // can match a stale outer binding; within its declaration's block it is
+  // `s`'s own local and does not leave the region.
+  void outer_assigned_names(const mir::Stmt& s, std::vector<std::string>* out) {
+    std::vector<std::string> local;
+    const auto walk = [&](const auto& self, const mir::Stmt& t,
+                          bool scoped) -> void {
+      if (t.kind == mir::Stmt::Decl && scoped) local.push_back(t.decl_id);
+      if (t.kind == mir::Stmt::Assignment &&
+          std::find(local.begin(), local.end(), t.lhs) == local.end() &&
+          std::find(out->begin(), out->end(), t.lhs) == out->end())
+        out->push_back(t.lhs);
+      const bool opens = t.kind != mir::Stmt::SList;
+      const size_t scope = local.size();
+      for (const auto& k : t.body) self(self, k, scoped || opens);
+      if (opens) local.resize(scope);
+    };
+    walk(walk, s, false);
+  }
   bool invariant_for_upper(const mir::Stmt& s) {
     if (expr_effectful(s.upper)) return false;
     mir::Expr upper = s.upper;

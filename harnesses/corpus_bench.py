@@ -334,12 +334,6 @@ def open_run(output, expected, resume):
     return directory, manifest
 
 
-def benchmark_cases(pdb, corpus="all"):
-    """Benchmark views of the shared numerical/benchmark fixture inventory."""
-    return {name: (case.source, case.data)
-            for name, case in corpus_cases(pdb, corpus).items()}
-
-
 def setup_phase(runner, setup, key, phase, argv, timeout, cwd=None):
     """Keep attempted setup events, including failures, separate from gradients."""
     event = runner.run(phase, argv, timeout, cwd)
@@ -885,7 +879,9 @@ def main(argv=None):
         for name, case in sorted(cases.items()):
             if args.filter and args.filter not in name:
                 continue
-            inputs[name] = (case.source, materialize_data(case, cache))
+            data = pathlib.Path(cache) / f"{name}.json"
+            shutil.copyfile(materialize_data(case, cache), data)
+            inputs[name] = (case.source, data)
         if not inputs:
             parser.error("no models selected")
         try:
