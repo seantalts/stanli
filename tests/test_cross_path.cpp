@@ -18,7 +18,7 @@
 #include "cross_path.hpp"
 
 #include <stanli/mir.hpp>
-#include <stanli/sexp.hpp>
+#include <stanli/mir_decode.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -52,7 +52,7 @@ std::string slurp(const std::string& path) {
 // another type or size, and then the fixture runs with no data as before.
 std::string unit_data(const std::string& sexp) {
   using namespace stanli;
-  const mir::Program p = mir::read_program(sexp::parse(sexp));
+  const mir::Program p = decode_program(sexp);
   std::map<std::string, long> ints;
   nlohmann::json j = nlohmann::json::object();
   for (const auto& [name, t] : p.input_vars) {
