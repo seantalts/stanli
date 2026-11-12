@@ -23,8 +23,6 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "stanli/isa_dispatch.hpp"
-
 // The AVX2 objects' static initializers are moved to the section
 // avx2_init_array at build time (objcopy, see CMakeLists.txt) so the loader
 // does not run AVX2 code on a CPU that lacks it. They run here, once, and only
@@ -86,8 +84,6 @@ bool want_avx2(bool* forced) {
   return env_on("STANLI_FAST_MATH");
 }
 
-bool g_avx2 = false;
-
 void run_avx2_initializers() {
   for (StanliInitFn* f = __start_avx2_init_array;
        f && f < __stop_avx2_init_array; ++f)
@@ -95,8 +91,6 @@ void run_avx2_initializers() {
 }
 
 }  // namespace
-
-bool matrix_kernels_use_avx2() { return g_avx2; }
 
 void register_matrix_kernels() {
   bool forced = false;
@@ -107,11 +101,11 @@ void register_matrix_kernels() {
                  "stanli: STANLI_ISA=avx2 requested but this CPU lacks "
                  "AVX2/FMA/BMI2, or this build has no AVX2 kernels; using "
                  "the baseline kernels\n");
-  g_avx2 = wanted && capable;
+  const bool use_avx2 = wanted && capable;
   if (env_on("STANLI_ISA_VERBOSE"))
     std::fprintf(stderr, "stanli: dense-matrix kernels: %s\n",
-                 g_avx2 ? "avx2" : "baseline");
-  if (g_avx2) {
+                 use_avx2 ? "avx2" : "baseline");
+  if (use_avx2) {
     run_avx2_initializers();
     register_matrix_kernels_avx2();
   } else {

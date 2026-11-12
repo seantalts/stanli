@@ -119,10 +119,6 @@ bool backward_ignores_values(uint16_t opcode) {
   return has_op_trait(opcode, op_trait::kBackwardValueFree);
 }
 
-bool backward_ignores_input_values(uint16_t opcode) {
-  return backward_ignores_values(opcode);
-}
-
 int make_inplace_updates(Graph& g, const std::vector<int>& roots) {
   if (std::getenv("STANLI_NO_INPLACE")) return 0;
 

@@ -101,12 +101,6 @@ void bind_call_fwd_ctx(const Program::Call& call, double* reg, KernelCtx& ctx,
   ctx.eval_state = state;
 }
 
-KernelCtx call_fwd_ctx(const Program::Call& call, double* reg) {
-  KernelCtx ctx;
-  bind_call_fwd_ctx(call, reg, ctx, nullptr);
-  return ctx;
-}
-
 bool bind_call(Program::Call& call) {
   call.forward = nullptr;
   call.backward = nullptr;

@@ -429,10 +429,8 @@ std::vector<std::pair<int, int>> used_program_inputs(
 bool compact_program_gated(Program& p, std::vector<std::pair<int, int>>& seeded,
                            bool enable_destination_forwarding);
 
-// Assemble the forward context for `call` over the register file `reg`.
-// Backward-only fields are left null; run_adjoint fills its own.
-KernelCtx call_fwd_ctx(const Program::Call& call, double* reg);
-
+// Fill the forward context for `call` over the register file `reg`.
+// Backward-only fields are left untouched; run_adjoint fills its own.
 void bind_call_fwd_ctx(const Program::Call& call, double* reg, KernelCtx& ctx,
                        EvalState* state);
 

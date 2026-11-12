@@ -23,9 +23,6 @@ namespace stanli {
 // this strong property. Exposed so tests/test_pass_safety.cpp can verify every
 // claimed opcode by poisoning all values between the sweeps.
 bool backward_ignores_values(uint16_t opcode);
-// Compatibility spelling retained for callers of the original input-only
-// description. The actual contract is now deliberately stronger.
-bool backward_ignores_input_values(uint16_t opcode);
 
 int make_inplace_updates(Graph& g, const std::vector<int>& roots);
 
