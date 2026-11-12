@@ -52,19 +52,19 @@ int main() {
         return 1;
     }
   }
-  if (builtin_count != builtin_specs().size() ||
-      density_count != density_specs().size() || builtin_count == 0 ||
-      density_count == 0) {
+  if (builtin_count != function_specs(FunctionFamily::Builtin).size() ||
+      density_count != function_specs(FunctionFamily::Density).size() ||
+      builtin_count == 0 || density_count == 0) {
     std::printf("FAIL registry family counts\n");
     return 1;
   }
   std::set<const FunctionSpec*> family_entries;
-  for (const FunctionSpec* spec : builtin_specs()) {
+  for (const FunctionSpec* spec : function_specs(FunctionFamily::Builtin)) {
     if (spec == nullptr || spec->family() != FunctionFamily::Builtin ||
         spec->builtin() == nullptr || !family_entries.insert(spec).second)
       return 1;
   }
-  for (const FunctionSpec* spec : density_specs()) {
+  for (const FunctionSpec* spec : function_specs(FunctionFamily::Density)) {
     if (spec == nullptr || spec->family() != FunctionFamily::Density ||
         spec->density() == nullptr || !family_entries.insert(spec).second)
       return 1;

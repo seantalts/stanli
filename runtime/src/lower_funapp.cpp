@@ -797,30 +797,6 @@ Lowering::Val Lowering::lower_dirichlet_rng(const mir::Expr& e,
   draw.autodiff = false;
   return draw;
 }
-Lowering::Val Lowering::lower_regular_unary(uint16_t opcode,
-                                            const std::string& type_,
-                                            const std::string& name,
-                                            const std::string& raw, Val a) {
-  SlotInfo si = a.si;
-  // Shape-preserving unaries keep rows/cols (softmax/cumulative_sum
-  // are vector-only, so they never carry one).
-  if (opcode != OP_SOFTMAX && opcode != OP_CUMSUM) {
-    if (type_ == "UMatrix" && !is_matrix(si))
-      fail(name + ": matrix result has unknown logical extents", raw);
-    stamp_kind(&si, type_);
-  } else {
-    si = view_of(type_);
-  }
-  si.param_free = a.si.param_free;
-  const bool packet_supported =
-      opcode != OP_SOFTMAX && opcode != OP_LOG_SOFTMAX && opcode != OP_CUMSUM;
-  // These functions return freshly allocated Eigen containers. Their
-  // result starts at lane zero independently of the input's provenance;
-  // the other unary operations are elementwise evaluator expressions.
-  const ExpressionLayout layout =
-      packet_supported ? elementwise_layout({a}) : owning_layout(si);
-  return with_layout(emit_value(opcode, {a}, g.slots[a.slot].len, si), layout);
-}
 Lowering::Val Lowering::lower_categorical_rng(const mir::Expr& e,
                                               CallArguments& actuals) {
   const bool is_logit = e.name == "categorical_logit_rng";

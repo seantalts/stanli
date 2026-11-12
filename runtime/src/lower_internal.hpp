@@ -724,13 +724,6 @@ struct Lowering {
                     call->raw);
     }
 
-    void require_min_arity(size_t min) const {
-      if (size() < min)
-        owner->fail(call->name + ": expected at least " + std::to_string(min) +
-                        " arguments, got " + std::to_string(size()),
-                    call->raw);
-    }
-
     const mir::Expr& call_expr() const { return *call; }
   };
   enum class BuiltinFamily {
@@ -2003,10 +1996,6 @@ struct Lowering {
   Val lower_multi_normal_rng(const mir::Expr& e, CallArguments& actuals);
 
   Val lower_dirichlet_rng(const mir::Expr& e, CallArguments& actuals);
-
-  Val lower_regular_unary(uint16_t opcode, const std::string& type_,
-                          const std::string& name, const std::string& raw,
-                          Val a);
 
   Val lower_categorical_rng(const mir::Expr& e, CallArguments& actuals);
 

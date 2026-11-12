@@ -79,15 +79,6 @@ double evaluate_all_integer(
 
 }  // namespace
 
-const DensitySpec* density_spec(const std::string& name) {
-  const FunctionSpec* candidate = function_spec(name, FunctionFamily::Density);
-  return candidate == nullptr ? nullptr : candidate->density();
-}
-
-const std::vector<const FunctionSpec*>& density_specs() {
-  return function_specs(FunctionFamily::Density);
-}
-
 DensityCallArgument integer_density_argument(std::vector<int> values,
                                              bool scalar, bool data_only) {
   DensityCallArgument argument;
@@ -103,17 +94,6 @@ DensityCallArgument integer_density_argument(std::vector<int> values,
   if (!scalar) argument.shape.dimensions = {argument.shape.storage_size};
   argument.integers = std::move(values);
   return argument;
-}
-
-double evaluate_all_integer_density(
-    const DensitySpec& spec,
-    const std::vector<IntegerDensityArgument>& arguments, bool propto) {
-  if (spec.evaluation != DensityEvaluationPolicy::AllInteger ||
-      spec.all_integer == AllIntegerDensity::None)
-    throw std::logic_error("density does not use all-integer evaluation");
-  if ((int)arguments.size() != spec.arity)
-    throw std::invalid_argument("all-integer density has wrong arity");
-  return evaluate_all_integer(spec.all_integer, arguments, propto);
 }
 
 std::vector<int> pack_all_integer_density_arguments(

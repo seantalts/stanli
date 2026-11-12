@@ -128,21 +128,10 @@ inline constexpr int kGlmScalarLayoutMarker = -2147483646;
 // outcome, so the outcome count is the instance count.
 inline constexpr int kGlmRowVectorDesign = 1 << 6;
 
-// Null means the function needs a genuinely custom contract or is not a
-// probability function.
-struct FunctionSpec;
-const DensitySpec* density_spec(const std::string& name);
-// Family views point into function_specs(); no family owns descriptor storage.
-const std::vector<const FunctionSpec*>& density_specs();
-
-// Execute a descriptor carrying the AllInteger policy.  The implementation
-// dispatches each source argument as either an int or vector<int>, preserving
-// Stan Math's vectorization, validation order, and propto support checks.
-double evaluate_all_integer_density(
-    const DensitySpec& spec,
-    const std::vector<IntegerDensityArgument>& arguments, bool propto);
 std::vector<int> pack_all_integer_density_arguments(
     const std::vector<IntegerDensityArgument>& arguments);
+// Dispatches each source argument as either an int or vector<int>, preserving
+// Stan Math's vectorization, validation order, and propto support checks.
 double evaluate_packed_all_integer_density(AllIntegerDensity density,
                                            const int* packed, int64_t size,
                                            bool propto);

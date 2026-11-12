@@ -8,6 +8,7 @@
 #include <stanli/compile.hpp>
 #include <stanli/dae.hpp>
 #include <stanli/density_registry.hpp>
+#include <stanli/function_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/island.hpp>
 #include <stanli/ode_adjoint.hpp>
@@ -10797,14 +10798,21 @@ int main() {
     check(lowering_rejected,
           "all-data propto density preserves support validation");
 
-    const DensitySpec* range = density_spec("discrete_range_lpmf");
+    const FunctionSpec* range_spec =
+        function_spec("discrete_range_lpmf", FunctionFamily::Density);
+    const DensitySpec* range =
+        range_spec == nullptr ? nullptr : range_spec->density();
     check(range != nullptr &&
               range->evaluation == DensityEvaluationPolicy::AllInteger,
           "discrete range uses the shared all-integer policy");
     std::vector<IntegerDensityArgument> range_args{
         {{2, 4}, false}, {{1}, true}, {{3, 5}, false}};
+    const std::vector<int> range_packed =
+        pack_all_integer_density_arguments(range_args);
     expect_eq("all-integer scalar/array dispatch",
-              evaluate_all_integer_density(*range, range_args, false),
+              evaluate_packed_all_integer_density(
+                  range->all_integer, range_packed.data(),
+                  static_cast<int64_t>(range_packed.size()), false),
               stan::math::discrete_range_lpmf(std::vector<int>{2, 4}, 1,
                                               std::vector<int>{3, 5}));
   }

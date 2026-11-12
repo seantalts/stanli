@@ -304,9 +304,6 @@ BuiltinLayout builtin_layout(const BuiltinSpec& spec,
                              const std::vector<BuiltinArgumentShape>& arguments,
                              const std::string& function, bool autodiff);
 
-struct FunctionSpec;
-// Family views point into function_specs(); no family owns descriptor storage.
-const std::vector<const FunctionSpec*>& builtin_specs();
 const BuiltinSpec* builtin_spec(std::string_view name, size_t arity);
 // Policy-checked name-and-arity lookups. Each name carrying one of these
 // policies has exactly one registered overload -- or, for SliceView names
