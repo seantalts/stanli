@@ -637,7 +637,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   for (size_t i = 0; i < binds.size(); ++i)
     if (!binds[i].is_int && f.arg_views[i].leaf != mir::UnsizedLeaf::Int)
       udf_autodiff_ctx = udf_autodiff_ctx || binds[i].v.autodiff;
-  auto restore = [&] {
+  const ScopeExit restore{[&] {
     propto_ctx = propto_saved;
     udf_autodiff_ctx = autodiff_saved;
     write_array_known_static = known_static_saved;
@@ -651,7 +651,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
     td.env() = std::move(env_saved);
     td_journal = std::move(journal_saved);
     --udf_depth;
-  };
+  }};
   try {
     for (size_t i = 0; i < binds.size(); ++i) {
       const std::string& name = f.arg_names[i];
@@ -690,12 +690,8 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   } catch (LpReturn& r) {
     ret = r.v;
     returned = true;
-  } catch (...) {
-    restore();
-    throw;
   }
   ret.autodiff = e.unsized.leaf != mir::UnsizedLeaf::Int && udf_autodiff_ctx;
-  restore();
   if (!returned) fail(e.name + ": no return value on the executed path");
   ret.layout = owning_layout(ret.si);
   return ret;

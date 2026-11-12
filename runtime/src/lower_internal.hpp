@@ -496,6 +496,15 @@ struct PreparedContext {
   const std::set<std::string>& names;
 };
 
+// Runs `restore` when the enclosing scope ends, by return or by exception.
+template <class F>
+struct ScopeExit {
+  F restore;
+  ~ScopeExit() { restore(); }
+};
+template <class F>
+ScopeExit(F) -> ScopeExit<F>;
+
 struct Lowering {
   // A bounded alternative is built in its own Lowering. Refusal discards that
   // entire instance; no partially specialized graph is ever published.
@@ -2312,13 +2321,8 @@ struct Lowering {
     }
     const bool loop = s.kind == mir::Stmt::For || s.kind == mir::Stmt::While;
     structured_outer_depth += loop;
-    try {
-      lower_stmt_impl(s);
-    } catch (...) {
-      structured_outer_depth -= loop;
-      throw;
-    }
-    structured_outer_depth -= loop;
+    const ScopeExit leave{[&] { structured_outer_depth -= loop; }};
+    lower_stmt_impl(s);
   }
   void lower_stmt_impl(const mir::Stmt& s);
 

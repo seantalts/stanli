@@ -155,7 +155,7 @@ bool Lowering::scan_block(const mir::Stmt& s,
   };
   std::vector<LocalValue> local_values;
   std::set<std::string> local_containers;
-  const auto restore = [&] {
+  const ScopeExit restore{[&] {
     int_env = saved;
     for (auto it = local_views.rbegin(); it != local_views.rend(); ++it) {
       if (it->second)
@@ -173,7 +173,7 @@ bool Lowering::scan_block(const mir::Stmt& s,
       else
         scope.erase(it->name);
     }
-  };
+  }};
   // A value the scan cannot work out yet (one written inside a nested block,
   // say) stays unknown; lowering evaluates it in order.
   const auto set_local_int = [&](const std::string& name,
@@ -203,61 +203,53 @@ bool Lowering::scan_block(const mir::Stmt& s,
     td.env().erase(name);
   };
   bool found = false;
-  try {
-    for (const auto& child : s.body) {
-      if (stop(child)) {
-        found = true;
-        break;
-      }
-      if (child.kind == mir::Stmt::Decl && child.decl_type.base == "SInt") {
-        local_ints.insert(child.decl_id);
-        set_local_int(child.decl_id, child.has_init ? &child.init : nullptr);
-      } else if (child.kind == mir::Stmt::Assignment && child.lhs_idx.empty() &&
-                 local_ints.count(child.lhs)) {
-        set_local_int(child.lhs, &child.rhs);
-      } else if (child.kind == mir::Stmt::Decl &&
-                 !child.decl_type.base.empty()) {
-        try {
-          DeclView sh;
-          sh.len = sized_len(child.decl_type, nullptr, nullptr, child.decl_id);
-          sh.si = view_of(child.decl_type);
-          const auto old = decls.find(child.decl_id);
-          local_views.emplace_back(child.decl_id,
-                                   old == decls.end()
-                                       ? std::nullopt
-                                       : std::optional<DeclView>(old->second));
-          decls[child.decl_id] = sh;
-        } catch (const CompileError&) {
-          // A runtime-sized local answers nothing here; the scan went on
-          // without it before and still does.
-        }
-        const auto data = td.env().find(child.decl_id);
-        const auto value = scope.find(child.decl_id);
-        local_values.push_back(
-            {child.decl_id,
-             data == td.env().end()
-                 ? std::nullopt
-                 : std::optional<DataMap::Entry>(data->second),
-             value == scope.end() ? std::nullopt
-                                  : std::optional<Val>(value->second)});
-        scope.erase(child.decl_id);
-        local_containers.insert(child.decl_id);
-        mirror_value(child, child.decl_id);
-      } else if (child.kind == mir::Stmt::Assignment &&
-                 local_containers.count(child.lhs)) {
-        mirror_value(child, child.lhs);
-      } else if (!local_containers.empty()) {
-        std::vector<std::string> writes;
-        assigned_names(child, &writes);
-        for (const auto& name : writes)
-          if (local_containers.count(name)) td.env().erase(name);
-      }
+  for (const auto& child : s.body) {
+    if (stop(child)) {
+      found = true;
+      break;
     }
-  } catch (...) {
-    restore();
-    throw;
+    if (child.kind == mir::Stmt::Decl && child.decl_type.base == "SInt") {
+      local_ints.insert(child.decl_id);
+      set_local_int(child.decl_id, child.has_init ? &child.init : nullptr);
+    } else if (child.kind == mir::Stmt::Assignment && child.lhs_idx.empty() &&
+               local_ints.count(child.lhs)) {
+      set_local_int(child.lhs, &child.rhs);
+    } else if (child.kind == mir::Stmt::Decl && !child.decl_type.base.empty()) {
+      try {
+        DeclView sh;
+        sh.len = sized_len(child.decl_type, nullptr, nullptr, child.decl_id);
+        sh.si = view_of(child.decl_type);
+        const auto old = decls.find(child.decl_id);
+        local_views.emplace_back(child.decl_id,
+                                 old == decls.end()
+                                     ? std::nullopt
+                                     : std::optional<DeclView>(old->second));
+        decls[child.decl_id] = sh;
+      } catch (const CompileError&) {
+        // A runtime-sized local answers nothing here; the scan went on
+        // without it before and still does.
+      }
+      const auto data = td.env().find(child.decl_id);
+      const auto value = scope.find(child.decl_id);
+      local_values.push_back(
+          {child.decl_id,
+           data == td.env().end() ? std::nullopt
+                                  : std::optional<DataMap::Entry>(data->second),
+           value == scope.end() ? std::nullopt
+                                : std::optional<Val>(value->second)});
+      scope.erase(child.decl_id);
+      local_containers.insert(child.decl_id);
+      mirror_value(child, child.decl_id);
+    } else if (child.kind == mir::Stmt::Assignment &&
+               local_containers.count(child.lhs)) {
+      mirror_value(child, child.lhs);
+    } else if (!local_containers.empty()) {
+      std::vector<std::string> writes;
+      assigned_names(child, &writes);
+      for (const auto& name : writes)
+        if (local_containers.count(name)) td.env().erase(name);
+    }
   }
-  restore();
   return found;
 }
 bool Lowering::needs_runtime_control(const mir::Stmt& s) {
@@ -1537,26 +1529,12 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         } catch (const std::logic_error&) {
         }
         wa_restore(snapshot);
-        const bool outer_known_static = write_array_known_static;
-        write_array_known_static = true;
-        try {
-          for (const auto& k : s.body) lower_stmt(k);
-        } catch (...) {
-          write_array_known_static = outer_known_static;
-          throw;
-        }
-        write_array_known_static = outer_known_static;
-        return;
       }
       const bool outer_known_static = write_array_known_static;
       write_array_known_static = true;
-      try {
-        for (const auto& k : s.body) lower_stmt(k);
-      } catch (...) {
-        write_array_known_static = outer_known_static;
-        throw;
-      }
-      write_array_known_static = outer_known_static;
+      const ScopeExit leave{
+          [&] { write_array_known_static = outer_known_static; }};
+      for (const auto& k : s.body) lower_stmt(k);
       return;
     }
     case mir::Stmt::Skip:
@@ -1832,15 +1810,11 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         const double old_scale = target_scale;
         target_scale *= static_cast<double>(hi) - static_cast<double>(lo) + 1;
         int_env[s.loopvar] = lo;
-        try {
-          for (const auto& child : s.body) lower_stmt(child);
-        } catch (...) {
+        const ScopeExit leave{[&] {
           target_scale = old_scale;
           int_env.erase(s.loopvar);
-          throw;
-        }
-        target_scale = old_scale;
-        int_env.erase(s.loopvar);
+        }};
+        for (const auto& child : s.body) lower_stmt(child);
       };
       // Both cheap invariant folding and retained selection precede the
       // per-iteration control scan. Neither needs an expanded graph.
@@ -1880,7 +1854,13 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       const bool had_old = old != int_env.end();
       const long old_value = had_old ? old->second : 0;
       bool has_runtime_loop_control = false;
-      try {
+      {
+        const ScopeExit leave{[&] {
+          if (had_old)
+            int_env[s.loopvar] = old_value;
+          else
+            int_env.erase(s.loopvar);
+        }};
         for (int64_t v = lo; v <= hi && !has_runtime_loop_control; ++v) {
           int_env[s.loopvar] = static_cast<long>(v);
           for (const auto& child : s.body)
@@ -1889,17 +1869,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
               break;
             }
         }
-      } catch (...) {
-        if (had_old)
-          int_env[s.loopvar] = old_value;
-        else
-          int_env.erase(s.loopvar);
-        throw;
       }
-      if (had_old)
-        int_env[s.loopvar] = old_value;
-      else
-        int_env.erase(s.loopvar);
       if (has_runtime_loop_control) {
         lower_runtime_ifelse(s);
         return;
@@ -1912,7 +1882,8 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
           bounded_specialization &&
           region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi});
       structured_unroll_depth += unrolled;
-      try {
+      {
+        const ScopeExit leave{[&] { structured_unroll_depth -= unrolled; }};
         for (int64_t v = lo; v <= hi; ++v) {
           int_env[s.loopvar] = static_cast<long>(v);
           try {
@@ -1923,11 +1894,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             break;
           }
         }
-      } catch (...) {
-        structured_unroll_depth -= unrolled;
-        throw;
       }
-      structured_unroll_depth -= unrolled;
       int_env.erase(s.loopvar);
       return;
     }
@@ -1942,18 +1909,14 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       // runtime, and a declared extent has to be a compile-time integer.
       // Where the guard is data the trip count is one too, so unroll it the
       // way `for` unrolls and every such extent folds with it.
-      if (while_unroll_depth || while_sizes_from_loop_state(s)) {
+      const auto unroll_nested = [&] {
         ++while_unroll_depth;
-        bool complete = false;
-        try {
-          complete = unroll_while(s);
-        } catch (...) {
-          --while_unroll_depth;
-          throw;
-        }
-        --while_unroll_depth;
-        if (complete) return;
-      }
+        const ScopeExit leave{[&] { --while_unroll_depth; }};
+        return unroll_while(s);
+      };
+      if ((while_unroll_depth || while_sizes_from_loop_state(s)) &&
+          unroll_nested())
+        return;
       if (static_int_bookkeeping(s.body) && unroll_while(s)) return;
       if (try_lower_region(s)) return;
       // Unlike `for`, a `while` has no statically supplied trip count.
@@ -1973,16 +1936,7 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       }
       wa_restore(snapshot);
       auto unrolled = wa_snapshot(mentioned);
-      ++while_unroll_depth;
-      bool complete = false;
-      try {
-        complete = unroll_while(s);
-      } catch (...) {
-        --while_unroll_depth;
-        throw;
-      }
-      --while_unroll_depth;
-      if (complete) return;
+      if (unroll_nested()) return;
       wa_restore(unrolled);
       lower_runtime_ifelse(s);
       return;

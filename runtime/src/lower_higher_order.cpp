@@ -1093,7 +1093,11 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   const size_t first_op = g.ops.size();
 
   Val result{-1, false, {}};
-  try {
+  {
+    const ScopeExit unbind{[&] {
+      scope.erase(bound);
+      decls.erase(bound);
+    }};
     int64_t grain = 0;
     if (compile_options.reduce_sum_threads > 1 && folded_grainsize &&
         !region_current && !in_write_array) {
@@ -1108,13 +1112,7 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
           return try_lower_parallel_reduce_sum(call, binds, n, grain,
                                                e.name == "reduce_sum_static");
         });
-  } catch (...) {
-    scope.erase(bound);
-    decls.erase(bound);
-    throw;
   }
-  scope.erase(bound);
-  decls.erase(bound);
   if (could_thread && first_op <= g.ops.size() &&
       reduce_sum_work_ns(g, first_op, g.ops.size()) >=
           2.0 * double(compile_options.reduce_sum_min_chunk_ns))
