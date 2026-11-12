@@ -22,7 +22,54 @@
     border: 1px solid #8884; border-radius: 6px; padding: .5rem;
     background: transparent; color: inherit; resize: vertical;
   }
-  #code { height: 300px; } #data { height: 300px; }
+  #data { height: 300px; }
+  .ed { position: relative; height: 300px; resize: vertical; overflow: hidden;
+        --gw: calc(2ch + 1rem); }
+  .ed textarea, .ed pre, .ed .gutter {
+    font: 12.5px/1.4 ui-monospace, monospace; tab-size: 4;
+    font-variant-ligatures: none; letter-spacing: normal;
+    white-space: pre; overflow-wrap: normal; word-break: normal;
+  }
+  .ed textarea, .ed pre { padding: .5rem .5rem .5rem calc(var(--gw) + .5rem); }
+  .ed pre {
+    position: absolute; inset: 0; margin: 0; overflow: hidden;
+    pointer-events: none; border: 1px solid transparent; border-radius: 6px;
+  }
+  .ed pre > code { display: block; position: relative; font: inherit;
+                   width: max-content; min-width: 100%;
+                   transform: translate(0, 0); }
+  #code { height: 100%; resize: none; color: transparent;
+          caret-color: CanvasText; background: transparent; }
+  #code::selection { background: #4a75; }
+  .ed .gutter {
+    position: absolute; top: 1px; left: 1px; bottom: 1px; width: var(--gw);
+    padding: .5rem .5rem 0; overflow: hidden; text-align: right;
+    pointer-events: none; background: Canvas; color: #888;
+    border-radius: 5px 0 0 5px; border-right: 1px solid #8882;
+  }
+  .ed .gutter > div { min-height: 100%; }
+  .ed .band { position: absolute; left: 0; right: 0; height: 1.4em;
+              background: #c334; z-index: -1; }
+  .tk-c { color: #6a737d; font-style: italic; }
+  .tk-s { color: #a3471e; }
+  .tk-n { color: #0b6e99; }
+  .tk-b { color: #8250df; font-weight: 600; }
+  .tk-k { color: #b0306e; }
+  .tk-t { color: #1a7f37; }
+  .tk-f { color: #2457b8; }
+  .tk-o { color: #b05e00; }
+  @media (prefers-color-scheme: dark) {
+    .tk-c { color: #8b949e; }
+    .tk-s { color: #f0a070; }
+    .tk-n { color: #6cc4e8; }
+    .tk-b { color: #c4a5ff; }
+    .tk-k { color: #ff86b6; }
+    .tk-t { color: #6fd38a; }
+    .tk-f { color: #8ab4ff; }
+    .tk-o { color: #f2b45c; }
+    .ed .band { background: #f554; }
+  }
+  .hint { font-size: .78rem; opacity: .6; margin-left: -.4rem; }
   .bar { display: flex; gap: .8rem; align-items: center; margin: .8rem 0;
          flex-wrap: wrap; }
   .bar label { margin: 0; font-weight: 400; }
@@ -153,13 +200,13 @@ graph and runs Stan Dynamic HMC,
 
 <div class="cols">
   <div><label for="code">model.stan</label>
-    <textarea id="code" spellcheck="false"></textarea></div>
+    <div class="ed" id="ed"><pre aria-hidden="true"><code id="hl"></code></pre><textarea id="code" spellcheck="false" wrap="off"></textarea><div class="gutter" aria-hidden="true"><div id="gutter"></div></div></div></div>
   <div><label for="data">data.json</label>
-    <textarea id="data" spellcheck="false"></textarea></div>
+    <textarea id="data" spellcheck="false" wrap="off"></textarea></div>
 </div>
 
 <div class="bar">
-  <button id="run">Run</button>
+  <button id="run">Run</button><span class="hint" id="runhint"></span>
   <label>sampler <select id="sampler">
     <option value="nuts">Stan-dard Dynamic HMC</option>
     <option value="walnuts">WALNUTS</option>
@@ -173,14 +220,14 @@ graph and runs Stan Dynamic HMC,
            autocomplete="off" spellcheck="false">
     <ul id="modellist" role="listbox" hidden></ul>
   </label>
-  <label>chains <input id="chains" value="4"></label>
-  <label>warmup <input id="warmup" value="1000"></label>
-  <label>samples <input id="samples" value="1000"></label>
-  <label>seed <input id="seed" value="1"></label>
+  <label>chains <input id="chains" type="number" min="1" inputmode="numeric" value="4"></label>
+  <label>warmup <input id="warmup" type="number" min="0" inputmode="numeric" value="1000"></label>
+  <label>samples <input id="samples" type="number" min="1" inputmode="numeric" value="1000"></label>
+  <label>seed <input id="seed" type="number" inputmode="numeric" value="1"></label>
   <label title="Fused multiply-add rewriting and faster kernels; results can differ from CmdStan in the last bits">
     <input id="fastmath" type="checkbox"> fast math</label>
-  <label id="deltalab">delta <input id="delta" value="0.8"></label>
-  <label id="maxerrlab" hidden>max err <input id="maxerr" value="0.5"></label>
+  <label id="deltalab">delta <input id="delta" type="number" step="any" value="0.8"></label>
+  <label id="maxerrlab" hidden>max err <input id="maxerr" type="number" step="any" value="0.5"></label>
   <label id="initlab">init <select id="initmethod">
     <option value="random">random</option>
     <option value="pathfinder">Pathfinder</option>
@@ -192,7 +239,7 @@ graph and runs Stan Dynamic HMC,
   <label class="pfinit" hidden>PF history
     <input id="pfhistory" value="5"></label>
   <label class="pfinit" hidden>PF radius
-    <input id="pfradius" value="2"></label>
+    <input id="pfradius" type="number" step="any" value="2"></label>
   <button id="csv" class="plain" hidden>Download CSV</button>
   <span id="status"></span>
 </div>
@@ -402,6 +449,140 @@ function highlight(name, q) {
   return out + esc(name.slice(i));
 }
 
+const KEYWORDS = new Set(("for in while if else return break continue print " +
+    "reject fatal_error target profile void lower upper offset multiplier")
+    .split(" "));
+const TYPES = new Set(("int real complex vector row_vector matrix " +
+    "complex_vector complex_row_vector complex_matrix array tuple simplex " +
+    "unit_vector sum_to_zero_vector sum_to_zero_matrix ordered " +
+    "positive_ordered cholesky_factor_corr cholesky_factor_cov corr_matrix " +
+    "cov_matrix column_stochastic_matrix row_stochastic_matrix data")
+    .split(" "));
+const STAN_TOKEN = new RegExp([
+  /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?(?:\*\/|$))/,
+  /("(?:[^"\\\n]|\\.)*"?)/,
+  /\b(functions|transformed\s+data|data|transformed\s+parameters|parameters|model|generated\s+quantities)(?=\s*\{)/,
+  /([A-Za-z_]\w*)/,
+  /((?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?i?)/,
+  /(~|\+=)/,
+].map((r) => r.source).join("|"), "g");
+const CALL = /\s*\(/y;
+function stanHtml(src) {
+  let out = "", at = 0, afterTilde = false;
+  const span = (cls, t) => `<span class="tk-${cls}">${esc(t)}</span>`;
+  for (const m of src.matchAll(STAN_TOKEN)) {
+    out += esc(src.slice(at, m.index));
+    at = m.index + m[0].length;
+    const [t, com, str, block, id, num, op] = m;
+    let cls = com ? "c" : str ? "s" : block ? "b" : num ? "n" : op ? "o" : "";
+    if (id) {
+      CALL.lastIndex = at;
+      cls = KEYWORDS.has(id) ? "k" : TYPES.has(id) ? "t"
+          : afterTilde || CALL.test(src) ? "f" : "";
+    }
+    afterTilde = t === "~";
+    out += cls ? span(cls, t) : esc(t);
+  }
+  return out + esc(src.slice(at));
+}
+
+const ed = $("ed"), code = $("code"), hl = $("hl"), gutter = $("gutter");
+let errLine = 0, lineCount = 0;
+function paint() {
+  const band = errLine
+      ? `<div class="band" style="top:${(errLine - 1) * 1.4}em"></div>` : "";
+  hl.innerHTML = band + stanHtml(code.value) + " ";
+  const n = code.value.split("\n").length;
+  if (n !== lineCount) {
+    lineCount = n;
+    gutter.textContent = Array.from({ length: n }, (_, i) => i + 1).join("\n");
+    ed.style.setProperty("--gw", `calc(${Math.max(2, String(n).length)}ch + 1rem)`);
+  }
+  syncScroll();
+}
+function syncScroll() {
+  hl.style.transform = `translate(${-code.scrollLeft}px, ${-code.scrollTop}px)`;
+  gutter.style.transform = `translateY(${-code.scrollTop}px)`;
+}
+function setCode(text) {
+  errLine = 0;
+  code.value = text;
+  code.scrollTop = code.scrollLeft = 0;
+  paint();
+}
+function clearErrLine() {
+  if (errLine) { errLine = 0; paint(); }
+}
+code.addEventListener("input", () => { errLine = 0; paint(); });
+code.addEventListener("scroll", syncScroll);
+
+const lineHeight = (ta) => parseFloat(getComputedStyle(ta).lineHeight);
+function caretTo(ta, line, col) {
+  const lines = ta.value.split("\n");
+  line = Math.min(Math.max(1, line), lines.length);
+  let off = 0;
+  for (let i = 0; i < line - 1; ++i) off += lines[i].length + 1;
+  off += Math.min(Math.max(0, col), lines[line - 1].length);
+  ta.focus({ preventScroll: true });
+  ta.setSelectionRange(off, off);
+  ta.scrollTop = Math.max(0, (line - 1) * lineHeight(ta) - ta.clientHeight / 2);
+  ta.scrollIntoView({ block: "nearest" });
+}
+
+function insertText(ta, text, start, end) {
+  ta.setSelectionRange(start, end);
+  if (!document.execCommand("insertText", false, text)) {
+    ta.setRangeText(text, start, end, "end");
+    ta.dispatchEvent(new Event("input"));
+  }
+}
+let escaped = false;
+code.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { escaped = true; return; }
+  if (/^(Shift|Control|Alt|Meta)$/.test(e.key) || e.isComposing) return;
+  const wasEscaped = escaped;
+  escaped = false;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const v = code.value, s = code.selectionStart, end = code.selectionEnd;
+  const lineStart = v.lastIndexOf("\n", s - 1) + 1;
+  if (e.key === "Tab") {
+    if (wasEscaped) return;
+    e.preventDefault();
+    if (!e.shiftKey && !v.slice(s, end).includes("\n")) {
+      insertText(code, "  ", s, end);
+      return;
+    }
+    const last = end > s && v[end - 1] === "\n" ? end - 1 : end;
+    let lineEnd = v.indexOf("\n", last);
+    if (lineEnd < 0) lineEnd = v.length;
+    const lines = v.slice(lineStart, lineEnd).split("\n");
+    const firstRemoved = e.shiftKey ? lines[0].match(/^ {0,2}/)[0].length : 0;
+    const block = lines.map((l) => (e.shiftKey ? l.replace(/^ {1,2}/, "")
+                                               : "  " + l)).join("\n");
+    if (block === v.slice(lineStart, lineEnd)) return;
+    insertText(code, block, lineStart, lineEnd);
+    if (s === end)
+      code.setSelectionRange(Math.max(lineStart, s - firstRemoved),
+                             Math.max(lineStart, s - firstRemoved));
+    else code.setSelectionRange(lineStart, lineStart + block.length);
+  } else if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    const before = v.slice(lineStart, s);
+    const indent = before.match(/^[ \t]*/)[0] +
+                   (/\{\s*$/.test(before) ? "  " : "");
+    insertText(code, "\n" + indent, s, end);
+  }
+});
+
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+$("run").title = `Run (${IS_MAC ? "⌘↵" : "Ctrl+Enter"})`;
+$("runhint").textContent = IS_MAC ? "⌘↵" : "Ctrl+Enter";
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
+  e.preventDefault();
+  if (!$("run").disabled) $("run").click();
+});
+
 const meta = (m) => [
   m.params != null ? `${m.params} par${m.params === 1 ? "" : "s"}` : "",
   m.speedup ? `${m.speedup}x native` : "",
@@ -465,7 +646,7 @@ box.onkeydown = (e) => {
   }
 };
 
-async function choose(m) {
+async function choose(m, quiet) {
   selected = m;
   box.value = m.name;
   closeList();
@@ -478,12 +659,14 @@ async function choose(m) {
   $("note").innerHTML = `<b>${esc(m.name)}</b>. ${esc(m.note)}` +
       (stats ? ` <span class="stats">(${esc(stats)})</span>` : "");
   $("warmup").value = $("samples").value = 1000;
+  if (!quiet)
+    history.replaceState(null, "", "#model=" + encodeURIComponent(m.builtin || m.name));
   if (m.builtin) {
-    $("code").value = PRESETS[m.builtin].code;
+    setCode(PRESETS[m.builtin].code);
     $("data").value = PRESETS[m.builtin].data();
     return;
   }
-  $("code").value = $("data").value = "loading...";
+  setCode($("data").value = "loading...");
   const get = (p) => fetch(p).then((r) => {
     if (!r.ok) throw new Error(`${p}: ${r.status}`);
     return r.text();
@@ -492,18 +675,22 @@ async function choose(m) {
     const [code, data] = await Promise.all([
       get(`./models/${m.name}.stan`), get(`./models/data/${m.data}.json`)]);
     if (selected !== m) return;  // a faster click won the race
-    $("code").value = code;
+    setCode(code);
     $("data").value = data;
   } catch (e) {
     if (selected !== m) return;
-    $("code").value = $("data").value = "";
+    setCode($("data").value = "");
     $("err").textContent = `could not load ${m.name}: ${e.message}`;
   }
 }
 catalogReady.then(() => {
   box.placeholder = `search ${CATALOG.length} models`;
 });
-choose(CATALOG[0]);
+const wanted = new URLSearchParams(location.hash.slice(1)).get("model");
+if (wanted == null) choose(CATALOG[0], true);
+else catalogReady.then(() => choose(
+    CATALOG.find((m) => m.builtin === wanted || m.name === wanted) ||
+    CATALOG[0]));
 
 // ---- sampler selection -----------------------------------------------------
 // "Stan-dard Dynamic HMC" is what CmdStan runs by default: the NUTS
@@ -696,9 +883,39 @@ function throttled(fn) {
   };
 }
 
+function dataError() {
+  const text = $("data").value;
+  if (!text.trim()) return false;
+  try { JSON.parse(text); return false; } catch (e) {
+    let line = 0, col = 0;
+    const lc = /line (\d+) column (\d+)/.exec(e.message);
+    const pos = /position (\d+)/.exec(e.message);
+    if (lc) { line = +lc[1]; col = +lc[2] - 1; }
+    else if (pos) {
+      const before = text.slice(0, +pos[1]).split("\n");
+      line = before.length;
+      col = before[before.length - 1].length;
+    }
+    $("err").textContent = `data.json: ${e.message}` +
+        (line && !lc ? ` (line ${line}, column ${col + 1})` : "");
+    if (line) caretTo($("data"), line, col);
+    return true;
+  }
+}
+function markCompileError(msg) {
+  const m = /line (\d+), column (\d+)/.exec(msg);
+  if (!m) return;
+  errLine = +m[1];
+  paint();
+  caretTo(code, errLine, +m[2]);
+}
+
 $("run").onclick = async () => {
-  $("run").disabled = true;
   $("err").textContent = "";
+  clearErrLine();
+  if (dataError()) return;
+  $("run").disabled = true;
+  $("run").textContent = "Running\u2026";
   // Park the plots before the table they may be sitting in is wiped.
   $("plotshome").appendChild($("plots"));
   $("out").innerHTML = "";
@@ -752,8 +969,10 @@ $("run").onclick = async () => {
     $("csv").hidden = false;
   } catch (e) {
     $("err").textContent = String(e.message || e);
+    markCompileError($("err").textContent);
   }
   $("run").disabled = false;
+  $("run").textContent = "Run";
   $("status").textContent = "";
 };
 

@@ -1325,6 +1325,7 @@ int main() {
   }
   test_contiguous_bucket();
   test_wide_contiguous_read();
+  test_wide_shared_operand_tiles();
   test_logistic_direct_terms();
   test_interleaved_lanes();
   test_scattered_indices();

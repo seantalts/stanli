@@ -243,6 +243,8 @@ int main() {
   const Floor floors[] = {
       {"no_island", 430, 2},
       {"island_always", 430, 2},
+      {"no_island_compact", 430, 55},
+      {"island_always_no_compact", 430, 56},
       {"no_native_adj", 430, 120},
       {"no_ode_direct_rk", 430, 13},
       {"passes_off", 430, 127},

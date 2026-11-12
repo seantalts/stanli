@@ -125,10 +125,18 @@ inline double draw_point(int64_t i, int variant) {
 // what shows state left behind by a previous evaluation.
 inline constexpr int kDefaultPoints = 3;
 
+// The offset is integer-hashed rather than taken from libm, so every
+// platform evaluates the same points.
 inline double sweep_point(int64_t i, int variant, int k) {
   const double base = draw_point(i, variant);
   if (k == 0) return base;
-  return base + 0.6 * std::sin(1.9 * k + 2.3 * (double)i + 0.4) + 0.2 * (k - 1);
+  uint64_t z = static_cast<uint64_t>(i) * 0x100000001B3ull +
+               static_cast<uint64_t>(k) + 0x9E3779B97F4A7C15ull;
+  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+  z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+  z ^= z >> 31;
+  const double u = static_cast<double>(z >> 11) * 0x1.0p-53;
+  return base + 0.6 * (2.0 * u - 1.0) + 0.2 * (k - 1);
 }
 
 // stanli_check's evaluation points, shared with tools/ref_driver.cpp. Some
@@ -224,6 +232,11 @@ inline const std::vector<Config>& configs() {
       {"default", {"STANLI_WA_FORCE_INTERP"}},
       {"no_island", {"STANLI_NO_ISLAND"}},
       {"island_always", {"STANLI_ISLAND_ALWAYS"}},
+      {"no_island_compact", {"STANLI_NO_ISLAND_COMPACT"}},
+      {"island_always_no_compact",
+       {"STANLI_ISLAND_ALWAYS", "STANLI_NO_ISLAND_COMPACT"},
+       Requires::Nothing,
+       "island_always"},
       {"no_native_adj", {"STANLI_NO_NATIVE_ADJ"}},
       {"no_ode_direct_rk", {"STANLI_NO_ODE_DIRECT_RK"}},
       {"passes_off",
