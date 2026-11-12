@@ -102,10 +102,10 @@ bool Lowering::while_sizes_from_loop_state(const mir::Stmt& s) {
     if (sized_from(child, names)) return true;
   return false;
 }
-// Unroll `s` while the data interpreter answers its guard.  Returns false
+// Unroll `s` while the data interpreter answers its guard.  Returns nothing
 // where the guard stopped being decidable, leaving the rest of the loop to
 // the caller.
-bool Lowering::unroll_while(const mir::Stmt& s) {
+std::optional<Lowering::Flow> Lowering::unroll_while(const mir::Stmt& s) {
   for (long trip = 0; trip < kWhileUnrollLimit; ++trip) {
     bool open = false;
     if (auto evaluated = try_eval_pure(s.cond)) {
@@ -114,18 +114,15 @@ bool Lowering::unroll_while(const mir::Stmt& s) {
       try {
         open = eval_int(s.cond) != 0;
       } catch (const CompileError&) {
-        return false;
+        return std::nullopt;
       }
     }
-    if (!open) return true;
-    try {
-      for (const auto& child : s.body) lower_stmt(child);
-    } catch (LoopContinue&) {
-    } catch (LoopBreak&) {
-      return true;
-    }
+    if (!open) return Flow::Next;
+    const Flow flow = lower_stmts(s.body);
+    if (flow == Flow::Break) return Flow::Next;
+    if (flow == Flow::Return) return flow;
   }
-  return false;
+  return std::nullopt;
 }
 // Both control scans run before the block is lowered, but loop bounds and
 // conditions later in the block can depend on scalar-int locals established
@@ -1147,7 +1144,9 @@ void Lowering::assign_plain(const mir::Stmt& s) {
   scope[s.lhs] = rhs;
   sync_data_local(s.lhs, s.rhs, rhs);
 }
-void Lowering::lower_stmt_impl(const mir::Stmt& s) {
+// The statements that hold no child statements, so none of them can leave a
+// loop or a function.
+void Lowering::lower_simple_stmt(const mir::Stmt& s) {
   switch (s.kind) {
     case mir::Stmt::Decl:
       // --O1 reuses one symbol id for block-local declarations at the same
@@ -1511,32 +1510,6 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       push_target_term(t.slot);
       return;
     }
-    case mir::Stmt::Block:
-    case mir::Stmt::SList: {
-      std::set<std::string> output_references;
-      if (bounded_output_candidate(s, &output_references) &&
-          try_lower_region(s, std::nullopt, &output_references))
-        return;
-      if (!write_array_known_static && in_write_array &&
-          needs_runtime_control(s)) {
-        std::set<std::string> mentioned;
-        mir::collect_names(s, &mentioned);
-        auto snapshot = wa_snapshot(mentioned);
-        try {
-          lower_runtime_ifelse(s);
-          return;
-        } catch (const CompileError&) {
-        } catch (const std::logic_error&) {
-        }
-        wa_restore(snapshot);
-      }
-      const bool outer_known_static = write_array_known_static;
-      write_array_known_static = true;
-      const ScopeExit leave{
-          [&] { write_array_known_static = outer_known_static; }};
-      for (const auto& k : s.body) lower_stmt(k);
-      return;
-    }
     case mir::Stmt::Skip:
       return;
     case mir::Stmt::NRFunApp:
@@ -1766,13 +1739,44 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         return;
       }
       fail("this kind of statement is not supported yet", s.raw);
+    default:
+      fail("unsupported statement", s.raw);
+  }
+}
+Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
+  switch (s.kind) {
+    case mir::Stmt::Block:
+    case mir::Stmt::SList: {
+      std::set<std::string> output_references;
+      if (bounded_output_candidate(s, &output_references) &&
+          try_lower_region(s, std::nullopt, &output_references))
+        return Flow::Next;
+      if (!write_array_known_static && in_write_array &&
+          needs_runtime_control(s)) {
+        std::set<std::string> mentioned;
+        mir::collect_names(s, &mentioned);
+        auto snapshot = wa_snapshot(mentioned);
+        try {
+          lower_runtime_ifelse(s);
+          return Flow::Next;
+        } catch (const CompileError&) {
+        } catch (const std::logic_error&) {
+        }
+        wa_restore(snapshot);
+      }
+      const bool outer_known_static = write_array_known_static;
+      write_array_known_static = true;
+      const ScopeExit leave{
+          [&] { write_array_known_static = outer_known_static; }};
+      return lower_stmts(s.body);
+    }
     case mir::Stmt::For: {
       // Unrolled graphs and counted structured loops capture their upper
       // bound. Mutable or effectful bounds need the register loop's repeated
       // condition, including its final failed test.
       if (expr_effectful(s.lower) || !invariant_for_upper(s)) {
         lower_runtime_ifelse(s);
-        return;
+        return Flow::Next;
       }
       long lo = 0, hi = 0;
       try {
@@ -1783,14 +1787,14 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
           throw;
         if (in_write_array) {
           lower_runtime_ifelse(s);
-          return;
+          return Flow::Next;
         }
         if (!try_lower_region(s)) lower_runtime_ifelse(s);
-        return;
+        return Flow::Next;
       }
       if (lo > hi) {
         int_env.erase(s.loopvar);
-        return;
+        return Flow::Next;
       }
       // Bound the control scan as well as graph emission in an isolated trial.
       if (bounded_specialization &&
@@ -1814,16 +1818,14 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
           target_scale = old_scale;
           int_env.erase(s.loopvar);
         }};
-        for (const auto& child : s.body) lower_stmt(child);
+        return lower_stmts(s.body);
       };
       // Both cheap invariant folding and retained selection precede the
       // per-iteration control scan. Neither needs an expanded graph.
       if ((structured_policy == StructuredMode::Prefer ||
            structured_policy == StructuredMode::Force) &&
-          lo != hi && has_repeatable_target()) {
-        fold_repeatable_target();
-        return;
-      }
+          lo != hi && has_repeatable_target())
+        return fold_repeatable_target();
       // A loop that only counts into integer locals from values known now
       // (how many observations are zero, say) is evaluated here, emitting
       // nothing. Kept as a region its counters would exist only at run
@@ -1836,12 +1838,13 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
             "time: " +
             std::to_string(hi - lo + 1) + " iterations");
       if (!bookkeeping) {
-        if (lower_region_map(s, lo, hi)) return;
-        if (try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi})) return;
+        if (lower_region_map(s, lo, hi)) return Flow::Next;
+        if (try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi}))
+          return Flow::Next;
         if (in_write_array && structured_policy != StructuredMode::Off &&
             region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi})) {
           lower_runtime_ifelse(s);
-          return;
+          return Flow::Next;
         }
       }
       // runtime_loop_control evaluates data-only conditions while looking
@@ -1872,12 +1875,9 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       }
       if (has_runtime_loop_control) {
         lower_runtime_ifelse(s);
-        return;
+        return Flow::Next;
       }
-      if (lo != hi && has_repeatable_target()) {
-        fold_repeatable_target();
-        return;
-      }
+      if (lo != hi && has_repeatable_target()) return fold_repeatable_target();
       const int unrolled =
           bounded_specialization &&
           region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi});
@@ -1886,22 +1886,18 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         const ScopeExit leave{[&] { structured_unroll_depth -= unrolled; }};
         for (int64_t v = lo; v <= hi; ++v) {
           int_env[s.loopvar] = static_cast<long>(v);
-          try {
-            for (const auto& k : s.body) lower_stmt(k);
-          } catch (LoopContinue&) {
-            continue;
-          } catch (LoopBreak&) {
-            break;
-          }
+          const Flow flow = lower_stmts(s.body);
+          if (flow == Flow::Break) break;
+          if (flow == Flow::Return) return flow;
         }
       }
       int_env.erase(s.loopvar);
-      return;
+      return Flow::Next;
     }
     case mir::Stmt::While: {
       if (bounded_specialization) {
         if (!bounded_while_guard(s.cond)) throw SpecializationRefused{};
-        if (unroll_while(s)) return;
+        if (const auto flow = unroll_while(s)) return *flow;
         throw SpecializationRefused{};
       }
       // A body that sizes a local from the loop's own state has no loop
@@ -1914,11 +1910,11 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         const ScopeExit leave{[&] { --while_unroll_depth; }};
         return unroll_while(s);
       };
-      if ((while_unroll_depth || while_sizes_from_loop_state(s)) &&
-          unroll_nested())
-        return;
-      if (static_int_bookkeeping(s.body) && unroll_while(s)) return;
-      if (try_lower_region(s)) return;
+      if (while_unroll_depth || while_sizes_from_loop_state(s))
+        if (const auto flow = unroll_nested()) return *flow;
+      if (static_int_bookkeeping(s.body))
+        if (const auto flow = unroll_while(s)) return *flow;
+      if (try_lower_region(s)) return Flow::Next;
       // Unlike `for`, a `while` has no statically supplied trip count.
       // Compile it as one structured register-program island, which
       // rechecks its guard at execution time and replays the executed
@@ -1930,16 +1926,16 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       auto snapshot = wa_snapshot(mentioned);
       try {
         lower_runtime_ifelse(s);
-        return;
+        return Flow::Next;
       } catch (const CompileError&) {
       } catch (const std::logic_error&) {
       }
       wa_restore(snapshot);
       auto unrolled = wa_snapshot(mentioned);
-      if (unroll_nested()) return;
+      if (const auto flow = unroll_nested()) return *flow;
       wa_restore(unrolled);
       lower_runtime_ifelse(s);
-      return;
+      return Flow::Next;
     }
     case mir::Stmt::IfElse: {
       // The guards are data-only and fold away below (both flags are
@@ -1963,9 +1959,8 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
         known = true;
       }
       if (known) {
-        if (c && !s.body.empty()) lower_stmt(s.body[0]);
-        if (!c && s.body.size() > 1) lower_stmt(s.body[1]);
-        return;
+        const size_t arm = c ? 0 : 1;
+        return arm < s.body.size() ? lower_stmt(s.body[arm]) : Flow::Next;
       }
       if (udf_depth > 0 && s.body.size() == 2) {
         mir::Stmt effects = s;
@@ -1986,7 +1981,8 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
           choice.data_only =
               s.cond.data_only && then_value.data_only && else_value.data_only;
           choice.raw = s.raw;
-          throw LpReturn{lower_expr(choice)};
+          return_value = lower_expr(choice);
+          return Flow::Return;
         }
       }
       // Data-only or not, an unfoldable condition compiles to an island.
@@ -1996,19 +1992,21 @@ void Lowering::lower_stmt_impl(const mir::Stmt& s) {
       // The island's live-outs come back parameter-dependent, which costs
       // adjoints such a branch does not need but is never wrong.
       lower_runtime_ifelse(s);
-      return;
+      return Flow::Next;
     }
     case mir::Stmt::Return:
       // Only reachable inside an inlined UDF body (log_prob itself has no
-      // value returns); unwinds to lower_call_udf.
+      // value returns); lower_call_udf collects the value.
       if (!s.has_init) fail("void return unsupported in UDF inlining");
-      throw LpReturn{lower_expr(s.rhs)};
+      return_value = lower_expr(s.rhs);
+      return Flow::Return;
     case mir::Stmt::Break:
-      throw LoopBreak{};
+      return Flow::Break;
     case mir::Stmt::Continue:
-      throw LoopContinue{};
+      return Flow::Continue;
     default:
-      fail("unsupported statement", s.raw);
+      lower_simple_stmt(s);
+      return Flow::Next;
   }
 }
 }  // namespace lower_detail

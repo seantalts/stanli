@@ -540,6 +540,11 @@ struct Lowering {
         : Val(slot_in, autodiff_in, std::move(si_in),
               ExpressionLayout::scalar(), std::move(runtime_dims_in)) {}
   };
+  // What a lowered statement asks of the statements around it: go on to the
+  // next one, leave or restart the enclosing loop, or leave the function
+  // with `return_value`.
+  enum class [[nodiscard]] Flow { Next, Break, Continue, Return };
+  Val return_value{-1, false, {}};
   // A function argument starts as a MIR expression and becomes a graph value
   // only when a consumer asks for it.  Keeping the source expression here is
   // important: different function families need different representations,
@@ -1579,7 +1584,7 @@ struct Lowering {
   bool scan_block(const mir::Stmt& s,
                   const std::function<bool(const mir::Stmt&)>& stop);
   static bool while_sizes_from_loop_state(const mir::Stmt& s);
-  bool unroll_while(const mir::Stmt& s);
+  std::optional<Flow> unroll_while(const mir::Stmt& s);
   // A while inside a while being unrolled belongs to the same compile-time
   // execution: leaving it as a loop puts the outer counter in a register
   // and undoes the unroll around it.
@@ -1995,16 +2000,10 @@ struct Lowering {
 
   std::vector<int> const_ints(const mir::Expr& e);
 
-  // Thrown by a Return statement inside an inlined UDF body.
-  struct LpReturn {
-    Val v;
-  };
-  struct LoopBreak {};
-  struct LoopContinue {};
   // Inline a user-defined function at its call site: arguments are lowered
   // in the caller's scope, bound under the parameter names in a shadowed
   // scope, and the body lowers like any other statements (loops unroll,
-  // data-only conditions resolve). Return throws the result value out.
+  // data-only conditions resolve). Return ends the body with the result.
   Val lower_call_udf(const mir::Expr& e,
                      const std::function<void()>& before_body = {},
                      const UdfSpecialization& specialize = {});
@@ -2309,22 +2308,36 @@ struct Lowering {
   }
 #include "lower_structured_loop.inc"
 
-  void lower_stmt(const mir::Stmt& s) {
+  Flow lower_stmt(const mir::Stmt& s) {
     if (bounded_specialization &&
         ++specialization_steps > specialization_step_limit)
       throw SpecializationRefused{};
     if (region_current) {
-      lower_region_stmt(s);
-      if (s.kind == mir::Stmt::For || s.kind == mir::Stmt::While)
+      const Flow flow = lower_region_stmt(s);
+      if (flow == Flow::Next &&
+          (s.kind == mir::Stmt::For || s.kind == mir::Stmt::While))
         region_unreachable = false;
-      return;
+      return flow;
     }
     const bool loop = s.kind == mir::Stmt::For || s.kind == mir::Stmt::While;
     structured_outer_depth += loop;
     const ScopeExit leave{[&] { structured_outer_depth -= loop; }};
-    lower_stmt_impl(s);
+    return lower_stmt_impl(s);
   }
-  void lower_stmt_impl(const mir::Stmt& s);
+  // Lowers `body` in order up to the first statement that leaves it.
+  Flow lower_stmts(const std::vector<mir::Stmt>& body) {
+    for (const auto& s : body)
+      if (const Flow flow = lower_stmt(s); flow != Flow::Next) return flow;
+    return Flow::Next;
+  }
+  // A section's own statements: nothing encloses them to break out of or
+  // return from.
+  void lower_top_stmt(const mir::Stmt& s) {
+    if (lower_stmt(s) != Flow::Next)
+      fail("break, continue or return outside a loop or function", s.raw);
+  }
+  Flow lower_stmt_impl(const mir::Stmt& s);
+  void lower_simple_stmt(const mir::Stmt& s);
 
   // Scalar terms reduce through chained ADD_N ops (6-input limit per op).
   int reduce_terms(std::vector<int> terms);
