@@ -82,4 +82,9 @@ jobs:
 
       - name: Build and test stanr's Stanli backend
         shell: bash
-        run: ./tests/test_stanr.sh "$STANR_REF"
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            export MAKEFLAGS=-j2
+            (while sleep 15; do free -m | awk 'NR==2{print "MEMSAMPLE used_mb=" $3 " avail_mb=" $7}'; done) &
+          fi
+          ./tests/test_stanr.sh "$STANR_REF"
