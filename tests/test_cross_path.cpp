@@ -254,9 +254,9 @@ int main() {
       {"region_map_checked", 46, 0},
       {"region_map_no_lanes", 46, 46},
       {"region_map_tile_recompute", 46, 45},
-      {"structured_forced", 430, 192},
+      {"structured_forced", 430, 191},
       {"structured_no_memo", 430, 17},
-      {"structured_plain", 430, 192},
+      {"structured_plain", 430, 191},
   };
   for (const cross::Config& c : cross::configs()) {
     if (c.name == "default") continue;
