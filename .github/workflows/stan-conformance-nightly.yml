@@ -2,7 +2,9 @@ name: Stan conformance nightly
 
 on:
   schedule:
-    - cron: '0 7 * * *'
+    # 00:17 UTC. Scheduled runs here have started 5 to 10 hours late, and
+    # this leaves room for that and a 90-minute run before 9am Eastern.
+    - cron: '17 0 * * *'
   workflow_dispatch:
 
 permissions:
@@ -44,8 +46,8 @@ jobs:
 
       - name: Install the Clang C/C++ compiler
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang
+          tools/with_retry.sh sh -c \
+            'sudo apt-get update && sudo apt-get install -y clang'
 
       # deps/pins.env is in the key, so advancing any pin rolls this cache.
       - name: Restore pinned Stan and CmdStan sources
