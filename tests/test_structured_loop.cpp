@@ -54,6 +54,16 @@ static void close(double actual, double expected, const char* name) {
   }
 }
 
+template <class E, class F>
+static bool throws(F&& body, const char* message = nullptr) {
+  try {
+    body();
+  } catch (const E& error) {
+    return message == nullptr || std::string(error.what()) == message;
+  }
+  return false;
+}
+
 static Node sequence(std::vector<Node> children) {
   Node node;
   node.children = std::move(children);
@@ -1073,13 +1083,8 @@ static std::shared_ptr<StructuredLoop> duplicate_node_plan() {
   Node second = first;
   plan->root = sequence({std::move(first), std::move(second)});
   plan->outputs = {product};
-  bool rejected = false;
-  try {
-    plan->prepare();
-  } catch (const std::invalid_argument&) {
-    rejected = true;
-  }
-  check(rejected, "duplicate output slots are rejected");
+  check(throws<std::invalid_argument>([&] { plan->prepare(); }),
+        "duplicate output slots are rejected");
   const int second_product = plan->body.add_slot(1, false);
   Node replacement = call(*plan, OP_MUL, {theta, beta}, second_product);
   plan->root = sequence(
@@ -1104,13 +1109,9 @@ static void iterator_history_tests() {
 
   Executor retry(outer(iterator_history_plan()));
   iterator_throw_once = true;
-  bool threw = false;
-  try {
-    (void)evaluate(retry, .25, 0);
-  } catch (const std::runtime_error& error) {
-    threw = std::string(error.what()) == "injected iterator callback failure";
-  }
-  check(threw, "forward preserves a callback exception");
+  check(throws<std::runtime_error>([&] { (void)evaluate(retry, .25, 0); },
+                                   "injected iterator callback failure"),
+        "forward preserves a callback exception");
   iterator_forward_values.clear();
   iterator_reverse_values.clear();
   const Evaluation retried = evaluate(retry, .25, 0);
@@ -1910,27 +1911,22 @@ static void integer_result_tests() {
   }
 
   Executor retry(outer(imported_integer_output_plan()));
-  bool threw = false;
-  try {
-    (void)evaluate(retry,
-                   static_cast<double>(std::numeric_limits<int32_t>::max()), 1);
-  } catch (const std::domain_error& error) {
-    threw = std::string(error.what()) ==
-            "integer arithmetic exceeds Stan integer range";
-  }
-  check(threw, "integer arithmetic exception is preserved");
+  check(throws<std::domain_error>(
+            [&] {
+              (void)evaluate(
+                  retry,
+                  static_cast<double>(std::numeric_limits<int32_t>::max()), 1);
+            },
+            "integer arithmetic exceeds Stan integer range"),
+        "integer arithmetic exception is preserved");
   const Evaluation retried = evaluate(retry, 2, 3);
   close(retried.value, 5, "integer retry value");
   close(retried.gradient[0], 0, "integer retry theta gradient");
 
   Executor division_retry(outer(imported_integer_output_plan(3)));
-  threw = false;
-  try {
-    (void)evaluate(division_retry, 4, 0);
-  } catch (const std::domain_error& error) {
-    threw = std::string(error.what()) == "integer division by zero";
-  }
-  check(threw, "integer division exception is preserved");
+  check(throws<std::domain_error>([&] { (void)evaluate(division_retry, 4, 0); },
+                                  "integer division by zero"),
+        "integer division exception is preserved");
   close(evaluate(division_retry, 4, 2).value, 2,
         "integer division retry value");
 
@@ -1967,14 +1963,9 @@ static void integer_result_tests() {
     replacement.scratch_size = inactive_workspace_size;
     ScopedKernelOverride overridden(OP_INT_ARITH, replacement);
     Executor workspace(outer(inactive_workspace_plan()));
-    bool workspace_threw = false;
-    try {
-      (void)evaluate(workspace, 0, 0);
-    } catch (const std::runtime_error& error) {
-      workspace_threw =
-          std::string(error.what()) == "injected inactive workspace failure";
-    }
-    check(workspace_threw, "transient kernel exception is preserved");
+    check(throws<std::runtime_error>([&] { (void)evaluate(workspace, 0, 0); },
+                                     "injected inactive workspace failure"),
+          "transient kernel exception is preserved");
     const Evaluation workspace_result = evaluate(workspace, 0, 0);
     close(workspace_result.value, 11,
           "transient kernel preserves second output and retry");
@@ -2023,13 +2014,10 @@ static void integer_result_tests() {
     ScopedKernelOverride overridden(OP_ADD, replacement);
     Executor retry_producer(outer(repeated_output_plan(3)));
     workspace_producer_throw_once = true;
-    bool producer_threw = false;
-    try {
-      (void)evaluate(retry_producer, 0, 0);
-    } catch (const std::runtime_error& error) {
-      producer_threw = std::string(error.what()) == "injected producer failure";
-    }
-    check(producer_threw, "producer preserves its forward exception");
+    check(throws<std::runtime_error>(
+              [&] { (void)evaluate(retry_producer, 0, 0); },
+              "injected producer failure"),
+          "producer preserves its forward exception");
     close(evaluate(retry_producer, 0, 0).value, 5,
           "producer retry rebuilds its output");
   }
@@ -2493,13 +2481,10 @@ static void control_tests() {
         "find retry control-cone callback");
   Executor retry_executor(outer(retry_plan));
   control_throw_once = true;
-  bool threw = false;
-  try {
-    (void)evaluate_invariant(retry_executor, .25);
-  } catch (const std::runtime_error& error) {
-    threw = std::string(error.what()) == "injected control failure";
-  }
-  check(threw, "transient callback preserves its forward exception");
+  check(throws<std::runtime_error>(
+            [&] { (void)evaluate_invariant(retry_executor, .25); },
+            "injected control failure"),
+        "transient callback preserves its forward exception");
   const Evaluation retry = evaluate_invariant(retry_executor, .25);
   check(std::memcmp(&direct, &retry, sizeof(Evaluation)) == 0,
         "retry after a transient failure rebuilds clean state");
@@ -2644,33 +2629,20 @@ static void failure_tests() {
   double gradient[2];
 
   fail_forward.store(true);
-  bool forward_threw = false;
-  try {
-    (void)executor.gradient(gradient);
-  } catch (const std::runtime_error& error) {
-    forward_threw =
-        std::string(error.what()) == "injected structured forward failure";
-  }
-  check(forward_threw, "forward exception is preserved");
+  check(throws<std::runtime_error>([&] { (void)executor.gradient(gradient); },
+                                   "injected structured forward failure"),
+        "forward exception is preserved");
 
   fail_backward.store(true);
-  bool backward_threw = false;
-  try {
-    (void)executor.gradient(gradient);
-  } catch (const std::runtime_error& error) {
-    backward_threw =
-        std::string(error.what()) == "injected structured backward failure";
-  }
-  check(backward_threw, "backward exception is preserved");
+  check(throws<std::runtime_error>([&] { (void)executor.gradient(gradient); },
+                                   "injected structured backward failure"),
+        "backward exception is preserved");
 
-  bool stale_reverse = false;
-  try {
-    KernelCtx stale{};
-    structured_loop_backward(stale);
-  } catch (const std::logic_error&) {
-    stale_reverse = true;
-  }
-  check(stale_reverse, "reverse without a forward is refused");
+  check(throws<std::logic_error>([] {
+          KernelCtx stale{};
+          structured_loop_backward(stale);
+        }),
+        "reverse without a forward is refused");
 
   auto reference_plan = recurrence(8);
   Executor reference(outer(reference_plan));
@@ -2692,13 +2664,8 @@ static void refusal_tests() {
     exit.kind = Node::Break;
     plan->root = sequence({std::move(exit)});
     plan->outputs = {theta};
-    bool rejected = false;
-    try {
-      plan->prepare();
-    } catch (const std::invalid_argument&) {
-      rejected = true;
-    }
-    check(rejected, "break outside a loop is rejected");
+    check(throws<std::invalid_argument>([&] { plan->prepare(); }),
+          "break outside a loop is rejected");
   }
   {
     auto plan = std::make_shared<StructuredLoop>();
@@ -2707,13 +2674,8 @@ static void refusal_tests() {
     plan->imports = {{theta, 0, 0, true}};
     plan->root = alias(wide, theta);
     plan->outputs = {wide};
-    bool rejected = false;
-    try {
-      plan->prepare();
-    } catch (const std::invalid_argument&) {
-      rejected = true;
-    }
-    check(rejected, "alias between different lengths is rejected");
+    check(throws<std::invalid_argument>([&] { plan->prepare(); }),
+          "alias between different lengths is rejected");
   }
   {
     auto plan = std::make_shared<StructuredLoop>();
@@ -2722,13 +2684,8 @@ static void refusal_tests() {
     plan->imports = {{theta, 0, 0, true}};
     plan->root = call(*plan, OP_LOOP, {theta}, result);
     plan->outputs = {result};
-    bool rejected = false;
-    try {
-      plan->prepare();
-    } catch (const std::invalid_argument&) {
-      rejected = true;
-    }
-    check(rejected, "nested OP_LOOP is rejected");
+    check(throws<std::invalid_argument>([&] { plan->prepare(); }),
+          "nested OP_LOOP is rejected");
   }
 }
 
@@ -2764,13 +2721,10 @@ static void automatic_policy_tests() {
   check(retained(renamed_auto) != nullptr,
         "alpha-renaming preserves automatic structural selection");
 
-  bool force_refused = false;
-  try {
-    (void)compile_fixture("structured_auto_refusal", 32, Mode::Force);
-  } catch (const CompileError&) {
-    force_refused = true;
-  }
-  check(force_refused, "unsupported native candidate is identified");
+  check(throws<CompileError>([] {
+          (void)compile_fixture("structured_auto_refusal", 32, Mode::Force);
+        }),
+        "unsupported native candidate is identified");
   const auto refused_auto =
       compile_fixture("structured_auto_refusal", 32, Mode::Auto);
   const auto refused_off =
@@ -3575,14 +3529,17 @@ static void record_arm_mul(KernelCtx& context) {
   find_kernel(OP_MUL)->forward(context);
 }
 
-// theta * sum of the iterators whose table entry is positive; `reuse_guard`
-// also adds theta * guard after the branch so the guard value stays live.
-static std::shared_ptr<StructuredLoop> traced_branch_plan(bool reuse_guard) {
+// theta * sum of the iterators whose table entry is positive over `rows`
+// rows; `param_guard` also adds theta per row while theta > 0, and
+// `reuse_guard` adds theta * guard after the branch so the guard value stays
+// live.
+static std::shared_ptr<StructuredLoop> row_scan_plan(int rows, bool param_guard,
+                                                     bool reuse_guard = false) {
   auto plan = std::make_shared<StructuredLoop>();
   const int theta = plan->body.add_slot(1, false);
-  const int table = plan->body.add_slot(3, false);
+  const int table = plan->body.add_slot(rows, false);
   const int one = scalar(*plan, 1);
-  const int three = scalar(*plan, 3);
+  const int last = scalar(*plan, rows);
   const int zero = scalar(*plan, 0);
   const int iterator = plan->body.add_slot(1, false);
   const int picked = plan->body.add_slot(1, false);
@@ -3593,7 +3550,7 @@ static std::shared_ptr<StructuredLoop> traced_branch_plan(bool reuse_guard) {
   const int next = plan->body.add_slot(1, false);
   plan->imports = {{theta, 0, 0, true, false}, {table, 2, 0, false, true}};
   Node index = call(*plan, OP_INDEX_DYNAMIC, {table, iterator}, picked);
-  attach(*plan, index.op, single_spec(3));
+  attach(*plan, index.op, single_spec(rows));
   const int index_op = index.op;
   Node compare = call(*plan, OP_COMPARE, {picked, zero}, guard);
   plan->body.ops[static_cast<size_t>(compare.op)].variant = 2;
@@ -3615,13 +3572,24 @@ static std::shared_ptr<StructuredLoop> traced_branch_plan(bool reuse_guard) {
     body.push_back(call(*plan, OP_ADD, {acc, bonus}, bumped));
     body.push_back(alias(acc, bumped));
   }
-  plan->root = counted(one, three, iterator, sequence(std::move(body)));
+  if (param_guard) {
+    const int positive = plan->body.add_slot(1, false);
+    const int bumped = plan->body.add_slot(1, false);
+    Node sign = call(*plan, OP_COMPARE, {theta, zero}, positive);
+    plan->body.ops[static_cast<size_t>(sign.op)].variant = 2;
+    body.push_back(std::move(sign));
+    body.push_back(branch(positive,
+                          sequence({call(*plan, OP_ADD, {acc, theta}, bumped),
+                                    alias(acc, bumped)}),
+                          sequence({})));
+  }
+  plan->root = counted(one, last, iterator, sequence(std::move(body)));
   plan->outputs = {acc};
   prepare_kernels(*plan);
   check(set_forward(plan->root, index_op, memo_index_forward) &&
             set_forward(plan->root, compare_op, memo_compare_forward) &&
             set_forward(plan->root, scale_op, record_arm_mul),
-        "find traced branch callbacks");
+        "find row scan callbacks");
   return plan;
 }
 
@@ -3746,7 +3714,7 @@ static void trace_tests() {
           "guard chain replays the recorded arms");
   }
   {
-    auto plan = traced_branch_plan(false);
+    auto plan = row_scan_plan(3, false);
     Executor executor(outer(plan, {1, 1}, {3}));
     const Evaluation first = evaluate_traced(executor, .25, {1, 0, 2});
     close(first.value, 1, "traced branch first value");
@@ -3780,7 +3748,7 @@ static void trace_tests() {
     close(early.gradient[0], 27, "untraced while early gradient");
   }
   {
-    auto plan = traced_branch_plan(true);
+    auto plan = row_scan_plan(3, false, true);
     Executor executor(outer(plan, {1, 1}, {3}));
     const Evaluation first = evaluate_traced(executor, .25, {1, 0, 2});
     close(first.value, 1.5, "live guard first value");
@@ -3792,7 +3760,7 @@ static void trace_tests() {
           "live guard replays the recorded arms");
   }
   {
-    const Graph graph = outer(traced_branch_plan(false), {1, 1}, {3});
+    const Graph graph = outer(row_scan_plan(3, false), {1, 1}, {3});
     Executor first(graph), second(graph);
     const Evaluation a = evaluate_traced(first, .25, {1, 0, 2});
     close(a.value, 1, "first executor traced value");
@@ -3810,61 +3778,6 @@ static void trace_tests() {
     check(traced_arm_iterators == std::vector<double>{2},
           "second executor replays its own arms");
   }
-}
-
-// theta * sum of the iterators whose table entry is positive over `rows`
-// rows; `param_guard` also adds theta per row while theta > 0.
-static std::shared_ptr<StructuredLoop> row_scan_plan(int rows,
-                                                     bool param_guard) {
-  auto plan = std::make_shared<StructuredLoop>();
-  const int theta = plan->body.add_slot(1, false);
-  const int table = plan->body.add_slot(rows, false);
-  const int one = scalar(*plan, 1);
-  const int last = scalar(*plan, rows);
-  const int zero = scalar(*plan, 0);
-  const int iterator = plan->body.add_slot(1, false);
-  const int picked = plan->body.add_slot(1, false);
-  const int guard = plan->body.add_slot(1, false);
-  const int term = plan->body.add_slot(1, false);
-  const int acc = plan->body.add_slot(1, false);
-  plan->fills.push_back({acc, {0}});
-  const int next = plan->body.add_slot(1, false);
-  plan->imports = {{theta, 0, 0, true, false}, {table, 2, 0, false, true}};
-  Node index = call(*plan, OP_INDEX_DYNAMIC, {table, iterator}, picked);
-  attach(*plan, index.op, single_spec(rows));
-  const int index_op = index.op;
-  Node compare = call(*plan, OP_COMPARE, {picked, zero}, guard);
-  plan->body.ops[static_cast<size_t>(compare.op)].variant = 2;
-  const int compare_op = compare.op;
-  Node scale = call(*plan, OP_MUL, {theta, iterator}, term);
-  const int scale_op = scale.op;
-  std::vector<Node> body;
-  body.push_back(std::move(index));
-  body.push_back(std::move(compare));
-  body.push_back(
-      branch(guard,
-             sequence({std::move(scale), call(*plan, OP_ADD, {acc, term}, next),
-                       alias(acc, next)}),
-             sequence({})));
-  if (param_guard) {
-    const int positive = plan->body.add_slot(1, false);
-    const int bumped = plan->body.add_slot(1, false);
-    Node sign = call(*plan, OP_COMPARE, {theta, zero}, positive);
-    plan->body.ops[static_cast<size_t>(sign.op)].variant = 2;
-    body.push_back(std::move(sign));
-    body.push_back(branch(positive,
-                          sequence({call(*plan, OP_ADD, {acc, theta}, bumped),
-                                    alias(acc, bumped)}),
-                          sequence({})));
-  }
-  plan->root = counted(one, last, iterator, sequence(std::move(body)));
-  plan->outputs = {acc};
-  prepare_kernels(*plan);
-  check(set_forward(plan->root, index_op, memo_index_forward) &&
-            set_forward(plan->root, compare_op, memo_compare_forward) &&
-            set_forward(plan->root, scale_op, record_arm_mul),
-        "find row scan callbacks");
-  return plan;
 }
 
 // theta * sum of k over the cells (k, i) of a 3 x 100 table holding a
@@ -4758,14 +4671,10 @@ static void frame_program_tests() {
     Executor automatic = diagnosed_executor(outer(plan, {1, 1}, {1}));
     automatic.value_ptr(2)[0] = 400;
     frame_failure_calls = 0;
-    bool threw = false;
     stanli_test::StdoutCapture captured(stderr);
-    try {
-      (void)evaluate(automatic, .1, .7);
-    } catch (const std::runtime_error& error) {
-      threw =
-          std::string(error.what()) == "injected failure after frame selection";
-    }
+    const bool threw =
+        throws<std::runtime_error>([&] { (void)evaluate(automatic, .1, .7); },
+                                   "injected failure after frame selection");
     const auto diagnostics = captured.finish();
     check(
         threw && (diagnostics.find("frame_selection:") != std::string::npos) ==
@@ -4918,14 +4827,9 @@ static void compiled_recording_tests() {
       ex->value_ptr(3)[0] = invalid;
       test_setenv("STANLI_STRUCTURED_COMPILED_RECORDING",
                   ex == &candidate ? "1" : "0");
-      bool threw = false;
-      try {
-        (void)evaluate(*ex, .25, 0);
-      } catch (const std::logic_error& error) {
-        threw = std::string(error.what()) ==
-                "structured loop invalid integer bounds";
-      }
-      check(threw, "compiled nested bounds retain validation failures");
+      check(throws<std::logic_error>([&] { (void)evaluate(*ex, .25, 0); },
+                                     "structured loop invalid integer bounds"),
+            "compiled nested bounds retain validation failures");
       ex->value_ptr(3)[0] = 5;
     }
     const auto expected = evaluate(tree, .25, 0);
@@ -5032,13 +4936,9 @@ static void data_recording_tests() {
       ex->value_ptr(3)[0] = 4;
       test_setenv("STANLI_STRUCTURED_DATA_RECORDING",
                   ex == &candidate ? "1" : "0");
-      bool threw = false;
-      try {
-        (void)evaluate(*ex, .25, 0);
-      } catch (const std::out_of_range& error) {
-        threw = std::string(error.what()) == "structured index out of range";
-      }
-      check(threw, "data recording preserves a later-iteration index failure");
+      check(throws<std::out_of_range>([&] { (void)evaluate(*ex, .25, 0); },
+                                      "structured index out of range"),
+            "data recording preserves a later-iteration index failure");
       ex->value_ptr(3)[0] = 3;
     }
     const auto expected = evaluate(tree, -.5, 0);
@@ -5786,13 +5686,8 @@ static void frame_clone_tests() {
   frame_failure_calls = 100;
   (void)evaluate(failed, .1, .7);
   frame_failure_calls = 0;
-  bool threw = false;
-  try {
-    (void)evaluate(failed, .1, .7);
-  } catch (const std::runtime_error&) {
-    threw = true;
-  }
-  check(threw, "clone fixture reaches a failure during recorded replay");
+  check(throws<std::runtime_error>([&] { (void)evaluate(failed, .1, .7); }),
+        "clone fixture reaches a failure during recorded replay");
   auto recovered = copy(failed, false);
   frame_failure_calls = 100;
   Executor oracle(outer(recurrence(20)));
@@ -5810,13 +5705,9 @@ static void frame_clone_tests() {
   test_unsetenv("STANLI_STRUCTURED_FRAMES");
   const auto backward_expected = evaluate(backward_failed, .1, .7);
   frame_backward_calls = 0;
-  threw = false;
-  try {
-    (void)evaluate(backward_failed, .1, .7);
-  } catch (const std::runtime_error&) {
-    threw = true;
-  }
-  check(threw, "clone fixture reaches a partially executed backward pass");
+  check(throws<std::runtime_error>(
+            [&] { (void)evaluate(backward_failed, .1, .7); }),
+        "clone fixture reaches a partially executed backward pass");
   auto backward_recovered = copy(backward_failed, false);
   frame_backward_calls = 100;
   check(same(evaluate(*backward_recovered, .1, .7), backward_expected),
@@ -5909,10 +5800,20 @@ static void recording_shape_tests() {
   }
 }
 
-struct MemoResult {
+struct RunResult {
   std::vector<std::vector<double>> evaluations;
   std::string diagnostics, error;
 };
+
+static std::vector<double> value_and_gradient(Executor& executor,
+                                              double theta) {
+  executor.params_data()[0] = theta;
+  executor.params_data()[1] = .5;
+  std::vector<double> gradient(static_cast<size_t>(executor.n_params()));
+  const double value = executor.gradient(gradient.data());
+  gradient.insert(gradient.begin(), value);
+  return gradient;
+}
 
 static Node compare_node(StructuredLoop& plan, int a, int b, int out,
                          int variant) {
@@ -5941,13 +5842,13 @@ static Node flow_node(Node::Kind kind) {
   return n;
 }
 
-static MemoResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
-                           const std::vector<int64_t>& data_lens,
-                           const std::vector<std::vector<double>>& data,
-                           bool memo, size_t extra_params = 0,
-                           const std::vector<std::vector<double>>& changed = {},
-                           bool shipped = false, bool tree = false,
-                           bool frames = true) {
+static RunResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
+                          const std::vector<int64_t>& data_lens,
+                          const std::vector<std::vector<double>>& data,
+                          bool memo, size_t extra_params = 0,
+                          const std::vector<std::vector<double>>& changed = {},
+                          bool shipped = false, bool tree = false,
+                          bool frames = true) {
   std::vector<int64_t> param_lens = {1, 1};
   if (extra_params) param_lens.push_back(static_cast<int64_t>(extra_params));
   const Graph graph = outer(plan, param_lens, data_lens);
@@ -5968,7 +5869,7 @@ static MemoResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
     test_unsetenv("STANLI_NO_DATA_LOOP_MEMO");
   else
     test_setenv("STANLI_NO_DATA_LOOP_MEMO", "1");
-  MemoResult result;
+  RunResult result;
   for (double theta : {.25, -.5, .25, .75, -.25}) {
     if (result.evaluations.size() == 3 && !changed.empty())
       for (size_t i = 0; i < changed.size(); ++i)
@@ -5978,12 +5879,7 @@ static MemoResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
       executor.params_data()[2 + k] = .3 + .17 * static_cast<double>(k) * theta;
     stanli_test::StdoutCapture capture(stderr);
     try {
-      executor.params_data()[0] = theta;
-      executor.params_data()[1] = .5;
-      std::vector<double> gradient(static_cast<size_t>(executor.n_params()));
-      const double value = executor.gradient(gradient.data());
-      gradient.insert(gradient.begin(), value);
-      result.evaluations.push_back(std::move(gradient));
+      result.evaluations.push_back(value_and_gradient(executor, theta));
     } catch (const std::exception& error) {
       result.error = error.what();
     }
@@ -5997,7 +5893,7 @@ static MemoResult memo_run(const std::shared_ptr<StructuredLoop>& plan,
   return result;
 }
 
-static bool memo_same(const MemoResult& a, const MemoResult& b) {
+static bool same_runs(const RunResult& a, const RunResult& b) {
   if (a.error != b.error || a.evaluations.size() != b.evaluations.size())
     return false;
   for (size_t i = 0; i < a.evaluations.size(); ++i)
@@ -6008,22 +5904,22 @@ static bool memo_same(const MemoResult& a, const MemoResult& b) {
   return true;
 }
 
-static size_t memo_field(const MemoResult& result, const char* name) {
+static size_t memo_field(const RunResult& result, const char* name) {
   return reported_field(result.diagnostics, name);
 }
 
 // Compares memo on and off bitwise. A negative expectation skips that count.
-static MemoResult memo_check(const char* name,
-                             const std::shared_ptr<StructuredLoop>& plan,
-                             const std::vector<int64_t>& data_lens,
-                             const std::vector<std::vector<double>>& data,
-                             long hits, long misses = -1,
-                             size_t extra_params = 0) {
-  const MemoResult on = memo_run(plan, data_lens, data, true, extra_params);
-  const MemoResult off = memo_run(plan, data_lens, data, false, extra_params);
+static RunResult memo_check(const char* name,
+                            const std::shared_ptr<StructuredLoop>& plan,
+                            const std::vector<int64_t>& data_lens,
+                            const std::vector<std::vector<double>>& data,
+                            long hits, long misses = -1,
+                            size_t extra_params = 0) {
+  const RunResult on = memo_run(plan, data_lens, data, true, extra_params);
+  const RunResult off = memo_run(plan, data_lens, data, false, extra_params);
   const std::string label = std::string("data loop memo ") + name;
   check(on.error == off.error, (label + " preserves the error").c_str());
-  check(memo_same(on, off),
+  check(same_runs(on, off),
         (label + " is bitwise identical to memo off").c_str());
   const auto counts = [&]() {
     std::printf(
@@ -6225,6 +6121,35 @@ static ScanFixture limit_plan() {
   return {plan, {6, 1, 6}};
 }
 
+static Node matrix_read(StructuredLoop& plan, int table, int64_t rows,
+                        int64_t columns, int row, int column, int out) {
+  Node n = call(plan, OP_INDEX_DYNAMIC, {table, row, column}, out);
+  auto spec = std::make_shared<DynamicIndexSpec>();
+  spec->selected_size = 1;
+  spec->input_count = 3;
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, rows, columns, 1, 0});
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, columns, 1, 1, 0});
+  spec->axes[0].selector_input = 1;
+  spec->axes[1].selector_input = 2;
+  attach(plan, n.op, spec);
+  return n;
+}
+
+static Node cell_write(StructuredLoop& plan, int base, int r, int c, int value,
+                       int out, int64_t rows, int64_t columns) {
+  Node n = call(plan, OP_SET_INDEX_DYNAMIC, {base, r, c, value}, out);
+  auto spec = std::make_shared<DynamicIndexSpec>();
+  spec->selected_size = 1;
+  spec->input_count = 4;
+  spec->rhs_input = 3;
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, rows, columns, 1, 0});
+  spec->axes.push_back({DynamicIndexSpec::Axis::Single, columns, 1, 1, 0});
+  spec->axes[0].selector_input = 1;
+  spec->axes[1].selector_input = 2;
+  attach(plan, n.op, spec);
+  return n;
+}
+
 static ScanFixture matrix_step_plan() {
   constexpr int rows_count = 6, matrix_rows = 3, matrix_cols = 2;
   auto plan = std::make_shared<StructuredLoop>();
@@ -6248,20 +6173,7 @@ static ScanFixture matrix_step_plan() {
                    {col_table, 3, 0, false, true},
                    {kind_table, 4, 0, false, true}};
   Node write =
-      call(*plan, OP_SET_INDEX_DYNAMIC, {matrix, r, c, value}, updated);
-  {
-    auto spec = std::make_shared<DynamicIndexSpec>();
-    spec->selected_size = 1;
-    spec->input_count = 4;
-    spec->rhs_input = 3;
-    spec->axes.push_back(
-        {DynamicIndexSpec::Axis::Single, matrix_rows, matrix_cols, 1, 0});
-    spec->axes.push_back(
-        {DynamicIndexSpec::Axis::Single, matrix_cols, 1, 1, 0});
-    spec->axes[0].selector_input = 1;
-    spec->axes[1].selector_input = 2;
-    attach(*plan, write.op, spec);
-  }
+      cell_write(*plan, matrix, r, c, value, updated, matrix_rows, matrix_cols);
   Node scan = counted(
       one, rows, row,
       sequence(
@@ -6385,35 +6297,6 @@ static void data_loop_memo_structure_tests() {
   }
 }
 
-static Node matrix_read(StructuredLoop& plan, int table, int64_t rows,
-                        int64_t columns, int row, int column, int out) {
-  Node n = call(plan, OP_INDEX_DYNAMIC, {table, row, column}, out);
-  auto spec = std::make_shared<DynamicIndexSpec>();
-  spec->selected_size = 1;
-  spec->input_count = 3;
-  spec->axes.push_back({DynamicIndexSpec::Axis::Single, rows, columns, 1, 0});
-  spec->axes.push_back({DynamicIndexSpec::Axis::Single, columns, 1, 1, 0});
-  spec->axes[0].selector_input = 1;
-  spec->axes[1].selector_input = 2;
-  attach(plan, n.op, spec);
-  return n;
-}
-
-static Node cell_write(StructuredLoop& plan, int base, int r, int c, int value,
-                       int out, int64_t rows, int64_t columns) {
-  Node n = call(plan, OP_SET_INDEX_DYNAMIC, {base, r, c, value}, out);
-  auto spec = std::make_shared<DynamicIndexSpec>();
-  spec->selected_size = 1;
-  spec->input_count = 4;
-  spec->rhs_input = 3;
-  spec->axes.push_back({DynamicIndexSpec::Axis::Single, rows, columns, 1, 0});
-  spec->axes.push_back({DynamicIndexSpec::Axis::Single, columns, 1, 1, 0});
-  spec->axes[0].selector_input = 1;
-  spec->axes[1].selector_input = 2;
-  attach(plan, n.op, spec);
-  return n;
-}
-
 // A scan over a setup table in the shape of a generated model: a per-row
 // boolean chain built from folded kernels and aliases, a population/individual
 // test on the outer subject, a counting loop, and parameter-dependent matrix
@@ -6435,7 +6318,7 @@ static ScanFixture setup_scan_plan() {
   const int allowed = fresh(), go = fresh(), changed = fresh();
   const int dest_row = fresh(), dest_col = fresh(), par = fresh();
   const int value = fresh(), cell = fresh(), cells = fresh(), flag = fresh();
-  const int when = fresh(), counter = fresh(), next_counter = fresh();
+  const int counter = fresh(), next_counter = fresh();
   const int running = fresh(), seen = fresh();
   const int one = scalar(*plan, 1), zero = scalar(*plan, 0);
   const int two = scalar(*plan, 2), three = scalar(*plan, 3);
@@ -6498,7 +6381,6 @@ static ScanFixture setup_scan_plan() {
       sequence({read_node(*plan, subjects, trips_count, trip, si),
                 alias(changed, zero), alias(matrix, base), std::move(scan),
                 branch(changed, std::move(reduce), sequence({}))}));
-  (void)when;
   plan->has_target = true;
   plan->prepare();
   return {plan, {setup_rows * setup_columns, trips_count}};
@@ -7123,7 +7005,7 @@ static ScanFixture wide_rows_plan(int rows_count, int columns,
 
 static void data_loop_memo_carry_tests() {
   const std::vector<double> table = {1, 2, 3, 4, 5, 6};
-  const auto engaged = [](const MemoResult& result) {
+  const auto engaged = [](const RunResult& result) {
     const size_t hits = memo_field(result, "memo_hits=");
     return hits != std::numeric_limits<size_t>::max() && hits > 0;
   };
@@ -7167,9 +7049,9 @@ static void data_loop_memo_carry_tests() {
     rows[299] = 5;
     rows[199] = 3;
     const auto f = lag_scan_plan(300);
-    const MemoResult on = memo_run(f.plan, f.lens, {rows}, true, 0, {}, true);
-    const MemoResult off = memo_run(f.plan, f.lens, {rows}, false, 0, {}, true);
-    check(memo_same(on, off),
+    const RunResult on = memo_run(f.plan, f.lens, {rows}, true, 0, {}, true);
+    const RunResult off = memo_run(f.plan, f.lens, {rows}, false, 0, {}, true);
+    check(same_runs(on, off),
           "data loop memo lag scan at the shipped thresholds matches memo off");
     check(engaged(on),
           "data loop memo lag scan at the shipped thresholds hits");
@@ -7182,11 +7064,11 @@ static void data_loop_memo_memory_tests() {
   std::vector<double> matrix(static_cast<size_t>(rows) * columns);
   for (size_t i = 0; i < matrix.size(); ++i)
     matrix[i] = static_cast<double>(i % 7);
-  const MemoResult on =
+  const RunResult on =
       memo_run(f.plan, f.lens, {matrix}, true, columns, {}, true);
-  const MemoResult off =
+  const RunResult off =
       memo_run(f.plan, f.lens, {matrix}, false, columns, {}, true);
-  check(memo_same(on, off), "data loop memo wide scan matches memo off");
+  check(same_runs(on, off), "data loop memo wide scan matches memo off");
   check(memo_field(on, "memo_aborted=") > 0 &&
             memo_field(on, "memo_bytes=") < (size_t{1} << 20),
         "data loop memo releases the storage of refused traces");
@@ -7349,30 +7231,30 @@ static void data_loop_memo_fuzz_tests() {
     for (size_t i = 0; i < table.size(); ++i)
       table[i] = static_cast<double>((seed + i * 7) % 4);
     const std::vector<double> changed(table.rbegin(), table.rend());
-    const MemoResult on =
+    const RunResult on =
         memo_run(f->plan, f->lens, {table}, true, 0, {changed});
-    const MemoResult off =
+    const RunResult off =
         memo_run(f->plan, f->lens, {table}, false, 0, {changed});
-    if (!memo_same(on, off))
+    if (!same_runs(on, off))
       std::printf("  fuzz seed %llu%s\n", static_cast<unsigned long long>(seed),
                   carry           ? " (carry)"
                   : aliasing      ? " (aliasing)"
                   : inplace_reads ? " (inplace reads)"
                                   : "");
-    check(memo_same(on, off),
+    check(same_runs(on, off),
           "data loop memo fuzz plan matches memo off bitwise");
     if (inplace_reads) {
-      const MemoResult tree =
+      const RunResult tree =
           memo_run(f->plan, f->lens, {table}, false, 0, {changed}, false, true);
-      const MemoResult stream = memo_run(f->plan, f->lens, {table}, false, 0,
-                                         {changed}, false, false, false);
-      if (!memo_same(off, tree) || !memo_same(stream, tree))
+      const RunResult stream = memo_run(f->plan, f->lens, {table}, false, 0,
+                                        {changed}, false, false, false);
+      if (!same_runs(off, tree) || !same_runs(stream, tree))
         std::printf("  fuzz seed %llu (inplace reads) frames=%d stream=%d\n",
-                    static_cast<unsigned long long>(seed), memo_same(off, tree),
-                    memo_same(stream, tree));
-      check(memo_same(off, tree),
+                    static_cast<unsigned long long>(seed), same_runs(off, tree),
+                    same_runs(stream, tree));
+      check(same_runs(off, tree),
             "framed replay after in-place writes matches the tree walk");
-      check(memo_same(stream, tree),
+      check(same_runs(stream, tree),
             "stream replay after in-place writes matches the tree walk");
     }
     const size_t seen = memo_field(on, "memo_hits=");
@@ -7381,11 +7263,6 @@ static void data_loop_memo_fuzz_tests() {
   check(built > order.size() * 3 / 4, "data loop memo fuzz builds most plans");
   check(hits > order.size() / 10, "data loop memo fuzz exercises hits");
 }
-
-struct InstanceResult {
-  std::vector<std::vector<double>> evaluations;
-  std::string diagnostics, error;
-};
 
 struct InstanceFixture {
   std::shared_ptr<StructuredLoop> plan;
@@ -7406,10 +7283,10 @@ static size_t total_field(const std::string& diagnostics,
 
 static std::atomic<int> instance_effects{0};
 
-static InstanceResult instance_run(const InstanceFixture& f, bool instance,
-                                   bool checked,
-                                   const std::vector<double>& thetas = {
-                                       .25, -.5, .25, .75, -.25}) {
+static RunResult instance_run(const InstanceFixture& f, bool instance,
+                              bool checked,
+                              const std::vector<double>& thetas = {
+                                  .25, -.5, .25, .75, -.25}) {
   test_setenv("STANLI_STRUCTURED_FRAMES", "1");
   test_setenv("STANLI_DATA_LOOP_MEMO_MIN_WORK", "0");
   test_setenv("STANLI_DATA_LOOP_MEMO_MIN_RATIO", "0");
@@ -7423,7 +7300,7 @@ static InstanceResult instance_run(const InstanceFixture& f, bool instance,
   for (size_t i = 0; i < f.data.size(); ++i)
     std::copy(f.data[i].begin(), f.data[i].end(),
               executor.value_ptr(first_data + i));
-  InstanceResult result;
+  RunResult result;
   instance_effects = 0;
   for (size_t step = 0; step < thetas.size(); ++step) {
     if (step == 3)
@@ -7437,11 +7314,7 @@ static InstanceResult instance_run(const InstanceFixture& f, bool instance,
       executor.params_data()[2 + j] = .3 + .17 * static_cast<double>(j) * theta;
     stanli_test::StdoutCapture capture(stderr);
     try {
-      executor.params_data()[0] = theta;
-      executor.params_data()[1] = .5;
-      std::vector<double> gradient(static_cast<size_t>(executor.n_params()));
-      const double value = executor.gradient(gradient.data());
-      gradient.insert(gradient.begin(), value);
+      auto gradient = value_and_gradient(executor, theta);
       gradient.push_back(static_cast<double>(instance_effects.load()));
       result.evaluations.push_back(std::move(gradient));
     } catch (const std::exception& error) {
@@ -7455,17 +7328,6 @@ static InstanceResult instance_run(const InstanceFixture& f, bool instance,
   return result;
 }
 
-static bool instance_same(const InstanceResult& a, const InstanceResult& b) {
-  if (a.error != b.error || a.evaluations.size() != b.evaluations.size())
-    return false;
-  for (size_t i = 0; i < a.evaluations.size(); ++i)
-    if (a.evaluations[i].size() != b.evaluations[i].size() ||
-        std::memcmp(a.evaluations[i].data(), b.evaluations[i].data(),
-                    a.evaluations[i].size() * sizeof(double)) != 0)
-      return false;
-  return true;
-}
-
 struct InstanceExpect {
   long instantiated = -1;
   long fallback = -1;
@@ -7476,18 +7338,18 @@ struct InstanceExpect {
 
 // Runs instantiation off, on, and on with the per-frame checker. Returns the
 // counts of the unchecked run.
-static InstanceResult instance_check(const char* name, const InstanceFixture& f,
-                                     InstanceExpect expect = {}) {
-  const InstanceResult off = instance_run(f, false, false);
-  const InstanceResult on = instance_run(f, true, false);
-  const InstanceResult checked = instance_run(f, true, true);
+static RunResult instance_check(const char* name, const InstanceFixture& f,
+                                InstanceExpect expect = {}) {
+  const RunResult off = instance_run(f, false, false);
+  const RunResult on = instance_run(f, true, false);
+  const RunResult checked = instance_run(f, true, true);
   const std::string label = std::string("frame instance ") + name;
-  if (!instance_same(on, off) || !instance_same(checked, off))
+  if (!same_runs(on, off) || !same_runs(checked, off))
     std::printf("  on: %s | checked: %s | off: %s\n", on.error.c_str(),
                 checked.error.c_str(), off.error.c_str());
-  check(instance_same(on, off),
+  check(same_runs(on, off),
         (label + " is bitwise identical to instantiation off").c_str());
-  check(instance_same(checked, off),
+  check(same_runs(checked, off),
         (label + " passes the frame instance checker").c_str());
   check(total_field(off.diagnostics, "instantiated=") == 0,
         (label + " is inert when disabled").c_str());
@@ -7899,40 +7761,36 @@ static InstanceFixture kernel_scratch_fixture(int rows) {
 }
 
 static void frame_instance_tests() {
+  const InstanceExpect instantiates{-1, -1, -1, 0, true};
   instance_check("on row-indexed folded reads", folded_rows_fixture(),
                  {-1, 0, -1, 0, true});
   instance_check("on a row-dependent data branch",
-                 data_branch_fixture(1, false), {-1, -1, -1, 0, true});
+                 data_branch_fixture(1, false), instantiates);
   instance_check("on programs repeating every 2 frames",
-                 data_branch_fixture(2, false), {-1, -1, -1, 0, true});
+                 data_branch_fixture(2, false), instantiates);
   instance_check("on programs repeating every 3 frames",
-                 data_branch_fixture(3, false), {-1, -1, -1, 0, true});
-  instance_check("on NaN rows", data_branch_fixture(2, true),
-                 {-1, -1, -1, 0, true});
+                 data_branch_fixture(3, false), instantiates);
+  instance_check("on NaN rows", data_branch_fixture(2, true), instantiates);
   instance_check("on a data counter carried across frames",
-                 carried_counter_fixture(), {-1, -1, -1, 0, true});
+                 carried_counter_fixture(), instantiates);
   instance_check("on row-dependent memo keys", memo_key_fixture(),
-                 {-1, -1, -1, 0, true});
+                 instantiates);
   instance_check("on a held container written in later frames",
-                 held_container_fixture(), {-1, -1, -1, 0, true});
+                 held_container_fixture(), instantiates);
   instance_check("on a row accumulator", row_accumulator_fixture(false),
-                 {-1, -1, -1, 0, true});
+                 instantiates);
   instance_check("on a parameter-chosen write selector",
                  row_accumulator_fixture(true), {-1, -1, -1, -1});
   instance_check("on a later adjoint promotion", promotion_fixture(),
-                 {-1, -1, -1, 0, true});
-  instance_check("on loop-invariant sites", invariant_fixture(),
-                 {-1, -1, -1, 0, true});
-  instance_check("on an outer break", outer_break_fixture(false),
-                 {-1, -1, -1, 0, true});
-  instance_check("on outer continues", outer_break_fixture(true),
-                 {-1, -1, -1, 0, true});
+                 instantiates);
+  instance_check("on loop-invariant sites", invariant_fixture(), instantiates);
+  instance_check("on an outer break", outer_break_fixture(false), instantiates);
+  instance_check("on outer continues", outer_break_fixture(true), instantiates);
   instance_check("on moving gather and adjoint bindings",
                  moving_binding_fixture(), {-1, 0, -1, 0, true});
-  instance_check("on a while outer loop", while_rows_fixture(),
-                 {-1, -1, -1, 0, true});
+  instance_check("on a while outer loop", while_rows_fixture(), instantiates);
   instance_check("on partly written kernel scratch", kernel_scratch_fixture(24),
-                 {-1, -1, -1, 0, true});
+                 instantiates);
   {
     const auto on = instance_check("on parameter guards flipping between rows",
                                    parameter_guard_fixture(), {});
@@ -8269,10 +8127,10 @@ static void frame_instance_fuzz_tests() {
     const auto f = instance_fuzz_plan(seed, arm);
     if (!f) continue;
     ++built;
-    const InstanceResult off = instance_run(*f, false, false);
-    const InstanceResult on = instance_run(*f, true, false);
-    const InstanceResult checked = instance_run(*f, true, true);
-    const bool ok = instance_same(on, off) && instance_same(checked, off);
+    const RunResult off = instance_run(*f, false, false);
+    const RunResult on = instance_run(*f, true, false);
+    const RunResult checked = instance_run(*f, true, true);
+    const bool ok = same_runs(on, off) && same_runs(checked, off);
     if (!ok)
       std::printf(
           "  instance fuzz seed %llu arm %d: on '%s' checked '%s' off '%s'\n",
