@@ -132,7 +132,7 @@ void dae_fwd_active(KernelCtx& ctx, const DaeSpec& spec) {
 
 void dae_fwd(KernelCtx& ctx) {
   const DaeSpec& spec = *static_cast<const DaeSpec*>(ctx.udata);
-  const int64_t S = ctx.in[0].len, P = ctx.in[2].len;
+  const int64_t S = ctx.in[0].len;
   if (ctx.n_in == 4 &&
       (ctx.in[3].len != 3 || (!values_only() && ctx.variant != 0x8u)))
     throw std::invalid_argument(
@@ -141,12 +141,7 @@ void dae_fwd(KernelCtx& ctx) {
     throw std::invalid_argument(
         "dae: initial state and derivative differ in size");
   if (values_only()) {
-    const auto solution = solve<double, double, double>(
-        spec, ctx.in[0].data, ctx.in[1].data, S, ctx.in[2].data, P,
-        ctx.n_in == 4 ? ctx.in[3].data : nullptr);
-    for (size_t n = 0; n < solution.size(); ++n)
-      for (int64_t i = 0; i < S; ++i)
-        ctx.out.data[(int64_t)n * S + i] = solution[n][i];
+    dae_fwd_data(ctx, spec);
     return;
   }
   const uint8_t mask = (ctx.variant & 0x8u) != 0 ? (ctx.variant & 0x7u) : 0x7u;

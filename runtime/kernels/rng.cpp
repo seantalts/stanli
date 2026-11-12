@@ -22,14 +22,13 @@ namespace stanli {
 namespace {
 
 void rng_fwd(KernelCtx& ctx) {
+  if (ctx.eval_state == nullptr || ctx.eval_state->wa_rng == nullptr)
+    throw std::logic_error("OP_RNG requires caller-owned evaluation RNG state");
   if (ctx.variant == kCategoricalRngVariant ||
       ctx.variant == kCategoricalLogitRngVariant ||
       ctx.variant == kPoissonBinomialRngVariant) {
     if (ctx.out.len != 1 || ctx.n_in != 1 || ctx.in[0].len < 0)
       throw std::logic_error("malformed categorical RNG op");
-    if (ctx.eval_state == nullptr || ctx.eval_state->wa_rng == nullptr)
-      throw std::logic_error(
-          "OP_RNG requires caller-owned evaluation RNG state");
     ctx.out.data[0] = static_cast<double>(vector_integer_rng_draw(
         ctx.in[0].data, static_cast<size_t>(ctx.in[0].len),
         *ctx.eval_state->wa_rng, ctx.variant));
@@ -43,9 +42,6 @@ void rng_fwd(KernelCtx& ctx) {
     const int64_t k = ctx.idata[0];
     if (ctx.in[0].len != k || ctx.in[1].len != k * k || ctx.out.len != k)
       throw std::logic_error("malformed multi-normal RNG op");
-    if (ctx.eval_state == nullptr || ctx.eval_state->wa_rng == nullptr)
-      throw std::logic_error(
-          "OP_RNG requires caller-owned evaluation RNG state");
     multi_normal_rng_draw(
         ctx.in[0].data, static_cast<size_t>(ctx.in[0].len), ctx.in[1].data,
         static_cast<size_t>(ctx.in[1].len), static_cast<size_t>(k),
@@ -56,9 +52,6 @@ void rng_fwd(KernelCtx& ctx) {
   if (ctx.variant == kDirichletRngVariant) {
     if (ctx.n_in != 1 || ctx.in[0].len < 0 || ctx.out.len != ctx.in[0].len)
       throw std::logic_error("malformed dirichlet RNG op");
-    if (ctx.eval_state == nullptr || ctx.eval_state->wa_rng == nullptr)
-      throw std::logic_error(
-          "OP_RNG requires caller-owned evaluation RNG state");
     dirichlet_rng_draw(ctx.in[0].data, static_cast<size_t>(ctx.in[0].len),
                        ctx.out.data, static_cast<size_t>(ctx.out.len),
                        *ctx.eval_state->wa_rng);
@@ -79,9 +72,6 @@ void rng_fwd(KernelCtx& ctx) {
       args[i] = {ctx.in[i].data, static_cast<size_t>(ctx.in[i].len),
                  (ctx.idata[0] & (1 << i)) == 0};
     }
-    if (ctx.eval_state == nullptr || ctx.eval_state->wa_rng == nullptr)
-      throw std::logic_error(
-          "OP_RNG requires caller-owned evaluation RNG state");
     container_rng_draw(family, args, nargs, ctx.out.data,
                        static_cast<size_t>(ctx.out.len),
                        *ctx.eval_state->wa_rng);
@@ -94,8 +84,6 @@ void rng_fwd(KernelCtx& ctx) {
       throw std::logic_error("scalar RNG received a container argument");
     args[i] = ctx.in[i].data[0];
   }
-  if (ctx.eval_state == nullptr || ctx.eval_state->wa_rng == nullptr)
-    throw std::logic_error("OP_RNG requires caller-owned evaluation RNG state");
   ctx.out.data[0] =
       scalar_rng_draw(family, args, nargs, *ctx.eval_state->wa_rng);
 }
