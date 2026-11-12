@@ -1,3 +1,4 @@
+#include "expect.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/density_registry.hpp>
 #include <stanli/function_registry.hpp>
@@ -6,7 +7,6 @@
 #include <cstdio>
 
 namespace {
-int failures = 0;
 void equal(const std::string& label, double got, double want) {
   if (got != want && !(std::isnan(got) && std::isnan(want))) {
     ++failures;
@@ -93,6 +93,5 @@ void poisson_binomial() {
 int main() {
   quantiles();
   poisson_binomial();
-  if (!failures) std::puts("test_stan240 OK");
-  return failures ? 1 : 0;
+  return finish("test_stan240");
 }

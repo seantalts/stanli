@@ -11,6 +11,8 @@
 // constrained values through the documented `constrained_env` boundary, hand
 // those to the init interpreter, and require the original free vector back.
 // Nothing here restates the mapping; a permutation error anywhere fails it.
+#include "expect.hpp"
+
 #include <stanli/compile.hpp>
 #include <stanli/init_interp.hpp>
 
@@ -24,20 +26,11 @@
 
 namespace {
 
-int failures = 0;
-
 void check(bool ok, const std::string& what) {
   if (!ok) {
     ++failures;
     std::printf("FAIL %s\n", what.c_str());
   }
-}
-
-std::string slurp(const std::string& path) {
-  std::ifstream in(path, std::ios::binary);
-  std::ostringstream buffer;
-  buffer << in.rdbuf();
-  return buffer.str();
 }
 
 // A free point that is in support for every transform in the fixture.
@@ -215,6 +208,5 @@ int main() {
   refusals(cm);
   parameterless_model();
 
-  if (failures == 0) std::printf("test_init_interp OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_init_interp");
 }

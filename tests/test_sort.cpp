@@ -1,3 +1,4 @@
+#include "expect.hpp"
 #include "graph_helpers.hpp"
 
 #include <stanli/builtin_registry.hpp>
@@ -15,8 +16,6 @@ namespace {
 using stan::math::var;
 using stanli::Executor;
 using stanli::Graph;
-
-int failures = 0;
 
 void expect(bool ok, const std::string& what) {
   if (ok) return;
@@ -169,6 +168,5 @@ int main() {
   check_ordering_values();
   check_errors();
   check_empty();
-  if (failures == 0) std::printf("test_sort OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_sort");
 }

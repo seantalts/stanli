@@ -564,10 +564,9 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DSTANLI_EMBED_STANC=ON
           cmake --build build-oracle -j ${{ matrix.build_jobs }} \
-            --target test_density_fused test_ordered_logistic_fused \
-                     test_student_t_fused
+            --target test_density_fused
           ctest --test-dir build-oracle --timeout 600 --output-on-failure \
-            -R '^test_(density|ordered_logistic|student_t)_fused$'
+            -R '^test_density_fused$'
 
       # The models and data the corpus check reads: ~24 MB out of
       # posteriordb's 2 GB, via sparse checkout, cached on the pinned SHA.

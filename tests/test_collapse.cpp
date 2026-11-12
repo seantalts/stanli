@@ -1,6 +1,7 @@
 // Observation collapse: likelihood terms that repeat over the data are
 // evaluated once per distinct row and weighted. Every rewritten graph is run
 // against the graph it came from.
+#include "expect.hpp"
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
 #include <stanli/collapse.hpp>
@@ -18,14 +19,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-static int failures = 0;
-static void expect(const char* what, bool ok) {
-  if (!ok) {
-    ++failures;
-    std::printf("FAIL %s\n", what);
-  }
-}
 
 using namespace stanli;
 using stanli::testutil::Fills;
@@ -136,18 +129,20 @@ static Model counts_by_group(int n, int groups = 2) {
 static void test_gathered_predictor() {
   const Collapsed c = collapse(counts_by_group(kWide));
   const Graph& g = c.model.g;
-  expect("gather: one term over four rows", c.stats.vector_terms == 1 &&
-                                                c.stats.observations == kWide &&
-                                                c.stats.rows == 4);
+  expect_true("gather: one term over four rows",
+              c.stats.vector_terms == 1 && c.stats.observations == kWide &&
+                  c.stats.rows == 4);
   const Op* dens = find_op(g, OP_NEG_BINOMIAL_2_LPMF);
-  expect("gather: density is elementwise over the rows",
-         dens && (dens->variant & 0x40u) && dens->n_idata == 4 &&
-             g.slots[(size_t)dens->out].len == 4);
-  expect("gather: predictor built at four elements",
-         count_opcode(g, OP_INV_LOGIT) == 1 && out_len(g, OP_INV_LOGIT) == 4 &&
-             count_opcode(g, OP_GATHER) == 1 && out_len(g, OP_GATHER) == 4);
-  expect("gather: weighted by a dot product", count_opcode(g, OP_DOT) == 1);
-  expect("gather: same log density and gradient", c.same_values);
+  expect_true("gather: density is elementwise over the rows",
+              dens && (dens->variant & 0x40u) && dens->n_idata == 4 &&
+                  g.slots[(size_t)dens->out].len == 4);
+  expect_true(
+      "gather: predictor built at four elements",
+      count_opcode(g, OP_INV_LOGIT) == 1 && out_len(g, OP_INV_LOGIT) == 4 &&
+          count_opcode(g, OP_GATHER) == 1 && out_len(g, OP_GATHER) == 4);
+  expect_true("gather: weighted by a dot product",
+              count_opcode(g, OP_DOT) == 1);
+  expect_true("gather: same log density and gradient", c.same_values);
 }
 
 // A slot something outside the graph reads keeps its full-length producer.
@@ -155,10 +150,10 @@ static void test_roots_stay() {
   Model m = counts_by_group(kWide);
   m.roots = {find_op(m.g, OP_INV_LOGIT)->out};
   const Collapsed c = collapse(m);
-  expect("root: collapses", c.stats.vector_terms == 1);
-  expect("root: full-length predictor kept beside the short one",
-         count_opcode(c.model.g, OP_INV_LOGIT) == 2);
-  expect("root: same values", c.same_values);
+  expect_true("root: collapses", c.stats.vector_terms == 1);
+  expect_true("root: full-length predictor kept beside the short one",
+              count_opcode(c.model.g, OP_INV_LOGIT) == 2);
+  expect_true("root: same values", c.same_values);
 }
 
 // The predictor is also summed into the target: both readers are served.
@@ -168,10 +163,10 @@ static void test_shared_predictor() {
   m.g.add_op(OP_SUM_VEC, {find_op(m.g, OP_INV_LOGIT)->out}, total);
   m.terms.push_back(total);
   const Collapsed c = collapse(m);
-  expect("shared: collapses", c.stats.vector_terms == 1);
-  expect("shared: both predictors present",
-         count_opcode(c.model.g, OP_INV_LOGIT) == 2);
-  expect("shared: same values", c.same_values);
+  expect_true("shared: collapses", c.stats.vector_terms == 1);
+  expect_true("shared: both predictors present",
+              count_opcode(c.model.g, OP_INV_LOGIT) == 2);
+  expect_true("shared: same values", c.same_values);
 }
 
 static void test_one_row() {
@@ -181,9 +176,9 @@ static void test_one_row() {
   m.g.idata_pool.push_back(ones);
   dens.idata = m.g.idata_pool.back().data();
   const Collapsed c = collapse(m);
-  expect("one row: collapses to one element",
-         c.stats.vector_terms == 1 && c.stats.rows == 1);
-  expect("one row: same values", c.same_values);
+  expect_true("one row: collapses to one element",
+              c.stats.vector_terms == 1 && c.stats.rows == 1);
+  expect_true("one row: same values", c.same_values);
 }
 
 // The predictor built one scalar at a time and stored into a vector, as an
@@ -214,15 +209,17 @@ static void test_scalar_chains() {
   const Collapsed c = collapse(m);
   const Graph& g = c.model.g;
   // i % 4 fixes i % 2, so the four predictors give four rows.
-  expect("chains: four rows", c.stats.vector_terms == 1 && c.stats.rows == 4);
-  expect("chains: four scalar chains left",
-         count_opcode(g, OP_INV_LOGIT) == 4 && count_opcode(g, OP_INDEX) == 4);
+  expect_true("chains: four rows",
+              c.stats.vector_terms == 1 && c.stats.rows == 4);
+  expect_true(
+      "chains: four scalar chains left",
+      count_opcode(g, OP_INV_LOGIT) == 4 && count_opcode(g, OP_INDEX) == 4);
   const Op* dens = find_op(g, OP_BETA_BINOMIAL_LPMF);
   const std::vector<int> want{4, 0, 1, 0, 1, -1, 5};
-  expect("chains: outcome groups restricted",
-         dens && dens->n_idata == (int64_t)want.size() &&
-             std::equal(want.begin(), want.end(), dens->idata));
-  expect("chains: same values", c.same_values);
+  expect_true("chains: outcome groups restricted",
+              dens && dens->n_idata == (int64_t)want.size() &&
+                  std::equal(want.begin(), want.end(), dens->idata));
+  expect_true("chains: same values", c.same_values);
 }
 
 // The predictor filled one scalar at a time, each a[group] + b * x: the
@@ -253,16 +250,16 @@ static void test_scalar_chains_become_vector_ops() {
   m.terms = {lp};
   const Collapsed c = collapse(m);
   const Graph& g = c.model.g;
-  expect("chains to vectors: ten groups",
-         c.stats.statistic_terms == 1 && c.stats.rows == 10);
-  expect("chains to vectors: no scalar chains or packing left",
-         count_opcode(g, OP_FMA) == 0 && count_opcode(g, OP_INDEX) == 0 &&
-             count_opcode(g, OP_SET_INDEX) == 0 &&
-             count_opcode(g, OP_SET_INDEX_INPLACE) == 0);
-  expect("chains to vectors: one gather, one multiply, one add",
-         count_opcode(g, OP_GATHER) == 1 && out_len(g, OP_GATHER) == 10 &&
-             count_opcode(g, OP_MUL) == 1 && count_opcode(g, OP_ADD) == 1);
-  expect("chains to vectors: same values", c.same_values);
+  expect_true("chains to vectors: ten groups",
+              c.stats.statistic_terms == 1 && c.stats.rows == 10);
+  expect_true("chains to vectors: no scalar chains or packing left",
+              count_opcode(g, OP_FMA) == 0 && count_opcode(g, OP_INDEX) == 0 &&
+                  count_opcode(g, OP_SET_INDEX) == 0 &&
+                  count_opcode(g, OP_SET_INDEX_INPLACE) == 0);
+  expect_true("chains to vectors: one gather, one multiply, one add",
+              count_opcode(g, OP_GATHER) == 1 && out_len(g, OP_GATHER) == 10 &&
+                  count_opcode(g, OP_MUL) == 1 && count_opcode(g, OP_ADD) == 1);
+  expect_true("chains to vectors: same values", c.same_values);
 }
 
 // mu = a + b * x copied into a declared vector, as `vector[N] mu = ...`
@@ -289,12 +286,13 @@ static void test_copied_predictor() {
   m.terms = {lp};
   const Collapsed c = collapse(m);
   const Graph& g = c.model.g;
-  expect("copy: four rows", c.stats.vector_terms == 1 && c.stats.rows == 4);
-  expect("copy: the copy is gone", count_opcode(g, OP_SET_SLICE) == 0);
-  expect("copy: predictor built at four elements",
-         out_len(g, OP_MUL) == 4 && out_len(g, OP_ADD) == 4 &&
-             count_opcode(g, OP_GATHER) == 0);
-  expect("copy: same values", c.same_values);
+  expect_true("copy: four rows",
+              c.stats.vector_terms == 1 && c.stats.rows == 4);
+  expect_true("copy: the copy is gone", count_opcode(g, OP_SET_SLICE) == 0);
+  expect_true("copy: predictor built at four elements",
+              out_len(g, OP_MUL) == 4 && out_len(g, OP_ADD) == 4 &&
+                  count_opcode(g, OP_GATHER) == 0);
+  expect_true("copy: same values", c.same_values);
 }
 
 // A real variate repeats too: rows are (y, mu). The mask of a density that
@@ -313,11 +311,11 @@ static void test_real_variate_rows() {
   m.g.add_op(OP_CAUCHY_LPDF, {ys, mu, sigma}, lp);
   m.terms = {lp};
   const Collapsed c = collapse(m);
-  expect("real variate: four rows",
-         c.stats.vector_terms == 1 && c.stats.rows == 4);
-  expect("real variate: no statistic for this density",
-         c.report.terms.size() == 1 && c.report.terms[0].groups == -1);
-  expect("real variate: same values", c.same_values);
+  expect_true("real variate: four rows",
+              c.stats.vector_terms == 1 && c.stats.rows == 4);
+  expect_true("real variate: no statistic for this density",
+              c.report.terms.size() == 1 && c.report.terms[0].groups == -1);
+  expect_true("real variate: same values", c.same_values);
 }
 
 // X * beta with four distinct rows of X.
@@ -337,12 +335,14 @@ static void test_matvec_rows() {
   m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {eta, phi}, lp, y);
   m.terms = {lp};
   const Collapsed c = collapse(m);
-  expect("matvec: four rows", c.stats.vector_terms == 1 && c.stats.rows == 4);
+  expect_true("matvec: four rows",
+              c.stats.vector_terms == 1 && c.stats.rows == 4);
   const Op* mv = find_op(c.model.g, OP_MATVEC);
-  expect("matvec: four rows of the design kept",
-         mv && mv->n_idata == 2 && mv->idata[0] == 4 && mv->idata[1] == 2 &&
-             c.model.g.slots[(size_t)mv->in[0]].len == 8);
-  expect("matvec: same values", c.same_values);
+  expect_true("matvec: four rows of the design kept",
+              mv && mv->n_idata == 2 && mv->idata[0] == 4 &&
+                  mv->idata[1] == 2 &&
+                  c.model.g.slots[(size_t)mv->in[0]].len == 8);
+  expect_true("matvec: same values", c.same_values);
 }
 
 // A store after the first density changes what the second one reads; the
@@ -368,9 +368,9 @@ static void test_a_later_store() {
   const Collapsed c = collapse(m);
   // The second term shares four of its five rows with the first, so the
   // two are one term over five rows.
-  expect("store: one term over five rows",
-         c.stats.vector_terms == 1 && c.stats.rows == 5);
-  expect("store: same values", c.same_values);
+  expect_true("store: one term over five rows",
+              c.stats.vector_terms == 1 && c.stats.rows == 5);
+  expect_true("store: same values", c.same_values);
 }
 
 // Where an argument can only be gathered from its full-length vector, the
@@ -397,24 +397,24 @@ static void test_unrestricted_argument() {
     if (n == 16) {
       // Seven groups of sixteen: enough to group, not enough to pay for a
       // predictor still built in full.
-      expect("unrestricted, few observations: taken back whole",
-             c.stats.statistic_terms == 0 &&
-                 c.model.g.ops.size() == m.g.ops.size() &&
-                 c.model.g.slots.size() == m.g.slots.size() &&
-                 c.model.fills.size() == m.fills.size());
-      expect("unrestricted, few observations: says why",
-             c.report.terms.size() == 1 &&
-                 refused(c.report.terms[0],
-                         "its arguments could not be restricted") &&
-                 c.report.terms[0].evaluator == nullptr);
+      expect_true("unrestricted, few observations: taken back whole",
+                  c.stats.statistic_terms == 0 &&
+                      c.model.g.ops.size() == m.g.ops.size() &&
+                      c.model.g.slots.size() == m.g.slots.size() &&
+                      c.model.fills.size() == m.fills.size());
+      expect_true("unrestricted, few observations: says why",
+                  c.report.terms.size() == 1 &&
+                      refused(c.report.terms[0],
+                              "its arguments could not be restricted") &&
+                      c.report.terms[0].evaluator == nullptr);
     } else {
       // Seven of sixty-four pay even so.
-      expect("unrestricted, many observations: collapses",
-             c.stats.statistic_terms == 1 && c.stats.rows == 7 &&
-                 count_opcode(c.model.g, OP_INV_LOGIT) == 1 &&
-                 out_len(c.model.g, OP_INV_LOGIT) == 7);
+      expect_true("unrestricted, many observations: collapses",
+                  c.stats.statistic_terms == 1 && c.stats.rows == 7 &&
+                      count_opcode(c.model.g, OP_INV_LOGIT) == 1 &&
+                      out_len(c.model.g, OP_INV_LOGIT) == 7);
     }
-    expect("unrestricted: same values", c.same_values);
+    expect_true("unrestricted: same values", c.same_values);
   }
 }
 
@@ -443,11 +443,11 @@ static void test_element_updates_die_with_their_rows() {
   m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
   m.terms = {lp};
   const Collapsed c = collapse(m);
-  expect("updates: two groups", c.stats.rows == 2);
-  expect("updates: two updates left of twenty",
-         count_opcode(c.model.g, OP_MUL) == 2 &&
-             count_opcode(c.model.g, OP_INDEX) == 2);
-  expect("updates: same values", c.same_values);
+  expect_true("updates: two groups", c.stats.rows == 2);
+  expect_true("updates: two updates left of twenty",
+              count_opcode(c.model.g, OP_MUL) == 2 &&
+                  count_opcode(c.model.g, OP_INDEX) == 2);
+  expect_true("updates: same values", c.same_values);
 }
 
 // Scalar target terms with equal values become one term and a count,
@@ -466,13 +466,13 @@ static void test_scalar_terms() {
   m.g.add_op(OP_SQUARE, {sigma}, extra);
   m.terms.push_back(extra);
   const Collapsed c = collapse(m);
-  expect("scalars: thirty-six terms merged",
-         c.stats.scalar_terms_merged == 36 && c.model.terms.size() == 5);
-  expect("scalars: four densities and four weights left",
-         count_opcode(c.model.g, OP_CAUCHY_LPDF) == 4 &&
-             count_opcode(c.model.g, OP_MUL) == 4 &&
-             count_opcode(c.model.g, OP_INDEX) == 4);
-  expect("scalars: same values", c.same_values);
+  expect_true("scalars: thirty-six terms merged",
+              c.stats.scalar_terms_merged == 36 && c.model.terms.size() == 5);
+  expect_true("scalars: four densities and four weights left",
+              count_opcode(c.model.g, OP_CAUCHY_LPDF) == 4 &&
+                  count_opcode(c.model.g, OP_MUL) == 4 &&
+                  count_opcode(c.model.g, OP_INDEX) == 4);
+  expect_true("scalars: same values", c.same_values);
 }
 
 // Terms that read the very same slots are CSE's to merge, and are left.
@@ -487,10 +487,10 @@ static void test_scalar_terms_equal_by_slot() {
     m.terms.push_back(lp);
   }
   const Collapsed c = collapse(m);
-  expect("equal by slot: untouched",
-         c.stats.scalar_terms_merged == 0 &&
-             c.model.g.ops.size() == m.g.ops.size() &&
-             c.model.terms == m.terms);
+  expect_true("equal by slot: untouched",
+              c.stats.scalar_terms_merged == 0 &&
+                  c.model.g.ops.size() == m.g.ops.size() &&
+                  c.model.terms == m.terms);
 }
 
 // Values of every count merge, each into one term, and no slot is listed
@@ -511,14 +511,14 @@ static void test_scalar_terms_mixed_counts() {
   const Collapsed c = collapse(m);
   std::vector<int> sorted = c.model.terms;
   std::sort(sorted.begin(), sorted.end());
-  expect("mixed counts: forty-two merged, four terms left",
-         c.stats.scalar_terms_merged == 42 && c.model.terms.size() == 4);
-  expect("mixed counts: no slot listed twice",
-         std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
-  expect("mixed counts: four weights, four densities",
-         count_opcode(c.model.g, OP_MUL) == 4 &&
-             count_opcode(c.model.g, OP_CAUCHY_LPDF) == 4);
-  expect("mixed counts: same values", c.same_values);
+  expect_true("mixed counts: forty-two merged, four terms left",
+              c.stats.scalar_terms_merged == 42 && c.model.terms.size() == 4);
+  expect_true("mixed counts: no slot listed twice",
+              std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
+  expect_true("mixed counts: four weights, four densities",
+              count_opcode(c.model.g, OP_MUL) == 4 &&
+                  count_opcode(c.model.g, OP_CAUCHY_LPDF) == 4);
+  expect_true("mixed counts: same values", c.same_values);
 }
 
 // The repeat is in the whole term: a two-component mixture per observation.
@@ -540,12 +540,12 @@ static void test_mixture_terms() {
     m.terms.push_back(t);
   }
   const Collapsed c = collapse(m);
-  expect("mixture: thirty terms merged",
-         c.stats.scalar_terms_merged == 30 && c.model.terms.size() == 2);
-  expect("mixture: two mixtures of two densities left",
-         count_opcode(c.model.g, OP_LSE2) == 2 &&
-             count_opcode(c.model.g, OP_NORMAL_LPDF) == 4);
-  expect("mixture: same values", c.same_values);
+  expect_true("mixture: thirty terms merged",
+              c.stats.scalar_terms_merged == 30 && c.model.terms.size() == 2);
+  expect_true("mixture: two mixtures of two densities left",
+              count_opcode(c.model.g, OP_LSE2) == 2 &&
+                  count_opcode(c.model.g, OP_NORMAL_LPDF) == 4);
+  expect_true("mixture: same values", c.same_values);
 }
 
 // ---- per-group statistics --------------------------------------------------
@@ -644,10 +644,11 @@ static void test_grouped_normal() {
     NormalByGroup c;
     c.groups = 1;
     const Collapsed r = collapse(normal_by_group(c));
-    expect("one group: collapsed to one element",
-           r.stats.statistic_terms + r.stats.linear_terms == 1 &&
-               r.stats.rows == 1 && count_opcode(r.model.g, c.opcode) == 0);
-    expect("one group: same values", r.same_values);
+    expect_true("one group: collapsed to one element",
+                r.stats.statistic_terms + r.stats.linear_terms == 1 &&
+                    r.stats.rows == 1 &&
+                    count_opcode(r.model.g, c.opcode) == 0);
+    expect_true("one group: same values", r.same_values);
   }
   {
     NormalByGroup c;
@@ -658,10 +659,10 @@ static void test_grouped_normal() {
   }
   {
     const Collapsed r = collapse(normal_by_group({}));
-    expect("grouped normal: reported as groups",
-           r.report.terms.size() == 1 && r.report.terms[0].groups == 3 &&
-               r.report.terms[0].refusal == nullptr &&
-               std::strcmp(r.report.terms[0].evaluator, "groups") == 0);
+    expect_true("grouped normal: reported as groups",
+                r.report.terms.size() == 1 && r.report.terms[0].groups == 3 &&
+                    r.report.terms[0].refusal == nullptr &&
+                    std::strcmp(r.report.terms[0].evaluator, "groups") == 0);
   }
 }
 
@@ -677,8 +678,8 @@ static void test_grouped_normal_shifted_data() {
     Model m = normal_by_group(c);
     const std::vector<double> yv = m.fills[0].second;
     collapse_observations(m.g, m.fills, m.terms, m.roots);
-    expect("shifted: rewritten",
-           count_opcode(m.g, OP_NORMAL_GROUPED_LPDF) == 1);
+    expect_true("shifted: rewritten",
+                count_opcode(m.g, OP_NORMAL_GROUPED_LPDF) == 1);
     const std::vector<double> got = evaluate(m);
     // Parameters in slot order: a[0..2], then sigma.
     const double sigma = fill_at(3);
@@ -728,13 +729,13 @@ static void test_grouped_normal_rejects() {
   Model collapsed = m;
   collapse_observations(collapsed.g, collapsed.fills, collapsed.terms,
                         collapsed.roots);
-  expect("reject: rewritten",
-         count_opcode(collapsed.g, OP_NORMAL_GROUPED_LPDF) == 1);
+  expect_true("reject: rewritten",
+              count_opcode(collapsed.g, OP_NORMAL_GROUPED_LPDF) == 1);
   const std::string before = rejection(m, -0.5);
-  expect("reject: the original rejects a negative scale", !before.empty());
-  expect("reject: same message", rejection(collapsed, -0.5) == before);
-  expect("reject: a valid point is accepted",
-         rejection(collapsed, 0.5).empty());
+  expect_true("reject: the original rejects a negative scale", !before.empty());
+  expect_true("reject: same message", rejection(collapsed, -0.5) == before);
+  expect_true("reject: a valid point is accepted",
+              rejection(collapsed, 0.5).empty());
 }
 
 // Values the statistics cannot stand in for leave the term to the row form,
@@ -744,7 +745,8 @@ static void test_grouped_normal_refusals() {
     Model m = normal_by_group({});
     m.fills[0].second[4] = std::numeric_limits<double>::infinity();
     const Collapsed r = collapse(m);
-    expect("infinite observation: not grouped", r.stats.statistic_terms == 0);
+    expect_true("infinite observation: not grouped",
+                r.stats.statistic_terms == 0);
   }
   {
     NormalByGroup c;
@@ -752,18 +754,18 @@ static void test_grouped_normal_refusals() {
     Model m = normal_by_group(c);
     m.fills[0].second[4] = 0.0;
     const Collapsed r = collapse(m);
-    expect("zero lognormal observation: left alone",
-           r.stats.statistic_terms == 0 && r.stats.linear_terms == 0 &&
-               r.model.g.ops.size() == m.g.ops.size());
+    expect_true("zero lognormal observation: left alone",
+                r.stats.statistic_terms == 0 && r.stats.linear_terms == 0 &&
+                    r.model.g.ops.size() == m.g.ops.size());
   }
   {
     // Ten groups of twenty observations is not worth it.
     NormalByGroup c;
     c.groups = 11;
     const Collapsed r = collapse(normal_by_group(c));
-    expect("too many groups: not grouped",
-           r.stats.statistic_terms == 0 &&
-               refused(r.report.terms[0], "too few repeated rows"));
+    expect_true("too many groups: not grouped",
+                r.stats.statistic_terms == 0 &&
+                    refused(r.report.terms[0], "too few repeated rows"));
   }
 }
 
@@ -794,16 +796,16 @@ static void test_grouped_normal_from_scalar_terms() {
     m.g.add_op(OP_SUM_VEC, {squared}, extra);
     m.terms.push_back(extra);
     const Collapsed c = collapse(m);
-    expect("scalar family: one grouped term over three groups",
-           c.stats.statistic_terms == 1 && c.stats.rows == 3 &&
-               c.stats.observations == 40 &&
-               count_opcode(c.model.g, OP_NORMAL_GROUPED_LPDF) == 1 &&
-               count_opcode(c.model.g, OP_NORMAL_LPDF) == 0 &&
-               c.model.terms.size() == 2);
+    expect_true("scalar family: one grouped term over three groups",
+                c.stats.statistic_terms == 1 && c.stats.rows == 3 &&
+                    c.stats.observations == 40 &&
+                    count_opcode(c.model.g, OP_NORMAL_GROUPED_LPDF) == 1 &&
+                    count_opcode(c.model.g, OP_NORMAL_LPDF) == 0 &&
+                    c.model.terms.size() == 2);
     // The locations are a[0..2] in order: the parameter vector itself.
-    expect("scalar family: no location or scale chains left",
-           count_opcode(c.model.g, OP_INDEX) == 0);
-    expect("scalar family: same values", c.same_values);
+    expect_true("scalar family: no location or scale chains left",
+                count_opcode(c.model.g, OP_INDEX) == 0);
+    expect_true("scalar family: same values", c.same_values);
   }
 }
 
@@ -828,18 +830,18 @@ static void test_scalar_family_locations_are_vectorized() {
   const Collapsed c = collapse(m);
   const Graph& g = c.model.g;
   // Ten groups (five of a, two of x) in six values: the group form.
-  expect("vectorized family: one grouped term over ten groups",
-         c.stats.statistic_terms == 1 && c.stats.rows == 10 &&
-             count_opcode(g, OP_NORMAL_GROUPED_LPDF) == 1 &&
-             count_opcode(g, OP_NORMAL_LPDF) == 0);
-  expect("vectorized family: no scalar chains or packing left",
-         count_opcode(g, OP_FMA) == 0 && count_opcode(g, OP_INDEX) == 0 &&
-             count_opcode(g, OP_SET_INDEX) == 0 &&
-             count_opcode(g, OP_SET_INDEX_INPLACE) == 0);
-  expect("vectorized family: one gather, one multiply, one add",
-         count_opcode(g, OP_GATHER) == 1 && out_len(g, OP_GATHER) == 10 &&
-             count_opcode(g, OP_MUL) == 1 && count_opcode(g, OP_ADD) == 1);
-  expect("vectorized family: same values", c.same_values);
+  expect_true("vectorized family: one grouped term over ten groups",
+              c.stats.statistic_terms == 1 && c.stats.rows == 10 &&
+                  count_opcode(g, OP_NORMAL_GROUPED_LPDF) == 1 &&
+                  count_opcode(g, OP_NORMAL_LPDF) == 0);
+  expect_true("vectorized family: no scalar chains or packing left",
+              count_opcode(g, OP_FMA) == 0 && count_opcode(g, OP_INDEX) == 0 &&
+                  count_opcode(g, OP_SET_INDEX) == 0 &&
+                  count_opcode(g, OP_SET_INDEX_INPLACE) == 0);
+  expect_true("vectorized family: one gather, one multiply, one add",
+              count_opcode(g, OP_GATHER) == 1 && out_len(g, OP_GATHER) == 10 &&
+                  count_opcode(g, OP_MUL) == 1 && count_opcode(g, OP_ADD) == 1);
+  expect_true("vectorized family: same values", c.same_values);
 }
 
 // One loop left in pieces, as re-roll leaves it: two vector terms over
@@ -873,14 +875,16 @@ static void test_chunks_of_one_loop_are_pooled() {
   }
   const Collapsed c = collapse(m);
   const Graph& g = c.model.g;
-  expect("pooled: one grouped term over three groups for 44 observations",
-         c.stats.statistic_terms == 1 && c.stats.rows == 3 &&
-             c.stats.observations == 2 * kN + 4 &&
-             count_opcode(g, OP_NORMAL_GROUPED_LPDF) == 1 &&
-             count_opcode(g, OP_NORMAL_LPDF) == 0 && c.model.terms.size() == 1);
-  expect("pooled: the locations are the parameter vector itself",
-         count_opcode(g, OP_GATHER) == 0 && count_opcode(g, OP_INDEX) == 0);
-  expect("pooled: same values", c.same_values);
+  expect_true("pooled: one grouped term over three groups for 44 observations",
+              c.stats.statistic_terms == 1 && c.stats.rows == 3 &&
+                  c.stats.observations == 2 * kN + 4 &&
+                  count_opcode(g, OP_NORMAL_GROUPED_LPDF) == 1 &&
+                  count_opcode(g, OP_NORMAL_LPDF) == 0 &&
+                  c.model.terms.size() == 1);
+  expect_true(
+      "pooled: the locations are the parameter vector itself",
+      count_opcode(g, OP_GATHER) == 0 && count_opcode(g, OP_INDEX) == 0);
+  expect_true("pooled: same values", c.same_values);
 }
 
 // The same for a density with no statistic: a negative-binomial loop left
@@ -925,25 +929,25 @@ static void test_any_density_in_pieces_is_pooled() {
     const Collapsed c = collapse(counts_in_pieces(true, opcode));
     const Graph& g = c.model.g;
     const Op* dens = find_op(g, opcode);
-    expect("pieces: one density over the loop's four rows",
-           c.stats.vector_terms == 1 && c.stats.rows == 4 &&
-               count_opcode(g, opcode) == 1 && dens != nullptr &&
-               (dens->variant & 0x40u) != 0 &&
-               g.slots[(size_t)dens->out].len == 4 &&
-               c.model.terms.size() == 1);
-    expect("pieces: every observation accounted for",
-           c.stats.observations == 67);
-    expect("pieces: same values", c.same_values);
+    expect_true("pieces: one density over the loop's four rows",
+                c.stats.vector_terms == 1 && c.stats.rows == 4 &&
+                    count_opcode(g, opcode) == 1 && dens != nullptr &&
+                    (dens->variant & 0x40u) != 0 &&
+                    g.slots[(size_t)dens->out].len == 4 &&
+                    c.model.terms.size() == 1);
+    expect_true("pieces: every observation accounted for",
+                c.stats.observations == 67);
+    expect_true("pieces: same values", c.same_values);
   }
   {
     // Chunks with no rows in common gain nothing from being one term, and
     // keep their own collapses.
     const Collapsed c =
         collapse(counts_in_pieces(false, OP_NEG_BINOMIAL_2_LOG_LPMF));
-    expect("disjoint pieces: collapsed piece by piece",
-           c.stats.vector_terms == 2 &&
-               count_opcode(c.model.g, OP_NEG_BINOMIAL_2_LOG_LPMF) == 2);
-    expect("disjoint pieces: same values", c.same_values);
+    expect_true("disjoint pieces: collapsed piece by piece",
+                c.stats.vector_terms == 2 &&
+                    count_opcode(c.model.g, OP_NEG_BINOMIAL_2_LOG_LPMF) == 2);
+    expect_true("disjoint pieces: same values", c.same_values);
   }
 }
 
@@ -964,12 +968,13 @@ static void test_linear_gaussian_from_scalar_terms() {
   }
   const Collapsed c = collapse(m);
   const Op* op = find_op(c.model.g, OP_LINEAR_GAUSSIAN_LPDF);
-  expect("scalar family: one quadratic form in two values",
-         c.stats.linear_terms == 1 && op != nullptr &&
-             c.model.g.slots[(size_t)op->in[1]].len == 2 &&
-             count_opcode(c.model.g, OP_NORMAL_LPDF) == 0 &&
-             count_opcode(c.model.g, OP_FMA) == 0 && c.model.terms.size() == 1);
-  expect("scalar family, linear: same values", c.same_values);
+  expect_true("scalar family: one quadratic form in two values",
+              c.stats.linear_terms == 1 && op != nullptr &&
+                  c.model.g.slots[(size_t)op->in[1]].len == 2 &&
+                  count_opcode(c.model.g, OP_NORMAL_LPDF) == 0 &&
+                  count_opcode(c.model.g, OP_FMA) == 0 &&
+                  c.model.terms.size() == 1);
+  expect_true("scalar family, linear: same values", c.same_values);
 }
 
 // ---- the other families with sufficient statistics --------------------------
@@ -1412,8 +1417,8 @@ static void test_linear_gaussian_near_the_mode() {
       Model m = regression(c);
       const std::vector<double> yv = m.fills[0].second;
       collapse_observations(m.g, m.fills, m.terms, m.roots);
-      expect("near mode: rewritten",
-             count_opcode(m.g, OP_LINEAR_GAUSSIAN_LPDF) == 1);
+      expect_true("near mode: rewritten",
+                  count_opcode(m.g, OP_LINEAR_GAUSSIAN_LPDF) == 1);
       const double sigma = 0.05;
       const auto at = [&](int64_t i) {
         return i == kColumns + 1 ? sigma : kTruth[i] * 1.001;
@@ -1493,11 +1498,11 @@ static void test_linear_gaussian_from_a_glm() {
     const Collapsed r = collapse(glm_regression(variant));
     const Graph& g = r.model.g;
     const Op* op = find_op(g, OP_LINEAR_GAUSSIAN_LPDF);
-    expect("glm: one quadratic form over four values",
-           r.stats.linear_terms == 1 && op != nullptr &&
-               count_opcode(g, OP_NORMAL_ID_GLM_LPDF) == 0 &&
-               g.slots[(size_t)op->in[1]].len == kColumns + 1);
-    expect("glm: same values", r.same_values);
+    expect_true("glm: one quadratic form over four values",
+                r.stats.linear_terms == 1 && op != nullptr &&
+                    count_opcode(g, OP_NORMAL_ID_GLM_LPDF) == 0 &&
+                    g.slots[(size_t)op->in[1]].len == kColumns + 1);
+    expect_true("glm: same values", r.same_values);
   }
   {
     const Model m = glm_regression(0x1c);
@@ -1516,13 +1521,13 @@ static void test_linear_gaussian_from_a_glm() {
       return std::string();
     };
     const std::string before = message(m);
-    expect("glm: the original rejects a negative scale", !before.empty());
-    expect("glm: same message", message(collapsed) == before);
+    expect_true("glm: the original rejects a negative scale", !before.empty());
+    expect_true("glm: same message", message(collapsed) == before);
   }
   {
     // Too few observations for the design to be worth factoring.
     const Collapsed r = collapse(glm_regression(0x1c, 12));
-    expect("short glm: untouched", r.stats.linear_terms == 0);
+    expect_true("short glm: untouched", r.stats.linear_terms == 0);
   }
 }
 
@@ -1586,18 +1591,18 @@ static void test_count_glms() {
         const Collapsed c = collapse(m);
         const Graph& g = c.model.g;
         const Op* product = find_op(g, OP_MATVEC);
-        expect("count glm: the predictor of four rows",
-               count_opcode(g, opcode) == 0 && product != nullptr &&
-                   g.slots[(size_t)product->out].len == 4 &&
-                   c.stats.rows == 4 && c.stats.observations == 64);
-        expect("count glm: by groups, or by rows without a statistic",
-               by_rows ? c.stats.vector_terms == 1 &&
-                             out_len(g, OP_NEG_BINOMIAL_2_LOG_LPMF) == 4
-                       : c.stats.statistic_terms == 1 &&
-                             count_opcode(g, OP_FAMILY_GROUPED_LPDF) == 1);
-        expect("count glm: no full-length intercept left",
-               !per_row || out_len(g, OP_GATHER) == 4);
-        expect("count glm: same values", c.same_values);
+        expect_true("count glm: the predictor of four rows",
+                    count_opcode(g, opcode) == 0 && product != nullptr &&
+                        g.slots[(size_t)product->out].len == 4 &&
+                        c.stats.rows == 4 && c.stats.observations == 64);
+        expect_true("count glm: by groups, or by rows without a statistic",
+                    by_rows ? c.stats.vector_terms == 1 &&
+                                  out_len(g, OP_NEG_BINOMIAL_2_LOG_LPMF) == 4
+                            : c.stats.statistic_terms == 1 &&
+                                  count_opcode(g, OP_FAMILY_GROUPED_LPDF) == 1);
+        expect_true("count glm: no full-length intercept left",
+                    !per_row || out_len(g, OP_GATHER) == 4);
+        expect_true("count glm: same values", c.same_values);
         // A weight that is not finite is an error either way.
         const auto fails = [](Model model) {
           testutil::reduce_into_result(model.g, model.terms);
@@ -1610,22 +1615,23 @@ static void test_count_glms() {
           }
           return false;
         };
-        expect("count glm: an infinite weight is rejected before", fails(m));
-        expect("count glm: and after", fails(c.model));
+        expect_true("count glm: an infinite weight is rejected before",
+                    fails(m));
+        expect_true("count glm: and after", fails(c.model));
       }
     {
       // Every row its own: nothing to gain.
       const Collapsed c = collapse(count_glm(opcode, false, false, 64, 64));
-      expect("count glm, no repeated rows: untouched",
-             count_opcode(c.model.g, opcode) == 1 &&
-                 c.report.terms.size() == 1 &&
-                 refused(c.report.terms[0], "too few repeated rows"));
+      expect_true("count glm, no repeated rows: untouched",
+                  count_opcode(c.model.g, opcode) == 1 &&
+                      c.report.terms.size() == 1 &&
+                      refused(c.report.terms[0], "too few repeated rows"));
     }
     {
       const Collapsed c = collapse(count_glm(opcode, false, false, 12));
-      expect("short count glm: untouched",
-             count_opcode(c.model.g, opcode) == 1 &&
-                 refused(c.report.terms[0], "too few observations"));
+      expect_true("short count glm: untouched",
+                  count_opcode(c.model.g, opcode) == 1 &&
+                      refused(c.report.terms[0], "too few observations"));
     }
   }
 }
@@ -1633,19 +1639,20 @@ static void test_count_glms() {
 // A location that is not affine in few values stays with the group form.
 static void test_linear_gaussian_left_to_groups() {
   const Collapsed r = collapse(normal_by_group({}));
-  expect("indicator design: grouped, not linear",
-         r.stats.linear_terms == 0 && r.stats.statistic_terms == 1);
+  expect_true("indicator design: grouped, not linear",
+              r.stats.linear_terms == 0 && r.stats.statistic_terms == 1);
 }
 
 static void test_left_alone() {
   {
     const Model m = counts_by_group(kCollapseMinObservations - 1);
     const Collapsed c = collapse(m);
-    expect("short term: untouched",
-           c.stats.vector_terms == 0 && c.model.g.ops.size() == m.g.ops.size());
-    expect("short term: says why",
-           c.report.terms.size() == 1 &&
-               refused(c.report.terms[0], "too few observations"));
+    expect_true(
+        "short term: untouched",
+        c.stats.vector_terms == 0 && c.model.g.ops.size() == m.g.ops.size());
+    expect_true("short term: says why",
+                c.report.terms.size() == 1 &&
+                    refused(c.report.terms[0], "too few observations"));
   }
   {
     // Four rows of sixty-four would do; four of twenty does not pay for a
@@ -1664,18 +1671,19 @@ static void test_left_alone() {
     m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {mu, phi}, lp, y);
     m.terms = {lp};
     const Collapsed c = collapse(m);
-    expect("recorder density: untouched", c.stats.vector_terms == 0);
-    expect("recorder density: says why",
-           c.report.terms.size() == 1 && c.report.terms[0].rows == 4 &&
-               refused(c.report.terms[0], "too few repeated rows"));
+    expect_true("recorder density: untouched", c.stats.vector_terms == 0);
+    expect_true("recorder density: says why",
+                c.report.terms.size() == 1 && c.report.terms[0].rows == 4 &&
+                    refused(c.report.terms[0], "too few repeated rows"));
   }
   {
     test_setenv("STANLI_NO_COLLAPSE", "1");
     const Model m = counts_by_group(kWide);
     const Collapsed c = collapse(m);
     test_unsetenv("STANLI_NO_COLLAPSE");
-    expect("disabled: untouched",
-           c.stats.vector_terms == 0 && c.model.g.ops.size() == m.g.ops.size());
+    expect_true(
+        "disabled: untouched",
+        c.stats.vector_terms == 0 && c.model.g.ops.size() == m.g.ops.size());
   }
 }
 
@@ -1698,15 +1706,16 @@ static void test_reports_rows_and_groups() {
   const int dens = m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
   m.terms = {lp};
   const CollapseReport r = analyze(m);
-  expect("report: one term", r.terms.size() == 1);
+  expect_true("report: one term", r.terms.size() == 1);
   if (r.terms.size() != 1) return;
   const CollapseTerm& t = r.terms[0];
-  expect("report: names the density op", t.op == dens && t.ops == 1);
-  expect("report: twenty observations, twenty rows", t.n == kN && t.rows == kN);
-  expect("report: three groups", t.groups == 3 && t.variate_is_data);
-  expect("report: collapses by groups",
-         t.refusal == nullptr && t.evaluator != nullptr &&
-             std::strcmp(t.evaluator, "groups") == 0);
+  expect_true("report: names the density op", t.op == dens && t.ops == 1);
+  expect_true("report: twenty observations, twenty rows",
+              t.n == kN && t.rows == kN);
+  expect_true("report: three groups", t.groups == 3 && t.variate_is_data);
+  expect_true("report: collapses by groups",
+              t.refusal == nullptr && t.evaluator != nullptr &&
+                  std::strcmp(t.evaluator, "groups") == 0);
 }
 
 // Data are compared bitwise: -0.0 and 0.0 are different rows.
@@ -1722,8 +1731,8 @@ static void test_data_equality_is_bitwise() {
   m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
   m.terms = {lp};
   const CollapseReport r = analyze(m);
-  expect("signed zero: two groups",
-         r.terms.size() == 1 && r.terms[0].groups == 2);
+  expect_true("signed zero: two groups",
+              r.terms.size() == 1 && r.terms[0].groups == 2);
 }
 
 // A predictor copied into a declared vector and read back in pieces.
@@ -1750,12 +1759,13 @@ static void test_slices_carry_values() {
   m.terms = {lp1, lp2};
   const CollapseReport r = analyze(m);
   // Each term, and then the two pooled as one family.
-  expect("slices: two terms and their family", r.terms.size() == 3);
+  expect_true("slices: two terms and their family", r.terms.size() == 3);
   if (r.terms.size() != 3) return;
-  expect("slices: the family has both terms' observations in two groups",
-         r.terms[2].n == 2 * kN && r.terms[2].groups == 2);
-  expect("slices: strided read sees two groups", r.terms[0].groups == 2);
-  expect("slices: contiguous read sees two groups", r.terms[1].groups == 2);
+  expect_true("slices: the family has both terms' observations in two groups",
+              r.terms[2].n == 2 * kN && r.terms[2].groups == 2);
+  expect_true("slices: strided read sees two groups", r.terms[0].groups == 2);
+  expect_true("slices: contiguous read sees two groups",
+              r.terms[1].groups == 2);
 }
 
 // An op the analysis does not model keeps every row apart.
@@ -1768,8 +1778,8 @@ static void test_unknown_producer_keeps_rows_apart() {
   m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
   m.terms = {lp};
   const CollapseReport r = analyze(m);
-  expect("unknown: twenty groups",
-         r.terms.size() == 1 && r.terms[0].groups == kN);
+  expect_true("unknown: twenty groups",
+              r.terms.size() == 1 && r.terms[0].groups == kN);
 }
 
 // A density of data alone is a constant, not a likelihood term.
@@ -1782,7 +1792,7 @@ static void test_data_only_density_is_not_a_term() {
   m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, c);
   m.g.add_op(OP_SQUARE, {p}, lp);
   m.terms = {c, lp};
-  expect("data-only density: no terms", analyze(m).terms.empty());
+  expect_true("data-only density: no terms", analyze(m).terms.empty());
 }
 
 int main() {
@@ -1824,6 +1834,5 @@ int main() {
   test_slices_carry_values();
   test_unknown_producer_keeps_rows_apart();
   test_data_only_density_is_not_a_term();
-  if (failures == 0) std::printf("test_collapse OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_collapse");
 }

@@ -1,5 +1,6 @@
 // Elementwise expression ops vs the stan-math var operations that stanc3's
 // C++ backend would emit for the same MIR node. lp = sum(op(args)).
+#include "expect.hpp"
 #include "graph_helpers.hpp"
 
 #include <stanli/expression_layout.hpp>
@@ -13,13 +14,6 @@
 #include <limits>
 #include <string>
 #include <vector>
-
-static int failures = 0;
-static void expect_eq(const std::string& what, double got, double want) {
-  if (got == want || (std::isnan(got) && std::isnan(want))) return;
-  ++failures;
-  std::printf("FAIL %-24s got %.17g want %.17g\n", what.c_str(), got, want);
-}
 
 using stan::math::var;
 using VecV = Eigen::Matrix<var, -1, 1>;
@@ -72,26 +66,15 @@ static void test_matrix_transpose_add() {
       kernel->forward(ctx);
       kernel->backward(ctx);
       for (int i = 0; i < n * n; ++i) {
-        expect_eq("matrix transpose add value", output[i],
-                  result.data()[i].val());
-        expect_eq("matrix transpose add gradient", gradient[i],
-                  a.data()[i].adj());
-        expect_eq("matrix transpose add direct accumulation", other[i], 0);
+        expect_eq_or_both_nan("matrix transpose add value", output[i],
+                              result.data()[i].val());
+        expect_eq_or_both_nan("matrix transpose add gradient", gradient[i],
+                              a.data()[i].adj());
+        expect_eq_or_both_nan("matrix transpose add direct accumulation",
+                              other[i], 0);
       }
     }
   }
-}
-
-// OP_LOGV takes Eigen's packet log, a ulp off libm on some arguments. The
-// gradients are 1/x and stay bitwise; only lp carries the difference, and a
-// sum that cancels reports it as several ulps of the result.
-static void expect_near_ulp(const std::string& what, double got, double want,
-                            int budget) {
-  if (got == want) return;
-  const double u = std::nextafter(std::abs(want), 1e308) - std::abs(want);
-  if (std::abs(got - want) <= budget * u) return;
-  ++failures;
-  std::printf("FAIL %-24s got %.17g want %.17g\n", what.c_str(), got, want);
 }
 
 // `params` marks which inputs the graph makes parameters; the rest reach the
@@ -110,12 +93,16 @@ static void check_case_params(const std::string& tag, uint16_t opcode,
   for (const auto& v : vals) vs.push_back(mkv(v));
   var lp = ref_fn(vs);
   lp.grad();
-  expect_near_ulp(tag + " lp", r.value, lp.val(), lp_ulp);
+  // OP_LOGV takes Eigen's packet log, a ulp off libm on some arguments. The
+  // gradients are 1/x and stay bitwise; only lp carries the difference, and a
+  // sum that cancels reports it as several ulps of the result.
+  expect_ulp_of(tag + " lp", r.value, lp.val(), lp.val(), lp_ulp);
   size_t gi = 0;
   for (size_t k = 0; k < vs.size(); ++k) {
     if (!params[k]) continue;
     for (int i = 0; i < vs[k].size(); ++i)
-      expect_eq(tag + " g" + std::to_string(gi), r.grad[gi], vs[k](i).adj()),
+      expect_eq_or_both_nan(tag + " g" + std::to_string(gi), r.grad[gi],
+                            vs[k](i).adj()),
           ++gi;
   }
   stan::math::recover_memory();
@@ -286,16 +273,6 @@ static void test_expression_layout_policy() {
   stan::math::recover_memory();
 }
 
-static int64_t ulps(double a, double b) {
-  if (a == b || (std::isnan(a) && std::isnan(b))) return 0;
-  int64_t ia, ib;
-  std::memcpy(&ia, &a, sizeof ia);
-  std::memcpy(&ib, &b, sizeof ib);
-  if ((ia < 0) != (ib < 0)) return INT64_MAX;
-  const int64_t d = ia - ib;
-  return d < 0 ? -d : d;
-}
-
 // dot(src[idata], weights) plus, for a parameter source, a second term that
 // seeds a nonzero adjoint before the gather's backward runs.
 static std::vector<double> run_gather_dot(const std::vector<int>& idx,
@@ -364,14 +341,9 @@ static void test_gather_bwd_repeated_indices() {
     const std::vector<double> got = run_gather_dot(idx, weights, j, true);
     std::vector<double> want(j, 1.0);
     for (size_t k = 0; k < idx.size(); ++k) want[idx[k]] += weights[k];
-    for (int64_t i = 0; i < j; ++i) {
-      const int64_t d = ulps(got[i], want[i]);
-      if (d > budget) {
-        ++failures;
-        std::printf("FAIL %s g%lld got %.17g want %.17g (%lld ulps)\n", tag,
-                    (long long)i, got[i], want[i], (long long)d);
-      }
-    }
+    for (int64_t i = 0; i < j; ++i)
+      expect_ulp(std::string(tag) + " g" + std::to_string(i), got[i], want[i],
+                 budget);
   };
   check("gather sorted runs", idx_sorted, weights_sorted, J, 10);
   check("gather unsorted dup", idx_unsorted, weights_unsorted, J, 0);
@@ -438,12 +410,15 @@ static void test_matrix_scalar_division() {
         k->forward(c);
         k->backward(c);
         for (int i = 0; i < n; ++i) {
-          expect_eq("matrix/scalar division value", out[i], expected_out[i]);
+          expect_eq_or_both_nan("matrix/scalar division value", out[i],
+                                expected_out[i]);
           if (active_matrix)
-            expect_eq("matrix/scalar division da", adj[i], a[i].adj());
+            expect_eq_or_both_nan("matrix/scalar division da", adj[i],
+                                  a[i].adj());
         }
         if (active_scalar)
-          expect_eq("matrix/scalar division db", scalar_adj, b.adj());
+          expect_eq_or_both_nan("matrix/scalar division db", scalar_adj,
+                                b.adj());
       }
     }
   }
@@ -480,9 +455,9 @@ static void test_power_seed_grouping() {
     implementation->forward(ctx);
     implementation->backward(ctx);
     for (int i = 0; i < n; ++i) {
-      expect_eq("power weighted value", output[i], result[i].val());
-      expect_eq("power weighted base", da[i], av[i].adj());
-      expect_eq("power weighted exponent", db[i], bv[i].adj());
+      expect_eq_or_both_nan("power weighted value", output[i], result[i].val());
+      expect_eq_or_both_nan("power weighted base", da[i], av[i].adj());
+      expect_eq_or_both_nan("power weighted exponent", db[i], bv[i].adj());
     }
   }
 }
@@ -512,24 +487,25 @@ static void test_reduction_overloads() {
     const Kernel* dot = find_kernel(OP_DOT);
     dot->forward(ctx);
     dot->backward(ctx);
-    expect_eq("dot_self value grouping", output, result.val());
+    expect_eq_or_both_nan("dot_self value grouping", output, result.val());
     for (int i = 0; i < n; ++i)
-      expect_eq("dot_self gradient grouping", adj[i], active[i].adj());
+      expect_eq_or_both_nan("dot_self gradient grouping", adj[i],
+                            active[i].adj());
 
     const Kernel* sum = find_kernel(OP_SUM_VEC);
     ctx.n_in = 1;
     ctx.variant = 1;  // owning Eigen double input
     sum->forward(ctx);
     Eigen::VectorXd owning = values.head(n);
-    expect_eq("sum owning Eigen", output, stan::math::sum(owning));
+    expect_eq_or_both_nan("sum owning Eigen", output, stan::math::sum(owning));
     int offset = 1;
     ctx.in[0] = {values.data() + 1, n};
     ctx.variant = 2;
     ctx.idata = &offset;
     ctx.n_idata = 1;
     sum->forward(ctx);
-    expect_eq("sum shifted Eigen", output,
-              stan::math::sum(values.segment(1, n)));
+    expect_eq_or_both_nan("sum shifted Eigen", output,
+                          stan::math::sum(values.segment(1, n)));
   }
 }
 
@@ -787,10 +763,10 @@ int main() {
       reference((Eigen::Index)i) = product_values[i];
     var want_lp = seed * stan::math::prod(reference);
     want_lp.grad();
-    expect_eq("prod active reverse lp", got_lp, want_lp.val());
+    expect_eq_or_both_nan("prod active reverse lp", got_lp, want_lp.val());
     for (size_t i = 0; i < got.size(); ++i)
-      expect_eq("prod active reverse g" + std::to_string(i), got[i],
-                reference((Eigen::Index)i).adj());
+      expect_eq_or_both_nan("prod active reverse g" + std::to_string(i), got[i],
+                            reference((Eigen::Index)i).adj());
     stan::math::recover_memory();
   }
 
@@ -822,6 +798,5 @@ int main() {
   check_case("variance packet reduction", OP_VARIANCE, 1, {variance_values},
              [](auto& v) { return stan::math::variance(v[0]); });
 
-  if (failures == 0) std::printf("test_eltwise OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_eltwise");
 }

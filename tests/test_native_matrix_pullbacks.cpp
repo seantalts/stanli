@@ -1,4 +1,6 @@
 // Differential checks against the previously used nested Stan Math tape.
+#include "expect.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/gp_cov_fusion.hpp>
 #include <stanli/optable.hpp>
@@ -18,7 +20,6 @@ using Mat = Eigen::MatrixXd;
 using Vec = Eigen::VectorXd;
 using Var = stan::math::var;
 using VarVec = Eigen::Matrix<Var, -1, 1>;
-static int failures = 0;
 static void check(double got, double want, const char* tag,
                   bool exact = false) {
   if (got == want || (std::isnan(got) && std::isnan(want))) return;
@@ -29,24 +30,6 @@ static void check(double got, double want, const char* tag,
   if (++failures < 12) std::printf("FAIL %s %.17g != %.17g\n", tag, got, want);
 }
 
-static int64_t ulp_key(double d) {
-  int64_t i;
-  std::memcpy(&i, &d, sizeof(i));
-  return i < 0 ? std::numeric_limits<int64_t>::min() - i : i;
-}
-// A native pullback's own gate: bitwise, with a stated ULP allowance when
-// it reassociates or -- as with matrix_exp's block-exponential identity --
-// runs a different algorithm than the nested-tape replay it replaces.
-static void expect_ulp(const std::string& what, double got, double want,
-                       int64_t max_ulp) {
-  if (got == want || (std::isnan(got) && std::isnan(want))) return;
-  const int64_t dist = std::llabs(ulp_key(got) - ulp_key(want));
-  if (dist > max_ulp) {
-    if (++failures < 12)
-      std::printf("FAIL %-28s got %.17g want %.17g (%lld ulp)\n", what.c_str(),
-                  got, want, (long long)dist);
-  }
-}
 static void gp(int n, int d, int active, uint8_t variant, bool repeated,
                double rho = 0.7, double sigma = 1.3, double seed_scale = 0.7,
                bool diagonal_update = false) {
@@ -418,18 +401,16 @@ static void solve_case(bool left, SolveKindTag kind, uint16_t opcode, int n,
       const double want = 0.125 + av.data()[i].adj();
       expect_ulp("solve A adj" + tag + " i=" + std::to_string(i),
                  a_adj.data()[i], want, max_ulp);
-      g_max_solve_ulp = std::max(
-          g_max_solve_ulp,
-          (double)std::llabs(ulp_key(a_adj.data()[i]) - ulp_key(want)));
+      g_max_solve_ulp = std::max(g_max_solve_ulp,
+                                 (double)ulp_distance(a_adj.data()[i], want));
     }
   if (dividend_var)
     for (int i = 0; i < br * bc; ++i) {
       const double want = 0.125 + bv.data()[i].adj();
       expect_ulp("solve B adj" + tag + " i=" + std::to_string(i),
                  b_adj.data()[i], want, max_ulp);
-      g_max_solve_ulp = std::max(
-          g_max_solve_ulp,
-          (double)std::llabs(ulp_key(b_adj.data()[i]) - ulp_key(want)));
+      g_max_solve_ulp = std::max(g_max_solve_ulp,
+                                 (double)ulp_distance(b_adj.data()[i], want));
     }
 }
 
@@ -519,18 +500,16 @@ static void qf_case(bool sym, uint16_t opcode, int n, int m, bool vec,
       const double want = 0.125 + av.data()[i].adj();
       expect_ulp("qf A adj" + tag + " i=" + std::to_string(i), a_adj.data()[i],
                  want, max_ulp);
-      g_max_qf_ulp = std::max(
-          g_max_qf_ulp,
-          (double)std::llabs(ulp_key(a_adj.data()[i]) - ulp_key(want)));
+      g_max_qf_ulp =
+          std::max(g_max_qf_ulp, (double)ulp_distance(a_adj.data()[i], want));
     }
   if (b_var)
     for (int i = 0; i < n * m; ++i) {
       const double want = 0.125 + bv.data()[i].adj();
       expect_ulp("qf B adj" + tag + " i=" + std::to_string(i), b_adj.data()[i],
                  want, max_ulp);
-      g_max_qf_ulp = std::max(
-          g_max_qf_ulp,
-          (double)std::llabs(ulp_key(b_adj.data()[i]) - ulp_key(want)));
+      g_max_qf_ulp =
+          std::max(g_max_qf_ulp, (double)ulp_distance(b_adj.data()[i], want));
     }
 }
 
@@ -1009,6 +988,5 @@ int main(int argc, char** argv) {
 
   fixed_small_vs_dynamic();
 
-  if (!failures) std::puts("test_native_matrix_pullbacks OK");
-  return failures ? 1 : 0;
+  return finish("test_native_matrix_pullbacks");
 }

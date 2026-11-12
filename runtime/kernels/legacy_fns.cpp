@@ -6,6 +6,8 @@
 #include <stanli/optable.hpp>
 #include <stanli/packet.hpp>
 
+#include <stdexcept>
+
 namespace stanli {
 namespace {
 
@@ -100,15 +102,10 @@ double dirichlet_eval(KernelCtx& ctx) {
   using stan::math::var;
   const bool propto = (ctx.variant & 0x80u) != 0;
   const unsigned mask = ctx.variant == 0 ? 0x3u : (ctx.variant & 0x3fu);
-  // New calls encode {inner width, theta count, alpha count}. Retain the
-  // historic unencoded theta-array/alpha-vector layout for direct graphs.
-  const int64_t width = ctx.n_idata >= 3 ? ctx.idata[0] : ctx.in[1].len;
-  const int theta_encoded =
-      ctx.n_idata >= 3
-          ? ctx.idata[1]
-          : (width > 0 && ctx.in[0].len > width ? (int)(ctx.in[0].len / width)
-                                                : -1);
-  const int alpha_encoded = ctx.n_idata >= 3 ? ctx.idata[2] : -1;
+  // idata is {inner width, theta count, alpha count}.
+  const int64_t width = ctx.idata[0];
+  const int theta_encoded = ctx.idata[1];
+  const int alpha_encoded = ctx.idata[2];
   auto theta = vectorized_vectors<var>(ctx.in[0], width, theta_encoded);
   auto alpha = vectorized_vectors<var>(ctx.in[1], width, alpha_encoded);
   auto theta_d = vectorized_vectors<double>(ctx.in[0], width, theta_encoded);
@@ -148,11 +145,10 @@ double dirichlet_eval(KernelCtx& ctx) {
   return value;
 }
 void dirichlet_fwd(KernelCtx& ctx) {
-  const bool shared_vectors = ctx.n_idata >= 3
-                                  ? ctx.idata[1] < 0 && ctx.idata[2] < 0 &&
-                                        ctx.idata[0] == ctx.in[0].len &&
-                                        ctx.idata[0] == ctx.in[1].len
-                                  : ctx.in[0].len == ctx.in[1].len;
+  if (ctx.n_idata < 3) throw std::logic_error("malformed dirichlet op");
+  const bool shared_vectors = ctx.idata[1] < 0 && ctx.idata[2] < 0 &&
+                              ctx.idata[0] == ctx.in[0].len &&
+                              ctx.idata[0] == ctx.in[1].len;
   if (!shared_vectors) {
     ctx.out.data[0] = dirichlet_eval(ctx);
     return;

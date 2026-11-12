@@ -1,3 +1,5 @@
+#include "expect.hpp"
+
 #include <stanli/function_shape.hpp>
 
 #include <cstdio>
@@ -7,8 +9,6 @@
 #include <vector>
 
 namespace {
-
-int failures = 0;
 
 template <typename F>
 void rejects(const char* name, F&& operation) {
@@ -114,6 +114,5 @@ int main() {
         FunctionContainerKind::Scalar, std::vector<int64_t>(256, 1), 1);
   });
 
-  if (failures == 0) std::printf("OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_function_shape");
 }

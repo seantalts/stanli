@@ -1,3 +1,7 @@
+#include "expect.hpp"
+
+#include <stanli/builtin_registry.hpp>
+#include <stanli/density_registry.hpp>
 #include <stanli/function_registry.hpp>
 #include <stanli/mir.hpp>
 
@@ -5,6 +9,157 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+
+// BuiltinSpec metadata, BuiltinLayout lanes, and size-mismatch messages.
+static void check_builtin_layouts() {
+  using namespace stanli;
+  const auto shape =
+      [](BuiltinArgumentKind value, BuiltinContainerKind container,
+         std::vector<int64_t> dimensions, int64_t size,
+         BuiltinContainerKind leaf = BuiltinContainerKind::Scalar) {
+        return BuiltinArgumentShape{value, container, leaf,
+                                    std::move(dimensions), size};
+      };
+  const BuiltinSpec* choose_spec = builtin_spec("choose", 2);
+  if (choose_spec == nullptr || choose_spec->opcode != OP_CHOOSE ||
+      choose_spec->arguments[0] != BuiltinArgumentKind::Integer ||
+      choose_spec->arguments[1] != BuiltinArgumentKind::Integer ||
+      choose_spec->result != FunctionArgumentKind::Integer ||
+      choose_spec->activity_mask != 0) {
+    ++failures;
+    std::printf("FAIL choose BuiltinSpec metadata\n");
+  }
+  {
+    const BuiltinSpec* atan2_spec = builtin_spec("atan2", 2);
+    const BuiltinLayout layout = builtin_layout(
+        *atan2_spec,
+        {shape(BuiltinArgumentKind::Real, BuiltinContainerKind::Scalar, {}, 1),
+         shape(BuiltinArgumentKind::Real, BuiltinContainerKind::Matrix, {2, 3},
+               6)},
+        "atan2", false);
+    if (layout.lanes != 6 || layout.result_argument != 1) {
+      ++failures;
+      std::printf("FAIL scalar/matrix BuiltinLayout\n");
+    }
+    std::string rejected;
+    try {
+      (void)builtin_layout(*atan2_spec,
+                           {shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::Vector, {3}, 3),
+                            shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::Vector, {4}, 4)},
+                           "atan2", false);
+    } catch (const std::invalid_argument& error) {
+      rejected = builtin_error_message("atan2", error);
+    }
+    if (rejected !=
+        "Binary function: x (3, 1) and y (4, 1) must match in size") {
+      ++failures;
+      std::printf("FAIL logical-shape mismatch message: %s\n",
+                  rejected.c_str());
+    }
+    rejected.clear();
+    try {
+      (void)builtin_layout(*builtin_spec("Plus__", 2),
+                           {shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::RowVector, {3}, 3),
+                            shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::RowVector, {4}, 4)},
+                           "Plus__", false);
+    } catch (const std::invalid_argument& error) {
+      rejected = builtin_error_message("Plus__", error);
+    }
+    if (rejected != "add: m1 (1, 3) and m2 (1, 4) must match in size") {
+      ++failures;
+      std::printf("FAIL operator size mismatch message: %s\n",
+                  rejected.c_str());
+    }
+    rejected.clear();
+    try {
+      (void)builtin_layout(*builtin_spec("Plus__", 2),
+                           {shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::RowVector, {3}, 3),
+                            shape(BuiltinArgumentKind::Real,
+                                  BuiltinContainerKind::RowVector, {4}, 4)},
+                           "Plus__", true);
+    } catch (const std::invalid_argument& error) {
+      rejected = builtin_error_message("Plus__", error);
+    }
+    if (rejected != "add: a (1, 3) and b (1, 4) must match in size") {
+      ++failures;
+      std::printf("FAIL var operator size mismatch message: %s\n",
+                  rejected.c_str());
+    }
+  }
+  {
+    const BuiltinSpec* bessel = builtin_spec("bessel_first_kind", 2);
+    const BuiltinLayout layout =
+        builtin_layout(*bessel,
+                       {shape(BuiltinArgumentKind::Integer,
+                              BuiltinContainerKind::Array, {2, 3}, 6),
+                        shape(BuiltinArgumentKind::Real,
+                              BuiltinContainerKind::Matrix, {2, 3}, 6)},
+                       "bessel_first_kind", false);
+    if (layout.lanes != 6 || layout.result_argument != 1 ||
+        layout.integer_matrix_rows != 2 || layout.integer_matrix_cols != 3) {
+      ++failures;
+      std::printf("FAIL mixed matrix/array BuiltinLayout\n");
+    }
+  }
+  {
+    const BuiltinSpec* softmax = builtin_spec("softmax", 1);
+    const BuiltinLayout layout =
+        builtin_layout(*softmax,
+                       {shape(BuiltinArgumentKind::Real,
+                              BuiltinContainerKind::Vector, {4}, 4)},
+                       "softmax", false);
+    if (layout.lanes != 4) {
+      ++failures;
+      std::printf("FAIL whole-value BuiltinLayout\n");
+    }
+  }
+}
+
+// The plan choke point must refuse parameter-dependent input outside a
+// fixed activity mask rather than let a kernel drop its partial silently.
+// Every backend builds its plan here, so this one guard covers them all.
+static void check_density_activity_guard() {
+  using namespace stanli;
+  DensitySpec spec;
+  spec.opcode = OP_LKJ_CORR_LPDF;
+  spec.arity = 2;
+  spec.integer_args = 0;
+  spec.shape = DensityShape::FirstMatrixRows;
+  spec.activity_mask = 0x1;
+  std::vector<DensityCallArgument> args(2);
+  args[0].shape.container = FunctionContainerKind::Matrix;
+  args[0].shape.dimensions = {2, 2};
+  args[0].shape.storage_size = 4;
+  args[0].data_only = false;
+  args[0].active = true;
+  args[1].shape.container = FunctionContainerKind::Scalar;
+  args[1].scalar = true;
+  args[1].data_only = false;
+  args[1].active = true;  // outside the 0x1 mask: must refuse
+  bool threw = false;
+  try {
+    density_call_plan(spec, args, false);
+  } catch (const std::invalid_argument&) {
+    threw = true;
+  }
+  if (!threw) {
+    ++failures;
+    std::printf("FAIL activity guard: out-of-mask activity was planned\n");
+  }
+  args[1].data_only = true;
+  args[1].active = false;  // within the mask: must still plan
+  try {
+    density_call_plan(spec, args, false);
+  } catch (const std::exception& error) {
+    ++failures;
+    std::printf("FAIL activity guard: in-mask plan threw: %s\n", error.what());
+  }
+}
 
 int main() {
   using namespace stanli;
@@ -245,5 +400,7 @@ int main() {
     std::printf("FAIL exact integer overload lost to a promoted one\n");
     return 1;
   }
-  std::printf("OK\n");
+  check_builtin_layouts();
+  check_density_activity_guard();
+  return finish("test_function_registry");
 }

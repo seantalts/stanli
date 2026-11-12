@@ -1,5 +1,7 @@
 // OP_MATVEC: out = X * beta with X data (column-major).
 // lp = normal_lpdf(y | X*beta, 1.0); gradient vs the var path, <= 10 ULP.
+#include "expect.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -9,27 +11,6 @@
 #include <limits>
 #include <string>
 #include <vector>
-
-static int failures = 0;
-
-static int64_t ulp_key(double d) {
-  int64_t i;
-  std::memcpy(&i, &d, sizeof(i));
-  return i < 0 ? std::numeric_limits<int64_t>::min() - i : i;
-}
-static int64_t ulp_distance(double a, double b) {
-  const int64_t k = ulp_key(a) - ulp_key(b);
-  return k < 0 ? -k : k;
-}
-static void expect_ulp(const std::string& what, double got, double want,
-                       int64_t budget) {
-  const int64_t d = ulp_distance(got, want);
-  if (d > budget) {
-    ++failures;
-    std::printf("FAIL %-16s got %.17g want %.17g (%lld ulp)\n", what.c_str(),
-                got, want, (long long)d);
-  }
-}
 
 static void run_case(const std::string& name, int R, int C,
                      const std::vector<double>& X, const std::vector<double>& y,
@@ -150,6 +131,5 @@ int main() {
     run_case("reassoc", R, C, X, y, beta, 10);
   }
 
-  if (failures == 0) std::printf("test_matvec OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_matvec");
 }
