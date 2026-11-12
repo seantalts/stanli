@@ -1389,7 +1389,7 @@ set(STANLI_TESTS
   test_executor test_recorder test_densities test_tile_calls
   test_matvec test_eigen
   test_mnc test_stan240
-  test_legacy test_eight_schools test_glm test_normal_glm test_nuts test_walnuts
+  test_eight_schools test_glm test_normal_glm test_nuts test_walnuts
   test_model_adapter test_sampler_parity
   test_mir test_mir_decode test_transforms test_eltwise test_sort test_scalar_binary
   test_lower

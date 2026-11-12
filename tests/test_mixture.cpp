@@ -508,6 +508,70 @@ static void check_sum_rows() {
   expect_true("sum_rows nan row", std::isnan(edge.out[1]));
 }
 
+// Legacy nested-tape ops: unmodified stan-math functions behind the op
+// interface. Scalar output: lp = log_sum_exp(v).
+static void check_log_sum_exp() {
+  const int N = 4;
+  double vv[N] = {0.3, -1.2, 2.0, 0.4};
+  Graph g;
+  const int v = g.add_slot(N, true);
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_LOG_SUM_EXP, {v}, lp);
+  g.result_slot = lp;
+  Executor ex(std::move(g));
+  for (int i = 0; i < N; ++i) ex.param_ptr(v)[i] = vv[i];
+  double grad[N];
+  const double val = ex.gradient(grad);
+
+  Eigen::Matrix<var, -1, 1> xv(N);
+  for (int i = 0; i < N; ++i) xv(i) = vv[i];
+  var vlp = stan::math::log_sum_exp(xv);
+  vlp.grad();
+  expect_eq("lse value", val, vlp.val());
+  // The log_sum_exp partials come off Eigen's packet exp, which rounds a
+  // last bit away from the var reference's scalar libm.
+  for (int i = 0; i < N; ++i)
+    expect_ulp_of("lse d" + std::to_string(i), grad[i], xv(i).adj(),
+                  xv(i).adj(), 1);
+  stan::math::recover_memory();
+}
+
+// Vector output, exercising output-adjoint seeding:
+// lp = normal_lpdf(y | softmax(v), 0.5).
+static void check_softmax() {
+  const int N = 4;
+  double vv[N] = {0.3, -1.2, 2.0, 0.4};
+  double yv[N] = {0.3, 0.2, 0.4, 0.1};
+  Graph g;
+  const int v = g.add_slot(N, true);
+  const int ys = g.add_slot(N, false);
+  const int half = g.add_slot(1, false);
+  const int sm = g.add_slot(N, false);
+  const int lp = g.add_slot(1, false);
+  g.add_op(OP_SOFTMAX, {v}, sm);
+  g.add_op(OP_NORMAL_LPDF, {ys, sm, half}, lp);
+  g.result_slot = lp;
+  Executor ex(std::move(g));
+  for (int i = 0; i < N; ++i) ex.param_ptr(v)[i] = vv[i];
+  for (int i = 0; i < N; ++i) ex.value_ptr(ys)[i] = yv[i];
+  ex.value_ptr(half)[0] = 0.5;
+  double grad[N];
+  const double val = ex.gradient(grad);
+
+  // Reference with the same activity: v var, softmax through the var path,
+  // then the same all-var-shape normal call the kernel makes.
+  Eigen::Matrix<var, -1, 1> xv(N);
+  for (int i = 0; i < N; ++i) xv(i) = vv[i];
+  Eigen::Matrix<var, -1, 1> vsm = stan::math::softmax(xv);
+  Eigen::Map<Eigen::VectorXd> ym(yv, N);
+  var vlp = stan::math::normal_lpdf<false>(ym, vsm, 0.5);
+  vlp.grad();
+  expect_eq("softmax value", val, vlp.val());
+  for (int i = 0; i < N; ++i)
+    expect_eq("softmax d" + std::to_string(i), grad[i], xv(i).adj());
+  stan::math::recover_memory();
+}
+
 int main() {
   const int64_t N = 4;
 
@@ -576,5 +640,7 @@ int main() {
   check_rows();
   check_sum_rows();
 
+  check_log_sum_exp();
+  check_softmax();
   return finish("test_mixture");
 }
