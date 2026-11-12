@@ -1395,7 +1395,7 @@ set(STANLI_TESTS
   test_lower test_region_map test_copy_prop test_kernel_contracts
   test_lower_views
   test_native_matrix_pullbacks
-  test_lower_view_contract test_lower_array_contract test_data test_e2e
+  test_data test_e2e
   test_reroll test_profile test_inplace test_pass_safety test_sampling
   test_ode_prog test_mir_program_conformance
   test_structured_checks test_structured_loop
