@@ -209,6 +209,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
     options.reduce_sum_threads = threads_per_chain;
     options.fast_math = fast_math;
     m->cm = stanli::compile_model(tmir_sexp, data, seed, options);
+    data = stanli::DataMap();
     m->reduce_sum_count =
         (int)std::count_if(m->cm.graph.ops.begin(), m->cm.graph.ops.end(),
                            [](const stanli::Op& op) {
@@ -220,6 +221,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
     }
     m->ex = std::make_unique<stanli::Executor>(std::move(m->cm.graph));
     m->cm.bind(*m->ex);
+    m->cm.fills = {};
     if (m->reduce_sum_count > 0) {
       m->reduce_team =
           std::make_unique<stanli::ReduceExecutionContext>(threads_per_chain);
@@ -244,6 +246,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
       } else if (!wa.columns.empty()) {
         m->wa_ex = std::make_unique<stanli::Executor>(std::move(wa.graph));
         wa.bind(*m->wa_ex);
+        wa.fills = {};
         m->wa_cols = wa.columns;
         m->wa_names = stanli::CompiledModel::csv_names(wa.columns);
         for (const auto& c : wa.columns) m->wa_n += c.len;

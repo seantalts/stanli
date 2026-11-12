@@ -704,7 +704,7 @@ int Lowering::env_slot(const std::string& name) {
   std::vector<double> vals = graph_order(*en, is_matrix(si), nested_matrix);
   validate_view(si, (int64_t)vals.size(), "data value " + name);
   const int s = add_slot((int64_t)vals.size(), false);
-  out.fills.emplace_back(s, vals);
+  out.fills.emplace_back(s, std::move(vals));
   Val v{s, false, si, owning_layout(si)};
   scope[name] = v;
   observe(v, *en);
@@ -1745,7 +1745,7 @@ std::optional<Lowering::Val> Lowering::fold_const(const mir::Expr& e) {
   std::vector<double> vals =
       graph_order(en, e.type_ == "UMatrix", nested_matrix);
   const int s = add_slot((int64_t)vals.size(), false);
-  out.fills.emplace_back(s, vals);
+  out.fills.emplace_back(s, std::move(vals));
   Val v{s, false, si, owning_layout(si)};
   observe(v, std::move(en));
   return v;
