@@ -197,11 +197,6 @@ typedef struct {
 } model_opts;
 static void* (*p_model_new_with_opts)(const char*, const char*,
                                       const model_opts*, char*, size_t);
-static void* (*p_model_new_from_stan_with_opts)(const char*, const char*,
-                                                const model_opts*, char*,
-                                                size_t);
-static char* (*p_stan_to_mir_with_opts)(const char*, const char* const*, size_t,
-                                        int, char*, size_t);
 static void* (*p_model_new_from_stan_named)(const char*, const char*,
                                             const char*, const model_opts*,
                                             char*, size_t);
@@ -285,8 +280,6 @@ static int (*p_variational)(void*, const stanli_variational_opts*, double*,
     }                                                           \
   } while (0)
 
-#define BIND_OPTIONAL(fn, var) *(void**)(&var) = dl_sym(g_lib, fn)
-
 SEXP stanli_bridge_load(SEXP path) {
   if (g_lib != NULL) return mkString("");
   g_lib = dl_open(CHAR(STRING_ELT(path, 0)));
@@ -309,21 +302,18 @@ SEXP stanli_bridge_load(SEXP path) {
   }
 
   BIND("stanli_model_new_with_opts", p_model_new_with_opts);
-  BIND("stanli_model_new_from_stan_with_opts", p_model_new_from_stan_with_opts);
-  BIND_OPTIONAL("stanli_model_new_from_stan_named",
-                p_model_new_from_stan_named);
-  BIND_OPTIONAL("stanli_stan_to_mir_named", p_stan_to_mir_named);
+  BIND("stanli_model_new_from_stan_named", p_model_new_from_stan_named);
+  BIND("stanli_stan_to_mir_named", p_stan_to_mir_named);
   BIND("stanli_reduce_sum_count", p_reduce_sum_count);
   BIND("stanli_reduce_sum_fallbacks", p_reduce_sum_fallbacks);
-  BIND("stanli_stan_to_mir_with_opts", p_stan_to_mir_with_opts);
   BIND("stanli_model_free", p_model_free);
   BIND("stanli_has_embedded_stanc", p_has_embedded_stanc);
   BIND("stanli_string_free", p_string_free);
-  BIND_OPTIONAL("stanli_capture_messages", p_capture_messages);
-  BIND_OPTIONAL("stanli_take_messages", p_take_messages);
+  BIND("stanli_capture_messages", p_capture_messages);
+  BIND("stanli_take_messages", p_take_messages);
   BIND("stanli_exact_lp", p_exact_lp);
   BIND("stanli_thread_safe", p_thread_safe);
-  BIND_OPTIONAL("stanli_build_id", p_build_id);
+  BIND("stanli_build_id", p_build_id);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
   BIND("stanli_grad", p_grad);
   BIND("stanli_hessian", p_hessian);
@@ -358,8 +348,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_pathfinder", p_pathfinder);
   BIND("stanli_variational_opts_init", p_variational_opts_init);
   BIND("stanli_variational", p_variational);
-  if (p_capture_messages != NULL && p_take_messages != NULL)
-    p_capture_messages(1);
+  p_capture_messages(1);
   return mkString("");
 }
 
@@ -400,7 +389,6 @@ static const char* file_label(SEXP file) {
  * can unwind, and the sampler callbacks drain it as they run so the text
  * keeps its order. */
 static void flush_messages(void) {
-  if (p_take_messages == NULL) return;
   char* text = p_take_messages();
   if (text == NULL) return;
   const void* vmax = vmaxget();
@@ -433,10 +421,8 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
   const char* label = file_label(file);
   if (asLogical(is_mir))
     m = p_model_new_with_opts(text, data, &opts, err, sizeof err);
-  else if (p_model_new_from_stan_named != NULL)
-    m = p_model_new_from_stan_named(text, label, data, &opts, err, sizeof err);
   else
-    m = p_model_new_from_stan_with_opts(text, data, &opts, err, sizeof err);
+    m = p_model_new_from_stan_named(text, label, data, &opts, err, sizeof err);
   flush_messages();
   if (m == NULL) error("%s", err[0] ? err : "stanli: model compilation failed");
   SEXP ext = PROTECT(R_MakeExternalPtr(m, R_NilValue, R_NilValue));
@@ -468,16 +454,9 @@ SEXP stanli_r_stan_to_mir(SEXP code, SEXP include_paths, SEXP fast_math,
     paths[i] = Rf_translateCharUTF8(STRING_ELT(include_paths, i));
   char err[8192] = {0};
   char* compiler_warnings = NULL;
-  char* mir;
-  if (p_stan_to_mir_named != NULL)
-    mir = p_stan_to_mir_named(Rf_translateCharUTF8(STRING_ELT(code, 0)),
-                              file_label(file), paths, count,
-                              asLogical(fast_math) == TRUE, &compiler_warnings,
-                              err, sizeof err);
-  else
-    mir = p_stan_to_mir_with_opts(Rf_translateCharUTF8(STRING_ELT(code, 0)),
-                                  paths, count, asLogical(fast_math) == TRUE,
-                                  err, sizeof err);
+  char* mir = p_stan_to_mir_named(
+      Rf_translateCharUTF8(STRING_ELT(code, 0)), file_label(file), paths, count,
+      asLogical(fast_math) == TRUE, &compiler_warnings, err, sizeof err);
   flush_messages();
   if (mir == NULL) {
     if (compiler_warnings != NULL) p_string_free(compiler_warnings);
@@ -504,8 +483,6 @@ SEXP stanli_r_thread_safe(void) {
 }
 SEXP stanli_r_build_id(void) {
   require_loaded();
-  if (p_build_id == NULL)
-    error("this stanli runtime does not report a build id");
   return ScalarString(mkCharCE(p_build_id(), CE_UTF8));
 }
 
