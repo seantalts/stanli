@@ -578,7 +578,7 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
       // initializes a local to NaN, and an arm that does not assign it
       // has to leave it that way.
       std::vector<std::string> pre;
-      assigned_names(*s, &pre);
+      outer_assigned_names(*s, &pre);
       for (const std::string& name : pre) {
         if (scope.count(name) || decls.count(name)) outer_names.insert(name);
         if (int_locals.count(name)) outer_int_names.insert(name);
@@ -604,7 +604,7 @@ void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
       }
       c.stmt(*s);
       std::vector<std::string> assigned;
-      assigned_names(*s, &assigned);
+      outer_assigned_names(*s, &assigned);
       for (const std::string& name : assigned) {
         const bool is_outer_int = outer_int_names.count(name) != 0;
         if (!outer_names.count(name) && !is_outer_int) continue;
