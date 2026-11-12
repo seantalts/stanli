@@ -407,7 +407,6 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/graph_print.cpp
   runtime/src/partition.cpp
   runtime/src/data.cpp
-  runtime/src/data_var_context.cpp
   runtime/src/forward_binding.cpp
   # Fast-mode observation collapse. Last, so that adding to it does not move
   # the code the default path runs.
