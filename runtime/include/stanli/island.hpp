@@ -37,7 +37,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <unordered_map>
 #include <vector>
 
 namespace stanli {
@@ -142,39 +141,6 @@ int carve_islands(Graph& g,
                   const std::vector<std::pair<int, std::vector<double>>>& fills,
                   const std::vector<int>& target_terms,
                   const std::vector<int>& extra_roots);
-
-// A straight-line run of a retained loop body compiled to one program. The
-// loop executor seeds the live-in registers from its own slot bindings, runs
-// the forward, and publishes the live-out registers as new slot versions;
-// the generated adjoint runs over the same frame in the reverse pass.
-struct SegmentItem {
-  int op = -1;
-  int alias_dst = -1, alias_src = -1;
-};
-struct SegmentBinding {
-  int slot = -1;
-  int reg = 0;
-  int len = 0;
-};
-struct Segment {
-  IslandProg program;
-  std::vector<SegmentBinding> ins, outs;
-};
-
-// Whether a body op can be an item of a segment: the carver's vocabulary,
-// including CALLs to kernels the executor would otherwise dispatch itself.
-bool segment_supports(const Graph& g, const Op& op);
-
-// Compile `items` in order. Slots in `constants` are absorbed into the pool;
-// other slots read before they are written become live-ins. `live_outs` are
-// the slots read after the run; slots that are both live-in and written are
-// published as well, since the next visit reads them through their cell.
-// False when an op is outside the vocabulary or the adjoint is refused.
-bool compile_segment(
-    const Graph& g, const std::vector<SegmentItem>& items,
-    const std::unordered_map<int, const std::vector<double>*>& constants,
-    const std::vector<int>& live_outs, const std::vector<char>& slot_active,
-    Segment* out);
 
 }  // namespace stanli
 

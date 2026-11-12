@@ -250,9 +250,6 @@ struct FrameEncoder {
           word(literal(f.value));
           break;
         }
-        case StreamInstr::Seg:
-          throw std::logic_error(
-              "segments are not eligible for frame recording");
         case StreamInstr::Tgt:
           break;
       }

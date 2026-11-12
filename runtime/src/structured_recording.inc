@@ -186,7 +186,6 @@ struct RecordingProgram {
 
 void RecordingProgram::compile_data(LoopState& s) {
   const auto& p = s.p;
-  if (!p.segments.empty()) return;
   // Constancy here is conditional on the recorder's existing guards. No
   // control flow or kernel is removed, reordered, or hoisted. This is not
   // loop invariance or proof that parameter-controlled assignments commute.

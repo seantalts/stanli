@@ -2,7 +2,6 @@
 #define STANLI_STRUCTURED_LOOP_HPP
 
 #include <stanli/graph.hpp>
-#include <stanli/island.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -54,8 +53,7 @@ struct StructuredLoop {
       While,
       Break,
       Continue,
-      Target,
-      Segment
+      Target
     } kind = Sequence;
     enum Storage { Retained, Transient, InPlace } storage = Retained;
     bool active = false;
@@ -71,7 +69,6 @@ struct StructuredLoop {
     int64_t workspace = -1;
     int64_t kernel_scratch = 0;
     int loop_index = -1;
-    int segment = -1;
     std::vector<Node> children;
     int op = -1;
     int dst = -1, src = -1;
@@ -97,9 +94,6 @@ struct StructuredLoop {
   // Existing loop plans retain their replay policy.
   bool cache_execution_path = true;
   Node root;
-  // Straight-line runs of the body compiled to register programs; a Segment
-  // node's `segment` indexes this.
-  std::vector<Segment> segments;
   int64_t initial_size = 0;
   int64_t workspace_size = 0;
   size_t node_count = 0, site_count = 0, loop_count = 0;
