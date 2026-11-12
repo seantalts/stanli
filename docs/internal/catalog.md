@@ -42,7 +42,7 @@ paths and hashes in raw records unchanged.
 | [Numerical fidelity and measurement evidence](research/numerics.md) | Short topic map; follow links only as needed. |
 | [Packaging, interfaces and installation](research/packaging.md) | Short topic map; follow links only as needed. |
 | [Native parallel reductions](research/parallelism.md) | Short topic map; follow links only as needed. |
-| [The lite build: half the library, lp__ off by a constant](../lp-constant.md) | Human-facing guide or maintained technical contract. |
+| [Compact densities: lp__ off by a constant](../lp-constant.md) | Human-facing guide or maintained technical contract. |
 | [Tutorial: three small models through every layer](../lowering-walkthrough.md) | Three small models traced through compiler and execution layers. |
 | [Native within-chain reductions](../native-reduce-sum.md) | Supported opt-in within-chain parallelism and API settings. |
 | [Native stanfit compatibility](../../notes/validation/2026-09-16-stanfit-compatibility.md) | Human-facing guide or maintained technical contract. |

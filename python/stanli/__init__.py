@@ -728,16 +728,7 @@ def _data_to_json(data) -> str:
 
 
 def exact_lp() -> bool:
-    """True if lp__ reproduces CmdStan's exactly.
-
-    Every shipped build is this way. A STANLI_LITE_LP build, which is off
-    by default and not built in CI, drops stan-math's propto
-    instantiations to halve the library, leaving every gradient bitwise
-    identical and lp__ a per-model constant higher. A pinned seed
-    still gives a different chain there: lp is added to the kinetic
-    energy, so shifting it changes the rounding, and NUTS amplifies that
-    into a different (equally valid) trajectory.
-    """
+    """Always True: every build reproduces CmdStan's lp__ exactly."""
     return bool(_lib.stanli_exact_lp())
 
 

@@ -621,7 +621,7 @@ def fast_dev(rv, gv):
 
 
 def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
-                no_lp, strict=False, fast_math=False):
+                strict=False, fast_math=False):
     """Replay one recorded point. (status, worst, worst_ulp, n, detail).
 
     A point whose entry has no `values` is one CmdStan itself refuses (it
@@ -675,27 +675,13 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                 f"point {point}: {len(rv)} vs {len(gv)}")
     if strict and not all(math.isfinite(x) for x in rv + gv):
         return ("NONFINITE", 0.0, 0, 0, f"point {point}: lp/gradient is nonfinite")
-    if no_lp:
-        # Element 0 is lp. A STANLI_LITE_LP build computes the full
-        # density where CmdStan's `~` drops constant terms, so its lp sits
-        # a per-model constant above the reference while every gradient is
-        # unchanged -- which is the part sampling depends on. Dropping the
-        # element keeps the corpus oracle usable for that build. Whether
-        # the offset is genuinely CONSTANT is a different question, and
-        # the one that can actually catch a bug; tools/verify_lite.py
-        # answers it by evaluating both builds at several points.
-        rv, gv = rv[1:], gv[1:]
     if fast_math:
-        # Without lp, a zero in its place leaves the gradient as the
-        # vector fast_dev scores.
-        worst, worst_ulp = fast_dev(*(([0.0] + v) if no_lp else v
-                                      for v in (rv, gv)))
+        worst, worst_ulp = fast_dev(rv, gv)
     else:
         worst, worst_ulp = worst_pair(rv, gv)
         if model in GRADIENT_AGAINST_LARGEST:
-            first = 0 if no_lp else 1
-            worst_ulp = max(worst_pair(rv[:first], gv[:first])[1],
-                            gradient_ulp(rv[first:], gv[first:]))
+            worst_ulp = max(worst_pair(rv[:1], gv[:1])[1],
+                            gradient_ulp(rv[1:], gv[1:]))
     n = len(rv)
     if want_wa:
         # The write_array reference: column names must match exactly, and
@@ -742,11 +728,11 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
 
 
 def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                no_wa=False, no_lp=False, target_platform=None,
+                no_wa=False, target_platform=None,
                 fast_math=False):
     """Replay one model, under whatever KNOWN_GAPS says about it."""
     result = replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                          no_wa, no_lp, target_platform, fast_math)
+                          no_wa, target_platform, fast_math)
     if model not in KNOWN_GAPS:
         return result
     _, status, rel, ulp, total, _, notes = result
@@ -761,7 +747,7 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
 
 
 def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                 no_wa=False, no_lp=False, target_platform=None,
+                 no_wa=False, target_platform=None,
                  fast_math=False):
     """Replay every point of one model.
 
@@ -823,7 +809,7 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                          f"but nothing compared it against CmdStan")
             continue
         status, rel, ulp, n, detail = check_point(
-            model, stan, dj, check_bin, point, pt, timeout, no_wa, no_lp, strict,
+            model, stan, dj, check_bin, point, pt, timeout, no_wa, strict,
             fast_math)
         total += n
         if status != "OK":
@@ -989,9 +975,6 @@ def main():
                          "native host); use 'WebAssembly wasm32' for the Node driver")
     ap.add_argument("--reference-compiler", choices=("clang", "gcc", "msvc", "unknown"),
                     help="external driver's C++ compiler; normally read from stanli_check")
-    ap.add_argument("--no-lp", action="store_true",
-                    help="compare gradients only, not lp: a STANLI_LITE_LP "
-                         "build shifts lp by a constant (docs/lp-constant.md)")
     ap.add_argument("--no-wa", action="store_true",
                     help="replay lp and gradients only (the WASM check "
                          "driver has no write_array entry point yet)")
@@ -1072,7 +1055,7 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         futs = [pool.submit(check_model, m, refs[m], pdb, check_bin, tmp,
                             args.timeout, args.max_rel, args.no_wa,
-                            args.no_lp, args.target_platform, args.fast_math)
+                            args.target_platform, args.fast_math)
                 for m in models]
         for fut in concurrent.futures.as_completed(futs):
             model, status, rel, ulp, n, detail, notes = fut.result()
@@ -1092,7 +1075,6 @@ def main():
     print(f"\n{ok}/{len(models)} models within {args.max_rel:.0e} of the "
           f"CmdStan references at all {len(POINTS)} evaluation points "
           f"({values} values compared)"
-          + (" (gradients only)" if args.no_lp else "")
           + (f"; worst {worst_overall[0]} at {worst_overall[1]:.2e} "
              f"({worst_overall[2]} ulp)" if worst_overall[0] else ""))
     if failures:

@@ -830,19 +830,6 @@ cmake --build build-asan --parallel "$asan_jobs" && \
 pointer, so reading a `vari` from a tape that was already recovered
 lands inside a live allocation and reports nothing.
 
-If the change touches a density tier or anything about propto, also
-check the lite build, the smaller build variant that reports lp only
-up to a constant ([`docs/lp-constant.md`](lp-constant.md)). CI does not cover
-it, because that would mean a second full stan-math compile:
-
-```
-cmake -B build-lite -DCMAKE_BUILD_TYPE=Release -DSTANLI_LITE_LP=ON
-cmake --build build-lite --parallel "$(tools/build_jobs.sh)" \
-  --target stanli_check
-python3 tools/verify_lite.py deps/posteriordb
-python3 tools/verify_refs.py deps/posteriordb --check build-lite/stanli_check --no-lp
-```
-
 If the change touches `runtime/kernels/density_fused.cpp`, build with the
 Stan Math kernels kept, which is the default of a plain `cmake -B build`
 (`-DSTANLI_STAN_DENSITY_ORACLE=ON`), and run the three differential tests

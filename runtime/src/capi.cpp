@@ -443,7 +443,7 @@ int stanli_has_embedded_stanc(void) {
 #endif
 }
 
-int stanli_exact_lp(void) { return stanli::exact_lp_build() ? 1 : 0; }
+int stanli_exact_lp(void) { return 1; }
 
 void stanli_model_free(stanli_model* m) { delete m; }
 
