@@ -663,7 +663,7 @@ int main(int argc, char** argv) {
     write.lhs = "x";
     write.lhs_idx = {index};
     write.rhs = five;
-    interp.exec(write);
+    (void)interp.exec(write);
     check(interp.eval(x).r == std::vector<double>{1.0, 5.0},
           "an indexed write to a parent entry is visible");
     check(parent.at("x").r == std::vector<double>{1.0, 2.0},
