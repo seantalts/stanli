@@ -545,6 +545,32 @@ inline std::optional<std::pair<size_t, size_t>> user_defined_statement_name(
   return std::make_pair(prefix.size(), end - prefix.size());
 }
 
+// Every expression a statement holds itself: its own slots, the declared
+// extents and the arguments of its transforms. Child statements are the
+// caller's to walk.
+template <class StmtRef, class F>
+void for_each_expr_of(StmtRef& s, F& visit) {
+  for (auto* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
+    visit(*e);
+  for (auto* expressions :
+       {&s.read_dims, &s.lhs_idx, &s.fn_args, &s.decl_type.dims})
+    for (auto& e : *expressions) visit(e);
+  for (auto* transform :
+       {&s.read_transform, &s.check_transform, &s.write_transform})
+    if (*transform)
+      for (auto& e : (*transform)->args) visit(e);
+}
+
+template <class F>
+void for_each_expr(const Stmt& s, F visit) {
+  for_each_expr_of(s, visit);
+}
+
+template <class F>
+void for_each_expr(Stmt& s, F visit) {
+  for_each_expr_of(s, visit);
+}
+
 // Every identifier a statement or expression spells: variables, declared
 // names, loop variables and call names. Over-approximating is safe for
 // callers that restrict lowering state to these names.
@@ -557,18 +583,7 @@ inline void collect_names(const Stmt& s, std::set<std::string>* names) {
   for (const std::string* name :
        {&s.decl_id, &s.lhs, &s.loopvar, &s.fn_name, &s.check_var_name})
     if (!name->empty()) names->insert(*name);
-  for (const Expr* e :
-       {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
-    collect_names(*e, names);
-  for (const auto* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
-    for (const Expr& e : *expressions) collect_names(e, names);
-  for (const Expr& dim : s.decl_type.dims) collect_names(dim, names);
-  for (const Transform* transform :
-       {s.read_transform ? &*s.read_transform : nullptr,
-        s.check_transform ? &*s.check_transform : nullptr,
-        s.write_transform ? &*s.write_transform : nullptr})
-    if (transform)
-      for (const Expr& e : transform->args) collect_names(e, names);
+  for_each_expr(s, [&](const Expr& e) { collect_names(e, names); });
   for (const Stmt& child : s.body) collect_names(child, names);
 }
 

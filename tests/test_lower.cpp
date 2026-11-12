@@ -4591,6 +4591,49 @@ int main() {
     stan::math::recover_memory();
   }
 
+  // The same resolution inside a parameter bound, which transform_inits
+  // carries a second time as the transform to invert.
+  {
+    DataMap d = DataMap::from_json(R"({"N": 2, "y": [0.25, 3.0]})");
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/overload_bound.tmir.sexp"), d);
+    check(lm.n_unconstrained == 2, "overload bound 2 unconstrained");
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    lex.params_data()[0] = 0.3;
+    lex.params_data()[1] = -0.4;
+    double grad[2] = {0, 0};
+    const double lp = lex.gradient(grad);
+
+    using stan::math::var;
+    var u0 = 0.3, u1 = -0.4;
+    var acc = 0;
+    var mu = stan::math::lb_constrain(u0, 0.25 - 1, acc);
+    var nu = stan::math::lb_constrain(u1, 0.5 - 1, acc);
+    acc += stan::math::normal_lpdf<false>(mu, 0.0, 1.0) +
+           stan::math::normal_lpdf<false>(nu, 0.0, 1.0);
+    acc.grad();
+    expect_ulp("overload bound lp", lp, acc.val());
+    expect_ulp("overload bound gmu", grad[0], u0.adj());
+    expect_ulp("overload bound gnu", grad[1], u1.adj());
+    stan::math::recover_memory();
+
+    check(lm.transform_inits && lm.transform_inits->interp,
+          "overload bound has transform_inits");
+    if (lm.transform_inits && lm.transform_inits->interp) {
+      DataMap::Entry mu_init, nu_init;
+      mu_init.r = {1.5};
+      nu_init.r = {2.0};
+      const std::vector<double> free =
+          lm.transform_inits->interp->eval({{"mu", mu_init}, {"nu", nu_init}});
+      check(free.size() == 2, "overload bound unconstrains two values");
+      if (free.size() == 2) {
+        expect_ulp("overload bound free mu", free[0], std::log(1.5 - -0.75));
+        expect_ulp("overload bound free nu", free[1], std::log(2.0 - -0.5));
+      }
+    }
+  }
+
   // Data-dependent gather width (issue #133): the same program gathers a
   // slice whose length transformed data computes from the data. Nev > 0 is
   // an ordinary gather; Nev == 0 must compile and contribute exactly zero

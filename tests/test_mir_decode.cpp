@@ -692,21 +692,10 @@ void strip_overload_suffixes(mir::Expr& value) {
   for (mir::Expr& arg : value.args) strip_overload_suffixes(arg);
 }
 
-void strip_overload_suffixes(mir::Transform& value) {
-  for (mir::Expr& arg : value.args) strip_overload_suffixes(arg);
-}
-
 void strip_overload_suffixes(mir::Stmt& value) {
-  for (mir::Expr* expression : {&value.init, &value.rhs, &value.target,
-                                &value.lower, &value.upper, &value.cond})
-    strip_overload_suffixes(*expression);
-  for (std::vector<mir::Expr>* expressions :
-       {&value.read_dims, &value.lhs_idx, &value.fn_args})
-    for (mir::Expr& expression : *expressions)
-      strip_overload_suffixes(expression);
-  for (mir::Expr& dim : value.decl_type.dims) strip_overload_suffixes(dim);
-  if (value.read_transform) strip_overload_suffixes(*value.read_transform);
-  if (value.check_transform) strip_overload_suffixes(*value.check_transform);
+  mir::for_each_expr(value, [](mir::Expr& expression) {
+    strip_overload_suffixes(expression);
+  });
   for (mir::Stmt& child : value.body) strip_overload_suffixes(child);
 }
 

@@ -850,10 +850,10 @@ void validate_statement_shape(const Stmt& statement) {
     for (const Expr& expression : *expressions)
       validate_expression_shape(expression);
   for (const Expr& index : statement.lhs_idx) validate_index_shape(index);
-  if (statement.read_transform)
-    validate_transform_shape(*statement.read_transform);
-  if (statement.check_transform)
-    validate_transform_shape(*statement.check_transform);
+  for (const std::optional<Transform>* transform :
+       {&statement.read_transform, &statement.check_transform,
+        &statement.write_transform})
+    if (*transform) validate_transform_shape(**transform);
 
   switch (statement.kind) {
     case Stmt::For:
@@ -1050,19 +1050,9 @@ void validate_expression(const Expr& e, const Bindings& bindings,
 void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
                        const Functions& functions,
                        bool strict_variable_metadata) {
-  for (const Expr* e :
-       {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
-    validate_expression(*e, bindings, functions, strict_variable_metadata);
-  for (const auto* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
-    for (const Expr& e : *expressions)
-      validate_expression(e, bindings, functions, strict_variable_metadata);
-  for (const Transform* transform :
-       {s.read_transform ? &*s.read_transform : nullptr,
-        s.check_transform ? &*s.check_transform : nullptr,
-        s.write_transform ? &*s.write_transform : nullptr})
-    if (transform)
-      for (const Expr& e : transform->args)
-        validate_expression(e, bindings, functions, strict_variable_metadata);
+  for_each_expr(s, [&](const Expr& e) {
+    validate_expression(e, bindings, functions, strict_variable_metadata);
+  });
   if (s.kind == Stmt::NRFunApp && s.fn_name == "FnCheck") {
     if (!s.check_transform)
       throw std::runtime_error("mir: FnCheck has no transform");
@@ -1263,15 +1253,7 @@ void resolve_calls(Stmt& s, const Overloads& overloads) {
       s.fn_name.replace(name->first, name->second,
                         resolve_overload(*it, s.fn_args));
   }
-  for (Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
-    resolve_calls(*e, overloads);
-  for (auto* exprs : {&s.read_dims, &s.lhs_idx, &s.fn_args})
-    for (Expr& e : *exprs) resolve_calls(e, overloads);
-  for (Expr& e : s.decl_type.dims) resolve_calls(e, overloads);
-  for (Transform* t : {s.read_transform ? &*s.read_transform : nullptr,
-                       s.check_transform ? &*s.check_transform : nullptr})
-    if (t)
-      for (Expr& e : t->args) resolve_calls(e, overloads);
+  for_each_expr(s, [&](Expr& e) { resolve_calls(e, overloads); });
   for (Stmt& k : s.body) resolve_calls(k, overloads);
 }
 
@@ -1289,22 +1271,11 @@ void unmangle(SizedType& type) {
   for (Expr& dim : type.dims) unmangle(dim);
 }
 
-void unmangle(Transform& transform) {
-  for (Expr& e : transform.args) unmangle(e);
-}
-
 void unmangle(Stmt& s) {
   for (std::string* name :
        {&s.decl_id, &s.lhs, &s.loopvar, &s.fn_name, &s.check_var_name})
     unmangle(*name);
-  for (Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
-    unmangle(*e);
-  for (std::vector<Expr>* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
-    for (Expr& e : *expressions) unmangle(e);
-  unmangle(s.decl_type);
-  for (std::optional<Transform>* transform :
-       {&s.read_transform, &s.check_transform, &s.write_transform})
-    if (*transform) unmangle(**transform);
+  for_each_expr(s, [](Expr& e) { unmangle(e); });
   for (Stmt& child : s.body) unmangle(child);
 }
 
@@ -1406,11 +1377,7 @@ void strip_eval(Expr& e) {
 }
 
 void strip_eval(Stmt& s) {
-  for (Expr* e : {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})
-    strip_eval(*e);
-  for (std::vector<Expr>* expressions : {&s.read_dims, &s.lhs_idx, &s.fn_args})
-    for (Expr& e : *expressions) strip_eval(e);
-  for (Expr& dim : s.decl_type.dims) strip_eval(dim);
+  for_each_expr(s, [](Expr& e) { strip_eval(e); });
   for (Stmt& child : s.body) strip_eval(child);
 }
 
