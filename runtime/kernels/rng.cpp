@@ -1,8 +1,8 @@
 // Scalar generated-quantities draws on the compiled write_array graph.
 //
 // OP_RNG is deliberately one effectful opcode. Its variant names the family;
-// the ScalarRng range takes scalar-double arguments (one int-typed, cast in
-// scalar_rng_draw, for the two families whose first argument is a
+// the ScalarRng range takes scalar-double arguments (one int-typed, cast by
+// container_rng_draw, for the two families whose first argument is a
 // population count); categorical, categorical-logit and Poisson-binomial
 // take one vector slot and return one integer.
 // Multi-normal takes a mean plus a square covariance or Cholesky factor and
