@@ -25,6 +25,8 @@ struct PartitionStats {
   int64_t list_steps = 0;         // per-slot use/writer entries read, probes
                                   //   included: the term that once made
                                   //   re-roll quadratic on ldaK5
+  int64_t term_steps = 0;         // target-term entries read while swapping
+                                  //   a bucket's terms for its replacement
 };
 
 // In place, after re-roll and its in-place re-run, before the island carver.

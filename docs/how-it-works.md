@@ -397,6 +397,15 @@ least 32 trips whose body, including any user function it calls, contains a
 stays unrolled, because a vector kernel over the same data beats the loop's
 per-call bookkeeping by an order of magnitude.
 
+`write_array` retains one more kind of loop: at least 32 trips, control that
+depends only on data, and an iteration that reads what an earlier iteration
+wrote, reached when the `write_array` graph already holds 65,536 operations.
+The vector passes cannot fold such a serial chain, and in a graph that large
+each unrolled operation costs about three times more per draw than in a
+small one. covid19imperial's generated quantities go from 587,557 operations
+to 45,581, with 5.5x faster preparation, 3.6x less peak memory and 2.6x
+faster draws; the first draw records the loops and takes about 50 ms.
+
 A retained loop keeps its own tape, decided at compile time per kernel call
 in the body. A call whose result feeds no reverse pass writes into one fixed
 cell. A call that does feed one appends its operands and scratch to a growing

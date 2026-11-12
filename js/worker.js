@@ -200,10 +200,8 @@ onmessage = async (e) => {
     M._free(mirPtr);
     M._free(dataPtr);
     if (!model) throw new Error(M.UTF8ToString(errPtr));
-    if (M._stanli_warnings) {
-      const note = M.UTF8ToString(M._stanli_warnings(model));
-      if (note) console.warn(note);
-    }
+    const note = M.UTF8ToString(M._stanli_warnings(model));
+    if (note) console.warn(note);
     const tCompile = performance.now();
 
     const n = Number(M._stanli_n_unconstrained(model));
@@ -326,11 +324,6 @@ onmessage = async (e) => {
         sampler: pathfinder ? "pathfinder" : walnuts ? "walnuts" : "nuts",
         maxDepth: pathfinder ? null : 10,
         samplerStats: samplerStats ? samplerStats.buffer : null,
-        // True unless the runtime was built with STANLI_LITE_LP, which
-        // drops stan-math's propto instantiations and shifts lp__ by a
-        // per-model constant. The shipped browser build does not, so this
-        // is true; it stays in the payload so a caller that compares lp__
-        // across engines can check rather than assume.
         exactLp: M._stanli_exact_lp() !== 0,
         columns: cols.buffer,
         ms: {

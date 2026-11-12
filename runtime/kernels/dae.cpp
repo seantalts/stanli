@@ -36,27 +36,12 @@ struct DaeResidual {
       return out;
     }
 
-    std::vector<std::vector<T>> reals{
-        {T(t)},
-        std::vector<T>(y.data(), y.data() + y.size()),
-        std::vector<T>(yp.data(), yp.data() + yp.size())};
-    std::vector<std::vector<int>> ints;
-    size_t th_at = 0, xr_at = 0;
-    for (const RhsArg& arg : spec->args) {
-      if (arg.is_int) {
-        ints.push_back(callback_integer_values(arg, theta.data(), &th_at));
-      } else if (arg.is_param) {
-        reals.emplace_back(theta.begin() + th_at,
-                           theta.begin() + th_at + arg.len);
-        th_at += (size_t)arg.len;
-      } else {
-        reals.emplace_back(x_r.begin() + xr_at, x_r.begin() + xr_at + arg.len);
-        xr_at += (size_t)arg.len;
-      }
-    }
-    MirInterp<T> interpreter(*spec->funs(), "DAE residual");
-    const std::vector<T> residual = interpret_retained_callback(
-        interpreter, *spec->residual(), reals, ints, spec->args);
+    const std::vector<T> residual = interpret_packed_callback<T>(
+        *spec->funs(), "DAE residual", *spec->residual(),
+        {{T(t)},
+         std::vector<T>(y.data(), y.data() + y.size()),
+         std::vector<T>(yp.data(), yp.data() + yp.size())},
+        spec->args, theta.data(), x_r.data());
     for (size_t i = 0; i < residual.size(); ++i)
       out((Eigen::Index)i) = residual[i];
     return out;
@@ -147,7 +132,7 @@ void dae_fwd_active(KernelCtx& ctx, const DaeSpec& spec) {
 
 void dae_fwd(KernelCtx& ctx) {
   const DaeSpec& spec = *static_cast<const DaeSpec*>(ctx.udata);
-  const int64_t S = ctx.in[0].len, P = ctx.in[2].len;
+  const int64_t S = ctx.in[0].len;
   if (ctx.n_in == 4 &&
       (ctx.in[3].len != 3 || (!values_only() && ctx.variant != 0x8u)))
     throw std::invalid_argument(
@@ -156,12 +141,7 @@ void dae_fwd(KernelCtx& ctx) {
     throw std::invalid_argument(
         "dae: initial state and derivative differ in size");
   if (values_only()) {
-    const auto solution = solve<double, double, double>(
-        spec, ctx.in[0].data, ctx.in[1].data, S, ctx.in[2].data, P,
-        ctx.n_in == 4 ? ctx.in[3].data : nullptr);
-    for (size_t n = 0; n < solution.size(); ++n)
-      for (int64_t i = 0; i < S; ++i)
-        ctx.out.data[(int64_t)n * S + i] = solution[n][i];
+    dae_fwd_data(ctx, spec);
     return;
   }
   const uint8_t mask = (ctx.variant & 0x8u) != 0 ? (ctx.variant & 0x7u) : 0x7u;

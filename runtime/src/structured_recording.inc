@@ -1,8 +1,3 @@
-constexpr size_t kMemoMaxEvents = size_t{1} << 16;
-constexpr size_t kMemoMaxPool = size_t{1} << 20;
-constexpr size_t kMemoMaxMemos = 256;
-constexpr size_t kMemoMaxCandidatePool = size_t{1} << 22;
-
 // A recorded execution of a data-controlled loop. Steps are the instructions
 // that must run again on a hit; the remaining events restore the data state
 // the skipped instructions would have left behind.
@@ -191,7 +186,6 @@ struct RecordingProgram {
 
 void RecordingProgram::compile_data(LoopState& s) {
   const auto& p = s.p;
-  if (!p.segments.empty()) return;
   // Constancy here is conditional on the recorder's existing guards. No
   // control flow or kernel is removed, reordered, or hoisted. This is not
   // loop invariance or proof that parameter-controlled assignments commute.

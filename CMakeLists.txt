@@ -151,25 +151,6 @@ if(NOT EMSCRIPTEN AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     APPEND PROPERTY COMPILE_OPTIONS -fmath-errno)
 endif()
 
-# Half the library is the propto family: stan-math drops a term based on
-# the argument TYPES, so an exact `~` needs the density instantiated once
-# per activity mask on top of the full form. Dropping it leaves a build
-# whose gradients are bit-identical, with an lp__ that sits a per-model
-# constant above CmdStan's. A given seed still draws a different chain,
-# because lp enters the Hamiltonian additively and a shifted lp rounds
-# differently: the same sampler statistically, not the same bytes.
-#
-# Off everywhere, browser included. The browser build used to default it
-# on to save 7 MB of wasm, which meant the demo reported an lp__ nobody
-# could compare against CmdStan. Every build now reports the same lp__.
-# See density_tier in optable.hpp and docs/lp-constant.md.
-option(STANLI_LITE_LP
-  "Drop the propto instantiation family: half the size, lp__ off by a constant"
-  OFF)
-if(STANLI_LITE_LP)
-  target_compile_definitions(stanmath INTERFACE STANLI_LITE_LP=1)
-endif()
-
 # normal, cauchy, student_t, lognormal, beta, gamma and ordered_logistic
 # (shared cutpoints) have fused kernels (runtime/kernels/density_fused.cpp).
 # With this option ON the Stan Math instantiations they replace stay compiled,
@@ -312,9 +293,6 @@ if(NOT STANLI_GIT_SHA)
 endif()
 set(STANLI_BUILD_ID
   "abi1-${STANLI_GIT_SHA}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
-if(STANLI_LITE_LP)
-  string(APPEND STANLI_BUILD_ID "-litelp")
-endif()
 if(STANLI_THREADS)
   string(APPEND STANLI_BUILD_ID "-threads")
 endif()
@@ -407,7 +385,6 @@ set(STANLI_RUNTIME_SOURCES
   runtime/src/graph_print.cpp
   runtime/src/partition.cpp
   runtime/src/data.cpp
-  runtime/src/data_var_context.cpp
   runtime/src/forward_binding.cpp
   # Fast-mode observation collapse. Last, so that adding to it does not move
   # the code the default path runs.
@@ -514,7 +491,7 @@ add_library(stanli_shared SHARED
   $<TARGET_OBJECTS:stanli_runtime_objects>
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_include_directories(stanli_shared PUBLIC runtime/include)
-# ${CMAKE_DL_LIBS}: bs_model_construct calls dladdr to find its own path.
+# ${CMAKE_DL_LIBS}: the embedded OCaml runtime uses dlopen.
 target_link_libraries(stanli_shared
                       PUBLIC stanmath sundials Threads::Threads ${CMAKE_DL_LIBS})
 set_target_properties(stanli_shared PROPERTIES OUTPUT_NAME stanli)
@@ -648,10 +625,9 @@ if(STANLI_SANITIZE)
   endif()
 endif()
 target_include_directories(stanli PUBLIC runtime/include)
-# The BridgeStan facade is native-only: it finds its own sidecar manifest
-# with dladdr, and a browser has neither dlopen nor a second process to
-# load the pair. Nothing under wasm references a bs_ symbol, so this only
-# saves compiling it.
+# The BridgeStan facade is native-only: it is the BridgeStan C ABI that
+# native hosts load, and nothing under wasm references a bs_ symbol, so this
+# only saves compiling it.
 if(NOT EMSCRIPTEN)
   # PUBLIC, so anything linking the runtime sees the same decoration the
   # definitions were compiled with. Without it the reference header's
@@ -662,7 +638,7 @@ if(NOT EMSCRIPTEN)
 endif()
 target_link_libraries(stanli PUBLIC stanmath sundials)
 if(NOT EMSCRIPTEN)
-  # ${CMAKE_DL_LIBS}: bs_model_construct calls dladdr. Not under
+  # ${CMAKE_DL_LIBS}: the embedded OCaml runtime uses dlopen. Not under
   # Emscripten, whose libc already carries it.
   target_link_libraries(stanli PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 endif()
@@ -1040,9 +1016,6 @@ add_executable(bench_mir_decode tools/bench_mir_decode.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(bench_mir_decode PRIVATE stanli)
 add_dependencies(bench_mir_decode stanli_mir_fixtures)
-add_executable(op_census tools/op_census.cpp
-  $<TARGET_OBJECTS:stanli_tbb_stub>)
-target_link_libraries(op_census PRIVATE stanli)
 add_test(NAME test_prep_only
          COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
                  tests/fixtures/ar1.json --prep
@@ -1084,22 +1057,9 @@ target_link_libraries(bench_opcost PRIVATE stanli)
 add_executable(bench_executor_clone EXCLUDE_FROM_ALL
   tools/bench_executor_clone.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_executor_clone PRIVATE stanli)
-# Within-chain feasibility probes and matched native integration benchmarks.
-add_executable(bench_reduce_sum EXCLUDE_FROM_ALL
-  tools/bench_reduce_sum.cpp tests/tbb_stub.cpp)
-target_link_libraries(bench_reduce_sum PRIVATE stanli)
-add_dependencies(bench_reduce_sum stanli_mir_fixtures)
 add_test(NAME test_bench_opcost_smoke COMMAND bench_opcost --smoke)
 set_tests_properties(test_bench_opcost_smoke PROPERTIES
   PASS_REGULAR_EXPRESSION "sink=")
-# Developer-only bridge for tools/matrix_pullback_hp_check.py: dumps the
-# pre-native nested-tape adjoint and the native kernel's adjoint for
-# matrix_exp and the solve kernels so they can both be checked against an
-# arbitrary-precision reference.
-add_executable(hp_adjoint_dump EXCLUDE_FROM_ALL
-  tools/hp_adjoint_dump.cpp tests/tbb_stub.cpp)
-target_link_libraries(hp_adjoint_dump PRIVATE stanli)
-add_executable(bench_dispatch tools/bench_dispatch.cpp)
 add_executable(dump_ops tools/dump_ops.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(dump_ops PRIVATE stanli)
@@ -1509,12 +1469,14 @@ if(Python3_Interpreter_FOUND)
                    $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(test_prep_scaling PROPERTIES RUN_SERIAL TRUE)
+  add_test(NAME test_prep_loop_body
+           COMMAND ${Python3_EXECUTABLE} tests/test_prep_loop_body.py
+                   $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(test_prep_loop_body PROPERTIES RUN_SERIAL TRUE)
   add_test(NAME test_missing_data
            COMMAND ${Python3_EXECUTABLE} tests/test_missing_data.py
                    $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_corpus_diagnostics
-           COMMAND ${Python3_EXECUTABLE} tests/test_corpus_diagnostics.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_reports
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_reports.py

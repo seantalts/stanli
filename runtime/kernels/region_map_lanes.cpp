@@ -75,81 +75,6 @@ bool lane_opcode(Program::Code c) {
   }
 }
 
-std::string opcode_name(Program::Code c) {
-  static const char* const names[] = {
-      "CONST",
-      "FILL",
-      "CONSTR",
-      "MOV",
-      "MOVR",
-      "ADD",
-      "SUB",
-      "MUL",
-      "DIV",
-      "IMOD",
-      "IDIV",
-      "IADD",
-      "ISUB",
-      "IMUL",
-      "INEG",
-      "IABS",
-      "POW",
-      "FMAX",
-      "FMIN",
-      "NEG",
-      "EXP",
-      "LOG",
-      "SQRT",
-      "SQUARE",
-      "INV",
-      "FABS",
-      "INV_LOGIT",
-      "LOG1M",
-      "LOG1P_EXP",
-      "TANH",
-      "GT",
-      "GE",
-      "LT",
-      "LE",
-      "EQ",
-      "NE",
-      "DYN_SET",
-      "DYN_INDEX",
-      "EXTREMA_RANGE",
-      "JZ",
-      "JMP",
-      "LOG_RANGE",
-      "EXP_RANGE",
-      "DOT",
-      "DYN_LSE_RANGE",
-      "LSE_RANGE",
-      "SOFTMAX",
-      "LSE2",
-      "LOG_DIFF_EXP",
-      "LMULTIPLY",
-      "LOG_MIX",
-      "FMA",
-      "DIAG_PRE_MULTIPLY",
-      "DIAG_POST_MULTIPLY",
-      "MDIVIDE_LEFT",
-      "MDIVIDE_RIGHT_SPD",
-      "DENSITY",
-      "CALL",
-      "TRANSFORM",
-      "PRINT",
-      "REJECT",
-      "DENSITY_VEC",
-      "RANGE",
-      "ERFC",
-      "LOG1P",
-      "LOG1M_EXP",
-      "INV_SQUARE",
-  };
-  const size_t i = static_cast<size_t>(c);
-  return i < sizeof(names) / sizeof(names[0]) ? names[i]
-                                              : std::to_string((int)c);
-}
-
 struct Span {
   int base = 0, len = 0;
 };
@@ -325,11 +250,12 @@ class Analysis {
   void check_opcodes() {
     std::set<std::string> unsupported;
     for (const auto& I : p_.code)
-      if (!lane_opcode(I.code)) unsupported.insert(opcode_name(I.code));
+      if (!lane_opcode(I.code))
+        unsupported.insert(program_code_spec(I.code).name);
     for (const auto& A : p_.adj.code)
       if (!lane_opcode(A.code) || A.code == Program::JZ ||
           A.code == Program::JMP)
-        unsupported.insert(opcode_name(A.code));
+        unsupported.insert(program_code_spec(A.code).name);
     if (unsupported.empty()) return;
     std::string why = "opcodes not lane-batched:";
     for (const auto& name : unsupported) why += " " + name;

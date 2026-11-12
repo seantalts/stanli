@@ -163,7 +163,7 @@ Outcome interp_outcome(const LeafCase& c, const std::vector<double>& x) {
                                          : std::vector<int64_t>{c.rows};
   m.env()["x"] = std::move(e);
   const Stmt s = structured_check(c.kind, c.leaf);
-  return outcome([&] { m.exec(s); });
+  return outcome([&] { (void)m.exec(s); });
 }
 
 void test_leaf_oracles() {
@@ -330,7 +330,7 @@ void test_nested_layout_and_malformed() {
     e.r = std::move(x);
     e.dims = std::move(shape);
     m.env()["x"] = std::move(e);
-    return outcome([&] { m.exec(nested); });
+    return outcome([&] { (void)m.exec(nested); });
   };
   check(run(encoded(-1), dims) == Outcome::Accepted,
         "nested first-index-fast simplex leaves are gathered in Stan order");
@@ -342,7 +342,7 @@ void test_nested_layout_and_malformed() {
   m.env()["x"] = std::move(bad);
   bool named_second = false;
   try {
-    m.exec(nested);
+    (void)m.exec(nested);
   } catch (const std::domain_error& e) {
     named_second = std::string(e.what()).find("x[1][2]") != std::string::npos;
   }
@@ -394,7 +394,7 @@ void test_nested_layout_and_malformed() {
   auto malformed = interp();
   malformed.env()["x"].r = encoded(-1);
   malformed.env()["x"].dims = dims;
-  check(outcome([&] { malformed.exec(wrong_arity); }) == Outcome::Other,
+  check(outcome([&] { (void)malformed.exec(wrong_arity); }) == Outcome::Other,
         "structured check rejects malformed arity");
 
   Stmt wrong_leaf =
@@ -402,7 +402,7 @@ void test_nested_layout_and_malformed() {
   auto wrong_type = interp();
   wrong_type.env()["x"].r = {0.2, 0.3, 0.5};
   wrong_type.env()["x"].dims = {3};
-  check(outcome([&] { wrong_type.exec(wrong_leaf); }) == Outcome::Other,
+  check(outcome([&] { (void)wrong_type.exec(wrong_leaf); }) == Outcome::Other,
         "simplex check rejects row-vector MIR");
 
   auto wrong_width = interp();
@@ -410,7 +410,7 @@ void test_nested_layout_and_malformed() {
   wrong_width.env()["x"].dims = {3};
   const Stmt simplex =
       structured_check(Transform::Simplex, UnsizedLeaf::Vector);
-  check(outcome([&] { wrong_width.exec(simplex); }) == Outcome::Other,
+  check(outcome([&] { (void)wrong_width.exec(simplex); }) == Outcome::Other,
         "structured check rejects inconsistent stored width");
 
   LeafCase rectangular_corr{"rectangular_corr",
@@ -448,7 +448,7 @@ void test_declaration_geometry_is_evaluated_once() {
   decl.decl_id = "x";
   decl.decl_type.base = "SVector";
   decl.decl_type.dims = {var("K", UnsizedLeaf::Int)};
-  m.exec(decl);
+  (void)m.exec(decl);
   m.env()["x"].r = {0.2, 0.3, 0.5};
   m.env()["x"].dims = {3};
 
@@ -456,7 +456,7 @@ void test_declaration_geometry_is_evaluated_once() {
   m.env()["K"].r = {4.0};
   const Stmt simplex =
       structured_check(Transform::Simplex, UnsizedLeaf::Vector);
-  check(outcome([&] { m.exec(simplex); }) == Outcome::Accepted,
+  check(outcome([&] { (void)m.exec(simplex); }) == Outcome::Accepted,
         "structured check reuses declaration-time dimensions");
 }
 

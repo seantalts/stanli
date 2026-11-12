@@ -78,9 +78,10 @@ TransformArg scalar_bound(const DataMap::Entry& e, const std::string& name) {
 
 }  // namespace
 
-InitInterp::InitInterp(std::shared_ptr<const mir::Program> prog,
-                       std::map<std::string, DataMap::Entry> base_env,
-                       std::vector<InitParam> params)
+InitInterp::InitInterp(
+    std::shared_ptr<const mir::Program> prog,
+    std::shared_ptr<const std::map<std::string, DataMap::Entry>> base_env,
+    std::vector<InitParam> params)
     : prog_(std::move(prog)),
       base_env_(std::move(base_env)),
       params_(std::move(params)) {
@@ -153,7 +154,7 @@ std::vector<double> InitInterp::eval(
       refuse("the init section writes unknown parameter " + name);
     const InitParam& p = *found->second;
 
-    const DataMap::Entry* value = cur->find(name);
+    const DataMap::Entry* value = cur->lookup(name);
     if (value == nullptr) refuse("no constrained value was built for " + name);
     if ((int64_t)value->r.size() != p.constrained_len)
       refuse(name + " built " + std::to_string(value->r.size()) +
@@ -212,7 +213,7 @@ std::vector<double> InitInterp::eval(
 
   MirInterp<double> in(funs_, "transform_inits", std::move(h));
   cur = &in;
-  in.env() = base_env_;
+  in.set_parent_env(base_env_.get());
   in.run(prog_->transform_inits);
 
   if ((int64_t)free_values.size() != total_free)

@@ -35,28 +35,9 @@ struct MirIntegrand {
       const mir::FunDef* callback = spec->callback();
       if (!callback)
         throw std::runtime_error("quadrature: missing integrand callback");
-      std::vector<std::vector<T>> reals{{T(x)}, {T(xc)}};
-      std::vector<std::vector<int>> ints;
-      size_t theta_at = 0, xr_at = 0;
-      for (const RhsArg& arg : spec->args) {
-        if (arg.is_int) {
-          ints.push_back(callback_integer_values(arg, theta.data(), &theta_at));
-          continue;
-        }
-        std::vector<T> values;
-        values.reserve(static_cast<size_t>(arg.len));
-        if (arg.is_param) {
-          for (int i = 0; i < arg.len; ++i)
-            values.push_back(theta(static_cast<Eigen::Index>(theta_at++)));
-        } else {
-          for (int i = 0; i < arg.len; ++i)
-            values.push_back(T(spec->x_r[xr_at++]));
-        }
-        reals.push_back(std::move(values));
-      }
-      MirInterp<T> interpreter(*spec->funs(), "quadrature integrand");
-      result = interpret_retained_callback(interpreter, *callback, reals, ints,
-                                           spec->args);
+      result = interpret_packed_callback<T>(
+          *spec->funs(), "quadrature integrand", *callback, {{T(x)}, {T(xc)}},
+          spec->args, theta.data(), spec->x_r.data());
     }
     if (result.size() != 1)
       throw std::runtime_error("quadrature: integrand must return one real");

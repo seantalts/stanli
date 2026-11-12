@@ -11,11 +11,11 @@
 
 namespace stanli {
 
-// One list, two uses: the enum and the name table are generated from it,
-// so a new op cannot be added to one and forgotten in the other.
+// The enum and the name table are generated from this list. The scalar
+// binary ops also appear in the STANLI_SCALAR_BINARY*_LIST lists below, which
+// give their evaluators.
 #define STANLI_OPCODE_LIST(X)         \
   X(OP_ADD_N)                         \
-  X(OP_BCAST_FMA)                     \
   X(OP_MATVEC)                        \
   X(OP_POISSON_LOG_LPMF)              \
   X(OP_BERNOULLI_LOGIT_LPMF)          \
@@ -264,7 +264,7 @@ namespace stanli {
 // exact propto lp and pays the collapse only on an explicit
 // `target += foo_lpdf(...)`; 1 is fast but constant-shifted lp; 0 is two
 // instantiations, about 40 KB, and is how the long tail gets to exist at
-// all. STANLI_LITE_LP clears bit 1 across the board -- see density_tier.
+// all.
 #define STANLI_DENSITY_FULL_MASKS 1
 #define STANLI_DENSITY_PROPTO 2
 // The sub-lists are the shard boundaries. Each one is a translation unit
@@ -767,32 +767,6 @@ inline void div_partials(double u, double b, double out, double* da,
 // their declared integer type and has no reverse pass.
 #define STANLI_SCALAR_BINARY_INTEGER_LIST(X) X(OP_CHOOSE, choose, choose)
 
-// The tier a density is actually built at. STANLI_LITE_LP drops the
-// propto family from every one of them: about half the library, at the
-// cost of an lp__ that differs from CmdStan's by a per-model constant on
-// every `~` statement. Gradients are untouched to the bit; the chain a
-// seed produces is not, because a shifted lp rounds differently inside
-// the Hamiltonian (docs/lp-constant.md)
-// -- which is why the browser build takes this and the wheel does not.
-constexpr int density_tier(int listed) {
-#ifdef STANLI_LITE_LP
-  return listed & STANLI_DENSITY_FULL_MASKS;
-#else
-  return listed;
-#endif
-}
-
-// True when this build can reproduce CmdStan's lp__ exactly, rather than
-// up to a constant. Reported by stanli_version() and checked by the
-// verification harnesses, which relax from bitwise to same-constant.
-constexpr bool exact_lp_build() {
-#ifdef STANLI_LITE_LP
-  return false;
-#else
-  return true;
-#endif
-}
-
 // Every opcode list, in enum order, named once. The enum and the name
 // table both expand this, so a list added to one cannot be forgotten in
 // the other. PLAIN takes (name), DENSITY takes (code, fn, n, m), UNARY
@@ -1058,7 +1032,7 @@ inline int64_t sum_in_lens(const Op& op, const Slot* slots) {
 }
 
 Kernel& kernel(uint16_t opcode);
-// Called by kernel TUs at static-init time.
+// Called from ensure_registered() in executor.cpp.
 void register_kernel(uint16_t opcode, Kernel k);
 
 // The registered kernel for an opcode, or null. Registers the built-in

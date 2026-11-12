@@ -81,12 +81,6 @@ void each_read(const Program& p, const Program::Instr& I, F fn) {
     if (arity > 2) fn(Span{I.c, 1});
     return;
   }
-  if (I.code == Program::DENSITY_VEC) {
-    const Program::VecDensity& v = p.vec_densities[(size_t)I.a];
-    for (int k = 0; k < v.arity; ++k)
-      fn(Span{v.arg_reg[k], ((v.container_mask >> k) & 1u) ? v.len : 1});
-    return;
-  }
   if (I.code == Program::PRINT || I.code == Program::REJECT) {
     const Program::Message& message = p.messages[(size_t)I.a];
     for (size_t k = 0; k < message.value_reg.size(); ++k)
@@ -114,10 +108,6 @@ void remap(Program::Transform& tr, const std::vector<int>& m) {
   tr.jac = m[(size_t)tr.jac];
 }
 
-void remap(Program::VecDensity& v, const std::vector<int>& m) {
-  for (int k = 0; k < v.arity; ++k) v.arg_reg[k] = m[(size_t)v.arg_reg[k]];
-}
-
 void remap(Program::Message& message, const std::vector<int>& m) {
   for (size_t k = 0; k < message.value_reg.size(); ++k)
     if (message.value_len[k] > 0)
@@ -128,9 +118,6 @@ void remap(Program::Instr& I, const std::vector<int>& m) {
   if (I.code == Program::CALL || I.code == Program::TRANSFORM) return;
   const ProgramOpSpec& spec = program_spec_of(I);
   if (program_output_len(I) > 0) I.dst = m[(size_t)I.dst];
-  // DENSITY_VEC's `a` is a vec_densities index, not a register; its own
-  // registers are remapped separately, by the table-level overload above.
-  if (I.code == Program::DENSITY_VEC) return;
   if (spec.has(kProgramNoInputs)) return;
   I.a = m[(size_t)I.a];
   if (I.code == Program::DENSITY) {
@@ -1074,9 +1061,6 @@ bool compact_program_gated(Program& p, std::vector<std::pair<int, int>>& seeded,
     if (I.code == Program::TRANSFORM &&
         (I.a < 0 || (size_t)I.a >= p.transforms.size()))
       return false;
-    if (I.code == Program::DENSITY_VEC &&
-        (I.a < 0 || (size_t)I.a >= p.vec_densities.size()))
-      return false;
     if ((I.code == Program::PRINT || I.code == Program::REJECT) &&
         (I.a < 0 || (size_t)I.a >= p.messages.size()))
       return false;
@@ -1122,12 +1106,6 @@ bool compact_program_gated(Program& p, std::vector<std::pair<int, int>>& seeded,
     }
     if (I.code == Program::DENSITY && program_density_arity(I.len) > 3)
       mark_pinned(Span{I.a, program_density_arity(I.len)});
-    if (I.code == Program::DENSITY_VEC) {
-      const Program::VecDensity& v = p.vec_densities[(size_t)I.a];
-      for (int k = 0; k < v.arity; ++k)
-        mark_pinned(
-            Span{v.arg_reg[k], ((v.container_mask >> k) & 1u) ? v.len : 1});
-    }
   }
 
   // Sweeping backwards keeps the "next event on this register" tables to two
@@ -1277,8 +1255,6 @@ bool compact_program_gated(Program& p, std::vector<std::pair<int, int>>& seeded,
     Program::Instr I = p.code[i];
     if (I.code == Program::CALL) remap(p.calls[(size_t)I.a], map);
     if (I.code == Program::TRANSFORM) remap(p.transforms[(size_t)I.a], map);
-    if (I.code == Program::DENSITY_VEC)
-      remap(p.vec_densities[(size_t)I.a], map);
     if (I.code == Program::PRINT || I.code == Program::REJECT)
       remap(p.messages[(size_t)I.a], map);
     remap(I, map);

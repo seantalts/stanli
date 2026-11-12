@@ -401,11 +401,11 @@ void Lowering::bind_data(const mir::Program& p) {
         resolved.init.lit_i = sized->second;
         resolved.init.type_ = "UInt";
         resolved.init.data_only = true;
-        td.exec(resolved);
+        (void)td.exec(resolved);
         continue;
       }
     }
-    td.exec(st);
+    (void)td.exec(st);
   }
   // The interpreter keeps a block's locals after the block ends. Drop them,
   // so a later local of the same name cannot start from transformed data's
@@ -793,17 +793,23 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
                          PrepTrace::Extra extra = PrepTrace::Extra::None,
                          int64_t a = 0, int64_t b = 0, bool deep = false,
                          int64_t params = 0, int64_t c = 0, int64_t d = 0,
-                         const detail::RerollDispositionStats* disp = nullptr) {
+                         const RerollStats* disp = nullptr,
+                         int64_t term_steps = 0) {
     prep.graph(prep_graph, stage, from, g, out.fills, target_terms.size(),
-               out.views.size(), extra, a, b, deep, params, c, d, disp);
+               out.views.size(), extra, a, b, deep, params, c, d, disp,
+               term_steps);
     dump(stage, stage_roots);
   };
 
   // Target terms have no consuming op yet either: reduce_terms (log_prob)
   // or the arena reads (write_array) see them only after the passes run.
-  std::vector<int> update_roots = roots;
-  update_roots.insert(update_roots.end(), target_terms.begin(),
-                      target_terms.end());
+  // Each call reflects the terms as they stand, since passes replace them.
+  const auto roots_with_terms = [&] {
+    std::vector<int> all = roots;
+    all.insert(all.end(), target_terms.begin(), target_terms.end());
+    return all;
+  };
+  const std::vector<int> update_roots = roots_with_terms();
   fuse_gp_diagonal_updates(g, update_roots);
   const auto inplace_time = prep.start();
   const int inplace =
@@ -827,27 +833,18 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
           constfolded.slots_folded);
   }
   const auto reroll_time = prep.start();
-  RerollStats rerolled;
-  detail::RerollDispositionStats reroll_dispositions;
-  if (prep.enabled()) {
-    detail::ProfiledRerollStats profiled = detail::reroll_profiled(
-        g, out.fills, target_terms, roots, compile_options.fast_math);
-    rerolled = profiled.work;
-    reroll_dispositions = profiled.dispositions;
-  } else {
-    rerolled = reroll(g, out.fills, target_terms, roots,
-                      compile_options.fast_math);  // STANLI_NO_REROLL
-  }
+  const RerollStats rerolled =
+      reroll(g, out.fills, target_terms, roots,
+             compile_options.fast_math);  // STANLI_NO_REROLL
   trace("reroll", reroll_time, roots, PrepTrace::Extra::Reroll,
         rerolled.regions, rerolled.list_steps, false, 0,
-        rerolled.candidate_steps, rerolled.row_steps, &reroll_dispositions);
+        rerolled.candidate_steps, rerolled.row_steps, &rerolled,
+        rerolled.term_steps);
   // Re-roll can replace many element writes with copying slice stores, and
   // may have replaced target terms with vector reductions: rebuild the
   // implicit-root set before giving those new ops the same last-use proof
   // as the scalar stores.
-  std::vector<int> post_reroll_roots = roots;
-  post_reroll_roots.insert(post_reroll_roots.end(), target_terms.begin(),
-                           target_terms.end());
+  const std::vector<int> post_reroll_roots = roots_with_terms();
   const auto post_reroll_inplace_time = prep.start();
   const int post_reroll_inplace =
       rerolled.regions ? make_inplace_updates(g, post_reroll_roots) : 0;
@@ -863,9 +860,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     const CollapseStats collapsed = collapse_observations(
         g, out.fills, target_terms, roots, report_terms ? &report : nullptr);
     if (report_terms) print_collapse_report(report, prep_graph);
-    current_roots = roots;
-    current_roots.insert(current_roots.end(), target_terms.begin(),
-                         target_terms.end());
+    current_roots = roots_with_terms();
     trace("collapse", collapse_time, current_roots, PrepTrace::Extra::Removed,
           collapsed.ops_removed);
   }
@@ -878,12 +873,10 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
         g, out.fills, target_terms, roots, compile_options.fast_math);
     trace("partition", partition_time, roots, PrepTrace::Extra::Partition,
           parted.groups, parted.lanes, false, 0, parted.declined,
-          parted.list_steps);
+          parted.list_steps, nullptr, parted.term_steps);
     // Same proof the slice stores re-roll makes get: rebuilt from the
     // terms partition just replaced.
-    std::vector<int> post_partition_roots = roots;
-    post_partition_roots.insert(post_partition_roots.end(),
-                                target_terms.begin(), target_terms.end());
+    const std::vector<int> post_partition_roots = roots_with_terms();
     const auto post_partition_inplace_time = prep.start();
     const int post_partition_inplace =
         parted.groups ? make_inplace_updates(g, post_partition_roots) : 0;
@@ -946,7 +939,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
       wa.truncated = std::string(section) + " (" + what + ")";
     };
     try {
-      lower_stmt(s);
+      lower_top_stmt(s);
     } catch (const CompileError& e) {
       fail_section(e.what());
       break;
@@ -963,7 +956,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
              !wa.truncated.empty());
   dump("lower", roots);
 
-  run_passes(roots, PassPlan{true, false, false, true, false});
+  run_passes(roots, kWriteArrayPasses);
 
   const auto finalize_time = prep.start();
   // Nothing reads a result here, but forward() asserts a scalar result
@@ -1001,7 +994,7 @@ CompiledModel Lowering::run(const mir::Program& p) {
   const auto lower_time = prep.start();
   for (size_t k = 0; k < p.log_prob.size(); ++k) {
     try {
-      lower_stmt(p.log_prob[k]);
+      lower_top_stmt(p.log_prob[k]);
     } catch (const std::domain_error& e) {
       // A statement after the parameter reads that fails while lowering
       // and always runs fails the same way at every point in CmdStan.
@@ -1024,7 +1017,7 @@ CompiledModel Lowering::run(const mir::Program& p) {
   for (const auto& v : out.views) roots.push_back(v.slot);
   roots.insert(roots.end(), extra_roots.begin(), extra_roots.end());
 
-  run_passes(roots, PassPlan{true, true, true, true, true});
+  run_passes(roots, kLogProbPasses);
 
   const auto reduce_time = prep.start();
   std::vector<int> all = target_terms;
@@ -1179,8 +1172,16 @@ class WriteArrayLowering {
       w = std::move(*result_);
       w.lowered_in_parallel = true;
     } else {
-      if (!wa_) build_after_log_prob(log_prob);
+      const bool lent = !wa_;
+      if (lent) build_after_log_prob(log_prob);
       w = wa_->run_write_array(prog_);
+      if (lent) {
+        for (const std::string& name : bound_env_) {
+          const auto it = wa_->td.env().find(name);
+          if (it != wa_->td.env().end())
+            log_prob.td.env()[name] = std::move(it->second);
+        }
+      }
     }
     prep.append(std::move(trace_));
     return w;
@@ -1218,10 +1219,12 @@ class WriteArrayLowering {
                         log_prob.int_env_data, no_declarations,
                         log_prob.omitted_data, log_prob.prepared_names});
     const auto select_time = trace_.start();
+    // Moved, not copied: log_prob is done with them, and finish() moves
+    // them back.
     for (const std::string& name : bound_env_) {
       const auto it = log_prob.td.env().find(name);
       if (it != log_prob.td.env().end())
-        wa_->td.env().emplace(name, it->second);
+        wa_->td.env().emplace(name, std::move(it->second));
     }
     for (const std::string& name : bound_decls_) {
       const auto it = log_prob.decls.find(name);
@@ -1295,8 +1298,17 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   auto specialized = try_bounded_specialization(lo, *prog);
   CompiledModel cm = specialized ? std::move(*specialized) : lo.run(*prog);
   lo.after_data_prepared = nullptr;
+  // The interpreters below only read data and transformed data, and nothing
+  // reads the log_prob lowering's environment after this, so they share it.
+  std::shared_ptr<const std::map<std::string, DataMap::Entry>> interp_env;
+  const auto shared_interp_env = [&] {
+    if (!interp_env)
+      interp_env =
+          std::make_shared<const std::map<std::string, DataMap::Entry>>(
+              std::move(lo.td.env()));
+    return interp_env;
+  };
   if (wa_lowering) {
-    const PreparedContext prepared = lo.prepared_context();
     CompiledModel::WriteArray w = wa_lowering->finish(lo, prep);
     for (const std::string& note : wa_lowering->interpreter_fallbacks())
       add_interpreter_fallback(cm, note);
@@ -1325,16 +1337,17 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
       // The graph could not express the whole section; hand the model the
       // per-draw interpreter, seeded with data + transformed data and the
       // emission flags the guard blocks test.
-      auto env = prepared.environment;
+      std::map<std::string, DataMap::Entry> flags;
       for (const char* flag :
            {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
         DataMap::Entry one;
         one.is_int = true;
         one.i = {1};
         one.r = {1.0};
-        env[flag] = one;
+        flags[flag] = one;
       }
-      w.interp = std::make_shared<WaInterp>(prog, std::move(env));
+      w.interp = std::make_shared<WaInterp>(prog, shared_interp_env(),
+                                            std::move(flags));
     }
     cm.write_array = std::move(w);
     if (!cm.write_array->truncated.empty())
@@ -1387,8 +1400,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
       }
     }
     if (ti.truncated.empty())
-      ti.interp =
-          std::make_shared<InitInterp>(prog, lo.td.env(), std::move(params));
+      ti.interp = std::make_shared<InitInterp>(prog, shared_interp_env(),
+                                               std::move(params));
     cm.transform_inits = std::move(ti);
   }
   if (!cm.interpreter_fallbacks.empty() && std::getenv("STANLI_NO_INTERPRETER"))

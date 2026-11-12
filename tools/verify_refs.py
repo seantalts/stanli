@@ -47,9 +47,9 @@ import subprocess
 import sys
 import shutil
 import tempfile
-import zipfile
 
-from corpus_inventory import corpus_cases, local_cases, source_digest
+from corpus_inventory import (CorpusCase, corpus_cases, local_cases, materialize_data,
+                              source_digest)
 import toolchain
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -307,10 +307,7 @@ def model_files(model, ref, pdb, tmp):
     dz = pdb / "data" / "data" / f"{ref['data']}.json.zip"
     if not stan.exists() or not dz.exists():
         return stan, dz
-    dj = tmp / f"{model}_data.json"
-    with zipfile.ZipFile(dz) as z:
-        dj.write_bytes(z.read(z.namelist()[0]))
-    return stan, dj
+    return stan, materialize_data(CorpusCase(model, stan, dz, "posteriordb", {}), tmp)
 
 
 def ulp_distance(a, b):
@@ -619,7 +616,7 @@ def fast_dev(rv, gv):
 
 
 def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
-                no_lp, strict=False, fast_math=False, opts=None):
+                strict=False, fast_math=False, opts=None):
     """Replay one recorded point. (status, worst, worst_ulp, n, detail).
 
     A point whose entry has no `values` is one CmdStan itself refuses (it
@@ -686,23 +683,10 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                 f"point {point}: {len(rv)} vs {len(gv)}")
     if strict and not all(math.isfinite(x) for x in rv + gv):
         return ("NONFINITE", 0.0, 0, 0, f"point {point}: lp/gradient is nonfinite")
-    if no_lp:
-        # Element 0 is lp. A STANLI_LITE_LP build computes the full
-        # density where CmdStan's `~` drops constant terms, so its lp sits
-        # a per-model constant above the reference while every gradient is
-        # unchanged -- which is the part sampling depends on. Dropping the
-        # element keeps the corpus oracle usable for that build. Whether
-        # the offset is genuinely CONSTANT is a different question, and
-        # the one that can actually catch a bug; tools/verify_lite.py
-        # answers it by evaluating both builds at several points.
-        rv, gv = rv[1:], gv[1:]
     floor = opts.scale_floor if opts else 1.0
     own = opts.value_limits if opts else {}
     if fast_math:
-        # Without lp, a zero in its place leaves the gradient as the
-        # vector fast_dev scores.
-        worst, worst_ulp = fast_dev(*(([0.0] + v) if no_lp else v
-                                      for v in (rv, gv)))
+        worst, worst_ulp = fast_dev(rv, gv)
     else:
         worst, worst_ulp = worst_pair(rv, gv, floor)
         if own:
@@ -710,13 +694,12 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                                       if i not in own] for side in (rv, gv)),
                                    floor)[1]
         if model in GRADIENT_AGAINST_LARGEST:
-            first = 0 if no_lp else 1
-            worst_ulp = max(worst_pair(rv[:first], gv[:first])[1],
-                            gradient_ulp(rv[first:], gv[first:]))
+            worst_ulp = max(worst_pair(rv[:1], gv[:1])[1],
+                            gradient_ulp(rv[1:], gv[1:]))
     where = worst_values(rv, gv, floor, own,
-                         lambda i: density_label(i, no_lp, opts))
+                         lambda i: density_label(i, opts))
     for i, (limit, reason, expected) in own.items():
-        label = density_label(i, no_lp, opts)
+        label = density_label(i, opts)
         ulp = pair_dev(rv[i], gv[i], floor)[1]
         if ulp > limit:
             return ("ULP_GATE", worst, ulp, len(rv),
@@ -786,12 +769,11 @@ def interpreted(stderr):
                for line in stderr.splitlines())
 
 
-def density_label(index, no_lp, opts):
-    if index == 0 and not no_lp:
+def density_label(index, opts):
+    if index == 0:
         return "lp"
-    k = index if not no_lp else index + 1
     labels = opts.grad_labels if opts else ()
-    return f"grad[{k}]" + (f" {labels[k - 1]}" if k <= len(labels) else "")
+    return f"grad[{index}]" + (f" {labels[index - 1]}" if index <= len(labels) else "")
 
 
 def column_label(name, opts):
@@ -811,11 +793,11 @@ def worst_values(rv, gv, floor, skip, label):
 
 
 def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                no_wa=False, no_lp=False, target_platform=None,
+                no_wa=False, target_platform=None,
                 fast_math=False, opts=None):
     """Replay one model, under whatever KNOWN_GAPS says about it."""
     result = replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                          no_wa, no_lp, target_platform, fast_math, opts)
+                          no_wa, target_platform, fast_math, opts)
     if model not in KNOWN_GAPS:
         return result
     _, status, rel, ulp, total, _, notes = result
@@ -830,7 +812,7 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
 
 
 def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                 no_wa=False, no_lp=False, target_platform=None,
+                 no_wa=False, target_platform=None,
                  fast_math=False, opts=None):
     """Replay every point of one model.
 
@@ -880,8 +862,8 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
         with concurrent.futures.ThreadPoolExecutor(len(POINTS)) as pool:
             done = {point: pool.submit(
                         check_point, model, stan, dj, check_bin, point,
-                        ref["points"][str(point)], timeout, no_wa, no_lp,
-                        strict, fast_math, opts)
+                        ref["points"][str(point)], timeout, no_wa, strict,
+                        fast_math, opts)
                     for point in POINTS if str(point) in ref["points"]
                     and (model, point) not in QUARANTINED}
     for point in POINTS:
@@ -911,8 +893,8 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             continue
         status, rel, ulp, n, detail = (
             done[point].result() if point in done else check_point(
-                model, stan, dj, check_bin, point, pt, timeout, no_wa, no_lp,
-                strict, fast_math))
+                model, stan, dj, check_bin, point, pt, timeout, no_wa, strict,
+                fast_math))
         total += n
         if status != "OK":
             return (model, status, worst, worst_ulp, total, detail, notes)
@@ -1342,9 +1324,6 @@ def main():
                          "native host); use 'WebAssembly wasm32' for the Node driver")
     ap.add_argument("--reference-compiler", choices=("clang", "gcc", "msvc", "unknown"),
                     help="external driver's C++ compiler; normally read from stanli_check")
-    ap.add_argument("--no-lp", action="store_true",
-                    help="compare gradients only, not lp: a STANLI_LITE_LP "
-                         "build shifts lp by a constant (docs/lp-constant.md)")
     ap.add_argument("--no-wa", action="store_true",
                     help="replay lp and gradients only (the WASM check "
                          "driver has no write_array entry point yet)")
@@ -1439,7 +1418,7 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         futs = [pool.submit(check_model, m, refs[m], pdb, check_bin, tmp,
                             args.timeout, args.max_rel, args.no_wa,
-                            args.no_lp, args.target_platform, args.fast_math)
+                            args.target_platform, args.fast_math)
                 for m in models]
         for fut in concurrent.futures.as_completed(futs):
             model, status, rel, ulp, n, detail, notes = fut.result()
@@ -1459,7 +1438,6 @@ def main():
     print(f"\n{ok}/{len(models)} models within {args.max_rel:.0e} of the "
           f"CmdStan references at all {len(POINTS)} evaluation points "
           f"({values} values compared)"
-          + (" (gradients only)" if args.no_lp else "")
           + (f"; worst {worst_overall[0]} at {worst_overall[1]:.2e} "
              f"({worst_overall[2]} ulp)" if worst_overall[0] else ""))
     if failures:

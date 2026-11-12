@@ -9,9 +9,11 @@
 namespace stanli {
 namespace dens {
 
+#ifndef STANLI_FUSED_ONLY
 bool fused_density_enabled();
 void set_fused_density(bool on);
 std::size_t fused_density_calls();
+#endif
 
 void normal_lpdf_fused(KernelCtx& ctx);
 void cauchy_lpdf_fused(KernelCtx& ctx);
@@ -55,10 +57,11 @@ constexpr FusedKernel fused_kernel_for(Code code) {
 }
 
 inline bool fused_density_active() {
-  if constexpr (kFusedOnly)
-    return true;
-  else
-    return fused_density_enabled();
+#ifdef STANLI_FUSED_ONLY
+  return true;
+#else
+  return fused_density_enabled();
+#endif
 }
 
 }  // namespace dens

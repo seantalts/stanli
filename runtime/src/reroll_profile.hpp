@@ -1,6 +1,5 @@
-// Private preparation diagnostics for the re-roll pass. This header is not
-// installed; the public RerollStats layout and reroll() entrypoint stay
-// unchanged.
+// Private constants and diagnostics for the re-roll pass. This header is not
+// installed.
 #ifndef STANLI_REROLL_PROFILE_HPP
 #define STANLI_REROLL_PROFILE_HPP
 
@@ -11,27 +10,6 @@ namespace detail {
 
 constexpr int64_t kMinLanes = 4;
 constexpr int kMaxPeriod = 32;
-
-struct RerollDispositionStats {
-  int64_t packed_rows = 0;
-  int64_t term_density = 0;
-  int64_t element_density = 0;
-  int64_t term_widen = 0;
-  int64_t element_store = 0;
-};
-
-struct ProfiledRerollStats {
-  RerollStats work;
-  RerollDispositionStats dispositions;
-};
-
-// The lowerer calls this only for STANLI_PROFILE_PREP. Ordinary compilation
-// continues through the public reroll() function and does not count
-// dispositions.
-ProfiledRerollStats reroll_profiled(
-    Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
-    std::vector<int>& target_terms, const std::vector<int>& extra_roots,
-    bool fuse_shared_params = false);
 
 struct SignatureCheckResult {
   int64_t pairs_checked = 0;

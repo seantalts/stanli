@@ -445,10 +445,6 @@ BuiltinLayout builtin_layout(const BuiltinSpec& spec,
   return layout;
 }
 
-const std::vector<const FunctionSpec*>& builtin_specs() {
-  return function_specs(FunctionFamily::Builtin);
-}
-
 const BuiltinSpec* builtin_spec(std::string_view name, size_t arity) {
   const FunctionSpec* candidate =
       function_spec(name, arity, FunctionFamily::Builtin);

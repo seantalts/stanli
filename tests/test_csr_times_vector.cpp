@@ -498,7 +498,6 @@ void test_linear_growth() {
 }  // namespace
 
 int main() {
-  stanli::set_packet_math(false);
   try {
     test_values();
     test_linear_growth();

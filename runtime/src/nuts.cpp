@@ -394,10 +394,9 @@ std::vector<std::unique_ptr<Executor>> clone_executors(const Executor& src,
 
 std::vector<ChainResult> run_nuts_chains(
     const std::vector<Executor*>& execs, const NutsConfig& cfg, int n_threads,
-    const DrawObserver& observe, const ChainProgressObserver& progress,
-    int progress_refresh, const std::function<bool()>& poll,
-    const StoredDrawWriter& write, const double* inits,
-    const double* inv_metrics) {
+    const ChainProgressObserver& progress, int progress_refresh,
+    const std::function<bool()>& poll, const StoredDrawWriter& write,
+    const double* inits, const double* inv_metrics) {
   const size_t n_chains = execs.size();
   std::vector<ChainResult> out(n_chains);
   std::atomic<bool> local_stop{false};
@@ -425,8 +424,7 @@ std::vector<ChainResult> run_nuts_chains(
         write((int)c, row, q, rng, stats);
       };
     try {
-      out[c].draws = run_nuts(*execs[c], cc, &out[c].stats,
-                              n_chains == 1 ? observe : DrawObserver{},
+      out[c].draws = run_nuts(*execs[c], cc, &out[c].stats, DrawObserver{},
                               one_progress, &out[c].report);
     } catch (const std::exception& e) {
       out[c].error = e.what();

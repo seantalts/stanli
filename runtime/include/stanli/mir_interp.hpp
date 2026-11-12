@@ -1,15 +1,17 @@
 // The MIR interpreter: one evaluator for every place stanli executes MIR
 // directly instead of lowering it to ops.
 //
-// Two call sites share it. The lowering runs it on `double` over the
+// Six roles share it. The lowering runs it on `double` over the
 // prepare_data statements (transformed data is DataOnly, so it reduces to
-// concrete values before any op is emitted) and on data-only conditions and
-// size expressions inside log_prob. The ODE kernels run it on `double` and
-// on `var` to evaluate a right-hand side at whatever times the integrator
-// picks, when ode_prog could not compile the body (see ode_prog.cpp for the
-// fast path). One interpreter means one definition of indexing,
-// broadcasting, statement semantics, and the function vocabulary; a
-// function that works in transformed data works in an ODE body and vice
+// concrete values before any op is emitted) and on data-only conditions,
+// size expressions and admission probes inside log_prob. The solver kernels
+// (ODE, DAE, algebra solver, quadrature) run it on `double` and on `var` to
+// evaluate a callback at whatever points the solver picks, when ode_prog
+// could not compile the body (see ode_prog.cpp for the fast path). The
+// interpreted write_array, standalone Stan functions, and constrained
+// initialization use it too. One interpreter means one definition of
+// indexing, broadcasting, statement semantics, and the function vocabulary;
+// a function that works in transformed data works in an ODE body and vice
 // versa.
 //
 // Values carry a real buffer, an int mirror where the value is integer, and
@@ -77,7 +79,7 @@ class MirInterp;
 
 // Host hooks, all optional. The lowering installs the first three; the
 // interpreted write_array installs the last two (they only fire on the
-// double instantiation); the ODE kernels install none.
+// double instantiation); the other roles install none.
 struct MirHooks {
   // Fetch a data variable by name (FnReadData and bare data-block decls).
   std::function<const DataMap::Entry*(const std::string&)> data;
@@ -117,9 +119,25 @@ class MirInterp {
     decl_dims_[name] = std::move(dims);
   }
 
+  // Names readable beneath env() without a copy. The first write to one
+  // copies it into env(); the parent itself is never written.
+  void set_parent_env(const std::map<std::string, Value>* parent) {
+    parent_ = parent;
+  }
+
   Value* find(const std::string& n) {
     auto it = env_.find(n);
-    return it == env_.end() ? nullptr : &it->second;
+    if (it != env_.end()) return &it->second;
+    if (parent_ == nullptr) return nullptr;
+    auto p = parent_->find(n);
+    return p == parent_->end() ? nullptr : &(env_[n] = p->second);
+  }
+  const Value* lookup(const std::string& n) const {
+    auto it = env_.find(n);
+    if (it != env_.end()) return &it->second;
+    if (parent_ == nullptr) return nullptr;
+    auto p = parent_->find(n);
+    return p == parent_->end() ? nullptr : &p->second;
   }
 
   void set_probe(bool on) {
@@ -147,14 +165,11 @@ class MirInterp {
   std::vector<T> call(const mir::FunDef& f,
                       const std::vector<std::vector<T>>& args,
                       const std::vector<std::vector<int>>& int_args) {
-    if (udf_depth_ > 64) fail("UDF recursion too deep");
-    MirInterp sub(funs_, where_, hooks_);
     // Positional calls are used by the ODE/RHS fallback, but their formals
     // have the same unknown Eigen-view provenance as an ordinary UDF's.
     // Keeping them below top-level depth prevents product lowering from
     // assuming a formal is an owning, address-zero vector.
-    sub.udf_depth_ = udf_depth_ + 1;
-    sub.propto_ctx_ = propto_ctx_;
+    MirInterp sub = function_scope(propto_ctx_);
     if (f.arg_views.size() != f.arg_names.size())
       fail("function has incomplete unsized argument metadata: " + f.name);
     size_t ai = 0, ii = 0;
@@ -174,11 +189,7 @@ class MirInterp {
       }
       sub.env_[f.arg_names[k]] = std::move(v);
     }
-    try {
-      for (const auto& s : f.body) sub.exec(s);
-    } catch (ReturnV& r) {
-      return std::move(r.v.r);
-    }
+    if (sub.exec_all(f.body) == Flow::Return) return std::move(sub.returned_.r);
     fail("function returned no value: " + f.name);
   }
 
@@ -187,21 +198,14 @@ class MirInterp {
   // public C++ entry point uses this path: DataMap::Entry is Value itself for
   // the double instantiation, so no host/container conversion is needed.
   Value call(const mir::FunDef& f, const std::vector<Value>& args) {
-    if (udf_depth_ > 64) fail("UDF recursion too deep");
     if (f.arg_names.size() != args.size())
       fail("function argument count mismatch: " + f.name);
-    MirInterp sub(funs_, where_, hooks_);
-    sub.udf_depth_ = udf_depth_ + 1;
-    sub.propto_ctx_ = propto_ctx_;
+    MirInterp sub = function_scope(propto_ctx_);
     for (size_t k = 0; k < args.size(); ++k) {
       sub.env_[f.arg_names[k]] = args[k];
       sub.set_declared_dims(f.arg_names[k], args[k].dims);
     }
-    try {
-      for (const auto& s : f.body) sub.exec(s);
-    } catch (ReturnV& r) {
-      return std::move(r.v);
-    }
+    if (sub.exec_all(f.body) == Flow::Return) return std::move(sub.returned_);
     fail("function returned no value: " + f.name);
   }
 
@@ -217,7 +221,7 @@ class MirInterp {
         r.r = {T(e.lit)};
         return r;
       case mir::Expr::Var: {
-        Value* en = find(e.name);
+        const Value* en = lookup(e.name);
         if (en) return *en;
         // The lowering evaluates data-only conditions of unrolled log_prob
         // loops here; the loop variables live in its own int environment.
@@ -263,17 +267,77 @@ class MirInterp {
 
   // Execute a statement list to completion; a bare top-level Return (the
   // write_array emission guards end this way) stops it cleanly.
-  void run(const std::vector<mir::Stmt>& body) {
-    try {
-      for (const auto& st : body) exec(st);
-    } catch (ReturnV&) {
+  void run(const std::vector<mir::Stmt>& body) { (void)exec_all(body); }
+
+  // What a statement asks of the statements around it: go on to the next
+  // one, leave or restart the enclosing loop, or leave the function with
+  // `returned_`.
+  enum class [[nodiscard]] Flow { Next, Return, Break, Continue };
+
+  Flow exec(const mir::Stmt& st) {
+    if constexpr (std::is_same_v<T, double>) {
+      if (hooks_.stmt && hooks_.stmt(st)) return Flow::Next;
+    }
+    switch (st.kind) {
+      case mir::Stmt::For: {
+        const long lo = as_int(st.lower);
+        // Match stanc's C++ for condition, including upper-bound effects on
+        // the final failed test. Only the lower bound is evaluated once.
+        // `long` is only 32-bit on Windows. A Stan loop ending at INT_MAX
+        // must advance once more to fail its final condition without wrapping.
+        for (int64_t v = lo; v <= as_int(st.upper); ++v) {
+          Value lv;
+          lv.is_int = true;
+          lv.i = {(int)v};
+          lv.r = {T((double)v)};
+          env_[st.loopvar] = lv;
+          const Flow flow = exec_all(st.body);
+          if (flow == Flow::Return) return flow;
+          if (flow == Flow::Break) break;
+        }
+        env_.erase(st.loopvar);
+        return Flow::Next;
+      }
+      case mir::Stmt::IfElse: {
+        const bool c = val(eval(st.cond).r.at(0)) != 0.0;
+        if (c && !st.body.empty()) return exec(st.body[0]);
+        if (!c && st.body.size() > 1) return exec(st.body[1]);
+        return Flow::Next;
+      }
+      case mir::Stmt::Block:
+      case mir::Stmt::SList:
+        return exec_all(st.body);
+      case mir::Stmt::While: {
+        int64_t guard = 0;
+        while (val(eval(st.cond).r.at(0)) != 0.0) {
+          if (++guard > 100000000) fail("while loop did not terminate");
+          const Flow flow = exec_all(st.body);
+          if (flow == Flow::Return) return flow;
+          if (flow == Flow::Break) break;
+        }
+        return Flow::Next;
+      }
+      case mir::Stmt::Return:
+        returned_ = st.has_init ? eval(st.rhs) : Value{};
+        return Flow::Return;
+      case mir::Stmt::Break:
+        return Flow::Break;
+      case mir::Stmt::Continue:
+        return Flow::Continue;
+      default:
+        exec_simple(st);
+        return Flow::Next;
     }
   }
 
-  void exec(const mir::Stmt& st) {
-    if constexpr (std::is_same_v<T, double>) {
-      if (hooks_.stmt && hooks_.stmt(st)) return;
-    }
+  Flow exec_all(const std::vector<mir::Stmt>& body) {
+    for (const auto& st : body)
+      if (const Flow flow = exec(st); flow != Flow::Next) return flow;
+    return Flow::Next;
+  }
+
+ private:
+  void exec_simple(const mir::Stmt& st) {
     switch (st.kind) {
       case mir::Stmt::Decl: {
         // Keep the declaration's evaluated geometry available to its later
@@ -361,7 +425,7 @@ class MirInterp {
         }
         if (st.lhs_idx.empty()) {
           Value v = eval(st.rhs);
-          if (const Value* current = find(st.lhs))
+          if (const Value* current = lookup(st.lhs))
             check_assign_size(
                 st.lhs,
                 current->dims.empty()
@@ -374,7 +438,7 @@ class MirInterp {
           // real registers, while an all-integer array literal is tagged int.
           // Preserve int destinations as before, and apply Stan's implicit
           // int-to-real promotion when assigning into a real destination.
-          const Value* existing = find(st.lhs);
+          const Value* existing = lookup(st.lhs);
           if (existing && existing->is_int && !v.is_int) {
             v.is_int = true;
             v.i.clear();
@@ -569,59 +633,6 @@ class MirInterp {
           fail(what, st.raw);
         }
       }
-      case mir::Stmt::For: {
-        const long lo = as_int(st.lower);
-        // Match stanc's C++ for condition, including upper-bound effects on
-        // the final failed test. Only the lower bound is evaluated once.
-        // `long` is only 32-bit on Windows. A Stan loop ending at INT_MAX
-        // must advance once more to fail its final condition without wrapping.
-        for (int64_t v = lo; v <= as_int(st.upper); ++v) {
-          Value lv;
-          lv.is_int = true;
-          lv.i = {(int)v};
-          lv.r = {T((double)v)};
-          env_[st.loopvar] = lv;
-          try {
-            for (const auto& k : st.body) exec(k);
-          } catch (ContinueV&) {
-            continue;
-          } catch (BreakV&) {
-            break;
-          }
-        }
-        env_.erase(st.loopvar);
-        return;
-      }
-      case mir::Stmt::IfElse: {
-        const bool c = val(eval(st.cond).r.at(0)) != 0.0;
-        if (c && !st.body.empty()) exec(st.body[0]);
-        if (!c && st.body.size() > 1) exec(st.body[1]);
-        return;
-      }
-      case mir::Stmt::Block:
-      case mir::Stmt::SList:
-        for (const auto& k : st.body) exec(k);
-        return;
-      case mir::Stmt::While: {
-        int64_t guard = 0;
-        while (val(eval(st.cond).r.at(0)) != 0.0) {
-          if (++guard > 100000000) fail("while loop did not terminate");
-          try {
-            for (const auto& k : st.body) exec(k);
-          } catch (ContinueV&) {
-            continue;
-          } catch (BreakV&) {
-            break;
-          }
-        }
-        return;
-      }
-      case mir::Stmt::Return:
-        throw ReturnV{st.has_init ? eval(st.rhs) : Value{}};
-      case mir::Stmt::Break:
-        throw BreakV{};
-      case mir::Stmt::Continue:
-        throw ContinueV{};
       case mir::Stmt::NRFunApp:
         // Constraint checks are not executed here, but reject() and
         // print() are: a `reject` in transformed data is how a model
@@ -707,7 +718,6 @@ class MirInterp {
     }
   }
 
- private:
   FunctionArgumentShape function_argument_shape(const mir::Expr& source,
                                                 const Value& value) const {
     const FunctionArgumentKind kind =
@@ -921,11 +931,11 @@ class MirInterp {
 
   // A registered real-result builtin executes through the same graph kernel
   // every lowering backend dispatches to, so a registry entry plus a kernel
-  // is complete interpreter support; the named branches in eval_fun remain
-  // only as allocation-free fast paths. The interpreter stores every
-  // container column-major, arrays included, so unlike the graph layout
-  // there is no storage-order idata: an integer array and a real matrix
-  // already pair element for element.
+  // is complete interpreter support; the named branches in eval_fun
+  // (comparisons, scalar unaries, a few special forms) bypass it. The
+  // interpreter stores every container column-major, arrays included, so unlike
+  // the graph layout there is no storage-order idata: an integer array and a
+  // real matrix already pair element for element.
   Value builtin_kernel_eval(const mir::Expr& e, const BuiltinSpec& spec,
                             std::vector<Value> values) {
     BuiltinLayout layout;
@@ -1152,17 +1162,12 @@ class MirInterp {
     return o;
   }
 
-  // Thrown by a Return statement inside an interpreted function body.
-  struct ReturnV {
-    Value v;
-  };
-  struct BreakV {};
-  struct ContinueV {};
-
   const std::map<std::string, const mir::FunDef*>& funs_;
   std::string where_;
   MirHooks hooks_;
   std::map<std::string, Value> env_;
+  Value returned_;
+  const std::map<std::string, Value>* parent_ = nullptr;
   std::map<std::string, std::vector<int64_t>> decl_dims_;
 
   struct AssignShape {
@@ -1498,9 +1503,6 @@ class MirInterp {
     return geometry;
   }
 
-  // max-shifted log-sum-exp over a buffer; -inf on an empty or all
-  // -inf input rather than NaN.
-
   static Value from_entry(const DataMap::Entry& d) {
     if constexpr (std::is_same_v<T, double>) {
       return d;
@@ -1566,13 +1568,10 @@ class MirInterp {
       fail("reduce_sum: unknown partial-sum function " + base, e.raw);
     if (f->arg_names.size() != views.size())
       fail("reduce_sum: " + base + " arity does not match the call", e.raw);
-    if (udf_depth_ > 64) fail("UDF recursion too deep");
 
-    MirInterp sub(funs_, where_, hooks_);
-    sub.udf_depth_ = udf_depth_ + 1;
     // As in CmdStan, an `_lupdf` functor inherits the caller's normalization
     // and an `_lpdf` one forces the normalized density.
-    sub.propto_ctx_ = propto_ctx_ && propto;
+    MirInterp sub = function_scope(propto_ctx_ && propto);
     sub.env_[f->arg_names[0]] = std::move(slice);
     Value start;
     start.is_int = true;
@@ -1588,11 +1587,7 @@ class MirInterp {
     sub.env_[f->arg_names[2]] = std::move(end);
     for (size_t i = 3; i < e.args.size(); ++i)
       sub.env_[f->arg_names[i]] = std::move(shared[i - 3]);
-    try {
-      for (const auto& st : f->body) sub.exec(st);
-    } catch (ReturnV& r) {
-      return std::move(r.v);
-    }
+    if (sub.exec_all(f->body) == Flow::Return) return std::move(sub.returned_);
     fail("reduce_sum: " + base + " returned no value", e.raw);
   }
 
@@ -1645,23 +1640,25 @@ class MirInterp {
     return result;
   }
 
+  // An empty scope for one user-function body: function bodies see their
+  // arguments and nothing else.
+  MirInterp function_scope(bool propto) {
+    if (udf_depth_ > 64) fail("UDF recursion too deep");
+    MirInterp sub(funs_, where_, hooks_);
+    sub.udf_depth_ = udf_depth_ + 1;
+    sub.propto_ctx_ = propto;
+    return sub;
+  }
+
   Value call_udf(const mir::Expr& e) {
     auto it = funs_.find(e.name);
     if (it == funs_.end()) fail("unknown function " + e.name, e.raw);
     const mir::FunDef& f = *it->second;
     if (e.args.size() != f.arg_names.size()) fail(e.name + " arity mismatch");
-    if (udf_depth_ > 64) fail("UDF recursion too deep");
-    // Function bodies see their arguments and nothing else.
-    MirInterp sub(funs_, where_, hooks_);
-    sub.udf_depth_ = udf_depth_ + 1;
-    sub.propto_ctx_ = propto_ctx_ && e.fn_propto;
+    MirInterp sub = function_scope(propto_ctx_ && e.fn_propto);
     for (size_t i = 0; i < e.args.size(); ++i)
       sub.env_[f.arg_names[i]] = eval(e.args[i]);
-    try {
-      for (const auto& st : f.body) sub.exec(st);
-    } catch (ReturnV& r) {
-      return std::move(r.v);
-    }
+    if (sub.exec_all(f.body) == Flow::Return) return std::move(sub.returned_);
     return Value{};
   }
 
@@ -1672,7 +1669,7 @@ class MirInterp {
     // a large data array (60k-row models spent minutes here).
     const Value* base_ptr = nullptr;
     Value base_storage;
-    if (e.args[0].kind == mir::Expr::Var) base_ptr = find(e.args[0].name);
+    if (e.args[0].kind == mir::Expr::Var) base_ptr = lookup(e.args[0].name);
     if (base_ptr == nullptr) {
       base_storage = eval(e.args[0]);
       base_ptr = &base_storage;
@@ -2437,9 +2434,6 @@ class MirInterp {
     }
     if (callable_transform(e.name, &transform) &&
         transform.arity == e.args.size()) {
-      if (transform.structured &&
-          transform.direction == TransformDirection::Unconstrain)
-        fail(e.name + ": structured inverse is unsupported", e.raw);
       std::vector<Value> a;
       a.reserve(e.args.size());
       for (const mir::Expr& arg : e.args) a.push_back(eval(arg));
@@ -3089,10 +3083,6 @@ class MirInterp {
           eval(e.args[2]).r.at(0), eval(e.args[3]).r.at(0))};
       return r;
     }
-    // Densities as plain functions (generated quantities use them freely:
-    // the hmm Viterbi recursions, log-likelihood columns). Elementwise
-    // with scalar broadcasting, summed, which is stan-math's vectorized
-    // semantics.
     // Scalar unaries from the shared list, so transformed data and
     // generated quantities accept exactly what the log-density path does.
     // Evaluate the table's value formula on doubles on every route. An ODE
@@ -3123,9 +3113,9 @@ class MirInterp {
     // Every remaining registered real-result builtin executes through its
     // graph kernel: a registry entry plus a kernel is complete interpreter
     // support for a new function, with no branch here. The named branches
-    // above are only allocation-free fast paths for the hot operators and
-    // unaries; integer results were answered by the shared integer
-    // evaluators earlier. Policy-shaped builtins resolve by name and arity
+    // above handle comparisons, scalar unaries and a few special forms;
+    // integer results were answered by the shared integer evaluators
+    // earlier. Policy-shaped builtins resolve by name and arity
     // so that hand-built MIR without numeric metadata still dispatches.
     if (const BuiltinSpec* ctor = shaped_builtin_spec(
             e.name, e.args.size(), BuiltinShapePolicy::Constructor))

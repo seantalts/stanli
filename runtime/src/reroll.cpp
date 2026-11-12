@@ -591,17 +591,18 @@ int fuse_log_sum_exp_rows(Graph& g, std::vector<int>& target_terms,
 
 }  // namespace
 
-static RerollStats reroll_impl(
-    Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
-    std::vector<int>& target_terms, const std::vector<int>& extra_roots,
-    detail::RerollDispositionStats* dispositions, bool fuse_shared_params) {
+RerollStats reroll(Graph& g,
+                   std::vector<std::pair<int, std::vector<double>>>& fills,
+                   std::vector<int>& target_terms,
+                   const std::vector<int>& extra_roots,
+                   bool fuse_shared_params) {
   RerollStats st;
   if (std::getenv("STANLI_NO_REROLL")) return st;
 
   const int packed_rows =
       fuse_log_sum_exp_rows(g, target_terms, extra_roots, st.row_steps);
   st.regions += packed_rows;
-  if (dispositions) dispositions->packed_rows += packed_rows;
+  st.packed_rows += packed_rows;
 
   std::unordered_set<int> term_set(target_terms.begin(), target_terms.end());
   const auto is_candidate_op = [&](const Op& t) {
@@ -700,6 +701,7 @@ static RerollStats reroll_impl(
   // are never chained: remapping the ORIGINAL name to the newest
   // replacement each time keeps lookups single-step.
   std::unordered_map<int, int> renamed;
+  TermRetirement retired;
   const auto resolve = [&renamed](int s) {
     return detail::reroll_plan::resolve_slot(renamed, s);
   };
@@ -1451,17 +1453,14 @@ static RerollStats reroll_impl(
 
       // Emit only the accepted plan; classification and pricing above have
       // not changed graph storage, targets or lazy renaming.
-      std::move(*selected).emit(g, fills, target_terms, term_set, result,
-                                renamed);
+      std::move(*selected).emit(g, fills, retired, term_set, result, renamed);
       i += (size_t)P * (size_t)Luse;
       ++st.regions;
-      if (dispositions) {
-        for (const Pos& committed : selected->description().positions) {
-          dispositions->term_density += committed.term_density;
-          dispositions->element_density += committed.elt_density;
-          dispositions->term_widen += committed.term_widen;
-          dispositions->element_store += committed.store_vec >= 0;
-        }
+      for (const Pos& committed : selected->description().positions) {
+        st.term_density += committed.term_density;
+        st.element_density += committed.elt_density;
+        st.term_widen += committed.term_widen;
+        st.element_store += committed.store_vec >= 0;
       }
       rewrote = true;
       break;
@@ -1477,29 +1476,12 @@ static RerollStats reroll_impl(
     }
   }
   g.ops = std::move(result);
+  retired.apply(target_terms);
+  st.term_steps = retired.steps;
   return st;
 }
 
-RerollStats reroll(Graph& g,
-                   std::vector<std::pair<int, std::vector<double>>>& fills,
-                   std::vector<int>& target_terms,
-                   const std::vector<int>& extra_roots,
-                   bool fuse_shared_params) {
-  return reroll_impl(g, fills, target_terms, extra_roots, nullptr,
-                     fuse_shared_params);
-}
-
 namespace detail {
-
-ProfiledRerollStats reroll_profiled(
-    Graph& g, std::vector<std::pair<int, std::vector<double>>>& fills,
-    std::vector<int>& target_terms, const std::vector<int>& extra_roots,
-    bool fuse_shared_params) {
-  ProfiledRerollStats result;
-  result.work = reroll_impl(g, fills, target_terms, extra_roots,
-                            &result.dispositions, fuse_shared_params);
-  return result;
-}
 
 SignatureCheckResult check_signature_soundness(const Graph& g, int64_t window) {
   SignatureCheckResult result;

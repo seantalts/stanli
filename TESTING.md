@@ -33,9 +33,8 @@ A change may move a result away from CmdStan by:
   [`tools/corpus.py`](tools/corpus.py) gives the cause for each such model.
 - More, when a high-precision reference, recorded with the model, shows stanli
   at least as close to the true value as CmdStan. A closed-form replacement for
-  a nested-tape backward always needs one.
-  [`tools/matrix_pullback_hp_check.py`](tools/matrix_pullback_hp_check.py)
-  evaluates the `matrix_exp` and matrix-solve adjoints at 60 digits.
+  a nested-tape backward always needs one; the `matrix_exp` and matrix-solve
+  adjoints were evaluated at 60 digits.
 
 Anything beyond these budgets is a bug. Bitwise agreement with CmdStan is
 reported for information and does not fail a run. A change that trades a
@@ -417,9 +416,7 @@ give the worst measured deviation.
 Some less common multivariate and multinomial densities match CmdStan's
 gradients but report `lp__` shifted by a parameter-independent constant. The
 posterior is unchanged, but a pinned-seed trajectory and the absolute log
-density can differ. The `STANLI_LITE_LP` build, off in shipped builds, does
-this for every density and is checked by hand with `tools/verify_lite.py`
-([docs/lp-constant.md](docs/lp-constant.md)).
+density can differ. See [docs/lp-constant.md](docs/lp-constant.md).
 
 The nested callback solver fixtures allow 16 ULP on their combined rate
 gradient, which must also match its analytic value within 2 ULP. The difference

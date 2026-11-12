@@ -24,14 +24,6 @@ measured and declined. Dead-code stripping cannot reach inside the OCaml
 object, and compiling stanc3 to bytecode saves 3.7 MB at the cost of
 about 8x slower model compilation.
 
-## The lite build
-
-`-DSTANLI_LITE_LP=ON` drops the propto family. The library is 48% smaller
-and every gradient stays bitwise, but `lp__` differs from CmdStan's by a
-per-model constant. It is off in every shipped build, browser included,
-so any run can be compared against CmdStan directly. `stanli_exact_lp()`
-reports which build is loaded. See [lp-constant.md](lp-constant.md).
-
 ## The browser build
 
 The browser build is a different binary with no embedded stanc3, because

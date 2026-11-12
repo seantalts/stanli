@@ -1,3 +1,8 @@
+constexpr size_t kMemoMaxEvents = size_t{1} << 16;
+constexpr size_t kMemoMaxPool = size_t{1} << 20;
+constexpr size_t kMemoMaxMemos = 256;
+constexpr size_t kMemoMaxCandidatePool = size_t{1} << 22;
+
 // Static eligibility and key construction for memoized data loops.
 void RecordingProgram::compile_memo(LoopState& s) {
   const auto& p = s.p;

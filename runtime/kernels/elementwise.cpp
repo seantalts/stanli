@@ -31,26 +31,6 @@ void add_n_bwd(KernelCtx& ctx) {
     if (ctx.in_adj[i].data) ctx.in_adj[i].data[0] += ctx.out_adj;
 }
 
-// OP_BCAST_FMA: out[i] = a + b * x[i], a and b scalar.
-void fma_fwd(KernelCtx& ctx) {
-  const double a = ctx.in[0].data[0], b = ctx.in[1].data[0];
-  const Desc& x = ctx.in[2];
-  for (int64_t i = 0; i < x.len; ++i) ctx.out.data[i] = a + b * x.data[i];
-}
-void fma_bwd(KernelCtx& ctx) {
-  const double b = ctx.in[1].data[0];
-  const Desc& x = ctx.in[2];
-  const Desc& dout = ctx.out_adj_vec;
-  // Element order descending with direct accumulation, matching the var
-  // tape's reverse replay of the per-element vari chain: local ascending
-  // partial sums differ from it by 1 ULP.
-  for (int64_t i = dout.len - 1; i >= 0; --i) {
-    if (ctx.in_adj[0].data) ctx.in_adj[0].data[0] += dout.data[i];
-    if (ctx.in_adj[1].data) ctx.in_adj[1].data[0] += dout.data[i] * x.data[i];
-    if (ctx.in_adj[2].data) ctx.in_adj[2].data[i] += b * dout.data[i];
-  }
-}
-
 // OP_MATVEC: out = X * beta, X data laid out COLUMN-major (Stan/Eigen
 // convention), idata = {rows, cols}. X as a parameter is out of scope.
 void matvec_fwd(KernelCtx& ctx) {
@@ -230,8 +210,6 @@ void extrema_vec_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data || ctx.in[0].len == 0) return;
   ctx.in_adj[0].data[static_cast<int64_t>(ctx.scratch[0])] += ctx.out_adj;
 }
-
-int64_t scalar_scratch(const Op&, const Slot*) { return 1; }
 
 // One selected coefficient for reverse mode. Phased reductions are emitted
 // only for the forward double path.
@@ -495,7 +473,6 @@ extern void (*const canonical_add_n_forward)(KernelCtx&) = add_n_fwd;
 // static library dropped by the linker.
 void register_elementwise_kernels() {
   register_kernel(OP_ADD_N, Kernel{add_n_fwd, add_n_bwd, nullptr});
-  register_kernel(OP_BCAST_FMA, Kernel{fma_fwd, fma_bwd, nullptr});
   register_kernel(OP_MATVEC, Kernel{matvec_fwd, matvec_bwd, nullptr});
   register_kernel(OP_SUM_VEC, Kernel{sum_vec_fwd, sum_vec_bwd, nullptr});
   register_kernel(OP_SEGMENT_SUM,

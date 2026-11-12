@@ -124,6 +124,34 @@ std::vector<T> interpret_retained_callback(
   return interpreter.call(function, values).r;
 }
 
+// Splits the packed theta and x_r regions into the per-argument vectors the
+// interpreter binds, in the order spec->args records, and runs the callback.
+// `reals` holds the leading formals (t, y, ...).
+template <typename T, typename Theta>
+std::vector<T> interpret_packed_callback(
+    const std::map<std::string, const mir::FunDef*>& funs, std::string label,
+    const mir::FunDef& function, std::vector<std::vector<T>> reals,
+    const std::vector<RhsArg>& args, const Theta* theta, const double* x_r) {
+  std::vector<std::vector<int>> ints;
+  size_t theta_at = 0, xr_at = 0;
+  for (const RhsArg& arg : args) {
+    if (arg.is_int) {
+      ints.push_back(callback_integer_values(arg, theta, &theta_at));
+      continue;
+    }
+    std::vector<T> values;
+    values.reserve(static_cast<size_t>(arg.len));
+    if (arg.is_param) {
+      for (int i = 0; i < arg.len; ++i) values.push_back(T(theta[theta_at++]));
+    } else {
+      for (int i = 0; i < arg.len; ++i) values.push_back(T(x_r[xr_at++]));
+    }
+    reals.push_back(std::move(values));
+  }
+  MirInterp<T> interpreter(funs, std::move(label));
+  return interpret_retained_callback(interpreter, function, reals, ints, args);
+}
+
 struct RetainedCallback {
   std::map<std::string, mir::FunDef> owned;
   std::map<std::string, const mir::FunDef*> funs_map;

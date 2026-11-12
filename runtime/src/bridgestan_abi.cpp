@@ -257,8 +257,6 @@ class bs_rng {
 
 namespace stanli {
 
-const char* bs_build_id() { return runtime_build_id(); }
-
 bool bs_read_manifest(const std::string& text, BsManifest* out,
                       std::string* err) {
   auto say = [&](const std::string& s) {
@@ -280,9 +278,9 @@ bool bs_read_manifest(const std::string& text, BsManifest* out,
   // A stale pair must fail loudly. The MIR dialect and the lowering that
   // reads it move together, so a manifest written by another build could
   // lower to something subtly different rather than not lower at all.
-  if (id != bs_build_id())
+  if (id != runtime_build_id())
     return say("manifest was written by a different stanli build: it says \"" +
-               id + "\", this runtime is \"" + std::string(bs_build_id()) +
+               id + "\", this runtime is \"" + std::string(runtime_build_id()) +
                "\"");
   out->build_id = id;
   out->mir = root["mir"].get<std::string>();
@@ -309,8 +307,10 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
     // so does stanli's compile: the section runs once here, at construction.
     stanli::DataMap dm = load_data(data);
     m->cm = stanli::compile_model(mir, dm, seed);
+    dm = stanli::DataMap();
     m->ex.reset(new stanli::Executor(std::move(m->cm.graph)));
     m->cm.bind(*m->ex);
+    m->cm.fills = {};
     m->pool.reset(new stanli::ExecutorPool(*m->ex));
 
     std::string probe_failure;
@@ -328,6 +328,7 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
       } else if (!wa.columns.empty()) {
         m->wa_ex.reset(new stanli::Executor(std::move(wa.graph)));
         wa.bind(*m->wa_ex);
+        wa.fills = {};
         m->wa_pool.reset(new stanli::ExecutorPool(*m->wa_ex));
         m->cols = wa.columns;
         m->n_tp_start = wa.n_tp_start;
@@ -377,9 +378,7 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
               // (walnutpie among them) grep for the make-args spelling
               // "STAN_THREADS=true" and refuse to run multi-chain without it.
               (stanli::thread_safe_build() ? "; STAN_THREADS=true" : "") +
-              (stanli::exact_lp_build()
-                   ? "; lp__ matches CmdStan exactly"
-                   : "; lp__ offset from CmdStan by a per-model constant");
+              "; lp__ matches CmdStan exactly";
     return m.release();
   } catch (const std::exception& e) {
     set_error(error_msg, e.what());

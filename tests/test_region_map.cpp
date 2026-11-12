@@ -8,7 +8,6 @@
 #include <stanli/ode_adjoint.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/structured_loop.hpp>
-#include <stanli/packet.hpp>
 #include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
 
@@ -2256,7 +2255,6 @@ void test_copy_propagation_in_map() {
 }  // namespace region_map_test
 
 int main() {
-  stanli::set_packet_math(false);
   using namespace region_map_test;
   test_same_executor_two_points();
   test_copy_propagation_in_map();

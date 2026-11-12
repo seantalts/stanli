@@ -7,6 +7,7 @@
 #include <stanli/compile.hpp>
 #include <stanli/dae.hpp>
 #include <stanli/density_registry.hpp>
+#include <stanli/function_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/island.hpp>
 #include <stanli/ode_adjoint.hpp>
@@ -1662,10 +1663,6 @@ static void test_udf_param_branch() {
 }
 
 int main() {
-  // These fixtures pin ULP-level parity with DEFAULT CmdStan, whose AoS
-  // Matrix<var> paths run scalar libm per element; the packet path answers
-  // to `stanc --O1` instead and is verified there.
-  stanli::set_packet_math(false);
   using namespace stanli;
 
   // Section A1's five reductions must lower in the autodiff model graph, not
@@ -2527,6 +2524,49 @@ int main() {
           "overload galpha " + std::to_string(grad[0]) + " vs " +
               std::to_string(alpha.adj()));
     stan::math::recover_memory();
+  }
+
+  // The same resolution inside a parameter bound, which transform_inits
+  // carries a second time as the transform to invert.
+  {
+    DataMap d = DataMap::from_json(R"({"N": 2, "y": [0.25, 3.0]})");
+    CompiledModel lm =
+        compile_model(slurp("tests/fixtures/overload_bound.tmir.sexp"), d);
+    check(lm.n_unconstrained == 2, "overload bound 2 unconstrained");
+    Executor lex(std::move(lm.graph));
+    lm.bind(lex);
+    lex.params_data()[0] = 0.3;
+    lex.params_data()[1] = -0.4;
+    double grad[2] = {0, 0};
+    const double lp = lex.gradient(grad);
+
+    using stan::math::var;
+    var u0 = 0.3, u1 = -0.4;
+    var acc = 0;
+    var mu = stan::math::lb_constrain(u0, 0.25 - 1, acc);
+    var nu = stan::math::lb_constrain(u1, 0.5 - 1, acc);
+    acc += stan::math::normal_lpdf<false>(mu, 0.0, 1.0) +
+           stan::math::normal_lpdf<false>(nu, 0.0, 1.0);
+    acc.grad();
+    expect_ulp("overload bound lp", lp, acc.val());
+    expect_ulp("overload bound gmu", grad[0], u0.adj());
+    expect_ulp("overload bound gnu", grad[1], u1.adj());
+    stan::math::recover_memory();
+
+    check(lm.transform_inits && lm.transform_inits->interp,
+          "overload bound has transform_inits");
+    if (lm.transform_inits && lm.transform_inits->interp) {
+      DataMap::Entry mu_init, nu_init;
+      mu_init.r = {1.5};
+      nu_init.r = {2.0};
+      const std::vector<double> free =
+          lm.transform_inits->interp->eval({{"mu", mu_init}, {"nu", nu_init}});
+      check(free.size() == 2, "overload bound unconstrains two values");
+      if (free.size() == 2) {
+        expect_ulp("overload bound free mu", free[0], std::log(1.5 - -0.75));
+        expect_ulp("overload bound free nu", free[1], std::log(2.0 - -0.5));
+      }
+    }
   }
 
   // Data-dependent gather width (issue #133): the same program gathers a
@@ -4351,12 +4391,11 @@ int main() {
 
   // A container-valued normal_lpdf inside a data-dependent while loop
   // (unsupported_normal_lpdf_container, verbatim): the loop forces the call
-  // through the register machine's runtime-control region compiler, whose
-  // DENSITY opcode only ever bound one scalar per argument. DENSITY_VEC adds
-  // the container form, calling stan-math's own vectorized normal_lpdf over
-  // an Eigen::Map per container argument -- the same call CmdStan's
-  // generated code makes -- rather than summing N scalar calls by hand,
-  // which would round differently. No parameters, so the model has one lp:
+  // through the register machine's runtime-control region compiler, which
+  // emits one kernel CALL on the registered density, so stan-math's own
+  // vectorized normal_lpdf runs -- the same call CmdStan's generated code
+  // makes -- rather than N scalar calls summed by hand, which would round
+  // differently. No parameters, so the model has one lp:
   // N identical calls (the loop body does not touch y/mu/sigma), matched
   // against N stan::math::normal_lpdf<false> calls over the same data.
   {
@@ -4380,7 +4419,7 @@ int main() {
   }
 
   // The same, with a parameter feeding one container argument (`mu`, via
-  // `rep_row_vector`): DENSITY_VEC has to run correctly as var replay too,
+  // `rep_row_vector`): the density CALL has to run correctly as var replay too,
   // not just reproduce a data-only lp.
   {
     DataMap d = DataMap::from_json(slurp("tests/fixtures/densityvecgrad.json"));
@@ -7689,14 +7728,21 @@ int main() {
     check(lowering_rejected,
           "all-data propto density preserves support validation");
 
-    const DensitySpec* range = density_spec("discrete_range_lpmf");
+    const FunctionSpec* range_spec =
+        function_spec("discrete_range_lpmf", FunctionFamily::Density);
+    const DensitySpec* range =
+        range_spec == nullptr ? nullptr : range_spec->density();
     check(range != nullptr &&
               range->evaluation == DensityEvaluationPolicy::AllInteger,
           "discrete range uses the shared all-integer policy");
     std::vector<IntegerDensityArgument> range_args{
         {{2, 4}, false}, {{1}, true}, {{3, 5}, false}};
+    const std::vector<int> range_packed =
+        pack_all_integer_density_arguments(range_args);
     expect_eq("all-integer scalar/array dispatch",
-              evaluate_all_integer_density(*range, range_args, false),
+              evaluate_packed_all_integer_density(
+                  range->all_integer, range_packed.data(),
+                  static_cast<int64_t>(range_packed.size()), false),
               stan::math::discrete_range_lpmf(std::vector<int>{2, 4}, 1,
                                               std::vector<int>{3, 5}));
   }

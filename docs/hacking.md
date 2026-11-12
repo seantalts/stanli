@@ -208,7 +208,10 @@ The tools you will reach for most:
   CmdStan-style CSV out.
 - [`bench_grad`](../tools/bench_grad.cpp): gradient/forward timing. Pass
   `--prep` instead of an evaluation count to measure file-to-bound-executor
-  preparation without warmup; `STANLI_PROFILE_PREP=1` splits that path into
+  preparation without warmup. It prints the preparation seconds, the
+  parameter count, peak RSS in bytes after preparation (-1 where the
+  platform has no getrusage), and the seconds of one gradient.
+  `STANLI_PROFILE_PREP=1` splits that path into
   JSON/MIR parsing, every lowering pass, Executor construction, and binding.
   For compile timing, use `graph=compile stage=total`: the enclosing driver
   call also includes emitting the buffered profile rows.
@@ -246,7 +249,8 @@ The tools you will reach for most:
 - `STANLI_DUMP_PASSES=<dir>`: an environment variable read by anything that
   compiles a model. It writes the graph after every lowering pass to
   `<dir>/NN-<graph>-<stage>.txt`, numbered so `ls` sorts in pass order, plus
-  the input MIR as `00-mir.sexp`. Diff two consecutive files to see exactly
+  the input MIR document as `00-mir.sexp` (the shipped compilers write an
+  encoded `STANLI2:` document there rather than an S-expression). Diff two consecutive files to see exactly
   what one pass did. A pass that throws still leaves
   `NN-<graph>-FAILED-after-<stage>.txt` with the graph it died on.
 
@@ -281,15 +285,18 @@ The tools you will reach for most:
 - [`sampler_trace.py`](../tools/sampler_trace.py): compare sampler
   behavior against CmdStan.
 
-For orientation: about 16,500 lines of runtime (not counting a
-vendored JSON parser) and 10,000 lines of tests. The biggest files are
-[`lower.cpp`](../runtime/src/lower.cpp) (2.4k lines, and the most
-likely place your change belongs),
-[`mir_interp.hpp`](../runtime/include/stanli/mir_interp.hpp) (1.3k),
-and [`reroll.cpp`](../runtime/src/reroll.cpp) (0.9k). The opcode list
-([`optable.hpp`](../runtime/include/stanli/optable.hpp)) has about 250
-entries. The kernels are repetitive by design: read one and you have
-read them all.
+For orientation, start with [`graph.hpp`](../runtime/include/stanli/graph.hpp)
+(the IR) and [`optable.hpp`](../runtime/include/stanli/optable.hpp) (every
+opcode, listed once). Lowering begins in [`lower.cpp`](../runtime/src/lower.cpp)
+and continues in the `lower_*.cpp` files beside it, split by statements,
+expressions, function calls and higher-order calls; a change to what a model
+compiles to usually belongs there. [`executor.cpp`](../runtime/src/executor.cpp)
+runs the result. What the op graph cannot express goes to the register machine
+([`program.hpp`](../runtime/include/stanli/program.hpp),
+[`mir_prog.hpp`](../runtime/include/stanli/mir_prog.hpp)) or the
+[MIR interpreter](../runtime/include/stanli/mir_interp.hpp). The kernels are
+repetitive by design: read one and you have read them all. Several files are
+large, so run `wc -l` before opening one.
 
 ## The IR
 
@@ -441,7 +448,7 @@ whichever branch actually executed. That is the same arithmetic
 CmdStan's generated C++ performs for the same statement, so the
 derivatives agree by construction.
 
-Six front ends produce these programs:
+Five front ends produce these programs:
 
 - `compile_rhs` ([`ode_prog.cpp`](../runtime/src/ode_prog.cpp)) for
   ODE right-hand sides.
@@ -459,9 +466,6 @@ Six front ends produce these programs:
 - `lower_region_map` ([`lower_region_map.cpp`](../runtime/src/lower_region_map.cpp))
   for long loops with parameter-dependent control whose body only adds to
   the target.
-- The segments of a structured loop (`OP_LOOP`,
-  [`structured_loop.cpp`](../runtime/src/structured_loop.cpp)), which run
-  a register program per trip.
 - Standalone Stan functions
   ([`function.cpp`](../runtime/src/function.cpp)), called from the C API
   and R and Python bindings.
@@ -819,19 +823,6 @@ cmake --build build-asan --parallel "$asan_jobs" && \
 `var`: stan-math's arena recovers a nested tape by rewinding a bump
 pointer, so reading a `vari` from a tape that was already recovered
 lands inside a live allocation and reports nothing.
-
-If the change touches a density tier or anything about propto, also
-check the lite build, the smaller build variant that reports lp only
-up to a constant ([`docs/lp-constant.md`](lp-constant.md)). CI does not cover
-it, because that would mean a second full stan-math compile:
-
-```
-cmake -B build-lite -DCMAKE_BUILD_TYPE=Release -DSTANLI_LITE_LP=ON
-cmake --build build-lite --parallel "$(tools/build_jobs.sh)" \
-  --target stanli_check
-python3 tools/verify_lite.py deps/posteriordb
-python3 tools/verify_refs.py deps/posteriordb --check build-lite/stanli_check --no-lp
-```
 
 If the change touches `runtime/kernels/density_fused.cpp`, build with the
 Stan Math kernels kept, which is the default of a plain `cmake -B build`

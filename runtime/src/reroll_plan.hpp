@@ -78,35 +78,12 @@ struct CandidatePlan {
 
 // Adapter over the immutable input op sequence. Graph slot/idata allocations
 // during emission cannot invalidate it: the driver publishes g.ops only after
-// the entire scan. Target replacement preserves the original first-leaf
-// position, including surrounding terms and lazy region-to-region renaming.
+// the entire scan.
 struct GraphSource {
   const Op* ops;
   int period;
   const Op& at(int p, int64_t lane) const {
     return ops[(size_t)lane * (size_t)period + (size_t)p];
-  }
-  void replace_terms(int p, int64_t Luse, int new_term,
-                     std::vector<int>& target_terms,
-                     std::unordered_set<int>& term_set) const {
-    std::unordered_set<int> dead;
-    for (int64_t l = 0; l < Luse; ++l) dead.insert(at(p, l).out);
-    std::vector<int> next_terms;
-    next_terms.reserve(target_terms.size());
-    bool placed = false;
-    for (int s : target_terms) {
-      if (dead.count(s)) {
-        if (!placed) {
-          next_terms.push_back(new_term);
-          placed = true;
-        }
-      } else {
-        next_terms.push_back(s);
-      }
-    }
-    target_terms = std::move(next_terms);
-    for (int s : dead) term_set.erase(s);
-    term_set.insert(new_term);
   }
 };
 
@@ -257,7 +234,7 @@ class SelectedPlan {
   // Consumes packing payloads, emitting existing kernels in their original
   // order. Target/rename state stays live across regions; it is not captured
   // in the plan. The caller publishes the completed op sequence afterward.
-  void emit(Graph& g, Fills& fills, std::vector<int>& target_terms,
+  void emit(Graph& g, Fills& fills, TermRetirement& retired,
             std::unordered_set<int>& term_set, std::vector<Op>& result,
             std::unordered_map<int, int>& renamed) &&;
 
@@ -273,8 +250,7 @@ inline int resolve_slot(const std::unordered_map<int, int>& renamed, int slot) {
   return it == renamed.end() ? slot : it->second;
 }
 
-inline void SelectedPlan::emit(Graph& g, Fills& fills,
-                               std::vector<int>& target_terms,
+inline void SelectedPlan::emit(Graph& g, Fills& fills, TermRetirement& retired,
                                std::unordered_set<int>& term_set,
                                std::vector<Op>& result,
                                std::unordered_map<int, int>& renamed) && {
@@ -448,7 +424,9 @@ inline void SelectedPlan::emit(Graph& g, Fills& fills,
     // Swap the Luse lane terms for one replacement, at the first
     // lane's position (term_density and term_widen both end here).
     const auto swap_terms = [&](int new_term) {
-      source.replace_terms(p, Luse, new_term, target_terms, term_set);
+      std::vector<int> dead((size_t)Luse);
+      for (int64_t l = 0; l < Luse; ++l) dead[(size_t)l] = source.at(p, l).out;
+      retired.retire(dead, new_term, term_set);
     };
     // The fused lpmf's outcome vector is the lanes' immediates.
     const auto attach_idata = [&](Op& o, std::vector<int> outcome) {

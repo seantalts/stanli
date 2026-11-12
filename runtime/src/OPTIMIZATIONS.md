@@ -531,7 +531,7 @@ A bucket is rewritten in one of these forms:
 
 Fusing is not always a win, so each bucket is costed before it is
 emitted, in the currencies the island carver uses (`pass_util.hpp`'s
-`kOpCost`, `kDensityElem`, `kPartitionMargin`, the same ones reroll.cpp's
+`kLaneOpCost`, `kLaneDensityElem`, `kLanePartitionMargin`, the same ones reroll.cpp's
 own region pricing uses): about 5 ns per graph op against about 1 ns per
 element moved, with a density element charged six op dispatches. Two
 measured pessimizations live in that model rather
@@ -1252,6 +1252,8 @@ gate.
 
 `OP_LOOP` keeps a loop whose body has a `while` or a parameter branch as one
 graph op (`lower.cpp`, `structured_loop.cpp`, `structured_recording.inc`).
+In `write_array` it also keeps a loop that carries a value between
+iterations once the graph is large (`write_array_loop_retained`).
 [How it works](../../docs/how-it-works.md#retained-loops) explains selection,
 recording and guarded replay. Large recordings are sealed into per-iteration
 numerical frames, and frame admission enables a temporary recording program
@@ -1265,16 +1267,26 @@ have the proofs and ctsem measurements.
 
 | switch | effect | source |
 | --- | --- | --- |
-| `STANLI_STRUCTURED_LOOPS=0` / `=1` | retain no loops / retain every loop | `lower.cpp` |
+| `STANLI_STRUCTURED_LOOPS=0` / `=1` / `=force` | retain no loops / prefer retaining loops / retain every loop; `auto` or unset is the default policy | `lower.cpp` |
 | `STANLI_NO_STRUCTURED_REPLAY=1` | walk the control tree on every evaluation | `structured_loop.cpp` |
 | `STANLI_NO_STRUCTURED_CELL_CONSTANTS=1` | disable the per-cell data proof for updated containers | `structured_loop.cpp` |
+| `STANLI_NO_STRUCTURED_INVARIANT_PRIMALS=1` | do not cache the primal of a loop-invariant active kernel call | `structured_loop.cpp` |
 | `STANLI_STRUCTURED_FRAMES=0` / `=1` | disable frames / force them on eligible plans | `structured_loop.cpp` |
-| `STANLI_STRUCTURED_COMPILED_RECORDING=0` | record with the tree walk instead of the temporary program | `structured_loop.cpp` |
+| `STANLI_NO_STRUCTURED_FRAME_LAYOUT=1` | do not reuse a sealed frame's code layout for later frames | `structured_loop.cpp` |
+| `STANLI_NO_STRUCTURED_FRAME_CLONE=1` | do not clone a ready frame tape into another loop state with the same plan | `structured_loop.cpp` |
+| `STANLI_NO_STRUCTURED_FRAME_INSTANCE=1` | record every frame instead of building repeated frames from a template | `structured_loop.cpp` |
+| `STANLI_STRUCTURED_CHECK_FRAME_INSTANCE=1` | also record each instantiated frame and require the same frame and recorder state | `structured_instance_run.inc` |
+| `STANLI_STRUCTURED_COMPILED_RECORDING=0` | record with the tree walk instead of the temporary program | `structured_instance_run.inc` |
 | `STANLI_STRUCTURED_DATA_RECORDING=0` | disable data-only call specialization in that program | `structured_recording.inc` |
 | `STANLI_STRUCTURED_PREPARED_INDEX=0` | disable prepared data-only point reads | `structured_recording.inc` |
 | `STANLI_STRUCTURED_PREPARED_ITERATOR=0` | disable transient iterator rebinding reuse | `structured_recording.inc` |
-| `STANLI_NO_STRUCTURED_FRAME_INSTANCE=1` | record every frame instead of building repeated frames from a template | `structured_instance_run.inc` |
-| `STANLI_STRUCTURED_CHECK_FRAME_INSTANCE=1` | also record each instantiated frame and require the same frame and recorder state | `structured_instance_run.inc` |
+| `STANLI_NO_DATA_LOOP_MEMO=1` | do not compile memoization for data-controlled loops | `structured_recording.inc` |
+| `STANLI_DATA_LOOP_MEMO_MIN_WORK=n` | minimum executed steps before a data-loop memo is kept (default 256) | `structured_recording.inc` |
+| `STANLI_DATA_LOOP_MEMO_MIN_RATIO=n` | minimum executed steps per recorded event for a kept memo (default 8) | `structured_recording.inc` |
+| `STANLI_STRUCTURED_CHECK_REMAP=1` | check that no recorded pointer still refers to a released arena block | `structured_loop.cpp` |
+| `STANLI_STRUCTURED_LOOP_DIAGNOSTICS=1` | print selection, recording and frame diagnostics to stderr (also enables the remap check) | `structured_loop.cpp`, `lower_structured_loop.inc` |
+| `STANLI_NO_REGION_RANGE_CACHE=1` | do not cache the range of an integer index expression over its loop-variable grid | `lower_structured_loop.inc` |
+| `STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS=1` | pass indexed region inputs through the packed layout instead of directly | `lower_structured_loop.inc` |
 
 ## Executor details (`executor.cpp`)
 
@@ -1298,8 +1310,8 @@ was correct but shifted hot buffers and consistently slowed `Mtbh_model` by
 about 8%, so it is not part of this optimization.
 
 A tail-call threaded dispatch, the usual next step, measured slower
-than the unrolled loop (`tools/bench_dispatch.cpp` keeps the
-comparison). After these changes per-op cost is dominated by loading
+than the unrolled loop (79-80% of the plain loop's time for the unroll
+against 85-95% for a musttail chain). After these changes per-op cost is dominated by loading
 the context, not the dispatch, so the remaining lever is fewer ops,
 which is what the passes above are.
 
@@ -1355,8 +1367,8 @@ the whole-model effect is small per site but the pattern is wide.
 Three measured dead ends, recorded so they are not retried. `-ffp-contract=fast`
 is a 1.7% geomean slowdown on this corpus (`arK` 0.85, reproducible) and
 perturbs 101 of 120 models at reduction-class magnitudes, so the `off` in
-`CMakeLists.txt` stays. The `STANLI_PACKET_MATH` fast forms (constrain,
-`inv_logit`, `seq_sum`) measure 0.995 geomean: neutral, correctly left off.
+`CMakeLists.txt` stays. The packet-math fast forms (constrain,
+`inv_logit`, `seq_sum`) measured 0.995 geomean: neutral, so they were removed.
 And Eigen's vectorized `pow` is 5x slower than scalar `std::pow` on Apple
 libm, with the `exp(k log x)` form costing 8 ULP, so the `POW` share of the
 `dogs` models stays where it is.
@@ -1419,9 +1431,10 @@ silently. Three layers:
 - Direct verification against CmdStan (`tools/verify_sample.py`) for
   models a change affects.
 
-The env switches (`STANLI_NO_DATA_PRELOAD`, `STANLI_NO_INPLACE`,
+Some of the env switches (`STANLI_NO_DATA_PRELOAD`, `STANLI_NO_INPLACE`,
 `STANLI_NO_CONSTFOLD`, `STANLI_NO_REROLL`, `STANLI_NO_ISLAND`,
-`STANLI_NO_ISLAND_COMPACT`, `STANLI_NO_ODE_DIRECT_RK`) exist so a wrong result
+`STANLI_NO_ISLAND_COMPACT`, `STANLI_NO_ODE_DIRECT_RK`; more are listed
+by grepping the sources for `STANLI_NO_`) exist so a wrong result
 can be attributed to one optimization quickly, and they are how each one is
 measured: every speed number is the same build with one variable set and
 unset.

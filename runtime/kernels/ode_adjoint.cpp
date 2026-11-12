@@ -39,25 +39,10 @@ struct AdjointRhs {
       return out;
     }
 
-    std::vector<std::vector<T>> reals{
-        {T(t)}, std::vector<T>(state.data(), state.data() + state.size())};
-    std::vector<std::vector<int>> ints;
-    size_t theta_at = 0, xr_at = 0;
-    for (const RhsArg& arg : spec->args) {
-      if (arg.is_int) {
-        ints.push_back(callback_integer_values(arg, theta.data(), &theta_at));
-      } else if (arg.is_param) {
-        reals.emplace_back(theta.begin() + theta_at,
-                           theta.begin() + theta_at + arg.len);
-        theta_at += (size_t)arg.len;
-      } else {
-        reals.emplace_back(x_r.begin() + xr_at, x_r.begin() + xr_at + arg.len);
-        xr_at += (size_t)arg.len;
-      }
-    }
-    MirInterp<T> interpreter(*spec->funs(), "adjoint ODE function");
-    const std::vector<T> rhs = interpret_retained_callback(
-        interpreter, *spec->rhs(), reals, ints, spec->args);
+    const std::vector<T> rhs = interpret_packed_callback<T>(
+        *spec->funs(), "adjoint ODE function", *spec->rhs(),
+        {{T(t)}, std::vector<T>(state.data(), state.data() + state.size())},
+        spec->args, theta.data(), x_r.data());
     for (size_t i = 0; i < rhs.size(); ++i) out((Eigen::Index)i) = rhs[i];
     return out;
   }

@@ -11,13 +11,7 @@
 #include <limits>
 #include <string>
 
-// Graph: lp = sum(constrained) + jac  (sum via dot with ones through
-// NORMAL-free ops: use OP_ADD_N over a 1-vector? constrained is a vector;
-// use OP_DOT against a ones data vector once Task 4 lands. Here: scalar
-// case uses ADD_N directly; vector case multiplies into a normal_lpdf-free
-// path via BCAST_FMA trick is overkill, so vector case feeds
-// OP_CONSTRAIN_* out into OP_SUM_VEC. OP_SUM_VEC arrives with Task 4; to
-// keep Task 3 self-contained it is declared there but implemented here.)
+// Graph: lp = sum(constrained) + jac, via OP_SUM_VEC then OP_ADD_N.
 static void run_case(const std::string& tag, uint16_t opcode, int n,
                      const double* x0, double lb, double ub) {
   using namespace stanli;

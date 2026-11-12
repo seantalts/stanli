@@ -855,7 +855,7 @@ def main(argv=None):
                   k.startswith(("STANLI_NO_", "STANLI_PROFILE", "STANLI_LITE_",
                                 "STANLI_BOUNDED_", "STANLI_STRUCTURED_",
                                 "STANLI_ISLAND_",
-                                "STANLI_WA_", "STANLI_PACKET_",
+                                "STANLI_WA_",
                                 "STANLI_DEBUG_", "STANLI_DUMP_")))]
     if overrides:
         parser.error("unset benchmark environment overrides: " + ", ".join(sorted(overrides)))

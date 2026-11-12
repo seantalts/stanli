@@ -105,6 +105,11 @@ class WaInterp {
  public:
   WaInterp(std::shared_ptr<const mir::Program> prog,
            std::map<std::string, DataMap::Entry> base_env);
+  // `shared_env` is read in place on every call; `own_env` is copied.
+  WaInterp(
+      std::shared_ptr<const mir::Program> prog,
+      std::shared_ptr<const std::map<std::string, DataMap::Entry>> shared_env,
+      std::map<std::string, DataMap::Entry> own_env);
 
   // One CSV row: constrained parameter values by name in, every column of
   // the generate_quantities section out. Any RNG draw advances `rng`.
@@ -125,6 +130,7 @@ class WaInterp {
                    std::vector<double>& row);
   std::shared_ptr<const mir::Program> prog_;
   std::map<std::string, const mir::FunDef*> funs_;
+  std::shared_ptr<const std::map<std::string, DataMap::Entry>> shared_env_;
   std::map<std::string, DataMap::Entry> base_env_;
   std::vector<CompiledModel::ParamView> cols_;
   size_t n_tp_start_ = 0;

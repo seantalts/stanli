@@ -1,6 +1,6 @@
 // The integer-outcome densities: the hand-written lpmfs, the ones
 // generated from STANLI_INT_DENSITY_LIST, the binomials with their two
-// int groups (lpmf and cdf alike), beta_binomial, and the ordered pair.
+// int groups (lpmf and cdf alike), and beta_binomial.
 //
 // One of the density shards: see densities_impl.hpp for why they
 // are split and what they share.
@@ -29,7 +29,7 @@ inline bool bernoulli_arg_active(const KernelCtx& ctx) {
 }
 
 inline bool bernoulli_drop_propto(const KernelCtx& ctx) {
-  constexpr bool has_propto = (density_tier(3) & STANLI_DENSITY_PROPTO) != 0;
+  constexpr bool has_propto = (3 & STANLI_DENSITY_PROPTO) != 0;
   return has_propto && (ctx.variant & 0x80u) != 0 && !bernoulli_arg_active(ctx);
 }
 
@@ -420,7 +420,7 @@ void beta_binomial_fwd(KernelCtx& ctx) {
     // observation collapse both ask for it.
     const int* g1 = ctx.idata;
     const int* g2 = int_group_next(g1);
-    density_fwd_elt<2, density_tier(2)>(
+    density_fwd_elt<2, 2>(
         ctx,
         [&](int64_t n, const auto&... a) {
           return stan::math::beta_binomial_lpmf<true>(
@@ -434,7 +434,7 @@ void beta_binomial_fwd(KernelCtx& ctx) {
   }
   with_int_group(ctx.idata, [&](const auto& n, const int* rest) {
     with_int_group(rest, [&](const auto& N, const int*) {
-      density_fwd_sum<2, density_tier(2), 0>(
+      density_fwd_sum<2, 2, 0>(
           ctx,
           [&](const auto&... a) {
             return stan::math::beta_binomial_lpmf<true>(n, N, a...);
@@ -454,7 +454,7 @@ void beta_binomial_fwd(KernelCtx& ctx) {
   void fn##_fwd_gen(KernelCtx& ctx) {                                      \
     with_int_group(ctx.idata, [&](const auto& n, const int* rest) {        \
       with_int_group(rest, [&](const auto& N, const int*) {                \
-        cdf_fwd<nreal, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>(    \
+        cdf_fwd<nreal, tier & STANLI_DENSITY_FULL_MASKS>(                  \
             ctx,                                                           \
             [&](const auto&... a) { return stan::math::fn(n, N, a...); }); \
       });                                                                  \

@@ -5,7 +5,6 @@
 #include <stanli/builtin_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
-#include <stanli/packet.hpp>
 
 #include <stan/math/prim.hpp>
 
@@ -504,14 +503,11 @@ void logv_bwd(KernelCtx& ctx) {
 // strided, so Eigen runs the functor's SCALAR body with libm exp. Contiguous
 // doubles select Eigen's `pexp` instead, a ulp off libm on ~7% of arguments,
 // and that was the entire divergence: forward only, with the backward's exact
-// multiplies inheriting it. So the default spells the scalar functor out and
-// the vectorized form stays behind packet_math(), whose reference is varmat.
+// multiplies inheriting it. So the scalar functor is spelled out.
 void invlogit_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.out.len;
   if (n == 1) {
     ctx.out.data[0] = stan::math::inv_logit(ctx.in[0].data[0]);
-  } else if (packet_math()) {
-    out_a(ctx) = stan::math::inv_logit(in_a(ctx, 0).matrix().eval().array());
   } else {
     const double* x = ctx.in[0].data;
     for (int64_t i = 0; i < n; ++i) {

@@ -26,12 +26,6 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
 
 namespace stanli {
 
-// This runtime binary's build id -- the same string stanli_build_id()
-// returns, read from the same compile definition. Taken from the macro
-// rather than through the C ABI because capi.cpp is not part of the static
-// library, and the facade has to work in both.
-const char* bs_build_id();
-
 // The manifest's shape: {"build_id": ..., "name": ..., "mir": ...}.
 struct BsManifest {
   std::string build_id;
@@ -41,7 +35,7 @@ struct BsManifest {
 
 // Parse a manifest and check it was written for THIS runtime binary.
 // Returns false with a message in *err on malformed JSON, a missing field,
-// or a build id that is not bs_build_id() -- a stale pair must fail loudly
+// or a build id that is not runtime_build_id() -- a stale pair must fail loudly
 // rather than lower MIR that this binary no longer understands.
 bool bs_read_manifest(const std::string& text, BsManifest* out,
                       std::string* err);

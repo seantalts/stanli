@@ -7,7 +7,7 @@
 stanli_exact_lp()
 }
 \value{
-`TRUE` unless the runtime was built with `STANLI_LITE_LP`.
+Always `TRUE`: every build reproduces CmdStan's `lp__` exactly.
 }
 \description{
 Does this build report CmdStan's `lp__` exactly?
