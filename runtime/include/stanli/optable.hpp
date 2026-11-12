@@ -16,7 +16,6 @@ namespace stanli {
 // give their evaluators.
 #define STANLI_OPCODE_LIST(X)         \
   X(OP_ADD_N)                         \
-  X(OP_BCAST_FMA)                     \
   X(OP_MATVEC)                        \
   X(OP_POISSON_LOG_LPMF)              \
   X(OP_BERNOULLI_LOGIT_LPMF)          \

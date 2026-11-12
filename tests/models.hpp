@@ -40,6 +40,7 @@ inline EightSchools eight_schools() {
   const int one = m.one = g.add_slot(1, false);
   const int five = m.five = g.add_slot(1, false);
   const int tau = g.add_slot(1, false);
+  const int tau_theta_tilde = g.add_slot(EightSchools::J, false);
   const int theta = g.add_slot(EightSchools::J, false);
   const int lp1 = g.add_slot(1, false);
   const int lp2 = g.add_slot(1, false);
@@ -48,7 +49,8 @@ inline EightSchools eight_schools() {
   const int lp = g.add_slot(1, false);
 
   g.add_op(OP_EXPV, {m.log_tau}, tau);
-  g.add_op(OP_BCAST_FMA, {m.mu, tau, m.theta_tilde}, theta);
+  g.add_op(OP_MUL, {tau, m.theta_tilde}, tau_theta_tilde);
+  g.add_op(OP_ADD, {m.mu, tau_theta_tilde}, theta);
   g.add_op(OP_NORMAL_LPDF, {m.y, theta, m.sigma}, lp1);
   g.add_op(OP_NORMAL_LPDF, {m.theta_tilde, zero, one}, lp2);
   g.add_op(OP_NORMAL_LPDF, {m.mu, zero, five}, lp3);
@@ -77,7 +79,7 @@ struct LogisticGlm {
   Graph graph;
   int alpha, beta;
   int X;
-  int zero, p25, five, one;  // constant slots
+  int zero, p25, five;  // constant slots
   static constexpr int N = 20, K = 3;
   // Deterministic fixed data, column-major (Stan/Eigen convention).
   static const double kX[N * K];
@@ -103,7 +105,6 @@ inline LogisticGlm logistic_glm() {
   const int zero = m.zero = g.add_slot(1, false);
   const int p25 = m.p25 = g.add_slot(1, false);
   const int five = m.five = g.add_slot(1, false);
-  const int one = m.one = g.add_slot(1, false);
   const int eta0 = g.add_slot(LogisticGlm::N, false);
   const int eta = g.add_slot(LogisticGlm::N, false);
   const int lp1 = g.add_slot(1, false);
@@ -112,7 +113,7 @@ inline LogisticGlm logistic_glm() {
   const int lp = g.add_slot(1, false);
 
   g.add_op(OP_MATVEC, {m.X, m.beta}, eta0, {LogisticGlm::N, LogisticGlm::K});
-  g.add_op(OP_BCAST_FMA, {m.alpha, one, eta0}, eta);
+  g.add_op(OP_ADD, {eta0, m.alpha}, eta);
   g.add_op(OP_BERNOULLI_LOGIT_LPMF, {eta}, lp1,
            std::vector<int>(LogisticGlm::kYint,
                             LogisticGlm::kYint + LogisticGlm::N));
@@ -129,7 +130,6 @@ inline void fill_logistic_glm_data(const LogisticGlm& m, Executor& ex) {
   ex.value_ptr(m.zero)[0] = 0.0;
   ex.value_ptr(m.p25)[0] = 2.5;
   ex.value_ptr(m.five)[0] = 5.0;
-  ex.value_ptr(m.one)[0] = 1.0;
 }
 
 }  // namespace testmodels

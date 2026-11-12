@@ -29,8 +29,11 @@ static void reference(const double* q, double* lp_out, double* grad_out) {
 
   var zero = 0.0, one = 1.0, five = 5.0;
   var tau = stan::math::exp(log_tau);
-  Eigen::Matrix<var, -1, 1> theta(J);
-  for (int i = 0; i < J; ++i) theta(i) = mu + tau * theta_tilde(i);
+  // Built in descending order so the reverse sweep reaches the elements in
+  // ascending order, as the OP_ADD and OP_MUL scalar-broadcast adjoints do.
+  Eigen::Matrix<var, -1, 1> tau_theta_tilde(J), theta(J);
+  for (int i = J - 1; i >= 0; --i) tau_theta_tilde(i) = tau * theta_tilde(i);
+  for (int i = J - 1; i >= 0; --i) theta(i) = mu + tau_theta_tilde(i);
 
   // Promote data to var: the all-rvar kernels instantiate every argument as
   // an autodiff type, and matching that activity is what makes bitwise
