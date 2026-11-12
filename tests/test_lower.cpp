@@ -471,6 +471,28 @@ static void test_fixture_constants() {
     q.insert(q.end(), 4, 0.25);
     return q;
   };
+  const auto container_point = [](double scale) {
+    const double weights[6] = {1, 4, 3.5, 5, 3, 8};
+    ConstantPoint point{{}, 0.0, {}};
+    for (int k = 0; k < 6; ++k) {
+      point.q.push_back(scale * (k + 1));
+      point.lp += weights[k] * point.q.back();
+      point.grad.push_back(weights[k]);
+    }
+    return point;
+  };
+  const std::vector<double> mq = {0.2, -0.4, 0.7, 0.1, -0.3,
+                                  0.8, 0.5,  0.9, -0.6};
+  // Dyadic values, so no summation order can round differently.
+  const std::vector<double> span_q = {0.5,   -0.25, 0.75, 0.125,  -0.375,
+                                      0.875, 0.5,   1.0,  -0.625, 0.25};
+  double span_lp = 0;
+  for (int i = 0; i < 6; ++i) span_lp += span_q[(size_t)i];
+  for (int i = 6; i < 10; ++i) span_lp += 2.0 * span_q[(size_t)i];
+  const std::vector<double> append_q = {0.5, -0.7, 0.2, 1.1, -0.4, 0.8};
+  const std::vector<double> one_to_nine = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+  std::vector<double> pr236_negative = one_to_nine;
+  pr236_negative[0] = -1.0;
   const std::vector<ConstantCase> cases = {
       // A data container passed beside an active actual cannot be folded as
       // one call. It remains observable while the UDF is inlined and must bind
@@ -770,6 +792,114 @@ static void test_fixture_constants() {
         {{1.0, 2.0, 3.0}, 15.0, {-1.0, 9.0, -3.0}}},
        3,
        true},
+      // Nonuniform coefficients distinguish each matrix lane. Container-valued
+      // replication/reversal must preserve the inner axes in both engines;
+      // the fixture's generated quantities also join the cross-path suite.
+      {"container shapes",
+       "container_shapes",
+       DataMap{},
+       {container_point(-0.25), container_point(0.0), container_point(0.5)}},
+      // zeros_*/ones_* constructors: data-sized, so transformed data folds the
+      // integer array and identity matrix in the interpreter while the log
+      // density broadcasts a ones/zeros vector in the graph. The constant
+      // terms (s = 0 + N + 0 + N) and the zeros row-vector contribute nothing,
+      // so a wrong fill would show up as a nonzero lp or gradient.
+      // s = sum(zeros) + sum(ones_row) + zeros_int[0] + trace(I) = 0+3+0+3.
+      {"zeros_ones",
+       "zeros_ones",
+       fixture_json("zeros_ones"),
+       {{{0.4, -1.1, 0.7}, (0.4 + -1.1 + 0.7) + 6.0, {1.0, 1.0, 1.0}}},
+       3},
+      // csr_extract_v / csr_extract_u: the integer companions to
+      // csr_extract_w, folded in the interpreter over a row-major sparse view.
+      // A = [[10,0,20,0],[0,30,0,0],[0,0,40,50]] has w=[10,20,30,40,50],
+      // v=[1,3,2,3,4] (1-indexed column ids), u=[1,3,4,6] (1-indexed row
+      // starts, length rows+1). The log density only reads w, so the gradient
+      // pins w's order and the constant lp pins the two index arrays.
+      // usum = 1+3+4+6 = 14, vsum = 1+3+2+3+4 = 13.
+      {"csrextract",
+       "csrextract",
+       fixture_json("csrextract"),
+       {{{0.4, -1.1, 0.7, 0.2, -0.5},
+         0.0 + 0.4 * 10 + -1.1 * 20 + 0.7 * 30 + 0.2 * 40 + -0.5 * 50 + 27.0,
+         {10, 20, 30, 40, 50}}},
+       5},
+      // Two dimension-preserving selectors on a matrix form their Cartesian
+      // submatrix. Different reordered Multi lists pin column-major gather
+      // order, Between/Between covers matrix ranges, and the mixed
+      // Multi/Single and Single/Multi forms keep the surviving axis. All route
+      // each selected cell's adjoint back to the source matrix.
+      {"matrix selectors",
+       "matrix_multi_multi",
+       make_data(
+           [](DataMap& d) {
+             d.set_int_array("row_indices", {3, 1});
+             d.set_int_array("column_indices", {2, 3});
+           }),
+       {{mq,
+         2.0 * (mq[5] + mq[3] + mq[8] + mq[6]) +
+             2.0 * (mq[3] + mq[4] + mq[6] + mq[7]) + 2.0 * (mq[2] + mq[0]) +
+             2.0 * (mq[3] + mq[6]),
+         {2.0 * 1, 2.0 * 0, 2.0 * 1, 2.0 * 3, 2.0 * 1, 2.0 * 1, 2.0 * 3,
+          2.0 * 1, 2.0 * 1}}}},
+      // O1 folds a full-span read's All indices away and leaves an Indexed
+      // node with no indices, on matrices and vectors alike.
+      {"full span read",
+       "full_span_read",
+       DataMap(),
+       {{span_q, span_lp, {1, 1, 1, 1, 1, 1, 2, 2, 2, 2}}}},
+      // O1 composes a scalar UDF index through a two-axis gather as a nested
+      // Indexed node whose empty outer layer carries UReal. The selected cell
+      // is row_indices[1], column_indices[2] = source (3,3).
+      {"matrix nested index",
+       "matrix_multi_multi_nested",
+       make_data([](DataMap& d) {
+         d.set_int_array("row_indices", {3, 1});
+         d.set_int_array("column_indices", {2, 3});
+       }),
+       {{mq, 2.0 * mq[8], {0, 0, 0, 0, 0, 0, 0, 0, 2.0}}}},
+      // append_array concatenates scalar-element and container-element arrays
+      // in outer-array order. O1 also materializes the loop sequence through an
+      // unsized integer-array temporary whose first assignment supplies its
+      // shape.
+      {"append array",
+       "unsized_append_loop",
+       make_data([](DataMap& d) { d.set_int_array("selected", {2, 4}); }),
+       {{append_q,
+         10.0 * append_q[0] + 2.0 * append_q[3] + 3.0 * append_q[4],
+         {10.0, 0.0, 0.0, 2.0, 3.0, 0.0}}}},
+      // DataMap observations are first-index-fast, unlike the graph's
+      // outer-major array slots. A rank-two append used by constant indexing
+      // must preserve the former order. An empty operand also takes its suffix
+      // shape from the nonempty side, as stan-math does.
+      {"rank-two append",
+       "append_regression",
+       DataMap::from_json(R"({"a":[[1,2]],"b":[[10,20]]})"),
+       {{{0.1, 0.5, -0.7, 1.2}, 6.0, {30.0, 3.0, 3.0, 3.0}}}},
+      // The same new MIR forms can occur inside parameter-dependent control.
+      // That route is compiled by ProgramCompiler rather than the main
+      // lowerer: it needs Cartesian matrix gathers, O1's empty Indexed wrapper,
+      // and deferred shape adoption for an unsized loop-sequence temporary.
+      {"PR236 island",
+       "pr236_island",
+       DataMap(),
+       {{one_to_nine, 75.0, {5, 0, 0, 2, 0, 2, 2, 0, 4}},
+        {pr236_negative, -1.0, {1, 0, 0, 0, 0, 0, 0, 0, 0}}}},
+      // The non-O1 producer keeps this UDF call intact. Its data-only integer
+      // array formals must retain their compile-time values when
+      // ProgramCompiler enters the callee, or the matrix gather cannot resolve
+      // rows and columns.
+      {"PR236 island UDF",
+       "pr236_island_udf",
+       DataMap(),
+       {{one_to_nine, 26.0, {0, 0, 0, 1, 0, 1, 1, 0, 1}}}},
+      // O1 also uses deferred unsized temporaries for an appended integer loop
+      // sequence and for arrays of row-vector literals. Both values are built
+      // inside the runtime branch, then indexed by the unrolled source loop.
+      {"PR236 unsized island",
+       "pr236_unsized_island",
+       make_data([](DataMap& d) { d.set_int_array("d", {2}); }),
+       {{{0.5}, 6.5, {13.0}}, {{-0.5}, 0.0, {0.0}}}},
   };
   for (const ConstantCase& c : cases) {
     const std::string what = c.what;
@@ -3738,79 +3868,6 @@ int main() {
                       std::to_string(col) + "," + std::to_string(nr) + "," +
                       std::to_string(nc));
           }
-  }
-
-  // Nonuniform coefficients distinguish each matrix lane. Container-valued
-  // replication/reversal must preserve the inner axes in both engines;
-  // the fixture's generated quantities also join the cross-path suite.
-  {
-    CompiledModel cm = compile_model(
-        slurp("tests/fixtures/container_shapes.tmir.sexp"), DataMap{});
-    Executor ex(std::move(cm.graph));
-    cm.bind(ex);
-    const double weights[6] = {1, 4, 3.5, 5, 3, 8};
-    for (double scale : {-0.25, 0.0, 0.5}) {
-      double want = 0;
-      for (int k = 0; k < 6; ++k) {
-        ex.params_data()[k] = scale * (k + 1);
-        want += weights[k] * ex.params_data()[k];
-      }
-      double grad[6];
-      expect_eq("container shapes lp", ex.gradient(grad), want);
-      for (int k = 0; k < 6; ++k)
-        expect_eq("container shapes gradient", grad[k], weights[k]);
-    }
-  }
-
-  // zeros_*/ones_* constructors: data-sized, so transformed data folds the
-  // integer array and identity matrix in the interpreter while the log
-  // density broadcasts a ones/zeros vector in the graph. The constant terms
-  // (s = 0 + N + 0 + N) and the zeros row-vector contribute nothing, so a
-  // wrong fill would show up as a nonzero lp or gradient.
-  {
-    DataMap d = DataMap::from_json(slurp("tests/fixtures/zeros_ones.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/zeros_ones.tmir.sexp"), d);
-    check(lm.n_unconstrained == 3, "zeros_ones 3 unconstrained");
-    Executor lex(std::move(lm.graph));
-    lm.bind(lex);
-    const double q[3] = {0.4, -1.1, 0.7};
-    for (int k = 0; k < 3; ++k) lex.params_data()[k] = q[k];
-    double grad[3];
-    const double lp = lex.gradient(grad);
-
-    // s = sum(zeros) + sum(ones_row) + zeros_int[0] + trace(I) = 0+3+0+3.
-    const double want_lp = (q[0] + q[1] + q[2]) + 6.0;
-    expect_eq("zeros_ones lp", lp, want_lp);
-    for (int k = 0; k < 3; ++k)
-      expect_eq("zeros_ones g" + std::to_string(k), grad[k], 1.0);
-  }
-
-  // csr_extract_v / csr_extract_u: the integer companions to
-  // csr_extract_w, folded in the interpreter over a row-major sparse view.
-  // A = [[10,0,20,0],[0,30,0,0],[0,0,40,50]] has w=[10,20,30,40,50],
-  // v=[1,3,2,3,4] (1-indexed column ids), u=[1,3,4,6] (1-indexed row
-  // starts, length rows+1). The log density only reads w, so the gradient
-  // pins w's order and the constant lp pins the two index arrays.
-  {
-    DataMap d = DataMap::from_json(slurp("tests/fixtures/csrextract.json"));
-    CompiledModel lm =
-        compile_model(slurp("tests/fixtures/csrextract.tmir.sexp"), d);
-    check(lm.n_unconstrained == 5, "csrextract 5 unconstrained");
-    Executor lex(std::move(lm.graph));
-    lm.bind(lex);
-    const double q[5] = {0.4, -1.1, 0.7, 0.2, -0.5};
-    for (int k = 0; k < 5; ++k) lex.params_data()[k] = q[k];
-    double grad[5];
-    const double lp = lex.gradient(grad);
-
-    const double w[5] = {10, 20, 30, 40, 50};
-    double dot = 0.0;
-    for (int k = 0; k < 5; ++k) dot += q[k] * w[k];
-    // usum = 1+3+4+6 = 14, vsum = 1+3+2+3+4 = 13.
-    expect_eq("csrextract lp", lp, dot + 27.0);
-    for (int k = 0; k < 5; ++k)
-      expect_eq("csrextract g" + std::to_string(k), grad[k], w[k]);
   }
 
   // rep_array tiling a parameter vector and a scalar. The element keeps its
@@ -7295,76 +7352,6 @@ int main() {
     stan::math::recover_memory();
   }
 
-  // Two dimension-preserving selectors on a matrix form their Cartesian
-  // submatrix. Different reordered Multi lists pin column-major gather order,
-  // Between/Between covers matrix ranges, and the mixed Multi/Single and
-  // Single/Multi forms keep the surviving axis. All route each selected
-  // cell's adjoint back to the source matrix.
-  {
-    DataMap d;
-    d.set_int_array("row_indices", {3, 1});
-    d.set_int_array("column_indices", {2, 3});
-    CompiledModel gm =
-        compile_model(slurp("tests/fixtures/matrix_multi_multi.tmir.sexp"), d);
-    Executor gex(std::move(gm.graph));
-    gm.bind(gex);
-    const double q[9] = {0.2, -0.4, 0.7, 0.1, -0.3, 0.8, 0.5, 0.9, -0.6};
-    for (int i = 0; i < 9; ++i) gex.params_data()[i] = q[i];
-    double gradient[9] = {};
-    const double lp = gex.gradient(gradient);
-    const double want = 2.0 * (q[5] + q[3] + q[8] + q[6]) +
-                        2.0 * (q[3] + q[4] + q[6] + q[7]) +
-                        2.0 * (q[2] + q[0]) + 2.0 * (q[3] + q[6]);
-    expect_eq("matrix selectors: lp", lp, want);
-    const int times[9] = {1, 0, 1, 3, 1, 1, 3, 1, 1};
-    for (int i = 0; i < 9; ++i)
-      expect_eq("matrix selectors: g" + std::to_string(i), gradient[i],
-                2.0 * times[i]);
-  }
-
-  // O1 folds a full-span read's All indices away and leaves an Indexed node
-  // with no indices, on matrices and vectors alike.
-  {
-    const DataMap d;
-    CompiledModel gm =
-        compile_model(slurp("tests/fixtures/full_span_read.tmir.sexp"), d);
-    Executor gex(std::move(gm.graph));
-    gm.bind(gex);
-    // Dyadic values, so no summation order can round differently.
-    const double q[10] = {0.5,   -0.25, 0.75, 0.125,  -0.375,
-                          0.875, 0.5,   1.0,  -0.625, 0.25};
-    for (int i = 0; i < 10; ++i) gex.params_data()[i] = q[i];
-    double gradient[10] = {};
-    const double lp = gex.gradient(gradient);
-    double want = 0;
-    for (int i = 0; i < 6; ++i) want += q[i];
-    for (int i = 6; i < 10; ++i) want += 2.0 * q[i];
-    expect_eq("full span read: lp", lp, want);
-    for (int i = 0; i < 10; ++i)
-      expect_eq("full span read: g" + std::to_string(i), gradient[i],
-                i < 6 ? 1.0 : 2.0);
-  }
-
-  // O1 composes a scalar UDF index through a two-axis gather as a nested
-  // Indexed node whose empty outer layer carries UReal. The selected cell is
-  // row_indices[1], column_indices[2] = source (3,3).
-  {
-    DataMap d;
-    d.set_int_array("row_indices", {3, 1});
-    d.set_int_array("column_indices", {2, 3});
-    CompiledModel gm = compile_model(
-        slurp("tests/fixtures/matrix_multi_multi_nested.tmir.sexp"), d);
-    Executor gex(std::move(gm.graph));
-    gm.bind(gex);
-    const double q[9] = {0.2, -0.4, 0.7, 0.1, -0.3, 0.8, 0.5, 0.9, -0.6};
-    for (int i = 0; i < 9; ++i) gex.params_data()[i] = q[i];
-    double gradient[9] = {};
-    expect_eq("matrix nested index: lp", gex.gradient(gradient), 2.0 * q[8]);
-    for (int i = 0; i < 9; ++i)
-      expect_eq("matrix nested index: g" + std::to_string(i), gradient[i],
-                i == 8 ? 2.0 : 0.0);
-  }
-
   // A scalar replicated as a row vector uses the vector replication opcode,
   // but must retain its row-vector type for downstream expression lowering.
   {
@@ -8407,113 +8394,6 @@ int main() {
       expect_eq(tag + " gz", g[3], 0.0);
       stan::math::recover_memory();
     }
-  }
-
-  // append_array concatenates scalar-element and container-element arrays in
-  // outer-array order. O1 also materializes the loop sequence through an
-  // unsized integer-array temporary whose first assignment supplies its shape.
-  {
-    DataMap d;
-    d.set_int_array("selected", {2, 4});
-    CompiledModel am =
-        compile_model(slurp("tests/fixtures/unsized_append_loop.tmir.sexp"), d);
-    Executor aex(std::move(am.graph));
-    am.bind(aex);
-    const double q[6] = {0.5, -0.7, 0.2, 1.1, -0.4, 0.8};
-    for (int i = 0; i < 6; ++i) aex.params_data()[i] = q[i];
-    double gradient[6] = {};
-    expect_eq("append array lp", aex.gradient(gradient),
-              10.0 * q[0] + 2.0 * q[3] + 3.0 * q[4]);
-    const double want[6] = {10.0, 0.0, 0.0, 2.0, 3.0, 0.0};
-    for (int i = 0; i < 6; ++i)
-      expect_eq("append array gradient " + std::to_string(i), gradient[i],
-                want[i]);
-  }
-
-  // DataMap observations are first-index-fast, unlike the graph's outer-major
-  // array slots. A rank-two append used by constant indexing must preserve the
-  // former order. An empty operand also takes its suffix shape from the
-  // nonempty side, as stan-math does.
-  {
-    DataMap d = DataMap::from_json(R"({"a":[[1,2]],"b":[[10,20]]})");
-    CompiledModel am =
-        compile_model(slurp("tests/fixtures/append_regression.tmir.sexp"), d);
-    Executor aex(std::move(am.graph));
-    am.bind(aex);
-    const double q[4] = {0.1, 0.5, -0.7, 1.2};
-    for (int i = 0; i < 4; ++i) aex.params_data()[i] = q[i];
-    double gradient[4] = {};
-    expect_eq("rank-two append lp", aex.gradient(gradient), 6.0);
-    const double want[4] = {30.0, 3.0, 3.0, 3.0};
-    for (int i = 0; i < 4; ++i)
-      expect_eq("rank-two append gradient " + std::to_string(i), gradient[i],
-                want[i]);
-  }
-
-  // The same new MIR forms can occur inside parameter-dependent control.
-  // That route is compiled by ProgramCompiler rather than the main lowerer:
-  // it needs Cartesian matrix gathers, O1's empty Indexed wrapper, and
-  // deferred shape adoption for an unsized loop-sequence temporary.
-  {
-    DataMap d;
-    CompiledModel im =
-        compile_model(slurp("tests/fixtures/pr236_island.tmir.sexp"), d);
-    Executor iex(std::move(im.graph));
-    im.bind(iex);
-    const double positive[9] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
-    std::copy(positive, positive + 9, iex.params_data());
-    double gradient[9] = {};
-    expect_eq("PR236 island positive lp", iex.gradient(gradient), 75.0);
-    const double positive_gradient[9] = {5, 0, 0, 2, 0, 2, 2, 0, 4};
-    for (int i = 0; i < 9; ++i)
-      expect_eq("PR236 island positive gradient " + std::to_string(i),
-                gradient[i], positive_gradient[i]);
-
-    std::copy(positive, positive + 9, iex.params_data());
-    iex.params_data()[0] = -1.0;
-    std::fill(gradient, gradient + 9, 0.0);
-    expect_eq("PR236 island negative lp", iex.gradient(gradient), -1.0);
-    for (int i = 0; i < 9; ++i)
-      expect_eq("PR236 island negative gradient " + std::to_string(i),
-                gradient[i], i == 0 ? 1.0 : 0.0);
-  }
-
-  // The non-O1 producer keeps this UDF call intact. Its data-only integer
-  // array formals must retain their compile-time values when ProgramCompiler
-  // enters the callee, or the matrix gather cannot resolve rows and columns.
-  {
-    DataMap d;
-    CompiledModel im =
-        compile_model(slurp("tests/fixtures/pr236_island_udf.tmir.sexp"), d);
-    Executor iex(std::move(im.graph));
-    im.bind(iex);
-    const double positive[9] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
-    std::copy(positive, positive + 9, iex.params_data());
-    double gradient[9] = {};
-    expect_eq("PR236 island UDF lp", iex.gradient(gradient), 26.0);
-    const double want[9] = {0, 0, 0, 1, 0, 1, 1, 0, 1};
-    for (int i = 0; i < 9; ++i)
-      expect_eq("PR236 island UDF gradient " + std::to_string(i), gradient[i],
-                want[i]);
-  }
-
-  // O1 also uses deferred unsized temporaries for an appended integer loop
-  // sequence and for arrays of row-vector literals. Both values are built
-  // inside the runtime branch, then indexed by the unrolled source loop.
-  {
-    DataMap d;
-    d.set_int_array("d", {2});
-    CompiledModel im = compile_model(
-        slurp("tests/fixtures/pr236_unsized_island.tmir.sexp"), d);
-    Executor iex(std::move(im.graph));
-    im.bind(iex);
-    iex.params_data()[0] = 0.5;
-    double gradient[1] = {};
-    expect_eq("PR236 unsized island positive lp", iex.gradient(gradient), 6.5);
-    expect_eq("PR236 unsized island positive gradient", gradient[0], 13.0);
-    iex.params_data()[0] = -0.5;
-    expect_eq("PR236 unsized island negative lp", iex.gradient(gradient), 0.0);
-    expect_eq("PR236 unsized island negative gradient", gradient[0], 0.0);
   }
 
   // matrix_exp retains the square matrix view and differentiates every output
