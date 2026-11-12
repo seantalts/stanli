@@ -472,6 +472,75 @@ class FastModeGateTest(unittest.TestCase):
             self.run_check(row % "1.00000001", pt, wa=False)[1], "WA_GATE")
 
 
+class CorpusOptionsTest(unittest.TestCase):
+    """The per-corpus gates CTest replays local corpora under."""
+
+    SOURCE = REPO / "tests" / "regressions" / f"{MODEL}.stan"
+    WA = {**VALUES, "wa": {"names": "a,b", "values": ["1", "2"]}}
+
+    def run_check(self, body, pt=None, wa=True, **options):
+        ref = {"points": {str(p): pt or self.WA for p in POINTS}}
+        opts = verify_refs.Replay(self.SOURCE, self.SOURCE.with_suffix(".json"),
+                                  **options)
+        with tempfile.TemporaryDirectory() as tmp:
+            return check_model(MODEL, ref, None, stub(tmp, body, wa),
+                               pathlib.Path(tmp), 60, 1e-9, opts=opts)
+
+    def row(self, values, extra=""):
+        return ('if [ -n "$wa" ]; then echo "WANAMES a,b"; '
+                f'echo "WAVALS {values}"; fi\n{extra}echo "OK -3.5 1 -2"')
+
+    def test_permuted_outputs_fail_and_name_the_column(self):
+        self.assertEqual(self.run_check(self.row("1 2"), wa=False)[1], "OK")
+        result = self.run_check(self.row("2 1"), wa=False)
+        self.assertEqual(result[1], "GATE")
+        self.assertIn("worst at a", result[5])
+
+    def test_a_gradient_failure_names_its_case(self):
+        result = self.run_check('echo "OK -3.5 1 -2.5"', VALUES,
+                                grad_labels=("f(real)=>real", "g(real)=>real"))
+        self.assertEqual(result[1], "GATE")
+        self.assertIn("grad[2] g(real)=>real", result[5])
+
+    def test_interpreter_use_must_match_the_expectation(self):
+        interp = 'echo "INTERP stanli: parts run interpreted" >&2\n'
+        self.assertEqual(self.run_check(self.row("1 2", interp), wa=False)[1],
+                         "INTERPRETER")
+        self.assertEqual(self.run_check(self.row("1 2"), wa=False,
+                                        interpreted=True)[1], "INTERPRETER")
+        self.assertEqual(self.run_check(self.row("1 2", interp), wa=False,
+                                        interpreted=True)[1], "OK")
+        wa_note = ('echo "WA 1 vars 2 values 0 nonfinite complete '
+                   '(interpreted: generated quantities)" >&2\n')
+        self.assertEqual(self.run_check(self.row("1 2", wa_note), wa=False)[1],
+                         "INTERPRETER")
+
+    def test_the_scale_floor_holds_small_values_to_an_absolute_error(self):
+        pt = {"values": ["-3.5", "1e-6", "-2"]}
+        body = 'echo "OK -3.5 1.00001e-06 -2"'
+        self.assertEqual(self.run_check(body, pt)[1], "OK")
+        self.assertEqual(self.run_check(body, pt, scale_floor=1e-3)[1], "GATE")
+
+    def test_the_ulp_limit_applies_on_every_platform(self):
+        body = f'echo "OK -3.5 {1.0 + 11 * math.ulp(1.0)!r} -2"'
+        self.assertEqual(self.run_check(body, VALUES)[1], "OK")
+        self.assertEqual(self.run_check(body, VALUES, ulp=10)[1], "ULP_GATE")
+
+    def test_a_wider_value_limit_needs_its_independent_value(self):
+        near = 1.0 + 12 * math.ulp(1.0)
+        body = f'echo "OK -3.5 {near!r} -2"'
+        limits = {1: (16, "a test", lambda outputs: near)}
+        self.assertEqual(self.run_check(body, VALUES, ulp=10)[1], "ULP_GATE")
+        self.assertEqual(self.run_check(body, VALUES, ulp=10,
+                                        value_limits=limits)[1], "OK")
+        far = {1: (16, "a test", lambda outputs: 1.0)}
+        self.assertEqual(self.run_check(body, VALUES, ulp=10,
+                                        value_limits=far)[1], "ULP_GATE")
+        wide = f'echo "OK -3.5 {1.0 + 17 * math.ulp(1.0)!r} -2"'
+        self.assertEqual(self.run_check(wide, VALUES, ulp=10,
+                                        value_limits=limits)[1], "ULP_GATE")
+
+
 class LocalCorpusTest(unittest.TestCase):
     """Models carried in the tree, resolved by name before posteriordb."""
 
