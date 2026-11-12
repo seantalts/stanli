@@ -18,9 +18,11 @@ sys.path.insert(0, str(REPO / "tools"))
 import toolchain
 
 KEYS = ("CMDSTAN_TAG", "CMDSTAN_SHA", "STAN_SHA", "MATH_SHA",
-        "STANC3_SRC_REPO", "STANC3_SRC_SHA", "BRIDGESTAN_SHA",
+        "STANC3_SRC_REPO", "STANC3_SRC_SHA", "STANC3_UPSTREAM_REPO",
+        "STANC3_UPSTREAM_SHA", "BRIDGESTAN_SHA",
         "PDB_SHA", "FMT_SHA", "OCAML_VERSION", "OPAM_SWITCH")
 SHAS = ("CMDSTAN_SHA", "STAN_SHA", "MATH_SHA", "STANC3_SRC_SHA",
+        "STANC3_UPSTREAM_SHA",
         "BRIDGESTAN_SHA", "PDB_SHA", "FMT_SHA")
 
 
@@ -134,7 +136,7 @@ class GuardTests(unittest.TestCase):
         (self.cmdstan / "bin").mkdir()
         (self.cmdstan / "bin/stanc").write_bytes(b"pinned stanc")
         pins = {"CMDSTAN_SHA": self.heads["cmdstan"], "STAN_SHA": self.heads["stan"],
-                "MATH_SHA": self.heads["math"], "STANC3_SRC_SHA": "s" * 40}
+                "MATH_SHA": self.heads["math"], "STANC3_UPSTREAM_SHA": "s" * 40}
         for patcher in (mock.patch.object(toolchain, "pins", lambda: pins),
                         mock.patch.object(toolchain, "PINNED_STANC", self.pinned)):
             patcher.start()

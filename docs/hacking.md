@@ -91,8 +91,12 @@ reverse sweep   = gradient
 
 Step by step:
 
-1. **stanc3 and the stanli OCaml pipeline compile the model.** The official
-   compiler parses and typechecks with the same code CmdStan uses.
+1. **stanc3 and the stanli OCaml pipeline compile the model.** stanli builds
+   stanc3 from its fork, [seantalts/stanc3](https://github.com/seantalts/stanc3)
+   (`STANC3_SRC_REPO` and `STANC3_SRC_SHA` in
+   [`deps/pins.env`](../deps/pins.env)): the stanc3 release CmdStan uses
+   (`STANC3_UPSTREAM_SHA`) plus a few compiler commits on its `stanli`
+   branch. It parses and typechecks with the same code CmdStan uses.
    [`stanli_pipeline.ml`](../compiler/ocaml/stanli_pipeline.ml) owns stanli's
    optimization policy: upstream O1 plus the separately selected upstream
    `vectorize_loops` pass. Before O1's dataflow passes, it isolates function
@@ -108,19 +112,17 @@ Step by step:
    exports the same pipeline through js_of_ocaml and provides the CLI entry
    point cross-built for Windows as `stanli-compile.exe`.
 
-   The exact-pin overlay also applies
-   [`stanc3-int32-fold.patch`](../compiler/ocaml/stanc3-int32-fold.patch).
-   Upstream's partial evaluator otherwise folds with the host OCaml `int`
-   width (63 bits natively and 32 bits under js_of_ocaml), even though Stan
-   integer literals and the portable contract are int32. The correction
-   computes folds in `Int64`: representable int32 results still fold, while an
-   overflowing expression remains in MIR for runtime evaluation. The producer
-   parity gate covers that no-fold path so the correction cannot silently
-   disappear.
+   One of the fork's commits fixes integer folding. Upstream's partial
+   evaluator folds with the host OCaml `int` width (63 bits natively and 32
+   bits under js_of_ocaml), even though Stan integer literals and the portable
+   contract are int32. The fork computes folds in `Int64`: representable int32
+   results still fold, while an overflowing expression remains in MIR for
+   runtime evaluation. The producer parity gate covers that no-fold path so
+   the correction cannot silently disappear.
 
 2. **[`mir_decode.cpp`](../runtime/src/mir_decode.cpp) selects a decoder.**
    Native embedded compilation, the preferred browser compiler, and Windows
-   `stanli-compile.exe` emit the stanli-owned compact portable format. Pristine
+   `stanli-compile.exe` emit the stanli-owned compact portable format. Stock
    browser and Windows rollback compilers, the R JavaScript compiler, and
    user-supplied stock stanc emit the legacy stanc3 s-expression. Both decode
    into the same plain C++ structs (`mir::Stmt`, `mir::Expr`) and share name
@@ -128,7 +130,7 @@ Step by step:
    never a guess.
 
    The Windows wheel keeps the compiler outside `stanli.dll`: it packages the
-   preferred `stanli-compile.exe` and pristine `stanc.exe` rollback as
+   preferred `stanli-compile.exe` and stock `stanc.exe` rollback as
    short-lived subprocesses, with no OCaml compiler DLL. Python selects stock
    only when the portable executable is absent. Native R first honors the
    explicit `STANLI_STANC` stock override, then checks for the portable and
@@ -736,6 +738,10 @@ rebuild command if it is missing or stale. A change to any of those inputs
 reruns the configure on the next `cmake --build`. When
 `STANLI_STANC_EXECUTABLE` is left at `deps/stanc3/stanc`, configure also
 requires its `stanc.src` to match `STANC3_SRC_SHA` in `deps/pins.env`.
+CmdStan references compile with `deps/stanc3/stanc-pinned` instead, built
+from `STANC3_UPSTREAM_SHA` by
+[`harnesses/conformance/build_stanc.sh`](../harnesses/conformance/build_stanc.sh),
+so a fork commit never changes the oracle.
 Old key directories are not pruned; delete `deps/stanc3/embed` to reclaim
 the space.
 

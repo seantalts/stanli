@@ -153,15 +153,10 @@ for (const [name, relative, includes] of models) {
     legacyBytes = Buffer.byteLength(legacyText);
     legacyGzipBytes = zlib.gzipSync(legacyText).length;
 
-    // The checked overflow policy deliberately differs from pristine stanc3:
-    // it retains an expression whose native and JavaScript host-int folds
-    // disagree. All ordinary compatible-stanc inputs must remain identical.
-    if (name !== "int32-overflow") {
-      const compatible = compatibleStanc(
-          "embedded_model", code, ["O1", "debug-optimized-mir"], includes);
-      if (compatible.errors || String(compatible.result) !== legacyText)
-        fail(name + ": custom stanc() differs from stock fallback");
-    }
+    const compatible = compatibleStanc(
+        "embedded_model", code, ["O1", "debug-optimized-mir"], includes);
+    if (compatible.errors || String(compatible.result) !== legacyText)
+      fail(name + ": custom stanc() differs from stock fallback");
   }
   measurements.push({
     model: name,

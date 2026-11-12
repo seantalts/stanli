@@ -19,9 +19,8 @@
 # --corpus adds: ~2 GB of checkouts under deps/ and a CmdStan build.
 # --conformance adds: the pinned CmdStan/BridgeStan pair and a venv
 #   holding the version-pinned reference client. It reuses the same
-#   deps/cmdstan checkout as --corpus and the same stanc3 source tree and
-#   opam switch as core, so with either of those already done most of
-#   it is a no-op.
+#   deps/cmdstan checkout and CmdStan stanc as --corpus and the opam switch
+#   as core, so with either of those already done most of it is a no-op.
 # Embedding is the default; use --no-embed on Windows ARM64.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -120,19 +119,17 @@ step "fetching pinned deps (Stan Math and Stan)"
 ./deps/fetch.sh
 
 # --- source-pinned stanc3 --------------------------------------------------
-# Fixture generation and the signature model generators run this executable.
-# build_stanc caches by source revision.
+# Fixture generation and the signature model generators run this executable,
+# built from stanli's stanc3 fork. build_stanc caches by source revision.
 step "stanc3 executable from source at $STANC3_SRC_SHA"
 # The embed build needs the source checkout too. Force the centralized builder
 # to recreate a cached output when that checkout or its opam switch is absent.
 if [ "$(git -C deps/stanc3-src rev-parse HEAD 2>/dev/null || true)" != \
      "$STANC3_SRC_SHA" ] ||
    ! opam switch list --color=never --short 2>/dev/null | tr -d '\r' | grep -qx "$OPAM_SWITCH"; then
-  rm -f deps/stanc3/stanc-pinned deps/stanc3/stanc-pinned.src
+  rm -f "deps/stanc3/stanc$EXE_SUFFIX" deps/stanc3/stanc.src
 fi
-./harnesses/conformance/build_stanc.sh "$OPAM_SWITCH"
-install -m 755 deps/stanc3/stanc-pinned "deps/stanc3/stanc$EXE_SUFFIX"
-cp deps/stanc3/stanc-pinned.src deps/stanc3/stanc.src
+./harnesses/conformance/build_stanc.sh --stanli "$OPAM_SWITCH"
 [ "$(cat deps/stanc3/stanc.src)" = "$STANC3_SRC_SHA" ] || {
   echo "stanc3 provenance does not match STANC3_SRC_SHA" >&2
   exit 1
@@ -211,13 +208,13 @@ if [ "$WANT_CORPUS" = 1 ]; then
 fi
 
 # --- Stan conformance reference stack (optional) ---------------------------
-# The nightly sweep's oracle, locally: the pinned stanc built from source,
+# The nightly sweep's oracle, locally: CmdStan's stanc built from source,
 # the exact CmdStan/Stan/Stan Math triple BridgeStan compiles against, and
 # the pinned reference client. fetch_cmdstan.sh --bridgestan already does the
 # first three and already refuses to proceed on a pin mismatch, so this adds
 # only the client and the staged runtime -- and every part of it is a no-op on the
 # second run. The cost people remember is the one-time stanc build; it is
-# once per machine per pin, not once per session, and core pays it too.
+# once per machine per pin, not once per session.
 if [ "$WANT_CONFORMANCE" = 1 ]; then
   step "conformance reference toolchain (stanc from source, CmdStan, BridgeStan)"
   ./harnesses/conformance/fetch_cmdstan.sh --bridgestan
@@ -286,7 +283,7 @@ if [ "$WANT_CONFORMANCE" = 1 ]; then
 conformance: one case, from the repo root, to prove the stack end to end:
 
   "$VENV_PYTHON" harnesses/stan_conformance.py \\
-    --stanc deps/stanc3/stanc$EXE_SUFFIX --cmdstan deps/cmdstan \\
+    --stanc deps/stanc3/stanc-pinned --cmdstan deps/cmdstan \\
     --build build-rel --stanli-pythonpath python \\
     --case 'abs(real)=>real'
 

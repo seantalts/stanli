@@ -263,7 +263,7 @@ def sweep_one(spec, cs, tmp, keep, density=True):
         return name, "unsupported", why[:60], None, None
 
     exe, err = build_reference(cs, d, stan, REPO / "tools/ref_driver.cpp",
-                               REPO / "deps/stanc3/stanc", name=name,
+                               toolchain.PINNED_STANC, name=name,
                                sundials=False, run=run, trim=60)
     if exe is None:
         status, _, note = err.partition(": ")
@@ -303,7 +303,7 @@ def main():
                     help="build tree holding stanli_check and bench_grad")
     args = ap.parse_args()
     BUILD = args.build
-    toolchain.require_pinned_toolchain(args.cmdstan.resolve(), REPO / "deps/stanc3/stanc")
+    toolchain.require_pinned_toolchain(args.cmdstan.resolve(), toolchain.PINNED_STANC)
 
     have = claimed()
     density = not args.from_stanc

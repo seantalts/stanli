@@ -11,7 +11,8 @@
 # Reporting is this script's whole job. New signatures cannot be
 # *tested* by any frozen toolchain -- exercising them means adopting a
 # compiler and a stan-math that know them, which is a reviewed pin
-# advance (STANC3_SRC_SHA in deps/pins.env), not a CI action.
+# advance (a rebase of the fork's stanli branch, then STANC3_SRC_SHA and
+# STANC3_UPSTREAM_SHA in deps/pins.env), not a CI action.
 #
 # Usage: harnesses/conformance/signature_watch.sh [upstream-ref]
 # Exit 0 always, unless a fetch itself fails.
@@ -75,7 +76,8 @@ n_removed=$(printf '%s' "$removed" | grep -c . || true)
     echo "The pin covers everything upstream offers."
   else
     echo
-    echo "To adopt: advance STANC3_SRC_SHA in deps/pins.env and" \
-         "rerun the conformance suite against the new frontend."
+    echo "To adopt: rebase the stanc3 fork, advance STANC3_SRC_SHA and" \
+         "STANC3_UPSTREAM_SHA in deps/pins.env, and rerun the conformance" \
+         "suite against the new frontend."
   fi
 } | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"

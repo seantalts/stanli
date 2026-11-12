@@ -232,7 +232,7 @@ def sweep_one(case, cs, tmp, build, legacy=False):
         return name, "unsupported", why[:80]
 
     exe, err = build_reference(cs, d, stan, REPO / "tools/ref_driver.cpp",
-                               REPO / "deps/stanc3/stanc", name=name,
+                               toolchain.PINNED_STANC, name=name,
                                run=run, trim=100)
     if exe is None:
         return name, "ref_fail", err
@@ -269,7 +269,7 @@ def main():
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args()
     cs = pathlib.Path(args.cmdstan).resolve()
-    toolchain.require_pinned_toolchain(cs, REPO / "deps/stanc3/stanc")
+    toolchain.require_pinned_toolchain(cs, toolchain.PINNED_STANC)
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="ode_sweep_"))
     cases = [(c, False) for c in CASES if args.filter in c[0]]
