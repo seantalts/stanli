@@ -21,17 +21,9 @@
 namespace stanli {
 namespace {
 
-using Arr = Eigen::Array<double, -1, 1>;
-using MapA = Eigen::Map<Arr>;
-using CMapA = Eigen::Map<const Arr>;
-
 // Sequential sum, matching Eigen's redux over a non-vectorizable strided
-// expression (which is how the rev matrix overloads reduce). Under packet
-// math this becomes Eigen's own (tree) reduction, as the varmat overloads
-// use: 4.3x faster per element and a different, equally valid summation
-// order.
+// expression (which is how the rev matrix overloads reduce).
 inline double seq_sum(const double* p, int64_t n) {
-  if (packet_math()) return CMapA(p, n).sum();
   double s = 0.0;
   for (int64_t i = 0; i < n; ++i) s += p[i];
   return s;
@@ -115,8 +107,6 @@ inline bool has_inf(const Bound& b, int64_t n, double inf) {
 // the elements that do transform still land where they did.
 inline double masked_sum(const double* x, const double* bound, int64_t n,
                          double inf) {
-  if (packet_math())
-    return (CMapA(bound, n) != inf).select(CMapA(x, n), 0.0).sum();
   double s = 0.0;
   for (int64_t i = 0; i < n; ++i) s += bound[i] == inf ? 0.0 : x[i];
   return s;
@@ -171,17 +161,9 @@ void clower_fwd(KernelCtx& ctx) {
     ctx.out2.data[0] = masked_sum(x, lb.p, n, kNegInf);
     return;
   }
-  if (packet_math() && n > 1) {
-    MapA(exp_x, n) = CMapA(x, n).exp();
-    if (lb.varies())
-      MapA(ctx.out.data, n) = MapA(exp_x, n) + CMapA(lb.p, n);
-    else
-      MapA(ctx.out.data, n) = MapA(exp_x, n) + lb[0];
-  } else {
-    for (int64_t i = 0; i < n; ++i) {
-      exp_x[i] = std::exp(x[i]);
-      ctx.out.data[i] = exp_x[i] + lb[i];
-    }
+  for (int64_t i = 0; i < n; ++i) {
+    exp_x[i] = std::exp(x[i]);
+    ctx.out.data[i] = exp_x[i] + lb[i];
   }
   ctx.out2.data[0] = seq_sum(x, n);
 }
@@ -238,17 +220,9 @@ void cupper_fwd(KernelCtx& ctx) {
     ctx.out2.data[0] = masked_sum(x, ub.p, n, kPosInf);
     return;
   }
-  if (packet_math() && n > 1) {
-    MapA(exp_x, n) = CMapA(x, n).exp();
-    if (ub.varies())
-      MapA(ctx.out.data, n) = CMapA(ub.p, n) - MapA(exp_x, n);
-    else
-      MapA(ctx.out.data, n) = ub[0] - MapA(exp_x, n);
-  } else {
-    for (int64_t i = 0; i < n; ++i) {
-      exp_x[i] = std::exp(x[i]);
-      ctx.out.data[i] = ub[i] - exp_x[i];
-    }
+  for (int64_t i = 0; i < n; ++i) {
+    exp_x[i] = std::exp(x[i]);
+    ctx.out.data[i] = ub[i] - exp_x[i];
   }
   ctx.out2.data[0] = seq_sum(x, n);
 }
@@ -289,15 +263,9 @@ inline void clu_inv_logit(const double* x, double* il, int64_t n) {
   }
   // Matrix rev overload: Eigen's scalar logistic functor over a strided
   // .val() expression: e/(1+e) with an inf guard, no sign branch.
-  if (packet_math()) {
-    MapA(il, n) = CMapA(x, n).exp();
-    MapA(il, n) =
-        (MapA(il, n).isInf()).select(1.0, MapA(il, n) / (1.0 + MapA(il, n)));
-  } else {
-    for (int64_t i = 0; i < n; ++i) {
-      const double e = std::exp(x[i]);
-      il[i] = std::isinf(e) ? 1.0 : e / (1.0 + e);
-    }
+  for (int64_t i = 0; i < n; ++i) {
+    const double e = std::exp(x[i]);
+    il[i] = std::isinf(e) ? 1.0 : e / (1.0 + e);
   }
 }
 

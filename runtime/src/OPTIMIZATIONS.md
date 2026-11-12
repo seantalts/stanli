@@ -1355,8 +1355,8 @@ the whole-model effect is small per site but the pattern is wide.
 Three measured dead ends, recorded so they are not retried. `-ffp-contract=fast`
 is a 1.7% geomean slowdown on this corpus (`arK` 0.85, reproducible) and
 perturbs 101 of 120 models at reduction-class magnitudes, so the `off` in
-`CMakeLists.txt` stays. The `STANLI_PACKET_MATH` fast forms (constrain,
-`inv_logit`, `seq_sum`) measure 0.995 geomean: neutral, correctly left off.
+`CMakeLists.txt` stays. The packet-math fast forms (constrain,
+`inv_logit`, `seq_sum`) measured 0.995 geomean: neutral, so they were removed.
 And Eigen's vectorized `pow` is 5x slower than scalar `std::pow` on Apple
 libm, with the `exp(k log x)` form costing 8 ULP, so the `POW` share of the
 `dogs` models stays where it is.

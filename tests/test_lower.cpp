@@ -3569,10 +3569,6 @@ static void test_region_map() {
 }
 
 int main() {
-  // These fixtures pin ULP-level parity with DEFAULT CmdStan, whose AoS
-  // Matrix<var> paths run scalar libm per element; the packet path answers
-  // to `stanc --O1` instead and is verified there.
-  stanli::set_packet_math(false);
   using namespace stanli;
 
   // Section A1's five reductions must lower in the autodiff model graph, not

@@ -31,16 +31,6 @@ Kernel& kernel(uint16_t opcode) {
   return g_table[opcode];
 }
 
-// Default OFF, on measurement: see packet.hpp. Opt in with
-// STANLI_PACKET_MATH=1.
-static bool g_packet_math = [] {
-  const char* e = std::getenv("STANLI_PACKET_MATH");
-  return e != nullptr && e[0] != '0';
-}();
-
-bool packet_math() { return g_packet_math; }
-void set_packet_math(bool on) { g_packet_math = on; }
-
 static bool g_fixed_small_matrices = true;
 bool fixed_small_matrices() { return g_fixed_small_matrices; }
 void set_fixed_small_matrices(bool on) { g_fixed_small_matrices = on; }
