@@ -108,6 +108,7 @@ int benchmark_main(int argc, char** argv) {
     cm = stanli::compile_model(mir_text, data, 1, compile_options);
     compile_ns = prep_ns(pt);
   }
+  data = stanli::DataMap();
   pt = prep_now();
   stanli::Executor ex(std::move(cm.graph));
   const int64_t executor_ns = prep_ns(pt);

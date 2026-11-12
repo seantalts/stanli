@@ -209,6 +209,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
     options.reduce_sum_threads = threads_per_chain;
     options.fast_math = fast_math;
     m->cm = stanli::compile_model(tmir_sexp, data, seed, options);
+    data = stanli::DataMap();
     m->reduce_sum_count =
         (int)std::count_if(m->cm.graph.ops.begin(), m->cm.graph.ops.end(),
                            [](const stanli::Op& op) {

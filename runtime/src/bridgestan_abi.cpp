@@ -307,6 +307,7 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
     // so does stanli's compile: the section runs once here, at construction.
     stanli::DataMap dm = load_data(data);
     m->cm = stanli::compile_model(mir, dm, seed);
+    dm = stanli::DataMap();
     m->ex.reset(new stanli::Executor(std::move(m->cm.graph)));
     m->cm.bind(*m->ex);
     m->pool.reset(new stanli::ExecutorPool(*m->ex));
