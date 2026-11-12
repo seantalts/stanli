@@ -1843,6 +1843,12 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
         if (lower_region_map(s, lo, hi)) return Flow::Next;
         if (try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi}))
           return Flow::Next;
+        if (write_array_loop_retained(s, lo, hi)) {
+          retaining_write_array_loop = true;
+          const ScopeExit leave{[&] { retaining_write_array_loop = false; }};
+          if (try_lower_region(s, std::pair<int64_t, int64_t>{lo, hi}))
+            return Flow::Next;
+        }
         if (in_write_array && structured_policy != StructuredMode::Off &&
             region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi})) {
           lower_runtime_ifelse(s);

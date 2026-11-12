@@ -1252,6 +1252,8 @@ gate.
 
 `OP_LOOP` keeps a loop whose body has a `while` or a parameter branch as one
 graph op (`lower.cpp`, `structured_loop.cpp`, `structured_recording.inc`).
+In `write_array` it also keeps a loop that carries a value between
+iterations once the graph is large (`write_array_loop_retained`).
 [How it works](../../docs/how-it-works.md#retained-loops) explains selection,
 recording and guarded replay. Large recordings are sealed into per-iteration
 numerical frames, and frame admission enables a temporary recording program
