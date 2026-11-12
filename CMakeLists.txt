@@ -1672,7 +1672,7 @@ if(Python3_Interpreter_FOUND)
   # the files, replay against recorded CmdStan references: log density,
   # gradient, output names and values at the three corpus points. The
   # committed artifact makes this run without a CmdStan checkout;
-  # tools/check_signature_models.py --record refreshes it when coverage
+  # tools/verify_sample.py --corpus signatures refreshes it when coverage
   # moves.
   foreach(STANLI_SIGNATURE_MODEL IN LISTS STANLI_BUILTIN_SIGNATURE_MODELS
           STANLI_DENSITY_SIGNATURE_MODELS)

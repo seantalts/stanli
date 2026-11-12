@@ -27,7 +27,7 @@ element so a failure names its case.
   python3 tools/gen_container_flow_models.py          # write
   python3 tools/gen_container_flow_models.py --check  # freshness gate
 
-Record references with tools/check_function_models.py --record (see
+Record references with tools/verify_sample.py --corpus container_flow (see
 tests/function_coverage/README.md).
 """
 from __future__ import annotations

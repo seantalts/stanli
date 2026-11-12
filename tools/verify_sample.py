@@ -25,6 +25,13 @@ away defeats the whole oracle. See TESTING.md.
 Usage: tools/verify_sample.py CMDSTAN_DIR PDB_DIR model1 model2 ...
        tools/verify_sample.py CMDSTAN_DIR PDB_DIR --from-refs [--jobs N]
        tools/verify_sample.py CMDSTAN_DIR PDB_DIR --output PATH model1 ...
+       tools/verify_sample.py CMDSTAN_DIR --corpus NAME [--model M ...]
+
+--corpus records one of the local corpora verify_refs.py --corpus replays.
+Every point must be accepted by CmdStan, and strict corpora need the full
+write_array row too; stanli is not run. Without --model it records the
+models whose reference is missing or whose source or data changed, and
+--from-refs records all of them.
 """
 import argparse
 import concurrent.futures
@@ -44,9 +51,9 @@ import toolchain
 # The deviation arithmetic and the reference format live in the replay
 # script, not here, so a change to either cannot land in the recorder
 # without landing in the CI gate.
-from verify_refs import (POINTS, REFS_PATH, SCHEMA, accepted,
-                         default_check_bin, load_refs, model_files,
-                         pair_dev, parse_status, parse_wa)
+from verify_refs import (CORPORA, POINTS, REFS_PATH, SCHEMA, accepted,
+                         default_check_bin, fixture_models, load_refs,
+                         model_files, pair_dev, parse_status, parse_wa)
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # Everything the recorded numbers depend on, by revision. Read from the
@@ -124,7 +131,7 @@ def write_results(results):
     out.write_text(json.dumps(prev, indent=1, sort_keys=True) + "\n")
 
 
-def write_refs(refs, recorded, fresh=False, path=None):
+def write_refs(refs, recorded, fresh=False, path=None, drop=()):
     """Merge the raw CmdStan values into the committed reference file.
 
     tools/verify_refs.py replays these without CmdStan installed, which is
@@ -160,6 +167,8 @@ def write_refs(refs, recorded, fresh=False, path=None):
     # recording rig. Never stamp the default rig over those retained values.
     blob["models"].update({name: {**entry, "recorded": entry.get("recorded", recorded)}
                            for name, entry in refs.items()})
+    for name in drop:
+        blob["models"].pop(name, None)
     text = json.dumps(blob, indent=0, sort_keys=True).encode()
     path.write_bytes(gzip.compress(text, mtime=0))
 
@@ -367,11 +376,80 @@ def one(model, cs, pdb, work, cases, check_bin, cxx="clang++"):
     return (model, entry, result, lines)
 
 
+def record_local(model, stan, dj, exe, strict):
+    """One local corpus entry, from CmdStan alone."""
+    points = {}
+    for point in POINTS:
+        out = subprocess.run([str(exe), str(dj), str(point)],
+                             capture_output=True, text=True,
+                             timeout=600).stdout
+        ref = parse_status(out)
+        if strict:
+            points[str(point)] = {"values": ref[1:], "wa": strict_outputs(
+                model, point, ref, out)}
+            continue
+        if not accepted(ref):
+            raise ValueError(f"CmdStan rejects {model} at point {point}")
+        points[str(point)] = {"values": ref[1:]}
+        wa = parse_wa(out)
+        if wa:
+            points[str(point)]["wa"] = {"names": wa[0], "values": wa[1]}
+    return {"source_sha256": source_digest(stan),
+            "data_sha256": source_digest(dj), "points": points}
+
+
+def record_corpus(cs, name, wanted, everything, work, jobs, cxx):
+    corpus = CORPORA[name]
+    if corpus.refs == REFS_PATH:
+        raise SystemExit(f"the {name} models are corpus models; record them "
+                         "by name without --corpus")
+    refs = load_refs(corpus.refs)[0] if corpus.refs.exists() else {}
+    models = (corpus.models(work) if corpus.models
+              else fixture_models(sorted(set(refs) | set(wanted)))(work))
+    unknown = sorted(set(wanted) - set(models))
+    if unknown:
+        raise SystemExit(f"not in the {name} corpus: " + " ".join(unknown))
+
+    def current(model):
+        source, data = models[model][:2]
+        ref = refs.get(model, {})
+        return (ref.get("source_sha256") == source_digest(source)
+                and ref.get("data_sha256") == source_digest(data))
+
+    todo = wanted or [m for m in sorted(models) if everything or not current(m)]
+    for model in todo:
+        source, _, _, *manifest = models[model]
+        if manifest and source_digest(source) != manifest[0]:
+            raise SystemExit(f"{source} disagrees with its manifest; rerun "
+                             "the signature generators")
+
+    def one(model):
+        source, data = models[model][:2]
+        exe, why = build_ref(cs, work, model, source, cxx)
+        if exe is None:
+            raise SystemExit(f"BUILD_FAIL {model}: {why}")
+        entry = record_local(model, source, data, exe, corpus.strict)
+        print(f"recorded {model}", flush=True)
+        return model, entry
+
+    with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
+        entries = dict(pool.map(one, todo))
+    stale = [] if wanted else sorted(set(refs) - set(models))
+    write_refs(entries, provenance(cs, cxx), fresh=everything,
+               path=corpus.refs, drop=stale)
+    print(f"recorded {len(entries)} {name} models into {corpus.refs}; replay "
+          f"with tools/verify_refs.py --corpus {name}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmdstan", type=pathlib.Path)
-    ap.add_argument("pdb", type=pathlib.Path)
+    ap.add_argument("pdb", type=pathlib.Path, nargs="?")
     ap.add_argument("models", nargs="*")
+    ap.add_argument("--corpus", choices=sorted(CORPORA),
+                    help="record a local corpus's archive instead")
+    ap.add_argument("--model", action="append", default=[],
+                    help="with --corpus, record only this model")
     ap.add_argument("--from-refs", action="store_true",
                     help="record every model already in the output reference file")
     ap.add_argument("--output", type=pathlib.Path, default=REFS_PATH,
@@ -391,6 +469,16 @@ def main():
         toolchain.require_pinned_toolchain(cs.resolve(), REPO / "deps/stanc3/stanc")
     except ValueError as exc:
         ap.error(str(exc))
+    work = args.work or pathlib.Path(
+        tempfile.mkdtemp(prefix="stanli_verify_"))
+    work.mkdir(parents=True, exist_ok=True)
+    if args.corpus:
+        if args.pdb or args.models:
+            ap.error("--corpus takes models with --model")
+        return record_corpus(cs.resolve(), args.corpus, args.model,
+                             args.from_refs, work, args.jobs, args.cxx)
+    if args.pdb is None:
+        ap.error("the posteriordb checkout is required without --corpus")
     pdb = args.pdb / "posterior_database"
     models = list(args.models)
     if args.from_refs:
@@ -398,9 +486,6 @@ def main():
     models = list(dict.fromkeys(models))
     if not models:
         ap.error("name at least one model, or pass --from-refs")
-    work = args.work or pathlib.Path(
-        tempfile.mkdtemp(prefix="stanli_verify_"))
-    work.mkdir(parents=True, exist_ok=True)
     check_bin = default_check_bin()
     recorded = provenance(cs, args.cxx)
     print(f"recording against CmdStan {recorded['cmdstan_version']} "

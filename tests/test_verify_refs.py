@@ -32,6 +32,7 @@ from verify_refs import (ILL_CONDITIONED, KNOWN_GAPS,  # noqa: E402
                          probe_point)
 from cmdstan_ref import point_results, split_points  # noqa: E402
 import verify_sample  # noqa: E402
+import toolchain  # noqa: E402
 import verify_refs  # noqa: E402
 from corpus_inventory import local_cases, source_digest
 from verify_sample import evaluate, record_wa, write_refs  # noqa: E402
@@ -724,6 +725,35 @@ class SchemaTest(unittest.TestCase):
             with self.assertRaises(SystemExit) as caught:
                 load_refs(path)
             self.assertIn(f"schema {SCHEMA}", str(caught.exception))
+
+
+class CorpusArchiveTest(unittest.TestCase):
+    """Every local corpus archive is the corpus schema, at the pins."""
+
+    def test_every_archive_loads_with_hashes_at_the_pins(self):
+        for name, corpus in verify_refs.CORPORA.items():
+            refs, _ = verify_refs.load_corpus_refs(corpus)
+            required = () if corpus.unpinned else ("cmdstan", "stan", "math")
+            with tempfile.TemporaryDirectory() as tmp:
+                models = (corpus.models(pathlib.Path(tmp)) if corpus.models
+                          else refs)
+            for model in models:
+                ref = refs[model]
+                with self.subTest(corpus=name, model=model):
+                    self.assertEqual(
+                        verify_refs.pin_drift(ref["recorded"], required), "")
+                    self.assertIn("source_sha256", ref)
+                    self.assertIn("data_sha256", ref)
+
+    def test_a_pin_bump_requires_a_new_recording(self):
+        recorded = {key: toolchain.pins()[pin] for key, pin in verify_refs.PINS}
+        self.assertEqual(verify_refs.pin_drift(recorded), "")
+        bumped = {**toolchain.pins(), "MATH_SHA": "0" * 40}
+        with unittest.mock.patch.object(toolchain, "pins", lambda: bumped):
+            self.assertIn("re-record", verify_refs.pin_drift(recorded))
+        self.assertIn("without its math",
+                      verify_refs.pin_drift({"cmdstan": recorded["cmdstan"],
+                                             "stan": recorded["stan"]}))
 
 
 class PlatformReferenceTest(unittest.TestCase):

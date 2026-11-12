@@ -1116,6 +1116,9 @@ class Corpus:
     scale_floor: float = 1.0
     strict: bool = True
     case_labels: bool = False
+    # Recorded before references carried provenance; nothing ties them to
+    # a pin until they are re-recorded.
+    unpinned: bool = False
 
 
 def own_data(stan, suffix=".json"):
@@ -1198,24 +1201,44 @@ CORPORA = {
     # also run with --stanc. isclose(rel 1e-9, abs 1e-12): the scaled
     # error with values below 1e-3 held to an absolute 1e-12.
     "cmdstan_replay": Corpus(FIXTURES / "cmdstan_replay" / "references.json.gz",
-                             replay_models, scale_floor=1e-3, strict=False),
+                             replay_models, scale_floor=1e-3, strict=False,
+                             unpinned=True),
     "oncobayes2": Corpus(REFS_PATH, collection_models("oncobayes2"),
                          strict=False),
 }
 
 
-def load_corpus_refs(name, corpus):
-    if name == "oncobayes2":
-        models, recorded = load_refs(corpus.refs)
-        return ({model: {**ref, "recorded": ref.get("recorded", recorded)}
-                 for model, ref in models.items()}, recorded)
-    return LEGACY_LOADERS[name](corpus)
+def load_corpus_refs(corpus):
+    models, recorded = load_refs(corpus.refs)
+    return ({model: {**ref, "recorded": ref.get("recorded", recorded)}
+             for model, ref in models.items()}, recorded)
+
+
+PINS = (("cmdstan", "CMDSTAN_SHA"), ("stan", "STAN_SHA"),
+        ("math", "MATH_SHA"), ("stanc3", "STANC3_SRC_SHA"))
+
+
+def pin_drift(recorded, required=("cmdstan", "stan", "math")):
+    """Why a recording no longer matches deps/pins.env, or "".
+
+    A reference describes one CmdStan build; after a pin bump it must be
+    re-recorded rather than replayed against a toolchain nobody pins.
+    """
+    pins = toolchain.pins()
+    for key, pin in PINS:
+        if key not in recorded:
+            if key in required:
+                return f"recorded without its {key} revision"
+        elif recorded[key] != pins[pin]:
+            return (f"recorded against {key} {recorded[key][:12]}, "
+                    f"deps/pins.env pins {pins[pin][:12]}; re-record it")
+    return ""
 
 
 def replay_corpus(name, selected, check_bin, stanc, jobs, timeout):
     """Replay a local corpus against its archive. Exit status."""
     corpus = CORPORA[name]
-    refs, recorded = load_corpus_refs(name, corpus)
+    refs, recorded = load_corpus_refs(corpus)
     with tempfile.TemporaryDirectory(prefix=f"stanli_{name}_") as tmp:
         work = pathlib.Path(tmp)
         models = (corpus.models(work) if corpus.models
@@ -1239,6 +1262,12 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout):
 
         def one(model):
             source, data, labels, *manifest = models[model]
+            ref = refs[model]
+            drift = pin_drift(ref["recorded"], () if corpus.unpinned else
+                              ("cmdstan", "stan", "math"))
+            if drift or "data_sha256" not in ref:
+                return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
+                        drift or "no data_sha256", [])
             if manifest and source.exists() and source_digest(source) != manifest[0]:
                 return (model, "STALE_SOURCE", 0.0, 0, 0,
                         f"{source} disagrees with its manifest; rerun the "
@@ -1264,8 +1293,8 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout):
             opts = Replay(source, data, args, model in INTERPRETED,
                           corpus.ulp, corpus.scale_floor, corpus.strict,
                           labels, columns, VALUE_ULP_LIMITS.get(model, {}))
-            return check_model(model, refs[model], None, check_bin, work,
-                               timeout, 1e-9, opts=opts)
+            return check_model(model, ref, None, check_bin, work, timeout,
+                               1e-9, opts=opts)
 
         leg = " through stock stanc" if stanc else ""
         with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
@@ -1287,56 +1316,6 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout):
         print(f"{len(failures)} FAILED: " + " ".join(failures))
         return 1
     return 0
-
-
-def _legacy_function_refs(corpus):
-    blob = json.loads(gzip.decompress(corpus.refs.read_bytes()))
-    rename = {"cmdstan_commit": "cmdstan", "stan_commit": "stan",
-              "math_commit": "math"}
-    recorded = {rename.get(k, k): v for k, v in blob["toolchain"].items()}
-    models = {}
-    for name, entry in blob["models"].items():
-        new = {k: v for k, v in entry.items() if k != "points"}
-        new["recorded"] = recorded
-        new["points"] = {str(i): {"values": p["lp_grad"],
-                                  "wa": {"names": ",".join(p["names"]),
-                                         "values": p["values"]}}
-                         for i, p in enumerate(entry["points"])}
-        models[name] = new
-    return models, recorded
-
-
-def _legacy_fixture_refs(_corpus):
-    models = {}
-    for path in sorted(FIXTURES.glob("*.ref.json")):
-        entry = json.loads(path.read_text())
-        if "recorded" in entry:
-            models[path.name[:-len(".ref.json")]] = entry
-    return models, {}
-
-
-def _legacy_replay_refs(_corpus):
-    models = {}
-    for name, (source, data, _) in replay_models(None).items():
-        old = json.loads(source.with_name(f"{name}.ref.json").read_text())
-        if old.get("data") != json.loads(data.read_text()):
-            raise SystemExit(f"{name}: recorded data differs from {data}")
-        points = old["points"] if "points" in old else [old]
-        models[name] = {
-            "source_sha256": old["source_sha256"],
-            "data_sha256": source_digest(data),
-            "points": {str(p["point"]): {"values": [p["lp"]] + p["grad"]}
-                       for p in points}}
-    return models, {}
-
-
-LEGACY_LOADERS = {
-    "functions": _legacy_function_refs, "stan240": _legacy_function_refs,
-    "sort": _legacy_function_refs, "library": _legacy_function_refs,
-    "container_flow": _legacy_function_refs,
-    "signatures": _legacy_function_refs, "fixtures": _legacy_fixture_refs,
-    "cmdstan_replay": _legacy_replay_refs,
-}
 
 
 def main():
@@ -1428,6 +1407,12 @@ def main():
     missing = [m for m in models if m not in refs]
     if missing:
         print(f"no reference recorded for: {' '.join(missing)}")
+        return 2
+    drifted = [(m, pin_drift(refs[m]["recorded"])) for m in models]
+    drifted = [(m, why) for m, why in drifted if why]
+    if drifted:
+        for model, why in drifted:
+            print(f"REFERENCE_INCOMPLETE {model} {why}")
         return 2
 
     # Which CmdStan these values came from is part of reading the result:
