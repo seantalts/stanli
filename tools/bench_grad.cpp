@@ -1,5 +1,5 @@
 // Per-gradient latency at fixed points, or file-to-bound-executor latency
-// with --prep (no warmup or model evaluation).
+// with --prep (no warmup; one gradient after the timed preparation).
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/model_adapter.hpp>
@@ -7,7 +7,12 @@
 #include <stan/math.hpp>
 #include "benchmark_timer.hpp"
 
+#ifndef _WIN32
+#include <sys/resource.h>
+#endif
+
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -15,6 +20,20 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+static long long peak_rss_bytes() {
+#ifdef _WIN32
+  return -1;
+#else
+  struct rusage ru;
+  if (getrusage(RUSAGE_SELF, &ru) != 0) return -1;
+#ifdef __APPLE__
+  return (long long)ru.ru_maxrss;
+#else
+  return (long long)ru.ru_maxrss * 1024;
+#endif
+#endif
+}
 
 static std::string slurp(const char* p) {
   std::ifstream f(p);
@@ -119,13 +138,6 @@ int benchmark_main(int argc, char** argv) {
     std::fprintf(stderr, "stanli_prep graph=driver stage=total ns=%lld\n",
                  (long long)total_ns);
   };
-  if (prep_only) {
-    const int64_t total_ns = prep_ns(driver_start);
-    report_driver(total_ns, -1, 0);
-    const double seconds = total_ns / 1e9;
-    std::printf("%.9f %lld\n", seconds, (long long)ex.n_params());
-    return 0;
-  }
   // STANLI_PROFILE=1: per-opcode time/count/element accounting on stderr.
   // Enabled for the measured loop only, so warmup does not pollute it.
   const char* prof_env = std::getenv("STANLI_PROFILE");
@@ -139,6 +151,24 @@ int benchmark_main(int argc, char** argv) {
   stanli::ExecutorModel model(ex);
   stan::callbacks::logger logger;
   const auto one = [&]() { stan::model::gradient(model, q, lp, grad, logger); };
+  if (prep_only) {
+    const int64_t total_ns = prep_ns(driver_start);
+    report_driver(total_ns, -1, 0);
+    const long long prep_rss = peak_rss_bytes();
+    double first_gradient_s = std::nan("");
+    try {
+      const Time g0 = Clock::now();
+      one();
+      first_gradient_s =
+          std::chrono::duration<double>(Clock::now() - g0).count();
+    } catch (const std::exception&) {
+    }
+    // <prep seconds> <n_params> <peak RSS bytes after prep, -1 if unknown>
+    // <first gradient seconds, nan if it threw>.
+    std::printf("%.9f %lld %lld %.9f\n", total_ns / 1e9, (long long)n, prep_rss,
+                first_gradient_s);
+    return 0;
+  }
   if (timed) {
     const auto opts = stanli_benchmark::options(argc, argv, 4);
     stanli_benchmark::timed(

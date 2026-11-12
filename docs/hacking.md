@@ -208,7 +208,10 @@ The tools you will reach for most:
   CmdStan-style CSV out.
 - [`bench_grad`](../tools/bench_grad.cpp): gradient/forward timing. Pass
   `--prep` instead of an evaluation count to measure file-to-bound-executor
-  preparation without warmup; `STANLI_PROFILE_PREP=1` splits that path into
+  preparation without warmup. It prints the preparation seconds, the
+  parameter count, peak RSS in bytes after preparation (-1 where the
+  platform has no getrusage), and the seconds of one gradient.
+  `STANLI_PROFILE_PREP=1` splits that path into
   JSON/MIR parsing, every lowering pass, Executor construction, and binding.
   For compile timing, use `graph=compile stage=total`: the enclosing driver
   call also includes emitting the buffered profile rows.
