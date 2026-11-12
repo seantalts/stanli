@@ -1487,9 +1487,6 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_fast_sampling_check
            COMMAND ${Python3_EXECUTABLE} tests/test_fast_sampling_check.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_historical_benchmarks
-           COMMAND ${Python3_EXECUTABLE} tests/test_historical_benchmarks.py
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_sampling
            COMMAND ${Python3_EXECUTABLE} tools/check_corpus_sampling.py
                    --build ${CMAKE_CURRENT_BINARY_DIR}

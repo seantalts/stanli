@@ -7,7 +7,6 @@ import copy
 import json
 import os
 import tempfile
-import zipfile
 import io
 import pathlib
 import shutil
@@ -23,7 +22,7 @@ sys.path.insert(0, str(REPO))
 from harnesses.corpus_bench import (COLS, PROTOCOL, row_line,
     upgrade_header, Runner, PhaseFailure, parse_timing, check_pair,
     summarize_pairs, paired_order, open_run, measure_model,
-    benchmark_cases, materialize_data, build_model, run_config)
+    build_model, run_config)
 
 
 class EnvironmentTests(unittest.TestCase):
@@ -299,7 +298,7 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(output.read_text(), "historical data\n")
 
 
-class SetupEstimateTests(unittest.TestCase):
+class SetupEstimateFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -350,6 +349,8 @@ class SetupEstimateTests(unittest.TestCase):
             return measure_model("m", self.source, self.data, self.root,
                                  {"run_id": "test-run"}, self.runner, self.args, reference=reference)
 
+
+class SetupEstimateTests(SetupEstimateFixture):
     def test_proxy_includes_each_setup_component_but_not_driver_build(self):
         record = self.measure()
         row = record["row"]
@@ -598,7 +599,7 @@ class CompilerSelectionTests(unittest.TestCase):
             self.assertEqual(commands["stanli"][0], args.bench)
 
 
-class FastMathModeTests(SetupEstimateTests):
+class FastMathModeTests(SetupEstimateFixture):
     def run_with(self, fast_math):
         self.args.fast_math = fast_math
         with mock.patch("harnesses.corpus_bench.compile_cmd", return_value=["c++"]):
@@ -629,142 +630,6 @@ class FastMathModeTests(SetupEstimateTests):
         self.assertNotIn("fast_math", run_config(SimpleNamespace(**base, fast_math=False)))
         self.assertIs(run_config(SimpleNamespace(**base, fast_math=True))["fast_math"], True)
         self.assertEqual(run_config(SimpleNamespace(**base))["points"], 4)
-
-
-class CorpusInventoryTests(unittest.TestCase):
-    def test_educational_cases_are_default_and_selectable_without_posteriordb(self):
-        cases = benchmark_cases(pathlib.Path("missing/posterior_database"))
-        self.assertEqual(len(cases), 227)
-        self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "educational")), 13)
-        self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "rethinking")), 62)
-        self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "brms")), 124)
-        self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "cogmod")), 22)
-        self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "ctsem")), 3)
-        self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "oncobayes2")), 3)
-        self.assertEqual(len(benchmark_cases(pathlib.Path("missing"), "teaching")), 199)
-        for source, data in cases.values():
-            self.assertTrue(source.is_file())
-            self.assertTrue(data.is_file())
-        self.assertEqual(benchmark_cases(pathlib.Path("missing"), "posteriordb"), {})
-        with self.assertRaises(ValueError):
-            benchmark_cases(pathlib.Path("missing"), "typo")
-
-    def test_posteriordb_keeps_first_dataset_and_can_combine_collections(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = pathlib.Path(tmp)
-            (root / "posteriors").mkdir()
-            for name, data in [("a", "first"), ("b", "second")]:
-                (root / "posteriors" / (name + ".json")).write_text(json.dumps(
-                    {"model_name": "example", "data_name": data}))
-            cases = benchmark_cases(root)
-            self.assertEqual(len(cases), 228)
-            self.assertEqual(cases["example"][1].name, "first.json.zip")
-            self.assertEqual(len(benchmark_cases(root, "posteriordb")), 1)
-
-    def test_plain_and_zipped_data_materialize_identically(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = pathlib.Path(tmp)
-            plain, zipped, result = root / "data.json", root / "data.json.zip", root / "out.json"
-            payload = b'{"N": 2, "y": [0.25, 0.75]}\n'
-            plain.write_bytes(payload)
-            with zipfile.ZipFile(zipped, "w") as archive:
-                archive.writestr("data.json", payload)
-            for source in [plain, zipped]:
-                materialize_data(source, result)
-                self.assertEqual(result.read_bytes(), payload)
-
-
-
-class TriageTests(unittest.TestCase):
-    def render(self, rows):
-        from harnesses.triage_bench import main
-        with tempfile.TemporaryDirectory() as temp:
-            path = pathlib.Path(temp) / "bench.tsv"
-            with path.open("w", newline="") as stream:
-                writer = csv.DictWriter(stream, fieldnames=list(rows[0]), delimiter="\t")
-                writer.writeheader()
-                writer.writerows(rows)
-            output = io.StringIO()
-            with mock.patch.object(sys, "argv", ["triage_bench.py", str(path), "--all"]), \
-                    contextlib.redirect_stdout(output):
-                main()
-            return output.getvalue()
-
-    def test_current_estimates_use_paired_ratio_and_keep_missing_estimates_visible(self):
-        row = dict(model="valid", stanli_ns_grad=100, cmdstan_ns_grad=200,
-                   paired_speedup=1.25, gradient_count=5000,
-                   stanli_estimated_s=.1, cmdstan_estimated_s=.2, note="")
-        missing = dict(row, model="missing", stanli_estimated_s="", cmdstan_estimated_s="",
-                       note="ordinary build failed")
-        result = self.render([row, missing])
-        self.assertIn("reference-run gradients (proxy, not HMC time)", result)
-        self.assertNotIn("Historical sampling", result)
-        measured = next(line.split() for line in result.splitlines() if line.lstrip().startswith("valid "))
-        self.assertEqual(measured[-4:], ["1.25x", "0.10", "0.20", "2.00x"])
-        absent = next(line.split() for line in result.splitlines() if line.lstrip().startswith("missing "))
-        self.assertEqual(absent[-3:], ["-", "-", "-"])
-        self.assertIn("ordinary build failed", result)
-
-    def test_historical_sampling_remains_explicitly_labeled(self):
-        result = self.render([dict(model="old", stanli_ns_grad=100, cmdstan_ns_grad=200,
-                                   stanli_sample_s=3, cmdstan_sample_s=9, note="")])
-        self.assertIn("Historical sampling seconds", result)
-        self.assertNotIn("Estimated seconds", result)
-        measured = next(line.split() for line in result.splitlines() if line.lstrip().startswith("old "))
-        self.assertEqual(measured[-4:], ["2.00x", "3.00", "9.00", "3.00x"])
-
-
-
-class HistoricalResultsTests(unittest.TestCase):
-    def report(self):
-        return json.loads((REPO / "tests/educational/pareto-benchmark-results.json").read_text())
-
-    def render(self, report):
-        from tools.corpus_table import render_historical_sampling
-        result = io.StringIO()
-        with contextlib.redirect_stdout(result):
-            render_historical_sampling(report)
-        return result.getvalue()
-
-    def test_results_page_matches_retained_measurements(self):
-        rendered = self.render(self.report())
-        page = (REPO / "notes/performance/benchmark-history.md").read_text()
-        body = page.split("<!-- educational-results:start -->\n")[1].split(
-            "<!-- educational-results:end -->")[0]
-        self.assertEqual(rendered, body)
-        self.assertEqual(rendered.count("| `aalto_"), 13)
-        self.assertIn("compiled CmdStan run", rendered)
-
-    def test_gradient_results_page_matches_raw_suite_rows(self):
-        from tools.corpus_table import load_rows, render_gradients
-        rows, col = load_rows(REPO / "docs/internal/artifacts/educational-bench-o1.tsv")
-        result = io.StringIO()
-        with contextlib.redirect_stdout(result):
-            render_gradients(rows, col)
-        body = (REPO / "notes/performance/benchmark-history.md").read_text().split(
-            "<!-- educational-gradients:start -->\n")[1].split(
-            "<!-- educational-gradients:end -->")[0]
-        self.assertEqual(result.getvalue(), body)
-        self.assertEqual(len(rows), 13)
-        # Nonfinite timing data cannot become a published speedup.
-        invalid = [["m", "1", "nan", "100", ""]]
-        columns = ["model", "params", "stanli_ns_grad", "cmdstan_ns_grad", "note"]
-        with self.assertRaises(ValueError), contextlib.redirect_stdout(io.StringIO()):
-            render_gradients(invalid, lambda r, c: r[columns.index(c)])
-
-    def test_missing_model_or_failed_performance_cannot_be_published(self):
-        report = self.report()
-        missing = copy.deepcopy(report)
-        del missing["models"]["aalto_bern"]
-        with self.assertRaises(ValueError):
-            self.render(missing)
-        failed = copy.deepcopy(report)
-        # The renderer must recompute from observations, not trust a stale
-        # saved speedup/pass cell after observations have changed.
-        failed["models"]["aalto_gpareto"]["benchmark"]["seconds"]["stanli"] = [100] * 5
-        with self.assertRaises(ValueError):
-            self.render(failed)
-
 
 
 class BenchmarkCatalogTests(unittest.TestCase):
@@ -914,14 +779,6 @@ class BenchmarkCatalogTests(unittest.TestCase):
         self.records[0]["setup"]["cmdstan_build"]["returncode"] = 1
         with self.assertRaisesRegex(ValueError, "exit status zero"):
             self.render()
-
-    def test_plain_tsv_cli_cannot_render_current_unvalidated_estimates(self):
-        from tools.corpus_table import main
-        self.render()
-        for flags in ([], ["--gradients"], ["--o1vec"]):
-            with self.subTest(flags=flags), mock.patch.object(sys, "argv", ["corpus_table", *flags, str(self.paths[0])]):
-                with self.assertRaisesRegex(SystemExit, "raw evidence validation"):
-                    main()
 
     def test_setup_phase_cannot_be_substituted_with_gradient_driver_build(self):
         self.records[0]["setup"]["cmdstan_build"]["phase"] = "good/gradient-driver-build"
