@@ -151,7 +151,8 @@ int main(int argc, char** argv) {
                  "       [--point N | --points N,N,...] [--sweep K] "
                  "[--columns] [--fast-math]\n"
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
-                 "[--draw-variant N] [--cross-points N] [--ledger PATH]]\n"
+                 "[--draw-variant N] [--cross-points N] [--cross-rel-tol T]\n"
+                 "        [--ledger PATH]]\n"
                  "       [--dump-passes=STAGES] [--dump-dir=DIR]\n"
                  "       stanli_check --compiler\n");
     return 2;
@@ -171,6 +172,7 @@ int main(int argc, char** argv) {
   std::string ledger_path = "tests/cross_path_ledger.json";
   int draw_variant = -1;
   int cross_points = stanli::cross::kDefaultPoints;
+  double cross_rel_tol = 0.0;
   std::string dump_stages, dump_dir;
   for (int i = 3; i < argc; ++i) {
     const std::string a = argv[i];
@@ -194,6 +196,8 @@ int main(int argc, char** argv) {
       draw_variant = std::atoi(argv[++i]);
     else if (a == "--cross-points" && i + 1 < argc)
       cross_points = std::atoi(argv[++i]);
+    else if (a == "--cross-rel-tol" && i + 1 < argc)
+      cross_rel_tol = std::atof(argv[++i]);
     else if (a == "--ledger" && i + 1 < argc)
       ledger_path = argv[++i];
     else if (a == "--stanc" && i + 1 < argc)
@@ -294,6 +298,7 @@ int main(int argc, char** argv) {
     opt.only = cross_one;
     opt.variant = draw_variant;
     opt.points = cross_points < 1 ? 1 : cross_points;
+    opt.rel_tol = cross_rel_tol;
     const stanli::cross::Result r =
         stanli::cross::run_matrix(mir, data, opt, led);
     std::fputs(r.report.c_str(), stdout);
@@ -308,6 +313,9 @@ int main(int argc, char** argv) {
         r.ok ? "OK" : "FAIL", name.c_str(), r.variant, r.comparisons,
         r.failures, r.declared, r.wa_compared, r.wa_rng_excluded,
         r.wa_name_excluded);
+    if (opt.rel_tol > 0.0)
+      std::printf("  %d mismatches within --cross-rel-tol %g\n", r.within_tol,
+                  opt.rel_tol);
     std::printf("  paths: %s\n", r.paths.line().c_str());
     std::string changed;
     for (const auto& [config, did] : r.changed)

@@ -51,6 +51,7 @@
 #include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -630,6 +631,11 @@ struct Options {
   std::string only;       // "", "lp", "grad" or "wa": limits which rows run
   int variant = -1;       // -1 walks the variants until one is in support
   int points = kDefaultPoints;
+  // For the by-hand posteriordb loop only, where reassociating passes are
+  // expected to move low bits: a finite mismatch whose scaled error
+  // |a - b| / max(|a|, 1e-300) is at most this passes. 0 keeps every row
+  // bitwise, which is what CTest runs.
+  double rel_tol = 0.0;
 };
 
 struct Result {
@@ -638,6 +644,7 @@ struct Result {
   int comparisons = 0;
   int failures = 0;
   int declared = 0;
+  int within_tol = 0;
   // Row 5's accounting, so a fully RNG-tainted section reports zero columns
   // compared instead of passing vacuously.
   int wa_compared = 0;
@@ -886,6 +893,11 @@ class Matrix {
       ++res_.declared;
       return;
     }
+    if (opt_.rel_tol > 0.0 && comparable &&
+        std::abs(x - y) / std::max(std::abs(x), 1e-300) <= opt_.rel_tol) {
+      ++res_.within_tol;
+      return;
+    }
     std::string suffix =
         comparable ? "   " + std::to_string(dist) + " ulp" : "   not finite";
     emit_pair(pair, quantity, name_a, fmt_value(x), name_b,
@@ -939,8 +951,16 @@ class Matrix {
          std::to_string(res_.variant) +
          (opt_.points == kDefaultPoints
               ? std::string()
-              : " --cross-points " + std::to_string(opt_.points)));
+              : " --cross-points " + std::to_string(opt_.points)) +
+         (opt_.rel_tol > 0.0 ? " --cross-rel-tol " + fmt_tol(opt_.rel_tol)
+                             : std::string()));
     line("  paths: " + paths.line());
+  }
+
+  static std::string fmt_tol(double t) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%g", t);
+    return buf;
   }
 
   static std::string row_of(const std::string& quantity) {
