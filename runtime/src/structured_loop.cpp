@@ -128,7 +128,6 @@ void prepare_node(StructuredLoop& p, Node& n, unsigned depth,
   n.reuse_primal_output = false;
   n.primal_contract_variant = 0;
   n.primal_contract = nullptr;
-  n.memo = false;
   n.invariant_loop = -1;
   n.site = ~uint32_t{0};
   n.workspace = -1;
@@ -401,7 +400,6 @@ void classify(StructuredLoop& p) {
   };
   walk(p.root, loops, renumber);
 
-  // Segments read their inputs from their own frame.
   std::vector<char> inplace_base(slots, 0), active_reader(slots, 0),
       primal_reader(slots, 0);
   auto mark_readers = [&](Node& n, const std::vector<int>&) {
@@ -1427,8 +1425,9 @@ struct Stream {
   }
 };
 
-// The experimental frame path seals a bounded recording at each outer trip.
-// Code contains relative operands; frame bindings carry the execution's
+// The frame path seals a bounded recording at each outer trip. Large loops
+// select it automatically (prefer_frames); STANLI_STRUCTURED_FRAMES=1 forces
+// it. Code contains relative operands; frame bindings carry the execution's
 // external addresses and derivative identities.
 struct FrameCode {
   std::vector<uint64_t> words;

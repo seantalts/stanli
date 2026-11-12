@@ -1,6 +1,7 @@
 // Included inside structured_loop.cpp's anonymous namespace. This path uses
 // the same recording semantics and kernels, but never retains a whole-loop
-// instruction stream or version table.
+// instruction stream or version table. Large loops select it automatically;
+// structured_instance*.inc builds on its frame code.
 //
 // Instruction headers pack StreamInstr::Kind in the low byte and the total
 // word count above it. Remaining words are scalar operands, followed by any

@@ -3781,12 +3781,6 @@ static const Node* find_kind(const Node& node, Node::Kind kind) {
   return nullptr;
 }
 
-static size_t count_memo(const Node& node) {
-  size_t total = node.memo ? 1 : 0;
-  for (const auto& child : node.children) total += count_memo(child);
-  return total;
-}
-
 // theta * sum(1..n) where the sum is an integer chain on the data import n.
 static std::shared_ptr<StructuredLoop> memo_counter_plan(bool with_break) {
   auto plan = std::make_shared<StructuredLoop>();
@@ -4045,13 +4039,6 @@ static std::vector<double> traced_arm_iterators;
 static void record_arm_mul(KernelCtx& context) {
   traced_arm_iterators.push_back(context.in[1].data[0]);
   find_kernel(OP_MUL)->forward(context);
-}
-
-static const Node* find_memo(const Node& node) {
-  if (node.memo) return &node;
-  for (const auto& child : node.children)
-    if (const Node* found = find_memo(child)) return found;
-  return nullptr;
 }
 
 // theta * sum of the iterators whose table entry is positive; `reuse_guard`
@@ -5256,8 +5243,9 @@ static void frame_program_tests() {
           "retry discards a partially recorded automatic frame tape");
   }
 
-  // Run the established semantic suites through the opt-in path too. Tests
-  // that assert the old recorder's storage statistics remain outside here.
+  // Run the established semantic suites through the forced frame path too.
+  // Tests that assert the old recorder's storage statistics remain outside
+  // here.
   test_setenv("STANLI_STRUCTURED_FRAMES", "1");
   inplace_import_base_tests();
   inplace_duplicate_position_tests();

@@ -66,7 +66,6 @@ struct StructuredLoop {
     // during prepare. Runtime mutation fails closed to ordinary retention.
     uint8_t primal_contract_variant = 0;
     BackwardPrimalReadFn primal_contract = nullptr;
-    bool memo = false;
     int invariant_loop = -1;
     uint32_t site = ~uint32_t{0};
     int64_t workspace = -1;
