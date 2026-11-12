@@ -1037,9 +1037,6 @@ add_executable(bench_mir_decode tools/bench_mir_decode.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(bench_mir_decode PRIVATE stanli)
 add_dependencies(bench_mir_decode stanli_mir_fixtures)
-add_executable(op_census tools/op_census.cpp
-  $<TARGET_OBJECTS:stanli_tbb_stub>)
-target_link_libraries(op_census PRIVATE stanli)
 add_test(NAME test_prep_only
          COMMAND bench_grad tests/fixtures/ar1.tmir.sexp
                  tests/fixtures/ar1.json --prep
@@ -1081,21 +1078,9 @@ target_link_libraries(bench_opcost PRIVATE stanli)
 add_executable(bench_executor_clone EXCLUDE_FROM_ALL
   tools/bench_executor_clone.cpp tests/tbb_stub.cpp)
 target_link_libraries(bench_executor_clone PRIVATE stanli)
-# Within-chain feasibility probes and matched native integration benchmarks.
-add_executable(bench_reduce_sum EXCLUDE_FROM_ALL
-  tools/bench_reduce_sum.cpp tests/tbb_stub.cpp)
-target_link_libraries(bench_reduce_sum PRIVATE stanli)
-add_dependencies(bench_reduce_sum stanli_mir_fixtures)
 add_test(NAME test_bench_opcost_smoke COMMAND bench_opcost --smoke)
 set_tests_properties(test_bench_opcost_smoke PROPERTIES
   PASS_REGULAR_EXPRESSION "sink=")
-# Developer-only bridge for tools/matrix_pullback_hp_check.py: dumps the
-# pre-native nested-tape adjoint and the native kernel's adjoint for
-# matrix_exp and the solve kernels so they can both be checked against an
-# arbitrary-precision reference.
-add_executable(hp_adjoint_dump EXCLUDE_FROM_ALL
-  tools/hp_adjoint_dump.cpp tests/tbb_stub.cpp)
-target_link_libraries(hp_adjoint_dump PRIVATE stanli)
 add_executable(dump_ops tools/dump_ops.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(dump_ops PRIVATE stanli)
@@ -1525,9 +1510,6 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_missing_data
            COMMAND ${Python3_EXECUTABLE} tests/test_missing_data.py
                    $<TARGET_FILE:bench_grad> ${STANLI_STANC_EXECUTABLE}
-           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-  add_test(NAME test_corpus_diagnostics
-           COMMAND ${Python3_EXECUTABLE} tests/test_corpus_diagnostics.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_reports
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_reports.py

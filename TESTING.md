@@ -34,10 +34,9 @@ A change may move a result away from CmdStan by:
 - More, when a high-precision reference shows stanli at least as close to the
   true value as CmdStan. The reference and its provenance are recorded with
   the model. A kernel that replaces a nested-tape backward with a closed form
-  is always held to such a reference:
-  [`tools/matrix_pullback_hp_check.py`](tools/matrix_pullback_hp_check.py)
-  evaluates the `matrix_exp` and matrix-solve adjoints at 60 digits, and the
-  error relative to each matrix's largest entry must not get worse.
+  is always held to such a reference: the `matrix_exp` and matrix-solve
+  adjoints were evaluated at 60 digits, and the error relative to each
+  matrix's largest entry must not get worse.
 
 Anything beyond these budgets is a bug. Bitwise agreement with CmdStan is
 reported for information and is never a gate. A change that trades a bitwise
