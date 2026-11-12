@@ -85,12 +85,12 @@ stanli::DataMap bound_check_data(int N = 1, int M = 1, int R = 1, int C = 1,
   return d;
 }
 
-std::map<std::string, stanli::DataMap::Entry> bound_check_env(
-    const stanli::DataMap& data) {
+// A WaInterp base environment: the listed data entries plus both emit flags.
+std::map<std::string, stanli::DataMap::Entry> emit_env(
+    const stanli::DataMap& data = stanli::DataMap(),
+    std::initializer_list<const char*> keys = {}) {
   std::map<std::string, stanli::DataMap::Entry> env;
-  for (const char* name :
-       {"d", "raw", "N", "M", "lo", "R", "C", "BR", "BC", "matrix_lo"})
-    env[name] = data.at(name);
+  for (const char* key : keys) env[key] = data.at(key);
   for (const char* flag :
        {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
     stanli::DataMap::Entry one;
@@ -100,6 +100,35 @@ std::map<std::string, stanli::DataMap::Entry> bound_check_env(
     env[flag] = one;
   }
   return env;
+}
+
+std::map<std::string, stanli::DataMap::Entry> bound_check_env(
+    const stanli::DataMap& data) {
+  return emit_env(
+      data, {"d", "raw", "N", "M", "lo", "R", "C", "BR", "BC", "matrix_lo"});
+}
+
+std::vector<double> read_row(
+    const std::vector<stanli::CompiledModel::ParamView>& columns,
+    const stanli::Executor& ex) {
+  std::vector<double> row;
+  for (const auto& c : columns) {
+    const double* p = ex.value_ptr(c.slot);
+    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
+  }
+  return row;
+}
+
+bool compiled_completely(const stanli::CompiledModel& cm,
+                         const std::string& what) {
+  if (cm.write_array && !cm.write_array->interp &&
+      cm.write_array->truncated.empty())
+    return true;
+  ++failures;
+  std::printf(
+      "FAIL %s did not compile completely: %s\n", what.c_str(),
+      cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
+  return false;
 }
 
 bool same_double_bytes(const std::vector<double>& a,
@@ -227,15 +256,7 @@ void test_wanames_interpreter_schema() {
   auto prog = std::make_shared<mir::Program>(mir::read_program(
       sexp::parse(slurp("tests/fixtures/wanames.tmir.sexp"))));
 
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp wi(prog, std::move(base));
 
   std::map<std::string, DataMap::Entry> params;
@@ -346,15 +367,7 @@ void test_gq_name_shadowing() {
   // A stale three-wide `x` in the base environment must not widen the row.
   auto prog = std::make_shared<mir::Program>(mir::read_program(
       sexp::parse(slurp("tests/fixtures/gqshadow.tmir.sexp"))));
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   base["x"].r = {1.0, 1.0, 1.0};
   base["x"].dims = {3};
   WaInterp interpreted(prog, std::move(base));
@@ -374,24 +387,10 @@ void test_interpreted_gq() {
   data.set_int("N", 5);
   const std::string text = slurp("tests/fixtures/gqrng.tmir.sexp");
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf("FAIL gqrng: runtime branch did not compile completely\n");
-    return;
-  }
+  if (!compiled_completely(cm, "gqrng")) return;
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  base["N"] = data.at("N");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"N"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry sig;
@@ -451,14 +450,7 @@ void test_compiled_extra_rng() {
   data.set_int("N", 10);
   const std::string text = slurp("tests/fixtures/gqrng_extra.tmir.sexp");
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL gqrng_extra did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "gqrng_extra")) return;
   expect_eq("gqrng_extra columns", joined(cm.write_array->columns),
             "sigma,g,d.1,d.2,d.3,bb");
 
@@ -467,26 +459,12 @@ void test_compiled_extra_rng() {
   wex.params_data()[0] = std::log(1.3);  // sigma's unconstrained log_sd form
   const auto graph_row = [&](WaRng& rng) {
     wex.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& c : cm.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, wex);
   };
 
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  base["N"] = data.at("N");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"N"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry sig;
@@ -542,14 +520,7 @@ void test_compiled_region_rng() {
   data.set_int("K", 3);
   const std::string text = slurp("tests/fixtures/gqrngregion.tmir.sexp");
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL gqrngregion did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "gqrngregion")) return;
   expect_eq("gqrngregion columns", joined(cm.write_array->columns),
             "sigma,e,n,d.1,d.2,d.3,mn.1,mn.2,mn.3,i");
 
@@ -559,24 +530,11 @@ void test_compiled_region_rng() {
   wex.params_data()[0] = std::log(sigma);  // sigma's unconstrained form
   WaRng graph_rng(11);
   wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row;
-  for (const auto& c : cm.write_array->columns) {
-    const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-  }
+  std::vector<double> row = read_row(cm.write_array->columns, wex);
 
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  base["K"] = data.at("K");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"K"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry sig;
@@ -632,25 +590,13 @@ void test_region_rng_is_not_folded() {
   DataMap data = DataMap::from_json_file("tests/fixtures/gqrngfold.json");
   const std::string text = slurp("tests/fixtures/gqrngfold.tmir.sexp");
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL gqrngfold did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "gqrngfold")) return;
   Executor wex(std::move(cm.write_array->graph));
   cm.write_array->bind(wex);
   WaRng rng(5);
   const auto draw_row = [&]() {
     wex.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& c : cm.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, wex);
   };
   const std::vector<double> first = draw_row();
   const std::vector<double> second = draw_row();
@@ -690,17 +636,8 @@ void test_interpreted_gq_densities() {
   }
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* key : {"K", "counts", "y", "Sigma"})
-    base[key] = data.at(key);
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base =
+      emit_env(data, {"K", "counts", "y", "Sigma"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry mu;
@@ -739,15 +676,7 @@ void test_interpreted_gq_gp_covariances() {
   const std::string text = slurp("tests/fixtures/gpmatern.tmir.sexp");
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp wi(program, std::move(base));
 
   std::vector<Eigen::VectorXd> pts(3, Eigen::VectorXd(2));
@@ -800,14 +729,7 @@ void test_compiled_multiply_lower_tri() {
   data.set_int("M", 3);
   const std::string text = slurp("tests/fixtures/mlt.tmir.sexp");
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL mlt did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "mlt")) return;
   // Column-major A with a non-zero upper triangle that must be ignored.
   const double a[9] = {1.0, 0.4, -0.2, 5.0, 2.0, 0.7, 9.0, 8.0, 3.0};
 
@@ -816,24 +738,11 @@ void test_compiled_multiply_lower_tri() {
   std::copy(a, a + 9, wex.params_data());
   WaRng graph_rng(3);
   wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row;
-  for (const auto& c : cm.write_array->columns) {
-    const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-  }
+  std::vector<double> row = read_row(cm.write_array->columns, wex);
 
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  base["M"] = data.at("M");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"M"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry A;
@@ -927,16 +836,7 @@ void test_array_of_matrix_columns() {
   // boundary rejected outright.
   auto prog = std::make_shared<mir::Program>(
       mir::read_program(sexp::parse(slurp("tests/fixtures/amatwa.tmir.sexp"))));
-  std::map<std::string, DataMap::Entry> base;
-  base["d"] = data.at("d");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"d"});
   WaInterp interpreted(prog, std::move(base));
   WaRng rng(1234);
   const std::vector<double> interpreted_values =
@@ -970,16 +870,7 @@ void test_caller_owned_rng() {
   data.set_int("N", 5);
   auto program = std::make_shared<mir::Program>(
       mir::read_program(sexp::parse(slurp("tests/fixtures/gqrng.tmir.sexp"))));
-  std::map<std::string, DataMap::Entry> base;
-  base["N"] = data.at("N");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"N"});
   WaInterp wi(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   DataMap::Entry sig;
@@ -1183,11 +1074,7 @@ void test_write_array_retained_loop() {
     wex.params_data()[0] = mu;
     WaRng graph_rng(7);
     wex.run_forward_only(EvalState{&graph_rng});
-    std::vector<double> row;
-    for (const auto& c : cross.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
+    std::vector<double> row = read_row(cross.write_array->columns, wex);
     WaRng interp_rng(7);
     const std::vector<double> interp_row =
         cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
@@ -1271,11 +1158,7 @@ void test_write_array_block_order() {
     wex.params_data()[0] = mu;
     WaRng graph_rng(7);
     wex.run_forward_only(EvalState{&graph_rng});
-    std::vector<double> row;
-    for (const auto& c : cross.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
+    std::vector<double> row = read_row(cross.write_array->columns, wex);
     WaRng interp_rng(7);
     const std::vector<double> interp_row =
         cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
@@ -1306,26 +1189,13 @@ void test_write_array_vector_rng() {
   const std::string text = slurp("tests/fixtures/gqrng_vector.tmir.sexp");
 
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL gqrng_vector did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  }
+  compiled_completely(cm, "gqrng_vector");
 
   test_setenv("STANLI_STRUCTURED_LOOPS", "0");
   CompiledModel cm_no_loops = compile_model(text, data);
   test_unsetenv("STANLI_STRUCTURED_LOOPS");
-  if (!cm_no_loops.write_array || cm_no_loops.write_array->interp ||
-      !cm_no_loops.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL gqrng_vector with STANLI_STRUCTURED_LOOPS=0 did not compile "
-        "completely: %s\n",
-        cm_no_loops.write_array ? cm_no_loops.write_array->truncated.c_str()
-                                : "no write_array");
-  }
+  compiled_completely(cm_no_loops,
+                      "gqrng_vector with STANLI_STRUCTURED_LOOPS=0");
 
   test_setenv("STANLI_WA_FORCE_INTERP", "1");
   CompiledModel cross = compile_model(text, data);
@@ -1352,11 +1222,7 @@ void test_write_array_vector_rng() {
           0.2 * static_cast<double>(draw + 1) + 0.1 * static_cast<double>(j);
     WaRng graph_rng(11 + draw);
     wex.run_forward_only(EvalState{&graph_rng});
-    std::vector<double> row;
-    for (const auto& c : cross.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
+    std::vector<double> row = read_row(cross.write_array->columns, wex);
     WaRng interp_rng(11 + draw);
     const std::vector<double> interp_row =
         cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
@@ -1689,11 +1555,7 @@ void test_write_array_selected_loop_refused() {
   wex.params_data()[0] = 0.4;
   WaRng graph_rng(9);
   wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row;
-  for (const auto& c : cross.write_array->columns) {
-    const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-  }
+  std::vector<double> row = read_row(cross.write_array->columns, wex);
   WaRng interp_rng(9);
   const std::vector<double> interp_row =
       cross.write_array->interp->eval(cross.constrained_env(pex), interp_rng);
@@ -1772,11 +1634,7 @@ void test_constant_folded_gq_column() {
   wex.params_data()[0] = 0.25;
   WaRng graph_rng(1);
   wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row;
-  for (const auto& c : cm.write_array->columns) {
-    const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-  }
+  std::vector<double> row = read_row(cm.write_array->columns, wex);
   WaRng interp_rng(1);
   const std::vector<double> interp_row =
       cm.write_array->interp->eval(cm.constrained_env(pex), interp_rng);
@@ -1935,14 +1793,7 @@ void test_categorical_rng_lowering_guards() {
   DataMap logit_data;
   logit_data.set_int("K", 4);
   CompiledModel logit_cm = compile_model(logit, logit_data);
-  if (!logit_cm.write_array || logit_cm.write_array->interp ||
-      !logit_cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf("FAIL categorical_logit_rng did not lower natively: %s\n",
-                logit_cm.write_array ? logit_cm.write_array->truncated.c_str()
-                                     : "no write_array");
-    return;
-  }
+  if (!compiled_completely(logit_cm, "categorical_logit_rng")) return;
 
   Executor logit_graph(std::move(logit_cm.write_array->graph));
   logit_cm.write_array->bind(logit_graph);
@@ -1973,17 +1824,7 @@ static stanli::DataMap categorical_data(int k) {
 
 static std::map<std::string, stanli::DataMap::Entry> categorical_base(
     const stanli::DataMap& data) {
-  std::map<std::string, stanli::DataMap::Entry> base;
-  base["K"] = data.at("K");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    stanli::DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
-  return base;
+  return emit_env(data, {"K"});
 }
 
 static stanli::DataMap::Entry categorical_parameter(
@@ -2009,14 +1850,7 @@ void test_compiled_categorical_rng() {
   const std::string text = slurp("tests/fixtures/gq_categorical_rng.tmir.sexp");
   const DataMap data = categorical_data(4);
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL categorical rng: write_array did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "categorical rng")) return;
 
   int categorical_ops = 0, uniform_ops = 0, other_rng_ops = 0;
   for (const Op& op : cm.write_array->graph.ops) {
@@ -2051,13 +1885,7 @@ void test_compiled_categorical_rng() {
   };
   const auto graph_row = [&](WaRng& rng) {
     graph.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& column : cm.write_array->columns) {
-      const double* values = graph.value_ptr(column.slot);
-      for (int64_t i = 0; i < column.len; ++i)
-        row.push_back(values[column.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, graph);
   };
 
   auto program =
@@ -2148,14 +1976,7 @@ void test_categorical_rng_empty_vector() {
   const std::string text = slurp("tests/fixtures/gq_categorical_rng.tmir.sexp");
   const DataMap data = categorical_data(0);
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL empty categorical vector did not compile: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "empty categorical vector")) return;
 
   Executor graph(std::move(cm.write_array->graph));
   cm.write_array->bind(graph);
@@ -2192,14 +2013,7 @@ void test_categorical_rng_dynamic_index() {
       slurp("tests/fixtures/gq_categorical_dynamic.tmir.sexp");
   const DataMap data = categorical_data(3);
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL categorical dynamic index lowering: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "categorical dynamic index lowering")) return;
 
   int categorical_ops = 0, dynamic_slices = 0;
   for (const Op& op : cm.write_array->graph.ops) {
@@ -2226,12 +2040,7 @@ void test_categorical_rng_dynamic_index() {
   std::copy(probabilities.begin(), probabilities.end(), graph.params_data());
   WaRng graph_rng(303), direct_rng(303);
   graph.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> got;
-  for (const auto& column : cm.write_array->columns) {
-    const double* values = graph.value_ptr(column.slot);
-    for (int64_t i = 0; i < column.len; ++i)
-      got.push_back(values[column.storage_index(i)]);
-  }
+  std::vector<double> got = read_row(cm.write_array->columns, graph);
   std::vector<double> want = probabilities;
   const int draw = stan::math::categorical_rng(categorical_theta(probabilities),
                                                direct_rng.gen());
@@ -2248,16 +2057,7 @@ void test_categorical_rng_dynamic_index() {
 }
 
 static std::map<std::string, stanli::DataMap::Entry> multi_normal_base() {
-  std::map<std::string, stanli::DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    stanli::DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
-  return base;
+  return emit_env();
 }
 
 static stanli::DataMap::Entry real_entry(double value) {
@@ -2462,11 +2262,7 @@ void test_multi_normal_rng_lowering_guards() {
                    std::string("multi_normal_rng").size(),
                    "multi_normal_cholesky_rng");
   auto cholesky_cm = compile_model(cholesky, DataMap{});
-  if (!cholesky_cm.write_array || cholesky_cm.write_array->interp ||
-      !cholesky_cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf("FAIL multi-normal Cholesky did not compile\n");
-  }
+  compiled_completely(cholesky_cm, "multi-normal Cholesky");
   // A new family must not weaken the shared geometry proof.
   mismatched_covariance.replace(call + std::string("(FunApp (StanLib ").size(),
                                 std::string("multi_normal_rng").size(),
@@ -2481,14 +2277,7 @@ void test_compiled_multi_normal_rng() {
   const std::string text =
       slurp("tests/fixtures/gq_multi_normal_rng.tmir.sexp");
   CompiledModel cm = compile_model(text, DataMap{});
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL multi-normal RNG did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "multi-normal RNG")) return;
   int multi_ops = 0, uniform_ops = 0, other_rng_ops = 0;
   for (const Op& op : cm.write_array->graph.ops) {
     if (op.opcode != OP_RNG) continue;
@@ -2523,13 +2312,7 @@ void test_compiled_multi_normal_rng() {
   std::copy(unconstrained.begin(), unconstrained.end(), graph.params_data());
   const auto graph_row = [&](WaRng& rng) {
     graph.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& column : cm.write_array->columns) {
-      const double* values = graph.value_ptr(column.slot);
-      for (int64_t i = 0; i < column.len; ++i)
-        row.push_back(values[column.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, graph);
   };
 
   // Obtain the exact constrained parameter bits produced by the graph; those
@@ -2698,12 +2481,7 @@ void test_compiled_scalar_rng() {
   const std::string text = slurp(path);
   DataMap data;
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf("FAIL scalar rng: write_array did not compile completely\n");
-    return;
-  }
+  if (!compiled_completely(cm, "scalar rng")) return;
   int rng_ops = 0;
   for (const Op& op : cm.write_array->graph.ops)
     if (op.opcode == OP_RNG) ++rng_ops;
@@ -2720,25 +2498,12 @@ void test_compiled_scalar_rng() {
   wex.params_data()[0] = x;
   const auto graph_row = [&](WaRng& rng) {
     wex.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& c : cm.write_array->columns) {
-      const double* p = wex.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, wex);
   };
 
   auto prog =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp interp(prog, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   params["x"].r = {x};
@@ -2777,12 +2542,7 @@ void test_compiled_scalar_rng() {
   clone.params_data()[0] = x;
   const auto clone_row = [&](WaRng& rng) {
     clone.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& c : cm.write_array->columns) {
-      const double* p = clone.value_ptr(c.slot);
-      for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, clone);
   };
   WaRng original_stream(123), clone_stream(123);
   if (graph_row(original_stream) != clone_row(clone_stream) ||
@@ -2859,18 +2619,7 @@ static stanli::DataMap reduction_data() {
 
 static std::map<std::string, stanli::DataMap::Entry> reduction_base(
     const stanli::DataMap& data) {
-  std::map<std::string, stanli::DataMap::Entry> base;
-  base["d"] = data.at("d");
-  base["counts"] = data.at("counts");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    stanli::DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
-  return base;
+  return emit_env(data, {"d", "counts"});
 }
 
 void test_layout_materialization_boundaries() {
@@ -2880,14 +2629,7 @@ void test_layout_materialization_boundaries() {
   DataMap data;
   data.set_int_array("idx", {1, 2, 3, 4, 5});
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL layout materialization fixture did not compile: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "layout materialization fixture")) return;
 
   int packet_products = 0, phased_products = 0, scalar_extrema = 0;
   for (const Op& op : cm.write_array->graph.ops) {
@@ -2951,16 +2693,7 @@ void test_layout_materialization_boundaries() {
 
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  base["idx"] = data.at("idx");
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env(data, {"idx"});
   WaInterp interp(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   params["x"].r = x;
@@ -3035,14 +2768,7 @@ void test_main_index_layout_metadata() {
       slurp("tests/fixtures/gq_main_index_layout.tmir.sexp");
   DataMap data;
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL main index layout fixture did not compile: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "main index layout fixture")) return;
 
   int phased_products = 0, packet_extrema = 0;
   for (const Op& op : cm.write_array->graph.ops) {
@@ -3124,15 +2850,7 @@ void test_matrix_transpose_extrema_fallback() {
 
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   WaInterp interp(program, std::move(base));
   std::map<std::string, DataMap::Entry> params;
   params["m"].r = values;
@@ -3205,26 +2923,11 @@ void test_compiled_gq_extrema() {
     std::copy(x.begin(), x.end(), graph.params_data());
     std::copy(xr.begin(), xr.end(), graph.params_data() + x.size());
     graph.run_forward_only();
-    std::vector<double> graph_row;
-    for (const auto& column : cm.write_array->columns) {
-      const double* values = graph.value_ptr(column.slot);
-      for (int64_t i = 0; i < column.len; ++i)
-        graph_row.push_back(values[column.storage_index(i)]);
-    }
+    std::vector<double> graph_row = read_row(cm.write_array->columns, graph);
 
     auto program =
         std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
-    std::map<std::string, DataMap::Entry> base;
-    base["N"] = data.at("N");
-    base["d"] = data.at("d");
-    for (const char* flag :
-         {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-      DataMap::Entry one;
-      one.is_int = true;
-      one.i = {1};
-      one.r = {1.0};
-      base[flag] = one;
-    }
+    std::map<std::string, DataMap::Entry> base = emit_env(data, {"N", "d"});
     WaInterp interp(program, std::move(base));
     std::map<std::string, DataMap::Entry> params;
     params["x"].r = x;
@@ -3473,14 +3176,7 @@ void test_compiled_gq_reductions() {
   const std::string text = slurp("tests/fixtures/gq_reductions.tmir.sexp");
   const DataMap data = reduction_data();
   CompiledModel cm = compile_model(text, data);
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL reductions fixture did not compile completely: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "reductions fixture")) return;
 
   // The same fixture pins both legacy seams in log_prob: data-only prod is
   // folded rather than becoming a runtime opcode, and pure-data int
@@ -3526,13 +3222,7 @@ void test_compiled_gq_reductions() {
   for (int i = 0; i < 5; ++i) graph.params_data()[1 + i] = 0.5;
   const auto graph_row = [&](WaRng& rng) {
     graph.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& column : cm.write_array->columns) {
-      const double* values = graph.value_ptr(column.slot);
-      for (int64_t i = 0; i < column.len; ++i)
-        row.push_back(values[column.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, graph);
   };
 
   auto program =
@@ -3710,24 +3400,12 @@ void test_gq_reduction_lowering_guards() {
       std::copy(x.begin(), x.end(), graph.params_data());
       std::copy(p.begin(), p.end(), graph.params_data() + x.size());
       graph.run_forward_only();
-      std::vector<double> graph_row;
-      for (const auto& column : surface.write_array->columns) {
-        const double* values = graph.value_ptr(column.slot);
-        for (int64_t i = 0; i < column.len; ++i)
-          graph_row.push_back(values[column.storage_index(i)]);
-      }
+      std::vector<double> graph_row =
+          read_row(surface.write_array->columns, graph);
 
       auto program = std::make_shared<mir::Program>(
           mir::read_program(sexp::parse(udf_fixture)));
-      std::map<std::string, DataMap::Entry> base_env;
-      for (const char* flag :
-           {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-        DataMap::Entry one;
-        one.is_int = true;
-        one.i = {1};
-        one.r = {1.0};
-        base_env[flag] = one;
-      }
+      std::map<std::string, DataMap::Entry> base_env = emit_env();
       WaInterp interp(program, std::move(base_env));
       std::map<std::string, DataMap::Entry> params;
       params["x"].r = x;
@@ -4217,12 +3895,7 @@ void test_gq_reduction_lowering_guards() {
       for (int i = 0; i < 5; ++i) eex.params_data()[1 + i] = 0.5;
       WaRng erng(2026), irng(2026);
       eex.run_forward_only(EvalState{&erng});
-      std::vector<double> got;
-      for (const auto& column : em.write_array->columns) {
-        const double* values = eex.value_ptr(column.slot);
-        for (int64_t i = 0; i < column.len; ++i)
-          got.push_back(values[column.storage_index(i)]);
-      }
+      std::vector<double> got = read_row(em.write_array->columns, eex);
       auto eprogram = std::make_shared<mir::Program>(
           mir::read_program(sexp::parse(empty_sum)));
       WaInterp einterp(eprogram, reduction_base(reduction_data()));
@@ -4532,11 +4205,7 @@ void test_choose_index_gq() {
   std::copy(q.begin(), q.end(), wex.params_data());
   WaRng graph_rng(5);
   wex.run_forward_only(EvalState{&graph_rng});
-  std::vector<double> row;
-  for (const auto& c : cm.write_array->columns) {
-    const double* p = wex.value_ptr(c.slot);
-    for (int64_t i = 0; i < c.len; ++i) row.push_back(p[c.storage_index(i)]);
-  }
+  std::vector<double> row = read_row(cm.write_array->columns, wex);
   expect_eq("choosesize header", joined(cm.write_array->columns),
             "z.1,z.2,z.3,z.4,z.5,z.6,A.1.1,A.2.1,A.3.1,A.4.1,A.1.2,A.2.2,"
             "A.3.2,A.4.2,A.1.3,A.2.3,A.3.3,A.4.3,A.1.4,A.2.4,A.3.4,A.4.4,"
@@ -4619,14 +4288,7 @@ void test_runtime_control_write_array() {
 
   const std::string text = slurp("tests/fixtures/gq_runtime_control.tmir.sexp");
   CompiledModel cm = compile_model(text, DataMap{});
-  if (!cm.write_array || cm.write_array->interp ||
-      !cm.write_array->truncated.empty()) {
-    ++failures;
-    std::printf(
-        "FAIL runtime-control write_array did not compile: %s\n",
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-    return;
-  }
+  if (!compiled_completely(cm, "runtime-control write_array")) return;
   int dynamic_slices = 0, control_regions = 0, concatenations = 0;
   for (const Op& op : cm.write_array->graph.ops) {
     dynamic_slices += op.opcode == OP_DYNAMIC_SLICE;
@@ -4662,28 +4324,14 @@ void test_runtime_control_write_array() {
   std::copy(q.begin(), q.end(), params.params_data());
   params.run_forward_only();
 
-  std::map<std::string, DataMap::Entry> base;
-  for (const char* flag :
-       {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
-    DataMap::Entry one;
-    one.is_int = true;
-    one.i = {1};
-    one.r = {1.0};
-    base[flag] = one;
-  }
+  std::map<std::string, DataMap::Entry> base = emit_env();
   auto program =
       std::make_shared<mir::Program>(mir::read_program(sexp::parse(text)));
   WaInterp interpreted(program, std::move(base));
   const auto env = cm.constrained_env(params);
   const auto graph_row = [&](WaRng& rng) {
     graph.run_forward_only(EvalState{&rng});
-    std::vector<double> row;
-    for (const auto& column : cm.write_array->columns) {
-      const double* values = graph.value_ptr(column.slot);
-      for (int64_t i = 0; i < column.len; ++i)
-        row.push_back(values[column.storage_index(i)]);
-    }
-    return row;
+    return read_row(cm.write_array->columns, graph);
   };
 
   WaRng graph_rng(81), interp_rng(81);
