@@ -1886,6 +1886,7 @@ struct Lowering {
   // this for selector values and for path-sensitive short-circuit decisions;
   // keeping it separate from try_eval_pure prevents recursive specialization.
   std::optional<DataMap::Entry> try_eval_interpreter(const mir::Expr& e);
+  bool missing_input(const mir::Expr& e);
 
   enum class StaticProbeState : uint8_t { Unknown, Known, Invalid };
   template <typename T>

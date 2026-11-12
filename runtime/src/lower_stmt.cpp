@@ -184,13 +184,15 @@ bool Lowering::scan_block(const mir::Stmt& s,
   };
   // Container locals are mirrored by running their declaration and every
   // assignment to them in the data interpreter, which reads loop integers
-  // from int_env. One it cannot run, or one that would draw, is dropped.
+  // from int_env. One it cannot run, or one that would draw, is dropped;
+  // one that reads a parameter is dropped without the failed attempt.
   const auto mirror_value = [&](const mir::Stmt& st, const std::string& name) {
-    bool effectful =
-        expr_effectful(st.kind == mir::Stmt::Decl ? st.init : st.rhs);
-    for (const auto& index : st.lhs_idx)
-      effectful = effectful || expr_effectful(index);
-    if (!effectful) {
+    const auto unrunnable = [&](const mir::Expr& e) {
+      return expr_effectful(e) || missing_input(e);
+    };
+    bool dropped = unrunnable(st.kind == mir::Stmt::Decl ? st.init : st.rhs);
+    for (const auto& index : st.lhs_idx) dropped = dropped || unrunnable(index);
+    if (!dropped) {
       try {
         td.exec(st);
         return;

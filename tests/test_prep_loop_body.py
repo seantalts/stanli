@@ -1,10 +1,12 @@
-"""Preparation time of an unrolled loop must not depend on how its body
-spells a decision the data already makes.
+"""Preparation time of an unrolled loop must not depend on how its body is
+spelled.
 
-Each pair is one loop over N observations written two ways that lower to the
-same graph. A `break`, `continue` or `return` that unwinds lowering once per
-iteration costs ten to twenty times the plain form, so the bound sits well
-above timer noise on a busy CI runner and well below that.
+Each pair is one loop over N observations written two ways that lower to
+about the same graph. A `break`, `continue` or `return` that unwinds lowering
+once per iteration, or a local whose parameter-dependent value the data
+interpreter is asked for and cannot give once per iteration, costs seven to
+twenty times the plain form. The bound sits well above timer noise on a busy
+CI runner and well below that.
 """
 import json
 import math
@@ -49,9 +51,35 @@ CONTINUE = DATA + PARAMETERS + """model {
 }
 """
 
+LOCAL = DATA + PARAMETERS + """model {
+  for (n in 1:N) {
+    real eta = mu * k[n];
+    target += normal_lpdf(y[n] | eta, 2);
+  }
+}
+"""
+
+GQ_HEAD = DATA + PARAMETERS + """model { y ~ normal(mu, 1); }
+generated quantities {
+  vector[N] log_lik;
+"""
+
+GQ_INLINE = GQ_HEAD + """  for (n in 1:N) log_lik[n] = normal_lpdf(y[n] | mu * k[n], 1);
+}
+"""
+
+GQ_LOCAL = GQ_HEAD + """  for (n in 1:N) {
+    real eta = mu * k[n];
+    log_lik[n] = normal_lpdf(y[n] | eta, 1);
+  }
+}
+"""
+
 PAIRS = {
     "two-return user function": (INLINE, TWO_RETURNS),
     "data-decided continue": (INLINE, CONTINUE),
+    "local declared from a parameter": (INLINE, LOCAL),
+    "generated quantities local declared from a parameter": (GQ_INLINE, GQ_LOCAL),
 }
 
 
@@ -87,8 +115,8 @@ def main(bench, stanc):
             if ratio > MAX_RATIO:
                 failures.append(f"{name}: {ratio:.1f}x the plain loop")
     if failures:
-        sys.exit("loop control slows preparation:\n  " + "\n  ".join(failures))
-    print("PASS: loop control does not slow preparation")
+        sys.exit("loop body slows preparation:\n  " + "\n  ".join(failures))
+    print("PASS: these loop bodies prepare as fast as the plain loop")
 
 
 if __name__ == "__main__":
