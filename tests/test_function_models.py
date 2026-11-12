@@ -12,12 +12,24 @@ import gen_function_models as generator
 
 
 class InventoryGateTest(unittest.TestCase):
-    def test_removing_a_runtime_function_probe_fails_the_inventory_gate(self):
+    """A runtime function needs a probe in a function or signature model."""
+
+    def render(self, recipe=None, signature=None):
         groups = copy.deepcopy(generator.GROUPS)
-        del groups["containers"]["reverse"]
-        with mock.patch.object(generator, "GROUPS", groups):
-            with self.assertRaisesRegex(ValueError, "recipes: reverse"):
-                generator.render()
+        if recipe:
+            del groups["containers"][recipe]
+        names = generator.signature_names() - {signature}
+        with mock.patch.object(generator, "GROUPS", groups), \
+                mock.patch.object(generator, "signature_names", lambda: names):
+            return generator.render()
+
+    def test_a_function_in_neither_inventory_fails_the_gate(self):
+        with self.assertRaisesRegex(ValueError, "recipes: reverse"):
+            self.render(recipe="reverse", signature="reverse")
+
+    def test_either_inventory_covers_a_function(self):
+        self.render(recipe="reverse")
+        self.render(signature="reverse")
 
 
 if __name__ == "__main__":

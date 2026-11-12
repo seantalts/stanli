@@ -48,9 +48,10 @@ python3 tools/verify_refs.py --corpus functions --check build-rel/stanli_check
 ```
 
 The generator checks runtime dispatch literals and X-macro registrations
-against its recipes and the pinned signature inventory. Adding a named runtime
-function without a probe fails freshness; there is no automatic "unsupported"
-escape. This source audit is intentionally conservative and is not proof that
+against the names its models call and the names the generated signature models
+call (`builtin_signatures_manifest.json`, `density_signatures_manifest.json`).
+Adding a named runtime function that neither calls fails freshness; there is no
+automatic "unsupported" escape. This source audit is intentionally conservative and is not proof that
 every overload or execution path is implemented. The exhaustive nightly sweep
 and focused boundary tests retain those separate responsibilities.
 
