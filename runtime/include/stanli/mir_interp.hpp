@@ -149,14 +149,11 @@ class MirInterp {
   std::vector<T> call(const mir::FunDef& f,
                       const std::vector<std::vector<T>>& args,
                       const std::vector<std::vector<int>>& int_args) {
-    if (udf_depth_ > 64) fail("UDF recursion too deep");
-    MirInterp sub(funs_, where_, hooks_);
     // Positional calls are used by the ODE/RHS fallback, but their formals
     // have the same unknown Eigen-view provenance as an ordinary UDF's.
     // Keeping them below top-level depth prevents product lowering from
     // assuming a formal is an owning, address-zero vector.
-    sub.udf_depth_ = udf_depth_ + 1;
-    sub.propto_ctx_ = propto_ctx_;
+    MirInterp sub = function_scope(propto_ctx_);
     if (f.arg_views.size() != f.arg_names.size())
       fail("function has incomplete unsized argument metadata: " + f.name);
     size_t ai = 0, ii = 0;
@@ -185,12 +182,9 @@ class MirInterp {
   // public C++ entry point uses this path: DataMap::Entry is Value itself for
   // the double instantiation, so no host/container conversion is needed.
   Value call(const mir::FunDef& f, const std::vector<Value>& args) {
-    if (udf_depth_ > 64) fail("UDF recursion too deep");
     if (f.arg_names.size() != args.size())
       fail("function argument count mismatch: " + f.name);
-    MirInterp sub(funs_, where_, hooks_);
-    sub.udf_depth_ = udf_depth_ + 1;
-    sub.propto_ctx_ = propto_ctx_;
+    MirInterp sub = function_scope(propto_ctx_);
     for (size_t k = 0; k < args.size(); ++k) {
       sub.env_[f.arg_names[k]] = args[k];
       sub.set_declared_dims(f.arg_names[k], args[k].dims);
@@ -1557,13 +1551,10 @@ class MirInterp {
       fail("reduce_sum: unknown partial-sum function " + base, e.raw);
     if (f->arg_names.size() != views.size())
       fail("reduce_sum: " + base + " arity does not match the call", e.raw);
-    if (udf_depth_ > 64) fail("UDF recursion too deep");
 
-    MirInterp sub(funs_, where_, hooks_);
-    sub.udf_depth_ = udf_depth_ + 1;
     // As in CmdStan, an `_lupdf` functor inherits the caller's normalization
     // and an `_lpdf` one forces the normalized density.
-    sub.propto_ctx_ = propto_ctx_ && propto;
+    MirInterp sub = function_scope(propto_ctx_ && propto);
     sub.env_[f->arg_names[0]] = std::move(slice);
     Value start;
     start.is_int = true;
@@ -1632,16 +1623,22 @@ class MirInterp {
     return result;
   }
 
+  // An empty scope for one user-function body: function bodies see their
+  // arguments and nothing else.
+  MirInterp function_scope(bool propto) {
+    if (udf_depth_ > 64) fail("UDF recursion too deep");
+    MirInterp sub(funs_, where_, hooks_);
+    sub.udf_depth_ = udf_depth_ + 1;
+    sub.propto_ctx_ = propto;
+    return sub;
+  }
+
   Value call_udf(const mir::Expr& e) {
     auto it = funs_.find(e.name);
     if (it == funs_.end()) fail("unknown function " + e.name, e.raw);
     const mir::FunDef& f = *it->second;
     if (e.args.size() != f.arg_names.size()) fail(e.name + " arity mismatch");
-    if (udf_depth_ > 64) fail("UDF recursion too deep");
-    // Function bodies see their arguments and nothing else.
-    MirInterp sub(funs_, where_, hooks_);
-    sub.udf_depth_ = udf_depth_ + 1;
-    sub.propto_ctx_ = propto_ctx_ && e.fn_propto;
+    MirInterp sub = function_scope(propto_ctx_ && e.fn_propto);
     for (size_t i = 0; i < e.args.size(); ++i)
       sub.env_[f.arg_names[i]] = eval(e.args[i]);
     if (sub.exec_all(f.body) == Flow::Return) return std::move(sub.returned_);
