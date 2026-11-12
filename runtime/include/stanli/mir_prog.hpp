@@ -1155,6 +1155,28 @@ struct ProgramCompiler {
       *out = rhs != 0;
       return true;
     }
+    if (e.kind == mir::Expr::Indexed && e.args.size() >= 2) {
+      // Each form cint answers reads every single index as an integer, and
+      // a variable base must be a known or external integer array.
+      for (size_t k = 1; k < e.args.size(); ++k) {
+        long index;
+        if (e.args[k].name == "IndexSingle" && e.args[k].args.size() == 1 &&
+            !try_cint(e.args[k].args[0], &index))
+          return false;
+      }
+      const mir::Expr& base = e.args[0];
+      if (base.kind == mir::Expr::Var && !known_int_arrays.count(base.name) &&
+          !ints.count(base.name) &&
+          !(extern_int &&
+            (extern_bound.count(base.name) || !reals.count(base.name))))
+        return false;
+    }
+    if (e.kind == mir::Expr::FunApp) {
+      const FunctionSpec* function = function_spec(e);
+      if (function && function->builtin() &&
+          function->builtin()->shape == BuiltinShapePolicy::Rng)
+        return false;
+    }
     if (e.kind == mir::Expr::FunApp &&
         (e.args.size() == 1 || e.args.size() == 2)) {
       if (const BuiltinSpec* pred = shaped_builtin_spec(
