@@ -22,6 +22,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -1565,6 +1566,154 @@ void expect_sample_options_validated() {
   stanli_model_free(model);
 }
 
+double type7_quantile(std::vector<double> x, double p) {
+  std::sort(x.begin(), x.end());
+  const double h = (double)(x.size() - 1) * p;
+  const size_t lo = (size_t)std::floor(h);
+  if (lo + 1 >= x.size()) return x.back();
+  return x[lo] + (h - (double)lo) * (x[lo + 1] - x[lo]);
+}
+
+void expect_summary_stats() {
+  const int64_t C = 4, N = 1000, P = 2;
+  std::vector<double> d((size_t)(C * N * P));
+  std::mt19937 rng(17);
+  std::exponential_distribution<double> ex(1.0);
+  std::vector<double> x;
+  for (int64_t c = 0; c < C; ++c)
+    for (int64_t i = 0; i < N; ++i) {
+      const double v = 3.0 + ex(rng);
+      d[(size_t)((c * N + i) * P + 0)] = v;
+      d[(size_t)((c * N + i) * P + 1)] = 5.0;
+      x.push_back(v);
+    }
+  double mean = 0;
+  for (double v : x) mean += v;
+  mean /= (double)x.size();
+  double ss = 0;
+  for (double v : x) ss += (v - mean) * (v - mean);
+  const double sd = std::sqrt(ss / (double)(x.size() - 1));
+
+  std::vector<double> out((size_t)(P * STANLI_N_SUMMARY_STATS), -1.0);
+  expect_true("summary_stats succeeds",
+              stanli_summary_stats(d.data(), C, N, P, out.data()) == 0);
+  const double* r = out.data();
+  const auto near = [](double got, double want) {
+    return std::fabs(got - want) <= 1e-12 * std::max(1.0, std::fabs(want));
+  };
+  expect_true("summary mean", near(r[STANLI_STAT_MEAN], mean));
+  expect_true("summary sd", near(r[STANLI_STAT_SD], sd));
+  expect_true("summary q5", near(r[STANLI_STAT_Q5], type7_quantile(x, 0.05)));
+  expect_true("summary q50", near(r[STANLI_STAT_Q50], type7_quantile(x, 0.5)));
+  expect_true("summary q95", near(r[STANLI_STAT_Q95], type7_quantile(x, 0.95)));
+  expect_true("summary rhat near 1",
+              r[STANLI_STAT_RHAT] > 0.99 && r[STANLI_STAT_RHAT] < 1.02);
+  expect_true("summary bulk ess",
+              r[STANLI_STAT_ESS_BULK] > 2000 && r[STANLI_STAT_ESS_BULK] < 6000);
+  expect_true("summary tail ess",
+              r[STANLI_STAT_ESS_TAIL] > 1500 && r[STANLI_STAT_ESS_TAIL] < 6000);
+  expect_true("summary mcse mean",
+              r[STANLI_STAT_MCSE_MEAN] > 0.5 * sd / std::sqrt(4000.0) &&
+                  r[STANLI_STAT_MCSE_MEAN] < 2.0 * sd / std::sqrt(4000.0));
+  expect_true("summary mcse sd",
+              r[STANLI_STAT_MCSE_SD] > 0 && r[STANLI_STAT_MCSE_SD] < 0.1);
+  const double* k = out.data() + STANLI_N_SUMMARY_STATS;
+  expect_true("constant column mean",
+              k[STANLI_STAT_MEAN] == 5.0 && k[STANLI_STAT_Q50] == 5.0);
+  expect_true("constant column has no rhat or ess",
+              std::isnan(k[STANLI_STAT_RHAT]) &&
+                  std::isnan(k[STANLI_STAT_ESS_BULK]) &&
+                  std::isnan(k[STANLI_STAT_ESS_TAIL]));
+
+  std::vector<double> split((size_t)(2 * 500));
+  for (int64_t c = 0; c < 2; ++c)
+    for (int64_t i = 0; i < 500; ++i)
+      split[(size_t)(c * 500 + i)] = ex(rng) + (c == 0 ? 0.0 : 10.0);
+  double s[STANLI_N_SUMMARY_STATS];
+  expect_true("summary reads chains as chains",
+              stanli_summary_stats(split.data(), 2, 500, 1, s) == 0 &&
+                  s[STANLI_STAT_RHAT] > 1.5);
+}
+
+void expect_diagnose_text() {
+  enum {
+    kAcceptStat = 1,
+    kStepsize,
+    kTreedepth,
+    kLeapfrog,
+    kDivergent,
+    kEnergy
+  };
+  const int64_t C = 4, N = 1000;
+  std::vector<double> d((size_t)(C * N));
+  std::vector<double> st((size_t)(C * N * STANLI_N_SAMPLER_COLS), 0.0);
+  std::mt19937 rng(23);
+  std::normal_distribution<double> nd(0, 1);
+  for (int64_t c = 0; c < C; ++c)
+    for (int64_t i = 0; i < N; ++i) {
+      d[(size_t)(c * N + i)] = nd(rng);
+      double* row = &st[(size_t)((c * N + i) * STANLI_N_SAMPLER_COLS)];
+      row[kAcceptStat] = 0.9;
+      row[kStepsize] = 0.5;
+      row[kTreedepth] = (c == 1 && i < 2) ? 4 : 3;
+      row[kEnergy] = nd(rng);
+    }
+  const char* names[] = {"mu"};
+  const auto text = [&](const double* draws, const char* const* nm,
+                        const double* stats, int max_depth) {
+    const int64_t need =
+        stanli_diagnose_text(draws, C, N, 1, nm, stats, max_depth, nullptr, 0);
+    std::vector<char> buf((size_t)std::max<int64_t>(need, 1));
+    stanli_diagnose_text(draws, C, N, 1, nm, stats, max_depth, buf.data(),
+                         buf.size());
+    const std::string t(buf.data());
+    expect_true("diagnose_text reports its full length",
+                need > 1 && t.size() + 1 == (size_t)need && t.back() == '\n');
+    return t;
+  };
+  const auto has = [](const std::string& t, const char* s) {
+    return t.find(s) != std::string::npos;
+  };
+
+  const std::string ok = text(d.data(), names, st.data(), 10);
+  expect_true("converged text: " + ok,
+              has(ok, "No divergent transitions.") &&
+                  has(ok,
+                      "No transitions saturated the maximum treedepth "
+                      "of 10.") &&
+                  has(ok, "E-BFMI is above 0.3 in every chain.") &&
+                  has(ok, "R-hat is below") && has(ok, ", mu).") &&
+                  has(ok, "Bulk ESS is at least") &&
+                  has(ok, "Tail ESS is at least") &&
+                  has(ok, "No problems detected."));
+  const std::string depth = text(d.data(), names, st.data(), 4);
+  expect_true("max_depth reaches the check: " + depth,
+              has(depth,
+                  "2 of 4000 transitions saturated the maximum "
+                  "treedepth of 4."));
+  st[(size_t)(5 * STANLI_N_SAMPLER_COLS + kDivergent)] = 1;
+  const std::string div = text(d.data(), names, st.data(), 10);
+  expect_true("divergences reach the text: " + div,
+              has(div, "1 of 4000 transitions (0.0%) diverged.") &&
+                  has(div, "1 diagnostic check failed."));
+  const std::string draws_only = text(d.data(), nullptr, nullptr, 10);
+  expect_true("null stats run only the R-hat and ESS half: " + draws_only,
+              !has(draws_only, "divergent") && !has(draws_only, "E-BFMI") &&
+                  has(draws_only, "R-hat is below"));
+
+  for (int64_t i = 0; i < N; ++i) d[(size_t)(3 * N + i)] += 10.0;
+  const std::string split = text(d.data(), names, nullptr, 10);
+  expect_true("split chains name the parameter: " + split,
+              has(split, "R-hat reaches") && has(split, "(mu)"));
+
+  char small[8];
+  const int64_t need = stanli_diagnose_text(d.data(), C, N, 1, names, nullptr,
+                                            10, small, sizeof small);
+  expect_true("a short buffer is truncated and terminated",
+              need == (int64_t)split.size() + 1 &&
+                  std::string(small) == split.substr(0, sizeof small - 1));
+}
+
 }  // namespace
 
 void expect_interpreter_policy(const char* fixture,
@@ -2215,6 +2364,8 @@ int main() {
   expect_sampling_warnings_api();
   expect_streaming_stats();
   expect_sample_options_validated();
+  expect_summary_stats();
+  expect_diagnose_text();
 
   if (failures == 0) std::printf("test_capi OK\n");
   return failures == 0 ? 0 : 1;
