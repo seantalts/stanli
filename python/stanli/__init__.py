@@ -155,16 +155,10 @@ def _load_lib():
     lib.stanli_reduce_sum_count.argtypes = [ctypes.c_void_p]
     lib.stanli_reduce_sum_fallbacks.restype = ctypes.c_char_p
     lib.stanli_reduce_sum_fallbacks.argtypes = [ctypes.c_void_p]
-    for name in ("stanli_model_new_with_opts", "stanli_model_new_from_stan_with_opts"):
-        fn = getattr(lib, name)
-        fn.restype = ctypes.c_void_p
-        fn.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
-                       ctypes.POINTER(_ModelOpts), ctypes.c_char_p,
-                       ctypes.c_size_t]
-    lib.stanli_stan_to_mir_with_opts.restype = ctypes.c_void_p
-    lib.stanli_stan_to_mir_with_opts.argtypes = [
-        ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_size_t,
-        ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_model_new_with_opts.restype = ctypes.c_void_p
+    lib.stanli_model_new_with_opts.argtypes = [
+        ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(_ModelOpts),
+        ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_stan_to_mir_named.restype = ctypes.c_void_p
     lib.stanli_stan_to_mir_named.argtypes = [
         ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p),
@@ -736,10 +730,10 @@ def _data_to_json(data) -> str:
 def exact_lp() -> bool:
     """True if lp__ reproduces CmdStan's exactly.
 
-    The wheel is built this way and always has been. A STANLI_LITE_LP
-    build -- which is what ships to the browser -- drops stan-math's
-    propto instantiations to halve the library, leaving every gradient
-    bitwise identical and lp__ a per-model constant higher. A pinned seed
+    Every shipped build is this way. A STANLI_LITE_LP build, which is off
+    by default and not built in CI, drops stan-math's propto
+    instantiations to halve the library, leaving every gradient bitwise
+    identical and lp__ a per-model constant higher. A pinned seed
     still gives a different chain there: lp is added to the kinetic
     energy, so shifting it changes the rounding, and NUTS amplifies that
     into a different (equally valid) trajectory.
