@@ -36,27 +36,12 @@ struct DaeResidual {
       return out;
     }
 
-    std::vector<std::vector<T>> reals{
-        {T(t)},
-        std::vector<T>(y.data(), y.data() + y.size()),
-        std::vector<T>(yp.data(), yp.data() + yp.size())};
-    std::vector<std::vector<int>> ints;
-    size_t th_at = 0, xr_at = 0;
-    for (const RhsArg& arg : spec->args) {
-      if (arg.is_int) {
-        ints.push_back(callback_integer_values(arg, theta.data(), &th_at));
-      } else if (arg.is_param) {
-        reals.emplace_back(theta.begin() + th_at,
-                           theta.begin() + th_at + arg.len);
-        th_at += (size_t)arg.len;
-      } else {
-        reals.emplace_back(x_r.begin() + xr_at, x_r.begin() + xr_at + arg.len);
-        xr_at += (size_t)arg.len;
-      }
-    }
-    MirInterp<T> interpreter(*spec->funs(), "DAE residual");
-    const std::vector<T> residual = interpret_retained_callback(
-        interpreter, *spec->residual(), reals, ints, spec->args);
+    const std::vector<T> residual = interpret_packed_callback<T>(
+        *spec->funs(), "DAE residual", *spec->residual(),
+        {{T(t)},
+         std::vector<T>(y.data(), y.data() + y.size()),
+         std::vector<T>(yp.data(), yp.data() + yp.size())},
+        spec->args, theta.data(), x_r.data());
     for (size_t i = 0; i < residual.size(); ++i)
       out((Eigen::Index)i) = residual[i];
     return out;

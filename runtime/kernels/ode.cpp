@@ -82,30 +82,10 @@ struct MirRhs {
     using T = stan::return_type_t<T_y, T_param>;
     if (spec->prog.ok)
       return eval(t, y.data(), y.size(), theta, x_r, x_i, msgs);
-    // Rebuild the formal argument list the right-hand side declares.
-    // MirInterp::call binds positionally by declared type, so the real
-    // arguments have to arrive already split out of the packed theta and
-    // x_r -- in the same order compile_rhs_args assigned their register
-    // ranges, which is the order spec->args records.
-    std::vector<std::vector<T>> reals{{T(t)},
-                                      std::vector<T>(y.begin(), y.end())};
-    std::vector<std::vector<int>> ints;
-    size_t th_at = 0, xr_at = 0;
-    for (const RhsArg& a : spec->args) {
-      if (a.is_int) {
-        ints.push_back(callback_integer_values(a, theta.data(), &th_at));
-      } else if (a.is_param) {
-        reals.emplace_back(theta.begin() + th_at,
-                           theta.begin() + th_at + a.len);
-        th_at += (size_t)a.len;
-      } else {
-        reals.emplace_back(x_r.begin() + xr_at, x_r.begin() + xr_at + a.len);
-        xr_at += (size_t)a.len;
-      }
-    }
-    MirInterp<T> ev(*spec->funs(), "ODE function");
-    return interpret_retained_callback(ev, *spec->rhs(), reals, ints,
-                                       spec->args);
+    return interpret_packed_callback<T>(
+        *spec->funs(), "ODE function", *spec->rhs(),
+        {{T(t)}, std::vector<T>(y.begin(), y.end())}, spec->args, theta.data(),
+        x_r.data());
   }
 };
 
