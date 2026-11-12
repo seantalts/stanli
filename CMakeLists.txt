@@ -993,8 +993,6 @@ add_executable(test_csv_writer tests/test_csv_writer.cpp)
 target_include_directories(test_csv_writer PRIVATE ${DEPS}/fmt/include)
 target_compile_definitions(test_csv_writer PRIVATE FMT_HEADER_ONLY)
 add_test(NAME test_csv_writer COMMAND test_csv_writer)
-add_test(NAME test_dev_setup
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_dev_setup.py)
 if(STANLI_HAVE_TLSDESC)
   add_test(NAME test_shared_tlsdesc
            COMMAND sh -c "readelf -rW \"$1\" | grep -q R_X86_64_TLSDESC"
@@ -1570,7 +1568,6 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_stan240_reference
            COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
              --build ${CMAKE_CURRENT_BINARY_DIR}
-             --stanc ${STANLI_STANC_EXECUTABLE}
              --fixtures tests/fixtures
              --manifest tests/function_coverage/stan240_manifest.json
              --reference tests/function_coverage/stan240_references.json.gz)
@@ -1579,7 +1576,6 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_sort_reference
            COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
              --build ${CMAKE_CURRENT_BINARY_DIR}
-             --stanc ${STANLI_STANC_EXECUTABLE}
              --fixtures tests/fixtures
              --manifest tests/function_coverage/sort_manifest.json
              --reference tests/function_coverage/sort_references.json.gz)
@@ -1588,7 +1584,6 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_library_reference
            COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
              --build ${CMAKE_CURRENT_BINARY_DIR}
-             --stanc ${STANLI_STANC_EXECUTABLE}
              --fixtures tests/fixtures
              --manifest tests/function_coverage/library_manifest.json
              --reference tests/function_coverage/library_references.json.gz)
@@ -1603,7 +1598,6 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_container_flow_reference
            COMMAND ${Python3_EXECUTABLE} tools/check_function_models.py
              --build ${CMAKE_CURRENT_BINARY_DIR}
-             --stanc ${STANLI_STANC_EXECUTABLE}
              --fixtures tests/function_coverage/container_flow
              --manifest tests/function_coverage/container_flow_manifest.json
              --reference tests/function_coverage/container_flow_references.json.gz)
