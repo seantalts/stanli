@@ -918,6 +918,8 @@ static void test_fixture_constants() {
       const ConstantPoint& point = c.points[p];
       const std::string at = what + " point " + std::to_string(p);
       std::copy(point.q.begin(), point.q.end(), ex.params_data());
+      std::fill(grad.begin(), grad.end(),
+                std::numeric_limits<double>::quiet_NaN());
       const double lp = ex.gradient(grad.data());
       if (std::isnan(point.lp))
         check(std::isnan(lp), at + " lp is NaN");
