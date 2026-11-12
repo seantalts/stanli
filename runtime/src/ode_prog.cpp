@@ -1,8 +1,10 @@
-// The ODE entry into the MIR compiler (mir_prog.hpp). All this adds is
-// the integrate_ode_* calling convention: the signature fixes the
-// argument order and the sizes, so t, y, theta and x_r get their register
-// ranges up front and x_i binds as compile-time integers. Everything the
-// body can contain is the shared compiler's problem.
+// The solver entry into the MIR compiler (mir_prog.hpp). This adds the
+// calling conventions: integrate_ode_* (the signature fixes the argument
+// order and the sizes, so t, y, theta and x_r get their register ranges up
+// front and x_i binds as compile-time integers), the variadic ODE
+// interface, and the DAE residual. It also holds the whitelist of opcodes
+// the direct RK adjoint accepts. Everything the body can contain is the
+// shared compiler's problem.
 #include <stanli/ode_prog.hpp>
 #include <stanli/callback.hpp>
 

@@ -1,20 +1,21 @@
 // MIR -> Program: the shared front end.
 //
-// Two callers compile MIR into the register machine. An ODE right-hand
-// side has to stay callable at runtime because the integrator picks the
-// times (ode_prog.hpp). A region whose control flow depends on a
-// parameter has to become a program because it cannot become graph ops
-// at all: `if (theta > 0)` has no op-graph form, and until this existed
-// it was a compile error (lower.cpp).
+// Several callers compile MIR into the register machine. A solver
+// callback (ODE right-hand side, DAE residual) has to stay callable at
+// runtime because the solver picks the points (ode_prog.hpp). A region
+// whose control flow depends on a parameter has to become a program
+// because it cannot become graph ops at all: `if (theta > 0)` has no
+// op-graph form, and until this existed it was a compile error
+// (lower.cpp). The region-map lowering and standalone Stan functions
+// (function.cpp) compile through it as well.
 //
-// The shape of the problem is what keeps this small: storage sizes are
-// known at compile time, even when loop bounds are runtime values. Most
-// indices and integers are also known at preparation. Runtime integer values
-// use scalar registers and integer operations; dynamic storage still requires
-// a separate shape proof.
+// Storage sizes are known at compile time, even when loop bounds are
+// runtime values, and most indices and integers are also known at
+// preparation. Runtime integer values use scalar registers and integer
+// operations; dynamic storage still requires a separate shape proof.
 //
 // Names the compiler does not know are the one thing that differs
-// between callers. The ODE side knows them all up front (t, y, theta,
+// between callers. The solver side knows them all up front (t, y, theta,
 // x_r, x_i). Lowering does not: a region reads model-block variables
 // that already live in graph slots, so it hands over `bind_extern`,
 // which allocates registers for such a name and records it as a live-in.
