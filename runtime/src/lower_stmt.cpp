@@ -207,7 +207,8 @@ bool Lowering::scan_block(const mir::Stmt& s,
   const std::function<bool(const mir::Stmt&)> runtime_while =
       [&](const mir::Stmt& st) {
         if (st.kind == mir::Stmt::While && while_unroll_depth == 0 &&
-            !while_sizes_from_loop_state(st) && !static_int_bookkeeping(st.body))
+            !while_sizes_from_loop_state(st) &&
+            !static_int_bookkeeping(st.body))
           return true;
         for (const auto& c : st.body)
           if (runtime_while(c)) return true;
