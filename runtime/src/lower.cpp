@@ -401,11 +401,11 @@ void Lowering::bind_data(const mir::Program& p) {
         resolved.init.lit_i = sized->second;
         resolved.init.type_ = "UInt";
         resolved.init.data_only = true;
-        td.exec(resolved);
+        (void)td.exec(resolved);
         continue;
       }
     }
-    td.exec(st);
+    (void)td.exec(st);
   }
   // The interpreter keeps a block's locals after the block ends. Drop them,
   // so a later local of the same name cannot start from transformed data's

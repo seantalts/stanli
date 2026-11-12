@@ -87,7 +87,7 @@ int main() {
                             var("lo", UnsizedLeaf::Vector));
     bool accepted = true;
     try {
-      m.exec(s);
+      (void)m.exec(s);
     } catch (const std::exception&) {
       accepted = false;
     }
@@ -96,7 +96,7 @@ int main() {
     m.env()["x"] = values({1.0, 1.5}, {2});
     bool domain = false;
     try {
-      m.exec(s);
+      (void)m.exec(s);
     } catch (const std::domain_error& e) {
       domain = std::string(e.what()).find("x") != std::string::npos;
     } catch (const std::exception&) {
@@ -113,7 +113,7 @@ int main() {
                             var("hi", UnsizedLeaf::RowVector));
     bool mismatch = false;
     try {
-      m.exec(s);
+      (void)m.exec(s);
     } catch (const std::invalid_argument&) {
       mismatch = true;
     } catch (const std::exception&) {
@@ -128,7 +128,7 @@ int main() {
                             var("hi", UnsizedLeaf::Matrix));
     bool mismatch = false;
     try {
-      m.exec(s);
+      (void)m.exec(s);
     } catch (const std::invalid_argument&) {
       mismatch = true;
     } catch (const std::exception&) {
@@ -147,7 +147,7 @@ int main() {
                  var("lo", UnsizedLeaf::Vector));
     bool accepted = true;
     try {
-      m.exec(vectors);
+      (void)m.exec(vectors);
     } catch (const std::exception&) {
       accepted = false;
     }
@@ -158,7 +158,7 @@ int main() {
                                  var("lo", UnsizedLeaf::Vector), "s");
     bool mismatch = false;
     try {
-      m.exec(scalar);
+      (void)m.exec(scalar);
     } catch (const std::invalid_argument&) {
       mismatch = true;
     } catch (const std::exception&) {
@@ -175,7 +175,7 @@ int main() {
                                 real(std::numeric_limits<double>::quiet_NaN()));
     bool accepted = true;
     try {
-      m.exec(empty);
+      (void)m.exec(empty);
     } catch (const std::exception&) {
       accepted = false;
     }
@@ -184,7 +184,7 @@ int main() {
     m.env()["x"] = values({0.0}, {1});
     bool domain = false;
     try {
-      m.exec(empty);
+      (void)m.exec(empty);
     } catch (const std::domain_error&) {
       domain = true;
     }

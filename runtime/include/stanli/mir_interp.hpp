@@ -176,11 +176,7 @@ class MirInterp {
       }
       sub.env_[f.arg_names[k]] = std::move(v);
     }
-    try {
-      for (const auto& s : f.body) sub.exec(s);
-    } catch (ReturnV& r) {
-      return std::move(r.v.r);
-    }
+    if (sub.exec_all(f.body) == Flow::Return) return std::move(sub.returned_.r);
     fail("function returned no value: " + f.name);
   }
 
@@ -199,11 +195,7 @@ class MirInterp {
       sub.env_[f.arg_names[k]] = args[k];
       sub.set_declared_dims(f.arg_names[k], args[k].dims);
     }
-    try {
-      for (const auto& s : f.body) sub.exec(s);
-    } catch (ReturnV& r) {
-      return std::move(r.v);
-    }
+    if (sub.exec_all(f.body) == Flow::Return) return std::move(sub.returned_);
     fail("function returned no value: " + f.name);
   }
 
@@ -265,17 +257,77 @@ class MirInterp {
 
   // Execute a statement list to completion; a bare top-level Return (the
   // write_array emission guards end this way) stops it cleanly.
-  void run(const std::vector<mir::Stmt>& body) {
-    try {
-      for (const auto& st : body) exec(st);
-    } catch (ReturnV&) {
+  void run(const std::vector<mir::Stmt>& body) { (void)exec_all(body); }
+
+  // What a statement asks of the statements around it: go on to the next
+  // one, leave or restart the enclosing loop, or leave the function with
+  // `returned_`.
+  enum class [[nodiscard]] Flow { Next, Return, Break, Continue };
+
+  Flow exec(const mir::Stmt& st) {
+    if constexpr (std::is_same_v<T, double>) {
+      if (hooks_.stmt && hooks_.stmt(st)) return Flow::Next;
+    }
+    switch (st.kind) {
+      case mir::Stmt::For: {
+        const long lo = as_int(st.lower);
+        // Match stanc's C++ for condition, including upper-bound effects on
+        // the final failed test. Only the lower bound is evaluated once.
+        // `long` is only 32-bit on Windows. A Stan loop ending at INT_MAX
+        // must advance once more to fail its final condition without wrapping.
+        for (int64_t v = lo; v <= as_int(st.upper); ++v) {
+          Value lv;
+          lv.is_int = true;
+          lv.i = {(int)v};
+          lv.r = {T((double)v)};
+          env_[st.loopvar] = lv;
+          const Flow flow = exec_all(st.body);
+          if (flow == Flow::Return) return flow;
+          if (flow == Flow::Break) break;
+        }
+        env_.erase(st.loopvar);
+        return Flow::Next;
+      }
+      case mir::Stmt::IfElse: {
+        const bool c = val(eval(st.cond).r.at(0)) != 0.0;
+        if (c && !st.body.empty()) return exec(st.body[0]);
+        if (!c && st.body.size() > 1) return exec(st.body[1]);
+        return Flow::Next;
+      }
+      case mir::Stmt::Block:
+      case mir::Stmt::SList:
+        return exec_all(st.body);
+      case mir::Stmt::While: {
+        int64_t guard = 0;
+        while (val(eval(st.cond).r.at(0)) != 0.0) {
+          if (++guard > 100000000) fail("while loop did not terminate");
+          const Flow flow = exec_all(st.body);
+          if (flow == Flow::Return) return flow;
+          if (flow == Flow::Break) break;
+        }
+        return Flow::Next;
+      }
+      case mir::Stmt::Return:
+        returned_ = st.has_init ? eval(st.rhs) : Value{};
+        return Flow::Return;
+      case mir::Stmt::Break:
+        return Flow::Break;
+      case mir::Stmt::Continue:
+        return Flow::Continue;
+      default:
+        exec_simple(st);
+        return Flow::Next;
     }
   }
 
-  void exec(const mir::Stmt& st) {
-    if constexpr (std::is_same_v<T, double>) {
-      if (hooks_.stmt && hooks_.stmt(st)) return;
-    }
+  Flow exec_all(const std::vector<mir::Stmt>& body) {
+    for (const auto& st : body)
+      if (const Flow flow = exec(st); flow != Flow::Next) return flow;
+    return Flow::Next;
+  }
+
+ private:
+  void exec_simple(const mir::Stmt& st) {
     switch (st.kind) {
       case mir::Stmt::Decl: {
         // Keep the declaration's evaluated geometry available to its later
@@ -571,59 +623,6 @@ class MirInterp {
           fail(what, st.raw);
         }
       }
-      case mir::Stmt::For: {
-        const long lo = as_int(st.lower);
-        // Match stanc's C++ for condition, including upper-bound effects on
-        // the final failed test. Only the lower bound is evaluated once.
-        // `long` is only 32-bit on Windows. A Stan loop ending at INT_MAX
-        // must advance once more to fail its final condition without wrapping.
-        for (int64_t v = lo; v <= as_int(st.upper); ++v) {
-          Value lv;
-          lv.is_int = true;
-          lv.i = {(int)v};
-          lv.r = {T((double)v)};
-          env_[st.loopvar] = lv;
-          try {
-            for (const auto& k : st.body) exec(k);
-          } catch (ContinueV&) {
-            continue;
-          } catch (BreakV&) {
-            break;
-          }
-        }
-        env_.erase(st.loopvar);
-        return;
-      }
-      case mir::Stmt::IfElse: {
-        const bool c = val(eval(st.cond).r.at(0)) != 0.0;
-        if (c && !st.body.empty()) exec(st.body[0]);
-        if (!c && st.body.size() > 1) exec(st.body[1]);
-        return;
-      }
-      case mir::Stmt::Block:
-      case mir::Stmt::SList:
-        for (const auto& k : st.body) exec(k);
-        return;
-      case mir::Stmt::While: {
-        int64_t guard = 0;
-        while (val(eval(st.cond).r.at(0)) != 0.0) {
-          if (++guard > 100000000) fail("while loop did not terminate");
-          try {
-            for (const auto& k : st.body) exec(k);
-          } catch (ContinueV&) {
-            continue;
-          } catch (BreakV&) {
-            break;
-          }
-        }
-        return;
-      }
-      case mir::Stmt::Return:
-        throw ReturnV{st.has_init ? eval(st.rhs) : Value{}};
-      case mir::Stmt::Break:
-        throw BreakV{};
-      case mir::Stmt::Continue:
-        throw ContinueV{};
       case mir::Stmt::NRFunApp:
         // Constraint checks are not executed here, but reject() and
         // print() are: a `reject` in transformed data is how a model
@@ -709,7 +708,6 @@ class MirInterp {
     }
   }
 
- private:
   FunctionArgumentShape function_argument_shape(const mir::Expr& source,
                                                 const Value& value) const {
     const FunctionArgumentKind kind =
@@ -1154,17 +1152,11 @@ class MirInterp {
     return o;
   }
 
-  // Thrown by a Return statement inside an interpreted function body.
-  struct ReturnV {
-    Value v;
-  };
-  struct BreakV {};
-  struct ContinueV {};
-
   const std::map<std::string, const mir::FunDef*>& funs_;
   std::string where_;
   MirHooks hooks_;
   std::map<std::string, Value> env_;
+  Value returned_;
   std::map<std::string, std::vector<int64_t>> decl_dims_;
 
   struct AssignShape {
@@ -1587,11 +1579,7 @@ class MirInterp {
     sub.env_[f->arg_names[2]] = std::move(end);
     for (size_t i = 3; i < e.args.size(); ++i)
       sub.env_[f->arg_names[i]] = std::move(shared[i - 3]);
-    try {
-      for (const auto& st : f->body) sub.exec(st);
-    } catch (ReturnV& r) {
-      return std::move(r.v);
-    }
+    if (sub.exec_all(f->body) == Flow::Return) return std::move(sub.returned_);
     fail("reduce_sum: " + base + " returned no value", e.raw);
   }
 
@@ -1656,11 +1644,7 @@ class MirInterp {
     sub.propto_ctx_ = propto_ctx_ && e.fn_propto;
     for (size_t i = 0; i < e.args.size(); ++i)
       sub.env_[f.arg_names[i]] = eval(e.args[i]);
-    try {
-      for (const auto& st : f.body) sub.exec(st);
-    } catch (ReturnV& r) {
-      return std::move(r.v);
-    }
+    if (sub.exec_all(f.body) == Flow::Return) return std::move(sub.returned_);
     return Value{};
   }
 

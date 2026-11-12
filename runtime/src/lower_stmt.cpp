@@ -194,7 +194,7 @@ bool Lowering::scan_block(const mir::Stmt& s,
     for (const auto& index : st.lhs_idx) dropped = dropped || unrunnable(index);
     if (!dropped) {
       try {
-        td.exec(st);
+        (void)td.exec(st);
         return;
       } catch (const std::exception&) {
       }
