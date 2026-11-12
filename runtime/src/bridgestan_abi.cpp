@@ -375,9 +375,7 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
               // (walnutpie among them) grep for the make-args spelling
               // "STAN_THREADS=true" and refuse to run multi-chain without it.
               (stanli::thread_safe_build() ? "; STAN_THREADS=true" : "") +
-              (stanli::exact_lp_build()
-                   ? "; lp__ matches CmdStan exactly"
-                   : "; lp__ offset from CmdStan by a per-model constant");
+              "; lp__ matches CmdStan exactly";
     return m.release();
   } catch (const std::exception& e) {
     set_error(error_msg, e.what());

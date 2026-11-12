@@ -410,9 +410,7 @@ transformation responsible.
 Some less common multivariate and multinomial densities match CmdStan's
 gradients but report `lp__` shifted by a parameter-independent constant. The
 posterior is unchanged, but a pinned-seed trajectory can differ, and an
-application that needs the absolute log density sees the shift. The optional
-`STANLI_LITE_LP` build makes the same trade for every density; it is off in
-shipped builds and checked by hand with `tools/verify_lite.py`. See
+application that needs the absolute log density sees the shift. See
 [docs/lp-constant.md](docs/lp-constant.md).
 
 AddressSanitizer cannot see every lifetime error in stan-math's arena: a stale

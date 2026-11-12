@@ -196,8 +196,8 @@ stanfit_empty_unbuilt <- function(object) {
 #'   Its placeholder `stanfit` class can otherwise conflict with RStan's class.
 #'   Native [as_cstanfit()] and [as_rfit()] do not need this load order.
 #'
-#'   Density calls support `adjust_transform = TRUE` (the default) and require
-#'   an exact-lp runtime. `adjust_transform = FALSE` is rejected because the
+#'   Density calls support `adjust_transform = TRUE` (the default).
+#'   `adjust_transform = FALSE` is rejected because the
 #'   graph includes the parameter-transform Jacobian. Native RStan resampling
 #'   and operations requiring its C++ model instance remain unsupported.
 #'   `constrain_pars` includes transformed parameters and generated quantities;

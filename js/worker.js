@@ -324,11 +324,6 @@ onmessage = async (e) => {
         sampler: pathfinder ? "pathfinder" : walnuts ? "walnuts" : "nuts",
         maxDepth: pathfinder ? null : 10,
         samplerStats: samplerStats ? samplerStats.buffer : null,
-        // True unless the runtime was built with STANLI_LITE_LP, which
-        // drops stan-math's propto instantiations and shifts lp__ by a
-        // per-model constant. The shipped browser build does not, so this
-        // is true; it stays in the payload so a caller that compares lp__
-        // across engines can check rather than assume.
         exactLp: M._stanli_exact_lp() !== 0,
         columns: cols.buffer,
         ms: {

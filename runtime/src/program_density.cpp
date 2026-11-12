@@ -39,8 +39,7 @@ struct Entry {
 };
 
 constexpr Entry kDensities[] = {
-#define STANLI_PD_ENTRY(opc, fn, arity, tier) \
-  {#fn, opc, arity, density_tier(tier)},
+#define STANLI_PD_ENTRY(opc, fn, arity, tier) {#fn, opc, arity, tier},
     STANLI_SCALAR_DENSITY_LIST(STANLI_PD_ENTRY)
         STANLI_SCALAR_CDF_LIST(STANLI_PD_ENTRY)
 #undef STANLI_PD_ENTRY
@@ -210,7 +209,7 @@ bool program_density_partials(int id, unsigned mask, const double* args,
   switch (id) {
 #define STANLI_PD_PARTIALS(opc, fn, arity, tier)                          \
   case kId_##fn:                                                          \
-    with_mask<arity, density_tier(tier)>(mask, [&](auto m) {              \
+    with_mask<arity, tier>(mask, [&](auto m) {                            \
       record_probability_call([&] {                                       \
         return call_rvar<arity, m.value>(                                 \
             [](const auto&... x) { return stan::math::fn<false>(x...); }, \
@@ -222,7 +221,7 @@ bool program_density_partials(int id, unsigned mask, const double* args,
 #undef STANLI_PD_PARTIALS
 #define STANLI_PCDF_PARTIALS(opc, fn, arity, tier)                        \
   case kId_##fn:                                                          \
-    with_mask<arity, density_tier(tier)>(mask, [&](auto m) {              \
+    with_mask<arity, tier>(mask, [&](auto m) {                            \
       record_probability_call([&] {                                       \
         return call_rvar<arity, m.value>(                                 \
             [](const auto&... x) { return stan::math::fn(x...); }, args); \

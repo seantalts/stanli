@@ -68,9 +68,6 @@ test_that("live methods validate flags, coordinates, and model attachment", {
   expect_error(rstan::log_prob(saved_sf, 0.2), "no live stanli")
   expect_identical(as_stanfit(sf), sf)
   expect_error(as_stanfit(sf, model = es_model()), "model must match")
-  testthat::local_mocked_bindings(stanli_exact_lp = function() FALSE, .package = "stanli")
-  expect_error(rstan::log_prob(sf, 0), "exact-lp runtime")
-  expect_error(rstan::grad_log_prob(sf, 0), "exact-lp runtime")
 })
 
 test_that("a fresh session restores subclass draws and reports a missing handle", {

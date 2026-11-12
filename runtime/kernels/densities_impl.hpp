@@ -223,10 +223,9 @@ void density_fwd_sum(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
   ctx.out.data[0] = s.value;
 }
 
-template <int NArgs, int Listed, unsigned VecMask = 0, typename FProp,
+template <int NArgs, int Tier, unsigned VecMask = 0, typename FProp,
           typename FFull>
 void density_fwd_v(KernelCtx& ctx, FProp&& fp, FFull&& ff) {
-  constexpr int Tier = density_tier(Listed);
   // A density with a vector-only argument has no elementwise form to
   // instantiate -- the per-lane binding hands every argument over as a
   // scalar, which is exactly what VecMask exists to forbid. reroll.cpp
@@ -342,7 +341,7 @@ int64_t density_scratch(const Op& op, const Slot* slots) {
 #define STANLI_LPMF_FWD_T(fname, dist, NARGS, TIER)                          \
   void fname(KernelCtx& ctx) {                                               \
     if (ctx.variant & 0x40u) {                                               \
-      density_fwd_elt<NARGS, density_tier(TIER)>(                            \
+      density_fwd_elt<NARGS, TIER>(                                          \
           ctx,                                                               \
           [&](int64_t n, const auto&... a) {                                 \
             return stan::math::dist<true>(ctx.idata[n], a...);               \
@@ -405,7 +404,7 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
 
 #define STANLI_DEFINE_CDF_FWD(code, fn, n, tier)                     \
   void fn##_fwd_gen(KernelCtx& ctx) {                                \
-    cdf_fwd<n, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>(      \
+    cdf_fwd<n, tier & STANLI_DENSITY_FULL_MASKS>(                    \
         ctx, [](const auto&... a) { return stan::math::fn(a...); }); \
   }
 
@@ -420,7 +419,7 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
   void fn##_fwd_gen(KernelCtx& ctx) {                                    \
     if constexpr (code == OP_POISSON_LCDF) {                             \
       if (ctx.n_idata == 1 && ctx.in[0].len == 1) {                      \
-        cdf_fwd<nreal, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>(  \
+        cdf_fwd<nreal, tier & STANLI_DENSITY_FULL_MASKS>(                \
             ctx, [&](const auto&... a) {                                 \
               return stan::math::fn(ctx.idata[0], a...);                 \
             });                                                          \
@@ -429,7 +428,7 @@ void cdf_fwd(KernelCtx& ctx, F&& f) {
     }                                                                    \
     Eigen::Map<const Eigen::VectorXi> y(                                 \
         ctx.idata, static_cast<Eigen::Index>(ctx.n_idata));              \
-    cdf_fwd<nreal, density_tier(tier) & STANLI_DENSITY_FULL_MASKS>(      \
+    cdf_fwd<nreal, tier & STANLI_DENSITY_FULL_MASKS>(                    \
         ctx, [&](const auto&... a) { return stan::math::fn(y, a...); }); \
   }
 

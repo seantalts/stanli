@@ -214,7 +214,7 @@ load_runtime <- function(path = stanli_runtime_path()) {
 }
 
 #' Does this build report CmdStan's `lp__` exactly?
-#' @return `TRUE` unless the runtime was built with `STANLI_LITE_LP`.
+#' @return Always `TRUE`: every build reproduces CmdStan's `lp__` exactly.
 #' @export
 stanli_exact_lp <- function() {
   load_runtime()

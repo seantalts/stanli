@@ -747,11 +747,7 @@ void student_t_dispatch(const Y& y, const Nu& nu, const M& mu, const S& sigma,
 void student_t_lpdf_run(KernelCtx& ctx) {
   count_call();
   const unsigned variant = ctx.variant;
-#ifdef STANLI_LITE_LP
-  const bool propto = false;
-#else
   const bool propto = (variant & 0x80u) != 0;
-#endif
   if (variant & 0x40u) {
     const unsigned mask = variant & 0x3fu;
     const int64_t N = ctx.out.len;
@@ -863,11 +859,7 @@ template <typename Op>
 void fused_lpdf(KernelCtx& ctx) {
   count_call();
   const unsigned variant = ctx.variant;
-#ifdef STANLI_LITE_LP
-  const bool propto = false;
-#else
   const bool propto = (variant & 0x80u) != 0;
-#endif
   if (variant & 0x40u) {
     const unsigned mask = variant & 0x3fu;
     const int64_t N = ctx.out.len;

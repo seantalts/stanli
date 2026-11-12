@@ -75,10 +75,6 @@ stanfit_density_model <- function(object, adjust_transform) {
     stop("adjust_transform = FALSE is unsupported: stanli's compiled graph ",
          "includes the parameter-transform Jacobian", call. = FALSE)
   model <- stanfit_live_model(object)
-  if (!stanli_exact_lp())
-    stop("RStan density methods need an exact-lp runtime; this runtime was ",
-         "built with STANLI_LITE_LP and changes parameter-independent constants",
-         call. = FALSE)
   model
 }
 
