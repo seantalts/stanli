@@ -257,8 +257,6 @@ class bs_rng {
 
 namespace stanli {
 
-const char* bs_build_id() { return runtime_build_id(); }
-
 bool bs_read_manifest(const std::string& text, BsManifest* out,
                       std::string* err) {
   auto say = [&](const std::string& s) {
@@ -280,9 +278,9 @@ bool bs_read_manifest(const std::string& text, BsManifest* out,
   // A stale pair must fail loudly. The MIR dialect and the lowering that
   // reads it move together, so a manifest written by another build could
   // lower to something subtly different rather than not lower at all.
-  if (id != bs_build_id())
+  if (id != runtime_build_id())
     return say("manifest was written by a different stanli build: it says \"" +
-               id + "\", this runtime is \"" + std::string(bs_build_id()) +
+               id + "\", this runtime is \"" + std::string(runtime_build_id()) +
                "\"");
   out->build_id = id;
   out->mir = root["mir"].get<std::string>();

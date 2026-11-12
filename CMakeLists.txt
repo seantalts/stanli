@@ -514,7 +514,7 @@ add_library(stanli_shared SHARED
   $<TARGET_OBJECTS:stanli_runtime_objects>
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_include_directories(stanli_shared PUBLIC runtime/include)
-# ${CMAKE_DL_LIBS}: bs_model_construct calls dladdr to find its own path.
+# ${CMAKE_DL_LIBS}: the embedded OCaml runtime uses dlopen.
 target_link_libraries(stanli_shared
                       PUBLIC stanmath sundials Threads::Threads ${CMAKE_DL_LIBS})
 set_target_properties(stanli_shared PROPERTIES OUTPUT_NAME stanli)
@@ -648,10 +648,9 @@ if(STANLI_SANITIZE)
   endif()
 endif()
 target_include_directories(stanli PUBLIC runtime/include)
-# The BridgeStan facade is native-only: it finds its own sidecar manifest
-# with dladdr, and a browser has neither dlopen nor a second process to
-# load the pair. Nothing under wasm references a bs_ symbol, so this only
-# saves compiling it.
+# The BridgeStan facade is native-only: it is the BridgeStan C ABI that
+# native hosts load, and nothing under wasm references a bs_ symbol, so this
+# only saves compiling it.
 if(NOT EMSCRIPTEN)
   # PUBLIC, so anything linking the runtime sees the same decoration the
   # definitions were compiled with. Without it the reference header's
@@ -662,7 +661,7 @@ if(NOT EMSCRIPTEN)
 endif()
 target_link_libraries(stanli PUBLIC stanmath sundials)
 if(NOT EMSCRIPTEN)
-  # ${CMAKE_DL_LIBS}: bs_model_construct calls dladdr. Not under
+  # ${CMAKE_DL_LIBS}: the embedded OCaml runtime uses dlopen. Not under
   # Emscripten, whose libc already carries it.
   target_link_libraries(stanli PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 endif()

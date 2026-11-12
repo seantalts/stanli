@@ -15,6 +15,7 @@
 #include "../runtime/third_party/bridgestan.h"
 #include "categorical_check_mir.hpp"
 
+#include "../runtime/src/build_id.hpp"
 #include "../runtime/third_party/nlohmann_json.hpp"
 
 #include <stanli/bridgestan_internal.hpp>
@@ -159,7 +160,7 @@ void test_density_matches_executor() {
   // and the ABI it implements.
   expect_eq_str("bs_name default", bs_name(m), "stanli_model");
   const std::string info = bs_model_info(m);
-  if (info.find(stanli::bs_build_id()) == std::string::npos)
+  if (info.find(stanli::runtime_build_id()) == std::string::npos)
     fail("bs_model_info does not carry the build id: " + info);
   if (info.find("2.9.0") == std::string::npos)
     fail("bs_model_info does not name the BridgeStan ABI version: " + info);
@@ -837,7 +838,7 @@ void test_necessity_effects() {
                 bs_set_print_callback(&collect_print, &err), 0);
 
   nlohmann::json root = {{"mode", 1}};
-  root["__stanli"] = {{"build_id", stanli::bs_build_id()},
+  root["__stanli"] = {{"build_id", stanli::runtime_build_id()},
                       {"mir", mir},
                       {"name", "necessity_effects"}};
   g_printed.clear();
@@ -889,7 +890,7 @@ void test_necessity_effects() {
 // The manifest reader on its own: the manifest is read and its build id
 // checked before anything is compiled.
 void test_manifest() {
-  const std::string id = stanli::bs_build_id();
+  const std::string id = stanli::runtime_build_id();
   stanli::BsManifest man;
   std::string err;
 
@@ -934,7 +935,7 @@ void test_embedded_manifest() {
   const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
   nlohmann::json root =
       nlohmann::json::parse(slurp("tests/fixtures/conj.json"));
-  root["__stanli"] = {{"build_id", stanli::bs_build_id()},
+  root["__stanli"] = {{"build_id", stanli::runtime_build_id()},
                       {"mir", mir},
                       {"name", "conj_embedded"}};
   const std::string data = root.dump();

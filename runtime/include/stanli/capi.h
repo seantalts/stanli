@@ -136,7 +136,8 @@ char* stanli_take_messages(void);
 const char* stanli_build_id(void);
 
 /* 1 if this build reproduces CmdStan's lp__ exactly, 0 if lp__ sits a
- * per-model constant above it. A STANLI_LITE_LP build drops stan-math's
+ * per-model constant above it. Every shipped build returns 1. A
+ * STANLI_LITE_LP build, which is off by default, drops stan-math's
  * propto instantiations to halve the library, which leaves every
  * gradient bitwise identical and shifts only the reported log density.
  * A given seed still draws a different (equally valid) chain, because a
