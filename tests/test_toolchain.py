@@ -49,6 +49,7 @@ class PinsFileTests(unittest.TestCase):
         self.assertEqual(toolchain.cmdstan_release(pinned), toolchain.cmdstan_version())
         self.assertEqual(toolchain.cmdstan_release("a" * 40), "a" * 12)
 
+    @unittest.skipIf(sys.platform == "win32", "the bash on PATH may be WSL, which cannot read Windows paths")
     def test_the_file_is_sourceable_by_bash(self):
         out = subprocess.run(
             ["bash", "-c", 'set -eu; . "$1"; echo "$CMDSTAN_SHA $OPAM_SWITCH"',
@@ -66,6 +67,7 @@ class PinsFileTests(unittest.TestCase):
 
 
 class EmbedDirTests(unittest.TestCase):
+    @unittest.skipIf(sys.platform == "win32", "the bash on PATH may be WSL, which cannot read Windows paths")
     def test_probe_lives_in_the_keyed_embed_directory(self):
         out = subprocess.check_output(
             ["bash", "-c", "source tools/stanc_embed/provenance.sh && stanc_embed_dir"],
