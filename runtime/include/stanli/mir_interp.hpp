@@ -119,9 +119,25 @@ class MirInterp {
     decl_dims_[name] = std::move(dims);
   }
 
+  // Names readable beneath env() without a copy. The first write to one
+  // copies it into env(); the parent itself is never written.
+  void set_parent_env(const std::map<std::string, Value>* parent) {
+    parent_ = parent;
+  }
+
   Value* find(const std::string& n) {
     auto it = env_.find(n);
-    return it == env_.end() ? nullptr : &it->second;
+    if (it != env_.end()) return &it->second;
+    if (parent_ == nullptr) return nullptr;
+    auto p = parent_->find(n);
+    return p == parent_->end() ? nullptr : &(env_[n] = p->second);
+  }
+  const Value* lookup(const std::string& n) const {
+    auto it = env_.find(n);
+    if (it != env_.end()) return &it->second;
+    if (parent_ == nullptr) return nullptr;
+    auto p = parent_->find(n);
+    return p == parent_->end() ? nullptr : &p->second;
   }
 
   void set_probe(bool on) {
@@ -219,7 +235,7 @@ class MirInterp {
         r.r = {T(e.lit)};
         return r;
       case mir::Expr::Var: {
-        Value* en = find(e.name);
+        const Value* en = lookup(e.name);
         if (en) return *en;
         // The lowering evaluates data-only conditions of unrolled log_prob
         // loops here; the loop variables live in its own int environment.
@@ -363,7 +379,7 @@ class MirInterp {
         }
         if (st.lhs_idx.empty()) {
           Value v = eval(st.rhs);
-          if (const Value* current = find(st.lhs))
+          if (const Value* current = lookup(st.lhs))
             check_assign_size(
                 st.lhs,
                 current->dims.empty()
@@ -376,7 +392,7 @@ class MirInterp {
           // real registers, while an all-integer array literal is tagged int.
           // Preserve int destinations as before, and apply Stan's implicit
           // int-to-real promotion when assigning into a real destination.
-          const Value* existing = find(st.lhs);
+          const Value* existing = lookup(st.lhs);
           if (existing && existing->is_int && !v.is_int) {
             v.is_int = true;
             v.i.clear();
@@ -1165,6 +1181,7 @@ class MirInterp {
   std::string where_;
   MirHooks hooks_;
   std::map<std::string, Value> env_;
+  const std::map<std::string, Value>* parent_ = nullptr;
   std::map<std::string, std::vector<int64_t>> decl_dims_;
 
   struct AssignShape {
@@ -1671,7 +1688,7 @@ class MirInterp {
     // a large data array (60k-row models spent minutes here).
     const Value* base_ptr = nullptr;
     Value base_storage;
-    if (e.args[0].kind == mir::Expr::Var) base_ptr = find(e.args[0].name);
+    if (e.args[0].kind == mir::Expr::Var) base_ptr = lookup(e.args[0].name);
     if (base_ptr == nullptr) {
       base_storage = eval(e.args[0]);
       base_ptr = &base_storage;

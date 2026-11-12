@@ -326,7 +326,18 @@ int64_t probe_wa_columns(WaInterp& interp, const CompiledModel& cm,
 
 WaInterp::WaInterp(std::shared_ptr<const mir::Program> prog,
                    std::map<std::string, DataMap::Entry> base_env)
-    : prog_(std::move(prog)), base_env_(std::move(base_env)) {
+    : WaInterp(std::move(prog),
+               std::make_shared<const std::map<std::string, DataMap::Entry>>(
+                   std::move(base_env)),
+               {}) {}
+
+WaInterp::WaInterp(
+    std::shared_ptr<const mir::Program> prog,
+    std::shared_ptr<const std::map<std::string, DataMap::Entry>> shared_env,
+    std::map<std::string, DataMap::Entry> own_env)
+    : prog_(std::move(prog)),
+      shared_env_(std::move(shared_env)),
+      base_env_(std::move(own_env)) {
   for (const auto& f : prog_->fun_defs) funs_[f.name] = &f;
 }
 
@@ -377,6 +388,7 @@ std::vector<double> WaInterp::eval(
   };
   MirInterp<double> in(funs_, "write_array", std::move(h));
   cur = &in;
+  in.set_parent_env(shared_env_.get());
   in.env() = base_env_;
   in.run(prog_->generate_quantities);
   if (!have_cols_) {

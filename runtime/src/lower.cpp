@@ -1285,8 +1285,17 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   auto specialized = try_bounded_specialization(lo, *prog);
   CompiledModel cm = specialized ? std::move(*specialized) : lo.run(*prog);
   lo.after_data_prepared = nullptr;
+  // The interpreters below only read data and transformed data, and nothing
+  // reads the log_prob lowering's environment after this, so they share it.
+  std::shared_ptr<const std::map<std::string, DataMap::Entry>> interp_env;
+  const auto shared_interp_env = [&] {
+    if (!interp_env)
+      interp_env =
+          std::make_shared<const std::map<std::string, DataMap::Entry>>(
+              std::move(lo.td.env()));
+    return interp_env;
+  };
   if (wa_lowering) {
-    const PreparedContext prepared = lo.prepared_context();
     CompiledModel::WriteArray w = wa_lowering->finish(lo, prep);
     for (const std::string& note : wa_lowering->interpreter_fallbacks())
       add_interpreter_fallback(cm, note);
@@ -1315,16 +1324,17 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
       // The graph could not express the whole section; hand the model the
       // per-draw interpreter, seeded with data + transformed data and the
       // emission flags the guard blocks test.
-      auto env = prepared.environment;
+      std::map<std::string, DataMap::Entry> flags;
       for (const char* flag :
            {"emit_transformed_parameters__", "emit_generated_quantities__"}) {
         DataMap::Entry one;
         one.is_int = true;
         one.i = {1};
         one.r = {1.0};
-        env[flag] = one;
+        flags[flag] = one;
       }
-      w.interp = std::make_shared<WaInterp>(prog, std::move(env));
+      w.interp = std::make_shared<WaInterp>(prog, shared_interp_env(),
+                                            std::move(flags));
     }
     cm.write_array = std::move(w);
     if (!cm.write_array->truncated.empty())
@@ -1377,8 +1387,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
       }
     }
     if (ti.truncated.empty())
-      ti.interp =
-          std::make_shared<InitInterp>(prog, lo.td.env(), std::move(params));
+      ti.interp = std::make_shared<InitInterp>(prog, shared_interp_env(),
+                                               std::move(params));
     cm.transform_inits = std::move(ti);
   }
   if (!cm.interpreter_fallbacks.empty() && std::getenv("STANLI_NO_INTERPRETER"))
