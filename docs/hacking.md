@@ -280,16 +280,28 @@ The tools you will reach for most:
   reference values (needs a CmdStan checkout).
 - [`sampler_trace.py`](../tools/sampler_trace.py): compare sampler
   behavior against CmdStan.
+- [`lowering_digest`](../tools/lowering_digest.cpp): compile a model and
+  print a deterministic account of everything lowering produced (both graphs,
+  column names, fallback notes, and values at a fixed point). `--hash` prints
+  one line, a hash of that account. `--time K` constructs the model `K` times
+  and prints each construction time in milliseconds, excluding stanc.
+  `--wa-time K` times `K` write_array evaluations at a fixed point and prints
+  nanoseconds per draw. To show that a lowering refactor changed nothing, run
+  `--hash` over every corpus model before and after the change and compare
+  the two lists: any model whose hash moved lowered differently.
 
-For orientation: about 16,500 lines of runtime (not counting a
-vendored JSON parser) and 10,000 lines of tests. The biggest files are
-[`lower.cpp`](../runtime/src/lower.cpp) (2.4k lines, and the most
-likely place your change belongs),
-[`mir_interp.hpp`](../runtime/include/stanli/mir_interp.hpp) (1.3k),
-and [`reroll.cpp`](../runtime/src/reroll.cpp) (0.9k). The opcode list
-([`optable.hpp`](../runtime/include/stanli/optable.hpp)) has about 250
-entries. The kernels are repetitive by design: read one and you have
-read them all.
+For orientation, start with [`graph.hpp`](../runtime/include/stanli/graph.hpp)
+(the IR) and [`optable.hpp`](../runtime/include/stanli/optable.hpp) (every
+opcode, listed once). Lowering begins in [`lower.cpp`](../runtime/src/lower.cpp)
+and continues in the `lower_*.cpp` files beside it, split by statements,
+expressions, function calls and higher-order calls; a change to what a model
+compiles to usually belongs there. [`executor.cpp`](../runtime/src/executor.cpp)
+runs the result. What the op graph cannot express goes to the register machine
+([`program.hpp`](../runtime/include/stanli/program.hpp),
+[`mir_prog.hpp`](../runtime/include/stanli/mir_prog.hpp)) or the
+[MIR interpreter](../runtime/include/stanli/mir_interp.hpp). The kernels are
+repetitive by design: read one and you have read them all. Several files are
+large, so run `wc -l` before opening one.
 
 ## The IR
 
