@@ -20,6 +20,7 @@ import subprocess
 import sys
 
 from cmdstan_ref import compile_cmd
+from corpus_inventory import source_digest
 import toolchain
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -38,12 +39,6 @@ def run(argv):
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def source_digest(path):
-    # Git may check text files out as CRLF on Windows. Only normalize that
-    # checkout transformation; compiler binaries still use the raw digest.
-    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def parse(text):

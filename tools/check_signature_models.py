@@ -42,7 +42,8 @@ import subprocess
 import sys
 import tempfile
 
-from check_function_models import digest, parse, source_digest
+from check_function_models import digest, parse
+from corpus_inventory import source_digest
 from cmdstan_ref import compile_cmd
 import toolchain
 

@@ -1,5 +1,4 @@
 """Check compiled standalone C-ABI results against independent CmdStan rows."""
-import hashlib
 import json
 import math
 import os
@@ -9,6 +8,9 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+from corpus_inventory import source_digest  # noqa: E402
+
 FIXTURE = ROOT / 'tests/fixtures/standalone_function_reference'
 
 def ordered(value):
@@ -18,7 +20,7 @@ def ordered(value):
 def main(host):
     reference = json.loads(FIXTURE.with_suffix('.ref.json').read_text())
     for suffix,key in (('.stan','source_sha256'),('.json','data_sha256')):
-        assert hashlib.sha256(FIXTURE.with_suffix(suffix).read_bytes().replace(b'\r\n',b'\n')).hexdigest() == reference[key]
+        assert source_digest(FIXTURE.with_suffix(suffix)) == reference[key]
     points = ('0','1','2','0')
     values = [str(reference['points'][point]['wa']['values'][0]) for point in points]
     run = subprocess.run([host,str(FIXTURE.with_suffix('.tmir.sexp')),*values],

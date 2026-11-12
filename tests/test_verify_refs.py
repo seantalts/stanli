@@ -30,8 +30,7 @@ from verify_refs import (ILL_CONDITIONED, KNOWN_GAPS,  # noqa: E402
                          POINTS, QUARANTINED, SCHEMA,
                          check_model, load_refs, model_files, parse_status,
                          probe_point)
-from cmdstan_ref import (_result_line, point_results,  # noqa: E402
-                         split_points)
+from cmdstan_ref import point_results, split_points  # noqa: E402
 import verify_sample  # noqa: E402
 import verify_refs  # noqa: E402
 from corpus_inventory import local_cases, source_digest
@@ -89,7 +88,6 @@ class StatusLineTest(unittest.TestCase):
         out = "OK generated quantity text\nOK -3.5 1 -2\n"
         want = ["OK", "-3.5", "1", "-2"]
         self.assertEqual(parse_status(out), want)
-        self.assertEqual(_result_line(out), want)
 
 
 class MultiPointOutputTest(unittest.TestCase):
@@ -118,7 +116,7 @@ class MultiPointOutputTest(unittest.TestCase):
         for line in ("COMPILE_FAIL no MIR", "DATA_FAIL bad data"):
             with self.subTest(line=line):
                 self.assertEqual(split_points(line + "\n"), {})
-                self.assertEqual(_result_line(line + "\n"), line.split())
+                self.assertEqual(parse_status(line + "\n"), line.split())
 
     def test_a_printed_point_prefix_is_not_a_header(self):
         out = "POINT 0\nPOINT lies\nOK 1 2\n"

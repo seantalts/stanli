@@ -8,7 +8,6 @@ CmdStan checkout on every run.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import pathlib
@@ -17,21 +16,19 @@ import sys
 import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tools"))
+from verify_refs import parse_status  # noqa: E402
+from corpus_inventory import source_digest  # noqa: E402
+
 FIXTURE = REPO / "tests/fixtures/viewc_zero_length_whole_assignment_resize.stan"
 REFERENCE = REPO / "tests/fixtures/viewc_zero_length_whole_assignment_resize.ref.json"
 
 
-def source_digest(path):
-    return hashlib.sha256(
-        path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
-
-
 def parse_ok(output):
-    for line in output.splitlines():
-        fields = line.split()
-        if fields and fields[0] == "OK":
-            return float(fields[1]), [float(x) for x in fields[2:]]
-    raise ValueError("no OK line in stanli_check output:\n" + output)
+    fields = parse_status(output)
+    if fields[:1] != ["OK"]:
+        raise ValueError("no OK line in stanli_check output:\n" + output)
+    return float(fields[1]), [float(x) for x in fields[2:]]
 
 
 def main():

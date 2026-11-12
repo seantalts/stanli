@@ -11,7 +11,6 @@ data comes from NAME.data.json when present.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import pathlib
 import subprocess
@@ -22,13 +21,11 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 
 import cmdstan_ref  # noqa: E402
+from corpus_inventory import source_digest  # noqa: E402
+from verify_refs import parse_status  # noqa: E402
 
 FIXTURES = REPO / "tests/fixtures/cmdstan_replay"
 POINTS = (0, 1, 2)
-
-
-def source_digest(path):
-    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def record(stan, cmdstan):
@@ -46,7 +43,7 @@ def record(stan, cmdstan):
         for p in POINTS:
             out = subprocess.run([str(exe), str(work / "data.json"), str(p)],
                                  capture_output=True, text=True).stdout
-            fields = cmdstan_ref._result_line(out)
+            fields = parse_status(out)
             if fields[:1] != ["OK"]:
                 raise RuntimeError(f"{stan.name}: CmdStan failed at point {p}")
             vals = [float(x) for x in fields[1:]]

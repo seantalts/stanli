@@ -30,6 +30,7 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
+from corpus_inventory import source_digest  # noqa: E402
 import toolchain  # noqa: E402
 from verify_refs import pair_dev  # noqa: E402
 
@@ -73,10 +74,6 @@ def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def source_digest(path):
-    return sha256(pathlib.Path(path).read_bytes().replace(b"\r\n", b"\n"))
-
-
 def load_gz(path):
     """A .json.gz or .json.xz file."""
     raw = pathlib.Path(path).read_bytes()
@@ -96,14 +93,7 @@ def check_corpus(corpus=CORPUS):
     """The pinned stanc3 checkout, or an error. Never a skip."""
     if not corpus.is_dir():
         raise SystemExit(f"{corpus} is missing; run tools/dev_setup.sh")
-    want = toolchain.pins()["STANC3_SRC_SHA"]
-    try:
-        head = toolchain.git_head(corpus)
-    except (OSError, subprocess.CalledProcessError):
-        head = "unknown"
-    if head != want:
-        raise SystemExit(f"{corpus} is at {head}, deps/pins.env wants "
-                         f"STANC3_SRC_SHA={want}")
+    toolchain.require_stanc3_src(corpus)
 
 
 def corpus_models(corpus=CORPUS):

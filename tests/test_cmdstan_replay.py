@@ -21,15 +21,16 @@ import tempfile
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 
-from record_replay_refs import FIXTURES, source_digest  # noqa: E402
+from verify_refs import parse_status  # noqa: E402
+from corpus_inventory import source_digest  # noqa: E402
+from record_replay_refs import FIXTURES  # noqa: E402
 
 
 def parse_ok(output):
-    for line in output.splitlines():
-        fields = line.split()
-        if fields and fields[0] == "OK":
-            return float(fields[1]), [float(x) for x in fields[2:]]
-    raise ValueError("no OK line in stanli_check output:\n" + output)
+    fields = parse_status(output)
+    if fields[:1] != ["OK"]:
+        raise ValueError("no OK line in stanli_check output:\n" + output)
+    return float(fields[1]), [float(x) for x in fields[2:]]
 
 
 def replay(stan, check, stanc):

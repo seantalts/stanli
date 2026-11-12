@@ -358,18 +358,14 @@ def parse_wa(out):
 
 
 def parse_status(out):
-    """Fields from the final machine-readable result line, or [].
+    """Fields of the final machine-readable result line, or [].
 
-    Stan ``print`` statements in transformed data run before evaluation and
-    can therefore put ordinary output ahead of stanli_check's result.  Keep
-    the three result spellings in one parser so recording and replay do not
-    accidentally treat that output as the result line.
+    stanli_check and ref_driver both print it after any Stan print output,
+    and a user `print("OK ...")` must not shadow it, so read backwards.
     """
-    # The driver writes its result after model output.  Walking backwards
-    # also prevents a user `print("OK ...")` from shadowing the real status.
     for line in reversed(out.splitlines()):
         fields = line.split()
-        if fields and fields[0] in ("OK", "COMPILE_FAIL", "EVAL_FAIL"):
+        if fields and fields[0] in ("OK", "COMPILE_FAIL", "EVAL_FAIL", "DATA_FAIL"):
             return fields
     return []
 

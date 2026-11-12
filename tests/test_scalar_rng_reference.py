@@ -1,5 +1,4 @@
 """Replay complete stochastic rows independently recorded from CmdStan."""
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -9,6 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+from corpus_inventory import source_digest
 from verify_refs import parse_status, parse_wa
 
 
@@ -21,7 +21,7 @@ def main(check, fixture="gq_scalar_rng_complete", expected_interpreter="0"):
     source = ROOT / "tests/fixtures" / (fixture + ".stan")
     reference = json.loads(source.with_suffix(".ref.json").read_text())
     for path, key in [(source, "source_sha256"), (source.with_suffix(".json"), "data_sha256")]:
-        assert hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == reference[key]
+        assert source_digest(path) == reference[key]
     assert set(reference["points"]) == {"0", "1", "2"}
     assert reference["seed"] == 1234 and reference["chain"] == 0
     worst = 0
