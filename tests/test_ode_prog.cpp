@@ -9,6 +9,8 @@
 // The other half is the fallback: return paths with incompatible logical
 // shapes still refuse, with a reason, while supported early exits select the
 // shared register compiler. Both values and weighted derivatives are checked.
+#include "expect.hpp"
+
 #include <stanli/mir.hpp>
 #include <stanli/callback.hpp>
 #include <stanli/message_sink.hpp>
@@ -33,26 +35,10 @@
 
 namespace {
 
-int failures = 0;
-
-void expect(const std::string& what, bool ok) {
-  if (!ok) {
-    ++failures;
-    std::printf("FAIL %s\n", what.c_str());
-  }
-}
-
 uint64_t bits(double x) {
   uint64_t out;
   std::memcpy(&out, &x, sizeof(out));
   return out;
-}
-
-std::string slurp(const std::string& path) {
-  std::ifstream f(path);
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
 }
 
 // Deterministic, and spread over both sides of the branch condition.
@@ -124,8 +110,10 @@ void check_generated_local(const std::string& name, const stanli::RhsProgram& p,
   bool jacobian_exact = got_jacobian.size() == want_jacobian.size();
   for (size_t i = 0; i < got_jacobian.size() && jacobian_exact; ++i)
     jacobian_exact = bits(got_jacobian[i]) == bits(want_jacobian[i]);
-  expect(name + ": generated local values are bitwise exact", values_exact);
-  expect(name + ": generated local Jacobian is bitwise exact", jacobian_exact);
+  expect_true(name + ": generated local values are bitwise exact",
+              values_exact);
+  expect_true(name + ": generated local Jacobian is bitwise exact",
+              jacobian_exact);
 }
 
 void check_exact_opcode_contract() {
@@ -178,8 +166,8 @@ void check_exact_opcode_contract() {
   std::string refusal;
   const std::shared_ptr<const IslandProg> generated =
       make_rhs_adjoint_program(p, &refusal);
-  expect("exact opcode contract is eligible", (bool)generated);
-  expect("exact opcode contract has no refusal", refusal.empty());
+  expect_true("exact opcode contract is eligible", (bool)generated);
+  expect_true("exact opcode contract has no refusal", refusal.empty());
   if (generated)
     check_generated_local("exact opcode contract", p, *generated, 0.25,
                           {0.7, 1.2}, {0.3, 0.8, 1.1}, {0.4, 0.6});
@@ -212,8 +200,8 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
                           got.a == want.a && got.b == want.b &&
                           got.c == want.c && got.len == want.len;
   }
-  expect(name + ": derivative builder preserves canonical bytecode",
-         canonical_unchanged);
+  expect_true(name + ": derivative builder preserves canonical bytecode",
+              canonical_unchanged);
   if (!want_ok) {
     if (expected_refusal && p.why.find(expected_refusal) == std::string::npos) {
       ++failures;
@@ -224,18 +212,19 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
       ++failures;
       std::printf("FAIL %s: refused without saying why\n", name.c_str());
     }
-    expect(name + ": compiler refusal has no derivative payload", !generated);
-    expect(name + ": compiler refusal is observable", !refusal.empty());
+    expect_true(name + ": compiler refusal has no derivative payload",
+                !generated);
+    expect_true(name + ": compiler refusal is observable", !refusal.empty());
     return;  // the interpreter still serves it; the ODE kernel falls back
   }
-  expect(name + ": generated derivative eligibility",
-         (bool)generated == want_generated);
-  expect(name + ": generated derivative disposition is observable",
-         generated ? refusal.empty() : !refusal.empty());
+  expect_true(name + ": generated derivative eligibility",
+              (bool)generated == want_generated);
+  expect_true(name + ": generated derivative disposition is observable",
+              generated ? refusal.empty() : !refusal.empty());
   if (!generated && (name == "f_branch" || name == "f_udf"))
-    expect(name + ": runtime control-flow refusal names JZ/JMP",
-           refusal.find("JZ") != std::string::npos ||
-               refusal.find("JMP") != std::string::npos);
+    expect_true(name + ": runtime control-flow refusal names JZ/JMP",
+                refusal.find("JZ") != std::string::npos ||
+                    refusal.find("JMP") != std::string::npos);
 
   // The general region derivative engine supports forward-only branches even
   // though the stricter direct-RK eligibility contract still excludes them.
@@ -248,8 +237,8 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
                           {p.y0, p.n_y, -1, 0, true},
                           {p.th0, p.n_th, -1, 0, true},
                           {p.xr0, p.n_xr, -1, 0, false}};
-    expect(name + ": acyclic exit supports generated reverse",
-           gen_adjoint(branch_adjoint));
+    expect_true(name + ": acyclic exit supports generated reverse",
+                gen_adjoint(branch_adjoint));
   }
 
   for (int trial = 0; trial < 12; ++trial) {
@@ -315,8 +304,8 @@ void check(const std::string& name, const stanli::mir::FunDef& f,
       for (auto v : tv) result.push_back(bits(v.adj()));
       return result;
     };
-    expect(name + ": weighted callback gradient bits",
-           gradient(true) == gradient(false));
+    expect_true(name + ": weighted callback gradient bits",
+                gradient(true) == gradient(false));
   }
 }
 
@@ -423,22 +412,24 @@ void check_mixed_seed(const stanli::RhsProgram& p, const char* label) {
   const MixedRun into =
       mixed_run<YAutodiff, ThetaAutodiff, false, true>(p, 0.73, y, theta, x_r);
   const std::string prefix = std::string("mixed seed ") + label + ": ";
-  expect(prefix + "output bits", direct.values == staged.values);
-  expect(prefix + "y gradient bits", direct.y_grads == staged.y_grads);
-  expect(prefix + "theta gradient bits",
-         direct.theta_grads == staged.theta_grads);
-  expect(prefix + "chain tape order", direct.chain_tape == staged.chain_tape);
-  expect(prefix + "nochain tape order",
-         direct.nochain_tape == staged.nochain_tape);
-  expect(prefix + "caller-owned output bits", into.values == staged.values);
-  expect(prefix + "caller-owned y gradient bits",
-         into.y_grads == staged.y_grads);
-  expect(prefix + "caller-owned theta gradient bits",
-         into.theta_grads == staged.theta_grads);
-  expect(prefix + "caller-owned chain tape order",
-         into.chain_tape == staged.chain_tape);
-  expect(prefix + "caller-owned nochain tape order",
-         into.nochain_tape == staged.nochain_tape);
+  expect_true(prefix + "output bits", direct.values == staged.values);
+  expect_true(prefix + "y gradient bits", direct.y_grads == staged.y_grads);
+  expect_true(prefix + "theta gradient bits",
+              direct.theta_grads == staged.theta_grads);
+  expect_true(prefix + "chain tape order",
+              direct.chain_tape == staged.chain_tape);
+  expect_true(prefix + "nochain tape order",
+              direct.nochain_tape == staged.nochain_tape);
+  expect_true(prefix + "caller-owned output bits",
+              into.values == staged.values);
+  expect_true(prefix + "caller-owned y gradient bits",
+              into.y_grads == staged.y_grads);
+  expect_true(prefix + "caller-owned theta gradient bits",
+              into.theta_grads == staged.theta_grads);
+  expect_true(prefix + "caller-owned chain tape order",
+              into.chain_tape == staged.chain_tape);
+  expect_true(prefix + "caller-owned nochain tape order",
+              into.nochain_tape == staged.nochain_tape);
 }
 
 void check_matrix_callbacks() {
@@ -461,8 +452,8 @@ void check_matrix_callbacks() {
     const auto& f = *funs.at(name);
     const auto compiled = compile_rhs_args(f, funs, 2, args);
     const bool dynamic = std::string(name) == "matrix_dynamic";
-    expect(std::string(name) + ": correct compiler selection",
-           compiled.ok != dynamic);
+    expect_true(std::string(name) + ": correct compiler selection",
+                compiled.ok != dynamic);
     if (!compiled.ok && !dynamic)
       std::printf("matrix refusal: %s\n", compiled.why.c_str());
     for (int trial = 0; trial < 8; ++trial) {
@@ -498,10 +489,11 @@ void check_matrix_callbacks() {
           out = interp.call(f, values).r;
         }
         set_message_sink(nullptr);
-        expect("matrix callback effects happen exactly once",
-               messages ==
-                   (dynamic ? std::vector<std::string>{"matrix callback effect"}
-                            : std::vector<std::string>{}));
+        expect_true(
+            "matrix callback effects happen exactly once",
+            messages ==
+                (dynamic ? std::vector<std::string>{"matrix callback effect"}
+                         : std::vector<std::string>{}));
         var root = out[0] * 0.37 + out[1] * -0.29;
         root.grad();
         std::vector<uint64_t> result;
@@ -511,13 +503,13 @@ void check_matrix_callbacks() {
         return result;
       };
       const auto reference = run(2);
-      expect(
+      expect_true(
           std::string(name) + ": fallback values and weighted gradients exact",
           run(1) == reference);
       if (compiled.ok)
-        expect(std::string(name) +
-                   ": compiled values and weighted gradients exact",
-               run(0) == reference);
+        expect_true(std::string(name) +
+                        ": compiled values and weighted gradients exact",
+                    run(0) == reference);
     }
   }
   {
@@ -539,7 +531,7 @@ void check_matrix_callbacks() {
         } catch (const std::exception&) {
           rejected = true;
         }
-        expect("runtime matrix row rejects each invalid axis", rejected);
+        expect_true("runtime matrix row rejects each invalid axis", rejected);
       }
     }
   }
@@ -551,19 +543,19 @@ void check_matrix_callbacks() {
     arg.cols = dims.second;
     arg.len = dims.first * dims.second;
     const auto compiled = compile_rhs_args(f, funs, 2, {arg});
-    expect("matrix shape callback compiles", compiled.ok);
+    expect_true("matrix shape callback compiles", compiled.ok);
     const std::vector<double> y{0.2, 0.8}, theta(arg.len, 0.3);
     const std::vector<double> want{dims.first + y[0], dims.second + y[1]};
     std::vector<double> got, registers;
     if (compiled.ok)
       run_rhs<double>(compiled, 0.0, y.data(), theta.data(), nullptr, got,
                       registers);
-    expect("matrix geometry stays distinct at equal flattened length",
-           got == want);
+    expect_true("matrix geometry stays distinct at equal flattened length",
+                got == want);
     MirInterp<double> interp(funs, "matrix shape test");
-    expect("matrix fallback preserves empty axes",
-           interpret_retained_callback(interp, f, {{0.0}, y, theta}, {},
-                                       {arg}) == want);
+    expect_true("matrix fallback preserves empty axes",
+                interpret_retained_callback(interp, f, {{0.0}, y, theta}, {},
+                                            {arg}) == want);
   }
   for (int invalid = 0; invalid < 6; ++invalid) {
     RhsArg arg = active;
@@ -573,8 +565,8 @@ void check_matrix_callbacks() {
     if (invalid == 3) arg.rows = int64_t(std::numeric_limits<int>::max()) + 1;
     if (invalid == 4) arg.len = -1;
     if (invalid == 5) arg.is_int = true;
-    expect("malformed matrix geometry refuses compilation",
-           !compile_rhs_args(f, funs, 2, {arg}).ok);
+    expect_true("malformed matrix geometry refuses compilation",
+                !compile_rhs_args(f, funs, 2, {arg}).ok);
     bool refused = false;
     try {
       MirInterp<double> interp(funs, "invalid matrix test");
@@ -583,12 +575,12 @@ void check_matrix_callbacks() {
     } catch (const std::invalid_argument&) {
       refused = true;
     }
-    expect("malformed matrix geometry refuses interpretation", refused);
+    expect_true("malformed matrix geometry refuses interpretation", refused);
   }
   auto nested = f;
   nested.arg_views[2].depth = 1;
-  expect("matrix array without full geometry refuses compilation",
-         !compile_rhs_args(nested, funs, 2, {active}).ok);
+  expect_true("matrix array without full geometry refuses compilation",
+              !compile_rhs_args(nested, funs, 2, {active}).ok);
 }
 
 void check_nested_callbacks() {
@@ -609,7 +601,7 @@ void check_nested_callbacks() {
   const auto& f = *funs.at("nested_values");
   const std::vector<RhsArg> args{active, data, integers};
   const auto compiled = compile_rhs_args(f, funs, 2, args);
-  expect("nested array callback compiles", compiled.ok);
+  expect_true("nested array callback compiles", compiled.ok);
   if (!compiled.ok) std::printf("nested refusal: %s\n", compiled.why.c_str());
   for (int trial = 0; trial < 8; ++trial) {
     std::vector<double> av, bv;
@@ -653,9 +645,11 @@ void check_nested_callbacks() {
       return result;
     };
     const auto reference = run(2);
-    expect("nested fallback values and gradients exact", run(1) == reference);
+    expect_true("nested fallback values and gradients exact",
+                run(1) == reference);
     if (compiled.ok)
-      expect("nested compiled values and gradients exact", run(0) == reference);
+      expect_true("nested compiled values and gradients exact",
+                  run(0) == reference);
   }
   const auto& shape = *funs.at("nested_shape");
   for (const std::vector<int64_t> dims :
@@ -665,23 +659,24 @@ void check_nested_callbacks() {
     a.dims = dims;
     a.len = static_cast<int>(checked_container_size(dims, "test"));
     const auto p = compile_rhs_args(shape, funs, 2, {a});
-    expect("array-of-vector geometry compiles", p.ok);
+    expect_true("array-of-vector geometry compiles", p.ok);
     std::vector<double> y{0.2, 0.8}, theta(a.len, 0.3), out, registers;
     const std::vector<double> want{dims[0] + y[0], dims[1] + y[1]};
     if (p.ok)
       run_rhs<double>(p, 0.0, y.data(), theta.data(), nullptr, out, registers);
-    expect("array geometry keeps empty and equal-size extents", out == want);
+    expect_true("array geometry keeps empty and equal-size extents",
+                out == want);
     MirInterp<double> interp(funs, "nested shape test");
-    expect("nested fallback keeps empty axes",
-           interpret_retained_callback(interp, shape, {{0.0}, y, theta}, {},
-                                       {a}) == want);
+    expect_true("nested fallback keeps empty axes",
+                interpret_retained_callback(interp, shape, {{0.0}, y, theta},
+                                            {}, {a}) == want);
   }
   for (const std::vector<int64_t> dims :
        {std::vector<int64_t>{2, 6}, {2, 2, 4}, {0, -1, 0}, {}}) {
     RhsArg bad = active;
     bad.dims = dims;
-    expect("incomplete or invalid nested geometry refuses compilation",
-           !compile_rhs_args(f, funs, 2, {bad, data, integers}).ok);
+    expect_true("incomplete or invalid nested geometry refuses compilation",
+                !compile_rhs_args(f, funs, 2, {bad, data, integers}).ok);
     bool refused = false;
     try {
       MirInterp<double> interp(funs, "invalid nested test");
@@ -692,7 +687,7 @@ void check_nested_callbacks() {
     } catch (const std::exception&) {
       refused = true;
     }
-    expect("invalid nested geometry refuses interpretation", refused);
+    expect_true("invalid nested geometry refuses interpretation", refused);
   }
 }
 
@@ -771,13 +766,14 @@ int main() {
         if (compiled.ok)
           run_rhs<double>(compiled, t, y.data(), theta.data(), x_r.data(),
                           values, registers);
-        expect(
+        expect_true(
             std::string(name) + ": compiled path selects the executed return",
             compiled.ok && values == expected);
         MirInterp<double> interp(funs, "early-return oracle");
-        expect(std::string(name) + ": interpreter selects the executed return",
-               interp.call(*funs.at(name), {{t}, y, theta, x_r}, {x_i}) ==
-                   expected);
+        expect_true(
+            std::string(name) + ": interpreter selects the executed return",
+            interp.call(*funs.at(name), {{t}, y, theta, x_r}, {x_i}) ==
+                expected);
       }
   }
   check_exact_opcode_contract();
@@ -790,7 +786,7 @@ int main() {
   {
     const auto it = funs.find("f_lin");
     const RhsProgram p = compile_rhs(*it->second, funs, 2, 4, 2, x_i);
-    expect("mixed seed fixture compiles", p.ok);
+    expect_true("mixed seed fixture compiles", p.ok);
     if (p.ok) {
       const bool compact =
           p.code.size() == 6 &&
@@ -803,7 +799,8 @@ int main() {
           std::printf(" %s", program_code_spec(i.code).name);
         std::printf("\n");
       }
-      expect("straight-line RHS drops initializer/copy bookkeeping", compact);
+      expect_true("straight-line RHS drops initializer/copy bookkeeping",
+                  compact);
       check_mixed_seed<true, false>(p, "var/double");
       check_mixed_seed<false, true>(p, "double/var");
       check_mixed_seed<true, true>(p, "var/var");
@@ -817,10 +814,10 @@ int main() {
                                              with_dot.y0, with_dot.y0, 0, 2});
       ++with_dot.n_regs;
       std::string refusal;
-      expect("direct RK refuses DOT value grouping",
-             !make_rhs_adjoint_program(with_dot, &refusal));
-      expect("direct RK DOT refusal is observable",
-             refusal.find("DOT") != std::string::npos);
+      expect_true("direct RK refuses DOT value grouping",
+                  !make_rhs_adjoint_program(with_dot, &refusal));
+      expect_true("direct RK DOT refusal is observable",
+                  refusal.find("DOT") != std::string::npos);
 
       // C99 fmax/fmin and Stan Math's var overload choose different operands
       // for signed-zero ties. Even an otherwise unused occurrence makes the
@@ -833,11 +830,11 @@ int main() {
         ++with_signed_zero_tie.n_regs;
         refusal.clear();
         const char* name = program_code_spec(opcode).name;
-        expect(
+        expect_true(
             std::string("direct RK refuses ") + name + " signed-zero grouping",
             !make_rhs_adjoint_program(with_signed_zero_tie, &refusal));
-        expect(std::string("direct RK ") + name + " refusal is observable",
-               refusal.find(name) != std::string::npos);
+        expect_true(std::string("direct RK ") + name + " refusal is observable",
+                    refusal.find(name) != std::string::npos);
       }
     }
   }
@@ -853,6 +850,5 @@ int main() {
     }
   }
 
-  if (failures == 0) std::printf("test_ode_prog OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_ode_prog");
 }

@@ -1,5 +1,6 @@
 // One-op graphs per density: value and every parameter gradient must match
 // an in-process var-path evaluation of the same call, bitwise.
+#include "expect.hpp"
 #include "graph_helpers.hpp"
 
 #include <stanli/density_registry.hpp>
@@ -18,23 +19,6 @@
 #include <string>
 #include <vector>
 
-static int failures = 0;
-static void expect_eq(const std::string& what, double got, double want) {
-  if (got != want) {
-    ++failures;
-    std::printf("FAIL %-32s got %.17g want %.17g\n", what.c_str(), got, want);
-  }
-}
-static void expect_ulp_of_largest(const std::string& what, double got,
-                                  double want, double largest, int64_t bound) {
-  const double spacing = std::nextafter(largest, INFINITY) - largest;
-  if (!(std::abs(got - want) <= (double)bound * spacing)) {
-    ++failures;
-    std::printf("FAIL %-32s got %.17g want %.17g (%.1f ulp of %g)\n",
-                what.c_str(), got, want, std::abs(got - want) / spacing,
-                largest);
-  }
-}
 static void expect_nan(const std::string& what, double got, double want) {
   if (!std::isnan(got) || !std::isnan(want)) {
     ++failures;
@@ -183,25 +167,6 @@ static void check_elt(
     expect_eq(tag + " out" + std::to_string(i), f.out[i], l.out[i]);
   for (size_t i = 0; i < f.grad.size(); ++i)
     expect_eq(tag + " g" + std::to_string(i), f.grad[i], l.grad[i]);
-}
-
-// Bernoulli's native forwards deliberately replace the generic rvar
-// recorder, so pin their complete contract directly to this checkout's Stan
-// Math. Equality below is bit equality (including signed zero), rather than
-// the numerical equality used by the older density coverage above.
-static void expect_bits(const std::string& what, double got, double want) {
-  if (std::memcmp(&got, &want, sizeof(double)) != 0) {
-    ++failures;
-    std::printf("FAIL %-32s got %.17g want %.17g (bit mismatch)\n",
-                what.c_str(), got, want);
-  }
-}
-
-static void expect_true(const std::string& what, bool got) {
-  if (!got) {
-    ++failures;
-    std::printf("FAIL %-32s false\n", what.c_str());
-  }
 }
 
 static stanli::testutil::RunResult run_bernoulli_variant(
@@ -362,11 +327,11 @@ static void check_bernoulli_run(const std::string& tag, uint16_t opcode,
   const auto got = run_bernoulli_variant(opcode, variant, y, theta);
   const auto want =
       run_bernoulli_reference(opcode, variant, y, theta, scalar_outcome);
-  expect_bits(tag + " value", got.value, want.value);
+  expect_eq(tag + " value", got.value, want.value);
   expect_true(tag + " grad size", got.grad.size() == want.grad.size());
   const size_t n = std::min(got.grad.size(), want.grad.size());
   for (size_t i = 0; i < n; ++i)
-    expect_bits(tag + " grad" + std::to_string(i), got.grad[i], want.grad[i]);
+    expect_eq(tag + " grad" + std::to_string(i), got.grad[i], want.grad[i]);
 }
 
 template <bool Logit, bool Propto>
@@ -441,15 +406,15 @@ static void check_bernoulli_elt(const std::string& tag, uint16_t opcode,
   const EltRun got =
       run_elt_fused(opcode, variant, (int64_t)y.size(), {theta}, {true}, y);
   const EltRun want = run_bernoulli_elt_reference(opcode, variant, y, theta);
-  expect_bits(tag + " value", got.value, want.value);
+  expect_eq(tag + " value", got.value, want.value);
   expect_true(tag + " out size", got.out.size() == want.out.size());
   const size_t n_out = std::min(got.out.size(), want.out.size());
   for (size_t i = 0; i < n_out; ++i)
-    expect_bits(tag + " out" + std::to_string(i), got.out[i], want.out[i]);
+    expect_eq(tag + " out" + std::to_string(i), got.out[i], want.out[i]);
   expect_true(tag + " grad size", got.grad.size() == want.grad.size());
   const size_t n_grad = std::min(got.grad.size(), want.grad.size());
   for (size_t i = 0; i < n_grad; ++i)
-    expect_bits(tag + " grad" + std::to_string(i), got.grad[i], want.grad[i]);
+    expect_eq(tag + " grad" + std::to_string(i), got.grad[i], want.grad[i]);
 }
 
 struct CapturedException {
@@ -512,40 +477,40 @@ static void check_bernoulli_scratch_reset(const std::string& tag,
 
   ctx.variant = 0;
   k->forward(ctx);
-  expect_bits(tag + " valid connected", scratch[1], 1.0);
+  expect_eq(tag + " valid connected", scratch[1], 1.0);
 
   ctx.variant = 0x02u;  // explicit inactive, full density
   k->forward(ctx);
-  expect_bits(tag + " inactive partial", scratch[0], 0.0);
-  expect_bits(tag + " inactive connected", scratch[1], 0.0);
+  expect_eq(tag + " inactive partial", scratch[0], 0.0);
+  expect_eq(tag + " inactive connected", scratch[1], 0.0);
   double adj = 0.0;
   ctx.in_adj[0] = Desc{&adj, 1};
   ctx.out_adj = std::numeric_limits<double>::infinity();
   k->backward(ctx);
-  expect_bits(tag + " inactive pullback", adj, 0.0);
+  expect_eq(tag + " inactive pullback", adj, 0.0);
 
   ctx.variant = 0;
   k->forward(ctx);
-  expect_bits(tag + " refill connected", scratch[1], 1.0);
+  expect_eq(tag + " refill connected", scratch[1], 1.0);
   ctx.n_idata = 0;
   k->forward(ctx);
-  expect_bits(tag + " empty value", out, 0.0);
-  expect_bits(tag + " empty partial", scratch[0], 0.0);
-  expect_bits(tag + " empty connected", scratch[1], 0.0);
+  expect_eq(tag + " empty value", out, 0.0);
+  expect_eq(tag + " empty partial", scratch[0], 0.0);
+  expect_eq(tag + " empty connected", scratch[1], 0.0);
   adj = 0.0;
   k->backward(ctx);
-  expect_bits(tag + " empty pullback", adj, 0.0);
+  expect_eq(tag + " empty pullback", adj, 0.0);
 
   ctx.idata = &y;
   ctx.n_idata = 1;
   ctx.variant = 0x81u;  // active propto
   k->forward(ctx);
-  expect_bits(tag + " propto connected", scratch[1], 1.0);
+  expect_eq(tag + " propto connected", scratch[1], 1.0);
   ctx.variant = 0x80u;  // inactive propto drops the only summand
   k->forward(ctx);
-  expect_bits(tag + " dropped value", out, 0.0);
-  expect_bits(tag + " dropped partial", scratch[0], 0.0);
-  expect_bits(tag + " dropped connected", scratch[1], 0.0);
+  expect_eq(tag + " dropped value", out, 0.0);
+  expect_eq(tag + " dropped partial", scratch[0], 0.0);
+  expect_eq(tag + " dropped connected", scratch[1], 0.0);
 }
 
 static void check_scalar_poisson_lcdf() {
@@ -553,8 +518,7 @@ static void check_scalar_poisson_lcdf() {
   const Kernel* kernel = find_kernel(OP_POISSON_LCDF);
   const double inf = std::numeric_limits<double>::infinity();
   auto compare = [](const std::string& label, double a, double b) {
-    if (std::isnan(a) && std::isnan(b)) return;
-    expect_bits(label, a, b);
+    expect_eq_or_both_nan(label, a, b);
   };
   for (int n : {-1, 0, 1, 2, 7, 32, 1000})
     for (double rate :
@@ -694,7 +658,7 @@ static void check_wiener_activity(const std::string& tag,
         expect_eq(gi, grad[i], want.grad[i]);
       } else {
         expect_eq(gi + " scaled", grad[i], seed * unit.grad[i]);
-        expect_ulp_of_largest(gi, grad[i], want.grad[i], largest, 10);
+        expect_ulp_of(gi, grad[i], want.grad[i], largest, 10);
       }
     }
   }
@@ -769,11 +733,11 @@ static void check_wiener_single_evaluation() {
       double largest = 0;
       for (const double g : want.grad) largest = std::max(largest, std::abs(g));
       for (int i = 0; i < 4; ++i)
-        expect_ulp_of_largest(
-            std::string("wiener partials kept from forward") +
-                (scalar ? " scalar " : " ") + (seed == 1.0 ? "" : "weighted ") +
-                std::to_string(i),
-            grad[i], want.grad[(size_t)i], largest, seed == 1.0 ? 0 : 10);
+        expect_ulp_of(std::string("wiener partials kept from forward") +
+                          (scalar ? " scalar " : " ") +
+                          (seed == 1.0 ? "" : "weighted ") + std::to_string(i),
+                      grad[i], want.grad[(size_t)i], largest,
+                      seed == 1.0 ? 0 : 10);
     }
 }
 
@@ -1327,10 +1291,10 @@ int main() {
                                                          : "bernoulli_logit") +
                      " empty scaled value",
                  got.value, result_ref.val());
-      expect_bits(std::string(opcode == OP_BERNOULLI_LPMF ? "bernoulli"
-                                                          : "bernoulli_logit") +
-                      " empty scaled grad",
-                  got.grad[0], theta_ref.adj());
+      expect_eq(std::string(opcode == OP_BERNOULLI_LPMF ? "bernoulli"
+                                                        : "bernoulli_logit") +
+                    " empty scaled grad",
+                got.grad[0], theta_ref.adj());
       stan::math::recover_memory();
     }
 
@@ -1816,6 +1780,5 @@ int main() {
     }
   }
 
-  if (failures == 0) std::printf("test_densities OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_densities");
 }

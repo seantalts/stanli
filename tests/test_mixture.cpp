@@ -6,6 +6,7 @@
 //  2. The fused op is bit-identical to the unrolled graph it will replace
 //     under re-rolling: INDEX -> scalar op -> SET_INDEX chain -> SUM_VEC.
 //     This includes the broadcast-adjoint accumulation order.
+#include "expect.hpp"
 #include "graph_helpers.hpp"
 
 #include <stan/math.hpp>
@@ -19,33 +20,9 @@
 
 using namespace stanli;
 
-static int failures = 0;
-static void expect(const std::string& what, bool ok) {
-  if (!ok) {
-    ++failures;
-    std::printf("FAIL %s\n", what.c_str());
-  }
-}
-static void expect_eq(const std::string& what, double got, double want) {
-  if (got != want && !(std::isnan(got) && std::isnan(want))) {
-    ++failures;
-    std::printf("FAIL %-28s got %.17g want %.17g\n", what.c_str(), got, want);
-  }
-}
-
-static void expect_ulp(const std::string& what, double got, double want,
-                       int max_ulp) {
-  if (got == want || (std::isnan(got) && std::isnan(want))) return;
-  double ulps = std::numeric_limits<double>::infinity();
-  if (std::isfinite(got) && std::isfinite(want))
-    ulps = std::abs(got - want) /
-           std::max(std::nextafter(std::abs(want), 1e308) - std::abs(want),
-                    std::numeric_limits<double>::denorm_min());
-  if (ulps > (double)max_ulp) {
-    ++failures;
-    std::printf("FAIL %-28s got %.17g want %.17g (%.1f ulp)\n", what.c_str(),
-                got, want, ulps);
-  }
+static void expect_ulp_or_both_nan(const std::string& what, double got,
+                                   double want, int max_ulp) {
+  if (!both_nan(got, want)) expect_ulp_of(what, got, want, want, max_ulp);
 }
 
 using stan::math::var;
@@ -76,11 +53,13 @@ static void check_ref(const std::string& tag, uint16_t opcode, int64_t out_len,
     lp += f(a);
   }
   lp.grad();
-  expect_eq(tag + " lp", r.value, lp.val());
+  expect_eq_or_both_nan(tag + " lp", r.value, lp.val());
   size_t gi = 0;
   for (auto& v : vs)
     for (auto& x : v)
-      expect_eq(tag + " g" + std::to_string(gi), r.grad[gi], x.adj()), ++gi;
+      expect_eq_or_both_nan(tag + " g" + std::to_string(gi), r.grad[gi],
+                            x.adj()),
+          ++gi;
   stan::math::recover_memory();
 }
 
@@ -141,7 +120,8 @@ static void check_partials(const std::string& tag, uint16_t opcode,
   size_t gi = 0;
   for (auto& v : vs)
     for (auto& x : v)
-      expect_ulp(tag + " p" + std::to_string(gi), got[gi], x.adj(), max_ulp),
+      expect_ulp_or_both_nan(tag + " p" + std::to_string(gi), got[gi], x.adj(),
+                             max_ulp),
           ++gi;
   stan::math::recover_memory();
 }
@@ -237,11 +217,11 @@ static void check_bitwise(const std::string& tag, uint16_t opcode, int64_t n,
                           const std::vector<std::vector<double>>& vals) {
   const GraphRun f = run_fused(opcode, n, vals);
   const GraphRun u = run_unrolled(opcode, n, vals);
-  expect_eq(tag + " lp", f.value, u.value);
+  expect_eq_or_both_nan(tag + " lp", f.value, u.value);
   for (int64_t i = 0; i < n; ++i)
-    expect_eq(tag + " out" + std::to_string(i), f.out[i], u.out[i]);
+    expect_eq_or_both_nan(tag + " out" + std::to_string(i), f.out[i], u.out[i]);
   for (size_t i = 0; i < f.grad.size(); ++i)
-    expect_eq(tag + " g" + std::to_string(i), f.grad[i], u.grad[i]);
+    expect_eq_or_both_nan(tag + " g" + std::to_string(i), f.grad[i], u.grad[i]);
 }
 
 // ---- 3. Packed row-wise log_sum_exp ---------------------------------------
@@ -286,11 +266,11 @@ static void check_row_edge(const std::string& tag,
   for (int i = 0; i < (int)x.size(); ++i) xv(i) = x[(size_t)i];
   var want = stan::math::log_sum_exp(xv);
   want.grad();
-  expect_eq(tag + " value", got.value, want.val());
-  expect_eq(tag + " row value", got.out[0], want.val());
+  expect_eq_or_both_nan(tag + " value", got.value, want.val());
+  expect_eq_or_both_nan(tag + " row value", got.out[0], want.val());
   for (int i = 0; i < (int)x.size(); ++i)
-    expect_ulp(tag + " g" + std::to_string(i), got.grad[(size_t)i], xv(i).adj(),
-               1);
+    expect_ulp_or_both_nan(tag + " g" + std::to_string(i), got.grad[(size_t)i],
+                           xv(i).adj(), 1);
   stan::math::recover_memory();
 }
 
@@ -332,13 +312,13 @@ static void check_rows() {
   }
   lp.grad();
 
-  expect_eq("rows lp", got.value, lp.val());
+  expect_eq_or_both_nan("rows lp", got.value, lp.val());
   for (int r = 0; r < R; ++r)
-    expect_eq("rows out" + std::to_string(r), got.out[(size_t)r],
-              row_lp[(size_t)r].val());
+    expect_eq_or_both_nan("rows out" + std::to_string(r), got.out[(size_t)r],
+                          row_lp[(size_t)r].val());
   for (int i = 0; i < (int)x.size(); ++i)
-    expect_ulp("rows g" + std::to_string(i), got.grad[(size_t)i], xv(i).adj(),
-               1);
+    expect_ulp_or_both_nan("rows g" + std::to_string(i), got.grad[(size_t)i],
+                           xv(i).adj(), 1);
   stan::math::recover_memory();
 
   // A nonuniform consumer verifies that backward uses each row's own output
@@ -355,8 +335,8 @@ static void check_rows() {
   }
   weighted_lp.grad();
   for (int i = 0; i < (int)x.size(); ++i)
-    expect_ulp("weighted rows g" + std::to_string(i), weighted.grad[(size_t)i],
-               wx(i).adj(), 1);
+    expect_ulp_or_both_nan("weighted rows g" + std::to_string(i),
+                           weighted.grad[(size_t)i], wx(i).adj(), 1);
   stan::math::recover_memory();
 
   Graph shape;
@@ -364,18 +344,20 @@ static void check_rows() {
   const int out = shape.add_slot(R, false);
   const int oi = shape.add_op(OP_LOG_SUM_EXP_ROWS, {in}, out, {K});
   const Kernel* kernel = find_kernel(OP_LOG_SUM_EXP_ROWS);
-  expect("rows kernel registered", kernel != nullptr);
+  expect_true("rows kernel registered", kernel != nullptr);
   if (kernel) {
-    expect("rows scratch callback", kernel->scratch_size != nullptr);
+    expect_true("rows scratch callback", kernel->scratch_size != nullptr);
     if (kernel->scratch_size)
-      expect("rows scratch=input len",
-             kernel->scratch_size(shape.ops[(size_t)oi], shape.slots.data()) ==
-                 (int64_t)x.size());
+      expect_true(
+          "rows scratch=input len",
+          kernel->scratch_size(shape.ops[(size_t)oi], shape.slots.data()) ==
+              (int64_t)x.size());
   }
-  expect("rows backward is value-free",
-         has_op_trait(OP_LOG_SUM_EXP_ROWS, op_trait::kBackwardValueFree));
-  expect("rows opcode name", std::string(opcode_name(OP_LOG_SUM_EXP_ROWS)) ==
-                                 "OP_LOG_SUM_EXP_ROWS");
+  expect_true("rows backward is value-free",
+              has_op_trait(OP_LOG_SUM_EXP_ROWS, op_trait::kBackwardValueFree));
+  expect_true(
+      "rows opcode name",
+      std::string(opcode_name(OP_LOG_SUM_EXP_ROWS)) == "OP_LOG_SUM_EXP_ROWS");
 
   // Widths past Eigen's packet boundary, and one that is not a multiple of
   // it.
@@ -403,11 +385,11 @@ static void check_rows() {
     }
     lp9.grad();
     for (int r = 0; r < 5; ++r)
-      expect_eq("rows9 out" + std::to_string(r), g9.out[(size_t)r],
-                rows9[(size_t)r].val());
+      expect_eq_or_both_nan("rows9 out" + std::to_string(r), g9.out[(size_t)r],
+                            rows9[(size_t)r].val());
     for (int i = 0; i < (int)many.size(); ++i)
-      expect_ulp("rows9 g" + std::to_string(i), g9.grad[(size_t)i], xv(i).adj(),
-                 1);
+      expect_ulp_or_both_nan("rows9 g" + std::to_string(i), g9.grad[(size_t)i],
+                             xv(i).adj(), 1);
     stan::math::recover_memory();
   }
 
@@ -475,33 +457,34 @@ static void check_sum_rows() {
   for (int r = 0; r < R; ++r) {
     const std::vector<double> row(x.begin() + r * K, x.begin() + (r + 1) * K);
     const double want = sum_vec_value(row);
-    expect_eq("sum_rows out" + std::to_string(r), got.out[(size_t)r], want);
+    expect_eq_or_both_nan("sum_rows out" + std::to_string(r),
+                          got.out[(size_t)r], want);
     want_lp += want;
   }
-  expect_eq("sum_rows lp", got.value, want_lp);
+  expect_eq_or_both_nan("sum_rows lp", got.value, want_lp);
   for (size_t i = 0; i < x.size(); ++i)
-    expect_eq("sum_rows g" + std::to_string(i), got.grad[i], 1.0);
+    expect_eq_or_both_nan("sum_rows g" + std::to_string(i), got.grad[i], 1.0);
 
   // Each row's own output adjoint reaches its elements, rather than the rows
   // being treated as one implicit sum.
   const std::vector<double> weights{0.5, -1.25, 2.0, 0.0};
   const RowsRun weighted = run_sum_rows(x, K, weights);
   for (size_t i = 0; i < x.size(); ++i)
-    expect_eq("weighted sum_rows g" + std::to_string(i), weighted.grad[i],
-              weights[i / (size_t)K]);
+    expect_eq_or_both_nan("weighted sum_rows g" + std::to_string(i),
+                          weighted.grad[i], weights[i / (size_t)K]);
 
   Graph shape;
   const int in = shape.add_slot((int64_t)x.size(), true);
   const int out = shape.add_slot(R, false);
   shape.add_op(OP_SUM_ROWS, {in}, out, {K});
   const Kernel* kernel = find_kernel(OP_SUM_ROWS);
-  expect("sum_rows kernel registered", kernel != nullptr);
+  expect_true("sum_rows kernel registered", kernel != nullptr);
   if (kernel)
-    expect("sum_rows needs no scratch", kernel->scratch_size == nullptr);
-  expect("sum_rows backward is value-free",
-         has_op_trait(OP_SUM_ROWS, op_trait::kBackwardValueFree));
-  expect("sum_rows opcode name",
-         std::string(opcode_name(OP_SUM_ROWS)) == "OP_SUM_ROWS");
+    expect_true("sum_rows needs no scratch", kernel->scratch_size == nullptr);
+  expect_true("sum_rows backward is value-free",
+              has_op_trait(OP_SUM_ROWS, op_trait::kBackwardValueFree));
+  expect_true("sum_rows opcode name",
+              std::string(opcode_name(OP_SUM_ROWS)) == "OP_SUM_ROWS");
 
   // Widths either side of Eigen's packet boundary, and one row per element.
   for (int width : {1, 7, 16}) {
@@ -512,7 +495,7 @@ static void check_sum_rows() {
     for (int r = 0; r < 3; ++r) {
       const std::vector<double> row(wide.begin() + r * width,
                                     wide.begin() + (r + 1) * width);
-      expect_eq(
+      expect_eq_or_both_nan(
           "sum_rows K=" + std::to_string(width) + " out" + std::to_string(r),
           w.out[(size_t)r], sum_vec_value(row));
     }
@@ -521,8 +504,8 @@ static void check_sum_rows() {
   const double inf = std::numeric_limits<double>::infinity();
   const double nan = std::numeric_limits<double>::quiet_NaN();
   const RowsRun edge = run_sum_rows({inf, -inf, 1.0, nan, 0.0, 2.0}, 3);
-  expect("sum_rows inf row", std::isnan(edge.out[0]));
-  expect("sum_rows nan row", std::isnan(edge.out[1]));
+  expect_true("sum_rows inf row", std::isnan(edge.out[0]));
+  expect_true("sum_rows nan row", std::isnan(edge.out[1]));
 }
 
 int main() {
@@ -593,10 +576,5 @@ int main() {
   check_rows();
   check_sum_rows();
 
-  if (failures) {
-    std::printf("%d failures\n", failures);
-    return 1;
-  }
-  std::printf("test_mixture: all passed\n");
-  return 0;
+  return finish("test_mixture");
 }

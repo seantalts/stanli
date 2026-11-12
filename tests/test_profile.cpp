@@ -1,5 +1,7 @@
 // The built-in per-op profiler: opt-in accounting of where gradient time
 // goes, per opcode, without touching the fast path when off.
+#include "expect.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/island.hpp>
 #include <stanli/optable.hpp>
@@ -10,14 +12,6 @@
 #include <cstring>
 #include <string>
 #include <vector>
-
-static int failures = 0;
-static void expect(const char* what, bool ok) {
-  if (!ok) {
-    ++failures;
-    std::printf("FAIL %s\n", what);
-  }
-}
 
 // The opcode's calls column, or -1 if the report has no row for it. Rows are
 // "%-22s %10lld %12lld %12lld %5.1f%% %12lld", so calls is the second
@@ -78,19 +72,21 @@ static void test_bound_kernel_survives_post_bind_override() {
                                    replacement_add_backward, nullptr});
   double grad[2];
   const double unprofiled = ex.gradient(grad);
-  expect("bound forward before profile", unprofiled == 2.2);
-  expect("bound backward before profile", grad[0] == 4.0 && grad[1] == 5.0);
+  expect_true("bound forward before profile", unprofiled == 2.2);
+  expect_true("bound backward before profile",
+              grad[0] == 4.0 && grad[1] == 5.0);
 
   ex.set_profile(true);
   // A single tiny call can round to zero at the profiler clock resolution.
   // The report omits a zero-time sample, so accumulate several executions.
   for (int i = 0; i < 100; ++i) {
     const double profiled = ex.gradient(grad);
-    expect("bound forward under profile", profiled == 2.2);
-    expect("bound backward under profile", grad[0] == 4.0 && grad[1] == 5.0);
+    expect_true("bound forward under profile", profiled == 2.2);
+    expect_true("bound backward under profile",
+                grad[0] == 4.0 && grad[1] == 5.0);
   }
-  expect("bound override is profiled",
-         calls_for(ex.profile_report(), "OP_ADD_N") == 100);
+  expect_true("bound override is profiled",
+              calls_for(ex.profile_report(), "OP_ADD_N") == 100);
 
   register_kernel(OP_ADD_N, saved);
 }
@@ -115,39 +111,39 @@ int main() {
   double grad[2];
 
   // Off by default: no rows, and results are unaffected either way.
-  expect("empty report when off", ex.profile_report().empty());
+  expect_true("empty report when off", ex.profile_report().empty());
   const double v_off = ex.gradient(grad);
   const double da_off = grad[0];
 
   ex.set_profile(true);
   for (int i = 0; i < 10; ++i) ex.gradient(grad);
-  expect("same value profiled", ex.gradient(grad) == v_off);
-  expect("same grad profiled", grad[0] == da_off);
+  expect_true("same value profiled", ex.gradient(grad) == v_off);
+  expect_true("same grad profiled", grad[0] == da_off);
 
   const std::string rep = ex.profile_report();
-  expect("report names EXP", rep.find("EXP") != std::string::npos);
-  expect("report names ADD_N", rep.find("ADD_N") != std::string::npos);
+  expect_true("report names EXP", rep.find("EXP") != std::string::npos);
+  expect_true("report names ADD_N", rep.find("ADD_N") != std::string::npos);
   // 11 profiled gradient evaluations, one op instance of each opcode.
-  expect("counts EXP calls", calls_for(rep, "OP_EXPV") == 11);
-  expect("counts ADD_N calls", calls_for(rep, "OP_ADD_N") == 11);
-  expect("report has totals", rep.find("total") != std::string::npos);
-  expect("forward-only gap is profiled", calls_for(rep, "OP_COMPARE") == 11);
+  expect_true("counts EXP calls", calls_for(rep, "OP_EXPV") == 11);
+  expect_true("counts ADD_N calls", calls_for(rep, "OP_ADD_N") == 11);
+  expect_true("report has totals", rep.find("total") != std::string::npos);
+  expect_true("forward-only gap is profiled",
+              calls_for(rep, "OP_COMPARE") == 11);
 
   // A copy must attribute its own rebound contexts and preserve reverse order.
   Executor copied(ex);
   copied.set_profile(true);
-  expect("copied executor profiled value", copied.gradient(grad) == v_off);
-  expect("copied executor profiled gradient",
-         grad[0] == da_off && grad[1] == 1);
+  expect_true("copied executor profiled value", copied.gradient(grad) == v_off);
+  expect_true("copied executor profiled gradient",
+              grad[0] == da_off && grad[1] == 1);
 
   // Toggling off stops accumulation but keeps the collected numbers.
   ex.set_profile(false);
   const std::string before = ex.profile_report();
   ex.gradient(grad);
-  expect("no growth when off", ex.profile_report() == before);
+  expect_true("no growth when off", ex.profile_report() == before);
 
   test_bound_kernel_survives_post_bind_override();
 
-  if (failures == 0) std::printf("test_profile: all ok\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_profile");
 }

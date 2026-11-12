@@ -6,6 +6,8 @@
 // A hand-written expected vector would only restate the implementation. A
 // round trip cannot: it fails if either direction drifts, if the free length
 // is wrong, or if a matrix leaf is read in the wrong storage order.
+#include "expect.hpp"
+
 #include <stanli/unconstrain.hpp>
 
 #include <stanli/compile.hpp>
@@ -20,8 +22,6 @@
 #include <vector>
 
 namespace {
-
-int failures = 0;
 
 void check(bool ok, const std::string& what) {
   if (!ok) {
@@ -348,6 +348,5 @@ int main() {
   elementwise_ignores_rank();
   free_sizes();
   refusals();
-  if (failures == 0) std::printf("test_unconstrain OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_unconstrain");
 }

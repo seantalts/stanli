@@ -2,6 +2,8 @@
 // pullbacks need.  Pin the forward values and native pullbacks against the
 // exact stan-math calls, including reuse of one Executor: stale eigenvectors
 // or eigenvalues in scratch produce a plausible but wrong second gradient.
+#include "expect.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -22,26 +24,10 @@ using MatD = Eigen::MatrixXd;
 using VecD = Eigen::VectorXd;
 using VarM = Eigen::Matrix<stan::math::var, -1, -1>;
 
-int failures = 0;
-
-int64_t ulp_key(double d) {
-  int64_t i;
-  std::memcpy(&i, &d, sizeof(i));
-  return i < 0 ? std::numeric_limits<int64_t>::min() - i : i;
-}
-
 void check(bool ok, const std::string& what) {
   if (!ok) {
     ++failures;
     std::printf("FAIL %s\n", what.c_str());
-  }
-}
-
-void expect_eq(const std::string& what, double got, double want) {
-  if (got != want) {
-    ++failures;
-    std::printf("FAIL %-32s got %.17g want %.17g (%lld ulp)\n", what.c_str(),
-                got, want, (long long)std::llabs(ulp_key(got) - ulp_key(want)));
   }
 }
 
@@ -268,6 +254,5 @@ int main() {
   compare(OP_EIGENVECTORS_SYM, "eigenvectors 30x30", big_vecs, big);
   check_scratch_sizes();
 
-  if (failures == 0) std::printf("test_eigen OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_eigen");
 }

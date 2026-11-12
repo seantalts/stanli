@@ -1,6 +1,8 @@
 // Legacy ops: unmodified stan-math functions behind the op interface via a
 // nested var tape replayed at backward time. Scalar output (log_sum_exp) and
 // vector output (softmax, exercising output-adjoint seeding).
+#include "expect.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -10,25 +12,6 @@
 #include <limits>
 #include <string>
 #include <vector>
-
-static int failures = 0;
-static void expect_eq(const std::string& what, double got, double want) {
-  if (got != want) {
-    ++failures;
-    std::printf("FAIL %-16s got %.17g want %.17g\n", what.c_str(), got, want);
-  }
-}
-
-// The log_sum_exp partials come off Eigen's packet exp, which rounds a last
-// bit away from the var reference's scalar libm.
-static void expect_ulp(const std::string& what, double got, double want) {
-  if (got == want) return;
-  const double ulp = std::nextafter(std::abs(want), 1e308) - std::abs(want);
-  if (!(std::abs(got - want) <= ulp)) {
-    ++failures;
-    std::printf("FAIL %-16s got %.17g want %.17g\n", what.c_str(), got, want);
-  }
-}
 
 // dirichlet through the graph, with a non-unit output adjoint: the kernel
 // grads its nested tape once in the forward with a seed of 1 and scales in
@@ -127,8 +110,11 @@ int main() {
     var vlp = stan::math::log_sum_exp(xv);
     vlp.grad();
     expect_eq("lse value", val, vlp.val());
+    // The log_sum_exp partials come off Eigen's packet exp, which rounds a
+    // last bit away from the var reference's scalar libm.
     for (int i = 0; i < N; ++i)
-      expect_ulp("lse d" + std::to_string(i), grad[i], xv(i).adj());
+      expect_ulp_of("lse d" + std::to_string(i), grad[i], xv(i).adj(),
+                    xv(i).adj(), 1);
     stan::math::recover_memory();
   }
 
@@ -171,6 +157,5 @@ int main() {
   check_dirichlet("vectorized propto", 3, true, true);
   check_dirichlet("vectorized alpha data", 3, false, false);
 
-  if (failures == 0) std::printf("test_legacy OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_legacy");
 }

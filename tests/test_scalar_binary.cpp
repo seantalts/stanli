@@ -1,6 +1,7 @@
 // STANLI_SCALAR_BINARY_LIST ops vs the stan-math var overloads CmdStan's
 // generated C++ would run: value and every gradient lane, bitwise, across
 // the four shape combos (vv, vs, sv, ss). In-support inputs per function.
+#include "expect.hpp"
 #include "graph_helpers.hpp"
 
 #include <stanli/builtin_registry.hpp>
@@ -17,23 +18,7 @@
 #include <utility>
 #include <vector>
 
-static int failures = 0;
-static void expect_eq(const std::string& what, double got, double want) {
-  if (got != want) {
-    ++failures;
-    std::printf("FAIL %-28s got %.17g want %.17g\n", what.c_str(), got, want);
-  }
-}
-
 using stan::math::var;
-
-static void expect_bits(const std::string& what, double got, double want) {
-  if ((std::isnan(got) && std::isnan(want)) ||
-      std::memcmp(&got, &want, sizeof(double)) == 0)
-    return;
-  ++failures;
-  std::printf("FAIL %-28s got %a want %a\n", what.c_str(), got, want);
-}
 
 // Exercise arbitrary upstream seeds and mixed activity through Stan's own
 // weighted expression. An outer tape must survive both success and rejection;
@@ -84,8 +69,8 @@ static void check_seeded_scalar(const std::string& tag, uint16_t opcode,
   }
   expect_eq(tag + " rejection", got_threw, ref_threw);
   if (!ref_threw && !got_threw) {
-    expect_bits(tag + " da", got_a, want_a);
-    expect_bits(tag + " db", got_b, want_b);
+    expect_eq_or_both_nan(tag + " da", got_a, want_a);
+    expect_eq_or_both_nan(tag + " db", got_b, want_b);
     // Existing nonzero adjoints must accumulate on a subsequent invocation.
     if (std::isfinite(got_a) && std::isfinite(got_b)) {
       got_a = 0.25;
@@ -94,14 +79,14 @@ static void check_seeded_scalar(const std::string& tag, uint16_t opcode,
       // The alias case rounds twice, so its zero-seed oracle above is the
       // relevant contract; check nonzero accumulation with separate slots.
       if (!alias) {
-        expect_bits(tag + " accumulate da", got_a, 0.25 + want_a);
-        expect_bits(tag + " accumulate db", got_b, -0.75 + want_b);
+        expect_eq_or_both_nan(tag + " accumulate da", got_a, 0.25 + want_a);
+        expect_eq_or_both_nan(tag + " accumulate db", got_b, -0.75 + want_b);
       }
     }
   }
-  expect_bits(tag + " outer untouched", sentinel.adj(), 0.0);
+  expect_eq_or_both_nan(tag + " outer untouched", sentinel.adj(), 0.0);
   stan::math::grad(outer_result.vi_);
-  expect_bits(tag + " outer usable", sentinel.adj(), 4.0);
+  expect_eq_or_both_nan(tag + " outer usable", sentinel.adj(), 4.0);
 }
 
 template <typename F>
@@ -148,10 +133,12 @@ static void check_weighted_shape(const std::string& tag, uint16_t opcode,
   stanli::kernel(opcode).backward(ctx);
   if constexpr (A0)
     for (size_t i = 0; i < a.size(); ++i)
-      expect_bits(tag + " da" + std::to_string(i), ga[i], 0.0 + a[i].adj());
+      expect_eq_or_both_nan(tag + " da" + std::to_string(i), ga[i],
+                            0.0 + a[i].adj());
   if constexpr (A1)
     for (size_t i = 0; i < b.size(); ++i)
-      expect_bits(tag + " db" + std::to_string(i), gb[i], 0.0 + b[i].adj());
+      expect_eq_or_both_nan(tag + " db" + std::to_string(i), gb[i],
+                            0.0 + b[i].adj());
 }
 
 template <typename F>
@@ -551,6 +538,5 @@ int main() {
     stan::math::recover_memory();
   }
 
-  if (failures == 0) std::printf("test_scalar_binary OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_scalar_binary");
 }

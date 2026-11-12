@@ -16,6 +16,7 @@
 #include <stanli/island.hpp>
 #include <stanli/optable.hpp>
 
+#include "expect.hpp"
 #include "env_helpers.hpp"
 
 #include <cmath>
@@ -24,20 +25,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-
-static int failures = 0;
-static void expect(const std::string& what, bool ok) {
-  if (!ok) {
-    ++failures;
-    std::printf("FAIL %s\n", what.c_str());
-  }
-}
-static std::string slurp(const std::string& p) {
-  std::ifstream f(p);
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
-}
 
 int main() {
   using namespace stanli;
@@ -55,16 +42,16 @@ int main() {
   // resulting newly activated island measures slower than the graph. It may
   // optimize an explicitly forced island, but must not change the default
   // activation decision used to price the feature.
-  expect("destination forwarding does not activate a marginal island",
-         island_count(cm.graph) == 0);
+  expect_true("destination forwarding does not activate a marginal island",
+              island_count(cm.graph) == 0);
   test_setenv("STANLI_ISLAND_ALWAYS", "1", 1);
   CompiledModel forced = compile_model(mir, data);
   test_setenv("STANLI_NO_PROGRAM_DEST_FORWARD", "1", 1);
   CompiledModel unforwarded = compile_model(mir, data);
   test_unsetenv("STANLI_NO_PROGRAM_DEST_FORWARD");
   test_unsetenv("STANLI_ISLAND_ALWAYS");
-  expect("marginal island remains available when forced",
-         island_count(forced.graph) == 1);
+  expect_true("marginal island remains available when forced",
+              island_count(forced.graph) == 1);
   auto island_instructions = [](const Graph& g) {
     size_t n = 0;
     for (const Op& op : g.ops)
@@ -72,22 +59,22 @@ int main() {
         n += static_cast<const IslandProg*>(op.udata)->code.size();
     return n;
   };
-  expect("forced island still receives destination forwarding",
-         island_instructions(forced.graph) <
-             island_instructions(unforwarded.graph));
+  expect_true("forced island still receives destination forwarding",
+              island_instructions(forced.graph) <
+                  island_instructions(unforwarded.graph));
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
 
   // Intercept, sigma, bsp_1, and simo_1 (a simplex[2], so 1 free).
   const int64_t n = ex.n_params();
-  expect("4 unconstrained parameters, got " + std::to_string(n), n == 4);
+  expect_true("4 unconstrained parameters, got " + std::to_string(n), n == 4);
   if (n != 4) return 1;
 
   std::vector<double> q((size_t)n), grad((size_t)n);
   for (int64_t i = 0; i < n; ++i) q[(size_t)i] = 0.2 - 0.13 * (double)i;
   for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = q[(size_t)i];
   const double lp = ex.gradient(grad.data());
-  expect("lp is finite", std::isfinite(lp));
+  expect_true("lp is finite", std::isfinite(lp));
 
   // Repeated evaluation must be idempotent. This is the check that
   // found the constant-folding bug behind this fixture: `mu` was folded
@@ -97,11 +84,11 @@ int main() {
   // it evaluates one point per process.
   for (int64_t k = 0; k < n; ++k) ex.params_data()[k] = q[(size_t)k];
   const double again = ex.forward();
-  expect("evaluating the same point twice gives the same lp", again == lp);
+  expect_true("evaluating the same point twice gives the same lp", again == lp);
   // bsp_1 is the monotonic slope; if the mo() term were folded to zero
   // (the shape a wrong `rows` could take) its gradient would vanish.
-  expect("the monotonic term reaches the target", std::fabs(grad[2]) > 1e-8);
+  expect_true("the monotonic term reaches the target",
+              std::fabs(grad[2]) > 1e-8);
 
-  if (failures == 0) std::printf("test_brmsmono: all checks passed\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_brmsmono");
 }

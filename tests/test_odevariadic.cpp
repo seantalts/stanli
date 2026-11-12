@@ -19,6 +19,7 @@
 //      loudly.
 //   3. _tol at a tighter tolerance must sit closer to the others, not
 //      further away.
+#include "expect.hpp"
 #include "env_helpers.hpp"
 
 #include <stanli/compile.hpp>
@@ -40,20 +41,6 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
-
-static int failures = 0;
-static void expect(const std::string& what, bool ok) {
-  if (!ok) {
-    ++failures;
-    std::printf("FAIL %s\n", what.c_str());
-  }
-}
-static std::string slurp(const std::string& p) {
-  std::ifstream f(p);
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
-}
 
 static uint64_t bits(double value) {
   uint64_t result;
@@ -243,14 +230,15 @@ void check_activity_case(const stanli::OdeSpec& spec, const char* label) {
   const OdeActivityRun want =
       direct_activity_run<YAutodiff, ThetaAutodiff>(spec);
   const std::string prefix = std::string(label) + ": direct/oracle ";
-  expect(prefix + "solution bits", bitwise_equal(got.value, oracle.value));
-  expect(prefix + "full scratch bits",
-         bitwise_equal(got.jacobian, oracle.jacobian));
-  expect(prefix + "y pullback bits", bitwise_equal(got.y_grad, oracle.y_grad));
-  expect(prefix + "theta pullback bits",
-         bitwise_equal(got.theta_grad, oracle.theta_grad));
-  expect(std::string(label) + " output shape",
-         got.value.size() == want.value.size());
+  expect_true(prefix + "solution bits", bitwise_equal(got.value, oracle.value));
+  expect_true(prefix + "full scratch bits",
+              bitwise_equal(got.jacobian, oracle.jacobian));
+  expect_true(prefix + "y pullback bits",
+              bitwise_equal(got.y_grad, oracle.y_grad));
+  expect_true(prefix + "theta pullback bits",
+              bitwise_equal(got.theta_grad, oracle.theta_grad));
+  expect_true(std::string(label) + " output shape",
+              got.value.size() == want.value.size());
   for (size_t i = 0; i < got.value.size() && i < want.value.size(); ++i)
     expect_close(std::string(label) + " value " + std::to_string(i),
                  got.value[i], want.value[i]);
@@ -263,17 +251,18 @@ void check_activity_case(const stanli::OdeSpec& spec, const char* label) {
 
   const size_t width = test_y0.size() + test_theta.size();
   if constexpr (!YAutodiff && !ThetaAutodiff)
-    expect(std::string(label) + " has no derivative scratch",
-           got.jacobian.empty());
+    expect_true(std::string(label) + " has no derivative scratch",
+                got.jacobian.empty());
   for (size_t o = 0; o < got.value.size() && !got.jacobian.empty(); ++o) {
     if constexpr (!YAutodiff)
       for (size_t i = 0; i < test_y0.size(); ++i)
-        expect(std::string(label) + " zero y Jacobian column",
-               bits(got.jacobian[o * width + i]) == bits(0.0));
+        expect_true(std::string(label) + " zero y Jacobian column",
+                    bits(got.jacobian[o * width + i]) == bits(0.0));
     if constexpr (!ThetaAutodiff)
       for (size_t i = 0; i < test_theta.size(); ++i)
-        expect(std::string(label) + " zero theta Jacobian column",
-               bits(got.jacobian[o * width + test_y0.size() + i]) == bits(0.0));
+        expect_true(
+            std::string(label) + " zero theta Jacobian column",
+            bits(got.jacobian[o * width + test_y0.size() + i]) == bits(0.0));
   }
 }
 
@@ -309,10 +298,10 @@ static void check_error_parity(
       capture_ode_error(spec, false, y0_values, theta_values);
   const OdeError direct =
       capture_ode_error(spec, true, y0_values, theta_values);
-  expect(label + ": oracle throws", oracle.threw);
-  expect(label + ": direct throws", direct.threw);
-  expect(label + ": exception type", direct.type == oracle.type);
-  expect(label + ": exception message", direct.message == oracle.message);
+  expect_true(label + ": oracle throws", oracle.threw);
+  expect_true(label + ": direct throws", direct.threw);
+  expect_true(label + ": exception type", direct.type == oracle.type);
+  expect_true(label + ": exception message", direct.message == oracle.message);
 }
 
 // Runtime controls must reach the same pinned Stan validation and solver,
@@ -345,15 +334,16 @@ static void check_runtime_controls(const stanli::OdeSpec& shared) {
       } catch (const std::exception& e) {
         failure = {true, typeid(e).name(), e.what()};
       }
-      expect("runtime controls preserve Stan rejection",
-             failure.threw == error.threw);
+      expect_true("runtime controls preserve Stan rejection",
+                  failure.threw == error.threw);
       if (error.threw) {
-        expect("runtime control exception type", failure.type == error.type);
-        expect("runtime control exception message",
-               failure.message == error.message);
+        expect_true("runtime control exception type",
+                    failure.type == error.type);
+        expect_true("runtime control exception message",
+                    failure.message == error.message);
       } else {
-        expect("runtime controls preserve Stan values",
-               bitwise_equal(got.value, want.value));
+        expect_true("runtime controls preserve Stan values",
+                    bitwise_equal(got.value, want.value));
       }
     }
   }
@@ -418,8 +408,8 @@ static void check_shared_spec_threads(const stanli::OdeSpec& spec,
   for (auto& thread : threads) thread.join();
 
   for (int thread = 0; thread < kThreads; ++thread)
-    expect("shared OdeSpec thread " + std::to_string(thread),
-           errors[(size_t)thread].empty());
+    expect_true("shared OdeSpec thread " + std::to_string(thread),
+                errors[(size_t)thread].empty());
 }
 
 static void check_precomputed_jacobian_harvest() {
@@ -447,8 +437,9 @@ static void check_precomputed_jacobian_harvest() {
     outputs[o].vi_->adj_ = 1.0;
     outputs[o].vi_->chain();
     for (size_t i = 0; i < inputs.size(); ++i) {
-      expect("direct precomputed-gradient harvest matches full reverse sweep",
-             inputs[i].adj() == full[o][i]);
+      expect_true(
+          "direct precomputed-gradient harvest matches full reverse sweep",
+          inputs[i].adj() == full[o][i]);
       inputs[i].vi_->adj_ = 0.0;
     }
     outputs[o].vi_->adj_ = 0.0;
@@ -494,46 +485,48 @@ int main() {
   const OdeSpec* ckrk_spec = fixture_spec(cm.graph, OdeSpec::CKRK);
   const OdeSpec* mixed_rk45_spec =
       fixture_spec(cm.graph, OdeSpec::RK45, "rhs_mixed");
-  expect("fixture exposes a modern rk45 rhs", rk45_spec != nullptr);
-  expect("fixture exposes a modern ckrk rhs", ckrk_spec != nullptr);
-  expect("fixture exposes a mixed-data rk45 rhs", mixed_rk45_spec != nullptr);
+  expect_true("fixture exposes a modern rk45 rhs", rk45_spec != nullptr);
+  expect_true("fixture exposes a modern ckrk rhs", ckrk_spec != nullptr);
+  expect_true("fixture exposes a mixed-data rk45 rhs",
+              mixed_rk45_spec != nullptr);
   const OdeSpec* oracle_rk45_spec =
       fixture_spec(oracle_cm.graph, OdeSpec::RK45);
-  expect("oracle fixture exposes a modern rk45 rhs",
-         oracle_rk45_spec != nullptr);
+  expect_true("oracle fixture exposes a modern rk45 rhs",
+              oracle_rk45_spec != nullptr);
   if (oracle_rk45_spec)
-    expect("inverse selector disables direct RK at lowering",
-           !oracle_rk45_spec->direct_rk_enabled);
+    expect_true("inverse selector disables direct RK at lowering",
+                !oracle_rk45_spec->direct_rk_enabled);
 
   bool log_has_vv = false, log_has_vd = false, log_has_dv = false;
   for (const Op& op : cm.graph.ops)
     if (op.opcode == OP_ODE) {
-      expect("lowered log_prob ODE has an explicit type mask",
-             (op.variant & 0x4u) != 0);
+      expect_true("lowered log_prob ODE has an explicit type mask",
+                  (op.variant & 0x4u) != 0);
       log_has_vv = log_has_vv || op.variant == 0x7u;
       log_has_vd = log_has_vd || op.variant == 0x5u;
       log_has_dv = log_has_dv || op.variant == 0x6u;
     }
-  expect("log_prob contains a var/var ODE", log_has_vv);
-  expect("log_prob contains an active-y/data-theta ODE", log_has_vd);
-  expect("log_prob contains a data-y/active-theta ODE", log_has_dv);
+  expect_true("log_prob contains a var/var ODE", log_has_vv);
+  expect_true("log_prob contains an active-y/data-theta ODE", log_has_vd);
+  expect_true("log_prob contains a data-y/active-theta ODE", log_has_dv);
 
   bool write_has_dd = false;
   if (cm.write_array)
     for (const Op& op : cm.write_array->graph.ops)
       if (op.opcode == OP_ODE) {
-        expect("lowered write_array ODE has an explicit type mask",
-               (op.variant & 0x4u) != 0);
+        expect_true("lowered write_array ODE has an explicit type mask",
+                    (op.variant & 0x4u) != 0);
         write_has_dd = write_has_dd || op.variant == 0x4u;
       }
-  expect("write_array contains a double/double ODE", write_has_dd);
+  expect_true("write_array contains a double/double ODE", write_has_dd);
 
   check_precomputed_jacobian_harvest();
 
   if (rk45_spec) {
-    expect("branchless RK45 has a direct derivative payload",
-           (bool)rk45_spec->direct_rk && rk45_spec->direct_rk_why.empty() &&
-               rk45_spec->direct_rk_enabled);
+    expect_true("branchless RK45 has a direct derivative payload",
+                (bool)rk45_spec->direct_rk &&
+                    rk45_spec->direct_rk_why.empty() &&
+                    rk45_spec->direct_rk_enabled);
     check_activity_case<true, false>(*rk45_spec, "active y/data theta");
     check_activity_case<false, true>(*rk45_spec, "data y/active theta");
     check_activity_case<true, true>(*rk45_spec, "active y/active theta");
@@ -581,14 +574,14 @@ int main() {
     check_error_parity(legacy, "legacy RK45 invalid relative tolerance");
   }
   if (mixed_rk45_spec) {
-    expect("mixed-data RK45 has a direct derivative payload",
-           (bool)mixed_rk45_spec->direct_rk &&
-               mixed_rk45_spec->direct_rk_why.empty() &&
-               mixed_rk45_spec->direct_rk_enabled);
-    expect("mixed-data RK45 exposes one real datum and three parameters",
-           mixed_rk45_spec->x_r.size() == 1 &&
-               mixed_rk45_spec->prog.n_xr == 1 &&
-               mixed_rk45_spec->prog.n_th == 3);
+    expect_true("mixed-data RK45 has a direct derivative payload",
+                (bool)mixed_rk45_spec->direct_rk &&
+                    mixed_rk45_spec->direct_rk_why.empty() &&
+                    mixed_rk45_spec->direct_rk_enabled);
+    expect_true("mixed-data RK45 exposes one real datum and three parameters",
+                mixed_rk45_spec->x_r.size() == 1 &&
+                    mixed_rk45_spec->prog.n_xr == 1 &&
+                    mixed_rk45_spec->prog.n_th == 3);
     if (mixed_rk45_spec->x_r.size() == 1 && mixed_rk45_spec->prog.n_xr == 1 &&
         mixed_rk45_spec->prog.n_th == 3) {
       OdeSpec invalid = *mixed_rk45_spec;
@@ -598,9 +591,10 @@ int main() {
     }
   }
   if (ckrk_spec) {
-    expect("branchless CKRK has a direct derivative payload",
-           (bool)ckrk_spec->direct_rk && ckrk_spec->direct_rk_why.empty() &&
-               ckrk_spec->direct_rk_enabled);
+    expect_true("branchless CKRK has a direct derivative payload",
+                (bool)ckrk_spec->direct_rk &&
+                    ckrk_spec->direct_rk_why.empty() &&
+                    ckrk_spec->direct_rk_enabled);
     check_activity_case<true, false>(*ckrk_spec, "CKRK active y/data theta");
     check_activity_case<false, true>(*ckrk_spec, "CKRK data y/active theta");
     check_activity_case<true, true>(*ckrk_spec, "CKRK active y/theta");
@@ -611,7 +605,7 @@ int main() {
 
   // a, b, p[2], y0[2]
   const int64_t n = ex.n_params();
-  expect("6 unconstrained parameters, got " + std::to_string(n), n == 6);
+  expect_true("6 unconstrained parameters, got " + std::to_string(n), n == 6);
   if (n != 6) return 1;
 
   std::vector<double> q((size_t)n);
@@ -620,7 +614,7 @@ int main() {
   std::vector<double> grad((size_t)n);
   for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = q[(size_t)i];
   const double lp = ex.gradient(grad.data());
-  expect("lp is finite", std::isfinite(lp));
+  expect_true("lp is finite", std::isfinite(lp));
 
   // ---- the value-only forward ------------------------------------------
   // ode_fwd is the only kernel that skips work under forward_value_only:
@@ -650,11 +644,12 @@ int main() {
     for (int64_t k = 0; k < n; ++k) ex.params_data()[k] = q[(size_t)k];
     std::vector<double> grad2((size_t)n);
     const double lp2 = ex.gradient(grad2.data());
-    expect("lp after a value-only sweep is bitwise the one before", lp2 == lp);
+    expect_true("lp after a value-only sweep is bitwise the one before",
+                lp2 == lp);
     for (int64_t i = 0; i < n; ++i)
-      expect("gradient " + std::to_string(i) +
-                 " after a value-only sweep is bitwise the one before",
-             grad2[(size_t)i] == grad[(size_t)i]);
+      expect_true("gradient " + std::to_string(i) +
+                      " after a value-only sweep is bitwise the one before",
+                  grad2[(size_t)i] == grad[(size_t)i]);
   }
 
   // ---- finite differences ----------------------------------------------
@@ -664,8 +659,8 @@ int main() {
   double worst = 0;
   int worst_i = -1;
   for (int64_t i = 0; i < n; ++i) {
-    expect("parameter " + std::to_string(i) + " reaches the solve",
-           std::fabs(grad[(size_t)i]) > 1e-8);
+    expect_true("parameter " + std::to_string(i) + " reaches the solve",
+                std::fabs(grad[(size_t)i]) > 1e-8);
     for (int64_t k = 0; k < n; ++k) ex.params_data()[k] = q[(size_t)k];
     ex.params_data()[i] = q[(size_t)i] + h;
     const double up = ex.forward();
@@ -712,10 +707,11 @@ int main() {
     return out;
   };
   const auto rk45 = col("z_rk45");
-  expect("z_rk45 has N*2 values", rk45.size() == 6);
+  expect_true("z_rk45 has N*2 values", rk45.size() == 6);
   for (const char* other : {"z_bdf", "z_adams", "z_ckrk", "z_tol"}) {
     const auto o = col(other);
-    expect(std::string(other) + " has the same shape", o.size() == rk45.size());
+    expect_true(std::string(other) + " has the same shape",
+                o.size() == rk45.size());
     double w = 0;
     for (size_t k = 0; k < o.size() && k < rk45.size(); ++k)
       w = std::max(
@@ -727,19 +723,18 @@ int main() {
       ++failures;
       std::printf("FAIL %s disagrees with z_rk45 by %.3g relative\n", other, w);
     }
-    expect(std::string(other) + " is finite",
-           std::all_of(o.begin(), o.end(),
-                       [](double v) { return std::isfinite(v); }));
+    expect_true(std::string(other) + " is finite",
+                std::all_of(o.begin(), o.end(),
+                            [](double v) { return std::isfinite(v); }));
   }
 
   // The mixed-argument solve is a different system, so it is checked for
   // being a solve at all rather than against the others.
   const auto mixed = col("z_mixed");
-  expect("z_mixed has N*2 finite values",
-         mixed.size() == 6 &&
-             std::all_of(mixed.begin(), mixed.end(),
-                         [](double v) { return std::isfinite(v); }));
+  expect_true("z_mixed has N*2 finite values",
+              mixed.size() == 6 &&
+                  std::all_of(mixed.begin(), mixed.end(),
+                              [](double v) { return std::isfinite(v); }));
 
-  if (failures == 0) std::printf("test_odevariadic: all checks passed\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_odevariadic");
 }

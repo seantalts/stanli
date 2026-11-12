@@ -1,6 +1,7 @@
 // Logistic GLM: graph log_prob + gradient vs an all-var reference in the
 // same op order, at three fixed parameter vectors. case0-2 (OP_MATVEC): 10
 // ULP. The rest: bitwise.
+#include "expect.hpp"
 #include "models.hpp"
 #include <stanli/density_registry.hpp>
 
@@ -12,29 +13,6 @@
 #include <limits>
 #include <string>
 #include <vector>
-
-static int failures = 0;
-static void expect_eq(const std::string& what, double got, double want) {
-  if (got != want && !(std::isnan(got) && std::isnan(want))) {
-    ++failures;
-    std::printf("FAIL %-16s got %.17g want %.17g\n", what.c_str(), got, want);
-  }
-}
-
-static int64_t ulp_key(double d) {
-  int64_t i;
-  std::memcpy(&i, &d, sizeof(i));
-  return i < 0 ? std::numeric_limits<int64_t>::min() - i : i;
-}
-static void expect_ulp(const std::string& what, double got, double want,
-                       int64_t budget) {
-  const int64_t d = std::abs(ulp_key(got) - ulp_key(want));
-  if (d > budget) {
-    ++failures;
-    std::printf("FAIL %-16s got %.17g want %.17g (%lld ulp)\n", what.c_str(),
-                got, want, (long long)d);
-  }
-}
 
 // The three direct GLM kernels do not pass through the generated scalar
 // density wrappers. Empty outcomes return zero before Stan Math builds a
@@ -89,12 +67,12 @@ static void check_empty_glm(uint16_t opcode, const std::string& name) {
   }
   var value_ref = lp_ref * std::numeric_limits<double>::infinity();
   value_ref.grad();
-  expect_eq(name + " empty value", value, value_ref.val());
-  expect_eq(name + " empty alpha", grad[0], alpha.adj());
+  expect_eq_or_both_nan(name + " empty value", value, value_ref.val());
+  expect_eq_or_both_nan(name + " empty alpha", grad[0], alpha.adj());
   for (int k = 0; k < K; ++k)
-    expect_eq(name + " empty beta" + std::to_string(k), grad[1 + k],
-              beta(k).adj());
-  if (has_phi) expect_eq(name + " empty phi", grad[3], phi.adj());
+    expect_eq_or_both_nan(name + " empty beta" + std::to_string(k), grad[1 + k],
+                          beta(k).adj());
+  if (has_phi) expect_eq_or_both_nan(name + " empty phi", grad[3], phi.adj());
   stan::math::recover_memory();
 }
 
@@ -167,13 +145,15 @@ static void check_vector_alpha(const std::string& tag, uint16_t opcode,
   }
   var scaled = ref * seed;
   stan::math::grad(scaled.vi_);
-  expect_eq(tag + " total", got, scaled.val());
+  expect_eq_or_both_nan(tag + " total", got, scaled.val());
   size_t at = 0;
   for (int i = 0; i < rows; ++i)
-    expect_eq(tag + " da" + std::to_string(i), grad[at++], av(i).adj());
+    expect_eq_or_both_nan(tag + " da" + std::to_string(i), grad[at++],
+                          av(i).adj());
   for (int i = 0; i < cols; ++i)
-    expect_eq(tag + " db" + std::to_string(i), grad[at++], bv(i).adj());
-  if (has_phi) expect_eq(tag + " dphi", grad[at], phi.adj());
+    expect_eq_or_both_nan(tag + " db" + std::to_string(i), grad[at++],
+                          bv(i).adj());
+  if (has_phi) expect_eq_or_both_nan(tag + " dphi", grad[at], phi.adj());
 }
 
 static void check_vector_alphas() {
@@ -265,15 +245,18 @@ static void check_active_design(const std::string& tag, uint16_t opcode,
   var ref = alpha_len == 1 ? with_alpha(av(0)) : with_alpha(av);
   var scaled = ref * seed;
   stan::math::grad(scaled.vi_);
-  expect_eq(tag + " total", got, scaled.val());
+  expect_eq_or_both_nan(tag + " total", got, scaled.val());
   size_t at = 0;
   for (size_t i = 0; i < X.size(); ++i)
-    expect_eq(tag + " dX" + std::to_string(i), grad[at++], Xv.data()[i].adj());
+    expect_eq_or_both_nan(tag + " dX" + std::to_string(i), grad[at++],
+                          Xv.data()[i].adj());
   for (int i = 0; i < alpha_len; ++i)
-    expect_eq(tag + " da" + std::to_string(i), grad[at++], av(i).adj());
+    expect_eq_or_both_nan(tag + " da" + std::to_string(i), grad[at++],
+                          av(i).adj());
   for (int i = 0; i < cols; ++i)
-    expect_eq(tag + " db" + std::to_string(i), grad[at++], bv(i).adj());
-  if (has_phi) expect_eq(tag + " dphi", grad[at], phi.adj());
+    expect_eq_or_both_nan(tag + " db" + std::to_string(i), grad[at++],
+                          bv(i).adj());
+  if (has_phi) expect_eq_or_both_nan(tag + " dphi", grad[at], phi.adj());
 }
 
 static void check_active_designs() {
@@ -354,29 +337,25 @@ static void check_tail_glm(const std::string& tag, uint16_t opcode, bool propto,
                  : stan::math::categorical_logit_glm_lpmf<false>(y, Xv, av, bm);
     };
     ref = scalar_y ? call(yy[0]) : call(yy);
-    auto exact = [&](const std::string& label, double actual, double expected) {
-      if (std::memcmp(&actual, &expected, sizeof(double)) != 0 &&
-          !(std::isnan(actual) && std::isnan(expected))) {
-        ++failures;
-        std::printf("FAIL %s got %.17g want %.17g\n", label.c_str(), actual,
-                    expected);
-      }
-    };
     var scaled_cat = ref * seed;
     stan::math::grad(scaled_cat.vi_);
-    exact(tag + " total", got, scaled_cat.val());
+    expect_eq_or_both_nan(tag + " total", got, scaled_cat.val());
     size_t at = 0;
     for (size_t i = 0; i < X.size(); ++i)
-      exact(tag + " dX" + std::to_string(i), grad[at++], Xv.data()[i].adj());
+      expect_eq_or_both_nan(tag + " dX" + std::to_string(i), grad[at++],
+                            Xv.data()[i].adj());
     for (int i = 0; i < alpha_len; ++i)
-      exact(tag + " da" + std::to_string(i), grad[at++], av(i).adj());
+      expect_eq_or_both_nan(tag + " da" + std::to_string(i), grad[at++],
+                            av(i).adj());
     for (int i = 0; i < beta_len; ++i)
-      exact(tag + " db" + std::to_string(i), grad[at++], bm.data()[i].adj());
-    exact(tag + " value-only", ex.forward_value_only(), got);
+      expect_eq_or_both_nan(tag + " db" + std::to_string(i), grad[at++],
+                            bm.data()[i].adj());
+    expect_eq_or_both_nan(tag + " value-only", ex.forward_value_only(), got);
     std::vector<double> repeated(grad.size());
-    exact(tag + " reused total", ex.gradient(repeated.data()), got);
+    expect_eq_or_both_nan(tag + " reused total", ex.gradient(repeated.data()),
+                          got);
     for (size_t i = 0; i < grad.size(); ++i)
-      exact(tag + " reused gradient", repeated[i], grad[i]);
+      expect_eq_or_both_nan(tag + " reused gradient", repeated[i], grad[i]);
     return;
   } else {
     std::vector<int> yy(idata.begin(), idata.begin() + rows);
@@ -385,14 +364,17 @@ static void check_tail_glm(const std::string& tag, uint16_t opcode, bool propto,
   }
   var scaled = ref * seed;
   stan::math::grad(scaled.vi_);
-  expect_eq(tag + " total", got, scaled.val());
+  expect_eq_or_both_nan(tag + " total", got, scaled.val());
   size_t at = 0;
   for (size_t i = 0; i < X.size(); ++i)
-    expect_eq(tag + " dX" + std::to_string(i), grad[at++], Xv.data()[i].adj());
+    expect_eq_or_both_nan(tag + " dX" + std::to_string(i), grad[at++],
+                          Xv.data()[i].adj());
   for (int i = 0; i < alpha_len; ++i)
-    expect_eq(tag + " da" + std::to_string(i), grad[at++], av(i).adj());
+    expect_eq_or_both_nan(tag + " da" + std::to_string(i), grad[at++],
+                          av(i).adj());
   for (int i = 0; i < beta_len; ++i)
-    expect_eq(tag + " db" + std::to_string(i), grad[at++], bv(i).adj());
+    expect_eq_or_both_nan(tag + " db" + std::to_string(i), grad[at++],
+                          bv(i).adj());
 }
 
 static void check_tail_glms() {
@@ -511,18 +493,18 @@ static void check_ordered_density(bool array_cuts, bool scalar_location,
         scalar_location ? call(location(0), cuts[0]) : call(location, cuts[0]);
   var ref = density * weight;
   stan::math::grad(ref.vi_);
-  expect_eq("ordered value", got, ref.val());
+  expect_eq_or_both_nan("ordered value", got, ref.val());
   const auto compare_gradient = [&](const char* name, double actual,
                                     double expected) {
     // The recorder and var CDF instantiations can differ in the far-tail
     // approximation's rounding; at +/-30 the observed relative error is
     // 6e-14. Keep a stricter gate than the 1e-9 external corpus oracle.
     if (probit && std::isfinite(expected))
-      expect_eq(name,
-                std::abs(actual - expected) <= 1e-12 * (1 + std::abs(expected)),
-                true);
+      expect_eq_or_both_nan(
+          name, std::abs(actual - expected) <= 1e-12 * (1 + std::abs(expected)),
+          true);
     else
-      expect_eq(name, actual, expected);
+      expect_eq_or_both_nan(name, actual, expected);
   };
   for (int i = 0; i < n; ++i)
     compare_gradient("ordered location", grad[i], location(i).adj());
@@ -540,9 +522,10 @@ static void check_ordered_density(bool array_cuts, bool scalar_location,
     } catch (const std::domain_error&) {
       threw = true;
     }
-    expect_eq("ordered invalid cutpoints", threw, true);
+    expect_eq_or_both_nan("ordered invalid cutpoints", threw, true);
     ex.param_ptr(cs)[1] += 1.0;
-    expect_eq("ordered recovery after error", ex.gradient(grad.data()), got);
+    expect_eq_or_both_nan("ordered recovery after error",
+                          ex.gradient(grad.data()), got);
   }
 }
 
@@ -581,11 +564,11 @@ static void check_multinomial_density() {
                   : stan::math::multinomial_lpmf<false>(counts, probabilities);
           var ref = density * weight;
           stan::math::grad(ref.vi_);
-          expect_eq("multinomial value", got, ref.val());
+          expect_eq_or_both_nan("multinomial value", got, ref.val());
           if (active)
             for (int i = 0; i < n; ++i)
-              expect_eq("multinomial weighted gradient", grad[i],
-                        probabilities(i).adj());
+              expect_eq_or_both_nan("multinomial weighted gradient", grad[i],
+                                    probabilities(i).adj());
           ex.value_ptr(theta)[0] = -0.1;
           bool threw = false;
           try {
@@ -593,7 +576,7 @@ static void check_multinomial_density() {
           } catch (const std::domain_error&) {
             threw = true;
           }
-          expect_eq("multinomial invalid simplex", threw, true);
+          expect_eq_or_both_nan("multinomial invalid simplex", threw, true);
         }
 }
 
@@ -658,15 +641,15 @@ static void check_dirichlet_recorder() {
           var ref = density * weight;
           stan::math::grad(ref.vi_);
           std::vector<double> grad(width * (n + 1));
-          expect_eq("dirichlet recorder value", ex.gradient(grad.data()),
-                    ref.val());
+          expect_eq_or_both_nan("dirichlet recorder value",
+                                ex.gradient(grad.data()), ref.val());
           for (int j = 0; j < n; ++j)
             for (int k = 0; k < width; ++k)
-              expect_eq("dirichlet recorder theta", grad[j * width + k],
-                        tv[j](k).adj());
+              expect_eq_or_both_nan("dirichlet recorder theta",
+                                    grad[j * width + k], tv[j](k).adj());
           for (int k = 0; k < width; ++k)
-            expect_eq("dirichlet recorder alpha", grad[n * width + k],
-                      av(k).adj());
+            expect_eq_or_both_nan("dirichlet recorder alpha",
+                                  grad[n * width + k], av(k).adj());
           if (!(propto && mask == 0)) {
             ex.param_ptr(a)[0] = -1;
             bool threw = false;
@@ -675,10 +658,10 @@ static void check_dirichlet_recorder() {
             } catch (const std::domain_error&) {
               threw = true;
             }
-            expect_eq("dirichlet recorder validation", threw, true);
+            expect_eq_or_both_nan("dirichlet recorder validation", threw, true);
             ex.param_ptr(a)[0] = 0.5;
-            expect_eq("dirichlet recorder error recovery",
-                      ex.gradient(grad.data()), ref.val());
+            expect_eq_or_both_nan("dirichlet recorder error recovery",
+                                  ex.gradient(grad.data()), ref.val());
           }
         }
 }
@@ -708,10 +691,11 @@ static void check_probit_alias() {
         stan::math::ordered_probit_lpmf(outcomes, locations, cuts) * weight;
     stan::math::grad(ref.vi_);
     double gradient[3];
-    expect_eq("probit aliased value", ex.gradient(gradient), ref.val());
+    expect_eq_or_both_nan("probit aliased value", ex.gradient(gradient),
+                          ref.val());
     for (int i = 0; i < 3; ++i) {
       const double expected = locations(i).adj() + cuts(i).adj();
-      expect_eq(
+      expect_eq_or_both_nan(
           "probit aliased gradient",
           std::abs(gradient[i] - expected) <= 1e-12 * (1 + std::abs(expected)),
           true);
@@ -755,7 +739,7 @@ static void check_wiener_fixed_observation() {
           stan::math::grad(ref.vi_);
           std::vector<double> grad(ex.n_params());
           const double got = ex.gradient(grad.data());
-          expect_eq("wiener value", got, ref.val());
+          expect_eq_or_both_nan("wiener value", got, ref.val());
           int at = 0;
           for (int i = 0; i < 5; ++i) {
             if ((i == 0 && !(active_mask & 1)) ||
@@ -763,12 +747,12 @@ static void check_wiener_fixed_observation() {
               continue;
             const double want = v[i].adj();
             if (std::isfinite(want))
-              expect_eq(
+              expect_eq_or_both_nan(
                   "wiener weighted gradient",
                   std::abs(grad[at++] - want) <= 1e-12 * (1 + std::abs(want)),
                   true);
             else if (!std::isfinite(weight))
-              expect_eq("wiener nonfinite seed", grad[at++], want);
+              expect_eq_or_both_nan("wiener nonfinite seed", grad[at++], want);
             else
               ++at;
           }
@@ -779,7 +763,7 @@ static void check_wiener_fixed_observation() {
           } catch (const std::domain_error&) {
             threw = true;
           }
-          expect_eq("wiener validation", threw, true);
+          expect_eq_or_both_nan("wiener validation", threw, true);
         }
 }
 
@@ -862,6 +846,5 @@ int main() {
   check_empty_glm(OP_POISSON_LOG_GLM_LPMF, "poisson_log_glm");
   check_empty_glm(OP_NEG_BINOMIAL_2_LOG_GLM_LPMF, "neg_binomial_2_log_glm");
 
-  if (failures == 0) std::printf("test_glm OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_glm");
 }
