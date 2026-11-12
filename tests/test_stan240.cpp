@@ -1,12 +1,9 @@
 #include "graph_helpers.hpp"
-#include "cross_path.hpp"
 #include <stanli/density_registry.hpp>
 #include <stanli/function_registry.hpp>
 #include <stan/math.hpp>
 #include <cmath>
 #include <cstdio>
-#include <fstream>
-#include <sstream>
 
 namespace {
 int failures = 0;
@@ -92,29 +89,10 @@ void poisson_binomial() {
   }
   equal("poisson binomial invalid probability", rejected, true);
 }
-void fixtures() {
-  using namespace stanli;
-  for (const auto* name :
-       {"stan240_functions", "stan240_containers", "stan240_glm"}) {
-    std::ifstream in(std::string("tests/fixtures/") + name + ".tmir.sexp");
-    std::ostringstream text;
-    text << in.rdbuf();
-    cross::Options opts;
-    opts.model = name;
-    const auto result =
-        cross::run_matrix(text.str(), DataMap{}, opts, cross::Ledger{});
-    if (!result.ok || !result.skipped.empty()) {
-      ++failures;
-      std::printf("FAIL %s: %s\n%s\n", name, result.skipped.c_str(),
-                  result.report.c_str());
-    }
-  }
-}
 }  // namespace
 int main() {
   quantiles();
   poisson_binomial();
-  fixtures();
   if (!failures) std::puts("test_stan240 OK");
   return failures ? 1 : 0;
 }

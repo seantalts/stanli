@@ -1782,7 +1782,7 @@ reverse-mode source transformation over the ~35 opcodes of `Program`,
 producing a second pass over doubles with no vari, no nested tape and no
 allocation. Measured with `STANLI_NO_ISLAND=1` as the baseline, same
 build, same point, on all twenty-one corpus models that compile a
-region (`harnesses/island_ab.py`, min of three runs each -- the sweep
+region (`harnesses/island_ab.py`, since removed; min of three runs each -- the sweep
 bypasses the carve estimate so the regions it declines are measured
 too, which is how the table can hold rows the default build refuses):
 

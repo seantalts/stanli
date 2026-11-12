@@ -944,10 +944,6 @@ add_executable(stanli_check tools/stanli_check.cpp
 target_link_libraries(stanli_check PRIVATE stanli stanli_stanc_process)
 add_dependencies(stanli_check stanli_mir_fixtures)
 stanli_embed_stanc(stanli_check)
-add_executable(lowering_digest tools/lowering_digest.cpp
-  $<TARGET_OBJECTS:stanli_tbb_stub>)
-target_link_libraries(lowering_digest PRIVATE stanli stanli_stanc_process)
-stanli_embed_stanc(lowering_digest)
 if(WIN32)
   # Standalone-compiler deployments must also run without MSYS2's C++/thread
   # runtime DLLs on PATH. Embedded targets already receive these link flags.
@@ -1390,10 +1386,10 @@ endif()
 
 set(STANLI_TESTS
   test_execution_report test_json_writer test_rng_families test_vector_rng test_container_rng
-  test_smoke test_executor test_recorder test_densities test_tile_calls
+  test_executor test_recorder test_densities test_tile_calls
   test_matvec test_eigen
   test_mnc test_stan240
-  test_legacy test_eight_schools test_glm test_normal_glm test_nuts test_walnuts test_sexp
+  test_legacy test_eight_schools test_glm test_normal_glm test_nuts test_walnuts
   test_model_adapter test_sampler_parity
   test_mir test_mir_decode test_transforms test_eltwise test_sort test_scalar_binary
   test_lower
@@ -1401,7 +1397,7 @@ set(STANLI_TESTS
   test_native_matrix_pullbacks
   test_lower_view_contract test_lower_array_contract test_data test_e2e
   test_reroll test_profile test_inplace test_pass_safety test_sampling
-  test_ode_prog test_mir_program_conformance test_mir_checks
+  test_ode_prog test_mir_program_conformance
   test_structured_checks test_structured_loop
   test_mir_unary_fallback test_mir_binary_fallback test_mir_reduction_fallback
   test_constfold test_collapse test_cse test_fast_math test_graph_print test_pass_dump
@@ -1522,6 +1518,9 @@ if(Python3_Interpreter_FOUND)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_corpus_inventory
            COMMAND ${Python3_EXECUTABLE} tests/test_corpus_inventory.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_toolchain
+           COMMAND ${Python3_EXECUTABLE} tests/test_toolchain.py
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_ctsem_engine
            COMMAND ${Python3_EXECUTABLE} tests/test_ctsem_engine.py

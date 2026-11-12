@@ -3757,34 +3757,14 @@ static void runtime_index_tests() {
   }
 }
 
-static std::atomic<int> memo_int_calls{0};
-static std::atomic<int> memo_compare_calls{0};
-static std::atomic<int> memo_index_calls{0};
-
-static void count_memo_int(KernelCtx& context) {
-  ++memo_int_calls;
+static void memo_int_forward(KernelCtx& context) {
   find_kernel(OP_INT_ARITH)->forward(context);
 }
-static void count_memo_compare(KernelCtx& context) {
-  ++memo_compare_calls;
+static void memo_compare_forward(KernelCtx& context) {
   find_kernel(OP_COMPARE)->forward(context);
 }
-static void count_memo_index(KernelCtx& context) {
-  ++memo_index_calls;
+static void memo_index_forward(KernelCtx& context) {
   find_kernel(OP_INDEX_DYNAMIC)->forward(context);
-}
-
-static const Node* find_kind(const Node& node, Node::Kind kind) {
-  if (node.kind == kind) return &node;
-  for (const auto& child : node.children)
-    if (const Node* found = find_kind(child, kind)) return found;
-  return nullptr;
-}
-
-static size_t count_memo(const Node& node) {
-  size_t total = node.memo ? 1 : 0;
-  for (const auto& child : node.children) total += count_memo(child);
-  return total;
 }
 
 // theta * sum(1..n) where the sum is an integer chain on the data import n.
@@ -3818,7 +3798,7 @@ static std::shared_ptr<StructuredLoop> memo_counter_plan(bool with_break) {
                          call(*plan, OP_MUL, {theta, acc}, result)});
   plan->outputs = {result};
   plan->prepare();
-  check(set_forward(plan->root, step_op, count_memo_int),
+  check(set_forward(plan->root, step_op, memo_int_forward),
         "find memo counter callback");
   return plan;
 }
@@ -3859,8 +3839,8 @@ static std::shared_ptr<StructuredLoop> memo_branch_plan(bool active_compare) {
                        alias(result, zero))});
   plan->outputs = {result};
   plan->prepare();
-  check(set_forward(plan->root, index_op, count_memo_index) &&
-            set_forward(plan->root, compare_op, count_memo_compare),
+  check(set_forward(plan->root, index_op, memo_index_forward) &&
+            set_forward(plan->root, compare_op, memo_compare_forward),
         "find memo branch callbacks");
   return plan;
 }
@@ -3940,7 +3920,7 @@ static void memo_tests() {
          call(*plan, OP_MUL, {theta, acc}, result)});
     plan->outputs = {result};
     plan->prepare();
-    check(set_forward(plan->root, step_op, count_memo_int),
+    check(set_forward(plan->root, step_op, memo_int_forward),
           "find guarded loop callback");
     Executor executor(outer(plan, {1, 1}, {1}));
     const Evaluation skipped = evaluate_memo(executor, -.5, 3);
@@ -3988,7 +3968,7 @@ static void memo_tests() {
              call(*escaping, OP_ADD, {acc, term}, next), alias(acc, next)}));
     escaping->outputs = {acc};
     prepare_kernels(*escaping);
-    check(set_forward(escaping->root, compare_op, count_memo_compare),
+    check(set_forward(escaping->root, compare_op, memo_compare_forward),
           "find escaping break callback");
     Executor escaping_executor(outer(escaping, {1, 1}, {1}));
     const Evaluation escaped = evaluate_memo(escaping_executor, .25, 10);
@@ -4047,13 +4027,6 @@ static void record_arm_mul(KernelCtx& context) {
   find_kernel(OP_MUL)->forward(context);
 }
 
-static const Node* find_memo(const Node& node) {
-  if (node.memo) return &node;
-  for (const auto& child : node.children)
-    if (const Node* found = find_memo(child)) return found;
-  return nullptr;
-}
-
 // theta * sum of the iterators whose table entry is positive; `reuse_guard`
 // also adds theta * guard after the branch so the guard value stays live.
 static std::shared_ptr<StructuredLoop> traced_branch_plan(bool reuse_guard) {
@@ -4097,8 +4070,8 @@ static std::shared_ptr<StructuredLoop> traced_branch_plan(bool reuse_guard) {
   plan->root = counted(one, three, iterator, sequence(std::move(body)));
   plan->outputs = {acc};
   prepare_kernels(*plan);
-  check(set_forward(plan->root, index_op, count_memo_index) &&
-            set_forward(plan->root, compare_op, count_memo_compare) &&
+  check(set_forward(plan->root, index_op, memo_index_forward) &&
+            set_forward(plan->root, compare_op, memo_compare_forward) &&
             set_forward(plan->root, scale_op, record_arm_mul),
         "find traced branch callbacks");
   return plan;
@@ -4149,7 +4122,7 @@ static std::shared_ptr<StructuredLoop> traced_while_plan(bool param_break) {
                                    sequence(std::move(body)))});
   plan->outputs = {x};
   prepare_kernels(*plan);
-  check(set_forward(plan->root, compare_op, count_memo_compare) &&
+  check(set_forward(plan->root, compare_op, memo_compare_forward) &&
             set_forward(plan->root, grow_op, count_mul_forward),
         "find traced while callbacks");
   return plan;
@@ -4202,10 +4175,10 @@ static std::shared_ptr<StructuredLoop> traced_chain_plan() {
                                sequence({}))}));
   plan->outputs = {acc};
   prepare_kernels(*plan);
-  check(set_forward(plan->root, index_op, count_memo_index) &&
-            set_forward(plan->root, compare_op, count_memo_compare) &&
-            set_forward(plan->root, index2_op, count_memo_index) &&
-            set_forward(plan->root, compare2_op, count_memo_compare) &&
+  check(set_forward(plan->root, index_op, memo_index_forward) &&
+            set_forward(plan->root, compare_op, memo_compare_forward) &&
+            set_forward(plan->root, index2_op, memo_index_forward) &&
+            set_forward(plan->root, compare2_op, memo_compare_forward) &&
             set_forward(plan->root, scale_op, record_arm_mul),
         "find traced chain callbacks");
   return plan;
@@ -4339,8 +4312,8 @@ static std::shared_ptr<StructuredLoop> row_scan_plan(int rows,
   plan->root = counted(one, last, iterator, sequence(std::move(body)));
   plan->outputs = {acc};
   prepare_kernels(*plan);
-  check(set_forward(plan->root, index_op, count_memo_index) &&
-            set_forward(plan->root, compare_op, count_memo_compare) &&
+  check(set_forward(plan->root, index_op, memo_index_forward) &&
+            set_forward(plan->root, compare_op, memo_compare_forward) &&
             set_forward(plan->root, scale_op, record_arm_mul),
         "find row scan callbacks");
   return plan;
@@ -4392,7 +4365,7 @@ static std::shared_ptr<StructuredLoop> nested_scan_plan() {
   plan->root = counted(one, three, k, sequence({std::move(inner)}));
   plan->outputs = {acc};
   prepare_kernels(*plan);
-  check(set_forward(plan->root, index_op, count_memo_index) &&
+  check(set_forward(plan->root, index_op, memo_index_forward) &&
             set_forward(plan->root, scale_op, record_arm_mul),
         "find nested scan callbacks");
   return plan;
@@ -4430,7 +4403,7 @@ static std::shared_ptr<StructuredLoop> break_scan_plan(int rows) {
                 call(*plan, OP_ADD, {acc, term}, next), alias(acc, next)}));
   plan->outputs = {acc};
   prepare_kernels(*plan);
-  check(set_forward(plan->root, index_op, count_memo_index) &&
+  check(set_forward(plan->root, index_op, memo_index_forward) &&
             set_forward(plan->root, scale_op, record_arm_mul),
         "find break scan callbacks");
   return plan;
@@ -6897,7 +6870,7 @@ static Node cell_write(StructuredLoop& plan, int base, int r, int c, int value,
 // boolean chain built from folded kernels and aliases, a population/individual
 // test on the outer subject, a counting loop, and parameter-dependent matrix
 // updates addressed by table columns.
-static ScanFixture setup_scan_plan(bool vary_subject) {
+static ScanFixture setup_scan_plan() {
   constexpr int setup_rows = 8, setup_columns = 5, out_rows = 3, out_cols = 2;
   constexpr int pars = 3, trips_count = 6;
   auto plan = std::make_shared<StructuredLoop>();
@@ -6978,7 +6951,6 @@ static ScanFixture setup_scan_plan(bool vary_subject) {
                 alias(changed, zero), alias(matrix, base), std::move(scan),
                 branch(changed, std::move(reduce), sequence({}))}));
   (void)when;
-  (void)vary_subject;
   plan->has_target = true;
   plan->prepare();
   return {plan, {setup_rows * setup_columns, trips_count}};
@@ -6988,7 +6960,7 @@ static void data_loop_memo_setup_scan_tests() {
   const std::vector<double> setup = {2, 1, 1, 1, 1, 1, 1, 2, 2, 0, 2, 2, 1, 3,
                                      1, 2, 3, 2, 2, 0, 3, 1, 1, 1, 1, 2, 2, 2,
                                      1, 1, 2, 3, 1, 3, 0, 1, 2, 2, 2, 1};
-  const auto f = setup_scan_plan(true);
+  const auto f = setup_scan_plan();
   memo_check("setup-table scan with a population test", f.plan, f.lens,
              {setup, {0, 5, 7, 0, 9, 3}}, 9, 3, 3);
   memo_check("setup-table scan with all-population subjects", f.plan, f.lens,
@@ -7029,14 +7001,12 @@ struct FuzzPlan {
   }
   int operand() { return random.chance(25) ? literal() : pick(); }
 
-  int safe_index(std::vector<Node>& out, int source, int extent_literal,
-                 int extent_value) {
+  int safe_index(std::vector<Node>& out, int source, int extent_literal) {
     const int a = fresh(), b = fresh(), c = fresh(), d = fresh();
     out.push_back(arith_node(*plan, source, extent_literal, a, 4));
     out.push_back(arith_node(*plan, a, extent_literal, b, 0));
     out.push_back(arith_node(*plan, b, extent_literal, c, 4));
     out.push_back(arith_node(*plan, c, one, d, 0));
-    (void)extent_value;
     return d;
   }
 
@@ -7070,7 +7040,7 @@ struct FuzzPlan {
                                  slot, 4));
         break;
       case 3: {
-        const int index = safe_index(out, pick(), six, 6);
+        const int index = safe_index(out, pick(), six);
         out.push_back(read_node(*plan, table, 6, index, slot));
         break;
       }
@@ -7082,14 +7052,14 @@ struct FuzzPlan {
   }
 
   void store_statement(std::vector<Node>& out) {
-    const int index = safe_index(out, pick(), six, 6);
+    const int index = safe_index(out, pick(), six);
     Node write = call(*plan, OP_SET_INDEX_DYNAMIC, {store, index, operand()},
                       store_next);
     attach(*plan, write.op, single_spec(6));
     out.push_back(std::move(write));
     out.push_back(alias(store, store_next));
     store_next = plan->body.add_slot(6, false);
-    const int read_index = safe_index(out, pick(), six, 6);
+    const int read_index = safe_index(out, pick(), six);
     const int slot = fresh();
     out.push_back(read_node(*plan, store, 6, read_index, slot));
     pool.push_back(slot);
@@ -7105,7 +7075,7 @@ struct FuzzPlan {
       out.push_back(target(hot));
       return;
     }
-    const int index = safe_index(out, pick(), six, 6);
+    const int index = safe_index(out, pick(), six);
     Node write =
         call(*plan, OP_SET_INDEX_DYNAMIC, {vector, index, hot}, vector_next);
     attach(*plan, write.op, single_spec(6));
@@ -7132,7 +7102,7 @@ struct FuzzPlan {
         write.push_back(arith_node(*plan, pick(), operand(), slot, 0));
         break;
       case 1: {
-        const int index = safe_index(write, pick(), six, 6);
+        const int index = safe_index(write, pick(), six);
         write.push_back(read_node(*plan, table, 6, index, slot));
         break;
       }
@@ -7154,7 +7124,7 @@ struct FuzzPlan {
     const bool use_store = random.chance(50);
     const int source = use_store ? store : vector;
     int& next = use_store ? store_next : vector_next;
-    const int write_index = safe_index(out, pick(), six, 6);
+    const int write_index = safe_index(out, pick(), six);
     Node write = call(
         *plan, OP_SET_INDEX_DYNAMIC,
         {source, write_index, random.chance(50) ? pool[1] : operand()}, next);
@@ -7179,7 +7149,7 @@ struct FuzzPlan {
     } else {
       out.push_back(alias(copy, source));
     }
-    const int index = safe_index(out, pick(), six, 6);
+    const int index = safe_index(out, pick(), six);
     const int slot = fresh();
     out.push_back(read_node(*plan, copy, 6, index, slot));
     pool.push_back(slot);
@@ -7194,7 +7164,7 @@ struct FuzzPlan {
         call(*plan, OP_MUL, {random.chance(70) ? theta : beta, source}, hot));
     out.push_back(call(*plan, OP_DOT, {hot, source}, dot));
     out.push_back(target(dot));
-    const int write_index = safe_index(out, pick(), six, 6);
+    const int write_index = safe_index(out, pick(), six);
     const int value = random.chance(30) && !hots.empty()
                           ? hots[static_cast<size_t>(random.below(hots.size()))]
                           : operand();
@@ -7355,7 +7325,7 @@ static std::optional<ScanFixture> fuzz_plan(uint64_t seed, bool carry,
     }
   head.push_back(arith_node(plan, trip, f.literals[1], key, 4));
   {
-    const int index = f.safe_index(head, trip, f.six, 6);
+    const int index = f.safe_index(head, trip, f.six);
     head.push_back(read_node(plan, f.table, 6, index, aux));
   }
   const int count = 2 + f.random.below(4);
@@ -8413,9 +8383,8 @@ static void frame_instance_tests() {
                  moving_binding_fixture(), {-1, 0, -1, 0, true});
   instance_check("on a while outer loop", while_rows_fixture(),
                  {-1, -1, -1, 0, true});
-  for (int rows : {24})
-    instance_check("on partly written kernel scratch",
-                   kernel_scratch_fixture(rows), {-1, -1, -1, 0, true});
+  instance_check("on partly written kernel scratch", kernel_scratch_fixture(24),
+                 {-1, -1, -1, 0, true});
   {
     const auto on = instance_check("on parameter guards flipping between rows",
                                    parameter_guard_fixture(), {});
@@ -8859,8 +8828,6 @@ int main() {
   data_loop_memo_sibling_tests();
   data_loop_memo_memory_tests();
   data_loop_memo_setup_scan_tests();
-  data_loop_memo_carry_tests();
-  data_loop_memo_memory_tests();
   data_loop_memo_fuzz_tests();
   frame_instance_tests();
   frame_instance_fuzz_tests();

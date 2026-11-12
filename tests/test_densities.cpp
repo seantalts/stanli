@@ -1517,8 +1517,9 @@ int main() {
     }
   }
 
-  // wiener: every argument vectorizes in the language, and a length-1 slot
-  // must enter stan-math as a scalar (vectors do not broadcast there).
+  // wiener with every argument a vector, through the all-active default
+  // variant. The activity table in check_wiener_single_evaluation holds the
+  // scalar and mixed shapes.
   {
     using stan::math::var;
     using VecV = Eigen::Matrix<var, -1, 1>;
@@ -1560,27 +1561,6 @@ int main() {
                      {nullptr, nullptr, nullptr, nullptr, nullptr},
                      {&y, &a, &t, &b, &d});
       expect_eq("wiener all-vector lp", r.value, lp.val());
-      stan::math::recover_memory();
-    }
-    {
-      VecV y = vec(wy);
-      var a = wa[0], t = wt[0], b = wb[0], d = wd[0];
-      var lp = stan::math::wiener_lpdf<false>(y, a, t, b, d);
-      lp.grad();
-      auto r = grads(
-          "wiener y-vector", {wy, {wa[0]}, {wt[0]}, {wb[0]}, {wd[0]}},
-          {nullptr, &a, &t, &b, &d}, {&y, nullptr, nullptr, nullptr, nullptr});
-      expect_eq("wiener y-vector lp", r.value, lp.val());
-      stan::math::recover_memory();
-    }
-    {
-      var y = wy[0], a = wa[0], t = wt[0], b = wb[0], d = wd[0];
-      var lp = stan::math::wiener_lpdf<false>(y, a, t, b, d);
-      lp.grad();
-      auto r = grads(
-          "wiener scalar", {{wy[0]}, {wa[0]}, {wt[0]}, {wb[0]}, {wd[0]}},
-          {&y, &a, &t, &b, &d}, {nullptr, nullptr, nullptr, nullptr, nullptr});
-      expect_eq("wiener scalar lp", r.value, lp.val());
       stan::math::recover_memory();
     }
   }

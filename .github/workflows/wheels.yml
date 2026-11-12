@@ -590,21 +590,9 @@ jobs:
       # The models and data the corpus check reads: ~24 MB out of
       # posteriordb's 2 GB, via sparse checkout, cached on the pinned SHA.
       - name: Restore posteriordb (models and data only)
-        id: pdb-cache
-        uses: actions/cache@v4
+        uses: ./.github/actions/posteriordb
         with:
-          path: deps/posteriordb
-          key: pdb-lite-${{ env.PDB_SHA }}-2
-      - name: Fetch posteriordb
-        if: steps.pdb-cache.outputs.cache-hit != 'true'
-        run: |
-          tools/with_retry.sh git clone --filter=blob:none --sparse \
-            https://github.com/stan-dev/posteriordb.git deps/posteriordb
-          git -C deps/posteriordb sparse-checkout set \
-            posterior_database/models/stan posterior_database/data/data \
-            posterior_database/posteriors
-          tools/with_retry.sh git -C deps/posteriordb fetch -q origin "$PDB_SHA"
-          git -C deps/posteriordb checkout -q "$PDB_SHA"
+          sha: ${{ env.PDB_SHA }}
 
       # Every model the demo page offers has a hand written description,
       # and nothing else on its card is typed. This is the part of that
@@ -1048,23 +1036,8 @@ jobs:
           # The checked-in artifact can be built on another host. Preserve its
           # actual toolchain provenance while requiring the same producer and
           # byte-identical output as this independent Linux build.
-          bundled=r/inst/js/stanc.js.src
-          built=browser-compilers/stanli-compiler.js.stamp
-          recorded() { _stanc_embed_stamp_value "$bundled" "$1"; }
-          for key in format stanc3_src_repo stanc3_src_sha ocaml_version \
-                     js_of_ocaml_version producer_inputs_sha256 \
-                     dune_profile dune_subst; do
-            [ -n "$(recorded "$key")" ]
-            [ "$(recorded "$key")" = \
-              "$(_stanc_embed_stamp_value "$built" "$key")" ]
-          done
-          [ "$(recorded ocaml_version)" = "$OCAML_VERSION" ]
-          [ "$(recorded js_of_ocaml_version)" = 6.4.1 ]
-          for key in opam_switch ocaml_target dune_version; do
-            [ -n "$(recorded "$key")" ]
-          done
-          sha=$(sha256sum r/inst/js/stanc.js | cut -d' ' -f1)
-          [ "$(recorded artifact_sha256)" = "$sha" ]
+          bash tools/check_bundled_stanc_js.sh \
+            browser-compilers/stanli-compiler.js.stamp
 
       - uses: actions/download-artifact@v4
         with:
@@ -1386,19 +1359,7 @@ jobs:
 
       - name: Check provenance and portable bytes
         run: |
-          while IFS= read -r input; do
-            eol=$(git ls-files --eol -- "$input")
-            printf '%s\n' "$eol"
-            printf '%s\n' "$eol" | grep -Fq 'w/lf'
-          done < <(
-            source tools/stanc_embed/provenance.sh
-            stanli_windows_cli_inputs
-          )
-          test "$(cat windows-compilers/stanc.src)" = "$STANC3_SRC_SHA"
-          source tools/stanc_embed/provenance.sh
-          stanli_windows_cli_artifact_matches \
-            windows-compilers/stanli-compile \
-            "$STANC3_SRC_REPO" "$STANC3_SRC_SHA"
+          bash tools/check_windows_compiler_provenance.sh windows-compilers
           chmod +x windows-compilers/stanc windows-compilers/stanli-compile
           cp windows-compilers/stanc windows-compilers/stanc.exe
           ./windows-compilers/stanc.exe --version
@@ -1512,19 +1473,7 @@ jobs:
 
       - name: Check compiler provenance
         run: |
-          while IFS= read -r input; do
-            eol=$(git ls-files --eol -- "$input")
-            printf '%s\n' "$eol"
-            printf '%s\n' "$eol" | grep -Fq 'w/lf'
-          done < <(
-            source tools/stanc_embed/provenance.sh
-            stanli_windows_cli_inputs
-          )
-          test "$(cat deps/stanc3/stanc.src)" = "$STANC3_SRC_SHA"
-          source tools/stanc_embed/provenance.sh
-          stanli_windows_cli_artifact_matches \
-            deps/stanc3/stanli-compile \
-            "$STANC3_SRC_REPO" "$STANC3_SRC_SHA"
+          bash tools/check_windows_compiler_provenance.sh deps/stanc3
           chmod +x deps/stanc3/stanc deps/stanc3/stanli-compile
           cp deps/stanc3/stanc deps/stanc3/stanc.exe
           ./deps/stanc3/stanc.exe --version
@@ -2266,21 +2215,9 @@ jobs:
       # so the deploy needs the corpus that tools/gen_web_models.py copies
       # into web/models/. Same sparse checkout and cache as the build job.
       - name: Restore posteriordb (models and data only)
-        id: pdb-cache
-        uses: actions/cache@v4
+        uses: ./.github/actions/posteriordb
         with:
-          path: deps/posteriordb
-          key: pdb-lite-${{ env.PDB_SHA }}-2
-      - name: Fetch posteriordb
-        if: steps.pdb-cache.outputs.cache-hit != 'true'
-        run: |
-          tools/with_retry.sh git clone --filter=blob:none --sparse \
-            https://github.com/stan-dev/posteriordb.git deps/posteriordb
-          git -C deps/posteriordb sparse-checkout set \
-            posterior_database/models/stan posterior_database/data/data \
-            posterior_database/posteriors
-          tools/with_retry.sh git -C deps/posteriordb fetch -q origin "$PDB_SHA"
-          git -C deps/posteriordb checkout -q "$PDB_SHA"
+          sha: ${{ env.PDB_SHA }}
       - name: Model catalog
         run: python3 tools/gen_web_models.py
 

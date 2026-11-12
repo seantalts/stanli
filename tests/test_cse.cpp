@@ -245,7 +245,8 @@ static void test_env_disable() {
   std::vector<int> terms;
   const CseStats st = cse(g, fills, terms, {});
   test_unsetenv("STANLI_NO_CSE");
-  expect("disabled by env", st.ops_removed == 0 && g.ops.size() == 3);
+  expect("disabled by env: nothing shared or removed",
+         st.primals_shared == 0 && st.ops_removed == 0 && g.ops.size() == 3);
 }
 
 static void test_gradient_accumulation_order() {

@@ -27,7 +27,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 
 from verify_refs import (ILL_CONDITIONED, KNOWN_GAPS,  # noqa: E402
-                         LOCAL_CORPORA, POINTS, QUARANTINED, SCHEMA,
+                         POINTS, QUARANTINED, SCHEMA,
                          check_model, load_refs, model_files, parse_status,
                          probe_point)
 from cmdstan_ref import (_result_line, point_results,  # noqa: E402
@@ -478,12 +478,10 @@ class LocalCorpusTest(unittest.TestCase):
     """Models carried in the tree, resolved by name before posteriordb."""
 
     def test_every_local_model_is_found_where_it_lives(self):
-        for directory in LOCAL_CORPORA:
-            for stan in sorted(directory.glob("*.stan")):
-                found, data = model_files(stan.stem, {}, REPO / "nonexistent",
-                                          REPO / "nonexistent")
-                self.assertEqual(found, stan)
-                self.assertEqual(data, stan.with_suffix(".json"))
+        for name, case in local_cases().items():
+            found, data = model_files(name, {}, REPO / "nonexistent",
+                                      REPO / "nonexistent")
+            self.assertEqual((found, data), (case.source, case.data))
 
 
 class SharedHeaderWorkTest(unittest.TestCase):

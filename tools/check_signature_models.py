@@ -53,7 +53,6 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 MANIFESTS = (REPO / "tests/function_coverage/builtin_signatures_manifest.json",
              REPO / "tests/function_coverage/density_signatures_manifest.json")
 REFERENCE = REPO / "tests/function_coverage/signature_references.json.gz"
-LEDGER = REPO / "tests/function_coverage/signature_ledger.json"
 POINTS = 3
 # The corpus replay's gate (check_function_models.py).
 GATE = 1e-9
@@ -71,45 +70,14 @@ def run(argv, timeout=600, env=None):
 
 
 def manifest_models(manifest_paths):
-    """name -> (source, manifest hash, function names) per manifest."""
+    """name -> (source, manifest hash) per manifest."""
     models = {}
     for manifest_path in manifest_paths:
         manifest = json.loads(manifest_path.read_text())
         for model in manifest["models"]:
             source = REPO / model["file"]
-            models[source.stem] = (source, model["source_sha256"],
-                                   set(model["functions"]))
+            models[source.stem] = (source, model["source_sha256"])
     return models
-
-
-def load_ledger(models):
-    """Known-divergence entries, keyed by the function name they excuse.
-
-    Mirrors the cross-path ledger: a comparison beyond the gate passes only
-    when the model contains a ledgered function and the error stays within
-    that entry's recorded bound, so a new divergence is still reported.
-    A ledgered name absent from every manifest is stale and fails loudly.
-    """
-    if not LEDGER.exists():
-        return {}
-    ledger = json.loads(LEDGER.read_text())
-    if ledger.get("schema") != 1:
-        raise ValueError("Unknown signature ledger schema")
-    entries = {}
-    for entry in ledger["entries"]:
-        if not entry.get("reason"):
-            raise ValueError(f"ledger entry {entry['name']} needs a reason")
-        if not GATE < entry["bound"] < 1:
-            raise ValueError(f"ledger bound for {entry['name']} must sit "
-                             f"between the {GATE:g} gate and 1")
-        entries[entry["name"]] = float(entry["bound"])
-    known = set().union(*(functions for _, _, functions in
-                          models.values()))
-    stale = sorted(set(entries) - known)
-    if stale:
-        raise ValueError("signature ledger names no generated signature: "
-                         + ", ".join(stale))
-    return entries
 
 
 def checked_source(name, source, manifest_sha):
@@ -215,16 +183,13 @@ def case_of(cases, field, index, label):
     return cases[position - 1]
 
 
-def compare(name, source, manifest_sha, functions, reference, ledger,
-            args):
+def compare(name, source, manifest_sha, reference, args):
     checked_source(name, source, manifest_sha)
     if reference["source_sha256"] != manifest_sha:
         raise ValueError(name + ": coverage changed since its CmdStan "
                          "reference was recorded; re-record with --record")
     if len(reference["points"]) != POINTS:
         raise ValueError(f"{name}: expected exactly {POINTS} reference points")
-    excused = {fn: bound for fn, bound in ledger.items() if fn in functions}
-    used = set()
     worst = 0.0
 
     cases = CASE.findall(source.read_text())
@@ -251,25 +216,17 @@ def compare(name, source, manifest_sha, functions, reference, ledger,
                 worst = max(worst, error)
                 if error <= GATE:
                     continue
-                covering = {fn for fn, bound in excused.items()
-                            if error <= bound}
                 label = want["names"][i] if field == "values" else str(i)
                 case = case_of(cases, field, i, label)
                 if case:
                     label += " " + case
-                if not covering:
-                    raise ValueError(
-                        f"{name} point {point} {field}[{label}]: "
-                        f"stanli={a:.17g}, CmdStan={b:.17g}, scaled "
-                        f"error={error:.3g}; the manifest records this "
-                        "model's coverage")
-                used.update(covering)
-                print(f"LEDGER {name} point {point} {field}[{label}] "
-                      f"error={error:.3g} within {', '.join(sorted(covering))}",
-                      flush=True)
+                raise ValueError(
+                    f"{name} point {point} {field}[{label}]: "
+                    f"stanli={a:.17g}, CmdStan={b:.17g}, scaled "
+                    f"error={error:.3g}; the manifest records this "
+                    "model's coverage")
     print(f"PASS {name}: {POINTS} points, lp/gradient/all outputs; "
           f"worst={worst:.3g}", flush=True)
-    return used
 
 
 def main():
@@ -299,7 +256,6 @@ def main():
 
 def replay_all(args):
     models = manifest_models(args.manifest or MANIFESTS)
-    ledger = load_ledger(models)
     if args.model:
         missing = set(args.model) - set(models)
         if missing:
@@ -321,35 +277,24 @@ def replay_all(args):
         raise ValueError("models without a recorded CmdStan reference "
                          "(re-record with --record): " + ", ".join(absent))
     failures = []
-    used = set()
 
     def replay(item):
-        name, (source, manifest_sha, functions) = item
+        name, (source, manifest_sha) = item
         try:
-            return compare(name, source, manifest_sha, functions,
-                           references["models"][name], ledger, args), None
+            compare(name, source, manifest_sha, references["models"][name],
+                    args)
+            return None
         except (RuntimeError, ValueError) as error:
             print("FAIL", error, flush=True)
-            return set(), str(error)
+            return str(error)
 
     # Each model spends most of its wall time compiling and lowering, so
     # replay models in parallel too (each also runs its points in parallel).
     with concurrent.futures.ThreadPoolExecutor(
             max_workers=max(1, args.jobs // POINTS)) as pool:
-        for entry_names, failure in pool.map(replay,
-                                             sorted(models.items())):
-            used |= entry_names
+        for failure in pool.map(replay, sorted(models.items())):
             if failure is not None:
                 failures.append(failure)
-    # A complete replay that needed none of an entry's allowance shows the
-    # divergence is gone; the obsolete entry must be removed, mirroring the
-    # conformance baseline's policy-improvement ratchet.
-    if not args.model and not args.manifest and not failures:
-        obsolete = sorted(set(ledger) - used)
-        if obsolete:
-            failures.append("obsolete signature ledger entries: "
-                            + ", ".join(obsolete))
-            print("FAIL", failures[-1], flush=True)
     if failures:
         return 1
     print(f"All {len(models)} signature models passed.")

@@ -4221,26 +4221,6 @@ static void expect_extrema_compiled(const std::string& text,
   }
 }
 
-static void expect_extrema_fixture_interp(const std::string& fixture,
-                                          const stanli::DataMap& data,
-                                          const char* what) {
-  using namespace stanli;
-  try {
-    CompiledModel cm = compile_model(slurp(fixture), data);
-    if (cm.write_array && cm.write_array->interp &&
-        cm.write_array->truncated.find("expression surface") !=
-            std::string::npos)
-      return;
-    ++failures;
-    std::printf(
-        "FAIL %s: got %s\n", what,
-        cm.write_array ? cm.write_array->truncated.c_str() : "no write_array");
-  } catch (const std::exception& e) {
-    ++failures;
-    std::printf("FAIL %s: fixture did not parse/compile: %s\n", what, e.what());
-  }
-}
-
 static void expect_extrema_fixture_compiled(const std::string& fixture,
                                             const stanli::DataMap& data,
                                             const char* what) {

@@ -115,7 +115,9 @@ static void test_refuses_midchain_reader() {
   // want = p*4 + p*(4+9): the mid-chain reader sees [4, 0], not [4, 9].
 
   Fills f2 = fills;
-  const_fold(g, f2, {r});
+  const ConstFoldStats st = const_fold(g, f2, {r});
+  expect("mid-chain reader refuses the fold",
+         st.ops_removed == 0 && st.slots_folded == 0);
   const std::vector<double> got = run_grad(std::move(g), f2);
   expect_close("mid-chain value", got[0], want[0]);
   expect_close("mid-chain gradient", got[1], want[1]);

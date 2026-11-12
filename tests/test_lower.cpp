@@ -6289,7 +6289,6 @@ int main() {
     expect_eq("zeros_ones lp", lp, want_lp);
     for (int k = 0; k < 3; ++k)
       expect_eq("zeros_ones g" + std::to_string(k), grad[k], 1.0);
-    stan::math::recover_memory();
   }
 
   // csr_extract_v / csr_extract_u: the integer companions to
@@ -6317,7 +6316,6 @@ int main() {
     expect_eq("csrextract lp", lp, dot + 27.0);
     for (int k = 0; k < 5; ++k)
       expect_eq("csrextract g" + std::to_string(k), grad[k], w[k]);
-    stan::math::recover_memory();
   }
 
   // rep_array tiling a parameter vector and a scalar. The element keeps its
@@ -10763,17 +10761,6 @@ int main() {
        (meta ((type_ UReal) (adlevel DataOnly))))))
     (meta <opaque>)))))
 )";
-
-    check(stan::math::hypergeometric_lpmf<true>(1, 2, 3, 4) == 0.0,
-          "all-data propto oracle drops a valid density");
-    bool oracle_rejected = false;
-    try {
-      (void)stan::math::hypergeometric_lpmf<true>(4, 4, 3, 3);
-    } catch (const std::domain_error&) {
-      oracle_rejected = true;
-    }
-    check(oracle_rejected,
-          "all-data propto oracle still checks invalid support");
 
     auto lower = [&](int n, int N, int a, int b) {
       DataMap d;

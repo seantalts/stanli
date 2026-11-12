@@ -56,6 +56,7 @@ r/src/*.so
 r/src/*.dll
 r/*.Rcheck/
 r/*.tar.gz
+r/**/Rplots.pdf
 .claude/worktrees/
 
 # Python bytecode, and the model libraries reference BridgeStan

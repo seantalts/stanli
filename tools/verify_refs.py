@@ -46,18 +46,6 @@ from corpus_inventory import corpus_cases, local_cases, source_digest
 import toolchain
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-# Corpora carried in the tree, each a directory of model.stan next to
-# model.json: programs that once failed to lower (tests/regressions/README.md),
-# brms output for the families and effect
-# structures posteriordb does not contain (tests/brms/README.md), and
-# cogmod's custom brms families for parameter-dependent density branches
-# (tests/cogmod/README.md), ctsem's generic state-space template
-# (tests/ctsem/README.md), and OncoBayes2's dose-escalation model
-# (tests/oncobayes2/README.md). They go through the same oracle as posteriordb,
-# and a reference is keyed on the file name either way.
-LOCAL_CORPORA = (REPO / "tests" / "regressions", REPO / "tests" / "brms",
-                REPO / "tests" / "rethinking", REPO / "tests" / "cogmod",
-                REPO / "tests" / "ctsem", REPO / "tests" / "oncobayes2")
 N_SAMPLER_COLS = 7
 REFS_PATH = REPO / "docs" / "internal" / "artifacts" / "corpus-refs.json.gz"
 # The reference file's format. Bumping this is a hard break on purpose:

@@ -413,11 +413,6 @@ static void solve_case(bool left, SolveKindTag kind, uint16_t opcode, int n,
       " n=" + std::to_string(n) + " k=" + std::to_string(k) +
       " vec=" + std::to_string(vec) + " act=" + std::to_string(activity) +
       " seed=" + std::to_string(seed_val);
-  for (int i = 0; i < outr * outc; ++i)
-    // This legacy gradient oracle promotes both operands to var matrices.
-    // test_solve_forwards separately enforces bitwise values with the exact
-    // activity and vector/matrix types, which can differ from this oracle.
-    check(out.data()[i], result.data()[i].val(), ("solve value" + tag).c_str());
   if (divisor_var)
     for (int i = 0; i < n * n; ++i) {
       const double want = 0.125 + av.data()[i].adj();

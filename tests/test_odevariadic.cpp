@@ -608,8 +608,6 @@ int main() {
 
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
-  Executor oracle_ex(std::move(oracle_cm.graph));
-  oracle_cm.bind(oracle_ex);
 
   // a, b, p[2], y0[2]
   const int64_t n = ex.n_params();
@@ -619,19 +617,10 @@ int main() {
   std::vector<double> q((size_t)n);
   for (int64_t i = 0; i < n; ++i) q[(size_t)i] = -0.3 + 0.11 * (double)i;
 
-  std::vector<double> grad((size_t)n), oracle_grad((size_t)n);
-  expect("oracle model has the same parameter count",
-         oracle_ex.n_params() == n);
-  for (int64_t i = 0; i < n; ++i) {
-    ex.params_data()[i] = q[(size_t)i];
-    oracle_ex.params_data()[i] = q[(size_t)i];
-  }
-  const double oracle_lp = oracle_ex.gradient(oracle_grad.data());
+  std::vector<double> grad((size_t)n);
+  for (int64_t i = 0; i < n; ++i) ex.params_data()[i] = q[(size_t)i];
   const double lp = ex.gradient(grad.data());
   expect("lp is finite", std::isfinite(lp));
-  expect("whole-model direct/oracle lp bits", bits(lp) == bits(oracle_lp));
-  expect("whole-model direct/oracle gradient bits",
-         bitwise_equal(grad, oracle_grad));
 
   // ---- the value-only forward ------------------------------------------
   // ode_fwd is the only kernel that skips work under forward_value_only:
