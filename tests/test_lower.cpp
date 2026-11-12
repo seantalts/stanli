@@ -237,69 +237,25 @@ static const char* kUpfromSliceMir = R"MIR(
  (prog_path upfrom_test.stan))
 )MIR";
 
-static const char* kBetweenSliceMir = R"MIR(
-((functions_block ())
- (input_vars ())
- (log_prob
-  (((pattern
-     (Decl (decl_adtype AutoDiffable) (decl_id v)
-      (decl_type
-       (Sized
-        (SVector AoS
-         ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))))
-      (initialize
-       (Assign
-        ((pattern
-          (FunApp
-           (CompilerInternal
-            (FnReadParam (constrain Identity)
-             (dims
-              (((pattern (Lit Int 3))
-                (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
-             (mem_pattern AoS)))
-           ()))
-         (meta ((type_ UVector) (loc <opaque>) (adlevel AutoDiffable))))))))
-    (meta <opaque>))
-   ((pattern
-     (TargetPE
-      ((pattern
-        (FunApp (StanLib normal_lpdf (FnLpdf false) AoS)
-         (((pattern
-            (Indexed
-             ((pattern (Var v))
-              (meta ((type_ UVector) (loc <opaque>) (adlevel AutoDiffable))))
-             ((Between
-               ((pattern (Lit Int 2))
-                (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
-               ((pattern (Lit Int 3))
-                (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))))
-           (meta ((type_ UVector) (loc <opaque>) (adlevel AutoDiffable))))
-          ((pattern
-            (Promotion
-             ((pattern (Lit Int 0))
-              (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
-             UReal DataOnly))
-           (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly))))
-          ((pattern
-            (Promotion
-             ((pattern (Lit Int 1))
-              (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))
-             UReal DataOnly))
-           (meta ((type_ UReal) (loc <opaque>) (adlevel DataOnly)))))))
-       (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))))
-    (meta <opaque>))))
- (output_vars
-  ((v <opaque>
-    ((out_unconstrained_st
-      (SVector AoS
-       ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
-     (out_constrained_st
-      (SVector AoS
-       ((pattern (Lit Int 3)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly))))))
-     (out_block Parameters) (out_trans Identity)))))
- (prog_name upfrom_test_model)
- (prog_path upfrom_test.stan))
-)MIR";
+static std::string between_slice_mir() {
+  std::string text = kUpfromSliceMir;
+  const std::string upfrom =
+      "((Upfrom\n"
+      "               ((pattern (Lit Int 2))\n"
+      "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
+      "DataOnly))))))))";
+  const size_t at = text.find(upfrom);
+  if (at == std::string::npos) return "";
+  text.replace(at, upfrom.size(),
+               "((Between\n"
+               "               ((pattern (Lit Int 2))\n"
+               "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
+               "DataOnly))))\n"
+               "               ((pattern (Lit Int 3))\n"
+               "                (meta ((type_ UInt) (loc <opaque>) (adlevel "
+               "DataOnly))))))))");
+  return text;
+}
 
 // Returns the parenthesized s-expression starting at or after `start`.
 static std::string read_sexp_at(const std::string& text, size_t start) {
@@ -2703,7 +2659,7 @@ int main() {
   // both on a declared local and on a UDF's unsized formal.
   {
     CompiledModel upfrom_model = compile_model(kUpfromSliceMir, DataMap{});
-    CompiledModel between_model = compile_model(kBetweenSliceMir, DataMap{});
+    CompiledModel between_model = compile_model(between_slice_mir(), DataMap{});
     check(same_graph_structure(upfrom_model, between_model),
           "v[k:] and v[k:N] on a declared vector lower identically");
   }
