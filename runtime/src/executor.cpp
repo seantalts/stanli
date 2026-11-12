@@ -810,9 +810,9 @@ void Executor::run_forward_only(EvalState state) {
   }
   // Unrolled by hand: four separate indirect-call sites predict
   // independently, and the loop bookkeeping amortizes. Measured against a
-  // musttail-chained alternative in tools/bench_dispatch.cpp -- the unroll
-  // won (79-80% of the plain loop vs 85-95%, and no kernel signature
-  // changes), so this is the whole of "threaded dispatch" worth having.
+  // musttail-chained alternative: the unroll won (79-80% of the plain loop
+  // vs 85-95%, and no kernel signature changes), so this is the whole of
+  // "threaded dispatch" worth having.
   const size_t n = fwd_fn_.size();
   size_t i = 0;
   for (; i + 4 <= n; i += 4) {

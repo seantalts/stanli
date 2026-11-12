@@ -1119,7 +1119,6 @@ set_tests_properties(test_bench_opcost_smoke PROPERTIES
 add_executable(hp_adjoint_dump EXCLUDE_FROM_ALL
   tools/hp_adjoint_dump.cpp tests/tbb_stub.cpp)
 target_link_libraries(hp_adjoint_dump PRIVATE stanli)
-add_executable(bench_dispatch tools/bench_dispatch.cpp)
 add_executable(dump_ops tools/dump_ops.cpp
   $<TARGET_OBJECTS:stanli_tbb_stub>)
 target_link_libraries(dump_ops PRIVATE stanli)
