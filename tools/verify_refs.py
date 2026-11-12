@@ -26,10 +26,16 @@ Usage: tools/verify_refs.py PDB_DIR [--check BIN] [--max-rel X]
        tools/verify_refs.py PDB_DIR --wa-headers CMDSTAN_DIR [model ...]
 Exit nonzero if any referenced model fails to run at any point, changes
 shape, or exceeds the gate.
+
+       tools/verify_refs.py --corpus NAME [--model M ...] [--stanc STANC]
+replays one of the local corpora in CORPORA, as CTest does.
 """
+from __future__ import annotations
+
 import argparse
 import collections
 import concurrent.futures
+import dataclasses
 import gzip
 import json
 import math
@@ -39,6 +45,7 @@ import re
 import struct
 import subprocess
 import sys
+import shutil
 import tempfile
 import zipfile
 
@@ -314,8 +321,11 @@ def ulp_distance(a, b):
     return abs(key(ia) - key(ib))
 
 
-def pair_dev(a, b):
+def pair_dev(a, b, floor=1.0):
     """(rel, ulp) for one reference/stanli pair, nonfinite-safe.
+
+    The deviation is scaled by the larger magnitude, or by floor when both
+    are smaller, so values below floor are held to an absolute error.
 
     Both NaN, or the same infinity, is agreement (0, 0). A nonfinite
     value on one side only is an infinite relative deviation: the old
@@ -329,7 +339,7 @@ def pair_dev(a, b):
         return (0.0, 0)
     if not (a - a == 0.0 and b - b == 0.0):
         return (float("inf"), ulp_distance(a, b) if a == a and b == b else 0)
-    scale = max(abs(a), abs(b), 1.0)
+    scale = max(abs(a), abs(b), floor)
     return (abs(a - b) / scale, ulp_distance(a, b))
 
 
@@ -358,18 +368,14 @@ def parse_wa(out):
 
 
 def parse_status(out):
-    """Fields from the final machine-readable result line, or [].
+    """Fields of the final machine-readable result line, or [].
 
-    Stan ``print`` statements in transformed data run before evaluation and
-    can therefore put ordinary output ahead of stanli_check's result.  Keep
-    the three result spellings in one parser so recording and replay do not
-    accidentally treat that output as the result line.
+    stanli_check and ref_driver both print it after any Stan print output,
+    and a user `print("OK ...")` must not shadow it, so read backwards.
     """
-    # The driver writes its result after model output.  Walking backwards
-    # also prevents a user `print("OK ...")` from shadowing the real status.
     for line in reversed(out.splitlines()):
         fields = line.split()
-        if fields and fields[0] in ("OK", "COMPILE_FAIL", "EVAL_FAIL"):
+        if fields and fields[0] in ("OK", "COMPILE_FAIL", "EVAL_FAIL", "DATA_FAIL"):
             return fields
     return []
 
@@ -503,7 +509,7 @@ def fail_detail(proc, got):
 
 
 def probe_point(model, stan, dj, check_bin, point, timeout,
-                fast_math=False):
+                fast_math=False, opts=None):
     """Evaluate a point with no recorded reference. (status, detail).
 
     No CmdStan values means no parity check, so the bar here is only what
@@ -545,7 +551,8 @@ def probe_point(model, stan, dj, check_bin, point, timeout,
     try:
         proc = subprocess.run(
             [str(check_bin), str(stan), str(dj), "--point", str(point)]
-            + (["--fast-math"] if fast_math else []),
+            + (["--fast-math"] if fast_math else [])
+            + (list(opts.args) if opts else []),
             capture_output=True, text=True, cwd=REPO, timeout=timeout)
     except subprocess.TimeoutExpired:
         return ("POINT_TIMEOUT", "")
@@ -570,11 +577,11 @@ def probe_point(model, stan, dj, check_bin, point, timeout,
     return ("OK", "")
 
 
-def worst_pair(rv, gv):
+def worst_pair(rv, gv, floor=1.0):
     """(worst relative deviation, worst ULP distance) over paired values."""
     worst, worst_ulp = 0.0, 0
     for a, b in zip(rv, gv):
-        rel, ulp = pair_dev(a, b)
+        rel, ulp = pair_dev(a, b, floor)
         worst = max(worst, rel)
         worst_ulp = max(worst_ulp, ulp)
     return worst, worst_ulp
@@ -612,7 +619,7 @@ def fast_dev(rv, gv):
 
 
 def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
-                no_lp, strict=False, fast_math=False):
+                no_lp, strict=False, fast_math=False, opts=None):
     """Replay one recorded point. (status, worst, worst_ulp, n, detail).
 
     A point whose entry has no `values` is one CmdStan itself refuses (it
@@ -623,10 +630,15 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
     evaluation threw, or an OK line whose values are all nan. Accepting a
     point CmdStan rejects is a real disagreement, not a free pass -- it is
     the same asymmetry as one engine throwing, read from the other side.
+
+    On a passing point, detail names the values with the worst scaled
+    error and the worst ULP distance, for the gate replay_model applies.
     """
     cmd = [str(check_bin), str(stan), str(dj), "--point", str(point)]
     if fast_math:
         cmd.append("--fast-math")
+    if opts:
+        cmd += list(opts.args)
     want_wa = "values" in pt and not no_wa
     if want_wa:
         cmd.append("--wa-values")
@@ -659,6 +671,14 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         crashed = proc.returncode < 0 or not got
         return ("CRASH" if crashed else "RUN_FAIL", 0.0, 0, 0,
                 f"point {point}: {fail_detail(proc, got)}")
+    if opts and interpreted(proc.stderr) != opts.interpreted:
+        note = next((line for line in proc.stderr.splitlines()
+                     if line.startswith("INTERP ")
+                     or "(interpreted:" in line), "")
+        return ("INTERPRETER", 0.0, 0, 0,
+                f"point {point}: " + (f"runs through the MIR interpreter: "
+                                      f"{note[:200]}" if not opts.interpreted
+                                      else "expected the MIR interpreter"))
     rv = [float(x) for x in pt["values"]]
     gv = [float(x) for x in got[1:]]
     if len(rv) != len(gv):
@@ -676,17 +696,39 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         # the one that can actually catch a bug; tools/verify_lite.py
         # answers it by evaluating both builds at several points.
         rv, gv = rv[1:], gv[1:]
+    floor = opts.scale_floor if opts else 1.0
+    own = opts.value_limits if opts else {}
     if fast_math:
         # Without lp, a zero in its place leaves the gradient as the
         # vector fast_dev scores.
         worst, worst_ulp = fast_dev(*(([0.0] + v) if no_lp else v
                                       for v in (rv, gv)))
     else:
-        worst, worst_ulp = worst_pair(rv, gv)
+        worst, worst_ulp = worst_pair(rv, gv, floor)
+        if own:
+            worst_ulp = worst_pair(*([v for i, v in enumerate(side)
+                                      if i not in own] for side in (rv, gv)),
+                                   floor)[1]
         if model in GRADIENT_AGAINST_LARGEST:
             first = 0 if no_lp else 1
             worst_ulp = max(worst_pair(rv[:first], gv[:first])[1],
                             gradient_ulp(rv[first:], gv[first:]))
+    where = worst_values(rv, gv, floor, own,
+                         lambda i: density_label(i, no_lp, opts))
+    for i, (limit, reason, expected) in own.items():
+        label = density_label(i, no_lp, opts)
+        ulp = pair_dev(rv[i], gv[i], floor)[1]
+        if ulp > limit:
+            return ("ULP_GATE", worst, ulp, len(rv),
+                    f"point {point}: {label} {ulp} ULP, allowed {limit} "
+                    f"({reason})")
+        # The wider limit holds only while an independent value agrees.
+        wa = parse_wa(proc.stdout)
+        want = expected([float(x) for x in wa[1]]) if wa else None
+        if want is None or pair_dev(want, gv[i])[1] > 2:
+            return ("ULP_GATE", worst, ulp, len(rv),
+                    f"point {point}: {label} {gv[i]!r} is not within 2 ULP "
+                    f"of {want!r}")
     n = len(rv)
     if want_wa:
         # The write_array reference: column names must match exactly, and
@@ -704,7 +746,7 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
             return ("WA_FAIL", worst, worst_ulp, n,
                     f"point {point}: no or failed write_array output")
         if "wa" not in pt:
-            return ("OK", worst, worst_ulp, n, "")
+            return ("OK", worst, worst_ulp, n, where)
         names, vals = wa
         if names != pt["wa"]["names"]:
             return ("WA_NAMES_FAIL", worst, worst_ulp, n,
@@ -718,7 +760,7 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         if strict and not all(math.isfinite(x) for x in wref + wgot):
             return ("WA_NONFINITE", worst, worst_ulp, n,
                     f"point {point}: write_array is nonfinite")
-        wworst, wulp = worst_pair(wref, wgot)
+        wworst, wulp = worst_pair(wref, wgot, floor)
         n += len(wref)
         if fast_math:
             # These outputs keep the default gate, so they are judged here
@@ -728,16 +770,52 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                         f"point {point}: write_array {wworst:.2e}, "
                         f"allowed {WA_MAX_REL:.1e}")
         else:
+            columns = names.split(",")
+            wwhere = worst_values(wref, wgot, floor, {},
+                                  lambda i: column_label(columns[i], opts))
+            where = tuple(b if dev > a_dev else a for a, b, a_dev, dev in
+                          zip(where, wwhere, (worst, worst_ulp), (wworst, wulp)))
             worst, worst_ulp = max(worst, wworst), max(worst_ulp, wulp)
-    return ("OK", worst, worst_ulp, n, "")
+    return ("OK", worst, worst_ulp, n, where)
+
+
+def interpreted(stderr):
+    """Did stanli_check report running any part of the model interpreted?"""
+    return any(line.startswith("INTERP ")
+               or (line.startswith("WA ") and "(interpreted:" in line)
+               for line in stderr.splitlines())
+
+
+def density_label(index, no_lp, opts):
+    if index == 0 and not no_lp:
+        return "lp"
+    k = index if not no_lp else index + 1
+    labels = opts.grad_labels if opts else ()
+    return f"grad[{k}]" + (f" {labels[k - 1]}" if k <= len(labels) else "")
+
+
+def column_label(name, opts):
+    case = opts.column_labels.get(name) if opts else None
+    return name + (f" {case}" if case else "")
+
+
+def worst_values(rv, gv, floor, skip, label):
+    """Labels of the values with the worst scaled error and worst ULP."""
+    devs = [(pair_dev(a, b, floor), i) for i, (a, b) in enumerate(zip(rv, gv))
+            if i not in skip]
+    if not devs:
+        return ("", "")
+    rel = max(devs, key=lambda d: d[0][0])[1]
+    ulp = max(devs, key=lambda d: d[0][1])[1]
+    return (label(rel), label(ulp))
 
 
 def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                 no_wa=False, no_lp=False, target_platform=None,
-                fast_math=False):
+                fast_math=False, opts=None):
     """Replay one model, under whatever KNOWN_GAPS says about it."""
     result = replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
-                          no_wa, no_lp, target_platform, fast_math)
+                          no_wa, no_lp, target_platform, fast_math, opts)
     if model not in KNOWN_GAPS:
         return result
     _, status, rel, ulp, total, _, notes = result
@@ -753,7 +831,7 @@ def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
 
 def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                  no_wa=False, no_lp=False, target_platform=None,
-                 fast_math=False):
+                 fast_math=False, opts=None):
     """Replay every point of one model.
 
     Returns (model, status, max_rel, max_ulp, n_values, detail, notes).
@@ -765,8 +843,10 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     The points run sequentially inside one pool task rather than as three
     tasks, because model_files unpacks the shared posteriordb data zip to
     one path per model and three workers writing it at once would race.
+    A local corpus (opts) has its files already and runs them in parallel.
     """
-    stan, dj = model_files(model, ref, pdb, tmp)
+    stan, dj = (opts.source, opts.data) if opts else model_files(model, ref,
+                                                                 pdb, tmp)
     if not stan.exists() or not dj.exists():
         return (model, "MISSING_INPUT", 0.0, 0, 0, str(stan), [])
     for key, path in (("source_sha256", stan), ("data_sha256", dj)):
@@ -775,10 +855,17 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     if model in ULP_LIMITS and not ref.get("recorded", {}).get("platform"):
         return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
                 "ULP-gated fixtures require recording platform provenance", [])
+    if (ref.get("seed", 1234), ref.get("chain", 0)) != (1234, 0):
+        return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
+                "recorded with another RNG seed or chain than stanli_check's",
+                [])
     # Fast mode is not held to the same-platform ULP limits.
-    ulp_limit = None if fast_math else ulp_limit_for(
-        model, ref, target_platform or native_platform())
-    strict = ref.get("strict", False)
+    if opts and opts.ulp is not None:
+        ulp_limit = opts.ulp
+    else:
+        ulp_limit = None if fast_math else ulp_limit_for(
+            model, ref, target_platform or native_platform())
+    strict = ref.get("strict", False) or bool(opts and opts.strict)
     if strict:
         if set(ref.get("points", {})) != {str(p) for p in POINTS}:
             return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
@@ -788,6 +875,15 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
                 return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
                         "lp/gradient and write_array references are required", [])
     worst, worst_ulp, total, notes = 0.0, 0, 0, []
+    done = {}
+    if opts:
+        with concurrent.futures.ThreadPoolExecutor(len(POINTS)) as pool:
+            done = {point: pool.submit(
+                        check_point, model, stan, dj, check_bin, point,
+                        ref["points"][str(point)], timeout, no_wa, no_lp,
+                        strict, fast_math, opts)
+                    for point in POINTS if str(point) in ref["points"]
+                    and (model, point) not in QUARANTINED}
     for point in POINTS:
         pt = ref["points"].get(str(point))
         if (model, point) in QUARANTINED:
@@ -799,23 +895,24 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             notes.append(f"QUARANTINE {model} point {point}: "
                          f"{QUARANTINED[(model, point)]}")
             status, detail = probe_point(model, stan, dj, check_bin, point,
-                                         timeout, fast_math)
+                                         timeout, fast_math, opts)
             if status != "OK":
                 return (model, status, worst, worst_ulp, total,
                         f"point {point}: {detail}", notes)
             continue
         if pt is None:
             status, detail = probe_point(model, stan, dj, check_bin, point,
-                                         timeout, fast_math)
+                                         timeout, fast_math, opts)
             if status != "OK":
                 return (model, status, worst, worst_ulp, total,
                         f"point {point}: {detail}", notes)
             notes.append(f"UNREFERENCED {model} point {point}: ran clean, "
                          f"but nothing compared it against CmdStan")
             continue
-        status, rel, ulp, n, detail = check_point(
-            model, stan, dj, check_bin, point, pt, timeout, no_wa, no_lp, strict,
-            fast_math)
+        status, rel, ulp, n, detail = (
+            done[point].result() if point in done else check_point(
+                model, stan, dj, check_bin, point, pt, timeout, no_wa, no_lp,
+                strict, fast_math))
         total += n
         if status != "OK":
             return (model, status, worst, worst_ulp, total, detail, notes)
@@ -827,11 +924,11 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
         if rel >= gate:
             return (model, "GATE", rel, ulp, total,
                     f"point {point}: {rel:.2e} ({ulp} ulp) over {n} "
-                    f"values, allowed {gate:.1e}", notes)
+                    f"values, allowed {gate:.1e}, worst at {detail[0]}", notes)
         if ulp_limit is not None and ulp > ulp_limit:
             return (model, "ULP_GATE", rel, ulp, total,
                     f"point {point}: {ulp} ULP over {n} values, "
-                    f"allowed {ulp_limit}", notes)
+                    f"allowed {ulp_limit}, worst at {detail[1]}", notes)
         if model in ILL_CONDITIONED and rel >= max_rel:
             notes.append(f"ILL-CONDITIONED {model} point {point}: "
                          f"{ILL_CONDITIONED[model]} ({rel:.2e})")
@@ -959,11 +1056,276 @@ def gate_for(model, pt, default):
         return max(rel * 4.0, 4.0 * 8.2e-3, default)
     return default
 
+# The corpora CTest replays: each is a set of models, one reference archive
+# in the corpus schema, and how to run and gate them. Unlike the corpus
+# above they need no posteriordb checkout.
+FUNCTIONS = REPO / "tests" / "function_coverage"
+FIXTURES = REPO / "tests" / "fixtures"
+EMPTY_DATA = FUNCTIONS / "empty.json"
+SIGNATURE_MANIFESTS = (FUNCTIONS / "builtin_signatures_manifest.json",
+                       FUNCTIONS / "density_signatures_manifest.json")
+# A signature model's case comments, one per case block in order. Case k
+# reads parameter k and writes generated_quantities_result.k.
+SIGNATURE_CASE = re.compile(r"// (\S+\(\S*=>\S+)$", re.MULTILINE)
+
+# Fixtures whose replay must run through the MIR interpreter. The
+# *_fallback twins hold the interpreter path to CmdStan on purpose.
+INTERPRETED = frozenset({
+    "gq_callback_integer_contexts_fallback",
+    "matrix_callback_contexts_fallback", "matrix_callback_geometry_edges",
+    "matrix_callback_value_fallback", "nested_callback_contexts_fallback",
+    "ode_matrix_callback_fallback", "ode_nested_callback_fallback"})
+
+
+def nested_rate_gradient(outputs):
+    gate, rate = outputs[:2]
+    return 3.96 * (2 if gate > 0 else 1) - rate
+
+
+# Values held to their own ULP limit: {model: {value index: (limit, cause,
+# independent value computed from the outputs, which must agree to 2 ULP)}}.
+VALUE_ULP_LIMITS = {
+    name: {2: (16, "the adjoint ODE sensitivity in the combined rate "
+                   "gradient differs by 14-16 ULP; both callback engines "
+                   "agree", nested_rate_gradient)}
+    for name in ("nested_callback_contexts",
+                 "nested_callback_contexts_fallback")}
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class Replay:
+    """How check_point runs and gates one model of a local corpus."""
+    source: pathlib.Path
+    data: pathlib.Path
+    args: tuple = ()
+    interpreted: bool = False
+    ulp: object = None
+    scale_floor: float = 1.0
+    strict: bool = False
+    grad_labels: tuple = ()
+    column_labels: dict = dataclasses.field(default_factory=dict)
+    value_limits: dict = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(frozen=True)
+class Corpus:
+    refs: pathlib.Path
+    # A function of a work directory giving name -> (source, data, gradient
+    # labels[, manifest source hash]); None takes the models from the archive.
+    models: object
+    mir: bool = False
+    ulp: object = None
+    scale_floor: float = 1.0
+    strict: bool = True
+    case_labels: bool = False
+    # Recorded before references carried provenance; nothing ties them to
+    # a pin until they are re-recorded.
+    unpinned: bool = False
+
+
+def own_data(stan, suffix=".json"):
+    data = stan.with_name(stan.stem + suffix)
+    return data if data.exists() else EMPTY_DATA
+
+
+def manifest_models(manifest, directory):
+    def models(_work):
+        listed = json.loads(manifest.read_text())["models"]
+        return {name: (directory / f"{name}.stan",
+                       own_data(directory / f"{name}.stan"),
+                       tuple(entry.get("gradient", ())))
+                for name, entry in listed.items()}
+    return models
+
+
+def signature_models(work):
+    """The generated signature models, checked against their manifests."""
+    sys.path.insert(0, str(REPO / "harnesses"))
+    from function_signature_common import CONTEXT_DATA
+    # Concurrent replays each write their own seed: Windows refuses to
+    # replace a file another process has open.
+    seed = work / "context_seed.json"
+    seed.write_text(json.dumps(CONTEXT_DATA) + "\n")
+    models = {}
+    for manifest in SIGNATURE_MANIFESTS:
+        for model in json.loads(manifest.read_text())["models"]:
+            source = REPO / model["file"]
+            models[source.stem] = (source, seed, (), model["source_sha256"])
+    return models
+
+
+def fixture_models(names):
+    def models(_work):
+        return {name: (FIXTURES / f"{name}.stan",
+                       own_data(FIXTURES / f"{name}.stan"), ())
+                for name in names}
+    return models
+
+
+def replay_models(_work):
+    found = {}
+    for stan in sorted((FIXTURES / "cmdstan_replay").glob("*.stan")):
+        found[stan.stem] = (stan, own_data(stan, ".data.json"), ())
+    stan = FIXTURES / "viewc_zero_length_whole_assignment_resize.stan"
+    found[stan.stem] = (stan, EMPTY_DATA, ())
+    return found
+
+
+def collection_models(collection):
+    def models(_work):
+        return {name: (case.source, case.data, ())
+                for name, case in local_cases().items()
+                if case.collection == collection}
+    return models
+
+
+CORPORA = {
+    "functions": Corpus(FUNCTIONS / "references.json.gz",
+                        manifest_models(FUNCTIONS / "manifest.json",
+                                        FUNCTIONS)),
+    # Library functions at sizes the unit-extent signature models cannot
+    # reach: ordering and ties, rectangular algebra, zero extents, GLMs.
+    "sized_functions": Corpus(FUNCTIONS / "sized_functions_references.json.gz",
+                              None),
+    "container_flow": Corpus(
+        FUNCTIONS / "container_flow_references.json.gz",
+        manifest_models(FUNCTIONS / "container_flow_manifest.json",
+                        FUNCTIONS / "container_flow")),
+    "signatures": Corpus(FUNCTIONS / "signature_references.json.gz",
+                         signature_models, case_labels=True),
+    "fixtures": Corpus(FIXTURES / "references.json.gz", None, mir=True,
+                       ulp=10),
+    # Lowering rewrites that only stock stanc's --O1 MIR reaches, so these
+    # also run with --stanc. isclose(rel 1e-9, abs 1e-12): the scaled
+    # error with values below 1e-3 held to an absolute 1e-12.
+    "cmdstan_replay": Corpus(FIXTURES / "cmdstan_replay" / "references.json.gz",
+                             replay_models, scale_floor=1e-3, strict=False,
+                             unpinned=True),
+    "oncobayes2": Corpus(REFS_PATH, collection_models("oncobayes2"),
+                         strict=False),
+}
+
+
+def load_corpus_refs(corpus):
+    models, recorded = load_refs(corpus.refs)
+    return ({model: {**ref, "recorded": ref.get("recorded", recorded)}
+             for model, ref in models.items()}, recorded)
+
+
+PINS = (("cmdstan", "CMDSTAN_SHA"), ("stan", "STAN_SHA"),
+        ("math", "MATH_SHA"), ("stanc3", "STANC3_SRC_SHA"))
+
+
+def pin_drift(recorded, required=("cmdstan", "stan", "math")):
+    """Why a recording no longer matches deps/pins.env, or "".
+
+    A reference describes one CmdStan build; after a pin bump it must be
+    re-recorded rather than replayed against a toolchain nobody pins.
+    """
+    pins = toolchain.pins()
+    for key, pin in PINS:
+        if key not in recorded:
+            if key in required:
+                return f"recorded without its {key} revision"
+        elif recorded[key] != pins[pin]:
+            return (f"recorded against {key} {recorded[key][:12]}, "
+                    f"deps/pins.env pins {pins[pin][:12]}; re-record it")
+    return ""
+
+
+def replay_corpus(name, selected, check_bin, stanc, jobs, timeout):
+    """Replay a local corpus against its archive. Exit status."""
+    corpus = CORPORA[name]
+    refs, _ = load_corpus_refs(corpus)
+    with tempfile.TemporaryDirectory(prefix=f"stanli_{name}_") as tmp:
+        work = pathlib.Path(tmp)
+        models = (corpus.models(work) if corpus.models
+                  else fixture_models(sorted(refs))(work))
+        missing = sorted(set(models) - set(refs))
+        if missing:
+            print("no reference recorded for: " + " ".join(missing))
+            return 2
+        if corpus.refs != REFS_PATH and set(refs) != set(models):
+            print("references for models the corpus no longer has: "
+                  + " ".join(sorted(set(refs) - set(models))))
+            return 2
+        unknown = sorted(set(selected) - set(models))
+        if unknown:
+            print(f"not in the {name} corpus: " + " ".join(unknown))
+            return 2
+        if stanc and corpus.mir:
+            print(f"the {name} corpus replays its build-generated MIR")
+            return 2
+        failures, values = [], 0
+
+        def one(model):
+            source, data, labels, *manifest = models[model]
+            ref = refs[model]
+            drift = pin_drift(ref["recorded"], () if corpus.unpinned else
+                              ("cmdstan", "stan", "math"))
+            if drift or "data_sha256" not in ref:
+                return (model, "REFERENCE_INCOMPLETE", 0.0, 0, 0,
+                        drift or "no data_sha256", [])
+            if manifest and source.exists() and source_digest(source) != manifest[0]:
+                return (model, "STALE_SOURCE", 0.0, 0, 0,
+                        f"{source} disagrees with its manifest; rerun the "
+                        "signature generators", [])
+            if not source.exists():
+                return (model, "MISSING_INPUT", 0.0, 0, 0,
+                        f"{source} is not generated yet; build the "
+                        "stanli_signature_models target", [])
+            args = ()
+            if corpus.mir:
+                args = ("--mir", str(source.with_suffix(".tmir.sexp")))
+            elif stanc:
+                # Stock stanc writes the model's C++ beside its source.
+                copy = work / "stanc" / model / source.name
+                copy.parent.mkdir(parents=True)
+                shutil.copyfile(source, copy)
+                source, args = copy, ("--stanc", str(stanc))
+            columns = {}
+            if corpus.case_labels:
+                labels = tuple(SIGNATURE_CASE.findall(source.read_text()))
+                columns = {f"generated_quantities_result.{k}": case
+                           for k, case in enumerate(labels, 1)}
+            opts = Replay(source, data, args, model in INTERPRETED,
+                          corpus.ulp, corpus.scale_floor, corpus.strict,
+                          labels, columns, VALUE_ULP_LIMITS.get(model, {}))
+            return check_model(model, ref, None, check_bin, work, timeout,
+                               1e-9, opts=opts)
+
+        leg = " through stock stanc" if stanc else ""
+        with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
+            for model, status, rel, ulp, n, detail, notes in pool.map(
+                    one, selected or sorted(models)):
+                for note in notes:
+                    print(note)
+                values += n
+                if status != "OK":
+                    failures.append(model)
+                    print(f"{status} {model}{leg} {detail}")
+                else:
+                    print(f"PASS {model}{leg}: {n} values, worst {rel:.2e} "
+                          f"({ulp} ulp)")
+    count = len(selected or models)
+    print(f"\n{count - len(failures)}/{count} {name} models match their "
+          f"CmdStan references{leg} ({values} values compared)")
+    if failures:
+        print(f"{len(failures)} FAILED: " + " ".join(failures))
+        return 1
+    return 0
+
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("pdb", type=pathlib.Path)
+    ap.add_argument("pdb", type=pathlib.Path, nargs="?")
     ap.add_argument("models", nargs="*")
+    ap.add_argument("--corpus", choices=sorted(CORPORA),
+                    help="replay a local corpus instead of the posteriordb one")
+    ap.add_argument("--model", action="append", default=[],
+                    help="with --corpus, replay only this model")
+    ap.add_argument("--stanc", type=pathlib.Path,
+                    help="with --corpus, compile with this stock stanc")
     ap.add_argument("--check", type=pathlib.Path,
                     default=default_check_bin())
     ap.add_argument("--max-rel", type=float, default=None,
@@ -999,6 +1361,14 @@ def main():
     ap.add_argument("--filter", default="", metavar="SUBSTR",
                     help="with --wa-report, select model names containing this")
     args = ap.parse_intermixed_args()
+    if args.corpus:
+        if args.pdb or args.models:
+            ap.error("--corpus takes models with --model")
+        return replay_corpus(args.corpus, args.model, args.check.resolve(),
+                             args.stanc and args.stanc.resolve(), args.jobs,
+                             args.timeout)
+    if args.pdb is None:
+        ap.error("the posteriordb checkout is required without --corpus")
     if args.max_rel is None:
         args.max_rel = FAST_MAX_REL if args.fast_math else 1e-9
 
@@ -1035,6 +1405,12 @@ def main():
     missing = [m for m in models if m not in refs]
     if missing:
         print(f"no reference recorded for: {' '.join(missing)}")
+        return 2
+    drifted = [(m, pin_drift(refs[m]["recorded"])) for m in models]
+    drifted = [(m, why) for m, why in drifted if why]
+    if drifted:
+        for model, why in drifted:
+            print(f"REFERENCE_INCOMPLETE {model} {why}")
         return 2
 
     # Which CmdStan these values came from is part of reading the result:

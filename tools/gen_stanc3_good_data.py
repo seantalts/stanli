@@ -35,7 +35,9 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
-from cmdstan_ref import _result_line, compile_cmd, point_results  # noqa: E402
+from cmdstan_ref import compile_cmd, point_results  # noqa: E402
+from verify_refs import parse_status  # noqa: E402
+import toolchain  # noqa: E402
 
 CORPUS = REPO / "deps" / "stanc3-src" / "test" / "integration" / "good"
 OUT = REPO / "tests" / "stanc3_good" / "data.json.gz"
@@ -56,10 +58,7 @@ def sha256(data):
 
 
 def pinned_sha():
-    for line in (REPO / "deps" / "pins.env").read_text().splitlines():
-        if line.startswith("STANC3_SRC_SHA="):
-            return line.split("=", 1)[1].strip()
-    raise SystemExit("STANC3_SRC_SHA missing from deps/pins.env")
+    return toolchain.pins()["STANC3_SRC_SHA"]
 
 
 def corpus_models():
@@ -156,7 +155,7 @@ def evaluate(exe, data_text, work):
     r = run([exe, path, "--points", ",".join(map(str, POINTS))], RUN_TIMEOUT)
     if r is None:
         return "driver timed out", 0, []
-    head = _result_line(r.stdout)
+    head = parse_status(r.stdout)
     if head[:1] == ["DATA_FAIL"]:
         msg = " ".join(head[1:])
         return re.sub(r"\(in '[^']*/good/", "(in '", msg)[:200], 0, [msg]

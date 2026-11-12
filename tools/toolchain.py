@@ -72,6 +72,18 @@ def git_head(path):
     return _git(path, "rev-parse", "HEAD").strip()
 
 
+def require_stanc3_src(path):
+    """Fail unless the stanc3 source checkout at path is at STANC3_SRC_SHA."""
+    want = pins()["STANC3_SRC_SHA"]
+    try:
+        head = git_head(path)
+    except (OSError, subprocess.CalledProcessError):
+        head = "not a checkout"
+    if head != want:
+        raise SystemExit(f"{path} is at {head}, deps/pins.env wants "
+                         f"STANC3_SRC_SHA={want}")
+
+
 def sha256_file(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 

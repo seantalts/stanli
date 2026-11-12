@@ -15,6 +15,8 @@ what CmdStan actually computes, which is the whole point of the binary.
 import re
 import subprocess
 
+from verify_refs import parse_status
+
 SUNDIALS_LIBS = ("cvodes", "idas", "kinsol", "nvecserial")
 
 
@@ -52,15 +54,6 @@ def _plain(cmd):
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def _result_line(out):
-    """Final machine result, after any Stan print output."""
-    for line in reversed(out.splitlines()):
-        fields = line.split()
-        if fields and fields[0] in ("OK", "COMPILE_FAIL", "EVAL_FAIL", "DATA_FAIL"):
-            return fields
-    return []
-
-
 _POINT_HEADER = re.compile(r"POINT (\d+)")
 
 
@@ -70,7 +63,7 @@ def split_points(out):
     Returns {point: text} in the order the points ran, where text is
     exactly what `--point k` would have printed. A failure that precedes
     every point (COMPILE_FAIL, DATA_FAIL) leaves the result empty; read it
-    with _result_line on the whole output.
+    with parse_status on the whole output.
     """
     blocks, current = {}, None
     for line in out.splitlines(keepends=True):
@@ -84,8 +77,8 @@ def split_points(out):
 
 
 def point_results(out):
-    """{point: result fields} for `--points` output; see _result_line."""
-    return {k: _result_line(text) for k, text in split_points(out).items()}
+    """{point: result fields} for `--points` output; see parse_status."""
+    return {k: parse_status(text) for k, text in split_points(out).items()}
 
 
 def build_reference(cs, workdir, stan, driver, stanc, name="ref", opt="-O1",
@@ -121,8 +114,8 @@ def compare_points(ref_exe, check_bin, stan, data, metric, stanc, n=3,
         ref = run([str(ref_exe), str(data), str(point)])
         got = run([str(check_bin), str(stan), str(data), "--stanc",
                    str(stanc), "--point", str(point)])
-        rf = _result_line(ref.stdout)
-        gf = _result_line(got.stdout)
+        rf = parse_status(ref.stdout)
+        gf = parse_status(got.stdout)
         if rf[:1] == ["OK"] and all(x != x for x in
                                     (float(v) for v in rf[1:])):
             rf = []

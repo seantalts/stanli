@@ -25,6 +25,8 @@ import re
 import subprocess
 import sys
 
+import toolchain
+
 REPO = pathlib.Path(__file__).resolve().parents[1]
 EMPTY = REPO / "tests/function_coverage/empty.json"
 LEDGER = REPO / "tests/stanc3_bad_ledger.json"
@@ -32,22 +34,10 @@ BLOCK = re.compile(r"^  \$ stanc (.*)$")
 EXIT = re.compile(r"^\[exit \d+\]$")
 
 
-def pinned_sha():
-    for line in (REPO / "deps/pins.env").read_text().splitlines():
-        if line.startswith("STANC3_SRC_SHA="):
-            return line.split("=", 1)[1].strip()
-    sys.exit("deps/pins.env has no STANC3_SRC_SHA")
-
-
 def check_pin(src):
     if not (src / "test/integration/bad").is_dir():
         sys.exit(f"{src}/test/integration/bad is missing; run deps/fetch.sh")
-    head = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"],
-                          text=True, capture_output=True)
-    want = pinned_sha()
-    if head.returncode != 0 or head.stdout.strip() != want:
-        sys.exit(f"{src} is at {head.stdout.strip() or '(not a checkout)'}, "
-                 f"not the pinned {want}")
+    toolchain.require_stanc3_src(src)
 
 
 def parse_expected(path):
