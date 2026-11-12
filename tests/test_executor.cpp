@@ -1,5 +1,7 @@
 // Executor forward/backward on a tiny graph: lp = exp(a) + b.
 // Gradient must be {exp(a), 1.0}, value exp(a) + b, both bitwise.
+#include "expect.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -10,14 +12,6 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
-
-static int failures = 0;
-static void expect_eq(const char* what, double got, double want) {
-  if (got != want) {
-    ++failures;
-    std::printf("FAIL %-12s got %.17g want %.17g\n", what, got, want);
-  }
-}
 
 static void expect_i64(const char* what, int64_t got, int64_t want) {
   if (got != want) {
@@ -578,6 +572,5 @@ int main() {
   test_empty_and_dead_idata();
   test_compact_idata_refusal();
 
-  if (failures == 0) std::printf("test_executor OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_executor");
 }

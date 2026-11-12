@@ -1,5 +1,6 @@
 // One-op graphs per density: value and every parameter gradient must match
 // an in-process var-path evaluation of the same call, bitwise.
+#include "expect.hpp"
 #include "graph_helpers.hpp"
 
 #include <stanli/density_registry.hpp>
@@ -15,26 +16,10 @@
 #include <limits>
 #include <type_traits>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
-static int failures = 0;
-static void expect_eq(const std::string& what, double got, double want) {
-  if (got != want) {
-    ++failures;
-    std::printf("FAIL %-32s got %.17g want %.17g\n", what.c_str(), got, want);
-  }
-}
-static void expect_ulp_of_largest(const std::string& what, double got,
-                                  double want, double largest, int64_t bound) {
-  const double spacing = std::nextafter(largest, INFINITY) - largest;
-  if (!(std::abs(got - want) <= (double)bound * spacing)) {
-    ++failures;
-    std::printf("FAIL %-32s got %.17g want %.17g (%.1f ulp of %g)\n",
-                what.c_str(), got, want, std::abs(got - want) / spacing,
-                largest);
-  }
-}
 static void expect_nan(const std::string& what, double got, double want) {
   if (!std::isnan(got) || !std::isnan(want)) {
     ++failures;
@@ -185,23 +170,61 @@ static void check_elt(
     expect_eq(tag + " g" + std::to_string(i), f.grad[i], l.grad[i]);
 }
 
-// Bernoulli's native forwards deliberately replace the generic rvar
-// recorder, so pin their complete contract directly to this checkout's Stan
-// Math. Equality below is bit equality (including signed zero), rather than
-// the numerical equality used by the older density coverage above.
-static void expect_bits(const std::string& what, double got, double want) {
-  if (std::memcmp(&got, &want, sizeof(double)) != 0) {
-    ++failures;
-    std::printf("FAIL %-32s got %.17g want %.17g (bit mismatch)\n",
-                what.c_str(), got, want);
+// Arguments for a reference call: an active input is a var (vector or
+// scalar), an inactive one data, matching the activity the graph gives it.
+struct DensityArgs {
+  using VecV = Eigen::Matrix<stan::math::var, -1, 1>;
+  std::vector<std::vector<double>> vals;
+  std::vector<bool> active;
+  std::vector<VecV> vars;
+  DensityArgs(std::vector<std::vector<double>> v, std::vector<bool> a)
+      : vals(std::move(v)), active(std::move(a)), vars(vals.size()) {
+    for (size_t k = 0; k < vals.size(); ++k)
+      if (active[k]) {
+        vars[k].resize((Eigen::Index)vals[k].size());
+        for (size_t i = 0; i < vals[k].size(); ++i)
+          vars[k]((Eigen::Index)i) = vals[k][i];
+      }
   }
-}
+  void need(int k, bool want_active) const {
+    if (active[(size_t)k] != want_active)
+      throw std::logic_error("reference binds argument " + std::to_string(k) +
+                             " with the wrong activity");
+  }
+  const VecV& v(int k) const { return need(k, true), vars[(size_t)k]; }
+  stan::math::var s(int k) const { return need(k, true), vars[(size_t)k](0); }
+  Eigen::Map<Eigen::VectorXd> d(int k) {
+    need(k, false);
+    return {vals[(size_t)k].data(), (Eigen::Index)vals[(size_t)k].size()};
+  }
+  double x(int k) const { return need(k, false), vals[(size_t)k][0]; }
+};
 
-static void expect_true(const std::string& what, bool got) {
-  if (!got) {
+// One density op through the Executor against `ref`, bitwise: the value and
+// the gradient of every active input, in slot order.
+template <class Ref>
+static void check_density(const std::string& tag, uint16_t opcode,
+                          const std::vector<std::vector<double>>& vals,
+                          const std::vector<bool>& active,
+                          const std::vector<int>& idata, Ref ref) {
+  const auto r = stanli::testutil::run_one_op(opcode, vals, active, idata);
+  DensityArgs args(vals, active);
+  stan::math::var lp = ref(args);
+  lp.grad();
+  expect_eq(tag + " value", r.value, lp.val());
+  size_t g = 0;
+  for (size_t k = 0; k < vals.size(); ++k)
+    if (active[k])
+      for (Eigen::Index i = 0; i < args.vars[k].size(); ++i, ++g)
+        expect_eq(
+            tag + " d" + std::to_string(k) + "[" + std::to_string(i) + "]",
+            r.grad[g], args.vars[k](i).adj());
+  if (g != r.grad.size()) {
     ++failures;
-    std::printf("FAIL %-32s false\n", what.c_str());
+    std::printf("FAIL %s: %zu gradients, checked %zu\n", tag.c_str(),
+                r.grad.size(), g);
   }
+  stan::math::recover_memory();
 }
 
 static stanli::testutil::RunResult run_bernoulli_variant(
@@ -362,11 +385,11 @@ static void check_bernoulli_run(const std::string& tag, uint16_t opcode,
   const auto got = run_bernoulli_variant(opcode, variant, y, theta);
   const auto want =
       run_bernoulli_reference(opcode, variant, y, theta, scalar_outcome);
-  expect_bits(tag + " value", got.value, want.value);
+  expect_eq(tag + " value", got.value, want.value);
   expect_true(tag + " grad size", got.grad.size() == want.grad.size());
   const size_t n = std::min(got.grad.size(), want.grad.size());
   for (size_t i = 0; i < n; ++i)
-    expect_bits(tag + " grad" + std::to_string(i), got.grad[i], want.grad[i]);
+    expect_eq(tag + " grad" + std::to_string(i), got.grad[i], want.grad[i]);
 }
 
 template <bool Logit, bool Propto>
@@ -441,15 +464,15 @@ static void check_bernoulli_elt(const std::string& tag, uint16_t opcode,
   const EltRun got =
       run_elt_fused(opcode, variant, (int64_t)y.size(), {theta}, {true}, y);
   const EltRun want = run_bernoulli_elt_reference(opcode, variant, y, theta);
-  expect_bits(tag + " value", got.value, want.value);
+  expect_eq(tag + " value", got.value, want.value);
   expect_true(tag + " out size", got.out.size() == want.out.size());
   const size_t n_out = std::min(got.out.size(), want.out.size());
   for (size_t i = 0; i < n_out; ++i)
-    expect_bits(tag + " out" + std::to_string(i), got.out[i], want.out[i]);
+    expect_eq(tag + " out" + std::to_string(i), got.out[i], want.out[i]);
   expect_true(tag + " grad size", got.grad.size() == want.grad.size());
   const size_t n_grad = std::min(got.grad.size(), want.grad.size());
   for (size_t i = 0; i < n_grad; ++i)
-    expect_bits(tag + " grad" + std::to_string(i), got.grad[i], want.grad[i]);
+    expect_eq(tag + " grad" + std::to_string(i), got.grad[i], want.grad[i]);
 }
 
 struct CapturedException {
@@ -512,40 +535,40 @@ static void check_bernoulli_scratch_reset(const std::string& tag,
 
   ctx.variant = 0;
   k->forward(ctx);
-  expect_bits(tag + " valid connected", scratch[1], 1.0);
+  expect_eq(tag + " valid connected", scratch[1], 1.0);
 
   ctx.variant = 0x02u;  // explicit inactive, full density
   k->forward(ctx);
-  expect_bits(tag + " inactive partial", scratch[0], 0.0);
-  expect_bits(tag + " inactive connected", scratch[1], 0.0);
+  expect_eq(tag + " inactive partial", scratch[0], 0.0);
+  expect_eq(tag + " inactive connected", scratch[1], 0.0);
   double adj = 0.0;
   ctx.in_adj[0] = Desc{&adj, 1};
   ctx.out_adj = std::numeric_limits<double>::infinity();
   k->backward(ctx);
-  expect_bits(tag + " inactive pullback", adj, 0.0);
+  expect_eq(tag + " inactive pullback", adj, 0.0);
 
   ctx.variant = 0;
   k->forward(ctx);
-  expect_bits(tag + " refill connected", scratch[1], 1.0);
+  expect_eq(tag + " refill connected", scratch[1], 1.0);
   ctx.n_idata = 0;
   k->forward(ctx);
-  expect_bits(tag + " empty value", out, 0.0);
-  expect_bits(tag + " empty partial", scratch[0], 0.0);
-  expect_bits(tag + " empty connected", scratch[1], 0.0);
+  expect_eq(tag + " empty value", out, 0.0);
+  expect_eq(tag + " empty partial", scratch[0], 0.0);
+  expect_eq(tag + " empty connected", scratch[1], 0.0);
   adj = 0.0;
   k->backward(ctx);
-  expect_bits(tag + " empty pullback", adj, 0.0);
+  expect_eq(tag + " empty pullback", adj, 0.0);
 
   ctx.idata = &y;
   ctx.n_idata = 1;
   ctx.variant = 0x81u;  // active propto
   k->forward(ctx);
-  expect_bits(tag + " propto connected", scratch[1], 1.0);
+  expect_eq(tag + " propto connected", scratch[1], 1.0);
   ctx.variant = 0x80u;  // inactive propto drops the only summand
   k->forward(ctx);
-  expect_bits(tag + " dropped value", out, 0.0);
-  expect_bits(tag + " dropped partial", scratch[0], 0.0);
-  expect_bits(tag + " dropped connected", scratch[1], 0.0);
+  expect_eq(tag + " dropped value", out, 0.0);
+  expect_eq(tag + " dropped partial", scratch[0], 0.0);
+  expect_eq(tag + " dropped connected", scratch[1], 0.0);
 }
 
 static void check_scalar_poisson_lcdf() {
@@ -553,8 +576,7 @@ static void check_scalar_poisson_lcdf() {
   const Kernel* kernel = find_kernel(OP_POISSON_LCDF);
   const double inf = std::numeric_limits<double>::infinity();
   auto compare = [](const std::string& label, double a, double b) {
-    if (std::isnan(a) && std::isnan(b)) return;
-    expect_bits(label, a, b);
+    expect_eq_or_both_nan(label, a, b);
   };
   for (int n : {-1, 0, 1, 2, 7, 32, 1000})
     for (double rate :
@@ -694,7 +716,7 @@ static void check_wiener_activity(const std::string& tag,
         expect_eq(gi, grad[i], want.grad[i]);
       } else {
         expect_eq(gi + " scaled", grad[i], seed * unit.grad[i]);
-        expect_ulp_of_largest(gi, grad[i], want.grad[i], largest, 10);
+        expect_ulp_of(gi, grad[i], want.grad[i], largest, 10);
       }
     }
   }
@@ -769,12 +791,338 @@ static void check_wiener_single_evaluation() {
       double largest = 0;
       for (const double g : want.grad) largest = std::max(largest, std::abs(g));
       for (int i = 0; i < 4; ++i)
-        expect_ulp_of_largest(
-            std::string("wiener partials kept from forward") +
-                (scalar ? " scalar " : " ") + (seed == 1.0 ? "" : "weighted ") +
-                std::to_string(i),
-            grad[i], want.grad[(size_t)i], largest, seed == 1.0 ? 0 : 10);
+        expect_ulp_of(std::string("wiener partials kept from forward") +
+                          (scalar ? " scalar " : " ") +
+                          (seed == 1.0 ? "" : "weighted ") + std::to_string(i),
+                      grad[i], want.grad[(size_t)i], largest,
+                      seed == 1.0 ? 0 : 10);
     }
+}
+
+// Shared-cutpoint recorder versus the established nested Stan Math tape.
+// Per-observation cutpoints exercise the deliberately retained fallback.
+static void check_ordered_density(bool array_cuts, bool scalar_location,
+                                  bool propto, double weight, int width,
+                                  bool probit = false, double shift = 0) {
+  using namespace stanli;
+  using stan::math::var;
+  const int n = scalar_location ? 1 : 4;
+  const int nc = array_cuts ? n : 1;
+  std::vector<int> y;
+  for (int i = 0; i < n; ++i) y.push_back(1 + i % (width + 1));
+  auto layout = y;
+  layout.insert(layout.end(),
+                {kVectorizedDensityLayoutMarker, width, array_cuts ? nc : -1});
+  Graph g;
+  const int ls = g.add_slot(n, true), cs = g.add_slot(width * nc, true);
+  const int ws = g.add_slot(1, false), out = g.add_slot(1, false);
+  const int scaled = g.add_slot(1, false);
+  g.add_op(probit ? OP_ORDERED_PROBIT_LPMF : OP_ORDERED_LOGISTIC_LPMF, {ls, cs},
+           out, layout);
+  g.ops.back().variant = propto ? 0x83u : 0;
+  g.add_op(OP_MUL, {out, ws}, scaled);
+  g.result_slot = scaled;
+  Executor ex(std::move(g));
+  ex.value_ptr(ws)[0] = weight;
+  stan::math::nested_rev_autodiff nested;
+  Eigen::Matrix<var, -1, 1> location(n);
+  std::vector<Eigen::Matrix<var, -1, 1>> cuts(nc);
+  for (int i = 0; i < n; ++i)
+    location(i) = ex.param_ptr(ls)[i] = shift - 0.6 + 0.7 * i;
+  for (int j = 0; j < nc; ++j) {
+    cuts[j].resize(width);
+    for (int k = 0; k < width; ++k)
+      cuts[j](k) = ex.param_ptr(cs)[j * width + k] = -1.2 + k + 0.1 * j;
+  }
+  std::vector<double> grad(n + width * nc);
+  const double got = ex.gradient(grad.data());
+  const auto call = [&](const auto& l, const auto& c) {
+    if (probit)
+      return propto ? stan::math::ordered_probit_lpmf<true>(y, l, c)
+                    : stan::math::ordered_probit_lpmf<false>(y, l, c);
+    return propto ? stan::math::ordered_logistic_lpmf<true>(y, l, c)
+                  : stan::math::ordered_logistic_lpmf<false>(y, l, c);
+  };
+  var density;
+  if (array_cuts)
+    density = scalar_location ? call(location(0), cuts) : call(location, cuts);
+  else
+    density =
+        scalar_location ? call(location(0), cuts[0]) : call(location, cuts[0]);
+  var ref = density * weight;
+  stan::math::grad(ref.vi_);
+  expect_eq_or_both_nan("ordered value", got, ref.val());
+  const auto compare_gradient = [&](const char* name, double actual,
+                                    double expected) {
+    // The recorder and var CDF instantiations can differ in the far-tail
+    // approximation's rounding; at +/-30 the observed relative error is
+    // 6e-14. Keep a stricter gate than the 1e-9 external corpus oracle.
+    if (probit && std::isfinite(expected))
+      expect_eq_or_both_nan(
+          name, std::abs(actual - expected) <= 1e-12 * (1 + std::abs(expected)),
+          true);
+    else
+      expect_eq_or_both_nan(name, actual, expected);
+  };
+  for (int i = 0; i < n; ++i)
+    compare_gradient("ordered location", grad[i], location(i).adj());
+  for (int j = 0; j < nc; ++j)
+    for (int k = 0; k < width; ++k)
+      compare_gradient("ordered cutpoint", grad[n + j * width + k],
+                       cuts[j](k).adj());
+
+  // Validation must still run, including after a preceding successful call.
+  if (width > 1) {
+    ex.param_ptr(cs)[1] = ex.param_ptr(cs)[0];
+    bool threw = false;
+    try {
+      ex.gradient(grad.data());
+    } catch (const std::domain_error&) {
+      threw = true;
+    }
+    expect_eq_or_both_nan("ordered invalid cutpoints", threw, true);
+    ex.param_ptr(cs)[1] += 1.0;
+    expect_eq_or_both_nan("ordered recovery after error",
+                          ex.gradient(grad.data()), got);
+  }
+}
+
+// Compare full/proportional values and weighted gradients with the all-var
+// oracle, including simplex boundaries, inactive edges and invalid inputs.
+static void check_multinomial_density() {
+  using namespace stanli;
+  using stan::math::var;
+  for (bool propto : {false, true})
+    for (bool active : {false, true})
+      for (double weight : {1.0, -2.75, 0.0, 1e308, 1e-308,
+                            std::numeric_limits<double>::infinity()})
+        for (const auto& values : std::vector<std::vector<double>>{
+                 {0.2, 0.3, 0.5}, {0.0, 0.5, 0.5}, {1.0}}) {
+          const int n = values.size();
+          std::vector<int> counts(n);
+          for (int i = 0; i < n; ++i) counts[i] = i == 2 ? 4 : i;
+          Graph g;
+          const int theta = g.add_slot(n, active), w = g.add_slot(1, false);
+          const int out = g.add_slot(1, false), scaled = g.add_slot(1, false);
+          g.add_op(OP_MULTINOMIAL_LPMF, {theta}, out, counts);
+          g.ops.back().variant = propto ? 0x80u : 0u;
+          g.add_op(OP_MUL, {out, w}, scaled);
+          g.result_slot = scaled;
+          Executor ex(std::move(g));
+          std::copy(values.begin(), values.end(), ex.value_ptr(theta));
+          ex.value_ptr(w)[0] = weight;
+          std::vector<double> grad(active ? n : 1);
+          const double got = ex.gradient(grad.data());
+          stan::math::nested_rev_autodiff nested;
+          Eigen::Matrix<var, -1, 1> probabilities(n);
+          for (int i = 0; i < n; ++i) probabilities(i) = values[i];
+          var density =
+              propto
+                  ? stan::math::multinomial_lpmf<true>(counts, probabilities)
+                  : stan::math::multinomial_lpmf<false>(counts, probabilities);
+          var ref = density * weight;
+          stan::math::grad(ref.vi_);
+          expect_eq_or_both_nan("multinomial value", got, ref.val());
+          if (active)
+            for (int i = 0; i < n; ++i)
+              expect_eq_or_both_nan("multinomial weighted gradient", grad[i],
+                                    probabilities(i).adj());
+          ex.value_ptr(theta)[0] = -0.1;
+          bool threw = false;
+          try {
+            ex.gradient(grad.data());
+          } catch (const std::domain_error&) {
+            threw = true;
+          }
+          expect_eq_or_both_nan("multinomial invalid simplex", threw, true);
+        }
+}
+
+static void check_dirichlet_recorder() {
+  using namespace stanli;
+  using stan::math::var;
+  for (unsigned mask : {0u, 1u, 2u, 3u})
+    for (bool propto : {false, true})
+      for (bool arrays : {false, true})
+        for (double weight : {1.0, -2.75, 0.0}) {
+          constexpr int width = 3;
+          const int n = arrays ? 2 : 1;
+          Graph g;
+          const int t = g.add_slot(width * n, true),
+                    a = g.add_slot(width, true);
+          const int w = g.add_slot(1, false), lp = g.add_slot(1, false);
+          const int scaled = g.add_slot(1, false);
+          g.add_op(OP_DIRICHLET_LPDF, {t, a}, lp, {width, arrays ? n : -1, -1});
+          g.ops.back().variant = 0x40u | mask | (propto ? 0x80u : 0u);
+          g.add_op(OP_MUL, {lp, w}, scaled);
+          g.result_slot = scaled;
+          Executor ex(std::move(g));
+          ex.value_ptr(w)[0] = weight;
+          stan::math::nested_rev_autodiff nested;
+          std::vector<Eigen::Matrix<var, -1, 1>> tv(n);
+          std::vector<Eigen::VectorXd> td(n);
+          Eigen::Matrix<var, -1, 1> av(width);
+          Eigen::VectorXd ad(width);
+          for (int j = 0; j < n; ++j) {
+            tv[j].resize(width);
+            td[j].resize(width);
+            for (int k = 0; k < width; ++k)
+              tv[j](k) = td[j](k) = ex.param_ptr(t)[j * width + k] =
+                  (k + 1) / 6.0;
+          }
+          for (int k = 0; k < width; ++k)
+            av(k) = ad(k) = ex.param_ptr(a)[k] = 0.5 + k;
+          var density = 0.0;
+          const auto call = [&](const auto& theta, const auto& alpha) {
+            density = propto ? stan::math::dirichlet_lpdf<true>(theta, alpha)
+                             : stan::math::dirichlet_lpdf<false>(theta, alpha);
+          };
+          const auto alpha = [&](const auto& theta) {
+            if (mask & 2u)
+              call(theta, av);
+            else
+              call(theta, ad);
+          };
+          if (!(propto && mask == 0)) {
+            if (mask & 1u) {
+              if (arrays)
+                alpha(tv);
+              else
+                alpha(tv[0]);
+            } else {
+              if (arrays)
+                alpha(td);
+              else
+                alpha(td[0]);
+            }
+          }
+          var ref = density * weight;
+          stan::math::grad(ref.vi_);
+          std::vector<double> grad(width * (n + 1));
+          expect_eq_or_both_nan("dirichlet recorder value",
+                                ex.gradient(grad.data()), ref.val());
+          for (int j = 0; j < n; ++j)
+            for (int k = 0; k < width; ++k)
+              expect_eq_or_both_nan("dirichlet recorder theta",
+                                    grad[j * width + k], tv[j](k).adj());
+          for (int k = 0; k < width; ++k)
+            expect_eq_or_both_nan("dirichlet recorder alpha",
+                                  grad[n * width + k], av(k).adj());
+          if (!(propto && mask == 0)) {
+            ex.param_ptr(a)[0] = -1;
+            bool threw = false;
+            try {
+              ex.gradient(grad.data());
+            } catch (const std::domain_error&) {
+              threw = true;
+            }
+            expect_eq_or_both_nan("dirichlet recorder validation", threw, true);
+            ex.param_ptr(a)[0] = 0.5;
+            expect_eq_or_both_nan("dirichlet recorder error recovery",
+                                  ex.gradient(grad.data()), ref.val());
+          }
+        }
+}
+
+static void check_probit_alias() {
+  using namespace stanli;
+  using stan::math::var;
+  for (double weight : {1.0, -2.75, 0.0}) {
+    Graph g;
+    const int input = g.add_slot(3, true), w = g.add_slot(1, false);
+    const int lp = g.add_slot(1, false), scaled = g.add_slot(1, false);
+    const std::vector<int> outcomes{1, 2, 4};
+    g.add_op(OP_ORDERED_PROBIT_LPMF, {input, input}, lp,
+             {1, 2, 4, kVectorizedDensityLayoutMarker, 3, -1});
+    g.add_op(OP_MUL, {lp, w}, scaled);
+    g.result_slot = scaled;
+    Executor ex(std::move(g));
+    ex.value_ptr(w)[0] = weight;
+    stan::math::nested_rev_autodiff nested;
+    Eigen::Matrix<var, -1, 1> locations(3), cuts(3);
+    for (int i = 0; i < 3; ++i)
+      locations(i) = cuts(i) = ex.param_ptr(input)[i] = -1.0 + 1.5 * i;
+    // Bind independent copies, matching the legacy kernel's two input edges,
+    // then scatter both into the aliased caller slot.
+    for (int i = 0; i < 3; ++i) cuts(i) = cuts(i).val();
+    var ref =
+        stan::math::ordered_probit_lpmf(outcomes, locations, cuts) * weight;
+    stan::math::grad(ref.vi_);
+    double gradient[3];
+    expect_eq_or_both_nan("probit aliased value", ex.gradient(gradient),
+                          ref.val());
+    for (int i = 0; i < 3; ++i) {
+      const double expected = locations(i).adj() + cuts(i).adj();
+      expect_eq_or_both_nan(
+          "probit aliased gradient",
+          std::abs(gradient[i] - expected) <= 1e-12 * (1 + std::abs(expected)),
+          true);
+    }
+  }
+}
+
+static void check_wiener_fixed_observation() {
+  using namespace stanli;
+  using stan::math::var;
+  for (bool propto : {false, true})
+    for (int active_mask = 0; active_mask < 4; ++active_mask)
+      for (double weight : {1.0, -2.75, 0.0, 1e308, 1e-308,
+                            std::numeric_limits<double>::infinity()})
+        for (double y : {0.201, 0.8, 2.0}) {
+          Graph g;
+          std::vector<int> slots;
+          for (int i = 0; i < 5; ++i)
+            slots.push_back(g.add_slot(1, i == 0   ? (active_mask & 1)
+                                          : i == 3 ? (active_mask & 2)
+                                                   : true));
+          const int w = g.add_slot(1, false), lp = g.add_slot(1, false),
+                    scaled = g.add_slot(1, false);
+          g.add_op(OP_WIENER_LPDF,
+                   {slots[0], slots[1], slots[2], slots[3], slots[4]}, lp);
+          g.ops.back().variant = propto ? 0x9fu : 0x1fu;
+          g.add_op(OP_MUL, {lp, w}, scaled);
+          g.result_slot = scaled;
+          Executor ex(std::move(g));
+          const double vals[] = {y, 1.4, 0.2, 0.35, -0.4};
+          for (int i = 0; i < 5; ++i) ex.value_ptr(slots[i])[0] = vals[i];
+          ex.value_ptr(w)[0] = weight;
+          stan::math::nested_rev_autodiff nested;
+          var v[5];
+          for (int i = 0; i < 5; ++i) v[i] = vals[i];
+          var ref = (propto ? stan::math::wiener_lpdf<true>(v[0], v[1], v[2],
+                                                            v[3], v[4])
+                            : stan::math::wiener_lpdf<false>(v[0], v[1], v[2],
+                                                             v[3], v[4])) *
+                    weight;
+          stan::math::grad(ref.vi_);
+          std::vector<double> grad(ex.n_params());
+          const double got = ex.gradient(grad.data());
+          expect_eq_or_both_nan("wiener value", got, ref.val());
+          int at = 0;
+          for (int i = 0; i < 5; ++i) {
+            if ((i == 0 && !(active_mask & 1)) ||
+                (i == 3 && !(active_mask & 2)))
+              continue;
+            const double want = v[i].adj();
+            if (std::isfinite(want))
+              expect_eq_or_both_nan(
+                  "wiener weighted gradient",
+                  std::abs(grad[at++] - want) <= 1e-12 * (1 + std::abs(want)),
+                  true);
+            else if (!std::isfinite(weight))
+              expect_eq_or_both_nan("wiener nonfinite seed", grad[at++], want);
+            else
+              ++at;
+          }
+          ex.value_ptr(slots[0])[0] = 0.1;
+          bool threw = false;
+          try {
+            ex.gradient(grad.data());
+          } catch (const std::domain_error&) {
+            threw = true;
+          }
+          expect_eq_or_both_nan("wiener validation", threw, true);
+        }
 }
 
 int main() {
@@ -989,66 +1337,44 @@ int main() {
     expect_eq("inv_gamma elt disconnected value", value, value_ref);
   }
 
-  // ---- normal_lpdf(y_pv, mu_ps, sigma_ps): all three parameters ----------
-  {
-    auto r = testutil::run_one_op(OP_NORMAL_LPDF, {ys, {0.25}, {1.4}},
-                                  {true, true, true});
-    Eigen::Matrix<var, -1, 1> vy(N);
-    for (int i = 0; i < N; ++i) vy(i) = ys[i];
-    var vmu = 0.25, vsig = 1.4;
-    var lp = stan::math::normal_lpdf<false>(vy, vmu, vsig);
-    lp.grad();
-    expect_eq("normal ppp value", r.value, lp.val());
-    for (int i = 0; i < N; ++i)
-      expect_eq("normal ppp dy" + std::to_string(i), r.grad[i], vy(i).adj());
-    expect_eq("normal ppp dmu", r.grad[N], vmu.adj());
-    expect_eq("normal ppp dsigma", r.grad[N + 1], vsig.adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- normal_lpdf(y_data, mu_ps, sigma_ps) ------------------------------
-  {
-    auto r = testutil::run_one_op(OP_NORMAL_LPDF, {ys, {0.25}, {1.4}},
-                                  {false, true, true});
-    Eigen::Map<Eigen::VectorXd> ymap(ys.data(), N);
-    var vmu = 0.25, vsig = 1.4;
-    var lp = stan::math::normal_lpdf<false>(ymap, vmu, vsig);
-    lp.grad();
-    expect_eq("normal dpp value", r.value, lp.val());
-    expect_eq("normal dpp dmu", r.grad[0], vmu.adj());
-    expect_eq("normal dpp dsigma", r.grad[1], vsig.adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- normal_lpdf(y_data, mu_pv, sigma_data): vector location -----------
-  {
-    std::vector<double> mus{0.1, -0.2, 0.3, 0.05, -0.6};
-    std::vector<double> sigs{15, 10, 16, 11, 9};
-    auto r = testutil::run_one_op(OP_NORMAL_LPDF, {ys, mus, sigs},
-                                  {false, true, false});
-    Eigen::Map<Eigen::VectorXd> ymap(ys.data(), N);
-    Eigen::Map<Eigen::VectorXd> smap(sigs.data(), N);
-    Eigen::Matrix<var, -1, 1> vmu(N);
-    for (int i = 0; i < N; ++i) vmu(i) = mus[i];
-    var lp = stan::math::normal_lpdf<false>(ymap, vmu, smap);
-    lp.grad();
-    expect_eq("normal dpd value", r.value, lp.val());
-    for (int i = 0; i < N; ++i)
-      expect_eq("normal dpd dmu" + std::to_string(i), r.grad[i], vmu(i).adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- cauchy_lpdf(y_ps, 0_data, 5_data) ---------------------------------
-  {
-    auto r = testutil::run_one_op(OP_CAUCHY_LPDF, {{2.3}, {0.0}, {5.0}},
-                                  {true, false, false});
-    var vt = 2.3;
-    var lp = stan::math::cauchy_lpdf<false>(vt, 0.0, 5.0);
-    lp.grad();
-    expect_eq("cauchy value", r.value, lp.val());
-    expect_eq("cauchy dy", r.grad[0], vt.adj());
-    stan::math::recover_memory();
-  }
+  // Each density's value and active gradients against the same call with
+  // the same activity.
+  check_density("normal ppp", OP_NORMAL_LPDF, {ys, {0.25}, {1.4}},
+                {true, true, true}, {}, [](DensityArgs& a) {
+                  return stan::math::normal_lpdf<false>(a.v(0), a.s(1), a.s(2));
+                });
+  check_density("normal dpp", OP_NORMAL_LPDF, {ys, {0.25}, {1.4}},
+                {false, true, true}, {}, [](DensityArgs& a) {
+                  return stan::math::normal_lpdf<false>(a.d(0), a.s(1), a.s(2));
+                });
+  check_density("normal dpd", OP_NORMAL_LPDF,
+                {ys, {0.1, -0.2, 0.3, 0.05, -0.6}, {15, 10, 16, 11, 9}},
+                {false, true, false}, {}, [](DensityArgs& a) {
+                  return stan::math::normal_lpdf<false>(a.d(0), a.v(1), a.d(2));
+                });
+  check_density("cauchy", OP_CAUCHY_LPDF, {{2.3}, {0.0}, {5.0}},
+                {true, false, false}, {}, [](DensityArgs& a) {
+                  return stan::math::cauchy_lpdf<false>(a.s(0), a.x(1), a.x(2));
+                });
+  check_density("gamma", OP_GAMMA_LPDF, {pos, {2.5}, {1.3}},
+                {false, true, true}, {}, [](DensityArgs& a) {
+                  return stan::math::gamma_lpdf<false>(a.d(0), a.s(1), a.s(2));
+                });
+  check_density("beta", OP_BETA_LPDF, {unit, {2.0}, {3.0}}, {false, true, true},
+                {}, [](DensityArgs& a) {
+                  return stan::math::beta_lpdf<false>(a.d(0), a.s(1), a.s(2));
+                });
+  check_density("poisson_log", OP_POISSON_LOG_LPMF, {{0.2, 0.4, 0.6, 0.8, 1.0}},
+                {true}, {2, 0, 5, 1, 3}, [](DensityArgs& a) {
+                  return stan::math::poisson_log_lpmf<false>(
+                      std::vector<int>{2, 0, 5, 1, 3}, a.v(0));
+                });
+  check_density("bernoulli_logit", OP_BERNOULLI_LOGIT_LPMF,
+                {{0.5, -1.2, 0.3, 2.0, -0.7}}, {true}, {1, 0, 0, 1, 1},
+                [](DensityArgs& a) {
+                  return stan::math::bernoulli_logit_lpmf<false>(
+                      std::vector<int>{1, 0, 0, 1, 1}, a.v(0));
+                });
 
   // ---- student_t_lpdf(y_data, nu_ps, mu_ps, sigma_ps) --------------------
   {
@@ -1075,67 +1401,6 @@ int main() {
     expect_eq("student_t allvar dnu", r.grad[0], wnu.adj());
     expect_eq("student_t allvar dmu", r.grad[1], wmu.adj());
     expect_eq("student_t allvar dsigma", r.grad[2], wsig.adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- gamma_lpdf(y_data, alpha_ps, beta_ps) -----------------------------
-  {
-    auto r = testutil::run_one_op(OP_GAMMA_LPDF, {pos, {2.5}, {1.3}},
-                                  {false, true, true});
-    Eigen::Map<Eigen::VectorXd> ymap(pos.data(), N);
-    var va = 2.5, vb = 1.3;
-    var lp = stan::math::gamma_lpdf<false>(ymap, va, vb);
-    lp.grad();
-    expect_eq("gamma value", r.value, lp.val());
-    expect_eq("gamma dalpha", r.grad[0], va.adj());
-    expect_eq("gamma dbeta", r.grad[1], vb.adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- beta_lpdf(y_data, alpha_ps, beta_ps) ------------------------------
-  {
-    auto r = testutil::run_one_op(OP_BETA_LPDF, {unit, {2.0}, {3.0}},
-                                  {false, true, true});
-    Eigen::Map<Eigen::VectorXd> ymap(unit.data(), N);
-    var va = 2.0, vb = 3.0;
-    var lp = stan::math::beta_lpdf<false>(ymap, va, vb);
-    lp.grad();
-    expect_eq("beta value", r.value, lp.val());
-    expect_eq("beta dalpha", r.grad[0], va.adj());
-    expect_eq("beta dbeta", r.grad[1], vb.adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- poisson_log_lpmf(n_idata; alpha_pv) -------------------------------
-  {
-    std::vector<double> alpha{0.2, 0.4, 0.6, 0.8, 1.0};
-    auto r = testutil::run_one_op(OP_POISSON_LOG_LPMF, {alpha}, {true},
-                                  {2, 0, 5, 1, 3});
-    std::vector<int> n{2, 0, 5, 1, 3};
-    Eigen::Matrix<var, -1, 1> va(N);
-    for (int i = 0; i < N; ++i) va(i) = alpha[i];
-    var lp = stan::math::poisson_log_lpmf<false>(n, va);
-    lp.grad();
-    expect_eq("poisson_log value", r.value, lp.val());
-    for (int i = 0; i < N; ++i)
-      expect_eq("poisson_log da" + std::to_string(i), r.grad[i], va(i).adj());
-    stan::math::recover_memory();
-  }
-
-  // ---- bernoulli_logit_lpmf(y_idata; alpha_pv) ---------------------------
-  {
-    std::vector<double> alpha{0.5, -1.2, 0.3, 2.0, -0.7};
-    auto r = testutil::run_one_op(OP_BERNOULLI_LOGIT_LPMF, {alpha}, {true},
-                                  {1, 0, 0, 1, 1});
-    std::vector<int> y{1, 0, 0, 1, 1};
-    Eigen::Matrix<var, -1, 1> va(N);
-    for (int i = 0; i < N; ++i) va(i) = alpha[i];
-    var lp = stan::math::bernoulli_logit_lpmf<false>(y, va);
-    lp.grad();
-    expect_eq("bernoulli_logit value", r.value, lp.val());
-    for (int i = 0; i < N; ++i)
-      expect_eq("bernoulli_logit da" + std::to_string(i), r.grad[i],
-                va(i).adj());
     stan::math::recover_memory();
   }
 
@@ -1327,10 +1592,10 @@ int main() {
                                                          : "bernoulli_logit") +
                      " empty scaled value",
                  got.value, result_ref.val());
-      expect_bits(std::string(opcode == OP_BERNOULLI_LPMF ? "bernoulli"
-                                                          : "bernoulli_logit") +
-                      " empty scaled grad",
-                  got.grad[0], theta_ref.adj());
+      expect_eq(std::string(opcode == OP_BERNOULLI_LPMF ? "bernoulli"
+                                                        : "bernoulli_logit") +
+                    " empty scaled grad",
+                got.grad[0], theta_ref.adj());
       stan::math::recover_memory();
     }
 
@@ -1416,109 +1681,53 @@ int main() {
   // overload, which is why each one is pinned rather than just the vector
   // case.
   {
-    using stan::math::var;
-    using VecV = Eigen::Matrix<var, -1, 1>;
     const std::vector<double> th3{0.2, 0.5, 0.75};
     const std::vector<double> a3{2.0, 3.0, 4.0};
     const std::vector<double> b3{1.3, 1.4, 1.5};
-    auto vec = [](const std::vector<double>& v) {
-      VecV x((Eigen::Index)v.size());
-      for (size_t i = 0; i < v.size(); ++i) x((Eigen::Index)i) = v[i];
-      return x;
-    };
     auto ivec = [](std::vector<int> v) {
       Eigen::VectorXi x((Eigen::Index)v.size());
       for (size_t i = 0; i < v.size(); ++i) x((Eigen::Index)i) = v[i];
       return x;
     };
     // Both groups vectors.
-    {
-      auto r = testutil::run_one_op(OP_BINOMIAL_LCDF, {th3}, {true},
-                                    {3, 1, 2, 3, 3, 5, 7, 9});
-      VecV theta = vec(th3);
-      var lp =
-          stan::math::binomial_lcdf(ivec({1, 2, 3}), ivec({5, 7, 9}), theta);
-      lp.grad();
-      expect_eq("binomial_lcdf vv value", r.value, lp.val());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("binomial_lcdf vv d" + std::to_string(i), r.grad[(size_t)i],
-                  theta(i).adj());
-      stan::math::recover_memory();
-    }
+    check_density("binomial_lcdf vv", OP_BINOMIAL_LCDF, {th3}, {true},
+                  {3, 1, 2, 3, 3, 5, 7, 9}, [&](DensityArgs& a) {
+                    return stan::math::binomial_lcdf(ivec({1, 2, 3}),
+                                                     ivec({5, 7, 9}), a.v(0));
+                  });
     // Scalar outcome against a vector of trials.
-    {
-      auto r = testutil::run_one_op(OP_BINOMIAL_LCDF, {th3}, {true},
-                                    {-1, 3, 3, 5, 7, 9});
-      VecV theta = vec(th3);
-      var lp = stan::math::binomial_lcdf(3, ivec({5, 7, 9}), theta);
-      lp.grad();
-      expect_eq("binomial_lcdf sv value", r.value, lp.val());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("binomial_lcdf sv d" + std::to_string(i), r.grad[(size_t)i],
-                  theta(i).adj());
-      stan::math::recover_memory();
-    }
+    check_density("binomial_lcdf sv", OP_BINOMIAL_LCDF, {th3}, {true},
+                  {-1, 3, 3, 5, 7, 9}, [&](DensityArgs& a) {
+                    return stan::math::binomial_lcdf(3, ivec({5, 7, 9}),
+                                                     a.v(0));
+                  });
     // Both groups scalars, broadcast across the real argument's lanes.
-    {
-      auto r =
-          testutil::run_one_op(OP_BINOMIAL_LCDF, {th3}, {true}, {-1, 3, -1, 9});
-      VecV theta = vec(th3);
-      var lp = stan::math::binomial_lcdf(3, 9, theta);
-      lp.grad();
-      expect_eq("binomial_lcdf ss value", r.value, lp.val());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("binomial_lcdf ss d" + std::to_string(i), r.grad[(size_t)i],
-                  theta(i).adj());
-      stan::math::recover_memory();
-    }
+    check_density(
+        "binomial_lcdf ss", OP_BINOMIAL_LCDF, {th3}, {true}, {-1, 3, -1, 9},
+        [](DensityArgs& a) { return stan::math::binomial_lcdf(3, 9, a.v(0)); });
     // An array of one is a container: it must not be confused with the
     // scalar form, which is what the -1 length exists to distinguish.
-    {
-      auto r = testutil::run_one_op(OP_BINOMIAL_LCCDF, {{0.4}}, {true},
-                                    {1, 2, 1, 7});
-      VecV theta = vec({0.4});
-      var lp = stan::math::binomial_lccdf(ivec({2}), ivec({7}), theta);
-      lp.grad();
-      expect_eq("binomial_lccdf 11 value", r.value, lp.val());
-      expect_eq("binomial_lccdf 11 d0", r.grad[0], theta(0).adj());
-      stan::math::recover_memory();
-    }
+    check_density("binomial_lccdf 11", OP_BINOMIAL_LCCDF, {{0.4}}, {true},
+                  {1, 2, 1, 7}, [&](DensityArgs& a) {
+                    return stan::math::binomial_lccdf(ivec({2}), ivec({7}),
+                                                      a.v(0));
+                  });
     // beta_binomial: the same two groups, then two real arguments.
-    {
-      auto r = testutil::run_one_op(OP_BETA_BINOMIAL_CDF, {a3, b3},
-                                    {true, true}, {3, 1, 2, 3, 3, 5, 7, 9});
-      VecV alpha = vec(a3), beta = vec(b3);
-      var lp = stan::math::beta_binomial_cdf(ivec({1, 2, 3}), ivec({5, 7, 9}),
-                                             alpha, beta);
-      lp.grad();
-      expect_eq("beta_binomial_cdf vv value", r.value, lp.val());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("beta_binomial_cdf vv da" + std::to_string(i),
-                  r.grad[(size_t)i], alpha(i).adj());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("beta_binomial_cdf vv db" + std::to_string(i),
-                  r.grad[(size_t)(3 + i)], beta(i).adj());
-      stan::math::recover_memory();
-    }
-    {
-      auto r = testutil::run_one_op(OP_BETA_BINOMIAL_LCCDF, {a3, b3},
-                                    {true, true}, {-1, 3, -1, 9});
-      VecV alpha = vec(a3), beta = vec(b3);
-      var lp = stan::math::beta_binomial_lccdf(3, 9, alpha, beta);
-      lp.grad();
-      expect_eq("beta_binomial_lccdf ss value", r.value, lp.val());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("beta_binomial_lccdf ss da" + std::to_string(i),
-                  r.grad[(size_t)i], alpha(i).adj());
-      for (int i = 0; i < 3; ++i)
-        expect_eq("beta_binomial_lccdf ss db" + std::to_string(i),
-                  r.grad[(size_t)(3 + i)], beta(i).adj());
-      stan::math::recover_memory();
-    }
+    check_density("beta_binomial_cdf vv", OP_BETA_BINOMIAL_CDF, {a3, b3},
+                  {true, true}, {3, 1, 2, 3, 3, 5, 7, 9}, [&](DensityArgs& a) {
+                    return stan::math::beta_binomial_cdf(
+                        ivec({1, 2, 3}), ivec({5, 7, 9}), a.v(0), a.v(1));
+                  });
+    check_density("beta_binomial_lccdf ss", OP_BETA_BINOMIAL_LCCDF, {a3, b3},
+                  {true, true}, {-1, 3, -1, 9}, [](DensityArgs& a) {
+                    return stan::math::beta_binomial_lccdf(3, 9, a.v(0),
+                                                           a.v(1));
+                  });
   }
 
-  // wiener: every argument vectorizes in the language, and a length-1 slot
-  // must enter stan-math as a scalar (vectors do not broadcast there).
+  // wiener with every argument a vector, through the all-active default
+  // variant. The activity table in check_wiener_single_evaluation holds the
+  // scalar and mixed shapes.
   {
     using stan::math::var;
     using VecV = Eigen::Matrix<var, -1, 1>;
@@ -1560,27 +1769,6 @@ int main() {
                      {nullptr, nullptr, nullptr, nullptr, nullptr},
                      {&y, &a, &t, &b, &d});
       expect_eq("wiener all-vector lp", r.value, lp.val());
-      stan::math::recover_memory();
-    }
-    {
-      VecV y = vec(wy);
-      var a = wa[0], t = wt[0], b = wb[0], d = wd[0];
-      var lp = stan::math::wiener_lpdf<false>(y, a, t, b, d);
-      lp.grad();
-      auto r = grads(
-          "wiener y-vector", {wy, {wa[0]}, {wt[0]}, {wb[0]}, {wd[0]}},
-          {nullptr, &a, &t, &b, &d}, {&y, nullptr, nullptr, nullptr, nullptr});
-      expect_eq("wiener y-vector lp", r.value, lp.val());
-      stan::math::recover_memory();
-    }
-    {
-      var y = wy[0], a = wa[0], t = wt[0], b = wb[0], d = wd[0];
-      var lp = stan::math::wiener_lpdf<false>(y, a, t, b, d);
-      lp.grad();
-      auto r = grads(
-          "wiener scalar", {{wy[0]}, {wa[0]}, {wt[0]}, {wb[0]}, {wd[0]}},
-          {&y, &a, &t, &b, &d}, {nullptr, nullptr, nullptr, nullptr, nullptr});
-      expect_eq("wiener scalar lp", r.value, lp.val());
       stan::math::recover_memory();
     }
   }
@@ -1794,48 +1982,21 @@ int main() {
     }
   }
 
-  // The plan choke point must refuse parameter-dependent input outside a
-  // fixed activity mask rather than let a kernel drop its partial silently.
-  // Every backend builds its plan here, so this one guard covers them all.
-  {
-    using namespace stanli;
-    DensitySpec spec;
-    spec.opcode = OP_LKJ_CORR_LPDF;
-    spec.arity = 2;
-    spec.integer_args = 0;
-    spec.shape = DensityShape::FirstMatrixRows;
-    spec.activity_mask = 0x1;
-    std::vector<DensityCallArgument> args(2);
-    args[0].shape.container = FunctionContainerKind::Matrix;
-    args[0].shape.dimensions = {2, 2};
-    args[0].shape.storage_size = 4;
-    args[0].data_only = false;
-    args[0].active = true;
-    args[1].shape.container = FunctionContainerKind::Scalar;
-    args[1].scalar = true;
-    args[1].data_only = false;
-    args[1].active = true;  // outside the 0x1 mask: must refuse
-    bool threw = false;
-    try {
-      density_call_plan(spec, args, false);
-    } catch (const std::invalid_argument&) {
-      threw = true;
-    }
-    if (!threw) {
-      ++failures;
-      std::printf("FAIL activity guard: out-of-mask activity was planned\n");
-    }
-    args[1].data_only = true;
-    args[1].active = false;  // within the mask: must still plan
-    try {
-      density_call_plan(spec, args, false);
-    } catch (const std::exception& error) {
-      ++failures;
-      std::printf("FAIL activity guard: in-mask plan threw: %s\n",
-                  error.what());
-    }
-  }
-
-  if (failures == 0) std::printf("test_densities OK\n");
-  return failures == 0 ? 0 : 1;
+  for (bool array_cuts : {false, true})
+    for (bool scalar_location : {false, true})
+      for (bool propto : {false, true})
+        for (double weight : {1.0, -2.75, 0.0})
+          for (int width : {0, 1, 3}) {
+            check_ordered_density(array_cuts, scalar_location, propto, weight,
+                                  width);
+            if (width)
+              for (double shift : {-30.0, 0.0, 30.0})
+                check_ordered_density(array_cuts, scalar_location, propto,
+                                      weight, width, true, shift);
+          }
+  check_multinomial_density();
+  check_dirichlet_recorder();
+  check_probit_alias();
+  check_wiener_fixed_observation();
+  return finish("test_densities");
 }

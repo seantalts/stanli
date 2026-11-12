@@ -1,6 +1,8 @@
 // Constraint transform ops: constrained value, log-jacobian, and gradient
 // (through both the constrained value and the jacobian) vs stan-math's
 // *_constrain var path.
+#include "expect.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -8,14 +10,6 @@
 #include <cstdio>
 #include <limits>
 #include <string>
-
-static int failures = 0;
-static void expect_eq(const std::string& what, double got, double want) {
-  if (got != want) {
-    ++failures;
-    std::printf("FAIL %-20s got %.17g want %.17g\n", what.c_str(), got, want);
-  }
-}
 
 // Graph: lp = sum(constrained) + jac  (sum via dot with ones through
 // NORMAL-free ops: use OP_ADD_N over a 1-vector? constrained is a vector;
@@ -385,6 +379,5 @@ int main() {
                       hi_shared, jacobian, true);
   }
 
-  if (failures == 0) std::printf("test_transforms OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_transforms");
 }

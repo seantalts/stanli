@@ -69,32 +69,7 @@ jobs:
           [ -n "$rt" ] && [ "$rt" = "$r" ]
 
       - name: Verify the bundled JavaScript compiler provenance
-        run: |
-          source tools/stanc_embed/provenance.sh
-          record=r/inst/js/stanc.js.src
-          recorded() { sed -n "s/^$1=//p" "$record"; }
-          expected_repo=$STANC3_SRC_REPO
-          expected_revision=$STANC3_SRC_SHA
-          actual_sha=$(sha256sum r/inst/js/stanc.js | cut -d' ' -f1)
-
-          [ -n "$expected_repo" ]
-          [ -n "$expected_revision" ]
-          [ "$(recorded format)" = stanli-portable-stancjs-v3 ]
-          [ "$(recorded stanc3_src_repo)" = "$expected_repo" ]
-          [ "$(recorded stanc3_src_sha)" = "$expected_revision" ]
-          # Switch names are local labels; compiler versions below identify the toolchain.
-          [ -n "$(recorded opam_switch)" ]
-          [ "$(recorded ocaml_version)" = \
-            "$OCAML_VERSION" ]
-          [ -n "$(recorded ocaml_target)" ]
-          [ -n "$(recorded dune_version)" ]
-          [ "$(recorded js_of_ocaml_version)" = 6.4.1 ]
-          [ "$(recorded producer_inputs_sha256)" = \
-            "$(stanli_stancjs_inputs_sha256)" ]
-          [ "$(recorded dune_profile)" = release ]
-          [ "$(recorded dune_subst)" = 1 ]
-          [ "$(recorded artifact_sha256)" = "$actual_sha" ]
-          ! grep -a -F -e '%%NAME%%' -e '%%VERSION%%' r/inst/js/stanc.js
+        run: bash tools/check_bundled_stanc_js.sh
 
   check:
     name: ${{ matrix.os }} (${{ matrix.r }})

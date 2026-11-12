@@ -18,6 +18,8 @@
 //    both spellings lowered the way CmdStan reads them.
 // 3. An empty slice never lowers its callee. The fixture's callee rejects,
 //    so a lowering that reached it leaves an OP_REJECT in the graph.
+#include "expect.hpp"
+
 #include <stanli/compile.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
@@ -37,22 +39,6 @@
 #include <vector>
 
 namespace {
-
-int failures = 0;
-
-void expect(const std::string& what, bool ok) {
-  if (!ok) {
-    ++failures;
-    std::printf("FAIL %s\n", what.c_str());
-  }
-}
-
-std::string slurp(const std::string& path) {
-  std::ifstream f(path);
-  std::ostringstream out;
-  out << f.rdbuf();
-  return out.str();
-}
 
 // The same deterministic walk stanli_check uses, so a failure here can be
 // reproduced from the command line against the same fixture.
@@ -115,18 +101,18 @@ void argument_evaluation(bool parallel = false) {
             options.reduce_sum_min_chunk_ns = 0;
             CompiledModel cm = compile_model(mir, data, 1, options);
             if (!in_td)
-              expect(tag + " no effects while lowering", lines.empty());
+              expect_true(tag + " no effects while lowering", lines.empty());
             Executor ex(std::move(cm.graph));
             cm.bind(ex);
             ex.params_data()[0] = 0.25;
             double grad;
             evaluating = true;
-            expect(tag + " finite lp", std::isfinite(ex.gradient(&grad)));
+            expect_true(tag + " finite lp", std::isfinite(ex.gradient(&grad)));
             if (!in_td) {
               const auto first = lines;
               lines.clear();
               ex.gradient(&grad);
-              expect(tag + " effects once per evaluation", lines == first);
+              expect_true(tag + " effects once per evaluation", lines == first);
             }
           } catch (const std::domain_error& e) {
             domain_error = true;
@@ -135,27 +121,30 @@ void argument_evaluation(bool parallel = false) {
             error = e.what();
           }
           set_message_sink(nullptr);
-          expect(tag + " rejection", !error.empty() == (grain == 0 || refuse));
+          expect_true(tag + " rejection",
+                      !error.empty() == (grain == 0 || refuse));
           if (!error.empty()) {
-            expect(tag + " error: " + error,
-                   error.find(refuse ? "shared argument rejected"
-                                     : "grainsize") != std::string::npos);
-            expect(tag + " correct execution phase", evaluating == !in_td);
-            if (!in_td) expect(tag + " runtime domain_error", domain_error);
+            expect_true(tag + " error: " + error,
+                        error.find(refuse ? "shared argument rejected"
+                                          : "grainsize") != std::string::npos);
+            expect_true(tag + " correct execution phase", evaluating == !in_td);
+            if (!in_td)
+              expect_true(tag + " runtime domain_error", domain_error);
           }
           // C++ leaves argument order unspecified; require both evaluations
           // exactly once before entering the partial-sum body or validating.
-          expect(tag + " grain evaluated once",
-                 std::count(lines.begin(), lines.end(),
-                            "grain=" + std::to_string(grain)) == 1);
-          expect(tag + " shared evaluated once",
-                 std::count(lines.begin(), lines.end(), "shared=0.25") == 1);
+          expect_true(tag + " grain evaluated once",
+                      std::count(lines.begin(), lines.end(),
+                                 "grain=" + std::to_string(grain)) == 1);
+          expect_true(
+              tag + " shared evaluated once",
+              std::count(lines.begin(), lines.end(), "shared=0.25") == 1);
           const bool body_runs = n > 0 && grain > 0 && !refuse;
-          expect(tag + " partial body only when required",
-                 lines.size() == (body_runs ? 3u : 2u));
+          expect_true(tag + " partial body only when required",
+                      lines.size() == (body_runs ? 3u : 2u));
           if (body_runs && !lines.empty())
-            expect(tag + " whole-slice bounds",
-                   lines.back() == "partial bounds=1:2");
+            expect_true(tag + " whole-slice bounds",
+                        lines.back() == "partial bounds=1:2");
         }
 }
 
@@ -168,11 +157,11 @@ void shapes_and_overloads(bool parallel = false) {
       compile_model(slurp("tests/fixtures/reduce_sum_shapes.tmir.sexp"),
                     DataMap{}, 1, options);
   if (parallel && thread_safe_build())
-    expect("nested outer reduction retained",
-           count_opcode(cm.graph, OP_REDUCE_SUM) == 2);
+    expect_true("nested outer reduction retained",
+                count_opcode(cm.graph, OP_REDUCE_SUM) == 2);
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
-  expect("shape fixture parameter count", ex.n_params() == 4);
+  expect_true("shape fixture parameter count", ex.n_params() == 4);
   if (ex.n_params() != 4) return;
   for (double scale : {-0.5, 0.0, 1.3}) {
     double total = 0;
@@ -185,10 +174,11 @@ void shapes_and_overloads(bool parallel = false) {
     const double lp = ex.gradient(grad);
     // The independent polynomial oracle is 3*b*sum(z) + 6*b. The tiny
     // absolute tolerance allows the different addition groupings only.
-    expect("nested/overloaded lp", std::abs(lp - b * (3 * total + 6)) < 1e-12);
+    expect_true("nested/overloaded lp",
+                std::abs(lp - b * (3 * total + 6)) < 1e-12);
     for (int i = 0; i < 3; ++i)
-      expect("active sliced gradient", std::abs(grad[i] - 3 * b) < 1e-12);
-    expect("shared gradient", std::abs(grad[3] - (3 * total + 6)) < 1e-12);
+      expect_true("active sliced gradient", std::abs(grad[i] - 3 * b) < 1e-12);
+    expect_true("shared gradient", std::abs(grad[3] - (3 * total + 6)) < 1e-12);
   }
 }
 
@@ -203,8 +193,8 @@ void native_review_regressions() {
       slurp("tests/fixtures/reduce_sum_native_discrete.tmir.sexp");
   auto data = DataMap::from_json("{\"N\":7,\"y\":[0,1,2,3,4,5,6]}");
   auto cm = compile_model(discrete, data, 1, options);
-  expect("integer density two retained sites",
-         count_opcode(cm.graph, OP_REDUCE_SUM) == 2);
+  expect_true("integer density two retained sites",
+              count_opcode(cm.graph, OP_REDUCE_SUM) == 2);
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
   ex.set_reduce_context(&team);
@@ -216,37 +206,39 @@ void native_review_regressions() {
     double grad;
     const double lp = ex.gradient(&grad);
     set_message_sink(nullptr);
-    expect("accepted callback argument effects once",
-           messages == std::vector<std::string>{"shared argument"});
+    expect_true("accepted callback argument effects once",
+                messages == std::vector<std::string>{"shared argument"});
     double normalizer = 0;
     for (int y = 0; y < 7; ++y) normalizer += std::lgamma(y + 1);
     const double expected =
         -.5 * b * b + 2 * (21 * b - 7 * std::exp(b)) - normalizer;
-    expect("integer normalized/propto oracle lp",
-           std::abs(lp - expected) < 1e-11);
-    expect("integer normalized/propto oracle gradient",
-           std::abs(grad - (-b + 2 * (21 - 7 * std::exp(b)))) < 1e-11);
+    expect_true("integer normalized/propto oracle lp",
+                std::abs(lp - expected) < 1e-11);
+    expect_true("integer normalized/propto oracle gradient",
+                std::abs(grad - (-b + 2 * (21 - 7 * std::exp(b)))) < 1e-11);
   }
   const auto bounded =
       slurp("tests/fixtures/reduce_sum_native_bounded.tmir.sexp");
   auto bc = compile_model(bounded, data, 1, options);
-  expect("bounded specialization retains threading option",
-         count_opcode(bc.graph, OP_REDUCE_SUM) == 1);
+  expect_true("bounded specialization retains threading option",
+              count_opcode(bc.graph, OP_REDUCE_SUM) == 1);
   Executor be(std::move(bc.graph));
   bc.bind(be);
   be.set_reduce_context(&team);
   be.params_data()[0] = .2;
   double grad;
-  expect("bounded reduction oracle lp",
-         std::abs(be.gradient(&grad) - (-.5 * 1.4 * 1.4 + 21 * .2)) < 1e-12);
-  expect("bounded reduction oracle grad",
-         std::abs(grad - (-49 * .2 + 21)) < 1e-12);
+  expect_true(
+      "bounded reduction oracle lp",
+      std::abs(be.gradient(&grad) - (-.5 * 1.4 * 1.4 + 21 * .2)) < 1e-12);
+  expect_true("bounded reduction oracle grad",
+              std::abs(grad - (-49 * .2 + 21)) < 1e-12);
   // A forced chunk budget refusal must remain visible to callers.
   options.reduce_sum_max_chunks = 1;
   auto refused = compile_model(bounded, data, 1, options);
-  expect("budget refusal is reported", !refused.reduce_sum_fallbacks.empty());
-  expect("budget refusal is serial",
-         count_opcode(refused.graph, OP_REDUCE_SUM) == 0);
+  expect_true("budget refusal is reported",
+              !refused.reduce_sum_fallbacks.empty());
+  expect_true("budget refusal is serial",
+              count_opcode(refused.graph, OP_REDUCE_SUM) == 0);
 }
 
 void native_lifecycle() {
@@ -265,7 +257,8 @@ void native_lifecycle() {
   } catch (const std::domain_error& e) {
     threw = std::string(e.what()) == "2";
   }
-  expect("team drains and selects first error", threw && jobs.completed == 13);
+  expect_true("team drains and selects first error",
+              threw && jobs.completed == 13);
   threw = false;
   try {
     team.run(1, &team, [](void* state, size_t) {
@@ -274,7 +267,7 @@ void native_lifecycle() {
   } catch (const std::logic_error&) {
     threw = true;
   }
-  expect("team rejects reentry", threw);
+  expect_true("team rejects reentry", threw);
   team.run(0, nullptr, nullptr);
   DataMap data;
   data.set_int("N", 257);
@@ -305,16 +298,16 @@ void native_lifecycle() {
   } catch (const std::domain_error&) {
     threw = true;
   }
-  expect("worker domain error reaches caller", threw);
+  expect_true("worker domain error reaches caller", threw);
   threw = false;
   try {
     ex.reverse(grad, 1);
   } catch (const std::logic_error&) {
     threw = true;
   }
-  expect("failed forward cannot reverse", threw);
+  expect_true("failed forward cannot reverse", threw);
   ex.params_data()[1] = .1;
-  expect("worker recovery", ex.gradient(grad) == good);
+  expect_true("worker recovery", ex.gradient(grad) == good);
   Executor clone(ex);
   ReduceExecutionContext other(2);
   clone.set_reduce_context(&other);
@@ -327,7 +320,7 @@ void native_lifecycle() {
   std::thread a([&] { stress(ex); }), b([&] { stress(clone); });
   a.join();
   b.join();
-  expect("concurrent chains retain private state", same);
+  expect_true("concurrent chains retain private state", same);
   NutsConfig config;
   config.warmup = 10;
   config.samples = 10;
@@ -335,11 +328,11 @@ void native_lifecycle() {
   auto sequential = run_nuts_chains({&ex, &clone}, config, 1);
   auto parallel = run_nuts_chains({&ex, &clone}, config, 2);
   for (size_t i = 0; i < 2; ++i) {
-    expect("threaded NUTS succeeds",
-           sequential[i].error.empty() && parallel[i].error.empty());
-    expect("threaded NUTS repeatability",
-           sequential[i].draws == parallel[i].draws);
-    expect("threaded NUTS draw count", parallel[i].draws.size() == 10);
+    expect_true("threaded NUTS succeeds",
+                sequential[i].error.empty() && parallel[i].error.empty());
+    expect_true("threaded NUTS repeatability",
+                sequential[i].draws == parallel[i].draws);
+    expect_true("threaded NUTS draw count", parallel[i].draws.size() == 10);
   }
 }
 
@@ -361,19 +354,19 @@ void native_corners() {
         auto cm = compile_model(mir, data, 1, options);
         auto ref = compile_model(mir, data);
         const bool retained = !dynamic && grain < 13;
-        expect("corners retain/refuse",
-               count_opcode(cm.graph, OP_REDUCE_SUM) == int(retained));
+        expect_true("corners retain/refuse",
+                    count_opcode(cm.graph, OP_REDUCE_SUM) == int(retained));
         if (!retained) {
-          expect("refusal reason is reported",
-                 !cm.reduce_sum_fallbacks.empty());
+          expect_true("refusal reason is reported",
+                      !cm.reduce_sum_fallbacks.empty());
           std::string a, b;
           GraphPrintInfo ai, bi;
           ai.fills = &cm.fills;
           bi.fills = &ref.fills;
           print_graph(a, cm.graph, ai);
           print_graph(b, ref.graph, bi);
-          expect("refusal preserves graph and fills",
-                 a == b && cm.fills == ref.fills);
+          expect_true("refusal preserves graph and fills",
+                      a == b && cm.fills == ref.fills);
         }
         Executor ex(std::move(cm.graph)), reference(std::move(ref.graph));
         cm.bind(ex);
@@ -394,45 +387,47 @@ void native_corners() {
           }
           const double actual = ex.gradient(got.data());
           const double expected = reference.gradient(want.data());
-          expect("nonlinear parent lp", std::abs(actual - expected) <
-                                            1e-10 * (1 + std::abs(expected)));
+          expect_true(
+              "nonlinear parent lp",
+              std::abs(actual - expected) < 1e-10 * (1 + std::abs(expected)));
           for (size_t i = 0; i < got.size(); ++i)
-            expect(
+            expect_true(
                 "nonlinear parent grad",
                 std::abs(got[i] - want[i]) < 1e-10 * (1 + std::abs(want[i])));
           if (!dynamic) {
             const double r = zsum * coefficient;
-            expect("polynomial oracle lp",
-                   std::abs(actual - (-.5 * r * r + zsum + bsum)) <
-                       1e-10 * (1 + r * r));
+            expect_true("polynomial oracle lp",
+                        std::abs(actual - (-.5 * r * r + zsum + bsum)) <
+                            1e-10 * (1 + r * r));
             for (size_t i = 0; i < got.size(); ++i) {
               const double oracle =
                   1 - r * (i < 13 ? coefficient : zsum * (i < 19 ? 3 : 2));
-              expect(
+              expect_true(
                   "polynomial oracle grad",
                   std::abs(got[i] - oracle) < 1e-10 * (1 + std::abs(oracle)));
             }
           }
           const auto first = got;
           for (int repeat = 0; repeat < 10; ++repeat)
-            expect("partition repeatability",
-                   ex.gradient(got.data()) == actual && got == first);
+            expect_true("partition repeatability",
+                        ex.gradient(got.data()) == actual && got == first);
         }
       }
   // Existing normalized/propto spellings and transformed-data behavior.
   auto data = DataMap::from_json_file("tests/fixtures/reduce_sum.json");
   auto cm = compile_model(slurp("tests/fixtures/reduce_sum.tmir.sexp"), data, 1,
                           options);
-  expect("propto retained calls", count_opcode(cm.graph, OP_REDUCE_SUM) > 0);
+  expect_true("propto retained calls",
+              count_opcode(cm.graph, OP_REDUCE_SUM) > 0);
   auto serial =
       compile_model(slurp("tests/fixtures/reduce_sum.tmir.sexp"), data);
   const auto got = evaluate(cm), want = evaluate(serial);
-  expect("parallel propto lp",
-         std::abs(got.lp - want.lp) < 1e-10 * (1 + std::abs(want.lp)));
+  expect_true("parallel propto lp",
+              std::abs(got.lp - want.lp) < 1e-10 * (1 + std::abs(want.lp)));
   for (size_t i = 0; i < got.grad.size(); ++i)
-    expect("parallel propto gradient",
-           std::abs(got.grad[i] - want.grad[i]) <
-               1e-10 * (1 + std::abs(want.grad[i])));
+    expect_true("parallel propto gradient",
+                std::abs(got.grad[i] - want.grad[i]) <
+                    1e-10 * (1 + std::abs(want.grad[i])));
 }
 
 void native_parallel() {
@@ -457,8 +452,8 @@ void native_parallel() {
         options.reduce_sum_threads = 4;
         options.reduce_sum_min_chunk_ns = 0;
         auto cm = compile_model(mir, data, 1, options);
-        expect("native retained opcode n=" + std::to_string(n),
-               count_opcode(cm.graph, OP_REDUCE_SUM) == (n > 1 ? 1 : 0));
+        expect_true("native retained opcode n=" + std::to_string(n),
+                    count_opcode(cm.graph, OP_REDUCE_SUM) == (n > 1 ? 1 : 0));
         auto serial = compile_model(mir, data);
         Executor reference(std::move(serial.graph));
         serial.bind(reference);
@@ -477,39 +472,39 @@ void native_parallel() {
           const double lp = reference.gradient(expected.data());
           for (auto* candidate : {&ex, &clone}) {
             const double actual = candidate->gradient(got.data());
-            expect("native lp",
-                   std::abs(actual - lp) < 1e-10 * (1 + std::abs(lp)));
+            expect_true("native lp",
+                        std::abs(actual - lp) < 1e-10 * (1 + std::abs(lp)));
             for (size_t i = 0; i < got.size(); ++i)
-              expect("native gradient " + std::to_string(i),
-                     std::abs(got[i] - expected[i]) <
-                         1e-10 * (1 + std::abs(expected[i])));
-            expect("native value-only",
-                   candidate->forward_value_only() == actual);
+              expect_true("native gradient " + std::to_string(i),
+                          std::abs(got[i] - expected[i]) <
+                              1e-10 * (1 + std::abs(expected[i])));
+            expect_true("native value-only",
+                        candidate->forward_value_only() == actual);
             bool refused = false;
             try {
               candidate->reverse(got.data(), 1);
             } catch (const std::logic_error&) {
               refused = true;
             }
-            expect("value-only invalidates reverse", refused);
+            expect_true("value-only invalidates reverse", refused);
             candidate->forward();
             candidate->reverse(got.data(), -0.37);
             for (size_t i = 0; i < got.size(); ++i)
-              expect("native seeded reverse",
-                     std::abs(got[i] + .37 * expected[i]) <
-                         1e-10 * (1 + std::abs(expected[i])));
+              expect_true("native seeded reverse",
+                          std::abs(got[i] + .37 * expected[i]) <
+                              1e-10 * (1 + std::abs(expected[i])));
             refused = false;
             try {
               candidate->reverse(got.data(), 1);
             } catch (const std::logic_error&) {
               refused = true;
             }
-            expect("reverse consumes forward", refused);
+            expect_true("reverse consumes forward", refused);
             candidate->forward();
             candidate->reverse(got.data(), 0.0);
-            expect("zero seed clears every gradient",
-                   std::all_of(got.begin(), got.end(),
-                               [](double value) { return value == 0.0; }));
+            expect_true("zero seed clears every gradient",
+                        std::all_of(got.begin(), got.end(),
+                                    [](double value) { return value == 0.0; }));
           }
         }
       }
@@ -546,26 +541,27 @@ void native_region_map() {
   options.reduce_sum_min_chunk_ns = 0;
   options.reduce_sum_threads = 4;
   auto cm = compile_model(mir, whole, 1, options);
-  expect("region-map body retains one reduction",
-         count_opcode(cm.graph, OP_REDUCE_SUM) == 1);
+  expect_true("region-map body retains one reduction",
+              count_opcode(cm.graph, OP_REDUCE_SUM) == 1);
   std::string reasons;
   for (const auto& reason : cm.reduce_sum_fallbacks) reasons += " " + reason;
-  expect("region-map body has no fallback:" + reasons,
-         cm.reduce_sum_fallbacks.empty());
+  expect_true("region-map body has no fallback:" + reasons,
+              cm.reduce_sum_fallbacks.empty());
   for (const auto& op : cm.graph.ops)
     if (op.opcode == OP_REDUCE_SUM) {
       const auto& spec = *static_cast<const ReduceSumSpec*>(op.udata);
-      expect("four children", spec.children.size() == 4);
+      expect_true("four children", spec.children.size() == 4);
       for (const auto& child : spec.children) {
-        expect("child runs a region map",
-               count_opcode(child.graph, OP_REGION_MAP) == 1);
-        expect("child views the slice and both data vectors",
-               child.shared.size() == 3);
+        expect_true("child runs a region map",
+                    count_opcode(child.graph, OP_REGION_MAP) == 1);
+        expect_true("child views the slice and both data vectors",
+                    child.shared.size() == 3);
         for (const auto& fill : child.fills)
-          expect("child keeps no copy of the data", fill.second.size() < 64);
+          expect_true("child keeps no copy of the data",
+                      fill.second.size() < 64);
       }
-      expect("one block per data argument", spec.blocks.size() == 3);
-      expect("data arguments are not op inputs", op.n_in == 2);
+      expect_true("one block per data argument", spec.blocks.size() == 3);
+      expect_true("data arguments are not op inputs", op.n_in == 2);
     }
 
   auto serial = compile_model(mir, whole);
@@ -580,22 +576,22 @@ void native_region_map() {
   for (int point = 0; point < 3; ++point) {
     const Run want = evaluate_region_map(reference, point);
     const Run base = evaluate_region_map(plain, point);
-    expect("region-map lp matches the whole slice",
-           std::abs(base.lp - want.lp) < 1e-10 * (1 + std::abs(want.lp)));
+    expect_true("region-map lp matches the whole slice",
+                std::abs(base.lp - want.lp) < 1e-10 * (1 + std::abs(want.lp)));
     for (size_t i = 0; i < base.grad.size(); ++i)
-      expect("region-map gradient matches the whole slice",
-             std::abs(base.grad[i] - want.grad[i]) <
-                 1e-10 * (1 + std::abs(want.grad[i])));
+      expect_true("region-map gradient matches the whole slice",
+                  std::abs(base.grad[i] - want.grad[i]) <
+                      1e-10 * (1 + std::abs(want.grad[i])));
     for (auto* candidate : {&attached, &clone}) {
       const Run got = evaluate_region_map(*candidate, point);
-      expect("team attached is bitwise equal to no team",
-             got.lp == base.lp && got.grad == base.grad);
+      expect_true("team attached is bitwise equal to no team",
+                  got.lp == base.lp && got.grad == base.grad);
     }
     attached.set_reduce_context(&small);
     const Run fewer = evaluate_region_map(attached, point);
     attached.set_reduce_context(&team);
-    expect("team size does not change the result",
-           fewer.lp == base.lp && fewer.grad == base.grad);
+    expect_true("team size does not change the result",
+                fewer.lp == base.lp && fewer.grad == base.grad);
   }
 
   Executor first(plain), second(plain);
@@ -617,12 +613,12 @@ void native_region_map() {
   std::thread chain_a(chain, std::ref(first)), chain_b(chain, std::ref(second));
   chain_a.join();
   chain_b.join();
-  expect("concurrent clones share data and agree bitwise", chains_agree);
+  expect_true("concurrent clones share data and agree bitwise", chains_agree);
 
   options.reduce_sum_threads = 2;
   auto halves = compile_model(mir, whole, 1, options);
-  expect("two-chunk region-map reduction",
-         count_opcode(halves.graph, OP_REDUCE_SUM) == 1);
+  expect_true("two-chunk region-map reduction",
+              count_opcode(halves.graph, OP_REDUCE_SUM) == 1);
   Executor split(std::move(halves.graph));
   halves.bind(split);
   ReduceExecutionContext pair(2);
@@ -638,10 +634,11 @@ void native_region_map() {
     const Run got = evaluate_region_map(split, point);
     const Run a = evaluate_region_map(lower_ex, point);
     const Run b = evaluate_region_map(upper_ex, point);
-    expect("child values are the serial chunk calls", got.lp == a.lp + b.lp);
+    expect_true("child values are the serial chunk calls",
+                got.lp == a.lp + b.lp);
     for (size_t i = 0; i < got.grad.size(); ++i)
-      expect("child gradients are the serial chunk calls",
-             got.grad[i] == a.grad[i] + b.grad[i]);
+      expect_true("child gradients are the serial chunk calls",
+                  got.grad[i] == a.grad[i] + b.grad[i]);
   }
 }
 
@@ -652,23 +649,25 @@ void serial_notice() {
   CompileOptions options;
   auto quiet = compile_model(
       mir, DataMap::from_json(region_map_data(0, 1, 256)), 1, options);
-  expect("a slice with little work gets no notice",
-         quiet.reduce_sum_notice.empty());
+  expect_true("a slice with little work gets no notice",
+              quiet.reduce_sum_notice.empty());
   auto noted = compile_model(
       mir, DataMap::from_json(region_map_data(0, 1, 100000, 100000)), 1,
       options);
-  expect("a serial reduce_sum that could thread says so",
-         noted.reduce_sum_notice.find("100000 elements") != std::string::npos);
+  expect_true(
+      "a serial reduce_sum that could thread says so",
+      noted.reduce_sum_notice.find("100000 elements") != std::string::npos);
   options.reduce_sum_threads = 4;
   auto threaded = compile_model(
       mir, DataMap::from_json(region_map_data(0, 1, 100000, 100000)), 1,
       options);
-  expect("a threaded compile has no serial notice",
-         threaded.reduce_sum_notice.empty());
+  expect_true("a threaded compile has no serial notice",
+              threaded.reduce_sum_notice.empty());
   options.reduce_sum_threads = 1;
   auto direct = compile_model(
       mir, DataMap::from_json(region_map_data(1, 1, 256)), 1, options);
-  expect("no notice without a reduce_sum", direct.reduce_sum_notice.empty());
+  expect_true("no notice without a reduce_sum",
+              direct.reduce_sum_notice.empty());
 }
 
 int retained_children(const stanli::CompiledModel& cm) {
@@ -690,19 +689,20 @@ void work_cutoff() {
                          1, options);
   };
   auto tiny = compile(256);
-  expect("little work stays serial", retained_children(tiny) == 0);
-  expect("the refusal names the work estimate",
-         !tiny.reduce_sum_fallbacks.empty() &&
-             tiny.reduce_sum_fallbacks[0].find("estimated work") !=
-                 std::string::npos);
+  expect_true("little work stays serial", retained_children(tiny) == 0);
+  expect_true("the refusal names the work estimate",
+              !tiny.reduce_sum_fallbacks.empty() &&
+                  tiny.reduce_sum_fallbacks[0].find("estimated work") !=
+                      std::string::npos);
   auto some = compile(8000);
-  expect("moderate work uses fewer chunks than threads",
-         retained_children(some) == 2);
+  expect_true("moderate work uses fewer chunks than threads",
+              retained_children(some) == 2);
   auto plenty = compile(100000);
-  expect("plenty of work uses every thread", retained_children(plenty) == 4);
+  expect_true("plenty of work uses every thread",
+              retained_children(plenty) == 4);
   options.reduce_sum_min_chunk_ns = 0;
-  expect("no minimum forces every thread",
-         retained_children(compile(256)) == 4);
+  expect_true("no minimum forces every thread",
+              retained_children(compile(256)) == 4);
 }
 
 void region_map_domain_error() {
@@ -716,9 +716,9 @@ void region_map_domain_error() {
   options.reduce_sum_threads = 4;
   auto cm = compile_model(mir, data, 1, options);
   auto serial = compile_model(mir, data);
-  expect("domain fixture retains the reduction",
-         count_opcode(cm.graph, OP_REDUCE_SUM) == 1 &&
-             cm.reduce_sum_fallbacks.empty());
+  expect_true("domain fixture retains the reduction",
+              count_opcode(cm.graph, OP_REDUCE_SUM) == 1 &&
+                  cm.reduce_sum_fallbacks.empty());
   Executor reference(std::move(serial.graph));
   serial.bind(reference);
   Executor ex(std::move(cm.graph));
@@ -745,7 +745,7 @@ void region_map_domain_error() {
   set_point(plain, 100.0);
   std::vector<double> want(3), got(3);
   const double good = reference.gradient(want.data());
-  expect(
+  expect_true(
       "retained lp before the error",
       std::abs(ex.gradient(got.data()) - good) < 1e-10 * (1 + std::abs(good)));
   for (double scale : {1.7, 2.3}) {
@@ -753,15 +753,16 @@ void region_map_domain_error() {
     set_point(ex, scale);
     set_point(plain, scale);
     const std::string expected = message(reference);
-    expect("whole-slice call rejects", !expected.empty());
-    expect("worker error is the first in chunk order", message(ex) == expected);
-    expect("no team gives the same error", message(plain) == expected);
+    expect_true("whole-slice call rejects", !expected.empty());
+    expect_true("worker error is the first in chunk order",
+                message(ex) == expected);
+    expect_true("no team gives the same error", message(plain) == expected);
   }
   set_point(ex, 100.0);
   set_point(plain, 100.0);
-  expect("gradient recovers after a worker error",
-         ex.gradient(got.data()) == plain.gradient(want.data()));
-  expect("recovered gradient is finite", std::isfinite(got[0]));
+  expect_true("gradient recovers after a worker error",
+              ex.gradient(got.data()) == plain.gradient(want.data()));
+  expect_true("recovered gradient is finite", std::isfinite(got[0]));
 }
 
 }  // namespace
@@ -788,8 +789,8 @@ int main() {
 
   // Ask the graph before the executor takes it. The empty slice's callee
   // rejects, so reaching it at all is the bug this catches.
-  expect("an empty slice never lowers its partial-sum function",
-         count_opcode(cm.graph, OP_REJECT) == 0);
+  expect_true("an empty slice never lowers its partial-sum function",
+              count_opcode(cm.graph, OP_REJECT) == 0);
 
   const Run got = evaluate(cm);
 
@@ -799,14 +800,15 @@ int main() {
       slurp("tests/fixtures/reduce_sum_equiv.tmir.sexp"), equiv_data);
   const Run want = evaluate(equiv_cm);
 
-  expect("lp is finite", std::isfinite(got.lp));
-  expect("reduce_sum lp is bitwise the hand-written lp", got.lp == want.lp);
-  expect("same parameter count", got.grad.size() == want.grad.size());
+  expect_true("lp is finite", std::isfinite(got.lp));
+  expect_true("reduce_sum lp is bitwise the hand-written lp",
+              got.lp == want.lp);
+  expect_true("same parameter count", got.grad.size() == want.grad.size());
   if (got.grad.size() == want.grad.size())
     for (size_t i = 0; i < got.grad.size(); ++i)
-      expect("reduce_sum gradient[" + std::to_string(i) +
-                 "] is bitwise the hand-written gradient",
-             got.grad[i] == want.grad[i]);
+      expect_true("reduce_sum gradient[" + std::to_string(i) +
+                      "] is bitwise the hand-written gradient",
+                  got.grad[i] == want.grad[i]);
 
   // The equality above is the propto check only if the two spellings would
   // actually disagree at this point. They differ by normal's normalizing
@@ -815,9 +817,8 @@ int main() {
   const double log_sqrt_2pi = 0.5 * std::log(8.0 * std::atan(1.0));
   const double sigma = std::exp(eval_point(1));  // parameters: mu, sigma, b
   const double normalizer = 5.0 * (log_sqrt_2pi + std::log(sigma));
-  expect("the two propto spellings differ by a nonzero constant",
-         std::fabs(normalizer) > 1.0);
+  expect_true("the two propto spellings differ by a nonzero constant",
+              std::fabs(normalizer) > 1.0);
 
-  if (failures == 0) std::printf("test_reduce_sum: all checks passed\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_reduce_sum");
 }

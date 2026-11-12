@@ -113,10 +113,10 @@
   },
   {
     "model": "region_map_hurdle_data",
-    "quantity": "grad[1]",
+    "quantity": "grad[*]",
     "pair": "default/passes_off",
-    "bound_ulp": 2,
-    "cause": "the 64 per-iteration gradient contributions of a loop whose UDF branches on data are accumulated in a different grouping with and without STANLI_NO_REROLL. The region map refuses the loop (the branch is data-only), so this is the rerolled graph's own regrouping, surfaced by this fixture.",
+    "bound_ulp": 4,
+    "cause": "the 64 per-iteration gradient contributions of a loop whose UDF branches on data are accumulated in a different grouping with and without STANLI_NO_REROLL. The region map refuses the loop (the branch is data-only), so this is the rerolled graph's own regrouping, surfaced by this fixture. Measured at three swept points: up to 4 ULP, and STANLI_NO_REROLL with STANLI_NO_PARTITION gives the same bits as passes_off.",
     "since": "2026-10-03"
   },
   {
@@ -126,5 +126,173 @@
     "bound_ulp": 10,
     "cause": "the default path runs the loop as one OP_REGION_MAP and sums the per-iteration subtotals in iteration order; STANLI_NO_NATIVE_ADJ refuses the map (it needs the generated adjoint), so the loop keeps its per-iteration regions and its running-target fold, which groups the terms differently.",
     "since": "2026-10-02"
+  },
+  {
+    "model": "region_map_data_control",
+    "quantity": "lp",
+    "pair": "default/no_partition",
+    "bound_ulp": 1,
+    "cause": "partition_lanes regroups this loop's per-iteration terms into lane SUM_VEC ops (76 ops with the pass, 110 with STANLI_NO_PARTITION, which turns them back into INDEX/ADD_N chains), so the 64 target terms sum in a different grouping. It is the only fixture on which the pass changes the graph.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_density",
+    "quantity": "lp",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 3,
+    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_density",
+    "quantity": "lp",
+    "pair": "default/no_region_map",
+    "bound_ulp": 3,
+    "cause": "the region map adds each iteration's three target terms into a subtotal and sums the subtotals, while the structured loop sums all 192 terms in source order (reduce_target). Against a 50-digit mpmath reference the region map is 1 ULP off at point 1 and 2 at point 2, the loop 2 and 1, so neither grouping is more accurate.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_hurdle_data",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 2,
+    "cause": "STANLI_NO_REROLL with STANLI_NO_PARTITION gives the same bits as passes_off, and each alone gives different bits, so this is the rerolled and lane-partitioned graph summing the 64 target terms in a different grouping. Against a 50-digit mpmath reference at point 2 the default path is exact and passes_off is 2 ULP off.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_multi",
+    "quantity": "lp",
+    "pair": "default/no_region_map",
+    "bound_ulp": 10,
+    "cause": "the region map's iteration-order sum of subtotals against the unmapped running-target fold, as for default/no_native_adj on this fixture: both switches remove the map and give the same bits at all three points.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_sinks",
+    "quantity": "grad[*]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 3,
+    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map; see default/no_region_map on this fixture, which gives the same bits.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_sinks",
+    "quantity": "grad[*]",
+    "pair": "default/no_region_map",
+    "bound_ulp": 3,
+    "cause": "the region map accumulates the per-iteration gradient contributions in iteration order; with STANLI_REGION_MAP=0 the per-iteration regions accumulate through the graph's own reverse sweep. default/no_native_adj gives the same bits, because it refuses the map too.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "wapar_heavy",
+    "quantity": "grad[*]",
+    "pair": "default/passes_off",
+    "bound_ulp": 5,
+    "cause": "the gradient side of this fixture's lp entry: the per-term adjoints accumulate in source order with both lane passes off, and in the fused lane loop otherwise.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "wapar_heavy",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 5,
+    "cause": "with both STANLI_NO_REROLL and STANLI_NO_PARTITION the 300 normal terms sum one by one in source order; either lane pass alone fuses them into the same lane loop and agrees with default bitwise at all three points. A retained loop (STANLI_STRUCTURED_LOOPS=1) gives the same bits as passes_off.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "cm_betadiscrete",
+    "quantity": "lp",
+    "pair": "default/no_partition",
+    "bound_ulp": 4,
+    "cause": "partition_lanes groups the 200 per-row terms into lane sums; no_partition and passes_off give the same bits at every point, so no other pass contributes. Against a 50-digit mpmath reference at point 8 (beta_lcdf through regularized incomplete beta) the default path is 10 ULP off and the ungrouped sum 6 ULP, the shared remainder being per-row beta_lcdf error.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "cm_betadiscrete",
+    "quantity": "lp",
+    "pair": "default/passes_off",
+    "bound_ulp": 4,
+    "cause": "the partition_lanes regrouping of default/no_partition on this model; passes_off gives the same bits at every point.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_acc_init",
+    "quantity": "lp",
+    "pair": "default/no_region_map",
+    "bound_ulp": 4,
+    "cause": "the region map sums the 64 loop terms from zero and adds acc's initial 2.5 afterwards, while the loop without the map folds the terms into acc starting from 2.5; seeding the map's sum with acc's initial value would make lp bitwise. Against a 50-digit mpmath reference at point 1 the region map is 5 ULP off and the loop 1 ULP.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_acc_init",
+    "quantity": "lp",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 4,
+    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_acc_init",
+    "quantity": "grad[0]",
+    "pair": "default/no_region_map",
+    "bound_ulp": 1,
+    "cause": "the lp entry's regrouping carried through the adjoint, plus the region map adding each iteration's contribution in iteration order where the loop adds them in reverse. Against a 50-digit mpmath reference at point 1 the region map is 2 ULP off and the loop 1 ULP.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_acc_init",
+    "quantity": "grad[0]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 1,
+    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_lse",
+    "quantity": "grad[*]",
+    "pair": "default/no_region_map",
+    "bound_ulp": 1,
+    "cause": "lp is bitwise; the gradient differs because the region map accumulates the 64 per-iteration parameter adjoints in iteration order and the structured loop in reverse. Against 50-digit mpmath derivatives the loop is closer at every failing component (grad[0]: 0 against 1 ULP at points 1 and 2; grad[1]: 2 against 3 ULP at point 1).",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "region_map_lse",
+    "quantity": "grad[*]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 1,
+    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "cm_rdm",
+    "quantity": "grad[0]",
+    "pair": "default/no_region_map",
+    "bound_ulp": 2526,
+    "cause": "Windows x86_64 only: at point 2 the region map's grad[0] is -5.0571779386431782e-06 and the map-refused loop's is -5.0571779386410386e-06, an absolute gap of 2.1e-18. That is below one ULP of grad[1] (0.13, ULP 2.8e-17), so the 2526 ULP is cancellation in a near-zero component; grad[1] differs by 1 ULP. The two paths are bitwise on Linux and macOS at the same point, so one of the model's libm calls rounds differently between the paths under the Windows CRT; which call has not been isolated without a Windows machine.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "cm_rdm",
+    "quantity": "grad[1]",
+    "pair": "default/no_region_map",
+    "bound_ulp": 1,
+    "cause": "Windows x86_64 only: at point 2 the region map's grad[0] is -5.0571779386431782e-06 and the map-refused loop's is -5.0571779386410386e-06, an absolute gap of 2.1e-18. That is below one ULP of grad[1] (0.13, ULP 2.8e-17), so the 2526 ULP is cancellation in a near-zero component; grad[1] differs by 1 ULP. The two paths are bitwise on Linux and macOS at the same point, so one of the model's libm calls rounds differently between the paths under the Windows CRT; which call has not been isolated without a Windows machine.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "cm_rdm",
+    "quantity": "grad[0]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 2526,
+    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
+    "since": "2026-11-12"
+  },
+  {
+    "model": "cm_rdm",
+    "quantity": "grad[1]",
+    "pair": "default/no_native_adj",
+    "bound_ulp": 1,
+    "cause": "STANLI_NO_NATIVE_ADJ refuses the region map, so it gives the same bits as default/no_region_map. See default/no_region_map.",
+    "since": "2026-11-12"
   }
 ]

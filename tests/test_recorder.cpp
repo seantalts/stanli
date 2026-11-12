@@ -1,6 +1,8 @@
 // The recorder scalar must (a) reproduce var-path gradients bitwise through
 // unmodified stan-math templates and (b) support zero-copy promotion of a
 // double buffer to an rvar view.
+#include "expect.hpp"
+
 #include <stanli/recorder.hpp>
 
 #include <stan/math.hpp>
@@ -8,14 +10,6 @@
 #include <limits>
 #include <cstdio>
 #include <vector>
-
-static int failures = 0;
-static void expect_eq(const char* what, double got, double want) {
-  if (got != want) {
-    ++failures;
-    std::printf("FAIL %-24s got %.17g want %.17g\n", what, got, want);
-  }
-}
 
 int main() {
   using stan::math::value_of;
@@ -248,6 +242,5 @@ int main() {
       stan::math::recover_memory();
     }
 
-  if (failures == 0) std::printf("test_recorder OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_recorder");
 }

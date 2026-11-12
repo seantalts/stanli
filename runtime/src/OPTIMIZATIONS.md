@@ -1400,12 +1400,22 @@ silently. Three layers:
   including tests that the passes refuse what they must refuse, and a
   fuzz test that runs hundreds of random graphs through all passes and
   compares gradients before and after.
-- A full-corpus A/B check (`harnesses/ab_corpus.py`): every posteriordb
-  model evaluated with the passes off and on, comparing the log density
-  and every gradient component. The passes-off graph is separately
-  verified against CmdStan, so if A and B agree, the optimized graph
-  inherits that verification. This has caught two real bugs the unit
-  tests missed. Run it after any change to a pass.
+- The cross-path matrix (`tests/cross_path.hpp`), which CTest runs over
+  every fixture and the cogmod models: each pass and path switch off or
+  forced, the log density and every gradient component compared bitwise
+  with the shipped pipeline at three points. After a change to a pass, run
+  it over posteriordb too, with a scaled-error tolerance because the passes
+  reassociate:
+  `python3 -c 'import sys,tempfile,subprocess; sys.path.insert(0,"tools"); from corpus_inventory import corpus_cases, materialize_data; t=tempfile.mkdtemp(); [subprocess.run(["build-rel/stanli_check",str(c.source),str(materialize_data(c,t)),"--cross","--cross-rel-tol","1e-11","--cross-corpus"]) for c in corpus_cases("deps/posteriordb","posteriordb").values()]' | grep -E '^CROSS (FAIL|SKIP)'`.
+  `--cross-rel-tol` passes a finite mismatch when |a - b| / max(|a|, 1e-300)
+  is at most the bound. `--cross-corpus` adds stanli_check's default point
+  and a config with rerolling, in-place, constant folding and islands off
+  together. Today `sir` is skipped (out of support at every draw) and
+  `ldaK5` fails at the default point under both pass-off configs, by up to
+  1.25e-9 in `grad[3198]`: that entry is 1.8e-6 against gradient entries up
+  to 180, and its absolute error of 2.2e-15 is reassociation error left
+  behind by cancellation. Without the tolerance 45 of the 120 models report
+  bitwise divergences, the largest elsewhere 8.7e-13.
 - Direct verification against CmdStan (`tools/verify_sample.py`) for
   models a change affects.
 
@@ -1782,7 +1792,7 @@ reverse-mode source transformation over the ~35 opcodes of `Program`,
 producing a second pass over doubles with no vari, no nested tape and no
 allocation. Measured with `STANLI_NO_ISLAND=1` as the baseline, same
 build, same point, on all twenty-one corpus models that compile a
-region (`harnesses/island_ab.py`, min of three runs each -- the sweep
+region (`harnesses/island_ab.py`, since removed; min of three runs each -- the sweep
 bypasses the carve estimate so the regions it declines are measured
 too, which is how the table can hold rows the default build refuses):
 

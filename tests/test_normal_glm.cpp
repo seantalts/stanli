@@ -1,5 +1,7 @@
 // Differential oracle is the preceding kernel's unit-seeded Stan Math tape.
 // Independent CmdStan corpus checks complement these exact internal checks.
+#include "expect.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 #include <stanli/packet.hpp>
@@ -17,15 +19,6 @@ using VecD = Eigen::VectorXd;
 using CMapM = Eigen::Map<const MatD>;
 using CMapV = Eigen::Map<const VecD>;
 using VarV = Eigen::Matrix<stan::math::var, -1, 1>;
-static int failures = 0;
-static void exact(const std::string& tag, double got, double want) {
-  if (std::memcmp(&got, &want, sizeof(double)) != 0 &&
-      !(std::isnan(got) && std::isnan(want))) {
-    ++failures;
-    if (failures < 20)
-      std::printf("FAIL %s %.17g != %.17g\n", tag.c_str(), got, want);
-  }
-}
 double reference_normal_glm(KernelCtx& ctx) {
   const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
   const bool propto = (ctx.variant & 0x80u) != 0;
@@ -210,16 +203,17 @@ static void check(int n, int cols, unsigned mask, unsigned scalar, bool row_x,
       "normal glm n=" + std::to_string(n) + " cols=" + std::to_string(cols) +
       " mask=" + std::to_string(mask) + " scalar=" + std::to_string(scalar) +
       " row=" + std::to_string(row_x);
-  exact(tag + " value", value, expected_value);
+  expect_eq_or_both_nan(tag + " value", value, expected_value);
   kernel->backward(ctx);
   size_t at = 0;
   for (int k = 0; k < 5; ++k) {
     if (k < 2 && !(mask & (1u << k))) continue;
     for (int i = 0; i < lens[k]; ++i, ++at) {
-      exact(tag + " partial " + std::to_string(at), scratch[at], expected[at]);
+      expect_eq_or_both_nan(tag + " partial " + std::to_string(at), scratch[at],
+                            expected[at]);
       const double want =
           (mask & (1u << k)) ? -0.25 + weight * expected[at] : -0.25;
-      exact(tag + " scatter", adjoints[k][i], want);
+      expect_eq_or_both_nan(tag + " scatter", adjoints[k][i], want);
     }
   }
   if (n == 5 && cols == 3 && mask == 31 && scalar == 6 && !row_x) {
@@ -235,16 +229,17 @@ static void check(int n, int cols, unsigned mask, unsigned scalar, bool row_x,
     Executor ex(std::move(graph));
     for (int k = 0; k < 5; ++k)
       std::copy(inputs[k].begin(), inputs[k].end(), ex.param_ptr(slots[k]));
-    exact(tag + " value only", ex.forward_value_only(), expected_value);
+    expect_eq_or_both_nan(tag + " value only", ex.forward_value_only(),
+                          expected_value);
     std::vector<double> gradients(total);
-    exact(tag + " after value only", ex.gradient(gradients.data()),
-          expected_value);
+    expect_eq_or_both_nan(tag + " after value only",
+                          ex.gradient(gradients.data()), expected_value);
     for (int i = 0; i < total; ++i)
-      exact(tag + " gradient after value only", gradients[i],
-            0.0 + expected[i]);
+      expect_eq_or_both_nan(tag + " gradient after value only", gradients[i],
+                            0.0 + expected[i]);
   }
   kernel->forward(ctx);
-  exact(tag + " reused", value, expected_value);
+  expect_eq_or_both_nan(tag + " reused", value, expected_value);
 }
 
 int main() {
@@ -273,6 +268,5 @@ int main() {
   for (int invalid = 0; invalid < 5; ++invalid)
     for (bool propto : {false, true})
       check(5, 3, 31, 6, false, propto, 1.0, invalid);
-  if (!failures) std::printf("test_normal_glm OK\n");
-  return failures ? 1 : 0;
+  return finish("test_normal_glm");
 }

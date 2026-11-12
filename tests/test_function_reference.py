@@ -1,24 +1,23 @@
 """Check compiled standalone C-ABI results against independent CmdStan rows."""
-import hashlib
 import json
 import math
 import os
 from pathlib import Path
-import struct
 import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+from corpus_inventory import source_digest  # noqa: E402
+from verify_refs import CORPORA, load_refs, pin_drift, ulp_distance  # noqa: E402
+
 FIXTURE = ROOT / 'tests/fixtures/standalone_function_reference'
 
-def ordered(value):
-    bits = struct.unpack('>Q',struct.pack('>d',value))[0]
-    return ~bits & ((1<<64)-1) if bits>>63 else bits | (1<<63)
-
 def main(host):
-    reference = json.loads(FIXTURE.with_suffix('.ref.json').read_text())
+    reference = load_refs(CORPORA['fixtures'].refs)[0][FIXTURE.name]
+    assert not pin_drift(reference['recorded']), pin_drift(reference['recorded'])
     for suffix,key in (('.stan','source_sha256'),('.json','data_sha256')):
-        assert hashlib.sha256(FIXTURE.with_suffix(suffix).read_bytes().replace(b'\r\n',b'\n')).hexdigest() == reference[key]
+        assert source_digest(FIXTURE.with_suffix(suffix)) == reference[key]
     points = ('0','1','2','0')
     values = [str(reference['points'][point]['wa']['values'][0]) for point in points]
     run = subprocess.run([host,str(FIXTURE.with_suffix('.tmir.sexp')),*values],
@@ -41,7 +40,7 @@ def main(host):
         for want,got in zip(expected,row['values']):
             want = float(want)
             assert math.isfinite(want) and math.isfinite(got)
-            distance = abs(ordered(want)-ordered(got))
+            distance = ulp_distance(want,got)
             assert distance <= 10, (point,want,got,distance)
             worst = max(worst,distance)
     print(f'Compiled standalone API vs CmdStan: 40 values, max {worst} ULP, no MIR entries')

@@ -1,4 +1,6 @@
 // Differential checks against the previously used nested Stan Math tape.
+#include "expect.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/gp_cov_fusion.hpp>
 #include <stanli/optable.hpp>
@@ -18,7 +20,6 @@ using Mat = Eigen::MatrixXd;
 using Vec = Eigen::VectorXd;
 using Var = stan::math::var;
 using VarVec = Eigen::Matrix<Var, -1, 1>;
-static int failures = 0;
 static void check(double got, double want, const char* tag,
                   bool exact = false) {
   if (got == want || (std::isnan(got) && std::isnan(want))) return;
@@ -29,24 +30,6 @@ static void check(double got, double want, const char* tag,
   if (++failures < 12) std::printf("FAIL %s %.17g != %.17g\n", tag, got, want);
 }
 
-static int64_t ulp_key(double d) {
-  int64_t i;
-  std::memcpy(&i, &d, sizeof(i));
-  return i < 0 ? std::numeric_limits<int64_t>::min() - i : i;
-}
-// A native pullback's own gate: bitwise, with a stated ULP allowance when
-// it reassociates or -- as with matrix_exp's block-exponential identity --
-// runs a different algorithm than the nested-tape replay it replaces.
-static void expect_ulp(const std::string& what, double got, double want,
-                       int64_t max_ulp) {
-  if (got == want || (std::isnan(got) && std::isnan(want))) return;
-  const int64_t dist = std::llabs(ulp_key(got) - ulp_key(want));
-  if (dist > max_ulp) {
-    if (++failures < 12)
-      std::printf("FAIL %-28s got %.17g want %.17g (%lld ulp)\n", what.c_str(),
-                  got, want, (long long)dist);
-  }
-}
 static void gp(int n, int d, int active, uint8_t variant, bool repeated,
                double rho = 0.7, double sigma = 1.3, double seed_scale = 0.7,
                bool diagonal_update = false) {
@@ -413,28 +396,21 @@ static void solve_case(bool left, SolveKindTag kind, uint16_t opcode, int n,
       " n=" + std::to_string(n) + " k=" + std::to_string(k) +
       " vec=" + std::to_string(vec) + " act=" + std::to_string(activity) +
       " seed=" + std::to_string(seed_val);
-  for (int i = 0; i < outr * outc; ++i)
-    // This legacy gradient oracle promotes both operands to var matrices.
-    // test_solve_forwards separately enforces bitwise values with the exact
-    // activity and vector/matrix types, which can differ from this oracle.
-    check(out.data()[i], result.data()[i].val(), ("solve value" + tag).c_str());
   if (divisor_var)
     for (int i = 0; i < n * n; ++i) {
       const double want = 0.125 + av.data()[i].adj();
       expect_ulp("solve A adj" + tag + " i=" + std::to_string(i),
                  a_adj.data()[i], want, max_ulp);
-      g_max_solve_ulp = std::max(
-          g_max_solve_ulp,
-          (double)std::llabs(ulp_key(a_adj.data()[i]) - ulp_key(want)));
+      g_max_solve_ulp = std::max(g_max_solve_ulp,
+                                 (double)ulp_distance(a_adj.data()[i], want));
     }
   if (dividend_var)
     for (int i = 0; i < br * bc; ++i) {
       const double want = 0.125 + bv.data()[i].adj();
       expect_ulp("solve B adj" + tag + " i=" + std::to_string(i),
                  b_adj.data()[i], want, max_ulp);
-      g_max_solve_ulp = std::max(
-          g_max_solve_ulp,
-          (double)std::llabs(ulp_key(b_adj.data()[i]) - ulp_key(want)));
+      g_max_solve_ulp = std::max(g_max_solve_ulp,
+                                 (double)ulp_distance(b_adj.data()[i], want));
     }
 }
 
@@ -524,18 +500,16 @@ static void qf_case(bool sym, uint16_t opcode, int n, int m, bool vec,
       const double want = 0.125 + av.data()[i].adj();
       expect_ulp("qf A adj" + tag + " i=" + std::to_string(i), a_adj.data()[i],
                  want, max_ulp);
-      g_max_qf_ulp = std::max(
-          g_max_qf_ulp,
-          (double)std::llabs(ulp_key(a_adj.data()[i]) - ulp_key(want)));
+      g_max_qf_ulp =
+          std::max(g_max_qf_ulp, (double)ulp_distance(a_adj.data()[i], want));
     }
   if (b_var)
     for (int i = 0; i < n * m; ++i) {
       const double want = 0.125 + bv.data()[i].adj();
       expect_ulp("qf B adj" + tag + " i=" + std::to_string(i), b_adj.data()[i],
                  want, max_ulp);
-      g_max_qf_ulp = std::max(
-          g_max_qf_ulp,
-          (double)std::llabs(ulp_key(b_adj.data()[i]) - ulp_key(want)));
+      g_max_qf_ulp =
+          std::max(g_max_qf_ulp, (double)ulp_distance(b_adj.data()[i], want));
     }
 }
 
@@ -955,6 +929,101 @@ static void fixed_small_vs_dynamic() {
       g_differential_cases, g_rejected_cases, failures);
 }
 
+// A scalar add_diag argument receives one contribution per diagonal entry.
+// The additions are created from the first coefficient to the last, so the
+// reverse tape accumulates a deliberately cancellation-sensitive seed in
+// the opposite order.
+static void test_add_diag_scalar_reverse_order() {
+  using namespace stanli;
+  const Kernel* add_diag = find_kernel(OP_ADD_DIAG);
+  expect_true("add_diag scalar kernel registration",
+              add_diag && add_diag->forward && add_diag->backward);
+  if (add_diag && add_diag->forward && add_diag->backward) {
+    constexpr int n = 3;
+    double a[n * n] = {};
+    double diagonal = 0.0;
+    double out[n * n] = {};
+    double out_adj[n * n] = {};
+    out_adj[0] = 1e16;
+    out_adj[4] = -1e16;
+    out_adj[8] = 1.0;
+    double diagonal_adj = 0.0;
+    const int dims[] = {n, n};
+    KernelCtx ctx;
+    ctx.in[0] = Desc{a, n * n};
+    ctx.in[1] = Desc{&diagonal, 1};
+    ctx.n_in = 2;
+    ctx.out = Desc{out, n * n};
+    ctx.variant = 1;
+    ctx.idata = dims;
+    ctx.n_idata = 2;
+    add_diag->forward(ctx);
+    ctx.in_adj[0] = Desc{nullptr, n * n};
+    ctx.in_adj[1] = Desc{&diagonal_adj, 1};
+    ctx.out_adj_vec = Desc{out_adj, n * n};
+    add_diag->backward(ctx);
+
+    Eigen::MatrixXd matrix = Eigen::MatrixXd::Zero(n, n);
+    Eigen::MatrixXd seed = Eigen::MatrixXd::Zero(n, n);
+    seed(0, 0) = 1e16;
+    seed(1, 1) = -1e16;
+    seed(2, 2) = 1.0;
+    stan::math::var d_ref = 0.0;
+    stan::math::var reference = stan::math::sum(
+        stan::math::elt_multiply(stan::math::add_diag(matrix, d_ref), seed));
+    reference.grad();
+    expect_eq("add_diag scalar reverse order", diagonal_adj, d_ref.adj());
+    stan::math::recover_memory();
+  }
+}
+
+// The triangular pullback must match the old nested-tape weighted sum,
+// including rectangular matrices, ignored upper entries, asymmetric seeds,
+// overflow, and accumulation into existing input adjoints.
+static void test_mult_lower_tri_self_transpose_pullback() {
+  using namespace stanli;
+  const Kernel* kernel = find_kernel(OP_MULT_LOWER_TRI_SELF_TRANSPOSE);
+  for (int nr : {1, 2, 3, 8})
+    for (int nc : {1, 2, 3, 8})
+      for (double scale : {0.0, 1.0, 1e-100, 1e100})
+        for (double weight : {0.0, -0.0, 1.0, -1.3, 1e308, 1e-308,
+                              std::numeric_limits<double>::infinity()}) {
+          stan::math::nested_rev_autodiff nested;
+          Eigen::MatrixXd a(nr, nc), seed(nr, nr), adj(nr, nc);
+          for (int i = 0; i < a.size(); ++i) {
+            a.data()[i] = scale * std::sin(0.3 * (i + 1));
+            adj.data()[i] = i % 2 ? -0.0 : 0.3125;
+          }
+          for (int i = 0; i < seed.size(); ++i)
+            seed.data()[i] = (i % 3 == 0 ? -1.0 : 1.0) * weight;
+          auto ref_a = a.cast<stan::math::var>().eval();
+          auto result = stan::math::multiply_lower_tri_self_transpose(ref_a);
+          stan::math::var loss =
+              stan::math::sum(stan::math::elt_multiply(result, seed));
+          stan::math::grad(loss.vi_);
+          std::vector<double> expected(a.size());
+          for (int i = 0; i < a.size(); ++i)
+            expected[i] = adj.data()[i] + ref_a.data()[i].adj();
+          int idata[] = {nr, nc};
+          KernelCtx ctx{};
+          ctx.n_in = 1;
+          ctx.in[0] = Desc{a.data(), a.size()};
+          ctx.in_adj[0] = Desc{adj.data(), adj.size()};
+          ctx.out_adj_vec = Desc{seed.data(), seed.size()};
+          ctx.idata = idata;
+          ctx.n_idata = 2;
+          kernel->backward(ctx);
+          for (int i = 0; i < a.size(); ++i)
+            expect_true(
+                "triangular native pullback bits",
+                (std::isnan(adj.data()[i]) && std::isnan(expected[i])) ||
+                    std::memcmp(&adj.data()[i], &expected[i], sizeof(double)) ==
+                        0);
+          ctx.in_adj[0].data = nullptr;
+          kernel->backward(ctx);
+        }
+}
+
 int main(int argc, char** argv) {
   // Optional local UBSan diagnostic: the pinned Stan Math blocked routine
   // itself binds an empty Eigen block reference at its final panel. The
@@ -1012,8 +1081,9 @@ int main(int argc, char** argv) {
   qf_family(true, OP_QUAD_FORM_SYM, 2);
   std::printf("quad_form: max adj ulp=%.0f\n", g_max_qf_ulp);
 
+  test_add_diag_scalar_reverse_order();
+  test_mult_lower_tri_self_transpose_pullback();
   fixed_small_vs_dynamic();
 
-  if (!failures) std::puts("test_native_matrix_pullbacks OK");
-  return failures ? 1 : 0;
+  return finish("test_native_matrix_pullbacks");
 }

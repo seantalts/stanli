@@ -34,39 +34,43 @@ data arguments, where CmdStan uses the model-construction stream (seed 1,
 chain 0); those draws enter the log density and are copied into the output. CmdStan supplies all reference numbers. At three
 fixed unconstrained points the gate compares the log density, every gradient,
 the full column schema, and every output value. It rejects nonfinite probes,
-missing output, compilation failures and shape differences. The numerical
-gate is the corpus replay's `abs(a-b)/max(1,abs(a),abs(b)) <= 1e-9`.
+missing output, compilation failures, interpreter fallbacks and shape
+differences. The numerical gate is the corpus replay's
+`abs(a-b)/max(1,abs(a),abs(b)) < 1e-9`.
 
-CTest runs freshness, harness mutation tests, and numerical replay on each PR:
+CTest runs freshness, the inventory mutation test, and numerical replay on
+each PR:
 
 ```sh
 python3 tools/gen_function_models.py --check
 python3 tests/test_function_models.py
-python3 tools/check_function_models.py --build build-rel
+python3 tools/verify_refs.py --corpus functions --check build-rel/stanli_check
 ```
 
 The generator checks runtime dispatch literals and X-macro registrations
-against its recipes and the pinned signature inventory. Adding a named runtime
-function without a probe fails freshness; there is no automatic "unsupported"
-escape. This source audit is intentionally conservative and is not proof that
+against the names its models call and the names the generated signature models
+call (`builtin_signatures_manifest.json`, `density_signatures_manifest.json`).
+Adding a named runtime function that neither calls fails freshness; there is no
+automatic "unsupported" escape. This source audit is intentionally conservative and is not proof that
 every overload or execution path is implemented. The exhaustive nightly sweep
 and focused boundary tests retain those separate responsibilities.
 
 To change coverage, edit `recipes.py` or `higher_order.stan`, regenerate, and
-record all ten models with the pinned CmdStan checkout:
+record the changed models with the pinned CmdStan checkout:
 
 ```sh
 python3 tools/gen_function_models.py
-python3 tools/check_function_models.py --build build-rel --record --jobs 2
+python3 tools/verify_sample.py deps/cmdstan --corpus functions --jobs 2
 ```
 
-The reference artifact records compiler/dependency identities and model source
-hashes with CRLF normalized to LF, so Windows checkouts use the same references.
-Compiler binary hashes remain byte exact. Recording is independent of stanli's
-answers: all CmdStan rows are saved before replay, and a mismatch still fails.
-Never change references to match a stanli regression. The generated sources
-and reference artifact are committed so normal CI needs no CmdStan build or
-reference download.
+The references use the corpus reference format (see `tools/verify_refs.py`):
+per model the source and data hashes, with CRLF normalized to LF so Windows
+checkouts use the same references, and the CmdStan, Stan and Stan Math
+revisions they were recorded at. A replay fails when those revisions differ
+from `deps/pins.env`. Recording is independent of stanli's answers: stanli is
+not run, and a mismatch still fails. Never change references to match a
+stanli regression. The generated sources and reference artifact are committed
+so normal CI needs no CmdStan build or reference download.
 
 ## Container write/read grid
 
@@ -102,14 +106,13 @@ These models are not in `tests/fixtures`, so the cross-path matrix does not
 run them: their model blocks sum many `read * p[k]` terms, and rerolling and
 constant folding regroup that sum by 1-2 ULP.
 
-Regenerate and re-record with:
+CTest replays the grid through the embedded compiler and again through
+stock stanc (`--stanc`), and fails if any model falls back to the MIR
+interpreter. Regenerate and re-record with:
 
 ```sh
 python3 tools/gen_container_flow_models.py
-python3 tools/check_function_models.py --build build-rel --record --jobs 10 \
-  --fixtures tests/function_coverage/container_flow \
-  --manifest tests/function_coverage/container_flow_manifest.json \
-  --reference tests/function_coverage/container_flow_references.json.gz
+python3 tools/verify_sample.py deps/cmdstan --corpus container_flow --jobs 10
 ```
 
 `--single DIR` also writes each case as its own model, to find which case a

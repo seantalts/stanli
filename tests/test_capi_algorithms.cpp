@@ -278,6 +278,27 @@ std::vector<double> find_mode(stanli_model* m) {
   expect_near("mode theta[1]", q[0], kMean1, 1e-4);
   expect_near("mode theta[2]", q[1], kMean2, 1e-4);
   expect_near("mode log tau", q[2], 0.0, 1e-4);
+  double model_lp = 0;
+  std::vector<double> grad(3);
+  expect("model lp at the mode",
+         stanli_grad(m, q.data(), &model_lp, grad.data()) == 0);
+  expect_near("reported lp is the model's lp", lp, model_lp, 1e-9);
+
+  // One iteration cannot reach the mode from a random start, so these see
+  // whether the starting point reached the optimizer.
+  o.iter = 1;
+  std::vector<double> again(3), zero(3, 0.0), from_zero(3);
+  o.init = q.data();
+  stanli_optimize(m, &o, again.data(), values.data(), &lp, err, sizeof err);
+  for (int i = 0; i < 3; ++i)
+    expect_near("optimize is stable at the mode", again[(size_t)i],
+                q[(size_t)i], 1e-6);
+  o.init = zero.data();
+  stanli_optimize(m, &o, from_zero.data(), values.data(), &lp, err, sizeof err);
+  o.init = nullptr;
+  o.init_radius = 0.0;
+  stanli_optimize(m, &o, again.data(), values.data(), &lp, err, sizeof err);
+  expect("init_radius = 0 starts at the origin", again == from_zero);
   return q;
 }
 

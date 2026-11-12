@@ -1,3 +1,5 @@
+#include "expect.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -14,27 +16,10 @@ namespace {
 
 using namespace stanli;
 
-int failures = 0;
-
 void check(bool ok, const std::string& what) {
   if (!ok) {
     ++failures;
     std::printf("FAIL %s\n", what.c_str());
-  }
-}
-
-int64_t ulp_key(double d) {
-  int64_t i;
-  std::memcpy(&i, &d, sizeof(i));
-  return i < 0 ? std::numeric_limits<int64_t>::min() - i : i;
-}
-
-void expect_ulp(const std::string& what, double got, double want) {
-  const int64_t d = std::llabs(ulp_key(got) - ulp_key(want));
-  if (d > 2) {
-    ++failures;
-    std::printf("FAIL %-24s got %.17g want %.17g (%lld ulp)\n", what.c_str(),
-                got, want, (long long)d);
   }
 }
 
@@ -316,7 +301,7 @@ int main() {
     const std::vector<double> want = reference_simplex(b, nb, K - 1, K);
     for (int64_t i = 0; i < nb * (K - 1); ++i)
       expect_ulp("simplex in_adj[" + std::to_string(i) + "]",
-                 got.in_adj[(size_t)i], want[(size_t)i]);
+                 got.in_adj[(size_t)i], want[(size_t)i], 2);
   }
 
   {
@@ -328,7 +313,7 @@ int main() {
     const std::vector<double> want = reference_ordered(b, nb, K, K);
     for (int64_t i = 0; i < nb * K; ++i)
       expect_ulp("ordered in_adj[" + std::to_string(i) + "]",
-                 got.in_adj[(size_t)i], want[(size_t)i]);
+                 got.in_adj[(size_t)i], want[(size_t)i], 2);
 
     const Kernel* k = find_kernel(OP_CONSTRAIN_ORDERED);
     check(k != nullptr && k->scratch_size != nullptr,
@@ -344,13 +329,12 @@ int main() {
     const std::vector<double> want = reference_positive_ordered(b, nb, K, K);
     for (int64_t i = 0; i < nb * K; ++i)
       expect_ulp("pos_ordered in_adj[" + std::to_string(i) + "]",
-                 got.in_adj[(size_t)i], want[(size_t)i]);
+                 got.in_adj[(size_t)i], want[(size_t)i], 2);
 
     const Kernel* k = find_kernel(OP_CONSTRAIN_POS_ORDERED);
     check(k != nullptr && k->scratch_size != nullptr,
           "positive_ordered kernel declares a scratch hook");
   }
 
-  if (failures == 0) std::printf("test_constrain_structured OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_constrain_structured");
 }

@@ -9,6 +9,7 @@
 #include <stanli/optable.hpp>
 #include <stanli/wa_interp.hpp>
 
+#include "expect.hpp"
 #include "env_helpers.hpp"
 
 #include <algorithm>
@@ -21,15 +22,6 @@
 
 namespace {
 
-int failures = 0;
-
-void expect(const std::string& what, bool ok) {
-  if (!ok) {
-    ++failures;
-    std::printf("FAIL %s\n", what.c_str());
-  }
-}
-
 void expect_close(const std::string& what, double got, double want,
                   double rel = 2e-8) {
   const double scale = std::max(1.0, std::fabs(want));
@@ -37,13 +29,6 @@ void expect_close(const std::string& what, double got, double want,
     ++failures;
     std::printf("FAIL %s: got %.17g want %.17g\n", what.c_str(), got, want);
   }
-}
-
-std::string slurp(const std::string& path) {
-  std::ifstream f(path);
-  std::ostringstream out;
-  out << f.rdbuf();
-  return out.str();
 }
 
 struct KernelRun {
@@ -72,7 +57,7 @@ KernelRun run_kernel(const stanli::AlgebraSpec& spec, bool active,
   ctx.out_adj_vec =
       Desc{const_cast<double*>(weights.data()), (int64_t)weights.size()};
   const Kernel* kernel = find_kernel(OP_ALGEBRA_SOLVER);
-  expect("algebra kernel is registered", kernel != nullptr);
+  expect_true("algebra kernel is registered", kernel != nullptr);
   if (!kernel) return out;
   kernel->forward(ctx);
   kernel->backward(ctx);
@@ -92,21 +77,21 @@ void check_kernel(const stanli::AlgebraSpec& spec, const char* path) {
                -weights[0] * x2);
   expect_close(std::string(path) + " d/dtheta2", got.theta_adj[1],
                (-weights[0] * theta[0] + weights[1]) * x2);
-  expect(std::string(path) + " never changes guess adjoint 1",
-         got.guess_adj[0] == 11.0);
-  expect(std::string(path) + " never changes guess adjoint 2",
-         got.guess_adj[1] == 12.0);
+  expect_true(std::string(path) + " never changes guess adjoint 1",
+              got.guess_adj[0] == 11.0);
+  expect_true(std::string(path) + " never changes guess adjoint 2",
+              got.guess_adj[1] == 12.0);
 
   const KernelRun inactive = run_kernel(spec, false, guess, theta, weights);
   expect_close(std::string(path) + " inactive solution x1", inactive.value[0],
                x1);
   expect_close(std::string(path) + " inactive solution x2", inactive.value[1],
                x2);
-  expect(std::string(path) + " inactive Jacobian is zero",
-         std::all_of(inactive.jacobian.begin(), inactive.jacobian.end(),
-                     [](double x) { return x == 0.0; }));
-  expect(std::string(path) + " inactive theta adjoint stays zero",
-         inactive.theta_adj[0] == 0.0 && inactive.theta_adj[1] == 0.0);
+  expect_true(std::string(path) + " inactive Jacobian is zero",
+              std::all_of(inactive.jacobian.begin(), inactive.jacobian.end(),
+                          [](double x) { return x == 0.0; }));
+  expect_true(std::string(path) + " inactive theta adjoint stays zero",
+              inactive.theta_adj[0] == 0.0 && inactive.theta_adj[1] == 0.0);
 }
 
 }  // namespace
@@ -117,13 +102,13 @@ int main() {
   // complete.  A real late truncation (mother's case) takes the same path:
   // the interpreter restarts generate_quantities at statement zero and must
   // recompute the algebra_solver transformed parameters before writing them.
-  expect("force interpreted write_array environment",
-         test_setenv("STANLI_WA_FORCE_INTERP", "1", 1) == 0);
+  expect_true("force interpreted write_array environment",
+              test_setenv("STANLI_WA_FORCE_INTERP", "1", 1) == 0);
   CompiledModel cm =
       compile_model(slurp("tests/fixtures/algebra.tmir.sexp"),
                     DataMap::from_json_file("tests/fixtures/algebra.json"));
-  expect("clear interpreted write_array environment",
-         test_unsetenv("STANLI_WA_FORCE_INTERP") == 0);
+  expect_true("clear interpreted write_array environment",
+              test_unsetenv("STANLI_WA_FORCE_INTERP") == 0);
 
   int n_solver = 0, n_active = 0, n_inactive = 0, n_reject = 0;
   const AlgebraSpec* active_spec = nullptr;
@@ -138,14 +123,14 @@ int main() {
       ++n_inactive;
     }
   }
-  expect("three algebra_solver calls survive lowering", n_solver == 3);
-  expect("two theta-active algebra_solver calls", n_active == 2);
-  expect("one data-theta algebra_solver call", n_inactive == 1);
-  expect("empty map_rect never lowers its rejecting UDF", n_reject == 0);
-  expect("active algebra spec is retained", active_spec != nullptr);
+  expect_true("three algebra_solver calls survive lowering", n_solver == 3);
+  expect_true("two theta-active algebra_solver calls", n_active == 2);
+  expect_true("one data-theta algebra_solver call", n_inactive == 1);
+  expect_true("empty map_rect never lowers its rejecting UDF", n_reject == 0);
+  expect_true("active algebra spec is retained", active_spec != nullptr);
   if (active_spec) {
-    expect("algebraic MIR system compiles to a register program",
-           active_spec->prog.ok);
+    expect_true("algebraic MIR system compiles to a register program",
+                active_spec->prog.ok);
     check_kernel(*active_spec, "compiled callback");
 
     AlgebraSpec fallback;
@@ -156,14 +141,14 @@ int main() {
     fallback.relative_tolerance = active_spec->relative_tolerance;
     fallback.function_tolerance = active_spec->function_tolerance;
     fallback.max_num_steps = active_spec->max_num_steps;
-    expect("fallback spec deliberately has no register program",
-           !fallback.prog.ok);
+    expect_true("fallback spec deliberately has no register program",
+                !fallback.prog.ok);
     check_kernel(fallback, "interpreter callback");
   }
 
   Executor ex(std::move(cm.graph));
   cm.bind(ex);
-  expect("guess and theta contribute four parameters", ex.n_params() == 4);
+  expect_true("guess and theta contribute four parameters", ex.n_params() == 4);
   const std::vector<double> q{0.4, 1.2, 0.3, -0.2};
   for (size_t i = 0; i < q.size(); ++i) ex.params_data()[i] = q[i];
   std::vector<double> grad(q.size(), 0.0);
@@ -175,16 +160,16 @@ int main() {
   const double data_x1 = 6.0 - 0.15 * data_x2;
   const double want_lp = x1 + 0.2 * x2 + 0.1 * (data_x1 + data_x2);
   expect_close("compiled model lp", lp, want_lp);
-  expect("initial guess gradient 1 is exactly zero", grad[0] == 0.0);
-  expect("initial guess gradient 2 is exactly zero", grad[1] == 0.0);
+  expect_true("initial guess gradient 1 is exactly zero", grad[0] == 0.0);
+  expect_true("initial guess gradient 2 is exactly zero", grad[1] == 0.0);
   expect_close("compiled model d/dtheta1", grad[2], -x2);
   expect_close("compiled model d/dtheta2", grad[3], (-q[2] + 0.2) * x2);
 
   // A value-only solve leaves the Jacobian scratch unused; the next full
   // gradient must refill it and reproduce the same answer.
   for (size_t i = 0; i < q.size(); ++i) ex.params_data()[i] = q[i] + 0.05;
-  expect("value-only algebra solve is finite",
-         std::isfinite(ex.forward_value_only()));
+  expect_true("value-only algebra solve is finite",
+              std::isfinite(ex.forward_value_only()));
   for (size_t i = 0; i < q.size(); ++i) ex.params_data()[i] = q[i];
   std::vector<double> grad2(q.size(), 0.0);
   const double lp2 = ex.gradient(grad2.data());
@@ -193,8 +178,8 @@ int main() {
     expect_close("gradient after value-only solve " + std::to_string(i),
                  grad2[i], grad[i]);
 
-  expect("algebra fixture retains interpreted write_array",
-         cm.write_array && cm.write_array->interp);
+  expect_true("algebra fixture retains interpreted write_array",
+              cm.write_array && cm.write_array->interp);
   if (cm.write_array && cm.write_array->interp) {
     WaRng rng(1234);
     const std::vector<double> row =
@@ -203,7 +188,7 @@ int main() {
         CompiledModel::csv_names(cm.write_array->interp->columns());
     const auto wa_value = [&](const std::string& name) {
       const auto it = std::find(names.begin(), names.end(), name);
-      expect("interpreted write_array has " + name, it != names.end());
+      expect_true("interpreted write_array has " + name, it != names.end());
       return it == names.end()
                  ? NAN
                  : row.at(static_cast<size_t>(it - names.begin()));
@@ -216,6 +201,5 @@ int main() {
     expect_close("interpreted data solve x2", wa_value("z_data.2"), data_x2);
   }
 
-  if (failures == 0) std::printf("test_algebra: all checks passed\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_algebra");
 }

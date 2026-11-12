@@ -2,6 +2,8 @@
 // single-vector pullback in scratch. Pin its exact value and gradient, reuse
 // one Executor across value-only and gradient calls, and make every guard
 // mutation fall back to the generic nested-var implementation.
+#include "expect.hpp"
+
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -24,8 +26,6 @@ using MatD = Eigen::MatrixXd;
 using VecD = Eigen::VectorXd;
 using VarM = Eigen::Matrix<stan::math::var, -1, -1>;
 using VarV = Eigen::Matrix<stan::math::var, -1, 1>;
-
-int failures = 0;
 
 uint64_t bits(double x) {
   uint64_t out;
@@ -619,6 +619,5 @@ int main() {
             check_multi_normal(tag, n, 1, variant, weight, scenario, true);
           }
 
-  if (failures == 0) std::printf("test_mnc OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_mnc");
 }

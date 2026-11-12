@@ -197,7 +197,7 @@ ones through every stage, op list and register programs included.
 | [`runtime/src/stanc_embed_c.cpp`](../runtime/src/stanc_embed_c.cpp), [`tools/stanc_embed/`](../tools/stanc_embed/) | The native OCaml-runtime bridge plus exact-source overlay, provenance, and Windows cross-build tooling. |
 | [`js/`](../js/), [`web/`](../web/) | The npm package (a one-call `sample()` over a worker) and the demo page. The worker prefers the portable compiler and keeps stock stancjs as a one-cycle legacy fallback. [`tools/build_web.sh`](../tools/build_web.sh) builds the page from the package, so the two cannot drift. |
 | [`tools/`](../tools/) | Small programs and scripts; the important ones are listed below. |
-| [`harnesses/`](../harnesses/) | Corpus sweeps that need a local posteriordb: [`ab_corpus.py`](../harnesses/ab_corpus.py), [`fn_sweep.py`](../harnesses/fn_sweep.py), benchmarks. |
+| [`harnesses/`](../harnesses/) | Corpus sweeps that need a local posteriordb: [`fn_sweep.py`](../harnesses/fn_sweep.py), benchmarks. |
 | [`tests/`](../tests/) | One `test_*.cpp` per subsystem, plus [`fixtures/`](../tests/fixtures/) with checked-in `.stan` sources. CMake generates ignored MIR before its consumers; run [`tools/gen_fixtures.sh`](../tools/gen_fixtures.sh) to do so explicitly. |
 
 The tools you will reach for most:
@@ -835,11 +835,10 @@ python3 tools/verify_refs.py deps/posteriordb --check build-lite/stanli_check --
 
 If the change touches `runtime/kernels/density_fused.cpp`, build with the
 Stan Math kernels kept, which is the default of a plain `cmake -B build`
-(`-DSTANLI_STAN_DENSITY_ORACLE=ON`), and run the three differential tests
-(`test_density_fused`, `test_student_t_fused`, `test_ordered_logistic_fused`).
-They compare each fused kernel with Stan Math's own over every activity mask and
-shape and require bitwise equal results. `tools/dev_setup.sh` configures
-`build-rel` with the option OFF, as the release scripts and CI do, so the
+(`-DSTANLI_STAN_DENSITY_ORACLE=ON`), and run `test_density_fused`. It compares
+each fused kernel with Stan Math's own over every activity mask and shape and
+requires bitwise equal results, except 2 ULP for normal and cauchy.
+`tools/dev_setup.sh` configures `build-rel` with the option OFF, as the release scripts and CI do, so the
 corpus replay there runs the fused kernels alone; its `build` keeps them.
 `STANLI_NO_FUSED_DENSITY=1` selects Stan Math's kernels in an ON build and
 prints a notice, then is ignored, in an OFF build.
@@ -871,9 +870,9 @@ are not gated by this; they point at commits that already passed on
 main.
 
 Pull requests keep one Linux native build, CTest, recorded CmdStan replay,
-installed Python/R checks, and native/JavaScript compiler parity. The broad
-vectorization A/B sweep, performance comparisons, Windows/compiler and browser
-runtime builds, and full R-version matrix run after merge. See
+installed Python/R checks, and native/JavaScript compiler parity. Performance
+comparisons, Windows/compiler and browser runtime builds, and the full
+R-version matrix run after merge. See
 [`TESTING.md`](../TESTING.md#checks-run-before-and-after-merge) for the exact
 split and [`AGENTS.md`](../AGENTS.md) for project priorities.
 

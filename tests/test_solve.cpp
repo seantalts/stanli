@@ -18,6 +18,8 @@
 //     solverng.stan have identical deterministic columns except for one
 //     trailing scalar RNG draw. The shared columns must remain bitwise equal,
 //     and the compiled draw must consume the caller's exact Stan stream.
+#include "expect.hpp"
+
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
@@ -36,52 +38,11 @@
 
 namespace {
 
-int failures = 0;
-
 void check(bool ok, const std::string& what) {
   if (!ok) {
     ++failures;
     std::printf("FAIL %s\n", what.c_str());
   }
-}
-
-int64_t ulp_key(double d) {
-  int64_t i;
-  std::memcpy(&i, &d, sizeof(i));
-  return i < 0 ? std::numeric_limits<int64_t>::min() - i : i;
-}
-
-// Bitwise, with the distance reported when it is not: a solve that drifts is
-// worth seeing the size of rather than just the word FAIL.
-void expect_eq(const std::string& what, double got, double want) {
-  if (got != want) {
-    ++failures;
-    std::printf("FAIL %-24s got %.17g want %.17g (%lld ulp)\n", what.c_str(),
-                got, want, (long long)std::llabs(ulp_key(got) - ulp_key(want)));
-  }
-}
-
-// The project's 2 ULP budget, for the gradient only. The solve kernels are
-// the nested-tape tier: each replays its own call on a fresh tape, so an
-// input whose adjoint has more than one contributor gets those contributions
-// summed as (0+c1)+(0+c2) where one CmdStan tape sums them as ((s+c1)+c2).
-// Measured on this fixture: 2 ULP on one entry of dB, which reaches two
-// solves through the transformed parameter P. lp and every write_array
-// column are bitwise and are checked as such.
-void expect_ulp(const std::string& what, double got, double want) {
-  const int64_t dist = std::llabs(ulp_key(got) - ulp_key(want));
-  if (dist > 2) {
-    ++failures;
-    std::printf("FAIL %-24s got %.17g want %.17g (%lld ulp)\n", what.c_str(),
-                got, want, (long long)dist);
-  }
-}
-
-std::string slurp(const std::string& path) {
-  std::ifstream f(path);
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
 }
 
 // The draw both halves of the test run at. Spread so no two parameters
@@ -200,8 +161,15 @@ int main() {
     std::vector<double> gref;
     const double lpref = reference(q, A, gref);
     expect_eq("lp", lp, lpref);
+    // The project's 2 ULP budget, for the gradient only. The solve kernels
+    // are the nested-tape tier: each replays its own call on a fresh tape, so
+    // an input whose adjoint has more than one contributor gets those
+    // contributions summed as (0+c1)+(0+c2) where one CmdStan tape sums them
+    // as ((s+c1)+c2). Measured on this fixture: 2 ULP on one entry of dB,
+    // which reaches two solves through the transformed parameter P. lp and
+    // every write_array column are bitwise and are checked as such.
     for (size_t i = 0; i < grad.size(); ++i)
-      expect_ulp("grad[" + std::to_string(i) + "]", grad[i], gref[i]);
+      expect_ulp("grad[" + std::to_string(i) + "]", grad[i], gref[i], 2);
   }
 
   // Generated quantities: the whole section lowers, so the graph -- not the
@@ -288,6 +256,5 @@ int main() {
     check(irow == reseeded, "solverng reseed reproduces row");
   }
 
-  if (failures == 0) std::printf("test_solve OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_solve");
 }

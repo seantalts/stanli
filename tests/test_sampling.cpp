@@ -1,33 +1,28 @@
-// Sampling-level correctness: does the whole engine -- lowering, the log_prob
-// graph, the write_array graph, the adaptive sampler -- land on the right
-// posterior?
+// This file exists for two reasons.
 //
-// Every other test in the suite, and the corpus verification rig too, pins a
-// gradient at a fixed point and compares it to CmdStan. That is a strong
-// oracle for the graph and a blind one for the sampler: max tree depth
-// defaulted to 5 instead of CmdStan's 10 for the whole life of the project,
-// which left every gradient bit-identical and every posterior needing a long
-// trajectory under-explored. Nothing structural could have caught it. So:
+// Max tree depth defaulted to 5 instead of CmdStan's 10 for the whole life of
+// the project, which left every gradient bit-identical and every posterior
+// needing a long trajectory under-explored. test_sampler_parity sets max_depth
+// explicitly, so ar1 is the check on the default: a badly conditioned Gaussian
+// that needs trajectories longer than a depth-5 sampler can produce.
 //
-//   conj  a conjugate normal whose posterior is known in closed form, with a
-//         transformed data block, a transformed parameter and generated
-//         quantities -- checked in distribution against the analytic moments,
-//         and exactly, draw by draw, for the deterministic columns.
-//   ar1   a badly conditioned Gaussian, checked for trajectories longer than
-//         a depth-5 sampler can produce.
+// conj is a compiled model with transformed data, a transformed parameter and
+// generated quantities, and its posterior is known in closed form. Sampling it
+// runs thousands of gradient calls on one executor. State that one call leaves
+// for the next, such as memo caches, in-place buffers or islands, can be wrong
+// while every pointwise check passes. Replay tests evaluate fixed points, and
+// sampler parity gives both samplers the same executor, so neither sees it.
 #include <stanli/compile.hpp>
 #include <stanli/nuts.hpp>
 
 #include <cmath>
 #include <cstdio>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <vector>
 
-namespace {
+#include "expect.hpp"
 
-int failures = 0;
+namespace {
 
 void expect_near(const std::string& what, double got, double want, double tol) {
   if (!(std::fabs(got - want) <= tol)) {
@@ -51,13 +46,6 @@ void expect_eq_str(const std::string& what, const std::string& got,
     std::printf("FAIL %s\n  got  %s\n  want %s\n", what.c_str(), got.c_str(),
                 want.c_str());
   }
-}
-
-std::string slurp(const std::string& path) {
-  std::ifstream f(path);
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
 }
 
 double mean(const std::vector<double>& v) {
@@ -259,6 +247,5 @@ void test_trajectory_depth() {
 int main() {
   test_conjugate();
   test_trajectory_depth();
-  if (failures == 0) std::printf("test_sampling OK\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_sampling");
 }

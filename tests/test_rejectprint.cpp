@@ -13,6 +13,8 @@
 //
 // The failure that matters is silence: a reject that is skipped rather
 // than taken lets stanli sample happily from a model CmdStan refuses.
+#include "expect.hpp"
+
 #include <stanli/compile.hpp>
 #include <stanli/message_sink.hpp>
 
@@ -23,20 +25,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-static int failures = 0;
-static void expect(const std::string& what, bool ok) {
-  if (!ok) {
-    ++failures;
-    std::printf("FAIL %s\n", what.c_str());
-  }
-}
-static std::string slurp(const std::string& p) {
-  std::ifstream f(p);
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
-}
 
 int main() {
   using namespace stanli;
@@ -53,11 +41,11 @@ int main() {
     CompiledModel cm = compile_model(mir, d);
     Executor ex(std::move(cm.graph));
     cm.bind(ex);
-    expect("3 parameters", ex.n_params() == 3);
+    expect_true("3 parameters", ex.n_params() == 3);
     for (int64_t i = 0; i < ex.n_params(); ++i) ex.params_data()[i] = 0.1;
     std::vector<double> g((size_t)ex.n_params());
     const double lp = ex.gradient(g.data());
-    expect("evaluates when no reject is taken", std::isfinite(lp));
+    expect_true("evaluates when no reject is taken", std::isfinite(lp));
   }
 
   // ---- transformed-data reject taken: compilation itself must fail ----
@@ -71,12 +59,12 @@ int main() {
       threw = true;
       msg = e.what();
     }
-    expect("a taken transformed-data reject fails the compile", threw);
+    expect_true("a taken transformed-data reject fails the compile", threw);
     // And it carries the user's message with the value interpolated --
     // which is the whole point of reject over a bare throw.
-    expect("with the user's message: " + msg,
-           msg.find("N must be nonnegative") != std::string::npos &&
-               msg.find("-1") != std::string::npos);
+    expect_true("with the user's message: " + msg,
+                msg.find("N must be nonnegative") != std::string::npos &&
+                    msg.find("-1") != std::string::npos);
   }
 
   // ---- model-block reject taken: evaluation must throw ----------------
@@ -97,10 +85,10 @@ int main() {
       threw = true;
       msg = e.what();
     }
-    expect("a taken model-block reject throws domain_error", threw);
-    expect("with every chunk and value: " + msg,
-           msg.find("N too large: 200") != std::string::npos &&
-               msg.find("limit 2.5") != std::string::npos);
+    expect_true("a taken model-block reject throws domain_error", threw);
+    expect_true("with every chunk and value: " + msg,
+                msg.find("N too large: 200") != std::string::npos &&
+                    msg.find("limit 2.5") != std::string::npos);
   }
 
   // ---- fatal_error throws std::runtime_error, never a rejection ---------
@@ -115,8 +103,8 @@ int main() {
     } catch (const std::runtime_error& e) {
       msg = e.what();
     }
-    expect("a transformed-data fatal_error fails the compile: " + msg,
-           msg.find("N is -2") != std::string::npos);
+    expect_true("a transformed-data fatal_error fails the compile: " + msg,
+                msg.find("N is -2") != std::string::npos);
     for (const double x : {0.5, 20.0}) {
       CompiledModel cm = compile_model(fatal, n(x > 10 ? 3 : 200));
       Executor ex(std::move(cm.graph));
@@ -133,8 +121,8 @@ int main() {
         msg = e.what();
       }
       const std::string want = x > 10 ? "x too large: 20" : "N too large: 200";
-      expect("a model-block fatal_error throws runtime_error: " + msg,
-             !domain && msg.find(want) != std::string::npos);
+      expect_true("a model-block fatal_error throws runtime_error: " + msg,
+                  !domain && msg.find(want) != std::string::npos);
     }
   }
 
@@ -158,15 +146,15 @@ int main() {
     ex.gradient(g.data());
     set_message_sink(nullptr);
 
-    expect("the sink saw both prints, got " + std::to_string(lines.size()),
-           lines.size() == 2);
+    expect_true("the sink saw both prints, got " + std::to_string(lines.size()),
+                lines.size() == 2);
     if (lines.size() == 2) {
-      expect("transformed-data print: " + lines[0],
-             lines[0] == "compiled with N = 7");
+      expect_true("transformed-data print: " + lines[0],
+                  lines[0] == "compiled with N = 7");
       // The container prints in brackets and the scalar bare, CmdStan's
       // formatting, and the sink is handed the line without a newline.
-      expect("model-block print: " + lines[1],
-             lines[1] == "drawing at x = 0.25 v = [0.25,0.25]");
+      expect_true("model-block print: " + lines[1],
+                  lines[1] == "drawing at x = 0.25 v = [0.25,0.25]");
     }
     // Restoring the default must actually restore it: a later evaluation
     // writes to stdout again rather than to a dangling sink.
@@ -195,13 +183,13 @@ int main() {
       msg = e.what();
     }
     set_message_sink(nullptr);
-    expect("ordered graph reject throws domain_error", threw);
-    expect("graph reject renders its scalar message exactly: " + msg,
-           msg == "stop scalar=0.1");
-    expect("only one effect precedes graph reject", lines.size() == 1);
+    expect_true("ordered graph reject throws domain_error", threw);
+    expect_true("graph reject renders its scalar message exactly: " + msg,
+                msg == "stop scalar=0.1");
+    expect_true("only one effect precedes graph reject", lines.size() == 1);
     if (lines.size() == 1)
-      expect("effect before graph reject: " + lines[0],
-             lines[0] == "before scalar=0.1");
+      expect_true("effect before graph reject: " + lines[0],
+                  lines[0] == "before scalar=0.1");
   }
 
   // ---- parameter-dependent print executes only in the forward ---------
@@ -233,20 +221,21 @@ int main() {
 
     ex.params_data()[0] = 0.1;
     const double positive_lp = ex.gradient(g.data());
-    expect("necessity print positive lp", positive_lp == 0.1);
-    expect("necessity print positive gradient", g[0] == 1.0);
-    expect("necessity print runs once, got " + std::to_string(lines.size()),
-           lines.size() == 1);
+    expect_true("necessity print positive lp", positive_lp == 0.1);
+    expect_true("necessity print positive gradient", g[0] == 1.0);
+    expect_true(
+        "necessity print runs once, got " + std::to_string(lines.size()),
+        lines.size() == 1);
     if (lines.size() == 1)
-      expect("necessity print message: " + lines[0],
-             lines[0] == "positive x=0.1");
+      expect_true("necessity print message: " + lines[0],
+                  lines[0] == "positive x=0.1");
 
     lines.clear();
     ex.params_data()[0] = -0.04;
     const double negative_lp = ex.gradient(g.data());
-    expect("necessity print negative lp", negative_lp == -0.04);
-    expect("necessity print negative gradient", g[0] == 1.0);
-    expect("untaken necessity print is silent", lines.empty());
+    expect_true("necessity print negative lp", negative_lp == -0.04);
+    expect_true("necessity print negative gradient", g[0] == 1.0);
+    expect_true("untaken necessity print is silent", lines.empty());
     set_message_sink(nullptr);
   }
 
@@ -267,10 +256,10 @@ int main() {
     ex.params_data()[0] = 0.2;
     const double lp = ex.gradient(g.data());
     set_message_sink(nullptr);
-    expect("print-only necessity island has zero lp", lp == 0.0);
-    expect("print-only necessity island has zero gradient", g[0] == 0.0);
-    expect("print-only necessity island is retained and executes once",
-           lines.size() == 1 && lines[0] == "print-only x=0.2");
+    expect_true("print-only necessity island has zero lp", lp == 0.0);
+    expect_true("print-only necessity island has zero gradient", g[0] == 0.0);
+    expect_true("print-only necessity island is retained and executes once",
+                lines.size() == 1 && lines[0] == "print-only x=0.2");
   }
 
   // A runtime-valued reject uses the same literal/value message template as
@@ -287,8 +276,8 @@ int main() {
 
     ex.params_data()[0] = 0.1;
     const double accepted_lp = ex.gradient(g.data());
-    expect("necessity untaken reject lp", accepted_lp == 0.1);
-    expect("necessity untaken reject gradient", g[0] == 1.0);
+    expect_true("necessity untaken reject lp", accepted_lp == 0.1);
+    expect_true("necessity untaken reject gradient", g[0] == 1.0);
 
     ex.params_data()[0] = -0.1;
     std::string message;
@@ -297,8 +286,8 @@ int main() {
     } catch (const std::domain_error& e) {
       message = e.what();
     }
-    expect("necessity dynamic reject message: " + message,
-           message == "negative x=-0.1");
+    expect_true("necessity dynamic reject message: " + message,
+                message == "negative x=-0.1");
   }
 
   // A recursive cycle is not itself an effect, but an effect reachable in
@@ -318,29 +307,28 @@ int main() {
 
     ex.params_data()[0] = 0.25;
     const double untaken_lp = ex.gradient(g.data());
-    expect("effectful recursive UDF untaken lp",
-           untaken_lp == -0.5 * 0.25 * 0.25);
-    expect("effectful recursive UDF untaken gradient", g[0] == -0.25);
-    expect("effectful recursive UDF is not evaluated during compilation",
-           lines.empty());
+    expect_true("effectful recursive UDF untaken lp",
+                untaken_lp == -0.5 * 0.25 * 0.25);
+    expect_true("effectful recursive UDF untaken gradient", g[0] == -0.25);
+    expect_true("effectful recursive UDF is not evaluated during compilation",
+                lines.empty());
 
     ex.params_data()[0] = 101.0;
     const double taken_lp = ex.gradient(g.data());
     set_message_sink(nullptr);
-    expect("effectful recursive UDF taken lp",
-           taken_lp == -0.5 * 101.0 * 101.0);
-    expect("effectful recursive UDF taken gradient", g[0] == -101.0);
-    expect("effectful recursive UDF emits exactly twice, got " +
-               std::to_string(lines.size()),
-           lines.size() == 2);
+    expect_true("effectful recursive UDF taken lp",
+                taken_lp == -0.5 * 101.0 * 101.0);
+    expect_true("effectful recursive UDF taken gradient", g[0] == -101.0);
+    expect_true("effectful recursive UDF emits exactly twice, got " +
+                    std::to_string(lines.size()),
+                lines.size() == 2);
     if (lines.size() == 2) {
-      expect("recursive effect remains ordered: " + lines[0],
-             lines[0] == "recursive base");
-      expect("outer recursive print remains ordered: " + lines[1],
-             lines[1] == "known effectful recursive real: -0.5");
+      expect_true("recursive effect remains ordered: " + lines[0],
+                  lines[0] == "recursive base");
+      expect_true("outer recursive print remains ordered: " + lines[1],
+                  lines[1] == "known effectful recursive real: -0.5");
     }
   }
 
-  if (failures == 0) std::printf("test_rejectprint: all checks passed\n");
-  return failures == 0 ? 0 : 1;
+  return finish("test_rejectprint");
 }

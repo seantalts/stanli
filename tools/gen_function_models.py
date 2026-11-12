@@ -24,6 +24,15 @@ from conformance.signatures import inventory_from_dump
 from recipes import GROUPS, HELPERS, PREAMBLE
 
 DEST = REPO / "tests" / "function_coverage"
+SIGNATURE_MANIFESTS = (DEST / "builtin_signatures_manifest.json",
+                       DEST / "density_signatures_manifest.json")
+
+
+def signature_names():
+    """Names the generated signature models call, every overload replayed."""
+    return {name for path in SIGNATURE_MANIFESTS
+            for model in json.loads(path.read_text())["models"]
+            for name in model["functions"]}
 
 
 def render():
@@ -167,13 +176,13 @@ def render():
     )
     for name in ("student_t_qf", "poisson_binomial_lpmf", "poisson_binomial_cdf",
                  "poisson_binomial_lcdf", "poisson_binomial_lccdf", "poisson_binomial_rng"):
-        focused[name] = "tests/fixtures/stan240_functions.stan; fresh CmdStan 2.40 references in stan240_references.json.gz"
+        focused[name] = "tests/fixtures/stan240_functions.stan; CmdStan references in sized_functions_references.json.gz"
     for name in ("sort_asc", "sort_desc", "sort_indices_asc", "sort_indices_desc",
                  "rank"):
         focused[name] = (
             "tests/fixtures/sort_functions.stan; data and parameter inputs in "
-            "transformed data, model, and generated quantities; fresh CmdStan "
-            "2.40 references in sort_references.json.gz"
+            "transformed data, model, and generated quantities; CmdStan "
+            "references in sized_functions_references.json.gz"
         )
     for name in ("wiener_lcdf_unnorm", "wiener_lccdf_unnorm"):
         focused[name] = (
@@ -192,8 +201,8 @@ def render():
                  "quantile", "scale_matrix_exp_multiply", "trace_dot",
                  "trace_gen_quad_form", "trace_quad_form", "yule_simon_rng"):
         focused[name] = (
-            "tests/fixtures/library_functions.stan; fresh CmdStan 2.40 "
-            "references in library_references.json.gz"
+            "tests/fixtures/library_functions.stan; CmdStan references in "
+            "sized_functions_references.json.gz"
         )
     for name in ("to_vector_array", "to_row_vector_array"):
         focused[name] = "tests/fixtures/stan240_containers.stan; rectangular and zero-extent round trips"
@@ -215,7 +224,8 @@ def render():
             "every registered constructor overload in transformed data, "
             "graph, runtime-control, and generated-quantities contexts"
         )
-    missing = candidates - covered - set(refusals) - set(focused)
+    missing = (candidates - covered - signature_names() - set(refusals)
+               - set(focused))
     if missing:
         raise ValueError("Runtime functions need coverage recipes: " + ", ".join(sorted(missing)))
     manifest["recognized_but_unsupported"] = refusals

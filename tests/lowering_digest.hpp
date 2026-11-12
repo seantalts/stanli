@@ -224,16 +224,6 @@ inline std::string describe_exception(const std::exception& e) {
   return std::string("THROWS ") + typeid(e).name() + ": " + e.what() + "\n";
 }
 
-inline std::string digest(const std::string& mir, const DataMap& data,
-                          unsigned seed = 1) {
-  try {
-    CompiledModel cm = compile_model(mir, data, seed);
-    return describe(cm) + describe_values(cm);
-  } catch (const std::exception& e) {
-    return describe_exception(e);
-  }
-}
-
 }  // namespace lowering_digest
 }  // namespace stanli
 

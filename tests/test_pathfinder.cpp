@@ -1,12 +1,7 @@
-// Single-path Pathfinder end to end through stan's own service driving the
-// executor's gradient, plus the Pareto k-hat diagnostic that says whether
-// its draws are worth trusting.
-//
-// Pathfinder is an approximation, so the checks are looser than the
-// sampler tests: what they pin down is that draws arrive at all (the
-// service writes them through an Eigen row-vector overload that a
-// std::vector-only collector drops on the floor), that they land on the
-// right posterior, and that the init is the one NUTS would have used.
+// The older single-path Pathfinder entry, run_pathfinder: determinism, the
+// init it shares with NUTS, an explicit init, the per-iterate observer, and
+// the Pareto k-hat diagnostic. test_capi expect_pathfinder checks its draws
+// through the ABI and test_algorithms pins the service's stream.
 #include "models.hpp"
 
 #include <stanli/estimate.hpp>
@@ -35,108 +30,12 @@ static void expect_in(const std::string& what, double got, double lo,
   }
 }
 
-static stanli::Graph std_normal_graph(int D) {
-  using namespace stanli;
-  Graph g;
-  const int x = g.add_slot(D, true);
-  const int zero = g.add_slot(1, false);
-  const int one = g.add_slot(1, false);
-  const int lp = g.add_slot(1, false);
-  g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
-  g.result_slot = lp;
-  return g;
-}
-
 int main() {
   using namespace stanli;
 
-  // ---- 10-dim standard normal: Pathfinder's target case -----------------
-  // A Gaussian posterior is exactly what the Taylor approximation along
-  // the L-BFGS path represents, so the draws should be near-exact and
-  // k-hat should say so.
-  {
-    const int D = 10;
-    Executor ex(std_normal_graph(D));
-    ex.value_ptr(1)[0] = 0.0;
-    ex.value_ptr(2)[0] = 1.0;
-
-    PathfinderConfig cfg;
-    cfg.seed = 20260815;
-    cfg.num_draws = 2000;
-    PathfinderResult r = run_pathfinder(ex, cfg);
-    expect("normal return code " + std::to_string(r.return_code),
-           r.return_code == 0);
-    expect("normal draw count " + std::to_string(r.draws.size()),
-           (int)r.draws.size() == cfg.num_draws);
-    expect("normal lp per draw", r.lp.size() == r.draws.size());
-    expect("normal lp_approx per draw", r.lp_approx.size() == r.draws.size());
-    if (r.draws.empty()) {
-      std::printf("%d failures\n", ++failures);
-      return 1;
-    }
-    for (int d = 0; d < D; ++d) {
-      double m = 0, m2 = 0;
-      for (const auto& q : r.draws) m += q[d];
-      m /= r.draws.size();
-      for (const auto& q : r.draws) m2 += (q[d] - m) * (q[d] - m);
-      const double sd = std::sqrt(m2 / (r.draws.size() - 1));
-      expect_in("norm mean[" + std::to_string(d) + "]", m, -0.15, 0.15);
-      expect_in("norm sd[" + std::to_string(d) + "]", sd, 0.85, 1.15);
-    }
-    expect_in("norm khat", r.khat, -1.0, 0.5);
-    expect("norm path non-empty", !r.path.empty());
-    expect("norm selected iterate in path",
-           r.selected_iter >= 0 && r.selected_iter < (int)r.path.size());
-  }
-
-  // ---- eight schools: a funnel, which Pathfinder approximates badly ----
-  // The band is far wider and far lower than the sampler tests' [2.5, 6.5]
-  // because a single normal approximation cannot cover this posterior: it
-  // lands near mu = 1.5 with a quarter of NUTS's spread. That is the
-  // method, not the wiring, and it is exactly what the comparison view is
-  // for. k-hat stays small because a narrow proposal has light importance
-  // ratios -- it says the weights are stable, never that they cover.
-  {
-    auto m = testmodels::eight_schools();
-    Executor ex(std::move(m.graph));
-    testmodels::fill_eight_schools_data(m, ex);
-
-    PathfinderConfig cfg;
-    cfg.seed = 8675309;
-    cfg.num_draws = 2000;
-    PathfinderResult r = run_pathfinder(ex, cfg);
-    expect("es return code " + std::to_string(r.return_code),
-           r.return_code == 0);
-    if (r.draws.empty()) {
-      std::printf("%d failures\n", ++failures);
-      return 1;
-    }
-    double mu_mean = 0;
-    int nan_count = 0;
-    for (const auto& q : r.draws) {
-      for (double v : q)
-        if (std::isnan(v)) ++nan_count;
-      mu_mean += q[0];
-    }
-    mu_mean /= r.draws.size();
-    expect_in("es nan_count", nan_count, 0, 0);
-    expect_in("es mu mean", mu_mean, -1.0, 4.0);
-    expect("es khat finite", std::isfinite(r.khat));
-
-    // The path climbs: the ELBO picks an iterate on the way up, never the
-    // starting point the optimizer was handed.
-    expect("es path non-empty", r.path.size() > 1);
-    expect("es selected iterate in path",
-           r.selected_iter > 0 && r.selected_iter < (int)r.path.size());
-    if (r.selected_iter > 0 && r.selected_iter < (int)r.path.size())
-      expect("es selected lp above the start",
-             r.path[(size_t)r.selected_iter].lp > r.path[0].lp);
-    expect("es selected elbo finite", std::isfinite(r.selected_elbo));
-  }
-
   // ---- determinism -----------------------------------------------------
   {
-    Executor ex(std_normal_graph(3));
+    Executor ex(testmodels::std_normal(3));
     ex.value_ptr(1)[0] = 0.0;
     ex.value_ptr(2)[0] = 1.0;
 
@@ -159,7 +58,7 @@ int main() {
   // draws, so a NUTS-vs-Pathfinder run compares methods and not starting
   // places. Path iterate 0 is that point, so its lp is the oracle.
   {
-    Executor ex(std_normal_graph(4));
+    Executor ex(testmodels::std_normal(4));
     ex.value_ptr(1)[0] = 0.0;
     ex.value_ptr(2)[0] = 1.0;
 
@@ -180,7 +79,7 @@ int main() {
 
   // ---- explicit init ---------------------------------------------------
   {
-    Executor ex(std_normal_graph(2));
+    Executor ex(testmodels::std_normal(2));
     ex.value_ptr(1)[0] = 0.0;
     ex.value_ptr(2)[0] = 1.0;
 
@@ -212,6 +111,10 @@ int main() {
     PathfinderResult r = run_pathfinder(
         ex, cfg, [&](const PathIterate& it) { seen.push_back(it); });
     expect("observer saw every iterate", seen.size() == r.path.size());
+    // The ELBO picks an iterate on the way up, never the starting point.
+    expect("selected iterate past the start",
+           r.selected_iter > 0 && r.selected_iter < (int)r.path.size() &&
+               r.path[(size_t)r.selected_iter].lp > r.path[0].lp);
     for (size_t i = 0; i < seen.size() && i < r.path.size(); ++i)
       expect("observer iterate " + std::to_string(i),
              seen[i].iter == r.path[i].iter && seen[i].lp == r.path[i].lp);
