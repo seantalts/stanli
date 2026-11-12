@@ -1157,7 +1157,6 @@ __attribute__((aligned(64))) void run_adjoint(const Program& fwd,
         case Program::TRANSFORM:
         case Program::PRINT:
         case Program::REJECT:
-        case Program::DENSITY_VEC:
         case Program::PATH:
           break;  // gen_adjoint refuses these; unreachable
         case Program::CALL:

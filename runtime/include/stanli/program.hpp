@@ -148,7 +148,6 @@ inline constexpr int32_t kProgramExtremaPhaseShift = 3;
   X(TRANSFORM, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)       \
   X(PRINT, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)           \
   X(REJECT, kProgramNoInputs | kProgramNoAdjoint | kProgramNoOutput)          \
-  X(DENSITY_VEC, kProgramNoAdjoint)                                           \
   /* An elementwise rule (sub) over len elements; see Instr. */               \
   X(RANGE, 0)                                                                 \
   X(ERFC, kProgramSaveA)                                                      \
@@ -283,31 +282,11 @@ struct Program {
     int32_t rows = 0;
   };
 
-  // A DENSITY_VEC's payload: same density id DENSITY uses, but one or more
-  // arguments is a same-length container rather than a scalar, evaluated
-  // with one propto-OFF call the way CmdStan's generated code would (its
-  // Eigen broadcasting, not N scalar calls summed by hand -- see
-  // program_density_vec). `container_mask` bit k says argument k is `len`
-  // consecutive registers starting at `arg_reg[k]`; a clear bit says it is
-  // the one register at `arg_reg[k]`, same as DENSITY's scalar argument.
-  // No `scratch`: unlike CALL, this runs under both double and var by
-  // re-evaluating the same stan-math call, so there is no forward-computed
-  // partial to carry to a hand-written backward.
-  struct VecDensity {
-    uint16_t density_id = 0;
-    uint8_t arity = 0;
-    uint8_t container_mask = 0;
-    int32_t len = 0;
-    int32_t arg_reg[4] = {0, 0, 0, 0};
-  };
-
   std::vector<Instr> code;
   std::vector<Call> calls;            // CALL payloads, indexed by Instr::a
   std::vector<Transform> transforms;  // TRANSFORM payloads, indexed by Instr::a
   std::vector<Message> messages;      // PRINT/REJECT payloads, by Instr::a
   std::vector<double> pool;           // CONSTR data
-  // DENSITY_VEC payloads, indexed by Instr::a.
-  std::vector<VecDensity> vec_densities;
   int n_regs = 0;
   std::vector<int> out_regs;  // the values the caller reads back
 };
@@ -935,12 +914,6 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
       case Program::RANGE:
         run_elementwise_range(I, reg);
         break;
-      case Program::DENSITY_VEC: {
-        const Program::VecDensity& v = p.vec_densities[(size_t)I.a];
-        d() = program_density_vec<T>(v.density_id, v.container_mask, v.len, reg,
-                                     v.arg_reg);
-        break;
-      }
     }
   }
 }
