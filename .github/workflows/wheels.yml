@@ -1123,8 +1123,6 @@ jobs:
       needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    env:
-      WINDOWS_DUNE_VERSION: 3.24.2
     steps:
       - uses: actions/checkout@v4
 
@@ -1141,7 +1139,7 @@ jobs:
         with:
           path: windows-compilers/
           key: >-
-            windows-compilers-v1-${{ env.STANC3_SRC_REPO }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.WINDOWS_DUNE_VERSION }}-${{ hashFiles('.gitattributes', 'compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
+            windows-compilers-v1-${{ env.STANC3_SRC_REPO }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.DUNE_VERSION }}-${{ hashFiles('.gitattributes', 'compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
 
       - name: Cross-compiler
         if: steps.windows-compilers-cache.outputs.cache-hit != 'true'
@@ -1161,9 +1159,9 @@ jobs:
             windows: http://github.com/ocaml-cross/opam-cross-windows.git
             default: https://github.com/ocaml/opam-repository.git
 
-      - name: Dune ${{ env.WINDOWS_DUNE_VERSION }}
+      - name: Dune ${{ env.DUNE_VERSION }}
         if: steps.windows-compilers-cache.outputs.cache-hit != 'true'
-        run: opam install -y "dune.$WINDOWS_DUNE_VERSION"
+        run: opam install -y "dune.$DUNE_VERSION"
 
       - name: Build the pinned compilers
         if: steps.windows-compilers-cache.outputs.cache-hit != 'true'
@@ -1209,7 +1207,7 @@ jobs:
             "$STANC3_SRC_REPO" "$STANC3_SRC_SHA"
           test "$(_stanc_embed_stamp_value \
             windows-compilers/stanli-compile.stamp dune_version)" = \
-            "$WINDOWS_DUNE_VERSION"
+            "$DUNE_VERSION"
           compiler_types=$(file \
             windows-compilers/stanc windows-compilers/stanli-compile)
           printf '%s\n' "$compiler_types"
@@ -1942,7 +1940,7 @@ jobs:
             deps/stanc3/stanli_compiler_cli
             deps/stanc3/stanli_compiler_cli.stamp
           key: >-
-            browser-compilers-v2-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-jsoo6.4.1-${{ hashFiles('compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
+            browser-compilers-v2-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.DUNE_VERSION }}-jsoo6.4.1-${{ hashFiles('compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
 
       - name: opam ${{ env.OPAM_VERSION }}
         if: steps.stancjs-cache.outputs.cache-hit != 'true'
@@ -1964,6 +1962,7 @@ jobs:
           git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
           test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
           (cd deps/stanc3-src &&
+           opam install --switch=stancjs -y "dune.$DUNE_VERSION" &&
            opam install . --switch=stancjs --deps-only -y &&
            opam install --switch=stancjs -y \
              js_of_ocaml.6.4.1 js_of_ocaml-compiler.6.4.1 \
