@@ -99,7 +99,7 @@ if ! opam switch list --color=never --short 2>/dev/null | tr -d '\r' | grep -Fqx
     --confirm-level="$opam_confirm"
 fi
 eval "$(opam env --switch="$switch" --set-switch)"
-opam install "dune.$DUNE_VERSION" --confirm-level="$opam_confirm"
+opam pin add -n dune "$DUNE_VERSION" --confirm-level="$opam_confirm"
 (cd "$src_dir" && opam install . --deps-only --confirm-level="$opam_confirm")
 # Fill the %%NAME%%/%%VERSION%% placeholders from git, as the release
 # pipeline would; without this every source build answers --version

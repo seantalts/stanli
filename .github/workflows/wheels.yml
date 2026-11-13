@@ -1161,7 +1161,7 @@ jobs:
 
       - name: Dune ${{ env.DUNE_VERSION }}
         if: steps.windows-compilers-cache.outputs.cache-hit != 'true'
-        run: opam install -y "dune.$DUNE_VERSION"
+        run: opam pin add -y dune "$DUNE_VERSION"
 
       - name: Build the pinned compilers
         if: steps.windows-compilers-cache.outputs.cache-hit != 'true'
@@ -1962,7 +1962,7 @@ jobs:
           git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
           test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
           (cd deps/stanc3-src &&
-           opam install --switch=stancjs -y "dune.$DUNE_VERSION" &&
+           opam pin add --switch=stancjs -y -n dune "$DUNE_VERSION" &&
            opam install . --switch=stancjs --deps-only -y &&
            opam install --switch=stancjs -y \
              js_of_ocaml.6.4.1 js_of_ocaml-compiler.6.4.1 \
