@@ -6,6 +6,7 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 PINS_FILE = REPO / "deps" / "pins.env"
+# CmdStan's compiler, built from STANC3_UPSTREAM_SHA rather than stanli's fork.
 PINNED_STANC = REPO / "deps" / "stanc3" / "stanc-pinned"
 STAMP_NAME = ".stanli-build-stamp"
 SETUP_COMMAND = "harnesses/conformance/fetch_cmdstan.sh"
@@ -17,7 +18,7 @@ LABELS = {
     "cmdstan_tree": "CmdStan tracked files",
     "cmdstan_stanc": "CmdStan bin/stanc sha256",
     "stanc": "stanc sha256",
-    "pinned_stanc_provenance": "deps/stanc3/stanc-pinned built from stanc3",
+    "pinned_stanc_provenance": "deps/stanc3/stanc-pinned built from upstream stanc3",
 }
 
 
@@ -136,7 +137,7 @@ def require_pinned_toolchain(cmdstan_dir, stanc_path=None, allow_unpinned=False,
     pinned = pathlib.Path(PINNED_STANC)
     provenance = pathlib.Path(str(pinned) + ".src")
     recorded = provenance.read_text().strip() if provenance.exists() else None
-    check("pinned_stanc_provenance", pin["STANC3_SRC_SHA"], recorded)
+    check("pinned_stanc_provenance", pin["STANC3_UPSTREAM_SHA"], recorded)
     pinned_sha = sha256_file(pinned) if pinned.exists() else None
     installed = default_stanc(cmdstan_dir)
     installed_sha = sha256_file(installed) if installed.exists() else None

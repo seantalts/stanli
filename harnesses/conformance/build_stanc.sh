@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the conformance stanc from source at the pinned stanc3 revision.
+# Build stanc from source at a pinned stanc3 revision.
 #
 # The old arrangement downloaded a binary from stanc3's `nightly` release
 # tag and pinned it by version string and sha256. That tag is reassigned
@@ -8,15 +8,21 @@
 # first cold cache after an upstream publish stranded the job with a
 # binary that no longer exists anywhere. A git SHA is fetchable forever.
 #
-# The source is STANC3_SRC_REPO at STANC3_SRC_SHA in deps/pins.env --
-# the same revision the wheels embed -- so the conformance run exercises
-# the frontend the shipped runtime actually uses, not a nearby nightly.
+# By default this builds CmdStan's compiler, STANC3_UPSTREAM_REPO at
+# STANC3_UPSTREAM_SHA in deps/pins.env, the release the fork is based on.
+# Every CmdStan reference and the conformance oracle compile with it.
+# Output: deps/stanc3/stanc-pinned, from deps/stanc3-upstream-src.
 #
-# Output: deps/stanc3/stanc-pinned, with deps/stanc3/stanc-pinned.src
-# recording the revision it was built from. Rerunning with a matching
-# provenance file is a no-op, so callers can invoke this unconditionally.
+# --stanli builds stanli's compiler instead, STANC3_SRC_REPO at
+# STANC3_SRC_SHA: the fork the wheels embed, built as stock stanc for the
+# MIR fixtures, the signature generators and the packaged rollback.
+# Output: deps/stanc3/stanc, from deps/stanc3-src.
 #
-# Usage: harnesses/conformance/build_stanc.sh [opam-switch]
+# Each output has a .src file beside it recording the revision it was built
+# from. Rerunning with a matching provenance file is a no-op, so callers can
+# invoke this unconditionally.
+#
+# Usage: harnesses/conformance/build_stanc.sh [--stanli] [opam-switch]
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -25,13 +31,25 @@ BUILD_JOBS=$(stanli_detect_build_jobs)
 export OPAMJOBS=$BUILD_JOBS
 
 source "$repo_root/deps/pins.env"
+if [[ "${1:-}" == --stanli ]]; then
+  shift
+  src_sha=$STANC3_SRC_SHA
+  src_repo=$STANC3_SRC_REPO
+  src_dir="$repo_root/deps/stanc3-src"
+  out="$repo_root/deps/stanc3/stanc"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) out=$out.exe ;;
+  esac
+  record="$repo_root/deps/stanc3/stanc.src"
+else
+  src_sha=$STANC3_UPSTREAM_SHA
+  src_repo=$STANC3_UPSTREAM_REPO
+  src_dir="$repo_root/deps/stanc3-upstream-src"
+  out="$repo_root/deps/stanc3/stanc-pinned"
+  record="$out.src"
+fi
 switch=${1:-$OPAM_SWITCH}
 ocaml_version=$OCAML_VERSION
-src_sha=$STANC3_SRC_SHA
-src_repo=$STANC3_SRC_REPO
-
-out="$repo_root/deps/stanc3/stanc-pinned"
-src_dir="$repo_root/deps/stanc3-src"
 # dune subst stamps `git describe`, which changes when a release tag for this
 # commit is published after an earlier build.
 version_matches() {
@@ -43,9 +61,9 @@ version_matches() {
   version=$("$out" --version)
   [[ "$version" == "stanc3 $described" || "$version" == "stanc3 $described "* ]]
 }
-if [[ -x "$out" && -f "$out.src" && "$(cat "$out.src")" == "$src_sha" ]] &&
+if [[ -x "$out" && -f "$record" && "$(cat "$record")" == "$src_sha" ]] &&
    version_matches; then
-  echo "conformance stanc already built from $src_sha"
+  echo "stanc already built from $src_sha"
   exit 0
 fi
 
@@ -81,6 +99,7 @@ if ! opam switch list --color=never --short 2>/dev/null | tr -d '\r' | grep -Fqx
     --confirm-level="$opam_confirm"
 fi
 eval "$(opam env --switch="$switch" --set-switch)"
+opam pin add -n dune "$DUNE_VERSION" --confirm-level="$opam_confirm"
 (cd "$src_dir" && opam install . --deps-only --confirm-level="$opam_confirm")
 # Fill the %%NAME%%/%%VERSION%% placeholders from git, as the release
 # pipeline would; without this every source build answers --version
@@ -91,5 +110,5 @@ eval "$(opam env --switch="$switch" --set-switch)"
 
 mkdir -p "$repo_root/deps/stanc3"
 install -m 755 "$src_dir/_build/default/src/stanc/stanc.exe" "$out"
-printf '%s\n' "$src_sha" > "$out.src"
-echo "conformance stanc: $out ($("$out" --version)) from $src_sha"
+printf '%s\n' "$src_sha" > "$record"
+echo "stanc: $out ($("$out" --version)) from $src_repo $src_sha"

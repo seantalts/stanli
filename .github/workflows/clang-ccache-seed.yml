@@ -170,7 +170,7 @@ jobs:
           rm -f deps/stanc3/stanc deps/stanc3/stanc.src
           # Remove old untracked overlay sources (including deleted modules),
           # retaining Dune's dependency-checked build state. The builder resets
-          # tracked sources to the exact upstream pin before applying this overlay.
+          # tracked sources to the exact pin before applying this overlay.
           if [ -d deps/stanc3-src/.git ]; then
             git -C deps/stanc3-src clean -ffd -e _build
           fi

@@ -710,7 +710,7 @@ def main(argv=None):
                     help="record CmdStan references, then replay")
     ap.add_argument("--cmdstan", type=pathlib.Path, default=REPO / "deps/cmdstan")
     ap.add_argument("--stanc", type=pathlib.Path,
-                    default=REPO / "deps/stanc3/stanc")
+                    default=toolchain.PINNED_STANC)
     ap.add_argument("--ref-objs", type=pathlib.Path,
                     default=REPO.parent / "stanc3-ref-objs",
                     help="prebuilt CmdStan model objects, <sha>/model.o")

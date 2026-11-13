@@ -1195,7 +1195,7 @@ def load_corpus_refs(corpus):
 
 
 PINS = (("cmdstan", "CMDSTAN_SHA"), ("stan", "STAN_SHA"),
-        ("math", "MATH_SHA"), ("stanc3", "STANC3_SRC_SHA"))
+        ("math", "MATH_SHA"), ("stanc3", "STANC3_UPSTREAM_SHA"))
 
 
 def pin_drift(recorded, required=("cmdstan", "stan", "math")):

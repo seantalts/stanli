@@ -56,7 +56,7 @@ strip -x "python/stanli/_bin/$(basename "$LIB")" 2>/dev/null || true
 cp THIRD_PARTY_LICENSES.md LICENSE python/stanli/
 
 # Without the embedded compiler the package needs subprocess compilers. Windows
-# ships stanli's portable-MIR producer and keeps pristine stock stanc beside it
+# ships stanli's portable-MIR producer and keeps stock stanc beside it
 # for one rollback cycle; other non-embedded development builds keep stock stanc.
 if [ "$EMBED_SETTING" != ON ]; then
   if [ ! -f deps/stanc3/stanc ] || [ ! -f deps/stanc3/stanc.src ] ||

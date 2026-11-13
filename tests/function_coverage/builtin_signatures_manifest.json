@@ -2026,7 +2026,7 @@
   ],
   "registry_name_count": 262,
   "signature_dump_sha256": "acc42ed71be9740fb5c4b644954c04fa250063f01e81372e8dc1eaeadef5aaee",
-  "stanc_build_id": "stanc3 v2.40.0",
+  "stanc_build_id": "stanc3 v2.40.0-5-gf33307e",
   "tested_case_count": 12753,
   "tested_signature_count": 7486
 }

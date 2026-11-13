@@ -41,13 +41,14 @@ tools/dev_setup.sh --conformance
 ```
 
 That prepares the whole oracle: the exact CmdStan/Stan/Stan Math combination
-BridgeStan compiles against, the conformance stanc built from source at
-`STANC3_SRC_SHA` -- the same revision the wheels embed, rather than a
-downloaded binary -- the version-pinned BridgeStan Python client in
-`.venv-conformance/`, and the stanli library staged where the harness drives
-it from. Every step is a no-op once its output exists, so the stanc build's
-half hour is paid once per machine per pin, not once per session, and
-`--embed` and `--corpus` pay most of it already. It ends by printing the
+BridgeStan compiles against, CmdStan's stanc built from source at
+`STANC3_UPSTREAM_SHA` rather than a downloaded binary, the version-pinned
+BridgeStan Python client in `.venv-conformance/`, and the stanli library
+staged where the harness drives it from. The oracle requires both sides to
+use the same stanc, so the sweep runs with CmdStan's compiler, not the
+fork the wheels embed. Every step is a no-op once its output exists, so the
+stanc build's half hour is paid once per machine per pin, not once per
+session, and `--corpus` pays it already. It ends by printing the
 invocation below with your paths filled in.
 
 Only the nightly *workflow* is pinned to Linux. Nothing in the harness is:
@@ -85,10 +86,10 @@ cp build-rel/libstanli.* python/stanli/_bin/
 ```
 
 `signature_watch.sh` is the other half of the pin story: it diffs stanc3's
-checked-in signature dump between the pin and upstream master, so new
+checked-in signature dump between the fork pin and upstream master, so new
 language surface is reported nightly without executing anything unreviewed.
-Adopting what it reports is a pin advance: bump `STANC3_SRC_SHA` and rerun
-this suite.
+Adopting what it reports is a pin advance: rebase the fork's `stanli` branch,
+bump `STANC3_SRC_SHA` and `STANC3_UPSTREAM_SHA`, and rerun this suite.
 
 ### Selecting what to run
 

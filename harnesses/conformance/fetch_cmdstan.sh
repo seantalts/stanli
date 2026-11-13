@@ -29,14 +29,15 @@ if [[ -L "$cmdstan_dir" ]]; then
   exit 1
 fi
 
+# CmdStan compiles with its own release's stanc, not stanli's fork.
 stanc_pinned="$repo_root/deps/stanc3/stanc-pinned"
 if [[ ! -x "$stanc_pinned" ||
-      "$(cat "$stanc_pinned.src" 2>/dev/null)" != "$STANC3_SRC_SHA" ]]; then
+      "$(cat "$stanc_pinned.src" 2>/dev/null)" != "$STANC3_UPSTREAM_SHA" ]]; then
   "$repo_root/harnesses/conformance/build_stanc.sh"
 fi
-if [[ "$(cat "$stanc_pinned.src" 2>/dev/null)" != "$STANC3_SRC_SHA" ]]; then
-  echo "conformance stanc provenance mismatch: built from" \
-       "'$(cat "$stanc_pinned.src" 2>/dev/null)', pin is '$STANC3_SRC_SHA'" >&2
+if [[ "$(cat "$stanc_pinned.src" 2>/dev/null)" != "$STANC3_UPSTREAM_SHA" ]]; then
+  echo "CmdStan stanc provenance mismatch: built from" \
+       "'$(cat "$stanc_pinned.src" 2>/dev/null)', pin is '$STANC3_UPSTREAM_SHA'" >&2
   exit 1
 fi
 
@@ -101,4 +102,4 @@ echo "  Math    $MATH_SHA"
 if [[ "$want_bridgestan" = 1 ]]; then
   echo "  BridgeStan $BRIDGESTAN_SHA"
 fi
-echo "  stanc   $("$stanc_pinned" --version) from $STANC3_SRC_SHA"
+echo "  stanc   $("$stanc_pinned" --version) from $STANC3_UPSTREAM_SHA"
