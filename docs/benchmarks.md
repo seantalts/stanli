@@ -621,9 +621,11 @@ python3 harnesses/corpus_bench.py deps/cmdstan deps/posteriordb \
 ```
 
 `--corpus` selects a source collection and `--filter` selects model IDs.
-`tools/gen_benchmark_points.py` reruns the reference runs and rewrites the
-committed points file (use `libstanli.so` on Linux; `--jobs` and `--timeout`
-set the parallelism and the per-model limit). The harness reads the file by
+`tools/gen_benchmark_points.py` reruns the reference runs for every model, or
+only for `--models NAME,...` or `--missing` (models with no entry or with
+changed source or data), and merges the results into the committed points file.
+Use `libstanli.so` on Linux; `--jobs` and `--timeout` set the parallelism and
+the per-model limit. The harness reads the file by
 default through `--points-file` and refuses a model whose source or data no
 longer matches.
 CmdStan binaries are built once and reused from a content-addressed cache,

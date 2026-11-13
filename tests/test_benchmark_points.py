@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Tests for the committed reference-run evaluation points and gradient counts."""
 
+import contextlib
 import gzip
 import hashlib
+import io
 import json
 import os
 import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
@@ -23,13 +26,15 @@ def digest(text):
 
 def document(models=None, warmup=10, draws=10):
     return dict(schema=bp.SCHEMA,
-                settings=dict(seed=1, warmup=warmup, draws=draws, chains=1, points=2,
-                              stanli_build_id="build"),
+                settings=dict(seed=1, warmup=warmup, draws=draws, chains=1, points=2),
                 models=models or {})
 
 
+BUILD = dict(stanli_build_id="build", stanli_abi_version=2)
+
+
 def reference(stan="s", data="d", vectors=((0.5, -1.0), (2.0, 3.0)), iterations=(3, 14)):
-    return dict(source="reference_run", stan_sha256=digest(stan), data_sha256=digest(data),
+    return dict(BUILD, source="reference_run", stan_sha256=digest(stan), data_sha256=digest(data),
                 n_params=len(vectors[0]), points=[list(v) for v in vectors],
                 iterations=list(iterations),
                 gradients=dict(warmup=30, sampling=70, total=100),
@@ -37,7 +42,7 @@ def reference(stan="s", data="d", vectors=((0.5, -1.0), (2.0, 3.0)), iterations=
 
 
 def fixed(stan="s", data="d", reason="reference run timed out after 60 s"):
-    return dict(source="fixed", stan_sha256=digest(stan), data_sha256=digest(data), reason=reason)
+    return dict(BUILD, source="fixed", stan_sha256=digest(stan), data_sha256=digest(data), reason=reason)
 
 
 class SelectionTests(unittest.TestCase):
@@ -99,8 +104,28 @@ class FileTests(unittest.TestCase):
 
     def test_a_model_without_an_entry_is_an_error(self):
         self.write(document())
-        with self.assertRaisesRegex(ValueError, "no entry"):
+        with self.assertRaisesRegex(ValueError, "no entry.*gen_benchmark_points.py --missing"):
             bp.entry_for(bp.load(self.path), "m", digest("s"), digest("d"))
+
+    def test_changed_hashes_point_at_the_missing_refresh(self):
+        self.write(document({"m": reference()}))
+        doc = bp.load(self.path)
+        with self.assertRaisesRegex(ValueError, "stan source changed.*gen_benchmark_points.py --missing"):
+            bp.entry_for(doc, "m", digest("other"), digest("d"))
+        with self.assertRaisesRegex(ValueError, "data changed.*gen_benchmark_points.py --missing"):
+            bp.entry_for(doc, "m", digest("s"), digest("other"))
+
+    def test_the_committed_file_loads_with_a_build_on_every_entry(self):
+        if not bp.DEFAULT_PATH.exists():
+            self.skipTest("no committed points file")
+        doc = bp.load(bp.DEFAULT_PATH)
+        self.assertEqual(doc["schema"], 3)
+        self.assertNotIn("stanli_build_id", doc["settings"])
+        self.assertNotIn("stanli_abi_version", doc["settings"])
+        for name, entry in doc["models"].items():
+            with self.subTest(model=name):
+                self.assertTrue(entry["stanli_build_id"])
+                self.assertIsInstance(entry["stanli_abi_version"], int)
 
     def test_points_and_counts_come_from_reference_entries_only(self):
         self.assertEqual(bp.points_of(reference()), [[0.5, -1.0], [2.0, 3.0]])
@@ -135,6 +160,10 @@ class FileTests(unittest.TestCase):
             "no gradients": document({"m": {k: v for k, v in reference().items() if k != "gradients"}}),
             "no reason": document({"m": {k: v for k, v in fixed().items() if k != "reason"}}),
             "fixed with points": document({"m": with_(fixed(), points=[[1.0, 2.0]] * 2)}),
+            "no build id": document({"m": {k: v for k, v in reference().items() if k != "stanli_build_id"}}),
+            "empty build id": document({"m": with_(fixed(), stanli_build_id="")}),
+            "no abi": document({"m": {k: v for k, v in fixed().items() if k != "stanli_abi_version"}}),
+            "old schema": dict(document({"m": reference()}), schema=2),
         }
         for label, doc in bad.items():
             with self.subTest(label=label):
@@ -153,6 +182,145 @@ class FileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             for name, case in cases.items():
                 bp.entry_for(doc, name, bp.sha256(case.source), bp.sha256(materialize_data(case, scratch)))
+
+
+class _FakeLib:
+    def __init__(self, build="new-build", abi=3):
+        self.build, self.abi = build, abi
+
+    def stanli_build_id(self):
+        return self.build.encode()
+
+    def stanli_abi_version(self):
+        return self.abi
+
+
+class MergeTests(unittest.TestCase):
+    def setUp(self):
+        import gen_benchmark_points as gen
+        self.gen = gen
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+        self.output = self.root / "points.json.gz"
+        self.cases = {name: self.files(name) for name in ("a", "b", "c")}
+        self.ran = []
+
+    def files(self, name, stan=None, data="{}"):
+        paths = self.root / f"{name}.stan", self.root / f"{name}.json"
+        paths[0].write_text(stan or f"// {name}")
+        paths[1].write_text(data)
+        return paths
+
+    def fake_job(self, name, stan, data, lib, probe, seed, warmup, draws, timeout, points):
+        self.ran.append(name)
+        base = dict(stan_sha256=bp.sha256(stan), data_sha256=bp.sha256(data))
+        if name == "broken":
+            return name, dict(base, error="stanc failed: nope")
+        return name, dict(base, n_params=1, iterations=list(range(points)),
+                          points=[[float(seed + k)] for k in range(points)],
+                          gradients=dict(warmup=warmup, sampling=draws, total=warmup + draws),
+                          divergences=dict(warmup=0, sampling=0), max_treedepth=dict(warmup=0, sampling=0))
+
+    def generate(self, cases=None, build="new-build", **options):
+        settings = dict(seed=1, warmup=4, draws=6, jobs=2, timeout=60, points=3)
+        settings.update(options)
+        with mock.patch.object(self.gen, "_bind", return_value=_FakeLib(build)), \
+                mock.patch.object(self.gen, "_model_job", self.fake_job), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            self.gen.generate(cases or self.cases, lib="unused", probe="unused", output=self.output,
+                              **settings)
+        self.stderr = err.getvalue()
+        return bp.load(self.output)
+
+    def hashes(self, cases=None):
+        return {n: (bp.sha256(s), bp.sha256(d)) for n, (s, d) in (cases or self.cases).items()}
+
+    def test_a_full_run_records_the_build_on_every_entry_and_not_in_settings(self):
+        doc = self.generate()
+        self.assertEqual(doc["schema"], 3)
+        self.assertEqual(sorted(doc["models"]), ["a", "b", "c"])
+        self.assertNotIn("stanli_build_id", doc["settings"])
+        self.assertNotIn("stanli_abi_version", doc["settings"])
+        for entry in doc["models"].values():
+            self.assertEqual((entry["stanli_build_id"], entry["stanli_abi_version"]), ("new-build", 3))
+
+    def test_a_failed_entry_records_the_build_too(self):
+        cases = dict(self.cases, broken=self.files("broken"))
+        entry = self.generate(cases)["models"]["broken"]
+        self.assertEqual((entry["source"], entry["stanli_build_id"]), ("fixed", "new-build"))
+
+    def test_merge_keeps_unselected_entries(self):
+        before = self.generate(build="old-build")
+        self.ran.clear()
+        after = self.generate(selected=["b"], build="new-build", seed=1)
+        self.assertEqual(self.ran, ["b"])
+        self.assertEqual(after["models"]["a"], before["models"]["a"])
+        self.assertEqual(after["models"]["c"], before["models"]["c"])
+        self.assertEqual(after["models"]["b"]["stanli_build_id"], "new-build")
+        self.assertEqual(after["models"]["a"]["stanli_build_id"], "old-build")
+
+    def test_models_gone_from_the_corpus_are_dropped_and_listed(self):
+        self.generate(dict(self.cases, gone=self.files("gone")))
+        doc = self.generate(selected=["a"])
+        self.assertEqual(sorted(doc["models"]), ["a", "b", "c"])
+        self.assertIn("gone", self.stderr)
+
+    def test_a_settings_mismatch_refuses_before_running_anything(self):
+        self.generate()
+        before = self.output.read_bytes()
+        self.ran.clear()
+        for change in (dict(seed=2), dict(warmup=5), dict(timeout=90), dict(points=4)):
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, "settings"):
+                self.generate(selected=["a"], **change)
+        self.assertEqual(self.ran, [])
+        self.assertEqual(self.output.read_bytes(), before)
+
+    def test_a_build_change_alone_merges(self):
+        self.generate(build="old-build")
+        self.assertEqual(self.generate(selected=["a"], build="new-build")["models"]["a"]["stanli_build_id"],
+                         "new-build")
+
+    def test_a_full_refresh_may_change_settings(self):
+        self.generate()
+        doc = self.generate(seed=5)
+        self.assertEqual(doc["settings"]["seed"], 5)
+        self.assertEqual(doc["models"]["a"]["points"][0], [5.0])
+
+    def test_missing_selects_absent_and_changed_models_only(self):
+        self.generate({k: self.cases[k] for k in ("a", "b", "c")})
+        cases = dict(self.cases, new=self.files("new"))
+        cases["b"] = self.files("b", stan="// edited")
+        cases["c"] = self.files("c", data='{"N": 1}')
+        doc = bp.load(self.output)
+        self.assertEqual(self.gen.select_models(doc, self.hashes(cases), missing=True), ["b", "c", "new"])
+
+    def test_missing_skips_a_matching_fixed_entry(self):
+        cases = dict(self.cases, broken=self.files("broken"))
+        self.generate(cases)
+        self.assertEqual(self.gen.select_models(bp.load(self.output), self.hashes(cases), missing=True), [])
+
+    def test_missing_without_a_file_selects_everything(self):
+        self.assertEqual(self.gen.select_models(None, self.hashes(), missing=True), ["a", "b", "c"])
+
+    def test_models_selects_exact_names_and_rejects_unknown_ones(self):
+        hashes = self.hashes()
+        self.assertEqual(self.gen.select_models(None, hashes, models=["c", "a"]), ["a", "c"])
+        with self.assertRaisesRegex(ValueError, "unknown model.*ab"):
+            self.gen.select_models(None, hashes, models=["ab"])
+
+    def test_filter_and_no_selector(self):
+        hashes = dict(self.hashes(), ab=("0" * 64, "0" * 64))
+        self.assertEqual(self.gen.select_models(None, hashes, filter="a"), ["a", "ab"])
+        self.assertEqual(self.gen.select_models(None, hashes), ["a", "ab", "b", "c"])
+
+    def test_the_command_line_takes_one_selector_and_comma_separated_models(self):
+        self.assertEqual(self.gen.parse_args(["--lib", "x", "--models", "a,b", "--models", "c"])[1].models,
+                         ["a", "b", "c"])
+        for extra in (["--missing", "--models", "a"], ["--filter", "a", "--missing"], ["--models", ","]):
+            with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit):
+                self.gen.parse_args(["--lib", "x", *extra])
 
 
 def stanli_library():
