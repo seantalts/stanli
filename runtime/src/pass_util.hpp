@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -79,6 +80,49 @@ inline bool any_at_or_after(const std::vector<size_t>& v, size_t x,
                             int64_t& steps) {
   return first_at_or_after(v, x, steps) != v.end();
 }
+
+// A fused region's lanes leave the target list for its one replacement, which
+// takes the first dead entry's position; the rest of the list closes up around
+// it. Regions are recorded as they are emitted and the list is rewritten once
+// by apply, while `term_set` stays current for membership questions.
+class TermRetirement {
+ public:
+  int64_t steps = 0;  // dead slots recorded plus list entries rewritten
+
+  void retire(const std::vector<int>& dead, int new_term,
+              std::unordered_set<int>& term_set) {
+    const int region = static_cast<int>(replacement_.size());
+    replacement_.push_back(new_term);
+    for (int s : dead) {
+      ++steps;
+      claimed_.try_emplace(s, region);
+      term_set.erase(s);
+    }
+    term_set.insert(new_term);
+  }
+
+  void apply(std::vector<int>& terms) {
+    if (replacement_.empty()) return;
+    std::vector<char> placed(replacement_.size(), 0);
+    std::vector<int> next;
+    next.reserve(terms.size());
+    for (int s : terms) {
+      ++steps;
+      const auto it = claimed_.find(s);
+      if (it == claimed_.end()) {
+        next.push_back(s);
+      } else if (!placed[(size_t)it->second]) {
+        placed[(size_t)it->second] = 1;
+        next.push_back(replacement_[(size_t)it->second]);
+      }
+    }
+    terms = std::move(next);
+  }
+
+ private:
+  std::unordered_map<int, int> claimed_;  // dead slot -> first region
+  std::vector<int> replacement_;
+};
 
 inline std::unordered_map<int, double> scalar_constants(const Fills& fills) {
   std::unordered_map<int, double> const_val;

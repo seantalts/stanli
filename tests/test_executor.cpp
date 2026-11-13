@@ -516,27 +516,6 @@ int main() {
   expect_eq("changed density dmu", changed_density_grad[0], 0.25);
   expect_eq("changed density dsigma", changed_density_grad[1], -0.875);
 
-  // BCAST_FMA forward: out[i] = a + b * x[i].
-  Graph g2;
-  const int s_a = g2.add_slot(1, true);
-  const int s_b = g2.add_slot(1, true);
-  const int s_x = g2.add_slot(3, false);
-  const int s_o = g2.add_slot(3, false);
-  g2.add_op(OP_BCAST_FMA, {s_a, s_b, s_x}, s_o);
-  g2.result_slot = s_o;  // vector result: forward-only check via value_ptr
-  Executor ex2(std::move(g2));
-  *ex2.param_ptr(s_a) = 0.5;
-  *ex2.param_ptr(s_b) = 2.0;
-  double* x = ex2.value_ptr(s_x);
-  x[0] = 1.0;
-  x[1] = -2.0;
-  x[2] = 0.25;
-  ex2.run_forward_only();
-  const double* o = ex2.value_ptr(s_o);
-  expect_eq("fma[0]", o[0], 0.5 + 2.0 * 1.0);
-  expect_eq("fma[1]", o[1], 0.5 + 2.0 * -2.0);
-  expect_eq("fma[2]", o[2], 0.5 + 2.0 * 0.25);
-
   // A forward-only graph need not designate a scalar result. Binding still
   // compacts its written adjoints without indexing result_slot == -1.
   Graph no_result;

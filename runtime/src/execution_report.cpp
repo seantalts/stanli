@@ -2,6 +2,7 @@
 #include <stanli/compile.hpp>
 #include <stanli/algebra.hpp>
 #include <stanli/dae.hpp>
+#include <stanli/island.hpp>
 #include <stanli/ode.hpp>
 #include <stanli/ode_adjoint.hpp>
 #include <stanli/quadrature.hpp>
@@ -115,13 +116,6 @@ struct Report {
     if (node.kind == Node::KernelCall) {
       op(loop.body, loop.body.ops.at(static_cast<size_t>(node.op)), id,
          reverse && node.active, depth);
-    } else if (node.kind == Node::Segment) {
-      w.StartObject();
-      str("site", id);
-      str("operation", "structured_segment");
-      island(loop.segments.at(static_cast<size_t>(node.segment)).program, id,
-             reverse, depth);
-      w.EndObject();
     }
     for (size_t i = 0; i < node.children.size(); ++i)
       control(loop, node.children[i], id + "/" + std::to_string(i), reverse,

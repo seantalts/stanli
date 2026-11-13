@@ -113,9 +113,8 @@ Shape classify(const Graph& g, const Op& op) {
   const int64_t len = g.slots[(size_t)op.out].len;
   const auto in_len = [&](int j) { return g.slots[(size_t)op.in[j]].len; };
 
-  if ((has_op_trait(op.opcode, op_trait::kRerollWidenable) ||
-       op.opcode == OP_BCAST_FMA) &&
-      op.n_in >= 1 && op.n_in <= 3 && op.n_idata == 0) {
+  if (has_op_trait(op.opcode, op_trait::kRerollWidenable) && op.n_in >= 1 &&
+      op.n_in <= 3 && op.n_idata == 0) {
     bool fits = true;
     for (int j = 0; j < op.n_in; ++j)
       fits &= in_len(j) == 1 || in_len(j) == len;
@@ -747,14 +746,11 @@ struct Affine {
           case OP_MUL:
           case OP_DIV:
           case OP_FMA:
-          case OP_BCAST_FMA:
             break;
           default:
             return all_leaves();
         }
-        const int arity = w.opcode == OP_NEG                               ? 1
-                          : w.opcode == OP_FMA || w.opcode == OP_BCAST_FMA ? 3
-                                                                           : 2;
+        const int arity = w.opcode == OP_NEG ? 1 : w.opcode == OP_FMA ? 3 : 2;
         if (w.variant != 0 || w.n_in != arity) return all_leaves();
         for (int j = 0; j < w.n_in; ++j)
           if (!holds(w.in[j])) return all_leaves();
@@ -786,10 +782,6 @@ struct Affine {
             case OP_FMA:  // in0 * in1 + in2
               ok = product(r, in[0][k], in[1][k]);
               if (ok) axpy(r, 1.0, in[2][k]);
-              break;
-            default:  // OP_BCAST_FMA: in0 + in1 * in2
-              ok = product(r, in[1][k], in[2][k]);
-              if (ok) axpy(r, 1.0, in[0][k]);
               break;
           }
           out[k] = ok ? std::move(r) : leaf(s, which[k]);

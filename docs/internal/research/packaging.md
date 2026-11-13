@@ -16,9 +16,7 @@ first useful results, compressed size and installed size are separate concerns.
 | [Browser density-pack experiment](../archive/density-pack.md) | A working prototype that was removed; measured payload and the remaining deployment blocker. |
 | [Stan's other inference algorithms](../../../notes/execution/2026-10-09-other-inference-algorithms.md) | fixed_param, Laplace, single-path Pathfinder and ADVI through Stan's services: the model adapter, the C API and R surface, agreement with `rstan::vb()`, and limits (no `propto = false` density; R only). Multi-path Pathfinder is held: an out-of-bounds read in Stan 2.40's `multi.hpp`. |
 
-The density-pack experiment is historical, while the optional
-[lite build](../../lp-constant.md) has a current public numerical contract; do not
-confuse them. Native instruction generation and stencil JIT are tabled, and
+The density-pack experiment is historical. Native instruction generation and stencil JIT are tabled, and
 the recent [code-generation probes](../../../notes/execution/2026-09-28-codegen-decision.md)
 were removed with their [cleanup](../../../notes/execution/2026-09-29-execution-code-cleanup.md).
 A browser import microbenchmark does not establish native-host performance.

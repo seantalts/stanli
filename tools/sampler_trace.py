@@ -35,7 +35,6 @@ on purpose: this is looking for configuration divergence (a 30x leapfrog
 gap, an order-of-magnitude stepsize gap), not for Monte Carlo noise.
 """
 import argparse
-import json
 import math
 import pathlib
 import shutil
@@ -43,9 +42,9 @@ import statistics
 import subprocess
 import sys
 import tempfile
-import zipfile
 
 import toolchain
+from corpus_inventory import corpus_cases, materialize_data
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 COLS = ["lp__", "accept_stat__", "stepsize__", "treedepth__",
@@ -201,18 +200,9 @@ def main():
     if args.stan:
         jobs.append((args.stan.stem, args.stan, args.data))
     else:
-        pdb = args.pdb / "posterior_database"
-        datas = {}
-        for pj in sorted((pdb / "posteriors").glob("*.json")):
-            meta = json.loads(pj.read_text())
-            datas.setdefault(meta["model_name"], meta["data_name"])
+        cases = corpus_cases(args.pdb, "posteriordb")
         for m in args.models:
-            stan = pdb / "models" / "stan" / f"{m}.stan"
-            dz = pdb / "data" / "data" / f"{datas[m]}.json.zip"
-            dj = tmp / f"{m}.json"
-            with zipfile.ZipFile(dz) as z:
-                dj.write_bytes(z.read(z.namelist()[0]))
-            jobs.append((m, stan, dj))
+            jobs.append((m, cases[m].source, materialize_data(cases[m], tmp)))
 
     failures = 0
     for name, stan, data in jobs:

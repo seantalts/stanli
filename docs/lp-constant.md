@@ -1,8 +1,7 @@
-# lp__ off by a constant: compact densities and the lite build
+# lp__ off by a constant: compact densities
 
 Most of stanli's densities reproduce CmdStan's `lp__` to the bit. A tail of
-less common densities reports `lp__` shifted by a constant, and an optional
-build extends that trade to the whole library. In both cases every gradient
+less common densities reports `lp__` shifted by a constant. Every gradient
 is bitwise identical to CmdStan's. This page explains the shift, lists which
 densities carry it, and shows how to check.
 
@@ -23,7 +22,7 @@ parameters, which is the only reason CmdStan could drop them, so every partial
 derivative is identical. For example, `lkj_cov` shifts lp by
 +0.28768207245200 with zero gradient difference.
 
-| | exact density | compact density or lite build |
+| | exact density | compact density |
 | --- | --- | --- |
 | gradients vs CmdStan | bitwise | bitwise |
 | `write_array` values | bitwise | bitwise |
@@ -71,51 +70,7 @@ each argument as `var` or `double`. That is `2^N` branches and `2^N`
 instantiations, and it is why `multi_normal` is exact while
 `multi_normal_prec`, the same kernel with one call swapped, is compact.
 
-## The lite build
-
-`-DSTANLI_LITE_LP=ON` makes every density compact by clearing the propto bit
-of each tier (`density_tier()` in
-[`optable.hpp`](../runtime/include/stanli/optable.hpp)). In September
-2026 this made the stripped library about half the size, and the wasm
-payload shrank by about the same. Over the 119-model posteriordb corpus, every gradient and
-every `write_array` value is bitwise identical to the exact build, and `lp__`
-differs by a constant at every evaluation point. Speed is unchanged, because
-the propto choice is internal to a kernel and never changes the graph.
-
-The lite build is off in every shipped build, browser included, so any run's
-`lp__` can be compared with CmdStan directly. `stanli_exact_lp()` (Python
-`stanli.exact_lp()`, JavaScript `fit.exactLp`) reports which build is loaded.
-Turn it on when download size matters more than a CmdStan-comparable `lp__`,
-for example on an embedded target or a size-critical web deployment.
-
-Draws under a pinned seed differ between the builds. In exact arithmetic a
-constant shift cancels in every Hamiltonian difference NUTS looks at. In
-floating point, `H = -lp + kinetic` rounds differently once `lp` is shifted.
-The difference starts at one ULP and grows because NUTS is chaotic: on eight
-schools at the same seed, `mu` differs by 2.0e-15 after 5 warmup iterations,
-6.3e-13 after 20, and 1.3e-09 after 50. This is the same kind of difference as
-changing the seed. A run that must reproduce another byte for byte needs both
-to use the same build.
-
 ## How to check
-
-`tools/verify_lite.py` replays both builds over the corpus and enforces both
-promises: gradients bitwise, and `lp_exact - lp_lite` the same number at all
-three points of every model.
-
-```sh
-cmake -B build      -DCMAKE_BUILD_TYPE=Release
-cmake -B build-lite -DCMAKE_BUILD_TYPE=Release -DSTANLI_LITE_LP=ON
-build_jobs=$(tools/build_jobs.sh)
-cmake --build build      --parallel "$build_jobs" --target stanli_check
-cmake --build build-lite --parallel "$build_jobs" --target stanli_check
-python3 tools/verify_lite.py deps/posteriordb
-```
-
-The gate on the shift is relative to `lp`. Dropping a term reassociates the
-sum after it, so the residue sits on `lp`'s rounding scale (half an ULP of
-`lp` on the worst model). CI does not build the lite configuration, because
-that needs a second full stan-math compile.
 
 No automated check covers a compact density in the exact build, because the
 corpus does not use those densities. To check one by hand, run a model that

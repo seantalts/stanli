@@ -40,9 +40,10 @@ struct InitParam {
 
 class InitInterp {
  public:
-  InitInterp(std::shared_ptr<const mir::Program> prog,
-             std::map<std::string, DataMap::Entry> base_env,
-             std::vector<InitParam> params);
+  InitInterp(
+      std::shared_ptr<const mir::Program> prog,
+      std::shared_ptr<const std::map<std::string, DataMap::Entry>> base_env,
+      std::vector<InitParam> params);
 
   // The parameters this model expects on the constrained scale, in
   // declaration order.
@@ -57,7 +58,7 @@ class InitInterp {
  private:
   std::shared_ptr<const mir::Program> prog_;
   std::map<std::string, const mir::FunDef*> funs_;
-  std::map<std::string, DataMap::Entry> base_env_;
+  std::shared_ptr<const std::map<std::string, DataMap::Entry>> base_env_;
   std::vector<InitParam> params_;
 };
 

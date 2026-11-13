@@ -1,5 +1,5 @@
 // unsupported_normal_lpdf_container, with a parameter feeding one of the
-// container arguments: DENSITY_VEC has to run correctly under both the
+// container arguments: the density CALL has to run correctly under both the
 // register machine's forward pass and its var-replay backward pass, not
 // just reproduce a data-only constant lp.
 data {

@@ -172,17 +172,12 @@ static void test_radon_shape() {
 
   std::vector<int> tt = terms;
   Fills f2 = fills;
-  const detail::ProfiledRerollStats profiled =
-      detail::reroll_profiled(g, f2, tt, {});
-  const RerollStats st = profiled.work;
+  const RerollStats st = reroll(g, f2, tt, {});
   expect("radon regions==1", st.regions == 1);
-  expect("radon term-density disposition",
-         profiled.dispositions.term_density == 1);
+  expect("radon term-density disposition", st.term_density == 1);
   expect("radon no other dispositions",
-         profiled.dispositions.packed_rows == 0 &&
-             profiled.dispositions.element_density == 0 &&
-             profiled.dispositions.term_widen == 0 &&
-             profiled.dispositions.element_store == 0);
+         st.packed_rows == 0 && st.element_density == 0 && st.term_widen == 0 &&
+             st.element_store == 0);
   // 1 REP_VEC survives; 8 INDEX + 8 NORMAL collapse to 1 NORMAL.
   expect("radon ops==2", g.ops.size() == 2);
   expect("radon one term", tt.size() == 1);
@@ -311,13 +306,10 @@ static void test_gauss_mix_shape() {
 
   std::vector<int> tt = terms;
   Fills f2 = fills;
-  const detail::ProfiledRerollStats profiled =
-      detail::reroll_profiled(g, f2, tt, {});
-  const RerollStats st = profiled.work;
+  const RerollStats st = reroll(g, f2, tt, {});
   expect("gmix regions==1", st.regions == 1);
-  expect("gmix element-density dispositions",
-         profiled.dispositions.element_density == 2);
-  expect("gmix term-widen disposition", profiled.dispositions.term_widen == 1);
+  expect("gmix element-density dispositions", st.element_density == 2);
+  expect("gmix term-widen disposition", st.term_widen == 1);
   // 2 elementwise NORMAL + 1 widened LOG_MIX + 1 SUM_VEC.
   expect("gmix ops==4", g.ops.size() == 4);
   expect("gmix one term", tt.size() == 1);
@@ -368,14 +360,10 @@ static void test_row_mixture_shape() {
 
   std::vector<int> tt = terms;
   Fills f2 = fills;
-  const detail::ProfiledRerollStats profiled =
-      detail::reroll_profiled(g, f2, tt, {});
-  const RerollStats st = profiled.work;
+  const RerollStats st = reroll(g, f2, tt, {});
   expect("row mix regions==1", st.regions == 1);
-  expect("row mix element-density dispositions",
-         profiled.dispositions.element_density == 2);
-  expect("row mix term-widen disposition",
-         profiled.dispositions.term_widen == 1);
+  expect("row mix element-density dispositions", st.element_density == 2);
+  expect("row mix term-widen disposition", st.term_widen == 1);
   // 2 elementwise BERNOULLI_LOGIT + 2 SUM_ROWS + 1 widened LOG_MIX + 1
   // SUM_VEC; the row itself elides.
   expect("row mix ops==6", g.ops.size() == 6);
@@ -424,12 +412,10 @@ static void test_row_mixture_shape_column_major() {
 
   std::vector<int> tt = terms;
   Fills f2 = fills;
-  const detail::ProfiledRerollStats profiled =
-      detail::reroll_profiled(g, f2, tt, {});
-  const RerollStats st = profiled.work;
+  const RerollStats st = reroll(g, f2, tt, {});
   expect("row mix col-major regions==1", st.regions == 1);
   expect("row mix col-major element-density disposition",
-         profiled.dispositions.element_density == 1);
+         st.element_density == 1);
   // BERNOULLI_LOGIT + one repacking OP_GATHER + OP_SUM_ROWS + widened ADD
   // (the zero it adds is a fresh constant per lane, so the chain does not
   // stay scalar) + OP_SUM_VEC.
@@ -481,13 +467,10 @@ static void test_logistic_elt_shape() {
 
   std::vector<int> tt = terms;
   Fills f2 = fills;
-  const detail::ProfiledRerollStats profiled =
-      detail::reroll_profiled(g, f2, tt, {});
-  expect("logistic elt regions==1", profiled.work.regions == 1);
-  expect("logistic elt density disposition",
-         profiled.dispositions.element_density == 1);
-  expect("logistic elt term disposition",
-         profiled.dispositions.term_widen == 1);
+  const RerollStats profiled = reroll(g, f2, tt, {});
+  expect("logistic elt regions==1", profiled.regions == 1);
+  expect("logistic elt density disposition", profiled.element_density == 1);
+  expect("logistic elt term disposition", profiled.term_widen == 1);
   expect("logistic elt ops==3", g.ops.size() == 3 && tt.size() == 1);
   expect("logistic elt opcode", g.ops[0].opcode == OP_LOGISTIC_LPDF &&
                                     (g.ops[0].variant & 0x40u) != 0 &&
@@ -1167,12 +1150,10 @@ static void test_lda_shape_gradients() {
 
       std::vector<int> tt = b.terms;
       Fills f2 = b.fills;
-      const detail::ProfiledRerollStats profiled =
-          detail::reroll_profiled(b.g, f2, tt, {});
-      const RerollStats st = profiled.work;
+      const RerollStats st = reroll(b.g, f2, tt, {});
       expect((label + " becomes one region").c_str(), st.regions == 1);
       expect((label + " records packed-row disposition").c_str(),
-             profiled.dispositions.packed_rows == 1);
+             st.packed_rows == 1);
       expect((label + " has seven fused ops plus inputs").c_str(),
              b.g.ops.size() == 9);
       expect((label + " has one packed reduction").c_str(),
@@ -1382,6 +1363,64 @@ static void test_sparse_candidate_cost() {
   expect("sparse-candidate work stays linear", big.steps < 3 * small.steps);
 }
 
+// Groups chained by a scalar recurrence, each with its own run of densities:
+// re-roll fuses every group into a region of its own, and each region retires
+// its lanes' terms. Doing that by rewriting the whole term list per region
+// made preparation quadratic in the number of groups.
+struct ManyRegionsCost {
+  int regions;
+  int64_t steps;
+};
+
+static ManyRegionsCost many_regions_cost(int groups) {
+  Graph g;
+  Fills fills;
+  const int alpha = g.add_slot(8, true);
+  const int rho = g.add_slot(1, true);
+  const int sigma = g.add_slot(1, true);
+  int m = g.add_slot(1, true);
+  std::vector<int> terms;
+  int n = 0;
+  for (int i = 0; i < groups; ++i) {
+    const int z = g.add_slot(1, false);
+    fills.emplace_back(z, std::vector<double>{0.01 * (i % 7)});
+    const int prod = g.add_slot(1, false);
+    g.add_op(OP_MUL, {rho, m}, prod);
+    m = g.add_slot(1, false);
+    g.add_op(OP_ADD, {prod, z}, m);
+    const int lanes = 4 + (i % 5);
+    for (int l = 0; l < lanes; ++l, ++n) {
+      const int y = g.add_slot(1, false);
+      fills.emplace_back(y, std::vector<double>{0.1 * (n % 11) - 0.5});
+      const int a = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {alpha}, a, {l});
+      const int mu = g.add_slot(1, false);
+      g.add_op(OP_ADD, {m, a}, mu);
+      const int lp = g.add_slot(1, false);
+      const int id = g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+      g.ops[id].variant = 0x06;
+      terms.push_back(lp);
+    }
+  }
+  const RerollStats st = reroll(g, fills, terms, {});
+  expect("many regions leave one term each",
+         terms.size() == (size_t)st.regions);
+  return {st.regions, st.term_steps};
+}
+
+static void test_many_regions_cost() {
+  const ManyRegionsCost small = many_regions_cost(2000);
+  const ManyRegionsCost big = many_regions_cost(4000);
+  std::printf(
+      "  many-region reroll: groups=2000 %lld term steps,"
+      " groups=4000 %lld term steps (%.1fx)\n",
+      (long long)small.steps, (long long)big.steps,
+      small.steps > 0 ? (double)big.steps / (double)small.steps : 0.0);
+  expect("many regions small: one region per group", small.regions == 2000);
+  expect("many regions big: one region per group", big.regions == 4000);
+  expect("many regions term work stays linear", big.steps < 3 * small.steps);
+}
+
 static void test_write_fusion() {
   using namespace writefuse;
   for (int start : {0, 1}) {
@@ -1393,13 +1432,11 @@ static void test_write_fusion() {
 
     std::vector<int> tt = b.terms;
     Fills f2 = b.fills;
-    const detail::ProfiledRerollStats profiled =
-        detail::reroll_profiled(b.g, f2, tt, {});
-    const RerollStats st = profiled.work;
+    const RerollStats st = reroll(b.g, f2, tt, {});
     const std::string tag = start ? "window" : "whole";
     expect((tag + " regions==1").c_str(), st.regions == 1);
     expect((tag + " records element-store disposition").c_str(),
-           profiled.dispositions.element_store == 1);
+           st.element_store == 1);
     expect((tag + " one gather").c_str(), count(b.g, OP_GATHER) == 1);
     expect((tag + " no element writes left").c_str(),
            count(b.g, OP_SET_INDEX_INPLACE) == 0);
@@ -1601,11 +1638,10 @@ static void test_read_modify_write_lanes() {
     const std::vector<double> want = reference(b);
     std::vector<int> tt = b.terms;
     Fills f2 = b.fills;
-    const detail::ProfiledRerollStats profiled =
-        detail::reroll_profiled(b.g, f2, tt, {});
-    expect((tag + " rmw regions").c_str(), profiled.work.regions == 1);
+    const RerollStats profiled = reroll(b.g, f2, tt, {});
+    expect((tag + " rmw regions").c_str(), profiled.regions == 1);
     expect((tag + " rmw element store recorded").c_str(),
-           profiled.dispositions.element_store == 1);
+           profiled.element_store == 1);
     expect((tag + " rmw no element writes left").c_str(),
            writefuse::count(b.g, OP_SET_INDEX_INPLACE) == c.stores_left);
     expect((tag + " rmw no scalar reads of the vector").c_str(),
@@ -2044,11 +2080,10 @@ static void test_row_density_lanes() {
 
     std::vector<int> tt = b.terms;
     Fills f2 = b.fills;
-    const detail::ProfiledRerollStats profiled =
-        detail::reroll_profiled(b.g, f2, tt, {});
-    expect((tag + " regions==1").c_str(), profiled.work.regions == 1);
+    const RerollStats profiled = reroll(b.g, f2, tt, {});
+    expect((tag + " regions==1").c_str(), profiled.regions == 1);
     expect((tag + " term-density disposition").c_str(),
-           profiled.dispositions.term_density == 1);
+           profiled.term_density == 1);
     expect((tag + " ops==1").c_str(), b.g.ops.size() == 1);
     expect((tag + " one term").c_str(), tt.size() == 1);
     expect((tag + " no constant materialized").c_str(),
@@ -2092,11 +2127,10 @@ static void test_row_store_lanes() {
 
     std::vector<int> tt = b.terms;
     Fills f2 = b.fills;
-    const detail::ProfiledRerollStats profiled =
-        detail::reroll_profiled(b.g, f2, tt, {});
-    expect((tag + " regions==1").c_str(), profiled.work.regions == 1);
+    const RerollStats profiled = reroll(b.g, f2, tt, {});
+    expect((tag + " regions==1").c_str(), profiled.regions == 1);
     expect((tag + " element-store disposition").c_str(),
-           profiled.dispositions.element_store == 1);
+           profiled.element_store == 1);
     expect((tag + " no row stores left").c_str(), row_stores(b.g) == 0);
     expect((tag + " one FMA").c_str(), writefuse::count(b.g, OP_FMA) == 1);
     // 2 hoisted INDEX + 1 FMA + NORMAL.
@@ -2340,9 +2374,8 @@ static void test_row_lane_shared_read() {
 
     std::vector<int> tt = b.terms;
     Fills f2 = b.fills;
-    const detail::ProfiledRerollStats profiled =
-        detail::reroll_profiled(b.g, f2, tt, {});
-    expect((tag + " regions==1").c_str(), profiled.work.regions == 1);
+    const RerollStats profiled = reroll(b.g, f2, tt, {});
+    expect((tag + " regions==1").c_str(), profiled.regions == 1);
     expect((tag + " shared row hoisted").c_str(),
            writefuse::count(b.g, OP_SLICE) +
                    writefuse::count(b.g, OP_SLICE_STRIDED) <=
@@ -2956,7 +2989,9 @@ static void test_lane_plan_boundary() {
       std::unordered_set<int> term_set(terms.begin(), terms.end());
       std::unordered_map<int, int> renamed;
       std::vector<Op> emitted;
-      std::move(*accepted).emit(g, fills, terms, term_set, emitted, renamed);
+      TermRetirement retired;
+      std::move(*accepted).emit(g, fills, retired, term_set, emitted, renamed);
+      retired.apply(terms);
       expect("lane emitter keeps operation order",
              emitted.size() == 3 && emitted[0].opcode == OP_FMA &&
                  emitted[1].opcode == OP_EXPV &&
@@ -3108,6 +3143,7 @@ int main() {
   test_lda_shape_cost();
   test_no_candidate_cost();
   test_sparse_candidate_cost();
+  test_many_regions_cost();
   test_write_fusion();
   test_write_fusion_bails();
   test_read_modify_write_lanes();

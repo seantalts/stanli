@@ -86,7 +86,7 @@ void run() {
                             var("lo", UnsizedLeaf::Vector));
     bool accepted = true;
     try {
-      m.exec(s);
+      (void)m.exec(s);
     } catch (const std::exception&) {
       accepted = false;
     }
@@ -95,7 +95,7 @@ void run() {
     m.env()["x"] = values({1.0, 1.5}, {2});
     bool domain = false;
     try {
-      m.exec(s);
+      (void)m.exec(s);
     } catch (const std::domain_error& e) {
       domain = std::string(e.what()).find("x") != std::string::npos;
     } catch (const std::exception&) {
@@ -112,7 +112,7 @@ void run() {
                             var("hi", UnsizedLeaf::RowVector));
     bool mismatch = false;
     try {
-      m.exec(s);
+      (void)m.exec(s);
     } catch (const std::invalid_argument&) {
       mismatch = true;
     } catch (const std::exception&) {
@@ -127,7 +127,7 @@ void run() {
                             var("hi", UnsizedLeaf::Matrix));
     bool mismatch = false;
     try {
-      m.exec(s);
+      (void)m.exec(s);
     } catch (const std::invalid_argument&) {
       mismatch = true;
     } catch (const std::exception&) {
@@ -146,7 +146,7 @@ void run() {
                  var("lo", UnsizedLeaf::Vector));
     bool accepted = true;
     try {
-      m.exec(vectors);
+      (void)m.exec(vectors);
     } catch (const std::exception&) {
       accepted = false;
     }
@@ -157,7 +157,7 @@ void run() {
                                  var("lo", UnsizedLeaf::Vector), "s");
     bool mismatch = false;
     try {
-      m.exec(scalar);
+      (void)m.exec(scalar);
     } catch (const std::invalid_argument&) {
       mismatch = true;
     } catch (const std::exception&) {
@@ -174,7 +174,7 @@ void run() {
                                 real(std::numeric_limits<double>::quiet_NaN()));
     bool accepted = true;
     try {
-      m.exec(empty);
+      (void)m.exec(empty);
     } catch (const std::exception&) {
       accepted = false;
     }
@@ -183,7 +183,7 @@ void run() {
     m.env()["x"] = values({0.0}, {1});
     bool domain = false;
     try {
-      m.exec(empty);
+      (void)m.exec(empty);
     } catch (const std::domain_error&) {
       domain = true;
     }
@@ -928,6 +928,51 @@ int main(int argc, char** argv) {
               promoted.r == std::vector<double>({0.0, 0.0}) &&
               promoted.dims == std::vector<int64_t>({2}),
           "integer literal assignment retains declared real vector type");
+  }
+
+  // A parent environment is read in place. An indexed write copies the
+  // written entry into the interpreter's own environment and leaves the
+  // parent as it was.
+  {
+    std::map<std::string, const mir::FunDef*> functions;
+    std::map<std::string, DataMap::Entry> parent;
+    parent["x"].r = {1.0, 2.0};
+    parent["x"].dims = {2};
+    MirInterp<double> interp(functions, "parent environment test");
+    interp.set_parent_env(&parent);
+    mir::Expr x;
+    x.kind = mir::Expr::Var;
+    x.name = "x";
+    x.type_ = "UVector";
+    x.unsized.leaf = mir::UnsizedLeaf::Vector;
+    check(interp.eval(x).r == std::vector<double>{1.0, 2.0},
+          "a parent entry is readable");
+    check(interp.env().count("x") == 0,
+          "reading a parent entry copies nothing");
+    mir::Expr two;
+    two.kind = mir::Expr::LitInt;
+    two.lit_i = 2;
+    two.type_ = "UInt";
+    two.unsized.leaf = mir::UnsizedLeaf::Int;
+    mir::Expr index;
+    index.kind = mir::Expr::FunApp;
+    index.name = "IndexSingle";
+    index.args = {two};
+    mir::Expr five;
+    five.kind = mir::Expr::LitReal;
+    five.lit = 5.0;
+    five.type_ = "UReal";
+    five.unsized.leaf = mir::UnsizedLeaf::Real;
+    mir::Stmt write;
+    write.kind = mir::Stmt::Assignment;
+    write.lhs = "x";
+    write.lhs_idx = {index};
+    write.rhs = five;
+    (void)interp.exec(write);
+    check(interp.eval(x).r == std::vector<double>{1.0, 5.0},
+          "an indexed write to a parent entry is visible");
+    check(parent.at("x").r == std::vector<double>{1.0, 2.0},
+          "an indexed write leaves the parent unchanged");
   }
 
   // A partial list of leading scalar indices removes exactly those array

@@ -4686,8 +4686,9 @@ static void frame_program_tests() {
           "retry discards a partially recorded automatic frame tape");
   }
 
-  // Run the established semantic suites through the opt-in path too. Tests
-  // that assert the old recorder's storage statistics remain outside here.
+  // Run the established semantic suites through the forced frame path too.
+  // Tests that assert the old recorder's storage statistics remain outside
+  // here.
   test_setenv("STANLI_STRUCTURED_FRAMES", "1");
   inplace_import_base_tests();
   inplace_duplicate_position_tests();

@@ -1151,6 +1151,73 @@ void test_write_array_retained_loop() {
   expect_retained_write_array_loop("structured_wa_region", alternating_y(32));
 }
 
+// A loop that carries a value from one iteration to the next is retained in
+// write_array once the graph is already large, and unrolled otherwise. Both
+// forms produce the interpreter's rows.
+void test_write_array_carried_loop() {
+  using namespace stanli;
+  const std::string text =
+      slurp("tests/fixtures/structured_wa_carried.tmir.sexp");
+  for (const int t : {8, 20000}) {
+    DataMap data;
+    const int n = 64;
+    data.set_int("N", n);
+    data.set_int("T", t);
+    std::vector<double> x(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i)
+      x[static_cast<size_t>(i)] = 0.25 * (i % 5) - 0.5;
+    data.set_real_array("x", x);
+    CompiledModel cm = compile_model(text, data);
+    if (!cm.write_array || !cm.write_array->truncated.empty()) {
+      ++failures;
+      std::printf("FAIL structured_wa_carried T=%d: no compiled write_array\n",
+                  t);
+      continue;
+    }
+    const bool retained = find_retained_loop(cm.write_array->graph) != nullptr;
+    if (retained != (t > 8)) {
+      ++failures;
+      std::printf("FAIL structured_wa_carried T=%d: retained=%d\n", t,
+                  retained ? 1 : 0);
+    }
+    test_setenv("STANLI_WA_FORCE_INTERP", "1");
+    CompiledModel cross = compile_model(text, data);
+    test_unsetenv("STANLI_WA_FORCE_INTERP");
+    if (!cross.write_array || !cross.write_array->interp) {
+      ++failures;
+      std::printf("FAIL structured_wa_carried T=%d: no interpreter\n", t);
+      continue;
+    }
+    Executor pex(cm.graph);
+    cm.bind(pex);
+    Executor wex(std::move(cm.write_array->graph));
+    cm.write_array->bind(wex);
+    for (const double mu : {0.4, -1.1, 2.0}) {
+      pex.params_data()[0] = mu;
+      pex.run_forward_only();
+      wex.params_data()[0] = mu;
+      WaRng graph_rng(3);
+      wex.run_forward_only(EvalState{&graph_rng});
+      std::vector<double> row;
+      for (const auto& c : cm.write_array->columns) {
+        const double* p = wex.value_ptr(c.slot);
+        for (int64_t i = 0; i < c.len; ++i)
+          row.push_back(p[c.storage_index(i)]);
+      }
+      WaRng interp_rng(3);
+      const std::vector<double> interp_row = cross.write_array->interp->eval(
+          cross.constrained_env(pex), interp_rng);
+      if (!same_double_bytes(row, interp_row)) {
+        ++failures;
+        std::printf(
+            "FAIL structured_wa_carried T=%d: graph/interp rows differ at "
+            "mu=%g\n",
+            t, mu);
+      }
+    }
+  }
+}
+
 // The transformed-parameter block carries a data-only sibling statement
 // (an is_nan check on a value a preceding while loop produced, so it is
 // not foldable) beside the 32-plus-trip parameter-branching loop. That
@@ -4421,6 +4488,7 @@ int main() {
   test_caller_owned_rng();
   test_transformed_parameter_checks();
   test_write_array_retained_loop();
+  test_write_array_carried_loop();
   test_write_array_block_order();
   test_write_array_vector_rng();
   test_write_array_bounded_blocks();

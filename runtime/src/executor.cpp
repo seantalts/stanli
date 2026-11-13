@@ -31,16 +31,6 @@ Kernel& kernel(uint16_t opcode) {
   return g_table[opcode];
 }
 
-// Default OFF, on measurement: see packet.hpp. Opt in with
-// STANLI_PACKET_MATH=1.
-static bool g_packet_math = [] {
-  const char* e = std::getenv("STANLI_PACKET_MATH");
-  return e != nullptr && e[0] != '0';
-}();
-
-bool packet_math() { return g_packet_math; }
-void set_packet_math(bool on) { g_packet_math = on; }
-
 static bool g_fixed_small_matrices = true;
 bool fixed_small_matrices() { return g_fixed_small_matrices; }
 void set_fixed_small_matrices(bool on) { g_fixed_small_matrices = on; }
@@ -99,12 +89,6 @@ void bind_call_fwd_ctx(const Program::Call& call, double* reg, KernelCtx& ctx,
   // Not a call-site fact: the draw stream belongs to the evaluation, so it
   // is rebound with the pointer fields rather than resolved once.
   ctx.eval_state = state;
-}
-
-KernelCtx call_fwd_ctx(const Program::Call& call, double* reg) {
-  KernelCtx ctx;
-  bind_call_fwd_ctx(call, reg, ctx, nullptr);
-  return ctx;
 }
 
 bool bind_call(Program::Call& call) {
@@ -810,9 +794,9 @@ void Executor::run_forward_only(EvalState state) {
   }
   // Unrolled by hand: four separate indirect-call sites predict
   // independently, and the loop bookkeeping amortizes. Measured against a
-  // musttail-chained alternative in tools/bench_dispatch.cpp -- the unroll
-  // won (79-80% of the plain loop vs 85-95%, and no kernel signature
-  // changes), so this is the whole of "threaded dispatch" worth having.
+  // musttail-chained alternative: the unroll won (79-80% of the plain loop
+  // vs 85-95%, and no kernel signature changes), so this is the whole of
+  // "threaded dispatch" worth having.
   const size_t n = fwd_fn_.size();
   size_t i = 0;
   for (; i + 4 <= n; i += 4) {

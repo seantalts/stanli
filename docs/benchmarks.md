@@ -590,7 +590,7 @@ Stanli timings in the loop-vectorization comparison are from the default run. Th
 | Item | Configuration |
 | --- | --- |
 | Scope | All <!--gen:benchmark_models-->343<!--/gen--> application models, `--corpus all` |
-| Stanli build | Release clang++, `-O3 -DNDEBUG`; full runtime, threads enabled, lite mode disabled |
+| Stanli build | Release clang++, `-O3 -DNDEBUG`; full runtime, threads enabled |
 | Measured source | <!--gen:benchmark_source-->`051bb4ba6834a7d6f313bdbabc2adc861bcf7b1d`<!--/gen-->; tracked differences and executable hashes in manifests |
 | Default reference compiler | Stock pinned stanc3, no additional flags |
 | CmdStan | <!--gen:benchmark_cmdstan-->2.40.0, `d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6`<!--/gen--> |

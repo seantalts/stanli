@@ -214,7 +214,7 @@ int main() {
     cfg.warmup = 100;
     cfg.samples = 100;
     cfg.chain_id = 1;
-    auto par = run_nuts_chains(ea, cfg, C, {}, {}, 1, {}, {}, inits.data());
+    auto par = run_nuts_chains(ea, cfg, C, {}, 1, {}, {}, inits.data());
 
     bool same = par.size() == (size_t)C;
     for (int c = 0; same && c < C; ++c) {
@@ -255,7 +255,7 @@ int main() {
     cfg.metric = metric;
     cfg.step_size = 0.4;
     auto par =
-        run_nuts_chains(ea, cfg, C, {}, {}, 1, {}, {}, nullptr, metrics.data());
+        run_nuts_chains(ea, cfg, C, {}, 1, {}, {}, nullptr, metrics.data());
 
     bool same = par.size() == (size_t)C;
     bool distinct = true;
@@ -336,7 +336,7 @@ int main() {
     bool caller_thread = true;
     std::vector<std::vector<int64_t>> events(C);
     const auto observed = run_nuts_chains(
-        observed_execs, cfg, C, {},
+        observed_execs, cfg, C,
         [&](int chain, int64_t i, bool warmup) {
           caller_thread = caller_thread && std::this_thread::get_id() == caller;
           events[(size_t)chain].push_back(warmup ? i + 1 : cfg.warmup + i + 1);
@@ -367,7 +367,7 @@ int main() {
     bool callback_error_rethrown = false;
     try {
       (void)run_nuts_chains(
-          throwing_execs, cfg, C, {},
+          throwing_execs, cfg, C,
           [](int, int64_t, bool) {
             throw std::runtime_error("progress callback failed");
           },
@@ -389,8 +389,8 @@ int main() {
     for (auto& c : empty_clones) empty_execs.push_back(c.get());
     int empty_events = 0;
     const auto empty = run_nuts_chains(
-        empty_execs, empty_cfg, C, {},
-        [&](int, int64_t, bool) { ++empty_events; }, 1);
+        empty_execs, empty_cfg, C, [&](int, int64_t, bool) { ++empty_events; },
+        1);
     expect("zero-transition chains complete without callbacks",
            empty.size() == C && empty_events == 0);
   }

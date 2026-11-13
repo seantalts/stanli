@@ -81,11 +81,6 @@ Lowering::BuiltinDispatch Lowering::resolve_builtin(const mir::Expr& e) {
     return {BuiltinFamily::CallableTransform};
   return {};
 }
-// Fallback for expressions with no native lowering: a data-only subtree
-// is evaluated at compile time and materialized as a constant. Unsupported
-// expressions and Stan validation failures decline; the latter must stay
-// at model evaluation rather than move to construction. Propto densities
-// never fold because their value is instantiation-dependent.
 bool Lowering::expr_effectful(const mir::Expr& e) {
   return expr_effects(e) != 0;
 }
@@ -567,7 +562,7 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
 // Inline a user-defined function at its call site: arguments are lowered
 // in the caller's scope, bound under the parameter names in a shadowed
 // scope, and the body lowers like any other statements (loops unroll,
-// data-only conditions resolve). Return throws the result value out.
+// data-only conditions resolve). Return ends the body with the result.
 Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
                                        const std::function<void()>& before_body,
                                        const UdfSpecialization& specialize) {
@@ -626,8 +621,6 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   decls.clear();
   int_locals.clear();
   td.env().clear();
-  Val ret{-1, false, {}};
-  bool returned = false;
   const bool propto_saved = propto_ctx;
   const bool autodiff_saved = udf_autodiff_ctx;
   const bool known_static_saved = write_array_known_static;
@@ -637,7 +630,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   for (size_t i = 0; i < binds.size(); ++i)
     if (!binds[i].is_int && f.arg_views[i].leaf != mir::UnsizedLeaf::Int)
       udf_autodiff_ctx = udf_autodiff_ctx || binds[i].v.autodiff;
-  auto restore = [&] {
+  const ScopeExit restore{[&] {
     propto_ctx = propto_saved;
     udf_autodiff_ctx = autodiff_saved;
     write_array_known_static = known_static_saved;
@@ -651,52 +644,46 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
     td.env() = std::move(env_saved);
     td_journal = std::move(journal_saved);
     --udf_depth;
-  };
-  try {
-    for (size_t i = 0; i < binds.size(); ++i) {
-      const std::string& name = f.arg_names[i];
-      // Bind whenever the argument's value is computable at compile time,
-      // not just when the MIR flags it DataOnly: a function may take a data
-      // array without the `data` qualifier, and its body still asks for
-      // shapes and sizes. Parameter expressions simply fail to evaluate.
-      if (binds[i].data) {
-        DataMap::Entry en = *binds[i].data;
-        td.env()[name] = std::move(en);
-      }
-      if (binds[i].is_int) {
-        int_env[name] = binds[i].iv;
-      } else {
-        scope[name] = binds[i].v;
-        udf_formal_autodiff[name] = binds[i].v.autodiff;
-        decls[name] = DeclView{g.slots[binds[i].v.slot].len,
-                               binds[i].v.autodiff, binds[i].v.si};
-      }
+  }};
+  for (size_t i = 0; i < binds.size(); ++i) {
+    const std::string& name = f.arg_names[i];
+    // Bind whenever the argument's value is computable at compile time,
+    // not just when the MIR flags it DataOnly: a function may take a data
+    // array without the `data` qualifier, and its body still asks for
+    // shapes and sizes. Parameter expressions simply fail to evaluate.
+    if (binds[i].data) {
+      DataMap::Entry en = *binds[i].data;
+      td.env()[name] = std::move(en);
     }
-    const std::vector<mir::Stmt>* body = &f.body;
-    if ((e.type_ == "UReal" || e.type_ == "UInt") && e.unsized.depth == 0 &&
-        non_tail_return(f.body, true)) {
-      bool looped = false;
-      for (const auto& st : f.body)
-        looped = looped || return_in_loop(st, false);
-      if (!looped) {
-        auto rewritten =
-            std::make_shared<std::vector<mir::Stmt>>(single_exit_body(f, e));
-        g.udata_pool.push_back(rewritten);
-        body = rewritten.get();
-      }
+    if (binds[i].is_int) {
+      int_env[name] = binds[i].iv;
+    } else {
+      scope[name] = binds[i].v;
+      udf_formal_autodiff[name] = binds[i].v.autodiff;
+      decls[name] = DeclView{g.slots[binds[i].v.slot].len, binds[i].v.autodiff,
+                             binds[i].v.si};
     }
-    // CmdStan passes the CALLER's propto__ value into a user density.
-    for (const auto& st : *body) lower_stmt(st);
-  } catch (LpReturn& r) {
-    ret = r.v;
-    returned = true;
-  } catch (...) {
-    restore();
-    throw;
   }
+  const std::vector<mir::Stmt>* body = &f.body;
+  if ((e.type_ == "UReal" || e.type_ == "UInt") && e.unsized.depth == 0 &&
+      non_tail_return(f.body, true)) {
+    bool looped = false;
+    for (const auto& st : f.body) looped = looped || return_in_loop(st, false);
+    if (!looped) {
+      auto rewritten =
+          std::make_shared<std::vector<mir::Stmt>>(single_exit_body(f, e));
+      g.udata_pool.push_back(rewritten);
+      body = rewritten.get();
+    }
+  }
+  // CmdStan passes the CALLER's propto__ value into a user density.
+  const Flow flow = lower_stmts(*body);
+  if (flow == Flow::Break || flow == Flow::Continue)
+    fail(e.name + ": break or continue outside a loop");
+  if (flow != Flow::Return)
+    fail(e.name + ": no return value on the executed path");
+  Val ret = std::move(return_value);
   ret.autodiff = e.unsized.leaf != mir::UnsizedLeaf::Int && udf_autodiff_ctx;
-  restore();
-  if (!returned) fail(e.name + ": no return value on the executed path");
   ret.layout = owning_layout(ret.si);
   return ret;
 }
@@ -796,30 +783,6 @@ Lowering::Val Lowering::lower_dirichlet_rng(const mir::Expr& e,
   draw.si.param_free = false;
   draw.autodiff = false;
   return draw;
-}
-Lowering::Val Lowering::lower_regular_unary(uint16_t opcode,
-                                            const std::string& type_,
-                                            const std::string& name,
-                                            const std::string& raw, Val a) {
-  SlotInfo si = a.si;
-  // Shape-preserving unaries keep rows/cols (softmax/cumulative_sum
-  // are vector-only, so they never carry one).
-  if (opcode != OP_SOFTMAX && opcode != OP_CUMSUM) {
-    if (type_ == "UMatrix" && !is_matrix(si))
-      fail(name + ": matrix result has unknown logical extents", raw);
-    stamp_kind(&si, type_);
-  } else {
-    si = view_of(type_);
-  }
-  si.param_free = a.si.param_free;
-  const bool packet_supported =
-      opcode != OP_SOFTMAX && opcode != OP_LOG_SOFTMAX && opcode != OP_CUMSUM;
-  // These functions return freshly allocated Eigen containers. Their
-  // result starts at lane zero independently of the input's provenance;
-  // the other unary operations are elementwise evaluator expressions.
-  const ExpressionLayout layout =
-      packet_supported ? elementwise_layout({a}) : owning_layout(si);
-  return with_layout(emit_value(opcode, {a}, g.slots[a.slot].len, si), layout);
 }
 Lowering::Val Lowering::lower_categorical_rng(const mir::Expr& e,
                                               CallArguments& actuals) {

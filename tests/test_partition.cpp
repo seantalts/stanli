@@ -1274,6 +1274,51 @@ static void test_scaling() {
   if (rss > 0.0) expect("partition space stays linear", rss < 1024.0);
 }
 
+// Many buckets, told apart by the length of the vector their lanes index,
+// each retiring its own lanes' terms.
+// Rewriting the whole term list per bucket made this quadratic.
+struct BucketCost {
+  int groups;
+  int64_t steps;
+};
+
+static BucketCost bucket_cost(int B) {
+  const int L = 8;
+  Graph g;
+  Fills fills;
+  const int sigma = g.add_slot(1, true);
+  std::vector<int> terms;
+  for (int b = 0; b < B; ++b) {
+    const int base = g.add_slot(b + 1, true);
+    for (int l = 0; l < L; ++l) {
+      const int y = g.add_slot(1, false);
+      fills.emplace_back(y, std::vector<double>{0.2 * l - 0.5});
+      const int idx = g.add_slot(1, false);
+      g.add_op(OP_INDEX, {base}, idx, {0});
+      const int lp = g.add_slot(1, false);
+      const int id = g.add_op(OP_NORMAL_LPDF, {y, idx, sigma}, lp);
+      g.ops[(size_t)id].variant = 0x06;
+      terms.push_back(lp);
+    }
+  }
+  const PartitionStats st = partition_lanes(g, fills, terms, {});
+  expect("bucket scaling leaves one term per bucket",
+         terms.size() == (size_t)st.groups);
+  return {st.groups, st.term_steps};
+}
+
+static void test_bucket_term_scaling() {
+  const BucketCost small = bucket_cost(2000);
+  const BucketCost big = bucket_cost(4000);
+  std::printf(
+      "  partition buckets: B=2000 %d groups %lld term steps, B=4000 %d groups "
+      "%lld term steps\n",
+      small.groups, (long long)small.steps, big.groups, (long long)big.steps);
+  expect("bucket scaling small: one group per bucket", small.groups == 2000);
+  expect("bucket scaling big: one group per bucket", big.groups == 4000);
+  expect("bucket term work stays linear", big.steps < 3 * small.steps);
+}
+
 static void test_fast_fuses_shared_parameter() {
   const int L = 12;
   Graph g;
@@ -1352,6 +1397,7 @@ int main() {
   test_irt_refuse_near_miss(1.5, true);
   test_cost_declines();
   test_scaling();
+  test_bucket_term_scaling();
   if (failures == 0) std::printf("test_partition OK\n");
   return failures == 0 ? 0 : 1;
 }

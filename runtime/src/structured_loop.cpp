@@ -128,12 +128,10 @@ void prepare_node(StructuredLoop& p, Node& n, unsigned depth,
   n.reuse_primal_output = false;
   n.primal_contract_variant = 0;
   n.primal_contract = nullptr;
-  n.memo = false;
   n.invariant_loop = -1;
   n.site = ~uint32_t{0};
   n.workspace = -1;
   n.loop_index = -1;
-  n.segment = -1;
   const bool loop = n.kind == Node::For || n.kind == Node::While;
   if (loop) {
     if (p.loop_count >= static_cast<size_t>(std::numeric_limits<int>::max()))
@@ -214,8 +212,6 @@ void prepare_node(StructuredLoop& p, Node& n, unsigned depth,
       if (!p.has_target)
         throw std::invalid_argument("structured target needs a target output");
       break;
-    case Node::Segment:
-      throw std::invalid_argument("structured segments are formed by prepare");
   }
   for (auto& c : n.children)
     prepare_node(p, c, depth + 1, loop_depth + loop, out_seen);
@@ -393,7 +389,6 @@ void classify(StructuredLoop& p) {
   };
   walk(p.root, loops, mark_invariant);
 
-  p.segments.clear();
   p.site_count = 0;
   auto renumber = [&](Node& n, const std::vector<int>&) {
     if (n.kind == Node::KernelCall)
@@ -401,7 +396,6 @@ void classify(StructuredLoop& p) {
   };
   walk(p.root, loops, renumber);
 
-  // Segments read their inputs from their own frame.
   std::vector<char> inplace_base(slots, 0), active_reader(slots, 0),
       primal_reader(slots, 0);
   auto mark_readers = [&](Node& n, const std::vector<int>&) {
@@ -1227,14 +1221,12 @@ struct Version {
 };
 
 struct Record {
-  enum Kind : uint8_t { Kernel, InPlace, Copy, Segment };
+  enum Kind : uint8_t { Kernel, InPlace, Copy };
   uint8_t kind;
-  uint32_t site;    // Segment: index into StructuredLoop::segments
-  int64_t handles;  // Kernel, Segment: first saved input version;
-                    // InPlace: undo offset
-  int64_t out;      // Kernel: out version; InPlace: base; Copy: from;
-                    // Segment: frame version
-  int64_t other;    // InPlace: rhs version; Copy: to; Segment: adjoint base
+  uint32_t site;
+  int64_t handles;  // Kernel: first saved input version; InPlace: undo offset
+  int64_t out;      // Kernel: out version; InPlace: base; Copy: from
+  int64_t other;    // InPlace: rhs version; Copy: to
 };
 static_assert(sizeof(Record) == 32, "records are the largest tape entry");
 
@@ -1267,13 +1259,6 @@ struct FrozenCopy {
   double* dst = nullptr;
   int64_t len = 0;
   uint32_t site = 0;
-};
-
-struct FrozenSegment {
-  const Segment* segment = nullptr;
-  double* frame = nullptr;
-  uint32_t in_offset = 0;
-  int64_t adjoint_base = -1;
 };
 
 struct FrozenSet {
@@ -1324,7 +1309,6 @@ struct StreamInstr {
     Call,
     InPlace,
     Copy,
-    Seg,
     GuardIf,
     GuardFor,
     Tgt,
@@ -1341,7 +1325,6 @@ struct Stream {
   std::vector<FrozenCall> calls;
   std::vector<FrozenInPlace> inplaces;
   std::vector<FrozenCopy> copies;
-  std::vector<FrozenSegment> segs;
   std::vector<FrozenGuardIf> guards_if;
   std::vector<FrozenGuardFor> guards_for;
   std::vector<FrozenTarget> targets;
@@ -1359,9 +1342,6 @@ struct Stream {
   std::vector<int64_t> inplace_adj_version;
   std::vector<double*> copy_adj;
   std::vector<int64_t> copy_adj_version;
-  std::vector<const double*> seg_in_src;
-  std::vector<double*> seg_in_adj;
-  std::vector<int64_t> seg_in_adj_version;
   std::vector<int64_t> gather_pos;
   std::vector<double*> gather_adj;
   std::vector<int64_t> gather_adj_version;
@@ -1389,7 +1369,6 @@ struct Stream {
     calls.clear();
     inplaces.clear();
     copies.clear();
-    segs.clear();
     guards_if.clear();
     guards_for.clear();
     targets.clear();
@@ -1406,9 +1385,6 @@ struct Stream {
     inplace_adj_version.clear();
     copy_adj.clear();
     copy_adj_version.clear();
-    seg_in_src.clear();
-    seg_in_adj.clear();
-    seg_in_adj_version.clear();
     gather_pos.clear();
     gather_adj.clear();
     gather_adj_version.clear();
@@ -1427,8 +1403,9 @@ struct Stream {
   }
 };
 
-// The experimental frame path seals a bounded recording at each outer trip.
-// Code contains relative operands; frame bindings carry the execution's
+// The frame path seals a bounded recording at each outer trip. Large loops
+// select it automatically (prefer_frames); STANLI_STRUCTURED_FRAMES=1 forces
+// it. Code contains relative operands; frame bindings carry the execution's
 // external addresses and derivative identities.
 struct FrameCode {
   std::vector<uint64_t> words;
@@ -1557,8 +1534,6 @@ struct LoopState : KernelState {
   bool frame_auto = false;
   bool frame_layout =
       std::getenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT") == nullptr;
-  bool check_frame_layout =
-      std::getenv("STANLI_STRUCTURED_CHECK_FRAME_LAYOUT") != nullptr;
   bool frame_clone = std::getenv("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
   bool frame_instance =
       std::getenv("STANLI_NO_STRUCTURED_FRAME_INSTANCE") == nullptr;
@@ -1584,11 +1559,9 @@ struct LoopState : KernelState {
         observable(plan.site_count, 0) {
     no_replay |= !plan.cache_execution_path;
     const char* frame_option = std::getenv("STANLI_STRUCTURED_FRAMES");
-    frame_mode = !no_replay && plan.outer_loop_index >= 0 &&
-                 plan.segments.empty() && frame_option &&
+    frame_mode = !no_replay && plan.outer_loop_index >= 0 && frame_option &&
                  frame_option[0] == '1';
-    frame_auto = !no_replay && plan.outer_loop_index >= 0 &&
-                 plan.segments.empty() && !frame_option;
+    frame_auto = !no_replay && plan.outer_loop_index >= 0 && !frame_option;
     collect(plan.root);
     for (size_t site = 0; site < sites.size(); ++site) {
       const Node* n = sites[site];
@@ -1670,8 +1643,7 @@ struct RecordingPoolSizes {
          copies = 0, inplace_pos = 0, inplace_old = 0, inplace_sel_ptr = 0,
          inplace_sel_snapshot = 0, inplace_adj_version = 0, inplaces = 0,
          guards_if = 0, guards_for = 0, sets = 0, targets = 0,
-         target_adj_version = 0, seg_in_src = 0, seg_in_adj_version = 0,
-         segs = 0;
+         target_adj_version = 0;
 };
 
 RecordingPoolSizes recording_pool_sizes(const Stream& st) {
@@ -1694,10 +1666,7 @@ RecordingPoolSizes recording_pool_sizes(const Stream& st) {
                             st.guards_for.size(),
                             st.sets.size(),
                             st.targets.size(),
-                            st.target_adj_version.size(),
-                            st.seg_in_src.size(),
-                            st.seg_in_adj_version.size(),
-                            st.segs.size()};
+                            st.target_adj_version.size()};
 }
 
 template <class T>
@@ -1761,13 +1730,6 @@ void reserve_remaining_trips(Stream& st, const RecordingPoolSizes& before,
                         remaining_trips);
   reserve_for_remaining(st.target_adj_version, before.target_adj_version,
                         after.target_adj_version, prefix_trips,
-                        remaining_trips);
-  reserve_for_remaining(st.seg_in_src, before.seg_in_src, after.seg_in_src,
-                        prefix_trips, remaining_trips);
-  reserve_for_remaining(st.seg_in_adj_version, before.seg_in_adj_version,
-                        after.seg_in_adj_version, prefix_trips,
-                        remaining_trips);
-  reserve_for_remaining(st.segs, before.segs, after.segs, prefix_trips,
                         remaining_trips);
 }
 
@@ -2435,58 +2397,8 @@ struct Execution {
       case Node::Target:
         execute_target(n);
         return Normal;
-      case Node::Segment:
-        run_segment(n, p.segments[static_cast<size_t>(n.segment)]);
-        ++s.effects;
-        return Normal;
     }
     throw std::logic_error("invalid structured node");
-  }
-
-  void run_segment(const Node& n, const Segment& segment) {
-    const IslandProg& program = segment.program;
-    double* frame = s.arena.allocate(program.n_regs);
-    bool folded = true;
-    for (const auto& in : segment.ins)
-      folded = folded && is_const(s.bindings[in.slot]);
-    int64_t handles = -1;
-    if (n.active && !s.building) {
-      handles = static_cast<int64_t>(s.handles.size());
-      for (const auto& in : segment.ins)
-        s.handles.push_back(hold(s.bindings[in.slot]));
-    }
-    const bool log_inputs = s.building && !folded;
-    const uint32_t seg_in_offset =
-        log_inputs ? static_cast<uint32_t>(s.building->seg_in_src.size()) : 0;
-    for (size_t k = 0; k < segment.ins.size(); ++k) {
-      const auto& in = segment.ins[k];
-      const double* v = value(in.slot);
-      double* r = frame + in.reg;
-      for (int i = 0; i < in.len; ++i) r[i] = v[i];
-      if (log_inputs) {
-        Stream& st = *s.building;
-        st.seg_in_src.push_back(materialize(s.bindings[in.slot], in.len));
-        st.seg_in_adj_version.push_back(n.active ? s.bindings[in.slot] : -1);
-      }
-    }
-    run_program(program, frame, outer.eval_state);
-    const int64_t base = n.active ? reserve_adjoint(program.adj.n_regs) : -1;
-    for (const auto& out : segment.outs)
-      s.bindings[out.slot] = make_version(
-          frame + out.reg,
-          n.active ? base + program.adj.adj_reg[static_cast<size_t>(out.reg)]
-                   : -1,
-          folded);
-    if (n.active && !s.building)
-      s.records.push_back(Record{Record::Segment,
-                                 static_cast<uint32_t>(n.segment), handles,
-                                 make_version(frame, -1), base});
-    if (s.building && !folded) {
-      Stream& st = *s.building;
-      const uint32_t idx = static_cast<uint32_t>(st.segs.size());
-      st.program.push_back(StreamInstr{StreamInstr::Seg, idx});
-      st.segs.push_back(FrozenSegment{&segment, frame, seg_in_offset, base});
-    }
   }
 
   void backward() {
@@ -2550,22 +2462,6 @@ struct Execution {
           const int64_t len = p.body.slots[op.in[0]].len;
           if (from && to)
             for (int64_t k = 0; k < len; ++k) from[k] += to[k];
-          break;
-        }
-        case Record::Segment: {
-          const Segment& segment = p.segments[r.site];
-          const IslandProg& program = segment.program;
-          const double* frame = s.versions[static_cast<size_t>(r.out)].value;
-          double* file = s.adjoints.data() + r.other;
-          run_adjoint(program, program.adj, frame, file);
-          for (size_t k = 0; k < segment.ins.size(); ++k) {
-            double* dst = adj(s.handles[static_cast<size_t>(r.handles) + k]);
-            if (!dst) continue;
-            const auto& in = segment.ins[k];
-            for (int i = 0; i < in.len; ++i)
-              dst[i] +=
-                  file[program.adj.adj_reg[static_cast<size_t>(in.reg + i)]];
-          }
           break;
         }
       }
@@ -2840,11 +2736,6 @@ void collect_live_ranges(LoopState& s, Stream& st,
     note(fc.src, fc.len);
     note(fc.dst, fc.len);
   }
-  for (const auto& fs : st.segs) {
-    note(fs.frame, fs.segment->program.n_regs);
-    for (size_t k = 0; k < fs.segment->ins.size(); ++k)
-      note(st.seg_in_src[fs.in_offset + k], fs.segment->ins[k].len);
-  }
   for (const auto& g : st.guards_if) note(g.a, 1);
   for (const auto& g : st.guards_for) {
     note(g.a, 1);
@@ -2866,9 +2757,9 @@ void compact_snapshot(LoopState& s, ArenaSnapshot& out) {
   std::vector<std::pair<const double*, int64_t>> live;
   live.reserve(st.call_ptrs.size() + 2 * st.inplaces.size() +
                st.inplace_sel_ptr.size() + 2 * st.copies.size() +
-               st.segs.size() + st.seg_in_src.size() + st.guards_if.size() +
-               2 * st.guards_for.size() + st.targets.size() +
-               st.imports.size() + s.p.outputs.size() + 2 * st.gathers.size());
+               st.guards_if.size() + 2 * st.guards_for.size() +
+               st.targets.size() + st.imports.size() + s.p.outputs.size() +
+               2 * st.gathers.size());
   collect_live_ranges(s, st, live);
   std::sort(live.begin(), live.end());
   out.ranges.clear();
@@ -2943,8 +2834,6 @@ void check_no_stale_arena_pointers(Stream& st, const ArenaBlockRanges& ranges) {
     check(fc.src, "copy.src");
     check(fc.dst, "copy.dst");
   }
-  for (auto& fseg : st.segs) check(fseg.frame, "seg.frame");
-  for (auto* ptr : st.seg_in_src) check(ptr, "seg_in_src");
   for (auto& g : st.guards_if) check(g.a, "guard.a");
   for (auto& g : st.guards_for) {
     check(g.a, "guard.a");
@@ -3064,7 +2953,6 @@ void freeze(LoopState& s) {
   resolve_pool(st.call_adj_version, st.call_adj);
   resolve_pool(st.inplace_adj_version, st.inplace_adj);
   resolve_pool(st.copy_adj_version, st.copy_adj);
-  resolve_pool(st.seg_in_adj_version, st.seg_in_adj);
   resolve_pool(st.gather_adj_version, st.gather_adj);
   for (size_t i = 0; i < st.targets.size(); ++i)
     st.targets[i].adjoint = adj_of(st.target_adj_version[i]);
@@ -3105,8 +2993,6 @@ void freeze(LoopState& s) {
     fc.src = remap_c(fc.src);
     fc.dst = remap(fc.dst);
   }
-  for (auto& fseg : st.segs) fseg.frame = remap(fseg.frame);
-  for (auto& ptr : st.seg_in_src) ptr = remap_c(ptr);
   for (auto& g : st.guards_if) g.a = remap_c(g.a);
   for (auto& g : st.guards_for) {
     g.a = remap_c(g.a);
@@ -3142,9 +3028,6 @@ void freeze(LoopState& s) {
       case StreamInstr::Copy:
         live = true;
         break;
-      case StreamInstr::Seg:
-        live = st.segs[instr.index].adjoint_base >= 0;
-        break;
       case StreamInstr::Gather:
         live = (st.gathers[instr.index].flags & kFrozenGatherActive) != 0;
         break;
@@ -3168,9 +3051,6 @@ void freeze(LoopState& s) {
   shrink_if_loose(st.sets);
   shrink_if_loose(st.copies);
   shrink_if_loose(st.copy_adj);
-  shrink_if_loose(st.segs);
-  shrink_if_loose(st.seg_in_src);
-  shrink_if_loose(st.seg_in_adj);
   shrink_if_loose(st.guards_if);
   shrink_if_loose(st.guards_for);
   shrink_if_loose(st.gather_pos);
@@ -3249,17 +3129,6 @@ bool replay_forward(LoopState& s, KernelCtx& ctx) {
       case StreamInstr::Copy: {
         const FrozenCopy& fc = st.copies[instr.index];
         std::copy_n(fc.src, fc.len, fc.dst);
-        break;
-      }
-      case StreamInstr::Seg: {
-        const FrozenSegment& fs = st.segs[instr.index];
-        const auto& ins = fs.segment->ins;
-        for (size_t k = 0; k < ins.size(); ++k) {
-          double* r = fs.frame + ins[k].reg;
-          const double* src = st.seg_in_src[fs.in_offset + k];
-          for (int i = 0; i < ins[k].len; ++i) r[i] = src[i];
-        }
-        run_program(fs.segment->program, fs.frame, ctx.eval_state);
         break;
       }
       case StreamInstr::GuardIf: {
@@ -3392,22 +3261,6 @@ void replay_backward(LoopState& s, KernelCtx& ctx) {
           for (int64_t k = 0; k < fc.len; ++k) from[k] += to[k];
         break;
       }
-      case StreamInstr::Seg: {
-        const FrozenSegment& fs = st.segs[instr.index];
-        const auto& ins = fs.segment->ins;
-        double* file = st.adjoints.data() + fs.adjoint_base;
-        run_adjoint(fs.segment->program, fs.segment->program.adj, fs.frame,
-                    file);
-        for (size_t k = 0; k < ins.size(); ++k) {
-          double* dst =
-              resolve_pooled_adjoint(st.seg_in_adj[fs.in_offset + k], p, ctx);
-          if (!dst) continue;
-          for (int j = 0; j < ins[k].len; ++j)
-            dst[j] += file[fs.segment->program.adj
-                               .adj_reg[static_cast<size_t>(ins[k].reg + j)]];
-        }
-        break;
-      }
       case StreamInstr::Gather: {
         const FrozenGather& g = st.gathers[instr.index];
         double* const* adj = st.gather_adj.data() + g.adj_offset;
@@ -3499,7 +3352,6 @@ void emit_frozen_sizeof() {
                   std::to_string(sizeof(FrozenCall)) +
                   " FrozenInPlace=" + std::to_string(sizeof(FrozenInPlace)) +
                   " FrozenCopy=" + std::to_string(sizeof(FrozenCopy)) +
-                  " FrozenSegment=" + std::to_string(sizeof(FrozenSegment)) +
                   " FrozenGuardIf=" + std::to_string(sizeof(FrozenGuardIf)) +
                   " FrozenGuardFor=" + std::to_string(sizeof(FrozenGuardFor)) +
                   " FrozenTarget=" + std::to_string(sizeof(FrozenTarget)) +
@@ -3515,8 +3367,7 @@ void emit_freeze_breakdown(const LoopState& s) {
   const Stream& st = *s.stream;
   emit_frozen_sizeof();
   const size_t n_call = st.calls.size(), n_inplace = st.inplaces.size(),
-               n_copy = st.copies.size(), n_seg = st.segs.size(),
-               n_guard_if = st.guards_if.size(),
+               n_copy = st.copies.size(), n_guard_if = st.guards_if.size(),
                n_guard_for = st.guards_for.size(), n_target = st.targets.size(),
                n_set = st.sets.size(), n_gather = st.gathers.size(),
                n_import = st.imports.size(), n_program = st.program.size();
@@ -3525,7 +3376,6 @@ void emit_freeze_breakdown(const LoopState& s) {
   emit_pool_bytes("calls", st.calls, n_call);
   emit_pool_bytes("inplaces", st.inplaces, n_inplace);
   emit_pool_bytes("copies", st.copies, n_copy);
-  emit_pool_bytes("segs", st.segs, n_seg);
   emit_pool_bytes("guards_if", st.guards_if, n_guard_if);
   emit_pool_bytes("guards_for", st.guards_for, n_guard_for);
   emit_pool_bytes("targets", st.targets, n_target);
@@ -3540,8 +3390,6 @@ void emit_freeze_breakdown(const LoopState& s) {
   emit_pool_bytes("inplace_sel_snapshot", st.inplace_sel_snapshot, n_inplace);
   emit_pool_bytes("inplace_adj", st.inplace_adj, n_inplace);
   emit_pool_bytes("copy_adj", st.copy_adj, n_copy);
-  emit_pool_bytes("seg_in_src", st.seg_in_src, n_seg);
-  emit_pool_bytes("seg_in_adj", st.seg_in_adj, n_seg);
   emit_pool_bytes("arena_cells", st.arena.cells);
   emit_pool_bytes("arena_ranges", st.arena.ranges);
   emit_pool_bytes("adjoints", st.adjoints);
@@ -3789,12 +3637,11 @@ void structured_loop_forward(KernelCtx& ctx) {
   if (s.report_tape && !s.memo_ready) {
     s.report_tape = false;
     const size_t arena_used = s.arena.used();
-    size_t kernel_records = 0, copies = 0, updates = 0, segment_records = 0;
+    size_t kernel_records = 0, copies = 0, updates = 0;
     for (const auto& r : s.records) {
       kernel_records += r.kind == Record::Kernel;
       copies += r.kind == Record::Copy;
       updates += r.kind == Record::InPlace;
-      segment_records += r.kind == Record::Segment;
     }
     emit_diagnostic(
         "stanli_structured tape: arena=" + std::to_string(arena_used) +
@@ -3808,8 +3655,6 @@ void structured_loop_forward(KernelCtx& ctx) {
         " workspace=" + std::to_string(s.workspace.size()) +
         " reused_primal_cells=" + std::to_string(s.reused_primal_cells) +
         " visits=" + std::to_string(s.visits) +
-        " segments=" + std::to_string(p.segments.size()) +
-        " segment_records=" + std::to_string(segment_records) +
         " record_arena=" + std::to_string(s.record_arena) +
         " record_versions=" + std::to_string(s.record_versions));
   }

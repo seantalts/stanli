@@ -1,20 +1,21 @@
 // MIR -> Program: the shared front end.
 //
-// Two callers compile MIR into the register machine. An ODE right-hand
-// side has to stay callable at runtime because the integrator picks the
-// times (ode_prog.hpp). A region whose control flow depends on a
-// parameter has to become a program because it cannot become graph ops
-// at all: `if (theta > 0)` has no op-graph form, and until this existed
-// it was a compile error (lower.cpp).
+// Several callers compile MIR into the register machine. A solver
+// callback (ODE right-hand side, DAE residual) has to stay callable at
+// runtime because the solver picks the points (ode_prog.hpp). A region
+// whose control flow depends on a parameter has to become a program
+// because it cannot become graph ops at all: `if (theta > 0)` has no
+// op-graph form, and until this existed it was a compile error
+// (lower.cpp). The region-map lowering and standalone Stan functions
+// (function.cpp) compile through it as well.
 //
-// The shape of the problem is what keeps this small: storage sizes are
-// known at compile time, even when loop bounds are runtime values. Most
-// indices and integers are also known at preparation. Runtime integer values
-// use scalar registers and integer operations; dynamic storage still requires
-// a separate shape proof.
+// Storage sizes are known at compile time, even when loop bounds are
+// runtime values, and most indices and integers are also known at
+// preparation. Runtime integer values use scalar registers and integer
+// operations; dynamic storage still requires a separate shape proof.
 //
 // Names the compiler does not know are the one thing that differs
-// between callers. The ODE side knows them all up front (t, y, theta,
+// between callers. The solver side knows them all up front (t, y, theta,
 // x_r, x_i). Lowering does not: a region reads model-block variables
 // that already live in graph slots, so it hands over `bind_extern`,
 // which allocates registers for such a name and records it as a live-in.
@@ -1154,6 +1155,28 @@ struct ProgramCompiler {
       if (!int_operand(e.args[1]) || !try_cint(e.args[1], &rhs)) return false;
       *out = rhs != 0;
       return true;
+    }
+    if (e.kind == mir::Expr::Indexed && e.args.size() >= 2) {
+      // Each form cint answers reads every single index as an integer, and
+      // a variable base must be a known or external integer array.
+      for (size_t k = 1; k < e.args.size(); ++k) {
+        long index;
+        if (e.args[k].name == "IndexSingle" && e.args[k].args.size() == 1 &&
+            !try_cint(e.args[k].args[0], &index))
+          return false;
+      }
+      const mir::Expr& base = e.args[0];
+      if (base.kind == mir::Expr::Var && !known_int_arrays.count(base.name) &&
+          !ints.count(base.name) &&
+          !(extern_int &&
+            (extern_bound.count(base.name) || !reals.count(base.name))))
+        return false;
+    }
+    if (e.kind == mir::Expr::FunApp) {
+      const FunctionSpec* function = function_spec(e);
+      if (function && function->builtin() &&
+          function->builtin()->shape == BuiltinShapePolicy::Rng)
+        return false;
     }
     if (e.kind == mir::Expr::FunApp &&
         (e.args.size() == 1 || e.args.size() == 2)) {
@@ -3652,99 +3675,6 @@ struct ProgramCompiler {
                                       maximum ? 1 : 0, flags, a.len});
       return typed(Range{r, 1}, e.type_);
     }
-    // Ahead of the arity-keyed blocks below: those end in a bail on an
-    // unknown name, so while this table sat after them a two-argument
-    // density (exponential_lpdf) was unreachable -- listed as supported
-    // and refused in practice.
-    // Explicit density calls. `target += normal_lpdf(y | mu, s)` keeps
-    // every constant, which is the propto-OFF instantiation the machine
-    // has; a `~` statement's dropped-constant form depends on which
-    // arguments are autodiff and is not expressible here.
-    {
-      const int dc = program_density_id_by_name(e.name);
-      const int arity = program_density_arity(dc);
-      if (arity) {
-        // A `~` statement lowers to the same call with propto set, and
-        // which constants it drops depends on which arguments are
-        // autodiff -- a distinction the program cannot make, since it
-        // binds every argument the same way. Getting this wrong is
-        // invisible in the gradient and shows up only in lp, so refuse
-        // rather than approximate. (Measured, before this check: lp off
-        // by exactly log(2*pi)/2 on a normal.)
-        if (e.fn_propto)
-          bail(
-              "`~` inside a runtime-control region (write it as "
-              "`target += " +
-              e.name +
-              "(...)`, which keeps every "
-              "constant and is what the region can reproduce)");
-        if ((int)e.args.size() != arity)
-          bail(e.name + " takes " + std::to_string(arity) + " arguments here");
-        Range argv[kMaxDensityArgs];
-        bool any_container = false;
-        for (int k = 0; k < arity; ++k) {
-          argv[k] = expr(e.args[(size_t)k]);
-          if (!is_scalar(argv[k])) any_container = true;
-        }
-        if (any_container) {
-          // One propto-OFF call, vectorized the way CmdStan's generated
-          // code would call it (stan-math's own broadcasting over an
-          // Eigen::Map per container argument -- program_density_vec),
-          // not `len` scalar calls summed by hand, which would not sum in
-          // the same order. Every container argument recycles to the same
-          // length, Stan's own rule for a vectorized call; and the density
-          // has to be one whose partials tier already pays for the extra
-          // instantiations (program_density.cpp), the same affordability
-          // line the mask-dispatched partials draw.
-          int64_t len = 0;
-          bool ok = program_density_container_capable(dc);
-          for (int k = 0; ok && k < arity; ++k) {
-            const Range& a = argv[k];
-            if (is_scalar(a)) continue;
-            if (a.kind != ViewKind::Vector && a.kind != ViewKind::RowVector) {
-              ok = false;
-            } else if (a.len <= 0) {
-              ok = false;
-            } else if (len == 0) {
-              len = a.len;
-            } else if (len != a.len) {
-              ok = false;
-            }
-          }
-          if (!ok) bail(e.name + " on a container");
-          Program::VecDensity v;
-          v.density_id = (uint16_t)dc;
-          v.arity = (uint8_t)arity;
-          v.len = (int32_t)len;
-          for (int k = 0; k < arity; ++k) {
-            v.arg_reg[k] = argv[k].reg;
-            if (!is_scalar(argv[k])) v.container_mask |= (uint8_t)(1u << k);
-          }
-          const int r = alloc(1);
-          p.vec_densities.push_back(v);
-          p.code.push_back(Program::Instr{Program::DENSITY_VEC, r,
-                                          (int)p.vec_densities.size() - 1, 0, 0,
-                                          0});
-          return {r, 1};
-        }
-        int argv_reg[kMaxDensityArgs];
-        for (int k = 0; k < arity; ++k) argv_reg[k] = argv[k].reg;
-        // Three arguments or fewer ride in the instruction; a fourth
-        // needs the contiguous form, so copy them into a block.
-        int a0 = argv_reg[0], a1 = arity > 1 ? argv_reg[1] : 0;
-        int a2 = arity > 2 ? argv_reg[2] : 0;
-        if (arity > 3) {
-          a0 = alloc(arity);
-          for (int k = 0; k < arity; ++k)
-            emit(Program::MOV, a0 + k, argv_reg[k]);
-          a1 = 0;
-          a2 = 0;
-        }
-        const int r = alloc(1);
-        p.code.push_back(Program::Instr{Program::DENSITY, r, a0, a1, a2, dc});
-        return {r, 1};
-      }
-    }
     if (e.name == "fma" && e.args.size() == 3) {
       // Fused, elementwise with scalar broadcast, mirroring OP_FMA.
       const Range a = expr(e.args[0]), b = expr(e.args[1]), c = expr(e.args[2]);
@@ -4057,12 +3987,12 @@ struct ProgramCompiler {
   }
 
   // ---- statements ----------------------------------------------------------
-  struct Returned {
-    Range r;
-  };
-  // Ends the current lexical path after emitting a runtime function exit.
-  // Branch/loop handlers still compile their other reachable paths.
-  struct PathExit {};
+  // Whether control can reach the statement after the one just compiled.
+  // Ended follows a runtime function exit on every path through it; branch
+  // and loop handlers still compile their other reachable paths. Returned
+  // is a single unconditional return whose value is the frame's result; it
+  // needs no join, so nothing after it in the function is compiled.
+  enum class [[nodiscard]] Path { Open, Ended, Returned };
   struct ReturnFrame {
     const std::vector<mir::Stmt>* body = nullptr;
     ReturnFrame* parent = nullptr;
@@ -4094,10 +4024,7 @@ struct ProgramCompiler {
     structured_while_seen = true;
     ++structured_while_depth;
     ++runtime_for_depth;
-    try {
-      for (const auto& child : loop.body) stmt(child);
-    } catch (PathExit&) {
-    }
+    (void)compile_body(loop.body);
     --runtime_for_depth;
     --structured_while_depth;
     loops.pop_back();
@@ -4131,26 +4058,20 @@ struct ProgramCompiler {
       ~Scope() { current = saved; }
     } scope{return_frame, return_frame};
     return_frame = &frame;
-    try {
-      for (const auto& statement : body) stmt(statement);
+    const Path path = compile_body(body);
+    if (path == Path::Returned) return frame.result;
+    if (path == Path::Open)
       bail("function can finish without returning a value");
-    } catch (Returned& returned) {
-      // A single unconditional return never needed a join or new storage.
-      return returned.r;
-    } catch (PathExit&) {
-      if (!frame.has_result) bail("function returned no value");
-      // Fall through at the final return instead of dispatching a no-op jump.
-      // PathExit propagates only through all-return paths; handlers with a
-      // fallthrough edge to code.size() consume it before reaching here.
-      if (!frame.jumps.empty() &&
-          frame.jumps.back() == (int)p.code.size() - 1) {
-        p.code.pop_back();
-        frame.jumps.pop_back();
-      }
-      for (int jump : frame.jumps)
-        p.code[(size_t)jump].dst = (int)p.code.size();
-      return frame.result;
+    if (!frame.has_result) bail("function returned no value");
+    // Fall through at the final return instead of dispatching a no-op jump.
+    // Path::Ended propagates only through all-return paths; handlers with a
+    // fallthrough edge to code.size() consume it before reaching here.
+    if (!frame.jumps.empty() && frame.jumps.back() == (int)p.code.size() - 1) {
+      p.code.pop_back();
+      frame.jumps.pop_back();
     }
+    for (int jump : frame.jumps) p.code[(size_t)jump].dst = (int)p.code.size();
+    return frame.result;
   }
 
   struct CompileBreak {};
@@ -4227,7 +4148,18 @@ struct ProgramCompiler {
     late_bound.clear();
   }
 
-  void stmt(const mir::Stmt& s) {
+  // Entry point for a region statement. A region has no function scope:
+  // a return in it bails, so no path through it ends.
+  void stmt(const mir::Stmt& s) { (void)compile_stmt(s); }
+
+  Path compile_body(const std::vector<mir::Stmt>& body) {
+    for (const auto& child : body)
+      if (const Path path = compile_stmt(child); path != Path::Open)
+        return path;
+    return Path::Open;
+  }
+
+  Path compile_stmt(const mir::Stmt& s) {
     switch (s.kind) {
       case mir::Stmt::Decl: {
         // A declaration shadows every compile-time fact retained for an
@@ -4266,7 +4198,7 @@ struct ProgramCompiler {
               bail("runtime for needs a sized container declaration");
             reals[s.decl_id] = Range{};
             deferred_shapes[s.decl_id] = view;
-            return;
+            return Path::Open;
           }
 
           const Range v = expr(s.init);
@@ -4286,7 +4218,7 @@ struct ProgramCompiler {
               known_int_array_dims[s.decl_id] = v.dims;
             }
           }
-          return;
+          return Path::Open;
         }
         if (s.decl_type.base.empty())
           bail("declaration has no sized or unsized logical view: " +
@@ -4302,14 +4234,14 @@ struct ProgramCompiler {
               if (!is_scalar(v)) bail("integer declaration is not scalar");
               emit(Program::MOV, d.reg, v.reg);
             }
-            return;
+            return Path::Open;
           }
           if (s.has_init) {
             long folded;
             if (try_cint(s.init, &folded)) {
               ints[s.decl_id] = {folded};
               mark_int_reset(s.decl_id);
-              return;
+              return Path::Open;
             }
             // A declaration after or inside a structured loop may read
             // loop-carried state (for example `int any = hits != 0`). Only
@@ -4323,11 +4255,11 @@ struct ProgramCompiler {
             const Range v = expr(s.init);
             if (!is_scalar(v)) bail("integer declaration is not scalar");
             emit(Program::MOV, d.reg, v.reg);
-            return;
+            return Path::Open;
           }
           ints[s.decl_id] = {std::numeric_limits<int>::min()};
           mark_int_reset(s.decl_id);
-          return;
+          return Path::Open;
         }
         const bool int_array =
             s.decl_type.base == "SArray" && s.decl_type.elem_base == "SInt";
@@ -4370,7 +4302,7 @@ struct ProgramCompiler {
             known_int_array_dims[s.decl_id] = expected.dims;
           }
         }
-        return;
+        return Path::Open;
       }
       case mir::Stmt::Assignment: {
         auto deferred = deferred_shapes.find(s.lhs);
@@ -4406,7 +4338,7 @@ struct ProgramCompiler {
               known_int_array_dims.erase(s.lhs);
             }
           }
-          return;
+          return Path::Open;
         }
         if (ints.count(s.lhs) && s.lhs_idx.empty()) {
           long ignored;
@@ -4430,7 +4362,7 @@ struct ProgramCompiler {
           // integer, so subsequent reads may use the folded value directly.
           ints[s.lhs] = {cint(s.rhs)};
           mark_int_reset(s.lhs);
-          return;
+          return Path::Open;
         }
         auto it = reals.find(s.lhs);
         if (it == reals.end()) {
@@ -4497,7 +4429,7 @@ struct ProgramCompiler {
               known_int_arrays.erase(s.lhs);
               known_int_array_dims.erase(s.lhs);
             }
-            return;
+            return Path::Open;
           }
           if (v.len != dst.len) bail("assignment width mismatch for " + s.lhs);
           if (!same_view(v, dst))
@@ -4511,7 +4443,7 @@ struct ProgramCompiler {
             known_int_arrays.erase(s.lhs);
             known_int_array_dims.erase(s.lhs);
           }
-          return;
+          return Path::Open;
         }
         // A single All is the complete destination view. This is reachable
         // in ODE functions and runtime-control statement islands, so it
@@ -4537,7 +4469,7 @@ struct ProgramCompiler {
               known_int_array_dims.erase(s.lhs);
             }
           }
-          return;
+          return Path::Open;
         }
         if ((dst.kind == ViewKind::Array || dst.kind == ViewKind::Matrix ||
              (s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexMulti")) &&
@@ -4557,7 +4489,7 @@ struct ProgramCompiler {
           }
           known_int_arrays.erase(s.lhs);
           known_int_array_dims.erase(s.lhs);
-          return;
+          return Path::Open;
         }
         if (dst.kind == ViewKind::Matrix && s.lhs_idx.size() == 2) {
           const std::vector<int64_t> rows = matrix_positions(
@@ -4574,7 +4506,7 @@ struct ProgramCompiler {
             for (int64_t i : rows)
               emit(Program::MOV, dst.reg + (int)(j * dst.rows + i),
                    v.reg + at++);
-          return;
+          return Path::Open;
         }
         if (dst.kind == ViewKind::Array) {
           const std::vector<int64_t> dims =
@@ -4652,7 +4584,7 @@ struct ProgramCompiler {
               known_int_array_dims.erase(s.lhs);
             }
           }
-          return;
+          return Path::Open;
         }
         if ((dst.kind == ViewKind::Vector || dst.kind == ViewKind::RowVector ||
              dst.kind == ViewKind::Flat) &&
@@ -4669,7 +4601,7 @@ struct ProgramCompiler {
             // records the selected write, including an aliased RHS, normally.
             emit(Program::DYN_SET, dst.reg, dst.reg, v.reg, index.reg, dst.len);
             known_int_arrays.erase(s.lhs);
-            return;
+            return Path::Open;
           }
           const std::vector<int64_t> positions =
               matrix_positions(s.lhs_idx[0], dst.len, "assignment vector");
@@ -4677,7 +4609,7 @@ struct ProgramCompiler {
             bail("vector assignment width mismatch for " + s.lhs);
           for (size_t k = 0; k < positions.size(); ++k)
             emit(Program::MOV, dst.reg + (int)positions[k], v.reg + (int)k);
-          return;
+          return Path::Open;
         }
         for (const auto& ix : s.lhs_idx)
           if (ix.name != "IndexSingle")
@@ -4710,7 +4642,7 @@ struct ProgramCompiler {
           else
             known_int_arrays.erase(s.lhs);
         }
-        return;
+        return Path::Open;
       }
       case mir::Stmt::Return: {
         bool runtime_exit =
@@ -4724,17 +4656,18 @@ struct ProgramCompiler {
                            !loops[i].continues.empty();
         if (return_frame && (runtime_exit || return_frame->has_result)) {
           emit_function_return(s.has_init ? expr(s.rhs) : Range{0, 0});
-          throw PathExit{};
+          return Path::Ended;
         }
         if (!return_frame) bail("return without a function scope");
-        throw Returned{s.has_init ? expr(s.rhs) : Range{0, 0}};
+        return_frame->result = s.has_init ? expr(s.rhs) : Range{0, 0};
+        return Path::Returned;
       }
       case mir::Stmt::Break:
         if (loops.empty()) bail("break outside a loop");
         if (branch_depth > loops.back().branch_depth ||
             loops.back().structured) {
           loops.back().breaks.push_back(emit(Program::JMP, 0));
-          return;
+          return Path::Open;
         }
         throw CompileBreak{};
       case mir::Stmt::Continue:
@@ -4742,7 +4675,7 @@ struct ProgramCompiler {
         if (branch_depth > loops.back().branch_depth ||
             loops.back().structured) {
           loops.back().continues.push_back(emit(Program::JMP, 0));
-          return;
+          return Path::Open;
         }
         throw CompileContinue{};
       case mir::Stmt::For: {
@@ -4779,11 +4712,8 @@ struct ProgramCompiler {
           structured_while_seen = true;
           ++structured_while_depth;
           ++runtime_for_depth;
-          try {
-            for (const auto& child : s.body) stmt(child);
-          } catch (PathExit&) {
-            // Other paths may still continue or break; patch them below.
-          }
+          // Other paths may still continue or break; patch them below.
+          (void)compile_body(s.body);
           --runtime_for_depth;
           --structured_while_depth;
           for (int jump : loops.back().continues)
@@ -4805,24 +4735,28 @@ struct ProgramCompiler {
           loops.pop_back();
           reals.erase(s.loopvar);
           int_decl_at.erase(s.loopvar);
-          return;
+          return Path::Open;
         }
         loops.push_back({});
         loops.back().branch_depth = branch_depth;
         bool broken = false;
         bool returned = false;
+        bool returned_directly = false;
         for (int64_t v = lo; v <= hi; ++v) {
-          bool path_returned = false;
+          Path path = Path::Open;
           ints[s.loopvar] = {static_cast<long>(v)};
           int_decl_at[s.loopvar] = {branch_depth, loops.size()};
           try {
-            for (const auto& k : s.body) stmt(k);
+            path = compile_body(s.body);
           } catch (CompileContinue&) {
           } catch (CompileBreak&) {
             broken = true;
-          } catch (PathExit&) {
-            path_returned = true;
           }
+          if (path == Path::Returned) {
+            returned_directly = true;
+            break;
+          }
+          const bool path_returned = path == Path::Ended;
           // A continue can reach another unrolled trip; a break reaches the
           // statements after the loop. Only an all-return iteration ends
           // the enclosing lexical path.
@@ -4840,8 +4774,8 @@ struct ProgramCompiler {
         for (int jump : loops.back().breaks)
           p.code[(size_t)jump].dst = (int)p.code.size();
         loops.pop_back();
-        if (returned) throw PathExit{};
-        return;
+        if (returned_directly) return Path::Returned;
+        return returned ? Path::Ended : Path::Open;
       }
       case mir::Stmt::While: {
         // The register program already has JZ/JMP and is replayed under
@@ -4859,12 +4793,7 @@ struct ProgramCompiler {
         loops.back().structured = true;
         structured_while_seen = true;
         ++structured_while_depth;
-        bool body_returned = false;
-        try {
-          for (const auto& k : s.body) stmt(k);
-        } catch (PathExit&) {
-          body_returned = true;
-        }
+        const bool body_returned = compile_body(s.body) == Path::Ended;
         --structured_while_depth;
         for (int jump : loops.back().continues) p.code[(size_t)jump].dst = head;
         if (!body_returned) emit(Program::JMP, head);
@@ -4872,44 +4801,35 @@ struct ProgramCompiler {
         for (int jump : loops.back().breaks)
           p.code[(size_t)jump].dst = (int)p.code.size();
         loops.pop_back();
-        return;
+        return Path::Open;
       }
       case mir::Stmt::IfElse: {
         long c;
         if (try_cint(s.cond, &c)) {
-          if (c != 0 && !s.body.empty()) stmt(s.body[0]);
-          if (c == 0 && s.body.size() > 1) stmt(s.body[1]);
-          return;
+          if (c != 0 && !s.body.empty()) return compile_stmt(s.body[0]);
+          if (c == 0 && s.body.size() > 1) return compile_stmt(s.body[1]);
+          return Path::Open;
         }
         std::vector<int> to_else;
         cond_jump(s.cond, false, &to_else);
         ++branch_depth;
-        bool then_exits = false, else_exits = false;
-        try {
-          if (!s.body.empty()) stmt(s.body[0]);
-        } catch (PathExit&) {
-          then_exits = true;
-        }
+        const bool then_exits =
+            !s.body.empty() && compile_stmt(s.body[0]) == Path::Ended;
+        bool else_exits = false;
         if (s.body.size() > 1) {
           const int jmp = then_exits ? -1 : emit(Program::JMP, 0);
           patch_jumps(to_else);
-          try {
-            stmt(s.body[1]);
-          } catch (PathExit&) {
-            else_exits = true;
-          }
+          else_exits = compile_stmt(s.body[1]) == Path::Ended;
           if (jmp >= 0) p.code[(size_t)jmp].dst = (int)p.code.size();
         } else {
           patch_jumps(to_else);
         }
         --branch_depth;
-        if (then_exits && else_exits) throw PathExit{};
-        return;
+        return then_exits && else_exits ? Path::Ended : Path::Open;
       }
       case mir::Stmt::Block:
       case mir::Stmt::SList:
-        for (const auto& k : s.body) stmt(k);
-        return;
+        return compile_body(s.body);
       case mir::Stmt::TargetPE: {
         // The region's own running total. The caller decides what it is
         // (the ODE side never sees one; lowering makes it a target term),
@@ -4922,10 +4842,10 @@ struct ProgramCompiler {
         // bit. A scalar is the one-element case of the same loop.
         for (int k = 0; k < v.len; ++k)
           emit(Program::ADD, target_reg, target_reg, v.reg + k);
-        return;
+        return Path::Open;
       }
       case mir::Stmt::NRFunApp:
-        if (s.fn_name == "FnValidateSize") return;
+        if (s.fn_name == "FnValidateSize") return Path::Open;
         if (const auto action = message_action(s.fn_name)) {
           Program::Message message;
           std::vector<MessageShape> shapes;
@@ -4953,12 +4873,12 @@ struct ProgramCompiler {
           emit(*action != MessageAction::Print ? Program::REJECT
                                                : Program::PRINT,
                0, (int)p.messages.size() - 1);
-          return;
+          return Path::Open;
         }
         bail("statement function " + s.fn_name +
              " requires the MIR interpreter");
       case mir::Stmt::Skip:
-        return;
+        return Path::Open;
       default:
         bail("statement");
     }

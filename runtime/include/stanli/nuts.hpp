@@ -193,10 +193,10 @@ bool should_report_progress(const NutsConfig& cfg, int64_t i, bool warmup,
 // replacing cfg.inv_metric.
 std::vector<ChainResult> run_nuts_chains(
     const std::vector<Executor*>& execs, const NutsConfig& cfg,
-    int n_threads = 1, const DrawObserver& observe = {},
-    const ChainProgressObserver& progress = {}, int progress_refresh = 1,
-    const std::function<bool()>& poll = {}, const StoredDrawWriter& write = {},
-    const double* inits = nullptr, const double* inv_metrics = nullptr);
+    int n_threads = 1, const ChainProgressObserver& progress = {},
+    int progress_refresh = 1, const std::function<bool()>& poll = {},
+    const StoredDrawWriter& write = {}, const double* inits = nullptr,
+    const double* inv_metrics = nullptr);
 
 // Build `n` executors over the same compiled graph, copying it out of an
 // already-bound one. The caller keeps ownership; `src` is not modified.

@@ -82,30 +82,10 @@ struct MirRhs {
     using T = stan::return_type_t<T_y, T_param>;
     if (spec->prog.ok)
       return eval(t, y.data(), y.size(), theta, x_r, x_i, msgs);
-    // Rebuild the formal argument list the right-hand side declares.
-    // MirInterp::call binds positionally by declared type, so the real
-    // arguments have to arrive already split out of the packed theta and
-    // x_r -- in the same order compile_rhs_args assigned their register
-    // ranges, which is the order spec->args records.
-    std::vector<std::vector<T>> reals{{T(t)},
-                                      std::vector<T>(y.begin(), y.end())};
-    std::vector<std::vector<int>> ints;
-    size_t th_at = 0, xr_at = 0;
-    for (const RhsArg& a : spec->args) {
-      if (a.is_int) {
-        ints.push_back(callback_integer_values(a, theta.data(), &th_at));
-      } else if (a.is_param) {
-        reals.emplace_back(theta.begin() + th_at,
-                           theta.begin() + th_at + a.len);
-        th_at += (size_t)a.len;
-      } else {
-        reals.emplace_back(x_r.begin() + xr_at, x_r.begin() + xr_at + a.len);
-        xr_at += (size_t)a.len;
-      }
-    }
-    MirInterp<T> ev(*spec->funs(), "ODE function");
-    return interpret_retained_callback(ev, *spec->rhs(), reals, ints,
-                                       spec->args);
+    return interpret_packed_callback<T>(
+        *spec->funs(), "ODE function", *spec->rhs(),
+        {{T(t)}, std::vector<T>(y.begin(), y.end())}, spec->args, theta.data(),
+        x_r.data());
   }
 };
 
@@ -171,8 +151,8 @@ std::vector<std::vector<stan::return_type_t<T_y0, T_theta, T_t0, T_ts>>> solve(
   // the Eigen convention, so call the same underlying solver implementation
   // with the legacy function name retained for validation and error messages.
   // This changes only container marshalling, not the solver or its defaults.
+  std::vector<Eigen::Matrix<T, Eigen::Dynamic, 1>> res;
   if (s.legacy) {
-    std::vector<Eigen::Matrix<T, Eigen::Dynamic, 1>> res;
     switch (s.solver) {
       case OdeSpec::BDF:
         res = stan::math::ode_bdf_tol_impl("integrate_ode_bdf", f, y0, t0, ts,
@@ -190,34 +170,29 @@ std::vector<std::vector<stan::return_type_t<T_y0, T_theta, T_t0, T_ts>>> solve(
                                             theta, s.x_r, s.x_i);
         break;
     }
-    std::vector<std::vector<T>> out;
-    out.reserve(res.size());
-    for (const auto& r : res) out.emplace_back(r.data(), r.data() + r.size());
-    return out;
-  }
-
-  // Dispatch on the solver the model actually named. Mapping adams onto
-  // bdf (or ckrk onto rk45) agrees to tolerance on an easy system and is
-  // still the wrong integrator for the user who picked one for its
-  // stability, so each gets its own call.
-  std::vector<Eigen::Matrix<T, Eigen::Dynamic, 1>> res;
-  switch (s.solver) {
-    case OdeSpec::BDF:
-      res = stan::math::ode_bdf_tol(f, y0, t0, ts, rtol, atol, max_steps,
-                                    nullptr, theta, s.x_r, s.x_i);
-      break;
-    case OdeSpec::ADAMS:
-      res = stan::math::ode_adams_tol(f, y0, t0, ts, rtol, atol, max_steps,
+  } else {
+    // Dispatch on the solver the model actually named. Mapping adams onto
+    // bdf (or ckrk onto rk45) agrees to tolerance on an easy system and is
+    // still the wrong integrator for the user who picked one for its
+    // stability, so each gets its own call.
+    switch (s.solver) {
+      case OdeSpec::BDF:
+        res = stan::math::ode_bdf_tol(f, y0, t0, ts, rtol, atol, max_steps,
                                       nullptr, theta, s.x_r, s.x_i);
-      break;
-    case OdeSpec::CKRK:
-      res = stan::math::ode_ckrk_tol(f, y0, t0, ts, rtol, atol, max_steps,
-                                     nullptr, theta, s.x_r, s.x_i);
-      break;
-    default:
-      res = stan::math::ode_rk45_tol(f, y0, t0, ts, rtol, atol, max_steps,
-                                     nullptr, theta, s.x_r, s.x_i);
-      break;
+        break;
+      case OdeSpec::ADAMS:
+        res = stan::math::ode_adams_tol(f, y0, t0, ts, rtol, atol, max_steps,
+                                        nullptr, theta, s.x_r, s.x_i);
+        break;
+      case OdeSpec::CKRK:
+        res = stan::math::ode_ckrk_tol(f, y0, t0, ts, rtol, atol, max_steps,
+                                       nullptr, theta, s.x_r, s.x_i);
+        break;
+      default:
+        res = stan::math::ode_rk45_tol(f, y0, t0, ts, rtol, atol, max_steps,
+                                       nullptr, theta, s.x_r, s.x_i);
+        break;
+    }
   }
   std::vector<std::vector<T>> out;
   out.reserve(res.size());
@@ -522,6 +497,11 @@ const double* ode_runtime_controls(const KernelCtx& ctx) {
   return controls.data;
 }
 
+uint8_t ode_type_mask(unsigned variant) {
+  if ((variant & 0x10u) != 0) return variant & 0x0fu;
+  return (variant & 0x4u) != 0 ? (variant & 0x3u) : 0x3u;
+}
+
 template <bool YAutodiff, bool ThetaAutodiff, bool T0Autodiff, bool TsAutodiff>
 void ode_fwd_typed(KernelCtx& ctx, const OdeSpec& s) {
   using T_y0 = std::conditional_t<YAutodiff, var, double>;
@@ -615,7 +595,6 @@ void ode_fwd_typed(KernelCtx& ctx, const OdeSpec& s) {
 
 void ode_fwd(KernelCtx& ctx) {
   const OdeSpec& s = *static_cast<const OdeSpec*>(ctx.udata);
-  const int64_t S = ctx.in[0].len, P = ctx.in[1].len;
   // The value alone: solve the states, skip the sensitivities and the
   // jacobian nobody is going to read. This is what CmdStan's
   // log_prob<double> does, and at a solution grazing zero it is a
@@ -623,23 +602,10 @@ void ode_fwd(KernelCtx& ctx) {
   // sees different error estimates. Matching it is the point: it decides
   // which initial points are valid.
   if (values_only()) {
-    const std::vector<double> z0(ctx.in[0].data, ctx.in[0].data + S);
-    const std::vector<double> th(ctx.in[1].data, ctx.in[1].data + P);
-    const double t0 = ctx.n_in >= 4 ? ctx.in[2].data[0] : s.t0;
-    const std::vector<double> ts =
-        ctx.n_in >= 4 ? std::vector<double>(ctx.in[3].data,
-                                            ctx.in[3].data + ctx.in[3].len)
-                      : s.ts;
-    const auto solv = solve(s, z0, th, t0, ts, ode_runtime_controls(ctx));
-    for (size_t n = 0; n < solv.size(); ++n)
-      for (int64_t k = 0; k < S; ++k)
-        ctx.out.data[(int64_t)n * S + k] = solv[n][k];
+    ode_fwd_typed<false, false, false, false>(ctx, s);
     return;
   }
-  const uint8_t type_mask =
-      (ctx.variant & 0x10u) != 0
-          ? (ctx.variant & 0x0fu)
-          : ((ctx.variant & 0x4u) != 0 ? (ctx.variant & 0x3u) : 0x3u);
+  const uint8_t type_mask = ode_type_mask(ctx.variant);
   const bool t0_autodiff = (type_mask & 0x4u) != 0;
   const bool ts_autodiff = (type_mask & 0x8u) != 0;
 #define STANLI_ODE_FWD_TIMES(Y, TH)               \
@@ -667,10 +633,7 @@ void ode_fwd(KernelCtx& ctx) {
 }
 
 void ode_bwd(KernelCtx& ctx) {
-  const uint8_t type_mask =
-      (ctx.variant & 0x10u) != 0
-          ? (ctx.variant & 0x0fu)
-          : ((ctx.variant & 0x4u) != 0 ? (ctx.variant & 0x3u) : 0x3u);
+  const uint8_t type_mask = ode_type_mask(ctx.variant);
   const bool y_active = (type_mask & 0x1u) != 0 && ctx.in_adj[0].data;
   const bool theta_active = (type_mask & 0x2u) != 0 && ctx.in_adj[1].data;
   const bool t0_active =
@@ -697,10 +660,7 @@ void ode_bwd(KernelCtx& ctx) {
 }
 
 int64_t ode_scratch(const Op& op, const Slot* slots) {
-  const uint8_t mask =
-      (op.variant & 0x10u) != 0
-          ? (op.variant & 0x0fu)
-          : ((op.variant & 0x4u) != 0 ? (op.variant & 0x3u) : 0x3u);
+  const uint8_t mask = ode_type_mask(op.variant);
   if (mask == 0) return 0;
   int64_t width = slots[op.in[0]].len + slots[op.in[1]].len;
   if (op.n_in >= 4) width += 1 + slots[op.in[3]].len;

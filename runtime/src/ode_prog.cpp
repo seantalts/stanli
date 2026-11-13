@@ -1,8 +1,10 @@
-// The ODE entry into the MIR compiler (mir_prog.hpp). All this adds is
-// the integrate_ode_* calling convention: the signature fixes the
-// argument order and the sizes, so t, y, theta and x_r get their register
-// ranges up front and x_i binds as compile-time integers. Everything the
-// body can contain is the shared compiler's problem.
+// The solver entry into the MIR compiler (mir_prog.hpp). This adds the
+// calling conventions: integrate_ode_* (the signature fixes the argument
+// order and the sizes, so t, y, theta and x_r get their register ranges up
+// front and x_i binds as compile-time integers), the variadic ODE
+// interface, and the DAE residual. It also holds the whitelist of opcodes
+// the direct RK adjoint accepts. Everything the body can contain is the
+// shared compiler's problem.
 #include <stanli/ode_prog.hpp>
 #include <stanli/callback.hpp>
 
@@ -109,62 +111,70 @@ void stamp_rhs_view(Range* range, const mir::UnsizedView& view,
   }
 }
 
-}  // namespace
-
-RhsProgram compile_dae_args(
+RhsProgram compile_callback(
     const mir::FunDef& f, const std::map<std::string, const mir::FunDef*>& funs,
-    int n_y, const std::vector<RhsArg>& args) {
+    int n_y, const std::vector<RhsArg>& args, bool dae) {
+  const char* what = dae ? "DAE residual" : "right-hand side";
+  const size_t lead = dae ? 3 : 2;
   RhsProgram p;
-  if (f.arg_names.size() != args.size() + 3) {
-    p.why = "DAE residual takes " + std::to_string(f.arg_names.size()) +
-            " arguments, the call passes " + std::to_string(args.size() + 3) +
-            " (t, y, y', and " + std::to_string(args.size()) + " more)";
+  if (f.arg_names.size() != args.size() + lead) {
+    p.why = std::string(what) + " takes " + std::to_string(f.arg_names.size()) +
+            " arguments, the call passes " +
+            std::to_string(args.size() + lead) +
+            (dae ? " (t, y, y', and " : " (t, y, and ") +
+            std::to_string(args.size()) + " more)";
     return p;
   }
   if (f.arg_views.size() != f.arg_names.size()) {
-    p.why = "DAE residual has incomplete unsized argument metadata";
+    p.why = std::string(what) + " has incomplete unsized argument metadata";
     return p;
   }
   for (size_t i = 0; i < f.arg_views.size(); ++i) {
     if (!supported_rhs_view(f.arg_views[i])) {
-      p.why = "DAE residual argument " + std::to_string(i + 1) +
+      p.why = std::string(what) + " argument " + std::to_string(i + 1) +
               " has an unsupported logical view";
       return p;
     }
   }
   ProgramCompiler c{p, funs};
   try {
+    // Two contiguous regions, so run_rhs can seed each with one loop: the
+    // autodiff arguments and the data ones. Each formal parameter gets a
+    // sub-range of whichever region it belongs to, assigned in argument
+    // order -- the same order the lowering concatenates the call site in.
     int n_th = 0, n_xr = 0;
     for (size_t k = 0; k < args.size(); ++k) {
       const auto& a = args[k];
-      if (f.arg_views[k + 3].depth == 0 &&
-          f.arg_views[k + 3].leaf == mir::UnsizedLeaf::Matrix)
+      if (f.arg_views[k + lead].depth == 0 &&
+          f.arg_views[k + lead].leaf == mir::UnsizedLeaf::Matrix)
         callback_matrix_dimensions(a);
       if (a.is_int && !a.is_param) continue;
       (a.is_param ? n_th : n_xr) += a.len;
     }
     p.t_reg = c.alloc(1);
     p.y0 = c.alloc(n_y);
-    p.yp0 = c.alloc(n_y);
+    if (dae) p.yp0 = c.alloc(n_y);
     p.th0 = c.alloc(n_th);
     p.xr0 = c.alloc(n_xr);
     p.n_y = n_y;
-    p.n_yp = n_y;
+    if (dae) p.n_yp = n_y;
     p.n_th = n_th;
     p.n_xr = n_xr;
     c.reals[f.arg_names[0]] = Range{p.t_reg, 1};
     Range y{p.y0, n_y};
     stamp_rhs_view(&y, f.arg_views[1]);
     c.reals[f.arg_names[1]] = y;
-    Range yp{p.yp0, n_y};
-    stamp_rhs_view(&yp, f.arg_views[2]);
-    c.reals[f.arg_names[2]] = yp;
+    if (dae) {
+      Range yp{p.yp0, n_y};
+      stamp_rhs_view(&yp, f.arg_views[2]);
+      c.reals[f.arg_names[2]] = yp;
+    }
     int th_at = 0, xr_at = 0;
     for (size_t k = 0; k < args.size(); ++k) {
       const RhsArg& a = args[k];
-      const std::string& name = f.arg_names[k + 3];
+      const std::string& name = f.arg_names[k + lead];
+      const auto& view = f.arg_views[k + lead];
       if (a.is_int && !a.is_param) {
-        const auto& view = f.arg_views[k + 3];
         if (view.depth) {
           c.known_int_array_dims[name] = callback_array_dimensions(a, view);
           c.known_int_arrays[name] =
@@ -175,21 +185,21 @@ RhsProgram compile_dae_args(
         }
       } else if (a.is_param) {
         Range r{p.th0 + th_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 3], &a);
+        stamp_rhs_view(&r, view, &a);
         c.reals[name] = r;
-        if (a.is_int && f.arg_views[k + 3].depth)
-          c.int_array_names.insert(name);
+        if (a.is_int && view.depth) c.int_array_names.insert(name);
         th_at += a.len;
       } else {
         Range r{p.xr0 + xr_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 3], &a);
+        stamp_rhs_view(&r, view, &a);
         c.reals[name] = r;
         xr_at += a.len;
       }
     }
+
     const Range out = c.function_body(f.body);
     if (out.len != n_y)
-      c.bail("DAE residual returns " + std::to_string(out.len) +
+      c.bail(std::string(what) + " returns " + std::to_string(out.len) +
              " values for " + std::to_string(n_y) + " states");
     for (int k = 0; k < out.len; ++k) p.out_regs.push_back(out.reg + k);
     c.finish();
@@ -213,106 +223,18 @@ RhsProgram compile_dae_args(
   return p;
 }
 
+}  // namespace
+
+RhsProgram compile_dae_args(
+    const mir::FunDef& f, const std::map<std::string, const mir::FunDef*>& funs,
+    int n_y, const std::vector<RhsArg>& args) {
+  return compile_callback(f, funs, n_y, args, true);
+}
+
 RhsProgram compile_rhs_args(
     const mir::FunDef& f, const std::map<std::string, const mir::FunDef*>& funs,
     int n_y, const std::vector<RhsArg>& args) {
-  RhsProgram p;
-  if (f.arg_names.size() != args.size() + 2) {
-    p.why = "right-hand side takes " + std::to_string(f.arg_names.size()) +
-            " arguments, the call passes " + std::to_string(args.size() + 2) +
-            " (t, y, and " + std::to_string(args.size()) + " more)";
-    return p;
-  }
-  if (f.arg_views.size() != f.arg_names.size()) {
-    p.why = "right-hand side has incomplete unsized argument metadata";
-    return p;
-  }
-  for (size_t i = 0; i < f.arg_views.size(); ++i) {
-    if (!supported_rhs_view(f.arg_views[i])) {
-      p.why = "right-hand side argument " + std::to_string(i + 1) +
-              " has an unsupported logical view";
-      return p;
-    }
-  }
-  ProgramCompiler c{p, funs};
-  try {
-    // Two contiguous regions, so run_rhs can seed each with one loop: the
-    // autodiff arguments and the data ones. Each formal parameter gets a
-    // sub-range of whichever region it belongs to, assigned in argument
-    // order -- the same order the lowering concatenates the call site in.
-    int n_th = 0, n_xr = 0;
-    for (size_t k = 0; k < args.size(); ++k) {
-      const auto& a = args[k];
-      if (f.arg_views[k + 2].depth == 0 &&
-          f.arg_views[k + 2].leaf == mir::UnsizedLeaf::Matrix)
-        callback_matrix_dimensions(a);
-      if (a.is_int && !a.is_param) continue;
-      (a.is_param ? n_th : n_xr) += a.len;
-    }
-    p.t_reg = c.alloc(1);
-    p.y0 = c.alloc(n_y);
-    p.th0 = c.alloc(n_th);
-    p.xr0 = c.alloc(n_xr);
-    p.n_y = n_y;
-    p.n_th = n_th;
-    p.n_xr = n_xr;
-    c.reals[f.arg_names[0]] = Range{p.t_reg, 1};
-    Range y{p.y0, n_y};
-    stamp_rhs_view(&y, f.arg_views[1]);
-    c.reals[f.arg_names[1]] = y;
-    int th_at = 0, xr_at = 0;
-    for (size_t k = 0; k < args.size(); ++k) {
-      const RhsArg& a = args[k];
-      const std::string& name = f.arg_names[k + 2];
-      if (a.is_int && !a.is_param) {
-        const auto& view = f.arg_views[k + 2];
-        if (view.depth) {
-          c.known_int_array_dims[name] = callback_array_dimensions(a, view);
-          c.known_int_arrays[name] =
-              std::vector<long>(a.ints.begin(), a.ints.end());
-          c.int_array_names.insert(name);
-        } else {
-          c.ints[name] = std::vector<long>(a.ints.begin(), a.ints.end());
-        }
-      } else if (a.is_param) {
-        Range r{p.th0 + th_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 2], &a);
-        c.reals[name] = r;
-        if (a.is_int && f.arg_views[k + 2].depth)
-          c.int_array_names.insert(name);
-        th_at += a.len;
-      } else {
-        Range r{p.xr0 + xr_at, a.len};
-        stamp_rhs_view(&r, f.arg_views[k + 2], &a);
-        c.reals[name] = r;
-        xr_at += a.len;
-      }
-    }
-
-    const Range out = c.function_body(f.body);
-    if (out.len != n_y)
-      c.bail("right-hand side returns " + std::to_string(out.len) +
-             " values for " + std::to_string(n_y) + " states");
-    for (int k = 0; k < out.len; ++k) p.out_regs.push_back(out.reg + k);
-    c.finish();
-    compact_rhs(p);
-    p.ok = true;
-  } catch (Bail& b) {
-    p.ok = false;
-    p.why = b.why;
-    p.code.clear();
-    p.out_regs.clear();
-  } catch (const std::bad_alloc&) {
-    throw;
-  } catch (const std::exception& failure) {
-    // A folded constructor in an untaken return arm can throw a Stan domain
-    // error during compilation. Defer it to the callback's actual execution.
-    p.ok = false;
-    p.why = failure.what();
-    p.code.clear();
-    p.out_regs.clear();
-  }
-  return p;
+  return compile_callback(f, funs, n_y, args, false);
 }
 
 RhsProgram compile_rhs(const mir::FunDef& f,

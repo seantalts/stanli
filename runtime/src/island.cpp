@@ -15,7 +15,7 @@
 // form the compiler does not model. Elementwise ops compile at any width,
 // with length-1 operands broadcast. Runs shorter than kMinIslandOps stay
 // as they are: below that, per-op dispatch with scratch partials is cheaper
-// than a var replay. A compiled run is then kept only if it is cheaper
+// than an island's backward. A compiled run is then kept only if it is cheaper
 // than the ops it replaces -- see the cost estimate at the end of
 // carve_islands, which is what decides the pass is a win rather than a
 // wash. A run holding vector elementwise ops is also priced split at them,
@@ -32,7 +32,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <limits>
 #include <memory>
 #include <map>
 #include <optional>
@@ -234,8 +233,6 @@ bool in_vocab(const Graph& g, const Op& op, bool strict = false) {
   }
 }
 
-void segment_noop_backward(KernelCtx&) {}
-
 struct Compiler {
   const Graph& g;
   const std::unordered_map<int, const std::vector<double>*>& const_slots;
@@ -261,8 +258,6 @@ struct Compiler {
   // or SET_SLICE output and stop being just a constant.
   int64_t n_const_regs = 0;
   bool ok = true;
-  int max_live_ins = kMaxLiveIns;
-  bool noop_backward = false;  // a kernel without a backward gets an empty one
 
   // A copy-then-modify op (SET_INDEX/SET_SLICE writing a slot distinct
   // from its base) can reuse the base's registers when nothing reads the
@@ -309,7 +304,7 @@ struct Compiler {
       if (len == 1) n_const_regs += 1;
       return r;
     }
-    if ((int)live_in_slots.size() >= max_live_ins) {
+    if ((int)live_in_slots.size() >= kMaxLiveIns) {
       ok = false;
       return 0;
     }
@@ -368,7 +363,6 @@ struct Compiler {
     call.n_in = (int8_t)op.n_in;
     call.forward = k->forward;
     call.backward = k->backward;
-    if (!call.backward && noop_backward) call.backward = segment_noop_backward;
     for (int j = 0; j < op.n_in; ++j) {
       call.in[j] = read_reg(op.in[j]);
       call.in_len[j] = (int)g.slots[op.in[j]].len;
@@ -617,8 +611,8 @@ struct Carver {
   std::vector<char> slot_active;
   std::vector<Op> result;
   int carved = 0;
-  // Strict sub-runs split_cost compiled to price a split, discarded after
-  // join_cost_floor sums their accepted island costs: emission never
+  // Strict sub-runs populate_strict_queue compiled to price a split, discarded
+  // after join_cost_floor sums their accepted island costs: emission never
   // replays a strict-sourced split (liveness_split_cost subsumes it, see
   // run()), so nothing needs these by position afterward.
   std::vector<Candidate> strict_queue;
@@ -1134,7 +1128,7 @@ struct Carver {
   }
 
   // The span liveness_split_cost already compiled and priced for [i, j),
-  // strict_candidate's counterpart for the liveness queue.
+  // the liveness queue's counterpart of a strict_queue entry.
   Candidate liveness_candidate(size_t i, size_t j) {
     if (liveness_queue_pos < liveness_queue.size()) {
       Candidate& next = liveness_queue[liveness_queue_pos];
@@ -1398,76 +1392,6 @@ int carve_islands(Graph& g,
   if (std::getenv("STANLI_NO_ISLAND")) return 0;
   Carver carver(g, fills, target_terms, extra_roots);
   return carver.run();
-}
-
-bool segment_supports(const Graph& g, const Op& op) {
-  return !is_effectful_op(op.opcode) && !op.dyn_lengths && in_vocab(g, op);
-}
-
-bool compile_segment(
-    const Graph& g, const std::vector<SegmentItem>& items,
-    const std::unordered_map<int, const std::vector<double>*>& constants,
-    const std::vector<int>& live_outs, const std::vector<char>& slot_active,
-    Segment* out) {
-  static const std::unordered_map<int, size_t> no_last_use;
-  static const std::unordered_set<int> no_pinned;
-  Compiler cc{g,   constants, no_last_use, no_pinned,
-              {},  {},        {},          0,
-              0,   0,         true,        std::numeric_limits<int>::max(),
-              true};
-  std::vector<int> written;
-  std::unordered_set<int> written_set;
-  const auto write = [&](int slot) {
-    if (written_set.insert(slot).second) written.push_back(slot);
-  };
-  for (const auto& item : items) {
-    if (item.op < 0) {
-      cc.reg_of[item.alias_dst] = cc.read_reg(item.alias_src);
-      if (!cc.ok) return false;
-      write(item.alias_dst);
-      continue;
-    }
-    const Op& op = g.ops[(size_t)item.op];
-    if (!segment_supports(g, op)) return false;
-    // Every kernel output is a fresh value, whatever the slot held before.
-    cc.reg_of.erase(op.out);
-    if (!cc.compile(op) || !cc.ok) return false;
-    write(op.out);
-  }
-  std::unordered_set<int> out_set(live_outs.begin(), live_outs.end());
-  for (int slot : cc.live_in_slots)
-    if (written_set.count(slot)) out_set.insert(slot);
-  std::vector<int> outs;
-  for (int slot : written)
-    if (out_set.count(slot)) outs.push_back(slot);
-  for (int slot : outs)
-    for (int e = 0; e < (int)g.slots[slot].len; ++e)
-      cc.prog.out_regs.push_back(cc.reg_of.at(slot) + e);
-  for (size_t k = 0; k < cc.prog.ins.size(); ++k)
-    cc.prog.ins[k].active = slot_active[(size_t)cc.live_in_slots[k]] != 0;
-  compact_island_gated(cc.prog, false);
-  if (!gen_adjoint(cc.prog)) return false;
-  cc.prog.native_adj = true;
-
-  Segment segment;
-  const auto& adj_reg = cc.prog.adj.adj_reg;
-  size_t off = 0;
-  for (int slot : outs) {
-    const int len = (int)g.slots[slot].len;
-    const int reg = len ? cc.prog.out_regs[off] : 0;
-    for (int e = 0; e < len; ++e)
-      if (cc.prog.out_regs[off + e] != reg + e ||
-          adj_reg[(size_t)(reg + e)] != adj_reg[(size_t)reg] + e)
-        return false;
-    segment.outs.push_back(SegmentBinding{slot, reg, len});
-    off += (size_t)len;
-  }
-  for (size_t k = 0; k < cc.prog.ins.size(); ++k)
-    segment.ins.push_back(SegmentBinding{
-        cc.live_in_slots[k], cc.prog.ins[k].reg, cc.prog.ins[k].len});
-  segment.program = std::move(cc.prog);
-  *out = std::move(segment);
-  return true;
 }
 
 }  // namespace stanli

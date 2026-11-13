@@ -81,31 +81,6 @@ extern template stan::math::var program_density<stan::math::var>(
 bool program_density_partials(int id, unsigned mask, const double* args,
                               double* partials);
 
-// Whether density `id` is affordable to also instantiate over container
-// arguments (program_density_vec): the same COMMON_A/COMMON_B tier line
-// program_density_partials draws for mask dispatch, reused here rather than
-// adding a second cost axis for a related reason -- both trade compiled
-// size for a density call the graph can already do exactly, on the
-// functions models actually lean on.
-bool program_density_container_capable(int id);
-
-// Density `id` over up to four arguments, one or more of which is a
-// `len`-element container rather than a scalar (bit k of `mask` says
-// argument k is one): one propto-OFF call built the way CmdStan's generated
-// code would build it (stan-math's own broadcasting), not `len` scalar
-// calls summed by hand, which would not sum in the same order. `reg` is the
-// register file; `arg_reg[k]` is a container argument's first register, or
-// a scalar argument's only one.
-template <typename T>
-T program_density_vec(int id, unsigned mask, int32_t len, const T* reg,
-                      const int32_t* arg_reg);
-
-extern template double program_density_vec<double>(int, unsigned, int32_t,
-                                                   const double*,
-                                                   const int32_t*);
-extern template stan::math::var program_density_vec<stan::math::var>(
-    int, unsigned, int32_t, const stan::math::var*, const int32_t*);
-
 }  // namespace stanli
 
 #endif
