@@ -2,9 +2,9 @@
 
 Stanli is a Stan Language Interpreter. It uses upstream Stan code from Stan
 Math, the Stan services and algorithms, and the Stan compiler, but it does not
-require a C++ toolchain. On the median of <!--gen:benchmark_models-->343<!--/gen--> real
-models, gradients are **<!--gen:corpus_median-->2.15x<!--/gen-->** faster than
-CmdStan's and sampling is **<!--gen:corpus_total_median-->23x<!--/gen-->** faster
+require a C++ toolchain. On the median of <!--gen:benchmark_models-->347<!--/gen--> real
+models, gradients are **<!--gen:corpus_median-->2.17x<!--/gen-->** faster than
+CmdStan's and sampling is **<!--gen:corpus_total_median-->25x<!--/gen-->** faster
 ([benchmarks](docs/benchmarks.md)).
 
 Stanli turns each model into a graph of operations over precompiled Stan Math
@@ -71,12 +71,12 @@ same example in their language.
 
 ## What is verified, and how fast
 
-- Speed. In the <!--gen:benchmark_date-->2026-10-21<!--/gen--> native
-  run, <!--gen:corpus_n_grad-->342<!--/gen-->
-  of <!--gen:benchmark_models-->343<!--/gen--> models produced paired gradient
+- Speed. In the <!--gen:benchmark_date-->2026-11-13<!--/gen--> native
+  run, <!--gen:corpus_n_grad-->346<!--/gen-->
+  of <!--gen:benchmark_models-->347<!--/gen--> models produced paired gradient
   measurements. The median gradient
-  is <!--gen:corpus_median-->2.15x<!--/gen--> faster than CmdStan's,
-  and <!--gen:corpus_at_par-->327<!--/gen--> models are at least as fast.
+  is <!--gen:corpus_median-->2.17x<!--/gen--> faster than CmdStan's,
+  and <!--gen:corpus_at_par-->335<!--/gen--> models are at least as fast.
   Failed or capped runs stay in the [full benchmark](docs/benchmarks.md).
 - Model coverage. <!--gen:corpus_reference_models-->350<!--/gen--> models
   share one three-point CmdStan reference replay. Within the posteriordb

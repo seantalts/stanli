@@ -1,0 +1,167 @@
+{
+  "identity": {
+    "config": {
+      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/build-rel/bench_grad",
+      "build_timeout": 900.0,
+      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/deps/cmdstan",
+      "corpus": "all",
+      "filter": "i319_",
+      "gradient_timeout": 60.0,
+      "measure_ms": 40,
+      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/deps/posteriordb",
+      "points": 10,
+      "rounds": 6,
+      "stanc": "/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src/_build/default/src/stanc/stanc.exe",
+      "stancflags": "--O1",
+      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/deps/stanc3/embed/0a5006d31d4889b8/stanli-vectorize-probe",
+      "warmup_ms": 20
+    },
+    "executables": {
+      "bench": "605b7b1c8e95f57276eb1e0c83ce3d4c754a0e3391c51cb87a2a62bc3624be5e",
+      "stanc": "359c905c882a4263811b17636817ce349f0b8c743a07769e5348e389dc81173c",
+      "vectorize_probe": "969f5fd3747185be6cb79afca25e6c8417fa41cbb5f7811353a23449c713ad8c"
+    },
+    "inputs": {
+      "i319_gauss_re": {
+        "collection": "brms",
+        "data": "7c56ac6180681111c94779752c83998fd81bdf2f59708335f73b62105dba1c50",
+        "gradient_count": 41258,
+        "point_source": "reference_run",
+        "points_sha256": "9d6e6b24742c1543871715ee19a67e9b460af76a1437a1933e7f9a1283811107",
+        "reference_sha256": "c22ef34d61a9f37022070db7a723c1ad0503e0f6f1ea5bba5c3fdbe36a9a481f",
+        "stan": "d725a5ac1f3faeab36c47d5d5412ab0234018ca83ef980a454a0a73b6ae95fb5"
+      },
+      "i319_negbin_fixed": {
+        "collection": "brms",
+        "data": "7b1a73a3fb8eca9a4cbc6ff495cacb3d5b70712ab976dfe8852e817e209c4958",
+        "gradient_count": 19395,
+        "point_source": "reference_run",
+        "points_sha256": "d9b3bbe391102c94ffeedad7ce73bdf50036eae411b0cf817919a23fa7e8cc22",
+        "reference_sha256": "a73a410cf9f6427267e3bda675bbc0031a103291e768b15f361b3e50b4bc01a2",
+        "stan": "374ea7c76cff74b04db642ff8675cdd003b594290b6fdd28934461c59d511ae1"
+      },
+      "i319_negbin_re": {
+        "collection": "brms",
+        "data": "7c56ac6180681111c94779752c83998fd81bdf2f59708335f73b62105dba1c50",
+        "gradient_count": 66699,
+        "point_source": "reference_run",
+        "points_sha256": "975515f0a71d3902e76352f57a4fc5940e4d1aa27519430fce2203c301f23d85",
+        "reference_sha256": "c906d44a4f21a4e11bf138e26dfc7e1eed7aea40b96eca0a25db97a3537630f5",
+        "stan": "fe13629fa44384bc1b47f362299aa841b422092e1ece9771fcf9f5449867aa5a"
+      },
+      "i319_pois_fixed": {
+        "collection": "brms",
+        "data": "7b1a73a3fb8eca9a4cbc6ff495cacb3d5b70712ab976dfe8852e817e209c4958",
+        "gradient_count": 24014,
+        "point_source": "reference_run",
+        "points_sha256": "e75e30af25d2b06db87fa594fcd61c2d660f4709f4d59811c1d60888b6a78318",
+        "reference_sha256": "cb7140e86876f51412a91e69ce9a5aa5af62666b8b46152513d524d69ce0b890",
+        "stan": "f1282374d905dd14c78d6c37e484f27a7afaaaa348ea5ca2802808ec4a425440"
+      },
+      "i319_pois_re": {
+        "collection": "brms",
+        "data": "7c56ac6180681111c94779752c83998fd81bdf2f59708335f73b62105dba1c50",
+        "gradient_count": 191872,
+        "point_source": "reference_run",
+        "points_sha256": "8665c53b2ab8883687f3d08fc339690024b409a73156ea2826c4886220b69017",
+        "reference_sha256": "ab9fdfb72d31e3d5540a8fdef1b5a6f426d5269509a2bd6008f72f79a85c51b3",
+        "stan": "eaba5db0eb1fc0941309e9e6363b182edb8a8d64e0cb55782df0bad41f38a1f6"
+      },
+      "i319_pois_re2": {
+        "collection": "brms",
+        "data": "c98170daceca5b5ccd9e8e96ee0e338050add39bd5117640219b0a7d73876847",
+        "gradient_count": 173289,
+        "point_source": "reference_run",
+        "points_sha256": "ac66144e10bc20ee7c7e7b32c6e6cd636c0342c925389ba9da684bd0cbfe1574",
+        "reference_sha256": "9a8dc02590bfdb5dbe6f4c0a12e490e4155bfc3986199fbc9717d10897090392",
+        "stan": "24e4f22550aed3c5a414aa69fb6ed4d3966c916eece7fbb0a382b881ace625bc"
+      }
+    },
+    "machine": {
+      "host": "SeansMacStudio",
+      "logical_cpus": 32,
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "processor": "arm"
+    },
+    "points_file_sha256": "154a367c8b0874f72b4cffada4f1cae2c3bd77c6bdcd39b62380449e4943bdc5",
+    "protocol": "stanli-corpus-v6",
+    "reference_settings": {
+      "chains": 1,
+      "delta": 0.8,
+      "draws": 1000,
+      "max_depth": 10,
+      "points": 10,
+      "save_warmup": true,
+      "seed": 1,
+      "timeout_s": 1800,
+      "warmup": 1000
+    },
+    "sources": {
+      "harnesses/corpus_bench.py": "86cbc8dae465037d9584bd2c5d4b29dbf67f9fe23f1e85e5dfcaf417e911239d",
+      "tools/bench_cmdstan_grad.cpp": "eb4ef7c0bb27aac34a189f605af5ed0ea0869928293ce5f0aa1793a3a782536f",
+      "tools/bench_grad.cpp": "1368601f50136174f6fde03b9242d159f3d37c67c31db6c66cacebcaa4aeb775",
+      "tools/benchmark_timer.hpp": "08c7b09589d126d78b91b8f81e53b8f772f58dbcdc906bad9ca70397d13181d4",
+      "tools/cmdstan_ref.py": "059099bf6f1786f8e5ed7c2c64ad0dfd25aafaa75b18056b6427690bb9b2968d",
+      "tools/corpus_inventory.py": "a8f81d82d60eb98ef71d9e68c3ca88bb14eccfb1f3d1f5d23163e46fb9972baa",
+      "tools/verify_refs.py": "6b680c42706f463d735c4d3a50aa683ce1c9d6d86b1c8884fc0fc5f2832dfa75"
+    },
+    "stanli_source": {
+      "head": "b4247512ca87f95da9fc9d088fba956f91c34e09",
+      "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "threads": {
+      "MKL_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "STAN_NUM_THREADS": "1",
+      "VECLIB_MAXIMUM_THREADS": "1"
+    },
+    "toolchains": {
+      "build_environment": {
+        "CC": null,
+        "CFLAGS": null,
+        "CPPFLAGS": null,
+        "CXX": null,
+        "CXXFLAGS": null,
+        "LDFLAGS": null,
+        "MAKEFLAGS": null
+      },
+      "clang_sha256": "b8763cf250e607a778bb4603cecb5b90338814d0a3dfcba0d57b1de242f610e9",
+      "cmdstan": {
+        "head": "d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "libraries": {
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_cvodes.a": "3c7398013f7c7c2d271be1107495b4af3fa6c91ce4b276987e7da589c1b3a9ab",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_idas.a": "c4fa89a1f841cba924769baf133fa60cd0fac4a94c1c3bfd247664600de62ca7",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_kinsol.a": "9c277256b65e09dc5b77e26ccf9c967cbd612c7f86f9334e334ed1678c19a2b7",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_nvecserial.a": "d1ea28ff4d38bb0e14febc427c257e67141451399ceb3a4f70ad348cfb2e60f3",
+        "stan/lib/stan_math/lib/tbb/libtbb.dylib": "3e1261fbe451cdfd7eddb0c93507065128c8ab02d4fcbbbfb20385a61f6f5289",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc.dylib": "9a6247602224ac8e233f06e381e38be4797a8120c9944828eeba971e75c5879f",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc_proxy.dylib": "0aba46a96c6c38bb32f8a7aa43dfd8d0b9aa1bc8537a1160d22b566dc8304e21"
+      },
+      "math": {
+        "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stan": {
+        "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stanli_fmt": {
+        "head": "40626af88bd7df9a5fb80be7b25ac85b122d6c21",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stanli_math": {
+        "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+        "tracked_diff_sha256": "a46ab8328d3da9cfaa9b5787dc73261f9f96d46bf6a935d1af1e1aed6a8040eb"
+      },
+      "stanli_stan": {
+        "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  },
+  "run_id": "ada72c9096a10e01",
+  "started_utc": "2026-11-15T00:10:50Z"
+}
