@@ -27,7 +27,7 @@ typedef struct stanli_model stanli_model;
  * from the wrong seed with the wrong step size. A binding must compare
  * this against the value it was compiled against before calling
  * anything, and refuse on a mismatch. */
-#define STANLI_ABI_VERSION 3
+#define STANLI_ABI_VERSION 4
 int stanli_abi_version(void);
 
 /* 1 if this build embeds stanc3, else 0. */
@@ -262,12 +262,16 @@ typedef struct {
 
 /* A completed transition selected by `refresh`. The iteration is one-based
  * across warmup and sampling together, `total` is warmup + samples, and
- * warmup is nonzero for the warmup phase. Callbacks are serialized on the
- * thread that called stanli_sample_multi_metric, never a sampler worker, so
- * language bindings may safely write to their own consoles. */
+ * warmup is nonzero for the warmup phase. `n_divergent` and `n_max_treedepth`
+ * count that chain's post-warmup transitions so far and end at the values in
+ * its stanli_sample_report; both are zero during warmup. Callbacks are
+ * serialized on the thread that called stanli_sample_multi_metric, never a
+ * sampler worker, so language bindings may safely write to their own
+ * consoles. */
 typedef void (*stanli_sample_progress_cb)(int32_t chain_id, int64_t iteration,
                                           int64_t total, int32_t warmup,
-                                          void* user);
+                                          int64_t n_divergent,
+                                          int64_t n_max_treedepth, void* user);
 
 /* Asked on the calling thread about every 100 ms while chains run. A nonzero
  * answer stops every chain after its current transition. */

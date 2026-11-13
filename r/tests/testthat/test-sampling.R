@@ -203,6 +203,43 @@ test_that("fixed_param and optimize name the argument they reject", {
                "init_radius must be a finite number >= 0", fixed = TRUE)
 })
 
+test_that("sampling progress shows running post-warmup problem counts", {
+  skip_without_runtime()
+  m <- progress_model()
+  # A fixed step size of 5 is unstable for a standard normal, so the chains
+  # diverge in warmup and sampling alike.
+  args <- list(m, chains = 2, seed = 552, warmup = 20, samples = 40,
+               parallel_chains = 2, adapt_engaged = FALSE, step_size = 5)
+  fit <- NULL
+  text <- capture.output(fit <- do.call(sample_model, c(args, refresh = 1)))
+  quiet_text <- capture.output(
+    quiet <- do.call(sample_model, c(args, refresh = 0)))
+  expect_length(quiet_text, 0)
+  expect_identical(fit$draws, quiet$draws)
+  expect_identical(fit$sampler, quiet$sampler)
+  progress <- grep("Iteration:", text, fixed = TRUE, value = TRUE)
+  expect_true(all(grepl("\\(Warmup\\)$",
+                        grep("(Warmup)", progress, fixed = TRUE,
+                             value = TRUE))))
+  for (chain in 1:2) {
+    wanted <- fit$report$n_divergent[chain]
+    expect_gt(wanted, 0)
+    sampling <- grep(sprintf("^Chain \\[%d\\].*\\(Sampling\\)", chain),
+                     progress, value = TRUE)
+    expect_match(sampling[length(sampling)],
+                 sprintf("\\(Sampling\\)  %d divergent$", wanted))
+  }
+
+  text <- capture.output(
+    fit <- sample_model(m, chains = 1, seed = 553, warmup = 30, samples = 40,
+                        max_depth = 1, refresh = 1))
+  progress <- grep("Iteration:", text, fixed = TRUE, value = TRUE)
+  hits <- fit$report$n_max_treedepth
+  expect_gt(hits, 0)
+  expect_match(progress[length(progress)],
+               sprintf("\\(Sampling\\)  %d at max treedepth \\(1\\)$", hits))
+})
+
 test_that("sampling progress is informative and observational", {
   skip_without_runtime()
   m <- progress_model()

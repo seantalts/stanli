@@ -65,7 +65,7 @@ class _SampleReport(ctypes.Structure):
 
 
 _PROGRESS = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_int64, ctypes.c_int64, ctypes.c_int32,
-                             ctypes.c_void_p)
+                             ctypes.c_int64, ctypes.c_int64, ctypes.c_void_p)
 _POLL = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
 _DP = ctypes.POINTER(ctypes.c_double)
 

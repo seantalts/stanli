@@ -422,15 +422,17 @@ void expect_pathfinder() {
 struct ProgressCapture {
   std::thread::id caller;
   bool caller_thread = true;
-  std::vector<std::array<int64_t, 4>> events;
+  std::vector<std::array<int64_t, 6>> events;
 };
 
 void capture_progress(int32_t chain_id, int64_t iteration, int64_t total,
-                      int32_t warmup, void* user) {
+                      int32_t warmup, int64_t n_divergent,
+                      int64_t n_max_treedepth, void* user) {
   auto* capture = static_cast<ProgressCapture*>(user);
   capture->caller_thread =
       capture->caller_thread && std::this_thread::get_id() == capture->caller;
-  capture->events.push_back({chain_id, iteration, total, warmup});
+  capture->events.push_back(
+      {chain_id, iteration, total, warmup, n_divergent, n_max_treedepth});
 }
 
 // Answers stop only after the chains have had time to finish: a sampler
@@ -756,6 +758,88 @@ void expect_sampling_progress() {
 
   stanli_model_free(quiet);
   stanli_model_free(observed);
+}
+
+// Progress carries each chain's running post-warmup divergence and
+// max-treedepth counts, ending at the report's totals. A fixed step size of 5
+// diverges on this model; depth 1 saturates every tree.
+void expect_sampling_progress_counts() {
+  const std::string mir = slurp("tests/fixtures/gqconst.tmir.sexp");
+  const char* data = R"({"rectangular":[[1,4],[2,5],[3,6]]})";
+  for (const bool diverging : {true, false}) {
+    const std::string label = diverging ? "divergent" : "saturating";
+    char err[8192]{};
+    stanli_model* quiet =
+        stanli_model_new_with_opts(mir.c_str(), data, nullptr, err, sizeof err);
+    stanli_model* observed =
+        stanli_model_new_with_opts(mir.c_str(), data, nullptr, err, sizeof err);
+    if (quiet == nullptr || observed == nullptr) {
+      ++failures;
+      std::printf("FAIL C API progress counts model construction: %s\n", err);
+      if (quiet) stanli_model_free(quiet);
+      if (observed) stanli_model_free(observed);
+      return;
+    }
+    stanli_sample_opts opts;
+    stanli_sample_opts_init(&opts);
+    opts.seed = 552;
+    opts.chains = 2;
+    opts.warmup = 20;
+    opts.samples = 40;
+    opts.num_threads = 2;
+    stanli_metric_opts mo;
+    stanli_metric_opts_init(&mo);
+    if (diverging) {
+      mo.adapt_engaged = 0;
+      mo.step_size = 5.0;
+    } else {
+      opts.max_depth = 1;
+    }
+    const int64_t n = stanli_n_unconstrained(quiet);
+    const int64_t rows = stanli_n_stored_draws(&opts);
+    std::vector<double> quiet_draws((size_t)(opts.chains * rows * n));
+    std::vector<double> quiet_stats(
+        (size_t)(opts.chains * rows * STANLI_N_SAMPLER_COLS));
+    std::vector<double> draws(quiet_draws.size());
+    std::vector<double> stats(quiet_stats.size());
+    const int quiet_failed = stanli_sample_multi_metric(
+        quiet, &opts, &mo, 0, quiet_draws.data(), quiet_stats.data(), nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, err, sizeof err);
+    ProgressCapture capture{std::this_thread::get_id()};
+    std::vector<stanli_sample_report> reports((size_t)opts.chains);
+    const int failed = stanli_sample_multi_metric(
+        observed, &opts, &mo, 1, draws.data(), stats.data(), nullptr,
+        capture_progress, &capture, nullptr, nullptr, nullptr, reports.data(),
+        err, sizeof err);
+    expect_true("C API " + label + " progress runs succeed",
+                quiet_failed == 0 && failed == 0);
+    expect_true("C API " + label + " progress leaves draws and stats unchanged",
+                quiet_draws == draws && quiet_stats == stats);
+    for (int chain = 1; chain <= opts.chains; ++chain) {
+      bool warmup_zero = true;
+      const std::array<int64_t, 6>* last = nullptr;
+      for (const auto& event : capture.events) {
+        if (event[0] != chain) continue;
+        if (event[3] != 0)
+          warmup_zero = warmup_zero && event[4] == 0 && event[5] == 0;
+        last = &event;
+      }
+      const auto& report = reports[(size_t)(chain - 1)];
+      const std::string which = " for chain " + std::to_string(chain);
+      expect_true("C API " + label + " warmup progress counts are zero" + which,
+                  warmup_zero);
+      expect_true(
+          "C API " + label + " final progress counts equal the report" + which,
+          last != nullptr && (*last)[3] == 0 &&
+              (*last)[4] == report.n_divergent &&
+              (*last)[5] == report.n_max_treedepth);
+      expect_true(
+          "C API " + label + " run has post-warmup problems" + which,
+          diverging ? report.n_divergent > 0 : report.n_max_treedepth > 0);
+    }
+    stanli_model_free(quiet);
+    stanli_model_free(observed);
+  }
 }
 
 struct PrintThreadCapture {
@@ -2112,6 +2196,7 @@ int main() {
   expect_compiled_scalar_rng();
   expect_pathfinder();
   expect_sampling_progress();
+  expect_sampling_progress_counts();
   expect_inits_run_in_parallel();
   expect_interruptible_sampling();
   expect_in_worker_write_array();

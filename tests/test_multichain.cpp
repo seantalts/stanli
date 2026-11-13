@@ -12,6 +12,7 @@
 
 #include <stanli/diagnose.hpp>
 #include <stanli/nuts.hpp>
+#include <stanli/threading.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -337,7 +338,7 @@ int main() {
     std::vector<std::vector<int64_t>> events(C);
     const auto observed = run_nuts_chains(
         observed_execs, cfg, C,
-        [&](int chain, int64_t i, bool warmup) {
+        [&](int chain, int64_t i, bool warmup, int64_t, int64_t) {
           caller_thread = caller_thread && std::this_thread::get_id() == caller;
           events[(size_t)chain].push_back(warmup ? i + 1 : cfg.warmup + i + 1);
         },
@@ -368,7 +369,7 @@ int main() {
     try {
       (void)run_nuts_chains(
           throwing_execs, cfg, C,
-          [](int, int64_t, bool) {
+          [](int, int64_t, bool, int64_t, int64_t) {
             throw std::runtime_error("progress callback failed");
           },
           7);
@@ -389,8 +390,8 @@ int main() {
     for (auto& c : empty_clones) empty_execs.push_back(c.get());
     int empty_events = 0;
     const auto empty = run_nuts_chains(
-        empty_execs, empty_cfg, C, [&](int, int64_t, bool) { ++empty_events; },
-        1);
+        empty_execs, empty_cfg, C,
+        [&](int, int64_t, bool, int64_t, int64_t) { ++empty_events; }, 1);
     expect("zero-transition chains complete without callbacks",
            empty.size() == C && empty_events == 0);
   }
@@ -429,6 +430,87 @@ int main() {
     expect(
         "thinned stats really omit transitions",
         thin_stats.rows.size() < (size_t)(thin_cfg.warmup + thin_cfg.samples));
+  }
+
+  // ---- progress carries the running post-warmup problem counts ---------
+  // A fixed step size of 5 is unstable for a standard normal, so most
+  // transitions diverge, warmup included; depth 1 saturates every tree.
+  {
+    struct Event {
+      int64_t i;
+      bool warmup;
+      int64_t n_divergent;
+      int64_t n_max_treedepth;
+    };
+    const auto check = [&](const std::string& label, const NutsConfig& cfg,
+                           int threads) {
+      const int C = 2;
+      Executor quiet_base(testmodels::std_normal(3));
+      quiet_base.value_ptr(2)[0] = 1.0;
+      auto quiet_clones = clone_executors(quiet_base, C - 1);
+      std::vector<Executor*> quiet_execs{&quiet_base};
+      for (auto& c : quiet_clones) quiet_execs.push_back(c.get());
+      Executor base(testmodels::std_normal(3));
+      base.value_ptr(2)[0] = 1.0;
+      auto clones = clone_executors(base, C - 1);
+      std::vector<Executor*> execs{&base};
+      for (auto& c : clones) execs.push_back(c.get());
+
+      const auto quiet = run_nuts_chains(quiet_execs, cfg, threads);
+      std::vector<std::vector<Event>> events(C);
+      const auto res = run_nuts_chains(
+          execs, cfg, threads,
+          [&](int chain, int64_t i, bool warmup, int64_t ndiv, int64_t ntd) {
+            events[(size_t)chain].push_back({i, warmup, ndiv, ntd});
+          },
+          1);
+      for (int c = 0; c < C; ++c) {
+        const auto& ev = events[(size_t)c];
+        const auto& report = res[(size_t)c].report;
+        bool warmup_zero = true, monotone = true;
+        for (size_t k = 0; k < ev.size(); ++k) {
+          if (ev[k].warmup)
+            warmup_zero = warmup_zero && ev[k].n_divergent == 0 &&
+                          ev[k].n_max_treedepth == 0;
+          if (k > 0)
+            monotone = monotone && ev[k].n_divergent >= ev[k - 1].n_divergent &&
+                       ev[k].n_max_treedepth >= ev[k - 1].n_max_treedepth;
+        }
+        expect(label + ": warmup progress reports zero counts", warmup_zero);
+        expect(label + ": progress counts never decrease", monotone);
+        expect(label + ": final progress counts equal the report",
+               !ev.empty() && !ev.back().warmup &&
+                   ev.back().n_divergent == report.n_divergent &&
+                   ev.back().n_max_treedepth == report.n_max_treedepth);
+        expect(label + ": progress leaves draws and stats unchanged",
+               quiet[(size_t)c].draws == res[(size_t)c].draws &&
+                   quiet[(size_t)c].stats.rows == res[(size_t)c].stats.rows);
+      }
+      return res;
+    };
+
+    NutsConfig diverging;
+    diverging.seed = 4242;
+    diverging.warmup = 20;
+    diverging.samples = 40;
+    diverging.adapt = false;
+    diverging.step_size = 5.0;
+    NutsConfig saturating;
+    saturating.seed = 4243;
+    saturating.warmup = 30;
+    saturating.samples = 40;
+    saturating.max_depth = 1;
+    expect("threaded progress path is exercised", thread_safe_build());
+    for (int threads : {1, 2}) {
+      const std::string t = threads == 1 ? "sequential" : "threaded";
+      const auto d = check(t + " divergent", diverging, threads);
+      expect(t + " divergent run diverges after warmup",
+             d[0].report.n_divergent > 0 && d[1].report.n_divergent > 0);
+      const auto s = check(t + " saturating", saturating, threads);
+      expect(
+          t + " depth-one run saturates after warmup",
+          s[0].report.n_max_treedepth > 0 && s[1].report.n_max_treedepth > 0);
+    }
   }
 
   // ---- explicit inits ---------------------------------------------------

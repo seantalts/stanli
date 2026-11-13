@@ -271,6 +271,8 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
 
   Eigen::VectorXd qd(n);
   std::vector<double> sp;
+  int64_t n_divergent = 0;
+  int64_t n_max_treedepth = 0;
   // One transition, stored or not. Storing is what `keep` decides;
   // observing happens either way, because a progress consumer wants every
   // transition and a thinned run still passes through the ones it drops.
@@ -278,11 +280,10 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
     s = sampler.transition(s, logger);
     logger.flush();
     s.cont_params(qd);
-    // A report covers every post-warmup transition even when thinning drops
-    // the row. Fetch the sampler parameters once when either consumer needs
-    // them; this is observational and does not touch the sampler RNG.
-    const bool inspect =
-        (keep && (stats || cfg.on_stored)) || (!warmup && report);
+    // The problem counts cover every post-warmup transition even when
+    // thinning drops the row. Fetching the sampler parameters is
+    // observational and does not touch the sampler RNG.
+    const bool inspect = (keep && (stats || cfg.on_stored)) || !warmup;
     if (inspect) {
       sp.clear();
       sampler.get_sampler_params(sp);
@@ -304,13 +305,16 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
       }
       ++stored;
     }
-    if (!warmup && report) {
-      if (sp.size() > 3 && sp[3] != 0.0) ++report->n_divergent;
-      if (sp.size() > 1 && (int)sp[1] >= cfg.max_depth)
-        ++report->n_max_treedepth;
+    if (!warmup) {
+      if (sp.size() > 3 && sp[3] != 0.0) ++n_divergent;
+      if (sp.size() > 1 && (int)sp[1] >= cfg.max_depth) ++n_max_treedepth;
+      if (report) {
+        report->n_divergent = n_divergent;
+        report->n_max_treedepth = n_max_treedepth;
+      }
     }
     if (observe) observe(i, warmup, qd.data());
-    if (progress) progress(i, warmup);
+    if (progress) progress(i, warmup, n_divergent, n_max_treedepth);
   };
 
   // Match Stan's timing boundary: initialization and stepsize search are
@@ -444,12 +448,13 @@ std::vector<ChainResult> run_nuts_chains(
     for (size_t c = 0; c < n_chains; ++c) {
       ProgressObserver one_progress;
       if (progress)
-        one_progress = [&, c](int64_t i, bool warmup) {
+        one_progress = [&, c](int64_t i, bool warmup, int64_t ndiv,
+                              int64_t ntd) {
           if (!should_report_progress(cfg, i, warmup, progress_refresh) ||
               progress_error)
             return;
           try {
-            progress((int)c, i, warmup);
+            progress((int)c, i, warmup, ndiv, ntd);
           } catch (...) {
             progress_error = std::current_exception();
           }
@@ -485,12 +490,14 @@ std::vector<ChainResult> run_nuts_chains(
 
   // R's console API is main-thread-only, and a Python callback from a new
   // native thread has avoidable interpreter overhead. Workers therefore
-  // enqueue only the three small fields; this calling thread drains them and
+  // enqueue only these small fields; this calling thread drains them and
   // invokes the public observer while the pool runs.
   struct ProgressEvent {
     int chain;
     int64_t i;
     bool warmup;
+    int64_t n_divergent;
+    int64_t n_max_treedepth;
   };
   std::mutex progress_mutex;
   std::condition_variable progress_ready;
@@ -511,12 +518,13 @@ std::vector<ChainResult> run_nuts_chains(
       for (size_t c = next++; c < n_chains; c = next++) {
         ProgressObserver one_progress;
         if (progress)
-          one_progress = [&, c](int64_t i, bool warmup) {
+          one_progress = [&, c](int64_t i, bool warmup, int64_t ndiv,
+                                int64_t ntd) {
             if (!should_report_progress(cfg, i, warmup, progress_refresh))
               return;
             {
               std::lock_guard<std::mutex> lock(progress_mutex);
-              progress_events.push_back({(int)c, i, warmup});
+              progress_events.push_back({(int)c, i, warmup, ndiv, ntd});
             }
             progress_ready.notify_one();
           };
@@ -555,7 +563,8 @@ std::vector<ChainResult> run_nuts_chains(
       // during unwinding would terminate the process.
       if (!progress_error) {
         try {
-          progress(event.chain, event.i, event.warmup);
+          progress(event.chain, event.i, event.warmup, event.n_divergent,
+                   event.n_max_treedepth);
         } catch (...) {
           progress_error = std::current_exception();
         }

@@ -863,10 +863,11 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
 
     stanli::ChainProgressObserver progress_observer;
     if (progress != nullptr && refresh > 0) {
-      progress_observer = [&](int chain, int64_t i, bool warmup) {
+      progress_observer = [&](int chain, int64_t i, bool warmup, int64_t ndiv,
+                              int64_t ntd) {
         const int64_t completed = warmup ? i + 1 : (int64_t)cfg.warmup + i + 1;
         progress(cfg.chain_id + chain, completed,
-                 (int64_t)cfg.warmup + cfg.samples, warmup ? 1 : 0,
+                 (int64_t)cfg.warmup + cfg.samples, warmup ? 1 : 0, ndiv, ntd,
                  progress_user);
       };
     }

@@ -97,7 +97,7 @@ class _SampleReport(ctypes.Structure):
 
 _SampleProgressCallback = ctypes.CFUNCTYPE(
     None, ctypes.c_int32, ctypes.c_int64, ctypes.c_int64, ctypes.c_int32,
-    ctypes.c_void_p)
+    ctypes.c_int64, ctypes.c_int64, ctypes.c_void_p)
 _SamplePollCallback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
 
 
@@ -751,13 +751,20 @@ def _fmt(v, prec=4):
     return f"{v:.{prec}f}"
 
 
-def _print_sample_progress(chain_id, iteration, total, warmup):
+def _print_sample_progress(chain_id, iteration, total, warmup,
+                           n_divergent=0, n_max_treedepth=0, max_depth=10):
     """One CmdStan-shaped progress line, through Python's live stdout."""
     width = max(1, len(str(total)))
     percent = 100 if total == 0 else 100 * iteration // total
     phase = "Warmup" if warmup else "Sampling"
+    problems = []
+    if n_divergent:
+        problems.append(f"{n_divergent} divergent")
+    if n_max_treedepth:
+        problems.append(f"{n_max_treedepth} at max treedepth ({max_depth})")
+    suffix = "  " + ", ".join(problems) if problems else ""
     print(f"Chain [{chain_id}] Iteration: {iteration:{width}d} / {total} "
-          f"[{percent:3d}%]  ({phase})", flush=True)
+          f"[{percent:3d}%]  ({phase}){suffix}", flush=True)
 
 
 def _sampling_warnings(opts, reports, stats):
@@ -1641,13 +1648,15 @@ class Model:
         # a CFUNCTYPE argtype, even though both represent a null C callback.
         progress_cb = _SampleProgressCallback()
         if refresh:
-            def progress(chain_id, iteration, total, is_warmup, _user):
+            def progress(chain_id, iteration, total, is_warmup, n_divergent,
+                         n_max_treedepth, _user):
                 if callback_errors:
                     return
                 try:
                     _flush_messages()
                     _print_sample_progress(chain_id, iteration, total,
-                                           is_warmup)
+                                           is_warmup, n_divergent,
+                                           n_max_treedepth, opts.max_depth)
                 except BaseException as exc:  # ctypes cannot propagate it
                     callback_errors.append(exc)
 

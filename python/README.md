@@ -73,7 +73,14 @@ Chain [1] Elapsed Time: 0.821 seconds (Warm-up)
 `refresh=0` silences it; another positive integer changes the interval.
 Output goes through `sys.stdout`, so notebooks and
 `contextlib.redirect_stdout()` work. Progress never changes draws or RNG
-streams. If any post-warmup transition diverges or hits the maximum treedepth,
+streams. Sampling lines also show the chain's post-warmup divergences and
+maximum-treedepth hits so far, once there are any:
+
+```text
+Chain [1] Iteration: 1100 / 2000 [ 55%]  (Sampling)  3 divergent, 12 at max treedepth (10)
+```
+
+If any post-warmup transition diverges or hits the maximum treedepth,
 or a chain's E-BFMI is below 0.3, the final output says so in CmdStan's words.
 A proposal rejected because the model threw is reported with its chain, as in
 CmdStan. Ctrl-C stops every chain after its current

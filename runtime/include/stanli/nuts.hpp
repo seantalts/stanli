@@ -129,7 +129,10 @@ using DrawObserver =
 // does not expose the position, so multi-chain execution can queue the small
 // event and dispatch it on the calling thread. `i` is zero-based within the
 // current phase and the callback runs after that transition completes.
-using ProgressObserver = std::function<void(int64_t i, bool warmup)>;
+// `n_divergent` and `n_max_treedepth` count the post-warmup transitions so
+// far, as SamplingReport does at the end; both are zero during warmup.
+using ProgressObserver = std::function<void(
+    int64_t i, bool warmup, int64_t n_divergent, int64_t n_max_treedepth)>;
 
 // Throws std::invalid_argument when cfg's metric, inv_metric and step_size
 // are unusable for an n-parameter model. run_nuts calls this first.
@@ -160,7 +163,8 @@ struct ChainResult {
 // Called on the thread that invoked run_nuts_chains, never on a sampler
 // worker. `chain` is the zero-based index into the supplied executor list.
 using ChainProgressObserver =
-    std::function<void(int chain, int64_t i, bool warmup)>;
+    std::function<void(int chain, int64_t i, bool warmup, int64_t n_divergent,
+                       int64_t n_max_treedepth)>;
 
 // Called on the chain's OWN thread as each draw is stored, for every chain.
 using StoredDrawWriter =
