@@ -60,7 +60,7 @@ static const char* dl_error(void) {
  * runtime reports its own through stanli_abi_version(), and
  * stanli_bridge_load() refuses to bind when the two disagree -- see
  * there for why a mismatch cannot be allowed to proceed. */
-#define STANLI_R_ABI_VERSION 3
+#define STANLI_R_ABI_VERSION 4
 
 /* Mirrors stanli_sample_opts in runtime/include/stanli/capi.h. Field
  * order and types must match exactly; R never sees this struct, but a
@@ -100,7 +100,7 @@ typedef struct {
 } stanli_metric_opts;
 
 typedef void (*stanli_sample_progress_cb)(int32_t, int64_t, int64_t, int32_t,
-                                          void*);
+                                          int64_t, int64_t, void*);
 typedef void (*stanli_path_cb)(int32_t, double, void*);
 typedef int (*stanli_sample_poll_cb)(void*);
 
@@ -681,13 +681,19 @@ static void fill_sample_opts(stanli_sample_opts* o, SEXP l) {
  * console API is not thread-safe, so keep this callback deliberately tiny and
  * never call user R code from it. */
 static void sample_progress(int32_t chain_id, int64_t iteration, int64_t total,
-                            int32_t warmup, void* user) {
-  (void)user;
+                            int32_t warmup, int64_t n_divergent,
+                            int64_t n_max_treedepth, void* user) {
+  const int max_depth = *(const int*)user;
   flush_messages();
   const int pct = total > 0 ? (int)(100 * iteration / total) : 100;
-  Rprintf("Chain [%d] Iteration: %4lld / %lld [%3d%%]  (%s)\n", chain_id,
+  Rprintf("Chain [%d] Iteration: %4lld / %lld [%3d%%]  (%s)", chain_id,
           (long long)iteration, (long long)total, pct,
           warmup ? "Warmup" : "Sampling");
+  if (n_divergent > 0) Rprintf("  %lld divergent", (long long)n_divergent);
+  if (n_max_treedepth > 0)
+    Rprintf("%s%lld at max treedepth (%d)", n_divergent > 0 ? ", " : "  ",
+            (long long)n_max_treedepth, max_depth);
+  Rprintf("\n");
   R_FlushConsole();
 }
 
@@ -822,8 +828,8 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   int interrupted = 0;
   const int failed = p_sample_multi_metric(
       mm, &o, &mo, refresh_rate, REAL(raw), REAL(stats), REAL(vals),
-      refresh_rate > 0 ? sample_progress : NULL, NULL, sample_poll, NULL,
-      &interrupted, reports, err, sizeof err);
+      refresh_rate > 0 ? sample_progress : NULL, &o.max_depth, sample_poll,
+      NULL, &interrupted, reports, err, sizeof err);
   flush_messages();
   if (failed) {
     UNPROTECT(5);

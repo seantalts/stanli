@@ -491,6 +491,59 @@ def test_sample_progress_output_and_refresh_zero():
     assert quiet.getvalue() == ""
 
 
+def _progress_lines(text):
+    return [line for line in text.splitlines() if "Iteration:" in line]
+
+
+def test_sample_progress_shows_running_problem_counts():
+    exact = io.StringIO()
+    with contextlib.redirect_stdout(exact):
+        stanli._print_sample_progress(1, 1100, 2000, False, 3, 0, 10)
+        stanli._print_sample_progress(2, 1200, 2000, False, 0, 12, 10)
+        stanli._print_sample_progress(3, 1300, 2000, False, 3, 12, 10)
+        stanli._print_sample_progress(4, 1400, 2000, False, 0, 0, 10)
+    assert exact.getvalue().splitlines() == [
+        "Chain [1] Iteration: 1100 / 2000 [ 55%]  (Sampling)  3 divergent",
+        "Chain [2] Iteration: 1200 / 2000 [ 60%]  (Sampling)  "
+        "12 at max treedepth (10)",
+        "Chain [3] Iteration: 1300 / 2000 [ 65%]  (Sampling)  "
+        "3 divergent, 12 at max treedepth (10)",
+        "Chain [4] Iteration: 1400 / 2000 [ 70%]  (Sampling)",
+    ]
+
+    # A fixed step size of 5 is unstable for a standard normal, so the
+    # chains diverge in warmup and sampling alike.
+    kwargs = dict(chains=2, warmup=20, samples=40, seed=552,
+                  adapt_engaged=False, step_size=5.0)
+    shown = io.StringIO()
+    with contextlib.redirect_stdout(shown):
+        fit = _normal().sample(refresh=1, **kwargs)
+    quiet = io.StringIO()
+    with contextlib.redirect_stdout(quiet):
+        quiet_fit = _normal().sample(refresh=0, **kwargs)
+    assert quiet.getvalue() == ""
+    assert np.array_equal(fit.draws(), quiet_fit.draws())
+    assert np.array_equal(fit.sampler_stats, quiet_fit.sampler_stats)
+    lines = _progress_lines(shown.getvalue())
+    assert all(line.endswith("(Warmup)") for line in lines
+               if "(Warmup)" in line), lines
+    for c, wanted in enumerate(fit.divergences, start=1):
+        assert wanted > 0
+        last = [line for line in lines
+                if line.startswith(f"Chain [{c}]") and "(Sampling)" in line][-1]
+        assert last.endswith(f"(Sampling)  {wanted} divergent"), last
+
+    shown = io.StringIO()
+    with contextlib.redirect_stdout(shown):
+        fit = _normal().sample(chains=1, warmup=30, samples=40, seed=553,
+                               max_depth=1, refresh=1)
+    lines = _progress_lines(shown.getvalue())
+    hits = fit.max_treedepth_hits[0]
+    assert hits > 0
+    assert lines[-1].endswith(f"(Sampling)  {hits} at max treedepth (1)"), \
+        lines[-1]
+
+
 def test_sample_progress_callback_runs_on_the_calling_thread():
     owner = threading.get_ident()
 

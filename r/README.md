@@ -66,8 +66,14 @@ Chains run in parallel by default. Each chain owns its executor and RNG
 stream, so a parallel run is byte-identical to a sequential one. Sampling
 prints per-chain progress, elapsed times, notices for rejected proposals, and
 any divergence, maximum-treedepth or low E-BFMI warnings; `refresh = 0`
-silences it. Exact per-chain times
-and problem counts are in `fit$report`. Ctrl-C (or RStudio's stop button)
+silences it. Sampling lines show the chain's post-warmup divergences and
+maximum-treedepth hits so far, once there are any:
+
+```text
+Chain [1] Iteration: 1100 / 2000 [ 55%]  (Sampling)  3 divergent, 12 at max treedepth (10)
+```
+
+Exact per-chain times and problem counts are in `fit$report`. Ctrl-C (or RStudio's stop button)
 stops every chain after its current transition.
 
 `summary()` uses Stan's own estimators (rank-normalized split R-hat, bulk and
