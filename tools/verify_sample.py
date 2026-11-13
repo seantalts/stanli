@@ -62,7 +62,6 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 PINNED = {"cmdstan": REPO / "deps" / "cmdstan",
           "stan": REPO / "deps" / "stan",
           "math": REPO / "deps" / "math",
-          "stanc3": REPO / "deps" / "stanc3-src",
           "posteriordb": REPO / "deps" / "posteriordb"}
 WRITE_LOCK = threading.Lock()
 
@@ -86,7 +85,8 @@ def provenance(cs, cxx="clang++"):
     p.update(cmdstan=head_sha(cs), stan=head_sha(cs / "stan"),
              math=head_sha(cs / "stan/lib/stan_math"))
     p["cmdstan_version"] = cmdstan_version(cs)
-    p["stanc_sha256"] = hashlib.sha256((REPO / "deps/stanc3/stanc").read_bytes()).hexdigest()
+    p["stanc3"] = pathlib.Path(f"{toolchain.PINNED_STANC}.src").read_text().strip()
+    p["stanc_sha256"] = hashlib.sha256(toolchain.PINNED_STANC.read_bytes()).hexdigest()
     p["compiler"] = subprocess.run([cxx, "--version"], capture_output=True,
                                     text=True, check=True).stdout.splitlines()[0]
     version = p["compiler"].lower()
@@ -188,7 +188,7 @@ def build_ref(cs, work, model, stan, cxx="clang++"):
     if exe.exists():
         return exe, None
     hpp = work / f"{model}.hpp"
-    stanc = subprocess.run([str(REPO / "deps/stanc3/stanc"), str(stan),
+    stanc = subprocess.run([str(toolchain.PINNED_STANC), str(stan),
                             f"--o={hpp}"], capture_output=True, text=True)
     if stanc.returncode != 0:
         return None, f"stanc: {stanc.stderr.strip().splitlines()[-1][:120]}"
@@ -368,7 +368,7 @@ def one(model, cs, pdb, work, cases, check_bin, cxx="clang++"):
         # A recording must never turn its failure into missing coverage.
         if set(entry["points"]) != {str(p) for p in POINTS}:
             raise ValueError(f"Incomplete reference points: {model}")
-        info = subprocess.run([str(REPO / "deps/stanc3/stanc"), "--info", str(stan)],
+        info = subprocess.run([str(toolchain.PINNED_STANC), "--info", str(stan)],
                               capture_output=True, text=True, check=True)
         parameters = json.loads(info.stdout)["parameters"]
         entry["parameter_names"] = [name for name in entry["points"]["0"]["wa"]["names"].split(",")
@@ -466,7 +466,7 @@ def main():
 
     cs = args.cmdstan
     try:
-        toolchain.require_pinned_toolchain(cs.resolve(), REPO / "deps/stanc3/stanc")
+        toolchain.require_pinned_toolchain(cs.resolve(), toolchain.PINNED_STANC)
     except ValueError as exc:
         ap.error(str(exc))
     work = args.work or pathlib.Path(

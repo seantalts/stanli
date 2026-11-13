@@ -201,6 +201,18 @@ bool Lowering::scan_block(const mir::Stmt& s,
     }
     td.env().erase(name);
   };
+  // An integer a runtime while writes is known only when the loop runs, so a
+  // later `if (flag) break` must not read the value it held before the loop.
+  const std::function<bool(const mir::Stmt&)> runtime_while =
+      [&](const mir::Stmt& st) {
+        if (st.kind == mir::Stmt::While && while_unroll_depth == 0 &&
+            !while_sizes_from_loop_state(st) &&
+            !static_int_bookkeeping(st.body))
+          return true;
+        for (const auto& c : st.body)
+          if (runtime_while(c)) return true;
+        return false;
+      };
   bool found = false;
   for (const auto& child : s.body) {
     if (stop(child)) {
@@ -242,11 +254,14 @@ bool Lowering::scan_block(const mir::Stmt& s,
     } else if (child.kind == mir::Stmt::Assignment &&
                local_containers.count(child.lhs)) {
       mirror_value(child, child.lhs);
-    } else if (!local_containers.empty()) {
+    } else if (const bool runtime = runtime_while(child);
+               runtime || !local_containers.empty()) {
       std::vector<std::string> writes;
       assigned_names(child, &writes);
-      for (const auto& name : writes)
+      for (const auto& name : writes) {
+        if (runtime) int_env.erase(name);
         if (local_containers.count(name)) td.env().erase(name);
+      }
     }
   }
   return found;

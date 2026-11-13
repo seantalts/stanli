@@ -40,9 +40,15 @@ stanc_embed_dir() { echo "$PWD/deps/stanc3/embed/testkey"; }
         self.script("deps/fetch.sh", "true\n")
         self.script("harnesses/conformance/build_stanc.sh", """
 mkdir -p deps/stanc3
-printf '#!/usr/bin/env bash\necho test-stanc\n' > deps/stanc3/stanc-pinned
-chmod +x deps/stanc3/stanc-pinned
-sed -n 's/^STANC3_SRC_SHA=//p' deps/pins.env > deps/stanc3/stanc-pinned.src
+if [ "${1:-}" = --stanli ]; then
+  out=deps/stanc3/stanc record=deps/stanc3/stanc.src pin=STANC3_SRC_SHA
+else
+  out=deps/stanc3/stanc-pinned record=deps/stanc3/stanc-pinned.src
+  pin=STANC3_UPSTREAM_SHA
+fi
+printf '#!/usr/bin/env bash\necho test-stanc\n' > "$out"
+chmod +x "$out"
+sed -n "s/^$pin=//p" deps/pins.env > "$record"
 """)
         self.script("tools/stanc_embed/build.sh", """
 mkdir -p deps/stanc3/embed/testkey
@@ -53,6 +59,7 @@ echo build >> embed-builds.log
 """)
         self.script("tools/stanc_embed/install_overlay.sh", "true\n")
         self.script("harnesses/conformance/fetch_cmdstan.sh",
+                    "harnesses/conformance/build_stanc.sh\n"
                     "echo \"fetch_cmdstan <$*>\" >> \"$SETUP_TEST_LOG\"\n")
         self.script(".venv-conformance/bin/python", "echo Python-3-test\n")
         (self.root / "deps/stanc3-src").mkdir()

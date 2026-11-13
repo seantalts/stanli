@@ -371,7 +371,7 @@ jobs:
           rm -f deps/stanc3/stanc deps/stanc3/stanc.src
           # Remove old untracked overlay sources (including deleted modules),
           # retaining Dune's dependency-checked build state. The builder resets
-          # tracked sources to the exact upstream pin before applying this overlay.
+          # tracked sources to the exact pin before applying this overlay.
           if [ -d deps/stanc3-src/.git ]; then
             git -C deps/stanc3-src clean -ffd -e _build
           fi
@@ -1112,8 +1112,8 @@ jobs:
           path: r-first-posterior.csv
 
   # The Windows wheel cannot embed the native compiler yet. Cross-build both
-  # the pristine stock rollback executable and stanli's portable-MIR executable
-  # from the same source revision the other wheels embed, using stanc3's own
+  # the stock rollback executable and stanli's portable-MIR executable from
+  # the same stanc3 fork revision the other wheels embed, using stanc3's own
   # Linux-to-Windows recipe. Their provenance is checked before packaging.
   stanc-windows:
     name: cross-build Windows compilers
@@ -1123,8 +1123,6 @@ jobs:
       needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    env:
-      WINDOWS_DUNE_VERSION: 3.24.2
     steps:
       - uses: actions/checkout@v4
 
@@ -1141,7 +1139,7 @@ jobs:
         with:
           path: windows-compilers/
           key: >-
-            windows-compilers-v1-${{ env.STANC3_SRC_REPO }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.WINDOWS_DUNE_VERSION }}-${{ hashFiles('.gitattributes', 'compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
+            windows-compilers-v1-${{ env.STANC3_SRC_REPO }}-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.DUNE_VERSION }}-${{ hashFiles('.gitattributes', 'compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
 
       - name: Cross-compiler
         if: steps.windows-compilers-cache.outputs.cache-hit != 'true'
@@ -1161,9 +1159,9 @@ jobs:
             windows: http://github.com/ocaml-cross/opam-cross-windows.git
             default: https://github.com/ocaml/opam-repository.git
 
-      - name: Dune ${{ env.WINDOWS_DUNE_VERSION }}
+      - name: Dune ${{ env.DUNE_VERSION }}
         if: steps.windows-compilers-cache.outputs.cache-hit != 'true'
-        run: opam install -y "dune.$WINDOWS_DUNE_VERSION"
+        run: opam pin add -y dune "$DUNE_VERSION"
 
       - name: Build the pinned compilers
         if: steps.windows-compilers-cache.outputs.cache-hit != 'true'
@@ -1178,9 +1176,6 @@ jobs:
            opam exec -- dune build -x windows --profile release \
              src/stanc/stanc.exe)
           mkdir -p windows-compilers
-          # Copy stock stanc before installing the stanli overlay. The overlay
-          # corrects host-width-dependent int32 folding, so rebuilding stock
-          # after it would silently destroy the pristine rollback artifact.
           cp deps/stanc3-src/_build/default.windows/src/stanc/stanc.exe \
              windows-compilers/stanc
           printf '%s\n' "$STANC3_SRC_SHA" > windows-compilers/stanc.src
@@ -1212,7 +1207,7 @@ jobs:
             "$STANC3_SRC_REPO" "$STANC3_SRC_SHA"
           test "$(_stanc_embed_stamp_value \
             windows-compilers/stanli-compile.stamp dune_version)" = \
-            "$WINDOWS_DUNE_VERSION"
+            "$DUNE_VERSION"
           compiler_types=$(file \
             windows-compilers/stanc windows-compilers/stanli-compile)
           printf '%s\n' "$compiler_types"
@@ -1284,7 +1279,13 @@ jobs:
           ./windows-compilers/stanc.exe --O1 --debug-optimized-mir \
             windows-compilers/stock-overflow.stan \
             > windows-compilers/stock-overflow.mir
-          grep -Fq '2500000000' windows-compilers/stock-overflow.mir
+          # The fork folds with int32 arithmetic, so the overflowing product
+          # stays unfolded rather than becoming 2500000000.
+          grep -Fq 'Times__' windows-compilers/stock-overflow.mir
+          if grep -Fq '2500000000' windows-compilers/stock-overflow.mir; then
+            echo "stock stanc folded past int32" >&2
+            exit 1
+          fi
           rm -f windows-compilers/stock-overflow.stan \
             windows-compilers/stock-overflow.hpp \
             windows-compilers/stock-overflow.mir
@@ -1939,7 +1940,7 @@ jobs:
             deps/stanc3/stanli_compiler_cli
             deps/stanc3/stanli_compiler_cli.stamp
           key: >-
-            browser-compilers-v2-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-jsoo6.4.1-${{ hashFiles('compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
+            browser-compilers-v2-${{ env.STANC3_SRC_SHA }}-ocaml${{ env.OCAML_VERSION }}-dune${{ env.DUNE_VERSION }}-jsoo6.4.1-${{ hashFiles('compiler/ocaml/**', 'compiler/js/**', 'tools/stanc_embed/**') }}
 
       - name: opam ${{ env.OPAM_VERSION }}
         if: steps.stancjs-cache.outputs.cache-hit != 'true'
@@ -1961,6 +1962,7 @@ jobs:
           git -C deps/stanc3-src checkout -q --detach "$STANC3_SRC_SHA"
           test "$(git -C deps/stanc3-src rev-parse HEAD)" = "$STANC3_SRC_SHA"
           (cd deps/stanc3-src &&
+           opam pin add --switch=stancjs -y -n dune "$DUNE_VERSION" &&
            opam install . --switch=stancjs --deps-only -y &&
            opam install --switch=stancjs -y \
              js_of_ocaml.6.4.1 js_of_ocaml-compiler.6.4.1 \
