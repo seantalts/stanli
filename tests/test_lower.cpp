@@ -1403,6 +1403,50 @@ static void test_udf_lp_branch_propto() {
   }
 }
 
+// Kernels whose constant terms depend on the caller's propto and the
+// actual argument types, inside a parameter-dependent branch. reduce_sum with
+// an `_lpdf` partial is normalized and with `_lupdf` drops the data scale's
+// log; a wiener density with only data arguments adds nothing under propto,
+// and with the parameter-dependent outcome it keeps every term.
+static void test_udf_branch_kernels() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_branch_kernels.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_branch_kernels.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf branch kernels compile: ") + error.what());
+    return;
+  }
+  const double s = data.at("s").r[0];
+  for (const std::vector<double>& q :
+       {std::vector<double>{0.1, 0.0, -0.1}, {-0.4, 0.3, 0.2}}) {
+    std::vector<stan::math::var> p(q.begin(), q.end());
+    const std::vector<stan::math::var> y{p[1], p[2]};
+    stan::math::var lp = stan::math::normal_lpdf<true>(p[0], 0, 1);
+    if (q[0] > 0) {
+      lp += stan::math::normal_lpdf(y, p[0], s);
+      lp += stan::math::normal_lpdf<true>(y, p[0], s);
+      lp += stan::math::wiener_lpdf<true>(1.0, 2.0, 0.3, 0.5, 0.2);
+      lp += stan::math::wiener_lpdf<true>(1 + stan::math::exp(p[0]), 2.0, 0.3,
+                                          0.5, 0.2);
+    }
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    std::copy(q.begin(), q.end(), ex.params_data());
+    double grad[3] = {};
+    const std::string at = q[0] > 0 ? " (branch taken)" : "";
+    expect_ulp("udf branch kernels lp" + at, ex.gradient(grad), lp.val(), 10);
+    for (int i = 0; i < 3; ++i)
+      expect_ulp("udf branch kernels grad " + std::to_string(i) + at, grad[i],
+                 p[i].adj(), 10);
+    stan::math::recover_memory();
+  }
+}
+
 // Void functions called as statements, as stanc leaves them when it does not
 // inline. An `_lp` function adds to the caller's target and inherits the
 // caller's propto, so the `~` inside prior_lp drops its constant terms while
@@ -8942,6 +8986,7 @@ int main() {
   test_udf_lp_propto();
   test_udf_lp_inlined_propto();
   test_udf_lp_branch_propto();
+  test_udf_branch_kernels();
   test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();

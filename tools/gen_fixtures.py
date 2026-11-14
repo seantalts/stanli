@@ -38,6 +38,7 @@ O0_FIXTURES = {
     "structured_sequence_local",
     "structured_zero_matrix_udf",
     "trunc_param",
+    "udf_branch_kernels",
     "udf_conditional_return",
     "udf_constant_branch",
     "udf_guard_returns",

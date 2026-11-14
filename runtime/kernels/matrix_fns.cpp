@@ -1966,6 +1966,10 @@ void wiener_fwd(KernelCtx& ctx) {
   ctx.out.data[0] = values_only() ? wiener_run(ctx, 0, WienerPass::Value)
                                   : wiener_run(ctx, wiener_activity(ctx),
                                                WienerPass::Partials);
+  // Stan Math's propto density of constants is zero. Evaluate it anyway so
+  // invalid arguments still reject.
+  if ((ctx.variant & 0x80u) && (ctx.variant & 0x1fu) == 0)
+    ctx.out.data[0] = 0.0;
 }
 void wiener_bwd(KernelCtx& ctx) {
   unsigned active = wiener_activity(ctx);
