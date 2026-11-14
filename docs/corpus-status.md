@@ -1,11 +1,11 @@
 # Corpus status
 
-Evaluating: 363/364
-CmdStan reference coverage: 363/364 models, 1089 evaluation points.
+Evaluating: 366/367
+CmdStan reference coverage: 366/367 models, 1098 evaluation points.
 
 The shared corpus includes posteriordb, generated brms and cogmod models, ctsem's state-space template, models from CRAN packages, imported teaching models, and language fixtures. Collection labels retain their source provenance; all references use the same replay in `tools/verify_refs.py`.
 
-Recording-time primary-point comparison metrics retained for 348 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
+Recording-time primary-point comparison metrics retained for 351 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
 
 A model counts as passing only when tools/verify_sample.py matches CmdStan's log_prob and full gradient at the shared deterministic point. Accuracy below is the worst deviation over lp and every gradient component: relative, and in ULPs (0 = bitwise identical to CmdStan). Bitwise counts are reported for information; the replay uses a 1e-9 scaled-error gate with documented ill-conditioned exceptions. Models that evaluate but are not verified are listed separately and are not counted.
 
@@ -144,6 +144,8 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `dogs_nonhierarchical` | posteriordb | 66 | 6.9e-16 | 4 |
 | `dugongs_model` | posteriordb | 5 | 1.9e-16 | 1 |
 | `earn_height` | posteriordb | 4 | 0 (bitwise) | 0 |
+| `ecoensemble_hierarchical_withdrivers` | ecoensemble | 64 | 2.0e-14 | 304 |
+| `ecoensemble_hierarchical_withdrivers_conj` | ecoensemble | 64 | 2.0e-14 | 416 |
 | `eight_schools_centered` | posteriordb | 11 | 0 (bitwise) | 0 |
 | `eight_schools_noncentered` | posteriordb | 11 | 0 (bitwise) | 0 |
 | `election88_full` | posteriordb | 91 | 9.9e-15 | 82 |
@@ -208,6 +210,7 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `lsat_model` | posteriordb | 1007 | 2.7e-15 | 96 |
 | `mesquite` | posteriordb | 9 | 0 (bitwise) | 0 |
 | `mlumr_survival_mspline_relaxed` | mlumr | 33 | 6.1e-16 | 22 |
+| `mlumr_survival_relaxed` | mlumr | 13 | 1.6e-16 | 1 |
 | `multi_occupancy` | posteriordb | 107 | 4.8e-15 | 36 |
 | `multinma_ndmm_mspline` | multinma | 63 | 4.4e-16 | 16 |
 | `multinma_smoking_re` | multinma | 60 | 4.8e-16 | 4 |
@@ -517,6 +520,8 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `dogs_nonhierarchical` | 946 |
 | `dugongs_model` | 6 |
 | `earn_height` | 3 |
+| `ecoensemble_hierarchical_withdrivers` | 612 |
+| `ecoensemble_hierarchical_withdrivers_conj` | 612 |
 | `eight_schools_centered` | 10 |
 | `eight_schools_noncentered` | 18 |
 | `election88_full` | 11656 |
@@ -581,6 +586,7 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `lsat_model` | 1012 |
 | `mesquite` | 8 |
 | `mlumr_survival_mspline_relaxed` | 1052 |
+| `mlumr_survival_relaxed` | 925 |
 | `multi_occupancy` | 312 |
 | `multinma_ndmm_mspline` | 956 |
 | `multinma_smoking_re` | 375 |

@@ -31,6 +31,7 @@ replaced by the text of the file it names. Nothing else is changed.
 
 | Entry | Model | Reaches | Parameters |
 | --- | --- | --- | --- |
+| `mlumr_survival_relaxed` | `mlumr_survival_relaxed.stan` | Weibull baseline (`dist = 2`) through the 9-way distribution dispatch | 12 |
 | `mlumr_survival_mspline_relaxed` | `mlumr_survival_mspline_relaxed.stan` | cubic M-spline baseline with 11 spline coefficients per study, softmax simplex and random-walk smoothing prior | 32 |
 
 The data is the survival vignette's comparison of lenalidomide
@@ -43,11 +44,10 @@ likelihoods. The relaxed variant is used because the shared-coefficient
 (`_spfa`) variant differs only in the coefficient vector and reaches the same
 functions.
 
-The script also writes a second entry, `mlumr_survival_relaxed` (the Weibull
-baseline, `dist = 2`, through the 9-way distribution dispatch, with the same
-data). It is added to the corpus later: stanc3's `--O1` pass takes minutes on
-it. Until then its two files are not checked in; delete them after a
-regeneration.
+Both entries use the same data. Inlining the dispatch function at every call
+site makes `mlumr_survival_relaxed` large: stanc3's `--O1` pass takes about
+26 s on it, and stanli's compiler skips `--O1` for it by its structural budget
+and compiles the transformed MIR instead.
 
 The rows go through the package's own `set_ipd()`, `set_agd_surv()`,
 `combine_data()`, `add_integration()` (with a fixed seed) and `mlumr()`.

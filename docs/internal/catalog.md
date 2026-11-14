@@ -69,6 +69,7 @@ paths and hashes in raw records unchanged.
 | [Model from rbioacc](../../tests/rbioacc/README.md) | Fixture scope, provenance or test workflow. |
 | [Model from BeeGUTS](../../tests/beeguts/README.md) | Fixture scope, provenance or test workflow. |
 | [Models from hdbayes](../../tests/hdbayes/README.md) | Fixture scope, provenance or test workflow. |
+| [Model from EcoEnsemble](../../tests/ecoensemble/README.md) | Fixture scope, provenance or test workflow. |
 | [Compiler producer fixtures](../../tests/compiler/README.md) | Fixture scope, provenance or test workflow. |
 | [Stan teaching-model corpus for Stanli](../../tests/educational/IMPORT_README.md) | Fixture scope, provenance or test workflow. |
 | [Models from Aalto Stan lessons](../../tests/educational/README.md) | Fixture scope, provenance or test workflow. |

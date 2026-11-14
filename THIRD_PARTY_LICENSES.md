@@ -94,3 +94,6 @@ as test inputs. Each directory's `licenses/` holds the license text.
   rstantools GPL-3 boilerplate.
 - `tests/beeguts/`: BeeGUTS 1.5.0, GPL-3, copyright Bayer AG and ibacon GmbH.
 - `tests/hdbayes/`: hdbayes 0.2.0, MIT, Copyright (c) 2024 hdbayes authors.
+- `tests/ecoensemble/`: EcoEnsemble 1.2.0, GPL (>= 3), by Michael A. Spence,
+  James A. Martindale, Michael J. Thomson, Thomas I. J. Bartos and Luke E. K.
+  Broadbent. The model has no `#include` and is copied as published.

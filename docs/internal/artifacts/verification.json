@@ -839,6 +839,20 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "ecoensemble_hierarchical_withdrivers": {
+  "max_rel": 1.9539925233402755e-14,
+  "max_ulp": 304,
+  "n_values": 64,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ecoensemble_hierarchical_withdrivers_conj": {
+  "max_rel": 1.9539925233402755e-14,
+  "max_ulp": 416,
+  "n_values": 64,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "eight_schools_centered": {
   "max_rel": 0.0,
   "max_ulp": 0,
@@ -1291,6 +1305,13 @@
   "max_rel": 6.106226635438361e-16,
   "max_ulp": 22,
   "n_values": 33,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "mlumr_survival_relaxed": {
+  "max_rel": 1.6442036761246e-16,
+  "max_ulp": 1,
+  "n_values": 13,
   "point": 0,
   "status": "VERIFIED"
  },

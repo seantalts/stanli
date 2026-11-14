@@ -78,6 +78,7 @@ tests/mlumr/*.hpp
 tests/rbioacc/*.hpp
 tests/beeguts/*.hpp
 tests/hdbayes/*.hpp
+tests/ecoensemble/*.hpp
 
 # Compiler output beside generated teaching fixtures.
 tests/rethinking/*.hpp
