@@ -108,6 +108,16 @@ supplied one is kept. With `warmup = 0` and adaptation on, Stan still runs its
 initial step size search, so use `adapt_engaged = FALSE` to sample at exactly
 `step_size`.
 
+`sample_more(fit, samples = 1000)` runs more transitions of each chain from
+where it stopped, with its own step size, metric and random stream and no new
+warmup, and returns a new fit with the draws appended. The result is the same,
+bit for bit, as asking for all the samples in the first call:
+
+```r
+fit <- sample_model(m, seed = 1, samples = 1000)
+fit <- sample_more(fit, samples = 1000)   # 2000 per chain
+```
+
 ### Within-chain parallelism
 
 `threads_per_chain = 4` in `sample_model()`, `sample_cstan()` or

@@ -13,6 +13,7 @@
 #include <stanli/diagnose.hpp>
 #include <stanli/nuts.hpp>
 #include <stanli/threading.hpp>
+#include <stanli/wa_interp.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -592,6 +593,32 @@ int main() {
     expect("clean run reports no problems",
            format_diagnostics(fd).find("No problems detected") !=
                std::string::npos);
+  }
+
+  // ---- the chain RNG survives a save and restore at every phase ---------
+  // boost's mixmax reader refuses the state just before the generator
+  // refills its buffer, one draw in N; every phase must restore anyway.
+  {
+    bool all_restored = true;
+    for (int drawn = 0; drawn < 60; ++drawn) {
+      WaRng a(17, 3);
+      for (int i = 0; i < drawn; ++i) a.gen()();
+      const RngState saved = save_rng_state(a);
+      WaRng b(1, 1);
+      restore_rng_state(b, saved);
+      for (int i = 0; i < 50; ++i)
+        if (a.gen()() != b.gen()()) all_restored = false;
+    }
+    expect("a restored chain RNG continues the stream at every phase",
+           all_restored);
+    bool refused = false;
+    try {
+      WaRng c(1, 1);
+      restore_rng_state(c, RngState(rng_state_words(), 0));
+    } catch (const std::invalid_argument&) {
+      refused = true;
+    }
+    expect("an inconsistent RNG state is refused", refused);
   }
 
   if (failures == 0) std::printf("test_multichain: all checks passed\n");

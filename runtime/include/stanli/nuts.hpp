@@ -19,6 +19,25 @@ using SamplerRow = std::array<double, 7>;
 
 enum class Metric { Unit, Diag, Dense };
 
+// The chain generator's state (stan::rng_t, mixmax): its counter, its checksum
+// and its rng_state_words() - 2 state words, in the order its stream operator
+// writes them.
+using RngState = std::vector<uint64_t>;
+size_t rng_state_words();
+RngState save_rng_state(WaRng& rng);
+// Throws std::invalid_argument when the state is not one the generator can
+// hold.
+void restore_rng_state(WaRng& rng, const RngState& state);
+
+// Where a chain stands after a run: everything a later run needs to continue
+// it as if it had never stopped, apart from the inverse metric, which travels
+// separately. Momentum is resampled at every transition, so it is not state.
+struct ChainState {
+  std::vector<double> q;  // the position after the last transition
+  RngState rng;           // after that transition's generated quantities
+  double step_size = 0;   // the nominal step size in use
+};
+
 struct NutsConfig {
   uint32_t seed = 0;
   // CmdStan's chain id, which is what makes chain c of a run a different
@@ -67,6 +86,14 @@ struct NutsConfig {
   // (CompiledModel::transform_inits), rather than teaching every sampler
   // entry point a second kind of start.
   const double* init = nullptr;
+  // Continue a chain instead of starting one: start exactly at resume->q,
+  // with resume->rng as the generator state and resume->step_size as the step
+  // size, skipping initialization. Requires warmup == 0 and adapt == false.
+  const ChainState* resume = nullptr;
+  // Post-warmup transitions done before this run. Thinning keeps transition
+  // i when (sample_offset + i) % thin == 0, and progress refreshes count from
+  // it, so a continued run keeps the schedule of one long run.
+  int64_t sample_offset = 0;
   // Cooperative interruption. A chain reads `stop` before every transition
   // and returns the draws it has once it is set. `poll`, when present, is
   // asked on the chain's own thread about every 100 ms; a true answer sets
@@ -117,6 +144,10 @@ struct SamplingReport {
   // is n values for Diag, n*n for Dense (column-major), empty for Unit.
   double step_size = 0;
   std::vector<double> inv_metric;
+  // Post-warmup transitions this run completed, and the chain's state after
+  // the last of them.
+  int64_t sample_transitions = 0;
+  ChainState end;
 };
 
 // Optional per-transition observer for streaming consumers (the browser
@@ -194,13 +225,14 @@ bool should_report_progress(const NutsConfig& cfg, int64_t i, bool warmup,
 // chain and runs under the same threading as the draw-from-radius case.
 // `inv_metrics`, when non-null, is the same for the starting inverse metric:
 // chain-major, n_params values per chain for Diag or n_params^2 for Dense,
-// replacing cfg.inv_metric.
+// replacing cfg.inv_metric. `resumes`, when non-null, holds one ChainState per
+// chain and replaces cfg.resume.
 std::vector<ChainResult> run_nuts_chains(
     const std::vector<Executor*>& execs, const NutsConfig& cfg,
     int n_threads = 1, const ChainProgressObserver& progress = {},
     int progress_refresh = 1, const std::function<bool()>& poll = {},
     const StoredDrawWriter& write = {}, const double* inits = nullptr,
-    const double* inv_metrics = nullptr);
+    const double* inv_metrics = nullptr, const ChainState* resumes = nullptr);
 
 // Build `n` executors over the same compiled graph, copying it out of an
 // already-bound one. The caller keeps ownership; `src` is not modified.

@@ -48,7 +48,10 @@ class _SampleOpts(ctypes.Structure):
                 ("warmup", ctypes.c_int), ("samples", ctypes.c_int), ("thin", ctypes.c_int),
                 ("delta", ctypes.c_double), ("max_depth", ctypes.c_int), ("save_warmup", ctypes.c_int),
                 ("init_radius", ctypes.c_double), ("inits", ctypes.POINTER(ctypes.c_double)),
-                ("num_threads", ctypes.c_int)]
+                ("num_threads", ctypes.c_int),
+                ("resume_in", ctypes.POINTER(ctypes.c_void_p)),
+                ("resume_in_len", ctypes.POINTER(ctypes.c_size_t)),
+                ("resume_out", ctypes.c_void_p)]
 
 
 class _MetricOpts(ctypes.Structure):

@@ -579,14 +579,30 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
                                 adapt_metric, as.integer(chains),
                                 model$n_unconstrained)
   res <- .Call("stanli_r_sample", model$ptr, opts, init_vec, refresh,
-               metric_opts)
-  if (isTRUE(res$interrupted)) {
-    signalCondition(structure(class = c("interrupt", "condition"),
-                              list(message = "sampling interrupted",
-                                   call = NULL)))
-    invokeRestart("abort")
-  }
+               metric_opts, NULL)
+  algorithm_interrupt(res, "sampling")
+  run <- nuts_arrays(res, model)
+  nchain <- res$chains
+  structure(list(draws = run$draws, sampler = run$sampler,
+                 unconstrained = run$unconstrained,
+                 columns = model$columns, max_depth = max_depth, seed = seed,
+                 model = model, report = run$report,
+                 warmup_draws = if (isTRUE(save_warmup))
+                   as.integer(ceiling(warmup / max(1, thin))) else 0L,
+                 warmup = as.integer(warmup), thin = as.integer(max(1, thin)),
+                 samples = as.integer(samples), save_warmup = isTRUE(save_warmup),
+                 chains = as.integer(nchain), delta = as.double(delta),
+                 metric = metric, step_size = res$step_size,
+                 initial_step_size = if (is.null(step_size)) 1 else as.double(step_size),
+                 inv_metric = split_inv_metric(res$inv_metric, metric, nchain,
+                                               model$n_unconstrained),
+                 adapt_engaged = adapt_engaged, adapt_metric = adapt_metric,
+                 chain_id = chain_id, resume = res$resume),
+            class = "stanli_fit")
+}
 
+# The (draw, chain, variable) arrays and the report of a stanli_r_sample run.
+nuts_arrays <- function(res, model) {
   nchain <- res$chains
   ndraw <- res$draws
   ncol <- length(model$columns)
@@ -601,26 +617,104 @@ sample_model <- function(model, chains = 4, seed = 1, warmup = 1000,
   uarr <- aperm(array(res$unconstrained,
                       dim = c(model$n_unconstrained, ndraw, nchain)),
                 c(2, 3, 1))
+  list(draws = arr, sampler = sarr, unconstrained = uarr,
+       report = list(warmup_seconds = res$warmup_seconds,
+                     sampling_seconds = res$sampling_seconds,
+                     n_divergent = res$n_divergent,
+                     n_max_treedepth = res$n_max_treedepth))
+}
 
-  report <- list(warmup_seconds = res$warmup_seconds,
-                 sampling_seconds = res$sampling_seconds,
-                 n_divergent = res$n_divergent,
-                 n_max_treedepth = res$n_max_treedepth)
-  structure(list(draws = arr, sampler = sarr, unconstrained = uarr,
-                 columns = model$columns, max_depth = max_depth, seed = seed,
-                 model = model, report = report,
-                 warmup_draws = if (isTRUE(save_warmup))
-                   as.integer(ceiling(warmup / max(1, thin))) else 0L,
-                 warmup = as.integer(warmup), thin = as.integer(max(1, thin)),
-                 samples = as.integer(samples), save_warmup = isTRUE(save_warmup),
-                 chains = as.integer(nchain), delta = as.double(delta),
-                 metric = metric, step_size = res$step_size,
-                 initial_step_size = if (is.null(step_size)) 1 else as.double(step_size),
-                 inv_metric = split_inv_metric(res$inv_metric, metric, nchain,
-                                               model$n_unconstrained),
-                 adapt_engaged = adapt_engaged, adapt_metric = adapt_metric,
-                 chain_id = chain_id),
-            class = "stanli_fit")
+# `a` with the draws of `b` after it, chain by chain.
+append_draws <- function(a, b) {
+  na <- dim(a)[1L]
+  out <- array(0, dim = c(na + dim(b)[1L], dim(a)[2L], dim(a)[3L]),
+               dimnames = dimnames(a))
+  out[seq_len(na), , ] <- a
+  out[na + seq_len(dim(b)[1L]), , ] <- b
+  out
+}
+
+#' Continue sampling from a fit
+#'
+#' Runs `samples` more transitions of each chain of a [sample_model()] fit,
+#' starting where the chains stopped with their own step size, inverse metric
+#' and random stream, and no warmup or adaptation. The result is the fit one
+#' call with the summed `samples` would have returned: the same draws, sampler
+#' columns and generated quantities, bit for bit.
+#'
+#' The other settings (seed, thinning, `delta`, `max_depth`, the metric) come
+#' from the fit, and the model is the one the fit carries, `fit$model`. A
+#' model with different code or data is refused.
+#'
+#' @param fit A `stanli_fit` from [sample_model()].
+#' @param samples Further transitions per chain, before thinning.
+#' @param refresh Print a progress update every `refresh` transitions; the
+#'   numbering continues from the fit's transitions. 0 is silent.
+#' @param parallel_chains Chains to run at once. Defaults to all of them.
+#' @param threads_per_chain Threads per chain for `reduce_sum`; defaults to
+#'   the setting the fit's model was prepared with.
+#' @param ... Not used; any other sampler setting is an error.
+#' @details Interrupting R stops every chain after its current transition and
+#'   raises the usual interrupt; no fit is returned.
+#' @return A new `stanli_fit` with the new draws, sampler columns and
+#'   unconstrained draws appended to the old ones in each chain, after any
+#'   saved warmup. `samples` is the total, the `report` sums sampling times and
+#'   problem counts, and `seed`, `warmup`, `step_size` and `inv_metric` are
+#'   those of `fit`, which is left unchanged.
+#' @export
+sample_more <- function(fit, samples = 1000, refresh = 100,
+                        parallel_chains = NULL, threads_per_chain = NULL,
+                        ...) {
+  if (!inherits(fit, "stanli_fit"))
+    stop("fit must be a stanli_fit from sample_model()", call. = FALSE)
+  extra <- names(list(...))
+  if (length(extra) > 0L)
+    stop("sample_more() continues the fit's chains with the fit's settings, ",
+         "so only samples, refresh, parallel_chains and threads_per_chain ",
+         "can be given; got ", paste(extra, collapse = ", "), call. = FALSE)
+  require_nuts_fit(fit, "sample_more()")
+  if (identical(fit$sampler_backend, "nutpie"))
+    stop("this fit has no resume record: sample_nutpie() fits cannot be ",
+         "continued", call. = FALSE)
+  if (!is.list(fit$resume) || length(fit$resume) != fit$chains)
+    stop("this fit has no resume record to continue from; fits made by ",
+         "earlier stanli versions carry none", call. = FALSE)
+  if (length(refresh) != 1L || !is.numeric(refresh) || is.na(refresh) ||
+      !is.finite(refresh) || refresh < 0 || refresh != floor(refresh) ||
+      refresh > .Machine$integer.max)
+    stop("refresh must be a single nonnegative integer", call. = FALSE)
+  model <- fit$model
+  if (is.null(threads_per_chain)) threads_per_chain <- model$threads_per_chain
+  cstan_integer(threads_per_chain, "threads_per_chain")
+  load_runtime()
+  if (is.null(parallel_chains)) parallel_chains <- fit$chains
+  cstan_integer(parallel_chains, "parallel_chains")
+  opts <- list(as.integer(fit$seed), as.integer(fit$chains), 0L,
+               sampler_integer(samples, "samples"), as.integer(fit$thin),
+               as.double(fit$delta), as.integer(fit$max_depth), FALSE, 2,
+               as.integer(parallel_chains), as.integer(fit$chain_id))
+  .Call("stanli_r_check_sample_options", opts)
+  model <- with_run_seed(model, fit$seed, threads_per_chain)
+  metric_opts <- metric_options(
+    fit$metric, if (fit$metric == "unit_e") NULL else fit$inv_metric, NULL,
+    FALSE, TRUE, as.integer(fit$chains), model$n_unconstrained)
+  res <- .Call("stanli_r_sample", model$ptr, opts, numeric(0),
+               as.integer(refresh), metric_opts, fit$resume)
+  algorithm_interrupt(res, "sampling")
+  run <- nuts_arrays(res, model)
+  out <- fit
+  out$draws <- append_draws(fit$draws, run$draws)
+  out$sampler <- append_draws(fit$sampler, run$sampler)
+  out$unconstrained <- append_draws(fit$unconstrained, run$unconstrained)
+  out$report$sampling_seconds <- fit$report$sampling_seconds +
+    run$report$sampling_seconds
+  out$report$n_divergent <- fit$report$n_divergent + run$report$n_divergent
+  out$report$n_max_treedepth <- fit$report$n_max_treedepth +
+    run$report$n_max_treedepth
+  out$samples <- as.integer(fit$samples + samples)
+  out$model <- model
+  out$resume <- res$resume
+  out
 }
 
 sampler_integer <- function(x, name) {
