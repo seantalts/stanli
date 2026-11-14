@@ -82,6 +82,9 @@ class _SampleOpts(ctypes.Structure):
         ("init_radius", ctypes.c_double),
         ("inits", ctypes.POINTER(ctypes.c_double)),
         ("num_threads", ctypes.c_int),
+        ("resume_in", ctypes.POINTER(ctypes.c_void_p)),
+        ("resume_in_len", ctypes.POINTER(ctypes.c_size_t)),
+        ("resume_out", ctypes.c_void_p),
     ]
 
 
@@ -194,6 +197,8 @@ def _load_lib():
     lib.stanli_n_stored_draws.restype = ctypes.c_int64
     lib.stanli_n_stored_draws.argtypes = [ctypes.POINTER(_SampleOpts)]
     lib.stanli_thread_safe.restype = ctypes.c_int
+    lib.stanli_resume_size.restype = ctypes.c_size_t
+    lib.stanli_resume_size.argtypes = [ctypes.c_void_p]
     lib.stanli_metric_opts_init.argtypes = [ctypes.POINTER(_MetricOpts)]
     lib.stanli_sample_multi_metric.restype = ctypes.c_int
     lib.stanli_sample_multi_metric.argtypes = [
@@ -855,11 +860,15 @@ class Fit:
 
     ``fit.draws("mu")`` keeps the chain axis -- shape (chains, draws) --
     which is what a trace plot or a per-chain check wants.
+
+    ``warmup_seconds`` and ``sampling_seconds`` hold each chain's times, and
+    ``threads_per_chain`` the setting the run used.
     """
 
     def __init__(self, names, draws, sampler_stats, max_depth, seed,
                  reports=None, metric="diag_e", step_size=None,
-                 inv_metric=None):
+                 inv_metric=None, thin=1, delta=0.8, resume=None,
+                 threads_per_chain=1):
         self.names = list(names)
         self._columns = {n: i for i, n in enumerate(self.names)}
         self._variables = _group_variables(self.names)
@@ -872,9 +881,19 @@ class Fit:
                           else step_size)
         self.inv_metric = ([None] * draws.shape[0] if inv_metric is None
                            else inv_metric)
+        self.thin = thin
+        self.delta = delta
+        self.threads_per_chain = threads_per_chain
+        # Per-chain resume records (bytes) for sample(continue_from=).
+        self._resume = resume
         self._divergence_counts = None
         self._max_treedepth_counts = None
+        self.warmup_seconds = np.full(draws.shape[0], np.nan)
+        self.sampling_seconds = np.full(draws.shape[0], np.nan)
         if reports is not None:
+            self.warmup_seconds = np.array([r.warmup_seconds for r in reports])
+            self.sampling_seconds = np.array(
+                [r.sampling_seconds for r in reports])
             self._divergence_counts = np.array(
                 [r.n_divergent for r in reports], dtype=np.int64)
             self._max_treedepth_counts = np.array(
@@ -1166,6 +1185,56 @@ def _inv_metric_buffer(inv_metric, metric, chains, n):
             f"inv_metric for {metric} must have shape {one} or "
             f"{(chains,) + one}, got {arr.shape}")
     return np.ascontiguousarray(arr)
+
+
+# What sample(continue_from=) takes from the fit and refuses from the caller,
+# with the defaults that mean "not passed".
+_CONTINUE_FIXED = {
+    "chains": 4, "seed": 1, "warmup": 1000, "delta": 0.8, "max_depth": 10,
+    "thin": 1, "save_warmup": False, "inits": None, "init_radius": 2.0,
+    "pathfinder_init": None, "metric": "diag_e", "inv_metric": None,
+    "step_size": None, "adapt_engaged": True, "adapt_metric": True,
+}
+
+
+def _continue_settings(fit, given):
+    if not isinstance(fit, Fit):
+        raise TypeError(
+            f"continue_from must be a Fit from Model.sample(), got "
+            f"{type(fit).__name__}")
+    passed = [name for name, default in _CONTINUE_FIXED.items()
+              if (given[name] is not None if default is None
+                  else given[name] is not default and given[name] != default)]
+    if passed:
+        raise ValueError(
+            "continue_from continues the fit's chains with the fit's "
+            "settings, so only samples, refresh, parallel_chains and "
+            "threads_per_chain can be given; got " + ", ".join(passed))
+    records = getattr(fit, "_resume", None)
+    if not records or len(records) != fit.n_chains:
+        raise ValueError(
+            "this fit has no resume record to continue from: continue_from "
+            "needs a NUTS fit from Model.sample(), and fits made by earlier "
+            "stanli versions carry none")
+    return records
+
+
+def _continued_fit(old, new):
+    """`old` with `new`'s draws appended per chain."""
+    fit = Fit(old.names, np.concatenate([old._draws, new._draws], axis=1),
+              np.concatenate([old.sampler_stats, new.sampler_stats], axis=1),
+              old.max_depth, old.seed, metric=old.metric,
+              step_size=old.step_size.copy(),
+              inv_metric=[None if a is None else a.copy()
+                          for a in old.inv_metric],
+              thin=old.thin, delta=old.delta, resume=new._resume,
+              threads_per_chain=new.threads_per_chain)
+    fit._divergence_counts = old.divergences + new.divergences
+    fit._max_treedepth_counts = (old.max_treedepth_hits
+                                 + new.max_treedepth_hits)
+    fit.warmup_seconds = old.warmup_seconds.copy()
+    fit.sampling_seconds = old.sampling_seconds + new.sampling_seconds
+    return fit
 
 
 def _threads_per_chain(value):
@@ -1462,9 +1531,9 @@ class Model:
     def sample(self, *, chains=4, seed=1, warmup=1000, samples=1000,
                delta=0.8, max_depth=10, thin=1, save_warmup=False,
                inits=None, init_radius=2.0, pathfinder_init=None,
-               parallel_chains=None, refresh=100, threads_per_chain=1,
+               parallel_chains=None, refresh=100, threads_per_chain=None,
                metric="diag_e", inv_metric=None, step_size=None,
-               adapt_engaged=True, adapt_metric=True):
+               adapt_engaged=True, adapt_metric=True, continue_from=None):
         """NUTS draws as a Fit.
 
         Four chains by default, because R-hat needs more than one and a
@@ -1498,7 +1567,8 @@ class Model:
         so it is on by default. A build without thread support clamps it
         to 1 (see ``thread_safe()``).
 
-        `threads_per_chain` defaults to 1. Larger values enable native
+        `threads_per_chain` defaults to 1, or with `continue_from` to the
+        fit's setting. Larger values enable native
         within-chain parallelism for eligible reduce_sum calls; small or
         unsupported calls remain serial. Changing it rebuilds the prepared
         model. Each active chain can use this many threads, including its
@@ -1533,11 +1603,44 @@ class Model:
         progress, timing, and sampler-problem output. Reporting only observes
         the run and does not change draws, sampler statistics, or RNG streams.
 
+        `continue_from=fit` runs `samples` more transitions of each of the
+        fit's chains, starting where they stopped with their own step size,
+        inverse metric and random stream, and no warmup or adaptation. It
+        returns a new Fit with the new draws and sampler statistics appended
+        to the old ones per chain; `fit` itself is unchanged. The result is
+        the run a single call with the summed `samples` would have made,
+        bitwise, generated quantities included. Only `samples`, `refresh`,
+        `parallel_chains` and `threads_per_chain` can be given with it; the
+        other settings come from the fit. The model and data must be the
+        ones that made the fit.
+
         Columns are every column CmdStan's CSV would carry -- constrained
         parameters, transformed parameters, generated quantities, with RNG
         draws streamed per chain -- for models with a generate_quantities
         section, and the constrained parameters otherwise.
         """
+        resume_in = None
+        if continue_from is not None:
+            resume_in = _continue_settings(continue_from, {
+                "chains": chains, "seed": seed, "warmup": warmup,
+                "delta": delta, "max_depth": max_depth, "thin": thin,
+                "save_warmup": save_warmup, "inits": inits,
+                "init_radius": init_radius, "pathfinder_init": pathfinder_init,
+                "metric": metric, "inv_metric": inv_metric,
+                "step_size": step_size, "adapt_engaged": adapt_engaged,
+                "adapt_metric": adapt_metric})
+            chains, seed = continue_from.n_chains, continue_from.seed
+            warmup = 0
+            thin, delta = continue_from.thin, continue_from.delta
+            max_depth, metric = continue_from.max_depth, continue_from.metric
+            if metric != "unit_e":
+                inv_metric = continue_from.inv_metric
+            adapt_engaged = False
+            if threads_per_chain is None:
+                threads_per_chain = getattr(continue_from,
+                                            "threads_per_chain", 1)
+        if threads_per_chain is None:
+            threads_per_chain = 1
         threads_per_chain = _threads_per_chain(threads_per_chain)
         seed = _seed_arg(seed)
         if inits is not None:
@@ -1636,6 +1739,21 @@ class Model:
             adapted_inv = np.full((opts.chains, width), np.nan)
             metric_opts.adapted_inv_metric = _dptr(adapted_inv)
 
+        # Locals until the end of the call: opts borrows them.
+        resume_bufs = resume_ptrs = resume_lens = None
+        if resume_in is not None:
+            resume_bufs = [(ctypes.c_char * len(r)).from_buffer_copy(r)
+                           for r in resume_in]
+            resume_ptrs = (ctypes.c_void_p * opts.chains)(
+                *[ctypes.addressof(b) for b in resume_bufs])
+            resume_lens = (ctypes.c_size_t * opts.chains)(
+                *[len(r) for r in resume_in])
+            opts.resume_in = resume_ptrs
+            opts.resume_in_len = resume_lens
+        record_size = _lib.stanli_resume_size(self._handle)
+        resume_out = (ctypes.c_char * (opts.chains * record_size))()
+        opts.resume_out = ctypes.addressof(resume_out)
+
         n_stored = _lib.stanli_n_stored_draws(ctypes.byref(opts))
         raw = np.empty((opts.chains, n_stored, self.n_unconstrained))
         stats = np.empty((opts.chains, n_stored, _N_SAMPLER_COLS))
@@ -1693,12 +1811,19 @@ class Model:
         if adapted_inv is not None:
             shape = (n, n) if metric == "dense_e" else (n,)
             fit_inv_metric = [row.reshape(shape).copy() for row in adapted_inv]
+        records = [resume_out.raw[c * record_size:(c + 1) * record_size]
+                   for c in range(opts.chains)]
         fit = Fit(names, out, stats, opts.max_depth, seed, reports,
                   metric=metric, step_size=adapted_step,
-                  inv_metric=fit_inv_metric)
+                  inv_metric=fit_inv_metric, thin=opts.thin,
+                  delta=opts.delta, resume=records,
+                  threads_per_chain=threads_per_chain)
         if refresh:
             _print_sample_reports(reports, first_chain,
                                   _sampling_warnings(opts, reports, stats))
+        del resume_bufs, resume_ptrs, resume_lens
+        if continue_from is not None:
+            return _continued_fit(continue_from, fit)
         return fit
 
 

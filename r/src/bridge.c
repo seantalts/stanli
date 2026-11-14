@@ -60,7 +60,7 @@ static const char* dl_error(void) {
  * runtime reports its own through stanli_abi_version(), and
  * stanli_bridge_load() refuses to bind when the two disagree -- see
  * there for why a mismatch cannot be allowed to proceed. */
-#define STANLI_R_ABI_VERSION 4
+#define STANLI_R_ABI_VERSION 5
 
 /* Mirrors stanli_sample_opts in runtime/include/stanli/capi.h. Field
  * order and types must match exactly; R never sees this struct, but a
@@ -78,6 +78,9 @@ typedef struct {
   double init_radius;
   const double* inits;
   int num_threads;
+  const uint8_t* const* resume_in;
+  const size_t* resume_in_len;
+  uint8_t* resume_out;
 } stanli_sample_opts;
 
 /* Mirrors the per-chain result struct of stanli_sample_multi_metric. */
@@ -210,6 +213,7 @@ static void (*p_capture_messages)(int);
 static char* (*p_take_messages)(void);
 static int (*p_exact_lp)(void);
 static int (*p_thread_safe)(void);
+static size_t (*p_resume_size)(const void*);
 static const char* (*p_build_id)(void);
 static int64_t (*p_n_unconstrained)(const void*);
 static int (*p_grad)(void*, const double*, double*, double*);
@@ -313,6 +317,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_take_messages", p_take_messages);
   BIND("stanli_exact_lp", p_exact_lp);
   BIND("stanli_thread_safe", p_thread_safe);
+  BIND("stanli_resume_size", p_resume_size);
   BIND("stanli_build_id", p_build_id);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
   BIND("stanli_grad", p_grad);
@@ -779,8 +784,10 @@ SEXP stanli_r_check_sample_options(SEXP optlist) {
   return R_NilValue;
 }
 
+/* `resume` is NULL for a fresh run, else a list of one raw resume record per
+ * chain, as an earlier run returned them. */
 SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
-                     SEXP metric_list) {
+                     SEXP metric_list, SEXP resume) {
   require_loaded();
   void* mm = model_ptr(m);
   stanli_sample_opts o;
@@ -788,10 +795,29 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   check_sample_opts(&o);
   if (XLENGTH(inits) > 0) o.inits = REAL(inits);
   const int refresh_rate = asInteger(refresh);
+  const int64_t nchain = o.chains;
+  if (resume != R_NilValue) {
+    if (TYPEOF(resume) != VECSXP || XLENGTH(resume) != nchain)
+      error("resume must be a list with one record per chain");
+    const uint8_t** ptrs =
+        (const uint8_t**)R_alloc((size_t)nchain, sizeof(*ptrs));
+    size_t* lens = (size_t*)R_alloc((size_t)nchain, sizeof(*lens));
+    for (int64_t c = 0; c < nchain; ++c) {
+      SEXP record = VECTOR_ELT(resume, c);
+      if (TYPEOF(record) != RAWSXP) error("resume records must be raw vectors");
+      ptrs[c] = RAW(record);
+      lens[c] = (size_t)XLENGTH(record);
+    }
+    o.resume_in = ptrs;
+    o.resume_in_len = lens;
+  }
+  const size_t record_size = p_resume_size(mm);
+  uint8_t* resume_out =
+      (uint8_t*)R_alloc((size_t)nchain * record_size, sizeof(uint8_t));
+  o.resume_out = resume_out;
 
   const int64_t n = p_n_unconstrained(mm);
   const int64_t rows = p_n_stored_draws(&o);
-  const int64_t nchain = o.chains;
   stanli_sample_report* reports =
       (stanli_sample_report*)R_alloc((size_t)nchain, sizeof(*reports));
 
@@ -861,7 +887,14 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
     treedepth_out[c] = (double)reports[c].n_max_treedepth;
   }
 
-  SEXP out = PROTECT(allocVector(VECSXP, 11));
+  SEXP records = PROTECT(allocVector(VECSXP, (R_xlen_t)nchain));
+  for (int64_t c = 0; c < nchain; ++c) {
+    SEXP record = allocVector(RAWSXP, (R_xlen_t)record_size);
+    SET_VECTOR_ELT(records, c, record);
+    memcpy(RAW(record), resume_out + (size_t)c * record_size, record_size);
+  }
+
+  SEXP out = PROTECT(allocVector(VECSXP, 12));
   SET_VECTOR_ELT(out, 0, vals);
   SET_VECTOR_ELT(out, 1, stats);
   SET_VECTOR_ELT(out, 2, ScalarInteger((int)nchain));
@@ -873,7 +906,8 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   SET_VECTOR_ELT(out, 8, n_max_treedepth);
   SET_VECTOR_ELT(out, 9, adapted_step);
   SET_VECTOR_ELT(out, 10, adapted_inv);
-  SEXP nm = PROTECT(allocVector(STRSXP, 11));
+  SET_VECTOR_ELT(out, 11, records);
+  SEXP nm = PROTECT(allocVector(STRSXP, 12));
   SET_STRING_ELT(nm, 0, mkChar("values"));
   SET_STRING_ELT(nm, 1, mkChar("stats"));
   SET_STRING_ELT(nm, 2, mkChar("chains"));
@@ -885,8 +919,9 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
   SET_STRING_ELT(nm, 8, mkChar("n_max_treedepth"));
   SET_STRING_ELT(nm, 9, mkChar("step_size"));
   SET_STRING_ELT(nm, 10, mkChar("inv_metric"));
+  SET_STRING_ELT(nm, 11, mkChar("resume"));
   setAttrib(out, R_NamesSymbol, nm);
-  UNPROTECT(11);
+  UNPROTECT(12);
   return out;
 }
 

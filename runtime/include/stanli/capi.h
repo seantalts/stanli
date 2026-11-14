@@ -27,7 +27,7 @@ typedef struct stanli_model stanli_model;
  * from the wrong seed with the wrong step size. A binding must compare
  * this against the value it was compiled against before calling
  * anything, and refuse on a mismatch. */
-#define STANLI_ABI_VERSION 4
+#define STANLI_ABI_VERSION 5
 int stanli_abi_version(void);
 
 /* 1 if this build embeds stanc3, else 0. */
@@ -215,11 +215,19 @@ typedef struct {
                         * host-boundary step, and one scale here means one
                         * contract for what a start is. */
   int num_threads;     /* honoured only when stanli_thread_safe(); see there */
+  /* Continue earlier chains instead of starting new ones: one resume record
+   * per chain (resume_in[c], resume_in_len[c] bytes), as an earlier run wrote
+   * them to resume_out. Null starts fresh. See stanli_resume_size. */
+  const uint8_t* const* resume_in;
+  const size_t* resume_in_len;
+  /* chains * stanli_resume_size(m) bytes receiving each chain's record after
+   * the run, chain c at c * stanli_resume_size(m); null writes none. */
+  uint8_t* resume_out;
 } stanli_sample_opts;
 
 /* Fill with CmdStan's defaults: seed 1, 4 chains from id 1, 1000 warmup,
  * 1000 samples, thin 1, delta 0.8, max_depth 10, no saved warmup, init
- * radius 2, random inits, one thread.
+ * radius 2, random inits, one thread, no resume records.
  *
  * ALWAYS call this before setting fields. A zeroed struct is not the
  * defaults: it asks for an init radius of 0, which is a different and
@@ -239,7 +247,8 @@ int stanli_sample_opts_check(const stanli_sample_opts* o, char* err,
 
 /* Stored rows per chain under these options. This is what `draws` and
  * `stats` must be sized against, and it is not `samples` whenever thin
- * or save_warmup is set. */
+ * or save_warmup is set, or when resume_in continues a thinned run (rows
+ * are kept where the whole run's transition count is a multiple of thin). */
 int64_t stanli_n_stored_draws(const stanli_sample_opts* o);
 
 /* 1 when this build can run chains in real threads. stan-math's autodiff
@@ -370,6 +379,27 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
                                void* poll_user, int* interrupted,
                                stanli_sample_report* reports, char* err,
                                size_t err_len);
+
+/* Bytes in one chain's resume record for this model.
+ *
+ * Every NUTS run of stanli_sample_multi_metric can write one record per chain
+ * (stanli_sample_opts::resume_out). A record is opaque and versioned. It holds
+ * what continuing the chain needs: the position after its last transition,
+ * the RNG state after that transition's generated quantities, the step size,
+ * the number of post-warmup transitions so far, and a hash of the model and
+ * its data. Passing the records back as resume_in, with warmup 0 and each
+ * chain's inverse metric (the adapted_inv_metric of the earlier run) as
+ * stanli_metric_opts::inv_metric, continues every chain exactly: 1000 samples
+ * then 1000 more give the draws, sampler columns and generated quantities of
+ * one run of 2000.
+ *
+ * A continued run skips initialization and adaptation, ignores seed, inits
+ * radius, step_size and adapt_engaged, and numbers its progress from the
+ * earlier transitions ("1001 / 2000"). It fails with a message when warmup is
+ * not 0, inits is set, a record has the wrong length or version, the records
+ * disagree on their transition count, or a record comes from a different
+ * model or data. */
+size_t stanli_resume_size(const stanli_model* m);
 
 /* The seven sampler columns, in order: lp__, accept_stat__, stepsize__,
  * treedepth__, n_leapfrog__, divergent__, energy__. */
