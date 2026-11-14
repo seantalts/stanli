@@ -1155,7 +1155,8 @@ if(NOT EMSCRIPTEN)
                        gq_callback_runtime_values matrix_callback_value_fallback
                        gq_callback_integer_contexts gq_callback_integer_contexts_fallback
                        gq_callback_shared_function gq_callback_runtime_integer
-                       gq_callback_runtime_control gq_callback_ode_controls gq_callback_solver_controls gq_callback_rng_values)
+                       gq_callback_runtime_control gq_callback_ode_controls gq_callback_solver_controls gq_callback_rng_values
+                       gq_udf_branch_rng)
     add_test(NAME ${exit_fixture}_reference
       COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
               --check $<TARGET_FILE:stanli_check> --model ${exit_fixture}

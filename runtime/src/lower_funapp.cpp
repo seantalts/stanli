@@ -475,6 +475,13 @@ bool return_in_loop(const mir::Stmt& s, bool in_loop) {
   return false;
 }
 
+bool return_in_branch(const mir::Stmt& s) {
+  if (s.kind == mir::Stmt::IfElse) return contains_return(s);
+  for (const auto& child : s.body)
+    if (return_in_branch(child)) return true;
+  return false;
+}
+
 bool non_tail_return(const mir::Stmt& s, bool tail);
 
 bool non_tail_return(const std::vector<mir::Stmt>& body, bool tail) {
@@ -666,7 +673,8 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   }
   const std::vector<mir::Stmt>* body = &f.body;
   if ((e.type_ == "UReal" || e.type_ == "UInt") && e.unsized.depth == 0 &&
-      non_tail_return(f.body, true)) {
+      (non_tail_return(f.body, true) ||
+       std::any_of(f.body.begin(), f.body.end(), return_in_branch))) {
     bool looped = false;
     for (const auto& st : f.body) looped = looped || return_in_loop(st, false);
     if (!looped) {
