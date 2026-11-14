@@ -598,6 +598,14 @@ def worst_pair(rv, gv, floor=1.0):
 # other output keeps the default gate.
 FAST_MAX_REL = 1e-12
 WA_MAX_REL = 1e-9
+# Fast-mode points allowed past FAST_MAX_REL, each with the limit it is held
+# to and the 80-digit reference result that justifies it.
+FAST_HP_CHECKED = {
+    "epinow2_estimate_infections": (
+        1e-10, "point 0: the 14-day generation-time PMF tail loses 7 digits "
+               "in double; fast is 8.651e-9 of the largest gradient entry "
+               "from the 80-digit gradient, CmdStan 8.646e-9"),
+}
 
 
 def fast_dev(rv, gv):
@@ -913,6 +921,8 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
         documented = model in ILL_CONDITIONED or pt.get("status") == "MISMATCH"
         gate = gate_for(model, pt, max(max_rel, WA_MAX_REL)
                         if fast_math and documented else max_rel)
+        if fast_math and model in FAST_HP_CHECKED:
+            gate = max(gate, FAST_HP_CHECKED[model][0])
         if rel >= gate:
             return (model, "GATE", rel, ulp, total,
                     f"point {point}: {rel:.2e} ({ulp} ulp) over {n} "

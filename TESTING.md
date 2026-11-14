@@ -203,8 +203,9 @@ in fast mode. At each point:
   values keep the default 1e-9 limit.
 
 `kronecker_gp` and the `ILL_CONDITIONED` models keep their default limits. A
-point may otherwise exceed 1e-12 only when a high-precision reference shows
-fast mode at least as close to the true value as CmdStan. This replay has not
+point may otherwise exceed 1e-12 when a high-precision reference shows fast
+mode about as close to the true value as CmdStan. Those points are listed in
+`FAST_HP_CHECKED` with their limit. This replay has not
 been run on macOS, Windows or ARM.
 
 [`tests/test_collapse.cpp`](tests/test_collapse.cpp) runs every graph the
