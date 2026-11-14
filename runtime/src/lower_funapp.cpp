@@ -507,14 +507,48 @@ bool non_tail_return(const mir::Stmt& s, bool tail) {
   }
 }
 
-mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result) {
+// A return inside a loop also sets `exited`, and each loop that holds one is
+// followed by `if (exited) break;` so the break reaches the single pass.
+mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result,
+                            const std::string& exited) {
+  mir::Expr flag;
+  flag.kind = mir::Expr::Var;
+  flag.name = exited;
+  flag.type_ = "UInt";
+  flag.unsized = {0, mir::UnsizedLeaf::Int};
+  mir::Stmt exit;
+  exit.kind = mir::Stmt::Break;
   if (s.kind != mir::Stmt::Return) {
     mir::Stmt out = s;
-    for (auto& child : out.body) child = returns_to_breaks(child, result);
-    return out;
+    for (auto& child : out.body)
+      child = returns_to_breaks(child, result, exited);
+    if (exited.empty() || !contains_return(s) ||
+        (s.kind != mir::Stmt::For && s.kind != mir::Stmt::While))
+      return out;
+    mir::Stmt leave;
+    leave.kind = mir::Stmt::IfElse;
+    leave.cond = flag;
+    leave.body.push_back(exit);
+    mir::Stmt both;
+    both.kind = mir::Stmt::SList;
+    both.body.push_back(std::move(out));
+    both.body.push_back(std::move(leave));
+    return both;
   }
   mir::Stmt block;
   block.kind = mir::Stmt::Block;
+  if (!exited.empty()) {
+    mir::Expr one;
+    one.kind = mir::Expr::LitInt;
+    one.lit_i = 1;
+    one.type_ = "UInt";
+    one.data_only = true;
+    mir::Stmt set;
+    set.kind = mir::Stmt::Assignment;
+    set.lhs = exited;
+    set.rhs = std::move(one);
+    block.body.push_back(std::move(set));
+  }
   if (s.has_init) {
     mir::Stmt assign;
     assign.kind = mir::Stmt::Assignment;
@@ -522,8 +556,6 @@ mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result) {
     assign.rhs = s.rhs;
     block.body.push_back(std::move(assign));
   }
-  mir::Stmt exit;
-  exit.kind = mir::Stmt::Break;
   block.body.push_back(std::move(exit));
   return block;
 }
@@ -547,10 +579,13 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   pass.loopvar = "__stanli_" + f.name + "_pass";
   pass.lower = one;
   pass.upper = one;
+  bool looped = false;
+  for (const auto& st : f.body) looped = looped || return_in_loop(st, false);
+  const std::string exited = looped ? "__stanli_" + f.name + "_exited" : "";
   mir::Stmt body;
   body.kind = mir::Stmt::Block;
   for (const auto& st : f.body)
-    body.body.push_back(returns_to_breaks(st, result));
+    body.body.push_back(returns_to_breaks(st, result, exited));
   pass.body.push_back(std::move(body));
   mir::Expr value;
   value.kind = mir::Expr::Var;
@@ -561,7 +596,18 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   ret.kind = mir::Stmt::Return;
   ret.has_init = true;
   ret.rhs = std::move(value);
-  return {std::move(decl), std::move(pass), std::move(ret)};
+  if (!looped) return {std::move(decl), std::move(pass), std::move(ret)};
+  mir::Stmt flag;
+  flag.kind = mir::Stmt::Decl;
+  flag.decl_id = exited;
+  flag.decl_type.base = "SInt";
+  mir::Stmt clear;
+  clear.kind = mir::Stmt::Assignment;
+  clear.lhs = exited;
+  clear.rhs = one;
+  clear.rhs.lit_i = 0;
+  return {std::move(decl), std::move(flag), std::move(clear), std::move(pass),
+          std::move(ret)};
 }
 
 }  // namespace
@@ -675,14 +721,10 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   if ((e.type_ == "UReal" || e.type_ == "UInt") && e.unsized.depth == 0 &&
       (non_tail_return(f.body, true) ||
        std::any_of(f.body.begin(), f.body.end(), return_in_branch))) {
-    bool looped = false;
-    for (const auto& st : f.body) looped = looped || return_in_loop(st, false);
-    if (!looped) {
-      auto rewritten =
-          std::make_shared<std::vector<mir::Stmt>>(single_exit_body(f, e));
-      g.udata_pool.push_back(rewritten);
-      body = rewritten.get();
-    }
+    auto rewritten =
+        std::make_shared<std::vector<mir::Stmt>>(single_exit_body(f, e));
+    g.udata_pool.push_back(rewritten);
+    body = rewritten.get();
   }
   // CmdStan passes the CALLER's propto__ value into a user density.
   const Flow flow = lower_stmts(*body);
