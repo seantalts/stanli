@@ -193,6 +193,7 @@ class Interp:
         self.mir = mir
         self.data = data
         self.funcs = {}
+        self.bodies = {}
         self.target = mpf(0)
         self.theta = None
         self.pos = 0
@@ -200,7 +201,7 @@ class Interp:
         self.cache = {}
         for fd in field(mir, "functions_block"):
             name = field(fd, "fdname")
-            self.funcs[name] = fd
+            self.funcs.setdefault(name, []).append(fd)
         self.env = {}
         for s in field(mir, "prepare_data"):
             self.stmt(s)(self.env)
@@ -590,24 +591,44 @@ class Interp:
             return build(0)
         return run
 
+    def overload(self, name, args):
+        """The definition of `name` whose argument types match the call."""
+        fds = self.funcs.get(name, [])
+        fds = [fd for fd in fds if field(fd, "fdbody")] or fds
+        if len(fds) < 2:
+            return fds[-1] if fds else None
+        actual = [ty_of(a) for a in args]
+        for promote in (False, True):
+            for fd in fds:
+                formal = [a[2] for a in field(fd, "fdargs")]
+                if len(formal) == len(actual) and all(
+                        f == a or (promote and (f, a) == ("UReal", "UInt"))
+                        for f, a in zip(formal, actual)):
+                    return fd
+        raise Unsupported("no overload of %s for %s" % (name, actual))
+
     def user_call(self, name, fn, args, ev, flags=None):
-        fd = self.funcs.get(name)
+        fd = self.overload(name, args)
         if fd is None:
             raise Unsupported("udf " + name)
         fargs = field(fd, "fdargs")
         body = field(fd, "fdbody")
         if flags is None:
             flags = [ad_of(a) for a in args]
-        stmts = [self.stmt(s) for s in body]
         names = [a[1] for a in fargs]
         fad = [a[0] == "AutoDiffable" for a in fargs]
+        # Compiled on the first call and shared, so a recursive function
+        # does not compile its own body forever.
+        compiled = self.bodies.setdefault(id(fd), [])
 
         def call(env):
+            if not compiled:
+                compiled.append([self.stmt(s) for s in body])
             local = {n: copy(e(env)) for n, e in zip(names, ev)}
             dyn = any(f and a for f, a in zip(flags, fad))
             self.dyn.append(dyn and self.dyn[-1])
             try:
-                for s in stmts:
+                for s in compiled[0]:
                     s(local)
             except Return as r:
                 return r.v
