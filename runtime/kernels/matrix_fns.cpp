@@ -1475,7 +1475,7 @@ STANLI_WISH_KERNEL(wishc, kWishartChol)
 STANLI_WISH_KERNEL(iwishc, kInvWishartChol)
 #undef STANLI_WISH_KERNEL
 
-// ---- multi_gp: (matrix y, matrix Sigma, vector w) -----------------------
+// ---- multi_gp: (matrix y, matrix Sigma, vector w), y K x N, Sigma N x N --
 enum GpKind { kMultiGp, kMultiGpChol };
 template <bool Grad, GpKind Kind>
 double mgp_eval(KernelCtx& ctx) {
@@ -1484,7 +1484,7 @@ double mgp_eval(KernelCtx& ctx) {
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   VarM y = tail_m(ctx, 0, K, N);
-  VarM S = tail_m(ctx, 1, K, K);
+  VarM S = tail_m(ctx, 1, N, N);
   VarV w = tail_v(ctx, 2, K);
   var out;
   if constexpr (Kind == kMultiGp) {
