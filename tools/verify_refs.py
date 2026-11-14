@@ -144,19 +144,6 @@ GRADIENT_AGAINST_LARGEST = {
         "s2_car", "s2_car_esicar", "s2_gr_by", "s2_mm", "s2_mm_weights",
         "s2_mmc", "sw_re_bern", "sw_skewnormal")
 }
-# A multi_gp covariance gradient entry cancels to a few hundredths of the
-# largest entry. stanli and CmdStan round it differently, 410 ULP of the
-# entry but under 1 ULP of the largest. Against a 60-digit reference stanli
-# is the closer of the two (74 vs 168 ULP).
-GRADIENT_AGAINST_LARGEST.update(dict.fromkeys(
-    ("multi_gp_rectangular", "propto_multi_gp"),
-    "multi_gp covariance entries cancel; checked against a 60-digit reference"))
-# inv_wishart's nu gradient with every argument a parameter cancels the same
-# way: 32 ULP from CmdStan, and here CmdStan is the closer to a 60-digit
-# reference (21 vs 53 ULP). The all-parameter call is unchanged by the propto
-# fix, so this predates it.
-GRADIENT_AGAINST_LARGEST["propto_data_arguments"] = (
-    "inv_wishart nu entry cancels; CmdStan is closer to a 60-digit reference")
 PLATFORM_REFS = {
     "Linux x86_64": REPO / "docs" / "internal" / "artifacts" / "corpus-refs-linux-x86_64.json.gz",
 }
