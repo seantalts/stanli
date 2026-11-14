@@ -15,7 +15,7 @@ arguments whose type changes which terms survive. The kernels are in
 
 `multi_student_t` and its Cholesky form bind every argument as autodiff and
 then subtract the `nu` and `Sigma` terms Stan Math drops when those arguments
-are data. Their `lp__` agrees with CmdStan to rounding rather than to the bit.
+are data. Their `lp__` agrees with CmdStan to within rounding.
 
 ## Releases up to 0.26.0
 
@@ -31,7 +31,9 @@ The shift did not depend on the parameters, so gradients, `write_array` values
 and the posterior were unchanged. It was lower than CmdStan's for the Wishart
 family: `S ~ inv_wishart(4, I)` on a 2 x 2 matrix reported 3.224 less. A
 pinned seed gave a different chain from the same posterior. Binding the data
-arguments as `double` made the shared library 208 KB larger.
+arguments as `double` made the shared library 208 KB larger. The size
+reasoning behind the old design is in the
+[earlier version of this page](https://github.com/seantalts/stanli/blob/d922c3cb8c9adf4baa22fa6706057e2455e2fef2/docs/lp-constant.md).
 
 ## How it is checked
 
