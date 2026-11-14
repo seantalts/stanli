@@ -1560,6 +1560,26 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
       si.param_free = e.data_only;
       return {StaticProbeState::Known, {(int64_t)e.args.size(), si}, {}};
     }
+    if ((e.name == "rep_vector" || e.name == "rep_row_vector") &&
+        e.args.size() == 2 && is_scalar_type(e.args[0].type_)) {
+      const auto n = try_static_int(e.args[1]);
+      if (n.state != StaticProbeState::Known || n.value < 0) return {};
+      SlotInfo si = view_of(e.name == "rep_vector" ? "UVector" : "URowVector");
+      si.param_free = e.data_only;
+      return {StaticProbeState::Known, {n.value, si}, {}};
+    }
+    if (e.name == "rep_matrix" && e.args.size() == 3 &&
+        is_scalar_type(e.args[0].type_)) {
+      const auto m = try_static_int(e.args[1]);
+      const auto n = try_static_int(e.args[2]);
+      if (m.state != StaticProbeState::Known ||
+          n.state != StaticProbeState::Known || m.value < 0 || n.value < 0)
+        return {};
+      return {StaticProbeState::Known,
+              {checked_product({m.value, n.value}, "rep_matrix"),
+               matrix_view(m.value, n.value, e.data_only)},
+              {}};
+    }
     if ((e.name == "transpose" || e.name == "Transpose__") &&
         e.args.size() == 1) {
       auto base = try_static_view(e.args[0]);
