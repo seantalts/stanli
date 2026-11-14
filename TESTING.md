@@ -88,7 +88,7 @@ BRANCH` runs it on a branch. The jobs are in
 | [lowering and pass tests](#unit-tests-for-numerical-operations) | log density, gradient, `write_array` rows and op counts of small compiled models | stan-math `var` references, hand-derived constants or the MIR interpreter | PR (CTest) | models outside the fixtures |
 | [lit](#unit-tests-for-numerical-operations) | each marked `.stan` file's compile or evaluation result, and optionally one pass dump | the expectation written in the file | PR (CTest) | values the file does not state |
 | [fused-density differential](#unit-tests-for-numerical-operations) | the seven fused densities over activity masks, shapes and edge values | Stan Math's kernels; bitwise, 2 ULP for normal and cauchy | Linux x86-64 on PRs and post-merge; AddressSanitizer; Windows ARM64 dev setup | macOS |
-| [corpus replay](#comparison-with-cmdstan-on-complete-models) | log density, gradient and `write_array` rows of 350 models at 3 points | recorded CmdStan values | PR on Linux x86-64; post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points; Windows |
+| [corpus replay](#comparison-with-cmdstan-on-complete-models) | log density, gradient and `write_array` rows of 363 models at 3 points | recorded CmdStan values | PR on Linux x86-64; post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points; Windows |
 | [fast-mode replay](#fast-mode) | the same models compiled in fast mode | the same references, fast-mode limits | PR, Linux x86-64 | macOS, Windows and ARM |
 | [local corpus replays](#comparison-with-cmdstan-on-complete-models) | log density, gradient and outputs of the function, signature, fixture and other local models | recorded CmdStan values | PR (CTest) | signatures and sizes the generators exclude |
 | [stanc3 good models](#testing-stan-language-coverage) | the 1,244 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
@@ -138,9 +138,11 @@ that needs a package these jobs lack, such as brms, goes in another file. The
 
 [`tools/verify_refs.py`](tools/verify_refs.py) replays every corpus against
 CmdStan's recorded answers. [`corpus-refs.json.gz`](docs/internal/artifacts/corpus-refs.json.gz)
-holds the main [corpus](tools/corpus_inventory.py), 350 models at 3 points
+holds the main [corpus](tools/corpus_inventory.py), 363 models at 3 points
 each: 119 posteriordb, 124 brms, 62 Rethinking, 22 cogmod, 13 Aalto, 4
-regression, 3 ctsem and 3 OncoBayes2 models. Nearly all also carry
+regression and 3 ctsem models, and 16 models from 8 CRAN packages
+(OncoBayes2, rstanarm, multinma, EpiNow2, mlumr, rbioacc, BeeGUTS and
+hdbayes). Nearly all also carry
 `write_array` rows, compared by column name, and both drivers seed Stan's RNG
 the same way so generated quantities compare too. Per-model status and worst
 deviations are in [`docs/corpus-status.md`](docs/corpus-status.md).

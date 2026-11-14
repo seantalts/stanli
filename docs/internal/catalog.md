@@ -62,6 +62,13 @@ paths and hashes in raw records unchanged.
 | [Models from cogmod](../../tests/cogmod/README.md) | Fixture scope, provenance or test workflow. |
 | [Model from ctsem](../../tests/ctsem/README.md) | Fixture scope, provenance or test workflow. |
 | [Model from OncoBayes2](../../tests/oncobayes2/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from rstanarm](../../tests/rstanarm/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from multinma](../../tests/multinma/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from EpiNow2](../../tests/epinow2/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from mlumr](../../tests/mlumr/README.md) | Fixture scope, provenance or test workflow. |
+| [Model from rbioacc](../../tests/rbioacc/README.md) | Fixture scope, provenance or test workflow. |
+| [Model from BeeGUTS](../../tests/beeguts/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from hdbayes](../../tests/hdbayes/README.md) | Fixture scope, provenance or test workflow. |
 | [Compiler producer fixtures](../../tests/compiler/README.md) | Fixture scope, provenance or test workflow. |
 | [Stan teaching-model corpus for Stanli](../../tests/educational/IMPORT_README.md) | Fixture scope, provenance or test workflow. |
 | [Models from Aalto Stan lessons](../../tests/educational/README.md) | Fixture scope, provenance or test workflow. |
