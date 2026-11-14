@@ -71,6 +71,8 @@ createStanli().then((M) => {
                 M.UTF8ToString(errPtr).split("\n")[0]);
     process.exit(1);
   }
+  const note = M.UTF8ToString(M._stanli_warnings(m));
+  if (note) console.error("INTERP " + note.replace(/\n/g, " "));
   const n = Number(M._stanli_n_unconstrained(m));
   const qPtr = M._malloc(8 * n);
   const lpPtr = M._malloc(8);
