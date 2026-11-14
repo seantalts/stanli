@@ -20,5 +20,14 @@ stopifnot(identical(emit(matrix(1:6, nrow = 2), 2), '[[1,3,5],[2,4,6]]'),
           identical(emit(array(1:8, dim = c(2, 1, 2, 2)), 4),
                     '[[[[1,5],[3,7]]],[[[2,6],[4,8]]]]'),
           identical(num(NA_real_), "NaN"), identical(num(Inf), "Infinity"))
+code2 <- "data {
+  int<lower=1> F;
+  vector[F == 3 ? 4 : 3] w;
+  array[2] vector[2] a;
+}"
+stopifnot(identical(decl_ndim(code2), list(F = 0, w = 1, a = 2)))
+write_json(list(F = 3L, w = c(1, 2, 3, 4), a = list(c(1, 2), c(3, 4)),
+                extra = list(1)), code2, out)
+stopifnot(identical(readLines(out), '{"F":3,"w":[1,2,3,4],"a":[[1,2],[3,4]]}'))
 unlink(out)
-cat("Stan JSON: constrained scalars, length-one vectors, arrays, matrices and non-finite values pass.\n")
+cat("Stan JSON: constrained scalars, length-one vectors, arrays, matrices, lists, conditional sizes and non-finite values pass.\n")
