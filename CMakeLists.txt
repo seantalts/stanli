@@ -1123,7 +1123,8 @@ if(NOT EMSCRIPTEN)
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   foreach(fixture gq_bounded_vector gq_bounded_row_vector gq_bounded_integer
                   gq_integer_fill_paths gq_bounded_integer_refusals
-                  gq_bounded_nested gq_bounded_nested3 gq_bounded_nested5)
+                  gq_bounded_nested gq_bounded_nested3 gq_bounded_nested5
+                  multi_gp_rectangular propto_data_arguments propto_multi_gp)
     add_test(NAME ${fixture}_reference
       COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
               --check $<TARGET_FILE:stanli_check> --model ${fixture}
@@ -1514,6 +1515,9 @@ if(Python3_Interpreter_FOUND)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_container_flow_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_container_flow_models.py --check
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_propto_fixture_generation
+           COMMAND ${Python3_EXECUTABLE} tools/gen_propto_fixtures.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_stanc3_good_data
            COMMAND ${Python3_EXECUTABLE} tools/gen_stanc3_good_data.py --check
