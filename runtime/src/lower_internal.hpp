@@ -1597,6 +1597,10 @@ struct Lowering {
   // loop. Promote that whole loop to the necessity island instead. Nested
   // loops own their own control statements and therefore stop this search.
   bool runtime_loop_control(const mir::Stmt& s, bool runtime_path = false);
+  // Drop from int_env the integers `s` writes when the scan cannot work out
+  // their value, so a later `if (flag) break` is not read as constant.
+  void forget_runtime_ints(const mir::Stmt& s);
+  bool decided_statically(const mir::Stmt& s);
 
   // Every name an Assignment targets anywhere in `s`, in first-seen order.
   void assigned_names(const mir::Stmt& s, std::vector<std::string>* out) {

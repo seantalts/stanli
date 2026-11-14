@@ -363,7 +363,9 @@ bool Lowering::runtime_loop_control(const mir::Stmt& s, bool runtime_path) {
   if (s.kind == mir::Stmt::Block || s.kind == mir::Stmt::SList) {
     try {
       return scan_block(s, [&](const mir::Stmt& child) {
-        return runtime_loop_control(child, runtime_path);
+        if (runtime_loop_control(child, runtime_path)) return true;
+        forget_runtime_ints(child);
+        return false;
       });
     } catch (const CompileError&) {
       // A local this scan cannot fold leaves every later condition
@@ -373,6 +375,36 @@ bool Lowering::runtime_loop_control(const mir::Stmt& s, bool runtime_path) {
   for (const auto& child : s.body)
     if (runtime_loop_control(child, runtime_path)) return true;
   return false;
+}
+// Whether every condition and integer value in `s` folds at compile time.
+bool Lowering::decided_statically(const mir::Stmt& s) {
+  switch (s.kind) {
+    case mir::Stmt::IfElse: {
+      const auto evaluated = try_eval_pure(s.cond);
+      if (!evaluated) return false;
+      const size_t arm = evaluated->r.at(0) != 0.0 ? 0 : 1;
+      return arm >= s.body.size() || decided_statically(s.body[arm]);
+    }
+    case mir::Stmt::For:
+    case mir::Stmt::While:
+      return false;
+    case mir::Stmt::Assignment:
+      if (int_env.count(s.lhs) && !try_eval_pure(s.rhs)) return false;
+      break;
+    default:
+      break;
+  }
+  return std::all_of(s.body.begin(), s.body.end(),
+                     [&](const mir::Stmt& k) { return decided_statically(k); });
+}
+void Lowering::forget_runtime_ints(const mir::Stmt& s) {
+  std::vector<std::string> writes;
+  assigned_names(s, &writes);
+  if (std::none_of(writes.begin(), writes.end(),
+                   [&](const std::string& n) { return int_env.count(n); }))
+    return;
+  if (decided_statically(s)) return;
+  for (const auto& name : writes) int_env.erase(name);
 }
 // Remove a return at the lexical end of a statement arm, preserving every
 // statement that precedes it.  This is the structured form used by UDFs
@@ -1895,7 +1927,9 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       const long old_value = had_old ? old->second : 0;
       bool has_runtime_loop_control = false;
       if (std::any_of(s.body.begin(), s.body.end(), has_loop_control)) {
+        const auto saved_ints = int_env;
         const ScopeExit leave{[&] {
+          int_env = saved_ints;
           if (had_old)
             int_env[s.loopvar] = old_value;
           else
@@ -1903,11 +1937,13 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
         }};
         for (int64_t v = lo; v <= hi && !has_runtime_loop_control; ++v) {
           int_env[s.loopvar] = static_cast<long>(v);
-          for (const auto& child : s.body)
+          for (const auto& child : s.body) {
             if (runtime_loop_control(child)) {
               has_runtime_loop_control = true;
               break;
             }
+            forget_runtime_ints(child);
+          }
         }
       }
       if (has_runtime_loop_control) {
