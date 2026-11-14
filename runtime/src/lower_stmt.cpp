@@ -385,7 +385,23 @@ bool Lowering::decided_statically(const mir::Stmt& s) {
       const size_t arm = evaluated->r.at(0) != 0.0 ? 0 : 1;
       return arm >= s.body.size() || decided_statically(s.body[arm]);
     }
-    case mir::Stmt::For:
+    case mir::Stmt::For: {
+      long lo, hi;
+      try {
+        lo = eval_int(s.lower);
+        hi = eval_int(s.upper);
+      } catch (const CompileError&) {
+        return false;
+      }
+      const auto saved = int_env;
+      const ScopeExit restore{[&] { int_env = saved; }};
+      for (long v = lo; v <= hi; ++v) {
+        int_env[s.loopvar] = v;
+        for (const auto& k : s.body)
+          if (!decided_statically(k)) return false;
+      }
+      return true;
+    }
     case mir::Stmt::While:
       return false;
     case mir::Stmt::Assignment:
