@@ -1318,6 +1318,49 @@ static void test_udf_lp_propto() {
   stan::math::recover_memory();
 }
 
+// stanc's O1 inliner substitutes the data actual for each formal, but an
+// indexed formal such as `s[i]` keeps the AutoDiffable adlevel it had in the
+// function body. CmdStan's types come from the actuals, so the data scales
+// drop their log under `~`; the local `wide` is a var because x is, and
+// keeps its log. tail_lp runs inside a parameter-dependent branch.
+static void test_udf_lp_inlined_propto() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_lp_inlined_propto.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_lp_inlined_propto.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf lp inlined compile: ") + error.what());
+    return;
+  }
+  const std::vector<double>& m = data.at("m").r;
+  const std::vector<double>& s = data.at("s").r;
+  for (const std::vector<double>& q :
+       {std::vector<double>{0.1, 0.0, -0.1}, {-0.4, 0.3, 0.2}}) {
+    std::vector<stan::math::var> p(q.begin(), q.end());
+    stan::math::var lp = 0;
+    for (int i = 0; i < 2; ++i) {
+      lp += stan::math::normal_lpdf<true>(p[i + 1], m[i], s[i]);
+      lp += stan::math::normal_lpdf<true>(p[i + 1], m[i] + 1,
+                                          stan::math::var(2 * s[i]));
+    }
+    if (q[0] > 0) lp += stan::math::normal_lpdf<true>(p[0], 0, s[1]);
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    std::copy(q.begin(), q.end(), ex.params_data());
+    double grad[3] = {};
+    const std::string at = q[0] > 0 ? " (branch taken)" : "";
+    expect_ulp("udf lp inlined lp" + at, ex.gradient(grad), lp.val(), 10);
+    for (int i = 0; i < 3; ++i)
+      expect_ulp("udf lp inlined grad " + std::to_string(i) + at, grad[i],
+                 p[i].adj(), 10);
+    stan::math::recover_memory();
+  }
+}
+
 // Void functions called as statements, as stanc leaves them when it does not
 // inline. An `_lp` function adds to the caller's target and inherits the
 // caller's propto, so the `~` inside prior_lp drops its constant terms while
@@ -8855,6 +8898,7 @@ int main() {
   test_region_constant_shadow();
   test_udf_guard_returns();
   test_udf_lp_propto();
+  test_udf_lp_inlined_propto();
   test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();

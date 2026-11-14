@@ -41,6 +41,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -74,6 +75,8 @@ struct InlineArg {
   bool is_const_int = false;
   bool is_const_real = false;
   double const_real = 0.0;
+  // Whether CmdStan instantiates the actual as a var.
+  bool autodiff = true;
 };
 
 struct Bail {
@@ -172,6 +175,26 @@ struct ProgramCompiler {
   // Whether this region belongs to generated quantities. Only there is an
   // RNG draw legal.
   bool in_write_array = false;
+  // CmdStan instantiates a user function body with the actual argument
+  // types: a formal is a var when its actual is, and a local not declared
+  // data is a var when any real actual is. Empty outside a function body,
+  // where the MIR adlevel of a variable is its C++ type.
+  struct CallTypes {
+    std::map<std::string, bool> formals;
+    bool locals = true;
+  };
+  std::optional<CallTypes> call_types;
+  // The caller's propto__, which an `_lp` or `_lupdf` call passes on.
+  bool propto_ctx = true;
+  bool autodiff(const mir::Expr& e) const {
+    if (in_write_array) return false;
+    const bool locals = !call_types || call_types->locals;
+    return mir::instantiated_autodiff(e, locals, [&](const mir::Expr& v) {
+      if (!call_types) return true;
+      const auto formal = call_types->formals.find(v.name);
+      return formal != call_types->formals.end() ? formal->second : locals;
+    });
+  }
   int branch_depth = 0;  // inside a branch on a runtime value
   // A while is a genuinely runtime loop: its condition and state must be
   // evaluated again on every trip, rather than folded once while the program
@@ -2157,6 +2180,7 @@ struct ProgramCompiler {
     } else {
       if (e.type_ == "UReal") arg.is_const_real = try_creal(e, &arg.const_real);
       arg.real = expr(e);
+      arg.autodiff = autodiff(e);
     }
     return arg;
   }
@@ -2229,6 +2253,7 @@ struct ProgramCompiler {
     args.reserve(views.size());
     InlineArg sliced;
     sliced.real = slice;
+    sliced.autodiff = autodiff(e.args[1]);
     args.push_back(std::move(sliced));
     InlineArg start;
     start.is_const_int = true;
@@ -2239,8 +2264,9 @@ struct ProgramCompiler {
     end.ints = {(long)n};
     args.push_back(std::move(end));
     for (InlineArg& arg : shared) args.push_back(std::move(arg));
-    (void)propto;
-    return inline_call(*f, args);
+    // As in CmdStan, an `_lupdf` functor inherits the caller's normalization
+    // and an `_lpdf` one forces the normalized density.
+    return inline_call(*f, args, propto_ctx && propto);
   }
 
   // map_rect's job count and every input shape are fixed when the model is
@@ -2321,6 +2347,7 @@ struct ProgramCompiler {
       args[2].real.kind = ViewKind::Array;
       args[2].real.dims = {real_width};
       args[2].real.leaf = ViewKind::Flat;
+      args[2].autodiff = false;
       args[3].is_const_int = true;
       args[3].int_dims = {int_width};
       args[3].ints.reserve((size_t)int_width);
@@ -2854,14 +2881,14 @@ struct ProgramCompiler {
         } else {
           argument.scalar = source.unsized.depth == 0;
           argument.data_only = source.data_only;
-          argument.active = !source.data_only;
+          argument.active = autodiff(source);
           args.push_back(expr(source));
           argument.shape = builtin_argument_shape(source, args.back());
         }
         plan_arguments.push_back(std::move(argument));
       }
       const DensityCallPlan plan =
-          density_call_plan(spec, plan_arguments, e.fn_propto);
+          density_call_plan(spec, plan_arguments, e.fn_propto && propto_ctx);
       if (plan.empty_result) return {konst(0.0), 1};
       Range out{0, 1};
       return kernel_call(spec.opcode, args, out, plan.variant,
@@ -3452,7 +3479,7 @@ struct ProgramCompiler {
       int active = 0;
       for (int k = 0; k < nargs; ++k) {
         if (args[k].len != lanes) bail(e.name + ": arguments differ in length");
-        if (!e.args[k].data_only) active |= 1 << k;
+        if (autodiff(e.args[k])) active |= 1 << k;
       }
       const int packed = alloc(nargs * lanes);
       for (int k = 0; k < nargs; ++k)
@@ -3462,7 +3489,7 @@ struct ProgramCompiler {
                                   ? expr(e.args[nargs])
                                   : Range{konst(wiener->default_precision), 1};
       const bool propto_density =
-          wiener->kind == WienerKind::Lpdf && e.fn_propto;
+          wiener->kind == WienerKind::Lpdf && e.fn_propto && propto_ctx;
       return kernel_call(
           OP_WIENER_PACKED_LPDF, {Range{packed, nargs * lanes}, precision},
           Range{0, 1}, 0, active ? 0x1 : 0,
@@ -3558,7 +3585,8 @@ struct ProgramCompiler {
     if (e.fn_lib == mir::Expr::Lib::UserDefined) {
       auto it = funs.find(e.name);
       if (it == funs.end()) bail("unknown function " + e.name);
-      return inline_call(*it->second, inline_arguments(e.args));
+      return inline_call(*it->second, inline_arguments(e.args),
+                         propto_ctx && mir::inherits_propto(e));
     }
     if (e.fn_lib == mir::Expr::Lib::Internal) {
       if (e.name == "FnMakeArray" || e.name == "FnMakeRowVec") {
@@ -4884,7 +4912,8 @@ struct ProgramCompiler {
     }
   }
 
-  Range inline_call(const mir::FunDef& f, const std::vector<InlineArg>& args) {
+  Range inline_call(const mir::FunDef& f, const std::vector<InlineArg>& args,
+                    bool propto = true) {
     if (args.size() != f.arg_names.size()) bail("function argument mismatch");
     if (++inline_depth > 32) {
       --inline_depth;
@@ -4902,6 +4931,8 @@ struct ProgramCompiler {
     auto saved_int_decl_at = int_decl_at;
     auto saved_int_reset_at = int_reset_at;
     auto saved_extern_bound = extern_bound;
+    auto saved_call_types = call_types;
+    const bool saved_propto_ctx = propto_ctx;
     const int saved_branch_depth = branch_depth;
     const int saved_return_while_base = return_while_base;
     const size_t saved_loop_count = loops.size();
@@ -4916,6 +4947,14 @@ struct ProgramCompiler {
     int_decl_at.clear();
     int_reset_at.clear();
     extern_bound.clear();
+    call_types = CallTypes{};
+    call_types->locals = false;
+    for (size_t k = 0; k < args.size(); ++k) {
+      const bool real_autodiff = !args[k].is_const_int && args[k].autodiff;
+      call_types->formals[f.arg_names[k]] = real_autodiff;
+      call_types->locals = call_types->locals || real_autodiff;
+    }
+    propto_ctx = propto;
     branch_depth = 0;
     inline_stack.push_back(f.name);
     std::set<std::string> assigned;
@@ -4959,6 +4998,8 @@ struct ProgramCompiler {
       int_decl_at = std::move(saved_int_decl_at);
       int_reset_at = std::move(saved_int_reset_at);
       extern_bound = std::move(saved_extern_bound);
+      call_types = std::move(saved_call_types);
+      propto_ctx = saved_propto_ctx;
       branch_depth = saved_branch_depth;
       return_while_base = saved_return_while_base;
       loops.resize(saved_loop_count);
@@ -4976,6 +5017,8 @@ struct ProgramCompiler {
     int_decl_at = std::move(saved_int_decl_at);
     int_reset_at = std::move(saved_int_reset_at);
     extern_bound = std::move(saved_extern_bound);
+    call_types = std::move(saved_call_types);
+    propto_ctx = saved_propto_ctx;
     branch_depth = saved_branch_depth;
     return_while_base = saved_return_while_base;
     loops.resize(saved_loop_count);

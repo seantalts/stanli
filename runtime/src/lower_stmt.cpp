@@ -399,6 +399,11 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
                                          const mir::Stmt* s) {
   IslandProg* const prog = &prog_ref;
   IslandRegion* const reg = &region;
+  c.propto_ctx = propto_ctx;
+  if (udf_depth > 0) {
+    c.call_types =
+        ProgramCompiler::CallTypes{udf_formal_autodiff, udf_autodiff_ctx};
+  }
   for (const std::string& name : names)
     if (const auto found = int_env.find(name); found != int_env.end())
       c.ints[name] = {found->second};
