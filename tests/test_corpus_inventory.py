@@ -21,8 +21,7 @@ class InventoryTest(unittest.TestCase):
         self.imported = self.root / "tests/educational"
         (self.imported / "models").mkdir(parents=True)
         (self.imported / "LICENSE").write_text("fixture license")
-        for collection in ("brms", "rethinking", "cogmod", "ctsem", "oncobayes2",
-                           "regressions"):
+        for collection in (*inventory.LOCAL_COLLECTIONS, "regressions"):
             directory = self.root / "tests" / collection
             directory.mkdir()
             (directory / f"{collection}.stan").write_text("parameters { real x; }")
@@ -67,14 +66,15 @@ class InventoryTest(unittest.TestCase):
 
     def test_filters_are_provenance_only_and_language_is_explicit(self):
         self.assertEqual(set(inventory.corpus_cases(self.pdb)),
-                         {"pdb_model", "import_a", "import_b", "brms", "rethinking", "cogmod",
-                          "ctsem", "oncobayes2"})
+                         {"pdb_model", "import_a", "import_b", *inventory.LOCAL_COLLECTIONS})
         self.assertIn("regressions", inventory.corpus_cases(self.pdb, include_language=True))
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "regressions")), {"regressions"})
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "cogmod")), {"cogmod"})
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "ctsem")), {"ctsem"})
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "oncobayes2")),
                          {"oncobayes2"})
+        self.assertEqual(set(inventory.corpus_cases(self.pdb, "cran")),
+                         set(inventory.CRAN_PACKAGES))
         self.assertEqual(set(inventory.corpus_cases(self.pdb, "teaching")),
                          {"import_a", "import_b", "brms", "rethinking"})
         with self.assertRaisesRegex(ValueError, "Unknown corpus collection"):

@@ -71,6 +71,13 @@ conformance-cache/
 /tests/function_coverage/*.hpp
 /tests/function_coverage/container_flow/*.hpp
 tests/oncobayes2/*.hpp
+tests/rstanarm/*.hpp
+tests/multinma/*.hpp
+tests/epinow2/*.hpp
+tests/mlumr/*.hpp
+tests/rbioacc/*.hpp
+tests/beeguts/*.hpp
+tests/hdbayes/*.hpp
 
 # Compiler output beside generated teaching fixtures.
 tests/rethinking/*.hpp
