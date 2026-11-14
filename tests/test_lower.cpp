@@ -1447,6 +1447,45 @@ static void test_udf_branch_kernels() {
   }
 }
 
+// stanc's O1 inliner, given a call whose non-integer actuals are all data,
+// declares the return value and locals as CmdStan's doubles. `~` then drops
+// their logs as CmdStan does at O0: widen(s), shifted_lp(0.25, s) and
+// scaled_lp(0.25, s) add only what normal_lpdf<true> of doubles does, while
+// scaled_lp(tau, s) keeps `wide` a var.
+static void test_udf_data_call_o1() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_data_call_o1.json"));
+  CompiledModel cm;
+  try {
+    cm =
+        compile_model(slurp("tests/fixtures/udf_data_call_o1.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf data call o1 compile: ") + error.what());
+    return;
+  }
+  const double s = data.at("s").r[0];
+  for (double q : {0.1, -0.3}) {
+    stan::math::var tau = q;
+    stan::math::var lp = stan::math::normal_lpdf<true>(tau, 0, 2 * s);
+    lp += stan::math::normal_lpdf<true>(0.25, 1, 2 * s);
+    if (q > 0) {
+      lp += stan::math::normal_lpdf<true>(tau, 0, s);
+      lp += stan::math::normal_lpdf<true>(tau, 1, stan::math::var(2 * s));
+      lp += stan::math::normal_lpdf<true>(0.25, 1, 2 * s);
+    }
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = q;
+    double grad = 0;
+    const std::string at = q > 0 ? " (branch taken)" : "";
+    expect_ulp("udf data call o1 lp" + at, ex.gradient(&grad), lp.val(), 10);
+    expect_ulp("udf data call o1 grad" + at, grad, tau.adj(), 10);
+    stan::math::recover_memory();
+  }
+}
+
 // Void functions called as statements, as stanc leaves them when it does not
 // inline. An `_lp` function adds to the caller's target and inherits the
 // caller's propto, so the `~` inside prior_lp drops its constant terms while
@@ -8987,6 +9026,7 @@ int main() {
   test_udf_lp_inlined_propto();
   test_udf_lp_branch_propto();
   test_udf_branch_kernels();
+  test_udf_data_call_o1();
   test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();
