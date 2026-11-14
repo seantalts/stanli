@@ -1361,6 +1361,48 @@ static void test_udf_lp_inlined_propto() {
   }
 }
 
+// User functions inside parameter-dependent branches, which the region
+// compiler inlines from O0 MIR. CmdStan instantiates each body with the
+// actual argument types: data scales drop their log, `wide` is a var only
+// when x is, so scaled_lp(0.25, s) adds nothing, and the normalized
+// shifted_lpdf call keeps every term of its normal_lupdf. guarded_lp holds
+// its branch inside the function, and centered_lp returns early above 1.
+static void test_udf_lp_branch_propto() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_lp_branch_propto.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_lp_branch_propto.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf lp branch compile: ") + error.what());
+    return;
+  }
+  const double s = data.at("s").r[0];
+  for (double q : {0.1, 1.5, -0.3}) {
+    stan::math::var tau = q;
+    stan::math::var lp = 0;
+    if (q > 0) {
+      lp += stan::math::normal_lpdf<true>(tau, -0.5, s);
+      lp += stan::math::normal_lpdf<true>(tau, 0, s);
+      lp += stan::math::normal_lpdf<true>(tau, 1, stan::math::var(2 * s));
+      if (q <= 1) lp += stan::math::normal_lpdf<true>(tau, 0.5, s);
+      lp += stan::math::normal_lpdf(tau, 1, s);
+      lp += stan::math::normal_lpdf<true>(tau, 2, s);
+    }
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = q;
+    double grad = 0;
+    const std::string at = " at " + std::to_string(q);
+    expect_ulp("udf lp branch lp" + at, ex.gradient(&grad), lp.val(), 10);
+    expect_ulp("udf lp branch grad" + at, grad, tau.adj(), 10);
+    stan::math::recover_memory();
+  }
+}
+
 // Void functions called as statements, as stanc leaves them when it does not
 // inline. An `_lp` function adds to the caller's target and inherits the
 // caller's propto, so the `~` inside prior_lp drops its constant terms while
@@ -8899,6 +8941,7 @@ int main() {
   test_udf_guard_returns();
   test_udf_lp_propto();
   test_udf_lp_inlined_propto();
+  test_udf_lp_branch_propto();
   test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();

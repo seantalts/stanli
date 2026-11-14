@@ -2266,7 +2266,7 @@ struct ProgramCompiler {
     for (InlineArg& arg : shared) args.push_back(std::move(arg));
     // As in CmdStan, an `_lupdf` functor inherits the caller's normalization
     // and an `_lpdf` one forces the normalized density.
-    return inline_call(*f, args, propto_ctx && propto);
+    return inline_call(*f, args, false, propto_ctx && propto);
   }
 
   // map_rect's job count and every input shape are fixed when the model is
@@ -3585,7 +3585,7 @@ struct ProgramCompiler {
     if (e.fn_lib == mir::Expr::Lib::UserDefined) {
       auto it = funs.find(e.name);
       if (it == funs.end()) bail("unknown function " + e.name);
-      return inline_call(*it->second, inline_arguments(e.args),
+      return inline_call(*it->second, inline_arguments(e.args), false,
                          propto_ctx && mir::inherits_propto(e));
     }
     if (e.fn_lib == mir::Expr::Lib::Internal) {
@@ -4075,7 +4075,8 @@ struct ProgramCompiler {
     frame.jumps.push_back(emit(Program::JMP, 0));
   }
 
-  Range function_body(const std::vector<mir::Stmt>& body) {
+  Range function_body(const std::vector<mir::Stmt>& body,
+                      bool void_call = false) {
     ReturnFrame frame;
     frame.body = &body;
     frame.parent = return_frame;
@@ -4088,9 +4089,9 @@ struct ProgramCompiler {
     return_frame = &frame;
     const Path path = compile_body(body);
     if (path == Path::Returned) return frame.result;
-    if (path == Path::Open)
+    if (path == Path::Open && !void_call)
       bail("function can finish without returning a value");
-    if (!frame.has_result) bail("function returned no value");
+    if (!frame.has_result && !void_call) bail("function returned no value");
     // Fall through at the final return instead of dispatching a no-op jump.
     // Path::Ended propagates only through all-return paths; handlers with a
     // fallthrough edge to code.size() consume it before reaching here.
@@ -4903,6 +4904,13 @@ struct ProgramCompiler {
                0, (int)p.messages.size() - 1);
           return Path::Open;
         }
+        if (const auto call = mir::user_defined_statement_call(s)) {
+          auto it = funs.find(call->name);
+          if (it == funs.end()) bail("unknown function " + call->name);
+          (void)inline_call(*it->second, inline_arguments(call->args), true,
+                            propto_ctx && mir::inherits_propto(*call));
+          return Path::Open;
+        }
         bail("statement function " + s.fn_name +
              " requires the MIR interpreter");
       case mir::Stmt::Skip:
@@ -4913,7 +4921,7 @@ struct ProgramCompiler {
   }
 
   Range inline_call(const mir::FunDef& f, const std::vector<InlineArg>& args,
-                    bool propto = true) {
+                    bool void_call = false, bool propto = true) {
     if (args.size() != f.arg_names.size()) bail("function argument mismatch");
     if (++inline_depth > 32) {
       --inline_depth;
@@ -4985,7 +4993,7 @@ struct ProgramCompiler {
     }
     Range out{0, 0};
     try {
-      out = function_body(f.body);
+      out = function_body(f.body, void_call);
     } catch (...) {
       inline_stack.pop_back();
       reals = std::move(saved_reals);
