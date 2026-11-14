@@ -161,7 +161,11 @@ deviations are in [`docs/corpus-status.md`](docs/corpus-status.md).
 
 `container_flow`, `cmdstan_replay` and `oncobayes2` also run through stock
 stanc (the `_stanc` CTests). A model fails when it runs interpreted and its
-corpus does not list it as interpreted, or the reverse.
+corpus does not list it as interpreted, or the reverse. The main corpus replay
+applies the same rule with `CORPUS_INTERPRETED` in
+[`tools/verify_refs.py`](tools/verify_refs.py), which lists `ctsem_ctsm` and
+`ctsem_ctsm_400`: a size expression in their generated quantities reads an
+integer the compiled `write_array` cannot size.
 
 [`tools/verify_sample.py`](tools/verify_sample.py) records the references, and
 `--corpus NAME` a local corpus, through CmdStan's own driver

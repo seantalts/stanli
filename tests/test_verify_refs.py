@@ -189,6 +189,15 @@ class CheckModelPointsTest(unittest.TestCase):
     def test_agreeing_at_every_point_passes(self):
         self.assertEqual(self.run_check('echo "OK -3.5 1 -2"')[1], "OK")
 
+    def test_interpreter_use_must_be_listed(self):
+        interp = 'echo "INTERP stanli: parts run interpreted" >&2\necho "OK -3.5 1 -2"'
+        self.assertEqual(self.run_check(interp)[1], "INTERPRETER")
+        with unittest.mock.patch.dict(verify_refs.CORPUS_INTERPRETED,
+                                      {MODEL: "a test"}):
+            self.assertEqual(self.run_check(interp)[1], "OK")
+            self.assertEqual(self.run_check('echo "OK -3.5 1 -2"')[1],
+                             "INTERPRETER")
+
     def test_tight_ulp_gate_catches_small_scaled_error(self):
         ref = {**REF, "recorded": {"platform": verify_refs.native_platform()}}
         with unittest.mock.patch.dict(verify_refs.ULP_LIMITS, {MODEL: 10}):

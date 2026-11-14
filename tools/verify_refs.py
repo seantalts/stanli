@@ -97,6 +97,15 @@ QUARANTINED = {}
 # excused: a segfault and a refusal are different bugs.
 KNOWN_GAPS = {}
 
+# Corpus models that run through the MIR interpreter, mapped to why. Any
+# other model that reports an interpreted log density or write_array
+# fails with INTERPRETER, and so does a listed model that no longer
+# does, as INTERPRETED does for the local corpora.
+CORPUS_INTERPRETED = {
+    name: "generated quantities: a size expression reads the integer pr2, "
+          "which the compiled write_array cannot size"
+    for name in ("ctsem_ctsm", "ctsem_ctsm_400")}
+
 # (model, point) pairs excused from probe_point's finite-gradient rule,
 # for points that carry no reference at all. Empty while every point is
 # referenced -- pair_dev already counts NaN against NaN as agreement, so
@@ -668,13 +677,14 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         crashed = proc.returncode < 0 or not got
         return ("CRASH" if crashed else "RUN_FAIL", 0.0, 0, 0,
                 f"point {point}: {fail_detail(proc, got)}")
-    if opts and interpreted(proc.stderr) != opts.interpreted:
+    expected = opts.interpreted if opts else model in CORPUS_INTERPRETED
+    if interpreted(proc.stderr) != expected:
         note = next((line for line in proc.stderr.splitlines()
                      if line.startswith("INTERP ")
                      or "(interpreted:" in line), "")
         return ("INTERPRETER", 0.0, 0, 0,
                 f"point {point}: " + (f"runs through the MIR interpreter: "
-                                      f"{note[:200]}" if not opts.interpreted
+                                      f"{note[:200]}" if not expected
                                       else "expected the MIR interpreter"))
     rv = [float(x) for x in pt["values"]]
     gv = [float(x) for x in got[1:]]
