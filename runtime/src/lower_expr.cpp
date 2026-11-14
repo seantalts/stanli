@@ -9,20 +9,14 @@ namespace lower_detail {
 // is intentionally small: ordinary ops propagate Val::autodiff from their
 // lowered operands; only a data-condition ternary needs the unchosen arm.
 bool Lowering::expression_autodiff(const mir::Expr& e) const {
-  if (e.unsized.leaf == mir::UnsizedLeaf::Int || e.data_only) return false;
-  if (e.promoted) return scalar_autodiff();
-  if (e.kind == mir::Expr::Var) {
-    const auto formal = udf_formal_autodiff.find(e.name);
-    if (formal != udf_formal_autodiff.end()) return formal->second;
-    const auto value = scope.find(e.name);
-    return value != scope.end() ? value->second.autodiff : scalar_autodiff();
-  }
-  if (e.kind == mir::Expr::TernaryIf && e.args.size() == 3)
-    return expression_autodiff(e.args[1]) || expression_autodiff(e.args[2]);
-  bool autodiff = false;
-  for (const mir::Expr& arg : e.args)
-    autodiff = autodiff || expression_autodiff(arg);
-  return autodiff;
+  return mir::instantiated_autodiff(
+      e, scalar_autodiff(), [&](const mir::Expr& v) {
+        const auto formal = udf_formal_autodiff.find(v.name);
+        if (formal != udf_formal_autodiff.end()) return formal->second;
+        const auto value = scope.find(v.name);
+        return value != scope.end() ? value->second.autodiff
+                                    : scalar_autodiff();
+      });
 }
 // Every index the lowering sees is a bind-time constant, so what CmdStan
 // bounds-checks at runtime is checked here instead.

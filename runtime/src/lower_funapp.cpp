@@ -1309,8 +1309,7 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
           !is_vector(arg.si))
         fail(e.name + ": MIR type does not match lowered values", e.raw);
       if (!e.args[0].data_only || !outcome.si.param_free ||
-          (udf_depth == 0 &&
-           arg.autodiff != (!in_write_array && !e.args[1].data_only)))
+          arg.autodiff != expression_autodiff(e.args[1]))
         fail(e.name + ": MIR adlevel contradicts lowered dependencies", e.raw);
     }
 
@@ -1331,13 +1330,7 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
           ins.push_back(value.slot);
           result_si.param_free = result_si.param_free && value.si.param_free;
           result_autodiff = result_autodiff || value.autodiff;
-          // A UDF formal is AutoDiffable in the MIR unless declared `data`.
-          // CmdStan instantiates the body with the actual argument types, so
-          // a formal bound to data is inactive and propto drops its terms.
-          argument.active =
-              spec.shape == stanli::DensityShape::Categorical || udf_depth > 0
-                  ? value.autodiff
-                  : !source.data_only;
+          argument.active = expression_autodiff(source);
           argument.shape = builtin_argument_shape(source, value);
           if (has_runtime_shape(value)) {
             const int slot = one_runtime_extent(value, e.name);
