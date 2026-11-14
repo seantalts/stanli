@@ -545,6 +545,21 @@ inline std::optional<std::pair<size_t, size_t>> user_defined_statement_name(
   return std::make_pair(prefix.size(), end - prefix.size());
 }
 
+// A user function called as a statement, as the call expression the
+// function machinery takes. It has no value, so its type stays empty.
+inline std::optional<Expr> user_defined_statement_call(const Stmt& s) {
+  if (s.kind != Stmt::NRFunApp) return std::nullopt;
+  const auto name = user_defined_statement_name(s.fn_name);
+  if (!name) return std::nullopt;
+  Expr call;
+  call.kind = Expr::FunApp;
+  call.fn_lib = Expr::Lib::UserDefined;
+  call.name = s.fn_name.substr(name->first, name->second);
+  call.args = s.fn_args;
+  call.raw = s.raw;
+  return call;
+}
+
 // CmdStan instantiates a user `_lp` function, and a user density called as
 // `_lupdf`/`_lupmf`, with the caller's propto__. Other calls get false. An
 // overloaded name carries its signature after the base name.

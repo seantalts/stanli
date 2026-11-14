@@ -1318,6 +1318,58 @@ static void test_udf_lp_propto() {
   stan::math::recover_memory();
 }
 
+// Void functions called as statements, as stanc leaves them when it does not
+// inline. An `_lp` function adds to the caller's target and inherits the
+// caller's propto, so the `~` inside prior_lp drops its constant terms while
+// the explicit normal_lpdf in scaled_lp keeps them. A `return;` ends only the
+// call: weighted_lp skips k == 2 and the loop continues.
+static void test_udf_void_statements() {
+  using namespace stanli;
+  const std::string mir = slurp("tests/fixtures/udf_void_statements.tmir.sexp");
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_void_statements.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(mir, data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf void statements compile: ") + error.what());
+    return;
+  }
+  const std::vector<double> q = {0.3, -0.2, 1.1, 0.7};
+  const std::vector<double>& mu = data.at("mu").r;
+  const double sigma = data.at("sigma").r[0];
+  std::vector<stan::math::var> x(q.begin(), q.end());
+  stan::math::var lp = 0;
+  for (int n = 0; n < 3; ++n) {
+    lp += stan::math::normal_lpdf<true>(x[n], mu[n], sigma);
+    if (n != 1) lp += (n + 1) * x[n];
+  }
+  lp += 1.5 * stan::math::normal_lpdf(x[3], 0, 2);
+  lp += stan::math::normal_lpdf<true>(x[3], 0, 3);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  std::copy(q.begin(), q.end(), ex.params_data());
+  double grad[4] = {};
+  expect_ulp("udf void statements lp", ex.gradient(grad), lp.val(), 10);
+  for (int i = 0; i < 4; ++i)
+    expect_ulp("udf void statements grad " + std::to_string(i), grad[i],
+               x[i].adj(), 10);
+  stan::math::recover_memory();
+
+  const std::vector<double> want = {q[0], q[1],        q[2],
+                                    q[3], q[3] * q[3], q[3] * q[3] + 1};
+  for (bool interp : {false, true}) {
+    const std::vector<double> row = write_array_row(mir, data, q, interp);
+    check(row.size() == want.size(),
+          std::string("udf void statements write_array ") +
+              (interp ? "interpreted" : "compiled"));
+    for (size_t i = 0; i < row.size() && i < want.size(); ++i)
+      expect_eq("udf void statements write_array " + std::to_string(i), row[i],
+                want[i]);
+  }
+}
+
 // stanc's inliner declares a vector-returning function's result zero-length
 // and assigns it in each arm. The structured loop sizes it from those
 // assignments instead of refusing the loop.
@@ -8803,6 +8855,7 @@ int main() {
   test_region_constant_shadow();
   test_udf_guard_returns();
   test_udf_lp_propto();
+  test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();
   test_structured_while_vector_return();

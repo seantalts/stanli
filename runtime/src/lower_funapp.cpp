@@ -680,6 +680,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   const Flow flow = lower_stmts(*body);
   if (flow == Flow::Break || flow == Flow::Continue)
     fail(e.name + ": break or continue outside a loop");
+  if (e.type_.empty()) return {};  // a void function called as a statement
   if (flow != Flow::Return)
     fail(e.name + ": no return value on the executed path");
   Val ret = std::move(return_value);

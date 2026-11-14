@@ -859,6 +859,8 @@ Lowering::Val Lowering::lower_program_expression(const mir::Expr& e) {
 }
 bool Lowering::stmt_effectful(const mir::Stmt& s) {
   if (s.kind == mir::Stmt::NRFunApp && message_action(s.fn_name)) return true;
+  // A void function runs only for its effects.
+  if (mir::user_defined_statement_name(s.fn_name)) return true;
   for (const auto& e : s.fn_args)
     if (expr_effectful(e)) return true;
   if (s.has_init && expr_effectful(s.init)) return true;
@@ -1761,6 +1763,10 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         out.views.push_back(pv);
         return;
       }
+      if (const auto call = mir::user_defined_statement_call(s)) {
+        (void)lower_call_udf(*call);
+        return;
+      }
       fail("this kind of statement is not supported yet", s.raw);
     default:
       fail("unsupported statement", s.raw);
@@ -2026,10 +2032,9 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       return Flow::Next;
     }
     case mir::Stmt::Return:
-      // Only reachable inside an inlined UDF body (log_prob itself has no
-      // value returns); lower_call_udf collects the value.
-      if (!s.has_init) fail("void return unsupported in UDF inlining");
-      return_value = lower_expr(s.rhs);
+      // Only reachable inside an inlined UDF body; lower_call_udf collects
+      // the value.
+      if (s.has_init) return_value = lower_expr(s.rhs);
       return Flow::Return;
     case mir::Stmt::Break:
       return Flow::Break;
