@@ -134,8 +134,8 @@ The full index is [docs/README.md](docs/README.md).
 - [Corpus status](docs/corpus-status.md) and
   [distribution coverage](docs/coverage.md)
 - [Benchmarks and how we measure](docs/benchmarks.md)
-- [The lp constant](docs/lp-constant.md), when `lp__` differs from
-  CmdStan's
+- [lp__ and dropped constants](docs/lp-constant.md), which terms `~`
+  leaves out of `lp__`
 
 ### Understand
 

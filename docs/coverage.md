@@ -63,8 +63,8 @@ log density and every gradient component, because some near-zero gradient
 lanes vary with container instantiation and compiler optimization. The policy
 is in [TESTING.md](../TESTING.md#numerical-policy).
 
-Some less common densities match CmdStan's gradients and report `lp__` shifted
-by a constant; see [lp off by a constant](lp-constant.md).
+Under `~`, stanli drops the same data-only terms as CmdStan; see
+[lp__ and dropped constants](lp-constant.md).
 
 ## Known unsupported forms
 

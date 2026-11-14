@@ -155,7 +155,7 @@ deviations are in [`docs/corpus-status.md`](docs/corpus-status.md).
 | `signatures` | 74 generated models covering 19,641 signatures, one output per case | `signature_refs_*` |
 | `sized_functions` | 5 models calling library functions at real sizes | `test_sized_functions_reference` |
 | `container_flow` | 66 models that write each container shape in each block and read it back | `test_container_flow_reference` |
-| `fixtures` | 52 models from `tests/fixtures`, held to 10 ULP | `*_reference` |
+| `fixtures` | 54 models from `tests/fixtures`, held to 10 ULP | `*_reference` |
 | `cmdstan_replay` | 14 models for lowering rewrites that stock stanc's `--O1` MIR reaches | `test_cmdstan_replay` |
 | `oncobayes2` | the 3 OncoBayes2 models | `test_oncobayes2_reference` |
 
@@ -415,10 +415,9 @@ Reduction order is not frozen across releases. Fusion and packet arithmetic can
 move gradients by their last bits within the budgets above. The release notes
 give the worst measured deviation.
 
-Some less common multivariate and multinomial densities match CmdStan's
-gradients but report `lp__` shifted by a parameter-independent constant. The
-posterior is unchanged, but a pinned-seed trajectory and the absolute log
-density can differ. See [docs/lp-constant.md](docs/lp-constant.md).
+Under `~`, every density drops the data-only terms CmdStan drops; the
+`propto_data_arguments` and `propto_multi_gp` fixtures check each split of
+arguments into data and parameters. See [docs/lp-constant.md](docs/lp-constant.md).
 
 The nested callback solver fixtures allow 16 ULP on their combined rate
 gradient, which must also match its analytic value within 2 ULP. The difference

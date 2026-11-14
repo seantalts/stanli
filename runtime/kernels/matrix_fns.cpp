@@ -572,6 +572,17 @@ void tail_scatter(KernelCtx& ctx, int k, const std::vector<VarV>& xs) {
       ctx.in_adj[k].data[at++] += x(i).adj();
 }
 
+// Under propto, Stan Math drops the terms whose arguments are all data, so a
+// data argument has to reach it as double. Calls f with x when active, and
+// with its value otherwise. Bind=false keeps x as var, for an argument whose
+// binding cannot change which terms Stan Math keeps.
+template <bool Bind = true, typename T, typename F>
+stan::math::var bind_active(bool active, const T& x, F&& f) {
+  if constexpr (Bind)
+    if (!active) return f(stan::math::value_of(x));
+  return f(x);
+}
+
 // Complete a compact density and return all argument adjoints in slot order.
 template <bool Grad, typename... Args>
 [[gnu::always_inline]] inline double finish_tail_density(
@@ -1158,19 +1169,21 @@ double lkj_eval(KernelCtx& ctx) {
     for (int64_t i = 0; i < K; ++i) L(i, j) = ctx.in[0].data[j * K + i];
   var eta(ctx.in[1].data[0]);
   var out;
-  const auto call = [&](const auto& shape) {
+  const auto call = [&](const auto& l, const auto& shape) -> var {
     if constexpr (Chol) {
-      return propto ? stan::math::lkj_corr_cholesky_lpdf<true>(L, shape)
-                    : stan::math::lkj_corr_cholesky_lpdf<false>(L, shape);
+      return propto ? stan::math::lkj_corr_cholesky_lpdf<true>(l, shape)
+                    : stan::math::lkj_corr_cholesky_lpdf<false>(l, shape);
     } else {
-      return propto ? stan::math::lkj_corr_lpdf<true>(L, shape)
-                    : stan::math::lkj_corr_lpdf<false>(L, shape);
+      return propto ? stan::math::lkj_corr_lpdf<true>(l, shape)
+                    : stan::math::lkj_corr_lpdf<false>(l, shape);
     }
   };
   if (ctx.variant & 0x2u)
-    out = call(eta);
+    out = call(L, eta);
   else
-    out = call(ctx.in[1].data[0]);
+    out = bind_active(!propto || (ctx.variant & 0x1u), L, [&](const auto& l) {
+      return call(l, ctx.in[1].data[0]);
+    });
   return finish_tail_density<Grad>(ctx, out, L, eta);
 }
 void lkj_fwd(KernelCtx& ctx) { ctx.out.data[0] = lkj_eval<false>(ctx); }
@@ -1423,7 +1436,7 @@ int64_t eigvals_scratch(const Op& op, const Slot*) {
 int64_t eigvecs_scratch(const Op& op, const Slot*) { return op.idata[0]; }
 
 // ---- tail densities: one nested var tape, no hand-written derivative ----
-// Everything below binds EVERY argument as var, calls the unmodified
+// Everything below binds its arguments as var, calls the unmodified
 // stan-math template, grads, and scatters the adjoints back. Two
 // consequences worth stating.
 //
@@ -1434,35 +1447,50 @@ int64_t eigvecs_scratch(const Op& op, const Slot*) { return op.idata[0]; }
 // through it at all. stan::math::var has every operator, so those work
 // here. That is why this file, not densities.cpp, is where the tail goes.
 //
-// And it is the compact tier by construction: one instantiation, no
-// activity-mask expansion. A data argument's partials are computed and
-// dropped, which is the right trade for a density nobody has profiled.
+// Without propto it is one instantiation. Under propto a data argument goes
+// in as double where that changes which terms Stan Math keeps (bind_active);
+// otherwise its partials are computed and dropped.
 // ---- wishart family: (matrix W, real nu, matrix S), four of them --------
 enum WishKind { kWishart, kInvWishart, kWishartChol, kInvWishartChol };
 template <bool Grad, WishKind Kind>
 double wish_eval(KernelCtx& ctx) {
   const int64_t K = ctx.idata[0];
   const bool propto = (ctx.variant & 0x80u) != 0;
+  const unsigned mask = ctx.variant & 0x7u;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   VarM W = tail_m(ctx, 0, K, K);
   var nu = ctx.in[1].data[0];
   VarM S = tail_m(ctx, 2, K, K);
+  const auto call = [](auto propto_tag, const auto& w, const auto& n,
+                       const auto& s) -> var {
+    constexpr bool P = decltype(propto_tag)::value;
+    if constexpr (Kind == kWishart)
+      return stan::math::wishart_lpdf<P>(w, n, s);
+    else if constexpr (Kind == kInvWishart)
+      return stan::math::inv_wishart_lpdf<P>(w, n, s);
+    else if constexpr (Kind == kWishartChol)
+      return stan::math::wishart_cholesky_lpdf<P>(w, n, s);
+    else
+      return stan::math::inv_wishart_cholesky_lpdf<P>(w, n, s);
+  };
+  // The Cholesky forms keep one term for nu alone and one for all three
+  // arguments together, so only nu's binding matters there.
+  constexpr bool chol = Kind == kWishartChol || Kind == kInvWishartChol;
   var out;
-  if constexpr (Kind == kWishart) {
-    out = propto ? stan::math::wishart_lpdf<true>(W, nu, S)
-                 : stan::math::wishart_lpdf<false>(W, nu, S);
-  } else if constexpr (Kind == kInvWishart) {
-    out = propto ? stan::math::inv_wishart_lpdf<true>(W, nu, S)
-                 : stan::math::inv_wishart_lpdf<false>(W, nu, S);
-  } else if constexpr (Kind == kWishartChol) {
-    out = propto ? stan::math::wishart_cholesky_lpdf<true>(W, nu, S)
-                 : stan::math::wishart_cholesky_lpdf<false>(W, nu, S);
+  if (!propto) {
+    out = call(std::false_type{}, W, nu, S);
   } else {
-    out = propto ? stan::math::inv_wishart_cholesky_lpdf<true>(W, nu, S)
-                 : stan::math::inv_wishart_cholesky_lpdf<false>(W, nu, S);
+    out = bind_active<!chol>(mask & 1u, W, [&](const auto& w) {
+      return bind_active(mask & 2u, nu, [&](const auto& n) {
+        return bind_active<!chol>(mask & 4u, S, [&](const auto& s) {
+          return call(std::true_type{}, w, n, s);
+        });
+      });
+    });
   }
-  return finish_tail_density<Grad>(ctx, out, W, nu, S);
+  const double value = finish_tail_density<Grad>(ctx, out, W, nu, S);
+  return propto && mask == 0 ? 0.0 : value;
 }
 #define STANLI_WISH_KERNEL(name, kind)             \
   void name##_fwd(KernelCtx& ctx) {                \
@@ -1483,18 +1511,32 @@ double mgp_eval(KernelCtx& ctx) {
   const bool propto = (ctx.variant & 0x80u) != 0;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
+  const unsigned mask = ctx.variant & 0x7u;
   VarM y = tail_m(ctx, 0, K, N);
   VarM S = tail_m(ctx, 1, N, N);
   VarV w = tail_v(ctx, 2, K);
+  const auto call = [](auto propto_tag, const auto& a, const auto& b,
+                       const auto& c) -> var {
+    constexpr bool P = decltype(propto_tag)::value;
+    if constexpr (Kind == kMultiGp)
+      return stan::math::multi_gp_lpdf<P>(a, b, c);
+    else
+      return stan::math::multi_gp_cholesky_lpdf<P>(a, b, c);
+  };
+  // y enters only the term that also takes Sigma and w, so y's binding
+  // matters only when all three are data.
   var out;
-  if constexpr (Kind == kMultiGp) {
-    out = propto ? stan::math::multi_gp_lpdf<true>(y, S, w)
-                 : stan::math::multi_gp_lpdf<false>(y, S, w);
+  if (!propto) {
+    out = call(std::false_type{}, y, S, w);
   } else {
-    out = propto ? stan::math::multi_gp_cholesky_lpdf<true>(y, S, w)
-                 : stan::math::multi_gp_cholesky_lpdf<false>(y, S, w);
+    out = bind_active(mask & 2u, S, [&](const auto& b) {
+      return bind_active(mask & 4u, w, [&](const auto& c) {
+        return call(std::true_type{}, y, b, c);
+      });
+    });
   }
-  return finish_tail_density<Grad>(ctx, out, y, S, w);
+  const double value = finish_tail_density<Grad>(ctx, out, y, S, w);
+  return propto && mask == 0 ? 0.0 : value;
 }
 
 // ---- multi_student_t: (vector y, real nu, vector mu, matrix Sigma) ------
@@ -1569,17 +1611,19 @@ double mult_eval(KernelCtx& ctx) {
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   VarV theta = tail_v(ctx, 0, K);
-  var out;
-  if constexpr (Kind == kMultinomial) {
-    out = propto ? stan::math::multinomial_lpmf<true>(ns, theta)
-                 : stan::math::multinomial_lpmf<false>(ns, theta);
-  } else if constexpr (Kind == kMultinomialLogit) {
-    out = propto ? stan::math::multinomial_logit_lpmf<true>(ns, theta)
-                 : stan::math::multinomial_logit_lpmf<false>(ns, theta);
-  } else {
-    out = propto ? stan::math::dirichlet_multinomial_lpmf<true>(ns, theta)
-                 : stan::math::dirichlet_multinomial_lpmf<false>(ns, theta);
-  }
+  const auto call = [&](const auto& t) -> var {
+    if constexpr (Kind == kMultinomial) {
+      return propto ? stan::math::multinomial_lpmf<true>(ns, t)
+                    : stan::math::multinomial_lpmf<false>(ns, t);
+    } else if constexpr (Kind == kMultinomialLogit) {
+      return propto ? stan::math::multinomial_logit_lpmf<true>(ns, t)
+                    : stan::math::multinomial_logit_lpmf<false>(ns, t);
+    } else {
+      return propto ? stan::math::dirichlet_multinomial_lpmf<true>(ns, t)
+                    : stan::math::dirichlet_multinomial_lpmf<false>(ns, t);
+    }
+  };
+  var out = bind_active(!propto || (ctx.variant & 0x1u), theta, call);
   return finish_tail_density<Grad>(ctx, out, theta);
 }
 
@@ -1596,6 +1640,10 @@ void multn_fwd(KernelCtx& ctx) {
                                theta.rows());
   stan::math::check_nonnegative(fn, "Number of trials variable", counts);
   stan::math::check_simplex(fn, "Probabilities parameter", theta);
+  if ((ctx.variant & 0x80u) && !(ctx.variant & 0x1u)) {
+    ctx.out.data[0] = 0;
+    return;
+  }
   double value = 0;
   if (!(ctx.variant & 0x80u)) {
     double total = 1;
@@ -1963,6 +2011,12 @@ int64_t oprobit_scratch(const Op& op, const Slot* slots) {
   return 5 * slots[op.in[0]].len + slots[op.in[1]].len;
 }
 void wiener_fwd(KernelCtx& ctx) {
+  // Under propto with every argument data, Stan Math keeps no term.
+  if (ctx.variant == 0x80u) {
+    wiener_run(ctx, 0, WienerPass::Value);
+    ctx.out.data[0] = 0;
+    return;
+  }
   ctx.out.data[0] = values_only() ? wiener_run(ctx, 0, WienerPass::Value)
                                   : wiener_run(ctx, wiener_activity(ctx),
                                                WienerPass::Partials);
@@ -2096,8 +2150,21 @@ double lkjcov_eval(KernelCtx& ctx) {
   VarV mu = tail_v(ctx, 1, ctx.in[1].len);
   VarV sig = tail_v(ctx, 2, ctx.in[2].len);
   var eta = ctx.in[3].data[0];
-  var out = propto ? stan::math::lkj_cov_lpdf<true>(S, mu, sig, eta)
-                   : stan::math::lkj_cov_lpdf<false>(S, mu, sig, eta);
+  const unsigned mask = ctx.variant & 0xfu;
+  var out;
+  if (!propto) {
+    out = stan::math::lkj_cov_lpdf<false>(S, mu, sig, eta);
+  } else {
+    out = bind_active(mask & 1u, S, [&](const auto& a) {
+      return bind_active(mask & 2u, mu, [&](const auto& b) {
+        return bind_active(mask & 4u, sig, [&](const auto& c) {
+          return bind_active(mask & 8u, eta, [&](const auto& d) {
+            return stan::math::lkj_cov_lpdf<true>(a, b, c, d);
+          });
+        });
+      });
+    });
+  }
   return finish_tail_density<Grad>(ctx, out, S, mu, sig, eta);
 }
 

@@ -147,9 +147,11 @@ GRADIENT_AGAINST_LARGEST = {
 # A multi_gp covariance gradient entry cancels to a few hundredths of the
 # largest entry. stanli and CmdStan round it differently, 410 ULP of the
 # entry but under 1 ULP of the largest. Against a 60-digit reference stanli
-# is the closer of the two (74 vs 168 ULP).
-GRADIENT_AGAINST_LARGEST["multi_gp_rectangular"] = (
-    "gradient entries that cancel; checked against a 60-digit reference")
+# is the closer of the two (74 vs 168 ULP). inv_wishart's nu entry cancels
+# the same way, 32 ULP apart, with CmdStan the closer (21 vs 53 ULP).
+GRADIENT_AGAINST_LARGEST.update(dict.fromkeys(
+    ("multi_gp_rectangular", "propto_data_arguments", "propto_multi_gp"),
+    "gradient entries that cancel; checked against a 60-digit reference"))
 PLATFORM_REFS = {
     "Linux x86_64": REPO / "docs" / "internal" / "artifacts" / "corpus-refs-linux-x86_64.json.gz",
 }
