@@ -1287,6 +1287,37 @@ static void test_udf_guard_returns() {
   stan::math::recover_memory();
 }
 
+// User functions stanc did not inline, under `~`. CmdStan instantiates an
+// `_lp` function and an `_lupdf` call with the caller's propto__, and the
+// body with the actual argument types, so the data-bound sigma is a double
+// there and propto drops its log. The explicit `_lpdf` call is normalized.
+static void test_udf_lp_propto() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_lp_propto.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_lp_propto.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf lp propto compile: ") + error.what());
+    return;
+  }
+  const double s = data.at("s").r[0];
+  const double q = 0.7;
+  stan::math::var tau = q;
+  stan::math::var lp = stan::math::normal_lpdf<true>(tau, 0, s) +
+                       stan::math::normal_lpdf<true>(tau, 1, s) +
+                       stan::math::normal_lpdf(tau, 1, s);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = q;
+  double grad = 0;
+  expect_ulp("udf lp propto lp", ex.gradient(&grad), lp.val(), 10);
+  expect_ulp("udf lp propto grad", grad, tau.adj(), 10);
+  stan::math::recover_memory();
+}
+
 // stanc's inliner declares a vector-returning function's result zero-length
 // and assigns it in each arm. The structured loop sizes it from those
 // assignments instead of refusing the loop.
@@ -8771,6 +8802,7 @@ int main() {
   test_region_dynamic_index();
   test_region_constant_shadow();
   test_udf_guard_returns();
+  test_udf_lp_propto();
   test_structured_vector_return();
   test_structured_dead_after_break();
   test_structured_while_vector_return();

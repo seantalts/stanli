@@ -42,6 +42,7 @@ O0_FIXTURES = {
     "udf_constant_branch",
     "udf_guard_returns",
     "udf_local_shape",
+    "udf_lp_propto",
     "whileloop",
 }
 

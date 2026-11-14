@@ -545,6 +545,16 @@ inline std::optional<std::pair<size_t, size_t>> user_defined_statement_name(
   return std::make_pair(prefix.size(), end - prefix.size());
 }
 
+// CmdStan instantiates a user `_lp` function, and a user density called as
+// `_lupdf`/`_lupmf`, with the caller's propto__. Other calls get false. An
+// overloaded name carries its signature after the base name.
+inline bool inherits_propto(const Expr& call) {
+  if (call.fn_propto) return true;
+  const std::string_view name =
+      std::string_view(call.name).substr(0, call.name.find('('));
+  return name.size() >= 3 && name.substr(name.size() - 3) == "_lp";
+}
+
 // Every expression a statement holds itself: its own slots, the declared
 // extents and the arguments of its transforms. Child statements are the
 // caller's to walk.

@@ -1655,7 +1655,7 @@ class MirInterp {
     if (it == funs_.end()) fail("unknown function " + e.name, e.raw);
     const mir::FunDef& f = *it->second;
     if (e.args.size() != f.arg_names.size()) fail(e.name + " arity mismatch");
-    MirInterp sub = function_scope(propto_ctx_ && e.fn_propto);
+    MirInterp sub = function_scope(propto_ctx_ && mir::inherits_propto(e));
     for (size_t i = 0; i < e.args.size(); ++i)
       sub.env_[f.arg_names[i]] = eval(e.args[i]);
     if (sub.exec_all(f.body) == Flow::Return) return std::move(sub.returned_);

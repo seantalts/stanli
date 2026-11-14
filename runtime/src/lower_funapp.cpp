@@ -625,7 +625,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   const bool autodiff_saved = udf_autodiff_ctx;
   const bool known_static_saved = write_array_known_static;
   write_array_known_static = false;
-  propto_ctx = propto_ctx && e.fn_propto;
+  propto_ctx = propto_ctx && mir::inherits_propto(e);
   udf_autodiff_ctx = false;
   for (size_t i = 0; i < binds.size(); ++i)
     if (!binds[i].is_int && f.arg_views[i].leaf != mir::UnsizedLeaf::Int)
@@ -1280,9 +1280,13 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
           ins.push_back(value.slot);
           result_si.param_free = result_si.param_free && value.si.param_free;
           result_autodiff = result_autodiff || value.autodiff;
-          argument.active = spec.shape == stanli::DensityShape::Categorical
-                                ? value.autodiff
-                                : !source.data_only;
+          // A UDF formal is AutoDiffable in the MIR unless declared `data`.
+          // CmdStan instantiates the body with the actual argument types, so
+          // a formal bound to data is inactive and propto drops its terms.
+          argument.active =
+              spec.shape == stanli::DensityShape::Categorical || udf_depth > 0
+                  ? value.autodiff
+                  : !source.data_only;
           argument.shape = builtin_argument_shape(source, value);
           if (has_runtime_shape(value)) {
             const int slot = one_runtime_extent(value, e.name);
