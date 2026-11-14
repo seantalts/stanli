@@ -71,13 +71,14 @@ std::vector<T> interpret_retained_callback(
     MirInterp<T>& interpreter, const mir::FunDef& function,
     const std::vector<std::vector<T>>& reals,
     const std::vector<std::vector<int>>& ints,
-    const std::vector<RhsArg>& bindings) {
+    const std::vector<RhsArg>& bindings,
+    const std::vector<bool>* autodiff = nullptr) {
   bool matrix = false;
   for (const auto& view : function.arg_views)
     matrix |= view.leaf == mir::UnsizedLeaf::Matrix || view.depth > 1 ||
               (view.depth && (view.leaf == mir::UnsizedLeaf::Vector ||
                               view.leaf == mir::UnsizedLeaf::RowVector));
-  if (!matrix) return interpreter.call(function, reals, ints);
+  if (!matrix) return interpreter.call(function, reals, ints, autodiff);
   if (function.arg_views.size() != function.arg_names.size() ||
       bindings.size() > function.arg_names.size())
     throw std::invalid_argument("callback argument metadata is incomplete");
@@ -121,7 +122,7 @@ std::vector<T> interpret_retained_callback(
   }
   if (ri != reals.size() || ii != ints.size())
     throw std::invalid_argument("unexpected callback arguments");
-  return interpreter.call(function, values).r;
+  return interpreter.call(function, values, autodiff).r;
 }
 
 // Splits the packed theta and x_r regions into the per-argument vectors the
@@ -148,8 +149,17 @@ std::vector<T> interpret_packed_callback(
     }
     reals.push_back(std::move(values));
   }
+  // The leading formals keep whatever type the algorithm passes; the bound
+  // arguments are vars exactly when they come from theta.
+  std::vector<bool> autodiff(function.arg_names.size(), true);
+  const size_t prefix = function.arg_names.size() >= args.size()
+                            ? function.arg_names.size() - args.size()
+                            : 0;
+  for (size_t k = 0; k < args.size() && prefix + k < autodiff.size(); ++k)
+    autodiff[prefix + k] = args[k].is_param && !args[k].is_int;
   MirInterp<T> interpreter(funs, std::move(label));
-  return interpret_retained_callback(interpreter, function, reals, ints, args);
+  return interpret_retained_callback(interpreter, function, reals, ints, args,
+                                     &autodiff);
 }
 
 struct RetainedCallback {
