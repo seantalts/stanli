@@ -80,6 +80,8 @@ as test inputs. Each directory's `licenses/` holds the license text.
   without a body (rstanarm implements it in C++); the checked-in copy gives it
   a Stan body.
 - `tests/multinma/`: multinma 0.9.1, GPL-3, by David M. Phillippo.
+  `tests/multinma/unflattened/` holds one model and its include files
+  unchanged.
 - `tests/epinow2/`: EpiNow2 1.9.0, MIT, Copyright (c) 2020 EpiForecasts. The
   package's DESCRIPTION declares MIT. Its `inst/stan/include/license.stan`,
   copied verbatim at the top of each model, is the rstantools GPL-3

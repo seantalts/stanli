@@ -81,3 +81,8 @@ recorded log density, gradient and `write_array` rows in
 [`tools/verify_refs.py`](../../tools/verify_refs.py). The references were
 recorded with CmdStan 2.40.0 (`d3d5df6a`), Stan `a6806ef8` and Math `5252d51d`
 on Darwin arm64, and each entry carries that as its own provenance block.
+
+`unflattened/` holds `binomial_1par.stan` and the eleven files it includes,
+unchanged from the package. `test_capi` compiles it with the include path
+`tests/multinma/unflattened` and checks that its log density and gradient
+equal those of the flattened `multinma_smoking_re.stan` at one point.
