@@ -1514,6 +1514,9 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_container_flow_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_container_flow_models.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_propto_fixture_generation
+           COMMAND ${Python3_EXECUTABLE} tools/gen_propto_fixtures.py --check
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_stanc3_good_data
            COMMAND ${Python3_EXECUTABLE} tools/gen_stanc3_good_data.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

@@ -40,6 +40,8 @@ reasoning behind the old design is in the
 [`tests/fixtures/propto_data_arguments.stan`](../tests/fixtures/propto_data_arguments.stan)
 and [`propto_multi_gp.stan`](../tests/fixtures/propto_multi_gp.stan) call
 each of the densities above under `~` with every split of its arguments into
-data and parameters, against CmdStan references. The corpus replay checks the
+data and parameters, against CmdStan references.
+[`tools/gen_propto_fixtures.py`](../tools/gen_propto_fixtures.py) writes both,
+and CTest checks they are current. The corpus replay checks the
 densities corpus models use. The generated signature models do not: they call
 `foo_lpdf(...)`, which always keeps every term.
