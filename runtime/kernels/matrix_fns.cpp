@@ -951,15 +951,20 @@ double mnc_small_fwd(KernelCtx& ctx) {
   FixM<N, 1> scaled_diff;
   FixM<N, N> l_partial;
   if (!(mask & 4u)) {
-    const MatD l_dyn = L;
-    const VecD diff_dyn = y_minus_mu;
-    const Eigen::RowVectorXd half_dyn =
-        stan::math::mdivide_left_tri<Eigen::Lower>(l_dyn, diff_dyn).transpose();
-    if (record)
-      scaled_diff = stan::math::mdivide_right_tri<Eigen::Lower>(half_dyn, l_dyn)
-                        .transpose();
-    if (!propto) logp -= stan::math::sum(stan::math::log(l_dyn.diagonal()));
-    half = half_dyn;
+    // Stan Math's mdivide_left_tri and mdivide_right_tri, as Eigen's
+    // dynamic triangular solver computes them: it multiplies by the
+    // reciprocal of each diagonal entry.
+    const double r0 = 1.0 / L(0, 0);
+    half(0) = y_minus_mu(0) * r0;
+    if constexpr (N == 2) {
+      const double r1 = 1.0 / L(1, 1);
+      half(1) = (y_minus_mu(1) - half(0) * L(1, 0)) * r1;
+      scaled_diff(1) = half(1) * r1;
+      scaled_diff(0) = (half(0) - L(1, 0) * scaled_diff(1)) * r0;
+    } else {
+      scaled_diff(0) = half(0) * r0;
+    }
+    if (!propto) logp -= stan::math::sum(stan::math::log(L.diagonal()));
   } else {
     const FixM<N, N> inv_L = stan::math::mdivide_left_tri<Eigen::Lower>(L);
     half = (inv_L.template triangularView<Eigen::Lower>() * y_minus_mu)
