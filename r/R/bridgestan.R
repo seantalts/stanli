@@ -149,10 +149,22 @@ nutpie_join <- function(pre, post) {
   out
 }
 
+# nutpie's sampler settings arrive as JSON text; nutpieR imports jsonlite,
+# so it is installed whenever this runs. The settings nest, so the key is
+# looked up at any depth.
 nutpie_config_number <- function(config, key, default) {
-  hit <- regmatches(config, regexec(paste0("\"", key, "\":([0-9.eE+-]+)"),
-                                    config))[[1L]]
-  if (length(hit) == 2L) as.numeric(hit[2L]) else default
+  find <- function(x) {
+    if (!is.list(x)) return(NULL)
+    if (!is.null(names(x)) && key %in% names(x)) return(x[[key]])
+    for (child in x) {
+      hit <- find(child)
+      if (!is.null(hit)) return(hit)
+    }
+    NULL
+  }
+  hit <- if (is.null(config)) NULL else
+    find(jsonlite::fromJSON(config, simplifyVector = FALSE))
+  if (is.numeric(hit) && length(hit) == 1L) as.numeric(hit) else default
 }
 
 nutpie_fit_from <- function(raw, model, seed, adaptation, save_warmup) {
