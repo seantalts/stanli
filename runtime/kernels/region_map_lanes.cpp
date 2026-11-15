@@ -1575,7 +1575,7 @@ void lane_instruction(const RegionMapProg& p, const TileState& t, int pc,
             const double raw = idx[l];
             if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
                 raw > len)
-              throw std::out_of_range("register-program index out of range");
+              throw ProgramIndexError();
             d[l] = read(static_cast<int32_t>(raw) - 1, l);
           });
         };

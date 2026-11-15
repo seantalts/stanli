@@ -41,6 +41,12 @@
 
 namespace stanli {
 
+// A DYN_INDEX read outside its source container.
+struct ProgramIndexError : std::out_of_range {
+  ProgramIndexError()
+      : std::out_of_range("register-program index out of range") {}
+};
+
 using KernelFn = void (*)(KernelCtx&);
 
 // Structural facts used by the program compilers and the generated-adjoint
@@ -675,7 +681,7 @@ __attribute__((aligned(64))) void run_program_impl(const Program& p, T* reg,
         const double raw = stan::math::value_of(rb());
         if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < 1.0 ||
             raw > static_cast<double>(I.len))
-          throw std::out_of_range("register-program index out of range");
+          throw ProgramIndexError();
         d() = reg[(size_t)(I.a + I.c + static_cast<int32_t>(raw) - 1)];
         break;
       }
