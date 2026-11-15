@@ -1,3 +1,4 @@
+#include <stanli/rejection.hpp>
 #include <stanli/adjoint.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/island.hpp>
@@ -129,7 +130,8 @@ void run_lane_forward(const RegionMapProg& p, KernelCtx& ctx) {
   try {
     region_map_lanes_forward(p, ctx, lane_region(p, ctx));
     return;
-  } catch (...) {
+  } catch (const std::exception& e) {
+    if (is_internal_error(e)) throw;
     original = std::current_exception();
   }
   seed_registers(p, ctx);

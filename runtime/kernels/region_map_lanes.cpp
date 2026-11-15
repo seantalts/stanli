@@ -1,3 +1,4 @@
+#include <stanli/rejection.hpp>
 #include <stanli/adjoint.hpp>
 #include <stanli/adjoint_rules.hpp>
 #include <stanli/program_density.hpp>
@@ -1408,7 +1409,8 @@ bool tile_call_forward(const RegionMapLanePlan::CallWindow& w,
   ctx.scratch = scratch;
   try {
     call.forward(ctx);
-  } catch (...) {
+  } catch (const std::exception& e) {
+    if (is_internal_error(e)) throw;
     return false;
   }
   if (!lanes.direct) {
