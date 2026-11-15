@@ -39,6 +39,37 @@ int main() {
   using namespace stanli;
   using stan::math::var;
 
+  // A rejected point is -inf. An internal invariant failing is a bug, and
+  // it reaches the caller instead of passing as a rejection.
+  {
+    Graph g;
+    const int x = g.add_slot(1, true);
+    const int lp = g.add_slot(1, false);
+    g.add_op(OP_CATEGORICAL, {x}, lp);  // malformed: one input
+    g.result_slot = lp;
+    Executor ex(std::move(g));
+    ExecutorModel model(ex);
+    Eigen::VectorXd q(1);
+    q(0) = 0.5;
+    bool escaped = false;
+    try {
+      (void)model.log_prob<false, true, double>(q, nullptr);
+    } catch (const std::logic_error&) {
+      escaped = true;
+    }
+    expect("internal error escapes log_prob<double>", escaped);
+    Eigen::Matrix<var, -1, 1> qv(1);
+    qv(0) = 0.5;
+    escaped = false;
+    try {
+      (void)model.log_prob<false, true, var>(qv, nullptr);
+    } catch (const std::logic_error&) {
+      escaped = true;
+    }
+    stan::math::recover_memory();
+    expect("internal error escapes log_prob<var>", escaped);
+  }
+
   {
     auto m = testmodels::eight_schools();
     Executor ex(std::move(m.graph));

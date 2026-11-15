@@ -1,3 +1,4 @@
+#include <stanli/rejection.hpp>
 #include <stanli/estimate.hpp>
 
 #include "initialize.hpp"
@@ -132,7 +133,8 @@ class PathCollector : public stan::callbacks::structured_writer {
     for (Eigen::Index i = 0; i < q.size(); ++i) ex_->params_data()[i] = q(i);
     try {
       return ex_->forward();
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+      if (is_internal_error(e)) throw;
       return -std::numeric_limits<double>::infinity();
     }
   }

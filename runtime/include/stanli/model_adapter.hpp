@@ -11,6 +11,7 @@
 #define STANLI_MODEL_ADAPTER_HPP
 
 #include <stanli/graph.hpp>
+#include <stanli/rejection.hpp>
 
 #include <stan/math.hpp>
 #include <stan/model/gradient.hpp>
@@ -55,7 +56,8 @@ class ExecutorModel {
       for (int64_t i = 0; i < n; ++i) ex_->params_data()[i] = q(i);
       try {
         return ex_->forward();
-      } catch (const std::exception&) {
+      } catch (const std::exception& e) {
+        if (is_internal_error(e)) throw;
         return -std::numeric_limits<double>::infinity();
       }
     } else {
@@ -69,7 +71,8 @@ class ExecutorModel {
       double value;
       try {
         value = ex_->gradient(grad);
-      } catch (const std::exception&) {
+      } catch (const std::exception& e) {
+        if (is_internal_error(e)) throw;
         // Rejected point (domain error in a kernel): -inf with no gradient,
         // which the sampler treats as a divergence.
         return T(-std::numeric_limits<double>::infinity());
