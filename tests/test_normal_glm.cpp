@@ -1,5 +1,6 @@
 // Differential oracle is the preceding kernel's unit-seeded Stan Math tape.
 // Independent CmdStan corpus checks complement these exact internal checks.
+#include "density_ops.hpp"
 #include "expect.hpp"
 
 #include <stanli/graph.hpp>
@@ -48,9 +49,8 @@ double reference_normal_glm(KernelCtx& ctx) {
   for (int64_t i = 0; i < ctx.in[4].len; ++i) sigma(i) = ctx.in[4].data[i];
   var out;
   const bool one_a = ctx.in[2].len == 1, one_s = ctx.in[4].len == 1;
-  const bool legacy = ctx.variant == 0;
-  const bool sigma_data = propto && !legacy && (ctx.variant & 0x10u) == 0;
-  const bool others_data = propto && !legacy && (ctx.variant & 0xfu) == 0;
+  const bool sigma_data = propto && (ctx.variant & 0x10u) == 0;
+  const bool others_data = propto && (ctx.variant & 0xfu) == 0;
   CMapV alpha_d(ctx.in[2].data, ctx.in[2].len);
   CMapV beta_d(ctx.in[3].data, ctx.in[3].len);
   CMapV sigma_d(ctx.in[4].data, ctx.in[4].len);
@@ -221,9 +221,9 @@ static void check(int n, int cols, unsigned mask, unsigned scalar, bool row_x,
     std::vector<int> slots;
     for (int k = 0; k < 5; ++k) slots.push_back(graph.add_slot(lens[k], true));
     const int out = graph.add_slot(1, false);
-    graph.add_op(OP_NORMAL_ID_GLM_LPDF,
-                 {slots[0], slots[1], slots[2], slots[3], slots[4]}, out,
-                 {rows, cols});
+    stanli::testutil::add_density(
+        graph, OP_NORMAL_ID_GLM_LPDF,
+        {slots[0], slots[1], slots[2], slots[3], slots[4]}, out, {rows, cols});
     graph.ops.back().variant = ctx.variant;
     graph.result_slot = out;
     Executor ex(std::move(graph));

@@ -1,5 +1,6 @@
 // run_nuts initialization: the retry over random starts, and the failures
 // when no start is finite. test_sampler_parity owns the sampled draws.
+#include "density_ops.hpp"
 #include <stanli/nuts.hpp>
 #include <cmath>
 #include <cstdio>
@@ -37,7 +38,8 @@ int main() {
       const int zero = g.add_slot(1, false);
       const int one = g.add_slot(1, false);
       const int lp = g.add_slot(1, false);
-      const int id = g.add_op(OP_NORMAL_LPDF, {lx, zero, one}, lp);
+      const int id =
+          stanli::testutil::add_density(g, OP_NORMAL_LPDF, {lx, zero, one}, lp);
       g.ops[(size_t)id].variant = 0x01;  // outcome active
       g.result_slot = lp;
       Executor ex(std::move(g));
@@ -72,7 +74,8 @@ int main() {
     const int nanc = g.add_slot(1, false);
     const int one = g.add_slot(1, false);
     const int lp = g.add_slot(1, false);
-    const int id = g.add_op(OP_NORMAL_LPDF, {x, nanc, one}, lp);
+    const int id =
+        stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, nanc, one}, lp);
     g.ops[(size_t)id].variant = 0x01;
     g.result_slot = lp;
     Executor ex(std::move(g));
@@ -103,7 +106,8 @@ int main() {
       const int zero = g.add_slot(1, false);
       const int bad = g.add_slot(1, false);
       const int lp = g.add_slot(1, false);
-      const int id = g.add_op(OP_NORMAL_LPDF, {x, zero, bad}, lp);
+      const int id =
+          stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, bad}, lp);
       g.ops[(size_t)id].variant = 0x01;
       g.result_slot = lp;
       Executor ex(std::move(g));

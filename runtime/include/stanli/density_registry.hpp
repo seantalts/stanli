@@ -6,6 +6,7 @@
 #define STANLI_DENSITY_REGISTRY_HPP
 
 #include <stanli/function_shape.hpp>
+#include <stanli/kernel_types.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -50,6 +51,37 @@ enum class AllIntegerDensity : uint8_t {
   DiscreteRangeCdf,
   DiscreteRangeLcdf,
   DiscreteRangeLccdf,
+};
+
+// OP_ALL_INTEGER_DENSITY's variant: which density, and propto.
+struct AllIntegerMode {
+  AllIntegerDensity density = AllIntegerDensity::None;
+  bool propto = false;
+
+  constexpr uint8_t byte() const {
+    return (uint8_t)((uint8_t)density |
+                     (propto ? DensityMode::kProptoBit : 0u));
+  }
+  static constexpr AllIntegerMode of(uint8_t byte) {
+    return {(AllIntegerDensity)(byte & ~DensityMode::kProptoBit),
+            (byte & DensityMode::kProptoBit) != 0};
+  }
+};
+
+enum class PoissonBinomialKind : uint8_t { Lpmf, Cdf, Lcdf, Lccdf };
+
+// OP_POISSON_BINOMIAL's variant: the probability function, and whether its
+// one real argument is autodiff.
+struct PoissonBinomialMode {
+  PoissonBinomialKind kind = PoissonBinomialKind::Lpmf;
+  bool active = false;
+
+  constexpr uint8_t byte() const {
+    return (uint8_t)(((uint8_t)kind << 1) | (active ? 1u : 0u));
+  }
+  static constexpr PoissonBinomialMode of(uint8_t byte) {
+    return {(PoissonBinomialKind)((byte >> 1) & 3u), (byte & 1u) != 0};
+  }
 };
 
 struct IntegerDensityArgument {
@@ -106,13 +138,13 @@ struct DensitySpec {
   bool lane_outcome = false;
   // Index among real arguments of a GLM's design matrix.
   uint8_t glm_matrix_arg = 0;
-  // Function-family bits which are independent of activity and propto.
-  uint8_t fixed_variant = 0;
   DensityEvaluationPolicy evaluation = DensityEvaluationPolicy::GraphKernel;
   AllIntegerDensity all_integer = AllIntegerDensity::None;
   // Real-input mask (after integer arguments) for vector/row_vector arguments
   // which also accept an array of vectors.
   uint8_t vectorized_vector_args = 0;
+  bool categorical_logit = false;
+  PoissonBinomialKind poisson_binomial = PoissonBinomialKind::Lpmf;
 };
 
 // OP_CATEGORICAL's ordinary variant byte replaces its former opaque per-op
@@ -122,6 +154,7 @@ struct DensitySpec {
 inline constexpr uint8_t kCategoricalArgAutodiff = 1u << 0;
 inline constexpr uint8_t kCategoricalLogit = 1u << 1;
 inline constexpr uint8_t kCategoricalScalarOutcome = 1u << 2;
+inline constexpr uint8_t kCategoricalPropto = DensityMode::kProptoBit;
 // Separates integer outcome values from an appended vectorized-layout payload.
 inline constexpr int kVectorizedDensityLayoutMarker = -2147483647;
 inline constexpr int kGlmScalarLayoutMarker = -2147483646;

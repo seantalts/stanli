@@ -719,8 +719,8 @@ double mn_eval(KernelCtx& ctx) {
           ? ctx.idata[1]
           : (ctx.n_idata > 1 && ctx.idata[1] > 1 ? ctx.idata[1] : -1);
   const int mu_encoded = ctx.n_idata > 2 ? ctx.idata[2] : -1;
-  const bool propto = (ctx.variant & 0x80u) != 0;
-  const unsigned mask = ctx.variant == 0 ? 0x7u : (ctx.variant & 0x3fu);
+  const bool propto = density_mode(ctx).propto;
+  const unsigned mask = density_mode(ctx).active;
   const bool ay = mask & 1u, am = mask & 2u, aS = mask & 4u;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
@@ -806,8 +806,8 @@ bool mn_single_shape(const KernelCtx& ctx) {
 double mn_single_fwd(KernelCtx& ctx) {
   static constexpr const char* function = "multi_normal_lpdf";
   const int64_t n = ctx.idata[0];
-  const unsigned mask = ctx.variant == 0 ? 7u : (ctx.variant & 7u);
-  const bool propto = (ctx.variant & 0x80u) != 0;
+  const unsigned mask = density_mode(ctx).active & 7u;
+  const bool propto = density_mode(ctx).propto;
   const bool record = !values_only();
   CMapV y(ctx.in[0].data, n), mu(ctx.in[1].data, n);
   CMapM sigma(ctx.in[2].data, n, n);
@@ -872,9 +872,12 @@ inline MncPath mnc_path(uint8_t variant, const int* idata, int64_t n_idata,
     return kMncGeneric;
   const int64_t n = idata[0];
   if (len_y != n || len_mu != n || len_l != n * n) return kMncGeneric;
-  const unsigned mask = variant == 0 ? 7u : (variant & 7u);
+  const DensityMode mode = DensityMode::of(variant);
+  const unsigned mask = mode.active & 7u;
   if (n >= 1 && n <= 2 && mask != 0 && fixed_small_matrices()) return kMncSmall;
-  return variant == 0x84u ? kMncLegacy : kMncGeneric;
+  // Propto with only the Cholesky factor active.
+  return mode.propto && !mode.elementwise && mode.active == 0x4u ? kMncLegacy
+                                                                 : kMncGeneric;
 }
 
 MncPath mnc_path(const KernelCtx& ctx) {
@@ -929,8 +932,8 @@ template <int N>
 double mnc_small_fwd(KernelCtx& ctx) {
   static constexpr const char* function = "multi_normal_cholesky_lpdf";
   const int64_t n = ctx.idata[0];
-  const unsigned mask = ctx.variant == 0 ? 7u : (ctx.variant & 7u);
-  const bool propto = (ctx.variant & 0x80u) != 0;
+  const unsigned mask = density_mode(ctx).active & 7u;
+  const bool propto = density_mode(ctx).propto;
   const bool record = !values_only();
   const FixM<N, 1> y = FixCMap<N, 1>(ctx.in[0].data, n, 1);
   const FixM<N, 1> mu = FixCMap<N, 1>(ctx.in[1].data, n, 1);
@@ -1158,7 +1161,7 @@ void mlt_self_transpose_bwd(KernelCtx& ctx) {
 
 // ---- lkj_corr_cholesky_lpdf(L | eta) --------------------------------------
 // in = {L, eta}; idata = {K}. eta is an ordinary differentiable shape
-// parameter (variant bit 1); binding it as data used to zero d(lp)/d(eta)
+// parameter (activity bit 1); binding it as data used to zero d(lp)/d(eta)
 // silently and, under propto, drop normalization terms that are not
 // constant when eta is a parameter -- a 0.5% CmdStan gradient divergence
 // found by the signature-reference gate. The double binding remains the
@@ -1166,7 +1169,7 @@ void mlt_self_transpose_bwd(KernelCtx& ctx) {
 template <bool Grad, bool Chol = true>
 double lkj_eval(KernelCtx& ctx) {
   const int64_t K = ctx.idata[0];
-  const bool propto = (ctx.variant & 0x80u) != 0;
+  const bool propto = density_mode(ctx).propto;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   VarM L(K, K);
@@ -1183,12 +1186,12 @@ double lkj_eval(KernelCtx& ctx) {
                     : stan::math::lkj_corr_lpdf<false>(l, shape);
     }
   };
-  if (ctx.variant & 0x2u)
+  if (density_mode(ctx).is_active(1))
     out = call(L, eta);
   else
-    out = bind_active(!propto || (ctx.variant & 0x1u), L, [&](const auto& l) {
-      return call(l, ctx.in[1].data[0]);
-    });
+    out =
+        bind_active(!propto || density_mode(ctx).is_active(0), L,
+                    [&](const auto& l) { return call(l, ctx.in[1].data[0]); });
   return finish_tail_density<Grad>(ctx, out, L, eta);
 }
 void lkj_fwd(KernelCtx& ctx) { ctx.out.data[0] = lkj_eval<false>(ctx); }
@@ -1203,9 +1206,10 @@ void lkjc_bwd(KernelCtx& ctx) { lkj_eval<true, false>(ctx); }
 // Stan Math's analytical partials directly, without a temporary var tape.
 double nid_glm_eval(KernelCtx& ctx) {
   const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
-  const bool propto = (ctx.variant & 0x80u) != 0;
-  const bool y_var = (ctx.variant & 0x1u) != 0;
-  const bool x_var = (ctx.variant & 0x2u) != 0;
+  const DensityMode mode = density_mode(ctx);
+  const bool propto = mode.propto;
+  const bool y_var = mode.is_active(0);
+  const bool x_var = mode.is_active(1);
   sink s;
   double* partials = ctx.scratch;
   for (int k = 0; k < 5; ++k) {
@@ -1226,9 +1230,8 @@ double nid_glm_eval(KernelCtx& ctx) {
   const auto beta = as_rvar(ctx.in[3]);
   const auto sigma = as_rvar(ctx.in[4]);
   const bool one_a = ctx.in[2].len == 1, one_s = ctx.in[4].len == 1;
-  const bool legacy = ctx.variant == 0;
-  const bool sigma_data = propto && !legacy && (ctx.variant & 0x10u) == 0;
-  const bool others_data = propto && !legacy && (ctx.variant & 0xfu) == 0;
+  const bool sigma_data = propto && !mode.is_active(4);
+  const bool others_data = propto && (mode.active & 0xfu) == 0;
   if (!values_only() && sigma_data)
     for (int k = others_data ? 2 : 4; k <= 4; ++k)
       if (s.buf[k]) std::fill_n(s.buf[k], ctx.in[k].len, 0.0);
@@ -1324,7 +1327,7 @@ double nid_glm_eval(KernelCtx& ctx) {
 }
 
 int64_t nid_glm_scratch(const Op& op, const Slot* slots) {
-  // The y and X sections exist only when those inputs are active (variant
+  // The y and X sections exist only when those inputs are active (activity
   // bits 0 and 1), but this hook reserves both unconditionally.
   return slots[op.in[0]].len + slots[op.in[1]].len + slots[op.in[2]].len +
          slots[op.in[3]].len + slots[op.in[4]].len;
@@ -1333,19 +1336,19 @@ int64_t nid_glm_scratch(const Op& op, const Slot* slots) {
 void nid_glm_fwd(KernelCtx& ctx) { ctx.out.data[0] = nid_glm_eval(ctx); }
 
 void nid_glm_bwd(KernelCtx& ctx) {
-  const unsigned mask = ctx.variant == 0 ? 0x1fu : (ctx.variant & 0x3fu);
+  const DensityMode mode = density_mode(ctx);
+  const unsigned mask = mode.active;
   const double* s = ctx.scratch;
   const double w = ctx.out_adj;
   // Mirror of the forward's scratch layout: y's partials are present
-  // exactly when variant bit 0 is set (never under the legacy variant==0
-  // encoding, whose forward bound y as data).
-  if (ctx.variant & 0x1u) {
+  // exactly when y is active.
+  if (mode.is_active(0)) {
     if (ctx.in_adj[0].data)
       for (int64_t i = 0; i < ctx.in[0].len; ++i)
         ctx.in_adj[0].data[i] += w * s[i];
     s += ctx.in[0].len;
   }
-  if (ctx.variant & 0x2u) {
+  if (mode.is_active(1)) {
     if (ctx.in_adj[1].data)
       for (int64_t i = 0; i < ctx.in[1].len; ++i)
         ctx.in_adj[1].data[i] += w * s[i];
@@ -1460,8 +1463,8 @@ enum WishKind { kWishart, kInvWishart, kWishartChol, kInvWishartChol };
 template <bool Grad, WishKind Kind>
 double wish_eval(KernelCtx& ctx) {
   const int64_t K = ctx.idata[0];
-  const bool propto = (ctx.variant & 0x80u) != 0;
-  const unsigned mask = ctx.variant & 0x7u;
+  const bool propto = density_mode(ctx).propto;
+  const unsigned mask = density_mode(ctx).active & 0x7u;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   VarM W = tail_m(ctx, 0, K, K);
@@ -1513,10 +1516,10 @@ enum GpKind { kMultiGp, kMultiGpChol };
 template <bool Grad, GpKind Kind>
 double mgp_eval(KernelCtx& ctx) {
   const int64_t K = ctx.idata[0], N = ctx.idata[1];
-  const bool propto = (ctx.variant & 0x80u) != 0;
+  const bool propto = density_mode(ctx).propto;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
-  const unsigned mask = ctx.variant & 0x7u;
+  const unsigned mask = density_mode(ctx).active & 0x7u;
   VarM y = tail_m(ctx, 0, K, N);
   VarM S = tail_m(ctx, 1, N, N);
   VarV w = tail_v(ctx, 2, K);
@@ -1554,7 +1557,7 @@ double mst_eval(KernelCtx& ctx) {
           ? ctx.idata[1]
           : (ctx.n_idata > 1 && ctx.idata[1] > 1 ? ctx.idata[1] : -1);
   const int mu_encoded = ctx.n_idata > 2 ? ctx.idata[2] : -1;
-  const bool propto = (ctx.variant & 0x80u) != 0;
+  const bool propto = density_mode(ctx).propto;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   std::vector<VarV> ys = mvt_vectors<var>(ctx.in[0], K, y_encoded);
@@ -1581,9 +1584,9 @@ double mst_eval(KernelCtx& ctx) {
   var out = with_mvt_argument(ys, y_encoded, dispatch_mu);
   const double value = finish_tail_density<Grad>(ctx, out, ys, nu, mus, S);
   // Every argument is bound as var, so Stan Math kept the terms it drops
-  // under propto when nu or Sigma is data (variant bits 1 and 3). Take
+  // under propto when nu or Sigma is data (activity bits 1 and 3). Take
   // them back out; with every argument data it keeps nothing.
-  const unsigned active = ctx.variant & 0xfu;
+  const unsigned active = density_mode(ctx).active & 0xfu;
   if (!propto) return value;
   if (active == 0) return 0.0;
   const double n = static_cast<double>(std::max(ys.size(), mus.size()));
@@ -1611,7 +1614,7 @@ enum MultKind { kMultinomial, kMultinomialLogit, kDirichletMultinomial };
 template <bool Grad, MultKind Kind>
 double mult_eval(KernelCtx& ctx) {
   const int64_t K = ctx.in[0].len;
-  const bool propto = (ctx.variant & 0x80u) != 0;
+  const bool propto = density_mode(ctx).propto;
   std::vector<int> ns(ctx.idata, ctx.idata + ctx.n_idata);
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
@@ -1628,7 +1631,7 @@ double mult_eval(KernelCtx& ctx) {
                     : stan::math::dirichlet_multinomial_lpmf<false>(ns, t);
     }
   };
-  var out = bind_active(!propto || (ctx.variant & 0x1u), theta, call);
+  var out = bind_active(!propto || density_mode(ctx).is_active(0), theta, call);
   return finish_tail_density<Grad>(ctx, out, theta);
 }
 
@@ -1645,12 +1648,13 @@ void multn_fwd(KernelCtx& ctx) {
                                theta.rows());
   stan::math::check_nonnegative(fn, "Number of trials variable", counts);
   stan::math::check_simplex(fn, "Probabilities parameter", theta);
-  if ((ctx.variant & 0x80u) && !(ctx.variant & 0x1u)) {
+  const DensityMode mode = density_mode(ctx);
+  if (mode.propto && !mode.is_active(0)) {
     ctx.out.data[0] = 0;
     return;
   }
   double value = 0;
-  if (!(ctx.variant & 0x80u)) {
+  if (!mode.propto) {
     double total = 1;
     for (int count : counts) {
       total += count;
@@ -1687,10 +1691,10 @@ double ordered_eval(KernelCtx& ctx) {
   const int64_t N = ctx.n_idata - 3;
   const int64_t K = ctx.idata[ctx.n_idata - 2];
   const int cuts_encoded = ctx.idata[ctx.n_idata - 1];
-  const bool propto = (ctx.variant & 0x80u) != 0;
+  const bool propto = density_mode(ctx).propto;
   std::vector<int> y(ctx.idata, ctx.idata + N);
   if constexpr (Kind == kOrderedLogistic) {
-    if (propto && (ctx.variant & 0x3u) == 0) {
+    if (propto && (density_mode(ctx).active & 0x3u) == 0) {
       if constexpr (Grad) return 0.0;
       Eigen::VectorXd location =
           Eigen::Map<const Eigen::VectorXd>(ctx.in[0].data, ctx.in[0].len);
@@ -1749,8 +1753,7 @@ using WienerArg =
                        std::conditional_t<Scalar, stan::math::var, WienerVar>,
                        std::conditional_t<Scalar, double, WienerData>>;
 unsigned wiener_activity(const KernelCtx& ctx) {
-  const unsigned mask = ctx.variant & 0x1fu;
-  return mask ? mask : 0x1fu;
+  return density_mode(ctx).active & 0x1fu;
 }
 int64_t wiener_extent(const KernelCtx& ctx) {
   int64_t n = 1;
@@ -1876,7 +1879,7 @@ void ologistic_fwd(KernelCtx& ctx) {
   if (ctx.n_idata < 4 ||
       ctx.idata[ctx.n_idata - 3] != kVectorizedDensityLayoutMarker ||
       ctx.idata[ctx.n_idata - 1] >= 0 ||
-      ((ctx.variant & 0x80u) && (ctx.variant & 0x3u) == 0)) {
+      (density_mode(ctx).propto && (density_mode(ctx).active & 0x3u) == 0)) {
     ctx.out.data[0] = ordered_eval<false, kOrderedLogistic>(ctx);
     return;
   }
@@ -1891,7 +1894,7 @@ void ologistic_fwd(KernelCtx& ctx) {
     const auto cuts = as_rvar(ctx.in[1]);
     const auto call = [&](const auto& location) {
       record_probability_call([&] {
-        return (ctx.variant & 0x80u)
+        return density_mode(ctx).propto
                    ? stan::math::ordered_logistic_lpmf<true>(y, location, cuts)
                    : stan::math::ordered_logistic_lpmf<false>(y, location,
                                                               cuts);
@@ -2017,7 +2020,8 @@ int64_t oprobit_scratch(const Op& op, const Slot* slots) {
 }
 void wiener_fwd(KernelCtx& ctx) {
   // Under propto with every argument data, Stan Math keeps no term.
-  if (ctx.variant == 0x80u) {
+  const DensityMode mode = density_mode(ctx);
+  if (mode.propto && mode.active == 0) {
     wiener_run(ctx, 0, WienerPass::Value);
     ctx.out.data[0] = 0;
     return;
@@ -2027,8 +2031,7 @@ void wiener_fwd(KernelCtx& ctx) {
                                                WienerPass::Partials);
   // Stan Math's propto density of constants is zero. Evaluate it anyway so
   // invalid arguments still reject.
-  if ((ctx.variant & 0x80u) && (ctx.variant & 0x1fu) == 0)
-    ctx.out.data[0] = 0.0;
+  if (mode.propto && (mode.active & 0x1fu) == 0) ctx.out.data[0] = 0.0;
 }
 void wiener_bwd(KernelCtx& ctx) {
   unsigned active = wiener_activity(ctx);
@@ -2152,14 +2155,14 @@ int64_t wiener_packed_scratch(const Op& op, const Slot* slots) {
 template <bool Grad>
 double lkjcov_eval(KernelCtx& ctx) {
   const int64_t K = ctx.idata[0];
-  const bool propto = (ctx.variant & 0x80u) != 0;
+  const bool propto = density_mode(ctx).propto;
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
   VarM S = tail_m(ctx, 0, K, K);
   VarV mu = tail_v(ctx, 1, ctx.in[1].len);
   VarV sig = tail_v(ctx, 2, ctx.in[2].len);
   var eta = ctx.in[3].data[0];
-  const unsigned mask = ctx.variant & 0xfu;
+  const unsigned mask = density_mode(ctx).active & 0xfu;
   var out;
   if (!propto) {
     out = stan::math::lkj_cov_lpdf<false>(S, mu, sig, eta);
@@ -2200,10 +2203,10 @@ double blglm_eval(KernelCtx& ctx) {
     else
       f(X);
   };
-  const bool propto = (ctx.variant & 0x80u) != 0;
+  const bool propto = density_mode(ctx).propto;
   std::vector<int> nn(ctx.idata, ctx.idata + outcomes);
   std::vector<int> NN(ctx.idata + outcomes, ctx.idata + 2 * outcomes);
-  if (propto && (ctx.variant & 0x7u) == 0) {
+  if (propto && (density_mode(ctx).active & 0x7u) == 0) {
     const CMapM Xd(ctx.in[0].data, rows, cols);
     const CMapV beta_d(ctx.in[2].data, cols);
     if (!values_only())
@@ -2258,7 +2261,7 @@ void clglm_fwd(KernelCtx& ctx) {
   std::vector<int> y(ctx.idata, ctx.idata + rows);
   sink s = recorded_tail_sink<3>(ctx);
   sink_scope active(s);
-  if ((ctx.variant & 0x80u) && (ctx.variant & 0x7u) == 0) {
+  if (density_mode(ctx).propto && (density_mode(ctx).active & 0x7u) == 0) {
     const CMapM Xd(ctx.in[0].data, rows, cols);
     const CMapV alpha_d(ctx.in[1].data, ctx.in[1].len);
     const CMapM beta_d(ctx.in[2].data, cols, ctx.in[2].len / cols);
@@ -2279,7 +2282,7 @@ void clglm_fwd(KernelCtx& ctx) {
   // the recorder deposits them without allocating or walking a var tape.
   with_glm_integer(y, scalar_y, [&](const auto& outcome) {
     record_probability_call([&] {
-      return (ctx.variant & 0x80u)
+      return density_mode(ctx).propto
                  ? stan::math::categorical_logit_glm_lpmf<true>(outcome, X,
                                                                 alpha, beta)
                  : stan::math::categorical_logit_glm_lpmf<false>(outcome, X,
@@ -2298,7 +2301,7 @@ void olglm_fwd(KernelCtx& ctx) {
   std::vector<int> y(ctx.idata, ctx.idata + rows);
   sink s = recorded_tail_sink<3>(ctx);
   sink_scope active(s);
-  if ((ctx.variant & 0x80u) && (ctx.variant & 0x7u) == 0) {
+  if (density_mode(ctx).propto && (density_mode(ctx).active & 0x7u) == 0) {
     const CMapM Xd(ctx.in[0].data, rows, cols);
     const CMapV beta_d(ctx.in[1].data, ctx.in[1].len);
     const CMapV cuts_d(ctx.in[2].data, ctx.in[2].len);
@@ -2315,7 +2318,7 @@ void olglm_fwd(KernelCtx& ctx) {
   const auto beta = as_rvar(ctx.in[1]), cuts = as_rvar(ctx.in[2]);
   with_glm_integer(y, scalar_y, [&](const auto& outcome) {
     record_probability_call([&] {
-      return (ctx.variant & 0x80u)
+      return density_mode(ctx).propto
                  ? stan::math::ordered_logistic_glm_lpmf<true>(outcome, X, beta,
                                                                cuts)
                  : stan::math::ordered_logistic_glm_lpmf<false>(outcome, X,

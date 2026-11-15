@@ -254,7 +254,7 @@ DensityCallPlan density_call_plan(
       integers.push_back({argument.integers, argument.scalar});
     }
     plan.idata = pack_all_integer_density_arguments(integers);
-    plan.variant = spec.fixed_variant | (propto ? uint8_t{0x80} : uint8_t{0});
+    plan.variant = AllIntegerMode{spec.all_integer, propto}.byte();
     return plan;
   }
 
@@ -433,7 +433,9 @@ DensityCallPlan density_call_plan(
     plan.idata = {width, arguments[0].scalar ? 1 : 0};
     plan.idata.insert(plan.idata.end(), arguments[0].integers.begin(),
                       arguments[0].integers.end());
-    plan.variant = spec.fixed_variant | plan.activity_mask;
+    plan.variant =
+        PoissonBinomialMode{spec.poisson_binomial, plan.activity_mask != 0}
+            .byte();
     return plan;
   }
   if (spec.shape == DensityShape::Categorical) {
@@ -451,16 +453,21 @@ DensityCallPlan density_call_plan(
         probabilities.array_depth != 0)
       throw std::invalid_argument(
           "categorical expects data-only int or array[] int and vector");
-    plan.variant = spec.fixed_variant;
-    if (arguments[1].active) plan.variant |= kCategoricalArgAutodiff;
-    if (scalar) plan.variant |= kCategoricalScalarOutcome;
+    plan.variant =
+        (uint8_t)((spec.categorical_logit ? kCategoricalLogit : 0u) |
+                  (arguments[1].active ? kCategoricalArgAutodiff : 0u) |
+                  (scalar ? kCategoricalScalarOutcome : 0u) |
+                  (propto ? kCategoricalPropto : 0u));
   } else {
+    // A nonnegative spec mask binds every differentiable argument as
+    // autodiff whenever one is; an all-data GLM binds none.
     const bool all_data_glm =
         spec.glm_layout && spec.activity_mask >= 0 && plan.activity_mask == 0;
-    plan.variant = spec.fixed_variant |
-                   (spec.activity_mask < 0 ? plan.activity_mask
-                    : all_data_glm ? uint8_t{0}
-                                   : static_cast<uint8_t>(spec.activity_mask));
+    const uint8_t active = spec.activity_mask < 0 ? plan.activity_mask
+                           : all_data_glm
+                               ? uint8_t{0}
+                               : static_cast<uint8_t>(spec.activity_mask);
+    plan.variant = DensityMode{active, false, propto}.byte();
   }
 
   if (spec.shape == DensityShape::FirstMatrixRows) {
@@ -485,7 +492,6 @@ DensityCallPlan density_call_plan(
     plan.idata.insert(plan.idata.end(), layout.vector_counts.begin(),
                       layout.vector_counts.end());
   }
-  if (propto) plan.variant |= 0x80u;
   return plan;
 }
 

@@ -1,6 +1,7 @@
 // WALNUTS end to end through the vendored walnutpie sampler driving the
 // executor's gradient. Statistical checks with fixed seeds, same shape as
 // test_nuts.cpp so the two samplers stay comparable.
+#include "density_ops.hpp"
 #include "models.hpp"
 
 #include <stanli/walnuts.hpp>
@@ -30,7 +31,7 @@ int main() {
     const int zero = g.add_slot(1, false);
     const int one = g.add_slot(1, false);
     const int lp = g.add_slot(1, false);
-    g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+    stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, one}, lp);
     g.result_slot = lp;
     Executor ex(std::move(g));
     ex.value_ptr(zero)[0] = 0.0;
@@ -90,7 +91,7 @@ int main() {
     const int zero = g.add_slot(1, false);
     const int one = g.add_slot(1, false);
     const int lp = g.add_slot(1, false);
-    g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+    stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, one}, lp);
     g.result_slot = lp;
     Executor ex(std::move(g));
     ex.value_ptr(zero)[0] = 0.0;
@@ -131,7 +132,7 @@ int main() {
       const int zero = g.add_slot(1, false);
       const int one = g.add_slot(1, false);
       const int nlp = g.add_slot(1, false);
-      g.add_op(OP_NORMAL_LPDF, {x, zero, one}, nlp);
+      stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, one}, nlp);
       const int lp = g.add_slot(1, false);
       g.add_op(OP_ADD, {nlp, lx}, lp);
       g.result_slot = lp;
@@ -165,7 +166,7 @@ int main() {
     const int zero = g.add_slot(1, false);
     const int one = g.add_slot(1, false);
     const int lp = g.add_slot(1, false);
-    g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+    stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, one}, lp);
     g.result_slot = lp;
     Executor ex(std::move(g));
     ex.value_ptr(zero)[0] = 0.0;
@@ -196,7 +197,7 @@ int main() {
     const int zero = g.add_slot(1, false);
     const int one = g.add_slot(1, false);
     const int lp = g.add_slot(1, false);
-    g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+    stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, one}, lp);
     g.result_slot = lp;
     Executor ex(std::move(g));
     ex.value_ptr(zero)[0] = 0.0;

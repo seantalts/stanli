@@ -33,11 +33,14 @@ inline TileCallKind tile_call_kind(uint16_t opcode) {
   }
 }
 
-inline uint8_t tile_call_variant(TileCallKind kind, uint8_t variant, int n_in) {
-  if (kind != TileCallKind::Density) return variant;
-  const uint8_t all = (uint8_t)((1u << n_in) - 1u);
-  const uint8_t mask = variant == 0 ? all : (uint8_t)(variant & 0x3fu);
-  return (uint8_t)(0x40u | (variant & 0x80u) | mask);
+// A tile runs a density call one lane per element.
+inline uint8_t tile_call_variant(TileCallKind kind, uint8_t variant) {
+  return kind == TileCallKind::Density ? elementwise_density(variant) : variant;
+}
+
+// Only the summed form of a density becomes a tile call.
+inline bool tile_call_accepts(TileCallKind kind, uint8_t variant) {
+  return kind != TileCallKind::Density || !DensityMode::of(variant).elementwise;
 }
 
 }  // namespace stanli

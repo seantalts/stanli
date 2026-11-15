@@ -1,5 +1,6 @@
 // Executor forward/backward on a tiny graph: lp = exp(a) + b.
 // Gradient must be {exp(a), 1.0}, value exp(a) + b, both bitwise.
+#include "density_ops.hpp"
 #include "expect.hpp"
 
 #include <stanli/graph.hpp>
@@ -481,10 +482,12 @@ int main() {
     const int shifted_lp = density.add_slot(1, false);
     const int vector_lp = density.add_slot(1, false);
     const int total_lp = density.add_slot(1, false);
-    density.add_op(OP_NORMAL_LPDF, {scalar_y, mu, sigma}, scalar_lp);
+    stanli::testutil::add_density(density, OP_NORMAL_LPDF,
+                                  {scalar_y, mu, sigma}, scalar_lp);
     density.ops.back().variant = 0x06;  // mu and sigma active
     density.add_op(OP_ADD, {scalar_lp, zero}, shifted_lp);
-    density.add_op(OP_NORMAL_LPDF, {vector_y, mu, sigma}, vector_lp);
+    stanli::testutil::add_density(density, OP_NORMAL_LPDF,
+                                  {vector_y, mu, sigma}, vector_lp);
     density.ops.back().variant = 0x06;
     density.add_op(OP_ADD_N, {shifted_lp, vector_lp}, total_lp);
     density.result_slot = total_lp;

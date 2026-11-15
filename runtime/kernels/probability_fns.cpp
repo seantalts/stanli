@@ -1,4 +1,5 @@
 // Probability functions with algorithmic reverse-mode implementations in Math.
+#include <stanli/density_registry.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 #include <stan/math.hpp>
@@ -55,12 +56,12 @@ void student_t_qf_bwd(KernelCtx& ctx) {
 
 template <typename Y, typename Theta>
 auto poisson_binomial_call(uint8_t variant, const Y& y, const Theta& theta) {
-  switch (variant & 6u) {
-    case 0:
+  switch (PoissonBinomialMode::of(variant).kind) {
+    case PoissonBinomialKind::Lpmf:
       return stan::math::poisson_binomial_lpmf(y, theta);
-    case 2:
+    case PoissonBinomialKind::Cdf:
       return stan::math::poisson_binomial_cdf(y, theta);
-    case 4:
+    case PoissonBinomialKind::Lcdf:
       return stan::math::poisson_binomial_lcdf(y, theta);
     default:
       return stan::math::poisson_binomial_lccdf(y, theta);
@@ -68,7 +69,7 @@ auto poisson_binomial_call(uint8_t variant, const Y& y, const Theta& theta) {
 }
 
 // Payload: probability width, scalar-outcome flag, then integer outcomes.
-// Variant bits 1-2 select the probability function; bit 0 records activity.
+// The variant is a PoissonBinomialMode.
 template <typename Theta>
 auto poisson_binomial_outcome(KernelCtx& ctx, const Theta& theta) {
   if (ctx.idata[1])

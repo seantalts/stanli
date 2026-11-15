@@ -1,5 +1,6 @@
 // OP_MATVEC: out = X * beta with X data (column-major).
 // lp = normal_lpdf(y | X*beta, 1.0); gradient vs the var path, <= 10 ULP.
+#include "density_ops.hpp"
 #include "expect.hpp"
 
 #include <stanli/graph.hpp>
@@ -26,7 +27,7 @@ static void run_case(const std::string& name, int R, int C,
   const int eta = g.add_slot(R, false);
   const int lp = g.add_slot(1, false);
   g.add_op(OP_MATVEC, {Xs, b}, eta, {R, C});
-  g.add_op(OP_NORMAL_LPDF, {ys, eta, one}, lp);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {ys, eta, one}, lp);
   g.result_slot = lp;
 
   Executor ex(std::move(g));

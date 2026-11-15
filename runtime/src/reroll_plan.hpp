@@ -460,7 +460,7 @@ inline void SelectedPlan::emit(Graph& g, Fills& fills, TermRetirement& retired,
       // (widened) consumers. An all-scalar real-arg density classified
       // as hoist instead, so a vector input or a per-lane outcome
       // exists here.
-      op.variant = (uint8_t)(op.variant | 0x40u);
+      op.variant = elementwise_density(op.variant);
       op.out = g.add_slot(Luse * ap.rows, false);
       attach_idata(op, std::move(ap.outcome_idata));
       int result_slot = op.out;

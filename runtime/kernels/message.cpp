@@ -360,7 +360,7 @@ std::vector<int> categorical_outcomes(const KernelCtx& ctx) {
 template <typename Arg>
 auto categorical_eval(uint8_t variant, const std::vector<int>& outcomes,
                       const Arg& arg) {
-  const bool propto = (variant & 0x80u) != 0;
+  const bool propto = (variant & kCategoricalPropto) != 0;
   if (variant & kCategoricalScalarOutcome) {
     if (variant & kCategoricalLogit)
       return propto
@@ -481,10 +481,9 @@ void categorical_bwd(KernelCtx& ctx) {
 }
 
 void all_integer_density_fwd(KernelCtx& ctx) {
-  const auto density =
-      static_cast<AllIntegerDensity>(ctx.variant & uint8_t{0x7f});
+  const AllIntegerMode mode = AllIntegerMode::of(ctx.variant);
   ctx.out.data[0] = evaluate_packed_all_integer_density(
-      density, ctx.idata, ctx.n_idata, (ctx.variant & 0x80u) != 0);
+      mode.density, ctx.idata, ctx.n_idata, mode.propto);
 }
 
 void all_integer_density_bwd(KernelCtx&) {}

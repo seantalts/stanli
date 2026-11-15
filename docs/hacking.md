@@ -383,11 +383,13 @@ depends on which arguments are parameters: if `sigma` is data, its
 parameter, that term must stay. CmdStan's generated C++ makes this
 decision through template types at compile time. stanli's kernels are
 compiled before your model exists, so the decision is made at lowering
-time instead and carried on the op, in the `variant` byte: bits 0-5
-mark which arguments are being differentiated, bit 6 selects the
-elementwise form (the output is each element's log density rather than
-their sum), and bit 7 says whether `~`-style dropping (propto) is in
-effect.
+time instead and carried on the op, in the `variant` byte. Density
+kernels read and write it as a `DensityMode`
+([`kernel_types.hpp`](../runtime/include/stanli/kernel_types.hpp)): which
+arguments are being differentiated, whether the op writes the
+elementwise form (each element's log density rather than their sum),
+and whether `~`-style dropping (propto) is in effect. Every field is
+written explicitly; a zero byte means no argument is active.
 
 Bugs here are nasty in a specific way: the gradient stays perfect
 while the log density is off by a constant. Sampling still works,

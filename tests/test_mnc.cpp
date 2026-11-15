@@ -2,6 +2,7 @@
 // single-vector pullback in scratch. Pin its exact value and gradient, reuse
 // one Executor across value-only and gradient calls, and make every guard
 // mutation fall back to the generic nested-var implementation.
+#include "density_ops.hpp"
 #include "expect.hpp"
 
 #include <stanli/graph.hpp>
@@ -236,8 +237,8 @@ stanli::Graph fast_graph(int n) {
   const int density = g.add_slot(1, false);
   const int seed = g.add_slot(1, false);
   const int total = g.add_slot(1, false);
-  const int op =
-      g.add_op(OP_MULTI_NORMAL_CHOL_LPDF, {y, mu, L}, density, {n, 1});
+  const int op = stanli::testutil::add_density(g, OP_MULTI_NORMAL_CHOL_LPDF,
+                                               {y, mu, L}, density, {n, 1});
   g.ops[(size_t)op].variant = 0x84u;
   g.add_op(OP_MUL, {density, seed}, total);
   g.result_slot = total;
@@ -536,8 +537,8 @@ int main() {
   // the pullback's n*n, every near miss asks for the fallback's one partial
   // per input element. These near misses are real supported contracts and
   // must continue through mn_eval: non-propto, another active argument,
-  // vectorized y, legacy activity, the hier_2pl all-active variant, a missing
-  // repetition immediate, or malformed slots.
+  // vectorized y, no active argument, the hier_2pl all-active variant, a
+  // missing repetition immediate, or malformed slots.
   check(scratch_for(0x84u, 11, 1, 11, 11, 121) == 121,
         "native gate gets n*n scratch");
   check(scratch_for(0x04u, 11, 1, 11, 11, 121) == 143,
@@ -547,7 +548,7 @@ int main() {
   check(scratch_for(0x84u, 11, 2, 22, 11, 121) == 154,
         "vectorized y refuses native path");
   check(scratch_for(0x00u, 11, 1, 11, 11, 121) == 143,
-        "legacy variant refuses native path");
+        "inactive variant refuses native path");
   check(scratch_for(0x07u, 11, 1, 11, 11, 121) == 143,
         "hier_2pl variant refuses native path");
   check(scratch_for(0x84u, 11, 1, 11, 11, 121, 1) == 143,
@@ -556,14 +557,11 @@ int main() {
         "malformed mu refuses native path");
 
   // Functional fallback oracles accompany the sizing sentinels: one changed
-  // variant, the hier_2pl all-active contract (also legacy variant zero), and
-  // the vectorized-y overload.
+  // variant, the hier_2pl all-active contract, and the vectorized-y overload.
   const Inputs three = inputs(3, 1, 0.35);
   compare_direct("fallback non-propto", three, 0x04u, seed,
                  reference_l_only<false>(three, seed), false, false);
   compare_direct("fallback hier activity", three, 0x07u, seed,
-                 reference_all_active<false>(three, seed), true, true);
-  compare_direct("fallback legacy activity", three, 0x00u, seed,
                  reference_all_active<false>(three, seed), true, true);
   const Inputs vectorized = inputs(3, 2, -0.15);
   compare_direct("fallback vectorized", vectorized, 0x84u, seed,
@@ -586,7 +584,6 @@ int main() {
 
   check_multi_normal("mn all active", 3, 1, 0x07u, seed);
   check_multi_normal("mn sigma only propto", 3, 1, 0x84u, seed);
-  check_multi_normal("mn legacy activity", 3, 1, 0x00u, seed);
   check_multi_normal("mn vectorized", 3, 2, 0x87u, seed);
   check_multi_normal_errors();
   for (int n : {1, 3, 8})

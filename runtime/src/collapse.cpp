@@ -1275,17 +1275,14 @@ Analysis analyze(const Graph& g, const Fills& fills,
             stat.statistics =
                 grouped_statistics(values, member, stat.rep.size());
           }
-          // An unset variant is the full density, every argument active.
+          const DensityMode mode = density_mode(op);
           stat.scale = op.in[2];
-          stat.propto = (op.variant & 0x80u) != 0;
-          stat.variant = (uint8_t)((op.variant == 0 || (op.variant & 0x02u)
-                                        ? kGroupedLocationActive
-                                        : 0) |
-                                   (op.variant == 0 || (op.variant & 0x04u)
-                                        ? kGroupedScaleActive
-                                        : 0) |
-                                   (lognormal ? kGroupedLognormal : 0) |
-                                   (stat.propto ? kGroupedPropto : 0));
+          stat.propto = mode.propto;
+          stat.variant =
+              (uint8_t)((mode.is_active(1) ? kGroupedLocationActive : 0) |
+                        (mode.is_active(2) ? kGroupedScaleActive : 0) |
+                        (lognormal ? kGroupedLognormal : 0) |
+                        (stat.propto ? kGroupedPropto : 0));
           by_line = try_line && line_data(stat, affine, lines);
         }
         const int kind = family_of_opcode(op.opcode);
@@ -1346,13 +1343,12 @@ Analysis analyze(const Graph& g, const Fills& fills,
             for (size_t k = 0; k < 2 * groups; ++k)
               stat.statistics[groups + k] = sum[k].value();
             stat.variate_constant = constant.value();
-            stat.propto = (op.variant & 0x80u) != 0;
-            // An unset variant is the full density, every argument active.
+            const DensityMode mode = density_mode(op);
+            stat.propto = mode.propto;
             stat.variant = stat.propto ? kFamilyPropto : 0;
             for (int k = 0; k < family_parameters(kind); ++k) {
               stat.parameters.push_back(op.in[first_parameter + k]);
-              if (op.variant == 0 ||
-                  (op.variant & (1u << (first_parameter + k))) != 0)
+              if (mode.is_active(first_parameter + k))
                 stat.variant |=
                     k == 0 ? kFamilyFirstActive : kFamilySecondActive;
             }
@@ -1390,17 +1386,18 @@ Analysis analyze(const Graph& g, const Fills& fills,
       t.opcode = op.opcode;
       t.ops = 1;
       t.n = t.rows = rows;
-      t.variate_is_data = (op.variant & 0x01u) == 0;
+      const DensityMode mode = density_mode(op);
+      t.variate_is_data = !mode.is_active(0);
       const auto* y = num.data_of(op.in[0]);
       const auto* x = num.data_of(op.in[1]);
       const auto in_len = [&](int j) { return g.slots[(size_t)op.in[j]].len; };
-      bool usable = y != nullptr && x != nullptr && (op.variant & 0x03u) == 0 &&
-                    !op.dyn_lengths && !(op.n_idata >= 5 && op.idata[4] == 1) &&
-                    in_len(0) == rows && in_len(1) == rows * cols &&
-                    (in_len(2) == 1 || in_len(2) == rows) &&
-                    in_len(3) == cols && in_len(4) == 1 &&
-                    g.slots[(size_t)op.out].len == 1 &&
-                    rows >= kCollapseMinObservations;
+      bool usable =
+          y != nullptr && x != nullptr && (mode.active & 0x03u) == 0 &&
+          !op.dyn_lengths && !(op.n_idata >= 5 && op.idata[4] == 1) &&
+          in_len(0) == rows && in_len(1) == rows * cols &&
+          (in_len(2) == 1 || in_len(2) == rows) && in_len(3) == cols &&
+          in_len(4) == 1 && g.slots[(size_t)op.out].len == 1 &&
+          rows >= kCollapseMinObservations;
       for (int64_t obs = 0; usable && obs < rows; ++obs)
         usable = std::isfinite((*y)[(size_t)obs]);
       StatisticPlan stat;
@@ -1440,7 +1437,7 @@ Analysis analyze(const Graph& g, const Fills& fills,
           // This kernel binds its scale as a parameter whatever it is, so
           // Stan keeps the scale's log term under propto too.
           stat.scale = op.in[4];
-          stat.propto = (op.variant & 0x80u) != 0;
+          stat.propto = mode.propto;
           stat.variant =
               (uint8_t)(kGroupedLocationActive | kGroupedScaleActive |
                         kGroupedGlm | (stat.propto ? kGroupedPropto : 0));
@@ -1498,7 +1495,7 @@ Analysis analyze(const Graph& g, const Fills& fills,
       plan.kind = glm_kind;
       plan.cols = cols;
       plan.observations = rows;
-      plan.propto = (op.variant & 0x80u) != 0;
+      plan.propto = density_mode(op).propto;
       bool valid = enough;
       const int64_t ratio =
           by_rows ? kCollapseRecorderRatio : kCollapseNativeRatio;
@@ -1786,10 +1783,9 @@ Analysis analyze(const Graph& g, const Fills& fills,
         stat.statistics[groups + k] = sum[k].value();
       stat.variate_constant = constant.value();
     }
-    stat.propto = (first.variant & 0x80u) != 0;
-    const auto is_active = [&](int k) {
-      return first.variant == 0 || (first.variant & (1u << (base + k))) != 0;
-    };
+    const DensityMode mode = density_mode(first);
+    stat.propto = mode.propto;
+    const auto is_active = [&](int k) { return mode.is_active(base + k); };
     if (kind < 0)
       stat.variant = (uint8_t)((is_active(0) ? kGroupedLocationActive : 0) |
                                (is_active(1) ? kGroupedScaleActive : 0) |
@@ -2422,10 +2418,7 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
 
     Op e = d;
     e.primal_source = -1;
-    // An unset mask means every argument is active; the elementwise form
-    // reads the mask as written.
-    if (e.variant == 0) e.variant = (uint8_t)((1u << d.n_in) - 1u);
-    e.variant = (uint8_t)(e.variant | 0x40u);
+    e.variant = elementwise_density(e.variant);
     int64_t n = outcomes.width;
     for (int j = 0; j < d.n_in; ++j) {
       n = std::max(n, g.slots[(size_t)d.in[j]].len);
@@ -2634,7 +2627,7 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
       // GLM binds its predictor and precision as parameters whatever they
       // are, and so does this.
       e.opcode = OP_NEG_BINOMIAL_2_LOG_LPMF;
-      e.variant = (uint8_t)(0x40u | 0x03u | (plan.propto ? 0x80u : 0u));
+      e.variant = DensityMode{0x3u, true, plan.propto}.byte();
       e.n_in = 2;
       e.in[0] = eta;
       e.in[1] = kept(d.in[3]);
@@ -2683,8 +2676,7 @@ CollapseStats collapse_observations(Graph& g, Fills& fills,
 
     Op e = d;
     e.primal_source = -1;
-    if (e.variant == 0) e.variant = (uint8_t)((1u << d.n_in) - 1u);
-    e.variant = (uint8_t)(e.variant | 0x40u);
+    e.variant = elementwise_density(e.variant);
     bool ok = true;
     for (int j = 0; j < d.n_in && ok; ++j) {
       // One scalar for every piece is passed as it is.

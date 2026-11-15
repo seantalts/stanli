@@ -4,6 +4,7 @@
 #ifndef STANLI_TESTS_MODELS_HPP
 #define STANLI_TESTS_MODELS_HPP
 
+#include "density_ops.hpp"
 #include <stanli/graph.hpp>
 #include <stanli/optable.hpp>
 
@@ -20,7 +21,7 @@ inline Graph std_normal(int D) {
   const int zero = g.add_slot(1, false);
   const int one = g.add_slot(1, false);
   const int lp = g.add_slot(1, false);
-  g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, one}, lp);
   g.result_slot = lp;
   return g;
 }
@@ -64,10 +65,11 @@ inline EightSchools eight_schools() {
   g.add_op(OP_EXPV, {m.log_tau}, tau);
   g.add_op(OP_MUL, {tau, m.theta_tilde}, tau_theta_tilde);
   g.add_op(OP_ADD, {m.mu, tau_theta_tilde}, theta);
-  g.add_op(OP_NORMAL_LPDF, {m.y, theta, m.sigma}, lp1);
-  g.add_op(OP_NORMAL_LPDF, {m.theta_tilde, zero, one}, lp2);
-  g.add_op(OP_NORMAL_LPDF, {m.mu, zero, five}, lp3);
-  g.add_op(OP_CAUCHY_LPDF, {tau, zero, five}, lp4);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {m.y, theta, m.sigma}, lp1);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {m.theta_tilde, zero, one},
+                                lp2);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {m.mu, zero, five}, lp3);
+  stanli::testutil::add_density(g, OP_CAUCHY_LPDF, {tau, zero, five}, lp4);
   g.add_op(OP_ADD_N, {lp1, lp2, lp3, lp4, m.log_tau}, lp);
   g.result_slot = lp;
   return m;
@@ -127,11 +129,12 @@ inline LogisticGlm logistic_glm() {
 
   g.add_op(OP_MATVEC, {m.X, m.beta}, eta0, {LogisticGlm::N, LogisticGlm::K});
   g.add_op(OP_ADD, {eta0, m.alpha}, eta);
-  g.add_op(OP_BERNOULLI_LOGIT_LPMF, {eta}, lp1,
-           std::vector<int>(LogisticGlm::kYint,
-                            LogisticGlm::kYint + LogisticGlm::N));
-  g.add_op(OP_NORMAL_LPDF, {m.beta, zero, p25}, lp2);
-  g.add_op(OP_NORMAL_LPDF, {m.alpha, zero, five}, lp3);
+  stanli::testutil::add_density(
+      g, OP_BERNOULLI_LOGIT_LPMF, {eta}, lp1,
+      std::vector<int>(LogisticGlm::kYint,
+                       LogisticGlm::kYint + LogisticGlm::N));
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {m.beta, zero, p25}, lp2);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {m.alpha, zero, five}, lp3);
   g.add_op(OP_ADD_N, {lp1, lp2, lp3}, lp);
   g.result_slot = lp;
   return m;

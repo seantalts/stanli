@@ -239,7 +239,8 @@ auto lpmf1(uint16_t opcode) {
     std::vector<const std::vector<T>*> in;
     for (size_t k = 1; k < a.size(); ++k) in.push_back(&a[k].r);
     const std::vector<int> idata(a[0].i.begin(), a[0].i.end());
-    call_kernel<T>(opcode, 0, 0x3f, idata, in, r.r);
+    call_kernel<T>(opcode, DensityMode::all_active((int)in.size()).byte(), 0x3f,
+                   idata, in, r.r);
     return r;
   };
 }
@@ -252,7 +253,8 @@ auto lpmf2(uint16_t opcode) {
     idata.push_back((int)a[1].i.size());
     idata.insert(idata.end(), a[1].i.begin(), a[1].i.end());
     const std::vector<const std::vector<T>*> in{&a[2].r};
-    call_kernel<T>(opcode, 0, 0x3f, idata, in, r.r);
+    call_kernel<T>(opcode, DensityMode::all_active(1).byte(), 0x3f, idata, in,
+                   r.r);
     return r;
   };
 }

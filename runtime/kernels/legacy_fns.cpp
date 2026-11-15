@@ -100,8 +100,9 @@ decltype(auto) with_vectorized_argument(Vectors& values, int encoded, F&& f) {
 double dirichlet_eval(KernelCtx& ctx) {
   stan::math::nested_rev_autodiff nested;
   using stan::math::var;
-  const bool propto = (ctx.variant & 0x80u) != 0;
-  const unsigned mask = ctx.variant == 0 ? 0x3u : (ctx.variant & 0x3fu);
+  const DensityMode mode = density_mode(ctx);
+  const bool propto = mode.propto;
+  const unsigned mask = mode.active;
   // idata is {inner width, theta count, alpha count}.
   const int64_t width = ctx.idata[0];
   const int theta_encoded = ctx.idata[1];
@@ -153,8 +154,9 @@ void dirichlet_fwd(KernelCtx& ctx) {
     ctx.out.data[0] = dirichlet_eval(ctx);
     return;
   }
-  const bool propto = (ctx.variant & 0x80u) != 0;
-  const unsigned mask = ctx.variant == 0 ? 3u : (ctx.variant & 3u);
+  const DensityMode mode = density_mode(ctx);
+  const bool propto = mode.propto;
+  const unsigned mask = mode.active & 3u;
   sink s;
   s.buf[0] = ctx.scratch;
   s.buf[1] = ctx.scratch + ctx.in[0].len;

@@ -427,7 +427,10 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
     lp.in[1] = alpha;
     lp.in[2] = beta;
     lp.out = g.add_slot(1, false);
-    lp.variant = (uint8_t)((glm.categorical_variant & 0x80u) | 0x7u);
+    lp.variant =
+        DensityMode{0x7u, false,
+                    (glm.categorical_variant & kCategoricalPropto) != 0}
+            .byte();
     outcomes.push_back((int)n);
     outcomes.push_back(1);
     attach_idata(lp, std::move(outcomes));
@@ -1053,7 +1056,7 @@ PartitionStats partition_lanes(Graph& g, Fills& fills,
           ap.out = op.out;
           break;
         case Emit::kEltDensity:
-          op.variant = (uint8_t)(op.variant | 0x40u);
+          op.variant = elementwise_density(op.variant);
           op.out = g.add_slot(L * ap.rows, false);
           attach_outcomes(op, p, ap.rows);
           ap.out = op.out;

@@ -49,9 +49,9 @@ struct Slot {
 
 struct Op {
   uint16_t opcode = 0;
-  // Opcode-specific compact mode. Density kernels use bits 0..5 for
-  // per-argument activity, bit 6 for elementwise lp, and bit 7 for propto;
-  // other kernels use it for contracts such as ODE scalar types or RNG family.
+  // Opcode-specific compact mode, read and written through the opcode
+  // family's typed view (DensityMode, ...); other kernels use
+  // it for contracts such as an RNG family.
   uint8_t variant = 0;
   int out = -1;
   int out2 = -1;  // optional second output (e.g. constrain jacobian term)
@@ -72,6 +72,32 @@ struct Op {
   // source pullback and its separate adjoint. Names the surviving output;
   // the survivor names itself. Fits the existing tail padding of Op.
   int32_t primal_source = -1;
+};
+
+// Op::variant of the general density kernels. Encoders write every field;
+// a zero byte means no argument is autodiff, the summed lp, and no propto.
+struct DensityMode {
+  uint8_t active = 0;        // bit k: in[k] is autodiff (k < 6)
+  bool elementwise = false;  // out[n] is element n's lp instead of the sum
+  bool propto = false;       // drop terms constant in the active arguments
+
+  static constexpr uint8_t kActiveBits = 0x3f;
+  static constexpr uint8_t kElementwiseBit = 1u << 6;
+  static constexpr uint8_t kProptoBit = 1u << 7;
+
+  constexpr bool is_active(int k) const { return ((active >> k) & 1u) != 0; }
+  constexpr uint8_t byte() const {
+    return (uint8_t)((active & kActiveBits) |
+                     (elementwise ? kElementwiseBit : 0u) |
+                     (propto ? kProptoBit : 0u));
+  }
+  static constexpr DensityMode of(uint8_t byte) {
+    return {(uint8_t)(byte & kActiveBits), (byte & kElementwiseBit) != 0,
+            (byte & kProptoBit) != 0};
+  }
+  static constexpr DensityMode all_active(int n_args, bool propto = false) {
+    return {(uint8_t)((1u << n_args) - 1u), false, propto};
+  }
 };
 
 // Bit 6 of a dynamic-length mask names the output; bits 0..5 name inputs.
@@ -103,6 +129,23 @@ struct KernelCtx {
   uint8_t dyn_lengths = 0;
 };
 
+// Both are copied per call on hot paths; the typed views above decode the
+// existing byte rather than widening either struct.
+static_assert(sizeof(void*) != 8 || sizeof(Op) == 80, "Op grew");
+static_assert(sizeof(void*) != 8 || sizeof(KernelCtx) == 336, "KernelCtx grew");
+
+inline DensityMode density_mode(const KernelCtx& c) {
+  return DensityMode::of(c.variant);
+}
+inline DensityMode density_mode(const Op& op) {
+  return DensityMode::of(op.variant);
+}
+// The same density call writing one lp per element.
+inline uint8_t elementwise_density(uint8_t variant) {
+  DensityMode mode = DensityMode::of(variant);
+  mode.elementwise = true;
+  return mode.byte();
+}
 inline void apply_dynamic_length(KernelCtx& c) {
   assert(c.in[c.dyn_extent_in].len == 1);
   const double raw = c.in[c.dyn_extent_in].data[0];

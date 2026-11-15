@@ -1,5 +1,6 @@
 // One-op graphs per density: value and every parameter gradient must match
 // an in-process var-path evaluation of the same call, bitwise.
+#include "density_ops.hpp"
 #include "expect.hpp"
 #include "graph_helpers.hpp"
 
@@ -207,7 +208,7 @@ static void check_density(const std::string& tag, uint16_t opcode,
                           const std::vector<std::vector<double>>& vals,
                           const std::vector<bool>& active,
                           const std::vector<int>& idata, Ref ref) {
-  const auto r = stanli::testutil::run_one_op(opcode, vals, active, idata);
+  const auto r = stanli::testutil::run_density(opcode, vals, active, idata);
   DensityArgs args(vals, active);
   stan::math::var lp = ref(args);
   lp.grad();
@@ -363,7 +364,7 @@ static BernoulliRef run_bernoulli_reference(uint16_t opcode, uint8_t variant,
                                             bool scalar_outcome) {
   const bool logit = opcode == stanli::OP_BERNOULLI_LOGIT_LPMF;
   const bool propto = (variant & 0x80u) != 0;
-  const bool active = variant == 0 || (variant & 0x01u) != 0;
+  const bool active = (variant & 0x01u) != 0;
   if (logit) {
     if (propto)
       return run_bernoulli_reference<true, true>(y, theta, scalar_outcome,
@@ -533,11 +534,11 @@ static void check_bernoulli_scratch_reset(const std::string& tag,
   ctx.idata = &y;
   ctx.n_idata = 1;
 
-  ctx.variant = 0;
+  ctx.variant = 0x01u;  // active, full density
   k->forward(ctx);
   expect_eq(tag + " valid connected", scratch[1], 1.0);
 
-  ctx.variant = 0x02u;  // explicit inactive, full density
+  ctx.variant = 0x00u;  // inactive, full density
   k->forward(ctx);
   expect_eq(tag + " inactive partial", scratch[0], 0.0);
   expect_eq(tag + " inactive connected", scratch[1], 0.0);
@@ -547,7 +548,7 @@ static void check_bernoulli_scratch_reset(const std::string& tag,
   k->backward(ctx);
   expect_eq(tag + " inactive pullback", adj, 0.0);
 
-  ctx.variant = 0;
+  ctx.variant = 0x01u;
   k->forward(ctx);
   expect_eq(tag + " refill connected", scratch[1], 1.0);
   ctx.n_idata = 0;
@@ -586,6 +587,7 @@ static void check_scalar_poisson_lcdf() {
         stan::math::nested_rev_autodiff nested;
         double out = 0, adj = 0, scratch[2] = {-9, -9};
         KernelCtx ctx;
+        ctx.variant = DensityMode::all_active(1).byte();
         ctx.n_in = 1;
         ctx.in[0] = Desc{&rate, 1};
         ctx.in_adj[0] = Desc{&adj, 1};
@@ -904,7 +906,8 @@ static void check_multinomial_density() {
           Graph g;
           const int theta = g.add_slot(n, active), w = g.add_slot(1, false);
           const int out = g.add_slot(1, false), scaled = g.add_slot(1, false);
-          g.add_op(OP_MULTINOMIAL_LPMF, {theta}, out, counts);
+          stanli::testutil::add_density(g, OP_MULTINOMIAL_LPMF, {theta}, out,
+                                        counts);
           g.ops.back().variant = (propto ? 0x80u : 0u) | (active ? 0x1u : 0u);
           g.add_op(OP_MUL, {out, w}, scaled);
           g.result_slot = scaled;
@@ -955,7 +958,8 @@ static void check_dirichlet_recorder() {
                     a = g.add_slot(width, true);
           const int w = g.add_slot(1, false), lp = g.add_slot(1, false);
           const int scaled = g.add_slot(1, false);
-          g.add_op(OP_DIRICHLET_LPDF, {t, a}, lp, {width, arrays ? n : -1, -1});
+          stanli::testutil::add_density(g, OP_DIRICHLET_LPDF, {t, a}, lp,
+                                        {width, arrays ? n : -1, -1});
           g.ops.back().variant = 0x40u | mask | (propto ? 0x80u : 0u);
           g.add_op(OP_MUL, {lp, w}, scaled);
           g.result_slot = scaled;
@@ -1035,8 +1039,9 @@ static void check_probit_alias() {
     const int input = g.add_slot(3, true), w = g.add_slot(1, false);
     const int lp = g.add_slot(1, false), scaled = g.add_slot(1, false);
     const std::vector<int> outcomes{1, 2, 4};
-    g.add_op(OP_ORDERED_PROBIT_LPMF, {input, input}, lp,
-             {1, 2, 4, kVectorizedDensityLayoutMarker, 3, -1});
+    stanli::testutil::add_density(
+        g, OP_ORDERED_PROBIT_LPMF, {input, input}, lp,
+        {1, 2, 4, kVectorizedDensityLayoutMarker, 3, -1});
     g.add_op(OP_MUL, {lp, w}, scaled);
     g.result_slot = scaled;
     Executor ex(std::move(g));
@@ -1080,8 +1085,9 @@ static void check_wiener_fixed_observation() {
                                                    : true));
           const int w = g.add_slot(1, false), lp = g.add_slot(1, false),
                     scaled = g.add_slot(1, false);
-          g.add_op(OP_WIENER_LPDF,
-                   {slots[0], slots[1], slots[2], slots[3], slots[4]}, lp);
+          stanli::testutil::add_density(
+              g, OP_WIENER_LPDF,
+              {slots[0], slots[1], slots[2], slots[3], slots[4]}, lp);
           g.ops.back().variant = propto ? 0x9fu : 0x1fu;
           g.add_op(OP_MUL, {lp, w}, scaled);
           g.result_slot = scaled;
@@ -1128,7 +1134,69 @@ static void check_wiener_fixed_observation() {
         }
 }
 
+// The typed views over Op::variant: every byte decodes to one mode and back,
+// and a lone propto or elementwise bit marks no argument active.
+static void check_density_modes() {
+  using namespace stanli;
+  bool round_trip = true;
+  for (unsigned b = 0; b < 256; ++b)
+    round_trip = round_trip && DensityMode::of((uint8_t)b).byte() == b;
+  expect_true("density modes round trip", round_trip);
+  const DensityMode zero = DensityMode::of(0);
+  expect_true("zero byte: nothing active, summed, full density",
+              zero.active == 0 && !zero.elementwise && !zero.propto);
+  const DensityMode propto =
+      DensityMode::of(DensityMode{0, false, true}.byte());
+  expect_true("propto alone marks nothing active",
+              propto.propto && !propto.elementwise && propto.active == 0);
+  const DensityMode elt = DensityMode::of(DensityMode{0, true, false}.byte());
+  expect_true("elementwise alone marks nothing active",
+              elt.elementwise && !elt.propto && elt.active == 0);
+  expect_true("all active covers exactly the arguments",
+              DensityMode::all_active(3).active == 0x7u &&
+                  !DensityMode::all_active(3).propto &&
+                  DensityMode::all_active(2, true).propto);
+  const DensityMode widened = DensityMode::of(
+      elementwise_density(DensityMode{0x6u, false, true}.byte()));
+  expect_true("elementwise keeps activity and propto",
+              widened.elementwise && widened.propto && widened.active == 0x6u);
+  expect_true("elementwise keeps an empty mask empty",
+              DensityMode::of(elementwise_density(0)).active == 0);
+  bool all_integer = true;
+  for (int d = 0; d <= (int)AllIntegerDensity::DiscreteRangeLccdf; ++d)
+    for (bool p : {false, true}) {
+      const AllIntegerMode m =
+          AllIntegerMode::of(AllIntegerMode{(AllIntegerDensity)d, p}.byte());
+      all_integer = all_integer && (int)m.density == d && m.propto == p;
+    }
+  expect_true("all-integer mode round trips", all_integer);
+  bool poisson_binomial = true;
+  for (int k = 0; k < 4; ++k)
+    for (bool a : {false, true}) {
+      const PoissonBinomialMode m = PoissonBinomialMode::of(
+          PoissonBinomialMode{(PoissonBinomialKind)k, a}.byte());
+      poisson_binomial = poisson_binomial && (int)m.kind == k && m.active == a;
+    }
+  expect_true("poisson_binomial mode round trips", poisson_binomial);
+
+  // A lone propto bit drops every term of a data-only normal; a lone
+  // elementwise bit writes each element's full lp with no partials.
+  using stan::math::normal_lpdf;
+  const std::vector<double> y{0.3, -1.2, 2.5};
+  const auto dropped = testutil::run_one_op(OP_NORMAL_LPDF, {y, {0.1}, {1.7}},
+                                            {false, false, false}, {},
+                                            DensityMode{0, false, true}.byte());
+  expect_eq("propto alone drops every term", dropped.value, 0.0);
+  const auto each = testutil::run_op_sum(OP_NORMAL_LPDF, 3, {y, {0.1}, {1.7}},
+                                         {false, false, false}, {},
+                                         DensityMode{0, true, false}.byte());
+  double want = 0;
+  for (double v : y) want += normal_lpdf<false>(v, 0.1, 1.7);
+  expect_eq("elementwise alone sums to the full density", each.value, want);
+}
+
 int main() {
+  check_density_modes();
   check_scalar_poisson_lcdf();
   check_wiener_single_evaluation();
   using namespace stanli;
@@ -1139,13 +1207,13 @@ int main() {
   // reaches the partials sink. This was the first instance caught by the
   // dogs_log reference: CmdStan said -inf while stanli said finite.
   {
-    auto r = testutil::run_one_op(OP_UNIFORM_LPDF, {{0.1}, {-100.0}, {0.0}},
-                                  {true, false, false});
+    auto r = testutil::run_density(OP_UNIFORM_LPDF, {{0.1}, {-100.0}, {0.0}},
+                                   {true, false, false});
     expect_eq("uniform oos value", r.value,
               -std::numeric_limits<double>::infinity());
     expect_eq("uniform oos dy", r.grad[0], 0.0);
-    auto r2 = testutil::run_one_op(OP_UNIFORM_LPDF, {{-0.5}, {-100.0}, {0.0}},
-                                   {true, false, false});
+    auto r2 = testutil::run_density(OP_UNIFORM_LPDF, {{-0.5}, {-100.0}, {0.0}},
+                                    {true, false, false});
     var vy = -0.5;
     var lp = stan::math::uniform_lpdf<false>(vy, -100.0, 0.0);
     lp.grad();
@@ -1165,7 +1233,8 @@ int main() {
     const int alpha = g.add_slot(1, false);
     const int beta = g.add_slot(1, false);
     const int lp_slot = g.add_slot(1, false);
-    g.add_op(OP_INV_GAMMA_LPDF, {y, alpha, beta}, lp_slot);
+    stanli::testutil::add_density(g, OP_INV_GAMMA_LPDF, {y, alpha, beta},
+                                  lp_slot);
     g.result_slot = lp_slot;
     Executor ex(std::move(g));
     ex.value_ptr(alpha)[0] = 2.0;
@@ -1198,8 +1267,8 @@ int main() {
   // non-rerolled shape lowering emits for a vectorized sampling statement.
   {
     const std::vector<double> yv{1.5, -1.0, 2.25};
-    auto r = testutil::run_one_op(OP_INV_GAMMA_LPDF, {yv, {2.0}, {3.0}},
-                                  {true, false, false});
+    auto r = testutil::run_density(OP_INV_GAMMA_LPDF, {yv, {2.0}, {3.0}},
+                                   {true, false, false});
     Eigen::Matrix<var, -1, 1> y_ref(3);
     for (int i = 0; i < 3; ++i) y_ref(i) = yv[(size_t)i];
     var lp_ref = stan::math::inv_gamma_lpdf<false>(y_ref, 2.0, 3.0);
@@ -1221,7 +1290,8 @@ int main() {
     const int beta = g.add_slot(1, false);
     const int lp_slot = g.add_slot(1, false);
     const int squared = g.add_slot(1, false);
-    g.add_op(OP_INV_GAMMA_LPDF, {y, alpha, beta}, lp_slot);
+    stanli::testutil::add_density(g, OP_INV_GAMMA_LPDF, {y, alpha, beta},
+                                  lp_slot);
     g.add_op(OP_SQUARE, {lp_slot}, squared);
     g.result_slot = squared;
     Executor ex(std::move(g));
@@ -1253,7 +1323,8 @@ int main() {
     const int infinity = g.add_slot(1, false);
     const int lp_slot = g.add_slot(1, false);
     const int scaled = g.add_slot(1, false);
-    g.add_op(OP_INV_GAMMA_LPDF, {y, alpha, beta}, lp_slot);
+    stanli::testutil::add_density(g, OP_INV_GAMMA_LPDF, {y, alpha, beta},
+                                  lp_slot);
     g.add_op(OP_MUL, {lp_slot, infinity}, scaled);
     g.result_slot = scaled;
     Executor ex(std::move(g));
@@ -1381,8 +1452,10 @@ int main() {
 
   // ---- student_t_lpdf(y_data, nu_ps, mu_ps, sigma_ps) --------------------
   {
+    // Every argument marked active, so the kernel promotes y to rvar too.
     auto r = testutil::run_one_op(OP_STUDENT_T_LPDF, {ys, {4.0}, {0.25}, {1.4}},
-                                  {false, true, true, true});
+                                  {false, true, true, true}, {},
+                                  DensityMode::all_active(4).byte());
     Eigen::Map<Eigen::VectorXd> ymap(ys.data(), N);
     var vnu = 4.0, vmu = 0.25, vsig = 1.4;
     var lp = stan::math::student_t_lpdf<false>(ymap, vnu, vmu, vsig);
@@ -1408,10 +1481,8 @@ int main() {
   }
 
   // ---- native Bernoulli forwards vs the pinned Stan Math checkout --------
-  // Default means variant == 0 (all arguments active). Once any variant bit
-  // is present, bit 0 explicitly selects activity; bit 7 selects propto.
-  // These are all five representable full/propto x default/active/inactive
-  // cases for a one-real-argument density.
+  // Bit 0 selects activity and bit 7 propto: the four full/propto x
+  // active/inactive cases for a one-real-argument density.
   {
     struct Dist {
       uint16_t opcode;
@@ -1430,18 +1501,17 @@ int main() {
       uint8_t variant;
       const char* tag;
     };
-    const VariantCase variants[] = {{0x00u, "default full"},
-                                    {0x01u, "active full"},
-                                    {0x02u, "inactive full"},
+    const VariantCase variants[] = {{0x01u, "active full"},
+                                    {0x00u, "inactive full"},
                                     {0x81u, "active propto"},
                                     {0x80u, "inactive propto"}};
 
     for (const Dist& d : dists) {
-      check_bernoulli_run(std::string(d.tag) + " scalar/scalar", d.opcode, 0,
+      check_bernoulli_run(std::string(d.tag) + " scalar/scalar", d.opcode, 1,
                           {1}, {d.scalar_theta}, true);
-      check_bernoulli_run(std::string(d.tag) + " vector/vector", d.opcode, 0, y,
+      check_bernoulli_run(std::string(d.tag) + " vector/vector", d.opcode, 1, y,
                           d.vector_theta, false);
-      check_bernoulli_run(std::string(d.tag) + " vector/broadcast", d.opcode, 0,
+      check_bernoulli_run(std::string(d.tag) + " vector/broadcast", d.opcode, 1,
                           y, {d.scalar_theta}, false);
       for (const VariantCase& c : variants)
         check_bernoulli_run(std::string(d.tag) + " " + c.tag, d.opcode,
@@ -1543,7 +1613,7 @@ int main() {
         [&](const std::string& tag, uint16_t opcode, const std::vector<int>& y,
             double theta) {
           const CapturedException got = capture_exception(
-              [&] { (void)run_bernoulli_variant(opcode, 0, y, {theta}); });
+              [&] { (void)run_bernoulli_variant(opcode, 1, y, {theta}); });
           const CapturedException want = capture_exception([&] {
             const Eigen::VectorXi y_ref = as_int_vector(y);
             if (opcode == OP_BERNOULLI_LPMF)
@@ -1582,7 +1652,7 @@ int main() {
   {
     const double inf = std::numeric_limits<double>::infinity();
     for (uint16_t opcode : {OP_BERNOULLI_LPMF, OP_BERNOULLI_LOGIT_LPMF}) {
-      const auto got = run_bernoulli_scaled(opcode, 0, {}, 0.4, inf);
+      const auto got = run_bernoulli_scaled(opcode, 1, {}, 0.4, inf);
       Eigen::VectorXi y_ref(0);
       var theta_ref = 0.4;
       var lp_ref =
@@ -1603,7 +1673,7 @@ int main() {
     }
 
     const auto got =
-        run_bernoulli_scaled(OP_BERNOULLI_LOGIT_LPMF, 0, {1}, inf, inf);
+        run_bernoulli_scaled(OP_BERNOULLI_LOGIT_LPMF, 1, {1}, inf, inf);
     Eigen::VectorXi y_ref(1);
     y_ref[0] = 1;
     var theta_ref = inf;
@@ -1748,7 +1818,8 @@ int main() {
       // Slot order: any vector slot's elements then the next slot's, matching
       // run_op_sum's parameter concatenation.
       auto r = stanli::testutil::run_op_sum(OP_WIENER_LPDF, 1, vals,
-                                            std::vector<bool>(5, true));
+                                            std::vector<bool>(5, true), {},
+                                            DensityMode::all_active(5).byte());
       size_t gi = 0;
       for (size_t k = 0; k < 5; ++k) {
         if (vectors[k]) {
@@ -1839,8 +1910,8 @@ int main() {
                               }}};
     for (const VonMises& c : kVm) {
       {
-        auto r = stanli::testutil::run_one_op(c.opcode, {vy, vmu, vk},
-                                              {true, true, true});
+        auto r = stanli::testutil::run_density(c.opcode, {vy, vmu, vk},
+                                               {true, true, true});
         VecV y = vec(vy), m = vec(vmu), k = vec(vk);
         var lp = c.vvv(y, m, k);
         lp.grad();
@@ -1856,8 +1927,8 @@ int main() {
         stan::math::recover_memory();
       }
       {
-        auto r = stanli::testutil::run_one_op(c.opcode, {vy, {vmu[0]}, {vk[0]}},
-                                              {true, true, true});
+        auto r = stanli::testutil::run_density(
+            c.opcode, {vy, {vmu[0]}, {vk[0]}}, {true, true, true});
         VecV y = vec(vy);
         var m = vmu[0], k = vk[0];
         var lp = c.vss(y, m, k);
@@ -1871,7 +1942,7 @@ int main() {
         stan::math::recover_memory();
       }
       {
-        auto r = stanli::testutil::run_one_op(
+        auto r = stanli::testutil::run_density(
             c.opcode, {{vy[0]}, {vmu[0]}, {vk[0]}}, {true, true, true});
         var y = vy[0], m = vmu[0], k = vk[0];
         var lp = c.sss(y, m, k);
@@ -1910,8 +1981,8 @@ int main() {
          }}};
     for (const Nb2& c : kNb) {
       {
-        auto r = stanli::testutil::run_one_op(c.opcode, {vmn, vphi},
-                                              {true, true}, {1, 3});
+        auto r = stanli::testutil::run_density(c.opcode, {vmn, vphi},
+                                               {true, true}, {1, 3});
         VecV m = vec(vmn), p = vec(vphi);
         var lp = c.vv(ivec({1, 3}), m, p);
         lp.grad();
@@ -1925,8 +1996,8 @@ int main() {
         stan::math::recover_memory();
       }
       {
-        auto r = stanli::testutil::run_one_op(c.opcode, {{vmn[0]}, {vphi[0]}},
-                                              {true, true}, {2});
+        auto r = stanli::testutil::run_density(c.opcode, {{vmn[0]}, {vphi[0]}},
+                                               {true, true}, {2});
         var m = vmn[0], p = vphi[0];
         var lp = c.ss(ivec({2}), m, p);
         lp.grad();

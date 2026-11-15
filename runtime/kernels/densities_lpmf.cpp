@@ -25,12 +25,12 @@ namespace {
 // reduction exactly. Both write the one partial column directly into
 // density_bwd<1>'s existing scratch layout.
 inline bool bernoulli_arg_active(const KernelCtx& ctx) {
-  return ctx.variant == 0 || (ctx.variant & 0x01u) != 0;
+  return density_mode(ctx).is_active(0);
 }
 
 inline bool bernoulli_drop_propto(const KernelCtx& ctx) {
   constexpr bool has_propto = (3 & STANLI_DENSITY_PROPTO) != 0;
-  return has_propto && (ctx.variant & 0x80u) != 0 && !bernoulli_arg_active(ctx);
+  return has_propto && density_mode(ctx).propto && !bernoulli_arg_active(ctx);
 }
 
 template <bool Logit>
@@ -189,7 +189,7 @@ void bernoulli_native_fwd(KernelCtx& ctx) {
   const bool drop = bernoulli_drop_propto(ctx);
   const Desc& theta = ctx.in[0];
 
-  if ((ctx.variant & 0x40u) != 0) {
+  if (density_mode(ctx).elementwise) {
     const int64_t n = ctx.out.len;
     std::fill_n(ctx.scratch, static_cast<size_t>(2 * n), 0.0);
     for (int64_t i = 0; i < n; ++i) {
@@ -253,15 +253,15 @@ void bernoulli_logit_fwd(KernelCtx& ctx) {
   // reduction order. Keep the recorder for that uncommon shape; the native
   // path covers scalar/scalar, vector/vector, and every rerolled elementwise
   // call without changing the contraction by a few ULPs.
-  if ((ctx.variant & 0x40u) == 0 && ctx.in[0].len == 1 && ctx.n_idata > 1) {
+  if (!density_mode(ctx).elementwise && ctx.in[0].len == 1 && ctx.n_idata > 1) {
     bernoulli_logit_recorded_fwd(ctx);
     return;
   }
-  if ((ctx.variant & 0x40u) == 0 && ctx.in[0].len > 1) {
+  if (!density_mode(ctx).elementwise && ctx.in[0].len > 1) {
     bernoulli_logit_vector_fwd(ctx);
     return;
   }
-  if ((ctx.variant & 0x40u) != 0 && ctx.out.len > 1) {
+  if (density_mode(ctx).elementwise && ctx.out.len > 1) {
     bernoulli_logit_elt_vector_fwd(ctx);
     return;
   }
@@ -307,8 +307,9 @@ void binomial_elt_vector_fwd(KernelCtx& ctx) {
   const int* g2 = int_group_next(g1);
   const Desc& theta = ctx.in[0];
   const int64_t len = ctx.out.len;
-  const bool active = (ctx.variant & 0x01u) != 0;
-  const bool propto = (ctx.variant & 0x80u) != 0;
+  const DensityMode mode = density_mode(ctx);
+  const bool active = mode.is_active(0);
+  const bool propto = mode.propto;
   std::fill_n(ctx.scratch, static_cast<size_t>(2 * len), 0.0);
   with_int_group(g1, [&](const auto& n, const int*) {
     with_int_group(g2, [&](const auto& trials, const int*) {
@@ -374,7 +375,7 @@ void binomial_elt_vector_fwd(KernelCtx& ctx) {
 
 #define STANLI_BINOMIAL_FWD(fname, dist, logit)                           \
   void fname(KernelCtx& ctx) {                                            \
-    if (ctx.variant & 0x40u) {                                            \
+    if (density_mode(ctx).elementwise) {                                  \
       if (ctx.out.len > 1) {                                              \
         binomial_elt_vector_fwd<logit>(ctx);                              \
         return;                                                           \
@@ -415,7 +416,7 @@ STANLI_BINOMIAL_FWD(binomial_logit_fwd, binomial_logit_lpmf, true)
 // arguments that behave like any other density's. with_int_group unpacks
 // the [len, vals...] pairs the lowering wrote, exactly as binomial does.
 void beta_binomial_fwd(KernelCtx& ctx) {
-  if (ctx.variant & 0x40u) {
+  if (density_mode(ctx).elementwise) {
     // One value per element, as the binomials above: partition and the
     // observation collapse both ask for it.
     const int* g1 = ctx.idata;

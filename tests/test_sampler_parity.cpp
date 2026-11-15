@@ -1,6 +1,7 @@
 // Isolate sampler configuration from compiler numerics: run the same executor
 // through our driver and the actual Stan service used by CmdStan, including
 // the live RNG consumed by generated quantities between saved transitions.
+#include "density_ops.hpp"
 #include "models.hpp"
 #include "env_helpers.hpp"
 
@@ -51,7 +52,7 @@ std::unique_ptr<stanli::Executor> make_executor(bool schools) {
   const int zero = g.add_slot(1, false);
   const int one = g.add_slot(1, false);
   const int lp = g.add_slot(1, false);
-  g.add_op(OP_NORMAL_LPDF, {x, zero, one}, lp);
+  stanli::testutil::add_density(g, OP_NORMAL_LPDF, {x, zero, one}, lp);
   g.result_slot = lp;
   auto ex = std::make_unique<Executor>(std::move(g));
   ex->value_ptr(zero)[0] = 0.0;

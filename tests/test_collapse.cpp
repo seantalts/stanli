@@ -1,6 +1,7 @@
 // Observation collapse: likelihood terms that repeat over the data are
 // evaluated once per distinct row and weighted. Every rewritten graph is run
 // against the graph it came from.
+#include "density_ops.hpp"
 #include "expect.hpp"
 #include "env_helpers.hpp"
 #include "graph_helpers.hpp"
@@ -121,7 +122,8 @@ static Model counts_by_group(int n, int groups = 2) {
   }
   m.g.add_op(OP_GATHER, {b}, eta, group);
   m.g.add_op(OP_INV_LOGIT, {eta}, theta);
-  m.g.add_op(OP_NEG_BINOMIAL_2_LPMF, {theta, phi}, lp, outcome);
+  stanli::testutil::add_density(m.g, OP_NEG_BINOMIAL_2_LPMF, {theta, phi}, lp,
+                                outcome);
   m.terms = {lp};
   return m;
 }
@@ -204,7 +206,8 @@ static void test_scalar_chains() {
   idata.push_back(-1);  // trials: one language-level scalar
   idata.push_back(5);
   const int lp = m.g.add_slot(1, false);
-  m.g.add_op(OP_BETA_BINOMIAL_LPMF, {p, beta}, lp, idata);
+  stanli::testutil::add_density(m.g, OP_BETA_BINOMIAL_LPMF, {p, beta}, lp,
+                                idata);
   m.terms = {lp};
   const Collapsed c = collapse(m);
   const Graph& g = c.model.g;
@@ -245,7 +248,7 @@ static void test_scalar_chains_become_vector_ops() {
       m.g.add_op(OP_SET_INDEX_INPLACE, {mu, mi}, mu, {i});
   }
   const int lp = m.g.add_slot(1, false);
-  m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
   m.g.ops.back().variant = 0x86;
   m.terms = {lp};
   const Collapsed c = collapse(m);
@@ -282,7 +285,8 @@ static void test_copied_predictor() {
   m.g.add_op(OP_MUL, {b, xs}, bx);
   m.g.add_op(OP_ADD, {a, bx}, mu);
   m.g.add_op(OP_SET_SLICE, {decl, mu}, stored, {0});
-  m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {stored, phi}, lp, y);
+  stanli::testutil::add_density(m.g, OP_NEG_BINOMIAL_2_LOG_LPMF, {stored, phi},
+                                lp, y);
   m.terms = {lp};
   const Collapsed c = collapse(m);
   const Graph& g = c.model.g;
@@ -295,8 +299,7 @@ static void test_copied_predictor() {
   expect_true("copy: same values", c.same_values);
 }
 
-// A real variate repeats too: rows are (y, mu). The mask of a density that
-// left its variant unset must still mark every argument active.
+// A real variate repeats too: rows are (y, mu), every argument active.
 static void test_real_variate_rows() {
   Model m;
   const int b = m.g.add_slot(1, true), sigma = m.g.add_slot(1, true);
@@ -308,7 +311,7 @@ static void test_real_variate_rows() {
   const int xs = data_slot(m, x), ys = data_slot(m, y);
   const int mu = m.g.add_slot(kWide, false), lp = m.g.add_slot(1, false);
   m.g.add_op(OP_MUL, {b, xs}, mu);
-  m.g.add_op(OP_CAUCHY_LPDF, {ys, mu, sigma}, lp);
+  stanli::testutil::add_density(m.g, OP_CAUCHY_LPDF, {ys, mu, sigma}, lp);
   m.terms = {lp};
   const Collapsed c = collapse(m);
   expect_true("real variate: four rows",
@@ -332,7 +335,8 @@ static void test_matvec_rows() {
   const int xs = data_slot(m, x);
   const int eta = m.g.add_slot(kWide, false), lp = m.g.add_slot(1, false);
   m.g.add_op(OP_MATVEC, {xs, beta}, eta, {kWide, 2});
-  m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {eta, phi}, lp, y);
+  stanli::testutil::add_density(m.g, OP_NEG_BINOMIAL_2_LOG_LPMF, {eta, phi}, lp,
+                                y);
   m.terms = {lp};
   const Collapsed c = collapse(m);
   expect_true("matvec: four rows",
@@ -361,9 +365,11 @@ static void test_a_later_store() {
   const int mu = m.g.add_slot(kWide, false), mu2 = m.g.add_slot(kWide, false);
   const int lp1 = m.g.add_slot(1, false), lp2 = m.g.add_slot(1, false);
   m.g.add_op(OP_MUL, {b, xs}, mu);
-  m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {mu, phi}, lp1, y);
+  stanli::testutil::add_density(m.g, OP_NEG_BINOMIAL_2_LOG_LPMF, {mu, phi}, lp1,
+                                y);
   m.g.add_op(OP_SET_INDEX, {mu, c0}, mu2, {7});
-  m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {mu2, phi}, lp2, y);
+  stanli::testutil::add_density(m.g, OP_NEG_BINOMIAL_2_LOG_LPMF, {mu2, phi},
+                                lp2, y);
   m.terms = {lp1, lp2};
   const Collapsed c = collapse(m);
   // The second term shares four of its five rows with the first, so the
@@ -391,7 +397,7 @@ static void test_unrestricted_argument() {
     // gather can restrict it.
     m.g.add_op(OP_SET_INDEX, {eta, c0}, eta2, {7});
     m.g.add_op(OP_INV_LOGIT, {eta2}, theta);
-    m.g.add_op(OP_BERNOULLI_LPMF, {theta}, lp, outcome);
+    stanli::testutil::add_density(m.g, OP_BERNOULLI_LPMF, {theta}, lp, outcome);
     m.terms = {lp};
     const Collapsed c = collapse(m);
     if (n == 16) {
@@ -440,7 +446,7 @@ static void test_element_updates_die_with_their_rows() {
       m.g.add_op(OP_SET_INDEX_INPLACE, {mu, now}, mu, {i});
   }
   const int lp = m.g.add_slot(1, false);
-  m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
   m.terms = {lp};
   const Collapsed c = collapse(m);
   expect_true("updates: two groups", c.stats.rows == 2);
@@ -459,7 +465,7 @@ static void test_scalar_terms() {
     const int y = data_slot(m, {i % 4 < 2 ? 1.5 : -0.5});
     const int mu = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_INDEX, {a}, mu, {i % 2});
-    m.g.add_op(OP_CAUCHY_LPDF, {y, mu, sigma}, lp);
+    stanli::testutil::add_density(m.g, OP_CAUCHY_LPDF, {y, mu, sigma}, lp);
     m.terms.push_back(lp);
   }
   const int extra = m.g.add_slot(1, false);
@@ -483,7 +489,7 @@ static void test_scalar_terms_equal_by_slot() {
   for (int i = 0; i < 40; ++i) {
     const int mu = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_INDEX, {a}, mu, {i % 20});
-    m.g.add_op(OP_CAUCHY_LPDF, {y, mu, sigma}, lp);
+    stanli::testutil::add_density(m.g, OP_CAUCHY_LPDF, {y, mu, sigma}, lp);
     m.terms.push_back(lp);
   }
   const Collapsed c = collapse(m);
@@ -505,7 +511,7 @@ static void test_scalar_terms_mixed_counts() {
     const int y = data_slot(m, {0.75});
     const int mu = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_INDEX, {a}, mu, {which});
-    m.g.add_op(OP_CAUCHY_LPDF, {y, mu, sigma}, lp);
+    stanli::testutil::add_density(m.g, OP_CAUCHY_LPDF, {y, mu, sigma}, lp);
     m.terms.push_back(lp);
   }
   const Collapsed c = collapse(m);
@@ -534,8 +540,8 @@ static void test_mixture_terms() {
     const int y = data_slot(m, {i % 2 ? 1.5 : -0.5});
     const int l0 = m.g.add_slot(1, false), l1 = m.g.add_slot(1, false);
     const int t = m.g.add_slot(1, false);
-    m.g.add_op(OP_NORMAL_LPDF, {y, mu[0], sigma}, l0);
-    m.g.add_op(OP_NORMAL_LPDF, {y, mu[1], sigma}, l1);
+    stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu[0], sigma}, l0);
+    stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu[1], sigma}, l1);
     m.g.add_op(OP_LSE2, {l0, l1}, t);
     m.terms.push_back(t);
   }
@@ -554,7 +560,7 @@ struct NormalByGroup {
   int n = kN;
   int groups = 3;
   uint16_t opcode = OP_NORMAL_LPDF;
-  uint8_t variant = 0;
+  uint8_t variant = DensityMode::all_active(3).byte();
   bool sigma_is_data = false;
   bool sigma_per_group = false;
   double shift = 0;  // added to the data and, as data, to the location
@@ -785,7 +791,7 @@ static void test_grouped_normal_from_scalar_terms() {
         sigma = m.g.add_slot(1, false);
         m.g.add_op(OP_INDEX, {s}, sigma, {i % 3});
       }
-      m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+      stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
       m.g.ops.back().variant = 0x86;
       m.terms.push_back(lp);
     }
@@ -823,7 +829,7 @@ static void test_scalar_family_locations_are_vectorized() {
     const int lp = m.g.add_slot(1, false);
     m.g.add_op(OP_INDEX, {a}, ai, {i % 5});
     m.g.add_op(OP_FMA, {xs, b, ai}, mu);
-    m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
     m.g.ops.back().variant = 0x86;
     m.terms.push_back(lp);
   }
@@ -861,7 +867,7 @@ static void test_chunks_of_one_loop_are_pooled() {
     const int y = data_slot(m, yv);
     const int mu = m.g.add_slot(kN, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_GATHER, {a}, mu, group);
-    m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
     m.g.ops.back().variant = 0x86;
     m.terms.push_back(lp);
   }
@@ -869,7 +875,7 @@ static void test_chunks_of_one_loop_are_pooled() {
     const int y = data_slot(m, {0.1 * obs - 2.0});
     const int mu = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_INDEX, {a}, mu, {obs % 3});
-    m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
     m.g.ops.back().variant = 0x86;
     m.terms.push_back(lp);
   }
@@ -962,7 +968,7 @@ static void test_linear_gaussian_from_scalar_terms() {
     const int y = data_slot(m, {0.4 + 1.3 * x + 0.05 * std::cos(2.1 * i)});
     const int mu = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_FMA, {b, xs, a}, mu);
-    m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+    stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
     m.g.ops.back().variant = 0x86;
     m.terms.push_back(lp);
   }
@@ -1034,9 +1040,8 @@ static Model family_model(const FamilyCase& c, const FamilyModel& o) {
   if (c.parameters == 2)
     second = o.second_is_data ? data_slot(m, {1.3}) : m.g.add_slot(1, true);
   const auto variant = [&](void) {
-    if (!o.propto) return uint8_t{0};
     const int base = c.integer ? 0 : 1;
-    uint8_t v = (uint8_t)(0x80u | (1u << base));
+    uint8_t v = (uint8_t)((o.propto ? 0x80u : 0u) | (1u << base));
     if (c.parameters == 2 && !o.second_is_data)
       v |= (uint8_t)(1u << (base + 1));
     return v;
@@ -1294,7 +1299,7 @@ static void test_families() {
 struct Regression {
   int n = 60;
   uint16_t opcode = OP_NORMAL_LPDF;
-  uint8_t variant = 0;
+  uint8_t variant = DensityMode::all_active(3).byte();
   bool repeat_a_column = false;  // a rank-deficient design
   bool by_fma = false;           // alpha + beta0 * x0 + ..., one op per term
   double shift = 0;              // added to the data as an intercept offset
@@ -1485,8 +1490,8 @@ static Model glm_regression(uint8_t variant, int n = 60) {
   }
   const int y = data_slot(m, yv), xs = data_slot(m, x);
   const int lp = m.g.add_slot(1, false);
-  m.g.add_op(OP_NORMAL_ID_GLM_LPDF, {y, xs, alpha, beta, sigma}, lp,
-             {n, kColumns});
+  stanli::testutil::add_density(m.g, OP_NORMAL_ID_GLM_LPDF,
+                                {y, xs, alpha, beta, sigma}, lp, {n, kColumns});
   m.g.ops.back().variant = variant;
   m.terms = {lp};
   return m;
@@ -1574,7 +1579,7 @@ static Model count_glm(uint16_t opcode, bool propto, bool intercept_per_row,
   else
     m.g.add_op(opcode, {xs, alpha, beta}, lp, idata);
   // Activity bits: alpha, beta and the precision.
-  m.g.ops.back().variant = propto ? 0x8e : 0;
+  m.g.ops.back().variant = propto ? 0x8e : 0x0e;
   m.terms = {lp};
   return m;
 }
@@ -1668,7 +1673,8 @@ static void test_left_alone() {
     const int xs = data_slot(m, x);
     const int mu = m.g.add_slot(kN, false), lp = m.g.add_slot(1, false);
     m.g.add_op(OP_MUL, {b, xs}, mu);
-    m.g.add_op(OP_NEG_BINOMIAL_2_LOG_LPMF, {mu, phi}, lp, y);
+    stanli::testutil::add_density(m.g, OP_NEG_BINOMIAL_2_LOG_LPMF, {mu, phi},
+                                  lp, y);
     m.terms = {lp};
     const Collapsed c = collapse(m);
     expect_true("recorder density: untouched", c.stats.vector_terms == 0);
@@ -1703,7 +1709,8 @@ static void test_reports_rows_and_groups() {
   std::vector<int> group;
   for (int i = 0; i < kN; ++i) group.push_back(i % 3);
   m.g.add_op(OP_GATHER, {a}, mu, group);
-  const int dens = m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  const int dens =
+      stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
   m.terms = {lp};
   const CollapseReport r = analyze(m);
   expect_true("report: one term", r.terms.size() == 1);
@@ -1728,7 +1735,7 @@ static void test_data_equality_is_bitwise() {
   const int y = data_slot(m, distinct_y(kN));
   const int mu = m.g.add_slot(kN, false), lp = m.g.add_slot(1, false);
   m.g.add_op(OP_MUL, {b, xs}, mu);
-  m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
   m.terms = {lp};
   const CollapseReport r = analyze(m);
   expect_true("signed zero: two groups",
@@ -1754,8 +1761,8 @@ static void test_slices_carry_values() {
   m.g.add_op(OP_SET_SLICE_INPLACE, {stored, picked}, stored, {kN});
   m.g.add_op(OP_SLICE_STRIDED, {stored}, evens, {0, 2});
   m.g.add_op(OP_SLICE, {stored}, tail, {kN});
-  m.g.add_op(OP_NORMAL_LPDF, {y, evens, sigma}, lp1);
-  m.g.add_op(OP_NORMAL_LPDF, {y, tail, sigma}, lp2);
+  stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, evens, sigma}, lp1);
+  stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, tail, sigma}, lp2);
   m.terms = {lp1, lp2};
   const CollapseReport r = analyze(m);
   // Each term, and then the two pooled as one family.
@@ -1775,7 +1782,7 @@ static void test_unknown_producer_keeps_rows_apart() {
   const int y = data_slot(m, distinct_y(kN));
   const int mu = m.g.add_slot(kN, false), lp = m.g.add_slot(1, false);
   m.g.add_op(OP_SOFTMAX, {a}, mu);
-  m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, lp);
+  stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu, sigma}, lp);
   m.terms = {lp};
   const CollapseReport r = analyze(m);
   expect_true("unknown: twenty groups",
@@ -1789,7 +1796,7 @@ static void test_data_only_density_is_not_a_term() {
   const int y = data_slot(m, distinct_y(kN));
   const int mu = data_slot(m, {0.0}), sigma = data_slot(m, {1.0});
   const int c = m.g.add_slot(1, false), lp = m.g.add_slot(1, false);
-  m.g.add_op(OP_NORMAL_LPDF, {y, mu, sigma}, c);
+  stanli::testutil::add_density(m.g, OP_NORMAL_LPDF, {y, mu, sigma}, c);
   m.g.add_op(OP_SQUARE, {p}, lp);
   m.terms = {c, lp};
   expect_true("data-only density: no terms", analyze(m).terms.empty());
