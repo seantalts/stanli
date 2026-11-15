@@ -7,6 +7,7 @@
 #include <array>
 #include <cassert>
 #include <chrono>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,9 +32,14 @@ Kernel& kernel(uint16_t opcode) {
   return g_table[opcode];
 }
 
-static bool g_fixed_small_matrices = true;
-bool fixed_small_matrices() { return g_fixed_small_matrices; }
-void set_fixed_small_matrices(bool on) { g_fixed_small_matrices = on; }
+// Atomic so that a test flipping it cannot race a kernel on another thread.
+static std::atomic<bool> g_fixed_small_matrices{true};
+bool fixed_small_matrices() {
+  return g_fixed_small_matrices.load(std::memory_order_relaxed);
+}
+void set_fixed_small_matrices(bool on) {
+  g_fixed_small_matrices.store(on, std::memory_order_relaxed);
+}
 
 const char* opcode_name(uint16_t opcode) {
   static const char* const names[] = {
