@@ -2418,6 +2418,51 @@ void test_fast_math_options() {
   stanli_string_free(fast);
 }
 
+// stanli_bridgestan_data builds the payload bs_model_construct reads, from
+// data as a structure: non-finite tokens survive, and a manifest already in
+// the data is replaced rather than duplicated.
+void test_bridgestan_data() {
+  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  const std::string conj = slurp("tests/fixtures/conj.json");
+  const std::string data =
+      "{\"__stanli\": {\"build_id\": \"old\"}, "
+      "\"spare\": [NaN, Infinity, -Infinity], " +
+      conj.substr(conj.find('{') + 1);
+  char err[8192]{};
+  char* payload = stanli_bridgestan_data(data.c_str(), mir.c_str(), "conj", err,
+                                         sizeof err);
+  expect_true(std::string("payload builds: ") + err, payload != nullptr);
+  if (payload == nullptr) return;
+  const std::string text = payload;
+  stanli_string_free(payload);
+  expect_true("the manifest is the first member",
+              text.rfind("{\"__stanli\":", 0) == 0);
+  expect_true("one manifest", text.find("__stanli", 3) == std::string::npos);
+  expect_true("non-finite values survive",
+              text.find("[NaN,Infinity,-Infinity]") != std::string::npos);
+  char* bs_err = nullptr;
+  bs_model* m = bs_model_construct(text.c_str(), 1, &bs_err);
+  expect_true(std::string("bs_model_construct accepts it: ") +
+                  (bs_err != nullptr ? bs_err : ""),
+              m != nullptr);
+  if (m != nullptr) {
+    expect_eq("payload name", bs_name(m), "conj");
+    bs_model_destruct(m);
+  }
+  bs_free_error_msg(bs_err);
+
+  expect_true("an array is not data",
+              stanli_bridgestan_data("[1]", mir.c_str(), "x", err,
+                                     sizeof err) == nullptr &&
+                  std::strstr(err, "not a JSON object") != nullptr);
+  payload =
+      stanli_bridgestan_data(nullptr, mir.c_str(), nullptr, err, sizeof err);
+  expect_true("null data is no data",
+              payload != nullptr &&
+                  std::strstr(payload, "\"name\":\"stanli_model\"") != nullptr);
+  stanli_string_free(payload);
+}
+
 void test_named_source_and_warnings() {
   char err[8192]{};
   char* compiler_warnings = nullptr;
@@ -2474,6 +2519,7 @@ void test_named_source_and_warnings() {
 }
 
 int main() {
+  test_bridgestan_data();
   test_named_source_and_warnings();
   test_fast_math_options();
   test_source_include_paths();

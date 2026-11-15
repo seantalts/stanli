@@ -27,6 +27,7 @@ EXPORTS
   stanli_function_call
   stanli_function_call_values
   stanli_build_id
+  stanli_bridgestan_data
   stanli_exact_lp
   stanli_model_free
   stanli_n_unconstrained

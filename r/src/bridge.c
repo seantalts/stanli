@@ -215,6 +215,8 @@ static int (*p_exact_lp)(void);
 static int (*p_thread_safe)(void);
 static size_t (*p_resume_size)(const void*);
 static const char* (*p_build_id)(void);
+static char* (*p_bridgestan_data)(const char*, const char*, const char*, char*,
+                                  size_t);
 static int64_t (*p_n_unconstrained)(const void*);
 static int (*p_grad)(void*, const double*, double*, double*);
 static int (*p_hessian)(void*, const double*, double*, double*, double*, char*,
@@ -319,6 +321,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_thread_safe", p_thread_safe);
   BIND("stanli_resume_size", p_resume_size);
   BIND("stanli_build_id", p_build_id);
+  BIND("stanli_bridgestan_data", p_bridgestan_data);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
   BIND("stanli_grad", p_grad);
   BIND("stanli_hessian", p_hessian);
@@ -489,6 +492,19 @@ SEXP stanli_r_thread_safe(void) {
 SEXP stanli_r_build_id(void) {
   require_loaded();
   return ScalarString(mkCharCE(p_build_id(), CE_UTF8));
+}
+SEXP stanli_r_bridgestan_data(SEXP data, SEXP mir, SEXP name) {
+  require_loaded();
+  char err[8192] = {0};
+  char* payload = p_bridgestan_data(Rf_translateCharUTF8(STRING_ELT(data, 0)),
+                                    Rf_translateCharUTF8(STRING_ELT(mir, 0)),
+                                    Rf_translateCharUTF8(STRING_ELT(name, 0)),
+                                    err, sizeof err);
+  if (payload == NULL) error("%s", err[0] ? err : "bridgestan_data failed");
+  SEXP result = PROTECT(ScalarString(mkCharCE(payload, CE_UTF8)));
+  p_string_free(payload);
+  UNPROTECT(1);
+  return result;
 }
 
 SEXP stanli_r_n_unconstrained(SEXP m) {

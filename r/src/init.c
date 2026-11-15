@@ -14,6 +14,7 @@ extern SEXP stanli_r_stan_to_mir(SEXP, SEXP, SEXP, SEXP);
 extern SEXP stanli_r_exact_lp(void);
 extern SEXP stanli_r_thread_safe(void);
 extern SEXP stanli_r_build_id(void);
+extern SEXP stanli_r_bridgestan_data(SEXP, SEXP, SEXP);
 extern SEXP stanli_r_n_unconstrained(SEXP);
 extern SEXP stanli_r_column_names(SEXP);
 extern SEXP stanli_r_warnings(SEXP);
@@ -49,6 +50,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"stanli_r_exact_lp", (DL_FUNC)&stanli_r_exact_lp, 0},
     {"stanli_r_thread_safe", (DL_FUNC)&stanli_r_thread_safe, 0},
     {"stanli_r_build_id", (DL_FUNC)&stanli_r_build_id, 0},
+    {"stanli_r_bridgestan_data", (DL_FUNC)&stanli_r_bridgestan_data, 3},
     {"stanli_r_n_unconstrained", (DL_FUNC)&stanli_r_n_unconstrained, 1},
     {"stanli_r_column_names", (DL_FUNC)&stanli_r_column_names, 1},
     {"stanli_r_warnings", (DL_FUNC)&stanli_r_warnings, 1},

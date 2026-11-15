@@ -15,6 +15,9 @@
 #include <stanli/wa_interp.hpp>
 
 #include "build_id.hpp"
+#include "data_document.hpp"
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 #include "service_model.hpp"
 
 #include <stan/math/rev/functor/finite_diff_hessian_auto.hpp>
@@ -328,6 +331,40 @@ stanli::ChainState read_resume(const stanli_model& m, int c,
   return state;
 }
 
+// The data argument bs_model_construct reads: the object in `data_json` with
+// a "__stanli" manifest for this runtime as its first member, replacing any
+// manifest already there.
+std::string bridgestan_payload(const std::string& data_json,
+                               const std::string& mir,
+                               const std::string& name) {
+  rapidjson::Document data = stanli::parse_data_document(data_json);
+  if (!data.IsObject())
+    throw std::invalid_argument("the model's data is not a JSON object");
+  rapidjson::Document out(rapidjson::kObjectType);
+  auto& a = out.GetAllocator();
+  rapidjson::Value manifest(rapidjson::kObjectType);
+  manifest.AddMember("build_id",
+                     rapidjson::Value(stanli::runtime_build_id(), a), a);
+  manifest.AddMember(
+      "mir", rapidjson::Value(mir.data(), (rapidjson::SizeType)mir.size(), a),
+      a);
+  manifest.AddMember(
+      "name",
+      rapidjson::Value(name.data(), (rapidjson::SizeType)name.size(), a), a);
+  out.AddMember("__stanli", manifest, a);
+  // `data` outlives the write below, so its members move rather than copy.
+  for (auto& member : data.GetObject())
+    if (member.name != "__stanli")
+      out.AddMember(member.name.Move(), member.value.Move(), a);
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer, rapidjson::UTF8<>,
+                    rapidjson::UTF8<>, rapidjson::CrtAllocator,
+                    rapidjson::kWriteNanAndInfFlag>
+      writer(buffer);
+  out.Accept(writer);
+  return std::string(buffer.GetString(), buffer.GetSize());
+}
+
 void copy_out(double* to, const std::vector<double>& from) {
   if (to != nullptr && !from.empty())
     std::memcpy(to, from.data(), sizeof(double) * from.size());
@@ -589,6 +626,29 @@ char* stanli_take_messages(void) {
 }
 
 const char* stanli_build_id(void) { return stanli::runtime_build_id(); }
+
+char* stanli_bridgestan_data(const char* data_json, const char* mir,
+                             const char* name, char* err, size_t err_len) {
+  if (mir == nullptr) {
+    put_err(err, err_len, "MIR text is null");
+    return nullptr;
+  }
+  try {
+    const std::string text = bridgestan_payload(
+        data_json == nullptr ? "{}" : data_json, mir,
+        name == nullptr || name[0] == '\0' ? "stanli_model" : name);
+    char* out = static_cast<char*>(std::malloc(text.size() + 1));
+    if (out == nullptr) {
+      put_err(err, err_len, "out of memory");
+      return nullptr;
+    }
+    std::memcpy(out, text.c_str(), text.size() + 1);
+    return out;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return nullptr;
+  }
+}
 
 int stanli_abi_version(void) { return STANLI_ABI_VERSION; }
 

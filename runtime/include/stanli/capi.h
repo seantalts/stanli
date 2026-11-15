@@ -135,6 +135,14 @@ char* stanli_take_messages(void);
  * refuse a mismatch. Static storage; do not free. */
 const char* stanli_build_id(void);
 
+/* The data argument a BridgeStan client passes to bs_model_construct to
+ * get this model from this runtime: the object in data_json (null means no
+ * data) with a "__stanli" member holding stanli_build_id(), mir and name.
+ * Returns null with a message in err when data_json is not a JSON object;
+ * on success the caller frees the string with stanli_string_free. */
+char* stanli_bridgestan_data(const char* data_json, const char* mir,
+                             const char* name, char* err, size_t err_len);
+
 /* Always 1: every build reproduces CmdStan's lp__ exactly. Kept so callers
  * written against earlier builds keep linking. */
 int stanli_exact_lp(void);

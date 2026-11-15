@@ -50,11 +50,28 @@ test_that("bridgestan_data passes a MIR model through unchanged", {
   expect_identical(parsed$`__stanli`$mir, fast$source$code)
 })
 
-test_that("json_string escapes quotes, backslashes and control characters", {
-  skip_if_not_installed("jsonlite")
-  text <- "a \"q\" \\ b\n\tc\r\u0001 \u00e9"
-  encoded <- stanli:::json_string(text)
-  expect_identical(jsonlite::fromJSON(encoded), text)
+test_that("bridgestan_data replaces a manifest already in the data", {
+  skip_without_runtime()
+  model <- stanli_model(code = bridgestan_code,
+                        data = bridgestan_data(stanli_model(
+                          code = bridgestan_code,
+                          data = list(N = 1L, y = 0.5))))
+  text <- bridgestan_data(model)
+  expect_length(gregexpr("\"__stanli\"", text, fixed = TRUE)[[1L]], 1L)
+  parsed <- parse_bridgestan_data(text)
+  expect_identical(parsed$`__stanli`$build_id, stanli_build_id())
+})
+
+test_that("bridgestan_data keeps non-finite data tokens", {
+  skip_without_runtime()
+  code <- "data { real a; real b; } parameters { real x; }
+           model { x ~ normal(0, 1); }"
+  model <- stanli_model(code = code,
+                        data = "{\"a\": NaN, \"b\": -Infinity}")
+  text <- bridgestan_data(model)
+  expect_match(text, "\"a\": ?NaN")
+  expect_match(text, "\"b\": ?-Infinity")
+  expect_match(text, "^\\{\"__stanli\"")
 })
 
 test_that("bridgestan_data keeps the content of a data file", {
