@@ -325,7 +325,15 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
   name_js <- js_string_literal(name)
   mirf_js <- js_string_literal(mirf)
   file_js <- if (is.null(file)) "null" else js_string_literal(file)
-  status <- eval_js(sprintf("(() => {
+  # The script leaves its outcome in globalThis.__stanli_webr and returns
+  # whether compilation failed; the error and each warning are then read as
+  # separate values, since eval_js converts only scalars.
+  failed <- eval_js(sprintf("(() => {
+    const done = (error, warnings) => {
+      globalThis.__stanli_webr = {failed: error !== null, error: error,
+                                  warnings: warnings};
+      return error !== null;
+    };
     const src = Module.FS.readFile(%s, {encoding: 'utf8'});
     const includes = Object.create(null);
     %s
@@ -340,14 +348,14 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
     const portableName = %s ? 'stanli_compile_fast' : 'stanli_compile';
     const portableExport = exported(portableName);
     if (%s && !portableExport.present)
-      return 'ERR:JavaScript compiler: fast_math needs a stanc.js with the stanli_compile_fast export';
+      return done('JavaScript compiler: fast_math needs a stanc.js with the stanli_compile_fast export', []);
     const classicExport = exported('stanc');
     const compiler = portableExport.present ? portableName : 'stanc';
     const selected = portableExport.present ? portableExport : classicExport;
     if (!selected.present)
-      return 'ERR:JavaScript compiler: no stanli_compile() or stanc() export';
+      return done('JavaScript compiler: no stanli_compile() or stanc() export', []);
     if (typeof selected.value !== 'function')
-      return 'ERR:' + compiler + ': export is not a function';
+      return done(compiler + ': export is not a function', []);
     const file = %s;
     try {
       const r = portableExport.present
@@ -359,25 +367,26 @@ mir_from_webr <- function(eval_js, code, name = "stanli_model",
                               'filename-in-msg=' + file],
                          includes);
       if (!r || typeof r !== 'object')
-        return 'ERR:' + compiler + ': compiler returned no result object';
-      if (r.errors) return 'ERR:' + compiler + ': ' + String(r.errors);
+        return done(compiler + ': compiler returned no result object', []);
+      if (r.errors) return done(compiler + ': ' + String(r.errors), []);
       if (typeof r.result === 'undefined')
-        return 'ERR:' + compiler + ': compiler returned no MIR';
+        return done(compiler + ': compiler returned no MIR', []);
       Module.FS.writeFile(%s, String(r.result));
-      const warned = (r.warnings || []).map(String).join('\\n');
-      return warned ? 'WARN:' + warned : 'ok';
+      return done(null, (r.warnings || []).map(String));
     } catch (e) {
-      return 'ERR:' + compiler + ': ' + String(e);
+      return done(compiler + ': ' + String(e), []);
     }
   })()", src_js, paste(include_js, collapse = "\n"),
     if (isTRUE(fast_math)) "true" else "false",
     if (isTRUE(fast_math)) "true" else "false",
     file_js, name_js, name_js, name_js, mirf_js))
-  if (startsWith(status, "WARN:")) {
-    warn_compiler(substring(status, 6L))
-  } else if (!identical(status, "ok")) {
-    stop(sub("^ERR:", "", status), call. = FALSE)
-  }
+  # V8 hands every value back as a string, webR as the R scalar.
+  if (isTRUE(as.logical(failed)))
+    stop(eval_js("globalThis.__stanli_webr.error"), call. = FALSE)
+  n <- as.integer(eval_js("globalThis.__stanli_webr.warnings.length"))
+  warn_compiler(vapply(seq_len(n) - 1L, function(i)
+    eval_js(sprintf("globalThis.__stanli_webr.warnings[%d]", i)),
+    character(1)))
   read_compiler_output(mirf)
 }
 

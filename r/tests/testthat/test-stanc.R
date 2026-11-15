@@ -355,6 +355,7 @@ test_that("the webR helper selects by presence and never retries errors", {
   eval_js <- function(script) {
     match <- regexec("Module\\.FS\\.readFile\\(([^,]+),", script)
     groups <- regmatches(script, match)[[1]]
+    if (!length(groups)) return(ctx$eval(script))
     expect_length(groups, 2)
     source_path <- ctx$eval(groups[[2]])
     ctx$assign("__stanli_source",

@@ -138,13 +138,14 @@ test_that("webR transports nested include files to the real JavaScript compiler"
       path <- ctx$eval(sub(",$", "", sub("^Module\\.FS\\.readFile\\(", "", match)))
       files[[path]] <- stanli:::read_utf8_file(path)
     }
+    if (!length(matches)) return(ctx$eval(script))
     ctx$assign("__files", files)
-    status <- ctx$eval(script)
-    if (identical(status, "ok")) {
-      written <- ctx$get("__written")
+    ctx$eval("globalThis.__written = null")
+    failed <- ctx$eval(script)
+    written <- ctx$get("__written")
+    if (!is.null(written))
       stanli:::write_utf8_file(written$path, written$value)
-    }
-    status
+    failed
   }
   mir <- stanli:::mir_from_webr(eval_js, f$code, include_paths = f$root)
   expect_identical(mir, stanli:::mir_from_js(f$code, include_paths = f$root))
