@@ -15,7 +15,7 @@ struct Relocation {
 
 bool Execution::compiled_recording() {
   if (recording_enabled < 0) {
-    const char* option = std::getenv("STANLI_STRUCTURED_COMPILED_RECORDING");
+    const char* option = debug_env("STANLI_STRUCTURED_COMPILED_RECORDING");
     recording_enabled = !option || option[0] != '0';
   }
   return recording_enabled != 0;

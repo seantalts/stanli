@@ -1,4 +1,5 @@
 #include "lower_internal.hpp"
+#include <stanli/debug_switch.hpp>
 #include <stanli/reduce_sum.hpp>
 #include <stanli/region_map.hpp>
 #include <stanli/detail/input_ranges.hpp>
@@ -1381,7 +1382,7 @@ Lowering::Val Lowering::emit_ode(std::shared_ptr<OdeSpec> spec, const Val& z0,
     spec->direct_rk =
         make_rhs_adjoint_program(spec->prog, &spec->direct_rk_why);
     spec->direct_rk_enabled =
-        spec->direct_rk && !std::getenv("STANLI_NO_ODE_DIRECT_RK");
+        spec->direct_rk && !debug_env("STANLI_NO_ODE_DIRECT_RK");
   }
   Val v = t0 && ts ? emit_value(OP_ODE, {z0, theta, *t0, *ts}, N * S, result_si,
                                 {(int)N, (int)S})

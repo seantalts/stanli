@@ -1,3 +1,4 @@
+#include <stanli/debug_switch.hpp>
 #include <stanli/execution_report.hpp>
 #include <stanli/compile.hpp>
 #include <stanli/algebra.hpp>
@@ -310,7 +311,7 @@ void report_execution_function(const std::string& name, bool compiled,
   emit_diagnostic(r.finish());
 }
 bool execution_reporting_enabled() {
-  const char* flag = std::getenv("STANLI_EXECUTION_REPORT");
+  const char* flag = debug_env("STANLI_EXECUTION_REPORT");
   return flag && *flag && *flag != '0';
 }
 }  // namespace stanli

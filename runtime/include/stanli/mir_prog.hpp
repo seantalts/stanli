@@ -22,6 +22,7 @@
 #ifndef STANLI_MIR_PROG_HPP
 #define STANLI_MIR_PROG_HPP
 
+#include <stanli/debug_switch.hpp>
 #include <stanli/builtin_registry.hpp>
 #include <stanli/mir_message.hpp>
 #include <stanli/mir.hpp>
@@ -2770,7 +2771,7 @@ struct ProgramCompiler {
       case OP_LOG1P:
       case OP_LOG1M_EXP:
       case OP_INV_SQUARE:
-        if (std::getenv("STANLI_NO_NATIVE_MATH")) return std::nullopt;
+        if (debug_env("STANLI_NO_NATIVE_MATH")) return std::nullopt;
         return native_math_code(opcode);
       case OP_ADD:
         return Program::ADD;

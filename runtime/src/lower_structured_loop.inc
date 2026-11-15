@@ -484,7 +484,7 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
     if (width == 0 || combinations > 1000000 / width) return {};
     combinations *= width;
   }
-  bool cacheable = !std::getenv("STANLI_NO_REGION_RANGE_CACHE");
+  bool cacheable = !debug_env("STANLI_NO_REGION_RANGE_CACHE");
   std::string key;
   if (cacheable) {
     std::set<std::string> seen;
@@ -1373,7 +1373,7 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
         return g.slots[input.slot].len > 0 && !input.autodiff &&
                input.si.param_free;
       }) &&
-      std::getenv("STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS") == nullptr;
+      debug_env("STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS") == nullptr;
   if (direct_inputs) {
     const auto remap = [&](int64_t* offset, int* input) {
       for (size_t i = 0; i < indices.size(); ++i) {
@@ -1694,7 +1694,7 @@ std::optional<int64_t> region_while_capacity(const mir::Stmt& s,
   auto real_start = region_real_range(guard->args[0]);
   auto real_end = region_real_range(guard->args[1]);
   if (integer_counter ? (!int_start || !int_end) : (!real_start || !real_end)) {
-    if (std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS")) {
+    if (debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS")) {
       emit_diagnostic(
           "stanli_structured while capacity ranges counter=" + counter +
           " integer=" + std::to_string(integer_counter) + " start=" +
@@ -1785,7 +1785,7 @@ std::optional<int64_t> region_while_capacity(const mir::Stmt& s,
       };
   for (const auto& st : s.body) advances(st, true);
   if (!valid) {
-    if (std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS"))
+    if (debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS"))
       emit_diagnostic(
           "stanli_structured while capacity invalid update counter=" +
           counter);
@@ -1820,7 +1820,7 @@ std::optional<int64_t> region_while_capacity(const mir::Stmt& s,
       real_ranges[v->second.slot] = {
           real_start->lo,
           std::max(real_start->hi, real_end->hi + real_step_hi)};
-    if (std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS"))
+    if (debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS"))
       emit_diagnostic(
           "stanli_structured real while counter=" + counter + " start=[" +
           fmt_g(real_start->lo) + "," + fmt_g(real_start->hi) + "] end=[" +
@@ -2696,7 +2696,7 @@ bool try_lower_region(
   const bool profitable_unroll = region_unroll_profitable(s);
   if (!output_references && !force && profitable_unroll) return false;
   const auto refuse = [&](const std::string& reason) {
-    if (std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS"))
+    if (debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS"))
       emit_diagnostic("stanli_structured refused: " + reason);
     if (force)
       fail("compact loop lowering unavailable: " + reason +
@@ -2920,12 +2920,12 @@ bool try_lower_region(
       refusal = e.what();
     }
     if (!candidate_ready) native_refusal = refusal;
-    if (!candidate_ready && std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS"))
+    if (!candidate_ready && debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS"))
       emit_diagnostic("stanli_structured native candidate (" + s.loopvar +
                       "): " + refusal);
   }
-  const bool diagnostics = std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") ||
-                           std::getenv("STANLI_PROFILE_PREP");
+  const bool diagnostics = debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") ||
+                           debug_env("STANLI_PROFILE_PREP");
   if (!plan) {
     return refuse("native: " + native_refusal);
   }

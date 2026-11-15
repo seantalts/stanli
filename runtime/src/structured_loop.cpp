@@ -1,3 +1,4 @@
+#include <stanli/debug_switch.hpp>
 #include <stanli/structured_loop.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
@@ -373,9 +374,9 @@ void classify(StructuredLoop& p) {
       // own adjoint and reverse call, preserving the order of contributions
       // to shared inputs. Stateful/scratch-bearing kernels keep full calls.
       const Kernel* k = find_kernel(op.opcode);
-      if (std::getenv("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS") ||
-          op.out2 >= 0 || op.dyn_lengths || n.kernel_scratch || !k ||
-          k->make_state || n.forward != k->forward || n.backward != k->backward)
+      if (debug_env("STANLI_NO_STRUCTURED_INVARIANT_PRIMALS") || op.out2 >= 0 ||
+          op.dyn_lengths || n.kernel_scratch || !k || k->make_state ||
+          n.forward != k->forward || n.backward != k->backward)
         return;
     }
     for (int loop : enclosing) {
@@ -1521,25 +1522,23 @@ struct LoopState : KernelState {
   bool memo_ready = false;
   bool has_reusable_primals = false;
   bool reuse_primals = false;
-  bool diagnostics =
-      std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
+  bool diagnostics = debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
   bool report_tape = diagnostics;
-  bool no_replay = std::getenv("STANLI_NO_STRUCTURED_REPLAY") != nullptr;
+  bool no_replay = debug_env("STANLI_NO_STRUCTURED_REPLAY") != nullptr;
   bool cell_constants =
-      std::getenv("STANLI_NO_STRUCTURED_CELL_CONSTANTS") == nullptr;
+      debug_env("STANLI_NO_STRUCTURED_CELL_CONSTANTS") == nullptr;
   std::unique_ptr<Stream> stream;
   std::unique_ptr<Stream> building;
   std::unique_ptr<FrameTape> frames;
   bool frame_mode = false;
   bool frame_auto = false;
-  bool frame_layout =
-      std::getenv("STANLI_NO_STRUCTURED_FRAME_LAYOUT") == nullptr;
-  bool frame_clone = std::getenv("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
+  bool frame_layout = debug_env("STANLI_NO_STRUCTURED_FRAME_LAYOUT") == nullptr;
+  bool frame_clone = debug_env("STANLI_NO_STRUCTURED_FRAME_CLONE") == nullptr;
   bool frame_instance =
-      std::getenv("STANLI_NO_STRUCTURED_FRAME_INSTANCE") == nullptr;
+      debug_env("STANLI_NO_STRUCTURED_FRAME_INSTANCE") == nullptr;
   const double* initial = nullptr;
   bool check_frame_instance =
-      std::getenv("STANLI_STRUCTURED_CHECK_FRAME_INSTANCE") != nullptr;
+      debug_env("STANLI_STRUCTURED_CHECK_FRAME_INSTANCE") != nullptr;
   std::vector<uint8_t> observable;
   bool last_replayed = false;
   size_t respecialized = 0;
@@ -1558,7 +1557,7 @@ struct LoopState : KernelState {
         sites(plan.site_count, nullptr),
         observable(plan.site_count, 0) {
     no_replay |= !plan.cache_execution_path;
-    const char* frame_option = std::getenv("STANLI_STRUCTURED_FRAMES");
+    const char* frame_option = debug_env("STANLI_STRUCTURED_FRAMES");
     frame_mode = !no_replay && plan.outer_loop_index >= 0 && frame_option &&
                  frame_option[0] == '1';
     frame_auto = !no_replay && plan.outer_loop_index >= 0 && !frame_option;
@@ -2813,8 +2812,8 @@ ArenaBlockRanges capture_arena_ranges(const BlockArena& arena) {
 }
 
 bool check_remap_enabled() {
-  return std::getenv("STANLI_STRUCTURED_CHECK_REMAP") != nullptr ||
-         std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
+  return debug_env("STANLI_STRUCTURED_CHECK_REMAP") != nullptr ||
+         debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") != nullptr;
 }
 
 void check_no_stale_arena_pointers(Stream& st, const ArenaBlockRanges& ranges) {

@@ -1,4 +1,5 @@
 #include "lower_internal.hpp"
+#include <stanli/debug_switch.hpp>
 
 namespace stanli {
 namespace lower_detail {
@@ -594,7 +595,7 @@ void Lowering::finalize_island_program_once(IslandProg& prog, bool native,
   }
   // Generated quantities have no backward consumer.
   prog.native_adj = native && gen_adjoint(prog, keep_every_clear) &&
-                    !std::getenv("STANLI_NO_NATIVE_ADJ");
+                    !debug_env("STANLI_NO_NATIVE_ADJ");
 }
 // Compile `s` (a statement region) or `e` (a ternary) into a program.
 void Lowering::lower_island(const mir::Stmt* s, const mir::Expr* e,
@@ -787,7 +788,7 @@ void Lowering::emit_island(const std::shared_ptr<IslandProg>& prog,
   // A single nonempty live-out already occupies this entire fresh slot.
   // Keep it distinct from all live-ins, but avoid an identity extraction.
   if (out_lens.size() == 1 && out_lens[0] > 0 &&
-      !std::getenv("STANLI_NO_REGION_DIRECT_OUTPUT")) {
+      !debug_env("STANLI_NO_REGION_DIRECT_OUTPUT")) {
     out_slots->push_back(is.out);
     return;
   }
@@ -1928,7 +1929,7 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       // nothing. Kept as a region its counters would exist only at run
       // time, and a later declaration sized by one could not be laid out.
       const bool bookkeeping = static_int_bookkeeping(s.body);
-      if (bookkeeping && std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") &&
+      if (bookkeeping && debug_env("STANLI_STRUCTURED_LOOP_DIAGNOSTICS") &&
           region_auto_profitable(s, std::pair<int64_t, int64_t>{lo, hi}))
         emit_diagnostic(
             "stanli_structured counting loop evaluated at compile "

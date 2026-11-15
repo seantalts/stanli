@@ -1,3 +1,4 @@
+#include <stanli/debug_switch.hpp>
 #include <stanli/region_map.hpp>
 
 #include <cstdlib>
@@ -270,14 +271,14 @@ bool only_accumulates(const mir::Stmt& s, const std::string& name,
 }  // namespace
 
 bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
-  const char* mode = std::getenv("STANLI_REGION_MAP");
+  const char* mode = debug_env("STANLI_REGION_MAP");
   if (mode && std::string_view(mode) == "0") return false;
   if (in_write_array || region_current) return false;
   if (structured_policy == StructuredMode::Prefer ||
       structured_policy == StructuredMode::Force)
     return false;
   const bool diagnostics =
-      std::getenv("STANLI_REGION_MAP_DIAGNOSTICS") != nullptr;
+      debug_env("STANLI_REGION_MAP_DIAGNOSTICS") != nullptr;
   const auto refuse = [&](const std::string& why) {
     if (diagnostics)
       emit_diagnostic("stanli_region_map refused (" + s.loopvar + "): " + why);
@@ -356,10 +357,10 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
   if (reg.in_slots.empty()) return abandon("no live-in values");
   if (island_has_effect(*prog)) return abandon("program has effects");
   prog->label = loop.loopvar;
-  prog->check_clean = std::getenv("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
+  prog->check_clean = debug_env("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
   const RegionMapProg pristine = *prog;
   int64_t save_limit = kMaxRegionMapSavedCells;
-  if (const char* limit = std::getenv("STANLI_REGION_MAP_SAVE_LIMIT"))
+  if (const char* limit = debug_env("STANLI_REGION_MAP_SAVE_LIMIT"))
     save_limit = std::strtoll(limit, nullptr, 10);
   const int64_t count = static_cast<int64_t>(hi) - lo + 1;
   std::vector<char> persistent;
@@ -430,7 +431,7 @@ bool Lowering::lower_region_map(const mir::Stmt& s, long lo, long hi) {
            count * saved_per_iteration > save_limit;
   };
 
-  const char* lanes_env = std::getenv("STANLI_REGION_MAP_LANES");
+  const char* lanes_env = debug_env("STANLI_REGION_MAP_LANES");
   const bool lanes_enabled = !(lanes_env && std::string_view(lanes_env) == "0");
   bool use_lanes = false;
   std::string lane_refusal = "off";

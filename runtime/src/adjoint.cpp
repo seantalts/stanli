@@ -22,6 +22,7 @@
 // templates are only allowed to find them if they are declared by the time
 // those templates are parsed. The density shards open with the same line for
 // the same reason.
+#include <stanli/debug_switch.hpp>
 #include <stanli/recorder.hpp>
 
 #include <stanli/adjoint.hpp>
@@ -403,7 +404,7 @@ bool gen_adjoint(IslandProg& p, bool keep_every_clear) {
   }
   // STANLI_NO_DENSITY_MASK=1 binds every density argument as a recorder
   // scalar again, which is the comparison the masks have to survive.
-  if (std::getenv("STANLI_NO_DENSITY_MASK"))
+  if (debug_env("STANLI_NO_DENSITY_MASK"))
     std::fill(dmask.begin(), dmask.end(), (uint8_t)0xf);
 
   std::vector<Program::Instr> ncode;

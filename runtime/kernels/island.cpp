@@ -19,6 +19,7 @@
 // the arena: the in-place pass ran before islands existed and may have
 // licensed a destructive overwrite of a live-in buffer on the strength of
 // the replaced ops' scratch-only backwards.
+#include <stanli/debug_switch.hpp>
 #include <stanli/adjoint.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/island.hpp>
@@ -64,7 +65,7 @@ class ReplayWorkspace {
 
 KernelState* island_state(const Op& op, const Slot*) {
   const auto& p = *static_cast<const IslandProg*>(op.udata);
-  if (p.native_adj || std::getenv("STANLI_NO_REPLAY_REUSE")) return nullptr;
+  if (p.native_adj || debug_env("STANLI_NO_REPLAY_REUSE")) return nullptr;
   if (p.replay_initialized.has_value())
     return *p.replay_initialized ? new ReplayState : nullptr;
   std::vector<std::pair<int, int>> seeded;

@@ -1,3 +1,4 @@
+#include <stanli/debug_switch.hpp>
 #include <stanli/rejection.hpp>
 #include <stanli/adjoint.hpp>
 #include <stanli/adjoint_rules.hpp>
@@ -2551,13 +2552,13 @@ void plan_region_map_lanes(RegionMapProg& p, bool enabled,
   }
   try {
     int64_t recompute_cells = std::numeric_limits<int64_t>::max();
-    if (const char* v = std::getenv("STANLI_REGION_MAP_TILE_CELLS"))
+    if (const char* v = debug_env("STANLI_REGION_MAP_TILE_CELLS"))
       recompute_cells = std::strtoll(v, nullptr, 10);
-    const char* tile_env = std::getenv("STANLI_REGION_MAP_TILE_CALLS");
+    const char* tile_env = debug_env("STANLI_REGION_MAP_TILE_CALLS");
     const bool tile_calls = !(tile_env && std::string_view(tile_env) == "0");
     Analysis(p, storage_limit, recompute_cells, tile_calls).run();
     p.lanes.active = true;
-    if (std::getenv("STANLI_REGION_MAP_PROFILE"))
+    if (debug_env("STANLI_REGION_MAP_PROFILE"))
       p.lanes.profile = make_profile(p);
   } catch (const Refusal& r) {
     p.lanes = RegionMapLanePlan{};

@@ -20,6 +20,7 @@
 // carve_islands, which is what decides the pass is a win rather than a
 // wash. A run holding vector elementwise ops is also priced split at them,
 // and carved whichever way is cheaper.
+#include <stanli/debug_switch.hpp>
 #include <stanli/island.hpp>
 
 #include <stanli/graph.hpp>
@@ -758,13 +759,13 @@ struct Carver {
     if (compiled) {
       for (size_t k = 0; k < cc.prog.ins.size(); ++k)
         cc.prog.ins[k].active = slot_active[(size_t)cc.live_in_slots[k]] != 0;
-      if (!std::getenv("STANLI_NO_PROGRAM_DEST_FORWARD") &&
-          !std::getenv("STANLI_NO_ISLAND_COMPACT") &&
+      if (!debug_env("STANLI_NO_PROGRAM_DEST_FORWARD") &&
+          !debug_env("STANLI_NO_ISLAND_COMPACT") &&
           may_forward_adjacent_copy_destination(cc.prog))
         c.destination_source = std::make_unique<IslandProg>(cc.prog);
       compact_island_gated(cc.prog, false);
       c.priced_gen = gen_adjoint(cc.prog);
-      cc.prog.native_adj = c.priced_gen && !std::getenv("STANLI_NO_NATIVE_ADJ");
+      cc.prog.native_adj = c.priced_gen && !debug_env("STANLI_NO_NATIVE_ADJ");
       // A failed generated adjoint would make this optimization replay each
       // kernel through callback vars. Leave the run as graph ops instead;
       // that is the same work without the gather/scatter adapter.
@@ -773,7 +774,7 @@ struct Carver {
       // gradient -- but it is worth being able to see, because it is the
       // difference between a region that is fast and one that merely
       // works, and nothing else about the model would show it.
-      if (!c.priced_gen && std::getenv("STANLI_DEBUG_ISLAND"))
+      if (!c.priced_gen && debug_env("STANLI_DEBUG_ISLAND"))
         emit_diagnostic("island: no adjoint generated for a " +
                         std::to_string(j - i) +
                         "-op region; it will replay under var");
@@ -822,11 +823,11 @@ struct Carver {
                     adj_regs + instrs + (kOpCost - 1) * 2 * n_calls;
     for (const auto& li : c.prog.ins) c.boundary += 2 * li.len;
     for (int o : c.live_outs) c.boundary += kOpCost + 3 * g.slots[o].len;
-    if (std::getenv("STANLI_ISLAND_ALWAYS")) {
+    if (debug_env("STANLI_ISLAND_ALWAYS")) {
       c.accepted = true;
       return c;
     }
-    if (std::getenv("STANLI_DEBUG_ISLAND"))
+    if (debug_env("STANLI_DEBUG_ISLAND"))
       emit_diagnostic(std::string(label) + "? ops=" + std::to_string(j - i) +
                       " graph=" + std::to_string(c.graph_cost) +
                       " island=" + std::to_string(c.island_cost) +
@@ -1013,7 +1014,7 @@ struct Carver {
   };
   std::map<std::pair<size_t, size_t>, LivenessPricing> liveness_prices;
   const bool cache_liveness_prices =
-      std::getenv("STANLI_NO_ISLAND_PRICING_CACHE") == nullptr;
+      debug_env("STANLI_NO_ISLAND_PRICING_CACHE") == nullptr;
 
   LivenessPricing price_cut(size_t i, size_t cut, size_t j) {
     const LivenessPricing left = price_liveness(i, cut);
@@ -1087,7 +1088,7 @@ struct Carver {
     // first whole-span candidate and every explored split remain valid;
     // unexplored leaves retain their graph cost. This is a search policy,
     // not a claim that an unexplored split could never be cheaper.
-    const char* budget = std::getenv("STANLI_ISLAND_PRICING_BUDGET");
+    const char* budget = debug_env("STANLI_ISLAND_PRICING_BUDGET");
     pricing_work_limit = !budget || std::string_view(budget) == "1"
                              ? std::max<size_t>(65536, 4 * (j - i))
                              : 0;
@@ -1108,7 +1109,7 @@ struct Carver {
     liveness_queue_pos = 0;
     liveness_queue_cuts.clear();
     collect_liveness(i, j, i);
-    if (std::getenv("STANLI_DEBUG_ISLAND") && pricing_work_limit)
+    if (debug_env("STANLI_DEBUG_ISLAND") && pricing_work_limit)
       emit_diagnostic("island-pricing work=" + std::to_string(pricing_work) +
                       " limit=" + std::to_string(pricing_work_limit) +
                       " skipped=" + std::to_string(pricing_skipped));
@@ -1157,7 +1158,7 @@ struct Carver {
   bool split_wins(const Candidate& c, int64_t split, bool any) {
     if (!c.accepted) return any;
     const int64_t joined = c.island_cost + c.boundary;
-    if (std::getenv("STANLI_DEBUG_ISLAND"))
+    if (debug_env("STANLI_DEBUG_ISLAND"))
       emit_diagnostic("island? ops=" + std::to_string(c.end - c.begin) +
                       " joined=" + std::to_string(joined) +
                       " split=" + std::to_string(split));
@@ -1171,7 +1172,7 @@ struct Carver {
       if (compact_island_gated(optimized, true)) {
         const bool optimized_gen = gen_adjoint(optimized);
         optimized.native_adj =
-            optimized_gen && !std::getenv("STANLI_NO_NATIVE_ADJ");
+            optimized_gen && !debug_env("STANLI_NO_NATIVE_ADJ");
         // Do not trade the existing generated backward for replay if
         // forwarding exposes an unforeseen generator limitation. CALL cannot
         // replay at all.
@@ -1179,7 +1180,7 @@ struct Carver {
             optimized_gen && (optimized.calls.empty() || optimized.native_adj);
         if (usable) {
           c.prog = std::move(optimized);
-        } else if (std::getenv("STANLI_DEBUG_ISLAND")) {
+        } else if (debug_env("STANLI_DEBUG_ISLAND")) {
           emit_diagnostic(
               "island: destination forwarding kept the priced program "
               "because its optimized adjoint was refused");
@@ -1234,7 +1235,7 @@ struct Carver {
       result.push_back(ex);
       off += len;
     }
-    if (std::getenv("STANLI_DEBUG_ISLAND")) {
+    if (debug_env("STANLI_DEBUG_ISLAND")) {
       const IslandProg& p = *static_cast<const IslandProg*>(is.udata);
       emit_diagnostic("island: ops=" + std::to_string(j - c.begin) +
                       " instr=" + std::to_string(p.code.size()) +
@@ -1267,8 +1268,7 @@ struct Carver {
     // strict's carving in every cell that changed nothing). This switch
     // disables splitting altogether, rather than falling back to a
     // strict-only split that no longer exists as a carving outcome.
-    const bool liveness_off =
-        std::getenv("STANLI_NO_ISLAND_LIVENESS") != nullptr;
+    const bool liveness_off = debug_env("STANLI_NO_ISLAND_LIVENESS") != nullptr;
     size_t i = 0;
     size_t liveness_until = 0;
     while (i < g.ops.size()) {
@@ -1281,9 +1281,9 @@ struct Carver {
         continue;
       }
       if (!liveness_off && !via_liveness && grow(i, j, true) != j) {
-        const bool always = std::getenv("STANLI_ISLAND_ALWAYS") != nullptr;
+        const bool always = debug_env("STANLI_ISLAND_ALWAYS") != nullptr;
         const bool guard_off =
-            std::getenv("STANLI_NO_ISLAND_JOIN_GUARD") != nullptr;
+            debug_env("STANLI_NO_ISLAND_JOIN_GUARD") != nullptr;
         const bool multi =
             !always && !guard_off && split_has_multiple_pieces(i, j);
 
@@ -1298,7 +1298,7 @@ struct Carver {
             const int64_t floor = split_cost_floor(*c, i, j);
             const int64_t joined = c->island_cost + c->boundary;
             if (floor >= joined) {
-              if (std::getenv("STANLI_DEBUG_ISLAND"))
+              if (debug_env("STANLI_DEBUG_ISLAND"))
                 emit_diagnostic("island? ops=" + std::to_string(j - i) +
                                 " split_floor=" + std::to_string(floor) +
                                 " joined=" + std::to_string(joined) +
@@ -1317,7 +1317,7 @@ struct Carver {
             if (!always && !guard_off) {
               const int64_t floor = join_cost_floor(i, j);
               if (floor > split) {
-                if (std::getenv("STANLI_DEBUG_ISLAND"))
+                if (debug_env("STANLI_DEBUG_ISLAND"))
                   emit_diagnostic("island? ops=" + std::to_string(j - i) +
                                   " join_floor=" + std::to_string(floor) +
                                   " split=" + std::to_string(split) +
@@ -1375,7 +1375,7 @@ struct Carver {
 void compact_island(IslandProg& p) { (void)compact_island_gated(p, true); }
 
 bool compact_island_gated(IslandProg& p, bool enable_destination_forwarding) {
-  if (std::getenv("STANLI_NO_ISLAND_COMPACT")) return false;
+  if (debug_env("STANLI_NO_ISLAND_COMPACT")) return false;
   std::vector<std::pair<int, int>> seeded;
   seeded.reserve(p.ins.size());
   for (const auto& li : p.ins) seeded.emplace_back(li.reg, li.len);
@@ -1389,7 +1389,7 @@ int carve_islands(Graph& g,
                   const std::vector<std::pair<int, std::vector<double>>>& fills,
                   const std::vector<int>& target_terms,
                   const std::vector<int>& extra_roots) {
-  if (std::getenv("STANLI_NO_ISLAND")) return 0;
+  if (debug_env("STANLI_NO_ISLAND")) return 0;
   Carver carver(g, fills, target_terms, extra_roots);
   return carver.run();
 }

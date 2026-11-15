@@ -3,6 +3,7 @@
 #include "build_id.hpp"
 #include "lower_work.hpp"
 #include "lower_worker.hpp"
+#include <stanli/debug_switch.hpp>
 #include <stanli/gp_cov_fusion.hpp>
 #include <stanli/execution_report.hpp>
 #include <stanli/large_stack.hpp>
@@ -17,7 +18,7 @@ namespace stanli {
 namespace lower_detail {
 
 StructuredMode read_structured_mode() {
-  const char* flag = std::getenv("STANLI_STRUCTURED_LOOPS");
+  const char* flag = debug_env("STANLI_STRUCTURED_LOOPS");
   if (!flag || !*flag || std::string_view(flag) == "auto")
     return StructuredMode::Auto;
   if (std::string_view(flag) == "0") return StructuredMode::Off;
@@ -295,7 +296,7 @@ void Lowering::omit_zero_size(const std::string& name,
 void Lowering::bind_data(const mir::Program& p) {
   std::set<std::string> input_names;
   bool all_inputs_bound = true;
-  bool use_prebound = std::getenv("STANLI_NO_DATA_PRELOAD") == nullptr;
+  bool use_prebound = debug_env("STANLI_NO_DATA_PRELOAD") == nullptr;
   for (const auto& [name, type] : p.input_vars) {
     input_names.insert(name);
     if (!data_entry(name)) omit_zero_size(name, type);
@@ -845,7 +846,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
     // After re-roll, which builds the vector terms this reads; before
     // partition, CSE and islands, which then work on what is left.
     const auto collapse_time = prep.start();
-    const bool report_terms = std::getenv("STANLI_COLLAPSE_REPORT") != nullptr;
+    const bool report_terms = debug_env("STANLI_COLLAPSE_REPORT") != nullptr;
     CollapseReport report;
     const CollapseStats collapsed = collapse_observations(
         g, out.fills, target_terms, roots, report_terms ? &report : nullptr);
@@ -1078,7 +1079,7 @@ bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
 
 std::optional<CompiledModel> try_bounded_specialization(Lowering& lo,
                                                         const mir::Program& p) {
-  const char* policy = std::getenv("STANLI_BOUNDED_SPECIALIZATION");
+  const char* policy = debug_env("STANLI_BOUNDED_SPECIALIZATION");
   // Explicit zero/unknown values keep the established path for ablation.
   if ((policy && std::string_view(policy) != "1") ||
       lo.structured_policy != StructuredMode::Auto)
@@ -1130,7 +1131,7 @@ constexpr uint64_t kParallelWriteArrayMaxDataBytes = uint64_t{64} << 20;
 enum class ParallelWriteArray { Off, Auto, Force };
 
 ParallelWriteArray read_parallel_write_array() {
-  const char* v = std::getenv("STANLI_PARALLEL_WA");
+  const char* v = debug_env("STANLI_PARALLEL_WA");
   if (!v || !*v || std::string_view(v) == "auto")
     return ParallelWriteArray::Auto;
   if (std::string_view(v) == "1" || std::string_view(v) == "force")
@@ -1253,10 +1254,10 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
   if (options.reduce_sum_threads < 1 || options.reduce_sum_min_chunk_ns < 0 ||
       options.reduce_sum_max_chunks < 1)
     throw std::invalid_argument("invalid reduce_sum compilation options");
-  const char* prep_env = std::getenv("STANLI_PROFILE_PREP");
+  const char* prep_env = debug_env("STANLI_PROFILE_PREP");
   PrepTrace prep(prep_env && prep_env[0] != '0');
-  PassDumper dumper(std::getenv("STANLI_DUMP_PASSES"),
-                    std::getenv("STANLI_DUMP_STAGES"));
+  PassDumper dumper(debug_env("STANLI_DUMP_PASSES"),
+                    debug_env("STANLI_DUMP_STAGES"));
   if (dumper.enabled()) dumper.write("mir", "mir.sexp", mir_text);
   const auto compile_time = prep.start();
   // Shared because the interpreted write_array fallback, when needed,
@@ -1326,7 +1327,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     // set it in a shipped environment: drivers PREFER an attached
     // interpreter (capi.cpp, bridgestan_abi.cpp), so it moves every caller
     // onto the slow per-draw path.
-    if (!w.truncated.empty() || std::getenv("STANLI_WA_FORCE_INTERP")) {
+    if (!w.truncated.empty() || debug_env("STANLI_WA_FORCE_INTERP")) {
       // The graph could not express the whole section; hand the model the
       // per-draw interpreter, seeded with data + transformed data and the
       // emission flags the guard blocks test.
