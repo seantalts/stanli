@@ -267,10 +267,11 @@ INVERT, turning an already-constrained value into a free one. The
 `FnWriteParam`s of `generate_quantities` carry none -- their values are
 constrained already.
 
-`transform_inits` is stanc3's inverse parameter-transform section: its
-`FnReadData` calls name PARAMETERS read from a caller-supplied init context
-rather than model data, and each parameter ends in an `FnWriteParam` carrying
-the transform to invert.
+`FnReadData` is a statement, `FnReadData(x, context__, "x")`, that reads the
+named input whole into the declared `x`. `transform_inits` is stanc3's inverse
+parameter-transform section: its `FnReadData` statements name PARAMETERS read
+from a caller-supplied init context rather than model data, and each parameter
+ends in an `FnWriteParam` carrying the transform to invert.
 
 It is the only optional element of the payload, and it is optional in exactly
 one direction. It trails every required section, so a document written by a

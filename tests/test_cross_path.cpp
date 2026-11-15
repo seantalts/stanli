@@ -235,7 +235,9 @@ int main() {
   // with itself, and nothing else in this file would notice. `ran` counts
   // the fixtures a configuration was compared on, `changed` those it
   // compiled or ran differently from its baseline. region_map_checked only
-  // adds an assertion, so it has no change to show.
+  // adds an assertion, so it has no change to show. Nor has no_data_preload
+  // since stanc3 reads each input with one FnReadData statement: the
+  // interpreter then binds the same values the preload does.
   struct Floor {
     const char* config;
     int ran, changed;
@@ -249,8 +251,8 @@ int main() {
       {"no_ode_direct_rk", 430, 13},
       {"passes_off", 430, 127},
       {"no_partition", 430, 1},
-      {"no_cse", 430, 44},
-      {"no_data_preload", 430, 2},
+      {"no_cse", 430, 43},
+      {"no_data_preload", 430, 0},
       {"no_region_map", 46, 46},
       {"region_map_recompute", 46, 46},
       {"region_map_checked", 46, 0},

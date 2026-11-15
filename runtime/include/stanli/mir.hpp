@@ -52,7 +52,7 @@ struct Expr {
   } kind = Unsupported;
   std::string name;  // Var name or FunApp function name
   enum class Lib { StanLib, Internal, UserDefined } fn_lib = Lib::StanLib;
-  bool fn_propto = false;  // (FnLpdf true) / (FnLpmf true)
+  bool fn_propto = false;  // (FnDist _ Unnormalized)
   long lit_i = 0;
   double lit = 0;
   std::string lit_s;
@@ -830,7 +830,7 @@ inline bool is_reduce_sum(const Expr& e) {
 // The `_lupdf` / `_lupmf` spelling at the functor reference is stanc3's
 // propto marker; the definition is always the normalized `_lpdf` / `_lpmf`.
 // The marker is the only surviving propto signal here: the functor's
-// `(FnLpdf true)` type is not part of the portable encoding, and the
+// `(FnDist _ Unnormalized)` type is not part of the portable encoding, and the
 // reduce_sum node itself is FnPlain, so neither can be consulted instead.
 inline std::string reduce_sum_partial_name(const std::string& functor,
                                            bool* propto) {

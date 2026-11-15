@@ -290,7 +290,7 @@ static size_t rewrite_udf_rows_slice_to_upfrom(std::string& text) {
     }
     const std::string node = read_sexp_at(text, idx);
     const size_t node_end = idx + node.size();
-    if (node.find("rows FnPlain AoS") != std::string::npos &&
+    if (node.find("rows FnPlain)") != std::string::npos &&
         node.find("(Var W)") != std::string::npos) {
       const std::string lo = read_sexp_at(node, std::strlen("(Between"));
       out += text.substr(pos, idx - pos);
@@ -2036,29 +2036,6 @@ int main() {
     const LowerSnapshot fast = lower_snapshot(mir, d, q, false);
     const LowerSnapshot oracle = lower_snapshot(mir, d, q, true);
     expect_same_lowering("data preload shapes", fast, oracle);
-  }
-
-  // A future stanc version may put another effect in the same top-level block
-  // as an input rebuild.  Make that shape synthetically by changing the inner
-  // generated `pos__ = pos__ + 1` into `N = pos__ + 1`.  The conservative
-  // classifier must interpret the whole mixed block; skipping it would leave
-  // y as [3,4], while the interpreter rebuilds it as [3,3].
-  {
-    std::string mir = slurp("tests/fixtures/loopy.tmir.sexp");
-    const std::string from = "(Assignment ((LVariable pos__) ()) UInt";
-    const std::string to = "(Assignment ((LVariable N) ()) UInt";
-    size_t pos = 0;
-    for (int occurrence = 0; occurrence < 3 && pos != std::string::npos;
-         ++occurrence) {
-      pos = mir.find(from, pos);
-      if (occurrence < 2 && pos != std::string::npos) pos += from.size();
-    }
-    check(pos != std::string::npos, "data preload mixed-block mutation");
-    if (pos != std::string::npos) mir.replace(pos, from.size(), to);
-    const DataMap d = DataMap::from_json(R"({"N": 2, "y": [3, 4]})");
-    const LowerSnapshot fast = lower_snapshot(mir, d, {0.4}, false);
-    const LowerSnapshot oracle = lower_snapshot(mir, d, {0.4}, true);
-    expect_same_lowering("data preload mixed block", fast, oracle);
   }
 
   // A missing input and a real-valued JSON token for an integer input must

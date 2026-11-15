@@ -672,6 +672,10 @@ class MirInterp {
                   }));
           return;
         }
+        if (st.fn_name == "FnReadData") {
+          exec_read_data(st);
+          return;
+        }
         if (st.fn_name == "FnCheck") {
           exec_check(st);
           return;
@@ -1559,6 +1563,23 @@ class MirInterp {
     const DataMap::Entry* dp = data_lookup(name);
     if (!dp) fail("unknown data variable " + name, raw);
     return from_entry(*dp);
+  }
+
+  // FnReadData__(x, context__, "x") reads the named input whole into the
+  // declared x, in the declared shape.
+  void exec_read_data(const mir::Stmt& st) {
+    if (st.fn_args.size() != 3 || st.fn_args[0].kind != mir::Expr::Var ||
+        st.fn_args[2].kind != mir::Expr::LitStr)
+      fail("malformed FnReadData", st.raw);
+    const std::string& name = st.fn_args[0].name;
+    Value e = read_data(st.fn_args[2].lit_s, st.raw);
+    if (st.fn_args[0].unsized.leaf != mir::UnsizedLeaf::Int && e.is_int) {
+      e.is_int = false;
+      e.i.clear();
+    }
+    const auto dims = decl_dims_.find(name);
+    if (dims != decl_dims_.end()) e.dims = dims->second;
+    env_[name] = std::move(e);
   }
 
   // reduce_sum(f, sliced, grainsize, shared...) sums f over the terms of a

@@ -309,21 +309,28 @@ Expr read_expr_pattern(const Node& p) {
   } else if (p.head_is("FunApp")) {
     e.kind = Expr::FunApp;
     const Node& kind = p[1];
-    // (StanLib normal_lpdf (FnLpdf true) AoS) and
-    // (UserDefined f_lpdf (FnLpdf true)) spell the propto flag the same
-    // way, and it means the same thing on both: `_lupdf` was written. On a
-    // user function it is the value of CmdStan's propto__ template
-    // argument, which the body inherits.
+    // (StanLib normal_lpdf (FnDist Density Unnormalized)) and
+    // (UserDefined f_lpdf (FnDist Density Unnormalized)) spell the propto
+    // flag the same way, and it means the same thing on both: `_lupdf` was
+    // written. On a user function it is the value of CmdStan's propto__
+    // template argument, which the body inherits. Older stanc3 spelled it
+    // (FnLpdf true), as some hand-written test MIR still does.
     auto read_propto = [&](const Node& kind) {
       const Node& suffix = kind[2];
-      if (!suffix.is_atom() &&
-          (suffix.head_is("FnLpdf") || suffix.head_is("FnLpmf")))
+      if (suffix.is_atom()) return;
+      if (suffix.head_is("FnDist"))
+        e.fn_propto = suffix[2].atom == "Unnormalized";
+      else if (suffix.head_is("FnLpdf") || suffix.head_is("FnLpmf"))
         e.fn_propto = suffix[1].atom == "true";
     };
     if (kind.head_is("StanLib")) {
       e.fn_lib = Expr::Lib::StanLib;
       e.name = kind[1].atom;
       read_propto(kind);
+    } else if (kind.head_is("Operator")) {
+      // (Operator Plus) is the StanLib function Plus__.
+      e.fn_lib = Expr::Lib::StanLib;
+      e.name = kind[1].atom + "__";
     } else if (kind.head_is("CompilerInternal")) {
       e.fn_lib = Expr::Lib::Internal;
       const Node& internal = kind[1];
@@ -638,6 +645,8 @@ Stmt read_stmt(const Node& n) {
       }
     } else if (kind.head_is("StanLib")) {
       s.fn_name = kind[1].atom;
+    } else if (kind.head_is("Operator")) {
+      s.fn_name = kind[1].atom + "__";
     } else {
       s.fn_name = dump(kind, 60);
     }

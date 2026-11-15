@@ -47,14 +47,6 @@
   "cause": "unsupported function laplace_marginal",
   "status": "unsupported"
  },
- "code-gen/laplace_neg_binomial_2_log.stan": {
-  "cause": "unsupported function laplace_marginal_neg_binomial_2_log_lpmf",
-  "status": "unsupported"
- },
- "code-gen/laplace_nested_tuple.stan": {
-  "cause": "unsupported function laplace_marginal_neg_binomial_2_log_lpmf",
-  "status": "unsupported"
- },
  "code-gen/laplace_nested_tuple2.stan": {
   "cause": "unsupported function laplace_marginal",
   "status": "unsupported"
@@ -98,6 +90,10 @@
    "3": "wa_unsupported",
    "4": "wa_unsupported"
   }
+ },
+ "compiler-optimizations/ad-level-disconnected-function.stan": {
+  "cause": "unsupported expression | in: (TupleProjection ((pattern (FunApp (UserDefined foo FnPlain) (((pattern (FunApp (Operator Transpose) (((pattern (FunApp (CompilerInternal FnMakeRowVec) (((pattern (Var theta)) (meta ((type_ UReal) (loc <opaque>) (adlevel AutoDiffable))))))) (meta ((type_ URowVector) (loc",
+  "status": "unsupported"
  },
  "compiler-optimizations/dce-fail.stan": {
   "cause": "stanc --O1 vectorizes the source loop, so the single index the program writes reaches stanli as a multi-index; stanli reports 'vector[multi] indexing' where CmdStan, running the unvectorized program, reports 'vector[uni] indexing'.",
@@ -237,10 +233,6 @@
  },
  "function-signatures/math/matrix/csr_extract_w.stan": {
   "cause": "unsupported function csr_extract_w",
-  "status": "unsupported"
- },
- "function-signatures/math/matrix/diag_matrix.stan": {
-  "cause": "complex numbers are not supported yet (in variable d_cvector) | in: (SComplexVector ((pattern (Var d_int)) (meta ((type_ UInt) (loc <opaque>) (adlevel DataOnly)))))",
   "status": "unsupported"
  },
  "function-signatures/math/matrix/diag_post_multiply.stan": {

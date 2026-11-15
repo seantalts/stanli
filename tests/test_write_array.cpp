@@ -2103,7 +2103,7 @@ void test_multi_normal_rng_lowering_guards() {
       "((pattern (Var mu)) (meta ((type_ UVector) (loc <opaque>) (adlevel "
       "DataOnly))))";
   const std::string covariance_arg =
-      "((pattern (Var inline_cov_matrix_2d_return_sym1__))\n"
+      "((pattern (Var inline_cov_matrix_2d_return1__))\n"
       "           (meta ((type_ UMatrix) (loc <opaque>) (adlevel "
       "DataOnly))))";
   const size_t mean = base.find(mean_arg, call);
@@ -2185,17 +2185,16 @@ void test_multi_normal_rng_lowering_guards() {
 
   std::string unknown_covariance = base;
   const size_t covariance_var =
-      unknown_covariance.find("(Var inline_cov_matrix_2d_return_sym1__)", call);
+      unknown_covariance.find("(Var inline_cov_matrix_2d_return1__)", call);
   unknown_covariance.replace(
       covariance_var,
-      std::string("(Var inline_cov_matrix_2d_return_sym1__)").size(),
-      "(Var mu)");
+      std::string("(Var inline_cov_matrix_2d_return1__)").size(), "(Var mu)");
   expect_interp(unknown_covariance, "covariance has no known matrix shape",
                 "multi-normal unknown covariance shape stays interpreted");
 
   std::string mismatched_covariance = base;
   const size_t matrix_decl = mismatched_covariance.find(
-      "(decl_id inline_cov_matrix_2d_covariance_sym2__)");
+      "(decl_id inline_cov_matrix_2d_covariance2__)");
   size_t first_extent =
       mismatched_covariance.find("((pattern (Lit Int 2))", matrix_decl);
   size_t second_extent =
@@ -3058,7 +3057,7 @@ void test_gq_extrema_lowering_guards() {
   // owning-vector provenance merely from its Var syntax.
   std::string udf = slurp("tests/fixtures/gq_extrema_udf.tmir.sexp");
   const size_t udf_wa = udf.find("(generate_quantities");
-  const std::string stan_min = "(FunApp (StanLib min FnPlain AoS)";
+  const std::string stan_min = "(FunApp (StanLib min FnPlain)";
   const size_t inlined = udf.find(stan_min, udf_wa);
   if (udf_wa == std::string::npos || inlined == std::string::npos) {
     ++failures;
@@ -3372,7 +3371,7 @@ void test_gq_reduction_lowering_guards() {
   // a UDF must remain on WaInterp even when the caller's syntax is a Var.
   std::string dynamic_udf = udf_fixture;
   const size_t udf_wa = dynamic_udf.find("(generate_quantities");
-  const std::string stan_prod = "(FunApp (StanLib prod FnPlain AoS)";
+  const std::string stan_prod = "(FunApp (StanLib prod FnPlain)";
   const size_t inlined_prod = dynamic_udf.find(stan_prod, udf_wa);
   if (udf_wa == std::string::npos || inlined_prod == std::string::npos) {
     ++failures;

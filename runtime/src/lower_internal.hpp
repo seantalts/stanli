@@ -1501,6 +1501,9 @@ struct Lowering {
   }
   static bool direct_input_load(const mir::Stmt& s,
                                 const std::set<std::string>& inputs) {
+    if (s.kind == mir::Stmt::NRFunApp && s.fn_name == "FnReadData")
+      return s.fn_args.size() == 3 && s.fn_args[0].kind == mir::Expr::Var &&
+             inputs.count(s.fn_args[0].name);
     if (s.kind != mir::Stmt::Assignment || !s.lhs_idx.empty() ||
         !inputs.count(s.lhs))
       return false;

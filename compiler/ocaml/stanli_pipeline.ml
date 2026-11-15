@@ -54,19 +54,7 @@ let add_stats a b =
   ; statements= saturating_add a.statements b.statements
   ; max_control_depth= Int.max a.max_control_depth b.max_control_depth }
 
-(* Inlined-call markers in log_prob are counted as the statements their
-   resolution leaves: the body statement alone, or an SList of the body. *)
 let rec statement_stats depth (stmt : Middle.Stmt.Located.t) =
-  match Analysis_and_optimization.Optimize.inlined_call stmt with
-  | Some (_, _, [single]) -> statement_stats depth single
-  | Some (_, _, body) ->
-      List.fold_left
-        (fun stats child -> add_stats stats (statement_stats depth child))
-        {cost= saturating_add depth 1; statements= 1; max_control_depth= depth}
-        body
-  | None -> unmarked_statement_stats depth stmt
-
-and unmarked_statement_stats depth (stmt : Middle.Stmt.Located.t) =
   let controls_children =
     match stmt.pattern with
     | Middle.Stmt.Pattern.IfElse _ | While _ | For _ -> true
@@ -114,8 +102,8 @@ module Function_names = Set.Make (String)
 
 let referenced_kind names = function
   | Middle.Fun_kind.UserDefined (name, _)
-   |Middle.Fun_kind.StanLib (name, _, _) -> Function_names.add name names
-  | CompilerInternal _ -> names
+   |Middle.Fun_kind.StanLib (name, _) -> Function_names.add name names
+  | Operator _ | CompilerInternal _ -> names
 
 let rec referenced_expr names (expr : Middle.Expr.Typed.t) =
   let names =
@@ -199,20 +187,16 @@ let compile_mir_with_passes_uncached ?include_source ?(prune_unused_sections = t
         ; partial_evaluation= passes.partial_evaluation } in
       let optimize candidate settings =
         Common.ICE.with_exn_message (fun () ->
-            Analysis_and_optimization.Optimize.resolve_inlined_program candidate
-            |> Analysis_and_optimization.Optimize.optimization_suite ~settings)
-      in
+            Analysis_and_optimization.Optimize.optimization_suite ~settings
+              candidate) in
       (* Inline before dropping unused procedures: upstream uses a shared
          fresh-name supply, so skipping their inlining would rename later
          generated-quantities locals. Preserve the original structural-budget
          decision as well. The remaining dataflow passes need only the
-         procedures the portable encoder actually consumes. Inlined-call
-         adlevels are resolved only for an O1 program that is kept, and only
-         in the procedures it keeps. *)
+         procedures the portable encoder actually consumes. *)
       match
         Common.ICE.with_exn_message (fun () ->
-            Analysis_and_optimization.Optimize.function_inlining
-              ~bind_repeated_scalar_args:true ~resolve:false mir)
+            Analysis_and_optimization.Optimize.function_inlining mir)
       with
       | Error internal -> (Error (Internal_error internal), [])
       | Ok inlined ->
