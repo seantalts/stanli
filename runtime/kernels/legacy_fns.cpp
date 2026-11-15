@@ -134,7 +134,7 @@ double dirichlet_eval(KernelCtx& ctx) {
     with_vectorized_argument(theta_d, theta_encoded, with_alpha);
   }
   const double value = lp.val();
-  if (!values_only()) {
+  if (!values_only(ctx)) {
     stan::math::grad(lp.vi_);
     double* s = ctx.scratch;
     for (auto& value : theta)

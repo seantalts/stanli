@@ -26,6 +26,7 @@ namespace {
 
 struct MirSystem {
   const AlgebraSpec* spec;
+  EvalState* eval_state = nullptr;
   mutable RhsWorkspace workspace;
 
   template <typename T_x, typename T_y>
@@ -40,7 +41,7 @@ struct MirSystem {
       // installed by lowering.  The remaining regions are exactly unknown,
       // parameters, and real data.
       run_rhs<T>(spec->prog, 0.0, x.data(), y.data(), (size_t)y.size(),
-                 x_r.data(), result, workspace.get<T>());
+                 x_r.data(), result, workspace.get<T>(), eval_state);
     } else {
       const mir::FunDef* system = spec->system();
       if (!system)
@@ -64,6 +65,7 @@ struct MirSystem {
 
 struct MirVariadicSystem {
   const AlgebraSpec* spec;
+  EvalState* eval_state = nullptr;
   mutable RhsWorkspace workspace;
 
   template <typename T_x, typename T_theta>
@@ -76,7 +78,7 @@ struct MirVariadicSystem {
     std::vector<T> result;
     if (spec->prog.ok) {
       run_rhs<T>(spec->prog, 0.0, x.data(), theta.data(), (size_t)theta.size(),
-                 spec->x_r.data(), result, workspace.get<T>());
+                 spec->x_r.data(), result, workspace.get<T>(), eval_state);
     } else {
       const mir::FunDef* system = spec->system();
       if (!system) throw std::runtime_error("solve: missing algebraic system");
@@ -94,8 +96,8 @@ struct MirVariadicSystem {
 };
 
 Eigen::VectorXd solve_double(const AlgebraSpec& spec, const Desc& x_desc,
-                             const Desc& y_desc,
-                             const double* controls = nullptr) {
+                             const Desc& y_desc, const double* controls,
+                             EvalState* state) {
   const double relative = controls ? controls[0] : spec.relative_tolerance;
   const double function = controls ? controls[1] : spec.function_tolerance;
   const int64_t steps =
@@ -104,17 +106,19 @@ Eigen::VectorXd solve_double(const AlgebraSpec& spec, const Desc& x_desc,
   Eigen::Map<const Eigen::VectorXd> y(y_desc.data, y_desc.len);
   if (spec.variadic) {
     if (spec.solver == AlgebraSpec::Newton)
-      return stan::math::solve_newton_tol(MirVariadicSystem{&spec}, x, relative,
-                                          function, steps, nullptr, y);
-    return stan::math::solve_powell_tol(MirVariadicSystem{&spec}, x, relative,
-                                        function, steps, nullptr, y);
+      return stan::math::solve_newton_tol(MirVariadicSystem{&spec, state}, x,
+                                          relative, function, steps, nullptr,
+                                          y);
+    return stan::math::solve_powell_tol(MirVariadicSystem{&spec, state}, x,
+                                        relative, function, steps, nullptr, y);
   }
   if (spec.solver == AlgebraSpec::Newton)
-    return stan::math::algebra_solver_newton(MirSystem{&spec}, x, y, spec.x_r,
-                                             spec.x_i, nullptr, relative,
-                                             function, steps);
-  return stan::math::algebra_solver(MirSystem{&spec}, x, y, spec.x_r, spec.x_i,
-                                    nullptr, relative, function, steps);
+    return stan::math::algebra_solver_newton(MirSystem{&spec, state}, x, y,
+                                             spec.x_r, spec.x_i, nullptr,
+                                             relative, function, steps);
+  return stan::math::algebra_solver(MirSystem{&spec, state}, x, y, spec.x_r,
+                                    spec.x_i, nullptr, relative, function,
+                                    steps);
 }
 
 void algebra_fwd(KernelCtx& ctx) {
@@ -122,12 +126,12 @@ void algebra_fwd(KernelCtx& ctx) {
   const int64_t P = ctx.in[1].len;
   const bool y_autodiff = (ctx.variant & 0x1u) != 0;
 
-  if (values_only() || !y_autodiff) {
+  if (values_only(ctx) || !y_autodiff) {
     const double* controls = ctx.n_in == 3 ? ctx.in[2].data : nullptr;
     if (controls && ctx.in[2].len != 3)
       throw std::invalid_argument("algebra solver control count mismatch");
     const Eigen::VectorXd solved =
-        solve_double(spec, ctx.in[0], ctx.in[1], controls);
+        solve_double(spec, ctx.in[0], ctx.in[1], controls, ctx.eval_state);
     if (solved.size() != ctx.out.len)
       throw std::runtime_error("algebra_solver: result size mismatch");
     std::copy(solved.data(), solved.data() + solved.size(), ctx.out.data);
@@ -148,17 +152,19 @@ void algebra_fwd(KernelCtx& ctx) {
   Eigen::MatrixXd jacobian;
   // Stan's adapter retains a reference to the system for its deferred
   // reverse-pass callback, so it must outlive the complete Jacobian sweep.
-  const MirSystem system{&spec};
+  const MirSystem system{&spec, ctx.eval_state};
   stan::math::jacobian(
       [&](const auto& y_var) {
         if (spec.variadic) {
           if (spec.solver == AlgebraSpec::Newton)
             return stan::math::solve_newton_tol(
-                MirVariadicSystem{&spec}, x, spec.relative_tolerance,
-                spec.function_tolerance, spec.max_num_steps, nullptr, y_var);
+                MirVariadicSystem{&spec, ctx.eval_state}, x,
+                spec.relative_tolerance, spec.function_tolerance,
+                spec.max_num_steps, nullptr, y_var);
           return stan::math::solve_powell_tol(
-              MirVariadicSystem{&spec}, x, spec.relative_tolerance,
-              spec.function_tolerance, spec.max_num_steps, nullptr, y_var);
+              MirVariadicSystem{&spec, ctx.eval_state}, x,
+              spec.relative_tolerance, spec.function_tolerance,
+              spec.max_num_steps, nullptr, y_var);
         }
         if (spec.solver == AlgebraSpec::Newton)
           return stan::math::algebra_solver_newton(

@@ -467,7 +467,7 @@ auto apply_structured(Y& y, Lp& lp, const KernelCtx& ctx) {
     if constexpr (!std::is_same_v<stan::value_type_t<Y>, double>) {
       return stan::math::unit_vector_constrain(y, lp);
     } else {
-      if (values_only() || (ctx.variant & kUnitVectorChecksNorm))
+      if (values_only(ctx) || (ctx.variant & kUnitVectorChecksNorm))
         return stan::math::unit_vector_constrain(y, lp);
       stan::math::check_nonzero_size("unit_vector", "y", y);
       const double SN = stan::math::dot_self(y);
@@ -581,7 +581,7 @@ void structured_fwd(KernelCtx& ctx) {
   const int64_t inner_con = structured_output_width<K>(ctx);
   double lp = 0.0;
   if constexpr (K == StructuredKind::CholeskyCorr)
-    ctx.scratch[0] = values_only() ? 0.0 : 1.0;
+    ctx.scratch[0] = values_only(ctx) ? 0.0 : 1.0;
   for (int64_t b = 0; b < nb; ++b) {
     if constexpr (kMatrixInput<K>) {
       const int64_t raw_rows =
@@ -597,7 +597,7 @@ void structured_fwd(KernelCtx& ctx) {
       const Eigen::Map<const Eigen::VectorXd> y(ctx.in[0].data + b * inner_raw,
                                                 inner_raw);
       if constexpr (K == StructuredKind::CholeskyCorr) {
-        if (!values_only()) {
+        if (!values_only(ctx)) {
           bool eligible = ctx.scratch[0] != 0.0;
           double* retained =
               ctx.scratch + 1 + b * (3 * inner_raw + ctx.idata[2]);
@@ -609,7 +609,7 @@ void structured_fwd(KernelCtx& ctx) {
         }
       }
       if constexpr (K == StructuredKind::CovMatrix) {
-        if (!values_only()) {
+        if (!values_only(ctx)) {
           const auto x = cov_matrix_rev_values(y, ctx.idata[2], lp);
           std::copy_n(x.data(), inner_con, ctx.out.data + b * inner_con);
           continue;

@@ -35,12 +35,6 @@ static bool g_fixed_small_matrices = true;
 bool fixed_small_matrices() { return g_fixed_small_matrices; }
 void set_fixed_small_matrices(bool on) { g_fixed_small_matrices = on; }
 
-// Set only for the duration of Executor::forward_value_only(). Kernels
-// that read it must still write ctx.out; all they may skip is work whose
-// only consumer is their own backward.
-static thread_local bool g_values_only = false;
-bool values_only() { return g_values_only; }
-
 const char* opcode_name(uint16_t opcode) {
   static const char* const names[] = {
       "OP_NONE_",
@@ -809,29 +803,22 @@ void Executor::run_forward_only(EvalState state) {
 }
 
 double Executor::forward_value_only() {
-  struct ValuesOnly {
-    bool previous = g_values_only;
-    ValuesOnly() { g_values_only = true; }
-    ~ValuesOnly() { g_values_only = previous; }
-  } guard;
-  return forward();
+  EvalState state{nullptr, reduce_context_};
+  state.values_only = true;
+  run_forward_only(state);
+  assert(graph_.slots[graph_.result_slot].len == 1);
+  return slot_data_(graph_.result_slot)[0];
 }
 
 double Executor::forward() {
   run_forward_only();
-  const Slot& r = graph_.slots[graph_.result_slot];
-  assert(r.len == 1);
-  reverse_ready_ = !g_values_only;
+  assert(graph_.slots[graph_.result_slot].len == 1);
+  reverse_ready_ = true;
   return slot_data_(graph_.result_slot)[0];
 }
 
 double Executor::gradient(double* grad_out) {
   ++n_grad_evals_;
-  struct FullGradient {
-    bool previous = g_values_only;
-    FullGradient() { g_values_only = false; }
-    ~FullGradient() { g_values_only = previous; }
-  } guard;
   const double v = forward();
   reverse(grad_out, 1.0);
   return v;

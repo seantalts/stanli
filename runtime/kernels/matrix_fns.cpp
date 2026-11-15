@@ -624,7 +624,7 @@ template <typename... Args>
 [[gnu::always_inline]] inline double tail_density_fwd(
     KernelCtx& ctx, const stan::math::var& density, const Args&... args) {
   const double value = density.val();
-  if (!values_only()) {
+  if (!values_only(ctx)) {
     stan::math::grad(density.vi_);
     double* s = ctx.scratch;
     ((s = tail_stash(s, args)), ...);
@@ -766,7 +766,7 @@ double mn_eval(KernelCtx& ctx) {
   if constexpr (Kind == kMnPrec) {
     return finish_tail_density<Grad>(ctx, out, ys, mus, S);
   } else {
-    if (!values_only()) {
+    if (!values_only(ctx)) {
       stan::math::grad(out.vi_);
       double* partial = ctx.scratch;
       const auto stash = [&](int k, bool active, const auto& operand) {
@@ -808,7 +808,7 @@ double mn_single_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
   const unsigned mask = ctx.variant == 0 ? 7u : (ctx.variant & 7u);
   const bool propto = (ctx.variant & 0x80u) != 0;
-  const bool record = !values_only();
+  const bool record = !values_only(ctx);
   CMapV y(ctx.in[0].data, n), mu(ctx.in[1].data, n);
   CMapM sigma(ctx.in[2].data, n, n);
   stan::math::check_positive(function, "Covariance matrix rows", sigma.rows());
@@ -912,14 +912,14 @@ double mnc_legacy_fwd(KernelCtx& ctx) {
              .transpose();
 
   VecD scaled_diff;
-  if (!values_only()) {
+  if (!values_only(ctx)) {
     scaled_diff =
         (half * inv_L.template triangularView<Eigen::Lower>()).transpose();
   }
 
   double logp(0.0);
   logp += stan::math::sum(stan::math::log(inv_L.diagonal()));
-  if (!values_only())
+  if (!values_only(ctx))
     MapM(ctx.scratch, n, n) = scaled_diff * half - inv_L.transpose();
   logp -= 0.5 * stan::math::sum(stan::math::dot_self(half));
   return logp;
@@ -931,7 +931,7 @@ double mnc_small_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
   const unsigned mask = ctx.variant == 0 ? 7u : (ctx.variant & 7u);
   const bool propto = (ctx.variant & 0x80u) != 0;
-  const bool record = !values_only();
+  const bool record = !values_only(ctx);
   const FixM<N, 1> y = FixCMap<N, 1>(ctx.in[0].data, n, 1);
   const FixM<N, 1> mu = FixCMap<N, 1>(ctx.in[1].data, n, 1);
   const FixM<N, N> L = FixCMap<N, N>(ctx.in[2].data, n, n);
@@ -1105,7 +1105,7 @@ void gemm_bwd(KernelCtx& ctx) {
 void crossprod_fwd(KernelCtx& ctx) {
   const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
   const CMapM a(ctx.in[0].data, rows, cols);
-  if ((ctx.variant & 1u) && !values_only())
+  if ((ctx.variant & 1u) && !values_only(ctx))
     MapM(ctx.out.data, cols, cols) = a.transpose() * a;
   else
     MapM(ctx.out.data, cols, cols) = stan::math::crossprod(a);
@@ -1130,7 +1130,7 @@ void crossprod_bwd(KernelCtx& ctx) {
 void mlt_self_transpose_fwd(KernelCtx& ctx) {
   const int64_t rows = ctx.idata[0], cols = ctx.idata[1];
   const CMapM a(ctx.in[0].data, rows, cols);
-  if ((ctx.variant & 1u) && !values_only()) {
+  if ((ctx.variant & 1u) && !values_only(ctx)) {
     const MatD masked = a.triangularView<Eigen::Lower>();
     MapM(ctx.out.data, rows, rows) =
         masked.triangularView<Eigen::Lower>() * masked.transpose();
@@ -1211,7 +1211,7 @@ double nid_glm_eval(KernelCtx& ctx) {
   for (int k = 0; k < 5; ++k) {
     if ((k == 0 && !y_var) || (k == 1 && !x_var)) continue;
     s.len[k] = ctx.in[k].len;
-    if (!values_only()) {
+    if (!values_only(ctx)) {
       s.buf[k] = partials;
       partials += ctx.in[k].len;
     }
@@ -1229,7 +1229,7 @@ double nid_glm_eval(KernelCtx& ctx) {
   const bool legacy = ctx.variant == 0;
   const bool sigma_data = propto && !legacy && (ctx.variant & 0x10u) == 0;
   const bool others_data = propto && !legacy && (ctx.variant & 0xfu) == 0;
-  if (!values_only() && sigma_data)
+  if (!values_only(ctx) && sigma_data)
     for (int k = others_data ? 2 : 4; k <= 4; ++k)
       if (s.buf[k]) std::fill_n(s.buf[k], ctx.in[k].len, 0.0);
   auto call = [&](const auto& y, const auto& x, const auto& a,
@@ -1316,7 +1316,7 @@ double nid_glm_eval(KernelCtx& ctx) {
   }
   // The previous unit reverse accumulated each partial into an initially
   // positive-zero adjoint. Preserve that addition, including signed zero.
-  if (!values_only())
+  if (!values_only(ctx))
     for (int k = 0; k < 5; ++k)
       if (s.buf[k])
         for (int64_t i = 0; i < s.len[k]; ++i) s.buf[k][i] = 0.0 + s.buf[k][i];
@@ -1381,7 +1381,7 @@ void eigvals_fwd(KernelCtx& ctx) {
   const int64_t n = ctx.idata[0];
   if (n == 0) return;
   MatD a = CMapM(ctx.in[0].data, n, n);
-  if (values_only()) {
+  if (values_only(ctx)) {
     Eigen::Map<VecD>(ctx.out.data, n) = stan::math::eigenvalues_sym(a);
     return;
   }
@@ -1414,7 +1414,8 @@ void eigvecs_fwd(KernelCtx& ctx) {
   stan::math::check_symmetric("eigenvalues_sym", "m", a);
   Eigen::SelfAdjointEigenSolver<MatD> solver(a);
   MapM(ctx.out.data, n, n) = solver.eigenvectors();
-  if (!values_only()) Eigen::Map<VecD>(ctx.scratch, n) = solver.eigenvalues();
+  if (!values_only(ctx))
+    Eigen::Map<VecD>(ctx.scratch, n) = solver.eigenvalues();
 }
 void eigvecs_bwd(KernelCtx& ctx) {
   if (!ctx.in_adj[0].data) return;
@@ -2022,9 +2023,9 @@ void wiener_fwd(KernelCtx& ctx) {
     ctx.out.data[0] = 0;
     return;
   }
-  ctx.out.data[0] = values_only() ? wiener_run(ctx, 0, WienerPass::Value)
-                                  : wiener_run(ctx, wiener_activity(ctx),
-                                               WienerPass::Partials);
+  ctx.out.data[0] = values_only(ctx) ? wiener_run(ctx, 0, WienerPass::Value)
+                                     : wiener_run(ctx, wiener_activity(ctx),
+                                                  WienerPass::Partials);
   // Stan Math's propto density of constants is zero. Evaluate it anyway so
   // invalid arguments still reject.
   if ((ctx.variant & 0x80u) && (ctx.variant & 0x1fu) == 0)
@@ -2095,7 +2096,7 @@ void wiener_packed_fwd(KernelCtx& ctx) {
   const bool propto = ctx.idata[3] != 0;
   const WienerKind kind = static_cast<WienerKind>(ctx.idata[4]);
   const int64_t width = nargs * lanes;
-  double* partials = values_only() ? nullptr : ctx.scratch;
+  double* partials = values_only(ctx) ? nullptr : ctx.scratch;
   if (partials) std::fill_n(partials, width, 0.0);
   if (propto && active == 0) {
     ctx.out.data[0] = 0.0;
@@ -2206,7 +2207,7 @@ double blglm_eval(KernelCtx& ctx) {
   if (propto && (ctx.variant & 0x7u) == 0) {
     const CMapM Xd(ctx.in[0].data, rows, cols);
     const CMapV beta_d(ctx.in[2].data, cols);
-    if (!values_only())
+    if (!values_only(ctx))
       std::fill_n(ctx.scratch, ctx.in[0].len + ctx.in[1].len + ctx.in[2].len,
                   0.0);
     double lp = 0;

@@ -49,6 +49,7 @@ using stan::math::var;
 // one, the MIR interpreter when there is not.
 struct MirRhs {
   const OdeSpec* spec;
+  EvalState* eval_state = nullptr;
   mutable RhsWorkspace workspace;
 
   template <typename T_y, typename T_param>
@@ -63,7 +64,7 @@ struct MirRhs {
       // unread no-parameter placeholder in the old tape position.
       std::vector<T> out;
       run_rhs<T>(spec->prog, t, y, theta.data(), theta.size(), x_r.data(), out,
-                 workspace.get<T>());
+                 workspace.get<T>(), eval_state);
       return out;
     }
     // Preserve the interpreter adapter exactly. The modern caller used to
@@ -100,6 +101,7 @@ struct MirRhs {
 // into the right-hand side's declared parameters.
 struct VarRhs {
   const OdeSpec* spec;
+  EvalState* eval_state = nullptr;
   mutable RhsWorkspace workspace;
 
   template <typename T_y, typename T_param>
@@ -116,11 +118,11 @@ struct VarRhs {
       // return object. The vector-returning MirRhs entry remains the exact
       // interpreter fallback and compatibility path.
       run_rhs_into<T>(spec->prog, t, y.data(), theta.data(), theta.size(),
-                      x_r.data(), out.data(), workspace.get<T>());
+                      x_r.data(), out.data(), workspace.get<T>(), eval_state);
       return out;
     }
-    const std::vector<T> dy =
-        MirRhs{spec}.eval(t, y.data(), (size_t)y.size(), theta, x_r, x_i, msgs);
+    const std::vector<T> dy = MirRhs{spec, eval_state}.eval(
+        t, y.data(), (size_t)y.size(), theta, x_r, x_i, msgs);
     Eigen::Matrix<T, Eigen::Dynamic, 1> out(dy.size());
     for (size_t i = 0; i < dy.size(); ++i) out(i) = dy[i];
     return out;
@@ -136,13 +138,13 @@ template <typename T_y0, typename T_theta, typename T_t0, typename T_ts>
 std::vector<std::vector<stan::return_type_t<T_y0, T_theta, T_t0, T_ts>>> solve(
     const OdeSpec& s, const std::vector<T_y0>& z0,
     const std::vector<T_theta>& theta, const T_t0& t0,
-    const std::vector<T_ts>& ts, const double* controls = nullptr) {
+    const std::vector<T_ts>& ts, const double* controls, EvalState* state) {
   using T = stan::return_type_t<T_y0, T_theta, T_t0, T_ts>;
   const double rtol = controls ? controls[0] : s.rtol;
   const double atol = controls ? controls[1] : s.atol;
   const long max_steps =
       controls ? static_cast<long>(controls[2]) : s.max_steps;
-  VarRhs f{&s};
+  VarRhs f{&s, state};
   Eigen::Matrix<T_y0, Eigen::Dynamic, 1> y0((Eigen::Index)z0.size());
   for (size_t i = 0; i < z0.size(); ++i) y0((Eigen::Index)i) = z0[i];
 
@@ -521,7 +523,8 @@ void ode_fwd_typed(KernelCtx& ctx, const OdeSpec& s) {
     std::vector<T_y0> z0(ctx.in[0].data, ctx.in[0].data + S);
     std::vector<T_theta> th(ctx.in[1].data, ctx.in[1].data + P);
     const std::vector<double> ts(ts_values, ts_values + N);
-    const auto solv = solve(s, z0, th, t0_value, ts, ode_runtime_controls(ctx));
+    const auto solv = solve(s, z0, th, t0_value, ts, ode_runtime_controls(ctx),
+                            ctx.eval_state);
     for (size_t n = 0; n < solv.size(); ++n)
       for (int64_t k = 0; k < S; ++k)
         ctx.out.data[(int64_t)n * S + k] = solv[n][k];
@@ -542,7 +545,8 @@ void ode_fwd_typed(KernelCtx& ctx, const OdeSpec& s) {
     std::vector<T_theta> th(ctx.in[1].data, ctx.in[1].data + P);
     T_t0 t0 = t0_value;
     std::vector<T_ts> ts(ts_values, ts_values + N);
-    const auto solv = solve(s, z0, th, t0, ts, ode_runtime_controls(ctx));
+    const auto solv =
+        solve(s, z0, th, t0, ts, ode_runtime_controls(ctx), ctx.eval_state);
     for (size_t n = 0; n < solv.size(); ++n)
       for (int64_t k = 0; k < S; ++k)
         ctx.out.data[(int64_t)n * S + k] = solv[n][k].val();
@@ -601,7 +605,7 @@ void ode_fwd(KernelCtx& ctx) {
   // different answer from the coupled solve below -- the step controller
   // sees different error estimates. Matching it is the point: it decides
   // which initial points are valid.
-  if (values_only()) {
+  if (values_only(ctx)) {
     ode_fwd_typed<false, false, false, false>(ctx, s);
     return;
   }

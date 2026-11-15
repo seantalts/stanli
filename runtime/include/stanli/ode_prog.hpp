@@ -146,9 +146,9 @@ template <typename T, typename T_time, typename T_y, typename T_yp,
 std::vector<T>& eval_dae_regs(const RhsProgram& p, const T_time& t,
                               const T_y* y, const T_yp* yp, const T_theta* th,
                               size_t n_th_source, const double* xr,
-                              std::vector<T>& reg) {
+                              std::vector<T>& reg, EvalState* state) {
   seed_dae_regs<T>(p, t, y, yp, th, n_th_source, xr, reg);
-  run_program(p, reg);
+  run_program(p, reg, state);
   return reg;
 }
 
@@ -156,10 +156,10 @@ template <typename T, typename T_time, typename T_y, typename T_theta>
 std::vector<T>& eval_rhs_regs(const RhsProgram& p, const T_time& t,
                               const T_y* y, const T_theta* th,
                               size_t n_th_source, const double* xr,
-                              std::vector<T>& reg) {
+                              std::vector<T>& reg, EvalState* state) {
   seed_rhs_regs<T>(p, t, y, th, n_th_source, xr, reg);
 
-  run_program(p, reg);
+  run_program(p, reg, state);
   return reg;
 }
 
@@ -169,9 +169,10 @@ template <typename T, typename T_time, typename T_y, typename T_yp,
           typename T_theta>
 void run_dae_into(const RhsProgram& p, const T_time& t, const T_y* y,
                   const T_yp* yp, const T_theta* th, size_t n_th_source,
-                  const double* xr, T* out, std::vector<T>& registers) {
-  const std::vector<T>& reg =
-      detail::eval_dae_regs<T>(p, t, y, yp, th, n_th_source, xr, registers);
+                  const double* xr, T* out, std::vector<T>& registers,
+                  EvalState* state = nullptr) {
+  const std::vector<T>& reg = detail::eval_dae_regs<T>(
+      p, t, y, yp, th, n_th_source, xr, registers, state);
   for (size_t i = 0; i < p.out_regs.size(); ++i)
     out[i] = reg[(size_t)p.out_regs[i]];
 }
@@ -182,9 +183,10 @@ void run_dae_into(const RhsProgram& p, const T_time& t, const T_y* y,
 template <typename T, typename T_time, typename T_y, typename T_theta>
 void run_rhs_into(const RhsProgram& p, const T_time& t, const T_y* y,
                   const T_theta* th, size_t n_th_source, const double* xr,
-                  T* out, std::vector<T>& registers) {
+                  T* out, std::vector<T>& registers,
+                  EvalState* state = nullptr) {
   const std::vector<T>& reg =
-      detail::eval_rhs_regs<T>(p, t, y, th, n_th_source, xr, registers);
+      detail::eval_rhs_regs<T>(p, t, y, th, n_th_source, xr, registers, state);
   for (size_t i = 0; i < p.out_regs.size(); ++i)
     out[i] = reg[(size_t)p.out_regs[i]];
 }
@@ -192,9 +194,10 @@ void run_rhs_into(const RhsProgram& p, const T_time& t, const T_y* y,
 template <typename T, typename T_time, typename T_y, typename T_theta>
 void run_rhs(const RhsProgram& p, const T_time& t, const T_y* y,
              const T_theta* th, size_t n_th_source, const double* xr,
-             std::vector<T>& out, std::vector<T>& registers) {
+             std::vector<T>& out, std::vector<T>& registers,
+             EvalState* state = nullptr) {
   const std::vector<T>& reg =
-      detail::eval_rhs_regs<T>(p, t, y, th, n_th_source, xr, registers);
+      detail::eval_rhs_regs<T>(p, t, y, th, n_th_source, xr, registers, state);
 
   // Keep resize after the program replay, as in the original adapter. Besides
   // retaining allocation behavior for existing callers, this leaves the
