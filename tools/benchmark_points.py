@@ -1,10 +1,11 @@
 """Committed evaluation points and gradient counts for the corpus benchmark.
 
 Each model has one entry, recorded from a Stanli NUTS reference run on the
-benchmark data. A reference_run entry holds ten points taken from that run and
-the number of gradient evaluations the run took. A fixed entry says why the run
-could not supply points: the benchmark then uses the fixed points built into the
-timing drivers and the default gradient count.
+benchmark data, with the Stanli build that ran it. A reference_run entry holds
+ten points taken from that run and the number of gradient evaluations the run
+took. A fixed entry says why the run could not supply points: the benchmark
+then uses the fixed points built into the timing drivers and the default
+gradient count.
 """
 
 import gzip
@@ -15,7 +16,7 @@ import math
 import pathlib
 import re
 
-SCHEMA = 2
+SCHEMA = 3
 DEFAULT_GRADIENTS = 5000
 DEFAULT_PATH = pathlib.Path(__file__).resolve().parent.parent / "docs/internal/artifacts/benchmark-points.json.gz"
 SOURCES = ("reference_run", "fixed")
@@ -90,6 +91,10 @@ def _validate(doc):
         for key in ("stan_sha256", "data_sha256"):
             if not isinstance(entry.get(key), str) or not _HEX.fullmatch(entry[key]):
                 _fail(f"{name}: {key} is not a sha256 digest")
+        if not isinstance(entry.get("stanli_build_id"), str) or not entry["stanli_build_id"]:
+            _fail(f"{name}: stanli_build_id is required")
+        if not _count(entry.get("stanli_abi_version")):
+            _fail(f"{name}: stanli_abi_version is required")
         if entry["source"] == "fixed":
             if not isinstance(entry.get("reason"), str) or not entry["reason"]:
                 _fail(f"{name}: a fixed entry needs a reason")
@@ -135,13 +140,14 @@ def load(path):
 
 def entry_for(doc, name, stan_sha256, data_sha256):
     """The model's entry, after checking that its stan and data hashes still match."""
+    refresh = "; regenerate with tools/gen_benchmark_points.py --missing"
     entry = doc["models"].get(name)
     if entry is None:
-        _fail(f"{name}: no entry; regenerate with tools/gen_benchmark_points.py")
+        _fail(f"{name}: no entry{refresh}")
     if entry["stan_sha256"] != stan_sha256:
-        _fail(f"{name}: stan source changed since the points were generated")
+        _fail(f"{name}: stan source changed since the points were generated{refresh}")
     if entry["data_sha256"] != data_sha256:
-        _fail(f"{name}: data changed since the points were generated")
+        _fail(f"{name}: data changed since the points were generated{refresh}")
     return entry
 
 
