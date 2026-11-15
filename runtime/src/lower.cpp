@@ -10,6 +10,7 @@
 
 #include <stan/math/rev/core/chainablestack.hpp>
 
+#include <cstring>
 #include <thread>
 
 namespace stanli {
@@ -1276,6 +1277,9 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
              static_cast<int64_t>(mir_text.size()));
   Lowering lo(data, prep, dumper, "log_prob", WaRng(seed));
   lo.compile_options = options;
+  if (const char* refuse = std::getenv("STANLI_NO_INTERPRETER");
+      refuse != nullptr && refuse[0] != '\0' && std::strcmp(refuse, "0") != 0)
+    lo.compile_options.allow_interpreter = false;
   // A second lowering, over the transformed data the first one already
   // interpreted: re-running prepare_data would double preparation time on
   // the models where preparation is the cost (nn_rbm1bJ100, 20.7 s).
@@ -1393,7 +1397,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                                                std::move(params));
     cm.transform_inits = std::move(ti);
   }
-  if (!cm.interpreter_fallbacks.empty() && std::getenv("STANLI_NO_INTERPRETER"))
+  if (!cm.interpreter_fallbacks.empty() &&
+      !lo.compile_options.allow_interpreter)
     throw CompileError(interpreter_error(cm));
   prep.plain("compile", "total", compile_time);
   prep.report();
@@ -1405,10 +1410,11 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
 }
 
 std::string interpreter_error(const CompiledModel& cm) {
-  return "stanli: STANLI_NO_INTERPRETER is set and parts of this model have "
-         "no compiled path: " +
+  return "stanli: the MIR interpreter is not allowed (allow_interpreter is "
+         "false, or STANLI_NO_INTERPRETER is set) and parts of this model "
+         "have no compiled path: " +
          fallback_items(cm) +
-         ". Unset it to run them through the MIR interpreter, which is far "
+         ". Allow it to run them through the MIR interpreter, which is far "
          "slower. " +
          report_request();
 }
