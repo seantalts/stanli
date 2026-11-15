@@ -139,7 +139,8 @@ stanfit_plain <- function(x) {
 }
 
 stanfit_empty <- function(model) {
-  layout <- stanfit_column_layout(c(model$columns, "lp__"))
+  layout <- variable_layout(c(model_variables(model),
+                              list(lp__ = integer(0))))
   name <- if (is.null(model$model_name)) "stanli_model" else model$model_name
   code <- if (is.null(model$model_code)) character(0) else model$model_code
   methods::new("stanli_stanfit", model_name = name, model_pars = layout$parameters,
@@ -277,12 +278,15 @@ as_stanfit.stanli_fit <- function(x, model = x$model, exclude = NULL, ...,
     stop("exclude must be a character vector of variable names", call. = FALSE)
   # Dropped variables leave the stored draws only: the live model, and so
   # log_prob and the transforms, still know every parameter.
-  kept_columns <- !(sub("\\[.*$", "", x$columns) %in% exclude)
+  variables <- model_variables(x)
+  kept_columns <- !(column_variables(variables) %in% exclude)
   columns <- x$columns[kept_columns]
   # lp__ closes every fit; an approximation also has the density of the
   # approximation at each draw, as cmdstanr names it.
   special <- if (approximate) c("lp__", "lp_approx__") else "lp__"
-  layout <- stanfit_column_layout(c(columns, special))
+  layout <- variable_layout(c(variables[!names(variables) %in% exclude],
+                              stats::setNames(rep(list(integer(0)),
+                                                  length(special)), special)))
   flat_names <- c(columns, special)
   posterior_rows <- seq.int(saved_warmup + 1L, shape[1L])
 

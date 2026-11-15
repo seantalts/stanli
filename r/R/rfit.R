@@ -56,7 +56,6 @@ as_rfit <- function(x) {
     stop("fit arrays and warmup metadata do not agree", call. = FALSE)
   n <- length(post_warmup_rows(x))
   if (n < 1L) stop("fit has no post-warmup draws", call. = FALSE)
-  stanfit_column_layout(c(x$columns, "lp__"))
   x$rfit_permutation <- fit_permutations(x$seed, dim(x$draws)[2L], n)
   class(x) <- c("stanli_rfit", class(x))
   x
@@ -75,15 +74,16 @@ rfit_array <- function(object, inc_warmup = FALSE) {
   arr[rows, , , drop = FALSE]
 }
 
-rfit_variables <- function(columns, pars, include = TRUE) {
-  if (is.null(pars)) return(unique(sub("\\[.*$", "", columns)))
+rfit_variables <- function(variables, columns, pars, include = TRUE) {
+  of <- column_variables(variables)[match(columns, variable_columns(variables))]
+  if (is.null(pars)) return(unique(of))
   if (!is.character(pars) || anyNA(pars) || anyDuplicated(pars))
     stop("pars must contain unique parameter names", call. = FALSE)
   selected <- select_draw_variables(columns, pars)
   if (include) pars else {
     # Preserve intact containers, returning indexed elements for partial exclusions.
     remaining <- setdiff(seq_along(columns), selected)
-    bases <- unique(sub("\\[.*$", "", columns[remaining]))
+    bases <- unique(of[remaining])
     unlist(lapply(bases, function(base) {
       full <- select_draw_variables(columns, base)
       if (all(full %in% remaining)) base else columns[intersect(full, remaining)]
@@ -100,10 +100,11 @@ extract <- function(object, pars = NULL, permuted = TRUE, inc_warmup = FALSE,
   if (permuted && !inherits(object, "stanli_rfit")) object <- as_rfit(object)
   arr <- rfit_array(object, inc_warmup = !permuted && inc_warmup)
   columns <- dimnames(arr)[[3L]]
-  pars <- rfit_variables(columns, pars, include)
+  variables <- c(model_variables(object), list(lp__ = integer(0)))
+  pars <- rfit_variables(variables, columns, pars, include)
   if (!permuted)
     return(arr[, , select_draw_variables(columns, pars), drop = FALSE])
-  layout <- stanfit_column_layout(columns)
+  layout <- variable_layout(variables)
   n <- dim(arr)[1L]
   chain_rows <- unlist(lapply(seq_len(dim(arr)[2L]), function(chain)
     object$rfit_permutation[[chain]] + (chain - 1L) * n), use.names = FALSE)
@@ -132,8 +133,10 @@ summary.stanli_rfit <- function(object, pars = NULL,
   # RStan prints matrix/array elements in row-major order in summaries,
   # while extraction retains Stan's column-major serialization order.
   columns <- dimnames(arr)[[3L]]
-  layout <- stanfit_column_layout(c(object$columns, "lp__"))
-  indices <- unlist(lapply(unique(sub("\\[.*$", "", columns)), function(par) {
+  variables <- c(model_variables(object), list(lp__ = integer(0)))
+  layout <- variable_layout(variables)
+  of <- column_variables(variables)[match(columns, variable_columns(variables))]
+  indices <- unlist(lapply(unique(of), function(par) {
     selected <- select_draw_variables(columns, par)
     shape <- layout$dimensions[[par]]
     if (length(shape) > 1L) {

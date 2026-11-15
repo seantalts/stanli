@@ -665,12 +665,14 @@ SEXP stanli_r_compiler_messages(SEXP m) {
                            p_model_compiler_message, mm);
 }
 
-/* list(name = character, dims = list of integer vectors) for the columns
+/* list(name = character, dims = list of integer vectors): the constrained
+ * parameters when `parameters` is TRUE, else the columns
  * stanli_r_column_names reports. */
-SEXP stanli_r_variables(SEXP m) {
+SEXP stanli_r_variables(SEXP m, SEXP parameters) {
   require_loaded();
   const void* mm = model_ptr(m);
-  const int set = p_wa_n_columns(mm) > 0 ? 1 : 0;
+  const int set =
+      asLogical(parameters) != TRUE && p_wa_n_columns(mm) > 0 ? 1 : 0;
   const int64_t n = p_n_variables(mm, set);
   SEXP names = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
   SEXP dims = PROTECT(allocVector(VECSXP, (R_xlen_t)n));

@@ -793,3 +793,23 @@ test_that("an O1 fallback is a classed warning", {
   expect_match(seen, "skipped O1", fixed = TRUE)
   expect_s3_class(model, "stanli_model")
 })
+
+test_that("a model's variables and columns come from the runtime", {
+  skip_without_runtime()
+  model <- stanli_model(code = "
+    parameters { real mu; vector[2] v; }
+    transformed parameters {
+      array[2] vector[3] tp;
+      for (i in 1:2) tp[i] = rep_vector(mu, 3);
+    }
+    model { mu ~ normal(0, 1); v ~ normal(0, 1); }
+    generated quantities { matrix[2, 3] m = rep_matrix(mu, 2, 3); }")
+  expect_identical(model$variables,
+                   list(mu = integer(0), v = 2L, tp = c(2L, 3L),
+                        m = c(2L, 3L)))
+  expect_identical(model$columns[1:6],
+                   c("mu", "v[1]", "v[2]", "tp[1,1]", "tp[2,1]", "tp[1,2]"))
+  expect_identical(parameter_names(model), c("mu", "v"))
+  expect_identical(parameter_names(model, scalars = TRUE),
+                   c("mu", "v[1]", "v[2]"))
+})

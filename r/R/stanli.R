@@ -220,10 +220,11 @@ build_model <- function(code, data_json, is_mir, seed,
   ptr <- .Call("stanli_r_model_new", code, data_json, is_mir,
                as.numeric(seed), as.integer(threads_per_chain), fast_math,
                allow_interpreter, file)
+  variables <- runtime_variables(ptr, parameters = FALSE)
   structure(list(ptr = ptr,
                  n_unconstrained = .Call("stanli_r_n_unconstrained", ptr),
-                 columns = stan_variable_names(
-                   .Call("stanli_r_column_names", ptr)),
+                 columns = variable_columns(variables),
+                 variables = variables,
                  model_name = model_name,
                  model_code = model_code,
                  source = list(code = code, data_json = data_json,
@@ -251,13 +252,40 @@ with_run_seed <- function(model, seed, threads_per_chain = model$threads_per_cha
               !isFALSE(model$allow_interpreter))
 }
 
-stan_variable_names <- function(x) {
-  vapply(strsplit(x, ".", fixed = TRUE), function(parts) {
-    if (length(parts) > 1L && all(grepl("^[0-9]+$", parts[-1L])))
-      paste0(parts[1L], "[", paste(parts[-1L], collapse = ","), "]")
-    else
-      paste(parts, collapse = ".")
-  }, character(1))
+# The declared variables behind a model's columns, from the runtime: a named
+# list of dims, first index fastest.
+runtime_variables <- function(ptr, parameters) {
+  v <- .Call("stanli_r_variables", ptr, parameters)
+  stats::setNames(v$dims, v$name)
+}
+
+# Column names in Stan's order, `theta[1,2]` for an element.
+variable_columns <- function(variables) {
+  unlist(lapply(names(variables), function(name) {
+    dims <- variables[[name]]
+    if (!length(dims)) return(name)
+    if (prod(dims) == 0) return(character(0))
+    index <- as.matrix(expand.grid(lapply(dims, seq_len)))
+    paste0(name, "[", apply(index, 1L, paste, collapse = ","), "]")
+  }), use.names = FALSE)
+}
+
+# The variable each column belongs to.
+column_variables <- function(variables) {
+  rep(names(variables), vapply(variables, function(d) as.integer(prod(d)),
+                               integer(1)))
+}
+
+# The variables of a model or of a fit's model. A model saved before models
+# carried their variables has only its column names to go on.
+model_variables <- function(x) {
+  model <- if (inherits(x, "stanli_model")) x else x$model
+  if (!is.null(model$variables)) return(model$variables)
+  stanfit_column_layout(x$columns)$dimensions
+}
+
+variable_layout <- function(variables) {
+  list(parameters = names(variables), dimensions = variables)
 }
 
 #' @export
@@ -311,9 +339,8 @@ parameter_names <- function(model, scalars = FALSE) {
     stop("model must be a stanli_model", call. = FALSE)
   if (!is.logical(scalars) || length(scalars) != 1L || is.na(scalars))
     stop("scalars must be TRUE or FALSE", call. = FALSE)
-  columns <- .Call("stanli_r_parameter_columns", model$ptr)
-  if (scalars) stan_variable_names(columns)
-  else unique(sub("\\..*$", "", columns))
+  variables <- runtime_variables(model$ptr, parameters = TRUE)
+  if (scalars) variable_columns(variables) else names(variables)
 }
 
 #' Starting values on the constrained scale, as the free vector
@@ -394,12 +421,11 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
   if (length(init_radius) != 1L || !is.numeric(init_radius) ||
       !is.finite(init_radius) || init_radius < 0)
     stop("init_radius must be finite and nonnegative", call. = FALSE)
-  columns <- .Call("stanli_r_parameter_columns", model$ptr)
-  declared <- sub("\\..*$", "", columns)
+  variables <- runtime_variables(model$ptr, parameters = TRUE)
+  columns <- variable_columns(variables)
   values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
-  if (all(unique(declared) %in% names(values))) return(values)
-  if (!identical(stan_variable_names(columns),
-                 utils::head(model$columns, length(columns))))
+  if (all(names(variables) %in% names(values))) return(values)
+  if (!identical(columns, utils::head(model$columns, length(columns))))
     stop("this model's outputs do not begin with its parameters; partial ",
          "starting values are unavailable", call. = FALSE)
   point <- if (is.null(seed)) {
@@ -412,7 +438,8 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
   }
   drawn <- utils::head(.Call("stanli_r_write_array", model$ptr, point),
                        length(columns))
-  filled <- split(drawn, factor(declared, levels = unique(declared)))
+  declared <- column_variables(variables)
+  filled <- split(drawn, factor(declared, levels = names(variables)))
   filled[intersect(names(values), names(filled))] <-
     values[intersect(names(values), names(filled))]
   # names that are not parameters are passed on for the usual error or, for
