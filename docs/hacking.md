@@ -389,7 +389,8 @@ kernels read and write it as a `DensityMode`
 arguments are being differentiated, whether the op writes the
 elementwise form (each element's log density rather than their sum),
 and whether `~`-style dropping (propto) is in effect. Every field is
-written explicitly; a zero byte means no argument is active.
+written explicitly; a zero byte means no argument is active. The ODE,
+DAE and quadrature kernels use `SolverActivity` the same way.
 
 Bugs here are nasty in a specific way: the gradient stays perfect
 while the log density is off by a constant. Sampling still works,

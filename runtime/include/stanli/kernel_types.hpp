@@ -50,7 +50,7 @@ struct Slot {
 struct Op {
   uint16_t opcode = 0;
   // Opcode-specific compact mode, read and written through the opcode
-  // family's typed view (DensityMode, ...); other kernels use
+  // family's typed view (DensityMode, SolverActivity, ...); other kernels use
   // it for contracts such as an RNG family.
   uint8_t variant = 0;
   int out = -1;
@@ -100,6 +100,17 @@ struct DensityMode {
   }
 };
 
+// Op::variant of OP_ODE, OP_ODE_ADJOINT, OP_DAE and OP_QUADRATURE: bit k says
+// in[k] is autodiff. Runtime-control inputs are never active.
+struct SolverActivity {
+  uint8_t inputs = 0;
+
+  constexpr bool is_active(int k) const { return ((inputs >> k) & 1u) != 0; }
+  constexpr bool any() const { return inputs != 0; }
+  constexpr uint8_t byte() const { return inputs; }
+  static constexpr SolverActivity of(uint8_t byte) { return {byte}; }
+};
+
 // Bit 6 of a dynamic-length mask names the output; bits 0..5 name inputs.
 inline constexpr uint8_t kDynamicLengthOutput = 1u << 6;
 static_assert(sizeof(Op::in) / sizeof(Op::in[0]) == 6,
@@ -146,6 +157,13 @@ inline uint8_t elementwise_density(uint8_t variant) {
   mode.elementwise = true;
   return mode.byte();
 }
+inline SolverActivity solver_activity(const KernelCtx& c) {
+  return SolverActivity::of(c.variant);
+}
+inline SolverActivity solver_activity(const Op& op) {
+  return SolverActivity::of(op.variant);
+}
+
 inline void apply_dynamic_length(KernelCtx& c) {
   assert(c.in[c.dyn_extent_in].len == 1);
   const double raw = c.in[c.dyn_extent_in].data[0];

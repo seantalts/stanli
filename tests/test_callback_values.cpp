@@ -35,12 +35,12 @@ void check(const stanli::Op& op) {
         inputs.push_back({0.1});
       }
       expect_true("ODE explicitly selects double scalar types",
-                  op.variant == 0x4u || op.variant == 0x10u);
+                  op.variant == 0);
       break;
     case OP_DAE:
       inputs = {{0.4}, {0.16}, theta};
       expect_true("DAE explicitly selects double scalar types",
-                  op.variant == 0x8u);
+                  op.variant == 0);
       break;
     case OP_ALGEBRA_SOLVER:
       inputs = {{0.4}, theta};
@@ -58,7 +58,7 @@ void check(const stanli::Op& op) {
         inputs.push_back(
             {1e-10, 1e-10, 1e-10, 1e-10, 1e-10, 1e-10, 100000, 10, 1, 1, 1});
       expect_true("adjoint ODE explicitly selects double scalar types",
-                  op.variant == 0x10u);
+                  op.variant == 0);
       break;
     default:
       return;
@@ -80,10 +80,10 @@ void check(const stanli::Op& op) {
   shape.out = static_cast<int>(inputs.size());
   slots.back().len = 1;
   if (op.opcode == OP_ODE || op.opcode == OP_DAE) {
-    Op legacy = shape;
-    legacy.variant = 0;
-    expect_true("absent activity marker preserves legacy active scratch",
-                kernel->scratch_size(legacy, slots.data()) > 0);
+    Op active = shape;
+    active.variant = SolverActivity{0x1u}.byte();
+    expect_true("an active solver keeps derivative scratch",
+                kernel->scratch_size(active, slots.data()) > 0);
   }
   expect_true(
       "inactive solver needs zero derivative scratch",

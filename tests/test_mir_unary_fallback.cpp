@@ -509,8 +509,8 @@ void test_ode_program() {
     expect_close(std::string("ODE program gradient ") + label, gradient,
                  want * 0.4 * std::cos(0.2), 2e-8);
   };
-  run(0x0u, "legacy var/var");
-  run(0x6u, "data y/active theta");
+  run(0x3u, "var/var");
+  run(0x2u, "data y/active theta");
 }
 
 }  // namespace

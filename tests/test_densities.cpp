@@ -1140,8 +1140,9 @@ static void check_density_modes() {
   using namespace stanli;
   bool round_trip = true;
   for (unsigned b = 0; b < 256; ++b)
-    round_trip = round_trip && DensityMode::of((uint8_t)b).byte() == b;
-  expect_true("density modes round trip", round_trip);
+    round_trip = round_trip && DensityMode::of((uint8_t)b).byte() == b &&
+                 SolverActivity::of((uint8_t)b).byte() == b;
+  expect_true("density and solver modes round trip", round_trip);
   const DensityMode zero = DensityMode::of(0);
   expect_true("zero byte: nothing active, summed, full density",
               zero.active == 0 && !zero.elementwise && !zero.propto);
@@ -1162,6 +1163,10 @@ static void check_density_modes() {
               widened.elementwise && widened.propto && widened.active == 0x6u);
   expect_true("elementwise keeps an empty mask empty",
               DensityMode::of(elementwise_density(0)).active == 0);
+  expect_true("an empty solver mask is inactive",
+              !SolverActivity::of(0).any() &&
+                  SolverActivity{0x5u}.is_active(2) &&
+                  !SolverActivity{0x5u}.is_active(1));
   bool all_integer = true;
   for (int d = 0; d <= (int)AllIntegerDensity::DiscreteRangeLccdf; ++d)
     for (bool p : {false, true}) {

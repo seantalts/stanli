@@ -497,11 +497,6 @@ const double* ode_runtime_controls(const KernelCtx& ctx) {
   return controls.data;
 }
 
-uint8_t ode_type_mask(unsigned variant) {
-  if ((variant & 0x10u) != 0) return variant & 0x0fu;
-  return (variant & 0x4u) != 0 ? (variant & 0x3u) : 0x3u;
-}
-
 template <bool YAutodiff, bool ThetaAutodiff, bool T0Autodiff, bool TsAutodiff>
 void ode_fwd_typed(KernelCtx& ctx, const OdeSpec& s) {
   using T_y0 = std::conditional_t<YAutodiff, var, double>;
@@ -605,9 +600,9 @@ void ode_fwd(KernelCtx& ctx) {
     ode_fwd_typed<false, false, false, false>(ctx, s);
     return;
   }
-  const uint8_t type_mask = ode_type_mask(ctx.variant);
-  const bool t0_autodiff = (type_mask & 0x4u) != 0;
-  const bool ts_autodiff = (type_mask & 0x8u) != 0;
+  const SolverActivity active = solver_activity(ctx);
+  const bool t0_autodiff = active.is_active(2);
+  const bool ts_autodiff = active.is_active(3);
 #define STANLI_ODE_FWD_TIMES(Y, TH)               \
   if (t0_autodiff) {                              \
     if (ts_autodiff)                              \
@@ -620,11 +615,11 @@ void ode_fwd(KernelCtx& ctx) {
     else                                          \
       ode_fwd_typed<Y, TH, false, false>(ctx, s); \
   }
-  if ((type_mask & 0x3u) == 0x3u) {
+  if (active.is_active(0) && active.is_active(1)) {
     STANLI_ODE_FWD_TIMES(true, true);
-  } else if ((type_mask & 0x3u) == 0x1u) {
+  } else if (active.is_active(0)) {
     STANLI_ODE_FWD_TIMES(true, false);
-  } else if ((type_mask & 0x3u) == 0x2u) {
+  } else if (active.is_active(1)) {
     STANLI_ODE_FWD_TIMES(false, true);
   } else {
     STANLI_ODE_FWD_TIMES(false, false);
@@ -633,13 +628,13 @@ void ode_fwd(KernelCtx& ctx) {
 }
 
 void ode_bwd(KernelCtx& ctx) {
-  const uint8_t type_mask = ode_type_mask(ctx.variant);
-  const bool y_active = (type_mask & 0x1u) != 0 && ctx.in_adj[0].data;
-  const bool theta_active = (type_mask & 0x2u) != 0 && ctx.in_adj[1].data;
+  const SolverActivity active = solver_activity(ctx);
+  const bool y_active = active.is_active(0) && ctx.in_adj[0].data;
+  const bool theta_active = active.is_active(1) && ctx.in_adj[1].data;
   const bool t0_active =
-      ctx.n_in >= 4 && (type_mask & 0x4u) != 0 && ctx.in_adj[2].data;
+      ctx.n_in >= 4 && active.is_active(2) && ctx.in_adj[2].data;
   const bool ts_active =
-      ctx.n_in >= 4 && (type_mask & 0x8u) != 0 && ctx.in_adj[3].data;
+      ctx.n_in >= 4 && active.is_active(3) && ctx.in_adj[3].data;
   if (!y_active && !theta_active && !t0_active && !ts_active) return;
   const int64_t S = ctx.in[0].len, P = ctx.in[1].len;
   const int64_t N = ctx.n_in >= 4 ? ctx.in[3].len : 0;
@@ -660,8 +655,7 @@ void ode_bwd(KernelCtx& ctx) {
 }
 
 int64_t ode_scratch(const Op& op, const Slot* slots) {
-  const uint8_t mask = ode_type_mask(op.variant);
-  if (mask == 0) return 0;
+  if (!solver_activity(op).any()) return 0;
   int64_t width = slots[op.in[0]].len + slots[op.in[1]].len;
   if (op.n_in >= 4) width += 1 + slots[op.in[3]].len;
   return slots[op.out].len * width;

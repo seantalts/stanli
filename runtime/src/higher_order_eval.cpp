@@ -292,14 +292,14 @@ bool evaluate_retained_higher_order(
                                     (int)in[0].size(), spec->args);
       const int64_t states = (int64_t)in[0].size();
       const int64_t times = (int64_t)in[2].size();
-      *out = solution_invoke(OP_ODE_ADJOINT, 0x10u, std::move(in), times,
-                             states, spec);
+      *out = solution_invoke(OP_ODE_ADJOINT, SolverActivity{}.byte(),
+                             std::move(in), times, states, spec);
       return true;
     }
     std::vector<std::vector<double>> in;
     int64_t states = 0, times = 0;
     auto spec = ode_spec(funs, e, eval, in, &states, &times);
-    *out = solution_invoke(OP_ODE, meta->legacy ? 0x4u : 0x10u, std::move(in),
+    *out = solution_invoke(OP_ODE, SolverActivity{}.byte(), std::move(in),
                            times, states, spec);
     return true;
   }
@@ -357,7 +357,8 @@ bool evaluate_retained_higher_order(
                                   (int)in[0].size(), spec->args);
     const int64_t states = (int64_t)in[0].size();
     const int64_t times = (int64_t)spec->ts.size();
-    *out = solution_invoke(OP_DAE, 0x8u, std::move(in), times, states, spec);
+    *out = solution_invoke(OP_DAE, SolverActivity{}.byte(), std::move(in),
+                           times, states, spec);
     return true;
   }
   if (family->family == mir::HigherOrderFamily::Algebra) {
