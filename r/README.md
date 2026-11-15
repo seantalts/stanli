@@ -341,7 +341,8 @@ model, so `log_prob()` and the other model methods stop working;
 stanli_install(); stanli_available(); stanli_runtime_path()
 
 m <- stanli_model(file = NULL, code = NULL, data = NULL, mir = NULL, seed = 1,
-                  threads_per_chain = 1, include_paths = NULL, fast_math = FALSE)
+                  threads_per_chain = 1, include_paths = NULL, fast_math = FALSE,
+                  allow_interpreter = TRUE)
 stanli_check_syntax(code)
 log_prob_grad(m, q)                 # log density and gradient
 log_prob_hessian(m, q)              # and the Hessian at q
