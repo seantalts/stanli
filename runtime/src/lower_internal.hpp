@@ -1480,6 +1480,16 @@ struct Lowering {
                        const Val& v);
 
   void assign_plain(const mir::Stmt& s);
+  // Bind lhs to an already lowered right-hand side, checked against lhs's
+  // declared view as an assignment is. Returns the binding.
+  Val assign_value(const std::string& lhs, Val rhs, const std::string& raw);
+  // a + b for two real scalars, the graph Plus__ builds for them.
+  Val add_real_scalars(const Val& a, const Val& b) {
+    SlotInfo si = a.si;
+    si.param_free = a.si.param_free && b.si.param_free;
+    return with_layout(emit_value(OP_ADD, {a, b}, 1, si),
+                       elementwise_layout({a, b}));
+  }
 
   void sync_indexed_data_local(const std::string& name, const Val& v) {
     td_erase(name);

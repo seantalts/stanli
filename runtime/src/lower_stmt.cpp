@@ -1191,17 +1191,21 @@ void Lowering::emit_error(MessageError error, const std::string& message) {
   g.ops.push_back(op);
 }
 void Lowering::assign_plain(const mir::Stmt& s) {
-  Val rhs = lower_expr(s.rhs);
-  auto old = scope.find(s.lhs);
+  const Val rhs = assign_value(s.lhs, lower_expr(s.rhs), s.raw);
+  sync_data_local(s.lhs, s.rhs, rhs);
+}
+Lowering::Val Lowering::assign_value(const std::string& lhs, Val rhs,
+                                     const std::string& raw) {
+  auto old = scope.find(lhs);
   if (old != scope.end()) {
     rhs = checked_binding(rhs, g.slots[old->second.slot].len, old->second.si,
-                          s.lhs, s.raw);
+                          lhs, raw);
     const bool param_free = rhs.si.param_free;
     rhs.autodiff = old->second.autodiff;
     rhs.si = old->second.si;
     rhs.si.param_free = param_free;
   } else {
-    auto dl = decls.find(s.lhs);
+    auto dl = decls.find(lhs);
     if (dl != decls.end()) {
       if (dl->second.deferred_shape) {
         dl->second.len = g.slots[rhs.slot].len;
@@ -1221,7 +1225,7 @@ void Lowering::assign_plain(const mir::Stmt& s) {
         dl->second.si = rhs.si;
       } else {
         SlotInfo expected = dl->second.si;
-        rhs = checked_binding(rhs, dl->second.len, expected, s.lhs, s.raw);
+        rhs = checked_binding(rhs, dl->second.len, expected, lhs, raw);
         const bool pf = rhs.si.param_free;
         rhs.si = expected;
         rhs.si.param_free = pf;
@@ -1230,8 +1234,8 @@ void Lowering::assign_plain(const mir::Stmt& s) {
     }
   }
   rhs.layout = owning_layout(rhs.si);
-  scope[s.lhs] = rhs;
-  sync_data_local(s.lhs, s.rhs, rhs);
+  scope[lhs] = rhs;
+  return rhs;
 }
 // The statements that hold no child statements, so none of them can leave a
 // loop or a function.

@@ -256,6 +256,14 @@ struct ProgramCompiler {
   // region may not modify target. The caller seeds it to zero and publishes
   // only this delta, never the preceding target supplied by bind_target.
   int target_reg = -1;
+  // A region-map body whose only output is a local real that it adds to,
+  // `name = name + term`: each term accumulates into reg, as `target +=`
+  // accumulates into target_reg. The caller seeds reg to zero.
+  struct Accumulator {
+    std::string name;
+    int reg = -1;
+  };
+  std::optional<Accumulator> accumulator;
   // Cached register returned by bind_target. Keeping it separate from the
   // delta prevents a region target contribution from double-counting the
   // target that existed before the region.
@@ -4334,6 +4342,15 @@ struct ProgramCompiler {
         return Path::Open;
       }
       case mir::Stmt::Assignment: {
+        if (accumulator && s.lhs == accumulator->name) {
+          if (!s.lhs_idx.empty() || s.rhs.name != "Plus__" ||
+              s.rhs.args.size() != 2 || s.rhs.args[0].name != s.lhs)
+            bail("accumulator " + s.lhs + " is not only added to");
+          const Range v = expr(s.rhs.args[1]);
+          for (int k = 0; k < v.len; ++k)
+            emit(Program::ADD, accumulator->reg, accumulator->reg, v.reg + k);
+          return Path::Open;
+        }
         auto deferred = deferred_shapes.find(s.lhs);
         if (deferred != deferred_shapes.end()) {
           if (!s.lhs_idx.empty())
