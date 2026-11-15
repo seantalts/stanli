@@ -1751,6 +1751,306 @@ void test_reduce_sum_threads() {
   stanli_model_free(parallel);
 }
 
+// A continued run is the same run: 1000 + 1000 transitions reproduce 2000 in
+// one go, draws, sampler columns and generated quantities, because the
+// record carries the position, the RNG after the last generated quantities,
+// the step size and the post-warmup transition count.
+struct ResumeRun {
+  int rc = -1;
+  std::string err;
+  int64_t rows = 0;
+  std::vector<double> draws, stats, values, step, inv;
+  std::vector<uint8_t> resume;
+  std::vector<int64_t> progress_iterations, progress_totals;
+};
+
+void record_progress(int32_t, int64_t iteration, int64_t total, int32_t,
+                     int64_t, int64_t, void* user) {
+  auto* run = static_cast<ResumeRun*>(user);
+  run->progress_iterations.push_back(iteration);
+  run->progress_totals.push_back(total);
+}
+
+ResumeRun resume_run(stanli_model* m, const stanli_sample_opts& opts,
+                     int metric, const std::vector<double>* inv_metric,
+                     const std::vector<uint8_t>* resume_in, int refresh = 0) {
+  ResumeRun r;
+  const int64_t n = stanli_n_unconstrained(m);
+  const int64_t width = stanli_wa_n_columns(m);
+  const size_t record = stanli_resume_size(m);
+  const int64_t metric_len = metric == STANLI_METRIC_DENSE ? n * n : n;
+  stanli_sample_opts o = opts;
+  std::vector<const uint8_t*> in_ptrs;
+  std::vector<size_t> in_lens;
+  if (resume_in != nullptr) {
+    for (int c = 0; c < o.chains; ++c) {
+      in_ptrs.push_back(resume_in->data() + (size_t)c * record);
+      in_lens.push_back(record);
+    }
+    o.resume_in = in_ptrs.data();
+    o.resume_in_len = in_lens.data();
+  }
+  r.resume.assign((size_t)o.chains * record, 0);
+  o.resume_out = r.resume.data();
+  r.rows = stanli_n_stored_draws(&o);
+  r.draws.assign((size_t)(o.chains * r.rows * n), -1.0);
+  r.stats.assign((size_t)(o.chains * r.rows * STANLI_N_SAMPLER_COLS), -1.0);
+  r.values.assign((size_t)(o.chains * r.rows * width), -1.0);
+  r.step.assign((size_t)o.chains, -1.0);
+  r.inv.assign((size_t)(o.chains * metric_len), -1.0);
+  stanli_metric_opts mo;
+  stanli_metric_opts_init(&mo);
+  mo.metric = metric;
+  if (inv_metric != nullptr) {
+    mo.inv_metric = inv_metric->data();
+    mo.adapt_engaged = 0;
+  }
+  mo.adapted_step_size = r.step.data();
+  mo.adapted_inv_metric = r.inv.data();
+  char err[4096]{};
+  r.rc = stanli_sample_multi_metric(
+      m, &o, &mo, refresh, r.draws.data(), r.stats.data(), r.values.data(),
+      refresh > 0 ? record_progress : nullptr, &r, nullptr, nullptr, nullptr,
+      nullptr, err, sizeof err);
+  r.err = err;
+  return r;
+}
+
+// Chain c's rows of `first` followed by its rows of `second`.
+std::vector<double> concat_chains(const std::vector<double>& first,
+                                  int64_t first_rows,
+                                  const std::vector<double>& second,
+                                  int64_t second_rows, int chains,
+                                  int64_t width) {
+  std::vector<double> out;
+  for (int c = 0; c < chains; ++c) {
+    out.insert(out.end(), first.begin() + c * first_rows * width,
+               first.begin() + (c + 1) * first_rows * width);
+    out.insert(out.end(), second.begin() + c * second_rows * width,
+               second.begin() + (c + 1) * second_rows * width);
+  }
+  return out;
+}
+
+bool same_bits(const std::vector<double>& a, const std::vector<double>& b) {
+  return a.size() == b.size() &&
+         std::memcmp(a.data(), b.data(), sizeof(double) * a.size()) == 0;
+}
+
+void expect_resume_matches_one_run(stanli_model* m, int metric, int threads,
+                                   int thin, bool save_warmup) {
+  const std::string label =
+      std::string(metric == STANLI_METRIC_DENSE ? "dense" : "diag") +
+      " threads " + std::to_string(threads) + " thin " + std::to_string(thin) +
+      (save_warmup ? " save_warmup" : "");
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.seed = 11;
+  opts.chains = 2;
+  opts.warmup = 200;
+  opts.thin = thin;
+  opts.save_warmup = save_warmup ? 1 : 0;
+  opts.num_threads = threads;
+  const int64_t n = stanli_n_unconstrained(m);
+  const int64_t width = stanli_wa_n_columns(m);
+
+  stanli_sample_opts whole = opts;
+  whole.samples = 41;
+  const ResumeRun one = resume_run(m, whole, metric, nullptr, nullptr);
+  stanli_sample_opts head = opts;
+  head.samples = 20;
+  const ResumeRun first = resume_run(m, head, metric, nullptr, nullptr);
+  stanli_sample_opts tail = opts;
+  tail.warmup = 0;
+  tail.save_warmup = 0;
+  tail.samples = 21;
+  const ResumeRun second =
+      resume_run(m, tail, metric, &first.inv, &first.resume, 10);
+  expect_true(
+      "resume " + label + ": runs succeed: " + one.err + first.err + second.err,
+      one.rc == 0 && first.rc == 0 && second.rc == 0);
+  if (one.rc != 0 || first.rc != 0 || second.rc != 0) return;
+  expect_true("resume " + label + ": stored rows add up",
+              first.rows + second.rows == one.rows);
+  expect_true("resume " + label + ": draws match one run bitwise",
+              same_bits(concat_chains(first.draws, first.rows, second.draws,
+                                      second.rows, opts.chains, n),
+                        one.draws));
+  expect_true(
+      "resume " + label + ": sampler columns match one run bitwise",
+      same_bits(concat_chains(first.stats, first.rows, second.stats,
+                              second.rows, opts.chains, STANLI_N_SAMPLER_COLS),
+                one.stats));
+  expect_true(
+      "resume " + label + ": generated quantities match one run bitwise",
+      same_bits(concat_chains(first.values, first.rows, second.values,
+                              second.rows, opts.chains, width),
+                one.values));
+  expect_true("resume " + label + ": the final record matches one run's",
+              second.resume == one.resume);
+  expect_true("resume " + label + ": the step size is carried",
+              same_bits(second.step, one.step));
+  // Progress continues the numbering: sampling resumes at transition 21 of
+  // 41, and the refresh schedule is the one-run schedule.
+  expect_true("resume " + label + ": progress continues the numbering",
+              !second.progress_iterations.empty() &&
+                  second.progress_iterations.front() == 21 &&
+                  second.progress_iterations.back() == 41 &&
+                  second.progress_totals.front() == 41);
+  bool on_schedule = true;
+  for (size_t i = 0; i < second.progress_iterations.size(); ++i)
+    on_schedule = on_schedule && (second.progress_iterations[i] == 21 ||
+                                  second.progress_iterations[i] == 41 ||
+                                  second.progress_iterations[i] % 10 == 0);
+  expect_true("resume " + label + ": refresh counts across the seam",
+              on_schedule);
+}
+
+void expect_resume() {
+  const std::string mir = slurp("tests/fixtures/resume_gq_rng.tmir.sexp");
+  const char* data = R"({"N":5,"y":[0.3,-1.2,2.1,0.8,1.5]})";
+  char err[8192]{};
+  stanli_model* m =
+      stanli_model_new_with_opts(mir.c_str(), data, nullptr, err, sizeof err);
+  expect_true(std::string("resume model builds: ") + err, m != nullptr);
+  if (m == nullptr) return;
+  const int64_t n = stanli_n_unconstrained(m);
+  expect_true("resume record has a size", stanli_resume_size(m) > 8 * n);
+
+  stanli_sample_opts defaults;
+  stanli_sample_opts_init(&defaults);
+  expect_true("resume fields default to null",
+              defaults.resume_in == nullptr &&
+                  defaults.resume_in_len == nullptr &&
+                  defaults.resume_out == nullptr);
+
+  const int threads = stanli_thread_safe() ? 2 : 1;
+  for (int metric : {STANLI_METRIC_DIAG, STANLI_METRIC_DENSE}) {
+    expect_resume_matches_one_run(m, metric, 1, 1, false);
+    expect_resume_matches_one_run(m, metric, threads, 1, false);
+    expect_resume_matches_one_run(m, metric, 1, 3, false);
+  }
+  expect_resume_matches_one_run(m, STANLI_METRIC_DIAG, threads, 3, true);
+
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.seed = 5;
+  opts.chains = 2;
+  opts.warmup = 100;
+  opts.samples = 10;
+  const ResumeRun base =
+      resume_run(m, opts, STANLI_METRIC_DIAG, nullptr, nullptr);
+  expect_true("resume base run succeeds: " + base.err, base.rc == 0);
+  if (base.rc != 0) {
+    stanli_model_free(m);
+    return;
+  }
+
+  stanli_sample_opts more = opts;
+  more.warmup = 0;
+  more.thin = 3;
+  more.samples = 10;
+  {
+    const size_t record = stanli_resume_size(m);
+    const uint8_t* ptrs[2] = {base.resume.data(), base.resume.data() + record};
+    const size_t lens[2] = {record, record};
+    stanli_sample_opts o = more;
+    o.resume_in = ptrs;
+    o.resume_in_len = lens;
+    // Transitions 10..19 keep 12, 15 and 18.
+    expect_true("stored rows count from the record's offset",
+                stanli_n_stored_draws(&o) == 3);
+  }
+
+  stanli_sample_opts warm = more;
+  warm.warmup = 10;
+  const ResumeRun warmed =
+      resume_run(m, warm, STANLI_METRIC_DIAG, &base.inv, &base.resume);
+  expect_true("resume with warmup is refused: " + warmed.err,
+              warmed.rc != 0 && warmed.err.find("warmup") != std::string::npos);
+
+  stanli_model* other = stanli_model_new_with_opts(
+      mir.c_str(), R"({"N":5,"y":[0.3,-1.2,2.1,0.8,9.5]})", nullptr, err,
+      sizeof err);
+  expect_true("resume other-data model builds", other != nullptr);
+  if (other != nullptr) {
+    const ResumeRun mismatched =
+        resume_run(other, more, STANLI_METRIC_DIAG, &base.inv, &base.resume);
+    expect_true(
+        "resume on different data is refused: " + mismatched.err,
+        mismatched.rc != 0 && mismatched.err.find("different model or data") !=
+                                  std::string::npos);
+    stanli_model_free(other);
+  }
+
+  stanli_model* wider = stanli_model_new_with_opts(
+      slurp("tests/fixtures/gq_scalar_rng_container_guard.tmir.sexp").c_str(),
+      "{}", nullptr, err, sizeof err);
+  stanli_model* narrower = stanli_model_new_with_opts(
+      slurp("tests/fixtures/gq_scalar_rng.tmir.sexp").c_str(), "{}", nullptr,
+      err, sizeof err);
+  expect_true("resume other models build",
+              wider != nullptr && narrower != nullptr);
+  if (wider != nullptr && narrower != nullptr) {
+    expect_true("the other model has as many parameters",
+                stanli_n_unconstrained(wider) == n);
+    const ResumeRun other_model =
+        resume_run(wider, more, STANLI_METRIC_DIAG, &base.inv, &base.resume);
+    expect_true("resume on a different model is refused: " + other_model.err,
+                other_model.rc != 0 &&
+                    other_model.err.find("different model or data") !=
+                        std::string::npos);
+    const std::vector<double> one_inv(2, 1.0);
+    const ResumeRun other_size =
+        resume_run(narrower, more, STANLI_METRIC_DIAG, &one_inv, &base.resume);
+    expect_true(
+        "resume on a model of another size is refused: " + other_size.err,
+        other_size.rc != 0 && other_size.err.find("unconstrained parameters") !=
+                                  std::string::npos);
+  }
+  if (wider != nullptr) stanli_model_free(wider);
+  if (narrower != nullptr) stanli_model_free(narrower);
+
+  std::vector<uint8_t> bad_version = base.resume;
+  bad_version[4] ^= 0x7f;
+  // A later format may put anything where this one keeps the offset.
+  for (size_t c = 0; c < 2; ++c)
+    std::memset(bad_version.data() + c * stanli_resume_size(m) + 24, 0xff, 8);
+  const ResumeRun versioned =
+      resume_run(m, more, STANLI_METRIC_DIAG, &base.inv, &bad_version);
+  expect_true(
+      "resume with an unknown version is refused: " + versioned.err,
+      versioned.rc != 0 && versioned.err.find("version") != std::string::npos);
+
+  {
+    const size_t record = stanli_resume_size(m);
+    const uint8_t* ptrs[2] = {base.resume.data(), base.resume.data() + record};
+    size_t lens[2] = {record - 1, record};
+    stanli_sample_opts o = more;
+    o.resume_in = ptrs;
+    o.resume_in_len = lens;
+    const int64_t rows = stanli_n_stored_draws(&o);
+    std::vector<double> d((size_t)(2 * (rows > 0 ? rows : 1) * n));
+    char e[1024]{};
+    const int rc = stanli_sample_multi_metric(
+        m, &o, nullptr, 0, d.data(), nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr, e, sizeof e);
+    expect_true(std::string("resume with a short record is refused: ") + e,
+                rc != 0 && std::strstr(e, "bytes") != nullptr);
+
+    std::vector<double> starts((size_t)(2 * n), 0.0);
+    lens[0] = record;
+    o.inits = starts.data();
+    e[0] = '\0';
+    const int rc_inits = stanli_sample_multi_metric(
+        m, &o, nullptr, 0, d.data(), nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr, e, sizeof e);
+    expect_true(std::string("resume with inits is refused: ") + e,
+                rc_inits != 0 && std::strstr(e, "inits") != nullptr);
+  }
+  stanli_model_free(m);
+}
+
 void expect_metric_options() {
   char err[8192]{};
   stanli_model* model = stanli_model_new_with_opts(
@@ -2229,6 +2529,7 @@ int main() {
   expect_interruptible_sampling();
   expect_in_worker_write_array();
   expect_metric_options();
+  expect_resume();
   expect_sampling_messages();
   expect_captured_messages();
   expect_sampling_warnings_api();

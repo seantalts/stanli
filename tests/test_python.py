@@ -817,6 +817,145 @@ def test_sample_opts_defaults_match_the_header():
     assert o.delta == 0.8 and o.max_depth == 10
     assert o.save_warmup == 0 and o.init_radius == 2.0
     assert o.num_threads == 1 and not o.inits
+    assert not o.resume_in and not o.resume_in_len and not o.resume_out
+
+
+RESUME_SOURCE = """
+data { int<lower=1> N; vector[N] y; }
+parameters { real mu; real<lower=0> sigma; }
+model {
+  mu ~ normal(0, 5);
+  sigma ~ lognormal(0, 1);
+  y ~ normal(mu, sigma);
+}
+generated quantities {
+  real y_rep = normal_rng(mu, sigma);
+  int k = poisson_rng(3);
+}
+"""
+RESUME_DATA = {"N": 5, "y": [0.3, -1.2, 2.1, 0.8, 1.5]}
+
+
+def _resume_model(data=RESUME_DATA):
+    return stanli.Model(stan_code=RESUME_SOURCE, data=data)
+
+
+def _same_bits(a, b):
+    a, b = np.ascontiguousarray(a), np.ascontiguousarray(b)
+    return a.shape == b.shape and a.tobytes() == b.tobytes()
+
+
+def test_continue_from_reproduces_one_long_run():
+    m = _resume_model()
+    threads = [1, 2] if stanli.thread_safe() else [1]
+    for metric in ("diag_e", "dense_e"):
+        for thin in (1, 3):
+            for parallel in threads:
+                for save_warmup in ((False, True) if thin == 3 else (False,)):
+                    what = (metric, thin, parallel, save_warmup)
+                    kw = dict(chains=2, seed=4, warmup=150, metric=metric,
+                              thin=thin, save_warmup=save_warmup, refresh=0,
+                              parallel_chains=parallel)
+                    one = m.sample(samples=41, **kw)
+                    first = m.sample(samples=20, **kw)
+                    first_draws = first.draws().copy()
+                    first_resume = list(first._resume)
+                    more = m.sample(continue_from=first, samples=21,
+                                    refresh=0, parallel_chains=parallel)
+                    assert _same_bits(more.draws(), one.draws()), what
+                    assert _same_bits(more.sampler_stats,
+                                      one.sampler_stats), what
+                    assert more._resume == one._resume, what
+                    assert np.array_equal(more.divergences,
+                                          one.divergences), what
+                    assert np.array_equal(more.max_treedepth_hits,
+                                          one.max_treedepth_hits), what
+                    assert _same_bits(more.step_size, first.step_size), what
+                    for a, b in zip(more.inv_metric, first.inv_metric):
+                        assert _same_bits(a, b), what
+                    assert more.seed == first.seed
+                    assert more.metric == metric
+                    assert np.array_equal(more.warmup_seconds,
+                                          first.warmup_seconds)
+                    assert np.all(more.sampling_seconds
+                                  >= first.sampling_seconds)
+                    # The input fit is not changed.
+                    assert _same_bits(first.draws(), first_draws), what
+                    assert first._resume == first_resume, what
+
+
+def test_continue_from_chains_and_counts():
+    m = _resume_model()
+    first = m.sample(chains=2, seed=2, warmup=100, samples=10, refresh=0)
+    second = m.sample(continue_from=first, samples=15, refresh=0)
+    third = m.sample(continue_from=second, samples=5, refresh=0)
+    assert third.n_chains == 2 and third.n_draws == 30
+    one = m.sample(chains=2, seed=2, warmup=100, samples=30, refresh=0)
+    assert _same_bits(third.draws(), one.draws())
+    assert np.array_equal(third.divergences, one.divergences)
+
+
+def test_continue_from_progress_continues_the_numbering():
+    m = _resume_model()
+    first = m.sample(chains=1, seed=3, warmup=50, samples=20, refresh=0)
+    shown = io.StringIO()
+    with contextlib.redirect_stdout(shown):
+        m.sample(continue_from=first, samples=20, refresh=10,
+                 parallel_chains=1)
+    lines = _progress_lines(shown.getvalue())
+    assert lines[0].startswith("Chain [1] Iteration: 21 / 40"), lines
+    assert lines[-1].startswith("Chain [1] Iteration: 40 / 40"), lines
+    assert all("(Sampling)" in line for line in lines)
+
+
+def test_continue_from_refuses_other_settings():
+    m = _resume_model()
+    first = m.sample(chains=2, seed=2, warmup=100, samples=10, refresh=0)
+    n = m.n_unconstrained
+    for name, value in [("seed", 2), ("thin", 2), ("max_depth", 5),
+                        ("delta", 0.9), ("warmup", 10), ("chains", 3),
+                        ("inits", np.zeros(n)), ("init_radius", 0.5),
+                        ("pathfinder_init", {}), ("metric", "dense_e"),
+                        ("inv_metric", np.ones(n)), ("step_size", 0.1),
+                        ("adapt_engaged", False), ("adapt_metric", False),
+                        ("save_warmup", True)]:
+        try:
+            m.sample(continue_from=first, samples=10, refresh=0,
+                     **{name: value})
+        except ValueError as exc:
+            assert name in str(exc), (name, exc)
+        else:
+            raise AssertionError(f"continue_from accepted {name}")
+
+
+def test_continue_from_needs_a_record_and_the_same_posterior():
+    m = _resume_model()
+    first = m.sample(chains=2, seed=2, warmup=100, samples=10, refresh=0)
+    old = copy.copy(first)
+    del old._resume
+    for fit in (old, "not a fit"):
+        try:
+            m.sample(continue_from=fit, samples=10, refresh=0)
+        except (ValueError, TypeError) as exc:
+            assert "resume record" in str(exc) or "Fit" in str(exc), exc
+        else:
+            raise AssertionError("continued without a resume record")
+    future = copy.copy(first)
+    future._resume = [r[:4] + bytes([r[4] ^ 0x7f]) + r[5:24] + b"\xff" * 8
+                      + r[32:] for r in first._resume]
+    try:
+        m.sample(continue_from=future, samples=10, refresh=0)
+    except RuntimeError as exc:
+        assert "format version" in str(exc), exc
+    else:
+        raise AssertionError("continued from an unknown record format")
+    other = _resume_model({"N": 5, "y": [0.3, -1.2, 2.1, 0.8, 9.5]})
+    try:
+        other.sample(continue_from=first, samples=10, refresh=0)
+    except RuntimeError as exc:
+        assert "different model or data" in str(exc), exc
+    else:
+        raise AssertionError("continued a fit of different data")
 
 
 def test_multichain_shapes_and_dict_protocol():
@@ -1492,7 +1631,7 @@ def test_reduce_sum_threads_per_chain():
     args = dict(chains=2, warmup=25, samples=10, refresh=0, seed=123,
                 max_depth=6)
     serial = m.sample(**args)
-    for invalid in (0, -1, 1.5, True, "2", None, 2**40):
+    for invalid in (0, -1, 1.5, True, "2", 2**40):
         try:
             m.sample(**args, threads_per_chain=invalid)
         except (ValueError, TypeError, OverflowError) as e:
@@ -1526,6 +1665,30 @@ def test_reduce_sum_threads_per_chain():
     small = stanli.Model(stan_code=REDUCE_SUM_SOURCE,
                          data={"N": 3, "y": [0, 1, 2]}, threads_per_chain=4)
     assert small.reduce_sum_count == 0 and small.reduce_sum_fallbacks
+
+
+def test_continue_from_keeps_the_fits_threads_per_chain():
+    data = {"N": 100000, "y": np.linspace(-1, 2, 100000).tolist()}
+    m = stanli.Model(stan_code=REDUCE_SUM_SOURCE, data=data)
+    args = dict(chains=2, warmup=25, refresh=0, seed=123, max_depth=6)
+    serial = m.sample(samples=10, **args)
+    assert serial.threads_per_chain == 1
+    if not stanli.thread_safe():
+        more = m.sample(continue_from=serial, samples=5, refresh=0)
+        assert more.threads_per_chain == 1
+        return
+    one = m.sample(samples=15, threads_per_chain=2, **args)
+    first = m.sample(samples=10, threads_per_chain=2, **args)
+    assert first.threads_per_chain == 2
+    m.sample(samples=5, **args)
+    assert m.threads_per_chain == 1
+    more = m.sample(continue_from=first, samples=5, refresh=0)
+    assert m.threads_per_chain == 2 and more.threads_per_chain == 2
+    assert _same_bits(more.draws(), one.draws())
+    assert _same_bits(more.sampler_stats, one.sampler_stats)
+    explicit = m.sample(continue_from=first, samples=5, refresh=0,
+                        threads_per_chain=1)
+    assert m.threads_per_chain == 1 and explicit.threads_per_chain == 1
 
 
 def test_reduce_sum_threads_preserve_transformed_data_seed():

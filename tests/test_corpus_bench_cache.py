@@ -558,7 +558,8 @@ class MainWiringTests(unittest.TestCase):
         phases = lambda a, b: dict(warmup=a, sampling=b)
         models = {}
         for name, case in self.cases.items():
-            hashes = dict(stan_sha256=bp.sha256(case.source), data_sha256=bp.sha256(case.data))
+            hashes = dict(stan_sha256=bp.sha256(case.source), data_sha256=bp.sha256(case.data),
+                          stanli_build_id="build", stanli_abi_version=2)
             if name == "a":
                 models[name] = dict(hashes, source="reference_run", n_params=1,
                                     points=[[0.1 * k] for k in range(10)], iterations=list(range(10)),

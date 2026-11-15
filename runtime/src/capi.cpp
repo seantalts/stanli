@@ -80,6 +80,8 @@ struct stanli_model {
   // stanli_wa_seed still gets the same rows every run.
   stanli::WaRng wa_rng{1};
   std::string warnings;
+  // Identifies the model and data for resume records; see model_new.
+  uint64_t resume_hash = 0;
 };
 
 namespace {
@@ -184,6 +186,148 @@ stanli::PathfinderRunConfig pathfinder_config(const stanli_pathfinder_opts& o) {
   return cfg;
 }
 
+// FNV-1a, 64-bit.
+struct Fnv1a {
+  uint64_t h = 0xcbf29ce484222325ull;
+  void add(const void* data, size_t len) {
+    const auto* p = static_cast<const unsigned char*>(data);
+    for (size_t i = 0; i < len; ++i) {
+      h ^= p[i];
+      h *= 0x100000001b3ull;
+    }
+  }
+  void add_string(const char* text) {
+    const std::string s = text != nullptr ? text : "";
+    const uint64_t len = s.size();
+    add(&len, sizeof len);
+    add(s.data(), s.size());
+  }
+};
+
+// A resume record, little-endian:
+//   0  "stlr"            4  u32 version
+//   8  u64 n_unconstrained
+//  16  u64 model and data hash
+//  24  u64 post-warmup transitions so far
+//  32  f64 step size
+//  40  u64 RNG state words, then f64 position values
+constexpr uint32_t kResumeVersion = 1;
+constexpr size_t kResumeHeader = 40;
+
+size_t resume_size(int64_t n) {
+  return kResumeHeader + 8 * stanli::rng_state_words() + 8 * (size_t)n;
+}
+
+void put_u64(uint8_t* at, uint64_t v) {
+  for (int i = 0; i < 8; ++i) at[i] = (uint8_t)(v >> (8 * i));
+}
+
+uint64_t get_u64(const uint8_t* at) {
+  uint64_t v = 0;
+  for (int i = 0; i < 8; ++i) v |= (uint64_t)at[i] << (8 * i);
+  return v;
+}
+
+void put_f64(uint8_t* at, double v) {
+  uint64_t bits;
+  std::memcpy(&bits, &v, sizeof bits);
+  put_u64(at, bits);
+}
+
+double get_f64(const uint8_t* at) {
+  const uint64_t bits = get_u64(at);
+  double v;
+  std::memcpy(&v, &bits, sizeof v);
+  return v;
+}
+
+void write_resume(uint8_t* out, const stanli_model& m, int64_t transitions,
+                  const stanli::ChainState& state) {
+  const uint64_t magic_and_version = (uint64_t)'s' | (uint64_t)'t' << 8 |
+                                     (uint64_t)'l' << 16 | (uint64_t)'r' << 24 |
+                                     (uint64_t)kResumeVersion << 32;
+  put_u64(out, magic_and_version);
+  put_u64(out + 8, (uint64_t)state.q.size());
+  put_u64(out + 16, m.resume_hash);
+  put_u64(out + 24, (uint64_t)transitions);
+  put_f64(out + 32, state.step_size);
+  uint8_t* at = out + kResumeHeader;
+  for (uint64_t w : state.rng) {
+    put_u64(at, w);
+    at += 8;
+  }
+  for (double x : state.q) {
+    put_f64(at, x);
+    at += 8;
+  }
+}
+
+bool resume_header_ok(const uint8_t* record, size_t len) {
+  return record != nullptr && len >= kResumeHeader &&
+         std::memcmp(record, "stlr", 4) == 0 &&
+         (uint32_t)(get_u64(record) >> 32) == kResumeVersion;
+}
+
+// The transitions-so-far field, or 0 for a record this runtime cannot read
+// (sample_multi_metric then names what is wrong with it).
+int64_t resume_offset(const uint8_t* record, size_t len) {
+  if (!resume_header_ok(record, len)) return 0;
+  const uint64_t offset = get_u64(record + 24);
+  return offset <= (uint64_t)std::numeric_limits<int>::max() ? (int64_t)offset
+                                                             : 0;
+}
+
+// Throws std::invalid_argument naming what is wrong with chain c's record.
+stanli::ChainState read_resume(const stanli_model& m, int c,
+                               const uint8_t* record, size_t len,
+                               int64_t* transitions) {
+  const std::string chain = "resume record for chain " + std::to_string(c + 1);
+  const int64_t n = m.ex->n_params();
+  if (record == nullptr) throw std::invalid_argument(chain + " is null");
+  if (len < 8 || std::memcmp(record, "stlr", 4) != 0)
+    throw std::invalid_argument(chain + " is not a stanli resume record");
+  const uint32_t version = (uint32_t)(get_u64(record) >> 32);
+  if (version != kResumeVersion)
+    throw std::invalid_argument(
+        chain + " has format version " + std::to_string(version) +
+        "; this runtime reads version " + std::to_string(kResumeVersion));
+  if (len < kResumeHeader) throw std::invalid_argument(chain + " is truncated");
+  if (get_u64(record + 8) != (uint64_t)n)
+    throw std::invalid_argument(
+        chain + " has " + std::to_string(get_u64(record + 8)) +
+        " unconstrained parameters; this model has " + std::to_string(n));
+  if (len != resume_size(n))
+    throw std::invalid_argument(chain + " is " + std::to_string(len) +
+                                " bytes; this model's records are " +
+                                std::to_string(resume_size(n)) + " bytes");
+  if (get_u64(record + 16) != m.resume_hash)
+    throw std::invalid_argument(
+        chain + " comes from a different model or data than this model");
+  if (get_u64(record + 24) > (uint64_t)std::numeric_limits<int>::max())
+    throw std::invalid_argument(chain + " has an invalid transition count");
+  *transitions = (int64_t)get_u64(record + 24);
+  stanli::ChainState state;
+  state.step_size = get_f64(record + 32);
+  const uint8_t* at = record + kResumeHeader;
+  state.rng.resize(stanli::rng_state_words());
+  for (auto& w : state.rng) {
+    w = get_u64(at);
+    at += 8;
+  }
+  state.q.resize((size_t)n);
+  for (auto& x : state.q) {
+    x = get_f64(at);
+    at += 8;
+  }
+  stanli::WaRng probe(1);
+  try {
+    stanli::restore_rng_state(probe, state.rng);
+  } catch (const std::invalid_argument&) {
+    throw std::invalid_argument(chain + " holds an invalid RNG state");
+  }
+  return state;
+}
+
 void copy_out(double* to, const std::vector<double>& from) {
   if (to != nullptr && !from.empty())
     std::memcpy(to, from.data(), sizeof(double) * from.size());
@@ -210,6 +354,16 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
     options.fast_math = fast_math;
     m->cm = stanli::compile_model(tmir_sexp, data, seed, options);
     data = stanli::DataMap();
+    // Resume records name the posterior they continue: the program text, the
+    // data text, fast_math, and the construction seed only when transformed
+    // data drew from it (otherwise the seed changes nothing).
+    Fnv1a hash;
+    hash.add_string(tmir_sexp);
+    hash.add_string(data_json);
+    const unsigned char fast = fast_math ? 1 : 0;
+    hash.add(&fast, 1);
+    if (m->cm.transformed_data_draws) hash.add(&seed, sizeof seed);
+    m->resume_hash = hash.h;
     m->reduce_sum_count =
         (int)std::count_if(m->cm.graph.ops.begin(), m->cm.graph.ops.end(),
                            [](const stanli::Op& op) {
@@ -699,6 +853,9 @@ void stanli_sample_opts_init(stanli_sample_opts* o) {
   o->init_radius = 2.0;
   o->inits = nullptr;
   o->num_threads = 1;
+  o->resume_in = nullptr;
+  o->resume_in_len = nullptr;
+  o->resume_out = nullptr;
 }
 
 int stanli_sample_opts_check(const stanli_sample_opts* o, char* err,
@@ -733,12 +890,23 @@ int stanli_sample_opts_check(const stanli_sample_opts* o, char* err,
 int64_t stanli_n_stored_draws(const stanli_sample_opts* o) {
   if (o == nullptr) return 0;
   const int thin = o->thin > 0 ? o->thin : 1;
+  const int64_t offset =
+      o->resume_in != nullptr && o->resume_in_len != nullptr
+          ? resume_offset(o->resume_in[0], o->resume_in_len[0])
+          : 0;
   // Ceiling division: transition 0 is always stored, so a run of 5
-  // transitions thinned by 2 keeps 3 rows (0, 2, 4), not 2.
-  const int64_t kept_samples = (o->samples + thin - 1) / thin;
+  // transitions thinned by 2 keeps 3 rows (0, 2, 4), not 2. A continued run
+  // keeps the multiples of thin in [offset, offset + samples).
+  const auto kept_before = [thin](int64_t t) { return (t + thin - 1) / thin; };
+  const int64_t kept_samples =
+      kept_before(offset + o->samples) - kept_before(offset);
   const int64_t kept_warmup =
       o->save_warmup ? (o->warmup + thin - 1) / thin : 0;
   return kept_samples + kept_warmup;
+}
+
+size_t stanli_resume_size(const stanli_model* m) {
+  return m != nullptr ? resume_size(m->ex->n_params()) : 0;
 }
 
 int stanli_thread_safe(void) { return stanli::thread_safe_build() ? 1 : 0; }
@@ -796,6 +964,32 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
     if (reports != nullptr)
       for (int c = 0; c < n_chains; ++c) reports[c] = stanli_sample_report{};
 
+    std::vector<stanli::ChainState> resumes;
+    int64_t sample_offset = 0;
+    if (opts->resume_in != nullptr) {
+      if (opts->resume_in_len == nullptr)
+        throw std::invalid_argument("resume_in needs resume_in_len");
+      if (opts->warmup != 0)
+        throw std::invalid_argument(
+            "warmup must be 0 when continuing from resume records");
+      if (opts->inits != nullptr)
+        throw std::invalid_argument(
+            "inits cannot be combined with resume records, which carry the "
+            "starting point");
+      for (int c = 0; c < n_chains; ++c) {
+        int64_t transitions = 0;
+        resumes.push_back(read_resume(*m, c, opts->resume_in[c],
+                                      opts->resume_in_len[c], &transitions));
+        if (c == 0)
+          sample_offset = transitions;
+        else if (transitions != sample_offset)
+          throw std::invalid_argument(
+              "resume records disagree on the transitions done so far (" +
+              std::to_string(sample_offset) + " and " +
+              std::to_string(transitions) + ")");
+      }
+    }
+
     stanli::NutsConfig cfg;
     cfg.seed = opts->seed;
     cfg.chain_id = opts->chain_id;
@@ -807,6 +1001,7 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
     cfg.save_warmup = opts->save_warmup != 0;
     cfg.init_radius = opts->init_radius;
     cfg.log_messages = refresh > 0;
+    cfg.sample_offset = sample_offset;
     struct FlushStdout {
       ~FlushStdout() {
 #ifndef STANLI_NO_STDIO
@@ -834,7 +1029,7 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
         return 1;
     }
     cfg.step_size = mo.step_size;
-    cfg.adapt = mo.adapt_engaged != 0;
+    cfg.adapt = mo.adapt_engaged != 0 && resumes.empty();
     cfg.adapt_metric = mo.adapt_metric != 0;
     const int64_t metric_len = cfg.metric == stanli::Metric::Unit    ? 0
                                : cfg.metric == stanli::Metric::Dense ? n * n
@@ -843,6 +1038,7 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
       stanli::NutsConfig probe = cfg;
       probe.inv_metric =
           mo.inv_metric != nullptr ? mo.inv_metric + c * metric_len : nullptr;
+      if (!resumes.empty()) probe.step_size = resumes[(size_t)c].step_size;
       stanli::validate_metric_config(probe, n);
     }
 
@@ -865,10 +1061,11 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
     if (progress != nullptr && refresh > 0) {
       progress_observer = [&](int chain, int64_t i, bool warmup, int64_t ndiv,
                               int64_t ntd) {
-        const int64_t completed = warmup ? i + 1 : (int64_t)cfg.warmup + i + 1;
+        const int64_t completed =
+            warmup ? i + 1 : (int64_t)cfg.warmup + sample_offset + i + 1;
         progress(cfg.chain_id + chain, completed,
-                 (int64_t)cfg.warmup + cfg.samples, warmup ? 1 : 0, ndiv, ntd,
-                 progress_user);
+                 (int64_t)cfg.warmup + sample_offset + cfg.samples,
+                 warmup ? 1 : 0, ndiv, ntd, progress_user);
       };
     }
 
@@ -910,7 +1107,8 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
 
     std::vector<stanli::ChainResult> res = stanli::run_nuts_chains(
         execs, cfg, opts->num_threads, progress_observer, refresh, poll_fn,
-        writer, opts->inits, mo.inv_metric);
+        writer, opts->inits, mo.inv_metric,
+        resumes.empty() ? nullptr : resumes.data());
 
     int failed = 0;
     std::string first_error;
@@ -924,6 +1122,10 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
       }
       if (interrupted != nullptr && r.report.interrupted) *interrupted = 1;
       if (r.error.empty()) {
+        if (opts->resume_out != nullptr)
+          write_resume(opts->resume_out + (size_t)c * resume_size(n), *m,
+                       sample_offset + r.report.sample_transitions,
+                       r.report.end);
         if (mo.adapted_step_size != nullptr)
           mo.adapted_step_size[c] = r.report.step_size;
         if (mo.adapted_inv_metric != nullptr && metric_len > 0 &&
@@ -993,8 +1195,9 @@ int64_t stanli_sampling_warnings(const stanli_sample_opts* opts,
     const int64_t n_chains = opts->chains > 0 ? opts->chains : 1;
     const int64_t n_stored = stanli_n_stored_draws(opts);
     const int thin = opts->thin > 0 ? opts->thin : 1;
-    const int64_t kept_samples = (opts->samples + thin - 1) / thin;
-    const int64_t first = n_stored - kept_samples;
+    const int64_t first =
+        opts->save_warmup ? (opts->warmup + thin - 1) / thin : 0;
+    const int64_t kept_samples = n_stored - first;
     std::vector<stanli::ChainProblems> chains((size_t)n_chains);
     for (int64_t c = 0; c < n_chains; ++c) {
       auto& p = chains[(size_t)c];

@@ -10,7 +10,11 @@ are recorded with them. A model whose run fails, times out or yields a
 non-finite point is recorded with the reason and keeps the fixed points. Each
 model runs in its own process.
 
-    python3 tools/gen_benchmark_points.py --lib build-points/libstanli.dylib
+The selected models (all of them by default, or --models, --missing or
+--filter) are merged into the existing file; entries for models no longer in
+the corpus are dropped.
+
+    python3 tools/gen_benchmark_points.py --lib build-points/libstanli.dylib [--missing]
 """
 
 import argparse
@@ -48,7 +52,10 @@ class _SampleOpts(ctypes.Structure):
                 ("warmup", ctypes.c_int), ("samples", ctypes.c_int), ("thin", ctypes.c_int),
                 ("delta", ctypes.c_double), ("max_depth", ctypes.c_int), ("save_warmup", ctypes.c_int),
                 ("init_radius", ctypes.c_double), ("inits", ctypes.POINTER(ctypes.c_double)),
-                ("num_threads", ctypes.c_int)]
+                ("num_threads", ctypes.c_int),
+                ("resume_in", ctypes.POINTER(ctypes.c_void_p)),
+                ("resume_in_len", ctypes.POINTER(ctypes.c_size_t)),
+                ("resume_out", ctypes.c_void_p)]
 
 
 class _MetricOpts(ctypes.Structure):
@@ -224,36 +231,54 @@ def _entry(result):
                 source="reference_run")
 
 
+def select_models(existing, hashes, models=None, missing=False, filter=None):
+    """hashes maps every corpus model to its (stan, data) sha256 digests."""
+    if models is not None:
+        unknown = sorted(set(models) - set(hashes))
+        if unknown:
+            raise ValueError("unknown model: " + ", ".join(unknown))
+        return sorted(set(models))
+    if missing:
+        old = existing["models"] if existing else {}
+        return sorted(name for name, digests in hashes.items()
+                      if name not in old or (old[name]["stan_sha256"], old[name]["data_sha256"]) != digests)
+    return sorted(name for name in hashes if not filter or filter in name)
+
+
 def generate(cases, lib, probe, output, seed=1, warmup=1000, draws=1000, jobs=8, timeout=1800,
-             points=POINTS):
-    """cases maps model name to (stan path, data path)."""
+             points=POINTS, selected=None):
+    """cases maps every corpus model to (stan path, data path); selected names the ones to rerun."""
+    settings = dict(seed=seed, chains=1, warmup=warmup, draws=draws, delta=DELTA, max_depth=MAX_DEPTH,
+                    save_warmup=True, points=points, timeout_s=timeout)
+    selected = sorted(cases) if selected is None else sorted(selected)
+    existing = bp.load(output) if pathlib.Path(output).exists() else None
+    old = existing["models"] if existing else {}
+    models = {name: entry for name, entry in old.items() if name in cases and name not in selected}
+    if models and existing["settings"] != settings:
+        changed = sorted(k for k in set(settings) | set(existing["settings"])
+                         if settings.get(k) != existing["settings"].get(k))
+        raise ValueError(f"{output} was generated with different settings ({', '.join(changed)}); "
+                         "rerun every model or match its settings")
+    for name in sorted(set(old) - set(cases)):
+        print(f"{name}: dropped, no longer in the corpus", file=sys.stderr, flush=True)
     handle = _bind(lib)
-    models = {}
+    build = dict(stanli_build_id=handle.stanli_build_id().decode(),
+                 stanli_abi_version=handle.stanli_abi_version())
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
-        futures = [(name, pool.submit(_model_job, name, stan, data, lib, probe, seed, warmup, draws,
+        futures = [(name, pool.submit(_model_job, name, *cases[name], lib, probe, seed, warmup, draws,
                                       timeout, points))
-                   for name, (stan, data) in sorted(cases.items())]
+                   for name in selected]
         for name, future in futures:
             _, result = future.result()
-            models[name] = _entry(result)
+            models[name] = dict(_entry(result), **build)
             note = models[name]["source"] if "error" not in result else "fixed: " + result["error"]
             print(f"{name}: {note}", file=sys.stderr, flush=True)
-    doc = dict(schema=bp.SCHEMA,
-               settings=dict(seed=seed, chains=1, warmup=warmup, draws=draws, delta=DELTA,
-                             max_depth=MAX_DEPTH, save_warmup=True, points=points, timeout_s=timeout,
-                             stanli_build_id=handle.stanli_build_id().decode(),
-                             stanli_abi_version=handle.stanli_abi_version()),
-               models=models)
+    doc = dict(schema=bp.SCHEMA, settings=settings, models=dict(sorted(models.items())))
     bp.write(output, doc)
     return doc
 
 
-def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "--worker":
-        lib, mir, data, seed, warmup, draws, points = sys.argv[2:9]
-        print(json.dumps(reference_run(lib, mir, data, int(seed), int(warmup), int(draws), int(points))))
-        return 0
-    from corpus_inventory import corpus_cases, materialize_data
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--lib", type=pathlib.Path, required=True, help="libstanli shared library")
     parser.add_argument("--probe", type=pathlib.Path, default=PROBE)
@@ -264,15 +289,38 @@ def main():
     parser.add_argument("--draws", type=int, default=1000)
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--timeout", type=int, default=1800, help="seconds per model")
-    parser.add_argument("--filter", default="", help="only models whose name contains this text")
-    args = parser.parse_args()
+    select = parser.add_mutually_exclusive_group()
+    select.add_argument("--filter", default="", help="only models whose name contains this text")
+    select.add_argument("--models", action="append", type=lambda text: [n for n in text.split(",") if n],
+                        help="only these models (repeatable or comma-separated)")
+    select.add_argument("--missing", action="store_true",
+                        help="only models with no entry or whose source or data changed")
+    args = parser.parse_args(argv)
+    if args.models is not None:
+        args.models = [name for names in args.models for name in names]
+        if not args.models:
+            parser.error("--models needs at least one name")
+    return parser, args
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--worker":
+        lib, mir, data, seed, warmup, draws, points = sys.argv[2:9]
+        print(json.dumps(reference_run(lib, mir, data, int(seed), int(warmup), int(draws), int(points))))
+        return 0
+    from corpus_inventory import corpus_cases, materialize_data
+    parser, args = parse_args()
     with tempfile.TemporaryDirectory(prefix="stanli-points-data-") as scratch:
-        cases = {}
-        for name, case in corpus_cases(args.pdb, "all").items():
-            if args.filter in name:
-                cases[name] = (case.source, materialize_data(case, scratch))
-        doc = generate(cases, args.lib, args.probe, args.output, args.seed, args.warmup,
-                       args.draws, args.jobs, args.timeout)
+        cases = {name: (case.source, materialize_data(case, scratch))
+                 for name, case in corpus_cases(args.pdb, "all").items()}
+        try:
+            existing = bp.load(args.output) if args.output.exists() else None
+            hashes = {name: (bp.sha256(stan), bp.sha256(data)) for name, (stan, data) in cases.items()}
+            selected = select_models(existing, hashes, args.models, args.missing, args.filter)
+            doc = generate(cases, args.lib, args.probe, args.output, args.seed, args.warmup,
+                           args.draws, args.jobs, args.timeout, selected=selected)
+        except ValueError as error:
+            parser.error(str(error))
     counts = {}
     for entry in doc["models"].values():
         counts[entry["source"]] = counts.get(entry["source"], 0) + 1

@@ -1,15 +1,17 @@
 {
-  "runtime_base": "051bb4ba6834a7d6f313bdbabc2adc861bcf7b1d",
+  "runtime_base": "b4247512ca87f95da9fc9d088fba956f91c34e09",
   "files": {
-    "build-rel/CMakeCache.txt": "bc6cc2baa9f60a11364a7fd7368a2a59103a3eb887c3b961425a6edd3989454b",
-    "build-rel/bench_grad": "c55a22ec9a686d1c41a5a07d6b5762c6c8e43c2c68f98a543333afd58a41d79e",
-    "build-rel/stanli_check": "68f2d396c3789439bcd2eb870c89fb58725675f7b20197866197fc3b553f149b",
-    "build-rel/stanli_run": "71aa5bf95965fd12e26358b1f00682feeea757d1be5244a6aa78e38064e412d5",
-    "deps/stanc3/stanc": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
-    "deps/stanc3/stanc_embed.o": "d98c403a4af46b32b8362831e89e11d41ff07ab6d51f07844820bfaab544a8ed",
-    "deps/stanc3/stanc_embed.o.stamp": "5e16815a2a878fa44d03c1e87734f63520a07c14bfed58cfba050495faa0556f",
-    "deps/stanc3/stanli-vectorize-probe": "8e6d3f59ee9965ad281392ffee716557090330622849dd93eed47444333a3068",
-    "deps/stanc3/stanli-vectorize-probe.stamp": "5e16815a2a878fa44d03c1e87734f63520a07c14bfed58cfba050495faa0556f"
+    "build-rel/CMakeCache.txt": "84485114bc7fa055c5a18a2ac6f18c19987a96dce3e7e4ad98e48aba089fa464",
+    "build-rel/bench_grad": "605b7b1c8e95f57276eb1e0c83ce3d4c754a0e3391c51cb87a2a62bc3624be5e",
+    "build-rel/stanli_check": "79b62203d5182d2e61ea40032b6f86c61c702aafb3b8f1b3c67bd46367fa92eb",
+    "build-rel/stanli_run": "9a5b22a263055b7d98a08e21c369539836b03bdd893ca9b0eb3e8ecf8a99a01f",
+    "build-rel/libstanli.dylib": "2b3fe2298f3293ac7fa3c8476eb01e244e25e33bb2ffc20a70bdd0fcf6608e77",
+    "deps/stanc3/stanc": "c99b5ca929d9a5614c39959c401425a98a88cf9c60160e3a5092f83b1df7b52b",
+    "deps/stanc3/stanc-pinned": "d549f0ddbccff17f6b882a54109339f2a0f718b3d1fc09fce118ccdf452adc2d",
+    "deps/stanc3/embed/0a5006d31d4889b8/stanc_embed.o": "5d710f210e1bfa75114be3605cf3b8b8dde0f9600201e951170aa122f383a704",
+    "deps/stanc3/embed/0a5006d31d4889b8/stanc_embed.o.stamp": "412ffaeb5a8e1d090c357d03d95db780faf1a286776c285222ac86e51110398e",
+    "deps/stanc3/embed/0a5006d31d4889b8/stanli-vectorize-probe": "969f5fd3747185be6cb79afca25e6c8417fa41cbb5f7811353a23449c713ad8c",
+    "deps/stanc3/embed/0a5006d31d4889b8/stanli-vectorize-probe.stamp": "412ffaeb5a8e1d090c357d03d95db780faf1a286776c285222ac86e51110398e"
   },
   "configuration": [
     "CMAKE_BUILD_TYPE:STRING=Release",
@@ -21,17 +23,14 @@
     "CMAKE_OSX_ARCHITECTURES:STRING=",
     "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=11.0",
     "CMAKE_OSX_SYSROOT:STRING=",
-    "STANLI_AVX2_KERNELS:BOOL=OFF",
     "STANLI_BASH:FILEPATH=/bin/bash",
-    "STANLI_LITE_LP:BOOL=OFF",
+    "STANLI_EMBED_STANC:BOOL=ON",
     "STANLI_LIT_JOBS:STRING=24",
-    "STANLI_OCAML_STDLIB:PATH=/Users/xitrium/.opam/stanc3-55/lib/ocaml",
     "STANLI_PORTABLE_COMPILER:FILEPATH=",
     "STANLI_SANITIZE:STRING=",
     "STANLI_SHARED_TEST_RUNTIME:BOOL=ON",
-    "STANLI_STANC_EMBED_OBJ:FILEPATH=/Users/xitrium/claud/stanrt/deps/stanc3/stanc_embed.o",
-    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/claud/stanrt/.worktrees/gate-fails/deps/stanc3/stanc",
-    "STANLI_STAN_DENSITY_ORACLE:BOOL=ON",
+    "STANLI_STANC_EXECUTABLE:FILEPATH=/Users/xitrium/claud/stanrt/.worktrees/bench-publish/deps/stanc3/stanc",
+    "STANLI_STAN_DENSITY_ORACLE:BOOL=OFF",
     "STANLI_THREADS:BOOL=ON",
     "STANLI_WASM_SIDE:BOOL=OFF"
   ],
@@ -39,5 +38,5 @@
     "Apple M3 Ultra",
     "103079215104"
   ],
-  "numerical_replay": "references recorded against CmdStan 2.40.0 (d3d5df6a2256), math 5252d51d47c1, on Darwin arm64\n37 models retain per-model recording provenance overrides\nfast mode: lp and gradient (against its largest entry) within 1e-12; other outputs within 1e-09; no same-platform ULP limits\n\n353/353 models within 1e-12 of the CmdStan references at all 3 evaluation points (1043747 values compared); worst election88_full at 1.59e-13 (726 ulp)\n"
+  "numerical_replay": "references recorded against CmdStan 2.40.0 (d3d5df6a2256), math 5252d51d47c1, on Darwin arm64\n45 models retain per-model recording provenance overrides\nfast mode: lp and gradient (against its largest entry) within 1e-12; other outputs within 1e-09; no same-platform ULP limits\n\n350/350 models within 1e-12 of the CmdStan references at all 3 evaluation points (1050413 values compared); worst election88_full at 1.59e-13 (726 ulp)\n"
 }

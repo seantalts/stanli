@@ -142,6 +142,21 @@ fit = model.sample(seed=2, metric="dense_e", warmup=0, adapt_engaged=False,
 With fewer than 150 warmup iterations Stan does not adapt the metric, and a
 supplied one is kept.
 
+### More draws from the same chains
+
+`continue_from=fit` runs more transitions of each chain from where it stopped,
+with its own step size, metric and random stream and no new warmup, and
+returns a new fit with the draws appended. The result is the same, bit for
+bit, as asking for all the samples in the first call:
+
+```python
+fit = model.sample(seed=1, samples=1000)
+fit = model.sample(continue_from=fit, samples=1000)   # 2000 per chain
+```
+
+Only `samples`, `refresh`, `parallel_chains` and `threads_per_chain` can be
+given with `continue_from`; everything else comes from the fit.
+
 ### Within-chain parallelism
 
 For models using `reduce_sum` or `reduce_sum_static`,
@@ -226,9 +241,9 @@ lp, grad, hess = model.log_prob_hessian(q)   # and the (n, n) Hessian at q
 fit = model.sample(chains=4, seed=1, warmup=1000, samples=1000, delta=0.8,
                    max_depth=10, thin=1, save_warmup=False, inits=None,
                    init_radius=2.0, pathfinder_init=None,
-                   parallel_chains=None, refresh=100, threads_per_chain=1,
+                   parallel_chains=None, refresh=100, threads_per_chain=None,
                    metric="diag_e", inv_metric=None, step_size=None,
-                   adapt_engaged=True, adapt_metric=True)
+                   adapt_engaged=True, adapt_metric=True, continue_from=None)
 fit["theta"]                        # (chains*draws, 8), declared shape
 fit["theta[1]"]                     # one column, chains concatenated
 fit["lp__"]                         # sampler columns by name too
@@ -281,10 +296,10 @@ On Windows the compiler runs as a short-lived `stanli-compile.exe` subprocess.
   component, <!--gen:corpus_bitwise-->55<!--/gen--> of them bitwise, with a worst
   relative error of <!--gen:corpus_worst-->7.1e-13<!--/gen-->. See
   [TESTING.md](https://github.com/seantalts/stanli/blob/main/TESTING.md).
-- Speed: in the <!--gen:benchmark_date-->2026-10-21<!--/gen-->
-  run, <!--gen:corpus_n_grad-->342<!--/gen--> of <!--gen:benchmark_models-->343<!--/gen-->
-  models produced paired gradient timings. The median gradient is <!--gen:corpus_median-->2.15x<!--/gen-->
-  faster than CmdStan's, and <!--gen:corpus_at_par-->327<!--/gen--> are at
+- Speed: in the <!--gen:benchmark_date-->2026-11-13<!--/gen-->
+  run, <!--gen:corpus_n_grad-->346<!--/gen--> of <!--gen:benchmark_models-->347<!--/gen-->
+  models produced paired gradient timings. The median gradient is <!--gen:corpus_median-->2.17x<!--/gen-->
+  faster than CmdStan's, and <!--gen:corpus_at_par-->335<!--/gen--> are at
   least as fast. See
   [docs/benchmarks.md](https://github.com/seantalts/stanli/blob/main/docs/benchmarks.md).
 - Source and issues: [github.com/seantalts/stanli](https://github.com/seantalts/stanli).

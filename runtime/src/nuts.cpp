@@ -132,6 +132,52 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
 
 }  // namespace
 
+size_t rng_state_words() { return (size_t)stan::rng_t::N + 2; }
+
+namespace {
+
+RngState engine_words(const stan::rng_t& engine) {
+  std::ostringstream text;
+  text << engine;
+  std::istringstream in(text.str());
+  uint64_t n = 0;
+  RngState words(rng_state_words());
+  in >> n;
+  for (auto& w : words) in >> w;
+  if (in.fail() || n != (uint64_t)stan::rng_t::N)
+    throw std::logic_error("unexpected mixmax state text: " + text.str());
+  return words;
+}
+
+}  // namespace
+
+RngState save_rng_state(WaRng& rng) {
+  RngState words = engine_words(rng.gen());
+  // boost's mixmax reader refuses counter == N, the state whose next draw
+  // refills the buffer. A copy that has made that draw holds the refilled
+  // buffer at counter 2; the same buffer at counter 1 is the same stream.
+  if (words[0] == (uint64_t)stan::rng_t::N) {
+    stan::rng_t next = rng.gen();
+    next();
+    words = engine_words(next);
+    words[0] = 1;
+  }
+  return words;
+}
+
+void restore_rng_state(WaRng& rng, const RngState& state) {
+  if (state.size() != rng_state_words())
+    throw std::invalid_argument("the RNG state has the wrong length");
+  std::ostringstream text;
+  text << stan::rng_t::N;
+  for (uint64_t w : state) text << ' ' << w;
+  std::istringstream in(text.str());
+  stan::rng_t engine;
+  in >> engine;
+  if (in.fail()) throw std::invalid_argument("the RNG state is not valid");
+  rng.gen() = engine;
+}
+
 void validate_metric_config(const NutsConfig& cfg, int64_t n_params) {
   if (!(cfg.step_size > 0) || !std::isfinite(cfg.step_size))
     throw std::invalid_argument("step_size must be positive and finite");
@@ -227,8 +273,22 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
   // part of that hypercube -- accel_gp's GP hyperparameters overflow exp()
   // over much of it -- failed outright on seeds whose first draw landed
   // badly, with the failure surfacing later as a stepsize-search error.
-  initialize_point(ex, rng, cfg.init_radius, cfg.init, q.data(),
-                   FixedInitPolicy::Validate);
+  if (cfg.resume) {
+    if (cfg.warmup != 0 || cfg.adapt)
+      throw std::invalid_argument(
+          "a continued chain runs no warmup and no adaptation");
+    if ((int64_t)cfg.resume->q.size() != n)
+      throw std::invalid_argument(
+          "the continued position has " + std::to_string(cfg.resume->q.size()) +
+          " values, the model has " + std::to_string(n));
+    if (!(cfg.resume->step_size > 0) || !std::isfinite(cfg.resume->step_size))
+      throw std::invalid_argument(
+          "the continued step size must be positive and finite");
+    q = Eigen::Map<const Eigen::VectorXd>(cfg.resume->q.data(), n);
+  } else {
+    initialize_point(ex, rng, cfg.init_radius, cfg.init, q.data(),
+                     FixedInitPolicy::Validate);
+  }
   sampler.seed(q);
 
   if constexpr (M == Metric::Diag) {
@@ -244,7 +304,8 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
   // Match CmdStan's service defaults, not base_hmc's 0.1 step size.
   // Initial dual averaging is centered on the requested step size BEFORE
   // init_stepsize searches; recentering on the result changes adaptation.
-  const double initial_stepsize = cfg.step_size;
+  const double initial_stepsize =
+      cfg.resume ? cfg.resume->step_size : cfg.step_size;
   sampler.set_nominal_stepsize(initial_stepsize);
   sampler.set_stepsize_jitter(0.0);
   sampler.get_stepsize_adaptation().set_mu(std::log(10.0 * initial_stepsize));
@@ -257,6 +318,8 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
     sampler.init_stepsize(logger);
     logger.flush();
   }
+
+  if (cfg.resume) restore_rng_state(chain_rng, cfg.resume->rng);
 
   stan::mcmc::sample s(q, 0, 0);
 
@@ -273,6 +336,7 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
   std::vector<double> sp;
   int64_t n_divergent = 0;
   int64_t n_max_treedepth = 0;
+  int64_t sample_transitions = 0;
   // One transition, stored or not. Storing is what `keep` decides;
   // observing happens either way, because a progress consumer wants every
   // transition and a thinned run still passes through the ones it drops.
@@ -306,6 +370,7 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
       ++stored;
     }
     if (!warmup) {
+      ++sample_transitions;
       if (sp.size() > 3 && sp[3] != 0.0) ++n_divergent;
       if (sp.size() > 1 && (int)sp[1] >= cfg.max_depth) ++n_max_treedepth;
       if (report) {
@@ -358,12 +423,17 @@ std::vector<std::vector<double>> run_nuts_with(Executor& ex,
     if (stopping())
       interrupted = true;
     else
-      step(i, false, i % thin == 0);
+      step(i, false, (cfg.sample_offset + i) % thin == 0);
   }
   if (report) {
     report->sampling_seconds =
         std::chrono::duration<double>(Clock::now() - sampling_started).count();
     report->interrupted = interrupted;
+    report->sample_transitions = sample_transitions;
+    s.cont_params(qd);
+    report->end.q.assign(qd.data(), qd.data() + n);
+    report->end.rng = save_rng_state(chain_rng);
+    report->end.step_size = sampler.get_nominal_stepsize();
   }
   return draws;
 }
@@ -385,7 +455,8 @@ bool should_report_progress(const NutsConfig& cfg, int64_t i, bool warmup,
   if (refresh <= 0) return false;
   const int64_t completed = i + 1;
   const int64_t phase_total = warmup ? cfg.warmup : cfg.samples;
-  return completed == 1 || completed == phase_total || completed % refresh == 0;
+  const int64_t numbered = warmup ? completed : cfg.sample_offset + completed;
+  return completed == 1 || completed == phase_total || numbered % refresh == 0;
 }
 
 std::vector<std::unique_ptr<Executor>> clone_executors(const Executor& src,
@@ -400,7 +471,7 @@ std::vector<ChainResult> run_nuts_chains(
     const std::vector<Executor*>& execs, const NutsConfig& cfg, int n_threads,
     const ChainProgressObserver& progress, int progress_refresh,
     const std::function<bool()>& poll, const StoredDrawWriter& write,
-    const double* inits, const double* inv_metrics) {
+    const double* inits, const double* inv_metrics, const ChainState* resumes) {
   const size_t n_chains = execs.size();
   std::vector<ChainResult> out(n_chains);
   std::atomic<bool> local_stop{false};
@@ -420,6 +491,7 @@ std::vector<ChainResult> run_nuts_chains(
       cc.inv_metric =
           inv_metrics + (int64_t)c * (cfg.metric == Metric::Dense ? n * n : n);
     }
+    if (resumes) cc.resume = resumes + c;
     cc.stop = stop;
     cc.poll = chain_poll;
     if (write)

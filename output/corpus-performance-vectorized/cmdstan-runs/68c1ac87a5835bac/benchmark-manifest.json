@@ -1,0 +1,158 @@
+{
+  "identity": {
+    "config": {
+      "bench": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/build-rel/bench_grad",
+      "build_timeout": 900.0,
+      "cmdstan": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/deps/cmdstan",
+      "corpus": "all",
+      "filter": "s2_cu",
+      "gradient_timeout": 60.0,
+      "measure_ms": 40,
+      "pdb": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/deps/posteriordb",
+      "points": 10,
+      "rounds": 6,
+      "stanc": "/Users/xitrium/.codex/worktrees/e688d4b7-0100-4415-af6a-57ad52961ceb/stanrt/build/corpus-current/stanc-o1vec-src/_build/default/src/stanc/stanc.exe",
+      "stancflags": "--O1",
+      "vectorize_probe": "/Users/xitrium/claud/stanrt/.worktrees/bench-publish/deps/stanc3/embed/0a5006d31d4889b8/stanli-vectorize-probe",
+      "warmup_ms": 20
+    },
+    "executables": {
+      "bench": "605b7b1c8e95f57276eb1e0c83ce3d4c754a0e3391c51cb87a2a62bc3624be5e",
+      "stanc": "359c905c882a4263811b17636817ce349f0b8c743a07769e5348e389dc81173c",
+      "vectorize_probe": "969f5fd3747185be6cb79afca25e6c8417fa41cbb5f7811353a23449c713ad8c"
+    },
+    "inputs": {
+      "s2_cumulative_cauchit": {
+        "collection": "brms",
+        "data": "f1ae2d98493729237362f7dab19711dd54bef6f1c4b95198b72bcfcd114a8307",
+        "gradient_count": 20703,
+        "point_source": "reference_run",
+        "points_sha256": "0c5f8139be2d9083abb5eceffef2c35dfb53c04dbf415d32b5425f93a2654344",
+        "reference_sha256": "16ef878008f1478b85cbf39f4f11b349bba5ee70447d2ebcfd12fa889b8909bb",
+        "stan": "7f83644e28d36cc1de10fa386a8651b61cf027964053e0f0a22b52ecfd656717"
+      },
+      "s2_cumulative_cloglog": {
+        "collection": "brms",
+        "data": "f1ae2d98493729237362f7dab19711dd54bef6f1c4b95198b72bcfcd114a8307",
+        "gradient_count": 20273,
+        "point_source": "reference_run",
+        "points_sha256": "cd3dff24f691d240ff93d9732edcc6878ac21e8c40b4b1cadf6de0e9adcfc854",
+        "reference_sha256": "58958b4e457a950adb1aa4d8da1b9414eff6d0c4ea0e8e7ebf964a74fcc3827a",
+        "stan": "d54a7257da82f41beb1bb51390df1a9c753f2912be77f31de00afc0279692731"
+      },
+      "s2_cumulative_probit": {
+        "collection": "brms",
+        "data": "f1ae2d98493729237362f7dab19711dd54bef6f1c4b95198b72bcfcd114a8307",
+        "gradient_count": 13734,
+        "point_source": "reference_run",
+        "points_sha256": "517d05ebda21b7f017a3fdadd54b31688f69ab6788d66177065eea453cb54151",
+        "reference_sha256": "da236088cb3a8e6811c1cbd7e718914b7d68e0e7c88dc58120085e866bf83f9a",
+        "stan": "38ca335047c74c25b10c0b1dfe5189d05ed14ed214183de8cf2bf5572969c3cf"
+      },
+      "s2_custom_vint": {
+        "collection": "brms",
+        "data": "0bca90706b6df71270473a433b55655fea1e9fe7b7f724705f8c32b6fe70bb1f",
+        "gradient_count": 10535,
+        "point_source": "reference_run",
+        "points_sha256": "17ea4f041552bed0237471458b228d3179b163d98d79d5d6da0808e70d6e9a4f",
+        "reference_sha256": "8697fb095856cf90c9db6684f31595ef3cb25acb74e0a3b23abeec96d1be414b",
+        "stan": "3aeb4dc4273597fd93b7c5a79879dcddb8bcf24479449e35a82107004f7ed294"
+      },
+      "s2_custom_vreal": {
+        "collection": "brms",
+        "data": "47401d91fada3c146834c3778fd89631754c86d5c99a60682ef97fc5fc53b9b5",
+        "gradient_count": 10171,
+        "point_source": "reference_run",
+        "points_sha256": "48b18d0d242806eaf8488307d8aaf78325fd46390a7492c1fac27ac97d9d2c6a",
+        "reference_sha256": "cfa89d8c51129de3872e6e8aa7543292d3ca9bcfbff2ee50add46b549553fbc1",
+        "stan": "83b5419778c7a334a18cb8d2e8a74590a938c91d381eac5e193b04d733d8e56b"
+      }
+    },
+    "machine": {
+      "host": "SeansMacStudio",
+      "logical_cpus": 32,
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "processor": "arm"
+    },
+    "points_file_sha256": "154a367c8b0874f72b4cffada4f1cae2c3bd77c6bdcd39b62380449e4943bdc5",
+    "protocol": "stanli-corpus-v6",
+    "reference_settings": {
+      "chains": 1,
+      "delta": 0.8,
+      "draws": 1000,
+      "max_depth": 10,
+      "points": 10,
+      "save_warmup": true,
+      "seed": 1,
+      "timeout_s": 1800,
+      "warmup": 1000
+    },
+    "sources": {
+      "harnesses/corpus_bench.py": "86cbc8dae465037d9584bd2c5d4b29dbf67f9fe23f1e85e5dfcaf417e911239d",
+      "tools/bench_cmdstan_grad.cpp": "eb4ef7c0bb27aac34a189f605af5ed0ea0869928293ce5f0aa1793a3a782536f",
+      "tools/bench_grad.cpp": "1368601f50136174f6fde03b9242d159f3d37c67c31db6c66cacebcaa4aeb775",
+      "tools/benchmark_timer.hpp": "08c7b09589d126d78b91b8f81e53b8f772f58dbcdc906bad9ca70397d13181d4",
+      "tools/cmdstan_ref.py": "059099bf6f1786f8e5ed7c2c64ad0dfd25aafaa75b18056b6427690bb9b2968d",
+      "tools/corpus_inventory.py": "a8f81d82d60eb98ef71d9e68c3ca88bb14eccfb1f3d1f5d23163e46fb9972baa",
+      "tools/verify_refs.py": "6b680c42706f463d735c4d3a50aa683ce1c9d6d86b1c8884fc0fc5f2832dfa75"
+    },
+    "stanli_source": {
+      "head": "b4247512ca87f95da9fc9d088fba956f91c34e09",
+      "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "threads": {
+      "MKL_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "STAN_NUM_THREADS": "1",
+      "VECLIB_MAXIMUM_THREADS": "1"
+    },
+    "toolchains": {
+      "build_environment": {
+        "CC": null,
+        "CFLAGS": null,
+        "CPPFLAGS": null,
+        "CXX": null,
+        "CXXFLAGS": null,
+        "LDFLAGS": null,
+        "MAKEFLAGS": null
+      },
+      "clang_sha256": "b8763cf250e607a778bb4603cecb5b90338814d0a3dfcba0d57b1de242f610e9",
+      "cmdstan": {
+        "head": "d3d5df6a22565edbe13edbd4eb40762cc8c5a4d6",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "libraries": {
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_cvodes.a": "3c7398013f7c7c2d271be1107495b4af3fa6c91ce4b276987e7da589c1b3a9ab",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_idas.a": "c4fa89a1f841cba924769baf133fa60cd0fac4a94c1c3bfd247664600de62ca7",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_kinsol.a": "9c277256b65e09dc5b77e26ccf9c967cbd612c7f86f9334e334ed1678c19a2b7",
+        "stan/lib/stan_math/lib/sundials_6.1.1/lib/libsundials_nvecserial.a": "d1ea28ff4d38bb0e14febc427c257e67141451399ceb3a4f70ad348cfb2e60f3",
+        "stan/lib/stan_math/lib/tbb/libtbb.dylib": "3e1261fbe451cdfd7eddb0c93507065128c8ab02d4fcbbbfb20385a61f6f5289",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc.dylib": "9a6247602224ac8e233f06e381e38be4797a8120c9944828eeba971e75c5879f",
+        "stan/lib/stan_math/lib/tbb/libtbbmalloc_proxy.dylib": "0aba46a96c6c38bb32f8a7aa43dfd8d0b9aa1bc8537a1160d22b566dc8304e21"
+      },
+      "math": {
+        "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stan": {
+        "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stanli_fmt": {
+        "head": "40626af88bd7df9a5fb80be7b25ac85b122d6c21",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stanli_math": {
+        "head": "5252d51d47c1d5e78005fc043ad996fad6dd8da8",
+        "tracked_diff_sha256": "a46ab8328d3da9cfaa9b5787dc73261f9f96d46bf6a935d1af1e1aed6a8040eb"
+      },
+      "stanli_stan": {
+        "head": "a6806ef8477a7b5f65b27449ec33528c162bc024",
+        "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  },
+  "run_id": "68c1ac87a5835bac",
+  "started_utc": "2026-11-15T00:37:08Z"
+}

@@ -528,14 +528,15 @@ class ReferenceInputTests(unittest.TestCase):
         self.other = self.root / "o.stan"
         self.other.write_text("parameters { real y; }\nmodel { y ~ normal(0, 1); }\n")
         phases = lambda a, b: dict(warmup=a, sampling=b)
+        build = dict(stanli_build_id="build", stanli_abi_version=2)
         self.doc = dict(schema=bp.SCHEMA, settings=dict(points=3, warmup=2, draws=2),
                         models={
-                            "m": dict(source="reference_run", stan_sha256=bp.sha256(self.stan),
+                            "m": dict(build, source="reference_run", stan_sha256=bp.sha256(self.stan),
                                       data_sha256=bp.sha256(self.data), n_params=1,
                                       points=[[0.5], [1.5], [-0.5]], iterations=[0, 1, 3],
                                       gradients=dict(warmup=10, sampling=20, total=30),
                                       divergences=phases(0, 0), max_treedepth=phases(0, 0)),
-                            "o": dict(source="fixed", stan_sha256=bp.sha256(self.other),
+                            "o": dict(build, source="fixed", stan_sha256=bp.sha256(self.other),
                                       data_sha256=bp.sha256(self.data), reason="reference run timed out")})
 
     def select(self, doc=None, points=3, **inputs):
