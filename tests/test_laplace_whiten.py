@@ -199,7 +199,8 @@ def test_clipping_path_warns_and_counts():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         whitened, report = stanli.laplace_whiten(
-            m, latent=["y"], init=np.zeros(2), keep_precision=True)
+            m, latent=["y"], init=np.zeros(2), repair="clip",
+            keep_precision=True)
     assert report.n_clipped >= 1
     assert any("clipped" in str(w.message) for w in caught), \
         [str(w.message) for w in caught]
@@ -214,7 +215,8 @@ def test_abs_repair_keeps_the_scale_of_a_negative_direction():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         _, clipped = stanli.laplace_whiten(
-            m, latent=["y"], init=np.zeros(2), keep_precision=True)
+            m, latent=["y"], init=np.zeros(2), repair="clip",
+            keep_precision=True)
         _, absolute = stanli.laplace_whiten(
             m, latent=["y"], init=np.zeros(2), repair="abs",
             keep_precision=True)

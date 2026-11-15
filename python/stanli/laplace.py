@@ -264,7 +264,7 @@ def _fill_reducing_order(pattern):
 
 def laplace_whiten(model, latent, *, init=None, seed=1, max_outer=60,
                    inner_iter=2000, pattern_tolerance=1e-6,
-                   threshold=1e-6, repair="clip", clip=None,
+                   threshold=1e-6, repair="abs", clip=None,
                    keep_precision=False):
     """EXPERIMENTAL. Whiten `model` around its Laplace-approximate marginal
     mode and return ``(whitened_model, report)``.
@@ -286,12 +286,13 @@ def laplace_whiten(model, latent, *, init=None, seed=1, max_outer=60,
     3. At the result take Q = -H, the full Hessian from `log_prob_hessian`,
        and drop entries below `threshold` relative to ``sqrt(Q_ii Q_jj)``.
     4. If Q is not positive definite, repair its eigenvalues and warn.
-       `repair="clip"` raises every eigenvalue below `clip` (default 1e-3)
-       times the largest to that value. `repair="abs"` replaces each
-       eigenvalue by its absolute value, floored at `clip` (default 1e-8)
-       times the largest; it keeps the scale of a direction whose curvature
-       came out negative, where clipping makes that direction much wider
-       than the posterior.
+       `repair="abs"`, the default and what the benchmark measured,
+       replaces each eigenvalue by its absolute value, floored at `clip`
+       (default 1e-8) times the largest. It keeps the scale of a direction
+       whose curvature came out negative. `repair="clip"` raises every
+       eigenvalue below `clip` (default 1e-3) times the largest to that
+       value, which can make such a direction much wider than the
+       posterior.
     5. Order with a fill-reducing permutation, factor the permuted matrix
        densely, keep the nonzeros as a sparse lower factor L, and call
        ``model.whiten(q_hat, perm, L)``.
