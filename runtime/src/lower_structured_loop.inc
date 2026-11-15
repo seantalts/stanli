@@ -893,8 +893,9 @@ void region_prepare_cells(const mir::Stmt& s) {
       (void)region_cell(name);
   }
 }
-// stanc's inliner declares a callee's result zero-length; branch arms that
-// assign it share one cell, sized from the static shape they agree on.
+// A zero-size or unsized local takes its shape from its first whole
+// assignment; branch arms that assign it share one cell, sized from the
+// static shape they agree on.
 bool deferred_unsized(const std::string& name) const {
   if (int_env.count(name) || int_locals.count(name)) return false;
   const auto declaration = decls.find(name);

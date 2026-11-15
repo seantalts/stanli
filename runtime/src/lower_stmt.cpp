@@ -808,8 +808,8 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
   Range ignored;
   lower_island(&s, nullptr, &reg, &ignored, &prog);
   // Widths come from the region compiler's own registers: they are what
-  // out_regs packs, and they already reflect a zero-length sentinel
-  // declaration the region's assignment sized.
+  // out_regs packs, and they already reflect a zero-size declaration the
+  // region's assignment sized.
   std::vector<int> out_lens;
   for (const Range& v : reg.out_views) out_lens.push_back(v.len);
   if (reg.has_target) out_lens.push_back(1);
@@ -852,8 +852,8 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
       }
     }
     if (!shaped_outside) {
-      // The outside declaration was the inliner's zero-length sentinel;
-      // the region's registers carry the real shape.
+      // The outside declaration was zero-size, which Stan's assignment
+      // resizes; the region's registers carry the real shape.
       si = SlotInfo{};
       si.rows = reg.out_views[k].rows;
       si.cols = reg.out_views[k].cols;
@@ -1212,11 +1212,10 @@ void Lowering::assign_plain(const mir::Stmt& s) {
                   (is_matrix(dl->second.si) && is_matrix(rhs.si) &&
                    (dl->second.si.rows != rhs.si.rows ||
                     dl->second.si.cols != rhs.si.cols)))) {
-        // stanc3's --O1 inliner declares a function's return
-        // variable zero-length (`array[real, 0]`, `vector[0]`)
-        // because the returned size is the callee's business, and
-        // C++ assignment resizes. Slots do not, so the first
-        // whole-variable assignment defines the shape instead.
+        // stan::model::assign treats a zero-size destination as a
+        // wildcard that takes the right-hand side's size. Slots do not
+        // resize, so the first whole-variable assignment defines the
+        // shape instead.
         dl->second.len = g.slots[rhs.slot].len;
         dl->second.si = rhs.si;
       } else {

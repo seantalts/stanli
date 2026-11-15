@@ -4408,13 +4408,12 @@ struct ProgramCompiler {
         }
         if (it == reals.end() && s.lhs_idx.empty()) {
           // First touch of this name from here, and nothing to import as a
-          // live-in either: an --O1 inliner return-temp (or similar
-          // compiler-introduced local) whose only other write sat in a
-          // branch the surrounding graph lowering folded away as
-          // unreachable, so it never got a slot to hand this region. A
-          // full-variable write with no prior binding is exactly the
-          // zero-length "adopt the assigned shape" case below, minus the
-          // placeholder declaration -- give it one now.
+          // live-in either: a local whose only other write sat in a branch
+          // the surrounding graph lowering folded away as unreachable, so
+          // it never got a slot to hand this region. A full-variable write
+          // with no prior binding is the zero-size "adopt the assigned
+          // shape" case below, minus the placeholder declaration -- give it
+          // one now.
           reals[s.lhs] = Range{};
           it = reals.find(s.lhs);
         }
@@ -4431,13 +4430,10 @@ struct ProgramCompiler {
                                         try_cints(s.rhs, &folded_ints) &&
                                         folded_ints.size() == (size_t)v.len;
           if (dst.len == 0 && v.len != 0) {
-            // The zero-length declaration is stanc3's --O1 inliner
-            // leaving a return variable unsized (`vector[0]`) for the
-            // assignment to size; adopt the assigned shape. The inliner
-            // assigns it exactly once, right where the call was, so no
-            // two branch arms can disagree about the size.
+            // stan::model::assign gives a zero-size destination the
+            // right-hand side's size, so adopt the assigned shape.
             //
-            // That one assignment can still sit inside a data-dependent
+            // The assignment can sit inside a data-dependent
             // branch -- `cond ? udf(x) : y` inlines to an assignment under
             // `if (cond)` -- and then the arm that does not run leaves
             // these registers unwritten. They are the variable's live-out,

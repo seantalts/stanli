@@ -1569,8 +1569,8 @@ struct Lowering {
     // compile-time values.
     std::vector<bool> out_is_int;
     // The register view of each live-out as the region compiler left it:
-    // the authority on shape when the outside declaration was the --O1
-    // inliner's zero-length sentinel and the region's assignment sized it.
+    // the authority on shape when the outside declaration was zero-size
+    // and the region's assignment sized it.
     std::vector<Range> out_views;
     bool has_target = false;  // the region contributed to the target
     // A print or reject is observable even when every data live-out is empty,
