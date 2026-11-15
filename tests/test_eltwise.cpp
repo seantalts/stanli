@@ -1092,6 +1092,51 @@ static void test_extrema_exact_grouping() {
   }
 }
 
+// The interpreter's name labels its errors and nothing else: the Eigen
+// reduction for min/max is chosen by set_native_extrema.
+void test_extrema_rule_is_not_the_label() {
+  using namespace stanli;
+  std::map<std::string, const mir::FunDef*> funs;
+  mir::Expr arg;
+  arg.kind = mir::Expr::Var;
+  arg.name = "a";
+  arg.type_ = "UVector";
+  arg.unsized.leaf = mir::UnsizedLeaf::Vector;
+  mir::Expr call;
+  call.kind = mir::Expr::FunApp;
+  call.name = "max";
+  call.fn_lib = mir::Expr::Lib::StanLib;
+  call.type_ = "UReal";
+  call.unsized.leaf = mir::UnsizedLeaf::Real;
+  call.args = {arg};
+  DataMap::Entry values;
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  values.r = {1, nan, 3, 2, 5, nan, 0, 4};
+  values.dims = {8};
+  const auto run = [&](const char* label, bool native) {
+    MirInterp<double> interp(funs, label);
+    interp.set_native_extrema(native);
+    interp.env()["a"] = values;
+    return reduction_bits(interp.eval(call).r.at(0));
+  };
+  const uint64_t fold = run("extrema rule test", false);
+  const uint64_t eigen = run("extrema rule test", true);
+  if (fold == eigen) {
+    ++failures;
+    std::printf("FAIL extrema rule input does not separate the two rules\n");
+  }
+  for (const char* label : {"write_array", "prepare_data"}) {
+    if (run(label, false) != fold) {
+      ++failures;
+      std::printf("FAIL label %s selected the native extrema rule\n", label);
+    }
+    if (run(label, true) != eigen) {
+      ++failures;
+      std::printf("FAIL label %s with native extrema differs\n", label);
+    }
+  }
+}
+
 int main() {
   test_matrix_transpose_add();
   using namespace stanli;
@@ -1102,6 +1147,7 @@ int main() {
   test_product_exact_grouping();
   test_reduction_view_grouping();
   test_extrema_exact_grouping();
+  test_extrema_rule_is_not_the_label();
   const int N = 4;
 
   // Binary: all shape combos. Scalars are length-1 slots; the var reference

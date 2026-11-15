@@ -33,7 +33,9 @@ Lowering::Lowering(const DataMap& d, PrepTrace& p, PassDumper& dump_to,
       prep(p),
       dumper(dump_to),
       prep_graph(graph_name),
-      td_rng(std::move(stream)) {}
+      td_rng(std::move(stream)) {
+  td.set_native_extrema(true);
+}
 template <typename Map>
 static void copy_named(Map& to, const Map& from,
                        const std::set<std::string>* names) {
