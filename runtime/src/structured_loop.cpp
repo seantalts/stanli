@@ -2,6 +2,7 @@
 #include <stanli/structured_loop.hpp>
 #include <stanli/message_sink.hpp>
 #include <stanli/optable.hpp>
+#include <stanli/rejection.hpp>
 
 #include <algorithm>
 #include <array>
