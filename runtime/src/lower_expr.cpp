@@ -319,15 +319,17 @@ long Lowering::eval_int(const mir::Expr& e) {
       }
       // Stock stanc's --O1 folds an integer a * b + c into fma(a, b, c).
       if (e.name == "fma" && e.args.size() == 3 &&
-          std::all_of(e.args.begin(), e.args.end(),
-                      [](const mir::Expr& a) { return a.type_ == "UInt"; }))
+          std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& a) {
+            return mir::is_unsized(a, mir::UnsizedLeaf::Int);
+          }))
         return eval_int(e.args[0]) * eval_int(e.args[1]) + eval_int(e.args[2]);
       if (const BuiltinSpec* pred =
               e.args.size() == 2 ? shaped_builtin_spec(
                                        e.name, 2, BuiltinShapePolicy::Predicate)
                                  : nullptr) {
         const auto scalar = [&](const mir::Expr& arg) -> double {
-          if (arg.type_ == "UInt") return (double)eval_int(arg);
+          if (mir::is_unsized(arg, mir::UnsizedLeaf::Int))
+            return (double)eval_int(arg);
           if (auto evaluated = try_eval_pure(arg)) {
             if (evaluated->r.size() == 1) return evaluated->r[0];
           }
@@ -449,7 +451,8 @@ SlotInfo Lowering::view_of(const mir::SizedType& t, bool param_free) {
   return si;
 }
 SlotInfo Lowering::indexed_view(const SlotInfo& base, size_t n_single,
-                                int64_t out_len, const std::string& out_type) {
+                                int64_t out_len,
+                                const mir::UnsizedView& out_type) {
   SlotInfo si = view_of(out_type);
   si.param_free = base.param_free;
   if (!is_array(base)) return si;
@@ -586,7 +589,7 @@ Lowering::Val Lowering::lower_extrema_reduction(const mir::Expr& e,
   const IntRange range =
       int_array ? prove_runtime_int_extrema(e, value, len) : IntRange{};
   Val result =
-      with_layout(emit_value(OP_EXTREMA_VEC, {value}, 1, view_of(e.type_),
+      with_layout(emit_value(OP_EXTREMA_VEC, {value}, 1, view_of(e.unsized),
                              reduction_phase_idata(value, grouping, "min/max")),
                   ExpressionLayout::scalar());
   if (in_write_array || int_array) result.autodiff = false;
@@ -611,7 +614,8 @@ Lowering::Val Lowering::lower_extrema_pair(const mir::Expr& e,
     fail("min/max scalar overload needs two scalar int arguments", e.raw);
   const bool maximum = kind == mir::ExtremaKind::Max;
   Val result = with_layout(
-      emit_value(maximum ? OP_FMAX : OP_FMIN, {x, y}, 1, view_of("UInt")),
+      emit_value(maximum ? OP_FMAX : OP_FMIN, {x, y}, 1,
+                 view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int})),
       ExpressionLayout::scalar());
   result.autodiff = false;
   result.si.param_free = false;
@@ -777,7 +781,6 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // type instead of rejecting the stale intermediate matrix type.
       if (e.args.size() == 1 && e.args[0].kind == mir::Expr::Indexed) {
         mir::Expr composed = e.args[0];
-        composed.type_ = e.type_;
         composed.unsized = e.unsized;
         composed.data_only = e.data_only;
         composed.promoted = e.promoted;
@@ -798,7 +801,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           std::any_of(
               e.args.begin() + 1, e.args.end(),
               [&](const mir::Expr& ix) { return runtime_selector(ix); }))
-        return region_index(base, {e.args.begin() + 1, e.args.end()}, e.type_,
+        return region_index(base, {e.args.begin() + 1, e.args.end()},
                             e.unsized);
       if (dynamic_slice) {
         const Val index = lower_expr(e.args[1].args[0]);
@@ -821,7 +824,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         }
         if (count <= 0 || width <= 0 || g.slots[base.slot].len != count * width)
           fail("runtime index has an invalid base shape", e.raw);
-        SlotInfo si = indexed_view(base.si, 1, width, e.type_);
+        SlotInfo si = indexed_view(base.si, 1, width, e.unsized);
         Val value =
             emit_value(OP_DYNAMIC_SLICE, {base, index}, width, si,
                        {checked_immediate(count, "runtime index extent")});
@@ -902,7 +905,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t len = hi >= lo ? hi - lo + 1 : 0;
         const int64_t offset = len ? lo - 1 : 0;
         return with_layout(
-            emit_value(OP_SLICE, {base}, len, view_of(e.type_),
+            emit_value(OP_SLICE, {base}, len, view_of(e.unsized),
                        {checked_immediate(offset, "range offset")}),
             contiguous_layout(base, offset, "range"));
       }
@@ -947,7 +950,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                                      "vector[multi] indexing", e.raw) -
                           1);
         return with_layout(emit_value(OP_GATHER, {base}, (int64_t)idata.size(),
-                                      view_of(e.type_), idata),
+                                      view_of(e.unsized), idata),
                            ExpressionLayout::scalar());
       }
       // Matrix row/column slices use the explicit logical view; physical
@@ -958,7 +961,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t i = eval_int(e.args[1].args[0]);
         check_uni_index(i, base.si.rows, "matrix[uni] indexing", e.raw);
         return with_layout(
-            emit_value(OP_SLICE_STRIDED, {base}, base.si.cols, view_of(e.type_),
+            emit_value(OP_SLICE_STRIDED, {base}, base.si.cols,
+                       view_of(e.unsized),
                        {checked_immediate(i - 1, "matrix row offset"),
                         checked_immediate(base.si.rows, "matrix row stride")}),
             ExpressionLayout::scalar());
@@ -970,7 +974,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                                      "matrix[..., uni] column indexing", e.raw);
         const int64_t offset = (j - 1) * base.si.rows;
         return with_layout(
-            emit_value(OP_SLICE, {base}, base.si.rows, view_of(e.type_),
+            emit_value(OP_SLICE, {base}, base.si.rows, view_of(e.unsized),
                        {checked_immediate(offset, "matrix column offset")}),
             contiguous_layout(base, offset, "matrix column"));
       }
@@ -1007,7 +1011,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t len = hi >= lo ? hi - lo + 1 : 0;
         SlotInfo si = array_shape(base.si).leaf == ViewKind::Flat
                           ? array_view({len}, ViewKind::Flat)
-                          : view_of(e.type_);
+                          : view_of(e.unsized);
         const int64_t offset = len ? (i - 1) * S + lo - 1 : 0;
         const ExpressionLayout layout =
             array_shape(base.si).leaf == ViewKind::Flat
@@ -1030,7 +1034,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t count = (*bdims)[0], width = (*bdims)[1];
         check_uni_index(i, count, "array[uni, ...] index", e.raw);
         const int64_t offset = (i - 1) * width;
-        SlotInfo si = view_of(e.type_);
+        SlotInfo si = view_of(e.unsized);
         return with_layout(
             emit_value(OP_SLICE, {base}, width, si,
                        {checked_immediate(offset, "array vector offset")}),
@@ -1049,7 +1053,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         const int64_t len = hi >= lo ? hi - lo + 1 : 0;
         const int64_t offset = len ? (j - 1) * base.si.rows + lo - 1 : 0;
         return with_layout(
-            emit_value(OP_SLICE, {base}, len, view_of(e.type_),
+            emit_value(OP_SLICE, {base}, len, view_of(e.unsized),
                        {checked_immediate(offset, "matrix row range offset")}),
             contiguous_layout(base, offset, "matrix row range"));
       }
@@ -1077,9 +1081,9 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           for (int64_t i : rows)
             gather.push_back(checked_immediate(j * base.si.rows + i,
                                                "matrix gather offset"));
-        SlotInfo si = view_of(e.type_);
+        SlotInfo si = view_of(e.unsized);
         si.param_free = base.si.param_free;
-        if (e.type_ == "UMatrix")
+        if (mir::is_unsized(e, mir::UnsizedLeaf::Matrix))
           si = matrix_view((int64_t)rows.size(), (int64_t)cols.size(),
                            base.si.param_free);
         return with_layout(
@@ -1102,19 +1106,19 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         if (a.stride != 1)
           return with_layout(
               emit_value(OP_SLICE_STRIDED, {base}, a.len,
-                         indexed_view(base.si, n_idx, a.len, e.type_),
+                         indexed_view(base.si, n_idx, a.len, e.unsized),
                          {checked_immediate(a.off, "indexed offset"),
                           checked_immediate(a.stride, "indexed stride")}),
               ExpressionLayout::scalar());
         if (a.len == 1)
           return with_layout(
               emit_value(OP_INDEX, {base}, 1,
-                         indexed_view(base.si, n_idx, 1, e.type_),
+                         indexed_view(base.si, n_idx, 1, e.unsized),
                          {checked_immediate(a.off, "indexed offset")}),
               ExpressionLayout::scalar());
         // One whole matrix out of the array keeps its shape, so a later
         // index on it can take the column-major paths above.
-        SlotInfo si = indexed_view(base.si, n_idx, a.len, e.type_);
+        SlotInfo si = indexed_view(base.si, n_idx, a.len, e.unsized);
         return with_layout(
             emit_value(OP_SLICE, {base}, a.len, si,
                        {checked_immediate(a.off, "indexed offset")}),
@@ -1155,7 +1159,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
             check_range(lo, hi, a.len, "array leaf range", e.raw);
           }
           const int64_t len = hi >= lo ? hi - lo + 1 : 0;
-          SlotInfo si = view_of(e.type_);
+          SlotInfo si = view_of(e.unsized);
           const int64_t offset = len ? a.off + lo - 1 : a.off;
           const ExpressionLayout layout =
               ranged ? ExpressionLayout::direct(len ? lo - 1 : 0)
@@ -1191,11 +1195,13 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       }
       // Row of a column-major data matrix / 2-D array: strided slice.
       if (all_single && e.args.size() == 2 && is_matrix(base.si) &&
-          e.type_ != "UReal" && e.type_ != "UInt") {
+          !mir::is_unsized(e, mir::UnsizedLeaf::Real) &&
+          !mir::is_unsized(e, mir::UnsizedLeaf::Int)) {
         const int64_t t = stan_index(eval_int(e.args[1].args[0]), base.si.rows,
                                      "matrix[uni] indexing", e.raw);
         return with_layout(
-            emit_value(OP_SLICE_STRIDED, {base}, base.si.cols, view_of(e.type_),
+            emit_value(OP_SLICE_STRIDED, {base}, base.si.cols,
+                       view_of(e.unsized),
                        {checked_immediate(t - 1, "matrix row offset"),
                         checked_immediate(base.si.rows, "matrix row stride")}),
             ExpressionLayout::scalar());
@@ -1208,15 +1214,14 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         if (auto v = fold_const(e)) return *v;
       }
       int64_t flat = 0;
-      if (all_single && e.args.size() == 2 &&
-          (e.type_ == "UReal" || e.type_ == "UInt")) {
+      if (all_single && e.args.size() == 2 && mir::language_scalar(e)) {
         flat = stan_index(eval_int(e.args[1].args[0]), g.slots[base.slot].len,
                           is_array(base.si) ? "array[uni, ...] index"
                                             : "vector[uni] indexing",
                           e.raw) -
                1;
       } else if (all_single && e.args.size() == 3 && is_matrix(base.si) &&
-                 (e.type_ == "UReal" || e.type_ == "UInt")) {
+                 mir::language_scalar(e)) {
         const int64_t ri = stan_index(eval_int(e.args[1].args[0]), base.si.rows,
                                       "matrix[uni,uni] row indexing", e.raw);
         const int64_t cj = stan_index(eval_int(e.args[2].args[0]), base.si.cols,
@@ -1234,7 +1239,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
             builtin_argument_shape(e.args[0], base);
         const size_t indexes = e.args.size() - 1;
         if (indexes > shape.dimensions.size())
-          fail("unsupported index expression: too many indexes for " + e.type_,
+          fail("unsupported index expression: too many indexes for " +
+                   mir::type_spelling(e.unsized),
                e.raw);
         std::vector<std::vector<int64_t>> selected;
         std::vector<bool> drops;
@@ -1254,12 +1260,13 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                e.raw);
         }
         SlotInfo si;
-        if (e.type_ == "UReal" || e.type_ == "UInt") {
-          si = view_of(e.type_);
-        } else if (e.type_ == "UVector" || e.type_ == "URowVector") {
-          si = view_of(e.type_);
+        if (mir::language_scalar(e)) {
+          si = view_of(e.unsized);
+        } else if (mir::is_unsized(e, mir::UnsizedLeaf::Vector) ||
+                   mir::is_unsized(e, mir::UnsizedLeaf::RowVector)) {
+          si = view_of(e.unsized);
           si.param_free = base.si.param_free;
-        } else if (e.type_ == "UMatrix") {
+        } else if (mir::is_unsized(e, mir::UnsizedLeaf::Matrix)) {
           if (map.dimensions.size() != 2)
             fail("unsupported index expression: matrix shape", e.raw);
           si = matrix_view(map.dimensions[0], map.dimensions[1],
@@ -1275,7 +1282,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         }
         switch (map.kind) {
           case BuiltinSliceMap::Kind::Contiguous:
-            if (map.count == 1 && (e.type_ == "UReal" || e.type_ == "UInt"))
+            if (map.count == 1 && mir::language_scalar(e))
               return with_layout(
                   emit_value(OP_INDEX, {base}, 1, si,
                              {checked_immediate(map.offset, "index offset")}),
@@ -1301,7 +1308,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           }
         }
       }
-      return with_layout(emit_value(OP_INDEX, {base}, 1, view_of(e.type_),
+      return with_layout(emit_value(OP_INDEX, {base}, 1, view_of(e.unsized),
                                     {checked_immediate(flat, "index offset")}),
                          ExpressionLayout::scalar());
     }
@@ -1519,7 +1526,8 @@ Lowering::StaticProbe<Lowering::StaticSelector> Lowering::try_static_selector(
 Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_broadcast_view(
     const mir::Expr& e) {
   for (const mir::Expr& arg : e.args) {
-    if (arg.type_ != e.type_) continue;
+    if (mir::type_spelling(arg.unsized) != mir::type_spelling(e.unsized))
+      continue;
     const auto view = try_static_view(arg);
     if (view.state == StaticProbeState::Known) return view;
   }
@@ -1558,22 +1566,24 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
   if (e.kind == mir::Expr::FunApp) {
     if (e.name == "FnMakeRowVec" && !e.args.empty() &&
         std::all_of(e.args.begin(), e.args.end(), [](const mir::Expr& a) {
-          return is_scalar_type(a.type_);
+          return mir::language_scalar(a);
         })) {
-      SlotInfo si = view_of("URowVector");
+      SlotInfo si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::RowVector});
       si.param_free = e.data_only;
       return {StaticProbeState::Known, {(int64_t)e.args.size(), si}, {}};
     }
     if ((e.name == "rep_vector" || e.name == "rep_row_vector") &&
-        e.args.size() == 2 && is_scalar_type(e.args[0].type_)) {
+        e.args.size() == 2 && mir::language_scalar(e.args[0])) {
       const auto n = try_static_int(e.args[1]);
       if (n.state != StaticProbeState::Known || n.value < 0) return {};
-      SlotInfo si = view_of(e.name == "rep_vector" ? "UVector" : "URowVector");
+      SlotInfo si = view_of(mir::UnsizedView{
+          0, e.name == "rep_vector" ? mir::UnsizedLeaf::Vector
+                                    : mir::UnsizedLeaf::RowVector});
       si.param_free = e.data_only;
       return {StaticProbeState::Known, {n.value, si}, {}};
     }
     if (e.name == "rep_matrix" && e.args.size() == 3 &&
-        is_scalar_type(e.args[0].type_)) {
+        mir::language_scalar(e.args[0])) {
       const auto m = try_static_int(e.args[1]);
       const auto n = try_static_int(e.args[2]);
       if (m.state != StaticProbeState::Known ||
@@ -1607,7 +1617,7 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
       return try_static_view(e.args[0]);
     const bool scalar_factor =
         e.args.size() == 2 &&
-        (is_scalar_type(e.args[0].type_) || is_scalar_type(e.args[1].type_));
+        (mir::language_scalar(e.args[0]) || mir::language_scalar(e.args[1]));
     if (elementwise != nullptr || (e.name == "fma" && e.args.size() == 3) ||
         ((e.name == "Times__" || e.name == "multiply") && scalar_factor))
       return try_static_broadcast_view(e);
@@ -1636,32 +1646,32 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
                             "static matrix subview");
   out.si.param_free = base.value.si.param_free;
   if (!rd && !cd) {
-    if (e.type_ != "UMatrix")
+    if (!mir::is_unsized(e, mir::UnsizedLeaf::Matrix))
       return {StaticProbeState::Invalid,
               {},
               "static matrix subview has an inconsistent result type"};
     out.si = matrix_view(rows.value.count, cols.value.count,
                          base.value.si.param_free);
   } else if (rd && !cd) {
-    if (e.type_ != "URowVector")
+    if (!mir::is_unsized(e, mir::UnsizedLeaf::RowVector))
       return {StaticProbeState::Invalid,
               {},
               "static matrix row has an inconsistent result type"};
-    out.si = view_of("URowVector");
+    out.si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::RowVector});
     out.si.param_free = base.value.si.param_free;
   } else if (!rd && cd) {
-    if (e.type_ != "UVector")
+    if (!mir::is_unsized(e, mir::UnsizedLeaf::Vector))
       return {StaticProbeState::Invalid,
               {},
               "static matrix column has an inconsistent result type"};
-    out.si = view_of("UVector");
+    out.si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
     out.si.param_free = base.value.si.param_free;
   } else {
-    if (e.type_ != "UReal")
+    if (!mir::is_unsized(e, mir::UnsizedLeaf::Real))
       return {StaticProbeState::Invalid,
               {},
               "static matrix element has an inconsistent result type"};
-    out.si = view_of("UReal");
+    out.si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Real});
     out.si.param_free = base.value.si.param_free;
   }
   return {StaticProbeState::Known, out, {}};
@@ -1720,7 +1730,6 @@ bool Lowering::specialize_static_shapes(mir::Expr* e) {
       mir::Expr literal;
       literal.kind = mir::Expr::LitInt;
       literal.lit_i = static_cast<long>(value.value);
-      literal.type_ = "UInt";
       literal.unsized = {0, mir::UnsizedLeaf::Int};
       literal.data_only = true;
       literal.raw = e->raw;
@@ -1744,8 +1753,8 @@ std::optional<Lowering::Val> Lowering::fold_const(const mir::Expr& e) {
   auto evaluated = try_eval_pure(e);
   if (!evaluated) return std::nullopt;
   DataMap::Entry en = std::move(*evaluated);
-  if (en.r.size() == 1 &&
-      (e.type_ == "UReal" || e.type_ == "UInt" || e.type_ == "UComplex"))
+  if (en.r.size() == 1 && (mir::language_scalar(e) ||
+                           mir::is_unsized(e, mir::UnsizedLeaf::Complex)))
     return constant(en.r[0]);
   SlotInfo si;
   si.param_free = true;
@@ -1760,14 +1769,14 @@ std::optional<Lowering::Val> Lowering::fold_const(const mir::Expr& e) {
     if (en.dims.empty()) en.dims = {(int64_t)en.r.size()};
     si = array_view(en.dims, leaf, true);
   } else {
-    stamp_kind(&si, e.type_);
+    stamp_kind(&si, e.unsized);
   }
-  if (e.type_ == "UMatrix" && en.dims.size() == 2)
+  if (mir::is_unsized(e, mir::UnsizedLeaf::Matrix) && en.dims.size() == 2)
     si = matrix_view(en.dims[0], en.dims[1], true);
   const bool nested_matrix =
       e.unsized.depth != 0 && e.unsized.leaf == mir::UnsizedLeaf::Matrix;
-  std::vector<double> vals =
-      graph_order(en, e.type_ == "UMatrix", nested_matrix);
+  std::vector<double> vals = graph_order(
+      en, mir::is_unsized(e, mir::UnsizedLeaf::Matrix), nested_matrix);
   const int s = add_slot((int64_t)vals.size(), false);
   out.fills.emplace_back(s, std::move(vals));
   Val v{s, false, si, owning_layout(si)};

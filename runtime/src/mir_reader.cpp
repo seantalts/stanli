@@ -401,12 +401,7 @@ Expr read_expr(const Node& n) {
         const Node& type = (*t)[1];
         e.unsized = read_unsized(type);
         if (e.kind == Expr::Var) e.fn_type = read_function_type(type);
-        if (e.unsized.leaf != UnsizedLeaf::Unknown) {
-          e.type_ = e.unsized.depth ? "UArray" : type.atom;
-        } else {
-          e.type_.clear();
-          e.raw = dump(type);
-        }
+        if (e.unsized.leaf == UnsizedLeaf::Unknown) e.raw = dump(type);
       }
       if (const Node* a = field(m, "adlevel"))
         e.data_only = (*a)[1].is_atom() && (*a)[1].atom == "DataOnly";
@@ -670,35 +665,6 @@ Stmt read_stmt(const Node& n) {
 
 void validate_expression_shape(const Expr& e);
 
-std::string unsized_spelling(const UnsizedView& view) {
-  std::string type;
-  switch (view.leaf) {
-    case UnsizedLeaf::Int:
-      type = "UInt";
-      break;
-    case UnsizedLeaf::Real:
-      type = "UReal";
-      break;
-    case UnsizedLeaf::Complex:
-      type = "UComplex";
-      break;
-    case UnsizedLeaf::Vector:
-      type = "UVector";
-      break;
-    case UnsizedLeaf::RowVector:
-      type = "URowVector";
-      break;
-    case UnsizedLeaf::Matrix:
-      type = "UMatrix";
-      break;
-    case UnsizedLeaf::Unknown:
-      return {};
-  }
-  for (uint8_t depth = 0; depth < view.depth; ++depth)
-    type = "(UArray " + type + ")";
-  return type;
-}
-
 bool parse_unsized_spelling(std::string_view text, UnsizedView* out) {
   size_t depth = 0;
   constexpr std::string_view prefix = "(UArray ";
@@ -727,31 +693,12 @@ bool parse_unsized_spelling(std::string_view text, UnsizedView* out) {
   return true;
 }
 
-void validate_expression_metadata(const Expr& e) {
-  if (e.unsized.leaf == UnsizedLeaf::Unknown) {
-    // Unknown upstream types use the raw/unsupported channel and clear the
-    // compact type spelling. A recognized compact spelling paired with an
-    // unknown structural view would let different consumers infer different
-    // shapes.
-    if (e.type_ == "UInt" || e.type_ == "UReal" || e.type_ == "UComplex" ||
-        e.type_ == "UVector" || e.type_ == "URowVector" ||
-        e.type_ == "UMatrix" || e.type_ == "UArray")
-      malformed("expression type metadata");
-    return;
-  }
-  const std::string expected = e.unsized.depth == 0
-                                   ? unsized_spelling(e.unsized)
-                                   : std::string("UArray");
-  if (e.type_ != expected) malformed("expression type metadata");
-}
-
 void validate_index_shape(const Expr& index) {
   if (!is_index(index)) malformed("index descriptor");
   validate_expression_shape(index);
 }
 
 void validate_expression_shape(const Expr& e) {
-  validate_expression_metadata(e);
   switch (e.kind) {
     case Expr::Var:
     case Expr::LitInt:

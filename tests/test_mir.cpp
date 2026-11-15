@@ -252,7 +252,6 @@ static void probe_mode_tests() {
   expr.kind = mir::Expr::Indexed;
   expr.args = {var_expr("x", mir::UnsizedLeaf::Vector),
                index_single(var_expr("i", mir::UnsizedLeaf::Int))};
-  expr.type_ = "UReal";
   expr.unsized = {0, mir::UnsizedLeaf::Real};
   expr.data_only = true;
 
@@ -517,7 +516,6 @@ int main(int argc, char** argv) {
     mir::Expr scalar;
     scalar.kind = mir::Expr::LitReal;
     scalar.lit = 2.0;
-    scalar.type_ = "UReal";
     scalar.unsized.leaf = mir::UnsizedLeaf::Real;
     scalar.data_only = true;
     for (const std::string& name : {"Plus__", "Times__"}) {
@@ -525,14 +523,12 @@ int main(int argc, char** argv) {
         mir::Expr vector;
         vector.kind = mir::Expr::Var;
         vector.name = variable;
-        vector.type_ = "UVector";
         vector.unsized.leaf = mir::UnsizedLeaf::Vector;
         vector.data_only = true;
         for (bool scalar_first : {false, true}) {
           mir::Expr call;
           call.kind = mir::Expr::FunApp;
           call.name = name;
-          call.type_ = "UVector";
           call.unsized.leaf = mir::UnsizedLeaf::Vector;
           call.data_only = true;
           call.args = scalar_first ? std::vector<mir::Expr>{scalar, vector}
@@ -552,14 +548,12 @@ int main(int argc, char** argv) {
       mir::Expr vector;
       vector.kind = mir::Expr::Var;
       vector.name = variable;
-      vector.type_ = "UVector";
       vector.unsized.leaf = mir::UnsizedLeaf::Vector;
       vector.data_only = true;
       for (int container_arg = 0; container_arg < 3; ++container_arg) {
         mir::Expr call;
         call.kind = mir::Expr::FunApp;
         call.name = "fma";
-        call.type_ = "UVector";
         call.unsized.leaf = mir::UnsizedLeaf::Vector;
         call.data_only = true;
         call.args = {scalar, scalar, scalar};
@@ -585,7 +579,6 @@ int main(int argc, char** argv) {
       mir::Expr three;
       three.kind = mir::Expr::Var;
       three.name = "three";
-      three.type_ = "UVector";
       three.unsized.leaf = mir::UnsizedLeaf::Vector;
       three.data_only = true;
       for (const std::string& name : {"log_sum_exp", "log_diff_exp"}) {
@@ -593,7 +586,6 @@ int main(int argc, char** argv) {
           mir::Expr call;
           call.kind = mir::Expr::FunApp;
           call.name = name;
-          call.type_ = "UVector";
           call.unsized.leaf = mir::UnsizedLeaf::Vector;
           call.data_only = true;
           call.args = scalar_first ? std::vector<mir::Expr>{scalar, three}
@@ -617,7 +609,6 @@ int main(int argc, char** argv) {
       mir::Expr reduce;
       reduce.kind = mir::Expr::FunApp;
       reduce.name = "log_sum_exp";
-      reduce.type_ = "UReal";
       reduce.unsized.leaf = mir::UnsizedLeaf::Real;
       reduce.data_only = true;
       reduce.args = {three};
@@ -641,7 +632,6 @@ int main(int argc, char** argv) {
         mir::Expr e;
         e.kind = mir::Expr::Var;
         e.name = name;
-        e.type_ = "UVector";
         e.unsized.leaf = mir::UnsizedLeaf::Vector;
         e.data_only = true;
         return e;
@@ -691,7 +681,6 @@ int main(int argc, char** argv) {
         mir::Expr call;
         call.kind = mir::Expr::FunApp;
         call.name = c.name;
-        call.type_ = "UVector";
         call.unsized.leaf = mir::UnsizedLeaf::Vector;
         call.data_only = true;
         // The second bound is always shared, so the ternary transforms
@@ -713,7 +702,6 @@ int main(int argc, char** argv) {
       mir::Expr call;
       call.kind = mir::Expr::FunApp;
       call.name = "lower_bound_jacobian";
-      call.type_ = "UReal";
       call.unsized.leaf = mir::UnsizedLeaf::Real;
       call.data_only = true;
       call.args = {scalar, scalar};
@@ -722,21 +710,21 @@ int main(int argc, char** argv) {
             "a scalar bound transform stays one value");
     }
 
-    auto variable = [](const std::string& name, const std::string& type) {
+    auto variable = [](const std::string& name, mir::UnsizedLeaf type) {
       mir::Expr e;
       e.kind = mir::Expr::Var;
       e.name = name;
-      e.type_ = type;
+      e.unsized = {0, type};
       e.data_only = true;
       return e;
     };
-    auto times = [&](const std::string& lhs, const std::string& lhs_type,
-                     const std::string& rhs, const std::string& rhs_type,
-                     const std::string& result_type) {
+    auto times = [&](const std::string& lhs, mir::UnsizedLeaf lhs_type,
+                     const std::string& rhs, mir::UnsizedLeaf rhs_type,
+                     mir::UnsizedLeaf result_type) {
       mir::Expr e;
       e.kind = mir::Expr::FunApp;
       e.name = "Times__";
-      e.type_ = result_type;
+      e.unsized = {0, result_type};
       e.data_only = true;
       e.args = {variable(lhs, lhs_type), variable(rhs, rhs_type)};
       return interp.eval(e);
@@ -744,24 +732,27 @@ int main(int argc, char** argv) {
     real_value("m11", {2.0}, {1, 1});
     real_value("m12", {3.0, 4.0}, {1, 2});
     DataMap::Entry matrix =
-        times("m11", "UMatrix", "m12", "UMatrix", "UMatrix");
+        times("m11", mir::UnsizedLeaf::Matrix, "m12", mir::UnsizedLeaf::Matrix,
+              mir::UnsizedLeaf::Matrix);
     check(matrix.dims == std::vector<int64_t>({1, 2}) &&
               matrix.r == std::vector<double>({6.0, 8.0}),
           "Times__ width-one matrix product");
     real_value("rv1", {2.0}, {1});
     real_value("v1", {3.0}, {1});
-    DataMap::Entry dot = times("rv1", "URowVector", "v1", "UVector", "UReal");
+    DataMap::Entry dot =
+        times("rv1", mir::UnsizedLeaf::RowVector, "v1",
+              mir::UnsizedLeaf::Vector, mir::UnsizedLeaf::Real);
     check(dot.dims.empty() && dot.r == std::vector<double>({6.0}),
           "Times__ width-one dot product");
 
     real_value("v2", {4.0, 5.0}, {2});
     auto refuses_elementwise =
         [&](const std::string& name, const std::string& lhs,
-            const std::string& rhs, const std::string& type) {
+            const std::string& rhs, mir::UnsizedLeaf type) {
           mir::Expr call;
           call.kind = mir::Expr::FunApp;
           call.name = name;
-          call.type_ = type;
+          call.unsized = {0, type};
           call.data_only = true;
           call.args = {variable(lhs, type), variable(rhs, type)};
           if (name == "fma") call.args.push_back(scalar);
@@ -774,7 +765,7 @@ int main(int argc, char** argv) {
           return refused;
         };
     for (const std::string& name : {"Plus__", "fma"}) {
-      check(refuses_elementwise(name, "one", "v2", "UVector"),
+      check(refuses_elementwise(name, "one", "v2", mir::UnsizedLeaf::Vector),
             name + " refuses vector[1]/vector[2] broadcast");
     }
 
@@ -783,9 +774,9 @@ int main(int argc, char** argv) {
     real_value("m03", {}, {0, 3});
     real_value("m02", {}, {0, 2});
     for (const std::string& name : {"Plus__", "fma"}) {
-      check(refuses_elementwise(name, "m23", "m32", "UMatrix"),
+      check(refuses_elementwise(name, "m23", "m32", mir::UnsizedLeaf::Matrix),
             name + " refuses equal-width unequal matrix shapes");
-      check(refuses_elementwise(name, "m03", "m02", "UMatrix"),
+      check(refuses_elementwise(name, "m03", "m02", mir::UnsizedLeaf::Matrix),
             name + " refuses unequal zero-width matrix shapes");
     }
 
@@ -802,8 +793,9 @@ int main(int argc, char** argv) {
     returned.has_init = true;
     returned.rhs.kind = mir::Expr::FunApp;
     returned.rhs.name = "Times__";
-    returned.rhs.type_ = "UVector";
-    returned.rhs.args = {variable("a", "UReal"), variable("x", "UVector")};
+    returned.rhs.unsized = {0, mir::UnsizedLeaf::Vector};
+    returned.rhs.args = {variable("a", mir::UnsizedLeaf::Real),
+                         variable("x", mir::UnsizedLeaf::Vector)};
     scale.body = {returned};
     const std::vector<double> scaled =
         interp.call(scale, {{2.0}, {3.0, 4.0}}, {});
@@ -823,8 +815,9 @@ int main(int argc, char** argv) {
     routed_return.has_init = true;
     routed_return.rhs.kind = mir::Expr::FunApp;
     routed_return.rhs.name = "Minus__";
-    routed_return.rhs.type_ = "UReal";
-    routed_return.rhs.args = {variable("i", "UInt"), variable("x", "UReal")};
+    routed_return.rhs.unsized = {0, mir::UnsizedLeaf::Real};
+    routed_return.rhs.args = {variable("i", mir::UnsizedLeaf::Int),
+                              variable("x", mir::UnsizedLeaf::Real)};
     routed.body = {routed_return};
     const std::vector<double> routed_value =
         interp.call(routed, {{2.5}}, {{4}});
@@ -845,7 +838,6 @@ int main(int argc, char** argv) {
     mir::Expr formal;
     formal.kind = mir::Expr::Var;
     formal.name = "x";
-    formal.type_ = "UVector";
     formal.unsized.leaf = mir::UnsizedLeaf::Vector;
     formal.data_only = true;
     mir::Stmt reduced_return;
@@ -854,7 +846,6 @@ int main(int argc, char** argv) {
     reduced_return.rhs.kind = mir::Expr::FunApp;
     reduced_return.rhs.fn_lib = mir::Expr::Lib::StanLib;
     reduced_return.rhs.name = "prod";
-    reduced_return.rhs.type_ = "UReal";
     reduced_return.rhs.unsized.leaf = mir::UnsizedLeaf::Real;
     reduced_return.rhs.data_only = true;
     reduced_return.rhs.args = {formal};
@@ -900,7 +891,6 @@ int main(int argc, char** argv) {
     mir::Expr two;
     two.kind = mir::Expr::LitInt;
     two.lit_i = 2;
-    two.type_ = "UInt";
     two.unsized.leaf = mir::UnsizedLeaf::Int;
     two.data_only = true;
     mir::Stmt vector_decl;
@@ -914,7 +904,6 @@ int main(int argc, char** argv) {
     literal.kind = mir::Expr::FunApp;
     literal.name = "FnMakeRowVec";
     literal.fn_lib = mir::Expr::Lib::Internal;
-    literal.type_ = "URowVector";
     literal.unsized.leaf = mir::UnsizedLeaf::RowVector;
     literal.data_only = true;
     literal.args = {zero, zero};
@@ -943,7 +932,6 @@ int main(int argc, char** argv) {
     mir::Expr x;
     x.kind = mir::Expr::Var;
     x.name = "x";
-    x.type_ = "UVector";
     x.unsized.leaf = mir::UnsizedLeaf::Vector;
     check(interp.eval(x).r == std::vector<double>{1.0, 2.0},
           "a parent entry is readable");
@@ -952,7 +940,6 @@ int main(int argc, char** argv) {
     mir::Expr two;
     two.kind = mir::Expr::LitInt;
     two.lit_i = 2;
-    two.type_ = "UInt";
     two.unsized.leaf = mir::UnsizedLeaf::Int;
     mir::Expr index;
     index.kind = stanli::mir::Expr::IndexSingle;
@@ -960,7 +947,6 @@ int main(int argc, char** argv) {
     mir::Expr five;
     five.kind = mir::Expr::LitReal;
     five.lit = 5.0;
-    five.type_ = "UReal";
     five.unsized.leaf = mir::UnsizedLeaf::Real;
     mir::Stmt write;
     write.kind = mir::Stmt::Assignment;
@@ -991,12 +977,10 @@ int main(int argc, char** argv) {
             x.r.push_back(1000.0 * a + 100.0 * b + 10.0 * row + col);
     interp.env()["x"] = std::move(x);
 
-    auto indexed = [](const std::vector<long>& indices, const std::string& type,
-                      mir::UnsizedView view) {
+    auto indexed = [](const std::vector<long>& indices, mir::UnsizedView view) {
       mir::Expr base;
       base.kind = mir::Expr::Var;
       base.name = "x";
-      base.type_ = "(UArray (UArray UMatrix))";
       base.unsized = {2, mir::UnsizedLeaf::Matrix};
       base.data_only = true;
 
@@ -1007,7 +991,6 @@ int main(int argc, char** argv) {
         mir::Expr literal;
         literal.kind = mir::Expr::LitInt;
         literal.lit_i = value;
-        literal.type_ = "UInt";
         literal.unsized.leaf = mir::UnsizedLeaf::Int;
         literal.data_only = true;
         mir::Expr index;
@@ -1015,14 +998,13 @@ int main(int argc, char** argv) {
         index.args.push_back(std::move(literal));
         e.args.push_back(std::move(index));
       }
-      e.type_ = type;
       e.unsized = view;
       e.data_only = true;
       return e;
     };
 
-    const DataMap::Entry outer = interp.eval(
-        indexed({2}, "(UArray UMatrix)", {1, mir::UnsizedLeaf::Matrix}));
+    const DataMap::Entry outer =
+        interp.eval(indexed({2}, {1, mir::UnsizedLeaf::Matrix}));
     std::vector<double> outer_values;
     for (int col = 1; col <= 3; ++col)
       for (int row = 1; row <= 2; ++row)
@@ -1033,7 +1015,7 @@ int main(int argc, char** argv) {
           "one leading index preserves array[5] matrix[2,3]");
 
     const DataMap::Entry matrix =
-        interp.eval(indexed({2, 3}, "UMatrix", {0, mir::UnsizedLeaf::Matrix}));
+        interp.eval(indexed({2, 3}, {0, mir::UnsizedLeaf::Matrix}));
     check(matrix.dims == std::vector<int64_t>({2, 3}) &&
               matrix.r ==
                   std::vector<double>({2311, 2321, 2312, 2322, 2313, 2323}),
@@ -1043,7 +1025,6 @@ int main(int argc, char** argv) {
       mir::Expr e;
       e.kind = mir::Expr::LitInt;
       e.lit_i = value;
-      e.type_ = "UInt";
       e.unsized.leaf = mir::UnsizedLeaf::Int;
       e.data_only = true;
       return e;
@@ -1069,7 +1050,6 @@ int main(int argc, char** argv) {
       mir::Expr positions;
       positions.kind = mir::Expr::Var;
       positions.name = name;
-      positions.type_ = "(UArray UInt)";
       positions.unsized = {1, mir::UnsizedLeaf::Int};
       positions.data_only = true;
       mir::Expr e;
@@ -1089,7 +1069,6 @@ int main(int argc, char** argv) {
       e.kind = mir::Expr::FunApp;
       e.fn_lib = mir::Expr::Lib::Internal;
       e.name = "FnMakeArray";
-      e.type_ = "UArray";
       e.unsized = {depth, mir::UnsizedLeaf::Int};
       e.data_only = true;
       e.args = std::move(values);
@@ -1105,13 +1084,11 @@ int main(int argc, char** argv) {
               nested_int_literal.r == std::vector<double>({1, 3, 2, 4}),
           "nested integer literals retain shape and integer provenance");
 
-    auto reverse = [](mir::Expr value, std::string type,
-                      mir::UnsizedView view) {
+    auto reverse = [](mir::Expr value, mir::UnsizedView view) {
       mir::Expr e;
       e.kind = mir::Expr::FunApp;
       e.fn_lib = mir::Expr::Lib::StanLib;
       e.name = "reverse";
-      e.type_ = std::move(type);
       e.unsized = view;
       e.data_only = true;
       e.args = {std::move(value)};
@@ -1120,15 +1097,14 @@ int main(int argc, char** argv) {
     mir::Expr vector;
     vector.kind = mir::Expr::Var;
     vector.name = "reverse_vector";
-    vector.type_ = "UVector";
     vector.unsized = {0, mir::UnsizedLeaf::Vector};
     vector.data_only = true;
     DataMap::Entry vector_value;
     vector_value.dims = {3};
     vector_value.r = {1, 2, 3};
     interp.env()[vector.name] = std::move(vector_value);
-    const DataMap::Entry reversed_vector = interp.eval(
-        reverse(std::move(vector), "UVector", {0, mir::UnsizedLeaf::Vector}));
+    const DataMap::Entry reversed_vector =
+        interp.eval(reverse(std::move(vector), {0, mir::UnsizedLeaf::Vector}));
     check(reversed_vector.dims == std::vector<int64_t>({3}) &&
               reversed_vector.r == std::vector<double>({3, 2, 1}),
           "reverse flips a vector's complete buffer");
@@ -1137,7 +1113,7 @@ int main(int argc, char** argv) {
         interp.eval(reverse(int_array({int_array({integer(1), integer(2)}, 1),
                                        int_array({integer(3), integer(4)}, 1)},
                                       2),
-                            "UArray", {2, mir::UnsizedLeaf::Int}));
+                            {2, mir::UnsizedLeaf::Int}));
     check(reversed_nested_ints.is_int &&
               reversed_nested_ints.dims == std::vector<int64_t>({2, 2}) &&
               reversed_nested_ints.i == std::vector<int>({3, 1, 4, 2}) &&
@@ -1147,15 +1123,13 @@ int main(int argc, char** argv) {
     mir::Expr empty_array;
     empty_array.kind = mir::Expr::Var;
     empty_array.name = "empty_reverse_array";
-    empty_array.type_ = "(UArray UVector)";
     empty_array.unsized = {1, mir::UnsizedLeaf::Vector};
     empty_array.data_only = true;
     DataMap::Entry empty_value;
     empty_value.dims = {0, 3};
     interp.env()[empty_array.name] = std::move(empty_value);
-    const DataMap::Entry reversed_empty =
-        interp.eval(reverse(std::move(empty_array), "(UArray UVector)",
-                            {1, mir::UnsizedLeaf::Vector}));
+    const DataMap::Entry reversed_empty = interp.eval(
+        reverse(std::move(empty_array), {1, mir::UnsizedLeaf::Vector}));
     check(reversed_empty.r.empty() &&
               reversed_empty.dims == std::vector<int64_t>({0, 3}),
           "reverse preserves empty array geometry");
@@ -1264,7 +1238,6 @@ int main(int argc, char** argv) {
       mir::Expr base;
       base.kind = mir::Expr::Var;
       base.name = "indexing";
-      base.type_ = "(UArray UMatrix)";
       base.unsized = {1, mir::UnsizedLeaf::Matrix};
       base.data_only = true;
       mir::Expr e;
@@ -1353,7 +1326,6 @@ int main(int argc, char** argv) {
     partial_write.lhs_idx = {single(2), single(1)};
     partial_write.rhs.kind = mir::Expr::Var;
     partial_write.rhs.name = "partial_replacement";
-    partial_write.rhs.type_ = "(UArray UInt)";
     partial_write.rhs.unsized = {1, mir::UnsizedLeaf::Int};
     partial_write.rhs.data_only = true;
     interp.run({partial_write});
@@ -1389,14 +1361,13 @@ int main(int argc, char** argv) {
       interp.env()[name] = std::move(entry);
     };
     auto full_write = [&](const std::string& lhs, const std::string& rhs,
-                          const std::string& type, mir::UnsizedView view) {
+                          mir::UnsizedView view) {
       mir::Stmt assignment;
       assignment.kind = mir::Stmt::Assignment;
       assignment.lhs = lhs;
       assignment.lhs_idx = {all()};
       assignment.rhs.kind = mir::Expr::Var;
       assignment.rhs.name = rhs;
-      assignment.rhs.type_ = type;
       assignment.rhs.unsized = view;
       assignment.rhs.data_only = true;
       return assignment;
@@ -1404,7 +1375,7 @@ int main(int argc, char** argv) {
 
     put_real("span_vector", {0, 0, 0}, {3});
     put_real("span_vector_rhs", {1, 2, 3}, {3});
-    interp.run({full_write("span_vector", "span_vector_rhs", "UVector",
+    interp.run({full_write("span_vector", "span_vector_rhs",
                            {0, mir::UnsizedLeaf::Vector})});
     check(
         interp.env().at("span_vector").dims == std::vector<int64_t>({3}) &&
@@ -1413,7 +1384,7 @@ int main(int argc, char** argv) {
 
     put_real("span_row", {0, 0, 0}, {3});
     put_real("span_row_rhs", {4, 5, 6}, {3});
-    interp.run({full_write("span_row", "span_row_rhs", "URowVector",
+    interp.run({full_write("span_row", "span_row_rhs",
                            {0, mir::UnsizedLeaf::RowVector})});
     check(interp.env().at("span_row").dims == std::vector<int64_t>({3}) &&
               interp.env().at("span_row").r == std::vector<double>({4, 5, 6}),
@@ -1431,8 +1402,8 @@ int main(int argc, char** argv) {
     span_ints_rhs.i = {7, 8, 9};
     span_ints_rhs.r = {7, 8, 9};
     interp.env()["span_ints_rhs"] = std::move(span_ints_rhs);
-    interp.run({full_write("span_ints", "span_ints_rhs", "UArray",
-                           {1, mir::UnsizedLeaf::Int})});
+    interp.run(
+        {full_write("span_ints", "span_ints_rhs", {1, mir::UnsizedLeaf::Int})});
     const DataMap::Entry& full_ints = interp.env().at("span_ints");
     check(full_ints.is_int && full_ints.dims == std::vector<int64_t>({3}) &&
               full_ints.i == std::vector<int>({7, 8, 9}) &&
@@ -1441,7 +1412,7 @@ int main(int argc, char** argv) {
 
     put_real("span_nested", {0, 0, 0, 0}, {2, 2});
     put_real("span_nested_rhs", {11, 12, 21, 22}, {2, 2});
-    interp.run({full_write("span_nested", "span_nested_rhs", "UArray",
+    interp.run({full_write("span_nested", "span_nested_rhs",
                            {1, mir::UnsizedLeaf::Vector})});
     check(interp.env().at("span_nested").dims == std::vector<int64_t>({2, 2}) &&
               interp.env().at("span_nested").r ==
@@ -1450,22 +1421,20 @@ int main(int argc, char** argv) {
 
     put_real("span_short", {0, 0, 0}, {3});
     put_real("span_short_rhs", {1, 2}, {2});
-    check(
-        assignment_refused(full_write("span_short", "span_short_rhs", "UVector",
-                                      {0, mir::UnsizedLeaf::Vector})),
-        "full-span assignment checks storage length");
+    check(assignment_refused(full_write("span_short", "span_short_rhs",
+                                        {0, mir::UnsizedLeaf::Vector})),
+          "full-span assignment checks storage length");
     put_real("span_shape", {0, 0, 0, 0}, {2, 2});
     put_real("span_shape_rhs", {1, 2, 3, 4}, {4});
-    check(
-        assignment_refused(full_write("span_shape", "span_shape_rhs", "UArray",
-                                      {1, mir::UnsizedLeaf::Vector})),
-        "full-span assignment checks logical shape");
+    check(assignment_refused(full_write("span_shape", "span_shape_rhs",
+                                        {1, mir::UnsizedLeaf::Vector})),
+          "full-span assignment checks logical shape");
 
     // Keep the pre-existing matrix column form on its own two-index path.
     put_real("span_matrix", {1, 2, 3, 4}, {2, 2});
     put_real("span_column", {9, 8}, {2});
-    mir::Stmt column_write = full_write("span_matrix", "span_column", "UVector",
-                                        {0, mir::UnsizedLeaf::Vector});
+    mir::Stmt column_write =
+        full_write("span_matrix", "span_column", {0, mir::UnsizedLeaf::Vector});
     column_write.lhs_idx = {all(), single(2)};
     interp.run({column_write});
     check(interp.env().at("span_matrix").r == std::vector<double>({1, 2, 9, 8}),
@@ -1509,7 +1478,6 @@ int main(int argc, char** argv) {
     row_write.lhs_idx = {single(1), between(1, 2)};
     row_write.rhs.kind = mir::Expr::Var;
     row_write.rhs.name = "replacement";
-    row_write.rhs.type_ = "(UArray UInt)";
     row_write.rhs.unsized = {1, mir::UnsizedLeaf::Int};
     row_write.rhs.data_only = true;
     interp.run({row_write});
@@ -1557,7 +1525,6 @@ int main(int argc, char** argv) {
     scatter_write.lhs_idx = {multi("scatter_indices")};
     scatter_write.rhs.kind = mir::Expr::Var;
     scatter_write.rhs.name = "scatter_rhs";
-    scatter_write.rhs.type_ = "UVector";
     scatter_write.rhs.unsized = {0, mir::UnsizedLeaf::Vector};
     scatter_write.rhs.data_only = true;
     interp.run({scatter_write});
@@ -1584,7 +1551,6 @@ int main(int argc, char** argv) {
     int_scatter_write.lhs = "int_scatter_target";
     int_scatter_write.lhs_idx = {multi("scatter_indices")};
     int_scatter_write.rhs.name = "int_scatter_rhs";
-    int_scatter_write.rhs.type_ = "(UArray UInt)";
     int_scatter_write.rhs.unsized = {1, mir::UnsizedLeaf::Int};
     interp.run({int_scatter_write});
     const DataMap::Entry& int_scattered = interp.env().at("int_scatter_target");
@@ -1618,7 +1584,6 @@ int main(int argc, char** argv) {
     matrix_scatter_write.lhs_idx = {multi("matrix_scatter_indices"),
                                     between(1, 2)};
     matrix_scatter_write.rhs.name = "matrix_scatter_rhs";
-    matrix_scatter_write.rhs.type_ = "(UArray (UArray UInt))";
     matrix_scatter_write.rhs.unsized = {2, mir::UnsizedLeaf::Int};
     interp.run({matrix_scatter_write});
     const DataMap::Entry& matrix_scattered =
@@ -1650,14 +1615,12 @@ int main(int argc, char** argv) {
     mir::Expr nan_value;
     nan_value.kind = mir::Expr::LitReal;
     nan_value.lit = std::numeric_limits<double>::quiet_NaN();
-    nan_value.type_ = "UReal";
     nan_value.unsized = {0, mir::UnsizedLeaf::Real};
     nan_value.data_only = true;
     mir::Expr is_nan;
     is_nan.kind = mir::Expr::FunApp;
     is_nan.fn_lib = mir::Expr::Lib::StanLib;
     is_nan.name = "is_nan";
-    is_nan.type_ = "UInt";
     is_nan.unsized = {0, mir::UnsizedLeaf::Int};
     is_nan.data_only = true;
     is_nan.args = {nan_value};
@@ -1677,13 +1640,11 @@ int main(int argc, char** argv) {
     mir::Expr power_values;
     power_values.kind = mir::Expr::Var;
     power_values.name = "powers";
-    power_values.type_ = "UVector";
     power_values.unsized.leaf = mir::UnsizedLeaf::Vector;
     power_values.data_only = true;
     mir::Expr elt_pow;
     elt_pow.kind = mir::Expr::FunApp;
     elt_pow.name = "EltPow__";
-    elt_pow.type_ = "UVector";
     elt_pow.unsized.leaf = mir::UnsizedLeaf::Vector;
     elt_pow.data_only = true;
     elt_pow.args = {power_values, integer(2)};
@@ -1706,7 +1667,6 @@ int main(int argc, char** argv) {
     mir::Expr whole_value_base;
     whole_value_base.kind = mir::Expr::Var;
     whole_value_base.name = "whole_value_vector";
-    whole_value_base.type_ = "UVector";
     whole_value_base.unsized = {0, mir::UnsizedLeaf::Vector};
     whole_value_base.data_only = true;
     mir::Expr whole_value_indexed;
@@ -1748,12 +1708,11 @@ int main(int argc, char** argv) {
   // semantics and the first-index-fast layout of array[N] vector[K]: the
   // logical observations below are {1,2} and {3,4}, not {1,3} and {2,4}.
   {
-    auto variable = [](const std::string& name, const std::string& type,
-                       uint8_t depth, mir::UnsizedLeaf leaf) {
+    auto variable = [](const std::string& name, uint8_t depth,
+                       mir::UnsizedLeaf leaf) {
       mir::Expr expression;
       expression.kind = mir::Expr::Var;
       expression.name = name;
-      expression.type_ = type;
       expression.unsized = {depth, leaf};
       return expression;
     };
@@ -1761,12 +1720,10 @@ int main(int argc, char** argv) {
     density.kind = mir::Expr::FunApp;
     density.fn_lib = mir::Expr::Lib::StanLib;
     density.name = "multi_normal_cholesky_lpdf";
-    density.type_ = "UReal";
     density.unsized = {0, mir::UnsizedLeaf::Real};
-    density.args = {
-        variable("y", "(UArray UVector)", 1, mir::UnsizedLeaf::Vector),
-        variable("mu", "UVector", 0, mir::UnsizedLeaf::Vector),
-        variable("L", "UMatrix", 0, mir::UnsizedLeaf::Matrix)};
+    density.args = {variable("y", 1, mir::UnsizedLeaf::Vector),
+                    variable("mu", 0, mir::UnsizedLeaf::Vector),
+                    variable("L", 0, mir::UnsizedLeaf::Matrix)};
 
     std::vector<Eigen::VectorXd> ys(2, Eigen::VectorXd(2));
     ys[0] << 1.0, 2.0;
@@ -1808,7 +1765,7 @@ int main(int argc, char** argv) {
 
     mir::Expr vectorized_density = density;
     vectorized_density.args[1] =
-        variable("mu_many", "(UArray UVector)", 1, mir::UnsizedLeaf::Vector);
+        variable("mu_many", 1, mir::UnsizedLeaf::Vector);
     DataMap::Entry locations;
     locations.dims = {2, 2};
     locations.r = {0.4, -0.2, -0.7, 0.9};
@@ -1886,7 +1843,6 @@ int main(int argc, char** argv) {
       mir::Expr e;
       e.kind = mir::Expr::LitInt;
       e.lit_i = value;
-      e.type_ = "UInt";
       e.unsized = {0, mir::UnsizedLeaf::Int};
       e.data_only = true;
       return e;
@@ -1894,20 +1850,17 @@ int main(int argc, char** argv) {
     mir::Expr alpha;
     alpha.kind = mir::Expr::Var;
     alpha.name = "alpha";
-    alpha.type_ = "UReal";
     alpha.unsized = {0, mir::UnsizedLeaf::Real};
     alpha.data_only = false;
     mir::Expr beta;
     beta.kind = mir::Expr::LitReal;
     beta.lit = 2.2;
-    beta.type_ = "UReal";
     beta.unsized = {0, mir::UnsizedLeaf::Real};
     beta.data_only = true;
     mir::Expr density;
     density.kind = mir::Expr::FunApp;
     density.fn_lib = mir::Expr::Lib::StanLib;
     density.name = "beta_binomial_lpmf";
-    density.type_ = "UReal";
     density.unsized = {0, mir::UnsizedLeaf::Real};
     density.args = {integer(1), integer(4), alpha, beta};
 
@@ -1958,41 +1911,41 @@ int main(int argc, char** argv) {
     real_value("rv3", {1.0, 2.0, 3.0}, {3});
     real_value("m23", {1.0, 2.0, 3.0, 4.0, 5.0, 6.0}, {2, 3});
     auto query = [&](const std::string& name, const std::string& arg,
-                     const std::string& arg_type) {
+                     mir::UnsizedLeaf arg_type) {
       mir::Expr a;
       a.kind = mir::Expr::Var;
       a.name = arg;
-      a.type_ = arg_type;
+      a.unsized = {0, arg_type};
       a.data_only = true;
       mir::Expr call;
       call.kind = mir::Expr::FunApp;
       call.name = name;
-      call.type_ = "UInt";
+      call.unsized = {0, mir::UnsizedLeaf::Int};
       call.data_only = true;
       call.args = {a};
       const DataMap::Entry got = interp.eval(call);
       return got.is_int && got.i.size() == 1 ? (long)got.i[0] : -1;
     };
-    check(query("rows", "v3", "UVector") == 3 &&
-              query("cols", "v3", "UVector") == 1,
+    check(query("rows", "v3", mir::UnsizedLeaf::Vector) == 3 &&
+              query("cols", "v3", mir::UnsizedLeaf::Vector) == 1,
           "vector[3] is 3 rows by 1 col");
-    check(query("rows", "rv3", "URowVector") == 1 &&
-              query("cols", "rv3", "URowVector") == 3,
+    check(query("rows", "rv3", mir::UnsizedLeaf::RowVector) == 1 &&
+              query("cols", "rv3", mir::UnsizedLeaf::RowVector) == 3,
           "row_vector[3] is 1 row by 3 cols");
-    check(query("rows", "m23", "UMatrix") == 2 &&
-              query("cols", "m23", "UMatrix") == 3,
+    check(query("rows", "m23", mir::UnsizedLeaf::Matrix) == 2 &&
+              query("cols", "m23", mir::UnsizedLeaf::Matrix) == 3,
           "matrix[2, 3] is 2 rows by 3 cols");
     // The task-shaped repro: `int r = rows(rv); int c = cols(rv);` folds to
     // 13 for a row_vector[3], and folded to 31 while orientation was lost.
-    check(query("rows", "rv3", "URowVector") * 10 +
-                  query("cols", "rv3", "URowVector") ==
+    check(query("rows", "rv3", mir::UnsizedLeaf::RowVector) * 10 +
+                  query("cols", "rv3", mir::UnsizedLeaf::RowVector) ==
               13,
           "row_vector shape query reaches transformed data as 13");
     // size()/num_elements() count elements and are orientation-blind; they
     // must not move when rows()/cols() start consulting the type.
     for (const std::string& name : {"size", "num_elements"})
-      check(query(name, "rv3", "URowVector") == 3 &&
-                query(name, "v3", "UVector") == 3,
+      check(query(name, "rv3", mir::UnsizedLeaf::RowVector) == 3 &&
+                query(name, "v3", mir::UnsizedLeaf::Vector) == 3,
             name + " counts elements of either vector kind");
   }
 
@@ -2017,12 +1970,13 @@ int main(int argc, char** argv) {
       mir::Expr argument;
       argument.kind = mir::Expr::Var;
       argument.name = name;
-      argument.type_ = name == "vector" ? "UVector" : "UMatrix";
+      argument.unsized = {0, name == "vector" ? mir::UnsizedLeaf::Vector
+                                              : mir::UnsizedLeaf::Matrix};
       argument.data_only = true;
       mir::Expr expression;
       expression.kind = mir::Expr::FunApp;
       expression.name = "diagonal";
-      expression.type_ = "UVector";
+      expression.unsized = {0, mir::UnsizedLeaf::Vector};
       expression.data_only = true;
       expression.args = {argument};
       return interp.eval(expression);

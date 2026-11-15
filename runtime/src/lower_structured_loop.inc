@@ -28,8 +28,7 @@ bool bounded_output_candidate(const mir::Stmt& root,
                               std::set<std::string>* references) {
   if (!in_write_array ||
       wa_section != mir::OutputVar::Block::GeneratedQuantities ||
-      root.kind != mir::Stmt::Block ||
-      structured_policy == StructuredMode::Off)
+      root.kind != mir::Stmt::Block || structured_policy == StructuredMode::Off)
     return false;
   std::set<std::string> locals, dependent;
   std::map<std::string, size_t> containers;
@@ -66,11 +65,12 @@ bool bounded_output_candidate(const mir::Stmt& root,
     if (e.kind == mir::Expr::Indexed) {
       if (e.args.size() < 2 || e.args[0].kind != mir::Expr::Var ||
           !containers.count(e.args[0].name) ||
-          (!container_argument && e.type_ != "UReal" && e.type_ != "UInt"))
+          (!container_argument && !mir::is_unsized(e, mir::UnsizedLeaf::Real) &&
+           !mir::is_unsized(e, mir::UnsizedLeaf::Int)))
         return false;
       for (size_t i = 1; i < e.args.size(); ++i)
-        if (e.args[i].kind != mir::Expr::IndexSingle || e.args[i].args.size() != 1 ||
-            !self(self, e.args[i].args[0]))
+        if (e.args[i].kind != mir::Expr::IndexSingle ||
+            e.args[i].args.size() != 1 || !self(self, e.args[i].args[0]))
           return false;
       return true;
     }
@@ -116,7 +116,8 @@ bool bounded_output_candidate(const mir::Stmt& root,
         if (containers.count(s.lhs)) {
           if (s.lhs_idx.size() != containers.at(s.lhs)) return false;
           for (const auto& index : s.lhs_idx)
-            if (index.kind != mir::Expr::IndexSingle || index.args.size() != 1 ||
+            if (index.kind != mir::Expr::IndexSingle ||
+                index.args.size() != 1 ||
                 !expression(expression, index.args[0]))
               return false;
         } else {
@@ -1222,8 +1223,7 @@ void region_refine_condition(const mir::Expr& e, bool truth) {
 
 // Compile a fixed-shape indexed access; values of selectors stay runtime.
 Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
-                 const std::string& type, mir::UnsizedView result_view,
-                 const Val* rhs = nullptr) {
+                 mir::UnsizedView result_view, const Val* rhs = nullptr) {
   auto spec = std::make_shared<DynamicIndexSpec>();
   std::vector<int64_t> dims;
   ViewKind leaf = base.si.kind;
@@ -1287,7 +1287,8 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
       index_width += axis.count;
       if (runtime_count >= 0) {
         axis.count_input_offset = index_width;
-        Val count{runtime_count, false, view_of("UInt")};
+        Val count{runtime_count, false,
+                  view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int})};
         count.si.param_free = true;
         index_offsets.push_back(index_width);
         indices.push_back(count);
@@ -1335,7 +1336,8 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
         d < base.runtime_dims.size() ? base.runtime_dims[d] : -1;
     if (base_runtime_dim >= 0) {
       axis.extent_input_offset = index_width;
-      Val extent{base_runtime_dim, false, view_of("UInt")};
+      Val extent{base_runtime_dim, false,
+                 view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int})};
       extent.si.param_free = true;
       index_offsets.push_back(index_width);
       indices.push_back(extent);
@@ -1353,11 +1355,11 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
     spec->axes.push_back(axis);
   }
   spec->selected_size = selected;
-  SlotInfo si = view_of(type);
-  if (type == "UMatrix") {
+  SlotInfo si = view_of(result_view);
+  if (mir::is_unsized(result_view, mir::UnsizedLeaf::Matrix)) {
     if (output_dims.size() < 2) fail("structured matrix selection shape");
     si = matrix_view(output_dims[output_dims.size() - 2], output_dims.back());
-  } else if (type.find("UArray") != std::string::npos) {
+  } else if (mir::is_unsized_array(result_view)) {
     si = array_view(output_dims, leaf_kind(result_view.leaf));
   }
   Val result;
@@ -1478,14 +1480,12 @@ std::optional<Val> region_expr(const mir::Expr& e) {
   if (e.kind == mir::Expr::Indexed) {
     if (e.args.size() == 1) return lower_expr(e.args[0]);
     Val base = lower_expr(e.args[0]);
-    return region_index(base, {e.args.begin() + 1, e.args.end()}, e.type_,
-                        e.unsized);
+    return region_index(base, {e.args.begin() + 1, e.args.end()}, e.unsized);
   }
   if (e.kind == mir::Expr::EAnd || e.kind == mir::Expr::EOr) {
     mir::Expr zero;
     zero.kind = mir::Expr::LitInt;
     zero.lit_i = 0;
-    zero.type_ = "UInt";
     zero.unsized = {0, mir::UnsizedLeaf::Int};
     zero.data_only = true;
     mir::Expr one = zero;
@@ -1495,7 +1495,6 @@ std::optional<Val> region_expr(const mir::Expr& e) {
     truth.name = "NEquals__";
     truth.fn_lib = mir::Expr::Lib::StanLib;
     truth.args = {e.args[1], zero};
-    truth.type_ = "UInt";
     truth.unsized = zero.unsized;
     mir::Expr choice = e;
     choice.kind = mir::Expr::TernaryIf;
@@ -1585,7 +1584,7 @@ bool runtime_int_expression(const mir::Expr& e) {
     if (x.kind == mir::Expr::Var || x.kind == mir::Expr::Indexed) {
       if (!needs_runtime_value(x)) return true;
       found = true;
-      return x.type_ == "UInt";
+      return mir::is_unsized(x, mir::UnsizedLeaf::Int);
     }
     for (const auto& argument : x.args)
       if (!self(self, argument)) return false;
@@ -1600,8 +1599,8 @@ bool runtime_selector(const mir::Expr& index) {
     // an integer index cannot depend on a parameter. One read from a slot
     // (an integer a runtime loop wrote) still selects at run time.
     if (write_array_unregioned() && index.kind == mir::Expr::IndexSingle &&
-        argument.type_ == "UInt" && needs_runtime_value(argument) &&
-        !try_eval_pure(argument))
+        mir::is_unsized(argument, mir::UnsizedLeaf::Int) &&
+        needs_runtime_value(argument) && !try_eval_pure(argument))
       return true;
   }
   return false;
@@ -1640,10 +1639,12 @@ std::optional<Val> lower_runtime_scalar(const mir::Expr& e) {
   if (comparison != comparisons.end()) {
     Val a = lower_expr(e.args.at(0)), v;
     if (e.args.size() == 1)
-      v = emit_value(OP_COMPARE, {a}, 1, view_of("UInt"));
+      v = emit_value(OP_COMPARE, {a}, 1,
+                     view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int}));
     else {
       Val b = lower_expr(e.args.at(1));
-      v = emit_value(OP_COMPARE, {a, b}, 1, view_of("UInt"));
+      v = emit_value(OP_COMPARE, {a, b}, 1,
+                     view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int}));
     }
     g.ops.back().variant = static_cast<uint8_t>(comparison->second);
     v.autodiff = false;
@@ -1657,10 +1658,12 @@ std::optional<Val> lower_runtime_scalar(const mir::Expr& e) {
       auto range = region_range(e);
       Val a = lower_expr(e.args.at(0)), v;
       if (e.args.size() == 1)
-        v = emit_value(OP_INT_ARITH, {a}, 1, view_of("UInt"));
+        v = emit_value(OP_INT_ARITH, {a}, 1,
+                       view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int}));
       else {
         Val b = lower_expr(e.args.at(1));
-        v = emit_value(OP_INT_ARITH, {a, b}, 1, view_of("UInt"));
+        v = emit_value(OP_INT_ARITH, {a, b}, 1,
+                       view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int}));
       }
       g.ops.back().variant = static_cast<uint8_t>(operation->second);
       v.autodiff = false;
@@ -1953,7 +1956,8 @@ Flow lower_region_stmt(const mir::Stmt& s) {
             if (body.kind != mir::Stmt::Assignment || body.lhs_idx.size() != 1)
               return;
             const mir::Expr& index = body.lhs_idx[0];
-            if (index.kind != mir::Expr::IndexSingle || index.args.size() != 1 ||
+            if (index.kind != mir::Expr::IndexSingle ||
+                index.args.size() != 1 ||
                 index.args[0].kind != mir::Expr::Var ||
                 index.args[0].name != s.loopvar)
               return;
@@ -2028,7 +2032,8 @@ Flow lower_region_stmt(const mir::Stmt& s) {
                                                     ? std::optional<Val>{}
                                                     : saved_scope->second;
       const auto dependencies = region_dependencies(s);
-      Val iterator{add_slot(1, false), false, view_of("UInt")};
+      Val iterator{add_slot(1, false), false,
+                   view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int})};
       iterator.si.param_free = lower.si.param_free && upper.si.param_free;
       scope[s.loopvar] = iterator;
       region_forget(s.loopvar);
@@ -2129,7 +2134,6 @@ Flow lower_region_stmt(const mir::Stmt& s) {
           mir::Expr choice;
           choice.kind = mir::Expr::TernaryIf;
           choice.args = {s.cond, then_value, else_value};
-          choice.type_ = then_value.type_;
           choice.unsized = then_value.unsized;
           choice.data_only =
               s.cond.data_only && then_value.data_only && else_value.data_only;
@@ -2286,7 +2290,8 @@ Flow lower_region_stmt(const mir::Stmt& s) {
           // A declaration evaluates its extent once.  Preserve that value
           // even if the source integer is assigned again later in the
           // iteration.
-          Val snapshot{add_slot(1, false), false, view_of("UInt")};
+          Val snapshot{add_slot(1, false), false,
+                       view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int})};
           snapshot.si.param_free = extent.si.param_free;
           region_alias(snapshot.slot, extent.slot);
           if (auto r = int_ranges.find(extent.slot); r != int_ranges.end())
@@ -2295,9 +2300,9 @@ Flow lower_region_stmt(const mir::Stmt& s) {
         }
         SlotInfo si;
         if (s.decl_type.base == "SVector")
-          si = view_of("UVector");
+          si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Vector});
         else if (s.decl_type.base == "SRowVector")
-          si = view_of("URowVector");
+          si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::RowVector});
         else
           si = array_view(dimensions, leaf_kind(s.decl_type.elem_base));
         si.param_free = true;
@@ -2328,7 +2333,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
         Val value = s.has_init ? lower_expr(s.init) : constant(INT32_MIN);
         const bool parameter_free = value.si.param_free;
         value.autodiff = false;
-        value.si = view_of("UInt");
+        value.si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int});
         value.si.param_free = parameter_free;
         scope[s.decl_id] = value;
         decls[s.decl_id] = DeclView{1, false, value.si};
@@ -2381,7 +2386,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       }
       if (!s.lhs_idx.empty()) {
         Val base = scope.at(s.lhs);
-        rhs = region_index(base, s.lhs_idx, s.rhs.type_, s.rhs.unsized, &rhs);
+        rhs = region_index(base, s.lhs_idx, s.rhs.unsized, &rhs);
         range = {};
         real_range = {};
       }
@@ -2571,7 +2576,9 @@ bool region_auto_profitable(
 // fusion path, while duplicating only a bounded amount of compiler work.
 // Merely fitting the expansion limit is NOT evidence for unrolling.
 static bool region_scalar_expression(const mir::Expr& e) {
-  if (e.type_ != "UReal" && e.type_ != "UInt") return false;
+  if (!mir::is_unsized(e, mir::UnsizedLeaf::Real) &&
+      !mir::is_unsized(e, mir::UnsizedLeaf::Int))
+    return false;
   switch (e.kind) {
     case mir::Expr::Var:
     case mir::Expr::LitInt:
@@ -2979,7 +2986,8 @@ bool try_lower_region(
       if (!region_current)
         fail("structured live-out keeps a runtime logical extent: " + names[i]);
       const size_t index = output_index.at(dim);
-      dim = emit_raw(OP_INDEX, {result.slot}, 1, view_of("UInt"),
+      dim = emit_raw(OP_INDEX, {result.slot}, 1,
+                     view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int}),
                      {checked_immediate(output_offsets[index],
                                         "structured extent output offset")},
                      -1, false)

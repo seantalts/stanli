@@ -16,7 +16,6 @@ type wire_expr =
   ; e_lit: float
   ; e_lit_s: string
   ; e_args: wire_expr list
-  ; e_type: string
   ; e_unsized: unsized_view
   ; e_data_only: bool
   ; e_promoted: bool
@@ -82,7 +81,6 @@ let default_expr () =
   ; e_lit= 0.
   ; e_lit_s= ""
   ; e_args= []
-  ; e_type= ""
   ; e_unsized= unsupported_view
   ; e_data_only= false
   ; e_promoted= false
@@ -151,7 +149,7 @@ let raw_stmt_pattern pattern =
 
 let is_data_only = function UnsizedType.DataOnly -> true | _ -> false
 
-let unsized_view_and_type typ =
+let unsized_view_and_raw typ =
   let rec unwind depth = function
     | UnsizedType.UArray inner ->
         if depth = 255 then
@@ -159,21 +157,20 @@ let unsized_view_and_type typ =
         unwind (depth + 1) inner
     | leaf -> (depth, leaf) in
   let depth, leaf_type = unwind 0 typ in
-  let leaf, atom =
+  let leaf =
     match leaf_type with
-    | UnsizedType.UInt -> ("Int", "UInt")
-    | UReal -> ("Real", "UReal")
-    | UComplex -> ("Complex", "UComplex")
-    | UVector -> ("Vector", "UVector")
-    | URowVector -> ("RowVector", "URowVector")
-    | UMatrix -> ("Matrix", "UMatrix")
+    | UnsizedType.UInt -> "Int"
+    | UReal -> "Real"
+    | UComplex -> "Complex"
+    | UVector -> "Vector"
+    | URowVector -> "RowVector"
+    | UMatrix -> "Matrix"
     | UComplexVector | UComplexRowVector | UComplexMatrix | UTuple _ | UFun _
      |UMathLibraryFunction ->
-        ("Unknown", "")
+        "Unknown"
     | UArray _ -> assert false in
   let view = {depth; leaf} in
-  if String.equal leaf "Unknown" then (view, "", raw_unsized typ)
-  else (view, (if depth = 0 then atom else "UArray"), "")
+  if String.equal leaf "Unknown" then (view, raw_unsized typ) else (view, "")
 
 let canonical_int32 spelling =
   try Int32.of_string spelling |> Int32.to_string
@@ -233,7 +230,7 @@ let function_type_of = function
       Some
         { ft_args=
             List.map args ~f:(fun (_, typ) ->
-                let view, _, _ = unsized_view_and_type typ in
+                let view, _ = unsized_view_and_raw typ in
                 view)
         ; ft_suffix= suffix_tag suffix }
   | UInt | UReal | UComplex | UVector | URowVector | UMatrix | UComplexVector
@@ -284,10 +281,9 @@ let rec expr_of_t (expr : Expr.Typed.t) =
         { (default_expr ()) with
           e_kind= "Unsupported"
         ; e_raw= raw_expr_pattern expr.pattern } in
-  let view, type_, type_raw = unsized_view_and_type expr.meta.type_ in
+  let view, type_raw = unsized_view_and_raw expr.meta.type_ in
   { base with
-    e_type= type_
-  ; e_unsized= view
+    e_unsized= view
   ; e_data_only= is_data_only expr.meta.adlevel
   ; e_raw= (if String.is_empty type_raw then base.e_raw else type_raw) }
 
@@ -401,7 +397,7 @@ let transform_of_t transform =
 let decl_unsized_of_type = function
   | Type.Sized _ -> None
   | Unsized unsized ->
-      let view, _, raw = unsized_view_and_type unsized in
+      let view, raw = unsized_view_and_raw unsized in
       Some (view, raw)
 
 let read_param_fields (expr : Expr.Typed.t) =
@@ -539,7 +535,7 @@ let fun_of_t (definition : Stmt.Located.t Program.fun_def) =
   let arg_names, arg_types, arg_views, arg_data_only =
     List.fold_right definition.fdargs ~init:([], [], [], [])
       ~f:(fun (adlevel, name, typ) (names, types, views, levels) ->
-        let view, _, _ = unsized_view_and_type typ in
+        let view, _ = unsized_view_and_raw typ in
         ( name :: names
         , raw_unsized typ :: types
         , view :: views
@@ -657,7 +653,6 @@ let add_v2_function_type buffer {ft_args; ft_suffix} =
   add_u8 buffer ft_suffix
 
 let add_v2_meta buffer expr =
-  add_v2_string buffer expr.e_type;
   add_v2_view buffer expr.e_unsized;
   add_v2_bool buffer expr.e_data_only;
   add_v2_bool buffer expr.e_promoted;

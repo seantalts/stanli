@@ -33,6 +33,14 @@ using stanli::mir::FunDef;
 using stanli::mir::SizedType;
 using stanli::mir::Stmt;
 using stanli::mir::UnsizedLeaf;
+using stanli::mir::UnsizedView;
+constexpr UnsizedView kInt{0, UnsizedLeaf::Int};
+constexpr UnsizedView kReal{0, UnsizedLeaf::Real};
+constexpr UnsizedView kVector{0, UnsizedLeaf::Vector};
+constexpr UnsizedView kRowVector{0, UnsizedLeaf::RowVector};
+constexpr UnsizedView kMatrix{0, UnsizedLeaf::Matrix};
+constexpr UnsizedView kRealArray{1, UnsizedLeaf::Real};
+constexpr UnsizedView kIntArray{1, UnsizedLeaf::Int};
 using stanli_test::StdoutCapture;
 
 int failures = 0;
@@ -43,7 +51,7 @@ Expr lit_int(long value) {
   Expr e;
   e.kind = Expr::LitInt;
   e.lit_i = value;
-  e.type_ = "UInt";
+  e.unsized = {0, UnsizedLeaf::Int};
   e.data_only = true;
   return e;
 }
@@ -52,7 +60,7 @@ Expr lit_real(double value) {
   Expr e;
   e.kind = Expr::LitReal;
   e.lit = value;
-  e.type_ = "UReal";
+  e.unsized = {0, UnsizedLeaf::Real};
   e.data_only = true;
   return e;
 }
@@ -61,36 +69,35 @@ Expr lit_string(std::string value) {
   Expr e;
   e.kind = Expr::LitStr;
   e.lit_s = std::move(value);
-  e.type_ = "UReal";
+  e.unsized = {0, UnsizedLeaf::Real};
   e.data_only = true;
   return e;
 }
 
-Expr var(std::string name, std::string type) {
+Expr var(std::string name, UnsizedView type) {
   Expr e;
   e.kind = Expr::Var;
   e.name = std::move(name);
-  e.type_ = std::move(type);
+  e.unsized = type;
   return e;
 }
 
-Expr fun(std::string name, std::vector<Expr> args, std::string type,
+Expr fun(std::string name, std::vector<Expr> args, UnsizedView type,
          Expr::Lib lib = Expr::Lib::StanLib) {
   Expr e;
   e.kind = Expr::FunApp;
   e.name = std::move(name);
   e.args = std::move(args);
-  e.type_ = std::move(type);
+  e.unsized = type;
   e.fn_lib = lib;
   return e;
 }
 
-Expr make_array(std::vector<Expr> values, std::string type = "UVector") {
-  return fun("FnMakeArray", std::move(values), std::move(type),
-             Expr::Lib::Internal);
+Expr make_array(std::vector<Expr> values, UnsizedView type = kVector) {
+  return fun("FnMakeArray", std::move(values), type, Expr::Lib::Internal);
 }
 
-Expr index_single(Expr base, long index, std::string type) {
+Expr index_single(Expr base, long index, UnsizedView type) {
   Expr ix;
   ix.kind = stanli::mir::Expr::IndexSingle;
   ix.args.push_back(lit_int(index));
@@ -99,7 +106,7 @@ Expr index_single(Expr base, long index, std::string type) {
   e.kind = Expr::Indexed;
   e.args.push_back(std::move(base));
   e.args.push_back(std::move(ix));
-  e.type_ = std::move(type);
+  e.unsized = type;
   return e;
 }
 
@@ -464,12 +471,12 @@ void test_short_circuit_or() {
   // Stan's || evaluates its right operand only when the left operand is
   // false.  The invalid density must therefore never be called here.
   Expr bad_density =
-      fun("normal_lpdf", {lit_real(0), lit_real(0), lit_real(-1)}, "UReal");
+      fun("normal_lpdf", {lit_real(0), lit_real(0), lit_real(-1)}, kReal);
   Expr invalid_rhs =
-      fun("Greater__", {std::move(bad_density), lit_real(0)}, "UInt");
+      fun("Greater__", {std::move(bad_density), lit_real(0)}, kInt);
   Expr disjunction;
   disjunction.kind = Expr::EOr;
-  disjunction.type_ = "UInt";
+  disjunction.unsized = {0, UnsizedLeaf::Int};
   disjunction.args = {lit_int(1), std::move(invalid_rhs)};
 
   FunDef entry =
@@ -484,12 +491,12 @@ void test_short_circuit_and() {
   // Stan's && evaluates its right operand only when the left operand is
   // true.  The invalid density must therefore never be called here.
   Expr bad_density =
-      fun("normal_lpdf", {lit_real(0), lit_real(0), lit_real(-1)}, "UReal");
+      fun("normal_lpdf", {lit_real(0), lit_real(0), lit_real(-1)}, kReal);
   Expr invalid_rhs =
-      fun("Greater__", {std::move(bad_density), lit_real(0)}, "UInt");
+      fun("Greater__", {std::move(bad_density), lit_real(0)}, kInt);
   Expr conjunction;
   conjunction.kind = Expr::EAnd;
-  conjunction.type_ = "UInt";
+  conjunction.unsized = {0, UnsizedLeaf::Int};
   conjunction.args = {lit_int(0), std::move(invalid_rhs)};
 
   FunDef entry =
@@ -504,14 +511,13 @@ void test_short_circuit_or_requires_rhs() {
   // Complement the skipping polarity: when the runtime left operand is
   // false, || must evaluate the invalid right operand and surface its error.
   Expr bad_density =
-      fun("normal_lpdf", {lit_real(0), lit_real(0), lit_real(-1)}, "UReal");
+      fun("normal_lpdf", {lit_real(0), lit_real(0), lit_real(-1)}, kReal);
   Expr invalid_rhs =
-      fun("Greater__", {std::move(bad_density), lit_real(0)}, "UInt");
-  Expr runtime_left =
-      fun("Greater__", {var("t", "UReal"), lit_real(0)}, "UInt");
+      fun("Greater__", {std::move(bad_density), lit_real(0)}, kInt);
+  Expr runtime_left = fun("Greater__", {var("t", kReal), lit_real(0)}, kInt);
   Expr disjunction;
   disjunction.kind = Expr::EOr;
-  disjunction.type_ = "UInt";
+  disjunction.unsized = {0, UnsizedLeaf::Int};
   disjunction.args = {std::move(runtime_left), std::move(invalid_rhs)};
 
   FunDef entry =
@@ -527,14 +533,13 @@ void test_short_circuit_and_requires_rhs() {
   // Complement the skipping polarity: when the runtime left operand is
   // true, && must evaluate the invalid right operand and surface its error.
   Expr bad_density =
-      fun("normal_lpdf", {lit_real(0), lit_real(0), lit_real(-1)}, "UReal");
+      fun("normal_lpdf", {lit_real(0), lit_real(0), lit_real(-1)}, kReal);
   Expr invalid_rhs =
-      fun("Greater__", {std::move(bad_density), lit_real(0)}, "UInt");
-  Expr runtime_left =
-      fun("Greater__", {var("t", "UReal"), lit_real(0)}, "UInt");
+      fun("Greater__", {std::move(bad_density), lit_real(0)}, kInt);
+  Expr runtime_left = fun("Greater__", {var("t", kReal), lit_real(0)}, kInt);
   Expr conjunction;
   conjunction.kind = Expr::EAnd;
-  conjunction.type_ = "UInt";
+  conjunction.unsized = {0, UnsizedLeaf::Int};
   conjunction.args = {std::move(runtime_left), std::move(invalid_rhs)};
 
   FunDef entry =
@@ -548,9 +553,9 @@ void test_short_circuit_and_requires_rhs() {
 
 void test_uninitialized_real() {
   // A bare local real has Stan's uninitialized NaN value, never numeric zero.
-  FunDef entry = rhs_function("uninitialized_rhs",
-                              {declaration("u", "SReal"),
-                               return_value(make_array({var("u", "UReal")}))});
+  FunDef entry = rhs_function(
+      "uninitialized_rhs",
+      {declaration("u", "SReal"), return_value(make_array({var("u", kReal)}))});
   run_case("uninitialized real", "a bare real observes as NaN",
            {std::move(entry)}, 1.0, {std::numeric_limits<double>::quiet_NaN()});
 }
@@ -564,20 +569,20 @@ void test_nullary_constants() {
     run_case("nullary " + name, "constant compiles identically",
              {std::move(entry)}, 1.0, {expected});
   };
-  check("e", fun("e", {}, "UReal"), stan::math::e());
-  check("pi", fun("pi", {}, "UReal"), stan::math::pi());
-  check("log2", fun("log2", {}, "UReal"), stan::math::log2());
-  check("log10", fun("log10", {}, "UReal"), stan::math::log10());
-  check("sqrt2", fun("sqrt2", {}, "UReal"), stan::math::sqrt2());
-  check("machine_precision", fun("machine_precision", {}, "UReal"),
+  check("e", fun("e", {}, kReal), stan::math::e());
+  check("pi", fun("pi", {}, kReal), stan::math::pi());
+  check("log2", fun("log2", {}, kReal), stan::math::log2());
+  check("log10", fun("log10", {}, kReal), stan::math::log10());
+  check("sqrt2", fun("sqrt2", {}, kReal), stan::math::sqrt2());
+  check("machine_precision", fun("machine_precision", {}, kReal),
         std::numeric_limits<double>::epsilon());
-  check("negative_infinity", fun("negative_infinity", {}, "UReal"),
+  check("negative_infinity", fun("negative_infinity", {}, kReal),
         -std::numeric_limits<double>::infinity());
-  check("positive_infinity", fun("positive_infinity", {}, "UReal"),
+  check("positive_infinity", fun("positive_infinity", {}, kReal),
         std::numeric_limits<double>::infinity());
-  check("not_a_number", fun("not_a_number", {}, "UReal"),
+  check("not_a_number", fun("not_a_number", {}, kReal),
         std::numeric_limits<double>::quiet_NaN());
-  check("FnNegInf", fun("FnNegInf", {}, "UReal", Expr::Lib::Internal),
+  check("FnNegInf", fun("FnNegInf", {}, kReal, Expr::Lib::Internal),
         -std::numeric_limits<double>::infinity());
 }
 
@@ -585,13 +590,13 @@ void test_discrete_densities() {
   // The integer-outcome densities. Their outcome rides in idata rather than
   // on an argument register, so both routes reach the graph kernel and the
   // oracle is Stan Math's own propto-OFF value.
-  const Expr rate = var("t", "UReal");
+  const Expr rate = var("t", kReal);
   const int64_t library_ulps = 2;
   const auto check = [&](const std::string& name, std::vector<Expr> args,
                          double expected) {
     FunDef entry = rhs_function(
         name + "_rhs",
-        {return_value(make_array({fun(name, std::move(args), "UReal")}))});
+        {return_value(make_array({fun(name, std::move(args), kReal)}))});
     run_program_case(name, "an integer outcome reaches the same kernel",
                      {std::move(entry)}, 0.25, {expected}, library_ulps);
   };
@@ -617,11 +622,10 @@ void test_full_span_ode_vector() {
   // ODE RHS compilation is one production caller of ProgramCompiler. The
   // destination is vector[1], and y supplies a vector view of exactly that
   // width, so the indexed assignment must stay on the compiled path.
-  FunDef entry =
-      rhs_function("full_span_vector_rhs",
-                   {declaration("copy", "SVector", {lit_int(1)}),
-                    full_span_assignment("copy", var("y", "UVector")),
-                    return_value(var("copy", "UVector"))});
+  FunDef entry = rhs_function("full_span_vector_rhs",
+                              {declaration("copy", "SVector", {lit_int(1)}),
+                               full_span_assignment("copy", var("y", kVector)),
+                               return_value(var("copy", kVector))});
   run_case("full-span ODE vector", "vector[1] copy[:] = y returns y",
            {std::move(entry)}, 1.0, {0.25});
 }
@@ -643,10 +647,10 @@ void test_full_span_program_views() {
     compiler.emit_const(rhs.reg, values.data(), rhs.len);
     compiler.reals["dst"] = dst;
     compiler.reals["rhs"] = rhs;
-    const std::string rhs_type =
-        rhs.kind == stanli::ViewKind::Vector      ? "UVector"
-        : rhs.kind == stanli::ViewKind::RowVector ? "URowVector"
-                                                  : "UArray";
+    const UnsizedView rhs_type = rhs.kind == stanli::ViewKind::Vector ? kVector
+                                 : rhs.kind == stanli::ViewKind::RowVector
+                                     ? kRowVector
+                                     : kRealArray;
     compiler.stmt(full_span_assignment("dst", var("rhs", rhs_type)));
     compiler.finish();
     const stanli::Range out = compiler.reals.at("dst");
@@ -698,7 +702,7 @@ void test_full_span_program_views() {
   mismatch.reals["rhs"] = rhs;
   bool refused = false;
   try {
-    mismatch.stmt(full_span_assignment("dst", var("rhs", "UArray")));
+    mismatch.stmt(full_span_assignment("dst", var("rhs", kRealArray)));
   } catch (const stanli::Bail& error) {
     refused = error.why.find("logical view mismatch") != std::string::npos;
   }
@@ -718,8 +722,8 @@ void test_program_extrema() {
   stanli::ProgramCompiler compiler{program, functions};
   const double values[] = {3.0, -2.0, 7.0, 1.0};
 
-  auto bind = [&](const std::string& name, const std::string& type,
-                  UnsizedLeaf leaf, uint8_t depth, stanli::ViewKind kind) {
+  auto bind = [&](const std::string& name, UnsizedLeaf leaf, uint8_t depth,
+                  stanli::ViewKind kind) {
     stanli::Range range{compiler.alloc(4), 4};
     range.kind = kind;
     if (kind == stanli::ViewKind::Matrix) {
@@ -732,43 +736,36 @@ void test_program_extrema() {
     }
     compiler.emit_const(range.reg, values, 4);
     compiler.reals[name] = range;
-    Expr input = var(name, type);
-    input.unsized = {depth, leaf};
+    Expr input = var(name, {depth, leaf});
     input.data_only = leaf != UnsizedLeaf::Int;
     return input;
   };
-  auto reduce = [&](const char* name, Expr input, const char* result_type,
-                    UnsizedLeaf result_leaf) {
-    Expr call = fun(name, {std::move(input)}, result_type);
-    call.unsized = {0, result_leaf};
+  auto reduce = [&](const char* name, Expr input, UnsizedLeaf result_leaf) {
+    Expr call = fun(name, {std::move(input)}, {0, result_leaf});
     return compiler.expr(call).reg;
   };
 
   std::vector<int> outputs;
+  outputs.push_back(
+      reduce("min", bind("v", UnsizedLeaf::Vector, 0, stanli::ViewKind::Vector),
+             UnsizedLeaf::Real));
   outputs.push_back(reduce(
-      "min",
-      bind("v", "UVector", UnsizedLeaf::Vector, 0, stanli::ViewKind::Vector),
-      "UReal", UnsizedLeaf::Real));
-  outputs.push_back(reduce("max",
-                           bind("rv", "URowVector", UnsizedLeaf::RowVector, 0,
-                                stanli::ViewKind::RowVector),
-                           "UReal", UnsizedLeaf::Real));
-  outputs.push_back(reduce(
-      "min",
-      bind("m", "UMatrix", UnsizedLeaf::Matrix, 0, stanli::ViewKind::Matrix),
-      "UReal", UnsizedLeaf::Real));
-  outputs.push_back(reduce(
-      "max",
-      bind("ar", "UArray", UnsizedLeaf::Real, 1, stanli::ViewKind::Array),
-      "UReal", UnsizedLeaf::Real));
-  outputs.push_back(reduce(
-      "min", bind("ai", "UArray", UnsizedLeaf::Int, 1, stanli::ViewKind::Array),
-      "UInt", UnsizedLeaf::Int));
+      "max", bind("rv", UnsizedLeaf::RowVector, 0, stanli::ViewKind::RowVector),
+      UnsizedLeaf::Real));
+  outputs.push_back(
+      reduce("min", bind("m", UnsizedLeaf::Matrix, 0, stanli::ViewKind::Matrix),
+             UnsizedLeaf::Real));
+  outputs.push_back(
+      reduce("max", bind("ar", UnsizedLeaf::Real, 1, stanli::ViewKind::Array),
+             UnsizedLeaf::Real));
+  outputs.push_back(
+      reduce("min", bind("ai", UnsizedLeaf::Int, 1, stanli::ViewKind::Array),
+             UnsizedLeaf::Int));
 
   Expr lhs = lit_int(9);
   Expr rhs = lit_int(-4);
   lhs.unsized = rhs.unsized = {0, UnsizedLeaf::Int};
-  Expr pair = fun("max", {std::move(lhs), std::move(rhs)}, "UInt");
+  Expr pair = fun("max", {std::move(lhs), std::move(rhs)}, kInt);
   pair.unsized = {0, UnsizedLeaf::Int};
   outputs.push_back(compiler.expr(pair).reg);
   compiler.finish();
@@ -810,13 +807,13 @@ void test_program_extrema() {
 void test_matrix_row_indexing() {
   // A[1] is the complete first row.  For [[1,2],[3,4]], sum(A[1]) is 3;
   // indexing a flattened register is not the same operation.
-  Expr row1 = fun("FnMakeRowVec", {lit_real(1), lit_real(2)}, "URowVector",
+  Expr row1 = fun("FnMakeRowVec", {lit_real(1), lit_real(2)}, kRowVector,
                   Expr::Lib::Internal);
-  Expr row2 = fun("FnMakeRowVec", {lit_real(3), lit_real(4)}, "URowVector",
+  Expr row2 = fun("FnMakeRowVec", {lit_real(3), lit_real(4)}, kRowVector,
                   Expr::Lib::Internal);
-  Expr matrix = make_array({std::move(row1), std::move(row2)}, "UMatrix");
-  Expr first_row = index_single(var("A", "UMatrix"), 1, "URowVector");
-  Expr row_sum = fun("sum", {std::move(first_row)}, "UReal");
+  Expr matrix = make_array({std::move(row1), std::move(row2)}, kMatrix);
+  Expr first_row = index_single(var("A", kMatrix), 1, kRowVector);
+  Expr row_sum = fun("sum", {std::move(first_row)}, kReal);
 
   FunDef entry = rhs_function(
       "matrix_row_rhs", {declaration("A", "SMatrix", {lit_int(2), lit_int(2)}),
@@ -834,14 +831,13 @@ void test_mixed_integer_udf_arguments() {
   score.arg_names = {"a", "b"};
   score.arg_types = {"UInt", "UInt"};
   score.arg_views = {{0, UnsizedLeaf::Int}, {0, UnsizedLeaf::Int}};
-  score.body = {
-      return_value(fun("Plus__",
-                       {fun("Times__", {var("a", "UInt"), lit_int(10)}, "UInt"),
-                        var("b", "UInt")},
-                       "UInt"))};
+  score.body = {return_value(
+      fun("Plus__",
+          {fun("Times__", {var("a", kInt), lit_int(10)}, kInt), var("b", kInt)},
+          kInt))};
 
-  Expr runtime_int = fun("Greater__", {var("t", "UReal"), lit_real(0)}, "UInt");
-  Expr call = fun("score", {std::move(runtime_int), lit_int(3)}, "UInt",
+  Expr runtime_int = fun("Greater__", {var("t", kReal), lit_real(0)}, kInt);
+  Expr call = fun("score", {std::move(runtime_int), lit_int(3)}, kInt,
                   Expr::Lib::UserDefined);
   FunDef entry = rhs_function("mixed_integer_args_rhs",
                               {return_value(make_array({std::move(call)}))});
@@ -856,15 +852,15 @@ void test_runtime_for_bound_effects() {
   bound.arg_names = {"n"};
   bound.arg_types = {"UInt"};
   bound.arg_views = {{0, UnsizedLeaf::Int}};
-  bound.body = {nr_fun_app("FnPrint", {lit_string("bound "), var("n", "UInt")}),
-                return_value(var("n", "UInt"))};
+  bound.body = {nr_fun_app("FnPrint", {lit_string("bound "), var("n", kInt)}),
+                return_value(var("n", kInt))};
   for (int first : {1, 5}) {
     Stmt loop;
     loop.kind = Stmt::For;
     loop.loopvar = "index";
-    loop.lower = fun("bound", {lit_int(first)}, "UInt", Expr::Lib::UserDefined);
+    loop.lower = fun("bound", {lit_int(first)}, kInt, Expr::Lib::UserDefined);
     loop.upper = lit_int(3);
-    loop.body = {nr_fun_app("FnPrint", {var("index", "UInt")})};
+    loop.body = {nr_fun_app("FnPrint", {var("index", kInt)})};
     FunDef entry = rhs_function(
         "runtime_bounds_rhs",
         {std::move(loop), return_value(make_array({lit_real(0)}))});
@@ -874,7 +870,7 @@ void test_runtime_for_bound_effects() {
                          {entry, bound}, 1.0, observed_values({0.0}, printed),
                          nullptr, true);
     entry.body[0].upper =
-        fun("bound", {lit_int(3)}, "UInt", Expr::Lib::UserDefined);
+        fun("bound", {lit_int(3)}, kInt, Expr::Lib::UserDefined);
     const std::string repeated =
         first == 1 ? "bound 1\nbound 3\n1\nbound 3\n2\nbound 3\n3\nbound 3\n"
                    : "bound 5\nbound 3\n";
@@ -894,10 +890,10 @@ void test_nested_print_effect() {
   echo.arg_types = {"UReal"};
   echo.arg_views = {{0, UnsizedLeaf::Real}};
   echo.body = {
-      nr_fun_app("FnPrint", {lit_string("nested print x="), var("x", "UReal")}),
-      return_value(var("x", "UReal"))};
+      nr_fun_app("FnPrint", {lit_string("nested print x="), var("x", kReal)}),
+      return_value(var("x", kReal))};
 
-  Expr call = fun("echo", {var("t", "UReal")}, "UReal", Expr::Lib::UserDefined);
+  Expr call = fun("echo", {var("t", kReal)}, kReal, Expr::Lib::UserDefined);
   FunDef entry = rhs_function("nested_print_rhs",
                               {return_value(make_array({std::move(call)}))});
   run_case("nested print effect",
@@ -911,9 +907,8 @@ void test_print_then_reject_effects() {
   // reject is specifically a domain_error carrying every rendered chunk.
   FunDef entry = rhs_function(
       "print_then_reject_rhs",
-      {nr_fun_app("FnPrint",
-                  {lit_string("before reject t="), var("t", "UReal")}),
-       nr_fun_app("FnReject", {lit_string("bad rhs t="), var("t", "UReal")}),
+      {nr_fun_app("FnPrint", {lit_string("before reject t="), var("t", kReal)}),
+       nr_fun_app("FnReject", {lit_string("bad rhs t="), var("t", kReal)}),
        nr_fun_app("FnPrint", {lit_string("unreachable after reject")}),
        return_value(make_array({lit_real(0)}))});
   run_domain_error_case(
@@ -926,18 +921,18 @@ FunDef runtime_effect_rhs() {
   Stmt effects;
   effects.kind = Stmt::Block;
   effects.body = {nr_fun_app("FnPrint", {lit_string("negative branch t="),
-                                         var("t", "UReal")}),
+                                         var("t", kReal)}),
                   nr_fun_app("FnReject", {lit_string("negative t rejected: "),
-                                          var("t", "UReal")})};
+                                          var("t", kReal)})};
 
   Stmt guarded;
   guarded.kind = Stmt::IfElse;
-  guarded.cond = fun("Less__", {var("t", "UReal"), lit_real(0)}, "UInt");
+  guarded.cond = fun("Less__", {var("t", kReal), lit_real(0)}, kInt);
   guarded.body.push_back(std::move(effects));
 
   return rhs_function(
       "runtime_effect_rhs",
-      {std::move(guarded), return_value(make_array({var("t", "UReal")}))});
+      {std::move(guarded), return_value(make_array({var("t", kReal)}))});
 }
 
 void test_runtime_guarded_effects() {
@@ -957,11 +952,11 @@ void test_early_return_effects() {
   Stmt arm;
   arm.kind = Stmt::Block;
   arm.body = {nr_fun_app("FnPrint", {lit_string("early")}),
-              return_value(make_array({var("t", "UReal")})),
+              return_value(make_array({var("t", kReal)})),
               nr_fun_app("FnReject", {lit_string("unreachable after return")})};
   Stmt guarded;
   guarded.kind = Stmt::IfElse;
-  guarded.cond = fun("Greater__", {var("t", "UReal"), lit_real(0)}, "UInt");
+  guarded.cond = fun("Greater__", {var("t", kReal), lit_real(0)}, kInt);
   guarded.body = {arm};
   FunDef entry = rhs_function(
       "early_effects", {nr_fun_app("FnPrint", {lit_string("prefix")}), guarded,
@@ -978,16 +973,16 @@ void test_early_return_effects() {
 void test_guarded_constructor_error() {
   Stmt guarded;
   guarded.kind = Stmt::IfElse;
-  guarded.cond = fun("Greater__", {var("t", "UReal"), lit_real(0)}, "UInt");
+  guarded.cond = fun("Greater__", {var("t", kReal), lit_real(0)}, kInt);
   guarded.body = {return_value(
       make_array({fun("sum",
                       {fun("linspaced_vector",
-                           {lit_int(-1), lit_real(0), lit_real(1)}, "UVector")},
-                      "UReal")}))};
+                           {lit_int(-1), lit_real(0), lit_real(1)}, kVector)},
+                      kReal)}))};
   FunDef entry =
       rhs_function("guarded_constructor",
                    {nr_fun_app("FnPrint", {lit_string("checked")}), guarded,
-                    return_value(make_array({var("t", "UReal")}))});
+                    return_value(make_array({var("t", kReal)}))});
   run_case("untaken invalid constructor",
            "compilation cannot reject an untaken return", {entry}, -1, {-1},
            "checked\n", "linspaced_vector");
@@ -1000,14 +995,13 @@ void test_to_int() {
   // to_int truncates toward zero: {2.9, -1.7, 5.5} -> {2, -1, 5}, summing to
   // 6 (rounding would give 7), and -2.7 -> -2 (not -3).
   const auto scaled = [](double x) {
-    return fun("Times__", {var("t", "UReal"), lit_real(x)}, "UReal");
+    return fun("Times__", {var("t", kReal), lit_real(x)}, kReal);
   };
-  Expr reals =
-      make_array({scaled(2.9), scaled(-1.7), scaled(5.5)}, "(UArray UReal)");
+  Expr reals = make_array({scaled(2.9), scaled(-1.7), scaled(5.5)}, kRealArray);
   reals.unsized = {1, UnsizedLeaf::Real};
-  Expr ints = fun("to_int", {std::move(reals)}, "(UArray UInt)");
+  Expr ints = fun("to_int", {std::move(reals)}, kIntArray);
   ints.unsized = {1, UnsizedLeaf::Int};
-  Expr truncated = fun("sum", {std::move(ints)}, "UInt");
+  Expr truncated = fun("sum", {std::move(ints)}, kInt);
   run_program_case(
       "to_int array", "to_int rounds each element toward zero",
       {rhs_function("to_int_array_rhs",
@@ -1017,13 +1011,13 @@ void test_to_int() {
       "to_int scalar", "to_int rounds toward zero",
       {rhs_function(
           "to_int_scalar_rhs",
-          {return_value(make_array({fun("to_int", {scaled(-2.7)}, "UInt")}))})},
+          {return_value(make_array({fun("to_int", {scaled(-2.7)}, kInt)}))})},
       1.0, {-2.0});
   // Stan Math's check_bounded rejects NaN and values outside int's range.
   for (double bad : {std::numeric_limits<double>::quiet_NaN(), 3e9, -3e9}) {
     FunDef reject = rhs_function(
         "to_int_reject_rhs",
-        {return_value(make_array({fun("to_int", {scaled(bad)}, "UInt")}))});
+        {return_value(make_array({fun("to_int", {scaled(bad)}, kInt)}))});
     run_domain_error_case(
         "to_int rejects", "to_int needs a finite int value", {reject}, 1.0,
         std::isnan(bad) ? "to_int: x is nan, but must be in the interval "
@@ -1058,14 +1052,14 @@ void test_constant_probes() {
   };
   long integer = 123;
   double real = 123;
-  const Expr unknown = var("unknown", "UInt");
+  const Expr unknown = var("unknown", kInt);
   require(!pc.try_cint(unknown, &integer) && integer == 123, "unknown integer");
-  require(!pc.try_creal(var("unknown", "UReal"), &real) && real == 123,
+  require(!pc.try_creal(var("unknown", kReal), &real) && real == 123,
           "unknown real");
   for (auto kind : {Expr::EAnd, Expr::EOr}) {
     Expr e;
     e.kind = kind;
-    e.type_ = "UInt";
+    e.unsized = {0, UnsizedLeaf::Int};
     const long lhs = kind == Expr::EAnd ? 0 : 1;
     e.args = {lit_int(lhs), unknown};
     require(pc.try_cint(e, &integer) && integer == lhs, "lazy dead operand");
@@ -1074,13 +1068,13 @@ void test_constant_probes() {
   }
   Expr select;
   select.kind = Expr::TernaryIf;
-  select.type_ = "UReal";
-  select.args = {lit_int(1), lit_real(-0.0), var("unknown", "UReal")};
+  select.unsized = {0, UnsizedLeaf::Real};
+  select.args = {lit_int(1), lit_real(-0.0), var("unknown", kReal)};
   require(pc.try_creal(select, &real) && real == 0 && std::signbit(real),
           "lazy real ternary and signed zero");
   select.args[0] = lit_int(0);
   require(!pc.try_creal(select, &real), "selected unknown arm");
-  require(pc.try_cint(fun("Greater__", {lit_real(2.5), lit_int(2)}, "UInt"),
+  require(pc.try_cint(fun("Greater__", {lit_real(2.5), lit_int(2)}, kInt),
                       &integer) &&
               integer == 1,
           "fractional comparison must not truncate");
@@ -1093,7 +1087,7 @@ void test_constant_probes() {
   shape.len = 7;
   shape.reg = pc.alloc(shape.len);
   pc.reals["runtime_values"] = shape;
-  require(pc.try_cint(fun("rows", {var("runtime_values", "UVector")}, "UInt"),
+  require(pc.try_cint(fun("rows", {var("runtime_values", kVector)}, kInt),
                       &integer) &&
               integer == 7,
           "shape without runtime values");
@@ -1120,12 +1114,12 @@ void test_builtin_activity() {
     std::map<std::string, const FunDef*> functions;
     stanli::ProgramCompiler pc{p, functions};
     pc.reals["x"] = stanli::Range{pc.alloc(1), 1};
-    Expr argument = var("x", mode == 2 ? "UInt" : "UReal");
+    Expr argument = var("x", mode == 2 ? kInt : kReal);
     argument.data_only = mode == 1;
     argument.promoted = mode == 3;
     stanli::Range out;
     try {
-      out = pc.expr(fun("lgamma", {argument}, "UReal"));
+      out = pc.expr(fun("lgamma", {argument}, kReal));
     } catch (const stanli::Bail& error) {
       ++failures;
       std::printf("FAIL builtin argument mode %d: %s\n", mode,
@@ -1213,7 +1207,7 @@ void test_dynamic_vector_program() {
       ProgramCompiler pc{p, functions};
       Range base{pc.alloc(8), 8};
       base.kind = row ? ViewKind::RowVector : ViewKind::Vector;
-      const std::string type = row ? "URowVector" : "UVector";
+      const UnsizedView type = row ? kRowVector : kVector;
       pc.reals["values"] = base;
       std::vector<std::pair<int, int>> seeds{{base.reg, base.len}};
       for (const char* name : {"index", "lo", "hi"}) {
@@ -1224,20 +1218,20 @@ void test_dynamic_vector_program() {
       // RHS aliases the destination vector. Indexing and the RHS must read
       // their old values before a write changes the selected element.
       Stmt set =
-          assignment("values", index_single(var("values", type), 1, "UReal"));
+          assignment("values", index_single(var("values", type), 1, kReal));
       Expr index;
       index.kind = stanli::mir::Expr::IndexSingle;
-      index.args = {var("index", "UInt")};
+      index.args = {var("index", kInt)};
       set.lhs_idx = {index};
       pc.stmt(set);
       Expr slice;
       slice.kind = Expr::Indexed;
-      slice.type_ = type;
+      slice.unsized = type;
       Expr span;
       span.kind = stanli::mir::Expr::IndexBetween;
-      span.args = {var("lo", "UInt"), var("hi", "UInt")};
+      span.args = {var("lo", kInt), var("hi", kInt)};
       slice.args = {var("values", type), span};
-      const Range result = pc.expr(fun("log_sum_exp", {slice}, "UReal"));
+      const Range result = pc.expr(fun("log_sum_exp", {slice}, kReal));
       p.out_regs = {result.reg};
       require(p.code.size() == 2 && p.code[0].code == Program::DYN_SET &&
                   p.code[1].code == Program::DYN_LSE_RANGE,
@@ -1324,7 +1318,7 @@ void test_runtime_remainder_and_identity_index() {
   for (const char* name : {"a", "b"})
     pc.reals[name] = stanli::Range{pc.alloc(1), 1};
   const auto out =
-      pc.expr(fun("Modulo__", {var("a", "UInt"), var("b", "UInt")}, "UInt"));
+      pc.expr(fun("Modulo__", {var("a", kInt), var("b", kInt)}, kInt));
   if (p.code.size() != 1 || p.code[0].code != stanli::Program::IMOD) ++failures;
   for (auto pair : std::vector<std::pair<int, int>>{
            {7, 3},
@@ -1354,8 +1348,8 @@ void test_runtime_remainder_and_identity_index() {
   pc.reals["values"] = values;
   Expr identity;
   identity.kind = Expr::Indexed;
-  identity.type_ = "UVector";
-  identity.args = {var("values", "UVector")};
+  identity.unsized = {0, UnsizedLeaf::Vector};
+  identity.args = {var("values", kVector)};
   const auto same = pc.expr(identity);
   if (same.reg != values.reg || same.len != 3 || same.kind != values.kind)
     ++failures;

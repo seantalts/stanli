@@ -464,9 +464,10 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       name += "." + std::to_string(*it);
     using Naming = CompiledModel::ParamView::Naming;
     CompiledModel::ParamView pv{name, (int)row.size(), len};
-    if (v.type_ == "UReal" || v.type_ == "UInt" || v.type_ == "UComplex") {
+    if (mir::language_scalar(v) ||
+        mir::is_unsized(v, mir::UnsizedLeaf::Complex)) {
       pv.naming = Naming::Scalar;
-    } else if (v.type_ == "UMatrix") {
+    } else if (mir::is_unsized(v, mir::UnsizedLeaf::Matrix)) {
       pv.naming = Naming::Matrix;
       pv.rows = e.dims.size() == 2 ? e.dims[0] : len;
     } else {

@@ -128,7 +128,8 @@ void Lowering::observe_indexed_rhs(const mir::Expr& rhs, const Val& v) {
     observe(v, std::move(*evaluated));
     return;
   }
-  if (rhs.type_ != "UInt" || g.slots[v.slot].len != 1) return;
+  if (!mir::is_unsized(rhs, mir::UnsizedLeaf::Int) || g.slots[v.slot].len != 1)
+    return;
   try {
     const long value = eval_int(rhs);
     DataMap::Entry en;
@@ -399,7 +400,7 @@ void Lowering::bind_data(const mir::Program& p) {
         resolved.init = mir::Expr{};
         resolved.init.kind = mir::Expr::LitInt;
         resolved.init.lit_i = sized->second;
-        resolved.init.type_ = "UInt";
+        resolved.init.unsized = {0, mir::UnsizedLeaf::Int};
         resolved.init.data_only = true;
         (void)td.exec(resolved);
         continue;

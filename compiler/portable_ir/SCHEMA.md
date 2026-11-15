@@ -161,7 +161,6 @@ the common metadata suffix shown below.
 The common suffix is:
 
 ```text
-string type
 UnsizedView unsized
 bool data_only
 bool promoted
@@ -398,11 +397,10 @@ After structural decoding and before a `Program` is exposed, the runtime:
 
 1. checks expression, index, transform, sized-type, statement, and known
    function arities;
-2. checks the redundant type/view metadata used by the lowerer;
-3. checks function argument list lengths and type/view agreement;
-4. resolves user-defined overload names and rejects final-name collisions;
-5. validates variable and function bindings; and
-6. rejects trailing payload bytes.
+2. checks function argument list lengths and type/view agreement;
+3. resolves user-defined overload names and rejects final-name collisions;
+4. validates variable and function bindings; and
+5. rejects trailing payload bytes.
 
 Validation runs before downstream code can index positional argument vectors.
 Malformed input therefore becomes a compiler error rather than undefined

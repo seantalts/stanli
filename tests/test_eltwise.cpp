@@ -157,20 +157,17 @@ static void test_expression_layout_policy() {
   Expr vector;
   vector.kind = Expr::Var;
   vector.unsized.leaf = UnsizedLeaf::Vector;
-  vector.type_ = "UVector";
   Expr multi;
   multi.kind = stanli::mir::Expr::IndexMulti;
   Expr gather;
   gather.kind = Expr::Indexed;
   gather.unsized.leaf = UnsizedLeaf::Vector;
-  gather.type_ = "UVector";
   gather.args = {vector, multi};
   Expr exp_gather;
   exp_gather.kind = Expr::FunApp;
   exp_gather.fn_lib = Expr::Lib::StanLib;
   exp_gather.name = "exp";
   exp_gather.unsized.leaf = UnsizedLeaf::Vector;
-  exp_gather.type_ = "UVector";
   exp_gather.args = {gather};
   Expr start;
   start.kind = Expr::LitInt;
@@ -182,17 +179,14 @@ static void test_expression_layout_policy() {
   segment_gather.fn_lib = Expr::Lib::StanLib;
   segment_gather.name = "segment";
   segment_gather.unsized.leaf = UnsizedLeaf::Vector;
-  segment_gather.type_ = "UVector";
   segment_gather.args = {gather, start, count};
   Expr matrix = vector;
   matrix.unsized.leaf = UnsizedLeaf::Matrix;
-  matrix.type_ = "UMatrix";
   Expr transpose;
   transpose.kind = Expr::FunApp;
   transpose.fn_lib = Expr::Lib::StanLib;
   transpose.name = "Transpose__";
   transpose.unsized.leaf = UnsizedLeaf::Matrix;
-  transpose.type_ = "UMatrix";
   transpose.args = {matrix};
   Expr udf_return = vector;
   udf_return.kind = Expr::FunApp;
@@ -596,13 +590,11 @@ static void test_product_exact_grouping() {
   mir::Expr variable;
   variable.kind = mir::Expr::Var;
   variable.name = "x";
-  variable.type_ = "UVector";
   variable.unsized.leaf = mir::UnsizedLeaf::Vector;
   mir::Expr call;
   call.kind = mir::Expr::FunApp;
   call.name = "prod";
   call.fn_lib = mir::Expr::Lib::StanLib;
-  call.type_ = "UReal";
   call.unsized.leaf = mir::UnsizedLeaf::Real;
   call.args = {variable};
 
@@ -653,7 +645,6 @@ static void test_product_exact_grouping() {
   // retain MirInterp's existing ascending scalar fold.
   mir::Expr array_variable = variable;
   array_variable.name = "a";
-  array_variable.type_ = "(UArray UReal)";
   array_variable.unsized.leaf = mir::UnsizedLeaf::Real;
   array_variable.unsized.depth = 1;
   mir::Expr array_call = call;
@@ -1046,14 +1037,12 @@ static void test_extrema_exact_grouping() {
   mir::Expr arg;
   arg.kind = mir::Expr::Var;
   arg.name = "a";
-  arg.type_ = "(UArray UReal)";
   arg.unsized.leaf = mir::UnsizedLeaf::Real;
   arg.unsized.depth = 1;
   mir::Expr call;
   call.kind = mir::Expr::FunApp;
   call.name = "min";
   call.fn_lib = mir::Expr::Lib::StanLib;
-  call.type_ = "UReal";
   call.unsized.leaf = mir::UnsizedLeaf::Real;
   call.args = {arg};
   DataMap::Entry empty_real;
@@ -1068,7 +1057,6 @@ static void test_extrema_exact_grouping() {
     ++failures;
     std::printf("FAIL empty real legacy max is not -infinity\n");
   }
-  arg.type_ = "(UArray UInt)";
   arg.unsized.leaf = mir::UnsizedLeaf::Int;
   call.args = {arg};
   DataMap::Entry empty_int;

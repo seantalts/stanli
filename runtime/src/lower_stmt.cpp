@@ -13,10 +13,11 @@ constexpr long kWhileUnrollLimit = 1L << 16;
 static bool bounded_while_guard(const mir::Expr& e) {
   using E = mir::Expr;
   if (e.kind == E::LitInt || e.kind == E::LitReal) return true;
-  if (e.kind == E::Var) return e.type_ == "UInt" || e.type_ == "UReal";
+  if (e.kind == E::Var) return mir::language_scalar(e);
   if (e.kind == E::Indexed) {
     if (e.args.empty() || e.args[0].kind != E::Var ||
-        (e.type_ != "UInt" && e.type_ != "UReal"))
+        (!mir::is_unsized(e, mir::UnsizedLeaf::Int) &&
+         !mir::is_unsized(e, mir::UnsizedLeaf::Real)))
       return false;
     for (size_t i = 1; i < e.args.size(); ++i) {
       const auto& index = e.args[i];
@@ -481,7 +482,7 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
     return true;
   };
   c.extern_real = [&](const mir::Expr& x, double* value) {
-    if (x.type_ != "UReal") return false;
+    if (!mir::is_unsized(x, mir::UnsizedLeaf::Real)) return false;
     auto evaluated = try_eval_pure(x);
     if (!evaluated || evaluated->is_int || evaluated->r.size() != 1)
       return false;
@@ -830,7 +831,7 @@ void Lowering::lower_runtime_ifelse(const mir::Stmt& s) {
       // now a register-program result; retain the UInt type but make it a
       // graph-local runtime value so later branches and scalar reads use
       // the value the loop actually produced.
-      si = view_of("UInt");
+      si = view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int});
       si.param_free = false;
       scope[name] = Val{out_slots[k], false, si};
       decls[name] = DeclView{1, false, si};
@@ -902,7 +903,7 @@ Lowering::Val Lowering::lower_program_expression(const mir::Expr& e) {
   if (value.kind == ViewKind::Array)
     si = array_view(value.dims, value.leaf, e.data_only);
   else {
-    si = view_of(e.type_);
+    si = view_of(e.unsized);
     si.rows = value.rows;
     si.cols = value.cols;
     si.kind = value.kind;
@@ -1053,8 +1054,7 @@ bool Lowering::needs_runtime_value(const mir::Expr& e) {
   return false;
 }
 bool Lowering::runtime_int_value(const mir::Expr& e) const {
-  if (e.type_ != "UInt" || e.unsized.leaf != mir::UnsizedLeaf::Int ||
-      e.unsized.depth != 0)
+  if (!mir::is_unsized(e, mir::UnsizedLeaf::Int) || e.unsized.depth != 0)
     return false;
   if (e.kind == mir::Expr::Var) {
     auto it = scope.find(e.name);
@@ -1115,8 +1115,10 @@ Lowering::Val Lowering::lower_runtime_int_sum(const mir::Expr& e,
               static_cast<uint64_t>(range.hi))
     fail("runtime integer sum may overflow int32 in a partial sum", e.raw);
 
-  Val result = with_layout(emit_value(OP_SUM_VEC, {a}, 1, view_of("UInt")),
-                           ExpressionLayout::scalar());
+  Val result = with_layout(
+      emit_value(OP_SUM_VEC, {a}, 1,
+                 view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Int})),
+      ExpressionLayout::scalar());
   result.autodiff = false;
   // A range is only a static proof. The elements or logical extent may be
   // runtime-produced; do not let compile-time geometry/control consume the
@@ -1404,7 +1406,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
               map.stride = a.stride;
               map.count = a.len;
               expected_view = indexed_view(lhs_si, s.lhs_idx.size(), map.count,
-                                           s.rhs.type_);
+                                           s.rhs.unsized);
             } else if (is_matrix(lhs_si)) {
               const int64_t i = eval_int(s.lhs_idx[0].args[0]);
               check_uni_index(i, lhs_si.rows,
@@ -1418,12 +1420,14 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
                                 s.raw);
                 map.offset = (j - 1) * lhs_si.rows + (i - 1);
                 map.count = 1;
-                expected_view = view_of("UReal");
+                expected_view =
+                    view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Real});
               } else {
                 map.offset = i - 1;
                 map.stride = lhs_si.rows;
                 map.count = lhs_si.cols;
-                expected_view = view_of("URowVector");
+                expected_view =
+                    view_of(mir::UnsizedView{0, mir::UnsizedLeaf::RowVector});
                 expected_view.param_free = lhs_si.param_free;
               }
             } else {
@@ -1431,7 +1435,8 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
               check_uni_index(i, lhs_len, "vector[uni] assign", s.raw);
               map.offset = i - 1;
               map.count = 1;
-              expected_view = view_of("UReal");
+              expected_view =
+                  view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Real});
             }
             map.kind = map.stride != 1 && map.count != 1
                            ? BuiltinSliceMap::Kind::Strided
@@ -1461,13 +1466,13 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
                        error.what(),
                    s.raw);
             }
-            if (s.rhs.type_ == "UReal" || s.rhs.type_ == "UInt") {
-              expected_view = view_of(s.rhs.type_);
-            } else if (s.rhs.type_ == "UVector" ||
-                       s.rhs.type_ == "URowVector") {
-              expected_view = view_of(s.rhs.type_);
+            if (mir::language_scalar(s.rhs)) {
+              expected_view = view_of(s.rhs.unsized);
+            } else if (mir::is_unsized(s.rhs, mir::UnsizedLeaf::Vector) ||
+                       mir::is_unsized(s.rhs, mir::UnsizedLeaf::RowVector)) {
+              expected_view = view_of(s.rhs.unsized);
               expected_view.param_free = lhs_si.param_free;
-            } else if (s.rhs.type_ == "UMatrix") {
+            } else if (mir::is_unsized(s.rhs, mir::UnsizedLeaf::Matrix)) {
               if (map.dimensions.size() != 2)
                 fail("unsupported indexed assignment: matrix shape", s.raw);
               expected_view = matrix_view(map.dimensions[0], map.dimensions[1],
@@ -1507,8 +1512,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         }
         Val rhs_v = lower_expr(s.rhs);
         if (runtime) {
-          Val nv = region_index(prev_v, s.lhs_idx, s.rhs.type_, s.rhs.unsized,
-                                &rhs_v);
+          Val nv = region_index(prev_v, s.lhs_idx, s.rhs.unsized, &rhs_v);
           nv.autodiff = prev_v.autodiff;
           scope[s.lhs] = nv;
           sync_indexed_data_local(s.lhs, nv);
@@ -1547,8 +1551,9 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
           for (int64_t k = 0; k < map.count; ++k) {
             const int cell =
                 checked_immediate((*cells)[(size_t)k], "assignment cell");
-            const Val el =
-                emit_value(OP_INDEX, {rhs_v}, 1, view_of("UReal"), {(int)k});
+            const Val el = emit_value(
+                OP_INDEX, {rhs_v}, 1,
+                view_of(mir::UnsizedView{0, mir::UnsizedLeaf::Real}), {(int)k});
             if (known_at) {
               const size_t from = (size_t)(*known_at)[(size_t)k];
               DataMap::Entry one;
@@ -1807,11 +1812,12 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         // scalar, a vector/row_vector, or a matrix -- and its type decides
         // how CmdStan indexes the columns.
         using Naming = CompiledModel::ParamView::Naming;
-        const std::string& t = s.fn_args[0].type_;
+        const mir::Expr& t = s.fn_args[0];
         CompiledModel::ParamView pv{name, v.slot, g.slots[v.slot].len};
-        if (t == "UReal" || t == "UInt" || t == "UComplex") {
+        if (mir::language_scalar(t) ||
+            mir::is_unsized(t, mir::UnsizedLeaf::Complex)) {
           pv.naming = Naming::Scalar;
-        } else if (t == "UMatrix") {
+        } else if (mir::is_unsized(t, mir::UnsizedLeaf::Matrix)) {
           if (!is_matrix(v.si))
             fail("FnWriteParam of a matrix with unknown shape: " + name, s.raw);
           pv.rows = v.si.rows;
@@ -2061,7 +2067,6 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
           mir::Expr choice;
           choice.kind = mir::Expr::TernaryIf;
           choice.args = {s.cond, then_value, else_value};
-          choice.type_ = then_value.type_;
           choice.unsized = then_value.unsized;
           choice.data_only =
               s.cond.data_only && then_value.data_only && else_value.data_only;

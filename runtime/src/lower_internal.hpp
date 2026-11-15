@@ -683,7 +683,7 @@ struct Lowering {
     }
 
     long require_constant_int(const char* role) {
-      if (expr().data_only && expr().type_ == "UInt") {
+      if (expr().data_only && mir::is_unsized(expr(), mir::UnsizedLeaf::Int)) {
         Cache& c = cache();
         if (!c.constant_int) c.constant_int = owner->eval_int(expr());
         return *c.constant_int;
@@ -1218,16 +1218,16 @@ struct Lowering {
 
   SlotInfo view_of(const mir::SizedType& t, bool param_free = false);
 
-  static void stamp_kind(SlotInfo* si, const std::string& type) {
-    if (type == "UVector") {
+  static void stamp_kind(SlotInfo* si, const mir::UnsizedView& type) {
+    if (mir::is_unsized(type, mir::UnsizedLeaf::Vector)) {
       si->kind = ViewKind::Vector;
       si->rows = si->cols = 0;
-    } else if (type == "URowVector") {
+    } else if (mir::is_unsized(type, mir::UnsizedLeaf::RowVector)) {
       si->kind = ViewKind::RowVector;
       si->rows = si->cols = 0;
     }
   }
-  static SlotInfo view_of(const std::string& type) {
+  static SlotInfo view_of(const mir::UnsizedView& type) {
     SlotInfo si;
     stamp_kind(&si, type);
     return si;
@@ -1272,7 +1272,7 @@ struct Lowering {
     return geometry;
   }
   SlotInfo indexed_view(const SlotInfo& base, size_t n_single, int64_t out_len,
-                        const std::string& out_type);
+                        const mir::UnsizedView& out_type);
 
   bool same_view(const SlotInfo& a, int64_t alen, const SlotInfo& b,
                  int64_t blen) const;
@@ -1405,14 +1405,19 @@ struct Lowering {
   }
   Val lower_dims(const mir::Expr& e, CallArguments& actuals);
 
-  SlotInfo view_for_dims(const std::string& type, LogicalDims d,
+  SlotInfo view_for_dims(const mir::UnsizedView& type, LogicalDims d,
                          bool param_free = false) {
-    if (type == "UMatrix") return matrix_view(d.rows, d.cols, param_free);
+    if (mir::is_unsized(type, mir::UnsizedLeaf::Matrix))
+      return matrix_view(d.rows, d.cols, param_free);
     SlotInfo si = view_of(type);
     si.param_free = param_free;
-    if (type == "UVector" && d.cols == 1) return si;
-    if (type == "URowVector" && d.rows == 1) return si;
-    if ((type == "UReal" || type == "UInt" || type == "UComplex") &&
+    if (mir::is_unsized(type, mir::UnsizedLeaf::Vector) && d.cols == 1)
+      return si;
+    if (mir::is_unsized(type, mir::UnsizedLeaf::RowVector) && d.rows == 1)
+      return si;
+    if ((mir::is_unsized(type, mir::UnsizedLeaf::Real) ||
+         mir::is_unsized(type, mir::UnsizedLeaf::Int) ||
+         mir::is_unsized(type, mir::UnsizedLeaf::Complex)) &&
         d.rows == 1 && d.cols == 1)
       return si;
     fail("result type does not match logical rows/cols");
@@ -1942,9 +1947,6 @@ struct Lowering {
   }
   StaticProbe<StaticSelector> try_static_selector(const mir::Expr& index,
                                                   int64_t extent);
-  static bool is_scalar_type(const std::string& type) {
-    return type == "UReal" || type == "UInt";
-  }
   StaticProbe<StaticView> try_static_broadcast_view(const mir::Expr& e);
 
   // Logical geometry only: this probe must never materialize a data value or
@@ -2045,10 +2047,10 @@ struct Lowering {
                                  bool allow_promoted = false) {
     // Parsing folds a scalar int-to-real Promotion onto the call. Its
     // integer-array argument still selects Stan's integer sum overload.
-    const bool scalar_result =
-        (e.type_ == "UInt" && e.unsized.leaf == mir::UnsizedLeaf::Int) ||
-        (allow_promoted && e.promoted && e.type_ == "UReal" &&
-         e.unsized.leaf == mir::UnsizedLeaf::Real);
+    const bool scalar_result = mir::is_unsized(e, mir::UnsizedLeaf::Int) ||
+                               (allow_promoted && e.promoted &&
+                                mir::is_unsized(e, mir::UnsizedLeaf::Real) &&
+                                e.unsized.leaf == mir::UnsizedLeaf::Real);
     return e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::StanLib &&
            e.name == "sum" && e.args.size() == 1 && scalar_result &&
            e.unsized.depth == 0 &&

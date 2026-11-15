@@ -37,6 +37,42 @@ struct UnsizedView {
   UnsizedLeaf leaf = UnsizedLeaf::Unknown;
 };
 
+// A non-array value of this type: stanc's UInt, UReal, UVector, ...
+inline bool is_unsized(const UnsizedView& view, UnsizedLeaf leaf) {
+  return view.depth == 0 && view.leaf == leaf;
+}
+
+// stanc's UArray of a known element type.
+inline bool is_unsized_array(const UnsizedView& view) {
+  return view.depth > 0 && view.leaf != UnsizedLeaf::Unknown;
+}
+
+inline const char* leaf_spelling(UnsizedLeaf leaf) {
+  switch (leaf) {
+    case UnsizedLeaf::Int:
+      return "UInt";
+    case UnsizedLeaf::Real:
+      return "UReal";
+    case UnsizedLeaf::Complex:
+      return "UComplex";
+    case UnsizedLeaf::Vector:
+      return "UVector";
+    case UnsizedLeaf::RowVector:
+      return "URowVector";
+    case UnsizedLeaf::Matrix:
+      return "UMatrix";
+    case UnsizedLeaf::Unknown:
+      break;
+  }
+  return "";
+}
+
+// The type as diagnostics name it: UArray for any array, empty if unknown.
+inline std::string type_spelling(const UnsizedView& view) {
+  if (view.leaf == UnsizedLeaf::Unknown) return {};
+  return view.depth > 0 ? "UArray" : leaf_spelling(view.leaf);
+}
+
 // stanc3's Fun_kind suffix: the kind of function a name denotes, which the
 // name's ending spells in Stan source (`_rng`, `_lpdf`, `_lp`, ...).
 enum class FnSuffix : uint8_t { Plain, Rng, Lpdf, Lpmf, Target, Jacobian };
@@ -84,12 +120,18 @@ struct Expr {
   std::string lit_s;
   std::vector<Expr> args;  // FunApp args; Promotion inner; Indexed base+idx;
                            // an index's bounds
-  std::string type_;       // UInt UReal UVector URowVector UMatrix ...
-  UnsizedView unsized;     // structural (UArray ...), without text parsing
+  UnsizedView unsized;
   bool data_only = false;  // adlevel DataOnly
   bool promoted = false;   // explicit MIR Promotion to this adlevel/type
   std::string raw;         // Unsupported diagnostics
 };
+
+inline bool is_unsized(const Expr& e, UnsizedLeaf leaf) {
+  return is_unsized(e.unsized, leaf);
+}
+inline bool is_unsized_array(const Expr& e) {
+  return is_unsized_array(e.unsized);
+}
 
 inline bool is_index(const Expr& e) {
   return e.kind == Expr::IndexAll || e.kind == Expr::IndexSingle ||
@@ -385,9 +427,8 @@ struct ExtremaCall {
   ExtremaSurface surface = ExtremaSurface::Legacy;
 };
 
-inline bool extrema_typed(const Expr& e, const char* type, UnsizedLeaf leaf,
-                          uint8_t depth) {
-  return e.type_ == type && e.unsized.leaf == leaf && e.unsized.depth == depth;
+inline bool extrema_typed(const Expr& e, UnsizedLeaf leaf, uint8_t depth) {
+  return e.unsized.leaf == leaf && e.unsized.depth == depth;
 }
 
 // Determine the overload from language-level types only. A vector expression
@@ -395,15 +436,14 @@ inline bool extrema_typed(const Expr& e, const char* type, UnsizedLeaf leaf,
 // ExpressionLayout decides whether the native kernel can reproduce its
 // evaluation grouping.
 inline ExtremaSurface extrema_container(const Expr& arg) {
-  if (extrema_typed(arg, "UVector", UnsizedLeaf::Vector, 0) ||
-      extrema_typed(arg, "URowVector", UnsizedLeaf::RowVector, 0))
+  if (extrema_typed(arg, UnsizedLeaf::Vector, 0) ||
+      extrema_typed(arg, UnsizedLeaf::RowVector, 0))
     return ExtremaSurface::RealVector;
-  if (extrema_typed(arg, "UMatrix", UnsizedLeaf::Matrix, 0))
+  if (extrema_typed(arg, UnsizedLeaf::Matrix, 0))
     return ExtremaSurface::RealMatrix;
-  if (extrema_typed(arg, "UArray", UnsizedLeaf::Real, 1))
+  if (extrema_typed(arg, UnsizedLeaf::Real, 1))
     return ExtremaSurface::RealArray;
-  if (extrema_typed(arg, "UArray", UnsizedLeaf::Int, 1))
-    return ExtremaSurface::IntArray;
+  if (extrema_typed(arg, UnsizedLeaf::Int, 1)) return ExtremaSurface::IntArray;
   return ExtremaSurface::Legacy;
 }
 
@@ -417,12 +457,11 @@ inline ExtremaCall extrema_call(const Expr& call) {
   else
     return {};
 
-  const bool real_result = extrema_typed(call, "UReal", UnsizedLeaf::Real, 0);
-  const bool int_result = extrema_typed(call, "UInt", UnsizedLeaf::Int, 0);
+  const bool real_result = extrema_typed(call, UnsizedLeaf::Real, 0);
+  const bool int_result = extrema_typed(call, UnsizedLeaf::Int, 0);
   if (call.args.size() == 2) {
-    if (!int_result ||
-        !extrema_typed(call.args[0], "UInt", UnsizedLeaf::Int, 0) ||
-        !extrema_typed(call.args[1], "UInt", UnsizedLeaf::Int, 0))
+    if (!int_result || !extrema_typed(call.args[0], UnsizedLeaf::Int, 0) ||
+        !extrema_typed(call.args[1], UnsizedLeaf::Int, 0))
       return {};
     return {kind, ExtremaSurface::IntPair};
   }

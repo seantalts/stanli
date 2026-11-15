@@ -516,7 +516,6 @@ struct ProgramCompiler {
         mir::Expr cell;
         cell.kind = mir::Expr::LitInt;
         cell.lit_i = values.at((size_t)offset);
-        cell.type_ = "UInt";
         cell.unsized = {0, mir::UnsizedLeaf::Int};
         cell.data_only = true;
         return cell;
@@ -525,7 +524,6 @@ struct ProgramCompiler {
       literal.kind = mir::Expr::FunApp;
       literal.fn_lib = mir::Expr::Lib::Internal;
       literal.name = "FnMakeArray";
-      literal.type_ = "UArray";
       literal.unsized = {static_cast<uint8_t>(shape.size() - d),
                          mir::UnsizedLeaf::Int};
       literal.data_only = true;
@@ -545,7 +543,6 @@ struct ProgramCompiler {
         *e = mir::Expr{};
         e->kind = mir::Expr::LitInt;
         e->lit_i = value;
-        e->type_ = "UInt";
         e->unsized = {0, mir::UnsizedLeaf::Int};
         e->data_only = true;
         return;
@@ -790,7 +787,6 @@ struct ProgramCompiler {
   bool static_indexed_view(const mir::Expr& e, Range* out) {
     if (e.args.size() == 1 && e.args[0].kind == mir::Expr::Indexed) {
       mir::Expr composed = e.args[0];
-      composed.type_ = e.type_;
       composed.unsized = e.unsized;
       composed.data_only = e.data_only;
       composed.promoted = e.promoted;
@@ -845,14 +841,15 @@ struct ProgramCompiler {
             (int64_t)matrix_positions(e.args[2], b.cols, "column").size();
         const int64_t width = nr * nc;
         Range r{0, (int)width};
-        if (width == 1 && e.type_ != "UMatrix" && e.type_ != "UVector" &&
-            e.type_ != "URowVector") {
+        if (width == 1 && !mir::is_unsized(e, mir::UnsizedLeaf::Matrix) &&
+            !mir::is_unsized(e, mir::UnsizedLeaf::Vector) &&
+            !mir::is_unsized(e, mir::UnsizedLeaf::RowVector)) {
           *out = r;
           return true;
         }
-        if (e.type_ == "UVector") {
+        if (mir::is_unsized(e, mir::UnsizedLeaf::Vector)) {
           r.kind = ViewKind::Vector;
-        } else if (e.type_ == "URowVector") {
+        } else if (mir::is_unsized(e, mir::UnsizedLeaf::RowVector)) {
           r.kind = ViewKind::RowVector;
         } else {
           r.kind = ViewKind::Matrix;
@@ -867,7 +864,7 @@ struct ProgramCompiler {
           e.args.size() == 2) {
         const int64_t n =
             (int64_t)matrix_positions(e.args[1], b.len, "index").size();
-        *out = typed(Range{0, (int)n}, e.type_);
+        *out = typed(Range{0, (int)n}, e.unsized);
         return true;
       }
     } catch (Bail&) {
@@ -882,11 +879,12 @@ struct ProgramCompiler {
   // real operands, and cint reads a real literal by truncation, which
   // would make it false. The operands have to be integers themselves.
   static bool int_operand(const mir::Expr& e) {
-    return e.type_ == "UInt" || e.unsized.leaf == mir::UnsizedLeaf::Int;
+    return e.unsized.leaf == mir::UnsizedLeaf::Int;
   }
 
   std::optional<double> constant_real(const mir::Expr& e) {
-    if (e.data_only && extern_real && e.type_ == "UReal") {
+    if (e.data_only && extern_real &&
+        mir::is_unsized(e, mir::UnsizedLeaf::Real)) {
       double value = 0.0;
       if (extern_real(e, &value)) return value;
     }
@@ -1037,7 +1035,6 @@ struct ProgramCompiler {
             ix = mir::Expr{};
             ix.kind = mir::Expr::LitInt;
             ix.lit_i = v;
-            ix.type_ = "UInt";
             ix.unsized = {0, mir::UnsizedLeaf::Int};
             ix.data_only = true;
           }
@@ -1144,11 +1141,11 @@ struct ProgramCompiler {
                   ? std::string()
                   : " arg-kind=" + std::to_string((int)e.args[0].kind) +
                         " arg-name=" + e.args[0].name +
-                        " arg-type=" + e.args[0].type_));
+                        " arg-type=" + mir::type_spelling(e.args[0].unsized)));
       default:
         bail("integer expression kind=" +
              std::to_string(static_cast<int>(e.kind)) + " name=" + e.name +
-             " type=" + e.type_);
+             " type=" + mir::type_spelling(e.unsized));
     }
   }
 
@@ -1288,7 +1285,6 @@ struct ProgramCompiler {
           }
           mir::Expr indexed;
           indexed.kind = mir::Expr::Indexed;
-          indexed.type_ = "UInt";
           indexed.unsized = {0, mir::UnsizedLeaf::Int};
           indexed.data_only = true;
           indexed.args.push_back(e);
@@ -1296,7 +1292,6 @@ struct ProgramCompiler {
             mir::Expr literal;
             literal.kind = mir::Expr::LitInt;
             literal.lit_i = position;
-            literal.type_ = "UInt";
             literal.unsized = {0, mir::UnsizedLeaf::Int};
             literal.data_only = true;
             mir::Expr single;
@@ -1351,7 +1346,6 @@ struct ProgramCompiler {
         }
         mir::Expr scalar;
         scalar.kind = mir::Expr::Indexed;
-        scalar.type_ = "UInt";
         scalar.unsized = {0, mir::UnsizedLeaf::Int};
         scalar.data_only = true;
         scalar.args.push_back(e.args[0]);
@@ -1359,7 +1353,6 @@ struct ProgramCompiler {
           mir::Expr literal;
           literal.kind = mir::Expr::LitInt;
           literal.lit_i = position;
-          literal.type_ = "UInt";
           literal.unsized = {0, mir::UnsizedLeaf::Int};
           literal.data_only = true;
           mir::Expr single;
@@ -1375,7 +1368,8 @@ struct ProgramCompiler {
     std::string detail =
         "integer gather selector is not known at compile time: kind=" +
         std::to_string(static_cast<int>(e.kind)) + " name=" + e.name +
-        " type=" + e.type_ + " args=" + std::to_string(e.args.size());
+        " type=" + mir::type_spelling(e.unsized) +
+        " args=" + std::to_string(e.args.size());
     for (const auto& arg : e.args) detail += " [" + arg.name + "]";
     bail(detail);
   }
@@ -1606,16 +1600,17 @@ struct ProgramCompiler {
     return r.kind == ViewKind::Flat && r.len == 1;
   }
 
-  Range typed(Range r, const std::string& type) {
-    if (type == "UVector") {
+  Range typed(Range r, const mir::UnsizedView& type) {
+    if (mir::is_unsized(type, mir::UnsizedLeaf::Vector)) {
       r.kind = ViewKind::Vector;
       r.rows = r.cols = 0;
-    } else if (type == "URowVector") {
+    } else if (mir::is_unsized(type, mir::UnsizedLeaf::RowVector)) {
       r.kind = ViewKind::RowVector;
       r.rows = r.cols = 0;
-    } else if (type == "UMatrix" && r.kind != ViewKind::Matrix) {
+    } else if (mir::is_unsized(type, mir::UnsizedLeaf::Matrix) &&
+               r.kind != ViewKind::Matrix) {
       bail("matrix expression has unknown logical extents");
-    } else if (type == "UArray" && r.kind != ViewKind::Array) {
+    } else if (mir::is_unsized_array(type) && r.kind != ViewKind::Array) {
       bail("array expression has an unknown logical view");
     }
     return r;
@@ -1695,8 +1690,8 @@ struct ProgramCompiler {
     // callback is the proof of concreteness: stanc can label the recursive
     // remainder AutoDiffable even after all its actuals became data literals.
     if (e.kind == mir::Expr::FunApp &&
-        e.fn_lib == mir::Expr::Lib::UserDefined && e.type_ == "UReal" &&
-        extern_real) {
+        e.fn_lib == mir::Expr::Lib::UserDefined &&
+        mir::is_unsized(e, mir::UnsizedLeaf::Real) && extern_real) {
       double value = 0.0;
       if (extern_real(e, &value)) return {konst(value), 1};
     }
@@ -1753,7 +1748,6 @@ struct ProgramCompiler {
         // logical-view decision.
         if (e.args.size() == 1 && e.args[0].kind == mir::Expr::Indexed) {
           mir::Expr composed = e.args[0];
-          composed.type_ = e.type_;
           composed.unsized = e.unsized;
           composed.data_only = e.data_only;
           composed.promoted = e.promoted;
@@ -1798,8 +1792,9 @@ struct ProgramCompiler {
           if (!rows.empty() && cols.size() > (size_t)kMaxRegs / rows.size())
             bail("matrix selection needs too many registers");
           const size_t width = rows.size() * cols.size();
-          if (width == 1 && e.type_ != "UMatrix" && e.type_ != "UVector" &&
-              e.type_ != "URowVector")
+          if (width == 1 && !mir::is_unsized(e, mir::UnsizedLeaf::Matrix) &&
+              !mir::is_unsized(e, mir::UnsizedLeaf::Vector) &&
+              !mir::is_unsized(e, mir::UnsizedLeaf::RowVector))
             return {b.reg + (int)(cols[0] * b.rows + rows[0]), 1};
           const int r = alloc((int)width);
           int at = 0;
@@ -1807,9 +1802,9 @@ struct ProgramCompiler {
             for (int64_t i : rows)
               emit(Program::MOV, r + at++, b.reg + (int)(j * b.rows + i));
           Range out{r, (int)width};
-          if (e.type_ == "UVector") {
+          if (mir::is_unsized(e, mir::UnsizedLeaf::Vector)) {
             out.kind = ViewKind::Vector;
-          } else if (e.type_ == "URowVector") {
+          } else if (mir::is_unsized(e, mir::UnsizedLeaf::RowVector)) {
             out.kind = ViewKind::RowVector;
           } else {
             out.kind = ViewKind::Matrix;
@@ -1830,10 +1825,11 @@ struct ProgramCompiler {
             e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexBetween) {
           const long lo = cint(e.args[1].args[0]);
           const long hi = cint(e.args[1].args[1]);
-          if (hi < lo) return typed(Range{b.reg, 0}, e.type_);
+          if (hi < lo) return typed(Range{b.reg, 0}, e.unsized);
           if (lo < 1 || hi > b.len)
             bail("range index out of the declared range");
-          return typed(Range{b.reg + (int)lo - 1, (int)(hi - lo + 1)}, e.type_);
+          return typed(Range{b.reg + (int)lo - 1, (int)(hi - lo + 1)},
+                       e.unsized);
         }
         if ((b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
              b.kind == ViewKind::Flat) &&
@@ -1845,7 +1841,7 @@ struct ProgramCompiler {
               bail("gather index out of the declared range");
             emit(Program::MOV, r + (int)k, b.reg + (int)indices[k] - 1);
           }
-          return typed(Range{r, (int)indices.size()}, e.type_);
+          return typed(Range{r, (int)indices.size()}, e.unsized);
         }
         if (b.kind == ViewKind::Matrix) {
           if (e.args.size() == 3) {
@@ -1877,12 +1873,13 @@ struct ProgramCompiler {
               emit(Program::MOV, r + (int)k, b.reg + (int)cell);
             }
             Range out{r, (int)map.count};
-            if (e.type_ == "UMatrix" && map.dimensions.size() == 2) {
+            if (mir::is_unsized(e, mir::UnsizedLeaf::Matrix) &&
+                map.dimensions.size() == 2) {
               out.kind = ViewKind::Matrix;
               out.rows = map.dimensions[0];
               out.cols = map.dimensions[1];
             } else {
-              out = typed(out, e.type_);
+              out = typed(out, e.unsized);
             }
             return out;
           }
@@ -1897,7 +1894,7 @@ struct ProgramCompiler {
             if (lo < 1 || lo > b.len + 1)
               bail("upfrom index out of the declared range");
             return typed(Range{b.reg + (int)lo - 1, (int)(b.len - lo + 1)},
-                         e.type_);
+                         e.unsized);
           }
           // Only a Single selects one element; any other index kind was
           // silently misread as one before this guard.
@@ -2001,14 +1998,13 @@ struct ProgramCompiler {
                                    : map.gather[(size_t)k];
           emit(Program::MOV, r + (int)k, b.reg + (int)cell);
         }
-        if (width == 1 && (e.type_ == "UReal" || e.type_ == "UInt"))
-          return {r, 1};
+        if (width == 1 && (mir::language_scalar(e))) return {r, 1};
         Range out{r, (int)width};
-        if (e.type_ == "UVector") {
+        if (mir::is_unsized(e, mir::UnsizedLeaf::Vector)) {
           out.kind = ViewKind::Vector;
-        } else if (e.type_ == "URowVector") {
+        } else if (mir::is_unsized(e, mir::UnsizedLeaf::RowVector)) {
           out.kind = ViewKind::RowVector;
-        } else if (e.type_ == "UMatrix") {
+        } else if (mir::is_unsized(e, mir::UnsizedLeaf::Matrix)) {
           if (out_dims.size() != 2) bail("matrix index form");
           out.kind = ViewKind::Matrix;
           out.rows = out_dims[0];
@@ -2171,7 +2167,7 @@ struct ProgramCompiler {
   InlineArg inline_argument(const mir::Expr& e) {
     InlineArg arg;
     long v;
-    if (e.type_ == "UInt" && try_cint(e, &v)) {
+    if (mir::is_unsized(e, mir::UnsizedLeaf::Int) && try_cint(e, &v)) {
       arg.is_const_int = true;
       arg.ints = {v};
     } else if (e.unsized.depth != 0 &&
@@ -2184,7 +2180,8 @@ struct ProgramCompiler {
       arg.int_dims =
           view.dims.empty() ? std::vector<int64_t>{view.len} : view.dims;
     } else {
-      if (e.type_ == "UReal") arg.is_const_real = try_creal(e, &arg.const_real);
+      if (mir::is_unsized(e, mir::UnsizedLeaf::Real))
+        arg.is_const_real = try_creal(e, &arg.const_real);
       arg.real = expr(e);
       arg.autodiff = autodiff(e);
     }
@@ -2709,7 +2706,7 @@ struct ProgramCompiler {
         out.dims = {out.len};
       }
     }
-    out = typed(out, e.type_);
+    out = typed(out, e.unsized);
     std::vector<int> idata;
     if (layout.groups >= 0)
       idata = {static_cast<int>(layout.groups),
@@ -2846,7 +2843,7 @@ struct ProgramCompiler {
     }
     out.reg = result;
     out.len = n;
-    return typed(out, e.type_);
+    return typed(out, e.unsized);
   }
 
   // Probability functions use their shared registry policy. Graph-backed
@@ -2859,7 +2856,7 @@ struct ProgramCompiler {
 
     const auto integer_values = [&](const mir::Expr& arg) {
       const std::vector<long> source =
-          arg.type_ == "UInt" && arg.unsized.depth == 0
+          mir::is_unsized(arg, mir::UnsizedLeaf::Int)
               ? std::vector<long>{cint(arg)}
               : cints(arg);
       std::vector<int> result;
@@ -3152,8 +3149,8 @@ struct ProgramCompiler {
       if (slice.args.size() == 2 &&
           slice.args[1].kind == mir::Expr::IndexBetween &&
           slice.args[1].args.size() == 2 &&
-          (slice.args[0].type_ == "UVector" ||
-           slice.args[0].type_ == "URowVector")) {
+          (mir::is_unsized(slice.args[0], mir::UnsizedLeaf::Vector) ||
+           mir::is_unsized(slice.args[0], mir::UnsizedLeaf::RowVector))) {
         long lo, hi;
         if (!try_cint(slice.args[1].args[0], &lo) ||
             !try_cint(slice.args[1].args[1], &hi)) {
@@ -3473,7 +3470,7 @@ struct ProgramCompiler {
         builtin->shape != BuiltinShapePolicy::Product &&
         builtin->shape != BuiltinShapePolicy::Solve &&
         !(e.name == "Divide__" && e.args.size() == 2 &&
-          e.args[1].type_ == "UMatrix")) {
+          mir::is_unsized(e.args[1], mir::UnsizedLeaf::Matrix))) {
       if (const auto native = native_builtin_code(builtin->opcode))
         return native_builtin_call(e, *builtin, *native);
       return builtin_kernel_call(e, *builtin);
@@ -3560,7 +3557,7 @@ struct ProgramCompiler {
       const BuiltinSpec* solve =
           shaped_builtin_spec(e.name, e.args.size(), BuiltinShapePolicy::Solve);
       if (solve == nullptr && e.name == "Divide__" && e.args.size() == 2 &&
-          e.args[1].type_ == "UMatrix")
+          mir::is_unsized(e.args[1], mir::UnsizedLeaf::Matrix))
         solve =
             shaped_builtin_spec("mdivide_right", 2, BuiltinShapePolicy::Solve);
       if (solve != nullptr) {
@@ -3609,7 +3606,8 @@ struct ProgramCompiler {
         // A matrix literal is rows of row-vectors, while a matrix register
         // run is column-major, so this is the one literal that transposes
         // rather than concatenating.
-        if (e.name == "FnMakeRowVec" && e.type_ == "UMatrix") {
+        if (e.name == "FnMakeRowVec" &&
+            mir::is_unsized(e, mir::UnsizedLeaf::Matrix)) {
           if (parts.empty()) bail("matrix literal has no rows");
           for (const Range& q : parts)
             if (q.kind != ViewKind::RowVector || q.len != parts.front().len)
@@ -3709,7 +3707,7 @@ struct ProgramCompiler {
       }
       p.code.push_back(Program::Instr{Program::EXTREMA_RANGE, r, a.reg,
                                       maximum ? 1 : 0, flags, a.len});
-      return typed(Range{r, 1}, e.type_);
+      return typed(Range{r, 1}, e.unsized);
     }
     if (e.name == "fma" && e.args.size() == 3) {
       // Fused, elementwise with scalar broadcast, mirroring OP_FMA.
@@ -3731,7 +3729,7 @@ struct ProgramCompiler {
       Range out = shaped;
       out.reg = r;
       out.len = n;
-      return typed(out, e.type_);
+      return typed(out, e.unsized);
     }
     if (e.name == "log_mix" && e.args.size() == 3) {
       const Range theta = expr(e.args[0]), a = expr(e.args[1]),
@@ -3766,14 +3764,14 @@ struct ProgramCompiler {
             v.reg, m.reg, (int32_t)m.rows, (int32_t)m.cols});
       Range out = m;
       out.reg = r;
-      return typed(out, e.type_);
+      return typed(out, e.unsized);
     }
     if (e.args.size() == 2) {
       // An int-typed binary is integer arithmetic, and `divide` truncates
       // where the real DIV below does not: `divide(7, 2)` is 3, not 3.5.
       // The register file holds only reals, so fold the integer answer
       // whenever cint can reach it rather than emitting real arithmetic.
-      if (e.type_ == "UInt") {
+      if (mir::is_unsized(e, mir::UnsizedLeaf::Int)) {
         long v;
         if (try_cint(e, &v)) return {konst((double)v), 1};
       }
@@ -3837,7 +3835,7 @@ struct ProgramCompiler {
           out.rows = rows;
           out.cols = cols;
         }
-        return typed(out, e.type_);
+        return typed(out, e.unsized);
       }
       if (!a_scalar && !b_scalar && !same_view(a, b))
         bail("binary " + e.name + " on different logical views");
@@ -3860,7 +3858,8 @@ struct ProgramCompiler {
       else if (e.name == "IntDivide__" || e.name == "Divide__" ||
                e.name == "EltDivide__" || e.name == "divide" ||
                e.name == "elt_divide")
-        c = e.type_ == "UInt" ? Program::IDIV : Program::DIV;
+        c = mir::is_unsized(e, mir::UnsizedLeaf::Int) ? Program::IDIV
+                                                      : Program::DIV;
       else if (e.name == "Modulo__")
         c = Program::IMOD;
       else if (e.name == "Pow__" || e.name == "pow")
@@ -3912,14 +3911,14 @@ struct ProgramCompiler {
                 emit(Program::NE, both + i, both + i, zero);
               }
             }
-            return typed(Range{both, n}, e.type_);
+            return typed(Range{both, n}, e.unsized);
           }
           default:
             bail("function " + e.name);
         }
       } else
         bail("function " + e.name);
-      if (e.type_ == "UInt") c = integer_instruction(c);
+      if (mir::is_unsized(e, mir::UnsizedLeaf::Int)) c = integer_instruction(c);
       const int law = c == Program::POW
                           ? mir::pow_zero_base_law(e.args[0], e.args[1],
                                                    !e.args[1].data_only)
@@ -3940,7 +3939,7 @@ struct ProgramCompiler {
         out = a;
       out.reg = r;
       out.len = n;
-      return typed(out, e.type_);
+      return typed(out, e.unsized);
     }
     if (e.args.size() == 1) {
       const Range a = expr(e.args[0]);
@@ -3956,7 +3955,9 @@ struct ProgramCompiler {
         if (a.len == 0) return {konst(0.0), 1};
         const int r = alloc(1);
         emit(Program::MOV, r, a.reg);
-        const auto add = e.type_ == "UInt" ? Program::IADD : Program::ADD;
+        const auto add = mir::is_unsized(e, mir::UnsizedLeaf::Int)
+                             ? Program::IADD
+                             : Program::ADD;
         for (int i = 1; i < a.len; ++i) emit(add, r, r, a.reg + i);
         return {r, 1};
       }
@@ -3988,7 +3989,7 @@ struct ProgramCompiler {
         }
         Range out = a;
         out.reg = r;
-        return typed(out, e.type_);
+        return typed(out, e.unsized);
       }
       Program::Code c;
       if (e.name == "PMinus__")
@@ -4017,7 +4018,7 @@ struct ProgramCompiler {
       for (int i = 0; i < a.len; ++i) emit(c, r + i, a.reg + i);
       Range out = a;
       out.reg = r;
-      return typed(out, e.type_);
+      return typed(out, e.unsized);
     }
     bail("function " + e.name);
   }

@@ -1019,7 +1019,7 @@ namespace {
 bool numeric_kind(const mir::Expr& expression, FunctionArgumentKind* kind) {
   if (expression.unsized.leaf == mir::UnsizedLeaf::Int ||
       (expression.unsized.leaf == mir::UnsizedLeaf::Unknown &&
-       expression.type_ == "UInt")) {
+       mir::is_unsized(expression, mir::UnsizedLeaf::Int))) {
     *kind = FunctionArgumentKind::Integer;
     return true;
   }
@@ -1028,8 +1028,10 @@ bool numeric_kind(const mir::Expr& expression, FunctionArgumentKind* kind) {
       expression.unsized.leaf == mir::UnsizedLeaf::RowVector ||
       expression.unsized.leaf == mir::UnsizedLeaf::Matrix ||
       (expression.unsized.leaf == mir::UnsizedLeaf::Unknown &&
-       (expression.type_ == "UReal" || expression.type_ == "UVector" ||
-        expression.type_ == "URowVector" || expression.type_ == "UMatrix"))) {
+       (mir::is_unsized(expression, mir::UnsizedLeaf::Real) ||
+        mir::is_unsized(expression, mir::UnsizedLeaf::Vector) ||
+        mir::is_unsized(expression, mir::UnsizedLeaf::RowVector) ||
+        mir::is_unsized(expression, mir::UnsizedLeaf::Matrix)))) {
     *kind = FunctionArgumentKind::Real;
     return true;
   }
@@ -1080,8 +1082,7 @@ const FunctionSpec* function_spec(const mir::Expr& call) {
   if (!numeric_kind(call, &result)) {
     // Older hand-built MIR may omit result metadata. Infer it only when the
     // argument contract admits exactly one registry result kind.
-    if (call.unsized.leaf != mir::UnsizedLeaf::Unknown || !call.type_.empty())
-      return nullptr;
+    if (call.unsized.leaf != mir::UnsizedLeaf::Unknown) return nullptr;
     const FunctionSpec* integer =
         function_spec(call.name, call.args.size(), integer_arguments,
                       FunctionArgumentKind::Integer);

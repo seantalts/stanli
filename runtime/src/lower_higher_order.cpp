@@ -657,7 +657,7 @@ std::optional<Lowering::Val> Lowering::lower_empty_map_rect(
   if (e.unsized.leaf != mir::UnsizedLeaf::Vector || e.unsized.depth != 0)
     fail("map_rect: result is not a vector", e.raw);
 
-  SlotInfo si = view_of(e.type_);
+  SlotInfo si = view_of(e.unsized);
   si.param_free = true;
   const int slot = add_slot(0, false);
   out.fills.emplace_back(slot, std::vector<double>{});
@@ -670,7 +670,6 @@ mir::Expr Lowering::slice_bound_literal(int64_t value, const std::string& raw) {
   literal.kind = mir::Expr::LitInt;
   literal.lit_i = static_cast<long>(value);
   literal.lit = static_cast<double>(value);
-  literal.type_ = "UInt";
   literal.unsized = {0, mir::UnsizedLeaf::Int};
   literal.data_only = true;
   literal.raw = raw;
@@ -955,7 +954,7 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
   }
   std::vector<int> slots;
   for (const auto& in : live) slots.push_back(in.slot);
-  Val result = emit_raw(OP_REDUCE_SUM, slots, 1, view_of(call.type_));
+  Val result = emit_raw(OP_REDUCE_SUM, slots, 1, view_of(call.unsized));
   result.autodiff = active;
   result.si.param_free = param_free;
   g.ops.back().udata = spec.get();
@@ -1063,7 +1062,6 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   // functor's propto__ argument: an `_lupdf` functor inherits the caller's
   // normalization, an `_lpdf` one forces the normalized density.
   call.fn_propto = propto;
-  call.type_ = e.type_;
   call.unsized = e.unsized;
   call.data_only = e.data_only;
   call.raw = e.raw;
@@ -1072,7 +1070,6 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   sliced.kind = mir::Expr::Var;
   sliced.name = bound;
   const mir::Expr& slice_expr = actuals.at(1).expr();
-  sliced.type_ = slice_expr.type_;
   sliced.unsized = slice_expr.unsized;
   sliced.data_only = slice_expr.data_only;
   sliced.raw = slice_expr.raw;
@@ -1265,7 +1262,7 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
   const uint8_t variant = static_cast<uint8_t>(
       (a.autodiff ? 0x1u : 0u) | (b.autodiff ? 0x2u : 0u) |
       (!in_write_array && spec->parameter_count != 0 ? 0x4u : 0u));
-  SlotInfo si = view_of(e.type_);
+  SlotInfo si = view_of(e.unsized);
   si.param_free = variant == 0;
   Val result = emit_raw(OP_QUADRATURE, {a.slot, b.slot, theta.slot}, 1, si, {},
                         -1, variant != 0);
@@ -1355,7 +1352,7 @@ Lowering::Val Lowering::lower_algebra_fn(const mir::Expr& e,
     emit_diagnostic("stanli: algebraic system " + spec->system_name +
                     " falls back to the interpreter: " + spec->prog.why);
 
-  SlotInfo si = view_of(e.type_);
+  SlotInfo si = view_of(e.unsized);
   si.param_free = x.si.param_free && y.si.param_free;
   Val result =
       emit_raw(OP_ALGEBRA_SOLVER, {x.slot, y.slot}, n, si, {}, -1, y.autodiff);

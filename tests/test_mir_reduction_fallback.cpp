@@ -165,7 +165,7 @@ void check(const std::string& name, std::vector<Arg> args, Expected expected) {
   Expr call;
   call.kind = Expr::FunApp;
   call.name = name;
-  call.type_ = "UReal";
+  call.unsized = {0, mir::UnsizedLeaf::Real};
   call.fn_lib = Expr::Lib::StanLib;
   for (size_t i = 0; i < args.size(); ++i) {
     const std::string nm = "a" + std::to_string(i);
@@ -173,7 +173,7 @@ void check(const std::string& name, std::vector<Arg> args, Expected expected) {
     Expr v;
     v.kind = Expr::Var;
     v.name = nm;
-    v.type_ = "UReal";
+    v.unsized = {0, mir::UnsizedLeaf::Real};
     call.args.push_back(v);
   }
   Stmt ret;

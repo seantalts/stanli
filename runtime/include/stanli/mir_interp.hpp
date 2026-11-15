@@ -244,7 +244,9 @@ class MirInterp {
         }
         if (e.fn_type)
           fail("unsupported call taking the function " + e.name, e.raw);
-        fail("unknown variable " + e.name + " (type " + e.type_ + ")", e.raw);
+        fail("unknown variable " + e.name + " (type " +
+                 mir::type_spelling(e.unsized) + ")",
+             e.raw);
       }
       case mir::Expr::TernaryIf: {
         const bool c = val(eval(e.args[0]).r.at(0)) != 0.0;
@@ -751,11 +753,12 @@ class MirInterp {
       // Legacy hand-built MIR may only carry the old string type; kind the
       // container from the evaluated value where even that is missing, the
       // way the metadata-free dispatch tail kinds integers.
-      if (source.type_ == "UVector")
+      if (mir::is_unsized(source, mir::UnsizedLeaf::Vector))
         container = FunctionContainerKind::Vector;
-      else if (source.type_ == "URowVector")
+      else if (mir::is_unsized(source, mir::UnsizedLeaf::RowVector))
         container = FunctionContainerKind::RowVector;
-      else if (source.type_ == "UMatrix" || value.dims.size() == 2)
+      else if (mir::is_unsized(source, mir::UnsizedLeaf::Matrix) ||
+               value.dims.size() == 2)
         container = FunctionContainerKind::Matrix;
       else
         container = value.dims.empty() && value.r.size() == 1
@@ -991,7 +994,7 @@ class MirInterp {
         // Only falling_factorial and rising_factorial have an int,int
         // overload that answers int; everywhere else two int arguments
         // still make a real, so stanc's own result type decides.
-        if (e.type_ == "UInt" && o.r.size() == 1) {
+        if (mir::is_unsized(e, mir::UnsizedLeaf::Int) && o.r.size() == 1) {
           o.is_int = true;
           o.i = {(int)val(o.r[0])};
         }
@@ -2120,7 +2123,7 @@ class MirInterp {
         const mir::Expr& source = e.args[index];
         const bool integer_type =
             source.unsized.leaf == mir::UnsizedLeaf::Int ||
-            source.type_ == "UInt";
+            mir::is_unsized(source, mir::UnsizedLeaf::Int);
         if (!value->is_int && integer_type) {
           value->is_int = true;
           value->i.reserve(value->r.size());
@@ -2185,7 +2188,8 @@ class MirInterp {
         return T(f(val(x), val(y)) ? 1.0 : 0.0);
       });
     };
-    if ((e.name == "Plus__" || e.name == "Minus__") && e.type_ == "UInt") {
+    if ((e.name == "Plus__" || e.name == "Minus__") &&
+        mir::is_unsized(e, mir::UnsizedLeaf::Int)) {
       const long x = as_int(e.args[0]), y = as_int(e.args[1]);
       const long q = e.name == "Plus__" ? x + y : x - y;
       r.is_int = true;
@@ -2203,9 +2207,9 @@ class MirInterp {
       // one-axis pair into outer product against dot product.
       Value a = eval(e.args[0]), b = eval(e.args[1]);
       const bool a_mat = a.dims.size() == 2, b_mat = b.dims.size() == 2;
-      const bool outer_pair = !a_mat && !b_mat && e.type_ == "UMatrix";
-      const bool inner_pair =
-          !a_mat && !b_mat && (e.type_ == "UReal" || e.type_ == "UInt");
+      const bool outer_pair =
+          !a_mat && !b_mat && mir::is_unsized(e, mir::UnsizedLeaf::Matrix);
+      const bool inner_pair = !a_mat && !b_mat && (mir::language_scalar(e));
       if (!is_scalar(a) && !is_scalar(b) &&
           (a_mat || b_mat || outer_pair || inner_pair)) {
         using Kind = FunctionContainerKind;
@@ -2296,7 +2300,7 @@ class MirInterp {
     const BuiltinSpec* solve_spec =
         shaped_builtin_spec(e.name, e.args.size(), BuiltinShapePolicy::Solve);
     if (solve_spec == nullptr && e.name == "Divide__" && e.args.size() == 2 &&
-        e.args.at(1).type_ == "UMatrix")
+        mir::is_unsized(e.args.at(1), mir::UnsizedLeaf::Matrix))
       solve_spec =
           shaped_builtin_spec("mdivide_right", 2, BuiltinShapePolicy::Solve);
     if (solve_spec != nullptr) {
@@ -2371,7 +2375,7 @@ class MirInterp {
       for (Eigen::Index j = 0; j < out.cols(); ++j)
         for (Eigen::Index i = 0; i < out.rows(); ++i)
           r.r[(size_t)(j * out.rows() + i)] = out(i, j);
-      if (e.type_ == "UMatrix")
+      if (mir::is_unsized(e, mir::UnsizedLeaf::Matrix))
         r.dims = {(int64_t)out.rows(), (int64_t)out.cols()};
       else
         r.dims = {(int64_t)r.r.size()};
@@ -2589,7 +2593,7 @@ class MirInterp {
       return o;
     }
     if ((e.name == "PMinus__" || e.name == "minus") && e.args.size() == 1 &&
-        e.type_ == "UInt") {
+        mir::is_unsized(e, mir::UnsizedLeaf::Int)) {
       const long x = as_int(e.args[0]);
       r.is_int = true;
       r.i = {(int)(-x)};

@@ -162,7 +162,6 @@ void append_expr(std::string& bytes, const mir::Expr& value) {
     case mir::Expr::Unsupported:
       break;
   }
-  append_string(bytes, value.type_);
   append_view(bytes, value.unsized);
   append_bool(bytes, value.data_only);
   append_bool(bytes, value.promoted);
@@ -350,7 +349,6 @@ std::string real_target_v2_payload(uint64_t bits, uint8_t data_only = 1,
   append_u8(payload, 2);   // TargetPE
   append_u8(payload, 2);   // LitReal
   append_u64(payload, bits);
-  append_string(payload, "UReal");
   append_u8(payload, 0);  // unsized array depth
   append_u8(payload, leaf);
   append_u8(payload, data_only);
@@ -515,7 +513,6 @@ json write_expr(const mir::Expr& value) {
           {"lit", write_f64(value.lit)},
           {"lit_s", value.lit_s},
           {"args", write_array(value.args, write_expr)},
-          {"type_", value.type_},
           {"unsized", write_unsized(value.unsized)},
           {"data_only", value.data_only},
           {"promoted", value.promoted},
@@ -716,7 +713,6 @@ mir::Expr literal(double value = 1.0) {
   mir::Expr expression;
   expression.kind = mir::Expr::LitReal;
   expression.lit = value;
-  expression.type_ = "UReal";
   expression.unsized.leaf = mir::UnsizedLeaf::Real;
   expression.data_only = true;
   return expression;
@@ -1090,7 +1086,6 @@ void check_full_span_assignment_lowering() {
                 statement.lhs == "x" && statement.lhs_idx.size() == 1 &&
                 statement.lhs_idx[0].kind == stanli::mir::Expr::IndexAll) {
               statement.rhs.name = "rep_vector";
-              statement.rhs.type_ = "UVector";
               statement.rhs.unsized.leaf = mir::UnsizedLeaf::Vector;
               return true;
             }
@@ -1244,7 +1239,6 @@ void check_exact_float_bits() {
   mir::Stmt target;
   target.kind = mir::Stmt::TargetPE;
   target.target.kind = mir::Expr::LitReal;
-  target.target.type_ = "UReal";
   target.target.unsized.leaf = mir::UnsizedLeaf::Real;
   target.target.data_only = true;
   program.log_prob.push_back(target);
@@ -1265,7 +1259,6 @@ void check_exact_float_bits() {
 void check_structural_rejections() {
   mir::Expr indexed;
   indexed.kind = mir::Expr::Indexed;
-  indexed.type_ = "UReal";
   indexed.unsized.leaf = mir::UnsizedLeaf::Real;
   expect_compile_error(write_v2(target_program(indexed)),
                        "Indexed expression arity",
@@ -1320,7 +1313,6 @@ void check_structural_rejections() {
            {mir::Expr::EAnd, "EAnd expression arity"}}) {
     mir::Expr expression;
     expression.kind = test.first;
-    expression.type_ = "UReal";
     expression.unsized.leaf = mir::UnsizedLeaf::Real;
     expect_error(write_v2(target_program(expression)), test.second,
                  test.second);
@@ -1329,7 +1321,6 @@ void check_structural_rejections() {
   mir::Expr bad_call;
   bad_call.kind = mir::Expr::FunApp;
   bad_call.name = "Plus__";
-  bad_call.type_ = "UReal";
   bad_call.unsized.leaf = mir::UnsizedLeaf::Real;
   bad_call.args.push_back(literal());
   expect_compile_error(write_v2(target_program(bad_call)), "Plus__ call",
@@ -1351,7 +1342,6 @@ void check_structural_rejections() {
   mir::Expr wiener;
   wiener.kind = mir::Expr::FunApp;
   wiener.name = "wiener_lpdf";
-  wiener.type_ = "UReal";
   wiener.unsized.leaf = mir::UnsizedLeaf::Real;
   wiener.args.assign(7, literal());
   const std::string extended_wiener = write_v2(target_program(wiener));
@@ -1369,18 +1359,12 @@ void check_structural_rejections() {
   expect_error(write_v2(target_program(wiener)), "expected 5 to 9 argument(s)",
                "ten-argument wiener rejected structurally");
 
-  mir::Expr bad_metadata = literal();
-  bad_metadata.unsized.leaf = mir::UnsizedLeaf::Int;
-  expect_error(write_v2(target_program(bad_metadata)),
-               "expression type metadata", "expression type/view mismatch");
-
   mir::Program bad_binding;
   mir::SizedType real_type;
   real_type.base = "SReal";
   mir::Expr x;
   x.kind = mir::Expr::Var;
   x.name = "x";
-  x.type_ = "UInt";
   x.unsized.leaf = mir::UnsizedLeaf::Int;
   bad_binding = target_program(x);
   bad_binding.input_vars.emplace_back("x", real_type);
@@ -1398,7 +1382,6 @@ void check_structural_rejections() {
   first_assignment.kind = mir::Stmt::Assignment;
   first_assignment.lhs = "tmp";
   first_assignment.rhs.kind = mir::Expr::Unsupported;
-  first_assignment.rhs.type_ = "UArray";
   first_assignment.rhs.unsized = {1, mir::UnsizedLeaf::Real};
   unsized_assignment.log_prob.push_back(std::move(first_assignment));
   const mir::Program restored_unsized =

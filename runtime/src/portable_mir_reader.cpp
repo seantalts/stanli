@@ -358,7 +358,6 @@ std::vector<Expr> read_exprs(Reader& reader) {
 }
 
 void read_meta(Reader& reader, Expr& value) {
-  value.type_ = reader.string();
   value.unsized = read_view(reader);
   value.data_only = reader.boolean();
   value.promoted = reader.boolean();
