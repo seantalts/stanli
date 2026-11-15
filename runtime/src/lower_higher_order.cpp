@@ -1357,9 +1357,6 @@ Lowering::Val Lowering::lower_algebra_fn(const mir::Expr& e,
   if (!spec->prog.ok)
     note_interpreter_fallback("the algebraic system " + spec->system_name,
                               spec->prog.why);
-  if (!spec->prog.ok && std::getenv("STANLI_DEBUG_ALGEBRA"))
-    emit_diagnostic("stanli: algebraic system " + spec->system_name +
-                    " falls back to the interpreter: " + spec->prog.why);
 
   SlotInfo si = view_of(e.type_);
   si.param_free = x.si.param_free && y.si.param_free;
@@ -1379,28 +1376,12 @@ Lowering::Val Lowering::emit_ode(std::shared_ptr<OdeSpec> spec, const Val& z0,
   if (!spec->prog.ok)
     note_interpreter_fallback("the ODE right-hand side " + spec->rhs_name,
                               spec->prog.why);
-  // Falling back to the interpreter is correct but ~30x slower, so make
-  // it findable rather than silent.
-  if (!spec->prog.ok && std::getenv("STANLI_DEBUG_ODE"))
-    emit_diagnostic("stanli: ODE right-hand side " + spec->rhs_name +
-                    " falls back to the interpreter: " + spec->prog.why);
   if (spec->prog.ok &&
       (spec->solver == OdeSpec::RK45 || spec->solver == OdeSpec::CKRK)) {
     spec->direct_rk =
         make_rhs_adjoint_program(spec->prog, &spec->direct_rk_why);
     spec->direct_rk_enabled =
         spec->direct_rk && !std::getenv("STANLI_NO_ODE_DIRECT_RK");
-  }
-  if (spec->prog.ok &&
-      (spec->solver == OdeSpec::RK45 || spec->solver == OdeSpec::CKRK) &&
-      std::getenv("STANLI_DEBUG_ODE")) {
-    if (spec->direct_rk)
-      emit_diagnostic("stanli: ODE right-hand side " + spec->rhs_name +
-                      " is direct-RK eligible" +
-                      (spec->direct_rk_enabled ? "" : " (oracle selected)"));
-    else
-      emit_diagnostic("stanli: ODE right-hand side " + spec->rhs_name +
-                      " keeps the RK oracle: " + spec->direct_rk_why);
   }
   Val v = t0 && ts ? emit_value(OP_ODE, {z0, theta, *t0, *ts}, N * S, result_si,
                                 {(int)N, (int)S})

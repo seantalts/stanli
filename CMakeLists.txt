@@ -414,8 +414,8 @@ endif()
 
 # Optional AVX2 copies of the dense-matrix kernels, for a fast mode. The
 # default build is unchanged: this is OFF, and the baseline kernels stay the
-# default even when it is ON (STANLI_FAST_MATH=1 opts in at run time, only on
-# a CPU that can run them). Each kernel file is compiled twice, a baseline
+# default even when it is ON (STANLI_ISA=avx2 opts in at run time, only on a
+# CPU that can run them). Each kernel file is compiled twice, a baseline
 # copy with its registration entry points renamed *_base and an AVX2 copy
 # (-march=x86-64-v3) in its own Eigen namespace (-DEigen=EigenAvx2): Eigen's
 # templates have identical mangled names but different packet sizes and
