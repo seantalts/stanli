@@ -201,10 +201,11 @@ static void test_scalar_chains() {
     else
       m.g.add_op(OP_SET_INDEX_INPLACE, {p, pi}, p, {i});
   }
-  std::vector<int> idata{kWide};
-  for (int i = 0; i < kWide; ++i) idata.push_back(i % 2);  // successes
-  idata.push_back(-1);  // trials: one language-level scalar
-  idata.push_back(5);
+  std::vector<int> successes;
+  for (int i = 0; i < kWide; ++i) successes.push_back(i % 2);
+  // trials: one language-level scalar
+  const std::vector<int> idata =
+      testutil::int_groups_idata({{successes}, {{5}, true}});
   const int lp = m.g.add_slot(1, false);
   stanli::testutil::add_density(m.g, OP_BETA_BINOMIAL_LPMF, {p, beta}, lp,
                                 idata);
@@ -218,7 +219,8 @@ static void test_scalar_chains() {
       "chains: four scalar chains left",
       count_opcode(g, OP_INV_LOGIT) == 4 && count_opcode(g, OP_INDEX) == 4);
   const Op* dens = find_op(g, OP_BETA_BINOMIAL_LPMF);
-  const std::vector<int> want{4, 0, 1, 0, 1, -1, 5};
+  const std::vector<int> want =
+      testutil::int_groups_idata({{{0, 1, 0, 1}}, {{5}, true}});
   expect_true("chains: outcome groups restricted",
               dens && dens->n_idata == (int64_t)want.size() &&
                   std::equal(want.begin(), want.end(), dens->idata));
@@ -1053,22 +1055,20 @@ static Model family_model(const FamilyCase& c, const FamilyModel& o) {
     return out;
   };
   const auto outcomes = [&](int from, int count) {
-    std::vector<int> idata;
+    std::vector<int> y;
+    for (int i = from; i < from + count; ++i)
+      y.push_back((int)family_y(c, i, o.n));
     const bool binomial =
         c.opcode == OP_BINOMIAL_LPMF || c.opcode == OP_BINOMIAL_LOGIT_LPMF;
-    if (binomial) idata.push_back(count == 1 ? -1 : count);
-    for (int i = from; i < from + count; ++i)
-      idata.push_back((int)family_y(c, i, o.n));
-    if (binomial) {
-      if (o.vector_trials && count > 1) {
-        idata.push_back(count);
-        for (int i = from; i < from + count; ++i) idata.push_back(5 + i % 3);
-      } else {
-        idata.push_back(-1);
-        idata.push_back(o.vector_trials ? 5 + from % 3 : 6);
-      }
+    if (!binomial) return y;
+    testutil::IntArg trials;
+    if (o.vector_trials && count > 1) {
+      for (int i = from; i < from + count; ++i)
+        trials.values.push_back(5 + i % 3);
+    } else {
+      trials = {{o.vector_trials ? 5 + from % 3 : 6}, true};
     }
-    return idata;
+    return testutil::int_groups_idata({{y, count == 1}, trials});
   };
   const auto density = [&](int y, int first, int lp, std::vector<int> idata) {
     if (c.integer)
@@ -1491,7 +1491,8 @@ static Model glm_regression(uint8_t variant, int n = 60) {
   const int y = data_slot(m, yv), xs = data_slot(m, x);
   const int lp = m.g.add_slot(1, false);
   stanli::testutil::add_density(m.g, OP_NORMAL_ID_GLM_LPDF,
-                                {y, xs, alpha, beta, sigma}, lp, {n, kColumns});
+                                {y, xs, alpha, beta, sigma}, lp,
+                                testutil::glm_idata({}, n, kColumns));
   m.g.ops.back().variant = variant;
   m.terms = {lp};
   return m;
@@ -1560,13 +1561,7 @@ static Model count_glm(uint16_t opcode, bool propto, bool intercept_per_row,
   }
   if (opcode == OP_BINOMIAL_LOGIT_GLM_LPMF)
     idata.insert(idata.end(), trials.begin(), trials.end());
-  idata.push_back(n);
-  idata.push_back(2);
-  if (intercept_per_row) {
-    // The tail lowering may add: no integer argument is a scalar.
-    idata.push_back(kGlmScalarLayoutMarker);
-    idata.push_back(0);
-  }
+  append_glm_layout(idata, n, 2, 0);
   const int xs = data_slot(m, x);
   int alpha = a;
   if (intercept_per_row) {

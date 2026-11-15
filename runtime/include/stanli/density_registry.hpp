@@ -5,6 +5,7 @@
 #ifndef STANLI_DENSITY_REGISTRY_HPP
 #define STANLI_DENSITY_REGISTRY_HPP
 
+#include <stanli/density_layout.hpp>
 #include <stanli/function_shape.hpp>
 #include <stanli/kernel_types.hpp>
 
@@ -101,9 +102,11 @@ struct DensitySizeError : std::invalid_argument {
 struct VectorizedDensityLayout {
   int64_t width = 0;
   // One entry for every set bit in DensitySpec::vectorized_vector_args, in
-  // source-argument order. -1 denotes a language vector/row_vector; a
-  // nonnegative value denotes the number of elements in an array of vectors.
+  // source-argument order: the number of vectors, 1 for a language
+  // vector/row_vector.
   std::vector<int> vector_counts;
+  // Bit j: entry j is an array of vectors.
+  int array_mask = 0;
 };
 
 struct DensityCallArgument {
@@ -155,13 +158,6 @@ inline constexpr uint8_t kCategoricalArgAutodiff = 1u << 0;
 inline constexpr uint8_t kCategoricalLogit = 1u << 1;
 inline constexpr uint8_t kCategoricalScalarOutcome = 1u << 2;
 inline constexpr uint8_t kCategoricalPropto = DensityMode::kProptoBit;
-// Separates integer outcome values from an appended vectorized-layout payload.
-inline constexpr int kVectorizedDensityLayoutMarker = -2147483647;
-inline constexpr int kGlmScalarLayoutMarker = -2147483646;
-// In the GLM scalar-layout mask: the design is one row_vector shared by every
-// outcome, so the outcome count is the instance count.
-inline constexpr int kGlmRowVectorDesign = 1 << 6;
-
 std::vector<int> pack_all_integer_density_arguments(
     const std::vector<IntegerDensityArgument>& arguments);
 // Dispatches each source argument as either an int or vector<int>, preserving

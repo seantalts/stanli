@@ -5,6 +5,7 @@
 // One of the density shards: see densities_impl.hpp for why they
 // are split and what they share.
 #include "densities_impl.hpp"
+#include <stanli/density_layout.hpp>
 
 namespace stanli {
 namespace dens {
@@ -275,23 +276,18 @@ STANLI_INT_DENSITY_LIST(STANLI_DEFINE_INT_DENSITY)
 #undef STANLI_DEFINE_INT_DENSITY
 #undef STANLI_LPMF_FWD_T
 
-// Binomials carry two int groups; idata = [len_n, n..., len_N, N...].
-// A length of -1 marks a language-level int scalar (stan-math broadcasts
-// scalars; a size-1 vector would be a size error against a longer group).
+// Binomials carry two integer groups, outcomes then trials (IntGroups in
+// density_layout.hpp). A language int scalar broadcasts; stan-math would
+// reject a size-1 vector against a longer group.
+IntGroups binomial_groups(const KernelCtx& ctx) {
+  return int_groups(ctx.idata, ctx.n_idata, 2);
+}
 template <typename F>
-void with_int_group(const int* p, F&& f) {
-  const int len = static_cast<int>(p[0]);
-  if (len == -1)
-    f(p[1], p + 2);
+void with_int_group(const IntGroup& g, F&& f) {
+  if (g.scalar)
+    f(g.values[0]);
   else
-    f(Eigen::Map<const Eigen::VectorXi>(p + 1, len), p + 1 + len);
-}
-// Element n of a group: the scalar for all n, or the vector's n-th entry.
-int int_group_elem(const int* p, int64_t n) {
-  return p[0] == -1 ? p[1] : p[1 + n];
-}
-const int* int_group_next(const int* p) {
-  return p + (p[0] == -1 ? 2 : 1 + p[0]);
+    f(Eigen::Map<const Eigen::VectorXi>(g.values, g.count));
 }
 // The elementwise variant with the per-element recorder call left off: this
 // walks stan-math's own branches for element i's value and its one partial,
@@ -303,16 +299,17 @@ template <bool Logit>
 void binomial_elt_vector_fwd(KernelCtx& ctx) {
   static constexpr const char* function =
       Logit ? "binomial_logit_lpmf" : "binomial_lpmf";
-  const int* g1 = ctx.idata;
-  const int* g2 = int_group_next(g1);
+  const IntGroups groups = binomial_groups(ctx);
+  const IntGroup& g1 = groups.group[0];
+  const IntGroup& g2 = groups.group[1];
   const Desc& theta = ctx.in[0];
   const int64_t len = ctx.out.len;
   const DensityMode mode = density_mode(ctx);
   const bool active = mode.is_active(0);
   const bool propto = mode.propto;
   std::fill_n(ctx.scratch, static_cast<size_t>(2 * len), 0.0);
-  with_int_group(g1, [&](const auto& n, const int*) {
-    with_int_group(g2, [&](const auto& trials, const int*) {
+  with_int_group(g1, [&](const auto& n) {
+    with_int_group(g2, [&](const auto& trials) {
       stan::math::check_bounded(function, "Successes variable", n, 0, trials);
       stan::math::check_nonnegative(function, "Population size parameter",
                                     trials);
@@ -342,8 +339,8 @@ void binomial_elt_vector_fwd(KernelCtx& ctx) {
   };
   if (one_theta) logs(theta.data[0]);
   for (int64_t i = 0; i < len; ++i) {
-    const int n = int_group_elem(g1, i);
-    const int trials = int_group_elem(g2, i);
+    const int n = g1.at(i);
+    const int trials = g2.at(i);
     const double t = theta.data[one_theta ? 0 : i];
     if (!one_theta) logs(t);
     double lp = 0.0, partial = 0.0;
@@ -373,39 +370,39 @@ void binomial_elt_vector_fwd(KernelCtx& ctx) {
   }
 }
 
-#define STANLI_BINOMIAL_FWD(fname, dist, logit)                           \
-  void fname(KernelCtx& ctx) {                                            \
-    if (density_mode(ctx).elementwise) {                                  \
-      if (ctx.out.len > 1) {                                              \
-        binomial_elt_vector_fwd<logit>(ctx);                              \
-        return;                                                           \
-      }                                                                   \
-      const int* g1 = ctx.idata;                                          \
-      const int* g2 = int_group_next(g1);                                 \
-      density_fwd_elt<1, 3>(                                              \
-          ctx,                                                            \
-          [&](int64_t n, const auto& theta) {                             \
-            return stan::math::dist<true>(int_group_elem(g1, n),          \
-                                          int_group_elem(g2, n), theta);  \
-          },                                                              \
-          [&](int64_t n, const auto& theta) {                             \
-            return stan::math::dist<false>(int_group_elem(g1, n),         \
-                                           int_group_elem(g2, n), theta); \
-          });                                                             \
-      return;                                                             \
-    }                                                                     \
-    with_int_group(ctx.idata, [&](const auto& n, const int* rest) {       \
-      with_int_group(rest, [&](const auto& N, const int*) {               \
-        density_fwd_v<1, 3>(                                              \
-            ctx,                                                          \
-            [&](const auto& theta) {                                      \
-              return stan::math::dist<true>(n, N, theta);                 \
-            },                                                            \
-            [&](const auto& theta) {                                      \
-              return stan::math::dist<false>(n, N, theta);                \
-            });                                                           \
-      });                                                                 \
-    });                                                                   \
+#define STANLI_BINOMIAL_FWD(fname, dist, logit)                        \
+  void fname(KernelCtx& ctx) {                                         \
+    if (density_mode(ctx).elementwise) {                               \
+      if (ctx.out.len > 1) {                                           \
+        binomial_elt_vector_fwd<logit>(ctx);                           \
+        return;                                                        \
+      }                                                                \
+      const IntGroups groups = binomial_groups(ctx);                   \
+      const IntGroup& g1 = groups.group[0];                            \
+      const IntGroup& g2 = groups.group[1];                            \
+      density_fwd_elt<1, 3>(                                           \
+          ctx,                                                         \
+          [&](int64_t n, const auto& theta) {                          \
+            return stan::math::dist<true>(g1.at(n), g2.at(n), theta);  \
+          },                                                           \
+          [&](int64_t n, const auto& theta) {                          \
+            return stan::math::dist<false>(g1.at(n), g2.at(n), theta); \
+          });                                                          \
+      return;                                                          \
+    }                                                                  \
+    const IntGroups groups = binomial_groups(ctx);                     \
+    with_int_group(groups.group[0], [&](const auto& n) {               \
+      with_int_group(groups.group[1], [&](const auto& N) {             \
+        density_fwd_v<1, 3>(                                           \
+            ctx,                                                       \
+            [&](const auto& theta) {                                   \
+              return stan::math::dist<true>(n, N, theta);              \
+            },                                                         \
+            [&](const auto& theta) {                                   \
+              return stan::math::dist<false>(n, N, theta);             \
+            });                                                        \
+      });                                                              \
+    });                                                                \
   }
 
 STANLI_BINOMIAL_FWD(binomial_fwd, binomial_lpmf, false)
@@ -413,28 +410,29 @@ STANLI_BINOMIAL_FWD(binomial_logit_fwd, binomial_logit_lpmf, true)
 #undef STANLI_BINOMIAL_FWD
 
 // beta_binomial(n | N, alpha, beta): two integer groups, then two real
-// arguments that behave like any other density's. with_int_group unpacks
-// the [len, vals...] pairs the lowering wrote, exactly as binomial does.
+// arguments that behave like any other density's. Its integer groups are
+// the binomial's.
 void beta_binomial_fwd(KernelCtx& ctx) {
   if (density_mode(ctx).elementwise) {
     // One value per element, as the binomials above: partition and the
     // observation collapse both ask for it.
-    const int* g1 = ctx.idata;
-    const int* g2 = int_group_next(g1);
+    const IntGroups groups = binomial_groups(ctx);
+    const IntGroup& g1 = groups.group[0];
+    const IntGroup& g2 = groups.group[1];
     density_fwd_elt<2, 2>(
         ctx,
         [&](int64_t n, const auto&... a) {
-          return stan::math::beta_binomial_lpmf<true>(
-              int_group_elem(g1, n), int_group_elem(g2, n), a...);
+          return stan::math::beta_binomial_lpmf<true>(g1.at(n), g2.at(n), a...);
         },
         [&](int64_t n, const auto&... a) {
-          return stan::math::beta_binomial_lpmf<false>(
-              int_group_elem(g1, n), int_group_elem(g2, n), a...);
+          return stan::math::beta_binomial_lpmf<false>(g1.at(n), g2.at(n),
+                                                       a...);
         });
     return;
   }
-  with_int_group(ctx.idata, [&](const auto& n, const int* rest) {
-    with_int_group(rest, [&](const auto& N, const int*) {
+  const IntGroups groups = binomial_groups(ctx);
+  with_int_group(groups.group[0], [&](const auto& n) {
+    with_int_group(groups.group[1], [&](const auto& N) {
       density_fwd_sum<2, 2, 0>(
           ctx,
           [&](const auto&... a) {
@@ -453,8 +451,9 @@ void beta_binomial_fwd(KernelCtx& ctx) {
 // one-group int cdfs in densities_cdf_b.cpp: cdf_fwd is what says so.
 #define STANLI_DEFINE_TWO_INT_CDF_FWD(code, fn, nreal, tier)               \
   void fn##_fwd_gen(KernelCtx& ctx) {                                      \
-    with_int_group(ctx.idata, [&](const auto& n, const int* rest) {        \
-      with_int_group(rest, [&](const auto& N, const int*) {                \
+    const IntGroups groups = binomial_groups(ctx);                         \
+    with_int_group(groups.group[0], [&](const auto& n) {                   \
+      with_int_group(groups.group[1], [&](const auto& N) {                 \
         cdf_fwd<nreal, tier & STANLI_DENSITY_FULL_MASKS>(                  \
             ctx,                                                           \
             [&](const auto&... a) { return stan::math::fn(n, N, a...); }); \

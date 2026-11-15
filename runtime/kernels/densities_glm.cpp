@@ -12,8 +12,7 @@ namespace dens {
 
 namespace {
 
-// idata = [y..., rows, cols] with an optional scalar-layout tail; one decode
-// shared by the three kernels so a layout change cannot drift between them.
+// idata is a GlmLayout (density_layout.hpp).
 struct GlmShape {
   int64_t rows;
   int64_t cols;
@@ -23,14 +22,10 @@ struct GlmShape {
 };
 
 GlmShape glm_shape(const KernelCtx& ctx) {
-  const bool scalar_layout =
-      ctx.n_idata >= 4 && ctx.idata[ctx.n_idata - 2] == kGlmScalarLayoutMarker;
-  const int tail = scalar_layout ? 4 : 2;
-  const int mask = scalar_layout ? ctx.idata[ctx.n_idata - 1] : 0;
-  const int64_t rows = ctx.idata[ctx.n_idata - tail];
-  return {rows, ctx.idata[ctx.n_idata - tail + 1], (mask & 1) != 0,
-          (mask & kGlmRowVectorDesign) != 0,
-          (mask & kGlmRowVectorDesign) != 0 ? ctx.n_idata - tail : rows};
+  const GlmLayout layout = glm_layout(ctx.idata, ctx.n_idata);
+  return {layout.rows, layout.cols, layout.scalar_outcome(0),
+          layout.row_vector_design(),
+          layout.row_vector_design() ? layout.n_outcomes : layout.rows};
 }
 
 template <typename Design, typename F>
@@ -91,7 +86,7 @@ void glm_bind_data_x_alpha(KernelCtx& ctx, Call&& call) {
 
 // bernoulli_logit_glm(y | X, alpha, beta): X is mapped column-major like
 // every other matrix slot.
-// idata = [y..., rows, cols]. Edges are (x, alpha, beta).
+// idata is a GlmLayout over y. Edges are (x, alpha, beta).
 void bernoulli_logit_glm_fwd(KernelCtx& ctx) {
   const GlmShape shape = glm_shape(ctx);
   Eigen::Map<const Eigen::VectorXi> y(ctx.idata, shape.outcomes);

@@ -479,15 +479,14 @@ namespace stanli {
   X(OP_YULE_SIMON_LCDF, yule_simon_lcdf, 1, 0)
 
 // The binomials: an outcome group AND a trials group, so idata is the
-// [len, vals...] pair their lpmfs already write rather than raw values,
-// and the kernel unpacks it with with_int_group. Field 3 is again the
-// count of REAL arguments, so the lowering entry is two more than that
-// with two int groups.
+// IntGroups (density_layout.hpp) their lpmfs already write rather than raw
+// values. Field 3 is again the count of REAL arguments, so the lowering
+// entry is two more than that with two int groups.
 //
 // Neither group is a lane broadcast the lowering can do on its own: a
-// scalar is spelled with a length of -1 and stan-math broadcasts it,
-// which is what keeps `binomial_lcdf(n | N, theta)` with a bare int `n`
-// from arriving as a size-1 container.
+// scalar group is flagged as one and stan-math broadcasts it, which is what
+// keeps `binomial_lcdf(n | N, theta)` with a bare int `n` from arriving as
+// a size-1 container.
 #define STANLI_TWO_INT_CDF_LIST(X)                     \
   X(OP_BETA_BINOMIAL_CDF, beta_binomial_cdf, 2, 0)     \
   X(OP_BETA_BINOMIAL_LCCDF, beta_binomial_lccdf, 2, 0) \

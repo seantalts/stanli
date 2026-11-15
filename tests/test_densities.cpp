@@ -812,16 +812,15 @@ static void check_ordered_density(bool array_cuts, bool scalar_location,
   const int nc = array_cuts ? n : 1;
   std::vector<int> y;
   for (int i = 0; i < n; ++i) y.push_back(1 + i % (width + 1));
-  auto layout = y;
-  layout.insert(layout.end(),
-                {kVectorizedDensityLayoutMarker, width, array_cuts ? nc : -1});
+  const auto layout =
+      testutil::vectorized_idata(y, width, {nc}, array_cuts ? 1 : 0);
   Graph g;
   const int ls = g.add_slot(n, true), cs = g.add_slot(width * nc, true);
   const int ws = g.add_slot(1, false), out = g.add_slot(1, false);
   const int scaled = g.add_slot(1, false);
   g.add_op(probit ? OP_ORDERED_PROBIT_LPMF : OP_ORDERED_LOGISTIC_LPMF, {ls, cs},
            out, layout);
-  g.ops.back().variant = propto ? 0x83u : 0;
+  g.ops.back().variant = propto ? 0x83u : 0x03u;
   g.add_op(OP_MUL, {out, ws}, scaled);
   g.result_slot = scaled;
   Executor ex(std::move(g));
@@ -958,8 +957,10 @@ static void check_dirichlet_recorder() {
                     a = g.add_slot(width, true);
           const int w = g.add_slot(1, false), lp = g.add_slot(1, false);
           const int scaled = g.add_slot(1, false);
-          stanli::testutil::add_density(g, OP_DIRICHLET_LPDF, {t, a}, lp,
-                                        {width, arrays ? n : -1, -1});
+          stanli::testutil::add_density(
+              g, OP_DIRICHLET_LPDF, {t, a}, lp,
+              testutil::vectorized_idata({}, width, {arrays ? n : 1, 1},
+                                         arrays ? 1 : 0));
           g.ops.back().variant = 0x40u | mask | (propto ? 0x80u : 0u);
           g.add_op(OP_MUL, {lp, w}, scaled);
           g.result_slot = scaled;
@@ -1041,7 +1042,7 @@ static void check_probit_alias() {
     const std::vector<int> outcomes{1, 2, 4};
     stanli::testutil::add_density(
         g, OP_ORDERED_PROBIT_LPMF, {input, input}, lp,
-        {1, 2, 4, kVectorizedDensityLayoutMarker, 3, -1});
+        testutil::vectorized_idata({1, 2, 4}, 3, {1}, 0));
     g.add_op(OP_MUL, {lp, w}, scaled);
     g.result_slot = scaled;
     Executor ex(std::move(g));
@@ -1724,13 +1725,14 @@ int main() {
               {pos, {3.5}}, {true, true}, counts,
               [&](int64_t i) { return std::vector<int>{counts[i]}; });
 
-    // binomial: int groups; y vector, trials a language-level scalar (-1).
+    // binomial: int groups; y vector, trials a language-level scalar.
     // The elementwise binomials leave the recorder out entirely, so every
     // shape they branch on is pinned against the lanes: both distributions,
     // propto off and on, and a broadcast probability against a vector one.
-    std::vector<int> fused_b{N, 3, 0, 7, 1, 2, -1, 20};
+    const std::vector<int> fused_b =
+        testutil::int_groups_idata({{{3, 0, 7, 1, 2}}, {{20}, true}});
     const auto lane_b = [&](int64_t i) {
-      return std::vector<int>{-1, counts[i], -1, 20};
+      return testutil::int_groups_idata({{{counts[i]}, true}, {{20}, true}});
     };
     for (uint8_t v : {0x01, 0x81}) {
       const std::string tag = v == 0x01 ? "" : " propto";
@@ -1745,15 +1747,16 @@ int main() {
     }
     // n == 0 and n == N are separate branches of the value and the partial.
     std::vector<int> edge{0, 20, 0, 20, 10};
-    check_elt("elt binomial edges", OP_BINOMIAL_LPMF, 0x01, N, {unit}, {true},
-              {N, 0, 20, 0, 20, 10, -1, 20},
-              [&](int64_t i) { return std::vector<int>{-1, edge[i], -1, 20}; });
+    check_elt(
+        "elt binomial edges", OP_BINOMIAL_LPMF, 0x01, N, {unit}, {true},
+        testutil::int_groups_idata({{edge}, {{20}, true}}), [&](int64_t i) {
+          return testutil::int_groups_idata({{{edge[i]}, true}, {{20}, true}});
+        });
   }
 
   // The two-integer-group cdfs. binomial and beta_binomial carry an
-  // outcome group and a trials group, so their idata is the same
-  // [len, vals...] pair their lpmfs use, and a len of -1 marks a
-  // language-level scalar that stan-math broadcasts. Every combination of
+  // outcome group and a trials group, the same IntGroups their lpmfs use,
+  // where a language-level scalar broadcasts. Every combination of
   // the three group forms -- vector, scalar, and the array of one that is
   // a container rather than a scalar -- reaches a different stan-math
   // overload, which is why each one is pinned rather than just the vector
@@ -1769,38 +1772,44 @@ int main() {
     };
     // Both groups vectors.
     check_density("binomial_lcdf vv", OP_BINOMIAL_LCDF, {th3}, {true},
-                  {3, 1, 2, 3, 3, 5, 7, 9}, [&](DensityArgs& a) {
+                  testutil::int_groups_idata({{{1, 2, 3}}, {{5, 7, 9}}}),
+                  [&](DensityArgs& a) {
                     return stan::math::binomial_lcdf(ivec({1, 2, 3}),
                                                      ivec({5, 7, 9}), a.v(0));
                   });
     // Scalar outcome against a vector of trials.
     check_density("binomial_lcdf sv", OP_BINOMIAL_LCDF, {th3}, {true},
-                  {-1, 3, 3, 5, 7, 9}, [&](DensityArgs& a) {
+                  testutil::int_groups_idata({{{3}, true}, {{5, 7, 9}}}),
+                  [&](DensityArgs& a) {
                     return stan::math::binomial_lcdf(3, ivec({5, 7, 9}),
                                                      a.v(0));
                   });
     // Both groups scalars, broadcast across the real argument's lanes.
     check_density(
-        "binomial_lcdf ss", OP_BINOMIAL_LCDF, {th3}, {true}, {-1, 3, -1, 9},
+        "binomial_lcdf ss", OP_BINOMIAL_LCDF, {th3}, {true},
+        testutil::int_groups_idata({{{3}, true}, {{9}, true}}),
         [](DensityArgs& a) { return stan::math::binomial_lcdf(3, 9, a.v(0)); });
     // An array of one is a container: it must not be confused with the
-    // scalar form, which is what the -1 length exists to distinguish.
-    check_density("binomial_lccdf 11", OP_BINOMIAL_LCCDF, {{0.4}}, {true},
-                  {1, 2, 1, 7}, [&](DensityArgs& a) {
-                    return stan::math::binomial_lccdf(ivec({2}), ivec({7}),
-                                                      a.v(0));
-                  });
+    // scalar form, which is what the scalar flag exists to distinguish.
+    check_density(
+        "binomial_lccdf 11", OP_BINOMIAL_LCCDF, {{0.4}}, {true},
+        testutil::int_groups_idata({{{2}}, {{7}}}), [&](DensityArgs& a) {
+          return stan::math::binomial_lccdf(ivec({2}), ivec({7}), a.v(0));
+        });
     // beta_binomial: the same two groups, then two real arguments.
     check_density("beta_binomial_cdf vv", OP_BETA_BINOMIAL_CDF, {a3, b3},
-                  {true, true}, {3, 1, 2, 3, 3, 5, 7, 9}, [&](DensityArgs& a) {
+                  {true, true},
+                  testutil::int_groups_idata({{{1, 2, 3}}, {{5, 7, 9}}}),
+                  [&](DensityArgs& a) {
                     return stan::math::beta_binomial_cdf(
                         ivec({1, 2, 3}), ivec({5, 7, 9}), a.v(0), a.v(1));
                   });
-    check_density("beta_binomial_lccdf ss", OP_BETA_BINOMIAL_LCCDF, {a3, b3},
-                  {true, true}, {-1, 3, -1, 9}, [](DensityArgs& a) {
-                    return stan::math::beta_binomial_lccdf(3, 9, a.v(0),
-                                                           a.v(1));
-                  });
+    check_density(
+        "beta_binomial_lccdf ss", OP_BETA_BINOMIAL_LCCDF, {a3, b3},
+        {true, true}, testutil::int_groups_idata({{{3}, true}, {{9}, true}}),
+        [](DensityArgs& a) {
+          return stan::math::beta_binomial_lccdf(3, 9, a.v(0), a.v(1));
+        });
   }
 
   // wiener with every argument a vector, through the all-active default

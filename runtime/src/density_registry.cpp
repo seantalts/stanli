@@ -98,16 +98,19 @@ DensityCallArgument integer_density_argument(std::vector<int> values,
 
 std::vector<int> pack_all_integer_density_arguments(
     const std::vector<IntegerDensityArgument>& arguments) {
+  if (arguments.size() > static_cast<size_t>(kMaxIntGroups))
+    throw std::logic_error("too many all-integer density arguments");
   std::vector<int> packed;
-  for (const IntegerDensityArgument& argument : arguments) {
+  int scalar_mask = 0;
+  for (size_t k = 0; k < arguments.size(); ++k) {
+    const IntegerDensityArgument& argument = arguments[k];
     if (argument.scalar && argument.values.size() != 1)
       throw std::logic_error("malformed scalar all-integer density argument");
-    if (argument.values.size() >
-        static_cast<size_t>(std::numeric_limits<int>::max()))
-      throw std::length_error("all-integer density argument is too large");
-    packed.push_back(argument.scalar ? -1 : (int)argument.values.size());
-    packed.insert(packed.end(), argument.values.begin(), argument.values.end());
+    append_int_group(packed, argument.values.data(),
+                     static_cast<int64_t>(argument.values.size()));
+    if (argument.scalar) scalar_mask |= 1 << k;
   }
+  packed.push_back(scalar_mask);
   return packed;
 }
 
@@ -118,22 +121,13 @@ double evaluate_packed_all_integer_density(AllIntegerDensity density,
                     : density == AllIntegerDensity::None             ? 0
                                                                      : 3;
   if (arity == 0) throw std::logic_error("unknown all-integer density");
+  const IntGroups groups = int_groups(packed, size, arity);
   std::vector<IntegerDensityArgument> arguments;
   arguments.reserve((size_t)arity);
-  int64_t at = 0;
   for (int k = 0; k < arity; ++k) {
-    if (at >= size)
-      throw std::logic_error("truncated all-integer density payload");
-    const int encoded = packed[at++];
-    const bool scalar = encoded == -1;
-    const int64_t count = scalar ? 1 : encoded;
-    if (count < 0 || count > size - at)
-      throw std::logic_error("malformed all-integer density payload");
-    arguments.push_back({{packed + at, packed + at + count}, scalar});
-    at += count;
+    const IntGroup& g = groups.group[k];
+    arguments.push_back({{g.values, g.values + g.count}, g.scalar});
   }
-  if (at != size)
-    throw std::logic_error("trailing all-integer density payload");
   return evaluate_all_integer(density, arguments, propto);
 }
 
@@ -222,8 +216,9 @@ VectorizedDensityLayout vectorized_density_layout(
       throw std::invalid_argument(
           "vectorized argument shape does not match storage");
     if (arg.array_depth == 0) {
-      result.vector_counts.push_back(-1);
+      result.vector_counts.push_back(1);
     } else {
+      result.array_mask |= 1 << result.vector_counts.size();
       if (count > std::numeric_limits<int>::max())
         throw std::length_error("vectorized argument has too many elements");
       if (array_count >= 0 && count != array_count)
@@ -259,29 +254,31 @@ DensityCallPlan density_call_plan(
   }
 
   std::vector<std::vector<int>> integer_groups;
-  uint8_t glm_scalar_mask = 0;
+  int glm_flags = 0;
   bool scalar_outcome = false;
   if (spec.integer_args == 1) {
     plan.idata = arguments[0].integers;
     scalar_outcome = arguments[0].scalar && plan.idata.size() == 1;
-    if (scalar_outcome) glm_scalar_mask |= 1u;
+    if (scalar_outcome) glm_flags |= kGlmScalarFirstOutcome;
   } else if (spec.integer_args == 2) {
     integer_groups.reserve(2);
+    int scalar_mask = 0;
     for (size_t k = 0; k < 2; ++k) {
       const DensityCallArgument& argument = arguments[k];
       if (spec.glm_layout) {
-        if (argument.scalar) glm_scalar_mask |= uint8_t{1} << k;
+        if (argument.scalar)
+          glm_flags |=
+              k == 0 ? kGlmScalarFirstOutcome : kGlmScalarSecondOutcome;
         integer_groups.push_back(argument.integers);
       } else {
-        if (argument.integers.size() >
-            static_cast<size_t>(std::numeric_limits<int>::max()))
-          throw std::length_error("integer density argument is too large");
-        plan.idata.push_back(
-            argument.scalar ? -1 : static_cast<int>(argument.integers.size()));
-        plan.idata.insert(plan.idata.end(), argument.integers.begin(),
-                          argument.integers.end());
+        if (argument.scalar && argument.integers.size() != 1)
+          throw std::logic_error("malformed scalar integer density argument");
+        append_int_group(plan.idata, argument.integers.data(),
+                         static_cast<int64_t>(argument.integers.size()));
+        if (argument.scalar) scalar_mask |= 1 << k;
       }
     }
+    if (!spec.glm_layout) plan.idata.push_back(scalar_mask);
   }
 
   std::vector<DensityArgumentShape> real_shapes;
@@ -361,7 +358,7 @@ DensityCallPlan density_call_plan(
                             real_shapes[spec.glm_matrix_arg].container ==
                                 FunctionContainerKind::RowVector;
     if (row_design) {
-      glm_scalar_mask |= kGlmRowVectorDesign;
+      glm_flags |= kGlmRowVectorDesign;
       instances =
           spec.integer_args == 1 ? static_cast<int64_t>(plan.idata.size()) : 1;
       for (const std::vector<int>& group : integer_groups)
@@ -386,7 +383,9 @@ DensityCallPlan density_call_plan(
       plan.idata.clear();
       for (size_t k = 0; k < integer_groups.size(); ++k) {
         std::vector<int>& group = integer_groups[k];
-        if ((glm_scalar_mask & (uint8_t{1} << k)) && instances > 1) {
+        if ((glm_flags &
+             (k == 0 ? kGlmScalarFirstOutcome : kGlmScalarSecondOutcome)) &&
+            instances > 1) {
           const int value = group[0];
           group.assign(static_cast<size_t>(instances), value);
         }
@@ -399,15 +398,14 @@ DensityCallPlan density_call_plan(
                static_cast<int64_t>(plan.idata.size()) != instances) {
       throw std::invalid_argument("density outcome does not match matrix rows");
     }
-    plan.idata.push_back(as_int_extent(rows));
-    plan.idata.push_back(as_int_extent(cols));
-    plan.idata.push_back(kGlmScalarLayoutMarker);
-    plan.idata.push_back(static_cast<int>(glm_scalar_mask));
-    if (spec.opcode == OP_NORMAL_ID_GLM_LPDF)
-      plan.idata.push_back(real_shapes[spec.glm_matrix_arg].container ==
-                                   FunctionContainerKind::RowVector
-                               ? 1
-                               : 0);
+    // normal_id_glm has no integer outcomes; its row_vector design is the
+    // same flag.
+    if (spec.opcode == OP_NORMAL_ID_GLM_LPDF &&
+        real_shapes[spec.glm_matrix_arg].container ==
+            FunctionContainerKind::RowVector)
+      glm_flags |= kGlmRowVectorDesign;
+    append_glm_layout(plan.idata, as_int_extent(rows), as_int_extent(cols),
+                      glm_flags);
   }
 
   if (spec.shape == DensityShape::PoissonBinomial) {
@@ -483,14 +481,9 @@ DensityCallPlan density_call_plan(
     plan.empty_result =
         std::any_of(layout.vector_counts.begin(), layout.vector_counts.end(),
                     [](int count) { return count == 0; });
-    if (spec.integer_args) {
-      plan.idata.push_back(kVectorizedDensityLayoutMarker);
-      plan.idata.push_back(as_int_extent(layout.width));
-    } else {
-      plan.idata = {as_int_extent(layout.width)};
-    }
-    plan.idata.insert(plan.idata.end(), layout.vector_counts.begin(),
-                      layout.vector_counts.end());
+    if (!spec.integer_args) plan.idata.clear();
+    append_vectorized_layout(plan.idata, as_int_extent(layout.width),
+                             layout.vector_counts, layout.array_mask);
   }
   return plan;
 }

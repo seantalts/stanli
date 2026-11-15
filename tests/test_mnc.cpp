@@ -174,7 +174,8 @@ Result run_direct(const Inputs& x, uint8_t variant, double seed,
   using namespace stanli;
   const Kernel* kernel = find_kernel(opcode);
   if (!kernel) throw std::runtime_error("MNC kernel missing");
-  int dims[2] = {x.n, x.m};
+  const std::vector<int> dims =
+      testutil::vectorized_idata({}, x.n, {x.m, 1}, x.m > 1 ? 1 : 0);
   double density = std::numeric_limits<double>::quiet_NaN();
   // The generic fallback stashes one partial per input element, which is
   // more than the native pullback's n*n.
@@ -193,8 +194,8 @@ Result run_direct(const Inputs& x, uint8_t variant, double seed,
   ctx.out = Desc{&density, 1};
   ctx.variant = variant;
   ctx.scratch = scratch.data();
-  ctx.idata = dims;
-  ctx.n_idata = 2;
+  ctx.idata = dims.data();
+  ctx.n_idata = (int64_t)dims.size();
   ctx.in_adj[0] = Desc{r.dy.data(), (int64_t)r.dy.size()};
   ctx.in_adj[1] = Desc{r.dmu.data(), (int64_t)r.dmu.size()};
   ctx.in_adj[2] = Desc{connect_L ? r.dL.data() : nullptr, (int64_t)r.dL.size()};
@@ -237,8 +238,9 @@ stanli::Graph fast_graph(int n) {
   const int density = g.add_slot(1, false);
   const int seed = g.add_slot(1, false);
   const int total = g.add_slot(1, false);
-  const int op = stanli::testutil::add_density(g, OP_MULTI_NORMAL_CHOL_LPDF,
-                                               {y, mu, L}, density, {n, 1});
+  const int op = stanli::testutil::add_density(
+      g, OP_MULTI_NORMAL_CHOL_LPDF, {y, mu, L}, density,
+      testutil::vectorized_idata({}, n, {1, 1}, 0));
   g.ops[(size_t)op].variant = 0x84u;
   g.add_op(OP_MUL, {density, seed}, total);
   g.result_slot = total;
@@ -289,11 +291,12 @@ void compare_runner(const std::string& tag, const Result& got,
 }
 
 int64_t scratch_for(uint8_t variant, int n, int m, int64_t y_len,
-                    int64_t mu_len, int64_t L_len, int64_t n_idata = 2) {
+                    int64_t mu_len, int64_t L_len) {
   using namespace stanli;
   const Kernel* kernel = find_kernel(OP_MULTI_NORMAL_CHOL_LPDF);
   if (!kernel || !kernel->scratch_size) return -1;
-  int dims[2] = {n, m};
+  const std::vector<int> dims =
+      testutil::vectorized_idata({}, n, {m, 1}, m > 1 ? 1 : 0);
   Slot slots[4];
   slots[0].len = y_len;
   slots[1].len = mu_len;
@@ -307,8 +310,8 @@ int64_t scratch_for(uint8_t variant, int n, int m, int64_t y_len,
   op.in[2] = 2;
   op.n_in = 3;
   op.out = 3;
-  op.idata = dims;
-  op.n_idata = n_idata;
+  op.idata = dims.data();
+  op.n_idata = (int64_t)dims.size();
   return kernel->scratch_size(op, slots);
 }
 
@@ -358,7 +361,7 @@ void check_multi_normal(const std::string& tag, int n, int m, uint8_t variant,
   const MatD Sm = opcode == OP_MULTI_NORMAL_CHOL_LPDF
                       ? MatD(Lm)
                       : MatD(Lm * Lm.transpose());
-  const unsigned mask = variant == 0 ? 0x7u : (variant & 0x3fu);
+  const unsigned mask = variant & 0x3fu;
   const bool ay = mask & 1u, am = mask & 2u, aS = mask & 4u;
   const bool propto = (variant & 0x80u) != 0;
 
@@ -370,10 +373,11 @@ void check_multi_normal(const std::string& tag, int n, int m, uint8_t variant,
   const int density = g.add_slot(1, false);
   const int seed_slot = g.add_slot(1, false);
   const int total = g.add_slot(1, false);
-  const int op = g.add_op(
-      opcode, {y, mu, S}, density,
-      modern ? std::vector<int>{n, m == 1 ? -1 : m, vectorized_mu ? m : -1}
-             : std::vector<int>{n, m});
+  const int op =
+      g.add_op(opcode, {y, mu, S}, density,
+               testutil::vectorized_idata(
+                   {}, n, {m, vectorized_mu ? m : 1},
+                   (m != 1 ? 1 : 0) | (modern && vectorized_mu ? 2 : 0)));
   g.ops[(size_t)op].variant = variant;
   g.add_op(OP_MUL, {density, seed_slot}, total);
   g.result_slot = total;
@@ -537,8 +541,8 @@ int main() {
   // the pullback's n*n, every near miss asks for the fallback's one partial
   // per input element. These near misses are real supported contracts and
   // must continue through mn_eval: non-propto, another active argument,
-  // vectorized y, no active argument, the hier_2pl all-active variant, a
-  // missing repetition immediate, or malformed slots.
+  // vectorized y, no active argument, the hier_2pl all-active variant, or
+  // malformed slots.
   check(scratch_for(0x84u, 11, 1, 11, 11, 121) == 121,
         "native gate gets n*n scratch");
   check(scratch_for(0x04u, 11, 1, 11, 11, 121) == 143,
@@ -551,8 +555,6 @@ int main() {
         "inactive variant refuses native path");
   check(scratch_for(0x07u, 11, 1, 11, 11, 121) == 143,
         "hier_2pl variant refuses native path");
-  check(scratch_for(0x84u, 11, 1, 11, 11, 121, 1) == 143,
-        "missing repetition immediate refuses native path");
   check(scratch_for(0x84u, 11, 1, 11, 10, 121) == 142,
         "malformed mu refuses native path");
 

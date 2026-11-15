@@ -556,9 +556,8 @@ Outcome run_ordered_logistic(const std::vector<int>& y,
                              bool fused) {
   stanli::dens::set_fused_density(fused);
   std::vector<int> idata(y);
-  idata.push_back(stanli::kVectorizedDensityLayoutMarker);
-  idata.push_back(static_cast<int>(cuts.size()));
-  idata.push_back(-1);
+  stanli::append_vectorized_layout(idata, static_cast<int>(cuts.size()), {1},
+                                   0);
   std::vector<double> lam(lambda), c(cuts);
   Outcome o;
   o.scratch.assign(lam.size() + c.size() + 1, kSentinel);

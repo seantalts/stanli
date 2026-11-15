@@ -1,5 +1,6 @@
 // Legacy ops: kernels of exactly this shape wrap any stan-math signature
 // that has no native port yet.
+#include <stanli/density_layout.hpp>
 #include <stanli/graph.hpp>
 #include <stanli/recorder.hpp>
 #include <stanli/legacy.hpp>
@@ -75,16 +76,12 @@ void softmax_bwd(KernelCtx& ctx) {
 // legacy propto op must bind each argument var-or-double per the activity
 // mask, exactly like the native kernels do; promoting an inactive argument
 // to var silently keeps terms CmdStan drops.
-inline int64_t vectorized_count(int encoded) {
-  return encoded < 0 ? 1 : encoded;
-}
-
 template <typename Scalar, typename Input>
 std::vector<Eigen::Matrix<Scalar, -1, 1>> vectorized_vectors(const Input& input,
                                                              int64_t width,
-                                                             int encoded) {
+                                                             int64_t count) {
   using Vector = Eigen::Matrix<Scalar, -1, 1>;
-  std::vector<Vector> result((size_t)vectorized_count(encoded), Vector(width));
+  std::vector<Vector> result((size_t)count, Vector(width));
   for (int64_t n = 0; n < (int64_t)result.size(); ++n)
     for (int64_t k = 0; k < width; ++k)
       result[(size_t)n](k) = input.data[n * width + k];
@@ -92,9 +89,8 @@ std::vector<Eigen::Matrix<Scalar, -1, 1>> vectorized_vectors(const Input& input,
 }
 
 template <typename Vectors, typename F>
-decltype(auto) with_vectorized_argument(Vectors& values, int encoded, F&& f) {
-  return encoded < 0 ? std::forward<F>(f)(values[0])
-                     : std::forward<F>(f)(values);
+decltype(auto) with_vectorized_argument(Vectors& values, bool array, F&& f) {
+  return array ? std::forward<F>(f)(values) : std::forward<F>(f)(values[0]);
 }
 
 double dirichlet_eval(KernelCtx& ctx) {
@@ -103,14 +99,14 @@ double dirichlet_eval(KernelCtx& ctx) {
   const DensityMode mode = density_mode(ctx);
   const bool propto = mode.propto;
   const unsigned mask = mode.active;
-  // idata is {inner width, theta count, alpha count}.
-  const int64_t width = ctx.idata[0];
-  const int theta_encoded = ctx.idata[1];
-  const int alpha_encoded = ctx.idata[2];
-  auto theta = vectorized_vectors<var>(ctx.in[0], width, theta_encoded);
-  auto alpha = vectorized_vectors<var>(ctx.in[1], width, alpha_encoded);
-  auto theta_d = vectorized_vectors<double>(ctx.in[0], width, theta_encoded);
-  auto alpha_d = vectorized_vectors<double>(ctx.in[1], width, alpha_encoded);
+  const VectorizedLayout layout = vectorized_layout(ctx.idata, ctx.n_idata, 2);
+  const int64_t width = layout.width;
+  const bool theta_array = layout.is_array(0);
+  const bool alpha_array = layout.is_array(1);
+  auto theta = vectorized_vectors<var>(ctx.in[0], width, layout.count[0]);
+  auto alpha = vectorized_vectors<var>(ctx.in[1], width, layout.count[1]);
+  auto theta_d = vectorized_vectors<double>(ctx.in[0], width, layout.count[0]);
+  auto alpha_d = vectorized_vectors<double>(ctx.in[1], width, layout.count[1]);
   const bool a0 = (mask & 1u) != 0, a1 = (mask & 2u) != 0;
   const auto call = [&](const auto& theta_arg, const auto& alpha_arg) {
     return propto ? stan::math::dirichlet_lpdf<true>(theta_arg, alpha_arg)
@@ -119,20 +115,20 @@ double dirichlet_eval(KernelCtx& ctx) {
   var lp;
   const auto with_alpha = [&](const auto& theta_arg) {
     if (a1)
-      with_vectorized_argument(alpha, alpha_encoded, [&](const auto& arg) {
+      with_vectorized_argument(alpha, alpha_array, [&](const auto& arg) {
         lp = call(theta_arg, arg);
       });
     else
-      with_vectorized_argument(alpha_d, alpha_encoded, [&](const auto& arg) {
+      with_vectorized_argument(alpha_d, alpha_array, [&](const auto& arg) {
         lp = call(theta_arg, arg);
       });
   };
   if (propto && !a0 && !a1) {
     lp = 0.0;
   } else if (a0) {
-    with_vectorized_argument(theta, theta_encoded, with_alpha);
+    with_vectorized_argument(theta, theta_array, with_alpha);
   } else {
-    with_vectorized_argument(theta_d, theta_encoded, with_alpha);
+    with_vectorized_argument(theta_d, theta_array, with_alpha);
   }
   const double value = lp.val();
   if (!values_only()) {
@@ -146,10 +142,10 @@ double dirichlet_eval(KernelCtx& ctx) {
   return value;
 }
 void dirichlet_fwd(KernelCtx& ctx) {
-  if (ctx.n_idata < 3) throw std::logic_error("malformed dirichlet op");
-  const bool shared_vectors = ctx.idata[1] < 0 && ctx.idata[2] < 0 &&
-                              ctx.idata[0] == ctx.in[0].len &&
-                              ctx.idata[0] == ctx.in[1].len;
+  const VectorizedLayout layout = vectorized_layout(ctx.idata, ctx.n_idata, 2);
+  const bool shared_vectors = !layout.is_array(0) && !layout.is_array(1) &&
+                              layout.width == ctx.in[0].len &&
+                              layout.width == ctx.in[1].len;
   if (!shared_vectors) {
     ctx.out.data[0] = dirichlet_eval(ctx);
     return;

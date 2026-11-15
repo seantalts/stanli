@@ -478,8 +478,9 @@ static void test_binomial_idata_groups() {
   std::vector<int> terms;
   for (int l = 0; l < L; ++l) {
     const int lp = g.add_slot(1, false);
-    const int id = stanli::testutil::add_density(g, OP_BINOMIAL_LPMF, {theta},
-                                                 lp, {-1, l, -1, L});
+    const int id = stanli::testutil::add_density(
+        g, OP_BINOMIAL_LPMF, {theta}, lp,
+        stanli::testutil::int_groups_idata({{{l}, true}, {{L}, true}}));
     g.ops[(size_t)id].variant = 0x01;
     const int t = g.add_slot(1, false);
     g.add_op(OP_ADD, {prior, lp}, t);
@@ -492,9 +493,10 @@ static void test_binomial_idata_groups() {
   const PartitionStats st = partition_lanes(g, f2, tt, {});
   expect("groups one group", st.groups == 1 && st.lanes == L);
   expect("groups op count", g.ops.size() == 3 && tt.size() == 1);
-  bool layout = g.ops[0].n_idata == 2 * (L + 1);
+  bool layout = g.ops[0].n_idata == 2 * (L + 1) + 1;
   if (layout) {
-    layout = g.ops[0].idata[0] == L && g.ops[0].idata[L + 1] == L;
+    layout = g.ops[0].idata[0] == L && g.ops[0].idata[L + 1] == L &&
+             g.ops[0].idata[2 * (L + 1)] == 0;
     for (int l = 0; l < L; ++l)
       layout = layout && g.ops[0].idata[1 + l] == l &&
                g.ops[0].idata[L + 2 + l] == L;
@@ -555,7 +557,8 @@ static void test_binomial_elt_fusion() {
     const int lp = g.add_slot(1, false);
     const int id = stanli::testutil::add_density(
         g, OP_BINOMIAL_LPMF, {theta}, lp,
-        {W, l % 3, (l + 1) % 3, l % 2, 1, 0, -1, 4});
+        stanli::testutil::int_groups_idata(
+            {{{l % 3, (l + 1) % 3, l % 2, 1, 0}}, {{4}, true}}));
     g.ops[(size_t)id].variant = 0x01;
     const int c = g.add_slot(1, false);
     fills.emplace_back(c, std::vector<double>{0.3 + 0.1 * l});
@@ -577,8 +580,8 @@ static void test_binomial_elt_fusion() {
   expect("binomial elt widens", count_opcode(g, OP_SUM_ROWS) == 1 &&
                                     count_opcode(g, OP_BINOMIAL_LPMF) == 1);
   expect("binomial elt groups concatenate",
-         g.ops[0].n_idata == 2 * (L * W + 1) && g.ops[0].idata[0] == L * W &&
-             g.ops[0].idata[L * W + 1] == L * W);
+         g.ops[0].n_idata == 2 * (L * W + 1) + 1 &&
+             g.ops[0].idata[0] == L * W && g.ops[0].idata[L * W + 1] == L * W);
   expect_same_grad("binomial elt", std::move(g), f2, tt, want);
 }
 
@@ -596,7 +599,8 @@ static void test_unset_variant_elt_fusion() {
   for (int l = 0; l < L; ++l) {
     const int lp = g.add_slot(1, false);
     g.add_op(OP_BINOMIAL_LPMF, {theta}, lp,
-             {W, l % 3, (l + 1) % 3, l % 2, 1, 0, -1, 4});
+             stanli::testutil::int_groups_idata(
+                 {{{l % 3, (l + 1) % 3, l % 2, 1, 0}}, {{4}, true}}));
     const int c = g.add_slot(1, false);
     fills.emplace_back(c, std::vector<double>{0.3 + 0.1 * l});
     const int s = g.add_slot(1, false);
@@ -618,8 +622,8 @@ static void test_unset_variant_elt_fusion() {
          count_opcode(g, OP_SUM_ROWS) == 1 &&
              count_opcode(g, OP_BINOMIAL_LPMF) == 1);
   expect("unset variant elt groups concatenate",
-         g.ops[0].n_idata == 2 * (L * W + 1) && g.ops[0].idata[0] == L * W &&
-             g.ops[0].idata[L * W + 1] == L * W);
+         g.ops[0].n_idata == 2 * (L * W + 1) + 1 &&
+             g.ops[0].idata[0] == L * W && g.ops[0].idata[L * W + 1] == L * W);
   expect_same_grad("unset variant elt", std::move(g), f2, tt, want);
 }
 
@@ -639,9 +643,10 @@ static void test_beta_binomial_elt_fusion() {
     const int alpha = g.add_slot(1, false);
     g.add_op(OP_INDEX, {base}, alpha, {l});
     const int lp = g.add_slot(1, false);
-    const int id =
-        stanli::testutil::add_density(g, OP_BETA_BINOMIAL_LPMF, {alpha, beta},
-                                      lp, {-1, l % 4, -1, 5 + l % 3});
+    const int id = stanli::testutil::add_density(
+        g, OP_BETA_BINOMIAL_LPMF, {alpha, beta}, lp,
+        stanli::testutil::int_groups_idata(
+            {{{l % 4}, true}, {{5 + l % 3}, true}}));
     g.ops[(size_t)id].variant = 0x03;
     const int w = g.add_slot(1, false);
     fills.emplace_back(w, std::vector<double>{0.5 + 0.1 * (l % 5)});
@@ -704,7 +709,9 @@ static bool both_forms_agree(const ListedDensity& d, int fill, int outcome,
     for (int j = 0; j < d.reals; ++j) in.push_back(g.add_slot(L, true));
     std::vector<int> idata;
     if (d.int_groups == 1) idata = {low, high, high};
-    if (d.int_groups == 2) idata = {L, low, high, high, -1, 4};
+    if (d.int_groups == 2)
+      idata = stanli::testutil::int_groups_idata(
+          {{{low, high, high}}, {{4}, true}});
     const int lp = g.add_slot(elementwise ? L : 1, false);
     const int id = g.add_op(d.opcode, {}, lp, idata);
     g.ops[(size_t)id].n_in = (uint8_t)d.reals;
@@ -1205,10 +1212,10 @@ static void test_irt_glm_synthesis() {
   expect("irt gathers in lane order", layout);
   for (const Op& op : b.g.ops) {
     if (op.opcode != OP_CATEGORICAL_LOGIT_GLM_LPMF) continue;
-    const int64_t rows = op.idata[op.n_idata - 2];
-    expect("irt glm idata", rows == (int64_t)person.size() &&
-                                op.idata[op.n_idata - 1] == 1 &&
-                                op.n_idata == rows + 2);
+    const GlmLayout glm = glm_layout(op.idata, op.n_idata);
+    expect("irt glm idata", glm.rows == (int64_t)person.size() &&
+                                glm.cols == 1 && glm.flags == 0 &&
+                                glm.n_outcomes == glm.rows);
   }
   expect_same_grad("irt", std::move(b.g), f2, tt, want);
 }

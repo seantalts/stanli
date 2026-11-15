@@ -357,7 +357,7 @@ static SharedBackwardGraph build_shared_backward_graph() {
       g.ops[g.add_op(OP_BERNOULLI_LPMF, {theta}, o, {1})].variant = variant;
     });
     dup([&](int o) {
-      g.ops[g.add_op(OP_BINOMIAL_LPMF, {theta}, o, {1, 3, 1, 10})].variant =
+      g.ops[g.add_op(OP_BINOMIAL_LPMF, {theta}, o, {1, 3, 1, 10, 0})].variant =
           variant;
     });
     dup([&](int o) {
