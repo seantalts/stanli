@@ -37,7 +37,8 @@ globalThis.Worker = class {
 
 (async () => {
   const wrapper = path.resolve(process.argv[4] || "js/index.mjs");
-  const { compile, sample, diagnose } = await import(pathToFileURL(wrapper));
+  const { compile, sample, diagnose, diagnoseReport } =
+      await import(pathToFileURL(wrapper));
   const { mir } = await compile({ code: `
     parameters { real x; real y; }
     model { x ~ normal(0, 1); y ~ normal(10, 2); }` });
@@ -70,6 +71,7 @@ globalThis.Worker = class {
   assert.match(text, /Bulk ESS is at least 100 per chain/);
   assert.match(text, /Tail ESS is at least 100 per chain/);
   assert.match(text, /No problems detected/);
+  assert.deepEqual(await diagnoseReport(fits), { text, failed: 0, unavailable: 0 });
   assert.deepEqual(fits, saved, "diagnosis must not detach or mutate fit data");
 
   // Failures in different chains/columns catch transpose errors and ensure
@@ -91,6 +93,8 @@ globalThis.Worker = class {
   assert.match(warning, /E-BFMI is below 0.3 in 4 of 4 chains/);
   assert.match(warning, /R-hat reaches .* \(y\)/);
   assert.doesNotMatch(warning, /No problems detected/);
+  assert.match(warning, /5 diagnostic checks failed/);
+  assert.equal((await diagnoseReport(bad)).failed, 5);
 
   const short = { ...fits[0], samples: 1,
     columns: { x: Float64Array.of(1), y: Float64Array.of(2) },
@@ -99,6 +103,9 @@ globalThis.Worker = class {
   assert.match(incomplete, /E-BFMI is unavailable/);
   assert.match(incomplete, /R-hat is unavailable/);
   assert.doesNotMatch(incomplete, /No problems detected/);
+  const shortReport = await diagnoseReport(short);
+  assert.equal(shortReport.failed, 0);
+  assert.ok(shortReport.unavailable > 0);
 
   for (const invalid of [[], [fits[0], short],
     [{ ...fits[0], samplerStats: null }],

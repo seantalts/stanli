@@ -511,6 +511,14 @@ int64_t stanli_sampling_warnings(const stanli_sample_opts* opts,
                                  const double* stats, char* out,
                                  size_t out_len);
 
+/* The verdict stanli_diagnose_text ends with, as numbers: how many checks
+ * failed and how many could not be computed (too few draws, say). Takes
+ * the same draws, stats and max_depth. Returns 0 on success. */
+int stanli_diagnose_counts(const double* draws, int64_t n_chains,
+                           int64_t n_draws, int64_t n_cols,
+                           const double* stats, int max_depth, int* n_failed,
+                           int* n_unavailable);
+
 /* ---- optimization --------------------------------------------------------
  *
  * L-BFGS, the same one CmdStan's `optimize` runs, over the same gradient
@@ -856,6 +864,11 @@ const stanli_field_layout* stanli_field_layouts(void);
  * way CmdStan does rebuilds with the run seed when this is set, and never
  * otherwise. Generated-quantities draws do not count. */
 int stanli_transformed_data_rng(const stanli_model* m);
+/* The parts of the model stanli_warnings is about, one entry each: what
+ * runs through the MIR interpreter and why. stanli_interpreter_fallback
+ * returns "" for an index out of range. Owned by the model. */
+int64_t stanli_n_interpreter_fallbacks(const stanli_model* m);
+const char* stanli_interpreter_fallback(const stanli_model* m, int64_t i);
 
 #ifdef __cplusplus
 }

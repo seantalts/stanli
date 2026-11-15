@@ -84,7 +84,14 @@ function diagnose(M, req) {
       outPtr = alloc(size);
       if (!report()) throw new Error("Could not compute sampling diagnostics");
     }
-    return M.UTF8ToString(outPtr);
+    const countsPtr = alloc(8);
+    if (M._stanli_diagnose_counts(
+        drawsPtr, BigInt(chains.length), BigInt(samples), BigInt(nCols),
+        statsPtr, maxDepth, countsPtr, countsPtr + 4) !== 0)
+      throw new Error("Could not compute sampling diagnostics");
+    const counts = new Int32Array(M.HEAPF64.buffer, countsPtr, 2);
+    return { text: M.UTF8ToString(outPtr), failed: counts[0],
+             unavailable: counts[1] };
   } finally {
     for (const ptr of allocations) M._free(ptr);
   }

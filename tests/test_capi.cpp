@@ -1522,7 +1522,18 @@ void expect_diagnose_text() {
     return t.find(s) != std::string::npos;
   };
 
+  const auto counts = [&](const double* draws, const double* stats,
+                          int max_depth) {
+    int failed = -1, unavailable = -1;
+    const int rc = stanli_diagnose_counts(draws, C, N, 1, stats, max_depth,
+                                          &failed, &unavailable);
+    expect_true("diagnose_counts succeeds", rc == 0);
+    return std::make_pair(failed, unavailable);
+  };
+
   const std::string ok = text(d.data(), names, st.data(), 10);
+  expect_true("converged counts",
+              counts(d.data(), st.data(), 10) == std::make_pair(0, 0));
   expect_true("converged text: " + ok,
               has(ok, "No divergent transitions.") &&
                   has(ok,
@@ -1543,6 +1554,10 @@ void expect_diagnose_text() {
   expect_true("divergences reach the text: " + div,
               has(div, "1 of 4000 transitions (0.0%) diverged.") &&
                   has(div, "1 diagnostic check failed."));
+  expect_true("divergences reach the counts",
+              counts(d.data(), st.data(), 10) == std::make_pair(1, 0));
+  expect_true("max_depth reaches the counts",
+              counts(d.data(), st.data(), 4) == std::make_pair(2, 0));
   const std::string draws_only = text(d.data(), nullptr, nullptr, 10);
   expect_true("null stats run only the R-hat and ESS half: " + draws_only,
               !has(draws_only, "divergent") && !has(draws_only, "E-BFMI") &&
@@ -1552,6 +1567,20 @@ void expect_diagnose_text() {
   const std::string split = text(d.data(), names, nullptr, 10);
   expect_true("split chains name the parameter: " + split,
               has(split, "R-hat reaches") && has(split, "(mu)"));
+  const auto split_counts = counts(d.data(), nullptr, 10);
+  expect_true("split chains fail a check in the counts",
+              split_counts.first >= 1 && split_counts.second == 0);
+  {
+    std::vector<double> one(d.begin(), d.begin() + C);
+    std::vector<double> one_stats(st.begin(),
+                                  st.begin() + C * STANLI_N_SAMPLER_COLS);
+    int failed = -1, unavailable = -1;
+    expect_true("one draw per chain",
+                stanli_diagnose_counts(one.data(), C, 1, 1, one_stats.data(),
+                                       10, &failed, &unavailable) == 0);
+    expect_true("one draw per chain leaves checks unavailable",
+                unavailable > 0);
+  }
 
   char small[8];
   const int64_t need = stanli_diagnose_text(d.data(), C, N, 1, names, nullptr,
@@ -1596,6 +1625,8 @@ void expect_interpreter_policy(const char* fixture,
       return;
     }
     expect_eq((tag + " no warning").c_str(), stanli_warnings(model), "");
+    expect_true(tag + " no interpreter fallbacks",
+                stanli_n_interpreter_fallbacks(model) == 0);
     stanli_model_free(model);
     return;
   }
@@ -1621,6 +1652,13 @@ void expect_interpreter_policy(const char* fixture,
   const std::string text = stanli_warnings(model);
   expect_true(tag + " warning carries the reason: " + text,
               text.find(expected_reason) != std::string::npos);
+  bool listed = false;
+  for (int64_t i = 0; i < stanli_n_interpreter_fallbacks(model); ++i)
+    listed = listed || std::string(stanli_interpreter_fallback(model, i))
+                               .find(expected_reason) != std::string::npos;
+  expect_true(tag + " the reason is a listed fallback", listed);
+  expect_eq((tag + " out of range fallback").c_str(),
+            stanli_interpreter_fallback(model, -1), "");
   expect_true(tag + " warning names the build: " + text,
               text.find(stanli_build_id()) != std::string::npos);
   stanli_model_free(model);

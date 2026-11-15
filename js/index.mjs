@@ -240,6 +240,13 @@ export function sample(opts) {
  * WALNUTS and Pathfinder do not expose the required sampler statistics.
  * @returns {Promise<string>} */
 export async function diagnose(fits) {
+  return (await diagnoseReport(fits)).text;
+}
+
+/** diagnose(), with the report's verdict as numbers: `failed` checks and
+ * `unavailable` ones, which could not be computed.
+ * @returns {Promise<{text: string, failed: number, unavailable: number}>} */
+export async function diagnoseReport(fits) {
   const chains = Array.isArray(fits) ? fits : [fits];
   const first = chains[0];
   if (!first || !Number.isInteger(first.samples) || first.samples < 1 ||

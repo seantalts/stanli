@@ -1420,6 +1420,24 @@ int64_t stanli_diagnose_text(const double* draws, int64_t n_chains,
   }
 }
 
+int stanli_diagnose_counts(const double* draws, int64_t n_chains,
+                           int64_t n_draws, int64_t n_cols,
+                           const double* stats, int max_depth, int* n_failed,
+                           int* n_unavailable) {
+  if (n_failed == nullptr || n_unavailable == nullptr) return 1;
+  try {
+    stanli::DrawSet d{draws, n_chains, n_draws, n_cols};
+    const auto summary = stanli::summarize(d, {});
+    const auto report =
+        stanli::diagnostic_report(stanli::diagnose(d, summary, stats, max_depth));
+    *n_failed = report.failed;
+    *n_unavailable = report.unavailable;
+    return 0;
+  } catch (const std::exception&) {
+    return 1;
+  }
+}
+
 void stanli_optimize_opts_init(stanli_optimize_opts* o) {
   if (o == nullptr) return;
   *o = stanli_optimize_opts{};
@@ -1915,6 +1933,15 @@ const stanli_field_layout* stanli_field_layouts(void) { return kFieldLayouts; }
 
 int stanli_transformed_data_rng(const stanli_model* m) {
   return m->cm.transformed_data_draws ? 1 : 0;
+}
+
+int64_t stanli_n_interpreter_fallbacks(const stanli_model* m) {
+  return (int64_t)m->cm.interpreter_fallbacks.size();
+}
+
+const char* stanli_interpreter_fallback(const stanli_model* m, int64_t i) {
+  if (i < 0 || i >= (int64_t)m->cm.interpreter_fallbacks.size()) return "";
+  return m->cm.interpreter_fallbacks[(size_t)i].c_str();
 }
 
 int64_t stanli_wa_n_generated_start(const stanli_model* m) {

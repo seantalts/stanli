@@ -257,7 +257,7 @@ graph and runs Stan Dynamic HMC,
 <div class="times" id="times"></div>
 
 <script type="module">
-import { compile, diagnose, preload, sample } from "./stanli.mjs";
+import { compile, diagnoseReport, preload, sample } from "./stanli.mjs";
 const $ = (id) => document.getElementById(id);
 
 // ---- background warm-up ----------------------------------------------------
@@ -749,32 +749,34 @@ async function completedFit(results, sampler) {
   let diagnostics = null;
   if (sampler === "nuts") {
     try {
-      diagnostics = await diagnose(results);
+      diagnostics = await diagnoseReport(results);
     } catch (err) {
       // A reporting failure must not discard successfully sampled draws.
-      diagnostics = "Sampling diagnostics unavailable: " + err.message;
+      diagnostics = { text: "Sampling diagnostics unavailable: " + err.message,
+                      failed: null };
     }
   } else if (sampler === "walnuts") {
-    diagnostics = "WALNUTS does not currently expose divergence, maximum " +
+    diagnostics = { failed: null, text:
+        "WALNUTS does not currently expose divergence, maximum " +
         "treedepth, or E-BFMI diagnostics. These checks are unavailable, " +
-        "not passed. R-hat and ESS estimates are shown in the table below.";
+        "not passed. R-hat and ESS estimates are shown in the table below." };
   }
   return { names: results[0].names, samples: results[0].samples, sampler,
            generatedStart: results[0].generatedStart,
            chains: results.map((r) => r.columns), diagnostics };
 }
 
-// The one-line verdict shown while the report is collapsed. A NUTS
-// report always ends with its verdict ("No problems detected.", "2
-// diagnostic checks failed.", ...); WALNUTS and a failed diagnose()
-// have no checks to report on.
+// The one-line verdict shown while the report is collapsed. WALNUTS and
+// a failed diagnoseReport() have no checks to report on.
 function diagnosticVerdict(f) {
-  if (f.sampler !== "nuts" ||
-      f.diagnostics.startsWith("Sampling diagnostics unavailable"))
-    return { text: "unavailable", bad: false };
-  const lines = f.diagnostics.trim().split("\n");
-  const last = lines[lines.length - 1];
-  return { text: last.replace(/\.$/, ""), bad: /failed/.test(last) };
+  const { failed, unavailable } = f.diagnostics;
+  if (failed === null) return { text: "unavailable", bad: false };
+  if (failed > 0)
+    return { text: failed === 1 ? "1 diagnostic check failed"
+                                : `${failed} diagnostic checks failed`,
+             bad: true };
+  if (unavailable > 0) return { text: "incomplete", bad: false };
+  return { text: "No problems detected", bad: false };
 }
 
 function showDiagnostics(parent, f) {
@@ -789,7 +791,7 @@ function showDiagnostics(parent, f) {
   verdict.textContent = v.text;
   heading.appendChild(verdict);
   const report = document.createElement("pre");
-  report.textContent = f.diagnostics;
+  report.textContent = f.diagnostics.text;
   section.append(heading, report);
   if (f.sampler === "nuts") {
     const note = document.createElement("p");
