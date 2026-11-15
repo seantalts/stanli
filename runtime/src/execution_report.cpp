@@ -255,7 +255,7 @@ std::string execution_report(const CompiledModel& model,
     r.w.StartObject();
     r.str("value_engine", wa.interp ? "mir_interpreter" : "bound_graph");
     r.str("status", wa.interp ? "attached_unprobed" : "lowered");
-    r.str("refusal", wa.truncated);
+    r.str("refusal", wa.truncated.value_or(""));
     // Partial or forced-interpreter graphs are not the driver-selected path.
     if (!wa.interp) {
       r.w.Key("graph");
@@ -270,7 +270,7 @@ std::string execution_report(const CompiledModel& model,
     r.w.StartObject();
     r.str("value_engine",
           model.transform_inits->interp ? "mir_interpreter" : "unavailable");
-    r.str("refusal", model.transform_inits->truncated);
+    r.str("refusal", model.transform_inits->truncated.value_or(""));
     r.w.EndObject();
   }
   r.w.Key("reported_fallbacks");

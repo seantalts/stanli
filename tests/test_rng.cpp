@@ -138,10 +138,10 @@ void scalar_family(int family, int region) {
   auto cm = compile_model(text, data);
   if (cm.write_array && cm.write_array->interp)
     std::fprintf(stderr, "family %d region %d: %s\n", family, region,
-                 cm.write_array->truncated.c_str());
-  require(cm.write_array && !cm.write_array->interp &&
-              cm.write_array->truncated.empty(),
-          "scalar RNG fell back during lowering");
+                 cm.write_array->truncated.value_or("").c_str());
+  require(
+      cm.write_array && !cm.write_array->interp && !cm.write_array->truncated,
+      "scalar RNG fell back during lowering");
   const auto manifest = execution_report(cm);
   require(manifest.find("OP_RNG") != std::string::npos, "missing selected RNG");
   if (region)
@@ -247,10 +247,10 @@ void vector_family(int family, int region, int n) {
   auto cm = compile_model(text, data);
   if (cm.write_array && cm.write_array->interp)
     std::fprintf(stderr, "family %d region %d: %s\n", family, region,
-                 cm.write_array->truncated.c_str());
-  require(cm.write_array && !cm.write_array->interp &&
-              cm.write_array->truncated.empty(),
-          "vector RNG fell back during lowering");
+                 cm.write_array->truncated.value_or("").c_str());
+  require(
+      cm.write_array && !cm.write_array->interp && !cm.write_array->truncated,
+      "vector RNG fell back during lowering");
   const auto manifest = execution_report(cm);
   require(manifest.find("OP_RNG") != std::string::npos, "missing selected RNG");
   if (region)
@@ -414,7 +414,8 @@ void container_family(int family, int mode, int region, std::vector<double> a,
       " M=" + std::to_string(b.size());
   require(cm.write_array.has_value(), label + ": missing output");
   require(bool(cm.write_array->interp) != admitted,
-          label + ": unexpected admission: " + cm.write_array->truncated);
+          label + ": unexpected admission: " +
+              cm.write_array->truncated.value_or(""));
   if (admitted && region)
     require(execution_report(cm).find("register_program") != std::string::npos,
             label + ": missing register program");

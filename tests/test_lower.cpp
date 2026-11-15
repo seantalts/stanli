@@ -97,7 +97,7 @@ static std::vector<double> write_array_row(const std::string& mir,
                  row.begin() + col.slot + col.len);
     return out;
   }
-  if (!lm.write_array->truncated.empty()) return out;
+  if (lm.write_array->truncated.has_value()) return out;
   Executor wex(std::move(lm.write_array->graph));
   lm.write_array->bind(wex);
   std::copy(params.begin(), params.end(), wex.params_data());
@@ -2592,9 +2592,9 @@ int main() {
       expect_eq("structured matrix ops repeated gradient " + std::to_string(i),
                 repeated[i], gradient[i]);
 
-    check(cm.write_array && cm.write_array->truncated.empty(),
+    check(cm.write_array && !cm.write_array->truncated,
           "structured matrix ops write_array compiled");
-    if (cm.write_array && cm.write_array->truncated.empty()) {
+    if (cm.write_array && !cm.write_array->truncated) {
       Executor wex(std::move(cm.write_array->graph));
       cm.write_array->bind(wex);
       for (int i = 0; i < 5; ++i) wex.params_data()[i] = point[i];
@@ -2676,9 +2676,9 @@ int main() {
     d.set_int("D", 2);
     CompiledModel lm =
         compile_model(slurp("tests/fixtures/udf_local_shape.tmir.sexp"), d);
-    check(lm.write_array && lm.write_array->truncated.empty(),
+    check(lm.write_array && !lm.write_array->truncated,
           "UDF local shape write_array compiled");
-    if (lm.write_array && lm.write_array->truncated.empty()) {
+    if (lm.write_array && !lm.write_array->truncated) {
       Executor wex(std::move(lm.write_array->graph));
       lm.write_array->bind(wex);
       const double q[4] = {0.25, -0.5, 0.75, -0.2};
@@ -2721,9 +2721,9 @@ int main() {
                       "." + std::to_string(i),
                   gradient[i], want_grad[point][i]);
     }
-    check(cm.write_array && cm.write_array->truncated.empty(),
+    check(cm.write_array && !cm.write_array->truncated,
           "conditional UDF return write_array compiled");
-    if (cm.write_array && cm.write_array->truncated.empty()) {
+    if (cm.write_array && !cm.write_array->truncated) {
       Executor wex(std::move(cm.write_array->graph));
       cm.write_array->bind(wex);
       wex.params_data()[0] = points[0][0];
@@ -2895,9 +2895,9 @@ int main() {
       expect_ulp(tag + " lp", lp, acc.val());
       check(std::fabs(grad[0] - mu.adj()) < 1e-12, tag + " grad");
       stan::math::recover_memory();
-      check(lm.write_array && lm.write_array->truncated.empty(),
+      check(lm.write_array && !lm.write_array->truncated,
             tag + " write_array compiled");
-      if (lm.write_array && lm.write_array->truncated.empty()) {
+      if (lm.write_array && !lm.write_array->truncated) {
         Executor wex(std::move(lm.write_array->graph));
         lm.write_array->bind(wex);
         wex.params_data()[0] = 0.4;
@@ -3217,9 +3217,9 @@ int main() {
 
       // The same logical matrix alias must survive the separately lowered
       // write_array graph used for transformed-parameter CSV columns.
-      check(lm.write_array && lm.write_array->truncated.empty(),
+      check(lm.write_array && !lm.write_array->truncated,
             "viewalias write_array compiled");
-      if (lm.write_array && lm.write_array->truncated.empty()) {
+      if (lm.write_array && !lm.write_array->truncated) {
         Executor wex(std::move(lm.write_array->graph));
         lm.write_array->bind(wex);
         for (int i = 0; i < 6; ++i) wex.params_data()[i] = points[0][i];
@@ -3577,9 +3577,9 @@ int main() {
         const std::string tag =
             fn + std::string(propto ? " propto" : " normalized") +
             (island ? " island" : " direct");
-        check(lm.write_array && lm.write_array->truncated.empty(),
+        check(lm.write_array && !lm.write_array->truncated,
               tag + " write_array compiles");
-        if (!lm.write_array || !lm.write_array->truncated.empty()) continue;
+        if (!lm.write_array || lm.write_array->truncated.has_value()) continue;
         Executor ex(std::move(lm.write_array->graph));
         lm.write_array->bind(ex);
         ex.params_data()[0] = 0.0;
@@ -4853,9 +4853,9 @@ int main() {
       expect_eq("tdintsize g" + std::to_string(k), grad[k], x(k).adj());
     stan::math::recover_memory();
 
-    check(lm.write_array && lm.write_array->truncated.empty(),
+    check(lm.write_array && !lm.write_array->truncated,
           "tdintsize prepared write_array compiled");
-    if (lm.write_array && lm.write_array->truncated.empty()) {
+    if (lm.write_array && !lm.write_array->truncated) {
       Executor wx(std::move(lm.write_array->graph));
       lm.write_array->bind(wx);
       for (int k = 0; k < 14; ++k) wx.params_data()[k] = 0.1 * (k + 1) - 0.7;
@@ -5153,9 +5153,9 @@ int main() {
       expect_eq(tag + " no-loop lp", ex.gradient(&grad), -0.5);
       expect_eq(tag + " no-loop grad", grad, 1.0);
 
-      check(cm.write_array && cm.write_array->truncated.empty(),
+      check(cm.write_array && !cm.write_array->truncated,
             tag + " write_array compiled");
-      if (!cm.write_array || !cm.write_array->truncated.empty()) return;
+      if (!cm.write_array || cm.write_array->truncated.has_value()) return;
       Executor wex(std::move(cm.write_array->graph));
       cm.write_array->bind(wex);
       wex.params_data()[0] = 0.5;
@@ -6385,9 +6385,9 @@ int main() {
     // write_array runs the same calls with `jacobian__ = false`, so the
     // `total` column is the returned contribution alone. log_prob adds the
     // four jacobian increments to it, and each of those is nonzero here.
-    check(bm.write_array && bm.write_array->truncated.empty(),
+    check(bm.write_array && !bm.write_array->truncated,
           "boundfn write_array compiled");
-    if (bm.write_array && bm.write_array->truncated.empty()) {
+    if (bm.write_array && !bm.write_array->truncated) {
       Executor wex(std::move(bm.write_array->graph));
       bm.write_array->bind(wex);
       for (int i = 0; i < 3; ++i) wex.params_data()[i] = pts[0][i];
@@ -6493,11 +6493,11 @@ int main() {
           "transformed-data HOF lp");
     check(std::fabs(gradient[0] - expected) < 1e-7,
           "transformed-data HOF gradient");
-    check(hm.write_array && !hm.write_array->interp &&
-              hm.write_array->truncated.empty(),
-          "higher-order write_array compiled completely");
+    check(
+        hm.write_array && !hm.write_array->interp && !hm.write_array->truncated,
+        "higher-order write_array compiled completely");
     if (hm.write_array && !hm.write_array->interp &&
-        hm.write_array->truncated.empty()) {
+        !hm.write_array->truncated) {
       Executor wex(std::move(hm.write_array->graph));
       hm.write_array->bind(wex);
       wex.params_data()[0] = 0.0;
@@ -6915,9 +6915,9 @@ int main() {
     }
     // The identity elements have to reach write_array untransformed too:
     // an unbounded declaration writes its unconstrained value straight out.
-    check(im.write_array && im.write_array->truncated.empty(),
+    check(im.write_array && !im.write_array->truncated,
           "infbounds write_array compiled");
-    if (im.write_array && im.write_array->truncated.empty()) {
+    if (im.write_array && !im.write_array->truncated) {
       Executor wex(std::move(im.write_array->graph));
       im.write_array->bind(wex);
       for (int i = 0; i < 14; ++i) wex.params_data()[i] = pts[0][i];
@@ -7509,7 +7509,7 @@ int main() {
     check(cm.n_unconstrained == 22,
           "choose size: choose(4, 2) sizes the parameter vector");
     check(cm.write_array && !cm.write_array->columns.empty() &&
-              cm.write_array->truncated.empty(),
+              !cm.write_array->truncated,
           "choose size: the write_array graph carries the whole section");
   }
 
@@ -7623,9 +7623,9 @@ int main() {
     for (int i = 0; i < 6; ++i)
       expect_ulp("crossprod: g" + std::to_string(i), gradient[i], a(i).adj());
 
-    check(cm.write_array && cm.write_array->truncated.empty(),
+    check(cm.write_array && !cm.write_array->truncated,
           "crossprod: write_array compiled");
-    if (cm.write_array && cm.write_array->truncated.empty()) {
+    if (cm.write_array && !cm.write_array->truncated) {
       Executor wex(std::move(cm.write_array->graph));
       cm.write_array->bind(wex);
       for (int i = 0; i < 6; ++i) wex.params_data()[i] = q[i];

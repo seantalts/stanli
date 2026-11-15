@@ -177,8 +177,8 @@ int main() {
   // giving the solves kernels at all; a truncated write_array drags the
   // entire section through mir_interp.hpp for every draw.
   check(cm.write_array.has_value(), "solve has a write_array");
-  check(cm.write_array->truncated.empty(),
-        "solve write_array not truncated: " + cm.write_array->truncated);
+  check(!cm.write_array->truncated, "solve write_array not truncated: " +
+                                        cm.write_array->truncated.value_or(""));
   check(cm.write_array->interp == nullptr, "solve needs no interpreter");
 
   const auto names = CompiledModel::csv_names(cm.write_array->columns);
@@ -222,7 +222,7 @@ int main() {
   {
     CompiledModel im =
         compile_model(slurp("tests/fixtures/solverng.tmir.sexp"), d);
-    check(im.write_array && im.write_array->truncated.empty(),
+    check(im.write_array && !im.write_array->truncated,
           "solverng write_array compiles");
     check(im.write_array && im.write_array->interp == nullptr,
           "solverng stays on graph");

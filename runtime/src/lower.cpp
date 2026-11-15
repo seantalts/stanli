@@ -944,7 +944,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   roots.insert(roots.end(), extra_roots.begin(), extra_roots.end());
   prep.graph(prep_graph, "lower", lower_time, g, out.fills, target_terms.size(),
              out.views.size(), PrepTrace::Extra::Truncated,
-             !wa.truncated.empty());
+             wa.truncated.has_value());
   dump("lower", roots);
 
   run_passes(roots, kWriteArrayPasses);
@@ -1314,7 +1314,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
       w.truncated = "write_array reads " + std::to_string(w.n_unconstrained) +
                     " unconstrained values, log_prob reads " +
                     std::to_string(cm.n_unconstrained) +
-                    (w.truncated.empty() ? "" : "; " + w.truncated);
+                    (w.truncated ? "; " + *w.truncated : "");
       w.columns.clear();
       w.n_tp_start = w.n_gq_start = 0;
     }
@@ -1327,7 +1327,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     // set it in a shipped environment: drivers PREFER an attached
     // interpreter (capi.cpp, bridgestan_abi.cpp), so it moves every caller
     // onto the slow per-draw path.
-    if (!w.truncated.empty() || debug_env("STANLI_WA_FORCE_INTERP")) {
+    if (w.truncated || debug_env("STANLI_WA_FORCE_INTERP")) {
       // The graph could not express the whole section; hand the model the
       // per-draw interpreter, seeded with data + transformed data and the
       // emission flags the guard blocks test.
@@ -1344,8 +1344,8 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                                             std::move(flags));
     }
     cm.write_array = std::move(w);
-    if (!cm.write_array->truncated.empty())
-      add_interpreter_fallback(cm, cm.write_array->truncated);
+    if (cm.write_array->truncated)
+      add_interpreter_fallback(cm, *cm.write_array->truncated);
   }
   if (prog->has_transform_inits) {
     // The inverse parameter transforms. Nothing is interpreted here: the
@@ -1393,7 +1393,7 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
         params.push_back(std::move(p));
       }
     }
-    if (ti.truncated.empty())
+    if (!ti.truncated)
       ti.interp = std::make_shared<InitInterp>(prog, shared_interp_env(),
                                                std::move(params));
     cm.transform_inits = std::move(ti);

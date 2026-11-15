@@ -145,7 +145,7 @@ void test_graph_and_write_array(int B, const std::string& mir) {
     fail(tag + " has no compiled write_array");
     return;
   }
-  if (!cm.write_array->truncated.empty() || cm.write_array->interp)
+  if (cm.write_array->truncated.has_value() || cm.write_array->interp)
     fail(tag + " unexpectedly fell back from compiled write_array");
   Executor wex(std::move(cm.write_array->graph));
   cm.write_array->bind(wex);

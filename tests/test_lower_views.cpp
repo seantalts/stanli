@@ -291,7 +291,7 @@ void test_write_array_receives_data_views() {
   CompiledModel model = compile_model(fixture("view_gq_data_matrix"), data);
   check(model.write_array.has_value(), "GQ data-view write_array exists");
   if (!model.write_array) return;
-  check(model.write_array->truncated.empty(),
+  check(!model.write_array->truncated,
         "GQ data-view lowering stays on compiled path");
   check(!model.write_array->interp,
         "GQ data-view lowering needs no interpreter fallback");
@@ -330,7 +330,7 @@ void test_empty_data_array_matrix() {
 
   check(model.write_array.has_value(), "empty array-matrix write_array exists");
   if (!model.write_array) return;
-  check(model.write_array->truncated.empty(),
+  check(!model.write_array->truncated,
         "empty array-matrix stays on graph write_array path");
   check(!model.write_array->interp,
         "empty array-matrix needs no write_array fallback");
@@ -365,8 +365,7 @@ void test_udf_array_matrix_order() {
 
   check(model.write_array.has_value(), "UDF array-matrix write_array exists");
   if (!model.write_array) return;
-  check(model.write_array->truncated.empty(),
-        "UDF array-matrix write_array compiled");
+  check(!model.write_array->truncated, "UDF array-matrix write_array compiled");
   stanli::Executor wx(std::move(model.write_array->graph));
   model.write_array->bind(wx);
   wx.params_data()[0] = 0.25;

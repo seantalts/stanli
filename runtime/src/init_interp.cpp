@@ -232,7 +232,7 @@ const InitInterp& transform_inits_interp(const CompiledModel& cm) {
   if (!cm.transform_inits->interp)
     throw std::runtime_error(
         "this model's inverse parameter transforms are unavailable: " +
-        cm.transform_inits->truncated);
+        cm.transform_inits->truncated.value_or(""));
   return *cm.transform_inits->interp;
 }
 

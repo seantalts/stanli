@@ -178,11 +178,10 @@ struct CompiledModel {
     size_t n_gq_start = 0;
     std::vector<std::pair<int, std::vector<double>>> fills;
     int64_t n_unconstrained = 0;  // must agree with the log_prob graph's
-    // Non-empty when lowering stopped early (an unsupported RNG family or
-    // draw-dependent branch, say). `columns` then holds the prefix that did
-    // lower, and this says what stopped it -- silently short CSV rows would
-    // be worse.
-    std::string truncated;
+    // Set when lowering stopped early (an unsupported RNG family or
+    // draw-dependent branch, say), to what stopped it. `columns` then holds
+    // the prefix that did lower -- silently short CSV rows would be worse.
+    std::optional<std::string> truncated;
     // Set alongside `truncated`: the per-draw interpreter that runs the
     // whole section, unsupported RNG draws and draw-dependent branches
     // included.
@@ -208,7 +207,8 @@ struct CompiledModel {
   // somewhere the user did not ask for.
   struct TransformInits {
     std::shared_ptr<InitInterp> interp;
-    std::string truncated;
+    // Why the section cannot be run, when it cannot.
+    std::optional<std::string> truncated;
   };
   std::optional<TransformInits> transform_inits;
   // Each part of the model that has no compiled path and would run through
