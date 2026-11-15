@@ -36,7 +36,7 @@ class PrivateSeed(unittest.TestCase):
     def replay(self):
         seen = []
 
-        def check_model(model, ref, pdb, check_bin, tmp, *args, opts):
+        def check_model(model, ref, pdb, check_bin, tmp, *args, opts, **_):
             seen.append((opts.data, opts.data.read_text()))
             return (model, "OK", 0.0, 0, 0, "", [])
 
