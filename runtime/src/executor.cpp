@@ -268,6 +268,7 @@ void register_island_kernel();
 void register_region_map_kernel();
 void register_structured_loop_kernel();
 void register_reduce_sum_kernel();
+void register_whiten_kernel();
 
 static void ensure_registered() {
   static const bool once = [] {
@@ -293,6 +294,7 @@ static void ensure_registered() {
     register_region_map_kernel();
     register_structured_loop_kernel();
     register_reduce_sum_kernel();
+    register_whiten_kernel();
     return true;
   }();
   (void)once;
@@ -395,6 +397,18 @@ Executor::Executor(Graph g, std::vector<Borrow> borrows)
   bind_();
 }
 
+Executor::Executor(Graph g, const Executor& source)
+    : graph_(std::move(g)),
+      data_(source.data_pointer_exposed_
+                ? std::make_shared<std::vector<double>>(*source.data_)
+                : source.data_),
+      borrowed_(source.borrowed_) {
+  ensure_registered();
+  graph_.compact_idata();
+  if (!borrowed_.empty()) borrowed_.resize(graph_.slots.size(), nullptr);
+  bind_();
+}
+
 Executor::Executor(const Executor& src)
     : graph_(src.graph_),
       data_(src.data_pointer_exposed_
@@ -468,7 +482,8 @@ void Executor::bind_() {
         graph_.slots[i].offset = graph_.slots[(size_t)primal_sources[i]].offset;
   values_.assign(off, 0.0);
   if (!data_) data_ = std::make_shared<std::vector<double>>(data_size, 0.0);
-  assert(static_cast<int64_t>(data_->size()) == data_size);
+  if (static_cast<int64_t>(data_->size()) != data_size)
+    throw std::invalid_argument("shared data does not match the graph");
 
   // Adjoint addresses never escape the executor, so unlike values they do
   // not need a hole for every externally addressable data slot or for slots

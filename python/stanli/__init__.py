@@ -207,6 +207,12 @@ def _load_lib():
                                    ctypes.POINTER(ctypes.c_double),
                                    ctypes.POINTER(ctypes.c_double),
                                    ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_model_whiten.restype = ctypes.c_void_p
+    lib.stanli_model_whiten.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(ctypes.c_double), ctypes.c_int64,
+        ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),
+        ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_double),
+        ctypes.c_int64, ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_unconstrain_inits.restype = ctypes.c_int
     lib.stanli_unconstrain_inits.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
                                              ctypes.POINTER(ctypes.c_double),
@@ -1401,6 +1407,7 @@ class Model:
                 mir = _compile_stan(stan_code, paths, self._fast_math,
                                     self._label)
         self._source = (mir, stan_code, _data_to_json(data))
+        self._whitening = None
         self._m = None
         self._adopt(self._construct(seed, threads_per_chain), seed, threads_per_chain)
         _warn_compiler_messages(
@@ -1443,7 +1450,87 @@ class Model:
                     data_json.encode(), ctypes.byref(opts), err, len(err))
         if not m:
             raise RuntimeError(err.value.decode())
+        if self._whitening is not None:
+            whitened = self._apply_whitening(m)
+            _lib.stanli_model_free(m)
+            m = whitened
         return m
+
+    def _apply_whitening(self, inner):
+        q_hat, perm, col_ptr, row_idx, values = self._whitening
+        err = ctypes.create_string_buffer(4096)
+        m = _lib.stanli_model_whiten(
+            inner,
+            q_hat.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            q_hat.size,
+            perm.ctypes.data_as(ctypes.POINTER(ctypes.c_int64)),
+            col_ptr.ctypes.data_as(ctypes.POINTER(ctypes.c_int64)),
+            row_idx.ctypes.data_as(ctypes.POINTER(ctypes.c_int64)),
+            values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+            values.size, err, len(err))
+        if not m:
+            raise ValueError(err.value.decode())
+        return m
+
+    def whiten(self, q_hat, perm, L):
+        """EXPERIMENTAL. A new Model over whitened coordinates z.
+
+        With q this model's unconstrained vector, the new model's free
+        vector z satisfies ``q = q_hat + P.T @ inv(L.T) @ z`` where
+        ``(P v)[i] = v[perm[i]]`` and ``L`` is a lower triangular Cholesky
+        factor with ``P Q P.T = L L.T``; Q is typically the negative Hessian
+        of the log density at ``q_hat``, so z is close to standard normal.
+        The log density is this model's at q(z) with the constant
+        ``log|det L|`` dropped. Every algorithm (sample, optimize, pathfinder,
+        laplace, log_prob_grad, log_prob_hessian) runs on z unchanged, and
+        sampler settings such as ``metric="unit_e"`` apply to z.
+
+        Columns, constrained names and output rows are this model's own, at
+        q(z). ``unconstrain`` returns z for given constrained values.
+        Unconstrained inits, modes and Hessians passed in or read back are in
+        z. The result does not depend on this model afterwards.
+
+        ``L`` is a scipy.sparse matrix (any format; converted to CSC) or a
+        ``(indptr, indices, data)`` tuple of CSC arrays. It must be lower
+        triangular with a nonzero diagonal. scipy is not imported by this
+        package; pass the tuple form to avoid needing it.
+        """
+        n = self.n_unconstrained
+        q_hat = np.ascontiguousarray(q_hat, dtype=np.float64)
+        if q_hat.shape != (n,):
+            raise ValueError(f"q_hat has shape {q_hat.shape}, the model has "
+                             f"{n} unconstrained parameters")
+        perm = np.ascontiguousarray(perm, dtype=np.int64)
+        if perm.shape != (n,):
+            raise ValueError(f"perm has shape {perm.shape}, expected ({n},)")
+        if hasattr(L, "tocsc"):
+            if tuple(L.shape) != (n, n):
+                raise ValueError(f"L has shape {tuple(L.shape)}, expected "
+                                 f"({n}, {n})")
+            L = L.tocsc().copy()
+            L.sum_duplicates()
+            L.sort_indices()
+            parts = (L.indptr, L.indices, L.data)
+        else:
+            parts = tuple(L)
+            if len(parts) != 3:
+                raise ValueError("L must be a scipy.sparse matrix or an "
+                                 "(indptr, indices, data) tuple")
+        col_ptr = np.ascontiguousarray(parts[0], dtype=np.int64)
+        row_idx = np.ascontiguousarray(parts[1], dtype=np.int64)
+        values = np.ascontiguousarray(parts[2], dtype=np.float64)
+        if col_ptr.shape != (n + 1,) or row_idx.shape != values.shape:
+            raise ValueError(f"L is not an {n} by {n} CSC matrix")
+        out = Model.__new__(Model)
+        out._fast_math = self._fast_math
+        out._label = self._label
+        out._source = self._source
+        out._whitening = (q_hat.copy(), perm.copy(), col_ptr.copy(),
+                          row_idx.copy(), values.copy())
+        out._m = None
+        out._adopt(out._apply_whitening(self._handle), self._seed,
+                   self._threads_per_chain)
+        return out
 
     @property
     def _handle(self):

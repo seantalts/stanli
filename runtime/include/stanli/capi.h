@@ -239,6 +239,37 @@ int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad);
 int stanli_hessian(stanli_model* m, const double* q, double* lp, double* grad,
                    double* hessian, char* err, size_t err_len);
 
+/* EXPERIMENTAL. A new model over whitened coordinates z, with
+ *     q = q_hat + P^T L^{-T} z,   (P v)[i] = v[perm[i]],
+ * where q is `inner`'s unconstrained vector and L is a lower triangular
+ * Cholesky factor with P Q P^T = L L^T for some precision Q (typically the
+ * negative Hessian at q_hat). The new model's log density is the inner one at
+ * q(z) with the constant log|det L| dropped, so every entry point that takes
+ * the unconstrained vector (stanli_grad, stanli_hessian, the samplers,
+ * stanli_optimize, ...) works on z unchanged.
+ *
+ * What comes OUT stays in the inner model's terms: constrained names, output
+ * rows (stanli_constrain, stanli_wa_row, sampler draws) are the inner model's
+ * parameters, transformed parameters and generated quantities at q(z).
+ * stanli_unconstrain_inits returns the z that corresponds to the given
+ * constrained values. Unconstrained inits, modes and Hessians the caller
+ * passes in or reads back are in z.
+ *
+ * L is given in compressed sparse column form: col_ptr[n + 1], and row_idx and
+ * values of length nnz. Each column must begin with its (nonzero) diagonal
+ * entry, followed by strictly increasing row indices below it. perm[n] must be
+ * a permutation of 0..n-1. n must equal stanli_n_unconstrained(inner).
+ *
+ * The arrays are copied. The result does not refer to `inner`, which can be
+ * freed independently. Whitening an already-whitened model is refused.
+ * Returns null with a message in `err` on invalid input. Free the result with
+ * stanli_model_free. */
+stanli_model* stanli_model_whiten(const stanli_model* inner,
+                                  const double* q_hat, int64_t n,
+                                  const int64_t* perm, const int64_t* col_ptr,
+                                  const int64_t* row_idx, const double* values,
+                                  int64_t nnz, char* err, size_t err_len);
+
 /* ---- multi-chain sampling ------------------------------------------------
  *
  * Everything below packs draws CHAIN-MAJOR: draw i of chain c, column j

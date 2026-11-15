@@ -42,6 +42,7 @@ EXPORTS
   stanli_unconstrain_inits
   stanli_grad
   stanli_hessian
+  stanli_model_whiten
   stanli_sample_stream_stats_init
   stanli_sample_walnuts_stream
   stanli_run_pathfinder

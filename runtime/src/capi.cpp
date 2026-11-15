@@ -13,6 +13,7 @@
 #include <stanli/reduce_sum.hpp>
 #include <stanli/walnuts.hpp>
 #include <stanli/wa_interp.hpp>
+#include <stanli/whiten.hpp>
 
 #include "build_id.hpp"
 #include "data_document.hpp"
@@ -150,6 +151,9 @@ struct stanli_model {
   std::vector<Variable> con_vars, wa_vars;
   // Identifies the model and data for resume records; see model_new.
   uint64_t resume_hash = 0;
+  // Set when this model is a whitening of another: its unconstrained vector
+  // is z, and the graphs above already map z to the original coordinates.
+  std::shared_ptr<const stanli::WhitenSpec> whiten;
 };
 
 namespace {
@@ -775,7 +779,13 @@ int64_t stanli_n_unconstrained(const stanli_model* m) {
 int stanli_unconstrain_inits(stanli_model* m, const char* inits_json, double* q,
                              char* err, size_t err_len) {
   try {
-    stanli::unconstrain_inits_json(m->cm, inits_json, q);
+    if (m->whiten) {
+      std::vector<double> inner((size_t)m->whiten->n);
+      stanli::unconstrain_inits_json(m->cm, inits_json, inner.data());
+      m->whiten->to_z(inner.data(), q);
+    } else {
+      stanli::unconstrain_inits_json(m->cm, inits_json, q);
+    }
     return 0;
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());
@@ -783,6 +793,60 @@ int stanli_unconstrain_inits(stanli_model* m, const char* inits_json, double* q,
   } catch (...) {
     put_err(err, err_len, "unknown error in stanli_unconstrain_inits");
     return 1;
+  }
+}
+
+stanli_model* stanli_model_whiten(const stanli_model* inner,
+                                  const double* q_hat, int64_t n,
+                                  const int64_t* perm, const int64_t* col_ptr,
+                                  const int64_t* row_idx, const double* values,
+                                  int64_t nnz, char* err, size_t err_len) {
+  try {
+    if (inner == nullptr) throw std::invalid_argument("null model");
+    if (inner->whiten)
+      throw std::invalid_argument("the model is already whitened");
+    if (n != inner->ex->n_params())
+      throw std::invalid_argument(
+          "q_hat has " + std::to_string(n) + " elements, the model has " +
+          std::to_string(inner->ex->n_params()) + " unconstrained parameters");
+    const auto spec =
+        stanli::make_whiten_spec(q_hat, n, perm, col_ptr, row_idx, values, nnz);
+    auto m = std::make_unique<stanli_model>();
+    m->cm = inner->cm;
+    m->threads_per_chain = inner->threads_per_chain;
+    m->reduce_sum_count = inner->reduce_sum_count;
+    m->reduce_sum_fallbacks = inner->reduce_sum_fallbacks;
+    m->flat_names = inner->flat_names;
+    m->n_con = inner->n_con;
+    m->wa_cols = inner->wa_cols;
+    m->wa_interp = inner->wa_interp;
+    m->wa_names = inner->wa_names;
+    m->wa_n = inner->wa_n;
+    m->wa_gq_start = inner->wa_gq_start;
+    m->warnings = inner->warnings;
+    m->whiten = spec;
+    m->ex = std::make_unique<stanli::Executor>(
+        stanli::whiten_graph(inner->ex->graph(), spec), *inner->ex);
+    if (m->reduce_sum_count > 0) {
+      m->reduce_team = std::make_unique<stanli::ReduceExecutionContext>(
+          m->threads_per_chain);
+      m->ex->set_reduce_context(m->reduce_team.get());
+    }
+    if (inner->wa_ex)
+      m->wa_ex = std::make_unique<stanli::Executor>(
+          stanli::whiten_graph(inner->wa_ex->graph(), spec), *inner->wa_ex);
+    Fnv1a hash;
+    hash.add(&inner->resume_hash, sizeof inner->resume_hash);
+    hash.add(spec->q_hat.data(), sizeof(double) * spec->q_hat.size());
+    hash.add(spec->perm.data(), sizeof(int64_t) * spec->perm.size());
+    hash.add(spec->col_ptr.data(), sizeof(int64_t) * spec->col_ptr.size());
+    hash.add(spec->row_idx.data(), sizeof(int64_t) * spec->row_idx.size());
+    hash.add(spec->values.data(), sizeof(double) * spec->values.size());
+    m->resume_hash = hash.h;
+    return m.release();
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return nullptr;
   }
 }
 
