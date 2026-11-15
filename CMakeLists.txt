@@ -36,7 +36,7 @@ endif()
 
 # Sanitizers, for running the test suite under. Empty by default and never
 # a shipped flavour: this is a way to run ctest, not a build anyone
-# installs, so it deliberately does not touch STANLI_BUILD_ID.
+# installs, so it deliberately does not touch the build id.
 #
 # Global rather than an option on the stanmath interface target, because
 # the bugs worth catching do not respect target boundaries -- the vendored
@@ -281,9 +281,10 @@ target_compile_options(sundials PRIVATE -w
 set_target_properties(sundials PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Identifies this runtime binary, for callers that cache artifacts next to
-# the library that produced them (the BridgeStan lib pair keys its manifest
-# on it). The git sha names the source; the flavour bits name the build
-# choices that change what the same source produces. Uncommitted edits do
+# the library that produced them (the BridgeStan payload carries it).
+# build_id.cpp prefixes the C ABI version; this part names the source and
+# the platform, plus "-threads" for a thread-safe build, the one build
+# choice that changes what the same source produces. Uncommitted edits do
 # not move it -- it identifies a build of the project, not a working tree.
 execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short=12 HEAD
                 OUTPUT_VARIABLE STANLI_GIT_SHA
@@ -291,10 +292,10 @@ execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short=12 
 if(NOT STANLI_GIT_SHA)
   set(STANLI_GIT_SHA "nogit")
 endif()
-set(STANLI_BUILD_ID
-  "abi1-${STANLI_GIT_SHA}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+set(STANLI_BUILD_SOURCE
+  "${STANLI_GIT_SHA}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
 if(STANLI_THREADS)
-  string(APPEND STANLI_BUILD_ID "-threads")
+  string(APPEND STANLI_BUILD_SOURCE "-threads")
 endif()
 
 # Only this tiny translation unit reads the build id. Keeping this definition
@@ -302,7 +303,7 @@ endif()
 # runtime target invalidates every stan-math-heavy object on every commit even
 # when none of those sources or headers changed.
 set_source_files_properties(runtime/src/build_id.cpp PROPERTIES
-  COMPILE_DEFINITIONS STANLI_BUILD_ID="${STANLI_BUILD_ID}")
+  COMPILE_DEFINITIONS STANLI_BUILD_SOURCE="${STANLI_BUILD_SOURCE}")
 
 # One runtime source inventory. The implementation is compiled once as a PIC
 # object library and reused by the shared library and the test/static library.

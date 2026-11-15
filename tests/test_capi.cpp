@@ -2421,6 +2421,13 @@ void test_fast_math_options() {
 // stanli_bridgestan_data builds the payload bs_model_construct reads, from
 // data as a structure: non-finite tokens survive, and a manifest already in
 // the data is replaced rather than duplicated.
+void test_build_id_names_the_abi() {
+  const std::string want = "abi" + std::to_string(STANLI_ABI_VERSION) + "-";
+  const std::string id = stanli_build_id();
+  expect_true("build id " + id + " starts with " + want,
+              id.rfind(want, 0) == 0);
+}
+
 void test_bridgestan_data() {
   const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
   const std::string conj = slurp("tests/fixtures/conj.json");
@@ -2519,6 +2526,7 @@ void test_named_source_and_warnings() {
 }
 
 int main() {
+  test_build_id_names_the_abi();
   test_bridgestan_data();
   test_named_source_and_warnings();
   test_fast_math_options();
