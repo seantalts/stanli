@@ -714,6 +714,9 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         if model in GRADIENT_AGAINST_LARGEST:
             worst_ulp = max(worst_pair(rv[:1], gv[:1])[1],
                             gradient_ulp(rv[1:], gv[1:]))
+    if opts and opts.ulp is not None and worst_ulp > opts.ulp:
+        print(f"DIAG {opts.source.stem} point {point} stdout:\n{proc.stdout}",
+              file=sys.stderr)
     where = worst_values(rv, gv, floor, own,
                          lambda i: density_label(i, opts))
     for i, (limit, reason, expected) in own.items():
