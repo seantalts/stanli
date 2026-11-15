@@ -210,6 +210,7 @@ inline void gradient<stanli::ExecutorModel>(const stanli::ExecutorModel& model,
   try {
     f = ex.gradient(grad_f.data());
   } catch (const std::exception& e) {
+    if (stanli::is_internal_error(e)) throw;
     logger.error(
         "Informational Message: The current Metropolis proposal "
         "is about to be rejected because of the following issue:");

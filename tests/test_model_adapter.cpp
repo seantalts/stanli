@@ -7,10 +7,12 @@
 #include <stanli/compile.hpp>
 #include <stanli/model_adapter.hpp>
 
+#include <stan/callbacks/stream_logger.hpp>
 #include <stan/math.hpp>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -68,6 +70,17 @@ int main() {
     }
     stan::math::recover_memory();
     expect("internal error escapes log_prob<var>", escaped);
+    Eigen::VectorXd grad;
+    double f = 0;
+    stan::callbacks::stream_logger logger(std::cout, std::cout, std::cout,
+                                          std::cerr, std::cerr);
+    escaped = false;
+    try {
+      stan::model::gradient(model, q, f, grad, logger);
+    } catch (const std::logic_error&) {
+      escaped = true;
+    }
+    expect("internal error escapes stan::model::gradient", escaped);
   }
 
   {
