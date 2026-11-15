@@ -1023,8 +1023,7 @@ SEXP stanli_r_optimize(SEXP m, SEXP optlist, SEXP init) {
 
 /* What a run said. The runtime calls back on the thread that entered it, so
  * printing is safe. Information is printed when the caller asked for
- * progress; warnings, errors and Stan's "Informational Message" lines (how
- * ADVI says it ran out of iterations) are kept for an R warning. */
+ * progress; warnings and errors are kept for an R warning. */
 typedef struct {
   int verbose;
   size_t used;
@@ -1043,8 +1042,7 @@ static void log_keep(run_log* log, const char* text) {
 static void run_logger(int32_t level, const char* text, void* user) {
   run_log* log = (run_log*)user;
   flush_messages();
-  if (level >= 1 || strstr(text, "Informational Message") != NULL)
-    log_keep(log, text);
+  if (level >= 1) log_keep(log, text);
   if (log->verbose && level == 0) {
     Rprintf("%s\n", text);
     R_FlushConsole();

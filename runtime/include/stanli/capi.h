@@ -606,7 +606,8 @@ int stanli_pathfinder_inits(stanli_model* m, uint32_t seed, int chain_id,
  *
  * `log`, when non-null, receives each line the service logs, on the calling
  * thread: level 0 is information (ADVI's convergence table, progress), 1 a
- * warning (Pathfinder's Pareto k), 2 an error. `poll`, when non-null, is
+ * warning (Pathfinder's Pareto k, ADVI stopping at its iteration limit), 2
+ * an error. `poll`, when non-null, is
  * asked on the calling thread about every 100 ms; a nonzero answer abandons
  * the run, which then returns 0 with *interrupted set to 1 and nothing
  * usable in the output buffers. `interrupted` may be null.
