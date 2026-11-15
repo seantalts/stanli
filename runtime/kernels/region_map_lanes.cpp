@@ -2458,7 +2458,7 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
   KernelCtx call_ctx;
   std::vector<Mask> entry;
   entry.reserve(plan.blocks.size() + 1);
-  const bool verify = std::getenv("STANLI_REGION_MAP_CHECK_CLEAN") != nullptr;
+  const bool verify = p.check_clean;
   RegionMapTally tally;
   RegionMapTally* counting = plan.profile ? &tally : nullptr;
   struct DirtyOnThrow {
