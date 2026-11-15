@@ -175,6 +175,8 @@ class FileTests(unittest.TestCase):
     def test_the_committed_file_covers_every_corpus_model(self):
         if not bp.DEFAULT_PATH.exists():
             self.skipTest("no committed points file")
+        if not (REPO / "deps/posteriordb/posterior_database").is_dir():
+            self.skipTest("posteriordb is not checked out")
         doc = bp.load(bp.DEFAULT_PATH)
         from corpus_inventory import corpus_cases, materialize_data
         cases = corpus_cases(REPO / "deps/posteriordb", "all")
