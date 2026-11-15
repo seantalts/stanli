@@ -534,7 +534,10 @@ class CorpusOptionsTest(unittest.TestCase):
     def test_the_ulp_limit_applies_on_every_platform(self):
         body = f'echo "OK -3.5 {1.0 + 11 * math.ulp(1.0)!r} -2"'
         self.assertEqual(self.run_check(body, VALUES)[1], "OK")
-        self.assertEqual(self.run_check(body, VALUES, ulp=10)[1], "ULP_GATE")
+        result = self.run_check(body, VALUES, ulp=10)
+        self.assertEqual(result[1], "ULP_GATE")
+        self.assertIn("grad[1] (stanli 1.0000000000000024, CmdStan 1.0)",
+                      result[5])
 
     def test_a_wider_value_limit_needs_its_independent_value(self):
         near = 1.0 + 12 * math.ulp(1.0)

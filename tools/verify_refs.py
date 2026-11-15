@@ -800,14 +800,17 @@ def column_label(name, opts):
 
 
 def worst_values(rv, gv, floor, skip, label):
-    """Labels of the values with the worst scaled error and worst ULP."""
+    """The values with the worst scaled error and worst ULP, each named
+    and shown on both sides, so a failure on a platform nobody can run
+    locally carries the numbers needed to diagnose it."""
     devs = [(pair_dev(a, b, floor), i) for i, (a, b) in enumerate(zip(rv, gv))
             if i not in skip]
     if not devs:
         return ("", "")
     rel = max(devs, key=lambda d: d[0][0])[1]
     ulp = max(devs, key=lambda d: d[0][1])[1]
-    return (label(rel), label(ulp))
+    show = lambda i: f"{label(i)} (stanli {gv[i]!r}, CmdStan {rv[i]!r})"
+    return (show(rel), show(ulp))
 
 
 def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
