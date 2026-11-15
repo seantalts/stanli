@@ -478,31 +478,18 @@ stanli_model* stanli_model_new_with_opts(const char* mir_text,
 }
 
 #ifdef STANLI_EMBED_STANC
-extern "C" char* stanli_stanc_compile(const char* stan_code,
-                                      const char* filename,
-                                      const char* const* include_paths,
-                                      size_t include_path_count, int flags);
-extern "C" void stanli_stanc_free(char* p);
-
 namespace {
-constexpr int kStancModelOnly = 1;
-constexpr int kStancFastMath = 2;
-
 char* dup_string(const std::string& text) {
   char* out = static_cast<char*>(std::malloc(text.size() + 1));
   if (out != nullptr) std::memcpy(out, text.c_str(), text.size() + 1);
   return out;
 }
 
-stanli::StancResult embedded_compile(const char* stan_code,
-                                     const char* filename,
-                                     const char* const* include_paths,
-                                     size_t include_path_count, int flags) {
-  char* raw = stanli_stanc_compile(stan_code, filename, include_paths,
-                                   include_path_count, flags);
-  stanli::StancResult result = stanli::parse_stanc_result(raw);
-  if (raw != nullptr) stanli_stanc_free(raw);
-  return result;
+std::string compiler_warning_text(const stanli::StancResult& r) {
+  std::string out;
+  for (const auto& w : r.warnings) out += (out.empty() ? "" : "\n") + w;
+  if (r.o1_fallback) out += (out.empty() ? "" : "\n") + *r.o1_fallback;
+  return out;
 }
 }  // namespace
 #endif
@@ -513,18 +500,19 @@ static stanli_model* model_new_from_stan(const char* stan_code,
                                          int threads_per_chain, bool fast_math,
                                          char* err, size_t err_len) {
 #ifdef STANLI_EMBED_STANC
-  const stanli::StancResult compiled =
-      embedded_compile(stan_code, filename, nullptr, 0,
-                       kStancModelOnly | (fast_math ? kStancFastMath : 0));
-  if (!compiled.ok) {
-    put_err(err, err_len, compiled.body.c_str());
+  const stanli::StancResult compiled = stanli::embedded_stanc_compile(
+      stan_code, filename, nullptr, 0,
+      stanli::kStancModelOnly | (fast_math ? stanli::kStancFastMath : 0));
+  if (!compiled.mir) {
+    put_err(err, err_len, compiled.error.c_str());
     return nullptr;
   }
-  stanli_model* m = model_new(compiled.body.c_str(), data_json, seed,
+  stanli_model* m = model_new(compiled.mir->c_str(), data_json, seed,
                               threads_per_chain, fast_math, err, err_len);
-  if (m != nullptr && !compiled.warnings.empty()) {
-    m->warnings = m->warnings.empty() ? compiled.warnings
-                                      : compiled.warnings + "\n" + m->warnings;
+  const std::string warnings = compiler_warning_text(compiled);
+  if (m != nullptr && !warnings.empty()) {
+    m->warnings =
+        m->warnings.empty() ? warnings : warnings + "\n" + m->warnings;
   }
   return m;
 #else
@@ -576,21 +564,22 @@ char* stanli_stan_to_mir_named(const char* stan_code, const char* filename,
     }
   }
 #ifdef STANLI_EMBED_STANC
-  const stanli::StancResult compiled =
-      embedded_compile(stan_code, filename, include_paths, include_path_count,
-                       fast_math ? kStancFastMath : 0);
-  if (!compiled.warnings.empty()) {
+  const stanli::StancResult compiled = stanli::embedded_stanc_compile(
+      stan_code, filename, include_paths, include_path_count,
+      fast_math ? stanli::kStancFastMath : 0);
+  const std::string warnings = compiler_warning_text(compiled);
+  if (!warnings.empty()) {
     if (warnings_out != nullptr) {
-      *warnings_out = dup_string(compiled.warnings);
+      *warnings_out = dup_string(warnings);
     } else {
-      std::fprintf(stderr, "%s\n", compiled.warnings.c_str());
+      std::fprintf(stderr, "%s\n", warnings.c_str());
     }
   }
-  if (!compiled.ok) {
-    put_err(err, err_len, compiled.body.c_str());
+  if (!compiled.mir) {
+    put_err(err, err_len, compiled.error.c_str());
     return nullptr;
   }
-  char* out = dup_string(compiled.body);
+  char* out = dup_string(*compiled.mir);
   if (out == nullptr) put_err(err, err_len, "out of memory");
   return out;
 #else
