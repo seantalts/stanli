@@ -905,7 +905,7 @@ static void check_multinomial_density() {
           const int theta = g.add_slot(n, active), w = g.add_slot(1, false);
           const int out = g.add_slot(1, false), scaled = g.add_slot(1, false);
           g.add_op(OP_MULTINOMIAL_LPMF, {theta}, out, counts);
-          g.ops.back().variant = propto ? 0x80u : 0u;
+          g.ops.back().variant = (propto ? 0x80u : 0u) | (active ? 0x1u : 0u);
           g.add_op(OP_MUL, {out, w}, scaled);
           g.result_slot = scaled;
           Executor ex(std::move(g));
@@ -920,6 +920,9 @@ static void check_multinomial_density() {
               propto
                   ? stan::math::multinomial_lpmf<true>(counts, probabilities)
                   : stan::math::multinomial_lpmf<false>(counts, probabilities);
+          if (propto && !active)
+            density = stan::math::multinomial_lpmf<true>(
+                counts, Eigen::VectorXd(probabilities.val()));
           var ref = density * weight;
           stan::math::grad(ref.vi_);
           expect_eq_or_both_nan("multinomial value", got, ref.val());

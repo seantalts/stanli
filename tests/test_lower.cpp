@@ -1287,6 +1287,257 @@ static void test_udf_guard_returns() {
   stan::math::recover_memory();
 }
 
+// User functions stanc did not inline, under `~`. CmdStan instantiates an
+// `_lp` function and an `_lupdf` call with the caller's propto__, and the
+// body with the actual argument types, so the data-bound sigma is a double
+// there and propto drops its log. The explicit `_lpdf` call is normalized.
+static void test_udf_lp_propto() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_lp_propto.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_lp_propto.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf lp propto compile: ") + error.what());
+    return;
+  }
+  const double s = data.at("s").r[0];
+  const double q = 0.7;
+  stan::math::var tau = q;
+  stan::math::var lp = stan::math::normal_lpdf<true>(tau, 0, s) +
+                       stan::math::normal_lpdf<true>(tau, 1, s) +
+                       stan::math::normal_lpdf(tau, 1, s);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  ex.params_data()[0] = q;
+  double grad = 0;
+  expect_ulp("udf lp propto lp", ex.gradient(&grad), lp.val(), 10);
+  expect_ulp("udf lp propto grad", grad, tau.adj(), 10);
+  stan::math::recover_memory();
+}
+
+// stanc's O1 inliner substitutes the data actual for each formal, but an
+// indexed formal such as `s[i]` keeps the AutoDiffable adlevel it had in the
+// function body. CmdStan's types come from the actuals, so the data scales
+// drop their log under `~`; the local `wide` is a var because x is, and
+// keeps its log. tail_lp runs inside a parameter-dependent branch.
+static void test_udf_lp_inlined_propto() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_lp_inlined_propto.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_lp_inlined_propto.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf lp inlined compile: ") + error.what());
+    return;
+  }
+  const std::vector<double>& m = data.at("m").r;
+  const std::vector<double>& s = data.at("s").r;
+  for (const std::vector<double>& q :
+       {std::vector<double>{0.1, 0.0, -0.1}, {-0.4, 0.3, 0.2}}) {
+    std::vector<stan::math::var> p(q.begin(), q.end());
+    stan::math::var lp = 0;
+    for (int i = 0; i < 2; ++i) {
+      lp += stan::math::normal_lpdf<true>(p[i + 1], m[i], s[i]);
+      lp += stan::math::normal_lpdf<true>(p[i + 1], m[i] + 1,
+                                          stan::math::var(2 * s[i]));
+    }
+    if (q[0] > 0) lp += stan::math::normal_lpdf<true>(p[0], 0, s[1]);
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    std::copy(q.begin(), q.end(), ex.params_data());
+    double grad[3] = {};
+    const std::string at = q[0] > 0 ? " (branch taken)" : "";
+    expect_ulp("udf lp inlined lp" + at, ex.gradient(grad), lp.val(), 10);
+    for (int i = 0; i < 3; ++i)
+      expect_ulp("udf lp inlined grad " + std::to_string(i) + at, grad[i],
+                 p[i].adj(), 10);
+    stan::math::recover_memory();
+  }
+}
+
+// User functions inside parameter-dependent branches, which the region
+// compiler inlines from O0 MIR. CmdStan instantiates each body with the
+// actual argument types: data scales drop their log, `wide` is a var only
+// when x is, so scaled_lp(0.25, s) adds nothing, and the normalized
+// shifted_lpdf call keeps every term of its normal_lupdf. guarded_lp holds
+// its branch inside the function, and centered_lp returns early above 1.
+static void test_udf_lp_branch_propto() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_lp_branch_propto.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_lp_branch_propto.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf lp branch compile: ") + error.what());
+    return;
+  }
+  const double s = data.at("s").r[0];
+  for (double q : {0.1, 1.5, -0.3}) {
+    stan::math::var tau = q;
+    stan::math::var lp = 0;
+    if (q > 0) {
+      lp += stan::math::normal_lpdf<true>(tau, -0.5, s);
+      lp += stan::math::normal_lpdf<true>(tau, 0, s);
+      lp += stan::math::normal_lpdf<true>(tau, 1, stan::math::var(2 * s));
+      if (q <= 1) lp += stan::math::normal_lpdf<true>(tau, 0.5, s);
+      lp += stan::math::normal_lpdf(tau, 1, s);
+      lp += stan::math::normal_lpdf<true>(tau, 2, s);
+    }
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = q;
+    double grad = 0;
+    const std::string at = " at " + std::to_string(q);
+    expect_ulp("udf lp branch lp" + at, ex.gradient(&grad), lp.val(), 10);
+    expect_ulp("udf lp branch grad" + at, grad, tau.adj(), 10);
+    stan::math::recover_memory();
+  }
+}
+
+// Kernels whose constant terms depend on the caller's propto and the
+// actual argument types, inside a parameter-dependent branch. reduce_sum with
+// an `_lpdf` partial is normalized and with `_lupdf` drops the data scale's
+// log; a wiener density with only data arguments adds nothing under propto,
+// and with the parameter-dependent outcome it keeps every term.
+static void test_udf_branch_kernels() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_branch_kernels.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(slurp("tests/fixtures/udf_branch_kernels.tmir.sexp"),
+                       data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf branch kernels compile: ") + error.what());
+    return;
+  }
+  const double s = data.at("s").r[0];
+  for (const std::vector<double>& q :
+       {std::vector<double>{0.1, 0.0, -0.1}, {-0.4, 0.3, 0.2}}) {
+    std::vector<stan::math::var> p(q.begin(), q.end());
+    const std::vector<stan::math::var> y{p[1], p[2]};
+    stan::math::var lp = stan::math::normal_lpdf<true>(p[0], 0, 1);
+    if (q[0] > 0) {
+      lp += stan::math::normal_lpdf(y, p[0], s);
+      lp += stan::math::normal_lpdf<true>(y, p[0], s);
+      lp += stan::math::wiener_lpdf<true>(1.0, 2.0, 0.3, 0.5, 0.2);
+      lp += stan::math::wiener_lpdf<true>(1 + stan::math::exp(p[0]), 2.0, 0.3,
+                                          0.5, 0.2);
+    }
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    std::copy(q.begin(), q.end(), ex.params_data());
+    double grad[3] = {};
+    const std::string at = q[0] > 0 ? " (branch taken)" : "";
+    expect_ulp("udf branch kernels lp" + at, ex.gradient(grad), lp.val(), 10);
+    for (int i = 0; i < 3; ++i)
+      expect_ulp("udf branch kernels grad " + std::to_string(i) + at, grad[i],
+                 p[i].adj(), 10);
+    stan::math::recover_memory();
+  }
+}
+
+// stanc's O1 inliner, given a call whose non-integer actuals are all data,
+// declares the return value and locals as CmdStan's doubles. `~` then drops
+// their logs as CmdStan does at O0: widen(s), shifted_lp(0.25, s) and
+// scaled_lp(0.25, s) add only what normal_lpdf<true> of doubles does, while
+// scaled_lp(tau, s) keeps `wide` a var.
+static void test_udf_data_call_o1() {
+  using namespace stanli;
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_data_call_o1.json"));
+  CompiledModel cm;
+  try {
+    cm =
+        compile_model(slurp("tests/fixtures/udf_data_call_o1.tmir.sexp"), data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf data call o1 compile: ") + error.what());
+    return;
+  }
+  const double s = data.at("s").r[0];
+  for (double q : {0.1, -0.3}) {
+    stan::math::var tau = q;
+    stan::math::var lp = stan::math::normal_lpdf<true>(tau, 0, 2 * s);
+    lp += stan::math::normal_lpdf<true>(0.25, 1, 2 * s);
+    if (q > 0) {
+      lp += stan::math::normal_lpdf<true>(tau, 0, s);
+      lp += stan::math::normal_lpdf<true>(tau, 1, stan::math::var(2 * s));
+      lp += stan::math::normal_lpdf<true>(0.25, 1, 2 * s);
+    }
+    lp.grad();
+    Executor ex(cm.graph);
+    cm.bind(ex);
+    ex.params_data()[0] = q;
+    double grad = 0;
+    const std::string at = q > 0 ? " (branch taken)" : "";
+    expect_ulp("udf data call o1 lp" + at, ex.gradient(&grad), lp.val(), 10);
+    expect_ulp("udf data call o1 grad" + at, grad, tau.adj(), 10);
+    stan::math::recover_memory();
+  }
+}
+
+// Void functions called as statements, as stanc leaves them when it does not
+// inline. An `_lp` function adds to the caller's target and inherits the
+// caller's propto, so the `~` inside prior_lp drops its constant terms while
+// the explicit normal_lpdf in scaled_lp keeps them. A `return;` ends only the
+// call: weighted_lp skips k == 2 and the loop continues.
+static void test_udf_void_statements() {
+  using namespace stanli;
+  const std::string mir = slurp("tests/fixtures/udf_void_statements.tmir.sexp");
+  const DataMap data =
+      DataMap::from_json(slurp("tests/fixtures/udf_void_statements.json"));
+  CompiledModel cm;
+  try {
+    cm = compile_model(mir, data);
+  } catch (const std::exception& error) {
+    check(false, std::string("udf void statements compile: ") + error.what());
+    return;
+  }
+  const std::vector<double> q = {0.3, -0.2, 1.1, 0.7};
+  const std::vector<double>& mu = data.at("mu").r;
+  const double sigma = data.at("sigma").r[0];
+  std::vector<stan::math::var> x(q.begin(), q.end());
+  stan::math::var lp = 0;
+  for (int n = 0; n < 3; ++n) {
+    lp += stan::math::normal_lpdf<true>(x[n], mu[n], sigma);
+    if (n != 1) lp += (n + 1) * x[n];
+  }
+  lp += 1.5 * stan::math::normal_lpdf(x[3], 0, 2);
+  lp += stan::math::normal_lpdf<true>(x[3], 0, 3);
+  lp.grad();
+  Executor ex(cm.graph);
+  cm.bind(ex);
+  std::copy(q.begin(), q.end(), ex.params_data());
+  double grad[4] = {};
+  expect_ulp("udf void statements lp", ex.gradient(grad), lp.val(), 10);
+  for (int i = 0; i < 4; ++i)
+    expect_ulp("udf void statements grad " + std::to_string(i), grad[i],
+               x[i].adj(), 10);
+  stan::math::recover_memory();
+
+  const std::vector<double> want = {q[0], q[1],        q[2],
+                                    q[3], q[3] * q[3], q[3] * q[3] + 1};
+  for (bool interp : {false, true}) {
+    const std::vector<double> row = write_array_row(mir, data, q, interp);
+    check(row.size() == want.size(),
+          std::string("udf void statements write_array ") +
+              (interp ? "interpreted" : "compiled"));
+    for (size_t i = 0; i < row.size() && i < want.size(); ++i)
+      expect_eq("udf void statements write_array " + std::to_string(i), row[i],
+                want[i]);
+  }
+}
+
 // stanc's inliner declares a vector-returning function's result zero-length
 // and assigns it in each arm. The structured loop sizes it from those
 // assignments instead of refusing the loop.
@@ -8771,6 +9022,12 @@ int main() {
   test_region_dynamic_index();
   test_region_constant_shadow();
   test_udf_guard_returns();
+  test_udf_lp_propto();
+  test_udf_lp_inlined_propto();
+  test_udf_lp_branch_propto();
+  test_udf_branch_kernels();
+  test_udf_data_call_o1();
+  test_udf_void_statements();
   test_structured_vector_return();
   test_structured_dead_after_break();
   test_structured_while_vector_return();

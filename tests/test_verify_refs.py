@@ -189,6 +189,15 @@ class CheckModelPointsTest(unittest.TestCase):
     def test_agreeing_at_every_point_passes(self):
         self.assertEqual(self.run_check('echo "OK -3.5 1 -2"')[1], "OK")
 
+    def test_interpreter_use_must_be_listed(self):
+        interp = 'echo "INTERP stanli: parts run interpreted" >&2\necho "OK -3.5 1 -2"'
+        self.assertEqual(self.run_check(interp)[1], "INTERPRETER")
+        with unittest.mock.patch.dict(verify_refs.CORPUS_INTERPRETED,
+                                      {MODEL: "a test"}):
+            self.assertEqual(self.run_check(interp)[1], "OK")
+            self.assertEqual(self.run_check('echo "OK -3.5 1 -2"')[1],
+                             "INTERPRETER")
+
     def test_tight_ulp_gate_catches_small_scaled_error(self):
         ref = {**REF, "recorded": {"platform": verify_refs.native_platform()}}
         with unittest.mock.patch.dict(verify_refs.ULP_LIMITS, {MODEL: 10}):
@@ -525,7 +534,32 @@ class CorpusOptionsTest(unittest.TestCase):
     def test_the_ulp_limit_applies_on_every_platform(self):
         body = f'echo "OK -3.5 {1.0 + 11 * math.ulp(1.0)!r} -2"'
         self.assertEqual(self.run_check(body, VALUES)[1], "OK")
-        self.assertEqual(self.run_check(body, VALUES, ulp=10)[1], "ULP_GATE")
+        result = self.run_check(body, VALUES, ulp=10)
+        self.assertEqual(result[1], "ULP_GATE")
+        self.assertIn("grad[1] (stanli 1.0000000000000024, CmdStan 1.0)",
+                      result[5])
+
+    def test_cancelling_fixtures_use_the_largest_entry_off_platform(self):
+        # 11 ULP of a gradient entry of 1, 1 ULP of the largest entry (8).
+        pt = {"values": ["-3.5", "1", "8"]}
+        body = f'echo "OK -3.5 {1.0 + 11 * math.ulp(1.0)!r} 8"'
+        listed = {MODEL: "cause"}
+
+        def run(platform):
+            ref = {"recorded": {"platform": platform},
+                   "points": {str(p): pt for p in POINTS}}
+            opts = verify_refs.Replay(self.SOURCE,
+                                      self.SOURCE.with_suffix(".json"), ulp=10)
+            with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.dict(
+                    verify_refs.GRADIENT_AGAINST_LARGEST_OFF_PLATFORM, listed):
+                return check_model(MODEL, ref, None, stub(tmp, body),
+                                   pathlib.Path(tmp), 60, 1e-9, opts=opts)[1]
+
+        here = verify_refs.native_platform()
+        self.assertEqual(run(here), "ULP_GATE")
+        self.assertEqual(run("Elsewhere x"), "OK")
+        listed.clear()
+        self.assertEqual(run("Elsewhere x"), "ULP_GATE")
 
     def test_a_wider_value_limit_needs_its_independent_value(self):
         near = 1.0 + 12 * math.ulp(1.0)

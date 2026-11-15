@@ -3,7 +3,7 @@ import mpdens
 from mpdens import lg, lchoose, log1m, log_inv_logit, log1m_inv_logit
 from mpfun import F, Phi, inv_logit, lse
 from mpmath import matrix
-from mpvals import map2, Mat, RVec, Unsupported, Vec, flat, map1, mat_cols, matmul, transpose
+from mpvals import is_scalar, map2, Mat, RVec, Unsupported, Vec, flat, map1, mat_cols, matmul, transpose
 
 EXTRA_DENS = {}
 CDFS = {}
@@ -639,3 +639,25 @@ def solve_right(b, A):
 
 F.update({"mdivide_left": solve_left, "mdivide_left_tri_low": solve_left, "mdivide_left_spd": solve_left,
           "mdivide_right": solve_right, "mdivide_right_tri_low": solve_right, "mdivide_right_spd": solve_right})
+
+
+def linspaced(n, lo, hi):
+    if n == 0:
+        return []
+    if n == 1:
+        return [mpf(hi)]
+    step = (mpf(hi) - lo) / (n - 1)
+    return [mpf(lo) + i * step for i in range(n - 1)] + [mpf(hi)]
+
+
+F.update({
+    "linspaced_vector": lambda n, lo, hi: Vec(linspaced(n, lo, hi)),
+    "linspaced_row_vector": lambda n, lo, hi: RVec(linspaced(n, lo, hi)),
+    "linspaced_array": lambda n, lo, hi: linspaced(n, lo, hi),
+    "to_int": lambda x: [F["to_int"](v) for v in x] if isinstance(x, list) else int(mp.floor(x) if x >= 0 else mp.ceil(x)),
+})
+
+F.update({
+    "gamma_p": lambda a, x: map2(reg_lower, a, x) if not (is_scalar(a) and is_scalar(x)) else reg_lower(a, x),
+    "gamma_q": lambda a, x: map2(reg_upper, a, x) if not (is_scalar(a) and is_scalar(x)) else reg_upper(a, x),
+})

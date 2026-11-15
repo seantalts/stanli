@@ -554,6 +554,27 @@ Eigen::MatrixXd cholesky_corr_rev_values(
   return x;
 }
 
+// The var overload of multiply_lower_tri_self_transpose forms L * L' with an
+// Eigen triangular product, which rounds differently from the prim loop of
+// dot products. Use the same product so the forward values agree with the
+// tape structured_bwd replays and with CmdStan's log density.
+Eigen::MatrixXd cov_matrix_rev_values(
+    const Eigen::Map<const Eigen::VectorXd>& y, Eigen::Index K, double& lp) {
+  stan::math::check_size_match("cov_matrix_constrain", "x.size()", y.size(),
+                               "K + (K choose 2)", (K * (K + 1)) / 2);
+  Eigen::MatrixXd L = Eigen::MatrixXd::Zero(K, K);
+  int i = 0;
+  for (Eigen::Index m = 0; m < K; ++m) {
+    L.row(m).head(m) = y.segment(i, m);
+    i += m;
+    L.coeffRef(m, m) = std::exp(y.coeff(i++));
+  }
+  lp += K * stan::math::LOG_TWO;
+  for (Eigen::Index k = 0; k < K; ++k) lp += (K - k + 1) * std::log(L(k, k));
+  if (K == 0) return L;
+  return L.triangularView<Eigen::Lower>() * L.transpose();
+}
+
 template <StructuredKind K>
 void structured_fwd(KernelCtx& ctx) {
   const int64_t nb = ctx.idata[0], inner_raw = ctx.idata[1];
@@ -583,6 +604,13 @@ void structured_fwd(KernelCtx& ctx) {
           const auto x =
               cholesky_corr_rev_values(y, ctx.idata[2], lp, retained, eligible);
           ctx.scratch[0] = eligible ? 1.0 : 0.0;
+          std::copy_n(x.data(), inner_con, ctx.out.data + b * inner_con);
+          continue;
+        }
+      }
+      if constexpr (K == StructuredKind::CovMatrix) {
+        if (!values_only()) {
+          const auto x = cov_matrix_rev_values(y, ctx.idata[2], lp);
           std::copy_n(x.data(), inner_con, ctx.out.data + b * inner_con);
           continue;
         }

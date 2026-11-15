@@ -146,6 +146,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "beeguts_guts_sd": {
+  "max_rel": 3.6302485480990956e-16,
+  "max_ulp": 2,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "blr": {
   "max_rel": 1.8301202581837216e-16,
   "max_ulp": 1,
@@ -832,6 +839,20 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "ecoensemble_hierarchical_withdrivers": {
+  "max_rel": 1.9539925233402755e-14,
+  "max_ulp": 304,
+  "n_values": 64,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "ecoensemble_hierarchical_withdrivers_conj": {
+  "max_rel": 1.9539925233402755e-14,
+  "max_ulp": 416,
+  "n_values": 64,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "eight_schools_centered": {
   "max_rel": 0.0,
   "max_ulp": 0,
@@ -850,6 +871,20 @@
   "max_rel": 9.921743553932213e-15,
   "max_ulp": 82,
   "n_values": 91,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "epinow2_estimate_infections": {
+  "max_rel": 4.246687965329096e-11,
+  "max_ulp": 299015,
+  "n_values": 25,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "epinow2_estimate_secondary": {
+  "max_rel": 7.321134758736772e-15,
+  "max_ulp": 64,
+  "n_values": 5,
   "point": 0,
   "status": "VERIFIED"
  },
@@ -892,6 +927,20 @@
   "max_rel": 1.2221152555609624e-14,
   "max_ulp": 81,
   "n_values": 409,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "hdbayes_lm_npp": {
+  "max_rel": 7.122167652447329e-16,
+  "max_ulp": 4,
+  "n_values": 7,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "hdbayes_pwe_npp": {
+  "max_rel": 7.465372996873202e-16,
+  "max_ulp": 4,
+  "n_values": 9,
   "point": 0,
   "status": "VERIFIED"
  },
@@ -1252,10 +1301,38 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "mlumr_survival_mspline_relaxed": {
+  "max_rel": 6.106226635438361e-16,
+  "max_ulp": 22,
+  "n_values": 33,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "mlumr_survival_relaxed": {
+  "max_rel": 1.6442036761246e-16,
+  "max_ulp": 1,
+  "n_values": 13,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "multi_occupancy": {
   "max_rel": 4.833372437940825e-15,
   "max_ulp": 36,
   "n_values": 107,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "multinma_ndmm_mspline": {
+  "max_rel": 4.440892098500626e-16,
+  "max_ulp": 16,
+  "n_values": 63,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "multinma_smoking_re": {
+  "max_rel": 4.763876683142924e-16,
+  "max_ulp": 4,
+  "n_values": 60,
   "point": 0,
   "status": "VERIFIED"
  },
@@ -1441,6 +1518,13 @@
   "point": 0,
   "status": "VERIFIED"
  },
+ "rbioacc_odetk": {
+  "max_rel": 3.4642472291693276e-16,
+  "max_ulp": 2,
+  "n_values": 4,
+  "point": 0,
+  "status": "VERIFIED"
+ },
  "rbmi_mmrm": {
   "max_rel": 2.1743569697112637e-16,
   "max_ulp": 1,
@@ -1452,6 +1536,34 @@
   "max_rel": 0.0,
   "max_ulp": 0,
   "n_values": 2,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "rstanarm_glm_gaussian": {
+  "max_rel": 5.495739993651755e-16,
+  "max_ulp": 4,
+  "n_values": 5,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "rstanarm_glmer_bernoulli": {
+  "max_rel": 8.881784197001252e-16,
+  "max_ulp": 16,
+  "n_values": 72,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "rstanarm_glmer_nb_count": {
+  "max_rel": 4.3147676149737796e-16,
+  "max_ulp": 3,
+  "n_values": 26,
+  "point": 0,
+  "status": "VERIFIED"
+ },
+ "rstanarm_polr": {
+  "max_rel": 2.1094237467877974e-15,
+  "max_ulp": 19,
+  "n_values": 10,
   "point": 0,
   "status": "VERIFIED"
  },

@@ -1,86 +1,47 @@
-# lp__ off by a constant: compact densities
+# lp__ and dropped constants
 
-Most of stanli's densities reproduce CmdStan's `lp__` to the bit. A tail of
-less common densities reports `lp__` shifted by a constant. Every gradient
-is bitwise identical to CmdStan's. This page explains the shift, lists which
-densities carry it, and shows how to check.
+Under `~`, and in `target += foo_lupdf(...)`, Stan Math leaves out the terms
+of a log density that depend only on data. They do not change the posterior.
+stanli leaves out the same terms, so its `lp__` matches CmdStan's.
 
-## What the shift is
+Stan Math decides which terms to keep from the argument types.
+`y ~ normal(mu, sigma)` with `sigma` as data drops `-log(sigma)`; with
+`sigma` as a parameter it keeps it. A stanli kernel therefore passes each data
+argument to Stan Math as `double` and each parameter as an autodiff variable.
+Every combination costs one template instantiation, so a kernel binds only the
+arguments whose type changes which terms survive. The kernels are in
+[`runtime/kernels/densities.cpp`](../runtime/kernels/densities.cpp) and
+[`runtime/kernels/matrix_fns.cpp`](../runtime/kernels/matrix_fns.cpp).
 
-stan-math decides which terms of a log density to keep by looking at the
-argument types. `y ~ normal(mu, sigma)` with `sigma` as data drops
-`-log(sigma)`; the same statement with `sigma` as a parameter keeps it.
-Reproducing that exactly costs one template instantiation per activity mask
-(which arguments are autodiff), twice for propto, and again for the
-elementwise form: `4 * 2^N` copies per distribution, about 630 KB of object
-for a three-argument density.
+`multi_student_t` and its Cholesky form bind every argument as autodiff and
+then subtract the `nu` and `Sigma` terms Stan Math drops when those arguments
+are data. Their `lp__` agrees with CmdStan to within rounding.
 
-A compact density instantiates the template once, with every argument bound
-as autodiff. Everything is active, so stan-math keeps terms CmdStan drops, and
-`lp__` comes out higher by exactly those terms. They are constant in the
-parameters, which is the only reason CmdStan could drop them, so every partial
-derivative is identical. For example, `lkj_cov` shifts lp by
-+0.28768207245200 with zero gradient difference.
+## Releases up to 0.26.0
 
-| | exact density | compact density |
-| --- | --- | --- |
-| gradients vs CmdStan | bitwise | bitwise |
-| `write_array` values | bitwise | bitwise |
-| `lp__` vs CmdStan | bitwise | a per-model constant higher |
-| draws for a pinned seed | same | a different chain from the same posterior |
+These densities bound every argument as autodiff to save binary size, kept
+terms CmdStan drops, and reported `lp__` shifted by a constant:
 
-Convergence checks on `lp__` cannot see the shift. It matters when an
-application needs the absolute log density or compares `lp__` across engines.
+- `wishart`, `inv_wishart` and their Cholesky forms, `multi_gp` and its
+  Cholesky form, and `lkj_cov`, whenever an argument was data;
+- `lkj_corr`, `lkj_corr_cholesky`, the multinomial family and `wiener`, only
+  when every argument was data.
 
-## Which densities are compact
+The shift did not depend on the parameters, so gradients, `write_array` values
+and the posterior were unchanged. It was lower than CmdStan's for the Wishart
+family: `S ~ inv_wishart(4, I)` on a 2 x 2 matrix reported 3.224 less. A
+pinned seed gave a different chain from the same posterior. Binding the data
+arguments as `double` made the shared library 208 KB larger. The size
+reasoning behind the old design is in the
+[earlier version of this page](https://github.com/seantalts/stanli/blob/d922c3cb8c9adf4baa22fa6706057e2455e2fef2/docs/lp-constant.md).
 
-Exact `lp__`, through activity-mask dispatch:
+## How it is checked
 
-- every scalar density in `STANLI_SCALAR_DENSITY_LIST`
-  ([`optable.hpp`](../runtime/include/stanli/optable.hpp)), including the 13
-  that models use most (`normal`, `cauchy`, `student_t`, `gamma`, `beta`,
-  `lognormal`, `uniform`, `double_exponential`, `exponential`, `inv_gamma`,
-  `std_normal`, `weibull`, `logistic`). The list's last field is the
-  instantiation tier; its propto bit is what keeps `lp__` exact.
-- the fused `normal`, `cauchy`, `student_t`, `lognormal`, `beta`, `gamma` and
-  `ordered_logistic` kernels, which are tested bitwise against Stan Math.
-- the discrete densities with an integer outcome, `multi_normal` and its
-  Cholesky form, `lkj_corr_cholesky`, `dirichlet`, and the GLMs.
-- `multi_student_t` and its Cholesky form. Their kernel binds every argument
-  as var and then subtracts the `nu` and `Sigma` terms Stan Math drops when
-  those arguments are data, so `lp__` agrees with CmdStan to rounding rather
-  than to the bit.
-
-These are the densities corpus models use, and
-[`tools/verify_refs.py`](../tools/verify_refs.py) checks their `lp__` against
-CmdStan on every source pull request.
-
-Compact: the multivariate and multinomial tail (`multi_normal_prec`, the
-Wishart family, `multi_gp` and its Cholesky form, `lkj_cov`, the multinomial
-family, `ordered_probit`, `wiener`). These kernels live in
-[`runtime/kernels/matrix_fns.cpp`](../runtime/kernels/matrix_fns.cpp) on a
-nested var tape.
-
-Full fidelity for the tail would cost more than the rest of the library:
-giving only the 13 common distributions' CDFs the mask dispatch measured
-4.8 MB, against 2.2 MB for all 72 distribution functions without it. To make a
-tail density exact, give it the mask dispatch. `multi_normal` in
-`matrix_fns.cpp` shows the shape: an if-chain over the mask bits that binds
-each argument as `var` or `double`. That is `2^N` branches and `2^N`
-instantiations, and it is why `multi_normal` is exact while
-`multi_normal_prec`, the same kernel with one call swapped, is compact.
-
-## How to check
-
-No automated check covers a compact density in the exact build, because the
-corpus does not use those densities. To check one by hand, run a model that
-uses it at each of the three points:
-
-```sh
-build/stanli_check model.stan data.json --point 0   # and 1, 2
-```
-
-and compare with [`tools/ref_driver.cpp`](../tools/ref_driver.cpp) compiled
-with CmdStan on the same model. Gradients must agree to the bit, and the
-`lp__` difference must be the same number at all three points. Anything else
-is a bug.
+[`tests/fixtures/propto_data_arguments.stan`](../tests/fixtures/propto_data_arguments.stan)
+and [`propto_multi_gp.stan`](../tests/fixtures/propto_multi_gp.stan) call
+each of the densities above under `~` with every split of its arguments into
+data and parameters, against CmdStan references.
+[`tools/gen_propto_fixtures.py`](../tools/gen_propto_fixtures.py) writes both,
+and CTest checks they are current. The corpus replay checks the
+densities corpus models use. The generated signature models do not: they call
+`foo_lpdf(...)`, which always keeps every term.

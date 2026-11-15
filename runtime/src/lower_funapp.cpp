@@ -475,6 +475,13 @@ bool return_in_loop(const mir::Stmt& s, bool in_loop) {
   return false;
 }
 
+bool return_in_branch(const mir::Stmt& s) {
+  if (s.kind == mir::Stmt::IfElse) return contains_return(s);
+  for (const auto& child : s.body)
+    if (return_in_branch(child)) return true;
+  return false;
+}
+
 bool non_tail_return(const mir::Stmt& s, bool tail);
 
 bool non_tail_return(const std::vector<mir::Stmt>& body, bool tail) {
@@ -500,14 +507,48 @@ bool non_tail_return(const mir::Stmt& s, bool tail) {
   }
 }
 
-mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result) {
+// A return inside a loop also sets `exited`, and each loop that holds one is
+// followed by `if (exited) break;` so the break reaches the single pass.
+mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result,
+                            const std::string& exited) {
+  mir::Expr flag;
+  flag.kind = mir::Expr::Var;
+  flag.name = exited;
+  flag.type_ = "UInt";
+  flag.unsized = {0, mir::UnsizedLeaf::Int};
+  mir::Stmt exit;
+  exit.kind = mir::Stmt::Break;
   if (s.kind != mir::Stmt::Return) {
     mir::Stmt out = s;
-    for (auto& child : out.body) child = returns_to_breaks(child, result);
-    return out;
+    for (auto& child : out.body)
+      child = returns_to_breaks(child, result, exited);
+    if (exited.empty() || !contains_return(s) ||
+        (s.kind != mir::Stmt::For && s.kind != mir::Stmt::While))
+      return out;
+    mir::Stmt leave;
+    leave.kind = mir::Stmt::IfElse;
+    leave.cond = flag;
+    leave.body.push_back(exit);
+    mir::Stmt both;
+    both.kind = mir::Stmt::SList;
+    both.body.push_back(std::move(out));
+    both.body.push_back(std::move(leave));
+    return both;
   }
   mir::Stmt block;
   block.kind = mir::Stmt::Block;
+  if (!exited.empty()) {
+    mir::Expr one;
+    one.kind = mir::Expr::LitInt;
+    one.lit_i = 1;
+    one.type_ = "UInt";
+    one.data_only = true;
+    mir::Stmt set;
+    set.kind = mir::Stmt::Assignment;
+    set.lhs = exited;
+    set.rhs = std::move(one);
+    block.body.push_back(std::move(set));
+  }
   if (s.has_init) {
     mir::Stmt assign;
     assign.kind = mir::Stmt::Assignment;
@@ -515,8 +556,6 @@ mir::Stmt returns_to_breaks(const mir::Stmt& s, const std::string& result) {
     assign.rhs = s.rhs;
     block.body.push_back(std::move(assign));
   }
-  mir::Stmt exit;
-  exit.kind = mir::Stmt::Break;
   block.body.push_back(std::move(exit));
   return block;
 }
@@ -540,10 +579,13 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   pass.loopvar = "__stanli_" + f.name + "_pass";
   pass.lower = one;
   pass.upper = one;
+  bool looped = false;
+  for (const auto& st : f.body) looped = looped || return_in_loop(st, false);
+  const std::string exited = looped ? "__stanli_" + f.name + "_exited" : "";
   mir::Stmt body;
   body.kind = mir::Stmt::Block;
   for (const auto& st : f.body)
-    body.body.push_back(returns_to_breaks(st, result));
+    body.body.push_back(returns_to_breaks(st, result, exited));
   pass.body.push_back(std::move(body));
   mir::Expr value;
   value.kind = mir::Expr::Var;
@@ -554,7 +596,18 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
   ret.kind = mir::Stmt::Return;
   ret.has_init = true;
   ret.rhs = std::move(value);
-  return {std::move(decl), std::move(pass), std::move(ret)};
+  if (!looped) return {std::move(decl), std::move(pass), std::move(ret)};
+  mir::Stmt flag;
+  flag.kind = mir::Stmt::Decl;
+  flag.decl_id = exited;
+  flag.decl_type.base = "SInt";
+  mir::Stmt clear;
+  clear.kind = mir::Stmt::Assignment;
+  clear.lhs = exited;
+  clear.rhs = one;
+  clear.rhs.lit_i = 0;
+  return {std::move(decl), std::move(flag), std::move(clear), std::move(pass),
+          std::move(ret)};
 }
 
 }  // namespace
@@ -582,7 +635,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
         binds[i].iv = actual.require_constant_int("integer argument");
         binds[i].is_int = true;
       } catch (const CompileError&) {
-        if (in_write_array || !needs_runtime_value(a)) throw;
+        if (!needs_runtime_value(a)) throw;
       }
     }
     if (!binds[i].is_int) {
@@ -625,7 +678,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   const bool autodiff_saved = udf_autodiff_ctx;
   const bool known_static_saved = write_array_known_static;
   write_array_known_static = false;
-  propto_ctx = propto_ctx && e.fn_propto;
+  propto_ctx = propto_ctx && mir::inherits_propto(e);
   udf_autodiff_ctx = false;
   for (size_t i = 0; i < binds.size(); ++i)
     if (!binds[i].is_int && f.arg_views[i].leaf != mir::UnsizedLeaf::Int)
@@ -666,20 +719,18 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
   }
   const std::vector<mir::Stmt>* body = &f.body;
   if ((e.type_ == "UReal" || e.type_ == "UInt") && e.unsized.depth == 0 &&
-      non_tail_return(f.body, true)) {
-    bool looped = false;
-    for (const auto& st : f.body) looped = looped || return_in_loop(st, false);
-    if (!looped) {
-      auto rewritten =
-          std::make_shared<std::vector<mir::Stmt>>(single_exit_body(f, e));
-      g.udata_pool.push_back(rewritten);
-      body = rewritten.get();
-    }
+      (non_tail_return(f.body, true) ||
+       std::any_of(f.body.begin(), f.body.end(), return_in_branch))) {
+    auto rewritten =
+        std::make_shared<std::vector<mir::Stmt>>(single_exit_body(f, e));
+    g.udata_pool.push_back(rewritten);
+    body = rewritten.get();
   }
   // CmdStan passes the CALLER's propto__ value into a user density.
   const Flow flow = lower_stmts(*body);
   if (flow == Flow::Break || flow == Flow::Continue)
     fail(e.name + ": break or continue outside a loop");
+  if (e.type_.empty()) return {};  // a void function called as a statement
   if (flow != Flow::Return)
     fail(e.name + ": no return value on the executed path");
   Val ret = std::move(return_value);
@@ -1258,8 +1309,7 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
           !is_vector(arg.si))
         fail(e.name + ": MIR type does not match lowered values", e.raw);
       if (!e.args[0].data_only || !outcome.si.param_free ||
-          (udf_depth == 0 &&
-           arg.autodiff != (!in_write_array && !e.args[1].data_only)))
+          arg.autodiff != expression_autodiff(e.args[1]))
         fail(e.name + ": MIR adlevel contradicts lowered dependencies", e.raw);
     }
 
@@ -1280,9 +1330,7 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
           ins.push_back(value.slot);
           result_si.param_free = result_si.param_free && value.si.param_free;
           result_autodiff = result_autodiff || value.autodiff;
-          argument.active = spec.shape == stanli::DensityShape::Categorical
-                                ? value.autodiff
-                                : !source.data_only;
+          argument.active = expression_autodiff(source);
           argument.shape = builtin_argument_shape(source, value);
           if (has_runtime_shape(value)) {
             const int slot = one_runtime_extent(value, e.name);

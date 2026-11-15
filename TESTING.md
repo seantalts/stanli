@@ -48,7 +48,13 @@ CI enforces:
   recorded on the same platform (`ULP_LIMITS` in
   [`tools/verify_refs.py`](tools/verify_refs.py)), and for the fixtures
   corpus on every platform. For the models in `GRADIENT_AGAINST_LARGEST`, the
-  gradient is measured in ULP of its largest entry.
+  gradient is measured in ULP of its largest entry, and so is it for the
+  fixtures in `GRADIENT_AGAINST_LARGEST_OFF_PLATFORM` on platforms other than
+  the one that recorded them. Eigen's matrix product fuses multiply-adds on
+  arm64 and not on x86-64 or MSVC, and their covariance gradients cancel.
+  CmdStan built on arm64 with Eigen's kernel changed to round each product
+  matches stanli on Linux within 2 ULP, and against an 80-digit reference the
+  largest gradient error is the same on both platforms.
 - A scaled error `|a-b| / max(|a|, |b|, 1)` below 1e-9 for every other
   reference comparison. This check catches implementation errors and does not
   prove a ULP bound; per-model ULP distances are in
@@ -88,7 +94,7 @@ BRANCH` runs it on a branch. The jobs are in
 | [lowering and pass tests](#unit-tests-for-numerical-operations) | log density, gradient, `write_array` rows and op counts of small compiled models | stan-math `var` references, hand-derived constants or the MIR interpreter | PR (CTest) | models outside the fixtures |
 | [lit](#unit-tests-for-numerical-operations) | each marked `.stan` file's compile or evaluation result, and optionally one pass dump | the expectation written in the file | PR (CTest) | values the file does not state |
 | [fused-density differential](#unit-tests-for-numerical-operations) | the seven fused densities over activity masks, shapes and edge values | Stan Math's kernels; bitwise, 2 ULP for normal and cauchy | Linux x86-64 on PRs and post-merge; AddressSanitizer; Windows ARM64 dev setup | macOS |
-| [corpus replay](#comparison-with-cmdstan-on-complete-models) | log density, gradient and `write_array` rows of 350 models at 3 points | recorded CmdStan values | PR on Linux x86-64; post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points; Windows |
+| [corpus replay](#comparison-with-cmdstan-on-complete-models) | log density, gradient and `write_array` rows of 366 models at 3 points | recorded CmdStan values | PR on Linux x86-64; post-merge on macOS arm64 and x86-64, Linux aarch64 and Linux GCC | parameter values away from the 3 points; Windows |
 | [fast-mode replay](#fast-mode) | the same models compiled in fast mode | the same references, fast-mode limits | PR, Linux x86-64 | macOS, Windows and ARM |
 | [local corpus replays](#comparison-with-cmdstan-on-complete-models) | log density, gradient and outputs of the function, signature, fixture and other local models | recorded CmdStan values | PR (CTest) | signatures and sizes the generators exclude |
 | [stanc3 good models](#testing-stan-language-coverage) | the 1,244 models in stanc3's `good` integration tests at up to 5 points | recorded CmdStan values and messages, 1e-9; a status ledger | PR (CTest) | models whose generated data CmdStan rejects |
@@ -138,9 +144,11 @@ that needs a package these jobs lack, such as brms, goes in another file. The
 
 [`tools/verify_refs.py`](tools/verify_refs.py) replays every corpus against
 CmdStan's recorded answers. [`corpus-refs.json.gz`](docs/internal/artifacts/corpus-refs.json.gz)
-holds the main [corpus](tools/corpus_inventory.py), 350 models at 3 points
+holds the main [corpus](tools/corpus_inventory.py), 366 models at 3 points
 each: 119 posteriordb, 124 brms, 62 Rethinking, 22 cogmod, 13 Aalto, 4
-regression, 3 ctsem and 3 OncoBayes2 models. Nearly all also carry
+regression and 3 ctsem models, and 19 models from 9 CRAN packages
+(OncoBayes2, rstanarm, multinma, EpiNow2, mlumr, rbioacc, BeeGUTS, hdbayes
+and EcoEnsemble). Nearly all also carry
 `write_array` rows, compared by column name, and both drivers seed Stan's RNG
 the same way so generated quantities compare too. Per-model status and worst
 deviations are in [`docs/corpus-status.md`](docs/corpus-status.md).
@@ -153,13 +161,15 @@ deviations are in [`docs/corpus-status.md`](docs/corpus-status.md).
 | `signatures` | 74 generated models covering 19,641 signatures, one output per case | `signature_refs_*` |
 | `sized_functions` | 5 models calling library functions at real sizes | `test_sized_functions_reference` |
 | `container_flow` | 66 models that write each container shape in each block and read it back | `test_container_flow_reference` |
-| `fixtures` | 51 models from `tests/fixtures`, held to 10 ULP | `*_reference` |
+| `fixtures` | 59 models from `tests/fixtures`, held to 10 ULP | `*_reference` |
 | `cmdstan_replay` | 14 models for lowering rewrites that stock stanc's `--O1` MIR reaches | `test_cmdstan_replay` |
 | `oncobayes2` | the 3 OncoBayes2 models | `test_oncobayes2_reference` |
 
 `container_flow`, `cmdstan_replay` and `oncobayes2` also run through stock
 stanc (the `_stanc` CTests). A model fails when it runs interpreted and its
-corpus does not list it as interpreted, or the reverse.
+corpus does not list it as interpreted, or the reverse. The main corpus replay
+applies the same rule with `CORPUS_INTERPRETED` in
+[`tools/verify_refs.py`](tools/verify_refs.py), which is empty.
 
 [`tools/verify_sample.py`](tools/verify_sample.py) records the references, and
 `--corpus NAME` a local corpus, through CmdStan's own driver
@@ -197,8 +207,9 @@ in fast mode. At each point:
   values keep the default 1e-9 limit.
 
 `kronecker_gp` and the `ILL_CONDITIONED` models keep their default limits. A
-point may otherwise exceed 1e-12 only when a high-precision reference shows
-fast mode at least as close to the true value as CmdStan. This replay has not
+point may otherwise exceed 1e-12 when a high-precision reference shows fast
+mode about as close to the true value as CmdStan. Those points are listed in
+`FAST_HP_CHECKED` with their limit. This replay has not
 been run on macOS, Windows or ARM.
 
 [`tests/test_collapse.cpp`](tests/test_collapse.cpp) runs every graph the
@@ -413,10 +424,9 @@ Reduction order is not frozen across releases. Fusion and packet arithmetic can
 move gradients by their last bits within the budgets above. The release notes
 give the worst measured deviation.
 
-Some less common multivariate and multinomial densities match CmdStan's
-gradients but report `lp__` shifted by a parameter-independent constant. The
-posterior is unchanged, but a pinned-seed trajectory and the absolute log
-density can differ. See [docs/lp-constant.md](docs/lp-constant.md).
+Under `~`, every density drops the data-only terms CmdStan drops; the
+`propto_data_arguments` and `propto_multi_gp` fixtures check each split of
+arguments into data and parameters. See [docs/lp-constant.md](docs/lp-constant.md).
 
 The nested callback solver fixtures allow 16 ULP on their combined rate
 gradient, which must also match its analytic value within 2 ULP. The difference

@@ -12,8 +12,15 @@ from pathlib import Path
 import zipfile
 
 REPO = Path(__file__).resolve().parents[1]
-COLLECTIONS = ("all", "posteriordb", "educational", "rethinking", "brms",
-               "cogmod", "ctsem", "oncobayes2", "teaching", "regressions")
+# Models from CRAN packages, one directory per package under tests/, named
+# for the package in lower case. A new package is one more name here.
+CRAN_PACKAGES = ("oncobayes2", "rstanarm", "multinma", "epinow2", "mlumr",
+                 "rbioacc", "beeguts", "hdbayes", "ecoensemble")
+LOCAL_COLLECTIONS = ("brms", "rethinking", "cogmod", "ctsem") + CRAN_PACKAGES
+GROUPS = {"teaching": {"educational", "rethinking", "brms"},
+          "cran": set(CRAN_PACKAGES)}
+COLLECTIONS = ("all", "posteriordb", "educational", *LOCAL_COLLECTIONS,
+               *GROUPS, "regressions")
 
 
 @dataclass(frozen=True)
@@ -66,7 +73,7 @@ def _imported_cases(root):
 def local_cases(include_language=True):
     """Local fixtures keyed by unique model id, with validated provenance."""
     cases = {}
-    collections = ["brms", "rethinking", "cogmod", "ctsem", "oncobayes2"]
+    collections = list(LOCAL_COLLECTIONS)
     if include_language:
         collections.append("regressions")
     for collection in collections:
@@ -102,7 +109,7 @@ def corpus_cases(pdb, collection="all", include_language=False):
                                  "posteriordb", meta))
     for case in local_cases(include_language or collection == "regressions").values():
         _insert(cases, case)
-    wanted = {"educational", "rethinking", "brms"} if collection == "teaching" else {collection}
+    wanted = GROUPS.get(collection, {collection})
     return {name: case for name, case in sorted(cases.items())
             if collection == "all" or case.collection in wanted}
 

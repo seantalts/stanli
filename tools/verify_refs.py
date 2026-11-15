@@ -97,6 +97,12 @@ QUARANTINED = {}
 # excused: a segfault and a refusal are different bugs.
 KNOWN_GAPS = {}
 
+# Corpus models that run through the MIR interpreter, mapped to why. Any
+# other model that reports an interpreted log density or write_array
+# fails with INTERPRETER, and so does a listed model that no longer
+# does, as INTERPRETED does for the local corpora.
+CORPUS_INTERPRETED = {}
+
 # (model, point) pairs excused from probe_point's finite-gradient rule,
 # for points that carry no reference at all. Empty while every point is
 # referenced -- pair_dev already counts NaN against NaN as agreement, so
@@ -589,6 +595,14 @@ def worst_pair(rv, gv, floor=1.0):
 # other output keeps the default gate.
 FAST_MAX_REL = 1e-12
 WA_MAX_REL = 1e-9
+# Fast-mode points allowed past FAST_MAX_REL, each with the limit it is held
+# to and the 80-digit reference result that justifies it.
+FAST_HP_CHECKED = {
+    "epinow2_estimate_infections": (
+        1e-10, "point 0: the 14-day generation-time PMF tail loses 7 digits "
+               "in double; fast is 8.651e-9 of the largest gradient entry "
+               "from the 80-digit gradient, CmdStan 8.646e-9"),
+}
 
 
 def fast_dev(rv, gv):
@@ -616,7 +630,7 @@ def fast_dev(rv, gv):
 
 
 def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
-                strict=False, fast_math=False, opts=None):
+                strict=False, fast_math=False, opts=None, off_platform=False):
     """Replay one recorded point. (status, worst, worst_ulp, n, detail).
 
     A point whose entry has no `values` is one CmdStan itself refuses (it
@@ -668,13 +682,14 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         crashed = proc.returncode < 0 or not got
         return ("CRASH" if crashed else "RUN_FAIL", 0.0, 0, 0,
                 f"point {point}: {fail_detail(proc, got)}")
-    if opts and interpreted(proc.stderr) != opts.interpreted:
+    expected = opts.interpreted if opts else model in CORPUS_INTERPRETED
+    if interpreted(proc.stderr) != expected:
         note = next((line for line in proc.stderr.splitlines()
                      if line.startswith("INTERP ")
                      or "(interpreted:" in line), "")
         return ("INTERPRETER", 0.0, 0, 0,
                 f"point {point}: " + (f"runs through the MIR interpreter: "
-                                      f"{note[:200]}" if not opts.interpreted
+                                      f"{note[:200]}" if not expected
                                       else "expected the MIR interpreter"))
     rv = [float(x) for x in pt["values"]]
     gv = [float(x) for x in got[1:]]
@@ -693,7 +708,8 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
             worst_ulp = worst_pair(*([v for i, v in enumerate(side)
                                       if i not in own] for side in (rv, gv)),
                                    floor)[1]
-        if model in GRADIENT_AGAINST_LARGEST:
+        if model in GRADIENT_AGAINST_LARGEST or (
+                off_platform and model in GRADIENT_AGAINST_LARGEST_OFF_PLATFORM):
             worst_ulp = max(worst_pair(rv[:1], gv[:1])[1],
                             gradient_ulp(rv[1:], gv[1:]))
     where = worst_values(rv, gv, floor, own,
@@ -782,14 +798,17 @@ def column_label(name, opts):
 
 
 def worst_values(rv, gv, floor, skip, label):
-    """Labels of the values with the worst scaled error and worst ULP."""
+    """The values with the worst scaled error and worst ULP, each named
+    and shown on both sides, so a failure on a platform nobody can run
+    locally carries the numbers needed to diagnose it."""
     devs = [(pair_dev(a, b, floor), i) for i, (a, b) in enumerate(zip(rv, gv))
             if i not in skip]
     if not devs:
         return ("", "")
     rel = max(devs, key=lambda d: d[0][0])[1]
     ulp = max(devs, key=lambda d: d[0][1])[1]
-    return (label(rel), label(ulp))
+    show = lambda i: f"{label(i)} (stanli {gv[i]!r}, CmdStan {rv[i]!r})"
+    return (show(rel), show(ulp))
 
 
 def check_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
@@ -847,6 +866,9 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     else:
         ulp_limit = None if fast_math else ulp_limit_for(
             model, ref, target_platform or native_platform())
+    recorded_on = ref.get("recorded", {}).get("platform")
+    off_platform = recorded_on is not None and recorded_on != (
+        target_platform or native_platform())
     strict = ref.get("strict", False) or bool(opts and opts.strict)
     if strict:
         if set(ref.get("points", {})) != {str(p) for p in POINTS}:
@@ -863,7 +885,7 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             done = {point: pool.submit(
                         check_point, model, stan, dj, check_bin, point,
                         ref["points"][str(point)], timeout, no_wa, strict,
-                        fast_math, opts)
+                        fast_math, opts, off_platform)
                     for point in POINTS if str(point) in ref["points"]
                     and (model, point) not in QUARANTINED}
     for point in POINTS:
@@ -894,7 +916,7 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
         status, rel, ulp, n, detail = (
             done[point].result() if point in done else check_point(
                 model, stan, dj, check_bin, point, pt, timeout, no_wa, strict,
-                fast_math))
+                fast_math, off_platform=off_platform))
         total += n
         if status != "OK":
             return (model, status, worst, worst_ulp, total, detail, notes)
@@ -903,6 +925,8 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
         documented = model in ILL_CONDITIONED or pt.get("status") == "MISMATCH"
         gate = gate_for(model, pt, max(max_rel, WA_MAX_REL)
                         if fast_math and documented else max_rel)
+        if fast_math and model in FAST_HP_CHECKED:
+            gate = max(gate, FAST_HP_CHECKED[model][0])
         if rel >= gate:
             return (model, "GATE", rel, ulp, total,
                     f"point {point}: {rel:.2e} ({ulp} ulp) over {n} "
@@ -1074,6 +1098,25 @@ VALUE_ULP_LIMITS = {
                  "nested_callback_contexts_fallback")}
 
 
+# Fixtures whose gradient is measured against its largest entry when replayed
+# on a platform other than the one the reference was recorded on. Their
+# covariance comes from Eigen's matrix product, whose arm64 kernel fuses each
+# multiply-add; x86-64 and MSVC builds round the product first. Gradient
+# entries that cancel to a hundredth of the largest one amplify that last
+# bit: stanli on Linux and Windows is up to 507 ULP per element from the
+# arm64 CmdStan reference, and 4 ULP of the largest entry. Against an
+# 80-digit reference the Linux values are farther from the true gradient at
+# five of the six largest gaps (propto_multi_gp grad[95]: 166 vs 70 ULP) and
+# closer at one (multi_gp_rectangular grad[19]: 222 vs 285). CmdStan built on
+# arm64 with Eigen's kernel changed to round each product gives the same value
+# as stanli on Linux at each of those entries and is within 2 ULP elsewhere,
+# and the largest gradient error relative to the largest entry is the same on
+# both platforms.
+GRADIENT_AGAINST_LARGEST_OFF_PLATFORM = dict.fromkeys(
+    ("multi_gp_rectangular", "propto_data_arguments", "propto_multi_gp"),
+    "cancelling covariance gradient; Eigen's product fuses on arm64 only")
+
+
 @dataclasses.dataclass(frozen=True, eq=False)
 class Replay:
     """How check_point runs and gates one model of a local corpus."""
@@ -1215,7 +1258,8 @@ def pin_drift(recorded, required=("cmdstan", "stan", "math")):
     return ""
 
 
-def replay_corpus(name, selected, check_bin, stanc, jobs, timeout):
+def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
+                  target_platform=None):
     """Replay a local corpus against its archive. Exit status."""
     corpus = CORPORA[name]
     refs, _ = load_corpus_refs(corpus)
@@ -1274,7 +1318,8 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout):
                           corpus.ulp, corpus.scale_floor, corpus.strict,
                           labels, columns, VALUE_ULP_LIMITS.get(model, {}))
             return check_model(model, ref, None, check_bin, work, timeout,
-                               1e-9, opts=opts)
+                               1e-9, target_platform=target_platform,
+                               opts=opts)
 
         leg = " through stock stanc" if stanc else ""
         with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
@@ -1345,7 +1390,7 @@ def main():
             ap.error("--corpus takes models with --model")
         return replay_corpus(args.corpus, args.model, args.check.resolve(),
                              args.stanc and args.stanc.resolve(), args.jobs,
-                             args.timeout)
+                             args.timeout, args.target_platform)
     if args.pdb is None:
         ap.error("the posteriordb checkout is required without --corpus")
     if args.max_rel is None:

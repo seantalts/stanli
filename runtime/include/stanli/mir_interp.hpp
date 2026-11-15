@@ -46,6 +46,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <type_traits>
@@ -162,14 +163,17 @@ class MirInterp {
   // Bind arguments positionally by their declared logical views and evaluate
   // the body to its return value. This is the ODE entry point: real-typed
   // parameters consume `args` in order, int-typed ones consume `int_args`.
+  // `autodiff` says which formals are bound to vars; absent, all may be.
   std::vector<T> call(const mir::FunDef& f,
                       const std::vector<std::vector<T>>& args,
-                      const std::vector<std::vector<int>>& int_args) {
+                      const std::vector<std::vector<int>>& int_args,
+                      const std::vector<bool>* autodiff = nullptr) {
     // Positional calls are used by the ODE/RHS fallback, but their formals
     // have the same unknown Eigen-view provenance as an ordinary UDF's.
     // Keeping them below top-level depth prevents product lowering from
     // assuming a formal is an owning, address-zero vector.
     MirInterp sub = function_scope(propto_ctx_);
+    sub.bind_argument_types(f, autodiff);
     if (f.arg_views.size() != f.arg_names.size())
       fail("function has incomplete unsized argument metadata: " + f.name);
     size_t ai = 0, ii = 0;
@@ -197,10 +201,12 @@ class MirInterp {
   // value, including integer identity and logical dimensions.  Function's
   // public C++ entry point uses this path: DataMap::Entry is Value itself for
   // the double instantiation, so no host/container conversion is needed.
-  Value call(const mir::FunDef& f, const std::vector<Value>& args) {
+  Value call(const mir::FunDef& f, const std::vector<Value>& args,
+             const std::vector<bool>* autodiff = nullptr) {
     if (f.arg_names.size() != args.size())
       fail("function argument count mismatch: " + f.name);
     MirInterp sub = function_scope(propto_ctx_);
+    sub.bind_argument_types(f, autodiff);
     for (size_t k = 0; k < args.size(); ++k) {
       sub.env_[f.arg_names[k]] = args[k];
       sub.set_declared_dims(f.arg_names[k], args[k].dims);
@@ -701,13 +707,8 @@ class MirInterp {
               static_cast<int>(as_int(st.fn_args[2])));
           return;
         }
-        if (const auto name = mir::user_defined_statement_name(st.fn_name)) {
-          mir::Expr call;
-          call.kind = mir::Expr::FunApp;
-          call.fn_lib = mir::Expr::Lib::UserDefined;
-          call.name = st.fn_name.substr(name->first, name->second);
-          call.args = st.fn_args;
-          call_udf(call);
+        if (const auto call = mir::user_defined_statement_call(st)) {
+          call_udf(*call);
           return;
         }
         fail("unsupported statement function " + st.fn_name, st.raw);
@@ -788,7 +789,7 @@ class MirInterp {
         argument.scalar = e.args[k].unsized.depth == 0;
         argument.data_only = e.args[k].data_only;
         if constexpr (!std::is_same_v<T, double>)
-          argument.active = !e.args[k].data_only;
+          argument.active = autodiff(e.args[k]);
         if (spec.evaluation == DensityEvaluationPolicy::AllInteger ||
             k < static_cast<size_t>(spec.integer_args)) {
           argument.integers = ints(k);
@@ -865,7 +866,7 @@ class MirInterp {
       if ((int64_t)values[k].r.size() != lanes)
         fail(e.name + ": arguments differ in length", e.raw);
       if constexpr (!std::is_same_v<T, double>)
-        if (!e.args[k].data_only) active |= 1 << k;
+        if (autodiff(e.args[k])) active |= 1 << k;
       packed.insert(packed.end(), values[k].r.begin(), values[k].r.end());
     }
     const T precision = form.has_precision ? values[(size_t)nargs].r.at(0)
@@ -1291,6 +1292,40 @@ class MirInterp {
 
   int udf_depth_ = 0;
   bool propto_ctx_ = true;
+  // CmdStan instantiates a user function body with the actual argument
+  // types: a formal is a var when its actual is, and a local not declared
+  // data is a var when any real actual is. Empty outside a function body,
+  // where the MIR adlevel of a variable is its C++ type.
+  struct CallTypes {
+    std::map<std::string, bool> formals;
+    bool locals = true;
+  };
+  std::optional<CallTypes> call_types_;
+  bool autodiff(const mir::Expr& e) const {
+    if constexpr (std::is_same_v<T, double>) {
+      return false;
+    } else {
+      const bool locals = !call_types_ || call_types_->locals;
+      return mir::instantiated_autodiff(e, locals, [&](const mir::Expr& v) {
+        if (!call_types_) return true;
+        const auto formal = call_types_->formals.find(v.name);
+        return formal != call_types_->formals.end() ? formal->second : locals;
+      });
+    }
+  }
+  void bind_argument_types(const mir::FunDef& f,
+                           const std::vector<bool>* autodiff) {
+    call_types_ = CallTypes{};
+    if (autodiff == nullptr) return;
+    call_types_->locals = false;
+    for (size_t k = 0; k < f.arg_names.size() && k < autodiff->size(); ++k) {
+      const bool real = k >= f.arg_views.size() ||
+                        f.arg_views[k].leaf != mir::UnsizedLeaf::Int;
+      const bool active = real && (*autodiff)[k];
+      call_types_->formals[f.arg_names[k]] = active;
+      call_types_->locals = call_types_->locals || active;
+    }
+  }
   bool probe_ = false;
   mutable bool probe_failed_ = false;
 
@@ -1572,6 +1607,11 @@ class MirInterp {
     // As in CmdStan, an `_lupdf` functor inherits the caller's normalization
     // and an `_lpdf` one forces the normalized density.
     MirInterp sub = function_scope(propto_ctx_ && propto);
+    std::vector<bool> types(f->arg_names.size(), false);
+    types[0] = autodiff(e.args[1]);
+    for (size_t i = 3; i < e.args.size() && i < types.size(); ++i)
+      types[i] = autodiff(e.args[i]);
+    sub.bind_argument_types(*f, &types);
     sub.env_[f->arg_names[0]] = std::move(slice);
     Value start;
     start.is_int = true;
@@ -1655,7 +1695,10 @@ class MirInterp {
     if (it == funs_.end()) fail("unknown function " + e.name, e.raw);
     const mir::FunDef& f = *it->second;
     if (e.args.size() != f.arg_names.size()) fail(e.name + " arity mismatch");
-    MirInterp sub = function_scope(propto_ctx_ && e.fn_propto);
+    std::vector<bool> types;
+    for (const mir::Expr& arg : e.args) types.push_back(autodiff(arg));
+    MirInterp sub = function_scope(propto_ctx_ && mir::inherits_propto(e));
+    sub.bind_argument_types(f, &types);
     for (size_t i = 0; i < e.args.size(); ++i)
       sub.env_[f.arg_names[i]] = eval(e.args[i]);
     if (sub.exec_all(f.body) == Flow::Return) return std::move(sub.returned_);

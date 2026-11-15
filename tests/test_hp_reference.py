@@ -186,6 +186,12 @@ class Builtins(unittest.TestCase):
         r = mpfun.F["matrix_exp"](Mat([[mpf(0), mpf(1)], [mpf(0), mpf(0)]]))
         self.assertEqual([[float(x) for x in row] for row in r], [[1.0, 1.0], [0.0, 1.0]])
 
+    def test_linspaced_gamma_p_and_to_int(self):
+        self.assertEqual([float(x) for x in mpfun.F["linspaced_vector"](3, 0, 1)], [0.0, 0.5, 1.0])
+        self.close(mpfun.F["gamma_p"](mpf(1), mpf(2)), 1 - mp.exp(-2))
+        self.close(mpfun.F["gamma_q"](mpf(1), mpf(2)), mp.exp(-2))
+        self.assertEqual(mpfun.F["to_int"](mpf("-2.7")), -2)
+
     def test_eigenvalues_sym_ascending(self):
         r = mpfun.F["eigenvalues_sym"](Mat([[mpf(2), mpf(1)], [mpf(1), mpf(2)]]))
         self.assertEqual([float(x) for x in r], [1.0, 3.0])
@@ -307,6 +313,48 @@ class Report(unittest.TestCase):
         self.assertEqual(self.report.drivers({"toggles": t}), "collapse")
         t["COLLAPSE"]["restores"] = False
         self.assertIn("collapse", self.report.drivers({"toggles": t}))
+
+
+STANC = REPO / "deps" / "stanc3" / "stanc"
+INTERP_MODEL = """
+functions {
+  real tri(int n) {
+    if (n <= 0) return 0;
+    return n + tri(n - 1);
+  }
+  real pick(real x) { return 2 * x; }
+  real pick(vector x) { return sum(x); }
+}
+parameters {
+  real<lower=0, upper=positive_infinity()> a;
+  vector<lower=[negative_infinity(), 1]'>[2] b;
+}
+model {
+  target += tri(3) + pick(a) + pick(b);
+}
+"""
+
+
+@unittest.skipUnless(HAVE_MP and STANC.exists(), "needs mpmath and deps/stanc3/stanc")
+class Interpreter(unittest.TestCase):
+    """A recursive function, an overloaded one and infinite bounds."""
+
+    def test_log_density(self):
+        import subprocess
+        import tempfile
+        from mpinterp import Interp
+        from sexp import parse
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / "model.stan").write_text(INTERP_MODEL)
+            out = subprocess.run([str(STANC), "--O0", "--debug-optimized-mir", "model.stan"],
+                                 cwd=tmp, capture_output=True, text=True, check=True).stdout
+        mp.dps = 50
+        it = Interp(parse(out), {})
+        self.assertEqual(it.nparams(), 3)
+        u = [mpf("0.5"), mpf("0.3"), mpf("-0.2")]
+        # a = exp(u0) with log Jacobian u0; b1 = u1 is unbounded; b2 = 1 + exp(u2).
+        want = 6 + 2 * mp.exp(u[0]) + u[1] + 1 + mp.exp(u[2]) + u[0] + u[2]
+        self.assertLess(abs(it.logp(u) - want), mpf(10) ** -45)
 
 
 if __name__ == "__main__":

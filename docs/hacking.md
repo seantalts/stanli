@@ -803,8 +803,9 @@ regressions in [`tests/regressions/`](../tests/regressions/README.md), the brms
 output in [`tests/brms/`](../tests/brms/README.md), cogmod's custom
 brms families in [`tests/cogmod/`](../tests/cogmod/README.md), ctsem's
 state-space template in [`tests/ctsem/`](../tests/ctsem/README.md), and
-OncoBayes2's dose-escalation model in
-[`tests/oncobayes2/`](../tests/oncobayes2/README.md). It is the
+models from CRAN packages, one directory per package (such as
+[`tests/oncobayes2/`](../tests/oncobayes2/README.md)), listed in
+`CRAN_PACKAGES` in [`tools/corpus_inventory.py`](../tools/corpus_inventory.py). It is the
 strongest oracle in the project. It
 runs in CI on every push, and
 [`tools/wasm_check.sh`](../tools/wasm_check.sh) drives the same replay
@@ -812,6 +813,12 @@ through the WASM build. A change that claims to be a pure refactor
 should leave the replay's worst-deviation line exactly as it found it.
 For kernel changes, see the numeric parity policy in [`TESTING.md`](../TESTING.md):
 within 2 ULP by default, up to 10 ULP for reassociation-class optimizations.
+
+To add a CRAN package, put its `.stan`/`.json` pairs, a README and
+`licenses/` in `tests/<package>/` and its generator in
+`tools/gen_<package>_data.R`, add the name to `CRAN_PACKAGES`, record the
+references with [`tools/verify_sample.py`](../tools/verify_sample.py), and
+regenerate the docs.
 
 If the change touches raw pointers, an `Eigen::Map` over a buffer
 somebody else sized, or the island register file, run the suite with

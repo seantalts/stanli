@@ -907,35 +907,34 @@ const std::vector<FunctionSpec>& function_specs() {
     density("lkj_corr_lpdf",
             {OP_LKJ_CORR_LPDF, 2, 0, false, DensityShape::FirstMatrixRows, -1});
     density("lkj_cov_lpdf",
-            {OP_LKJ_COV_LPDF, 4, 0, false, DensityShape::FirstMatrixRows, 0xf});
+            {OP_LKJ_COV_LPDF, 4, 0, false, DensityShape::FirstMatrixRows});
     density("multi_gp_lpdf", {OP_MULTI_GP_LPDF, 3, 0, false,
-                              DensityShape::FirstMatrixDimensions, 0x7});
-    density("multi_gp_cholesky_lpdf",
-            {OP_MULTI_GP_CHOL_LPDF, 3, 0, false,
-             DensityShape::FirstMatrixDimensions, 0x7});
+                              DensityShape::FirstMatrixDimensions});
+    density("multi_gp_cholesky_lpdf", {OP_MULTI_GP_CHOL_LPDF, 3, 0, false,
+                                       DensityShape::FirstMatrixDimensions});
     density("multi_student_t_lpdf",
             vectorized_mvt_spec(OP_MULTI_STUDENT_T_LPDF, 4, 0x5));
     density("multi_student_t_cholesky_lpdf",
             vectorized_mvt_spec(OP_MULTI_STUDENT_T_CHOL_LPDF, 4, 0x5));
     density("multinomial_lpmf",
-            {OP_MULTINOMIAL_LPMF, 2, 1, false, DensityShape::Plain, 0x1});
+            {OP_MULTINOMIAL_LPMF, 2, 1, false, DensityShape::Plain});
     density("multinomial_logit_lpmf",
-            {OP_MULTINOMIAL_LOGIT_LPMF, 2, 1, false, DensityShape::Plain, 0x1});
-    density("dirichlet_multinomial_lpmf", {OP_DIRICHLET_MULTINOMIAL_LPMF, 2, 1,
-                                           false, DensityShape::Plain, 0x1});
+            {OP_MULTINOMIAL_LOGIT_LPMF, 2, 1, false, DensityShape::Plain});
+    density("dirichlet_multinomial_lpmf",
+            {OP_DIRICHLET_MULTINOMIAL_LPMF, 2, 1, false, DensityShape::Plain});
     density("ordered_probit_lpmf", {OP_ORDERED_PROBIT_LPMF, 3, 1, false,
                                     DensityShape::VectorizedVectors, 0x3, false,
                                     0, 0, DensityEvaluationPolicy::GraphKernel,
                                     AllIntegerDensity::None, 0x2});
     density("wiener_lpdf", {OP_WIENER_LPDF, 5, 0, false, DensityShape::Plain});
     density("wishart_lpdf",
-            {OP_WISHART_LPDF, 3, 0, false, DensityShape::FirstMatrixRows, 0x7});
-    density("inv_wishart_lpdf", {OP_INV_WISHART_LPDF, 3, 0, false,
-                                 DensityShape::FirstMatrixRows, 0x7});
-    density("wishart_cholesky_lpdf", {OP_WISHART_CHOL_LPDF, 3, 0, false,
-                                      DensityShape::FirstMatrixRows, 0x7});
+            {OP_WISHART_LPDF, 3, 0, false, DensityShape::FirstMatrixRows});
+    density("inv_wishart_lpdf",
+            {OP_INV_WISHART_LPDF, 3, 0, false, DensityShape::FirstMatrixRows});
+    density("wishart_cholesky_lpdf",
+            {OP_WISHART_CHOL_LPDF, 3, 0, false, DensityShape::FirstMatrixRows});
     density("inv_wishart_cholesky_lpdf", {OP_INV_WISHART_CHOL_LPDF, 3, 0, false,
-                                          DensityShape::FirstMatrixRows, 0x7});
+                                          DensityShape::FirstMatrixRows});
     return result;
   }();
   return entries;

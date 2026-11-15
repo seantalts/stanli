@@ -14,8 +14,10 @@ decl_ndim <- function(code) {
     if (!grepl(";", l)) next
     d <- trimws(sub(";.*$", "", l))
     if (d == "" || grepl("^(data|transformed|parameters|model)", d)) next
-    # name is the last identifier before ; (ignoring any = default)
-    d2 <- sub("=.*$", "", gsub("<[^>]*>", "", d))
+    # name is the last identifier before ; (ignoring any = default). Sizes
+    # such as [K == 3 ? 4 : 3] hold comparisons, so mask those first.
+    d2 <- gsub("[=!<>]=", "  ", d)
+    d2 <- sub("=.*$", "", gsub("<[^>]*>", "", d2))
     nm <- regmatches(d2, regexpr("[A-Za-z_][A-Za-z0-9_]*\\s*$", d2))
     if (length(nm) == 0) next
     nm <- trimws(nm)
@@ -46,6 +48,9 @@ num <- function(x) {
 }
 
 emit <- function(x, ndim) {
+  if (is.list(x))
+    return(paste0("[", paste(vapply(x, emit, character(1), ndim - 1),
+                             collapse = ","), "]"))
   d <- dim(x)
   if (!is.null(d) && length(d) >= 2) {
     # row-major nesting over the leading index
@@ -64,10 +69,15 @@ emit <- function(x, ndim) {
 
 write_json <- function(sd, code, path) {
   nd <- decl_ndim(code)
-  keep <- names(sd)[!vapply(sd, function(v) is.character(v) || is.factor(v) ||
-                                            is.list(v), logical(1))]
+  # Lists are kept only when the data block declares them (arrays of
+  # vectors or matrices).
+  keep <- names(sd)[!vapply(names(sd), function(k) {
+    v <- sd[[k]]
+    is.character(v) || is.factor(v) || (is.list(v) && is.null(nd[[k]]))
+  }, logical(1))]
   parts <- vapply(keep, function(k) {
     v <- sd[[k]]
+    if (is.list(v)) return(paste0("\"", k, "\":", emit(v, nd[[k]])))
     dd <- dim(v)
     attributes(v) <- NULL
     if (!is.null(dd) && length(dd) >= 2) dim(v) <- dd

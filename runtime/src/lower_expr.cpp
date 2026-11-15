@@ -9,20 +9,14 @@ namespace lower_detail {
 // is intentionally small: ordinary ops propagate Val::autodiff from their
 // lowered operands; only a data-condition ternary needs the unchosen arm.
 bool Lowering::expression_autodiff(const mir::Expr& e) const {
-  if (e.unsized.leaf == mir::UnsizedLeaf::Int || e.data_only) return false;
-  if (e.promoted) return scalar_autodiff();
-  if (e.kind == mir::Expr::Var) {
-    const auto formal = udf_formal_autodiff.find(e.name);
-    if (formal != udf_formal_autodiff.end()) return formal->second;
-    const auto value = scope.find(e.name);
-    return value != scope.end() ? value->second.autodiff : scalar_autodiff();
-  }
-  if (e.kind == mir::Expr::TernaryIf && e.args.size() == 3)
-    return expression_autodiff(e.args[1]) || expression_autodiff(e.args[2]);
-  bool autodiff = false;
-  for (const mir::Expr& arg : e.args)
-    autodiff = autodiff || expression_autodiff(arg);
-  return autodiff;
+  return mir::instantiated_autodiff(
+      e, scalar_autodiff(), [&](const mir::Expr& v) {
+        const auto formal = udf_formal_autodiff.find(v.name);
+        if (formal != udf_formal_autodiff.end()) return formal->second;
+        const auto value = scope.find(v.name);
+        return value != scope.end() ? value->second.autodiff
+                                    : scalar_autodiff();
+      });
 }
 // Every index the lowering sees is a bind-time constant, so what CmdStan
 // bounds-checks at runtime is checked here instead.
@@ -796,14 +790,16 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // Indexed node with none left.
       if (e.args.size() == 1) return base;
       if (e.args.size() == 2 && e.args[1].name == "IndexAll") return base;
-      if (std::any_of(
+      const bool dynamic_slice = in_write_array && e.args.size() == 2 &&
+                                 e.args[1].name == "IndexSingle" &&
+                                 runtime_int_value(e.args[1].args[0]);
+      if (!(dynamic_slice && write_array_unregioned()) &&
+          std::any_of(
               e.args.begin() + 1, e.args.end(),
               [&](const mir::Expr& ix) { return runtime_selector(ix); }))
         return region_index(base, {e.args.begin() + 1, e.args.end()}, e.type_,
                             e.unsized);
-      if (in_write_array && e.args.size() == 2 &&
-          e.args[1].name == "IndexSingle" &&
-          runtime_int_value(e.args[1].args[0])) {
+      if (dynamic_slice) {
         const Val index = lower_expr(e.args[1].args[0]);
         if (!is_scalar(index)) fail("runtime index is not scalar", e.raw);
         int64_t count = 0, width = 0;
@@ -1559,6 +1555,26 @@ Lowering::StaticProbe<Lowering::StaticView> Lowering::try_static_view(
       SlotInfo si = view_of("URowVector");
       si.param_free = e.data_only;
       return {StaticProbeState::Known, {(int64_t)e.args.size(), si}, {}};
+    }
+    if ((e.name == "rep_vector" || e.name == "rep_row_vector") &&
+        e.args.size() == 2 && is_scalar_type(e.args[0].type_)) {
+      const auto n = try_static_int(e.args[1]);
+      if (n.state != StaticProbeState::Known || n.value < 0) return {};
+      SlotInfo si = view_of(e.name == "rep_vector" ? "UVector" : "URowVector");
+      si.param_free = e.data_only;
+      return {StaticProbeState::Known, {n.value, si}, {}};
+    }
+    if (e.name == "rep_matrix" && e.args.size() == 3 &&
+        is_scalar_type(e.args[0].type_)) {
+      const auto m = try_static_int(e.args[1]);
+      const auto n = try_static_int(e.args[2]);
+      if (m.state != StaticProbeState::Known ||
+          n.state != StaticProbeState::Known || m.value < 0 || n.value < 0)
+        return {};
+      return {StaticProbeState::Known,
+              {checked_product({m.value, n.value}, "rep_matrix"),
+               matrix_view(m.value, n.value, e.data_only)},
+              {}};
     }
     if ((e.name == "transpose" || e.name == "Transpose__") &&
         e.args.size() == 1) {

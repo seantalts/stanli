@@ -432,6 +432,64 @@ void check_mixed_seed(const stanli::RhsProgram& p, const char* label) {
               into.nochain_tape == staged.nochain_tape);
 }
 
+// The interpreter instantiates a user density with its actual argument types,
+// as CmdStan does: under propto only -0.5 z^2 survives when the location and
+// scale are data, both through an ordinary call and a retained callback.
+void check_interpreted_density_activity() {
+  using namespace stanli;
+  using stan::math::var;
+  const auto mir = mir::read_program(
+      sexp::parse(slurp("tests/fixtures/udf_lp_branch_propto.tmir.sexp")));
+  std::map<std::string, const mir::FunDef*> funs;
+  for (const auto& f : mir.fun_defs) funs[f.name] = &f;
+  const mir::FunDef& shifted = *funs.at("shifted_lpdf");
+  const double want = stan::math::normal_lpdf<true>(var(0.7), 1.0, 3.0).val();
+
+  const auto real_var = [](const char* name, bool data) {
+    mir::Expr v;
+    v.kind = mir::Expr::Var;
+    v.name = name;
+    v.type_ = "UReal";
+    v.unsized = {0, mir::UnsizedLeaf::Real};
+    v.data_only = data;
+    return v;
+  };
+  mir::Expr call;
+  call.kind = mir::Expr::FunApp;
+  call.fn_lib = mir::Expr::Lib::UserDefined;
+  call.fn_propto = true;
+  call.name = "shifted_lpdf";
+  call.type_ = "UReal";
+  call.unsized = {0, mir::UnsizedLeaf::Real};
+  call.args = {real_var("x", false), real_var("mu", true), real_var("s", true)};
+  {
+    stan::math::nested_rev_autodiff nested;
+    MirInterp<var> interp(funs, "interpreted density activity");
+    for (const auto& [name, value] :
+         {std::pair<const char*, double>{"x", 0.7}, {"mu", 1.0}, {"s", 3.0}}) {
+      MirVal<var> bound;
+      bound.r = {var(value)};
+      interp.env()[name] = bound;
+    }
+    expect_ulp("interpreted density call", interp.eval(call).r.at(0).val(),
+               want, 2);
+  }
+  {
+    stan::math::nested_rev_autodiff nested;
+    RhsArg x;
+    x.is_param = true;
+    x.len = 1;
+    RhsArg data = x;
+    data.is_param = false;
+    const std::vector<var> theta{var(0.7)};
+    const std::vector<double> x_r{1.0, 3.0};
+    const std::vector<var> got = interpret_packed_callback<var>(
+        funs, "retained density callback", shifted, {}, {x, data, data},
+        theta.data(), x_r.data());
+    expect_ulp("retained density callback", got.at(0).val(), want, 2);
+  }
+}
+
 void check_matrix_callbacks() {
   using namespace stanli;
   const auto mir = mir::read_program(
@@ -816,6 +874,7 @@ int main() {
   }
   check_exact_opcode_contract();
   check_matrix_callbacks();
+  check_interpreted_density_activity();
   check_nested_callbacks();
 
   // stan-math instantiates a var state whenever either side is active. The

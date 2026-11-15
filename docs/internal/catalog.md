@@ -27,7 +27,7 @@ paths and hashes in raw records unchanged.
 | [Benchmarks](../benchmarks.md) | Published model comparisons; accepted pairs, incomplete cases and limits. |
 | [brms performance and numerics](../../notes/performance/2026-09-16-brms-performance.md) | Human-facing guide or maintained technical contract. |
 | [Build and pull-request latency](../../notes/performance/build-performance.md) | Human-facing guide or maintained technical contract. |
-| [Compact densities: exact gradients, lp\_\_ off by a constant](../lp-constant.md) | Human-facing guide or maintained technical contract. |
+| [lp\_\_ and dropped constants](../lp-constant.md) | Human-facing guide or maintained technical contract. |
 | [Corpus status](../corpus-status.md) | Recorded model support and reference coverage, distinct from fresh replay. |
 | [Probability-function coverage](../coverage.md) | Builtin signature coverage and unsupported overloads. |
 | [Coming from cmdstanr](../from-cmdstanr.md) | Human-facing guide or maintained technical contract. |
@@ -42,7 +42,7 @@ paths and hashes in raw records unchanged.
 | [Numerical fidelity and measurement evidence](research/numerics.md) | Short topic map; follow links only as needed. |
 | [Packaging, interfaces and installation](research/packaging.md) | Short topic map; follow links only as needed. |
 | [Native parallel reductions](research/parallelism.md) | Short topic map; follow links only as needed. |
-| [Compact densities: lp__ off by a constant](../lp-constant.md) | Human-facing guide or maintained technical contract. |
+| [lp__ and dropped constants](../lp-constant.md) | Human-facing guide or maintained technical contract. |
 | [Tutorial: three small models through every layer](../lowering-walkthrough.md) | Three small models traced through compiler and execution layers. |
 | [Native within-chain reductions](../native-reduce-sum.md) | Supported opt-in within-chain parallelism and API settings. |
 | [Native stanfit compatibility](../../notes/validation/2026-09-16-stanfit-compatibility.md) | Human-facing guide or maintained technical contract. |
@@ -62,6 +62,14 @@ paths and hashes in raw records unchanged.
 | [Models from cogmod](../../tests/cogmod/README.md) | Fixture scope, provenance or test workflow. |
 | [Model from ctsem](../../tests/ctsem/README.md) | Fixture scope, provenance or test workflow. |
 | [Model from OncoBayes2](../../tests/oncobayes2/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from rstanarm](../../tests/rstanarm/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from multinma](../../tests/multinma/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from EpiNow2](../../tests/epinow2/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from mlumr](../../tests/mlumr/README.md) | Fixture scope, provenance or test workflow. |
+| [Model from rbioacc](../../tests/rbioacc/README.md) | Fixture scope, provenance or test workflow. |
+| [Model from BeeGUTS](../../tests/beeguts/README.md) | Fixture scope, provenance or test workflow. |
+| [Models from hdbayes](../../tests/hdbayes/README.md) | Fixture scope, provenance or test workflow. |
+| [Model from EcoEnsemble](../../tests/ecoensemble/README.md) | Fixture scope, provenance or test workflow. |
 | [Compiler producer fixtures](../../tests/compiler/README.md) | Fixture scope, provenance or test workflow. |
 | [Stan teaching-model corpus for Stanli](../../tests/educational/IMPORT_README.md) | Fixture scope, provenance or test workflow. |
 | [Models from Aalto Stan lessons](../../tests/educational/README.md) | Fixture scope, provenance or test workflow. |

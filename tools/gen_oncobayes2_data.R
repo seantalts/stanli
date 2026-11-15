@@ -4,8 +4,8 @@
 #
 # OncoBayes2 (https://cran.r-project.org/package=OncoBayes2) is GPL (>= 3),
 # Copyright (C) 2025 Novartis Pharma AG. This script drives the installed
-# package (installed separately by whoever runs this):
-#   Rscript -e 'install.packages("OncoBayes2")'   # must be 0.10-0
+# package, version 0.10-0 from CRAN:
+#   Rscript -e 'remotes::install_version("OncoBayes2", "0.10-0")'
 # It checks the installed package's Stan sources against the hashes below
 # before writing anything, and aborts on a mismatch.
 #

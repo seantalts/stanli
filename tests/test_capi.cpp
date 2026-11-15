@@ -2323,6 +2323,34 @@ void test_source_include_paths() {
       stanli_stan_to_mir_with_opts("model {}", nullptr, 0, 0, err, sizeof err);
   expect_true("compiler recovers after include error", mir != nullptr);
   stanli_string_free(mir);
+
+  // multinma's model as shipped, with its eleven /include/ files, against the
+  // flattened copy in the corpus.
+  const std::string data = slurp("tests/multinma/multinma_smoking_re.json");
+  const char* multinma_paths[] = {"tests/multinma/unflattened"};
+  const std::string sources[] = {
+      slurp("tests/multinma/unflattened/binomial_1par.stan"),
+      slurp("tests/multinma/multinma_smoking_re.stan")};
+  std::vector<double> lp(2), grads[2];
+  for (int i = 0; i < 2; ++i) {
+    char* m = stanli_stan_to_mir_with_opts(sources[i].c_str(), multinma_paths,
+                                           i == 0 ? 1 : 0, 0, err, sizeof err);
+    expect_true(std::string("multinma compiles: ") + err, m != nullptr);
+    if (!m) return;
+    stanli_model* model =
+        stanli_model_new_with_opts(m, data.c_str(), nullptr, err, sizeof err);
+    stanli_string_free(m);
+    expect_true(std::string("multinma loads: ") + err, model != nullptr);
+    if (!model) return;
+    std::vector<double> q(stanli_n_unconstrained(model));
+    for (size_t j = 0; j < q.size(); ++j) q[j] = 0.1 * (j % 5) - 0.2;
+    grads[i].resize(q.size());
+    expect_true("multinma gradient succeeds",
+                stanli_grad(model, q.data(), &lp[i], grads[i].data()) == 0);
+    stanli_model_free(model);
+  }
+  expect_true("unflattened multinma matches the flattened corpus model",
+              lp[0] == lp[1] && grads[0] == grads[1] && !grads[0].empty());
 }
 
 void test_fast_math_options() {

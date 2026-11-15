@@ -30,6 +30,7 @@ import textwrap
 import warnings
 
 import toolchain
+from corpus_inventory import local_cases
 from corpus_table import (FIXED_GRADIENT_COUNT, render_catalog_sections,
                           render_vectorized_sections)
 
@@ -208,29 +209,18 @@ def total_sampling_median(rows):
 
 def compute():
     ver = json.loads((REPO / "docs" / "internal" / "artifacts" / "verification.json").read_text())
-    # The same record holds three corpora, and the sentences about them
-    # say different things: posteriordb is real posteriors, tests/regressions
-    # is programs that once failed to lower, tests/brms is
-    # brms output. Split them here so the posteriordb numbers stay
-    # posteriordb numbers.
+    # The same record holds every corpus, and the sentences about them say
+    # different things: posteriordb is real posteriors, tests/regressions
+    # is programs that once failed to lower, and the other local
+    # collections are package output and teaching models. Split them here
+    # so the posteriordb numbers stay posteriordb numbers.
+    local = local_cases()
     lang = {k: v for k, v in ver.items()
-            if (REPO / "tests" / "regressions" / f"{k}.stan").exists()}
-    brms = {k: v for k, v in ver.items()
-            if (REPO / "tests" / "brms" / f"{k}.stan").exists()}
-    cogmod = {k: v for k, v in ver.items()
-              if (REPO / "tests" / "cogmod" / f"{k}.stan").exists()}
-    ctsem = {k: v for k, v in ver.items()
-             if (REPO / "tests" / "ctsem" / f"{k}.stan").exists()}
-    oncobayes2 = {k: v for k, v in ver.items()
-                  if (REPO / "tests" / "oncobayes2" / f"{k}.stan").exists()}
-    rethinking = {p.stem for p in (REPO / "tests" / "rethinking").glob("*.stan")}
+            if k in local and local[k].collection == "regressions"}
+    rethinking = {k for k, case in local.items() if case.collection == "rethinking"}
     rethinking_verified = sum(ver.get(k, {}).get("status") == "VERIFIED"
                              for k in rethinking)
-    imported = {p.name for p in (REPO / "tests/educational/models").iterdir() if p.is_dir()}
-    ver = {k: v for k, v in ver.items()
-           if k not in lang and k not in brms and k not in cogmod and k not in ctsem
-           and k not in oncobayes2
-           and k not in rethinking and k not in imported}
+    ver = {k: v for k, v in ver.items() if k not in local}
     references = json.loads(gzip.decompress((REPO / "docs/internal/artifacts/corpus-refs.json.gz").read_bytes()))["models"]
     verified = {k: v for k, v in ver.items() if v["status"] == "VERIFIED"}
     bitwise = sum(1 for v in verified.values() if v["max_ulp"] == 0)

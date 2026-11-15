@@ -1124,7 +1124,9 @@ if(NOT EMSCRIPTEN)
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   foreach(fixture gq_bounded_vector gq_bounded_row_vector gq_bounded_integer
                   gq_integer_fill_paths gq_bounded_integer_refusals
-                  gq_bounded_nested gq_bounded_nested3 gq_bounded_nested5)
+                  gq_bounded_nested gq_bounded_nested3 gq_bounded_nested5
+                  gq_runtime_int_index
+                  multi_gp_rectangular propto_data_arguments propto_multi_gp)
     add_test(NAME ${fixture}_reference
       COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
               --check $<TARGET_FILE:stanli_check> --model ${fixture}
@@ -1156,7 +1158,9 @@ if(NOT EMSCRIPTEN)
                        gq_callback_runtime_values matrix_callback_value_fallback
                        gq_callback_integer_contexts gq_callback_integer_contexts_fallback
                        gq_callback_shared_function gq_callback_runtime_integer
-                       gq_callback_runtime_control gq_callback_ode_controls gq_callback_solver_controls gq_callback_rng_values)
+                       gq_callback_runtime_control gq_callback_ode_controls gq_callback_solver_controls gq_callback_rng_values
+                       gq_udf_branch_rng udf_rep_vector_slice
+                       gq_udf_loop_return gq_udf_loop_return_o0)
     add_test(NAME ${exit_fixture}_reference
       COMMAND ${Python3_EXECUTABLE} tools/verify_refs.py --corpus fixtures
               --check $<TARGET_FILE:stanli_check> --model ${exit_fixture}
@@ -1516,6 +1520,9 @@ if(Python3_Interpreter_FOUND)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_container_flow_generation
            COMMAND ${Python3_EXECUTABLE} tools/gen_container_flow_models.py --check
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME test_propto_fixture_generation
+           COMMAND ${Python3_EXECUTABLE} tools/gen_propto_fixtures.py --check
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME test_stanc3_good_data
            COMMAND ${Python3_EXECUTABLE} tools/gen_stanc3_good_data.py --check

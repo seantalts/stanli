@@ -545,6 +545,54 @@ inline std::optional<std::pair<size_t, size_t>> user_defined_statement_name(
   return std::make_pair(prefix.size(), end - prefix.size());
 }
 
+// A user function called as a statement, as the call expression the
+// function machinery takes. It has no value, so its type stays empty.
+inline std::optional<Expr> user_defined_statement_call(const Stmt& s) {
+  if (s.kind != Stmt::NRFunApp) return std::nullopt;
+  const auto name = user_defined_statement_name(s.fn_name);
+  if (!name) return std::nullopt;
+  Expr call;
+  call.kind = Expr::FunApp;
+  call.fn_lib = Expr::Lib::UserDefined;
+  call.name = s.fn_name.substr(name->first, name->second);
+  call.args = s.fn_args;
+  call.raw = s.raw;
+  return call;
+}
+
+// CmdStan instantiates a user `_lp` function, and a user density called as
+// `_lupdf`/`_lupmf`, with the caller's propto__. Other calls get false. An
+// overloaded name carries its signature after the base name.
+inline bool inherits_propto(const Expr& call) {
+  if (call.fn_propto) return true;
+  const std::string_view name =
+      std::string_view(call.name).substr(0, call.name.find('('));
+  return name.size() >= 3 && name.substr(name.size() - 3) == "_lp";
+}
+
+// Whether CmdStan instantiates `e` as a var, which decides the terms propto
+// drops. The adlevel is right for a variable at the top level, but not for a
+// variable inside a user function body, where CmdStan's types come from the
+// call's actual arguments. Nor is it right for an indexed formal that stanc's
+// O1 inliner substituted: `s[i]` keeps the formal's adlevel when `s` becomes
+// data. So read variables through `var_autodiff` and derive the rest from
+// them. `promoted_autodiff` is the type a promotion to a var produces.
+template <class VarAutodiff>
+bool instantiated_autodiff(const Expr& e, bool promoted_autodiff,
+                           const VarAutodiff& var_autodiff) {
+  if (e.unsized.leaf == UnsizedLeaf::Int || e.data_only) return false;
+  if (e.promoted) return promoted_autodiff;
+  if (e.kind == Expr::Var) return var_autodiff(e);
+  const auto recurse = [&](const Expr& arg) {
+    return instantiated_autodiff(arg, promoted_autodiff, var_autodiff);
+  };
+  if (e.kind == Expr::TernaryIf && e.args.size() == 3)
+    return recurse(e.args[1]) || recurse(e.args[2]);
+  for (const Expr& arg : e.args)
+    if (recurse(arg)) return true;
+  return false;
+}
+
 // Every expression a statement holds itself: its own slots, the declared
 // extents and the arguments of its transforms. Child statements are the
 // caller's to walk.

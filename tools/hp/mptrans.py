@@ -7,13 +7,25 @@ def elementwise(kind, bargs):
     name = kind
     if name == "Identity":
         return lambda u, b: (u, mpf(0))
+    # An infinite bound is no bound, as in Stan Math's lb_, ub_ and
+    # lub_constrain.
+    def lower(u, lo):
+        return (u, mpf(0)) if lo == mp.ninf else (mp.exp(u) + lo, u)
+
+    def upper(u, hi):
+        return (u, mpf(0)) if hi == mp.inf else (hi - mp.exp(u), u)
+
     if name == "Lower":
-        return lambda u, b: (mp.exp(u) + b[0], u)
+        return lambda u, b: lower(u, b[0])
     if name == "Upper":
-        return lambda u, b: (b[0] - mp.exp(u), u)
+        return lambda u, b: upper(u, b[0])
     if name == "LowerUpper":
         def f(u, b):
             lo, hi = b
+            if hi == mp.inf:
+                return lower(u, lo)
+            if lo == mp.ninf:
+                return upper(u, hi)
             return (lo + (hi - lo) * (1 / (1 + mp.exp(-u))),
                     mp.log(hi - lo) + log_inv_logit(u) + log1m_inv_logit(u))
         return f

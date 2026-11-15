@@ -78,7 +78,7 @@ same example in their language.
   is <!--gen:corpus_median-->2.17x<!--/gen--> faster than CmdStan's,
   and <!--gen:corpus_at_par-->335<!--/gen--> models are at least as fast.
   Failed or capped runs stay in the [full benchmark](docs/benchmarks.md).
-- Model coverage. <!--gen:corpus_reference_models-->350<!--/gen--> models
+- Model coverage. <!--gen:corpus_reference_models-->366<!--/gen--> models
   share one three-point CmdStan reference replay. Within the posteriordb
   subset, <!--gen:corpus_verified-->118/120<!--/gen--> models match
   CmdStan's log density and full gradient.
@@ -134,8 +134,8 @@ The full index is [docs/README.md](docs/README.md).
 - [Corpus status](docs/corpus-status.md) and
   [distribution coverage](docs/coverage.md)
 - [Benchmarks and how we measure](docs/benchmarks.md)
-- [The lp constant](docs/lp-constant.md), when `lp__` differs from
-  CmdStan's
+- [lp__ and dropped constants](docs/lp-constant.md), which terms `~`
+  leaves out of `lp__`
 
 ### Understand
 

@@ -1,11 +1,11 @@
 # Corpus status
 
-Evaluating: 350/351
-CmdStan reference coverage: 350/351 models, 1050 evaluation points.
+Evaluating: 366/367
+CmdStan reference coverage: 366/367 models, 1098 evaluation points.
 
-The shared corpus includes posteriordb, generated brms and cogmod models, ctsem's state-space template, OncoBayes2's dose-escalation model, imported teaching models, and language fixtures. Collection labels retain their source provenance; all references use the same replay in `tools/verify_refs.py`.
+The shared corpus includes posteriordb, generated brms and cogmod models, ctsem's state-space template, models from CRAN packages, imported teaching models, and language fixtures. Collection labels retain their source provenance; all references use the same replay in `tools/verify_refs.py`.
 
-Recording-time primary-point comparison metrics retained for 335 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
+Recording-time primary-point comparison metrics retained for 351 verified models are shown below. Imported references retain their original answers and per-model recording provenance, without inventing historical comparison metrics. Reference coverage is separate from a current-build numerical replay result.
 
 A model counts as passing only when tools/verify_sample.py matches CmdStan's log_prob and full gradient at the shared deterministic point. Accuracy below is the worst deviation over lp and every gradient component: relative, and in ULPs (0 = bitwise identical to CmdStan). Bitwise counts are reported for information; the replay uses a 1e-9 scaled-error gate with documented ill-conditioned exceptions. Models that evaluate but are not verified are listed separately and are not counted.
 
@@ -45,6 +45,7 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `accel_splines` | posteriordb | 83 | 3.1e-16 | 2 |
 | `arK` | posteriordb | 8 | 9.6e-16 | 5 |
 | `arma11` | posteriordb | 5 | 0 (bitwise) | 0 |
+| `beeguts_guts_sd` | beeguts | 5 | 3.6e-16 | 2 |
 | `blr` | posteriordb | 7 | 1.8e-16 | 1 |
 | `bones_model` | posteriordb | 14 | 1.5e-16 | 1 |
 | `bym2_offset_only` | posteriordb | 3846 | 1.3e-15 | 8 |
@@ -143,15 +144,21 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `dogs_nonhierarchical` | posteriordb | 66 | 6.9e-16 | 4 |
 | `dugongs_model` | posteriordb | 5 | 1.9e-16 | 1 |
 | `earn_height` | posteriordb | 4 | 0 (bitwise) | 0 |
+| `ecoensemble_hierarchical_withdrivers` | ecoensemble | 64 | 2.0e-14 | 304 |
+| `ecoensemble_hierarchical_withdrivers_conj` | ecoensemble | 64 | 2.0e-14 | 416 |
 | `eight_schools_centered` | posteriordb | 11 | 0 (bitwise) | 0 |
 | `eight_schools_noncentered` | posteriordb | 11 | 0 (bitwise) | 0 |
 | `election88_full` | posteriordb | 91 | 9.9e-15 | 82 |
+| `epinow2_estimate_infections` | epinow2 | 25 | 4.2e-11 | 299015 |
+| `epinow2_estimate_secondary` | epinow2 | 5 | 7.3e-15 | 64 |
 | `extra_hurdle_poisson` | rethinking | 3 | 2.2e-16 | 1 |
 | `garch11` | posteriordb | 5 | 1.6e-15 | 8 |
 | `gp_pois_regr` | posteriordb | 14 | 0 (bitwise) | 0 |
 | `gp_regr` | posteriordb | 4 | 0 (bitwise) | 0 |
 | `gpcm_latent_reg_irt` | posteriordb | 531 | 2.6e-13 | 4608 |
 | `grsm_latent_reg_irt` | posteriordb | 409 | 1.2e-14 | 81 |
+| `hdbayes_lm_npp` | hdbayes | 7 | 7.1e-16 | 4 |
+| `hdbayes_pwe_npp` | hdbayes | 9 | 7.5e-16 | 4 |
 | `hier_2pl` | posteriordb | 670 | 0 (bitwise) | 0 |
 | `hierarchical_gp` | posteriordb | 934 | 7.0e-16 | 88 |
 | `hmm_drive_0` | posteriordb | 7 | 6.2e-16 | 3 |
@@ -202,7 +209,11 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `low_dim_gauss_mix_collapse` | posteriordb | 6 | 0 (bitwise) | 0 |
 | `lsat_model` | posteriordb | 1007 | 2.7e-15 | 96 |
 | `mesquite` | posteriordb | 9 | 0 (bitwise) | 0 |
+| `mlumr_survival_mspline_relaxed` | mlumr | 33 | 6.1e-16 | 22 |
+| `mlumr_survival_relaxed` | mlumr | 13 | 1.6e-16 | 1 |
 | `multi_occupancy` | posteriordb | 107 | 4.8e-15 | 36 |
+| `multinma_ndmm_mspline` | multinma | 63 | 4.4e-16 | 16 |
+| `multinma_smoking_re` | multinma | 60 | 4.8e-16 | 4 |
 | `nes` | posteriordb | 11 | 0 (bitwise) | 0 |
 | `nes_logit_model` | posteriordb | 3 | 0 (bitwise) | 0 |
 | `nn_rbm1bJ10` | posteriordb | 7952 | 4.6e-16 | 3 |
@@ -229,8 +240,13 @@ A model counts as passing only when tools/verify_sample.py matches CmdStan's log
 | `radon_variable_slope_centered` | posteriordb | 391 | 3.0e-14 | 168 |
 | `radon_variable_slope_noncentered` | posteriordb | 391 | 1.5e-14 | 848 |
 | `rats_model` | posteriordb | 66 | 4.1e-16 | 3 |
+| `rbioacc_odetk` | rbioacc | 4 | 3.5e-16 | 2 |
 | `rbmi_mmrm` | regressions | 5 | 2.2e-16 | 1 |
 | `reject_udf_data_size` | regressions | 2 | 0 (bitwise) | 0 |
+| `rstanarm_glm_gaussian` | rstanarm | 5 | 5.5e-16 | 4 |
+| `rstanarm_glmer_bernoulli` | rstanarm | 72 | 8.9e-16 | 16 |
+| `rstanarm_glmer_nb_count` | rstanarm | 26 | 4.3e-16 | 3 |
+| `rstanarm_polr` | rstanarm | 10 | 2.1e-15 | 19 |
 | `s2_ar_cov` | brms | 5 | 3.3e-16 | 2 |
 | `s2_beta_binomial` | brms | 4 | 2.2e-16 | 2 |
 | `s2_car` | brms | 11 | 1.6e-16 | 4 |
@@ -405,6 +421,7 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `accel_splines` | 160 |
 | `arK` | 7 |
 | `arma11` | 4 |
+| `beeguts_guts_sd` | 540 |
 | `blr` | 6 |
 | `bones_model` | 13 |
 | `bym2_offset_only` | 9610 |
@@ -503,15 +520,21 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `dogs_nonhierarchical` | 946 |
 | `dugongs_model` | 6 |
 | `earn_height` | 3 |
+| `ecoensemble_hierarchical_withdrivers` | 612 |
+| `ecoensemble_hierarchical_withdrivers_conj` | 612 |
 | `eight_schools_centered` | 10 |
 | `eight_schools_noncentered` | 18 |
 | `election88_full` | 11656 |
+| `epinow2_estimate_infections` | 352 |
+| `epinow2_estimate_secondary` | 72 |
 | `extra_hurdle_poisson` | 2 |
 | `garch11` | 4 |
 | `gp_pois_regr` | 24 |
 | `gp_regr` | 3 |
 | `gpcm_latent_reg_irt` | 550 |
 | `grsm_latent_reg_irt` | 418 |
+| `hdbayes_lm_npp` | 6 |
+| `hdbayes_pwe_npp` | 64 |
 | `hier_2pl` | 804 |
 | `hierarchical_gp` | 3279 |
 | `hmm_drive_0` | 429 |
@@ -562,7 +585,11 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `low_dim_gauss_mix_collapse` | 5 |
 | `lsat_model` | 1012 |
 | `mesquite` | 8 |
+| `mlumr_survival_mspline_relaxed` | 1052 |
+| `mlumr_survival_relaxed` | 925 |
 | `multi_occupancy` | 312 |
+| `multinma_ndmm_mspline` | 956 |
+| `multinma_smoking_re` | 375 |
 | `nes` | 10 |
 | `nes_logit_model` | 2 |
 | `nn_rbm1bJ10` | 7951 |
@@ -589,8 +616,13 @@ The oracle also records CmdStan's write_array at the same point: every CSV colum
 | `radon_variable_slope_centered` | 390 |
 | `radon_variable_slope_noncentered` | 776 |
 | `rats_model` | 66 |
+| `rbioacc_odetk` | 124 |
 | `rbmi_mmrm` | 15 |
 | `reject_udf_data_size` | 1 |
+| `rstanarm_glm_gaussian` | 9 |
+| `rstanarm_glmer_bernoulli` | 142 |
+| `rstanarm_glmer_nb_count` | 51 |
+| `rstanarm_polr` | 113 |
 | `s2_ar_cov` | 70 |
 | `s2_beta_binomial` | 5 |
 | `s2_car` | 12 |
@@ -734,4 +766,4 @@ CmdStan and stanli both reject every shared evaluation point for these models: t
 
 ## Failures
 
-- `sir`: EVAL_FAIL y is -1.82492e-07, but must be greater than or equal to 0.000000
+- `sir`: EVAL_FAIL y[6][4] is -1.82492e-07, but must be greater than or equal to 0.000000

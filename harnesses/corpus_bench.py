@@ -38,7 +38,7 @@ import benchmark_points
 import toolchain
 from bench_build_cache import BuildCache, cache_key
 from cmdstan_ref import compile_cmd
-from corpus_inventory import corpus_cases, materialize_data
+from corpus_inventory import COLLECTIONS, corpus_cases, materialize_data
 
 PROTOCOL = "stanli-corpus-v6"
 CACHE_STEM = "model"
@@ -798,7 +798,8 @@ def main(argv=None):
     parser.add_argument("cmdstan", type=pathlib.Path)
     parser.add_argument("pdb", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
-    parser.add_argument("--corpus", choices=("all", "posteriordb", "educational", "rethinking", "brms", "cogmod", "ctsem", "oncobayes2", "teaching"), default="all")
+    parser.add_argument("--corpus", choices=[c for c in COLLECTIONS if c != "regressions"],
+                        default="all")
     parser.add_argument("--filter", default="")
     parser.add_argument("--rounds", type=int, default=6)
     parser.add_argument("--warmup-ms", type=int, default=20)

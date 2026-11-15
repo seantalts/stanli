@@ -363,7 +363,9 @@ bool Lowering::runtime_loop_control(const mir::Stmt& s, bool runtime_path) {
   if (s.kind == mir::Stmt::Block || s.kind == mir::Stmt::SList) {
     try {
       return scan_block(s, [&](const mir::Stmt& child) {
-        return runtime_loop_control(child, runtime_path);
+        if (runtime_loop_control(child, runtime_path)) return true;
+        forget_runtime_ints(child);
+        return false;
       });
     } catch (const CompileError&) {
       // A local this scan cannot fold leaves every later condition
@@ -373,6 +375,52 @@ bool Lowering::runtime_loop_control(const mir::Stmt& s, bool runtime_path) {
   for (const auto& child : s.body)
     if (runtime_loop_control(child, runtime_path)) return true;
   return false;
+}
+// Whether every condition and integer value in `s` folds at compile time.
+bool Lowering::decided_statically(const mir::Stmt& s) {
+  switch (s.kind) {
+    case mir::Stmt::IfElse: {
+      const auto evaluated = try_eval_pure(s.cond);
+      if (!evaluated) return false;
+      const size_t arm = evaluated->r.at(0) != 0.0 ? 0 : 1;
+      return arm >= s.body.size() || decided_statically(s.body[arm]);
+    }
+    case mir::Stmt::For: {
+      long lo, hi;
+      try {
+        lo = eval_int(s.lower);
+        hi = eval_int(s.upper);
+      } catch (const CompileError&) {
+        return false;
+      }
+      const auto saved = int_env;
+      const ScopeExit restore{[&] { int_env = saved; }};
+      for (long v = lo; v <= hi; ++v) {
+        int_env[s.loopvar] = v;
+        for (const auto& k : s.body)
+          if (!decided_statically(k)) return false;
+      }
+      return true;
+    }
+    case mir::Stmt::While:
+      return false;
+    case mir::Stmt::Assignment:
+      if (int_env.count(s.lhs) && !try_eval_pure(s.rhs)) return false;
+      break;
+    default:
+      break;
+  }
+  return std::all_of(s.body.begin(), s.body.end(),
+                     [&](const mir::Stmt& k) { return decided_statically(k); });
+}
+void Lowering::forget_runtime_ints(const mir::Stmt& s) {
+  std::vector<std::string> writes;
+  assigned_names(s, &writes);
+  if (std::none_of(writes.begin(), writes.end(),
+                   [&](const std::string& n) { return int_env.count(n); }))
+    return;
+  if (decided_statically(s)) return;
+  for (const auto& name : writes) int_env.erase(name);
 }
 // Remove a return at the lexical end of a statement arm, preserving every
 // statement that precedes it.  This is the structured form used by UDFs
@@ -399,6 +447,11 @@ void Lowering::configure_island_compiler(ProgramCompiler& c,
                                          const mir::Stmt* s) {
   IslandProg* const prog = &prog_ref;
   IslandRegion* const reg = &region;
+  c.propto_ctx = propto_ctx;
+  if (udf_depth > 0) {
+    c.call_types =
+        ProgramCompiler::CallTypes{udf_formal_autodiff, udf_autodiff_ctx};
+  }
   for (const std::string& name : names)
     if (const auto found = int_env.find(name); found != int_env.end())
       c.ints[name] = {found->second};
@@ -859,6 +912,8 @@ Lowering::Val Lowering::lower_program_expression(const mir::Expr& e) {
 }
 bool Lowering::stmt_effectful(const mir::Stmt& s) {
   if (s.kind == mir::Stmt::NRFunApp && message_action(s.fn_name)) return true;
+  // A void function runs only for its effects.
+  if (mir::user_defined_statement_name(s.fn_name)) return true;
   for (const auto& e : s.fn_args)
     if (expr_effectful(e)) return true;
   if (s.has_init && expr_effectful(s.init)) return true;
@@ -962,6 +1017,17 @@ bool Lowering::static_int_bookkeeping(const std::vector<mir::Stmt>& body) {
       case mir::Stmt::Assignment:
         if (!s.lhs_idx.empty() || !int_locals.count(s.lhs) ||
             expr_effectful(s.rhs) || needs_runtime_value(s.rhs))
+          return false;
+        break;
+      case mir::Stmt::IfElse:
+        if (expr_effectful(s.cond) || needs_runtime_value(s.cond) ||
+            !static_int_bookkeeping(s.body))
+          return false;
+        break;
+      case mir::Stmt::For:
+        if (expr_effectful(s.lower) || needs_runtime_value(s.lower) ||
+            expr_effectful(s.upper) || needs_runtime_value(s.upper) ||
+            !static_int_bookkeeping(s.body))
           return false;
         break;
       default:
@@ -1761,6 +1827,10 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         out.views.push_back(pv);
         return;
       }
+      if (const auto call = mir::user_defined_statement_call(s)) {
+        (void)lower_call_udf(*call);
+        return;
+      }
       fail("this kind of statement is not supported yet", s.raw);
     default:
       fail("unsupported statement", s.raw);
@@ -1889,7 +1959,9 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       const long old_value = had_old ? old->second : 0;
       bool has_runtime_loop_control = false;
       if (std::any_of(s.body.begin(), s.body.end(), has_loop_control)) {
+        const auto saved_ints = int_env;
         const ScopeExit leave{[&] {
+          int_env = saved_ints;
           if (had_old)
             int_env[s.loopvar] = old_value;
           else
@@ -1897,11 +1969,13 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
         }};
         for (int64_t v = lo; v <= hi && !has_runtime_loop_control; ++v) {
           int_env[s.loopvar] = static_cast<long>(v);
-          for (const auto& child : s.body)
+          for (const auto& child : s.body) {
             if (runtime_loop_control(child)) {
               has_runtime_loop_control = true;
               break;
             }
+            forget_runtime_ints(child);
+          }
         }
       }
       if (has_runtime_loop_control) {
@@ -2026,10 +2100,9 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       return Flow::Next;
     }
     case mir::Stmt::Return:
-      // Only reachable inside an inlined UDF body (log_prob itself has no
-      // value returns); lower_call_udf collects the value.
-      if (!s.has_init) fail("void return unsupported in UDF inlining");
-      return_value = lower_expr(s.rhs);
+      // Only reachable inside an inlined UDF body; lower_call_udf collects
+      // the value.
+      if (s.has_init) return_value = lower_expr(s.rhs);
       return Flow::Return;
     case mir::Stmt::Break:
       return Flow::Break;
