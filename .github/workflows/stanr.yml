@@ -80,6 +80,17 @@ jobs:
           extra-packages: >-
             any::R6, any::QuickJSR, any::posterior, any::withr, any::testthat
 
+      # R's default -g makes GCC run out of the runner's 16 GB at -j4 on the
+      # Stan Math kernels. Without debug info the build peaks near 12 GB.
+      - name: Build without debug info on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p ~/.R
+          for v in CXXFLAGS CXX11FLAGS CXX14FLAGS CXX17FLAGS CXX20FLAGS; do
+            echo "$v = -O2 -g0"
+          done > ~/.R/Makevars
+
       - name: Build and test stanr's Stanli backend
         shell: bash
         run: ./tests/test_stanr.sh "$STANR_REF"
