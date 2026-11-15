@@ -88,6 +88,18 @@ warn_compiler <- function(text) {
   invisible(NULL)
 }
 
+# Compiler messages from the runtime: list(kind, text). Warnings go out as
+# one warning, as the subprocess compilers' stderr does; the O1 fallback
+# notice is its own warning with class "stanli_o1_fallback".
+warn_compiler_messages <- function(messages) {
+  if (is.null(messages)) return(invisible(NULL))
+  warn_compiler(messages$text[messages$kind == "warning"])
+  for (text in messages$text[messages$kind == "o1_fallback"])
+    warning(structure(class = c("stanli_o1_fallback", "warning", "condition"),
+                      list(message = text, call = NULL)))
+  invisible(NULL)
+}
+
 stanc_js_path <- function() {
   system.file("js", "stanc.js", package = "stanli")
 }

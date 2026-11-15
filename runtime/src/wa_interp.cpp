@@ -476,6 +476,8 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       name += "." + std::to_string(*it);
     using Naming = CompiledModel::ParamView::Naming;
     CompiledModel::ParamView pv{name, (int)row.size(), len};
+    pv.variable = last_written_;
+    pv.index.assign(ixs.rbegin(), ixs.rend());
     if (v.type_ == "UReal" || v.type_ == "UInt" || v.type_ == "UComplex") {
       pv.naming = Naming::Scalar;
     } else if (v.type_ == "UMatrix") {

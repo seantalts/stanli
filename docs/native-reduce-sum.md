@@ -45,8 +45,8 @@ C callers set `threads_per_chain` in `stanli_model_opts` and pass it to
 `stanli_model_new_with_opts` or `stanli_model_new_from_stan_with_opts`, which
 also take the construction seed. The model owns its worker team, and
 multi-chain sampling gives each executor clone its own team. The default is one
-thread. `stanli_reduce_sum_count` and `stanli_reduce_sum_fallbacks` return the
-same diagnostics.
+thread. `stanli_reduce_sum_count`, `stanli_n_reduce_sum_fallbacks` and
+`stanli_reduce_sum_fallback` return the same diagnostics.
 
 ```cpp
 #include <stanli/compile.hpp>

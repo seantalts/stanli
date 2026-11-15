@@ -495,6 +495,10 @@ test_that("a part with no compiled path warns, or errors when refused", {
     }"
   expect_warning(stanli_model(code = code), "interpreter")
   expect_warning(es_model(), NA)
+  expect_error(stanli_model(code = code, allow_interpreter = FALSE),
+               "no compiled path")
+  expect_error(stanli_model(code = code, allow_interpreter = NA),
+               "allow_interpreter")
   Sys.setenv(STANLI_NO_INTERPRETER = "1")
   on.exit(Sys.unsetenv("STANLI_NO_INTERPRETER"), add = TRUE)
   expect_error(stanli_model(code = code), "STANLI_NO_INTERPRETER")
@@ -771,4 +775,21 @@ test_that("sampling never touches the caller's random stream", {
                  refresh = 0)
     expect_null(random_state())
   })
+})
+
+test_that("an O1 fallback is a classed warning", {
+  skip_without_runtime()
+  loops <- paste0("for (i", 1:9, " in 1:1) {", collapse = "\n")
+  code <- paste("parameters { real x; }", "model {", "real s = 0;", loops,
+                strrep("s += 1;\n", 2100), strrep("}\n", 9),
+                "x ~ normal(s, 1);", "}", sep = "\n")
+  seen <- NULL
+  model <- withCallingHandlers(
+    stanli_model(code = code),
+    stanli_o1_fallback = function(w) {
+      seen <<- conditionMessage(w)
+      invokeRestart("muffleWarning")
+    })
+  expect_match(seen, "skipped O1", fixed = TRUE)
+  expect_s3_class(model, "stanli_model")
 })

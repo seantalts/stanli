@@ -1814,6 +1814,8 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         using Naming = CompiledModel::ParamView::Naming;
         const std::string& t = s.fn_args[0].type_;
         CompiledModel::ParamView pv{name, v.slot, g.slots[v.slot].len};
+        pv.variable = last_written;
+        pv.index.assign(ixs.rbegin(), ixs.rend());
         if (t == "UReal" || t == "UInt" || t == "UComplex") {
           pv.naming = Naming::Scalar;
         } else if (t == "UMatrix") {

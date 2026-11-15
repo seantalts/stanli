@@ -33,6 +33,7 @@
 #include <map>
 #include <limits>
 #include <memory>
+#include <cstddef>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -58,13 +59,75 @@ int64_t scalar_column_start(
 
 }  // namespace
 
+struct CompilerMessage {
+  stanli_compiler_message_kind kind;
+  std::string text;
+};
+
+struct Variable {
+  std::string name;
+  std::vector<int64_t> dims;
+};
+
+// Scalar element views of one variable (`a[i, j]` written per element) join
+// into one variable when they cover its shape in CmdStan's column order,
+// first index fastest; the dims are the largest index at each position.
+// Anything else stays one variable per view.
+std::vector<Variable> variables_of(
+    const std::vector<stanli::CompiledModel::ParamView>& views) {
+  auto scalar_element = [](const stanli::CompiledModel::ParamView& v) {
+    return !v.index.empty() && v.shape().empty();
+  };
+  std::vector<Variable> out;
+  for (size_t i = 0; i < views.size();) {
+    const auto& first = views[i];
+    size_t end = i + 1;
+    if (scalar_element(first)) {
+      while (end < views.size() && scalar_element(views[end]) &&
+             views[end].variable == first.variable &&
+             views[end].index.size() == first.index.size())
+        ++end;
+      std::vector<int64_t> dims(first.index.size(), 0);
+      for (size_t j = i; j < end; ++j)
+        for (size_t d = 0; d < dims.size(); ++d)
+          dims[d] = std::max(dims[d], views[j].index[d]);
+      bool column_order = true;
+      for (size_t j = i; j < end && column_order; ++j) {
+        int64_t q = (int64_t)(j - i);
+        for (size_t d = 0; d < dims.size(); ++d) {
+          column_order = column_order && views[j].index[d] == q % dims[d] + 1;
+          q /= dims[d];
+        }
+        column_order = column_order && q == 0;
+      }
+      int64_t count = 1;
+      for (int64_t d : dims) count *= d;
+      if (column_order && count == (int64_t)(end - i)) {
+        out.push_back({first.variable, std::move(dims)});
+        i = end;
+        continue;
+      }
+      end = i + 1;
+    }
+    out.push_back({first.name, first.shape()});
+    i = end;
+  }
+  return out;
+}
+
+struct stanli_compilation {
+  std::optional<std::string> mir;
+  std::string error;
+  std::vector<CompilerMessage> messages;
+};
+
 struct stanli_model {
   stanli::CompiledModel cm;  // graph moved out into ex
   // Declared before ex so the executor dies before its borrowed team.
   std::unique_ptr<stanli::ReduceExecutionContext> reduce_team;
   int threads_per_chain = 1;
   int reduce_sum_count = 0;
-  std::string reduce_sum_fallbacks;
+  std::vector<std::string> reduce_sum_fallbacks;
   std::unique_ptr<stanli::Executor> ex;
   std::vector<std::string> flat_names;  // constrained, flattened
   int64_t n_con = 0;
@@ -83,6 +146,8 @@ struct stanli_model {
   // stanli_wa_seed still gets the same rows every run.
   stanli::WaRng wa_rng{1};
   std::string warnings;
+  std::vector<CompilerMessage> compiler_messages;
+  std::vector<Variable> con_vars, wa_vars;
   // Identifies the model and data for resume records; see model_new.
   uint64_t resume_hash = 0;
 };
@@ -376,7 +441,8 @@ extern "C" {
 
 static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
                                uint32_t seed, int threads_per_chain,
-                               bool fast_math, char* err, size_t err_len) {
+                               bool fast_math, bool allow_interpreter,
+                               char* err, size_t err_len) {
   try {
     if (threads_per_chain < 1)
       throw std::invalid_argument("threads_per_chain must be positive");
@@ -391,6 +457,10 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
     options.fast_math = fast_math;
     m->cm = stanli::compile_model(tmir_sexp, data, seed, options);
     data = stanli::DataMap();
+    // TODO(merge with fix/runtime-hacks): set options.allow_interpreter from
+    // the argument once CompileOptions has the field, and drop this check.
+    if (!allow_interpreter && !m->cm.interpreter_fallbacks.empty())
+      throw stanli::CompileError(stanli::interpreter_error(m->cm));
     // Resume records name the posterior they continue: the program text, the
     // data text, fast_math, and the construction seed only when transformed
     // data drew from it (otherwise the seed changes nothing).
@@ -406,10 +476,8 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
                            [](const stanli::Op& op) {
                              return op.opcode == stanli::OP_REDUCE_SUM;
                            });
-    for (const auto& reason : m->cm.reduce_sum_fallbacks) {
-      if (!m->reduce_sum_fallbacks.empty()) m->reduce_sum_fallbacks += "\n";
-      m->reduce_sum_fallbacks += reason;
-    }
+    m->reduce_sum_fallbacks.assign(m->cm.reduce_sum_fallbacks.begin(),
+                                   m->cm.reduce_sum_fallbacks.end());
     m->ex = std::make_unique<stanli::Executor>(std::move(m->cm.graph));
     m->cm.bind(*m->ex);
     m->cm.fills = {};
@@ -420,6 +488,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
     }
     for (const auto& v : m->cm.views) m->n_con += v.len;
     m->flat_names = stanli::CompiledModel::csv_names(m->cm.views);
+    m->con_vars = variables_of(m->cm.views);
     std::string probe_failure;
     if (m->cm.write_array) {
       auto& wa = *m->cm.write_array;
@@ -431,6 +500,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
           m->wa_n = n;
           const auto& cols = m->wa_interp->columns();
           m->wa_names = stanli::CompiledModel::csv_names(cols);
+          m->wa_vars = variables_of(cols);
           m->wa_gq_start =
               scalar_column_start(cols, m->wa_interp->n_gq_start());
         }
@@ -440,6 +510,7 @@ static stanli_model* model_new(const char* tmir_sexp, const char* data_json,
         wa.fills = {};
         m->wa_cols = wa.columns;
         m->wa_names = stanli::CompiledModel::csv_names(wa.columns);
+        m->wa_vars = variables_of(wa.columns);
         for (const auto& c : wa.columns) m->wa_n += c.len;
         m->wa_gq_start = scalar_column_start(wa.columns, wa.n_gq_start);
       }
@@ -464,6 +535,7 @@ void stanli_model_opts_init(stanli_model_opts* o) {
   o->seed = 1;
   o->threads_per_chain = 1;
   o->fast_math = 0;
+  o->allow_interpreter = 1;
 }
 
 stanli_model* stanli_model_new_with_opts(const char* mir_text,
@@ -474,7 +546,7 @@ stanli_model* stanli_model_new_with_opts(const char* mir_text,
   stanli_model_opts_init(&o);
   if (opts != nullptr) o = *opts;
   return model_new(mir_text, data_json, o.seed, o.threads_per_chain,
-                   o.fast_math != 0, err, err_len);
+                   o.fast_math != 0, o.allow_interpreter != 0, err, err_len);
 }
 
 #ifdef STANLI_EMBED_STANC
@@ -485,10 +557,11 @@ char* dup_string(const std::string& text) {
   return out;
 }
 
-std::string compiler_warning_text(const stanli::StancResult& r) {
-  std::string out;
-  for (const auto& w : r.warnings) out += (out.empty() ? "" : "\n") + w;
-  if (r.o1_fallback) out += (out.empty() ? "" : "\n") + *r.o1_fallback;
+std::vector<CompilerMessage> compiler_messages(const stanli::StancResult& r) {
+  std::vector<CompilerMessage> out;
+  for (const auto& w : r.warnings) out.push_back({STANLI_COMPILER_WARNING, w});
+  if (r.o1_fallback)
+    out.push_back({STANLI_COMPILER_O1_FALLBACK, *r.o1_fallback});
   return out;
 }
 }  // namespace
@@ -498,7 +571,8 @@ static stanli_model* model_new_from_stan(const char* stan_code,
                                          const char* filename,
                                          const char* data_json, uint32_t seed,
                                          int threads_per_chain, bool fast_math,
-                                         char* err, size_t err_len) {
+                                         bool allow_interpreter, char* err,
+                                         size_t err_len) {
 #ifdef STANLI_EMBED_STANC
   const stanli::StancResult compiled = stanli::embedded_stanc_compile(
       stan_code, filename, nullptr, 0,
@@ -507,13 +581,10 @@ static stanli_model* model_new_from_stan(const char* stan_code,
     put_err(err, err_len, compiled.error.c_str());
     return nullptr;
   }
-  stanli_model* m = model_new(compiled.mir->c_str(), data_json, seed,
-                              threads_per_chain, fast_math, err, err_len);
-  const std::string warnings = compiler_warning_text(compiled);
-  if (m != nullptr && !warnings.empty()) {
-    m->warnings =
-        m->warnings.empty() ? warnings : warnings + "\n" + m->warnings;
-  }
+  stanli_model* m =
+      model_new(compiled.mir->c_str(), data_json, seed, threads_per_chain,
+                fast_math, allow_interpreter, err, err_len);
+  if (m != nullptr) m->compiler_messages = compiler_messages(compiled);
   return m;
 #else
   (void)stan_code;
@@ -522,6 +593,7 @@ static stanli_model* model_new_from_stan(const char* stan_code,
   (void)seed;
   (void)threads_per_chain;
   (void)fast_math;
+  (void)allow_interpreter;
   put_err(err, err_len, "this build does not embed stanc3");
   return nullptr;
 #endif
@@ -543,60 +615,95 @@ stanli_model* stanli_model_new_from_stan_named(const char* stan_code,
   stanli_model_opts_init(&o);
   if (opts != nullptr) o = *opts;
   return model_new_from_stan(stan_code, filename, data_json, o.seed,
-                             o.threads_per_chain, o.fast_math != 0, err,
-                             err_len);
+                             o.threads_per_chain, o.fast_math != 0,
+                             o.allow_interpreter != 0, err, err_len);
 }
 
-char* stanli_stan_to_mir_named(const char* stan_code, const char* filename,
-                               const char* const* include_paths,
-                               size_t include_path_count, int fast_math,
-                               char** warnings_out, char* err, size_t err_len) {
-  if (warnings_out != nullptr) *warnings_out = nullptr;
-  if (stan_code == nullptr ||
-      (include_path_count && include_paths == nullptr)) {
-    put_err(err, err_len, "Stan source or include_paths is null");
-    return nullptr;
-  }
-  for (size_t i = 0; i < include_path_count; ++i) {
-    if (include_paths[i] == nullptr) {
-      put_err(err, err_len, "include_paths contains a null path");
-      return nullptr;
+stanli_compilation* stanli_compile_stan(const char* stan_code,
+                                        const char* filename,
+                                        const char* const* include_paths,
+                                        size_t include_path_count,
+                                        int fast_math) {
+  try {
+    auto c = std::make_unique<stanli_compilation>();
+    if (stan_code == nullptr ||
+        (include_path_count && include_paths == nullptr)) {
+      c->error = "Stan source or include_paths is null";
+      return c.release();
     }
-  }
+    for (size_t i = 0; i < include_path_count; ++i) {
+      if (include_paths[i] == nullptr) {
+        c->error = "include_paths contains a null path";
+        return c.release();
+      }
+    }
 #ifdef STANLI_EMBED_STANC
-  const stanli::StancResult compiled = stanli::embedded_stanc_compile(
-      stan_code, filename, include_paths, include_path_count,
-      fast_math ? stanli::kStancFastMath : 0);
-  const std::string warnings = compiler_warning_text(compiled);
-  if (!warnings.empty()) {
-    if (warnings_out != nullptr) {
-      *warnings_out = dup_string(warnings);
-    } else {
-      std::fprintf(stderr, "%s\n", warnings.c_str());
-    }
-  }
-  if (!compiled.mir) {
-    put_err(err, err_len, compiled.error.c_str());
+    stanli::StancResult compiled = stanli::embedded_stanc_compile(
+        stan_code, filename, include_paths, include_path_count,
+        fast_math ? stanli::kStancFastMath : 0);
+    c->messages = compiler_messages(compiled);
+    c->mir = std::move(compiled.mir);
+    c->error = std::move(compiled.error);
+#else
+    (void)filename;
+    (void)fast_math;
+    c->error = "this build does not embed stanc3";
+#endif
+    return c.release();
+  } catch (const std::exception&) {
     return nullptr;
   }
-  char* out = dup_string(*compiled.mir);
-  if (out == nullptr) put_err(err, err_len, "out of memory");
-  return out;
-#else
-  (void)filename;
-  (void)fast_math;
-  put_err(err, err_len, "this build does not embed stanc3");
-  return nullptr;
-#endif
 }
+
+const char* stanli_compilation_mir(const stanli_compilation* c) {
+  return c->mir ? c->mir->c_str() : nullptr;
+}
+
+const char* stanli_compilation_error(const stanli_compilation* c) {
+  return c->mir ? nullptr : c->error.c_str();
+}
+
+int64_t stanli_compilation_n_messages(const stanli_compilation* c) {
+  return (int64_t)c->messages.size();
+}
+
+stanli_compiler_message_kind stanli_compilation_message_kind(
+    const stanli_compilation* c, int64_t i) {
+  return c->messages[(size_t)i].kind;
+}
+
+const char* stanli_compilation_message(const stanli_compilation* c, int64_t i) {
+  if (i < 0 || i >= (int64_t)c->messages.size()) return nullptr;
+  return c->messages[(size_t)i].text.c_str();
+}
+
+void stanli_compilation_free(stanli_compilation* c) { delete c; }
 
 char* stanli_stan_to_mir_with_opts(const char* stan_code,
                                    const char* const* include_paths,
                                    size_t include_path_count, int fast_math,
                                    char* err, size_t err_len) {
-  return stanli_stan_to_mir_named(stan_code, nullptr, include_paths,
-                                  include_path_count, fast_math, nullptr, err,
-                                  err_len);
+  std::unique_ptr<stanli_compilation, void (*)(stanli_compilation*)> c(
+      stanli_compile_stan(stan_code, nullptr, include_paths, include_path_count,
+                          fast_math),
+      stanli_compilation_free);
+  if (c == nullptr) {
+    put_err(err, err_len, "out of memory");
+    return nullptr;
+  }
+  for (const auto& msg : c->messages)
+    std::fprintf(stderr, "%s\n", msg.text.c_str());
+  if (!c->mir) {
+    put_err(err, err_len, c->error.c_str());
+    return nullptr;
+  }
+  char* out = static_cast<char*>(std::malloc(c->mir->size() + 1));
+  if (out == nullptr) {
+    put_err(err, err_len, "out of memory");
+    return nullptr;
+  }
+  std::memcpy(out, c->mir->c_str(), c->mir->size() + 1);
+  return out;
 }
 
 void stanli_string_free(char* p) { std::free(p); }
@@ -964,8 +1071,13 @@ int stanli_reduce_sum_count(const stanli_model* m) {
   return m->reduce_sum_count;
 }
 
-const char* stanli_reduce_sum_fallbacks(const stanli_model* m) {
-  return m->reduce_sum_fallbacks.c_str();
+int64_t stanli_n_reduce_sum_fallbacks(const stanli_model* m) {
+  return (int64_t)m->reduce_sum_fallbacks.size();
+}
+
+const char* stanli_reduce_sum_fallback(const stanli_model* m, int64_t i) {
+  if (i < 0 || i >= (int64_t)m->reduce_sum_fallbacks.size()) return nullptr;
+  return m->reduce_sum_fallbacks[(size_t)i].c_str();
 }
 
 const char* stanli_sampler_column_name(int i) {
@@ -975,6 +1087,18 @@ const char* stanli_sampler_column_name(int i) {
   if (i < 0 || i >= STANLI_N_SAMPLER_COLS) return "";
   return kNames[i];
 }
+
+int stanli_n_sampler_columns(void) { return STANLI_N_SAMPLER_COLS; }
+
+const char* stanli_summary_stat_name(int i) {
+  static const char* kNames[STANLI_N_SUMMARY_STATS] = {
+      "mean", "mcse_mean", "sd",       "mcse_sd",  "q5",
+      "q50",  "q95",       "ess_bulk", "ess_tail", "r_hat"};
+  if (i < 0 || i >= STANLI_N_SUMMARY_STATS) return nullptr;
+  return kNames[i];
+}
+
+int stanli_n_summary_stats(void) { return STANLI_N_SUMMARY_STATS; }
 
 void stanli_metric_opts_init(stanli_metric_opts* o) {
   if (o == nullptr) return;
@@ -997,16 +1121,16 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
     if (interrupted != nullptr) *interrupted = 0;
     if (opts == nullptr) {
       put_err(err, err_len, "null options");
-      return 1;
+      return -1;
     }
     stanli_metric_opts defaults;
     stanli_metric_opts_init(&defaults);
     const stanli_metric_opts& mo = metric != nullptr ? *metric : defaults;
     if (refresh < 0) {
       put_err(err, err_len, "refresh must be nonnegative");
-      return 1;
+      return -1;
     }
-    if (stanli_sample_opts_check(opts, err, err_len) != 0) return 1;
+    if (stanli_sample_opts_check(opts, err, err_len) != 0) return -1;
     const int n_chains = opts->chains;
     const int64_t n = m->ex->n_params();
     const int64_t n_stored = stanli_n_stored_draws(opts);
@@ -1075,7 +1199,7 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
         break;
       default:
         put_err(err, err_len, "unknown metric kind");
-        return 1;
+        return -1;
     }
     cfg.step_size = mo.step_size;
     cfg.adapt = mo.adapt_engaged != 0 && resumes.empty();
@@ -1207,7 +1331,7 @@ int stanli_sample_multi_metric(stanli_model* m, const stanli_sample_opts* opts,
     return failed;
   } catch (const std::exception& e) {
     put_err(err, err_len, e.what());
-    return 1;
+    return -1;
   }
 }
 
@@ -1633,6 +1757,161 @@ int64_t stanli_wa_n_columns(const stanli_model* m) { return m->wa_n; }
 const char* stanli_warnings(const stanli_model* m) {
   return m->warnings.c_str();
 }
+
+int64_t stanli_model_n_compiler_messages(const stanli_model* m) {
+  return (int64_t)m->compiler_messages.size();
+}
+
+stanli_compiler_message_kind stanli_model_compiler_message_kind(
+    const stanli_model* m, int64_t i) {
+  return m->compiler_messages[(size_t)i].kind;
+}
+
+const char* stanli_model_compiler_message(const stanli_model* m, int64_t i) {
+  if (i < 0 || i >= (int64_t)m->compiler_messages.size()) return nullptr;
+  return m->compiler_messages[(size_t)i].text.c_str();
+}
+
+namespace {
+const std::vector<Variable>* variable_set(const stanli_model* m, int set) {
+  if (set == STANLI_CONSTRAINED_COLUMNS) return &m->con_vars;
+  if (set == STANLI_WRITE_ARRAY_COLUMNS) return &m->wa_vars;
+  return nullptr;
+}
+
+const Variable* variable_at(const stanli_model* m, int set, int64_t i) {
+  const std::vector<Variable>* vars = variable_set(m, set);
+  if (vars == nullptr || i < 0 || i >= (int64_t)vars->size()) return nullptr;
+  return &(*vars)[(size_t)i];
+}
+}  // namespace
+
+int64_t stanli_n_variables(const stanli_model* m, int set) {
+  const std::vector<Variable>* vars = variable_set(m, set);
+  return vars == nullptr ? 0 : (int64_t)vars->size();
+}
+
+const char* stanli_variable_name(const stanli_model* m, int set, int64_t i) {
+  const Variable* v = variable_at(m, set, i);
+  return v == nullptr ? nullptr : v->name.c_str();
+}
+
+int64_t stanli_variable_n_dims(const stanli_model* m, int set, int64_t i) {
+  const Variable* v = variable_at(m, set, i);
+  return v == nullptr ? 0 : (int64_t)v->dims.size();
+}
+
+int64_t stanli_variable_dim(const stanli_model* m, int set, int64_t i,
+                            int64_t k) {
+  const Variable* v = variable_at(m, set, i);
+  if (v == nullptr || k < 0 || k >= (int64_t)v->dims.size()) return 0;
+  return v->dims[(size_t)k];
+}
+
+#define STANLI_FIELD(T, f) \
+  {#T, #f, offsetof(T, f), sizeof(((T*)nullptr)->f), sizeof(T)}
+
+namespace {
+const stanli_field_layout kFieldLayouts[] = {
+    STANLI_FIELD(stanli_model_opts, seed),
+    STANLI_FIELD(stanli_model_opts, threads_per_chain),
+    STANLI_FIELD(stanli_model_opts, fast_math),
+    STANLI_FIELD(stanli_model_opts, allow_interpreter),
+    STANLI_FIELD(stanli_sample_opts, seed),
+    STANLI_FIELD(stanli_sample_opts, chains),
+    STANLI_FIELD(stanli_sample_opts, chain_id),
+    STANLI_FIELD(stanli_sample_opts, warmup),
+    STANLI_FIELD(stanli_sample_opts, samples),
+    STANLI_FIELD(stanli_sample_opts, thin),
+    STANLI_FIELD(stanli_sample_opts, delta),
+    STANLI_FIELD(stanli_sample_opts, max_depth),
+    STANLI_FIELD(stanli_sample_opts, save_warmup),
+    STANLI_FIELD(stanli_sample_opts, init_radius),
+    STANLI_FIELD(stanli_sample_opts, inits),
+    STANLI_FIELD(stanli_sample_opts, num_threads),
+    STANLI_FIELD(stanli_sample_opts, resume_in),
+    STANLI_FIELD(stanli_sample_opts, resume_in_len),
+    STANLI_FIELD(stanli_sample_opts, resume_out),
+    STANLI_FIELD(stanli_sample_report, warmup_seconds),
+    STANLI_FIELD(stanli_sample_report, sampling_seconds),
+    STANLI_FIELD(stanli_sample_report, n_divergent),
+    STANLI_FIELD(stanli_sample_report, n_max_treedepth),
+    STANLI_FIELD(stanli_metric_opts, metric),
+    STANLI_FIELD(stanli_metric_opts, inv_metric),
+    STANLI_FIELD(stanli_metric_opts, step_size),
+    STANLI_FIELD(stanli_metric_opts, adapt_engaged),
+    STANLI_FIELD(stanli_metric_opts, adapt_metric),
+    STANLI_FIELD(stanli_metric_opts, adapted_step_size),
+    STANLI_FIELD(stanli_metric_opts, adapted_inv_metric),
+    STANLI_FIELD(stanli_optimize_opts, seed),
+    STANLI_FIELD(stanli_optimize_opts, chain_id),
+    STANLI_FIELD(stanli_optimize_opts, iter),
+    STANLI_FIELD(stanli_optimize_opts, jacobian),
+    STANLI_FIELD(stanli_optimize_opts, init_alpha),
+    STANLI_FIELD(stanli_optimize_opts, tol_obj),
+    STANLI_FIELD(stanli_optimize_opts, tol_rel_obj),
+    STANLI_FIELD(stanli_optimize_opts, tol_grad),
+    STANLI_FIELD(stanli_optimize_opts, tol_rel_grad),
+    STANLI_FIELD(stanli_optimize_opts, tol_param),
+    STANLI_FIELD(stanli_optimize_opts, history_size),
+    STANLI_FIELD(stanli_optimize_opts, init_radius),
+    STANLI_FIELD(stanli_optimize_opts, init),
+    STANLI_FIELD(stanli_fixed_param_opts, seed),
+    STANLI_FIELD(stanli_fixed_param_opts, chains),
+    STANLI_FIELD(stanli_fixed_param_opts, chain_id),
+    STANLI_FIELD(stanli_fixed_param_opts, samples),
+    STANLI_FIELD(stanli_fixed_param_opts, thin),
+    STANLI_FIELD(stanli_fixed_param_opts, init_radius),
+    STANLI_FIELD(stanli_fixed_param_opts, inits),
+    STANLI_FIELD(stanli_fixed_param_opts, refresh),
+    STANLI_FIELD(stanli_laplace_opts, seed),
+    STANLI_FIELD(stanli_laplace_opts, draws),
+    STANLI_FIELD(stanli_laplace_opts, jacobian),
+    STANLI_FIELD(stanli_laplace_opts, calculate_lp),
+    STANLI_FIELD(stanli_laplace_opts, refresh),
+    STANLI_FIELD(stanli_pathfinder_opts, seed),
+    STANLI_FIELD(stanli_pathfinder_opts, chain_id),
+    STANLI_FIELD(stanli_pathfinder_opts, num_paths),
+    STANLI_FIELD(stanli_pathfinder_opts, num_draws),
+    STANLI_FIELD(stanli_pathfinder_opts, num_psis_draws),
+    STANLI_FIELD(stanli_pathfinder_opts, num_elbo_draws),
+    STANLI_FIELD(stanli_pathfinder_opts, max_lbfgs_iters),
+    STANLI_FIELD(stanli_pathfinder_opts, history_size),
+    STANLI_FIELD(stanli_pathfinder_opts, init_alpha),
+    STANLI_FIELD(stanli_pathfinder_opts, tol_obj),
+    STANLI_FIELD(stanli_pathfinder_opts, tol_rel_obj),
+    STANLI_FIELD(stanli_pathfinder_opts, tol_grad),
+    STANLI_FIELD(stanli_pathfinder_opts, tol_rel_grad),
+    STANLI_FIELD(stanli_pathfinder_opts, tol_param),
+    STANLI_FIELD(stanli_pathfinder_opts, init_radius),
+    STANLI_FIELD(stanli_pathfinder_opts, inits),
+    STANLI_FIELD(stanli_pathfinder_opts, psis_resample),
+    STANLI_FIELD(stanli_pathfinder_opts, calculate_lp),
+    STANLI_FIELD(stanli_pathfinder_opts, refresh),
+    STANLI_FIELD(stanli_variational_opts, seed),
+    STANLI_FIELD(stanli_variational_opts, chain_id),
+    STANLI_FIELD(stanli_variational_opts, algorithm),
+    STANLI_FIELD(stanli_variational_opts, iter),
+    STANLI_FIELD(stanli_variational_opts, grad_samples),
+    STANLI_FIELD(stanli_variational_opts, elbo_samples),
+    STANLI_FIELD(stanli_variational_opts, eta),
+    STANLI_FIELD(stanli_variational_opts, adapt_engaged),
+    STANLI_FIELD(stanli_variational_opts, adapt_iter),
+    STANLI_FIELD(stanli_variational_opts, tol_rel_obj),
+    STANLI_FIELD(stanli_variational_opts, eval_elbo),
+    STANLI_FIELD(stanli_variational_opts, output_samples),
+    STANLI_FIELD(stanli_variational_opts, init_radius),
+    STANLI_FIELD(stanli_variational_opts, init),
+};
+}  // namespace
+
+#undef STANLI_FIELD
+
+int64_t stanli_n_field_layouts(void) {
+  return (int64_t)(sizeof kFieldLayouts / sizeof kFieldLayouts[0]);
+}
+
+const stanli_field_layout* stanli_field_layouts(void) { return kFieldLayouts; }
 
 int stanli_transformed_data_rng(const stanli_model* m) {
   return m->cm.transformed_data_draws ? 1 : 0;

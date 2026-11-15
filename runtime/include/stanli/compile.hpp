@@ -53,6 +53,11 @@ struct CompiledModel {
     // already peeled to one emitted value and leave this empty.
     std::vector<int64_t> dims;
     bool matrix_storage = false;  // the final two dims form a matrix
+    // A write-array view of one element of an array: the declared variable
+    // and the element's 1-based index path, outermost first. Empty when the
+    // view is a whole variable.
+    std::string variable;
+    std::vector<int64_t> index;
     // Empty means identity. Nonidentity permutations are prepared once while
     // compiling the concrete model, so serialization performs one indexed
     // copy per value with no per-draw division or allocation.
@@ -86,27 +91,30 @@ struct CompiledModel {
       return storage_order.empty() ? serial : storage_order[(size_t)serial];
     }
 
+    // The declared dimensions behind this view's columns, first index
+    // fastest: none for a scalar.
+    std::vector<int64_t> shape() const {
+      if (!dims.empty()) return dims;
+      if (naming == Naming::Matrix && rows > 0) return {rows, len / rows};
+      if (naming == Naming::Scalar || (naming == Naming::Auto && len == 1))
+        return {};
+      return {len};
+    }
+
     void append_names(std::vector<std::string>& out) const {
-      if (!dims.empty()) {
-        for (int64_t f = 0; f < len; ++f) {
-          std::string column = name;
-          int64_t q = f;
-          for (int64_t d : dims) {
-            column += "." + std::to_string(q % d + 1);
-            q /= d;
-          }
-          out.push_back(std::move(column));
-        }
-      } else if (naming == Naming::Matrix && rows > 0) {
-        for (int64_t f = 0; f < len; ++f)
-          out.push_back(name + "." + std::to_string(f % rows + 1) + "." +
-                        std::to_string(f / rows + 1));
-      } else if (naming == Naming::Scalar ||
-                 (naming == Naming::Auto && len == 1)) {
+      const std::vector<int64_t> s = shape();
+      if (s.empty()) {
         out.push_back(name);
-      } else {
-        for (int64_t i = 0; i < len; ++i)
-          out.push_back(name + "." + std::to_string(i + 1));
+        return;
+      }
+      for (int64_t f = 0; f < len; ++f) {
+        std::string column = name;
+        int64_t q = f;
+        for (int64_t d : s) {
+          column += "." + std::to_string(q % d + 1);
+          q /= d;
+        }
+        out.push_back(std::move(column));
       }
     }
   };

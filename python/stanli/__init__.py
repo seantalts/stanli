@@ -25,21 +25,30 @@ import numpy as np
 __all__ = ["Model", "Function", "Fit", "Summary", "OptimizeResult",
            "exact_lp", "thread_safe", "stan_to_mir", "build_id",
            "bridgestan_model", "bridgestan_data", "runtime_path",
-           "SAMPLER_COLUMNS", "__version__"]
+           "SAMPLER_COLUMNS", "O1FallbackWarning", "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
 __version__ = "0.26.0"
 
 _BIN = pathlib.Path(__file__).parent / "_bin"
 
-# Must match STANLI_N_SAMPLER_COLS in runtime/include/stanli/capi.h; the
-# names themselves come from the ABI (see below), so only the count is
-# mirrored here.
-_N_SAMPLER_COLS = 7
-# Must match the STANLI_STAT_* enum in capi.h.
-_SUMMARY_STATS = ("mean", "mcse_mean", "sd", "mcse_sd", "q5", "q50", "q95",
-                  "ess_bulk", "ess_tail", "r_hat")
-_N_SUMMARY_STATS = len(_SUMMARY_STATS)
+# The C ABI this module's ctypes declarations are written against: must
+# equal STANLI_ABI_VERSION in runtime/include/stanli/capi.h.
+_ABI_VERSION = 6
+
+# stanli_compiler_message_kind in capi.h.
+_COMPILER_O1_FALLBACK = 1
+# The column sets of stanli_n_variables.
+_CONSTRAINED_COLUMNS = 0
+_WRITE_ARRAY_COLUMNS = 1
+
+
+class O1FallbackWarning(RuntimeWarning):
+    """The compiler skipped O1 for this model and it runs from O0 MIR.
+
+    Issued when the model's structure exceeds stanli's O1 budget. The model
+    is correct but may be slower; ``STANLI_NO_O1_FALLBACK=1`` forces O1.
+    """
 
 
 class _OptimizeOpts(ctypes.Structure):
@@ -121,14 +130,61 @@ _METRICS = ("unit_e", "diag_e", "dense_e")
 
 
 class _ModelOpts(ctypes.Structure):
+    """Mirrors stanli_model_opts in runtime/include/stanli/capi.h."""
     _fields_ = [("seed", ctypes.c_uint32),
                 ("threads_per_chain", ctypes.c_int),
-                ("fast_math", ctypes.c_int)]
+                ("fast_math", ctypes.c_int),
+                ("allow_interpreter", ctypes.c_int)]
+
+
+class _FieldLayout(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_char_p), ("field", ctypes.c_char_p),
+                ("offset", ctypes.c_size_t), ("size", ctypes.c_size_t),
+                ("type_size", ctypes.c_size_t)]
+
+
+_MIRRORS = {"stanli_optimize_opts": _OptimizeOpts,
+            "stanli_sample_opts": _SampleOpts,
+            "stanli_sample_report": _SampleReport,
+            "stanli_metric_opts": _MetricOpts,
+            "stanli_model_opts": _ModelOpts}
+
+
+def _check_layouts(lib, mirrors=None):
+    """Refuse a runtime whose structs differ from the ctypes mirrors here.
+
+    A mirror with a field at the wrong offset does not fail: the call reads
+    the wrong bytes and runs with the wrong settings.
+    """
+    mirrors = _MIRRORS if mirrors is None else mirrors
+    lib.stanli_n_field_layouts.restype = ctypes.c_int64
+    lib.stanli_field_layouts.restype = ctypes.POINTER(_FieldLayout)
+    table = lib.stanli_field_layouts()
+    runtime = {}
+    for i in range(lib.stanli_n_field_layouts()):
+        e = table[i]
+        runtime.setdefault(e.type.decode(), (e.type_size, {}))[1][
+            e.field.decode()] = (e.offset, e.size)
+    for name, mirror in mirrors.items():
+        type_size, fields = runtime.get(name, (None, {}))
+        ours = {f: (getattr(mirror, f).offset, getattr(mirror, f).size)
+                for f, _ in mirror._fields_}
+        if type_size != ctypes.sizeof(mirror) or ours != fields:
+            raise ImportError(
+                f"the stanli runtime's {name} differs from this package's "
+                f"copy (runtime {type_size} bytes {fields}, package "
+                f"{ctypes.sizeof(mirror)} bytes {ours}); reinstall stanli")
 
 
 def _load_lib():
     names = {"darwin": "libstanli.dylib", "linux": "libstanli.so"}
     lib = ctypes.CDLL(str(_BIN / names.get(sys.platform, "stanli.dll")))
+    lib.stanli_abi_version.restype = ctypes.c_int
+    if lib.stanli_abi_version() != _ABI_VERSION:
+        raise ImportError(
+            f"the stanli runtime speaks C ABI {lib.stanli_abi_version()}, "
+            f"this package {_ABI_VERSION}; reinstall stanli")
+    _check_layouts(lib)
     lib.stanli_model_free.argtypes = [ctypes.c_void_p]
     lib.stanli_n_unconstrained.restype = ctypes.c_int64
     lib.stanli_n_unconstrained.argtypes = [ctypes.c_void_p]
@@ -156,17 +212,50 @@ def _load_lib():
     lib.stanli_exact_lp.restype = ctypes.c_int
     lib.stanli_reduce_sum_count.restype = ctypes.c_int
     lib.stanli_reduce_sum_count.argtypes = [ctypes.c_void_p]
-    lib.stanli_reduce_sum_fallbacks.restype = ctypes.c_char_p
-    lib.stanli_reduce_sum_fallbacks.argtypes = [ctypes.c_void_p]
+    lib.stanli_n_reduce_sum_fallbacks.restype = ctypes.c_int64
+    lib.stanli_n_reduce_sum_fallbacks.argtypes = [ctypes.c_void_p]
+    lib.stanli_reduce_sum_fallback.restype = ctypes.c_char_p
+    lib.stanli_reduce_sum_fallback.argtypes = [ctypes.c_void_p, ctypes.c_int64]
     lib.stanli_model_new_with_opts.restype = ctypes.c_void_p
     lib.stanli_model_new_with_opts.argtypes = [
         ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(_ModelOpts),
         ctypes.c_char_p, ctypes.c_size_t]
-    lib.stanli_stan_to_mir_named.restype = ctypes.c_void_p
-    lib.stanli_stan_to_mir_named.argtypes = [
+    lib.stanli_compile_stan.restype = ctypes.c_void_p
+    lib.stanli_compile_stan.argtypes = [
         ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p),
-        ctypes.c_size_t, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p),
-        ctypes.c_char_p, ctypes.c_size_t]
+        ctypes.c_size_t, ctypes.c_int]
+    lib.stanli_compilation_mir.restype = ctypes.c_char_p
+    lib.stanli_compilation_mir.argtypes = [ctypes.c_void_p]
+    lib.stanli_compilation_error.restype = ctypes.c_char_p
+    lib.stanli_compilation_error.argtypes = [ctypes.c_void_p]
+    lib.stanli_compilation_n_messages.restype = ctypes.c_int64
+    lib.stanli_compilation_n_messages.argtypes = [ctypes.c_void_p]
+    lib.stanli_compilation_message_kind.restype = ctypes.c_int
+    lib.stanli_compilation_message_kind.argtypes = [ctypes.c_void_p,
+                                                    ctypes.c_int64]
+    lib.stanli_compilation_message.restype = ctypes.c_char_p
+    lib.stanli_compilation_message.argtypes = [ctypes.c_void_p,
+                                               ctypes.c_int64]
+    lib.stanli_compilation_free.argtypes = [ctypes.c_void_p]
+    lib.stanli_model_n_compiler_messages.restype = ctypes.c_int64
+    lib.stanli_model_n_compiler_messages.argtypes = [ctypes.c_void_p]
+    lib.stanli_model_compiler_message_kind.restype = ctypes.c_int
+    lib.stanli_model_compiler_message_kind.argtypes = [ctypes.c_void_p,
+                                                       ctypes.c_int64]
+    lib.stanli_model_compiler_message.restype = ctypes.c_char_p
+    lib.stanli_model_compiler_message.argtypes = [ctypes.c_void_p,
+                                                  ctypes.c_int64]
+    lib.stanli_n_variables.restype = ctypes.c_int64
+    lib.stanli_n_variables.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.stanli_variable_name.restype = ctypes.c_char_p
+    lib.stanli_variable_name.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                         ctypes.c_int64]
+    lib.stanli_variable_n_dims.restype = ctypes.c_int64
+    lib.stanli_variable_n_dims.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                           ctypes.c_int64]
+    lib.stanli_variable_dim.restype = ctypes.c_int64
+    lib.stanli_variable_dim.argtypes = [ctypes.c_void_p, ctypes.c_int,
+                                        ctypes.c_int64, ctypes.c_int64]
     lib.stanli_model_new_from_stan_named.restype = ctypes.c_void_p
     lib.stanli_model_new_from_stan_named.argtypes = [
         ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
@@ -242,6 +331,8 @@ def _load_lib():
         ctypes.POINTER(ctypes.c_double), ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_sampler_column_name.restype = ctypes.c_char_p
     lib.stanli_sampler_column_name.argtypes = [ctypes.c_int]
+    lib.stanli_summary_stat_name.restype = ctypes.c_char_p
+    lib.stanli_summary_stat_name.argtypes = [ctypes.c_int]
     return lib
 
 
@@ -280,8 +371,12 @@ class _native_output:
 
 # The column names are the ABI's, not ours; the R bridge reads the same
 # accessor.
+_N_SAMPLER_COLS = _lib.stanli_n_sampler_columns()
 SAMPLER_COLUMNS = tuple(_lib.stanli_sampler_column_name(i).decode()
                         for i in range(_N_SAMPLER_COLS))
+_SUMMARY_STATS = tuple(_lib.stanli_summary_stat_name(i).decode()
+                       for i in range(_lib.stanli_n_summary_stats()))
+_N_SUMMARY_STATS = len(_SUMMARY_STATS)
 
 
 def _dptr(a):
@@ -298,45 +393,23 @@ def _bracket(name):
     return parts[0] + "[" + ",".join(parts[1:]) + "]"
 
 
-_VARIABLE_INDEX_RE = re.compile(r"^(.+?)\[(\d+(?:,\d+)*)\]$")
+def _scalar_variables(names):
+    """Every column a scalar variable under its own name."""
+    return {n: ((), np.array(i, dtype=np.int64)) for i, n in enumerate(names)}
 
 
-def _group_variables(names):
-    """{variable: (dims, index_array)} from bracket-form flat names.
+def _variables_from_shapes(shapes):
+    """{variable: (dims, index_array)} from the runtime's (name, dims) list.
 
-    First-appearance order. A column with no bracket suffix is a scalar
-    variable under its own name.
+    Variables cover consecutive columns in order, first index fastest.
     """
-    groups = {}
-    for col, name in enumerate(names):
-        m = _VARIABLE_INDEX_RE.match(name)
-        if m is None:
-            base, idx = name, ()
-        else:
-            base = m.group(1)
-            idx = tuple(int(i) - 1 for i in m.group(2).split(","))
-        groups.setdefault(base, []).append((idx, col))
-
-    out = {}
-    for base, entries in groups.items():
-        ndim = len(entries[0][0])
-        if ndim == 0:
-            out[base] = ((), np.array(entries[0][1], dtype=np.int64))
-            continue
-        if any(len(idx) != ndim for idx, _ in entries):
-            for _, col in entries:
-                out[names[col]] = ((), np.array(col, dtype=np.int64))
-            continue
-        dims = tuple(max(idx[d] for idx, _ in entries) + 1
-                     for d in range(ndim))
-        arr = np.full(dims, -1, dtype=np.int64)
-        for idx, col in entries:
-            arr[idx] = col
-        if (arr >= 0).all() and arr.size == len(entries):
-            out[base] = (dims, arr)
-        else:
-            for _, col in entries:
-                out[names[col]] = ((), np.array(col, dtype=np.int64))
+    out, start = {}, 0
+    for name, dims in shapes:
+        size = int(np.prod(dims, dtype=np.int64)) if dims else 1
+        cols = np.arange(start, start + size, dtype=np.int64)
+        out[name] = (dims, cols.reshape(dims, order="F") if dims
+                     else np.array(start, dtype=np.int64))
+        start += size
     return out
 
 
@@ -479,7 +552,7 @@ def _compiler_command(model_path: pathlib.Path, include_paths=(),
         f"(expected {portable.name} or {stanc.name} in {_BIN})")
 
 
-def _warn_compile(text):
+def _warn_compile(text, category=RuntimeWarning):
     """Report compiler warnings once, attributed to the first caller outside
     this package."""
     if not text:
@@ -487,7 +560,13 @@ def _warn_compile(text):
     level, frame = 1, sys._getframe(1)
     while frame is not None and frame.f_globals.get("__package__") == __package__:
         level, frame = level + 1, frame.f_back
-    warnings.warn(text, RuntimeWarning, stacklevel=level + 1)
+    warnings.warn(text, category, stacklevel=level + 1)
+
+
+def _warn_compiler_messages(kinds_and_texts):
+    for kind, text in kinds_and_texts:
+        _warn_compile(text, O1FallbackWarning if kind == _COMPILER_O1_FALLBACK
+                      else RuntimeWarning)
 
 
 def _stanc_mir(model_path: pathlib.Path, include_paths=(), fast_math=False,
@@ -598,27 +677,25 @@ def _compile_stan(stan_code, include_paths, fast_math=False, filename=None):
             return _subprocess_mir(stan_code, include_paths, True, **extra)
         return (_subprocess_mir(stan_code, include_paths, **extra)
                 if include_paths else _subprocess_mir(stan_code, **extra))
-    err = ctypes.create_string_buffer(8192)
     paths = (ctypes.c_char_p * len(include_paths))(
         *(path.encode("utf-8") for path in include_paths))
-    compiler_warnings = ctypes.c_void_p()
     with _native_output():
-        p = _lib.stanli_stan_to_mir_named(
+        c = _lib.stanli_compile_stan(
             stan_code.encode(), None if filename is None else filename.encode(),
-            paths, len(paths), int(fast_math), ctypes.byref(compiler_warnings),
-            err, len(err))
+            paths, len(paths), int(fast_math))
+    if not c:
+        raise MemoryError("stanli could not allocate a compilation")
     try:
-        if compiler_warnings:
-            _warn_compile(ctypes.cast(compiler_warnings,
-                                      ctypes.c_char_p).value.decode())
+        _warn_compiler_messages(
+            (_lib.stanli_compilation_message_kind(c, i),
+             _lib.stanli_compilation_message(c, i).decode())
+            for i in range(_lib.stanli_compilation_n_messages(c)))
+        mir = _lib.stanli_compilation_mir(c)
+        if mir is None:
+            raise RuntimeError(_lib.stanli_compilation_error(c).decode())
+        return mir.decode()
     finally:
-        _lib.stanli_string_free(compiler_warnings)
-    if not p:
-        raise RuntimeError(err.value.decode())
-    try:
-        return ctypes.cast(p, ctypes.c_char_p).value.decode()
-    finally:
-        _lib.stanli_string_free(p)
+        _lib.stanli_compilation_free(c)
 
 
 def _lib_suffix() -> str:
@@ -868,10 +945,11 @@ class Fit:
     def __init__(self, names, draws, sampler_stats, max_depth, seed,
                  reports=None, metric="diag_e", step_size=None,
                  inv_metric=None, thin=1, delta=0.8, resume=None,
-                 threads_per_chain=1):
+                 threads_per_chain=1, variables=None):
         self.names = list(names)
         self._columns = {n: i for i, n in enumerate(self.names)}
-        self._variables = _group_variables(self.names)
+        self._variables = (_scalar_variables(self.names) if variables is None
+                           else variables)
         self._draws = draws               # (chains, draws, cols)
         self.sampler_stats = sampler_stats  # (chains, draws, 7)
         self.max_depth = max_depth
@@ -1069,11 +1147,12 @@ class OptimizeResult(dict):
     unconstrained = None
     lp = None
 
-    def __init__(self, data):
+    def __init__(self, data, variables=None):
         super().__init__(data)
         self._names = list(data)
         self._columns = {n: i for i, n in enumerate(self._names)}
-        self._variables = _group_variables(self._names)
+        self._variables = (_scalar_variables(self._names) if variables is None
+                           else variables)
 
     @property
     def variables(self):
@@ -1228,7 +1307,8 @@ def _continued_fit(old, new):
               inv_metric=[None if a is None else a.copy()
                           for a in old.inv_metric],
               thin=old.thin, delta=old.delta, resume=new._resume,
-              threads_per_chain=new.threads_per_chain)
+              threads_per_chain=new.threads_per_chain,
+              variables=old._variables)
     fit._divergence_counts = old.divergences + new.divergences
     fit._max_treedepth_counts = (old.max_treedepth_hits
                                  + new.max_treedepth_hits)
@@ -1277,14 +1357,21 @@ class Model:
     less exactly rounded evaluation. Results can differ from the default in
     the last bits. Pass the same ``fast_math`` with ``mir=`` that was used
     to produce it with ``stan_to_mir``.
+
+    ``allow_interpreter=False`` makes construction raise, naming the parts,
+    when parts of the model have no compiled path and would run through the
+    much slower MIR interpreter.
     """
 
     def __init__(self, stan_file=None, data=None, stan_code=None, mir=None,
                  seed=1, threads_per_chain=1, include_paths=None,
-                 fast_math=False):
+                 fast_math=False, allow_interpreter=True):
         threads_per_chain = _threads_per_chain(threads_per_chain)
         seed = _seed_arg(seed)
         self._fast_math = _check_fast_math(fast_math)
+        if not isinstance(allow_interpreter, bool):
+            raise TypeError("allow_interpreter must be True or False")
+        self._allow_interpreter = allow_interpreter
         self._label = None
         if mir is None:
             self._label = _source_label(stan_file, stan_code)
@@ -1295,6 +1382,10 @@ class Model:
         self._source = (mir, stan_code, _data_to_json(data))
         self._m = None
         self._adopt(self._construct(seed, threads_per_chain), seed, threads_per_chain)
+        _warn_compiler_messages(
+            (_lib.stanli_model_compiler_message_kind(self._m, i),
+             _lib.stanli_model_compiler_message(self._m, i).decode())
+            for i in range(_lib.stanli_model_n_compiler_messages(self._m)))
         note = _lib.stanli_warnings(self._m)
         if note:
             warnings.warn(note.decode(), RuntimeWarning, stacklevel=2)
@@ -1319,7 +1410,8 @@ class Model:
     def _construct(self, seed, threads_per_chain):
         mir, stan_code, data_json = self._source
         err = ctypes.create_string_buffer(8192)
-        opts = _ModelOpts(seed, threads_per_chain, int(self._fast_math))
+        opts = _ModelOpts(seed, threads_per_chain, int(self._fast_math),
+                          int(self._allow_interpreter))
         with _native_output():
             if mir is not None:
                 m = _lib.stanli_model_new_with_opts(
@@ -1364,7 +1456,9 @@ class Model:
     @property
     def reduce_sum_fallbacks(self):
         """Graph-lowering refusal reasons; opaque runtime regions are not inventoried."""
-        return _lib.stanli_reduce_sum_fallbacks(self._handle).decode().splitlines()
+        m = self._handle
+        return [_lib.stanli_reduce_sum_fallback(m, i).decode()
+                for i in range(_lib.stanli_n_reduce_sum_fallbacks(m))]
 
     def _prepare_run(self, seed, threads_per_chain):
         construction_seed = (seed if _lib.stanli_transformed_data_rng(self._handle)
@@ -1464,6 +1558,18 @@ class Model:
                     for i in range(n_wa)], True
         return list(self.constrained_names), False
 
+    def _column_variables(self, write_array):
+        """The declared variables behind _column_names, from the runtime."""
+        m = self._handle
+        which = _WRITE_ARRAY_COLUMNS if write_array else _CONSTRAINED_COLUMNS
+        shapes = []
+        for i in range(_lib.stanli_n_variables(m, which)):
+            dims = tuple(_lib.stanli_variable_dim(m, which, i, k) for k in
+                         range(_lib.stanli_variable_n_dims(m, which, i)))
+            shapes.append((_lib.stanli_variable_name(m, which, i).decode(),
+                           dims))
+        return _variables_from_shapes(shapes)
+
     def optimize(self, *, seed=1, iter=2000, jacobian=True, init=None,
                  init_radius=2.0):
         """The mode by L-BFGS -- the same optimizer CmdStan's `optimize` runs.
@@ -1511,7 +1617,8 @@ class Model:
                     f"unconstrained scale, got {init_arr.shape}")
             opts.init = _dptr(init_arr)
 
-        names, _ = self._column_names()
+        names, write_array = self._column_names()
+        variables = self._column_variables(write_array)
         q = np.empty(self.n_unconstrained)
         vals = np.empty(len(names))
         lp = ctypes.c_double()
@@ -1523,7 +1630,8 @@ class Model:
         del init_arr
         if rc != 0:
             raise RuntimeError(f"optimize failed: {err.value.decode()}")
-        out = OptimizeResult({n: vals[i] for i, n in enumerate(names)})
+        out = OptimizeResult({n: vals[i] for i, n in enumerate(names)},
+                             variables)
         out.unconstrained = q
         out.lp = lp.value
         return out
@@ -1757,7 +1865,8 @@ class Model:
         n_stored = _lib.stanli_n_stored_draws(ctypes.byref(opts))
         raw = np.empty((opts.chains, n_stored, self.n_unconstrained))
         stats = np.empty((opts.chains, n_stored, _N_SAMPLER_COLS))
-        names, _ = self._column_names()
+        names, write_array = self._column_names()
+        variables = self._column_variables(write_array)
         out = np.empty((opts.chains, n_stored, len(names)))
         reports = (_SampleReport * opts.chains)()
         err = ctypes.create_string_buffer(4096)
@@ -1794,7 +1903,7 @@ class Model:
         del init_arr, inv_metric_arr
         if interrupted.value:
             watch.raise_interrupt()
-        if failed and err.value and not err.value.startswith(b"chain "):
+        if failed < 0:
             raise RuntimeError(err.value.decode())
         if failed:
             raise RuntimeError(
@@ -1817,7 +1926,7 @@ class Model:
                   metric=metric, step_size=adapted_step,
                   inv_metric=fit_inv_metric, thin=opts.thin,
                   delta=opts.delta, resume=records,
-                  threads_per_chain=threads_per_chain)
+                  threads_per_chain=threads_per_chain, variables=variables)
         if refresh:
             _print_sample_reports(reports, first_chain,
                                   _sampling_warnings(opts, reports, stats))

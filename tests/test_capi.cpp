@@ -14,6 +14,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1567,8 +1568,25 @@ void expect_interpreter_policy(const char* fixture,
   const std::string mir = slurp(fixture);
   const std::string tag(fixture);
   char err[8192]{};
-  test_setenv("STANLI_NO_INTERPRETER", "1", 1);
+  stanli_model_opts strict;
+  stanli_model_opts_init(&strict);
+  strict.allow_interpreter = 0;
   stanli_model* model =
+      stanli_model_new_with_opts(mir.c_str(), "{}", &strict, err, sizeof err);
+  if (expected_reason != nullptr) {
+    const std::string refused(err);
+    expect_true(
+        tag + " refused with allow_interpreter 0: " + refused,
+        model == nullptr && refused.find(expected_reason) != std::string::npos);
+    if (model != nullptr) stanli_model_free(model);
+  } else if (model != nullptr) {
+    stanli_model_free(model);
+  } else {
+    ++failures;
+    std::printf("FAIL strict construction for %s: %s\n", fixture, err);
+  }
+  test_setenv("STANLI_NO_INTERPRETER", "1", 1);
+  model =
       stanli_model_new_with_opts(mir.c_str(), "{}", nullptr, err, sizeof err);
   test_unsetenv("STANLI_NO_INTERPRETER");
   if (expected_reason == nullptr) {
@@ -1712,8 +1730,9 @@ void test_reduce_sum_threads() {
                 stanli_reduce_sum_count(serial) == 0);
     expect_true("ABI retained native reduction",
                 stanli_reduce_sum_count(parallel) == 1);
-    expect_eq("ABI accepted reduction has no refusal",
-              stanli_reduce_sum_fallbacks(parallel), "");
+    expect_true("ABI accepted reduction has no refusal",
+                stanli_n_reduce_sum_fallbacks(parallel) == 0 &&
+                    stanli_reduce_sum_fallback(parallel, 0) == nullptr);
     double q = 0.2, slp = 0, plp = 0, sg = 0, pg = 0;
     expect_true("ABI serial gradient succeeds",
                 stanli_grad(serial, &q, &slp, &sg) == 0);
@@ -2359,6 +2378,8 @@ void test_fast_math_options() {
   expect_true("opts default seed", defaults.seed == 1);
   expect_true("opts default threads", defaults.threads_per_chain == 1);
   expect_true("opts default fast_math off", defaults.fast_math == 0);
+  expect_true("opts default allows the interpreter",
+              defaults.allow_interpreter == 1);
   if (!stanli_has_embedded_stanc()) return;
 
   char err[8192]{};
@@ -2470,41 +2491,60 @@ void test_bridgestan_data() {
   stanli_string_free(payload);
 }
 
+struct Compilation {
+  std::string mir, error;
+  std::vector<std::pair<stanli_compiler_message_kind, std::string>> messages;
+  bool ok = false;
+};
+
+Compilation compile(const std::string& code, const char* filename) {
+  Compilation out;
+  stanli_compilation* c =
+      stanli_compile_stan(code.c_str(), filename, nullptr, 0, 0);
+  if (c == nullptr) return out;
+  out.ok = stanli_compilation_mir(c) != nullptr;
+  if (out.ok) out.mir = stanli_compilation_mir(c);
+  if (stanli_compilation_error(c) != nullptr)
+    out.error = stanli_compilation_error(c);
+  for (int64_t i = 0; i < stanli_compilation_n_messages(c); ++i)
+    out.messages.push_back({stanli_compilation_message_kind(c, i),
+                            stanli_compilation_message(c, i)});
+  stanli_compilation_free(c);
+  return out;
+}
+
 void test_named_source_and_warnings() {
-  char err[8192]{};
-  char* compiler_warnings = nullptr;
-  char* mir = stanli_stan_to_mir_named("", "dir/empty.stan", nullptr, 0, 0,
-                                       &compiler_warnings, err, sizeof err);
+  Compilation empty = compile("", "dir/empty.stan");
   if (!stanli_has_embedded_stanc()) {
-    expect_true("no embedded stanc is reported", mir == nullptr);
+    expect_true("no embedded stanc is reported",
+                !empty.ok && !empty.error.empty());
     return;
   }
-  expect_true(std::string("empty model compiles: ") + err, mir != nullptr);
-  stanli_string_free(mir);
-  expect_true(
-      "warnings are returned",
-      compiler_warnings != nullptr &&
-          std::strstr(compiler_warnings, "Empty model detected") != nullptr);
-  expect_true("warnings name the file",
-              compiler_warnings != nullptr &&
-                  std::strstr(compiler_warnings, "dir/empty.stan") != nullptr);
-  stanli_string_free(compiler_warnings);
+  expect_true("empty model compiles: " + empty.error, empty.ok);
+  expect_true("an empty model has one warning", empty.messages.size() == 1);
+  if (empty.messages.size() == 1) {
+    expect_true("the warning is a compiler warning",
+                empty.messages[0].first == STANLI_COMPILER_WARNING);
+    expect_true("the warning says so",
+                empty.messages[0].second.find("Empty model detected") !=
+                    std::string::npos);
+    expect_true(
+        "the warning names the file",
+        empty.messages[0].second.find("dir/empty.stan") != std::string::npos);
+  }
 
-  compiler_warnings = nullptr;
-  mir = stanli_stan_to_mir_named("model {}", nullptr, nullptr, 0, 0,
-                                 &compiler_warnings, err, sizeof err);
-  expect_true("a clean model has no warnings",
-              mir != nullptr && compiler_warnings == nullptr);
-  stanli_string_free(mir);
+  Compilation clean = compile("model {}", nullptr);
+  expect_true("a clean model has no messages",
+              clean.ok && clean.messages.empty());
 
   const char* broken = "parameters { real x }\nmodel { x ~ normal(0, 1); }\n";
-  mir = stanli_stan_to_mir_named(broken, "dir/broken.stan", nullptr, 0, 0,
-                                 nullptr, err, sizeof err);
-  expect_true("a syntax error is reported", mir == nullptr);
-  expect_true(std::string("the error names the file: ") + err,
-              std::strstr(err, "dir/broken.stan") != nullptr &&
-                  std::strstr(err, "'string'") == nullptr);
+  Compilation bad = compile(broken, "dir/broken.stan");
+  expect_true("a syntax error is reported", !bad.ok && bad.mir.empty());
+  expect_true("the error names the file: " + bad.error,
+              bad.error.find("dir/broken.stan") != std::string::npos &&
+                  bad.error.find("'string'") == std::string::npos);
 
+  char err[8192]{};
   stanli_model_opts defaults;
   stanli_model_opts_init(&defaults);
   stanli_model* model = stanli_model_new_from_stan_named(
@@ -2512,10 +2552,14 @@ void test_named_source_and_warnings() {
   expect_true(std::string("named empty model builds: ") + err,
               model != nullptr);
   if (model) {
-    const std::string note = stanli_warnings(model);
-    expect_true("model warnings carry the compiler warning",
-                note.find("Empty model detected") != std::string::npos &&
-                    note.find("dir/empty.stan") != std::string::npos);
+    expect_true("model keeps the compiler warning",
+                stanli_model_n_compiler_messages(model) == 1 &&
+                    stanli_model_compiler_message_kind(model, 0) ==
+                        STANLI_COMPILER_WARNING &&
+                    std::strstr(stanli_model_compiler_message(model, 0),
+                                "dir/empty.stan") != nullptr);
+    expect_eq("compiler warnings stay out of stanli_warnings",
+              stanli_warnings(model), "");
     stanli_model_free(model);
   }
   model = stanli_model_new_from_stan_named(broken, "dir/broken.stan", "{}",
@@ -2525,8 +2569,110 @@ void test_named_source_and_warnings() {
       model == nullptr && std::strstr(err, "dir/broken.stan") != nullptr);
 }
 
+// A model past the structural budget compiles from O0 MIR, and the notice
+// comes back as its own kind of message.
+void test_o1_fallback_message() {
+  if (!stanli_has_embedded_stanc()) return;
+  std::string body;
+  for (int i = 0; i < 2100; ++i) body += "s += 1;\n";
+  std::string code = "parameters { real x; }\nmodel {\nreal s = 0;\n";
+  for (int d = 0; d < 9; ++d)
+    code += "for (i" + std::to_string(d) + " in 1:1) {\n";
+  code += body;
+  for (int d = 0; d < 9; ++d) code += "}\n";
+  code += "x ~ normal(s, 1);\n}\n";
+  const Compilation c = compile(code, nullptr);
+  expect_true("budget model compiles: " + c.error, c.ok);
+  bool found = false;
+  for (const auto& m : c.messages)
+    if (m.first == STANLI_COMPILER_O1_FALLBACK)
+      found = m.second.find("skipped O1") != std::string::npos;
+  expect_true("the O1 fallback is a typed message", found);
+}
+
+void test_variables_and_layouts() {
+  const std::string mir = slurp("tests/fixtures/amatwa.tmir.sexp");
+  char err[8192]{};
+  stanli_model* m = stanli_model_new_with_opts(
+      mir.c_str(), slurp("tests/fixtures/amatwa.json").c_str(), nullptr, err,
+      sizeof err);
+  expect_true(std::string("amatwa builds: ") + err, m != nullptr);
+  if (m != nullptr) {
+    expect_true("one constrained variable",
+                stanli_n_variables(m, STANLI_CONSTRAINED_COLUMNS) == 1);
+    expect_eq("its name",
+              stanli_variable_name(m, STANLI_CONSTRAINED_COLUMNS, 0), "m");
+    std::vector<int64_t> dims;
+    for (int64_t k = 0;
+         k < stanli_variable_n_dims(m, STANLI_CONSTRAINED_COLUMNS, 0); ++k)
+      dims.push_back(stanli_variable_dim(m, STANLI_CONSTRAINED_COLUMNS, 0, k));
+    expect_true("its dims are array then matrix",
+                dims == std::vector<int64_t>({2, 2, 3}));
+    expect_true("an unknown set has no variables",
+                stanli_n_variables(m, 7) == 0 &&
+                    stanli_variable_name(m, 7, 0) == nullptr);
+    stanli_model_free(m);
+  }
+
+  bool seen_resume_out = false, sizes_agree = true;
+  const stanli_field_layout* fields = stanli_field_layouts();
+  for (int64_t i = 0; i < stanli_n_field_layouts(); ++i) {
+    const std::string type = fields[i].type, field = fields[i].field;
+    if (type == "stanli_sample_opts" && field == "resume_out")
+      seen_resume_out =
+          fields[i].offset == offsetof(stanli_sample_opts, resume_out) &&
+          fields[i].size == sizeof(void*);
+    if (type == "stanli_sample_opts")
+      sizes_agree =
+          sizes_agree && fields[i].type_size == sizeof(stanli_sample_opts);
+  }
+  expect_true("the layout table describes stanli_sample_opts",
+              seen_resume_out && sizes_agree);
+
+  expect_true(
+      "summary stat names follow the enum",
+      stanli_n_summary_stats() == STANLI_N_SUMMARY_STATS &&
+          std::string(stanli_summary_stat_name(STANLI_STAT_RHAT)) == "r_hat" &&
+          std::string(stanli_summary_stat_name(STANLI_STAT_Q50)) == "q50" &&
+          stanli_summary_stat_name(STANLI_N_SUMMARY_STATS) == nullptr);
+  expect_true("sampler column count",
+              stanli_n_sampler_columns() == STANLI_N_SAMPLER_COLS);
+}
+
+// A run that cannot start says so with -1, distinct from a count of failed
+// chains.
+void test_sample_setup_error() {
+  const std::string mir = slurp("tests/fixtures/conj.tmir.sexp");
+  char err[8192]{};
+  stanli_model* m = stanli_model_new_with_opts(
+      mir.c_str(), slurp("tests/fixtures/conj.json").c_str(), nullptr, err,
+      sizeof err);
+  if (m == nullptr) {
+    expect_true(std::string("conj builds: ") + err, false);
+    return;
+  }
+  stanli_sample_opts opts;
+  stanli_sample_opts_init(&opts);
+  opts.chains = 1;
+  std::vector<double> draws(1);
+  expect_true(
+      "negative refresh is a setup error",
+      stanli_sample_multi_metric(m, &opts, nullptr, -1, draws.data(), nullptr,
+                                 nullptr, nullptr, nullptr, nullptr, nullptr,
+                                 nullptr, nullptr, err, sizeof err) == -1);
+  expect_true(
+      "null options are a setup error",
+      stanli_sample_multi_metric(m, nullptr, nullptr, 0, draws.data(), nullptr,
+                                 nullptr, nullptr, nullptr, nullptr, nullptr,
+                                 nullptr, nullptr, err, sizeof err) == -1);
+  stanli_model_free(m);
+}
+
 int main() {
   test_build_id_names_the_abi();
+  test_o1_fallback_message();
+  test_variables_and_layouts();
+  test_sample_setup_error();
   test_bridgestan_data();
   test_named_source_and_warnings();
   test_fast_math_options();
