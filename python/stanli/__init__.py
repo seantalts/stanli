@@ -398,6 +398,19 @@ def _scalar_variables(names):
     return {n: ((), np.array(i, dtype=np.int64)) for i, n in enumerate(names)}
 
 
+def _variable_columns(variables):
+    """Column names in Stan's order, ``theta[1,2]`` for an element."""
+    out = []
+    for name, (dims, idx) in variables.items():
+        if not dims:
+            out.append(name)
+            continue
+        for col in np.ndindex(*reversed(dims)):
+            out.append(name + "[" + ",".join(str(i + 1) for i in reversed(col))
+                       + "]")
+    return out
+
+
 def _variables_from_shapes(shapes):
     """{variable: (dims, index_array)} from the runtime's (name, dims) list.
 
@@ -1401,11 +1414,8 @@ class Model:
         self._m, self._seed = m, seed
         self._threads_per_chain = threads_per_chain
         self.n_unconstrained = _lib.stanli_n_unconstrained(m)
-        n_con = _lib.stanli_n_constrained(m)
-        self.constrained_names = [
-            _bracket(_lib.stanli_constrained_name(m, i).decode())
-            for i in range(n_con)
-        ]
+        self.constrained_names = _variable_columns(
+            self._column_variables(False))
 
     def _construct(self, seed, threads_per_chain):
         mir, stan_code, data_json = self._source
@@ -1552,15 +1562,13 @@ class Model:
         Every column CmdStan would write when the model has a generated
         quantities section; the constrained parameters otherwise.
         """
-        n_wa = _lib.stanli_wa_n_columns(self._handle)
-        if n_wa > 0:
-            return [_bracket(_lib.stanli_wa_column_name(self._handle, i).decode())
-                    for i in range(n_wa)], True
+        if _lib.stanli_wa_n_columns(self._handle) > 0:
+            return _variable_columns(self._column_variables(True)), True
         return list(self.constrained_names), False
 
     def _column_variables(self, write_array):
         """The declared variables behind _column_names, from the runtime."""
-        m = self._handle
+        m = self._m
         which = _WRITE_ARRAY_COLUMNS if write_array else _CONSTRAINED_COLUMNS
         shapes = []
         for i in range(_lib.stanli_n_variables(m, which)):
