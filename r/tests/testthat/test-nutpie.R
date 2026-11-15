@@ -15,11 +15,6 @@ nutpie_eight_schools <- function(...) {
                     sigma = c(15, 10, 16, 11, 9, 11, 10, 18)), ...)
 }
 
-skip_without_nutpie <- function() {
-  skip_if_not_installed("nutpieR")
-  skip_without_runtime()
-}
-
 nutpie_fit <- function(model = nutpie_eight_schools(), ...) {
   sample_nutpie(model, chains = 2, warmup = 200, samples = 100, seed = 5, ...)
 }
