@@ -214,6 +214,14 @@ def _load_lib():
         ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),
         ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_double),
         ctypes.c_int64, ctypes.c_char_p, ctypes.c_size_t]
+    lib.stanli_model_whiten_lowrank.restype = ctypes.c_void_p
+    lib.stanli_model_whiten_lowrank.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(ctypes.c_double), ctypes.c_int64,
+        ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),
+        ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_double),
+        ctypes.c_int64, ctypes.c_int64, ctypes.POINTER(ctypes.c_double),
+        ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+        ctypes.c_char_p, ctypes.c_size_t]
     lib.stanli_unconstrain_inits.restype = ctypes.c_int
     lib.stanli_unconstrain_inits.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
                                              ctypes.POINTER(ctypes.c_double),
@@ -1464,9 +1472,16 @@ class Model:
         return m
 
     def _apply_whitening(self, inner):
-        q_hat, perm, col_ptr, row_idx, values = self._whitening
+        q_hat, perm, col_ptr, row_idx, values, lowrank = self._whitening
         err = ctypes.create_string_buffer(4096)
-        m = _lib.stanli_model_whiten(
+        if lowrank is None:
+            c = b = w = None
+            k = 0
+        else:
+            c, b, w = lowrank
+            k = b.shape[1]
+            c, b, w = (_dptr(c), _dptr(b), _dptr(w))
+        m = _lib.stanli_model_whiten_lowrank(
             inner,
             q_hat.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
             q_hat.size,
@@ -1474,12 +1489,12 @@ class Model:
             col_ptr.ctypes.data_as(ctypes.POINTER(ctypes.c_int64)),
             row_idx.ctypes.data_as(ctypes.POINTER(ctypes.c_int64)),
             values.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-            values.size, err, len(err))
+            values.size, k, c, b, w, err, len(err))
         if not m:
             raise ValueError(err.value.decode())
         return m
 
-    def whiten(self, q_hat, perm, L):
+    def whiten(self, q_hat, perm, L, lowrank=None):
         """EXPERIMENTAL. A new Model over whitened coordinates z.
 
         With q this model's unconstrained vector, the new model's free
@@ -1501,6 +1516,12 @@ class Model:
         ``(indptr, indices, data)`` tuple of CSC arrays. It must be lower
         triangular with a nonzero diagonal. scipy is not imported by this
         package; pass the tuple form to avoid needing it.
+
+        ``lowrank=(c, B, W)`` inserts the factor ``C = diag(c) +
+        tril(W B.T, -1)`` (``B`` and ``W`` are n by k): ``q = q_hat + P.T @
+        inv(L.T) @ inv(C.T) @ z``. With ``L`` unit lower triangular and ``C
+        C.T = D + W W.T`` the whitened precision is ``P.T L (D + W W.T) L.T
+        P``. The per-gradient cost is O(nnz(L) + n k).
         """
         n = self.n_unconstrained
         q_hat = np.ascontiguousarray(q_hat, dtype=np.float64)
@@ -1528,12 +1549,20 @@ class Model:
         values = np.ascontiguousarray(parts[2], dtype=np.float64)
         if col_ptr.shape != (n + 1,) or row_idx.shape != values.shape:
             raise ValueError(f"L is not an {n} by {n} CSC matrix")
+        if lowrank is not None:
+            c, B, W = (np.ascontiguousarray(a, dtype=np.float64)
+                       for a in lowrank)
+            if (c.shape != (n,) or B.ndim != 2 or B.shape[0] != n
+                    or B.shape != W.shape or B.shape[1] < 1):
+                raise ValueError(f"lowrank must be (c, B, W) with c of "
+                                 f"shape ({n},) and B, W of shape ({n}, k)")
+            lowrank = (c.copy(), B.copy(), W.copy())
         out = Model.__new__(Model)
         out._fast_math = self._fast_math
         out._label = self._label
         out._source = self._source
         out._whitening = (q_hat.copy(), perm.copy(), col_ptr.copy(),
-                          row_idx.copy(), values.copy())
+                          row_idx.copy(), values.copy(), lowrank)
         out._m = None
         out._adopt(out._apply_whitening(self._handle), self._seed,
                    self._threads_per_chain)

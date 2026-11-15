@@ -270,6 +270,50 @@ stanli_model* stanli_model_whiten(const stanli_model* inner,
                                   const int64_t* row_idx, const double* values,
                                   int64_t nnz, char* err, size_t err_len);
 
+/* EXPERIMENTAL. Like stanli_model_whiten, with the factor
+ * C = diag(c) + tril(W B^T, -1) of a diagonal-plus-low-rank matrix inserted:
+ *     q = q_hat + P^T L^{-T} C^{-T} z.
+ * With L unit lower triangular and C C^T = D + W0 W0^T this whitens a
+ * precision Q' = P^T L (D + W0 W0^T) L^T P, as stanli_sparse_factor_lowrank
+ * computes. c has n entries; b and w are n by k, row-major. Per-gradient cost
+ * is O(nnz(L) + n k). With k = 0, b and w may be null. */
+stanli_model* stanli_model_whiten_lowrank(
+    const stanli_model* inner, const double* q_hat, int64_t n,
+    const int64_t* perm, const int64_t* col_ptr, const int64_t* row_idx,
+    const double* values, int64_t nnz, int64_t k, const double* c,
+    const double* b, const double* w, char* err, size_t err_len);
+
+/* EXPERIMENTAL. Sparse LDL^T of a symmetric matrix A, given as the lower
+ * triangle in compressed sparse column form (entries above the diagonal are
+ * ignored). With perm null the ordering is approximate minimum degree;
+ * otherwise perm[n] is used as given. With (P v)[i] = v[perm[i]]:
+ *     P A P^T = L diag(d) L^T,
+ * L unit lower triangular with each column's diagonal entry first. d may have
+ * negative entries when A is indefinite; there is no pivoting. Returns null
+ * with a message in `err` on invalid input or a zero pivot. Free with
+ * stanli_sparse_factor_free. */
+typedef struct stanli_sparse_factor stanli_sparse_factor;
+stanli_sparse_factor* stanli_sparse_factor_new(
+    int64_t n, const int64_t* col_ptr, const int64_t* row_idx,
+    const double* values, const int64_t* perm, char* err, size_t err_len);
+/* Entries stored in L, diagonal included. */
+int64_t stanli_sparse_factor_nnz(const stanli_sparse_factor* f);
+/* Number of negative d entries and the sum of log|d|, i.e. log|det A|. */
+void stanli_sparse_factor_stats(const stanli_sparse_factor* f,
+                                int64_t* n_negative, double* log_abs_det);
+/* perm[n], col_ptr[n + 1], row_idx[nnz], values[nnz] and d[n]. */
+void stanli_sparse_factor_get(const stanli_sparse_factor* f, int64_t* perm,
+                              int64_t* col_ptr, int64_t* row_idx,
+                              double* values, double* d);
+/* For u, an n by k column-major matrix in A's own ordering, writes the
+ * arguments of stanli_model_whiten_lowrank (c[n], b[n * k], w[n * k]) for
+ * A + u u^T, with W0 = L^{-1} P u. Returns nonzero with a message when
+ * A + u u^T is not positive definite. */
+int stanli_sparse_factor_lowrank(const stanli_sparse_factor* f, int64_t k,
+                                 const double* u, double* c, double* b,
+                                 double* w, char* err, size_t err_len);
+void stanli_sparse_factor_free(stanli_sparse_factor* f);
+
 /* ---- multi-chain sampling ------------------------------------------------
  *
  * Everything below packs draws CHAIN-MAJOR: draw i of chain c, column j

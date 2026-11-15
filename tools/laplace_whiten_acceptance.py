@@ -190,8 +190,9 @@ def main():
     ap.add_argument("--posteriordb", type=pathlib.Path,
                     default=REPO / "deps" / "posteriordb" / "posterior_database")
     ap.add_argument("--models", nargs="*", default=[m["name"] for m in MODELS])
-    ap.add_argument("--repair", choices=["clip", "abs"], default="clip",
-                    help="laplace_whiten eigenvalue repair (default clip)")
+    ap.add_argument("--repair", choices=["clip", "abs", "abs_dense"],
+                    default="abs",
+                    help="laplace_whiten eigenvalue repair (default abs)")
     ap.add_argument("--jobs", type=int, default=28)
     ap.add_argument("--json", type=pathlib.Path, help="write raw per-run results here")
     a = ap.parse_args()

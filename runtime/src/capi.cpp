@@ -13,6 +13,7 @@
 #include <stanli/reduce_sum.hpp>
 #include <stanli/walnuts.hpp>
 #include <stanli/wa_interp.hpp>
+#include <stanli/sparse_factor.hpp>
 #include <stanli/whiten.hpp>
 
 #include "build_id.hpp"
@@ -801,6 +802,16 @@ stanli_model* stanli_model_whiten(const stanli_model* inner,
                                   const int64_t* perm, const int64_t* col_ptr,
                                   const int64_t* row_idx, const double* values,
                                   int64_t nnz, char* err, size_t err_len) {
+  return stanli_model_whiten_lowrank(inner, q_hat, n, perm, col_ptr, row_idx,
+                                     values, nnz, 0, nullptr, nullptr, nullptr,
+                                     err, err_len);
+}
+
+stanli_model* stanli_model_whiten_lowrank(
+    const stanli_model* inner, const double* q_hat, int64_t n,
+    const int64_t* perm, const int64_t* col_ptr, const int64_t* row_idx,
+    const double* values, int64_t nnz, int64_t k, const double* c,
+    const double* b, const double* w, char* err, size_t err_len) {
   try {
     if (inner == nullptr) throw std::invalid_argument("null model");
     if (inner->whiten)
@@ -809,8 +820,8 @@ stanli_model* stanli_model_whiten(const stanli_model* inner,
       throw std::invalid_argument(
           "q_hat has " + std::to_string(n) + " elements, the model has " +
           std::to_string(inner->ex->n_params()) + " unconstrained parameters");
-    const auto spec =
-        stanli::make_whiten_spec(q_hat, n, perm, col_ptr, row_idx, values, nnz);
+    const auto spec = stanli::make_whiten_spec(q_hat, n, perm, col_ptr, row_idx,
+                                               values, nnz, k, c, b, w);
     auto m = std::make_unique<stanli_model>();
     m->cm = inner->cm;
     m->threads_per_chain = inner->threads_per_chain;
@@ -842,6 +853,10 @@ stanli_model* stanli_model_whiten(const stanli_model* inner,
     hash.add(spec->col_ptr.data(), sizeof(int64_t) * spec->col_ptr.size());
     hash.add(spec->row_idx.data(), sizeof(int64_t) * spec->row_idx.size());
     hash.add(spec->values.data(), sizeof(double) * spec->values.size());
+    hash.add(&spec->k, sizeof spec->k);
+    hash.add(spec->c.data(), sizeof(double) * spec->c.size());
+    hash.add(spec->cb.data(), sizeof(double) * spec->cb.size());
+    hash.add(spec->cw.data(), sizeof(double) * spec->cw.size());
     m->resume_hash = hash.h;
     return m.release();
   } catch (const std::exception& e) {
@@ -849,6 +864,61 @@ stanli_model* stanli_model_whiten(const stanli_model* inner,
     return nullptr;
   }
 }
+
+struct stanli_sparse_factor {
+  stanli::SparseFactor f;
+};
+
+stanli_sparse_factor* stanli_sparse_factor_new(
+    int64_t n, const int64_t* col_ptr, const int64_t* row_idx,
+    const double* values, const int64_t* perm, char* err, size_t err_len) {
+  try {
+    auto out = std::make_unique<stanli_sparse_factor>();
+    out->f = stanli::sparse_ldlt(n, col_ptr, row_idx, values, perm);
+    return out.release();
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return nullptr;
+  }
+}
+
+int64_t stanli_sparse_factor_nnz(const stanli_sparse_factor* f) {
+  return (int64_t)f->f.row_idx.size();
+}
+
+void stanli_sparse_factor_stats(const stanli_sparse_factor* f,
+                                int64_t* n_negative, double* log_abs_det) {
+  *n_negative = f->f.n_negative;
+  *log_abs_det = f->f.log_abs_det;
+}
+
+void stanli_sparse_factor_get(const stanli_sparse_factor* f, int64_t* perm,
+                              int64_t* col_ptr, int64_t* row_idx,
+                              double* values, double* d) {
+  const auto& x = f->f;
+  std::copy(x.perm.begin(), x.perm.end(), perm);
+  std::copy(x.col_ptr.begin(), x.col_ptr.end(), col_ptr);
+  std::copy(x.row_idx.begin(), x.row_idx.end(), row_idx);
+  std::copy(x.values.begin(), x.values.end(), values);
+  std::copy(x.d.begin(), x.d.end(), d);
+}
+
+int stanli_sparse_factor_lowrank(const stanli_sparse_factor* f, int64_t k,
+                                 const double* u, double* c, double* b,
+                                 double* w, char* err, size_t err_len) {
+  try {
+    const auto r = stanli::sparse_lowrank(f->f, k, u);
+    std::copy(r.c.begin(), r.c.end(), c);
+    std::copy(r.b.begin(), r.b.end(), b);
+    std::copy(r.w.begin(), r.w.end(), w);
+    return 0;
+  } catch (const std::exception& e) {
+    put_err(err, err_len, e.what());
+    return 1;
+  }
+}
+
+void stanli_sparse_factor_free(stanli_sparse_factor* f) { delete f; }
 
 int stanli_grad(stanli_model* m, const double* q, double* lp, double* grad) {
   const int64_t n = m->ex->n_params();

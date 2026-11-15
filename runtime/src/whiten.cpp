@@ -40,8 +40,51 @@ void WhitenSpec::multiply_lower_transpose(const double* w, double* out) const {
   }
 }
 
+void WhitenSpec::solve_c_transpose(double* x, double* acc) const {
+  std::fill(acc, acc + k, 0.0);
+  for (int64_t j = n - 1; j >= 0; --j) {
+    const double* bj = cb.data() + j * k;
+    const double* wj = cw.data() + j * k;
+    double s = 0;
+    for (int64_t r = 0; r < k; ++r) s += bj[r] * acc[r];
+    const double y = (x[j] - s) / c[(size_t)j];
+    x[j] = y;
+    for (int64_t r = 0; r < k; ++r) acc[r] += y * wj[r];
+  }
+}
+
+void WhitenSpec::solve_c(double* x, double* acc) const {
+  std::fill(acc, acc + k, 0.0);
+  for (int64_t j = 0; j < n; ++j) {
+    const double* bj = cb.data() + j * k;
+    const double* wj = cw.data() + j * k;
+    double s = 0;
+    for (int64_t r = 0; r < k; ++r) s += wj[r] * acc[r];
+    const double y = (x[j] - s) / c[(size_t)j];
+    x[j] = y;
+    for (int64_t r = 0; r < k; ++r) acc[r] += y * bj[r];
+  }
+}
+
+void WhitenSpec::multiply_c_transpose(double* x, double* acc) const {
+  std::fill(acc, acc + k, 0.0);
+  for (int64_t j = n - 1; j >= 0; --j) {
+    const double* bj = cb.data() + j * k;
+    const double* wj = cw.data() + j * k;
+    double s = 0;
+    for (int64_t r = 0; r < k; ++r) s += bj[r] * acc[r];
+    const double xj = x[j];
+    x[j] = c[(size_t)j] * xj + s;
+    for (int64_t r = 0; r < k; ++r) acc[r] += xj * wj[r];
+  }
+}
+
 void WhitenSpec::to_q(const double* z, double* out) const {
   std::vector<double> w(z, z + n);
+  if (has_c()) {
+    std::vector<double> acc((size_t)k);
+    solve_c_transpose(w.data(), acc.data());
+  }
   solve_lower_transpose(w.data());
   for (int64_t i = 0; i < n; ++i) {
     const auto at = (size_t)perm[(size_t)i];
@@ -56,11 +99,23 @@ void WhitenSpec::to_z(const double* q, double* out) const {
     w[(size_t)i] = q[at] - q_hat[at];
   }
   multiply_lower_transpose(w.data(), out);
+  if (has_c()) {
+    std::vector<double> acc((size_t)k);
+    multiply_c_transpose(out, acc.data());
+  }
 }
 
 std::shared_ptr<const WhitenSpec> make_whiten_spec(
     const double* q_hat, int64_t n, const int64_t* perm, const int64_t* col_ptr,
     const int64_t* row_idx, const double* values, int64_t nnz) {
+  return make_whiten_spec(q_hat, n, perm, col_ptr, row_idx, values, nnz, 0,
+                          nullptr, nullptr, nullptr);
+}
+
+std::shared_ptr<const WhitenSpec> make_whiten_spec(
+    const double* q_hat, int64_t n, const int64_t* perm, const int64_t* col_ptr,
+    const int64_t* row_idx, const double* values, int64_t nnz, int64_t k,
+    const double* c, const double* b, const double* w) {
   if (n < 1) throw std::invalid_argument("whiten needs at least one parameter");
   if (nnz < n)
     throw std::invalid_argument(
@@ -113,6 +168,24 @@ std::shared_ptr<const WhitenSpec> make_whiten_spec(
       if (!std::isfinite(spec->values[(size_t)p]))
         throw std::invalid_argument("L has a non-finite entry");
   }
+  if (c) {
+    if (k < 0) throw std::invalid_argument("the low-rank width is negative");
+    if (k > 0 && (!b || !w))
+      throw std::invalid_argument("whiten got a null low-rank array");
+    spec->k = k;
+    spec->c.assign(c, c + n);
+    spec->cb.assign(b, b + (k > 0 ? n * k : 0));
+    spec->cw.assign(w, w + (k > 0 ? n * k : 0));
+    for (double v : spec->c)
+      if (!(v != 0.0) || !std::isfinite(v))
+        throw std::invalid_argument("c has a zero or non-finite entry");
+    for (double v : spec->cb)
+      if (!std::isfinite(v))
+        throw std::invalid_argument("the low-rank factor B is not finite");
+    for (double v : spec->cw)
+      if (!std::isfinite(v))
+        throw std::invalid_argument("the low-rank factor W is not finite");
+  }
   return spec;
 }
 
@@ -126,6 +199,7 @@ void whiten_fwd(KernelCtx& ctx) {
   const WhitenSpec& s = spec_of(ctx);
   double* w = ctx.scratch;
   std::copy_n(ctx.in[0].data, s.n, w);
+  if (s.has_c()) s.solve_c_transpose(w, w + s.n);
   s.solve_lower_transpose(w);
   for (int64_t i = 0; i < s.n; ++i) {
     const auto at = (size_t)s.perm[(size_t)i];
@@ -140,11 +214,13 @@ void whiten_bwd(KernelCtx& ctx) {
   for (int64_t i = 0; i < s.n; ++i)
     w[i] = ctx.out_adj_vec.data[s.perm[(size_t)i]];
   s.solve_lower(w);
+  if (s.has_c()) s.solve_c(w, w + s.n);
   for (int64_t i = 0; i < s.n; ++i) ctx.in_adj[0].data[i] += w[i];
 }
 
 int64_t whiten_scratch(const Op& op, const Slot*) {
-  return static_cast<const WhitenSpec*>(op.udata)->n;
+  const auto* s = static_cast<const WhitenSpec*>(op.udata);
+  return s->n + s->k;
 }
 
 }  // namespace

@@ -43,6 +43,13 @@ EXPORTS
   stanli_grad
   stanli_hessian
   stanli_model_whiten
+  stanli_model_whiten_lowrank
+  stanli_sparse_factor_new
+  stanli_sparse_factor_nnz
+  stanli_sparse_factor_stats
+  stanli_sparse_factor_get
+  stanli_sparse_factor_lowrank
+  stanli_sparse_factor_free
   stanli_sample_stream_stats_init
   stanli_sample_walnuts_stream
   stanli_run_pathfinder

@@ -183,7 +183,8 @@ def test_precision_is_spd_and_factor_reproduces_it():
 def test_report_counts_gradients():
     m = centred()
     n = m.n_unconstrained
-    _, report = stanli.laplace_whiten(m, latent=["alpha"], seed=1)
+    _, report = stanli.laplace_whiten(m, latent=["alpha"], seed=1,
+                                      hessian="dense")
     g = report.gradients
     assert g["pattern_hessian"] == 1 + 2 * n
     assert g["final_hessian"] == 1 + 2 * n
@@ -192,6 +193,14 @@ def test_report_counts_gradients():
                           + g["final_hessian"])
     assert report.pathfinder_seconds > 0 and report.wall_seconds > 0
     assert len(report.theta_hat) == report.n_theta
+
+
+def test_coloured_hessian_uses_fewer_gradients_than_dense():
+    m = centred()
+    n = m.n_unconstrained
+    _, report = stanli.laplace_whiten(m, latent=["alpha"], seed=1)
+    g = report.gradients
+    assert g["final_hessian"] < 1 + 2 * n
 
 
 def test_clipping_path_warns_and_counts():
