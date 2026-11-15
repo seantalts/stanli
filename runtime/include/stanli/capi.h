@@ -515,9 +515,8 @@ int64_t stanli_sampling_warnings(const stanli_sample_opts* opts,
  * failed and how many could not be computed (too few draws, say). Takes
  * the same draws, stats and max_depth. Returns 0 on success. */
 int stanli_diagnose_counts(const double* draws, int64_t n_chains,
-                           int64_t n_draws, int64_t n_cols,
-                           const double* stats, int max_depth, int* n_failed,
-                           int* n_unavailable);
+                           int64_t n_draws, int64_t n_cols, const double* stats,
+                           int max_depth, int* n_failed, int* n_unavailable);
 
 /* ---- optimization --------------------------------------------------------
  *

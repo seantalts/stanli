@@ -64,8 +64,7 @@ class StatusFile {
  public:
   void open(const std::string& path) {
     file_ = std::fopen(path.c_str(), "w");
-    if (!file_)
-      throw std::runtime_error("cannot write status file " + path);
+    if (!file_) throw std::runtime_error("cannot write status file " + path);
   }
   void write(const Json& record) {
     if (!file_) return;
@@ -102,8 +101,7 @@ static const char* error_kind(const std::exception& e) {
   if (dynamic_cast<const stanli::CompileError*>(&e)) return "compile_error";
   if (dynamic_cast<const std::domain_error*>(&e)) return "domain_error";
   if (dynamic_cast<const std::out_of_range*>(&e)) return "out_of_range";
-  if (dynamic_cast<const std::invalid_argument*>(&e))
-    return "invalid_argument";
+  if (dynamic_cast<const std::invalid_argument*>(&e)) return "invalid_argument";
   return "runtime_error";
 }
 
@@ -499,9 +497,8 @@ int main(int argc, char** argv) {
       // to say how many models get their transformed parameters and
       // generated quantities.
       const auto wa_failed = [&](const std::exception& we) {
-        record["write_array"] = {{"ok", false},
-                                 {"error", error_kind(we)},
-                                 {"message", we.what()}};
+        record["write_array"] = {
+            {"ok", false}, {"error", error_kind(we)}, {"message", we.what()}};
         if (wa_values)
           std::printf("WANAMES FAIL %s\nWAVALS FAIL\n", msg(we.what()).c_str());
       };

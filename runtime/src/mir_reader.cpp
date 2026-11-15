@@ -983,8 +983,8 @@ void validate_expression(const Expr& e, const Bindings& bindings,
         binding->second.view.leaf != UnsizedLeaf::Unknown &&
         (binding->second.view.depth != e.unsized.depth ||
          binding->second.view.leaf != e.unsized.leaf))
-      throw mir::MirError(
-          "mir: variable type disagrees with its binding for " + e.name);
+      throw mir::MirError("mir: variable type disagrees with its binding for " +
+                          e.name);
     // Do not equate data_only with the declaration here. In write_array,
     // stanc intentionally marks constrained-parameter reads DataOnly even
     // though the corresponding declaration was AutoDiffable. The narrower
@@ -1021,13 +1021,12 @@ void validate_expression(const Expr& e, const Bindings& bindings,
       throw mir::MirError("mir: call to unknown user function " + e.name);
     const FunDef& function = *found->second;
     if (e.args.size() != function.arg_names.size())
-      throw mir::MirError("mir: user function arity mismatch for " +
-                               e.name);
+      throw mir::MirError("mir: user function arity mismatch for " + e.name);
     for (size_t i = 0; i < e.args.size(); ++i) {
       if (e.args[i].unsized.depth != function.arg_views[i].depth ||
           e.args[i].unsized.leaf != function.arg_views[i].leaf)
-        throw mir::MirError(
-            "mir: user function argument type mismatch for " + e.name);
+        throw mir::MirError("mir: user function argument type mismatch for " +
+                            e.name);
       if (e.args[i].kind == Expr::Var && !e.args[i].promoted) {
         const auto binding = bindings.find(e.args[i].name);
         if (binding == bindings.end() ||
@@ -1208,13 +1207,12 @@ std::string resolve_overload(const Overloads::value_type& candidates,
   for (const FunDef* f : candidates.second) {
     if (!views_match(args, f->arg_views)) continue;
     if (match)
-      throw mir::MirError("mir: ambiguous overload for " +
-                               candidates.first);
+      throw mir::MirError("mir: ambiguous overload for " + candidates.first);
     match = f;
   }
   if (!match)
     throw mir::MirError("mir: no overload of " + candidates.first +
-                             " matches its call");
+                        " matches its call");
   return match->name;
 }
 
@@ -1330,8 +1328,7 @@ void resolve_overloads(Program& prog) {
     for (size_t i = 0; i < defs.size(); ++i)
       for (size_t j = i + 1; j < defs.size(); ++j)
         if (views_match(defs[i]->arg_views, defs[j]->arg_views))
-          throw mir::MirError("mir: indistinguishable overloads of " +
-                                   name);
+          throw mir::MirError("mir: indistinguishable overloads of " + name);
     for (FunDef* f : defs) f->name += signature(f->arg_views);
     overloads[name] = std::move(defs);
   }

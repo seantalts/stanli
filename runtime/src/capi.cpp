@@ -1421,15 +1421,14 @@ int64_t stanli_diagnose_text(const double* draws, int64_t n_chains,
 }
 
 int stanli_diagnose_counts(const double* draws, int64_t n_chains,
-                           int64_t n_draws, int64_t n_cols,
-                           const double* stats, int max_depth, int* n_failed,
-                           int* n_unavailable) {
+                           int64_t n_draws, int64_t n_cols, const double* stats,
+                           int max_depth, int* n_failed, int* n_unavailable) {
   if (n_failed == nullptr || n_unavailable == nullptr) return 1;
   try {
     stanli::DrawSet d{draws, n_chains, n_draws, n_cols};
     const auto summary = stanli::summarize(d, {});
-    const auto report =
-        stanli::diagnostic_report(stanli::diagnose(d, summary, stats, max_depth));
+    const auto report = stanli::diagnostic_report(
+        stanli::diagnose(d, summary, stats, max_depth));
     *n_failed = report.failed;
     *n_unavailable = report.unavailable;
     return 0;

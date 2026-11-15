@@ -1255,10 +1255,9 @@ class MirInterp {
       reject(MessageError::InvalidArgument,
              std::string(empty_range ? "array[negative_min_max, ...] assign"
                                      : "array[multi, ...] assign") +
-                 ": assigning variable " + name + " (" +
-                 std::to_string(count) + ") and right hand side" +
-                 (empty_range ? "" : " size") + " (" + std::to_string(given) +
-                 ") must match in size",
+                 ": assigning variable " + name + " (" + std::to_string(count) +
+                 ") and right hand side" + (empty_range ? "" : " size") + " (" +
+                 std::to_string(given) + ") must match in size",
              raw);
     }
     selected.reserve(static_cast<size_t>(count));
@@ -1361,8 +1360,8 @@ class MirInterp {
         return;
       }
       if (label)
-        reject(MessageError::OutOfRange, index_out_of_range_message(label, n, i),
-               e.raw);
+        reject(MessageError::OutOfRange,
+               index_out_of_range_message(label, n, i), e.raw);
       fail("index " + std::to_string(i) + " out of bounds for size " +
                std::to_string(n),
            e.raw);
