@@ -18,7 +18,7 @@ namespace {
 using sexp::Node;
 
 [[noreturn]] void malformed(const std::string& what) {
-  throw std::runtime_error("mir: malformed " + what);
+  throw mir::MirError("mir: malformed " + what);
 }
 
 void require_arity(const Expr& e, size_t expected) {
@@ -228,7 +228,7 @@ UnsizedView read_unsized(const Node& n) {
   const Node* leaf = &n;
   while (!leaf->is_atom() && leaf->head_is("UArray") && leaf->size() == 2) {
     if (out.depth == std::numeric_limits<uint8_t>::max())
-      throw std::runtime_error("mir: unsized array nesting is too deep");
+      throw mir::MirError("mir: unsized array nesting is too deep");
     ++out.depth;
     leaf = &(*leaf)[1];
   }
@@ -965,7 +965,7 @@ UnsizedView declared_view(const SizedType& type) {
     leaf_rank = 1;
   if (view.leaf == UnsizedLeaf::Unknown || type.dims.size() < leaf_rank ||
       type.dims.size() - leaf_rank > std::numeric_limits<uint8_t>::max())
-    throw std::runtime_error("mir: malformed sized declaration type");
+    throw mir::MirError("mir: malformed sized declaration type");
   view.depth = static_cast<uint8_t>(type.dims.size() - leaf_rank);
   return view;
 }
@@ -983,7 +983,7 @@ void validate_expression(const Expr& e, const Bindings& bindings,
         binding->second.view.leaf != UnsizedLeaf::Unknown &&
         (binding->second.view.depth != e.unsized.depth ||
          binding->second.view.leaf != e.unsized.leaf))
-      throw std::runtime_error(
+      throw mir::MirError(
           "mir: variable type disagrees with its binding for " + e.name);
     // Do not equate data_only with the declaration here. In write_array,
     // stanc intentionally marks constrained-parameter reads DataOnly even
@@ -997,15 +997,15 @@ void validate_expression(const Expr& e, const Bindings& bindings,
         e.args[0].unsized.depth > 1 ||
         e.args[1].unsized.leaf != UnsizedLeaf::Vector ||
         e.args[1].unsized.depth != 0)
-      throw std::runtime_error("mir: malformed categorical signature");
+      throw mir::MirError("mir: malformed categorical signature");
     for (const Expr& arg : e.args) {
       if (arg.kind != Expr::Var) continue;
       const auto binding = bindings.find(arg.name);
       if (binding == bindings.end())
-        throw std::runtime_error("mir: categorical argument has no binding");
+        throw mir::MirError("mir: categorical argument has no binding");
       if (binding->second.view.depth != arg.unsized.depth ||
           binding->second.view.leaf != arg.unsized.leaf)
-        throw std::runtime_error(
+        throw mir::MirError(
             "mir: categorical argument type disagrees with its binding");
       // Do not compare adlevels here. stanc specializes an inlined user
       // function to its caller: the declaration can retain the function's
@@ -1018,28 +1018,28 @@ void validate_expression(const Expr& e, const Bindings& bindings,
   if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::UserDefined) {
     const auto found = functions.find(e.name);
     if (found == functions.end())
-      throw std::runtime_error("mir: call to unknown user function " + e.name);
+      throw mir::MirError("mir: call to unknown user function " + e.name);
     const FunDef& function = *found->second;
     if (e.args.size() != function.arg_names.size())
-      throw std::runtime_error("mir: user function arity mismatch for " +
+      throw mir::MirError("mir: user function arity mismatch for " +
                                e.name);
     for (size_t i = 0; i < e.args.size(); ++i) {
       if (e.args[i].unsized.depth != function.arg_views[i].depth ||
           e.args[i].unsized.leaf != function.arg_views[i].leaf)
-        throw std::runtime_error(
+        throw mir::MirError(
             "mir: user function argument type mismatch for " + e.name);
       if (e.args[i].kind == Expr::Var && !e.args[i].promoted) {
         const auto binding = bindings.find(e.args[i].name);
         if (binding == bindings.end() ||
             binding->second.view.depth != e.args[i].unsized.depth ||
             binding->second.view.leaf != e.args[i].unsized.leaf)
-          throw std::runtime_error(
+          throw mir::MirError(
               "mir: user function argument type disagrees with its binding "
               "for " +
               e.name);
       }
       if (function.arg_data_only[i] && !e.args[i].data_only)
-        throw std::runtime_error(
+        throw mir::MirError(
             "mir: data-only function argument depends on a parameter");
     }
   }
@@ -1055,11 +1055,11 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
   });
   if (s.kind == Stmt::NRFunApp && s.fn_name == "FnCheck") {
     if (!s.check_transform)
-      throw std::runtime_error("mir: FnCheck has no transform");
+      throw mir::MirError("mir: FnCheck has no transform");
     const Transform::Kind kind = s.check_transform->kind;
     if (is_structured_check(kind)) {
       if (!s.check_transform->args.empty() || s.fn_args.size() != 1)
-        throw std::runtime_error("mir: malformed structured FnCheck");
+        throw mir::MirError("mir: malformed structured FnCheck");
       const UnsizedLeaf leaf = s.fn_args[0].unsized.leaf;
       const bool matrix = leaf == UnsizedLeaf::Matrix;
       const bool vector = leaf == UnsizedLeaf::Vector;
@@ -1067,14 +1067,14 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
       const bool vector_only = kind != Transform::SumToZero && !matrix_only;
       if ((!matrix && !vector) || (matrix_only && !matrix) ||
           (vector_only && !vector))
-        throw std::runtime_error(
+        throw mir::MirError(
             "mir: structured FnCheck transform and value type disagree");
     } else if ((kind == Transform::Lower || kind == Transform::Upper) &&
                s.check_transform->args.size() == 1 && s.fn_args.size() == 2) {
       // Exact scalar/container compatibility is value- and shape-dependent;
       // the lowering/interpreter check it at the original statement site.
     } else {
-      throw std::runtime_error("mir: unsupported or malformed FnCheck");
+      throw mir::MirError("mir: unsupported or malformed FnCheck");
     }
     const Expr& value = s.fn_args[0];
     // --O1 constant propagation may substitute the checked value itself
@@ -1085,7 +1085,7 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
       if (binding == bindings.end() ||
           binding->second.view.depth != value.unsized.depth ||
           binding->second.view.leaf != value.unsized.leaf)
-        throw std::runtime_error(
+        throw mir::MirError(
             "mir: FnCheck value type disagrees with its declaration");
     }
   }
@@ -1097,7 +1097,7 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
         s.rhs.unsized.leaf != UnsizedLeaf::Unknown &&
         (binding->second.view.depth != s.rhs.unsized.depth ||
          binding->second.view.leaf != s.rhs.unsized.leaf))
-      throw std::runtime_error(
+      throw mir::MirError(
           "mir: assignment type disagrees with its binding for " + s.lhs);
   }
   if (s.kind == Stmt::Decl) {
@@ -1107,7 +1107,7 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
         s.init.unsized.leaf != UnsizedLeaf::Unknown &&
         (view.depth != s.init.unsized.depth ||
          view.leaf != s.init.unsized.leaf))
-      throw std::runtime_error(
+      throw mir::MirError(
           "mir: declaration initializer type disagrees with its binding for " +
           s.decl_id);
     const Binding declared{view, s.decl_data_only};
@@ -1208,12 +1208,12 @@ std::string resolve_overload(const Overloads::value_type& candidates,
   for (const FunDef* f : candidates.second) {
     if (!views_match(args, f->arg_views)) continue;
     if (match)
-      throw std::runtime_error("mir: ambiguous overload for " +
+      throw mir::MirError("mir: ambiguous overload for " +
                                candidates.first);
     match = f;
   }
   if (!match)
-    throw std::runtime_error("mir: no overload of " + candidates.first +
+    throw mir::MirError("mir: no overload of " + candidates.first +
                              " matches its call");
   return match->name;
 }
@@ -1224,11 +1224,11 @@ std::vector<UnsizedView> function_argument_views(const std::string& raw) {
   const Node type = sexp::parse(raw);
   if (!type.head_is("UFun") || type.size() != 2 || type[1].is_atom() ||
       type[1].size() == 0 || type[1][0].is_atom())
-    throw std::runtime_error("mir: malformed function type " + raw);
+    throw mir::MirError("mir: malformed function type " + raw);
   std::vector<UnsizedView> views;
   for (const Node& arg : type[1][0].kids) {
     if (arg.is_atom() || arg.size() != 2)
-      throw std::runtime_error("mir: malformed function type " + raw);
+      throw mir::MirError("mir: malformed function type " + raw);
     views.push_back(read_unsized(arg[1]));
   }
   return views;
@@ -1330,7 +1330,7 @@ void resolve_overloads(Program& prog) {
     for (size_t i = 0; i < defs.size(); ++i)
       for (size_t j = i + 1; j < defs.size(); ++j)
         if (views_match(defs[i]->arg_views, defs[j]->arg_views))
-          throw std::runtime_error("mir: indistinguishable overloads of " +
+          throw mir::MirError("mir: indistinguishable overloads of " +
                                    name);
     for (FunDef* f : defs) f->name += signature(f->arg_views);
     overloads[name] = std::move(defs);
@@ -1406,7 +1406,7 @@ void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
   for (const auto& f : prog.fun_defs) {
     const auto inserted = functions.emplace(f.name, &f);
     if (!inserted.second)
-      throw std::runtime_error(
+      throw mir::MirError(
           "mir: duplicate function name after overload resolution: " + f.name);
   }
   Bindings inputs;
@@ -1439,7 +1439,7 @@ Program read_program(const sexp::Node& root) {
   Program prog;
   nesting_meter = {};
   const Node* iv = field(root, "input_vars");
-  if (!iv) throw std::runtime_error("mir: no input_vars section");
+  if (!iv) throw mir::MirError("mir: no input_vars section");
   const Node& vars = (*iv)[1];
   for (size_t i = 0; i < vars.size(); ++i) {
     const Node& v = vars[i];  // (name <loc> sizedtype)
@@ -1471,7 +1471,7 @@ Program read_program(const sexp::Node& root) {
     }
   }
   const Node* lp = field(root, "log_prob");
-  if (!lp) throw std::runtime_error("mir: no log_prob section");
+  if (!lp) throw mir::MirError("mir: no log_prob section");
   read_stmt_list((*lp)[1], prog.log_prob);
   if (const Node* gq = field(root, "generate_quantities"))
     read_stmt_list((*gq)[1], prog.generate_quantities);

@@ -13,6 +13,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -20,6 +21,12 @@
 
 namespace stanli {
 namespace mir {
+
+// The MIR text is not something this reader understands: malformed, or
+// using a construct outside the slice.
+struct MirError : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
 
 enum class UnsizedLeaf : uint8_t {
   Unknown,

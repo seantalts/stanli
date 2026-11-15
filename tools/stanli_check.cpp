@@ -8,6 +8,12 @@
 // Used by tools/corpus.py to build the coverage scoreboard, and by the
 // reference harness to compare against CmdStan at the same point.
 //
+// --status-json PATH writes what the run found out as JSON lines, one
+// record each, flushed as written: a "compile" record, then a "point"
+// record per evaluated point. tools/check_status.py documents the fields
+// and reads them. stdout keeps the values and stderr the human-readable
+// notes.
+//
 // The model is compiled by the embedded stanc3 pipeline, the same one
 // stanli_run and the language packages use. A build without the embedded
 // object runs that pipeline's executable, stanli-compile, found beside this
@@ -32,6 +38,7 @@
 #include <stanli/graph.hpp>
 #include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
+#include <stanli/builtin_registry.hpp>
 
 #include "stanc_embedded.hpp"
 #include "stanc_process.hpp"
@@ -49,6 +56,64 @@
 #include <vector>
 
 using stanli::cross::check_point;
+using Json = nlohmann::json;
+
+// The JSON-lines status file. Every record is flushed when written, so a
+// run that crashes keeps the records it finished.
+class StatusFile {
+ public:
+  void open(const std::string& path) {
+    file_ = std::fopen(path.c_str(), "w");
+    if (!file_)
+      throw std::runtime_error("cannot write status file " + path);
+  }
+  void write(const Json& record) {
+    if (!file_) return;
+    const std::string line =
+        record.dump(-1, ' ', false, Json::error_handler_t::replace);
+    std::fprintf(file_, "%s\n", line.c_str());
+    std::fflush(file_);
+  }
+  ~StatusFile() {
+    if (file_) std::fclose(file_);
+  }
+
+ private:
+  std::FILE* file_ = nullptr;
+};
+
+// The C++ type of a failure, which is what says whether it is Stan Math
+// rejecting a value or stanli lacking a feature. A rejection the compiler
+// found early reports the class Stan Math would have thrown.
+static const char* error_kind(const std::exception& e) {
+  if (const auto* r = dynamic_cast<const stanli::StanMathCompileError*>(&e)) {
+    switch (r->error) {
+      case stanli::MessageError::Domain:
+        return "domain_error";
+      case stanli::MessageError::InvalidArgument:
+        return "invalid_argument";
+      case stanli::MessageError::OutOfRange:
+        return "out_of_range";
+      case stanli::MessageError::Runtime:
+        return "runtime_error";
+    }
+  }
+  if (dynamic_cast<const stanli::mir::MirError*>(&e)) return "mir_error";
+  if (dynamic_cast<const stanli::CompileError*>(&e)) return "compile_error";
+  if (dynamic_cast<const std::domain_error*>(&e)) return "domain_error";
+  if (dynamic_cast<const std::out_of_range*>(&e)) return "out_of_range";
+  if (dynamic_cast<const std::invalid_argument*>(&e))
+    return "invalid_argument";
+  return "runtime_error";
+}
+
+static Json failure(const char* stage, const std::exception& e) {
+  return {{"record", "compile"},
+          {"ok", false},
+          {"stage", stage},
+          {"error", error_kind(e)},
+          {"message", e.what()}};
+}
 
 static std::string one_line(std::string s) {
   while (!s.empty() &&
@@ -129,7 +194,8 @@ int main(int argc, char** argv) {
                  "       [--paths] [--cross [--cross-one lp|grad|wa] "
                  "[--draw-variant N] [--cross-points N] [--cross-rel-tol T]\n"
                  "        [--cross-corpus] [--ledger PATH]]\n"
-                 "       [--dump-passes=STAGES] [--dump-dir=DIR]\n"
+                 "       [--dump-passes=STAGES] [--dump-dir=DIR] "
+                 "[--status-json PATH]\n"
                  "       stanli_check --compiler\n");
     return 2;
   }
@@ -151,6 +217,7 @@ int main(int argc, char** argv) {
   double cross_rel_tol = 0.0;
   bool cross_corpus = false;
   std::string dump_stages, dump_dir;
+  std::string status_path;
   for (int i = 3; i < argc; ++i) {
     const std::string a = argv[i];
     if (a.rfind("--dump-passes=", 0) == 0)
@@ -177,6 +244,8 @@ int main(int argc, char** argv) {
       cross_rel_tol = std::atof(argv[++i]);
     else if (a == "--cross-corpus")
       cross_corpus = true;
+    else if (a == "--status-json" && i + 1 < argc)
+      status_path = argv[++i];
     else if (a == "--ledger" && i + 1 < argc)
       ledger_path = argv[++i];
     else if (a == "--stanc" && i + 1 < argc)
@@ -201,11 +270,22 @@ int main(int argc, char** argv) {
                  "mutually exclusive\n");
     return 2;
   }
-  if ((!dump_stages.empty() || !dump_dir.empty()) && (paths_only || cross)) {
+  if ((!dump_stages.empty() || !dump_dir.empty() || !status_path.empty()) &&
+      (paths_only || cross)) {
     std::fprintf(stderr,
-                 "stanli_check: --dump-passes and --dump-dir apply to the "
-                 "ordinary evaluation, not --paths or --cross\n");
+                 "stanli_check: --dump-passes, --dump-dir and --status-json "
+                 "apply to the ordinary evaluation, not --paths or --cross\n");
     return 2;
+  }
+
+  StatusFile status;
+  if (!status_path.empty()) {
+    try {
+      status.open(status_path);
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "stanli_check: %s\n", e.what());
+      return 2;
+    }
   }
 
   std::string mir;
@@ -213,13 +293,12 @@ int main(int argc, char** argv) {
     mir = mir_path.empty() ? stanli::tooling::compile_source(stanc, compiler,
                                                              argv[1], fast_math)
                            : read_mir(mir_path);
-    if (mir.empty()) {
-      std::printf("COMPILE_FAIL %s\n",
-                  mir_path.empty() ? "the Stan compiler exited without output"
+    if (mir.empty())
+      throw std::runtime_error(mir_path.empty()
+                                   ? "the Stan compiler exited without output"
                                    : "the MIR file is empty");
-      return 1;
-    }
   } catch (const std::exception& e) {
+    status.write(failure("stanc", e));
     const std::string what = e.what();
     std::fprintf(stderr, "%s\n", what.c_str());
     std::printf("COMPILE_FAIL %s\n",
@@ -235,6 +314,7 @@ int main(int argc, char** argv) {
     try {
       data = stanli::DataMap::from_json_file(argv[2]);
     } catch (const std::exception& e) {
+      status.write(failure("data", e));
       std::printf("COMPILE_FAIL data: %s\n", e.what());
       return 1;
     }
@@ -300,8 +380,10 @@ int main(int argc, char** argv) {
   }
 
   stanli::CompiledModel cm;
+  const char* stage = "data";
   try {
     stanli::DataMap data = stanli::DataMap::from_json_file(argv[2]);
+    stage = "model";
     stanli::CompileOptions compile_options;
     compile_options.fast_math = fast_math;
     if (!dump_stages.empty() || !dump_dir.empty()) {
@@ -314,12 +396,30 @@ int main(int argc, char** argv) {
       if (!note.empty()) std::fprintf(stderr, "INTERP %s\n", note.c_str());
     }
   } catch (const std::exception& e) {
+    status.write(failure(stage, e));
     std::string what = e.what();
     const size_t nl = what.find('\n');
     if (nl != std::string::npos && points.empty()) what = what.substr(0, nl);
     if (!points.empty()) what = one_line(what);
     std::printf("COMPILE_FAIL %s\n", what.c_str());
     return 1;
+  }
+
+  {
+    Json wa = {{"section", "none"}};
+    if (cm.write_array) {
+      wa = {{"section", cm.write_array->interp ? "interpreted" : "graph"},
+            {"columns", cm.write_array->interp
+                            ? cm.write_array->interp->columns().size()
+                            : cm.write_array->columns.size()},
+            {"truncated", cm.write_array->truncated.empty()
+                              ? Json()
+                              : Json(cm.write_array->truncated)}};
+    }
+    status.write({{"record", "compile"},
+                  {"ok", true},
+                  {"interpreter_fallbacks", cm.interpreter_fallbacks},
+                  {"write_array", wa}});
   }
 
   // --columns: the CSV header the write_array graph would write, for
@@ -339,7 +439,8 @@ int main(int argc, char** argv) {
     }
     std::printf("%s\n", h.c_str());
     if (!cm.write_array->truncated.empty())
-      std::fprintf(stderr, "TRUNCATED %s\n", cm.write_array->truncated.c_str());
+      std::fprintf(stderr, "write_array truncated: %s\n",
+                   cm.write_array->truncated.c_str());
     return 0;
   }
 
@@ -349,6 +450,7 @@ int main(int argc, char** argv) {
     const auto msg = [multi](const std::string& s) {
       return multi ? one_line(s) : s;
     };
+    Json record = {{"record", "point"}, {"point", variant}};
     try {
       if (!ex_store) {
         if (!ex_error.empty()) throw std::runtime_error(ex_error);
@@ -392,12 +494,28 @@ int main(int argc, char** argv) {
       if (prof_env && prof_env[0] != '0')
         std::fprintf(stderr, "%s", ex.profile_report().c_str());
 
-      // The write_array graph, exercised at the same point. Reported on stderr
-      // so the machine-readable stdout contract is unchanged; this is what the
-      // corpus sweep reads to say how many models get their transformed
-      // parameters and generated quantities.
+      // The write_array graph, exercised at the same point. The outcome goes
+      // in the point's status record, which verify_refs.py --wa-report reads
+      // to say how many models get their transformed parameters and
+      // generated quantities.
+      const auto wa_failed = [&](const std::exception& we) {
+        record["write_array"] = {{"ok", false},
+                                 {"error", error_kind(we)},
+                                 {"message", we.what()}};
+        if (wa_values)
+          std::printf("WANAMES FAIL %s\nWAVALS FAIL\n", msg(we.what()).c_str());
+      };
+      const auto wa_done = [&](size_t columns, int64_t values, int64_t bad) {
+        record["write_array"] = {{"ok", true},
+                                 {"columns", columns},
+                                 {"values", values},
+                                 {"nonfinite", bad}};
+        std::fprintf(stderr,
+                     "write_array: %zu columns, %lld values, %lld nonfinite\n",
+                     columns, (long long)values, (long long)bad);
+      };
       if (!cm.write_array) {
-        std::fprintf(stderr, "WA none\n");
+        std::fprintf(stderr, "write_array: no section\n");
       } else if (cm.write_array->interp) {
         // The graph could not express the whole section; the per-draw
         // interpreter runs all of it. Failures stay on stderr; the final
@@ -410,11 +528,7 @@ int main(int argc, char** argv) {
           int64_t bad = 0;
           for (double x : row)
             if (!std::isfinite(x)) ++bad;
-          std::fprintf(stderr,
-                       "WA %zu vars %lld values %lld nonfinite complete "
-                       "(interpreted: %s)\n",
-                       wi.columns().size(), (long long)row.size(),
-                       (long long)bad, cm.write_array->truncated.c_str());
+          wa_done(wi.columns().size(), (int64_t)row.size(), bad);
           if (wa_values) {
             std::string joined;
             for (const auto& nm :
@@ -427,13 +541,12 @@ int main(int argc, char** argv) {
             std::printf("\n");
           }
         } catch (const std::exception& we) {
-          std::fprintf(stderr, "WA empty interp: %s\n", we.what());
-          if (wa_values)
-            std::printf("WANAMES FAIL %s\nWAVALS FAIL\n",
-                        msg(we.what()).c_str());
+          std::fprintf(stderr, "write_array interpreter threw: %s\n",
+                       we.what());
+          wa_failed(we);
         }
       } else if (cm.write_array->columns.empty()) {
-        std::fprintf(stderr, "WA empty %s\n",
+        std::fprintf(stderr, "write_array: no columns: %s\n",
                      cm.write_array->truncated.c_str());
       } else {
         try {
@@ -460,12 +573,7 @@ int main(int argc, char** argv) {
             for (int64_t i = 0; i < c.len; ++i, ++width)
               if (!std::isfinite(p[i])) ++bad;
           }
-          std::fprintf(
-              stderr, "WA %zu vars %lld values %lld nonfinite %s\n",
-              cm.write_array->columns.size(), (long long)width, (long long)bad,
-              cm.write_array->truncated.empty()
-                  ? "complete"
-                  : ("truncated: " + cm.write_array->truncated).c_str());
+          wa_done(cm.write_array->columns.size(), width, bad);
           if (wa_values) {
             std::string joined;
             for (const auto& nm :
@@ -481,15 +589,10 @@ int main(int argc, char** argv) {
             std::printf("\n");
           }
         } catch (const std::exception& we) {
-          std::fprintf(stderr, "WA empty graph: %s\n", we.what());
-          if (wa_values)
-            std::printf("WANAMES FAIL %s\nWAVALS FAIL\n",
-                        msg(we.what()).c_str());
+          std::fprintf(stderr, "write_array graph threw: %s\n", we.what());
+          wa_failed(we);
         }
       }
-      if (wa_values && (!cm.write_array || (!cm.write_array->interp &&
-                                            cm.write_array->columns.empty())))
-        std::printf("WANAMES FAIL no write_array\nWAVALS FAIL\n");
       if (sweep > 0) {
         int evaluated = 0;
         for (int k = 1; k <= sweep; ++k) {
@@ -517,8 +620,14 @@ int main(int argc, char** argv) {
       print_real(lp);
       for (double g : grad) print_real(g);
       std::printf("\n");
+      record["ok"] = true;
+      status.write(record);
     } catch (const std::exception& e) {
       std::printf("EVAL_FAIL %s\n", msg(e.what()).c_str());
+      record["ok"] = false;
+      record["error"] = error_kind(e);
+      record["message"] = e.what();
+      status.write(record);
       return 1;
     }
     return 0;

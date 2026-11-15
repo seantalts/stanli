@@ -1060,6 +1060,22 @@ struct Lowering {
   [[noreturn]] void fail(const std::string& msg, const std::string& raw = "") {
     throw CompileError(msg + (raw.empty() ? "" : " | in: " + raw));
   }
+  // An error CmdStan would raise from Stan Math at run time, found here.
+  [[noreturn]] void reject(MessageError error, const std::string& msg,
+                           const std::string& raw = "") {
+    throw StanMathCompileError(error,
+                               msg + (raw.empty() ? "" : " | in: " + raw));
+  }
+  // A builtin resolver's error: Stan Math's own check, or stanli lacking
+  // the overload.
+  [[noreturn]] void fail_builtin(const std::string& function,
+                                 const std::exception& error,
+                                 const std::string& raw) {
+    if (dynamic_cast<const StanMathError*>(&error))
+      reject(MessageError::InvalidArgument,
+             builtin_error_message(function, error), raw);
+    fail(builtin_error_message(function, error), raw);
+  }
   // Every index the graph lowering sees is a bind-time constant, so the
   // bounds CmdStan checks at runtime are checked here, before an op that
   // would silently read a neighboring arena slot can be emitted.
@@ -1082,7 +1098,9 @@ struct Lowering {
   }
   void check_uni_index(int64_t i, int64_t n, const char* stan_label,
                        const std::string& raw) {
-    if (i < 1 || i > n) fail(index_out_of_range_message(stan_label, n, i), raw);
+    if (i < 1 || i > n)
+      reject(MessageError::OutOfRange,
+             index_out_of_range_message(stan_label, n, i), raw);
   }
   // A range with hi < lo is empty and never reads, whatever the endpoints.
   void check_range(int64_t lo, int64_t hi, int64_t n, const char* what,
@@ -1309,7 +1327,7 @@ struct Lowering {
       return builtin_layout(spec, shapes, e.name,
                             !in_write_array && mir::any_argument_active(e));
     } catch (const std::invalid_argument& error) {
-      fail(builtin_error_message(e.name, error), e.raw);
+      fail_builtin(e.name, error, e.raw);
     }
   }
 

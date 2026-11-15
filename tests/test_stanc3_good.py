@@ -17,6 +17,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 
 import check_stanc3_good as g  # noqa: E402
+import check_status  # noqa: E402
 
 
 def stanli(points, pre=None, code=0):
@@ -30,6 +31,22 @@ def stanli(points, pre=None, code=0):
 
 
 WA = ["WANAMES a,b", "WAVALS 1 2"]
+
+
+def failed(error):
+    """The status stanli_check writes for a compile failure of this kind."""
+    return check_status.CheckStatus({"record": "compile", "ok": False,
+                                     "stage": "model", "error": error,
+                                     "message": "m"})
+
+
+def compiled(write_arrays, section="graph"):
+    """A compiled model's status, with per-point write_array records."""
+    return check_status.CheckStatus(
+        {"record": "compile", "ok": True, "interpreter_fallbacks": [],
+         "write_array": {"section": section, "columns": 2, "truncated": None}},
+        {k: {"record": "point", "point": k, "ok": True, "write_array": wa}
+         for k, wa in write_arrays.items()})
 
 
 def ref_ok(lp_grad=("-1", "0.5"), wa=(["a", "b"], ["1", "2"])):
@@ -168,14 +185,57 @@ class ClassifyTest(unittest.TestCase):
     def test_compile_failures(self):
         ref = ref_ok()
         run = stanli({}, pre="COMPILE_FAIL unsupported function foo", code=1)
-        self.assertEqual(g.classify(ref, run)[0], "unsupported")
+        self.assertEqual(g.classify(ref, run, (), failed("compile_error"))[0],
+                         "unsupported")
+        self.assertEqual(g.classify(ref, run, (), failed("mir_error"))[0],
+                         "unsupported")
         run = stanli({}, pre="COMPILE_FAIL f: y is 3, but must be <= 2", code=1)
-        self.assertEqual(g.classify(ref, run)[0], "one_side_threw")
+        self.assertEqual(g.classify(ref, run, (), failed("domain_error"))[0],
+                         "one_side_threw")
         rejected = {"outcome": "data_fail",
                     "message": "Exception: f: y is 3, but must be <= 2 (in 'x')"}
-        self.assertEqual(g.classify(rejected, run)[0], "data_rejected")
+        self.assertEqual(g.classify(rejected, run, (),
+                                    failed("domain_error"))[0],
+                         "data_rejected")
         self.assertEqual(g.classify(rejected, stanli(all_points("OK -1 0.5")))[0],
                          "one_side_threw")
+
+    def test_the_error_kind_decides_not_the_wording(self):
+        run = stanli({}, pre="COMPILE_FAIL x not supported here", code=1)
+        self.assertEqual(g.classify(ref_ok(), run, (),
+                                    failed("invalid_argument"))[0],
+                         "one_side_threw")
+        rejected = {"outcome": "data_fail", "message": "something else"}
+        self.assertEqual(g.classify(rejected, run, (),
+                                    failed("out_of_range"))[0],
+                         "data_message_mismatch")
+        self.assertEqual(g.classify(rejected, run, (),
+                                    failed("compile_error"))[0],
+                         "unsupported")
+
+    def test_a_compile_failure_without_its_record_is_a_crash(self):
+        run = stanli({}, pre="COMPILE_FAIL unsupported function foo", code=1)
+        self.assertEqual(g.classify(ref_ok(), run)[0], "crashed")
+
+    def test_write_array_outcome_comes_from_the_status(self):
+        threw = all_points("OK -1 0.5", ["WANAMES FAIL f is unsupported",
+                                         "WAVALS FAIL"])
+        unsupported = compiled({k: {"ok": False, "error": "compile_error",
+                                    "message": "f"} for k in g.POINTS})
+        self.assertEqual(g.classify(ref_ok(), stanli(threw), (),
+                                    unsupported)[1],
+                         {str(k): "wa_unsupported" for k in g.POINTS})
+        rejected = compiled({k: {"ok": False, "error": "domain_error",
+                                 "message": "f"} for k in g.POINTS})
+        self.assertEqual(g.classify(ref_ok(), stanli(threw), (), rejected)[1],
+                         {str(k): "one_side_threw" for k in g.POINTS})
+        empty = ref_ok(wa=([], []))
+        no_row = stanli(all_points("OK -1 0.5", []))
+        self.assertEqual(g.classify(empty, no_row, (),
+                                    compiled({}, section="none"))[0],
+                         "verified")
+        self.assertEqual(g.classify(empty, no_row, (), compiled({}))[0],
+                         "points")
 
     def test_timeouts_and_crashes(self):
         self.assertEqual(g.classify(ref_ok(), None)[0], "timeout")

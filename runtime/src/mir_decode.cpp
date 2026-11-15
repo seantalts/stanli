@@ -23,12 +23,12 @@ mir::Program decode_text(std::string_view text) {
 
   size_t first = 0;
   while (first < text.size() && is_space(text[first])) ++first;
-  if (first == text.size()) throw std::runtime_error("mir: empty input");
+  if (first == text.size()) throw mir::MirError("mir: empty input");
 
   if (text[first] == '(')
     return mir::read_program(sexp::parse(text, 8 * size_t{nesting_limit()}));
 
-  throw std::runtime_error(
+  throw mir::MirError(
       "mir: unrecognized input format (expected compact portable MIR or "
       "legacy S-expression)");
 }

@@ -39,6 +39,7 @@ import dataclasses
 import gzip
 import json
 import math
+import os
 import pathlib
 import platform
 import re
@@ -51,6 +52,7 @@ import tempfile
 from corpus_inventory import (CorpusCase, corpus_cases, local_cases, materialize_data,
                               source_digest)
 import toolchain
+import check_status
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 N_SAMPLER_COLS = 7
@@ -355,6 +357,23 @@ def gradient_ulp(rv, gv):
     return math.ceil(diff / math.ulp(scale)) if diff else 0
 
 
+def run_check(cmd, timeout=None):
+    """(process, CheckStatus) for one stanli_check run.
+
+    The status file holds what the run found out beyond the values on
+    stdout; see tools/check_status.py.
+    """
+    fd, path = tempfile.mkstemp(prefix="stanli_status_", suffix=".jsonl")
+    os.close(fd)
+    try:
+        proc = subprocess.run([str(a) for a in cmd] + ["--status-json", path],
+                              capture_output=True, text=True, cwd=REPO,
+                              timeout=timeout)
+        return proc, check_status.read(path)
+    finally:
+        pathlib.Path(path).unlink(missing_ok=True)
+
+
 def parse_wa(out):
     """(names_csv, value_strings) from WANAMES/WAVALS lines, or None."""
     names, vals = None, None
@@ -456,10 +475,12 @@ def check_wa_headers(pdb, check_bin, cmdstan, models, excluded=()):
             continue
         runnable += 1
         stan, data = inputs
-        ours = subprocess.run([str(check_bin), str(stan), str(data), "--columns"],
-                              capture_output=True, text=True, cwd=REPO)
+        ours, status = run_check([check_bin, stan, data, "--columns"])
         if ours.returncode != 0:
             skipped.append((model, ours.stdout.strip()[:110]))
+            continue
+        if status.compile is None:
+            skipped.append((model, "stanli_check wrote no status record"))
             continue
         work = tmp / model
         work.mkdir()
@@ -468,7 +489,7 @@ def check_wa_headers(pdb, check_bin, cmdstan, models, excluded=()):
             skipped.append((model, why))
             continue
         got = ours.stdout.strip().split(",")
-        truncated = ours.stderr.startswith("TRUNCATED")
+        truncated = status.write_array().get("truncated") is not None
         ref = theirs[:len(got)] if truncated else theirs
         if got == ref:
             ok.append((model, len(got), truncated))
@@ -654,8 +675,7 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
     if want_wa:
         cmd.append("--wa-values")
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO,
-                              timeout=timeout)
+        proc, status = run_check(cmd, timeout)
     except subprocess.TimeoutExpired:
         return ("TIMEOUT", 0.0, 0, 0, f"point {point}")
     got = parse_status(proc.stdout)
@@ -682,14 +702,17 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
         crashed = proc.returncode < 0 or not got
         return ("CRASH" if crashed else "RUN_FAIL", 0.0, 0, 0,
                 f"point {point}: {fail_detail(proc, got)}")
+    if status.compile is None:
+        return ("CRASH", 0.0, 0, 0,
+                f"point {point}: stanli_check wrote no status record")
     expected = opts.interpreted if opts else model in CORPUS_INTERPRETED
-    if interpreted(proc.stderr) != expected:
-        note = next((line for line in proc.stderr.splitlines()
-                     if line.startswith("INTERP ")
-                     or "(interpreted:" in line), "")
+    if status.interpreted != expected:
+        parts = (status.compile["interpreter_fallbacks"]
+                 or ["write_array section"])
         return ("INTERPRETER", 0.0, 0, 0,
                 f"point {point}: " + (f"runs through the MIR interpreter: "
-                                      f"{note[:200]}" if not expected
+                                      f"{', '.join(parts)[:200]}"
+                                      if not expected
                                       else "expected the MIR interpreter"))
     rv = [float(x) for x in pt["values"]]
     gv = [float(x) for x in got[1:]]
@@ -776,13 +799,6 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
                           zip(where, wwhere, (worst, worst_ulp), (wworst, wulp)))
             worst, worst_ulp = max(worst, wworst), max(worst_ulp, wulp)
     return ("OK", worst, worst_ulp, n, where)
-
-
-def interpreted(stderr):
-    """Did stanli_check report running any part of the model interpreted?"""
-    return any(line.startswith("INTERP ")
-               or (line.startswith("WA ") and "(interpreted:" in line)
-               for line in stderr.splitlines())
 
 
 def density_label(index, opts):
@@ -950,6 +966,29 @@ def short_wa(msg):
             else msg.split("|")[0].strip()[:80])
 
 
+def wa_coverage(status, point):
+    """(row status, detail, reason or None) for one model's write_array.
+
+    The reason is what stops the section, for the report's tally.
+    """
+    section = status.write_array()
+    if section["section"] == "none":
+        return "NO_GQ_SECTION", "", None
+    truncated = section.get("truncated")
+    wa = status.points.get(point, {}).get("write_array")
+    if wa is None:
+        return "EMPTY", truncated or "", truncated or ""
+    if not wa["ok"]:
+        return "EMPTY", wa["message"], wa["message"]
+    note = (f", {wa['nonfinite']}/{wa['values']} nonfinite"
+            if wa["nonfinite"] else "")
+    if section["section"] == "interpreted":
+        return "COMPLETE", f"{wa['columns']} vars (interpreted){note}", None
+    if truncated is not None:
+        return "TRUNCATED", truncated + note, truncated
+    return "COMPLETE", f"{wa['columns']} vars{note}", None
+
+
 def check_wa_coverage(pdb, check_bin, models, contains, timeout, excluded=()):
     """Probe write_array at points 0--2 and report corpus coverage."""
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="stanli_wa_"))
@@ -966,45 +1005,24 @@ def check_wa_coverage(pdb, check_bin, models, contains, timeout, excluded=()):
         runnable += 1
         stan, data = inputs
         try:
-            for point in ("0", "1", "2"):
-                proc = subprocess.run(
-                    [str(check_bin), str(stan), str(data), "--point", point],
-                    capture_output=True, text=True, timeout=timeout, cwd=REPO)
-                if parse_status(proc.stdout)[:1] == ["OK"]:
+            for point in (0, 1, 2):
+                proc, status = run_check([check_bin, stan, data, "--point",
+                                          point], timeout)
+                if status.points.get(point, {}).get("ok"):
                     break
         except subprocess.TimeoutExpired:
             rows.append((model, "TIMEOUT", ""))
             continue
-        if parse_status(proc.stdout)[:1] != ["OK"]:
+        if not status.points.get(point, {}).get("ok"):
             continue
-        wa_lines = [line[3:] for line in proc.stderr.splitlines()
-                    if line.startswith("WA ")]
-        wa = wa_lines[-1] if wa_lines else ""
-        if wa.startswith("none"):
-            rows.append((model, "NO_GQ_SECTION", ""))
-            continue
-        if wa.startswith("empty"):
-            detail = wa[6:]
-            rows.append((model, "EMPTY", detail))
-            reasons[short_wa(detail)] += 1
-            continue
-        match = re.match(r"(\d+) vars (\d+) values (\d+) nonfinite (.*)", wa)
-        if not match:
-            rows.append((model, "UNPARSED", wa))
-            continue
-        nvars, nvals, nbad = map(int, match.groups()[:3])
-        tail = match[4]
-        note = f", {nbad}/{nvals} nonfinite" if nbad else ""
-        if tail.startswith("complete"):
-            mode = " (interpreted)" if "interpreted" in tail else ""
-            rows.append((model, "COMPLETE", f"{nvars} vars{mode}{note}"))
-        else:
-            rows.append((model, "TRUNCATED", tail + note))
-            reasons[short_wa(tail)] += 1
+        name, detail, reason = wa_coverage(status, point)
+        rows.append((model, name, detail))
+        if reason is not None:
+            reasons[short_wa(reason)] += 1
     counts = collections.Counter(row[1] for row in rows)
     print(f"{len(rows)} compiling models")
-    for name in ("COMPLETE", "TRUNCATED", "NONFINITE", "EMPTY", "NO_GQ_SECTION",
-                 "TIMEOUT", "UNPARSED"):
+    for name in ("COMPLETE", "TRUNCATED", "EMPTY", "NO_GQ_SECTION",
+                 "TIMEOUT"):
         if counts[name]:
             print(f"  {counts[name]:4d}  {name}")
     if reasons:

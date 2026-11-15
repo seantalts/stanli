@@ -11,6 +11,7 @@
 #include <stanli/data.hpp>
 #include <stanli/init_interp.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/message.hpp>
 #include <stanli/mir.hpp>
 
 #include <optional>
@@ -28,6 +29,16 @@ class WaInterp;
 
 struct CompileError : std::runtime_error {
   explicit CompileError(const std::string& what) : std::runtime_error(what) {}
+};
+
+// Stan Math rejecting the model's values, found while compiling: an index
+// out of range or a size mismatch that CmdStan reports at run time. `error`
+// is the class Stan Math's check throws. A CompileError, so every fallback
+// that catches one still does.
+struct StanMathCompileError : CompileError {
+  StanMathCompileError(MessageError error, const std::string& what)
+      : CompileError(what), error(error) {}
+  MessageError error;
 };
 
 struct CompiledModel {

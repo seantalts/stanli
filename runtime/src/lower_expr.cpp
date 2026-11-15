@@ -254,9 +254,10 @@ long Lowering::eval_int(const mir::Expr& e) {
               en->dims.empty() ? (int64_t)stored : en->dims[d];
           const long index = eval_int(e.args[d + 1].args[0]);
           if (index < 1 || index > extent)
-            fail(index_out_of_range_message("array[uni, ...] index", extent,
-                                            index),
-                 e.raw);
+            reject(MessageError::OutOfRange,
+                   index_out_of_range_message("array[uni, ...] index", extent,
+                                              index),
+                   e.raw);
           offset += (size_t)(index - 1) * stride;
           stride *= (size_t)extent;
         }
