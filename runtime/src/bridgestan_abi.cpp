@@ -44,8 +44,7 @@
 #include <stanli/wa_interp.hpp>
 
 #include "build_id.hpp"
-
-#include "../third_party/nlohmann_json.hpp"
+#include "data_document.hpp"
 
 #include <boost/random/uniform_real_distribution.hpp>
 
@@ -257,24 +256,26 @@ class bs_rng {
 
 namespace stanli {
 
-bool bs_read_manifest(const std::string& text, BsManifest* out,
-                      std::string* err) {
+namespace {
+
+bool read_manifest(const rapidjson::Value& root, BsManifest* out,
+                   std::string* err) {
   auto say = [&](const std::string& s) {
     if (err != nullptr) *err = s;
     return false;
   };
-  nlohmann::json root;
-  try {
-    root = nlohmann::json::parse(text);
-  } catch (const std::exception& e) {
-    return say(std::string("manifest is not valid JSON: ") + e.what());
-  }
-  if (!root.is_object()) return say("manifest is not a JSON object");
-  if (!root.contains("build_id") || !root["build_id"].is_string())
+  auto text_field = [&](const char* key) -> const rapidjson::Value* {
+    const auto it = root.FindMember(key);
+    return it != root.MemberEnd() && it->value.IsString() ? &it->value
+                                                          : nullptr;
+  };
+  if (!root.IsObject()) return say("manifest is not a JSON object");
+  const rapidjson::Value* id_field = text_field("build_id");
+  if (id_field == nullptr)
     return say("manifest has no string \"build_id\" field");
-  if (!root.contains("mir") || !root["mir"].is_string())
-    return say("manifest has no string \"mir\" field");
-  const std::string id = root["build_id"].get<std::string>();
+  const rapidjson::Value* mir_field = text_field("mir");
+  if (mir_field == nullptr) return say("manifest has no string \"mir\" field");
+  const std::string id(id_field->GetString(), id_field->GetStringLength());
   // A stale pair must fail loudly. The MIR dialect and the lowering that
   // reads it move together, so a manifest written by another build could
   // lower to something subtly different rather than not lower at all.
@@ -283,19 +284,37 @@ bool bs_read_manifest(const std::string& text, BsManifest* out,
                id + "\", this runtime is \"" + std::string(runtime_build_id()) +
                "\"");
   out->build_id = id;
-  out->mir = root["mir"].get<std::string>();
-  out->name = (root.contains("name") && root["name"].is_string())
-                  ? root["name"].get<std::string>()
-                  : std::string("stanli_model");
+  out->mir.assign(mir_field->GetString(), mir_field->GetStringLength());
+  const rapidjson::Value* name_field = text_field("name");
+  out->name = name_field != nullptr ? std::string(name_field->GetString(),
+                                                  name_field->GetStringLength())
+                                    : std::string();
   if (out->name.empty()) out->name = "stanli_model";
   return true;
 }
 
+}  // namespace
+
+bool bs_read_manifest(const std::string& text, BsManifest* out,
+                      std::string* err) {
+  rapidjson::Document root;
+  try {
+    root = parse_data_document(text);
+  } catch (const std::exception& e) {
+    if (err != nullptr)
+      *err = std::string("manifest is not valid JSON: ") + e.what();
+    return false;
+  }
+  return read_manifest(root, out, err);
+}
+
 }  // namespace stanli
 
-bs_model* bs_model_from_mir(const char* mir, const char* data,
-                            unsigned int seed, char** error_msg,
-                            const char* name) {
+namespace {
+
+bs_model* model_from_data(const char* mir, stanli::DataMap dm,
+                          unsigned int seed, char** error_msg,
+                          const char* name) {
   try {
     if (mir == nullptr) {
       set_error(error_msg, "null MIR text");
@@ -305,7 +324,6 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
     if (name != nullptr && name[0] != '\0') m->name = name;
     // Reference BridgeStan seeds transformed-data RNG calls with this, and
     // so does stanli's compile: the section runs once here, at construction.
-    stanli::DataMap dm = load_data(data);
     m->cm = stanli::compile_model(mir, dm, seed);
     dm = stanli::DataMap();
     m->ex.reset(new stanli::Executor(std::move(m->cm.graph)));
@@ -389,6 +407,21 @@ bs_model* bs_model_from_mir(const char* mir, const char* data,
   }
 }
 
+}  // namespace
+
+bs_model* bs_model_from_mir(const char* mir, const char* data,
+                            unsigned int seed, char** error_msg,
+                            const char* name) {
+  stanli::DataMap dm;
+  try {
+    dm = load_data(data);
+  } catch (const std::exception& e) {
+    set_error(error_msg, e.what());
+    return nullptr;
+  }
+  return model_from_data(mir, std::move(dm), seed, error_msg, name);
+}
+
 extern "C" {
 
 const int bs_major_version = 2;
@@ -422,26 +455,25 @@ bs_model* bs_model_construct(const char* data, unsigned int seed,
         ss << f.rdbuf();
         text = ss.str();
       }
-      if (text.find("\"__stanli\"") != std::string::npos) {
-        const nlohmann::json root = nlohmann::json::parse(text);
-        if (root.is_object() && root.contains("__stanli")) {
+      rapidjson::Document root = stanli::parse_data_document(text);
+      if (root.IsObject()) {
+        const auto member = root.FindMember("__stanli");
+        if (member != root.MemberEnd()) {
           stanli::BsManifest man;
           std::string err;
-          if (!stanli::bs_read_manifest(root["__stanli"].dump(), &man, &err)) {
+          if (!stanli::read_manifest(member->value, &man, &err)) {
             set_error(error_msg, "embedded __stanli manifest: " + err);
             return nullptr;
           }
-          nlohmann::json rest = root;
-          rest.erase("__stanli");
-          const std::string rest_text = rest.dump();
-          return bs_model_from_mir(man.mir.c_str(), rest_text.c_str(), seed,
-                                   error_msg, man.name.c_str());
+          root.EraseMember(member);
+          return model_from_data(man.mir.c_str(),
+                                 stanli::data_from_document(root), seed,
+                                 error_msg, man.name.c_str());
         }
       }
     }
   } catch (const std::exception& e) {
-    set_error(error_msg,
-              std::string("embedded __stanli manifest: ") + e.what());
+    set_error(error_msg, std::string("data argument: ") + e.what());
     return nullptr;
   } catch (...) {
     set_error(error_msg, "unknown error reading the embedded manifest");
