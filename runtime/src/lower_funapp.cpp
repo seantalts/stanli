@@ -635,7 +635,7 @@ Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
         binds[i].iv = actual.require_constant_int("integer argument");
         binds[i].is_int = true;
       } catch (const CompileError&) {
-        if (in_write_array || !needs_runtime_value(a)) throw;
+        if (!needs_runtime_value(a)) throw;
       }
     }
     if (!binds[i].is_int) {

@@ -161,7 +161,7 @@ deviations are in [`docs/corpus-status.md`](docs/corpus-status.md).
 | `signatures` | 74 generated models covering 19,641 signatures, one output per case | `signature_refs_*` |
 | `sized_functions` | 5 models calling library functions at real sizes | `test_sized_functions_reference` |
 | `container_flow` | 66 models that write each container shape in each block and read it back | `test_container_flow_reference` |
-| `fixtures` | 58 models from `tests/fixtures`, held to 10 ULP | `*_reference` |
+| `fixtures` | 59 models from `tests/fixtures`, held to 10 ULP | `*_reference` |
 | `cmdstan_replay` | 14 models for lowering rewrites that stock stanc's `--O1` MIR reaches | `test_cmdstan_replay` |
 | `oncobayes2` | the 3 OncoBayes2 models | `test_oncobayes2_reference` |
 
@@ -169,9 +169,7 @@ deviations are in [`docs/corpus-status.md`](docs/corpus-status.md).
 stanc (the `_stanc` CTests). A model fails when it runs interpreted and its
 corpus does not list it as interpreted, or the reverse. The main corpus replay
 applies the same rule with `CORPUS_INTERPRETED` in
-[`tools/verify_refs.py`](tools/verify_refs.py), which lists `ctsem_ctsm` and
-`ctsem_ctsm_400`: a size expression in their generated quantities reads an
-integer the compiled `write_array` cannot size.
+[`tools/verify_refs.py`](tools/verify_refs.py), which is empty.
 
 [`tools/verify_sample.py`](tools/verify_sample.py) records the references, and
 `--corpus NAME` a local corpus, through CmdStan's own driver

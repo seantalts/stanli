@@ -25,6 +25,7 @@ O0_FIXTURES = {
     "call_argument_cache",
     "gq_udf_return_layout",
     "gq_rng_udf_effect",
+    "gq_runtime_int_index",
     "gq_udf_branch_rng",
     "gq_udf_loop_return_o0",
     "gq_function_exits",

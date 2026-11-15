@@ -101,10 +101,7 @@ KNOWN_GAPS = {}
 # other model that reports an interpreted log density or write_array
 # fails with INTERPRETER, and so does a listed model that no longer
 # does, as INTERPRETED does for the local corpora.
-CORPUS_INTERPRETED = {
-    name: "generated quantities: a size expression reads the integer pr2, "
-          "which the compiled write_array cannot size"
-    for name in ("ctsem_ctsm", "ctsem_ctsm_400")}
+CORPUS_INTERPRETED = {}
 
 # (model, point) pairs excused from probe_point's finite-gradient rule,
 # for points that carry no reference at all. Empty while every point is

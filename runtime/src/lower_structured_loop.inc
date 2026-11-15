@@ -1590,8 +1590,16 @@ bool runtime_int_expression(const mir::Expr& e) {
   return integer_reads(integer_reads, e) && found && !try_eval_pure(e);
 }
 bool runtime_selector(const mir::Expr& index) {
-  for (const auto& argument : index.args)
+  for (const auto& argument : index.args) {
     if (runtime_only(argument)) return true;
+    // write_array keeps parameter-dependent values out of runtime_only, but
+    // an integer index cannot depend on a parameter. One read from a slot
+    // (an integer a runtime loop wrote) still selects at run time.
+    if (write_array_unregioned() && index.name == "IndexSingle" &&
+        argument.type_ == "UInt" && needs_runtime_value(argument) &&
+        !try_eval_pure(argument))
+      return true;
+  }
   return false;
 }
 std::optional<long> static_int(const mir::Expr& e) {

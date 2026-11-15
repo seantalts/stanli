@@ -790,14 +790,16 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // Indexed node with none left.
       if (e.args.size() == 1) return base;
       if (e.args.size() == 2 && e.args[1].name == "IndexAll") return base;
-      if (std::any_of(
+      const bool dynamic_slice = in_write_array && e.args.size() == 2 &&
+                                 e.args[1].name == "IndexSingle" &&
+                                 runtime_int_value(e.args[1].args[0]);
+      if (!(dynamic_slice && write_array_unregioned()) &&
+          std::any_of(
               e.args.begin() + 1, e.args.end(),
               [&](const mir::Expr& ix) { return runtime_selector(ix); }))
         return region_index(base, {e.args.begin() + 1, e.args.end()}, e.type_,
                             e.unsized);
-      if (in_write_array && e.args.size() == 2 &&
-          e.args[1].name == "IndexSingle" &&
-          runtime_int_value(e.args[1].args[0])) {
+      if (dynamic_slice) {
         const Val index = lower_expr(e.args[1].args[0]);
         if (!is_scalar(index)) fail("runtime index is not scalar", e.raw);
         int64_t count = 0, width = 0;

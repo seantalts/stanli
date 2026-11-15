@@ -1019,6 +1019,17 @@ bool Lowering::static_int_bookkeeping(const std::vector<mir::Stmt>& body) {
             expr_effectful(s.rhs) || needs_runtime_value(s.rhs))
           return false;
         break;
+      case mir::Stmt::IfElse:
+        if (expr_effectful(s.cond) || needs_runtime_value(s.cond) ||
+            !static_int_bookkeeping(s.body))
+          return false;
+        break;
+      case mir::Stmt::For:
+        if (expr_effectful(s.lower) || needs_runtime_value(s.lower) ||
+            expr_effectful(s.upper) || needs_runtime_value(s.upper) ||
+            !static_int_bookkeeping(s.body))
+          return false;
+        break;
       default:
         return false;
     }
