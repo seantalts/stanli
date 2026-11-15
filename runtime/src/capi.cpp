@@ -1841,6 +1841,21 @@ const char* stanli_constrained_name(const stanli_model* m, int64_t i) {
   return m->flat_names[i].c_str();
 }
 
+int64_t stanli_n_param_blocks(const stanli_model* m) {
+  return m->whiten ? 0 : (int64_t)m->cm.unc_params.size();
+}
+
+const char* stanli_param_block_name(const stanli_model* m, int64_t i) {
+  if (m->whiten || i < 0 || i >= (int64_t)m->cm.unc_params.size())
+    return nullptr;
+  return m->cm.unc_params[(size_t)i].name.c_str();
+}
+
+int64_t stanli_param_block_size(const stanli_model* m, int64_t i) {
+  if (m->whiten || i < 0 || i >= (int64_t)m->cm.unc_params.size()) return -1;
+  return m->cm.unc_params[(size_t)i].len;
+}
+
 int64_t stanli_wa_n_columns(const stanli_model* m) { return m->wa_n; }
 
 const char* stanli_warnings(const stanli_model* m) {

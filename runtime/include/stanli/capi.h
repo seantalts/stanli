@@ -610,6 +610,15 @@ int stanli_optimize(stanli_model* m, const stanli_optimize_opts* opts,
  * n_constrained gives the output length; names are "mu", "theta.1", ... */
 int64_t stanli_n_constrained(const stanli_model* m);
 const char* stanli_constrained_name(const stanli_model* m, int64_t i);
+
+/* The unconstrained vector as declared parameters, in declaration order:
+ * block i is stanli_param_block_size(m, i) consecutive entries and belongs to
+ * the parameter stanli_param_block_name(m, i). A simplex of K entries is one
+ * block of K - 1. A whitened model reports no blocks, because its vector is
+ * not in the declared parameters' terms. */
+int64_t stanli_n_param_blocks(const stanli_model* m);
+const char* stanli_param_block_name(const stanli_model* m, int64_t i);
+int64_t stanli_param_block_size(const stanli_model* m, int64_t i);
 int stanli_constrain(stanli_model* m, const double* q, double* out);
 
 /* Single-chain NUTS with diagonal-metric adaptation. `cb`, when non-null,

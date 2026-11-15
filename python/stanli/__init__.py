@@ -23,6 +23,7 @@ import warnings
 import numpy as np
 
 __all__ = ["Model", "Function", "Fit", "Summary", "OptimizeResult",
+           "laplace_whiten", "LaplaceWhitenReport",
            "exact_lp", "thread_safe", "stan_to_mir", "build_id",
            "bridgestan_model", "bridgestan_data", "runtime_path",
            "SAMPLER_COLUMNS", "O1FallbackWarning", "__version__"]
@@ -221,6 +222,12 @@ def _load_lib():
     lib.stanli_n_constrained.argtypes = [ctypes.c_void_p]
     lib.stanli_constrained_name.restype = ctypes.c_char_p
     lib.stanli_constrained_name.argtypes = [ctypes.c_void_p, ctypes.c_int64]
+    lib.stanli_n_param_blocks.restype = ctypes.c_int64
+    lib.stanli_n_param_blocks.argtypes = [ctypes.c_void_p]
+    lib.stanli_param_block_name.restype = ctypes.c_char_p
+    lib.stanli_param_block_name.argtypes = [ctypes.c_void_p, ctypes.c_int64]
+    lib.stanli_param_block_size.restype = ctypes.c_int64
+    lib.stanli_param_block_size.argtypes = [ctypes.c_void_p, ctypes.c_int64]
     lib.stanli_has_embedded_stanc.restype = ctypes.c_int
     lib.stanli_exact_lp.restype = ctypes.c_int
     lib.stanli_reduce_sum_count.restype = ctypes.c_int
@@ -1652,6 +1659,16 @@ class Model:
             raise ValueError(err.value.decode())
         return q
 
+    def _unconstrained_layout(self):
+        """[(parameter name, unconstrained entries)] in vector order.
+
+        Empty for a whitened model, whose vector is not in the declared
+        parameters' terms.
+        """
+        return [(_lib.stanli_param_block_name(self._handle, i).decode(),
+                 _lib.stanli_param_block_size(self._handle, i))
+                for i in range(_lib.stanli_n_param_blocks(self._handle))]
+
     def _column_names(self):
         """The CSV columns for a draw, and whether write_array supplies them.
 
@@ -2042,3 +2059,4 @@ class Model:
 
 # Kept separate from Model's JSON data path: functions bind typed buffers.
 from ._function import Function  # noqa: E402
+from .laplace import LaplaceWhitenReport, laplace_whiten  # noqa: E402
