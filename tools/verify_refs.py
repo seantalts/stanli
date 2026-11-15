@@ -633,7 +633,7 @@ def fast_dev(rv, gv):
 
 
 def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
-                strict=False, fast_math=False, opts=None):
+                strict=False, fast_math=False, opts=None, off_platform=False):
     """Replay one recorded point. (status, worst, worst_ulp, n, detail).
 
     A point whose entry has no `values` is one CmdStan itself refuses (it
@@ -711,7 +711,8 @@ def check_point(model, stan, dj, check_bin, point, pt, timeout, no_wa,
             worst_ulp = worst_pair(*([v for i, v in enumerate(side)
                                       if i not in own] for side in (rv, gv)),
                                    floor)[1]
-        if model in GRADIENT_AGAINST_LARGEST:
+        if model in GRADIENT_AGAINST_LARGEST or (
+                off_platform and model in GRADIENT_AGAINST_LARGEST_OFF_PLATFORM):
             worst_ulp = max(worst_pair(rv[:1], gv[:1])[1],
                             gradient_ulp(rv[1:], gv[1:]))
     if opts and opts.ulp is not None and worst_ulp > opts.ulp:
@@ -871,6 +872,9 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
     else:
         ulp_limit = None if fast_math else ulp_limit_for(
             model, ref, target_platform or native_platform())
+    recorded_on = ref.get("recorded", {}).get("platform")
+    off_platform = recorded_on is not None and recorded_on != (
+        target_platform or native_platform())
     strict = ref.get("strict", False) or bool(opts and opts.strict)
     if strict:
         if set(ref.get("points", {})) != {str(p) for p in POINTS}:
@@ -887,7 +891,7 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
             done = {point: pool.submit(
                         check_point, model, stan, dj, check_bin, point,
                         ref["points"][str(point)], timeout, no_wa, strict,
-                        fast_math, opts)
+                        fast_math, opts, off_platform)
                     for point in POINTS if str(point) in ref["points"]
                     and (model, point) not in QUARANTINED}
     for point in POINTS:
@@ -918,7 +922,7 @@ def replay_model(model, ref, pdb, check_bin, tmp, timeout, max_rel,
         status, rel, ulp, n, detail = (
             done[point].result() if point in done else check_point(
                 model, stan, dj, check_bin, point, pt, timeout, no_wa, strict,
-                fast_math))
+                fast_math, off_platform=off_platform))
         total += n
         if status != "OK":
             return (model, status, worst, worst_ulp, total, detail, notes)
@@ -1100,6 +1104,23 @@ VALUE_ULP_LIMITS = {
                  "nested_callback_contexts_fallback")}
 
 
+# Fixtures whose gradient is measured against its largest entry when replayed
+# on a platform other than the one the reference was recorded on. Their
+# covariance comes from Eigen's matrix product, whose arm64 kernel fuses each
+# multiply-add; x86-64 and MSVC builds round the product first. Gradient
+# entries that cancel to a hundredth of the largest one amplify that last
+# bit: stanli on Linux and Windows is up to 507 ULP per element from the
+# arm64 CmdStan reference, and 4 ULP of the largest entry. CmdStan built with
+# the unfused kernel matches stanli on Linux within 2 ULP per element. Against
+# an 80-digit reference neither is closer: at multi_gp_rectangular grad[19]
+# stanli on Linux is 222 ULP off and the arm64 reference 285, at
+# propto_multi_gp grad[95] 166 and 70, and the largest gradient error is the
+# same on both platforms.
+GRADIENT_AGAINST_LARGEST_OFF_PLATFORM = dict.fromkeys(
+    ("multi_gp_rectangular", "propto_data_arguments", "propto_multi_gp"),
+    "cancelling covariance gradient; Eigen's product fuses on arm64 only")
+
+
 @dataclasses.dataclass(frozen=True, eq=False)
 class Replay:
     """How check_point runs and gates one model of a local corpus."""
@@ -1241,7 +1262,8 @@ def pin_drift(recorded, required=("cmdstan", "stan", "math")):
     return ""
 
 
-def replay_corpus(name, selected, check_bin, stanc, jobs, timeout):
+def replay_corpus(name, selected, check_bin, stanc, jobs, timeout,
+                  target_platform=None):
     """Replay a local corpus against its archive. Exit status."""
     corpus = CORPORA[name]
     refs, _ = load_corpus_refs(corpus)
@@ -1300,7 +1322,8 @@ def replay_corpus(name, selected, check_bin, stanc, jobs, timeout):
                           corpus.ulp, corpus.scale_floor, corpus.strict,
                           labels, columns, VALUE_ULP_LIMITS.get(model, {}))
             return check_model(model, ref, None, check_bin, work, timeout,
-                               1e-9, opts=opts)
+                               1e-9, target_platform=target_platform,
+                               opts=opts)
 
         leg = " through stock stanc" if stanc else ""
         with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
@@ -1371,7 +1394,7 @@ def main():
             ap.error("--corpus takes models with --model")
         return replay_corpus(args.corpus, args.model, args.check.resolve(),
                              args.stanc and args.stanc.resolve(), args.jobs,
-                             args.timeout)
+                             args.timeout, args.target_platform)
     if args.pdb is None:
         ap.error("the posteriordb checkout is required without --corpus")
     if args.max_rel is None:

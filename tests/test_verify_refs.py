@@ -539,6 +539,28 @@ class CorpusOptionsTest(unittest.TestCase):
         self.assertIn("grad[1] (stanli 1.0000000000000024, CmdStan 1.0)",
                       result[5])
 
+    def test_cancelling_fixtures_use_the_largest_entry_off_platform(self):
+        # 11 ULP of a gradient entry of 1, 1 ULP of the largest entry (8).
+        pt = {"values": ["-3.5", "1", "8"]}
+        body = f'echo "OK -3.5 {1.0 + 11 * math.ulp(1.0)!r} 8"'
+        listed = {MODEL: "cause"}
+
+        def run(platform):
+            ref = {"recorded": {"platform": platform},
+                   "points": {str(p): pt for p in POINTS}}
+            opts = verify_refs.Replay(self.SOURCE,
+                                      self.SOURCE.with_suffix(".json"), ulp=10)
+            with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.dict(
+                    verify_refs.GRADIENT_AGAINST_LARGEST_OFF_PLATFORM, listed):
+                return check_model(MODEL, ref, None, stub(tmp, body),
+                                   pathlib.Path(tmp), 60, 1e-9, opts=opts)[1]
+
+        here = verify_refs.native_platform()
+        self.assertEqual(run(here), "ULP_GATE")
+        self.assertEqual(run("Elsewhere x"), "OK")
+        listed.clear()
+        self.assertEqual(run("Elsewhere x"), "ULP_GATE")
+
     def test_a_wider_value_limit_needs_its_independent_value(self):
         near = 1.0 + 12 * math.ulp(1.0)
         body = f'echo "OK -3.5 {near!r} -2"'

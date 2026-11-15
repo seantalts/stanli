@@ -48,7 +48,12 @@ CI enforces:
   recorded on the same platform (`ULP_LIMITS` in
   [`tools/verify_refs.py`](tools/verify_refs.py)), and for the fixtures
   corpus on every platform. For the models in `GRADIENT_AGAINST_LARGEST`, the
-  gradient is measured in ULP of its largest entry.
+  gradient is measured in ULP of its largest entry, and so is it for the
+  fixtures in `GRADIENT_AGAINST_LARGEST_OFF_PLATFORM` on platforms other than
+  the one that recorded them. Eigen's matrix product fuses multiply-adds on
+  arm64 and not on x86-64 or MSVC, and their covariance gradients cancel.
+  CmdStan with the unfused product matches stanli within 2 ULP, and against an
+  80-digit reference the largest gradient error is the same on both platforms.
 - A scaled error `|a-b| / max(|a|, |b|, 1)` below 1e-9 for every other
   reference comparison. This check catches implementation errors and does not
   prove a ULP bound; per-model ULP distances are in
