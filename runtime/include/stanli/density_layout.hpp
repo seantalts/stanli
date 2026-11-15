@@ -13,15 +13,19 @@
 
 namespace stanli {
 
+// Out of line so the decoders below stay small enough to inline into every
+// kernel call. Throws std::logic_error.
+[[noreturn]] void density_layout_error(const char* what);
+
 // ---- integer groups -------------------------------------------------------
 // Integer arguments, one group each: [count_0, values_0..., ...,
 // count_{n-1}, values_{n-1}..., scalar_mask]. Bit k of scalar_mask says
 // argument k is a language int, which broadcasts; it has count 1. A
 // one-element array has count 1 and its bit clear.
 struct IntGroup {
-  const int* values = nullptr;
-  int64_t count = 0;
-  bool scalar = false;
+  const int* values;
+  int64_t count;
+  bool scalar;
 
   // Element n: the scalar for every n, or the array's n-th entry.
   int at(int64_t n) const { return values[scalar ? 0 : n]; }
@@ -42,27 +46,29 @@ inline void append_int_group(std::vector<int>& idata, const int* values,
   idata.insert(idata.end(), values, values + count);
 }
 
-inline IntGroups int_groups(const int* idata, int64_t n_idata, int n_groups) {
+[[gnu::always_inline]] inline IntGroups int_groups(const int* idata,
+                                                   int64_t n_idata,
+                                                   int n_groups) {
   if (n_groups < 1 || n_groups > kMaxIntGroups || n_idata < 1)
-    throw std::logic_error("malformed integer density groups");
+    density_layout_error("malformed integer density groups");
   IntGroups g;
   g.n = n_groups;
   const int scalar_mask = idata[n_idata - 1];
   int64_t at = 0;
   for (int k = 0; k < n_groups; ++k) {
     if (at >= n_idata - 1)
-      throw std::logic_error("truncated integer density groups");
+      density_layout_error("truncated integer density groups");
     const int64_t count = idata[at++];
     if (count < 0 || count > n_idata - 1 - at)
-      throw std::logic_error("malformed integer density groups");
+      density_layout_error("malformed integer density groups");
     const bool scalar = (scalar_mask >> k) & 1;
     if (scalar && count != 1)
-      throw std::logic_error("malformed scalar integer density group");
+      density_layout_error("malformed scalar integer density group");
     g.group[k] = {idata + at, count, scalar};
     at += count;
   }
   if (at != n_idata - 1 || (scalar_mask >> n_groups) != 0)
-    throw std::logic_error("trailing integer density groups");
+    density_layout_error("trailing integer density groups");
   return g;
 }
 
@@ -99,14 +105,15 @@ inline void append_glm_layout(std::vector<int>& idata, int rows, int cols,
   idata.push_back(flags);
 }
 
-inline GlmLayout glm_layout(const int* idata, int64_t n_idata) {
+[[gnu::always_inline]] inline GlmLayout glm_layout(const int* idata,
+                                                   int64_t n_idata) {
   if (idata == nullptr || n_idata < kGlmHeader)
-    throw std::logic_error("GLM op has no layout");
+    density_layout_error("GLM op has no layout");
   const int* h = idata + n_idata - kGlmHeader;
   if (h[0] < 0 || h[1] < 0 ||
       (h[2] & ~(kGlmScalarFirstOutcome | kGlmScalarSecondOutcome |
                 kGlmRowVectorDesign)) != 0)
-    throw std::logic_error("malformed GLM layout");
+    density_layout_error("malformed GLM layout");
   return {h[0], h[1], h[2], idata, n_idata - kGlmHeader};
 }
 
@@ -118,7 +125,7 @@ inline constexpr int kMaxVectorizedArgs = 4;
 
 struct VectorizedLayout {
   int64_t width = 0;
-  int64_t count[kMaxVectorizedArgs] = {};
+  int64_t count[kMaxVectorizedArgs];  // the first n_args are set
   int array_mask = 0;
   const int* outcomes = nullptr;
   int64_t n_outcomes = 0;
@@ -134,12 +141,12 @@ inline void append_vectorized_layout(std::vector<int>& idata, int width,
   idata.push_back(array_mask);
 }
 
-inline VectorizedLayout vectorized_layout(const int* idata, int64_t n_idata,
-                                          int n_args) {
+[[gnu::always_inline]] inline VectorizedLayout vectorized_layout(
+    const int* idata, int64_t n_idata, int n_args) {
   const int64_t header = 2 + n_args;
   if (idata == nullptr || n_args < 1 || n_args > kMaxVectorizedArgs ||
       n_idata < header)
-    throw std::logic_error("density has no vector layout");
+    density_layout_error("density has no vector layout");
   const int* h = idata + n_idata - header;
   VectorizedLayout v;
   v.width = h[0];
@@ -147,11 +154,11 @@ inline VectorizedLayout vectorized_layout(const int* idata, int64_t n_idata,
   v.outcomes = idata;
   v.n_outcomes = n_idata - header;
   if (v.width < 0 || (v.array_mask >> n_args) != 0)
-    throw std::logic_error("malformed vector layout");
+    density_layout_error("malformed vector layout");
   for (int j = 0; j < n_args; ++j) {
     v.count[j] = h[1 + j];
     if (v.count[j] < 0 || (!v.is_array(j) && v.count[j] != 1))
-      throw std::logic_error("malformed vector layout");
+      density_layout_error("malformed vector layout");
   }
   return v;
 }

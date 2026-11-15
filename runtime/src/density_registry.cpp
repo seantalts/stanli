@@ -79,6 +79,8 @@ double evaluate_all_integer(
 
 }  // namespace
 
+void density_layout_error(const char* what) { throw std::logic_error(what); }
+
 DensityCallArgument integer_density_argument(std::vector<int> values,
                                              bool scalar, bool data_only) {
   DensityCallArgument argument;

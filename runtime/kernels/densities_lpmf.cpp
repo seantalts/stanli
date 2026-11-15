@@ -279,7 +279,7 @@ STANLI_INT_DENSITY_LIST(STANLI_DEFINE_INT_DENSITY)
 // Binomials carry two integer groups, outcomes then trials (IntGroups in
 // density_layout.hpp). A language int scalar broadcasts; stan-math would
 // reject a size-1 vector against a longer group.
-IntGroups binomial_groups(const KernelCtx& ctx) {
+[[gnu::always_inline]] inline IntGroups binomial_groups(const KernelCtx& ctx) {
   return int_groups(ctx.idata, ctx.n_idata, 2);
 }
 template <typename F>

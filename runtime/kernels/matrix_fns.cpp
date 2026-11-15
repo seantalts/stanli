@@ -1870,7 +1870,7 @@ void ologistic_fwd(KernelCtx& ctx) {
     return;
   }
   if (dens::fused_density_active()) {
-    dens::ordered_logistic_lpmf_fused(ctx);
+    dens::ordered_logistic_lpmf_fused(ctx, layout.n_outcomes);
     return;
   }
   if constexpr (!dens::kFusedOnly) {

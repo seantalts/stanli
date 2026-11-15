@@ -1,5 +1,4 @@
 #include "density_fused.hpp"
-#include <stanli/density_layout.hpp>
 
 #include <stan/math/prim/err.hpp>
 #include <stan/math/prim/fun/Eigen.hpp>
@@ -931,12 +930,10 @@ void set_fused_density(bool on) {
 std::size_t fused_density_calls() { return g_calls; }
 #endif
 
-void ordered_logistic_lpmf_fused(KernelCtx& ctx) {
+void ordered_logistic_lpmf_fused(KernelCtx& ctx, int64_t n) {
   count_call();
   static constexpr const char* function = "ordered_logistic";
-  const VectorizedLayout layout = vectorized_layout(ctx.idata, ctx.n_idata, 1);
-  const int64_t n = layout.n_outcomes;
-  const int* y = layout.outcomes;
+  const int* y = ctx.idata;
   const int64_t L = ctx.in[0].len, C = ctx.in[1].len;
   const double* lambda = ctx.in[0].data;
   const double* cut = ctx.in[1].data;
