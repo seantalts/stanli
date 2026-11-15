@@ -29,7 +29,7 @@ constexpr uint32_t kMaxListItems = 1000000;
 constexpr size_t kMaxValues = 10000000;
 
 [[noreturn]] void fail_wire(size_t offset, const std::string& message) {
-  throw std::runtime_error("portable mir v2 at byte " + std::to_string(offset) +
+  throw std::runtime_error("portable mir at byte " + std::to_string(offset) +
                            ": " + message);
 }
 
@@ -188,7 +188,7 @@ class Reader {
    public:
     explicit Depth(Reader& reader) : reader_(reader) {
       if (reader_.depth_ >= 2 * nesting_limit())
-        throw NestingTooDeep("portable mir v2: nested too deeply (more than " +
+        throw NestingTooDeep("portable mir: nested too deeply (more than " +
                              std::to_string(nesting_limit()) + " levels)");
       reader_.peak_ = std::max(reader_.peak_, ++reader_.depth_);
     }
@@ -212,7 +212,7 @@ class Reader {
   }
 
   [[noreturn]] void fail(const std::string& message) const {
-    throw std::runtime_error("portable mir v2 at byte " +
+    throw std::runtime_error("portable mir at byte " +
                              std::to_string(position_) + ": " + message);
   }
 
@@ -299,19 +299,34 @@ constexpr std::array<FnSuffix, 6> kSuffixTags = {
     FnSuffix::Plain, FnSuffix::Rng,    FnSuffix::Lpdf,
     FnSuffix::Lpmf,  FnSuffix::Target, FnSuffix::Jacobian};
 
-constexpr std::array<Transform::Kind, 17> kTransformTags = {
-    Transform::Identity,         Transform::Lower,        Transform::Upper,
-    Transform::LowerUpper,       Transform::Offset,       Transform::Multiplier,
-    Transform::OffsetMultiplier, Transform::Simplex,      Transform::Ordered,
-    Transform::PositiveOrdered,  Transform::CholeskyCorr, Transform::UnitVector,
-    Transform::SumToZero,        Transform::Correlation,  Transform::Covariance,
-    Transform::CholeskyCov,      Transform::Unsupported};
+constexpr std::array<Transform::Kind, 19> kTransformTags = {
+    Transform::Identity,
+    Transform::Lower,
+    Transform::Upper,
+    Transform::LowerUpper,
+    Transform::Offset,
+    Transform::Multiplier,
+    Transform::OffsetMultiplier,
+    Transform::Simplex,
+    Transform::Ordered,
+    Transform::PositiveOrdered,
+    Transform::CholeskyCorr,
+    Transform::UnitVector,
+    Transform::SumToZero,
+    Transform::Correlation,
+    Transform::Covariance,
+    Transform::CholeskyCov,
+    Transform::StochasticColumn,
+    Transform::StochasticRow,
+    Transform::Unsupported};
 
-constexpr std::array<Stmt::Kind, 14> kStmtTags = {
-    Stmt::Decl,     Stmt::Assignment, Stmt::TargetPE, Stmt::Block,
-    Stmt::SList,    Stmt::For,        Stmt::IfElse,   Stmt::While,
-    Stmt::NRFunApp, Stmt::Return,     Stmt::Break,    Stmt::Continue,
-    Stmt::Skip,     Stmt::Unsupported};
+// Tag 14 is `jacobian +=`, a TargetPE with its jacobian flag set.
+constexpr uint8_t kJacobianPETag = 14;
+constexpr std::array<Stmt::Kind, 15> kStmtTags = {
+    Stmt::Decl,     Stmt::Assignment,  Stmt::TargetPE, Stmt::Block,
+    Stmt::SList,    Stmt::For,         Stmt::IfElse,   Stmt::While,
+    Stmt::NRFunApp, Stmt::Return,      Stmt::Break,    Stmt::Continue,
+    Stmt::Skip,     Stmt::Unsupported, Stmt::TargetPE};
 
 UnsizedView read_view(Reader& reader) {
   UnsizedView view;
@@ -403,12 +418,6 @@ Transform read_transform(Reader& reader) {
   value.kind = read_tag(reader, tag, kTransformTags, "unknown transform tag");
   value.args = read_exprs(reader);
   value.raw = reader.string();
-  if (value.kind == Transform::Unsupported) {
-    if (value.raw == "StochasticColumn")
-      value.kind = Transform::StochasticColumn;
-    else if (value.raw == "StochasticRow")
-      value.kind = Transform::StochasticRow;
-  }
   return value;
 }
 
@@ -429,6 +438,16 @@ SizedType read_sized(Reader& reader) {
   return value;
 }
 
+// A declaration's type: tag 0 is sized, tag 1 unsized.
+SizedType read_decl_type(Reader& reader) {
+  const uint8_t tag = reader.u8();
+  if (tag == 0) return read_sized(reader);
+  if (tag != 1) reader.fail("unknown declaration-type tag");
+  const UnsizedView view = read_view(reader);
+  std::string raw = reader.string();
+  return unsized_declaration(view, std::move(raw));
+}
+
 std::vector<Stmt> read_stmts(Reader& reader) {
   return reader.list<Stmt>([&] { return read_stmt(reader); });
 }
@@ -438,10 +457,11 @@ Stmt read_stmt(Reader& reader) {
   Stmt value;
   const uint8_t tag = reader.u8();
   value.kind = read_tag(reader, tag, kStmtTags, "unknown statement tag");
+  value.jacobian = tag == kJacobianPETag;
   switch (value.kind) {
     case Stmt::Decl:
       value.decl_id = reader.string();
-      value.decl_type = read_sized(reader);
+      value.decl_type = read_decl_type(reader);
       value.decl_data_only = reader.boolean();
       value.has_init = reader.boolean();
       if (value.has_init) value.init = read_expr(reader);
@@ -484,16 +504,23 @@ Stmt read_stmt(Reader& reader) {
       value.fn_name = reader.string();
       value.fn_suffix = read_suffix(reader);
       value.fn_args = read_exprs(reader);
-      value.check_transform = read_optional_transform(reader);
-      value.check_var_name = reader.string();
+      // FnCheck's and FnWriteParam's value leads their operand list, ahead
+      // of a check's bounds.
+      const uint8_t payload = reader.u8();
+      const std::string_view internal = internal_name(value);
+      if (payload != (internal == "FnCheck"        ? 1
+                      : internal == "FnWriteParam" ? 2
+                                                   : 0))
+        reader.fail("statement payload does not match its function");
+      if (payload == 1) {
+        value.check_transform = read_transform(reader);
+        value.check_var_name = reader.string();
+      } else if (payload == 2) {
+        value.write_transform = read_optional_transform(reader);
+      }
+      if (payload != 0)
+        value.fn_args.insert(value.fn_args.begin(), read_expr(reader));
       value.raw = reader.string();
-      // FnCheck and FnWriteParam share the wire's optional-transform slot.
-      // Split them here so the rest of the runtime never has to ask which
-      // meaning a transform carries: FnCheck verifies a constraint,
-      // FnWriteParam names one to invert.
-      if (internal_name(value) == "FnWriteParam")
-        value.write_transform =
-            std::exchange(value.check_transform, std::nullopt);
       break;
     }
     case Stmt::Return:

@@ -545,20 +545,14 @@ Stmt read_stmt(const Node& n) {
       s.decl_data_only = (*ad)[1].is_atom() && (*ad)[1].atom == "DataOnly";
     if (const Node* dt = field(p, "decl_type")) {
       const Node& t = (*dt)[1];  // (Sized ST) or (Unsized T)
-      s.decl_type = t.head_is("Sized") ? read_sized(t[1]) : SizedType{};
-      if (!t.head_is("Sized")) {
+      if (t.head_is("Sized"))
+        s.decl_type = read_sized(t[1]);
+      else if (t.head_is("Unsized") && t.size() == 2) {
+        const UnsizedView view = read_unsized(t[1]);
+        s.decl_type = detail::unsized_declaration(
+            view, view.leaf == UnsizedLeaf::Unknown ? dump(t[1]) : "");
+      } else
         s.decl_type.raw = dump(t);
-        // stanc3 declares scalar and container temporaries unsized. Scalars
-        // have a fixed width, so retain the historical sized spelling;
-        // container shapes are restored during finalization and supplied by
-        // their first whole-variable assignment during lowering.
-        if (t.size() > 1 && t[1].is_atom()) {
-          if (t[1].atom == "UReal")
-            s.decl_type.base = "SReal";
-          else if (t[1].atom == "UInt")
-            s.decl_type.base = "SInt";
-        }
-      }
     }
     if (const Node* init = field(p, "initialize")) {
       const Node& iv = (*init)[1];
@@ -598,9 +592,8 @@ Stmt read_stmt(const Node& n) {
     }
     s.rhs = read_expr(p[p.size() - 1]);
   } else if (head == "TargetPE" || head == "JacobianPE") {
-    // The model is always evaluated with jacobian=true, and write_array
-    // never adds to the target, so `jacobian +=` is a target increment.
     s.kind = Stmt::TargetPE;
+    s.jacobian = head == "JacobianPE";
     s.target = read_expr(p[1]);
   } else if (head == "Block") {
     s.kind = Stmt::Block;
@@ -1340,32 +1333,6 @@ void unmangle(Program& prog) {
   for (std::string& name : prog.output_vars) unmangle(name);
 }
 
-void restore_unsized_decls(Stmt& s, bool strict) {
-  if (s.kind == Stmt::Decl && s.decl_type.base.empty()) {
-    const std::string& raw = s.decl_type.raw;
-    const bool looks_unsized = raw.compare(0, 8, "(Unsized") == 0;
-    const bool wrapped = raw.size() > 10 &&
-                         raw.compare(0, 9, "(Unsized ") == 0 &&
-                         raw.back() == ')';
-    bool parsed = false;
-    if (wrapped) {
-      const std::string_view spelling(raw.data() + 9, raw.size() - 10);
-      parsed = parse_unsized_spelling(spelling, &s.decl_type.unsized);
-    }
-    if (strict && looks_unsized && !parsed)
-      malformed("unsized declaration type");
-  }
-  for (Stmt& child : s.body) restore_unsized_decls(child, strict);
-}
-
-void restore_unsized_decls(Program& prog, bool strict) {
-  for (auto* body : {&prog.prepare_data, &prog.log_prob,
-                     &prog.generate_quantities, &prog.transform_inits})
-    for (Stmt& s : *body) restore_unsized_decls(s, strict);
-  for (FunDef& f : prog.fun_defs)
-    for (Stmt& s : f.body) restore_unsized_decls(s, strict);
-}
-
 void resolve_overloads(Program& prog) {
   std::map<std::string, std::vector<FunDef*>> by_name;
   for (FunDef& f : prog.fun_defs) by_name[f.name].push_back(&f);
@@ -1391,23 +1358,24 @@ void resolve_overloads(Program& prog) {
 
 }  // namespace
 
+SizedType detail::unsized_declaration(const UnsizedView& view,
+                                      std::string raw) {
+  SizedType type;
+  type.raw = std::move(raw);
+  if (view.depth == 0 && view.leaf == UnsizedLeaf::Int)
+    type.base = "SInt";
+  else if (view.depth == 0 && view.leaf == UnsizedLeaf::Real)
+    type.base = "SReal";
+  else
+    type.unsized = view;
+  return type;
+}
+
 void detail::validate_portable_program(const Program& prog) {
   validate_program_shape(prog);
 }
 
 namespace {
-
-// The portable format has no JacobianPE statement; it carries the statement
-// as stanc3's s-expression.
-void read_jacobian_statements(Stmt& s) {
-  if (s.kind == Stmt::Unsupported && s.raw.rfind("(JacobianPE ", 0) == 0) {
-    const Node pattern = sexp::parse(s.raw);
-    if (pattern.size() != 2) malformed("JacobianPE statement");
-    s.kind = Stmt::TargetPE;
-    s.target = read_expr(pattern[1]);
-  }
-  for (Stmt& child : s.body) read_jacobian_statements(child);
-}
 
 // stanc3 wraps an argument in eval() to force an Eigen expression; the value
 // is the argument's.
@@ -1425,26 +1393,19 @@ void strip_eval(Stmt& s) {
   for (Stmt& child : s.body) strip_eval(child);
 }
 
-void read_jacobian_statements(Program& prog) {
+void strip_eval(Program& prog) {
   for (auto* body : {&prog.prepare_data, &prog.log_prob,
                      &prog.generate_quantities, &prog.transform_inits})
-    for (Stmt& s : *body) {
-      read_jacobian_statements(s);
-      strip_eval(s);
-    }
+    for (Stmt& s : *body) strip_eval(s);
   for (FunDef& f : prog.fun_defs)
-    for (Stmt& s : f.body) {
-      read_jacobian_statements(s);
-      strip_eval(s);
-    }
+    for (Stmt& s : f.body) strip_eval(s);
 }
 
 }  // namespace
 
 void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
-  read_jacobian_statements(prog);
+  strip_eval(prog);
   unmangle(prog);
-  restore_unsized_decls(prog, strict_variable_metadata);
   resolve_overloads(prog);
   Functions functions;
   for (const auto& f : prog.fun_defs) {

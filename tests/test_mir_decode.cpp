@@ -191,11 +191,19 @@ void append_stmt_list(std::string& bytes,
 }
 
 void append_stmt(std::string& bytes, const mir::Stmt& value) {
-  append_u8(bytes, static_cast<uint8_t>(value.kind));
+  append_u8(bytes, value.jacobian ? 14 : static_cast<uint8_t>(value.kind));
   switch (value.kind) {
     case mir::Stmt::Decl:
       append_string(bytes, value.decl_id);
-      append_sized(bytes, value.decl_type);
+      if (!value.decl_type.base.empty() ||
+          value.decl_type.unsized.leaf == mir::UnsizedLeaf::Unknown) {
+        append_u8(bytes, 0);
+        append_sized(bytes, value.decl_type);
+      } else {
+        append_u8(bytes, 1);
+        append_view(bytes, value.decl_type.unsized);
+        append_string(bytes, value.decl_type.raw);
+      }
       append_bool(bytes, value.decl_data_only);
       append_bool(bytes, value.has_init);
       if (value.has_init) append_expr(bytes, value.init);
@@ -235,11 +243,29 @@ void append_stmt(std::string& bytes, const mir::Stmt& value) {
       append_u8(bytes, static_cast<uint8_t>(value.fn_lib));
       append_string(bytes, value.fn_name);
       append_u8(bytes, static_cast<uint8_t>(value.fn_suffix));
-      append_expr_list(bytes, value.fn_args);
-      append_optional_transform(bytes, value.fn_name == "FnWriteParam"
-                                           ? value.write_transform
-                                           : value.check_transform);
-      append_string(bytes, value.check_var_name);
+      if (mir::internal_name(value) == "FnCheck" ||
+          mir::internal_name(value) == "FnWriteParam") {
+        const bool check = mir::internal_name(value) == "FnCheck";
+        const std::vector<mir::Expr> args =
+            value.fn_args.empty()
+                ? std::vector<mir::Expr>{}
+                : std::vector<mir::Expr>(value.fn_args.begin() + 1,
+                                         value.fn_args.end());
+        append_expr_list(bytes, args);
+        append_u8(bytes, check ? 1 : 2);
+        if (check) {
+          append_transform(bytes,
+                           value.check_transform.value_or(mir::Transform{}));
+          append_string(bytes, value.check_var_name);
+        } else {
+          append_optional_transform(bytes, value.write_transform);
+        }
+        append_expr(
+            bytes, value.fn_args.empty() ? mir::Expr{} : value.fn_args.front());
+      } else {
+        append_expr_list(bytes, value.fn_args);
+        append_u8(bytes, 0);
+      }
       append_string(bytes, value.raw);
       break;
     case mir::Stmt::Return:
@@ -504,6 +530,10 @@ const char* write_transform_kind(mir::Transform::Kind value) {
       return "Covariance";
     case mir::Transform::CholeskyCov:
       return "CholeskyCov";
+    case mir::Transform::StochasticColumn:
+      return "StochasticColumn";
+    case mir::Transform::StochasticRow:
+      return "StochasticRow";
     case mir::Transform::Unsupported:
       return "Unsupported";
   }
@@ -573,6 +603,7 @@ json write_stmt(const mir::Stmt& value) {
           {"lhs_idx", write_array(value.lhs_idx, write_expr)},
           {"rhs", write_expr(value.rhs)},
           {"target", write_expr(value.target)},
+          {"jacobian", value.jacobian},
           {"fn_lib", write_expr_lib(value.fn_lib)},
           {"fn_name", value.fn_name},
           {"fn_suffix", static_cast<int>(value.fn_suffix)},
@@ -1331,7 +1362,7 @@ void check_structural_rejections() {
   mir::Stmt unsized_declaration;
   unsized_declaration.kind = mir::Stmt::Decl;
   unsized_declaration.decl_id = "tmp";
-  unsized_declaration.decl_type.raw = "(Unsized (UArray UReal))";
+  unsized_declaration.decl_type.unsized = {1, mir::UnsizedLeaf::Real};
   unsized_assignment.log_prob.push_back(std::move(unsized_declaration));
   mir::Stmt first_assignment;
   first_assignment.kind = mir::Stmt::Assignment;
@@ -1365,10 +1396,6 @@ void check_structural_rejections() {
   expect_error(write_v2(wrong_unsized_initializer),
                "declaration initializer type disagrees with its binding",
                "unsized declaration initializer mismatch");
-  mir::Program malformed_unsized = unsized_assignment;
-  malformed_unsized.log_prob[0].decl_type.raw = "(Unsized (UArray UFuture))";
-  expect_error(write_v2(malformed_unsized), "unsized declaration type",
-               "malformed unsized declaration spelling");
 
   mir::Program bad_function;
   mir::FunDef function;
@@ -1639,6 +1666,7 @@ void check_v2_rejections() {
     append_u32(payload, 1);
     append_u8(payload, 0);  // Decl
     append_string(payload, "x");
+    append_u8(payload, 0);  // sized
     append_string(payload, "SReal");
     append_u32(payload, 0);  // dimensions
     append_string(payload, "");
@@ -1653,6 +1681,28 @@ void check_v2_rejections() {
                "optional marker is not 0 or 1", "v2 invalid optional marker");
   expect_error(v2_wire(declaration_through_transform(1, 0xff)),
                "unknown transform tag", "v2 unknown transform tag");
+  std::string unknown_declaration_type;
+  append_u32(unknown_declaration_type, 0);
+  append_u32(unknown_declaration_type, 0);
+  append_u32(unknown_declaration_type, 1);
+  append_u8(unknown_declaration_type, 0);  // Decl
+  append_string(unknown_declaration_type, "x");
+  append_u8(unknown_declaration_type, 2);
+  expect_error(v2_wire(unknown_declaration_type),
+               "unknown declaration-type tag", "unknown declaration-type tag");
+  std::string check_without_payload;
+  append_u32(check_without_payload, 0);
+  append_u32(check_without_payload, 0);
+  append_u32(check_without_payload, 1);
+  append_u8(check_without_payload, 8);  // NRFunApp
+  append_u8(check_without_payload, 1);  // Internal
+  append_string(check_without_payload, "FnCheck");
+  append_u8(check_without_payload, 0);   // FnPlain
+  append_u32(check_without_payload, 0);  // arguments
+  append_u8(check_without_payload, 0);   // no payload
+  expect_error(v2_wire(check_without_payload),
+               "statement payload does not match its function",
+               "FnCheck without its payload");
 
   expect_error(v2_wire(real_target_v2_payload(0, 2)), "boolean is not 0 or 1",
                "v2 invalid boolean");

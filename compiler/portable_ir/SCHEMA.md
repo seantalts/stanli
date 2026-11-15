@@ -210,7 +210,9 @@ string raw
 | 13 | `Correlation` |
 | 14 | `Covariance` |
 | 15 | `CholeskyCov` |
-| 16 | `Unsupported` |
+| 16 | `StochasticColumn` |
+| 17 | `StochasticRow` |
+| 18 | `Unsupported` |
 
 Argument arities are checked against the selected kind.
 
@@ -228,6 +230,42 @@ string raw
 element for an array and is empty otherwise. Dimension counts are validated
 against the base.
 
+### `DeclType`
+
+```text
+u8 tag
+```
+
+| `tag` | Meaning | Fields after tag |
+| ---: | --- | --- |
+| 0 | `Sized` | `SizedType type` |
+| 1 | `Unsized` | `UnsizedView view`, `string raw` |
+
+stanc3 declares optimizer temporaries, such as an inlined function's result,
+unsized; the first whole-variable assignment gives such a container its
+shape. `raw` spells an `Unknown` leaf's stanc3 type for diagnostics and is
+otherwise empty. The decoder gives an unsized `int` or `real` the sized
+`SInt`/`SReal` spelling, since a scalar's width is fixed.
+
+### Statement payload
+
+The two compiler-internal statement functions that carry data beyond their
+arguments say so with a tag. Any other statement uses tag 0, and the tag must
+match the function.
+
+| Tag | Function | Fields after tag |
+| ---: | --- | --- |
+| 0 | any other | none |
+| 1 | `FnCheck` | `Transform constraint`, `string var_name`, `Expr value` |
+| 2 | `FnWriteParam` | `optional<Transform> unconstrain`, `Expr value` |
+
+`FnCheck` verifies `value` against `constraint`, whose bounds are the
+statement's arguments. `FnWriteParam` writes `value`; in `transform_inits`
+`unconstrain` is the transform to invert, turning an already-constrained
+value into a free one, and in `generate_quantities` it is absent because the
+value is constrained already. The decoder puts `value` first in the
+statement's argument list.
+
 ### Statement kind
 
 Each statement starts with one tag and then only fields active for that kind.
@@ -235,7 +273,7 @@ There is no inactive-field block.
 
 | Tag | Kind | Active fields after tag |
 | ---: | --- | --- |
-| 0 | `Decl` | `string id`, `SizedType type`, `bool data_only`, `bool has_init`, optional `Expr init`, `optional<Transform> read_transform`, `list<Expr> read_dims`, `string raw` |
+| 0 | `Decl` | `string id`, `DeclType type`, `bool data_only`, `bool has_init`, optional `Expr init`, `optional<Transform> read_transform`, `list<Expr> read_dims`, `string raw` |
 | 1 | `Assignment` | `string lhs`, `list<Expr> lhs_indices`, `Expr rhs`, `string raw` |
 | 2 | `TargetPE` | `Expr target`, `string raw` |
 | 3 | `Block` | `list<Stmt> body`, `string raw` |
@@ -243,16 +281,20 @@ There is no inactive-field block.
 | 5 | `For` | `string loopvar`, `Expr lower`, `Expr upper`, `list<Stmt> body`, `string raw` |
 | 6 | `IfElse` | `Expr condition`, `list<Stmt> body`, `string raw` |
 | 7 | `While` | `Expr condition`, `list<Stmt> body`, `string raw` |
-| 8 | `NRFunApp` | `u8 library`, `string name`, `u8 suffix`, `list<Expr> args`, `optional<Transform> payload_transform`, `string check_var_name`, `string raw` |
+| 8 | `NRFunApp` | `u8 library`, `string name`, `u8 suffix`, `list<Expr> args`, `u8 payload` and its fields, `string raw` |
 | 9 | `Return` | `bool has_value`, optional `Expr value`, `string raw` |
 | 10 | `Break` | none |
 | 11 | `Continue` | none |
 | 12 | `Skip` | `string raw` |
 | 13 | `Unsupported` | `string raw` |
+| 14 | `JacobianPE` | `Expr target`, `string raw` |
+
+`JacobianPE` is `jacobian += target`. The decoder reads it as a `TargetPE`
+whose `jacobian` flag is set: stanli always evaluates the density with the
+Jacobian, so it adds to the target like any other increment.
 
 The `IfElse` body has one or two statements in then/else order. `For` and
-`While` each have exactly one body statement. `FnCheck` and `FnWriteParam`
-payload fields follow the same structural conventions as the legacy mapping.
+`While` each have exactly one body statement.
 
 ### `FunDef`
 
@@ -294,14 +336,6 @@ list<Stmt> transform_inits   (optional; see below)
 ```
 
 An `InputVar` is `string name` followed by `SizedType type`.
-
-`payload_transform` is the one optional-transform slot an `NRFunApp` carries.
-Its meaning follows the internal function name, and the decoder splits the two
-apart so no consumer has to ask: on `FnCheck` it is the constraint being
-verified; on the `FnWriteParam` of `transform_inits` it is the transform to
-INVERT, turning an already-constrained value into a free one. The
-`FnWriteParam`s of `generate_quantities` carry none -- their values are
-constrained already.
 
 `transform_inits` is stanc3's inverse parameter-transform section: its
 `FnReadData` calls name PARAMETERS read from a caller-supplied init context

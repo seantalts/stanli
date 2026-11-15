@@ -27,10 +27,19 @@ type wire_transform = {t_kind: string; t_args: wire_expr list; t_raw: string}
 type wire_sized =
   {s_base: string; s_dims: wire_expr list; s_elem_base: string; s_raw: string}
 
-type wire_stmt =
+(* The payload of the two statement internals that carry one: FnCheck's
+   constraint, checked variable name and value, and FnWriteParam's optional
+   transform to invert and the value it writes. *)
+type wire_payload =
+  | No_payload
+  | Check_payload of wire_transform * string * wire_expr
+  | Write_payload of wire_transform option * wire_expr
+
+and wire_stmt =
   { st_kind: string
   ; st_decl_id: string
   ; st_decl_type: wire_sized
+  ; st_decl_unsized: (unsized_view * string) option
   ; st_decl_data_only: bool
   ; st_has_init: bool
   ; st_init: wire_expr
@@ -44,8 +53,7 @@ type wire_stmt =
   ; st_fn_name: string
   ; st_fn_suffix: int
   ; st_fn_args: wire_expr list
-  ; st_check_transform: wire_transform option
-  ; st_check_var_name: string
+  ; st_payload: wire_payload
   ; st_loopvar: string
   ; st_lower: wire_expr
   ; st_upper: wire_expr
@@ -86,6 +94,7 @@ let default_stmt () =
   { st_kind= "Unsupported"
   ; st_decl_id= ""
   ; st_decl_type= default_sized ()
+  ; st_decl_unsized= None
   ; st_decl_data_only= false
   ; st_has_init= false
   ; st_init= default_expr ()
@@ -99,8 +108,7 @@ let default_stmt () =
   ; st_fn_name= ""
   ; st_fn_suffix= 0
   ; st_fn_args= []
-  ; st_check_transform= None
-  ; st_check_var_name= ""
+  ; st_payload= No_payload
   ; st_loopvar= ""
   ; st_lower= default_expr ()
   ; st_upper= default_expr ()
@@ -136,8 +144,6 @@ let raw_transform transform =
 
 let raw_sized sized =
   sexp_string (SizedType.sexp_of_t Expr.Typed.sexp_of_t sized)
-
-let raw_type typ = sexp_string (Type.sexp_of_t Expr.Typed.sexp_of_t typ)
 
 let raw_stmt_pattern pattern =
   sexp_string
@@ -395,18 +401,18 @@ let transform_of_t transform =
       { t_kind= "OffsetMultiplier"
       ; t_args= List.map ~f:expr_of_t [offset; multiplier]
       ; t_raw= "" }
-  | (StochasticRow | StochasticColumn | TupleTransformation _) as unsupported ->
+  | StochasticColumn -> supported_atom "StochasticColumn"
+  | StochasticRow -> supported_atom "StochasticRow"
+  | TupleTransformation _ as unsupported ->
       {t_kind= "Unsupported"; t_args= []; t_raw= raw_transform unsupported}
 
-let decl_sized_of_type = function
-  | Type.Sized sized -> sized_of_t sized
-  | Unsized unsized as typ ->
-      let base =
-        match unsized with
-        | UnsizedType.UInt -> "SInt"
-        | UReal -> "SReal"
-        | _ -> "" in
-      {(default_sized ()) with s_base= base; s_raw= raw_type typ}
+(* stanc3 declares optimizer temporaries, such as an inlined function's
+   result, without sizes; the first whole assignment gives them a shape. *)
+let decl_unsized_of_type = function
+  | Type.Sized _ -> None
+  | Unsized unsized ->
+      let view, _, raw = unsized_view_and_type unsized in
+      Some (view, raw)
 
 let read_param_fields (expr : Expr.Typed.t) =
   match expr.pattern with
@@ -430,7 +436,11 @@ let rec stmt_of_t (stmt : Stmt.Located.t) =
       { (default_stmt ()) with
         st_kind= "Decl"
       ; st_decl_id= decl_id
-      ; st_decl_type= decl_sized_of_type decl_type
+      ; st_decl_type=
+          (match decl_type with
+          | Type.Sized sized -> sized_of_t sized
+          | Unsized _ -> default_sized ())
+      ; st_decl_unsized= decl_unsized_of_type decl_type
       ; st_decl_data_only= is_data_only decl_adtype
       ; st_has_init= initialized
       ; st_init= init
@@ -491,37 +501,36 @@ let rec stmt_of_t (stmt : Stmt.Located.t) =
       { (default_stmt ()) with
         st_kind= "Block"
       ; st_body= List.map ~f:stmt_of_t body }
-  | JacobianPE _ ->
-      { (default_stmt ()) with
-        st_kind= "Unsupported"
-      ; st_raw= raw_stmt_pattern stmt.pattern }
+  | JacobianPE expr ->
+      {(default_stmt ()) with st_kind= "JacobianPE"; st_target= expr_of_t expr}
 
 and nr_fun_app_of_t kind args =
   let ordinary_args = List.map ~f:expr_of_t args in
   match kind with
   | Fun_kind.CompilerInternal internal ->
       let name = internal_name internal in
-      (* One optional-transform slot serves both internals that carry one,
-         disambiguated by the function name. FnCheck names the constraint it
-         verifies; transform_inits' FnWriteParam names the transform to
-         INVERT, turning an already-constrained value into a free one.
-         write_array's own FnWriteParam carries none -- its value is
-         constrained already -- so documents produced before transform_inits
-         was encoded stay byte-identical. *)
-      let payload_args, payload_transform, check_var_name =
+      (* transform_inits' FnWriteParam names the transform to INVERT, turning
+         an already-constrained value into a free one; write_array's own
+         carries none, its value being constrained already. *)
+      let payload =
         match internal with
         | Internal_fun.FnCheck {trans; var_name; var} ->
-            ([expr_of_t var], Some (transform_of_t trans), var_name)
+            Check_payload (transform_of_t trans, var_name, expr_of_t var)
         | FnWriteParam {var; unconstrain_opt} ->
-            ([expr_of_t var], Option.map ~f:transform_of_t unconstrain_opt, "")
-        | _ -> ([], None, "") in
+            Write_payload
+              (Option.map ~f:transform_of_t unconstrain_opt, expr_of_t var)
+        | FnLength | FnMakeArray | FnMakeTuple | FnMakeRowVec | FnNegInf
+         |FnReadData | FnReadDeserializer | FnReadParam _ | FnValidateSize
+         |FnValidateSizePositive | FnValidateSizeUnitVector | FnPrint
+         |FnReject | FnFatalError | FnResizeToMatch | FnNaN | FnDeepCopy
+         |FnReadWriteEventsOpenCL _ ->
+            No_payload in
       { (default_stmt ()) with
         st_kind= "NRFunApp"
       ; st_fn_lib= "Internal"
       ; st_fn_name= name
-      ; st_fn_args= payload_args @ ordinary_args
-      ; st_check_transform= payload_transform
-      ; st_check_var_name= check_var_name }
+      ; st_fn_args= ordinary_args
+      ; st_payload= payload }
   | StanLib (name, suffix, _) ->
       { (default_stmt ()) with
         st_kind= "NRFunApp"
@@ -728,7 +737,9 @@ let v2_transform_tag = function
   | "Correlation" -> 13
   | "Covariance" -> 14
   | "CholeskyCov" -> 15
-  | "Unsupported" -> 16
+  | "StochasticColumn" -> 16
+  | "StochasticRow" -> 17
+  | "Unsupported" -> 18
   | kind -> invalid_arg ("portable MIR v2: unknown transform kind " ^ kind)
 
 let add_v2_transform buffer transform =
@@ -747,7 +758,14 @@ let rec add_v2_stmt buffer stmt =
   | "Decl" ->
       add_u8 buffer 0;
       add_v2_string buffer stmt.st_decl_id;
-      add_v2_sized buffer stmt.st_decl_type;
+      (match stmt.st_decl_unsized with
+      | None ->
+          add_u8 buffer 0;
+          add_v2_sized buffer stmt.st_decl_type
+      | Some (view, raw) ->
+          add_u8 buffer 1;
+          add_v2_view buffer view;
+          add_v2_string buffer raw);
       add_v2_bool buffer stmt.st_decl_data_only;
       add_v2_bool buffer stmt.st_has_init;
       if stmt.st_has_init then add_v2_expr buffer stmt.st_init;
@@ -795,8 +813,17 @@ let rec add_v2_stmt buffer stmt =
       add_v2_string buffer stmt.st_fn_name;
       add_u8 buffer stmt.st_fn_suffix;
       add_v2_list add_v2_expr buffer stmt.st_fn_args;
-      add_v2_optional add_v2_transform buffer stmt.st_check_transform;
-      add_v2_string buffer stmt.st_check_var_name;
+      (match stmt.st_payload with
+      | No_payload -> add_u8 buffer 0
+      | Check_payload (transform, var_name, var) ->
+          add_u8 buffer 1;
+          add_v2_transform buffer transform;
+          add_v2_string buffer var_name;
+          add_v2_expr buffer var
+      | Write_payload (transform, var) ->
+          add_u8 buffer 2;
+          add_v2_optional add_v2_transform buffer transform;
+          add_v2_expr buffer var);
       add_v2_string buffer stmt.st_raw
   | "Return" ->
       add_u8 buffer 9;
@@ -810,6 +837,10 @@ let rec add_v2_stmt buffer stmt =
       add_v2_string buffer stmt.st_raw
   | "Unsupported" ->
       add_u8 buffer 13;
+      add_v2_string buffer stmt.st_raw
+  | "JacobianPE" ->
+      add_u8 buffer 14;
+      add_v2_expr buffer stmt.st_target;
       add_v2_string buffer stmt.st_raw
   | kind -> invalid_arg ("portable MIR v2: unknown statement kind " ^ kind)
 

@@ -527,6 +527,9 @@ struct Stmt {
   Expr rhs;
   // TargetPE
   Expr target;
+  // `jacobian += target`: a TargetPE that belongs to the change of variables.
+  // Every evaluation includes the Jacobian, so it adds to the target alike.
+  bool jacobian = false;
   // NRFunApp
   std::string fn_name;
   Expr::Lib fn_lib = Expr::Lib::StanLib;
