@@ -287,10 +287,11 @@ constexpr std::array<UnsizedLeaf, 7> kLeafTags = {
     UnsizedLeaf::Complex, UnsizedLeaf::Vector, UnsizedLeaf::RowVector,
     UnsizedLeaf::Matrix};
 
-constexpr std::array<Expr::Kind, 11> kExprTags = {
-    Expr::Var,    Expr::LitInt,    Expr::LitReal,    Expr::LitStr,
-    Expr::FunApp, Expr::Promotion, Expr::Indexed,    Expr::TernaryIf,
-    Expr::EOr,    Expr::EAnd,      Expr::Unsupported};
+constexpr std::array<Expr::Kind, 16> kExprTags = {
+    Expr::Var,         Expr::LitInt,      Expr::LitReal,      Expr::LitStr,
+    Expr::FunApp,      Expr::Promotion,   Expr::Indexed,      Expr::TernaryIf,
+    Expr::EOr,         Expr::EAnd,        Expr::Unsupported,  Expr::IndexAll,
+    Expr::IndexSingle, Expr::IndexUpfrom, Expr::IndexBetween, Expr::IndexMulti};
 
 constexpr std::array<Expr::Lib, 3> kLibraryTags = {
     Expr::Lib::StanLib, Expr::Lib::Internal, Expr::Lib::UserDefined};
@@ -402,6 +403,11 @@ Expr read_expr(Reader& reader) {
     case Expr::TernaryIf:
     case Expr::EOr:
     case Expr::EAnd:
+    case Expr::IndexAll:
+    case Expr::IndexSingle:
+    case Expr::IndexUpfrom:
+    case Expr::IndexBetween:
+    case Expr::IndexMulti:
       value.args = read_exprs(reader);
       break;
     case Expr::Unsupported:

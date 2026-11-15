@@ -312,10 +312,14 @@ struct ProgramCompiler {
       case mir::Expr::EOr:
       case mir::Expr::Indexed:
         break;
+      case mir::Expr::IndexAll:
+      case mir::Expr::IndexSingle:
+      case mir::Expr::IndexUpfrom:
+      case mir::Expr::IndexBetween:
+      case mir::Expr::IndexMulti:
+        break;
       case mir::Expr::FunApp: {
-        if (e.name == "FnMakeArray" || e.name == "FnMakeRowVec" ||
-            e.name.compare(0, 5, "Index") == 0)
-          break;
+        if (e.name == "FnMakeArray" || e.name == "FnMakeRowVec") break;
         if (e.fn_lib != mir::Expr::Lib::StanLib) return false;
         const auto* spec = function_spec(e);
         if (!spec || !spec->builtin()) return false;
@@ -796,7 +800,7 @@ struct ProgramCompiler {
     if (e.args.empty()) return false;
     Range b;
     if (!static_view(e.args[0], &b)) return false;
-    if (e.args.size() == 2 && e.args[1].name == "IndexAll") {
+    if (e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexAll) {
       *out = b;
       return true;
     }
@@ -814,7 +818,7 @@ struct ProgramCompiler {
         for (size_t d = 0; d < selected; ++d) {
           const auto& index = e.args[d + 1];
           long value;
-          if (index.name != "IndexSingle" || index.args.size() != 1 ||
+          if (index.kind != mir::Expr::IndexSingle || index.args.size() != 1 ||
               !try_cint(index.args[0], &value) || value < 1 || value > dims[d])
             return false;
         }
@@ -963,7 +967,7 @@ struct ProgramCompiler {
         // The same substituted literal, indexed rather than measured.
         if (e.args.size() == 2 && e.args[0].kind == mir::Expr::FunApp &&
             e.args[0].name == "FnMakeArray" &&
-            e.args[1].name == "IndexSingle") {
+            e.args[1].kind == mir::Expr::IndexSingle) {
           const long ix = cint(e.args[1].args[0]);
           if (ix < 1 || (size_t)ix > e.args[0].args.size())
             bail("integer index range");
@@ -974,7 +978,7 @@ struct ProgramCompiler {
         if (e.args.size() == 2 && e.args[0].kind == mir::Expr::FunApp &&
             e.args[0].unsized.depth == 1 &&
             e.args[0].unsized.leaf == mir::UnsizedLeaf::Int &&
-            e.args[1].name == "IndexSingle") {
+            e.args[1].kind == mir::Expr::IndexSingle) {
           const std::vector<long> values = cints(e.args[0]);
           const long ix = cint(e.args[1].args[0]);
           if (ix < 1 || (size_t)ix > values.size()) bail("integer index range");
@@ -982,7 +986,8 @@ struct ProgramCompiler {
         }
         if (e.args[0].kind != mir::Expr::Var) bail("integer index base");
         for (size_t k = 1; k < e.args.size(); ++k)
-          if (e.args[k].name != "IndexSingle" || e.args[k].args.size() != 1)
+          if (e.args[k].kind != mir::Expr::IndexSingle ||
+              e.args[k].args.size() != 1)
             bail("integer index form");
         auto known = known_int_arrays.find(e.args[0].name);
         if (known != known_int_arrays.end()) {
@@ -1184,8 +1189,8 @@ struct ProgramCompiler {
       // a variable base must be a known or external integer array.
       for (size_t k = 1; k < e.args.size(); ++k) {
         long index;
-        if (e.args[k].name == "IndexSingle" && e.args[k].args.size() == 1 &&
-            !try_cint(e.args[k].args[0], &index))
+        if (e.args[k].kind == mir::Expr::IndexSingle &&
+            e.args[k].args.size() == 1 && !try_cint(e.args[k].args[0], &index))
           return false;
       }
       const mir::Expr& base = e.args[0];
@@ -1295,8 +1300,7 @@ struct ProgramCompiler {
             literal.unsized = {0, mir::UnsizedLeaf::Int};
             literal.data_only = true;
             mir::Expr single;
-            single.kind = mir::Expr::FunApp;
-            single.name = "IndexSingle";
+            single.kind = mir::Expr::IndexSingle;
             single.args.push_back(std::move(literal));
             indexed.args.push_back(std::move(single));
           }
@@ -1359,8 +1363,7 @@ struct ProgramCompiler {
           literal.unsized = {0, mir::UnsizedLeaf::Int};
           literal.data_only = true;
           mir::Expr single;
-          single.kind = mir::Expr::FunApp;
-          single.name = "IndexSingle";
+          single.kind = mir::Expr::IndexSingle;
           single.args.push_back(std::move(literal));
           scalar.args.push_back(std::move(single));
         }
@@ -1391,12 +1394,13 @@ struct ProgramCompiler {
     if (extent < 0 || extent > kMaxRegs)
       bail("matrix " + axis + " has an invalid extent");
     std::vector<long> values;
-    if (index.name == "IndexAll") {
+    if (index.kind == mir::Expr::IndexAll) {
       values.reserve((size_t)extent);
       for (int64_t i = 1; i <= extent; ++i) values.push_back((long)i);
-    } else if (index.name == "IndexSingle" && index.args.size() == 1) {
+    } else if (index.kind == mir::Expr::IndexSingle && index.args.size() == 1) {
       values.push_back(cint(index.args[0]));
-    } else if (index.name == "IndexBetween" && index.args.size() == 2) {
+    } else if (index.kind == mir::Expr::IndexBetween &&
+               index.args.size() == 2) {
       const long lo = cint(index.args[0]), hi = cint(index.args[1]);
       if (hi >= lo) {
         if (lo < 1 || hi > extent)
@@ -1407,9 +1411,9 @@ struct ProgramCompiler {
         values.reserve((size_t)count);
         for (long i = lo; i <= hi; ++i) values.push_back(i);
       }
-    } else if (index.name == "IndexMulti" && index.args.size() == 1) {
+    } else if (index.kind == mir::Expr::IndexMulti && index.args.size() == 1) {
       values = cints(index.args[0]);
-    } else if (index.name == "IndexUpfrom" && index.args.size() == 1) {
+    } else if (index.kind == mir::Expr::IndexUpfrom && index.args.size() == 1) {
       const long lo = cint(index.args[0]);
       if (lo < 1 || lo > extent + 1)
         bail("matrix " + axis + " upfrom is outside its extent");
@@ -1761,11 +1765,12 @@ struct ProgramCompiler {
         // Index composition can erase every selector of a full span. The
         // remaining base-only node is the identity, as in MirInterp.
         if (e.args.size() == 1) return b;
-        if (e.args.size() == 2 && e.args[1].name == "IndexAll") return b;
+        if (e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexAll)
+          return b;
         const std::vector<mir::Expr> selectors(e.args.begin() + 1,
                                                e.args.end());
         if ((b.kind == ViewKind::Matrix || b.kind == ViewKind::Array ||
-             (e.args.size() == 2 && e.args[1].name == "IndexMulti")) &&
+             (e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexMulti)) &&
             has_runtime_selector(selectors)) {
           // Preserve the existing single-op path for a final scalar array
           // index; other geometries use the shared checked kernel below.
@@ -1774,7 +1779,7 @@ struct ProgramCompiler {
               selectors.size() == (b.dims.empty() ? 1 : b.dims.size());
           for (size_t k = 0; k < selectors.size() && final_scalar; ++k) {
             long fixed;
-            final_scalar = selectors[k].name == "IndexSingle" &&
+            final_scalar = selectors[k].kind == mir::Expr::IndexSingle &&
                            selectors[k].args.size() == 1 &&
                            (k + 1 == selectors.size() ||
                             try_cint(selectors[k].args[0], &fixed));
@@ -1816,13 +1821,13 @@ struct ProgramCompiler {
         // A matrix row, `m[i]` or `m[i, ]`. Ahead of the all-single check
         // below, which the explicit `IndexAll` would not pass.
         if (b.kind == ViewKind::Matrix && e.args.size() >= 2 &&
-            e.args[1].name == "IndexSingle" &&
+            e.args[1].kind == mir::Expr::IndexSingle &&
             (e.args.size() == 2 ||
-             (e.args.size() == 3 && e.args[2].name == "IndexAll")))
+             (e.args.size() == 3 && e.args[2].kind == mir::Expr::IndexAll)))
           return matrix_row(b, cint(e.args[1].args[0]));
         if ((b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
              b.kind == ViewKind::Flat) &&
-            e.args.size() == 2 && e.args[1].name == "IndexBetween") {
+            e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexBetween) {
           const long lo = cint(e.args[1].args[0]);
           const long hi = cint(e.args[1].args[1]);
           if (hi < lo) return typed(Range{b.reg, 0}, e.type_);
@@ -1832,7 +1837,7 @@ struct ProgramCompiler {
         }
         if ((b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
              b.kind == ViewKind::Flat) &&
-            e.args.size() == 2 && e.args[1].name == "IndexMulti") {
+            e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexMulti) {
           const std::vector<long> indices = cints(e.args[1].args[0]);
           const int r = alloc((int)indices.size());
           for (size_t k = 0; k < indices.size(); ++k) {
@@ -1856,9 +1861,10 @@ struct ProgramCompiler {
           if (e.args.size() == 2) {
             const std::vector<int64_t> rows =
                 matrix_positions(e.args[1], b.rows, "row of " + e.args[0].name);
-            const BuiltinIndexMap map = builtin_index_map(
-                {b.rows, b.cols}, 2, {rows}, {e.args[1].name == "IndexSingle"},
-                SliceStorageOrder::OuterMajor);
+            const BuiltinIndexMap map =
+                builtin_index_map({b.rows, b.cols}, 2, {rows},
+                                  {e.args[1].kind == mir::Expr::IndexSingle},
+                                  SliceStorageOrder::OuterMajor);
             if (map.count > kMaxRegs)
               bail("matrix selection needs too many registers");
             const int r = alloc((int)map.count);
@@ -1886,7 +1892,7 @@ struct ProgramCompiler {
         if (b.kind == ViewKind::Vector || b.kind == ViewKind::RowVector ||
             b.kind == ViewKind::Flat) {
           if (e.args.size() != 2) bail("one-dimensional index form");
-          if (e.args[1].name == "IndexUpfrom") {
+          if (e.args[1].kind == mir::Expr::IndexUpfrom) {
             const long lo = cint(e.args[1].args[0]);
             if (lo < 1 || lo > b.len + 1)
               bail("upfrom index out of the declared range");
@@ -1895,7 +1901,7 @@ struct ProgramCompiler {
           }
           // Only a Single selects one element; any other index kind was
           // silently misread as one before this guard.
-          if (e.args[1].name != "IndexSingle")
+          if (e.args[1].kind != mir::Expr::IndexSingle)
             bail("one-dimensional index form " + e.args[1].name);
           long ix;
           if (try_cint(e.args[1].args[0], &ix)) {
@@ -1940,7 +1946,7 @@ struct ProgramCompiler {
         size_t runtime_dim = dims.size();
         for (size_t d = 0; d < n_idx; ++d) {
           const mir::Expr& index = e.args[d + 1];
-          if (index.name == "IndexSingle" && index.args.size() == 1) {
+          if (index.kind == mir::Expr::IndexSingle && index.args.size() == 1) {
             long ignored;
             if (!try_cint(index.args[0], &ignored)) {
               all_static = false;
@@ -1949,12 +1955,12 @@ struct ProgramCompiler {
             }
           }
           positions.push_back(matrix_positions(index, dims[d], "array"));
-          drops.push_back(index.name == "IndexSingle");
+          drops.push_back(index.kind == mir::Expr::IndexSingle);
         }
         if (!all_static) {
           if (b.leaf != ViewKind::Flat || n_idx != dims.size() ||
               runtime_dim + 1 != dims.size() ||
-              e.args[runtime_dim + 1].name != "IndexSingle" ||
+              e.args[runtime_dim + 1].kind != mir::Expr::IndexSingle ||
               e.args[runtime_dim + 1].args.size() != 1)
             bail("runtime array index must be the final scalar index");
           positions.push_back({0});
@@ -2380,8 +2386,8 @@ struct ProgramCompiler {
   // binding, scratch sizing, ownership, and reverse-mode contract.
   bool has_runtime_selector(const std::vector<mir::Expr>& selectors) {
     for (const auto& index : selectors) {
-      if (index.name == "IndexAll") continue;
-      if (index.name == "IndexMulti") {
+      if (index.kind == mir::Expr::IndexAll) continue;
+      if (index.kind == mir::Expr::IndexMulti) {
         std::vector<long> values;
         if (index.args.size() != 1 || !try_cints(index.args[0], &values))
           return true;
@@ -2449,16 +2455,18 @@ struct ProgramCompiler {
       const auto* index = d < selectors.size() ? &selectors[d] : nullptr;
       bool drop = false;
       Range values;
-      if (!index || index->name == "IndexAll") {
+      if (!index || index->kind == mir::Expr::IndexAll) {
         axis.kind = DynamicIndexSpec::Axis::All;
         axis.count = dims[d];
-      } else if (index->name == "IndexSingle" && index->args.size() == 1) {
+      } else if (index->kind == mir::Expr::IndexSingle &&
+                 index->args.size() == 1) {
         axis.kind = DynamicIndexSpec::Axis::Single;
         axis.count = 1;
         values = expr(index->args[0]);
         if (!is_scalar(values)) bail("runtime index must be scalar");
         drop = true;
-      } else if (index->name == "IndexMulti" && index->args.size() == 1) {
+      } else if (index->kind == mir::Expr::IndexMulti &&
+                 index->args.size() == 1) {
         axis.kind = DynamicIndexSpec::Axis::Multi;
         values = expr(index->args[0]);
         if (values.kind != ViewKind::Array ||
@@ -3141,7 +3149,8 @@ struct ProgramCompiler {
     if (e.fn_lib == mir::Expr::Lib::StanLib && e.name == "log_sum_exp" &&
         e.args.size() == 1 && e.args[0].kind == mir::Expr::Indexed) {
       const auto& slice = e.args[0];
-      if (slice.args.size() == 2 && slice.args[1].name == "IndexBetween" &&
+      if (slice.args.size() == 2 &&
+          slice.args[1].kind == mir::Expr::IndexBetween &&
           slice.args[1].args.size() == 2 &&
           (slice.args[0].type_ == "UVector" ||
            slice.args[0].type_ == "URowVector")) {
@@ -4473,7 +4482,7 @@ struct ProgramCompiler {
         // in ODE functions and runtime-control statement islands, so it
         // must agree with both graph lowering and MirInterp rather than
         // forcing an otherwise supported region onto the fallback path.
-        if (s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexAll") {
+        if (s.lhs_idx.size() == 1 && s.lhs_idx[0].kind == mir::Expr::IndexAll) {
           if (dst.kind == ViewKind::Flat)
             bail("full-span assignment needs a container for " + s.lhs);
           if (v.len != dst.len)
@@ -4496,12 +4505,14 @@ struct ProgramCompiler {
           return Path::Open;
         }
         if ((dst.kind == ViewKind::Array || dst.kind == ViewKind::Matrix ||
-             (s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexMulti")) &&
+             (s.lhs_idx.size() == 1 &&
+              s.lhs_idx[0].kind == mir::Expr::IndexMulti)) &&
             has_runtime_selector(s.lhs_idx)) {
           const bool scalar_array =
               dst.kind == ViewKind::Array && dst.leaf == ViewKind::Flat &&
               (dst.dims.empty() || dst.dims.size() == 1) &&
-              s.lhs_idx.size() == 1 && s.lhs_idx[0].name == "IndexSingle";
+              s.lhs_idx.size() == 1 &&
+              s.lhs_idx[0].kind == mir::Expr::IndexSingle;
           if (scalar_array && is_scalar(v)) {
             const Range index = expr(s.lhs_idx[0].args.at(0));
             if (!is_scalar(index))
@@ -4614,7 +4625,7 @@ struct ProgramCompiler {
              dst.kind == ViewKind::Flat) &&
             s.lhs_idx.size() == 1) {
           long fixed_index;
-          if (s.lhs_idx[0].name == "IndexSingle" &&
+          if (s.lhs_idx[0].kind == mir::Expr::IndexSingle &&
               s.lhs_idx[0].args.size() == 1 &&
               !try_cint(s.lhs_idx[0].args[0], &fixed_index)) {
             if (!is_scalar(v)) bail("element assignment from a container");
@@ -4636,7 +4647,7 @@ struct ProgramCompiler {
           return Path::Open;
         }
         for (const auto& ix : s.lhs_idx)
-          if (ix.name != "IndexSingle")
+          if (ix.kind != mir::Expr::IndexSingle)
             bail("assignment index form for " + s.lhs);
         if (!is_scalar(v)) bail("element assignment from a container");
         int64_t flat = 0;

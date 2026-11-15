@@ -821,8 +821,7 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
         arg.args.clear();
         if (i == 0) {
           mir::Expr range;
-          range.kind = mir::Expr::FunApp;
-          range.name = "IndexBetween";
+          range.kind = mir::Expr::IndexBetween;
           range.args = {slice_bound_literal(first + 1, call.raw),
                         slice_bound_literal(last, call.raw)};
           mir::Expr sliced = arg;

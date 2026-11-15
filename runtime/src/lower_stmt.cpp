@@ -20,8 +20,8 @@ static bool bounded_while_guard(const mir::Expr& e) {
       return false;
     for (size_t i = 1; i < e.args.size(); ++i) {
       const auto& index = e.args[i];
-      if (index.kind != E::FunApp || index.name != "IndexSingle" ||
-          index.args.size() != 1 || !bounded_while_guard(index.args[0]))
+      if (index.kind != E::IndexSingle || index.args.size() != 1 ||
+          !bounded_while_guard(index.args[0]))
         return false;
     }
     return true;
@@ -1358,7 +1358,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
             [&](const mir::Expr& ix) { return runtime_selector(ix); });
         const bool whole = std::all_of(
             s.lhs_idx.begin(), s.lhs_idx.end(),
-            [](const mir::Expr& ix) { return ix.name == "IndexAll"; });
+            [](const mir::Expr& ix) { return ix.kind == mir::Expr::IndexAll; });
         if (whole && bound == scope.end() && declared->second.len == 0) {
           assign_plain(s);
           return;
@@ -1380,9 +1380,10 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
                                                                    : 1;
           const bool all_single =
               s.lhs_idx.size() <= rank &&
-              std::all_of(
-                  s.lhs_idx.begin(), s.lhs_idx.end(),
-                  [](const mir::Expr& ix) { return ix.name == "IndexSingle"; });
+              std::all_of(s.lhs_idx.begin(), s.lhs_idx.end(),
+                          [](const mir::Expr& ix) {
+                            return ix.kind == mir::Expr::IndexSingle;
+                          });
           if (whole) {
             map.count = lhs_len;
           } else if (all_single) {
@@ -1450,7 +1451,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
               selected.push_back(index_positions(s.lhs_idx[d],
                                                  shape.dimensions[d],
                                                  "assignment index", s.raw));
-              drops.push_back(s.lhs_idx[d].name == "IndexSingle");
+              drops.push_back(s.lhs_idx[d].kind == mir::Expr::IndexSingle);
             }
             try {
               map = builtin_index_map(shape, selected, drops,
@@ -1780,7 +1781,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         const mir::Expr* base = &s.fn_args[0];
         while (base->kind == mir::Expr::Indexed) {
           for (size_t k = base->args.size(); k-- > 1;) {
-            if (base->args[k].name != "IndexSingle")
+            if (base->args[k].kind != mir::Expr::IndexSingle)
               fail("FnWriteParam under a non-scalar index", s.raw);
             ixs.push_back(eval_int(base->args[k].args[0]));
           }

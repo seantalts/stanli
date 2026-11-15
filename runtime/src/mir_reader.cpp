@@ -59,19 +59,6 @@ void validate_funapp_arity(const Expr& e) {
   // at all is rejected at the end of this function.
   if (function_arity_registered(e.name, e.args.size())) return;
 
-  if (named(e, {"IndexAll"})) {
-    require_arity(e, 0);
-    return;
-  }
-  if (named(e, {"IndexSingle", "IndexMulti", "IndexUpfrom"})) {
-    require_arity(e, 1);
-    return;
-  }
-  if (named(e, {"IndexBetween"})) {
-    require_arity(e, 2);
-    return;
-  }
-
   if (e.fn_lib == Expr::Lib::Internal &&
       (e.name == "FnReadData" || e.name == "FnLength")) {
     require_arity(e, 1);
@@ -295,24 +282,19 @@ Expr read_expr(const Node& n);
 Expr read_index(const Node& ix_n) {
   Expr ix;
   if (ix_n.is_atom() && ix_n.atom == "All") {
-    ix.kind = Expr::FunApp;
-    ix.name = "IndexAll";
+    ix.kind = Expr::IndexAll;
   } else if (!ix_n.is_atom() && ix_n.head_is("Single")) {
-    ix.kind = Expr::FunApp;
-    ix.name = "IndexSingle";
+    ix.kind = Expr::IndexSingle;
     ix.args.push_back(read_expr(ix_n[1]));
   } else if (!ix_n.is_atom() && ix_n.head_is("Between")) {
-    ix.kind = Expr::FunApp;
-    ix.name = "IndexBetween";
+    ix.kind = Expr::IndexBetween;
     ix.args.push_back(read_expr(ix_n[1]));
     ix.args.push_back(read_expr(ix_n[2]));
   } else if (!ix_n.is_atom() && ix_n.head_is("Upfrom")) {
-    ix.kind = Expr::FunApp;
-    ix.name = "IndexUpfrom";
+    ix.kind = Expr::IndexUpfrom;
     ix.args.push_back(read_expr(ix_n[1]));
   } else if (!ix_n.is_atom() && ix_n.head_is("MultiIndex")) {
-    ix.kind = Expr::FunApp;
-    ix.name = "IndexMulti";
+    ix.kind = Expr::IndexMulti;
     ix.args.push_back(read_expr(ix_n[1]));
   } else {
     ix.kind = Expr::Unsupported;
@@ -764,10 +746,7 @@ void validate_expression_metadata(const Expr& e) {
 }
 
 void validate_index_shape(const Expr& index) {
-  if (index.kind != Expr::FunApp || index.fn_lib != Expr::Lib::StanLib ||
-      !named(index, {"IndexAll", "IndexSingle", "IndexBetween", "IndexMulti",
-                     "IndexUpfrom"}))
-    malformed("index descriptor");
+  if (!is_index(index)) malformed("index descriptor");
   validate_expression_shape(index);
 }
 
@@ -787,8 +766,8 @@ void validate_expression_shape(const Expr& e) {
     case Expr::Indexed:
       // args[0] is the base. stanc can retain a no-op Indexed wrapper with no
       // descriptors after transformations, so only the base is mandatory.
-      // Index consumers address each descriptor according to its synthetic
-      // name when descriptors are present.
+      // Index consumers address each descriptor according to its kind when
+      // descriptors are present.
       if (e.args.empty()) malformed("Indexed expression arity");
       validate_expression_shape(e.args[0]);
       for (size_t i = 1; i < e.args.size(); ++i)
@@ -805,6 +784,17 @@ void validate_expression_shape(const Expr& e) {
       break;
     case Expr::FunApp:
       validate_funapp_arity(e);
+      break;
+    case Expr::IndexAll:
+      if (!e.args.empty()) malformed("IndexAll arity");
+      break;
+    case Expr::IndexSingle:
+    case Expr::IndexUpfrom:
+    case Expr::IndexMulti:
+      if (e.args.size() != 1) malformed("index arity");
+      break;
+    case Expr::IndexBetween:
+      if (e.args.size() != 2) malformed("IndexBetween arity");
       break;
   }
   for (const Expr& arg : e.args) validate_expression_shape(arg);

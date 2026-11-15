@@ -24,11 +24,11 @@ std::vector<int64_t> Lowering::index_positions(const mir::Expr& ix,
                                                int64_t extent, const char* what,
                                                const std::string& raw) {
   std::vector<int64_t> out;
-  if (ix.name == "IndexAll") {
+  if (ix.kind == mir::Expr::IndexAll) {
     for (int64_t i = 0; i < extent; ++i) out.push_back(i);
     return out;
   }
-  if (ix.name == "IndexSingle") {
+  if (ix.kind == mir::Expr::IndexSingle) {
     const int64_t i = eval_int(ix.args[0]);
     check_index(i, extent, what, raw);
     return {i - 1};
@@ -39,7 +39,7 @@ std::vector<int64_t> Lowering::index_positions(const mir::Expr& ix,
     for (int64_t i = range.lo; i <= range.hi; ++i) out.push_back(i - 1);
     return out;
   }
-  if (ix.name == "IndexMulti") {
+  if (ix.kind == mir::Expr::IndexMulti) {
     DataMap::Entry iv = eval_pure(ix.args[0], "an index list");
     if (!iv.is_int) fail(std::string(what) + " needs int data", raw);
     for (int i : iv.i) {
@@ -48,7 +48,7 @@ std::vector<int64_t> Lowering::index_positions(const mir::Expr& ix,
     }
     return out;
   }
-  if (ix.name == "IndexUpfrom") {
+  if (ix.kind == mir::Expr::IndexUpfrom) {
     const int64_t lo = eval_int(ix.args[0]);
     check_range(lo, extent, extent, what, raw);
     for (int64_t i = lo; i <= extent; ++i) out.push_back(i - 1);
@@ -245,7 +245,7 @@ long Lowering::eval_int(const mir::Expr& e) {
                 en->is_int ? en->i.size() == en->r.size() : en->i.empty();
       const size_t stored = !en ? 0 : en->is_int ? en->i.size() : en->r.size();
       for (size_t k = 1; all_single && k < e.args.size(); ++k)
-        all_single = e.args[k].name == "IndexSingle";
+        all_single = e.args[k].kind == mir::Expr::IndexSingle;
       const size_t rank = en ? std::max<size_t>(en->dims.size(), 1) : 0;
       if (all_single && e.args.size() - 1 == rank) {
         size_t offset = 0, stride = 1;
@@ -267,7 +267,7 @@ long Lowering::eval_int(const mir::Expr& e) {
       // sequence, then index it.
       {
         std::vector<int> vals = const_ints(e.args[0]);
-        if (e.args.size() == 2 && e.args[1].name == "IndexSingle") {
+        if (e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexSingle) {
           const long ix = eval_int(e.args[1].args[0]);
           if (ix >= 1 && (size_t)ix <= vals.size()) return vals[ix - 1];
         }
@@ -789,9 +789,10 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // O1 drops a full-span read's All indices, so `m[:, :]` arrives as an
       // Indexed node with none left.
       if (e.args.size() == 1) return base;
-      if (e.args.size() == 2 && e.args[1].name == "IndexAll") return base;
+      if (e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexAll)
+        return base;
       const bool dynamic_slice = in_write_array && e.args.size() == 2 &&
-                                 e.args[1].name == "IndexSingle" &&
+                                 e.args[1].kind == mir::Expr::IndexSingle &&
                                  runtime_int_value(e.args[1].args[0]);
       if (!(dynamic_slice && write_array_unregioned()) &&
           std::any_of(
@@ -830,14 +831,14 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       }
       bool all_single = true;
       for (size_t k = 1; k < e.args.size(); ++k)
-        if (e.args[k].name != "IndexSingle") all_single = false;
+        if (e.args[k].kind != mir::Expr::IndexSingle) all_single = false;
       const std::vector<int64_t>* bdims = nullptr;
       if (is_array(base.si)) bdims = &array_shape(base.si).dims;
       const size_t n_idx = e.args.size() - 1;
       // One index on a matrix selects rows. A range or gather is not a
       // contiguous slice in column-major storage, so spell its gather.
       if (e.args.size() == 2 && is_matrix(base.si) &&
-          (is_range(e.args[1]) || e.args[1].name == "IndexMulti")) {
+          (is_range(e.args[1]) || e.args[1].kind == mir::Expr::IndexMulti)) {
         std::vector<int> rows;
         if (auto range = static_range(e.args[1], base.si.rows)) {
           check_range(range->lo, range->hi, base.si.rows, "matrix row range",
@@ -908,7 +909,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // A data gather over the outer array dimension copies whole outer
       // elements, which graph storage keeps contiguous.
       if (e.args.size() == 2 && is_array(base.si) &&
-          e.args[1].name == "IndexMulti") {
+          e.args[1].kind == mir::Expr::IndexMulti) {
         const ArrayShape& sh = array_shape(base.si);
         DataMap::Entry iv = eval_pure(e.args[1].args[0], "a gather index");
         if (!iv.is_int || iv.i.size() != iv.r.size())
@@ -932,7 +933,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                            owning_layout(si));
       }
       // Gather by a data int array: v[idx].
-      if (e.args.size() == 2 && e.args[1].name == "IndexMulti") {
+      if (e.args.size() == 2 && e.args[1].kind == mir::Expr::IndexMulti) {
         // An empty index is a legitimate data-dependent gather (a slice
         // whose computed length is zero); an int-flagged entry whose int
         // mirror disagrees with its values is not.
@@ -952,7 +953,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // Matrix row/column slices use the explicit logical view; physical
       // storage remains column-major even when either extent is zero.
       if (e.args.size() == 3 && is_matrix(base.si) &&
-          e.args[1].name == "IndexSingle" && e.args[2].name == "IndexAll") {
+          e.args[1].kind == mir::Expr::IndexSingle &&
+          e.args[2].kind == mir::Expr::IndexAll) {
         const int64_t i = eval_int(e.args[1].args[0]);
         check_uni_index(i, base.si.rows, "matrix[uni] indexing", e.raw);
         return with_layout(
@@ -962,7 +964,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
             ExpressionLayout::scalar());
       }
       if (e.args.size() == 3 && is_matrix(base.si) &&
-          e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle") {
+          e.args[1].kind == mir::Expr::IndexAll &&
+          e.args[2].kind == mir::Expr::IndexSingle) {
         const int64_t j = stan_index(eval_int(e.args[2].args[0]), base.si.cols,
                                      "matrix[..., uni] column indexing", e.raw);
         const int64_t offset = (j - 1) * base.si.rows;
@@ -975,7 +978,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // each outer element is contiguous, so successive rows sit S apart.
       if (e.args.size() == 3 && is_array(base.si) && bdims &&
           array_shape(base.si).leaf == ViewKind::Flat && bdims->size() == 2 &&
-          e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle") {
+          e.args[1].kind == mir::Expr::IndexAll &&
+          e.args[2].kind == mir::Expr::IndexSingle) {
         const int64_t k = eval_int(e.args[2].args[0]) - 1;
         const int64_t N = (*bdims)[0], S = (*bdims)[1];
         if (k < 0 || k >= S) fail("array column out of bounds", e.raw);
@@ -991,7 +995,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
           (array_shape(base.si).leaf == ViewKind::Flat ||
            array_shape(base.si).leaf == ViewKind::Vector ||
            array_shape(base.si).leaf == ViewKind::RowVector) &&
-          bdims->size() == 2 && e.args[1].name == "IndexSingle" &&
+          bdims->size() == 2 && e.args[1].kind == mir::Expr::IndexSingle &&
           is_range(e.args[2])) {
         const int64_t i = eval_int(e.args[1].args[0]);
         const int64_t S = (*bdims)[1];
@@ -1020,8 +1024,8 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       if (e.args.size() == 3 && is_array(base.si) && bdims &&
           (array_shape(base.si).leaf == ViewKind::Vector ||
            array_shape(base.si).leaf == ViewKind::RowVector) &&
-          bdims->size() == 2 && e.args[1].name == "IndexSingle" &&
-          e.args[2].name == "IndexAll") {
+          bdims->size() == 2 && e.args[1].kind == mir::Expr::IndexSingle &&
+          e.args[2].kind == mir::Expr::IndexAll) {
         const int64_t i = eval_int(e.args[1].args[0]);
         const int64_t count = (*bdims)[0], width = (*bdims)[1];
         check_uni_index(i, count, "array[uni, ...] index", e.raw);
@@ -1034,7 +1038,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       }
       // Row-range column read M[a:b, j] (contiguous within the column).
       if (e.args.size() == 3 && is_matrix(base.si) && is_range(e.args[1]) &&
-          e.args[2].name == "IndexSingle") {
+          e.args[2].kind == mir::Expr::IndexSingle) {
         const StaticRange range = *static_range(e.args[1], base.si.rows);
         const int64_t lo = range.lo;
         const int64_t hi = range.hi;
@@ -1055,13 +1059,14 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // selected columns are outer and selected rows are inner in the flat
       // gather list.
       const auto is_matrix_selector = [](const mir::Expr& index) {
-        return index.name == "IndexAll" || index.name == "IndexSingle" ||
-               is_range(index) || index.name == "IndexMulti";
+        return index.kind == mir::Expr::IndexAll ||
+               index.kind == mir::Expr::IndexSingle || is_range(index) ||
+               index.kind == mir::Expr::IndexMulti;
       };
       if (e.args.size() == 3 && is_matrix(base.si) &&
           is_matrix_selector(e.args[1]) && is_matrix_selector(e.args[2]) &&
-          (e.args[1].name != "IndexSingle" ||
-           e.args[2].name != "IndexSingle")) {
+          (e.args[1].kind != mir::Expr::IndexSingle ||
+           e.args[2].kind != mir::Expr::IndexSingle)) {
         const std::vector<int64_t> rows = index_positions(
             e.args[1], base.si.rows, "matrix row gather", e.raw);
         const std::vector<int64_t> cols = index_positions(
@@ -1126,10 +1131,12 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
                     array_shape(base.si).leaf == ViewKind::RowVector)) {
         const size_t n_arr = bdims->size() - 1;
         const mir::Expr& last = e.args.back();
-        bool prefix_single = e.args.size() == n_arr + 2 &&
-                             (is_range(last) || last.name == "IndexAll");
+        bool prefix_single =
+            e.args.size() == n_arr + 2 &&
+            (is_range(last) || last.kind == mir::Expr::IndexAll);
         for (size_t d = 0; prefix_single && d < n_arr; ++d)
-          if (e.args[1 + d].name != "IndexSingle") prefix_single = false;
+          if (e.args[1 + d].kind != mir::Expr::IndexSingle)
+            prefix_single = false;
         if (prefix_single) {
           std::vector<int64_t> ix;
           ix.reserve(n_arr);
@@ -1166,8 +1173,9 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
       // this is a strided read of one scalar out of every element.
       if (e.args.size() == 4 && is_array(base.si) && bdims &&
           bdims->size() == 3 && array_shape(base.si).leaf == ViewKind::Matrix &&
-          e.args[1].name == "IndexAll" && e.args[2].name == "IndexSingle" &&
-          e.args[3].name == "IndexSingle") {
+          e.args[1].kind == mir::Expr::IndexAll &&
+          e.args[2].kind == mir::Expr::IndexSingle &&
+          e.args[3].kind == mir::Expr::IndexSingle) {
         const int64_t N = (*bdims)[0], R = (*bdims)[1], C = (*bdims)[2];
         const int64_t ri = eval_int(e.args[2].args[0]);
         const int64_t cj = eval_int(e.args[3].args[0]);
@@ -1235,7 +1243,7 @@ Lowering::Val Lowering::lower_expr_impl(const mir::Expr& e) {
         for (size_t k = 0; k < indexes; ++k) {
           selected.push_back(index_positions(e.args[1 + k], shape.dimensions[k],
                                              "index", e.raw));
-          drops.push_back(e.args[1 + k].name == "IndexSingle");
+          drops.push_back(e.args[1 + k].kind == mir::Expr::IndexSingle);
         }
         BuiltinIndexMap map;
         try {
@@ -1454,9 +1462,9 @@ std::optional<DataMap::Entry> Lowering::try_eval_interpreter(
 }
 Lowering::StaticProbe<Lowering::StaticSelector> Lowering::try_static_selector(
     const mir::Expr& index, int64_t extent) {
-  if (index.name == "IndexAll")
+  if (index.kind == mir::Expr::IndexAll)
     return {StaticProbeState::Known, {extent, false}, {}};
-  if (index.name == "IndexSingle" && index.args.size() == 1) {
+  if (index.kind == mir::Expr::IndexSingle && index.args.size() == 1) {
     const auto at = try_static_int(index.args[0]);
     if (at.state == StaticProbeState::Invalid) return {at.state, {}, at.error};
     // A single index drops its dimension whichever element it selects.
@@ -1467,7 +1475,7 @@ Lowering::StaticProbe<Lowering::StaticSelector> Lowering::try_static_selector(
           StaticProbeState::Invalid, {}, "static matrix index out of bounds"};
     return {StaticProbeState::Known, {1, true}, {}};
   }
-  if (index.name == "IndexBetween" && index.args.size() == 2) {
+  if (index.kind == mir::Expr::IndexBetween && index.args.size() == 2) {
     const auto lo = try_static_int(index.args[0]);
     if (lo.state != StaticProbeState::Known) return {lo.state, {}, lo.error};
     const auto hi = try_static_int(index.args[1]);
@@ -1480,7 +1488,7 @@ Lowering::StaticProbe<Lowering::StaticSelector> Lowering::try_static_selector(
           StaticProbeState::Invalid, {}, "static matrix range out of bounds"};
     return {StaticProbeState::Known, {hi.value - lo.value + 1, false}, {}};
   }
-  if (index.name == "IndexUpfrom" && index.args.size() == 1) {
+  if (index.kind == mir::Expr::IndexUpfrom && index.args.size() == 1) {
     const auto lo = try_static_int(index.args[0]);
     if (lo.state != StaticProbeState::Known) return {lo.state, {}, lo.error};
     if (extent < lo.value) return {StaticProbeState::Known, {0, false}, {}};
@@ -1489,7 +1497,7 @@ Lowering::StaticProbe<Lowering::StaticSelector> Lowering::try_static_selector(
           StaticProbeState::Invalid, {}, "static matrix range out of bounds"};
     return {StaticProbeState::Known, {extent - lo.value + 1, false}, {}};
   }
-  if (index.name == "IndexMulti" && index.args.size() == 1) {
+  if (index.kind == mir::Expr::IndexMulti && index.args.size() == 1) {
     auto evaluated = try_eval_interpreter(index.args[0]);
     if (!evaluated) return {};
     if (!evaluated->is_int || evaluated->i.size() != evaluated->r.size())

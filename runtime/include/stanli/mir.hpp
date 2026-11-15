@@ -60,7 +60,14 @@ struct Expr {
     TernaryIf,
     EOr,
     EAnd,
-    Unsupported
+    Unsupported,
+    // The indices of an Indexed expression, after its base: `[:]`, `[i]`,
+    // `[i:]`, `[i:j]` and `[is]`.
+    IndexAll,
+    IndexSingle,
+    IndexUpfrom,
+    IndexBetween,
+    IndexMulti
   } kind = Unsupported;
   std::string name;  // Var name or FunApp function name
   enum class Lib { StanLib, Internal, UserDefined } fn_lib = Lib::StanLib;
@@ -75,13 +82,20 @@ struct Expr {
   long lit_i = 0;
   double lit = 0;
   std::string lit_s;
-  std::vector<Expr> args;  // FunApp args; Promotion inner; Indexed base+idx
+  std::vector<Expr> args;  // FunApp args; Promotion inner; Indexed base+idx;
+                           // an index's bounds
   std::string type_;       // UInt UReal UVector URowVector UMatrix ...
   UnsizedView unsized;     // structural (UArray ...), without text parsing
   bool data_only = false;  // adlevel DataOnly
   bool promoted = false;   // explicit MIR Promotion to this adlevel/type
   std::string raw;         // Unsupported diagnostics
 };
+
+inline bool is_index(const Expr& e) {
+  return e.kind == Expr::IndexAll || e.kind == Expr::IndexSingle ||
+         e.kind == Expr::IndexUpfrom || e.kind == Expr::IndexBetween ||
+         e.kind == Expr::IndexMulti;
+}
 
 // stanc leaves these calls in MIR rather than folding them: four have
 // non-finite/platform values, while the mathematical constants are still part
@@ -192,10 +206,10 @@ inline bool is_matrix_row_value(const Expr& value) {
       indexed->args[0].unsized.leaf != UnsizedLeaf::Matrix)
     return false;
   const bool implicit_all =
-      indexed->args.size() == 2 && indexed->args[1].name == "IndexSingle";
+      indexed->args.size() == 2 && indexed->args[1].kind == Expr::IndexSingle;
   const bool explicit_all = indexed->args.size() == 3 &&
-                            indexed->args[1].name == "IndexSingle" &&
-                            indexed->args[2].name == "IndexAll";
+                            indexed->args[1].kind == Expr::IndexSingle &&
+                            indexed->args[2].kind == Expr::IndexAll;
   return implicit_all || explicit_all;
 }
 
@@ -280,30 +294,30 @@ inline ExpressionLayout source_expression_layout(const Expr& e) {
                                base.unsized.leaf == UnsizedLeaf::RowVector;
       for (uint8_t i = 0; i < base.unsized.depth; ++i)
         selected_one_leaf = selected_one_leaf && i + 1 < e.args.size() &&
-                            e.args[i + 1].kind == Expr::FunApp &&
-                            e.args[i + 1].name == "IndexSingle";
+                            e.args[i + 1].kind == Expr::IndexSingle;
       const size_t leaf_index = static_cast<size_t>(base.unsized.depth) + 1;
       if (selected_one_leaf && leaf_index < e.args.size()) {
         const Expr& inner = e.args[leaf_index];
-        if (inner.kind != Expr::FunApp) return ExpressionLayout::unknown();
-        if (inner.name == "IndexMulti") return ExpressionLayout::scalar();
-        if ((inner.name == "IndexBetween" || inner.name == "IndexUpfrom") &&
+        if (!is_index(inner)) return ExpressionLayout::unknown();
+        if (inner.kind == Expr::IndexMulti) return ExpressionLayout::scalar();
+        if ((inner.kind == Expr::IndexBetween ||
+             inner.kind == Expr::IndexUpfrom) &&
             !inner.args.empty() && inner.args[0].kind == Expr::LitInt &&
             inner.args[0].lit_i >= 1)
           return ExpressionLayout::direct(
               static_cast<int64_t>(inner.args[0].lit_i - 1));
-        if (inner.name != "IndexAll") return ExpressionLayout::unknown();
+        if (inner.kind != Expr::IndexAll) return ExpressionLayout::unknown();
       }
       return ExpressionLayout::direct();
     }
-    if (index.kind != Expr::FunApp) return ExpressionLayout::unknown();
-    if (index.name == "IndexMulti") return ExpressionLayout::scalar();
-    if ((index.name == "IndexBetween" || index.name == "IndexUpfrom") &&
+    if (!is_index(index)) return ExpressionLayout::unknown();
+    if (index.kind == Expr::IndexMulti) return ExpressionLayout::scalar();
+    if ((index.kind == Expr::IndexBetween || index.kind == Expr::IndexUpfrom) &&
         !index.args.empty() && index.args[0].kind == Expr::LitInt &&
         index.args[0].lit_i >= 1)
       return ExpressionLayout::direct(
           static_cast<int64_t>(index.args[0].lit_i - 1));
-    if (index.name == "IndexAll") return source_expression_layout(base);
+    if (index.kind == Expr::IndexAll) return source_expression_layout(base);
     return ExpressionLayout::unknown();
   }
   if (e.kind != Expr::FunApp || e.fn_lib != Expr::Lib::StanLib ||

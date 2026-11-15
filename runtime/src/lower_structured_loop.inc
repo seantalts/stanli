@@ -69,7 +69,7 @@ bool bounded_output_candidate(const mir::Stmt& root,
           (!container_argument && e.type_ != "UReal" && e.type_ != "UInt"))
         return false;
       for (size_t i = 1; i < e.args.size(); ++i)
-        if (e.args[i].name != "IndexSingle" || e.args[i].args.size() != 1 ||
+        if (e.args[i].kind != mir::Expr::IndexSingle || e.args[i].args.size() != 1 ||
             !self(self, e.args[i].args[0]))
           return false;
       return true;
@@ -116,7 +116,7 @@ bool bounded_output_candidate(const mir::Stmt& root,
         if (containers.count(s.lhs)) {
           if (s.lhs_idx.size() != containers.at(s.lhs)) return false;
           for (const auto& index : s.lhs_idx)
-            if (index.name != "IndexSingle" || index.args.size() != 1 ||
+            if (index.kind != mir::Expr::IndexSingle || index.args.size() != 1 ||
                 !expression(expression, index.args[0]))
               return false;
         } else {
@@ -1263,10 +1263,10 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
     axis.input_offset = index_width;
     int output_runtime_dim = -1;
     const mir::Expr* ix = d < selectors.size() ? &selectors[d] : nullptr;
-    if (!ix || ix->name == "IndexAll") {
+    if (!ix || ix->kind == mir::Expr::IndexAll) {
       axis.kind = DynamicIndexSpec::Axis::All;
       axis.count = dims[d];
-    } else if (ix->name == "IndexSingle" && ix->args.size() == 1) {
+    } else if (ix->kind == mir::Expr::IndexSingle && ix->args.size() == 1) {
       axis.kind = DynamicIndexSpec::Axis::Single;
       axis.count = 1;
       Val v = lower_expr(ix->args[0]);
@@ -1274,7 +1274,7 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
       index_offsets.push_back(index_width);
       indices.push_back(v);
       ++index_width;
-    } else if (ix->name == "IndexMulti" && ix->args.size() == 1) {
+    } else if (ix->kind == mir::Expr::IndexMulti && ix->args.size() == 1) {
       axis.kind = DynamicIndexSpec::Axis::Multi;
       Val v = lower_expr(ix->args[0]);
       axis.count = g.slots[v.slot].len;
@@ -1294,7 +1294,7 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
         ++index_width;
       }
       output_runtime_dim = runtime_count;
-    } else if (ix->name == "IndexBetween" && ix->args.size() == 2) {
+    } else if (ix->kind == mir::Expr::IndexBetween && ix->args.size() == 2) {
       const auto lo = region_range(ix->args[0]), hi = region_range(ix->args[1]);
       if (!lo || !hi || lo->lo != lo->hi)
         fail("structured slice needs a fixed lower bound and finite capacity");
@@ -1318,7 +1318,7 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
         runtime_count = upper.slot;
       }
       output_runtime_dim = runtime_count;
-    } else if (ix->name == "IndexUpfrom" && ix->args.size() == 1) {
+    } else if (ix->kind == mir::Expr::IndexUpfrom && ix->args.size() == 1) {
       const auto lo = region_range(ix->args[0]);
       if (!lo || lo->lo != lo->hi)
         fail("structured slice needs a fixed lower bound and finite capacity");
@@ -1599,7 +1599,7 @@ bool runtime_selector(const mir::Expr& index) {
     // write_array keeps parameter-dependent values out of runtime_only, but
     // an integer index cannot depend on a parameter. One read from a slot
     // (an integer a runtime loop wrote) still selects at run time.
-    if (write_array_unregioned() && index.name == "IndexSingle" &&
+    if (write_array_unregioned() && index.kind == mir::Expr::IndexSingle &&
         argument.type_ == "UInt" && needs_runtime_value(argument) &&
         !try_eval_pure(argument))
       return true;
@@ -1863,7 +1863,7 @@ void region_prove_bounded_int_fill(const mir::Stmt& loop, int64_t capacity) {
       if (body.lhs != name) return false;
       elements.push_back(&body.rhs);
       return body.lhs_idx.size() == 1 &&
-             body.lhs_idx[0].name == "IndexSingle" &&
+             body.lhs_idx[0].kind == mir::Expr::IndexSingle &&
              body.lhs_idx[0].args.size() == 1 &&
              body.lhs_idx[0].args[0].kind == mir::Expr::Var &&
              body.lhs_idx[0].args[0].name == loop.loopvar;
@@ -1953,7 +1953,7 @@ Flow lower_region_stmt(const mir::Stmt& s) {
             if (body.kind != mir::Stmt::Assignment || body.lhs_idx.size() != 1)
               return;
             const mir::Expr& index = body.lhs_idx[0];
-            if (index.name != "IndexSingle" || index.args.size() != 1 ||
+            if (index.kind != mir::Expr::IndexSingle || index.args.size() != 1 ||
                 index.args[0].kind != mir::Expr::Var ||
                 index.args[0].name != s.loopvar)
               return;

@@ -321,27 +321,17 @@ and fun_app_of_t kind args =
       ; e_args= args }
 
 and index_of_t = function
-  | Index.All -> {(default_expr ()) with e_kind= "FunApp"; e_name= "IndexAll"}
+  | Index.All -> {(default_expr ()) with e_kind= "IndexAll"}
   | Single expr ->
-      { (default_expr ()) with
-        e_kind= "FunApp"
-      ; e_name= "IndexSingle"
-      ; e_args= [expr_of_t expr] }
+      {(default_expr ()) with e_kind= "IndexSingle"; e_args= [expr_of_t expr]}
   | Between (lower, upper) ->
       { (default_expr ()) with
-        e_kind= "FunApp"
-      ; e_name= "IndexBetween"
+        e_kind= "IndexBetween"
       ; e_args= List.map ~f:expr_of_t [lower; upper] }
   | MultiIndex expr ->
-      { (default_expr ()) with
-        e_kind= "FunApp"
-      ; e_name= "IndexMulti"
-      ; e_args= [expr_of_t expr] }
+      {(default_expr ()) with e_kind= "IndexMulti"; e_args= [expr_of_t expr]}
   | Upfrom expr ->
-      { (default_expr ()) with
-        e_kind= "FunApp"
-      ; e_name= "IndexUpfrom"
-      ; e_args= [expr_of_t expr] }
+      {(default_expr ()) with e_kind= "IndexUpfrom"; e_args= [expr_of_t expr]}
 
 let rec sized_of_t sized =
   match sized with
@@ -717,6 +707,21 @@ let rec add_v2_expr buffer expr =
       add_u8 buffer 9;
       add_v2_list add_v2_expr buffer expr.e_args
   | "Unsupported" -> add_u8 buffer 10
+  | "IndexAll" ->
+      add_u8 buffer 11;
+      add_v2_list add_v2_expr buffer expr.e_args
+  | "IndexSingle" ->
+      add_u8 buffer 12;
+      add_v2_list add_v2_expr buffer expr.e_args
+  | "IndexUpfrom" ->
+      add_u8 buffer 13;
+      add_v2_list add_v2_expr buffer expr.e_args
+  | "IndexBetween" ->
+      add_u8 buffer 14;
+      add_v2_list add_v2_expr buffer expr.e_args
+  | "IndexMulti" ->
+      add_u8 buffer 15;
+      add_v2_list add_v2_expr buffer expr.e_args
   | kind -> invalid_arg ("portable MIR v2: unknown expression kind " ^ kind));
   add_v2_meta buffer expr
 

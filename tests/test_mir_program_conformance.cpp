@@ -92,7 +92,7 @@ Expr make_array(std::vector<Expr> values, std::string type = "UVector") {
 
 Expr index_single(Expr base, long index, std::string type) {
   Expr ix;
-  ix.name = "IndexSingle";
+  ix.kind = stanli::mir::Expr::IndexSingle;
   ix.args.push_back(lit_int(index));
 
   Expr e;
@@ -123,8 +123,7 @@ Stmt assignment(std::string name, Expr rhs) {
 Stmt full_span_assignment(std::string name, Expr rhs) {
   Stmt s = assignment(std::move(name), std::move(rhs));
   Expr all;
-  all.kind = Expr::FunApp;
-  all.name = "IndexAll";
+  all.kind = stanli::mir::Expr::IndexAll;
   s.lhs_idx.push_back(std::move(all));
   return s;
 }
@@ -1227,7 +1226,7 @@ void test_dynamic_vector_program() {
       Stmt set =
           assignment("values", index_single(var("values", type), 1, "UReal"));
       Expr index;
-      index.name = "IndexSingle";
+      index.kind = stanli::mir::Expr::IndexSingle;
       index.args = {var("index", "UInt")};
       set.lhs_idx = {index};
       pc.stmt(set);
@@ -1235,7 +1234,7 @@ void test_dynamic_vector_program() {
       slice.kind = Expr::Indexed;
       slice.type_ = type;
       Expr span;
-      span.name = "IndexBetween";
+      span.kind = stanli::mir::Expr::IndexBetween;
       span.args = {var("lo", "UInt"), var("hi", "UInt")};
       slice.args = {var("values", type), span};
       const Range result = pc.expr(fun("log_sum_exp", {slice}, "UReal"));

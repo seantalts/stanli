@@ -76,7 +76,7 @@ Expr call(std::string name, std::vector<Expr> args, std::string type,
 
 Expr element(Expr base, long index) {
   Expr ix;
-  ix.name = "IndexSingle";
+  ix.kind = stanli::mir::Expr::IndexSingle;
   ix.args.push_back(integer(index));
   Expr e;
   e.kind = Expr::Indexed;

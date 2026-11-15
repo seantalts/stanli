@@ -1097,14 +1097,15 @@ struct Lowering {
     int64_t lo, hi;
   };
   static bool is_range(const mir::Expr& ix) {
-    return ix.name == "IndexBetween" || ix.name == "IndexUpfrom";
+    return ix.kind == mir::Expr::IndexBetween ||
+           ix.kind == mir::Expr::IndexUpfrom;
   }
   std::optional<StaticRange> static_range(const mir::Expr& ix, int64_t extent) {
-    if (ix.name == "IndexBetween")
+    if (ix.kind == mir::Expr::IndexBetween)
       return StaticRange{eval_int(ix.args[0]), eval_int(ix.args[1])};
-    if (ix.name == "IndexUpfrom")
+    if (ix.kind == mir::Expr::IndexUpfrom)
       return StaticRange{eval_int(ix.args[0]), extent};
-    if (ix.name == "IndexAll") return StaticRange{1, extent};
+    if (ix.kind == mir::Expr::IndexAll) return StaticRange{1, extent};
     return std::nullopt;
   }
   // Every index the lowering sees is a bind-time constant, so what CmdStan

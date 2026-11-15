@@ -159,8 +159,7 @@ static void test_expression_layout_policy() {
   vector.unsized.leaf = UnsizedLeaf::Vector;
   vector.type_ = "UVector";
   Expr multi;
-  multi.kind = Expr::FunApp;
-  multi.name = "IndexMulti";
+  multi.kind = stanli::mir::Expr::IndexMulti;
   Expr gather;
   gather.kind = Expr::Indexed;
   gather.unsized.leaf = UnsizedLeaf::Vector;
@@ -201,12 +200,12 @@ static void test_expression_layout_policy() {
   Expr array_vector = vector;
   array_vector.unsized.depth = 1;
   Expr single = multi;
-  single.name = "IndexSingle";
+  single.kind = stanli::mir::Expr::IndexSingle;
   Expr inner = vector;
   inner.kind = Expr::Indexed;
   inner.args = {array_vector, single};
   Expr between = multi;
-  between.name = "IndexBetween";
+  between.kind = stanli::mir::Expr::IndexBetween;
   between.args = {start, count};
   Expr inner_range = inner;
   inner_range.args = {array_vector, single, between};

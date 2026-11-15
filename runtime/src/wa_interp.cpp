@@ -430,7 +430,7 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
     const mir::Expr* base = &v;
     while (base->kind == mir::Expr::Indexed) {
       for (size_t k = base->args.size(); k-- > 1;) {
-        if (base->args[k].name != "IndexSingle")
+        if (base->args[k].kind != mir::Expr::IndexSingle)
           throw CompileError(
               "cannot name an output parameter written through a non-scalar "
               "index");

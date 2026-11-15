@@ -1056,9 +1056,7 @@ bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
     // Expansion gains were established for single selectors. Range/gather
     // bodies also expose different reduction/fusion choices; keep their
     // established representation until that separate arithmetic is proved.
-    if (e.kind == mir::Expr::FunApp && e.name.compare(0, 5, "Index") == 0 &&
-        e.name != "IndexSingle")
-      return false;
+    if (mir::is_index(e) && e.kind != mir::Expr::IndexSingle) return false;
     if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
       return false;
     for (const auto& a : e.args)

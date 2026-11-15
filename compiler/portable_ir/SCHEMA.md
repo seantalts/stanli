@@ -152,6 +152,11 @@ the common metadata suffix shown below.
 | 8 | `EOr` | `list<Expr> args` |
 | 9 | `EAnd` | `list<Expr> args` |
 | 10 | `Unsupported` | none |
+| 11 | `IndexAll` | `list<Expr> args` (empty) |
+| 12 | `IndexSingle` | `list<Expr> args` (the index) |
+| 13 | `IndexUpfrom` | `list<Expr> args` (the lower bound) |
+| 14 | `IndexBetween` | `list<Expr> args` (the lower and upper bounds) |
+| 15 | `IndexMulti` | `list<Expr> args` (the integer array of indices) |
 
 The common suffix is:
 
@@ -169,18 +174,9 @@ The producer currently flattens stanc3 `Promotion` nodes into the promoted
 inner expression and sets `promoted`, matching the legacy structural mapping.
 Tag 5 remains defined for direct runtime inputs and validation coverage.
 
-Synthetic index descriptors are ordinary `FunApp` values inside an `Indexed`
-argument list. Their canonical names and arities are validated after decode:
-
-| Name | Argument count |
-| --- | ---: |
-| `IndexAll` | 0 |
-| `IndexSingle` | 1 |
-| `IndexUpfrom` | 1 |
-| `IndexBetween` | 2 |
-| `IndexMulti` | 1 |
-
-They use library tag 0 and default function metadata.
+The index kinds (11-15) occur only after the base of an `Indexed` expression
+and in an assignment's `lhs_indices`; their arities are validated after
+decode, and their metadata suffix carries default values.
 
 ### Transform kind
 

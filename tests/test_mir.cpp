@@ -244,8 +244,7 @@ static void probe_mode_tests() {
   };
   auto index_single = [](mir::Expr idx) {
     mir::Expr e;
-    e.kind = mir::Expr::FunApp;
-    e.name = "IndexSingle";
+    e.kind = stanli::mir::Expr::IndexSingle;
     e.args = {std::move(idx)};
     return e;
   };
@@ -490,7 +489,7 @@ int main(int argc, char** argv) {
                                   : nullptr;
     check(parsed && parsed->kind == mir::Expr::Indexed &&
               parsed->args.size() == 2 &&
-              parsed->args[1].name == "IndexUpfrom" &&
+              parsed->args[1].kind == stanli::mir::Expr::IndexUpfrom &&
               parsed->args[1].args.size() == 1 &&
               parsed->args[1].args[0].kind == mir::Expr::LitInt &&
               parsed->args[1].args[0].lit_i == 4,
@@ -956,8 +955,7 @@ int main(int argc, char** argv) {
     two.type_ = "UInt";
     two.unsized.leaf = mir::UnsizedLeaf::Int;
     mir::Expr index;
-    index.kind = mir::Expr::FunApp;
-    index.name = "IndexSingle";
+    index.kind = stanli::mir::Expr::IndexSingle;
     index.args = {two};
     mir::Expr five;
     five.kind = mir::Expr::LitReal;
@@ -1013,8 +1011,7 @@ int main(int argc, char** argv) {
         literal.unsized.leaf = mir::UnsizedLeaf::Int;
         literal.data_only = true;
         mir::Expr index;
-        index.kind = mir::Expr::FunApp;
-        index.name = "IndexSingle";
+        index.kind = stanli::mir::Expr::IndexSingle;
         index.args.push_back(std::move(literal));
         e.args.push_back(std::move(index));
       }
@@ -1053,22 +1050,19 @@ int main(int argc, char** argv) {
     };
     auto single = [&](long value) {
       mir::Expr e;
-      e.kind = mir::Expr::FunApp;
-      e.name = "IndexSingle";
+      e.kind = stanli::mir::Expr::IndexSingle;
       e.args = {integer(value)};
       return e;
     };
     auto between = [&](long lo, long hi) {
       mir::Expr e;
-      e.kind = mir::Expr::FunApp;
-      e.name = "IndexBetween";
+      e.kind = stanli::mir::Expr::IndexBetween;
       e.args = {integer(lo), integer(hi)};
       return e;
     };
     auto all = [] {
       mir::Expr e;
-      e.kind = mir::Expr::FunApp;
-      e.name = "IndexAll";
+      e.kind = stanli::mir::Expr::IndexAll;
       return e;
     };
     auto multi = [](const std::string& name) {
@@ -1079,15 +1073,13 @@ int main(int argc, char** argv) {
       positions.unsized = {1, mir::UnsizedLeaf::Int};
       positions.data_only = true;
       mir::Expr e;
-      e.kind = mir::Expr::FunApp;
-      e.name = "IndexMulti";
+      e.kind = stanli::mir::Expr::IndexMulti;
       e.args = {std::move(positions)};
       return e;
     };
     auto upfrom = [&](long lo) {
       mir::Expr e;
-      e.kind = mir::Expr::FunApp;
-      e.name = "IndexUpfrom";
+      e.kind = stanli::mir::Expr::IndexUpfrom;
       e.args = {integer(lo)};
       return e;
     };

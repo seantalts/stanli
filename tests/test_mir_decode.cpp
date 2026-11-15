@@ -152,6 +152,11 @@ void append_expr(std::string& bytes, const mir::Expr& value) {
     case mir::Expr::TernaryIf:
     case mir::Expr::EOr:
     case mir::Expr::EAnd:
+    case mir::Expr::IndexAll:
+    case mir::Expr::IndexSingle:
+    case mir::Expr::IndexUpfrom:
+    case mir::Expr::IndexBetween:
+    case mir::Expr::IndexMulti:
       append_expr_list(bytes, value.args);
       break;
     case mir::Expr::Unsupported:
@@ -380,7 +385,7 @@ size_t count_full_span_assignments(const std::vector<mir::Stmt>& body,
   for (const mir::Stmt& statement : body) {
     count += statement.kind == mir::Stmt::Assignment && statement.lhs == lhs &&
              statement.lhs_idx.size() == 1 &&
-             statement.lhs_idx[0].name == "IndexAll";
+             statement.lhs_idx[0].kind == stanli::mir::Expr::IndexAll;
     count += count_full_span_assignments(statement.body, lhs);
   }
   return count;
@@ -453,6 +458,16 @@ const char* write_expr_kind(mir::Expr::Kind value) {
       return "EAnd";
     case mir::Expr::Unsupported:
       return "Unsupported";
+    case mir::Expr::IndexAll:
+      return "IndexAll";
+    case mir::Expr::IndexSingle:
+      return "IndexSingle";
+    case mir::Expr::IndexUpfrom:
+      return "IndexUpfrom";
+    case mir::Expr::IndexBetween:
+      return "IndexBetween";
+    case mir::Expr::IndexMulti:
+      return "IndexMulti";
   }
   return "Unsupported";
 }
@@ -1052,7 +1067,7 @@ void check_full_span_assignment_lowering() {
           for (mir::Stmt& statement : body) {
             if (statement.kind == mir::Stmt::Assignment &&
                 statement.lhs == "x" && statement.lhs_idx.size() == 1 &&
-                statement.lhs_idx[0].name == "IndexAll" &&
+                statement.lhs_idx[0].kind == stanli::mir::Expr::IndexAll &&
                 statement.rhs.args.size() == 2) {
               statement.rhs.args[1].lit_i = 3;
               statement.rhs.args[1].lit = 3.0;
@@ -1073,7 +1088,7 @@ void check_full_span_assignment_lowering() {
           for (mir::Stmt& statement : body) {
             if (statement.kind == mir::Stmt::Assignment &&
                 statement.lhs == "x" && statement.lhs_idx.size() == 1 &&
-                statement.lhs_idx[0].name == "IndexAll") {
+                statement.lhs_idx[0].kind == stanli::mir::Expr::IndexAll) {
               statement.rhs.name = "rep_vector";
               statement.rhs.type_ = "UVector";
               statement.rhs.unsized.leaf = mir::UnsizedLeaf::Vector;
@@ -1263,44 +1278,40 @@ void check_structural_rejections() {
         "base-only Indexed wrapper");
 
   mir::Expr bad_index;
-  bad_index.kind = mir::Expr::FunApp;
-  bad_index.name = "IndexSingle";
+  bad_index.kind = stanli::mir::Expr::IndexSingle;
   indexed.args.push_back(bad_index);
-  expect_error(write_v2(target_program(indexed)), "IndexSingle call",
+  expect_error(write_v2(target_program(indexed)), "index arity",
                "IndexSingle without operand");
 
-  bad_index.name = "IndexBetween";
+  bad_index.kind = stanli::mir::Expr::IndexBetween;
   bad_index.args.push_back(literal());
   indexed.args[1] = bad_index;
-  expect_error(write_v2(target_program(indexed)), "IndexBetween call",
+  expect_error(write_v2(target_program(indexed)), "IndexBetween arity",
                "IndexBetween with one endpoint");
 
-  bad_index.name = "IndexUpfrom";
+  bad_index.kind = stanli::mir::Expr::IndexUpfrom;
   bad_index.args.clear();
   indexed.args[1] = bad_index;
-  expect_error(write_v2(target_program(indexed)), "IndexUpfrom call",
+  expect_error(write_v2(target_program(indexed)), "index arity",
                "IndexUpfrom without lower bound");
   bad_index.args.push_back(literal());
   indexed.args[1] = bad_index;
   const mir::Program upfrom = decode_program(write_v2(target_program(indexed)));
-  check(upfrom.log_prob[0].target.args[1].name == "IndexUpfrom",
-        "IndexUpfrom portable shape");
+  check(
+      upfrom.log_prob[0].target.args[1].kind == stanli::mir::Expr::IndexUpfrom,
+      "IndexUpfrom portable shape");
 
-  bad_index.name = "IndexAll";
+  bad_index.kind = stanli::mir::Expr::IndexAll;
   indexed.args[1] = bad_index;
-  expect_error(write_v2(target_program(indexed)), "IndexAll call",
+  expect_error(write_v2(target_program(indexed)), "IndexAll arity",
                "IndexAll with an operand");
 
-  bad_index.name = "FutureIndex";
-  indexed.args[1] = bad_index;
-  expect_error(write_v2(target_program(indexed)), "index descriptor",
-               "unknown synthetic index");
-
+  bad_index.kind = mir::Expr::FunApp;
   bad_index.name = "IndexSingle";
-  bad_index.fn_lib = mir::Expr::Lib::UserDefined;
+  bad_index.args = {literal()};
   indexed.args[1] = bad_index;
   expect_error(write_v2(target_program(indexed)), "index descriptor",
-               "noncanonical synthetic index library");
+               "a call in index position");
 
   for (const auto& test : std::vector<std::pair<mir::Expr::Kind, const char*>>{
            {mir::Expr::Promotion, "Promotion expression arity"},
