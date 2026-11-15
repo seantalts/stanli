@@ -297,7 +297,6 @@ void append_strings(std::string& bytes,
 void append_fun(std::string& bytes, const mir::FunDef& value) {
   append_string(bytes, value.name);
   append_strings(bytes, value.arg_names);
-  append_strings(bytes, value.arg_types);
   append_list(bytes, value.arg_views,
               [](std::string& out, const mir::UnsizedView& view) {
                 append_view(out, view);
@@ -651,7 +650,6 @@ json write_fun_def(const mir::FunDef& value) {
   return {{"name", value.name},
           {"overload", value.overload},
           {"arg_names", write_strings(value.arg_names)},
-          {"arg_types", write_strings(value.arg_types)},
           {"arg_views", write_array(value.arg_views, write_unsized)},
           {"arg_data_only", write_bools(value.arg_data_only)},
           {"body", write_array(value.body, write_stmt)}};
@@ -1410,33 +1408,19 @@ void check_structural_rejections() {
                "declaration initializer type disagrees with its binding",
                "unsized declaration initializer mismatch");
 
-  mir::Program bad_function;
-  mir::FunDef function;
-  function.name = "f";
-  function.arg_names.push_back("x");
-  function.arg_types.push_back("(UArray UReal)");
-  function.arg_views.push_back(mir::UnsizedView{0, mir::UnsizedLeaf::Real});
-  function.arg_data_only.push_back(true);
-  bad_function.fun_defs.push_back(std::move(function));
-  expect_error(write_v2(bad_function),
-               "function argument type disagrees with its view",
-               "function argument type/view mismatch");
-
   mir::Program colliding_functions;
   const auto add_function = [&](const std::string& name,
-                                const std::string& type,
                                 mir::UnsizedLeaf leaf) {
     mir::FunDef definition;
     definition.name = name;
     definition.arg_names.push_back("x");
-    definition.arg_types.push_back(type);
     definition.arg_views.push_back(mir::UnsizedView{0, leaf});
     definition.arg_data_only.push_back(false);
     colliding_functions.fun_defs.push_back(std::move(definition));
   };
-  add_function("f", "UReal", mir::UnsizedLeaf::Real);
-  add_function("f", "UInt", mir::UnsizedLeaf::Int);
-  add_function("f(int)", "UInt", mir::UnsizedLeaf::Int);
+  add_function("f", mir::UnsizedLeaf::Real);
+  add_function("f", mir::UnsizedLeaf::Int);
+  add_function("f(int)", mir::UnsizedLeaf::Int);
   expect_error(write_v2(colliding_functions),
                "duplicate function name after overload resolution",
                "overload suffix collision");

@@ -1293,7 +1293,7 @@ Lowering::Val Lowering::lower_algebra_fn(const mir::Expr& e,
     fail("algebra_solver: unknown algebraic system " + system_expr.name, e.raw);
   const mir::FunDef& f = *resolved;
   if (f.arg_views.size() != 4 || f.arg_names.size() != 4 ||
-      f.arg_types.size() != 4 || f.arg_views[0].depth != 0 ||
+      f.arg_views[0].depth != 0 ||
       f.arg_views[0].leaf != mir::UnsizedLeaf::Vector ||
       f.arg_views[1].depth != 0 ||
       f.arg_views[1].leaf != mir::UnsizedLeaf::Vector ||

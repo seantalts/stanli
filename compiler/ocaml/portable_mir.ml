@@ -2,7 +2,6 @@ open Std
 open Middle
 
 type unsized_view = {depth: int; leaf: string}
-
 type function_type = {ft_args: unsized_view list; ft_suffix: int}
 
 type wire_expr =
@@ -63,7 +62,6 @@ and wire_stmt =
 type wire_fun =
   { f_name: string
   ; f_arg_names: string list
-  ; f_arg_types: string list
   ; f_arg_views: unsized_view list
   ; f_arg_data_only: bool list
   ; f_body: wire_stmt list }
@@ -392,8 +390,8 @@ let transform_of_t transform =
   | TupleTransformation _ as unsupported ->
       {t_kind= "Unsupported"; t_args= []; t_raw= raw_transform unsupported}
 
-(* stanc3 declares optimizer temporaries, such as an inlined function's
-   result, without sizes; the first whole assignment gives them a shape. *)
+(* stanc3 declares optimizer temporaries, such as an inlined function's result,
+   without sizes; the first whole assignment gives them a shape. *)
 let decl_unsized_of_type = function
   | Type.Sized _ -> None
   | Unsized unsized ->
@@ -482,8 +480,8 @@ let rec stmt_of_t (stmt : Stmt.Located.t) =
   | Skip -> {(default_stmt ()) with st_kind= "Skip"}
   | NRFunApp (kind, args) -> nr_fun_app_of_t kind args
   | Profile (_, body) ->
-      (* The profile name is only for stanc's own timing output, which
-         stanli does not produce; unwrap to the plain block it wraps. *)
+      (* The profile name is only for stanc's own timing output, which stanli
+         does not produce; unwrap to the plain block it wraps. *)
       { (default_stmt ()) with
         st_kind= "Block"
       ; st_body= List.map ~f:stmt_of_t body }
@@ -495,9 +493,9 @@ and nr_fun_app_of_t kind args =
   match kind with
   | Fun_kind.CompilerInternal internal ->
       let name = internal_name internal in
-      (* transform_inits' FnWriteParam names the transform to INVERT, turning
-         an already-constrained value into a free one; write_array's own
-         carries none, its value being constrained already. *)
+      (* transform_inits' FnWriteParam names the transform to INVERT, turning an
+         already-constrained value into a free one; write_array's own carries
+         none, its value being constrained already. *)
       let payload =
         match internal with
         | Internal_fun.FnCheck {trans; var_name; var} ->
@@ -532,17 +530,13 @@ and nr_fun_app_of_t kind args =
       ; st_fn_args= ordinary_args }
 
 let fun_of_t (definition : Stmt.Located.t Program.fun_def) =
-  let arg_names, arg_types, arg_views, arg_data_only =
-    List.fold_right definition.fdargs ~init:([], [], [], [])
-      ~f:(fun (adlevel, name, typ) (names, types, views, levels) ->
+  let arg_names, arg_views, arg_data_only =
+    List.fold_right definition.fdargs ~init:([], [], [])
+      ~f:(fun (adlevel, name, typ) (names, views, levels) ->
         let view, _ = unsized_view_and_raw typ in
-        ( name :: names
-        , raw_unsized typ :: types
-        , view :: views
-        , is_data_only adlevel :: levels )) in
+        (name :: names, view :: views, is_data_only adlevel :: levels)) in
   { f_name= definition.fdname
   ; f_arg_names= arg_names
-  ; f_arg_types= arg_types
   ; f_arg_views= arg_views
   ; f_arg_data_only= arg_data_only
   ; f_body=
@@ -557,12 +551,12 @@ let fun_of_t (definition : Stmt.Located.t Program.fun_def) =
    only by fields active for that tag. *)
 
 let add_u8 buffer value =
-  if value < 0 || value > 0xff then invalid_arg "portable MIR v2: invalid u8";
+  if value < 0 || value > 0xff then invalid_arg "portable MIR: invalid u8";
   Buffer.add_char buffer (Stdlib.Char.chr value)
 
 let add_u32 buffer value =
   if value < 0 || Int64.of_int value > 0xffff_ffffL then
-    invalid_arg "portable MIR v2: invalid u32";
+    invalid_arg "portable MIR: invalid u32";
   for shift = 0 to 3 do
     add_u8 buffer ((value lsr (shift * 8)) land 0xff)
   done
@@ -585,7 +579,7 @@ let validate_utf8 string =
   let length = String.length string in
   let continuation byte = byte land 0xc0 = 0x80 in
   let require condition =
-    if not condition then invalid_arg "portable MIR v2: invalid UTF-8" in
+    if not condition then invalid_arg "portable MIR: invalid UTF-8" in
   let rec loop i =
     if i < length then
       let byte = Char.code string.[i] in
@@ -614,7 +608,7 @@ let validate_utf8 string =
            else if byte = 0xf4 then second >= 0x80 && second <= 0x8f
            else continuation second);
         loop (i + 4))
-      else invalid_arg "portable MIR v2: invalid UTF-8" in
+      else invalid_arg "portable MIR: invalid UTF-8" in
   loop 0
 
 let add_v2_string buffer string =
@@ -636,7 +630,7 @@ let v2_leaf_tag = function
   | "Vector" -> 4
   | "RowVector" -> 5
   | "Matrix" -> 6
-  | leaf -> invalid_arg ("portable MIR v2: unknown unsized leaf " ^ leaf)
+  | leaf -> invalid_arg ("portable MIR: unknown unsized leaf " ^ leaf)
 
 let add_v2_view buffer {depth; leaf} =
   add_u8 buffer depth;
@@ -662,7 +656,8 @@ let v2_lib_tag = function
   | "StanLib" -> 0
   | "Internal" -> 1
   | "UserDefined" -> 2
-  | library -> invalid_arg ("portable MIR v2: unknown function library " ^ library)
+  | library ->
+      invalid_arg ("portable MIR: unknown function library " ^ library)
 
 let rec add_v2_expr buffer expr =
   (match expr.e_kind with
@@ -717,7 +712,7 @@ let rec add_v2_expr buffer expr =
   | "IndexMulti" ->
       add_u8 buffer 15;
       add_v2_list add_v2_expr buffer expr.e_args
-  | kind -> invalid_arg ("portable MIR v2: unknown expression kind " ^ kind));
+  | kind -> invalid_arg ("portable MIR: unknown expression kind " ^ kind));
   add_v2_meta buffer expr
 
 let v2_transform_tag = function
@@ -740,7 +735,7 @@ let v2_transform_tag = function
   | "StochasticColumn" -> 16
   | "StochasticRow" -> 17
   | "Unsupported" -> 18
-  | kind -> invalid_arg ("portable MIR v2: unknown transform kind " ^ kind)
+  | kind -> invalid_arg ("portable MIR: unknown transform kind " ^ kind)
 
 let add_v2_transform buffer transform =
   add_u8 buffer (v2_transform_tag transform.t_kind);
@@ -842,12 +837,11 @@ let rec add_v2_stmt buffer stmt =
       add_u8 buffer 14;
       add_v2_expr buffer stmt.st_target;
       add_v2_string buffer stmt.st_raw
-  | kind -> invalid_arg ("portable MIR v2: unknown statement kind " ^ kind)
+  | kind -> invalid_arg ("portable MIR: unknown statement kind " ^ kind)
 
 let add_v2_fun buffer fn =
   add_v2_string buffer fn.f_name;
   add_v2_list add_v2_string buffer fn.f_arg_names;
-  add_v2_list add_v2_string buffer fn.f_arg_types;
   add_v2_list add_v2_view buffer fn.f_arg_views;
   add_v2_list add_v2_bool buffer fn.f_arg_data_only;
   add_v2_list add_v2_stmt buffer fn.f_body
@@ -872,8 +866,8 @@ let base64_alphabet =
 let encode_base64 input =
   let length = String.length input in
   if length > 201_326_586 then
-    invalid_arg "portable MIR v2: payload exceeds envelope limit";
-  let output = Buffer.create (((length + 2) / 3) * 4) in
+    invalid_arg "portable MIR: payload exceeds envelope limit";
+  let output = Buffer.create ((length + 2) / 3 * 4) in
   let emit value = Buffer.add_char output base64_alphabet.[value] in
   let rec loop offset =
     if offset + 3 <= length then (
@@ -901,10 +895,10 @@ let encode_base64 input =
 
 (* stanc3 separates write_array's three sections with top-level early-return
    guards on its emit flags, which it recognizes with these predicates
-   (Transform_Mir's tparam_start and gq_start). The runtime always emits
-   every section, so the guards are dropped and their positions kept: the
-   statement indices where the transformed-parameter and generated-quantity
-   sections begin. *)
+   (Transform_Mir's tparam_start and gq_start). The runtime always emits every
+   section, so the guards are dropped and their positions kept: the statement
+   indices where the transformed-parameter and generated-quantity sections
+   begin. *)
 let rec mentions name (expr : Expr.Typed.t) =
   match expr.pattern with
   | Var var -> String.equal var name
@@ -914,7 +908,12 @@ let rec mentions name (expr : Expr.Typed.t) =
 let write_array_sections stmts =
   let guard (stmt : Stmt.Located.t) =
     match stmt.pattern with
-    | IfElse ({pattern= FunApp (_, [{pattern= Var "emit_generated_quantities__"; _}]); _}, _, _) ->
+    | IfElse
+        ( { pattern=
+              FunApp (_, [{pattern= Var "emit_generated_quantities__"; _}])
+          ; _ }
+        , _
+        , _ ) ->
         Some `Generated_quantities
     | IfElse (cond, _, _) when mentions "emit_transformed_parameters__" cond ->
         Some `Transformed_parameters
@@ -949,6 +948,5 @@ let encode (program : Program.Typed.t) =
     (List.map program.output_vars
        ~f:(fun (name, _, Program.{out_block; out_constrained_st; _}) ->
          (name, out_block, sized_of_t out_constrained_st)));
-  add_v2_list add_v2_stmt buffer
-    (List.map ~f:stmt_of_t program.transform_inits);
+  add_v2_list add_v2_stmt buffer (List.map ~f:stmt_of_t program.transform_inits);
   "STANLI3:" ^ encode_base64 (Buffer.contents buffer)

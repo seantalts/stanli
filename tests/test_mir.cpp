@@ -787,7 +787,6 @@ int main(int argc, char** argv) {
     scale.arg_names = {"a", "x"};
     scale.arg_views = {{0, mir::UnsizedLeaf::Real},
                        {0, mir::UnsizedLeaf::Vector}};
-    scale.arg_types = {"UReal", "UVector"};
     mir::Stmt returned;
     returned.kind = mir::Stmt::Return;
     returned.has_init = true;
@@ -809,7 +808,6 @@ int main(int argc, char** argv) {
     routed.arg_names = {"i", "x"};
     routed.arg_views = {{0, mir::UnsizedLeaf::Int},
                         {0, mir::UnsizedLeaf::Real}};
-    routed.arg_types = {"OpaqueInt", "OpaqueRealWithUIntAnnotation"};
     mir::Stmt routed_return;
     routed_return.kind = mir::Stmt::Return;
     routed_return.has_init = true;
@@ -834,7 +832,6 @@ int main(int argc, char** argv) {
     reduce.name = "reduce";
     reduce.arg_names = {"x"};
     reduce.arg_views = {{0, mir::UnsizedLeaf::Vector}};
-    reduce.arg_types = {"UVector"};
     mir::Expr formal;
     formal.kind = mir::Expr::Var;
     formal.name = "x";

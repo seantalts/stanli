@@ -296,15 +296,12 @@ The `IfElse` body has one or two statements in then/else order. `For` and
 ```text
 string name
 list<string> arg_names
-list<string> arg_types
 list<UnsizedView> arg_views
 list<bool> arg_data_only
 list<Stmt> body
 ```
 
-The four argument lists must have identical lengths. `arg_types` preserves the
-complete stanc3 unsized-type spelling; `arg_views` is the runtime's redundant
-structural view and must agree with it. Function names are stanc3's names,
+The three argument lists must have identical lengths. Function names are stanc3's names,
 including its `_stan_` prefix for a C++ keyword, which the finalizer removes.
 A `propto` flag is true only for an `FnLpdf`/`FnLpmf` call written
 `_lupdf`/`_lupmf`.
@@ -397,8 +394,9 @@ After structural decoding and before a `Program` is exposed, the runtime:
 
 1. checks expression, index, transform, sized-type, statement, and known
    function arities;
-2. checks function argument list lengths and type/view agreement;
-3. resolves user-defined overload names and rejects final-name collisions;
+2. checks function argument list lengths;
+3. records the overload each user-function call selects and rejects
+   colliding overloads;
 4. validates variable and function bindings; and
 5. rejects trailing payload bytes.
 

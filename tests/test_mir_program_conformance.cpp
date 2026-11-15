@@ -156,8 +156,6 @@ FunDef rhs_function(std::string name, std::vector<Stmt> body) {
   FunDef f;
   f.name = std::move(name);
   f.arg_names = {"t", "y", "theta", "x_r", "x_i"};
-  f.arg_types = {"UReal", "UVector", "UVector", "(UArray UReal)",
-                 "(UArray UInt)"};
   f.arg_views = {{0, UnsizedLeaf::Real},
                  {0, UnsizedLeaf::Vector},
                  {0, UnsizedLeaf::Vector},
@@ -829,7 +827,6 @@ void test_mixed_integer_udf_arguments() {
   FunDef score;
   score.name = "score";
   score.arg_names = {"a", "b"};
-  score.arg_types = {"UInt", "UInt"};
   score.arg_views = {{0, UnsizedLeaf::Int}, {0, UnsizedLeaf::Int}};
   score.body = {return_value(
       fun("Plus__",
@@ -850,7 +847,6 @@ void test_runtime_for_bound_effects() {
   FunDef bound;
   bound.name = "bound";
   bound.arg_names = {"n"};
-  bound.arg_types = {"UInt"};
   bound.arg_views = {{0, UnsizedLeaf::Int}};
   bound.body = {nr_fun_app("FnPrint", {lit_string("bound "), var("n", kInt)}),
                 return_value(var("n", kInt))};
@@ -887,7 +883,6 @@ void test_nested_print_effect() {
   FunDef echo;
   echo.name = "echo";
   echo.arg_names = {"x"};
-  echo.arg_types = {"UReal"};
   echo.arg_views = {{0, UnsizedLeaf::Real}};
   echo.body = {
       nr_fun_app("FnPrint", {lit_string("nested print x="), var("x", kReal)}),

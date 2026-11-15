@@ -553,13 +553,11 @@ FunDef read_fun(Reader& reader) {
   FunDef value;
   value.name = reader.string();
   value.arg_names = read_strings(reader);
-  value.arg_types = read_strings(reader);
   value.arg_views = reader.list<UnsizedView>([&] { return read_view(reader); });
   value.arg_data_only = reader.list<bool>([&] { return reader.boolean(); });
   value.body = read_stmts(reader);
   const size_t arity = value.arg_names.size();
-  if (value.arg_types.size() != arity || value.arg_views.size() != arity ||
-      value.arg_data_only.size() != arity)
+  if (value.arg_views.size() != arity || value.arg_data_only.size() != arity)
     reader.fail("function argument field lengths disagree");
   return value;
 }

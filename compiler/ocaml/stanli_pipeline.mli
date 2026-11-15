@@ -61,7 +61,7 @@ val compile_portable :
   -> model_name:string
   -> string
   -> string compilation
-(** Compile Stan source and encode canonical compact portable MIR v2.
+(** Compile Stan source and encode canonical compact portable MIR v3.
     [model_only] permits removal of functions unreachable from the model's
     entry points. The default preserves every exported function for the
     public function API. *)

@@ -665,34 +665,6 @@ Stmt read_stmt(const Node& n) {
 
 void validate_expression_shape(const Expr& e);
 
-bool parse_unsized_spelling(std::string_view text, UnsizedView* out) {
-  size_t depth = 0;
-  constexpr std::string_view prefix = "(UArray ";
-  while (text.size() > prefix.size() &&
-         text.substr(0, prefix.size()) == prefix && text.back() == ')') {
-    if (++depth > std::numeric_limits<uint8_t>::max()) return false;
-    text.remove_prefix(prefix.size());
-    text.remove_suffix(1);
-  }
-  UnsizedLeaf leaf = UnsizedLeaf::Unknown;
-  if (text == "UInt")
-    leaf = UnsizedLeaf::Int;
-  else if (text == "UReal")
-    leaf = UnsizedLeaf::Real;
-  else if (text == "UComplex")
-    leaf = UnsizedLeaf::Complex;
-  else if (text == "UVector")
-    leaf = UnsizedLeaf::Vector;
-  else if (text == "URowVector")
-    leaf = UnsizedLeaf::RowVector;
-  else if (text == "UMatrix")
-    leaf = UnsizedLeaf::Matrix;
-  else
-    return false;
-  *out = UnsizedView{static_cast<uint8_t>(depth), leaf};
-  return true;
-}
-
 void validate_index_shape(const Expr& index) {
   if (!is_index(index)) malformed("index descriptor");
   validate_expression_shape(index);
@@ -860,20 +832,9 @@ void validate_program_shape(const Program& program) {
     for (const Stmt& statement : *body) validate_statement_shape(statement);
   for (const FunDef& function : program.fun_defs) {
     const size_t arity = function.arg_names.size();
-    if (function.arg_types.size() != arity ||
-        function.arg_views.size() != arity ||
+    if (function.arg_views.size() != arity ||
         function.arg_data_only.size() != arity)
       malformed("function argument field lengths disagree");
-    for (size_t i = 0; i < arity; ++i) {
-      UnsizedView parsed;
-      const bool recognized =
-          parse_unsized_spelling(function.arg_types[i], &parsed);
-      const UnsizedView& view = function.arg_views[i];
-      if ((recognized &&
-           (parsed.depth != view.depth || parsed.leaf != view.leaf)) ||
-          (!recognized && view.leaf != UnsizedLeaf::Unknown))
-        malformed("function argument type disagrees with its view");
-    }
     for (const Stmt& statement : function.body)
       validate_statement_shape(statement);
   }
@@ -1450,8 +1411,6 @@ Program read_program(const sexp::Node& root) {
           f.arg_views.push_back(read_unsized(args[a][2]));
           f.arg_data_only.push_back(args[a][0].is_atom() &&
                                     args[a][0].atom == "DataOnly");
-          f.arg_types.push_back(args[a][2].is_atom() ? args[a][2].atom
-                                                     : dump(args[a][2], 40));
         }
       }
       if (const Node* fb2 = field(fd, "fdbody"))

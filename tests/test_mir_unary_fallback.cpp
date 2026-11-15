@@ -105,8 +105,6 @@ FunDef rhs(std::string name, Expr value) {
   FunDef f;
   f.name = std::move(name);
   f.arg_names = {"t", "y", "theta", "x_r", "x_i"};
-  f.arg_types = {"UReal", "UVector", "UVector", "(UArray UReal)",
-                 "(UArray UInt)"};
   f.arg_views = {{0, UnsizedLeaf::Real},
                  {0, UnsizedLeaf::Vector},
                  {0, UnsizedLeaf::Vector},
@@ -439,8 +437,6 @@ void test_vector_jacobian() {
   FunDef f;
   f.name = "vector_rhs";
   f.arg_names = {"t", "y", "theta", "x_r", "x_i"};
-  f.arg_types = {"UReal", "UVector", "UVector", "(UArray UReal)",
-                 "(UArray UInt)"};
   f.arg_views = {{0, UnsizedLeaf::Real},
                  {0, UnsizedLeaf::Vector},
                  {0, UnsizedLeaf::Vector},

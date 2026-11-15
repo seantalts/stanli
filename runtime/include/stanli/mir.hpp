@@ -720,7 +720,6 @@ struct FunDef {
   // than one; empty otherwise. The reader assigns it.
   std::string overload;
   std::vector<std::string> arg_names;
-  std::vector<std::string> arg_types;  // unsized: UReal UVector UMatrix ...
   std::vector<UnsizedView> arg_views;
   std::vector<bool> arg_data_only;
   std::vector<Stmt> body;

@@ -46,7 +46,6 @@ struct AlgebraSpec : RetainedCallback {
 inline mir::FunDef with_leading_time(const mir::FunDef& system) {
   mir::FunDef adapted = system;
   adapted.arg_names.insert(adapted.arg_names.begin(), "__stanli_unused_time");
-  adapted.arg_types.insert(adapted.arg_types.begin(), "UReal");
   adapted.arg_views.insert(adapted.arg_views.begin(),
                            mir::UnsizedView{0, mir::UnsizedLeaf::Real});
   adapted.arg_data_only.insert(adapted.arg_data_only.begin(), true);
