@@ -2173,6 +2173,9 @@ def _o1_budget_source():
 def test_o1_fallback_is_its_own_warning_category():
     assert issubclass(stanli.O1FallbackWarning, RuntimeWarning)
     assert "O1FallbackWarning" in stanli.__all__
+    # The subprocess compiler reports the notice on stderr, as text.
+    if not stanli._lib.stanli_has_embedded_stanc():
+        return
     source = _o1_budget_source()
     for build in (lambda: stanli.Model(stan_code=source),
                   lambda: stanli.stan_to_mir(source)):

@@ -779,6 +779,9 @@ test_that("sampling never touches the caller's random stream", {
 
 test_that("an O1 fallback is a classed warning", {
   skip_without_runtime()
+  stanli:::load_runtime()
+  skip_if_not(.Call("stanli_r_has_embedded_stanc", PACKAGE = "stanli"),
+              "the subprocess compiler reports the O1 notice as text")
   loops <- paste0("for (i", 1:9, " in 1:1) {", collapse = "\n")
   code <- paste("parameters { real x; }", "model {", "real s = 0;", loops,
                 strrep("s += 1;\n", 2100), strrep("}\n", 9),

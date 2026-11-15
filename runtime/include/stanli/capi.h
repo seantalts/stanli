@@ -131,6 +131,7 @@ stanli_compilation* stanli_compile_stan(const char* stan_code,
 const char* stanli_compilation_mir(const stanli_compilation* c);
 /* The error, or null when compilation succeeded. */
 const char* stanli_compilation_error(const stanli_compilation* c);
+/* Message i, for 0 <= i < stanli_compilation_n_messages(c). */
 int64_t stanli_compilation_n_messages(const stanli_compilation* c);
 stanli_compiler_message_kind stanli_compilation_message_kind(
     const stanli_compilation* c, int64_t i);
@@ -815,7 +816,8 @@ int stanli_wa_row(stanli_model* m, const double* q, double* out);
 const char* stanli_warnings(const stanli_model* m);
 /* The compiler's messages for a model built from Stan source, as
  * stanli_compilation_message* report them; none for a model built from MIR.
- * Strings are owned by the model. */
+ * i must satisfy 0 <= i < stanli_model_n_compiler_messages(m). Strings are
+ * owned by the model. */
 int64_t stanli_model_n_compiler_messages(const stanli_model* m);
 stanli_compiler_message_kind stanli_model_compiler_message_kind(
     const stanli_model* m, int64_t i);
