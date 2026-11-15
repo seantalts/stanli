@@ -4,7 +4,8 @@ register_ecosystem_methods <- function() {
   methods <- list(
     bayesplot = c("nuts_params", "log_posterior", "rhat", "neff_ratio"),
     loo = c("loo", "loo_compare"),
-    tidybayes = "tidy_draws"
+    tidybayes = "tidy_draws",
+    bridgesampling = "bridge_sampler"
   )
   for (package in names(methods)) {
     local({
@@ -48,23 +49,35 @@ sampler_long <- function(object, pars, inc_warmup = FALSE, parameter = TRUE) {
 
 #' R workflow integrations
 #'
-#' Optional methods for bayesplot, loo, and tidybayes. Install the relevant
-#' package to use its generic; no plotting package is needed to load stanli.
+#' Optional methods for bayesplot, loo, tidybayes, and bridgesampling. Install
+#' the relevant package to use its generic; no plotting package is needed to
+#' load stanli.
 #' Saved warmup is excluded by default.
 #'
 #' @param object,x,model A `stanli_fit`.
 #' @param pars Optional variable names (base names select all indexed elements).
 #'   For `nuts_params`, exact sampler names such as `divergent__`.
 #' @param inc_warmup Include saved warmup in sampler tables.
+#' @param samples A `stanli_fit` for `bridge_sampler`.
+#' @param repetitions,method,cores,use_neff,maxiter,silent,verbose Passed to
+#'   `bridgesampling::bridge_sampler()`.
 #' @param ... Further arguments passed to the underlying package where applicable.
 #' @return `nuts_params` returns a data frame with `Chain`, `Iteration`,
 #'   `Parameter` (a factor), and `Value`; `log_posterior` omits `Parameter`.
 #'   `rhat` and `neff_ratio` return named numeric vectors. `tidy_draws` returns
 #'   a tibble with draw indices. `loo` returns a `psis_loo` object and
-#'   `loo_compare` compares fits via their LOO results.
+#'   `loo_compare` compares fits via their LOO results. `bridge_sampler`
+#'   returns a `bridge` object.
 #' @details R-hat and effective sample size use [summary.stanli_fit()].
 #'   The ESS ratio is bulk ESS divided by the number of retained post-warmup
 #'   draws. Bayesplot's CmdStanMCMC method instead uses basic ESS.
+#'
+#'   `bridge_sampler` estimates the log marginal likelihood from the
+#'   unconstrained post-warmup draws. Write the model with `target +=`
+#'   statements: `~` drops normalizing constants, as in rstan, and the
+#'   estimate is then wrong. It needs the fit's live model, so a fit restored
+#'   with `readRDS()` must be sampled again from a new [stanli_model()].
+#'   On Windows, `cores` is set to 1.
 #' @name stanli-ecosystem
 NULL
 
@@ -174,4 +187,36 @@ loo_compare.stanli_fit <- function(x, ...) {
 #' @rdname stanli-ecosystem
 tidy_draws.stanli_fit <- function(model, ...) {
   tidybayes::tidy_draws(as_draws_array(model, include_sampler = TRUE), ...)
+}
+
+#' @rdname stanli-ecosystem
+bridge_sampler.stanli_fit <- function(samples, repetitions = 1, method = "normal",
+                                      cores = 1, use_neff = TRUE, maxiter = 1000,
+                                      silent = FALSE, verbose = FALSE, ...) {
+  model <- samples$model
+  if (!model_is_live(model))
+    stop("This fit has no live stanli model (saveRDS does not preserve native ",
+         "handles). Recreate stanli_model() with the original code and data ",
+         "and sample again.", call. = FALSE)
+  if (.Platform$OS.type != "unix" && cores != 1) {
+    warning("cores > 1 is not supported on Windows; using cores = 1.",
+            call. = FALSE)
+    cores <- 1
+  }
+  u <- samples$unconstrained[post_warmup_rows(samples), , , drop = FALSE]
+  n_par <- dim(u)[3L]
+  p <- paste0("x", seq_len(n_par))
+  chains <- coda::mcmc.list(lapply(seq_len(dim(u)[2L]), function(chain)
+    coda::mcmc(matrix(u[, chain, ], ncol = n_par, dimnames = list(NULL, p)))))
+  log_posterior <- function(pars, data) {
+    lp <- tryCatch(.Call("stanli_r_log_prob", data$ptr, as.double(pars)),
+                   error = function(e) -Inf)
+    if (is.na(lp)) -Inf else lp
+  }
+  bridgesampling::bridge_sampler(
+    chains, log_posterior = log_posterior, data = model,
+    lb = stats::setNames(rep(-Inf, n_par), p),
+    ub = stats::setNames(rep(Inf, n_par), p),
+    repetitions = repetitions, method = method, cores = cores,
+    use_neff = use_neff, maxiter = maxiter, silent = silent, verbose = verbose)
 }

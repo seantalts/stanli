@@ -43,10 +43,14 @@ stanfit_check_model <- function(model, columns, n_unconstrained) {
          call. = FALSE)
 }
 
+model_is_live <- function(model) {
+  inherits(model, "stanli_model") &&
+    isTRUE(.Call("stanli_r_model_alive", model$ptr))
+}
+
 stanfit_live_model <- function(object) {
   model <- object@.MISC$stanli_model
-  if (!inherits(model, "stanli_model") ||
-      !isTRUE(.Call("stanli_r_model_alive", model$ptr)))
+  if (!model_is_live(model))
     stop("This fit has no live stanli model (saveRDS does not preserve native ",
          "handles). Recreate stanli_model() with the original code and data, ",
          "then use as_stanfit(saved_fit, model = model).", call. = FALSE)

@@ -9,6 +9,7 @@
 \alias{loo.stanli_fit}
 \alias{loo_compare.stanli_fit}
 \alias{tidy_draws.stanli_fit}
+\alias{bridge_sampler.stanli_fit}
 \title{R workflow integrations}
 \usage{
 nuts_params.stanli_fit(object, pars = NULL, inc_warmup = FALSE, ...)
@@ -24,6 +25,18 @@ loo.stanli_fit(x, ..., variable = "log_lik", r_eff = NULL)
 loo_compare.stanli_fit(x, ...)
 
 tidy_draws.stanli_fit(model, ...)
+
+bridge_sampler.stanli_fit(
+  samples,
+  repetitions = 1,
+  method = "normal",
+  cores = 1,
+  use_neff = TRUE,
+  maxiter = 1000,
+  silent = FALSE,
+  verbose = FALSE,
+  ...
+)
 }
 \arguments{
 \item{object, x, model}{A `stanli_fit`.}
@@ -39,21 +52,35 @@ For `nuts_params`, exact sampler names such as `divergent__`.}
 
 \item{r_eff}{Optional relative effective sample sizes. By default computed
 from the likelihood with `loo::relative_eff()` using the chain axis.}
+
+\item{samples}{A `stanli_fit` for `bridge_sampler`.}
+
+\item{repetitions, method, cores, use_neff, maxiter, silent, verbose}{Passed to
+`bridgesampling::bridge_sampler()`.}
 }
 \value{
 `nuts_params` returns a data frame with `Chain`, `Iteration`,
   `Parameter` (a factor), and `Value`; `log_posterior` omits `Parameter`.
   `rhat` and `neff_ratio` return named numeric vectors. `tidy_draws` returns
   a tibble with draw indices. `loo` returns a `psis_loo` object and
-  `loo_compare` compares fits via their LOO results.
+  `loo_compare` compares fits via their LOO results. `bridge_sampler`
+  returns a `bridge` object.
 }
 \description{
-Optional methods for bayesplot, loo, and tidybayes. Install the relevant
-package to use its generic; no plotting package is needed to load stanli.
+Optional methods for bayesplot, loo, tidybayes, and bridgesampling. Install
+the relevant package to use its generic; no plotting package is needed to
+load stanli.
 Saved warmup is excluded by default.
 }
 \details{
 R-hat and effective sample size use [summary.stanli_fit()].
   The ESS ratio is bulk ESS divided by the number of retained post-warmup
   draws. Bayesplot's CmdStanMCMC method instead uses basic ESS.
+
+  `bridge_sampler` estimates the log marginal likelihood from the
+  unconstrained post-warmup draws. Write the model with `target +=`
+  statements: `~` drops normalizing constants, as in rstan, and the
+  estimate is then wrong. It needs the fit's live model, so a fit restored
+  with `readRDS()` must be sampled again from a new [stanli_model()].
+  On Windows, `cores` is set to 1.
 }
