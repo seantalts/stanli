@@ -508,6 +508,8 @@ int main() {
                 overloaded(scalar).r == std::vector<double>({2.5}),
             "cached candidates select by the current rank");
     }
+    throws_with([&] { (void)numeric(vector); }, "has rank 1, expected 0",
+                "an unmatched call says why each overload was refused");
     Function resolved(source, "numeric(real)");
     check(resolved(promoted).r == std::vector<double>({22.0}),
           "resolved signature preserves promotion despite integer overload");

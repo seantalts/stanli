@@ -73,27 +73,32 @@ int64_t checked_elements(const std::vector<int64_t>& dims,
   return n;
 }
 
-void validate_argument(const std::string& name,
-                       const stanli::mir::UnsizedView& view,
-                       const stanli::DataMap::Entry& value) {
+// Why `value` cannot be the argument `name`, or nothing when it can.
+std::optional<std::string> argument_mismatch(
+    const std::string& name, const stanli::mir::UnsizedView& view,
+    const stanli::DataMap::Entry& value) {
   using Leaf = stanli::mir::UnsizedLeaf;
   const size_t rank = static_cast<size_t>(view.depth) + leaf_rank(view.leaf);
   if (value.dims.size() != rank)
-    throw std::runtime_error("argument '" + name + "' has rank " +
-                             std::to_string(value.dims.size()) + ", expected " +
-                             std::to_string(rank));
-
+    return "argument '" + name + "' has rank " +
+           std::to_string(value.dims.size()) + ", expected " +
+           std::to_string(rank);
   const int64_t expected = checked_elements(value.dims, name);
   if (value.r.size() != static_cast<size_t>(expected))
-    throw std::runtime_error("argument '" + name +
-                             "' storage does not match its dimensions");
+    return "argument '" + name + "' storage does not match its dimensions";
   if (view.leaf == Leaf::Int) {
-    if (!value.is_int)
-      throw std::runtime_error("argument '" + name + "' must be integer");
+    if (!value.is_int) return "argument '" + name + "' must be integer";
     if (value.i.size() != static_cast<size_t>(expected))
-      throw std::runtime_error("integer argument '" + name +
-                               "' has no matching integer storage");
+      return "integer argument '" + name + "' has no matching integer storage";
   }
+  return std::nullopt;
+}
+
+void validate_argument(const std::string& name,
+                       const stanli::mir::UnsizedView& view,
+                       const stanli::DataMap::Entry& value) {
+  if (auto why = argument_mismatch(name, view, value))
+    throw std::runtime_error(*why);
 }
 
 bool named(const stanli::mir::FunDef& f, std::string_view requested) {
@@ -117,31 +122,38 @@ const stanli::mir::FunDef* select_function(
   }
 
   std::vector<const stanli::mir::FunDef*> matches;
+  std::string refusals;
   int best_promotions = std::numeric_limits<int>::max();
   for (const auto* f : candidates) {
-    try {
-      int promotions = 0;
-      for (size_t i = 0; i < f->arg_names.size(); ++i) {
-        const auto& value = arguments->at(f->arg_names[i]);
-        validate_argument(f->arg_names[i], f->arg_views[i], value);
-        // Match stanc's ordinary numeric promotion preference: an integer
-        // argument selects an integer overload ahead of a real overload.
-        if (value.is_int &&
-            f->arg_views[i].leaf == stanli::mir::UnsizedLeaf::Real)
-          ++promotions;
+    std::optional<std::string> why;
+    int promotions = 0;
+    for (size_t i = 0; i < f->arg_names.size() && !why; ++i) {
+      if (!arguments->has(f->arg_names[i])) {
+        why = "no argument '" + f->arg_names[i] + "'";
+        break;
       }
-      if (promotions < best_promotions) {
-        best_promotions = promotions;
-        matches.clear();
-      }
-      if (promotions == best_promotions) matches.push_back(f);
-    } catch (const std::exception&) {
+      const auto& value = arguments->at(f->arg_names[i]);
+      why = argument_mismatch(f->arg_names[i], f->arg_views[i], value);
+      // Match stanc's ordinary numeric promotion preference: an integer
+      // argument selects an integer overload ahead of a real overload.
+      if (value.is_int &&
+          f->arg_views[i].leaf == stanli::mir::UnsizedLeaf::Real)
+        ++promotions;
     }
+    if (why) {
+      refusals += "; " + f->name + ": " + *why;
+      continue;
+    }
+    if (promotions < best_promotions) {
+      best_promotions = promotions;
+      matches.clear();
+    }
+    if (promotions == best_promotions) matches.push_back(f);
   }
   if (matches.size() == 1) return matches.front();
   if (matches.empty())
     throw std::runtime_error("no overload of Stan function '" + requested +
-                             "' matches the arguments");
+                             "' matches the arguments" + refusals);
   throw std::runtime_error(
       "arguments ambiguously match overloaded Stan function '" + requested +
       "'; use a resolved signature");
