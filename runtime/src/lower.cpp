@@ -392,19 +392,6 @@ void Lowering::bind_data(const mir::Program& p) {
          canonical_input_rebuild(st, input_names)))
       continue;
     record_interpreter_event("prepare_data", "statement_entry");
-    if (st.kind == mir::Stmt::Decl && st.has_init) {
-      const auto sized = data_extent_memo.find(expr_signature(st.init));
-      if (sized != data_extent_memo.end()) {
-        mir::Stmt resolved = st;
-        resolved.init = mir::Expr{};
-        resolved.init.kind = mir::Expr::LitInt;
-        resolved.init.lit_i = sized->second;
-        resolved.init.type_ = "UInt";
-        resolved.init.data_only = true;
-        (void)td.exec(resolved);
-        continue;
-      }
-    }
     (void)td.exec(st);
   }
   // The interpreter keeps a block's locals after the block ends. Drop them,

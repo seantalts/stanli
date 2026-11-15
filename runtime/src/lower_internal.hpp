@@ -861,6 +861,10 @@ struct Lowering {
                      fun_defs, e,
                      [&in](const mir::Expr& arg) { return in.eval(arg); },
                      result);
+               },
+               [this](const mir::Stmt& st) {
+                 return data_extent_scope && st.kind == mir::Stmt::NRFunApp &&
+                        message_action(st.fn_name) == MessageAction::Print;
                }}};
   Graph g;
   CompiledModel out;
@@ -897,7 +901,9 @@ struct Lowering {
   // return use the promoted type, but a direct formal reference keeps its own.
   std::map<std::string, bool> udf_formal_autodiff;
   std::map<std::string, unsigned> effectful_cache;
-  std::map<std::string, long> data_extent_memo;
+  // Set while bind_data computes the data block's sizes to check the input.
+  // A size that prints prints when prepare_data reaches its declaration, as
+  // in CmdStan, so these early evaluations skip print statements.
   bool data_extent_scope = false;
   std::set<std::string> int_locals;
   // SInt locals in log_prob (data-only)
@@ -1841,7 +1847,6 @@ struct Lowering {
   static constexpr unsigned kStatefulEffect = 2;
   bool expr_effectful(const mir::Expr& e);
   unsigned expr_effects(const mir::Expr& e);
-  static std::string expr_signature(const mir::Expr& e);
   unsigned fun_effects(const std::string& name);
 
   struct UdfBinding {

@@ -469,6 +469,21 @@ void test_data_size_effect_runs_once() {
   check(captured.finish().empty(), "data size print absent at evaluation");
 }
 
+// Two data sizes and a transformed-data statement spell the same printing
+// call. CmdStan prints once per site: three lines.
+void test_data_size_effect_runs_once_per_site() {
+  auto data = stanli::DataMap::from_json_file(
+      "tests/fixtures/data_size_print_sites.json");
+  std::string printed;
+  {
+    stanli_test::StdoutCapture captured;
+    (void)stanli::compile_model(fixture("data_size_print_sites"), data);
+    printed = captured.finish();
+  }
+  check(printed == "sizing 3\nsizing 3\nsizing 3\n",
+        "data size print fires once per site, got '" + printed + "'");
+}
+
 std::string lower_dump(const std::string& stem, const std::string& dir) {
   std::filesystem::remove_all(dir);
   test_setenv("STANLI_DUMP_PASSES", dir.c_str(), 1);
@@ -506,6 +521,8 @@ int main() {
   run_case("effectful data UDF", test_effectful_data_udf);
   run_case("effectful int UDF", test_effectful_int_udf_is_not_observed);
   run_case("data size effect runs once", test_data_size_effect_runs_once);
+  run_case("data size effect runs once per site",
+           test_data_size_effect_runs_once_per_site);
   run_case("while fallback leaves no trace",
            test_while_fallback_leaves_no_trace);
   if (failures == 0) std::printf("test_lower_views OK\n");
