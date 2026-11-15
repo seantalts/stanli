@@ -1265,8 +1265,11 @@ CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
     throw std::invalid_argument("invalid reduce_sum compilation options");
   const char* prep_env = std::getenv("STANLI_PROFILE_PREP");
   PrepTrace prep(prep_env && prep_env[0] != '0');
-  PassDumper dumper(std::getenv("STANLI_DUMP_PASSES"),
-                    std::getenv("STANLI_DUMP_STAGES"));
+  PassDumper dumper = options.dump_passes.empty()
+                         ? PassDumper(std::getenv("STANLI_DUMP_PASSES"),
+                                      std::getenv("STANLI_DUMP_STAGES"))
+                         : PassDumper(options.dump_passes.c_str(),
+                                      options.dump_stages.c_str());
   if (dumper.enabled()) dumper.write("mir", "mir.sexp", mir_text);
   const auto compile_time = prep.start();
   // Shared because the interpreted write_array fallback, when needed,

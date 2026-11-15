@@ -247,6 +247,11 @@ struct CompileOptions {
   int64_t reduce_sum_min_chunk_ns = 30000;
   int reduce_sum_max_chunks = 1024;
   bool fast_math = false;
+  // Lowering stage dumps: a directory, or "-" for stdout. Empty leaves the
+  // choice to STANLI_DUMP_PASSES. dump_stages narrows the stages as
+  // STANLI_DUMP_STAGES does.
+  std::string dump_passes;
+  std::string dump_stages;
 };
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                             unsigned seed = 1);

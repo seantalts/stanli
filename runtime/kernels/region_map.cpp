@@ -70,7 +70,7 @@ void expect_clean_sweep(const std::vector<char>& exempt, const double* adj,
                         int64_t iteration) {
   for (size_t cell = 0; cell < exempt.size(); ++cell)
     if (!exempt[cell] && adj[cell] != 0.0)
-      throw std::logic_error(
+      throw RegionMapUncleanSweep(
           "region_map_check_clean: adjoint cell " + std::to_string(cell) +
           " holds " + std::to_string(adj[cell]) +
           " after the sweep of iteration " + std::to_string(iteration));

@@ -30,6 +30,7 @@
 
 #include <stanli/compile.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/region_map.hpp>
 #include <stanli/wa_interp.hpp>
 
 #include "stanc_embedded.hpp"
@@ -200,17 +201,11 @@ int main(int argc, char** argv) {
                  "mutually exclusive\n");
     return 2;
   }
-  if (!dump_stages.empty() || !dump_dir.empty()) {
-    const std::string sink = dump_dir.empty() ? "-" : dump_dir;
-#ifdef _WIN32
-    _putenv_s("STANLI_DUMP_PASSES", sink.c_str());
-    if (!dump_stages.empty())
-      _putenv_s("STANLI_DUMP_STAGES", dump_stages.c_str());
-#else
-    setenv("STANLI_DUMP_PASSES", sink.c_str(), 1);
-    if (!dump_stages.empty())
-      setenv("STANLI_DUMP_STAGES", dump_stages.c_str(), 1);
-#endif
+  if ((!dump_stages.empty() || !dump_dir.empty()) && (paths_only || cross)) {
+    std::fprintf(stderr,
+                 "stanli_check: --dump-passes and --dump-dir apply to the "
+                 "ordinary evaluation, not --paths or --cross\n");
+    return 2;
   }
 
   std::string mir;
@@ -309,6 +304,10 @@ int main(int argc, char** argv) {
     stanli::DataMap data = stanli::DataMap::from_json_file(argv[2]);
     stanli::CompileOptions compile_options;
     compile_options.fast_math = fast_math;
+    if (!dump_stages.empty() || !dump_dir.empty()) {
+      compile_options.dump_passes = dump_dir.empty() ? "-" : dump_dir;
+      compile_options.dump_stages = dump_stages;
+    }
     cm = stanli::compile_model(mir, data, 1, compile_options);
     {
       const std::string note = stanli::interpreter_warning(cm);
@@ -502,10 +501,9 @@ int main(int argc, char** argv) {
             std::fill(grad.begin(), grad.end(), 0.0);
             print_sweep_point(k, ex.gradient(grad.data()), grad);
             ++evaluated;
-          } catch (const std::exception& e) {
-            if (std::string(e.what()).find("region_map_check_clean") !=
-                std::string::npos)
-              throw;
+          } catch (const stanli::RegionMapUncleanSweep&) {
+            throw;
+          } catch (const std::exception&) {
           }
         }
         std::fprintf(stderr, "SWEEP %d points, %d evaluated\n", sweep,
