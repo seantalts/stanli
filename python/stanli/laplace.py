@@ -452,6 +452,7 @@ def _bad_eigenpairs(Q, floor, n_negative):
     absolute eigenvalue, with their eigenvectors; also the extreme
     eigenvalues. `n_negative` is the exact count of negative eigenvalues
     (from the inertia of an LDL^T), which the Lanczos search must reach."""
+    import scipy.sparse as sp
     import scipy.sparse.linalg as spla
     n = Q.shape[0]
     if n <= 64:
@@ -460,16 +461,21 @@ def _bad_eigenpairs(Q, floor, n_negative):
         bad = w < lo
         return w[bad], V[:, bad], float(w.min()), float(w.max())
     top = float(spla.eigsh(Q, k=1, which="LA", return_eigenvectors=False)[0])
+    sigma = -floor * abs(top)
+    lu = spla.splu((Q - sigma * sp.identity(n, format="csc")).tocsc(),
+                   permc_spec="MMD_AT_PLUS_A", diag_pivot_thresh=1.0)
+    op = spla.LinearOperator((n, n), matvec=lu.solve, dtype=np.float64)
     k = min(max(2 * n_negative, n_negative + 4), n - 2)
     for attempt in range(8):
-        w, V = spla.eigsh(Q, k=k, which="SA", ncv=min(n - 1, max(2 * k + 1, 20)),
+        w, V = spla.eigsh(Q, k=k, sigma=sigma, which="LM", OPinv=op,
                           v0=np.random.RandomState(attempt).randn(n))
         order = np.argsort(w)
         w, V = w[order], V[:, order]
         lo = floor * max(abs(top), abs(w[0]))
-        bad = w < lo
+        reach = float(np.abs(w - sigma).max())
         found = int((w < 0).sum())
-        if found >= n_negative and (bad.sum() < k or k >= n - 2):
+        if found >= n_negative and (sigma + reach >= lo or k >= n - 2):
+            bad = w < lo
             return w[bad], V[:, bad], float(w[0]), top
         k = min(2 * k, n - 2)
     raise RuntimeError(

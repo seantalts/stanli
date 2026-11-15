@@ -160,6 +160,19 @@ def test_lowrank_whitening_implies_the_corrected_precision():
         check_implied_precision(Q, U, perm)
 
 
+def test_bad_eigenpairs_with_a_wide_spectrum():
+    rng = np.random.RandomState(3)
+    n = 144
+    w = np.concatenate([[-1.1, -0.5, 0.2, 0.3, 0.35, 0.43, 0.57, 0.64, 0.67],
+                        np.geomspace(1.9, 5e5, n - 9)])
+    V, _ = np.linalg.qr(rng.randn(n, n))
+    Q = scipy.sparse.csc_matrix((V * w) @ V.T)
+    bad, vecs, lo, hi = laplace._bad_eigenpairs(Q, 1e-8, 2)
+    assert np.allclose(np.sort(bad), [-1.1, -0.5], rtol=1e-8)
+    assert abs(lo + 1.1) < 1e-8 and abs(hi - 5e5) < 1e-3
+    assert np.allclose(Q @ vecs, vecs * bad, atol=1e-6)
+
+
 def test_lowrank_with_one_column_and_positive_definite_base():
     rng = np.random.RandomState(5)
     Q = banded(16, rng)
