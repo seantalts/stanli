@@ -70,7 +70,7 @@ model.stan + data.json
   |  stanc3 parse/typecheck/Stan-Math transform (upstream OCaml)
   v  stanli-owned budgeted O1 + vectorize_loops policy (typed OCaml)
 compiler/ocaml/stanli_pipeline.ml + portable_mir.ml
-  |  canonical compact portable MIR v2
+  |  canonical compact portable MIR v3
   v
 decode_program (compact portable MIR or legacy s-expression)
   |  decoded into mir::Stmt / mir::Expr structs

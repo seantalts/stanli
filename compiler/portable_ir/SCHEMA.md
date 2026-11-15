@@ -19,8 +19,8 @@ inactive fields, and decimal parsing.
 Portable MIR v1 was a pre-release JSON format and v2 (`STANLI2:`) the layout
 before every stanc3 fact the runtime reads became a typed field. Neither is
 accepted by this runtime; a `STANLI<n>:` document of another version is
-rejected with a request to recompile the model. The legacy stanc3 S-expression reader
-remains a separate transitional input path.
+rejected with a request to recompile the model. The legacy stanc3
+S-expression reader remains a separate input path.
 
 ## Envelope and format detection
 
@@ -381,14 +381,13 @@ stanc3 fields absent from `stanli::mir` are not encoded.
 The producer must not silently omit or reinterpret an unsupported construct.
 Expressions, statements, and transforms use their `Unsupported` tag; a sized
 type retains its exact unrecognized `base`. Each carries a complete
-deterministic opaque spelling in `raw`. Supported nodes may also carry `raw`
-when the legacy mapping uses an internal payload. The decoder preserves those
-bytes; lowering either consumes the supported payload or reports an
-unsupported-form error.
+deterministic opaque spelling in `raw`; lowering reports such a node as an
+unsupported form.
 
-`raw` is diagnostic/compatibility data rather than executable syntax. It is
-still included in canonical byte equality so native OCaml, js_of_ocaml, and
-Windows builds cannot drift unnoticed.
+`raw` is diagnostic text only: every fact the runtime acts on has a typed
+field, and no consumer parses `raw`. It is still included in canonical byte
+equality so native OCaml, js_of_ocaml, and Windows builds cannot drift
+unnoticed.
 
 ## Validation and finalization
 
