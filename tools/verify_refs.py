@@ -1107,12 +1107,14 @@ VALUE_ULP_LIMITS = {
 # multiply-add; x86-64 and MSVC builds round the product first. Gradient
 # entries that cancel to a hundredth of the largest one amplify that last
 # bit: stanli on Linux and Windows is up to 507 ULP per element from the
-# arm64 CmdStan reference, and 4 ULP of the largest entry. CmdStan built with
-# the unfused kernel matches stanli on Linux within 2 ULP per element. Against
-# an 80-digit reference neither is closer: at multi_gp_rectangular grad[19]
-# stanli on Linux is 222 ULP off and the arm64 reference 285, at
-# propto_multi_gp grad[95] 166 and 70, and the largest gradient error is the
-# same on both platforms.
+# arm64 CmdStan reference, and 4 ULP of the largest entry. Against an
+# 80-digit reference the Linux values are farther from the true gradient at
+# five of the six largest gaps (propto_multi_gp grad[95]: 166 vs 70 ULP) and
+# closer at one (multi_gp_rectangular grad[19]: 222 vs 285). CmdStan built on
+# arm64 with Eigen's kernel changed to round each product gives the same value
+# as stanli on Linux at each of those entries and is within 2 ULP elsewhere,
+# and the largest gradient error relative to the largest entry is the same on
+# both platforms.
 GRADIENT_AGAINST_LARGEST_OFF_PLATFORM = dict.fromkeys(
     ("multi_gp_rectangular", "propto_data_arguments", "propto_multi_gp"),
     "cancelling covariance gradient; Eigen's product fuses on arm64 only")
