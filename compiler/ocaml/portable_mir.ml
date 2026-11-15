@@ -2,7 +2,9 @@ open Std
 open Middle
 
 type unsized_view = {depth: int; leaf: string}
-type function_type = {ft_args: unsized_view list; ft_suffix: int}
+
+type function_type =
+  {ft_args: unsized_view list; ft_suffix: int; ft_propto: bool}
 
 type wire_expr =
   { e_kind: string
@@ -230,7 +232,8 @@ let function_type_of = function
             List.map args ~f:(fun (_, typ) ->
                 let view, _ = unsized_view_and_raw typ in
                 view)
-        ; ft_suffix= suffix_tag suffix }
+        ; ft_suffix= suffix_tag suffix
+        ; ft_propto= propto suffix }
   | UInt | UReal | UComplex | UVector | URowVector | UMatrix | UComplexVector
    |UComplexRowVector | UComplexMatrix | UArray _ | UTuple _
    |UMathLibraryFunction ->
@@ -241,10 +244,17 @@ let rec expr_of_t (expr : Expr.Typed.t) =
   let base =
     match expr.pattern with
     | Var name ->
+        (* A density passed as `foo_lupdf` names the definition foo_lpdf and
+           asks for its unnormalized form, as stanc3's C++ generation reads
+           it. *)
+        let fn_type = function_type_of expr.meta.type_ in
+        let unnormalized =
+          Option.value_map fn_type ~default:false ~f:(fun t -> t.ft_propto)
+        in
         { (default_expr ()) with
           e_kind= "Var"
-        ; e_name= name
-        ; e_fn_type= function_type_of expr.meta.type_ }
+        ; e_name= (if unnormalized then Utils.normalized_name name else name)
+        ; e_fn_type= fn_type }
     | Lit (Int, spelling) ->
         let canonical = canonical_int32 spelling in
         { (default_expr ()) with
@@ -642,9 +652,10 @@ let add_v2_optional add_value buffer = function
       add_u8 buffer 1;
       add_value buffer value
 
-let add_v2_function_type buffer {ft_args; ft_suffix} =
+let add_v2_function_type buffer {ft_args; ft_suffix; ft_propto} =
   add_v2_list add_v2_view buffer ft_args;
-  add_u8 buffer ft_suffix
+  add_u8 buffer ft_suffix;
+  add_v2_bool buffer ft_propto
 
 let add_v2_meta buffer expr =
   add_v2_view buffer expr.e_unsized;
@@ -656,8 +667,7 @@ let v2_lib_tag = function
   | "StanLib" -> 0
   | "Internal" -> 1
   | "UserDefined" -> 2
-  | library ->
-      invalid_arg ("portable MIR: unknown function library " ^ library)
+  | library -> invalid_arg ("portable MIR: unknown function library " ^ library)
 
 let rec add_v2_expr buffer expr =
   (match expr.e_kind with

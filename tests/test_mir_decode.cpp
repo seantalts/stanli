@@ -125,6 +125,7 @@ void append_expr(std::string& bytes, const mir::Expr& value) {
                       append_view(out, view);
                     });
         append_u8(bytes, static_cast<uint8_t>(value.fn_type->suffix));
+        append_bool(bytes, value.fn_type->propto);
       }
       break;
     case mir::Expr::LitInt:
@@ -497,7 +498,8 @@ std::string write_f64(double value) {
 json write_function_type(const std::optional<mir::FunctionType>& value) {
   if (!value) return nullptr;
   return {{"args", write_array(value->args, write_unsized)},
-          {"suffix", static_cast<int>(value->suffix)}};
+          {"suffix", static_cast<int>(value->suffix)},
+          {"propto", value->propto}};
 }
 
 json write_expr(const mir::Expr& value) {

@@ -240,8 +240,7 @@ std::optional<FunctionType> read_function_type(const Node& type) {
       throw std::runtime_error("mir: malformed function type");
     out.args.push_back(read_unsized(arg[1]));
   }
-  bool propto = false;
-  out.suffix = read_suffix(type[1][2], &propto);
+  out.suffix = read_suffix(type[1][2], &out.propto);
   return out;
 }
 
@@ -400,7 +399,20 @@ Expr read_expr(const Node& n) {
       if (const Node* t = field(m, "type_")) {
         const Node& type = (*t)[1];
         e.unsized = read_unsized(type);
-        if (e.kind == Expr::Var) e.fn_type = read_function_type(type);
+        if (e.kind == Expr::Var) {
+          e.fn_type = read_function_type(type);
+          // A density passed as `foo_lupdf` names the definition foo_lpdf
+          // and asks for its unnormalized form, as stanc3's C++ generation
+          // reads it; the portable producer does the same.
+          if (e.fn_type && e.fn_type->propto) {
+            e.fn_propto = true;
+            for (const char* unnormalized : {"_lupdf", "_lupmf"})
+              if (e.name.size() > 6 &&
+                  e.name.compare(e.name.size() - 6, 6, unnormalized) == 0)
+                e.name.replace(e.name.size() - 6, 6,
+                               unnormalized[4] == 'd' ? "_lpdf" : "_lpmf");
+          }
+        }
         if (e.unsized.leaf == UnsizedLeaf::Unknown) e.raw = dump(type);
       }
       if (const Node* a = field(m, "adlevel"))
@@ -1155,27 +1167,8 @@ std::string resolve_overload(const Overloads::value_type& candidates,
   return match->overload;
 }
 
-// A callback reference to a density written `foo_lupdf` names the
-// definition `foo_lpdf` and passes propto along, as stanc3's own C++
-// generation does.
-void normalize_callback(Expr& e) {
-  if (!e.fn_type) return;
-  const FnSuffix suffix = e.fn_type->suffix;
-  if (suffix != FnSuffix::Lpdf && suffix != FnSuffix::Lpmf) return;
-  const std::string unnormalized =
-      suffix == FnSuffix::Lpdf ? "_lupdf" : "_lupmf";
-  if (e.name.size() <= unnormalized.size() ||
-      e.name.compare(e.name.size() - unnormalized.size(), unnormalized.size(),
-                     unnormalized) != 0)
-    return;
-  e.name.replace(e.name.size() - unnormalized.size(), unnormalized.size(),
-                 suffix == FnSuffix::Lpdf ? "_lpdf" : "_lpmf");
-  e.fn_propto = true;
-}
-
 void resolve_calls(Expr& e, const Overloads& overloads) {
   for (Expr& a : e.args) resolve_calls(a, overloads);
-  normalize_callback(e);
   const bool call =
       e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::UserDefined;
   const bool callback = e.kind == Expr::Var && e.fn_type;

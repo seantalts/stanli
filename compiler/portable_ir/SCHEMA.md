@@ -129,10 +129,14 @@ name.
 ```text
 list<UnsizedView> args
 u8 suffix
+bool propto
 ```
 
 The type of a variable that names a function, as a higher-order callback
-argument does: the views of the function's arguments and its suffix.
+argument does: the views of the function's arguments, its suffix, and
+whether the reference asks for the unnormalized density. A callback written
+`foo_lupdf`/`foo_lupmf` is encoded with the definition's name,
+`foo_lpdf`/`foo_lpmf`, and `propto` set.
 
 ### Expression kind
 
@@ -309,9 +313,7 @@ A `propto` flag is true only for an `FnLpdf`/`FnLpmf` call written
 When a name has several definitions, the shared finalizer gives each its
 argument signature as a separate `overload` field and records on every call,
 statement call and callback variable the overload its argument views (for a
-callback, its `function_type` views) select; names stay unchanged. It also
-maps a callback written `foo_lupdf`/`foo_lupmf` to the definition `foo_lpdf`/
-`foo_lpmf` with `propto` set, as stanc3's C++ generation does.
+callback, its `function_type` views) select; names stay unchanged.
 
 ### `Program`
 

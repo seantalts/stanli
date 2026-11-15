@@ -350,6 +350,7 @@ FunctionType read_function_type(Reader& reader) {
   FunctionType value;
   value.args = reader.list<UnsizedView>([&] { return read_view(reader); });
   value.suffix = read_suffix(reader);
+  value.propto = reader.boolean();
   return value;
 }
 
@@ -374,7 +375,10 @@ Expr read_expr(Reader& reader) {
       value.name = reader.string();
       const uint8_t present = reader.u8();
       if (present > 1) reader.fail("optional marker is not 0 or 1");
-      if (present) value.fn_type = read_function_type(reader);
+      if (present) {
+        value.fn_type = read_function_type(reader);
+        value.fn_propto = value.fn_type->propto;
+      }
       break;
     }
     case Expr::LitInt:

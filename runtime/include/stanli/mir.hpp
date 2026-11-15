@@ -82,6 +82,7 @@ enum class FnSuffix : uint8_t { Plain, Rng, Lpdf, Lpmf, Target, Jacobian };
 struct FunctionType {
   std::vector<UnsizedView> args;
   FnSuffix suffix = FnSuffix::Plain;
+  bool propto = false;  // referenced as `_lupdf` / `_lupmf`
 };
 
 struct Expr {

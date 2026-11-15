@@ -120,7 +120,10 @@ let referenced_kind names = function
 let rec referenced_expr names (expr : Middle.Expr.Typed.t) =
   let names =
     match expr.pattern with
-    | Var name -> Function_names.add name names
+    | Var name ->
+        (* A density passed as `foo_lupdf` names the definition foo_lpdf. *)
+        Function_names.add name names
+        |> Function_names.add (Middle.Utils.normalized_name name)
     | FunApp (kind, _) -> referenced_kind names kind
     | _ -> names in
   Middle.Expr.Pattern.fold referenced_expr names expr.pattern
