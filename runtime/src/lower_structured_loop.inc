@@ -26,7 +26,9 @@ bool bounded_output_dynamic = false;
 // This scan mutates no lowering state and invokes no interpreter probes.
 bool bounded_output_candidate(const mir::Stmt& root,
                               std::set<std::string>* references) {
-  if (!in_write_array || !n_gq_start || root.kind != mir::Stmt::Block ||
+  if (!in_write_array ||
+      wa_section != mir::OutputVar::Block::GeneratedQuantities ||
+      root.kind != mir::Stmt::Block ||
       structured_policy == StructuredMode::Off)
     return false;
   std::set<std::string> locals, dependent;

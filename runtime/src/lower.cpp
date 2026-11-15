@@ -917,20 +917,28 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   const auto total_time = prep.start();
   for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
   in_write_array = true;
-  output_vars = &p.output_vars;
-  // stanc3 guards the two emission groups on these flags; the sampler wants
-  // both, so pin them and let the data-only IfElse fold them away.
+  output_cursor = mir::OutputCursor(p.output_vars);
+  // The readers drop stanc3's section guards on these flags; a guard they
+  // did not recognize still folds away with both pinned on.
   int_env["emit_transformed_parameters__"] = 1;
   int_env["emit_generated_quantities__"] = 1;
   CompiledModel::WriteArray wa;
   DumpOnThrow guard{*this};
   const auto lower_time = prep.start();
-  for (const auto& s : p.generate_quantities) {
+  for (size_t i = 0; i < p.generate_quantities.size(); ++i) {
+    const mir::Stmt& s = p.generate_quantities[i];
+    if (i == p.transformed_parameters_begin)
+      wa_section = mir::OutputVar::Block::TransformedParameters;
+    if (i == p.generated_quantities_begin)
+      wa_section = mir::OutputVar::Block::GeneratedQuantities;
     const auto mark = wa_mark();
     const auto fail_section = [&](const std::string& what) {
-      const char* section = mark.n_gq_start   ? "generated quantities"
-                            : mark.n_tp_start ? "transformed parameters"
-                                              : "write_array";
+      const char* section =
+          wa_section == mir::OutputVar::Block::GeneratedQuantities
+              ? "generated quantities"
+          : wa_section == mir::OutputVar::Block::TransformedParameters
+              ? "transformed parameters"
+              : "write_array";
       wa_rollback(mark);
       // Keep the valid prefix for diagnostics, but drivers select WaInterp
       // whenever this marker is set and it evaluates the whole section from
@@ -971,11 +979,10 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
              out.n_unconstrained);
   guard.done = true;
   wa.graph = std::move(g);
-  // A section stanc did not emit a guard for (or one lowering stopped
-  // short of) has no columns of its own: it starts where the CSV ends.
-  // The transformed-parameter boundary falls back to the generated
-  // quantities one rather than to the end, so a missing first guard
-  // cannot order the two backwards and hand a reader a negative count.
+  // A section with no columns (or one lowering stopped short of) starts
+  // where the next one does; the transformed-parameter boundary falls back
+  // to the generated-quantities one, so the two cannot come out ordered
+  // backwards and hand a reader a negative count.
   wa.n_gq_start = n_gq_start.value_or(out.views.size());
   wa.n_tp_start = n_tp_start.value_or(wa.n_gq_start);
   wa.columns = std::move(out.views);

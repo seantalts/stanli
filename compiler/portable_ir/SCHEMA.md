@@ -330,26 +330,54 @@ list<InputVar> input_vars
 list<Stmt> prepare_data
 list<Stmt> log_prob
 list<Stmt> generate_quantities
+u32 transformed_parameters_begin
+u32 generated_quantities_begin
 list<FunDef> fun_defs
-list<string> output_vars
-list<Stmt> transform_inits   (optional; see below)
+list<OutputVar> output_vars
+list<Stmt> transform_inits
 ```
 
-An `InputVar` is `string name` followed by `SizedType type`.
+stanc3 separates `generate_quantities`, its write_array body, into
+parameter, transformed-parameter and generated-quantity sections with
+top-level early-return guards on `emit_transformed_parameters__` and
+`emit_generated_quantities__`. The runtime always emits every section, so
+the producer drops the two guards and records the index of the statement
+each later section begins with; a missing section begins where the next
+one does. The decoder requires
+`transformed_parameters_begin <= generated_quantities_begin <=` the
+statement count.
+
+An `InputVar` is `string name` followed by `SizedType type`. An `OutputVar`
+is
+
+```text
+string name
+u8 block
+SizedType constrained_type
+```
+
+| `block` | Meaning |
+| ---: | --- |
+| 0 | `Parameters` |
+| 1 | `TransformedParameters` |
+| 2 | `GeneratedQuantities` |
+
+`output_vars` lists the parameters, transformed parameters and generated
+quantities in the order `generate_quantities` writes them, which is CmdStan's
+column order. The runtime assigns each executed `FnWriteParam` to the first
+variable whose columns (the product of its constrained type's extents) are
+not all written; a write that still reads a variable by name selects that
+variable, skipping zero-width variables before it. Column names, CSV section
+boundaries and the complex-output check all come from the variable so
+assigned, so a write the optimizer turned into a literal is named correctly.
 
 `transform_inits` is stanc3's inverse parameter-transform section: its
 `FnReadData` calls name PARAMETERS read from a caller-supplied init context
 rather than model data, and each parameter ends in an `FnWriteParam` carrying
 the transform to invert.
 
-It is the only optional element of the payload, and it is optional in exactly
-one direction. It trails every required section, so a document written by a
-producer from before it existed simply ends after `output_vars` and decodes
-with an empty `transform_inits` -- the same state as a model whose section
-could not be encoded, which callers already have to handle. A decoder must not
-treat its absence as truncation, and must still reject bytes beyond it. The
-current producer always emits it, empty list included, so the canonical bytes
-for a given input remain unique.
+Every section is required, `transform_inits` included; a model without
+parameters writes it as an empty list.
 
 The order of every list is semantic and preserved. Source locations and
 stanc3 fields absent from `stanli::mir` are not encoded.
@@ -433,5 +461,3 @@ and participates in the same byte comparison.
 
 A future incompatible layout gets a new ASCII header and a new decoder. It
 must never reuse `STANLI3:` with different tag meanings or field order.
-Appending an optional trailing section, as `transform_inits` did, is the one
-change that keeps the header: it cannot alter how any earlier byte is read.

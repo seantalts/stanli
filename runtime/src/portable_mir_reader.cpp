@@ -559,6 +559,20 @@ FunDef read_fun(Reader& reader) {
   return value;
 }
 
+constexpr std::array<OutputVar::Block, 3> kBlockTags = {
+    OutputVar::Block::Parameters, OutputVar::Block::TransformedParameters,
+    OutputVar::Block::GeneratedQuantities};
+
+OutputVar read_output_var(Reader& reader) {
+  Reader::Depth depth(reader);
+  OutputVar value;
+  value.name = reader.string();
+  const uint8_t block = reader.u8();
+  value.block = read_tag(reader, block, kBlockTags, "unknown output-block tag");
+  value.type = read_sized(reader);
+  return value;
+}
+
 std::pair<std::string, SizedType> read_input(Reader& reader) {
   Reader::Depth depth(reader);
   std::string name = reader.string();
@@ -573,17 +587,16 @@ Program read_program(Reader& reader) {
   result.prepare_data = read_stmts(reader);
   result.log_prob = read_stmts(reader);
   result.generate_quantities = read_stmts(reader);
+  result.transformed_parameters_begin = reader.u32();
+  result.generated_quantities_begin = reader.u32();
+  if (result.transformed_parameters_begin > result.generated_quantities_begin ||
+      result.generated_quantities_begin > result.generate_quantities.size())
+    reader.fail("write_array section boundaries out of order");
   result.fun_defs = reader.list<FunDef>([&] { return read_fun(reader); });
-  result.output_vars = read_strings(reader);
-  // Appended after the sections every v2 document carries. A document from a
-  // producer that predates it simply ends here, and decodes with no inverse
-  // parameter transforms -- the same state as a model whose section could not
-  // be encoded. Anything else still has to be a well-formed statement list,
-  // and finish() still rejects bytes beyond it.
-  if (!reader.at_end()) {
-    result.has_transform_inits = true;
-    result.transform_inits = read_stmts(reader);
-  }
+  result.output_vars =
+      reader.list<OutputVar>([&] { return read_output_var(reader); });
+  result.has_transform_inits = true;
+  result.transform_inits = read_stmts(reader);
   result.nesting = (reader.peak_depth() + 1) / 2;
   return result;
 }

@@ -661,32 +661,6 @@ inline void collect_names(const Stmt& s, std::set<std::string>* names) {
   for (const Stmt& child : s.body) collect_names(child, names);
 }
 
-// stanc3 separates write_array's three CSV sections with early-return
-// guards rather than nested blocks:
-//   if (!(emit_transformed_parameters__ || emit_generated_quantities__))
-//     return;                                 <- transformed parameters start
-//   if (!emit_generated_quantities__) return; <- generated quantities start
-// Both flags are pinned on, so the guards emit nothing; the column count
-// as one is reached is the only record of where a section begins.
-enum class EmitGuard { None, TransformedParams, GeneratedQuantities };
-
-inline EmitGuard emit_guard(const Stmt& s) {
-  if (s.kind != Stmt::IfElse) return EmitGuard::None;
-  const Expr& c = s.cond;
-  if (c.kind != Expr::FunApp || c.name != "PNot__" || c.args.size() != 1)
-    return EmitGuard::None;
-  const Expr& a = c.args[0];
-  if (a.kind == Expr::Var && a.name == "emit_generated_quantities__")
-    return EmitGuard::GeneratedQuantities;
-  if (a.kind == Expr::EOr && a.args.size() == 2 &&
-      a.args[0].kind == Expr::Var &&
-      a.args[0].name == "emit_transformed_parameters__" &&
-      a.args[1].kind == Expr::Var &&
-      a.args[1].name == "emit_generated_quantities__")
-    return EmitGuard::TransformedParams;
-  return EmitGuard::None;
-}
-
 struct FunDef {
   std::string name;
   // The signature that tells this overload apart, when the name has more
@@ -699,6 +673,18 @@ struct FunDef {
   std::vector<Stmt> body;
 };
 
+// A variable write_array emits: a parameter, transformed parameter or
+// generated quantity, with its constrained type.
+struct OutputVar {
+  std::string name;
+  enum class Block : uint8_t {
+    Parameters,
+    TransformedParameters,
+    GeneratedQuantities
+  } block = Block::Parameters;
+  SizedType type;
+};
+
 struct Program {
   std::vector<std::pair<std::string, SizedType>> input_vars;
   std::vector<Stmt> prepare_data;
@@ -706,9 +692,13 @@ struct Program {
   // stanc3's `generate_quantities` is the whole write_array body: it re-reads
   // the unconstrained draw, recomputes the transformed parameters, runs the
   // generated quantities block, and marks each CSV column with an
-  // FnWriteParam. Gated on emit_transformed_parameters__ /
-  // emit_generated_quantities__, which the lowering pins to 1.
+  // FnWriteParam. stanc3 separates the three sections with early-return
+  // guards on its emit flags; stanli always emits every section, so the
+  // readers drop the guards and keep where each section begins, as indices
+  // into this list.
   std::vector<Stmt> generate_quantities;
+  size_t transformed_parameters_begin = 0;
+  size_t generated_quantities_begin = 0;
   // stanc3's `transform_inits`: reads each parameter by name from a caller
   // supplied context (FnReadData names the PARAMETER here, not model data)
   // and emits one FnWriteParam per parameter carrying the transform to
@@ -719,10 +709,9 @@ struct Program {
   bool has_transform_inits = false;
   std::vector<Stmt> transform_inits;
   std::vector<FunDef> fun_defs;
-  // Output variable names (params, transformed params, generated
-  // quantities) in FnWriteParam emission order, from the MIR's
-  // output_vars section.
-  std::vector<std::string> output_vars;
+  // The parameters, transformed parameters and generated quantities in
+  // the order write_array emits them, which is CmdStan's column order.
+  std::vector<OutputVar> output_vars;
   // Deepest nesting of statements and expressions the reader met.
   unsigned nesting = 0;
 };
@@ -894,6 +883,55 @@ const FunDef* find_function(const std::map<std::string, const FunDef*>& funs,
   const auto found = funs.find(function_key(call));
   return found == funs.end() ? nullptr : found->second;
 }
+
+// Assigns each of write_array's FnWriteParam statements, in execution
+// order, to the output variable whose values it writes. stanc3 emits the
+// variables in output_vars order. A write that reads a later output
+// variable by name belongs to it. A write the optimizer turned into a
+// literal no longer names its variable; it belongs to the first variable
+// whose columns are not all written yet, which needs the column counts of
+// the variables from the current one on.
+class OutputCursor {
+ public:
+  OutputCursor() = default;
+  explicit OutputCursor(const std::vector<OutputVar>& vars) : vars_(&vars) {}
+
+  // `named` is the variable the write reads, or empty when there is none.
+  // `columns(var)` evaluates a variable's column count; it is called only
+  // for a write that names no variable. Returns null when the write fits
+  // no output variable.
+  template <class Columns>
+  const OutputVar* take(const std::string& named, int64_t width,
+                        Columns columns) {
+    if (!vars_) return nullptr;
+    for (size_t k = next_; !named.empty() && k < vars_->size(); ++k)
+      if ((*vars_)[k].name == named) {
+        if (k != next_) {
+          next_ = k;
+          written_ = 0;
+        }
+        written_ += width;
+        return &(*vars_)[next_];
+      }
+    for (; next_ < vars_->size(); ++next_, written_ = 0) {
+      const int64_t total = columns((*vars_)[next_]);
+      if (written_ + width > total) {
+        if (written_ > 0 && written_ < total) return nullptr;
+        continue;
+      }
+      if (written_ < total || (width == 0 && written_ == 0)) {
+        written_ += width;
+        return &(*vars_)[next_];
+      }
+    }
+    return nullptr;
+  }
+
+ private:
+  const std::vector<OutputVar>* vars_ = nullptr;
+  size_t next_ = 0;
+  int64_t written_ = 0;  // columns of vars_[next_] written so far
+};
 
 Program read_program(const sexp::Node& root);
 

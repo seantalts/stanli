@@ -931,17 +931,17 @@ struct Lowering {
   // Set while try_lower_region considers a write_array loop that
   // write_array_loop_retained selected.
   bool retaining_write_array_loop = false;
-  // The declared emission order, and the last name emitted from it: what a
-  // write whose variable --O1 substituted away is called.
-  const std::vector<std::string>* output_vars = nullptr;
-  std::string last_written;
+  // Which output variable each FnWriteParam writes, and which section of
+  // write_array the statement being lowered belongs to.
+  mir::OutputCursor output_cursor;
+  mir::OutputVar::Block wa_section = mir::OutputVar::Block::Parameters;
   // Read once per lowering. The automatic parent path stays legacy until its
   // cheap outer-loop hazard gate fires, so ordinary expressions and loops pay
   // no repeated environment lookup or recursive scan.
   StructuredMode structured_policy = read_structured_mode();
-  // Where the emission guards fell, as counts of columns emitted before
-  // each. Unset until the guard is reached (a section can be missing from
-  // the MIR entirely), which run_write_array then reads as "at the end".
+  // How many columns precede the first transformed parameter and the first
+  // generated quantity. Unset until such a column is emitted (a section can
+  // be empty), which run_write_array then reads as "at the end".
   std::optional<size_t> n_tp_start, n_gq_start;
   // CmdStan's propto__ template parameter, threaded by lower_call_udf: a
   // density inside an inlined user function is unnormalized only if the
@@ -2208,6 +2208,7 @@ struct Lowering {
   // `out` only grow as well.
   struct WaMark {
     std::optional<size_t> n_tp_start, n_gq_start;
+    mir::OutputCursor output_cursor;
     size_t n_fills = 0, n_ops = 0, n_slots = 0, n_idata = 0, n_udata = 0,
            td_mark = 0;
     size_t n_param_names = 0, n_views = 0, n_unc_params = 0,
@@ -2229,6 +2230,7 @@ struct Lowering {
     WaMark m;
     m.n_tp_start = n_tp_start;
     m.n_gq_start = n_gq_start;
+    m.output_cursor = output_cursor;
     m.n_fills = out.fills.size();
     m.n_ops = g.ops.size();
     m.n_synthetic_names = synthetic_names.size();
@@ -2249,6 +2251,7 @@ struct Lowering {
   void wa_rollback(const WaMark& m) {
     n_tp_start = m.n_tp_start;
     n_gq_start = m.n_gq_start;
+    output_cursor = m.output_cursor;
     const auto truncate = [](auto& v, size_t n) {
       v.erase(v.begin() + (std::ptrdiff_t)n, v.end());
     };

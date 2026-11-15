@@ -1664,6 +1664,34 @@ void test_constant_folded_gq_column() {
   }
 }
 
+// A zero-size output before a folded one: its loop writes nothing, so
+// naming the folded write "the variable after the last one written" calls
+// it z. The writes' widths against output_vars name it w.
+void test_constant_folded_gq_after_empty_output() {
+  using namespace stanli;
+  DataMap data;
+  data.set_int("N", 0);
+  const std::string text =
+      slurp("tests/fixtures/gqconst_after_empty.tmir.sexp");
+  test_setenv("STANLI_WA_FORCE_INTERP", "1");
+  CompiledModel cm = compile_model(text, data);
+  test_unsetenv("STANLI_WA_FORCE_INTERP");
+  if (!cm.write_array || !cm.write_array->interp) {
+    ++failures;
+    std::printf("FAIL gqconst_after_empty did not compile\n");
+    return;
+  }
+  expect_eq("gqconst_after_empty graph header", joined(cm.write_array->columns),
+            "mu,w");
+  Executor pex(cm.graph);
+  cm.bind(pex);
+  Executor wex(std::move(cm.write_array->graph));
+  cm.write_array->bind(wex);
+  (void)cross_checked_row(cm, pex, wex, {0.25}, 1, "gqconst_after_empty");
+  expect_eq("gqconst_after_empty interpreted header",
+            joined(cm.write_array->interp->columns()), "mu,w");
+}
+
 struct RngException {
   int kind = 0;
   std::string message;
@@ -4466,6 +4494,7 @@ int main() {
   test_choose_index_gq();
   test_interpreted_lkj();
   test_constant_folded_gq_column();
+  test_constant_folded_gq_after_empty_output();
   test_categorical_rng_lowering_guards();
   test_compiled_categorical_rng();
   test_categorical_rng_empty_vector();

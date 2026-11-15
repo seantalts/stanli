@@ -1786,25 +1786,22 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
           }
           base = &base->args[0];
         }
-        std::string name;
-        if (base->kind == mir::Expr::Var) {
-          name = base->name;
-        } else {
-          size_t next = 0;
-          if (output_vars) {
-            const auto at = std::find(output_vars->begin(), output_vars->end(),
-                                      last_written);
-            if (at != output_vars->end())
-              next = (size_t)(at - output_vars->begin()) + 1;
-          }
-          if (!output_vars || next >= output_vars->size())
-            fail("cannot name a substituted FnWriteParam", s.raw);
-          name = (*output_vars)[next];
-        }
-        last_written = name;
+        const Val v = lower_expr(s.fn_args[0]);
+        const mir::OutputVar* owner = output_cursor.take(
+            base->kind == mir::Expr::Var ? base->name : std::string(),
+            g.slots[v.slot].len, [&](const mir::OutputVar& var) {
+              return sized_len(var.type, nullptr, nullptr, var.name);
+            });
+        if (owner == nullptr)
+          fail("FnWriteParam matches no output variable", s.raw);
+        if (owner->block != mir::OutputVar::Block::Parameters && !n_tp_start)
+          n_tp_start = out.views.size();
+        if (owner->block == mir::OutputVar::Block::GeneratedQuantities &&
+            !n_gq_start)
+          n_gq_start = out.views.size();
+        std::string name = owner->name;
         for (auto it = ixs.rbegin(); it != ixs.rend(); ++it)
           name += "." + std::to_string(*it);
-        const Val v = lower_expr(s.fn_args[0]);
         // stanc peels the array dimensions, so what is left here is a
         // scalar, a vector/row_vector, or a matrix -- and its type decides
         // how CmdStan indexes the columns.
@@ -2040,21 +2037,6 @@ Lowering::Flow Lowering::lower_stmt_impl(const mir::Stmt& s) {
       return Flow::Next;
     }
     case mir::Stmt::IfElse: {
-      // The guards are data-only and fold away below (both flags are
-      // pinned on), so this is the only chance to note that a CSV
-      // section ended here.
-      if (in_write_array) {
-        switch (mir::emit_guard(s)) {
-          case mir::EmitGuard::TransformedParams:
-            if (!n_tp_start) n_tp_start = out.views.size();
-            break;
-          case mir::EmitGuard::GeneratedQuantities:
-            if (!n_gq_start) n_gq_start = out.views.size();
-            break;
-          case mir::EmitGuard::None:
-            break;
-        }
-      }
       bool known = false, c = false;
       if (auto evaluated = try_eval_pure(s.cond)) {
         c = evaluated->r.at(0) != 0.0;

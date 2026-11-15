@@ -313,18 +313,26 @@ std::string write_v2(const mir::Program& value) {
   append_stmt_list(payload, value.prepare_data);
   append_stmt_list(payload, value.log_prob);
   append_stmt_list(payload, value.generate_quantities);
+  append_u32(payload,
+             static_cast<uint32_t>(value.transformed_parameters_begin));
+  append_u32(payload, static_cast<uint32_t>(value.generated_quantities_begin));
   append_list(payload, value.fun_defs,
               [](std::string& out, const mir::FunDef& definition) {
                 append_fun(out, definition);
               });
-  append_strings(payload, value.output_vars);
+  append_list(payload, value.output_vars,
+              [](std::string& out, const mir::OutputVar& var) {
+                append_string(out, var.name);
+                append_u8(out, static_cast<uint8_t>(var.block));
+                append_sized(out, var.type);
+              });
   append_stmt_list(payload, value.transform_inits);
   return v2_wire(payload);
 }
 
 std::string empty_v2_payload() {
   std::string payload;
-  for (int i = 0; i < 6; ++i) append_u32(payload, 0);
+  for (int i = 0; i < 9; ++i) append_u32(payload, 0);
   return payload;
 }
 
@@ -345,8 +353,11 @@ std::string real_target_v2_payload(uint64_t bits, uint8_t data_only = 1,
   append_string(payload, "");
   append_string(payload, "");  // statement raw
   append_u32(payload, 0);      // generate_quantities
+  append_u32(payload, 0);      // transformed_parameters_begin
+  append_u32(payload, 0);      // generated_quantities_begin
   append_u32(payload, 0);      // fun_defs
   append_u32(payload, 0);      // output_vars
+  append_u32(payload, 0);      // transform_inits
   return payload;
 }
 
@@ -634,6 +645,12 @@ json write_fun_def(const mir::FunDef& value) {
           {"body", write_array(value.body, write_stmt)}};
 }
 
+json write_output_var(const mir::OutputVar& value) {
+  return {{"name", value.name},
+          {"block", static_cast<int>(value.block)},
+          {"type", write_sized_type(value.type)}};
+}
+
 json write_program_object(const mir::Program& value) {
   json input_vars = json::array();
   for (const auto& input : value.input_vars)
@@ -644,9 +661,11 @@ json write_program_object(const mir::Program& value) {
           {"log_prob", write_array(value.log_prob, write_stmt)},
           {"generate_quantities",
            write_array(value.generate_quantities, write_stmt)},
+          {"transformed_parameters_begin", value.transformed_parameters_begin},
+          {"generated_quantities_begin", value.generated_quantities_begin},
           {"transform_inits", write_array(value.transform_inits, write_stmt)},
           {"fun_defs", write_array(value.fun_defs, write_fun_def)},
-          {"output_vars", write_strings(value.output_vars)}};
+          {"output_vars", write_array(value.output_vars, write_output_var)}};
 }
 
 bool expect_error(const std::string& text, const std::string& needle,
@@ -1490,21 +1509,10 @@ void check_v2_rejections() {
             empty.log_prob.empty() && empty.generate_quantities.empty() &&
             empty.fun_defs.empty() && empty.output_vars.empty(),
         "v2 empty program");
-  // empty_v2_payload() stops after output_vars, which is exactly the shape a
-  // producer that predates transform_inits emits. It must decode, with no
-  // inverse parameter transforms rather than an error.
-  check(!empty.has_transform_inits && empty.transform_inits.empty(),
-        "v2 document without the trailing section decodes");
+  check(empty.has_transform_inits && empty.transform_inits.empty(),
+        "v3 empty transform_inits section");
   check(empty_wire.find('\0') == std::string::npos,
         "v2 envelope is safe for C-string transports");
-
-  // The current producer writes the section even when it is empty. Presence
-  // must survive independently of content so a parameterless current model
-  // can unconstrain an empty object, while an old document remains unsupported.
-  const mir::Program current_empty = decode_program(write_v2(mir::Program{}));
-  check(current_empty.has_transform_inits &&
-            current_empty.transform_inits.empty(),
-        "v2 explicitly empty transform_inits section stays present");
 
   mir::Program loop_control;
   mir::Stmt break_statement;
@@ -1581,13 +1589,12 @@ void check_v2_rejections() {
   truncated.pop_back();
   expect_error(v2_wire(truncated), "truncated input", "v2 truncated payload");
   std::string trailing = empty_v2_payload();
-  append_u32(trailing, 0);  // an empty transform_inits, which is well formed
   append_u8(trailing, 0);
   expect_error(v2_wire(trailing), "trailing bytes", "v2 trailing payload");
-  std::string short_section = empty_v2_payload();
-  append_u8(short_section, 0);
-  expect_error(v2_wire(short_section), "truncated input",
-               "v2 partial trailing section");
+  std::string no_transform_inits = empty_v2_payload();
+  no_transform_inits.resize(no_transform_inits.size() - 4);
+  expect_error(v2_wire(no_transform_inits), "truncated input",
+               "missing transform_inits section");
 
   std::string oversized_list;
   append_u32(oversized_list, 1000001);

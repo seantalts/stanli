@@ -856,6 +856,16 @@ let add_v2_input buffer (name, sized) =
   add_v2_string buffer name;
   add_v2_sized buffer sized
 
+let block_tag = function
+  | Program.Parameters -> 0
+  | TransformedParameters -> 1
+  | GeneratedQuantities -> 2
+
+let add_v2_output buffer (name, block, sized) =
+  add_v2_string buffer name;
+  add_u8 buffer (block_tag block);
+  add_v2_sized buffer sized
+
 let base64_alphabet =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
@@ -889,6 +899,38 @@ let encode_base64 input =
   loop 0;
   Buffer.contents output
 
+(* stanc3 separates write_array's three sections with top-level early-return
+   guards on its emit flags, which it recognizes with these predicates
+   (Transform_Mir's tparam_start and gq_start). The runtime always emits
+   every section, so the guards are dropped and their positions kept: the
+   statement indices where the transformed-parameter and generated-quantity
+   sections begin. *)
+let rec mentions name (expr : Expr.Typed.t) =
+  match expr.pattern with
+  | Var var -> String.equal var name
+  | pattern ->
+      Expr.Pattern.fold (fun found e -> found || mentions name e) false pattern
+
+let write_array_sections stmts =
+  let guard (stmt : Stmt.Located.t) =
+    match stmt.pattern with
+    | IfElse ({pattern= FunApp (_, [{pattern= Var "emit_generated_quantities__"; _}]); _}, _, _) ->
+        Some `Generated_quantities
+    | IfElse (cond, _, _) when mentions "emit_transformed_parameters__" cond ->
+        Some `Transformed_parameters
+    | _ -> None in
+  let kept, length, tp_begin, gq_begin =
+    List.fold_left stmts ~init:([], 0, None, None)
+      ~f:(fun (kept, length, tp_begin, gq_begin) stmt ->
+        match guard stmt with
+        | Some `Transformed_parameters when Option.is_none tp_begin ->
+            (kept, length, Some length, gq_begin)
+        | Some `Generated_quantities when Option.is_none gq_begin ->
+            (kept, length, tp_begin, Some length)
+        | _ -> (stmt :: kept, length + 1, tp_begin, gq_begin)) in
+  let gq_begin = Option.value gq_begin ~default:length in
+  (List.rev kept, Option.value tp_begin ~default:gq_begin, gq_begin)
+
 let encode (program : Program.Typed.t) =
   let inputs =
     List.map program.input_vars ~f:(fun (name, _, sized) ->
@@ -897,13 +939,16 @@ let encode (program : Program.Typed.t) =
   add_v2_list add_v2_input buffer inputs;
   add_v2_list add_v2_stmt buffer (List.map ~f:stmt_of_t program.prepare_data);
   add_v2_list add_v2_stmt buffer (List.map ~f:stmt_of_t program.log_prob);
-  add_v2_list add_v2_stmt buffer
-    (List.map ~f:stmt_of_t program.generate_quantities);
+  let write_array, tp_begin, gq_begin =
+    write_array_sections program.generate_quantities in
+  add_v2_list add_v2_stmt buffer (List.map ~f:stmt_of_t write_array);
+  add_u32 buffer tp_begin;
+  add_u32 buffer gq_begin;
   add_v2_list add_v2_fun buffer (List.map ~f:fun_of_t program.functions_block);
-  add_v2_list add_v2_string buffer
-    (List.map program.output_vars ~f:(fun (name, _, _) -> name));
-  (* Trailing, and therefore optional: a document written before this section
-     existed ends here and decodes with an empty transform_inits. *)
+  add_v2_list add_v2_output buffer
+    (List.map program.output_vars
+       ~f:(fun (name, _, Program.{out_block; out_constrained_st; _}) ->
+         (name, out_block, sized_of_t out_constrained_st)));
   add_v2_list add_v2_stmt buffer
     (List.map ~f:stmt_of_t program.transform_inits);
   "STANLI3:" ^ encode_base64 (Buffer.contents buffer)

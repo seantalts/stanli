@@ -915,6 +915,8 @@ void validate_statement_shape(const Stmt& statement) {
 void validate_program_shape(const Program& program) {
   for (const auto& input : program.input_vars)
     validate_sized_type_shape(input.second);
+  for (const OutputVar& output : program.output_vars)
+    validate_sized_type_shape(output.type);
   for (const std::vector<Stmt>* body :
        {&program.prepare_data, &program.log_prob, &program.generate_quantities,
         &program.transform_inits})
@@ -1330,7 +1332,10 @@ void unmangle(Program& prog) {
     for (std::string& arg : f.arg_names) unmangle(arg);
     for (Stmt& s : f.body) unmangle(s);
   }
-  for (std::string& name : prog.output_vars) unmangle(name);
+  for (OutputVar& var : prog.output_vars) {
+    unmangle(var.name);
+    unmangle(var.type);
+  }
 }
 
 void resolve_overloads(Program& prog) {
@@ -1441,6 +1446,47 @@ void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
   }
 }
 
+// stanc3 separates write_array's three sections with top-level early-return
+// guards on its emit flags:
+//   if (!(emit_transformed_parameters__ || emit_generated_quantities__))
+//     return;                                 <- transformed parameters start
+//   if (!emit_generated_quantities__) return; <- generated quantities start
+// stanli always emits every section, so drop the guards and keep where they
+// were, as the portable producer does.
+void read_write_array(const Node& list, Program& prog) {
+  const auto mentions = [](const auto& self, const Expr& e,
+                           const char* name) -> bool {
+    if (e.kind == Expr::Var && e.name == name) return true;
+    for (const Expr& arg : e.args)
+      if (self(self, arg, name)) return true;
+    return false;
+  };
+  std::optional<size_t> tp_begin, gq_begin;
+  for (size_t i = 0; i < list.size(); ++i) {
+    Stmt s = read_stmt(list[i]);
+    const size_t here = prog.generate_quantities.size();
+    if (s.kind == Stmt::IfElse && s.cond.kind == Expr::FunApp &&
+        s.cond.args.size() == 1 && s.cond.args[0].kind == Expr::Var &&
+        s.cond.args[0].name == "emit_generated_quantities__") {
+      if (!gq_begin) {
+        gq_begin = here;
+        continue;
+      }
+    } else if (s.kind == Stmt::IfElse &&
+               mentions(mentions, s.cond, "emit_transformed_parameters__")) {
+      if (!tp_begin) {
+        tp_begin = here;
+        continue;
+      }
+    }
+    prog.generate_quantities.push_back(std::move(s));
+  }
+  prog.generated_quantities_begin =
+      gq_begin.value_or(prog.generate_quantities.size());
+  prog.transformed_parameters_begin =
+      tp_begin.value_or(prog.generated_quantities_begin);
+}
+
 Program read_program(const sexp::Node& root) {
   Program prog;
   nesting_meter = {};
@@ -1480,7 +1526,7 @@ Program read_program(const sexp::Node& root) {
   if (!lp) throw std::runtime_error("mir: no log_prob section");
   read_stmt_list((*lp)[1], prog.log_prob);
   if (const Node* gq = field(root, "generate_quantities"))
-    read_stmt_list((*gq)[1], prog.generate_quantities);
+    read_write_array((*gq)[1], prog);
   // stanc3's inverse parameter transforms. Absent from a hand-written or
   // pre-backend-transform MIR, in which case constrained-scale inits stay
   // unavailable for this model rather than becoming an error here.
@@ -1489,14 +1535,30 @@ Program read_program(const sexp::Node& root) {
     read_stmt_list((*ti)[1], prog.transform_inits);
   }
   if (const Node* ov = field(root, "output_vars")) {
-    // ((name <opaque> (...)) ...): parameters, transformed parameters and
-    // generated quantities in declaration order -- the order FnWriteParam
-    // statements emit them in. Only the names matter here; they are the
-    // naming fallback for a write whose variable reference the optimizer
-    // replaced with the value itself.
+    // ((name <opaque> ((out_unconstrained_st ST) (out_constrained_st ST)
+    // (out_block B) (out_trans T))) ...)
     const Node& vars = (*ov)[1];
-    for (size_t i = 0; i < vars.size(); ++i)
-      prog.output_vars.push_back(vars[i][0].atom);
+    for (size_t i = 0; i < vars.size(); ++i) {
+      const Node& v = vars[i];
+      const Node* type =
+          v.size() == 3 ? field(v[2], "out_constrained_st") : nullptr;
+      const Node* block = v.size() == 3 ? field(v[2], "out_block") : nullptr;
+      if (!type || !block || !(*block)[1].is_atom())
+        throw std::runtime_error("mir: malformed output variable");
+      OutputVar out;
+      out.name = v[0].atom;
+      out.type = read_sized((*type)[1]);
+      const std::string& b = (*block)[1].atom;
+      if (b == "Parameters")
+        out.block = OutputVar::Block::Parameters;
+      else if (b == "TransformedParameters")
+        out.block = OutputVar::Block::TransformedParameters;
+      else if (b == "GeneratedQuantities")
+        out.block = OutputVar::Block::GeneratedQuantities;
+      else
+        throw std::runtime_error("mir: unknown output block " + b);
+      prog.output_vars.push_back(std::move(out));
+    }
   }
   prog.nesting = nesting_meter.peak;
   detail::finalize_program(prog);

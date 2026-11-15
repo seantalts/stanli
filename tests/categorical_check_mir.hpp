@@ -502,6 +502,20 @@ inline std::string categorical_write_array_mir(
               << "    (meta <opaque>))))\n"
               << " (transform_inits";
   mir.replace(pos, boundary.size(), replacement.str());
+  // categorical_value is the last generated quantity, so it ends the
+  // output variables.
+  const size_t outputs = mir.find("(output_vars");
+  size_t end = mir.find('(', outputs + 1);
+  for (int depth = 0; end < mir.size(); ++end) {
+    if (mir[end] == '(') ++depth;
+    if (mir[end] == ')' && --depth == 0) break;
+  }
+  if (outputs == std::string::npos || end >= mir.size())
+    throw std::logic_error("categorical write-array fixture has no outputs");
+  mir.insert(end,
+             " (categorical_value <opaque> ((out_unconstrained_st SReal) "
+             "(out_constrained_st SReal) (out_block GeneratedQuantities) "
+             "(out_trans Identity)))");
   return mir;
 }
 
