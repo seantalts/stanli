@@ -84,7 +84,7 @@ std::string encode_base64(std::string_view bytes) {
 }
 
 std::string v2_wire(std::string_view payload) {
-  return "STANLI2:" + encode_base64(payload);
+  return "STANLI3:" + encode_base64(payload);
 }
 
 void append_bool(std::string& bytes, bool value) {
@@ -118,6 +118,14 @@ void append_expr(std::string& bytes, const mir::Expr& value) {
   switch (value.kind) {
     case mir::Expr::Var:
       append_string(bytes, value.name);
+      append_bool(bytes, value.fn_type.has_value());
+      if (value.fn_type) {
+        append_list(bytes, value.fn_type->args,
+                    [](std::string& out, const mir::UnsizedView& view) {
+                      append_view(out, view);
+                    });
+        append_u8(bytes, static_cast<uint8_t>(value.fn_type->suffix));
+      }
       break;
     case mir::Expr::LitInt:
       append_u32(bytes,
@@ -135,6 +143,7 @@ void append_expr(std::string& bytes, const mir::Expr& value) {
     case mir::Expr::FunApp:
       append_u8(bytes, static_cast<uint8_t>(value.fn_lib));
       append_string(bytes, value.name);
+      append_u8(bytes, static_cast<uint8_t>(value.fn_suffix));
       append_bool(bytes, value.fn_propto);
       append_expr_list(bytes, value.args);
       break;
@@ -223,7 +232,9 @@ void append_stmt(std::string& bytes, const mir::Stmt& value) {
       append_string(bytes, value.raw);
       break;
     case mir::Stmt::NRFunApp:
+      append_u8(bytes, static_cast<uint8_t>(value.fn_lib));
       append_string(bytes, value.fn_name);
+      append_u8(bytes, static_cast<uint8_t>(value.fn_suffix));
       append_expr_list(bytes, value.fn_args);
       append_optional_transform(bytes, value.fn_name == "FnWriteParam"
                                            ? value.write_transform
@@ -434,11 +445,20 @@ std::string write_f64(double value) {
   return text;
 }
 
+json write_function_type(const std::optional<mir::FunctionType>& value) {
+  if (!value) return nullptr;
+  return {{"args", write_array(value->args, write_unsized)},
+          {"suffix", static_cast<int>(value->suffix)}};
+}
+
 json write_expr(const mir::Expr& value) {
   return {{"kind", write_expr_kind(value.kind)},
           {"name", value.name},
           {"fn_lib", write_expr_lib(value.fn_lib)},
+          {"fn_suffix", static_cast<int>(value.fn_suffix)},
           {"fn_propto", value.fn_propto},
+          {"fn_overload", value.fn_overload},
+          {"fn_type", write_function_type(value.fn_type)},
           {"lit_i", std::to_string(value.lit_i)},
           {"lit", write_f64(value.lit)},
           {"lit_s", value.lit_s},
@@ -553,7 +573,10 @@ json write_stmt(const mir::Stmt& value) {
           {"lhs_idx", write_array(value.lhs_idx, write_expr)},
           {"rhs", write_expr(value.rhs)},
           {"target", write_expr(value.target)},
+          {"fn_lib", write_expr_lib(value.fn_lib)},
           {"fn_name", value.fn_name},
+          {"fn_suffix", static_cast<int>(value.fn_suffix)},
+          {"fn_overload", value.fn_overload},
           {"fn_args", write_array(value.fn_args, write_expr)},
           {"check_transform", value.check_transform
                                   ? write_transform(*value.check_transform)
@@ -572,6 +595,7 @@ json write_stmt(const mir::Stmt& value) {
 
 json write_fun_def(const mir::FunDef& value) {
   return {{"name", value.name},
+          {"overload", value.overload},
           {"arg_names", write_strings(value.arg_names)},
           {"arg_types", write_strings(value.arg_types)},
           {"arg_views", write_array(value.arg_views, write_unsized)},
@@ -1423,10 +1447,13 @@ void check_structural_rejections() {
 }
 
 void check_v2_rejections() {
-  expect_error("STANLI3:", "unrecognized input format", "unknown v2 version");
+  expect_error("STANLI4:", "is from a different stanli compiler",
+               "unknown portable version");
+  expect_error("STANLI2:AAAAAA==", "is from a different stanli compiler",
+               "retired portable v2 envelope");
   expect_error("{\"stanli_ir\":1}", "unrecognized input format",
                "retired portable v1 envelope");
-  expect_error(" STANLI2:", "unrecognized input format",
+  expect_error(" STANLI3:", "unrecognized input format",
                "v2 leading whitespace");
   expect_error("[]", "unrecognized input format", "unknown input format");
   expect_error(" \n\t", "empty input", "empty input");
@@ -1473,6 +1500,7 @@ void check_v2_rejections() {
   mir::Stmt free_write;
   free_write.kind = mir::Stmt::NRFunApp;
   free_write.fn_name = "FnWriteParam";
+  free_write.fn_lib = mir::Expr::Lib::Internal;
   mir::Transform lower;
   lower.kind = mir::Transform::Lower;
   mir::Expr bound;
@@ -1484,6 +1512,7 @@ void check_v2_rejections() {
   mir::Stmt constrained_write;
   constrained_write.kind = mir::Stmt::NRFunApp;
   constrained_write.fn_name = "FnWriteParam";
+  constrained_write.fn_lib = mir::Expr::Lib::Internal;
   inits.generate_quantities.push_back(constrained_write);
   const mir::Program decoded_inits = decode_program(write_v2(inits));
   check(
@@ -1511,14 +1540,14 @@ void check_v2_rejections() {
   check_real_bits(UINT64_C(0x7ff8000000000042),
                   "v2 preserves binary64 NaN payload bits");
 
-  expect_error("STANLI2:AAA", "multiple of 4", "v2 incomplete base64 quartet");
-  expect_error("STANLI2:!!!!", "invalid base64 character",
+  expect_error("STANLI3:AAA", "multiple of 4", "v2 incomplete base64 quartet");
+  expect_error("STANLI3:!!!!", "invalid base64 character",
                "v2 invalid base64 character");
-  expect_error("STANLI2:AA==AAAA", "padding before final quartet",
+  expect_error("STANLI3:AA==AAAA", "padding before final quartet",
                "v2 early base64 padding");
-  expect_error("STANLI2:AB==", "non-canonical base64 tail",
+  expect_error("STANLI3:AB==", "non-canonical base64 tail",
                "v2 non-canonical one-byte tail");
-  expect_error("STANLI2:AAB=", "non-canonical base64 tail",
+  expect_error("STANLI3:AAB=", "non-canonical base64 tail",
                "v2 non-canonical two-byte tail");
 
   std::string truncated = empty_v2_payload();

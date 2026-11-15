@@ -3,10 +3,14 @@ open Middle
 
 type unsized_view = {depth: int; leaf: string}
 
+type function_type = {ft_args: unsized_view list; ft_suffix: int}
+
 type wire_expr =
   { e_kind: string
   ; e_name: string
+  ; e_fn_type: function_type option
   ; e_fn_lib: string
+  ; e_fn_suffix: int
   ; e_fn_propto: bool
   ; e_lit_i: string
   ; e_lit: float
@@ -36,7 +40,9 @@ type wire_stmt =
   ; st_lhs_idx: wire_expr list
   ; st_rhs: wire_expr
   ; st_target: wire_expr
+  ; st_fn_lib: string
   ; st_fn_name: string
+  ; st_fn_suffix: int
   ; st_fn_args: wire_expr list
   ; st_check_transform: wire_transform option
   ; st_check_var_name: string
@@ -60,7 +66,9 @@ let unsupported_view = {depth= 0; leaf= "Unknown"}
 let default_expr () =
   { e_kind= "Unsupported"
   ; e_name= ""
+  ; e_fn_type= None
   ; e_fn_lib= "StanLib"
+  ; e_fn_suffix= 0
   ; e_fn_propto= false
   ; e_lit_i= "0"
   ; e_lit= 0.
@@ -87,7 +95,9 @@ let default_stmt () =
   ; st_lhs_idx= []
   ; st_rhs= default_expr ()
   ; st_target= default_expr ()
+  ; st_fn_lib= "StanLib"
   ; st_fn_name= ""
+  ; st_fn_suffix= 0
   ; st_fn_args= []
   ; st_check_transform= None
   ; st_check_var_name= ""
@@ -120,9 +130,6 @@ let raw_expr_pattern pattern =
 
 let raw_internal internal =
   sexp_string (Internal_fun.sexp_of_t Expr.Typed.sexp_of_t internal)
-
-let raw_fun_kind kind =
-  sexp_string (Fun_kind.sexp_of_t Expr.Typed.sexp_of_t kind)
 
 let raw_transform transform =
   sexp_string (Transformation.sexp_of_t Expr.Typed.sexp_of_t transform)
@@ -207,11 +214,36 @@ let propto = function
   | FnPlain | FnRng | FnLpdf false | FnLpmf false | FnTarget | FnJacobian ->
       false
 
+let suffix_tag : bool Fun_kind.suffix -> int = function
+  | Fun_kind.FnPlain -> 0
+  | FnRng -> 1
+  | FnLpdf _ -> 2
+  | FnLpmf _ -> 3
+  | FnTarget -> 4
+  | FnJacobian -> 5
+
+let function_type_of = function
+  | UnsizedType.UFun (args, _, suffix, _) ->
+      Some
+        { ft_args=
+            List.map args ~f:(fun (_, typ) ->
+                let view, _, _ = unsized_view_and_type typ in
+                view)
+        ; ft_suffix= suffix_tag suffix }
+  | UInt | UReal | UComplex | UVector | URowVector | UMatrix | UComplexVector
+   |UComplexRowVector | UComplexMatrix | UArray _ | UTuple _
+   |UMathLibraryFunction ->
+      None
+
 let rec expr_of_t (expr : Expr.Typed.t) =
   let open Expr.Pattern in
   let base =
     match expr.pattern with
-    | Var name -> {(default_expr ()) with e_kind= "Var"; e_name= name}
+    | Var name ->
+        { (default_expr ()) with
+          e_kind= "Var"
+        ; e_name= name
+        ; e_fn_type= function_type_of expr.meta.type_ }
     | Lit (Int, spelling) ->
         let canonical = canonical_int32 spelling in
         { (default_expr ()) with
@@ -261,6 +293,7 @@ and fun_app_of_t kind args =
         e_kind= "FunApp"
       ; e_name= name
       ; e_fn_lib= "StanLib"
+      ; e_fn_suffix= suffix_tag suffix
       ; e_fn_propto= propto suffix
       ; e_args= args }
   | CompilerInternal internal ->
@@ -277,6 +310,7 @@ and fun_app_of_t kind args =
         e_kind= "FunApp"
       ; e_name= name
       ; e_fn_lib= "UserDefined"
+      ; e_fn_suffix= suffix_tag suffix
       ; e_fn_propto= propto suffix
       ; e_args= args }
 
@@ -483,19 +517,23 @@ and nr_fun_app_of_t kind args =
         | _ -> ([], None, "") in
       { (default_stmt ()) with
         st_kind= "NRFunApp"
+      ; st_fn_lib= "Internal"
       ; st_fn_name= name
       ; st_fn_args= payload_args @ ordinary_args
       ; st_check_transform= payload_transform
       ; st_check_var_name= check_var_name }
-  | StanLib (name, _, _) ->
+  | StanLib (name, suffix, _) ->
       { (default_stmt ()) with
         st_kind= "NRFunApp"
       ; st_fn_name= name
+      ; st_fn_suffix= suffix_tag suffix
       ; st_fn_args= ordinary_args }
-  | UserDefined _ ->
+  | UserDefined (name, suffix) ->
       { (default_stmt ()) with
         st_kind= "NRFunApp"
-      ; st_fn_name= raw_fun_kind kind
+      ; st_fn_lib= "UserDefined"
+      ; st_fn_name= name
+      ; st_fn_suffix= suffix_tag suffix
       ; st_fn_args= ordinary_args }
 
 let fun_of_t (definition : Stmt.Located.t Program.fun_def) =
@@ -609,6 +647,16 @@ let add_v2_view buffer {depth; leaf} =
   add_u8 buffer depth;
   add_u8 buffer (v2_leaf_tag leaf)
 
+let add_v2_optional add_value buffer = function
+  | None -> add_u8 buffer 0
+  | Some value ->
+      add_u8 buffer 1;
+      add_value buffer value
+
+let add_v2_function_type buffer {ft_args; ft_suffix} =
+  add_v2_list add_v2_view buffer ft_args;
+  add_u8 buffer ft_suffix
+
 let add_v2_meta buffer expr =
   add_v2_string buffer expr.e_type;
   add_v2_view buffer expr.e_unsized;
@@ -626,7 +674,8 @@ let rec add_v2_expr buffer expr =
   (match expr.e_kind with
   | "Var" ->
       add_u8 buffer 0;
-      add_v2_string buffer expr.e_name
+      add_v2_string buffer expr.e_name;
+      add_v2_optional add_v2_function_type buffer expr.e_fn_type
   | "LitInt" ->
       add_u8 buffer 1;
       add_i32 buffer expr.e_lit_i
@@ -640,6 +689,7 @@ let rec add_v2_expr buffer expr =
       add_u8 buffer 4;
       add_u8 buffer (v2_lib_tag expr.e_fn_lib);
       add_v2_string buffer expr.e_name;
+      add_u8 buffer expr.e_fn_suffix;
       add_v2_bool buffer expr.e_fn_propto;
       add_v2_list add_v2_expr buffer expr.e_args
   | "Promotion" ->
@@ -685,12 +735,6 @@ let add_v2_transform buffer transform =
   add_u8 buffer (v2_transform_tag transform.t_kind);
   add_v2_list add_v2_expr buffer transform.t_args;
   add_v2_string buffer transform.t_raw
-
-let add_v2_optional add_value buffer = function
-  | None -> add_u8 buffer 0
-  | Some value ->
-      add_u8 buffer 1;
-      add_value buffer value
 
 let add_v2_sized buffer sized =
   add_v2_string buffer sized.s_base;
@@ -747,7 +791,9 @@ let rec add_v2_stmt buffer stmt =
       add_v2_string buffer stmt.st_raw
   | "NRFunApp" ->
       add_u8 buffer 8;
+      add_u8 buffer (v2_lib_tag stmt.st_fn_lib);
       add_v2_string buffer stmt.st_fn_name;
+      add_u8 buffer stmt.st_fn_suffix;
       add_v2_list add_v2_expr buffer stmt.st_fn_args;
       add_v2_optional add_v2_transform buffer stmt.st_check_transform;
       add_v2_string buffer stmt.st_check_var_name;
@@ -829,4 +875,4 @@ let encode (program : Program.Typed.t) =
      existed ends here and decodes with an empty transform_inits. *)
   add_v2_list add_v2_stmt buffer
     (List.map ~f:stmt_of_t program.transform_inits);
-  "STANLI2:" ^ encode_base64 (Buffer.contents buffer)
+  "STANLI3:" ^ encode_base64 (Buffer.contents buffer)

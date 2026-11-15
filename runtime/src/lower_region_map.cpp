@@ -112,7 +112,7 @@ class ParameterControl {
       return true;
     if (e.kind == mir::Expr::FunApp &&
         e.fn_lib == mir::Expr::Lib::UserDefined &&
-        call(e.name, pattern(e.args, env), depth + 1))
+        call(mir::function_key(e), pattern(e.args, env), depth + 1))
       return true;
     for (const auto& a : e.args)
       if (expression(a, env, depth + 1)) return true;
@@ -126,8 +126,8 @@ class ParameterControl {
     if (s.kind == mir::Stmt::For &&
         (dependent(s.lower, env) || dependent(s.upper, env)))
       return true;
-    if (s.kind == mir::Stmt::NRFunApp && defs_.count(s.fn_name) &&
-        call(s.fn_name, pattern(s.fn_args, env), depth + 1))
+    if (s.fn_lib == mir::Expr::Lib::UserDefined &&
+        call(mir::function_key(s), pattern(s.fn_args, env), depth + 1))
       return true;
     for (const mir::Expr* value :
          {&s.init, &s.rhs, &s.target, &s.lower, &s.upper, &s.cond})

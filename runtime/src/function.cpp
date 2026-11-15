@@ -97,10 +97,7 @@ void validate_argument(const std::string& name,
 }
 
 bool named(const stanli::mir::FunDef& f, std::string_view requested) {
-  if (f.name == requested) return true;
-  return f.name.size() > requested.size() &&
-         f.name.compare(0, requested.size(), requested) == 0 &&
-         f.name[requested.size()] == '(';
+  return f.name == requested || stanli::mir::function_key(f) == requested;
 }
 
 const stanli::mir::FunDef* select_function(
@@ -109,7 +106,7 @@ const stanli::mir::FunDef* select_function(
   // An explicitly resolved signature, e.g. foo(real,vector), selects one
   // definition without inspecting values.
   for (const auto* f : candidates)
-    if (f->name == requested) return f;
+    if (stanli::mir::function_key(*f) == requested) return f;
   if (arguments == nullptr) {
     if (candidates.size() == 1) return candidates.front();
     throw std::runtime_error("Stan function '" + requested +
@@ -498,7 +495,7 @@ stanli_function* stanli_function_new_from_mir(const char* mir_text,
     // Fail at construction for a missing name. Overloads are intentionally
     // selected later, when their argument values are present.
     for (const auto& f : out->program->fun_defs) {
-      out->functions.emplace(f.name, &f);
+      out->functions.emplace(stanli::mir::function_key(f), &f);
       if (named(f, function_name)) {
         out->candidates.push_back(&f);
         // The public result follows the typed return, just as promoted input

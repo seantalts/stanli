@@ -94,7 +94,7 @@ inline void check_program_integer_contract(
   expression = [&](const mir::Expr& value) {
     if (value.kind == mir::Expr::FunApp) {
       if (value.fn_lib == mir::Expr::Lib::UserDefined) {
-        const auto found = functions.find(value.name);
+        const auto found = functions.find(mir::function_key(value));
         if (found != functions.end() && visited.insert(found->second).second)
           check_program_integer_contract(found->second->body, functions,
                                          visited);
@@ -2239,12 +2239,11 @@ struct ProgramCompiler {
     if (n > std::numeric_limits<int32_t>::max())
       bail("reduce_sum: slice bound exceeds the Stan integer range");
 
-    bool propto = false;
-    const std::string base =
-        mir::reduce_sum_partial_name(e.args[0].name, &propto);
+    const bool propto = e.args[0].fn_propto;
+    const std::string& base = e.args[0].name;
     const std::vector<mir::UnsizedView> views =
         mir::reduce_sum_partial_views(e);
-    const mir::FunDef* f = mir::resolve_callback(funs, base, views);
+    const mir::FunDef* f = mir::find_function(funs, e.args[0]);
     if (f == nullptr) bail("reduce_sum: unknown partial-sum function " + base);
     if (f->arg_names.size() != views.size())
       bail("reduce_sum: partial-sum arity does not match the call");
@@ -2328,7 +2327,7 @@ struct ProgramCompiler {
                                               {0, mir::UnsizedLeaf::Vector},
                                               {1, mir::UnsizedLeaf::Real},
                                               {1, mir::UnsizedLeaf::Int}};
-    const mir::FunDef* f = mir::resolve_callback(funs, e.args[0].name, views);
+    const mir::FunDef* f = mir::find_function(funs, e.args[0]);
     if (f == nullptr)
       bail("map_rect: unknown callback function " + e.args[0].name);
     if (f->arg_names.size() != views.size())
@@ -3583,7 +3582,7 @@ struct ProgramCompiler {
       }
     }
     if (e.fn_lib == mir::Expr::Lib::UserDefined) {
-      auto it = funs.find(e.name);
+      auto it = funs.find(mir::function_key(e));
       if (it == funs.end()) bail("unknown function " + e.name);
       return inline_call(*it->second, inline_arguments(e.args), false,
                          propto_ctx && mir::inherits_propto(e));
@@ -4870,8 +4869,8 @@ struct ProgramCompiler {
         return Path::Open;
       }
       case mir::Stmt::NRFunApp:
-        if (s.fn_name == "FnValidateSize") return Path::Open;
-        if (const auto action = message_action(s.fn_name)) {
+        if (mir::internal_name(s) == "FnValidateSize") return Path::Open;
+        if (const auto action = message_action(mir::internal_name(s))) {
           Program::Message message;
           std::vector<MessageShape> shapes;
           message.spec = lower_message_arguments(
@@ -4901,7 +4900,7 @@ struct ProgramCompiler {
           return Path::Open;
         }
         if (const auto call = mir::user_defined_statement_call(s)) {
-          auto it = funs.find(call->name);
+          auto it = funs.find(mir::function_key(*call));
           if (it == funs.end()) bail("unknown function " + call->name);
           (void)inline_call(*it->second, inline_arguments(call->args), true,
                             propto_ctx && mir::inherits_propto(*call));

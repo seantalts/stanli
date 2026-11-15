@@ -57,7 +57,7 @@ bool Lowering::expr_has_jacobian(const mir::Expr& e) {
     // has this suffix. Conservatively carry a target through such a call;
     // an unused zero is cheaper than dropping a nested adjustment.
     if (e.fn_lib == mir::Expr::Lib::UserDefined &&
-        transform_suffix(e.name, "_jacobian"))
+        e.fn_suffix == mir::FnSuffix::Jacobian)
       return true;
   }
   for (const auto& a : e.args)
@@ -911,9 +911,9 @@ Lowering::Val Lowering::lower_program_expression(const mir::Expr& e) {
   return {out_slots[0], expression_autodiff(e), si};
 }
 bool Lowering::stmt_effectful(const mir::Stmt& s) {
-  if (s.kind == mir::Stmt::NRFunApp && message_action(s.fn_name)) return true;
+  if (message_action(mir::internal_name(s))) return true;
   // A void function runs only for its effects.
-  if (mir::user_defined_statement_name(s.fn_name)) return true;
+  if (s.fn_lib == mir::Expr::Lib::UserDefined) return true;
   for (const auto& e : s.fn_args)
     if (expr_effectful(e)) return true;
   if (s.has_init && expr_effectful(s.init)) return true;
@@ -939,10 +939,8 @@ bool Lowering::repeatable_target_expr(const mir::Expr& e,
     return false;
   if (e.kind == mir::Expr::FunApp) {
     if (e.fn_lib != mir::Expr::Lib::StanLib) return false;
-    const std::string& name = e.name;
-    const bool rng =
-        name.size() >= 4 && name.compare(name.size() - 4, 4, "_rng") == 0;
-    if (rng || mir::higher_order_call(e) || mir::stateful_intrinsic_kind(e))
+    if (e.fn_suffix == mir::FnSuffix::Rng || mir::higher_order_call(e) ||
+        mir::stateful_intrinsic_kind(e))
       return false;
   }
   for (const auto& a : e.args)
@@ -1601,7 +1599,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
     case mir::Stmt::Skip:
       return;
     case mir::Stmt::NRFunApp:
-      if (s.fn_name == "FnCheck") {
+      if (mir::internal_name(s) == "FnCheck") {
         // prepare_data checks already ran in bind_data. Any check reaching
         // this lowering belongs to log_prob/write_array and must retain its
         // per-evaluation position, even when its value is parameter-free.
@@ -1690,7 +1688,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         g.udata_pool.push_back(std::move(spec));
         return;
       }
-      if (s.fn_name == "FnValidateSize") {
+      if (mir::internal_name(s) == "FnValidateSize") {
         if (s.fn_args.size() != 3 || s.fn_args[0].kind != mir::Expr::LitStr ||
             s.fn_args[1].kind != mir::Expr::LitStr)
           fail("malformed FnValidateSize", s.raw);
@@ -1710,7 +1708,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
               s.raw);
         return;
       }
-      if (s.fn_name == "check_matching_dims") {
+      if (mir::library_name(s) == "check_matching_dims") {
         if (s.fn_args.size() != 5 || s.fn_args[0].kind != mir::Expr::LitStr ||
             s.fn_args[1].kind != mir::Expr::LitStr ||
             s.fn_args[3].kind != mir::Expr::LitStr)
@@ -1739,7 +1737,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
       // std::domain_error at forward time, which is the same exception
       // from the same place CmdStan's generated code throws it, so the
       // sampler counts it as a rejected proposal rather than a failure.
-      if (const auto action = message_action(s.fn_name)) {
+      if (const auto action = message_action(mir::internal_name(s))) {
         auto spec = std::make_shared<MessageSpec>();
         std::vector<int> ins;
         std::vector<MessageShape> shapes;
@@ -1770,7 +1768,7 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         g.ops.push_back(op);
         return;
       }
-      if (s.fn_name == "FnWriteParam") {
+      if (mir::internal_name(s) == "FnWriteParam") {
         // One CSV column, at the point the emission happens: this is what
         // fixes the column order to CmdStan's. Arrays of containers are
         // emitted one element at a time -- `array[K] simplex[K] theta`

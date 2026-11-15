@@ -915,7 +915,7 @@ void Lowering::run_passes(const std::vector<int>& roots, const PassPlan& plan) {
 }
 CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
   const auto total_time = prep.start();
-  for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
+  for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
   in_write_array = true;
   output_vars = &p.output_vars;
   // stanc3 guards the two emission groups on these flags; the sampler wants
@@ -985,7 +985,7 @@ CompiledModel::WriteArray Lowering::run_write_array(const mir::Program& p) {
 CompiledModel Lowering::run(const mir::Program& p) {
   DumpOnThrow guard{*this};
   const auto total_time = prep.start();
-  for (const auto& f : p.fun_defs) fun_defs[f.name] = &f;
+  for (const auto& f : p.fun_defs) fun_defs[mir::function_key(f)] = &f;
   const auto bind_time = prep.start();
   if (!data_prepared) bind_data(p);
   prep.graph(prep_graph, "bind_data", bind_time, g, out.fills,
@@ -1062,8 +1062,8 @@ bool bounded_specialization_candidate(Lowering& lo, const mir::Program& p) {
     return shape(e) && !lo.expr_effectful(e);
   };
   std::function<bool(const mir::Stmt&)> statement = [&](const mir::Stmt& s) {
-    if (s.kind == mir::Stmt::NRFunApp && s.fn_name != "FnCheck" &&
-        s.fn_name != "FnValidateSize")
+    if (s.kind == mir::Stmt::NRFunApp && mir::internal_name(s) != "FnCheck" &&
+        mir::internal_name(s) != "FnValidateSize")
       return false;
     if ((s.kind == mir::Stmt::For || s.kind == mir::Stmt::While) &&
         lo.region_runtime_control(s))
@@ -1093,7 +1093,7 @@ std::optional<CompiledModel> try_bounded_specialization(Lowering& lo,
   if ((policy && std::string_view(policy) != "1") ||
       lo.structured_policy != StructuredMode::Auto)
     return {};
-  for (const auto& f : p.fun_defs) lo.fun_defs[f.name] = &f;
+  for (const auto& f : p.fun_defs) lo.fun_defs[mir::function_key(f)] = &f;
   if (!bounded_specialization_candidate(lo, p)) return {};
   // Transformed data, including its RNG and observable effects, runs once.
   // Both paths start after it; the trial owns every mutable lowering field.

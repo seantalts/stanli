@@ -242,7 +242,7 @@ class MirInterp {
           probe_failed_ = true;
           return r;
         }
-        if (funs_.count(e.name))
+        if (e.fn_type)
           fail("unsupported call taking the function " + e.name, e.raw);
         fail("unknown variable " + e.name + " (type " + e.type_ + ")", e.raw);
       }
@@ -646,7 +646,7 @@ class MirInterp {
         // there rather than sampling from a model whose data is wrong.
         // Skipping it would mean stanli happily sampled a model CmdStan
         // refuses to build.
-        if (const auto action = message_action(st.fn_name)) {
+        if (const auto action = message_action(mir::internal_name(st))) {
           std::vector<Value> values;
           std::vector<MessageShape> shapes;
           const MessageSpec spec = lower_message_arguments(
@@ -672,11 +672,11 @@ class MirInterp {
                   }));
           return;
         }
-        if (st.fn_name == "FnCheck") {
+        if (mir::internal_name(st) == "FnCheck") {
           exec_check(st);
           return;
         }
-        if (st.fn_name == "check_matching_dims") {
+        if (mir::library_name(st) == "check_matching_dims") {
           exec_matching_dims(st);
           return;
         }
@@ -684,7 +684,7 @@ class MirInterp {
         // debt. `check_greater_or_equal` is only a static shape check in the
         // existing newtrans input; the function name is not generally pure.
         // New names must never silently join this list.
-        if (st.fn_name == "FnValidateSize") {
+        if (mir::internal_name(st) == "FnValidateSize") {
           if (st.fn_args.size() != 3 ||
               st.fn_args[0].kind != mir::Expr::LitStr ||
               st.fn_args[1].kind != mir::Expr::LitStr)
@@ -694,10 +694,10 @@ class MirInterp {
               static_cast<int>(as_int(st.fn_args[2])));
           return;
         }
-        if (st.fn_name == "FnValidateSizePositive" ||
-            st.fn_name == "check_greater_or_equal")
+        if (mir::internal_name(st) == "FnValidateSizePositive" ||
+            mir::library_name(st) == "check_greater_or_equal")
           return;
-        if (st.fn_name == "FnValidateSizeUnitVector") {
+        if (mir::internal_name(st) == "FnValidateSizeUnitVector") {
           if (st.fn_args.size() != 3 ||
               st.fn_args[0].kind != mir::Expr::LitStr ||
               st.fn_args[1].kind != mir::Expr::LitStr)
@@ -1593,12 +1593,11 @@ class MirInterp {
     sum.r = {0.0};
     if (n == 0) return sum;
 
-    bool propto = false;
-    const std::string base =
-        mir::reduce_sum_partial_name(e.args[0].name, &propto);
+    const bool propto = e.args[0].fn_propto;
+    const std::string& base = e.args[0].name;
     const std::vector<mir::UnsizedView> views =
         mir::reduce_sum_partial_views(e);
-    const mir::FunDef* f = mir::resolve_callback(funs_, base, views);
+    const mir::FunDef* f = mir::find_function(funs_, e.args[0]);
     if (f == nullptr)
       fail("reduce_sum: unknown partial-sum function " + base, e.raw);
     if (f->arg_names.size() != views.size())
@@ -1655,7 +1654,7 @@ class MirInterp {
                                               {0, mir::UnsizedLeaf::Vector},
                                               {1, mir::UnsizedLeaf::Real},
                                               {1, mir::UnsizedLeaf::Int}};
-    const mir::FunDef* f = mir::resolve_callback(funs_, e.args[0].name, views);
+    const mir::FunDef* f = mir::find_function(funs_, e.args[0]);
     if (!f) fail("map_rect: unknown callback " + e.args[0].name, e.raw);
     Value result;
     for (int64_t job = 0; job < n; ++job) {
@@ -1691,7 +1690,7 @@ class MirInterp {
   }
 
   Value call_udf(const mir::Expr& e) {
-    auto it = funs_.find(e.name);
+    auto it = funs_.find(mir::function_key(e));
     if (it == funs_.end()) fail("unknown function " + e.name, e.raw);
     const mir::FunDef& f = *it->second;
     if (e.args.size() != f.arg_names.size()) fail(e.name + " arity mismatch");

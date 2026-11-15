@@ -54,6 +54,7 @@ Stmt fn_check(Transform::Kind relation, Expr value, Expr bound,
   Stmt s;
   s.kind = Stmt::NRFunApp;
   s.fn_name = "FnCheck";
+  s.fn_lib = stanli::mir::Expr::Lib::Internal;
   s.check_var_name = std::move(name);
   Transform t;
   t.kind = relation;

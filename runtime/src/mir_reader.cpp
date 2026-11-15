@@ -223,6 +223,41 @@ UnsizedLeaf unsized_leaf(const std::string& atom) {
   return UnsizedLeaf::Unknown;
 }
 
+// stanc3's Fun_kind suffix: `FnPlain`, `(FnLpdf true)`, ...
+FnSuffix read_suffix(const Node& n, bool* propto) {
+  *propto = false;
+  const std::string& head = n.is_atom() ? n.atom : n[0].atom;
+  if (!n.is_atom() && n.size() == 2 && (head == "FnLpdf" || head == "FnLpmf")) {
+    *propto = n[1].atom == "true";
+    return head == "FnLpdf" ? FnSuffix::Lpdf : FnSuffix::Lpmf;
+  }
+  if (head == "FnRng") return FnSuffix::Rng;
+  if (head == "FnTarget") return FnSuffix::Target;
+  if (head == "FnJacobian") return FnSuffix::Jacobian;
+  if (head == "FnPlain") return FnSuffix::Plain;
+  throw std::runtime_error("mir: unknown function suffix " + head);
+}
+
+UnsizedView read_unsized(const Node& n);
+
+// (UFun ((arg types...) return-type suffix mem-pattern)): a variable that
+// names a function.
+std::optional<FunctionType> read_function_type(const Node& type) {
+  if (type.is_atom() || !type.head_is("UFun")) return std::nullopt;
+  if (type.size() != 2 || type[1].is_atom() || type[1].size() < 3 ||
+      type[1][0].is_atom())
+    throw std::runtime_error("mir: malformed function type");
+  FunctionType out;
+  for (const Node& arg : type[1][0].kids) {
+    if (arg.is_atom() || arg.size() != 2)
+      throw std::runtime_error("mir: malformed function type");
+    out.args.push_back(read_unsized(arg[1]));
+  }
+  bool propto = false;
+  out.suffix = read_suffix(type[1][2], &propto);
+  return out;
+}
+
 UnsizedView read_unsized(const Node& n) {
   UnsizedView out;
   const Node* leaf = &n;
@@ -315,10 +350,7 @@ Expr read_expr_pattern(const Node& p) {
     // user function it is the value of CmdStan's propto__ template
     // argument, which the body inherits.
     auto read_propto = [&](const Node& kind) {
-      const Node& suffix = kind[2];
-      if (!suffix.is_atom() &&
-          (suffix.head_is("FnLpdf") || suffix.head_is("FnLpmf")))
-        e.fn_propto = suffix[1].atom == "true";
+      e.fn_suffix = read_suffix(kind[2], &e.fn_propto);
     };
     if (kind.head_is("StanLib")) {
       e.fn_lib = Expr::Lib::StanLib;
@@ -386,6 +418,7 @@ Expr read_expr(const Node& n) {
       if (const Node* t = field(m, "type_")) {
         const Node& type = (*t)[1];
         e.unsized = read_unsized(type);
+        if (e.kind == Expr::Var) e.fn_type = read_function_type(type);
         if (e.unsized.leaf != UnsizedLeaf::Unknown) {
           e.type_ = e.unsized.depth ? "UArray" : type.atom;
         } else {
@@ -605,6 +638,7 @@ Stmt read_stmt(const Node& n) {
     s.kind = Stmt::NRFunApp;
     const Node& kind = p[1];
     if (kind.head_is("CompilerInternal")) {
+      s.fn_lib = Expr::Lib::Internal;
       const Node& internal = kind[1];
       s.fn_name = internal.is_atom() ? internal.atom : internal[0].atom;
       if (!internal.is_atom()) {
@@ -638,8 +672,17 @@ Stmt read_stmt(const Node& n) {
       }
     } else if (kind.head_is("StanLib")) {
       s.fn_name = kind[1].atom;
+      bool propto = false;
+      if (kind.size() > 2) s.fn_suffix = read_suffix(kind[2], &propto);
+    } else if (kind.head_is("UserDefined") && kind.size() == 3) {
+      s.fn_lib = Expr::Lib::UserDefined;
+      s.fn_name = kind[1].atom;
+      bool propto = false;
+      s.fn_suffix = read_suffix(kind[2], &propto);
     } else {
-      s.fn_name = dump(kind, 60);
+      s.kind = Stmt::Unsupported;
+      s.raw = dump(p);
+      return s;
     }
     for (size_t i = 2; i < p.size(); ++i)
       for (size_t a = 0; a < p[i].size(); ++a)
@@ -1016,7 +1059,7 @@ void validate_expression(const Expr& e, const Bindings& bindings,
     }
   }
   if (e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::UserDefined) {
-    const auto found = functions.find(e.name);
+    const auto found = functions.find(function_key(e));
     if (found == functions.end())
       throw std::runtime_error("mir: call to unknown user function " + e.name);
     const FunDef& function = *found->second;
@@ -1053,7 +1096,9 @@ void validate_bindings(const Stmt& s, Bindings& bindings, BindingScope* scope,
   for_each_expr(s, [&](const Expr& e) {
     validate_expression(e, bindings, functions, strict_variable_metadata);
   });
-  if (s.kind == Stmt::NRFunApp && s.fn_name == "FnCheck") {
+  if (const auto call = user_defined_statement_call(s))
+    validate_expression(*call, bindings, functions, strict_variable_metadata);
+  if (internal_name(s) == "FnCheck") {
     if (!s.check_transform)
       throw std::runtime_error("mir: FnCheck has no transform");
     const Transform::Kind kind = s.check_transform->kind;
@@ -1143,11 +1188,10 @@ void validate_bindings(const std::vector<Stmt>& body, Bindings& bindings,
 
 // stanc3 keeps every overload of a user function under one fdname, and calls
 // carry only that name, so the by-name function maps downstream would
-// collide (last definition wins). Give each overload a distinct internal
-// name and rewrite every call site to the overload its argument types
-// select. stanc3 already ran overload resolution and inserted promotions at
-// typecheck time, so a call's (leaf, depth) views match exactly one
-// signature; parenthesized signatures cannot collide with Stan identifiers.
+// collide (last definition wins). Give each overload its signature and
+// point every call site at the overload its argument types select. stanc3
+// already ran overload resolution and inserted promotions at typecheck
+// time, so a call's (leaf, depth) views match exactly one signature.
 
 using Overloads = std::map<std::string, std::vector<FunDef*>>;
 
@@ -1215,43 +1259,44 @@ std::string resolve_overload(const Overloads::value_type& candidates,
   if (!match)
     throw std::runtime_error("mir: no overload of " + candidates.first +
                              " matches its call");
-  return match->name;
+  return match->overload;
 }
 
-// A function passed by name, as to ode_rk45, is typed
-// (UFun ((arg types...) (ReturnType ...) ...)) in its raw metadata.
-std::vector<UnsizedView> function_argument_views(const std::string& raw) {
-  const Node type = sexp::parse(raw);
-  if (!type.head_is("UFun") || type.size() != 2 || type[1].is_atom() ||
-      type[1].size() == 0 || type[1][0].is_atom())
-    throw std::runtime_error("mir: malformed function type " + raw);
-  std::vector<UnsizedView> views;
-  for (const Node& arg : type[1][0].kids) {
-    if (arg.is_atom() || arg.size() != 2)
-      throw std::runtime_error("mir: malformed function type " + raw);
-    views.push_back(read_unsized(arg[1]));
-  }
-  return views;
+// A callback reference to a density written `foo_lupdf` names the
+// definition `foo_lpdf` and passes propto along, as stanc3's own C++
+// generation does.
+void normalize_callback(Expr& e) {
+  if (!e.fn_type) return;
+  const FnSuffix suffix = e.fn_type->suffix;
+  if (suffix != FnSuffix::Lpdf && suffix != FnSuffix::Lpmf) return;
+  const std::string unnormalized =
+      suffix == FnSuffix::Lpdf ? "_lupdf" : "_lupmf";
+  if (e.name.size() <= unnormalized.size() ||
+      e.name.compare(e.name.size() - unnormalized.size(), unnormalized.size(),
+                     unnormalized) != 0)
+    return;
+  e.name.replace(e.name.size() - unnormalized.size(), unnormalized.size(),
+                 suffix == FnSuffix::Lpdf ? "_lpdf" : "_lpmf");
+  e.fn_propto = true;
 }
 
 void resolve_calls(Expr& e, const Overloads& overloads) {
   for (Expr& a : e.args) resolve_calls(a, overloads);
+  normalize_callback(e);
   const bool call =
       e.kind == Expr::FunApp && e.fn_lib == Expr::Lib::UserDefined;
-  const bool callback = e.kind == Expr::Var && e.raw.rfind("(UFun ", 0) == 0;
+  const bool callback = e.kind == Expr::Var && e.fn_type;
   if (!call && !callback) return;
   const auto it = overloads.find(e.name);
   if (it == overloads.end()) return;
-  e.name = call ? resolve_overload(*it, e.args)
-                : resolve_overload(*it, function_argument_views(e.raw));
+  e.fn_overload = call ? resolve_overload(*it, e.args)
+                       : resolve_overload(*it, e.fn_type->args);
 }
 
 void resolve_calls(Stmt& s, const Overloads& overloads) {
-  if (const auto name = user_defined_statement_name(s.fn_name)) {
-    const auto it = overloads.find(s.fn_name.substr(name->first, name->second));
-    if (it != overloads.end())
-      s.fn_name.replace(name->first, name->second,
-                        resolve_overload(*it, s.fn_args));
+  if (s.kind == Stmt::NRFunApp && s.fn_lib == Expr::Lib::UserDefined) {
+    const auto it = overloads.find(s.fn_name);
+    if (it != overloads.end()) s.fn_overload = resolve_overload(*it, s.fn_args);
   }
   for_each_expr(s, [&](Expr& e) { resolve_calls(e, overloads); });
   for (Stmt& k : s.body) resolve_calls(k, overloads);
@@ -1332,10 +1377,9 @@ void resolve_overloads(Program& prog) {
         if (views_match(defs[i]->arg_views, defs[j]->arg_views))
           throw std::runtime_error("mir: indistinguishable overloads of " +
                                    name);
-    for (FunDef* f : defs) f->name += signature(f->arg_views);
+    for (FunDef* f : defs) f->overload = signature(f->arg_views);
     overloads[name] = std::move(defs);
   }
-  if (overloads.empty()) return;
   for (auto& [name, type] : prog.input_vars)
     for (Expr& d : type.dims) resolve_calls(d, overloads);
   for (auto* body : {&prog.prepare_data, &prog.log_prob,
@@ -1404,10 +1448,11 @@ void detail::finalize_program(Program& prog, bool strict_variable_metadata) {
   resolve_overloads(prog);
   Functions functions;
   for (const auto& f : prog.fun_defs) {
-    const auto inserted = functions.emplace(f.name, &f);
+    const auto inserted = functions.emplace(function_key(f), &f);
     if (!inserted.second)
       throw std::runtime_error(
-          "mir: duplicate function name after overload resolution: " + f.name);
+          "mir: duplicate function name after overload resolution: " +
+          function_key(f));
   }
   Bindings inputs;
   for (const auto& [name, type] : prog.input_vars)

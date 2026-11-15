@@ -20,7 +20,7 @@ namespace mir {
 namespace detail {
 namespace {
 
-constexpr std::string_view kMagic = "STANLI2:";
+constexpr std::string_view kMagic = "STANLI3:";
 constexpr size_t kMaxInputBytes = size_t{256} * 1024 * 1024;
 constexpr size_t kMaxStringBytes = size_t{16} * 1024 * 1024;
 constexpr size_t kMaxTotalStringBytes = size_t{256} * 1024 * 1024;
@@ -46,7 +46,7 @@ std::string decode_payload(std::string_view wire) {
   if (wire.size() > kMaxInputBytes)
     fail_wire(0, "input exceeds 268435456 bytes");
   if (wire.size() < kMagic.size() || wire.substr(0, kMagic.size()) != kMagic)
-    fail_wire(0, "missing STANLI2 header");
+    fail_wire(0, "missing STANLI3 header");
   const std::string_view encoded = wire.substr(kMagic.size());
   if (encoded.size() % 4 != 0)
     fail_wire(wire.size(), "base64 length is not a multiple of 4");
@@ -295,6 +295,10 @@ constexpr std::array<Expr::Kind, 11> kExprTags = {
 constexpr std::array<Expr::Lib, 3> kLibraryTags = {
     Expr::Lib::StanLib, Expr::Lib::Internal, Expr::Lib::UserDefined};
 
+constexpr std::array<FnSuffix, 6> kSuffixTags = {
+    FnSuffix::Plain, FnSuffix::Rng,    FnSuffix::Lpdf,
+    FnSuffix::Lpmf,  FnSuffix::Target, FnSuffix::Jacobian};
+
 constexpr std::array<Transform::Kind, 17> kTransformTags = {
     Transform::Identity,         Transform::Lower,        Transform::Upper,
     Transform::LowerUpper,       Transform::Offset,       Transform::Multiplier,
@@ -320,6 +324,19 @@ UnsizedView read_view(Reader& reader) {
 Expr read_expr(Reader& reader);
 Stmt read_stmt(Reader& reader);
 
+FnSuffix read_suffix(Reader& reader) {
+  const uint8_t tag = reader.u8();
+  return read_tag(reader, tag, kSuffixTags, "unknown function-suffix tag");
+}
+
+FunctionType read_function_type(Reader& reader) {
+  Reader::Depth depth(reader);
+  FunctionType value;
+  value.args = reader.list<UnsizedView>([&] { return read_view(reader); });
+  value.suffix = read_suffix(reader);
+  return value;
+}
+
 std::vector<Expr> read_exprs(Reader& reader) {
   return reader.list<Expr>([&] { return read_expr(reader); });
 }
@@ -338,9 +355,13 @@ Expr read_expr(Reader& reader) {
   const uint8_t tag = reader.u8();
   value.kind = read_tag(reader, tag, kExprTags, "unknown expression tag");
   switch (value.kind) {
-    case Expr::Var:
+    case Expr::Var: {
       value.name = reader.string();
+      const uint8_t present = reader.u8();
+      if (present > 1) reader.fail("optional marker is not 0 or 1");
+      if (present) value.fn_type = read_function_type(reader);
       break;
+    }
     case Expr::LitInt:
       value.lit_i = reader.i32();
       value.lit = static_cast<double>(value.lit_i);
@@ -356,6 +377,7 @@ Expr read_expr(Reader& reader) {
       value.fn_lib = read_tag(reader, library, kLibraryTags,
                               "unknown function-library tag");
       value.name = reader.string();
+      value.fn_suffix = read_suffix(reader);
       value.fn_propto = reader.boolean();
       value.args = read_exprs(reader);
       break;
@@ -455,8 +477,12 @@ Stmt read_stmt(Reader& reader) {
       value.body = read_stmts(reader);
       value.raw = reader.string();
       break;
-    case Stmt::NRFunApp:
+    case Stmt::NRFunApp: {
+      const uint8_t library = reader.u8();
+      value.fn_lib = read_tag(reader, library, kLibraryTags,
+                              "unknown function-library tag");
       value.fn_name = reader.string();
+      value.fn_suffix = read_suffix(reader);
       value.fn_args = read_exprs(reader);
       value.check_transform = read_optional_transform(reader);
       value.check_var_name = reader.string();
@@ -465,10 +491,11 @@ Stmt read_stmt(Reader& reader) {
       // Split them here so the rest of the runtime never has to ask which
       // meaning a transform carries: FnCheck verifies a constraint,
       // FnWriteParam names one to invert.
-      if (value.fn_name == "FnWriteParam")
+      if (internal_name(value) == "FnWriteParam")
         value.write_transform =
             std::exchange(value.check_transform, std::nullopt);
       break;
+    }
     case Stmt::Return:
       value.has_init = reader.boolean();
       if (value.has_init) value.rhs = read_expr(reader);
@@ -536,7 +563,7 @@ Program read_program(Reader& reader) {
 
 }  // namespace
 
-Program read_portable_v2_program(std::string_view bytes) {
+Program read_portable_program(std::string_view bytes) {
   const std::string payload = decode_payload(bytes);
   Reader reader(payload);
   Program result = read_program(reader);

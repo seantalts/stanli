@@ -267,7 +267,7 @@ def test_function_errors_and_recovery():
 
 
 def _portable_payload(mir):
-    assert mir.startswith("STANLI2:"), mir[:80]
+    assert mir.startswith("STANLI3:"), mir[:80]
     return base64.b64decode(mir[8:], validate=True)
 
 
@@ -1236,7 +1236,7 @@ def test_stan_to_mir_round_trips():
     # path uses: the model built from it must be the same model.
     code = "parameters { real x; } model { x ~ normal(0, 1); }"
     mir = stanli.stan_to_mir(code)
-    assert mir.startswith("STANLI2:") or "log_prob" in mir
+    assert mir.startswith("STANLI3:") or "log_prob" in mir
     suffix = ".exe" if sys.platform == "win32" else ""
     if (stanli._BIN / ("stanli-compile" + suffix)).is_file():
         _portable_payload(mir)
@@ -1272,7 +1272,7 @@ def test_stan_to_mir_is_optimized():
             "if (1) target += normal_lpdf(x | 0, 1); "
             "else target += student_t_lpdf(x | 3, 0, 1); }")
     mir = stanli.stan_to_mir(code)
-    optimized = (_portable_payload(mir) if mir.startswith("STANLI2:")
+    optimized = (_portable_payload(mir) if mir.startswith("STANLI3:")
                  else mir.encode("utf-8"))
     assert b"normal_lpdf" in optimized, "MIR lost the live branch"
     assert b"student_t_lpdf" not in optimized, "MIR retained the dead branch"
@@ -1443,7 +1443,7 @@ def test_subprocess_compiler_preference_and_rollback_contract():
         def successful_run(argv, **kwargs):
             calls.append((argv, kwargs))
             return subprocess.CompletedProcess(
-                argv, 0, "STANLI2:ZmFrZQ==",
+                argv, 0, "STANLI3:ZmFrZQ==",
                 "a successful frontend warning")
 
         with mock.patch.object(stanli, "_BIN", compiler_dir), \
@@ -1451,7 +1451,7 @@ def test_subprocess_compiler_preference_and_rollback_contract():
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 got = stanli._stanc_mir(source)
-        assert got == "STANLI2:ZmFrZQ=="
+        assert got == "STANLI3:ZmFrZQ=="
         assert [str(w.message) for w in caught] == [
             "a successful frontend warning"]
         assert calls[0][0] == [str(portable), str(source)]

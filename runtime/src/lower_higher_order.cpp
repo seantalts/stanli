@@ -111,14 +111,13 @@ bool Lowering::lower_program_variadic_algebra(ProgramCompiler& c,
   std::vector<mir::UnsizedView> views{{0, mir::UnsizedLeaf::Vector}};
   for (size_t i = call->callback_args_begin; i < e.args.size(); ++i)
     views.push_back(e.args[i].unsized);
-  const mir::FunDef* system =
-      mir::resolve_callback(fun_defs, e.args[0].name, views);
+  const mir::FunDef* system = mir::find_function(fun_defs, e.args[0]);
   if (system == nullptr)
     c.bail(e.name + ": unknown algebraic system " + e.args[0].name);
 
   auto spec = std::make_shared<AlgebraSpec>();
   spec->adopt(fun_defs);
-  spec->system_name = system->name;
+  spec->system_name = mir::function_key(*system);
   spec->select(*call);
   Range controls;
   const bool runtime_controls = in_write_array && call->with_tolerance;
@@ -179,13 +178,12 @@ bool Lowering::lower_program_quadrature(ProgramCompiler& c, const mir::Expr& e,
                                       {0, mir::UnsizedLeaf::Real}};
   for (size_t i = call->callback_args_begin; i < callback_end; ++i)
     views.push_back(e.args[i].unsized);
-  const mir::FunDef* integrand =
-      mir::resolve_callback(fun_defs, e.args[0].name, views);
+  const mir::FunDef* integrand = mir::find_function(fun_defs, e.args[0]);
   if (!integrand) c.bail(e.name + ": unknown integrand " + e.args[0].name);
 
   auto spec = std::make_shared<QuadratureSpec>();
   spec->adopt(fun_defs);
-  spec->callback_name = integrand->name;
+  spec->callback_name = mir::function_key(*integrand);
   spec->method = call->method;
   Range controls;
   const bool runtime_controls =
@@ -242,7 +240,7 @@ bool Lowering::lower_program_ode(ProgramCompiler& c, const mir::Expr& e,
 
   auto spec = std::make_shared<OdeSpec>();
   spec->adopt(fun_defs);
-  spec->rhs_name = e.args[0].name;
+  spec->rhs_name = mir::function_key(e.args[0]);
   if (!spec->rhs())
     c.bail(e.name + ": unknown right-hand side " + spec->rhs_name);
   spec->solver = ode_solver(call->method);
@@ -361,7 +359,7 @@ bool Lowering::lower_program_ode_adjoint(ProgramCompiler& c, const mir::Expr& e,
 
   auto spec = std::make_shared<OdeAdjointSpec>();
   spec->adopt(fun_defs);
-  spec->rhs_name = e.args[0].name;
+  spec->rhs_name = mir::function_key(e.args[0]);
   spec->callback_name = spec->rhs_name;
   if (!spec->rhs())
     c.bail(e.name + ": unknown right-hand side " + spec->rhs_name);
@@ -461,7 +459,7 @@ bool Lowering::lower_program_dae(ProgramCompiler& c, const mir::Expr& e,
 
   auto spec = std::make_shared<DaeSpec>();
   spec->adopt(fun_defs);
-  spec->residual_name = e.args[0].name;
+  spec->residual_name = mir::function_key(e.args[0]);
   spec->callback_name = spec->residual_name;
   if (!spec->residual())
     c.bail(e.name + ": unknown residual " + spec->residual_name);
@@ -540,8 +538,7 @@ bool Lowering::lower_program_higher_order(ProgramCompiler& c,
                                             {0, mir::UnsizedLeaf::Vector},
                                             {1, mir::UnsizedLeaf::Real},
                                             {1, mir::UnsizedLeaf::Int}};
-  const mir::FunDef* system =
-      mir::resolve_callback(fun_defs, e.args[0].name, views);
+  const mir::FunDef* system = mir::find_function(fun_defs, e.args[0]);
   if (system == nullptr)
     c.bail("algebra_solver: unknown algebraic system " + e.args[0].name);
   if (system->arg_names.size() != views.size())
@@ -549,7 +546,7 @@ bool Lowering::lower_program_higher_order(ProgramCompiler& c,
 
   auto spec = std::make_shared<AlgebraSpec>();
   spec->adopt(fun_defs);
-  spec->system_name = system->name;
+  spec->system_name = mir::function_key(*system);
   spec->select(*mir::algebra_call(e.name));
   spec->x_r = program_vector_real(c, e.args[3], "algebra_solver x_r");
   DataMap::Entry xi = program_constant(c, e.args[4], "algebra_solver x_i");
@@ -728,7 +725,7 @@ std::optional<Lowering::Val> Lowering::try_lower_parallel_reduce_sum(
     return refuse("retained control-flow or write-array context");
   if (count <= 1) return refuse("slice has at most one element");
   if (grain <= 0) return refuse("grainsize is not a known positive integer");
-  if (fun_effectful(call.name))
+  if (fun_effectful(mir::function_key(call)))
     return refuse("callback has observable effects");
   const int64_t needed = 1 + (count - 1) / grain;
   int64_t chunks =
@@ -1029,11 +1026,10 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
     return constant(0.0);
   }
 
-  bool propto = false;
-  const std::string base =
-      mir::reduce_sum_partial_name(partial_expr.name, &propto);
+  const bool propto = partial_expr.fn_propto;
+  const std::string& base = partial_expr.name;
   const std::vector<mir::UnsizedView> views = mir::reduce_sum_partial_views(e);
-  const mir::FunDef* f = mir::resolve_callback(fun_defs, base, views);
+  const mir::FunDef* f = mir::find_function(fun_defs, partial_expr);
   if (f == nullptr)
     fail("reduce_sum: unknown partial-sum function " + base, e.raw);
   if (f->arg_views.size() != views.size())
@@ -1063,6 +1059,7 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   call.kind = mir::Expr::FunApp;
   call.fn_lib = mir::Expr::Lib::UserDefined;
   call.name = f->name;
+  call.fn_overload = f->overload;
   // lower_call_udf reads this exactly as CmdStan reads the generated
   // functor's propto__ argument: an `_lupdf` functor inherits the caller's
   // normalization, an `_lpdf` one forces the normalized density.
@@ -1086,10 +1083,10 @@ Lowering::Val Lowering::lower_reduce_sum(const mir::Expr& e,
   for (size_t i = 3; i < actuals.size(); ++i)
     call.args.push_back(actuals.at(i).expr());
 
-  const bool could_thread = compile_options.reduce_sum_threads <= 1 &&
-                            thread_safe_build() &&
-                            out.reduce_sum_notice.empty() && !region_current &&
-                            !in_write_array && n > 1 && !fun_effectful(f->name);
+  const bool could_thread =
+      compile_options.reduce_sum_threads <= 1 && thread_safe_build() &&
+      out.reduce_sum_notice.empty() && !region_current && !in_write_array &&
+      n > 1 && !fun_effectful(mir::function_key(*f));
   const size_t first_op = g.ops.size();
 
   Val result{-1, false, {}};
@@ -1164,13 +1161,12 @@ Lowering::Val Lowering::lower_quadrature_fn(const mir::Expr& e,
                                       {0, mir::UnsizedLeaf::Real}};
   for (size_t i = call->callback_args_begin; i < callback_end; ++i)
     views.push_back(e.args[i].unsized);
-  const mir::FunDef* integrand =
-      mir::resolve_callback(fun_defs, e.args[0].name, views);
+  const mir::FunDef* integrand = mir::find_function(fun_defs, e.args[0]);
   if (!integrand) fail(e.name + ": unknown integrand " + e.args[0].name, e.raw);
 
   auto spec = std::make_shared<QuadratureSpec>();
   spec->adopt(fun_defs);
-  spec->callback_name = integrand->name;
+  spec->callback_name = mir::function_key(*integrand);
   spec->method = call->method;
   if (call->legacy && actuals.size() == 7) {
     spec->relative_tolerance =
@@ -1296,8 +1292,7 @@ Lowering::Val Lowering::lower_algebra_fn(const mir::Expr& e,
                                             {0, mir::UnsizedLeaf::Vector},
                                             {1, mir::UnsizedLeaf::Real},
                                             {1, mir::UnsizedLeaf::Int}};
-  const mir::FunDef* resolved =
-      mir::resolve_callback(fun_defs, system_expr.name, views);
+  const mir::FunDef* resolved = mir::find_function(fun_defs, system_expr);
   if (resolved == nullptr)
     fail("algebra_solver: unknown algebraic system " + system_expr.name, e.raw);
   const mir::FunDef& f = *resolved;
@@ -1316,7 +1311,7 @@ Lowering::Val Lowering::lower_algebra_fn(const mir::Expr& e,
 
   auto spec = std::make_shared<AlgebraSpec>();
   spec->adopt(fun_defs);
-  spec->system_name = f.name;
+  spec->system_name = mir::function_key(f);
   spec->select(*mir::algebra_call(e.name));
   spec->x_r = actuals.at(3).require_constant_reals("algebra_solver x_r");
   spec->x_i = actuals.at(4).require_constant_ints("algebra_solver x_i");
@@ -1452,10 +1447,10 @@ std::optional<Lowering::Val> Lowering::lower_ode_variadic(
   // value. The remaining fixed arguments are acquired in the historical
   // order below because constant probing can be observable through errors.
   const mir::Expr& rhs_expr = actuals.at(0).expr();
-  if (fun_defs.find(rhs_expr.name) == fun_defs.end())
+  if (mir::find_function(fun_defs, rhs_expr) == nullptr)
     fail(e.name + ": unknown right-hand side " + rhs_expr.name, e.raw);
   spec->adopt(fun_defs);
-  spec->rhs_name = rhs_expr.name;
+  spec->rhs_name = mir::function_key(rhs_expr);
   spec->solver = ode_solver(call->method);
   spec->stiff = spec->solver == OdeSpec::BDF || spec->solver == OdeSpec::ADAMS;
   stamp_ode_defaults(*spec);
@@ -1608,11 +1603,11 @@ std::optional<Lowering::Val> Lowering::lower_ode_fn(const mir::Expr& e,
     // The callback name is retained as source metadata; all value-bearing
     // actuals use the lazy wrapper so each is acquired once.
     const mir::Expr& rhs_expr = actuals.at(0).expr();
-    auto fit = fun_defs.find(rhs_expr.name);
+    auto fit = fun_defs.find(mir::function_key(rhs_expr));
     if (fit == fun_defs.end())
       fail(e.name + ": unknown right-hand side " + rhs_expr.name, e.raw);
     spec->adopt(fun_defs);
-    spec->rhs_name = rhs_expr.name;
+    spec->rhs_name = mir::function_key(rhs_expr);
     spec->legacy = true;
     spec->solver = legacy_solver;
     spec->stiff =

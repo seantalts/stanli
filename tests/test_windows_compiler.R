@@ -51,7 +51,7 @@ main <- function() {
   Encoding(model) <- "UTF-8"
 
   portable <- mir_from_binary_test(portable_compiler, model, portable = TRUE)
-  if (!startsWith(portable, "STANLI2:"))
+  if (!startsWith(portable, "STANLI3:"))
     stop("the portable compiler did not emit the versioned envelope")
   if (endsWith(portable, "\n") || endsWith(portable, "\r"))
     stop("the portable compiler emitted a final newline")
@@ -67,7 +67,7 @@ main <- function() {
   legacy <- mir_from_binary_test(stock_compiler, model, portable = FALSE)
   if (!startsWith(legacy, "((functions_block"))
     stop("stock stanc did not emit legacy optimized MIR")
-  if (startsWith(legacy, "STANLI2:"))
+  if (startsWith(legacy, "STANLI3:"))
     stop("the stock rollback compiler was replaced by the portable producer")
   # Legacy MIR renders non-ASCII string bytes as decimal backslash escapes.
   legacy_unicode <- paste0("\\", as.integer(charToRaw(unicode)), collapse = "")

@@ -15,6 +15,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -36,6 +37,17 @@ struct UnsizedView {
   UnsizedLeaf leaf = UnsizedLeaf::Unknown;
 };
 
+// stanc3's Fun_kind suffix: the kind of function a name denotes, which the
+// name's ending spells in Stan source (`_rng`, `_lpdf`, `_lp`, ...).
+enum class FnSuffix : uint8_t { Plain, Rng, Lpdf, Lpmf, Target, Jacobian };
+
+// The type of a variable that names a function, as a higher-order callback
+// does: its argument views and the suffix of the function it denotes.
+struct FunctionType {
+  std::vector<UnsizedView> args;
+  FnSuffix suffix = FnSuffix::Plain;
+};
+
 struct Expr {
   enum Kind {
     Var,
@@ -52,7 +64,14 @@ struct Expr {
   } kind = Unsupported;
   std::string name;  // Var name or FunApp function name
   enum class Lib { StanLib, Internal, UserDefined } fn_lib = Lib::StanLib;
-  bool fn_propto = false;  // (FnLpdf true) / (FnLpmf true)
+  FnSuffix fn_suffix = FnSuffix::Plain;
+  // (FnLpdf true) / (FnLpmf true): the call was written `_lupdf`/`_lupmf`.
+  // On a callback Var, the reference was.
+  bool fn_propto = false;
+  // A user function call, or a Var naming one, that selects one overload of
+  // an overloaded name: that overload's signature. Empty otherwise.
+  std::string fn_overload;
+  std::optional<FunctionType> fn_type;  // Var naming a function
   long lit_i = 0;
   double lit = 0;
   std::string lit_s;
@@ -510,6 +529,9 @@ struct Stmt {
   Expr target;
   // NRFunApp
   std::string fn_name;
+  Expr::Lib fn_lib = Expr::Lib::StanLib;
+  FnSuffix fn_suffix = FnSuffix::Plain;
+  std::string fn_overload;  // as on Expr
   std::vector<Expr> fn_args;
   // FnCheck: the relation lives in the CompilerInternal payload rather than
   // the ordinary argument list. The first fn_arg is the value and the rest
@@ -534,40 +556,41 @@ struct Stmt {
   std::string raw;
 };
 
-// A user function called as a statement keeps stanc3's spelling of its kind,
-// `(UserDefined name FnPlain)`. Returns the offset and length of the name.
-inline std::optional<std::pair<size_t, size_t>> user_defined_statement_name(
-    const std::string& fn_name) {
-  constexpr std::string_view prefix = "(UserDefined ";
-  if (fn_name.compare(0, prefix.size(), prefix) != 0) return std::nullopt;
-  const size_t end = fn_name.find(' ', prefix.size());
-  if (end == std::string::npos || end == prefix.size()) return std::nullopt;
-  return std::make_pair(prefix.size(), end - prefix.size());
-}
-
 // A user function called as a statement, as the call expression the
 // function machinery takes. It has no value, so its type stays empty.
 inline std::optional<Expr> user_defined_statement_call(const Stmt& s) {
-  if (s.kind != Stmt::NRFunApp) return std::nullopt;
-  const auto name = user_defined_statement_name(s.fn_name);
-  if (!name) return std::nullopt;
+  if (s.kind != Stmt::NRFunApp || s.fn_lib != Expr::Lib::UserDefined)
+    return std::nullopt;
   Expr call;
   call.kind = Expr::FunApp;
   call.fn_lib = Expr::Lib::UserDefined;
-  call.name = s.fn_name.substr(name->first, name->second);
+  call.name = s.fn_name;
+  call.fn_suffix = s.fn_suffix;
+  call.fn_overload = s.fn_overload;
   call.args = s.fn_args;
   call.raw = s.raw;
   return call;
 }
 
+// The function a statement calls, when it is a compiler-internal or a Stan
+// library one; empty otherwise, so a user function can never be mistaken
+// for one of these by name.
+inline std::string_view internal_name(const Stmt& s) {
+  return s.kind == Stmt::NRFunApp && s.fn_lib == Expr::Lib::Internal
+             ? std::string_view(s.fn_name)
+             : std::string_view();
+}
+
+inline std::string_view library_name(const Stmt& s) {
+  return s.kind == Stmt::NRFunApp && s.fn_lib == Expr::Lib::StanLib
+             ? std::string_view(s.fn_name)
+             : std::string_view();
+}
+
 // CmdStan instantiates a user `_lp` function, and a user density called as
-// `_lupdf`/`_lupmf`, with the caller's propto__. Other calls get false. An
-// overloaded name carries its signature after the base name.
+// `_lupdf`/`_lupmf`, with the caller's propto__. Other calls get false.
 inline bool inherits_propto(const Expr& call) {
-  if (call.fn_propto) return true;
-  const std::string_view name =
-      std::string_view(call.name).substr(0, call.name.find('('));
-  return name.size() >= 3 && name.substr(name.size() - 3) == "_lp";
+  return call.fn_propto || call.fn_suffix == FnSuffix::Target;
 }
 
 // Whether CmdStan instantiates `e` as a var, which decides the terms propto
@@ -663,6 +686,9 @@ inline EmitGuard emit_guard(const Stmt& s) {
 
 struct FunDef {
   std::string name;
+  // The signature that tells this overload apart, when the name has more
+  // than one; empty otherwise. The reader assigns it.
+  std::string overload;
   std::vector<std::string> arg_names;
   std::vector<std::string> arg_types;  // unsized: UReal UVector UMatrix ...
   std::vector<UnsizedView> arg_views;
@@ -827,29 +853,6 @@ inline bool is_reduce_sum(const Expr& e) {
   return call && call->family == HigherOrderFamily::ReduceSum;
 }
 
-// The `_lupdf` / `_lupmf` spelling at the functor reference is stanc3's
-// propto marker; the definition is always the normalized `_lpdf` / `_lpmf`.
-// The marker is the only surviving propto signal here: the functor's
-// `(FnLpdf true)` type is not part of the portable encoding, and the
-// reduce_sum node itself is FnPlain, so neither can be consulted instead.
-inline std::string reduce_sum_partial_name(const std::string& functor,
-                                           bool* propto) {
-  const auto unnormalized = [&](const char* marker) {
-    return functor.size() > 6 &&
-           functor.compare(functor.size() - 6, 6, marker) == 0;
-  };
-  if (unnormalized("_lupdf")) {
-    *propto = true;
-    return functor.substr(0, functor.size() - 6) + "_lpdf";
-  }
-  if (unnormalized("_lupmf")) {
-    *propto = true;
-    return functor.substr(0, functor.size() - 6) + "_lpmf";
-  }
-  *propto = false;
-  return functor;
-}
-
 // The formals reduce_sum calls its partial-sum function with, in order: the
 // slice, its two bounds, then every shared argument unchanged.
 inline std::vector<UnsizedView> reduce_sum_partial_views(const Expr& e) {
@@ -863,32 +866,30 @@ inline std::vector<UnsizedView> reduce_sum_partial_views(const Expr& e) {
   return views;
 }
 
-// The reader mangles an overloaded definition's name and rewrites ordinary
-// call sites, but a higher-order callback reference is a Var and is never
-// rewritten. Take the unmangled name when it is the only one, and otherwise
-// select the overload whose formals match the call the family will make.
-// Returns null when the name resolves to nothing or, impossibly, to more than
-// one.  Family-specific helpers only have to construct `views`.
-inline const FunDef* resolve_callback(
-    const std::map<std::string, const FunDef*>& funs, const std::string& base,
-    const std::vector<UnsizedView>& views) {
-  const auto exact = funs.find(base);
-  if (exact != funs.end()) return exact->second;
-  const FunDef* match = nullptr;
-  for (const auto& [name, def] : funs) {
-    if (name.size() <= base.size() || name.compare(0, base.size(), base) != 0 ||
-        name[base.size()] != '(')
-      continue;
-    if (def->arg_views.size() != views.size()) continue;
-    bool same = true;
-    for (size_t i = 0; i < views.size() && same; ++i)
-      same = def->arg_views[i].depth == views[i].depth &&
-             def->arg_views[i].leaf == views[i].leaf;
-    if (!same) continue;
-    if (match) return nullptr;
-    match = def;
-  }
-  return match;
+// User functions are looked up by name and overload together.
+inline std::string function_key(const std::string& name,
+                                const std::string& overload) {
+  return name + overload;
+}
+
+inline std::string function_key(const FunDef& f) {
+  return function_key(f.name, f.overload);
+}
+
+// The key of the function a call, a statement call, or a callback Var names.
+template <class Call>
+std::string function_key(const Call& call) {
+  if constexpr (std::is_same_v<Call, Stmt>)
+    return function_key(call.fn_name, call.fn_overload);
+  else
+    return function_key(call.name, call.fn_overload);
+}
+
+template <class Call>
+const FunDef* find_function(const std::map<std::string, const FunDef*>& funs,
+                            const Call& call) {
+  const auto found = funs.find(function_key(call));
+  return found == funs.end() ? nullptr : found->second;
 }
 
 Program read_program(const sexp::Node& root);

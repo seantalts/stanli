@@ -19,7 +19,7 @@ void finalize_program(Program& program, bool strict_variable_metadata = false);
 // fallbacks accept some unusual debug-MIR shapes.
 void validate_portable_program(const Program& program);
 
-Program read_portable_v2_program(std::string_view bytes);
+Program read_portable_program(std::string_view bytes);
 
 }  // namespace detail
 }  // namespace mir

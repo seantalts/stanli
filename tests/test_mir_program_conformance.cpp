@@ -140,6 +140,7 @@ Stmt return_value(Expr value) {
 Stmt nr_fun_app(std::string name, std::vector<Expr> args) {
   Stmt s;
   s.kind = Stmt::NRFunApp;
+  s.fn_lib = Expr::Lib::Internal;
   s.fn_name = std::move(name);
   s.fn_args = std::move(args);
   return s;

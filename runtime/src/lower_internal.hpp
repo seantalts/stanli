@@ -1858,14 +1858,11 @@ struct Lowering {
       int64_t count, int64_t grain, bool fixed_partition);
   bool reduce_sum_effectful(const mir::Expr& e) {
     if (e.args.empty() || e.args[0].kind != mir::Expr::Var) return true;
-    bool propto = false;
-    const mir::FunDef* f = mir::resolve_callback(
-        fun_defs, mir::reduce_sum_partial_name(e.args[0].name, &propto),
-        mir::reduce_sum_partial_views(e));
+    const mir::FunDef* f = mir::find_function(fun_defs, e.args[0]);
     // A functor this cannot resolve is refused at lowering. Until it gets
     // there, assume the worst rather than fold away a call whose body has
     // never been examined.
-    return f == nullptr || fun_effectful(f->name);
+    return f == nullptr || fun_effectful(mir::function_key(*f));
   }
   bool stmt_effectful(const mir::Stmt& s);
 

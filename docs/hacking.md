@@ -186,7 +186,7 @@ ones through every stage, op list and register programs included.
 | [`compiler/portable_ir/SCHEMA.md`](../compiler/portable_ir/SCHEMA.md), [`compiler/ocaml/`](../compiler/ocaml/) | The stanli-owned portable MIR contract, shared optimization policy, and typed-OCaml encoder. |
 | [`compiler/native/`](../compiler/native/), [`compiler/js/`](../compiler/js/) | Thin native callback, js_of_ocaml, and Windows CLI entry points around the shared OCaml pipeline. |
 | [`runtime/src/lower.cpp`](../runtime/src/lower.cpp) | Lowering: transformed MIR in, op graph out. |
-| [`runtime/src/mir_decode.cpp`](../runtime/src/mir_decode.cpp), [`portable_mir_v2_reader.cpp`](../runtime/src/portable_mir_v2_reader.cpp), [`mir_reader.cpp`](../runtime/src/mir_reader.cpp) | Dispatches compact portable MIR or legacy s-expressions into one MIR representation and runs their shared finalization. |
+| [`runtime/src/mir_decode.cpp`](../runtime/src/mir_decode.cpp), [`portable_mir_reader.cpp`](../runtime/src/portable_mir_reader.cpp), [`mir_reader.cpp`](../runtime/src/mir_reader.cpp) | Dispatches compact portable MIR or legacy s-expressions into one MIR representation and runs their shared finalization. |
 | [`runtime/src/inplace.cpp`](../runtime/src/inplace.cpp), [`constfold.cpp`](../runtime/src/constfold.cpp), [`reroll.cpp`](../runtime/src/reroll.cpp), [`island.cpp`](../runtime/src/island.cpp) | The graph passes, in pipeline order. |
 | [`runtime/src/executor.cpp`](../runtime/src/executor.cpp) | Runs the op list. `STANLI_PROFILE=1` prints per-opcode time accounting. |
 | [`runtime/kernels/`](../runtime/kernels/) | The kernels: [`densities.cpp`](../runtime/kernels/densities.cpp), [`elementwise.cpp`](../runtime/kernels/elementwise.cpp), [`constrain.cpp`](../runtime/kernels/constrain.cpp), and friends. [`ode.cpp`](../runtime/kernels/ode.cpp) owns the canonical Stan Math solves and the direct all-double coupled RK path. [`matrix_fns.cpp`](../runtime/kernels/matrix_fns.cpp) and [`legacy_fns.cpp`](../runtime/kernels/legacy_fns.cpp) wrap stan-math functions that have no native kernel yet. |
@@ -252,7 +252,7 @@ The tools you will reach for most:
   compiles a model. It writes the graph after every lowering pass to
   `<dir>/NN-<graph>-<stage>.txt`, numbered so `ls` sorts in pass order, plus
   the input MIR document as `00-mir.sexp` (the shipped compilers write an
-  encoded `STANLI2:` document there rather than an S-expression). Diff two consecutive files to see exactly
+  encoded `STANLI3:` document there rather than an S-expression). Diff two consecutive files to see exactly
   what one pass did. A pass that throws still leaves
   `NN-<graph>-FAILED-after-<stage>.txt` with the graph it died on.
 

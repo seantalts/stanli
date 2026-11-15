@@ -338,7 +338,7 @@ WaInterp::WaInterp(
     : prog_(std::move(prog)),
       shared_env_(std::move(shared_env)),
       base_env_(std::move(own_env)) {
-  for (const auto& f : prog_->fun_defs) funs_[f.name] = &f;
+  for (const auto& f : prog_->fun_defs) funs_[mir::function_key(f)] = &f;
 }
 
 std::vector<double> WaInterp::eval(
@@ -357,7 +357,7 @@ std::vector<double> WaInterp::eval(
   h.stmt = [this, &cur, &params, &row](const mir::Stmt& s) {
     if (s.kind == mir::Stmt::Decl && s.read_transform)
       return read_param(*cur, s, params);
-    if (s.kind == mir::Stmt::NRFunApp && s.fn_name == "FnWriteParam")
+    if (mir::internal_name(s) == "FnWriteParam")
       return write_param(*cur, s, row);
     // The section guards: note the boundary and let the interpreter run
     // the statement, whose condition is false (both flags are on).
@@ -496,7 +496,9 @@ bool interpreted_rng_call(MirInterp<double>& in, const mir::Expr& e,
                           DataMap::Entry* out, WaRng& rng) {
   stan::rng_t& g = rng.gen();
   const std::string& f = e.name;
-  if (f.size() < 5 || f.compare(f.size() - 4, 4, "_rng") != 0) return false;
+  if (e.kind != mir::Expr::FunApp || e.fn_lib != mir::Expr::Lib::StanLib ||
+      e.fn_suffix != mir::FnSuffix::Rng || f.size() < 5)
+    return false;
   const std::string base = f.substr(0, f.size() - 4);
 
   std::vector<DataMap::Entry> av;

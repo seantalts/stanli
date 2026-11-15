@@ -1,4 +1,4 @@
-# Stanli portable MIR v2
+# Stanli portable MIR v3
 
 This document defines the stanli-owned wire representation of the MIR slice
 consumed by the C++ runtime. It is not a serialization of every stanc3 MIR
@@ -10,14 +10,16 @@ selected optimization policy. The decoder constructs `stanli::mir::Program`
 directly, validates it, then runs the same overload and binding finalizer used
 by the legacy S-expression reader.
 
-Version 2 is a canonical ASCII envelope around a compact, fixed-layout binary
+Version 3 is a canonical ASCII envelope around a compact, fixed-layout binary
 payload. The envelope crosses native callbacks, subprocess output, V8,
 js_of_ocaml, Web Workers, and existing C-string APIs without transcoding or
 embedded-NUL problems. The payload avoids a JSON DOM, repeated field names,
 inactive fields, and decimal parsing.
 
-Portable MIR v1 was a pre-release JSON format. It is not accepted by this
-runtime and has no compatibility role. The legacy stanc3 S-expression reader
+Portable MIR v1 was a pre-release JSON format and v2 (`STANLI2:`) the layout
+before every stanc3 fact the runtime reads became a typed field. Neither is
+accepted by this runtime; a `STANLI<n>:` document of another version is
+rejected with a request to recompile the model. The legacy stanc3 S-expression reader
 remains a separate transitional input path.
 
 ## Envelope and format detection
@@ -25,23 +27,24 @@ remains a separate transitional input path.
 A canonical document is:
 
 ```text
-STANLI2:<base64 payload>
+STANLI3:<base64 payload>
 ```
 
-`STANLI2:` is the eight-byte ASCII version marker. The remainder is standard
+`STANLI3:` is the eight-byte ASCII version marker. The remainder is standard
 RFC 4648 base64 using `A-Z`, `a-z`, `0-9`, `+`, and `/`, with required `=`
 padding. There is no whitespace, BOM, or final newline.
 
 The multi-format decoder dispatches as follows:
 
-1. An exact `STANLI2:` prefix selects this decoder.
-2. Otherwise, after the four ASCII whitespace bytes are skipped, `(` selects
+1. An exact `STANLI3:` prefix selects this decoder.
+2. Any other `STANLI` prefix is a document of another version and is
+   rejected.
+3. Otherwise, after the four ASCII whitespace bytes are skipped, `(` selects
    the legacy S-expression reader.
-3. Every other input is rejected.
+4. Every other input is rejected.
 
-Once the v2 prefix is seen, malformed base64 or a malformed payload is a hard
-v2 error. The decoder never retries another format. `STANLI3:` and the former
-JSON envelope are unknown formats rather than near matches.
+Once the v3 prefix is seen, malformed base64 or a malformed payload is a hard
+v3 error. The decoder never retries another format.
 
 Canonical base64 has exactly one spelling. Padding may occur only in the final
 quartet, and unused tail bits must be zero. A decoder rejects non-canonical
@@ -106,6 +109,31 @@ u8 leaf
 | 1 | `Internal` |
 | 2 | `UserDefined` |
 
+### Function suffix
+
+stanc3's `Fun_kind.suffix`: the kind of function a name denotes. Stan source
+spells it with the name's ending, but consumers read this tag, never the
+name.
+
+| Tag | Meaning | Source spelling |
+| ---: | --- | --- |
+| 0 | `FnPlain` | |
+| 1 | `FnRng` | `_rng` |
+| 2 | `FnLpdf` | `_lpdf`, `_lupdf` |
+| 3 | `FnLpmf` | `_lpmf`, `_lupmf` |
+| 4 | `FnTarget` | `_lp` |
+| 5 | `FnJacobian` | `_jacobian` |
+
+### `FunctionType`
+
+```text
+list<UnsizedView> args
+u8 suffix
+```
+
+The type of a variable that names a function, as a higher-order callback
+argument does: the views of the function's arguments and its suffix.
+
 ### Expression kind
 
 Every expression begins with a kind tag and its active fields, then ends with
@@ -113,11 +141,11 @@ the common metadata suffix shown below.
 
 | Tag | Kind | Active fields after tag |
 | ---: | --- | --- |
-| 0 | `Var` | `string name` |
+| 0 | `Var` | `string name`, `optional<FunctionType> function_type` |
 | 1 | `LitInt` | `i32 value` |
 | 2 | `LitReal` | `f64 value` |
 | 3 | `LitStr` | `string value` |
-| 4 | `FunApp` | `u8 library`, `string name`, `bool propto`, `list<Expr> args` |
+| 4 | `FunApp` | `u8 library`, `string name`, `u8 suffix`, `bool propto`, `list<Expr> args` |
 | 5 | `Promotion` | `list<Expr> args` |
 | 6 | `Indexed` | `list<Expr> args` |
 | 7 | `TernaryIf` | `list<Expr> args` |
@@ -215,7 +243,7 @@ There is no inactive-field block.
 | 5 | `For` | `string loopvar`, `Expr lower`, `Expr upper`, `list<Stmt> body`, `string raw` |
 | 6 | `IfElse` | `Expr condition`, `list<Stmt> body`, `string raw` |
 | 7 | `While` | `Expr condition`, `list<Stmt> body`, `string raw` |
-| 8 | `NRFunApp` | `string name`, `list<Expr> args`, `optional<Transform> payload_transform`, `string check_var_name`, `string raw` |
+| 8 | `NRFunApp` | `u8 library`, `string name`, `u8 suffix`, `list<Expr> args`, `optional<Transform> payload_transform`, `string check_var_name`, `string raw` |
 | 9 | `Return` | `bool has_value`, optional `Expr value`, `string raw` |
 | 10 | `Break` | none |
 | 11 | `Continue` | none |
@@ -239,9 +267,17 @@ list<Stmt> body
 
 The four argument lists must have identical lengths. `arg_types` preserves the
 complete stanc3 unsized-type spelling; `arg_views` is the runtime's redundant
-structural view and must agree with it. Producer-side function names and
-user-defined calls are unsuffixed. The shared finalizer appends overload
-signatures and rejects collisions exactly once.
+structural view and must agree with it. Function names are stanc3's names,
+including its `_stan_` prefix for a C++ keyword, which the finalizer removes.
+A `propto` flag is true only for an `FnLpdf`/`FnLpmf` call written
+`_lupdf`/`_lupmf`.
+
+When a name has several definitions, the shared finalizer gives each its
+argument signature as a separate `overload` field and records on every call,
+statement call and callback variable the overload its argument views (for a
+callback, its `function_type` views) select; names stay unchanged. It also
+maps a callback written `foo_lupdf`/`foo_lupmf` to the definition `foo_lpdf`/
+`foo_lpmf` with `propto` set, as stanc3's C++ generation does.
 
 ### `Program`
 
@@ -346,7 +382,7 @@ and anything deeper is rejected as nested too deeply.
 For a fixed stanc3 revision, source, include map, and pass selection, every
 producer must emit identical bytes. Canonical encoding requires:
 
-1. the exact `STANLI2:` prefix;
+1. the exact `STANLI3:` prefix;
 2. the tag numbers and field order in this document;
 3. little-endian fixed-width scalars;
 4. original list order;
@@ -362,6 +398,6 @@ user functions, warnings, and frontend errors. Windows uses the same encoder
 and participates in the same byte comparison.
 
 A future incompatible layout gets a new ASCII header and a new decoder. It
-must never reuse `STANLI2:` with different tag meanings or field order.
+must never reuse `STANLI3:` with different tag meanings or field order.
 Appending an optional trailing section, as `transform_inits` did, is the one
 change that keeps the header: it cannot alter how any earlier byte is read.

@@ -61,7 +61,7 @@ Promise.resolve(globalThis.onmessage({data: {cmd: "compile", code}}))
         throw new Error("worker did not return one compiled MIR document");
 
       const mir = completed[0].done.mir;
-      const portable = mir.startsWith("STANLI2:");
+      const portable = mir.startsWith("STANLI3:");
       if ((mode === "custom") !== portable)
         throw new Error(mode + " selected the wrong MIR producer");
 
@@ -92,7 +92,7 @@ Promise.resolve(globalThis.onmessage({data: {cmd: "compile", code}}))
                                            JSON.stringify(results).slice(0, 200));
       if (plain.fastMath !== false || fast.fastMath !== true)
         throw new Error("compile did not report fastMath");
-      if (!fast.mir.startsWith("STANLI2:") || fast.mir === plain.mir)
+      if (!fast.mir.startsWith("STANLI3:") || fast.mir === plain.mir)
         throw new Error("fastMath did not change the compiled MIR");
       console.log("test_worker_compiler " + mode + " OK");
     })

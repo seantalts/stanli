@@ -76,8 +76,8 @@ bool bounded_output_candidate(const mir::Stmt& root,
       if (e.fn_lib != mir::Expr::Lib::StanLib) return false;
       if (e.name == "sum")
         return e.args.size() == 1 && self(self, e.args[0], true);
-      if (e.name == "size" || e.name == "num_elements" ||
-          e.name == "rows" || e.name == "cols")
+      if (e.name == "size" || e.name == "num_elements" || e.name == "rows" ||
+          e.name == "cols")
         return e.args.size() == 1 && e.args[0].kind == mir::Expr::Var &&
                containers.count(e.args[0].name);
       static const std::set<std::string> scalar_calls = {
@@ -102,8 +102,7 @@ bool bounded_output_candidate(const mir::Stmt& root,
                s.decl_type.elem_base != "SReal" &&
                s.decl_type.elem_base != "SInt") ||
               s.decl_type.dims.empty() || s.has_init ||
-              (s.decl_type.dims.size() > 1 &&
-               s.decl_type.elem_base != "SReal"))
+              (s.decl_type.dims.size() > 1 && s.decl_type.elem_base != "SReal"))
             return false;
           for (const auto& dim : s.decl_type.dims)
             if (!expression(expression, dim)) return false;
@@ -146,8 +145,8 @@ bool bounded_output_candidate(const mir::Stmt& root,
           return false;
         break;
       case mir::Stmt::NRFunApp:
-        if (s.fn_name != "FnValidateSize" || s.fn_args.size() != 3 ||
-            !expression(expression, s.fn_args.back()))
+        if (mir::internal_name(s) != "FnValidateSize" ||
+            s.fn_args.size() != 3 || !expression(expression, s.fn_args.back()))
           return false;
         break;
       case mir::Stmt::Block:
@@ -260,7 +259,8 @@ bool bounded_nested_update_over_budget(const mir::Stmt& root) {
   const auto range = [&](const auto& self,
                          const mir::Expr& e) -> std::optional<IntRange> {
     if (!local(local, e))
-      return unstable(unstable, e) ? std::optional<IntRange>{} : region_range(e);
+      return unstable(unstable, e) ? std::optional<IntRange>{}
+                                   : region_range(e);
     if (e.kind == mir::Expr::Var) {
       auto found = integers.find(e.name);
       if (found != integers.end()) return found->second;
@@ -323,8 +323,7 @@ bool bounded_nested_update_over_budget(const mir::Stmt& root) {
       // A repeated body's scalar writes cannot supply stable nested bounds.
       forget_writes(s);
       if (!lo || !hi) return false;
-      const uint64_t count =
-          std::max<int64_t>(0, int64_t(hi->hi) - lo->lo + 1);
+      const uint64_t count = std::max<int64_t>(0, int64_t(hi->hi) - lo->lo + 1);
       if (!count || count > 4096 / multiplier) return false;
       for (const auto& child : s.body)
         if (self(self, child, multiplier * count, false)) return true;
@@ -334,7 +333,8 @@ bool bounded_nested_update_over_budget(const mir::Stmt& root) {
       // still establish an arm despite an unknown loop iterator.
       if (auto selected = truth(truth, s.cond)) {
         const size_t arm = *selected ? 0 : 1;
-        if (arm < s.body.size()) return self(self, s.body[arm], multiplier, false);
+        if (arm < s.body.size())
+          return self(self, s.body[arm], multiplier, false);
       }
       forget_writes(s);
     }
@@ -392,8 +392,7 @@ std::optional<DataMap::Entry> region_bounded_data_value(const mir::Expr& e) {
   };
   hooks.stmt = [&](const mir::Stmt&) {
     if (++steps > 4096)
-      throw CompileError(
-          "structured data probe budget exceeded");
+      throw CompileError("structured data probe budget exceeded");
     return false;
   };
   try {
@@ -465,7 +464,8 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
     return true;
   };
   if (!collect(e)) return {};
-  const auto unresolvable = [&](const auto& self, const mir::Expr& value) -> bool {
+  const auto unresolvable = [&](const auto& self,
+                                const mir::Expr& value) -> bool {
     if (value.kind == mir::Expr::Var)
       return !variables.count(value.name) && !data_entry(value.name) &&
              !int_env.count(value.name) && !td.find(value.name);
@@ -498,8 +498,7 @@ std::optional<RealRange> region_enumerated_data_range(const mir::Expr& e) {
         } else if (!data_entry(value.name)) {
           if (const auto local = int_env.find(value.name);
               local != int_env.end()) {
-            key += "N" + value.name + ":" + std::to_string(local->second) +
-                   ";";
+            key += "N" + value.name + ":" + std::to_string(local->second) + ";";
           } else if (DataMap::Entry* entry = td.find(value.name)) {
             if (!entry->is_int || entry->i.size() > 64) {
               cacheable = false;
@@ -709,7 +708,7 @@ std::optional<int64_t> bounded_outer_width(const Val& value) {
       shape.dims.size() != value.runtime_dims.size())
     return {};
   return checked_product({shape.dims.begin() + 1, shape.dims.end()},
-                          "bounded inner array");
+                         "bounded inner array");
 }
 
 std::optional<IntRange> region_range(const mir::Expr& e) {
@@ -899,8 +898,7 @@ void region_prepare_cells(const mir::Stmt& s) {
 bool deferred_unsized(const std::string& name) const {
   if (int_env.count(name) || int_locals.count(name)) return false;
   const auto declaration = decls.find(name);
-  if (declaration == decls.end() ||
-      !declaration->second.runtime_dims.empty() ||
+  if (declaration == decls.end() || !declaration->second.runtime_dims.empty() ||
       (!declaration->second.deferred_shape &&
        (declaration->second.si.kind == ViewKind::Flat ||
         declaration->second.len != 0)))
@@ -921,8 +919,7 @@ bool region_size_deferred(const std::string& name, const mir::Stmt& s) {
         agree = false;
       else if (!shape)
         shape = view.value;
-      else if (!same_view(shape->si, shape->len, view.value.si,
-                          view.value.len))
+      else if (!same_view(shape->si, shape->len, view.value.si, view.value.len))
         agree = false;
     }
     for (const auto& child : st.body) visit(child);
@@ -933,8 +930,9 @@ bool region_size_deferred(const std::string& name, const mir::Stmt& s) {
   if (shape->len == 0) return true;
   Val value{add_slot(shape->len, false), false, shape->si};
   out.fills.emplace_back(
-      value.slot, std::vector<double>((size_t)shape->len,
-                                      std::numeric_limits<double>::quiet_NaN()));
+      value.slot,
+      std::vector<double>((size_t)shape->len,
+                          std::numeric_limits<double>::quiet_NaN()));
   scope[name] = value;
   declaration->second.len = shape->len;
   declaration->second.si = shape->si;
@@ -1371,9 +1369,9 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
       indices.size() >= 2 && indices.size() <= max_direct_selectors &&
       std::all_of(indices.begin(), indices.end(),
                   [&](const Val& input) {
-        return g.slots[input.slot].len > 0 && !input.autodiff &&
-               input.si.param_free;
-      }) &&
+                    return g.slots[input.slot].len > 0 && !input.autodiff &&
+                           input.si.param_free;
+                  }) &&
       std::getenv("STANLI_NO_STRUCTURED_DIRECT_INDEX_INPUTS") == nullptr;
   if (direct_inputs) {
     const auto remap = [&](int64_t* offset, int* input) {
@@ -1421,9 +1419,9 @@ Val region_index(const Val& base, const std::vector<mir::Expr>& selectors,
   } else {
     Val packed = indices.empty() ? constant(0) : indices[0];
     for (size_t i = 1; i < indices.size(); ++i)
-      packed = emit_value(
-          OP_CONCAT2, {packed, indices[i]},
-          g.slots[packed.slot].len + g.slots[indices[i].slot].len);
+      packed =
+          emit_value(OP_CONCAT2, {packed, indices[i]},
+                     g.slots[packed.slot].len + g.slots[indices[i].slot].len);
     if (rhs) {
       result = emit_value(OP_SET_INDEX_DYNAMIC, {base, packed, *rhs},
                           g.slots[base.slot].len, base.si);
@@ -1533,7 +1531,7 @@ std::optional<Val> region_expr(const mir::Expr& e) {
     return result;
   }
   if (e.kind != mir::Expr::FunApp) return {};
-  if (e.name == "target" || e.name.find("_jacobian") != std::string::npos)
+  if (mir::stateful_intrinsic_kind(e) || e.fn_suffix == mir::FnSuffix::Jacobian)
     fail(
         "structured target reads and Jacobian calls need a separate "
         "contract");
@@ -1571,9 +1569,12 @@ static bool runtime_scalar_form(const mir::Expr& e) {
          runtime_int_arithmetic().count(e.name);
 }
 
-bool write_array_unregioned() const { return in_write_array && !region_current; }
+bool write_array_unregioned() const {
+  return in_write_array && !region_current;
+}
 bool runtime_only(const mir::Expr& e) {
-  return !write_array_unregioned() && needs_runtime_value(e) && !try_eval_pure(e);
+  return !write_array_unregioned() && needs_runtime_value(e) &&
+         !try_eval_pure(e);
 }
 bool runtime_int_expression(const mir::Expr& e) {
   if (write_array_unregioned() || !runtime_scalar_form(e)) return false;
@@ -1707,8 +1708,8 @@ std::optional<int64_t> region_while_capacity(const mir::Stmt& s,
         if (x.kind == mir::Expr::Var) {
           auto sv = scope.find(x.name);
           std::string line =
-              "  var " + x.name +
-              " slot=" + std::to_string(sv == scope.end() ? -1 : sv->second.slot);
+              "  var " + x.name + " slot=" +
+              std::to_string(sv == scope.end() ? -1 : sv->second.slot);
           if (sv != scope.end()) {
             auto rr = real_ranges.find(sv->second.slot);
             if (rr != real_ranges.end())
@@ -1788,8 +1789,7 @@ std::optional<int64_t> region_while_capacity(const mir::Stmt& s,
   if (!valid) {
     if (std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS"))
       emit_diagnostic(
-          "stanli_structured while capacity invalid update counter=" +
-          counter);
+          "stanli_structured while capacity invalid update counter=" + counter);
     return {};
   }
   int64_t count = 0;
@@ -1822,12 +1822,12 @@ std::optional<int64_t> region_while_capacity(const mir::Stmt& s,
           real_start->lo,
           std::max(real_start->hi, real_end->hi + real_step_hi)};
     if (std::getenv("STANLI_STRUCTURED_LOOP_DIAGNOSTICS"))
-      emit_diagnostic(
-          "stanli_structured real while counter=" + counter + " start=[" +
-          fmt_g(real_start->lo) + "," + fmt_g(real_start->hi) + "] end=[" +
-          fmt_g(real_end->lo) + "," + fmt_g(real_end->hi) + "] step=[" +
-          fmt_g(real_step_lo) + "," + fmt_g(real_step_hi) +
-          "] capacity=" + std::to_string(count));
+      emit_diagnostic("stanli_structured real while counter=" + counter +
+                      " start=[" + fmt_g(real_start->lo) + "," +
+                      fmt_g(real_start->hi) + "] end=[" + fmt_g(real_end->lo) +
+                      "," + fmt_g(real_end->hi) + "] step=[" +
+                      fmt_g(real_step_lo) + "," + fmt_g(real_step_hi) +
+                      "] capacity=" + std::to_string(count));
   }
   *proven_counter = counter;
   return count;
@@ -2355,7 +2355,8 @@ Flow lower_region_stmt(const mir::Stmt& s) {
       // already exceeds the unchanged budget.
       if (bounded_output && !s.lhs_idx.empty()) {
         auto base = scope.find(s.lhs);
-        if (base != scope.end()) check_slot_budget(g.slots[base->second.slot].len);
+        if (base != scope.end())
+          check_slot_budget(g.slots[base->second.slot].len);
       }
       if (s.lhs_idx.empty() && deferred_unsized(s.lhs) &&
           !region_unsized_unagreed.count(s.lhs)) {
@@ -2408,12 +2409,12 @@ Flow lower_region_stmt(const mir::Stmt& s) {
         fail("structured early return needs local replay");
       return lower_stmt_impl(s);
     case mir::Stmt::NRFunApp:
-      if (bounded_output && s.fn_name == "FnValidateSize") {
+      if (bounded_output && mir::internal_name(s) == "FnValidateSize") {
         const auto range = region_range(s.fn_args.back());
         if (!range || range->lo < 0)
           fail("bounded output block cannot erase size validation");
       }
-      if (s.fn_name == "FnWriteParam")
+      if (mir::internal_name(s) == "FnWriteParam")
         fail("structured CSV emission unsupported");
       lower_simple_stmt(s);
       region_flush();
@@ -2450,8 +2451,9 @@ bool region_runtime_control(const mir::Stmt& root) const {
           return true;
         if (e.kind == mir::Expr::FunApp &&
             e.fn_lib == mir::Expr::Lib::UserDefined) {
-          const auto found = fun_defs.find(e.name);
-          if (found != fun_defs.end() && visited.insert(e.name).second)
+          const std::string key = mir::function_key(e);
+          const auto found = fun_defs.find(key);
+          if (found != fun_defs.end() && visited.insert(key).second)
             for (const auto& body : found->second->body)
               if (statement(body, depth + 1)) return true;
         }
@@ -2643,7 +2645,7 @@ uint64_t region_cost(const mir::Stmt& s, uint64_t limit, unsigned depth = 0) {
         }
         if (e.kind == mir::Expr::FunApp &&
             e.fn_lib == mir::Expr::Lib::UserDefined) {
-          auto f = fun_defs.find(e.name);
+          auto f = fun_defs.find(mir::function_key(e));
           if (f == fun_defs.end()) return limit;
           for (const auto& stmt : f->second->body)
             cost = plus(cost, region_cost(stmt, limit, depth + 1));
@@ -3000,8 +3002,8 @@ bool try_lower_region(
             .slot);
   }
   if (diagnostics)
-    emit_diagnostic("stanli_structured selected nodes=" +
-                    std::to_string(plan->node_count) +
-                    " kernels=" + std::to_string(plan->body.ops.size()));
+    emit_diagnostic(
+        "stanli_structured selected nodes=" + std::to_string(plan->node_count) +
+        " kernels=" + std::to_string(plan->body.ops.size()));
   return true;
 }

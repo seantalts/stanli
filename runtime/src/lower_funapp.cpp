@@ -87,11 +87,10 @@ bool Lowering::expr_effectful(const mir::Expr& e) {
 unsigned Lowering::expr_effects(const mir::Expr& e) {
   unsigned effects = 0;
   if (mir::stateful_intrinsic_kind(e)) effects |= kStatefulEffect;
-  if (e.kind == mir::Expr::FunApp && e.name.size() >= 4 &&
-      e.name.compare(e.name.size() - 4, 4, "_rng") == 0)
+  if (e.kind == mir::Expr::FunApp && e.fn_suffix == mir::FnSuffix::Rng)
     effects |= kStatefulEffect;
   if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
-    effects |= fun_effects(e.name);
+    effects |= fun_effects(mir::function_key(e));
   if (mir::is_reduce_sum(e) && reduce_sum_effectful(e))
     effects |= kStatefulEffect;
   for (const auto& a : e.args) effects |= expr_effects(a);
@@ -129,22 +128,18 @@ unsigned Lowering::fun_effects(const std::string& name) {
   visit_expr = [&](const mir::Expr& e) -> unsigned {
     unsigned found = 0;
     if (mir::stateful_intrinsic_kind(e)) found |= kStatefulEffect;
-    if (e.kind == mir::Expr::FunApp && e.name.size() >= 4 &&
-        e.name.compare(e.name.size() - 4, 4, "_rng") == 0)
+    if (e.kind == mir::Expr::FunApp && e.fn_suffix == mir::FnSuffix::Rng)
       found |= kStatefulEffect;
     if (e.kind == mir::Expr::FunApp && e.fn_lib == mir::Expr::Lib::UserDefined)
-      found |= visit_fun(e.name);
+      found |= visit_fun(mir::function_key(e));
     if (mir::is_reduce_sum(e)) {
       if (e.args.empty() || e.args[0].kind != mir::Expr::Var) {
         found |= kStatefulEffect;
       } else {
-        bool propto = false;
-        const mir::FunDef* partial = mir::resolve_callback(
-            fun_defs, mir::reduce_sum_partial_name(e.args[0].name, &propto),
-            mir::reduce_sum_partial_views(e));
+        const mir::FunDef* partial = mir::find_function(fun_defs, e.args[0]);
         if (partial == nullptr)
           found |= kStatefulEffect;
-        else if (visit_fun(partial->name))
+        else if (visit_fun(mir::function_key(*partial)))
           found |= kStatefulEffect;
       }
     }
@@ -155,8 +150,9 @@ unsigned Lowering::fun_effects(const std::string& name) {
   visit_stmt = [&](const mir::Stmt& s) -> unsigned {
     unsigned found = 0;
     if (s.kind == mir::Stmt::TargetPE) found |= kStatefulEffect;
-    if (s.kind == mir::Stmt::NRFunApp && message_action(s.fn_name))
-      found |= kMessageEffect;
+    if (message_action(mir::internal_name(s))) found |= kMessageEffect;
+    if (const auto call = mir::user_defined_statement_call(s))
+      found |= visit_expr(*call);
     for (const auto& e : s.fn_args) found |= visit_expr(e);
     if (s.has_init) found |= visit_expr(s.init);
     found |= visit_expr(s.rhs) | visit_expr(s.target) | visit_expr(s.lower) |
@@ -619,7 +615,7 @@ std::vector<mir::Stmt> single_exit_body(const mir::FunDef& f,
 Lowering::Val Lowering::lower_call_udf(const mir::Expr& e,
                                        const std::function<void()>& before_body,
                                        const UdfSpecialization& specialize) {
-  auto it = fun_defs.find(e.name);
+  auto it = fun_defs.find(mir::function_key(e));
   if (it == fun_defs.end()) fail("unknown function " + e.name, e.raw);
   const mir::FunDef& f = *it->second;
   CallArguments actuals(*this, e);
