@@ -483,6 +483,27 @@ void test_data_size_effect_runs_once_per_site() {
         "data size print fires once per site, got '" + printed + "'");
 }
 
+// A size that fails the data check still printed first in CmdStan: the size
+// of w prints, then w's dimension check fails, and v is never reached.
+void test_data_size_effect_prints_before_dimension_error() {
+  auto data = stanli::DataMap::from_json_file(
+      "tests/fixtures/data_size_print_sites_bad.json");
+  std::string printed;
+  bool failed = false;
+  {
+    stanli_test::StdoutCapture captured;
+    try {
+      (void)stanli::compile_model(fixture("data_size_print_sites"), data);
+    } catch (const std::exception&) {
+      failed = true;
+    }
+    printed = captured.finish();
+  }
+  check(failed, "short w fails its dimension check");
+  check(printed == "sizing 3\n",
+        "data size prints before the dimension error, got '" + printed + "'");
+}
+
 std::string lower_dump(const std::string& stem, const std::string& dir) {
   std::filesystem::remove_all(dir);
   test_setenv("STANLI_DUMP_PASSES", dir.c_str(), 1);
@@ -522,6 +543,8 @@ int main() {
   run_case("data size effect runs once", test_data_size_effect_runs_once);
   run_case("data size effect runs once per site",
            test_data_size_effect_runs_once_per_site);
+  run_case("data size effect prints before a dimension error",
+           test_data_size_effect_prints_before_dimension_error);
   run_case("while fallback leaves no trace",
            test_while_fallback_leaves_no_trace);
   if (failures == 0) std::printf("test_lower_views OK\n");

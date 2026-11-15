@@ -369,8 +369,28 @@ void Lowering::bind_data(const mir::Program& p) {
   {
     ExtentScope extents(data_extent_scope);
     for (const auto& [name, type] : p.input_vars) {
-      record(name, type);
-      validate_data_dims(name, type);
+      try {
+        record(name, type);
+        validate_data_dims(name, type);
+      } catch (const std::exception&) {
+        // CmdStan computes each size, printing if it prints, before it
+        // checks that input. Print the sizes prepare_data computes ahead of
+        // the failing input's declaration, then report its error.
+        data_extent_scope = false;
+        for (const auto& st : p.prepare_data) {
+          if (st.kind != mir::Stmt::Decl) continue;
+          if (st.decl_id == name) break;
+          if (!st.has_init || input_names.count(st.decl_id) ||
+              expr_effects(st.init) != kMessageEffect)
+            continue;
+          try {
+            (void)td.exec(st);
+          } catch (const std::exception&) {
+            break;
+          }
+        }
+        throw;
+      }
     }
   }
   for (const auto& st : p.prepare_data) {
