@@ -681,6 +681,15 @@ jobs:
           # argument, two models through the one dlopen'd runtime library.
           /tmp/wheeltest/bin/python tests/test_bridgestan_embed.py
 
+      # scipy is optional for the package, so it is installed only for these.
+      - name: Laplace whitening and annotation tests
+        run: |
+          /tmp/wheeltest/bin/pip install numpy scipy
+          /tmp/wheeltest/bin/python tests/test_whiten.py
+          /tmp/wheeltest/bin/python tests/test_laplace_whiten.py
+          /tmp/wheeltest/bin/python tests/test_sparse_laplace.py
+          /tmp/wheeltest/bin/python tests/test_annotations.py
+
       # Encode the same optimized MIR with the real portable producer and
       # upstream's legacy serializer, then compare decoded fields and graphs.
       # The normal C++ test has a test-only writer so it can run without an
@@ -1425,6 +1434,15 @@ jobs:
           wheeltest\Scripts\pip install $whl.FullName
           wheeltest\Scripts\python tests\test_python.py
           wheeltest\Scripts\python tests\test_bridgestan_embed.py
+
+      - name: Laplace whitening and annotation tests
+        shell: pwsh
+        run: |
+          wheeltest\Scripts\pip install numpy scipy
+          wheeltest\Scripts\python tests\test_whiten.py
+          wheeltest\Scripts\python tests\test_laplace_whiten.py
+          wheeltest\Scripts\python tests\test_sparse_laplace.py
+          wheeltest\Scripts\python tests\test_annotations.py
 
       - uses: actions/upload-artifact@v4
         with:

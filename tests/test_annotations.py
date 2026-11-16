@@ -13,7 +13,12 @@ import tempfile
 import warnings
 from unittest import mock
 
-import numpy as np
+try:
+    import numpy as np
+    import scipy.sparse
+except ImportError as exc:
+    print(f"SKIP {pathlib.Path(__file__).name}: needs numpy and scipy ({exc})")
+    sys.exit(0)
 
 import stanli
 

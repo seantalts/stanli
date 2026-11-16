@@ -11,9 +11,13 @@ import pathlib
 import sys
 import warnings
 
-import numpy as np
-import scipy.linalg
-import scipy.sparse
+try:
+    import numpy as np
+    import scipy.linalg
+    import scipy.sparse
+except ImportError as exc:
+    print(f"SKIP {pathlib.Path(__file__).name}: needs numpy and scipy ({exc})")
+    sys.exit(0)
 
 import stanli
 from stanli import laplace
