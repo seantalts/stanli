@@ -793,11 +793,12 @@ cmake --build build --parallel "$build_jobs"
 ctest --test-dir build --parallel "$build_jobs"
 ```
 
-The `STANLI_*` environment variables in this guide and in
-[OPTIMIZATIONS.md](../runtime/src/OPTIMIZATIONS.md) that turn a pass off,
-force an engine, set a tuning limit or print a diagnostic are developer
-switches, read through `debug_env()` in
-[`debug_switch.hpp`](../runtime/include/stanli/debug_switch.hpp). CMake's
+The runtime's `STANLI_*` environment variables that turn a pass off, force
+an engine, set a tuning limit or print a diagnostic, such as those in
+[OPTIMIZATIONS.md](../runtime/src/OPTIMIZATIONS.md), are developer switches,
+read through `debug_env()` in
+[`debug_switch.hpp`](../runtime/include/stanli/debug_switch.hpp). Build and
+tool variables such as `STANLI_JOBS` and `STANLI_PROFILE` are not. CMake's
 `STANLI_DEBUG_SWITCHES` compiles them in. It defaults to OFF, which is what
 the wheels, the R runtime and the browser builds ship: there a set switch is
 ignored, with a one-time notice. `tools/dev_setup.sh` configures both of its
