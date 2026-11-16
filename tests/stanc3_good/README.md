@@ -1,6 +1,6 @@
 # stanc3's test models against CmdStan
 
-stanc3 keeps 1,380 models in `test/integration/good` to test that they
+stanc3 keeps 1,382 models in `test/integration/good` to test that they
 compile, not counting the pretty-printed copies in its `expected_*`
 directories. They cover syntax and type combinations that posteriordb and the
 signature generators never produce. This suite runs every one of them

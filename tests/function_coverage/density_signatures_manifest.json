@@ -543,7 +543,7 @@
   ],
   "registry_name_count": 180,
   "signature_dump_sha256": "e9d528c1e275a200679eee49cf7bd132c0b9be1574b50da891b2bf8d6cd49234",
-  "stanc_build_id": "stanc3 v2.40.0-144-g9f5c452",
+  "stanc_build_id": "stanc3 v2.40.0-157-gaa1c2c1",
   "tested_case_count": 54137,
   "tested_registry_name_count": 180,
   "tested_registry_names": [
