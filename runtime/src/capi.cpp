@@ -835,6 +835,9 @@ stanli_model* stanli_model_whiten_lowrank(
     m->wa_n = inner->wa_n;
     m->wa_gq_start = inner->wa_gq_start;
     m->warnings = inner->warnings;
+    m->compiler_messages = inner->compiler_messages;
+    m->con_vars = inner->con_vars;
+    m->wa_vars = inner->wa_vars;
     m->whiten = spec;
     m->ex = std::make_unique<stanli::Executor>(
         stanli::whiten_graph(inner->ex->graph(), spec), *inner->ex);
