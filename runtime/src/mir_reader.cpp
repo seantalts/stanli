@@ -1176,7 +1176,7 @@ std::string resolve_overload(const Overloads::value_type& candidates,
   }
   if (!match)
     throw mir::MirError("mir: no overload of " + candidates.first +
-                             " matches its call");
+                        " matches its call");
   return match->overload;
 }
 
@@ -1251,8 +1251,7 @@ void resolve_overloads(Program& prog) {
     for (size_t i = 0; i < defs.size(); ++i)
       for (size_t j = i + 1; j < defs.size(); ++j)
         if (views_match(defs[i]->arg_views, defs[j]->arg_views))
-          throw mir::MirError("mir: indistinguishable overloads of " +
-                                   name);
+          throw mir::MirError("mir: indistinguishable overloads of " + name);
     for (FunDef* f : defs) f->overload = signature(f->arg_views);
     overloads[name] = std::move(defs);
   }
