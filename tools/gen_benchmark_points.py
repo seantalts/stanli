@@ -44,7 +44,8 @@ MAX_VALUE_DOUBLES = 1 << 26
 
 class _ModelOpts(ctypes.Structure):
     _fields_ = [("seed", ctypes.c_uint32), ("threads_per_chain", ctypes.c_int),
-                ("fast_math", ctypes.c_int), ("allow_interpreter", ctypes.c_int)]
+                ("fast_math", ctypes.c_int), ("allow_interpreter", ctypes.c_int),
+                ("execution_report", ctypes.c_int), ("parallel_write_array", ctypes.c_int)]
 
 
 class _SampleOpts(ctypes.Structure):
@@ -71,6 +72,36 @@ class _SampleReport(ctypes.Structure):
                 ("n_divergent", ctypes.c_int64), ("n_max_treedepth", ctypes.c_int64)]
 
 
+class _FieldLayout(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_char_p), ("field", ctypes.c_char_p),
+                ("offset", ctypes.c_size_t), ("size", ctypes.c_size_t),
+                ("type_size", ctypes.c_size_t)]
+
+
+_MIRRORS = {"stanli_model_opts": _ModelOpts, "stanli_sample_opts": _SampleOpts,
+            "stanli_metric_opts": _MetricOpts, "stanli_sample_report": _SampleReport}
+
+
+def _check_layouts(lib):
+    """Refuse a library whose structs differ from the mirrors above."""
+    lib.stanli_n_field_layouts.restype = ctypes.c_int64
+    lib.stanli_field_layouts.restype = ctypes.POINTER(_FieldLayout)
+    table = lib.stanli_field_layouts()
+    runtime = {}
+    for i in range(lib.stanli_n_field_layouts()):
+        e = table[i]
+        runtime.setdefault(e.type.decode(), (e.type_size, {}))[1][
+            e.field.decode()] = (e.offset, e.size)
+    for name, mirror in _MIRRORS.items():
+        type_size, fields = runtime.get(name, (None, {}))
+        ours = {f: (getattr(mirror, f).offset, getattr(mirror, f).size)
+                for f, _ in mirror._fields_}
+        if type_size != ctypes.sizeof(mirror) or ours != fields:
+            raise RuntimeError(f"{name} in the library differs from this tool's copy: "
+                               f"library {type_size} bytes {fields}, "
+                               f"tool {ctypes.sizeof(mirror)} bytes {ours}")
+
+
 _PROGRESS = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_int64, ctypes.c_int64, ctypes.c_int32,
                              ctypes.c_int64, ctypes.c_int64, ctypes.c_void_p)
 _POLL = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
@@ -79,6 +110,8 @@ _DP = ctypes.POINTER(ctypes.c_double)
 
 def _bind(path):
     lib = ctypes.CDLL(str(path))
+    _check_layouts(lib)
+    lib.stanli_model_opts_init.argtypes = [ctypes.POINTER(_ModelOpts)]
     lib.stanli_model_new_with_opts.restype = ctypes.c_void_p
     lib.stanli_model_new_with_opts.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(_ModelOpts),
                                                ctypes.c_char_p, ctypes.c_size_t]
@@ -107,6 +140,7 @@ def _bind(path):
 
 def _model(lib, mir, data, seed):
     opts = _ModelOpts()
+    lib.stanli_model_opts_init(ctypes.byref(opts))
     opts.seed, opts.threads_per_chain, opts.fast_math = seed, 1, 0
     opts.allow_interpreter = 1
     err = ctypes.create_string_buffer(ERR_LEN)
