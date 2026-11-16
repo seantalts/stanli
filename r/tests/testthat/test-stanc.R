@@ -87,6 +87,21 @@ test_that("the bundled JavaScript compiler names the model file and reports warn
   expect_warning(stanli:::mir_from_js(""), "Empty model", fixed = TRUE)
 })
 
+test_that("the bundled JavaScript compiler reads @latent and warns on other annotations", {
+  skip_if_not_installed("V8")
+  skip_if_not_installed("jsonlite")
+  skip_if(!nzchar(stanli:::stanc_js_path()) ||
+            !file.exists(stanli:::stanc_js_path()),
+          "stanc.js is not in this installation")
+
+  latent <- "parameters { @latent vector[3] a; real mu; }
+             model { a ~ normal(mu, 1); }"
+  expect_no_warning(stanli:::mir_from_js(latent))
+  unknown <- sub("real mu;", "@foo real mu;", latent, fixed = TRUE)
+  expect_warning(stanli:::mir_from_js(unknown),
+                 "Unknown annotation '@foo'", fixed = TRUE)
+})
+
 test_that("the V8 helper calls stanli_compile and reports its messages", {
   skip_if_not_installed("V8")
   skip_if_not_installed("jsonlite")

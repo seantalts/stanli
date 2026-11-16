@@ -193,6 +193,25 @@ if (portableWarning.errors || nativeWarning.status !== 0 ||
        JSON.stringify([Array.from(portableWarning.warnings),
                        nativeWarning.messages]));
 
+const latentCode = "parameters { @latent vector[3] a; real mu; }\n" +
+    "model { a ~ normal(mu, 1); }\n";
+const latent = compile("embedded_model", latentCode);
+const nativeLatent = nativeMessages(latentCode);
+if (latent.errors || latent.warnings.length !== 0 ||
+    nativeLatent.status !== 0 || nativeLatent.messages.warnings.length !== 0)
+  fail("@latent warns: " + JSON.stringify([Array.from(latent.warnings),
+                                           nativeLatent.messages]));
+
+const unknownCode = latentCode.replace("real mu;", "@foo real mu;");
+const unknown = compile("embedded_model", unknownCode);
+const nativeUnknown = nativeMessages(unknownCode);
+if (unknown.errors || unknown.warnings.length !== 1 ||
+    !String(unknown.warnings[0]).includes("Unknown annotation '@foo'") ||
+    JSON.stringify(trimmed(unknown.warnings)) !==
+        JSON.stringify(nativeUnknown.messages.warnings))
+  fail("@foo warnings differ: " + JSON.stringify([Array.from(unknown.warnings),
+                                                  nativeUnknown.messages]));
+
 const budgetCode = "parameters { real x; }\nmodel {\nreal s = 0;\n" +
     Array.from({length: 9}, (_, d) => `for (i${d} in 1:1) {\n`).join("") +
     "s += 1;\n".repeat(2100) + "}\n".repeat(9) + "x ~ normal(s, 1);\n}\n";

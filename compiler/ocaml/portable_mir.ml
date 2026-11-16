@@ -429,7 +429,7 @@ let read_param_fields (expr : Expr.Typed.t) =
 let rec stmt_of_t (stmt : Stmt.Located.t) =
   let open Stmt.Pattern in
   match stmt.pattern with
-  | Decl {decl_adtype; decl_id; decl_type; initialize} ->
+  | Decl {decl_adtype; decl_id; decl_type; initialize; _} ->
       let initialized, init =
         match initialize with
         | Assign expr -> (true, expr_of_t expr)
