@@ -48,7 +48,14 @@ if (!compilerOnly) {
               'stanli_exact_lp', 'stanli_grad', 'stanli_hessian',
               'stanli_sample_multi_metric',
               'stanli_sample_opts_check', 'stanli_resume_size',
-              'stanli_optimize', 'stanli_diagnose_text', 'stanli_wa_row')
+              'stanli_optimize', 'stanli_diagnose_text', 'stanli_wa_row',
+              'stanli_model_whiten', 'stanli_model_whiten_lowrank',
+              'stanli_sparse_factor_new', 'stanli_sparse_factor_nnz',
+              'stanli_sparse_factor_stats', 'stanli_sparse_factor_get',
+              'stanli_sparse_factor_lowrank', 'stanli_sparse_factor_free',
+              'stanli_variable_n_annotations', 'stanli_variable_annotation',
+              'stanli_n_param_blocks', 'stanli_param_block_name',
+              'stanli_param_block_size')
     syms[!vapply(syms, is.loaded, logical(1))]
   `);
   const missing = (await res.toJs()).values;
