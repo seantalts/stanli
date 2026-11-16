@@ -188,7 +188,7 @@ def test_report_counts_gradients():
     m = centred()
     n = m.n_unconstrained
     _, report = stanli.laplace_whiten(m, latent=["alpha"], seed=1,
-                                      hessian="dense")
+                                      hessian="dense", pattern="dense")
     g = report.gradients
     assert g["pattern_hessian"] == 1 + 2 * n
     assert g["final_hessian"] == 1 + 2 * n

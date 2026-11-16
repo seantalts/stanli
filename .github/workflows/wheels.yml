@@ -688,6 +688,7 @@ jobs:
           /tmp/wheeltest/bin/python tests/test_whiten.py
           /tmp/wheeltest/bin/python tests/test_laplace_whiten.py
           /tmp/wheeltest/bin/python tests/test_sparse_laplace.py
+          /tmp/wheeltest/bin/python tests/test_laplace_pattern.py
           /tmp/wheeltest/bin/python tests/test_annotations.py
           /tmp/wheeltest/bin/python tests/test_bridgestan_whiten.py
 
@@ -1443,6 +1444,7 @@ jobs:
           wheeltest\Scripts\python tests\test_whiten.py
           wheeltest\Scripts\python tests\test_laplace_whiten.py
           wheeltest\Scripts\python tests\test_sparse_laplace.py
+          wheeltest\Scripts\python tests\test_laplace_pattern.py
           wheeltest\Scripts\python tests\test_annotations.py
           wheeltest\Scripts\python tests\test_bridgestan_whiten.py
 

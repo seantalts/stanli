@@ -270,6 +270,195 @@ def _sparse_hessian(grad, q, pattern, cols, dense=(), plan=None,
     return sp.csc_matrix(H)
 
 
+_PROBE_GROUPS = 48
+_PROBE_ROUNDS = 4
+_PROBE_NOISE = 1e3 * np.finfo(float).eps
+
+
+def _probe_responses(grad, q, iu, g0, step, labels, groups, rng):
+    """Boolean (groups, m): row i responds to the probe of group g when a
+    forward difference of the gradient along random weights on the columns
+    of that group moves entry i by more than rounding noise."""
+    m = len(iu)
+    resp = np.zeros((groups, m), dtype=bool)
+    order = np.argsort(labels, kind="stable")
+    bounds = np.searchsorted(labels[order], np.arange(groups + 1))
+    for g in range(groups):
+        js = order[bounds[g]:bounds[g + 1]]
+        if not len(js):
+            continue
+        w = rng.uniform(0.5, 1.5, len(js)) * rng.choice([-1.0, 1.0], len(js))
+        e = np.zeros(q.size)
+        e[iu[js]] = step[js] * w
+        gp = grad(q + e)[1][iu]
+        noise = _PROBE_NOISE * (np.abs(gp) + np.abs(g0))
+        resp[g] = np.abs(gp - g0) > noise
+    return resp
+
+
+def _probe_candidates(grad, q, iu, g0, step, rng):
+    """A symmetric boolean pattern (CSC, with the diagonal) in the
+    coordinates of `iu` that contains every nonzero of the Hessian block.
+
+    Each round splits the columns into random groups and probes each group
+    with random weights (one gradient per group). Entry (i, j) is a
+    candidate when row i responded to the probe of j's group in every round,
+    so a true nonzero is never missed (random weights make cancellation
+    within a group probability zero) and a false candidate needs a chance
+    response in every round. If the candidates outgrow a budget the groups
+    are made four times as many; once the probes would outnumber the
+    columns, columns are probed one at a time, which is exact."""
+    import scipy.sparse as sp
+    m = len(iu)
+    budget = 32 * m + 100_000
+    groups = _PROBE_GROUPS
+    while True:
+        if groups * _PROBE_ROUNDS >= m:
+            labels = np.arange(m)[None, :]
+            groups, rounds = m, 1
+        else:
+            rounds = _PROBE_ROUNDS
+            labels = np.stack([rng.permutation(m) % groups
+                               for _ in range(rounds)])
+        resps = [_probe_responses(grad, q, iu, g0, step, labels[t], groups,
+                                  rng) for t in range(rounds)]
+        pairs = _intersect(resps, labels, groups,
+                           None if rounds == 1 and groups == m else budget)
+        if pairs is not None:
+            break
+        groups *= 4
+    P = sp.csr_matrix((np.ones(len(pairs[0]), dtype=bool), pairs),
+                      shape=(m, m))
+    P = P + sp.identity(m, dtype=bool, format="csr")
+    P = (P + P.T).astype(bool)
+    P.sum_duplicates()
+    return P.tocsc()
+
+
+def _intersect(resps, labels, groups, budget):
+    rounds, m = labels.shape
+    order = np.argsort(labels[0], kind="stable")
+    bounds = np.searchsorted(labels[0][order], np.arange(groups + 1))
+    out_r, out_c, total = [], [], 0
+    for g in range(groups):
+        cols = order[bounds[g]:bounds[g + 1]]
+        rows = np.nonzero(resps[0][g])[0]
+        if not len(cols) or not len(rows):
+            continue
+        chunk = max(1, 4_000_000 // len(cols))
+        for start in range(0, len(rows), chunk):
+            rr = rows[start:start + chunk]
+            keep = np.ones((len(rr), len(cols)), dtype=bool)
+            for t in range(1, rounds):
+                keep &= resps[t][labels[t][cols][None, :], rr[:, None]]
+            ri, ci = np.nonzero(keep)
+            total += len(ri)
+            if budget is not None and total > budget:
+                return None
+            out_r.append(rr[ri])
+            out_c.append(cols[ci])
+    if not out_r:
+        return np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64)
+    return np.concatenate(out_r), np.concatenate(out_c)
+
+
+def _probe_agrees(grad, q, iu, H, step, rng, tol):
+    """Whether H, the coloured Hessian over the candidate pattern, predicts
+    central differences of the gradient along three random directions to
+    within what a missing entry of the size the pattern keeps would change."""
+    for _ in range(3):
+        v = step * rng.randn(len(iu))
+        e = np.zeros(q.size)
+        e[iu] = v
+        gp = grad(q + e)[1][iu]
+        gm = grad(q - e)[1][iu]
+        miss = np.abs((gp - gm) - 2.0 * (H @ v))
+        noise = _PROBE_NOISE * (np.abs(gp) + np.abs(gm))
+        signal = 0.25 * tol * np.abs(H.diagonal()) * np.sqrt(np.mean(v * v))
+        if np.any(miss > np.maximum(noise, signal)):
+            return False
+    return True
+
+
+def _threshold_pattern(H, tol):
+    """`_pattern` for a sparse matrix."""
+    import scipy.sparse as sp
+    m = H.shape[0]
+    C = H.tocoo()
+    d = np.sqrt(np.abs(H.diagonal()))
+    scale = d[C.row] * d[C.col]
+    if len(C.data):
+        scale[scale == 0] = np.abs(C.data).max()
+    keep = np.abs(C.data) > tol * scale
+    P = sp.csr_matrix((np.ones(int(keep.sum()), dtype=bool),
+                       (C.row[keep], C.col[keep])), shape=(m, m))
+    P = P + sp.identity(m, dtype=bool, format="csr")
+    P = (P + P.T).astype(bool)
+    P.sum_duplicates()
+    return P.tocsc()
+
+
+def _probe_pattern(model, q, iu, tol, counter, seed=1):
+    """The pattern `_pattern` would give for the Hessian block over `iu` at
+    q, without the dense Hessian, or None when the verification fails.
+
+    `_probe_candidates` gives a superset from group probes; the coloured
+    Hessian over it is differenced (two gradients per colour) and its
+    entries thresholded exactly as `_pattern` does; then three random central
+    differences of the gradient are compared with that Hessian's prediction,
+    which catches any entry the candidates missed. Costs about
+    `_PROBE_GROUPS * _PROBE_ROUNDS` gradients on a model whose rows have a
+    few nonzeros, and O(nnz) memory."""
+    iu = np.asarray(iu, dtype=np.int64)
+    q = np.ascontiguousarray(q, dtype=np.float64)
+    rng = np.random.RandomState(seed)
+
+    def grad(x):
+        counter[0] += 1
+        return model.log_prob_grad(x)
+
+    g0 = grad(q)[1][iu]
+    if not np.all(np.isfinite(g0)):
+        return None
+    step = 1e-4 * np.maximum(1.0, np.abs(q[iu]))
+    C = _probe_candidates(grad, q, iu, g0, step, rng)
+    H = _sparse_hessian(grad, q, C, iu)
+    if not np.all(np.isfinite(H.data)):
+        return None
+    if not _probe_agrees(grad, q, iu, H, step, rng, tol):
+        return None
+    return _threshold_pattern(H, tol)
+
+
+def _start_pattern(model, q, iu, tol, mode, seed, counter):
+    """The sparsity pattern of the Hessian block over `iu` at q, CSC."""
+    if mode == "probe":
+        P = _probe_pattern(model, q, iu, tol, counter, seed)
+        if P is not None:
+            return P
+        warnings.warn(
+            "laplace_whiten: the sparsity probe disagreed with a gradient "
+            "difference (or met a non-finite value); using the dense "
+            "Hessian pattern instead", RuntimeWarning, stacklevel=3)
+    counter[0] += 1 + 2 * q.size
+    _, _, H = model.log_prob_hessian(q)
+    if not np.all(np.isfinite(H)):
+        raise RuntimeError("the Hessian at the starting point is not finite")
+    return _pattern(H, tol)[iu][:, iu]
+
+
+def _embed_pattern(pattern_uu, iu, n):
+    """The n by n pattern with `pattern_uu` on the `iu` block and only the
+    diagonal elsewhere."""
+    import scipy.sparse as sp
+    C = pattern_uu.tocoo()
+    rest = np.setdiff1d(np.arange(n), iu)
+    rows = np.concatenate([iu[C.row], rest])
+    cols = np.concatenate([iu[C.col], rest])
+    return sp.csc_matrix((np.ones(len(rows), dtype=bool), (rows, cols)),
+                         shape=(n, n))
+
+
 class _Factor:
     """A sparse LDL^T factorization from the native library:
     ``P A P^T = L diag(d) L^T`` with ``L`` unit lower triangular (scipy
@@ -555,7 +744,8 @@ def _sparse_whiten(model, q_hat, Q, floor, keep_precision, n_clipped_warning):
 def laplace_whiten(model, latent=None, *, init=None, seed=1, max_outer=60,
                    inner_iter=2000, pattern_tolerance=1e-6,
                    threshold=1e-6, repair="abs", clip=None,
-                   hessian="coloured", keep_precision=False):
+                   hessian="coloured", keep_precision=False,
+                   pattern="probe"):
     """EXPERIMENTAL. Whiten `model` around its Laplace-approximate marginal
     mode and return ``(whitened_model, report)``.
 
@@ -571,10 +761,18 @@ def laplace_whiten(model, latent=None, *, init=None, seed=1, max_outer=60,
     Steps, with the harness' fixed thresholds as defaults:
 
     1. Start at the Pathfinder mean (or at the unconstrained `init`) and
-       take the sparsity pattern of the Hessian there, entries above
-       `pattern_tolerance` relative to the square root of the diagonal.
-       This one Hessian is dense, so it needs 8 n^2 bytes and 2 n + 1
-       gradients.
+       take the sparsity pattern of the Hessian block over the latent
+       coordinates there, entries above `pattern_tolerance` relative to the
+       square root of the diagonal. `pattern="probe"`, the default, finds it
+       without the dense Hessian: random-weight gradient differences along
+       groups of coordinates give a superset (a missed nonzero would need a
+       cancellation of probability zero), the coloured Hessian over that
+       superset is thresholded, and three random central differences of the
+       gradient check that nothing was missed. If a check fails the builder
+       warns and uses the dense pattern. On a hierarchical model it costs a
+       few hundred gradients and O(nnz) memory however many groups there
+       are. `pattern="dense"` forms the dense Hessian, 2 n + 1 gradients and
+       8 n^2 bytes.
     2. Maximize over theta the marginal
        ``log p(theta, u_hat(theta)) - 1/2 log det(-H_uu)``. u_hat comes from
        an inner L-BFGS over u, H_uu from central differences of the gradient
@@ -619,6 +817,8 @@ def laplace_whiten(model, latent=None, *, init=None, seed=1, max_outer=60,
         raise ValueError('repair must be "abs", "abs_dense" or "clip"')
     if hessian not in ("coloured", "dense"):
         raise ValueError('hessian must be "coloured" or "dense"')
+    if pattern not in ("probe", "dense"):
+        raise ValueError('pattern must be "probe" or "dense"')
     if clip is None:
         clip = 1e-3 if repair == "clip" else 1e-8
     if latent is None:
@@ -636,13 +836,12 @@ def laplace_whiten(model, latent=None, *, init=None, seed=1, max_outer=60,
         if q_start.shape != (n,):
             raise ValueError(f"init has shape {q_start.shape}, the model has "
                              f"{n} unconstrained parameters")
-    _, _, H_start = model.log_prob_hessian(q_start)
-    if not np.all(np.isfinite(H_start)):
-        raise RuntimeError("the Hessian at the starting point is not finite")
-    pattern_full = _pattern(H_start, pattern_tolerance)
-    del H_start
-    pattern_uu = pattern_full[iu][:, iu]
     counter = [0]
+    pattern_uu = _start_pattern(model, q_start, iu, pattern_tolerance,
+                                pattern, seed, counter)
+    pattern_grads = counter[0]
+    pattern_full = _embed_pattern(pattern_uu, iu, n)
+    counter[0] = 0
     q_hat, theta_start, theta_hat, outer = _marginal_mode(
         model, q_start, iu, it, pattern_uu, max_outer, inner_iter, counter)
     marginal_grads = counter[0]
@@ -696,7 +895,7 @@ def laplace_whiten(model, latent=None, *, init=None, seed=1, max_outer=60,
                                clip, warn)
         if not keep_precision:
             precision = None
-    gradients = {"pattern_hessian": 1 + 2 * n,
+    gradients = {"pattern_hessian": pattern_grads,
                  "marginal_mode": marginal_grads,
                  "final_hessian": final_grads}
     gradients["total"] = sum(gradients.values())
