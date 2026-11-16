@@ -2,6 +2,105 @@
 
 ## Unreleased
 
+## 0.27.0
+
+You can now continue sampling from an existing fit, see divergence counts
+while chains run, and compute bridge sampling estimates from R. Models from
+nine CRAN packages joined the CmdStan replay, which found and fixed several
+`lp__` constant and compile bugs. stanli no longer falls back to stock
+stanc when its own compiler is missing. The R package and runtime must be
+updated together.
+
+### Performance
+
+- ctsem's generated quantities are compiled instead of interpreted. Each
+  saved draw is about 250x faster on `ctsem_ctsm`.
+- Preparing models with early returns, `break` or `continue` in loops, or
+  long chains of grouped loops no longer slows down sharply. On one machine,
+  covid19imperial v2 and v3 prepare 5.5x faster and each saved draw is 2.6x
+  faster, with peak memory down from 469 MB to 131 MB. `gpcm_latent_reg_irt`
+  prepares 5.2x faster and `grsm_latent_reg_irt` 8.5x faster.
+- Preparation keeps fewer copies of the data. A GLM with 100 predictors and
+  160,000 rows peaks at 774 MB instead of 1,020 MB.
+- `multi_normal_cholesky` with a data Cholesky factor no longer allocates.
+  OncoBayes2's gradients are 1.04x to 1.09x faster.
+- Compiling is faster for models with many inlined function calls:
+  `cm_rdm` 1.69x faster, OncoBayes2 1.40x to 1.53x faster.
+
+### Features
+
+- `bridge_sampler(fit)` works on a stanli fit in R, without rstan. It
+  needs the full log density, and `~` drops constants as in rstan, so write
+  the model with `target +=` (#559).
+- R `sample_more(fit, samples = ...)` and Python
+  `model.sample(continue_from=fit, samples=...)` continue sampling where the
+  chains stopped and return a new fit with the draws appended. 1000 then
+  1000 more samples give the same draws as one run of 2000 (#553).
+- Sampling progress shows each chain's divergences and max-treedepth hits
+  so far, once either is non-zero (#552).
+- The browser demo's editor highlights Stan syntax, shows line numbers,
+  marks the line of a compile or data error, and runs on Cmd/Ctrl+Enter.
+- `allow_interpreter = FALSE` (R) and `allow_interpreter=False` (Python)
+  make building a model an error, naming the parts, when part of it would
+  run through the much slower interpreter.
+- C API (ABI 6): the progress callback gains `n_divergent` and
+  `n_max_treedepth`, and `stanli_sample_opts` gains resume buffers, with
+  `stanli_resume_size()`. Compiler messages come back typed, with a kind
+  (warning or O1 fallback notice), and output variables come with their
+  dimensions.
+
+### Fixes
+
+- A `return` inside a `while` loop in a user function returned the value
+  of the function's last `return`. This came from stanc3's `--O1` inliner,
+  and stanli now builds stanc3 from a fork that fixes it.
+- `lp__` kept constants that CmdStan drops under `~` for `wishart`,
+  `inv_wishart`, `lkj`, `multinomial`, `multi_gp` and `wiener`, for
+  densities inside user functions stanc did not inline, and in `_lp`
+  functions. `lp__` values for these models change and now match CmdStan.
+- The `inv_wishart` gradient for `nu` was 32 ULP off.
+- `multi_gp` used the wrong covariance size when `y` was not square.
+- A model with an overloaded user function in a parameter bound failed to
+  load.
+- These failed to compile and now do: `void` function calls as statements
+  and inside parameter-dependent branches, returns inside
+  parameter-dependent branches and loops, `rep_vector` slices without a
+  static shape, and an integer set under a runtime condition and then used
+  as a loop bound.
+- A model could crash when a local in one block reused a name from an
+  earlier block and had no initializer.
+- Internal errors in the samplers, Pathfinder, the gradient and the init
+  search were treated as rejected proposals, so sampling went on around a
+  bug. They are now reported.
+- BridgeStan data containing NaN or Infinity failed to load.
+- Pathfinder reported a small ELBO as -0.000000.
+- A density used only through a `foo_lupdf` callback was dropped, and
+  `reduce_sum` then failed with "unknown partial-sum function".
+- A void function named like a C++ keyword failed with "unknown function".
+- A zero-size output ahead of a generated quantity could mislabel a column.
+- Generated-quantities `multi_normal` with data arguments now matches
+  CmdStan's values exactly in most cases (1 to 4 ULP changes).
+- `print` in the data block printed once for two declarations with the same
+  size expression, and a failing dimension check skipped prints CmdStan
+  makes first.
+
+### Internal
+
+- The CmdStan replay covers 366 models, including 19 from rstanarm,
+  multinma, EpiNow2, mlumr, rbioacc, BeeGUTS, hdbayes, EcoEnsemble and
+  OncoBayes2. A model that falls back to the interpreter without being
+  listed now fails it.
+- Republished benchmarks: median gradient 2.17x faster than CmdStan.
+- Each test oracle has one mechanism, about 20,000 fewer lines.
+- Information that used to travel as encoded text or sentinel values now
+  travels as typed data, from the compiler through the C API. Portable MIR
+  moves to version 3.
+- stanc3 is pinned to the fork's merge of stanc3 master and built with
+  OCaml 5.5.2. Wheels and runtime tarballs no longer ship stock `stanc`.
+- Developer `STANLI_*` switches are compiled out of release builds.
+  `STANLI_NO_INTERPRETER`, `STANLI_ISA`, `STANLI_NO_FUSED_DENSITY` and
+  `STANLI_NO_O1_FALLBACK` still work.
+
 ## 0.26.0
 
 stanli now runs stanc3's own test models against CmdStan, which found and
