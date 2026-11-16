@@ -5,6 +5,7 @@ or a bundled compiler executable as a subprocess where it is not), lowers it
 to an op graph in-process, and samples with NUTS. No C++ toolchain, no model
 compilation on this machine.
 """
+import base64
 import ctypes
 from collections.abc import Mapping
 import json
@@ -791,11 +792,35 @@ def bridgestan_data(stan_file=None, stan_code=None, mir=None, data=None,
     ``Model``.
     """
     mir, name = _resolve_program(stan_file, stan_code, mir, name, include_paths)
-    payload = json.loads(_data_to_json(data))
+    return _bridgestan_payload(mir, name, _data_to_json(data), None)
+
+
+def _bridgestan_payload(mir, name, data_json, whitening):
+    payload = json.loads(data_json)
     if not isinstance(payload, dict):
         raise ValueError("data must be a JSON object")
-    payload["__stanli"] = {"build_id": build_id(), "mir": mir, "name": name}
+    manifest = {"build_id": build_id(), "mir": mir, "name": name}
+    if whitening is not None:
+        manifest["whiten"] = _whitening_manifest(whitening)
+    payload["__stanli"] = manifest
     return json.dumps(payload)
+
+
+def _whitening_manifest(whitening):
+    q_hat, perm, col_ptr, row_idx, values, lowrank = whitening
+
+    def pack(a, dtype):
+        raw = np.ascontiguousarray(a, dtype=dtype).tobytes()
+        return base64.b64encode(raw).decode("ascii")
+
+    out = {"q_hat": pack(q_hat, "<f8"), "perm": pack(perm, "<i8"),
+           "col_ptr": pack(col_ptr, "<i8"), "row_idx": pack(row_idx, "<i8"),
+           "values": pack(values, "<f8")}
+    if lowrank is not None:
+        c, b, w = lowrank
+        out.update(k=int(b.shape[1]), c=pack(c, "<f8"), b=pack(b, "<f8"),
+                   w=pack(w, "<f8"))
+    return out
 
 
 def bridgestan_model(stan_file=None, stan_code=None, mir=None, data=None,
@@ -1499,6 +1524,41 @@ class Model:
         if not m:
             raise ValueError(err.value.decode())
         return m
+
+    def bridgestan_data(self, name=None):
+        """The data argument that makes the runtime serve this model to BridgeStan.
+
+        Like the module-level ``bridgestan_data``, for the program and data
+        this model was built from. On a model returned by ``whiten`` the
+        manifest also carries the whitening (``q_hat``, the permutation, L
+        and any low-rank factors, as exact little-endian bytes), so a
+        BridgeStan client sees the same free vector z and the same log
+        density, gradient and constrain/unconstrain maps as this object.
+        Unconstrained parameter names are ``z.1``, ``z.2``, ... for a
+        whitened model.
+
+        The log density is the one the runtime computes by default;
+        ``fast_math`` is a runtime option BridgeStan has no way to pass, so
+        a model built with it is refused.
+        """
+        if self._fast_math:
+            raise ValueError("a fast_math model has no BridgeStan route: "
+                             "the option is not part of the manifest")
+        mir, stan_code, data_json = self._source
+        if mir is None:
+            mir = _compile_stan(stan_code, [], False, self._label)
+        if name is None:
+            name = (pathlib.Path(self._label).stem if self._label
+                    else "stanli_model")
+        return _bridgestan_payload(mir, name, data_json, self._whitening)
+
+    def bridgestan_model(self, name=None, **kw):
+        """A ``bridgestan.StanModel`` over ``bridgestan_data(name)``."""
+        import bridgestan
+
+        kw.setdefault("warn", False)
+        return bridgestan.StanModel(runtime_path(), self.bridgestan_data(name),
+                                    **kw)
 
     def whiten(self, q_hat, perm, L, lowrank=None):
         """EXPERIMENTAL. A new Model over whitened coordinates z.
