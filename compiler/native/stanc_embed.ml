@@ -1,14 +1,20 @@
 (* stanli embedding entry point: Stan code -> compact portable MIR (upstream O1
    plus loop vectorization). Registered for C via Callback; built with
    -output-complete-obj so the OCaml runtime rides inside one object file linked
-   into libstanli. Return protocol: "W<n>:<n bytes of warnings>" followed by
-   "OK<portable>" or "ERR<message>". *)
+   into libstanli. runtime/src/stanc_embed_c.cpp reads [embed_result] field by
+   field, so the field order and types here are part of that contract. *)
 
 let flag_model_only = 1
 let flag_fast_math = 2
 
+type embed_result =
+  { outcome: (string, string) result  (** the portable MIR, or the error *)
+  ; warnings: string array
+  ; o1_fallback: string option
+        (** set when O1 was skipped for the structural budget *) }
+
 let compile_tmir ~model_only ~fast_math ~filename ~include_paths (code : string)
-    : string =
+    : embed_result =
   let printed_filename = if filename = "" then None else Some filename in
   let compilation =
     Stanli_pipeline.compile_portable ~model_only ~fast_math
@@ -16,21 +22,24 @@ let compile_tmir ~model_only ~fast_math ~filename ~include_paths (code : string)
       ~include_source:
         (Frontend.Include_files.FileSystemPaths (Array.to_list include_paths)) in
   let warnings =
-    String.concat "\n"
+    Array.of_list
       (List.map
          (fun warning ->
            String.trim
              (Fmt.str "%a" (Frontend.Warnings.pp ?printed_filename) warning))
-         compilation.warnings
-      @ List.map Stanli_pipeline.diagnostic_message compilation.diagnostics) in
+         compilation.warnings) in
+  let o1_fallback =
+    List.find_map
+      (fun (Stanli_pipeline.O1_budget_exceeded _ as d) ->
+        Some (Stanli_pipeline.diagnostic_message d))
+      compilation.diagnostics in
   let outcome =
     match compilation.result with
-    | Error (Stanli_pipeline.Internal_error message) -> "ERR" ^ message
+    | Error (Stanli_pipeline.Internal_error message) -> Error message
     | Error (Stanli_pipeline.Frontend_error error) ->
-        "ERR"
-        ^ Fmt.str "%a" (Frontend.Errors.pp ?printed_filename ~code) error
-    | Ok encoded -> "OK" ^ encoded in
-  Printf.sprintf "W%d:%s%s" (String.length warnings) warnings outcome
+        Error (Fmt.str "%a" (Frontend.Errors.pp ?printed_filename ~code) error)
+    | Ok encoded -> Ok encoded in
+  {outcome; warnings; o1_fallback}
 
 let () =
   ignore (Thread.self ());

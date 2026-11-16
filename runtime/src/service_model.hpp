@@ -224,8 +224,8 @@ class SinkLogger : public stan::callbacks::logger {
 
   void debug(const std::string&) override {}
   void debug(const std::stringstream&) override {}
-  void info(const std::string& m) override { emit(0, m); }
-  void info(const std::stringstream& m) override { emit(0, m.str()); }
+  void info(const std::string& m) override { emit(info_level(m), m); }
+  void info(const std::stringstream& m) override { info(m.str()); }
   void warn(const std::string& m) override { emit(1, m); }
   void warn(const std::stringstream& m) override { emit(1, m.str()); }
   void error(const std::string& m) override { emit(2, m); }
@@ -243,6 +243,13 @@ class SinkLogger : public stan::callbacks::logger {
       errors_ += text;
     }
     if (*sink_) (*sink_)(level, text);
+  }
+
+  // Stan's ADVI reports that it stopped at the iteration limit, or that
+  // the ELBO fell after convergence, at info level with this prefix; it has
+  // no other channel. Those are warnings to a caller.
+  static int info_level(const std::string& m) {
+    return m.rfind("Informational Message", 0) == 0 ? 1 : 0;
   }
 
   const LogSink* sink_;

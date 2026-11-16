@@ -2182,10 +2182,8 @@ void test_clean_sweep() {
         try {
           evaluate(ex, point);
           ++swept;
-        } catch (const std::logic_error& e) {
-          const std::string what_failed = e.what();
-          check(what_failed.find("region_map_check_clean") == std::string::npos,
-                what + ": " + what_failed);
+        } catch (const stanli::RegionMapUncleanSweep& e) {
+          check(false, what + ": " + e.what());
         } catch (const std::exception&) {
         }
       }

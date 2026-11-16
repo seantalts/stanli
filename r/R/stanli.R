@@ -101,20 +101,28 @@ read_utf8_file <- function(path) {
 #'   less exactly rounded evaluation, so results can differ from the default
 #'   in the last bits. Defaults to `FALSE`. With `mir`, use MIR compiled in
 #'   fast mode.
+#' @param allow_interpreter `FALSE` makes it an error, naming the parts, when
+#'   part of the model has no compiled path and would run through the much
+#'   slower MIR interpreter. Defaults to `TRUE`.
 #' @return An object of class `stanli_model` whose `columns` name every
 #'   output the way the posterior package reads them, `theta[1,2]` for an
 #'   indexed value. Warns, naming the part and the
 #'   reason, when part of the model has no compiled path and runs through
-#'   the much slower MIR interpreter; with the environment variable
-#'   `STANLI_NO_INTERPRETER` set that is an error instead. Either message is
-#'   what to include in a bug report.
+#'   the much slower MIR interpreter; with `allow_interpreter = FALSE` (or the
+#'   environment variable `STANLI_NO_INTERPRETER` set) that is an error
+#'   instead. Either message is what to include in a bug report. When the
+#'   compiler skips O1 for a very large model, the warning has class
+#'   `stanli_o1_fallback`.
 #' @export
 stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
                          seed = 1, threads_per_chain = 1, include_paths = NULL,
-                         fast_math = FALSE) {
+                         fast_math = FALSE, allow_interpreter = TRUE) {
   cstan_integer(threads_per_chain, "threads_per_chain")
   if (!is.logical(fast_math) || length(fast_math) != 1L || is.na(fast_math))
     stop("fast_math must be TRUE or FALSE", call. = FALSE)
+  if (!is.logical(allow_interpreter) || length(allow_interpreter) != 1L ||
+      is.na(allow_interpreter))
+    stop("allow_interpreter must be TRUE or FALSE", call. = FALSE)
   load_runtime()
   source_file <- NULL
   if (is.null(mir)) {
@@ -157,7 +165,8 @@ stanli_model <- function(file = NULL, code = NULL, data = NULL, mir = NULL,
       tools::file_path_sans_ext(basename(file)),
     model_code = if (is.null(code)) character(0) else code,
     threads_per_chain = threads_per_chain, fast_math = fast_math,
-    file = source_file)
+    allow_interpreter = allow_interpreter, file = source_file)
+  warn_compiler_messages(.Call("stanli_r_compiler_messages", model$ptr))
   note <- .Call("stanli_r_warnings", model$ptr)
   if (nzchar(note)) warning(note, call. = FALSE)
   model
@@ -189,9 +198,8 @@ stanli_check_syntax <- function(code, include_paths = NULL) {
 
 embedded_mir <- function(code, paths, fast_math, file) {
   mir <- .Call("stanli_r_stan_to_mir", code, paths, fast_math, file)
-  note <- attr(mir, "warnings", exact = TRUE)
-  if (!is.null(note)) warn_compiler(note)
-  attr(mir, "warnings") <- NULL
+  warn_compiler_messages(attr(mir, "messages", exact = TRUE))
+  attr(mir, "messages") <- NULL
   mir
 }
 
@@ -207,23 +215,25 @@ looks_like_path <- function(x) {
 # vector length and the columns along with the draws.
 build_model <- function(code, data_json, is_mir, seed,
                         model_name = "stanli_model", model_code = character(0),
-                        threads_per_chain = 1, fast_math = FALSE, file = NULL) {
+                        threads_per_chain = 1, fast_math = FALSE,
+                        allow_interpreter = TRUE, file = NULL) {
   ptr <- .Call("stanli_r_model_new", code, data_json, is_mir,
                as.numeric(seed), as.integer(threads_per_chain), fast_math,
-               file)
+               allow_interpreter, file)
+  variables <- runtime_variables(ptr, parameters = FALSE)
   structure(list(ptr = ptr,
                  n_unconstrained = .Call("stanli_r_n_unconstrained", ptr),
-                 columns = stan_variable_names(
-                   .Call("stanli_r_column_names", ptr)),
+                 columns = variable_columns(variables),
+                 variables = variables,
                  model_name = model_name,
                  model_code = model_code,
                  source = list(code = code, data_json = data_json,
                                is_mir = is_mir),
                  seed = seed, threads_per_chain = threads_per_chain,
-                 fast_math = fast_math,
+                 fast_math = fast_math, allow_interpreter = allow_interpreter,
                  reduce_sum_count = .Call("stanli_r_reduce_sum_count", ptr),
-                 reduce_sum_fallbacks = strsplit(
-                   .Call("stanli_r_reduce_sum_fallbacks", ptr), "\n", fixed = TRUE)[[1L]]),
+                 reduce_sum_fallbacks =
+                   .Call("stanli_r_reduce_sum_fallbacks", ptr)),
             class = "stanli_model")
 }
 
@@ -238,16 +248,44 @@ with_run_seed <- function(model, seed, threads_per_chain = model$threads_per_cha
     return(model)
   build_model(model$source$code, model$source$data_json,
               model$source$is_mir, seed, model$model_name, model$model_code,
-              threads_per_chain, model$fast_math)
+              threads_per_chain, model$fast_math,
+              !isFALSE(model$allow_interpreter))
 }
 
-stan_variable_names <- function(x) {
-  vapply(strsplit(x, ".", fixed = TRUE), function(parts) {
-    if (length(parts) > 1L && all(grepl("^[0-9]+$", parts[-1L])))
-      paste0(parts[1L], "[", paste(parts[-1L], collapse = ","), "]")
-    else
-      paste(parts, collapse = ".")
-  }, character(1))
+# The declared variables behind a model's columns, from the runtime: a named
+# list of dims, first index fastest.
+runtime_variables <- function(ptr, parameters) {
+  v <- .Call("stanli_r_variables", ptr, parameters)
+  stats::setNames(v$dims, v$name)
+}
+
+# Column names in Stan's order, `theta[1,2]` for an element.
+variable_columns <- function(variables) {
+  unlist(lapply(names(variables), function(name) {
+    dims <- variables[[name]]
+    if (!length(dims)) return(name)
+    if (prod(dims) == 0) return(character(0))
+    index <- as.matrix(expand.grid(lapply(dims, seq_len)))
+    paste0(name, "[", apply(index, 1L, paste, collapse = ","), "]")
+  }), use.names = FALSE)
+}
+
+# The variable each column belongs to.
+column_variables <- function(variables) {
+  rep(names(variables), vapply(variables, function(d) as.integer(prod(d)),
+                               integer(1)))
+}
+
+# The variables of a model or of a fit's model. A model saved before models
+# carried their variables has only its column names to go on.
+model_variables <- function(x) {
+  model <- if (inherits(x, "stanli_model")) x else x$model
+  if (!is.null(model$variables)) return(model$variables)
+  stanfit_column_layout(x$columns)$dimensions
+}
+
+variable_layout <- function(variables) {
+  list(parameters = names(variables), dimensions = variables)
 }
 
 #' @export
@@ -301,9 +339,8 @@ parameter_names <- function(model, scalars = FALSE) {
     stop("model must be a stanli_model", call. = FALSE)
   if (!is.logical(scalars) || length(scalars) != 1L || is.na(scalars))
     stop("scalars must be TRUE or FALSE", call. = FALSE)
-  columns <- .Call("stanli_r_parameter_columns", model$ptr)
-  if (scalars) stan_variable_names(columns)
-  else unique(sub("\\..*$", "", columns))
+  variables <- runtime_variables(model$ptr, parameters = TRUE)
+  if (scalars) variable_columns(variables) else names(variables)
 }
 
 #' Starting values on the constrained scale, as the free vector
@@ -384,12 +421,11 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
   if (length(init_radius) != 1L || !is.numeric(init_radius) ||
       !is.finite(init_radius) || init_radius < 0)
     stop("init_radius must be finite and nonnegative", call. = FALSE)
-  columns <- .Call("stanli_r_parameter_columns", model$ptr)
-  declared <- sub("\\..*$", "", columns)
+  variables <- runtime_variables(model$ptr, parameters = TRUE)
+  columns <- variable_columns(variables)
   values <- lapply(values, function(value) if (is.array(value)) as.vector(value) else value)
-  if (all(unique(declared) %in% names(values))) return(values)
-  if (!identical(stan_variable_names(columns),
-                 utils::head(model$columns, length(columns))))
+  if (all(names(variables) %in% names(values))) return(values)
+  if (!identical(columns, utils::head(model$columns, length(columns))))
     stop("this model's outputs do not begin with its parameters; partial ",
          "starting values are unavailable", call. = FALSE)
   point <- if (is.null(seed)) {
@@ -402,7 +438,8 @@ complete_partial_inits <- function(model, values, init_radius, seed) {
   }
   drawn <- utils::head(.Call("stanli_r_write_array", model$ptr, point),
                        length(columns))
-  filled <- split(drawn, factor(declared, levels = unique(declared)))
+  declared <- column_variables(variables)
+  filled <- split(drawn, factor(declared, levels = names(variables)))
   filled[intersect(names(values), names(filled))] <-
     values[intersect(names(values), names(filled))]
   # names that are not parameters are passed on for the usual error or, for
@@ -864,11 +901,13 @@ summary.stanli_fit <- function(object, ...) {
   flat <- as.double(aperm(object$draws, c(3, 1, 2)))
   st <- .Call("stanli_r_summary", flat,
               as.integer(c(d[2], d[1], d[3])))
-  m <- matrix(st, nrow = d[3], byrow = TRUE)
-  out <- data.frame(variable = object$columns, mean = m[, 1],
-                    mcse_mean = m[, 2], sd = m[, 3], mcse_sd = m[, 4],
-                    q5 = m[, 5], q50 = m[, 6], q95 = m[, 7],
-                    ess_bulk = m[, 8], ess_tail = m[, 9], rhat = m[, 10],
+  m <- t(st)
+  out <- data.frame(variable = object$columns, mean = m[, "mean"],
+                    mcse_mean = m[, "mcse_mean"], sd = m[, "sd"],
+                    mcse_sd = m[, "mcse_sd"], q5 = m[, "q5"],
+                    q50 = m[, "q50"], q95 = m[, "q95"],
+                    ess_bulk = m[, "ess_bulk"], ess_tail = m[, "ess_tail"],
+                    rhat = m[, "r_hat"],
                     stringsAsFactors = FALSE)
   rownames(out) <- NULL
   out

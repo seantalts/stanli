@@ -179,7 +179,7 @@ stanmodel_seed <- function(seed) {
 stanmodel_exclude <- function(model, pars, include) {
   if (!is.logical(include) || length(include) != 1L || is.na(include))
     stop("include must be TRUE or FALSE", call. = FALSE)
-  names <- unique(sub("\\[.*$", "", model$columns))
+  names <- names(model_variables(model))
   pars <- unlist(pars)
   if (is.null(pars) || (length(pars) == 1L && is.na(pars)))
     return(if (include) character() else names)

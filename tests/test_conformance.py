@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -361,6 +362,58 @@ class ConstructCatalogTests(unittest.TestCase):
                          "killed by signal 11 (SIGSEGV)")
         self.assertEqual(_exit_description(2), "exit 2")
         self.assertEqual(_exit_description(None), "still running")
+
+    def test_worker_phase_is_where_the_call_failed(self):
+        from conformance import model_worker
+        source = pathlib.Path("m.stan")
+
+        def describe(backend, module, name):
+            with mock.patch.dict(sys.modules, {name: module}):
+                worker = model_worker.Worker(source, backend)
+                with mock.patch.object(pathlib.Path, "read_text",
+                                       return_value="model {}"):
+                    return worker.describe({"request_id": 1})["phase"]
+
+        def bridgestan(compile_error=None, construct_error=None):
+            module = types.SimpleNamespace()
+
+            def compile_model(path):
+                if compile_error:
+                    raise compile_error
+                return pathlib.Path("m_model.so")
+
+            def construct(*args, **kwargs):
+                raise construct_error
+
+            module.compile_model, module.StanModel = compile_model, construct
+            return module
+
+        self.assertEqual(describe("reference", bridgestan(
+            compile_error=RuntimeError("make: no rule")), "bridgestan"),
+            "compile")
+        self.assertEqual(describe("reference", bridgestan(
+            construct_error=RuntimeError("stanc failed with a syntax error")),
+            "bridgestan"), "construction")
+
+        def stanli(mir_error=None):
+            module = types.SimpleNamespace()
+
+            def stan_to_mir(code):
+                if mir_error:
+                    raise mir_error
+                return "mir"
+
+            def bridgestan_model(**kwargs):
+                raise RuntimeError("Semantic error in the data")
+
+            module.stan_to_mir = stan_to_mir
+            module.bridgestan_model = bridgestan_model
+            return module
+
+        self.assertEqual(describe("stanli", stanli(ValueError("bad")),
+                                  "stanli"), "compile")
+        self.assertEqual(describe("stanli", stanli(), "stanli"),
+                         "construction")
 
     def test_worker_normalizes_public_error_categories(self):
         self.assertEqual(worker_category(RuntimeError(

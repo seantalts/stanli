@@ -30,6 +30,7 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
+import check_status  # noqa: E402
 from corpus_inventory import source_digest  # noqa: E402
 import toolchain  # noqa: E402
 from verify_refs import pair_dev  # noqa: E402
@@ -61,14 +62,6 @@ POINT_VERDICTS = ("ok", "both_threw", "mismatch", "one_side_threw",
 _RANK = {"points": 6, "data_message_mismatch": 6, "unsupported": 5,
          "one_side_threw": 2, "timeout": 1, "crashed": 0}
 _AGREES_RANK = 9
-
-# A Stan Math validation error. stanli reporting one of these at compile
-# time, on data CmdStan accepted, is a disagreement and not a missing feature.
-_UNSUPPORTED = re.compile(r"unsupported|not supported|requires the MIR "
-                          r"interpreter|^mir: ")
-_DOMAIN_ERROR = re.compile(r", but must be|is not a valid|is not positive "
-                           r"definite|is not symmetric|must match in size")
-
 
 def sha256(data):
     return hashlib.sha256(data).hexdigest()
@@ -146,10 +139,7 @@ def parse_output(text):
             sections[current]["status"] = (
                 head, tail.split() if head == "OK" else tail.strip())
         elif head == "WANAMES":
-            if tail == "FAIL no write_array":
-                # stanli_check's spelling of a model with no columns.
-                sections[current]["wa"] = ("ok", [], [])
-            elif tail.startswith("FAIL"):
+            if tail.startswith("FAIL"):
                 sections[current]["wa"] = ("threw", tail[4:].strip())
                 names = None
             else:
@@ -237,6 +227,33 @@ def compare_values(want, got, field, labels=None):
     return out
 
 
+def unsupported(record):
+    """Is this stanli_check failure record stanli lacking a feature?
+
+    The alternative is Stan Math rejecting the values, which on input
+    CmdStan accepted is a disagreement and not a missing feature.
+    """
+    return record.get("error") in check_status.UNSUPPORTED
+
+
+def with_status(got, status, k):
+    """A point from parse_output, completed from the status records.
+
+    stanli_check prints no write_array row for a model with no section or
+    no columns; that is an empty row. A row that threw says why in the
+    point record.
+    """
+    got = dict(got or {"status": None, "wa": None})
+    record = status.points.get(k, {}).get("write_array")
+    section = status.write_array()
+    if got["wa"] is None and record is None and (
+            section["section"] == "none" or section.get("columns") == 0):
+        got["wa"] = ("ok", [], [])
+    got["wa_unsupported"] = bool(record) and not record["ok"] and unsupported(
+        record)
+    return got
+
+
 def point_verdict(want, got):
     """(verdict, details) for one point. want is the reference entry."""
     status = got["status"] if got else None
@@ -274,7 +291,7 @@ def point_verdict(want, got):
                         else "message_mismatch"), details
         elif wa_got is None or wa_got[0] != "ok":
             why = wa_got[1] if wa_got else "no write_array output"
-            if _UNSUPPORTED.search(why):
+            if got.get("wa_unsupported"):
                 return ("mismatch" if details else "wa_unsupported"), [
                     f"stanli write_array unsupported: {why}"] + details
             return "one_side_threw", [f"stanli write_array threw: {why}",
@@ -290,7 +307,7 @@ def point_verdict(want, got):
     return ("mismatch" if details else "ok"), details
 
 
-def classify(ref, run, unstable=()):
+def classify(ref, run, unstable=(), status=None):
     """(status, points, details) for one model.
 
     A value mismatch at a point in `unstable` counts as agreement: the
@@ -299,8 +316,10 @@ def classify(ref, run, unstable=()):
 
     status is one of the status groups above; points maps each non-ok point
     to its verdict when the status is "points". `run` is (returncode, stdout,
-    stderr) or None for a timeout.
+    stderr) or None for a timeout, and `status` the CheckStatus that run
+    wrote.
     """
+    records = status or check_status.CheckStatus()
     outcome = ref["outcome"]
     if outcome == "no_data":
         return "data_unavailable", {}, [ref.get("message", "")]
@@ -319,14 +338,17 @@ def classify(ref, run, unstable=()):
         return "one_side_threw", {}, ["stanc rejects it, stanli compiled it"]
     if pre and pre[0] == "COMPILE_FAIL":
         msg = pre[1]
+        failure = records.compile
+        if failure is None or failure["ok"]:
+            return "crashed", {}, [f"no compile failure record: {msg[:200]}"]
         if outcome == "data_fail":
             if messages_agree(ref["message"], msg):
                 return "data_rejected", {}, [ref["message"]]
-            if not _UNSUPPORTED.search(msg):
+            if not unsupported(failure):
                 return "data_message_mismatch", {}, [
                     f"CmdStan: {ref['message']}", f"stanli: {msg}"]
             return "unsupported", {}, [msg]
-        if _DOMAIN_ERROR.search(msg):
+        if not unsupported(failure):
             return "one_side_threw", {}, [f"stanli rejects the data: {msg}"]
         return "unsupported", {}, [msg]
     if code not in (0, 1) or not parsed["points"]:
@@ -341,8 +363,8 @@ def classify(ref, run, unstable=()):
         want = ref["points"][str(k)]
         if "values" in want.get("wa", {}) and "names" not in want["wa"]:
             want = dict(want, wa=dict(want["wa"], names=ref["wa_names"]))
-        verdict, why = point_verdict(want,
-                                     parsed["points"].get(k))
+        verdict, why = point_verdict(
+            want, with_status(parsed["points"].get(k), records, k))
         if verdict == "mismatch" and str(k) in unstable:
             verdict, why = "ok", []
         verdicts[k] = verdict
@@ -402,11 +424,17 @@ def replay_one(path, ctx):
         with tempfile.TemporaryDirectory(prefix="stanc3_good_") as work:
             data_file = pathlib.Path(work) / "data.json"
             data_file.write_bytes(blob)
+            status_file = pathlib.Path(work) / "status.jsonl"
             run = run_process([ctx["check"], source, data_file, "--points",
-                               ",".join(map(str, POINTS)), "--wa-values"],
+                               ",".join(map(str, POINTS)), "--wa-values",
+                               "--status-json", status_file],
                               timeout)
+            records = check_status.read(status_file)
+    else:
+        records = check_status.CheckStatus()
     status, points, details = classify(ref, run, set(
-        ctx["overrides"].get(path, {}).get("platform_dependent", ())))
+        ctx["overrides"].get(path, {}).get("platform_dependent", ())),
+        records)
     problem = ledger_verdict(status, points, entry)
     ctx["seconds"][path] = time.monotonic() - started
     return path, status, points, details, problem

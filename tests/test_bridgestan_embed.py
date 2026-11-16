@@ -24,6 +24,16 @@ parameters { real theta; }
 model { theta ~ normal(0, 1); y ~ normal(theta, 1); }
 """
 
+NONFINITE = """
+data { real a; real b; real c; }
+transformed data {
+  if (!is_nan(a) || b != positive_infinity() || c != negative_infinity())
+    reject("the non-finite data did not arrive: ", a, " ", b, " ", c);
+}
+parameters { real x; }
+model { x ~ normal(0, 1); }
+"""
+
 failures = []
 
 
@@ -176,6 +186,20 @@ def test_bridgestan_data_is_the_embed_payload():
         lib.bs_model_destruct(m)
 
 
+def test_non_finite_data():
+    # json.dumps writes NaN and +/-Infinity as bare tokens, which Stan's
+    # data reader accepts; the model rejects unless all three arrive.
+    data = {"a": float("nan"), "b": float("inf"), "c": float("-inf")}
+    text = stanli.bridgestan_data(stan_code=NONFINITE, data=data)
+    check("json.dumps wrote bare non-finite tokens",
+          "NaN" in text and "-Infinity" in text)
+    lib = bind(ctypes.CDLL(str(stanli.runtime_path())))
+    m, err = construct(lib, text)
+    check(f"NaN and Infinity data construct ({err})", m)
+    if m:
+        lib.bs_model_destruct(m)
+
+
 def test_runtime_path_names_the_loaded_library():
     path = stanli.runtime_path()
     check("runtime_path is a file", path.is_file())
@@ -186,6 +210,7 @@ def test_runtime_path_names_the_loaded_library():
 def main():
     test_runtime_path_names_the_loaded_library()
     test_bridgestan_data_is_the_embed_payload()
+    test_non_finite_data()
     test_two_models_through_one_library()
     test_wrong_build_is_loud()
     test_bridgestan_model_sugar()

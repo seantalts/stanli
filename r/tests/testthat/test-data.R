@@ -20,7 +20,7 @@ test_that("integer data still rejects a missing value", {
 })
 
 test_that("a model reads data holding an infinite bound", {
-  if (!stanli_available()) skip("no stanli runtime installed")
+  skip_without_runtime()
   m <- stanli_model(code = "
     data { real lb; real<upper=5> ub; }
     parameters { real mu; }

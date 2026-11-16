@@ -820,7 +820,7 @@ class MirInterp {
       plan =
           density_call_plan(spec, plan_arguments, e.fn_propto && propto_ctx_);
     } catch (const std::exception& error) {
-      fail(builtin_error_message(e.name, error), e.raw);
+      fail_builtin(e.name, error, e.raw);
     }
     if (spec.evaluation == DensityEvaluationPolicy::AllInteger) {
       Value result;
@@ -960,7 +960,7 @@ class MirInterp {
         shapes.push_back(function_argument_shape(e.args[k], values[k]));
       layout = builtin_layout(spec, shapes, e.name, interpreter_autodiff(e));
     } catch (const std::invalid_argument& error) {
-      fail(builtin_error_message(e.name, error), e.raw);
+      fail_builtin(e.name, error, e.raw);
     }
     std::vector<std::vector<T>> inputs;
     inputs.reserve(values.size());
@@ -1061,7 +1061,7 @@ class MirInterp {
           shapes.push_back(function_argument_shape(e.args[1], b));
         (void)builtin_layout(spec, shapes, e.name, interpreter_autodiff(e));
       } catch (const std::invalid_argument& error) {
-        fail(builtin_error_message(e.name, error), e.raw);
+        fail_builtin(e.name, error, e.raw);
       }
     }
     uint8_t activity = 0;
@@ -1269,12 +1269,13 @@ class MirInterp {
     if (count != given) {
       const bool empty_range =
           count == 0 && index.kind == mir::Expr::IndexBetween;
-      fail(std::string(empty_range ? "array[negative_min_max, ...] assign"
-                                   : "array[multi, ...] assign") +
-               ": assigning variable " + name + " (" + std::to_string(count) +
-               ") and right hand side" + (empty_range ? "" : " size") + " (" +
-               std::to_string(given) + ") must match in size",
-           raw);
+      reject(MessageError::InvalidArgument,
+             std::string(empty_range ? "array[negative_min_max, ...] assign"
+                                     : "array[multi, ...] assign") +
+                 ": assigning variable " + name + " (" + std::to_string(count) +
+                 ") and right hand side" + (empty_range ? "" : " size") + " (" +
+                 std::to_string(given) + ") must match in size",
+             raw);
     }
     selected.reserve(static_cast<size_t>(count));
     for (int64_t k = 0; k < count; ++k) {
@@ -1282,9 +1283,10 @@ class MirInterp {
                                 ? listed[static_cast<size_t>(k)]
                                 : static_cast<long>(first + k);
       if (position < 1 || position > extent)
-        fail(index_out_of_range_message("array[multi, ...] assign", extent,
-                                        position),
-             raw);
+        reject(MessageError::OutOfRange,
+               index_out_of_range_message("array[multi, ...] assign", extent,
+                                          position),
+               raw);
       selected.push_back(position - 1);
     }
   }
@@ -1350,6 +1352,19 @@ class MirInterp {
                          const std::string& raw = "") const {
     throw CompileError(msg + (raw.empty() ? "" : " | in: " + raw));
   }
+  [[noreturn]] void reject(MessageError error, const std::string& msg,
+                           const std::string& raw = "") const {
+    throw StanMathCompileError(error,
+                               msg + (raw.empty() ? "" : " | in: " + raw));
+  }
+  [[noreturn]] void fail_builtin(const std::string& function,
+                                 const std::exception& error,
+                                 const std::string& raw) const {
+    if (dynamic_cast<const StanMathError*>(&error))
+      reject(MessageError::InvalidArgument,
+             builtin_error_message(function, error), raw);
+    fail(builtin_error_message(function, error), raw);
+  }
 
   // The .at() reads in eval_indexed would throw a bare
   // std::out_of_range("vector"); check first so an out-of-range index
@@ -1361,9 +1376,11 @@ class MirInterp {
         probe_failed_ = true;
         return;
       }
-      fail(label ? index_out_of_range_message(label, n, i)
-                 : "index " + std::to_string(i) + " out of bounds for size " +
-                       std::to_string(n),
+      if (label)
+        reject(MessageError::OutOfRange,
+               index_out_of_range_message(label, n, i), e.raw);
+      fail("index " + std::to_string(i) + " out of bounds for size " +
+               std::to_string(n),
            e.raw);
     }
   }
@@ -2055,7 +2072,7 @@ class MirInterp {
         return builtin_layout(*builtin, shapes, e.name,
                               interpreter_autodiff(e));
       } catch (const std::invalid_argument& error) {
-        fail(builtin_error_message(e.name, error), e.raw);
+        fail_builtin(e.name, error, e.raw);
       }
     };
     // Elementwise with scalar broadcasting; results of real math are real
@@ -2234,7 +2251,7 @@ class MirInterp {
               oriented(a, outer_pair ? Kind::Vector : Kind::RowVector),
               oriented(b, outer_pair ? Kind::RowVector : Kind::Vector));
         } catch (const std::invalid_argument& error) {
-          fail(builtin_error_message(e.name, error), e.raw);
+          fail_builtin(e.name, error, e.raw);
         }
         switch (map.kind) {
           case BuiltinProductMap::Kind::Gemm:

@@ -1,38 +1,28 @@
 #pragma once
 
-#include <cstdlib>
+#include <cstddef>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace stanli {
 
+// What the embedded stanc3 returns: the portable MIR or an error, the
+// compiler's warnings, and the O1 fallback notice when O1 was skipped.
 struct StancResult {
-  std::string warnings;
-  bool ok = false;
-  std::string body;
+  std::optional<std::string> mir;
+  std::string error;
+  std::vector<std::string> warnings;
+  std::optional<std::string> o1_fallback;
 };
 
-inline StancResult parse_stanc_result(const char* raw) {
-  StancResult out;
-  if (raw == nullptr) {
-    out.body = "stanc returned nothing";
-    return out;
-  }
-  const char* p = raw;
-  if (*p == 'W') {
-    char* end = nullptr;
-    const unsigned long n = std::strtoul(p + 1, &end, 10);
-    if (end != nullptr && *end == ':') {
-      out.warnings.assign(end + 1, n);
-      p = end + 1 + n;
-    }
-  }
-  if (p[0] == 'O' && p[1] == 'K') {
-    out.ok = true;
-    out.body = p + 2;
-  } else {
-    out.body = p[0] == 'E' && p[1] == 'R' && p[2] == 'R' ? p + 3 : p;
-  }
-  return out;
-}
+inline constexpr int kStancModelOnly = 1;
+inline constexpr int kStancFastMath = 2;
+
+// Defined in stanc_embed_c.cpp, linked only into builds with
+// STANLI_EMBED_STANC.
+StancResult embedded_stanc_compile(const char* stan_code, const char* filename,
+                                   const char* const* include_paths,
+                                   size_t include_path_count, int flags);
 
 }  // namespace stanli

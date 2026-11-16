@@ -16,6 +16,15 @@ class TransportUnavailable(RuntimeError):
     pass
 
 
+class PhaseFailure(Exception):
+    """`error`, raised by the call that runs `phase`."""
+
+    def __init__(self, phase: str, error: Exception):
+        super().__init__(str(error))
+        self.phase = phase
+        self.error = error
+
+
 def _stan_call(function, *args, **kwargs):
     """Keep Stan `print` output off the JSON-lines stdout channel."""
     with contextlib.redirect_stdout(sys.stderr):
@@ -36,14 +45,6 @@ def _number(value):
     if value == -math.inf:
         return "-Infinity"
     return value
-
-
-def _phase(error: Exception, default: str) -> str:
-    message = str(error).lower()
-    if "syntax error" in message or "semantic error" in message \
-            or "stanc" in message and "failed" in message:
-        return "compile"
-    return default
 
 
 def _category(error: Exception) -> str:
@@ -73,20 +74,20 @@ class Worker:
                            if data is not None else None)
         self.models = {}
         self.failures = {}
-        self.mir = None
-        self.mir_error = None
+        self.compiled = None
+        self.compile_error = None
 
-    def stanli_mir(self, stanli):
-        if self.mir_error is not None:
-            raise self.mir_error
-        if self.mir is None:
+    def compile(self, compile_model):
+        """compile_model's result, once; a failure is a compile-phase one."""
+        if self.compile_error is not None:
+            raise self.compile_error
+        if self.compiled is None:
             try:
-                self.mir = stanli.stan_to_mir(
-                    self.model_path.read_text(encoding="utf-8"))
+                self.compiled = compile_model()
             except Exception as error:
-                self.mir_error = error
-                raise
-        return self.mir
+                self.compile_error = PhaseFailure("compile", error)
+                raise self.compile_error from error
+        return self.compiled
 
     def model(self, active_case: int):
         key = "fixed" if self.fixed_data is not None else active_case
@@ -99,9 +100,11 @@ class Worker:
         try:
             if self.backend == "reference":
                 import bridgestan
+                library = self.compile(lambda: _stan_call(
+                    bridgestan.compile_model, str(self.model_path)))
                 model = _stan_call(
                     bridgestan.StanModel,
-                    str(self.model_path), data, capture_stan_prints=True,
+                    str(library), data, capture_stan_prints=True,
                     warn=False)
             else:
                 import stanli
@@ -111,9 +114,11 @@ class Worker:
                     raise TransportUnavailable(
                         "this stanli build does not expose "
                         + ", ".join(missing))
+                mir = self.compile(lambda: stanli.stan_to_mir(
+                    self.model_path.read_text(encoding="utf-8")))
                 model = _stan_call(
                     stanli.bridgestan_model,
-                    mir=self.stanli_mir(stanli),
+                    mir=mir,
                     name=self.model_path.stem, data=data,
                     capture_stan_prints=True)
         except Exception as error:
@@ -123,10 +128,12 @@ class Worker:
         return model
 
     def _rejection(self, response, error: Exception, phase: str):
+        if isinstance(error, PhaseFailure):
+            phase, error = error.phase, error.error
         if _infrastructure_error(error):
             response.update(protocol_error=True, message=str(error))
         else:
-            response.update(accepted=False, phase=_phase(error, phase),
+            response.update(accepted=False, phase=phase,
                             exception_category=_category(error),
                             message=str(error))
         return response

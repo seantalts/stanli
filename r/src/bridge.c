@@ -10,6 +10,7 @@
  * stanli_bridge_load() has succeeded, so every wrapper checks and errors
  * with a message naming the missing piece rather than dereferencing null.
  */
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -60,7 +61,7 @@ static const char* dl_error(void) {
  * runtime reports its own through stanli_abi_version(), and
  * stanli_bridge_load() refuses to bind when the two disagree -- see
  * there for why a mismatch cannot be allowed to proceed. */
-#define STANLI_R_ABI_VERSION 5
+#define STANLI_R_ABI_VERSION 6
 
 /* Mirrors stanli_sample_opts in runtime/include/stanli/capi.h. Field
  * order and types must match exactly; R never sees this struct, but a
@@ -192,20 +193,49 @@ static void* g_lib = NULL;
 /* Every entry point the R side uses. */
 static int (*p_abi_version)(void);
 static int (*p_reduce_sum_count)(const void*);
-static const char* (*p_reduce_sum_fallbacks)(const void*);
+static int64_t (*p_n_reduce_sum_fallbacks)(const void*);
+static const char* (*p_reduce_sum_fallback)(const void*, int64_t);
+/* Mirrors stanli_model_opts. */
 typedef struct {
   uint32_t seed;
   int threads_per_chain;
   int fast_math;
-} model_opts;
+  int allow_interpreter;
+} stanli_model_opts;
+/* Mirrors stanli_field_layout. */
+typedef struct {
+  const char* type;
+  const char* field;
+  size_t offset;
+  size_t size;
+  size_t type_size;
+} field_layout;
+static int64_t (*p_n_field_layouts)(void);
+static const field_layout* (*p_field_layouts)(void);
 static void* (*p_model_new_with_opts)(const char*, const char*,
-                                      const model_opts*, char*, size_t);
+                                      const stanli_model_opts*, char*, size_t);
 static void* (*p_model_new_from_stan_named)(const char*, const char*,
-                                            const char*, const model_opts*,
-                                            char*, size_t);
-static char* (*p_stan_to_mir_named)(const char*, const char*,
-                                    const char* const*, size_t, int, char**,
-                                    char*, size_t);
+                                            const char*,
+                                            const stanli_model_opts*, char*,
+                                            size_t);
+static void* (*p_compile_stan)(const char*, const char*, const char* const*,
+                               size_t, int);
+static const char* (*p_compilation_mir)(const void*);
+static const char* (*p_compilation_error)(const void*);
+static int64_t (*p_compilation_n_messages)(const void*);
+static int (*p_compilation_message_kind)(const void*, int64_t);
+static const char* (*p_compilation_message)(const void*, int64_t);
+static void (*p_compilation_free)(void*);
+static int64_t (*p_model_n_compiler_messages)(const void*);
+static int (*p_model_compiler_message_kind)(const void*, int64_t);
+static const char* (*p_model_compiler_message)(const void*, int64_t);
+static int64_t (*p_n_variables)(const void*, int);
+static const char* (*p_variable_name)(const void*, int, int64_t);
+static int64_t (*p_variable_n_dims)(const void*, int, int64_t);
+static int64_t (*p_variable_dim)(const void*, int, int64_t, int64_t);
+static int (*p_n_sampler_columns)(void);
+static int (*p_n_summary_stats)(void);
+static const char* (*p_summary_stat_name)(int);
 static void (*p_model_free)(void*);
 static int (*p_has_embedded_stanc)(void);
 static void (*p_string_free)(char*);
@@ -215,6 +245,8 @@ static int (*p_exact_lp)(void);
 static int (*p_thread_safe)(void);
 static size_t (*p_resume_size)(const void*);
 static const char* (*p_build_id)(void);
+static char* (*p_bridgestan_data)(const char*, const char*, const char*, char*,
+                                  size_t);
 static int64_t (*p_n_unconstrained)(const void*);
 static int (*p_grad)(void*, const double*, double*, double*);
 static int (*p_hessian)(void*, const double*, double*, double*, double*, char*,
@@ -284,6 +316,122 @@ static int (*p_variational)(void*, const stanli_variational_opts*, double*,
     }                                                           \
   } while (0)
 
+/* The structs above against the runtime's own layout table. Returns the
+ * name of the first struct that differs, or NULL. */
+#define LAYOUT(T, f) {#T, #f, offsetof(T, f), sizeof(((T*)0)->f), sizeof(T)}
+static const field_layout k_layouts[] = {
+    LAYOUT(stanli_sample_opts, seed),
+    LAYOUT(stanli_sample_opts, chains),
+    LAYOUT(stanli_sample_opts, chain_id),
+    LAYOUT(stanli_sample_opts, warmup),
+    LAYOUT(stanli_sample_opts, samples),
+    LAYOUT(stanli_sample_opts, thin),
+    LAYOUT(stanli_sample_opts, delta),
+    LAYOUT(stanli_sample_opts, max_depth),
+    LAYOUT(stanli_sample_opts, save_warmup),
+    LAYOUT(stanli_sample_opts, init_radius),
+    LAYOUT(stanli_sample_opts, inits),
+    LAYOUT(stanli_sample_opts, num_threads),
+    LAYOUT(stanli_sample_opts, resume_in),
+    LAYOUT(stanli_sample_opts, resume_in_len),
+    LAYOUT(stanli_sample_opts, resume_out),
+    LAYOUT(stanli_sample_report, warmup_seconds),
+    LAYOUT(stanli_sample_report, sampling_seconds),
+    LAYOUT(stanli_sample_report, n_divergent),
+    LAYOUT(stanli_sample_report, n_max_treedepth),
+    LAYOUT(stanli_metric_opts, metric),
+    LAYOUT(stanli_metric_opts, inv_metric),
+    LAYOUT(stanli_metric_opts, step_size),
+    LAYOUT(stanli_metric_opts, adapt_engaged),
+    LAYOUT(stanli_metric_opts, adapt_metric),
+    LAYOUT(stanli_metric_opts, adapted_step_size),
+    LAYOUT(stanli_metric_opts, adapted_inv_metric),
+    LAYOUT(stanli_optimize_opts, seed),
+    LAYOUT(stanli_optimize_opts, chain_id),
+    LAYOUT(stanli_optimize_opts, iter),
+    LAYOUT(stanli_optimize_opts, jacobian),
+    LAYOUT(stanli_optimize_opts, init_alpha),
+    LAYOUT(stanli_optimize_opts, tol_obj),
+    LAYOUT(stanli_optimize_opts, tol_rel_obj),
+    LAYOUT(stanli_optimize_opts, tol_grad),
+    LAYOUT(stanli_optimize_opts, tol_rel_grad),
+    LAYOUT(stanli_optimize_opts, tol_param),
+    LAYOUT(stanli_optimize_opts, history_size),
+    LAYOUT(stanli_optimize_opts, init_radius),
+    LAYOUT(stanli_optimize_opts, init),
+    LAYOUT(stanli_fixed_param_opts, seed),
+    LAYOUT(stanli_fixed_param_opts, chains),
+    LAYOUT(stanli_fixed_param_opts, chain_id),
+    LAYOUT(stanli_fixed_param_opts, samples),
+    LAYOUT(stanli_fixed_param_opts, thin),
+    LAYOUT(stanli_fixed_param_opts, init_radius),
+    LAYOUT(stanli_fixed_param_opts, inits),
+    LAYOUT(stanli_fixed_param_opts, refresh),
+    LAYOUT(stanli_laplace_opts, seed),
+    LAYOUT(stanli_laplace_opts, draws),
+    LAYOUT(stanli_laplace_opts, jacobian),
+    LAYOUT(stanli_laplace_opts, calculate_lp),
+    LAYOUT(stanli_laplace_opts, refresh),
+    LAYOUT(stanli_pathfinder_opts, seed),
+    LAYOUT(stanli_pathfinder_opts, chain_id),
+    LAYOUT(stanli_pathfinder_opts, num_paths),
+    LAYOUT(stanli_pathfinder_opts, num_draws),
+    LAYOUT(stanli_pathfinder_opts, num_psis_draws),
+    LAYOUT(stanli_pathfinder_opts, num_elbo_draws),
+    LAYOUT(stanli_pathfinder_opts, max_lbfgs_iters),
+    LAYOUT(stanli_pathfinder_opts, history_size),
+    LAYOUT(stanli_pathfinder_opts, init_alpha),
+    LAYOUT(stanli_pathfinder_opts, tol_obj),
+    LAYOUT(stanli_pathfinder_opts, tol_rel_obj),
+    LAYOUT(stanli_pathfinder_opts, tol_grad),
+    LAYOUT(stanli_pathfinder_opts, tol_rel_grad),
+    LAYOUT(stanli_pathfinder_opts, tol_param),
+    LAYOUT(stanli_pathfinder_opts, init_radius),
+    LAYOUT(stanli_pathfinder_opts, inits),
+    LAYOUT(stanli_pathfinder_opts, psis_resample),
+    LAYOUT(stanli_pathfinder_opts, calculate_lp),
+    LAYOUT(stanli_pathfinder_opts, refresh),
+    LAYOUT(stanli_variational_opts, seed),
+    LAYOUT(stanli_variational_opts, chain_id),
+    LAYOUT(stanli_variational_opts, algorithm),
+    LAYOUT(stanli_variational_opts, iter),
+    LAYOUT(stanli_variational_opts, grad_samples),
+    LAYOUT(stanli_variational_opts, elbo_samples),
+    LAYOUT(stanli_variational_opts, eta),
+    LAYOUT(stanli_variational_opts, adapt_engaged),
+    LAYOUT(stanli_variational_opts, adapt_iter),
+    LAYOUT(stanli_variational_opts, tol_rel_obj),
+    LAYOUT(stanli_variational_opts, eval_elbo),
+    LAYOUT(stanli_variational_opts, output_samples),
+    LAYOUT(stanli_variational_opts, init_radius),
+    LAYOUT(stanli_variational_opts, init),
+    LAYOUT(stanli_model_opts, seed),
+    LAYOUT(stanli_model_opts, threads_per_chain),
+    LAYOUT(stanli_model_opts, fast_math),
+    LAYOUT(stanli_model_opts, allow_interpreter),
+};
+#undef LAYOUT
+
+static const char* layout_mismatch(void) {
+  const field_layout* runtime = p_field_layouts();
+  const int64_t n = p_n_field_layouts();
+  for (size_t i = 0; i < sizeof k_layouts / sizeof k_layouts[0]; ++i) {
+    const field_layout* ours = &k_layouts[i];
+    const char* type = ours->type;
+    int found = 0;
+    for (int64_t j = 0; j < n && !found; ++j) {
+      if (strcmp(runtime[j].type, type) != 0 ||
+          strcmp(runtime[j].field, ours->field) != 0)
+        continue;
+      found = runtime[j].offset == ours->offset &&
+              runtime[j].size == ours->size &&
+              runtime[j].type_size == ours->type_size;
+    }
+    if (!found) return type;
+  }
+  return NULL;
+}
+
 SEXP stanli_bridge_load(SEXP path) {
   if (g_lib != NULL) return mkString("");
   g_lib = dl_open(CHAR(STRING_ELT(path, 0)));
@@ -304,12 +452,45 @@ SEXP stanli_bridge_load(SEXP path) {
     g_lib = NULL;
     return mkString(msg);
   }
+  BIND("stanli_n_field_layouts", p_n_field_layouts);
+  BIND("stanli_field_layouts", p_field_layouts);
+  {
+    const char* bad = layout_mismatch();
+    if (bad != NULL) {
+      char msg[512];
+      snprintf(msg, sizeof msg,
+               "this stanli runtime lays out %s differently from the R "
+               "package's copy. Run stanli_install(overwrite = TRUE) to fetch "
+               "a matching runtime, or update the package.",
+               bad);
+      dl_close(g_lib);
+      g_lib = NULL;
+      return mkString(msg);
+    }
+  }
 
   BIND("stanli_model_new_with_opts", p_model_new_with_opts);
   BIND("stanli_model_new_from_stan_named", p_model_new_from_stan_named);
-  BIND("stanli_stan_to_mir_named", p_stan_to_mir_named);
+  BIND("stanli_compile_stan", p_compile_stan);
+  BIND("stanli_compilation_mir", p_compilation_mir);
+  BIND("stanli_compilation_error", p_compilation_error);
+  BIND("stanli_compilation_n_messages", p_compilation_n_messages);
+  BIND("stanli_compilation_message_kind", p_compilation_message_kind);
+  BIND("stanli_compilation_message", p_compilation_message);
+  BIND("stanli_compilation_free", p_compilation_free);
+  BIND("stanli_model_n_compiler_messages", p_model_n_compiler_messages);
+  BIND("stanli_model_compiler_message_kind", p_model_compiler_message_kind);
+  BIND("stanli_model_compiler_message", p_model_compiler_message);
+  BIND("stanli_n_variables", p_n_variables);
+  BIND("stanli_variable_name", p_variable_name);
+  BIND("stanli_variable_n_dims", p_variable_n_dims);
+  BIND("stanli_variable_dim", p_variable_dim);
+  BIND("stanli_n_sampler_columns", p_n_sampler_columns);
+  BIND("stanli_n_summary_stats", p_n_summary_stats);
+  BIND("stanli_summary_stat_name", p_summary_stat_name);
   BIND("stanli_reduce_sum_count", p_reduce_sum_count);
-  BIND("stanli_reduce_sum_fallbacks", p_reduce_sum_fallbacks);
+  BIND("stanli_n_reduce_sum_fallbacks", p_n_reduce_sum_fallbacks);
+  BIND("stanli_reduce_sum_fallback", p_reduce_sum_fallback);
   BIND("stanli_model_free", p_model_free);
   BIND("stanli_has_embedded_stanc", p_has_embedded_stanc);
   BIND("stanli_string_free", p_string_free);
@@ -319,6 +500,7 @@ SEXP stanli_bridge_load(SEXP path) {
   BIND("stanli_thread_safe", p_thread_safe);
   BIND("stanli_resume_size", p_resume_size);
   BIND("stanli_build_id", p_build_id);
+  BIND("stanli_bridgestan_data", p_bridgestan_data);
   BIND("stanli_n_unconstrained", p_n_unconstrained);
   BIND("stanli_grad", p_grad);
   BIND("stanli_hessian", p_hessian);
@@ -412,7 +594,8 @@ static void flush_messages_cb(void* unused) {
 }
 
 SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
-                        SEXP threads_per_chain, SEXP fast_math, SEXP file) {
+                        SEXP threads_per_chain, SEXP fast_math,
+                        SEXP allow_interpreter, SEXP file) {
   require_loaded();
   char err[8192];
   err[0] = '\0';
@@ -422,7 +605,9 @@ SEXP stanli_r_model_new(SEXP code, SEXP data_json, SEXP is_mir, SEXP seed,
   const uint32_t construction_seed = (uint32_t)asReal(seed);
   const int threads = asInteger(threads_per_chain);
   if (threads < 1) error("threads_per_chain must be positive");
-  model_opts opts = {construction_seed, threads, asLogical(fast_math) == TRUE};
+  stanli_model_opts opts = {construction_seed, threads,
+                            asLogical(fast_math) == TRUE,
+                            asLogical(allow_interpreter) == TRUE};
   const char* label = file_label(file);
   if (asLogical(is_mir))
     m = p_model_new_with_opts(text, data, &opts, err, sizeof err);
@@ -442,7 +627,71 @@ SEXP stanli_r_reduce_sum_count(SEXP m) {
 }
 SEXP stanli_r_reduce_sum_fallbacks(SEXP m) {
   require_loaded();
-  return mkString(p_reduce_sum_fallbacks(model_ptr(m)));
+  const void* mm = model_ptr(m);
+  const int64_t n = p_n_reduce_sum_fallbacks(mm);
+  SEXP out = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
+  for (int64_t i = 0; i < n; ++i)
+    SET_STRING_ELT(out, (R_xlen_t)i,
+                   mkCharCE(p_reduce_sum_fallback(mm, i), CE_UTF8));
+  UNPROTECT(1);
+  return out;
+}
+
+/* list(kind = character, text = character): kind is "warning" or
+ * "o1_fallback" (stanli_compiler_message_kind). */
+static SEXP compiler_messages(int64_t n, int (*kind)(const void*, int64_t),
+                              const char* (*text)(const void*, int64_t),
+                              const void* from) {
+  SEXP kinds = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
+  SEXP texts = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
+  for (int64_t i = 0; i < n; ++i) {
+    SET_STRING_ELT(kinds, (R_xlen_t)i,
+                   mkChar(kind(from, i) == 1 ? "o1_fallback" : "warning"));
+    SET_STRING_ELT(texts, (R_xlen_t)i, mkCharCE(text(from, i), CE_UTF8));
+  }
+  const char* names[] = {"kind", "text", ""};
+  SEXP out = PROTECT(mkNamed(VECSXP, names));
+  SET_VECTOR_ELT(out, 0, kinds);
+  SET_VECTOR_ELT(out, 1, texts);
+  UNPROTECT(3);
+  return out;
+}
+
+SEXP stanli_r_compiler_messages(SEXP m) {
+  require_loaded();
+  const void* mm = model_ptr(m);
+  return compiler_messages(p_model_n_compiler_messages(mm),
+                           p_model_compiler_message_kind,
+                           p_model_compiler_message, mm);
+}
+
+/* list(name = character, dims = list of integer vectors): the constrained
+ * parameters when `parameters` is TRUE, else the columns
+ * stanli_r_column_names reports. */
+SEXP stanli_r_variables(SEXP m, SEXP parameters) {
+  require_loaded();
+  const void* mm = model_ptr(m);
+  const int set =
+      asLogical(parameters) != TRUE && p_wa_n_columns(mm) > 0 ? 1 : 0;
+  const int64_t n = p_n_variables(mm, set);
+  SEXP names = PROTECT(allocVector(STRSXP, (R_xlen_t)n));
+  SEXP dims = PROTECT(allocVector(VECSXP, (R_xlen_t)n));
+  for (int64_t i = 0; i < n; ++i) {
+    SET_STRING_ELT(names, (R_xlen_t)i,
+                   mkCharCE(p_variable_name(mm, set, i), CE_UTF8));
+    const int64_t nd = p_variable_n_dims(mm, set, i);
+    SEXP d = PROTECT(allocVector(INTSXP, (R_xlen_t)nd));
+    for (int64_t k = 0; k < nd; ++k)
+      INTEGER(d)[k] = (int)p_variable_dim(mm, set, i, k);
+    SET_VECTOR_ELT(dims, (R_xlen_t)i, d);
+    UNPROTECT(1);
+  }
+  const char* fields[] = {"name", "dims", ""};
+  SEXP out = PROTECT(mkNamed(VECSXP, fields));
+  SET_VECTOR_ELT(out, 0, names);
+  SET_VECTOR_ELT(out, 1, dims);
+  UNPROTECT(3);
+  return out;
 }
 
 SEXP stanli_r_has_embedded_stanc(void) {
@@ -457,25 +706,27 @@ SEXP stanli_r_stan_to_mir(SEXP code, SEXP include_paths, SEXP fast_math,
   const char** paths = (const char**)R_alloc(count, sizeof(char*));
   for (size_t i = 0; i < count; ++i)
     paths[i] = Rf_translateCharUTF8(STRING_ELT(include_paths, i));
-  char err[8192] = {0};
-  char* compiler_warnings = NULL;
-  char* mir = p_stan_to_mir_named(
-      Rf_translateCharUTF8(STRING_ELT(code, 0)), file_label(file), paths, count,
-      asLogical(fast_math) == TRUE, &compiler_warnings, err, sizeof err);
+  void* c = p_compile_stan(Rf_translateCharUTF8(STRING_ELT(code, 0)),
+                           file_label(file), paths, count,
+                           asLogical(fast_math) == TRUE);
   flush_messages();
+  if (c == NULL) error("stanli: out of memory compiling Stan source");
+  const char* mir = p_compilation_mir(c);
   if (mir == NULL) {
-    if (compiler_warnings != NULL) p_string_free(compiler_warnings);
-    error("%s", err[0] ? err : "Stan source compilation failed");
+    const char* e = p_compilation_error(c);
+    char err[8192];
+    snprintf(err, sizeof err, "%s",
+             e && e[0] ? e : "Stan source compilation failed");
+    p_compilation_free(c);
+    error("%s", err);
   }
   SEXP result = PROTECT(ScalarString(mkCharCE(mir, CE_UTF8)));
-  p_string_free(mir);
-  if (compiler_warnings != NULL) {
-    SEXP text = PROTECT(ScalarString(mkCharCE(compiler_warnings, CE_UTF8)));
-    p_string_free(compiler_warnings);
-    setAttrib(result, install("warnings"), text);
-    UNPROTECT(1);
-  }
-  UNPROTECT(1);
+  SEXP messages = PROTECT(compiler_messages(p_compilation_n_messages(c),
+                                            p_compilation_message_kind,
+                                            p_compilation_message, c));
+  p_compilation_free(c);
+  setAttrib(result, install("messages"), messages);
+  UNPROTECT(2);
   return result;
 }
 SEXP stanli_r_exact_lp(void) {
@@ -489,6 +740,19 @@ SEXP stanli_r_thread_safe(void) {
 SEXP stanli_r_build_id(void) {
   require_loaded();
   return ScalarString(mkCharCE(p_build_id(), CE_UTF8));
+}
+SEXP stanli_r_bridgestan_data(SEXP data, SEXP mir, SEXP name) {
+  require_loaded();
+  char err[8192] = {0};
+  char* payload = p_bridgestan_data(Rf_translateCharUTF8(STRING_ELT(data, 0)),
+                                    Rf_translateCharUTF8(STRING_ELT(mir, 0)),
+                                    Rf_translateCharUTF8(STRING_ELT(name, 0)),
+                                    err, sizeof err);
+  if (payload == NULL) error("%s", err[0] ? err : "bridgestan_data failed");
+  SEXP result = PROTECT(ScalarString(mkCharCE(payload, CE_UTF8)));
+  p_string_free(payload);
+  UNPROTECT(1);
+  return result;
 }
 
 SEXP stanli_r_n_unconstrained(SEXP m) {
@@ -857,9 +1121,12 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
       refresh_rate > 0 ? sample_progress : NULL, &o.max_depth, sample_poll,
       NULL, &interrupted, reports, err, sizeof err);
   flush_messages();
+  if (failed < 0) {
+    UNPROTECT(5);
+    error("%s", err[0] ? err : "stanli: sampling could not start");
+  }
   if (failed) {
     UNPROTECT(5);
-    if (err[0] && strncmp(err, "chain ", 6) != 0) error("%s", err);
     error("%d of %d chains failed; first: %s", failed, (int)nchain,
           err[0] ? err : "(no message)");
   }
@@ -927,8 +1194,9 @@ SEXP stanli_r_sample(SEXP m, SEXP optlist, SEXP inits, SEXP refresh,
 
 SEXP stanli_r_sampler_columns(void) {
   require_loaded();
-  SEXP out = PROTECT(allocVector(STRSXP, 7));
-  for (int i = 0; i < 7; ++i)
+  const int n = p_n_sampler_columns();
+  SEXP out = PROTECT(allocVector(STRSXP, n));
+  for (int i = 0; i < n; ++i)
     SET_STRING_ELT(out, i, mkChar(p_sampler_column_name(i)));
   UNPROTECT(1);
   return out;
@@ -939,12 +1207,19 @@ SEXP stanli_r_summary(SEXP draws, SEXP dims) {
   const int64_t nchain = INTEGER(dims)[0];
   const int64_t ndraw = INTEGER(dims)[1];
   const int64_t ncol = INTEGER(dims)[2];
-  SEXP out = PROTECT(allocVector(REALSXP, (R_xlen_t)(ncol * 10)));
+  const int n_stats = p_n_summary_stats();
+  SEXP out = PROTECT(allocMatrix(REALSXP, n_stats, (int)ncol));
   if (p_summary_stats(REAL(draws), nchain, ndraw, ncol, REAL(out)) != 0) {
     UNPROTECT(1);
     error("stanli: summary failed");
   }
-  UNPROTECT(1);
+  SEXP names = PROTECT(allocVector(STRSXP, n_stats));
+  for (int i = 0; i < n_stats; ++i)
+    SET_STRING_ELT(names, i, mkChar(p_summary_stat_name(i)));
+  SEXP dimnames = PROTECT(allocVector(VECSXP, 2));
+  SET_VECTOR_ELT(dimnames, 0, names);
+  setAttrib(out, R_DimNamesSymbol, dimnames);
+  UNPROTECT(3);
   return out;
 }
 
@@ -1007,8 +1282,7 @@ SEXP stanli_r_optimize(SEXP m, SEXP optlist, SEXP init) {
 
 /* What a run said. The runtime calls back on the thread that entered it, so
  * printing is safe. Information is printed when the caller asked for
- * progress; warnings, errors and Stan's "Informational Message" lines (how
- * ADVI says it ran out of iterations) are kept for an R warning. */
+ * progress; warnings and errors are kept for an R warning. */
 typedef struct {
   int verbose;
   size_t used;
@@ -1027,8 +1301,7 @@ static void log_keep(run_log* log, const char* text) {
 static void run_logger(int32_t level, const char* text, void* user) {
   run_log* log = (run_log*)user;
   flush_messages();
-  if (level >= 1 || strstr(text, "Informational Message") != NULL)
-    log_keep(log, text);
+  if (level >= 1) log_keep(log, text);
   if (log->verbose && level == 0) {
     Rprintf("%s\n", text);
     R_FlushConsole();

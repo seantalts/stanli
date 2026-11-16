@@ -1819,6 +1819,8 @@ void Lowering::lower_simple_stmt(const mir::Stmt& s) {
         using Naming = CompiledModel::ParamView::Naming;
         const mir::Expr& t = s.fn_args[0];
         CompiledModel::ParamView pv{name, v.slot, g.slots[v.slot].len};
+        pv.variable = owner->name;
+        pv.index.assign(ixs.rbegin(), ixs.rend());
         if (mir::language_scalar(t) ||
             mir::is_unsized(t, mir::UnsizedLeaf::Complex)) {
           pv.naming = Naming::Scalar;

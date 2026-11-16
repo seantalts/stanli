@@ -11,6 +11,7 @@
 #include <stanli/data.hpp>
 #include <stanli/init_interp.hpp>
 #include <stanli/graph.hpp>
+#include <stanli/message.hpp>
 #include <stanli/mir.hpp>
 
 #include <optional>
@@ -28,6 +29,16 @@ class WaInterp;
 
 struct CompileError : std::runtime_error {
   explicit CompileError(const std::string& what) : std::runtime_error(what) {}
+};
+
+// Stan Math rejecting the model's values, found while compiling: an index
+// out of range or a size mismatch that CmdStan reports at run time. `error`
+// is the class Stan Math's check throws. A CompileError, so every fallback
+// that catches one still does.
+struct StanMathCompileError : CompileError {
+  StanMathCompileError(MessageError error, const std::string& what)
+      : CompileError(what), error(error) {}
+  MessageError error;
 };
 
 struct CompiledModel {
@@ -53,6 +64,11 @@ struct CompiledModel {
     // already peeled to one emitted value and leave this empty.
     std::vector<int64_t> dims;
     bool matrix_storage = false;  // the final two dims form a matrix
+    // A write-array view of one element of an array: the declared variable
+    // and the element's 1-based index path, outermost first. Empty when the
+    // view is a whole variable.
+    std::string variable;
+    std::vector<int64_t> index;
     // Empty means identity. Nonidentity permutations are prepared once while
     // compiling the concrete model, so serialization performs one indexed
     // copy per value with no per-draw division or allocation.
@@ -86,27 +102,30 @@ struct CompiledModel {
       return storage_order.empty() ? serial : storage_order[(size_t)serial];
     }
 
+    // The declared dimensions behind this view's columns, first index
+    // fastest: none for a scalar.
+    std::vector<int64_t> shape() const {
+      if (!dims.empty()) return dims;
+      if (naming == Naming::Matrix && rows > 0) return {rows, len / rows};
+      if (naming == Naming::Scalar || (naming == Naming::Auto && len == 1))
+        return {};
+      return {len};
+    }
+
     void append_names(std::vector<std::string>& out) const {
-      if (!dims.empty()) {
-        for (int64_t f = 0; f < len; ++f) {
-          std::string column = name;
-          int64_t q = f;
-          for (int64_t d : dims) {
-            column += "." + std::to_string(q % d + 1);
-            q /= d;
-          }
-          out.push_back(std::move(column));
-        }
-      } else if (naming == Naming::Matrix && rows > 0) {
-        for (int64_t f = 0; f < len; ++f)
-          out.push_back(name + "." + std::to_string(f % rows + 1) + "." +
-                        std::to_string(f / rows + 1));
-      } else if (naming == Naming::Scalar ||
-                 (naming == Naming::Auto && len == 1)) {
+      const std::vector<int64_t> s = shape();
+      if (s.empty()) {
         out.push_back(name);
-      } else {
-        for (int64_t i = 0; i < len; ++i)
-          out.push_back(name + "." + std::to_string(i + 1));
+        return;
+      }
+      for (int64_t f = 0; f < len; ++f) {
+        std::string column = name;
+        int64_t q = f;
+        for (int64_t d : s) {
+          column += "." + std::to_string(q % d + 1);
+          q /= d;
+        }
+        out.push_back(std::move(column));
       }
     }
   };
@@ -243,6 +262,11 @@ struct CompileOptions {
   // compiled path (interpreter_fallbacks). The environment variable
   // STANLI_NO_INTERPRETER set to anything but 0 does the same.
   bool allow_interpreter = true;
+  // Lowering stage dumps: a directory, or "-" for stdout. Empty leaves the
+  // choice to STANLI_DUMP_PASSES. dump_stages narrows the stages as
+  // STANLI_DUMP_STAGES does.
+  std::string dump_passes;
+  std::string dump_stages;
 };
 CompiledModel compile_model(const std::string& mir_text, const DataMap& data,
                             unsigned seed = 1);

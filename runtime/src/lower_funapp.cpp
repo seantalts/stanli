@@ -1355,7 +1355,7 @@ std::optional<Lowering::Val> Lowering::lower_density_fn(
       emit_error(MessageError::InvalidArgument, e.name + ": " + error.what());
       return constant(0.0);
     } catch (const std::exception& error) {
-      fail(builtin_error_message(e.name, error), e.raw);
+      fail_builtin(e.name, error, e.raw);
     }
     if (plan.empty_result) return constant(0.0);
     if (extent >= 0) {
@@ -1502,7 +1502,7 @@ std::optional<Lowering::Val> Lowering::lower_eltwise_fn(
         return with_layout(emit_value(OP_MUL, {a, b}, len),
                            elementwise_layout({a, b}));
       }
-      fail(builtin_error_message(e.name, error), e.raw);
+      fail_builtin(e.name, error, e.raw);
     }
     switch (map.kind) {
       case BuiltinProductMap::Kind::ScalarScale: {

@@ -271,7 +271,9 @@ The tools you will reach for most:
   MIR is the stage `mir`. Sequence numbers still count the stages the filter
   dropped, so `05-log_prob-constfold.txt` is `05` under any selection.
   `stanli_check` takes the same two as `--dump-passes=<list>` and
-  `--dump-dir=<dir>`; without a directory it dumps to stdout.
+  `--dump-dir=<dir>`; without a directory it dumps to stdout. It hands them
+  to the runtime as `CompileOptions::dump_passes` and `dump_stages`, which a
+  C++ caller can set directly, and refuses them with `--paths` or `--cross`.
 
   ```
   ./build/stanli_check model.stan data.json --dump-passes=log_prob:reroll

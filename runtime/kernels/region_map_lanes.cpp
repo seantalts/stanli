@@ -2527,11 +2527,11 @@ void region_map_lanes_backward(const RegionMapProg& p, KernelCtx& ctx,
         const double* row = adj_tile + (size_t)cell_slot[cell] * kTile;
         for (int l = 0; l < kTile; ++l)
           if (row[l] != 0.0)
-            throw std::logic_error("region_map_check_clean: adjoint cell " +
-                                   std::to_string(cell) + " holds " +
-                                   std::to_string(row[l]) +
-                                   " after the sweep of iteration " +
-                                   std::to_string(p.lo + first + l));
+            throw RegionMapUncleanSweep(
+                "region_map_check_clean: adjoint cell " + std::to_string(cell) +
+                " holds " + std::to_string(row[l]) +
+                " after the sweep of iteration " +
+                std::to_string(p.lo + first + l));
       }
     }
   }

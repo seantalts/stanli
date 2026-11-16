@@ -12,7 +12,8 @@ stanli_model(
   seed = 1,
   threads_per_chain = 1,
   include_paths = NULL,
-  fast_math = FALSE
+  fast_math = FALSE,
+  allow_interpreter = TRUE
 )
 }
 \arguments{
@@ -53,15 +54,21 @@ compiled with fused multiply-add rewriting and the runtime may use faster,
 less exactly rounded evaluation, so results can differ from the default
 in the last bits. Defaults to `FALSE`. With `mir`, use MIR compiled in
 fast mode.}
+
+\item{allow_interpreter}{`FALSE` makes it an error, naming the parts, when
+part of the model has no compiled path and would run through the much
+slower MIR interpreter. Defaults to `TRUE`.}
 }
 \value{
 An object of class `stanli_model` whose `columns` name every
   output the way the posterior package reads them, `theta[1,2]` for an
   indexed value. Warns, naming the part and the
   reason, when part of the model has no compiled path and runs through
-  the much slower MIR interpreter; with the environment variable
-  `STANLI_NO_INTERPRETER` set that is an error instead. Either message is
-  what to include in a bug report.
+  the much slower MIR interpreter; with `allow_interpreter = FALSE` (or the
+  environment variable `STANLI_NO_INTERPRETER` set) that is an error
+  instead. Either message is what to include in a bug report. When the
+  compiler skips O1 for a very large model, the warning has class
+  `stanli_o1_fallback`.
 }
 \description{
 Compile a Stan model

@@ -13,7 +13,6 @@ import io
 import json
 import math
 import pathlib
-import re
 import subprocess
 import sys
 import tempfile
@@ -79,12 +78,17 @@ def sample_csv(text, names, samples):
     return result
 
 
-def parse_timings(stderr):
-    match = re.search(r"stanli_run: timings prep_s=(\S+) sample_s=(\S+) output_s=(\S+)", stderr)
-    if not match:
-        raise ValueError("Missing phase timing output")
-    result = dict(zip(("prep_s", "sample_s", "output_s"), map(float, match.groups())))
-    if not all(math.isfinite(x) and x >= 0 for x in result.values()):
+def read_timings(path):
+    """The phase seconds stanli_run --timings-json wrote to `path`."""
+    try:
+        result = json.loads(pathlib.Path(path).read_text())
+    except (OSError, ValueError) as error:
+        raise ValueError(f"Missing phase timing output: {error}") from error
+    keys = ("prep_s", "sample_s", "output_s")
+    if not isinstance(result, dict) or sorted(result) != sorted(keys):
+        raise ValueError("Phase timings need prep_s, sample_s and output_s")
+    if not all(isinstance(result[k], (int, float)) and math.isfinite(result[k])
+               and result[k] >= 0 for k in keys):
         raise ValueError("Invalid phase timing")
     return result
 

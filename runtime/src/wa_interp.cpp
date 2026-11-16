@@ -465,6 +465,8 @@ bool WaInterp::write_param(MirInterp<double>& in, const mir::Stmt& s,
       name += "." + std::to_string(*it);
     using Naming = CompiledModel::ParamView::Naming;
     CompiledModel::ParamView pv{name, (int)row.size(), len};
+    pv.variable = owner->name;
+    pv.index.assign(ixs.rbegin(), ixs.rend());
     if (mir::language_scalar(v) ||
         mir::is_unsized(v, mir::UnsizedLeaf::Complex)) {
       pv.naming = Naming::Scalar;

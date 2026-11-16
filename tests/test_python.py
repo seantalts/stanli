@@ -6,6 +6,7 @@ Run against an installed wheel (CI does) or a local build:
     tools/build_wheel.sh && PYTHONPATH=python python3 tests/test_python.py
 """
 import base64
+import ctypes
 import concurrent.futures
 import contextlib
 import copy
@@ -1100,16 +1101,6 @@ def test_to_arviz_keeps_dims():
     assert fit.to_arviz().posterior["M"].shape == (2, 50, 2, 3)
 
 
-def test_group_variables_incomplete_and_non_numeric():
-    variables = stanli._group_variables(["x[1]", "x[3]"])
-    assert set(variables) == {"x[1]", "x[3]"}
-    assert variables["x[1]"][0] == () and variables["x[3]"][0] == ()
-
-    variables = stanli._group_variables(["z.real"])
-    assert set(variables) == {"z.real"}
-    assert variables["z.real"][0] == ()
-
-
 def test_thin_and_save_warmup_change_the_row_count():
     m = _es()
     assert m.sample(chains=1, seed=6, warmup=100, samples=100,
@@ -2157,6 +2148,74 @@ def test_construction_errors_raise_runtime_error():
     with mock.patch.dict(os.environ, {"STANLI_NO_INTERPRETER": "1"}):
         _, error, _ = _build_and_warn(fallback, WA_FALLBACK_DATA)
     assert error is not None and "STANLI_NO_INTERPRETER" in error, error
+
+
+def test_allow_interpreter_false_refuses_fallback_models():
+    fallback = (FIXTURES / "wapar_wa_fallback.stan").read_text()
+    try:
+        stanli.Model(stan_code=fallback, data=WA_FALLBACK_DATA,
+                     allow_interpreter=False)
+    except RuntimeError as e:
+        assert "no compiled path" in str(e), str(e)
+    else:
+        raise AssertionError("allow_interpreter=False accepted a fallback")
+    clean = "parameters { real x; } model { x ~ normal(0, 1); }"
+    stanli.Model(stan_code=clean, allow_interpreter=False)
+
+
+def _o1_budget_source():
+    body = "s += 1;\n" * 2100
+    loops = "".join(f"for (i{d} in 1:1) {{\n" for d in range(9))
+    return ("parameters { real x; }\nmodel {\nreal s = 0;\n" + loops + body
+            + "}\n" * 9 + "x ~ normal(s, 1);\n}\n")
+
+
+def test_o1_fallback_is_its_own_warning_category():
+    assert issubclass(stanli.O1FallbackWarning, RuntimeWarning)
+    assert "O1FallbackWarning" in stanli.__all__
+    # The subprocess compiler reports the notice on stderr, as text.
+    if not stanli._lib.stanli_has_embedded_stanc():
+        return
+    source = _o1_budget_source()
+    for build in (lambda: stanli.Model(stan_code=source),
+                  lambda: stanli.stan_to_mir(source)):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            build()
+        o1 = [w for w in caught
+              if issubclass(w.category, stanli.O1FallbackWarning)]
+        assert len(o1) == 1 and "skipped O1" in str(o1[0].message), \
+            [str(w.message) for w in caught]
+
+
+def test_struct_mirrors_are_checked_against_the_runtime():
+    stanli._check_layouts(stanli._lib)
+
+    class Wrong(ctypes.Structure):
+        _fields_ = [("seed", ctypes.c_uint32), ("fast_math", ctypes.c_int)]
+
+    try:
+        stanli._check_layouts(stanli._lib, {"stanli_model_opts": Wrong})
+    except ImportError as e:
+        assert "stanli_model_opts" in str(e), str(e)
+    else:
+        raise AssertionError("a wrong struct mirror was accepted")
+
+
+def test_variables_come_from_the_runtime():
+    code = """
+    parameters { real mu; vector[2] v; }
+    transformed parameters {
+      array[2] vector[3] tp;
+      for (i in 1:2) tp[i] = rep_vector(mu, 3);
+    }
+    model { mu ~ normal(0, 1); v ~ normal(0, 1); }
+    generated quantities { matrix[2, 3] m = rep_matrix(mu, 2, 3); real s = 1; }
+    """
+    fit = stanli.Model(stan_code=code).sample(chains=1, warmup=20, samples=5)
+    assert fit.variables == {"mu": (), "v": (2,), "tp": (2, 3),
+                             "m": (2, 3), "s": ()}, fit.variables
+    assert np.array_equal(fit.draws("tp")[:, :, 1, 2], fit.draws("tp[2,3]"))
 
 
 def test_models_construct_concurrently_from_python_threads():

@@ -8,6 +8,10 @@
 // build: tools/wasm_check.sh adapts the argv.
 //
 //   node tools/wasm_check.cjs model.stan data.json [--point N]
+//                             [--status-json PATH]
+//
+// --status-json writes the records tools/check_status.py describes, as far
+// as the C ABI reaches: no write_array truncation reason and no error kind.
 //
 // The WASM C ABI has no write_array entry point yet, so --wa-values
 // reports failure; replay wa-carrying models with --no-wa.
@@ -19,10 +23,19 @@ const path = require("path");
 const repo = path.resolve(__dirname, "..");
 const args = process.argv.slice(2);
 const model = args[0], dataFile = args[1];
-let point = 0, waValues = false;
+let point = 0, waValues = false, statusPath = null;
 for (let i = 2; i < args.length; ++i) {
   if (args[i] === "--point") point = parseInt(args[++i], 10);
   else if (args[i] === "--wa-values") waValues = true;
+  else if (args[i] === "--status-json") statusPath = args[++i];
+}
+if (statusPath) fs.writeFileSync(statusPath, "");
+function status(record) {
+  if (statusPath) fs.appendFileSync(statusPath, JSON.stringify(record) + "\n");
+}
+function compileFailed(stage, message) {
+  status({ record: "compile", ok: false, stage, error: "runtime_error",
+           message });
 }
 
 // Same deterministic points as stanli_check.cpp / ref_driver.cpp.
@@ -50,6 +63,7 @@ try {
                      ["--O1", "--debug-optimized-mir", model],
                      { maxBuffer: 1 << 28, encoding: "utf8" });
 } catch (e) {
+  compileFailed("stanc", String(e.message));
   console.log("COMPILE_FAIL stanc: " + String(e.message).split("\n")[0]);
   process.exit(1);
 }
@@ -67,18 +81,29 @@ createStanli().then((M) => {
   const errPtr = M._malloc(errLen);
   const m = M._stanli_model_new_with_opts(mirPtr, dataPtr, 0, errPtr, errLen);
   if (!m) {
+    compileFailed("model", M.UTF8ToString(errPtr));
     console.log("COMPILE_FAIL " +
                 M.UTF8ToString(errPtr).split("\n")[0]);
     process.exit(1);
   }
   const note = M.UTF8ToString(M._stanli_warnings(m));
-  if (note) console.error("INTERP " + note.replace(/\n/g, " "));
+  if (note) console.error(note);
+  const fallbacks = [];
+  for (let i = 0; i < Number(M._stanli_n_interpreter_fallbacks(m)); ++i)
+    fallbacks.push(M.UTF8ToString(M._stanli_interpreter_fallback(m, BigInt(i))));
+  const nColumns = Number(M._stanli_wa_n_columns(m));
+  status({ record: "compile", ok: true, interpreter_fallbacks: fallbacks,
+           write_array: nColumns > 0
+               ? { section: "graph", columns: nColumns, truncated: null }
+               : { section: "none" } });
   const n = Number(M._stanli_n_unconstrained(m));
   const qPtr = M._malloc(8 * n);
   const lpPtr = M._malloc(8);
   const gradPtr = M._malloc(8 * n);
   for (let i = 0; i < n; ++i) M.HEAPF64[qPtr / 8 + i] = evalPoint(i, point);
   if (M._stanli_grad(m, qPtr, lpPtr, gradPtr) !== 0) {
+    status({ record: "point", point, ok: false, error: "runtime_error",
+             message: "evaluation threw" });
     console.log("EVAL_FAIL evaluation threw");
     process.exit(1);
   }
@@ -97,6 +122,7 @@ createStanli().then((M) => {
     console.error("wasm_check: nonfinite lp=" + (Number.isFinite(lp) ? 0 : 1) +
                   " gradients=" + nBad);
   console.log(parts.join(" "));
+  status({ record: "point", point, ok: true });
   if (waValues) {
     const nWa = Number(M._stanli_wa_n_columns(m));
     if (nWa <= 0) {

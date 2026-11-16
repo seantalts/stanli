@@ -13,9 +13,10 @@
 #include <caml/mlvalues.h>
 #include <caml/threads.h>
 
-#include <cstdlib>
-#include <cstring>
+#include <stanli/stanc_result.hpp>
+
 #include <mutex>
+#include <string>
 
 namespace {
 
@@ -73,25 +74,40 @@ class RuntimeLock {
   ~RuntimeLock() { caml_release_runtime_system(); }
 };
 
-char* error_result(const char* message) {
-  const size_t n = std::strlen(message);
-  char* out = static_cast<char*>(std::malloc(n + 4));
-  if (out == nullptr) return nullptr;
-  std::memcpy(out, "ERR", 3);
-  std::memcpy(out + 3, message, n + 1);
+stanli::StancResult error_result(const char* message) {
+  stanli::StancResult out;
+  out.error = message;
+  return out;
+}
+
+std::string ocaml_string(value v) {
+  return std::string(String_val(v), caml_string_length(v));
+}
+
+// Field order follows embed_result in compiler/native/stanc_embed.ml.
+stanli::StancResult read_result(value res) {
+  stanli::StancResult out;
+  const value outcome = Field(res, 0);
+  if (Tag_val(outcome) == 0)
+    out.mir = ocaml_string(Field(outcome, 0));
+  else
+    out.error = ocaml_string(Field(outcome, 0));
+  const value warnings = Field(res, 1);
+  for (mlsize_t i = 0; i < Wosize_val(warnings); ++i)
+    out.warnings.push_back(ocaml_string(Field(warnings, i)));
+  const value o1_fallback = Field(res, 2);
+  if (Is_some(o1_fallback))
+    out.o1_fallback = ocaml_string(Some_val(o1_fallback));
   return out;
 }
 
 }  // namespace
 
-extern "C" {
-
 // Called with the OCaml runtime lock held. Root every allocation while building
 // the argument array: copying a later path may collect the earlier strings.
-static char* invoke_callback(const value* fn, const char* stan_code,
-                             const char* filename,
-                             const char* const* include_paths,
-                             size_t include_path_count, int flags) {
+static stanli::StancResult invoke_callback(
+    const value* fn, const char* stan_code, const char* filename,
+    const char* const* include_paths, size_t include_path_count, int flags) {
   CAMLparam0();
   CAMLlocal3(code, paths, name);
   CAMLlocal2(res, flag_value);
@@ -103,18 +119,18 @@ static char* invoke_callback(const value* fn, const char* stan_code,
   flag_value = Val_int(flags);
   value args[4] = {code, paths, name, flag_value};
   res = caml_callbackN_exn(*fn, 4, args);
-  char* out =
+  stanli::StancResult out =
       Is_exception_result(res)
           ? error_result("embedded stanc callback raised an OCaml exception")
-          : strdup(String_val(res));
-  CAMLreturnT(char*, out);
+          : read_result(res);
+  CAMLreturnT(stanli::StancResult, out);
 }
 
-// "W<n>:<n bytes of warnings>" then "OK<MIR>" or "ERR<message>"; caller frees
-// with stanli_stanc_free. A failure before the callback runs has no W prefix.
-char* stanli_stanc_compile(const char* stan_code, const char* filename,
-                           const char* const* include_paths,
-                           size_t include_path_count, int flags) {
+namespace stanli {
+
+StancResult embedded_stanc_compile(const char* stan_code, const char* filename,
+                                   const char* const* include_paths,
+                                   size_t include_path_count, int flags) {
   if (stan_code == nullptr) return error_result("Stan source is null");
 
   std::lock_guard<std::mutex> serial(compile_mutex);
@@ -136,6 +152,4 @@ char* stanli_stanc_compile(const char* stan_code, const char* filename,
                          include_path_count, flags);
 }
 
-void stanli_stanc_free(char* p) { std::free(p); }
-
-}  // extern "C"
+}  // namespace stanli
