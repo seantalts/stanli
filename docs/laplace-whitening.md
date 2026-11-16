@@ -59,9 +59,11 @@ parameters {
 ```
 
 or pass `latent=` (Python) or `latent =` (R) with parameter names. A list
-wins over annotations. stanc3 treats declaration annotations as experimental
-and prints a warning when it sees one. Annotations on transformed parameters
-and generated quantities have no effect. With no annotations and no list the
+wins over annotations. `@latent` comes from declaration annotations
+(stan-dev/stanc3#1439), which stanli's compiler includes but released stanc3
+(2.40, used by CmdStan) does not yet: CmdStan rejects a model that uses one.
+Pass `latent=` for a model that must also compile with CmdStan. Annotations on
+transformed parameters and generated quantities have no effect. With no annotations and no list the
 call fails with a message naming both fixes.
 
 ## Sampling
