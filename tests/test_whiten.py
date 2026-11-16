@@ -7,6 +7,7 @@ Needs numpy and scipy. Run against an installed wheel or a local build:
 """
 import pathlib
 import sys
+import warnings
 
 try:
     import numpy as np
@@ -258,6 +259,18 @@ def test_inner_survives_whitened_model():
     del fx
     lp_after, _ = inner.log_prob_grad(np.zeros(inner.n_unconstrained))
     assert np.isfinite(lp) and np.isfinite(lp_after)
+
+
+def test_whitening_says_once_that_it_is_experimental():
+    stanli._experimental_notified.clear()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        Fixture(es_model(), 15)
+        Fixture(es_model(), 16)
+    notes = [w for w in caught
+             if issubclass(w.category, stanli.ExperimentalWarning)]
+    assert len(notes) == 1, [str(w.message) for w in caught]
+    assert "Laplace whitening is experimental" in str(notes[0].message)
 
 
 def test_csc_arrays_equal_scipy_matrix():

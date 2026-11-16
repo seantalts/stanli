@@ -27,7 +27,8 @@ __all__ = ["Model", "Function", "Fit", "Summary", "OptimizeResult",
            "laplace_whiten", "LaplaceWhitenReport",
            "exact_lp", "thread_safe", "stan_to_mir", "build_id",
            "bridgestan_model", "bridgestan_data", "runtime_path",
-           "SAMPLER_COLUMNS", "O1FallbackWarning", "__version__"]
+           "SAMPLER_COLUMNS", "O1FallbackWarning", "ExperimentalWarning",
+           "__version__"]
 # The one place the version lives. setup.py and the release workflow both
 # read it from here.
 __version__ = "0.26.0"
@@ -52,6 +53,26 @@ class O1FallbackWarning(RuntimeWarning):
     Issued when the model's structure exceeds stanli's O1 budget. The model
     is correct but may be slower; ``STANLI_NO_O1_FALLBACK=1`` forces O1.
     """
+
+
+class ExperimentalWarning(UserWarning):
+    """An experimental feature was used. Issued once per process per feature."""
+
+
+_experimental_notified = set()
+
+
+def _experimental(feature, advice):
+    if feature in _experimental_notified:
+        return
+    _experimental_notified.add(feature)
+    warnings.warn(f"{feature} is experimental. {advice}",
+                  ExperimentalWarning, stacklevel=3)
+
+
+_LAPLACE_WHITENING_ADVICE = (
+    "A whitened fit can be wrong without any sampler warning, so compare it "
+    "against one fit with the default sampler. See docs/laplace-whitening.md.")
 
 
 class _OptimizeOpts(ctypes.Structure):
@@ -1589,6 +1610,7 @@ class Model:
         C.T = D + W W.T`` the whitened precision is ``P.T L (D + W W.T) L.T
         P``. The per-gradient cost is O(nnz(L) + n k).
         """
+        _experimental("Laplace whitening", _LAPLACE_WHITENING_ADVICE)
         n = self.n_unconstrained
         q_hat = np.ascontiguousarray(q_hat, dtype=np.float64)
         if q_hat.shape != (n,):

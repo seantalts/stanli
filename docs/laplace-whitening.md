@@ -6,7 +6,9 @@ factors the negative Hessian there with a sparse Cholesky-style factor L, and
 returns a new model whose parameters are z, with `q = q_hat + P' L^-T z`. The
 sampler then runs on z with an identity metric. Output rows, generated
 quantities and initial values still use the original parameters. The default
-sampler does not change, and nothing here runs unless you call it.
+sampler does not change, and nothing here runs unless you call it. The first
+call in a session says it is experimental: an `ExperimentalWarning` in Python,
+a message in R.
 
 The idea is from #540. The transform is #565, and `@latent` is #564.
 

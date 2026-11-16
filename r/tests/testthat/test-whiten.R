@@ -51,6 +51,14 @@ draw_at <- function(model, q) {
   setNames(as.vector(fit$draws[1, 1, ]), dimnames(fit$draws)[[3]])
 }
 
+test_that("whitening says once per session that it is experimental", {
+  skip_without_whiten()
+  rm(list = ls(experimental_state), envir = experimental_state)
+  inner <- es_whiten_model()
+  expect_message(whiten_fixture(inner, 1), "Laplace whitening is experimental")
+  expect_no_message(whiten_fixture(inner, 2))
+})
+
 test_that("whitened log density differs from the inner one by a constant", {
   skip_without_whiten()
   fx <- whiten_fixture(es_whiten_model(), 1)

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from . import _lib, _dptr, _native_output
+from . import _experimental, _LAPLACE_WHITENING_ADVICE
 
 _PATH_CB = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_double,
                             ctypes.c_void_p)
@@ -811,6 +812,7 @@ def laplace_whiten(model, latent=None, *, init=None, seed=1, max_outer=60,
     `init` is an unconstrained starting point that replaces Pathfinder.
     `keep_precision` stores the repaired Q' on the report as a dense array.
     """
+    _experimental("Laplace whitening", _LAPLACE_WHITENING_ADVICE)
     import scipy.sparse as sp
     t0 = time.time()
     if repair not in ("clip", "abs", "abs_dense"):

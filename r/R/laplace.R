@@ -75,7 +75,24 @@ lowrank_arrays <- function(lowrank, n) {
 #'   [laplace_whiten()].
 #' @return A `stanli_model`.
 #' @export
+# Each experimental feature says so once per session, through message() so
+# suppressMessages() silences it.
+experimental_state <- new.env(parent = emptyenv())
+
+experimental_notice <- function(feature, advice) {
+  if (isTRUE(experimental_state[[feature]])) return(invisible())
+  assign(feature, TRUE, envir = experimental_state)
+  message(feature, " is experimental. ", advice)
+}
+
+laplace_whitening_notice <- function() {
+  experimental_notice("Laplace whitening", paste(
+    "A whitened fit can be wrong without any sampler warning, so compare it",
+    "against one fit with the default sampler. See docs/laplace-whitening.md."))
+}
+
 whiten <- function(model, q_hat, perm, L, lowrank = NULL) {
+  laplace_whitening_notice()
   if (!inherits(model, "stanli_model"))
     stop("model must be a stanli_model", call. = FALSE)
   if (!is.null(model$whitening))
@@ -769,6 +786,7 @@ laplace_whiten <- function(model, latent = NULL, init = NULL, seed = 1,
                            repair = c("abs", "abs_dense", "clip"), clip = NULL,
                            hessian = c("coloured", "dense"),
                            pattern = c("probe", "dense")) {
+  laplace_whitening_notice()
   require_matrix()
   if (!inherits(model, "stanli_model"))
     stop("model must be a stanli_model", call. = FALSE)
